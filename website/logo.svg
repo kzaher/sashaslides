@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <!-- Soft shadow for depth -->
+    <filter id="shadow" x="-5%" y="-5%" width="115%" height="115%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#6b4c3b" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="95" fill="#fef7f0" stroke="#e8734a" stroke-width="3"/>
+
+  <!-- Bear body (round, cute) -->
+  <ellipse cx="100" cy="125" rx="55" ry="50" fill="#8B6914" filter="url(#shadow)"/>
+
+  <!-- Bear belly -->
+  <ellipse cx="100" cy="135" rx="35" ry="30" fill="#D4A843"/>
+
+  <!-- Bear head -->
+  <circle cx="100" cy="75" r="40" fill="#A07818" filter="url(#shadow)"/>
+
+  <!-- Bear ears -->
+  <circle cx="65" cy="45" r="16" fill="#A07818"/>
+  <circle cx="65" cy="45" r="10" fill="#D4A843"/>
+  <circle cx="135" cy="45" r="16" fill="#A07818"/>
+  <circle cx="135" cy="45" r="10" fill="#D4A843"/>
+
+  <!-- Bear muzzle -->
+  <ellipse cx="100" cy="85" rx="18" ry="14" fill="#D4A843"/>
+
+  <!-- Bear nose -->
+  <ellipse cx="100" cy="80" rx="7" ry="5" fill="#3D2B1F"/>
+
+  <!-- Bear mouth (smile) -->
+  <path d="M 92 87 Q 100 94 108 87" fill="none" stroke="#3D2B1F" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Bear eyes -->
+  <circle cx="85" cy="70" r="5" fill="#3D2B1F"/>
+  <circle cx="115" cy="70" r="5" fill="#3D2B1F"/>
+  <!-- Eye highlights -->
+  <circle cx="87" cy="68" r="2" fill="white"/>
+  <circle cx="117" cy="68" r="2" fill="white"/>
+
+  <!-- Bear cheeks (blush) -->
+  <circle cx="75" cy="82" r="7" fill="#e85d75" opacity="0.35"/>
+  <circle cx="125" cy="82" r="7" fill="#e85d75" opacity="0.35"/>
+
+  <!-- Bear arms holding slide -->
+  <path d="M 55 120 Q 35 130 40 145 Q 45 155 60 148" fill="#8B6914" stroke="#7A5C10" stroke-width="1"/>
+  <path d="M 145 120 Q 165 130 160 145 Q 155 155 140 148" fill="#8B6914" stroke="#7A5C10" stroke-width="1"/>
+
+  <!-- Slide/presentation the bear is holding -->
+  <rect x="65" y="130" width="70" height="45" rx="4" fill="white" stroke="#e8734a" stroke-width="2" filter="url(#shadow)"/>
+  <!-- Slide content lines -->
+  <rect x="72" y="137" width="40" height="4" rx="2" fill="#e8734a" opacity="0.7"/>
+  <rect x="72" y="145" width="50" height="3" rx="1.5" fill="#f5a623" opacity="0.5"/>
+  <rect x="72" y="151" width="35" height="3" rx="1.5" fill="#f5a623" opacity="0.5"/>
+  <rect x="72" y="157" width="45" height="3" rx="1.5" fill="#f5a623" opacity="0.5"/>
+  <!-- Slide chart icon -->
+  <rect x="118" y="145" width="4" height="12" rx="1" fill="#4caf50" opacity="0.6"/>
+  <rect x="124" y="140" width="4" height="17" rx="1" fill="#e85d75" opacity="0.6"/>
+  <rect x="130" y="148" width="4" height="9" rx="1" fill="#2979b0" opacity="0.6"/>
+
+  <!-- Hearts floating around -->
+  <!-- Heart 1 (top left) -->
+  <g transform="translate(30, 30) scale(0.5)">
+    <path d="M 0 -10 C -10 -20 -25 -10 0 5 C 25 -10 10 -20 0 -10 Z" fill="#e85d75" opacity="0.7"/>
+  </g>
+
+  <!-- Heart 2 (top right) -->
+  <g transform="translate(165, 25) scale(0.6)">
+    <path d="M 0 -10 C -10 -20 -25 -10 0 5 C 25 -10 10 -20 0 -10 Z" fill="#e85d75" opacity="0.6"/>
+  </g>
+
+  <!-- Heart 3 (bottom right) -->
+  <g transform="translate(175, 155) scale(0.4)">
+    <path d="M 0 -10 C -10 -20 -25 -10 0 5 C 25 -10 10 -20 0 -10 Z" fill="#e85d75" opacity="0.8"/>
+  </g>
+
+  <!-- Heart 4 (left) -->
+  <g transform="translate(20, 120) scale(0.35)">
+    <path d="M 0 -10 C -10 -20 -25 -10 0 5 C 25 -10 10 -20 0 -10 Z" fill="#e85d75" opacity="0.5"/>
+  </g>
+
+  <!-- Sparkles -->
+  <text x="155" y="65" font-size="14" opacity="0.6">✨</text>
+  <text x="30" y="95" font-size="10" opacity="0.5">✨</text>
+  <text x="170" y="110" font-size="12" opacity="0.5">⭐</text>
+</svg>

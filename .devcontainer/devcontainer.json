@@ -1,0 +1,39 @@
+{
+  "name": "SashaSlides Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.mypy-type-checker",
+        "ms-python.black-formatter",
+        "BazelBuild.vscode-bazel",
+        "zxh404.vscode-proto3",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/bin/python3.11",
+        "python.analysis.typeCheckingMode": "basic",
+        "[python]": {
+          "editor.defaultFormatter": "ms-python.black-formatter",
+          "editor.formatOnSave": true
+        },
+        "files.exclude": {
+          "bazel-*": true
+        }
+      }
+    }
+  },
+  "postCreateCommand": "sudo pip3 install --ignore-installed -r requirements.txt",
+  "remoteUser": "vscode",
+  "forwardPorts": [8080, 8090],
+  "portsAttributes": {
+    "8080": { "label": "Composer Server" },
+    "8090": { "label": "Website" }
+  }
+}

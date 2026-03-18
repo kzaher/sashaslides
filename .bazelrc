@@ -1,0 +1,23 @@
+# SashaSlides Bazel Configuration
+
+# Disable bzlmod — we use WORKSPACE for external deps
+common --noenable_bzlmod
+
+# Build settings
+build --enable_platform_specific_config
+build --incompatible_strict_action_env
+
+# Test settings
+test --test_output=errors
+test --test_verbose_timeout_warnings
+
+# Python settings
+build --action_env=PYTHONPATH=
+
+# Performance
+build --experimental_remote_merkle_tree_cache
+build --jobs=auto
+
+# Convenience aliases
+build:debug --compilation_mode=dbg
+build:release --compilation_mode=opt

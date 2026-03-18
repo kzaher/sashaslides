@@ -1,0 +1,103 @@
+// SashaSlides Protocol Buffer definitions.
+//
+// All application data is modeled as protobufs. No raw JSON is parsed or
+// worked with directly — everything goes through protobuf serialization.
+//
+// Google Slides API data format reference:
+//   https://developers.google.com/slides/api/reference/rest/v1/presentations
+//   A presentation has slides (pages), each with pageElements.
+//   pageElements contain shapes, text boxes, images, tables, etc.
+//   The content_json fields store Google Slides API Page resource JSON.
+
+syntax = "proto3";
+
+package sashaslides;
+
+// ============================================================================
+// Enums
+// ============================================================================
+
+// Chat platform where the bot is interacting.
+enum ChatPlatform {
+  CHAT_PLATFORM_UNSPECIFIED = 0;
+  CHAT_PLATFORM_GOOGLE = 1;
+  CHAT_PLATFORM_MICROSOFT = 2;
+  CHAT_PLATFORM_DISCORD = 3;
+}
+
+// Presentation platform being edited.
+enum SlidesPlatform {
+  SLIDES_PLATFORM_UNSPECIFIED = 0;
+  SLIDES_PLATFORM_GOOGLE = 1;
+  SLIDES_PLATFORM_MICROSOFT = 2;
+}
+
+// Type of action recorded in a thread.
+enum ActionType {
+  ACTION_TYPE_UNSPECIFIED = 0;
+  ACTION_TYPE_LINK_SHARED = 1;
+  ACTION_TYPE_GENERATE_REQUEST = 2;
+  ACTION_TYPE_SUGGESTIONS_GENERATED = 3;
+  ACTION_TYPE_SUGGESTION_SELECTED = 4;
+  ACTION_TYPE_SLIDE_IMPORTED = 5;
+}
+
+// ============================================================================
+// Data Model — stored in SQLite
+// ============================================================================
+
+// A conversation thread where SashaSlides bot is active.
+message Thread {
+  string thread_external_id = 1;   // External ID from chat platform
+  ChatPlatform chat_platform = 2;
+  SlidesPlatform slides_platform = 3;
+  string presentation_url = 4;
+  string user_id = 5;
+  int64 created_at_unix_milliseconds = 6;
+  string state = 7;                // Bot state machine: awaiting_link, awaiting_request, awaiting_selection
+}
+
+// Content of a single slide suggestion. Stored in a separate table,
+// only references (IDs) are kept in thread actions.
+message SlideContent {
+  int64 thread_id = 1;
+  string content_json = 2;         // Google Slides API Page resource JSON
+  string thumbnail_url = 3;
+  int32 suggestion_index = 4;      // 1-4
+  int64 created_at_unix_milliseconds = 5;
+}
+
+// An action that occurred within a thread.
+message ThreadAction {
+  int64 thread_id = 1;
+  ActionType action_type = 2;
+  string user_message = 3;
+  repeated int64 slide_content_ids = 4;   // References to SlideContent rows
+  int32 selected_suggestion = 5;          // 1-4 when user picks
+  int32 target_slide_number = 6;          // 0 = new slide
+  int64 created_at_unix_milliseconds = 7;
+}
+
+// ============================================================================
+// Composer Service — slide generation
+// ============================================================================
+
+// Request to generate slide suggestions.
+message GenerateSlideRequest {
+  string presentation_url = 1;
+  int32 slide_number = 2;          // 0 for new slide
+  string user_prompt = 3;
+  string existing_slide_json = 4;  // Current slide content if improving
+}
+
+// A single slide suggestion candidate.
+message SlideCandidate {
+  string title = 1;
+  string content_json = 2;         // Google Slides API Page resource JSON
+  string description = 3;
+}
+
+// Response containing exactly 4 slide suggestions.
+message GenerateSlideResponse {
+  repeated SlideCandidate candidates = 1;  // Always 4 candidates
+}

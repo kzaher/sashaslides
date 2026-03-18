@@ -1,0 +1,65 @@
+# SashaSlides — Full System Docker Compose
+#
+# Services:
+#   - composer:  Flask server for generating slide suggestions (port 8080)
+#   - chatbot:   Interactive mock CLI chatbot (attach with docker compose attach)
+#   - website:   Static website served by nginx (port 8090)
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f composer
+#   docker compose attach chatbot
+#   open http://localhost:8090
+
+version: "3.8"
+
+services:
+  # Composer — AI slide generation server
+  composer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m sashaslides.composer.server
+    ports:
+      - "8080:8080"
+    volumes:
+      - sashaslides-data:/app/data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-stub}
+      - COMPOSER_PORT=8080
+      - DB_PATH=/app/data/sashaslides.db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Chatbot — interactive mock CLI (attach to interact)
+  chatbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m sashaslides.chatbot.mock_interface
+    stdin_open: true
+    tty: true
+    volumes:
+      - sashaslides-data:/app/data
+    environment:
+      - COMPOSER_URL=http://composer:8080
+      - DB_PATH=/app/data/sashaslides.db
+    depends_on:
+      composer:
+        condition: service_healthy
+
+  # Website — static landing page
+  website:
+    image: nginx:alpine
+    ports:
+      - "8090:80"
+    volumes:
+      - ./website:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+volumes:
+  sashaslides-data:

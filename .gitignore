@@ -1,0 +1,38 @@
+# Bazel outputs
+bazel-*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Generated protobuf code (non-Bazel)
+proto/sashaslides_pb2.py
+proto/sashaslides_pb2.pyi
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+*.env.local
+venv/
+.venv/
+
+# Data
+data/
+*.db
+
+# Docker
+.docker/
