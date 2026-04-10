@@ -14,9 +14,10 @@ different platform implementations (Google Chat, Discord, mock CLI).
 import enum
 import re
 import time
-from typing import List, Optional, Protocol
+from typing import Dict, List, Optional, Protocol
 
 from proto import sashaslides_pb2
+from sashaslides.composer.claude_client import ClaudeClient
 from sashaslides.db.database import Database
 
 
@@ -38,16 +39,6 @@ class ChatInterface(Protocol):
         candidates: List[sashaslides_pb2.SlideCandidate],
     ) -> None:
         """Send slide preview cards to the thread."""
-        ...
-
-
-class ComposerInterface(Protocol):
-    """Abstract interface for slide suggestion generation."""
-
-    def generate_slide_suggestions(
-        self, request: sashaslides_pb2.GenerateSlideRequest
-    ) -> sashaslides_pb2.GenerateSlideResponse:
-        """Generate slide suggestions for the given request."""
         ...
 
 
@@ -115,11 +106,6 @@ _SLIDES_URL_RE = re.compile(
 )
 
 
-def _now_unix_milliseconds() -> int:
-    """Return the current Unix timestamp in milliseconds."""
-    return int(time.time() * 1000)
-
-
 # ============================================================================
 # Bot
 # ============================================================================
@@ -135,7 +121,7 @@ class Bot:
     def __init__(
         self,
         db: Database,
-        composer: ComposerInterface,
+        composer: ClaudeClient,
         chat: ChatInterface,
         platform: "sashaslides_pb2.ChatPlatform.ValueType" = (
             sashaslides_pb2.CHAT_PLATFORM_GOOGLE
@@ -145,6 +131,10 @@ class Bot:
         self._composer = composer
         self._chat = chat
         self._platform = platform
+        self._thread_states: Dict[str, ThreadState] = {}
+        self._pending_candidates: Dict[
+            str, List[sashaslides_pb2.SlideCandidate]
+        ] = {}
 
     def handle_message(
         self,
@@ -157,7 +147,7 @@ class Bot:
         This is the main entry point. Routes to the appropriate handler
         based on the current thread state.
         """
-        state = self._get_thread_state(thread_external_id)
+        state = self._thread_states.get(thread_external_id)
 
         if state is None:
             self._start_thread(thread_external_id, user_id)
@@ -174,32 +164,7 @@ class Bot:
         self, thread_external_id: str
     ) -> Optional[ThreadState]:
         """Get the current state of a thread (for testing)."""
-        return self._get_thread_state(thread_external_id)
-
-    def _get_thread_state(
-        self, thread_external_id: str
-    ) -> Optional[ThreadState]:
-        """Read the thread state from the database."""
-        result = self._db.get_thread_by_external_id(thread_external_id)
-        if not result:
-            return None
-        _, thread = result
-        if not thread.state:
-            return None
-        return ThreadState(thread.state)
-
-    def _set_thread_state(
-        self,
-        thread_external_id: str,
-        state: ThreadState,
-    ) -> None:
-        """Persist the thread state to the database."""
-        result = self._db.get_thread_by_external_id(thread_external_id)
-        if not result:
-            return
-        thread_id, thread = result
-        thread.state = state.value
-        self._db.update_thread(thread_id, thread)
+        return self._thread_states.get(thread_external_id)
 
     # ---------------------------------------------------------------- states
 
@@ -212,10 +177,10 @@ class Bot:
             chat_platform=self._platform,
             slides_platform=sashaslides_pb2.SLIDES_PLATFORM_GOOGLE,
             user_id=user_id,
-            created_at_unix_milliseconds=_now_unix_milliseconds(),
-            state=ThreadState.AWAITING_LINK.value,
+            created_at_unix=int(time.time()),
         )
         self._db.create_thread(thread)
+        self._thread_states[thread_external_id] = ThreadState.AWAITING_LINK
         self._chat.send_message(thread_external_id, WELCOME_MESSAGE)
 
     def _handle_link(
@@ -243,12 +208,12 @@ class Bot:
             thread_id=thread_id,
             action_type=sashaslides_pb2.ACTION_TYPE_LINK_SHARED,
             user_message=message,
-            created_at_unix_milliseconds=_now_unix_milliseconds(),
+            created_at_unix=int(time.time()),
         )
         self._db.create_thread_action(action)
 
-        self._set_thread_state(
-            thread_external_id, ThreadState.AWAITING_REQUEST
+        self._thread_states[thread_external_id] = (
+            ThreadState.AWAITING_REQUEST
         )
         self._chat.send_message(
             thread_external_id, LINK_RECEIVED_MESSAGE
@@ -289,7 +254,7 @@ class Bot:
             action_type=sashaslides_pb2.ACTION_TYPE_GENERATE_REQUEST,
             user_message=message,
             target_slide_number=slide_number,
-            created_at_unix_milliseconds=_now_unix_milliseconds(),
+            created_at_unix=int(time.time()),
         )
         self._db.create_thread_action(action)
 
@@ -300,7 +265,7 @@ class Bot:
                 thread_id=thread_id,
                 content_json=candidate.content_json,
                 suggestion_index=i + 1,
-                created_at_unix_milliseconds=_now_unix_milliseconds(),
+                created_at_unix=int(time.time()),
             )
             content_id = self._db.create_slide_content(content)
             content_ids.append(content_id)
@@ -310,17 +275,20 @@ class Bot:
             thread_id=thread_id,
             action_type=sashaslides_pb2.ACTION_TYPE_SUGGESTIONS_GENERATED,
             slide_content_ids=content_ids,
-            created_at_unix_milliseconds=_now_unix_milliseconds(),
+            created_at_unix=int(time.time()),
         )
         self._db.create_thread_action(suggestions_action)
 
         # Send to user
+        self._pending_candidates[thread_external_id] = list(
+            gen_response.candidates
+        )
         self._chat.send_message(thread_external_id, SELECTION_MESSAGE)
         self._chat.send_slide_previews(
             thread_external_id, list(gen_response.candidates)
         )
-        self._set_thread_state(
-            thread_external_id, ThreadState.AWAITING_SELECTION
+        self._thread_states[thread_external_id] = (
+            ThreadState.AWAITING_SELECTION
         )
 
     def _handle_selection(
@@ -348,7 +316,7 @@ class Bot:
             thread_id=thread_id,
             action_type=sashaslides_pb2.ACTION_TYPE_SUGGESTION_SELECTED,
             selected_suggestion=selection,
-            created_at_unix_milliseconds=_now_unix_milliseconds(),
+            created_at_unix=int(time.time()),
         )
         self._db.create_thread_action(select_action)
 
@@ -358,12 +326,15 @@ class Bot:
             thread_id=thread_id,
             action_type=sashaslides_pb2.ACTION_TYPE_SLIDE_IMPORTED,
             selected_suggestion=selection,
-            created_at_unix_milliseconds=_now_unix_milliseconds(),
+            created_at_unix=int(time.time()),
         )
         self._db.create_thread_action(import_action)
 
-        self._set_thread_state(
-            thread_external_id, ThreadState.AWAITING_REQUEST
+        # Clear pending candidates
+        self._pending_candidates.pop(thread_external_id, None)
+
+        self._thread_states[thread_external_id] = (
+            ThreadState.AWAITING_REQUEST
         )
         self._chat.send_message(
             thread_external_id, SLIDE_APPLIED_MESSAGE

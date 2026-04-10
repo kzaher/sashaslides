@@ -1,0 +1,205 @@
+# =============================================================================
+# SashaSlides — Standalone vLLM + LMCache Model Server
+# =============================================================================
+#
+# This Dockerfile builds a self-contained GPU inference server meant to
+# run on a separate machine (e.g. your home computer with an NVIDIA GPU).
+# It exposes an OpenAI-compatible API on port 8000 that the SashaSlides
+# Composer service connects to remotely.
+#
+# Pre-requisites on the host:
+#   - NVIDIA GPU with ≥ 6 GB VRAM (24 GB recommended)
+#   - NVIDIA driver ≥ 525
+#   - Docker with NVIDIA Container Toolkit installed:
+#       https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+#
+# Supported models (set via VLLM_MODEL env or build-arg):
+#   MODEL                       VRAM    Notes
+#   ─────────────────────────── ─────── ─────────────────────
+#   mistralai/Mistral-7B-Instruct-v0.3            ~5 GB   Fits fully on 24 GB
+#   meta-llama/Meta-Llama-3-8B-Instruct           ~6 GB   Fits fully (default)
+#   Qwen/Qwen2.5-14B-Instruct                     ~10 GB  Fits fully
+#   meta-llama/Meta-Llama-3-70B-Instruct-AWQ      ~20 GB  Q4 quantized
+#   deepseek-ai/deepseek-coder-33b-instruct       ~19 GB  Q4 quantized
+#
+# ─── Build ───────────────────────────────────────────────────────────────
+#
+#   docker build -f Dockerfile.vllm -t sashaslides-vllm .
+#
+#   # Pre-download a specific model into the image (optional, avoids
+#   # first-run download):
+#   docker build -f Dockerfile.vllm \
+#       --build-arg MODEL=meta-llama/Meta-Llama-3-8B-Instruct \
+#       --build-arg HF_TOKEN=hf_... \
+#       -t sashaslides-vllm .
+#
+# ─── Run ─────────────────────────────────────────────────────────────────
+#
+#   docker run --gpus all -p 8000:8000 sashaslides-vllm
+#
+#   # Override model at runtime:
+#   docker run --gpus all -p 8000:8000 \
+#       -e VLLM_MODEL=Qwen/Qwen2.5-14B-Instruct \
+#       -e HF_TOKEN=hf_... \
+#       -v ~/.cache/huggingface:/root/.cache/huggingface \
+#       sashaslides-vllm
+#
+#   # With LMCache disk-backed KV-cache:
+#   docker run --gpus all -p 8000:8000 \
+#       -v /tmp/lmcache:/tmp/lmcache \
+#       -e LMCACHE_ENABLED=true \
+#       sashaslides-vllm
+#
+# ─── Connect from SashaSlides Composer ───────────────────────────────────
+#
+#   # On the machine running docker compose for the app:
+#   export VLLM_HOST=<gpu-machine-ip>
+#   export VLLM_PORT=8000
+#   export LLM_BACKEND=vllm
+#   docker compose up -d
+#
+# =============================================================================
+
+# ── Stage 1: base CUDA image with vLLM + LMCache ────────────────────────
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS base
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 python3.11-venv python3.11-dev \
+        python3-pip curl wget git \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python  python  /usr/bin/python3.11 1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install vLLM (pulls PyTorch + CUDA wheels automatically)
+RUN pip install --no-cache-dir \
+    vllm>=0.6.0 \
+    lmcache>=0.1.0
+
+# ── Stage 2: entrypoint setup ───────────────────────────────────────────
+FROM base AS server
+
+WORKDIR /app
+
+# Build-time model pre-download (optional).
+# Set MODEL + HF_TOKEN at build time to bake the model weights into the
+# image so the first run doesn't need to download ~5-20 GB.
+ARG MODEL=""
+ARG HF_TOKEN=""
+ENV HF_TOKEN=${HF_TOKEN}
+
+RUN if [ -n "$MODEL" ]; then \
+        python3 -c "\
+from huggingface_hub import snapshot_download; \
+import os; \
+snapshot_download('${MODEL}', token=os.environ.get('HF_TOKEN') or None)" ; \
+    fi
+
+# Copy the entrypoint script
+COPY <<'ENTRYPOINT_SCRIPT' /app/entrypoint.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── Configuration (all overridable via environment) ──────────────────
+MODEL="${VLLM_MODEL:-meta-llama/Meta-Llama-3-8B-Instruct}"
+HOST="${VLLM_HOST:-0.0.0.0}"
+PORT="${VLLM_PORT:-8000}"
+MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-8192}"
+GPU_MEM_UTIL="${VLLM_GPU_MEM_UTIL:-0.90}"
+TP_SIZE="${VLLM_TP_SIZE:-1}"
+QUANTIZATION="${VLLM_QUANTIZATION:-}"          # e.g. "awq" or "gptq"
+EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
+
+echo "=============================================="
+echo "  SashaSlides vLLM Model Server"
+echo "=============================================="
+echo "  Model:          $MODEL"
+echo "  Host:           $HOST"
+echo "  Port:           $PORT"
+echo "  Max model len:  $MAX_MODEL_LEN"
+echo "  GPU mem util:   $GPU_MEM_UTIL"
+echo "  TP size:        $TP_SIZE"
+echo "  Quantization:   ${QUANTIZATION:-none}"
+echo "=============================================="
+
+# Detect GPU
+if ! nvidia-smi > /dev/null 2>&1; then
+    echo "ERROR: No NVIDIA GPU detected. Make sure you run with --gpus all"
+    echo "       and have the NVIDIA Container Toolkit installed."
+    exit 1
+fi
+echo ""
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+echo ""
+
+# Build command
+CMD_ARGS=(
+    python3 -m vllm.entrypoints.openai.api_server
+    --model "$MODEL"
+    --host "$HOST"
+    --port "$PORT"
+    --max-model-len "$MAX_MODEL_LEN"
+    --gpu-memory-utilization "$GPU_MEM_UTIL"
+    --tensor-parallel-size "$TP_SIZE"
+    --enable-prefix-caching
+)
+
+if [ -n "$QUANTIZATION" ]; then
+    CMD_ARGS+=(--quantization "$QUANTIZATION")
+fi
+
+# LMCache integration (disk-backed KV caching)
+if [ "${LMCACHE_ENABLED:-false}" = "true" ]; then
+    CACHE_DIR="${LMCACHE_DIR:-/tmp/lmcache}"
+    mkdir -p "$CACHE_DIR"
+    echo "LMCache enabled — cache dir: $CACHE_DIR"
+
+    # Write LMCache config
+    cat > /tmp/lmcache_config.yaml <<EOF
+kv_connector: LMCacheConnector
+kv_role: kv_both
+kv_connector_extra_config:
+  disag_pdl_config:
+    kv_chunk_size: 256
+    max_local_cache_size: ${LMCACHE_MAX_SIZE:-4GB}
+    storage_type: file
+    storage_path: ${CACHE_DIR}
+EOF
+    CMD_ARGS+=(--kv-transfer-config /tmp/lmcache_config.yaml)
+fi
+
+# Trust remote code for models that need it (e.g. DeepSeek)
+if [ "${VLLM_TRUST_REMOTE_CODE:-false}" = "true" ]; then
+    CMD_ARGS+=(--trust-remote-code)
+fi
+
+# Append any extra args
+if [ -n "$EXTRA_ARGS" ]; then
+    # shellcheck disable=SC2206
+    CMD_ARGS+=($EXTRA_ARGS)
+fi
+
+echo "Starting: ${CMD_ARGS[*]}"
+exec "${CMD_ARGS[@]}"
+ENTRYPOINT_SCRIPT
+
+RUN chmod +x /app/entrypoint.sh
+
+# ── Health check ─────────────────────────────────────────────────────
+HEALTHCHECK --interval=30s --timeout=10s --retries=10 --start-period=120s \
+    CMD curl -sf http://localhost:${VLLM_PORT:-8000}/health || exit 1
+
+# ── Ports & volumes ──────────────────────────────────────────────────
+EXPOSE 8000
+
+# HuggingFace cache — mount a host volume here to persist models
+VOLUME ["/root/.cache/huggingface"]
+# LMCache disk storage
+VOLUME ["/tmp/lmcache"]
+
+ENTRYPOINT ["/app/entrypoint.sh"]

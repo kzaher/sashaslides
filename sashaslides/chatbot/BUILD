@@ -21,10 +21,8 @@ py_binary(
         ":bot",
         "//proto:sashaslides_py_proto",
         "//sashaslides/composer:claude_client",
-        "//sashaslides/composer:http_client",
         "//sashaslides/db:database",
         requirement("protobuf"),
-        requirement("requests"),
     ],
 )
 

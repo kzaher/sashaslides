@@ -53,8 +53,7 @@ message Thread {
   SlidesPlatform slides_platform = 3;
   string presentation_url = 4;
   string user_id = 5;
-  int64 created_at_unix_milliseconds = 6;
-  string state = 7;                // Bot state machine: awaiting_link, awaiting_request, awaiting_selection
+  int64 created_at_unix = 6;
 }
 
 // Content of a single slide suggestion. Stored in a separate table,
@@ -64,7 +63,7 @@ message SlideContent {
   string content_json = 2;         // Google Slides API Page resource JSON
   string thumbnail_url = 3;
   int32 suggestion_index = 4;      // 1-4
-  int64 created_at_unix_milliseconds = 5;
+  int64 created_at_unix = 5;
 }
 
 // An action that occurred within a thread.
@@ -75,7 +74,7 @@ message ThreadAction {
   repeated int64 slide_content_ids = 4;   // References to SlideContent rows
   int32 selected_suggestion = 5;          // 1-4 when user picks
   int32 target_slide_number = 6;          // 0 = new slide
-  int64 created_at_unix_milliseconds = 7;
+  int64 created_at_unix = 7;
 }
 
 // ============================================================================

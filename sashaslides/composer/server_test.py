@@ -1,15 +1,12 @@
 """Tests for the SashaSlides Composer service."""
 
 import json
-import threading
 import unittest
 
 from google.protobuf import json_format
-from werkzeug.serving import make_server
 
 from proto import sashaslides_pb2
 from sashaslides.composer.claude_client import ClaudeClient
-from sashaslides.composer.http_client import ComposerHttpClient
 from sashaslides.composer.server import app
 
 
@@ -135,38 +132,6 @@ class TestComposerServer(unittest.TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
-
-
-class TestComposerHttpClient(unittest.TestCase):
-    """Tests for the HTTP client talking to the Flask server."""
-
-    def setUp(self) -> None:
-        app.config["TESTING"] = True
-        self._server = make_server("127.0.0.1", 0, app)
-        self._thread = threading.Thread(
-            target=self._server.serve_forever,
-            daemon=True,
-        )
-        self._thread.start()
-        host, port = self._server.server_address
-        self.client = ComposerHttpClient(f"http://{host}:{port}")
-
-    def tearDown(self) -> None:
-        self._server.shutdown()
-        self._server.server_close()
-        self._thread.join(timeout=5)
-
-    def test_generate_slide_suggestions_over_http(self) -> None:
-        request = sashaslides_pb2.GenerateSlideRequest(
-            presentation_url="https://docs.google.com/presentation/d/http",
-            user_prompt="Roadmap update",
-        )
-
-        response = self.client.generate_slide_suggestions(request)
-
-        self.assertEqual(len(response.candidates), 4)
-        self.assertIn("Roadmap update", response.candidates[0].title)
-        self.assertTrue(response.candidates[0].content_json)
 
 
 if __name__ == "__main__":

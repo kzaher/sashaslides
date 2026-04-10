@@ -25,7 +25,7 @@ class TestDatabase(unittest.TestCase):
             slides_platform=sashaslides_pb2.SLIDES_PLATFORM_GOOGLE,
             presentation_url="https://docs.google.com/presentation/d/abc",
             user_id="user_1",
-            created_at_unix_milliseconds=int(time.time() * 1000),
+            created_at_unix=int(time.time()),
         )
         thread_id = self.db.create_thread(thread)
         self.assertGreater(thread_id, 0)
@@ -50,7 +50,7 @@ class TestDatabase(unittest.TestCase):
             thread_external_id="ext_456",
             chat_platform=sashaslides_pb2.CHAT_PLATFORM_DISCORD,
             user_id="user_2",
-            created_at_unix_milliseconds=int(time.time() * 1000),
+            created_at_unix=int(time.time()),
         )
         self.db.create_thread(thread)
 
@@ -71,7 +71,7 @@ class TestDatabase(unittest.TestCase):
             thread_external_id="ext_789",
             chat_platform=sashaslides_pb2.CHAT_PLATFORM_GOOGLE,
             user_id="user_3",
-            created_at_unix_milliseconds=int(time.time() * 1000),
+            created_at_unix=int(time.time()),
         )
         thread_id = self.db.create_thread(thread)
 
@@ -92,7 +92,7 @@ class TestDatabase(unittest.TestCase):
             thread_external_id="ext_sc",
             chat_platform=sashaslides_pb2.CHAT_PLATFORM_GOOGLE,
             user_id="user_sc",
-            created_at_unix_milliseconds=int(time.time() * 1000),
+            created_at_unix=int(time.time()),
         )
         thread_id = self.db.create_thread(thread)
 
@@ -101,7 +101,7 @@ class TestDatabase(unittest.TestCase):
                 thread_id=thread_id,
                 content_json=f'{{"slide": {i}}}',
                 suggestion_index=i + 1,
-                created_at_unix_milliseconds=int(time.time() * 1000),
+                created_at_unix=int(time.time()),
             )
             self.db.create_slide_content(content)
 
@@ -116,7 +116,7 @@ class TestDatabase(unittest.TestCase):
             thread_external_id="ext_sc2",
             chat_platform=sashaslides_pb2.CHAT_PLATFORM_GOOGLE,
             user_id="user_sc2",
-            created_at_unix_milliseconds=int(time.time() * 1000),
+            created_at_unix=int(time.time()),
         )
         thread_id = self.db.create_thread(thread)
 
@@ -124,7 +124,7 @@ class TestDatabase(unittest.TestCase):
             thread_id=thread_id,
             content_json='{"test": true}',
             suggestion_index=1,
-            created_at_unix_milliseconds=int(time.time() * 1000),
+            created_at_unix=int(time.time()),
         )
         content_id = self.db.create_slide_content(content)
 
@@ -140,7 +140,7 @@ class TestDatabase(unittest.TestCase):
             thread_external_id="ext_act",
             chat_platform=sashaslides_pb2.CHAT_PLATFORM_GOOGLE,
             user_id="user_act",
-            created_at_unix_milliseconds=int(time.time() * 1000),
+            created_at_unix=int(time.time()),
         )
         thread_id = self.db.create_thread(thread)
 
@@ -148,7 +148,7 @@ class TestDatabase(unittest.TestCase):
             thread_id=thread_id,
             action_type=sashaslides_pb2.ACTION_TYPE_LINK_SHARED,
             user_message="https://docs.google.com/presentation/d/test",
-            created_at_unix_milliseconds=int(time.time() * 1000),
+            created_at_unix=int(time.time()),
         )
         self.db.create_thread_action(link_action)
 
@@ -157,7 +157,7 @@ class TestDatabase(unittest.TestCase):
             action_type=sashaslides_pb2.ACTION_TYPE_GENERATE_REQUEST,
             user_message="Make a slide about bears",
             target_slide_number=0,
-            created_at_unix_milliseconds=int(time.time() * 1000),
+            created_at_unix=int(time.time()),
         )
         self.db.create_thread_action(gen_action)
 
@@ -177,7 +177,7 @@ class TestDatabase(unittest.TestCase):
             thread_external_id="ext_abt",
             chat_platform=sashaslides_pb2.CHAT_PLATFORM_GOOGLE,
             user_id="user_abt",
-            created_at_unix_milliseconds=int(time.time() * 1000),
+            created_at_unix=int(time.time()),
         )
         thread_id = self.db.create_thread(thread)
 
@@ -189,7 +189,7 @@ class TestDatabase(unittest.TestCase):
             action = sashaslides_pb2.ThreadAction(
                 thread_id=thread_id,
                 action_type=action_type,
-                created_at_unix_milliseconds=int(time.time() * 1000),
+                created_at_unix=int(time.time()),
             )
             self.db.create_thread_action(action)
 
@@ -206,7 +206,7 @@ class TestDatabase(unittest.TestCase):
                 thread_external_id="ctx_test",
                 chat_platform=sashaslides_pb2.CHAT_PLATFORM_GOOGLE,
                 user_id="user_ctx",
-                created_at_unix_milliseconds=int(time.time() * 1000),
+                created_at_unix=int(time.time()),
             )
             tid = db.create_thread(thread)
             self.assertGreater(tid, 0)
@@ -220,7 +220,7 @@ class TestDatabase(unittest.TestCase):
                 thread_external_id=f"asc_{i}",
                 chat_platform=sashaslides_pb2.CHAT_PLATFORM_GOOGLE,
                 user_id=f"user_{i}",
-                created_at_unix_milliseconds=int(time.time() * 1000),
+                created_at_unix=int(time.time()),
             )
             tid = self.db.create_thread(thread)
             self.assertGreater(tid, prev_id)
