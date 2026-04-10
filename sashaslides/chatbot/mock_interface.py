@@ -10,13 +10,12 @@ Usage:
     bazel run //sashaslides/chatbot:mock_interface
 """
 
-import os
+import sys
 from typing import List
 
 from proto import sashaslides_pb2
-from sashaslides.chatbot.bot import Bot, ComposerInterface
+from sashaslides.chatbot.bot import Bot, ChatInterface
 from sashaslides.composer.claude_client import ClaudeClient
-from sashaslides.composer.http_client import ComposerHttpClient
 from sashaslides.db.database import Database
 
 
@@ -64,20 +63,12 @@ def _print_banner() -> None:
     )
 
 
-def _build_composer_client() -> ComposerInterface:
-    """Create the configured composer client."""
-    composer_url = os.environ.get("COMPOSER_URL", "").strip()
-    if composer_url:
-        return ComposerHttpClient(composer_url)
-    return ClaudeClient()
-
-
 def main() -> None:
     """Run the mock chat interface."""
     _print_banner()
 
-    db = Database(os.environ.get("DB_PATH", ":memory:"))
-    composer = _build_composer_client()
+    db = Database(":memory:")
+    composer = ClaudeClient()
     interface = MockChatInterface()
     bot = Bot(
         db=db,

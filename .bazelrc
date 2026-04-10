@@ -1,8 +1,5 @@
 # SashaSlides Bazel Configuration
 
-# Disable bzlmod — we use WORKSPACE for external deps
-common --noenable_bzlmod
-
 # Build settings
 build --enable_platform_specific_config
 build --incompatible_strict_action_env

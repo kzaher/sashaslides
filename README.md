@@ -8,6 +8,20 @@ SashaSlides is a chatbot that generates presentation slides through a conversati
 
 * The tone is funny and humorous. You can intentionally write misspellings to convey easter european accent.
 
+## Claude Composer — Direct Slide Editing (NEW)
+
+We are adding a new component to SashaSlides: **direct editing of presentashuns** using Claude! Instead of just generating slide content through chat, Claude Composer lets you edit slides hands-on — like having tiny AI artist living inside your presentashun, da!
+
+The idea is simple but powerful:
+1. You give markdown describing your slides
+2. Composer finds the closest matching template slide from past presentashuns
+3. It adapts the template to your content using Google Slides API
+4. You see screenshot of result and iterate until is looking fantastik!
+
+This is a TypeScript project living in `sashaslides/claude-composer/` with Chrome-based visual verificashun. Think of it as the "art studio" where slides get sculpted directly.
+
+See [`sashaslides/claude-composer/README.md`](sashaslides/claude-composer/README.md) for the full details, comrade!
+
 ## How It Works
 
 ```

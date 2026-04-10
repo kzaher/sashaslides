@@ -1,0 +1,36 @@
+{
+  "name": "Polybot Dev",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "options": ["--platform=linux/amd64"]
+  },
+  "forwardPorts": [9222, 5900, 6080],
+  "portsAttributes": {
+    "6080": {
+      "label": "noVNC Desktop",
+      "onAutoForward": "notify"
+    }
+  },
+  "mounts": [
+    "source=polybot-chrome-profile,target=/home/node/chrome-profile,type=volume",
+    "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind",
+    "source=${localEnv:HOME}/Projects/claude,target=/claude,type=bind"
+  ],
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude"
+  },
+  "postCreateCommand": "npm install",
+  "postStartCommand": "bash .devcontainer/claude-code/setup-claude.sh && bash .devcontainer/start-chrome.sh &",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropics.claude-code"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "runArgs": ["--shm-size=2g", "--platform=linux/amd64"],
+  "remoteUser": "node"
+}

@@ -3,7 +3,7 @@
 load("@rules_python//python:defs.bzl", "py_binary")
 load("@pip_deps//:requirements.bzl", "requirement")
 
-exports_files(["requirements.txt", "requirements_lock.txt"])
+exports_files(["requirements.txt"])
 
 # Convenience target: run all tests
 test_suite(
