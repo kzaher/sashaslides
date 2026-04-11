@@ -1,0 +1,107 @@
+{
+  "showcase_intro": {
+    "type": "roadmap",
+    "title": "The Whiteboard Graph Library",
+    "subtitle": "Hand-drawn charts, built with rough.js",
+    "stages": [
+      { "label": "Bar",     "sublabel": "compare" },
+      { "label": "Line",    "sublabel": "trend" },
+      { "label": "Pie",     "sublabel": "share" },
+      { "label": "Flow",    "sublabel": "steps" },
+      { "label": "Pillars", "sublabel": "support" },
+      { "label": "Hub",     "sublabel": "radiate" },
+      { "label": "Road",    "sublabel": "timeline" }
+    ],
+    "opts": { "title": "7 chart types for any story" }
+  },
+  "showcase_bar": {
+    "type": "barChart",
+    "title": "Bar Chart",
+    "subtitle": "Compare values across categories",
+    "data": [
+      { "label": "Q1", "value": 120 },
+      { "label": "Q2", "value": 185 },
+      { "label": "Q3", "value": 240 },
+      { "label": "Q4", "value": 310 }
+    ],
+    "opts": { "title": "Revenue Growth", "yLabel": "$M", "xLabel": "Quarter" }
+  },
+  "showcase_line": {
+    "type": "lineChart",
+    "title": "Line Chart",
+    "subtitle": "Show trends over time",
+    "data": [
+      { "label": "Jan", "value": 72 },
+      { "label": "Feb", "value": 78 },
+      { "label": "Mar", "value": 82 },
+      { "label": "Apr", "value": 91 },
+      { "label": "May", "value": 88 }
+    ],
+    "opts": { "title": "Accuracy %", "yLabel": "%", "xLabel": "Month" }
+  },
+  "showcase_pie": {
+    "type": "pieChart",
+    "title": "Pie Chart",
+    "subtitle": "Break down a whole into parts",
+    "data": [
+      { "label": "Search", "value": 40 },
+      { "label": "Chat",   "value": 30 },
+      { "label": "Image",  "value": 15 },
+      { "label": "Other",  "value": 15 }
+    ],
+    "opts": { "title": "Query Mix" }
+  },
+  "showcase_flow": {
+    "type": "flowDiagram",
+    "title": "Flow Diagram",
+    "subtitle": "Connect steps with arrows",
+    "nodes": [
+      { "id": "a", "label": "Query",  "x": 40,  "y": 260, "w": 140, "h": 80 },
+      { "id": "b", "label": "Route",  "x": 230, "y": 260, "w": 140, "h": 80 },
+      { "id": "c", "label": "Model",  "x": 420, "y": 140, "w": 140, "h": 80 },
+      { "id": "d", "label": "Search", "x": 420, "y": 380, "w": 140, "h": 80 },
+      { "id": "e", "label": "Answer", "x": 610, "y": 260, "w": 140, "h": 80 }
+    ],
+    "edges": [
+      { "from": "a", "to": "b" },
+      { "from": "b", "to": "c" },
+      { "from": "b", "to": "d" },
+      { "from": "c", "to": "e" },
+      { "from": "d", "to": "e" }
+    ]
+  },
+  "showcase_pillars": {
+    "type": "pillars",
+    "title": "Pillars",
+    "subtitle": "Structural / foundational diagrams",
+    "pillarLabels": ["Talent", "Process", "Culture"],
+    "opts": { "title": "Strategy", "topLabel": "Advantage", "baseLabel": "Data Infra" }
+  },
+  "showcase_hubspoke": {
+    "type": "hubSpoke",
+    "title": "Hub & Spoke",
+    "subtitle": "Central concept with radiating components",
+    "centerLabel": "Gemini",
+    "spokes": [
+      { "label": "Text" },
+      { "label": "Image" },
+      { "label": "Video" },
+      { "label": "Audio" },
+      { "label": "Code" }
+    ],
+    "opts": { "title": "Modalities" }
+  },
+  "showcase_roadmap": {
+    "type": "roadmap",
+    "title": "Roadmap",
+    "subtitle": "Sequential milestones on a timeline",
+    "stages": [
+      { "label": "Design",  "sublabel": "Apr 15" },
+      { "label": "Build",   "sublabel": "Apr 30" },
+      { "label": "Test",    "sublabel": "May 15" },
+      { "label": "Rollout", "sublabel": "Jun 1" },
+      { "label": "Launch",  "sublabel": "Jun 11" }
+    ],
+    "opts": { "title": "Path to Launch" }
+  }
+}

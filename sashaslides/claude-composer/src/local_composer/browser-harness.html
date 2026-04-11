@@ -1,0 +1,54 @@
+<!doctype html>
+<!--
+  local_composer browser harness
+
+  Loaded by run-eval.ts via Playwright / CDP. The Node driver:
+    1. Serves this page from a local HTTP server so cross-origin isolation
+       and WebGPU are available.
+    2. Injects a window.__localComposer object with:
+         - EVAL_SET
+         - adapter factories (loads @mlc-ai/web-llm or @huggingface/transformers
+           from a CDN bundled with the page)
+         - render helper (renders slideHtml into a 1920x1080 iframe,
+           screenshots it via html-to-image or Chrome's built-in OffscreenCanvas,
+           returns { sha256, dataUrl, width, height })
+    3. Calls window.__localComposer.runEval({ modelId }) and awaits the
+       ModelReport. The result is read back via CDP Runtime.evaluate.
+
+  This HTML file is intentionally minimal — everything non-trivial lives in
+  bundled JS the driver injects at runtime.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="cross-origin-opener-policy" content="same-origin" />
+    <meta http-equiv="cross-origin-embedder-policy" content="require-corp" />
+    <title>local_composer eval harness</title>
+    <style>
+      html, body { margin: 0; padding: 0; font-family: system-ui, sans-serif; background: #0b0f19; color: #fff; }
+      #root { padding: 24px; }
+      #status { font-size: 14px; opacity: 0.8; margin-bottom: 16px; }
+      #progress { font-family: ui-monospace, monospace; font-size: 12px; max-height: 60vh; overflow: auto; }
+      .ok { color: #10b981; }
+      .bad { color: #ef4444; }
+      /* Offscreen render sandbox — 1920x1080, hidden but laid out. */
+      #render-sandbox {
+        position: fixed;
+        left: -10000px;
+        top: 0;
+        width: 1920px;
+        height: 1080px;
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <h1>local_composer eval harness</h1>
+      <div id="status">Waiting for driver to call window.__localComposer.runEval(…)</div>
+      <div id="progress"></div>
+    </div>
+    <div id="render-sandbox"></div>
+    <script type="module" src="./browser-harness.bundle.js"></script>
+  </body>
+</html>

@@ -1,0 +1,150 @@
+/**
+ * extract-whiteboard-bg.ts
+ *
+ * Takes a whiteboard template image and creates a clean background by
+ * rendering a high-quality whiteboard surface in HTML (matching the template style).
+ * Also generates an HTML page for whiteboard-style icon reference.
+ */
+
+import CDP from "chrome-remote-interface";
+import { writeFileSync, mkdirSync } from "node:fs";
+
+async function main() {
+  const outputDir = "presentations/1/whiteboard";
+  mkdirSync(outputDir, { recursive: true });
+
+  // Create a realistic whiteboard background HTML
+  const bgHtml = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; }
+.whiteboard {
+  width: 1280px;
+  height: 720px;
+  position: relative;
+  background: #d0d0d0;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px 0 8px;
+}
+.surface {
+  flex: 1;
+  background: linear-gradient(170deg, #faf9f5 0%, #f4f2eb 30%, #eeece3 60%, #eae7dd 100%);
+  border: 3px solid #b0b0b0;
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 100px rgba(0,0,0,0.03),
+    inset 0 2px 6px rgba(0,0,0,0.05),
+    inset 0 -1px 3px rgba(0,0,0,0.02);
+}
+/* Glossy reflections like a real whiteboard */
+.surface::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse at 12% 8%, rgba(255,255,255,0.8) 0%, transparent 45%),
+    radial-gradient(ellipse at 88% 6%, rgba(255,255,255,0.6) 0%, transparent 35%),
+    radial-gradient(ellipse at 50% 95%, rgba(255,255,255,0.15) 0%, transparent 30%);
+  pointer-events: none;
+}
+/* Faint leftover marker traces for authenticity */
+.surface::after {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    linear-gradient(22deg, transparent 94.5%, rgba(130,150,200,0.04) 94.5%, rgba(130,150,200,0.04) 95%, transparent 95%),
+    linear-gradient(-18deg, transparent 92%, rgba(180,140,140,0.03) 92%, rgba(180,140,140,0.03) 92.4%, transparent 92.4%),
+    linear-gradient(8deg, transparent 96.5%, rgba(100,100,160,0.03) 96.5%, rgba(100,100,160,0.03) 97%, transparent 97%);
+  pointer-events: none;
+}
+/* Marker tray */
+.tray {
+  height: 30px;
+  background: linear-gradient(180deg, #c5c5c5, #a5a5a5);
+  border-radius: 0 0 3px 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  border-top: 2px solid #999;
+}
+.marker {
+  width: 55px; height: 13px;
+  border-radius: 6px 2px 2px 6px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.marker.blue { background: linear-gradient(90deg, #15466a, #2471a3); }
+.marker.red { background: linear-gradient(90deg, #7b241c, #cb4335); }
+.marker.black { background: linear-gradient(90deg, #1a1a1a, #3d3d3d); }
+.marker.green { background: linear-gradient(90deg, #196f3d, #229954); }
+.marker.orange { background: linear-gradient(90deg, #b9770e, #f39c12); }
+.eraser {
+  width: 48px; height: 18px;
+  background: linear-gradient(180deg, #e0e0e0, #b0b0b0);
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  border: 1px solid #999;
+}
+</style>
+</head>
+<body>
+<div class="whiteboard">
+  <div class="surface"></div>
+  <div class="tray">
+    <div class="marker blue"></div>
+    <div class="marker red"></div>
+    <div class="marker black"></div>
+    <div class="marker green"></div>
+    <div class="marker orange"></div>
+    <div class="eraser"></div>
+  </div>
+</div>
+</body>
+</html>`;
+
+  const bgHtmlPath = `${outputDir}/whiteboard_bg.html`;
+  writeFileSync(bgHtmlPath, bgHtml);
+
+  // Render it in Chrome
+  console.log("Rendering whiteboard background...");
+  const newTarget = await CDP.New({
+    port: 9222,
+    url: `file://${process.cwd()}/${bgHtmlPath}`,
+  });
+
+  const client = await CDP({ target: newTarget });
+  const { Page, Runtime, Emulation } = client;
+
+  await Page.enable();
+  await Emulation.setDeviceMetricsOverride({
+    width: 1280,
+    height: 720,
+    deviceScaleFactor: 2,
+    mobile: false,
+  });
+
+  await Page.loadEventFired();
+  await Runtime.evaluate({
+    expression: "new Promise(r => setTimeout(r, 500))",
+    awaitPromise: true,
+  });
+
+  const screenshot = await Page.captureScreenshot({
+    format: "png",
+    clip: { x: 0, y: 0, width: 1280, height: 720, scale: 1 },
+    captureBeyondViewport: true,
+  });
+
+  const bgPath = `${outputDir}/whiteboard_bg.png`;
+  writeFileSync(bgPath, Buffer.from(screenshot.data, "base64"));
+  console.log(`Background saved: ${bgPath}`);
+
+  await CDP.Close({ port: 9222, id: newTarget.id });
+  await client.close();
+}
+
+main().catch(console.error);
