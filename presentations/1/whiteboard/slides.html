@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&family=Kalam:wght@300;400;700&family=Patrick+Hand&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+.whiteboard-slide {
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+  position: relative;
+}
+
+.wb-frame {
+  width: 100%; height: 100%;
+  background: #d4d4d4;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px 0 10px;
+}
+
+.wb-surface {
+  flex: 1;
+  background: linear-gradient(180deg, #f8f8f6 0%, #f0efe8 40%, #eae8e0 100%);
+  border: 3px solid #b8b8b8;
+  border-radius: 3px;
+  position: relative;
+  padding: 40px 50px;
+  overflow: hidden;
+  /* subtle whiteboard texture */
+  box-shadow: inset 0 0 80px rgba(0,0,0,0.04), inset 0 2px 4px rgba(0,0,0,0.06);
+}
+
+.wb-surface::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse at 15% 10%, rgba(255,255,255,0.7) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 10%, rgba(255,255,255,0.5) 0%, transparent 40%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.wb-surface > * { position: relative; z-index: 2; }
+
+.wb-surface.marks::after {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    linear-gradient(25deg, transparent 95%, rgba(150,150,200,0.06) 95%, rgba(150,150,200,0.06) 95.5%, transparent 95.5%),
+    linear-gradient(-15deg, transparent 93%, rgba(180,150,150,0.05) 93%, rgba(180,150,150,0.05) 93.3%, transparent 93.3%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.wb-tray {
+  height: 32px;
+  background: linear-gradient(180deg, #c0c0c0, #a0a0a0);
+  border-radius: 0 0 4px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 4px 20px;
+  border-top: 2px solid #999;
+}
+
+.marker {
+  width: 60px; height: 14px;
+  border-radius: 7px 2px 2px 7px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.marker.blue { background: linear-gradient(90deg, #1a5276, #2980b9); }
+.marker.red { background: linear-gradient(90deg, #922b21, #e74c3c); }
+.marker.black { background: linear-gradient(90deg, #1c1c1c, #444); }
+.marker.green { background: linear-gradient(90deg, #1e8449, #27ae60); }
+.eraser {
+  width: 50px; height: 20px;
+  background: linear-gradient(180deg, #ddd, #aaa);
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* Decorative faint marks */
+.deco {
+  position: absolute;
+  font-family: 'Patrick Hand', cursive;
+  font-size: 14px;
+  color: rgba(100,100,150,0.15);
+  z-index: 0 !important;
+}
+.deco-tl { top: 12px; left: 15px; transform: rotate(-5deg); }
+.deco-tr { top: 15px; right: 20px; transform: rotate(3deg); }
+
+/* ── Title Slide ───────────────────────────────────── */
+.title-slide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+}
+.title-slide .icon {
+  font-size: 64px;
+  margin-bottom: 10px;
+  filter: drop-shadow(1px 1px 1px rgba(0,0,0,0.1));
+}
+.title-slide .main-title {
+  font-family: 'Caveat', cursive;
+  font-size: 64px;
+  font-weight: 700;
+  line-height: 1.15;
+  text-shadow: 1px 1px 0 rgba(0,0,0,0.05);
+  max-width: 900px;
+}
+.title-slide .arrow-right {
+  font-size: 36px;
+  color: #c0392b;
+  margin: 8px 0;
+  font-family: 'Caveat', cursive;
+}
+.title-slide .sub-title {
+  font-family: 'Kalam', cursive;
+  font-size: 30px;
+  color: #555;
+  max-width: 800px;
+}
+
+/* ── Section Header ────────────────────────────────── */
+.section-slide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+.section-title {
+  font-family: 'Caveat', cursive;
+  font-size: 58px;
+  font-weight: 700;
+  text-align: center;
+  max-width: 900px;
+  line-height: 1.2;
+}
+.section-divider {
+  width: 400px;
+  height: 4px;
+  background: linear-gradient(90deg, transparent, #2980b9, transparent);
+  border-radius: 2px;
+  margin: 18px 0;
+}
+.section-divider.bottom {
+  background: linear-gradient(90deg, transparent, #c0392b, transparent);
+}
+
+/* ── Content Slide ─────────────────────────────────── */
+.content-slide {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.slide-title {
+  font-family: 'Caveat', cursive;
+  font-size: 42px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  line-height: 1.15;
+  position: relative;
+}
+.title-underline {
+  height: 3px;
+  border-radius: 2px;
+  margin-top: 2px;
+  width: 100%;
+  opacity: 0.6;
+}
+.slide-body-area {
+  flex: 1;
+  display: flex;
+  gap: 30px;
+  padding-top: 15px;
+  overflow: hidden;
+}
+.body-only .slide-body-area { flex-direction: column; }
+.table-only .slide-body-area { flex-direction: column; }
+.split .body-content { flex: 1; }
+.split .wb-table { flex: 1; }
+
+.body-content {
+  font-family: 'Kalam', cursive;
+  font-size: 22px;
+  color: #2c3e50;
+  line-height: 1.5;
+}
+.body-line {
+  margin-bottom: 4px;
+  padding-left: 5px;
+}
+.body-section-header {
+  font-family: 'Caveat', cursive;
+  font-weight: 700;
+  font-size: 26px;
+  color: #c0392b;
+  margin-top: 10px;
+  margin-bottom: 2px;
+}
+.body-line .bullet {
+  color: #2980b9;
+  font-size: 26px;
+  font-weight: bold;
+}
+.body-line .num {
+  color: #2980b9;
+  font-weight: bold;
+}
+.body-line .bold {
+  font-weight: 700;
+  color: #1a5276;
+}
+
+/* ── Table ─────────────────────────────────────────── */
+.wb-table {
+  font-family: 'Kalam', cursive;
+  font-size: 19px;
+  border: 2px solid #2c3e50;
+  border-radius: 6px;
+  overflow: hidden;
+  align-self: flex-start;
+}
+.table-row {
+  display: flex;
+}
+.table-row.header {
+  background: rgba(26,82,118,0.12);
+  font-weight: 700;
+  color: #1a5276;
+  font-family: 'Caveat', cursive;
+  font-size: 21px;
+}
+.table-cell {
+  flex: 1;
+  padding: 6px 14px;
+  border-right: 1px solid rgba(44,62,80,0.2);
+  border-bottom: 1px solid rgba(44,62,80,0.15);
+  min-width: 100px;
+}
+.table-cell:last-child { border-right: none; }
+.table-row:last-child .table-cell { border-bottom: none; }
+
+/* ── Closing slide ──── */
+.title-slide .main-title:has(+ .arrow-right) { }
+</style>
+</head>
+<body style="margin:0; padding:0; background:#333;">
+
+    <div class="whiteboard-slide" id="slide-0">
+      <div class="wb-frame">
+        <div class="wb-surface clean">
+          
+          
+      <div class="title-slide">
+        <div class="icon lightbulb">💡</div>
+        <div class="main-title" style="color: #c0392b">Gemini Search: Q2 Update for Rob</div>
+        <div class="arrow-right">→</div><div class="sub-title">Search Triggering &amp; Optimization Team | April 2026</div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-1">
+      <div class="wb-frame">
+        <div class="wb-surface marks">
+          
+      <div class="deco deco-tl">≈ notes</div>
+      <div class="deco deco-tr">→ ∝ λ</div>
+    
+          
+      <div class="content-slide body-only">
+        <div class="slide-title" style="color: #1a5276">
+          Agenda
+          <div class="title-underline" style="background: #1a5276"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-line"><span class="bullet">•</span> Real-Time Search Signals → Smarter Triggering</div>
+<div class="body-line"><span class="bullet">•</span> Three Latency &amp; Cost Optimizations</div>
+<div class="body-line"><span class="bullet">•</span> World Cup 2026: Generative UI</div></div>
+          
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-2">
+      <div class="wb-frame">
+        <div class="wb-surface clean">
+          
+          
+      <div class="section-slide">
+        <div class="section-divider"></div>
+        <div class="section-title" style="color: #1a5276">Real-Time Signals for Search Triggering</div>
+        <div class="section-divider bottom"></div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-3">
+      <div class="wb-frame">
+        <div class="wb-surface marks">
+          
+      <div class="deco deco-tl">≈ notes</div>
+      <div class="deco deco-tr">→ ∝ λ</div>
+    
+          
+      <div class="content-slide body-only">
+        <div class="slide-title" style="color: #c0392b">
+          The Problem: Stale Triggering
+          <div class="title-underline" style="background: #c0392b"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-line"><span class="bullet">•</span> Triggering model had NO awareness of world state</div>
+<div class="body-line"><span class="bullet">•</span> Under-triggering during breaking news — Gemini answers confidently with stale data</div>
+<div class="body-line"><span class="bullet">•</span> Over-triggering on stable facts — wasting search roundtrips on &quot;Who wrote Hamlet?&quot;</div></div>
+          
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-4">
+      <div class="wb-frame">
+        <div class="wb-surface clean">
+          
+          
+      <div class="content-slide body-only">
+        <div class="slide-title" style="color: #1a5276">
+          What We Built: Three Real-Time Signals
+          <div class="title-underline" style="background: #1a5276"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-section-header"><span class="bold">Query Freshness Score (QFS)</span></div>
+<div class="body-line">How much have top results changed in the last N hours?</div>
+<div class="body-section-header"><span class="bold">Trending Topic Overlay</span></div>
+<div class="body-line">Google Trends real-time pipeline → boost triggering for trending entities</div>
+<div class="body-section-header"><span class="bold">Staleness Detector</span></div>
+<div class="body-line">Lightweight check: &quot;Would top-1 result differ from training data?&quot;</div></div>
+          
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-5">
+      <div class="wb-frame">
+        <div class="wb-surface marks">
+          
+      <div class="deco deco-tl">≈ notes</div>
+      <div class="deco deco-tr">→ ∝ λ</div>
+    
+          
+      <div class="content-slide split">
+        <div class="slide-title" style="color: #1a5276">
+          Results: Less Triggering, Better Answers
+          <div class="title-underline" style="background: #1a5276"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-line"><span class="bold">Key insight:</span> More information about the world → FEWER search calls.</div>
+<div class="body-line">The model was over-triggering because it couldn't assess &quot;do I need fresh data?&quot;</div></div>
+          <div class="wb-table">
+        <div class="table-row header">
+          <div class="table-cell">Metric</div><div class="table-cell">Before</div><div class="table-cell">After</div>
+        </div>
+        <div class="table-row"><div class="table-cell">Freshness accuracy</div><div class="table-cell">72%</div><div class="table-cell">91%</div></div>
+<div class="table-row"><div class="table-cell">Search trigger rate</div><div class="table-cell">baseline</div><div class="table-cell">-8%</div></div>
+<div class="table-row"><div class="table-cell">Latency (p50)</div><div class="table-cell">baseline</div><div class="table-cell">+12ms (net-neutral)</div></div>
+<div class="table-row"><div class="table-cell">CSAT (time-sensitive)</div><div class="table-cell">baseline</div><div class="table-cell">+3.2 pts (p&lt;0.01)</div></div>
+      </div>
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-6">
+      <div class="wb-frame">
+        <div class="wb-surface clean">
+          
+          
+      <div class="section-slide">
+        <div class="section-divider"></div>
+        <div class="section-title" style="color: #1a5276">Latency &amp; Cost Optimizations</div>
+        <div class="section-divider bottom"></div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-7">
+      <div class="wb-frame">
+        <div class="wb-surface marks">
+          
+      <div class="deco deco-tl">≈ notes</div>
+      <div class="deco deco-tr">→ ∝ λ</div>
+    
+          
+      <div class="content-slide split">
+        <div class="slide-title" style="color: #1a5276">
+          Optimization 1: Skip SGM for Short Queries
+          <div class="title-underline" style="background: #1a5276"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-line"><span class="bold">Before:</span> Every search query → Search Generation Model → reformulated query → Search</div>
+<div class="body-line"><span class="bold">Discovery:</span> For queries &lt; 8 tokens, SGM returns the original query 94.2% of the time</div>
+<div class="body-line"><span class="bold">Fix:</span> Skip SGM entirely for short queries, pass directly to Search</div></div>
+          <div class="wb-table">
+        <div class="table-row header">
+          <div class="table-cell">Impact</div><div class="table-cell">Value</div>
+        </div>
+        <div class="table-row"><div class="table-cell">Latency saved</div><div class="table-cell">-180ms p50 on 41% of queries</div></div>
+<div class="table-row"><div class="table-cell">SGM cost reduction</div><div class="table-cell">-38%</div></div>
+<div class="table-row"><div class="table-cell">Quality regression</div><div class="table-cell">-0.1% (not significant)</div></div>
+      </div>
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-8">
+      <div class="wb-frame">
+        <div class="wb-surface clean">
+          
+          
+      <div class="content-slide split">
+        <div class="slide-title" style="color: #1a5276">
+          Optimization 2: Small Models for First-Step Thinking
+          <div class="title-underline" style="background: #1a5276"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-line"><span class="bold">Before:</span> Full Gemini model for every thinking step, including initial planning</div>
+<div class="body-line"><span class="bold">Discovery:</span> First step is always structural: &quot;This needs code&quot; or &quot;This needs search&quot;</div>
+<div class="body-line"><span class="bold">Fix:</span> Route first thinking step to Gemini Flash → only execution uses full model</div></div>
+          <div class="wb-table">
+        <div class="table-row header">
+          <div class="table-cell">Impact</div><div class="table-cell">Value</div>
+        </div>
+        <div class="table-row"><div class="table-cell">First-token latency</div><div class="table-cell">-320ms on reasoning queries</div></div>
+<div class="table-row"><div class="table-cell">Full-model tokens</div><div class="table-cell">-22% per reasoning query</div></div>
+<div class="table-row"><div class="table-cell">Plan match rate</div><div class="table-cell">97.8% (Flash vs Full)</div></div>
+      </div>
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-9">
+      <div class="wb-frame">
+        <div class="wb-surface marks">
+          
+      <div class="deco deco-tl">≈ notes</div>
+      <div class="deco deco-tr">→ ∝ λ</div>
+    
+          
+      <div class="content-slide split">
+        <div class="slide-title" style="color: #c0392b">
+          Optimization 3: Fewer Search Results to Model
+          <div class="title-underline" style="background: #c0392b"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-line"><span class="bold">Before:</span> Top 10 results sent to model for grounding (massive token count)</div>
+<div class="body-line"><span class="bold">Discovery:</span> Results 7-10 almost never contribute to final answer</div>
+<div class="body-line"><span class="bold">Fix:</span> Default to top 5, expand to 7 for complex queries. Never more than 7.</div></div>
+          <div class="wb-table">
+        <div class="table-row header">
+          <div class="table-cell">Impact</div><div class="table-cell">Value</div>
+        </div>
+        <div class="table-row"><div class="table-cell">Grounding context</div><div class="table-cell">-45% average</div></div>
+<div class="table-row"><div class="table-cell">Response generation</div><div class="table-cell">-150ms</div></div>
+<div class="table-row"><div class="table-cell">Quality (simple queries)</div><div class="table-cell">+0.8% (less noise)</div></div>
+<div class="table-row"><div class="table-cell">Quality (deep research)</div><div class="table-cell">-1.6% (acceptable)</div></div>
+      </div>
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-10">
+      <div class="wb-frame">
+        <div class="wb-surface clean">
+          
+          
+      <div class="content-slide split">
+        <div class="slide-title" style="color: #1a5276">
+          Combined Optimization Impact
+          <div class="title-underline" style="background: #1a5276"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-line"><span class="bold">Bottom line:</span> 25% faster, 39% cheaper, same quality.</div></div>
+          <div class="wb-table">
+        <div class="table-row header">
+          <div class="table-cell">Metric</div><div class="table-cell">Before</div><div class="table-cell">After</div><div class="table-cell">Delta</div>
+        </div>
+        <div class="table-row"><div class="table-cell">P50 Latency</div><div class="table-cell">2.8s</div><div class="table-cell">2.1s</div><div class="table-cell">-25%</div></div>
+<div class="table-row"><div class="table-cell">P90 Latency</div><div class="table-cell">5.2s</div><div class="table-cell">3.8s</div><div class="table-cell">-27%</div></div>
+<div class="table-row"><div class="table-cell">Serving cost/query</div><div class="table-cell">$X</div><div class="table-cell">$0.61X</div><div class="table-cell">-39%</div></div>
+<div class="table-row"><div class="table-cell">Answer quality</div><div class="table-cell">baseline</div><div class="table-cell">-0.3%</div><div class="table-cell">negligible</div></div>
+      </div>
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-11">
+      <div class="wb-frame">
+        <div class="wb-surface marks">
+          
+      <div class="deco deco-tl">≈ notes</div>
+      <div class="deco deco-tr">→ ∝ λ</div>
+    
+          
+      <div class="section-slide">
+        <div class="section-divider"></div>
+        <div class="section-title" style="color: #1a5276">World Cup 2026: Generative UI</div>
+        <div class="section-divider bottom"></div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-12">
+      <div class="wb-frame">
+        <div class="wb-surface clean">
+          
+          
+      <div class="content-slide body-only">
+        <div class="slide-title" style="color: #c0392b">
+          The Opportunity
+          <div class="title-underline" style="background: #c0392b"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-line"><span class="bullet">•</span> FIFA World Cup kicks off <span class="bold">June 11</span> — US/Canada/Mexico</div>
+<div class="body-line"><span class="bullet">•</span> First World Cup where Gemini is a primary user interface</div>
+<div class="body-line"><span class="bullet">•</span> Search sees <span class="bold">5-10x traffic spikes</span> during matches</div>
+<div class="body-line"><span class="bullet">•</span> Hundreds of millions of users will ask Gemini about the World Cup</div></div>
+          
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-13">
+      <div class="wb-frame">
+        <div class="wb-surface marks">
+          
+      <div class="deco deco-tl">≈ notes</div>
+      <div class="deco deco-tr">→ ∝ λ</div>
+    
+          
+      <div class="content-slide body-only">
+        <div class="slide-title" style="color: #1a5276">
+          Generative UI: How It Works
+          <div class="title-underline" style="background: #1a5276"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-line"><span class="bold">Old way:</span> Engineers manually design every sports card layout</div>
+<div class="body-line"><span class="bold">Our way:</span> The model GENERATES the UI specification</div>
+<div class="body-line"><span class="num">1.</span> User asks a World Cup question</div>
+<div class="body-line"><span class="num">2.</span> SI classification detects sports/World Cup intent</div>
+<div class="body-line"><span class="num">3.</span> Model generates response WITH UI directives (layout instructions)</div>
+<div class="body-line"><span class="num">4.</span> Client rendering engine interprets directives into rich components</div></div>
+          
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-14">
+      <div class="wb-frame">
+        <div class="wb-surface clean">
+          
+          
+      <div class="content-slide body-only">
+        <div class="slide-title" style="color: #1a5276">
+          What We're Building
+          <div class="title-underline" style="background: #1a5276"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-section-header"><span class="bold">Live Match</span></div>
+<div class="body-line"><span class="bullet">•</span> Real-time score cards with crests &amp; live minute</div>
+<div class="body-line"><span class="bullet">•</span> Event timeline (goals, cards, subs) — updates live</div>
+<div class="body-line"><span class="bullet">•</span> Animated possession/shot stats</div>
+<div class="body-line"><span class="bullet">•</span> AI tactical commentary</div>
+<div class="body-section-header"><span class="bold">Pre/Post Match</span></div>
+<div class="body-line"><span class="bullet">•</span> AI match previews with head-to-head stats</div>
+<div class="body-line"><span class="bullet">•</span> Predicted lineups with tactical explanations</div>
+<div class="body-line"><span class="bullet">•</span> Highlights summary linked to video timestamps</div>
+<div class="body-section-header"><span class="bold">Tournament</span></div>
+<div class="body-line"><span class="bullet">•</span> Interactive bracket with AI annotations</div>
+<div class="body-line"><span class="bullet">•</span> Group standings with qualification scenarios in natural language</div>
+<div class="body-line"><span class="bullet">•</span> On-demand player stats dashboards</div></div>
+          
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-15">
+      <div class="wb-frame">
+        <div class="wb-surface marks">
+          
+      <div class="deco deco-tl">≈ notes</div>
+      <div class="deco deco-tr">→ ∝ λ</div>
+    
+          
+      <div class="content-slide body-only">
+        <div class="slide-title" style="color: #c0392b">
+          Personalization &amp; Localization
+          <div class="title-underline" style="background: #c0392b"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-section-header"><span class="bold">Team Personalization</span></div>
+<div class="body-line"><span class="bullet">•</span> Detect user's favorite team from Search history</div>
+<div class="body-line"><span class="bullet">•</span> Highlight their matches, prioritize their news</div>
+<div class="body-section-header"><span class="bold">Language-Aware Rendering</span></div>
+<div class="body-line"><span class="bullet">•</span> RTL layouts for Arabic users</div>
+<div class="body-line"><span class="bullet">•</span> Local time zones on score cards</div>
+<div class="body-line"><span class="bullet">•</span> Localized player/team names</div></div>
+          
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-16">
+      <div class="wb-frame">
+        <div class="wb-surface clean">
+          
+          
+      <div class="content-slide table-only">
+        <div class="slide-title" style="color: #1a5276">
+          Timeline: 61 Days to Kickoff
+          <div class="title-underline" style="background: #1a5276"></div>
+        </div>
+        <div class="slide-body-area">
+          
+          <div class="wb-table">
+        <div class="table-row header">
+          <div class="table-cell">Milestone</div><div class="table-cell">Date</div><div class="table-cell">Status</div>
+        </div>
+        <div class="table-row"><div class="table-cell">SI classification model</div><div class="table-cell">Apr 15</div><div class="table-cell">In progress</div></div>
+<div class="table-row"><div class="table-cell">Generative UI renderer v1</div><div class="table-cell">Apr 30</div><div class="table-cell">In progress</div></div>
+<div class="table-row"><div class="table-cell">Live score card integration</div><div class="table-cell">May 15</div><div class="table-cell">Not started</div></div>
+<div class="table-row"><div class="table-cell">Internal dogfood</div><div class="table-cell">May 20</div><div class="table-cell">Not started</div></div>
+<div class="table-row"><div class="table-cell">Gradual external rollout</div><div class="table-cell">Jun 1</div><div class="table-cell">Not started</div></div>
+<div class="table-row"><div class="table-cell">World Cup kickoff</div><div class="table-cell">Jun 11</div><div class="table-cell">—</div></div>
+      </div>
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-17">
+      <div class="wb-frame">
+        <div class="wb-surface marks">
+          
+      <div class="deco deco-tl">≈ notes</div>
+      <div class="deco deco-tr">→ ∝ λ</div>
+    
+          
+      <div class="content-slide body-only">
+        <div class="slide-title" style="color: #1a5276">
+          Risks &amp; Asks for Rob
+          <div class="title-underline" style="background: #1a5276"></div>
+        </div>
+        <div class="slide-body-area">
+          <div class="body-content"><div class="body-section-header"><span class="bold">Risks</span></div>
+<div class="body-line"><span class="bullet">•</span> Latency: UI renderer at 80ms, need &lt; 50ms — optimizing now</div>
+<div class="body-line"><span class="bullet">•</span> Accuracy: Live scores double-sourced (Sports Data API + Search). Mismatch → text fallback</div>
+<div class="body-line"><span class="bullet">•</span> Scale: 10x traffic during marquee matches (US v Mexico, Brazil v Argentina)</div>
+<div class="body-section-header"><span class="bold">Asks</span></div>
+<div class="body-line"><span class="num">1.</span> Support our pre-provisioning request to SRE for World Cup traffic</div>
+<div class="body-line"><span class="num">2.</span> 2 additional FTEs from the rendering team for the May sprint</div></div>
+          
+        </div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+
+    <div class="whiteboard-slide" id="slide-18">
+      <div class="wb-frame">
+        <div class="wb-surface clean">
+          
+          
+      <div class="title-slide">
+        <div class="icon lightbulb">💡</div>
+        <div class="main-title" style="color: #c0392b">Thank You</div>
+        <div class="arrow-right">→</div><div class="sub-title">Questions?</div>
+      </div>
+    
+        </div>
+        <div class="wb-tray">
+          <div class="marker blue"></div>
+          <div class="marker red"></div>
+          <div class="marker black"></div>
+          <div class="marker green"></div>
+          <div class="eraser"></div>
+        </div>
+      </div>
+    </div>
+  
+</body>
+</html>

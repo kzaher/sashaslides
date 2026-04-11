@@ -4,14 +4,10 @@
 
 set -e
 
-# Build extension first
-cd /workspaces/polybot
-npm run build 2>&1 || echo "Initial build failed - run 'npm run build' manually"
-
 # Start virtual display if not already running
 if ! pgrep -x Xvfb > /dev/null; then
   export DISPLAY=:99
-  Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
+  Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset &
   sleep 1
   echo "Xvfb started on :99"
 else
@@ -53,8 +49,8 @@ DISPLAY=:99 google-chrome-stable \
   --remote-debugging-port=9222 \
   --remote-debugging-address=0.0.0.0 \
   --user-data-dir=/home/node/chrome-profile \
-  --load-extension=/workspaces/polybot/dist \
-  --window-size=1920,1080 \
+  --window-size=1280,720 \
+  --start-maximized \
   --disable-gpu \
   --no-sandbox \
   &
