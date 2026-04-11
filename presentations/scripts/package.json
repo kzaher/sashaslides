@@ -1,0 +1,12 @@
+{
+  "name": "presentation-scripts",
+  "type": "module",
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "chrome-remote-interface": "^0.33.2",
+    "pptxgenjs": "^4.0.1",
+    "puppeteer": "^24.40.0",
+    "roughjs": "^4.6.6",
+    "tsx": "^4.19.0"
+  }
+}

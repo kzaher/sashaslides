@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Whiteboard Graphs Demo</title>
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<script src="./whiteboard-graphs.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Patrick+Hand&display=swap');
+body {
+  background: #f0efe8;
+  font-family: 'Patrick Hand', cursive;
+  padding: 20px;
+}
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.card {
+  background: #fafaf5;
+  border: 2px solid #b0b0b0;
+  border-radius: 4px;
+  padding: 10px;
+}
+h2 { font-family: 'Caveat', cursive; color: #1a5276; margin: 0 0 10px; }
+svg { display: block; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="card"><h2>Bar Chart</h2><svg id="g1" viewBox="0 0 500 320"></svg></div>
+  <div class="card"><h2>Line Chart</h2><svg id="g2" viewBox="0 0 500 320"></svg></div>
+  <div class="card"><h2>Pie Chart</h2><svg id="g3" viewBox="0 0 500 400"></svg></div>
+  <div class="card"><h2>Flow Diagram</h2><svg id="g4" viewBox="0 0 600 300"></svg></div>
+  <div class="card"><h2>Pillars</h2><svg id="g5" viewBox="0 0 500 380"></svg></div>
+  <div class="card"><h2>Hub &amp; Spoke</h2><svg id="g6" viewBox="0 0 500 400"></svg></div>
+  <div class="card" style="grid-column: span 2"><h2>Roadmap</h2><svg id="g7" viewBox="0 0 900 250"></svg></div>
+</div>
+<script>
+window.addEventListener('load', function() {
+  const WG = WhiteboardGraphs;
+
+  WG.barChart(document.getElementById('g1'),
+    [
+      { label: 'Q1', value: 120 },
+      { label: 'Q2', value: 185 },
+      { label: 'Q3', value: 240 },
+      { label: 'Q4', value: 310 },
+    ],
+    { title: 'Revenue Growth', yLabel: '$M', xLabel: 'Quarter' }
+  );
+
+  WG.lineChart(document.getElementById('g2'),
+    [
+      { label: 'Jan', value: 72 },
+      { label: 'Feb', value: 78 },
+      { label: 'Mar', value: 82 },
+      { label: 'Apr', value: 91 },
+      { label: 'May', value: 88 },
+    ],
+    { title: 'Accuracy %', yLabel: '%', xLabel: 'Month' }
+  );
+
+  WG.pieChart(document.getElementById('g3'),
+    [
+      { label: 'Search', value: 40 },
+      { label: 'Chat', value: 30 },
+      { label: 'Image', value: 15 },
+      { label: 'Other', value: 15 },
+    ],
+    { title: 'Usage Mix' }
+  );
+
+  WG.flowDiagram(document.getElementById('g4'),
+    [
+      { id: 'a', label: 'Query', x: 30, y: 120, w: 100, h: 60 },
+      { id: 'b', label: 'Route', x: 180, y: 120, w: 100, h: 60 },
+      { id: 'c', label: 'Model', x: 330, y: 50, w: 100, h: 60 },
+      { id: 'd', label: 'Search', x: 330, y: 190, w: 100, h: 60 },
+      { id: 'e', label: 'Answer', x: 480, y: 120, w: 100, h: 60 },
+    ],
+    [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'c' },
+      { from: 'b', to: 'd' },
+      { from: 'c', to: 'e' },
+      { from: 'd', to: 'e' },
+    ]
+  );
+
+  WG.pillars(document.getElementById('g5'),
+    ['Talent', 'Process', 'Culture'],
+    { title: 'Strategy', topLabel: 'Advantage', baseLabel: 'Data' }
+  );
+
+  WG.hubSpoke(document.getElementById('g6'),
+    'Gemini',
+    [
+      { label: 'Text' },
+      { label: 'Image' },
+      { label: 'Video' },
+      { label: 'Audio' },
+      { label: 'Code' },
+    ],
+    { title: 'Modalities' }
+  );
+
+  WG.roadmap(document.getElementById('g7'),
+    [
+      { label: 'Design', sublabel: 'Apr 15' },
+      { label: 'Build', sublabel: 'Apr 30' },
+      { label: 'Test', sublabel: 'May 15' },
+      { label: 'Rollout', sublabel: 'Jun 1' },
+      { label: 'Launch', sublabel: 'Jun 11' },
+    ],
+    { title: 'Roadmap to Launch' }
+  );
+});
+</script>
+</body>
+</html>

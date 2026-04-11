@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<script src="file:///workspaces/sashaslides/presentation-templates/whiteboard/whiteboard-graphs.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Patrick+Hand&display=swap');
+body { margin: 0; padding: 0; background: transparent; }
+.asset { background: transparent; display: block; margin: 0; padding: 0; }
+.asset svg { display: block; background: transparent; }
+</style>
+</head>
+<body>
+
+    <div class="asset" id="asset-underline" data-name="underline" data-w="2400" data-h="80">
+      <svg width="2400" height="80" viewBox="0 0 2400 80"></svg>
+      <script>
+        window.addEventListener('load', () => {
+          const svg = document.querySelector('#asset-underline svg');
+          const rc = WhiteboardGraphs.wrapRough(svg);
+          // Two overlapping passes with different seeds create a chunkier marker look
+          rc.line(30, 40, 2370, 40, {
+            stroke: '#1a5276', strokeWidth: 14, roughness: 4, bowing: 3, seed: 11
+          });
+          rc.line(30, 44, 2370, 44, {
+            stroke: '#1a5276', strokeWidth: 12, roughness: 3.5, bowing: 2.5, seed: 29
+          });
+        });
+      </script>
+    </div>
+  
+
+    <div class="asset" id="asset-underline-red" data-name="underline-red" data-w="2400" data-h="80">
+      <svg width="2400" height="80" viewBox="0 0 2400 80"></svg>
+      <script>
+        window.addEventListener('load', () => {
+          const svg = document.querySelector('#asset-underline-red svg');
+          const rc = WhiteboardGraphs.wrapRough(svg);
+          rc.line(30, 40, 2370, 40, {
+            stroke: '#c0392b', strokeWidth: 14, roughness: 4, bowing: 3, seed: 17
+          });
+          rc.line(30, 44, 2370, 44, {
+            stroke: '#c0392b', strokeWidth: 12, roughness: 3.5, bowing: 2.5, seed: 43
+          });
+        });
+      </script>
+    </div>
+  
+
+      <div class="asset" id="asset-table-5" data-name="table_05" data-w="620" data-h="290">
+        <svg width="620" height="290" viewBox="0 0 620 290"></svg>
+        <script>
+          window.addEventListener('load', () => {
+            const svg = document.querySelector('#asset-table-5 svg');
+            const rc = WhiteboardGraphs.wrapRough(svg);
+            const W = 620, H = 290;
+            const headers = ["Metric","Before","After"];
+            const rows = [["Freshness accuracy","72%","91%"],["Search trigger rate","baseline","-8%"],["Latency (p50)","baseline","+12ms (net-neutral)"],["CSAT (time-sensitive)","baseline","+3.2 pts (p<0.01)"]];
+            const cols = headers.length;
+            const colW = (W - 20) / cols;
+            const rowH = 52;
+            const headerH = 60;
+
+            // Outer frame — fat and rough
+            rc.rectangle(10, 10, W - 20, H - 20, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 2
+            });
+
+            // Header background — hachured light blue
+            rc.rectangle(10, 10, W - 20, headerH, {
+              fill: '#d6eaf8', fillStyle: 'hachure', hachureGap: 6,
+              stroke: '#1a5276', strokeWidth: 4, roughness: 2.5
+            });
+
+            // Vertical column separators
+            for (let c = 1; c < cols; c++) {
+              rc.line(10 + c * colW, 10, 10 + c * colW, H - 10, {
+                stroke: '#2c3e50', strokeWidth: 3.5, roughness: 2.2, bowing: 1.5
+              });
+            }
+
+            // Horizontal row separators
+            rc.line(10, 10 + headerH, W - 10, 10 + headerH, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 1.5
+            });
+            for (let r = 1; r < rows.length; r++) {
+              rc.line(10, 10 + headerH + r * rowH, W - 10, 10 + headerH + r * rowH, {
+                stroke: '#2c3e50', strokeWidth: 3, roughness: 2, bowing: 1.5
+              });
+            }
+
+            // Header text
+            headers.forEach((h, ci) => {
+              WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH / 2 + 10, h, {
+                fontFamily: 'Caveat, cursive',
+                fontSize: 28,
+                color: '#1a5276',
+                bold: true,
+                anchor: 'middle',
+              });
+            });
+
+            // Data rows
+            rows.forEach((row, ri) => {
+              row.forEach((cell, ci) => {
+                WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH + ri * rowH + rowH / 2 + 8, cell, {
+                  fontFamily: 'Patrick Hand, cursive',
+                  fontSize: 22,
+                  color: '#2c3e50',
+                  anchor: 'middle',
+                });
+              });
+            });
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-table-7" data-name="table_07" data-w="620" data-h="235">
+        <svg width="620" height="235" viewBox="0 0 620 235"></svg>
+        <script>
+          window.addEventListener('load', () => {
+            const svg = document.querySelector('#asset-table-7 svg');
+            const rc = WhiteboardGraphs.wrapRough(svg);
+            const W = 620, H = 235;
+            const headers = ["Impact","Value"];
+            const rows = [["Latency saved","-180ms p50 on 41% of queries"],["SGM cost reduction","-38%"],["Quality regression","-0.1% (not significant)"]];
+            const cols = headers.length;
+            const colW = (W - 20) / cols;
+            const rowH = 52;
+            const headerH = 60;
+
+            // Outer frame — fat and rough
+            rc.rectangle(10, 10, W - 20, H - 20, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 2
+            });
+
+            // Header background — hachured light blue
+            rc.rectangle(10, 10, W - 20, headerH, {
+              fill: '#d6eaf8', fillStyle: 'hachure', hachureGap: 6,
+              stroke: '#1a5276', strokeWidth: 4, roughness: 2.5
+            });
+
+            // Vertical column separators
+            for (let c = 1; c < cols; c++) {
+              rc.line(10 + c * colW, 10, 10 + c * colW, H - 10, {
+                stroke: '#2c3e50', strokeWidth: 3.5, roughness: 2.2, bowing: 1.5
+              });
+            }
+
+            // Horizontal row separators
+            rc.line(10, 10 + headerH, W - 10, 10 + headerH, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 1.5
+            });
+            for (let r = 1; r < rows.length; r++) {
+              rc.line(10, 10 + headerH + r * rowH, W - 10, 10 + headerH + r * rowH, {
+                stroke: '#2c3e50', strokeWidth: 3, roughness: 2, bowing: 1.5
+              });
+            }
+
+            // Header text
+            headers.forEach((h, ci) => {
+              WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH / 2 + 10, h, {
+                fontFamily: 'Caveat, cursive',
+                fontSize: 28,
+                color: '#1a5276',
+                bold: true,
+                anchor: 'middle',
+              });
+            });
+
+            // Data rows
+            rows.forEach((row, ri) => {
+              row.forEach((cell, ci) => {
+                WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH + ri * rowH + rowH / 2 + 8, cell, {
+                  fontFamily: 'Patrick Hand, cursive',
+                  fontSize: 22,
+                  color: '#2c3e50',
+                  anchor: 'middle',
+                });
+              });
+            });
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-table-8" data-name="table_08" data-w="620" data-h="235">
+        <svg width="620" height="235" viewBox="0 0 620 235"></svg>
+        <script>
+          window.addEventListener('load', () => {
+            const svg = document.querySelector('#asset-table-8 svg');
+            const rc = WhiteboardGraphs.wrapRough(svg);
+            const W = 620, H = 235;
+            const headers = ["Impact","Value"];
+            const rows = [["First-token latency","-320ms on reasoning queries"],["Full-model tokens","-22% per reasoning query"],["Plan match rate","97.8% (Flash vs Full)"]];
+            const cols = headers.length;
+            const colW = (W - 20) / cols;
+            const rowH = 52;
+            const headerH = 60;
+
+            // Outer frame — fat and rough
+            rc.rectangle(10, 10, W - 20, H - 20, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 2
+            });
+
+            // Header background — hachured light blue
+            rc.rectangle(10, 10, W - 20, headerH, {
+              fill: '#d6eaf8', fillStyle: 'hachure', hachureGap: 6,
+              stroke: '#1a5276', strokeWidth: 4, roughness: 2.5
+            });
+
+            // Vertical column separators
+            for (let c = 1; c < cols; c++) {
+              rc.line(10 + c * colW, 10, 10 + c * colW, H - 10, {
+                stroke: '#2c3e50', strokeWidth: 3.5, roughness: 2.2, bowing: 1.5
+              });
+            }
+
+            // Horizontal row separators
+            rc.line(10, 10 + headerH, W - 10, 10 + headerH, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 1.5
+            });
+            for (let r = 1; r < rows.length; r++) {
+              rc.line(10, 10 + headerH + r * rowH, W - 10, 10 + headerH + r * rowH, {
+                stroke: '#2c3e50', strokeWidth: 3, roughness: 2, bowing: 1.5
+              });
+            }
+
+            // Header text
+            headers.forEach((h, ci) => {
+              WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH / 2 + 10, h, {
+                fontFamily: 'Caveat, cursive',
+                fontSize: 28,
+                color: '#1a5276',
+                bold: true,
+                anchor: 'middle',
+              });
+            });
+
+            // Data rows
+            rows.forEach((row, ri) => {
+              row.forEach((cell, ci) => {
+                WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH + ri * rowH + rowH / 2 + 8, cell, {
+                  fontFamily: 'Patrick Hand, cursive',
+                  fontSize: 22,
+                  color: '#2c3e50',
+                  anchor: 'middle',
+                });
+              });
+            });
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-table-9" data-name="table_09" data-w="620" data-h="290">
+        <svg width="620" height="290" viewBox="0 0 620 290"></svg>
+        <script>
+          window.addEventListener('load', () => {
+            const svg = document.querySelector('#asset-table-9 svg');
+            const rc = WhiteboardGraphs.wrapRough(svg);
+            const W = 620, H = 290;
+            const headers = ["Impact","Value"];
+            const rows = [["Grounding context","-45% average"],["Response generation","-150ms"],["Quality (simple queries)","+0.8% (less noise)"],["Quality (deep research)","-1.6% (acceptable)"]];
+            const cols = headers.length;
+            const colW = (W - 20) / cols;
+            const rowH = 52;
+            const headerH = 60;
+
+            // Outer frame — fat and rough
+            rc.rectangle(10, 10, W - 20, H - 20, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 2
+            });
+
+            // Header background — hachured light blue
+            rc.rectangle(10, 10, W - 20, headerH, {
+              fill: '#d6eaf8', fillStyle: 'hachure', hachureGap: 6,
+              stroke: '#1a5276', strokeWidth: 4, roughness: 2.5
+            });
+
+            // Vertical column separators
+            for (let c = 1; c < cols; c++) {
+              rc.line(10 + c * colW, 10, 10 + c * colW, H - 10, {
+                stroke: '#2c3e50', strokeWidth: 3.5, roughness: 2.2, bowing: 1.5
+              });
+            }
+
+            // Horizontal row separators
+            rc.line(10, 10 + headerH, W - 10, 10 + headerH, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 1.5
+            });
+            for (let r = 1; r < rows.length; r++) {
+              rc.line(10, 10 + headerH + r * rowH, W - 10, 10 + headerH + r * rowH, {
+                stroke: '#2c3e50', strokeWidth: 3, roughness: 2, bowing: 1.5
+              });
+            }
+
+            // Header text
+            headers.forEach((h, ci) => {
+              WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH / 2 + 10, h, {
+                fontFamily: 'Caveat, cursive',
+                fontSize: 28,
+                color: '#1a5276',
+                bold: true,
+                anchor: 'middle',
+              });
+            });
+
+            // Data rows
+            rows.forEach((row, ri) => {
+              row.forEach((cell, ci) => {
+                WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH + ri * rowH + rowH / 2 + 8, cell, {
+                  fontFamily: 'Patrick Hand, cursive',
+                  fontSize: 22,
+                  color: '#2c3e50',
+                  anchor: 'middle',
+                });
+              });
+            });
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-table-10" data-name="table_10" data-w="620" data-h="290">
+        <svg width="620" height="290" viewBox="0 0 620 290"></svg>
+        <script>
+          window.addEventListener('load', () => {
+            const svg = document.querySelector('#asset-table-10 svg');
+            const rc = WhiteboardGraphs.wrapRough(svg);
+            const W = 620, H = 290;
+            const headers = ["Metric","Before","After","Delta"];
+            const rows = [["P50 Latency","2.8s","2.1s","-25%"],["P90 Latency","5.2s","3.8s","-27%"],["Serving cost/query","$X","$0.61X","-39%"],["Answer quality","baseline","-0.3%","negligible"]];
+            const cols = headers.length;
+            const colW = (W - 20) / cols;
+            const rowH = 52;
+            const headerH = 60;
+
+            // Outer frame — fat and rough
+            rc.rectangle(10, 10, W - 20, H - 20, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 2
+            });
+
+            // Header background — hachured light blue
+            rc.rectangle(10, 10, W - 20, headerH, {
+              fill: '#d6eaf8', fillStyle: 'hachure', hachureGap: 6,
+              stroke: '#1a5276', strokeWidth: 4, roughness: 2.5
+            });
+
+            // Vertical column separators
+            for (let c = 1; c < cols; c++) {
+              rc.line(10 + c * colW, 10, 10 + c * colW, H - 10, {
+                stroke: '#2c3e50', strokeWidth: 3.5, roughness: 2.2, bowing: 1.5
+              });
+            }
+
+            // Horizontal row separators
+            rc.line(10, 10 + headerH, W - 10, 10 + headerH, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 1.5
+            });
+            for (let r = 1; r < rows.length; r++) {
+              rc.line(10, 10 + headerH + r * rowH, W - 10, 10 + headerH + r * rowH, {
+                stroke: '#2c3e50', strokeWidth: 3, roughness: 2, bowing: 1.5
+              });
+            }
+
+            // Header text
+            headers.forEach((h, ci) => {
+              WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH / 2 + 10, h, {
+                fontFamily: 'Caveat, cursive',
+                fontSize: 28,
+                color: '#1a5276',
+                bold: true,
+                anchor: 'middle',
+              });
+            });
+
+            // Data rows
+            rows.forEach((row, ri) => {
+              row.forEach((cell, ci) => {
+                WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH + ri * rowH + rowH / 2 + 8, cell, {
+                  fontFamily: 'Patrick Hand, cursive',
+                  fontSize: 22,
+                  color: '#2c3e50',
+                  anchor: 'middle',
+                });
+              });
+            });
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-table-16" data-name="table_16" data-w="1200" data-h="400">
+        <svg width="1200" height="400" viewBox="0 0 1200 400"></svg>
+        <script>
+          window.addEventListener('load', () => {
+            const svg = document.querySelector('#asset-table-16 svg');
+            const rc = WhiteboardGraphs.wrapRough(svg);
+            const W = 1200, H = 400;
+            const headers = ["Milestone","Date","Status"];
+            const rows = [["SI classification model","Apr 15","In progress"],["Generative UI renderer v1","Apr 30","In progress"],["Live score card integration","May 15","Not started"],["Internal dogfood","May 20","Not started"],["Gradual external rollout","Jun 1","Not started"],["World Cup kickoff","Jun 11","—"]];
+            const cols = headers.length;
+            const colW = (W - 20) / cols;
+            const rowH = 52;
+            const headerH = 60;
+
+            // Outer frame — fat and rough
+            rc.rectangle(10, 10, W - 20, H - 20, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 2
+            });
+
+            // Header background — hachured light blue
+            rc.rectangle(10, 10, W - 20, headerH, {
+              fill: '#d6eaf8', fillStyle: 'hachure', hachureGap: 6,
+              stroke: '#1a5276', strokeWidth: 4, roughness: 2.5
+            });
+
+            // Vertical column separators
+            for (let c = 1; c < cols; c++) {
+              rc.line(10 + c * colW, 10, 10 + c * colW, H - 10, {
+                stroke: '#2c3e50', strokeWidth: 3.5, roughness: 2.2, bowing: 1.5
+              });
+            }
+
+            // Horizontal row separators
+            rc.line(10, 10 + headerH, W - 10, 10 + headerH, {
+              stroke: '#2c3e50', strokeWidth: 5, roughness: 2.5, bowing: 1.5
+            });
+            for (let r = 1; r < rows.length; r++) {
+              rc.line(10, 10 + headerH + r * rowH, W - 10, 10 + headerH + r * rowH, {
+                stroke: '#2c3e50', strokeWidth: 3, roughness: 2, bowing: 1.5
+              });
+            }
+
+            // Header text
+            headers.forEach((h, ci) => {
+              WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH / 2 + 10, h, {
+                fontFamily: 'Caveat, cursive',
+                fontSize: 28,
+                color: '#1a5276',
+                bold: true,
+                anchor: 'middle',
+              });
+            });
+
+            // Data rows
+            rows.forEach((row, ri) => {
+              row.forEach((cell, ci) => {
+                WhiteboardGraphs.addText(svg, 10 + ci * colW + colW / 2, 10 + headerH + ri * rowH + rowH / 2 + 8, cell, {
+                  fontFamily: 'Patrick Hand, cursive',
+                  fontSize: 22,
+                  color: '#2c3e50',
+                  anchor: 'middle',
+                });
+              });
+            });
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-showcase_intro" data-name="showcase_intro" data-w="1600" data-h="900">
+        <div style="width:1600px;height:900px;position:relative;background:transparent;">
+          <div style="position:absolute;top:60px;left:80px;right:80px;text-align:center;">
+            <div style="font-family:'Caveat',cursive;font-size:92px;color:#c0392b;font-weight:700;line-height:1">The Whiteboard Graph Library</div>
+            <div style="font-family:'Patrick Hand',cursive;font-size:36px;color:#2c3e50;margin-top:8px">Hand-drawn charts, built with rough.js</div>
+          </div>
+          <svg id="svg-showcase_intro" width="1400" height="450" viewBox="0 0 1400 450"
+               style="position:absolute;left:100px;top:345px"></svg>
+        </div>
+        <script>
+          window.addEventListener('load', () => {
+            const g = document.getElementById('svg-showcase_intro');
+            WhiteboardGraphs.roadmap(g, [{"label":"Bar","sublabel":"compare"},{"label":"Line","sublabel":"trend"},{"label":"Pie","sublabel":"share"},{"label":"Flow","sublabel":"steps"},{"label":"Pillars","sublabel":"support"},{"label":"Hub","sublabel":"radiate"},{"label":"Road","sublabel":"timeline"}], {"title":"7 chart types for any story"});
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-showcase_bar" data-name="showcase_bar" data-w="1600" data-h="900">
+        <div style="width:1600px;height:900px;position:relative;background:transparent;">
+          <div style="position:absolute;top:60px;left:80px;right:80px;text-align:left;">
+            <div style="font-family:'Caveat',cursive;font-size:80px;color:#1a5276;font-weight:700;line-height:1">Bar Chart</div>
+            <div style="font-family:'Patrick Hand',cursive;font-size:36px;color:#2c3e50;margin-top:8px">Compare values across categories</div>
+          </div>
+          <svg id="svg-showcase_bar" width="900" height="580" viewBox="0 0 900 580"
+               style="position:absolute;left:350px;top:280px"></svg>
+        </div>
+        <script>
+          window.addEventListener('load', () => {
+            const g = document.getElementById('svg-showcase_bar');
+            WhiteboardGraphs.barChart(g, [{"label":"Q1","value":120},{"label":"Q2","value":185},{"label":"Q3","value":240},{"label":"Q4","value":310}], {"title":"Revenue Growth","yLabel":"$M","xLabel":"Quarter"});
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-showcase_line" data-name="showcase_line" data-w="1600" data-h="900">
+        <div style="width:1600px;height:900px;position:relative;background:transparent;">
+          <div style="position:absolute;top:60px;left:80px;right:80px;text-align:left;">
+            <div style="font-family:'Caveat',cursive;font-size:80px;color:#1a5276;font-weight:700;line-height:1">Line Chart</div>
+            <div style="font-family:'Patrick Hand',cursive;font-size:36px;color:#2c3e50;margin-top:8px">Show trends over time</div>
+          </div>
+          <svg id="svg-showcase_line" width="900" height="580" viewBox="0 0 900 580"
+               style="position:absolute;left:350px;top:280px"></svg>
+        </div>
+        <script>
+          window.addEventListener('load', () => {
+            const g = document.getElementById('svg-showcase_line');
+            WhiteboardGraphs.lineChart(g, [{"label":"Jan","value":72},{"label":"Feb","value":78},{"label":"Mar","value":82},{"label":"Apr","value":91},{"label":"May","value":88}], {"title":"Accuracy %","yLabel":"%","xLabel":"Month"});
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-showcase_pie" data-name="showcase_pie" data-w="1600" data-h="900">
+        <div style="width:1600px;height:900px;position:relative;background:transparent;">
+          <div style="position:absolute;top:60px;left:80px;right:80px;text-align:left;">
+            <div style="font-family:'Caveat',cursive;font-size:80px;color:#1a5276;font-weight:700;line-height:1">Pie Chart</div>
+            <div style="font-family:'Patrick Hand',cursive;font-size:36px;color:#2c3e50;margin-top:8px">Break down a whole into parts</div>
+          </div>
+          <svg id="svg-showcase_pie" width="700" height="700" viewBox="0 0 700 700"
+               style="position:absolute;left:450px;top:220px"></svg>
+        </div>
+        <script>
+          window.addEventListener('load', () => {
+            const g = document.getElementById('svg-showcase_pie');
+            WhiteboardGraphs.pieChart(g, [{"label":"Search","value":40},{"label":"Chat","value":30},{"label":"Image","value":15},{"label":"Other","value":15}], {"title":"Query Mix"});
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-showcase_flow" data-name="showcase_flow" data-w="1600" data-h="900">
+        <div style="width:1600px;height:900px;position:relative;background:transparent;">
+          <div style="position:absolute;top:60px;left:80px;right:80px;text-align:left;">
+            <div style="font-family:'Caveat',cursive;font-size:80px;color:#1a5276;font-weight:700;line-height:1">Flow Diagram</div>
+            <div style="font-family:'Patrick Hand',cursive;font-size:36px;color:#2c3e50;margin-top:8px">Connect steps with arrows</div>
+          </div>
+          <svg id="svg-showcase_flow" width="800" height="600" viewBox="0 0 800 600"
+               style="position:absolute;left:400px;top:270px"></svg>
+        </div>
+        <script>
+          window.addEventListener('load', () => {
+            const g = document.getElementById('svg-showcase_flow');
+            WhiteboardGraphs.flowDiagram(g, [{"id":"a","label":"Query","x":40,"y":260,"w":140,"h":80},{"id":"b","label":"Route","x":230,"y":260,"w":140,"h":80},{"id":"c","label":"Model","x":420,"y":140,"w":140,"h":80},{"id":"d","label":"Search","x":420,"y":380,"w":140,"h":80},{"id":"e","label":"Answer","x":610,"y":260,"w":140,"h":80}], [{"from":"a","to":"b"},{"from":"b","to":"c"},{"from":"b","to":"d"},{"from":"c","to":"e"},{"from":"d","to":"e"}], {});
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-showcase_pillars" data-name="showcase_pillars" data-w="1600" data-h="900">
+        <div style="width:1600px;height:900px;position:relative;background:transparent;">
+          <div style="position:absolute;top:60px;left:80px;right:80px;text-align:left;">
+            <div style="font-family:'Caveat',cursive;font-size:80px;color:#1a5276;font-weight:700;line-height:1">Pillars</div>
+            <div style="font-family:'Patrick Hand',cursive;font-size:36px;color:#2c3e50;margin-top:8px">Structural / foundational diagrams</div>
+          </div>
+          <svg id="svg-showcase_pillars" width="800" height="620" viewBox="0 0 800 620"
+               style="position:absolute;left:400px;top:260px"></svg>
+        </div>
+        <script>
+          window.addEventListener('load', () => {
+            const g = document.getElementById('svg-showcase_pillars');
+            WhiteboardGraphs.pillars(g, ["Talent","Process","Culture"], {"title":"Strategy","topLabel":"Advantage","baseLabel":"Data Infra"});
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-showcase_hubspoke" data-name="showcase_hubspoke" data-w="1600" data-h="900">
+        <div style="width:1600px;height:900px;position:relative;background:transparent;">
+          <div style="position:absolute;top:60px;left:80px;right:80px;text-align:left;">
+            <div style="font-family:'Caveat',cursive;font-size:80px;color:#1a5276;font-weight:700;line-height:1">Hub & Spoke</div>
+            <div style="font-family:'Patrick Hand',cursive;font-size:36px;color:#2c3e50;margin-top:8px">Central concept with radiating components</div>
+          </div>
+          <svg id="svg-showcase_hubspoke" width="800" height="700" viewBox="0 0 800 700"
+               style="position:absolute;left:400px;top:220px"></svg>
+        </div>
+        <script>
+          window.addEventListener('load', () => {
+            const g = document.getElementById('svg-showcase_hubspoke');
+            WhiteboardGraphs.hubSpoke(g, "Gemini", [{"label":"Text"},{"label":"Image"},{"label":"Video"},{"label":"Audio"},{"label":"Code"}], {"title":"Modalities"});
+          });
+        </script>
+      </div>
+    
+
+      <div class="asset" id="asset-showcase_roadmap" data-name="showcase_roadmap" data-w="1600" data-h="900">
+        <div style="width:1600px;height:900px;position:relative;background:transparent;">
+          <div style="position:absolute;top:60px;left:80px;right:80px;text-align:left;">
+            <div style="font-family:'Caveat',cursive;font-size:80px;color:#1a5276;font-weight:700;line-height:1">Roadmap</div>
+            <div style="font-family:'Patrick Hand',cursive;font-size:36px;color:#2c3e50;margin-top:8px">Sequential milestones on a timeline</div>
+          </div>
+          <svg id="svg-showcase_roadmap" width="1400" height="450" viewBox="0 0 1400 450"
+               style="position:absolute;left:100px;top:345px"></svg>
+        </div>
+        <script>
+          window.addEventListener('load', () => {
+            const g = document.getElementById('svg-showcase_roadmap');
+            WhiteboardGraphs.roadmap(g, [{"label":"Design","sublabel":"Apr 15"},{"label":"Build","sublabel":"Apr 30"},{"label":"Test","sublabel":"May 15"},{"label":"Rollout","sublabel":"Jun 1"},{"label":"Launch","sublabel":"Jun 11"}], {"title":"Path to Launch"});
+          });
+        </script>
+      </div>
+    
+</body>
+</html>
