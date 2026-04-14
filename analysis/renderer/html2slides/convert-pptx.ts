@@ -123,6 +123,8 @@ function buildPptx(
   const pptxgenModule = require("pptxgenjs");
   const PptxGenJS = (pptxgenModule as any).default || pptxgenModule;
   const pres = new PptxGenJS();
+  const gradientRegistry: any[] = [];
+  (pres as any).__gradients = gradientRegistry;
   pres.title = title;
   pres.layout = "LAYOUT_WIDE"; // 13.333" x 7.5" — wait, we want 10" x 5.625"
 
@@ -207,8 +209,13 @@ function buildPptx(
             line: { type: "none" },
           };
 
-          // Fill
-          if (el.fill) {
+          // Fill (gradient tagged via objectName for post-processing — pptxgenjs has no gradient API)
+          if (el.gradient && el.gradient.stops && el.gradient.stops.length >= 2) {
+            opts.fill = { color: hexToRgb(el.gradient.stops[0].color) };
+            const gid = gradientRegistry.length;
+            gradientRegistry.push(el.gradient);
+            opts.objectName = `GRAD_${gid}`;
+          } else if (el.fill) {
             opts.fill = { color: hexToRgb(el.fill) };
           }
 
@@ -406,6 +413,9 @@ async function main() {
   await pres.writeFile({ fileName: pptxPath });
   console.log(`  Saved: ${pptxPath}`);
 
+  // Post-process: inject <a:gradFill> into shapes tagged with name="GRAD_N"
+  await injectGradients(pptxPath, (pres as any).__gradients || []);
+
   // Step 3: Upload to Google Drive as Google Slides
   console.log("\nUploading to Google Slides...");
   const auth = getAuth();
@@ -420,6 +430,60 @@ async function main() {
   const presId = res.data.id;
   console.log(`  → https://docs.google.com/presentation/d/${presId}/edit`);
   console.log("Done.");
+}
+
+// --- Gradient post-processing ---
+// pptxgenjs has no gradFill API. We mark gradient shapes with descr="GRAD:{json}" via altText,
+// then rewrite the saved .pptx XML to replace those shapes' <a:solidFill> with <a:gradFill>.
+const JSZip = require("jszip");
+
+function cssAngleToOoxml(cssDeg: number): number {
+  // CSS: 0deg=up (to top), clockwise. OOXML <a:lin ang=>: 0=east, clockwise, units of 60000ths deg.
+  // CSS direction = OOXML direction rotated 90° CCW: ooxml = (css - 90 + 360) % 360.
+  const ooxml = ((cssDeg - 90) % 360 + 360) % 360;
+  return Math.round(ooxml * 60000);
+}
+
+function buildGradFillXml(gradient: { angle: number; stops: { color: string; position: number }[] }): string {
+  const ang = cssAngleToOoxml(gradient.angle);
+  const gsItems = gradient.stops.map(s => {
+    const pos = Math.round(Math.max(0, Math.min(1, s.position)) * 100000);
+    const clr = hexToRgb(s.color);
+    return `<a:gs pos="${pos}"><a:srgbClr val="${clr}"/></a:gs>`;
+  }).join("");
+  return `<a:gradFill rotWithShape="1"><a:gsLst>${gsItems}</a:gsLst><a:lin ang="${ang}" scaled="0"/></a:gradFill>`;
+}
+
+async function injectGradients(pptxPath: string, registry: any[]): Promise<void> {
+  if (registry.length === 0) return;
+  const buf = readFileSync(pptxPath);
+  const zip = await JSZip.loadAsync(buf);
+  const slideFiles = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+
+  let patchedShapes = 0;
+  for (const name of slideFiles) {
+    let xml = await zip.file(name)!.async("string");
+    let slidePatched = 0;
+    xml = xml.replace(/<p:sp>[\s\S]*?<\/p:sp>/g, (spBlock: string) => {
+      const m = spBlock.match(/name="GRAD_(\d+)"/);
+      if (!m) return spBlock;
+      const gradient = registry[parseInt(m[1])];
+      if (!gradient) return spBlock;
+      const gradXml = buildGradFillXml(gradient);
+      slidePatched++;
+      return spBlock.replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/, gradXml);
+    });
+    if (slidePatched > 0) {
+      zip.file(name, xml);
+      patchedShapes += slidePatched;
+    }
+  }
+
+  if (patchedShapes > 0) {
+    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    writeFileSync(pptxPath, out);
+    console.log(`  Gradient injection: ${patchedShapes} shape(s) patched`);
+  }
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
