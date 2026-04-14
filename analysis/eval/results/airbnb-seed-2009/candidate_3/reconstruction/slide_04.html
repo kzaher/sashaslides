@@ -1,0 +1,57 @@
+<!-- slide_04.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Helvetica Neue', Arial, system-ui, sans-serif;
+  padding: 60px 80px;
+}
+.title {
+  font-size: 34px; font-weight: 700; color: #333333;
+  margin-bottom: 10px;
+}
+.title-underline {
+  width: 48px; height: 3px; background: #29B6F6; margin-bottom: 60px;
+}
+.metrics { display: flex; flex-direction: column; gap: 52px; }
+.metric-row {
+  display: flex; flex-direction: column; gap: 6px;
+  padding-bottom: 52px;
+  border-bottom: 1px solid #D6EEFB;
+}
+.metric-row:last-child { border-bottom: none; padding-bottom: 0; }
+.metric-number {
+  font-size: 52px; font-weight: 700; color: #29B6F6;
+  line-height: 1;
+}
+.metric-label {
+  font-size: 20px; font-weight: 400; color: #333333;
+  line-height: 1.4;
+}
+.metric-source {
+  font-size: 13px; font-weight: 300; color: #999999;
+}
+</style>
+</head>
+<body>
+  <div class="title">Proven Demand</div>
+  <div class="title-underline"></div>
+  <div class="metrics">
+    <div class="metric-row">
+      <div class="metric-number">660,000</div>
+      <div class="metric-label">Total registered users already seeking this experience</div>
+      <div class="metric-source">Source: Couchsurfing.com</div>
+    </div>
+    <div class="metric-row">
+      <div class="metric-number">50,000</div>
+      <div class="metric-label">Temporary housing listings posted every week in the US</div>
+      <div class="metric-source">Source: Craigslist</div>
+    </div>
+  </div>
+</body>
+</html>

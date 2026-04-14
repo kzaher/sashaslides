@@ -1,0 +1,207 @@
+{
+  "presentationId": "peloton-seed-2012",
+  "presentationTitle": "Peloton Brand Positioning Deck",
+  "slideCount": 20,
+  "slides": [
+    {
+      "index": 1,
+      "title": "Peloton",
+      "layoutType": "titleSlideWithPhoto",
+      "bodyText": "Cover slide featuring the Peloton logo centered over a dark, moody photograph of a rider on a Peloton bike with the touchscreen visible showing a live class with an instructor and performance metrics.",
+      "dominantColors": ["#1A1A1A", "#FFFFFF", "#3A3A3A", "#5C7080"],
+      "fontStyle": "Bold sans-serif uppercase logo text in white, clean and modern",
+      "whitespacePct": 10,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 2,
+      "title": "Contents",
+      "layoutType": "tableOfContentsWithPhoto",
+      "bodyText": "Contents page listing three sections: 1. Consumer Target, 2. Global Positioning, 3. Global Positioning articulated in creative. Left half shows a dramatic purple-lit cycling studio photo with instructor on stage.",
+      "dominantColors": ["#1A0A30", "#FFFFFF", "#7B2FBE", "#F44060"],
+      "fontStyle": "Bold italic sans-serif title in red/coral, regular sans-serif list items in dark gray",
+      "whitespacePct": 35,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 3,
+      "title": "Target Consumer: Serious About Fitness",
+      "layoutType": "twoColumnTable",
+      "bodyText": "Table with Psychographics and Demographics columns. Psychographics: Prioritize Fitness, Workout 4+ times/week, Enjoy energy of workout classes, Follow an exercise routine with multiple types. Demographics: Spend $150USD+/month on fitness, Typically live in big suburban areas, 35-50 years old (average 43), $100-$150K+ HHI, Typically Married with kids, Highly Educated.",
+      "dominantColors": ["#1A1A1A", "#F44060", "#FFFFFF", "#333333"],
+      "fontStyle": "Bold uppercase sans-serif title in white, red column headers, light gray body text",
+      "whitespacePct": 15,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 4,
+      "title": "Consumer Promise",
+      "layoutType": "threeColumnWithIcons",
+      "bodyText": "Three brand pillars shown as red circular speech-bubble icons over a darkened lifestyle photo of rider at home. Reasons to Believe: An integrated experience designed to pull you in and ensure you literally show up. Functional Benefit: Entertainment and competition to show up at your best on your terms. Emotional Benefit: A transformative experience so you show up as your full self all day long.",
+      "dominantColors": ["#F44060", "#1A1A1A", "#FFFFFF", "#8B7355"],
+      "fontStyle": "Bold italic uppercase sans-serif title, bold white icon labels, regular white body text",
+      "whitespacePct": 10,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 5,
+      "title": "Brand Values",
+      "layoutType": "sixValueGrid",
+      "bodyText": "Six brand values in a 2x3 grid on white background. Always On: gold standard for being there for members. Empowering: lifting members up through celebration. Optimistic: inspirational, energizing, hopeful & hyped-up. Captivating: blends performance with entertainment. Authentic: member-first, simple, conversational. Premium: established through design, performance and excellence.",
+      "dominantColors": ["#FFFFFF", "#F44060", "#1A1A1A", "#333333"],
+      "fontStyle": "Bold italic uppercase sans-serif title in red, bold black value names, regular gray descriptions",
+      "whitespacePct": 45,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 6,
+      "title": "Who We Are / Who We're Not",
+      "layoutType": "twoColumnComparison",
+      "bodyText": "Left column 'Who We Are': Motivating, Modern, Premium, Authentic, Enthusiastic, Captivating, Confident, Inclusive, Street Wise, Empowering, Optimistic, Community. Right column 'Who We're Not' (struck through): Preachy, A Fad, Exclusive, Sterile, Over the top, Goofy, Aggressive, Cultish, Snobby, Religion, Satisfied, Cheap, A Fitness Brand.",
+      "dominantColors": ["#1A1A1A", "#FFFFFF", "#F44060", "#666666"],
+      "fontStyle": "Bold italic uppercase sans-serif headers in white/red, regular white bullet text, strikethrough on right column",
+      "whitespacePct": 20,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 7,
+      "title": "We're Not a Gimmicky Fitness Brand",
+      "layoutType": "fourColumnWithIcons",
+      "bodyText": "Four red circular icons with labels on white background. No Before & Afters (photo comparison icon), No Cheesy Ads (cheese icon), Not a Fad (trend chart icon), Don't talk down (sad face icon). Reinforces brand anti-patterns.",
+      "dominantColors": ["#FFFFFF", "#F44060", "#1A1A1A", "#F0F0F0"],
+      "fontStyle": "Bold italic uppercase sans-serif title in black, regular sans-serif labels below icons",
+      "whitespacePct": 50,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 8,
+      "title": "Brand Wheel",
+      "layoutType": "concentricCircleDiagram",
+      "bodyText": "Concentric circle brand wheel diagram. Center (red): Peloton 'Makes You Want To Show Up'. Inner ring: Product truths (Leaderboard and Metrics, Passionate Connected Community, Top Tier Instructor Talent, Always Ready). Outer ring divided into four quadrants: Functional Inward (Makes Hard Work Fun, Removes Barriers, Pushes Me to Excel), Functional Outward (Innovative Design, Wholly Immersive, Engineered for Competition), Emotional Inward (Like Nothing Is In My Way, Like I Belong to Something, Like I Can Accomplish Anything), Emotional Outward (Captivating, Tech-Savvy, Discerning, Committed). Brand values ring: Always On, Encouraging, Competitive.",
+      "dominantColors": ["#FFFFFF", "#F44060", "#D4A0A0", "#1A1A1A"],
+      "fontStyle": "Bold uppercase sans-serif title, small caps labels in diagram, mixed bold and regular",
+      "whitespacePct": 15,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 9,
+      "title": "Brand Wheel (Highlighted)",
+      "layoutType": "concentricCircleDiagram",
+      "bodyText": "Same brand wheel as slide 8 but with certain segments highlighted/emphasized, showing the full framework with all four quadrants clearly labeled: Functional Inward, Functional Outward, Emotional Inward, Emotional Outward. Appears to be an animated build of the same diagram.",
+      "dominantColors": ["#FFFFFF", "#F44060", "#D4A0A0", "#1A1A1A"],
+      "fontStyle": "Bold uppercase sans-serif title, small caps labels in diagram",
+      "whitespacePct": 15,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 10,
+      "title": "Product and Emotional Storytelling Balance",
+      "layoutType": "timelineWithImages",
+      "bodyText": "Timeline showing evolution from product-led to emotional-led advertising. Y-axis: Product Led to Emotional Led. X-axis: 2014-2016 ('This is Peloton' / 'Morning Ride'), May 2017 ('Hello, Let's Go'), Holiday 2017 ('Give it All'), Spring 2018 ('Better in Us'). Each point illustrated with circular lifestyle photography showing progressive shift toward emotional brand storytelling.",
+      "dominantColors": ["#1A1A1A", "#F44060", "#FFFFFF", "#8B6040"],
+      "fontStyle": "Bold italic uppercase sans-serif title in white, red timeline labels, regular white captions",
+      "whitespacePct": 25,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 11,
+      "title": "Makes Hard Work Fun",
+      "layoutType": "photoWithCalloutBubble",
+      "bodyText": "Lifestyle photo of woman riding Peloton bike at home with instructor visible on screen. Red circular callout bubble: 'Makes Hard Work Fun' - Our brand is about making the hard work enjoyable. We visually represent this by heroeing our content and instructors while still always showing hard work (i.e. not a party on a bike).",
+      "dominantColors": ["#F44060", "#E8D8C8", "#1A1A1A", "#FFFFFF"],
+      "fontStyle": "Bold uppercase white text in callout, regular white body text, Peloton logo top-left",
+      "whitespacePct": 10,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 12,
+      "title": "Pushes Me to Excel",
+      "layoutType": "photoWithCalloutBubble",
+      "bodyText": "Dark dramatic photo of packed cycling studio with instructor on elevated stage. Large red circular callout on left: 'Pushes Me to Excel' - Metrics, the leaderboard and our overall UX/engaging content show that Peloton will keep you motivated. We also always intensity/our protagonists working hard.",
+      "dominantColors": ["#1A0A30", "#F44060", "#FFFFFF", "#4B0082"],
+      "fontStyle": "Bold uppercase white text in callout, regular white body text",
+      "whitespacePct": 5,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 13,
+      "title": "Innovative Design",
+      "layoutType": "productPhotoWithCalloutBubble",
+      "bodyText": "Product shot of the Peloton bike on white/gray split background. Red circular callout: 'Innovative Design' - Our creative dramatizes the beauty of the design of our bike and the technological advancements to reinforce 'Innovative Design' while always showing in situ (not sterile product shots).",
+      "dominantColors": ["#FFFFFF", "#F44060", "#1A1A1A", "#666666"],
+      "fontStyle": "Bold uppercase white text in callout, regular white body text",
+      "whitespacePct": 25,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 14,
+      "title": "Wholly Immersive",
+      "layoutType": "photoWithCalloutBubble",
+      "bodyText": "Lifestyle photo of woman riding Peloton bike near large windows with natural light and greenery outside. Red circular callout: 'Wholly Immersive' - Our marketing always shows the protagonist fully engaged and immersed in class, not distracted doing something else. This is his/her escape. We portray the content as hero.",
+      "dominantColors": ["#A0C0A0", "#F44060", "#FFFFFF", "#8B8B6B"],
+      "fontStyle": "Bold uppercase white text in callout, regular white body text",
+      "whitespacePct": 10,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 15,
+      "title": "Brand Wheel (Tech-Savvy Highlight)",
+      "layoutType": "concentricCircleDiagram",
+      "bodyText": "Same brand wheel diagram as slides 8-9, with the 'Tech-Savvy' segment highlighted in the Emotional Outward quadrant. Used as a transition to the Tech Savvy section.",
+      "dominantColors": ["#FFFFFF", "#F44060", "#D4A0A0", "#1A1A1A"],
+      "fontStyle": "Bold uppercase sans-serif title, small caps labels in diagram",
+      "whitespacePct": 15,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 16,
+      "title": "Tech Savvy...",
+      "layoutType": "pressQuotesGrid",
+      "bodyText": "Four press quotes reinforcing tech-savvy positioning on dark background. Tech Crunch: 'Peloton is now a unicorn because of the spinning class craze.' Gear Brain: 'Give your home a smart gym with this connected workout equipment.' Circuit Breaker: 'Peloton to launch its smart exercise bike in the UK and Canada.' Business Insider: 'Peloton is now worth more than $1 Billion.' Each source labeled in red.",
+      "dominantColors": ["#1A1A1A", "#F44060", "#FFFFFF", "#333333"],
+      "fontStyle": "Bold italic uppercase sans-serif title in red, regular white quote text, red source labels",
+      "whitespacePct": 25,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 17,
+      "title": "Discerning",
+      "layoutType": "customerTestimonials",
+      "bodyText": "Two customer reviews with star decorations on white background. 'Excellent Bike and Excellent Customer Service' from Mackenzie - Gordon, PA: detailed review about switching from spinning classes, praising bike quality and customer service. 'Peloton Changed My Life' from Mackenzie - Gordon, PA: praising flawless experience, amazing classes, and instructors.",
+      "dominantColors": ["#FFFFFF", "#F44060", "#1A1A1A", "#E0E0E0"],
+      "fontStyle": "Bold italic uppercase sans-serif title in red, bold black review headlines, regular gray review text, red name labels",
+      "whitespacePct": 20,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 18,
+      "title": "Discerning",
+      "layoutType": "customerTestimonial",
+      "bodyText": "Single customer review on dark background with large star decorations. 'Life Changing Purchase' from Mackenzie - Gordon, PA: teacher and yoga instructor praising how the bike made working out easier, with great instructors and classes for every mood and fitness goal. Beginners and fitness junkies alike can find a challenge.",
+      "dominantColors": ["#1A1A1A", "#F44060", "#FFFFFF", "#333333"],
+      "fontStyle": "Bold uppercase white review headline, regular white review text, red name label",
+      "whitespacePct": 30,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 19,
+      "title": "Brand Wheel (Emotional Inward Highlight)",
+      "layoutType": "concentricCircleDiagram",
+      "bodyText": "Same brand wheel diagram with the Emotional Inward quadrant segments highlighted (Like Nothing Is In My Way, Always On, Like I Belong to Something, Like I Can Accomplish Anything). Serves as transition to the Committed section.",
+      "dominantColors": ["#FFFFFF", "#F44060", "#D4A0A0", "#1A1A1A"],
+      "fontStyle": "Bold uppercase sans-serif title, small caps labels in diagram",
+      "whitespacePct": 15,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 20,
+      "title": "Committed",
+      "layoutType": "photoWithCalloutBubble",
+      "bodyText": "Lifestyle photo of a man intensely riding a Peloton bike at home, visible through glass doors/windows. Red circular callout: 'Committed' - Our creative shows the work and the intensity to reinforce that Peloton users are wholeheartedly dedicated.",
+      "dominantColors": ["#8B6040", "#F44060", "#FFFFFF", "#1A1A1A"],
+      "fontStyle": "Bold uppercase white text in callout, regular white body text, Peloton logo top-left",
+      "whitespacePct": 10,
+      "visualComplexity": "high"
+    }
+  ]
+}

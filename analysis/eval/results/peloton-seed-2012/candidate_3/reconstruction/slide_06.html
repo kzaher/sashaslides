@@ -1,0 +1,54 @@
+<!-- slide_17.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1280px;height:720px;overflow:hidden;font-family:"Helvetica Neue",Arial,sans-serif}
+body{
+  background:#1A1A1A;
+  display:flex;align-items:center;justify-content:center;
+  position:relative;
+}
+.star-tl,.star-tr,.star-bl,.star-br{
+  position:absolute;color:#F44060;font-size:80px;line-height:1;opacity:.35;
+}
+.star-tl{top:48px;left:60px}
+.star-tr{top:48px;right:60px}
+.star-bl{bottom:48px;left:60px}
+.star-br{bottom:48px;right:60px}
+.content{
+  max-width:760px;text-align:center;
+  position:relative;z-index:1;
+}
+.stars{display:flex;justify-content:center;gap:6px;margin-bottom:28px}
+.star-sm{color:#F44060;font-size:22px}
+.review-title{
+  font-size:26px;font-weight:800;text-transform:uppercase;
+  color:#fff;letter-spacing:.06em;line-height:1.2;
+  margin-bottom:24px;
+}
+.review-body{
+  font-size:18px;font-weight:400;color:#CCCCCC;
+  line-height:1.6;font-style:italic;
+  margin-bottom:28px;
+}
+.reviewer{font-size:14px;font-weight:700;color:#F44060;letter-spacing:.12em;text-transform:uppercase}
+</style>
+</head>
+<body>
+<div class="star-tl">★</div>
+<div class="star-tr">★</div>
+<div class="star-bl">★</div>
+<div class="star-br">★</div>
+<div class="content">
+  <div class="stars">
+    <span class="star-sm">★</span><span class="star-sm">★</span><span class="star-sm">★</span><span class="star-sm">★</span><span class="star-sm">★</span>
+  </div>
+  <div class="review-title">PELOTON CHANGED MY LIFE</div>
+  <div class="review-body">"The experience is flawless. The instructors are amazing. I used to dread working out — now I look forward to every class. This isn't fitness equipment. It's a transformation you didn't know you needed."</div>
+  <div class="reviewer">Verified Member · Peloton Community</div>
+</div>
+</body>
+</html>

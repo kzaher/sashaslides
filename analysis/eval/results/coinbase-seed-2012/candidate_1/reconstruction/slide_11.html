@@ -1,0 +1,125 @@
+<!-- slide_11.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .upper {
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 0;
+    padding-bottom: 20px;
+  }
+  .logo-mark {
+    width: 72px; height: 72px; background: #4A90D9;
+    border-radius: 16px; display: flex; align-items: center; justify-content: center;
+    margin-bottom: 20px;
+  }
+  .logo-mark svg { width: 44px; height: 44px; }
+  .brand-name {
+    font-size: 48px; font-weight: 300; color: #333333;
+    letter-spacing: -1px; margin-bottom: 10px;
+  }
+  .tagline {
+    font-size: 22px; font-weight: 300; color: #888888;
+    margin-bottom: 40px;
+  }
+  .devices {
+    display: flex; gap: 28px; align-items: flex-end;
+  }
+  .device-card {
+    background: #fff; border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10); overflow: hidden;
+  }
+  .browser-bar {
+    height: 28px; background: #f0f0f0;
+    display: flex; align-items: center; padding: 0 12px; gap: 6px;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .browser-body {
+    width: 320px; height: 160px; background: #fff; padding: 14px;
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  .mock-h { height: 11px; background: #4A90D9; border-radius: 3px; width: 55%; }
+  .mock-r { height: 7px; background: #E8ECF0; border-radius: 3px; }
+  .mock-r.sm { width: 38%; }
+  .mock-r.md { width: 68%; }
+  .mock-balance-bar {
+    height: 26px; background: #4A90D9; border-radius: 4px; margin-top: 4px;
+    display: flex; align-items: center; padding: 0 10px;
+  }
+  .mock-balance-bar span { font-size: 12px; color: #fff; font-weight: 300; }
+  .mobile-bar { background: #4A90D9; height: 24px; display: flex; align-items: center; justify-content: center; }
+  .mobile-bar span { font-size: 12px; color: #fff; font-weight: 300; }
+  .mobile-body { width: 130px; height: 210px; background: #fff; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .m-amt { height: 22px; background: #4A90D9; border-radius: 3px; }
+  .m-btn { height: 18px; background: #E8ECF0; border-radius: 3px; }
+
+  .contact-banner {
+    width: 100%;
+    background: #4A90D9;
+    height: 72px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .contact-banner a, .contact-banner span {
+    font-size: 24px; font-weight: 700; color: #fff;
+    letter-spacing: 0.5px;
+    text-decoration: none;
+  }
+</style>
+</head>
+<body>
+  <div class="upper">
+    <div class="logo-mark">
+      <svg viewBox="0 0 44 44" fill="none">
+        <circle cx="22" cy="22" r="18" fill="none" stroke="#fff" stroke-width="3"/>
+        <text x="22" y="28" text-anchor="middle" font-size="18" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#fff">₿</text>
+      </svg>
+    </div>
+    <div class="brand-name">Coinbase</div>
+    <div class="tagline">Your Hosted Bitcoin Wallet</div>
+    <div class="devices">
+      <div class="device-card">
+        <div class="browser-bar">
+          <div class="dot" style="background:#ff5f57"></div>
+          <div class="dot" style="background:#febc2e"></div>
+          <div class="dot" style="background:#28c840"></div>
+        </div>
+        <div class="browser-body">
+          <div class="mock-h"></div>
+          <div class="mock-r md"></div>
+          <div class="mock-r sm"></div>
+          <div class="mock-balance-bar"><span>2.4500 BTC — $24.50</span></div>
+          <div class="mock-r md"></div>
+          <div class="mock-r sm"></div>
+        </div>
+      </div>
+      <div class="device-card">
+        <div class="mobile-bar"><span>Coinbase</span></div>
+        <div class="mobile-body">
+          <div class="m-amt"></div>
+          <div class="m-btn"></div>
+          <div class="m-btn"></div>
+          <div class="mock-r md" style="background:#E8ECF0;height:7px;border-radius:3px;"></div>
+          <div class="mock-r sm" style="background:#E8ECF0;height:7px;border-radius:3px;width:40%;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="contact-banner">
+    <span>coinbase.com</span>
+  </div>
+</body>
+</html>

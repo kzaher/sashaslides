@@ -1,0 +1,74 @@
+<!-- slide_07.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; background:#1A1A1A; display:flex; flex-direction:column; justify-content:center; padding:60px 88px; }
+.top { margin-bottom:36px; }
+.section-title { font-size:13px; font-weight:700; font-style:italic; color:#F44060; letter-spacing:5px; text-transform:uppercase; margin-bottom:8px; }
+.headline { font-size:30px; font-weight:900; color:#FFFFFF; text-transform:uppercase; }
+.cols { display:grid; grid-template-columns:1fr 1fr; gap:0 72px; }
+.col { }
+.col-header { font-size:11px; font-weight:800; color:#F44060; letter-spacing:5px; text-transform:uppercase; padding-bottom:14px; border-bottom:2px solid #F44060; margin-bottom:20px; display:flex; align-items:center; gap:10px; }
+.col-header-icon { width:18px; height:18px; background:#F44060; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+.col-header-icon svg { width:10px; height:10px; }
+.neg-header .col-header-icon { background:rgba(255,255,255,0.15); }
+.neg-header { border-bottom-color:rgba(255,255,255,0.2); color:rgba(255,255,255,0.35); }
+.tags { display:flex; flex-wrap:wrap; gap:10px; }
+.tag {
+  padding:7px 14px; border-radius:3px;
+  font-size:12px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
+}
+.tag-pos { background:rgba(244,64,96,0.12); color:#FFFFFF; border:1px solid rgba(244,64,96,0.3); }
+.tag-neg {
+  background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.3);
+  border:1px solid rgba(255,255,255,0.1);
+  position:relative;
+}
+.tag-neg::after {
+  content:'';
+  position:absolute; left:8px; right:8px; top:50%;
+  height:1px; background:rgba(255,255,255,0.3);
+}
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="top">
+    <div class="section-title">Brand Identity</div>
+    <div class="headline">Who We Are — Who We're Not</div>
+  </div>
+  <div class="cols">
+    <div class="col">
+      <div class="col-header">
+        <div class="col-header-icon"><svg viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        Who We Are
+      </div>
+      <div class="tags">
+        <div class="tag tag-pos">Motivating</div><div class="tag tag-pos">Modern</div><div class="tag tag-pos">Premium</div>
+        <div class="tag tag-pos">Authentic</div><div class="tag tag-pos">Enthusiastic</div><div class="tag tag-pos">Captivating</div>
+        <div class="tag tag-pos">Confident</div><div class="tag tag-pos">Inclusive</div><div class="tag tag-pos">Street Wise</div>
+        <div class="tag tag-pos">Empowering</div><div class="tag tag-pos">Optimistic</div><div class="tag tag-pos">Community</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-header neg-header">
+        <div class="col-header-icon" style="background:rgba(255,255,255,0.12)"><svg viewBox="0 0 10 10" fill="none"><path d="M3 3l4 4M7 3L3 7" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+        Who We're Not
+      </div>
+      <div class="tags">
+        <div class="tag tag-neg">Preachy</div><div class="tag tag-neg">A Fad</div><div class="tag tag-neg">Exclusive</div>
+        <div class="tag tag-neg">Sterile</div><div class="tag tag-neg">Over the Top</div><div class="tag tag-neg">Goofy</div>
+        <div class="tag tag-neg">Aggressive</div><div class="tag tag-neg">Cultish</div><div class="tag tag-neg">Snobby</div>
+        <div class="tag tag-neg">Religion</div><div class="tag tag-neg">Satisfied</div><div class="tag tag-neg">Cheap</div>
+        <div class="tag tag-neg">A Fitness Brand</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

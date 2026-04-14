@@ -1,0 +1,54 @@
+<!-- slide_03.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px;
+    background: #FFFFFF;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  .slide { padding: 80px; height: 720px; position: relative; }
+  .section-label {
+    font-size: 13px; font-weight: bold;
+    color: #29B6F6; letter-spacing: 2px;
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .title {
+    font-size: 38px; font-weight: bold;
+    color: #333333; margin-bottom: 20px;
+  }
+  .subtitle {
+    font-size: 18px; color: #555555;
+    margin-bottom: 44px; max-width: 700px;
+  }
+  .bullets { list-style: none; }
+  .bullets li {
+    font-size: 20px; color: #333333;
+    line-height: 1.5; margin-bottom: 24px;
+    padding-left: 28px; position: relative;
+  }
+  .bullets li::before {
+    content: '';
+    position: absolute; left: 0; top: 12px;
+    width: 8px; height: 8px;
+    background: #29B6F6; border-radius: 50%;
+  }
+</style>
+</head>
+<body>
+  <div class="slide">
+    <div class="section-label">The Solution</div>
+    <div class="title">A Web Platform for Local Stays</div>
+    <div class="subtitle">Rent out your space to travelers — or find a local room anywhere in the world.</div>
+    <ul class="bullets">
+      <li>Save money when traveling</li>
+      <li>Make money when hosting</li>
+      <li>Share culture — real connection to the city you're visiting</li>
+    </ul>
+  </div>
+</body>
+</html>

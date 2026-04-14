@@ -1,0 +1,1016 @@
+{
+  "airbnb-seed-2009/slide_01": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_01",
+        "reason": "Exact layout type match (title-subtitle), identical center-heavy weight and sparse density, similar heading-content-footer structure with central visual element"
+      },
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Center-heavy and sparse density match, heading-chart-footer arrangement similar to target's heading-badge-footer structure with prominent central element"
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"sequoia-template/slide_01\", \"reason\": \"Exact layout type match (title-subtitle), identical center-heavy weight and sparse density, similar heading-content-footer structure with central visual element\"},\n    {\"id\": \"facebook-2004/slide_11\", \"reason\": \"Center-heavy and sparse density match, heading-chart-footer arrangement similar to target's heading-badge-footer structure with prominent central element\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_02": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_17",
+        "reason": "Title-bullets layout with center-heavy weight and moderate density; title positioned at top with bullet list flowing through middle rows."
+      },
+      {
+        "id": "facebook-2004/slide_14",
+        "reason": "Title-bullets layout matching center-heavy weight and moderate density; contains title, bullet list, and logo in similar centered composition."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_17\", \"reason\": \"Title-bullets layout with center-heavy weight and moderate density; title positioned at top with bullet list flowing through middle rows.\"},\n    {\"id\": \"facebook-2004/slide_14\", \"reason\": \"Title-bullets layout matching center-heavy weight and moderate density; contains title, bullet list, and logo in similar centered composition.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_03": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_04",
+        "reason": "Identical 3-card grid layout in middle row with title spanning top-left, logo at top-right, center-heavy weight, and moderate density matching target exactly."
+      },
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "3 card-boxes arranged horizontally in middle row with footer at bottom-center and logo/page-identifier at top-right, matching target's element inventory and spatial arrangement."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_04\", \"reason\": \"Identical 3-card grid layout in middle row with title spanning top-left, logo at top-right, center-heavy weight, and moderate density matching target exactly.\"},\n    {\"id\": \"facebook-2004/slide_12\", \"reason\": \"3 card-boxes arranged horizontally in middle row with footer at bottom-center and logo/page-identifier at top-right, matching target's element inventory and spatial arrangement.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_04": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_05",
+        "reason": "Matches two-column layout with title-left/empty-center/logo-right arrangement, symmetric content in left and right columns with empty middle, footer element at bottom-left, and moderate density."
+      },
+      {
+        "id": "peloton-seed-2012/slide_17",
+        "reason": "Shares two-column layout with title-left/empty-center/logo-right, symmetric content blocks on left and right sides, empty top and bottom center zones, and moderate density similar to target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_05\", \"reason\": \"Matches two-column layout with title-left/empty-center/logo-right arrangement, symmetric content in left and right columns with empty middle, footer element at bottom-left, and moderate density.\"},\n    {\"id\": \"peloton-seed-2012/slide_17\", \"reason\": \"Shares two-column layout with title-left/empty-center/logo-right, symmetric content blocks on left and right sides, empty top and bottom center zones, and moderate density similar to target.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_05": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_10",
+        "reason": "Chart type with title at top and content spanning all middle and bottom grid cells, matching the target's three-zone structure in both rows."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_09",
+        "reason": "Chart type with title at top, content filling middle columns, and axis labels spanning bottom row, similar balanced spatial distribution."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_10\",\n      \"reason\": \"Chart type with title at top and content spanning all middle and bottom grid cells, matching the target's three-zone structure in both rows.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_09\",\n      \"reason\": \"Chart type with title at top, content filling middle columns, and axis labels spanning bottom row, similar balanced spatial distribution.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_06": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_01",
+        "reason": "Same image-dominant layout type with multiple mockup screenshots in center, title/heading in top row, similar element inventory and moderate density."
+      },
+      {
+        "id": "peloton-seed-2012/slide_20",
+        "reason": "Image-dominant layout with small branding/content at top, large central hero image, and supporting circular elements distributed on right, matching spatial zone arrangement and overall structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"coinbase-seed-2012/slide_01\", \"reason\": \"Same image-dominant layout type with multiple mockup screenshots in center, title/heading in top row, similar element inventory and moderate density.\"},\n    {\"id\": \"peloton-seed-2012/slide_20\", \"reason\": \"Image-dominant layout with small branding/content at top, large central hero image, and supporting circular elements distributed on right, matching spatial zone arrangement and overall structure.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_07": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_03",
+        "reason": "Comparison type with 3-column header structure (ML/MC/MR) and title at top-left, matching target's spatial zone arrangement and grid pattern."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_06",
+        "reason": "Comparison type with centered title and symmetrical comparison content distribution across columns and rows."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_03\", \"reason\": \"Comparison type with 3-column header structure (ML/MC/MR) and title at top-left, matching target's spatial zone arrangement and grid pattern.\"},\n    {\"id\": \"coinbase-seed-2012/slide_06\", \"reason\": \"Comparison type with centered title and symmetrical comparison content distribution across columns and rows.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_08": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_04",
+        "reason": "Exact LAYOUT_TYPE match (three-column) with title row at top and three identical content columns (ML/MC/MR) sharing similar structural pattern to target's balanced, three-section arrangement."
+      },
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Three-column grid structure with title at top, three content columns (ML/MC/MR) with identical internal structure, footer text at BC, balanced weight distribution, and moderate density matching target layout."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_04\", \"reason\": \"Exact LAYOUT_TYPE match (three-column) with title row at top and three identical content columns (ML/MC/MR) sharing similar structural pattern to target's balanced, three-section arrangement.\"},\n    {\"id\": \"facebook-2004/slide_12\", \"reason\": \"Three-column grid structure with title at top, three content columns (ML/MC/MR) with identical internal structure, footer text at BC, balanced weight distribution, and moderate density matching target layout.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_09": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_03",
+        "reason": "Both are comparison-type layouts with title at top and left-center-right flanking structure for comparing opposing elements, including moderate density and centered spatial arrangement."
+      },
+      {
+        "id": "peloton-seed-2012/slide_09",
+        "reason": "Center-heavy weight with a central circular chart flanked by text labels on multiple sides, mirroring the target's axis-centered directional arrows with competitor logos on left and right."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_03\",\n      \"reason\": \"Both are comparison-type layouts with title at top and left-center-right flanking structure for comparing opposing elements, including moderate density and centered spatial arrangement.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_09\",\n      \"reason\": \"Center-heavy weight with a central circular chart flanked by text labels on multiple sides, mirroring the target's axis-centered directional arrows with competitor logos on left and right.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_10": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Exact icon-grid layout type with icon boxes + labels + metrics in grid arrangement, title/subtitle at top, balanced weight, moderate density."
+      },
+      {
+        "id": "peloton-seed-2012/slide_04",
+        "reason": "Title at top with 3 icon-circle cards (label + body text) in grid, balanced centered arrangement, moderate density with similar card-based composition."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Exact icon-grid layout type with icon boxes + labels + metrics in grid arrangement, title/subtitle at top, balanced weight, moderate density.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_04\",\n      \"reason\": \"Title at top with 3 icon-circle cards (label + body text) in grid, balanced centered arrangement, moderate density with similar card-based composition.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_11": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_19",
+        "reason": "Contains profile photo (circular), contact information text, and title-body layout matching the target's profile card structure with similar element inventory."
+      },
+      {
+        "id": "facebook-2004/slide_14",
+        "reason": "Same title-bullets layout type with centered title and below-content structure, matching center-heavy weight distribution and moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_19\",\n      \"reason\": \"Contains profile photo (circular), contact information text, and title-body layout matching the target's profile card structure with similar element inventory.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_14\",\n      \"reason\": \"Same title-bullets layout type with centered title and below-content structure, matching center-heavy weight distribution and moderate density.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_12": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_01",
+        "reason": "Quote layout with multiple quote blocks (MC, MR) arranged horizontally across middle, sparse density matching target exactly."
+      },
+      {
+        "id": "facebook-2004/slide_13",
+        "reason": "Quote layout with centered quote element and sparse density, closest second match for quote-focused slide."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_01\", \"reason\": \"Quote layout with multiple quote blocks (MC, MR) arranged horizontally across middle, sparse density matching target exactly.\"},\n    {\"id\": \"facebook-2004/slide_13\", \"reason\": \"Quote layout with centered quote element and sparse density, closest second match for quote-focused slide.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_13": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_16",
+        "reason": "2x2 grid of quote blocks with title at top, balanced weight, moderate density matches the 4-testimonial photo grid structure."
+      },
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Title at top with grid of 3 icon boxes, balanced weight, moderate density—similar spatial arrangement and content distribution."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_16\", \"reason\": \"2x2 grid of quote blocks with title at top, balanced weight, moderate density matches the 4-testimonial photo grid structure.\"},\n    {\"id\": \"facebook-2004/slide_12\", \"reason\": \"Title at top with grid of 3 icon boxes, balanced weight, moderate density—similar spatial arrangement and content distribution.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_14": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_04",
+        "reason": "Three circular icons with labels distributed across ML-MC-MR, title at top, center-heavy weight and moderate density matching the target structure."
+      },
+      {
+        "id": "peloton-seed-2012/slide_19",
+        "reason": "Central circular chart with surrounding text labels, center-heavy weight, and moderate density matching the target's visual composition and spatial arrangement."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_04\", \"reason\": \"Three circular icons with labels distributed across ML-MC-MR, title at top, center-heavy weight and moderate density matching the target structure.\"},\n    {\"id\": \"peloton-seed-2012/slide_19\", \"reason\": \"Central circular chart with surrounding text labels, center-heavy weight, and moderate density matching the target's visual composition and spatial arrangement.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_01": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Same image-dominant layout type with title heading, central mockup screenshots, and moderate density; closest match to target's visual element inventory."
+      },
+      {
+        "id": "peloton-seed-2012/slide_11",
+        "reason": "Same image-dominant type with logo positioned in top-left corner like target, multiple photos distributed across middle row, and similar spatial weight distribution."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_06\",\n      \"reason\": \"Same image-dominant layout type with title heading, central mockup screenshots, and moderate density; closest match to target's visual element inventory.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_11\",\n      \"reason\": \"Same image-dominant type with logo positioned in top-left corner like target, multiple photos distributed across middle row, and similar spatial weight distribution.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_02": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_10",
+        "reason": "Both are title-bullets with header area at top, bullet list in ML, top-heavy weight, and sparse density matching the target."
+      },
+      {
+        "id": "facebook-2004/slide_17",
+        "reason": "Title-bullets layout with title in TC area and bullet list starting in ML, closest grid-position match among remaining candidates."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"sequoia-template/slide_10\",\n      \"reason\": \"Both are title-bullets with header area at top, bullet list in ML, top-heavy weight, and sparse density matching the target.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_17\",\n      \"reason\": \"Title-bullets layout with title in TC area and bullet list starting in ML, closest grid-position match among remaining candidates.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_03": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Title at TC, centered pie chart at MC, sparse layout with mostly empty cells, center-heavy weight distribution—closest structural match to the target's minimal cell-filling pattern."
+      },
+      {
+        "id": "peloton-seed-2012/slide_09",
+        "reason": "Title at TC, centered circular diagram with segmented radial layout and corner text labels mimic radiating lines, center-heavy weight—best visual match for the globe-with-radiating-lines element."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_11\",\n      \"reason\": \"Title at TC, centered pie chart at MC, sparse layout with mostly empty cells, center-heavy weight distribution—closest structural match to the target's minimal cell-filling pattern.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_09\",\n      \"reason\": \"Title at TC, centered circular diagram with segmented radial layout and corner text labels mimic radiating lines, center-heavy weight—best visual match for the globe-with-radiating-lines element.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_04": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Same chart layout type with title+subheading at top, chart centered, and content at bottom; moderate density matches."
+      },
+      {
+        "id": "peloton-seed-2012/slide_19",
+        "reason": "Chart layout with title at top, chart centered, and content at bottom creating bottom-weighted composition; matching moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_11\", \"reason\": \"Same chart layout type with title+subheading at top, chart centered, and content at bottom; moderate density matches.\"},\n    {\"id\": \"peloton-seed-2012/slide_19\", \"reason\": \"Chart layout with title at top, chart centered, and content at bottom creating bottom-weighted composition; matching moderate density.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_05": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_15",
+        "reason": "Mixed layout type with centered circular diagram, scattered corner text labels, and visual hierarchy similar to target's centered prominent label with scattered text elements."
+      },
+      {
+        "id": "peloton-seed-2012/slide_08",
+        "reason": "Mixed layout type with centered circular diagram, multiple text callouts distributed around slide, and balanced spatial arrangement of elements matching target's scattered label distribution."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_15\", \"reason\": \"Mixed layout type with centered circular diagram, scattered corner text labels, and visual hierarchy similar to target's centered prominent label with scattered text elements.\"},\n    {\"id\": \"peloton-seed-2012/slide_08\", \"reason\": \"Mixed layout type with centered circular diagram, multiple text callouts distributed around slide, and balanced spatial arrangement of elements matching target's scattered label distribution.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_06": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Features overlapping mockup screenshots as central content (MC) with title and process-flow text at top (TL/TC), footer text below, creating a vertically-stacked screenshot comparison layout."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_13",
+        "reason": "Arranges multiple photo elements in grid pattern (ML, MC, BL, BC cells) with title at top center (TC), balanced weight and moderate density matching the target's multi-image comparison structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_06\",\n      \"reason\": \"Features overlapping mockup screenshots as central content (MC) with title and process-flow text at top (TL/TC), footer text below, creating a vertically-stacked screenshot comparison layout.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_13\",\n      \"reason\": \"Arranges multiple photo elements in grid pattern (ML, MC, BL, BC cells) with title at top center (TC), balanced weight and moderate density matching the target's multi-image comparison structure.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_07": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_08",
+        "reason": "Three-column layout with title at top and balanced weight; structured as title row (TL-TC-TR) followed by three distinct content columns (ML-MC-MR) spanning two rows, with balanced distribution and moderate density—closest match to the target's layout structure."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_10",
+        "reason": "Six cards arranged in 3×2 grid (ML-MC-MR, BL-BC-BR) with title at top; matches the target's spatial arrangement of three equal columns across two rows, same balanced weight and moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_08\",\n      \"reason\": \"Three-column layout with title at top and balanced weight; structured as title row (TL-TC-TR) followed by three distinct content columns (ML-MC-MR) spanning two rows, with balanced distribution and moderate density—closest match to the target's layout structure.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_10\",\n      \"reason\": \"Six cards arranged in 3×2 grid (ML-MC-MR, BL-BC-BR) with title at top; matches the target's spatial arrangement of three equal columns across two rows, same balanced weight and moderate density.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_08": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_01",
+        "reason": "Large centered heading at top with sparse whitespace and text-only content directly matches title-focused minimalism."
+      },
+      {
+        "id": "facebook-2004/slide_15",
+        "reason": "Centered heading with minimal elements (icon, logo) and sparse density mirrors title-only structural simplicity."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"sequoia-template/slide_01\",\n      \"reason\": \"Large centered heading at top with sparse whitespace and text-only content directly matches title-focused minimalism.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_15\",\n      \"reason\": \"Centered heading with minimal elements (icon, logo) and sparse density mirrors title-only structural simplicity.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_09": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_09",
+        "reason": "Exact match on LAYOUT_TYPE (chart), WEIGHT (center-heavy), and DENSITY (moderate); both feature a prominent centered visualization with surrounding text labels structuring the layout."
+      },
+      {
+        "id": "peloton-seed-2012/slide_19",
+        "reason": "Exact match on LAYOUT_TYPE (chart), WEIGHT (center-heavy), and DENSITY (moderate); circular chart centered with frame elements (divider line) similar to axis structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_09\", \"reason\": \"Exact match on LAYOUT_TYPE (chart), WEIGHT (center-heavy), and DENSITY (moderate); both feature a prominent centered visualization with surrounding text labels structuring the layout.\"},\n    {\"id\": \"peloton-seed-2012/slide_19\", \"reason\": \"Exact match on LAYOUT_TYPE (chart), WEIGHT (center-heavy), and DENSITY (moderate); circular chart centered with frame elements (divider line) similar to axis structure.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_10": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_09",
+        "reason": "Chart layout type with title at top (TC), large centered circular chart (MC), corner text labels similar to overlay elements, center-heavy weight, and moderate density matching target structure."
+      },
+      {
+        "id": "peloton-seed-2012/slide_19",
+        "reason": "Chart layout type with title at top (TC), large centered circular chart (MC), surrounding text labels matching overlay function, center-heavy weight, and moderate density nearly identical to target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_09\", \"reason\": \"Chart layout type with title at top (TC), large centered circular chart (MC), corner text labels similar to overlay elements, center-heavy weight, and moderate density matching target structure.\"},\n    {\"id\": \"peloton-seed-2012/slide_19\", \"reason\": \"Chart layout type with title at top (TC), large centered circular chart (MC), surrounding text labels matching overlay function, center-heavy weight, and moderate density nearly identical to target.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_11": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_05",
+        "reason": "Chart spans all three middle columns (ML/MC/MR) identically to TARGET; moderate density; labels/text at bottom mirrors dark bar placement."
+      },
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Exactly 6-element inventory matching TARGET (logo, heading, subheading/subtitle, chart, labels, footer/bar); perfect center-heavy weight; elements anchored at top and bottom."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_05\", \"reason\": \"Chart spans all three middle columns (ML/MC/MR) identically to TARGET; moderate density; labels/text at bottom mirrors dark bar placement.\"},\n    {\"id\": \"facebook-2004/slide_11\", \"reason\": \"Exactly 6-element inventory matching TARGET (logo, heading, subheading/subtitle, chart, labels, footer/bar); perfect center-heavy weight; elements anchored at top and bottom.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_01": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Quote layout with sparse density, centered quote bubbles in MC/MR cells, and branding in TR—grid structure directly parallels target."
+      },
+      {
+        "id": "peloton-seed-2012/slide_18",
+        "reason": "Quote layout with quotation block, logo, and body-text elements, though left-aligned arrangement and moderate density diverge from target's center-heavy sparse structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_12\", \"reason\": \"Quote layout with sparse density, centered quote bubbles in MC/MR cells, and branding in TR—grid structure directly parallels target.\"},\n    {\"id\": \"peloton-seed-2012/slide_18\", \"reason\": \"Quote layout with quotation block, logo, and body-text elements, though left-aligned arrangement and moderate density diverge from target's center-heavy sparse structure.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_02": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_07",
+        "reason": "Both are title-body layouts with moderate density and top-heavy weight; title positioned at top with body content filling the remaining rows below."
+      },
+      {
+        "id": "sequoia-template/slide_04",
+        "reason": "Title-body layout matching the target's top-heavy weight and moderate density, with title spanning the top row and body text in the middle section."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_07\",\n      \"reason\": \"Both are title-body layouts with moderate density and top-heavy weight; title positioned at top with body content filling the remaining rows below.\"\n    },\n    {\n      \"id\": \"sequoia-template/slide_04\",\n      \"reason\": \"Title-body layout matching the target's top-heavy weight and moderate density, with title spanning the top row and body text in the middle section.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_03": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Features mockup screenshots with centered title and descriptive text at moderate density; strongest element alignment despite layout type difference."
+      },
+      {
+        "id": "peloton-seed-2012/slide_02",
+        "reason": "Two-column layout with logo, heading, numbered list, and large image spanning left side; matches target structure with opposite weight distribution."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_06\", \"reason\": \"Features mockup screenshots with centered title and descriptive text at moderate density; strongest element alignment despite layout type difference.\"},\n    {\"id\": \"peloton-seed-2012/slide_02\", \"reason\": \"Two-column layout with logo, heading, numbered list, and large image spanning left side; matches target structure with opposite weight distribution.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_04": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_01",
+        "reason": "Exact layout-type match (full-bleed) with image-dominant grid and logo overlay, sparse-to-moderate density."
+      },
+      {
+        "id": "peloton-seed-2012/slide_12",
+        "reason": "Image-dominant layout with text overlay on left (TL/ML), logo at top-right, and background image dominance matching TARGET's spatial arrangement and moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_01\", \"reason\": \"Exact layout-type match (full-bleed) with image-dominant grid and logo overlay, sparse-to-moderate density.\"},\n    {\"id\": \"peloton-seed-2012/slide_12\", \"reason\": \"Image-dominant layout with text overlay on left (TL/ML), logo at top-right, and background image dominance matching TARGET's spatial arrangement and moderate density.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_05": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_02",
+        "reason": "Two-column layout with numbered list (3 items), heading, and structured bottom content matching target's core element inventory and layout type."
+      },
+      {
+        "id": "peloton-seed-2012/slide_05",
+        "reason": "Two-column layout with title at top, body text in both middle columns, and divider at bottom providing best spatial arrangement match to target's title-body-two-column structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_02\",\n      \"reason\": \"Two-column layout with numbered list (3 items), heading, and structured bottom content matching target's core element inventory and layout type.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_05\",\n      \"reason\": \"Two-column layout with title at top, body text in both middle columns, and divider at bottom providing best spatial arrangement match to target's title-body-two-column structure.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_06": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_13",
+        "reason": "Two-column balanced layout with visual element (product photo) on left/center and text content (body text) on right, logo at TR, moderate density—mirrors target's body-left and diagram-right arrangement."
+      },
+      {
+        "id": "peloton-seed-2012/slide_05",
+        "reason": "Two-column balanced layout with title and logo at top, left and right content columns separated by empty middle (MC), moderate density—similar structural symmetry to target's balanced text-diagram split."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_13\",\n      \"reason\": \"Two-column balanced layout with visual element (product photo) on left/center and text content (body text) on right, logo at TR, moderate density—mirrors target's body-left and diagram-right arrangement.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_05\",\n      \"reason\": \"Two-column balanced layout with title and logo at top, left and right content columns separated by empty middle (MC), moderate density—similar structural symmetry to target's balanced text-diagram split.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_07": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_03",
+        "reason": "Exact layout type match (title-body), identical weight (center-heavy) and density (moderate), with heading and body-text content in similar vertical-axis arrangement."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_07",
+        "reason": "Close layout variant (title+body), balanced-to-center weight distribution, moderate density, and centered heading with content-heavy body section below."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_03\",\n      \"reason\": \"Exact layout type match (title-body), identical weight (center-heavy) and density (moderate), with heading and body-text content in similar vertical-axis arrangement.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_07\",\n      \"reason\": \"Close layout variant (title+body), balanced-to-center weight distribution, moderate density, and centered heading with content-heavy body section below.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_08": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_03",
+        "reason": "Table-based layout with header row spanning three columns and body rows continuing below; heading in top area with logo in TR corner matches target grid pattern exactly."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_07",
+        "reason": "Three-column content layout with continuation rows at bottom; explicitly includes data-table-interface as an element and matches the TL-empty, TC-title, ML/MC/MR-content, BL/BC/BR-continuation grid pattern."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_03\", \"reason\": \"Table-based layout with header row spanning three columns and body rows continuing below; heading in top area with logo in TR corner matches target grid pattern exactly.\"},\n    {\"id\": \"coinbase-seed-2012/slide_07\", \"reason\": \"Three-column content layout with continuation rows at bottom; explicitly includes data-table-interface as an element and matches the TL-empty, TC-title, ML/MC/MR-content, BL/BC/BR-continuation grid pattern.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_09": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_03",
+        "reason": "Same title-body type with metadata in TR and main content in MC center-middle, matching center-heavy weight and moderate density."
+      },
+      {
+        "id": "sequoia-template/slide_06",
+        "reason": "Same title-body layout type with similar sparse content distribution (title bar top, body left-center, branding elements)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_03\",\n      \"reason\": \"Same title-body type with metadata in TR and main content in MC center-middle, matching center-heavy weight and moderate density.\"\n    },\n    {\n      \"id\": \"sequoia-template/slide_06\",\n      \"reason\": \"Same title-body layout type with similar sparse content distribution (title bar top, body left-center, branding elements).\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_10": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_03",
+        "reason": "Same layout type (title-body) with matching center-heavy weight and moderate density; heading + content block arrangement is structurally similar."
+      },
+      {
+        "id": "sequoia-template/slide_04",
+        "reason": "Same layout type (title-body) with matching moderate density; body text block arrangement in middle zone parallels target despite different header spanning pattern."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_03\",\n      \"reason\": \"Same layout type (title-body) with matching center-heavy weight and moderate density; heading + content block arrangement is structurally similar.\"\n    },\n    {\n      \"id\": \"sequoia-template/slide_04\",\n      \"reason\": \"Same layout type (title-body) with matching moderate density; body text block arrangement in middle zone parallels target despite different header spanning pattern.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_11": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_09",
+        "reason": "Chart type, center-heavy weight, title heading in TC, line chart in MC, axis labels in BC matching the footer text zone."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_11",
+        "reason": "Chart type, center-heavy weight, logo and heading in TL, subtitle in TC, scatter chart in MC, text label at BC similar to footer."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"coinbase-seed-2012/slide_09\", \"reason\": \"Chart type, center-heavy weight, title heading in TC, line chart in MC, axis labels in BC matching the footer text zone.\"},\n    {\"id\": \"coinbase-seed-2012/slide_11\", \"reason\": \"Chart type, center-heavy weight, logo and heading in TL, subtitle in TC, scatter chart in MC, text label at BC similar to footer.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_12": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_07",
+        "reason": "icon-grid type with 3 icon elements in middle row and title in top-center, matching the spatial structure; has logo and heading elements in the top zone."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_10",
+        "reason": "icon-grid type with cards in middle zone arranged similarly (ML/MC/MR), balanced weight, and footer element present like the target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_07\", \"reason\": \"icon-grid type with 3 icon elements in middle row and title in top-center, matching the spatial structure; has logo and heading elements in the top zone.\"},\n    {\"id\": \"airbnb-seed-2009/slide_10\", \"reason\": \"icon-grid type with cards in middle zone arranged similarly (ML/MC/MR), balanced weight, and footer element present like the target.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_13": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Explicit quote layout type with sparse density, multiple logos and quote bubbles matching target's centered quote composition."
+      },
+      {
+        "id": "peloton-seed-2012/slide_18",
+        "reason": "Quote layout type with logo, quotation-mark icon, and attributed body text matching target's key quote elements."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_12\",\n      \"reason\": \"Explicit quote layout type with sparse density, multiple logos and quote bubbles matching target's centered quote composition.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_18\",\n      \"reason\": \"Quote layout type with logo, quotation-mark icon, and attributed body text matching target's key quote elements.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_14": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Same title-bullets layout with bullet list as primary content region, matching center-heavy weight and moderate density."
+      },
+      {
+        "id": "sequoia-template/slide_02",
+        "reason": "Title-bullets layout with centered content and matching weight/density, though logo and title positioning differ from target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_02\",\n      \"reason\": \"Same title-bullets layout with bullet list as primary content region, matching center-heavy weight and moderate density.\"\n    },\n    {\n      \"id\": \"sequoia-template/slide_02\",\n      \"reason\": \"Title-bullets layout with centered content and matching weight/density, though logo and title positioning differ from target.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_15": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_11",
+        "reason": "Same section-divider type; sparse density matches target; heading and logo elements present; content focused in middle row with empty top/bottom zones like target."
+      },
+      {
+        "id": "sequoia-template/slide_12",
+        "reason": "Same section-divider type; sparse density matches target; heading and logo elements present; though content distribution differs slightly from target layout."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"sequoia-template/slide_11\", \"reason\": \"Same section-divider type; sparse density matches target; heading and logo elements present; content focused in middle row with empty top/bottom zones like target.\"},\n    {\"id\": \"sequoia-template/slide_12\", \"reason\": \"Same section-divider type; sparse density matches target; heading and logo elements present; though content distribution differs slightly from target layout.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_16": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_04",
+        "reason": "Matches title position (TC), logo placement (TR), and three-column layout with icons and body text in middle section; moderate density and balanced element distribution align with target structure."
+      },
+      {
+        "id": "peloton-seed-2012/slide_07",
+        "reason": "Shares logo element, title at TC, icon-circles (functionally similar to icon-in-box), and moderate density; top-heavy weight distribution reflects similar spatial emphasis pattern."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_04\",\n      \"reason\": \"Matches title position (TC), logo placement (TR), and three-column layout with icons and body text in middle section; moderate density and balanced element distribution align with target structure.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_07\",\n      \"reason\": \"Shares logo element, title at TC, icon-circles (functionally similar to icon-in-box), and moderate density; top-heavy weight distribution reflects similar spatial emphasis pattern.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_17": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Identical layout type (title-bullets), matching weight (center-heavy) and density (moderate), with title positioning and multi-column bullet list structure."
+      },
+      {
+        "id": "sequoia-template/slide_02",
+        "reason": "Same layout type (title-bullets), matching weight (center-heavy) and density (moderate), with centered header bar and vertical bullet list organization."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_02\", \"reason\": \"Identical layout type (title-bullets), matching weight (center-heavy) and density (moderate), with title positioning and multi-column bullet list structure.\"},\n    {\"id\": \"sequoia-template/slide_02\", \"reason\": \"Same layout type (title-bullets), matching weight (center-heavy) and density (moderate), with centered header bar and vertical bullet list organization.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_18": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Title-bullets layout with bullet list in ML, body text continuation in MC, moderate density, and element distribution across left-center-right zones matching target structure."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Title-bullets layout with centered title and bullet list in ML, achieving the core title+bullets zone arrangement despite missing body text and logo."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_02\",\n      \"reason\": \"Title-bullets layout with bullet list in ML, body text continuation in MC, moderate density, and element distribution across left-center-right zones matching target structure.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_02\",\n      \"reason\": \"Title-bullets layout with centered title and bullet list in ML, achieving the core title+bullets zone arrangement despite missing body text and logo.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_19": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_11",
+        "reason": "Profile-focused two-column layout with photos on the left and biographical information (names, roles, body text) on the right—directly mirrors the target's contact-card structure with profile elements and contact details."
+      },
+      {
+        "id": "peloton-seed-2012/slide_17",
+        "reason": "Two-column balanced layout with title and logo at top, body text in left and right columns, and name labels at bottom—shares the target's two-column arrangement, balanced weight, and moderate density with contact-information-like footer."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_11\",\n      \"reason\": \"Profile-focused two-column layout with photos on the left and biographical information (names, roles, body text) on the right—directly mirrors the target's contact-card structure with profile elements and contact details.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_17\",\n      \"reason\": \"Two-column balanced layout with title and logo at top, body text in left and right columns, and name labels at bottom—shares the target's two-column arrangement, balanced weight, and moderate density with contact-information-like footer.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_20": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_18",
+        "reason": "Quote layout with logo in top-right corner, central quotation block, attribution bar, moderate density, and centered weight focus matching target structure."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Quote layout with quote bubbles and logos, though distributed horizontally rather than center-focused, and sparse rather than moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_18\", \"reason\": \"Quote layout with logo in top-right corner, central quotation block, attribution bar, moderate density, and centered weight focus matching target structure.\"},\n    {\"id\": \"airbnb-seed-2009/slide_12\", \"reason\": \"Quote layout with quote bubbles and logos, though distributed horizontally rather than center-focused, and sparse rather than moderate density.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_01": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_01",
+        "reason": "Same layout type (title-subtitle), center-heavy weight, sparse density, centered heading with decorative badge/logo and footer attribution matching the target structure."
+      },
+      {
+        "id": "facebook-2004/slide_13",
+        "reason": "Structurally similar with centered title, body text, decorative elements (quotation mark, divider, logo), and date attribution arranged vertically in a sparse, center-heavy layout matching target element inventory."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_01\", \"reason\": \"Same layout type (title-subtitle), center-heavy weight, sparse density, centered heading with decorative badge/logo and footer attribution matching the target structure.\"},\n    {\"id\": \"facebook-2004/slide_13\", \"reason\": \"Structurally similar with centered title, body text, decorative elements (quotation mark, divider, logo), and date attribution arranged vertically in a sparse, center-heavy layout matching target element inventory.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_02": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_17",
+        "reason": "Title-bullets layout with title at TC (top-center, matching TARGET), bullets in middle rows, logo element present, center-heavy weight, and moderate density"
+      },
+      {
+        "id": "facebook-2004/slide_14",
+        "reason": "Title-bullets layout with centered title and bullet list elements, logo present, matching center-heavy weight and moderate density, though title and bullet positioning differ from TARGET"
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_17\", \"reason\": \"Title-bullets layout with title at TC (top-center, matching TARGET), bullets in middle rows, logo element present, center-heavy weight, and moderate density\"},\n    {\"id\": \"facebook-2004/slide_14\", \"reason\": \"Title-bullets layout with centered title and bullet list elements, logo present, matching center-heavy weight and moderate density, though title and bullet positioning differ from TARGET\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_03": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Exact title-body layout type with top-heavy weight distribution matching target structure (title prominence, sparse content below)."
+      },
+      {
+        "id": "facebook-2004/slide_05",
+        "reason": "Title-body variant with matching top-heavy weight and similar spatial arrangement (title at top, body content in middle rows, footer at bottom)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_02\",\n      \"reason\": \"Exact title-body layout type with top-heavy weight distribution matching target structure (title prominence, sparse content below).\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_05\",\n      \"reason\": \"Title-body variant with matching top-heavy weight and similar spatial arrangement (title at top, body content in middle rows, footer at bottom).\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_04": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_03",
+        "reason": "Same title-body layout type with heading in TL, page number in TR, and body content in MC—closest spatial zone match."
+      },
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Title-body type with matching top-heavy weight, logo element in TR, and body text distribution across middle and bottom rows."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_03\", \"reason\": \"Same title-body layout type with heading in TL, page number in TR, and body content in MC—closest spatial zone match.\"},\n    {\"id\": \"facebook-2004/slide_02\", \"reason\": \"Title-body type with matching top-heavy weight, logo element in TR, and body text distribution across middle and bottom rows.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_05": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_03",
+        "reason": "Top-heavy weight with moderate density (exact matches), title and logo positioned at top spanning TL-TC-TR like target's colored header, structured table content analogous to body-text-blocks"
+      },
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Top-heavy weight with moderate density (exact matches), title-body layout structurally similar to section-header, clean spatial arrangement with heading, body content, and logo placement"
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_03\", \"reason\": \"Top-heavy weight with moderate density (exact matches), title and logo positioned at top spanning TL-TC-TR like target's colored header, structured table content analogous to body-text-blocks\"},\n    {\"id\": \"facebook-2004/slide_02\", \"reason\": \"Top-heavy weight with moderate density (exact matches), title-body layout structurally similar to section-header, clean spatial arrangement with heading, body content, and logo placement\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_06": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Same title-body layout type with matching top-heavy weight, simple heading+body+logo elements, and sparse grid arrangement with empty middle cells."
+      },
+      {
+        "id": "facebook-2004/slide_05",
+        "reason": "Title-body variant with top-heavy weight, better spatial zone arrangement (title spanning top area, body left, footnote bottom), and similar structural hierarchy."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_02\",\n      \"reason\": \"Same title-body layout type with matching top-heavy weight, simple heading+body+logo elements, and sparse grid arrangement with empty middle cells.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_05\",\n      \"reason\": \"Title-body variant with top-heavy weight, better spatial zone arrangement (title spanning top area, body left, footnote bottom), and similar structural hierarchy.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_07": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Same title-body layout type with top-heavy weight, title at top, body text in lower area, logo and page number elements"
+      },
+      {
+        "id": "facebook-2004/slide_09",
+        "reason": "Same title-body layout type with sparse density matching target, centered title and body combined in single area, minimal clean structure"
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_02\", \"reason\": \"Same title-body layout type with top-heavy weight, title at top, body text in lower area, logo and page number elements\"},\n    {\"id\": \"facebook-2004/slide_09\", \"reason\": \"Same title-body layout type with sparse density matching target, centered title and body combined in single area, minimal clean structure\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_08": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_03",
+        "reason": "Same title-body layout with heading at top, body content in center, page number in top-right, and similar top-heavy sparse weight distribution."
+      },
+      {
+        "id": "facebook-2004/slide_10",
+        "reason": "Matching title-body layout with title in top zone, logo present, body text spanning middle area, and similar element inventory."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_03\",\n      \"reason\": \"Same title-body layout with heading at top, body content in center, page number in top-right, and similar top-heavy sparse weight distribution.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_10\",\n      \"reason\": \"Matching title-body layout with title in top zone, logo present, body text spanning middle area, and similar element inventory.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_09": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Title-bullets layout with title in TC, bullet body in ML, sparse density, and top-heavy weight—closest grid arrangement to target."
+      },
+      {
+        "id": "facebook-2004/slide_17",
+        "reason": "Title-bullets with title in TC and bullet-list body starting in ML, top-heavy structure, and mostly empty cells below content."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"coinbase-seed-2012/slide_02\", \"reason\": \"Title-bullets layout with title in TC, bullet body in ML, sparse density, and top-heavy weight—closest grid arrangement to target.\"},\n    {\"id\": \"facebook-2004/slide_17\", \"reason\": \"Title-bullets with title in TC and bullet-list body starting in ML, top-heavy structure, and mostly empty cells below content.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_10": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Same layout type (title-bullets), weight (top-heavy), density (sparse), and T-shaped spatial distribution with heading at top, bullet list on left-middle, and empty areas."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Same layout type (title-bullets) with matching heading, bullet-list, and page-number elements positioned in similar T-shaped arrangement."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"coinbase-seed-2012/slide_02\", \"reason\": \"Same layout type (title-bullets), weight (top-heavy), density (sparse), and T-shaped spatial distribution with heading at top, bullet list on left-middle, and empty areas.\"},\n    {\"id\": \"airbnb-seed-2009/slide_02\", \"reason\": \"Same layout type (title-bullets) with matching heading, bullet-list, and page-number elements positioned in similar T-shaped arrangement.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_11": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_15",
+        "reason": "Only section-divider type template; matches layout category exactly with sparse density and branding elements."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Top-heavy, sparse layout with title in TL, slide number in TR, and whitespace below matches TARGET's spatial arrangement and visual weight."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_15\",\n      \"reason\": \"Only section-divider type template; matches layout category exactly with sparse density and branding elements.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_12\",\n      \"reason\": \"Top-heavy, sparse layout with title in TL, slide number in TR, and whitespace below matches TARGET's spatial arrangement and visual weight.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_12": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_15",
+        "reason": "Only other section-divider type; both use sparse density with heading + logo focus and decorative structure."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Best spatial match: title spanning top row (TL-TC-TR), page number at top-right, content in middle, sparse whitespace below, top-heavy weight."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_15\",\n      \"reason\": \"Only other section-divider type; both use sparse density with heading + logo focus and decorative structure.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_12\",\n      \"reason\": \"Best spatial match: title spanning top row (TL-TC-TR), page number at top-right, content in middle, sparse whitespace below, top-heavy weight.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_13": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_13",
+        "reason": "Has content at both TC (divider line) and BC (quotation mark) with space between, center-heavy weight, sparse-to-moderate density, quote structure functions as a closing statement."
+      },
+      {
+        "id": "facebook-2004/slide_10",
+        "reason": "Has TC with heading and subtitle, body text distributed across middle and bottom rows, center-heavy weight, moderate density matching target, strong heading+subtitle+body-text element alignment."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_13\", \"reason\": \"Has content at both TC (divider line) and BC (quotation mark) with space between, center-heavy weight, sparse-to-moderate density, quote structure functions as a closing statement.\"},\n    {\"id\": \"facebook-2004/slide_10\", \"reason\": \"Has TC with heading and subtitle, body text distributed across middle and bottom rows, center-heavy weight, moderate density matching target, strong heading+subtitle+body-text element alignment.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_01": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_04",
+        "reason": "Only template with full-bleed-image layout type; extensive background photo coverage (6 cells) with minimal logo and text overlay matching TARGET's structure."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Image-dominant layout with centered mockup screenshots; center-heavy weight distribution and minimal text matching TARGET's sparse content focus."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_04\", \"reason\": \"Only template with full-bleed-image layout type; extensive background photo coverage (6 cells) with minimal logo and text overlay matching TARGET's structure.\"},\n    {\"id\": \"airbnb-seed-2009/slide_06\", \"reason\": \"Image-dominant layout with centered mockup screenshots; center-heavy weight distribution and minimal text matching TARGET's sparse content focus.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_02": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Same two-column layout type with logo in TR, heading, and list elements; opposite weight distribution is the main mismatch."
+      },
+      {
+        "id": "facebook-2004/slide_04",
+        "reason": "Shares large photo + small logo in TR spatial pattern and moderate density; full-bleed layout type differs but better matches image dominance."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_03\", \"reason\": \"Same two-column layout type with logo in TR, heading, and list elements; opposite weight distribution is the main mismatch.\"},\n    {\"id\": \"facebook-2004/slide_04\", \"reason\": \"Shares large photo + small logo in TR spatial pattern and moderate density; full-bleed layout type differs but better matches image dominance.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_03": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_07",
+        "reason": "Comparison layout with title-logo top row, metrics/content spanning middle row, and labels in bottom row—mirrors target's table header-body structure."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_14",
+        "reason": "Comparison layout with similar grid pattern: title at top, charts/values in middle row, labels spanning bottom row matching target's two-tier data organization."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_07\",\n      \"reason\": \"Comparison layout with title-logo top row, metrics/content spanning middle row, and labels in bottom row—mirrors target's table header-body structure.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_14\",\n      \"reason\": \"Comparison layout with similar grid pattern: title at top, charts/values in middle row, labels spanning bottom row matching target's two-tier data organization.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_04": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_08",
+        "reason": "Exact layout type match (three-column) with title spanning top, three distinct content columns (ML/MC/MR), and footer at bottom."
+      },
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Near-identical spatial arrangement: title+logo at top (TC/TR), three icon+label content blocks in middle row (ML/MC/MR), empty bottom row; element inventory mirrors target's icon-label-metric pattern."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_08\", \"reason\": \"Exact layout type match (three-column) with title spanning top, three distinct content columns (ML/MC/MR), and footer at bottom.\"},\n    {\"id\": \"facebook-2004/slide_12\", \"reason\": \"Near-identical spatial arrangement: title+logo at top (TC/TR), three icon+label content blocks in middle row (ML/MC/MR), empty bottom row; element inventory mirrors target's icon-label-metric pattern.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_05": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Exact layout type match (two-column) with identical grid structure: title top-left, identifier top-right, two balanced content columns, and footer divider at bottom."
+      },
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Layout type match (two-column) with similar spatial arrangement: title and logo at top, left column with text content, right column with visual content, creating a balanced two-column composition."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_04\",\n      \"reason\": \"Exact layout type match (two-column) with identical grid structure: title top-left, identifier top-right, two balanced content columns, and footer divider at bottom.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_03\",\n      \"reason\": \"Layout type match (two-column) with similar spatial arrangement: title and logo at top, left column with text content, right column with visual content, creating a balanced two-column composition.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_06": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_17",
+        "reason": "Two bullet lists stacked vertically in ML and MR columns with central divider, title and logo in top row, moderate density."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Classic two-column layout with title in TL, vertical divider in TC/MC, content blocks in ML/MR, matching balanced spatial structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_17\",\n      \"reason\": \"Two bullet lists stacked vertically in ML and MR columns with central divider, title and logo in top row, moderate density.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_04\",\n      \"reason\": \"Classic two-column layout with title in TL, vertical divider in TC/MC, content blocks in ML/MR, matching balanced spatial structure.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_07": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Same icon-grid layout type with logo and heading at top, icon elements with labels as primary content, and minimal spacing at bottom."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_10",
+        "reason": "Matching icon-grid layout type with heading and icon cards distributed across middle rows."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Same icon-grid layout type with logo and heading at top, icon elements with labels as primary content, and minimal spacing at bottom.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_10\",\n      \"reason\": \"Matching icon-grid layout type with heading and icon cards distributed across middle rows.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_08": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_05",
+        "reason": "Mixed layout with centered prominent element (MC) surrounded by scattered text labels (ML, MR, BL, BR) directly mirrors the brand wheel diagram with surrounding text callouts."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_09",
+        "reason": "Centered element at MC (directional arrows) with surrounding logos and axis labels in ML/MR provides similar spatial distribution to central brand wheel with surrounding text callouts."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_05\",\n      \"reason\": \"Mixed layout with centered prominent element (MC) surrounded by scattered text labels (ML, MR, BL, BR) directly mirrors the brand wheel diagram with surrounding text callouts.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_09\",\n      \"reason\": \"Centered element at MC (directional arrows) with surrounding logos and axis labels in ML/MR provides similar spatial distribution to central brand wheel with surrounding text callouts.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_09": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Chart type with central circular element (pie chart), center-heavy weight, logo at top-right, title at top-center, and labels around the chart—closest structural match to the brand wheel layout."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_05",
+        "reason": "Chart type with central circular elements (three circles with labels), moderate density, and distributed labels—preserves the round/circular chart structure despite balanced weight rather than center-heavy."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_11\",\n      \"reason\": \"Chart type with central circular element (pie chart), center-heavy weight, logo at top-right, title at top-center, and labels around the chart—closest structural match to the brand wheel layout.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_05\",\n      \"reason\": \"Chart type with central circular elements (three circles with labels), moderate density, and distributed labels—preserves the round/circular chart structure despite balanced weight rather than center-heavy.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_10": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_05",
+        "reason": "Multiple circular elements (3) arranged horizontally across the middle row with category labels at the bottom—structurally mirrors timeline milestones with date markers."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_07",
+        "reason": "Features circle shapes with connecting arrows showing directional progression and bottom-row labels with center-heavy weight distribution—captures the milestone and flow elements of a timeline."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_05\", \"reason\": \"Multiple circular elements (3) arranged horizontally across the middle row with category labels at the bottom—structurally mirrors timeline milestones with date markers.\"},\n    {\"id\": \"airbnb-seed-2009/slide_07\", \"reason\": \"Features circle shapes with connecting arrows showing directional progression and bottom-row labels with center-heavy weight distribution—captures the milestone and flow elements of a timeline.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_11": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_01",
+        "reason": "Same image-dominant layout type with logo in top-left, multiple distinct images spread across middle grid cells (ML, MC, MR), and moderate density matching the target's overall image distribution strategy."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_13",
+        "reason": "Multiple photo elements scattered across grid in similar spatial pattern (ML, MC, BL, BC), creating the same vertically-distributed image inventory and moderate density as target, though categorized as image-grid rather than image-dominant."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_01\",\n      \"reason\": \"Same image-dominant layout type with logo in top-left, multiple distinct images spread across middle grid cells (ML, MC, MR), and moderate density matching the target's overall image distribution strategy.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_13\",\n      \"reason\": \"Multiple photo elements scattered across grid in similar spatial pattern (ML, MC, BL, BC), creating the same vertically-distributed image inventory and moderate density as target, though categorized as image-grid rather than image-dominant.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_12": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Same image-dominant layout with title heading top-left, central mockup images dominating the slide, and footer text spanning bottom rows mirrors target's text-plus-background-photo distribution."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_01",
+        "reason": "Shared image-dominant type with logo and heading at top, product mockups/screenshots filling middle rows creates similar visual hierarchy of text overlay plus dominant imagery."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_06\", \"reason\": \"Same image-dominant layout with title heading top-left, central mockup images dominating the slide, and footer text spanning bottom rows mirrors target's text-plus-background-photo distribution.\"},\n    {\"id\": \"coinbase-seed-2012/slide_01\", \"reason\": \"Shared image-dominant type with logo and heading at top, product mockups/screenshots filling middle rows creates similar visual hierarchy of text overlay plus dominant imagery.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_13": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_19",
+        "reason": "Two-column layout with balanced weight, visual element on right, and matching spatial zones (text-left, image-right, logo-title-top)."
+      },
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Two-column layout with logo in TR position matching target, visual element (screenshot) on right, and text-image spatial division."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_19\", \"reason\": \"Two-column layout with balanced weight, visual element on right, and matching spatial zones (text-left, image-right, logo-title-top).\"},\n    {\"id\": \"facebook-2004/slide_03\", \"reason\": \"Two-column layout with logo in TR position matching target, visual element (screenshot) on right, and text-image spatial division.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_14": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_19",
+        "reason": "Two-column layout with logo, heading, body text, and circular photo element; balanced weight and moderate density matching target."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_01",
+        "reason": "Logo at top-left with heading and three product mockup images distributed across grid; similar showcase composition to target's multi-image layout."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_19\", \"reason\": \"Two-column layout with logo, heading, body text, and circular photo element; balanced weight and moderate density matching target.\"},\n    {\"id\": \"coinbase-seed-2012/slide_01\", \"reason\": \"Logo at top-left with heading and three product mockup images distributed across grid; similar showcase composition to target's multi-image layout.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_15": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_14",
+        "reason": "Large circle in ML/MC with labels in BL/BC/BR matches the circular diagram + corner labels pattern; center-heavy weight and moderate density align perfectly."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_05",
+        "reason": "Identical 'mixed' layout type with centered prominent element in MC and scattered text labels throughout matches target's structural organization."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_14\", \"reason\": \"Large circle in ML/MC with labels in BL/BC/BR matches the circular diagram + corner labels pattern; center-heavy weight and moderate density align perfectly.\"},\n    {\"id\": \"coinbase-seed-2012/slide_05\", \"reason\": \"Identical 'mixed' layout type with centered prominent element in MC and scattered text labels throughout matches target's structural organization.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_16": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Exact two-column layout type with title at TL, content distributed to ML/MC/MR grid with central empty column (MC), maintaining balanced spatial symmetry and moderate density."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Quote-focused layout with title heading at TL, distributed quote elements across ML/MR positions similar to target's badge arrangement, plus logo reference in top row."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_04\",\n      \"reason\": \"Exact two-column layout type with title at TL, content distributed to ML/MC/MR grid with central empty column (MC), maintaining balanced spatial symmetry and moderate density.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_12\",\n      \"reason\": \"Quote-focused layout with title heading at TL, distributed quote elements across ML/MR positions similar to target's badge arrangement, plus logo reference in top row.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_17": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Perfect spatial alignment: two-column layout with title at top, logo/identifier at top-right, balanced left-right content blocks (ML/MR), decorative empty center (MC), and footer placement (BL/BR)."
+      },
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Strong two-column structure with title at top-center, logo at top-right, left content column (text+list), right content block (image), and balanced weight distribution across zones."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_04\", \"reason\": \"Perfect spatial alignment: two-column layout with title at top, logo/identifier at top-right, balanced left-right content blocks (ML/MR), decorative empty center (MC), and footer placement (BL/BR).\"},\n    {\"id\": \"facebook-2004/slide_03\", \"reason\": \"Strong two-column structure with title at top-center, logo at top-right, left content column (text+list), right content block (image), and balanced weight distribution across zones.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_18": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_20",
+        "reason": "Same quote layout type, moderate density, logo in TR, title-quote-attribution structure with decorative divider element matching target's hierarchical organization."
+      },
+      {
+        "id": "facebook-2004/slide_13",
+        "reason": "Quote layout with logo TR, decorative element (quotation mark) paralleling target's decorative stars, and structured title-body-attribution pattern."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_20\",\n      \"reason\": \"Same quote layout type, moderate density, logo in TR, title-quote-attribution structure with decorative divider element matching target's hierarchical organization.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_13\",\n      \"reason\": \"Quote layout with logo TR, decorative element (quotation mark) paralleling target's decorative stars, and structured title-body-attribution pattern.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_19": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Pie chart (circular) centered at MC, heading + subheading at top, logo at TR, center-heavy weight, footer divider at BC—structurally mirrors TARGET's wheel chart layout."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_05",
+        "reason": "Three circular elements (numbers in circles) arranged horizontally, title at top, page number at TR (logo role), category labels below, chart type and moderate density match TARGET."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_11\", \"reason\": \"Pie chart (circular) centered at MC, heading + subheading at top, logo at TR, center-heavy weight, footer divider at BC—structurally mirrors TARGET's wheel chart layout.\"},\n    {\"id\": \"airbnb-seed-2009/slide_05\", \"reason\": \"Three circular elements (numbers in circles) arranged horizontally, title at top, page number at TR (logo role), category labels below, chart type and moderate density match TARGET.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_20": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_01",
+        "reason": "Image-dominant type with logo at TL, heading/subtitle content, and three product images filling middle/right zones—closest structural match to target's grid arrangement."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Image-dominant type with title at top and central overlapping images, but more center-heavy and footer-dense than target's left-heavy image focus."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_01\",\n      \"reason\": \"Image-dominant type with logo at TL, heading/subtitle content, and three product images filling middle/right zones—closest structural match to target's grid arrangement.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_06\",\n      \"reason\": \"Image-dominant type with title at top and central overlapping images, but more center-heavy and footer-dense than target's left-heavy image focus.\"\n    }\n  ]\n}\n```"
+  }
+}

@@ -1,0 +1,83 @@
+<!-- slide_01.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .eyebrow {
+    font-size: 14px; font-weight: 400; color: #888888;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    margin-bottom: 18px;
+  }
+  .title {
+    font-size: 58px; font-weight: 300; color: #333333;
+    text-align: center; letter-spacing: -0.5px;
+    line-height: 1.1;
+  }
+  .title span { color: #4A90D9; }
+  .product-card {
+    margin-top: 52px;
+    background: #FFFFFF;
+    border-radius: 6px;
+    width: 780px;
+    padding: 32px 48px;
+    display: flex;
+    align-items: center;
+    gap: 48px;
+  }
+  .balance-block { flex: 1; }
+  .balance-label { font-size: 12px; color: #888888; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 6px; }
+  .balance-amount { font-size: 38px; font-weight: 300; color: #333333; }
+  .balance-btc { font-size: 15px; color: #888888; margin-top: 4px; }
+  .actions { display: flex; gap: 14px; }
+  .btn {
+    padding: 11px 28px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    border: none;
+    cursor: default;
+  }
+  .btn-send { background: #4A90D9; color: #fff; }
+  .btn-receive { background: #E8ECF0; color: #333333; }
+  .tx-list { flex: 1; border-left: 1px solid #E8ECF0; padding-left: 36px; }
+  .tx-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #F2F4F6; }
+  .tx-row:last-child { border-bottom: none; }
+  .tx-name { font-size: 13px; color: #333333; }
+  .tx-amt { font-size: 13px; font-weight: 700; }
+  .tx-amt.pos { color: #4A90D9; }
+  .tx-amt.neg { color: #888888; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Introducing</div>
+  <div class="title"><span>Coinbase</span> — Your Hosted Bitcoin Wallet</div>
+  <div class="product-card">
+    <div class="balance-block">
+      <div class="balance-label">Total Balance</div>
+      <div class="balance-amount">$1,240.00</div>
+      <div class="balance-btc">3.42 BTC</div>
+      <div class="actions" style="margin-top:24px;">
+        <div class="btn btn-send">Send</div>
+        <div class="btn btn-receive">Receive</div>
+      </div>
+    </div>
+    <div class="tx-list">
+      <div class="balance-label" style="margin-bottom:10px;">Recent Transactions</div>
+      <div class="tx-row"><span class="tx-name">Received from Alex</span><span class="tx-amt pos">+0.50 BTC</span></div>
+      <div class="tx-row"><span class="tx-name">Sent to Merchant</span><span class="tx-amt neg">−0.12 BTC</span></div>
+      <div class="tx-row"><span class="tx-name">Received from Jane</span><span class="tx-amt pos">+1.00 BTC</span></div>
+      <div class="tx-row"><span class="tx-name">Sent to Exchange</span><span class="tx-amt neg">−0.80 BTC</span></div>
+    </div>
+  </div>
+</body>
+</html>

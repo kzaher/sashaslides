@@ -1,0 +1,34 @@
+{
+  "runAt": "2026-04-13T22:11:59.879Z",
+  "model": "haiku",
+  "ranking": [
+    {
+      "candidate": 2,
+      "name": "semantic",
+      "avgScore": 0.412820512820513,
+      "totalScore": 32.20000000000002,
+      "totalTests": 78
+    },
+    {
+      "candidate": 3,
+      "name": "tag",
+      "avgScore": 0.38205128205128214,
+      "totalScore": 29.800000000000008,
+      "totalTests": 78
+    },
+    {
+      "candidate": 4,
+      "name": "hybrid",
+      "avgScore": 0.2897435897435899,
+      "totalScore": 22.60000000000001,
+      "totalTests": 78
+    },
+    {
+      "candidate": 1,
+      "name": "structural",
+      "avgScore": 0.23846153846153847,
+      "totalScore": 18.6,
+      "totalTests": 78
+    }
+  ]
+}

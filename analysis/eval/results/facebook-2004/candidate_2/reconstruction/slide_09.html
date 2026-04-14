@@ -1,0 +1,78 @@
+<!-- slide_09.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@1,400&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1280px; height: 720px; overflow: hidden; background: #FFFFFF; }
+body { display: flex; align-items: center; justify-content: center; }
+.slide {
+  width: 1280px; height: 720px;
+  position: relative;
+  display: flex; flex-direction: column;
+  justify-content: center;
+  padding: 72px 104px;
+}
+.slide-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 22px; font-weight: 600;
+  color: #2C3040; margin-bottom: 36px;
+}
+.table-wrap { width: 100%; max-width: 760px; }
+table {
+  width: 100%; border-collapse: collapse;
+}
+thead th {
+  background: #4A6FA5; color: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px; font-weight: 600;
+  text-align: left; padding: 12px 20px;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+tbody tr:nth-child(odd) { background: #FFFFFF; }
+tbody tr:nth-child(even) { background: #C8DCF0; }
+tbody td {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px; color: #2C3040;
+  padding: 12px 20px; line-height: 1.4;
+}
+tbody td:last-child {
+  font-weight: 600; color: #3B5998;
+}
+tfoot td {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px; font-weight: 700;
+  color: #2C3040; padding: 13px 20px;
+  background: #E8F0F8;
+}
+tfoot td:last-child { color: #3B5998; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="slide-title">How $85 billion in college spending breaks down annually</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Annual spend</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Restaurants and food</td><td>$21 billion</td></tr>
+        <tr><td>Automobiles</td><td>$9 billion</td></tr>
+        <tr><td>Clothing</td><td>$5 billion</td></tr>
+        <tr><td>Phones</td><td>$4 billion</td></tr>
+        <tr><td>Other amenities</td><td>$46 billion</td></tr>
+      </tbody>
+      <tfoot>
+        <tr><td>Total purchasing power</td><td>$85 billion</td></tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+</body>
+</html>

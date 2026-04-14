@@ -1,0 +1,79 @@
+<!-- slide_06.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px;
+    background: #FFFFFF;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  .slide { padding: 80px; height: 720px; position: relative; }
+  .section-label {
+    font-size: 13px; font-weight: bold;
+    color: #29B6F6; letter-spacing: 2px;
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .title {
+    font-size: 38px; font-weight: bold;
+    color: #333333; margin-bottom: 64px;
+  }
+  .flow {
+    display: flex; align-items: flex-start;
+    gap: 0;
+  }
+  .step { flex: 1; }
+  .step-num {
+    font-size: 80px; font-weight: bold;
+    color: #D6EEFB; line-height: 1;
+    margin-bottom: 14px;
+  }
+  .step-name {
+    font-size: 30px; font-weight: bold;
+    color: #29B6F6; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 12px;
+  }
+  .step-desc { font-size: 18px; color: #333333; line-height: 1.5; }
+  .arrow {
+    font-size: 36px; color: #CCCCCC;
+    padding: 0 28px; margin-top: 22px;
+    flex-shrink: 0;
+  }
+  .tagline {
+    position: absolute; bottom: 80px; left: 80px;
+    font-size: 18px; color: #888888;
+  }
+</style>
+</head>
+<body>
+  <div class="slide">
+    <div class="section-label">The Product</div>
+    <div class="title">Simple. Three Steps.</div>
+
+    <div class="flow">
+      <div class="step">
+        <div class="step-num">01</div>
+        <div class="step-name">Search</div>
+        <div class="step-desc">Filter by city, price, and check-in dates.</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <div class="step-name">Review</div>
+        <div class="step-desc">Browse host profiles and read listings.</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <div class="step-name">Book</div>
+        <div class="step-desc">Confirm your stay in 3 clicks.</div>
+      </div>
+    </div>
+
+    <div class="tagline">Stay with a local. Connect with the city.</div>
+  </div>
+</body>
+</html>

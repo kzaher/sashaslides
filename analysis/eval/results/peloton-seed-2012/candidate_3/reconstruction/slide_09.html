@@ -1,0 +1,56 @@
+<!-- slide_20.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1280px;height:720px;overflow:hidden;font-family:"Helvetica Neue",Arial,sans-serif}
+body{
+  position:relative;
+  background:
+    radial-gradient(ellipse at 40% 55%,rgba(244,64,96,.28) 0%,transparent 50%),
+    radial-gradient(ellipse at 85% 25%,rgba(80,10,120,.45) 0%,transparent 50%),
+    radial-gradient(ellipse at 10% 10%,rgba(20,0,40,.8) 0%,transparent 60%),
+    linear-gradient(150deg,#060608 0%,#110014 35%,#08080e 65%,#030304 100%);
+  display:flex;align-items:center;justify-content:center;
+}
+.vignette{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 50%,transparent 25%,rgba(0,0,0,.55) 100%)}
+.mark{position:absolute;top:60px;left:80px;font-size:14px;font-weight:700;color:rgba(255,255,255,.4);letter-spacing:.18em;text-transform:uppercase}
+.layout{
+  position:relative;z-index:1;
+  display:flex;align-items:center;gap:80px;
+  padding:0 80px;
+}
+.text-side{flex:1}
+.pretitle{font-size:13px;font-weight:700;color:#F44060;letter-spacing:.22em;text-transform:uppercase;margin-bottom:18px}
+.headline{font-size:56px;font-weight:800;font-style:italic;text-transform:uppercase;color:#fff;line-height:1.05;letter-spacing:.04em;margin-bottom:28px}
+.body-text{font-size:18px;font-weight:400;color:rgba(255,255,255,.7);line-height:1.55;max-width:420px}
+.callout-circle{
+  width:340px;height:340px;border-radius:50%;
+  background:#F44060;flex-shrink:0;
+  display:flex;flex-direction:column;align-items:center;
+  justify-content:center;text-align:center;padding:36px;
+}
+.c-head{font-size:24px;font-weight:800;text-transform:uppercase;color:#fff;letter-spacing:.04em;line-height:1.15;margin-bottom:14px}
+.c-rule{width:32px;height:2px;background:rgba(255,255,255,.5);margin:0 auto 14px}
+.c-body{font-size:14px;font-weight:400;color:rgba(255,255,255,.88);line-height:1.5}
+</style>
+</head>
+<body>
+<div class="vignette"></div>
+<div class="mark">PELOTON</div>
+<div class="layout">
+  <div class="text-side">
+    <div class="pretitle">THE BRAND PROMISE</div>
+    <div class="headline">SHOW UP<br>AS YOUR<br>FULL SELF</div>
+    <div class="body-text">Not just at the handlebars. The transformative experience Peloton delivers carries forward — into every hour of every day that follows the ride.</div>
+  </div>
+  <div class="callout-circle">
+    <div class="c-head">SHOW UP<br>AS YOUR<br>FULL SELF<br>ALL DAY LONG</div>
+    <div class="c-rule"></div>
+    <div class="c-body">The emotional benefit that makes Peloton more than fitness — and members more than members.</div>
+  </div>
+</div>
+</body>
+</html>

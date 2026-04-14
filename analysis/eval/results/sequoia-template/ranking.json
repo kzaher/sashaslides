@@ -1,0 +1,44 @@
+{
+  "presId": "sequoia-template",
+  "slideCount": 13,
+  "candidates": [
+    {
+      "candidate": 1,
+      "slideCount": 13,
+      "scores": {
+        "layout": 9,
+        "content": 8,
+        "visual": 9,
+        "rules": 8,
+        "avg": 8.5
+      }
+    },
+    {
+      "candidate": 2,
+      "slideCount": 13,
+      "scores": {
+        "layout": 9,
+        "content": 9,
+        "visual": 9,
+        "rules": 9,
+        "avg": 9
+      }
+    },
+    {
+      "candidate": 3,
+      "slideCount": 13,
+      "scores": {
+        "layout": 5,
+        "content": 5,
+        "visual": 5,
+        "rules": 5,
+        "avg": 5
+      }
+    }
+  ],
+  "ranking": [
+    2,
+    1,
+    3
+  ]
+}

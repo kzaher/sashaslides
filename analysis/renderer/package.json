@@ -1,0 +1,9 @@
+{
+  "name": "analysis-renderer",
+  "type": "module",
+  "dependencies": {
+    "chrome-remote-interface": "^0.33.2",
+    "pptxgenjs": "^4.0.1",
+    "tsx": "^4.19.0"
+  }
+}

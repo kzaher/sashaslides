@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #fafbfc; padding: 48px 64px; }
+
+h1 {
+  font-size: 28px;
+  color: #1a202c;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: #718096;
+  margin-bottom: 32px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+.box {
+  height: 180px;
+  padding: 20px;
+  background: white;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.box .label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #2d3748;
+}
+
+.box .desc {
+  font-size: 12px;
+  color: #a0aec0;
+  line-height: 1.5;
+}
+
+.box-1 {
+  border: 4px solid #4a6cf7;
+}
+
+.box-2 {
+  border-left: 6px solid #e94560;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  background: #fff5f5;
+}
+
+.box-3 {
+  border: 3px dashed #38b2ac;
+}
+
+.box-4 {
+  border: 6px double #d69e2e;
+}
+
+.box-5 {
+  border-top: 4px solid #e53e3e;
+  border-right: 4px solid #38a169;
+  border-bottom: 4px solid #3182ce;
+  border-left: 4px solid #d69e2e;
+}
+
+.box-6 {
+  border: 3px solid #805ad5;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(128,90,213,0.2);
+}
+</style></head><body>
+<h1>Complex Borders</h1>
+<div class="subtitle">Six border variations testing converter edge cases</div>
+<div class="grid">
+  <div class="box box-1">
+    <div class="label">1. Thick All Sides</div>
+    <div class="desc">4px solid blue border on all four sides. Uniform width and color — the simplest multi-side case.</div>
+  </div>
+  <div class="box box-2">
+    <div class="label">2. Left Accent Only</div>
+    <div class="desc">6px solid red on left only. Common "accent border" pattern. No border on other three sides.</div>
+  </div>
+  <div class="box box-3">
+    <div class="label">3. Dashed Border</div>
+    <div class="desc">3px dashed teal border. Tests non-solid border-style rendering. Many converters drop dash patterns.</div>
+  </div>
+  <div class="box box-4">
+    <div class="label">4. Double Border</div>
+    <div class="desc">6px double gold border. The "double" style draws two parallel lines. Rarely supported in slide formats.</div>
+  </div>
+  <div class="box box-5">
+    <div class="label">5. Different Colors Per Side</div>
+    <div class="desc">Each side is a different color: red top, green right, blue bottom, gold left. Tests per-side color extraction.</div>
+  </div>
+  <div class="box box-6">
+    <div class="label">6. Border + Radius + Shadow</div>
+    <div class="desc">Purple border combined with border-radius: 16px and a box-shadow. Tests all three properties together.</div>
+  </div>
+</div>
+</body></html>

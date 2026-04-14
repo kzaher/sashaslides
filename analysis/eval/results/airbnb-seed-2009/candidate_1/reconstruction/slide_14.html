@@ -1,0 +1,77 @@
+<!-- slide_14.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px;
+    background: #FFFFFF;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  .slide { padding: 80px; height: 720px; position: relative; }
+  .section-label {
+    font-size: 13px; font-weight: bold;
+    color: #29B6F6; letter-spacing: 2px;
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .title {
+    font-size: 38px; font-weight: bold;
+    color: #333333; margin-bottom: 16px;
+  }
+  .subtitle {
+    font-size: 18px; color: #888888;
+    margin-bottom: 52px;
+  }
+  .metrics { display: flex; gap: 80px; align-items: flex-start; }
+  .metric-block { flex: 1; }
+  .metric-tier {
+    font-size: 11px; font-weight: bold;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    margin-bottom: 8px; color: #888888;
+  }
+  .metric-number {
+    font-size: 56px; font-weight: bold;
+    text-transform: uppercase; line-height: 1;
+    margin-bottom: 10px;
+  }
+  .metric-number.orange { color: #E8711F; }
+  .metric-number.blue   { color: #29B6F6; }
+  .metric-number.green  { color: #8BC34A; }
+  .metric-desc { font-size: 16px; color: #333333; line-height: 1.5; }
+  .bottom-line {
+    position: absolute; bottom: 80px; left: 80px;
+    font-size: 14px; color: #888888;
+  }
+</style>
+</head>
+<body>
+  <div class="slide">
+    <div class="section-label">The Ask</div>
+    <div class="title">12 Months to Reach Escape Velocity</div>
+    <div class="subtitle">Angel round to prove the model and hit 80,000 transactions.</div>
+
+    <div class="metrics">
+      <div class="metric-block">
+        <div class="metric-tier">Raise</div>
+        <div class="metric-number orange">$500K</div>
+        <div class="metric-desc">angel round — 12 months of runway</div>
+      </div>
+      <div class="metric-block">
+        <div class="metric-tier">Target</div>
+        <div class="metric-number blue">80K</div>
+        <div class="metric-desc">trips completed on AirBed&amp;Breakfast</div>
+      </div>
+      <div class="metric-block">
+        <div class="metric-tier">Revenue</div>
+        <div class="metric-number green">$2M</div>
+        <div class="metric-desc">revenue over 12 months at $25 avg fee</div>
+      </div>
+    </div>
+
+    <div class="bottom-line">airbedandbreakfast.com — joe@airbedandbreakfast.com</div>
+  </div>
+</body>
+</html>

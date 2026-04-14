@@ -26,6 +26,7 @@ type ParsedSlide = {
   isSectionHeader: boolean;
   isTitleSlide: boolean;
   isClosing: boolean;
+  whiteboard: boolean; // first `>` line was `whiteboard=1` — opt-in to whiteboard styling
 };
 
 function parseSlides(md: string): ParsedSlide[] {
@@ -85,6 +86,14 @@ function parseSlides(md: string): ParsedSlide[] {
       bodyLines.push(line);
     }
 
+    // The marker `whiteboard=1` MUST be the first `>` line — anywhere else
+    // is treated as a regular note. Strip it out before computing subtitle/notes.
+    let whiteboard = false;
+    if (notes[0] === "whiteboard=1") {
+      whiteboard = true;
+      notes.shift();
+    }
+
     const isTitleSlide =
       lines[0]?.startsWith("# ") && bodyLines.length === 0 && !isSectionHeader && !table;
     const isClosing = title.toLowerCase().includes("thank you");
@@ -100,6 +109,7 @@ function parseSlides(md: string): ParsedSlide[] {
       isSectionHeader,
       isTitleSlide,
       isClosing,
+      whiteboard,
     });
   }
 
@@ -115,50 +125,56 @@ function cleanText(s: string): string {
 function buildAssetHtml(slides: ParsedSlide[]): string {
   const rows: string[] = [];
 
-  // 1. Fat, rough blue underline — rendered at 2400x80 for crisp roughness
-  //    Double-stroked with slightly different seeds for extra marker-pen feel
-  rows.push(`
-    <div class="asset" id="asset-underline" data-name="underline" data-w="2400" data-h="80">
-      <svg width="2400" height="80" viewBox="0 0 2400 80"></svg>
-      <script>
-        window.addEventListener('load', () => {
-          const svg = document.querySelector('#asset-underline svg');
-          const rc = WhiteboardGraphs.wrapRough(svg);
-          // Two overlapping passes with different seeds create a chunkier marker look
-          rc.line(30, 40, 2370, 40, {
-            stroke: '#1a5276', strokeWidth: 14, roughness: 4, bowing: 3, seed: 11
+  // 1. Underline variants — flatter aspect (2400x48) so the rough.js wobble
+  //    stays compact at the final ~0.3" display height instead of looking
+  //    like a clipped scribble. Strokes are thinner and roughness is lower
+  //    than the previous version. Six blue variants, three red variants —
+  //    generate-pptx.ts cycles through them per-slide so consecutive titles
+  //    never get the same drawing.
+  const UNDERLINE_W = 2400;
+  const UNDERLINE_H = 48;
+  function pushUnderline(name: string, color: string, seedA: number, seedB: number) {
+    rows.push(`
+      <div class="asset" id="asset-${name}" data-name="${name}" data-w="${UNDERLINE_W}" data-h="${UNDERLINE_H}">
+        <svg width="${UNDERLINE_W}" height="${UNDERLINE_H}" viewBox="0 0 ${UNDERLINE_W} ${UNDERLINE_H}"></svg>
+        <script>
+          window.addEventListener('load', () => {
+            const svg = document.querySelector('#asset-${name} svg');
+            const rc = WhiteboardGraphs.wrapRough(svg);
+            // Two overlapping passes with different seeds give a chunky marker
+            // look without the wild scribble of the old roughness=4 settings.
+            rc.line(30, 22, 2370, 22, {
+              stroke: '${color}', strokeWidth: 8, roughness: 1.8, bowing: 1.2, seed: ${seedA}
+            });
+            rc.line(30, 26, 2370, 26, {
+              stroke: '${color}', strokeWidth: 7, roughness: 1.6, bowing: 1.0, seed: ${seedB}
+            });
           });
-          rc.line(30, 44, 2370, 44, {
-            stroke: '#1a5276', strokeWidth: 12, roughness: 3.5, bowing: 2.5, seed: 29
-          });
-        });
-      </script>
-    </div>
-  `);
+        </script>
+      </div>
+    `);
+  }
+  // Blue title underlines (cycled per content slide)
+  pushUnderline("underline_0", "#1a5276", 11, 29);
+  pushUnderline("underline_1", "#1a5276", 47, 53);
+  pushUnderline("underline_2", "#1a5276", 71, 89);
+  pushUnderline("underline_3", "#1a5276", 103, 127);
+  pushUnderline("underline_4", "#1a5276", 149, 167);
+  pushUnderline("underline_5", "#1a5276", 191, 211);
+  // Red accent underlines (cycled per section header)
+  pushUnderline("underline_red_0", "#c0392b", 17, 43);
+  pushUnderline("underline_red_1", "#c0392b", 61, 79);
+  pushUnderline("underline_red_2", "#c0392b", 109, 131);
+  // Back-compat: keep `underline` and `underline-red` as aliases of the first
+  // variant so any caller still referencing the old names keeps working.
+  pushUnderline("underline", "#1a5276", 11, 29);
+  pushUnderline("underline-red", "#c0392b", 17, 43);
 
-  // 2. Fat, rough red accent underline
-  rows.push(`
-    <div class="asset" id="asset-underline-red" data-name="underline-red" data-w="2400" data-h="80">
-      <svg width="2400" height="80" viewBox="0 0 2400 80"></svg>
-      <script>
-        window.addEventListener('load', () => {
-          const svg = document.querySelector('#asset-underline-red svg');
-          const rc = WhiteboardGraphs.wrapRough(svg);
-          rc.line(30, 40, 2370, 40, {
-            stroke: '#c0392b', strokeWidth: 14, roughness: 4, bowing: 3, seed: 17
-          });
-          rc.line(30, 44, 2370, 44, {
-            stroke: '#c0392b', strokeWidth: 12, roughness: 3.5, bowing: 2.5, seed: 43
-          });
-        });
-      </script>
-    </div>
-  `);
-
-  // 2. Hand-drawn table per slide that has one
+  // 2. Hand-drawn table per slide that has one — only for whiteboard slides
   for (let i = 0; i < slides.length; i++) {
     const s = slides[i];
     if (!s.table) continue;
+    if (!s.whiteboard) continue;
     const hasBody = s.bodyLines.length > 0;
     // Width: 580 if alongside body, 1100 if full-width
     const tableW = hasBody ? 620 : 1200;

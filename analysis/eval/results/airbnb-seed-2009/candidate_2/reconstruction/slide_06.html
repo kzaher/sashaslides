@@ -1,0 +1,80 @@
+<!-- slide_06.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+}
+body {
+  padding: 72px 96px 60px;
+  display: flex; flex-direction: column;
+  position: relative;
+}
+.heading {
+  font-size: 42px; font-weight: 700; color: #29B6F6;
+  margin-bottom: 14px; letter-spacing: -0.5px;
+}
+.model-statement {
+  font-size: 17px; color: #333333; line-height: 1.6;
+  margin-bottom: 64px; max-width: 640px;
+}
+.data-row {
+  display: flex; gap: 0;
+}
+.data-item {
+  flex: 1;
+  padding-right: 48px;
+  border-right: 1px solid #E0E0E0;
+  margin-right: 48px;
+}
+.data-item:last-child {
+  border-right: none; margin-right: 0; padding-right: 0;
+}
+.data-number {
+  font-size: 80px; font-weight: 900; color: #E8711F;
+  line-height: 1; margin-bottom: 14px;
+  letter-spacing: -2px;
+}
+.data-label {
+  font-size: 15px; font-weight: 700; color: #333333;
+  text-transform: uppercase; letter-spacing: 0.8px;
+  margin-bottom: 8px;
+}
+.data-desc {
+  font-size: 13px; color: #333333; line-height: 1.6;
+}
+.citation {
+  position: absolute; bottom: 32px; left: 96px;
+  font-size: 10px; color: #888888;
+}
+</style>
+</head>
+<body>
+  <h1 class="heading">Business Model</h1>
+  <p class="model-statement">We take a 10% commission on each completed transaction. No subscription fees. No listing fees. Revenue is earned only when a booking is made.</p>
+  <div class="data-row">
+    <div class="data-item">
+      <div class="data-number">10%</div>
+      <div class="data-label">Commission per transaction</div>
+      <div class="data-desc">Charged to the traveler at checkout. Zero friction for hosts — they list once and receive payment minus our fee.</div>
+    </div>
+    <div class="data-item">
+      <div class="data-number">$25</div>
+      <div class="data-label">Average fee per booking</div>
+      <div class="data-desc">Based on $80/night average over 3 nights = $240 booking value. 10% = $24, rounded to $25 blended average.</div>
+    </div>
+    <div class="data-item">
+      <div class="data-number">$2.1B</div>
+      <div class="data-label">Projected revenue by 2011</div>
+      <div class="data-desc">At 84 million trips × $25 average fee across the serviceable market within 3 years of launch.</div>
+    </div>
+  </div>
+  <div class="citation">Internal model: 84M trips × $25 avg commission = $2.1B. See market size slide for trip count assumptions.</div>
+</body>
+</html>

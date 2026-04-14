@@ -1,0 +1,43 @@
+<!-- slide_02.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@1,400&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1280px; height: 720px; overflow: hidden; background: #4A6FA5; }
+body { display: flex; align-items: center; justify-content: center; }
+.slide {
+  width: 1280px; height: 720px;
+  position: relative;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 80px 200px;
+}
+.eyebrow {
+  position: absolute; top: 52px; left: 104px;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.11em; text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+}
+.statement {
+  font-family: 'Inter', sans-serif;
+  font-size: 32px; font-weight: 300; line-height: 1.55;
+  color: #FFFFFF; text-align: center; max-width: 760px;
+}
+.emphasis {
+  font-weight: 600;
+}
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="eyebrow">What is thefacebook.com?</div>
+  <div class="statement">
+    An online directory that connects <span class="emphasis">students, alumni, faculty, and staff</span> through social networks at colleges and universities — built on courses, friendships, and campus life.
+  </div>
+</div>
+</body>
+</html>

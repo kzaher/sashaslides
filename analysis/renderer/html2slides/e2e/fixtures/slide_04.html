@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%); display: flex; flex-direction: column; align-items: center; padding: 48px 60px; }
+h1 { font-size: 36px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+.subtitle { font-size: 16px; color: #64748b; margin-bottom: 48px; }
+.timeline { position: relative; width: 1100px; height: 440px; }
+/* Main horizontal line */
+.timeline-line { position: absolute; top: 180px; left: 40px; right: 40px; height: 4px; background: linear-gradient(90deg, #3b82f6, #60a5fa, #93c5fd, #cbd5e1, #e2e8f0); border-radius: 2px; }
+/* Milestone base */
+.milestone { position: absolute; top: 140px; display: flex; flex-direction: column; align-items: center; }
+.ms-1 { left: 40px; }
+.ms-2 { left: 280px; }
+.ms-3 { left: 520px; }
+.ms-4 { left: 760px; }
+.ms-5 { left: 1000px; }
+.dot { width: 28px; height: 28px; border-radius: 50%; position: relative; z-index: 2; }
+.dot.done { background: #3b82f6; box-shadow: 0 2px 8px rgba(59,130,246,0.4); }
+.dot.current { background: #3b82f6; box-shadow: 0 0 0 6px rgba(59,130,246,0.2), 0 0 0 12px rgba(59,130,246,0.08); }
+.dot.current::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: #fff; }
+.dot.current::before { content: ''; position: absolute; inset: 8px; border-radius: 50%; background: #3b82f6; }
+.dot.future { background: #fff; border: 3px solid #cbd5e1; }
+.date-above { position: absolute; bottom: calc(100% + 60px); left: 50%; transform: translateX(-50%); white-space: nowrap; }
+.date-label { font-size: 13px; font-weight: 600; color: #3b82f6; text-transform: uppercase; letter-spacing: 0.5px; }
+.date-label.future-label { color: #94a3b8; }
+.date-val { font-size: 12px; color: #64748b; margin-top: 2px; }
+.desc-below { position: absolute; top: calc(100% + 24px); left: 50%; transform: translateX(-50%); width: 180px; text-align: center; }
+.desc-title { font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 4px; }
+.desc-text { font-size: 12px; color: #64748b; line-height: 1.5; }
+/* Checkmark inside done dots */
+.dot.done::after { content: '✓'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 700; }
+/* Connector arrows between milestones */
+.arrow { position: absolute; top: 175px; font-size: 18px; color: #94a3b8; }
+.arrow-1 { left: 160px; }
+.arrow-2 { left: 400px; }
+.arrow-3 { left: 640px; }
+.arrow-4 { left: 880px; }
+/* Status badges */
+.status { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; margin-top: 8px; display: inline-block; }
+.status.complete { background: #dcfce7; color: #16a34a; }
+.status.in-progress { background: #dbeafe; color: #2563eb; }
+.status.planned { background: #f1f5f9; color: #94a3b8; }
+</style></head><body>
+<h1>Product Roadmap 2026</h1>
+<p class="subtitle">Key milestones and delivery timeline</p>
+<div class="timeline">
+  <div class="timeline-line"></div>
+  <div class="arrow arrow-1">→</div>
+  <div class="arrow arrow-2">→</div>
+  <div class="arrow arrow-3">→</div>
+  <div class="arrow arrow-4">→</div>
+
+  <div class="milestone ms-1">
+    <div class="date-above">
+      <div class="date-label">Phase 1</div>
+      <div class="date-val">Jan 2026</div>
+    </div>
+    <div class="dot done"></div>
+    <div class="desc-below">
+      <div class="desc-title">Foundation</div>
+      <div class="desc-text">Core platform rebuild with new architecture and CI/CD pipeline</div>
+      <div class="status complete">COMPLETED</div>
+    </div>
+  </div>
+
+  <div class="milestone ms-2">
+    <div class="date-above">
+      <div class="date-label">Phase 2</div>
+      <div class="date-val">Mar 2026</div>
+    </div>
+    <div class="dot done"></div>
+    <div class="desc-below">
+      <div class="desc-title">Beta Launch</div>
+      <div class="desc-text">Private beta with 50 design partners, feedback loops established</div>
+      <div class="status complete">COMPLETED</div>
+    </div>
+  </div>
+
+  <div class="milestone ms-3">
+    <div class="date-above">
+      <div class="date-label">Phase 3</div>
+      <div class="date-val">Apr 2026</div>
+    </div>
+    <div class="dot current"></div>
+    <div class="desc-below">
+      <div class="desc-title">GA Release</div>
+      <div class="desc-text">Public launch with self-serve onboarding and documentation</div>
+      <div class="status in-progress">IN PROGRESS</div>
+    </div>
+  </div>
+
+  <div class="milestone ms-4">
+    <div class="date-above">
+      <div class="date-label future-label">Phase 4</div>
+      <div class="date-val">Jul 2026</div>
+    </div>
+    <div class="dot future"></div>
+    <div class="desc-below">
+      <div class="desc-title">Enterprise</div>
+      <div class="desc-text">SSO, RBAC, audit logs, SOC 2 compliance certification</div>
+      <div class="status planned">PLANNED</div>
+    </div>
+  </div>
+
+  <div class="milestone ms-5">
+    <div class="date-above">
+      <div class="date-label future-label">Phase 5</div>
+      <div class="date-val">Oct 2026</div>
+    </div>
+    <div class="dot future"></div>
+    <div class="desc-below">
+      <div class="desc-title">AI Features</div>
+      <div class="desc-text">ML-powered insights, predictive analytics, smart automation</div>
+      <div class="status planned">PLANNED</div>
+    </div>
+  </div>
+</div>
+</body></html>

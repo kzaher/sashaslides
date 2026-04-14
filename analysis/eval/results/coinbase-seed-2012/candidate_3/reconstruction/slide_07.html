@@ -1,0 +1,78 @@
+<!-- slide_11.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px;
+  background: #E8ECF0;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 300;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.center-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 72px; /* space for banner */
+}
+.logo {
+  font-size: 64px;
+  font-weight: 300;
+  color: #333;
+  letter-spacing: -0.02em;
+}
+.logo-accent { color: #4A90D9; }
+.tagline {
+  font-size: 22px;
+  font-weight: 300;
+  color: #555;
+  margin-top: 16px;
+  letter-spacing: -0.01em;
+}
+.mini-chart {
+  margin-top: 36px;
+  opacity: 0.7;
+}
+.banner {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 68px;
+  background: #4A90D9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.banner-text {
+  font-size: 26px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.04em;
+}
+</style>
+</head>
+<body>
+<div class="center-block">
+  <div class="logo"><span class="logo-accent">Coin</span>base</div>
+  <div class="tagline">Your Hosted Bitcoin Wallet</div>
+  <div class="mini-chart">
+    <svg width="260" height="80" viewBox="0 0 260 80">
+      <path d="M 10,70 C 40,68 60,65 80,60 C 100,55 110,46 130,38 C 150,30 170,18 200,10 C 220,5 238,4 250,3"
+            fill="none" stroke="#4A90D9" stroke-width="2"/>
+      <path d="M 10,75 L 10,70 C 40,68 60,65 80,60 C 100,55 110,46 130,38 C 150,30 170,18 200,10 C 220,5 238,4 250,3 L 250,75 Z"
+            fill="rgba(74,144,217,0.15)"/>
+    </svg>
+  </div>
+</div>
+<div class="banner">
+  <span class="banner-text">coinbase.com</span>
+</div>
+</body>
+</html>

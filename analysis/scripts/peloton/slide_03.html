@@ -1,0 +1,65 @@
+<!-- slide_03.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; display:flex; }
+.photo {
+  width:540px; height:720px; flex-shrink:0; position:relative; overflow:hidden;
+  background:#1A1A1A;
+}
+.photo-light {
+  position:absolute; inset:0;
+  background:
+    radial-gradient(ellipse 400px 600px at 50% 40%, rgba(80,30,20,0.6) 0%, transparent 65%),
+    radial-gradient(ellipse 300px 200px at 70% 80%, rgba(244,64,96,0.08) 0%, transparent 50%),
+    #111111;
+}
+/* Silhouette suggestion */
+.figure {
+  position:absolute; bottom:0; left:50%; transform:translateX(-50%);
+  width:280px; height:520px;
+  background:radial-gradient(ellipse 120px 300px at 50% 50%, rgba(60,20,10,0.8) 0%, transparent 75%);
+}
+.photo-label {
+  position:absolute; bottom:32px; left:32px;
+  font-size:11px; font-weight:700; color:#F44060; letter-spacing:4px; text-transform:uppercase;
+}
+.panel {
+  flex:1; background:#FFFFFF; display:flex; flex-direction:column; justify-content:center;
+  padding:64px 72px 64px 60px;
+}
+.section-title { font-size:13px; font-weight:700; font-style:italic; color:#F44060; letter-spacing:5px; text-transform:uppercase; margin-bottom:20px; }
+.headline { font-size:30px; font-weight:900; color:#1A1A1A; text-transform:uppercase; line-height:1.1; margin-bottom:32px; }
+.list { display:flex; flex-direction:column; gap:18px; }
+.list-item { display:flex; align-items:flex-start; gap:14px; }
+.list-bullet { width:7px; height:7px; border-radius:50%; background:#F44060; flex-shrink:0; margin-top:6px; }
+.list-text { font-size:15px; font-weight:400; color:#1A1A1A; line-height:1.5; }
+.list-text strong { font-weight:700; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="photo">
+    <div class="photo-light"></div>
+    <div class="figure"></div>
+    <div class="photo-label">The Peloton Member</div>
+  </div>
+  <div class="panel">
+    <div class="section-title">Target Consumer</div>
+    <div class="headline">Serious About Fitness</div>
+    <div class="list">
+      <div class="list-item"><div class="list-bullet"></div><div class="list-text"><strong>Fitness first.</strong> They prioritize fitness above other discretionary activities.</div></div>
+      <div class="list-item"><div class="list-bullet"></div><div class="list-text"><strong>4+ workouts per week</strong> — an established, multi-discipline routine.</div></div>
+      <div class="list-item"><div class="list-bullet"></div><div class="list-text"><strong>Energy seekers.</strong> They love the competitive charge of group classes.</div></div>
+      <div class="list-item"><div class="list-bullet"></div><div class="list-text"><strong>Cross-trained.</strong> Their routine spans multiple exercise types — not one-note.</div></div>
+      <div class="list-item"><div class="list-bullet"></div><div class="list-text"><strong>Already committed.</strong> This isn't their first fitness product or gym membership.</div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

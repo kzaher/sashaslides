@@ -1,0 +1,59 @@
+<!-- slide_14.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; position:relative; }
+.photo-bg {
+  position:absolute; inset:0;
+  background:
+    radial-gradient(ellipse 700px 600px at 70% 40%, rgba(80,25,10,0.75) 0%, transparent 65%),
+    radial-gradient(ellipse 400px 300px at 20% 80%, rgba(30,8,5,0.6) 0%, transparent 55%),
+    #111111;
+}
+.overlay { position:absolute; inset:0; background:rgba(0,0,0,0.35); }
+/* Circular callout */
+.callout {
+  position:absolute;
+  left:80px; top:50%; transform:translateY(-50%);
+  width:340px; height:340px; border-radius:50%;
+  background:#F44060;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding:40px;
+  text-align:center;
+}
+.callout-label { font-size:10px; font-weight:800; color:rgba(255,255,255,0.7); letter-spacing:4px; text-transform:uppercase; margin-bottom:12px; }
+.callout-title { font-size:18px; font-weight:900; color:#FFFFFF; text-transform:uppercase; letter-spacing:2px; margin-bottom:14px; line-height:1.2; }
+.callout-rule { width:32px; height:2px; background:rgba(255,255,255,0.5); margin:0 auto 14px; }
+.callout-body { font-size:12px; font-weight:400; color:rgba(255,255,255,0.9); line-height:1.6; }
+/* Bottom caption */
+.caption {
+  position:absolute; bottom:40px; right:80px;
+  font-size:11px; font-weight:600; color:rgba(255,255,255,0.4); letter-spacing:3px; text-transform:uppercase;
+}
+/* Pillar number */
+.pillar-num {
+  position:absolute; top:48px; right:80px;
+  font-size:96px; font-weight:900; color:rgba(244,64,96,0.12); line-height:1;
+}
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="photo-bg"></div>
+  <div class="overlay"></div>
+  <div class="pillar-num">01</div>
+  <div class="callout">
+    <div class="callout-label">Brand Pillar 01</div>
+    <div class="callout-title">Makes Hard Work Fun</div>
+    <div class="callout-rule"></div>
+    <div class="callout-body">Hero the instructors and the content. Always show hard work — this is not a party on a bike. The work is the entertainment.</div>
+  </div>
+  <div class="caption">Creative Pillar</div>
+</div>
+</body>
+</html>

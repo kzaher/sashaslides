@@ -1,0 +1,1286 @@
+[
+  {
+    "slide": 1,
+    "file": "slide_01.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#5cb85c",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 392.36,
+          "y": 268.61,
+          "w": 495.27,
+          "h": 124.78
+        },
+        "text": "Sequoia Capital\nPitch Deck Template",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 52,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "center",
+          "lineHeight": 62.4,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 392.36,
+          "y": 421.39,
+          "w": 495.27,
+          "h": 30
+        },
+        "text": "A framework for structuring a startup pitch",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 20,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "center",
+          "lineHeight": 30,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 2,
+    "file": "slide_02.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 112,
+          "y": 155,
+          "w": 1056,
+          "h": 174.45
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "Company Purpose",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 28.9,
+            "spacingAfter": 6
+          },
+          {
+            "text": "Problem",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 28.9,
+            "spacingAfter": 6
+          },
+          {
+            "text": "Solution",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 28.9,
+            "spacingAfter": 6
+          },
+          {
+            "text": "Why Now",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 28.9,
+            "spacingAfter": 6
+          },
+          {
+            "text": "Market Size",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 28.9,
+            "spacingAfter": 6
+          },
+          {
+            "text": "Competition",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 28.9,
+            "spacingAfter": 6
+          },
+          {
+            "text": "Product",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 28.9,
+            "spacingAfter": 6
+          },
+          {
+            "text": "Business Model",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 28.9,
+            "spacingAfter": 6
+          },
+          {
+            "text": "Team",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 28.9,
+            "spacingAfter": 6
+          },
+          {
+            "text": "Financials",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 28.9,
+            "spacingAfter": 6
+          }
+        ],
+        "columnCount": 2,
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 72,
+          "w": 1056,
+          "h": 39
+        },
+        "text": "What this deck covers",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 30,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#5cb85c",
+          "textAlign": "start",
+          "lineHeight": 39,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 3,
+    "file": "slide_03.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 72,
+          "w": 1056,
+          "h": 39
+        },
+        "text": "Company Purpose",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 30,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#5cb85c",
+          "textAlign": "start",
+          "lineHeight": 39,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 163,
+          "w": 680,
+          "h": 28.8
+        },
+        "text": "Define the company in a single declarative sentence.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 18,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 28.8,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 231.8,
+          "w": 560,
+          "h": 38.38
+        },
+        "text": "This sentence is the north star of the entire deck. Every subsequent slide either supports it or loses the audience. Write it before building any other slide.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#999999",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 4,
+    "file": "slide_04.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 112,
+          "y": 155,
+          "w": 1056,
+          "h": 141.56
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "Describe the problem in the customer's own words, not yours",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Show how customers address this issue today",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Make clear why the current approach is insufficient",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          }
+        ],
+        "columnCount": 1,
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 72,
+          "w": 1056,
+          "h": 39
+        },
+        "text": "What pain does the customer feel?",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 30,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#5cb85c",
+          "textAlign": "start",
+          "lineHeight": 39,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 5,
+    "file": "slide_05.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 112,
+          "y": 155,
+          "w": 1056,
+          "h": 141.56
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "State the core value proposition directly",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Show where the product sits in the customer's workflow",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Provide one concrete use case with a named customer type",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          }
+        ],
+        "columnCount": 1,
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 72,
+          "w": 1056,
+          "h": 39
+        },
+        "text": "How do we make the customer's life better?",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 30,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#5cb85c",
+          "textAlign": "start",
+          "lineHeight": 39,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 332.56,
+          "w": 560,
+          "h": 38.38
+        },
+        "text": "Optional: include a before/after framing in prose if the transformation is not obvious from the bullets alone.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#999999",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 6,
+    "file": "slide_06.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 72,
+          "w": 1056,
+          "h": 39
+        },
+        "text": "Why is this the right moment?",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 30,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#5cb85c",
+          "textAlign": "start",
+          "lineHeight": 39,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 163,
+          "w": 700,
+          "h": 30.59
+        },
+        "text": "Set up the historical evolution of the category. Show the trajectory that leads to now.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 18,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 30.6,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 217.59,
+          "w": 700,
+          "h": 61.19
+        },
+        "text": "Name the recent shift — technical, regulatory, behavioral, or economic — that makes this solution possible and necessary today rather than five years ago.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 18,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 30.6,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 7,
+    "file": "slide_07.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 112,
+          "y": 155,
+          "w": 1056,
+          "h": 188.75
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "Profile the customer you are targeting with specificity",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "TAM: total addressable market, calculated top-down",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "SAM: serviceable addressable market, calculated bottoms-up",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "SOM: the portion realistically capturable in years one through three",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          }
+        ],
+        "columnCount": 1,
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 72,
+          "w": 1056,
+          "h": 39
+        },
+        "text": "How large is the opportunity?",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 30,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#5cb85c",
+          "textAlign": "start",
+          "lineHeight": 39,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 379.75,
+          "w": 600,
+          "h": 19.19
+        },
+        "text": "Optional: cite the source for each estimate. Unsourced large numbers are a credibility liability.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#999999",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 8,
+    "file": "slide_08.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 112,
+          "y": 155,
+          "w": 1056,
+          "h": 141.56
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "List primary direct and indirect competitors by name",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "State your defensible advantages against each category",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Identify where competitors are strong and why you are not competing there",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          }
+        ],
+        "columnCount": 1,
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 72,
+          "w": 1056,
+          "h": 39
+        },
+        "text": "Who else is in this space?",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 30,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#5cb85c",
+          "textAlign": "start",
+          "lineHeight": 39,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 332.56,
+          "w": 640,
+          "h": 22.39
+        },
+        "text": "Do not claim there are no competitors. Every evaluator will name three before you finish the sentence.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ff0000",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 9,
+    "file": "slide_09.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 112,
+          "y": 155,
+          "w": 1056,
+          "h": 188.75
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "Form factor, core functionality, and key features",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Architecture decisions that create defensibility",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Intellectual property or technical differentiation",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Development roadmap with concrete milestones",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          }
+        ],
+        "columnCount": 1,
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 72,
+          "w": 1056,
+          "h": 39
+        },
+        "text": "What are we building?",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 30,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#5cb85c",
+          "textAlign": "start",
+          "lineHeight": 39,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 379.75,
+          "w": 580,
+          "h": 38.38
+        },
+        "text": "Optional: include current product status — concept, beta, or shipping — so the audience calibrates expectations correctly.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#999999",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 10,
+    "file": "slide_10.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 112,
+          "y": 155,
+          "w": 1056,
+          "h": 188.75
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "Revenue model and pricing structure",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Average account size or customer lifetime value",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Sales motion and distribution channels",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Current customer list or pipeline with named accounts",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          }
+        ],
+        "columnCount": 1,
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 72,
+          "w": 1056,
+          "h": 39
+        },
+        "text": "How do we make money?",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 30,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#5cb85c",
+          "textAlign": "start",
+          "lineHeight": 39,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 11,
+    "file": "slide_11.html",
+    "elementCount": 5,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 72,
+          "w": 1056,
+          "h": 39
+        },
+        "text": "Who is building this?",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 30,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#5cb85c",
+          "textAlign": "start",
+          "lineHeight": 39,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 163,
+          "w": 680,
+          "h": 61.19
+        },
+        "text": "Name founders and key management. State the specific experience that qualifies each person for their role.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 18,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 30.6,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 248.19,
+          "w": 680,
+          "h": 30.59
+        },
+        "text": "List board of directors and advisors separately.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 18,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 30.6,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 302.78,
+          "w": 560,
+          "h": 38.38
+        },
+        "text": "Optional: note any domain expertise gaps and how you are addressing them. Acknowledging gaps builds more trust than the audience assumes you are hiding.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#999999",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 12,
+    "file": "slide_12.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 112,
+          "y": 155,
+          "w": 1056,
+          "h": 235.94
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "Profit and loss projection (three-year minimum)",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Cash flow forecast with burn rate and runway",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#333333",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Balance sheet — optional",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#999999",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "Cap table — optional",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#999999",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          },
+          {
+            "text": "The deal: raise amount, instrument, and use of funds — optional",
+            "level": 0,
+            "fontFamily": "-apple-system",
+            "fontSize": 17,
+            "fontWeight": "normal",
+            "color": "#999999",
+            "lineHeight": 27.2,
+            "spacingAfter": 20
+          }
+        ],
+        "columnCount": 1,
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 112,
+          "y": 72,
+          "w": 1056,
+          "h": 39
+        },
+        "text": "What do the numbers show?",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 30,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#5cb85c",
+          "textAlign": "start",
+          "lineHeight": 39,
+          "textDecoration": null
+        }
+      }
+    ]
+  },
+  {
+    "slide": 13,
+    "file": "slide_13.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#5cb85c",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 298.27,
+          "y": 300.8,
+          "w": 683.45,
+          "h": 57.59
+        },
+        "text": "Here is what we are asking for.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 48,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "center",
+          "lineHeight": 57.6,
+          "textDecoration": null
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 298.27,
+          "y": 390.39,
+          "w": 683.45,
+          "h": 28.8
+        },
+        "text": "State the raise amount, the instrument, the use of funds, and the timeline.",
+        "style": {
+          "fontFamily": "-apple-system",
+          "fontSize": 18,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "center",
+          "lineHeight": 28.8,
+          "textDecoration": null
+        }
+      }
+    ]
+  }
+]

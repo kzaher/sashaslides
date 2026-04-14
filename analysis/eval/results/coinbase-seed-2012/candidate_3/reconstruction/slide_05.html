@@ -1,0 +1,78 @@
+<!-- slide_09.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px;
+  background: #E8ECF0;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 300;
+  overflow: hidden;
+  position: relative;
+}
+h1 {
+  position: absolute;
+  top: 60px; left: 0; right: 0;
+  text-align: center;
+  font-size: 44px; font-weight: 300;
+  color: #333; letter-spacing: -0.02em;
+}
+.trio {
+  position: absolute;
+  top: 50%; left: 80px; right: 80px;
+  transform: translateY(-45%);
+  display: flex;
+  justify-content: space-around;
+  align-items: flex-start;
+}
+.item {
+  display: flex; flex-direction: column;
+  align-items: center; gap: 14px;
+  width: 280px;
+}
+.label {
+  font-size: 30px; font-weight: 300;
+  color: #333; text-align: center;
+  letter-spacing: -0.02em;
+}
+</style>
+</head>
+<body>
+<h1>Send. Receive. Manage.</h1>
+<div class="trio">
+  <!-- Send -->
+  <div class="item">
+    <svg width="64" height="64" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="26" fill="none" stroke="#4A90D9" stroke-width="2.5"/>
+      <line x1="32" y1="44" x2="32" y2="20" stroke="#4A90D9" stroke-width="2.5"/>
+      <polyline points="22,30 32,20 42,30" fill="none" stroke="#4A90D9" stroke-width="2.5" stroke-linejoin="round"/>
+    </svg>
+    <div class="label">Send</div>
+  </div>
+  <!-- Receive -->
+  <div class="item">
+    <svg width="64" height="64" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="26" fill="none" stroke="#4A90D9" stroke-width="2.5"/>
+      <line x1="32" y1="20" x2="32" y2="44" stroke="#4A90D9" stroke-width="2.5"/>
+      <polyline points="22,34 32,44 42,34" fill="none" stroke="#4A90D9" stroke-width="2.5" stroke-linejoin="round"/>
+    </svg>
+    <div class="label">Receive</div>
+  </div>
+  <!-- Manage -->
+  <div class="item">
+    <svg width="64" height="64" viewBox="0 0 64 64">
+      <rect x="8" y="18" width="48" height="34" rx="4" fill="none" stroke="#4A90D9" stroke-width="2.5"/>
+      <line x1="8" y1="28" x2="56" y2="28" stroke="#4A90D9" stroke-width="2.5"/>
+      <rect x="16" y="35" width="10" height="6" rx="1" fill="#4A90D9"/>
+      <rect x="30" y="35" width="10" height="6" rx="1" fill="#4A90D9" opacity="0.5"/>
+      <line x1="22" y1="14" x2="22" y2="22" stroke="#4A90D9" stroke-width="2"/>
+      <line x1="42" y1="14" x2="42" y2="22" stroke="#4A90D9" stroke-width="2"/>
+    </svg>
+    <div class="label">Manage</div>
+  </div>
+</div>
+</body>
+</html>

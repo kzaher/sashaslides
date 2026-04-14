@@ -1,0 +1,57 @@
+<!-- slide_13.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; display:flex; }
+.photo {
+  width:560px; height:720px; flex-shrink:0; position:relative; overflow:hidden;
+  background:#0D0D0D;
+}
+.photo-light {
+  position:absolute; inset:0;
+  background:
+    radial-gradient(ellipse 350px 500px at 45% 35%, rgba(90,25,15,0.7) 0%, transparent 60%),
+    radial-gradient(ellipse 250px 200px at 65% 85%, rgba(244,64,96,0.06) 0%, transparent 50%),
+    #0D0D0D;
+}
+.photo-label {
+  position:absolute; bottom:32px; left:32px;
+  font-size:11px; font-weight:700; color:#F44060; letter-spacing:4px; text-transform:uppercase;
+}
+.panel {
+  flex:1; background:#FFFFFF; display:flex; flex-direction:column; justify-content:center;
+  padding:64px 72px 64px 64px;
+}
+.section-title { font-size:13px; font-weight:700; font-style:italic; color:#F44060; letter-spacing:5px; text-transform:uppercase; margin-bottom:20px; }
+.headline { font-size:30px; font-weight:900; color:#1A1A1A; text-transform:uppercase; line-height:1.1; margin-bottom:32px; }
+.pillars { display:flex; flex-direction:column; gap:16px; }
+.pillar { display:flex; align-items:center; gap:16px; padding:12px 16px; background:#F8F8F8; border-left:3px solid #F44060; }
+.pillar-num { font-size:11px; font-weight:800; color:#F44060; min-width:24px; }
+.pillar-name { font-size:13px; font-weight:800; color:#1A1A1A; text-transform:uppercase; letter-spacing:1.5px; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="photo">
+    <div class="photo-light"></div>
+    <div class="photo-label">Creative Execution</div>
+  </div>
+  <div class="panel">
+    <div class="section-title">Brand Pillars</div>
+    <div class="headline">How We Show Up in Creative</div>
+    <div class="pillars">
+      <div class="pillar"><div class="pillar-num">01</div><div class="pillar-name">Makes Hard Work Fun</div></div>
+      <div class="pillar"><div class="pillar-num">02</div><div class="pillar-name">Pushes Me to Excel</div></div>
+      <div class="pillar"><div class="pillar-num">03</div><div class="pillar-name">Innovative Design</div></div>
+      <div class="pillar"><div class="pillar-num">04</div><div class="pillar-name">Wholly Immersive</div></div>
+      <div class="pillar"><div class="pillar-num">05</div><div class="pillar-name">Committed</div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!-- slide_07.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding-top: 48px;
+  }
+  .eyebrow { font-size: 13px; color: #888888; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 12px; }
+  .title { font-size: 50px; font-weight: 300; color: #333333; margin-bottom: 36px; }
+  .title span { color: #4A90D9; font-weight: 700; }
+  .screens { display: flex; gap: 28px; align-items: flex-start; }
+  .screen-card {
+    background: #FFFFFF; border-radius: 8px;
+    overflow: hidden;
+  }
+  .screen-label { font-size: 11px; color: #888888; letter-spacing: 0.12em; text-transform: uppercase; text-align: center; padding: 10px 0 6px; }
+  /* Dashboard screen */
+  .dash { width: 380px; }
+  .dash-header { background: #2E3A5F; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }
+  .dash-logo { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: 0.05em; }
+  .dash-nav { font-size: 12px; color: rgba(255,255,255,0.6); }
+  .dash-balance { padding: 20px 24px 14px; border-bottom: 1px solid #F0F2F4; }
+  .dash-bal-label { font-size: 11px; color: #888; letter-spacing: 0.1em; text-transform: uppercase; }
+  .dash-bal-amount { font-size: 32px; font-weight: 300; color: #333; margin-top: 4px; }
+  .dash-bal-btc { font-size: 13px; color: #888; }
+  .dash-actions { display: flex; gap: 10px; padding: 14px 24px; border-bottom: 1px solid #F0F2F4; }
+  .dash-btn { flex: 1; padding: 9px; border-radius: 3px; font-size: 13px; font-weight: 700; text-align: center; }
+  .dash-btn-send { background: #4A90D9; color: #fff; }
+  .dash-btn-recv { background: #E8ECF0; color: #333; }
+  .dash-txs { padding: 10px 24px 14px; }
+  .dash-tx-row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #F5F6F8; font-size: 13px; }
+  .dash-tx-row:last-child { border-bottom: none; }
+  .tx-p { color: #333; }
+  .tx-a { font-weight: 700; color: #4A90D9; }
+  .tx-an { font-weight: 700; color: #888; }
+  /* Send screen */
+  .send-scr { width: 280px; }
+  .send-header { background: #2E3A5F; padding: 14px 20px; }
+  .send-title-bar { font-size: 15px; font-weight: 700; color: #fff; }
+  .send-body { padding: 18px 20px; }
+  .send-field { margin-bottom: 12px; }
+  .send-field label { font-size: 11px; color: #888; letter-spacing: 0.1em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+  .send-field .inp { background: #F5F6F8; border-radius: 3px; padding: 9px 12px; font-size: 13px; color: #333; }
+  .send-submit { background: #4A90D9; color: #fff; text-align: center; padding: 11px; border-radius: 3px; font-size: 14px; font-weight: 700; margin-top: 16px; }
+  /* History screen */
+  .hist { width: 280px; }
+  .hist-header { background: #2E3A5F; padding: 14px 20px; }
+  .hist-title-bar { font-size: 15px; font-weight: 700; color: #fff; }
+  .hist-list { padding: 6px 0; }
+  .hist-row { padding: 10px 20px; border-bottom: 1px solid #F0F2F4; display: flex; justify-content: space-between; align-items: center; }
+  .hist-row:last-child { border-bottom: none; }
+  .hist-name { font-size: 13px; color: #333; }
+  .hist-date { font-size: 11px; color: #888; margin-top: 2px; }
+  .hist-amt { font-size: 13px; font-weight: 700; }
+  .pos { color: #4A90D9; }
+  .neg { color: #888; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">The Solution</div>
+  <div class="title"><span>Coinbase</span> — Bitcoin for everyone</div>
+  <div class="screens">
+    <div class="screen-card dash">
+      <div class="screen-label">Dashboard</div>
+      <div class="dash-header">
+        <span class="dash-logo">Coinbase</span>
+        <span class="dash-nav">Dashboard · Send · History</span>
+      </div>
+      <div class="dash-balance">
+        <div class="dash-bal-label">Your Balance</div>
+        <div class="dash-bal-amount">$1,240.00</div>
+        <div class="dash-bal-btc">3.42 BTC</div>
+      </div>
+      <div class="dash-actions">
+        <div class="dash-btn dash-btn-send">Send Bitcoin</div>
+        <div class="dash-btn dash-btn-recv">Receive</div>
+      </div>
+      <div class="dash-txs">
+        <div class="dash-tx-row"><span class="tx-p">Received · Alex</span><span class="tx-a">+0.50 BTC</span></div>
+        <div class="dash-tx-row"><span class="tx-p">Sent · Merchant</span><span class="tx-an">−0.12 BTC</span></div>
+        <div class="dash-tx-row"><span class="tx-p">Received · Jane</span><span class="tx-a">+1.00 BTC</span></div>
+      </div>
+    </div>
+    <div class="screen-card send-scr">
+      <div class="screen-label">Send</div>
+      <div class="send-header"><div class="send-title-bar">Send Bitcoin</div></div>
+      <div class="send-body">
+        <div class="send-field"><label>To</label><div class="inp">friend@example.com</div></div>
+        <div class="send-field"><label>Amount (BTC)</label><div class="inp">0.10</div></div>
+        <div class="send-field"><label>Note (optional)</label><div class="inp">For dinner</div></div>
+        <div class="send-submit">Send 0.10 BTC →</div>
+      </div>
+    </div>
+    <div class="screen-card hist">
+      <div class="screen-label">History</div>
+      <div class="hist-header"><div class="hist-title-bar">Transaction History</div></div>
+      <div class="hist-list">
+        <div class="hist-row"><div><div class="hist-name">Received from Alex</div><div class="hist-date">Aug 12</div></div><div class="hist-amt pos">+0.50</div></div>
+        <div class="hist-row"><div><div class="hist-name">Sent to Merchant</div><div class="hist-date">Aug 11</div></div><div class="hist-amt neg">−0.12</div></div>
+        <div class="hist-row"><div><div class="hist-name">Received · Jane</div><div class="hist-date">Aug 9</div></div><div class="hist-amt pos">+1.00</div></div>
+        <div class="hist-row"><div><div class="hist-name">Sent · Exchange</div><div class="hist-date">Aug 7</div></div><div class="hist-amt neg">−0.80</div></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

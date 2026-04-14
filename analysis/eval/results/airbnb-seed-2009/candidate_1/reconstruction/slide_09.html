@@ -1,0 +1,98 @@
+<!-- slide_09.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px;
+    background: #FFFFFF;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  .slide { padding: 80px 80px 60px; height: 720px; }
+  .section-label {
+    font-size: 13px; font-weight: bold;
+    color: #29B6F6; letter-spacing: 2px;
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .title {
+    font-size: 38px; font-weight: bold;
+    color: #333333; margin-bottom: 32px;
+  }
+  .matrix-wrap {
+    position: relative;
+    width: 1120px; height: 480px;
+  }
+  /* Axes */
+  .h-axis {
+    position: absolute; top: 50%; left: 5%; right: 5%;
+    height: 1px; background: #CCCCCC;
+  }
+  .v-axis {
+    position: absolute; left: 50%; top: 5%; bottom: 5%;
+    width: 1px; background: #CCCCCC;
+  }
+  /* Axis labels */
+  .axis-label {
+    position: absolute;
+    font-size: 11px; font-weight: bold;
+    color: #888888; letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .ax-top    { top: 2%;  left: 50%; transform: translateX(-50%); }
+  .ax-bottom { bottom: 2%; left: 50%; transform: translateX(-50%); }
+  .ax-left   { top: 50%; left: 1%; transform: translateY(-50%); }
+  .ax-right  { top: 50%; right: 1%; transform: translateY(-50%); }
+  /* Competitor labels */
+  .comp {
+    position: absolute;
+    font-size: 13px; color: #888888;
+    transform: translate(-50%, -50%);
+    white-space: nowrap;
+  }
+  .comp.hero {
+    font-size: 15px; font-weight: bold;
+    color: #29B6F6;
+  }
+</style>
+</head>
+<body>
+  <div class="slide">
+    <div class="section-label">Competitive Landscape</div>
+    <div class="title">Affordable + Online: Our Territory</div>
+
+    <div class="matrix-wrap">
+      <div class="h-axis"></div>
+      <div class="v-axis"></div>
+
+      <!-- Axis Labels -->
+      <div class="axis-label ax-top">Expensive</div>
+      <div class="axis-label ax-bottom">Affordable</div>
+      <div class="axis-label ax-left">Offline</div>
+      <div class="axis-label ax-right">Online</div>
+
+      <!-- Top-Left: Expensive + Offline -->
+      <div class="comp" style="left:22%; top:18%;">BedandBreakfast.com</div>
+      <div class="comp" style="left:18%; top:32%;">rentahome</div>
+
+      <!-- Top-Right: Expensive + Online -->
+      <div class="comp" style="left:68%; top:12%;">Hotels.com</div>
+      <div class="comp" style="left:80%; top:22%;">Orbitz</div>
+      <div class="comp" style="left:75%; top:34%;">VRBO</div>
+
+      <!-- Bottom-Left: Affordable + Offline -->
+      <div class="comp" style="left:28%; top:70%;">CouchSurfing</div>
+
+      <!-- Bottom-Right: Affordable + Online -->
+      <div class="comp" style="left:60%; top:72%;">Craigslist</div>
+      <div class="comp" style="left:72%; top:62%;">Hostels.com</div>
+      <div class="comp" style="left:82%; top:74%;">rentobi.com</div>
+
+      <!-- Hero: AirBed&Breakfast -->
+      <div class="comp hero" style="left:65%; top:84%;">● AirBed&amp;Breakfast</div>
+    </div>
+  </div>
+</body>
+</html>

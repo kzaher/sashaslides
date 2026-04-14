@@ -1,0 +1,63 @@
+<!-- slide_04.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+}
+body {
+  padding: 72px 96px;
+  display: flex; flex-direction: column;
+}
+.heading {
+  font-size: 42px; font-weight: 700; color: #29B6F6;
+  margin-bottom: 14px; letter-spacing: -0.5px;
+}
+.description {
+  font-size: 17px; color: #333333; line-height: 1.6;
+  max-width: 720px; margin-bottom: 56px;
+}
+.callouts {
+  display: flex; gap: 32px; flex: 1;
+}
+.callout {
+  flex: 1;
+  padding: 36px 32px;
+  background: #D6EEFB;
+  display: flex; flex-direction: column;
+}
+.callout-label {
+  font-size: 18px; font-weight: 900; color: #29B6F6;
+  letter-spacing: 2.5px; text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.callout-text {
+  font-size: 15px; color: #333333; line-height: 1.65;
+}
+</style>
+</head>
+<body>
+  <h1 class="heading">The Solution</h1>
+  <p class="description">A web platform where users rent out their space to host travelers — creating value on both sides of every transaction.</p>
+  <div class="callouts">
+    <div class="callout">
+      <div class="callout-label">Save Money</div>
+      <div class="callout-text">Travelers access affordable, local alternatives to hotels at a fraction of the standard nightly rate.</div>
+    </div>
+    <div class="callout">
+      <div class="callout-label">Make Money</div>
+      <div class="callout-text">Hosts earn income from unused space. The first platform to give hosts a financial reason to participate.</div>
+    </div>
+    <div class="callout">
+      <div class="callout-label">Share Culture</div>
+      <div class="callout-text">Every booking creates a genuine local connection that the hotel model structurally cannot provide.</div>
+    </div>
+  </div>
+</body>
+</html>

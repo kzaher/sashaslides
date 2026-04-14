@@ -1,0 +1,4853 @@
+[
+  {
+    "slide": 1,
+    "file": "slide_01.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 349.03,
+          "y": 296.41,
+          "w": 581.94,
+          "h": 68
+        },
+        "text": "AirBed&Breakfast",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 68,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "center",
+          "lineHeight": 68,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 414.48,
+          "y": 388.41,
+          "w": 451.03,
+          "h": 35.19
+        },
+        "text": "Book rooms with locals, rather than hotels.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 22,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "center",
+          "lineHeight": 35.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0.2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 451.97,
+          "y": 662,
+          "w": 376.06,
+          "h": 14
+        },
+        "text": "airbedandbreakfast.com  ·  joe@airbedandbreakfast.com  ·  2008",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "center",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0.6
+        }
+      }
+    ]
+  },
+  {
+    "slide": 2,
+    "file": "slide_02.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 96,
+          "y": 321.5,
+          "w": 1088,
+          "h": 188
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "Price is an important concern for customers booking travel online.",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 16,
+            "fontWeight": "normal",
+            "color": "#000000",
+            "lineHeight": 19.2,
+            "spacingAfter": 0
+          },
+          {
+            "text": "Hotels leave you disconnected from the city and its culture.",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 16,
+            "fontWeight": "normal",
+            "color": "#000000",
+            "lineHeight": 19.2,
+            "spacingAfter": 0
+          },
+          {
+            "text": "No easy way exists to book a room with a local or become a host.",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 16,
+            "fontWeight": "normal",
+            "color": "#000000",
+            "lineHeight": 19.2,
+            "spacingAfter": 0
+          }
+        ],
+        "columnCount": 1,
+        "listStyleType": "none",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 210.5,
+          "w": 1088,
+          "h": 51
+        },
+        "text": "The Problem",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 42,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 50.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      }
+    ]
+  },
+  {
+    "slide": 3,
+    "file": "slide_03.html",
+    "elementCount": 10,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 72,
+          "w": 1088,
+          "h": 51
+        },
+        "text": "Demand Already Exists",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 42,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 50.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 139,
+          "w": 680,
+          "h": 54.38
+        },
+        "text": "Travelers are already solving this problem with inferior tools. The market is proven — the infrastructure is not.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 27.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 265.38,
+          "w": 463.5,
+          "h": 96
+        },
+        "text": "660K",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 96,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 96,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -3
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 720.5,
+          "y": 265.38,
+          "w": 463.5,
+          "h": 96
+        },
+        "text": "50K",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 96,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 96,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -3
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 377.38,
+          "w": 463.5,
+          "h": 20
+        },
+        "text": "Couchsurfing.com total users",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 20.4,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 720.5,
+          "y": 377.38,
+          "w": 463.5,
+          "h": 20
+        },
+        "text": "Craigslist temp housing listings / week (US)",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 20.4,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 407.38,
+          "w": 420,
+          "h": 67.17
+        },
+        "text": "Travelers already willing to stay with strangers — with zero financial incentive for hosts. Demand is there; the business model is missing.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 720.5,
+          "y": 407.38,
+          "w": 420,
+          "h": 44.78
+        },
+        "text": "Active supply posted through a tool with no booking, no trust layer, and no transaction infrastructure whatsoever.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 676,
+          "w": 458.86,
+          "h": 12
+        },
+        "text": "Sources: Couchsurfing.com public stats; Craigslist US temporary housing category — 2008",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 10,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 12,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0.3
+        }
+      }
+    ]
+  },
+  {
+    "slide": 4,
+    "file": "slide_04.html",
+    "elementCount": 12,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 96,
+          "y": 247.38,
+          "w": 341.33,
+          "h": 400.63
+        },
+        "fill": "#d6eefb",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 469.33,
+          "y": 247.38,
+          "w": 341.34,
+          "h": 400.63
+        },
+        "fill": "#d6eefb",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 842.67,
+          "y": 247.38,
+          "w": 341.33,
+          "h": 400.63
+        },
+        "fill": "#d6eefb",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 72,
+          "w": 1088,
+          "h": 51
+        },
+        "text": "The Solution",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 42,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 50.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 137,
+          "w": 720,
+          "h": 54.38
+        },
+        "text": "A web platform where users rent out their space to host travelers — creating value on both sides of every transaction.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 27.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 128,
+          "y": 283.38,
+          "w": 277.33,
+          "h": 21
+        },
+        "text": "Save Money",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 21.599999999999998,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 501.33,
+          "y": 283.38,
+          "w": 277.34,
+          "h": 21
+        },
+        "text": "Make Money",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 21.599999999999998,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 874.67,
+          "y": 283.38,
+          "w": 277.33,
+          "h": 21
+        },
+        "text": "Share Culture",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 21.599999999999998,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 128,
+          "y": 320.38,
+          "w": 277.33,
+          "h": 74.25
+        },
+        "text": "Travelers access affordable, local alternatives to hotels at a fraction of the standard nightly rate.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 24.75,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 501.33,
+          "y": 320.38,
+          "w": 277.34,
+          "h": 74.25
+        },
+        "text": "Hosts earn income from unused space. The first platform to give hosts a financial reason to participate.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 24.75,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 874.67,
+          "y": 320.38,
+          "w": 277.33,
+          "h": 74.25
+        },
+        "text": "Every booking creates a genuine local connection that the hotel model structurally cannot provide.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 24.75,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 5,
+    "file": "slide_05.html",
+    "elementCount": 67,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 82,
+          "y": 170.5,
+          "w": 1116,
+          "h": 46
+        },
+        "fill": "#f5f5f5",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 158,
+          "y": 180.5,
+          "w": 1024,
+          "h": 25
+        },
+        "fill": "#ffffff",
+        "borderColor": "#e0e0e0",
+        "borderWidth": 1,
+        "borderRadius": 4
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 98,
+          "y": 188,
+          "w": 10,
+          "h": 10
+        },
+        "fill": "#ffcdd2",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 50
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 118,
+          "y": 188,
+          "w": 10,
+          "h": 10
+        },
+        "fill": "#fff9c4",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 50
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 138,
+          "y": 188,
+          "w": 10,
+          "h": 10
+        },
+        "fill": "#dcedc8",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 50
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 82,
+          "y": 216.5,
+          "w": 1116,
+          "h": 449.5
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 1073.91,
+          "y": 242.5,
+          "w": 96.09,
+          "h": 37
+        },
+        "fill": "#29b6f6",
+        "borderColor": "#ffffff",
+        "borderWidth": 0,
+        "borderRadius": 4
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 111,
+          "y": 302.5,
+          "w": 340.66,
+          "h": 110
+        },
+        "fill": "#e3f2fd",
+        "borderColor": "#999999",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 469.66,
+          "y": 302.5,
+          "w": 340.67,
+          "h": 110
+        },
+        "fill": "#f3e5f5",
+        "borderColor": "#999999",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 828.33,
+          "y": 302.5,
+          "w": 340.67,
+          "h": 110
+        },
+        "fill": "#e8f5e9",
+        "borderColor": "#999999",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 483.66,
+          "y": 596,
+          "w": 312.67,
+          "h": 33
+        },
+        "fill": "#ffffff",
+        "borderColor": "#29b6f6",
+        "borderWidth": 1,
+        "borderRadius": 4
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 842.33,
+          "y": 596,
+          "w": 312.67,
+          "h": 33
+        },
+        "fill": "#ffffff",
+        "borderColor": "#29b6f6",
+        "borderWidth": 1,
+        "borderRadius": 4
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 125,
+          "y": 598,
+          "w": 312.66,
+          "h": 31
+        },
+        "fill": "#29b6f6",
+        "borderColor": "#ffffff",
+        "borderWidth": 0,
+        "borderRadius": 4
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 80,
+          "y": 168.5,
+          "w": 1120,
+          "h": 2
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 80,
+          "y": 168.5,
+          "w": 2,
+          "h": 499.5
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 1200,
+          "y": 168.5,
+          "w": 2,
+          "h": 499.5
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 158,
+          "y": 180.5,
+          "w": 1024,
+          "h": 1
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 158,
+          "y": 180.5,
+          "w": 1,
+          "h": 25
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 1182,
+          "y": 180.5,
+          "w": 1,
+          "h": 25
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 158,
+          "y": 205.5,
+          "w": 1024,
+          "h": 1
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 82,
+          "y": 216.5,
+          "w": 1116,
+          "h": 1
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 110,
+          "y": 240.5,
+          "w": 953.91,
+          "h": 2
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 110,
+          "y": 240.5,
+          "w": 2,
+          "h": 41
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 1063.9099999999999,
+          "y": 240.5,
+          "w": 2,
+          "h": 41
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 110,
+          "y": 281.5,
+          "w": 953.91,
+          "h": 2
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 110,
+          "y": 301.5,
+          "w": 342.66,
+          "h": 1
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 110,
+          "y": 301.5,
+          "w": 1,
+          "h": 340.5
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 452.66,
+          "y": 301.5,
+          "w": 1,
+          "h": 340.5
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 468.66,
+          "y": 301.5,
+          "w": 342.67,
+          "h": 1
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 468.66,
+          "y": 301.5,
+          "w": 1,
+          "h": 340.5
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 811.33,
+          "y": 301.5,
+          "w": 1,
+          "h": 340.5
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 827.33,
+          "y": 301.5,
+          "w": 342.67,
+          "h": 1
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 827.33,
+          "y": 301.5,
+          "w": 1,
+          "h": 340.5
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 1170,
+          "y": 301.5,
+          "w": 1,
+          "h": 340.5
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 483.66,
+          "y": 596,
+          "w": 312.67,
+          "h": 1
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 483.66,
+          "y": 596,
+          "w": 1,
+          "h": 33
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 796.33,
+          "y": 596,
+          "w": 1,
+          "h": 33
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 842.33,
+          "y": 596,
+          "w": 312.67,
+          "h": 1
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 842.33,
+          "y": 596,
+          "w": 1,
+          "h": 33
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 1155,
+          "y": 596,
+          "w": 1,
+          "h": 33
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 483.66,
+          "y": 629,
+          "w": 312.67,
+          "h": 1
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 842.33,
+          "y": 629,
+          "w": 312.67,
+          "h": 1
+        },
+        "color": "#29b6f6"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 110,
+          "y": 642,
+          "w": 342.66,
+          "h": 1
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 468.66,
+          "y": 642,
+          "w": 342.67,
+          "h": 1
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 827.33,
+          "y": 642,
+          "w": 342.67,
+          "h": 1
+        },
+        "color": "#e8e8e8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 80,
+          "y": 668,
+          "w": 1120,
+          "h": 2
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 80,
+          "y": 60,
+          "w": 1120,
+          "h": 44
+        },
+        "text": "The Product",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 36,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 43.199999999999996,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 80,
+          "y": 114,
+          "w": 1120,
+          "h": 22.5
+        },
+        "text": "Search by city. Review host listings. Book in 3 clicks. Stay with a local.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.5,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 158,
+          "y": 180.5,
+          "w": 1024,
+          "h": 25
+        },
+        "text": "airbedandbreakfast.com/search",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 110,
+          "y": 240.5,
+          "w": 953.91,
+          "h": 41
+        },
+        "text": "Denver, CO  ·  Aug 24–26  ·  1 guest",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1073.91,
+          "y": 242.5,
+          "w": 96.09,
+          "h": 37
+        },
+        "text": "Search",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 111,
+          "y": 302.5,
+          "w": 340.66,
+          "h": 110
+        },
+        "text": "PHOTO",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#999999",
+          "textAlign": "center",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 469.66,
+          "y": 302.5,
+          "w": 340.67,
+          "h": 110
+        },
+        "text": "PHOTO",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#999999",
+          "textAlign": "center",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 828.33,
+          "y": 302.5,
+          "w": 340.67,
+          "h": 110
+        },
+        "text": "PHOTO",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#999999",
+          "textAlign": "center",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 125,
+          "y": 424.5,
+          "w": 312.66,
+          "h": 16
+        },
+        "text": "Private Room, Capitol Hill",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 483.66,
+          "y": 424.5,
+          "w": 312.67,
+          "h": 16
+        },
+        "text": "Shared Space, LoDo District",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 842.33,
+          "y": 424.5,
+          "w": 312.67,
+          "h": 16
+        },
+        "text": "Entire Studio, Five Points",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 125,
+          "y": 444.5,
+          "w": 312.66,
+          "h": 14
+        },
+        "text": "Denver, CO · Hosted by Sarah",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 483.66,
+          "y": 444.5,
+          "w": 312.67,
+          "h": 14
+        },
+        "text": "Denver, CO · Hosted by Marcus",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 842.33,
+          "y": 444.5,
+          "w": 312.67,
+          "h": 14
+        },
+        "text": "Denver, CO · Hosted by Priya",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 125,
+          "y": 466.5,
+          "w": 312.66,
+          "h": 21
+        },
+        "text": "$60 / night",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 21.599999999999998,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 483.66,
+          "y": 466.5,
+          "w": 312.67,
+          "h": 21
+        },
+        "text": "$45 / night",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 21.599999999999998,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 842.33,
+          "y": 466.5,
+          "w": 312.67,
+          "h": 21
+        },
+        "text": "$80 / night",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 21.599999999999998,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 483.66,
+          "y": 596,
+          "w": 312.67,
+          "h": 33
+        },
+        "text": "Book Now",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "center",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 842.33,
+          "y": 596,
+          "w": 312.67,
+          "h": 33
+        },
+        "text": "Book Now",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "center",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 125,
+          "y": 598,
+          "w": 312.66,
+          "h": 31
+        },
+        "text": "Book Now",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "center",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 6,
+    "file": "slide_06.html",
+    "elementCount": 15,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 443,
+          "y": 255.38,
+          "w": 1,
+          "h": 183.39
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 838,
+          "y": 255.38,
+          "w": 1,
+          "h": 183.39
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 72,
+          "w": 1088,
+          "h": 51
+        },
+        "text": "Business Model",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 42,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 50.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 137,
+          "w": 640,
+          "h": 54.38
+        },
+        "text": "We take a 10% commission on each completed transaction. No subscription fees. No listing fees. Revenue is earned only when a booking is made.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 27.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 255.38,
+          "w": 298,
+          "h": 80
+        },
+        "text": "10%",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 80,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e8711f",
+          "textAlign": "start",
+          "lineHeight": 80,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 491,
+          "y": 255.38,
+          "w": 298,
+          "h": 80
+        },
+        "text": "$25",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 80,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e8711f",
+          "textAlign": "start",
+          "lineHeight": 80,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 886,
+          "y": 255.38,
+          "w": 298,
+          "h": 80
+        },
+        "text": "$2.1B",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 80,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e8711f",
+          "textAlign": "start",
+          "lineHeight": 80,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 349.38,
+          "w": 298,
+          "h": 19
+        },
+        "text": "Commission per transaction",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.8
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 491,
+          "y": 349.38,
+          "w": 298,
+          "h": 19
+        },
+        "text": "Average fee per booking",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.8
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 886,
+          "y": 349.38,
+          "w": 298,
+          "h": 19
+        },
+        "text": "Projected revenue by 2011",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.8
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 376.38,
+          "w": 298,
+          "h": 62.39
+        },
+        "text": "Charged to the traveler at checkout. Zero friction for hosts — they list once and receive payment minus our fee.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 20.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 491,
+          "y": 376.38,
+          "w": 298,
+          "h": 62.39
+        },
+        "text": "Based on $80/night average over 3 nights = $240 booking value. 10% = $24, rounded to $25 blended average.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 20.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 886,
+          "y": 376.38,
+          "w": 298,
+          "h": 41.59
+        },
+        "text": "At 84 million trips × $25 average fee across the serviceable market within 3 years of launch.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 20.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 676,
+          "w": 501.28,
+          "h": 12
+        },
+        "text": "Internal model: 84M trips × $25 avg commission = $2.1B. See market size slide for trip count assumptions.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 10,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 12,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 7,
+    "file": "slide_07.html",
+    "elementCount": 20,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 443,
+          "y": 224.19,
+          "w": 1,
+          "h": 184.59
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 838,
+          "y": 224.19,
+          "w": 1,
+          "h": 205.39
+        },
+        "color": "#e0e0e0"
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 72,
+          "w": 1088,
+          "h": 51
+        },
+        "text": "Market Size",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 42,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 50.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 137,
+          "w": 680,
+          "h": 27.19
+        },
+        "text": "Starting from worldwide trip volume, we narrow to the segment we can actually win.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 27.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 224.19,
+          "w": 298,
+          "h": 14
+        },
+        "text": "TAM",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e8711f",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 491,
+          "y": 224.19,
+          "w": 298,
+          "h": 14
+        },
+        "text": "SAM",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e8711f",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 886,
+          "y": 224.19,
+          "w": 298,
+          "h": 14
+        },
+        "text": "SOM",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e8711f",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 252.19,
+          "w": 298,
+          "h": 72
+        },
+        "text": "2B+",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 72,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e8711f",
+          "textAlign": "start",
+          "lineHeight": 72,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 491,
+          "y": 252.19,
+          "w": 298,
+          "h": 72
+        },
+        "text": "560M",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 72,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e8711f",
+          "textAlign": "start",
+          "lineHeight": 72,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 886,
+          "y": 252.19,
+          "w": 298,
+          "h": 72
+        },
+        "text": "84M",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 72,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e8711f",
+          "textAlign": "start",
+          "lineHeight": 72,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 454.31,
+          "y": 282.19,
+          "w": 7.69,
+          "h": 24
+        },
+        "text": "›",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 20,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#cccccc",
+          "textAlign": "start",
+          "lineHeight": 24,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 849.31,
+          "y": 282.19,
+          "w": 7.69,
+          "h": 24
+        },
+        "text": "›",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 20,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#cccccc",
+          "textAlign": "start",
+          "lineHeight": 24,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 340.19,
+          "w": 298,
+          "h": 19
+        },
+        "text": "Trips booked worldwide",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.8
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 491,
+          "y": 340.19,
+          "w": 298,
+          "h": 19
+        },
+        "text": "Budget & online trips",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.8
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 886,
+          "y": 340.19,
+          "w": 298,
+          "h": 19
+        },
+        "text": "Trips with AirBed&Breakfast",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.8
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 367.19,
+          "w": 298,
+          "h": 41.59
+        },
+        "text": "Total global market for accommodation bookings — all price tiers, all channels.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 20.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 491,
+          "y": 367.19,
+          "w": 298,
+          "h": 62.39
+        },
+        "text": "Travelers who book online and are price-sensitive — the segment that has a reason to switch.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 20.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 886,
+          "y": 367.19,
+          "w": 298,
+          "h": 62.39
+        },
+        "text": "15% of the available market — consistent with Couchsurfing's penetration of the same audience.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 20.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 676,
+          "w": 592.55,
+          "h": 12
+        },
+        "text": "Sources: World Tourism Organization, 2007; Phocuswright online travel research, 2007; Couchsurfing user penetration model",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 10,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 12,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 8,
+    "file": "slide_08.html",
+    "elementCount": 14,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 96,
+          "y": 343.15999999999997,
+          "w": 1088,
+          "h": 1
+        },
+        "color": "#f0f0f0"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 96,
+          "y": 470.94000000000005,
+          "w": 1088,
+          "h": 1
+        },
+        "color": "#f0f0f0"
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 72,
+          "w": 1088,
+          "h": 51
+        },
+        "text": "Adoption Strategy",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 42,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 50.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 137,
+          "w": 680,
+          "h": 54.38
+        },
+        "text": "Three channels that reach budget-conscious travelers where they are already concentrated.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 27.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 328,
+          "y": 243.38,
+          "w": 856,
+          "h": 20
+        },
+        "text": "Target high-density events with a listing widget",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 245.38,
+          "w": 200,
+          "h": 20
+        },
+        "text": "Events",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 328,
+          "y": 269.38,
+          "w": 856,
+          "h": 44.78
+        },
+        "text": "Octoberfest (6M attendees), CeBIT (700K), Summerfest (1M), Euro Cup (3M+), Mardi Gras (800K). Hotel capacity collapses at these events — we deploy the widget 8 weeks prior to capture demand at its peak.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 328,
+          "y": 371.16,
+          "w": 856,
+          "h": 20
+        },
+        "text": "Cheap and alternative travel platforms",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 373.16,
+          "w": 200,
+          "h": 20
+        },
+        "text": "Partnerships",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 328,
+          "y": 397.16,
+          "w": 856,
+          "h": 44.78
+        },
+        "text": "GoLoCo, KAYAK, Orbitz — distribution partnerships that embed our inventory inside platforms travelers are already using to find budget options.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 328,
+          "y": 498.94,
+          "w": 856,
+          "h": 20
+        },
+        "text": "Dual-posting feature leverages 50K weekly listings",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 500.94,
+          "w": 200,
+          "h": 20
+        },
+        "text": "Craigslist",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 328,
+          "y": 524.94,
+          "w": 856,
+          "h": 44.78
+        },
+        "text": "Hosts who post on Craigslist can cross-list on AirBed&Breakfast in one click — converting existing supply with zero acquisition cost.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 9,
+    "file": "slide_09.html",
+    "elementCount": 20,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 251,
+          "y": 172.25,
+          "w": 839,
+          "h": 240
+        },
+        "fill": "#f9fdff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 983,
+          "y": 201.25,
+          "w": 16,
+          "h": 16
+        },
+        "fill": "#29b6f6",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 50
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 190,
+          "y": 595.25,
+          "w": 900,
+          "h": 1
+        },
+        "color": "#cccccc"
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 80,
+          "y": 56,
+          "w": 1120,
+          "h": 46
+        },
+        "text": "Competitive Landscape",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 38,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 45.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 80,
+          "y": 110,
+          "w": 1120,
+          "h": 22.5
+        },
+        "text": "Two dimensions define the market: price and whether transactions happen online. One quadrant is empty.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.5,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 190,
+          "y": 168.25,
+          "w": 11,
+          "h": 82.7
+        },
+        "text": "Affordable",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "center",
+          "lineHeight": 11,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 932.31,
+          "y": 223.25,
+          "w": 117.38,
+          "h": 16
+        },
+        "text": "AirBed&Breakfast",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "center",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 402.84,
+          "y": 246.14,
+          "w": 78.31,
+          "h": 25
+        },
+        "text": "CouchSurfing",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 361.65,
+          "y": 294.14,
+          "w": 52.7,
+          "h": 25
+        },
+        "text": "Craigslist",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 802.74,
+          "y": 303.75,
+          "w": 70.52,
+          "h": 25
+        },
+        "text": "Hostels.com",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 906.55,
+          "y": 342.14,
+          "w": 42.89,
+          "h": 25
+        },
+        "text": "Rentobi",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 829.38,
+          "y": 438.14,
+          "w": 125.25,
+          "h": 25
+        },
+        "text": "BedandBreakfast.com",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 742.92,
+          "y": 476.55,
+          "w": 64.16,
+          "h": 25
+        },
+        "text": "Rentahome",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 895.91,
+          "y": 505.34,
+          "w": 64.19,
+          "h": 25
+        },
+        "text": "Hotels.com",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 190,
+          "y": 529.06,
+          "w": 11,
+          "h": 71.19
+        },
+        "text": "Expensive",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "center",
+          "lineHeight": 11,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 803.48,
+          "y": 534.14,
+          "w": 33.03,
+          "h": 25
+        },
+        "text": "VRBO",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 964.66,
+          "y": 543.75,
+          "w": 34.69,
+          "h": 25
+        },
+        "text": "Orbitz",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 258,
+          "y": 614.25,
+          "w": 52.77,
+          "h": 14
+        },
+        "text": "Offline",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1042.77,
+          "y": 614.25,
+          "w": 47.23,
+          "h": 14
+        },
+        "text": "Online",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1
+        }
+      }
+    ]
+  },
+  {
+    "slide": 10,
+    "file": "slide_10.html",
+    "elementCount": 20,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 96,
+          "y": 389,
+          "w": 330.66,
+          "h": 2
+        },
+        "color": "#d6eefb"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 474.66,
+          "y": 389,
+          "w": 330.67,
+          "h": 2
+        },
+        "color": "#d6eefb"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 853.33,
+          "y": 389,
+          "w": 330.66,
+          "h": 2
+        },
+        "color": "#d6eefb"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 96,
+          "y": 656,
+          "w": 330.66,
+          "h": 2
+        },
+        "color": "#d6eefb"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 474.66,
+          "y": 656,
+          "w": 330.67,
+          "h": 2
+        },
+        "color": "#d6eefb"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 853.33,
+          "y": 656,
+          "w": 330.66,
+          "h": 2
+        },
+        "color": "#d6eefb"
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 64,
+          "w": 1088,
+          "h": 46
+        },
+        "text": "Competitive Advantages",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 38,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 45.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 150,
+          "w": 330.66,
+          "h": 17
+        },
+        "text": "1st to Market",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 474.66,
+          "y": 150,
+          "w": 330.67,
+          "h": 17
+        },
+        "text": "Host Incentive",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 853.33,
+          "y": 150,
+          "w": 330.66,
+          "h": 17
+        },
+        "text": "List Once",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 177,
+          "w": 330.66,
+          "h": 67.17
+        },
+        "text": "No competitor offers a transaction-based, peer-to-peer temporary housing marketplace. We define the category.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 474.66,
+          "y": 177,
+          "w": 330.67,
+          "h": 67.17
+        },
+        "text": "Hosts earn money — unlike Couchsurfing. Financial motivation converts passive inventory into active supply.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 853.33,
+          "y": 177,
+          "w": 330.66,
+          "h": 67.17
+        },
+        "text": "One persistent listing vs. Craigslist's daily re-posting. Lower host effort means more active, better-maintained listings.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 417,
+          "w": 330.66,
+          "h": 17
+        },
+        "text": "Ease of Use",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 474.66,
+          "y": 417,
+          "w": 330.67,
+          "h": 17
+        },
+        "text": "Profiles",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 853.33,
+          "y": 417,
+          "w": 330.66,
+          "h": 17
+        },
+        "text": "Brand & Timing",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 444,
+          "w": 330.66,
+          "h": 67.17
+        },
+        "text": "Search by price, location, and check-in/check-out dates in a single interface. No email chains, no phone calls.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 474.66,
+          "y": 444,
+          "w": 330.67,
+          "h": 67.17
+        },
+        "text": "Browse host profiles with photos and reviews. Book in 3 clicks. Trust is built into the product, not appended.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 853.33,
+          "y": 444,
+          "w": 330.66,
+          "h": 67.17
+        },
+        "text": "Memorable name. Launching at the DNC — a high-density event that creates national share of mind from day one.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 11,
+    "file": "slide_11.html",
+    "elementCount": 14,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 96,
+          "y": 211,
+          "w": 512,
+          "h": 46.28
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "–Entrepreneur and product designer; holds a patent for CritBuns",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 16,
+            "fontWeight": "normal",
+            "color": "#000000",
+            "lineHeight": 19.2,
+            "spacingAfter": 0
+          },
+          {
+            "text": "–RISD graduate — dual BFAs in graphic design and industrial design",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 16,
+            "fontWeight": "normal",
+            "color": "#000000",
+            "lineHeight": 19.2,
+            "spacingAfter": 0
+          }
+        ],
+        "columnCount": 1,
+        "listStyleType": "none",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 672,
+          "y": 211,
+          "w": 512,
+          "h": 46.28
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "–Founder, Brian Chesky Inc — industrial design consultancy",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 16,
+            "fontWeight": "normal",
+            "color": "#000000",
+            "lineHeight": 19.2,
+            "spacingAfter": 0
+          },
+          {
+            "text": "–RISD graduate — BFA in industrial design",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 16,
+            "fontWeight": "normal",
+            "color": "#000000",
+            "lineHeight": 19.2,
+            "spacingAfter": 0
+          }
+        ],
+        "columnCount": 1,
+        "listStyleType": "none",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 96,
+          "y": 482,
+          "w": 512,
+          "h": 46.28
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "–Built Facebook Apps \"Your Neighbors\" (75K users) and \"Rolodextrous\"",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 16,
+            "fontWeight": "normal",
+            "color": "#000000",
+            "lineHeight": 19.2,
+            "spacingAfter": 0
+          },
+          {
+            "text": "–Harvard CS graduate; worked at Microsoft, OPNET Technologies, Batiq",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 16,
+            "fontWeight": "normal",
+            "color": "#000000",
+            "lineHeight": 19.2,
+            "spacingAfter": 0
+          }
+        ],
+        "columnCount": 1,
+        "listStyleType": "none",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 672,
+          "y": 482,
+          "w": 512,
+          "h": 46.28
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "–CEO & co-founder of justin.tv — live video platform with millions of viewers",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 16,
+            "fontWeight": "normal",
+            "color": "#000000",
+            "lineHeight": 19.2,
+            "spacingAfter": 0
+          },
+          {
+            "text": "–Advising on product-market fit and consumer growth strategy",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 16,
+            "fontWeight": "normal",
+            "color": "#000000",
+            "lineHeight": 19.2,
+            "spacingAfter": 0
+          }
+        ],
+        "columnCount": 1,
+        "listStyleType": "none",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 64,
+          "w": 1088,
+          "h": 46
+        },
+        "text": "Team",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 38,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 45.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 150,
+          "w": 512,
+          "h": 15
+        },
+        "text": "User Interface & PR",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 672,
+          "y": 150,
+          "w": 512,
+          "h": 15
+        },
+        "text": "Business Development & Brand",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 171,
+          "w": 512,
+          "h": 26
+        },
+        "text": "Joe Gebbia",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 22,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 26.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.3
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 672,
+          "y": 171,
+          "w": 512,
+          "h": 26
+        },
+        "text": "Brian Chesky",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 22,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 26.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.3
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 421,
+          "w": 512,
+          "h": 15
+        },
+        "text": "Engineering",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 672,
+          "y": 421,
+          "w": 512,
+          "h": 15
+        },
+        "text": "Advisor",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 442,
+          "w": 512,
+          "h": 26
+        },
+        "text": "Nathan Blecharczyk",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 22,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 26.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.3
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 672,
+          "y": 442,
+          "w": 512,
+          "h": 26
+        },
+        "text": "Michael Seibel",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 22,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 26.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.3
+        }
+      }
+    ]
+  },
+  {
+    "slide": 12,
+    "file": "slide_12.html",
+    "elementCount": 19,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 96,
+          "y": 182.5,
+          "w": 3,
+          "h": 80.14
+        },
+        "color": "#e91e8b"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 96,
+          "y": 286.64,
+          "w": 3,
+          "h": 80.14
+        },
+        "color": "#e91e8b"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 96,
+          "y": 390.78,
+          "w": 3,
+          "h": 80.14
+        },
+        "color": "#e91e8b"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 96,
+          "y": 494.92,
+          "w": 3,
+          "h": 80.14
+        },
+        "color": "#e91e8b"
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 64,
+          "w": 1088,
+          "h": 46
+        },
+        "text": "Press",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 38,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 45.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 120,
+          "w": 1088,
+          "h": 22.5
+        },
+        "text": "Independent coverage from technology media — unsolicited, third-party validation of the concept.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.5,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 182.5,
+          "w": 1061,
+          "h": 16.8
+        },
+        "text": "\"",
+        "style": {
+          "fontFamily": "Georgia",
+          "fontSize": 28,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 211.3,
+          "w": 1061,
+          "h": 26.34
+        },
+        "text": "AirBed & Breakfast is a fun approach to couch surfing.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 26.35,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 247.64,
+          "w": 1061,
+          "h": 15
+        },
+        "text": "Webware",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 286.64,
+          "w": 1061,
+          "h": 16.8
+        },
+        "text": "\"",
+        "style": {
+          "fontFamily": "Georgia",
+          "fontSize": 28,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 315.44,
+          "w": 1061,
+          "h": 26.34
+        },
+        "text": "Think of it as Craigslist meets Hotels.com, but a lot less creepy.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 26.35,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 351.78,
+          "w": 1061,
+          "h": 15
+        },
+        "text": "Josh Spear",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 390.78,
+          "w": 1061,
+          "h": 16.8
+        },
+        "text": "\"",
+        "style": {
+          "fontFamily": "Georgia",
+          "fontSize": 28,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 419.58,
+          "w": 1061,
+          "h": 26.34
+        },
+        "text": "A cool alternative to a boring evening in a hotel room.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 26.35,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 455.92,
+          "w": 1061,
+          "h": 15
+        },
+        "text": "Mashable",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 494.92,
+          "w": 1061,
+          "h": 16.8
+        },
+        "text": "\"",
+        "style": {
+          "fontFamily": "Georgia",
+          "fontSize": 28,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 523.72,
+          "w": 1061,
+          "h": 26.34
+        },
+        "text": "AirBed's fee-based service could help alleviate concerns about quality of accommodations.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 26.35,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 123,
+          "y": 560.06,
+          "w": 1061,
+          "h": 15
+        },
+        "text": "Springwise",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1
+        }
+      }
+    ]
+  },
+  {
+    "slide": 13,
+    "file": "slide_13.html",
+    "elementCount": 23,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 96,
+          "y": 182.5,
+          "w": 516,
+          "h": 222.75
+        },
+        "fill": "#fff0f7",
+        "borderColor": "#e91e8b",
+        "borderWidth": 3,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 668,
+          "y": 182.5,
+          "w": 516,
+          "h": 222.75
+        },
+        "fill": "#fff0f7",
+        "borderColor": "#e91e8b",
+        "borderWidth": 3,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 96,
+          "y": 433.25,
+          "w": 516,
+          "h": 222.75
+        },
+        "fill": "#fff0f7",
+        "borderColor": "#e91e8b",
+        "borderWidth": 3,
+        "borderRadius": 0
+      },
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 668,
+          "y": 433.25,
+          "w": 516,
+          "h": 222.75
+        },
+        "fill": "#fff0f7",
+        "borderColor": "#e91e8b",
+        "borderWidth": 3,
+        "borderRadius": 0
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 96,
+          "y": 182.5,
+          "w": 516,
+          "h": 3
+        },
+        "color": "#e91e8b"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 668,
+          "y": 182.5,
+          "w": 516,
+          "h": 3
+        },
+        "color": "#e91e8b"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 96,
+          "y": 433.25,
+          "w": 516,
+          "h": 3
+        },
+        "color": "#e91e8b"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 668,
+          "y": 433.25,
+          "w": 516,
+          "h": 3
+        },
+        "color": "#e91e8b"
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 64,
+          "w": 1088,
+          "h": 46
+        },
+        "text": "What Users Say",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 38,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#29b6f6",
+          "textAlign": "start",
+          "lineHeight": 45.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 120,
+          "w": 1088,
+          "h": 22.5
+        },
+        "text": "Real guests and hosts — unprompted, on their own experience with the platform.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 22.5,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 120,
+          "y": 209.5,
+          "w": 468,
+          "h": 124.75
+        },
+        "text": "AirBed&Breakfast freaking rocks!",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 25.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 692,
+          "y": 209.5,
+          "w": 468,
+          "h": 124.75
+        },
+        "text": "I found something in my price-range, and that's what really enabled me to come to the conference.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 25.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 120,
+          "y": 354.25,
+          "w": 468,
+          "h": 16
+        },
+        "text": "Jason F.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.8
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 692,
+          "y": 354.25,
+          "w": 468,
+          "h": 16
+        },
+        "text": "Jason R.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.8
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 120,
+          "y": 370.25,
+          "w": 468,
+          "h": 15
+        },
+        "text": "Washington, DC",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 692,
+          "y": 370.25,
+          "w": 468,
+          "h": 15
+        },
+        "text": "Atlanta, GA",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 120,
+          "y": 460.25,
+          "w": 468,
+          "h": 124.75
+        },
+        "text": "A complete success. It is easy to use and it made me money.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 25.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 692,
+          "y": 460.25,
+          "w": 468,
+          "h": 124.75
+        },
+        "text": "It's about the ideas, the interactions, the people. You don't get that in a hotel room.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 25.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 120,
+          "y": 605,
+          "w": 468,
+          "h": 16
+        },
+        "text": "Emily M.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.8
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 692,
+          "y": 605,
+          "w": 468,
+          "h": 16
+        },
+        "text": "Don A.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#e91e8b",
+          "textAlign": "start",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 0.8
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 120,
+          "y": 621,
+          "w": 468,
+          "h": 15
+        },
+        "text": "Austin, TX — Host",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 692,
+          "y": 621,
+          "w": 468,
+          "h": 15
+        },
+        "text": "Ontario, Canada",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 14.399999999999999,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 14,
+    "file": "slide_14.html",
+    "elementCount": 16,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 440.33,
+          "y": 269.38,
+          "w": 1,
+          "h": 183.39
+        },
+        "color": "#dcedc8"
+      },
+      {
+        "type": "line",
+        "bounds": {
+          "x": 840.67,
+          "y": 269.38,
+          "w": 1,
+          "h": 183.39
+        },
+        "color": "#dcedc8"
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 80,
+          "w": 1088,
+          "h": 51
+        },
+        "text": "The Ask",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 42,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#8bc34a",
+          "textAlign": "start",
+          "lineHeight": 50.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.5
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 143,
+          "w": 680,
+          "h": 54.38
+        },
+        "text": "We are raising a $500K angel round to fund 12 months of operations and reach 80,000 transactions on AirBed&Breakfast.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 27.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 269.38,
+          "w": 287.33,
+          "h": 80
+        },
+        "text": "$500K",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 80,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#8bc34a",
+          "textAlign": "start",
+          "lineHeight": 80,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 496.33,
+          "y": 269.38,
+          "w": 287.34,
+          "h": 80
+        },
+        "text": "80K",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 80,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#8bc34a",
+          "textAlign": "start",
+          "lineHeight": 80,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 896.67,
+          "y": 269.38,
+          "w": 287.33,
+          "h": 80
+        },
+        "text": "$2M",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 80,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#8bc34a",
+          "textAlign": "start",
+          "lineHeight": 80,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -2
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 365.38,
+          "w": 287.33,
+          "h": 17
+        },
+        "text": "Angel Round",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 496.33,
+          "y": 365.38,
+          "w": 287.34,
+          "h": 17
+        },
+        "text": "Trips — 12-month target",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 896.67,
+          "y": 365.38,
+          "w": 287.33,
+          "h": 17
+        },
+        "text": "Revenue over 12 months",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 390.38,
+          "w": 287.33,
+          "h": 62.39
+        },
+        "text": "12 months of runway to reach the first major transaction milestone and validate the unit economics at scale.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 20.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 496.33,
+          "y": 390.38,
+          "w": 287.34,
+          "h": 62.39
+        },
+        "text": "The milestone that proves market adoption and unlocks the next round. 80,000 completed bookings at $25 average fee.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 20.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 896.67,
+          "y": 390.38,
+          "w": 287.33,
+          "h": 62.39
+        },
+        "text": "80K trips × $25 average commission. Demonstrates a repeatable, scalable revenue model before Series A.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#333333",
+          "textAlign": "start",
+          "lineHeight": 20.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 96,
+          "y": 663,
+          "w": 121.78,
+          "h": 17
+        },
+        "text": "AirBed&Breakfast",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#8bc34a",
+          "textAlign": "start",
+          "lineHeight": 16.8,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 888.06,
+          "y": 664.5,
+          "w": 295.94,
+          "h": 14
+        },
+        "text": "joe@airbedandbreakfast.com  ·  airbedandbreakfast.com",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#888888",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  }
+]
