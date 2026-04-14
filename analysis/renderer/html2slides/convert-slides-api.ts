@@ -91,7 +91,7 @@ interface Bounds { x: number; y: number; w: number; h: number; }
 interface ExtractedElement { type: string; bounds: Bounds; [key: string]: any; }
 interface Extraction { viewport: { w: number; h: number }; elementCount: number; elements: ExtractedElement[]; }
 
-async function extractFromHtml(htmlPath: string): Promise<{ extraction: Extraction; visualPngs: Map<number, Buffer> }> {
+async function extractFromHtml(htmlPath: string): Promise<{ extraction: Extraction; visualPngs: Map<number, Buffer>; shapePngs: Map<number, Buffer> }> {
   const absPath = resolve(htmlPath);
   const tab = await (CDP as any).New({ port: CDP_PORT, url: `file://${absPath}` });
   await sleep(1200);
@@ -119,17 +119,66 @@ async function extractFromHtml(htmlPath: string): Promise<{ extraction: Extracti
     }
   }
 
+  // Shape snapshots: capture rounded rects as high-res PNGs with text hidden.
+  // This gives pixel-perfect corner radii since Slides API can't control ROUND_RECTANGLE radius.
+  // Text children are hidden so they can be overlaid as native editable Slides text.
+  const SNAPSHOT_SCALE = 4; // 4x resolution for crisp edges
+  const shapePngs = new Map<number, Buffer>();
+  const snapshotEls = extraction.elements
+    .map((el, i) => ({ el, i }))
+    .filter(({ el }) => el.type === "rect" && el.extractId);
+
+  if (snapshotEls.length > 0) {
+    // Increase device scale for high-res capture
+    await Emulation.setDeviceMetricsOverride({ width: SLIDE_W_PX, height: SLIDE_H_PX, deviceScaleFactor: SNAPSHOT_SCALE, mobile: false });
+    await sleep(200);
+
+    for (const { el, i } of snapshotEls) {
+      const eid = el.extractId;
+      // Hide all text children of this element, keeping the shape chrome visible
+      await Runtime.evaluate({ expression: `(() => {
+        const el = document.querySelector('[data-extract-id="${eid}"]');
+        if (!el) return;
+        // Hide all text nodes by wrapping in invisible spans, and hide child elements that are text-only
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+        const textNodes = [];
+        while (walker.nextNode()) textNodes.push(walker.currentNode);
+        for (const tn of textNodes) {
+          const span = document.createElement('span');
+          span.style.visibility = 'hidden';
+          span.className = '__extract_hidden';
+          tn.parentNode.insertBefore(span, tn);
+          span.appendChild(tn);
+        }
+      })()`, returnByValue: true });
+
+      const b = el.bounds;
+      const clip = { x: b.x, y: b.y, width: b.w, height: b.h, scale: SNAPSHOT_SCALE };
+      const ss = await Page.captureScreenshot({ format: "png", clip, captureBeyondViewport: true });
+      shapePngs.set(i, Buffer.from(ss.data, "base64"));
+
+      // Restore text visibility
+      await Runtime.evaluate({ expression: `(() => {
+        for (const span of document.querySelectorAll('.__extract_hidden')) {
+          while (span.firstChild) span.parentNode.insertBefore(span.firstChild, span);
+          span.remove();
+        }
+      })()`, returnByValue: true });
+    }
+  }
+
   await client.close();
   await (CDP as any).Close({ port: CDP_PORT, id: tab.id });
-  return { extraction, visualPngs };
+  return { extraction, visualPngs, shapePngs };
 }
 
-// --- Upload visual PNGs to Drive (Slides API needs URLs) ---
-async function uploadVisualsToDrive(
+// --- Upload PNGs to Drive (Slides API needs URLs) ---
+// Handles both visual PNGs (svg/canvas screenshots) and shape PNGs (rounded rect snapshots)
+async function uploadPngsToDrive(
   drive: any,
-  slides: { visualPngs: Map<number, Buffer> }[],
+  slides: { visualPngs: Map<number, Buffer>; shapePngs: Map<number, Buffer> }[],
 ): Promise<Map<string, string>> {
-  const urlMap = new Map<string, string>(); // "slideIdx-elemIdx" -> webContentLink
+  const urlMap = new Map<string, string>(); // "slideIdx-elemIdx" or "shape-slideIdx-elemIdx" -> URL
   const uploads: Promise<void>[] = [];
 
   for (let si = 0; si < slides.length; si++) {
@@ -141,20 +190,34 @@ async function uploadVisualsToDrive(
           media: { mimeType: "image/png", body: Readable.from(buf) },
           fields: "id,webContentLink",
         }).then(async (res: any) => {
-          // Make file publicly readable so Slides API can access it
           await drive.permissions.create({
             fileId: res.data.id,
             requestBody: { role: "reader", type: "anyone" },
           });
-          const link = `https://drive.google.com/uc?id=${res.data.id}&export=download`;
-          urlMap.set(key, link);
+          urlMap.set(key, `https://drive.google.com/uc?id=${res.data.id}&export=download`);
+        })
+      );
+    }
+    for (const [ei, buf] of slides[si].shapePngs) {
+      const key = `shape-${si}-${ei}`;
+      uploads.push(
+        drive.files.create({
+          requestBody: { name: `shape_${si}_${ei}.png`, mimeType: "image/png" },
+          media: { mimeType: "image/png", body: Readable.from(buf) },
+          fields: "id,webContentLink",
+        }).then(async (res: any) => {
+          await drive.permissions.create({
+            fileId: res.data.id,
+            requestBody: { role: "reader", type: "anyone" },
+          });
+          urlMap.set(key, `https://drive.google.com/uc?id=${res.data.id}&export=download`);
         })
       );
     }
   }
 
   if (uploads.length > 0) {
-    console.log(`  Uploading ${uploads.length} visual PNGs to Drive...`);
+    console.log(`  Uploading ${uploads.length} PNGs to Drive...`);
     await Promise.all(uploads);
   }
   return urlMap;
@@ -162,7 +225,7 @@ async function uploadVisualsToDrive(
 
 // --- Build batchUpdate requests ---
 function buildRequests(
-  slides: { extraction: Extraction; visualPngs: Map<number, Buffer> }[],
+  slides: { extraction: Extraction; visualPngs: Map<number, Buffer>; shapePngs: Map<number, Buffer> }[],
   visualUrls: Map<string, string>,
 ): any[] {
   const requests: any[] = [];
@@ -217,6 +280,84 @@ function buildRequests(
                 fields: "pageBackgroundFill.solidFill.color",
               },
             });
+          } else if (el.extractId && visualUrls.has(`shape-${si}-${ei}`)) {
+            // --- Shape snapshot: use high-res PNG for pixel-perfect corner radius ---
+            // The element was captured as a PNG with text hidden; place as image,
+            // then overlay native editable Slides text on top.
+            const shapeUrl = visualUrls.get(`shape-${si}-${ei}`)!;
+            const imgId = newId();
+            requests.push({
+              createImage: {
+                objectId: imgId,
+                url: shapeUrl,
+                elementProperties: {
+                  pageObjectId: slideId,
+                  size: { width: { magnitude: emu(b.w), unit: "EMU" }, height: { magnitude: emu(b.h), unit: "EMU" } },
+                  transform: { scaleX: 1, scaleY: 1, translateX: emu(b.x), translateY: emu(b.y), unit: "EMU" },
+                },
+              },
+            });
+
+            // Scan for text to overlay as native editable text
+            for (let ti = ei + 1; ti < extraction.elements.length; ti++) {
+              const next = extraction.elements[ti];
+              if (next.type !== "text" || !next.bounds) continue;
+              const nb = next.bounds;
+              const sameBounds = Math.abs(nb.x - b.x) < 5 && Math.abs(nb.y - b.y) < 5 &&
+                                 Math.abs(nb.w - b.w) < 5 && Math.abs(nb.h - b.h) < 5;
+              const tcx = nb.x + nb.w / 2, tcy = nb.y + nb.h / 2;
+              const insideBounds = tcx >= b.x && tcx <= b.x + b.w && tcy >= b.y && tcy <= b.y + b.h;
+              if (sameBounds || insideBounds) {
+                // Create a transparent text box on top with proper alignment
+                const ms = next.style || {};
+                let text = next.text || "";
+                if (ms.textTransform === "uppercase") text = text.toUpperCase();
+                const textId = newId();
+                requests.push({
+                  createShape: {
+                    objectId: textId,
+                    shapeType: "TEXT_BOX",
+                    elementProperties: {
+                      pageObjectId: slideId,
+                      size: { width: { magnitude: emu(nb.w), unit: "EMU" }, height: { magnitude: emu(nb.h), unit: "EMU" } },
+                      transform: { scaleX: 1, scaleY: 1, translateX: emu(nb.x), translateY: emu(nb.y), unit: "EMU" },
+                    },
+                  },
+                });
+                requests.push({ updateShapeProperties: {
+                  objectId: textId,
+                  shapeProperties: {
+                    shapeBackgroundFill: { propertyState: "NOT_RENDERED" },
+                    outline: { propertyState: "NOT_RENDERED" },
+                    contentAlignment: sameBounds ? "MIDDLE" : "TOP",
+                  },
+                  fields: "shapeBackgroundFill.propertyState,outline.propertyState,contentAlignment",
+                } });
+                requests.push({ insertText: { objectId: textId, text, insertionIndex: 0 } });
+                const align = ms.textAlign === "center" ? "CENTER" : ms.textAlign === "right" ? "END" : "START";
+                requests.push({ updateParagraphStyle: {
+                  objectId: textId,
+                  textRange: { type: "ALL" },
+                  style: { alignment: align },
+                  fields: "alignment",
+                } });
+                requests.push({ updateTextStyle: {
+                  objectId: textId,
+                  textRange: { type: "ALL" },
+                  style: {
+                    fontFamily: mapFont(ms.fontFamily || "Arial"),
+                    fontSize: { magnitude: (ms.fontSize || 14) * PX2PT, unit: "PT" },
+                    foregroundColor: textColor(ms.color || "#333333"),
+                    bold: ms.fontWeight === "bold",
+                    italic: ms.fontStyle === "italic",
+                  },
+                  fields: "fontFamily,fontSize,foregroundColor,bold,italic",
+                } });
+                extraction.elements[ti] = { type: "_skip", bounds: nb };
+                // Only merge one text element per shape snapshot
+                break;
+              }
+            }
           } else {
             // --- Determine shape type from corner radii ---
             // See extract-dom.ts "Border & Corner Radius Rendering Rules" for full spec
@@ -295,24 +436,26 @@ function buildRequests(
             const sizeW = (rotation === 90 || rotation === 270) ? b.h : b.w;
             const sizeH = (rotation === 90 || rotation === 270) ? b.w : b.h;
 
-            // --- Look ahead: merge text into this shape if text bounds match/overlap ---
+            // --- Scan ahead: merge text into this shape if text bounds match/overlap ---
             // This handles flex-centered text inside containers: the text gets rendered
             // INSIDE the shape with contentAlignment: MIDDLE instead of as a separate text box.
+            // Note: DOM extraction may emit all rects before texts (z-order), so we scan
+            // forward through ALL remaining elements, not just ei+1.
             let mergedTextEl: any = null;
-            if (ei + 1 < extraction.elements.length) {
-              const next = extraction.elements[ei + 1];
-              if (next.type === "text" && next.bounds) {
-                const nb = next.bounds;
-                // Merge if text bounds are same as rect bounds (same container)
-                // or if text center is inside the rect
-                const sameBounds = Math.abs(nb.x - b.x) < 5 && Math.abs(nb.y - b.y) < 5 &&
-                                   Math.abs(nb.w - b.w) < 5 && Math.abs(nb.h - b.h) < 5;
-                const tcx = nb.x + nb.w / 2, tcy = nb.y + nb.h / 2;
-                const insideBounds = tcx >= b.x && tcx <= b.x + b.w && tcy >= b.y && tcy <= b.y + b.h;
-                if (sameBounds || (insideBounds && (isCircle || b.w < 300))) {
-                  mergedTextEl = next;
-                  extraction.elements[ei + 1] = { type: "_skip", bounds: nb };
-                }
+            for (let ti = ei + 1; ti < extraction.elements.length; ti++) {
+              const next = extraction.elements[ti];
+              if (next.type !== "text" || !next.bounds) continue;
+              const nb = next.bounds;
+              // Merge if text bounds are same as rect bounds (same container)
+              // or if text center is inside the rect
+              const sameBounds = Math.abs(nb.x - b.x) < 5 && Math.abs(nb.y - b.y) < 5 &&
+                                 Math.abs(nb.w - b.w) < 5 && Math.abs(nb.h - b.h) < 5;
+              const tcx = nb.x + nb.w / 2, tcy = nb.y + nb.h / 2;
+              const insideBounds = tcx >= b.x && tcx <= b.x + b.w && tcy >= b.y && tcy <= b.y + b.h;
+              if (sameBounds || (insideBounds && (isCircle || b.w < 300))) {
+                mergedTextEl = next;
+                extraction.elements[ti] = { type: "_skip", bounds: nb };
+                break;
               }
             }
 
@@ -861,7 +1004,7 @@ async function main() {
 
   // Step 1: Extract DOM from all slides (parallel batches)
   const EXTRACT_BATCH = 4;
-  const slideData: { extraction: Extraction; visualPngs: Map<number, Buffer> }[] = new Array(htmlFiles.length);
+  const slideData: { extraction: Extraction; visualPngs: Map<number, Buffer>; shapePngs: Map<number, Buffer> }[] = new Array(htmlFiles.length);
   const t0 = Date.now();
   for (let i = 0; i < htmlFiles.length; i += EXTRACT_BATCH) {
     const batch = htmlFiles.slice(i, i + EXTRACT_BATCH);
@@ -869,7 +1012,7 @@ async function main() {
       const idx = i + bi;
       console.log(`  [${idx + 1}/${htmlFiles.length}] Extracting ${f.split("/").pop()}...`);
       const data = await extractFromHtml(f);
-      console.log(`    [${idx + 1}] ${data.extraction.elementCount} elements, ${data.visualPngs.size} visuals`);
+      console.log(`    [${idx + 1}] ${data.extraction.elementCount} elements, ${data.visualPngs.size} visuals, ${data.shapePngs.size} snapshots`);
       return { idx, data };
     }));
     for (const { idx, data } of results) slideData[idx] = data;
@@ -896,7 +1039,7 @@ async function main() {
   }
 
   // Step 3: Upload visual PNGs to Drive
-  const visualUrls = await uploadVisualsToDrive(driveApi, slideData);
+  const visualUrls = await uploadPngsToDrive(driveApi, slideData);
   console.log(`  ${visualUrls.size} visuals uploaded`);
 
   // Step 4: Build all requests

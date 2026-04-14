@@ -181,7 +181,7 @@ interface ElementStyle {
   zIndex: number;
   position: string;
   // Box shadow parsed components (null if no shadow)
-  boxShadow: { offsetX: number; offsetY: number; blur: number; spread: number; color: string | null } | null;
+  boxShadow: { offsetX: number; offsetY: number; blur: number; spread: number; color: string | null; alpha: number } | null;
 }
 
 interface TextRun {
@@ -308,14 +308,16 @@ interface ExtractedElement {
       boxShadow: (() => {
         const sh = cs.boxShadow;
         if (!sh || sh === "none") return null;
-        // Parse first shadow: "rgba(r,g,b,a) Xpx Ypx Bpx Spx" or "Xpx Ypx Bpx Spx rgba(...)"
         const nums = sh.match(/(-?\d+(?:\.\d+)?)px/g);
         if (!nums || nums.length < 2) return null;
         const vals = nums.map(n => parseFloat(n));
+        const rgbaMatch = sh.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+        const alpha = rgbaMatch && rgbaMatch[4] !== undefined ? parseFloat(rgbaMatch[4]) : 1;
         return {
           offsetX: vals[0], offsetY: vals[1],
           blur: vals[2] || 0, spread: vals[3] || 0,
-          color: rgb2hex(sh) || "rgba(0,0,0,0.3)",
+          color: rgb2hex(sh) || "#000000",
+          alpha,
         };
       })(),
     };

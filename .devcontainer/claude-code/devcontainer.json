@@ -13,8 +13,8 @@
   },
   "mounts": [
     "source=polybot-chrome-profile,target=/home/node/chrome-profile,type=volume",
-    "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind",
-    "source=${localEnv:HOME}/Projects/claude,target=/claude,type=bind"
+    "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind,consistency=cached",
+    "source=/p/claude,target=/claude,type=bind"
   ],
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/node/.claude"
