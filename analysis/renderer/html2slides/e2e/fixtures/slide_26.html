@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #f0f4f8; padding: 40px 56px; }
+
+h1 {
+  font-size: 24px;
+  color: #1a202c;
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+.subtitle {
+  font-size: 13px;
+  color: #718096;
+  margin-bottom: 24px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 16px;
+}
+
+.card {
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.card p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.card .big-num {
+  font-size: 36px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.card .badge {
+  display: inline-block;
+  background: rgba(255,255,255,0.3);
+  padding: 2px 10px;
+  border-radius: 50px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 8px;
+  width: fit-content;
+}
+
+/* Row 1: 8 + 4 */
+.card-hero {
+  grid-column: span 8;
+  background: #4a6cf7;
+  color: white;
+  min-height: 140px;
+}
+.card-side {
+  grid-column: span 4;
+  background: #1a202c;
+  color: white;
+  min-height: 140px;
+}
+
+/* Row 2: 4 + 4 + 4 */
+.card-a {
+  grid-column: span 4;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #2d3748;
+  min-height: 120px;
+}
+.card-b {
+  grid-column: span 4;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #2d3748;
+  min-height: 120px;
+}
+.card-c {
+  grid-column: span 4;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #2d3748;
+  min-height: 120px;
+}
+
+/* Row 3: full width banner */
+.card-banner {
+  grid-column: span 12;
+  background: linear-gradient(90deg, #e94560, #ff6b6b);
+  color: white;
+  min-height: 80px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.card-banner .badge { background: rgba(0,0,0,0.2); color: white; }
+
+/* Row 4: 6 + 6 */
+.card-half-1 {
+  grid-column: span 6;
+  background: #f0fff4;
+  border: 1px solid #c6f6d5;
+  color: #276749;
+  min-height: 100px;
+}
+.card-half-2 {
+  grid-column: span 6;
+  background: #fffff0;
+  border: 1px solid #fefcbf;
+  color: #975a16;
+  min-height: 100px;
+}
+
+.stat-green { color: #38a169; }
+.stat-red { color: #e53e3e; }
+</style></head><body>
+<h1>CSS Grid Complex Layout</h1>
+<div class="subtitle">12-column grid with varying span widths — tests layout extraction fidelity</div>
+<div class="grid">
+  <div class="card card-hero">
+    <h3>Revenue Dashboard</h3>
+    <div class="big-num">$2.4M</div>
+    <p>Total quarterly revenue across all product lines. Up 23% from last quarter.</p>
+    <div class="badge">8-column span</div>
+  </div>
+  <div class="card card-side">
+    <h3>Active Users</h3>
+    <div class="big-num">48.2K</div>
+    <p>Monthly active users</p>
+    <div class="badge">4-column span</div>
+  </div>
+  <div class="card card-a">
+    <h3>Product A</h3>
+    <div class="big-num stat-green">+18%</div>
+    <p>Growth rate this month</p>
+  </div>
+  <div class="card card-b">
+    <h3>Product B</h3>
+    <div class="big-num stat-red">-3%</div>
+    <p>Slight decline in signups</p>
+  </div>
+  <div class="card card-c">
+    <h3>Product C</h3>
+    <div class="big-num stat-green">+42%</div>
+    <p>New market expansion</p>
+  </div>
+  <div class="card card-banner">
+    <div>
+      <h3>Quarterly All-Hands Meeting — April 20, 2026</h3>
+      <p>Full-width banner spanning all 12 columns</p>
+    </div>
+    <div class="badge">Register Now</div>
+  </div>
+  <div class="card card-half-1">
+    <h3>Engineering Velocity</h3>
+    <p>Sprint completion rate at 94%. Deploy frequency: 3.2/day. MTTR under 15 minutes.</p>
+  </div>
+  <div class="card card-half-2">
+    <h3>Customer Satisfaction</h3>
+    <p>NPS score: 72 (+8 pts). Support ticket resolution time down 22% quarter over quarter.</p>
+  </div>
+</div>
+</body></html>

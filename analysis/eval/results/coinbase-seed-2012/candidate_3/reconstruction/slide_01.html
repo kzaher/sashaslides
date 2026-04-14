@@ -1,0 +1,84 @@
+height: 1.7; color: #33ff33;
+}
+.t-dim { color: #666; }
+.t-err { color: #ff5555; }
+/* Clean UI mockup */
+.clean-ui {
+  background: #fff;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ui-nav {
+  background: #4A90D9; height: 40px;
+  display: flex; align-items: center;
+  padding: 0 16px; gap: 20px;
+}
+.ui-logo { font-size: 13px; font-weight: 700; color: #fff; letter-spacing: 0.06em; font-family: "Helvetica Neue",Arial,sans-serif; }
+.ui-nl { font-size: 11px; color: rgba(255,255,255,0.85); font-family: "Helvetica Neue",Arial,sans-serif; }
+.ui-body { padding: 24px; flex: 1; }
+.ui-lbl { font-size: 10px; color: #999; text-transform: uppercase; letter-spacing: 0.08em; font-family: "Helvetica Neue",Arial,sans-serif; }
+.ui-btc { font-size: 36px; font-weight: 300; color: #333; margin-top: 4px; font-family: "Helvetica Neue",Arial,sans-serif; }
+.ui-usd { font-size: 14px; color: #888; margin-top: 3px; font-family: "Helvetica Neue",Arial,sans-serif; }
+.ui-btns { display: flex; gap: 10px; margin-top: 18px; }
+.ui-btn { padding: 8px 22px; background: #4A90D9; color: #fff; border-radius: 4px; font-size: 13px; font-family: "Helvetica Neue",Arial,sans-serif; }
+.ui-btn-o { padding: 8px 22px; background: none; color: #4A90D9; border: 1px solid #4A90D9; border-radius: 4px; font-size: 13px; font-family: "Helvetica Neue",Arial,sans-serif; }
+.ui-tl { font-size: 10px; color: #999; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 24px; padding-bottom: 6px; border-bottom: 1px solid #eee; font-family: "Helvetica Neue",Arial,sans-serif; }
+.ui-tr { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f5f5f5; font-size: 12px; color: #555; font-family: "Helvetica Neue",Arial,sans-serif; }
+.tin { color: #27ae60; }
+.tout { color: #c0392b; }
+</style>
+</head>
+<body>
+<h1>Too Difficult to Use</h1>
+<div class="columns">
+  <div class="col">
+    <div class="col-label muted">Desktop Client</div>
+    <div class="mockup">
+      <div class="terminal">
+        <span class="t-dim">Bitcoin Core v0.7.2</span><br>
+        <span class="t-dim">Synchronizing… block 204,312</span><br><br>
+        $ getbalance<br>
+        1.23456789<br><br>
+        $ sendtoaddress 1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2 0.5<br>
+        <span class="t-err">error: insufficient fee, add 0.0001 BTC</span><br><br>
+        $ sendtoaddress 1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2 0.5 0.0001<br>
+        3f2e1a9b7c4d…<br><br>
+        <span class="t-dim">$ listunspent<br>
+        [{"txid":"3f2e…","vout":0,<br>
+        "address":"1Bv…","amount":<br>
+        0.72456789,"conf":3}]</span>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="col-label accent">Coinbase</div>
+    <div class="mockup">
+      <div class="clean-ui">
+        <div class="ui-nav">
+          <span class="ui-logo">COINBASE</span>
+          <span class="ui-nl">Dashboard</span>
+          <span class="ui-nl">Send</span>
+          <span class="ui-nl">Receive</span>
+          <span class="ui-nl">History</span>
+        </div>
+        <div class="ui-body">
+          <div class="ui-lbl">Your Balance</div>
+          <div class="ui-btc">1.234 BTC</div>
+          <div class="ui-usd">$14,240.00 USD</div>
+          <div class="ui-btns">
+            <div class="ui-btn">Send Bitcoin</div>
+            <div class="ui-btn-o">Request</div>
+          </div>
+          <div class="ui-tl">Recent Transactions</div>
+          <div class="ui-tr"><span class="tin">▼ Received</span><span>1.000 BTC</span><span>Jan 15</span></div>
+          <div class="ui-tr"><span class="tout">▲ Sent</span><span>0.500 BTC</span><span>Jan 12</span></div>
+          <div class="ui-tr"><span class="tin">▼ Received</span><span>0.734 BTC</span><span>Jan 8</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

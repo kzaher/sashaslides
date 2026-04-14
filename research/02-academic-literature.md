@@ -213,18 +213,18 @@
 
 | Dataset | Domain | Size | Source | Notes |
 |---------|--------|------|--------|-------|
-| **PS5K** | Paper-slide pairs | 5,873 pairs | Academic proceedings | CV/NLP/ML papers |
-| **SciDuet** | Paper-slide pairs | ~5K pairs | Academic | With alignment annotations |
-| **DOC2PPT** | Paper-slide pairs | ~5K papers | Academic | Multi-modal |
+| **PS5K** | Paper-slide pairs | 5,873 pairs | Academic proceedings | CV/NLP/ML papers — [Project](https://doc2ppt.github.io/), [Google Drive](https://drive.google.com/drive/folders/1s2zJ04WZYifZhotRCXpk4OGtCHWXuM0b) |
+| **SciDuet** | Paper-slide pairs | ~5K pairs | Academic | With alignment annotations — [GitHub](https://github.com/IBM/document2slides), [HuggingFace](https://huggingface.co/datasets/GEM/SciDuet) |
+| **DOC2PPT** | Paper-slide pairs | ~5K papers | Academic | Multi-modal — [Project](https://doc2ppt.github.io/), [arXiv](https://arxiv.org/abs/2101.11796) |
 | **Slideshare-1M** | General slides | 977K slides (31K decks) | SlideShare API | [Stanford](https://exhibits.stanford.edu/data/catalog/mv327tb8364) |
-| **SPaSe** | Slide segmentation | 2,000 slides | Academic | 25 pixel-wise classes |
-| **SlideSpeech** | Slides + audio | Large | YouTube conferences | Multi-modal |
-| **Crello** | Graphic designs | ~23K templates | VistaCreate | Rich element annotations |
+| **SPaSe** | Slide segmentation | 2,000 slides | Academic | 25 pixel-wise classes — [Project](https://cvhci.anthropomatik.kit.edu/~mhaurile/spase/), [Paper](https://ieeexplore.ieee.org/document/8659181/) |
+| **SlideSpeech** | Slides + audio | Large | YouTube conferences | Multi-modal — [Project](https://slidespeech.github.io/), [OpenSLR](https://www.openslr.org/144/) |
+| **Crello** | Graphic designs | ~23K templates | VistaCreate | Rich element annotations — [HuggingFace](https://huggingface.co/datasets/cyberagent/crello), [GitHub](https://github.com/CyberAgentAILab/canvas-vae/blob/main/docs/crello-dataset.md) |
 | **PubLayNet** | Document layouts | ~1M pages | PubMed | [GitHub](https://github.com/ibm-aur-nlp/PubLayNet) |
-| **RICO** | UI layouts | ~66K screens | Mobile apps | Transfer learning |
-| **AVA** | Image aesthetics | ~250K images | DPChallenge | Aesthetic scores |
-| **Magazine** | Magazine layouts | ~4K pages | Various | Multi-element |
-| **CGL** | Graphic layouts | ~60K | Canva | Layout annotations |
+| **RICO** | UI layouts | ~66K screens | Mobile apps | Transfer learning — [Official site](https://interactionmining.org/rico), [Semantic annotations](https://github.com/google-research-datasets/rico_semantics) |
+| **AVA** | Image aesthetics | ~250K images | DPChallenge | Aesthetic scores — [Torrents](https://academictorrents.com/details/71631f83b11d3d79d8f84efe0a7e12f0ac001460), [Downloader](https://github.com/imfing/ava_downloader) |
+| **Magazine** | Magazine layouts | ~4K pages | Various | Multi-element — [HuggingFace](https://huggingface.co/datasets/creative-graphic-design/Magazine), [GitHub](https://github.com/creative-graphic-design/huggingface-datasets_Magazine) |
+| **CGL** | Graphic layouts | ~60K | Canva | Layout annotations — [HuggingFace](https://huggingface.co/datasets/creative-graphic-design/CGL-Dataset), [GitHub](https://github.com/creative-graphic-design/huggingface-datasets_CGL-Dataset-v2) |
 
 ---
 

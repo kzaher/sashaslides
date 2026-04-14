@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #f8f9fa; display: flex; position: relative; }
+.half { width: 640px; height: 720px; display: flex; flex-direction: column; }
+.half-header { height: 56px; display: flex; align-items: center; padding: 0 28px; font-size: 18px; font-weight: 700; color: white; letter-spacing: 0.5px; }
+.before .half-header { background: #dc2626; }
+.after .half-header { background: #16a34a; }
+.half-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; opacity: 0.8; margin-right: 10px; }
+.half-content { flex: 1; padding: 20px 24px; overflow: hidden; }
+.before .half-content { background: #fef2f2; }
+.after .half-content { background: #f0fdf4; }
+.mock-dashboard { display: flex; flex-direction: column; gap: 14px; height: 100%; }
+.mock-topbar { height: 36px; background: rgba(0,0,0,0.06); border-radius: 6px; display: flex; align-items: center; padding: 0 12px; gap: 8px; }
+.mock-topbar-item { height: 10px; border-radius: 3px; background: rgba(0,0,0,0.1); }
+.mock-row { display: flex; gap: 12px; flex: 1; }
+.metric-card { flex: 1; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; }
+.before .metric-card { background: white; border: 1px solid #fecaca; box-shadow: 0 1px 3px rgba(220,38,38,0.08); }
+.after .metric-card { background: white; border: 1px solid #bbf7d0; box-shadow: 0 2px 8px rgba(22,163,74,0.08); }
+.metric-label { font-size: 10px; color: #6b7280; font-weight: 500; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+.metric-value { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+.before .metric-value { color: #991b1b; }
+.after .metric-value { color: #166534; }
+.metric-change { font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
+.before .metric-change { color: #dc2626; }
+.after .metric-change { color: #16a34a; }
+.mock-chart { flex: 2; border-radius: 10px; padding: 14px; position: relative; overflow: hidden; }
+.before .mock-chart { background: white; border: 1px solid #fecaca; }
+.after .mock-chart { background: white; border: 1px solid #bbf7d0; }
+.chart-title { font-size: 11px; font-weight: 600; color: #374151; margin-bottom: 10px; }
+.bar-group { display: flex; align-items: flex-end; gap: 6px; height: 80px; padding-top: 10px; }
+.bar { border-radius: 3px 3px 0 0; width: 28px; }
+.before .bar { background: #fca5a5; }
+.after .bar { background: #86efac; }
+.before .bar:nth-child(odd) { background: #f87171; }
+.after .bar:nth-child(odd) { background: #4ade80; }
+.mock-sidebar { width: 140px; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.before .mock-sidebar { background: white; border: 1px solid #fecaca; }
+.after .mock-sidebar { background: white; border: 1px solid #bbf7d0; }
+.sidebar-item { height: 12px; border-radius: 3px; }
+.before .sidebar-item { background: #fee2e2; }
+.after .sidebar-item { background: #dcfce7; }
+.before .sidebar-item:nth-child(odd) { background: #fecaca; }
+.after .sidebar-item:nth-child(odd) { background: #bbf7d0; }
+.mock-table { flex: 1; border-radius: 10px; overflow: hidden; }
+.before .mock-table { background: white; border: 1px solid #fecaca; }
+.after .mock-table { background: white; border: 1px solid #bbf7d0; }
+.table-header { height: 28px; display: flex; align-items: center; padding: 0 12px; gap: 20px; }
+.before .table-header { background: #fee2e2; }
+.after .table-header { background: #dcfce7; }
+.th { font-size: 9px; font-weight: 600; color: #6b7280; text-transform: uppercase; flex: 1; }
+.table-row { height: 24px; display: flex; align-items: center; padding: 0 12px; gap: 20px; border-bottom: 1px solid #f3f4f6; }
+.td { font-size: 10px; color: #374151; flex: 1; }
+/* Divider */
+.divider { position: absolute; left: 50%; top: 0; bottom: 0; width: 4px; background: #374151; z-index: 10; transform: translateX(-50%); }
+.divider-badge { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 48px; height: 48px; border-radius: 50%; background: #374151; color: white; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; z-index: 11; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+</style></head><body>
+<div class="half before">
+  <div class="half-header"><span class="half-label">Before</span> Legacy Dashboard v1</div>
+  <div class="half-content">
+    <div class="mock-dashboard">
+      <div class="mock-topbar">
+        <div class="mock-topbar-item" style="width:60px"></div>
+        <div class="mock-topbar-item" style="width:40px"></div>
+        <div class="mock-topbar-item" style="width:80px"></div>
+      </div>
+      <div class="mock-row">
+        <div class="metric-card">
+          <div class="metric-label">Load Time</div>
+          <div class="metric-value">4.2s</div>
+          <div class="metric-change">&#9650; 180% slower</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Error Rate</div>
+          <div class="metric-value">12.4%</div>
+          <div class="metric-change">&#9650; Critical</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">User Satisfaction</div>
+          <div class="metric-value">2.1/5</div>
+          <div class="metric-change">&#9660; Declining</div>
+        </div>
+      </div>
+      <div class="mock-row" style="flex:2">
+        <div class="mock-chart">
+          <div class="chart-title">Weekly Performance (Inconsistent)</div>
+          <div class="bar-group">
+            <div class="bar" style="height:45%"></div>
+            <div class="bar" style="height:20%"></div>
+            <div class="bar" style="height:70%"></div>
+            <div class="bar" style="height:30%"></div>
+            <div class="bar" style="height:55%"></div>
+            <div class="bar" style="height:15%"></div>
+            <div class="bar" style="height:60%"></div>
+          </div>
+        </div>
+        <div class="mock-sidebar">
+          <div class="sidebar-item" style="width:100%"></div>
+          <div class="sidebar-item" style="width:70%"></div>
+          <div class="sidebar-item" style="width:90%"></div>
+          <div class="sidebar-item" style="width:50%"></div>
+          <div class="sidebar-item" style="width:80%"></div>
+          <div class="sidebar-item" style="width:60%"></div>
+          <div class="sidebar-item" style="width:75%"></div>
+          <div class="sidebar-item" style="width:40%"></div>
+        </div>
+      </div>
+      <div class="mock-table">
+        <div class="table-header"><div class="th">Endpoint</div><div class="th">Status</div><div class="th">Latency</div><div class="th">Errors</div></div>
+        <div class="table-row"><div class="td">/api/users</div><div class="td" style="color:#dc2626">Degraded</div><div class="td">820ms</div><div class="td">47</div></div>
+        <div class="table-row"><div class="td">/api/orders</div><div class="td" style="color:#dc2626">Down</div><div class="td">Timeout</div><div class="td">312</div></div>
+        <div class="table-row"><div class="td">/api/analytics</div><div class="td" style="color:#f59e0b">Slow</div><div class="td">2.4s</div><div class="td">18</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="half after">
+  <div class="half-header"><span class="half-label">After</span> New Dashboard v2</div>
+  <div class="half-content">
+    <div class="mock-dashboard">
+      <div class="mock-topbar">
+        <div class="mock-topbar-item" style="width:60px"></div>
+        <div class="mock-topbar-item" style="width:40px"></div>
+        <div class="mock-topbar-item" style="width:80px"></div>
+      </div>
+      <div class="mock-row">
+        <div class="metric-card">
+          <div class="metric-label">Load Time</div>
+          <div class="metric-value">0.8s</div>
+          <div class="metric-change">&#9660; 5x faster</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Error Rate</div>
+          <div class="metric-value">0.3%</div>
+          <div class="metric-change">&#9660; 97% reduction</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">User Satisfaction</div>
+          <div class="metric-value">4.8/5</div>
+          <div class="metric-change">&#9650; +129% improvement</div>
+        </div>
+      </div>
+      <div class="mock-row" style="flex:2">
+        <div class="mock-chart">
+          <div class="chart-title">Weekly Performance (Stable)</div>
+          <div class="bar-group">
+            <div class="bar" style="height:78%"></div>
+            <div class="bar" style="height:82%"></div>
+            <div class="bar" style="height:85%"></div>
+            <div class="bar" style="height:80%"></div>
+            <div class="bar" style="height:88%"></div>
+            <div class="bar" style="height:90%"></div>
+            <div class="bar" style="height:92%"></div>
+          </div>
+        </div>
+        <div class="mock-sidebar">
+          <div class="sidebar-item" style="width:100%"></div>
+          <div class="sidebar-item" style="width:95%"></div>
+          <div class="sidebar-item" style="width:90%"></div>
+          <div class="sidebar-item" style="width:85%"></div>
+          <div class="sidebar-item" style="width:80%"></div>
+          <div class="sidebar-item" style="width:75%"></div>
+          <div class="sidebar-item" style="width:70%"></div>
+          <div class="sidebar-item" style="width:65%"></div>
+        </div>
+      </div>
+      <div class="mock-table">
+        <div class="table-header"><div class="th">Endpoint</div><div class="th">Status</div><div class="th">Latency</div><div class="th">Errors</div></div>
+        <div class="table-row"><div class="td">/api/users</div><div class="td" style="color:#16a34a">Healthy</div><div class="td">45ms</div><div class="td">0</div></div>
+        <div class="table-row"><div class="td">/api/orders</div><div class="td" style="color:#16a34a">Healthy</div><div class="td">62ms</div><div class="td">1</div></div>
+        <div class="table-row"><div class="td">/api/analytics</div><div class="td" style="color:#16a34a">Healthy</div><div class="td">120ms</div><div class="td">0</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="divider"></div>
+<div class="divider-badge">&#8594;</div>
+</body></html>

@@ -1,0 +1,60 @@
+<!-- slide_01.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@1,400;1,600&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1280px; height: 720px; overflow: hidden; background: #FFFFFF; }
+body { display: flex; align-items: center; justify-content: center; }
+.slide {
+  width: 1280px; height: 720px;
+  position: relative;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 80px 180px;
+}
+.eyebrow {
+  position: absolute; top: 52px; left: 104px;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.11em; text-transform: uppercase;
+  color: #4A6FA5;
+}
+.quote-body {
+  font-family: 'Playfair Display', serif;
+  font-style: italic; font-size: 22px; line-height: 1.72;
+  color: #2C3040; text-align: center; max-width: 820px;
+}
+.brand {
+  font-family: 'Inter', sans-serif;
+  font-style: normal; font-weight: 700; color: #2C3040;
+}
+.attribution {
+  position: absolute; bottom: 72px; right: 104px;
+  text-align: right;
+}
+.attr-source {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px; font-weight: 500; color: #4A6FA5;
+}
+.attr-date {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px; color: #9AAAC8; margin-top: 3px;
+}
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="eyebrow">thefacebook.com — Advertising Media Kit</div>
+  <div class="quote-body">
+    "Classes are being skipped. Work is ignored. Students are spending hours in front of the computer in utter fascination. <span class="brand">Thefacebook.com</span> craze has swept through campus."
+  </div>
+  <div class="attribution">
+    <div class="attr-source">The Stanford Daily</div>
+    <div class="attr-date">March 5, 2004</div>
+  </div>
+</div>
+</body>
+</html>

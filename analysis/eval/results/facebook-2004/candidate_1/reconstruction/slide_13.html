@@ -1,0 +1,91 @@
+<!-- slide_13.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.slide { width: 1280px; height: 720px; display: flex; flex-direction: column; }
+.title-bar {
+  background: #3B5998; height: 90px;
+  display: flex; align-items: center; padding: 0 60px; flex-shrink: 0;
+}
+.title-bar h1 { color: #FFFFFF; font-size: 32px; font-weight: 700; }
+.content {
+  flex: 1; display: flex; padding: 32px 60px 40px; gap: 0;
+}
+.chart-zone { width: 55%; display: flex; flex-direction: column; justify-content: center; padding-right: 48px; }
+.chart-title {
+  font-size: 13px; font-weight: 700; color: #4A6FA5;
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 28px;
+}
+.bar-row { display: flex; align-items: center; margin-bottom: 22px; }
+.bar-label { font-size: 14px; color: #1A1A1A; width: 120px; flex-shrink: 0; }
+.bar-track {
+  flex: 1; height: 28px; background: #E8F0F8;
+  position: relative;
+}
+.bar-fill {
+  height: 100%; background: #4A6FA5; position: absolute; left: 0; top: 0;
+}
+.bar-pct {
+  font-size: 14px; font-weight: 700; color: #3B5998;
+  margin-left: 10px; width: 38px; flex-shrink: 0;
+}
+.callout-zone {
+  width: 45%; border-left: 1px solid #C8DCF0;
+  padding-left: 48px;
+  display: flex; flex-direction: column; justify-content: center; gap: 32px;
+}
+.callout { text-align: center; }
+.callout-num { font-size: 52px; font-weight: 700; color: #3B5998; line-height: 1; }
+.callout-label { font-size: 13px; color: #1A1A1A; margin-top: 8px; line-height: 1.4; }
+.source {
+  position: absolute; bottom: 24px; right: 60px;
+  font-size: 12px; font-style: italic; color: #888;
+}
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="title-bar"><h1>User Composition</h1></div>
+  <div class="content" style="position:relative">
+    <div class="chart-zone">
+      <div class="chart-title">Share of total users</div>
+      <div class="bar-row">
+        <span class="bar-label">Students</span>
+        <div class="bar-track"><div class="bar-fill" style="width:87%"></div></div>
+        <span class="bar-pct">87%</span>
+      </div>
+      <div class="bar-row">
+        <span class="bar-label">Alumni</span>
+        <div class="bar-track"><div class="bar-fill" style="width:11%; background:#C8DCF0"></div></div>
+        <span class="bar-pct">11%</span>
+      </div>
+      <div class="bar-row">
+        <span class="bar-label">Faculty &amp; Staff</span>
+        <div class="bar-track"><div class="bar-fill" style="width:2%; background:#C8DCF0"></div></div>
+        <span class="bar-pct">2%</span>
+      </div>
+    </div>
+    <div class="callout-zone">
+      <div class="callout">
+        <div class="callout-num">10,000</div>
+        <div class="callout-label">new members joined<br>in the first week of April</div>
+      </div>
+      <div class="callout">
+        <div class="callout-num">70,000</div>
+        <div class="callout-label">total users<br>as of March 2004</div>
+      </div>
+    </div>
+    <div class="source">Source: thefacebook.com, March–April 2004</div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #1a1a2e; padding: 48px 56px; }
+
+h1 {
+  font-size: 26px;
+  font-weight: 700;
+  color: #e6e6fa;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #8892b0;
+  margin-bottom: 28px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.card {
+  border-radius: 14px;
+  padding: 24px;
+  min-height: 200px;
+}
+
+.card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.card p {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.card-gradient-1 {
+  background: linear-gradient(135deg, #4a6cf7 0%, #805ad5 100%);
+  color: white;
+}
+
+.card-gradient-2 {
+  background: linear-gradient(180deg, #e94560 0%, #ff6b6b 50%, #ffd93d 100%);
+  color: white;
+}
+
+.card-overlay {
+  position: relative;
+  background: #2d2d5e;
+  overflow: hidden;
+}
+
+.card-overlay::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(74, 108, 247, 0.3);
+  z-index: 0;
+}
+
+.card-overlay > * {
+  position: relative;
+  z-index: 1;
+}
+
+.card-overlay h3 { color: #a8c8ff; }
+.card-overlay p { color: #c0c8e0; }
+
+.bottom-row {
+  display: flex;
+  gap: 20px;
+  align-items: stretch;
+}
+
+.shadow-text {
+  flex: 1;
+  background: #16213e;
+  border-radius: 14px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.shadow-text h3 {
+  font-size: 28px;
+  color: #ffffff;
+  text-shadow: 0 0 20px rgba(74,108,247,0.8), 0 0 40px rgba(74,108,247,0.4);
+  margin-bottom: 8px;
+}
+
+.shadow-text p {
+  font-size: 12px;
+  color: #8892b0;
+}
+
+.opacity-badge-area {
+  flex: 1;
+  background: #16213e;
+  border-radius: 14px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.opacity-badge {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.badge-full {
+  background: #e94560;
+  color: white;
+  opacity: 1;
+}
+
+.badge-half {
+  background: #e94560;
+  color: white;
+  opacity: 0.5;
+}
+
+.badge-quarter {
+  background: #e94560;
+  color: white;
+  opacity: 0.25;
+}
+
+.opacity-label {
+  font-size: 12px;
+  color: #8892b0;
+}
+
+.gradient-bar {
+  flex: 1;
+  background: linear-gradient(90deg, #38b2ac, #4a6cf7, #805ad5, #e94560);
+  border-radius: 14px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gradient-bar span {
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+</style></head><body>
+<h1>Gradient Backgrounds & Opacity</h1>
+<div class="subtitle">Tests gradient rendering, semi-transparent overlays, text-shadow, and opacity levels</div>
+<div class="cards">
+  <div class="card card-gradient-1">
+    <h3>Blue → Purple Gradient</h3>
+    <p>Linear gradient at 135 degrees from #4a6cf7 to #805ad5. The converter should either reproduce the gradient or pick a representative solid color.</p>
+  </div>
+  <div class="card card-gradient-2">
+    <h3>Three-Stop Gradient</h3>
+    <p>Red → coral → yellow with three color stops. Multi-stop gradients are harder to approximate with a single solid fallback color.</p>
+  </div>
+  <div class="card card-overlay">
+    <h3>Semi-Transparent Overlay</h3>
+    <p>This card has a ::before pseudo-element with rgba(74,108,247,0.3) overlaid on a solid #2d2d5e background. The visual result is a tinted composite.</p>
+  </div>
+</div>
+<div class="bottom-row">
+  <div class="shadow-text">
+    <h3>Glowing Text Shadow</h3>
+    <p>text-shadow: 0 0 20px rgba(blue, 0.8). Should fallback to plain text.</p>
+  </div>
+  <div class="opacity-badge-area">
+    <div class="opacity-badge badge-full">100%</div>
+    <div class="opacity-badge badge-half">50%</div>
+    <div class="opacity-badge badge-quarter">25%</div>
+    <div class="opacity-label">Three identical badges at<br>different opacity levels</div>
+  </div>
+  <div class="gradient-bar">
+    <span>4-color horizontal gradient bar →</span>
+  </div>
+</div>
+</body></html>

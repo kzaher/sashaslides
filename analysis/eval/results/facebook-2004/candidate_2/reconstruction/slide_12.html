@@ -1,0 +1,67 @@
+<!-- slide_12.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@1,400&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1280px; height: 720px; overflow: hidden; background: #FFFFFF; }
+body { display: flex; align-items: center; justify-content: center; }
+.slide {
+  width: 1280px; height: 720px;
+  position: relative;
+  display: flex; flex-direction: column;
+  justify-content: center;
+  padding: 72px 104px;
+}
+.slide-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px; font-weight: 600;
+  color: #4A6FA5; letter-spacing: 0.1em;
+  text-transform: uppercase; margin-bottom: 60px;
+}
+.metrics-grid {
+  display: flex; gap: 0;
+}
+.metric {
+  flex: 1; text-align: center; padding: 0 12px;
+}
+.metric-value {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700; font-size: 52px;
+  color: #3B5998; line-height: 1;
+  letter-spacing: -0.025em;
+}
+.metric-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px; font-weight: 400;
+  color: #6A7A96; margin-top: 14px;
+  line-height: 1.4;
+}
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="slide-title">Engagement — as of March 2004</div>
+  <div class="metrics-grid">
+    <div class="metric">
+      <div class="metric-value">65%</div>
+      <div class="metric-label">daily unique<br>users</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value">95%</div>
+      <div class="metric-label">monthly unique<br>users</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value">3M</div>
+      <div class="metric-label">daily<br>pageviews</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value">87%</div>
+      <div class="metric-label">of users are<br>current students</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

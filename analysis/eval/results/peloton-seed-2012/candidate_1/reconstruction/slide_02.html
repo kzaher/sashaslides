@@ -1,0 +1,56 @@
+<!-- slide_20.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,400;0,700;1,400;1,700&family=Barlow:ital,wght@0,400;0,700&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  width:1280px; height:720px; overflow:hidden;
+  background:#1A0A30;
+  position:relative;
+  display:flex; align-items:center; justify-content:center;
+}
+body::after {
+  content:''; position:absolute; inset:0;
+  background:radial-gradient(ellipse 65% 65% at 50% 50%, transparent 25%, rgba(0,0,0,0.62) 100%);
+  pointer-events:none;
+}
+/* Subtle horizontal accent line behind the wordmark */
+.h-rule {
+  position:absolute;
+  left:10%; right:10%;
+  top:50%; height:1px;
+  background:rgba(255,255,255,0.05);
+  transform:translateY(-50%);
+}
+.inner {
+  position:relative; z-index:1;
+  text-align:center;
+}
+.wordmark {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:108px; font-weight:700; font-style:italic;
+  text-transform:uppercase; color:#FFFFFF;
+  letter-spacing:0.22em; line-height:1;
+  margin-bottom:0;
+}
+.rule { width:80px; height:3px; background:#F44060; margin:26px auto; }
+.tagline {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:18px; font-weight:700; font-style:italic;
+  text-transform:uppercase; color:rgba(255,255,255,0.55);
+  letter-spacing:0.28em;
+}
+</style>
+</head>
+<body>
+  <div class="h-rule"></div>
+  <div class="inner">
+    <div class="wordmark">PELOTON</div>
+    <div class="rule"></div>
+    <div class="tagline">Makes You Want To Show Up</div>
+  </div>
+</body>
+</html>

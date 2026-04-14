@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400;1,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #fefdfb; display: flex; align-items: center; justify-content: center; }
+.card { width: 960px; background: #fff; border-radius: 16px; box-shadow: 0 8px 40px rgba(0,0,0,0.06); padding: 56px 64px; position: relative; border-left: 6px solid #6366f1; }
+.quote-mark { position: absolute; top: 24px; left: 48px; font-family: 'Playfair Display', serif; font-size: 160px; line-height: 1; color: #6366f1; opacity: 0.08; pointer-events: none; }
+.quote-text { font-family: 'Playfair Display', serif; font-style: italic; font-size: 26px; line-height: 1.6; color: #1e293b; margin-bottom: 28px; position: relative; z-index: 1; }
+.stars { display: flex; gap: 4px; margin-bottom: 24px; }
+.star { font-size: 24px; }
+.star.filled { color: #f59e0b; }
+.star.empty { color: #e2e8f0; }
+.divider { width: 60px; height: 3px; background: linear-gradient(90deg, #6366f1, #a78bfa); border-radius: 2px; margin-bottom: 24px; }
+.author { display: flex; align-items: center; gap: 16px; }
+.author-photo { width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, #e0e7ff, #c7d2fe); display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 600; color: #6366f1; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(99,102,241,0.2); flex-shrink: 0; }
+.author-info { }
+.author-name { font-size: 18px; font-weight: 600; color: #1e293b; }
+.author-title { font-size: 14px; color: #64748b; margin-top: 2px; }
+.author-company { font-size: 13px; color: #6366f1; font-weight: 500; margin-top: 1px; }
+/* Decorative elements */
+.corner-dots { position: absolute; right: 48px; bottom: 40px; display: grid; grid-template-columns: repeat(5, 8px); gap: 8px; }
+.corner-dot { width: 8px; height: 8px; border-radius: 50%; background: #e2e8f0; }
+.corner-dot:nth-child(3n) { background: #c7d2fe; }
+/* Side badge */
+.badge { position: absolute; top: 48px; right: 56px; background: #f0fdf4; color: #16a34a; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 20px; border: 1px solid #bbf7d0; }
+</style></head><body>
+<div class="card">
+  <div class="quote-mark">&ldquo;</div>
+  <div class="badge">FEATURED REVIEW</div>
+  <div class="quote-text">
+    This platform completely transformed how our team collaborates on data projects.
+    The real-time sync and AI-powered insights saved us over 200 hours in Q1 alone.
+    I cannot imagine going back to our old workflow.
+  </div>
+  <div class="stars">
+    <span class="star filled">&#9733;</span>
+    <span class="star filled">&#9733;</span>
+    <span class="star filled">&#9733;</span>
+    <span class="star filled">&#9733;</span>
+    <span class="star empty">&#9734;</span>
+  </div>
+  <div class="divider"></div>
+  <div class="author">
+    <div class="author-photo">EW</div>
+    <div class="author-info">
+      <div class="author-name">Elena Whitfield</div>
+      <div class="author-title">Head of Data Engineering</div>
+      <div class="author-company">Meridian Analytics Inc.</div>
+    </div>
+  </div>
+  <div class="corner-dots">
+    <div class="corner-dot"></div><div class="corner-dot"></div><div class="corner-dot"></div><div class="corner-dot"></div><div class="corner-dot"></div>
+    <div class="corner-dot"></div><div class="corner-dot"></div><div class="corner-dot"></div><div class="corner-dot"></div><div class="corner-dot"></div>
+    <div class="corner-dot"></div><div class="corner-dot"></div><div class="corner-dot"></div><div class="corner-dot"></div><div class="corner-dot"></div>
+  </div>
+</div>
+</body></html>

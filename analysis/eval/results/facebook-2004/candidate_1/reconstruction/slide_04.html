@@ -1,0 +1,28 @@
+<!-- slide_13.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1280px; height: 720px; overflow: hidden; background: #FFFFFF; font-family: 'Inter', sans-serif; }
+.title-bar { background: #3B5998; height: 90px; display: flex; align-items: center; padding: 0 58px; }
+.title-bar h1 { font-size: 36px; font-weight: 700; color: #FFFFFF; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 3px; height: calc(720px - 90px); background: #E8F0F8; }
+.metric { background: #FFFFFF; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+.accent { width: 48px; height: 3px; background: #3B5998; margin-bottom: 16px; }
+.num { font-size: 56px; font-weight: 700; color: #3B5998; line-height: 1; margin-bottom: 10px; }
+.lbl { font-size: 15px; color: #1A1A1A; text-align: center; line-height: 1.35; }
+</style>
+</head>
+<body>
+  <div class="title-bar"><h1>Platform Metrics, March 2004</h1></div>
+  <div class="grid">
+    <div class="metric"><div class="accent"></div><div class="num">70,000</div><div class="lbl">Registered Users</div></div>
+    <div class="metric"><div class="accent"></div><div class="num">65%</div><div class="lbl">Daily Unique Visitors</div></div>
+    <div class="metric"><div class="accent"></div><div class="num">95%</div><div class="lbl">Monthly Unique Users</div></div>
+    <div class="metric"><div class="accent"></div><div class="num">3M</div><div class="lbl">Daily Pageviews</div></div>
+  </div>
+</body>
+</html>

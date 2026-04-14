@@ -1,0 +1,1016 @@
+{
+  "airbnb-seed-2009/slide_01": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_01",
+        "reason": "Centered text hierarchy with attribution footer and generous whitespace mirrors logo-dominant cover slide with minimal supporting elements"
+      },
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Centered focal heading with body text below and brand mark in top-right corner matches spatial framing and minimalist whitespace pattern"
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"sequoia-template/slide_01\",\n      \"reason\": \"Centered text hierarchy with attribution footer and generous whitespace mirrors logo-dominant cover slide with minimal supporting elements\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_02\",\n      \"reason\": \"Centered focal heading with body text below and brand mark in top-right corner matches spatial framing and minimalist whitespace pattern\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_02": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_05",
+        "reason": "Shares the core structure of a section heading anchoring the top, three vertically-stacked text blocks with generous spacing between them, and a footer with logo/page-number anchors matching the slide number placement."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Matches the layout pattern of a top-level heading with three vertically-stacked content items below, top-heavy composition with generous whitespace at the bottom, and clear top-down reading flow."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"sequoia-template/slide_05\",\n      \"reason\": \"Shares the core structure of a section heading anchoring the top, three vertically-stacked text blocks with generous spacing between them, and a footer with logo/page-number anchors matching the slide number placement.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_02\",\n      \"reason\": \"Matches the layout pattern of a top-level heading with three vertically-stacked content items below, top-heavy composition with generous whitespace at the bottom, and clear top-down reading flow.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_03": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Three equal-width columns with bordered boxes below a header (title + subheading), generous whitespace, footnote at bottom—directly mirrors target's heading + descriptive text + three-card grid + footer structure."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_01",
+        "reason": "Heading and subtitle positioned at top with three product items arranged horizontally below in lower half; clear top-down hierarchy and generous whitespace match target's spatial arrangement and reading flow."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Three equal-width columns with bordered boxes below a header (title + subheading), generous whitespace, footnote at bottom—directly mirrors target's heading + descriptive text + three-card grid + footer structure.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_01\",\n      \"reason\": \"Heading and subtitle positioned at top with three product items arranged horizontally below in lower half; clear top-down hierarchy and generous whitespace match target's spatial arrangement and reading flow.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_04": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Three-column metric-and-stat layout with bordered boxes, metric labels with supporting values, generous whitespace, and footnote—structurally mirrors the target's two-column metric comparison exactly, just expanded to three columns."
+      },
+      {
+        "id": "peloton-seed-2012/slide_06",
+        "reason": "Symmetric two-column comparison with column headers at the top of each column, balanced visual weight distribution, and ample whitespace—matches the target's structural layout and spatial symmetry perfectly, differing only in content type (lists vs. metrics)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_12\", \"reason\": \"Three-column metric-and-stat layout with bordered boxes, metric labels with supporting values, generous whitespace, and footnote—structurally mirrors the target's two-column metric comparison exactly, just expanded to three columns.\"},\n    {\"id\": \"peloton-seed-2012/slide_06\", \"reason\": \"Symmetric two-column comparison with column headers at the top of each column, balanced visual weight distribution, and ample whitespace—matches the target's structural layout and spatial symmetry perfectly, differing only in content type (lists vs. metrics).\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_05": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_07",
+        "reason": "Circular icon badges arranged horizontally with text labels below, title at top-left, and balanced visual rhythm—closely matches the bubble arrangement and spatial structure despite having four elements instead of three."
+      },
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Three-column layout with centered icons and metric labels positioned below each element, capturing the three-element count and vertical label structure of the target, though with centered rather than left-anchored title."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_07\", \"reason\": \"Circular icon badges arranged horizontally with text labels below, title at top-left, and balanced visual rhythm—closely matches the bubble arrangement and spatial structure despite having four elements instead of three.\"},\n    {\"id\": \"facebook-2004/slide_12\", \"reason\": \"Three-column layout with centered icons and metric labels positioned below each element, capturing the three-element count and vertical label structure of the target, though with centered rather than left-anchored title.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_06": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_07",
+        "reason": "Horizontally-arranged trio of device mockups as dominant visual elements with title overhead and gallery-like whitespace—directly matches the three-mockup product showcase structure and spatial arrangement."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_01",
+        "reason": "Three product interface screenshots in lower half with title and subtitle overhead, clear top-down hierarchy, and horizontal mockup arrangement parallels the target's process-flow product showcase layout."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"coinbase-seed-2012/slide_07\", \"reason\": \"Horizontally-arranged trio of device mockups as dominant visual elements with title overhead and gallery-like whitespace—directly matches the three-mockup product showcase structure and spatial arrangement.\"},\n    {\"id\": \"coinbase-seed-2012/slide_01\", \"reason\": \"Three product interface screenshots in lower half with title and subtitle overhead, clear top-down hierarchy, and horizontal mockup arrangement parallels the target's process-flow product showcase layout.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_07": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Three equal-width columns arranged horizontally with metric labels and values in each, header above, footer below, and left-to-right reading flow."
+      },
+      {
+        "id": "peloton-seed-2012/slide_04",
+        "reason": "Three-column horizontal layout with circular icon elements, supporting text beneath each, title anchoring top, and clear left-to-right compositional flow."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Three equal-width columns arranged horizontally with metric labels and values in each, header above, footer below, and left-to-right reading flow.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_04\",\n      \"reason\": \"Three-column horizontal layout with circular icon elements, supporting text beneath each, title anchoring top, and clear left-to-right compositional flow.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_08": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Three equal-width columns with distinct content (icons/metrics in bordered boxes) below a header area, reading flows top-down then left-to-right, same spatial zone arrangement."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_07",
+        "reason": "Three equal-width device mockups arranged horizontally below a centered title, similar three-element column layout with generous whitespace and top-down-then-left-right reading flow."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Three equal-width columns with distinct content (icons/metrics in bordered boxes) below a header area, reading flows top-down then left-to-right, same spatial zone arrangement.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_07\",\n      \"reason\": \"Three equal-width device mockups arranged horizontally below a centered title, similar three-element column layout with generous whitespace and top-down-then-left-right reading flow.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_09": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_10",
+        "reason": "Both use two intersecting axes to position elements in 2D space based on dimensional values, with title at top and center-out flow from axis intersection."
+      },
+      {
+        "id": "peloton-seed-2012/slide_09",
+        "reason": "Central diagram with four elements positioned at cardinal directions/quadrants, title at top, and radial center-out flow creating spatial zones."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_10\", \"reason\": \"Both use two intersecting axes to position elements in 2D space based on dimensional values, with title at top and center-out flow from axis intersection.\"},\n    {\"id\": \"peloton-seed-2012/slide_09\", \"reason\": \"Central diagram with four elements positioned at cardinal directions/quadrants, title at top, and radial center-out flow creating spatial zones.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_10": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_05",
+        "reason": "Both feature a balanced 6-item structured grid (3×2 vs 2×3) with subheading+paragraph blocks per element, centered composition, and generous whitespace framing the layout."
+      },
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Three-column grid of bordered boxes with icons and labels, same column count as target, each element has structured header+supporting content, centered heading, and balanced visual weight."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_05\",\n      \"reason\": \"Both feature a balanced 6-item structured grid (3×2 vs 2×3) with subheading+paragraph blocks per element, centered composition, and generous whitespace framing the layout.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Three-column grid of bordered boxes with icons and labels, same column count as target, each element has structured header+supporting content, centered heading, and balanced visual weight.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_11": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_10",
+        "reason": "Vertical list of left-aligned items with generous spacing between each, header at top, logo and page number in footer, creating top-down linear reading flow matching the profile card roster structure."
+      },
+      {
+        "id": "sequoia-template/slide_12",
+        "reason": "Vertical arrangement of left-aligned section labels paired with annotation text below each, top-down reading from header through spaced items to footer, mirroring the profile-card layout with repeated name/title/bio entries."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"sequoia-template/slide_10\",\n      \"reason\": \"Vertical list of left-aligned items with generous spacing between each, header at top, logo and page number in footer, creating top-down linear reading flow matching the profile card roster structure.\"\n    },\n    {\n      \"id\": \"sequoia-template/slide_12\",\n      \"reason\": \"Vertical arrangement of left-aligned section labels paired with annotation text below each, top-down reading from header through spaced items to footer, mirroring the profile-card layout with repeated name/title/bio entries.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_12": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_07",
+        "reason": "Heading anchors the top with 4 icon badges distributed horizontally, each with a text label below—structurally mirrors the testimonial quotes and logo rows arranged horizontally with labels underneath."
+      },
+      {
+        "id": "peloton-seed-2012/slide_16",
+        "reason": "Grid of 4 quote cards (2×2 arrangement) below a header area, with each card containing a quotation mark, text block, and labeled badge—thematically aligns with testimonials and matches the 4-element card structure with attributions."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_07\", \"reason\": \"Heading anchors the top with 4 icon badges distributed horizontally, each with a text label below—structurally mirrors the testimonial quotes and logo rows arranged horizontally with labels underneath.\"},\n    {\"id\": \"peloton-seed-2012/slide_16\", \"reason\": \"Grid of 4 quote cards (2×2 arrangement) below a header area, with each card containing a quotation mark, text block, and labeled badge—thematically aligns with testimonials and matches the 4-element card structure with attributions.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_13": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_16",
+        "reason": "Exactly matches the target: 2×2 grid of testimonial cards with heading at top, each card containing quote marks, text, and visual labels in balanced equal-sized cells."
+      },
+      {
+        "id": "peloton-seed-2012/slide_17",
+        "reason": "Strong testimonial layout match with two-column structure, heading at top, and multi-cell card design with quotation marks, text blocks, and labeled attribution elements."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_16\",\n      \"reason\": \"Exactly matches the target: 2×2 grid of testimonial cards with heading at top, each card containing quote marks, text, and visual labels in balanced equal-sized cells.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_17\",\n      \"reason\": \"Strong testimonial layout match with two-column structure, heading at top, and multi-cell card design with quotation marks, text blocks, and labeled attribution elements.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_14": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_04",
+        "reason": "Three equal-width columns with large circular icons at the top of each column, subheadings, and supporting text blocks below—matching the TARGET's three-column structure with circular anchors and text labels."
+      },
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Three equal-width columns arranged left-to-right, each with a centered icon/illustration in a bordered box and label below—mirroring the TARGET's three-column progression with visual anchors and supporting descriptive elements."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_04\",\n      \"reason\": \"Three equal-width columns with large circular icons at the top of each column, subheadings, and supporting text blocks below—matching the TARGET's three-column structure with circular anchors and text labels.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Three equal-width columns arranged left-to-right, each with a centered icon/illustration in a bordered box and label below—mirroring the TARGET's three-column progression with visual anchors and supporting descriptive elements.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_01": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_03",
+        "reason": "Same hierarchical structure with heading top-left, descriptive text below, and three equal-width items arranged horizontally in the lower section with generous whitespace."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Product showcase with three mockup screenshots arranged horizontally across the lower portion, title at top, and similar top-down reading flow with generous whitespace distribution."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_03\",\n      \"reason\": \"Same hierarchical structure with heading top-left, descriptive text below, and three equal-width items arranged horizontally in the lower section with generous whitespace.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_06\",\n      \"reason\": \"Product showcase with three mockup screenshots arranged horizontally across the lower portion, title at top, and similar top-down reading flow with generous whitespace distribution.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_02": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_14",
+        "reason": "Exact layout match: centered title at top, three-item bullet list in left-center area, generous whitespace dominating bottom half, top-heavy minimalist composition."
+      },
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Icon-plus-text pattern with three equal elements and centered layout; despite horizontal (not vertical) arrangement, it captures the icon-label-value pairing rhythm and spatial centering of the target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_14\",\n      \"reason\": \"Exact layout match: centered title at top, three-item bullet list in left-center area, generous whitespace dominating bottom half, top-heavy minimalist composition.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Icon-plus-text pattern with three equal elements and centered layout; despite horizontal (not vertical) arrangement, it captures the icon-label-value pairing rhythm and spatial centering of the target.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_03": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Title anchors top with whitespace below, large pie chart dominates center as primary visual focal point, centered positioning with generous whitespace throughout, top-down flow from title to graphic."
+      },
+      {
+        "id": "peloton-seed-2012/slide_08",
+        "reason": "Large circular diagram anchors center as dominant visual element, title positioned at top, composition maintains generous whitespace around perimeter with visual weight concentrated centrally, similar title-then-graphic reading sequence."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_11\",\n      \"reason\": \"Title anchors top with whitespace below, large pie chart dominates center as primary visual focal point, centered positioning with generous whitespace throughout, top-down flow from title to graphic.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_08\",\n      \"reason\": \"Large circular diagram anchors center as dominant visual element, title positioned at top, composition maintains generous whitespace around perimeter with visual weight concentrated centrally, similar title-then-graphic reading sequence.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_04": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Heading and metric occupy top portion; large pie chart dominates the remainder as primary visual element with segment labels, matching the title-plus-chart structure and chart-centric layout."
+      },
+      {
+        "id": "facebook-2004/slide_08",
+        "reason": "Title positioned at top with data table dominating the lower two-thirds as the primary visual element, mirroring the head-then-visualization hierarchy and data-heavy composition."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_11\", \"reason\": \"Heading and metric occupy top portion; large pie chart dominates the remainder as primary visual element with segment labels, matching the title-plus-chart structure and chart-centric layout.\"},\n    {\"id\": \"facebook-2004/slide_08\", \"reason\": \"Title positioned at top with data table dominating the lower two-thirds as the primary visual element, mirroring the head-then-visualization hierarchy and data-heavy composition.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_05": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_10",
+        "reason": "Multiple elements scattered at varying vertical heights and horizontal positions across the slide with label annotations, creating asymmetric distribution across different zones matching the organic scattered composition."
+      },
+      {
+        "id": "peloton-seed-2012/slide_09",
+        "reason": "Title at top with four text blocks positioned at cardinal directions creating a scattered radial distribution across the slide with generous surrounding whitespace and non-linear exploratory reading flow."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_10\", \"reason\": \"Multiple elements scattered at varying vertical heights and horizontal positions across the slide with label annotations, creating asymmetric distribution across different zones matching the organic scattered composition.\"},\n    {\"id\": \"peloton-seed-2012/slide_09\", \"reason\": \"Title at top with four text blocks positioned at cardinal directions creating a scattered radial distribution across the slide with generous surrounding whitespace and non-linear exploratory reading flow.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_06": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Product-flow-showcase with multiple mockup screenshots arranged in vertical/cascading layout demonstrates the same pattern of visual evidence progression from problem to solution."
+      },
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Title with introductory text followed by supporting image creates a parallel top-down text-to-visual evidence flow that mirrors the TARGET's progression from problem statement through visual proof."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_06\",\n      \"reason\": \"Product-flow-showcase with multiple mockup screenshots arranged in vertical/cascading layout demonstrates the same pattern of visual evidence progression from problem to solution.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_03\",\n      \"reason\": \"Title with introductory text followed by supporting image creates a parallel top-down text-to-visual evidence flow that mirrors the TARGET's progression from problem statement through visual proof.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_07": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Product-showcase with three stacked mockup screenshots arranged horizontally, title at top, and gallery-like whitespace presentation."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_08",
+        "reason": "Three-column layout with title at top, balanced horizontal arrangement of elements including website screenshot mockup in right column."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_06\", \"reason\": \"Product-showcase with three stacked mockup screenshots arranged horizontally, title at top, and gallery-like whitespace presentation.\"},\n    {\"id\": \"airbnb-seed-2009/slide_08\", \"reason\": \"Three-column layout with title at top, balanced horizontal arrangement of elements including website screenshot mockup in right column.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_08": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_14",
+        "reason": "Centered title dominates upper-middle portion with content concentrated in upper half, leaving generous whitespace at bottom—creating the same upper/lower visual split as the target."
+      },
+      {
+        "id": "facebook-2004/slide_09",
+        "reason": "Centered heading positioned in upper-middle area with top-heavy, minimalist layout and generous whitespace throughout, matching the target's symmetrical alignment and uncluttered spacing."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_14\", \"reason\": \"Centered title dominates upper-middle portion with content concentrated in upper half, leaving generous whitespace at bottom—creating the same upper/lower visual split as the target.\"},\n    {\"id\": \"facebook-2004/slide_09\", \"reason\": \"Centered heading positioned in upper-middle area with top-heavy, minimalist layout and generous whitespace throughout, matching the target's symmetrical alignment and uncluttered spacing.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_09": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_10",
+        "reason": "Title at top; vertical Y-axis on left and horizontal X-axis at bottom frame the main content; data elements plotted across the coordinate space with annotations and labels; chart dominates ~75% of slide; top-down flow."
+      },
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Title at top with large data visualization (pie chart) as dominant visual element occupying lower two-thirds; segment labels and legend provide axis-like structure; minimal surrounding text; chart-centric layout with top-down flow."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_10\", \"reason\": \"Title at top; vertical Y-axis on left and horizontal X-axis at bottom frame the main content; data elements plotted across the coordinate space with annotations and labels; chart dominates ~75% of slide; top-down flow.\"},\n    {\"id\": \"facebook-2004/slide_11\", \"reason\": \"Title at top with large data visualization (pie chart) as dominant visual element occupying lower two-thirds; segment labels and legend provide axis-like structure; minimal surrounding text; chart-centric layout with top-down flow.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_10": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Title + metric + chart layout with chart as dominant center-right visual element, numeric callouts, and similar whitespace framing"
+      },
+      {
+        "id": "peloton-seed-2012/slide_10",
+        "reason": "Title + coordinate plot with axes and plotted data points; shares axis-based spatial visualization and center positioning similar to line chart structure"
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_11\",\n      \"reason\": \"Title + metric + chart layout with chart as dominant center-right visual element, numeric callouts, and similar whitespace framing\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_10\",\n      \"reason\": \"Title + coordinate plot with axes and plotted data points; shares axis-based spatial visualization and center positioning similar to line chart structure\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_11": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_10",
+        "reason": "Coordinate plot with vertical and horizontal axes, scattered circular elements at specific data positions, axis labels, title at top, and logo placement—directly mirrors the scatter plot structure with legend-like supporting labels."
+      },
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Chart-focused layout with title and metric at top, large pie chart as dominant visual element dominating center, segment labels as legend, and footer disclaimer at bottom—shares the same header→visualization→footer reading flow."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_10\", \"reason\": \"Coordinate plot with vertical and horizontal axes, scattered circular elements at specific data positions, axis labels, title at top, and logo placement—directly mirrors the scatter plot structure with legend-like supporting labels.\"},\n    {\"id\": \"facebook-2004/slide_11\", \"reason\": \"Chart-focused layout with title and metric at top, large pie chart as dominant visual element dominating center, segment labels as legend, and footer disclaimer at bottom—shares the same header→visualization→footer reading flow.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_01": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_17",
+        "reason": "Testimonial layout with all core elements: quotation mark icons, attribution boxes, logo positioned top-right, horizontal divider line, and top-down reading flow with generous whitespace."
+      },
+      {
+        "id": "peloton-seed-2012/slide_18",
+        "reason": "Quote/testimonial type with quotation marks, attribution box, and top-down vertical stacking, though left-aligned rather than centered."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_17\",\n      \"reason\": \"Testimonial layout with all core elements: quotation mark icons, attribution boxes, logo positioned top-right, horizontal divider line, and top-down reading flow with generous whitespace.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_18\",\n      \"reason\": \"Quote/testimonial type with quotation marks, attribution box, and top-down vertical stacking, though left-aligned rather than centered.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_02": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Centered title at top with structured content below and generous whitespace filling lower half, matching the target's top-heavy minimalist spatial arrangement and vertical reading flow."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_08",
+        "reason": "Centered text positioned in upper portion with dominant whitespace filling lower two-thirds, providing similar minimalist composition and clear top-down hierarchy as the target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_02\",\n      \"reason\": \"Centered title at top with structured content below and generous whitespace filling lower half, matching the target's top-heavy minimalist spatial arrangement and vertical reading flow.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_08\",\n      \"reason\": \"Centered text positioned in upper portion with dominant whitespace filling lower two-thirds, providing similar minimalist composition and clear top-down hierarchy as the target.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_03": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_08",
+        "reason": "Heading at top with descriptive text below, followed by left-to-right column layout containing a text list on left and large website screenshot on right, matching the target's two-column structure and top-down then left-right reading flow."
+      },
+      {
+        "id": "peloton-seed-2012/slide_02",
+        "reason": "Two-column layout pairing a large photograph with heading and numbered list on the opposite side, capturing the same image-plus-content spatial arrangement and left-right reading pattern as the target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_08\",\n      \"reason\": \"Heading at top with descriptive text below, followed by left-to-right column layout containing a text list on left and large website screenshot on right, matching the target's two-column structure and top-down then left-right reading flow.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_02\",\n      \"reason\": \"Two-column layout pairing a large photograph with heading and numbered list on the opposite side, capturing the same image-plus-content spatial arrangement and left-right reading pattern as the target.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_04": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_01",
+        "reason": "Full-bleed background image with white text and logo overlay positioned on the image, prioritizing visual imagery with text as secondary element."
+      },
+      {
+        "id": "peloton-seed-2012/slide_11",
+        "reason": "Full-bleed photograph dominates with branded circular callout overlay and logo anchored at top-left corner, balancing image-heavy composition with branded text element."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_01\", \"reason\": \"Full-bleed background image with white text and logo overlay positioned on the image, prioritizing visual imagery with text as secondary element.\"},\n    {\"id\": \"peloton-seed-2012/slide_11\", \"reason\": \"Full-bleed photograph dominates with branded circular callout overlay and logo anchored at top-left corner, balancing image-heavy composition with branded text element.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_05": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Two-column symmetric metric layout with heading at top and footer at bottom, matching the target's top-heading + two-column split + footer structure."
+      },
+      {
+        "id": "peloton-seed-2012/slide_05",
+        "reason": "Two-column grid of text blocks with title at top and logo placement, capturing the target's structured two-column content distribution with top-down then left-right flow."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_04\", \"reason\": \"Two-column symmetric metric layout with heading at top and footer at bottom, matching the target's top-heading + two-column split + footer structure.\"},\n    {\"id\": \"peloton-seed-2012/slide_05\", \"reason\": \"Two-column grid of text blocks with title at top and logo placement, capturing the target's structured two-column content distribution with top-down then left-right flow.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_06": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_05",
+        "reason": "Full-width title at top with logo in upper right, followed by balanced two-column grid below — directly mirrors target's title+logo header and symmetric two-column content layout."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Heading top-left with badge top-right anchoring a symmetric two-column layout in a white container below — matches target's top anchors and left-right symmetric column distribution."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_05\",\n      \"reason\": \"Full-width title at top with logo in upper right, followed by balanced two-column grid below — directly mirrors target's title+logo header and symmetric two-column content layout.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_04\",\n      \"reason\": \"Heading top-left with badge top-right anchoring a symmetric two-column layout in a white container below — matches target's top anchors and left-right symmetric column distribution.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_07": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_01",
+        "reason": "Centered text hierarchy with decorative marks, full-bleed background, and generous whitespace mirrors the target's centered heading, ghosted illustration, and clear visual flow."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Centered title with body content (bullet list) below and generous whitespace below creates similar text-focused hierarchy and top-down reading pattern."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"sequoia-template/slide_01\", \"reason\": \"Centered text hierarchy with decorative marks, full-bleed background, and generous whitespace mirrors the target's centered heading, ghosted illustration, and clear visual flow.\"},\n    {\"id\": \"coinbase-seed-2012/slide_02\", \"reason\": \"Centered title with body content (bullet list) below and generous whitespace below creates similar text-focused hierarchy and top-down reading pattern.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_08": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_03",
+        "reason": "Two-column structured table with header row distinct from data rows, title and logo at top-right anchoring layout, left-aligned content with balanced spacing between columns—directly matches core data-table structure."
+      },
+      {
+        "id": "peloton-seed-2012/slide_05",
+        "reason": "Title at top with logo in top-right corner, followed by a balanced multi-row, multi-column grid of organized text blocks (3 rows × 2 columns)—shares identical spatial story of header + structured columnar content dominating lower portion."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_03\",\n      \"reason\": \"Two-column structured table with header row distinct from data rows, title and logo at top-right anchoring layout, left-aligned content with balanced spacing between columns—directly matches core data-table structure.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_05\",\n      \"reason\": \"Title at top with logo in top-right corner, followed by a balanced multi-row, multi-column grid of organized text blocks (3 rows × 2 columns)—shares identical spatial story of header + structured columnar content dominating lower portion.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_09": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_03",
+        "reason": "Centered title at top with large decorative spherical illustration and radiating lines below, matching the target's centered heading and decorative graphic with generous whitespace and top-down flow."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_07",
+        "reason": "Centered heading spanning above centered visual elements (device mockups) with generous surrounding whitespace and gallery-like composition, structurally mirroring the target's spatial hierarchy and spacious layout."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_03\",\n      \"reason\": \"Centered title at top with large decorative spherical illustration and radiating lines below, matching the target's centered heading and decorative graphic with generous whitespace and top-down flow.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_07\",\n      \"reason\": \"Centered heading spanning above centered visual elements (device mockups) with generous surrounding whitespace and gallery-like composition, structurally mirroring the target's spatial hierarchy and spacious layout.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_10": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_05",
+        "reason": "Logo anchors top-right, full-width title spans below, substantial two-column text grid with dense subheading+body pairs fills lower two-thirds, minimal surrounding whitespace."
+      },
+      {
+        "id": "peloton-seed-2012/slide_03",
+        "reason": "Logo positioned top-right, full-width heading spans top, two-column comparison table with dense row content occupies center area with minimal whitespace, text-heavy layout."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_05\",\n      \"reason\": \"Logo anchors top-right, full-width title spans below, substantial two-column text grid with dense subheading+body pairs fills lower two-thirds, minimal surrounding whitespace.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_03\",\n      \"reason\": \"Logo positioned top-right, full-width heading spans top, two-column comparison table with dense row content occupies center area with minimal whitespace, text-heavy layout.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_11": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_10",
+        "reason": "Title at top with numeric callout (metric) positioned center-right within chart area, matching TARGET's layout of prominent metric and chart positioned center-right as dominant visual element."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_04",
+        "reason": "Centered heading and supporting text (metric) occupy top ~15%, large chart dominates remainder, matching TARGET's top-down flow of title+metric above with chart as dominant visual below."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_10\",\n      \"reason\": \"Title at top with numeric callout (metric) positioned center-right within chart area, matching TARGET's layout of prominent metric and chart positioned center-right as dominant visual element.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_04\",\n      \"reason\": \"Centered heading and supporting text (metric) occupy top ~15%, large chart dominates remainder, matching TARGET's top-down flow of title+metric above with chart as dominant visual below.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_12": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_03",
+        "reason": "Three equal-width cards arranged horizontally below a header, matching the target's bordered-box three-column layout with top-down-then-left-right flow pattern and similar spatial hierarchy."
+      },
+      {
+        "id": "peloton-seed-2012/slide_04",
+        "reason": "Three equal-width columns anchored by large circular icons with supporting text below, capturing the icon-and-metric visual pattern and identical reading rhythm as the target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_03\", \"reason\": \"Three equal-width cards arranged horizontally below a header, matching the target's bordered-box three-column layout with top-down-then-left-right flow pattern and similar spatial hierarchy.\"},\n    {\"id\": \"peloton-seed-2012/slide_04\", \"reason\": \"Three equal-width columns anchored by large circular icons with supporting text below, capturing the icon-and-metric visual pattern and identical reading rhythm as the target.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_13": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_18",
+        "reason": "Single testimonial/quote structure with quotation mark, heading, body text, and attribution box matching the singular quote-with-source-attribution design"
+      },
+      {
+        "id": "peloton-seed-2012/slide_17",
+        "reason": "Testimonial layout with explicit horizontal divider line, quotation marks, attribution boxes, and logo at top-right matching key structural elements"
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_18\", \"reason\": \"Single testimonial/quote structure with quotation mark, heading, body text, and attribution box matching the singular quote-with-source-attribution design\"},\n    {\"id\": \"peloton-seed-2012/slide_17\", \"reason\": \"Testimonial layout with explicit horizontal divider line, quotation marks, attribution boxes, and logo at top-right matching key structural elements\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_14": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Centered title with three vertically-stacked left-aligned bullet points below, top-heavy layout with generous whitespace at bottom—directly mirrors the target's spatial structure."
+      },
+      {
+        "id": "sequoia-template/slide_05",
+        "reason": "Three left-aligned text blocks stacked vertically with generous spacing between, creating the same top-heavy asymmetric balance with whitespace dominance at bottom."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_02\",\n      \"reason\": \"Centered title with three vertically-stacked left-aligned bullet points below, top-heavy layout with generous whitespace at bottom—directly mirrors the target's spatial structure.\"\n    },\n    {\n      \"id\": \"sequoia-template/slide_05\",\n      \"reason\": \"Three left-aligned text blocks stacked vertically with generous spacing between, creating the same top-heavy asymmetric balance with whitespace dominance at bottom.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_15": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_12",
+        "reason": "Asymmetrical layout with large geometric element on left containing text (heading + body), full background element on right, small logo in top-right corner, and minimalist composition with clear visual separation."
+      },
+      {
+        "id": "peloton-seed-2012/slide_09",
+        "reason": "Large centered circular diagram as focal watermark element, small logo positioned in top-right corner, four supporting text blocks distributed around the center, and generous whitespace emphasizing minimalist design."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_12\",\n      \"reason\": \"Asymmetrical layout with large geometric element on left containing text (heading + body), full background element on right, small logo in top-right corner, and minimalist composition with clear visual separation.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_09\",\n      \"reason\": \"Large centered circular diagram as focal watermark element, small logo positioned in top-right corner, four supporting text blocks distributed around the center, and generous whitespace emphasizing minimalist design.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_16": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_17",
+        "reason": "Two-column layout with heading at top-left and logo at top-right, followed by two distinct columns below—closest spatial arrangement to target's structure."
+      },
+      {
+        "id": "peloton-seed-2012/slide_02",
+        "reason": "Clear 2-column layout with heading and logo in top area, balanced visual (photograph) on left and text content (list) on right, matching target's text-vs-visual balance."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_17\",\n      \"reason\": \"Two-column layout with heading at top-left and logo at top-right, followed by two distinct columns below—closest spatial arrangement to target's structure.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_02\",\n      \"reason\": \"Clear 2-column layout with heading and logo in top area, balanced visual (photograph) on left and text content (list) on right, matching target's text-vs-visual balance.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_17": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_06",
+        "reason": "Explicit two-column layout with bullet lists in each column, balanced visual weight distribution, symmetric structure matching the target's dual-column bullet organization."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Symmetric two-column layout with heading at top and full-width container below, similar spatial arrangement of centered header with two balanced vertical sections despite different content type."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_06\",\n      \"reason\": \"Explicit two-column layout with bullet lists in each column, balanced visual weight distribution, symmetric structure matching the target's dual-column bullet organization.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_04\",\n      \"reason\": \"Symmetric two-column layout with heading at top and full-width container below, similar spatial arrangement of centered header with two balanced vertical sections despite different content type.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_18": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_06",
+        "reason": "Exact structural match: two-column layout with heading at top, balanced bullet-list columns, logo mark, and symmetric visual weight distribution."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Two-column layout with heading top-left, logo badge top-right, centered white container, supporting text in each column, and balanced whitespace—mirrors the spatial hierarchy of heading above and balanced columns below."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_06\",\n      \"reason\": \"Exact structural match: two-column layout with heading at top, balanced bullet-list columns, logo mark, and symmetric visual weight distribution.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_04\",\n      \"reason\": \"Two-column layout with heading top-left, logo badge top-right, centered white container, supporting text in each column, and balanced whitespace—mirrors the spatial hierarchy of heading above and balanced columns below.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_19": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_11",
+        "reason": "Directly combines circular portrait photos with stacked contact information (name, title, bio), capturing the core contact-card element composition."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Explicit two balanced column layout below a top-anchored heading with symmetric content distribution, matching the spatial zone arrangement of the target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_11\",\n      \"reason\": \"Directly combines circular portrait photos with stacked contact information (name, title, bio), capturing the core contact-card element composition.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_04\",\n      \"reason\": \"Explicit two balanced column layout below a top-anchored heading with symmetric content distribution, matching the spatial zone arrangement of the target.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_20": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_17",
+        "reason": "Two-column testimonial layout with quotation marks, body text blocks, attribution boxes, and horizontal divider line—matching the core quote element inventory and centered composition with generous whitespace."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Testimonials arranged in a large centered white content block with generous whitespace distributing weight evenly—sharing the vertical centering and whitespace rhythm of the target despite multiple quotes rather than a single quote."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_17\", \"reason\": \"Two-column testimonial layout with quotation marks, body text blocks, attribution boxes, and horizontal divider line—matching the core quote element inventory and centered composition with generous whitespace.\"},\n    {\"id\": \"airbnb-seed-2009/slide_12\", \"reason\": \"Testimonials arranged in a large centered white content block with generous whitespace distributing weight evenly—sharing the vertical centering and whitespace rhythm of the target despite multiple quotes rather than a single quote.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_01": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_01",
+        "reason": "Centered vertical hierarchy with decorative divider above, main text block in center, and closing marks below; generous whitespace throughout and similar top-down reading flow like a title composition."
+      },
+      {
+        "id": "facebook-2004/slide_20",
+        "reason": "Vertically-centered layout with decorative divider at top, main text block, and attribution/closing elements at bottom; similar distribution of whitespace and centered content arrangement."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_01\", \"reason\": \"Centered vertical hierarchy with decorative divider above, main text block in center, and closing marks below; generous whitespace throughout and similar top-down reading flow like a title composition.\"},\n    {\"id\": \"facebook-2004/slide_20\", \"reason\": \"Vertically-centered layout with decorative divider at top, main text block, and attribution/closing elements at bottom; similar distribution of whitespace and centered content arrangement.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_02": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Centered heading with vertically-stacked bullet items below, top-heavy composition with generous whitespace at bottom and sides matching the agenda layout structure."
+      },
+      {
+        "id": "facebook-2004/slide_14",
+        "reason": "Centered title anchoring upper portion with vertically-stacked bullet list positioned below, substantial whitespace at bottom, and top-heavy asymmetric balance mirroring the target's centered list composition."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"coinbase-seed-2012/slide_02\", \"reason\": \"Centered heading with vertically-stacked bullet items below, top-heavy composition with generous whitespace at bottom and sides matching the agenda layout structure.\"},\n    {\"id\": \"facebook-2004/slide_14\", \"reason\": \"Centered title anchoring upper portion with vertically-stacked bullet list positioned below, substantial whitespace at bottom, and top-heavy asymmetric balance mirroring the target's centered list composition.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_03": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_03",
+        "reason": "Full-width colored heading spans the entire top, anchoring the visual hierarchy with structured content below—most directly mirrors the target's green header bar and top-down composition."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Section title and page number anchor the top, with a prominent content container below, generous whitespace, and footer framing—matches the target's header-region-plus-whitespace-plus-footer spatial pattern."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_03\",\n      \"reason\": \"Full-width colored heading spans the entire top, anchoring the visual hierarchy with structured content below—most directly mirrors the target's green header bar and top-down composition.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_02\",\n      \"reason\": \"Section title and page number anchor the top, with a prominent content container below, generous whitespace, and footer framing—matches the target's header-region-plus-whitespace-plus-footer spatial pattern.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_04": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_03",
+        "reason": "Red full-width heading at top creates colored banner effect; two-column structured table below with balanced spatial arrangement; logo in corner and organized layout with similar visual hierarchy."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Large section title anchors top with slide number in opposite corner; vertically-stacked text statements in white content box below; top-down flow with generous surrounding whitespace matching target's spatial arrangement."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_03\",\n      \"reason\": \"Red full-width heading at top creates colored banner effect; two-column structured table below with balanced spatial arrangement; logo in corner and organized layout with similar visual hierarchy.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_02\",\n      \"reason\": \"Large section title anchors top with slide number in opposite corner; vertically-stacked text statements in white content box below; top-down flow with generous surrounding whitespace matching target's spatial arrangement.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_05": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Section title at top with slide number, three vertically-stacked text statement blocks in white container with generous whitespace between, and footer at bottom—directly mirrors the target's composition structure."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_11",
+        "reason": "Left-aligned title with slide number, three stacked profile cards with consistent spacing between entries, footer attribution, and top-to-bottom reading flow with generous margins—similar layout rhythm despite image elements in cards."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_02\",\n      \"reason\": \"Section title at top with slide number, three vertically-stacked text statement blocks in white container with generous whitespace between, and footer at bottom—directly mirrors the target's composition structure.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_11\",\n      \"reason\": \"Left-aligned title with slide number, three stacked profile cards with consistent spacing between entries, footer attribution, and top-to-bottom reading flow with generous margins—similar layout rhythm despite image elements in cards.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_06": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Title at top-left with opposite slide number, vertically-stacked text statements in content area, and generous surrounding whitespace creates strong spatial alignment with the target's header-plus-statements layout."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_08",
+        "reason": "Two text elements positioned in upper third with abundant whitespace dominating the lower two-thirds mirrors the target's minimalist statement-list design with generous breathing room."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_02\",\n      \"reason\": \"Title at top-left with opposite slide number, vertically-stacked text statements in content area, and generous surrounding whitespace creates strong spatial alignment with the target's header-plus-statements layout.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_08\",\n      \"reason\": \"Two text elements positioned in upper third with abundant whitespace dominating the lower two-thirds mirrors the target's minimalist statement-list design with generous breathing room.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_07": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_14",
+        "reason": "Centered heading with three-item bullet list stacked below, logo identifier, sparse layout with generous whitespace — matches the title + stacked content structure and top-down flow with navigational anchors."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Section title anchoring top with three vertically-stacked text statements in white content box and footer — matches title bar + multiple stacked elements with top-down flow and structural footer anchors."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_14\",\n      \"reason\": \"Centered heading with three-item bullet list stacked below, logo identifier, sparse layout with generous whitespace — matches the title + stacked content structure and top-down flow with navigational anchors.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_02\",\n      \"reason\": \"Section title anchoring top with three vertically-stacked text statements in white content box and footer — matches title bar + multiple stacked elements with top-down flow and structural footer anchors.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_08": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Vertical stacking of left-aligned elements with centered heading above, substantial whitespace filling lower half, and top-down reading flow mirrors TARGET's spatial arrangement."
+      },
+      {
+        "id": "facebook-2004/slide_14",
+        "reason": "Similar top-down hierarchy with title and stacked bullet list below, left-aligned content positioning, and generous whitespace at bottom echoes TARGET's structural rhythm."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_02\",\n      \"reason\": \"Vertical stacking of left-aligned elements with centered heading above, substantial whitespace filling lower half, and top-down reading flow mirrors TARGET's spatial arrangement.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_14\",\n      \"reason\": \"Similar top-down hierarchy with title and stacked bullet list below, left-aligned content positioning, and generous whitespace at bottom echoes TARGET's structural rhythm.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_09": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Section title anchors the top creating a visual header element; white rounded-rectangle content box below contains vertically-stacked text statements; top-down reading flow with concentrated visual weight at top and generous whitespace—matches the section-header-with-content spatial structure."
+      },
+      {
+        "id": "peloton-seed-2012/slide_07",
+        "reason": "Bold heading positioned top-left establishes visual hierarchy; icon content elements arranged horizontally below; left-weighted layout with generous whitespace surrounding the composition—captures similar top-heavy reading pattern and left-biased spatial distribution as the target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_02\",\n      \"reason\": \"Section title anchors the top creating a visual header element; white rounded-rectangle content box below contains vertically-stacked text statements; top-down reading flow with concentrated visual weight at top and generous whitespace—matches the section-header-with-content spatial structure.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_07\",\n      \"reason\": \"Bold heading positioned top-left establishes visual hierarchy; icon content elements arranged horizontally below; left-weighted layout with generous whitespace surrounding the composition—captures similar top-heavy reading pattern and left-biased spatial distribution as the target.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_10": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Identical structural layout: centered title at top, vertical bullet list below with left alignment, generous whitespace, and top-down reading flow matching the sparse vertical list pattern of the target."
+      },
+      {
+        "id": "facebook-2004/slide_14",
+        "reason": "Same core layout with centered heading, left-aligned bullet list below, substantial whitespace at bottom, and similar spatial proportions creating a sparse, top-heavy composition."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"coinbase-seed-2012/slide_02\", \"reason\": \"Identical structural layout: centered title at top, vertical bullet list below with left alignment, generous whitespace, and top-down reading flow matching the sparse vertical list pattern of the target.\"},\n    {\"id\": \"facebook-2004/slide_14\", \"reason\": \"Same core layout with centered heading, left-aligned bullet list below, substantial whitespace at bottom, and similar spatial proportions creating a sparse, top-heavy composition.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_11": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_15",
+        "reason": "Explicit section-divider type with minimal hierarchy (heading+subheading), whitespace-dominant composition, and similar top-down flow with content concentrated in upper portion."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Minimalist stacked layout (title + elements below) with strong top-heavy balance and generous whitespace filling lower half, matching the sparse content structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_15\",\n      \"reason\": \"Explicit section-divider type with minimal hierarchy (heading+subheading), whitespace-dominant composition, and similar top-down flow with content concentrated in upper portion.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_02\",\n      \"reason\": \"Minimalist stacked layout (title + elements below) with strong top-heavy balance and generous whitespace filling lower half, matching the sparse content structure.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_12": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_11",
+        "reason": "Single-column vertical list layout with consistent entry spacing, each entry pairing a primary label (name/title) with secondary text (biography), matching the TARGET's section labels + annotations structure with generous whitespace dominance."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Vertical bullet list with icon-preceded items arranged top-down, creating a top-heavy layout with heavy whitespace below, matching the TARGET's uncluttered agenda structure and minimalist composition."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_11\", \"reason\": \"Single-column vertical list layout with consistent entry spacing, each entry pairing a primary label (name/title) with secondary text (biography), matching the TARGET's section labels + annotations structure with generous whitespace dominance.\"},\n    {\"id\": \"coinbase-seed-2012/slide_02\", \"reason\": \"Vertical bullet list with icon-preceded items arranged top-down, creating a top-heavy layout with heavy whitespace below, matching the TARGET's uncluttered agenda structure and minimalist composition.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_13": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Centered header zone (title + subheading) sits above icon-focused content area with bordered boxes; similar vertical zoning, center-aligned structure, and generous whitespace separation between zones."
+      },
+      {
+        "id": "peloton-seed-2012/slide_16",
+        "reason": "Clear top-to-bottom split with heading/body text section above icon-grid cards; dual-zone structure with visual elements distributed across both areas and similar vertical rhythm."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Centered header zone (title + subheading) sits above icon-focused content area with bordered boxes; similar vertical zoning, center-aligned structure, and generous whitespace separation between zones.\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_16\",\n      \"reason\": \"Clear top-to-bottom split with heading/body text section above icon-grid cards; dual-zone structure with visual elements distributed across both areas and similar vertical rhythm.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_01": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_04",
+        "reason": "Full-bleed background photograph with white text overlay and branding label—directly matches the target's photographic background with centered overlay elements as focal point."
+      },
+      {
+        "id": "facebook-2004/slide_15",
+        "reason": "Large centered background visual element (watermark icon) with text overlay positioned left-center—parallels target's overlay-on-background spatial arrangement and center-outward reading flow."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_04\",\n      \"reason\": \"Full-bleed background photograph with white text overlay and branding label—directly matches the target's photographic background with centered overlay elements as focal point.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_15\",\n      \"reason\": \"Large centered background visual element (watermark icon) with text overlay positioned left-center—parallels target's overlay-on-background spatial arrangement and center-outward reading flow.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_02": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Two-column layout with heading, introductory text, bullet list on one side and large mockup screenshot on the other; matches the image-and-content structural type despite reversed column orientation."
+      },
+      {
+        "id": "facebook-2004/slide_05",
+        "reason": "Two-column layout with heading/subheading at top, text block left and numbered list right; matches element inventory (numbered list, heading) and right-column positioning of content list."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_03\",\n      \"reason\": \"Two-column layout with heading, introductory text, bullet list on one side and large mockup screenshot on the other; matches the image-and-content structural type despite reversed column orientation.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_05\",\n      \"reason\": \"Two-column layout with heading/subheading at top, text block left and numbered list right; matches element inventory (numbered list, heading) and right-column positioning of content list.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_03": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_08",
+        "reason": "Explicit data-table with centered title, top-right logo, header row with distinct styling, and multi-row tabular content below."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Two-column metric comparison with heading, top-right badge, white container, symmetric two-column layout with labels and supporting content blocks."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_08\",\n      \"reason\": \"Explicit data-table with centered title, top-right logo, header row with distinct styling, and multi-row tabular content below.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_04\",\n      \"reason\": \"Two-column metric comparison with heading, top-right badge, white container, symmetric two-column layout with labels and supporting content blocks.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_04": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Three equal-width columns arranged horizontally, each with a centered icon/illustration at top and supporting text (metric labels) below; identical compositional structure with moderate spacing."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_05",
+        "reason": "Three circular visual elements (bubbles) arranged horizontally, each centered above supporting labels and descriptive text below; matches the icon-centric, left-to-right reading flow with strong circular anchors."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Three equal-width columns arranged horizontally, each with a centered icon/illustration at top and supporting text (metric labels) below; identical compositional structure with moderate spacing.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_05\",\n      \"reason\": \"Three circular visual elements (bubbles) arranged horizontally, each centered above supporting labels and descriptive text below; matches the icon-centric, left-to-right reading flow with strong circular anchors.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_05": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_10",
+        "reason": "Both layouts anchor a title at top and present exactly 6 content blocks organized in a balanced grid (2×3 vs target's 3×2), each with a header and supporting text, using clean spacing and even visual weight distribution."
+      },
+      {
+        "id": "facebook-2004/slide_08",
+        "reason": "Both use a title-anchored layout with an organized table/grid structure of rows and columns to display parallel sets of information with clear visual hierarchy and consistent spacing."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_10\",\n      \"reason\": \"Both layouts anchor a title at top and present exactly 6 content blocks organized in a balanced grid (2×3 vs target's 3×2), each with a header and supporting text, using clean spacing and even visual weight distribution.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_08\",\n      \"reason\": \"Both use a title-anchored layout with an organized table/grid structure of rows and columns to display parallel sets of information with clear visual hierarchy and consistent spacing.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_06": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_17",
+        "reason": "Two balanced vertical bullet columns of equal height with symmetric layout, directly matching the target's two-column comparison structure with lists extending downward."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Symmetric two-column layout with header-like elements ('label text') at the top of each column and structured content below, capturing the balanced two-column comparison spatial arrangement."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_17\",\n      \"reason\": \"Two balanced vertical bullet columns of equal height with symmetric layout, directly matching the target's two-column comparison structure with lists extending downward.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_04\",\n      \"reason\": \"Symmetric two-column layout with header-like elements ('label text') at the top of each column and structured content below, capturing the balanced two-column comparison spatial arrangement.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_07": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Both feature a heading above evenly-distributed horizontal columns/boxes with centered icons or illustrations and supporting metric/stat labels positioned directly below, surrounded by generous whitespace in a balanced grid-like rhythm."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Both arrange exactly four elements horizontally across the slide with supporting labels or information (URLs) positioned below each item, strong top-left heading positioning, generous whitespace, and a clear distributed grid structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Both feature a heading above evenly-distributed horizontal columns/boxes with centered icons or illustrations and supporting metric/stat labels positioned directly below, surrounded by generous whitespace in a balanced grid-like rhythm.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_12\",\n      \"reason\": \"Both arrange exactly four elements horizontally across the slide with supporting labels or information (URLs) positioned below each item, strong top-left heading positioning, generous whitespace, and a clear distributed grid structure.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_08": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_09",
+        "reason": "Competitive positioning matrix with quadrant-based layout and center-out flow mirrors the target's radial/quadrant organization around a central hub."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_05",
+        "reason": "Centered title with eight text elements scattered in radial distribution around the center, explicitly matching the target's radial flow pattern."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_09\",\n      \"reason\": \"Competitive positioning matrix with quadrant-based layout and center-out flow mirrors the target's radial/quadrant organization around a central hub.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_05\",\n      \"reason\": \"Centered title with eight text elements scattered in radial distribution around the center, explicitly matching the target's radial flow pattern.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_09": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_03",
+        "reason": "Large spherical illustration with radiating lines extending outward creates a radial composition that directly mirrors the target's centered wheel diagram with concentric rings; both maintain title at top and concentrated visual weight at center."
+      },
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Pie chart as the dominant central visual element with segment labels distributed around its perimeter parallels the target's radial diagram with four text blocks at cardinal directions; both use circular/radial organization as the primary structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"coinbase-seed-2012/slide_03\", \"reason\": \"Large spherical illustration with radiating lines extending outward creates a radial composition that directly mirrors the target's centered wheel diagram with concentric rings; both maintain title at top and concentrated visual weight at center.\"},\n    {\"id\": \"facebook-2004/slide_11\", \"reason\": \"Pie chart as the dominant central visual element with segment labels distributed around its perimeter parallels the target's radial diagram with four text blocks at cardinal directions; both use circular/radial organization as the primary structure.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_10": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_09",
+        "reason": "Dual-axis coordinate system (vertical and horizontal) with competitor logos distributed across quadrants based on dimensional positioning, matching the target's spectrum/timeline matrix with scattered circular elements."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_11",
+        "reason": "Scatter plot visualization with elements distributed in 2D coordinate space, featuring axis labels and legend, capturing the same principle of spatial positioning along multiple dimensions."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_09\",\n      \"reason\": \"Dual-axis coordinate system (vertical and horizontal) with competitor logos distributed across quadrants based on dimensional positioning, matching the target's spectrum/timeline matrix with scattered circular elements.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_11\",\n      \"reason\": \"Scatter plot visualization with elements distributed in 2D coordinate space, featuring axis labels and legend, capturing the same principle of spatial positioning along multiple dimensions.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_11": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_04",
+        "reason": "Full-bleed photograph dominates the slide with overlay text in a contained format; both prioritize visual imagery with layered text treatment and logo anchor."
+      },
+      {
+        "id": "facebook-2004/slide_19",
+        "reason": "Circular portrait photo positioned on right side with text/info integration; both create asymmetric left-right composition emphasizing a prominent visual element."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_04\",\n      \"reason\": \"Full-bleed photograph dominates the slide with overlay text in a contained format; both prioritize visual imagery with layered text treatment and logo anchor.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_19\",\n      \"reason\": \"Circular portrait photo positioned on right side with text/info integration; both create asymmetric left-right composition emphasizing a prominent visual element.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_12": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_04",
+        "reason": "Full-bleed background photo spanning the slide with left-aligned text block in semi-transparent dark container, logo in top-right corner—directly mirrors the target's geometric shape containing text overlaid on a photographic image with minimal whitespace."
+      },
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Two-column layout with text-heavy left column (heading, intro, bullets) paired against a large right-side screenshot, establishing a left-text/right-visual spatial arrangement that mirrors the target's asymmetric composition and left-to-right reading flow."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_04\",\n      \"reason\": \"Full-bleed background photo spanning the slide with left-aligned text block in semi-transparent dark container, logo in top-right corner—directly mirrors the target's geometric shape containing text overlaid on a photographic image with minimal whitespace.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_03\",\n      \"reason\": \"Two-column layout with text-heavy left column (heading, intro, bullets) paired against a large right-side screenshot, establishing a left-text/right-visual spatial arrangement that mirrors the target's asymmetric composition and left-to-right reading flow.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_13": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_19",
+        "reason": "Two-column left-right layout with circular visual element (portrait photo) on right, body text on left, similar spatial balance and flow to product showcase with callout design."
+      },
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Clear two-column left-right structure with product mockup screenshot (right) and text content (left), matching the spatial zone arrangement and left-to-right reading flow of a product showcase layout."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_19\",\n      \"reason\": \"Two-column left-right layout with circular visual element (portrait photo) on right, body text on left, similar spatial balance and flow to product showcase with callout design.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_03\",\n      \"reason\": \"Clear two-column left-right structure with product mockup screenshot (right) and text content (left), matching the spatial zone arrangement and left-to-right reading flow of a product showcase layout.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_14": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_04",
+        "reason": "Full-bleed background photograph with text overlay positioned in upper area; small branded element in corner; asymmetric image-dominant composition with callout text element."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Dominant cascading visual elements (mockups) create image-heavy asymmetric layout; text labels positioned above as callout annotations; left-to-right flow with progressive visual hierarchy."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_04\",\n      \"reason\": \"Full-bleed background photograph with text overlay positioned in upper area; small branded element in corner; asymmetric image-dominant composition with callout text element.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_06\",\n      \"reason\": \"Dominant cascading visual elements (mockups) create image-heavy asymmetric layout; text labels positioned above as callout annotations; left-to-right flow with progressive visual hierarchy.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_15": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_09",
+        "reason": "Competitive positioning matrix with 2×2 quadrant structure and center-out radial flow mirrors the target's four-corner label arrangement with central diagram organization."
+      },
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Pie chart with segment labels distributed around perimeter captures the target's circular visual element with radiating text elements radiating from the central structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_09\",\n      \"reason\": \"Competitive positioning matrix with 2×2 quadrant structure and center-out radial flow mirrors the target's four-corner label arrangement with central diagram organization.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_11\",\n      \"reason\": \"Pie chart with segment labels distributed around perimeter captures the target's circular visual element with radiating text elements radiating from the central structure.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_16": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_13",
+        "reason": "Identical structure: 2×2 grid of testimonial cards with heading at top, each card combining visual element (photo) with quoted text in balanced arrangement."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Strong match on content type and layout: testimonials (speech bubbles) arranged in upper grid, logo cards in lower grid, with section heading and top-down reading flow."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_13\",\n      \"reason\": \"Identical structure: 2×2 grid of testimonial cards with heading at top, each card combining visual element (photo) with quoted text in balanced arrangement.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_12\",\n      \"reason\": \"Strong match on content type and layout: testimonials (speech bubbles) arranged in upper grid, logo cards in lower grid, with section heading and top-down reading flow.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_17": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_13",
+        "reason": "Testimonial grid with photos captures two-column testimonial structure (2×2 grid), proper heading-number positioning, balanced visual weight across equal cells, and quote text content exactly matching the target's semantic category."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Testimonials with logo grid shares testimonial content type with heading-number positioning at top corners, structured multi-column grid layout, and quote elements, though four-across rather than two-across."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_13\",\n      \"reason\": \"Testimonial grid with photos captures two-column testimonial structure (2×2 grid), proper heading-number positioning, balanced visual weight across equal cells, and quote text content exactly matching the target's semantic category.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_12\",\n      \"reason\": \"Testimonials with logo grid shares testimonial content type with heading-number positioning at top corners, structured multi-column grid layout, and quote elements, though four-across rather than two-across.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_18": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_20",
+        "reason": "Best testimonial/quote layout match with quotation marks and attribution framing the quote text, creating a similar top-down reading flow and decorative divider structure."
+      },
+      {
+        "id": "facebook-2004/slide_13",
+        "reason": "Second-best testimonial/quote layout with publication source attribution and decorative horizontal divider, featuring quote-focused content and quotation marks anchoring the bottom."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_20\", \"reason\": \"Best testimonial/quote layout match with quotation marks and attribution framing the quote text, creating a similar top-down reading flow and decorative divider structure.\"},\n    {\"id\": \"facebook-2004/slide_13\", \"reason\": \"Second-best testimonial/quote layout with publication source attribution and decorative horizontal divider, featuring quote-focused content and quotation marks anchoring the bottom.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_19": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_09",
+        "reason": "Central intersection point (axis crossing) with logos distributed symmetrically across four quadrants mirrors the target's wheel-centric design with four surrounding text blocks."
+      },
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Pie chart anchors the center as dominant visual element with segment labels radiating around its perimeter, creating the same radial pattern as the target's wheel with surrounding text blocks."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_09\", \"reason\": \"Central intersection point (axis crossing) with logos distributed symmetrically across four quadrants mirrors the target's wheel-centric design with four surrounding text blocks.\"},\n    {\"id\": \"facebook-2004/slide_11\", \"reason\": \"Pie chart anchors the center as dominant visual element with segment labels radiating around its perimeter, creating the same radial pattern as the target's wheel with surrounding text blocks.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_20": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_04",
+        "reason": "Full-bleed photograph as primary visual anchor with floating text overlay in corner, sharing the core concept of image-dominant layout with secondary overlaid content creating emphasis."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_14",
+        "reason": "Large circle visual anchor on left connected to secondary elements on right in left-right spatial progression, mirroring the target's asymmetric layout with primary visual dominating left and secondary element on right."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_04\",\n      \"reason\": \"Full-bleed photograph as primary visual anchor with floating text overlay in corner, sharing the core concept of image-dominant layout with secondary overlaid content creating emphasis.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_14\",\n      \"reason\": \"Large circle visual anchor on left connected to secondary elements on right in left-right spatial progression, mirroring the target's asymmetric layout with primary visual dominating left and secondary element on right.\"\n    }\n  ]\n}\n```"
+  }
+}

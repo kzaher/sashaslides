@@ -1,0 +1,97 @@
+<!-- slide_11.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+}
+body {
+  padding: 64px 96px;
+  display: flex; flex-direction: column;
+}
+.heading {
+  font-size: 38px; font-weight: 700; color: #29B6F6;
+  margin-bottom: 40px; letter-spacing: -0.5px;
+}
+.grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 36px 64px; flex: 1;
+}
+.person {
+  display: flex; flex-direction: column;
+  padding-bottom: 16px;
+}
+.person-role {
+  font-size: 12px; font-weight: 700; color: #29B6F6;
+  text-transform: uppercase; letter-spacing: 1.5px;
+  margin-bottom: 6px;
+}
+.person-name {
+  font-size: 22px; font-weight: 900; color: #333333;
+  margin-bottom: 14px;
+  letter-spacing: -0.3px;
+}
+.cred-list {
+  list-style: none;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.cred-item {
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.cred-dash {
+  width: 12px; color: #29B6F6; font-weight: 700;
+  flex-shrink: 0; margin-top: 1px;
+  font-size: 13px;
+}
+.cred-text {
+  font-size: 13px; color: #333333; line-height: 1.55;
+}
+.divider-h {
+  border: none; border-top: 1px solid #E8E8E8; margin: 0;
+}
+</style>
+</head>
+<body>
+  <h1 class="heading">Team</h1>
+  <div class="grid">
+    <div class="person">
+      <div class="person-role">User Interface &amp; PR</div>
+      <div class="person-name">Joe Gebbia</div>
+      <ul class="cred-list">
+        <li class="cred-item"><span class="cred-dash">–</span><span class="cred-text">Entrepreneur and product designer; holds a patent for CritBuns</span></li>
+        <li class="cred-item"><span class="cred-dash">–</span><span class="cred-text">RISD graduate — dual BFAs in graphic design and industrial design</span></li>
+      </ul>
+    </div>
+    <div class="person">
+      <div class="person-role">Business Development &amp; Brand</div>
+      <div class="person-name">Brian Chesky</div>
+      <ul class="cred-list">
+        <li class="cred-item"><span class="cred-dash">–</span><span class="cred-text">Founder, Brian Chesky Inc — industrial design consultancy</span></li>
+        <li class="cred-item"><span class="cred-dash">–</span><span class="cred-text">RISD graduate — BFA in industrial design</span></li>
+      </ul>
+    </div>
+    <div class="person">
+      <div class="person-role">Engineering</div>
+      <div class="person-name">Nathan Blecharczyk</div>
+      <ul class="cred-list">
+        <li class="cred-item"><span class="cred-dash">–</span><span class="cred-text">Built Facebook Apps "Your Neighbors" (75K users) and "Rolodextrous"</span></li>
+        <li class="cred-item"><span class="cred-dash">–</span><span class="cred-text">Harvard CS graduate; worked at Microsoft, OPNET Technologies, Batiq</span></li>
+      </ul>
+    </div>
+    <div class="person">
+      <div class="person-role">Advisor</div>
+      <div class="person-name">Michael Seibel</div>
+      <ul class="cred-list">
+        <li class="cred-item"><span class="cred-dash">–</span><span class="cred-text">CEO &amp; co-founder of justin.tv — live video platform with millions of viewers</span></li>
+        <li class="cred-item"><span class="cred-dash">–</span><span class="cred-text">Advising on product-market fit and consumer growth strategy</span></li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,32 @@
+{
+  "slide_101": {
+    "status": "bad",
+    "comment": "The alignment for send and receive is still wrong and coinbase is not colored blue.",
+    "ratedAt": "2026-04-13T00:39:13.538Z"
+  },
+  "slide_102": {
+    "status": "bad",
+    "comment": "Icons are still missing from circles",
+    "ratedAt": "2026-04-13T00:39:22.862Z"
+  },
+  "slide_103": {
+    "status": "bad",
+    "comment": "Map is still missing",
+    "ratedAt": "2026-04-13T00:39:31.210Z"
+  },
+  "slide_104": {
+    "status": "bad",
+    "comment": "Graph line is missing",
+    "ratedAt": "2026-04-13T00:39:37.266Z"
+  },
+  "slide_105": {
+    "status": "bad",
+    "comment": "The positions and fonts are wrong for the list of words: International Paymenst, Virtual goods, ...",
+    "ratedAt": "2026-04-13T08:34:45.843Z"
+  },
+  "slide_106": {
+    "status": "bad",
+    "comment": "The terminal green has wrong spacing between lines and wrong color, the 3 vertical items right have wrong horizontal and vertical alignment without padding",
+    "ratedAt": "2026-04-13T08:36:18.561Z"
+  }
+}

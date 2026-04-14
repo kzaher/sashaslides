@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #f8fafc; display: flex; flex-direction: column; padding: 28px 32px 24px; }
+.top-section { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.title { font-size: 30px; font-weight: 800; color: #0f172a; }
+.subtitle { font-size: 13px; color: #64748b; font-family: 'Roboto', sans-serif; }
+.phase-labels { display: flex; gap: 6px; }
+.phase-label { font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: 12px; }
+.pl-discover { background: #dbeafe; color: #1d4ed8; }
+.pl-evaluate { background: #e0e7ff; color: #4338ca; }
+.pl-purchase { background: #ede9fe; color: #6d28d9; }
+.pl-use { background: #fae8ff; color: #a21caf; }
+.pl-advocate { background: #fce7f3; color: #be185d; }
+.journey-container { display: flex; gap: 12px; flex: 1; align-items: stretch; position: relative; }
+.stage-card { flex: 1; background: white; border-radius: 14px; padding: 18px 16px; display: flex; flex-direction: column; position: relative; box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04); border-top: 4px solid; }
+.stage-card:nth-child(1) { border-top-color: #3b82f6; }
+.stage-card:nth-child(3) { border-top-color: #6366f1; }
+.stage-card:nth-child(5) { border-top-color: #8b5cf6; }
+.stage-card:nth-child(7) { border-top-color: #a855f7; }
+.stage-card:nth-child(9) { border-top-color: #d946ef; }
+.arrow-connector { display: flex; align-items: center; justify-content: center; width: 28px; flex-shrink: 0; }
+.arrow-icon { font-size: 20px; color: #94a3b8; font-weight: 700; }
+.stage-emoji { font-size: 28px; margin-bottom: 8px; }
+.stage-name { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.stage-desc { font-size: 11px; color: #64748b; margin-bottom: 12px; font-family: 'Roboto', sans-serif; line-height: 1.4; }
+.section-label { font-size: 9px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 6px; }
+.touchpoints { margin-bottom: 12px; }
+.touchpoint { font-size: 11px; color: #334155; padding: 3px 0; padding-left: 12px; position: relative; font-family: 'Roboto', sans-serif; }
+.touchpoint::before { content: ''; position: absolute; left: 0; top: 9px; width: 5px; height: 5px; border-radius: 50%; }
+.stage-card:nth-child(1) .touchpoint::before { background: #3b82f6; }
+.stage-card:nth-child(3) .touchpoint::before { background: #6366f1; }
+.stage-card:nth-child(5) .touchpoint::before { background: #8b5cf6; }
+.stage-card:nth-child(7) .touchpoint::before { background: #a855f7; }
+.stage-card:nth-child(9) .touchpoint::before { background: #d946ef; }
+.sentiment { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 6px 10px; border-radius: 8px; background: #f8fafc; }
+.sentiment-face { font-size: 18px; }
+.sentiment-text { font-size: 11px; font-weight: 600; }
+.sentiment-happy { color: #16a34a; }
+.sentiment-neutral { color: #ca8a04; }
+.sentiment-sad { color: #dc2626; }
+.pain-points { margin-top: auto; }
+.pain { font-size: 10px; color: #dc2626; padding: 2px 0; padding-left: 12px; position: relative; font-family: 'Roboto', sans-serif; }
+.pain::before { content: '!'; position: absolute; left: 0; font-weight: 800; font-size: 10px; }
+.bottom-bar { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; padding-top: 14px; border-top: 1px solid #e2e8f0; }
+.metric-pill { background: #f1f5f9; border-radius: 8px; padding: 8px 16px; display: flex; align-items: center; gap: 8px; }
+.metric-pill-value { font-size: 16px; font-weight: 700; color: #0f172a; }
+.metric-pill-label { font-size: 11px; color: #64748b; }
+</style></head><body>
+<div class="top-section">
+  <div>
+    <div class="title">Customer Journey Map</div>
+    <div class="subtitle">End-to-end experience from first touch to brand advocacy</div>
+  </div>
+  <div class="phase-labels">
+    <span class="phase-label pl-discover">Phase 1</span>
+    <span class="phase-label pl-evaluate">Phase 2</span>
+    <span class="phase-label pl-purchase">Phase 3</span>
+    <span class="phase-label pl-use">Phase 4</span>
+    <span class="phase-label pl-advocate">Phase 5</span>
+  </div>
+</div>
+<div class="journey-container">
+  <div class="stage-card">
+    <div class="stage-emoji">&#128270;</div>
+    <div class="stage-name">Discover</div>
+    <div class="stage-desc">First awareness through marketing channels</div>
+    <div class="section-label">Touchpoints</div>
+    <div class="touchpoints">
+      <div class="touchpoint">Google search ads</div>
+      <div class="touchpoint">Blog content / SEO</div>
+      <div class="touchpoint">Social media posts</div>
+    </div>
+    <div class="sentiment"><span class="sentiment-face">&#128578;</span><span class="sentiment-text sentiment-happy">Curious</span></div>
+    <div class="pain-points">
+      <div class="section-label">Pain Points</div>
+      <div class="pain">Too many options</div>
+      <div class="pain">Unclear differentiation</div>
+    </div>
+  </div>
+  <div class="arrow-connector"><span class="arrow-icon">&#8594;</span></div>
+  <div class="stage-card">
+    <div class="stage-emoji">&#129488;</div>
+    <div class="stage-name">Evaluate</div>
+    <div class="stage-desc">Comparing features, pricing and reviews</div>
+    <div class="section-label">Touchpoints</div>
+    <div class="touchpoints">
+      <div class="touchpoint">Pricing page</div>
+      <div class="touchpoint">G2 / Capterra reviews</div>
+      <div class="touchpoint">Demo request form</div>
+      <div class="touchpoint">Competitor comparison</div>
+    </div>
+    <div class="sentiment"><span class="sentiment-face">&#128528;</span><span class="sentiment-text sentiment-neutral">Cautious</span></div>
+    <div class="pain-points">
+      <div class="section-label">Pain Points</div>
+      <div class="pain">Complex pricing tiers</div>
+      <div class="pain">Slow demo scheduling</div>
+    </div>
+  </div>
+  <div class="arrow-connector"><span class="arrow-icon">&#8594;</span></div>
+  <div class="stage-card">
+    <div class="stage-emoji">&#128179;</div>
+    <div class="stage-name">Purchase</div>
+    <div class="stage-desc">Checkout flow and onboarding kickoff</div>
+    <div class="section-label">Touchpoints</div>
+    <div class="touchpoints">
+      <div class="touchpoint">Checkout page</div>
+      <div class="touchpoint">Welcome email series</div>
+      <div class="touchpoint">Onboarding call</div>
+    </div>
+    <div class="sentiment"><span class="sentiment-face">&#128522;</span><span class="sentiment-text sentiment-happy">Excited</span></div>
+    <div class="pain-points">
+      <div class="section-label">Pain Points</div>
+      <div class="pain">Long contract process</div>
+    </div>
+  </div>
+  <div class="arrow-connector"><span class="arrow-icon">&#8594;</span></div>
+  <div class="stage-card">
+    <div class="stage-emoji">&#128187;</div>
+    <div class="stage-name">Use</div>
+    <div class="stage-desc">Daily product usage and support interactions</div>
+    <div class="section-label">Touchpoints</div>
+    <div class="touchpoints">
+      <div class="touchpoint">Product dashboard</div>
+      <div class="touchpoint">Help center / docs</div>
+      <div class="touchpoint">Support chat</div>
+      <div class="touchpoint">Feature requests</div>
+    </div>
+    <div class="sentiment"><span class="sentiment-face">&#128528;</span><span class="sentiment-text sentiment-neutral">Mixed</span></div>
+    <div class="pain-points">
+      <div class="section-label">Pain Points</div>
+      <div class="pain">Steep learning curve</div>
+      <div class="pain">Missing integrations</div>
+    </div>
+  </div>
+  <div class="arrow-connector"><span class="arrow-icon">&#8594;</span></div>
+  <div class="stage-card">
+    <div class="stage-emoji">&#128147;</div>
+    <div class="stage-name">Advocate</div>
+    <div class="stage-desc">Champions who refer and promote the product</div>
+    <div class="section-label">Touchpoints</div>
+    <div class="touchpoints">
+      <div class="touchpoint">Referral program</div>
+      <div class="touchpoint">Case study invite</div>
+      <div class="touchpoint">Community forum</div>
+    </div>
+    <div class="sentiment"><span class="sentiment-face">&#129321;</span><span class="sentiment-text sentiment-happy">Loyal</span></div>
+    <div class="pain-points">
+      <div class="section-label">Pain Points</div>
+      <div class="pain">No referral incentives</div>
+    </div>
+  </div>
+</div>
+<div class="bottom-bar">
+  <div class="metric-pill"><span class="metric-pill-value">34 days</span><span class="metric-pill-label">Avg. Time to Purchase</span></div>
+  <div class="metric-pill"><span class="metric-pill-value">72%</span><span class="metric-pill-label">Onboarding Completion</span></div>
+  <div class="metric-pill"><span class="metric-pill-value">4.2/5</span><span class="metric-pill-label">Satisfaction Score</span></div>
+  <div class="metric-pill"><span class="metric-pill-value">23%</span><span class="metric-pill-label">Referral Rate</span></div>
+</div>
+</body></html>

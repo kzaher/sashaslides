@@ -1,0 +1,81 @@
+<!-- slide_02.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1280px; height: 720px; overflow: hidden; }
+body {
+  background: #FFFFFF;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  position: relative;
+}
+.safe {
+  position: absolute;
+  left: 80px;
+  top: 72px;
+  width: 1120px;
+  height: 576px;
+}
+.section-title {
+  color: #5CB85C;
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.columns {
+  margin-top: 48px;
+  display: flex;
+  gap: 80px;
+}
+.col {
+  flex: 1;
+}
+ul {
+  list-style: none;
+  padding: 0;
+}
+ul li {
+  color: #333333;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.5;
+  margin-bottom: 18px;
+  padding-left: 24px;
+  position: relative;
+}
+ul li::before {
+  content: "–";
+  position: absolute;
+  left: 0;
+  color: #999999;
+}
+</style>
+</head>
+<body>
+  <div class="safe">
+    <div class="section-title">Agenda</div>
+    <div class="columns">
+      <div class="col">
+        <ul>
+          <li>Company Purpose</li>
+          <li>Problem</li>
+          <li>Solution</li>
+          <li>Why Now</li>
+          <li>Market Size</li>
+        </ul>
+      </div>
+      <div class="col">
+        <ul>
+          <li>Competition</li>
+          <li>Product</li>
+          <li>Business Model</li>
+          <li>Team</li>
+          <li>Financials</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!-- slide_02.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+}
+body {
+  padding: 80px 96px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.heading {
+  font-size: 42px; font-weight: 700; color: #333333;
+  margin-bottom: 60px;
+  letter-spacing: -0.5px;
+}
+.bullet-list {
+  list-style: none;
+  display: flex; flex-direction: column; gap: 40px;
+}
+.bullet-item {
+  display: flex; align-items: flex-start;
+}
+.bullet-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #333333;
+  margin-top: 9px; margin-right: 22px;
+  flex-shrink: 0;
+}
+.bullet-text {
+  font-size: 24px; font-weight: 400; color: #333333;
+  line-height: 1.5;
+}
+</style>
+</head>
+<body>
+  <h1 class="heading">The Problem</h1>
+  <ul class="bullet-list">
+    <li class="bullet-item">
+      <div class="bullet-dot"></div>
+      <div class="bullet-text">Price is an important concern for customers booking travel online.</div>
+    </li>
+    <li class="bullet-item">
+      <div class="bullet-dot"></div>
+      <div class="bullet-text">Hotels leave you disconnected from the city and its culture.</div>
+    </li>
+    <li class="bullet-item">
+      <div class="bullet-dot"></div>
+      <div class="bullet-text">No easy way exists to book a room with a local or become a host.</div>
+    </li>
+  </ul>
+</body>
+</html>

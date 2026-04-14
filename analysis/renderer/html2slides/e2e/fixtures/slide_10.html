@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Code+Pro:wght@500;600&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #f8fafc; display: flex; flex-direction: column; padding: 32px 48px; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+h1 { font-size: 28px; font-weight: 700; color: #1e293b; }
+.period { font-size: 14px; color: #64748b; background: #e2e8f0; padding: 6px 14px; border-radius: 8px; font-weight: 500; }
+/* Chart area */
+.chart-container { position: relative; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.05); padding: 24px 28px 16px 28px; margin-bottom: 20px; flex: 1; display: flex; flex-direction: column; }
+.chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.chart-title { font-size: 16px; font-weight: 600; color: #334155; }
+.legend { display: flex; gap: 20px; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #64748b; }
+.legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+.chart-body { flex: 1; position: relative; display: flex; flex-direction: column; }
+/* Y-axis labels */
+.y-axis { position: absolute; left: 0; top: 0; bottom: 30px; width: 50px; display: flex; flex-direction: column; justify-content: space-between; }
+.y-label { font-size: 11px; color: #94a3b8; font-family: 'Source Code Pro', monospace; text-align: right; padding-right: 8px; }
+/* Grid lines */
+.grid { position: absolute; left: 54px; right: 0; top: 0; bottom: 30px; }
+.grid-line { position: absolute; left: 0; right: 0; height: 1px; background: #f1f5f9; }
+/* Bars */
+.bars-area { position: absolute; left: 54px; right: 0; top: 0; bottom: 30px; display: flex; align-items: flex-end; justify-content: space-around; padding: 0 20px; }
+.bar-group { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.bar-pair { display: flex; gap: 6px; align-items: flex-end; }
+.bar { width: 32px; border-radius: 4px 4px 0 0; }
+.bar-rev { background: linear-gradient(180deg, #3b82f6, #2563eb); }
+.bar-exp { background: linear-gradient(180deg, #f97316, #ea580c); }
+.q-label { font-size: 12px; color: #64748b; margin-top: 8px; font-weight: 500; }
+/* Profit dots overlay */
+.profit-overlay { position: absolute; left: 54px; right: 0; top: 0; bottom: 30px; pointer-events: none; }
+.profit-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: #10b981; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.15); transform: translate(-50%, -50%); }
+.profit-line { position: absolute; height: 2px; background: #10b981; transform-origin: left center; }
+/* Summary cards */
+.summary { display: flex; gap: 16px; }
+.sum-card { flex: 1; background: #fff; border-radius: 10px; padding: 16px 20px; box-shadow: 0 1px 6px rgba(0,0,0,0.04); display: flex; align-items: center; gap: 14px; border-top: 3px solid; }
+.sum-card.rev { border-top-color: #3b82f6; }
+.sum-card.exp { border-top-color: #f97316; }
+.sum-card.profit { border-top-color: #10b981; }
+.sum-card.margin { border-top-color: #8b5cf6; }
+.sum-icon { width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.sum-icon.rev-bg { background: #eff6ff; color: #3b82f6; }
+.sum-icon.exp-bg { background: #fff7ed; color: #f97316; }
+.sum-icon.profit-bg { background: #f0fdf4; color: #10b981; }
+.sum-icon.margin-bg { background: #f5f3ff; color: #8b5cf6; }
+.sum-val { font-size: 22px; font-weight: 700; color: #1e293b; font-family: 'Source Code Pro', monospace; }
+.sum-label { font-size: 12px; color: #64748b; }
+.sum-change { font-size: 11px; font-weight: 600; margin-top: 1px; }
+.sum-change.up { color: #10b981; }
+.sum-change.down { color: #ef4444; }
+</style></head><body>
+<div class="header">
+  <h1>Financial Summary</h1>
+  <div class="period">FY 2025-26</div>
+</div>
+<div class="chart-container">
+  <div class="chart-header">
+    <div class="chart-title">Revenue vs Expenses (Quarterly)</div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>Revenue</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>Expenses</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#10b981;border-radius:50%"></div>Net Profit</div>
+    </div>
+  </div>
+  <div class="chart-body">
+    <div class="y-axis">
+      <div class="y-label">$500K</div>
+      <div class="y-label">$400K</div>
+      <div class="y-label">$300K</div>
+      <div class="y-label">$200K</div>
+      <div class="y-label">$100K</div>
+      <div class="y-label">$0</div>
+    </div>
+    <div class="grid">
+      <div class="grid-line" style="top:0%"></div>
+      <div class="grid-line" style="top:20%"></div>
+      <div class="grid-line" style="top:40%"></div>
+      <div class="grid-line" style="top:60%"></div>
+      <div class="grid-line" style="top:80%"></div>
+      <div class="grid-line" style="top:100%"></div>
+    </div>
+    <div class="bars-area">
+      <div class="bar-group">
+        <div class="bar-pair">
+          <div class="bar bar-rev" style="height:52%"></div>
+          <div class="bar bar-exp" style="height:42%"></div>
+        </div>
+        <div class="q-label">Q1 '25</div>
+      </div>
+      <div class="bar-group">
+        <div class="bar-pair">
+          <div class="bar bar-rev" style="height:60%"></div>
+          <div class="bar bar-exp" style="height:46%"></div>
+        </div>
+        <div class="q-label">Q2 '25</div>
+      </div>
+      <div class="bar-group">
+        <div class="bar-pair">
+          <div class="bar bar-rev" style="height:68%"></div>
+          <div class="bar bar-exp" style="height:48%"></div>
+        </div>
+        <div class="q-label">Q3 '25</div>
+      </div>
+      <div class="bar-group">
+        <div class="bar-pair">
+          <div class="bar bar-rev" style="height:78%"></div>
+          <div class="bar bar-exp" style="height:52%"></div>
+        </div>
+        <div class="q-label">Q4 '25</div>
+      </div>
+      <div class="bar-group">
+        <div class="bar-pair">
+          <div class="bar bar-rev" style="height:88%"></div>
+          <div class="bar bar-exp" style="height:56%"></div>
+        </div>
+        <div class="q-label">Q1 '26</div>
+      </div>
+    </div>
+    <!-- Profit dots positioned manually -->
+    <div class="profit-overlay">
+      <div class="profit-dot" style="left:12%;top:78%"></div>
+      <div class="profit-dot" style="left:31%;top:68%"></div>
+      <div class="profit-dot" style="left:50%;top:58%"></div>
+      <div class="profit-dot" style="left:69%;top:44%"></div>
+      <div class="profit-dot" style="left:88%;top:32%"></div>
+      <!-- Connecting lines approximated -->
+      <div class="profit-line" style="left:12%;top:78%;width:19%;transform:rotate(-8deg)"></div>
+      <div class="profit-line" style="left:31%;top:68%;width:19%;transform:rotate(-8deg)"></div>
+      <div class="profit-line" style="left:50%;top:58%;width:19%;transform:rotate(-10deg)"></div>
+      <div class="profit-line" style="left:69%;top:44%;width:19%;transform:rotate(-9deg)"></div>
+    </div>
+  </div>
+</div>
+<div class="summary">
+  <div class="sum-card rev">
+    <div class="sum-icon rev-bg">$</div>
+    <div>
+      <div class="sum-val">$1.84M</div>
+      <div class="sum-label">Total Revenue</div>
+      <div class="sum-change up">&#9650; 24% YoY</div>
+    </div>
+  </div>
+  <div class="sum-card exp">
+    <div class="sum-icon exp-bg">&#8595;</div>
+    <div>
+      <div class="sum-val">$1.22M</div>
+      <div class="sum-label">Total Expenses</div>
+      <div class="sum-change down">&#9650; 8% YoY</div>
+    </div>
+  </div>
+  <div class="sum-card profit">
+    <div class="sum-icon profit-bg">&#8593;</div>
+    <div>
+      <div class="sum-val">$620K</div>
+      <div class="sum-label">Net Profit</div>
+      <div class="sum-change up">&#9650; 58% YoY</div>
+    </div>
+  </div>
+  <div class="sum-card margin">
+    <div class="sum-icon margin-bg">%</div>
+    <div>
+      <div class="sum-val">33.7%</div>
+      <div class="sum-label">Profit Margin</div>
+      <div class="sum-change up">&#9650; 7.2pp YoY</div>
+    </div>
+  </div>
+</div>
+</body></html>

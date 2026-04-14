@@ -1,0 +1,77 @@
+<!-- slide_06.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding-top: 52px;
+  }
+  .eyebrow { font-size: 13px; color: #888888; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 14px; }
+  .title { font-size: 50px; font-weight: 300; color: #333333; margin-bottom: 44px; }
+  .split { display: flex; gap: 32px; width: 1090px; }
+  .col {
+    flex: 1; background: #FFFFFF; border-radius: 6px;
+    padding: 36px 40px;
+    display: flex; flex-direction: column; gap: 20px;
+  }
+  .col-label {
+    font-size: 13px; color: #888888; letter-spacing: 0.14em;
+    text-transform: uppercase; margin-bottom: 8px;
+  }
+  .col-head { font-size: 22px; font-weight: 700; color: #333333; }
+  .col-desc { font-size: 15px; color: #888888; line-height: 1.6; }
+  .terminal {
+    background: #1C1C1E;
+    border-radius: 4px;
+    padding: 20px 24px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #7CFC7C;
+    line-height: 1.7;
+    margin-top: 4px;
+  }
+  .prompt { color: #888; }
+  .after-col .col-head { color: #4A90D9; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">The Problem</div>
+  <div class="title">Bitcoin is powerful but unusable</div>
+  <div class="split">
+    <div class="col">
+      <div>
+        <div class="col-label">Current Reality</div>
+        <div class="col-head">Desktop Clients &amp; Terminals</div>
+      </div>
+      <div class="terminal">
+        <span class="prompt">$ </span>bitcoin-cli sendtoaddress \<br>
+        &nbsp;&nbsp;1A1zP1eP5QGefi2DM<br>
+        &nbsp;&nbsp;PTfedCe5vkAgj 0.1<br>
+        <span class="prompt">$ </span>bitcoin-cli getbalance<br>
+        3.42000000<br>
+        <span class="prompt">$ </span>_
+      </div>
+      <div class="col-desc">Configuration files. Private keys. Command-line parameters. No normal person can use this.</div>
+    </div>
+    <div class="col after-col">
+      <div>
+        <div class="col-label">What People Need</div>
+        <div class="col-head">Simple. Mobile. Web.</div>
+      </div>
+      <div style="background:#E8ECF0;border-radius:4px;padding:20px 24px;margin-top:4px;">
+        <div style="background:#4A90D9;border-radius:3px;height:36px;display:flex;align-items:center;padding:0 16px;color:#fff;font-size:14px;font-weight:700;margin-bottom:12px;">Send 0.10 BTC to Alex →</div>
+        <div style="height:28px;background:#fff;border-radius:3px;margin-bottom:8px;display:flex;align-items:center;padding:0 12px;font-size:12px;color:#888888;">Recipient address or email</div>
+        <div style="height:28px;background:#fff;border-radius:3px;display:flex;align-items:center;padding:0 12px;font-size:12px;color:#888888;">Amount in USD or BTC</div>
+      </div>
+      <div class="col-desc">Works from a browser. No installation. No keys to manage. Any device, any person.</div>
+    </div>
+  </div>
+</body>
+</html>

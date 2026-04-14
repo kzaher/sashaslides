@@ -1,0 +1,80 @@
+<!-- slide_03.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+  .title-bar {
+    position: absolute; top: 52px; left: 0; right: 0;
+    text-align: center;
+  }
+  .eyebrow { font-size: 13px; color: #888888; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 10px; }
+  .title { font-size: 44px; font-weight: 300; color: #333333; }
+  .title span { color: #4A90D9; font-weight: 700; }
+  .map-wrap {
+    position: absolute; bottom: 0; left: 0; right: 0; top: 130px;
+  }
+  svg.world { width: 100%; height: 100%; }
+  .dot { fill: #4A90D9; opacity: 0.85; }
+  .dot-lg { fill: #2E6DB4; }
+</style>
+</head>
+<body>
+  <div class="title-bar">
+    <div class="eyebrow">Global Adoption</div>
+    <div class="title">Bitcoin is everywhere — concentrated where it matters</div>
+  </div>
+  <div class="map-wrap">
+    <svg class="world" viewBox="0 0 1280 590" xmlns="http://www.w3.org/2000/svg">
+      <!-- Simplified continent outlines -->
+      <!-- North America -->
+      <path d="M120,80 L230,70 L260,110 L280,160 L250,200 L230,240 L200,260 L180,300 L150,310 L130,280 L100,250 L90,200 L80,150 Z" fill="#D0D8E0" stroke="#C0CAD4" stroke-width="1"/>
+      <!-- South America -->
+      <path d="M190,320 L240,310 L260,340 L270,390 L250,440 L220,470 L190,460 L175,420 L165,370 L170,340 Z" fill="#D0D8E0" stroke="#C0CAD4" stroke-width="1"/>
+      <!-- Europe -->
+      <path d="M520,60 L580,55 L610,70 L620,100 L600,120 L570,130 L540,120 L515,105 L510,80 Z" fill="#D0D8E0" stroke="#C0CAD4" stroke-width="1"/>
+      <!-- Africa -->
+      <path d="M530,150 L590,140 L620,160 L630,210 L620,270 L600,320 L570,350 L545,340 L520,300 L510,250 L515,200 L525,170 Z" fill="#D0D8E0" stroke="#C0CAD4" stroke-width="1"/>
+      <!-- Asia -->
+      <path d="M620,50 L780,40 L860,60 L890,100 L870,150 L840,170 L800,180 L760,170 L720,150 L690,130 L660,110 L630,90 Z" fill="#D0D8E0" stroke="#C0CAD4" stroke-width="1"/>
+      <!-- Southeast Asia -->
+      <path d="M800,180 L850,175 L870,200 L850,230 L820,240 L800,220 Z" fill="#D0D8E0" stroke="#C0CAD4" stroke-width="1"/>
+      <!-- Australia -->
+      <path d="M860,300 L940,290 L970,320 L960,370 L920,390 L870,380 L845,350 L850,320 Z" fill="#D0D8E0" stroke="#C0CAD4" stroke-width="1"/>
+
+      <!-- US cluster - large dots -->
+      <circle class="dot dot-lg" cx="155" cy="155" r="14"/>
+      <circle class="dot" cx="175" cy="145" r="8"/>
+      <circle class="dot" cx="140" cy="170" r="7"/>
+      <circle class="dot" cx="165" cy="175" r="6"/>
+      <circle class="dot" cx="190" cy="160" r="5"/>
+      <circle class="dot" cx="145" cy="155" r="5"/>
+      <!-- Europe cluster -->
+      <circle class="dot dot-lg" cx="548" cy="88" r="12"/>
+      <circle class="dot" cx="565" cy="80" r="8"/>
+      <circle class="dot" cx="535" cy="95" r="7"/>
+      <circle class="dot" cx="560" cy="100" r="6"/>
+      <circle class="dot" cx="575" cy="92" r="5"/>
+      <circle class="dot" cx="545" cy="78" r="5"/>
+      <!-- East Asia cluster -->
+      <circle class="dot dot-lg" cx="820" cy="110" r="12"/>
+      <circle class="dot" cx="840" cy="100" r="8"/>
+      <circle class="dot" cx="835" cy="125" r="7"/>
+      <circle class="dot" cx="808" cy="102" r="6"/>
+      <circle class="dot" cx="850" cy="115" r="5"/>
+      <!-- smaller scattered -->
+      <circle class="dot" cx="320" cy="180" r="4"/>
+      <circle class="dot" cx="650" cy="200" r="4"/>
+      <circle class="dot" cx="700" cy="120" r="4"/>
+      <circle class="dot" cx="210" cy="350" r="3"/>
+      <circle class="dot" cx="900" cy="330" r="3"/>
+    </svg>
+  </div>
+</body>
+</html>

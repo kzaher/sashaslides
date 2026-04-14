@@ -1,0 +1,79 @@
+<!-- slide_10.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding-top: 48px;
+  }
+  .eyebrow { font-size: 13px; color: #888888; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 12px; }
+  .title { font-size: 50px; font-weight: 300; color: #333333; margin-bottom: 8px; }
+  .callout-line { font-size: 20px; font-weight: 700; color: #4A90D9; margin-bottom: 32px; }
+  .charts-row { display: flex; gap: 28px; width: 1060px; }
+  .chart-wrap {
+    background: #FFFFFF;
+    border-radius: 6px;
+    flex: 1; height: 360px;
+    position: relative;
+    padding: 28px 32px 44px 56px;
+  }
+  .chart-title { font-size: 13px; color: #888888; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+  .chart-num { font-size: 32px; font-weight: 700; color: #333333; margin-bottom: 16px; }
+  svg.chart { width: 100%; height: 220px; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Traction — Transaction Volume</div>
+  <div class="title">$65,000 in 5 weeks</div>
+  <div class="callout-line">Real money moving — not just signups</div>
+  <div class="charts-row">
+    <div class="chart-wrap">
+      <div class="chart-title">USD Volume</div>
+      <div class="chart-num">$65,000</div>
+      <svg class="chart" viewBox="0 0 400 200" xmlns="http://www.w3.org/2000/svg">
+        <line x1="0" y1="180" x2="400" y2="180" stroke="#E8ECF0" stroke-width="1"/>
+        <line x1="0" y1="120" x2="400" y2="120" stroke="#F0F2F4" stroke-width="1"/>
+        <line x1="0" y1="60" x2="400" y2="60" stroke="#F0F2F4" stroke-width="1"/>
+        <text x="-8" y="184" font-size="10" fill="#888888" text-anchor="end" font-family="Helvetica Neue,sans-serif">$0</text>
+        <text x="-8" y="124" font-size="10" fill="#888888" text-anchor="end" font-family="Helvetica Neue,sans-serif">$20K</text>
+        <text x="-8" y="64" font-size="10" fill="#888888" text-anchor="end" font-family="Helvetica Neue,sans-serif">$50K</text>
+        <text x="0" y="196" font-size="10" fill="#888888" text-anchor="middle" font-family="Helvetica Neue,sans-serif">Wk 1</text>
+        <text x="100" y="196" font-size="10" fill="#888888" text-anchor="middle" font-family="Helvetica Neue,sans-serif">Wk 2</text>
+        <text x="200" y="196" font-size="10" fill="#888888" text-anchor="middle" font-family="Helvetica Neue,sans-serif">Wk 3</text>
+        <text x="300" y="196" font-size="10" fill="#888888" text-anchor="middle" font-family="Helvetica Neue,sans-serif">Wk 4</text>
+        <text x="400" y="196" font-size="10" fill="#888888" text-anchor="middle" font-family="Helvetica Neue,sans-serif">Wk 5</text>
+        <path d="M0,178 L100,174 L200,163 L300,135 L400,12 L400,180 L0,180 Z" fill="#4A90D9" opacity="0.12"/>
+        <path d="M0,178 L100,174 L200,163 L300,135 L400,12" fill="none" stroke="#4A90D9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="400" cy="12" r="5" fill="#4A90D9"/>
+      </svg>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">BTC Volume</div>
+      <div class="chart-num">~1,000 BTC</div>
+      <svg class="chart" viewBox="0 0 400 200" xmlns="http://www.w3.org/2000/svg">
+        <line x1="0" y1="180" x2="400" y2="180" stroke="#E8ECF0" stroke-width="1"/>
+        <line x1="0" y1="120" x2="400" y2="120" stroke="#F0F2F4" stroke-width="1"/>
+        <line x1="0" y1="60" x2="400" y2="60" stroke="#F0F2F4" stroke-width="1"/>
+        <text x="-8" y="184" font-size="10" fill="#888888" text-anchor="end" font-family="Helvetica Neue,sans-serif">0</text>
+        <text x="-8" y="124" font-size="10" fill="#888888" text-anchor="end" font-family="Helvetica Neue,sans-serif">250</text>
+        <text x="-8" y="64" font-size="10" fill="#888888" text-anchor="end" font-family="Helvetica Neue,sans-serif">700</text>
+        <text x="0" y="196" font-size="10" fill="#888888" text-anchor="middle" font-family="Helvetica Neue,sans-serif">Wk 1</text>
+        <text x="100" y="196" font-size="10" fill="#888888" text-anchor="middle" font-family="Helvetica Neue,sans-serif">Wk 2</text>
+        <text x="200" y="196" font-size="10" fill="#888888" text-anchor="middle" font-family="Helvetica Neue,sans-serif">Wk 3</text>
+        <text x="300" y="196" font-size="10" fill="#888888" text-anchor="middle" font-family="Helvetica Neue,sans-serif">Wk 4</text>
+        <text x="400" y="196" font-size="10" fill="#888888" text-anchor="middle" font-family="Helvetica Neue,sans-serif">Wk 5</text>
+        <path d="M0,178 L100,173 L200,160 L300,128 L400,8 L400,180 L0,180 Z" fill="#2E6DB4" opacity="0.12"/>
+        <path d="M0,178 L100,173 L200,160 L300,128 L400,8" fill="none" stroke="#2E6DB4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="400" cy="8" r="5" fill="#2E6DB4"/>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

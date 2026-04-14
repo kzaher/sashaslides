@@ -1,0 +1,85 @@
+<!-- slide_10.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding: 52px 80px 36px;
+  }
+  .section-label {
+    font-size: 18px; font-weight: 300; color: #888888;
+    text-align: center; margin-bottom: 8px; letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  h1 {
+    font-size: 40px; font-weight: 300; color: #333333;
+    text-align: center; margin-bottom: 20px;
+  }
+  .chart-card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+    padding: 24px 28px 16px;
+    width: 100%;
+    flex: 1;
+    position: relative;
+  }
+  .annotation {
+    position: absolute;
+    top: 24px; right: 32px;
+    font-size: 22px; font-weight: 700; color: #333333;
+    text-align: right; line-height: 1.3;
+  }
+  .annotation span { font-size: 14px; font-weight: 300; color: #888888; display: block; }
+</style>
+</head>
+<body>
+  <div class="section-label">Traction</div>
+  <h1>Transaction Volume</h1>
+  <div class="chart-card">
+    <div class="annotation">$65K USD<span>in first 5 weeks</span></div>
+    <svg viewBox="0 0 1040 400" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
+      <!-- Grid -->
+      <line x1="60" y1="20" x2="60" y2="350" stroke="#E8ECF0" stroke-width="1.5"/>
+      <line x1="60" y1="350" x2="1020" y2="350" stroke="#E8ECF0" stroke-width="1.5"/>
+      <line x1="60" y1="270" x2="1020" y2="270" stroke="#E8ECF0" stroke-width="1"/>
+      <line x1="60" y1="190" x2="1020" y2="190" stroke="#E8ECF0" stroke-width="1"/>
+      <line x1="60" y1="110" x2="1020" y2="110" stroke="#E8ECF0" stroke-width="1"/>
+      <line x1="60" y1="30" x2="1020" y2="30" stroke="#E8ECF0" stroke-width="1"/>
+
+      <!-- Y axis labels -->
+      <text x="50" y="354" text-anchor="end" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888">0 BTC</text>
+      <text x="50" y="274" text-anchor="end" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888">250</text>
+      <text x="50" y="194" text-anchor="end" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888">500</text>
+      <text x="50" y="114" text-anchor="end" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888">750</text>
+      <text x="50" y="34" text-anchor="end" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888">1000</text>
+
+      <!-- X axis labels -->
+      <text x="100" y="370" text-anchor="middle" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888">Week 1</text>
+      <text x="290" y="370" text-anchor="middle" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888">Week 2</text>
+      <text x="480" y="370" text-anchor="middle" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888">Week 3</text>
+      <text x="670" y="370" text-anchor="middle" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888">Week 4</text>
+      <text x="860" y="370" text-anchor="middle" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888">Week 5</text>
+
+      <!-- Area gradient -->
+      <defs>
+        <linearGradient id="volGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#4A90D9" stop-opacity="0.25"/>
+          <stop offset="100%" stop-color="#4A90D9" stop-opacity="0.02"/>
+        </linearGradient>
+      </defs>
+      <path d="M100,348 L180,345 L220,342 L260,338 L290,332 L320,322 L360,308 L400,290 L440,268 L480,244 L520,216 L560,188 L600,164 L640,142 L680,122 L720,104 L760,88 L800,72 L840,58 L880,46 L920,36 L960,32 L1000,28 L1000,350 L100,350 Z" fill="url(#volGrad)"/>
+      <path d="M100,348 L180,345 L220,342 L260,338 L290,332 L320,322 L360,308 L400,290 L440,268 L480,244 L520,216 L560,188 L600,164 L640,142 L680,122 L720,104 L760,88 L800,72 L840,58 L880,46 L920,36 L960,32 L1000,28" fill="none" stroke="#4A90D9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="1000" cy="28" r="6" fill="#4A90D9"/>
+    </svg>
+  </div>
+</body>
+</html>

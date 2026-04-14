@@ -1,0 +1,53 @@
+<!-- slide_05.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; background:#FFFFFF; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px 80px; }
+.section-title { font-size:13px; font-weight:700; font-style:italic; color:#F44060; letter-spacing:5px; text-transform:uppercase; margin-bottom:12px; text-align:center; }
+.headline { font-size:30px; font-weight:900; color:#1A1A1A; text-transform:uppercase; margin-bottom:52px; text-align:center; }
+.grid { display:grid; grid-template-columns:repeat(3,1fr); gap:48px 40px; width:100%; max-width:1000px; }
+.card { display:flex; flex-direction:column; align-items:center; text-align:center; }
+.icon-circle {
+  width:88px; height:88px; border-radius:50%; background:#F44060;
+  display:flex; align-items:center; justify-content:center; margin-bottom:20px;
+}
+.icon-circle svg { width:44px; height:44px; }
+.card-label { font-size:12px; font-weight:800; color:#1A1A1A; text-transform:uppercase; letter-spacing:3px; margin-bottom:10px; }
+.card-desc { font-size:14px; font-weight:400; color:#666666; line-height:1.6; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="section-title">Consumer Promise</div>
+  <div class="headline">What We Deliver</div>
+  <div class="grid">
+    <div class="card">
+      <div class="icon-circle">
+        <svg viewBox="0 0 44 44" fill="none"><circle cx="22" cy="22" r="14" stroke="white" stroke-width="2.5"/><path d="M16 22l4 4 8-8" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="card-label">Reasons to Believe</div>
+      <div class="card-desc">An integrated experience designed to pull you in and ensure you literally show up.</div>
+    </div>
+    <div class="card">
+      <div class="icon-circle">
+        <svg viewBox="0 0 44 44" fill="none"><path d="M22 8v7M22 29v7M8 22h7M29 22h7" stroke="white" stroke-width="2.5" stroke-linecap="round"/><circle cx="22" cy="22" r="6" stroke="white" stroke-width="2.5"/></svg>
+      </div>
+      <div class="card-label">Functional Benefit</div>
+      <div class="card-desc">Entertainment and competition to show up at your best, on your terms.</div>
+    </div>
+    <div class="card">
+      <div class="icon-circle">
+        <svg viewBox="0 0 44 44" fill="none"><path d="M22 12c-5.52 0-10 4.48-10 10s4.48 10 10 10 10-4.48 10-10" stroke="white" stroke-width="2.5" stroke-linecap="round"/><path d="M32 12l-4 4 4 4" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="card-label">Emotional Benefit</div>
+      <div class="card-desc">A transformative experience so you show up as your full self — all day long.</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

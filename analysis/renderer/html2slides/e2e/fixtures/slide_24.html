@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #0d1117; display: flex; align-items: center; justify-content: center; }
+
+.wrapper {
+  display: flex;
+  gap: 64px;
+  align-items: center;
+}
+
+.nesting-demo {
+  /* Level 0 — outermost */
+}
+
+.level-0 {
+  background: #161b22;
+  border: 1px solid #30363d;
+  padding: 16px;
+  border-radius: 12px;
+}
+
+.level-1 {
+  background: #1c2333;
+  border: 1px solid #3b4455;
+  padding: 16px;
+  border-radius: 10px;
+}
+
+.level-2 {
+  background: #243044;
+  border: 1px solid #4a6080;
+  padding: 16px;
+  border-radius: 8px;
+}
+
+.level-3 {
+  background: #2a4060;
+  border: 1px solid #5a80a0;
+  padding: 16px;
+  border-radius: 6px;
+}
+
+.level-4 {
+  background: #305080;
+  border: 1px solid #6a9ac0;
+  padding: 16px;
+  border-radius: 4px;
+}
+
+.innermost {
+  color: #e6edf3;
+  font-size: 15px;
+  line-height: 1.6;
+  font-weight: 500;
+}
+
+.innermost strong {
+  color: #58a6ff;
+}
+
+.labels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.label-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.label-color {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid #30363d;
+  flex-shrink: 0;
+}
+
+.label-text {
+  color: #8b949e;
+  font-size: 13px;
+}
+
+.label-text strong {
+  color: #e6edf3;
+  font-weight: 600;
+}
+
+h2 {
+  color: #e6edf3;
+  font-size: 22px;
+  margin-bottom: 16px;
+  font-weight: 700;
+}
+
+.annotation {
+  color: #8b949e;
+  font-size: 12px;
+  margin-top: 12px;
+  font-style: italic;
+}
+</style></head><body>
+<div class="wrapper">
+  <div class="nesting-demo">
+    <div class="level-0">
+      <div class="level-1">
+        <div class="level-2">
+          <div class="level-3">
+            <div class="level-4">
+              <div class="innermost">
+                This text lives inside <strong>5 levels</strong> of nested containers.<br><br>
+                Each level adds <strong>16px padding</strong> and a <strong>1px border</strong>, accumulating to 80px of padding and 10px of borders from the outermost edge to this content.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="labels">
+    <h2>Deep Padding Nesting</h2>
+    <div class="label-row">
+      <div class="label-color" style="background:#161b22"></div>
+      <div class="label-text"><strong>Level 0</strong> — #161b22, pad 16px</div>
+    </div>
+    <div class="label-row">
+      <div class="label-color" style="background:#1c2333"></div>
+      <div class="label-text"><strong>Level 1</strong> — #1c2333, pad 16px</div>
+    </div>
+    <div class="label-row">
+      <div class="label-color" style="background:#243044"></div>
+      <div class="label-text"><strong>Level 2</strong> — #243044, pad 16px</div>
+    </div>
+    <div class="label-row">
+      <div class="label-color" style="background:#2a4060"></div>
+      <div class="label-text"><strong>Level 3</strong> — #2a4060, pad 16px</div>
+    </div>
+    <div class="label-row">
+      <div class="label-color" style="background:#305080"></div>
+      <div class="label-text"><strong>Level 4</strong> — #305080, pad 16px</div>
+    </div>
+    <div class="annotation">Total accumulated: 80px padding + 10px borders = 90px inset</div>
+  </div>
+</div>
+</body></html>

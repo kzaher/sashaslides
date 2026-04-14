@@ -1,0 +1,43 @@
+<!-- slide_15.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1280px;height:720px;overflow:hidden;font-family:"Helvetica Neue",Arial,sans-serif}
+body{background:#1A1A1A;padding:60px 80px;display:flex;flex-direction:column}
+.title{font-size:42px;font-weight:800;font-style:italic;text-transform:uppercase;color:#F44060;letter-spacing:.05em;margin-bottom:40px}
+.grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;flex:1;gap:0}
+.cell{padding:28px 32px;display:flex;flex-direction:column;justify-content:center}
+.cell:nth-child(1){border-right:1px solid rgba(255,255,255,.15);border-bottom:1px solid rgba(255,255,255,.15)}
+.cell:nth-child(2){border-bottom:1px solid rgba(255,255,255,.15)}
+.cell:nth-child(3){border-right:1px solid rgba(255,255,255,.15)}
+.cell:nth-child(1),.cell:nth-child(3){padding-left:0}
+.cell:nth-child(2),.cell:nth-child(4){padding-right:0}
+.source{font-size:13px;font-weight:700;color:#F44060;letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px}
+.quote{font-size:17px;font-weight:400;color:#fff;line-height:1.5;font-style:italic}
+</style>
+</head>
+<body>
+<div class="title">WHAT THE PRESS SAYS</div>
+<div class="grid">
+  <div class="cell">
+    <div class="source">TechCrunch</div>
+    <div class="quote">"Peloton is now a unicorn because of the spinning class craze."</div>
+  </div>
+  <div class="cell">
+    <div class="source">Gear Brain</div>
+    <div class="quote">"Give your home a smart gym with this connected workout equipment."</div>
+  </div>
+  <div class="cell">
+    <div class="source">Circuit Breaker</div>
+    <div class="quote">"Peloton to launch its smart exercise bike in the UK and Canada."</div>
+  </div>
+  <div class="cell">
+    <div class="source">Business Insider</div>
+    <div class="quote">"Peloton is now worth more than $1 Billion."</div>
+  </div>
+</div>
+</body>
+</html>

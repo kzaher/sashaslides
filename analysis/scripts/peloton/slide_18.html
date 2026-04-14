@@ -1,0 +1,72 @@
+<!-- slide_18.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; background:#1A1A1A; display:flex; flex-direction:column; justify-content:center; padding:60px 88px; }
+.section-title { font-size:13px; font-weight:700; font-style:italic; color:#F44060; letter-spacing:5px; text-transform:uppercase; margin-bottom:12px; }
+.headline { font-size:30px; font-weight:900; color:#FFFFFF; text-transform:uppercase; margin-bottom:52px; }
+/* Timeline */
+.timeline { position:relative; padding:0; }
+.timeline-axis { position:absolute; left:48px; right:0; top:32px; height:2px; background:rgba(244,64,96,0.3); }
+.timeline-fill { position:absolute; left:48px; top:32px; height:2px; background:#F44060; width:calc(100% - 48px); }
+.nodes { display:flex; align-items:flex-start; gap:0; position:relative; z-index:1; }
+.node { flex:1; display:flex; flex-direction:column; align-items:center; }
+.node-circle {
+  width:64px; height:64px; border-radius:50%;
+  background:
+    radial-gradient(ellipse at 35% 35%, rgba(120,40,20,0.9) 0%, rgba(20,10,5,1) 100%);
+  border:3px solid #F44060;
+  margin-bottom:16px; flex-shrink:0;
+}
+.node-year { font-size:12px; font-weight:800; color:#F44060; letter-spacing:2px; margin-bottom:6px; }
+.node-title { font-size:11px; font-weight:700; color:#FFFFFF; text-transform:uppercase; letter-spacing:1px; text-align:center; margin-bottom:4px; }
+.node-desc { font-size:10px; font-weight:400; color:rgba(255,255,255,0.4); text-align:center; line-height:1.5; }
+.mode-shift { display:inline-block; margin-top:4px; font-size:9px; font-weight:700; color:#F44060; text-transform:uppercase; letter-spacing:1px; background:rgba(244,64,96,0.12); padding:2px 6px; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="section-title">Creative Evolution</div>
+  <div class="headline">From Product-Led to Emotion-Led</div>
+  <div class="timeline">
+    <div class="timeline-axis"></div>
+    <div class="timeline-fill"></div>
+    <div class="nodes">
+      <div class="node">
+        <div class="node-circle"></div>
+        <div class="node-year">2014–16</div>
+        <div class="node-title">"This is Peloton" / "Morning Ride"</div>
+        <div class="node-desc">Product-focused. Hardware and specs.</div>
+        <span class="mode-shift">Product Mode</span>
+      </div>
+      <div class="node">
+        <div class="node-circle"></div>
+        <div class="node-year">May 2017</div>
+        <div class="node-title">"Hello, Let's Go"</div>
+        <div class="node-desc">Transitional. Energy starts to lead.</div>
+        <span class="mode-shift">Transitional</span>
+      </div>
+      <div class="node">
+        <div class="node-circle"></div>
+        <div class="node-year">Holiday 2017</div>
+        <div class="node-title">"Give it All"</div>
+        <div class="node-desc">More emotional. Effort becomes visible.</div>
+        <span class="mode-shift">Emotional Turn</span>
+      </div>
+      <div class="node">
+        <div class="node-circle" style="border-color:#F44060;background:radial-gradient(ellipse at 35% 35%,rgba(180,50,30,0.9) 0%,rgba(40,10,10,1) 100%)"></div>
+        <div class="node-year">Spring 2018</div>
+        <div class="node-title">"Better in Us"</div>
+        <div class="node-desc">Fully emotional. Human transformation at center.</div>
+        <span class="mode-shift" style="background:rgba(244,64,96,0.25);">Emotional Mode</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<!-- slide_16.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; position:relative; }
+.photo-bg {
+  position:absolute; inset:0;
+  background:
+    radial-gradient(ellipse 800px 700px at 55% 50%, rgba(60,20,10,0.8) 0%, transparent 65%),
+    radial-gradient(ellipse 300px 250px at 10% 20%, rgba(244,64,96,0.05) 0%, transparent 50%),
+    #0A0A0A;
+}
+.overlay { position:absolute; inset:0; background:rgba(0,0,0,0.3); }
+/* Callout circle - right center */
+.callout {
+  position:absolute;
+  right:80px; top:50%; transform:translateY(-50%);
+  width:360px; height:360px; border-radius:50%;
+  background:#F44060;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding:44px;
+  text-align:center;
+}
+.callout-label { font-size:10px; font-weight:800; color:rgba(255,255,255,0.7); letter-spacing:4px; text-transform:uppercase; margin-bottom:12px; }
+.callout-title { font-size:17px; font-weight:900; color:#FFFFFF; text-transform:uppercase; letter-spacing:2px; margin-bottom:14px; line-height:1.2; }
+.callout-rule { width:32px; height:2px; background:rgba(255,255,255,0.5); margin:0 auto 14px; }
+.callout-body { font-size:12px; font-weight:400; color:rgba(255,255,255,0.92); line-height:1.65; }
+.pillar-num {
+  position:absolute; top:48px; left:80px;
+  font-size:96px; font-weight:900; color:rgba(244,64,96,0.1); line-height:1;
+}
+.caption {
+  position:absolute; bottom:40px; left:80px;
+  font-size:11px; font-weight:600; color:rgba(255,255,255,0.35); letter-spacing:3px; text-transform:uppercase;
+}
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="photo-bg"></div>
+  <div class="overlay"></div>
+  <div class="pillar-num">03</div>
+  <div class="callout">
+    <div class="callout-label">Brand Pillar 03</div>
+    <div class="callout-title">Innovative Design</div>
+    <div class="callout-rule"></div>
+    <div class="callout-body">Dramatize the beauty of the bike's design and technology — always in real-life settings. Never sterile product shots. The bike belongs in a life being lived.</div>
+  </div>
+  <div class="caption">Creative Direction</div>
+</div>
+</body>
+</html>

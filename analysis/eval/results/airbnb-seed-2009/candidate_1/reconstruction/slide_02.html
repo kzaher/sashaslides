@@ -1,0 +1,49 @@
+<!-- slide_02.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px;
+    background: #FFFFFF;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  .slide { padding: 80px; height: 720px; position: relative; }
+  .section-label {
+    font-size: 13px; font-weight: bold;
+    color: #29B6F6; letter-spacing: 2px;
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .title {
+    font-size: 38px; font-weight: bold;
+    color: #333333; margin-bottom: 52px;
+  }
+  .bullets { list-style: none; }
+  .bullets li {
+    font-size: 20px; color: #333333;
+    line-height: 1.5; margin-bottom: 28px;
+    padding-left: 28px; position: relative;
+  }
+  .bullets li::before {
+    content: '';
+    position: absolute; left: 0; top: 12px;
+    width: 8px; height: 8px;
+    background: #29B6F6; border-radius: 50%;
+  }
+</style>
+</head>
+<body>
+  <div class="slide">
+    <div class="section-label">The Problem</div>
+    <div class="title">Travel Is Broken for Budget Seekers</div>
+    <ul class="bullets">
+      <li>Price is a critical concern for travelers booking online.</li>
+      <li>Hotels leave you disconnected from the city and its local culture.</li>
+      <li>No easy way exists to book a room with a local — or to become a host.</li>
+    </ul>
+  </div>
+</body>
+</html>

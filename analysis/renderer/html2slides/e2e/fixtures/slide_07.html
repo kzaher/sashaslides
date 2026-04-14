@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Code+Pro:wght@600&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #0f172a; color: #e2e8f0; display: flex; flex-direction: column; align-items: center; padding: 44px 60px; }
+h1 { font-size: 32px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
+.subtitle { font-size: 15px; color: #64748b; margin-bottom: 36px; }
+.donuts { display: flex; gap: 40px; justify-content: center; margin-bottom: 36px; }
+.donut-card { background: #1e293b; border-radius: 16px; padding: 32px 40px; display: flex; flex-direction: column; align-items: center; border: 1px solid #334155; width: 280px; }
+.donut { width: 160px; height: 160px; border-radius: 50%; position: relative; margin-bottom: 20px; }
+.donut-1 { background: conic-gradient(#3b82f6 0% 78%, #1e293b 78% 100%); }
+.donut-2 { background: conic-gradient(#f59e0b 0% 45%, #1e293b 45% 100%); }
+.donut-3 { background: conic-gradient(#10b981 0% 92%, #1e293b 92% 100%); }
+.donut::after { content: ''; position: absolute; inset: 28px; background: #1e293b; border-radius: 50%; }
+.donut-val { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 1; font-family: 'Source Code Pro', monospace; font-size: 32px; font-weight: 600; color: #f1f5f9; }
+.donut-label { font-size: 16px; font-weight: 600; color: #cbd5e1; margin-bottom: 4px; }
+.donut-desc { font-size: 13px; color: #64748b; text-align: center; }
+/* Bottom stats bar */
+.stats-bar { display: flex; gap: 20px; width: 100%; }
+.stat-card { flex: 1; background: #1e293b; border-radius: 10px; padding: 16px 20px; display: flex; align-items: center; gap: 14px; border: 1px solid #334155; }
+.stat-icon { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+.stat-icon.blue { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.stat-icon.amber { background: rgba(245,158,11,0.15); color: #fbbf24; }
+.stat-icon.green { background: rgba(16,185,129,0.15); color: #34d399; }
+.stat-icon.purple { background: rgba(139,92,246,0.15); color: #a78bfa; }
+.stat-content {}
+.stat-val { font-size: 20px; font-weight: 700; color: #f1f5f9; font-family: 'Source Code Pro', monospace; }
+.stat-label { font-size: 12px; color: #64748b; margin-top: 1px; }
+</style></head><body>
+<h1>Performance Metrics</h1>
+<p class="subtitle">Key health indicators for Q1 2026</p>
+<div class="donuts">
+  <div class="donut-card">
+    <div class="donut donut-1">
+      <div class="donut-val">78%</div>
+    </div>
+    <div class="donut-label">Customer Satisfaction</div>
+    <div class="donut-desc">NPS score based on 2,400 survey responses this quarter</div>
+  </div>
+  <div class="donut-card">
+    <div class="donut donut-2">
+      <div class="donut-val">45%</div>
+    </div>
+    <div class="donut-label">Market Penetration</div>
+    <div class="donut-desc">Share of addressable market in North America region</div>
+  </div>
+  <div class="donut-card">
+    <div class="donut donut-3">
+      <div class="donut-val">92%</div>
+    </div>
+    <div class="donut-label">System Uptime</div>
+    <div class="donut-desc">Average availability across all production services</div>
+  </div>
+</div>
+<div class="stats-bar">
+  <div class="stat-card">
+    <div class="stat-icon blue">&#9889;</div>
+    <div class="stat-content">
+      <div class="stat-val">142ms</div>
+      <div class="stat-label">Avg Response Time</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon amber">&#9888;</div>
+    <div class="stat-content">
+      <div class="stat-val">3</div>
+      <div class="stat-label">Open Incidents</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon green">&#10003;</div>
+    <div class="stat-content">
+      <div class="stat-val">847</div>
+      <div class="stat-label">Deploys This Month</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon purple">&#9881;</div>
+    <div class="stat-content">
+      <div class="stat-val">99.97%</div>
+      <div class="stat-label">Error-Free Rate</div>
+    </div>
+  </div>
+</div>
+</body></html>

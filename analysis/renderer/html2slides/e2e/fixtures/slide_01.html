@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #f0f4f8; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+h1 { font-size: 36px; color: #1a202c; text-align: center; margin-bottom: 8px; font-weight: 700; }
+.subtitle { font-size: 16px; color: #718096; text-align: center; margin-bottom: 32px; }
+.cards { display: flex; gap: 24px; align-items: stretch; }
+.card { background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); padding: 28px 24px; width: 280px; display: flex; flex-direction: column; align-items: center; position: relative; border: 2px solid transparent; }
+.card.popular { border-color: #6366f1; box-shadow: 0 8px 32px rgba(99,102,241,0.18); transform: scale(1.04); }
+.badge { position: absolute; top: -14px; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; font-size: 12px; font-weight: 600; padding: 4px 16px; border-radius: 20px; letter-spacing: 0.5px; }
+.card-header { text-align: center; margin-bottom: 16px; width: 100%; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; }
+.card.popular .card-header { background: linear-gradient(135deg, #eef2ff, #e0e7ff); margin: -28px -24px 16px -24px; padding: 28px 24px 16px 24px; border-radius: 10px 10px 0 0; border-bottom: 1px solid #c7d2fe; }
+.plan-name { font-size: 18px; font-weight: 600; color: #374151; margin-bottom: 4px; }
+.price { font-size: 42px; font-weight: 700; color: #1a202c; }
+.price span { font-size: 16px; font-weight: 400; color: #9ca3af; }
+.features { list-style: none; width: 100%; margin: 12px 0 20px 0; flex: 1; }
+.features li { font-size: 14px; color: #4b5563; padding: 8px 0; border-bottom: 1px solid #f3f4f6; display: flex; align-items: center; gap: 8px; }
+.features li:last-child { border-bottom: none; }
+.check { color: #10b981; font-weight: 700; font-size: 16px; }
+.cross { color: #ef4444; font-weight: 700; font-size: 16px; }
+.cta { display: inline-block; width: 100%; padding: 12px 0; border-radius: 8px; font-size: 15px; font-weight: 600; text-align: center; border: none; cursor: pointer; }
+.cta-outline { background: #fff; color: #6366f1; border: 2px solid #6366f1; }
+.cta-filled { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; }
+</style></head><body>
+<h1>Simple, Transparent Pricing</h1>
+<p class="subtitle">Choose the plan that fits your team. No hidden fees.</p>
+<div class="cards">
+  <div class="card">
+    <div class="card-header">
+      <div class="plan-name">Starter</div>
+      <div class="price">$19<span>/mo</span></div>
+    </div>
+    <ul class="features">
+      <li><span class="check">✓</span> 5 team members</li>
+      <li><span class="check">✓</span> 10 GB storage</li>
+      <li><span class="check">✓</span> Basic analytics</li>
+      <li><span class="cross">✗</span> Custom domains</li>
+      <li><span class="cross">✗</span> Priority support</li>
+      <li><span class="cross">✗</span> API access</li>
+    </ul>
+    <button class="cta cta-outline">Get Started</button>
+  </div>
+  <div class="card popular">
+    <div class="badge">MOST POPULAR</div>
+    <div class="card-header">
+      <div class="plan-name">Professional</div>
+      <div class="price">$49<span>/mo</span></div>
+    </div>
+    <ul class="features">
+      <li><span class="check">✓</span> 25 team members</li>
+      <li><span class="check">✓</span> 100 GB storage</li>
+      <li><span class="check">✓</span> Advanced analytics</li>
+      <li><span class="check">✓</span> Custom domains</li>
+      <li><span class="check">✓</span> Priority support</li>
+      <li><span class="cross">✗</span> API access</li>
+    </ul>
+    <button class="cta cta-filled">Get Started</button>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <div class="plan-name">Enterprise</div>
+      <div class="price">$99<span>/mo</span></div>
+    </div>
+    <ul class="features">
+      <li><span class="check">✓</span> Unlimited members</li>
+      <li><span class="check">✓</span> 1 TB storage</li>
+      <li><span class="check">✓</span> Custom analytics</li>
+      <li><span class="check">✓</span> Custom domains</li>
+      <li><span class="check">✓</span> Dedicated support</li>
+      <li><span class="check">✓</span> Full API access</li>
+    </ul>
+    <button class="cta cta-outline">Contact Sales</button>
+  </div>
+</div>
+</body></html>

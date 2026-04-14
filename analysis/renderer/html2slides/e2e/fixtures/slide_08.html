@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: linear-gradient(135deg, #eff6ff, #f0f9ff); display: flex; flex-direction: column; align-items: center; padding: 48px 56px; }
+h1 { font-size: 34px; font-weight: 700; color: #1e293b; margin-bottom: 6px; }
+.subtitle { font-size: 15px; color: #64748b; margin-bottom: 44px; }
+.flow { display: flex; align-items: flex-start; gap: 0; position: relative; }
+.step { width: 220px; position: relative; }
+.step-card { background: #fff; border-radius: 12px; padding: 24px 20px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); min-height: 200px; border: 1px solid #e2e8f0; position: relative; }
+.step:nth-child(odd) .step-card { background: #3b82f6; border-color: #3b82f6; }
+.step:nth-child(odd) .step-card .step-title { color: #fff; }
+.step:nth-child(odd) .step-card .step-desc { color: #bfdbfe; }
+.badge-num { position: absolute; top: -16px; left: 20px; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; color: #fff; z-index: 2; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.step:nth-child(odd) .badge-num { background: #1d4ed8; }
+.step:nth-child(even) .badge-num { background: #6366f1; }
+.step-title { font-size: 17px; font-weight: 600; color: #1e293b; margin-top: 12px; margin-bottom: 8px; }
+.step-desc { font-size: 13px; color: #64748b; line-height: 1.6; }
+.step-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
+.tag { font-size: 10px; font-weight: 500; padding: 3px 8px; border-radius: 6px; }
+.step:nth-child(odd) .tag { background: rgba(255,255,255,0.2); color: #fff; }
+.step:nth-child(even) .tag { background: #eff6ff; color: #3b82f6; }
+/* Arrows between steps */
+.arrow-conn { display: flex; align-items: center; justify-content: center; width: 48px; padding-top: 80px; }
+.arrow-body { display: flex; align-items: center; }
+.arrow-line { width: 24px; height: 3px; background: #cbd5e1; }
+.arrow-head { width: 0; height: 0; border-top: 8px solid transparent; border-bottom: 8px solid transparent; border-left: 12px solid #cbd5e1; }
+/* Bottom timeline bar */
+.timeline-bar { display: flex; align-items: center; margin-top: 36px; gap: 0; width: 100%; }
+.tl-segment { flex: 1; height: 6px; border-radius: 3px; }
+.tl-1 { background: #3b82f6; }
+.tl-2 { background: #60a5fa; }
+.tl-3 { background: #93c5fd; }
+.tl-4 { background: #bfdbfe; }
+.tl-labels { display: flex; width: 100%; margin-top: 6px; }
+.tl-label { flex: 1; text-align: center; font-size: 11px; color: #94a3b8; }
+</style></head><body>
+<h1>Our Process</h1>
+<p class="subtitle">Four simple steps from idea to launch</p>
+<div class="flow">
+  <div class="step">
+    <div class="step-card">
+      <div class="badge-num">1</div>
+      <div class="step-title">Discovery</div>
+      <div class="step-desc">Deep dive into requirements, stakeholder interviews, and competitive analysis to define the problem space.</div>
+      <div class="step-tags">
+        <span class="tag">Research</span>
+        <span class="tag">Interviews</span>
+        <span class="tag">Analysis</span>
+      </div>
+    </div>
+  </div>
+  <div class="arrow-conn"><div class="arrow-body"><div class="arrow-line"></div><div class="arrow-head"></div></div></div>
+  <div class="step">
+    <div class="step-card">
+      <div class="badge-num">2</div>
+      <div class="step-title">Design</div>
+      <div class="step-desc">Create wireframes, prototypes, and design specs. Validate with user testing before development begins.</div>
+      <div class="step-tags">
+        <span class="tag">Wireframes</span>
+        <span class="tag">Prototypes</span>
+        <span class="tag">Testing</span>
+      </div>
+    </div>
+  </div>
+  <div class="arrow-conn"><div class="arrow-body"><div class="arrow-line"></div><div class="arrow-head"></div></div></div>
+  <div class="step">
+    <div class="step-card">
+      <div class="badge-num">3</div>
+      <div class="step-title">Build</div>
+      <div class="step-desc">Agile sprints with CI/CD pipeline. Code review, automated testing, and staging deployments every week.</div>
+      <div class="step-tags">
+        <span class="tag">Sprints</span>
+        <span class="tag">CI/CD</span>
+        <span class="tag">QA</span>
+      </div>
+    </div>
+  </div>
+  <div class="arrow-conn"><div class="arrow-body"><div class="arrow-line"></div><div class="arrow-head"></div></div></div>
+  <div class="step">
+    <div class="step-card">
+      <div class="badge-num">4</div>
+      <div class="step-title">Launch</div>
+      <div class="step-desc">Phased rollout with feature flags, monitoring dashboards, and rapid incident response playbooks.</div>
+      <div class="step-tags">
+        <span class="tag">Rollout</span>
+        <span class="tag">Monitoring</span>
+        <span class="tag">Support</span>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="timeline-bar">
+  <div class="tl-segment tl-1"></div>
+  <div class="tl-segment tl-2"></div>
+  <div class="tl-segment tl-3"></div>
+  <div class="tl-segment tl-4"></div>
+</div>
+<div class="tl-labels">
+  <div class="tl-label">Weeks 1-2</div>
+  <div class="tl-label">Weeks 3-5</div>
+  <div class="tl-label">Weeks 6-10</div>
+  <div class="tl-label">Week 11-12</div>
+</div>
+</body></html>

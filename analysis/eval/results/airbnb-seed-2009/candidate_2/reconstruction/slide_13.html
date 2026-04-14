@@ -1,0 +1,105 @@
+<!-- slide_13.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+}
+body {
+  padding: 64px 96px;
+  display: flex; flex-direction: column;
+}
+.heading {
+  font-size: 38px; font-weight: 700; color: #29B6F6;
+  margin-bottom: 10px; letter-spacing: -0.5px;
+}
+.sub {
+  font-size: 15px; color: #333333; line-height: 1.5;
+  margin-bottom: 40px;
+}
+.quotes {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 28px 56px;
+  flex: 1;
+}
+.quote-item {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 24px 24px 20px;
+  background: #FFF0F7;
+  border-top: 3px solid #E91E8B;
+}
+.quote-text {
+  font-size: 16px; font-weight: 400; color: #333333;
+  line-height: 1.6; font-style: italic; flex: 1;
+}
+.quote-text::before {
+  content: '\201C';
+  color: #E91E8B;
+  font-size: 22px;
+  font-family: Georgia, serif;
+  line-height: 0;
+  vertical-align: -6px;
+  margin-right: 4px;
+}
+.quote-text::after {
+  content: '\201D';
+  color: #E91E8B;
+  font-size: 22px;
+  font-family: Georgia, serif;
+  line-height: 0;
+  vertical-align: -6px;
+  margin-left: 4px;
+}
+.quote-attribution {
+  margin-top: 14px;
+}
+.quote-name {
+  font-size: 13px; font-weight: 700; color: #E91E8B;
+  text-transform: uppercase; letter-spacing: 0.8px;
+}
+.quote-location {
+  font-size: 12px; color: #888888;
+}
+</style>
+</head>
+<body>
+  <h1 class="heading">What Users Say</h1>
+  <p class="sub">Real guests and hosts — unprompted, on their own experience with the platform.</p>
+  <div class="quotes">
+    <div class="quote-item">
+      <div class="quote-text">AirBed&amp;Breakfast freaking rocks!</div>
+      <div class="quote-attribution">
+        <div class="quote-name">Jason F.</div>
+        <div class="quote-location">Washington, DC</div>
+      </div>
+    </div>
+    <div class="quote-item">
+      <div class="quote-text">I found something in my price-range, and that's what really enabled me to come to the conference.</div>
+      <div class="quote-attribution">
+        <div class="quote-name">Jason R.</div>
+        <div class="quote-location">Atlanta, GA</div>
+      </div>
+    </div>
+    <div class="quote-item">
+      <div class="quote-text">A complete success. It is easy to use and it made me money.</div>
+      <div class="quote-attribution">
+        <div class="quote-name">Emily M.</div>
+        <div class="quote-location">Austin, TX — Host</div>
+      </div>
+    </div>
+    <div class="quote-item">
+      <div class="quote-text">It's about the ideas, the interactions, the people. You don't get that in a hotel room.</div>
+      <div class="quote-attribution">
+        <div class="quote-name">Don A.</div>
+        <div class="quote-location">Ontario, Canada</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

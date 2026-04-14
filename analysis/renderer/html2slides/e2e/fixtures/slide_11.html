@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #f8f9fa; display: flex; flex-direction: column; padding: 32px 40px; }
+.title { font-size: 36px; font-weight: 700; color: #1a1a2e; text-align: center; margin-bottom: 24px; }
+.subtitle { font-size: 16px; color: #6c757d; text-align: center; margin-bottom: 28px; font-family: 'Roboto', sans-serif; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 20px; flex: 1; }
+.card { border-radius: 12px; padding: 24px 28px; position: relative; overflow: hidden; }
+.card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; }
+.strengths { background: #e8f5e9; border: 2px solid #4caf50; }
+.strengths::before { background: #4caf50; }
+.weaknesses { background: #ffebee; border: 2px solid #e53935; }
+.weaknesses::before { background: #e53935; }
+.opportunities { background: #e3f2fd; border: 2px solid #1e88e5; }
+.opportunities::before { background: #1e88e5; }
+.threats { background: #fff3e0; border: 2px solid #fb8c00; }
+.threats::before { background: #fb8c00; }
+.card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.icon-circle { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; color: white; font-weight: 700; flex-shrink: 0; }
+.strengths .icon-circle { background: #4caf50; }
+.weaknesses .icon-circle { background: #e53935; }
+.opportunities .icon-circle { background: #1e88e5; }
+.threats .icon-circle { background: #fb8c00; }
+.card-title { font-size: 20px; font-weight: 700; }
+.strengths .card-title { color: #2e7d32; }
+.weaknesses .card-title { color: #c62828; }
+.opportunities .card-title { color: #1565c0; }
+.threats .card-title { color: #e65100; }
+ul { list-style: none; padding-left: 4px; }
+li { font-size: 14px; color: #333; padding: 4px 0; padding-left: 18px; position: relative; font-family: 'Roboto', sans-serif; line-height: 1.5; }
+li::before { content: '•'; position: absolute; left: 0; font-weight: 700; }
+.strengths li::before { color: #4caf50; }
+.weaknesses li::before { color: #e53935; }
+.opportunities li::before { color: #1e88e5; }
+.threats li::before { color: #fb8c00; }
+</style></head><body>
+<div class="title">SWOT Analysis</div>
+<div class="subtitle">Strategic Planning Framework — Q2 2026 Review</div>
+<div class="grid">
+  <div class="card strengths">
+    <div class="card-header"><div class="icon-circle">S</div><div class="card-title">Strengths</div></div>
+    <ul>
+      <li>Market-leading product with 98% uptime SLA</li>
+      <li>Strong brand recognition in enterprise segment</li>
+      <li>Experienced engineering team (avg 8yr tenure)</li>
+      <li>Proprietary ML pipeline with 3 patents filed</li>
+    </ul>
+  </div>
+  <div class="card weaknesses">
+    <div class="card-header"><div class="icon-circle">W</div><div class="card-title">Weaknesses</div></div>
+    <ul>
+      <li>High customer acquisition cost ($420 CAC)</li>
+      <li>Limited presence in APAC markets</li>
+      <li>Legacy codebase slowing feature velocity</li>
+      <li>Dependency on single cloud provider (AWS)</li>
+    </ul>
+  </div>
+  <div class="card opportunities">
+    <div class="card-header"><div class="icon-circle">O</div><div class="card-title">Opportunities</div></div>
+    <ul>
+      <li>AI/ML integration demand growing 34% YoY</li>
+      <li>Competitor exit from mid-market opens gap</li>
+      <li>Strategic partnership with Salesforce ecosystem</li>
+    </ul>
+  </div>
+  <div class="card threats">
+    <div class="card-header"><div class="icon-circle">T</div><div class="card-title">Threats</div></div>
+    <ul>
+      <li>New entrant with $50M Series B funding</li>
+      <li>Regulatory changes in EU data sovereignty</li>
+      <li>Economic downturn reducing enterprise budgets</li>
+      <li>Open-source alternatives gaining traction</li>
+    </ul>
+  </div>
+</div>
+</body></html>

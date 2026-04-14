@@ -1,0 +1,89 @@
+<!-- slide_04.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    width:1280px; height:720px;
+    background:#E8ECF0;
+    font-family:"Helvetica Neue",Arial,sans-serif;
+    font-weight:300;
+    overflow:hidden;
+    position:relative;
+  }
+</style>
+</head>
+<body>
+  <!-- Zone A: title -->
+  <div style="position:absolute;left:80px;top:48px;">
+    <span style="font-size:44px;font-weight:300;color:#333;letter-spacing:-0.02em;">Bitcoin Growing Fast</span>
+  </div>
+
+  <!-- Zone B: key metric -->
+  <div style="position:absolute;left:80px;top:114px;">
+    <span style="font-size:20px;font-weight:300;color:#555;letter-spacing:-0.02em;">Transaction volume reached </span>
+    <span style="font-size:20px;font-weight:700;color:#333;letter-spacing:-0.02em;">$2 million USD per day</span>
+    <span style="font-size:20px;font-weight:300;color:#555;letter-spacing:-0.02em;"> by August 2012</span>
+  </div>
+
+  <!-- Zone C: line chart -->
+  <svg style="position:absolute;left:0;top:155px;" width="1280" height="510" viewBox="0 0 1280 510" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="area-fill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#4A90D9" stop-opacity="0.22"/>
+        <stop offset="100%" stop-color="#4A90D9" stop-opacity="0.02"/>
+      </linearGradient>
+    </defs>
+
+    <!-- Chart area: left=100, top=30, right=1180, bottom=440 -->
+    <!-- Y-axis light gridlines -->
+    <line x1="100" y1="30" x2="100" y2="440" stroke="#C8D0D8" stroke-width="1"/>
+    <line x1="100" y1="30" x2="1180" y2="30" stroke="#C8D0D8" stroke-width="0.5" stroke-dasharray="4,6"/>
+    <line x1="100" y1="140" x2="1180" y2="140" stroke="#C8D0D8" stroke-width="0.5" stroke-dasharray="4,6"/>
+    <line x1="100" y1="250" x2="1180" y2="250" stroke="#C8D0D8" stroke-width="0.5" stroke-dasharray="4,6"/>
+    <line x1="100" y1="360" x2="1180" y2="360" stroke="#C8D0D8" stroke-width="0.5" stroke-dasharray="4,6"/>
+    <line x1="100" y1="440" x2="1180" y2="440" stroke="#C8D0D8" stroke-width="1"/>
+
+    <!-- Y-axis labels -->
+    <text x="88" y="34" font-family="Helvetica Neue,Arial,sans-serif" font-size="13" fill="#888" text-anchor="end">$2M</text>
+    <text x="88" y="144" font-family="Helvetica Neue,Arial,sans-serif" font-size="13" fill="#888" text-anchor="end">$1.5M</text>
+    <text x="88" y="254" font-family="Helvetica Neue,Arial,sans-serif" font-size="13" fill="#888" text-anchor="end">$1M</text>
+    <text x="88" y="364" font-family="Helvetica Neue,Arial,sans-serif" font-size="13" fill="#888" text-anchor="end">$0.5M</text>
+    <text x="88" y="444" font-family="Helvetica Neue,Arial,sans-serif" font-size="13" fill="#888" text-anchor="end">$0</text>
+
+    <!-- X-axis month labels -->
+    <!-- Data: Mar(100,428) Apr(316,400) May(532,355) Jun(748,278) Jul(964,168) Aug(1180,30) -->
+    <text x="100" y="462" font-family="Helvetica Neue,Arial,sans-serif" font-size="14" fill="#888" text-anchor="middle">Mar 2012</text>
+    <text x="316" y="462" font-family="Helvetica Neue,Arial,sans-serif" font-size="14" fill="#888" text-anchor="middle">Apr</text>
+    <text x="532" y="462" font-family="Helvetica Neue,Arial,sans-serif" font-size="14" fill="#888" text-anchor="middle">May</text>
+    <text x="748" y="462" font-family="Helvetica Neue,Arial,sans-serif" font-size="14" fill="#888" text-anchor="middle">Jun</text>
+    <text x="964" y="462" font-family="Helvetica Neue,Arial,sans-serif" font-size="14" fill="#888" text-anchor="middle">Jul</text>
+    <text x="1180" y="462" font-family="Helvetica Neue,Arial,sans-serif" font-size="14" fill="#888" text-anchor="middle">Aug 2012</text>
+
+    <!-- Area fill under curve -->
+    <!-- Points: (100,428) (316,400) (532,355) (748,278) (964,168) (1180,30) -->
+    <path d="M 100,428 C 180,424 248,410 316,400 C 398,388 468,370 532,355 C 614,338 684,302 748,278 C 832,252 898,200 964,168 C 1048,136 1114,68 1180,30 L 1180,440 L 100,440 Z"
+          fill="url(#area-fill)"/>
+
+    <!-- Chart line -->
+    <path d="M 100,428 C 180,424 248,410 316,400 C 398,388 468,370 532,355 C 614,338 684,302 748,278 C 832,252 898,200 964,168 C 1048,136 1114,68 1180,30"
+          fill="none" stroke="#4A90D9" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+
+    <!-- Data point dots -->
+    <circle cx="100" cy="428" r="4.5" fill="#4A90D9"/>
+    <circle cx="316" cy="400" r="4.5" fill="#4A90D9"/>
+    <circle cx="532" cy="355" r="4.5" fill="#4A90D9"/>
+    <circle cx="748" cy="278" r="4.5" fill="#4A90D9"/>
+    <circle cx="964" cy="168" r="4.5" fill="#4A90D9"/>
+    <circle cx="1180" cy="30" r="5.5" fill="#2E6DB4"/>
+
+    <!-- Zone D: annotation at peak (Aug, $2M) -->
+    <rect x="1048" y="6" width="130" height="28" rx="4" fill="#2E3A5F"/>
+    <text x="1113" y="24" font-family="Helvetica Neue,Arial,sans-serif" font-size="13" font-weight="700" fill="white" text-anchor="middle">$2M / day</text>
+    <!-- Annotation pointer line -->
+    <line x1="1180" y1="30" x2="1180" y2="35" stroke="#2E3A5F" stroke-width="1.5"/>
+  </svg>
+</body>
+</html>
