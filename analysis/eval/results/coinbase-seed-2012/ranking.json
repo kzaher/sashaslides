@@ -1,0 +1,44 @@
+{
+  "presId": "coinbase-seed-2012",
+  "slideCount": 11,
+  "candidates": [
+    {
+      "candidate": 1,
+      "slideCount": 11,
+      "scores": {
+        "layout": 8,
+        "content": 7,
+        "visual": 8,
+        "rules": 9,
+        "avg": 8
+      }
+    },
+    {
+      "candidate": 2,
+      "slideCount": 11,
+      "scores": {
+        "layout": 8,
+        "content": 9,
+        "visual": 9,
+        "rules": 8,
+        "avg": 8.5
+      }
+    },
+    {
+      "candidate": 3,
+      "slideCount": 7,
+      "scores": {
+        "layout": 5,
+        "content": 5,
+        "visual": 5,
+        "rules": 5,
+        "avg": 5
+      }
+    }
+  ],
+  "ranking": [
+    2,
+    1,
+    3
+  ]
+}

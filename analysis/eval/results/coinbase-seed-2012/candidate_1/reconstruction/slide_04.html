@@ -1,0 +1,82 @@
+<!-- slide_04.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding: 56px 80px 40px;
+  }
+  h1 {
+    font-size: 40px; font-weight: 300; color: #333333;
+    text-align: center; margin-bottom: 20px;
+  }
+  .chart-card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+    padding: 28px 32px 20px;
+    width: 100%;
+    flex: 1;
+    position: relative;
+  }
+  .annotation {
+    position: absolute;
+    top: 28px; right: 40px;
+    font-size: 22px; font-weight: 700; color: #333333;
+  }
+  .axis-label {
+    font-size: 12px; font-weight: 300; color: #888888;
+  }
+  svg.chart { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+  <h1>Bitcoin Transaction Volume</h1>
+  <div class="chart-card">
+    <div class="annotation">$2M / day</div>
+    <svg viewBox="0 0 1040 420" xmlns="http://www.w3.org/2000/svg" class="chart">
+      <!-- Grid lines -->
+      <line x1="60" y1="20" x2="60" y2="370" stroke="#E8ECF0" stroke-width="1.5"/>
+      <line x1="60" y1="370" x2="1020" y2="370" stroke="#E8ECF0" stroke-width="1.5"/>
+      <line x1="60" y1="270" x2="1020" y2="270" stroke="#E8ECF0" stroke-width="1"/>
+      <line x1="60" y1="170" x2="1020" y2="170" stroke="#E8ECF0" stroke-width="1"/>
+      <line x1="60" y1="70" x2="1020" y2="70" stroke="#E8ECF0" stroke-width="1"/>
+
+      <!-- Y axis labels -->
+      <text x="50" y="374" text-anchor="end" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888888">$0</text>
+      <text x="50" y="274" text-anchor="end" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888888">$500K</text>
+      <text x="50" y="174" text-anchor="end" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888888">$1M</text>
+      <text x="50" y="74" text-anchor="end" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888888">$2M</text>
+
+      <!-- X axis labels -->
+      <text x="80" y="392" text-anchor="middle" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888888">Mar</text>
+      <text x="242" y="392" text-anchor="middle" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888888">Apr</text>
+      <text x="404" y="392" text-anchor="middle" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888888">May</text>
+      <text x="566" y="392" text-anchor="middle" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888888">Jun</text>
+      <text x="728" y="392" text-anchor="middle" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888888">Jul</text>
+      <text x="890" y="392" text-anchor="middle" font-size="12" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#888888">Aug</text>
+
+      <!-- Area fill -->
+      <defs>
+        <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#4A90D9" stop-opacity="0.2"/>
+          <stop offset="100%" stop-color="#4A90D9" stop-opacity="0.02"/>
+        </linearGradient>
+      </defs>
+      <path d="M80,360 C120,355 160,350 200,348 C240,345 280,340 320,335 C360,328 400,318 440,305 C480,288 520,268 560,245 C600,218 640,200 680,182 C720,160 760,138 800,118 C840,98 880,84 920,76 L960,72 L1000,70 L1000,370 L80,370 Z" fill="url(#areaGrad)"/>
+      <!-- Line -->
+      <path d="M80,360 C120,355 160,350 200,348 C240,345 280,340 320,335 C360,328 400,318 440,305 C480,288 520,268 560,245 C600,218 640,200 680,182 C720,160 760,138 800,118 C840,98 880,84 920,76 L960,72 L1000,70" fill="none" stroke="#4A90D9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- Peak dot -->
+      <circle cx="1000" cy="70" r="6" fill="#4A90D9"/>
+    </svg>
+  </div>
+</body>
+</html>

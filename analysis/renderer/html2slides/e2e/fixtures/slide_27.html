@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Source+Code+Pro:wght@400;500&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #ffffff; padding: 36px 48px; }
+
+h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1a202c;
+  margin-bottom: 4px;
+}
+
+.header-line {
+  font-size: 11px;
+  color: #a0aec0;
+  margin-bottom: 20px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.columns {
+  display: flex;
+  gap: 0;
+  height: 590px;
+}
+
+.column {
+  flex: 1;
+  padding: 0 20px;
+  overflow: hidden;
+}
+
+.column:not(:last-child) {
+  border-right: 1px solid #e2e8f0;
+}
+
+.col-headline {
+  font-size: 14px;
+  font-weight: 700;
+  color: #2d3748;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #4a6cf7;
+}
+
+.col-body {
+  font-size: 10.5px;
+  color: #4a5568;
+  line-height: 1.65;
+  margin-bottom: 12px;
+  text-align: justify;
+}
+
+.pull-quote {
+  border-left: 3px solid #e94560;
+  padding: 8px 12px;
+  margin: 14px 0;
+  background: #fff5f5;
+}
+
+.pull-quote p {
+  font-size: 12px;
+  font-style: italic;
+  color: #c53030;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.pull-quote .attr {
+  font-size: 9px;
+  color: #a0aec0;
+  font-style: normal;
+  margin-top: 4px;
+  font-weight: 400;
+}
+
+.col-subhead {
+  font-size: 11px;
+  font-weight: 600;
+  color: #2d3748;
+  margin-top: 12px;
+  margin-bottom: 6px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #718096;
+  padding: 3px 0;
+  border-bottom: 1px dotted #e2e8f0;
+}
+
+.stat-row .val {
+  font-weight: 600;
+  color: #2d3748;
+}
+</style></head><body>
+<h1>Quarterly Performance Digest</h1>
+<div class="header-line">Confidential — Internal Distribution Only — Q1 2026</div>
+<div class="columns">
+  <div class="column">
+    <div class="col-headline">Market Overview</div>
+    <div class="col-body">Global technology spending reached $4.8 trillion in Q1 2026, representing a 6.2% year-over-year increase. Cloud infrastructure continues to dominate capital allocation, with hyperscaler revenue growing at 28% annually. Enterprise software margins expanded to 72.4%, driven by AI-assisted development tools and automation platforms.</div>
+    <div class="pull-quote">
+      <p>"The inflection point for AI-native applications has arrived. Companies not investing now will face structural disadvantage within 18 months."</p>
+      <div class="attr">— Sarah Chen, VP Strategy</div>
+    </div>
+    <div class="col-body">Regional analysis shows APAC markets outpacing North America for the second consecutive quarter. European regulatory frameworks continue to create compliance overhead, with GDPR-adjacent AI regulations adding 8-12% to deployment costs for multinational operations.</div>
+    <div class="col-subhead">Key Indicators</div>
+    <div class="stat-row"><span>S&P Tech Index</span><span class="val">+14.3%</span></div>
+    <div class="stat-row"><span>Cloud Revenue Growth</span><span class="val">28.1%</span></div>
+    <div class="stat-row"><span>VC Funding (AI)</span><span class="val">$42.6B</span></div>
+  </div>
+  <div class="column">
+    <div class="col-headline">Product Metrics</div>
+    <div class="col-body">Platform adoption accelerated with 12,400 new enterprise accounts activated in Q1. Daily active usage increased to 2.1M sessions, with average session duration up 34% following the February feature release. API call volume crossed 8 billion per month.</div>
+    <div class="col-subhead">Engagement Breakdown</div>
+    <div class="stat-row"><span>DAU/MAU Ratio</span><span class="val">0.68</span></div>
+    <div class="stat-row"><span>Avg Session Length</span><span class="val">14.2 min</span></div>
+    <div class="stat-row"><span>Feature Adoption (new)</span><span class="val">41%</span></div>
+    <div class="stat-row"><span>Churn Rate</span><span class="val">1.8%</span></div>
+    <div class="stat-row"><span>NPS Score</span><span class="val">72</span></div>
+    <div class="pull-quote">
+      <p>"Retention improvements in the mid-market segment exceeded all projections. The onboarding redesign is clearly working."</p>
+      <div class="attr">— Marcus Rodriguez, Product Lead</div>
+    </div>
+    <div class="col-body">Mobile platform adoption remains a growth vector, with 38% of enterprise users now accessing via mobile at least once per week. Cross-platform sync reliability improved to 99.97%.</div>
+  </div>
+  <div class="column">
+    <div class="col-headline">Financial Summary</div>
+    <div class="col-body">Revenue for Q1 came in at $124.6M, exceeding guidance of $118M by 5.6%. Gross margin held steady at 74.2% despite increased infrastructure costs. Operating expenses grew 8% year-over-year, primarily in R&D headcount expansion.</div>
+    <div class="col-subhead">P&L Highlights</div>
+    <div class="stat-row"><span>Revenue</span><span class="val">$124.6M</span></div>
+    <div class="stat-row"><span>Gross Margin</span><span class="val">74.2%</span></div>
+    <div class="stat-row"><span>Operating Income</span><span class="val">$28.4M</span></div>
+    <div class="stat-row"><span>Free Cash Flow</span><span class="val">$31.1M</span></div>
+    <div class="stat-row"><span>ARR</span><span class="val">$502M</span></div>
+    <div class="pull-quote">
+      <p>"Cash generation remains strong. We are well-positioned to fund both organic growth and targeted M&A through 2027."</p>
+      <div class="attr">— David Park, CFO</div>
+    </div>
+    <div class="col-body">Deferred revenue grew to $186M, providing strong forward visibility. International revenue now represents 34% of total, up from 28% a year ago. Currency headwinds reduced reported growth by approximately 2 percentage points.</div>
+  </div>
+</div>
+</body></html>

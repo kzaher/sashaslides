@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Presentation Preview — Freshness & Response Quality</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Google Sans', sans-serif;
+      background: #202124;
+      color: #e8eaed;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      user-select: none;
+    }
+
+    /* ── Top bar ── */
+    .top-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 48px;
+      background: #292a2d;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      z-index: 100;
+      border-bottom: 1px solid #3c4043;
+    }
+    .top-bar .title {
+      font-size: 14px;
+      font-weight: 500;
+      color: #e8eaed;
+    }
+    .top-bar .counter {
+      font-size: 14px;
+      color: #9aa0a6;
+      min-width: 80px;
+      text-align: center;
+    }
+    .top-bar .shortcuts {
+      font-size: 12px;
+      color: #5f6368;
+    }
+    .shortcuts kbd {
+      background: #3c4043;
+      border-radius: 3px;
+      padding: 2px 6px;
+      font-family: inherit;
+      font-size: 11px;
+      color: #9aa0a6;
+    }
+
+    /* ── Slide area ── */
+    .slide-container {
+      margin-top: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: calc(100vh - 48px);
+      position: relative;
+    }
+
+    iframe {
+      width: 960px;
+      height: 540px;
+      border: none;
+      border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      background: #fff;
+    }
+
+    /* ── Navigation arrows ── */
+    .nav-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255,255,255,0.08);
+      color: #e8eaed;
+      font-size: 24px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, transform 0.15s;
+      z-index: 10;
+    }
+    .nav-btn:hover {
+      background: rgba(255,255,255,0.16);
+    }
+    .nav-btn:active {
+      transform: translateY(-50%) scale(0.92);
+    }
+    .nav-btn:disabled {
+      opacity: 0.2;
+      cursor: default;
+    }
+    .nav-btn:disabled:hover {
+      background: rgba(255,255,255,0.08);
+    }
+    .nav-btn.prev { left: max(16px, calc(50% - 540px)); }
+    .nav-btn.next { right: max(16px, calc(50% - 540px)); }
+
+    .nav-btn svg {
+      width: 28px;
+      height: 28px;
+      fill: currentColor;
+    }
+
+    /* ── Slide strip (bottom) ── */
+    .strip {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      height: 72px;
+      background: #292a2d;
+      border-top: 1px solid #3c4043;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 0 16px;
+      overflow-x: auto;
+      z-index: 100;
+    }
+    .strip-thumb {
+      width: 96px;
+      height: 54px;
+      border-radius: 4px;
+      border: 2px solid transparent;
+      background: #3c4043;
+      cursor: pointer;
+      font-size: 10px;
+      color: #9aa0a6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .strip-thumb:hover {
+      background: #5f6368;
+    }
+    .strip-thumb.active {
+      border-color: #8ab4f8;
+      background: #394457;
+      color: #e8eaed;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="top-bar">
+    <span class="title">Freshness & Response Quality — Rob Caldwell</span>
+    <span class="counter" id="counter">1 / 19</span>
+    <span class="shortcuts">
+      <kbd>←</kbd> <kbd>→</kbd> or click arrows
+    </span>
+  </div>
+
+  <div class="slide-container">
+    <button class="nav-btn prev" id="prevBtn" onclick="navigate(-1)">
+      <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+    </button>
+
+    <iframe id="slideFrame" src="slide_01_title.html"></iframe>
+
+    <button class="nav-btn next" id="nextBtn" onclick="navigate(1)">
+      <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+    </button>
+  </div>
+
+  <div class="strip" id="strip"></div>
+
+<script>
+const slides = [
+  "slide_01_title.html",
+  "slide_02_agenda.html",
+  "slide_03_realtime_intro.html",
+  "slide_04_signals_overview.html",
+  "slide_05_rtb_plan.html",
+  "slide_06_rtb_wl.html",
+  "slide_07_unified_signal.html",
+  "slide_08_hivemind.html",
+  "slide_09_challenges.html",
+  "slide_10_optimizations_header.html",
+  "slide_11_max_search_results.html",
+  "slide_12_fast_path_current.html",
+  "slide_13_fast_path_new.html",
+  "slide_14_fast_model_current.html",
+  "slide_15_fast_model_new.html",
+  "slide_16_worldcup_overview.html",
+  "slide_17_cards.html",
+  "slide_18_collaborations.html",
+  "slide_19_risks_le.html"
+];
+
+const labels = [
+  "Title", "Agenda", "RT Signals", "Overview", "RTB Plan",
+  "RTB W/L", "Unified", "HiveMind", "Challenges", "Optimizations",
+  "20→10", "Fast Path①", "Fast Path②", "Fast Model①", "Fast Model②",
+  "World Cup", "Cards", "Collabs", "Risks/LE"
+];
+
+let current = 0;
+
+const frame = document.getElementById('slideFrame');
+const counter = document.getElementById('counter');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const strip = document.getElementById('strip');
+
+// Build thumbnail strip
+slides.forEach((_, i) => {
+  const thumb = document.createElement('div');
+  thumb.className = 'strip-thumb' + (i === 0 ? ' active' : '');
+  thumb.textContent = labels[i];
+  thumb.onclick = () => goTo(i);
+  strip.appendChild(thumb);
+});
+
+function goTo(index) {
+  current = Math.max(0, Math.min(slides.length - 1, index));
+  frame.src = slides[current];
+  counter.textContent = `${current + 1} / ${slides.length}`;
+  prevBtn.disabled = current === 0;
+  nextBtn.disabled = current === slides.length - 1;
+
+  // Update strip
+  document.querySelectorAll('.strip-thumb').forEach((t, i) => {
+    t.classList.toggle('active', i === current);
+  });
+
+  // Scroll active thumb into view
+  const activeThumb = strip.children[current];
+  activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+}
+
+function navigate(delta) {
+  goTo(current + delta);
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); navigate(-1); }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); navigate(1); }
+  if (e.key === 'Home') { e.preventDefault(); goTo(0); }
+  if (e.key === 'End') { e.preventDefault(); goTo(slides.length - 1); }
+});
+
+// Init
+goTo(0);
+</script>
+
+</body>
+</html>

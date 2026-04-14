@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #fafbfc; display: flex; flex-direction: column; align-items: center; padding: 40px 60px; }
+.badge { font-size: 12px; font-weight: 600; color: #6366f1; background: #eef2ff; padding: 6px 16px; border-radius: 20px; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px; }
+.title { font-size: 40px; font-weight: 700; color: #111827; text-align: center; margin-bottom: 6px; font-family: 'Playfair Display', serif; }
+.subtitle { font-size: 15px; color: #6b7280; text-align: center; margin-bottom: 30px; }
+.logo-grid { display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(3, 1fr); gap: 16px; width: 100%; max-width: 900px; margin-bottom: 28px; }
+.logo-card { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; display: flex; align-items: center; justify-content: center; height: 72px; font-size: 15px; font-weight: 600; color: #374151; transition: all 0.2s; position: relative; overflow: hidden; }
+.logo-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; opacity: 0; }
+.logo-card:nth-child(1) { color: #4285f4; } .logo-card:nth-child(1)::before { background: #4285f4; opacity: 1; }
+.logo-card:nth-child(2) { color: #1da1f2; } .logo-card:nth-child(2)::before { background: #1da1f2; opacity: 1; }
+.logo-card:nth-child(3) { color: #ff6900; } .logo-card:nth-child(3)::before { background: #ff6900; opacity: 1; }
+.logo-card:nth-child(4) { color: #0a66c2; } .logo-card:nth-child(4)::before { background: #0a66c2; opacity: 1; }
+.logo-card:nth-child(5) { color: #7b68ee; } .logo-card:nth-child(5)::before { background: #7b68ee; opacity: 1; }
+.logo-card:nth-child(6) { color: #e11d48; } .logo-card:nth-child(6)::before { background: #e11d48; opacity: 1; }
+.logo-card:nth-child(7) { color: #059669; } .logo-card:nth-child(7)::before { background: #059669; opacity: 1; }
+.logo-card:nth-child(8) { color: #8b5cf6; } .logo-card:nth-child(8)::before { background: #8b5cf6; opacity: 1; }
+.logo-card:nth-child(9) { color: #f59e0b; } .logo-card:nth-child(9)::before { background: #f59e0b; opacity: 1; }
+.logo-card:nth-child(10) { color: #06b6d4; } .logo-card:nth-child(10)::before { background: #06b6d4; opacity: 1; }
+.logo-card:nth-child(11) { color: #ec4899; } .logo-card:nth-child(11)::before { background: #ec4899; opacity: 1; }
+.logo-card:nth-child(12) { color: #14b8a6; } .logo-card:nth-child(12)::before { background: #14b8a6; opacity: 1; }
+.bottom-row { display: flex; align-items: center; gap: 48px; }
+.rating { display: flex; flex-direction: column; align-items: center; }
+.stars { display: flex; gap: 4px; margin-bottom: 6px; }
+.star { width: 28px; height: 28px; color: #f59e0b; font-size: 26px; line-height: 28px; }
+.rating-text { font-size: 22px; font-weight: 700; color: #111827; }
+.rating-sub { font-size: 13px; color: #6b7280; margin-top: 2px; }
+.divider-v { width: 1px; height: 60px; background: #e5e7eb; }
+.reviews-stat { text-align: center; }
+.reviews-num { font-size: 32px; font-weight: 800; color: #6366f1; }
+.reviews-label { font-size: 13px; color: #6b7280; margin-top: 2px; }
+.trust-badges { display: flex; gap: 12px; }
+.trust-badge { background: #f3f4f6; border-radius: 8px; padding: 8px 16px; font-size: 11px; font-weight: 600; color: #374151; display: flex; align-items: center; gap: 6px; }
+.trust-dot { width: 8px; height: 8px; border-radius: 50%; }
+</style></head><body>
+<div class="badge">Social Proof</div>
+<div class="title">Trusted by 500+ Companies</div>
+<div class="subtitle">From startups to Fortune 500, teams rely on us to power their workflows</div>
+<div class="logo-grid">
+  <div class="logo-card">Acme Corp</div>
+  <div class="logo-card">StreamLine</div>
+  <div class="logo-card">NovaTech</div>
+  <div class="logo-card">BlueShift</div>
+  <div class="logo-card">Quantum AI</div>
+  <div class="logo-card">RedPanda</div>
+  <div class="logo-card">EverGreen</div>
+  <div class="logo-card">VioletLab</div>
+  <div class="logo-card">SunForge</div>
+  <div class="logo-card">AquaFlow</div>
+  <div class="logo-card">PinkCloud</div>
+  <div class="logo-card">TealStack</div>
+</div>
+<div class="bottom-row">
+  <div class="rating">
+    <div class="stars">
+      <span class="star">&#9733;</span><span class="star">&#9733;</span><span class="star">&#9733;</span><span class="star">&#9733;</span><span class="star">&#9733;</span>
+    </div>
+    <div class="rating-text">4.9 / 5 average rating</div>
+    <div class="rating-sub">Based on verified customer reviews</div>
+  </div>
+  <div class="divider-v"></div>
+  <div class="reviews-stat">
+    <div class="reviews-num">10,000+</div>
+    <div class="reviews-label">Verified Reviews</div>
+  </div>
+  <div class="divider-v"></div>
+  <div class="trust-badges">
+    <div class="trust-badge"><div class="trust-dot" style="background:#059669"></div>SOC 2 Certified</div>
+    <div class="trust-badge"><div class="trust-dot" style="background:#2563eb"></div>GDPR Compliant</div>
+    <div class="trust-badge"><div class="trust-dot" style="background:#7c3aed"></div>ISO 27001</div>
+  </div>
+</div>
+</body></html>

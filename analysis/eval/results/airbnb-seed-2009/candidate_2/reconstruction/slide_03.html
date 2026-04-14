@@ -1,0 +1,73 @@
+<!-- slide_03.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+}
+body {
+  padding: 72px 96px 60px;
+  display: flex; flex-direction: column;
+  position: relative;
+}
+.heading {
+  font-size: 42px; font-weight: 700; color: #29B6F6;
+  margin-bottom: 16px; letter-spacing: -0.5px;
+}
+.sub {
+  font-size: 17px; color: #333333; line-height: 1.6;
+  max-width: 680px; margin-bottom: 72px;
+}
+.data-row {
+  display: flex; gap: 80px; align-items: flex-start;
+}
+.data-item { flex: 1; }
+.data-number {
+  font-size: 96px; font-weight: 900; color: #E91E8B;
+  line-height: 1; margin-bottom: 16px;
+  letter-spacing: -3px;
+}
+.data-label {
+  font-size: 17px; font-weight: 700; color: #333333;
+  margin-bottom: 10px; text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.data-desc {
+  font-size: 14px; color: #333333; line-height: 1.6;
+  max-width: 420px;
+}
+.divider {
+  width: 1px; background: #E0E0E0; align-self: stretch;
+  flex-shrink: 0;
+}
+.citation {
+  position: absolute; bottom: 32px; left: 96px;
+  font-size: 10px; color: #888888; letter-spacing: 0.3px;
+}
+</style>
+</head>
+<body>
+  <h1 class="heading">Demand Already Exists</h1>
+  <p class="sub">Travelers are already solving this problem with inferior tools. The market is proven — the infrastructure is not.</p>
+  <div class="data-row">
+    <div class="data-item">
+      <div class="data-number">660K</div>
+      <div class="data-label">Couchsurfing.com total users</div>
+      <div class="data-desc">Travelers already willing to stay with strangers — with zero financial incentive for hosts. Demand is there; the business model is missing.</div>
+    </div>
+    <div class="divider"></div>
+    <div class="data-item">
+      <div class="data-number">50K</div>
+      <div class="data-label">Craigslist temp housing listings / week (US)</div>
+      <div class="data-desc">Active supply posted through a tool with no booking, no trust layer, and no transaction infrastructure whatsoever.</div>
+    </div>
+  </div>
+  <div class="citation">Sources: Couchsurfing.com public stats; Craigslist US temporary housing category — 2008</div>
+</body>
+</html>

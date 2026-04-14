@@ -1,9 +1,11 @@
 # Gemini Search: Q2 Update for Rob
+> whiteboard=1
 > Search Triggering & Optimization Team | April 2026
 
 ---
 
 ## Agenda
+> whiteboard=1
 - Real-Time Search Signals → Smarter Triggering
 - Three Latency & Cost Optimizations
 - World Cup 2026: Generative UI
@@ -12,10 +14,12 @@
 
 # PART 1
 # Real-Time Signals for Search Triggering
+> whiteboard=1
 
 ---
 
 ## The Problem: Stale Triggering
+> whiteboard=1
 - Triggering model had NO awareness of world state
 - Under-triggering during breaking news — Gemini answers confidently with stale data
 - Over-triggering on stable facts — wasting search roundtrips on "Who wrote Hamlet?"
@@ -24,6 +28,7 @@
 ---
 
 ## What We Built: Three Real-Time Signals
+> whiteboard=1
 
 **Query Freshness Score (QFS)**
 How much have top results changed in the last N hours?
@@ -39,6 +44,7 @@ Lightweight check: "Would top-1 result differ from training data?"
 ---
 
 ## Results: Less Triggering, Better Answers
+> whiteboard=1
 
 | Metric | Before | After |
 |--------|--------|-------|
@@ -54,10 +60,12 @@ The model was over-triggering because it couldn't assess "do I need fresh data?"
 
 # PART 2
 # Latency & Cost Optimizations
+> whiteboard=1
 
 ---
 
 ## Optimization 1: Skip SGM for Short Queries
+> whiteboard=1
 
 **Before:** Every search query → Search Generation Model → reformulated query → Search
 
@@ -74,6 +82,7 @@ The model was over-triggering because it couldn't assess "do I need fresh data?"
 ---
 
 ## Optimization 2: Small Models for First-Step Thinking
+> whiteboard=1
 
 **Before:** Full Gemini model for every thinking step, including initial planning
 
@@ -90,6 +99,7 @@ The model was over-triggering because it couldn't assess "do I need fresh data?"
 ---
 
 ## Optimization 3: Fewer Search Results to Model
+> whiteboard=1
 
 **Before:** Top 10 results sent to model for grounding (massive token count)
 
@@ -107,6 +117,7 @@ The model was over-triggering because it couldn't assess "do I need fresh data?"
 ---
 
 ## Combined Optimization Impact
+> whiteboard=1
 
 | Metric | Before | After | Delta |
 |--------|--------|-------|-------|
@@ -121,10 +132,12 @@ The model was over-triggering because it couldn't assess "do I need fresh data?"
 
 # PART 3
 # World Cup 2026: Generative UI
+> whiteboard=1
 
 ---
 
 ## The Opportunity
+> whiteboard=1
 
 - FIFA World Cup kicks off **June 11** — US/Canada/Mexico
 - First World Cup where Gemini is a primary user interface
@@ -134,6 +147,7 @@ The model was over-triggering because it couldn't assess "do I need fresh data?"
 ---
 
 ## Generative UI: How It Works
+> whiteboard=1
 
 **Old way:** Engineers manually design every sports card layout
 
@@ -149,6 +163,7 @@ The model was over-triggering because it couldn't assess "do I need fresh data?"
 ---
 
 ## What We're Building
+> whiteboard=1
 
 **Live Match**
 - Real-time score cards with crests & live minute
@@ -169,6 +184,7 @@ The model was over-triggering because it couldn't assess "do I need fresh data?"
 ---
 
 ## Personalization & Localization
+> whiteboard=1
 
 **Team Personalization**
 - Detect user's favorite team from Search history
@@ -182,6 +198,7 @@ The model was over-triggering because it couldn't assess "do I need fresh data?"
 ---
 
 ## Timeline: 61 Days to Kickoff
+> whiteboard=1
 
 | Milestone | Date | Status |
 |-----------|------|--------|
@@ -195,6 +212,7 @@ The model was over-triggering because it couldn't assess "do I need fresh data?"
 ---
 
 ## Risks & Asks for Rob
+> whiteboard=1
 
 **Risks**
 - Latency: UI renderer at 80ms, need < 50ms — optimizing now
@@ -208,4 +226,5 @@ The model was over-triggering because it couldn't assess "do I need fresh data?"
 ---
 
 ## Thank You
+> whiteboard=1
 > Questions?

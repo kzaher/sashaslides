@@ -1,0 +1,93 @@
+<!-- slide_07.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+}
+body {
+  padding: 72px 96px 60px;
+  display: flex; flex-direction: column;
+  position: relative;
+}
+.heading {
+  font-size: 42px; font-weight: 700; color: #29B6F6;
+  margin-bottom: 14px; letter-spacing: -0.5px;
+}
+.sub {
+  font-size: 17px; color: #333333; line-height: 1.6;
+  max-width: 680px; margin-bottom: 60px;
+}
+.data-row {
+  display: flex; gap: 0; flex: 1; align-items: flex-start;
+}
+.data-item {
+  flex: 1;
+  padding-right: 48px;
+  border-right: 1px solid #E0E0E0;
+  margin-right: 48px;
+  position: relative;
+}
+.data-item:last-child { border-right: none; margin-right: 0; padding-right: 0; }
+.tier-label {
+  font-size: 11px; font-weight: 700; color: #E8711F;
+  text-transform: uppercase; letter-spacing: 1.5px;
+  margin-bottom: 14px;
+}
+.data-number {
+  font-size: 72px; font-weight: 900; color: #E8711F;
+  line-height: 1; margin-bottom: 16px;
+  letter-spacing: -2px;
+}
+.data-label {
+  font-size: 15px; font-weight: 700; color: #333333;
+  text-transform: uppercase; letter-spacing: 0.8px;
+  margin-bottom: 8px;
+}
+.data-desc {
+  font-size: 13px; color: #333333; line-height: 1.6;
+}
+.arrow {
+  position: absolute; right: -20px; top: 58px;
+  font-size: 20px; color: #CCCCCC; font-weight: 400;
+}
+.citation {
+  position: absolute; bottom: 32px; left: 96px;
+  font-size: 10px; color: #888888;
+}
+</style>
+</head>
+<body>
+  <h1 class="heading">Market Size</h1>
+  <p class="sub">Starting from worldwide trip volume, we narrow to the segment we can actually win.</p>
+  <div class="data-row">
+    <div class="data-item">
+      <div class="tier-label">TAM</div>
+      <div class="data-number">2B+</div>
+      <div class="data-label">Trips booked worldwide</div>
+      <div class="data-desc">Total global market for accommodation bookings — all price tiers, all channels.</div>
+      <div class="arrow">›</div>
+    </div>
+    <div class="data-item">
+      <div class="tier-label">SAM</div>
+      <div class="data-number">560M</div>
+      <div class="data-label">Budget &amp; online trips</div>
+      <div class="data-desc">Travelers who book online and are price-sensitive — the segment that has a reason to switch.</div>
+      <div class="arrow">›</div>
+    </div>
+    <div class="data-item">
+      <div class="tier-label">SOM</div>
+      <div class="data-number">84M</div>
+      <div class="data-label">Trips with AirBed&amp;Breakfast</div>
+      <div class="data-desc">15% of the available market — consistent with Couchsurfing's penetration of the same audience.</div>
+    </div>
+  </div>
+  <div class="citation">Sources: World Tourism Organization, 2007; Phocuswright online travel research, 2007; Couchsurfing user penetration model</div>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!-- slide_05.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px;
+    background: #FFFFFF;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  .slide { padding: 80px; height: 720px; position: relative; }
+  .section-label {
+    font-size: 13px; font-weight: bold;
+    color: #29B6F6; letter-spacing: 2px;
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .title {
+    font-size: 38px; font-weight: bold;
+    color: #333333; margin-bottom: 52px;
+  }
+  .metrics { display: flex; gap: 80px; align-items: flex-start; }
+  .metric-block { flex: 1; }
+  .metric-tier {
+    font-size: 11px; font-weight: bold;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .metric-tier.total { color: #29B6F6; }
+  .metric-tier.sam { color: #E8711F; }
+  .metric-tier.share { color: #E91E8B; }
+  .metric-number {
+    font-size: 56px; font-weight: bold;
+    text-transform: uppercase; line-height: 1;
+    margin-bottom: 10px;
+  }
+  .metric-number.blue { color: #29B6F6; }
+  .metric-number.orange { color: #E8711F; }
+  .metric-number.pink { color: #E91E8B; }
+  .metric-desc { font-size: 16px; color: #333333; line-height: 1.5; }
+  .source {
+    position: absolute; bottom: 72px; left: 80px;
+    font-size: 12px; color: #888888;
+  }
+</style>
+</head>
+<body>
+  <div class="slide">
+    <div class="section-label">Market Size</div>
+    <div class="title">A Multi-Billion Trip Market</div>
+
+    <div class="metrics">
+      <div class="metric-block">
+        <div class="metric-tier total">Total Available Market</div>
+        <div class="metric-number blue">2B+</div>
+        <div class="metric-desc">trips booked worldwide annually</div>
+      </div>
+      <div class="metric-block">
+        <div class="metric-tier sam">Serviceable Market</div>
+        <div class="metric-number orange">560M</div>
+        <div class="metric-desc">budget and online-booked trips</div>
+      </div>
+      <div class="metric-block">
+        <div class="metric-tier share">Our Share</div>
+        <div class="metric-number pink">84M</div>
+        <div class="metric-desc">trips with AirBed&amp;Breakfast — 15% of available market</div>
+      </div>
+    </div>
+
+    <div class="source">Projected share at 15% market penetration of serviceable segment</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!-- slide_10.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px;
+  background: #E8ECF0;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 300;
+  overflow: hidden;
+  position: relative;
+}
+.title {
+  position: absolute;
+  top: 60px; left: 80px;
+  font-size: 44px; font-weight: 300;
+  color: #333; letter-spacing: -0.02em;
+}
+.metric {
+  position: absolute;
+  top: 68px; right: 80px;
+  font-size: 20px; font-weight: 700;
+  color: #333; text-align: right;
+  letter-spacing: -0.01em;
+}
+.chart-area {
+  position: absolute;
+  top: 148px; left: 80px; right: 80px; height: 480px;
+}
+</style>
+</head>
+<body>
+<div class="title">Transaction Volume</div>
+<div class="metric">$65,000 in first 5 weeks</div>
+<div class="chart-area">
+  <svg width="1120" height="480" viewBox="0 0 1120 480">
+    <!-- Grid -->
+    <line x1="70" y1="60"  x2="1060" y2="60"  stroke="#ccc" stroke-width="1" stroke-dasharray="4,4"/>
+    <line x1="70" y1="160" x2="1060" y2="160" stroke="#ccc" stroke-width="1" stroke-dasharray="4,4"/>
+    <line x1="70" y1="260" x2="1060" y2="260" stroke="#ccc" stroke-width="1" stroke-dasharray="4,4"/>
+    <line x1="70" y1="360" x2="1060" y2="360" stroke="#ccc" stroke-width="1" stroke-dasharray="4,4"/>
+    <!-- Axes -->
+    <line x1="70" y1="420" x2="1060" y2="420" stroke="#bbb" stroke-width="1.5"/>
+    <line x1="70" y1="40"  x2="70"   y2="420" stroke="#bbb" stroke-width="1.5"/>
+    <!-- Area fill — exponential -->
+    <path d="M 70,420 L 70,410
+             C 200,408 300,402 400,390
+             C 500,378 580,348 660,296
+             C 740,244 840,160 930,88
+             C 970,56 1010,30 1060,20
+             L 1060,420 Z"
+          fill="rgba(74,144,217,0.18)"/>
+    <!-- Curve -->
+    <path d="M 70,410
+             C 200,408 300,402 400,390
+             C 500,378 580,348 660,296
+             C 740,244 840,160 930,88
+             C 970,56 1010,30 1060,20"
+          fill="none" stroke="#4A90D9" stroke-width="2.5" stroke-linejoin="round"/>
+    <!-- X-axis labels -->
+    <text x="70"   y="448" text-anchor="middle" font-size="13" fill="#888" font-family="Helvetica Neue,Arial,sans-serif">Week 1</text>
+    <text x="318"  y="448" text-anchor="middle" font-size="13" fill="#888" font-family="Helvetica Neue,Arial,sans-serif">Week 2</text>
+    <text x="565"  y="448" text-anchor="middle" font-size="13" fill="#888" font-family="Helvetica Neue,Arial,sans-serif">Week 3</text>
+    <text x="812"  y="448" text-anchor="middle" font-size="13" fill="#888" font-family="Helvetica Neue,Arial,sans-serif">Week 4</text>
+    <text x="1060" y="448" text-anchor="middle" font-size="13" fill="#888" font-family="Helvetica Neue,Arial,sans-serif">Week 5</text>
+    <!-- Y-axis labels -->
+    <text x="58" y="424" text-anchor="end" font-size="12" fill="#888" font-family="Helvetica Neue,Arial,sans-serif">0</text>
+    <text x="58" y="265" text-anchor="end" font-size="12" fill="#888" font-family="Helvetica Neue,Arial,sans-serif">500 BTC</text>
+    <text x="58" y="65"  text-anchor="end" font-size="12" fill="#888" font-family="Helvetica Neue,Arial,sans-serif">1,000 BTC</text>
+    <!-- Annotation dot -->
+    <circle cx="1060" cy="20" r="5" fill="#4A90D9"/>
+    <!-- Annotation -->
+    <rect x="880" y="0" width="168" height="22" rx="3" fill="#4A90D9"/>
+    <text x="964" y="15" text-anchor="middle" font-size="13" font-weight="700" fill="#fff" font-family="Helvetica Neue,Arial,sans-serif">~1,000 BTC peak</text>
+    <line x1="1055" y1="22" x2="1055" y2="20" stroke="#4A90D9" stroke-width="1.5"/>
+  </svg>
+</div>
+</body>
+</html>

@@ -1,0 +1,112 @@
+<!-- slide_01.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .logo-mark {
+    width: 72px; height: 72px; background: #4A90D9;
+    border-radius: 16px; display: flex; align-items: center; justify-content: center;
+    margin-bottom: 20px;
+  }
+  .logo-mark svg { width: 44px; height: 44px; fill: #fff; }
+  .brand-name {
+    font-size: 48px; font-weight: 300; color: #333333;
+    letter-spacing: -1px; margin-bottom: 10px;
+  }
+  .tagline {
+    font-size: 22px; font-weight: 300; color: #888888;
+    margin-bottom: 56px;
+  }
+  .devices {
+    display: flex; gap: 32px; align-items: flex-end;
+  }
+  .device-card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+    overflow: hidden;
+  }
+  .device-browser {
+    width: 360px; height: 220px;
+    display: flex; flex-direction: column;
+  }
+  .browser-bar {
+    height: 28px; background: #f0f0f0;
+    display: flex; align-items: center; padding: 0 12px; gap: 6px;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .browser-content {
+    flex: 1; background: #fff; padding: 16px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .mock-header { height: 12px; background: #4A90D9; border-radius: 3px; width: 60%; }
+  .mock-row { height: 8px; background: #E8ECF0; border-radius: 3px; }
+  .mock-row.short { width: 40%; }
+  .mock-row.med { width: 70%; }
+  .mock-balance {
+    margin-top: 8px; height: 28px; background: #4A90D9; border-radius: 4px;
+    display: flex; align-items: center; padding: 0 10px;
+  }
+  .mock-balance-text { font-size: 13px; color: #fff; font-weight: 300; }
+  .device-mobile {
+    width: 140px; height: 248px;
+    display: flex; flex-direction: column;
+  }
+  .mobile-bar {
+    height: 24px; background: #4A90D9;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .mobile-bar span { font-size: 11px; color: #fff; font-weight: 300; }
+  .mobile-content {
+    flex: 1; background: #fff; padding: 12px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .mock-amount { height: 24px; background: #4A90D9; border-radius: 4px; margin-bottom: 4px; }
+  .mock-btn { height: 20px; background: #E8ECF0; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div class="logo-mark">
+    <svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" fill="none" stroke="#fff" stroke-width="3"/><text x="22" y="28" text-anchor="middle" font-size="18" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" fill="#fff">₿</text></svg>
+  </div>
+  <div class="brand-name">Coinbase</div>
+  <div class="tagline">Your Hosted Bitcoin Wallet</div>
+  <div class="devices">
+    <div class="device-card device-browser">
+      <div class="browser-bar">
+        <div class="dot" style="background:#ff5f57"></div>
+        <div class="dot" style="background:#febc2e"></div>
+        <div class="dot" style="background:#28c840"></div>
+      </div>
+      <div class="browser-content">
+        <div class="mock-header"></div>
+        <div class="mock-row med"></div>
+        <div class="mock-row short"></div>
+        <div class="mock-balance"><span class="mock-balance-text">Balance: 2.4500 BTC</span></div>
+        <div class="mock-row med"></div>
+        <div class="mock-row short"></div>
+      </div>
+    </div>
+    <div class="device-card device-mobile">
+      <div class="mobile-bar"><span>Coinbase</span></div>
+      <div class="mobile-content">
+        <div class="mock-amount"></div>
+        <div class="mock-btn"></div>
+        <div class="mock-btn"></div>
+        <div class="mock-row short"></div>
+        <div class="mock-row med"></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

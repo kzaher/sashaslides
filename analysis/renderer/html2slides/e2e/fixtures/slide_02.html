@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #fafbfc; display: flex; flex-direction: column; align-items: center; padding-top: 32px; }
+h1 { font-size: 32px; color: #1e293b; font-weight: 700; margin-bottom: 28px; }
+.org { position: relative; width: 1100px; height: 580px; }
+.person { position: absolute; background: #fff; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 16px; text-align: center; width: 220px; }
+.person.ceo { left: 440px; top: 0; border-top: 4px solid #3b82f6; }
+.person.vp { top: 200px; border-top: 4px solid #8b5cf6; }
+.person.vp1 { left: 60px; }
+.person.vp2 { left: 440px; }
+.person.vp3 { left: 820px; }
+.avatar { width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #e0e7ff, #c7d2fe); margin: 0 auto 10px auto; display: flex; align-items: center; justify-content: center; font-size: 28px; color: #6366f1; font-weight: 700; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(99,102,241,0.2); }
+.person.ceo .avatar { width: 72px; height: 72px; background: linear-gradient(135deg, #dbeafe, #93c5fd); font-size: 32px; color: #3b82f6; }
+.name { font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 2px; }
+.title { font-size: 13px; color: #6366f1; font-weight: 500; margin-bottom: 6px; }
+.bio { font-size: 11px; color: #94a3b8; line-height: 1.4; }
+/* Connector lines */
+.line-v { position: absolute; width: 2px; background: #cbd5e1; }
+.line-h { position: absolute; height: 2px; background: #cbd5e1; }
+.line-v.top { left: 549px; top: 140px; height: 60px; }
+.line-h.mid { left: 170px; top: 168px; width: 760px; height: 2px; }
+.line-v.b1 { left: 170px; top: 168px; height: 32px; }
+.line-v.b2 { left: 549px; top: 168px; height: 32px; }
+.line-v.b3 { left: 930px; top: 168px; height: 32px; }
+/* Reports */
+.report { position: absolute; top: 400px; background: #fff; border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.06); padding: 10px 14px; width: 160px; text-align: center; border-left: 3px solid #10b981; }
+.report .name { font-size: 13px; }
+.report .title { font-size: 11px; color: #10b981; }
+.r1 { left: 0; }
+.r2 { left: 180px; }
+.r3 { left: 380px; }
+.r4 { left: 560px; }
+.r5 { left: 760px; }
+.r6 { left: 940px; }
+.line-v.r { height: 24px; top: 376px; }
+.line-v.r1l { left: 80px; }
+.line-v.r2l { left: 260px; }
+.line-v.r3l { left: 460px; }
+.line-v.r4l { left: 640px; }
+.line-v.r5l { left: 840px; }
+.line-v.r6l { left: 1020px; }
+.line-h.sub1 { left: 80px; top: 376px; width: 180px; }
+.line-h.sub2 { left: 460px; top: 376px; width: 180px; }
+.line-h.sub3 { left: 840px; top: 376px; width: 180px; }
+.line-v.s1 { left: 170px; top: 340px; height: 36px; }
+.line-v.s2 { left: 549px; top: 340px; height: 36px; }
+.line-v.s3 { left: 930px; top: 340px; height: 36px; }
+</style></head><body>
+<h1>Leadership Team</h1>
+<div class="org">
+  <div class="line-v top"></div>
+  <div class="line-h mid"></div>
+  <div class="line-v b1"></div>
+  <div class="line-v b2"></div>
+  <div class="line-v b3"></div>
+  <div class="line-v s1"></div>
+  <div class="line-v s2"></div>
+  <div class="line-v s3"></div>
+  <div class="line-h sub1"></div>
+  <div class="line-h sub2"></div>
+  <div class="line-h sub3"></div>
+  <div class="line-v r r1l"></div>
+  <div class="line-v r r2l"></div>
+  <div class="line-v r r3l"></div>
+  <div class="line-v r r4l"></div>
+  <div class="line-v r r5l"></div>
+  <div class="line-v r r6l"></div>
+  <div class="person ceo">
+    <div class="avatar">SC</div>
+    <div class="name">Sarah Chen</div>
+    <div class="title">Chief Executive Officer</div>
+    <div class="bio">15+ years in tech leadership. Previously CTO at ScaleUp Inc.</div>
+  </div>
+  <div class="person vp vp1">
+    <div class="avatar">MR</div>
+    <div class="name">Marcus Rivera</div>
+    <div class="title">VP of Engineering</div>
+    <div class="bio">Leads a team of 45 engineers across platform and infra.</div>
+  </div>
+  <div class="person vp vp2">
+    <div class="avatar">JP</div>
+    <div class="name">Jessica Park</div>
+    <div class="title">VP of Product</div>
+    <div class="bio">Product visionary driving roadmap and go-to-market strategy.</div>
+  </div>
+  <div class="person vp vp3">
+    <div class="avatar">DK</div>
+    <div class="name">David Kim</div>
+    <div class="title">VP of Sales</div>
+    <div class="bio">Scaled revenue 3x in 18 months. Enterprise sales expert.</div>
+  </div>
+  <div class="report r1">
+    <div class="name">Alex T.</div>
+    <div class="title">Eng Manager</div>
+  </div>
+  <div class="report r2">
+    <div class="name">Priya S.</div>
+    <div class="title">Staff Engineer</div>
+  </div>
+  <div class="report r3">
+    <div class="name">Tom W.</div>
+    <div class="title">Product Lead</div>
+  </div>
+  <div class="report r4">
+    <div class="name">Lisa M.</div>
+    <div class="title">UX Director</div>
+  </div>
+  <div class="report r5">
+    <div class="name">Ryan B.</div>
+    <div class="title">Sales Director</div>
+  </div>
+  <div class="report r6">
+    <div class="name">Nina K.</div>
+    <div class="title">Account Exec</div>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=960">
+  <meta charset="UTF-8">
+  <title>Slide 17 - Cards Improvements</title>
+  <style>
+/* Shared Presentation Stylesheet — Google-style clean design */
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Text:wght@400;500&display=swap');
+
+:root {
+  --google-blue: #1a73e8;
+  --google-blue-light: #e8f0fe;
+  --google-blue-dark: #174ea6;
+  --google-green: #34a853;
+  --google-green-light: #e6f4ea;
+  --google-red: #ea4335;
+  --google-red-light: #fce8e6;
+  --google-yellow: #fbbc04;
+  --google-yellow-light: #fef7e0;
+  --google-grey-900: #202124;
+  --google-grey-800: #3c4043;
+  --google-grey-700: #5f6368;
+  --google-grey-600: #80868b;
+  --google-grey-400: #bdc1c6;
+  --google-grey-200: #e8eaed;
+  --google-grey-100: #f1f3f4;
+  --google-grey-50: #f8f9fa;
+  --google-white: #ffffff;
+  --slide-width: 960px;
+  --slide-height: 540px;
+  --accent: var(--google-blue);
+  --accent-light: var(--google-blue-light);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Google Sans', 'Google Sans Text', 'Segoe UI', Roboto, sans-serif;
+  background: #e0e0e0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  color: var(--google-grey-900);
+}
+
+.slide {
+  width: var(--slide-width);
+  height: var(--slide-height);
+  background: var(--google-white);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(60,64,67,.3), 0 4px 8px 3px rgba(60,64,67,.15);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Top accent bar ── */
+.slide::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--google-blue), var(--google-green), var(--google-yellow), var(--google-red));
+}
+
+/* ── Header area ── */
+.slide-header {
+  padding: 28px 48px 0;
+  flex-shrink: 0;
+}
+
+.slide-header h1 {
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--google-grey-900);
+  line-height: 1.3;
+}
+
+.slide-header h1 .accent {
+  color: var(--accent);
+}
+
+.slide-header .subtitle {
+  font-size: 14px;
+  color: var(--google-grey-700);
+  margin-top: 4px;
+  font-weight: 400;
+}
+
+/* ── Body / content ── */
+.slide-body {
+  flex: 1;
+  padding: 20px 48px 28px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.slide-body.centered {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.slide-body.two-col {
+  flex-direction: row;
+  gap: 32px;
+}
+
+.col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.col-narrow { flex: 0.7; }
+.col-wide { flex: 1.3; }
+
+/* ── Footer ── */
+.slide-footer {
+  padding: 0 48px 16px;
+  font-size: 11px;
+  color: var(--google-grey-600);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.slide-footer .page-num {
+  font-weight: 500;
+}
+
+/* ── Typography ── */
+h2 {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--google-grey-800);
+  margin-bottom: 12px;
+}
+
+h3 {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+p, li {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--google-grey-800);
+}
+
+ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+ul li {
+  position: relative;
+  padding-left: 18px;
+  margin-bottom: 6px;
+}
+
+ul li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+ul ul li::before {
+  background: var(--google-grey-400);
+  width: 5px;
+  height: 5px;
+}
+
+ul ul {
+  margin-top: 4px;
+  padding-left: 8px;
+}
+
+/* ── Tables ── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--google-grey-700);
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--google-grey-200);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--google-grey-100);
+  color: var(--google-grey-800);
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+tr:hover {
+  background: var(--google-grey-50);
+}
+
+/* ── Chips / Tags ── */
+.chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.chip-green { background: var(--google-green-light); color: #137333; }
+.chip-blue { background: var(--google-blue-light); color: var(--google-blue-dark); }
+.chip-red { background: var(--google-red-light); color: #c5221f; }
+.chip-yellow { background: var(--google-yellow-light); color: #b06000; }
+.chip-grey { background: var(--google-grey-200); color: var(--google-grey-700); }
+
+/* ── Status icons ── */
+.status-done::before { content: '✅ '; }
+.status-wip::before { content: '🔄 '; }
+.status-eta::before { content: '📅 '; }
+.status-question::before { content: '❓ '; }
+
+/* ── Cards / Boxes ── */
+.card {
+  background: var(--google-grey-50);
+  border: 1px solid var(--google-grey-200);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.card-accent {
+  border-left: 3px solid var(--accent);
+}
+
+.card h3 {
+  margin-bottom: 6px;
+}
+
+/* ── Metric blocks ── */
+.metric-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.metric {
+  flex: 1;
+  text-align: center;
+  padding: 12px 8px;
+  background: var(--google-grey-50);
+  border-radius: 8px;
+  border: 1px solid var(--google-grey-200);
+}
+
+.metric .value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+}
+
+.metric .value.green { color: var(--google-green); }
+.metric .value.red { color: var(--google-red); }
+
+.metric .label {
+  font-size: 11px;
+  color: var(--google-grey-700);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ── Quote / Callout ── */
+.callout {
+  background: var(--accent-light);
+  border-radius: 8px;
+  padding: 14px 18px;
+  font-size: 14px;
+  color: var(--google-blue-dark);
+  font-style: italic;
+  margin-bottom: 16px;
+  border-left: 3px solid var(--accent);
+}
+
+/* ── Images ── */
+.slide-image {
+  max-width: 100%;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(60,64,67,.2);
+}
+
+.slide-image-full {
+  width: 100%;
+  height: auto;
+}
+
+/* ── Flow diagrams (CSS-based) ── */
+.flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.flow-step {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.flow-step.grey { background: var(--google-grey-200); color: var(--google-grey-800); }
+.flow-step.blue { background: #a8c7fa; color: var(--google-blue-dark); }
+.flow-step.green { background: #a8dab5; color: #137333; }
+
+.flow-arrow {
+  font-size: 18px;
+  color: var(--google-grey-600);
+}
+
+/* ── Agenda / Section dividers ── */
+.agenda-item {
+  display: flex;
+  align-items: center;
+  padding: 14px 20px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.agenda-item:hover {
+  background: var(--google-grey-50);
+}
+
+.agenda-num {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 16px;
+  margin-right: 16px;
+  flex-shrink: 0;
+}
+
+.agenda-text {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+/* ── ETA badge ── */
+.eta-badge {
+  position: absolute;
+  bottom: 48px;
+  right: 48px;
+  background: var(--google-blue);
+  color: white;
+  padding: 6px 14px;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(26,115,232,.3);
+}
+
+/* ── Quadrant layout ── */
+.quadrant {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  flex: 1;
+}
+
+.quadrant .card {
+  margin-bottom: 0;
+}
+
+/* ── Risk severity ── */
+.risk-high { border-left-color: var(--google-red); }
+.risk-medium { border-left-color: var(--google-yellow); }
+.risk-low { border-left-color: var(--google-green); }
+
+/* ── Timeline ── */
+.timeline {
+  position: relative;
+  padding-left: 24px;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--google-grey-200);
+}
+
+.timeline-item {
+  position: relative;
+  margin-bottom: 14px;
+  padding-left: 12px;
+}
+
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -22px;
+  top: 6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid white;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.timeline-item.done::before { background: var(--google-green); box-shadow: 0 0 0 2px var(--google-green); }
+.timeline-item.current::before { background: var(--google-yellow); box-shadow: 0 0 0 2px var(--google-yellow); }
+.timeline-item.future::before { background: var(--google-grey-400); box-shadow: 0 0 0 2px var(--google-grey-400); }
+
+.timeline-item .date {
+  font-size: 11px;
+  color: var(--google-grey-600);
+  font-weight: 500;
+}
+
+.timeline-item .desc {
+  font-size: 13px;
+  color: var(--google-grey-800);
+}
+
+/* ── Collaboration / People ── */
+.person-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px 3px 3px;
+  border-radius: 14px;
+  background: var(--google-grey-100);
+  margin: 2px 4px 2px 0;
+  font-size: 12px;
+  color: var(--google-grey-800);
+}
+
+.person-chip .avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+/* ── Title slide special ── */
+.title-slide {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 60px 64px;
+}
+
+.title-slide h1 {
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--google-grey-900);
+  margin-bottom: 12px;
+  line-height: 1.2;
+}
+
+.title-slide .divider {
+  width: 48px;
+  height: 4px;
+  background: var(--accent);
+  border-radius: 2px;
+  margin-bottom: 16px;
+}
+
+.title-slide .meta {
+  font-size: 16px;
+  color: var(--google-grey-700);
+  line-height: 1.6;
+}
+
+/* ── Section header slide ── */
+.section-slide {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 60px 64px;
+  background: var(--google-blue);
+}
+
+.section-slide::before {
+  background: rgba(255,255,255,0.3);
+}
+
+.section-slide h1 {
+  font-size: 32px;
+  font-weight: 700;
+  color: white;
+}
+
+.section-slide .subtitle {
+  color: rgba(255,255,255,0.8);
+  font-size: 16px;
+  margin-top: 8px;
+}
+
+/* ── Checklist ── */
+.checklist li::before {
+  content: none;
+}
+
+.checklist li {
+  padding-left: 24px;
+  position: relative;
+}
+
+.checklist li .check {
+  position: absolute;
+  left: 0;
+  font-size: 14px;
+}
+
+/* ── Connector lines ── */
+.signal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.signal-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: 1px solid var(--google-grey-200);
+  background: var(--google-grey-50);
+}
+
+.signal-item.active {
+  border-color: var(--google-green);
+  background: var(--google-green-light);
+}
+
+.signal-item.pending {
+  border-color: var(--google-yellow);
+  background: var(--google-yellow-light);
+}
+
+.signal-item .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.signal-item.active .dot { background: var(--google-green); }
+.signal-item.pending .dot { background: var(--google-yellow); }
+
+/* ── Loss examples styling ── */
+.example-query {
+  font-family: 'Google Sans Mono', monospace;
+  background: var(--google-grey-100);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  display: inline-block;
+  margin: 2px 0;
+}
+
+/* ── Responsive image container ── */
+.img-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex: 1;
+  overflow: hidden;
+}
+
+.img-container img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+</style>
+</head>
+<body>
+  <div class="slide">
+    <div class="slide-header"><h1>World Cup — Cards Improvements</h1>
+    </div>
+    <div class="slide-body centered">
+      <div class="img-container">
+        <img src="/google/src/cloud/kruno/presentations/google3/experimental/users/kruno/presentation/rob/factuality/2026-04-15/screenshot_9qFHYWgiTJZg8NG.png" class="slide-image" alt="World Cup Cards Improvements Before and After">
+      </div>
+      <div style="margin-top: 12px; font-size: 12px; color: var(--google-grey-600);">
+        Reference RFC: <a href="http://go/geminiapp-rfc-3193" style="color: var(--google-blue); text-decoration: none;">go/geminiapp-rfc-3193</a>
+      </div>
+    </div>
+    <div class="slide-footer">
+      <span>Gemini App Freshness & Response Quality</span>
+      <span class="page-num">17</span>
+    </div>
+  </div>
+</body>
+</html>

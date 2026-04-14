@@ -1,0 +1,433 @@
+{
+  "candidate": 3,
+  "name": "tag",
+  "avgScore": 0.38205128205128214,
+  "totalScore": 29.800000000000008,
+  "totalTests": 78,
+  "perCategory": {
+    "title-only": {
+      "total": 5,
+      "score": 3
+    },
+    "title-bullets": {
+      "total": 20,
+      "score": 9
+    },
+    "title-body": {
+      "total": 29,
+      "score": 17.800000000000004
+    },
+    "section-divider": {
+      "total": 2,
+      "score": 0
+    },
+    "closing": {
+      "total": 5,
+      "score": 0
+    },
+    "image-dominant": {
+      "total": 5,
+      "score": 0
+    },
+    "data-table": {
+      "total": 6,
+      "score": 0
+    },
+    "chart": {
+      "total": 6,
+      "score": 0
+    }
+  },
+  "details": [
+    {
+      "targetId": "airbnb-seed-2009/slide_01",
+      "score": 1,
+      "detail": "1st match sequoia-template/slide_01 (title-only) = correct"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_02",
+      "score": 1,
+      "detail": "1st match sequoia-template/slide_03 (title-bullets) = correct"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_03",
+      "score": 0.6,
+      "detail": "2nd match coinbase-seed-2012/slide_05 (title-bullets) = correct"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_04",
+      "score": 0.6,
+      "detail": "2nd match sequoia-template/slide_04 (title-bullets) = correct"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_05",
+      "score": 1,
+      "detail": "1st match peloton-seed-2012/slide_19 (title-body) = correct"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_06",
+      "score": 0.6,
+      "detail": "2nd match coinbase-seed-2012/slide_07 (title-body) = correct"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_07",
+      "score": 0,
+      "detail": "no match — target=section-divider, got=[peloton-seed-2012/slide_10(data-table), coinbase-seed-2012/slide_09(title-bullets)]"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_08",
+      "score": 0.6,
+      "detail": "2nd match facebook-2004/slide_02 (title-body) = correct"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_09",
+      "score": 0,
+      "detail": "no match — target=title-body, got=[peloton-seed-2012/slide_05(image-dominant), peloton-seed-2012/slide_16(image-dominant)]"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_10",
+      "score": 0,
+      "detail": "no match — target=title-body, got=[facebook-2004/slide_12(chart), facebook-2004/slide_17(data-table)]"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_11",
+      "score": 1,
+      "detail": "1st match facebook-2004/slide_14 (title-body) = correct"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_12",
+      "score": 0,
+      "detail": "no match — target=title-body, got=[facebook-2004/slide_13(data-table), peloton-seed-2012/slide_18(title-bullets)]"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_13",
+      "score": 1,
+      "detail": "1st match peloton-seed-2012/slide_04 (title-bullets) = correct"
+    },
+    {
+      "targetId": "airbnb-seed-2009/slide_14",
+      "score": 0,
+      "detail": "no match — target=closing, got=[peloton-seed-2012/slide_05(image-dominant), facebook-2004/slide_12(chart)]"
+    },
+    {
+      "targetId": "coinbase-seed-2012/slide_01",
+      "score": 1,
+      "detail": "1st match airbnb-seed-2009/slide_01 (title-only) = correct"
+    },
+    {
+      "targetId": "coinbase-seed-2012/slide_02",
+      "score": 0,
+      "detail": "no match — target=title-bullets, got=[sequoia-template/slide_10(title-body), sequoia-template/slide_09(title-body)]"
+    },
+    {
+      "targetId": "coinbase-seed-2012/slide_03",
+      "score": 1,
+      "detail": "1st match airbnb-seed-2009/slide_06 (title-body) = correct"
+    },
+    {
+      "targetId": "coinbase-seed-2012/slide_04",
+      "score": 0,
+      "detail": "no match — target=image-dominant, got=[facebook-2004/slide_10(data-table), sequoia-template/slide_02(section-divider)]"
+    },
+    {
+      "targetId": "coinbase-seed-2012/slide_05",
+      "score": 0,
+      "detail": "no match — target=title-bullets, got=[facebook-2004/slide_02(title-body), facebook-2004/slide_07(chart)]"
+    },
+    {
+      "targetId": "coinbase-seed-2012/slide_06",
+      "score": 1,
+      "detail": "1st match airbnb-seed-2009/slide_06 (title-body) = correct"
+    },
+    {
+      "targetId": "coinbase-seed-2012/slide_07",
+      "score": 0.6,
+      "detail": "2nd match airbnb-seed-2009/slide_06 (title-body) = correct"
+    },
+    {
+      "targetId": "coinbase-seed-2012/slide_08",
+      "score": 1,
+      "detail": "1st match peloton-seed-2012/slide_03 (title-body) = correct"
+    },
+    {
+      "targetId": "coinbase-seed-2012/slide_09",
+      "score": 0,
+      "detail": "no match — target=title-bullets, got=[airbnb-seed-2009/slide_07(section-divider), peloton-seed-2012/slide_10(data-table)]"
+    },
+    {
+      "targetId": "coinbase-seed-2012/slide_10",
+      "score": 0.6,
+      "detail": "2nd match facebook-2004/slide_11 (title-bullets) = correct"
+    },
+    {
+      "targetId": "coinbase-seed-2012/slide_11",
+      "score": 0,
+      "detail": "no match — target=closing, got=[facebook-2004/slide_10(data-table), peloton-seed-2012/slide_19(title-body)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_01",
+      "score": 0,
+      "detail": "no match — target=title-only, got=[peloton-seed-2012/slide_18(title-bullets), airbnb-seed-2009/slide_12(title-body)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_02",
+      "score": 1,
+      "detail": "1st match sequoia-template/slide_06 (title-body) = correct"
+    },
+    {
+      "targetId": "facebook-2004/slide_03",
+      "score": 0,
+      "detail": "no match — target=data-table, got=[peloton-seed-2012/slide_02(image-dominant), peloton-seed-2012/slide_11(title-body)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_04",
+      "score": 0,
+      "detail": "no match — target=chart, got=[coinbase-seed-2012/slide_07(title-body), airbnb-seed-2009/slide_06(title-body)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_05",
+      "score": 1,
+      "detail": "1st match peloton-seed-2012/slide_18 (title-bullets) = correct"
+    },
+    {
+      "targetId": "facebook-2004/slide_06",
+      "score": 0,
+      "detail": "no match — target=data-table, got=[peloton-seed-2012/slide_11(title-body), peloton-seed-2012/slide_02(image-dominant)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_07",
+      "score": 0,
+      "detail": "no match — target=chart, got=[sequoia-template/slide_06(title-body), sequoia-template/slide_07(title-body)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_08",
+      "score": 1,
+      "detail": "1st match sequoia-template/slide_06 (title-body) = correct"
+    },
+    {
+      "targetId": "facebook-2004/slide_09",
+      "score": 0,
+      "detail": "no match — target=chart, got=[sequoia-template/slide_08(title-bullets), sequoia-template/slide_06(title-body)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_10",
+      "score": 0,
+      "detail": "no match — target=data-table, got=[sequoia-template/slide_06(title-body), sequoia-template/slide_07(title-body)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_11",
+      "score": 0,
+      "detail": "no match — target=title-bullets, got=[peloton-seed-2012/slide_19(title-body), coinbase-seed-2012/slide_11(closing)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_12",
+      "score": 0,
+      "detail": "no match — target=chart, got=[airbnb-seed-2009/slide_10(title-body), peloton-seed-2012/slide_07(title-bullets)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_13",
+      "score": 0,
+      "detail": "no match — target=data-table, got=[airbnb-seed-2009/slide_12(title-body), peloton-seed-2012/slide_18(title-bullets)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_14",
+      "score": 0.6,
+      "detail": "2nd match sequoia-template/slide_09 (title-body) = correct"
+    },
+    {
+      "targetId": "facebook-2004/slide_15",
+      "score": 0,
+      "detail": "no match — target=chart, got=[sequoia-template/slide_06(title-body), peloton-seed-2012/slide_01(title-only)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_16",
+      "score": 1,
+      "detail": "1st match peloton-seed-2012/slide_11 (title-body) = correct"
+    },
+    {
+      "targetId": "facebook-2004/slide_17",
+      "score": 0,
+      "detail": "no match — target=data-table, got=[airbnb-seed-2009/slide_08(title-body), peloton-seed-2012/slide_05(image-dominant)]"
+    },
+    {
+      "targetId": "facebook-2004/slide_18",
+      "score": 1,
+      "detail": "1st match peloton-seed-2012/slide_17 (title-body) = correct"
+    },
+    {
+      "targetId": "facebook-2004/slide_19",
+      "score": 0.6,
+      "detail": "2nd match peloton-seed-2012/slide_13 (title-bullets) = correct"
+    },
+    {
+      "targetId": "facebook-2004/slide_20",
+      "score": 0,
+      "detail": "no match — target=closing, got=[peloton-seed-2012/slide_18(title-bullets), sequoia-template/slide_02(section-divider)]"
+    },
+    {
+      "targetId": "sequoia-template/slide_01",
+      "score": 1,
+      "detail": "1st match airbnb-seed-2009/slide_01 (title-only) = correct"
+    },
+    {
+      "targetId": "sequoia-template/slide_02",
+      "score": 0,
+      "detail": "no match — target=section-divider, got=[facebook-2004/slide_10(data-table), airbnb-seed-2009/slide_01(title-only)]"
+    },
+    {
+      "targetId": "sequoia-template/slide_03",
+      "score": 1,
+      "detail": "1st match airbnb-seed-2009/slide_02 (title-bullets) = correct"
+    },
+    {
+      "targetId": "sequoia-template/slide_04",
+      "score": 0.6,
+      "detail": "2nd match airbnb-seed-2009/slide_02 (title-bullets) = correct"
+    },
+    {
+      "targetId": "sequoia-template/slide_05",
+      "score": 1,
+      "detail": "1st match facebook-2004/slide_02 (title-body) = correct"
+    },
+    {
+      "targetId": "sequoia-template/slide_06",
+      "score": 1,
+      "detail": "1st match facebook-2004/slide_02 (title-body) = correct"
+    },
+    {
+      "targetId": "sequoia-template/slide_07",
+      "score": 1,
+      "detail": "1st match facebook-2004/slide_02 (title-body) = correct"
+    },
+    {
+      "targetId": "sequoia-template/slide_08",
+      "score": 0,
+      "detail": "no match — target=title-bullets, got=[facebook-2004/slide_02(title-body), facebook-2004/slide_07(chart)]"
+    },
+    {
+      "targetId": "sequoia-template/slide_09",
+      "score": 1,
+      "detail": "1st match facebook-2004/slide_14 (title-body) = correct"
+    },
+    {
+      "targetId": "sequoia-template/slide_10",
+      "score": 0,
+      "detail": "no match — target=title-body, got=[coinbase-seed-2012/slide_02(title-bullets), facebook-2004/slide_13(data-table)]"
+    },
+    {
+      "targetId": "sequoia-template/slide_11",
+      "score": 0,
+      "detail": "no match — target=title-bullets, got=[facebook-2004/slide_02(title-body), facebook-2004/slide_10(data-table)]"
+    },
+    {
+      "targetId": "sequoia-template/slide_12",
+      "score": 1,
+      "detail": "1st match airbnb-seed-2009/slide_02 (title-bullets) = correct"
+    },
+    {
+      "targetId": "sequoia-template/slide_13",
+      "score": 0,
+      "detail": "no match — target=closing, got=[airbnb-seed-2009/slide_03(title-bullets), airbnb-seed-2009/slide_04(title-bullets)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_01",
+      "score": 0,
+      "detail": "no match — target=title-only, got=[facebook-2004/slide_15(chart), facebook-2004/slide_04(chart)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_02",
+      "score": 0,
+      "detail": "no match — target=image-dominant, got=[facebook-2004/slide_05(title-bullets), facebook-2004/slide_03(data-table)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_03",
+      "score": 0,
+      "detail": "no match — target=title-body, got=[airbnb-seed-2009/slide_04(title-bullets), facebook-2004/slide_10(data-table)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_04",
+      "score": 1,
+      "detail": "1st match airbnb-seed-2009/slide_13 (title-bullets) = correct"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_05",
+      "score": 0,
+      "detail": "no match — target=image-dominant, got=[airbnb-seed-2009/slide_14(closing), facebook-2004/slide_17(data-table)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_06",
+      "score": 0.6,
+      "detail": "2nd match facebook-2004/slide_18 (title-body) = correct"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_07",
+      "score": 0,
+      "detail": "no match — target=title-bullets, got=[facebook-2004/slide_12(chart), airbnb-seed-2009/slide_07(section-divider)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_08",
+      "score": 0,
+      "detail": "no match — target=image-dominant, got=[airbnb-seed-2009/slide_03(title-bullets), coinbase-seed-2012/slide_05(title-bullets)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_09",
+      "score": 0,
+      "detail": "no match — target=title-body, got=[facebook-2004/slide_11(title-bullets), coinbase-seed-2012/slide_04(image-dominant)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_10",
+      "score": 0,
+      "detail": "no match — target=data-table, got=[airbnb-seed-2009/slide_07(section-divider), coinbase-seed-2012/slide_09(title-bullets)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_11",
+      "score": 0,
+      "detail": "no match — target=title-body, got=[facebook-2004/slide_06(data-table), facebook-2004/slide_19(title-bullets)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_12",
+      "score": 0,
+      "detail": "no match — target=chart, got=[facebook-2004/slide_18(title-body), facebook-2004/slide_19(title-bullets)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_13",
+      "score": 0,
+      "detail": "no match — target=title-bullets, got=[facebook-2004/slide_03(data-table), facebook-2004/slide_06(data-table)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_14",
+      "score": 0.6,
+      "detail": "2nd match coinbase-seed-2012/slide_03 (title-body) = correct"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_15",
+      "score": 0.6,
+      "detail": "2nd match sequoia-template/slide_07 (title-body) = correct"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_16",
+      "score": 0,
+      "detail": "no match — target=image-dominant, got=[airbnb-seed-2009/slide_03(title-bullets), airbnb-seed-2009/slide_08(title-body)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_17",
+      "score": 0.6,
+      "detail": "2nd match facebook-2004/slide_18 (title-body) = correct"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_18",
+      "score": 0,
+      "detail": "no match — target=title-bullets, got=[facebook-2004/slide_20(closing), facebook-2004/slide_13(data-table)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_19",
+      "score": 0,
+      "detail": "no match — target=title-body, got=[airbnb-seed-2009/slide_03(title-bullets), coinbase-seed-2012/slide_11(closing)]"
+    },
+    {
+      "targetId": "peloton-seed-2012/slide_20",
+      "score": 0,
+      "detail": "no match — target=closing, got=[facebook-2004/slide_03(data-table), facebook-2004/slide_19(title-bullets)]"
+    }
+  ]
+}

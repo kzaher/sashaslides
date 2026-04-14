@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #1a1a2e; display: flex; align-items: center; justify-content: center; }
+
+.container {
+  position: relative;
+  width: 800px;
+  height: 500px;
+}
+
+.card {
+  position: absolute;
+  width: 500px;
+  height: 320px;
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+}
+
+.card h3 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.card p {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.card-1 {
+  background: #16213e;
+  border: 2px solid #0f3460;
+  color: #a8b2d1;
+  top: 0;
+  left: 0;
+  z-index: 1;
+}
+.card-1 h3 { color: #64ffda; }
+
+.card-2 {
+  background: #0f3460;
+  border: 2px solid #533483;
+  color: #ccd6f6;
+  top: 60px;
+  left: 140px;
+  z-index: 2;
+}
+.card-2 h3 { color: #ffd700; }
+
+.card-3 {
+  background: #533483;
+  border: 2px solid #e94560;
+  color: #e6e6fa;
+  top: 120px;
+  left: 280px;
+  z-index: 3;
+}
+.card-3 h3 { color: #ff6b9d; }
+
+.badge-overlap {
+  position: absolute;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #e94560;
+  border: 4px solid #1a1a2e;
+  color: white;
+  font-size: 22px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  top: 40px;
+  left: 472px;
+  z-index: 10;
+  box-shadow: 0 4px 16px rgba(233,69,96,0.5);
+}
+
+.title {
+  position: absolute;
+  top: 500px;
+  left: 0;
+  width: 100%;
+  text-align: center;
+}
+
+.title h2 {
+  color: #e6e6fa;
+  font-size: 18px;
+  font-weight: 600;
+}
+.title p {
+  color: #8892b0;
+  font-size: 13px;
+  margin-top: 6px;
+}
+</style></head><body>
+<div class="container">
+  <div class="card card-1">
+    <h3>Background Layer</h3>
+    <p>This card sits at the back (z-index: 1). It's partially obscured by the cards above. The overlapping region tests how the converter handles stacked elements with transparency and borders.</p>
+  </div>
+  <div class="card card-2">
+    <h3>Middle Layer</h3>
+    <p>Overlapping card #1 by about 30%. This layer has its own distinct background, rounded corners, and shadow. Text should remain readable where visible.</p>
+  </div>
+  <div class="card card-3">
+    <h3>Front Layer</h3>
+    <p>The topmost card (z-index: 3). Notice how shadows from different layers interact. Each card maintains its own visual identity despite overlapping.</p>
+  </div>
+  <div class="badge-overlap">3</div>
+  <div class="title">
+    <h2>Overlapping Elements — Z-Index Stress Test</h2>
+    <p>Three fanned cards with a circular badge crossing card boundaries</p>
+  </div>
+</div>
+</body></html>

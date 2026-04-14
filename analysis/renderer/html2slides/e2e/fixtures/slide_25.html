@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Source+Code+Pro:wght@400;500&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #ffffff; padding: 56px 72px; }
+
+h1 {
+  font-size: 28px;
+  color: #1a202c;
+  margin-bottom: 32px;
+  font-weight: 700;
+}
+
+.text-block {
+  font-size: 18px;
+  line-height: 2.2;
+  color: #2d3748;
+  max-width: 1100px;
+}
+
+.bold { font-weight: 700; }
+.italic { font-style: italic; }
+.red { color: #e53e3e; }
+.blue { color: #3182ce; }
+.green { color: #38a169; }
+.purple { color: #805ad5; }
+.underline { text-decoration: underline; text-decoration-color: #e53e3e; text-underline-offset: 3px; }
+.strike { text-decoration: line-through; color: #a0aec0; }
+.big { font-size: 24px; font-weight: 700; }
+.small { font-size: 12px; vertical-align: super; color: #718096; }
+.sub { font-size: 12px; vertical-align: sub; color: #718096; }
+.code {
+  font-family: 'Source Code Pro', monospace;
+  background: #f0f4f8;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 15px;
+  color: #e53e3e;
+  border: 1px solid #e2e8f0;
+}
+.highlight {
+  background: #fefcbf;
+  padding: 1px 4px;
+}
+.gradient-text {
+  background: linear-gradient(90deg, #4a6cf7, #e94560);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 700;
+}
+
+.annotation {
+  margin-top: 40px;
+  padding: 16px 20px;
+  background: #f7fafc;
+  border-left: 4px solid #4a6cf7;
+  border-radius: 0 8px 8px 0;
+}
+
+.annotation p {
+  font-size: 13px;
+  color: #718096;
+  line-height: 1.6;
+}
+</style></head><body>
+<h1>Mixed Text Styling — Inline Style Transitions</h1>
+<div class="text-block">
+  The <span class="bold">quick brown fox</span> jumps over the <span class="italic">lazy dog</span>.
+  This sentence has <span class="red bold">red bold</span>, <span class="blue italic">blue italic</span>,
+  and <span class="green underline">green underlined</span> words.
+  Here is <span class="strike">deleted text</span> and a <span class="big">BIG</span> word
+  with a footnote<span class="small">1</span> and chemical formula H<span class="sub">2</span>O.
+  Use <span class="code">console.log()</span> to debug, or try <span class="code">Array.from()</span> for conversion.
+  Some text is <span class="highlight">highlighted in yellow</span> while other text uses
+  <span class="purple bold">purple bold emphasis</span>.
+  Finally, <span class="gradient-text">gradient text is purely decorative</span> and should
+  fallback to a <span class="bold blue">solid color</span>.
+  Mixing <span class="bold italic red">bold italic red</span> with <span class="underline blue">underlined blue</span>
+  and <span class="code">inline code</span> in a single paragraph tests how many
+  <span class="bold green">style transitions</span> the converter can handle without
+  <span class="strike">breaking</span> the text flow.
+</div>
+<div class="annotation">
+  <p><strong>Test purpose:</strong> This paragraph contains 18+ inline style transitions within continuous text. The converter must extract each text run with its correct font-weight, font-style, color, text-decoration, font-family, font-size, and background.</p>
+</div>
+</body></html>

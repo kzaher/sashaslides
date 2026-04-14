@@ -1,0 +1,89 @@
+<!-- slide_14.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+}
+body {
+  padding: 80px 96px 64px;
+  display: flex; flex-direction: column;
+  position: relative;
+}
+.heading {
+  font-size: 42px; font-weight: 700; color: #8BC34A;
+  margin-bottom: 12px; letter-spacing: -0.5px;
+}
+.ask-statement {
+  font-size: 17px; color: #333333; line-height: 1.6;
+  max-width: 680px; margin-bottom: 72px;
+}
+.data-row {
+  display: flex; gap: 0;
+}
+.data-item {
+  flex: 1;
+  padding-right: 56px;
+  border-right: 1px solid #DCEDC8;
+  margin-right: 56px;
+}
+.data-item:last-child {
+  border-right: none; margin-right: 0; padding-right: 0;
+}
+.data-number {
+  font-size: 80px; font-weight: 900; color: #8BC34A;
+  line-height: 1; margin-bottom: 16px;
+  letter-spacing: -2px;
+}
+.data-label {
+  font-size: 14px; font-weight: 700; color: #333333;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+.data-desc {
+  font-size: 13px; color: #333333; line-height: 1.6;
+}
+.footer-contact {
+  position: absolute; bottom: 40px; left: 96px; right: 96px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.footer-brand {
+  font-size: 14px; font-weight: 700; color: #8BC34A;
+}
+.footer-info {
+  font-size: 11px; color: #888888;
+}
+</style>
+</head>
+<body>
+  <h1 class="heading">The Ask</h1>
+  <p class="ask-statement">We are raising a $500K angel round to fund 12 months of operations and reach 80,000 transactions on AirBed&amp;Breakfast.</p>
+  <div class="data-row">
+    <div class="data-item">
+      <div class="data-number">$500K</div>
+      <div class="data-label">Angel Round</div>
+      <div class="data-desc">12 months of runway to reach the first major transaction milestone and validate the unit economics at scale.</div>
+    </div>
+    <div class="data-item">
+      <div class="data-number">80K</div>
+      <div class="data-label">Trips — 12-month target</div>
+      <div class="data-desc">The milestone that proves market adoption and unlocks the next round. 80,000 completed bookings at $25 average fee.</div>
+    </div>
+    <div class="data-item">
+      <div class="data-number">$2M</div>
+      <div class="data-label">Revenue over 12 months</div>
+      <div class="data-desc">80K trips × $25 average commission. Demonstrates a repeatable, scalable revenue model before Series A.</div>
+    </div>
+  </div>
+  <div class="footer-contact">
+    <div class="footer-brand">AirBed&amp;Breakfast</div>
+    <div class="footer-info">joe@airbedandbreakfast.com &nbsp;·&nbsp; airbedandbreakfast.com</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=960">
+<link rel="stylesheet" href="styles.css">
+<style>
+/* slide-specific styles */
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="slide-header"><h1>Real-time signals for search: Challenges</h1></div>
+  <div class="slide-body">
+<div class="quadrant" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; height: 100%;">
+  <div class="card risk-high" style="border-left: 4px solid #d93025; background: #fce8e6; border-radius: 8px; padding: 20px;">
+    <h3 style="display: flex; align-items: center; color: #d93025; margin-top: 0;"><svg viewBox="0 0 24 24" width="24" height="24" style="vertical-align: middle; margin-right: 8px;"><path fill="currentColor" d="M19 20H5v-2h1.36l4.64-8V4h-1V2h8v2h-1v6l4.64 8H19v2zm-2.8-4l-3.2-5.5V4h-2v6.5L7.8 16h8.4z"/></svg> Evaluation Blocker</h3>
+    <ul style="padding-left: 20px; color: #3c4043;">
+      <li>inability to build a static ground-truth</li>
+      <li>reliance on building a high-quality autorater</li>
+    </ul>
+  </div>
+  <div class="card risk-medium" style="border-left: 4px solid #f29900; background: #fef7e0; border-radius: 8px; padding: 20px;">
+    <h3 style="display: flex; align-items: center; color: #b06000; margin-top: 0;"><svg viewBox="0 0 24 24" width="24" height="24" style="vertical-align: middle; margin-right: 8px;"><path fill="currentColor" d="M16 18l2.29-2.29-4.88-4.88-4 4L2 7.41 3.41 6l6 6 4-4 6.3 6.29L22 12v6z"/></svg> Search Signal Degradation</h3>
+    <ul style="padding-left: 20px; color: #3c4043;">
+      <li>Quality depends on length</li>
+      <li>Targeting 80% of prompts</li>
+    </ul>
+  </div>
+  <div class="card risk-high" style="border-left: 4px solid #d93025; background: #fce8e6; border-radius: 8px; padding: 20px;">
+    <h3 style="display: flex; align-items: center; color: #d93025; margin-top: 0;"><svg viewBox="0 0 24 24" width="24" height="24" style="vertical-align: middle; margin-right: 8px;"><path fill="currentColor" d="M14 11V8h4v3h2V6h-6V3h-4v3H4v2h2v3H4v2h4v-2h4v2h4v-2h-2zm-8-3h4v3H6V8zm10 3V8h4v3h-4z"/></svg> Legal</h3>
+    <ul style="padding-left: 20px; color: #3c4043;">
+      <li>DMA 5(2)</li>
+      <li>Using signals directly from Search</li>
+      <li>Blocking logs evaluation</li>
+    </ul>
+  </div>
+  <div class="card risk-medium" style="border-left: 4px solid #f29900; background: #fef7e0; border-radius: 8px; padding: 20px;">
+    <h3 style="display: flex; align-items: center; color: #b06000; margin-top: 0;"><svg viewBox="0 0 24 24" width="24" height="24" style="vertical-align: middle; margin-right: 8px;"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-13c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 8c-1.65 0-3-1.35-3-3s1.35-3 3-3 3 1.35 3 3-1.35 3-3 3z"/></svg> Small Targeted Slice</h3>
+    <ul style="padding-left: 20px; color: #3c4043;">
+      <li>< 0.1% of traffic</li>
+      <li>Creates data mining and eval difficulty</li>
+      <li>Disproportional reputational damage</li>
+    </ul>
+  </div>
+</div>
+  </div>
+  <div class="slide-footer">
+    <span>Gemini App Freshness and Response Quality</span>
+    <span class="page-num">9</span>
+  </div>
+</div>
+</body>
+</html>

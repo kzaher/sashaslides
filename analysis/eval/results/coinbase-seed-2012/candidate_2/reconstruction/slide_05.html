@@ -1,0 +1,52 @@
+<!-- slide_05.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding-top: 52px;
+  }
+  .eyebrow { font-size: 13px; color: #888888; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 14px; }
+  .title { font-size: 50px; font-weight: 300; color: #333333; margin-bottom: 0; }
+  .scatter {
+    position: absolute;
+    top: 0; left: 0; width: 1280px; height: 720px;
+    pointer-events: none;
+  }
+  .word {
+    position: absolute;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    color: #333333;
+    font-weight: 300;
+    white-space: nowrap;
+  }
+  .word.blue { color: #4A90D9; font-weight: 700; }
+  .word.gray { color: #888888; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Use Cases</div>
+  <div class="title">Real users. Real money. Real categories.</div>
+  <div class="scatter">
+    <span class="word blue" style="left:112px;top:180px;font-size:38px;">International Payments</span>
+    <span class="word" style="left:750px;top:200px;font-size:28px;">Virtual Goods</span>
+    <span class="word gray" style="left:180px;top:280px;font-size:24px;">Games</span>
+    <span class="word" style="left:540px;top:320px;font-size:34px;">Remittance</span>
+    <span class="word gray" style="left:900px;top:295px;font-size:22px;">Micro-transactions</span>
+    <span class="word blue" style="left:310px;top:390px;font-size:30px;">Developing World</span>
+    <span class="word" style="left:740px;top:400px;font-size:26px;">E-Commerce</span>
+    <span class="word gray" style="left:100px;top:470px;font-size:22px;">Peer-to-Peer</span>
+    <span class="word" style="left:580px;top:490px;font-size:32px;">Digital Commerce</span>
+    <span class="word gray" style="left:940px;top:460px;font-size:20px;">Borderless</span>
+    <span class="word" style="left:220px;top:560px;font-size:26px;">Global Transfers</span>
+    <span class="word gray" style="left:700px;top:555px;font-size:24px;">Open Marketplace</span>
+  </div>
+</body>
+</html>

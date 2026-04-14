@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #fafbfc; padding: 44px 56px; }
+
+h1 {
+  font-size: 26px;
+  font-weight: 700;
+  color: #1a202c;
+  margin-bottom: 6px;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #718096;
+  margin-bottom: 28px;
+}
+
+.two-columns {
+  display: flex;
+  gap: 32px;
+}
+
+.col {
+  flex: 1;
+}
+
+.col-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #a0aec0;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 16px;
+}
+
+.list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid #edf2f7;
+}
+
+.list-item:last-child {
+  border-bottom: none;
+}
+
+.icon-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: white;
+}
+
+.icon-red { background: #e53e3e; }
+.icon-green { background: #38a169; }
+.icon-blue { background: #3182ce; }
+.icon-orange { background: #dd6b20; }
+.icon-purple { background: #805ad5; }
+.icon-teal { background: #319795; }
+
+.item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.item-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2d3748;
+}
+
+.item-desc {
+  font-size: 12px;
+  color: #718096;
+  line-height: 1.5;
+}
+
+.badge-new {
+  background: #38a169;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 50px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.badge-beta {
+  background: #805ad5;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 50px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.badge-hot {
+  background: #e53e3e;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 50px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+</style></head><body>
+<h1>Feature List with Icon Indicators</h1>
+<div class="subtitle">Flex-based list layout — no &lt;ul&gt; or &lt;ol&gt; elements used</div>
+<div class="two-columns">
+  <div class="col">
+    <div class="col-title">Core Platform</div>
+    <div class="list-item">
+      <div class="icon-circle icon-blue">D</div>
+      <div class="item-content">
+        <div class="item-header">
+          <div class="item-title">Dashboard Analytics</div>
+        </div>
+        <div class="item-desc">Real-time metrics with customizable widgets and export capabilities for team reporting.</div>
+      </div>
+    </div>
+    <div class="list-item">
+      <div class="icon-circle icon-green">A</div>
+      <div class="item-content">
+        <div class="item-header">
+          <div class="item-title">API Gateway</div>
+          <span class="badge-new">New</span>
+        </div>
+        <div class="item-desc">Rate limiting, auth middleware, and request transformation in a unified gateway layer.</div>
+      </div>
+    </div>
+    <div class="list-item">
+      <div class="icon-circle icon-red">S</div>
+      <div class="item-content">
+        <div class="item-header">
+          <div class="item-title">Security Center</div>
+        </div>
+        <div class="item-desc">Threat detection, vulnerability scanning, and compliance monitoring in one view.</div>
+      </div>
+    </div>
+    <div class="list-item">
+      <div class="icon-circle icon-orange">W</div>
+      <div class="item-content">
+        <div class="item-header">
+          <div class="item-title">Workflow Automation</div>
+          <span class="badge-hot">Hot</span>
+        </div>
+        <div class="item-desc">Visual workflow builder with 200+ integrations and conditional branching logic.</div>
+      </div>
+    </div>
+    <div class="list-item">
+      <div class="icon-circle icon-purple">T</div>
+      <div class="item-content">
+        <div class="item-header">
+          <div class="item-title">Team Collaboration</div>
+        </div>
+        <div class="item-desc">Shared workspaces, commenting, and real-time co-editing for distributed teams.</div>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="col-title">Advanced Features</div>
+    <div class="list-item">
+      <div class="icon-circle icon-teal">M</div>
+      <div class="item-content">
+        <div class="item-header">
+          <div class="item-title">ML Model Registry</div>
+          <span class="badge-beta">Beta</span>
+        </div>
+        <div class="item-desc">Version, deploy, and monitor machine learning models with automated rollback.</div>
+      </div>
+    </div>
+    <div class="list-item">
+      <div class="icon-circle icon-blue">E</div>
+      <div class="item-content">
+        <div class="item-header">
+          <div class="item-title">Event Streaming</div>
+          <span class="badge-new">New</span>
+        </div>
+        <div class="item-desc">Kafka-compatible event bus with schema registry and dead-letter queue handling.</div>
+      </div>
+    </div>
+    <div class="list-item">
+      <div class="icon-circle icon-red">C</div>
+      <div class="item-content">
+        <div class="item-header">
+          <div class="item-title">Cost Optimizer</div>
+        </div>
+        <div class="item-desc">AI-powered cloud spend analysis with automated rightsizing recommendations.</div>
+      </div>
+    </div>
+    <div class="list-item">
+      <div class="icon-circle icon-green">G</div>
+      <div class="item-content">
+        <div class="item-header">
+          <div class="item-title">GraphQL Studio</div>
+        </div>
+        <div class="item-desc">Schema explorer, query builder, and performance profiling for GraphQL endpoints.</div>
+      </div>
+    </div>
+    <div class="list-item">
+      <div class="icon-circle icon-orange">O</div>
+      <div class="item-content">
+        <div class="item-header">
+          <div class="item-title">Observability Suite</div>
+          <span class="badge-hot">Hot</span>
+        </div>
+        <div class="item-desc">Unified logs, metrics, and traces with correlation engine and anomaly detection.</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>

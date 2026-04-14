@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #0d1117; display: flex; flex-direction: column; }
+.top-bar { background: #161b22; height: 48px; display: flex; align-items: center; padding: 0 24px; gap: 16px; border-bottom: 1px solid #30363d; }
+.top-dot { width: 12px; height: 12px; border-radius: 50%; }
+.dot-red { background: #ff5f57; }
+.dot-yellow { background: #febc2e; }
+.dot-green { background: #28c840; }
+.top-title { color: #8b949e; font-size: 13px; margin-left: 12px; font-family: 'Roboto Mono', monospace; }
+.api-badge { background: #238636; color: #fff; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 12px; margin-left: auto; }
+.main { display: flex; flex: 1; overflow: hidden; }
+.code-panel { flex: 1; display: flex; flex-direction: column; border-right: 1px solid #30363d; }
+.tabs { display: flex; background: #161b22; border-bottom: 1px solid #30363d; }
+.tab { padding: 10px 20px; font-size: 13px; font-weight: 500; color: #8b949e; cursor: pointer; border-bottom: 2px solid transparent; font-family: 'Roboto Mono', monospace; }
+.tab.active { color: #f0f6fc; border-bottom-color: #f78166; background: #0d1117; }
+.code-area { flex: 1; padding: 20px 24px; overflow: hidden; font-family: 'Roboto Mono', monospace; font-size: 13px; line-height: 1.7; }
+.line { display: flex; }
+.line-num { color: #484f58; width: 36px; text-align: right; margin-right: 16px; user-select: none; flex-shrink: 0; }
+.comment { color: #8b949e; font-style: italic; }
+.keyword { color: #ff7b72; }
+.string { color: #a5d6ff; }
+.method { color: #d2a8ff; }
+.func { color: #79c0ff; }
+.param { color: #ffa657; }
+.punct { color: #c9d1d9; }
+.const { color: #79c0ff; }
+.response-panel { width: 400px; display: flex; flex-direction: column; }
+.response-header { background: #161b22; padding: 12px 20px; border-bottom: 1px solid #30363d; display: flex; align-items: center; justify-content: space-between; }
+.response-title { color: #8b949e; font-size: 13px; font-weight: 600; }
+.status-badge { background: #1a4731; color: #3fb950; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 4px; }
+.response-body { flex: 1; padding: 20px; font-family: 'Roboto Mono', monospace; font-size: 12px; line-height: 1.8; color: #c9d1d9; }
+.json-key { color: #79c0ff; }
+.json-str { color: #a5d6ff; }
+.json-num { color: #ffa657; }
+.json-bool { color: #ff7b72; }
+.bottom-bar { background: #161b22; height: 32px; display: flex; align-items: center; padding: 0 16px; gap: 20px; border-top: 1px solid #30363d; }
+.bottom-item { font-size: 11px; color: #8b949e; font-family: 'Roboto Mono', monospace; display: flex; align-items: center; gap: 6px; }
+.bottom-dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; }
+</style></head><body>
+<div class="top-bar">
+  <div class="top-dot dot-red"></div>
+  <div class="top-dot dot-yellow"></div>
+  <div class="top-dot dot-green"></div>
+  <div class="top-title">api-reference.sh</div>
+  <div class="api-badge">v2.4 API</div>
+</div>
+<div class="main">
+  <div class="code-panel">
+    <div class="tabs">
+      <div class="tab active">cURL</div>
+      <div class="tab">Python</div>
+      <div class="tab">JavaScript</div>
+    </div>
+    <div class="code-area">
+      <div class="line"><span class="line-num">1</span><span class="comment"># Create a new user with team assignment</span></div>
+      <div class="line"><span class="line-num">2</span><span class="keyword">curl</span> <span class="punct">-X</span> <span class="string">POST</span> <span class="punct">\</span></div>
+      <div class="line"><span class="line-num">3</span><span class="string">&nbsp;&nbsp;"https://api.example.com/v2/users"</span> <span class="punct">\</span></div>
+      <div class="line"><span class="line-num">4</span><span class="punct">&nbsp;&nbsp;-H</span> <span class="string">"Authorization: Bearer sk_live_..."</span> <span class="punct">\</span></div>
+      <div class="line"><span class="line-num">5</span><span class="punct">&nbsp;&nbsp;-H</span> <span class="string">"Content-Type: application/json"</span> <span class="punct">\</span></div>
+      <div class="line"><span class="line-num">6</span><span class="punct">&nbsp;&nbsp;-d</span> <span class="string">'{'</span></div>
+      <div class="line"><span class="line-num">7</span><span class="string">&nbsp;&nbsp;&nbsp;&nbsp;"name"</span><span class="punct">:</span> <span class="string">"Jane Cooper"</span><span class="punct">,</span></div>
+      <div class="line"><span class="line-num">8</span><span class="string">&nbsp;&nbsp;&nbsp;&nbsp;"email"</span><span class="punct">:</span> <span class="string">"jane@acme.co"</span><span class="punct">,</span></div>
+      <div class="line"><span class="line-num">9</span><span class="string">&nbsp;&nbsp;&nbsp;&nbsp;"role"</span><span class="punct">:</span> <span class="string">"admin"</span><span class="punct">,</span></div>
+      <div class="line"><span class="line-num">10</span><span class="string">&nbsp;&nbsp;&nbsp;&nbsp;"team_id"</span><span class="punct">:</span> <span class="string">"team_8x92k"</span><span class="punct">,</span></div>
+      <div class="line"><span class="line-num">11</span><span class="string">&nbsp;&nbsp;&nbsp;&nbsp;"permissions"</span><span class="punct">: [</span></div>
+      <div class="line"><span class="line-num">12</span><span class="string">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"read"</span><span class="punct">,</span> <span class="string">"write"</span><span class="punct">,</span> <span class="string">"delete"</span></div>
+      <div class="line"><span class="line-num">13</span><span class="punct">&nbsp;&nbsp;&nbsp;&nbsp;],</span></div>
+      <div class="line"><span class="line-num">14</span><span class="string">&nbsp;&nbsp;&nbsp;&nbsp;"metadata"</span><span class="punct">: {</span></div>
+      <div class="line"><span class="line-num">15</span><span class="string">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"source"</span><span class="punct">:</span> <span class="string">"onboarding"</span><span class="punct">,</span></div>
+      <div class="line"><span class="line-num">16</span><span class="string">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"plan"</span><span class="punct">:</span> <span class="string">"enterprise"</span></div>
+      <div class="line"><span class="line-num">17</span><span class="punct">&nbsp;&nbsp;&nbsp;&nbsp;}</span></div>
+      <div class="line"><span class="line-num">18</span><span class="punct">&nbsp;&nbsp;}'</span></div>
+      <div class="line"><span class="line-num">19</span>&nbsp;</div>
+      <div class="line"><span class="line-num">20</span><span class="comment"># Rate limit: 100 req/min per API key</span></div>
+      <div class="line"><span class="line-num">21</span><span class="comment"># Supports idempotency via Idempotency-Key header</span></div>
+    </div>
+  </div>
+  <div class="response-panel">
+    <div class="response-header">
+      <span class="response-title">Response</span>
+      <span class="status-badge">200 OK</span>
+    </div>
+    <div class="response-body">
+      <div>{</div>
+      <div>&nbsp;&nbsp;<span class="json-key">"id"</span>: <span class="json-str">"usr_a1b2c3d4"</span>,</div>
+      <div>&nbsp;&nbsp;<span class="json-key">"object"</span>: <span class="json-str">"user"</span>,</div>
+      <div>&nbsp;&nbsp;<span class="json-key">"name"</span>: <span class="json-str">"Jane Cooper"</span>,</div>
+      <div>&nbsp;&nbsp;<span class="json-key">"email"</span>: <span class="json-str">"jane@acme.co"</span>,</div>
+      <div>&nbsp;&nbsp;<span class="json-key">"role"</span>: <span class="json-str">"admin"</span>,</div>
+      <div>&nbsp;&nbsp;<span class="json-key">"team"</span>: {</div>
+      <div>&nbsp;&nbsp;&nbsp;&nbsp;<span class="json-key">"id"</span>: <span class="json-str">"team_8x92k"</span>,</div>
+      <div>&nbsp;&nbsp;&nbsp;&nbsp;<span class="json-key">"name"</span>: <span class="json-str">"Engineering"</span></div>
+      <div>&nbsp;&nbsp;},</div>
+      <div>&nbsp;&nbsp;<span class="json-key">"permissions"</span>: [</div>
+      <div>&nbsp;&nbsp;&nbsp;&nbsp;<span class="json-str">"read"</span>, <span class="json-str">"write"</span>, <span class="json-str">"delete"</span></div>
+      <div>&nbsp;&nbsp;],</div>
+      <div>&nbsp;&nbsp;<span class="json-key">"created_at"</span>: <span class="json-num">1712956800</span>,</div>
+      <div>&nbsp;&nbsp;<span class="json-key">"active"</span>: <span class="json-bool">true</span>,</div>
+      <div>&nbsp;&nbsp;<span class="json-key">"mfa_enabled"</span>: <span class="json-bool">false</span></div>
+      <div>}</div>
+    </div>
+  </div>
+</div>
+<div class="bottom-bar">
+  <div class="bottom-item"><div class="bottom-dot"></div>Connected</div>
+  <div class="bottom-item">Latency: 42ms</div>
+  <div class="bottom-item">Region: us-east-1</div>
+  <div class="bottom-item" style="margin-left:auto">UTF-8 &nbsp; | &nbsp; JSON &nbsp; | &nbsp; REST v2.4</div>
+</div>
+</body></html>

@@ -1,0 +1,63 @@
+<!-- slide_10.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; background:#FFFFFF; display:flex; align-items:center; }
+.right-panel { width:380px; flex-shrink:0; padding:0 64px 0 0; display:flex; flex-direction:column; justify-content:center; margin-left:auto; }
+.section-title { font-size:13px; font-weight:700; font-style:italic; color:#F44060; letter-spacing:5px; text-transform:uppercase; margin-bottom:16px; }
+.headline { font-size:26px; font-weight:900; color:#1A1A1A; text-transform:uppercase; line-height:1.15; margin-bottom:28px; }
+.truths { display:flex; flex-direction:column; gap:14px; }
+.truth-item { display:flex; align-items:flex-start; gap:12px; }
+.truth-dot { width:8px; height:8px; border-radius:50%; background:#F44060; flex-shrink:0; margin-top:5px; }
+.truth-text { font-size:14px; font-weight:600; color:#1A1A1A; text-transform:uppercase; letter-spacing:1px; }
+.wheel-wrap { flex:1; display:flex; align-items:center; justify-content:center; padding-left:72px; }
+svg text { font-family:'Inter',sans-serif; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="wheel-wrap">
+    <svg id="wheel" viewBox="0 0 520 520" width="520" height="520"></svg>
+  </div>
+  <div class="right-panel">
+    <div class="section-title">Brand Wheel — Layer 1</div>
+    <div class="headline">Product Truths</div>
+    <div class="truths">
+      <div class="truth-item"><div class="truth-dot"></div><div class="truth-text">Leaderboard &amp; Metrics</div></div>
+      <div class="truth-item"><div class="truth-dot"></div><div class="truth-text">Passionate Connected Community</div></div>
+      <div class="truth-item"><div class="truth-dot"></div><div class="truth-text">Top Tier Instructor Talent</div></div>
+      <div class="truth-item"><div class="truth-dot"></div><div class="truth-text">Always Ready</div></div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var svg=document.getElementById('wheel');
+  var cx=260,cy=260;
+  var NS='http://www.w3.org/2000/svg';
+  function pt(r,deg){var rad=(deg-90)*Math.PI/180;return[cx+r*Math.cos(rad),cy+r*Math.sin(rad)];}
+  function arc(r1,r2,a1,a2){var p1=pt(r1,a1),p2=pt(r1,a2),p3=pt(r2,a2),p4=pt(r2,a1);var lg=(a2-a1)>180?1:0;return['M',p1[0].toFixed(2),p1[1].toFixed(2),'A',r1,r1,0,lg,1,p2[0].toFixed(2),p2[1].toFixed(2),'L',p3[0].toFixed(2),p3[1].toFixed(2),'A',r2,r2,0,lg,0,p4[0].toFixed(2),p4[1].toFixed(2),'Z'].join(' ');}
+  function el(tag,attrs){var e=document.createElementNS(NS,tag);for(var k in attrs){e.setAttribute(k,attrs[k]);}svg.appendChild(e);return e;}
+  function txt(x,y,lines,sz,fill,fw){var g=document.createElementNS(NS,'g');lines.forEach(function(l,i){var t=document.createElementNS(NS,'text');t.setAttribute('x',x);t.setAttribute('y',y+(i-(lines.length-1)/2)*sz*1.35);t.setAttribute('font-size',sz);t.setAttribute('fill',fill);t.setAttribute('font-weight',fw||'700');t.setAttribute('text-anchor','middle');t.setAttribute('dominant-baseline','middle');t.style.fontFamily='Inter,sans-serif';t.textContent=l;g.appendChild(t);});svg.appendChild(g);}
+  // Center muted
+  el('circle',{cx:cx,cy:cy,r:74,fill:'#E0E0E0',stroke:'#fff','stroke-width':2});
+  txt(cx,cy,['MAKES YOU WANT','TO SHOW UP'],9,'rgba(0,0,0,0.3)','800');
+  // Ring1 HIGHLIGHTED
+  var p1i=[['LEADERBOARD','& METRICS'],['PASSIONATE','COMMUNITY'],['TOP TIER','INSTRUCTORS'],['ALWAYS','READY']];
+  var p1f=['#F44060','#D83050','#F44060','#D83050'];
+  for(var i=0;i<4;i++){var a1=i*90+1.5,a2=(i+1)*90-1.5;el('path',{d:arc(78,138,a1,a2),fill:p1f[i],stroke:'#fff','stroke-width':1.5});var mid=(a1+a2)/2,mp=pt(108,mid);txt(mp[0],mp[1],p1i[i],8,'#FFFFFF','800');}
+  // Ring2 muted
+  var p2i=[['HARD WORK','FUN'],['REMOVES','BARRIERS'],['PUSHES TO','EXCEL'],['INNOVATIVE','DESIGN'],['WHOLLY','IMMERSIVE'],['COMPETITION']];
+  for(var i=0;i<6;i++){var a1=i*60+1,a2=(i+1)*60-1;el('path',{d:arc(142,198,a1,a2),fill:'#DDDDDD',stroke:'#fff','stroke-width':1});var mid=(a1+a2)/2,mp=pt(170,mid);txt(mp[0],mp[1],p2i[i],6,'rgba(0,0,0,0.2)','600');}
+  // Ring3 muted
+  var p3i=[['NOTHING','IN MY WAY'],['I BELONG'],['I CAN','ACCOMPLISH'],['CAPTIVATING'],['TECH-SAVVY'],['COMMITTED']];
+  for(var i=0;i<6;i++){var a1=i*60+1,a2=(i+1)*60-1;el('path',{d:arc(202,256,a1,a2),fill:'#E8E8E8',stroke:'#fff','stroke-width':1});var mid=(a1+a2)/2,mp=pt(229,mid);txt(mp[0],mp[1],p3i[i],5.5,'rgba(0,0,0,0.15)','600');}
+})();
+</script>
+</body>
+</html>

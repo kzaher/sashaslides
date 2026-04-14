@@ -1,0 +1,78 @@
+<!-- slide_08.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+}
+body {
+  padding: 72px 96px;
+  display: flex; flex-direction: column;
+}
+.heading {
+  font-size: 42px; font-weight: 700; color: #29B6F6;
+  margin-bottom: 14px; letter-spacing: -0.5px;
+}
+.sub {
+  font-size: 17px; color: #333333; line-height: 1.6;
+  max-width: 680px; margin-bottom: 52px;
+}
+.channels {
+  display: flex; flex-direction: column; gap: 28px;
+}
+.channel {
+  display: flex; align-items: flex-start; gap: 32px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid #F0F0F0;
+}
+.channel:last-child { border-bottom: none; padding-bottom: 0; }
+.channel-label {
+  font-size: 16px; font-weight: 900; color: #29B6F6;
+  letter-spacing: 2px; text-transform: uppercase;
+  min-width: 200px; margin-top: 2px;
+  flex-shrink: 0;
+}
+.channel-body { flex: 1; }
+.channel-title {
+  font-size: 16px; font-weight: 700; color: #333333;
+  margin-bottom: 6px;
+}
+.channel-desc {
+  font-size: 14px; color: #333333; line-height: 1.6;
+}
+</style>
+</head>
+<body>
+  <h1 class="heading">Adoption Strategy</h1>
+  <p class="sub">Three channels that reach budget-conscious travelers where they are already concentrated.</p>
+  <div class="channels">
+    <div class="channel">
+      <div class="channel-label">Events</div>
+      <div class="channel-body">
+        <div class="channel-title">Target high-density events with a listing widget</div>
+        <div class="channel-desc">Octoberfest (6M attendees), CeBIT (700K), Summerfest (1M), Euro Cup (3M+), Mardi Gras (800K). Hotel capacity collapses at these events — we deploy the widget 8 weeks prior to capture demand at its peak.</div>
+      </div>
+    </div>
+    <div class="channel">
+      <div class="channel-label">Partnerships</div>
+      <div class="channel-body">
+        <div class="channel-title">Cheap and alternative travel platforms</div>
+        <div class="channel-desc">GoLoCo, KAYAK, Orbitz — distribution partnerships that embed our inventory inside platforms travelers are already using to find budget options.</div>
+      </div>
+    </div>
+    <div class="channel">
+      <div class="channel-label">Craigslist</div>
+      <div class="channel-body">
+        <div class="channel-title">Dual-posting feature leverages 50K weekly listings</div>
+        <div class="channel-desc">Hosts who post on Craigslist can cross-list on AirBed&amp;Breakfast in one click — converting existing supply with zero acquisition cost.</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

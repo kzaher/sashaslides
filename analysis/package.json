@@ -1,0 +1,21 @@
+{
+  "name": "sashaslides-analysis",
+  "type": "module",
+  "scripts": {
+    "install:all": "cd scripts && npm install && cd ../renderer && npm install",
+
+    "extract":       "cd scripts && npx tsx run-eval-multi.ts --step extract",
+    "analyze":       "cd scripts && npx tsx run-eval-multi.ts --step analyze",
+    "reconstruct":   "cd scripts && npx tsx run-eval-multi.ts --step reconstruct",
+    "screenshot":    "cd scripts && npx tsx run-eval-multi.ts --step screenshot",
+    "score":         "cd scripts && npx tsx run-eval-multi.ts --step score",
+
+    "eval":          "cd scripts && npx tsx run-eval-multi.ts",
+    "eval:force":    "cd scripts && npx tsx run-eval-multi.ts --force",
+    "eval:one":      "cd scripts && npx tsx run-eval-multi.ts --pres",
+    "eval:quick":    "cd scripts && npx tsx run-eval-multi.ts --max 1",
+
+    "render":        "cd renderer && npx tsx html-to-slides.ts",
+    "render:eval":   "cd renderer && npx tsx eval-renderer.ts"
+  }
+}

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #f8fafc; display: flex; flex-direction: column; align-items: center; padding: 40px 64px; }
+h1 { font-size: 32px; font-weight: 700; color: #1e293b; margin-bottom: 6px; }
+.subtitle { font-size: 15px; color: #64748b; margin-bottom: 28px; }
+.table-wrap { border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08); width: 100%; background: #fff; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 14px 20px; text-align: center; font-size: 14px; }
+th { font-weight: 600; color: #fff; font-size: 15px; }
+th:first-child { background: #334155; text-align: left; }
+th.product-a { background: #3b82f6; }
+th.product-b { background: #8b5cf6; }
+th.product-c { background: #f59e0b; }
+td:first-child { text-align: left; font-weight: 500; color: #334155; background: #f8fafc; }
+tr:nth-child(even) td { background: #f1f5f9; }
+tr:nth-child(even) td:first-child { background: #eef2f7; }
+tr:nth-child(odd) td { background: #fff; }
+tr:last-child td { border-bottom: none; }
+td { border-bottom: 1px solid #e2e8f0; }
+.check-mark { color: #10b981; font-size: 20px; font-weight: 700; }
+.cross-mark { color: #ef4444; font-size: 20px; font-weight: 700; }
+.partial { display: inline-block; background: #fef3c7; color: #b45309; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 12px; }
+.feature-desc { display: block; font-size: 11px; color: #94a3b8; font-weight: 400; margin-top: 2px; }
+/* Legend */
+.legend { display: flex; gap: 24px; margin-top: 20px; justify-content: center; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #64748b; }
+.leg-icon { width: 20px; text-align: center; }
+/* Summary row */
+tr.summary td { background: #1e293b !important; color: #f1f5f9; font-weight: 600; font-size: 15px; border-bottom: none; }
+tr.summary td:first-child { background: #1e293b !important; color: #94a3b8; }
+.price { font-size: 22px; font-weight: 700; }
+.price span { font-size: 13px; font-weight: 400; color: #94a3b8; }
+</style></head><body>
+<h1>Feature Comparison</h1>
+<p class="subtitle">See how our products stack up against each other</p>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th style="width:28%">Feature</th>
+      <th class="product-a" style="width:24%">CloudBase Pro</th>
+      <th class="product-b" style="width:24%">DataSync Plus</th>
+      <th class="product-c" style="width:24%">AIFlow Studio</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Real-time Collaboration<span class="feature-desc">Multi-user editing with conflict resolution</span></td>
+      <td><span class="check-mark">✓</span></td>
+      <td><span class="check-mark">✓</span></td>
+      <td><span class="partial">Partial</span></td>
+    </tr>
+    <tr>
+      <td>API Rate Limit<span class="feature-desc">Requests per minute per user</span></td>
+      <td>1,000 RPM</td>
+      <td>5,000 RPM</td>
+      <td>10,000 RPM</td>
+    </tr>
+    <tr>
+      <td>Custom Integrations<span class="feature-desc">Build and deploy custom plugins</span></td>
+      <td><span class="cross-mark">✗</span></td>
+      <td><span class="check-mark">✓</span></td>
+      <td><span class="check-mark">✓</span></td>
+    </tr>
+    <tr>
+      <td>On-Premise Deployment<span class="feature-desc">Self-hosted with full data control</span></td>
+      <td><span class="cross-mark">✗</span></td>
+      <td><span class="partial">Partial</span></td>
+      <td><span class="check-mark">✓</span></td>
+    </tr>
+    <tr>
+      <td>AI-Powered Analytics<span class="feature-desc">Machine learning insights and predictions</span></td>
+      <td><span class="partial">Partial</span></td>
+      <td><span class="cross-mark">✗</span></td>
+      <td><span class="check-mark">✓</span></td>
+    </tr>
+    <tr>
+      <td>SSO &amp; SAML<span class="feature-desc">Enterprise identity provider support</span></td>
+      <td><span class="check-mark">✓</span></td>
+      <td><span class="check-mark">✓</span></td>
+      <td><span class="check-mark">✓</span></td>
+    </tr>
+    <tr>
+      <td>Audit Logging<span class="feature-desc">Comprehensive activity trail with export</span></td>
+      <td><span class="cross-mark">✗</span></td>
+      <td><span class="check-mark">✓</span></td>
+      <td><span class="check-mark">✓</span></td>
+    </tr>
+    <tr class="summary">
+      <td>Starting Price</td>
+      <td><div class="price">$29<span>/mo</span></div></td>
+      <td><div class="price">$79<span>/mo</span></div></td>
+      <td><div class="price">$149<span>/mo</span></div></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+<div class="legend">
+  <div class="legend-item"><div class="leg-icon" style="color:#10b981;font-weight:700">✓</div> Fully supported</div>
+  <div class="legend-item"><div class="leg-icon" style="color:#ef4444;font-weight:700">✗</div> Not available</div>
+  <div class="legend-item"><span class="partial" style="font-size:11px">Partial</span> Limited support</div>
+</div>
+</body></html>

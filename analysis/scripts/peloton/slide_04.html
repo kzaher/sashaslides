@@ -1,0 +1,48 @@
+<!-- slide_04.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; background:#1A1A1A; display:flex; flex-direction:column; justify-content:center; padding:60px 88px; }
+.section-title { font-size:13px; font-weight:700; font-style:italic; color:#F44060; letter-spacing:5px; text-transform:uppercase; margin-bottom:16px; }
+.headline { font-size:30px; font-weight:900; color:#FFFFFF; text-transform:uppercase; margin-bottom:48px; }
+.table { display:grid; grid-template-columns:1fr 1fr; gap:0 72px; }
+.col-header { font-size:11px; font-weight:800; color:#F44060; letter-spacing:5px; text-transform:uppercase; padding-bottom:16px; border-bottom:1px solid rgba(244,64,96,0.3); margin-bottom:0; }
+.rows { display:flex; flex-direction:column; }
+.row { display:flex; align-items:baseline; padding:14px 0; border-bottom:1px solid rgba(255,255,255,0.07); gap:16px; }
+.row-label { font-size:11px; font-weight:600; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:2px; width:130px; flex-shrink:0; }
+.row-value { font-size:15px; font-weight:600; color:#FFFFFF; }
+.row-value span { color:#F44060; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="section-title">Target Consumer</div>
+  <div class="headline">Who They Are</div>
+  <div class="table">
+    <div>
+      <div class="col-header">Financial Profile</div>
+      <div class="rows">
+        <div class="row"><div class="row-label">Fitness Spend</div><div class="row-value"><span>$150+</span> USD / month</div></div>
+        <div class="row"><div class="row-label">Household Income</div><div class="row-value"><span>$100–150K+</span> annually</div></div>
+        <div class="row"><div class="row-label">Education</div><div class="row-value">Highly educated</div></div>
+        <div class="row"><div class="row-label">Spends on</div><div class="row-value">Premium fitness, health, wellness</div></div>
+      </div>
+    </div>
+    <div>
+      <div class="col-header">Life Stage</div>
+      <div class="rows">
+        <div class="row"><div class="row-label">Age Range</div><div class="row-value"><span>35–50</span> (avg. 43)</div></div>
+        <div class="row"><div class="row-label">Location</div><div class="row-value">Big suburban areas</div></div>
+        <div class="row"><div class="row-label">Household</div><div class="row-value">Typically married with kids</div></div>
+        <div class="row"><div class="row-label">Mindset</div><div class="row-value">Time-pressed, results-driven</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!-- slide_19.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@1,400&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1280px; height: 720px; overflow: hidden; background: #FFFFFF; }
+body { display: flex; align-items: center; justify-content: center; }
+.slide {
+  width: 1280px; height: 720px;
+  position: relative;
+  display: flex; flex-direction: column;
+  justify-content: flex-start;
+  padding: 64px 104px 56px;
+}
+.slide-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 24px; font-weight: 600;
+  color: #2C3040; margin-bottom: 40px;
+}
+.columns {
+  display: flex; gap: 80px; flex: 1;
+}
+.column { flex: 1; }
+.col-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.11em;
+  color: #4A6FA5; margin-bottom: 18px;
+}
+.col-items { list-style: none; }
+.col-items li {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px; color: #2C3040; line-height: 1.45;
+  padding: 5px 0 5px 18px;
+  position: relative;
+}
+.col-items li::before {
+  content: '—';
+  position: absolute; left: 0;
+  color: #4A6FA5;
+}
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="slide-title">17 targeting parameters — combinable on any campaign</div>
+  <div class="columns">
+    <div class="column">
+      <div class="col-label">Academic &amp; demographic</div>
+      <ul class="col-items">
+        <li>College / University</li>
+        <li>Degree type</li>
+        <li>Concentration</li>
+        <li>Courses taken</li>
+        <li>Class year</li>
+        <li>House / Dormitory</li>
+        <li>Age</li>
+        <li>Gender</li>
+        <li>Sexual orientation</li>
+      </ul>
+    </div>
+    <div class="column">
+      <div class="col-label">Social &amp; behavioral</div>
+      <ul class="col-items">
+        <li>Home city / state / zip code</li>
+        <li>Relationship / dating interests</li>
+        <li>Personal interests</li>
+        <li>Clubs and jobs</li>
+        <li>Political bent</li>
+        <li>Intra-school friend count</li>
+        <li>Inter-school friend count</li>
+        <li>Site usage</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</body>
+</html>

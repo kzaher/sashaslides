@@ -1,0 +1,26 @@
+{
+  "slide_01": {
+    "status": "bad",
+    "comment": "Missing template word in \"Pitch Deck Template\"",
+    "ratedAt": "2026-04-12T21:45:43.790Z"
+  },
+  "slide_02": {
+    "status": "bad",
+    "comment": "Lists have bullets instead of being without bullets.",
+    "ratedAt": "2026-04-12T21:45:58.430Z"
+  },
+  "slide_03": {
+    "status": "bad",
+    "comment": "line height in bottom text is wrong.",
+    "ratedAt": "2026-04-12T21:46:17.243Z"
+  },
+  "slide_04": {
+    "status": "good",
+    "ratedAt": "2026-04-12T21:46:23.680Z"
+  },
+  "slide_05": {
+    "status": "bad",
+    "comment": "line height in bottom text is wrong.",
+    "ratedAt": "2026-04-12T21:46:33.320Z"
+  }
+}

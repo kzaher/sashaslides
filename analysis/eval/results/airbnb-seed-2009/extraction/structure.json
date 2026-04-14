@@ -1,0 +1,149 @@
+{
+  "presentationId": "airbnb-seed-2009",
+  "presentationTitle": "Airbnb Original Pitch Deck",
+  "slideCount": 14,
+  "slides": [
+    {
+      "index": 1,
+      "title": "Welcome",
+      "layoutType": "title",
+      "bodyText": "AirBed&Breakfast\nBook rooms with locals, rather than hotels.\n19 rausch street, ste c, san francisco, ca 94103  www.airbedandbreakfast.com  (888) 461 8180  joe@airbedandbreakfast.com",
+      "dominantColors": ["#FFFFFF", "#29B6F6", "#E91E8B"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 65,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 2,
+      "title": "Problem",
+      "layoutType": "bullet-list",
+      "bodyText": "Price is a important concern for customers booking travel online.\nHotels leave you disconnected from the city and its culture.\nNo easy way exists to book a room with a local or become a host.",
+      "dominantColors": ["#FFFFFF", "#D6EEFB", "#333333"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 55,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 3,
+      "title": "Solution",
+      "layoutType": "mixed",
+      "bodyText": "A web platform where users can rent out their space to host travelers to:\nSAVE MONEY - when traveling\nMAKE MONEY - when hosting\nSHARE CULTURE - local connection to the city",
+      "dominantColors": ["#FFFFFF", "#29B6F6", "#D6EEFB"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 45,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 4,
+      "title": "Market Validation",
+      "layoutType": "data-chart",
+      "bodyText": "Couchsurfing.com - 660,000 total users\nCraigslist.com - 50,000 temporary housing listings per week in the US. 07/09 - 07/16\n(1) www.couchsurfing.com\n(2) www.craigslist.org",
+      "dominantColors": ["#FFFFFF", "#E91E8B", "#29B6F6"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 50,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 5,
+      "title": "Market Size",
+      "layoutType": "data-chart",
+      "bodyText": "2 Billion+ TRIPS BOOKED (WORLDWIDE) - Total Available Market\nsource: Travel Industry Association of America & World Tourism Organization\n560M BUDGET&ONLINE - Serviceable Available Market\nsource: comScore\n84M TRIPS W/AB&B - Share of Market - 15% of Available Market",
+      "dominantColors": ["#FFFFFF", "#E8711F", "#29B6F6"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 35,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 6,
+      "title": "Product",
+      "layoutType": "image-dominant",
+      "bodyText": "SEARCH BY CITY -> REVIEW LISTINGS -> BOOK IT!\nStay with a local when traveling.\nWhere are you going?\nFind a room",
+      "dominantColors": ["#FFFFFF", "#29B6F6", "#D6EEFB"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 25,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 7,
+      "title": "Business Model",
+      "layoutType": "data-chart",
+      "bodyText": "We take a 10% commission on each transaction.\n$84M TRIPS W/AB&B - Share of Market - 15% of Available Market\n$25 AVG FEE - $80/night @ 3 nights\nsource: $70 is avg room price on AB&B\n$2.1B REVENUE - Projected by 2011",
+      "dominantColors": ["#FFFFFF", "#E8711F", "#29B6F6"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 40,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 8,
+      "title": "Adoption Strategy",
+      "layoutType": "mixed",
+      "bodyText": "EVENTS - target events monthly: Octoberfest (6M), Cebit (700,000), Summerfest (1M), Eurocup (3M+), Mardi Gras (800,000) - with listing widget\nPARTNERSHIPS - cheap / alternative travel: GoLoCo, KAYAK, Orbitz\nCRAIGSLIST - dual posting feature",
+      "dominantColors": ["#FFFFFF", "#29B6F6", "#D6EEFB"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 25,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 9,
+      "title": "Competition",
+      "layoutType": "data-chart",
+      "bodyText": "Competitive landscape matrix:\nAFFORDABLE axis (top) to EXPENSIVE axis (bottom)\nOFFLINE TRANSACTION (left) to ONLINE TRANSACTION (right)\nCompetitors: CouchSurfing, craigslist, BedandBreakfast.com, Hostels.com, rentahome, Orbitz, hotels.com, rentobi.com, VRBO\nAirBed&Breakfast positioned: Affordable + Online Transaction",
+      "dominantColors": ["#FFFFFF", "#29B6F6", "#E91E8B"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 35,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 10,
+      "title": "Competitive Advantages",
+      "layoutType": "bullet-list",
+      "bodyText": "1st TO MARKET - for transaction-based temporary housing site\nHOST INCENTIVE - they can make money over couchsurfing.com\nLIST ONCE - hosts post one time with us vs. daily on craigslist\nEASE OF USE - search by price, location & check-in/check-out dates\nPROFILES - browse host profiles, and book in 3 clicks\nDESIGN & BRAND - memorable name will launch at historic DNC to gain share of mind",
+      "dominantColors": ["#FFFFFF", "#29B6F6", "#D6EEFB"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 30,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 11,
+      "title": "Team",
+      "layoutType": "mixed",
+      "bodyText": "Joe Gebbia, User Interface & PR - Entrepreneur and designer. Holds a patent for his product, CritBuns. A graduate of the Rhode Island School of Design (RISD), has dual BFA's in graphic design and industrial design.\nBrian Chesky, Business Development & Brand - Founder of Brian Chesky, Inc, industrial design consultant. A graduate of the Rhode Island School of Design (RISD), has a BFA in industrial design.\nNathan Blecharcyzk, Developer - Created Facebook Apps \"Your neighbors\" (75,000 users) and \"Rolodextrous\", recently launched \"Identified Hits.\" A graduate of computer science Harvard. Nate has worked at Microsoft, OPNET Technologies, and Batiq.\nMichael Seibel, Advisor - Michael is the CEO and co-founder of www.justin.tv, a San Francisco based venture funded start up that delivers live video to the internet.",
+      "dominantColors": ["#FFFFFF", "#29B6F6", "#333333"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 20,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 12,
+      "title": "Press",
+      "layoutType": "quote",
+      "bodyText": "\"AirBed & Breakfast is a fun approach to couch surfing.\" - Webware (www.webware.com)\n\"Think of it as Craigslist meets Hotels.com, but a lot less creepy.\" - Josh Spear (www.joshspear.com)\n\"A cool alternative to a boring evening in a hotel room.\" - Mashable (www.mashable.com)\n\"AirBed's fee-based service could help alleviate concerns about quality of accommodations.\" - Springwise (www.springwise.com)",
+      "dominantColors": ["#FFFFFF", "#29B6F6", "#E91E8B"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 40,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 13,
+      "title": "User Testimonials",
+      "layoutType": "quote",
+      "bodyText": "\"AirBed&Breakfast freaking rocks!\" - Jason F., Washington, DC\n\"I found something in my price-range, and that's what really enabled me to come to the conference.\" - Jason R., Atlanta, GA\n\"A complete success. It is easy to use and it made me money.\" - Emily M., Austin, TX\n\"It's about the ideas, the interactions, the people. You don't get that in a hotel room.\" - Don A., Ontario, Canada",
+      "dominantColors": ["#FFFFFF", "#29B6F6", "#E91E8B"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 25,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 14,
+      "title": "Financial",
+      "layoutType": "data-chart",
+      "bodyText": "We are looking for 12 months financing to reach 80,000 transactions on AirBed&Breakfast.\n$500K ANGEL ROUND - initial investment opportunity\n80K TRIPS W/AB&B - avg $25 fee\n$2M REVENUE - over 12 months",
+      "dominantColors": ["#FFFFFF", "#8BC34A", "#E8711F"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 40,
+      "visualComplexity": "medium"
+    }
+  ],
+  "extractedAt": "2026-04-12T00:00:00.000Z",
+  "source": "slide images"
+}

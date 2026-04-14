@@ -1,0 +1,67 @@
+<!-- slide_07.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Helvetica Neue', Arial, system-ui, sans-serif;
+  padding: 60px 80px;
+}
+.title {
+  font-size: 34px; font-weight: 700; color: #333333; margin-bottom: 10px;
+}
+.title-underline {
+  width: 48px; height: 3px; background: #E8711F; margin-bottom: 52px;
+}
+.metrics { display: flex; flex-direction: column; gap: 0; }
+.metric-row {
+  display: flex; align-items: baseline; gap: 28px;
+  padding: 26px 0; border-bottom: 1px solid #FDE8D4;
+}
+.metric-row:first-child { padding-top: 0; }
+.metric-row:last-child { border-bottom: none; }
+.metric-number {
+  font-size: 48px; font-weight: 700; color: #E8711F;
+  line-height: 1; min-width: 260px; flex-shrink: 0;
+}
+.metric-info { display: flex; flex-direction: column; gap: 4px; }
+.metric-label {
+  font-size: 20px; font-weight: 400; color: #333333; line-height: 1.4;
+}
+.metric-source {
+  font-size: 13px; font-weight: 300; color: #999999;
+}
+</style>
+</head>
+<body>
+  <div class="title">Business Model</div>
+  <div class="title-underline"></div>
+  <div class="metrics">
+    <div class="metric-row">
+      <div class="metric-number">10%</div>
+      <div class="metric-info">
+        <div class="metric-label">Commission taken on every transaction</div>
+        <div class="metric-source">Applied to host payout on each booking</div>
+      </div>
+    </div>
+    <div class="metric-row">
+      <div class="metric-number">$25</div>
+      <div class="metric-info">
+        <div class="metric-label">Average fee per booking</div>
+        <div class="metric-source">Based on $80/night average over 3 nights × 10%</div>
+      </div>
+    </div>
+    <div class="metric-row">
+      <div class="metric-number">$2.1B</div>
+      <div class="metric-info">
+        <div class="metric-label">Projected revenue by 2011</div>
+        <div class="metric-source">84M trips (15% share of market) × $25 average fee</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

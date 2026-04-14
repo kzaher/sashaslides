@@ -1,0 +1,71 @@
+<!-- slide_14.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1280px;height:720px;overflow:hidden;font-family:"Helvetica Neue",Arial,sans-serif}
+body{background:#fff;display:flex;align-items:center}
+.left{width:420px;flex-shrink:0;padding:60px 0 60px 80px;display:flex;flex-direction:column;justify-content:center}
+.sup{font-size:12px;font-weight:700;color:#F44060;letter-spacing:.2em;text-transform:uppercase;margin-bottom:16px}
+.title{font-size:42px;font-weight:800;font-style:italic;text-transform:uppercase;color:#1A1A1A;line-height:1.1;letter-spacing:.04em}
+.desc{font-size:16px;font-weight:400;color:#555;line-height:1.5;margin-top:20px}
+.highlight-tag{display:inline-flex;align-items:center;gap:8px;background:#F44060;color:#fff;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:5px 12px;border-radius:2px;margin-top:28px}
+.dot{width:8px;height:8px;background:#fff;border-radius:50%}
+.right{flex:1;display:flex;align-items:center;justify-content:center}
+</style>
+</head>
+<body>
+<div class="left">
+  <div class="sup">SECTION 04</div>
+  <div class="title">WHAT DRIVES IT ALL</div>
+  <div class="desc">Product truths are the foundation. Everything else amplifies what the hardware and platform actually deliver.</div>
+  <div class="highlight-tag"><div class="dot"></div>PRODUCT TRUTHS · HIGHLIGHTED</div>
+</div>
+<div class="right">
+  <svg id="wheel" viewBox="0 0 560 560" width="560" height="560"></svg>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded',function(){
+  const svg=document.getElementById('wheel');
+  const cx=280,cy=280;
+  function toR(d){return d*Math.PI/180}
+  function pt(r,deg){return[cx+r*Math.cos(toR(deg-90)),cy+r*Math.sin(toR(deg-90))]}
+  function arcPath(r1,r2,sa,ea){
+    const gap=1.8,s=sa+gap,e=ea-gap,laf=(ea-sa)>180?1:0;
+    const[ax,ay]=pt(r1,s),[bx,by]=pt(r2,s),[cx2,cy2]=pt(r2,e),[dx,dy]=pt(r1,e);
+    if(r1<2)return`M${cx},${cy} L${bx},${by} A${r2},${r2} 0 ${laf} 1 ${cx2},${cy2} Z`;
+    return`M${ax},${ay} L${bx},${by} A${r2},${r2} 0 ${laf} 1 ${cx2},${cy2} L${dx},${dy} A${r1},${r1} 0 ${laf} 0 ${ax},${ay} Z`;
+  }
+  function addEl(tag,attrs,parent){
+    const el=document.createElementNS('http://www.w3.org/2000/svg',tag);
+    for(const[k,v]of Object.entries(attrs))el.setAttribute(k,v);
+    (parent||svg).appendChild(el);return el;
+  }
+  function addSeg(r1,r2,sa,ea,fill){addEl('path',{d:arcPath(r1,r2,sa,ea),fill,stroke:'#fff','stroke-width':'2'});}
+  function segText(r1,r2,sa,ea,lines,fs,col){
+    const mid=(sa+ea)/2,r=(r1+r2)/2,[tx,ty]=pt(r,mid);
+    const g=addEl('g',{});let rot=mid;if(rot>180)rot-=180;
+    g.setAttribute('transform',`rotate(${rot},${tx},${ty})`);
+    lines.forEach((line,i)=>{addEl('text',{'text-anchor':'middle','dominant-baseline':'middle','font-size':fs,'fill':col,'font-family':'"Helvetica Neue",Arial,sans-serif','font-weight':'700',x:tx,y:ty+(i-(lines.length-1)/2)*fs*1.3},g).textContent=line;});
+  }
+  addEl('circle',{cx,cy,r:76,fill:'#F44060'});
+  ['MAKES YOU','WANT TO','SHOW UP'].forEach((l,i)=>{addEl('text',{x:cx,y:cy-12+i*16,'text-anchor':'middle','dominant-baseline':'middle','font-size':12,'fill':'#fff','font-weight':'800','font-family':'"Helvetica Neue",Arial,sans-serif'}).textContent=l;});
+  // Ring 1: HIGHLIGHTED
+  [{sa:0,ea:90,l:['LEADERBOARD','& METRICS']},{sa:90,ea:180,l:['PASSIONATE','COMMUNITY']},
+   {sa:180,ea:270,l:['TOP TIER','INSTRUCTORS']},{sa:270,ea:360,l:['ALWAYS','READY']}
+  ].forEach(d=>{addSeg(76,158,d.sa,d.ea,'#F44060');segText(76,158,d.sa,d.ea,d.l,10,'#fff');});
+  // Ring 2: muted
+  [{sa:0,ea:60,l:['MAKES HARD','WORK FUN']},{sa:60,ea:120,l:['REMOVES','BARRIERS']},
+   {sa:120,ea:180,l:['PUSHES ME','TO EXCEL']},{sa:180,ea:240,l:['INNOVATIVE','DESIGN']},
+   {sa:240,ea:300,l:['WHOLLY','IMMERSIVE']},{sa:300,ea:360,l:['ENGINEERED','COMP.']}
+  ].forEach(d=>{addSeg(158,232,d.sa,d.ea,'#F5E8E8');segText(158,232,d.sa,d.ea,d.l,9,'#AA6A6A');});
+  // Ring 3: muted
+  [{sa:0,ea:90,l:['NOTHING','IN MY WAY']},{sa:90,ea:180,l:['I BELONG','TO SOMETHING']},
+   {sa:180,ea:270,l:['I CAN','ACCOMPLISH']},{sa:270,ea:360,l:['CAPTIVATING','TECH-SAVVY']}
+  ].forEach(d=>{addSeg(232,280,d.sa,d.ea,'#FAF0F0');segText(232,280,d.sa,d.ea,d.l,9,'#CCA0A0');});
+});
+</script>
+</body>
+</html>

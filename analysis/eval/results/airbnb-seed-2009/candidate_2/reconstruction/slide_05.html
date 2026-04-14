@@ -1,0 +1,149 @@
+<!-- slide_05.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+}
+body {
+  padding: 60px 80px 52px;
+  display: flex; flex-direction: column;
+}
+.heading {
+  font-size: 36px; font-weight: 700; color: #29B6F6;
+  margin-bottom: 10px; letter-spacing: -0.5px;
+}
+.subhead {
+  font-size: 15px; color: #333333; margin-bottom: 32px; line-height: 1.5;
+}
+.browser {
+  flex: 1;
+  border: 2px solid #E0E0E0;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.browser-bar {
+  background: #F5F5F5;
+  border-bottom: 1px solid #E0E0E0;
+  padding: 10px 16px;
+  display: flex; align-items: center; gap: 10px;
+}
+.dot { width: 10px; height: 10px; border-radius: 50%; }
+.dot-r { background: #FFCDD2; }
+.dot-y { background: #FFF9C4; }
+.dot-g { background: #DCEDC8; }
+.url-bar {
+  flex: 1; background: #FFFFFF; border: 1px solid #E0E0E0;
+  border-radius: 4px; padding: 4px 12px;
+  font-size: 12px; color: #888888;
+}
+.browser-content {
+  flex: 1; background: #FFFFFF;
+  padding: 24px 28px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.search-row {
+  display: flex; gap: 10px; align-items: center;
+}
+.search-input {
+  flex: 1; border: 2px solid #29B6F6; border-radius: 4px;
+  padding: 10px 16px; font-size: 14px; color: #333333;
+  font-family: 'Inter', sans-serif;
+}
+.search-btn {
+  background: #29B6F6; color: #FFFFFF;
+  border: none; border-radius: 4px;
+  padding: 10px 24px; font-size: 14px; font-weight: 700;
+  font-family: 'Inter', sans-serif; cursor: pointer;
+}
+.listings-row {
+  display: flex; gap: 16px; flex: 1;
+}
+.card {
+  flex: 1; border: 1px solid #E8E8E8; border-radius: 6px;
+  overflow: hidden; display: flex; flex-direction: column;
+}
+.card-img {
+  height: 110px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: #999; letter-spacing: 0.5px;
+}
+.card-img-1 { background: #E3F2FD; }
+.card-img-2 { background: #F3E5F5; }
+.card-img-3 { background: #E8F5E9; }
+.card-body { padding: 12px 14px; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.card-title { font-size: 13px; font-weight: 700; color: #333333; }
+.card-location { font-size: 11px; color: #888888; }
+.card-price { font-size: 18px; font-weight: 900; color: #29B6F6; margin-top: 4px; }
+.card-price span { font-size: 11px; font-weight: 400; color: #888888; }
+.card-btn {
+  margin: 0 14px 12px;
+  background: #29B6F6; color: #FFFFFF;
+  border: none; border-radius: 4px;
+  padding: 8px; font-size: 12px; font-weight: 700;
+  font-family: 'Inter', sans-serif; text-align: center; cursor: pointer;
+}
+.card-btn-ghost {
+  margin: 0 14px 12px;
+  background: #FFFFFF; color: #29B6F6;
+  border: 1px solid #29B6F6; border-radius: 4px;
+  padding: 8px; font-size: 12px; font-weight: 700;
+  font-family: 'Inter', sans-serif; text-align: center; cursor: pointer;
+}
+</style>
+</head>
+<body>
+  <h1 class="heading">The Product</h1>
+  <p class="subhead">Search by city. Review host listings. Book in 3 clicks. Stay with a local.</p>
+  <div class="browser">
+    <div class="browser-bar">
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+      <div class="url-bar">airbedandbreakfast.com/search</div>
+    </div>
+    <div class="browser-content">
+      <div class="search-row">
+        <div class="search-input">Denver, CO &nbsp;·&nbsp; Aug 24–26 &nbsp;·&nbsp; 1 guest</div>
+        <div class="search-btn">Search</div>
+      </div>
+      <div class="listings-row">
+        <div class="card">
+          <div class="card-img card-img-1">PHOTO</div>
+          <div class="card-body">
+            <div class="card-title">Private Room, Capitol Hill</div>
+            <div class="card-location">Denver, CO · Hosted by Sarah</div>
+            <div class="card-price">$60 <span>/ night</span></div>
+          </div>
+          <div class="card-btn">Book Now</div>
+        </div>
+        <div class="card">
+          <div class="card-img card-img-2">PHOTO</div>
+          <div class="card-body">
+            <div class="card-title">Shared Space, LoDo District</div>
+            <div class="card-location">Denver, CO · Hosted by Marcus</div>
+            <div class="card-price">$45 <span>/ night</span></div>
+          </div>
+          <div class="card-btn-ghost">Book Now</div>
+        </div>
+        <div class="card">
+          <div class="card-img card-img-3">PHOTO</div>
+          <div class="card-body">
+            <div class="card-title">Entire Studio, Five Points</div>
+            <div class="card-location">Denver, CO · Hosted by Priya</div>
+            <div class="card-price">$80 <span>/ night</span></div>
+          </div>
+          <div class="card-btn-ghost">Book Now</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

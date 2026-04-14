@@ -1,0 +1,68 @@
+<!-- slide_09.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding-top: 48px;
+  }
+  .eyebrow { font-size: 13px; color: #888888; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 12px; }
+  .title { font-size: 50px; font-weight: 300; color: #333333; margin-bottom: 8px; }
+  .callout-line { font-size: 20px; font-weight: 700; color: #4A90D9; margin-bottom: 32px; }
+  .chart-wrap {
+    background: #FFFFFF;
+    border-radius: 6px;
+    width: 1040px;
+    height: 380px;
+    position: relative;
+    padding: 32px 48px 48px 72px;
+  }
+  .annotation {
+    position: absolute;
+    right: 52px; top: 36px;
+    text-align: right;
+  }
+  .ann-num { font-size: 42px; font-weight: 700; color: #333333; line-height: 1; }
+  .ann-sub { font-size: 13px; color: #888888; margin-top: 4px; }
+  svg.chart { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Traction — User Growth</div>
+  <div class="title">20% daily signup growth</div>
+  <div class="callout-line">Zero to thousands in two weeks</div>
+  <div class="chart-wrap">
+    <div class="annotation">
+      <div class="ann-num">+20%</div>
+      <div class="ann-sub">daily, sustained</div>
+    </div>
+    <svg class="chart" viewBox="0 0 940 300" xmlns="http://www.w3.org/2000/svg">
+      <line x1="0" y1="270" x2="940" y2="270" stroke="#E8ECF0" stroke-width="1.5"/>
+      <line x1="0" y1="200" x2="940" y2="200" stroke="#F0F2F4" stroke-width="1"/>
+      <line x1="0" y1="135" x2="940" y2="135" stroke="#F0F2F4" stroke-width="1"/>
+      <line x1="0" y1="67" x2="940" y2="67" stroke="#F0F2F4" stroke-width="1"/>
+      <text x="-10" y="274" font-size="11" fill="#888888" text-anchor="end" font-family="Helvetica Neue, sans-serif">0</text>
+      <text x="-10" y="204" font-size="11" fill="#888888" text-anchor="end" font-family="Helvetica Neue, sans-serif">500</text>
+      <text x="-10" y="139" font-size="11" fill="#888888" text-anchor="end" font-family="Helvetica Neue, sans-serif">1,500</text>
+      <text x="-10" y="71" font-size="11" fill="#888888" text-anchor="end" font-family="Helvetica Neue, sans-serif">3,000</text>
+      <text x="0" y="290" font-size="11" fill="#888888" text-anchor="middle" font-family="Helvetica Neue, sans-serif">Day 1</text>
+      <text x="235" y="290" font-size="11" fill="#888888" text-anchor="middle" font-family="Helvetica Neue, sans-serif">Day 4</text>
+      <text x="470" y="290" font-size="11" fill="#888888" text-anchor="middle" font-family="Helvetica Neue, sans-serif">Day 7</text>
+      <text x="705" y="290" font-size="11" fill="#888888" text-anchor="middle" font-family="Helvetica Neue, sans-serif">Day 11</text>
+      <text x="940" y="290" font-size="11" fill="#888888" text-anchor="middle" font-family="Helvetica Neue, sans-serif">Day 14</text>
+      <!-- Hockey stick area -->
+      <path d="M0,268 L235,265 L470,258 L600,245 L705,220 L800,175 L870,120 L940,20 L940,270 L0,270 Z" fill="#4A90D9" opacity="0.12"/>
+      <!-- Hockey stick line -->
+      <path d="M0,268 L235,265 L470,258 L600,245 L705,220 L800,175 L870,120 L940,20" fill="none" stroke="#4A90D9" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="940" cy="20" r="6" fill="#4A90D9"/>
+    </svg>
+  </div>
+</body>
+</html>

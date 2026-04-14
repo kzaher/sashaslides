@@ -1,0 +1,44 @@
+{
+  "presId": "airbnb-seed-2009",
+  "slideCount": 14,
+  "candidates": [
+    {
+      "candidate": 1,
+      "slideCount": 14,
+      "scores": {
+        "layout": 5,
+        "content": 5,
+        "visual": 5,
+        "rules": 5,
+        "avg": 5
+      }
+    },
+    {
+      "candidate": 2,
+      "slideCount": 14,
+      "scores": {
+        "layout": 8,
+        "content": 8,
+        "visual": 7,
+        "rules": 7,
+        "avg": 7.5
+      }
+    },
+    {
+      "candidate": 3,
+      "slideCount": 14,
+      "scores": {
+        "layout": 8,
+        "content": 8,
+        "visual": 8,
+        "rules": 9,
+        "avg": 8.25
+      }
+    }
+  ],
+  "ranking": [
+    3,
+    2,
+    1
+  ]
+}

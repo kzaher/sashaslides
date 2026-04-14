@@ -1,0 +1,44 @@
+{
+  "presId": "facebook-2004",
+  "slideCount": 20,
+  "candidates": [
+    {
+      "candidate": 1,
+      "slideCount": 20,
+      "scores": {
+        "layout": 5,
+        "content": 5,
+        "visual": 5,
+        "rules": 5,
+        "avg": 5
+      }
+    },
+    {
+      "candidate": 2,
+      "slideCount": 20,
+      "scores": {
+        "layout": 8,
+        "content": 7,
+        "visual": 8,
+        "rules": 8,
+        "avg": 7.75
+      }
+    },
+    {
+      "candidate": 3,
+      "slideCount": 16,
+      "scores": {
+        "layout": 7,
+        "content": 5,
+        "visual": 6,
+        "rules": 6,
+        "avg": 6
+      }
+    }
+  ],
+  "ranking": [
+    2,
+    3,
+    1
+  ]
+}

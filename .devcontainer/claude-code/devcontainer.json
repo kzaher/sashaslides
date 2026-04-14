@@ -1,5 +1,5 @@
 {
-  "name": "Polybot Dev",
+  "name": "Sasha Slides",
   "build": {
     "dockerfile": "Dockerfile",
     "options": ["--platform=linux/amd64"]

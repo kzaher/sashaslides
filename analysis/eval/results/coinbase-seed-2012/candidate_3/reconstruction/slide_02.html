@@ -1,0 +1,160 @@
+<!-- slide_06.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px;
+  background: #E8ECF0;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 300;
+  overflow: hidden;
+  position: relative;
+}
+.zone-a {
+  position: absolute;
+  left: 80px; top: 50%;
+  transform: translateY(-60%);
+  width: 400px;
+}
+.brand { font-size: 56px; font-weight: 300; color: #333; letter-spacing: -0.02em; line-height: 1.1; }
+.brand-accent { color: #4A90D9; }
+.tagline { font-size: 22px; font-weight: 300; color: #555; margin-top: 18px; letter-spacing: -0.01em; line-height: 1.4; }
+.sub { font-size: 16px; color: #888; margin-top: 28px; letter-spacing: -0.01em; line-height: 1.6; max-width: 340px; }
+.feature { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.dot-f { width: 6px; height: 6px; border-radius: 50%; background: #4A90D9; flex-shrink: 0; }
+.zone-b { position: absolute; right: 0; top: 0; width: 790px; height: 720px; }
+/* Desktop */
+.desktop { position: absolute; left: 20px; top: 90px; width: 530px; height: 345px; background: #2c2c2c; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); overflow: hidden; }
+.b-bar { height: 34px; background: #3e3e3e; display: flex; align-items: center; padding: 0 10px; gap: 6px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; }
+.dr { background: #FF5F56; } .dy { background: #FFBD2E; } .dg { background: #27C93F; }
+.b-url { flex: 1; height: 18px; background: #555; border-radius: 9px; margin: 0 10px; font-size: 9px; color: #bbb; display: flex; align-items: center; padding: 0 8px; }
+.b-content { background: #fff; height: calc(100% - 34px); }
+.cb-nav { background: #4A90D9; height: 36px; display: flex; align-items: center; padding: 0 14px; gap: 22px; }
+.cb-logo { font-size: 12px; font-weight: 700; color: #fff; letter-spacing: 0.06em; }
+.cb-nl { font-size: 11px; color: rgba(255,255,255,0.85); }
+.cb-body { padding: 18px 20px; }
+.cb-lbl { font-size: 9px; color: #999; text-transform: uppercase; letter-spacing: 0.08em; }
+.cb-btc { font-size: 30px; font-weight: 300; color: #333; margin-top: 4px; }
+.cb-usd { font-size: 12px; color: #888; margin-top: 2px; }
+.cb-btns { display: flex; gap: 8px; margin-top: 14px; }
+.cb-btn { padding: 6px 18px; background: #4A90D9; color: #fff; border-radius: 4px; font-size: 11px; }
+.cb-btn-o { padding: 6px 18px; background: none; color: #4A90D9; border: 1px solid #4A90D9; border-radius: 4px; font-size: 11px; }
+.cb-tl { font-size: 9px; color: #999; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 16px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
+.cb-tr { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #f5f5f5; font-size: 10px; color: #555; }
+.tin { color: #27ae60; } .tout { color: #c0392b; }
+/* Phone */
+.phone { position: absolute; right: 36px; bottom: 68px; width: 140px; height: 260px; background: #1a1a1a; border-radius: 26px; box-shadow: 0 16px 48px rgba(0,0,0,0.28); padding: 10px 6px; }
+.ph-screen { background: #fff; height: 100%; border-radius: 18px; overflow: hidden; }
+.ph-nav { background: #4A90D9; height: 28px; display: flex; align-items: center; justify-content: center; }
+.ph-logo { font-size: 10px; font-weight: 700; color: #fff; letter-spacing: 0.06em; }
+.ph-body { padding: 10px; }
+.ph-lbl { font-size: 7px; color: #999; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+.ph-btc { font-size: 18px; font-weight: 300; color: #333; }
+.ph-usd { font-size: 9px; color: #888; margin-top: 2px; }
+.ph-btns { display: flex; gap: 5px; margin-top: 8px; }
+.ph-btn { flex: 1; padding: 4px 0; background: #4A90D9; color: #fff; text-align: center; font-size: 8px; border-radius: 3px; }
+.ph-btn-o { flex: 1; padding: 4px 0; background: none; color: #4A90D9; border: 1px solid #4A90D9; text-align: center; font-size: 8px; border-radius: 3px; }
+.ph-tr { font-size: 7.5px; color: #666; padding: 3px 0; border-bottom: 1px solid #f0f0f0; }
+/* Tablet */
+.tablet { position: absolute; right: 100px; top: 44px; width: 210px; height: 150px; background: #1e1e1e; border-radius: 10px; box-shadow: 0 10px 32px rgba(0,0,0,0.22); padding: 7px 8px; }
+.tab-screen { background: #fff; height: 100%; border-radius: 5px; overflow: hidden; }
+.tab-nav { background: #4A90D9; height: 22px; display: flex; align-items: center; padding: 0 8px; }
+.tab-logo { font-size: 8px; font-weight: 700; color: #fff; letter-spacing: 0.06em; }
+.tab-body { padding: 8px 10px; display: flex; gap: 10px; }
+.tab-lbl { font-size: 6.5px; color: #999; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+.tab-btc { font-size: 14px; font-weight: 300; color: #333; }
+.tab-usd { font-size: 7.5px; color: #888; }
+.tab-btns { display: flex; gap: 4px; margin-top: 6px; }
+.tab-btn { padding: 3px 6px; background: #4A90D9; color: #fff; font-size: 6px; border-radius: 2px; }
+.tab-tr { font-size: 7px; color: #666; padding: 2.5px 0; border-bottom: 1px solid #f0f0f0; }
+</style>
+</head>
+<body>
+<div class="zone-a">
+  <div class="brand"><span class="brand-accent">Coin</span>base</div>
+  <div class="tagline">Bitcoin for Everyone</div>
+  <div class="sub">
+    <div class="feature"><div class="dot-f"></div><span>Send and receive from any device</span></div>
+    <div class="feature"><div class="dot-f"></div><span>Full transaction history, always</span></div>
+    <div class="feature"><div class="dot-f"></div><span>No setup. No command line.</span></div>
+  </div>
+</div>
+<div class="zone-b">
+  <div class="desktop">
+    <div class="b-bar">
+      <div class="dot dr"></div><div class="dot dy"></div><div class="dot dg"></div>
+      <div class="b-url">coinbase.com</div>
+    </div>
+    <div class="b-content">
+      <div class="cb-nav">
+        <span class="cb-logo">COINBASE</span>
+        <span class="cb-nl">Dashboard</span>
+        <span class="cb-nl">Send</span>
+        <span class="cb-nl">Receive</span>
+        <span class="cb-nl">History</span>
+      </div>
+      <div class="cb-body">
+        <div class="cb-lbl">Your Balance</div>
+        <div class="cb-btc">2.581 BTC</div>
+        <div class="cb-usd">$29,760.00 USD</div>
+        <div class="cb-btns">
+          <div class="cb-btn">Send Bitcoin</div>
+          <div class="cb-btn-o">Request</div>
+        </div>
+        <div class="cb-tl">Recent Transactions</div>
+        <div class="cb-tr"><span class="tin">▼ Received</span><span>2.000 BTC</span><span>Jan 20</span></div>
+        <div class="cb-tr"><span class="tout">▲ Sent</span><span>0.750 BTC</span><span>Jan 18</span></div>
+        <div class="cb-tr"><span class="tin">▼ Received</span><span>1.331 BTC</span><span>Jan 14</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="tablet">
+    <div class="tab-screen">
+      <div class="tab-nav"><span class="tab-logo">COINBASE</span></div>
+      <div class="tab-body">
+        <div style="flex:1">
+          <div class="tab-lbl">Balance</div>
+          <div class="tab-btc">2.581 BTC</div>
+          <div class="tab-usd">$29,760.00</div>
+          <div class="tab-btns">
+            <div class="tab-btn">Send</div>
+            <div class="tab-btn" style="background:none;color:#4A90D9;border:1px solid #4A90D9;">Recv</div>
+          </div>
+        </div>
+        <div style="flex:1">
+          <div class="tab-lbl">Transactions</div>
+          <div class="tab-tr">▼ +2.000 BTC · Jan 20</div>
+          <div class="tab-tr">▲ −0.750 BTC · Jan 18</div>
+          <div class="tab-tr">▼ +1.331 BTC · Jan 14</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="phone">
+    <div class="ph-screen">
+      <div class="ph-nav"><span class="ph-logo">COINBASE</span></div>
+      <div class="ph-body">
+        <div class="ph-lbl">Balance</div>
+        <div class="ph-btc">2.581 BTC</div>
+        <div class="ph-usd">$29,760.00 USD</div>
+        <div class="ph-btns">
+          <div class="ph-btn">Send</div>
+          <div class="ph-btn-o">Receive</div>
+        </div>
+        <div style="margin-top:8px;">
+          <div class="ph-lbl" style="margin-bottom:4px;">Recent</div>
+          <div class="ph-tr">▼ +2.000 BTC Jan 20</div>
+          <div class="ph-tr">▲ −0.750 BTC Jan 18</div>
+          <div class="ph-tr">▼ +1.331 BTC Jan 14</div>
+          <div class="ph-tr">▲ −0.400 BTC Jan 10</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

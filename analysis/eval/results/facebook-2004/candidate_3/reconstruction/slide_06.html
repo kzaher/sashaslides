@@ -1,0 +1,63 @@
+<!-- slide_10.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1280px;height:720px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;color:#fff}
+body{background-color:#4A6FA5;background-image:linear-gradient(rgba(255,255,255,.15) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.15) 1px,transparent 1px);background-size:70px 70px;position:relative}
+.logo{position:absolute;top:20px;right:24px;font-family:'Arial Black',Impact,sans-serif;font-size:14pt;font-weight:700}
+.title{position:absolute;top:40px;width:100%;text-align:center;font-size:26pt;font-weight:400}
+.metric{position:absolute;top:90px;width:100%;text-align:center;font-size:18pt;font-weight:700}
+.chart-wrap{position:absolute;top:148px;left:50%;transform:translateX(-50%)}
+.source{position:absolute;bottom:22px;width:100%;text-align:center;font-size:12pt;font-style:italic;opacity:.7}
+</style>
+</head>
+<body>
+<div class="logo">tf.</div>
+<div class="title">How College Students Spend</div>
+<div class="metric">$85 billion in total annual purchasing power</div>
+<div class="chart-wrap">
+  <canvas id="pie" width="680" height="450"></canvas>
+</div>
+<div class="source">Source: thefacebook.com Media Kit, 2004</div>
+<script>
+window.onload=function(){
+  var c=document.getElementById('pie'),ctx=c.getContext('2d');
+  var cx=290,cy=215,r=150;
+  var data=[
+    {v:21,l:'Restaurants & Food',s:'$21B',col:'#FFFFFF'},
+    {v:9, l:'Automobiles',       s:'$9B', col:'#87CEEB'},
+    {v:5, l:'Clothes',           s:'$5B', col:'#A8D0E8'},
+    {v:4, l:'Phones',            s:'$4B', col:'#C5DFF4'},
+    {v:46,l:'Other amenities',   s:'$46B',col:'rgba(255,255,255,0.22)'}
+  ];
+  var lpos=[
+    {x:475,y:52, a:'left'},
+    {x:478,y:270,a:'left'},
+    {x:452,y:378,a:'left'},
+    {x:390,y:418,a:'left'},
+    {x:22, y:230,a:'right'}
+  ];
+  var ang=-Math.PI/2,total=85;
+  data.forEach(function(d,i){
+    var sw=(d.v/total)*Math.PI*2,mid=ang+sw/2;
+    ctx.beginPath();ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,r,ang,ang+sw);ctx.closePath();
+    ctx.fillStyle=d.col;ctx.fill();
+    ctx.strokeStyle='#4A6FA5';ctx.lineWidth=2;ctx.stroke();
+    var x1=cx+(r+6)*Math.cos(mid),y1=cy+(r+6)*Math.sin(mid);
+    var lp=lpos[i];
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(lp.x,lp.y);
+    ctx.strokeStyle='rgba(255,255,255,0.45)';ctx.lineWidth=1;ctx.stroke();
+    var tx=lp.a==='left'?lp.x+4:lp.x-4;
+    ctx.textAlign=lp.a;ctx.fillStyle='#FFFFFF';
+    ctx.font='bold 13px Arial';ctx.fillText(d.s,tx,lp.y-3);
+    ctx.font='12px Arial';ctx.fillText(d.l,tx,lp.y+14);
+    ang+=sw;
+  });
+};
+</script>
+</body>
+</html>

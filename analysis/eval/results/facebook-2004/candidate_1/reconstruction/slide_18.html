@@ -1,0 +1,86 @@
+<!-- slide_18.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.slide { width: 1280px; height: 720px; display: flex; flex-direction: column; }
+.title-bar {
+  background: #3B5998; height: 90px;
+  display: flex; align-items: center; padding: 0 60px; flex-shrink: 0;
+}
+.title-bar h1 { color: #FFFFFF; font-size: 32px; font-weight: 700; }
+.content {
+  flex: 1; padding: 28px 60px 40px;
+  display: flex; flex-direction: column;
+}
+table { border-collapse: collapse; width: 78%; }
+thead tr th {
+  background: #3B5998; color: #FFFFFF;
+  padding: 11px 18px; font-size: 13px; font-weight: 700; text-align: left;
+}
+tbody tr:nth-child(odd) td { background: #FFFFFF; }
+tbody tr:nth-child(even) td { background: #E8F0F8; }
+td {
+  padding: 11px 18px; font-size: 14px; color: #1A1A1A;
+  border-bottom: 1px solid #C8DCF0;
+}
+td.dim { font-weight: 700; color: #3B5998; font-size: 13px; }
+.source {
+  margin-top: auto; font-size: 12px; font-style: italic;
+  color: #888; text-align: right;
+}
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="title-bar"><h1>Ad Formats</h1></div>
+  <div class="content">
+    <table>
+      <thead>
+        <tr>
+          <th>Format</th>
+          <th>Dimensions</th>
+          <th>Placement Type</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Leaderboard Banner</td>
+          <td class="dim">468 × 60</td>
+          <td>Horizontal / Top of page</td>
+        </tr>
+        <tr>
+          <td>Vertical Banner</td>
+          <td class="dim">120 × 240</td>
+          <td>Sidebar</td>
+        </tr>
+        <tr>
+          <td>Button Banner</td>
+          <td class="dim">120 × 90</td>
+          <td>Sidebar</td>
+        </tr>
+        <tr>
+          <td>Square Button</td>
+          <td class="dim">125 × 125</td>
+          <td>Sidebar</td>
+        </tr>
+        <tr>
+          <td>Text Link</td>
+          <td class="dim">—</td>
+          <td>Contextual / In-content</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="source">Rates vary based on scope, duration, and targeting. Contact for details.</div>
+  </div>
+</div>
+</body>
+</html>

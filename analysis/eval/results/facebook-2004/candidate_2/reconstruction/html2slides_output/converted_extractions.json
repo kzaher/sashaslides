@@ -1,0 +1,3017 @@
+[
+  {
+    "slide": 1,
+    "file": "slide_01.html",
+    "elementCount": 5,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 52,
+          "w": 309.14,
+          "h": 14
+        },
+        "text": "thefacebook.com — Advertising Media Kit",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#4a6fa5",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.21
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 230,
+          "y": 321.67,
+          "w": 820,
+          "h": 76.66
+        },
+        "text": "\"Classes are being skipped. Work is ignored. Students are spending hours in front of the computer in utter fascination. Thefacebook.com craze has swept through campus.\"",
+        "style": {
+          "fontFamily": "Playfair Display",
+          "fontSize": 22,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#2c3040",
+          "textAlign": "center",
+          "lineHeight": 37.84,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1060.91,
+          "y": 615,
+          "w": 115.09,
+          "h": 16
+        },
+        "text": "The Stanford Daily",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#4a6fa5",
+          "textAlign": "right",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1060.91,
+          "y": 634,
+          "w": 115.09,
+          "h": 14
+        },
+        "text": "March 5, 2004",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#9aaac8",
+          "textAlign": "right",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 2,
+    "file": "slide_02.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#4a6fa5",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 52,
+          "w": 196.05,
+          "h": 14
+        },
+        "text": "What is thefacebook.com?",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.21
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 260,
+          "y": 260.81,
+          "w": 760,
+          "h": 198.38
+        },
+        "text": "An online directory that connects students, alumni, faculty, and staff through social networks at colleges and universities — built on courses, friendships, and campus life.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 32,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "center",
+          "lineHeight": 49.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 3,
+    "file": "slide_03.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 320.5,
+          "w": 212.7,
+          "h": 44
+        },
+        "text": "The platform",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 36,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#4a6fa5",
+          "textAlign": "start",
+          "lineHeight": 43.199999999999996,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.36
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 380.5,
+          "w": 341.45,
+          "h": 19
+        },
+        "text": "Profiles, social graph, and campus networking",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#9aaac8",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0.3
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1164.33,
+          "y": 654,
+          "w": 11.67,
+          "h": 14
+        },
+        "text": "01",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#c8dcf0",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 4,
+    "file": "slide_04.html",
+    "elementCount": 6,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 104,
+          "y": 184,
+          "w": 488,
+          "h": 255.5
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "Contact information",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          },
+          {
+            "text": "Relationship status",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          },
+          {
+            "text": "Political views",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          },
+          {
+            "text": "Clubs and jobs",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          },
+          {
+            "text": "Favorite music, books, movies, and quotes",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          },
+          {
+            "text": "Course schedule and concentration",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          },
+          {
+            "text": "Profile photo",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          }
+        ],
+        "columnCount": 1,
+        "listStyleType": "none",
+        "style": {
+          "fontFamily": "Times New Roman",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 688,
+          "y": 184,
+          "w": 488,
+          "h": 182.5
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "Linked school news articles mentioning the user",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          },
+          {
+            "text": "Last AIM away message",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          },
+          {
+            "text": "Last campus access location",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          },
+          {
+            "text": "Visualized friendship network",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          },
+          {
+            "text": "Shortest connection path to any other user",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 15,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 22.5,
+            "spacingAfter": 14
+          }
+        ],
+        "columnCount": 1,
+        "listStyleType": "none",
+        "style": {
+          "fontFamily": "Times New Roman",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 72,
+          "w": 1072,
+          "h": 34
+        },
+        "text": "User profiles",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#2c3040",
+          "textAlign": "start",
+          "lineHeight": 33.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 150,
+          "w": 488,
+          "h": 14
+        },
+        "text": "User-declared",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#4a6fa5",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.21
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 688,
+          "y": 150,
+          "w": 488,
+          "h": 14
+        },
+        "text": "Auto-populated by the system",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#4a6fa5",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.21
+        }
+      }
+    ]
+  },
+  {
+    "slide": 5,
+    "file": "slide_05.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 244.45,
+          "w": 660,
+          "h": 34
+        },
+        "text": "Every connection has a path.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#2c3040",
+          "textAlign": "start",
+          "lineHeight": 33.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 310.45,
+          "w": 680,
+          "h": 165.09
+        },
+        "text": "Within each school, users navigate the network through three discovery tools: a random people browser, complete course rosters for any class, and a full-parameter search engine. Every friendship requires mutual confirmation. The platform automatically visualizes each user's social graph and traces the shortest connection path between any two people on the network. Separate friendship lists extend the same graph across every school in the directory.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#3a4a65",
+          "textAlign": "start",
+          "lineHeight": 27.52,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 6,
+    "file": "slide_06.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#4a6fa5",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 320.5,
+          "w": 227.41,
+          "h": 44
+        },
+        "text": "The audience",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 36,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 43.199999999999996,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.36
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 380.5,
+          "w": 364.03,
+          "h": 19
+        },
+        "text": "15 million students. $85 billion in purchasing power.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1162.11,
+          "y": 654,
+          "w": 13.89,
+          "h": 14
+        },
+        "text": "02",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 7,
+    "file": "slide_07.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 241.2,
+          "w": 700,
+          "h": 68
+        },
+        "text": "The most valuable demographic with the least targeted advertising.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#2c3040",
+          "textAlign": "start",
+          "lineHeight": 33.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 341.2,
+          "w": 680,
+          "h": 137.58
+        },
+        "text": "There are 15 million college students in the United States with a combined purchasing power exceeding $85 billion annually. They are early adopters, brand-formers, and active job seekers — making financial decisions for the first time. Until now, no advertising platform has been able to reach them on the basis of what they study, where they live on campus, or who they know.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#3a4a65",
+          "textAlign": "start",
+          "lineHeight": 27.52,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 8,
+    "file": "slide_08.html",
+    "elementCount": 10,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 269.31,
+          "w": 1072,
+          "h": 19
+        },
+        "text": "U.S. college market — purchasing power",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#4a6fa5",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.35
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 124,
+          "y": 344.31,
+          "w": 228,
+          "h": 56
+        },
+        "text": "15M",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 56,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#3b5998",
+          "textAlign": "center",
+          "lineHeight": 56,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -1.12
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 392,
+          "y": 344.31,
+          "w": 228,
+          "h": 56
+        },
+        "text": "$85B",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 56,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#3b5998",
+          "textAlign": "center",
+          "lineHeight": 56,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -1.12
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 660,
+          "y": 344.31,
+          "w": 228,
+          "h": 56
+        },
+        "text": "$21B",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 56,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#3b5998",
+          "textAlign": "center",
+          "lineHeight": 56,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -1.12
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 928,
+          "y": 344.31,
+          "w": 228,
+          "h": 56
+        },
+        "text": "$9B",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 56,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#3b5998",
+          "textAlign": "center",
+          "lineHeight": 56,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -1.12
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 124,
+          "y": 414.31,
+          "w": 228,
+          "h": 36.38
+        },
+        "text": "college students\nin the United States",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#6a7a96",
+          "textAlign": "center",
+          "lineHeight": 18.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 392,
+          "y": 414.31,
+          "w": 228,
+          "h": 36.38
+        },
+        "text": "estimated annual\npurchasing power",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#6a7a96",
+          "textAlign": "center",
+          "lineHeight": 18.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 660,
+          "y": 414.31,
+          "w": 228,
+          "h": 36.38
+        },
+        "text": "spent annually\non restaurants & food",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#6a7a96",
+          "textAlign": "center",
+          "lineHeight": 18.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 928,
+          "y": 414.31,
+          "w": 228,
+          "h": 36.38
+        },
+        "text": "spent annually\non automobiles",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#6a7a96",
+          "textAlign": "center",
+          "lineHeight": 18.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 9,
+    "file": "slide_09.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "table",
+        "bounds": {
+          "x": 104,
+          "y": 241.02,
+          "w": 760,
+          "h": 299.97
+        },
+        "rows": [
+          [
+            {
+              "text": "CATEGORY",
+              "isHeader": true,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 12,
+                "fontWeight": "bold",
+                "color": "#ffffff",
+                "bgColor": "#4a6fa5",
+                "textAlign": "left",
+                "borderColor": "#ffffff",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "ANNUAL SPEND",
+              "isHeader": true,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 12,
+                "fontWeight": "bold",
+                "color": "#ffffff",
+                "bgColor": "#4a6fa5",
+                "textAlign": "left",
+                "borderColor": "#ffffff",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Restaurants and food",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "$21 billion",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "bold",
+                "color": "#3b5998",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#3b5998",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Automobiles",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "$9 billion",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "bold",
+                "color": "#3b5998",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#3b5998",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Clothing",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "$5 billion",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "bold",
+                "color": "#3b5998",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#3b5998",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Phones",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "$4 billion",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "bold",
+                "color": "#3b5998",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#3b5998",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Other amenities",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "$46 billion",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "bold",
+                "color": "#3b5998",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#3b5998",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Total purchasing power",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "bold",
+                "color": "#2c3040",
+                "bgColor": "#e8f0f8",
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "$85 billion",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 14,
+                "fontWeight": "bold",
+                "color": "#3b5998",
+                "bgColor": "#e8f0f8",
+                "textAlign": "start",
+                "borderColor": "#3b5998",
+                "borderWidth": 0
+              }
+            }
+          ]
+        ],
+        "bgColor": null,
+        "borderColor": "#808080"
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 179.02,
+          "w": 1072,
+          "h": 26
+        },
+        "text": "How $85 billion in college spending breaks down annually",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 22,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#2c3040",
+          "textAlign": "start",
+          "lineHeight": 26.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 10,
+    "file": "slide_10.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 320.5,
+          "w": 210.25,
+          "h": 44
+        },
+        "text": "Engagement",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 36,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#4a6fa5",
+          "textAlign": "start",
+          "lineHeight": 43.199999999999996,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.36
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 380.5,
+          "w": 298.89,
+          "h": 19
+        },
+        "text": "Usage, retention, and growth since launch",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#9aaac8",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1162,
+          "y": 654,
+          "w": 14,
+          "h": 14
+        },
+        "text": "03",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#c8dcf0",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 11,
+    "file": "slide_11.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#3b5998",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 455.25,
+          "y": 255,
+          "w": 369.5,
+          "h": 112
+        },
+        "text": "70,000",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 112,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 112,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -4.48
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 501.38,
+          "y": 387,
+          "w": 277.25,
+          "h": 26
+        },
+        "text": "registered users in 60 days",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 22,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "center",
+          "lineHeight": 26.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 446.06,
+          "y": 449,
+          "w": 387.86,
+          "h": 16
+        },
+        "text": "Launched February 4, 2004 — as of March 2004",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.04
+        }
+      }
+    ]
+  },
+  {
+    "slide": 12,
+    "file": "slide_12.html",
+    "elementCount": 10,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 270.81,
+          "w": 1072,
+          "h": 16
+        },
+        "text": "Engagement — as of March 2004",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#4a6fa5",
+          "textAlign": "start",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.3
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 116,
+          "y": 346.81,
+          "w": 244,
+          "h": 52
+        },
+        "text": "65%",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 52,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#3b5998",
+          "textAlign": "center",
+          "lineHeight": 52,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -1.3
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 384,
+          "y": 346.81,
+          "w": 244,
+          "h": 52
+        },
+        "text": "95%",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 52,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#3b5998",
+          "textAlign": "center",
+          "lineHeight": 52,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -1.3
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 652,
+          "y": 346.81,
+          "w": 244,
+          "h": 52
+        },
+        "text": "3M",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 52,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#3b5998",
+          "textAlign": "center",
+          "lineHeight": 52,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -1.3
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 920,
+          "y": 346.81,
+          "w": 244,
+          "h": 52
+        },
+        "text": "87%",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 52,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#3b5998",
+          "textAlign": "center",
+          "lineHeight": 52,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -1.3
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 116,
+          "y": 412.81,
+          "w": 244,
+          "h": 36.38
+        },
+        "text": "daily unique\nusers",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#6a7a96",
+          "textAlign": "center",
+          "lineHeight": 18.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 384,
+          "y": 412.81,
+          "w": 244,
+          "h": 36.38
+        },
+        "text": "monthly unique\nusers",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#6a7a96",
+          "textAlign": "center",
+          "lineHeight": 18.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 652,
+          "y": 412.81,
+          "w": 244,
+          "h": 36.38
+        },
+        "text": "daily\npageviews",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#6a7a96",
+          "textAlign": "center",
+          "lineHeight": 18.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 920,
+          "y": 412.81,
+          "w": 244,
+          "h": 36.38
+        },
+        "text": "of users are\ncurrent students",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#6a7a96",
+          "textAlign": "center",
+          "lineHeight": 18.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 13,
+    "file": "slide_13.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 290,
+          "y": 313.31,
+          "w": 700,
+          "h": 93.38
+        },
+        "text": "\"I have a new addiction. It is powerful. It is disturbing. It is thefacebook.com.\"",
+        "style": {
+          "fontFamily": "Playfair Display",
+          "fontSize": 28,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#2c3040",
+          "textAlign": "center",
+          "lineHeight": 46.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1023.75,
+          "y": 615,
+          "w": 152.25,
+          "h": 16
+        },
+        "text": "The Daily Pennsylvanian",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#4a6fa5",
+          "textAlign": "right",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1023.75,
+          "y": 634,
+          "w": 152.25,
+          "h": 14
+        },
+        "text": "March 25, 2004",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#9aaac8",
+          "textAlign": "right",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 14,
+    "file": "slide_14.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#4a6fa5",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 243.02,
+          "w": 1072,
+          "h": 14
+        },
+        "text": "Growth trajectory — April 2004",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.21
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 289.02,
+          "w": 720,
+          "h": 100.78
+        },
+        "text": "10,000 new members joined in the first week of April 2004.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 36,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 50.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 425.8,
+          "w": 540,
+          "h": 51.19
+        },
+        "text": "Daily unique users and pageviews are growing proportionally with the user base. Growth is not slowing.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 25.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 15,
+    "file": "slide_15.html",
+    "elementCount": 5,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#4a6fa5",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 300.5,
+          "w": 210.52,
+          "h": 44
+        },
+        "text": "The network",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 36,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 43.199999999999996,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.36
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 364.5,
+          "w": 221.92,
+          "h": 26
+        },
+        "text": "12 schools in 73 days",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 22,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 26.4,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.22
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 400.5,
+          "w": 154.27,
+          "h": 19
+        },
+        "text": "Feb 4 — Apr 19, 2004",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1161.67,
+          "y": 654,
+          "w": 14.33,
+          "h": 14
+        },
+        "text": "04",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#ffffff",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 16,
+    "file": "slide_16.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "table",
+        "bounds": {
+          "x": 104,
+          "y": 260.44,
+          "w": 516,
+          "h": 251.13
+        },
+        "rows": [
+          [
+            {
+              "text": "SCHOOL",
+              "isHeader": true,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 11,
+                "fontWeight": "bold",
+                "color": "#ffffff",
+                "bgColor": "#4a6fa5",
+                "textAlign": "left",
+                "borderColor": "#ffffff",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "LAUNCH DATE",
+              "isHeader": true,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 11,
+                "fontWeight": "bold",
+                "color": "#ffffff",
+                "bgColor": "#4a6fa5",
+                "textAlign": "left",
+                "borderColor": "#ffffff",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Harvard University",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Feb 4, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Stanford University",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Feb 26, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "MIT",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Mar 14, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "New York University",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Mar 21, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Boston University",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Mar 21, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "UC Berkeley",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Apr 4, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ]
+        ],
+        "bgColor": null,
+        "borderColor": "#808080"
+      },
+      {
+        "type": "table",
+        "bounds": {
+          "x": 660,
+          "y": 260.44,
+          "w": 516,
+          "h": 251.13
+        },
+        "rows": [
+          [
+            {
+              "text": "SCHOOL",
+              "isHeader": true,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 11,
+                "fontWeight": "bold",
+                "color": "#ffffff",
+                "bgColor": "#4a6fa5",
+                "textAlign": "left",
+                "borderColor": "#ffffff",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "LAUNCH DATE",
+              "isHeader": true,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 11,
+                "fontWeight": "bold",
+                "color": "#ffffff",
+                "bgColor": "#4a6fa5",
+                "textAlign": "left",
+                "borderColor": "#ffffff",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Duke University",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Apr 11, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Georgetown University",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Apr 11, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "University of Virginia",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Apr 11, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Tufts University",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Apr 19, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Boston College",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Apr 19, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ],
+          [
+            {
+              "text": "Northeastern University",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#2c3040",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#2c3040",
+                "borderWidth": 0
+              }
+            },
+            {
+              "text": "Apr 19, 2004",
+              "isHeader": false,
+              "colspan": 1,
+              "rowspan": 1,
+              "style": {
+                "fontFamily": "Inter",
+                "fontSize": 13,
+                "fontWeight": "normal",
+                "color": "#4a6fa5",
+                "bgColor": null,
+                "textAlign": "start",
+                "borderColor": "#4a6fa5",
+                "borderWidth": 0
+              }
+            }
+          ]
+        ],
+        "bgColor": null,
+        "borderColor": "#808080"
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 208.44,
+          "w": 1072,
+          "h": 24
+        },
+        "text": "Schools launched February 4 – April 19, 2004",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 20,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#2c3040",
+          "textAlign": "start",
+          "lineHeight": 24,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 17,
+    "file": "slide_17.html",
+    "elementCount": 4,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 320.5,
+          "w": 189.3,
+          "h": 44
+        },
+        "text": "Advertising",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 36,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#4a6fa5",
+          "textAlign": "start",
+          "lineHeight": 43.199999999999996,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": -0.36
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 380.5,
+          "w": 409.56,
+          "h": 19
+        },
+        "text": "Targeting parameters, ad formats, and campaign services",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#9aaac8",
+          "textAlign": "start",
+          "lineHeight": 18,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1162.27,
+          "y": 654,
+          "w": 13.73,
+          "h": 14
+        },
+        "text": "05",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#c8dcf0",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 18,
+    "file": "slide_18.html",
+    "elementCount": 3,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 227.45,
+          "w": 720,
+          "h": 68
+        },
+        "text": "Targeting built on declared identity, not inferred behavior.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#2c3040",
+          "textAlign": "start",
+          "lineHeight": 33.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 327.45,
+          "w": 680,
+          "h": 165.09
+        },
+        "text": "thefacebook.com ad targeting draws on data no other platform has access to: students' declared academic identity — school, courses, concentration, class year — combined with explicit social graph connections and verified institutional affiliations. Campaigns can reach users at their dorm, work, home, or library, and can be targeted on any combination of 17 parameters. We work directly with advertisers to identify the most effective placements for each campaign goal.",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#3a4a65",
+          "textAlign": "start",
+          "lineHeight": 27.52,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  },
+  {
+    "slide": 19,
+    "file": "slide_19.html",
+    "elementCount": 6,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 104,
+          "y": 165,
+          "w": 496,
+          "h": 272.67
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "College / University",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Degree type",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Concentration",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Courses taken",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Class year",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "House / Dormitory",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Age",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Gender",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Sexual orientation",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          }
+        ],
+        "columnCount": 1,
+        "listStyleType": "none",
+        "style": {
+          "fontFamily": "Times New Roman",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "list",
+        "bounds": {
+          "x": 680,
+          "y": 165,
+          "w": 496,
+          "h": 242.38
+        },
+        "ordered": false,
+        "items": [
+          {
+            "text": "Home city / state / zip code",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Relationship / dating interests",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Personal interests",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Clubs and jobs",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Political bent",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Intra-school friend count",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Inter-school friend count",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          },
+          {
+            "text": "Site usage",
+            "level": 0,
+            "fontFamily": "Inter",
+            "fontSize": 14,
+            "fontWeight": "normal",
+            "color": "#2c3040",
+            "lineHeight": 20.3,
+            "spacingAfter": 10
+          }
+        ],
+        "columnCount": 1,
+        "listStyleType": "none",
+        "style": {
+          "fontFamily": "Times New Roman",
+          "fontSize": 16,
+          "color": "#000000"
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 64,
+          "w": 1072,
+          "h": 29
+        },
+        "text": "17 targeting parameters — combinable on any campaign",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 24,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#2c3040",
+          "textAlign": "start",
+          "lineHeight": 28.799999999999997,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 133,
+          "w": 496,
+          "h": 14
+        },
+        "text": "Academic & demographic",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#4a6fa5",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.21
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 680,
+          "y": 133,
+          "w": 496,
+          "h": 14
+        },
+        "text": "Social & behavioral",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#4a6fa5",
+          "textAlign": "start",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": "uppercase",
+          "letterSpacing": 1.21
+        }
+      }
+    ]
+  },
+  {
+    "slide": 20,
+    "file": "slide_20.html",
+    "elementCount": 6,
+    "elements": [
+      {
+        "type": "rect",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "w": 1280,
+          "h": 720
+        },
+        "fill": "#ffffff",
+        "borderColor": "#000000",
+        "borderWidth": 0,
+        "borderRadius": 0
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 240,
+          "y": 303.88,
+          "w": 800,
+          "h": 112.25
+        },
+        "text": "\"The wonderful thing about The Facebook is its ability to connect so many people through so many different avenues, including courses, interests, houses, politics, concentration, and favourite movies.\"",
+        "style": {
+          "fontFamily": "Playfair Display",
+          "fontSize": 21,
+          "fontWeight": "normal",
+          "fontStyle": "italic",
+          "color": "#2c3040",
+          "textAlign": "center",
+          "lineHeight": 36.75,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 609.63,
+          "w": 244.5,
+          "h": 19.19
+        },
+        "text": "Eduardo Saverin, CFO",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "bold",
+          "fontStyle": "normal",
+          "color": "#6a7a96",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1016.8,
+          "y": 615,
+          "w": 159.2,
+          "h": 16
+        },
+        "text": "The Harvard Independent",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#4a6fa5",
+          "textAlign": "right",
+          "lineHeight": 15.6,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 104,
+          "y": 628.81,
+          "w": 244.5,
+          "h": 19.19
+        },
+        "text": "thefacebook.com — Cambridge, MA 02138",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#9aaac8",
+          "textAlign": "start",
+          "lineHeight": 19.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      },
+      {
+        "type": "text",
+        "bounds": {
+          "x": 1016.8,
+          "y": 634,
+          "w": 159.2,
+          "h": 14
+        },
+        "text": "March 4, 2004",
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal",
+          "fontStyle": "normal",
+          "color": "#9aaac8",
+          "textAlign": "right",
+          "lineHeight": 13.2,
+          "textDecoration": null,
+          "textTransform": null,
+          "letterSpacing": 0
+        }
+      }
+    ]
+  }
+]

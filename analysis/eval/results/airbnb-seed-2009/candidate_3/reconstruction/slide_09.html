@@ -1,0 +1,96 @@
+<!-- slide_09.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Helvetica Neue', Arial, system-ui, sans-serif;
+  padding: 60px 80px 40px 80px;
+}
+.title {
+  font-size: 34px; font-weight: 700; color: #333333; margin-bottom: 10px;
+}
+.title-underline {
+  width: 48px; height: 3px; background: #29B6F6; margin-bottom: 24px;
+}
+.matrix-wrap {
+  position: relative; width: 1120px; height: 520px;
+}
+/* axes */
+.axis-h {
+  position: absolute; top: 50%; left: 40px; right: 40px;
+  height: 1px; background: #CCCCCC; transform: translateY(-50%);
+}
+.axis-v {
+  position: absolute; left: 50%; top: 20px; bottom: 20px;
+  width: 1px; background: #CCCCCC; transform: translateX(-50%);
+}
+/* axis labels */
+.lbl {
+  position: absolute; font-size: 13px; font-weight: 700;
+  color: #999999; text-transform: uppercase; letter-spacing: 1px;
+}
+.lbl-top    { top: 4px; left: 50%; transform: translateX(-50%); }
+.lbl-bottom { bottom: 4px; left: 50%; transform: translateX(-50%); }
+.lbl-left   { top: 50%; left: 0; transform: translateY(-50%); }
+.lbl-right  { top: 50%; right: 0; transform: translateY(-50%); }
+/* competitor dots */
+.competitor {
+  position: absolute; font-size: 12px; color: #888888;
+  white-space: nowrap; transform: translate(-50%, -50%);
+}
+.competitor::before {
+  content: ''; display: block; width: 6px; height: 6px;
+  border-radius: 50%; background: #CCCCCC;
+  margin: 0 auto 4px auto;
+}
+/* brand dot */
+.brand {
+  position: absolute; font-size: 14px; font-weight: 700;
+  color: #29B6F6; white-space: nowrap;
+  transform: translate(-50%, -50%);
+}
+.brand::before {
+  content: ''; display: block; width: 12px; height: 12px;
+  border-radius: 50%; background: #29B6F6;
+  margin: 0 auto 4px auto;
+}
+</style>
+</head>
+<body>
+  <div class="title">Competitive Position</div>
+  <div class="title-underline"></div>
+  <div class="matrix-wrap">
+    <div class="axis-h"></div>
+    <div class="axis-v"></div>
+    <div class="lbl lbl-top">AFFORDABLE</div>
+    <div class="lbl lbl-bottom">EXPENSIVE</div>
+    <div class="lbl lbl-left">OFFLINE</div>
+    <div class="lbl lbl-right">ONLINE</div>
+
+    <!-- Offline / Affordable -->
+    <div class="competitor" style="left:22%; top:22%;">CouchSurfing</div>
+    <!-- Offline-ish / Affordable -->
+    <div class="competitor" style="left:38%; top:32%;">Craigslist</div>
+    <!-- Offline / Expensive -->
+    <div class="competitor" style="left:18%; top:72%;">rentahome</div>
+
+    <!-- Online / Affordable -->
+    <div class="competitor" style="left:72%; top:28%;">Hostels.com</div>
+
+    <!-- Online / Expensive -->
+    <div class="competitor" style="left:78%; top:68%;">hotels.com</div>
+    <div class="competitor" style="left:68%; top:78%;">Orbitz</div>
+    <div class="competitor" style="left:82%; top:78%;">BedandBreakfast.com</div>
+    <div class="competitor" style="left:72%; top:88%;">VRBO</div>
+    <div class="competitor" style="left:60%; top:72%;">rentobi.com</div>
+
+    <!-- AirBed&Breakfast: affordable + online -->
+    <div class="brand" style="left:62%; top:18%;">AirBed&amp;Breakfast</div>
+  </div>
+</body>
+</html>

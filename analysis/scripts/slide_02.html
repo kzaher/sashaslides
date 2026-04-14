@@ -1,0 +1,116 @@
+<!-- slide_02.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    width:1280px; height:720px;
+    background:#E8ECF0;
+    font-family:"Helvetica Neue",Arial,sans-serif;
+    font-weight:300;
+    overflow:hidden;
+    position:relative;
+  }
+</style>
+</head>
+<body>
+  <!-- Zone A: title -->
+  <div style="position:absolute;left:80px;top:44px;">
+    <span style="font-size:44px;font-weight:300;color:#333;letter-spacing:-0.02em;">Bitcoin Across the Globe</span>
+  </div>
+
+  <!-- Zone B: full-width map visualization -->
+  <svg style="position:absolute;left:0;top:100px;" width="1280" height="620" viewBox="0 0 1280 620" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="us-glow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#4A90D9" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="#4A90D9" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="eu-glow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#4A90D9" stop-opacity="0.28"/>
+        <stop offset="100%" stop-color="#4A90D9" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="asia-glow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#4A90D9" stop-opacity="0.30"/>
+        <stop offset="100%" stop-color="#4A90D9" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+
+    <!-- Lat/lon grid lines (faint) -->
+    <!-- Equator at y=363, 30N at y=225, 60N at y=90, 30S at y=498 -->
+    <line x1="0" y1="90" x2="1280" y2="90" stroke="#C5CDD6" stroke-width="0.8" stroke-dasharray="4,8"/>
+    <line x1="0" y1="225" x2="1280" y2="225" stroke="#C5CDD6" stroke-width="0.8" stroke-dasharray="4,8"/>
+    <line x1="0" y1="363" x2="1280" y2="363" stroke="#C5CDD6" stroke-width="1.2" stroke-dasharray="6,8"/>
+    <line x1="0" y1="498" x2="1280" y2="498" stroke="#C5CDD6" stroke-width="0.8" stroke-dasharray="4,8"/>
+    <!-- Vertical lon lines at 60deg intervals -->
+    <line x1="213" y1="0" x2="213" y2="620" stroke="#C5CDD6" stroke-width="0.8" stroke-dasharray="4,8"/>
+    <line x1="427" y1="0" x2="427" y2="620" stroke="#C5CDD6" stroke-width="0.8" stroke-dasharray="4,8"/>
+    <line x1="640" y1="0" x2="640" y2="620" stroke="#C5CDD6" stroke-width="1.2" stroke-dasharray="6,8"/>
+    <line x1="853" y1="0" x2="853" y2="620" stroke="#C5CDD6" stroke-width="0.8" stroke-dasharray="4,8"/>
+    <line x1="1067" y1="0" x2="1067" y2="620" stroke="#C5CDD6" stroke-width="0.8" stroke-dasharray="4,8"/>
+    <!-- Equator label -->
+    <text x="655" y="360" font-family="Helvetica Neue,Arial,sans-serif" font-size="11" fill="#B0B8C4">Equator</text>
+
+    <!-- Simplified continent shapes (fill:#CDD6DF) -->
+    <!-- North America -->
+    <path d="M 52,45 L 115,22 L 198,18 L 265,55 L 300,70 L 350,100 L 445,135 L 410,160 L 385,185 L 368,215 L 352,252 L 330,238 L 308,250 L 298,268 L 320,278 L 338,308 L 318,298 L 265,292 L 235,302 L 200,320 L 180,315 L 162,295 L 148,265 L 138,235 L 128,200 L 118,165 L 110,135 L 104,108 L 88,80 L 62,58 Z"
+          fill="#CDD6DF" stroke="none"/>
+    <!-- Central America appendage -->
+    <path d="M 298,268 L 310,280 L 316,300 L 310,310 L 302,305 L 295,290 Z" fill="#CDD6DF"/>
+    <!-- South America -->
+    <path d="M 350,300 L 372,288 L 392,292 L 412,308 L 422,335 L 428,370 L 422,410 L 412,448 L 396,480 L 375,505 L 355,520 L 338,530 L 328,522 L 322,505 L 330,490 L 340,468 L 332,445 L 315,420 L 302,385 L 295,348 L 298,318 L 315,302 L 335,296 Z"
+          fill="#CDD6DF" stroke="none"/>
+    <!-- Europe (small) -->
+    <path d="M 600,200 L 612,175 L 622,155 L 630,132 L 640,110 L 655,105 L 668,98 L 682,88 L 694,68 L 705,45 L 715,55 L 718,75 L 712,100 L 720,118 L 730,128 L 738,142 L 732,158 L 725,170 L 732,180 L 742,185 L 750,172 L 758,162 L 768,158 L 772,168 L 762,182 L 748,192 L 735,200 L 722,210 L 708,218 L 695,222 L 678,228 L 665,235 L 650,240 L 635,235 L 620,228 L 608,215 Z"
+          fill="#CDD6DF" stroke="none"/>
+    <!-- Africa -->
+    <path d="M 608,240 L 635,232 L 662,236 L 688,248 L 714,265 L 735,290 L 750,320 L 758,358 L 755,398 L 745,435 L 730,462 L 710,485 L 688,500 L 662,508 L 638,505 L 615,492 L 598,470 L 585,442 L 578,410 L 575,372 L 578,335 L 588,300 L 600,272 Z"
+          fill="#CDD6DF" stroke="none"/>
+    <!-- Asia (large) -->
+    <path d="M 752,185 L 795,148 L 848,108 L 910,68 L 970,42 L 1042,25 L 1118,32 L 1182,55 L 1230,95 L 1262,142 L 1272,192 L 1268,238 L 1255,272 L 1232,295 L 1205,315 L 1175,328 L 1138,338 L 1095,352 L 1055,372 L 1008,390 L 965,402 L 922,408 L 885,425 L 858,438 L 832,432 L 808,422 L 782,412 L 765,395 L 748,378 L 735,358 L 725,335 L 718,308 L 715,278 L 722,255 L 732,235 L 742,215 Z"
+          fill="#CDD6DF" stroke="none"/>
+    <!-- Australia -->
+    <path d="M 1048,375 L 1088,355 L 1128,352 L 1162,362 L 1188,382 L 1202,412 L 1200,445 L 1188,468 L 1162,482 L 1122,488 L 1082,478 L 1055,458 L 1038,430 L 1035,402 L 1040,385 Z"
+          fill="#CDD6DF" stroke="none"/>
+
+    <!-- ADOPTION GLOW HALOS -->
+    <ellipse cx="285" cy="185" rx="130" ry="105" fill="url(#us-glow)"/>
+    <ellipse cx="648" cy="155" rx="95" ry="80" fill="url(#eu-glow)"/>
+    <ellipse cx="1068" cy="195" rx="110" ry="90" fill="url(#asia-glow)"/>
+
+    <!-- ADOPTION CIRCLES -->
+    <!-- North America / US -->
+    <circle cx="285" cy="185" r="52" fill="#4A90D9" opacity="0.22"/>
+    <circle cx="285" cy="185" r="30" fill="#4A90D9" opacity="0.50"/>
+    <circle cx="285" cy="185" r="12" fill="#4A90D9" opacity="0.90"/>
+    <!-- Europe -->
+    <circle cx="648" cy="155" rx="38" ry="38" r="38" fill="#4A90D9" opacity="0.20"/>
+    <circle cx="648" cy="155" r="22" fill="#4A90D9" opacity="0.45"/>
+    <circle cx="648" cy="155" r="9" fill="#4A90D9" opacity="0.90"/>
+    <!-- East Asia -->
+    <circle cx="1068" cy="195" r="44" fill="#4A90D9" opacity="0.21"/>
+    <circle cx="1068" cy="195" r="26" fill="#4A90D9" opacity="0.48"/>
+    <circle cx="1068" cy="195" r="10" fill="#4A90D9" opacity="0.90"/>
+
+    <!-- Small secondary dots -->
+    <circle cx="375" cy="200" r="5" fill="#4A90D9" opacity="0.55"/>
+    <circle cx="248" cy="160" r="4" fill="#4A90D9" opacity="0.45"/>
+    <circle cx="670" cy="175" r="4" fill="#4A90D9" opacity="0.50"/>
+    <circle cx="718" cy="188" r="3.5" fill="#4A90D9" opacity="0.40"/>
+    <circle cx="1042" cy="182" r="4" fill="#4A90D9" opacity="0.55"/>
+    <circle cx="1100" cy="210" r="3" fill="#4A90D9" opacity="0.40"/>
+
+    <!-- Region labels -->
+    <text x="285" y="252" font-family="Helvetica Neue,Arial,sans-serif" font-size="14" font-weight="600" fill="#2E6DB4" text-anchor="middle">North America</text>
+    <text x="648" y="215" font-family="Helvetica Neue,Arial,sans-serif" font-size="14" font-weight="600" fill="#2E6DB4" text-anchor="middle">Europe</text>
+    <text x="1068" y="258" font-family="Helvetica Neue,Arial,sans-serif" font-size="14" font-weight="600" fill="#2E6DB4" text-anchor="middle">East Asia</text>
+
+    <!-- Adoption value labels -->
+    <text x="285" y="272" font-family="Helvetica Neue,Arial,sans-serif" font-size="11" fill="#555" text-anchor="middle">$1.2M/day</text>
+    <text x="648" y="232" font-family="Helvetica Neue,Arial,sans-serif" font-size="11" fill="#555" text-anchor="middle">$0.5M/day</text>
+    <text x="1068" y="275" font-family="Helvetica Neue,Arial,sans-serif" font-size="11" fill="#555" text-anchor="middle">$0.3M/day</text>
+  </svg>
+</body>
+</html>

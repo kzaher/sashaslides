@@ -1,0 +1,119 @@
+{
+  "presentationId": "coinbase-seed-2012",
+  "presentationTitle": "Coinbase: Your Hosted Bitcoin Wallet (YC Demo Day 2012)",
+  "slideCount": 11,
+  "slides": [
+    {
+      "index": 1,
+      "title": "Coinbase - Your Hosted Bitcoin Wallet",
+      "layoutType": "titleWithProductScreenshots",
+      "bodyText": "Your hosted bitcoin wallet. Shows Coinbase logo with blue database icon, tagline, and three product screenshots (desktop browser, mobile phone, tablet) displaying the Coinbase wallet interface with transaction history.",
+      "dominantColors": ["#4A90D9", "#FFFFFF", "#C0C8D0", "#2E6DB4"],
+      "fontStyle": "Light sans-serif, large title in dark gray, 'bitcoin' highlighted in blue",
+      "whitespacePct": 30,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 2,
+      "title": "Bitcoin: A New Digital Currency",
+      "layoutType": "titleWithBulletList",
+      "bodyText": "Three key benefits of Bitcoin listed with icons: Instant (clock icon), International (globe icon), No Transaction Fees (prohibition sign icon).",
+      "dominantColors": ["#E8ECF0", "#333333", "#000000"],
+      "fontStyle": "Thin sans-serif (Helvetica Neue Light style), large centered title, large bullet text",
+      "whitespacePct": 65,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 3,
+      "title": "Bitcoin: A New Digital Currency",
+      "layoutType": "titleWithImage",
+      "bodyText": "Global adoption visualization showing a 3D globe with colored vertical bars/spikes emanating from various countries, indicating Bitcoin transaction activity worldwide. Concentration visible in US, Europe, and East Asia.",
+      "dominantColors": ["#E8ECF0", "#2E6DB4", "#4CAF50", "#F5DEB3"],
+      "fontStyle": "Thin sans-serif, same as slide 2",
+      "whitespacePct": 25,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 4,
+      "title": "Bitcoin Growth",
+      "layoutType": "titleWithChart",
+      "bodyText": "$2 million USD per day in transaction volume. Line chart showing Bitcoin transaction volume from March through August, with a strong upward trend and spikes reaching 50k-60k range by August.",
+      "dominantColors": ["#4A90D9", "#FFFFFF", "#E8ECF0", "#333333"],
+      "fontStyle": "Thin sans-serif title, small body text, chart labels in gray",
+      "whitespacePct": 20,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 5,
+      "title": "Early Adopters",
+      "layoutType": "wordCloud",
+      "bodyText": "Word cloud of Bitcoin early adopter use cases: international payments, virtual goods, games, developing world, peer-to-peer, remittance, micro-transactions, e-commerce. Words vary in size suggesting relative importance.",
+      "dominantColors": ["#E8ECF0", "#555555", "#333333"],
+      "fontStyle": "Thin sans-serif, varying font sizes to create word-cloud effect",
+      "whitespacePct": 50,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 6,
+      "title": "Too Difficult To Use",
+      "layoutType": "beforeAfterComparison",
+      "bodyText": "Compares 'Current Tools' (showing a clunky desktop client and command-line terminal) with 'Coinbase' (showing clean web and mobile interfaces). Demonstrates the UX gap Coinbase fills.",
+      "dominantColors": ["#E8ECF0", "#333333", "#4A90D9", "#000000"],
+      "fontStyle": "Thin sans-serif title, section labels in gray/blue",
+      "whitespacePct": 20,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 7,
+      "title": "Coinbase: A Hosted Bitcoin Wallet",
+      "layoutType": "titleWithProductScreenshots",
+      "bodyText": "Product demo showing the Coinbase web interface on desktop browser and mobile phone. Displays transaction history, balance, send/receive money features. Clean, consumer-friendly UI.",
+      "dominantColors": ["#E8ECF0", "#4A90D9", "#FFFFFF", "#333333"],
+      "fontStyle": "Thin sans-serif, large centered title",
+      "whitespacePct": 25,
+      "visualComplexity": "high"
+    },
+    {
+      "index": 8,
+      "title": "Coinbase : Bitcoin :: iTunes : MP3",
+      "layoutType": "analogy",
+      "bodyText": "Simple analogy slide positioning Coinbase's relationship to Bitcoin as equivalent to iTunes' relationship to MP3. 'Coinbase' and 'iTunes' in dark blue, 'Bitcoin' and 'MP3' in gray.",
+      "dominantColors": ["#E8ECF0", "#2E3A5F", "#888888"],
+      "fontStyle": "Thin sans-serif, large centered text, two-tone color for emphasis",
+      "whitespacePct": 75,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 9,
+      "title": "Coinbase Signups",
+      "layoutType": "titleWithChart",
+      "bodyText": "Daily Signups line chart from Aug 2 to Aug 18 showing exponential hockey-stick growth. Annotation: '20% Daily' growth rate. Chart shows signups accelerating from near-zero to ~4.5k daily.",
+      "dominantColors": ["#E8ECF0", "#4A90D9", "#333333"],
+      "fontStyle": "Thin sans-serif title, bold annotation text, chart labels in gray",
+      "whitespacePct": 30,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 10,
+      "title": "Coinbase Transactions",
+      "layoutType": "titleWithChart",
+      "bodyText": "Transaction Volume (BTC) line chart from Jul 23 to Aug 13 showing exponential growth in BTC transaction volume, peaking near 1,000 BTC. Annotation: '$65,000 USD in the first 5 weeks'.",
+      "dominantColors": ["#E8ECF0", "#4A90D9", "#333333"],
+      "fontStyle": "Thin sans-serif title, bold annotation text, chart labels in gray",
+      "whitespacePct": 30,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 11,
+      "title": "Coinbase - Closing / Contact",
+      "layoutType": "closingSlide",
+      "bodyText": "Coinbase logo with tagline 'Your hosted bitcoin wallet'. Scatter plot showing transaction/trade/currency data over time (about 2 minutes window). Contact: @coinbase.com displayed prominently at bottom with blue banner.",
+      "dominantColors": ["#E8ECF0", "#4A90D9", "#D9534F", "#333333"],
+      "fontStyle": "Mixed: logo font for brand, thin sans-serif for tagline, bold for contact URL",
+      "whitespacePct": 20,
+      "visualComplexity": "high"
+    }
+  ],
+  "extractedAt": "2026-04-12T00:00:00Z",
+  "source": "Coinbase YC Demo Day pitch deck, Summer 2012 (S12 batch)"
+}

@@ -1,0 +1,80 @@
+<!-- slide_02.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding-top: 80px;
+  }
+  h1 {
+    font-size: 40px; font-weight: 300; color: #333333;
+    text-align: center; margin-bottom: 60px;
+  }
+  .icons-row {
+    display: flex; gap: 140px; align-items: flex-start;
+    margin-top: 20px;
+  }
+  .icon-item {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    width: 140px;
+  }
+  .icon-wrap {
+    width: 64px; height: 64px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .icon-wrap svg { width: 56px; height: 56px; }
+  .label {
+    font-size: 26px; font-weight: 300; color: #333333;
+    text-align: center; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+  <h1>What is Bitcoin?</h1>
+  <div class="icons-row">
+    <div class="icon-item">
+      <div class="icon-wrap">
+        <svg viewBox="0 0 56 56" fill="none">
+          <circle cx="28" cy="28" r="24" fill="#4A90D9"/>
+          <path d="M18 28 L28 18 L38 28" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <line x1="28" y1="18" x2="28" y2="40" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="label">Instant</div>
+    </div>
+    <div class="icon-item">
+      <div class="icon-wrap">
+        <svg viewBox="0 0 56 56" fill="none">
+          <circle cx="28" cy="28" r="24" fill="#4A90D9"/>
+          <ellipse cx="28" cy="28" rx="10" ry="16" stroke="#fff" stroke-width="2.5"/>
+          <line x1="4" y1="28" x2="52" y2="28" stroke="#fff" stroke-width="2.5"/>
+          <path d="M10 18 Q28 22 46 18" stroke="#fff" stroke-width="2" fill="none"/>
+          <path d="M10 38 Q28 34 46 38" stroke="#fff" stroke-width="2" fill="none"/>
+        </svg>
+      </div>
+      <div class="label">International</div>
+    </div>
+    <div class="icon-item">
+      <div class="icon-wrap">
+        <svg viewBox="0 0 56 56" fill="none">
+          <circle cx="28" cy="28" r="24" fill="#4A90D9"/>
+          <line x1="16" y1="34" x2="40" y2="22" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="18" cy="22" r="5" fill="#fff"/>
+          <circle cx="38" cy="34" r="5" fill="#fff"/>
+          <line x1="18" y1="19" x2="18" y2="25" stroke="#4A90D9" stroke-width="2"/>
+          <line x1="38" y1="31" x2="38" y2="37" stroke="#4A90D9" stroke-width="2"/>
+        </svg>
+      </div>
+      <div class="label">No fees</div>
+    </div>
+  </div>
+</body>
+</html>

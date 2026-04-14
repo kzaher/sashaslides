@@ -1,0 +1,202 @@
+{
+  "runAt": "2026-04-12T18:22:44.015Z",
+  "presentationCount": 4,
+  "candidates": [
+    {
+      "candidate": 1,
+      "name": "decompose",
+      "avgRank": 2.5,
+      "avgScore": 6.625
+    },
+    {
+      "candidate": 2,
+      "name": "persona",
+      "avgRank": 1.25,
+      "avgScore": 8.1875
+    },
+    {
+      "candidate": 3,
+      "name": "generative",
+      "avgRank": 2.25,
+      "avgScore": 6.0625
+    }
+  ],
+  "perPresentation": [
+    {
+      "presId": "airbnb-seed-2009",
+      "slideCount": 14,
+      "candidates": [
+        {
+          "candidate": 1,
+          "slideCount": 14,
+          "scores": {
+            "layout": 5,
+            "content": 5,
+            "visual": 5,
+            "rules": 5,
+            "avg": 5
+          }
+        },
+        {
+          "candidate": 2,
+          "slideCount": 14,
+          "scores": {
+            "layout": 8,
+            "content": 8,
+            "visual": 7,
+            "rules": 7,
+            "avg": 7.5
+          }
+        },
+        {
+          "candidate": 3,
+          "slideCount": 14,
+          "scores": {
+            "layout": 8,
+            "content": 8,
+            "visual": 8,
+            "rules": 9,
+            "avg": 8.25
+          }
+        }
+      ],
+      "ranking": [
+        3,
+        2,
+        1
+      ]
+    },
+    {
+      "presId": "coinbase-seed-2012",
+      "slideCount": 11,
+      "candidates": [
+        {
+          "candidate": 1,
+          "slideCount": 11,
+          "scores": {
+            "layout": 8,
+            "content": 7,
+            "visual": 8,
+            "rules": 9,
+            "avg": 8
+          }
+        },
+        {
+          "candidate": 2,
+          "slideCount": 11,
+          "scores": {
+            "layout": 8,
+            "content": 9,
+            "visual": 9,
+            "rules": 8,
+            "avg": 8.5
+          }
+        },
+        {
+          "candidate": 3,
+          "slideCount": 7,
+          "scores": {
+            "layout": 5,
+            "content": 5,
+            "visual": 5,
+            "rules": 5,
+            "avg": 5
+          }
+        }
+      ],
+      "ranking": [
+        2,
+        1,
+        3
+      ]
+    },
+    {
+      "presId": "facebook-2004",
+      "slideCount": 20,
+      "candidates": [
+        {
+          "candidate": 1,
+          "slideCount": 20,
+          "scores": {
+            "layout": 5,
+            "content": 5,
+            "visual": 5,
+            "rules": 5,
+            "avg": 5
+          }
+        },
+        {
+          "candidate": 2,
+          "slideCount": 20,
+          "scores": {
+            "layout": 8,
+            "content": 7,
+            "visual": 8,
+            "rules": 8,
+            "avg": 7.75
+          }
+        },
+        {
+          "candidate": 3,
+          "slideCount": 16,
+          "scores": {
+            "layout": 7,
+            "content": 5,
+            "visual": 6,
+            "rules": 6,
+            "avg": 6
+          }
+        }
+      ],
+      "ranking": [
+        2,
+        3,
+        1
+      ]
+    },
+    {
+      "presId": "sequoia-template",
+      "slideCount": 13,
+      "candidates": [
+        {
+          "candidate": 1,
+          "slideCount": 13,
+          "scores": {
+            "layout": 9,
+            "content": 8,
+            "visual": 9,
+            "rules": 8,
+            "avg": 8.5
+          }
+        },
+        {
+          "candidate": 2,
+          "slideCount": 13,
+          "scores": {
+            "layout": 9,
+            "content": 9,
+            "visual": 9,
+            "rules": 9,
+            "avg": 9
+          }
+        },
+        {
+          "candidate": 3,
+          "slideCount": 13,
+          "scores": {
+            "layout": 5,
+            "content": 5,
+            "visual": 5,
+            "rules": 5,
+            "avg": 5
+          }
+        }
+      ],
+      "ranking": [
+        2,
+        1,
+        3
+      ]
+    }
+  ]
+}

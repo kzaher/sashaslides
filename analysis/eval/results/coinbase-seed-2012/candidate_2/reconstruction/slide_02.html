@@ -1,0 +1,67 @@
+<!-- slide_02.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .eyebrow { font-size: 14px; color: #888888; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 20px; }
+  .title { font-size: 52px; font-weight: 300; color: #333333; text-align: center; margin-bottom: 64px; }
+  .icons-row { display: flex; gap: 80px; align-items: flex-start; justify-content: center; }
+  .icon-block { display: flex; flex-direction: column; align-items: center; gap: 20px; width: 200px; }
+  .icon-circle {
+    width: 88px; height: 88px; border-radius: 50%;
+    background: #FFFFFF;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .icon-circle svg { width: 40px; height: 40px; }
+  .icon-label { font-size: 22px; font-weight: 700; color: #333333; letter-spacing: -0.2px; }
+  .icon-sub { font-size: 13px; color: #888888; text-align: center; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Bitcoin</div>
+  <div class="title">A new kind of money</div>
+  <div class="icons-row">
+    <div class="icon-block">
+      <div class="icon-circle">
+        <svg viewBox="0 0 40 40" fill="none">
+          <circle cx="20" cy="20" r="16" stroke="#4A90D9" stroke-width="2.5"/>
+          <polyline points="12,20 18,26 28,14" stroke="#4A90D9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="icon-label">Instant</div>
+      <div class="icon-sub">Transactions confirm in seconds, anywhere on earth</div>
+    </div>
+    <div class="icon-block">
+      <div class="icon-circle">
+        <svg viewBox="0 0 40 40" fill="none">
+          <circle cx="20" cy="20" r="15" stroke="#4A90D9" stroke-width="2.5"/>
+          <ellipse cx="20" cy="20" rx="7" ry="15" stroke="#4A90D9" stroke-width="2" stroke-dasharray="3 2"/>
+          <line x1="5" y1="20" x2="35" y2="20" stroke="#4A90D9" stroke-width="2"/>
+        </svg>
+      </div>
+      <div class="icon-label">International</div>
+      <div class="icon-sub">No borders, no exchange rates, no intermediaries</div>
+    </div>
+    <div class="icon-block">
+      <div class="icon-circle">
+        <svg viewBox="0 0 40 40" fill="none">
+          <rect x="8" y="12" width="24" height="18" rx="3" stroke="#4A90D9" stroke-width="2.5"/>
+          <line x1="8" y1="19" x2="32" y2="19" stroke="#4A90D9" stroke-width="2"/>
+          <circle cx="14" cy="25" r="2" fill="#4A90D9"/>
+        </svg>
+      </div>
+      <div class="icon-label">No Fees</div>
+      <div class="icon-sub">Zero transaction cost versus 3% for cards or wire fees</div>
+    </div>
+  </div>
+</body>
+</html>

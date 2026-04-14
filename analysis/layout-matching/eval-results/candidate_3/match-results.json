@@ -1,0 +1,1016 @@
+{
+  "airbnb-seed-2009/slide_01": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_01",
+        "reason": "Matches title-subtitle layout, three-zone structure (top/center/bottom-band), heading/body-text elements, single-focal hierarchy, and sparse density."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_11",
+        "reason": "Shares title-subtitle + image-dominant layouts, same three-zone arrangement (top/center/bottom-band), large-image and body-text elements, single-focal composition."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"sequoia-template/slide_01\",\n      \"reason\": \"Matches title-subtitle layout, three-zone structure (top/center/bottom-band), heading/body-text elements, single-focal hierarchy, and sparse density.\"\n    },\n    {\n      \"id\": \"coinbase-seed-2012/slide_11\",\n      \"reason\": \"Shares title-subtitle + image-dominant layouts, same three-zone arrangement (top/center/bottom-band), large-image and body-text elements, single-focal composition.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_02": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_03",
+        "reason": "Near-perfect alignment on all core dimensions: title-body layout, top-band+center-block+bottom-band zones, heading+body-text elements, single-focal hierarchy, and sparse density match exactly; only lacks multi-element tag."
+      },
+      {
+        "id": "sequoia-template/slide_06",
+        "reason": "Strong structural match with identical layout (title-body), zones (top-band, center-block, full-width), and core elements (heading, body-text); differs only in missing bottom-band and multi-element, plus additional logo element."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"sequoia-template/slide_03\", \"reason\": \"Near-perfect alignment on all core dimensions: title-body layout, top-band+center-block+bottom-band zones, heading+body-text elements, single-focal hierarchy, and sparse density match exactly; only lacks multi-element tag.\"},\n    {\"id\": \"sequoia-template/slide_06\", \"reason\": \"Strong structural match with identical layout (title-body), zones (top-band, center-block, full-width), and core elements (heading, body-text); differs only in missing bottom-band and multi-element, plus additional logo element.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_03": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_08",
+        "reason": "Strong match on mixed layout with matching zones (top-band, center-block), identical element set (heading, subheading, body-text, shape, logo), and same density (moderate)."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_05",
+        "reason": "Mixed layout with nearly identical zone arrangement (top-band, center-block, full-width), shared core elements (heading, body-text, logo), and moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_08\", \"reason\": \"Strong match on mixed layout with matching zones (top-band, center-block), identical element set (heading, subheading, body-text, shape, logo), and same density (moderate).\"},\n    {\"id\": \"coinbase-seed-2012/slide_05\", \"reason\": \"Mixed layout with nearly identical zone arrangement (top-band, center-block, full-width), shared core elements (heading, body-text, logo), and moderate density.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_04": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_03",
+        "reason": "Two-column comparison layout with aligned zones (top-band, center-block, full-width) and matching element mix (heading, subheading, body-text)."
+      },
+      {
+        "id": "sequoia-template/slide_04",
+        "reason": "Shared vertical band structure (top, center, bottom) with full-width zones and consistent sparse density; layout emphasizes content boundaries."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_03\", \"reason\": \"Two-column comparison layout with aligned zones (top-band, center-block, full-width) and matching element mix (heading, subheading, body-text).\"},\n    {\"id\": \"sequoia-template/slide_04\", \"reason\": \"Shared vertical band structure (top, center, bottom) with full-width zones and consistent sparse density; layout emphasizes content boundaries.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_05": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_19",
+        "reason": "Strongest chart-focus and zone alignment (top/center/bottom bands), shared shape + logo + moderate density."
+      },
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Icon-grid layout match with multi-element, uniform-grid hierarchy, center-block zone, and moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_19\", \"reason\": \"Strongest chart-focus and zone alignment (top/center/bottom bands), shared shape + logo + moderate density.\"},\n    {\"id\": \"facebook-2004/slide_12\", \"reason\": \"Icon-grid layout match with multi-element, uniform-grid hierarchy, center-block zone, and moderate density.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_06": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_04",
+        "reason": "Shares layout (title-body, image-dominant), all zone tags (top-band, center-block, full-width), and primary elements (heading, body-text, large-image); adds only full-bleed and single-focal."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_07",
+        "reason": "Matches layout (title-body, image-dominant), zones (top-band, center-block, full-width), and heading+large-image; missing only body-text and multi-element from target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_04\", \"reason\": \"Shares layout (title-body, image-dominant), all zone tags (top-band, center-block, full-width), and primary elements (heading, body-text, large-image); adds only full-bleed and single-focal.\"},\n    {\"id\": \"coinbase-seed-2012/slide_07\", \"reason\": \"Matches layout (title-body, image-dominant), zones (top-band, center-block, full-width), and heading+large-image; missing only body-text and multi-element from target.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_07": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_10",
+        "reason": "Shares timeline, chart-focus, and moderate density; both have dual-focal arrangement with top-band + divider-line structure."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_09",
+        "reason": "Matches on title-body + chart-focus layout with identical zone arrangement (top-band, center-block, full-width) and dual-focal density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_10\", \"reason\": \"Shares timeline, chart-focus, and moderate density; both have dual-focal arrangement with top-band + divider-line structure.\"},\n    {\"id\": \"coinbase-seed-2012/slide_09\", \"reason\": \"Matches on title-body + chart-focus layout with identical zone arrangement (top-band, center-block, full-width) and dual-focal density.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_08": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_16",
+        "reason": "Strong comparison layout match with shared heading, subheading, body-text, logo, and multi-element tags—both emphasize structured content organization at moderate density."
+      },
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Matching title-body layout with identical zone arrangement (top-band, center-block, full-width) and shared elements (heading, body-text, logo, moderate density)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_16\",\n      \"reason\": \"Strong comparison layout match with shared heading, subheading, body-text, logo, and multi-element tags—both emphasize structured content organization at moderate density.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_02\",\n      \"reason\": \"Matching title-body layout with identical zone arrangement (top-band, center-block, full-width) and shared elements (heading, body-text, logo, moderate density).\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_09": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_05",
+        "reason": "Has both critical layout tags (comparison + uniform-grid), plus center-block, heading, logo, and moderate—captures the target's comparison-with-grid concept."
+      },
+      {
+        "id": "peloton-seed-2012/slide_16",
+        "reason": "Matches comparison layout and multi-element composition with center-block, heading, logo, and moderate, though lacks uniform-grid and inset."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_05\", \"reason\": \"Has both critical layout tags (comparison + uniform-grid), plus center-block, heading, logo, and moderate—captures the target's comparison-with-grid concept.\"},\n    {\"id\": \"peloton-seed-2012/slide_16\", \"reason\": \"Matches comparison layout and multi-element composition with center-block, heading, logo, and moderate, though lacks uniform-grid and inset.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_10": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Perfect structural match: has title-body + dashboard layout, multi-element + uniform-grid organization, top-band/center-block zones, and all core elements (heading, body-text, shape) with moderate density."
+      },
+      {
+        "id": "facebook-2004/slide_17",
+        "reason": "Strong secondary match: title-body layout with multi-element structure, matching zones (top-band, center-block), core elements (heading, body-text), and moderate density—missing only dashboard and uniform-grid tags."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_12\",\n      \"reason\": \"Perfect structural match: has title-body + dashboard layout, multi-element + uniform-grid organization, top-band/center-block zones, and all core elements (heading, body-text, shape) with moderate density.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_17\",\n      \"reason\": \"Strong secondary match: title-body layout with multi-element structure, matching zones (top-band, center-block), core elements (heading, body-text), and moderate density—missing only dashboard and uniform-grid tags.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_11": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_14",
+        "reason": "Strongest match: both have title-bullets layout with top-band + left-panel zones, plus heading and body-text elements with moderate density."
+      },
+      {
+        "id": "sequoia-template/slide_09",
+        "reason": "Second match: shares title-bullets layout with top-band and full-width structure, heading and body-text elements; differs mainly in center-block vs left-panel zone placement."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_14\",\n      \"reason\": \"Strongest match: both have title-bullets layout with top-band + left-panel zones, plus heading and body-text elements with moderate density.\"\n    },\n    {\n      \"id\": \"sequoia-template/slide_09\",\n      \"reason\": \"Second match: shares title-bullets layout with top-band and full-width structure, heading and body-text elements; differs mainly in center-block vs left-panel zone placement.\"\n    }\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_12": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_13",
+        "reason": "Identical quote-centered layout with all 4 zones (top-band, center-block, bottom-band, full-width) and core elements (heading, quote-mark, logo, body-text)."
+      },
+      {
+        "id": "peloton-seed-2012/slide_18",
+        "reason": "Quote-centered layout with 3 zones and all 4 key elements; matches moderate density and multi-element complexity despite missing full-width."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_13\", \"reason\": \"Identical quote-centered layout with all 4 zones (top-band, center-block, bottom-band, full-width) and core elements (heading, quote-mark, logo, body-text).\"},\n    {\"id\": \"peloton-seed-2012/slide_18\", \"reason\": \"Quote-centered layout with 3 zones and all 4 key elements; matches moderate density and multi-element complexity despite missing full-width.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_13": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_04",
+        "reason": "Strongest match: shares icon-grid + mixed layout, top-band + full-width zones, large-image + uniform-grid elements, and moderate density—core layout DNA of target."
+      },
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Second match: icon-grid layout with multi-element + uniform-grid composition, top-band + full-width zones, and moderate density mirror target structure, though lacks the mixed layout dimension."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_04\", \"reason\": \"Strongest match: shares icon-grid + mixed layout, top-band + full-width zones, large-image + uniform-grid elements, and moderate density—core layout DNA of target.\"},\n    {\"id\": \"facebook-2004/slide_12\", \"reason\": \"Second match: icon-grid layout with multi-element + uniform-grid composition, top-band + full-width zones, and moderate density mirror target structure, though lacks the mixed layout dimension.\"}\n  ]\n}\n```"
+  },
+  "airbnb-seed-2009/slide_14": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_05",
+        "reason": "Matches title-body and comparison layouts, top+center zones, heading/body-text/divider-line elements, and moderate density."
+      },
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Shares title-body and dashboard layouts, multi-element hierarchy, heading/body-text/shape elements, and moderate density with target structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_05\", \"reason\": \"Matches title-body and comparison layouts, top+center zones, heading/body-text/divider-line elements, and moderate density.\"},\n    {\"id\": \"facebook-2004/slide_12\", \"reason\": \"Shares title-body and dashboard layouts, multi-element hierarchy, heading/body-text/shape elements, and moderate density with target structure.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_01": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_01",
+        "reason": "Strong match on both layout tags (title-subtitle + image-dominant), zones (top-band, full-width), and core elements (heading, large-image, single-focal, sparse); only template with both layout tags."
+      },
+      {
+        "id": "facebook-2004/slide_10",
+        "reason": "Excellent alignment on layout, zones, and elements (title-subtitle, top-band, full-width, heading, subheading, logo, single-focal); missing image-dominant and large-image."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_01\",\n      \"reason\": \"Strong match on both layout tags (title-subtitle + image-dominant), zones (top-band, full-width), and core elements (heading, large-image, single-focal, sparse); only template with both layout tags.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_10\",\n      \"reason\": \"Excellent alignment on layout, zones, and elements (title-subtitle, top-band, full-width, heading, subheading, logo, single-focal); missing image-dominant and large-image.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_02": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_10",
+        "reason": "Exact layout match (title-bullets), shares top-band + center-block + full-width zones, same heading + single-focal + sparse pattern; missing only bullet-list and icon elements."
+      },
+      {
+        "id": "sequoia-template/slide_09",
+        "reason": "Title-bullets layout with identical top-band + center-block + full-width zones and sparse density; differs slightly in hierarchy (dual-focal vs single-focal) but maintains strong structural alignment."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"sequoia-template/slide_10\",\n      \"reason\": \"Exact layout match (title-bullets), shares top-band + center-block + full-width zones, same heading + single-focal + sparse pattern; missing only bullet-list and icon elements.\"\n    },\n    {\n      \"id\": \"sequoia-template/slide_09\",\n      \"reason\": \"Title-bullets layout with identical top-band + center-block + full-width zones and sparse density; differs slightly in hierarchy (dual-focal vs single-focal) but maintains strong structural alignment.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_03": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Matches core layout (title-body, image-dominant), zones (full-width, top-band, center-block), and elements (heading, large-image) with minimal structural divergence."
+      },
+      {
+        "id": "facebook-2004/slide_04",
+        "reason": "Matches all layout, zone, and primary element tags including single-focal hierarchy, though includes full-bleed variant and density shift (moderate vs sparse)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_06\", \"reason\": \"Matches core layout (title-body, image-dominant), zones (full-width, top-band, center-block), and elements (heading, large-image) with minimal structural divergence.\"},\n    {\"id\": \"facebook-2004/slide_04\", \"reason\": \"Matches all layout, zone, and primary element tags including single-focal hierarchy, though includes full-bleed variant and density shift (moderate vs sparse).\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_04": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_10",
+        "reason": "Strong match on layout (title-subtitle), zones (top-band, center-block, full-width), core elements (heading, subheading), and density (moderate, single-focal)."
+      },
+      {
+        "id": "sequoia-template/slide_02",
+        "reason": "Matches layout (title-subtitle), zones (top-band, center-block), elements (heading, subheading), and focal structure (single-focal); lacks full-width and chart focus."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_10\",\n      \"reason\": \"Strong match on layout (title-subtitle), zones (top-band, center-block, full-width), core elements (heading, subheading), and density (moderate, single-focal).\"\n    },\n    {\n      \"id\": \"sequoia-template/slide_02\",\n      \"reason\": \"Matches layout (title-subtitle), zones (top-band, center-block), elements (heading, subheading), and focal structure (single-focal); lacks full-width and chart focus.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_05": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Matches all core tags (title-body, top-band, center-block, full-width, heading, body-text, single-focal, moderate); only difference is logo element instead of mixed descriptor."
+      },
+      {
+        "id": "facebook-2004/slide_07",
+        "reason": "Matches all core layout and zone tags; adds image elements (logo, large-image) but preserves the foundational title-body + body-text + single-focal structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_02\", \"reason\": \"Matches all core tags (title-body, top-band, center-block, full-width, heading, body-text, single-focal, moderate); only difference is logo element instead of mixed descriptor.\"},\n    {\"id\": \"facebook-2004/slide_07\", \"reason\": \"Matches all core layout and zone tags; adds image elements (logo, large-image) but preserves the foundational title-body + body-text + single-focal structure.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_06": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Shares image-dominant and mixed layout with consistent zone arrangement (top-band, center-block, full-width), matching heading/body-text/large-image element inventory, and moderate density."
+      },
+      {
+        "id": "peloton-seed-2012/slide_04",
+        "reason": "Shares image-dominant and mixed layout with heading/subheading/large-image/body-text elements, top-band and full-width zone presence, and moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_06\", \"reason\": \"Shares image-dominant and mixed layout with consistent zone arrangement (top-band, center-block, full-width), matching heading/body-text/large-image element inventory, and moderate density.\"},\n    {\"id\": \"peloton-seed-2012/slide_04\", \"reason\": \"Shares image-dominant and mixed layout with heading/subheading/large-image/body-text elements, top-band and full-width zone presence, and moderate density.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_07": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_04",
+        "reason": "Perfect alignment on layout (title-body, image-dominant), zones (top-band, center-block, full-width), key elements (heading, large-image), and matching hierarchy (single-focal) and density (moderate)."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Strong match on layout (title-body, image-dominant), identical zones (top-band, center-block, full-width), and core elements (heading, large-image, body-text) with matching density, differing only in hierarchy (multi-element vs single-focal)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_04\",\n      \"reason\": \"Perfect alignment on layout (title-body, image-dominant), zones (top-band, center-block, full-width), key elements (heading, large-image), and matching hierarchy (single-focal) and density (moderate).\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_06\",\n      \"reason\": \"Strong match on layout (title-body, image-dominant), identical zones (top-band, center-block, full-width), and core elements (heading, large-image, body-text) with matching density, differing only in hierarchy (multi-element vs single-focal).\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_08": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_03",
+        "reason": "Shares both title-subtitle and comparison layout tags, plus center-block/full-width zones and single-focal hierarchy—closest structural alignment despite moderate vs. sparse density difference."
+      },
+      {
+        "id": "facebook-2004/slide_10",
+        "reason": "Matches on title-subtitle layout, center-block/full-width zones, heading element, and single-focal hierarchy; clean title+body structure aligns with target's minimalist spatial arrangement."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_03\", \"reason\": \"Shares both title-subtitle and comparison layout tags, plus center-block/full-width zones and single-focal hierarchy—closest structural alignment despite moderate vs. sparse density difference.\"},\n    {\"id\": \"facebook-2004/slide_10\", \"reason\": \"Matches on title-subtitle layout, center-block/full-width zones, heading element, and single-focal hierarchy; clean title+body structure aligns with target's minimalist spatial arrangement.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_09": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_07",
+        "reason": "Shares chart-focus + title-body layout, top/center/full-width zones, heading, dual-focal, moderate density—strongest overlap across layout, zones, and hierarchy tags."
+      },
+      {
+        "id": "peloton-seed-2012/slide_10",
+        "reason": "Matches chart-focus, top/center/full-width zones, heading, dual-focal, moderate density with timeline; strong structural alignment on charting + layout dimensions."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_07\", \"reason\": \"Shares chart-focus + title-body layout, top/center/full-width zones, heading, dual-focal, moderate density—strongest overlap across layout, zones, and hierarchy tags.\"},\n    {\"id\": \"peloton-seed-2012/slide_10\", \"reason\": \"Matches chart-focus, top/center/full-width zones, heading, dual-focal, moderate density with timeline; strong structural alignment on charting + layout dimensions.\"}\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_10": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_19",
+        "reason": "Chart-focus layout with single-focal hierarchy, top-band+center-block+full-width zone arrangement, heading+body-text content, and moderate density."
+      },
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Chart-focus layout with single-focal hierarchy, top-band+center-block zones, heading+body-text elements, and moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_19\",\n      \"reason\": \"Chart-focus layout with single-focal hierarchy, top-band+center-block+full-width zone arrangement, heading+body-text content, and moderate density.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_11\",\n      \"reason\": \"Chart-focus layout with single-focal hierarchy, top-band+center-block zones, heading+body-text elements, and moderate density.\"\n    }\n  ]\n}\n```"
+  },
+  "coinbase-seed-2012/slide_11": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_10",
+        "reason": "Strongest alignment on title-subtitle + top/center/bottom-band zones with heading, subheading, body-text, single-focal hierarchy, and moderate density."
+      },
+      {
+        "id": "peloton-seed-2012/slide_19",
+        "reason": "chart-focus layout with identical zone arrangement (top/center/bottom-band, full-width) and matching element inventory (heading, subheading, body-text, single-focal, moderate)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_10\", \"reason\": \"Strongest alignment on title-subtitle + top/center/bottom-band zones with heading, subheading, body-text, single-focal hierarchy, and moderate density.\"},\n    {\"id\": \"peloton-seed-2012/slide_19\", \"reason\": \"chart-focus layout with identical zone arrangement (top/center/bottom-band, full-width) and matching element inventory (heading, subheading, body-text, single-focal, moderate).\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_01": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_18",
+        "reason": "Quote-centered layout with quote-mark, identical zone arrangement (center-block + top-band), matches subheading + body-text + single-focal density."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Quote-centered with quote-mark and divider, same central block + top-band zones, shared heading + body-text pattern."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_18\", \"reason\": \"Quote-centered layout with quote-mark, identical zone arrangement (center-block + top-band), matches subheading + body-text + single-focal density.\"},\n    {\"id\": \"airbnb-seed-2009/slide_12\", \"reason\": \"Quote-centered with quote-mark and divider, same central block + top-band zones, shared heading + body-text pattern.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_02": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_06",
+        "reason": "Identical layout and elements (title-body, heading, body-text, logo) with only density difference (moderate vs sparse)."
+      },
+      {
+        "id": "sequoia-template/slide_07",
+        "reason": "Nearly identical (title-body, heading, body-text, logo, all zones) with one additional divider-line element."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"sequoia-template/slide_06\", \"reason\": \"Identical layout and elements (title-body, heading, body-text, logo) with only density difference (moderate vs sparse).\"},\n    {\"id\": \"sequoia-template/slide_07\", \"reason\": \"Nearly identical (title-body, heading, body-text, logo, all zones) with one additional divider-line element.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_03": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_02",
+        "reason": "Two-column split layout with left/right panels, heading, body-text, large-image, logo, dual-focal composition, and moderate density - matches 10 target tags including the critical spatial arrangement."
+      },
+      {
+        "id": "peloton-seed-2012/slide_11",
+        "reason": "Two-column split-screen layout with left/right panels, heading, body-text, large-image, logo, dual-focal, and moderate density - preserves visual hierarchy and core spatial structure despite missing top-band and bullet-list."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_02\", \"reason\": \"Two-column split layout with left/right panels, heading, body-text, large-image, logo, dual-focal composition, and moderate density - matches 10 target tags including the critical spatial arrangement.\"},\n    {\"id\": \"peloton-seed-2012/slide_11\", \"reason\": \"Two-column split-screen layout with left/right panels, heading, body-text, large-image, logo, dual-focal, and moderate density - preserves visual hierarchy and core spatial structure despite missing top-band and bullet-list.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_04": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_07",
+        "reason": "Identical core layout (title-body, image-dominant, top-band, center-block, full-width, heading, large-image, single-focal, moderate) with only full-bleed and body-text missing."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_06",
+        "reason": "Strong layout match (title-body, image-dominant, top-band, center-block, full-width, heading, body-text, large-image, moderate) but has multi-element instead of single-focal and lacks full-bleed."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_07\",\n      \"reason\": \"Identical core layout (title-body, image-dominant, top-band, center-block, full-width, heading, large-image, single-focal, moderate) with only full-bleed and body-text missing.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_06\",\n      \"reason\": \"Strong layout match (title-body, image-dominant, top-band, center-block, full-width, heading, body-text, large-image, moderate) but has multi-element instead of single-focal and lacks full-bleed.\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_05": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_18",
+        "reason": "Strong match on title-subtitle, band structure (top/center/bottom), typography (heading/subheading/body/logo), right-panel placement, and moderate density—nearly perfect overlap on layout and visual hierarchy."
+      },
+      {
+        "id": "peloton-seed-2012/slide_02",
+        "reason": "Excellent match on two-column layout with left/right panels, dual-focal balance, heading, numbered-list, body-text, logo, and moderate density—core structural parallels despite image-dominant variation."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_18\", \"reason\": \"Strong match on title-subtitle, band structure (top/center/bottom), typography (heading/subheading/body/logo), right-panel placement, and moderate density—nearly perfect overlap on layout and visual hierarchy.\"},\n    {\"id\": \"peloton-seed-2012/slide_02\", \"reason\": \"Excellent match on two-column layout with left/right panels, dual-focal balance, heading, numbered-list, body-text, logo, and moderate density—core structural parallels despite image-dominant variation.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_06": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_11",
+        "reason": "Two-column split-screen layout with left/right panels, strong dual-focal composition, matching elements (heading, body-text, logo, shape, moderate density)"
+      },
+      {
+        "id": "peloton-seed-2012/slide_02",
+        "reason": "Two-column layout with top-band, left/right panel structure, dual-focal balance, same core elements and moderate density as target"
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_11\",\n      \"reason\": \"Two-column split-screen layout with left/right panels, strong dual-focal composition, matching elements (heading, body-text, logo, shape, moderate density)\"\n    },\n    {\n      \"id\": \"peloton-seed-2012/slide_02\",\n      \"reason\": \"Two-column layout with top-band, left/right panel structure, dual-focal balance, same core elements and moderate density as target\"\n    }\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_07": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_06",
+        "reason": "Perfect alignment on layout (title-body), zones (top-band, center-block, full-width), hierarchy (single-focal), and core elements (heading, body-text, logo). Differs only in density (sparse vs moderate) and missing large-image."
+      },
+      {
+        "id": "sequoia-template/slide_07",
+        "reason": "Identical layout, zones, hierarchy, and element match as slide_06, with the addition of divider-line. Both from Sequoia template family with nearly identical structural foundations."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"sequoia-template/slide_06\", \"reason\": \"Perfect alignment on layout (title-body), zones (top-band, center-block, full-width), hierarchy (single-focal), and core elements (heading, body-text, logo). Differs only in density (sparse vs moderate) and missing large-image.\"},\n    {\"id\": \"sequoia-template/slide_07\", \"reason\": \"Identical layout, zones, hierarchy, and element match as slide_06, with the addition of divider-line. Both from Sequoia template family with nearly identical structural foundations.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_08": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_06",
+        "reason": "Perfect structural alignment: matches title-body, all three zones (top-band, center-block, full-width), heading, logo, and single-focal focus with minimal divergence (body-text vs table content)."
+      },
+      {
+        "id": "sequoia-template/slide_08",
+        "reason": "Nearly identical layout structure (title-body + zones + focal), with only an inset detail and sparse vs dense density as differences."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"sequoia-template/slide_06\", \"reason\": \"Perfect structural alignment: matches title-body, all three zones (top-band, center-block, full-width), heading, logo, and single-focal focus with minimal divergence (body-text vs table content).\"},\n    {\"id\": \"sequoia-template/slide_08\", \"reason\": \"Nearly identical layout structure (title-body + zones + focal), with only an inset detail and sparse vs dense density as differences.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_09": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_08",
+        "reason": "Matches 8 of 9 core tags: title-body layout, top-band + inset zones, heading + body-text + logo elements, single-focal, sparse density; only missing shape."
+      },
+      {
+        "id": "sequoia-template/slide_06",
+        "reason": "Matches 7 of 9 core tags: title-body layout, top-band zone, heading + body-text + logo elements, single-focal, sparse density; missing inset and shape but maintains primary structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"sequoia-template/slide_08\", \"reason\": \"Matches 8 of 9 core tags: title-body layout, top-band + inset zones, heading + body-text + logo elements, single-focal, sparse density; only missing shape.\"},\n    {\"id\": \"sequoia-template/slide_06\", \"reason\": \"Matches 7 of 9 core tags: title-body layout, top-band zone, heading + body-text + logo elements, single-focal, sparse density; missing inset and shape but maintains primary structure.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_10": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_06",
+        "reason": "Title-body layout with full-width center-block design matching target's heading+subheading+body+logo arrangement."
+      },
+      {
+        "id": "sequoia-template/slide_07",
+        "reason": "Highly similar title-body+divider structure with matching top-band+center-block+full-width zone pattern."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"sequoia-template/slide_06\", \"reason\": \"Title-body layout with full-width center-block design matching target's heading+subheading+body+logo arrangement.\"},\n    {\"id\": \"sequoia-template/slide_07\", \"reason\": \"Highly similar title-body+divider structure with matching top-band+center-block+full-width zone pattern.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_11": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_19",
+        "reason": "Both have chart-focus with chart-pie, identical zone structure (top-band, center-block, bottom-band), heading + body-text, single-focal, and moderate density."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_11",
+        "reason": "Shares chart-focus, all three zone tags, heading, body-text, single-focal, and moderate density; adds secondary elements without disrupting core layout."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_19\", \"reason\": \"Both have chart-focus with chart-pie, identical zone structure (top-band, center-block, bottom-band), heading + body-text, single-focal, and moderate density.\"},\n    {\"id\": \"coinbase-seed-2012/slide_11\", \"reason\": \"Shares chart-focus, all three zone tags, heading, body-text, single-focal, and moderate density; adds secondary elements without disrupting core layout.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_12": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_10",
+        "reason": "Matches dashboard layout with title-body, uniform-grid organization, and heading/body-text/shape elements across top-band and center-block zones."
+      },
+      {
+        "id": "peloton-seed-2012/slide_07",
+        "reason": "Matches icon-grid with title-body layout, icon elements, and all three zones (top-band, center-block, full-width) with consistent moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_10\", \"reason\": \"Matches dashboard layout with title-body, uniform-grid organization, and heading/body-text/shape elements across top-band and center-block zones.\"},\n    {\"id\": \"peloton-seed-2012/slide_07\", \"reason\": \"Matches icon-grid with title-body layout, icon elements, and all three zones (top-band, center-block, full-width) with consistent moderate density.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_13": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_12",
+        "reason": "Quote-centered layout with center-top-bottom band structure and all core elements (heading, body-text, quote-mark, logo) matching target."
+      },
+      {
+        "id": "peloton-seed-2012/slide_18",
+        "reason": "Quote-centered layout with matching spatial bands and focal point, sharing heading, body-text, quote-mark, logo elements."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_12\", \"reason\": \"Quote-centered layout with center-top-bottom band structure and all core elements (heading, body-text, quote-mark, logo) matching target.\"},\n    {\"id\": \"peloton-seed-2012/slide_18\", \"reason\": \"Quote-centered layout with matching spatial bands and focal point, sharing heading, body-text, quote-mark, logo elements.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_14": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Exact layout match (title-bullets), strong zone alignment (top-band, center-block), matching elements (heading, bullet-list), and single-focal hierarchy."
+      },
+      {
+        "id": "sequoia-template/slide_09",
+        "reason": "Perfect layout match (title-bullets), identical zones (top-band, center-block), shared key elements (heading, body-text, logo), and similar moderate-to-sparse visual density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"coinbase-seed-2012/slide_02\", \"reason\": \"Exact layout match (title-bullets), strong zone alignment (top-band, center-block), matching elements (heading, bullet-list), and single-focal hierarchy.\"},\n    {\"id\": \"sequoia-template/slide_09\", \"reason\": \"Perfect layout match (title-bullets), identical zones (top-band, center-block), shared key elements (heading, body-text, logo), and similar moderate-to-sparse visual density.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_15": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_06",
+        "reason": "Shares 7 of 9 target tags: top-band, center-block, full-width, heading, logo, single-focal, sparse—only large-image missing."
+      },
+      {
+        "id": "peloton-seed-2012/slide_01",
+        "reason": "Explicit title-only layout with logo, large-image, heading, single-focal, sparse; zones differ (full-bleed/overlay vs top-band/full-width)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"sequoia-template/slide_06\", \"reason\": \"Shares 7 of 9 target tags: top-band, center-block, full-width, heading, logo, single-focal, sparse—only large-image missing.\"},\n    {\"id\": \"peloton-seed-2012/slide_01\", \"reason\": \"Explicit title-only layout with logo, large-image, heading, single-focal, sparse; zones differ (full-bleed/overlay vs top-band/full-width).\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_16": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_11",
+        "reason": "Two-column split-screen layout with left/right panels, top-band structure, plus matching heading, body-text, logo, and shape elements with moderate density."
+      },
+      {
+        "id": "peloton-seed-2012/slide_13",
+        "reason": "Two-column split-screen layout with left/right panels matching spatial zones, plus heading, body-text, logo, and shape elements with moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_11\", \"reason\": \"Two-column split-screen layout with left/right panels, top-band structure, plus matching heading, body-text, logo, and shape elements with moderate density.\"},\n    {\"id\": \"peloton-seed-2012/slide_13\", \"reason\": \"Two-column split-screen layout with left/right panels matching spatial zones, plus heading, body-text, logo, and shape elements with moderate density.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_17": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_08",
+        "reason": "Shares title-body, bullets, logo, top-band, center-block, full-width, heading, and dual-focal elements; strongest layout and element overlap with target."
+      },
+      {
+        "id": "peloton-seed-2012/slide_05",
+        "reason": "Two-column title-body with dual-focal arrangement and shared center-block zone; matches core layout structure but lacks full-width distribution."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_08\", \"reason\": \"Shares title-body, bullets, logo, top-band, center-block, full-width, heading, and dual-focal elements; strongest layout and element overlap with target.\"},\n    {\"id\": \"peloton-seed-2012/slide_05\", \"reason\": \"Two-column title-body with dual-focal arrangement and shared center-block zone; matches core layout structure but lacks full-width distribution.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_18": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_17",
+        "reason": "Identical two-column split-screen layout with left/right panels, top-band, heading + body-text + dual-focal + moderate density matching target structure."
+      },
+      {
+        "id": "peloton-seed-2012/slide_02",
+        "reason": "Two-column split-screen layout with left/right panels, top-band, heading + body-text + logo + dual-focal + moderate density, though with image-dominant focus vs target's bullet-list content."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_17\", \"reason\": \"Identical two-column split-screen layout with left/right panels, top-band, heading + body-text + dual-focal + moderate density matching target structure.\"},\n    {\"id\": \"peloton-seed-2012/slide_02\", \"reason\": \"Two-column split-screen layout with left/right panels, top-band, heading + body-text + logo + dual-focal + moderate density, though with image-dominant focus vs target's bullet-list content.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_19": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_02",
+        "reason": "Exact structural match: two-column layout with left/right panels, heading, body text, large image, logo, dual focal points at moderate density."
+      },
+      {
+        "id": "peloton-seed-2012/slide_13",
+        "reason": "Split-screen two-column layout with left/right panels, large image dominant, heading, body text, logo, dual focal emphasis at moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"peloton-seed-2012/slide_02\", \"reason\": \"Exact structural match: two-column layout with left/right panels, heading, body text, large image, logo, dual focal points at moderate density.\"},\n    {\"id\": \"peloton-seed-2012/slide_13\", \"reason\": \"Split-screen two-column layout with left/right panels, large image dominant, heading, body text, logo, dual focal emphasis at moderate density.\"}\n  ]\n}\n```"
+  },
+  "facebook-2004/slide_20": {
+    "matches": [
+      {
+        "id": "peloton-seed-2012/slide_18",
+        "reason": "Shares quote-centered + title-subtitle layout, center-block + top-band + right-panel zones, and quote-mark + logo + subheading + body-text elements with identical single-focal hierarchy."
+      },
+      {
+        "id": "sequoia-template/slide_02",
+        "reason": "Matches title-subtitle layout, center-block + top-band zones, and logo + subheading + body-text + single-focal + sparse composition, though missing right-panel and quote-mark."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"peloton-seed-2012/slide_18\",\n      \"reason\": \"Shares quote-centered + title-subtitle layout, center-block + top-band + right-panel zones, and quote-mark + logo + subheading + body-text elements with identical single-focal hierarchy.\"\n    },\n    {\n      \"id\": \"sequoia-template/slide_02\",\n      \"reason\": \"Matches title-subtitle layout, center-block + top-band zones, and logo + subheading + body-text + single-focal + sparse composition, though missing right-panel and quote-mark.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_01": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_01",
+        "reason": "Identical layout type (title-subtitle), full zone overlap (top-band, center-block, bottom-band), matching hierarchy (single-focal, sparse), with shared core elements (heading, body-text) differing only in image vs. shape focus."
+      },
+      {
+        "id": "peloton-seed-2012/slide_18",
+        "reason": "Strong layout alignment (title-subtitle), complete zone match including bottom-band, identical hierarchy (single-focal), all core elements present (heading, subheading, body-text, shape), with only density and quote decoration differences."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_01\", \"reason\": \"Identical layout type (title-subtitle), full zone overlap (top-band, center-block, bottom-band), matching hierarchy (single-focal, sparse), with shared core elements (heading, body-text) differing only in image vs. shape focus.\"},\n    {\"id\": \"peloton-seed-2012/slide_18\", \"reason\": \"Strong layout alignment (title-subtitle), complete zone match including bottom-band, identical hierarchy (single-focal), all core elements present (heading, subheading, body-text, shape), with only density and quote decoration differences.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_02": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_10",
+        "reason": "Matches 8 of 9 target tags: title-subtitle layout, top-band + center-block zones, heading/subheading/body-text elements, logo, and single-focal hierarchy—only density differs (moderate vs sparse)."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_01",
+        "reason": "Shares title-subtitle, top-band/center-block zones, heading/body-text, single-focal hierarchy, and sparse density—variant structure with large-image element instead of subheading."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_10\",\n      \"reason\": \"Matches 8 of 9 target tags: title-subtitle layout, top-band + center-block zones, heading/subheading/body-text elements, logo, and single-focal hierarchy—only density differs (moderate vs sparse).\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_01\",\n      \"reason\": \"Shares title-subtitle, top-band/center-block zones, heading/body-text, single-focal hierarchy, and sparse density—variant structure with large-image element instead of subheading.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_03": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Perfect alignment on layout (title-body), all 4 zones, elements (heading + body-text), hierarchy (single-focal), and density (sparse); only differs by having multi-element tag."
+      },
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Strong match on layout (title-body), 3 zone overlaps (top-band, center-block, full-width), matching elements and hierarchy; only gaps are missing bottom-band and density mismatch (moderate vs sparse)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_02\",\n      \"reason\": \"Perfect alignment on layout (title-body), all 4 zones, elements (heading + body-text), hierarchy (single-focal), and density (sparse); only differs by having multi-element tag.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_02\",\n      \"reason\": \"Strong match on layout (title-body), 3 zone overlaps (top-band, center-block, full-width), matching elements and hierarchy; only gaps are missing bottom-band and density mismatch (moderate vs sparse).\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_04": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_13",
+        "reason": "Strongest zone and layout alignment: both have top-band+center-block+bottom-band, full-width, heading, body-text, logo, single-focal, and sparse density."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Excellent zone coverage match with same top-band+center-block+bottom-band structure, full-width, heading, body-text, single-focal, sparse layout."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_13\", \"reason\": \"Strongest zone and layout alignment: both have top-band+center-block+bottom-band, full-width, heading, body-text, logo, single-focal, and sparse density.\"},\n    {\"id\": \"airbnb-seed-2009/slide_02\", \"reason\": \"Excellent zone coverage match with same top-band+center-block+bottom-band structure, full-width, heading, body-text, single-focal, sparse layout.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_05": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Title-body layout with matching zones (top-band, center-block, full-width), heading, body-text, and logo elements."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Title-body layout with identical zones and body elements, plus matching sparse density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_02\",\n      \"reason\": \"Title-body layout with matching zones (top-band, center-block, full-width), heading, body-text, and logo elements.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_02\",\n      \"reason\": \"Title-body layout with identical zones and body elements, plus matching sparse density.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_06": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Identical layout type (title-body), all core zones (top-band, center-block, full-width), and all key elements (heading, body-text, logo, single-focal) match perfectly; only density differs (moderate vs. sparse)."
+      },
+      {
+        "id": "facebook-2004/slide_07",
+        "reason": "Identical layout type (title-body) with matching zones and core elements, including heading, body-text, logo, and single-focal; adds large-image as secondary element and differs in density (moderate vs. sparse)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_02\", \"reason\": \"Identical layout type (title-body), all core zones (top-band, center-block, full-width), and all key elements (heading, body-text, logo, single-focal) match perfectly; only density differs (moderate vs. sparse).\"},\n    {\"id\": \"facebook-2004/slide_07\", \"reason\": \"Identical layout type (title-body) with matching zones and core elements, including heading, body-text, logo, and single-focal; adds large-image as secondary element and differs in density (moderate vs. sparse).\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_07": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Exact match on layout (title-body, full-width), zones (top-band, center-block), and most elements (heading, body-text, logo); only differs in density (moderate vs sparse) and lacks divider-line."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Strong match on layout and zones with identical title-body and full-width structure; shares heading, body-text, single-focal, and sparse; adds bottom-band and multi-element but misses logo and divider-line."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_02\", \"reason\": \"Exact match on layout (title-body, full-width), zones (top-band, center-block), and most elements (heading, body-text, logo); only differs in density (moderate vs sparse) and lacks divider-line.\"},\n    {\"id\": \"airbnb-seed-2009/slide_02\", \"reason\": \"Strong match on layout and zones with identical title-body and full-width structure; shares heading, body-text, single-focal, and sparse; adds bottom-band and multi-element but misses logo and divider-line.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_08": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Exact match on title-body, top-band, center-block, full-width, heading, body-text, logo, single-focal; only differs on moderate vs sparse density."
+      },
+      {
+        "id": "facebook-2004/slide_07",
+        "reason": "Strong match on title-body, top-band, center-block, full-width, heading, body-text, logo, single-focal; swaps sparse inset for large-image element."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_02\", \"reason\": \"Exact match on title-body, top-band, center-block, full-width, heading, body-text, logo, single-focal; only differs on moderate vs sparse density.\"},\n    {\"id\": \"facebook-2004/slide_07\", \"reason\": \"Strong match on title-body, top-band, center-block, full-width, heading, body-text, logo, single-focal; swaps sparse inset for large-image element.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_09": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_14",
+        "reason": "Shares title-bullets layout, top-band/center-block zones, and heading/body-text/logo elements with identical hierarchy (single-focal only differs); left-panel variant replaces full-width."
+      },
+      {
+        "id": "facebook-2004/slide_13",
+        "reason": "Shares 8 tags including all key zones (top-band, center-block, full-width), critical elements (heading, body-text, divider-line, logo), and density (sparse); quote-centered layout substitutes for title-bullets."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"facebook-2004/slide_14\",\n      \"reason\": \"Shares title-bullets layout, top-band/center-block zones, and heading/body-text/logo elements with identical hierarchy (single-focal only differs); left-panel variant replaces full-width.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_13\",\n      \"reason\": \"Shares 8 tags including all key zones (top-band, center-block, full-width), critical elements (heading, body-text, divider-line, logo), and density (sparse); quote-centered layout substitutes for title-bullets.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_10": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_02",
+        "reason": "Perfect layout match: title-bullets, top-band + center-block + full-width zones, sparse density; both have heading with bullet-list vs. body-text element variation."
+      },
+      {
+        "id": "facebook-2004/slide_13",
+        "reason": "Strong zone and element match: center-block + top-band + full-width with heading + body-text + divider-line, sparse density; layout differs (quote-centered) but spatial structure aligns."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"coinbase-seed-2012/slide_02\",\n      \"reason\": \"Perfect layout match: title-bullets, top-band + center-block + full-width zones, sparse density; both have heading with bullet-list vs. body-text element variation.\"\n    },\n    {\n      \"id\": \"facebook-2004/slide_13\",\n      \"reason\": \"Strong zone and element match: center-block + top-band + full-width with heading + body-text + divider-line, sparse density; layout differs (quote-centered) but spatial structure aligns.\"\n    }\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_11": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Matching title-body layout, identical zone arrangement (top-band/center-block/full-width), core elements align (heading/body-text/logo)."
+      },
+      {
+        "id": "facebook-2004/slide_10",
+        "reason": "Matching title-body layout, identical zones, includes subheading element, both single-focal—differs only in density (moderate vs sparse)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_02\", \"reason\": \"Matching title-body layout, identical zone arrangement (top-band/center-block/full-width), core elements align (heading/body-text/logo).\"},\n    {\"id\": \"facebook-2004/slide_10\", \"reason\": \"Matching title-body layout, identical zones, includes subheading element, both single-focal—differs only in density (moderate vs sparse).\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_12": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_02",
+        "reason": "Perfect layout match: title-body, top-band, full-width zones with heading, body-text, logo, multi-element, sparse density."
+      },
+      {
+        "id": "facebook-2004/slide_02",
+        "reason": "Near-identical structure: title-body, top-band, full-width, center-block with heading, body-text, logo, multi-element, moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_02\", \"reason\": \"Perfect layout match: title-body, top-band, full-width zones with heading, body-text, logo, multi-element, sparse density.\"},\n    {\"id\": \"facebook-2004/slide_02\", \"reason\": \"Near-identical structure: title-body, top-band, full-width, center-block with heading, body-text, logo, multi-element, moderate density.\"}\n  ]\n}\n```"
+  },
+  "sequoia-template/slide_13": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_03",
+        "reason": "Mixed layout with identical zone structure (top/center/bottom band, full-width), matching heading + subheading elements."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Identical zone arrangement (top/center/bottom band, full-width) with dual-focal hierarchy, heading, subheading, and sparse density matching target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\n      \"id\": \"airbnb-seed-2009/slide_03\",\n      \"reason\": \"Mixed layout with identical zone structure (top/center/bottom band, full-width), matching heading + subheading elements.\"\n    },\n    {\n      \"id\": \"airbnb-seed-2009/slide_04\",\n      \"reason\": \"Identical zone arrangement (top/center/bottom band, full-width) with dual-focal hierarchy, heading, subheading, and sparse density matching target.\"\n    }\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_01": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_15",
+        "reason": "Identical layout type (title-only) with matching zones, elements (heading + logo + large-image), hierarchy (single-focal), and density (sparse)."
+      },
+      {
+        "id": "facebook-2004/slide_04",
+        "reason": "Shares full-bleed and center-block layout, heading + large-image elements, and single-focal hierarchy despite differing in layout type and density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_15\", \"reason\": \"Identical layout type (title-only) with matching zones, elements (heading + logo + large-image), hierarchy (single-focal), and density (sparse).\"},\n    {\"id\": \"facebook-2004/slide_04\", \"reason\": \"Shares full-bleed and center-block layout, heading + large-image elements, and single-focal hierarchy despite differing in layout type and density.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_02": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_05",
+        "reason": "Two-column layout with left/right panels, heading, body-text, numbered-list, logo, and dual-focal arrangement matching target structure."
+      },
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Two-column split-screen with left/right panels, large-image, logo, and dual-focal composition; has bullet-list instead of numbered-list."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_05\", \"reason\": \"Two-column layout with left/right panels, heading, body-text, numbered-list, logo, and dual-focal arrangement matching target structure.\"},\n    {\"id\": \"facebook-2004/slide_03\", \"reason\": \"Two-column split-screen with left/right panels, large-image, logo, and dual-focal composition; has bullet-list instead of numbered-list.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_03": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_04",
+        "reason": "Two-column comparison layout with matching zones (top-band, center-block, full-width) and key elements (heading, subheading, body-text)."
+      },
+      {
+        "id": "facebook-2004/slide_10",
+        "reason": "Title-subtitle layout with top-band/center-block/full-width zones and strong element overlap (heading, subheading, body-text, logo, single-focal, moderate density)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_04\", \"reason\": \"Two-column comparison layout with matching zones (top-band, center-block, full-width) and key elements (heading, subheading, body-text).\"},\n    {\"id\": \"facebook-2004/slide_10\", \"reason\": \"Title-subtitle layout with top-band/center-block/full-width zones and strong element overlap (heading, subheading, body-text, logo, single-focal, moderate density).\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_04": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_13",
+        "reason": "Shares the distinctive icon-grid + mixed + uniform-grid combination with identical zone arrangement (top-band, full-width) and matching content types (heading, large-image, body-text, moderate density)."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_06",
+        "reason": "Aligns on core image-dominant + mixed layout with matching zones (top-band, full-width) and content elements (heading, subheading, large-image, body-text, moderate density), representing the image-centric aspect of the target."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_13\", \"reason\": \"Shares the distinctive icon-grid + mixed + uniform-grid combination with identical zone arrangement (top-band, full-width) and matching content types (heading, large-image, body-text, moderate density).\"},\n    {\"id\": \"coinbase-seed-2012/slide_06\", \"reason\": \"Aligns on core image-dominant + mixed layout with matching zones (top-band, full-width) and content elements (heading, subheading, large-image, body-text, moderate density), representing the image-centric aspect of the target.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_05": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_14",
+        "reason": "Both have title-body + comparison layout, shared zones (top-band, center-block), matching elements (heading, body-text, divider-line, logo), and moderate density."
+      },
+      {
+        "id": "facebook-2004/slide_17",
+        "reason": "Both have two-column + title-body layout with matching zones (top-band, center-block, left/right-panels), shared elements (heading, body-text, logo), and moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_14\", \"reason\": \"Both have title-body + comparison layout, shared zones (top-band, center-block), matching elements (heading, body-text, divider-line, logo), and moderate density.\"},\n    {\"id\": \"facebook-2004/slide_17\", \"reason\": \"Both have two-column + title-body layout with matching zones (top-band, center-block, left/right-panels), shared elements (heading, body-text, logo), and moderate density.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_06": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Two-column layout with matching zones (top-band, left-panel, right-panel) and shared core elements (heading, bullet-list, logo) plus dual-focal hierarchy."
+      },
+      {
+        "id": "facebook-2004/slide_18",
+        "reason": "Perfect zone alignment (top-band, left-panel, right-panel), two-column split with matching heading, bullet-list, logo, and dual-focal structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_03\", \"reason\": \"Two-column layout with matching zones (top-band, left-panel, right-panel) and shared core elements (heading, bullet-list, logo) plus dual-focal hierarchy.\"},\n    {\"id\": \"facebook-2004/slide_18\", \"reason\": \"Perfect zone alignment (top-band, left-panel, right-panel), two-column split with matching heading, bullet-list, logo, and dual-focal structure.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_07": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_12",
+        "reason": "Has both icon-grid and title-body layouts (matching target's dual layout structure), all three zones (top-band, center-block, full-width), heading + body-text + icon elements, and moderate density."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_07",
+        "reason": "Matches title-body layout, all three zones, heading + body-text + divider-line elements, dual-focal hierarchy, and moderate density (missing only icon-grid and icon element)."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_12\", \"reason\": \"Has both icon-grid and title-body layouts (matching target's dual layout structure), all three zones (top-band, center-block, full-width), heading + body-text + icon elements, and moderate density.\"},\n    {\"id\": \"airbnb-seed-2009/slide_07\", \"reason\": \"Matches title-body layout, all three zones, heading + body-text + divider-line elements, dual-focal hierarchy, and moderate density (missing only icon-grid and icon element).\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_08": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_03",
+        "reason": "Both have mixed layout with chart/visual focus, top-band/center-block zones, and shared elements (heading, subheading, body-text, logo, shape) at moderate density."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_05",
+        "reason": "Both emphasize mixed layouts with heading, body-text, and moderate density in top-band/center-block arrangement; strong zone and element overlap."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_03\", \"reason\": \"Both have mixed layout with chart/visual focus, top-band/center-block zones, and shared elements (heading, subheading, body-text, logo, shape) at moderate density.\"},\n    {\"id\": \"coinbase-seed-2012/slide_05\", \"reason\": \"Both emphasize mixed layouts with heading, body-text, and moderate density in top-band/center-block arrangement; strong zone and element overlap.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_09": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_11",
+        "reason": "Both are chart-focused with pie as the central element, centered layout with heading, and single focal point at moderate density."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_04",
+        "reason": "Chart-focused layout with title+subtitle structure, centered composition, and similar heading+subheading pairing."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_11\", \"reason\": \"Both are chart-focused with pie as the central element, centered layout with heading, and single focal point at moderate density.\"},\n    {\"id\": \"coinbase-seed-2012/slide_04\", \"reason\": \"Chart-focused layout with title+subtitle structure, centered composition, and similar heading+subheading pairing.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_10": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_07",
+        "reason": "Strongest match: contains both timeline and chart-focus layout types, plus all spatial zones (top-band, center-block, full-width), core elements (heading, divider-line), and hierarchy/density tags (dual-focal, moderate)."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_09",
+        "reason": "Second best: shares chart-focus layout, spatial arrangement (top-band, center-block, full-width), heading, and hierarchy/density (dual-focal, moderate), but lacks timeline and large-image elements."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_07\", \"reason\": \"Strongest match: contains both timeline and chart-focus layout types, plus all spatial zones (top-band, center-block, full-width), core elements (heading, divider-line), and hierarchy/density tags (dual-focal, moderate).\"},\n    {\"id\": \"coinbase-seed-2012/slide_09\", \"reason\": \"Second best: shares chart-focus layout, spatial arrangement (top-band, center-block, full-width), heading, and hierarchy/density (dual-focal, moderate), but lacks timeline and large-image elements.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_11": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_06",
+        "reason": "Strong two-column split layout with distinct left/right panels, shared heading, body-text, logo, shape, and dual-focal arrangement; chart replaces image but maintains structural balance."
+      },
+      {
+        "id": "facebook-2004/slide_19",
+        "reason": "Excellent match on two-column layout with left/right panel split, large image on right, matching heading, body-text, logo, dual-focal composition."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_06\", \"reason\": \"Strong two-column split layout with distinct left/right panels, shared heading, body-text, logo, shape, and dual-focal arrangement; chart replaces image but maintains structural balance.\"},\n    {\"id\": \"facebook-2004/slide_19\", \"reason\": \"Excellent match on two-column layout with left/right panel split, large image on right, matching heading, body-text, logo, dual-focal composition.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_12": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_18",
+        "reason": "Two-column left/right-panel layout with full-width, heading, body-text, logo, and dual-focal structure; matches all critical spatial zones."
+      },
+      {
+        "id": "facebook-2004/slide_19",
+        "reason": "Two-column left/right-panel layout with image-dominant large-image element, matching core heading, body-text, logo, and dual-focal structure."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_18\", \"reason\": \"Two-column left/right-panel layout with full-width, heading, body-text, logo, and dual-focal structure; matches all critical spatial zones.\"},\n    {\"id\": \"facebook-2004/slide_19\", \"reason\": \"Two-column left/right-panel layout with image-dominant large-image element, matching core heading, body-text, logo, and dual-focal structure.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_13": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Two-column split-screen layout with left/right panels, dual-focal hierarchy, moderate density, and shared elements (heading, body-text, large-image, logo)."
+      },
+      {
+        "id": "facebook-2004/slide_06",
+        "reason": "Two-column layout with left/right panels, dual-focal arrangement, moderate density, shape element, but uses chart instead of large-image."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_03\", \"reason\": \"Two-column split-screen layout with left/right panels, dual-focal hierarchy, moderate density, and shared elements (heading, body-text, large-image, logo).\"},\n    {\"id\": \"facebook-2004/slide_06\", \"reason\": \"Two-column layout with left/right panels, dual-focal arrangement, moderate density, shape element, but uses chart instead of large-image.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_14": {
+    "matches": [
+      {
+        "id": "coinbase-seed-2012/slide_01",
+        "reason": "Image-dominant layout with full-width zone, large-image and logo elements, and sparse density—closest structural match to target."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_03",
+        "reason": "Image-dominant layout with large-image and shape elements, sparse density, and full-width zone—second-best tag overlap."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"coinbase-seed-2012/slide_01\", \"reason\": \"Image-dominant layout with full-width zone, large-image and logo elements, and sparse density—closest structural match to target.\"},\n    {\"id\": \"coinbase-seed-2012/slide_03\", \"reason\": \"Image-dominant layout with large-image and shape elements, sparse density, and full-width zone—second-best tag overlap.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_15": {
+    "matches": [
+      {
+        "id": "sequoia-template/slide_08",
+        "reason": "Matches all four spatial zones (top-band, center-block, inset, full-width) and single focal structure, providing strong structural alignment for dashboard layout despite lacking chart-specific elements."
+      },
+      {
+        "id": "sequoia-template/slide_07",
+        "reason": "Excellent zone and divider-line alignment with single focal point, though missing the inset zone required by the target layout."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"sequoia-template/slide_08\", \"reason\": \"Matches all four spatial zones (top-band, center-block, inset, full-width) and single focal structure, providing strong structural alignment for dashboard layout despite lacking chart-specific elements.\"},\n    {\"id\": \"sequoia-template/slide_07\", \"reason\": \"Excellent zone and divider-line alignment with single focal point, though missing the inset zone required by the target layout.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_16": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_03",
+        "reason": "Comparison layout with heading, subheading, body-text, logo, and multi-element components in full-width center-block format at moderate density."
+      },
+      {
+        "id": "airbnb-seed-2009/slide_08",
+        "reason": "Comparison layout with matching heading, subheading, body-text, logo, and multi-element components in full-width arrangement at moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_03\", \"reason\": \"Comparison layout with heading, subheading, body-text, logo, and multi-element components in full-width center-block format at moderate density.\"},\n    {\"id\": \"airbnb-seed-2009/slide_08\", \"reason\": \"Comparison layout with matching heading, subheading, body-text, logo, and multi-element components in full-width arrangement at moderate density.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_17": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_17",
+        "reason": "Two-column with left-right panels, full-width heading-body structure, dual-focal distribution, and multi-element content mix matching the target's mixed layout."
+      },
+      {
+        "id": "facebook-2004/slide_18",
+        "reason": "Identical two-column zone arrangement (top-band, left-panel, right-panel, full-width) with dual-focal visual weight and moderate density."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_17\", \"reason\": \"Two-column with left-right panels, full-width heading-body structure, dual-focal distribution, and multi-element content mix matching the target's mixed layout.\"},\n    {\"id\": \"facebook-2004/slide_18\", \"reason\": \"Identical two-column zone arrangement (top-band, left-panel, right-panel, full-width) with dual-focal visual weight and moderate density.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_18": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_20",
+        "reason": "Matches all 3 layout tags (quote-centered, title-subtitle, single-focal) plus 7 of 10 zone/element tags (top-band, center-block, right-panel, logo, subheading, body-text, quote-mark), providing the strongest structural alignment."
+      },
+      {
+        "id": "facebook-2004/slide_13",
+        "reason": "Matches 2 layout tags (quote-centered, single-focal) and covers all key zones (top-band, center-block, bottom-band) with most core elements (heading, quote-mark, logo, body-text), making it the strongest runner-up."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_20\", \"reason\": \"Matches all 3 layout tags (quote-centered, title-subtitle, single-focal) plus 7 of 10 zone/element tags (top-band, center-block, right-panel, logo, subheading, body-text, quote-mark), providing the strongest structural alignment.\"},\n    {\"id\": \"facebook-2004/slide_13\", \"reason\": \"Matches 2 layout tags (quote-centered, single-focal) and covers all key zones (top-band, center-block, bottom-band) with most core elements (heading, quote-mark, logo, body-text), making it the strongest runner-up.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_19": {
+    "matches": [
+      {
+        "id": "airbnb-seed-2009/slide_03",
+        "reason": "Strong match on layout (comparison), all 4 zones (top/center/bottom/full-width), and extensive element overlap (heading, subheading, body-text, shape, logo, moderate density)—missing only chart-focus and chart-pie."
+      },
+      {
+        "id": "coinbase-seed-2012/slide_11",
+        "reason": "Excellent zone coverage (all 4 zones), chart-focus layout, single-focal hierarchy, and strong element inventory (heading, subheading, body-text, moderate density)—missing comparison and chart-pie but structurally aligned on spatial arrangement."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"airbnb-seed-2009/slide_03\", \"reason\": \"Strong match on layout (comparison), all 4 zones (top/center/bottom/full-width), and extensive element overlap (heading, subheading, body-text, shape, logo, moderate density)—missing only chart-focus and chart-pie.\"},\n    {\"id\": \"coinbase-seed-2012/slide_11\", \"reason\": \"Excellent zone coverage (all 4 zones), chart-focus layout, single-focal hierarchy, and strong element inventory (heading, subheading, body-text, moderate density)—missing comparison and chart-pie but structurally aligned on spatial arrangement.\"}\n  ]\n}\n```"
+  },
+  "peloton-seed-2012/slide_20": {
+    "matches": [
+      {
+        "id": "facebook-2004/slide_03",
+        "reason": "Two-column split layout with left-right panels, large image, dual-focal design, and moderate density directly matching target structure."
+      },
+      {
+        "id": "facebook-2004/slide_19",
+        "reason": "Two-column split with left-right panel zones, large image, logo, heading, body-text, and dual-focal hierarchy matching target composition."
+      }
+    ],
+    "raw": "```json\n{\n  \"matches\": [\n    {\"id\": \"facebook-2004/slide_03\", \"reason\": \"Two-column split layout with left-right panels, large image, dual-focal design, and moderate density directly matching target structure.\"},\n    {\"id\": \"facebook-2004/slide_19\", \"reason\": \"Two-column split with left-right panel zones, large image, logo, heading, body-text, and dual-focal hierarchy matching target composition.\"}\n  ]\n}\n```"
+  }
+}

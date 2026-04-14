@@ -1,0 +1,76 @@
+<!-- slide_04.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding-top: 52px;
+  }
+  .eyebrow { font-size: 13px; color: #888888; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 14px; }
+  .title { font-size: 50px; font-weight: 300; color: #333333; margin-bottom: 8px; }
+  .callout { font-size: 20px; font-weight: 700; color: #4A90D9; margin-bottom: 36px; }
+  .chart-wrap {
+    background: #FFFFFF;
+    border-radius: 6px;
+    width: 1040px;
+    height: 380px;
+    position: relative;
+    padding: 32px 48px 48px 64px;
+  }
+  svg.chart { width: 100%; height: 100%; }
+  .annotation {
+    position: absolute;
+    right: 52px; top: 36px;
+    text-align: right;
+  }
+  .ann-num { font-size: 42px; font-weight: 700; color: #333333; line-height: 1; }
+  .ann-label { font-size: 13px; color: #888888; margin-top: 4px; letter-spacing: 0.05em; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Transaction Volume</div>
+  <div class="title">Bitcoin processes $2M per day</div>
+  <div class="callout">Mar → Aug 2012 — consistently upward</div>
+  <div class="chart-wrap">
+    <div class="annotation">
+      <div class="ann-num">$2M</div>
+      <div class="ann-label">daily volume, Aug 2012</div>
+    </div>
+    <svg class="chart" viewBox="0 0 940 300" xmlns="http://www.w3.org/2000/svg">
+      <!-- Y axis -->
+      <line x1="0" y1="0" x2="0" y2="270" stroke="#E8ECF0" stroke-width="1.5"/>
+      <!-- X axis -->
+      <line x1="0" y1="270" x2="940" y2="270" stroke="#E8ECF0" stroke-width="1.5"/>
+      <!-- Grid lines -->
+      <line x1="0" y1="200" x2="940" y2="200" stroke="#F0F2F4" stroke-width="1"/>
+      <line x1="0" y1="135" x2="940" y2="135" stroke="#F0F2F4" stroke-width="1"/>
+      <line x1="0" y1="67" x2="940" y2="67" stroke="#F0F2F4" stroke-width="1"/>
+      <!-- Y labels -->
+      <text x="-8" y="274" font-size="11" fill="#888888" text-anchor="end" font-family="Helvetica Neue, sans-serif">$0</text>
+      <text x="-8" y="204" font-size="11" fill="#888888" text-anchor="end" font-family="Helvetica Neue, sans-serif">$0.5M</text>
+      <text x="-8" y="139" font-size="11" fill="#888888" text-anchor="end" font-family="Helvetica Neue, sans-serif">$1M</text>
+      <text x="-8" y="71" font-size="11" fill="#888888" text-anchor="end" font-family="Helvetica Neue, sans-serif">$1.5M</text>
+      <!-- X labels -->
+      <text x="0" y="290" font-size="11" fill="#888888" text-anchor="middle" font-family="Helvetica Neue, sans-serif">Mar</text>
+      <text x="188" y="290" font-size="11" fill="#888888" text-anchor="middle" font-family="Helvetica Neue, sans-serif">Apr</text>
+      <text x="376" y="290" font-size="11" fill="#888888" text-anchor="middle" font-family="Helvetica Neue, sans-serif">May</text>
+      <text x="564" y="290" font-size="11" fill="#888888" text-anchor="middle" font-family="Helvetica Neue, sans-serif">Jun</text>
+      <text x="752" y="290" font-size="11" fill="#888888" text-anchor="middle" font-family="Helvetica Neue, sans-serif">Jul</text>
+      <text x="940" y="290" font-size="11" fill="#888888" text-anchor="middle" font-family="Helvetica Neue, sans-serif">Aug</text>
+      <!-- Area fill -->
+      <path d="M0,240 C60,235 100,228 188,215 C260,204 300,198 376,180 C440,164 500,155 564,138 C630,120 690,105 752,82 C810,60 870,42 940,8 L940,270 L0,270 Z" fill="#4A90D9" opacity="0.12"/>
+      <!-- Line -->
+      <path d="M0,240 C60,235 100,228 188,215 C260,204 300,198 376,180 C440,164 500,155 564,138 C630,120 690,105 752,82 C810,60 870,42 940,8" fill="none" stroke="#4A90D9" stroke-width="3" stroke-linecap="round"/>
+      <!-- End dot -->
+      <circle cx="940" cy="8" r="5" fill="#4A90D9"/>
+    </svg>
+  </div>
+</body>
+</html>

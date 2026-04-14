@@ -1,0 +1,26 @@
+{
+  "slide_01": {
+    "status": "bad",
+    "comment": "Missing bolded Thefacebook.com, font is wrong. Top left font is not ALL CAPS",
+    "ratedAt": "2026-04-12T21:53:58.523Z"
+  },
+  "slide_02": {
+    "status": "bad",
+    "comment": "Missing top left all caps font, and bolded \"alumni, factulity, and staff\"",
+    "ratedAt": "2026-04-12T21:54:19.325Z"
+  },
+  "slide_03": {
+    "status": "bad",
+    "comment": "The platform is split in two rows",
+    "ratedAt": "2026-04-12T21:54:33.400Z"
+  },
+  "slide_04": {
+    "status": "bad",
+    "comment": "The left has - for bullets, and all caps style is wrong, font is wrong.",
+    "ratedAt": "2026-04-12T21:54:59.454Z"
+  },
+  "slide_05": {
+    "status": "bad",
+    "ratedAt": "2026-04-12T21:54:59.547Z"
+  }
+}

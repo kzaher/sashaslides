@@ -1,0 +1,139 @@
+{
+  "presentationId": "sequoia-template",
+  "presentationTitle": "Sequoia Capital Pitch Deck Template",
+  "slideCount": 13,
+  "slides": [
+    {
+      "index": 1,
+      "title": "Sequoia Capital Pitch Deck Template",
+      "layoutType": "title",
+      "bodyText": "Sequoia Capital\nPitch Deck Template\nReproduced by PitchDeckCoach from info presented at http://www.sequoiacap.com/grove/posts/6bzx/writing-a-business-plan",
+      "dominantColors": ["#5CB85C", "#FFFFFF"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 40,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 2,
+      "title": "Flow",
+      "layoutType": "bullet-list",
+      "bodyText": "FYI Only - NOT a slide for your deck\nCompany Purpose\nProblem\nSolution\nWhy Now\nMarket Size\nCompetition\nProduct\nBusiness Model\nTeam\nFinancials",
+      "dominantColors": ["#FFFFFF", "#5CB85C", "#999999"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 55,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 3,
+      "title": "Company Purpose",
+      "layoutType": "text",
+      "bodyText": "Define the company/business in a single declarative sentence",
+      "dominantColors": ["#FFFFFF", "#5CB85C", "#999999"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 80,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 4,
+      "title": "Problem",
+      "layoutType": "text",
+      "bodyText": "Describe the pain of the customer (or the customer's customer)\nOutline how the customer addresses the issue today",
+      "dominantColors": ["#FFFFFF", "#5CB85C", "#999999"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 70,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 5,
+      "title": "Solution",
+      "layoutType": "text",
+      "bodyText": "Demonstrate your company's value proposition to make the customer's life better\nShow where your product physically sits\nProvide use cases",
+      "dominantColors": ["#FFFFFF", "#5CB85C", "#999999"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 65,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 6,
+      "title": "Why Now",
+      "layoutType": "text",
+      "bodyText": "Set-up the historical evolution of your category\nDefine recent trends that make your solution possible",
+      "dominantColors": ["#FFFFFF", "#5CB85C", "#999999"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 70,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 7,
+      "title": "Market Size",
+      "layoutType": "text",
+      "bodyText": "Identify/profile the customer you cater to\nCalculate the TAM (top down), SAM (bottoms up) and SOM",
+      "dominantColors": ["#FFFFFF", "#5CB85C", "#999999"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 70,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 8,
+      "title": "Competition",
+      "layoutType": "text",
+      "bodyText": "List competitors\nList competitive advantages",
+      "dominantColors": ["#FFFFFF", "#5CB85C", "#999999"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 75,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 9,
+      "title": "Product",
+      "layoutType": "text",
+      "bodyText": "Product line-up (form factor, functionality, features, architecture, intellectual property)\nDevelopment roadmap",
+      "dominantColors": ["#FFFFFF", "#5CB85C", "#999999"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 70,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 10,
+      "title": "Business Model",
+      "layoutType": "bullet-list",
+      "bodyText": "Revenue model\nPricing\nAverage account size and/or lifetime value\nSales & distribution model\nCustomer/pipeline list",
+      "dominantColors": ["#FFFFFF", "#5CB85C", "#999999"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 55,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 11,
+      "title": "Team",
+      "layoutType": "text",
+      "bodyText": "Founders & Management\nBoard of Directors/Board of Advisors",
+      "dominantColors": ["#FFFFFF", "#5CB85C", "#999999"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 75,
+      "visualComplexity": "low"
+    },
+    {
+      "index": 12,
+      "title": "Financials",
+      "layoutType": "bullet-list",
+      "bodyText": "P&L\nBalance Sheet (Not required for this presentation)\nCash flow\nCap table (Not required for this presentation)\nThe deal (Not required for this presentation)",
+      "dominantColors": ["#FFFFFF", "#5CB85C", "#FF0000", "#999999"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 50,
+      "visualComplexity": "medium"
+    },
+    {
+      "index": 13,
+      "title": "Did you like this presentation?",
+      "layoutType": "closing",
+      "bodyText": "If yes, please click the Like button in the SlideShare toolbar below. Thanks!\nNeed help with your pitch deck?\nWe can provide feedback on your existing deck or build a new one from scratch. Contact us via our website.",
+      "dominantColors": ["#5CB85C", "#FFFFFF", "#333333"],
+      "fontStyle": "sans-serif",
+      "whitespacePct": 40,
+      "visualComplexity": "medium"
+    }
+  ],
+  "extractedAt": "2026-04-12T00:00:00.000Z",
+  "source": "sequoia-template"
+}

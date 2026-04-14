@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #f0f4f8; display: flex; align-items: center; justify-content: center; }
+
+.outer-card {
+  width: 900px;
+  background: #ffffff;
+  border-radius: 16px;
+  border: 2px solid #d1d9e6;
+  padding: 32px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+}
+
+.outer-card h2 {
+  font-size: 22px;
+  color: #1a202c;
+  margin-bottom: 20px;
+  font-weight: 700;
+}
+
+.inner-card {
+  background: #f7fafc;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.inner-card-header {
+  background: #4a6cf7;
+  color: white;
+  padding: 16px 24px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 12px 12px 0 0;
+}
+
+.inner-card-body {
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.inner-card-body p {
+  font-size: 15px;
+  color: #4a5568;
+  line-height: 1.6;
+  flex: 1;
+}
+
+.badge {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+  border: 3px solid #ffffff;
+  box-shadow: 0 4px 12px rgba(238,90,36,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 24px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.tags {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 0 24px 20px;
+}
+
+.tag {
+  background: #edf2f7;
+  color: #4a6cf7;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 50px;
+  border: 1px solid #d1d9e6;
+}
+
+.footer {
+  margin-top: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.footer span {
+  font-size: 13px;
+  color: #a0aec0;
+}
+
+.footer .btn {
+  background: #4a6cf7;
+  color: white;
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+</style></head><body>
+<div class="outer-card">
+  <h2>Nested Rounded Corners Test</h2>
+  <div class="inner-card">
+    <div class="inner-card-header">Project Alpha — Status Dashboard</div>
+    <div class="inner-card-body">
+      <p>This inner card is nested inside the outer card, each with its own border-radius. The header section clips to the inner card's top corners. The badge on the right is a perfect circle (border-radius: 50%).</p>
+      <div class="badge">A+</div>
+    </div>
+    <div class="tags">
+      <span class="tag">Design</span>
+      <span class="tag">Frontend</span>
+      <span class="tag">Edge Case</span>
+      <span class="tag">Nested</span>
+    </div>
+  </div>
+  <div class="footer">
+    <span>Last updated: 2 hours ago</span>
+    <div class="btn">View Details</div>
+  </div>
+</div>
+</body></html>

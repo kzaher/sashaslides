@@ -1,0 +1,46 @@
+<!-- slide_01.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; position:relative; background:#1A0A30; display:flex; align-items:center; justify-content:center; }
+.bg {
+  position:absolute; inset:0;
+  background:
+    radial-gradient(ellipse 1000px 800px at 20% 80%, rgba(50,15,80,0.85) 0%, transparent 65%),
+    radial-gradient(ellipse 600px 500px at 85% 15%, rgba(244,64,96,0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 400px 300px at 60% 50%, rgba(20,5,40,0.5) 0%, transparent 50%);
+}
+.vignette { position:absolute; inset:0; background:radial-gradient(ellipse at center, transparent 25%, rgba(0,0,0,0.82) 100%); }
+.accent-bar { position:absolute; left:0; top:0; bottom:0; width:5px; background:#F44060; }
+.content { position:relative; z-index:2; text-align:center; display:flex; flex-direction:column; align-items:center; }
+.logo-circle {
+  width:100px; height:100px; background:#F44060; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; margin-bottom:36px;
+}
+.logo-p { font-size:52px; font-weight:900; color:#fff; line-height:1; }
+.wordmark { font-size:80px; font-weight:900; color:#FFFFFF; letter-spacing:22px; text-transform:uppercase; line-height:1; }
+.rule-wrap { display:flex; align-items:center; gap:14px; margin:22px 0; }
+.rule-line { width:64px; height:2px; background:rgba(255,255,255,0.18); }
+.rule-dot { width:7px; height:7px; border-radius:50%; background:#F44060; }
+.tagline { font-size:12px; font-weight:600; color:rgba(255,255,255,0.4); letter-spacing:9px; text-transform:uppercase; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="bg"></div>
+  <div class="vignette"></div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="logo-circle"><span class="logo-p">P</span></div>
+    <div class="wordmark">PELOTON</div>
+    <div class="rule-wrap"><div class="rule-line"></div><div class="rule-dot"></div><div class="rule-line"></div></div>
+    <div class="tagline">Brand Positioning</div>
+  </div>
+</div>
+</body>
+</html>

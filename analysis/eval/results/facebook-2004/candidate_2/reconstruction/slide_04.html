@@ -1,0 +1,78 @@
+<!-- slide_04.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@1,400&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1280px; height: 720px; overflow: hidden; background: #FFFFFF; }
+body { display: flex; align-items: center; justify-content: center; }
+.slide {
+  width: 1280px; height: 720px;
+  position: relative;
+  display: flex; flex-direction: column;
+  justify-content: flex-start;
+  padding: 72px 104px 64px;
+}
+.slide-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 28px; font-weight: 600;
+  color: #2C3040; margin-bottom: 44px;
+}
+.columns {
+  display: flex; gap: 96px; flex: 1;
+}
+.column { flex: 1; }
+.col-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.11em;
+  color: #4A6FA5; margin-bottom: 20px;
+}
+.col-items {
+  list-style: none;
+}
+.col-items li {
+  font-family: 'Inter', sans-serif;
+  font-size: 15px; color: #2C3040; line-height: 1.5;
+  padding: 7px 0 7px 18px;
+  position: relative;
+}
+.col-items li::before {
+  content: '—';
+  position: absolute; left: 0;
+  color: #4A6FA5; font-weight: 400;
+}
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="slide-title">User profiles</div>
+  <div class="columns">
+    <div class="column">
+      <div class="col-label">User-declared</div>
+      <ul class="col-items">
+        <li>Contact information</li>
+        <li>Relationship status</li>
+        <li>Political views</li>
+        <li>Clubs and jobs</li>
+        <li>Favorite music, books, movies, and quotes</li>
+        <li>Course schedule and concentration</li>
+        <li>Profile photo</li>
+      </ul>
+    </div>
+    <div class="column">
+      <div class="col-label">Auto-populated by the system</div>
+      <ul class="col-items">
+        <li>Linked school news articles mentioning the user</li>
+        <li>Last AIM away message</li>
+        <li>Last campus access location</li>
+        <li>Visualized friendship network</li>
+        <li>Shortest connection path to any other user</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</body>
+</html>

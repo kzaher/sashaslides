@@ -1,0 +1,81 @@
+<!-- slide_06.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; background:#FFFFFF; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px 72px; }
+.section-title { font-size:13px; font-weight:700; font-style:italic; color:#F44060; letter-spacing:5px; text-transform:uppercase; margin-bottom:10px; text-align:center; }
+.headline { font-size:28px; font-weight:900; color:#1A1A1A; text-transform:uppercase; margin-bottom:40px; text-align:center; }
+.grid { display:grid; grid-template-columns:repeat(3,1fr); gap:32px 48px; width:100%; max-width:1100px; }
+.card { display:flex; flex-direction:column; align-items:center; text-align:center; }
+.icon-circle {
+  width:76px; height:76px; border-radius:50%; background:#F44060;
+  display:flex; align-items:center; justify-content:center; margin-bottom:16px; flex-shrink:0;
+}
+.icon-circle svg { width:38px; height:38px; }
+.card-label { font-size:11px; font-weight:800; color:#1A1A1A; text-transform:uppercase; letter-spacing:3px; margin-bottom:8px; }
+.card-dash { width:24px; height:2px; background:#F44060; margin:0 auto 8px; }
+.card-desc { font-size:13px; font-weight:400; color:#666666; line-height:1.55; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="section-title">Brand Values</div>
+  <div class="headline">Six Pillars of the Brand</div>
+  <div class="grid">
+    <div class="card">
+      <div class="icon-circle">
+        <svg viewBox="0 0 38 38" fill="none"><circle cx="19" cy="19" r="10" stroke="white" stroke-width="2.2"/><path d="M19 9V5M19 33v-4M9 19H5M33 19h-4" stroke="white" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </div>
+      <div class="card-label">Always On</div>
+      <div class="card-dash"></div>
+      <div class="card-desc">The gold standard for being there for members, whenever and wherever.</div>
+    </div>
+    <div class="card">
+      <div class="icon-circle">
+        <svg viewBox="0 0 38 38" fill="none"><path d="M19 7l2.5 7.5H29l-6 4.5 2.5 7.5-6-4.5-6 4.5 2.5-7.5-6-4.5h7.5z" stroke="white" stroke-width="2" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="card-label">Empowering</div>
+      <div class="card-dash"></div>
+      <div class="card-desc">Lifting members up through celebration, not comparison or shame.</div>
+    </div>
+    <div class="card">
+      <div class="icon-circle">
+        <svg viewBox="0 0 38 38" fill="none"><path d="M10 28c0-8 4-14 9-14s9 6 9 14" stroke="white" stroke-width="2.2" stroke-linecap="round"/><path d="M19 14V8M14 10l5-2 5 2" stroke="white" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </div>
+      <div class="card-label">Optimistic</div>
+      <div class="card-dash"></div>
+      <div class="card-desc">Inspirational, energizing, hopeful and hyped — never cynical.</div>
+    </div>
+    <div class="card">
+      <div class="icon-circle">
+        <svg viewBox="0 0 38 38" fill="none"><rect x="8" y="8" width="22" height="16" rx="2" stroke="white" stroke-width="2.2"/><path d="M13 30h12M19 24v6" stroke="white" stroke-width="2.2" stroke-linecap="round"/><path d="M13 16h12" stroke="white" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </div>
+      <div class="card-label">Captivating</div>
+      <div class="card-dash"></div>
+      <div class="card-desc">Blends performance with entertainment — the class is the product.</div>
+    </div>
+    <div class="card">
+      <div class="icon-circle">
+        <svg viewBox="0 0 38 38" fill="none"><path d="M19 8c-6 0-11 5-11 11 0 4 2 7.5 5.5 9.5L19 30l5.5-1.5C28 26.5 30 23 30 19c0-6-5-11-11-11z" stroke="white" stroke-width="2.2"/><path d="M15 19l3 3 6-6" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="card-label">Authentic</div>
+      <div class="card-dash"></div>
+      <div class="card-desc">Member-first, simple, conversational — no corporate fitness speak.</div>
+    </div>
+    <div class="card">
+      <div class="icon-circle">
+        <svg viewBox="0 0 38 38" fill="none"><path d="M19 9l3 6h6l-5 4 2 6-6-4-6 4 2-6-5-4h6z" stroke="white" stroke-width="2" stroke-linejoin="round"/><circle cx="19" cy="28" r="3" stroke="white" stroke-width="2"/></svg>
+      </div>
+      <div class="card-label">Premium</div>
+      <div class="card-dash"></div>
+      <div class="card-desc">Established through design, performance and excellence — earned, not claimed.</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

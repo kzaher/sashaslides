@@ -1,0 +1,41 @@
+<!-- slide_11.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    position: relative;
+  }
+  .brand { font-size: 64px; font-weight: 300; color: #333333; letter-spacing: -1px; }
+  .brand span { color: #4A90D9; font-weight: 700; }
+  .tagline { font-size: 22px; color: #888888; margin-top: 16px; font-weight: 300; letter-spacing: 0.02em; }
+  .cta-banner {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 72px;
+    background: #D9534F;
+    display: flex; align-items: center; justify-content: center;
+    gap: 40px;
+  }
+  .cta-text { font-size: 20px; font-weight: 700; color: #FFFFFF; letter-spacing: 0.02em; }
+  .cta-sep { width: 1px; height: 28px; background: rgba(255,255,255,0.35); }
+  .cta-contact { font-size: 18px; color: rgba(255,255,255,0.9); font-weight: 300; }
+</style>
+</head>
+<body>
+  <div class="brand"><span>Coinbase</span></div>
+  <div class="tagline">Your hosted Bitcoin wallet — Bitcoin for everyone</div>
+  <div class="cta-banner">
+    <span class="cta-text">Get early access</span>
+    <div class="cta-sep"></div>
+    <span class="cta-contact">coinbase.com</span>
+  </div>
+</body>
+</html>

@@ -1,0 +1,164 @@
+<!-- slide_09.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+}
+body {
+  padding: 56px 80px;
+  display: flex; flex-direction: column;
+}
+.heading {
+  font-size: 38px; font-weight: 700; color: #29B6F6;
+  margin-bottom: 8px; letter-spacing: -0.5px;
+}
+.sub {
+  font-size: 15px; color: #333333; line-height: 1.5;
+  margin-bottom: 28px;
+}
+.matrix-container {
+  flex: 1; position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+.matrix {
+  position: relative;
+  width: 900px; height: 480px;
+}
+/* Axes */
+.axis-y {
+  position: absolute; left: 60px; top: 0; bottom: 0; width: 1px;
+  background: #CCCCCC;
+}
+.axis-x {
+  position: absolute; left: 0; right: 0; bottom: 56px; height: 1px;
+  background: #CCCCCC;
+}
+/* Axis labels */
+.label-affordable {
+  position: absolute; left: 0; top: -4px;
+  font-size: 11px; font-weight: 700; color: #888888;
+  text-transform: uppercase; letter-spacing: 1px;
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  text-align: center; line-height: 1;
+}
+.label-expensive {
+  position: absolute; left: 0; bottom: 52px;
+  font-size: 11px; font-weight: 700; color: #888888;
+  text-transform: uppercase; letter-spacing: 1px;
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  text-align: center; line-height: 1;
+}
+.label-offline {
+  position: absolute; left: 68px; bottom: 24px;
+  font-size: 11px; font-weight: 700; color: #888888;
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.label-online {
+  position: absolute; right: 0; bottom: 24px;
+  font-size: 11px; font-weight: 700; color: #888888;
+  text-transform: uppercase; letter-spacing: 1px;
+}
+/* Competitor labels */
+.comp {
+  position: absolute;
+  font-size: 12px; color: #888888; font-weight: 400;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+.comp::before {
+  content: '·'; position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 18px; color: #CCCCCC;
+}
+.comp span {
+  position: relative; display: block; padding-top: 10px; text-align: center;
+}
+/* Our brand */
+.brand-mark {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  z-index: 10;
+}
+.brand-dot {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #29B6F6;
+  margin: 0 auto 6px;
+}
+.brand-name {
+  font-size: 13px; font-weight: 900; color: #29B6F6;
+  text-align: center;
+}
+/* Quadrant labels */
+.quadrant-label {
+  position: absolute;
+  font-size: 10px; font-weight: 700; color: #F0F0F0;
+  text-transform: uppercase; letter-spacing: 1px;
+}
+</style>
+</head>
+<body>
+  <h1 class="heading">Competitive Landscape</h1>
+  <p class="sub">Two dimensions define the market: price and whether transactions happen online. One quadrant is empty.</p>
+  <div class="matrix-container">
+    <div class="matrix">
+      <!-- Axes -->
+      <div class="axis-y"></div>
+      <div class="axis-x"></div>
+      <!-- Axis Labels -->
+      <div class="label-affordable">Affordable</div>
+      <div class="label-expensive">Expensive</div>
+      <div class="label-offline">Offline</div>
+      <div class="label-online">Online</div>
+      <!-- Quadrant background tints -->
+      <div style="position:absolute;left:61px;top:0;right:0;height:50%;background:#F9FDFF;opacity:0.6;"></div>
+
+      <!-- Competitors: left side (offline-ish) -->
+      <div class="comp" style="left:28%;top:18%;">
+        <span>CouchSurfing</span>
+      </div>
+      <div class="comp" style="left:22%;top:28%;">
+        <span>Craigslist</span>
+      </div>
+
+      <!-- Competitors: right side (online), affordable zone -->
+      <div class="comp" style="left:72%;top:30%;">
+        <span>Hostels.com</span>
+      </div>
+      <div class="comp" style="left:82%;top:38%;">
+        <span>Rentobi</span>
+      </div>
+
+      <!-- Competitors: right side (online), expensive zone -->
+      <div class="comp" style="left:78%;top:58%;">
+        <span>BedandBreakfast.com</span>
+      </div>
+      <div class="comp" style="left:65%;top:66%;">
+        <span>Rentahome</span>
+      </div>
+      <div class="comp" style="left:82%;top:72%;">
+        <span>Hotels.com</span>
+      </div>
+      <div class="comp" style="left:88%;top:80%;">
+        <span>Orbitz</span>
+      </div>
+      <div class="comp" style="left:70%;top:78%;">
+        <span>VRBO</span>
+      </div>
+
+      <!-- Our brand mark: top-right (Affordable + Online) -->
+      <div class="brand-mark" style="left:89%;top:10%;">
+        <div class="brand-dot"></div>
+        <div class="brand-name">AirBed&amp;Breakfast</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

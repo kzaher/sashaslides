@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #ffffff; display: flex; }
+.left { width: 520px; height: 100%; background: #f0f4ff; display: flex; align-items: center; justify-content: center; padding: 40px; position: relative; }
+.device { width: 280px; height: 560px; background: #1a1a2e; border-radius: 32px; position: relative; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.2), 0 0 0 2px #333; }
+.status-bar { height: 44px; background: #1a1a2e; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; }
+.status-time { color: #fff; font-size: 14px; font-weight: 600; }
+.status-icons { display: flex; gap: 6px; }
+.status-dot { width: 14px; height: 14px; background: #fff; border-radius: 2px; opacity: 0.8; }
+.notch { width: 120px; height: 28px; background: #000; border-radius: 0 0 16px 16px; position: absolute; top: 0; left: 50%; transform: translateX(-50%); }
+.screen { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); height: calc(100% - 44px); padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.screen-card { background: rgba(255,255,255,0.15); border-radius: 12px; padding: 14px; backdrop-filter: blur(10px); }
+.screen-card-title { color: #fff; font-size: 11px; font-weight: 600; opacity: 0.8; margin-bottom: 6px; }
+.screen-card-value { color: #fff; font-size: 22px; font-weight: 700; }
+.screen-bar-row { display: flex; gap: 4px; margin-top: 8px; }
+.screen-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.3); }
+.screen-bar.active { background: #fff; }
+.screen-nav { display: flex; justify-content: space-around; margin-top: auto; padding: 12px 0; }
+.nav-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.4); }
+.nav-dot.active { background: #fff; width: 24px; border-radius: 4px; }
+.right { flex: 1; padding: 60px 50px; display: flex; flex-direction: column; justify-content: center; }
+.section-label { font-size: 13px; font-weight: 600; color: #667eea; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px; }
+.main-title { font-size: 36px; font-weight: 700; color: #1a1a2e; line-height: 1.2; margin-bottom: 8px; }
+.main-subtitle { font-size: 16px; color: #6c757d; margin-bottom: 36px; font-family: 'Roboto', sans-serif; line-height: 1.5; }
+.feature { display: flex; gap: 18px; padding: 18px 0; border-left: 3px solid #667eea; padding-left: 20px; margin-bottom: 16px; }
+.feature:nth-child(2) { border-left-color: #764ba2; }
+.feature:nth-child(3) { border-left-color: #f093fb; }
+.feature-icon { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); display: flex; align-items: center; justify-content: center; color: white; font-size: 18px; font-weight: 700; flex-shrink: 0; }
+.feature:nth-child(2) .feature-icon { background: linear-gradient(135deg, #764ba2, #f093fb); }
+.feature:nth-child(3) .feature-icon { background: linear-gradient(135deg, #f093fb, #f5576c); }
+.feature-text h3 { font-size: 17px; font-weight: 600; color: #1a1a2e; margin-bottom: 4px; }
+.feature-text p { font-size: 13px; color: #6c757d; line-height: 1.5; font-family: 'Roboto', sans-serif; }
+.divider { width: 1px; background: #e9ecef; position: absolute; left: 520px; top: 60px; bottom: 60px; }
+</style></head><body>
+<div class="left">
+  <div class="device">
+    <div class="notch"></div>
+    <div class="status-bar">
+      <span class="status-time">9:41</span>
+      <div class="status-icons"><div class="status-dot" style="width:16px;height:10px;border-radius:2px"></div><div class="status-dot" style="width:14px;height:10px;border-radius:2px"></div></div>
+    </div>
+    <div class="screen">
+      <div class="screen-card">
+        <div class="screen-card-title">Monthly Revenue</div>
+        <div class="screen-card-value">$48,290</div>
+        <div class="screen-bar-row">
+          <div class="screen-bar active" style="width:20%"></div>
+          <div class="screen-bar active" style="width:35%"></div>
+          <div class="screen-bar active" style="width:25%"></div>
+          <div class="screen-bar" style="width:15%"></div>
+        </div>
+      </div>
+      <div class="screen-card">
+        <div class="screen-card-title">Active Users</div>
+        <div class="screen-card-value">12,847</div>
+        <div class="screen-bar-row">
+          <div class="screen-bar active" style="width:40%"></div>
+          <div class="screen-bar active" style="width:30%"></div>
+          <div class="screen-bar" style="width:20%"></div>
+        </div>
+      </div>
+      <div class="screen-card">
+        <div class="screen-card-title">Conversion Rate</div>
+        <div class="screen-card-value">4.2%</div>
+      </div>
+      <div class="screen-nav">
+        <div class="nav-dot active"></div>
+        <div class="nav-dot"></div>
+        <div class="nav-dot"></div>
+        <div class="nav-dot"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="divider"></div>
+<div class="right">
+  <div class="section-label">Product Features</div>
+  <div class="main-title">Built for Modern Teams</div>
+  <div class="main-subtitle">Everything you need to track, analyze, and grow your business in one beautiful dashboard.</div>
+  <div class="feature">
+    <div class="feature-icon">&#x26A1;</div>
+    <div class="feature-text"><h3>Real-time Analytics</h3><p>Live dashboards update every second with zero-lag streaming from all data sources.</p></div>
+  </div>
+  <div class="feature">
+    <div class="feature-icon">&#x1F512;</div>
+    <div class="feature-text"><h3>Enterprise Security</h3><p>SOC 2 Type II certified with end-to-end encryption and role-based access controls.</p></div>
+  </div>
+  <div class="feature">
+    <div class="feature-icon">&#x1F4CA;</div>
+    <div class="feature-text"><h3>Smart Predictions</h3><p>ML-powered forecasting identifies trends and anomalies before they impact your KPIs.</p></div>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,55 @@
+{
+  "description": "Business presentations for analysis eval (≤20 slides, with images)",
+  "presentations": [
+    {
+      "id": "airbnb-seed-2009",
+      "name": "Airbnb Original Pitch Deck",
+      "company": "Airbnb",
+      "year": 2009,
+      "slideCount": 14,
+      "category": "pitch",
+      "style": "playful-minimal",
+      "notable": "Most referenced seed pitch deck ever; raised $600K"
+    },
+    {
+      "id": "coinbase-seed-2012",
+      "name": "Coinbase Seed Pitch Deck",
+      "company": "Coinbase",
+      "year": 2012,
+      "slideCount": 11,
+      "category": "pitch",
+      "style": "clean-product",
+      "notable": "YC Demo Day deck by Brian Armstrong; publicly shared"
+    },
+    {
+      "id": "facebook-2004",
+      "name": "Facebook Advertising Media Kit",
+      "company": "Facebook",
+      "year": 2004,
+      "slideCount": 20,
+      "category": "pitch",
+      "style": "corporate-data",
+      "notable": "Eduardo Saverin's 2004 advertising deck; blue brand grid"
+    },
+    {
+      "id": "sequoia-template",
+      "name": "Sequoia Capital Pitch Deck Template",
+      "company": "Sequoia Capital",
+      "year": 2015,
+      "slideCount": 13,
+      "category": "strategy",
+      "style": "bold-minimal",
+      "notable": "Canonical VC pitch structure thousands of startups follow"
+    },
+    {
+      "id": "peloton-seed-2012",
+      "name": "Peloton Seed Pitch Deck",
+      "company": "Peloton",
+      "year": 2012,
+      "slideCount": 20,
+      "category": "pitch",
+      "style": "photo-heavy",
+      "notable": "Original investor deck; dark, lifestyle imagery"
+    }
+  ]
+}

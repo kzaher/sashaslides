@@ -1,0 +1,64 @@
+<!-- slide_08.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Helvetica Neue', Arial, system-ui, sans-serif;
+  padding: 60px 80px;
+}
+.title {
+  font-size: 34px; font-weight: 700; color: #333333; margin-bottom: 10px;
+}
+.title-underline {
+  width: 48px; height: 3px; background: #29B6F6; margin-bottom: 52px;
+}
+.channels {
+  display: flex; gap: 0;
+}
+.channel {
+  flex: 1; padding-right: 48px; border-right: 1px solid #D6EEFB;
+}
+.channel:last-child { border-right: none; padding-right: 0; padding-left: 48px; }
+.channel:nth-child(2) { padding-left: 48px; }
+.channel-name {
+  font-size: 24px; font-weight: 700; color: #29B6F6;
+  text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px;
+}
+.channel-desc {
+  font-size: 16px; font-weight: 400; color: #333333; line-height: 1.6;
+}
+.channel-desc strong { font-weight: 700; color: #333333; }
+</style>
+</head>
+<body>
+  <div class="title">Go-to-Market</div>
+  <div class="title-underline"></div>
+  <div class="channels">
+    <div class="channel">
+      <div class="channel-name">Events</div>
+      <div class="channel-desc">
+        Target large events monthly with a listing widget.<br><br>
+        <strong>Octoberfest</strong> (6M attendees) · <strong>Cebit</strong> (700K) · <strong>Summerfest</strong> (1M) · <strong>Eurocup</strong> (3M+) · <strong>Mardi Gras</strong> (800K)
+      </div>
+    </div>
+    <div class="channel">
+      <div class="channel-name">Partnerships</div>
+      <div class="channel-desc">
+        Integrate with cheap and alternative travel partners to reach budget-conscious travelers already in-funnel.<br><br>
+        <strong>GoLoCo</strong> · <strong>KAYAK</strong> · <strong>Orbitz</strong>
+      </div>
+    </div>
+    <div class="channel">
+      <div class="channel-name">Craigslist</div>
+      <div class="channel-desc">
+        Dual-posting feature lets hosts cross-list their AirBed&amp;Breakfast space directly to Craigslist, capturing the 50K weekly listings already seeking this demand.
+      </div>
+    </div>
+  </div>
+</body>
+</html>

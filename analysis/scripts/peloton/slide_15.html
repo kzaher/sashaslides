@@ -1,0 +1,74 @@
+<!-- slide_15.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1280px; height:720px; overflow:hidden; font-family:'Inter',sans-serif; }
+.slide { width:1280px; height:720px; display:flex; }
+.photo {
+  width:560px; height:720px; flex-shrink:0; position:relative; overflow:hidden;
+  background:#0D0808;
+}
+.photo-bg {
+  position:absolute; inset:0;
+  background:
+    radial-gradient(ellipse 400px 400px at 50% 45%, rgba(100,20,10,0.65) 0%, transparent 60%),
+    radial-gradient(ellipse 300px 200px at 20% 75%, rgba(244,64,96,0.05) 0%, transparent 50%),
+    #0D0808;
+}
+/* Leaderboard-style visual hint */
+.leaderboard {
+  position:absolute; right:24px; top:50%; transform:translateY(-50%);
+  display:flex; flex-direction:column; gap:6px;
+}
+.lb-row { display:flex; align-items:center; gap:8px; }
+.lb-rank { font-size:9px; font-weight:800; color:#F44060; width:18px; text-align:right; }
+.lb-bar { height:4px; background:rgba(255,255,255,0.15); border-radius:2px; }
+.lb-bar.you { background:#F44060; }
+.photo-label {
+  position:absolute; bottom:32px; left:32px;
+  font-size:11px; font-weight:700; color:#F44060; letter-spacing:4px; text-transform:uppercase;
+}
+.panel {
+  flex:1; background:#FFFFFF; display:flex; flex-direction:column; justify-content:center;
+  padding:64px 72px 64px 64px;
+}
+.section-title { font-size:13px; font-weight:700; font-style:italic; color:#F44060; letter-spacing:5px; text-transform:uppercase; margin-bottom:20px; }
+.headline { font-size:30px; font-weight:900; color:#1A1A1A; text-transform:uppercase; line-height:1.1; margin-bottom:24px; }
+.body { font-size:15px; font-weight:400; color:#1A1A1A; line-height:1.65; margin-bottom:28px; }
+.metrics { display:flex; flex-direction:column; gap:10px; }
+.metric { display:flex; align-items:center; gap:14px; }
+.metric-icon { width:36px; height:36px; border-radius:50%; background:#F44060; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.metric-icon svg { width:18px; height:18px; }
+.metric-text { font-size:13px; font-weight:600; color:#1A1A1A; text-transform:uppercase; letter-spacing:1px; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="photo">
+    <div class="photo-bg"></div>
+    <div class="leaderboard">
+      <div class="lb-row"><div class="lb-rank">1</div><div class="lb-bar" style="width:90px"></div></div>
+      <div class="lb-row"><div class="lb-rank">2</div><div class="lb-bar" style="width:76px"></div></div>
+      <div class="lb-row"><div class="lb-rank">3</div><div class="lb-bar lb-bar you" style="width:68px"></div></div>
+      <div class="lb-row"><div class="lb-rank">4</div><div class="lb-bar" style="width:55px"></div></div>
+      <div class="lb-row"><div class="lb-rank">5</div><div class="lb-bar" style="width:44px"></div></div>
+    </div>
+    <div class="photo-label">Metrics &amp; Leaderboard</div>
+  </div>
+  <div class="panel">
+    <div class="section-title">Brand Pillar 02</div>
+    <div class="headline">Pushes Me to Excel</div>
+    <div class="body">Metrics and the leaderboard create objective proof of progress. Creative always shows intensity and protagonists working hard — not cruising.</div>
+    <div class="metrics">
+      <div class="metric"><div class="metric-icon"><svg viewBox="0 0 18 18" fill="none"><path d="M3 14l4-5 3 3 5-7" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="metric-text">Output &amp; Cadence Metrics</div></div>
+      <div class="metric"><div class="metric-icon"><svg viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="5" stroke="white" stroke-width="1.8"/><path d="M9 6v3l2 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></div><div class="metric-text">Real-Time Leaderboard</div></div>
+      <div class="metric"><div class="metric-icon"><svg viewBox="0 0 18 18" fill="none"><path d="M9 3l1.5 4.5H15l-3.5 2.5 1.5 4.5L9 12l-4 2.5 1.5-4.5L3 7.5h4.5z" stroke="white" stroke-width="1.6"/></svg></div><div class="metric-text">Engaging Class Content</div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

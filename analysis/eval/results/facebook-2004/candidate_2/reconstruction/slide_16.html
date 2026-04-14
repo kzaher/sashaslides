@@ -1,0 +1,80 @@
+<!-- slide_16.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@1,400&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1280px; height: 720px; overflow: hidden; background: #FFFFFF; }
+body { display: flex; align-items: center; justify-content: center; }
+.slide {
+  width: 1280px; height: 720px;
+  position: relative;
+  display: flex; flex-direction: column;
+  justify-content: center;
+  padding: 56px 104px;
+}
+.slide-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 20px; font-weight: 600;
+  color: #2C3040; margin-bottom: 28px;
+}
+.table-wrap {
+  display: flex; gap: 40px;
+}
+.table-col { flex: 1; }
+table {
+  width: 100%; border-collapse: collapse;
+}
+thead th {
+  background: #4A6FA5; color: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px; font-weight: 600;
+  text-align: left; padding: 10px 16px;
+  letter-spacing: 0.07em; text-transform: uppercase;
+}
+tbody tr:nth-child(odd) { background: #FFFFFF; }
+tbody tr:nth-child(even) { background: #C8DCF0; }
+tbody td {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px; color: #2C3040;
+  padding: 9px 16px; line-height: 1.4;
+}
+tbody td:last-child { color: #4A6FA5; font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="slide-title">Schools launched February 4 – April 19, 2004</div>
+  <div class="table-wrap">
+    <div class="table-col">
+      <table>
+        <thead><tr><th>School</th><th>Launch date</th></tr></thead>
+        <tbody>
+          <tr><td>Harvard University</td><td>Feb 4, 2004</td></tr>
+          <tr><td>Stanford University</td><td>Feb 26, 2004</td></tr>
+          <tr><td>MIT</td><td>Mar 14, 2004</td></tr>
+          <tr><td>New York University</td><td>Mar 21, 2004</td></tr>
+          <tr><td>Boston University</td><td>Mar 21, 2004</td></tr>
+          <tr><td>UC Berkeley</td><td>Apr 4, 2004</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-col">
+      <table>
+        <thead><tr><th>School</th><th>Launch date</th></tr></thead>
+        <tbody>
+          <tr><td>Duke University</td><td>Apr 11, 2004</td></tr>
+          <tr><td>Georgetown University</td><td>Apr 11, 2004</td></tr>
+          <tr><td>University of Virginia</td><td>Apr 11, 2004</td></tr>
+          <tr><td>Tufts University</td><td>Apr 19, 2004</td></tr>
+          <tr><td>Boston College</td><td>Apr 19, 2004</td></tr>
+          <tr><td>Northeastern University</td><td>Apr 19, 2004</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</body>
+</html>

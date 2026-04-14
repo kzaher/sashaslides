@@ -1,0 +1,72 @@
+<!-- slide_14.html -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #FFFFFF;
+  font-family: 'Helvetica Neue', Arial, system-ui, sans-serif;
+  padding: 60px 80px;
+}
+.framing {
+  font-size: 20px; font-weight: 400; color: #555555;
+  max-width: 860px; line-height: 1.5; margin-bottom: 52px;
+}
+.metrics { display: flex; flex-direction: column; gap: 0; }
+.metric-row {
+  display: flex; align-items: baseline; gap: 28px;
+  padding: 28px 0; border-bottom: 1px solid #E8F5E2;
+}
+.metric-row:first-child { padding-top: 0; }
+.metric-row:last-child { border-bottom: none; }
+.metric-number {
+  font-size: 52px; font-weight: 700; color: #8BC34A;
+  line-height: 1; min-width: 220px; flex-shrink: 0;
+}
+.metric-info { display: flex; flex-direction: column; gap: 5px; }
+.metric-label {
+  font-size: 20px; font-weight: 400; color: #333333; line-height: 1.4;
+}
+.metric-source {
+  font-size: 13px; font-weight: 300; color: #999999;
+}
+.slide-title {
+  font-size: 34px; font-weight: 700; color: #333333; margin-bottom: 10px;
+}
+.title-underline {
+  width: 48px; height: 3px; background: #8BC34A; margin-bottom: 32px;
+}
+</style>
+</head>
+<body>
+  <div class="slide-title">The Ask</div>
+  <div class="title-underline"></div>
+  <div class="framing">We are seeking 12 months of financing to reach 80,000 transactions on AirBed&amp;Breakfast.</div>
+  <div class="metrics">
+    <div class="metric-row">
+      <div class="metric-number">$500K</div>
+      <div class="metric-info">
+        <div class="metric-label">Angel round</div>
+        <div class="metric-source">Seed financing to fund 12 months of operations and growth</div>
+      </div>
+    </div>
+    <div class="metric-row">
+      <div class="metric-number">80K</div>
+      <div class="metric-info">
+        <div class="metric-label">Trips at an average $25 fee</div>
+        <div class="metric-source">Target transaction volume at end of 12-month runway</div>
+      </div>
+    </div>
+    <div class="metric-row">
+      <div class="metric-number">$2M</div>
+      <div class="metric-info">
+        <div class="metric-label">Revenue over 12 months</div>
+        <div class="metric-source">80K trips × $25 average commission fee</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!-- slide_06.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #E8ECF0;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding: 56px 80px 40px;
+  }
+  h1 {
+    font-size: 38px; font-weight: 300; color: #333333;
+    text-align: center; margin-bottom: 40px;
+  }
+  .columns {
+    display: flex; gap: 0; width: 100%; flex: 1;
+  }
+  .col {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 20px;
+    padding: 0 40px;
+  }
+  .col-label {
+    font-size: 20px; font-weight: 300; color: #888888; text-align: center;
+  }
+  .screen-card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+    flex: 1; width: 100%;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .terminal-bar {
+    background: #2E3A5F; height: 32px;
+    display: flex; align-items: center; padding: 0 14px; gap: 8px;
+  }
+  .terminal-bar span { font-size: 12px; color: #aaa; font-family: monospace; }
+  .terminal-body {
+    flex: 1; background: #1a1a2e; padding: 20px 16px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .cmd-line { font-size: 13px; color: #7ec8a0; font-family: monospace; }
+  .out-line { font-size: 12px; color: #888; font-family: monospace; padding-left: 12px; }
+  .prompt { color: #4A90D9; }
+  .win-bar {
+    background: #c0c0c0; height: 28px;
+    display: flex; align-items: center; padding: 0 10px; gap: 6px;
+  }
+  .win-bar span { font-size: 11px; color: #444; }
+  .win-body {
+    flex: 1; background: #f0f0f0; padding: 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .win-row { display: flex; gap: 8px; align-items: center; }
+  .win-icon { width: 24px; height: 24px; background: #888; border-radius: 2px; flex-shrink: 0; }
+  .win-text { font-size: 11px; color: #333; font-family: monospace; }
+  .separator {
+    width: 1px; background: #d0d8e0; align-self: stretch; margin: 0;
+  }
+</style>
+</head>
+<body>
+  <h1>Bitcoin is Powerful but Unusable</h1>
+  <div class="columns">
+    <div class="col">
+      <div class="col-label">Command Line</div>
+      <div class="screen-card">
+        <div class="terminal-bar">
+          <span>bitcoin-cli</span>
+        </div>
+        <div class="terminal-body">
+          <div class="cmd-line"><span class="prompt">$ </span>bitcoin-cli getbalance</div>
+          <div class="out-line">2.45000000</div>
+          <div class="cmd-line"><span class="prompt">$ </span>bitcoin-cli sendtoaddress \</div>
+          <div class="out-line">  "1A2b3C4d5E6f..." \</div>
+          <div class="out-line">  0.5</div>
+          <div class="out-line">error: insufficient fee</div>
+          <div class="cmd-line"><span class="prompt">$ </span>bitcoin-cli listtransactions</div>
+          <div class="out-line">[{"txid":"ab3f...","amount":</div>
+          <div class="out-line">-0.5,"confirmations":0}]</div>
+          <div class="cmd-line"><span class="prompt">$ </span><span style="opacity:0.5">_</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="separator"></div>
+    <div class="col">
+      <div class="col-label">Desktop Client</div>
+      <div class="screen-card">
+        <div class="win-bar">
+          <span>Bitcoin-Qt — Wallet</span>
+        </div>
+        <div class="win-body">
+          <div class="win-row"><div class="win-icon"></div><div class="win-text">Synchronizing with network...<br>214,832 / 248,101 blocks</div></div>
+          <div style="height:1px;background:#ccc;margin:4px 0"></div>
+          <div class="win-row"><div class="win-text" style="font-size:10px;color:#888">Your Bitcoin Address:<br>1BpEi6DfDAUFd542ozm8hz4V56mNPW...</div></div>
+          <div style="height:1px;background:#ccc;margin:4px 0"></div>
+          <div class="win-row">
+            <div style="width:80px;height:24px;background:#c0c0c0;border-radius:2px;display:flex;align-items:center;justify-content:center;">
+              <span style="font-size:10px;color:#333">Send</span>
+            </div>
+            <div style="width:80px;height:24px;background:#c0c0c0;border-radius:2px;display:flex;align-items:center;justify-content:center;">
+              <span style="font-size:10px;color:#333">Receive</span>
+            </div>
+          </div>
+          <div style="height:1px;background:#ccc;margin:4px 0"></div>
+          <div class="win-text" style="font-size:10px;color:#555">Transactions (last 30 days)</div>
+          <div class="win-row" style="background:#e8e8e8;padding:4px;">
+            <div class="win-text" style="font-size:9px;color:#333">2012-08-01 &nbsp; Received &nbsp; +0.25 BTC</div>
+          </div>
+          <div class="win-row" style="background:#fff;padding:4px;">
+            <div class="win-text" style="font-size:9px;color:#333">2012-07-28 &nbsp; Sent &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; -0.10 BTC</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
