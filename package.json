@@ -4,7 +4,10 @@
     "sudo_claude_fork": "claude --dangerously-skip-permissions --fork-session --resume"
   },
   "dependencies": {
+    "chrome-remote-interface": "^0.34.0",
+    "esbuild": "^0.28.0",
     "googleapis": "^171.4.0",
-    "postcss-value-parser": "^4.2.0"
+    "postcss-value-parser": "^4.2.0",
+    "pptxgenjs": "^4.0.1"
   }
 }

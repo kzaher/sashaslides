@@ -73,6 +73,23 @@ function findComparisons(): SlideComparison[] {
     }
   }
 
+  // Merge optional meta.json: { htmlDir, presentationId, slideIds? }
+  const metaFile = join(resultsDir, "meta.json");
+  if (existsSync(metaFile)) {
+    const meta = JSON.parse(readFileSync(metaFile, "utf-8"));
+    const htmlFiles = meta.htmlDir && existsSync(meta.htmlDir)
+      ? readdirSync(meta.htmlDir).filter((f: string) => f.endsWith(".html")).sort()
+      : [];
+    for (let i = 0; i < comparisons.length; i++) {
+      const c = comparisons[i];
+      if (htmlFiles[i]) c.htmlFile = join(meta.htmlDir, htmlFiles[i]);
+      if (meta.presentationId) {
+        const slideFrag = meta.slideIds?.[i] ? `#slide=id.${meta.slideIds[i]}` : "";
+        c.slidesUrl = `https://docs.google.com/presentation/d/${meta.presentationId}/edit${slideFrag}`;
+      }
+    }
+  }
+
   // Load existing ratings
   const ratingsFile = join(resultsDir, "ratings.json");
   if (existsSync(ratingsFile)) {
@@ -82,8 +99,8 @@ function findComparisons(): SlideComparison[] {
         c.status = ratings[c.id].status;
         c.comment = ratings[c.id].comment;
         c.analysis = ratings[c.id].analysis;
-        c.htmlFile = ratings[c.id].htmlFile;
-        c.slidesUrl = ratings[c.id].slidesUrl;
+        if (ratings[c.id].htmlFile) c.htmlFile = ratings[c.id].htmlFile;
+        if (ratings[c.id].slidesUrl) c.slidesUrl = ratings[c.id].slidesUrl;
       }
     }
   }
