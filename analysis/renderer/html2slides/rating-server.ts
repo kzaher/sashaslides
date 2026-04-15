@@ -457,7 +457,7 @@ function computeClientSideDiff() {
   });
   Promise.all([wait(origImg), wait(slidesImg)]).then(() => {
     const WORK_W = 1600, WORK_H = 900;
-    const THRESHOLD = 45; // per-channel L1 sum; tuned for font-hinting noise
+    const THRESHOLD = 10; // per-channel L1 sum; tuned for font-hinting noise
     const a = document.createElement('canvas');
     a.width = WORK_W; a.height = WORK_H;
     const actx = a.getContext('2d');
