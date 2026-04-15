@@ -14,8 +14,8 @@
  */
 
 import { createServer } from "http";
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, copyFileSync } from "fs";
-import { join, resolve } from "path";
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, copyFileSync, statSync } from "fs";
+import { join, resolve, dirname } from "path";
 
 const args = process.argv.slice(2);
 const resultsDir = resolve(args[0] || ".");
@@ -33,6 +33,9 @@ interface SlideComparison {
   analysis?: string;
   htmlFile?: string;
   slidesUrl?: string;
+  diffPng?: string;        // /tmp/.../diffs/diff_slide_NN.png (pixelmatch output)
+  diffStatus?: string;     // "ok" | "regressed" | "new" | "missing-current"
+  diffPixels?: number;
 }
 
 function findComparisons(): SlideComparison[] {
@@ -90,12 +93,31 @@ function findComparisons(): SlideComparison[] {
     }
   }
 
-  // Load existing ratings
+  // Merge regression report from goldens check: adds diff image path, diff
+  // pixel count, and auto-marks unchanged slides as "good" so the default
+  // view shows only slides that actually diverge from blessed goldens.
+  const reportFile = join(resultsDir, "diffs", "regression-report.json");
+  if (existsSync(reportFile)) {
+    const report = JSON.parse(readFileSync(reportFile, "utf-8"));
+    const byFile = new Map<string, any>();
+    for (const r of (report.results || [])) byFile.set(r.file.replace(".png", ""), r);
+    for (const c of comparisons) {
+      const r = byFile.get(c.id);
+      if (!r) continue;
+      c.diffStatus = r.status;
+      c.diffPixels = r.diffPixels || 0;
+      if (r.diffPath && existsSync(r.diffPath)) c.diffPng = r.diffPath;
+      // Auto-bless: a slide that matches its golden has no diff to rate.
+      if (r.status === "ok") c.status = "good";
+    }
+  }
+
+  // Load existing ratings (user ratings override auto-blessing).
   const ratingsFile = join(resultsDir, "ratings.json");
   if (existsSync(ratingsFile)) {
     const ratings = JSON.parse(readFileSync(ratingsFile, "utf-8"));
     for (const c of comparisons) {
-      if (ratings[c.id]) {
+      if (ratings[c.id] && ratings[c.id].status) {
         c.status = ratings[c.id].status;
         c.comment = ratings[c.id].comment;
         c.analysis = ratings[c.id].analysis;
@@ -114,14 +136,32 @@ function saveRating(id: string, status: "good" | "bad", comment?: string) {
   ratings[id] = { status, comment, ratedAt: new Date().toISOString() };
   writeFileSync(ratingsFile, JSON.stringify(ratings, null, 2));
 
-  // If good, copy to regression snapshots
   if (status === "good") {
+    // Keep a simple SxS archive pair
     const snapshotDir = join(resultsDir, "regression-snapshots");
     mkdirSync(snapshotDir, { recursive: true });
     const comp = findComparisons().find(c => c.id === id);
     if (comp) {
       copyFileSync(comp.originalPng, join(snapshotDir, `${id}_original.png`));
       copyFileSync(comp.slidesPng, join(snapshotDir, `${id}_slides.png`));
+
+      // Bless the blessed golden — THIS is the only sanctioned writer of the
+      // goldens directory. We infer goldens dir from meta.json (htmlDir is
+      // `fixtures-basic/`; goldens sit at the sibling `goldens/`).
+      const metaFile = join(resultsDir, "meta.json");
+      if (existsSync(metaFile)) {
+        const meta = JSON.parse(readFileSync(metaFile, "utf-8"));
+        if (meta.htmlDir) {
+          const goldensDir = join(dirname(meta.htmlDir), "goldens");
+          mkdirSync(goldensDir, { recursive: true });
+          const srcBase = id.replace(/^slide_/, "slide_").split(".")[0];
+          const srcPng = join(resultsDir, "slides", `${srcBase}.png`);
+          if (existsSync(srcPng)) {
+            copyFileSync(srcPng, join(goldensDir, `${srcBase}.png`));
+            console.log(`  BLESSED ${srcBase} → ${goldensDir}`);
+          }
+        }
+      }
     }
   }
 }
@@ -137,10 +177,12 @@ const HTML = `<!DOCTYPE html>
   .header { padding: 16px 24px; background: #16213e; display: flex; justify-content: space-between; align-items: center; }
   .header h1 { font-size: 18px; font-weight: 600; }
   .stats { font-size: 14px; color: #888; }
-  .slide-pair { display: flex; gap: 4px; padding: 12px 24px; align-items: flex-start; }
-  .slide-pair img { width: 49%; border: 2px solid #333; border-radius: 4px; }
+  .slide-pair { display: flex; gap: 4px; padding: 12px 24px; align-items: flex-start; flex-wrap: wrap; }
+  .slide-pair img { width: 32.5%; border: 2px solid #333; border-radius: 4px; }
+  .slide-pair:has(img:nth-child(2):last-child) img { width: 49%; }
   .slide-pair img.original { border-color: #4a90d9; }
   .slide-pair img.slides { border-color: #e94560; }
+  .slide-pair img.diff { border-color: #f1c40f; background: #111; }
   .labels { display: flex; gap: 4px; padding: 0 24px; }
   .labels span { width: 49%; text-align: center; font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
   .actions { display: flex; gap: 12px; padding: 12px 24px; justify-content: center; }
@@ -158,6 +200,13 @@ const HTML = `<!DOCTYPE html>
   .status-good { background: #27ae60; color: white; }
   .status-bad { background: #c0392b; color: white; }
   .status-pending { background: #555; color: #aaa; }
+  .status-regressed { background: #e94560; color: white; animation: pulse 1.5s ease-in-out infinite; }
+  .status-new { background: #8e44ad; color: white; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+  .nav a.diff-regressed { box-shadow: inset 0 -3px 0 #e94560; font-weight: 700; color: #ff6b81; }
+  .nav a.diff-new { box-shadow: inset 0 -3px 0 #8e44ad; color: #c39bd3; }
+  .nav a.diff-ok { opacity: 0.6; }
+  .regression-banner { background: #2a0a14; border-left: 4px solid #e94560; color: #ffb8c4; padding: 10px 16px; margin: 12px 24px; border-radius: 0 6px 6px 0; font-size: 14px; font-weight: 600; }
   .nav { display: flex; gap: 8px; padding: 8px 24px; flex-wrap: wrap; }
   .nav a { color: #4a90d9; text-decoration: none; font-size: 12px; padding: 4px 8px; border-radius: 4px; }
   .nav a:hover { background: #2a2a4e; }
@@ -176,6 +225,7 @@ const HTML = `<!DOCTYPE html>
   <h1>html2slides Fidelity Rating</h1>
   <div class="stats" id="stats"></div>
 </div>
+<div id="regressionBanner"></div>
 <div class="nav" id="nav"></div>
 <div class="labels"><span>Original HTML</span><span>Google Slides</span></div>
 <div class="slide-pair" id="pair"></div>
@@ -191,17 +241,50 @@ const HTML = `<!DOCTYPE html>
 </div>
 <div id="savedComment"></div>
 <div class="analysis" id="analysis" style="display:none"></div>
+<div id="goldenReport" style="margin: 24px; padding: 12px 16px; background: #0f1a30; border-left: 4px solid #f1c40f; border-radius: 0 6px 6px 0; font-size: 13px; color: #ccc; font-family: ui-monospace, monospace;"></div>
 
 <script>
 let comparisons = [];
 let currentIdx = 0;
 
+let showAll = false;
+function visibleComparisons() {
+  // By default, hide slides that match their blessed golden (status=good +
+  // diffStatus=ok). Show everything else: regressed, new fixtures, bad, pending.
+  if (showAll) return comparisons;
+  return comparisons.filter(c =>
+    c.status !== 'good' ||
+    (c.diffStatus && c.diffStatus !== 'ok')
+  );
+}
+
+function humanizeAge(ms) {
+  if (ms == null) return 'never';
+  const s = Math.round(ms/1000);
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.round(s/60) + 'm ago';
+  if (s < 86400) return (s/3600).toFixed(1) + 'h ago';
+  return (s/86400).toFixed(1) + 'd ago';
+}
+async function refreshReport() {
+  const r = await fetch('/api/summary').then(r => r.json());
+  const age = r.oldestRenderMs != null ? humanizeAge(r.nowMs - r.oldestRenderMs) : 'no render yet';
+  document.getElementById('goldenReport').innerHTML =
+    '<b>Goldens report</b> — ' +
+    r.matching + '/' + r.goldenTotal + ' goldens still pixel-match current render' +
+    (r.regressed ? ' · <span style="color:#e94560">' + r.regressed + ' regressed</span>' : '') +
+    (r.new ? ' · <span style="color:#8e44ad">' + r.new + ' new (never blessed)</span>' : '') +
+    ' · oldest current-render thumbnail: ' + age + ' (proves re-scrape)';
+}
 async function load() {
   const resp = await fetch('/api/comparisons');
   comparisons = await resp.json();
-  // Find first pending
-  const pendingIdx = comparisons.findIndex(c => c.status === 'pending');
-  currentIdx = pendingIdx >= 0 ? pendingIdx : 0;
+  refreshReport();
+  const visible = visibleComparisons();
+  const pendingIdx = visible.findIndex(c => c.status === 'pending');
+  const firstVisibleId = (visible[pendingIdx >= 0 ? pendingIdx : 0] || {}).id;
+  currentIdx = comparisons.findIndex(c => c.id === firstVisibleId);
+  if (currentIdx < 0) currentIdx = 0;
   render();
 }
 
@@ -209,12 +292,30 @@ function render() {
   const c = comparisons[currentIdx];
   if (!c) return;
 
-  document.getElementById('pair').innerHTML =
+  let pairHtml =
     '<img class="original" src="/img?path=' + encodeURIComponent(c.originalPng) + '">' +
     '<img class="slides" src="/img?path=' + encodeURIComponent(c.slidesPng) + '">';
+  if (c.diffPng) {
+    pairHtml += '<img class="diff" src="/img?path=' + encodeURIComponent(c.diffPng) + '" title="pixel diff vs golden">';
+  }
+  document.getElementById('pair').innerHTML = pairHtml;
 
   const badge = '<span class="status-badge status-' + c.status + '">' + c.status + '</span>';
-  document.getElementById('slideId').innerHTML = c.id + badge + ' (' + (currentIdx+1) + '/' + comparisons.length + ')';
+  let diffBadge = '';
+  if (c.diffStatus) {
+    const diffClass = c.diffStatus === 'ok' ? 'good' : c.diffStatus;
+    diffBadge = '<span class="status-badge status-' + diffClass + '">⚠ ' + c.diffStatus.toUpperCase() + (c.diffPixels ? ' · ' + c.diffPixels + 'px' : '') + '</span>';
+  }
+  // Top regression banner — makes the "this is a golden that regressed" state
+  // impossible to miss (e.g. slide_10 was good, now differs from its golden).
+  const banner = c.diffStatus === 'regressed'
+    ? '<div class="regression-banner">⚠ REGRESSION — this slide was previously blessed as a golden but now diverges from it by ' + (c.diffPixels || 0) + ' pixels. Check the yellow diff panel on the right.</div>'
+    : '';
+  const bannerEl = document.getElementById('regressionBanner');
+  if (bannerEl) bannerEl.innerHTML = banner;
+  const visible = visibleComparisons();
+  const visIdx = visible.findIndex(x => x.id === c.id);
+  document.getElementById('slideId').innerHTML = c.id + badge + diffBadge + ' (' + (visIdx >= 0 ? visIdx+1 : '-') + '/' + visible.length + ' visible, ' + comparisons.length + ' total — ' + (showAll ? '<a href="#" onclick="showAll=false; render(); return false">only diffs</a>' : '<a href="#" onclick="showAll=true; render(); return false">show all</a>') + ')';
 
   // Links to HTML source and Google Slides page
   let links = '';
@@ -228,10 +329,12 @@ function render() {
   const pending = comparisons.filter(c => c.status === 'pending').length;
   document.getElementById('stats').textContent = good + ' good / ' + bad + ' bad / ' + pending + ' pending';
 
-  // Nav
-  document.getElementById('nav').innerHTML = comparisons.map((c, i) =>
-    '<a href="#" class="' + (i === currentIdx ? 'current' : '') + ' status-' + c.status + '" onclick="currentIdx=' + i + '; render(); return false;">' + c.id.replace('slide_', 'S') + '</a>'
-  ).join('');
+  // Nav — only visible comparisons, mapped back to their real index
+  document.getElementById('nav').innerHTML = visible.map(c => {
+    const i = comparisons.findIndex(x => x.id === c.id);
+    const cls = (i === currentIdx ? 'current ' : '') + 'status-' + c.status + ' diff-' + (c.diffStatus || 'none');
+    return '<a href="#" class="' + cls + '" onclick="currentIdx=' + i + '; render(); return false;">' + c.id.replace('slide_', 'S') + '</a>';
+  }).join('');
 
   // Analysis
   const analysisEl = document.getElementById('analysis');
@@ -264,7 +367,13 @@ async function rate(status) {
 }
 
 function navigate(delta) {
-  currentIdx = Math.max(0, Math.min(comparisons.length - 1, currentIdx + delta));
+  const visible = visibleComparisons();
+  if (visible.length === 0) return;
+  const curId = comparisons[currentIdx] && comparisons[currentIdx].id;
+  let vIdx = visible.findIndex(c => c.id === curId);
+  if (vIdx < 0) vIdx = 0;
+  vIdx = Math.max(0, Math.min(visible.length - 1, vIdx + delta));
+  currentIdx = comparisons.findIndex(c => c.id === visible[vIdx].id);
   render();
 }
 
@@ -300,6 +409,47 @@ const server = createServer((req, res) => {
   if (url.pathname === "/api/comparisons") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(findComparisons()));
+    return;
+  }
+
+  if (url.pathname === "/api/summary") {
+    // Goldens health summary + freshness-of-current-render. The "oldest"
+    // timestamp reported is the OLDEST CURRENT-RENDER thumbnail under
+    // results/slides/ — this is the file being compared against the golden,
+    // so its mtime proves the render was actually re-scraped. The golden
+    // file's own mtime is irrelevant (a golden could be years old and still
+    // correct).
+    const metaFile = join(resultsDir, "meta.json");
+    let goldensDir: string | null = null;
+    if (existsSync(metaFile)) {
+      const meta = JSON.parse(readFileSync(metaFile, "utf-8"));
+      if (meta.htmlDir) goldensDir = join(dirname(meta.htmlDir), "goldens");
+    }
+    const comparisons = findComparisons();
+    const matching = comparisons.filter(c => c.diffStatus === "ok").length;
+    const regressed = comparisons.filter(c => c.diffStatus === "regressed").length;
+    const newCount = comparisons.filter(c => c.diffStatus === "new").length;
+    let goldenTotal = 0;
+    if (goldensDir && existsSync(goldensDir)) {
+      goldenTotal = readdirSync(goldensDir).filter(f => f.endsWith(".png")).length;
+    }
+
+    // Oldest CURRENT-RENDER thumbnail mtime under slides/.
+    const slidesDir = join(resultsDir, "slides");
+    let oldestRenderMs = Infinity;
+    if (existsSync(slidesDir)) {
+      for (const f of readdirSync(slidesDir).filter(f => f.endsWith(".png"))) {
+        const m = statSync(join(slidesDir, f)).mtimeMs;
+        if (m < oldestRenderMs) oldestRenderMs = m;
+      }
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      matching, regressed, new: newCount, total: comparisons.length,
+      goldenTotal,
+      oldestRenderMs: oldestRenderMs === Infinity ? null : oldestRenderMs,
+      nowMs: Date.now(),
+    }));
     return;
   }
 

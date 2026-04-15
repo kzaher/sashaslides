@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; background: #fff; font-family: Arial, sans-serif; padding: 40px 80px; }
+h2 { font-size: 26px; color: #111; margin-bottom: 14px; }
+h2.sub { font-size: 22px; margin-top: 18px; margin-bottom: 12px; color: #222; }
+.cols { display: flex; gap: 80px; }
+.col { flex: 1; }
+ul { padding-left: 22px; margin-bottom: 12px; }
+ol { padding-left: 22px; margin-bottom: 12px; }
+li { font-size: 18px; color: #333; margin-bottom: 6px; line-height: 1.4; }
+
+.styled-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 40px; }
+.styled-row ul, .styled-row ol { list-style: none; padding-left: 0; margin: 0; }
+
+.styled-bg li {
+  background: #ecfdf5;
+  padding: 6px;
+  border-radius: 4px;
+  border: none;
+  margin-bottom: 6px;
+  list-style: none;
+  font-size: 16px;
+}
+.styled-bg li:nth-child(even) { background: #dbeafe; }
+
+.styled-border li {
+  border: 1px solid #e5e7eb;
+  padding: 8px;
+  border-radius: 6px;
+  background: transparent;
+  margin-bottom: 4px;
+  list-style: none;
+  font-size: 16px;
+}
+
+.styled-dashed li {
+  display: block;
+  list-style-position: inside;
+  border: 2px dashed #f59e0b;
+  padding: 6px;
+  background: #fff7ed;
+  margin-bottom: 6px;
+  font-size: 16px;
+}
+</style></head><body>
+<h2>Lists</h2>
+<div class="cols">
+  <div class="col">
+    <ul>
+      <li>Alpha bullet</li>
+      <li>Beta bullet</li>
+      <li>Gamma bullet</li>
+      <li>Delta bullet</li>
+    </ul>
+  </div>
+  <div class="col">
+    <ol>
+      <li>First numbered</li>
+      <li>Second numbered</li>
+      <li>Third numbered</li>
+      <li>Fourth numbered</li>
+    </ol>
+  </div>
+</div>
+
+<h2 class="sub">Styled list items</h2>
+<div class="styled-row">
+  <ul class="styled-bg">
+    <li>Mint one</li>
+    <li>Sky two</li>
+    <li>Mint three</li>
+    <li>Sky four</li>
+  </ul>
+  <ul class="styled-border">
+    <li>Bordered one</li>
+    <li>Bordered two</li>
+    <li>Bordered three</li>
+    <li>Bordered four</li>
+  </ul>
+  <ol class="styled-dashed">
+    <li>Dashed one</li>
+    <li>Dashed two</li>
+    <li>Dashed three</li>
+    <li>Dashed four</li>
+  </ol>
+</div>
+</body></html>

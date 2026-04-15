@@ -62,6 +62,12 @@ Important:
 * **pptxgenjs 4.0.1 capabilities verified for this design:** `slide.hidden`, `addChart` (BAR/LINE/PIE), `addShape` arrow shapes (`rightArrow`, `leftArrow`, `line` with `endArrowType`), `addNotes`, `addTable` with per-cell formatting. ChartType strings are lowercase (`'bar'`, `'line'`, `'pie'`).
 * **Hand-drawn lines must be fat AND rough.** rough.js `roughness: 2, strokeWidth: 4` is too subtle for big elements — use `roughness: 3.5–4, strokeWidth: 12–14, bowing: 2–3` for things drawn at large display sizes. **Underlines are the exception**: at ~0.3″ display height the wobble dominates, so they need flatter aspect + lower roughness (see above). Always render 2–4× the final display size so roughness stays crisp after Slides rescales.
 
+## html2slides fixtures & regression gating
+
+* **Basic fixtures** live at `analysis/renderer/html2slides/e2e/fixtures-basic/` and cover one feature per slide (rects, borders, gradients, shadows, text, **nested recursive elements, lists, tables with varied borders**). Complex layouts go in `fixtures/`.
+* **Never show the user new fixes without running the goldens gate.** Workflow is: `./regen-basics.sh` (regen + diff vs. goldens) → eyeball each `/tmp/sxs/diffs/diff_slide_NN.png` in a **parallel Agent per diff** (ingest the diff image directly, do NOT compare original vs. new side-by-side) → confirm all diffs are intended → hand the user the updated SxS link and let them rate. Full details: `analysis/renderer/html2slides/README.md`.
+* **Goldens are user-only.** `e2e/goldens/*.png` may ONLY be written by the user clicking "Good" in the SxS rating UI — that is the sole sanctioned writer. Claude must NEVER `cp`/`mv`/write files into `e2e/goldens/`, never run `check-goldens.ts --bless` (disabled anyway), never promote regenerated thumbs as goldens. If a fix looks right, regen + diff and hand the result back; let the user bless. The sentinel `e2e/goldens/.BLESSED_BY_USER_ONLY` documents this boundary in-tree.
+
 ## TypeScript / Node tooling gotchas
 
 * **`pptxgenjs` ESM/CJS interop** needs `(pptxgenModule as any).default || pptxgenModule` — direct `import pptxgen from "pptxgenjs"` hits "not a constructor" under Node 22 ESM.

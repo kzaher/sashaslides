@@ -7,6 +7,8 @@
     "chrome-remote-interface": "^0.34.0",
     "esbuild": "^0.28.0",
     "googleapis": "^171.4.0",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0",
     "postcss-value-parser": "^4.2.0",
     "pptxgenjs": "^4.0.1"
   }

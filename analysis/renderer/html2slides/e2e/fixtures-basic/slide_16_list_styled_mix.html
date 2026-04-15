@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; background: #f9fafb; font-family: Arial, sans-serif; padding: 40px 60px; }
+h2 { font-size: 22px; color: #111; margin-bottom: 16px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; }
+/* Plain bulleted — should render with real disc markers */
+.plain ul { padding-left: 24px; }
+.plain li { font-size: 16px; color: #333; margin-bottom: 6px; }
+/* Cards: bg + borders on <li> */
+.cards { list-style: none; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 8px 0; }
+.cards li { font-size: 15px; padding: 10px 18px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #f3f4f6; color: #374151; }
+.cards li:last-child { border-bottom: none; }
+.cards li.hi { background: #fffbeb; border-left: 4px solid #f59e0b; color: #92400e; font-weight: 600; }
+/* Rounded pills: each <li> has its own rounded colored bg */
+.pills { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.pills li { padding: 10px 16px; border-radius: 999px; font-size: 15px; color: #fff; font-weight: 600; background: #4f46e5; display: inline-block; width: max-content; }
+.pills li.ok { background: #10b981; }
+.pills li.warn { background: #f59e0b; }
+.pills li.err { background: #ef4444; }
+/* Numbered with styled markers */
+.steps { padding-left: 28px; }
+.steps li { font-size: 15px; color: #111; margin-bottom: 8px; }
+.steps li b { color: #4f46e5; }
+</style></head><body>
+<h2>List styling combinations</h2>
+<div class="grid">
+  <div class="plain">
+    <ul>
+      <li>Plain bullet one</li>
+      <li>Plain bullet two</li>
+      <li>Plain bullet three</li>
+    </ul>
+    <ol class="steps">
+      <li><b>Setup</b> — install deps</li>
+      <li><b>Build</b> — compile assets</li>
+      <li><b>Ship</b> — deploy to prod</li>
+    </ol>
+  </div>
+  <div>
+    <ul class="cards">
+      <li>Standard row</li>
+      <li class="hi">Highlighted row with left border</li>
+      <li>Another standard row</li>
+      <li>Final row</li>
+    </ul>
+    <ul class="pills" style="margin-top:16px">
+      <li class="ok">Success pill</li>
+      <li class="warn">Warning pill</li>
+      <li class="err">Error pill</li>
+    </ul>
+  </div>
+</div>
+</body></html>
