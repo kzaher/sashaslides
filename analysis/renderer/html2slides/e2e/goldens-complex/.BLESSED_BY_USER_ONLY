@@ -1,0 +1,19 @@
+The PNG files in this directory are the authoritative pixel-perfect goldens
+for the html2slides pipeline.
+
+THEY MAY ONLY BE WRITTEN BY THE HUMAN USER, and only via the SxS rating UI
+(rating-server.ts) when the user explicitly clicks "Good" on a slide.
+
+Claude / any script / any automated tool MUST NEVER:
+  - Copy PNGs into this directory directly.
+  - Run `check-goldens.ts --bless` (the flag is disabled and will error out).
+  - Run `cp`, `mv`, or editor writes targeting `goldens/*.png`.
+  - Commit regenerated thumbnails as goldens.
+
+If a fix is complete, regen and diff against goldens. Then PRESENT the diff
+to the user and let them rate in SxS. Blessing is not a Claude action.
+
+Rationale: goldens are the human-approved truth. Letting the automated loop
+"bless" its own output collapses the feedback signal — the system would
+always report "no regressions" because it would always promote whatever it
+produced.

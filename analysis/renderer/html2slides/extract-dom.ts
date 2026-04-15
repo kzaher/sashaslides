@@ -284,7 +284,19 @@ interface ExtractedElement {
       fontSize: parseFloat(cs.fontSize),
       fontWeight: cs.fontWeight === "bold" || parseInt(cs.fontWeight) >= 600 ? "bold" : "normal",
       fontStyle: cs.fontStyle === "italic" ? "italic" : "normal",
-      color: rgb2hex(cs.color),
+      color: (() => {
+        // text-clip gradient fallback: when color is transparent because of
+        // `-webkit-text-fill-color: transparent`, use the first gradient stop
+        // from `background-image` so the glyphs remain visible instead of
+        // disappearing along with the suppressed rect fill.
+        const rawColor = rgb2hex(cs.color);
+        if (rgbAlpha(cs.color) < 0.1) {
+          const bgImg = cs.backgroundImage || "";
+          const m = bgImg.match(/(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|rgba\([^)]+\))/);
+          if (m) return rgb2hex(m[1]) || rawColor;
+        }
+        return rawColor;
+      })(),
       bgColor: rgb2hex(cs.backgroundColor),
       bgAlpha: rgbAlpha(cs.backgroundColor),
       textAlign: cs.textAlign,
@@ -532,8 +544,13 @@ interface ExtractedElement {
     // SHOULD NOT get per-row bullet/number markers — the user reads them as
     // card rows, not list entries.
     const containerHasBox = !!style.bgColor || (style.borderWidth || 0) > 0 || (style.borderRadius || 0) > 0;
+    // A row-separator <li> has a border-BOTTOM only (no full-box border, no
+    // bg, no radius). `it.borderWidth = max(all sides)`, so a bottom-only
+    // border registers as borderWidth>0 — we detect "full box" via bgColor or
+    // borderRadius instead. If an <li> has borderBottom AND no other
+    // decoration, it reads as a divider between rows, not a card.
     const rowSeparatorCount = items.filter(it =>
-      !!it.borderBottom && !it.bgColor && !(it.borderWidth > 0) && !(it.borderRadius > 0)
+      !!it.borderBottom && !it.bgColor && !(it.borderRadius > 0)
     ).length;
     const isContainerList = containerHasBox || rowSeparatorCount >= Math.max(1, Math.ceil(items.length / 2));
     return {
@@ -667,16 +684,23 @@ interface ExtractedElement {
     else if (parts.startsWith("to left")) angle = 270;
     else if (parts.startsWith("to bottom")) angle = 180;
     else if (parts.startsWith("to top")) angle = 0;
-    // Extract color stops
-    const stops: { color: string; position: number }[] = [];
+    // Extract color stops — two-pass so we can interpolate default positions
+    // evenly across all stops when only some (or none) specify explicit %.
+    const raw: { color: string; position: number | null }[] = [];
     const colorRegex = /(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|rgba\([^)]+\))\s*(\d+%)?/g;
     let cm;
     while ((cm = colorRegex.exec(parts)) !== null) {
       const hex = rgb2hex(cm[1]) || cm[1];
-      const pos = cm[2] ? parseInt(cm[2]) / 100 : stops.length === 0 ? 0 : 1;
-      if (hex) stops.push({ color: hex, position: pos });
+      if (hex) raw.push({ color: hex, position: cm[2] ? parseInt(cm[2]) / 100 : null });
     }
-    if (stops.length < 2) return null;
+    if (raw.length < 2) return null;
+    // First and last default to 0 and 1; middles interpolate evenly.
+    if (raw[0].position === null) raw[0].position = 0;
+    if (raw[raw.length - 1].position === null) raw[raw.length - 1].position = 1;
+    for (let i = 1; i < raw.length - 1; i++) {
+      if (raw[i].position === null) raw[i].position = i / (raw.length - 1);
+    }
+    const stops = raw.map(s => ({ color: s.color, position: s.position as number }));
     return { angle, stops };
   }
 
@@ -688,6 +712,15 @@ interface ExtractedElement {
     const hasGradient = s.backgroundImage && s.backgroundImage.includes("linear-gradient");
     const hasBorder = s.borderWidth >= 1 && !!s.borderColor;
     if (!hasBg && !hasGradient && !hasBorder) return;
+    // CSS text-clip gradient trick: `background: linear-gradient(...);
+    // -webkit-background-clip: text; -webkit-text-fill-color: transparent`
+    // fills only the text glyphs with the gradient. Emitting the gradient as
+    // the element's box fill produces a solid-colored rectangle over the
+    // transparent text — worse than just rendering the text in the gradient's
+    // dominant color. Skip the rect and let the text path paint it normally.
+    const elCs2 = getComputedStyle(el);
+    const clip = (elCs2 as any).backgroundClip || (elCs2 as any).webkitBackgroundClip;
+    if (clip === "text") return;
 
     // For transparent elements with borders, detect background color underneath
     let fill = s.bgColor || null;
@@ -701,9 +734,13 @@ interface ExtractedElement {
       fill = gradient.stops[0].color; // solid fallback
     }
 
+    // Combine CSS `opacity` with rgba alpha so semi-transparent elements
+     // (e.g. slide_28's `.badge.opacity-50 { opacity: 0.5 }`) render faded.
+    const bgA = (s as any).bgAlpha ?? 1;
+    const opA = typeof s.opacity === "number" && s.opacity < 1 ? s.opacity : 1;
     elements.push({
       type: "rect", bounds: b, fill,
-      fillAlpha: (s as any).bgAlpha ?? 1,
+      fillAlpha: bgA * opA,
       gradient, // null or { angle, stops: [{color, position}] }
       borderRadius: s.borderRadius,
       cornerRadii: s.cornerRadii,
@@ -734,6 +771,58 @@ interface ExtractedElement {
       seen.add(el);
       el.querySelectorAll("tr, td, th, thead, tbody, tfoot").forEach(c => seen.add(c));
       elements.push(extractTable(el as HTMLTableElement));
+      // After the table, emit inline "pill" spans (span with bg/border/radius)
+      // as rect + centered text overlays. The table's cell-text already
+      // contains the same string, but it sits below the pill. We re-draw the
+      // text so the `<span class="partial">Partial</span>` amber-on-cream
+      // pill effect is reconstructed on top.
+      el.querySelectorAll("td span, th span").forEach(sp => {
+        const scs = getComputedStyle(sp as Element);
+        const sBg = rgb2hex(scs.backgroundColor);
+        const sBW = parseFloat(scs.borderTopWidth) || 0;
+        const sBR = parseFloat(scs.borderTopLeftRadius) || 0;
+        if (!sBg && sBW === 0 && sBR === 0) return;
+        const sBounds = getBounds(sp as Element);
+        if (sBounds.w < 4 || sBounds.h < 4) return;
+        const sPad = {
+          top: parseFloat(scs.paddingTop) || 0,
+          right: parseFloat(scs.paddingRight) || 0,
+          bottom: parseFloat(scs.paddingBottom) || 0,
+          left: parseFloat(scs.paddingLeft) || 0,
+        };
+        const sBorderColor = rgb2hex(scs.borderTopColor);
+        elements.push({
+          type: "rect", bounds: sBounds, fill: sBg || null, fillAlpha: 1,
+          gradient: null, borderRadius: sBR,
+          cornerRadii: { tl: sBR, tr: sBR, br: sBR, bl: sBR },
+          borderUniform: true, borderSides: null,
+          borderColor: sBW > 0 ? sBorderColor : null,
+          borderWidth: sBW, borderStyle: scs.borderTopStyle,
+          zIndex: 999, position: "relative", boxShadow: null,
+        } as any);
+        const spText = (sp.textContent || "").replace(/\s+/g, " ").trim();
+        if (spText) {
+          elements.push({
+            type: "text",
+            bounds: sBounds,
+            text: spText,
+            style: {
+              fontFamily: scs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
+              fontSize: parseFloat(scs.fontSize),
+              fontWeight: (scs.fontWeight === "bold" || parseInt(scs.fontWeight) >= 600) ? "bold" : "normal",
+              fontStyle: scs.fontStyle === "italic" ? "italic" : "normal",
+              color: rgb2hex(scs.color) || "#000000",
+              textAlign: "center",
+              lineHeight: parseFloat(scs.lineHeight) || parseFloat(scs.fontSize) * 1.2,
+              textDecoration: null, textTransform: "none", letterSpacing: 0,
+              paddingLeft: 0, paddingTop: 0,
+            },
+            runs: [{ text: spText, style: null }],
+            zIndex: 999, position: "relative",
+            verticallyCentered: true,
+          } as any);
+        }
+      });
       return;
     }
 
@@ -782,17 +871,209 @@ interface ExtractedElement {
 
     const style = getStyle(el);
 
+    // Pseudo-element text (::before / ::after) — e.g. checkmark glyphs inside
+    // step dots, chevron separators between cards. These have CSS `content: '✓'`
+    // and would otherwise be silently dropped. Emit as a centered text overlay
+    // at the parent element's bounds.
+    // Compute pseudo-element bounds by interpreting its CSS box relative to
+    // its host element. `inset: 0` → fills parent; `top: 0; height: 3px` →
+    // thin top strip. Works for `position: absolute` pseudos only — static
+    // pseudos live inline and we don't try to place those geometrically.
+    const pseudoBounds = (pcs: CSSStyleDeclaration): Bounds | null => {
+      if (pcs.position !== "absolute") return null;
+      const parseLen = (v: string, ref: number): number | null => {
+        if (!v || v === "auto") return null;
+        if (v.endsWith("%")) return (parseFloat(v) / 100) * ref;
+        return parseFloat(v);
+      };
+      const top = parseLen(pcs.top, bounds.h);
+      const bottom = parseLen(pcs.bottom, bounds.h);
+      const left = parseLen(pcs.left, bounds.w);
+      const right = parseLen(pcs.right, bounds.w);
+      const w = parseLen(pcs.width, bounds.w);
+      const h = parseLen(pcs.height, bounds.h);
+      let x = bounds.x + (left ?? 0);
+      let y = bounds.y + (top ?? 0);
+      let ww = w ?? (right != null ? bounds.w - (left ?? 0) - right : bounds.w - (left ?? 0));
+      let hh = h ?? (bottom != null ? bounds.h - (top ?? 0) - bottom : bounds.h - (top ?? 0));
+      // Translate per `transform: translate(...)`
+      const tm = (pcs.transform || "").match(/matrix\(([^)]+)\)/);
+      if (tm) {
+        const nums = tm[1].split(",").map(n => parseFloat(n));
+        if (nums.length === 6) { x += nums[4]; y += nums[5]; }
+      }
+      return { x, y, w: Math.max(0, ww), h: Math.max(0, hh) };
+    };
+
+    // Pseudo-element visual box (::before / ::after with bg/border/radius) —
+    // e.g. `.logo-card::before` accent stripes, CSS border-triangle arrows.
+    // Only emitted when the pseudo is absolutely positioned so we can compute
+    // its bounds from CSS. Inline pseudos are handled by text emission below.
+    const emitPseudoRect = () => {
+      for (const which of ["::before", "::after"] as const) {
+        const pcs = getComputedStyle(el, which);
+        const content = pcs.content || "";
+        // `content: none` → pseudo doesn't exist. Empty string (`content: ''`)
+        // is VALID and renders — commonly used for visual-only decorative
+        // pseudos like the nested white+blue inset rings in slide_04's current
+        // dot (`.dot.current::after/::before { content: ''; inset: 4px; … }`).
+        if (content === "none") continue;
+        const bg = rgb2hex(pcs.backgroundColor);
+        const bwT = parseFloat(pcs.borderTopWidth) || 0;
+        const bwR = parseFloat(pcs.borderRightWidth) || 0;
+        const bwB = parseFloat(pcs.borderBottomWidth) || 0;
+        const bwL = parseFloat(pcs.borderLeftWidth) || 0;
+        const borderMax = Math.max(bwT, bwR, bwB, bwL);
+        const br = parseFloat(pcs.borderTopLeftRadius) || 0;
+        if (!bg && borderMax === 0 && br === 0) continue;
+        const pb = pseudoBounds(pcs);
+        if (!pb || pb.w < 1 || pb.h < 1) continue;
+        // CSS border-triangle: 0×0 box with transparent top/bottom and a
+        // colored side — skip as rect; downstream renderers can't reproduce
+        // it cleanly. (Leave for a future targeted fix.)
+        elements.push({
+          type: "rect", bounds: pb, fill: bg || null, fillAlpha: 1,
+          gradient: null, borderRadius: br,
+          cornerRadii: { tl: br, tr: br, br, bl: br },
+          borderUniform: bwT === bwR && bwR === bwB && bwB === bwL,
+          borderSides: {
+            top: { width: bwT, color: rgb2hex(pcs.borderTopColor), style: pcs.borderTopStyle },
+            right: { width: bwR, color: rgb2hex(pcs.borderRightColor), style: pcs.borderRightStyle },
+            bottom: { width: bwB, color: rgb2hex(pcs.borderBottomColor), style: pcs.borderBottomStyle },
+            left: { width: bwL, color: rgb2hex(pcs.borderLeftColor), style: pcs.borderLeftStyle },
+          },
+          borderColor: rgb2hex(pcs.borderTopColor),
+          borderWidth: borderMax,
+          borderStyle: pcs.borderTopStyle,
+          zIndex: 999, position: "absolute", boxShadow: null,
+        } as any);
+      }
+    };
+
+    const emitPseudoText = () => {
+      for (const which of ["::before", "::after"] as const) {
+        const pcs = getComputedStyle(el, which);
+        let content = pcs.content || "";
+        if (!content || content === "none" || content === "normal") continue;
+        content = content.replace(/^['"]|['"]$/g, "").trim();
+        if (!content || content === "" || content === '""') continue;
+        const fontSize = parseFloat(pcs.fontSize) || 14;
+        if (bounds.w < 4 || bounds.h < 4) continue;
+        elements.push({
+          type: "text",
+          bounds,
+          text: content,
+          style: {
+            fontFamily: pcs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
+            fontSize,
+            fontWeight: (pcs.fontWeight === "bold" || parseInt(pcs.fontWeight) >= 600) ? "bold" : "normal",
+            fontStyle: pcs.fontStyle === "italic" ? "italic" : "normal",
+            color: rgb2hex(pcs.color) || "#000000",
+            textAlign: "center",
+            lineHeight: parseFloat(pcs.lineHeight) || fontSize * 1.2,
+            textDecoration: null,
+            textTransform: "none",
+            letterSpacing: 0,
+            paddingLeft: 0,
+            paddingTop: 0,
+          },
+          runs: [{ text: content, style: null }],
+          zIndex: style.zIndex,
+          position: style.position,
+          verticallyCentered: true,
+        } as any);
+      }
+    };
+
     // Flex/grid containers
     if ((style.display === "flex" || style.display === "inline-flex" || style.display === "grid" || style.display === "inline-grid") && (el as HTMLElement).children.length > 0) {
       emitRect(el, style, bounds);
-      // Borders are handled by emitRect's borderSides data — no separate border lines
-      for (const child of (el as HTMLElement).children) { walk(child); }
+      emitPseudoRect();
+      emitPseudoText();
+      // Mixed content: a flex container may have a text node sibling next to
+      // element children (e.g. <div class="legend-item"><div class="dot"/>Revenue</div>).
+      // Walk children normally, but if any direct text node has non-empty
+      // content, emit a text element at the container's bounds so the label
+      // survives. Without this, "Revenue"/"Expenses" legend text vanishes.
+      let directFlexText = "";
+      for (const node of el.childNodes) {
+        if (node.nodeType === 3) {
+          const t = (node.textContent || "").replace(/[ \t\n\r\f]+/g, " ").trim();
+          if (t) directFlexText += (directFlexText ? " " : "") + t;
+        }
+      }
+      if (directFlexText) {
+        const cs = getComputedStyle(el);
+        // Offset the text past the rightmost child's visual extent so a flex
+        // label like `<div class="dot"/>Revenue` doesn't render with "R"
+        // sitting under the dot. The legend-dot renders first as a sibling
+        // rect; the text starts after it plus CSS `gap`.
+        const gap = parseFloat(cs.gap) || parseFloat(cs.columnGap) || 0;
+        let textX = bounds.x;
+        let textW = bounds.w;
+        const kids = Array.from((el as HTMLElement).children).filter(c => {
+          const ccs = getComputedStyle(c);
+          return ccs.position !== "absolute" && ccs.position !== "fixed";
+        });
+        if (kids.length > 0) {
+          const last = kids[kids.length - 1] as HTMLElement;
+          const lb = getBounds(last);
+          textX = Math.max(bounds.x, lb.x + lb.w + gap);
+          textW = Math.max(20, bounds.w - (textX - bounds.x));
+        }
+        elements.push({
+          type: "text",
+          bounds: { x: textX, y: bounds.y, w: textW, h: bounds.h },
+          text: directFlexText,
+          style: {
+            fontFamily: style.fontFamily,
+            fontSize: style.fontSize,
+            fontWeight: style.fontWeight,
+            fontStyle: style.fontStyle,
+            color: style.color,
+            textAlign: style.justifyContent === "center" ? "center" : style.justifyContent === "flex-end" ? "right" : "left",
+            lineHeight: style.lineHeight,
+            textDecoration: style.textDecoration,
+            textTransform: style.textTransform,
+            letterSpacing: style.letterSpacing,
+            paddingLeft: 0,
+            paddingTop: 0,
+          },
+          runs: [{ text: directFlexText, style: null }],
+          zIndex: style.zIndex,
+          position: style.position,
+          verticallyCentered: true,
+        } as any);
+      }
+      // Sort children by CSS paint order so absolutely-positioned siblings
+      // (e.g. `.badge{position:absolute;top:-14px}` on a pricing card) paint
+       // AFTER static siblings, matching browser rendering. Without this the
+      // flex branch walked DOM order and the badge ended up beneath the
+      // card header instead of overhanging on top of it.
+      const flexChildren = Array.from((el as HTMLElement).children);
+      const flexPaintBucket = (c: Element): number => {
+        const ccs = getComputedStyle(c);
+        const zStr = ccs.zIndex;
+        const positioned = ccs.position !== "static";
+        if (!positioned) return 0;
+        if (zStr === "auto") return 1;
+        const z = parseInt(zStr);
+        if (isNaN(z)) return 1;
+        if (z < 0) return -1;
+        if (z > 0) return 2;
+        return 1;
+      };
+      const flexIndexed = flexChildren.map((c, i) => ({ c, i, b: flexPaintBucket(c) }));
+      flexIndexed.sort((a, b) => a.b - b.b || a.i - b.i);
+      for (const { c } of flexIndexed) walk(c);
       return;
     }
 
     const directText = getDirectText(el);
 
     emitRect(el, style, bounds);
+    emitPseudoRect();
+    emitPseudoText();
     // Borders are handled by emitRect's borderSides data — no separate border lines
 
     // Horizontal rules / lines
@@ -831,6 +1112,7 @@ interface ExtractedElement {
         letterSpacing: style.letterSpacing,
         paddingLeft: padLeft > 2 ? padLeft : 0,
         paddingTop: padTop > 2 ? padTop : 0,
+        opacity: style.opacity !== undefined && style.opacity < 1 ? style.opacity : undefined,
       };
       const runs = getTextRuns(el, style);
       const hasStyledRuns = runs.some(r => r.style !== null);
