@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; background: #f3f4f6; font-family: Arial, sans-serif; padding: 50px 80px; }
+h2 { font-size: 24px; color: #111; margin-bottom: 16px; }
+.row { display: flex; gap: 32px; margin-bottom: 24px; }
+.col { flex: 1; }
+.label { font-size: 13px; color: #6b7280; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
+
+/* Rounded outer container with separated cells */
+table.rounded {
+  border-collapse: separate; border-spacing: 0;
+  width: 100%; font-size: 14px;
+  border: 1px solid #d1d5db; border-radius: 12px; overflow: hidden;
+  background: #fff;
+}
+.rounded th, .rounded td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+.rounded tr:last-child td { border-bottom: none; }
+.rounded th { background: #4f46e5; color: #fff; font-weight: 600; }
+.rounded td { color: #374151; }
+.rounded tr:nth-child(even) td { background: #f9fafb; }
+.rounded td.status-ok { color: #059669; font-weight: 700; }
+.rounded td.status-bad { color: #dc2626; font-weight: 700; }
+
+/* Per-cell colors with full cell-color variety */
+table.colored {
+  border-collapse: collapse; width: 100%; font-size: 14px;
+  border-radius: 10px; overflow: hidden;
+}
+.colored th, .colored td { padding: 10px 12px; text-align: center; border: 1px solid #fff; }
+.colored th { background: #111; color: #fff; }
+.colored td.g { background: #d1fae5; color: #065f46; }
+.colored td.y { background: #fef3c7; color: #92400e; }
+.colored td.r { background: #fee2e2; color: #991b1b; }
+.colored td.b { background: #dbeafe; color: #1e40af; }
+</style></head><body>
+<h2>Rounded + colored tables</h2>
+<div class="row">
+  <div class="col">
+    <div class="label">Rounded with zebra + colored cells</div>
+    <table class="rounded">
+      <thead><tr><th>Service</th><th>Region</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>API</td><td>us-east</td><td class="status-ok">Healthy</td></tr>
+        <tr><td>Worker</td><td>eu-west</td><td class="status-bad">Degraded</td></tr>
+        <tr><td>Ingest</td><td>ap-south</td><td class="status-ok">Healthy</td></tr>
+        <tr><td>Storage</td><td>us-west</td><td class="status-ok">Healthy</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="col">
+    <div class="label">Per-cell color palette</div>
+    <table class="colored">
+      <thead><tr><th>Week</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th></tr></thead>
+      <tbody>
+        <tr><th>A</th><td class="g">98</td><td class="y">76</td><td class="r">41</td><td class="b">63</td></tr>
+        <tr><th>B</th><td class="b">70</td><td class="g">92</td><td class="y">55</td><td class="r">38</td></tr>
+        <tr><th>C</th><td class="r">22</td><td class="b">61</td><td class="g">89</td><td class="y">74</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</body></html>

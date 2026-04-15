@@ -147,6 +147,7 @@ interface ElementStyle {
   fontStyle: "italic" | "normal";
   color: string | null;
   bgColor: string | null;
+  bgAlpha: number;
   textAlign: string;
   lineHeight: number;
   textDecoration: string | null;
@@ -208,12 +209,26 @@ interface ExtractedElement {
   const H: number = document.body.offsetHeight || 720;
   const elements: ExtractedElement[] = [];
   const seen = new Set<Element>();
+  let _domCounter = 0;
+  const _origPush = elements.push.bind(elements);
+  (elements as any).push = (...items: ExtractedElement[]) => {
+    for (const it of items) if (it && it._domIdx === undefined) it._domIdx = _domCounter++;
+    return _origPush(...items);
+  };
 
   function rgb2hex(rgb: string): string | null {
     if (!rgb || rgb === "transparent" || rgb === "rgba(0, 0, 0, 0)") return null;
     const m = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
     if (!m) return rgb.startsWith("#") ? rgb : null;
     return "#" + [m[1], m[2], m[3]].map(x => parseInt(x).toString(16).padStart(2, "0")).join("");
+  }
+
+  /** Extract alpha (0-1) from a CSS color string; 1 if fully opaque or unparseable */
+  function rgbAlpha(rgb: string): number {
+    if (!rgb) return 1;
+    if (rgb === "transparent" || rgb === "rgba(0, 0, 0, 0)") return 0;
+    const m = rgb.match(/rgba\(\s*\d+,\s*\d+,\s*\d+,\s*([\d.]+)\s*\)/);
+    return m ? parseFloat(m[1]) : 1;
   }
 
   /** Detect background color at the center of an element by walking up the DOM tree */
@@ -271,6 +286,7 @@ interface ExtractedElement {
       fontStyle: cs.fontStyle === "italic" ? "italic" : "normal",
       color: rgb2hex(cs.color),
       bgColor: rgb2hex(cs.backgroundColor),
+      bgAlpha: rgbAlpha(cs.backgroundColor),
       textAlign: cs.textAlign,
       lineHeight: parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2,
       textDecoration: cs.textDecorationLine !== "none" ? cs.textDecorationLine : null,
@@ -302,7 +318,11 @@ interface ExtractedElement {
       alignItems: cs.alignItems,
       backgroundImage: cs.backgroundImage !== "none" ? cs.backgroundImage : null,
       clipPath: cs.clipPath !== "none" ? cs.clipPath : null,
-      zIndex: parseInt(cs.zIndex) || 0,
+      // zIndex: null means `auto` (inherit from parent stacking context) — keep
+      // that distinct from an explicit `0`, because paint order treats them
+      // differently: explicit 0 promotes the element into group 6 of its
+      // stacking context, auto keeps it in groups 3–5 when non-positioned.
+      zIndex: cs.zIndex === "auto" ? null : parseInt(cs.zIndex),
       position: cs.position,
       // Parse box-shadow: offsetX offsetY blur spread color
       boxShadow: (() => {
@@ -346,6 +366,8 @@ interface ExtractedElement {
   function extractTable(table: HTMLTableElement): ExtractedElement {
     const bounds = getBounds(table);
     const style = getStyle(table);
+    const tableCs = getComputedStyle(table);
+    const borderCollapse = tableCs.borderCollapse; // "collapse" | "separate"
     const rows: any[][] = [];
     const trs = table.querySelectorAll("tr");
     for (const tr of trs) {
@@ -353,26 +375,50 @@ interface ExtractedElement {
       const tds = tr.querySelectorAll("td, th");
       for (const td of tds) {
         const cs = getStyle(td);
+        const cb = getBounds(td);
+        const cCs = getComputedStyle(td);
         cells.push({
           text: (td as HTMLElement).innerText.trim(),
+          runs: getTextRuns(td, cs),
           isHeader: td.tagName === "TH",
           colspan: (td as HTMLTableCellElement).colSpan || 1,
           rowspan: (td as HTMLTableCellElement).rowSpan || 1,
+          bounds: cb,
+          padding: {
+            top: parseFloat(cCs.paddingTop) || 0,
+            right: parseFloat(cCs.paddingRight) || 0,
+            bottom: parseFloat(cCs.paddingBottom) || 0,
+            left: parseFloat(cCs.paddingLeft) || 0,
+          },
           style: {
             fontFamily: cs.fontFamily,
             fontSize: cs.fontSize,
             fontWeight: cs.fontWeight,
+            fontStyle: cs.fontStyle,
             color: cs.color,
             bgColor: cs.bgColor,
+            bgAlpha: (cs as any).bgAlpha,
             textAlign: cs.textAlign,
             borderColor: cs.borderColor,
             borderWidth: cs.borderWidth,
+            borderStyle: cs.borderStyle,
+            borderSides: cs.borderSides,
+            borderRadius: cs.borderRadius,
+            cornerRadii: cs.cornerRadii,
           },
         });
       }
       rows.push(cells);
     }
-    return { type: "table", bounds, rows, bgColor: style.bgColor, borderColor: style.borderColor };
+    return {
+      type: "table", bounds, rows,
+      bgColor: style.bgColor,
+      borderColor: style.borderColor,
+      borderRadius: style.borderRadius,
+      cornerRadii: style.cornerRadii,
+      borderSides: style.borderSides,
+      borderCollapse,
+    };
   }
 
   // --- LIST EXTRACTION ---
@@ -426,26 +472,96 @@ interface ExtractedElement {
         }
         const liStyle = getStyle(li);
         const liCs = getComputedStyle(li);
-        const spacingBottom = parseFloat(liCs.marginBottom) + parseFloat(liCs.paddingBottom) || 0;
-        const spacingTop = parseFloat(liCs.marginTop) + parseFloat(liCs.paddingTop) || 0;
+        const marginBottom = parseFloat(liCs.marginBottom) || 0;
+        const marginTop = parseFloat(liCs.marginTop) || 0;
+        const spacingBottom = marginBottom + (parseFloat(liCs.paddingBottom) || 0);
+        const spacingTop = marginTop + (parseFloat(liCs.paddingTop) || 0);
+        // Preserve styled inline child runs (e.g. <span class="check">✓</span>) so
+        // colors on ✓/✗ prefixes survive into the rendered slide.
+        const runs = getTextRuns(li, liStyle);
         items.push({
           text: text.trim(),
+          runs,
           level,
           fontFamily: liStyle.fontFamily,
           fontSize: liStyle.fontSize,
           fontWeight: liStyle.fontWeight,
+          fontStyle: liStyle.fontStyle,
           color: liStyle.color,
           lineHeight: liStyle.lineHeight,
+          textAlign: liStyle.textAlign,
           spacingAfter: Math.round(spacingBottom + spacingTop),
+          marginBottom,
+          marginTop,
+          borderBottom: liStyle.borderBottom > 0 ? liStyle.borderBottomColor : null,
+          bgColor: liStyle.bgColor,
+          bgAlpha: (liStyle as any).bgAlpha,
+          borderColor: liStyle.borderColor,
+          borderWidth: liStyle.borderWidth,
+          borderStyle: liStyle.borderStyle,
+          borderSides: liStyle.borderSides,
+          borderRadius: liStyle.borderRadius,
+          cornerRadii: liStyle.cornerRadii,
+          padding: {
+            top: parseFloat(liCs.paddingTop) || 0,
+            right: parseFloat(liCs.paddingRight) || 0,
+            bottom: parseFloat(liCs.paddingBottom) || 0,
+            left: parseFloat(liCs.paddingLeft) || 0,
+          },
+          bounds: getBounds(li),
         });
         const nested = li.querySelector("ul, ol");
         if (nested) walkItems(nested, level + 1);
       }
     }
     walkItems(list, 0);
+    // Per-item decoration detection: if ANY item has borderBottom / bgColor /
+    // any side border / non-default borderRadius, the list is "styled" and
+    // must be rendered per-item (so we can paint boxes). If all items are
+    // pure text, the caller can render as a native bulleted/numbered list.
+    const anyStyledItem = items.some(it =>
+      it.borderBottom ||
+      (it.bgColor && it.bgColor !== null) ||
+      (it.borderWidth && it.borderWidth > 0) ||
+      (it.borderRadius && it.borderRadius > 0)
+    );
+    // "Container list" = a card/panel that WRAPS a row of items.
+    // Triggered either by the <ul>/<ol> having its own bg/border/radius, or
+    // by a majority of items using border-bottom as row separator. In that
+    // case the container itself is the visual affordance and the rows inside
+    // SHOULD NOT get per-row bullet/number markers — the user reads them as
+    // card rows, not list entries.
+    const containerHasBox = !!style.bgColor || (style.borderWidth || 0) > 0 || (style.borderRadius || 0) > 0;
+    const rowSeparatorCount = items.filter(it =>
+      !!it.borderBottom && !it.bgColor && !(it.borderWidth > 0) && !(it.borderRadius > 0)
+    ).length;
+    const isContainerList = containerHasBox || rowSeparatorCount >= Math.max(1, Math.ceil(items.length / 2));
     return {
       type: "list", bounds, ordered, items, columnCount, listStyleType,
       hasPseudoBullet, pseudoBulletChar, pseudoBulletColor,
+      anyStyledItem,
+      isContainerList,
+      // List container's own box — so convert-pptx can paint the background
+      // rounded rect / border around the bulleted list (e.g. features card).
+      containerStyle: {
+        bgColor: style.bgColor,
+        fillAlpha: (style as any).bgAlpha,
+        borderWidth: style.borderWidth,
+        borderColor: style.borderColor,
+        borderStyle: style.borderStyle,
+        borderSides: style.borderSides,
+        borderRadius: style.borderRadius,
+        cornerRadii: style.cornerRadii,
+        padding: (() => {
+          const lcs = getComputedStyle(list);
+          return {
+            top: parseFloat(lcs.paddingTop) || 0,
+            right: parseFloat(lcs.paddingRight) || 0,
+            bottom: parseFloat(lcs.paddingBottom) || 0,
+            left: parseFloat(lcs.paddingLeft) || 0,
+          };
+        })(),
+      },
       style: { fontFamily: style.fontFamily, fontSize: style.fontSize, color: style.color },
     };
   }
@@ -565,9 +681,12 @@ interface ExtractedElement {
   }
 
   function emitRect(el: Element, s: ElementStyle, b: Bounds): void {
-    const hasBg = s.bgColor && b.w > 2 && b.h > 2;
+    // No size filter: if CSS paints a box, we extract it. Filtering by dimension
+    // previously dropped 2px connector/divider divs. Zero-area elements are
+    // rejected upstream by isVisible().
+    const hasBg = !!s.bgColor;
     const hasGradient = s.backgroundImage && s.backgroundImage.includes("linear-gradient");
-    const hasBorder = s.borderWidth >= 1 && s.borderColor && b.w > 5 && b.h > 5;
+    const hasBorder = s.borderWidth >= 1 && !!s.borderColor;
     if (!hasBg && !hasGradient && !hasBorder) return;
 
     // For transparent elements with borders, detect background color underneath
@@ -584,6 +703,7 @@ interface ExtractedElement {
 
     elements.push({
       type: "rect", bounds: b, fill,
+      fillAlpha: (s as any).bgAlpha ?? 1,
       gradient, // null or { angle, stops: [{color, position}] }
       borderRadius: s.borderRadius,
       cornerRadii: s.cornerRadii,
@@ -592,7 +712,8 @@ interface ExtractedElement {
       borderColor: hasBorder ? s.borderColor : null,
       borderWidth: hasBorder ? s.borderWidth : 0,
       borderStyle: s.borderStyle,
-      zIndex: s.zIndex || 0,
+      zIndex: s.zIndex,
+      position: s.position,
       boxShadow: s.boxShadow,
     });
   }
@@ -621,6 +742,11 @@ interface ExtractedElement {
       if (!el.parentElement || el.parentElement.tagName.toUpperCase() !== "LI") {
         seen.add(el);
         el.querySelectorAll("li, ul, ol").forEach(c => seen.add(c));
+        // Emit the list's own background/border/radius rect BEFORE the list
+        // items so the card-style background (e.g. features pricing list with
+        // border + radius + bg) gets painted under the bullets.
+        const listStyle = getStyle(el);
+        emitRect(el, listStyle, bounds);
         elements.push(extractList(el as HTMLElement));
         return;
       }
@@ -713,6 +839,8 @@ interface ExtractedElement {
         bounds,
         text: directText.trim(),
         style: baseStyle,
+        zIndex: style.zIndex,
+        position: style.position,
       };
       if (hasStyledRuns) {
         const allRuns = runs.filter(r => r.text.length > 0).map(r => ({
@@ -739,10 +867,31 @@ interface ExtractedElement {
       return;
     }
 
-    // Recurse children
-    for (const child of (el as HTMLElement).children) {
-      walk(child);
-    }
+    // Recurse children in CSS paint order:
+    //   bucket -1 : negative z-index positioned   (group 2)
+    //   bucket  0 : in-flow non-positioned        (groups 3–5)
+    //   bucket  1 : positioned with z:auto or 0   (group 6)
+    //   bucket  2 : positive z-index positioned   (group 7)
+    // Stable sort preserves document order inside each bucket. This scopes paint
+    // order per-subtree, so a parent's own rect (emitted above before recursion)
+    // paints first, and positioned siblings paint above static siblings within
+    // the same parent — matching CSS 2.1 Appendix E.
+    const childArr = Array.from((el as HTMLElement).children);
+    const paintBucket = (c: Element): number => {
+      const ccs = getComputedStyle(c);
+      const zStr = ccs.zIndex;
+      const positioned = ccs.position !== "static";
+      if (!positioned) return 0;
+      if (zStr === "auto") return 1;
+      const z = parseInt(zStr);
+      if (isNaN(z)) return 1;
+      if (z < 0) return -1;
+      if (z > 0) return 2;
+      return 1;
+    };
+    const indexed = childArr.map((c, i) => ({ c, i, b: paintBucket(c) }));
+    indexed.sort((a, b) => a.b - b.b || a.i - b.i);
+    for (const { c } of indexed) walk(c);
   }
 
   walk(document.body);
@@ -764,18 +913,11 @@ interface ExtractedElement {
     elements.unshift({ type: "rect", bounds: { x: 0, y: 0, w: W, h: H }, fill: bodyGradColor, borderWidth: 0, borderRadius: 0 });
   }
 
-  // Sort: rects first (backgrounds), then by type, zIndex, position
-  elements.sort((a, b) => {
-    const order: Record<string, number> = { rect: 0, line: 1, visual: 2, image: 3, table: 4, list: 5, text: 6 };
-    const oa = order[a.type] ?? 5;
-    const ob = order[b.type] ?? 5;
-    if (oa !== ob) return oa - ob;
-    const za = a.zIndex || 0;
-    const zb = b.zIndex || 0;
-    if (za !== zb) return za - zb;
-    if (a.bounds.y !== b.bounds.y) return a.bounds.y - b.bounds.y;
-    return a.bounds.x - b.bounds.x;
-  });
+  // Paint order is already baked in by walk() (children visited in CSS paint
+  // bucket order, parent rects pushed before descendants). A stable sort by
+  // _domIdx alone preserves that emission sequence. No type/y/z tiebreaking
+  // needed — the walk itself is the ordering.
+  elements.sort((a, b) => ((a as any)._domIdx ?? 0) - ((b as any)._domIdx ?? 0));
 
   return JSON.stringify({
     viewport: { w: W, h: H },
