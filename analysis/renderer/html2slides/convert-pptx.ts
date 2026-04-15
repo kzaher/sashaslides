@@ -160,7 +160,11 @@ function buildPptx(
 
           const shapeName = isCircle ? "ellipse" : anyRounded ? "roundRect" : "rect";
 
-          // Scan for text to merge into this shape
+          // Scan for text to merge into this shape. IMPORTANT: only merge if
+          // this rect is the *innermost* ancestor that fits the text. Otherwise
+          // a deeper-nested rect (with its own bg) will paint over the merged
+          // text and bury it (slide_24: text inside 5 nested cards was merged
+          // into level-3, then hidden by level-4's solid fill).
           let mergedTextEl: any = null;
           for (let ti = ei + 1; ti < extraction.elements.length; ti++) {
             const next = extraction.elements[ti];
@@ -170,14 +174,21 @@ function buildPptx(
                                Math.abs(nb.w - b.w) < 5 && Math.abs(nb.h - b.h) < 5;
             const tcx = nb.x + nb.w / 2, tcy = nb.y + nb.h / 2;
             const insideBounds = tcx >= b.x && tcx <= b.x + b.w && tcy >= b.y && tcy <= b.y + b.h;
-            // Only merge when text fills the shape — prevents a single small label
-            // (e.g. "Starter" at the top of a 440px-tall card) from being absorbed
-            // into a big container and re-rendered vertically centered.
-            // Width fit is required too, otherwise a thin connector line that happens
-            // to cross the horizontal center of a bio would swallow the bio's text
-            // and reflow it one-char-per-line inside the 2px-wide rect.
             const textDominates = nb.h >= b.h * 0.5 && nb.w <= b.w + 4;
             if (sameBounds || (insideBounds && (isCircle || textDominates))) {
+              // Check if a rect *after* this one also contains the text and
+              // would paint over it. If so, defer the merge — the text will
+              // ride on that deeper rect (or be emitted standalone as a text
+              // element after all the nested fills).
+              let deeperFillsOver = false;
+              for (let di = ei + 1; di < ti; di++) {
+                const mid = extraction.elements[di];
+                if (mid.type !== "rect" || !mid.bounds || (!mid.fill && !mid.gradient)) continue;
+                const mb = mid.bounds;
+                const textInsideMid = tcx >= mb.x && tcx <= mb.x + mb.w && tcy >= mb.y && tcy <= mb.y + mb.h;
+                if (textInsideMid) { deeperFillsOver = true; break; }
+              }
+              if (deeperFillsOver) break; // don't merge — let text render on its own
               mergedTextEl = next;
               extraction.elements[ti] = { type: "_skip", bounds: nb };
               break;
@@ -407,6 +418,34 @@ function buildPptx(
 
           const align = s.textAlign === "center" ? "center" : s.textAlign === "right" ? "right" : "left";
 
+          // Slack: Slides renders fonts a hair wider than Chrome measures, so a
+          // text box sized to the exact DOM bound wraps a single line
+          // character-by-character. Extend the box by a small slack amount in
+          // the direction opposite alignment so single-line text has breathing
+          // room: left-aligned grows to the right, right-aligned grows to the
+          // left, centered grows both sides.
+          const SLACK_PX = 12;
+          let bx = b.x, bw = b.w;
+          if (align === "left")   { bw = b.w + SLACK_PX; }
+          else if (align === "right")  { bx = b.x - SLACK_PX; bw = b.w + SLACK_PX; }
+          else if (align === "center") { bx = b.x - SLACK_PX / 2; bw = b.w + SLACK_PX; }
+
+          // Opacity: pptxgenjs text color is hex with no alpha. Approximate
+          // CSS `opacity` by blending foreground with white (the dominant slide
+          // background) — good enough for decorative watermark-style text like
+          // the oversized quote glyph in slide_06.
+          const blendOpacity = (hexColor: string, op: number): string => {
+            const m = hexColor.replace("#", "").match(/.{2}/g);
+            if (!m || m.length < 3) return hexColor;
+            const [r, g, bl] = m.map(x => parseInt(x, 16));
+            const br = Math.round(r * op + 255 * (1 - op));
+            const bg = Math.round(g * op + 255 * (1 - op));
+            const bb = Math.round(bl * op + 255 * (1 - op));
+            return "#" + [br, bg, bb].map(v => v.toString(16).padStart(2, "0")).join("");
+          };
+          const effectiveColor = (raw: string) =>
+            typeof s.opacity === "number" && s.opacity < 1 ? blendOpacity(raw, s.opacity) : raw;
+
           // Build text runs if available
           if (el.runs && el.runs.length > 0) {
             const textRuns = el.runs.filter((r: any) => r.text.length > 0).map((run: any) => {
@@ -418,7 +457,7 @@ function buildPptx(
                 options: {
                   fontFace: mapFont(rs.fontFamily || s.fontFamily || "Arial"),
                   fontSize: (rs.fontSize || s.fontSize || 16) * PX2PT,
-                  color: hexToRgb(rs.color || s.color || "#333333"),
+                  color: hexToRgb(effectiveColor(rs.color || s.color || "#000000")),
                   bold: rs.fontWeight === "bold" || (!rs.fontWeight && s.fontWeight === "bold"),
                   italic: rs.fontStyle === "italic" || (!rs.fontStyle && s.fontStyle === "italic"),
                   underline: { style: (rs.textDecoration === "underline" || (!rs.textDecoration && s.textDecoration === "underline")) ? "sng" : "none" },
@@ -428,8 +467,8 @@ function buildPptx(
             });
 
             slide.addText(textRuns, {
-              x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
-              valign: "top",
+              x: px2in(bx), y: px2in(b.y), w: px2in(bw), h: px2in(b.h),
+              valign: el.verticallyCentered ? "middle" : "top",
               align,
               lineSpacingMultiple: s.lineHeight && s.fontSize ? s.lineHeight / s.fontSize : undefined,
               fill: { type: "none" },
@@ -438,12 +477,12 @@ function buildPptx(
             });
           } else {
             const textOpts: any = {
-              x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
-              valign: "top",
+              x: px2in(bx), y: px2in(b.y), w: px2in(bw), h: px2in(b.h),
+              valign: el.verticallyCentered ? "middle" : "top",
               align,
               fontSize: (s.fontSize || 16) * PX2PT,
               fontFace: mapFont(s.fontFamily || "Arial"),
-              color: hexToRgb(s.color || "#333333"),
+              color: hexToRgb(effectiveColor(s.color || "#000000")),
               bold: s.fontWeight === "bold",
               italic: s.fontStyle === "italic",
               fill: { type: "none" },

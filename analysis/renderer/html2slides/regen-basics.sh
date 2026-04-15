@@ -29,7 +29,7 @@ npx tsx export-thumbs.ts "$PRES_ID" "$OUT/slides" > "$OUT/thumbs.log" 2>&1
 wait $SHOT_PID
 
 echo "=== Pixel-perfect goldens check ==="
-npx tsx check-goldens.ts "$OUT/slides" "$OUT/diffs" || true
+npx tsx check-goldens.ts "$OUT/slides" "$OUT/diffs" --originals "$OUT/originals" || true
 
 echo ""
 echo "Thumbs:  $OUT/slides/"

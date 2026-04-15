@@ -123,6 +123,9 @@ function findComparisons(): SlideComparison[] {
         c.analysis = ratings[c.id].analysis;
         if (ratings[c.id].htmlFile) c.htmlFile = ratings[c.id].htmlFile;
         if (ratings[c.id].slidesUrl) c.slidesUrl = ratings[c.id].slidesUrl;
+        if (ratings[c.id].annotation && existsSync(ratings[c.id].annotation)) {
+          (c as any).annotationPng = ratings[c.id].annotation;
+        }
       }
     }
   }
@@ -130,11 +133,31 @@ function findComparisons(): SlideComparison[] {
   return comparisons;
 }
 
-function saveRating(id: string, status: "good" | "bad", comment?: string) {
+function saveRating(id: string, status: "good" | "bad", comment?: string, annotationPng?: string) {
   const ratingsFile = join(resultsDir, "ratings.json");
   const ratings = existsSync(ratingsFile) ? JSON.parse(readFileSync(ratingsFile, "utf-8")) : {};
-  ratings[id] = { status, comment, ratedAt: new Date().toISOString() };
+  const entry: any = { status, comment, ratedAt: new Date().toISOString() };
+  if (annotationPng) {
+    // Annotations persist under resultsDir/annotations/ so /tmp wipes only
+    // break the PNGs, not the metadata.
+    const annotDir = join(resultsDir, "annotations");
+    mkdirSync(annotDir, { recursive: true });
+    const annotPath = join(annotDir, `${id}.png`);
+    const b64 = annotationPng.replace(/^data:image\/png;base64,/, "");
+    writeFileSync(annotPath, Buffer.from(b64, "base64"));
+    entry.annotation = annotPath;
+  }
+  ratings[id] = entry;
   writeFileSync(ratingsFile, JSON.stringify(ratings, null, 2));
+
+  // Mirror to persistent backup (survives /tmp wipes).
+  const metaFile = join(resultsDir, "meta.json");
+  if (existsSync(metaFile)) {
+    const meta = JSON.parse(readFileSync(metaFile, "utf-8"));
+    if (meta.ratingsBackup) {
+      try { writeFileSync(meta.ratingsBackup, JSON.stringify(ratings, null, 2)); } catch {}
+    }
+  }
 
   if (status === "good") {
     // Keep a simple SxS archive pair
@@ -152,7 +175,7 @@ function saveRating(id: string, status: "good" | "bad", comment?: string) {
       if (existsSync(metaFile)) {
         const meta = JSON.parse(readFileSync(metaFile, "utf-8"));
         if (meta.htmlDir) {
-          const goldensDir = join(dirname(meta.htmlDir), "goldens");
+          const goldensDir = meta.goldensDir || join(dirname(meta.htmlDir), "goldens");
           mkdirSync(goldensDir, { recursive: true });
           const srcBase = id.replace(/^slide_/, "slide_").split(".")[0];
           const srcPng = join(resultsDir, "slides", `${srcBase}.png`);
@@ -178,11 +201,18 @@ const HTML = `<!DOCTYPE html>
   .header h1 { font-size: 18px; font-weight: 600; }
   .stats { font-size: 14px; color: #888; }
   .slide-pair { display: flex; gap: 4px; padding: 12px 24px; align-items: flex-start; flex-wrap: wrap; }
-  .slide-pair img { width: 32.5%; border: 2px solid #333; border-radius: 4px; }
-  .slide-pair:has(img:nth-child(2):last-child) img { width: 49%; }
-  .slide-pair img.original { border-color: #4a90d9; }
-  .slide-pair img.slides { border-color: #e94560; }
-  .slide-pair img.diff { border-color: #f1c40f; background: #111; }
+  .slide-pair .panel { width: 49%; position: relative; }
+  .slide-pair .panel img { width: 100%; border: 2px solid #333; border-radius: 4px; display: block; }
+  .slide-pair .panel.original img { border-color: #4a90d9; }
+  .slide-pair .panel.slides img { border-color: #e94560; }
+  .slide-pair .panel.diff img { border-color: #f1c40f; background: #111; }
+  .slide-pair .panel.slides canvas { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); cursor: crosshair; touch-action: none; border-radius: 4px; }
+  .slide-pair .panel.original .diff-overlay { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); border-radius: 4px; pointer-events: none; }
+  .slide-pair .panel.original canvas.diff-overlay { background: transparent; }
+  .draw-toolbar { display: flex; gap: 8px; padding: 0 24px; align-items: center; font-size: 12px; color: #aaa; }
+  .draw-toolbar button { background: #2a2a4e; color: #e0e0e0; border: 1px solid #444; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .draw-toolbar button.active { background: #e94560; border-color: #e94560; color: white; }
+  .draw-toolbar input[type=color] { width: 28px; height: 24px; border: 1px solid #444; border-radius: 4px; background: transparent; cursor: pointer; }
   .labels { display: flex; gap: 4px; padding: 0 24px; }
   .labels span { width: 49%; text-align: center; font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
   .actions { display: flex; gap: 12px; padding: 12px 24px; justify-content: center; }
@@ -229,6 +259,17 @@ const HTML = `<!DOCTYPE html>
 <div class="nav" id="nav"></div>
 <div class="labels"><span>Original HTML</span><span>Google Slides</span></div>
 <div class="slide-pair" id="pair"></div>
+<div class="draw-toolbar" id="drawToolbar">
+  <label style="display:flex; gap:6px; align-items:center; cursor:pointer;">
+    <input type="checkbox" id="showDiff" onchange="toggleShowDiff()"> Show diff at full size (hide small diff panel)
+  </label>
+  <span style="width: 24px;"></span>
+  <span>Draw on Slides render:</span>
+  <button id="drawToggle" onclick="toggleDraw()">Draw</button>
+  <input type="color" id="drawColor" value="#e94560">
+  <label><input type="range" id="drawSize" min="2" max="20" value="6"> px</label>
+  <button onclick="clearDraw()">Clear</button>
+</div>
 <div class="slide-id" id="slideId"></div>
 <div class="slide-links" id="slideLinks"></div>
 <div class="comment-box">
@@ -292,13 +333,21 @@ function render() {
   const c = comparisons[currentIdx];
   if (!c) return;
 
-  let pairHtml =
-    '<img class="original" src="/img?path=' + encodeURIComponent(c.originalPng) + '">' +
-    '<img class="slides" src="/img?path=' + encodeURIComponent(c.slidesPng) + '">';
-  if (c.diffPng) {
-    pairHtml += '<img class="diff" src="/img?path=' + encodeURIComponent(c.diffPng) + '" title="pixel diff vs golden">';
-  }
+  // Always two panels: Original · Slides. When "Show diff" is checked we
+  // compute the diff IN THE BROWSER between the exact two <img>s on screen
+  // (after they've both been downscaled to the panel size) and paint it to
+  // a canvas overlay on the original. That way the diff is guaranteed to be
+  // the difference between what the user actually sees — no server-side
+  // downscaling, no blur, no threshold mystery.
+  const diffOverlay = (showDiff && c.slidesPng)
+    ? '<canvas class="diff-overlay" id="diffCanvas"></canvas>'
+    : '';
+  const pairHtml =
+    '<div class="panel original"><img id="originalImg" src="/img?path=' + encodeURIComponent(c.originalPng) + '">' + diffOverlay + '</div>' +
+    '<div class="panel slides"><img id="slidesImg" src="/img?path=' + encodeURIComponent(c.slidesPng) + '"><canvas id="drawCanvas"></canvas></div>';
   document.getElementById('pair').innerHTML = pairHtml;
+  setupDrawCanvas(c.annotationPng);
+  if (showDiff) computeClientSideDiff();
 
   const badge = '<span class="status-badge status-' + c.status + '">' + c.status + '</span>';
   let diffBadge = '';
@@ -356,14 +405,153 @@ function render() {
 async function rate(status) {
   const c = comparisons[currentIdx];
   const comment = document.getElementById('comment').value.trim();
+  // Export annotation canvas if anything was drawn.
+  let annotation;
+  const canvas = document.getElementById('drawCanvas');
+  if (canvas && canvasHasStrokes) {
+    annotation = canvas.toDataURL('image/png');
+  }
   await fetch('/api/rate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: c.id, status, comment: comment || undefined }),
+    body: JSON.stringify({ id: c.id, status, comment: comment || undefined, annotation }),
   });
   c.status = status;
   c.comment = comment || undefined;
   navigate(1);
+}
+
+// --- Draw overlay on Slides render ---
+let drawMode = false;
+let canvasHasStrokes = false;
+let drawHistory = []; // stack of ImageData snapshots, one per completed stroke
+function undoDraw() {
+  const canvas = document.getElementById('drawCanvas');
+  if (!canvas || drawHistory.length === 0) return;
+  const ctx = canvas.getContext('2d');
+  const prev = drawHistory.pop();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (prev) ctx.putImageData(prev, 0, 0);
+  canvasHasStrokes = drawHistory.length > 0 || !!prev;
+}
+let showDiff = false;
+function toggleShowDiff() {
+  showDiff = document.getElementById('showDiff').checked;
+  render();
+}
+
+// Compute a per-pixel diff in the browser between the two <img>s currently
+// visible (left panel original, right panel slides). Writes red pixels to the
+// overlay canvas wherever the two images differ by more than THRESHOLD. Both
+// images are downscaled to a common WORK_W x WORK_H grid so different source
+// resolutions (original = 2560x1440, slides thumb = 1600x900) line up 1:1
+// before comparison — that's the "two pictures on screen" alignment.
+function computeClientSideDiff() {
+  const origImg = document.getElementById('originalImg');
+  const slidesImg = document.getElementById('slidesImg');
+  const out = document.getElementById('diffCanvas');
+  if (!origImg || !slidesImg || !out) return;
+  const wait = (img) => new Promise(r => {
+    if (img.complete && img.naturalWidth) r();
+    else img.addEventListener('load', () => r(), { once: true });
+  });
+  Promise.all([wait(origImg), wait(slidesImg)]).then(() => {
+    const WORK_W = 1600, WORK_H = 900;
+    const THRESHOLD = 45; // per-channel L1 sum; tuned for font-hinting noise
+    const a = document.createElement('canvas');
+    a.width = WORK_W; a.height = WORK_H;
+    const actx = a.getContext('2d');
+    actx.drawImage(origImg, 0, 0, WORK_W, WORK_H);
+    const aData = actx.getImageData(0, 0, WORK_W, WORK_H).data;
+
+    const b = document.createElement('canvas');
+    b.width = WORK_W; b.height = WORK_H;
+    const bctx = b.getContext('2d');
+    bctx.drawImage(slidesImg, 0, 0, WORK_W, WORK_H);
+    const bData = bctx.getImageData(0, 0, WORK_W, WORK_H).data;
+
+    out.width = WORK_W; out.height = WORK_H;
+    const octx = out.getContext('2d');
+    const diffImg = octx.createImageData(WORK_W, WORK_H);
+    const dData = diffImg.data;
+    let count = 0;
+    for (let i = 0; i < aData.length; i += 4) {
+      const dr = Math.abs(aData[i] - bData[i]);
+      const dg = Math.abs(aData[i + 1] - bData[i + 1]);
+      const db = Math.abs(aData[i + 2] - bData[i + 2]);
+      if (dr + dg + db > THRESHOLD) {
+        dData[i] = 255; dData[i + 1] = 0; dData[i + 2] = 0; dData[i + 3] = 200;
+        count++;
+      }
+      // else leave as rgba(0,0,0,0) — fully transparent
+    }
+    octx.putImageData(diffImg, 0, 0);
+    console.log('client diff: ' + count + ' pixels');
+  });
+}
+function toggleDraw() {
+  drawMode = !drawMode;
+  document.getElementById('drawToggle').classList.toggle('active', drawMode);
+  const canvas = document.getElementById('drawCanvas');
+  if (canvas) canvas.style.pointerEvents = drawMode ? 'auto' : 'none';
+}
+function clearDraw() {
+  const canvas = document.getElementById('drawCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  canvasHasStrokes = false;
+  drawHistory = [];
+}
+function setupDrawCanvas(annotationPath) {
+  const img = document.getElementById('slidesImg');
+  const canvas = document.getElementById('drawCanvas');
+  if (!img || !canvas) return;
+  canvas.style.pointerEvents = drawMode ? 'auto' : 'none';
+  document.getElementById('drawToggle').classList.toggle('active', drawMode);
+  canvasHasStrokes = false;
+  drawHistory = [];
+  const init = () => {
+    canvas.width = img.naturalWidth || img.clientWidth;
+    canvas.height = img.naturalHeight || img.clientHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (annotationPath) {
+      const saved = new Image();
+      saved.onload = () => { ctx.drawImage(saved, 0, 0, canvas.width, canvas.height); canvasHasStrokes = true; };
+      saved.src = '/img?path=' + encodeURIComponent(annotationPath) + '&t=' + Date.now();
+    }
+  };
+  if (img.complete && img.naturalWidth) init();
+  else img.onload = init;
+
+  let drawing = false;
+  const getPos = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
+  };
+  canvas.onpointerdown = (e) => {
+    if (!drawMode) return;
+    drawing = true; canvas.setPointerCapture(e.pointerId);
+    const ctx = canvas.getContext('2d');
+    // Snapshot current canvas BEFORE this stroke so Ctrl+Z can revert to it.
+    // Cap history at 50 entries to bound memory.
+    drawHistory.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    if (drawHistory.length > 50) drawHistory.shift();
+    ctx.strokeStyle = document.getElementById('drawColor').value;
+    ctx.lineWidth = parseFloat(document.getElementById('drawSize').value) * (canvas.width / canvas.getBoundingClientRect().width);
+    const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y);
+  };
+  canvas.onpointermove = (e) => {
+    if (!drawing) return;
+    const ctx = canvas.getContext('2d');
+    const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke();
+    canvasHasStrokes = true;
+  };
+  canvas.onpointerup = () => { drawing = false; };
+  canvas.onpointercancel = () => { drawing = false; };
 }
 
 function navigate(delta) {
@@ -378,6 +566,13 @@ function navigate(delta) {
 }
 
 document.addEventListener('keydown', e => {
+  // Ctrl/Cmd+Z — undo last drawing stroke (works globally, even while typing
+  // in the comment box, so drawing workflow isn't interrupted).
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    undoDraw();
+    e.preventDefault();
+    return;
+  }
   const commentEl = document.getElementById('comment');
   // Don't intercept keys when typing in the comment box
   if (document.activeElement === commentEl) {
@@ -423,7 +618,8 @@ const server = createServer((req, res) => {
     let goldensDir: string | null = null;
     if (existsSync(metaFile)) {
       const meta = JSON.parse(readFileSync(metaFile, "utf-8"));
-      if (meta.htmlDir) goldensDir = join(dirname(meta.htmlDir), "goldens");
+      if (meta.goldensDir) goldensDir = meta.goldensDir;
+      else if (meta.htmlDir) goldensDir = join(dirname(meta.htmlDir), "goldens");
     }
     const comparisons = findComparisons();
     const matching = comparisons.filter(c => c.diffStatus === "ok").length;
@@ -457,9 +653,9 @@ const server = createServer((req, res) => {
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", () => {
-      const { id, status, comment } = JSON.parse(body);
-      saveRating(id, status, comment);
-      console.log(`RATING: ${id} → ${status}${comment ? ` | ${comment}` : ''}`);
+      const { id, status, comment, annotation } = JSON.parse(body);
+      saveRating(id, status, comment, annotation);
+      console.log(`RATING: ${id} → ${status}${comment ? ` | ${comment}` : ''}${annotation ? ' [+annotation]' : ''}`);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
     });
