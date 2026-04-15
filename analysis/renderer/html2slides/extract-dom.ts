@@ -183,6 +183,14 @@ interface ElementStyle {
   position: string;
   // Box shadow parsed components (null if no shadow)
   boxShadow: { offsetX: number; offsetY: number; blur: number; spread: number; color: string | null; alpha: number } | null;
+  // CSS transform rotation in degrees clockwise. 0 when no rotation. Extracted
+  // from the computed `transform` matrix via atan2(b,a); ignores translation
+  // and scale. Paired with `naturalWidth`/`naturalHeight` (pre-transform layout
+  // box) so the converter can place a rotated text box and rotate it around
+  // the right center.
+  rotate: number;
+  naturalWidth: number;
+  naturalHeight: number;
 }
 
 interface TextRun {
@@ -194,6 +202,11 @@ interface TextRun {
     fontFamily: string;
     fontSize: number;
     textDecoration: string | null;
+    // Inline backgrounds (e.g. `<span class="code">`, `<span class="highlight">`)
+    // — captured so the converter can apply pptxgenjs `highlight` per run.
+    bgColor?: string | null;
+    // `vertical-align: sub` / `super` on a span → pptxgenjs subscript/superscript.
+    verticalAlign?: "baseline" | "sub" | "super";
   } | null;
 }
 
@@ -336,6 +349,26 @@ interface ExtractedElement {
       // stacking context, auto keeps it in groups 3–5 when non-positioned.
       zIndex: cs.zIndex === "auto" ? null : parseInt(cs.zIndex),
       position: cs.position,
+      // Parse `transform` matrix → rotation in degrees CW.
+      // `matrix(a, b, c, d, tx, ty)` = [[a,c,tx],[b,d,ty]]; rotation angle =
+      // atan2(b, a). Non-rotation transforms (pure translate/scale) yield ~0°.
+      // We only keep the rotation because pptxgenjs shapes can rotate but
+      // can't skew or non-uniformly scale.
+      rotate: (() => {
+        const tr = cs.transform;
+        if (!tr || tr === "none") return 0;
+        const m = tr.match(/matrix\(([^)]+)\)/);
+        if (!m) return 0;
+        const n = m[1].split(",").map(x => parseFloat(x));
+        if (n.length < 4) return 0;
+        const [a, b] = n;
+        const rad = Math.atan2(b, a);
+        const deg = rad * 180 / Math.PI;
+        // Snap near-zero to 0 so unrotated elements don't get 0.0001° jitter.
+        return Math.abs(deg) < 0.1 ? 0 : deg;
+      })(),
+      naturalWidth: (el as HTMLElement).offsetWidth || elBounds.width,
+      naturalHeight: (el as HTMLElement).offsetHeight || elBounds.height,
       // Parse box-shadow: offsetX offsetY blur spread color
       boxShadow: (() => {
         const sh = cs.boxShadow;
@@ -624,6 +657,17 @@ interface ExtractedElement {
         } else if (INLINE_TAGS.includes(tag)) {
           const cs = getComputedStyle(node as Element);
           if (cs.position === "absolute" || cs.position === "fixed") continue;
+          // Inline backgrounds on span runs (`.code { background: #f0f4f8 }`,
+          // `.highlight { background: #fefcbf }`) — the rect emitter skips
+          // these because they sit *inside* a text flow (no layout box of its
+          // own on wrapped lines). Capture on the run so pptxgenjs can paint
+          // the highlight per-run via the `highlight` option.
+          const csBg = rgb2hex(cs.backgroundColor);
+          const parentBg = parentStyle.bgColor || null;
+          // vertical-align: sub / super → pptxgenjs subscript/superscript.
+          const va = cs.verticalAlign;
+          const verticalAlign: "sub" | "super" | "baseline" =
+            va === "sub" ? "sub" : va === "super" ? "super" : "baseline";
           const childStyle = {
             color: rgb2hex(cs.color),
             fontWeight: (cs.fontWeight === "bold" || parseInt(cs.fontWeight) >= 600 ? "bold" : "normal") as "bold" | "normal",
@@ -631,12 +675,16 @@ interface ExtractedElement {
             fontFamily: cs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
             fontSize: parseFloat(cs.fontSize),
             textDecoration: cs.textDecorationLine !== "none" ? cs.textDecorationLine : null,
+            bgColor: csBg && csBg !== parentBg ? csBg : null,
+            verticalAlign,
           };
           const differs = childStyle.color !== parentStyle.color ||
             childStyle.fontWeight !== parentStyle.fontWeight ||
             childStyle.fontStyle !== parentStyle.fontStyle ||
             childStyle.fontSize !== parentStyle.fontSize ||
-            childStyle.textDecoration !== parentStyle.textDecoration;
+            childStyle.textDecoration !== parentStyle.textDecoration ||
+            !!childStyle.bgColor ||
+            childStyle.verticalAlign !== "baseline";
           const runText = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
           runs.push({ text: runText, style: differs ? childStyle : null });
         }
@@ -1123,6 +1171,14 @@ interface ExtractedElement {
         style: baseStyle,
         zIndex: style.zIndex,
         position: style.position,
+        // Rotation info: non-zero `rotate` means CSS `transform: rotate(...)`
+        // is on this element. getBoundingClientRect returns the post-transform
+        // axis-aligned bbox; `naturalWidth/Height` is the pre-transform layout
+        // box. The converter repositions the text box around the bbox center
+        // at its natural size and applies pptxgenjs `rotate`.
+        rotate: style.rotate || 0,
+        naturalWidth: style.naturalWidth,
+        naturalHeight: style.naturalHeight,
       };
       if (hasStyledRuns) {
         const allRuns = runs.filter(r => r.text.length > 0).map(r => ({
