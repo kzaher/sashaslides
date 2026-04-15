@@ -165,8 +165,32 @@ function buildPptx(
           // a deeper-nested rect (with its own bg) will paint over the merged
           // text and bury it (slide_24: text inside 5 nested cards was merged
           // into level-3, then hidden by level-4's solid fill).
-          let mergedTextEl: any = null;
+          //
+          // Also count how many text elements are wholly inside this rect's
+          // vertical range (before the next same-depth sibling paints). A
+          // pull-quote (`.pull-quote { bg + border-left } > <p> + .attr`) hosts
+          // TWO block texts — merging just the first would center it vertically
+          // and push the `.attr` caption off the decorated box. When multiple
+          // texts live inside, skip merging and let each text emit at its own
+          // bounds so the rect acts as a pure background + accent stripe.
+          let insideTextCount = 0;
           for (let ti = ei + 1; ti < extraction.elements.length; ti++) {
+            const next = extraction.elements[ti];
+            if (next.type !== "text" || !next.bounds) continue;
+            const nb = next.bounds;
+            const tcx = nb.x + nb.w / 2, tcy = nb.y + nb.h / 2;
+            if (tcx >= b.x && tcx <= b.x + b.w && tcy >= b.y && tcy <= b.y + b.h) {
+              insideTextCount++;
+              if (insideTextCount > 1) break;
+            }
+            // Stop scanning past this rect's vertical extent — avoids counting
+            // unrelated texts from sibling sections that sit below.
+            if (nb.y > b.y + b.h) break;
+          }
+          const skipMergeMultiText = insideTextCount > 1;
+
+          let mergedTextEl: any = null;
+          for (let ti = ei + 1; ti < extraction.elements.length && !skipMergeMultiText; ti++) {
             const next = extraction.elements[ti];
             if (next.type !== "text" || !next.bounds) continue;
             const nb = next.bounds;
@@ -223,9 +247,15 @@ function buildPptx(
             opts.fill = fillOpts;
           }
 
-          // Corner radius (pptxgenjs rectRadius is in inches)
+          // Corner radius (pptxgenjs rectRadius is in inches).
+          // Clamp to half the shorter dimension — CSS `border-radius: 50px` on
+          // a 18px-tall pill gives radius > h/2, which produces an invalid
+          // OOXML `adj` value; Google Slides then renders the shape as empty
+          // (no fill, no outline), leaving the tag's text floating on the slide
+          // background. Clamping yields a proper stadium/pill shape.
           if (anyRounded && !isCircle) {
-            opts.rectRadius = px2in(el.borderRadius);
+            const maxR = Math.min(b.w, b.h) / 2;
+            opts.rectRadius = px2in(Math.min(el.borderRadius, maxR));
           }
 
           // Border outline (uniform)
@@ -328,14 +358,19 @@ function buildPptx(
             for (const side of sides) {
               if (side.style === "dashed" || side.style === "dotted") {
                 const isHoriz = side.w > side.h;
+                // Minimum 1pt stroke for dashed/dotted — Google Slides renders
+                // sub-pt dashed strokes as a single thin solid line (or drops
+                // them entirely), erasing `.stat-row { border-bottom: 1px
+                // dotted }`-style dividers. 1pt is barely visible but keeps
+                // the dash pattern intact.
                 slide.addShape("line", {
                   x: px2in(side.x), y: px2in(side.y),
                   w: isHoriz ? px2in(side.w) : 0,
                   h: isHoriz ? 0 : px2in(side.h),
                   line: {
                     color: hexToRgb(side.color),
-                    width: Math.max((isHoriz ? side.h : side.w) * PX2PT, 0.5),
-                    dashType: side.style === "dashed" ? "dash" : "dot",
+                    width: Math.max((isHoriz ? side.h : side.w) * PX2PT, 1),
+                    dashType: side.style === "dashed" ? "dash" : "sysDot",
                   },
                 });
               } else {
@@ -355,29 +390,65 @@ function buildPptx(
           if (mergedTextEl) {
             const ms = mergedTextEl.style || {};
             const xfm = ms.textTransform === "uppercase";
+            // Respect the merged text's own alignment and bounds.
+            //
+            // Two-bug fix (slide_24 — deep-nest innermost text):
+            //   1. Alignment — hardcoding `align: "center"` forced every
+            //      merged text to center. `.innermost` inherits the default
+            //      `text-align: start` (left) and must stay left when absorbed
+            //      into the parent rect. Pills/cards that want centered text
+            //      either set `text-align: center` explicitly or trip the
+            //      padding-based auto-center in extract-dom.ts — both already
+            //      tag textAlign on the text element, so respecting
+            //      ms.textAlign handles all cases.
+            //   2. Bounds — using the rect's `b` (level-4 at 837×164) makes
+            //      the text box wider than the source innermost div (769×96).
+            //      Wrap points shift and left/right-aligned glyphs drift
+            //      outward. Fall back to `mergedTextEl.bounds` so Chrome's
+            //      wrap survives the merge; valign:middle still centers
+            //      vertically within the rect because the DOM y/h is the
+            //      flex-centered position Chrome already computed.
+            const mb = mergedTextEl.bounds || b;
+            const declaredAlign =
+              ms.textAlign === "center" ? "center" :
+              ms.textAlign === "right" || ms.textAlign === "end" ? "right" : "left";
+            // Slack mirrors the standalone text path — Slides measures a hair
+            // wider than Chrome, so grow the box opposite alignment to give
+            // single-line text breathing room.
+            const SLACK_PX = 12;
+            let mbx = mb.x, mbw = mb.w;
+            if (declaredAlign === "left")        { mbw = mb.w + SLACK_PX; }
+            else if (declaredAlign === "right")  { mbx = mb.x - SLACK_PX; mbw = mb.w + SLACK_PX; }
+            else                                  { mbx = mb.x - SLACK_PX / 2; mbw = mb.w + SLACK_PX; }
             const commonOpts: any = {
-              x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
-              align: "center",
+              x: px2in(mbx), y: px2in(mb.y), w: px2in(mbw), h: px2in(mb.h),
+              align: declaredAlign,
               valign: "middle",
               fill: { type: "none" },
               line: { type: "none" },
               margin: 0,
             };
+            if (ms.lineHeight && ms.fontSize) {
+              commonOpts.lineSpacingMultiple = ms.lineHeight / ms.fontSize;
+            }
             if (mergedTextEl.runs && mergedTextEl.runs.length > 0) {
               const textRuns = mergedTextEl.runs
                 .filter((r: any) => r.text.length > 0)
                 .map((run: any) => {
                   const rs = run.style || {};
-                  return {
-                    text: xfm ? run.text.toUpperCase() : run.text,
-                    options: {
-                      fontFace: mapFont(rs.fontFamily || ms.fontFamily || "Arial"),
-                      fontSize: (rs.fontSize || ms.fontSize || 14) * PX2PT,
-                      color: hexToRgb(rs.color || ms.color || "#333333"),
-                      bold: rs.fontWeight === "bold" || (!rs.fontWeight && ms.fontWeight === "bold"),
-                      italic: rs.fontStyle === "italic" || (!rs.fontStyle && ms.fontStyle === "italic"),
-                    },
+                  const opts: any = {
+                    fontFace: mapFont(rs.fontFamily || ms.fontFamily || "Arial"),
+                    fontSize: (rs.fontSize || ms.fontSize || 14) * PX2PT,
+                    color: hexToRgb(rs.color || ms.color || "#333333"),
+                    bold: rs.fontWeight === "bold" || (!rs.fontWeight && ms.fontWeight === "bold"),
+                    italic: rs.fontStyle === "italic" || (!rs.fontStyle && ms.fontStyle === "italic"),
+                    underline: { style: (rs.textDecoration === "underline" || (!rs.textDecoration && ms.textDecoration === "underline")) ? "sng" : "none" },
+                    strike: (rs.textDecoration === "line-through" || (!rs.textDecoration && ms.textDecoration === "line-through")) ? "sngStrike" : undefined,
                   };
+                  if (rs.bgColor) opts.highlight = hexToRgb(rs.bgColor);
+                  if (rs.verticalAlign === "sub") opts.subscript = true;
+                  else if (rs.verticalAlign === "super") opts.superscript = true;
+                  return { text: xfm ? run.text.toUpperCase() : run.text, options: opts };
                 });
               slide.addText(textRuns, commonOpts);
             } else {
@@ -425,10 +496,29 @@ function buildPptx(
           // room: left-aligned grows to the right, right-aligned grows to the
           // left, centered grows both sides.
           const SLACK_PX = 12;
-          let bx = b.x, bw = b.w;
-          if (align === "left")   { bw = b.w + SLACK_PX; }
-          else if (align === "right")  { bx = b.x - SLACK_PX; bw = b.w + SLACK_PX; }
-          else if (align === "center") { bx = b.x - SLACK_PX / 2; bw = b.w + SLACK_PX; }
+          let bx = b.x, bw = b.w, by = b.y, bh = b.h;
+          // Rotated text: CSS transform: rotate(Xdeg). `bounds` is the post-
+          // transform axis-aligned bbox — sized to a rotated wrapper. Using it
+          // as the pptxgenjs box would squeeze "Feature Completeness ↑" into a
+          // narrow vertical strip and wrap it letter-by-letter. Instead, place
+          // the box at its *natural* (pre-transform) dimensions centered on
+          // the bbox, and let pptxgenjs rotate it.
+          const rot = typeof el.rotate === "number" ? el.rotate : 0;
+          let rotateDeg = 0;
+          if (Math.abs(rot) > 0.5 && el.naturalWidth && el.naturalHeight) {
+            const cx = b.x + b.w / 2;
+            const cy = b.y + b.h / 2;
+            bx = cx - el.naturalWidth / 2;
+            by = cy - el.naturalHeight / 2;
+            bw = el.naturalWidth;
+            bh = el.naturalHeight;
+            // pptxgenjs rotate is degrees clockwise 0–360.
+            rotateDeg = ((rot % 360) + 360) % 360;
+          } else {
+            if (align === "left")   { bw = b.w + SLACK_PX; }
+            else if (align === "right")  { bx = b.x - SLACK_PX; bw = b.w + SLACK_PX; }
+            else if (align === "center") { bx = b.x - SLACK_PX / 2; bw = b.w + SLACK_PX; }
+          }
 
           // Opacity: pptxgenjs text color is hex with no alpha. Approximate
           // CSS `opacity` by blending foreground with white (the dominant slide
@@ -452,32 +542,39 @@ function buildPptx(
               const rs = run.style || {};
               let runText = run.text;
               if (s.textTransform === "uppercase") runText = runText.toUpperCase();
-              return {
-                text: runText,
-                options: {
-                  fontFace: mapFont(rs.fontFamily || s.fontFamily || "Arial"),
-                  fontSize: (rs.fontSize || s.fontSize || 16) * PX2PT,
-                  color: hexToRgb(effectiveColor(rs.color || s.color || "#000000")),
-                  bold: rs.fontWeight === "bold" || (!rs.fontWeight && s.fontWeight === "bold"),
-                  italic: rs.fontStyle === "italic" || (!rs.fontStyle && s.fontStyle === "italic"),
-                  underline: { style: (rs.textDecoration === "underline" || (!rs.textDecoration && s.textDecoration === "underline")) ? "sng" : "none" },
-                  strike: (rs.textDecoration === "line-through" || (!rs.textDecoration && s.textDecoration === "line-through")) ? "sngStrike" : undefined,
-                },
+              const runOpts: any = {
+                fontFace: mapFont(rs.fontFamily || s.fontFamily || "Arial"),
+                fontSize: (rs.fontSize || s.fontSize || 16) * PX2PT,
+                color: hexToRgb(effectiveColor(rs.color || s.color || "#000000")),
+                bold: rs.fontWeight === "bold" || (!rs.fontWeight && s.fontWeight === "bold"),
+                italic: rs.fontStyle === "italic" || (!rs.fontStyle && s.fontStyle === "italic"),
+                underline: { style: (rs.textDecoration === "underline" || (!rs.textDecoration && s.textDecoration === "underline")) ? "sng" : "none" },
+                strike: (rs.textDecoration === "line-through" || (!rs.textDecoration && s.textDecoration === "line-through")) ? "sngStrike" : undefined,
               };
+              // Inline span background → pptxgenjs `highlight` (per-run fill
+              // behind the glyphs). Used by `.code { background: #f0f4f8 }`
+              // and `.highlight { background: #fefcbf }` constructs.
+              if (rs.bgColor) runOpts.highlight = hexToRgb(rs.bgColor);
+              // vertical-align: sub / super on a span.
+              if (rs.verticalAlign === "sub") runOpts.subscript = true;
+              else if (rs.verticalAlign === "super") runOpts.superscript = true;
+              return { text: runText, options: runOpts };
             });
 
-            slide.addText(textRuns, {
-              x: px2in(bx), y: px2in(b.y), w: px2in(bw), h: px2in(b.h),
+            const textOpts: any = {
+              x: px2in(bx), y: px2in(by), w: px2in(bw), h: px2in(bh),
               valign: el.verticallyCentered ? "middle" : "top",
               align,
               lineSpacingMultiple: s.lineHeight && s.fontSize ? s.lineHeight / s.fontSize : undefined,
               fill: { type: "none" },
               line: { type: "none" },
               margin: 0,
-            });
+            };
+            if (rotateDeg) textOpts.rotate = rotateDeg;
+            slide.addText(textRuns, textOpts);
           } else {
             const textOpts: any = {
-              x: px2in(bx), y: px2in(b.y), w: px2in(bw), h: px2in(b.h),
+              x: px2in(bx), y: px2in(by), w: px2in(bw), h: px2in(bh),
               valign: el.verticallyCentered ? "middle" : "top",
               align,
               fontSize: (s.fontSize || 16) * PX2PT,
@@ -494,6 +591,7 @@ function buildPptx(
             }
             if (s.textDecoration === "underline") textOpts.underline = { style: "sng" };
             if (s.textDecoration === "line-through") textOpts.strike = "sngStrike";
+            if (rotateDeg) textOpts.rotate = rotateDeg;
 
             slide.addText(fullText, textOpts);
           }
@@ -800,7 +898,11 @@ function buildPptx(
             const tableRows = rows.map((row: any[]) => row.map((cell: any) => {
               const cs = cell.style || {};
               const ub = cellUniformBorder(cs) || { width: 0, color: "", style: "none" };
-              const dashType = ub.style === "dashed" ? "dash" : ub.style === "dotted" ? "dash" : "solid";
+              // pptxgenjs table cell border dashType: "dash" | "dashDot" | "lgDash" |
+              // "lgDashDot" | "lgDashDotDot" | "solid" | "sysDash" | "sysDashDot" |
+              // "sysDashDotDot" | "sysDot" | "none". Use "sysDot" for CSS dotted so
+              // Google Slides preserves the dotted appearance (not a long dash).
+              const dashType = ub.style === "dashed" ? "dash" : ub.style === "dotted" ? "sysDot" : "solid";
               const borderSpec = ub.width > 0
                 ? { type: dashType as any, pt: Math.max(0.5, ub.width * PX2PT), color: hexToRgb(ub.color) }
                 : { type: "none" as const, pt: 0, color: "000000" };
@@ -920,8 +1022,8 @@ function buildPptx(
                       h: isHoriz ? 0 : px2in(s.h),
                       line: {
                         color: hexToRgb(s.color),
-                        width: Math.max((isHoriz ? s.h : s.w) * PX2PT, 0.5),
-                        dashType: s.style === "dashed" ? "dash" : "dot",
+                        width: Math.max((isHoriz ? s.h : s.w) * PX2PT, 1),
+                        dashType: s.style === "dashed" ? "dash" : "sysDot",
                       },
                     });
                   } else {
