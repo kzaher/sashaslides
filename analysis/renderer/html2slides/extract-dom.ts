@@ -1111,6 +1111,15 @@ interface ExtractedElement {
         if (!bg && borderMax === 0 && br === 0) continue;
         const pb = pseudoBounds(pcs);
         if (!pb || pb.w < 1 || pb.h < 1) continue;
+        // SWOT-card top-accent: grow thin top-stripe pseudo by 2×
+        // parent border-top when colors match (cluster 8).
+        const parentCs2 = getComputedStyle(el);
+        const parentBT = parseFloat(parentCs2.borderTopWidth) || 0;
+        const parentBTColor = rgb2hex(parentCs2.borderTopColor);
+        if (parentBT > 0 && bg && parentBTColor && bg.toLowerCase() === parentBTColor.toLowerCase()
+            && Math.abs(pb.y - bounds.y) < 1.5 && pb.w >= bounds.w * 0.5 && pb.h <= 12) {
+          pb.h = pb.h + parentBT * 2;
+        }
         // CSS border-triangle: 0×0 box with transparent top/bottom and a
         // colored side — skip as rect; downstream renderers can't reproduce
         // it cleanly. (Leave for a future targeted fix.)
