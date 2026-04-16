@@ -938,6 +938,177 @@ interface ExtractedElement {
     });
   }
 
+  // --- PSEUDO-ELEMENT HELPERS ---
+  // Compute a pseudo-element's bounds by interpreting its CSS box relative to
+  // its host element. `inset: 0` → fills parent; `top: 0; height: 3px` → thin
+  // top strip. Works for `position: absolute` pseudos only — static pseudos
+  // live inline and we don't try to place those geometrically.
+  function pseudoBounds(pcs: CSSStyleDeclaration, hostBounds: Bounds): Bounds | null {
+    if (pcs.position !== "absolute") return null;
+    const parseLen = (v: string, ref: number): number | null => {
+      if (!v || v === "auto") return null;
+      if (v.endsWith("%")) return (parseFloat(v) / 100) * ref;
+      return parseFloat(v);
+    };
+    const top = parseLen(pcs.top, hostBounds.h);
+    const bottom = parseLen(pcs.bottom, hostBounds.h);
+    const left = parseLen(pcs.left, hostBounds.w);
+    const right = parseLen(pcs.right, hostBounds.w);
+    const w = parseLen(pcs.width, hostBounds.w);
+    const h = parseLen(pcs.height, hostBounds.h);
+    let x = hostBounds.x + (left ?? 0);
+    let y = hostBounds.y + (top ?? 0);
+    let ww = w ?? (right != null ? hostBounds.w - (left ?? 0) - right : hostBounds.w - (left ?? 0));
+    let hh = h ?? (bottom != null ? hostBounds.h - (top ?? 0) - bottom : hostBounds.h - (top ?? 0));
+    // Translate per `transform: translate(...)`
+    const tm = (pcs.transform || "").match(/matrix\(([^)]+)\)/);
+    if (tm) {
+      const nums = tm[1].split(",").map(n => parseFloat(n));
+      if (nums.length === 6) { x += nums[4]; y += nums[5]; }
+    }
+    return { x, y, w: Math.max(0, ww), h: Math.max(0, hh) };
+  }
+
+  // Pseudo-element visual box (::before / ::after with bg/border/radius) —
+  // e.g. `.logo-card::before` accent stripes, CSS border-triangle arrows.
+  // Only emitted when the pseudo is absolutely positioned so we can compute
+  // its bounds from CSS. Inline pseudos are handled by emitPseudoText below.
+  function emitPseudoRect(el: Element, bounds: Bounds): void {
+    for (const which of ["::before", "::after"] as const) {
+      const pcs = getComputedStyle(el, which);
+      const content = pcs.content || "";
+      // `content: none` → pseudo doesn't exist. Empty string (`content: ''`)
+      // is VALID and renders — commonly used for visual-only decorative
+      // pseudos like the nested white+blue inset rings in slide_04's current
+      // dot (`.dot.current::after/::before { content: ''; inset: 4px; … }`).
+      if (content === "none") continue;
+      const bg = rgb2hex(pcs.backgroundColor);
+      const bwT = parseFloat(pcs.borderTopWidth) || 0;
+      const bwR = parseFloat(pcs.borderRightWidth) || 0;
+      const bwB = parseFloat(pcs.borderBottomWidth) || 0;
+      const bwL = parseFloat(pcs.borderLeftWidth) || 0;
+      const borderMax = Math.max(bwT, bwR, bwB, bwL);
+      const br = parseFloat(pcs.borderTopLeftRadius) || 0;
+      if (!bg && borderMax === 0 && br === 0) continue;
+      const pb = pseudoBounds(pcs, bounds);
+      if (!pb || pb.w < 1 || pb.h < 1) continue;
+      // SWOT-card top-accent: grow thin top-stripe pseudo by 2×
+      // parent border-top when colors match (cluster 8).
+      const parentCs2 = getComputedStyle(el);
+      const parentBT = parseFloat(parentCs2.borderTopWidth) || 0;
+      const parentBTColor = rgb2hex(parentCs2.borderTopColor);
+      if (parentBT > 0 && bg && parentBTColor && bg.toLowerCase() === parentBTColor.toLowerCase()
+          && Math.abs(pb.y - bounds.y) < 1.5 && pb.w >= bounds.w * 0.5 && pb.h <= 12) {
+        pb.h = pb.h + parentBT * 2;
+      }
+      // CSS border-triangle: 0×0 box with transparent top/bottom and a
+      // colored side — skip as rect; downstream renderers can't reproduce
+      // it cleanly. (Leave for a future targeted fix.)
+      elements.push({
+        type: "rect", bounds: pb, fill: bg || null, fillAlpha: 1,
+        gradient: null, borderRadius: br,
+        cornerRadii: { tl: br, tr: br, br, bl: br },
+        borderUniform: bwT === bwR && bwR === bwB && bwB === bwL,
+        borderSides: {
+          top: { width: bwT, color: rgb2hex(pcs.borderTopColor), style: pcs.borderTopStyle },
+          right: { width: bwR, color: rgb2hex(pcs.borderRightColor), style: pcs.borderRightStyle },
+          bottom: { width: bwB, color: rgb2hex(pcs.borderBottomColor), style: pcs.borderBottomStyle },
+          left: { width: bwL, color: rgb2hex(pcs.borderLeftColor), style: pcs.borderLeftStyle },
+        },
+        borderColor: rgb2hex(pcs.borderTopColor),
+        borderWidth: borderMax,
+        borderStyle: pcs.borderTopStyle,
+        zIndex: 999, position: "absolute", boxShadow: null,
+      } as any);
+    }
+  }
+
+  // Pseudo-element text (::before / ::after) — e.g. checkmark glyphs inside
+  // step dots, chevron separators between cards. These have CSS `content: '✓'`
+  // and would otherwise be silently dropped. Emit as a centered text overlay
+  // at the host element's bounds.
+  function emitPseudoText(el: Element, bounds: Bounds, style: ElementStyle): void {
+    for (const which of ["::before", "::after"] as const) {
+      const pcs = getComputedStyle(el, which);
+      let content = pcs.content || "";
+      if (!content || content === "none" || content === "normal") continue;
+      content = content.replace(/^['"]|['"]$/g, "").trim();
+      if (!content || content === "" || content === '""') continue;
+      const fontSize = parseFloat(pcs.fontSize) || 14;
+      if (bounds.w < 4 || bounds.h < 4) continue;
+      elements.push({
+        type: "text",
+        bounds,
+        text: content,
+        style: {
+          fontFamily: pcs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
+          fontSize,
+          fontWeight: (pcs.fontWeight === "bold" || parseInt(pcs.fontWeight) >= 600) ? "bold" : "normal",
+          fontStyle: pcs.fontStyle === "italic" ? "italic" : "normal",
+          color: rgb2hex(pcs.color) || "#000000",
+          textAlign: "center",
+          lineHeight: parseFloat(pcs.lineHeight) || fontSize * 1.2,
+          textDecoration: null,
+          textTransform: "none",
+          letterSpacing: 0,
+          paddingLeft: 0,
+          paddingTop: 0,
+        },
+        runs: [{ text: content, style: null }],
+        zIndex: style.zIndex,
+        position: style.position,
+        verticallyCentered: true,
+      } as any);
+    }
+  }
+
+  // Inline "pill" span (a span with bg/border/radius nested inside a block
+  // container) — emit as rect + centered text overlay. Used by the TABLE
+  // branch to redraw `<span class="partial">Partial</span>` style pills on
+  // top of native cell text. Designed to be reusable by future block-level
+  // inline-pill scanners (e.g. list items, cards).
+  function emitPillSpan(sp: Element): void {
+    const scs = getComputedStyle(sp);
+    const sBg = rgb2hex(scs.backgroundColor);
+    const sBW = parseFloat(scs.borderTopWidth) || 0;
+    const sBR = parseFloat(scs.borderTopLeftRadius) || 0;
+    if (!sBg && sBW === 0 && sBR === 0) return;
+    const sBounds = getBounds(sp);
+    if (sBounds.w < 4 || sBounds.h < 4) return;
+    const sBorderColor = rgb2hex(scs.borderTopColor);
+    elements.push({
+      type: "rect", bounds: sBounds, fill: sBg || null, fillAlpha: 1,
+      gradient: null, borderRadius: sBR,
+      cornerRadii: { tl: sBR, tr: sBR, br: sBR, bl: sBR },
+      borderUniform: true, borderSides: null,
+      borderColor: sBW > 0 ? sBorderColor : null,
+      borderWidth: sBW, borderStyle: scs.borderTopStyle,
+      zIndex: 999, position: "relative", boxShadow: null,
+    } as any);
+    const spText = (sp.textContent || "").replace(/\s+/g, " ").trim();
+    if (spText) {
+      elements.push({
+        type: "text",
+        bounds: sBounds,
+        text: spText,
+        style: {
+          fontFamily: scs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
+          fontSize: parseFloat(scs.fontSize),
+          fontWeight: (scs.fontWeight === "bold" || parseInt(scs.fontWeight) >= 600) ? "bold" : "normal",
+          fontStyle: scs.fontStyle === "italic" ? "italic" : "normal",
+          color: rgb2hex(scs.color) || "#000000",
+          textAlign: "center",
+          lineHeight: parseFloat(scs.lineHeight) || parseFloat(scs.fontSize) * 1.2,
+          textDecoration: null, textTransform: "none", letterSpacing: 0,
+          paddingLeft: 0, paddingTop: 0,
+        },
+        runs: [{ text: spText, style: null }],
+        zIndex: 999, position: "relative",
+        verticallyCentered: true,
+      } as any);
+    }
+  }
+
   // --- MAIN WALK ---
   function walk(el: Element): void {
     if (seen.has(el)) return;
@@ -959,53 +1130,7 @@ interface ExtractedElement {
       // contains the same string, but it sits below the pill. We re-draw the
       // text so the `<span class="partial">Partial</span>` amber-on-cream
       // pill effect is reconstructed on top.
-      el.querySelectorAll("td span, th span").forEach(sp => {
-        const scs = getComputedStyle(sp as Element);
-        const sBg = rgb2hex(scs.backgroundColor);
-        const sBW = parseFloat(scs.borderTopWidth) || 0;
-        const sBR = parseFloat(scs.borderTopLeftRadius) || 0;
-        if (!sBg && sBW === 0 && sBR === 0) return;
-        const sBounds = getBounds(sp as Element);
-        if (sBounds.w < 4 || sBounds.h < 4) return;
-        const sPad = {
-          top: parseFloat(scs.paddingTop) || 0,
-          right: parseFloat(scs.paddingRight) || 0,
-          bottom: parseFloat(scs.paddingBottom) || 0,
-          left: parseFloat(scs.paddingLeft) || 0,
-        };
-        const sBorderColor = rgb2hex(scs.borderTopColor);
-        elements.push({
-          type: "rect", bounds: sBounds, fill: sBg || null, fillAlpha: 1,
-          gradient: null, borderRadius: sBR,
-          cornerRadii: { tl: sBR, tr: sBR, br: sBR, bl: sBR },
-          borderUniform: true, borderSides: null,
-          borderColor: sBW > 0 ? sBorderColor : null,
-          borderWidth: sBW, borderStyle: scs.borderTopStyle,
-          zIndex: 999, position: "relative", boxShadow: null,
-        } as any);
-        const spText = (sp.textContent || "").replace(/\s+/g, " ").trim();
-        if (spText) {
-          elements.push({
-            type: "text",
-            bounds: sBounds,
-            text: spText,
-            style: {
-              fontFamily: scs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
-              fontSize: parseFloat(scs.fontSize),
-              fontWeight: (scs.fontWeight === "bold" || parseInt(scs.fontWeight) >= 600) ? "bold" : "normal",
-              fontStyle: scs.fontStyle === "italic" ? "italic" : "normal",
-              color: rgb2hex(scs.color) || "#000000",
-              textAlign: "center",
-              lineHeight: parseFloat(scs.lineHeight) || parseFloat(scs.fontSize) * 1.2,
-              textDecoration: null, textTransform: "none", letterSpacing: 0,
-              paddingLeft: 0, paddingTop: 0,
-            },
-            runs: [{ text: spText, style: null }],
-            zIndex: 999, position: "relative",
-            verticallyCentered: true,
-          } as any);
-        }
-      });
+      el.querySelectorAll("td span, th span").forEach(sp => emitPillSpan(sp as Element));
       return;
     }
 
@@ -1054,134 +1179,11 @@ interface ExtractedElement {
 
     const style = getStyle(el);
 
-    // Pseudo-element text (::before / ::after) — e.g. checkmark glyphs inside
-    // step dots, chevron separators between cards. These have CSS `content: '✓'`
-    // and would otherwise be silently dropped. Emit as a centered text overlay
-    // at the parent element's bounds.
-    // Compute pseudo-element bounds by interpreting its CSS box relative to
-    // its host element. `inset: 0` → fills parent; `top: 0; height: 3px` →
-    // thin top strip. Works for `position: absolute` pseudos only — static
-    // pseudos live inline and we don't try to place those geometrically.
-    const pseudoBounds = (pcs: CSSStyleDeclaration): Bounds | null => {
-      if (pcs.position !== "absolute") return null;
-      const parseLen = (v: string, ref: number): number | null => {
-        if (!v || v === "auto") return null;
-        if (v.endsWith("%")) return (parseFloat(v) / 100) * ref;
-        return parseFloat(v);
-      };
-      const top = parseLen(pcs.top, bounds.h);
-      const bottom = parseLen(pcs.bottom, bounds.h);
-      const left = parseLen(pcs.left, bounds.w);
-      const right = parseLen(pcs.right, bounds.w);
-      const w = parseLen(pcs.width, bounds.w);
-      const h = parseLen(pcs.height, bounds.h);
-      let x = bounds.x + (left ?? 0);
-      let y = bounds.y + (top ?? 0);
-      let ww = w ?? (right != null ? bounds.w - (left ?? 0) - right : bounds.w - (left ?? 0));
-      let hh = h ?? (bottom != null ? bounds.h - (top ?? 0) - bottom : bounds.h - (top ?? 0));
-      // Translate per `transform: translate(...)`
-      const tm = (pcs.transform || "").match(/matrix\(([^)]+)\)/);
-      if (tm) {
-        const nums = tm[1].split(",").map(n => parseFloat(n));
-        if (nums.length === 6) { x += nums[4]; y += nums[5]; }
-      }
-      return { x, y, w: Math.max(0, ww), h: Math.max(0, hh) };
-    };
-
-    // Pseudo-element visual box (::before / ::after with bg/border/radius) —
-    // e.g. `.logo-card::before` accent stripes, CSS border-triangle arrows.
-    // Only emitted when the pseudo is absolutely positioned so we can compute
-    // its bounds from CSS. Inline pseudos are handled by text emission below.
-    const emitPseudoRect = () => {
-      for (const which of ["::before", "::after"] as const) {
-        const pcs = getComputedStyle(el, which);
-        const content = pcs.content || "";
-        // `content: none` → pseudo doesn't exist. Empty string (`content: ''`)
-        // is VALID and renders — commonly used for visual-only decorative
-        // pseudos like the nested white+blue inset rings in slide_04's current
-        // dot (`.dot.current::after/::before { content: ''; inset: 4px; … }`).
-        if (content === "none") continue;
-        const bg = rgb2hex(pcs.backgroundColor);
-        const bwT = parseFloat(pcs.borderTopWidth) || 0;
-        const bwR = parseFloat(pcs.borderRightWidth) || 0;
-        const bwB = parseFloat(pcs.borderBottomWidth) || 0;
-        const bwL = parseFloat(pcs.borderLeftWidth) || 0;
-        const borderMax = Math.max(bwT, bwR, bwB, bwL);
-        const br = parseFloat(pcs.borderTopLeftRadius) || 0;
-        if (!bg && borderMax === 0 && br === 0) continue;
-        const pb = pseudoBounds(pcs);
-        if (!pb || pb.w < 1 || pb.h < 1) continue;
-        // SWOT-card top-accent: grow thin top-stripe pseudo by 2×
-        // parent border-top when colors match (cluster 8).
-        const parentCs2 = getComputedStyle(el);
-        const parentBT = parseFloat(parentCs2.borderTopWidth) || 0;
-        const parentBTColor = rgb2hex(parentCs2.borderTopColor);
-        if (parentBT > 0 && bg && parentBTColor && bg.toLowerCase() === parentBTColor.toLowerCase()
-            && Math.abs(pb.y - bounds.y) < 1.5 && pb.w >= bounds.w * 0.5 && pb.h <= 12) {
-          pb.h = pb.h + parentBT * 2;
-        }
-        // CSS border-triangle: 0×0 box with transparent top/bottom and a
-        // colored side — skip as rect; downstream renderers can't reproduce
-        // it cleanly. (Leave for a future targeted fix.)
-        elements.push({
-          type: "rect", bounds: pb, fill: bg || null, fillAlpha: 1,
-          gradient: null, borderRadius: br,
-          cornerRadii: { tl: br, tr: br, br, bl: br },
-          borderUniform: bwT === bwR && bwR === bwB && bwB === bwL,
-          borderSides: {
-            top: { width: bwT, color: rgb2hex(pcs.borderTopColor), style: pcs.borderTopStyle },
-            right: { width: bwR, color: rgb2hex(pcs.borderRightColor), style: pcs.borderRightStyle },
-            bottom: { width: bwB, color: rgb2hex(pcs.borderBottomColor), style: pcs.borderBottomStyle },
-            left: { width: bwL, color: rgb2hex(pcs.borderLeftColor), style: pcs.borderLeftStyle },
-          },
-          borderColor: rgb2hex(pcs.borderTopColor),
-          borderWidth: borderMax,
-          borderStyle: pcs.borderTopStyle,
-          zIndex: 999, position: "absolute", boxShadow: null,
-        } as any);
-      }
-    };
-
-    const emitPseudoText = () => {
-      for (const which of ["::before", "::after"] as const) {
-        const pcs = getComputedStyle(el, which);
-        let content = pcs.content || "";
-        if (!content || content === "none" || content === "normal") continue;
-        content = content.replace(/^['"]|['"]$/g, "").trim();
-        if (!content || content === "" || content === '""') continue;
-        const fontSize = parseFloat(pcs.fontSize) || 14;
-        if (bounds.w < 4 || bounds.h < 4) continue;
-        elements.push({
-          type: "text",
-          bounds,
-          text: content,
-          style: {
-            fontFamily: pcs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
-            fontSize,
-            fontWeight: (pcs.fontWeight === "bold" || parseInt(pcs.fontWeight) >= 600) ? "bold" : "normal",
-            fontStyle: pcs.fontStyle === "italic" ? "italic" : "normal",
-            color: rgb2hex(pcs.color) || "#000000",
-            textAlign: "center",
-            lineHeight: parseFloat(pcs.lineHeight) || fontSize * 1.2,
-            textDecoration: null,
-            textTransform: "none",
-            letterSpacing: 0,
-            paddingLeft: 0,
-            paddingTop: 0,
-          },
-          runs: [{ text: content, style: null }],
-          zIndex: style.zIndex,
-          position: style.position,
-          verticallyCentered: true,
-        } as any);
-      }
-    };
-
     // Flex/grid containers
     if ((style.display === "flex" || style.display === "inline-flex" || style.display === "grid" || style.display === "inline-grid") && (el as HTMLElement).children.length > 0) {
       emitRect(el, style, bounds);
-      emitPseudoRect();
-      emitPseudoText();
+      emitPseudoRect(el, bounds);
+      emitPseudoText(el, bounds, style);
       // Mixed content: a flex container may have a text node sibling next to
       // element children (e.g. <div class="legend-item"><div class="dot"/>Revenue</div>).
       // Walk children normally, but if any direct text node has non-empty
@@ -1274,8 +1276,8 @@ interface ExtractedElement {
     }
 
     emitRect(el, style, bounds);
-    emitPseudoRect();
-    emitPseudoText();
+    emitPseudoRect(el, bounds);
+    emitPseudoText(el, bounds, style);
     // Borders are handled by emitRect's borderSides data — no separate border lines
 
     // Horizontal rules / lines
