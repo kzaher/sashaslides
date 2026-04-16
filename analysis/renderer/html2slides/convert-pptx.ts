@@ -183,6 +183,45 @@ async function extractFromHtml(htmlPath: string): Promise<{ extraction: Extracti
   return { extraction, visualPngs };
 }
 
+// Bounded slack: extending a text box by SLACK_PX in some direction must not
+// overlap a sibling element that sits to the same side with vertical overlap.
+// Returns the maximum permissible slack on each side (>=0) capped by the
+// requested SLACK_PX. Iter 8 Agent A6 logic — fixes slide_16 API-latency tables
+// where uncapped right-slack made `/api/users` text overlap the next column.
+function neighborSlackBudget(
+  b: { x: number; y: number; w: number; h: number },
+  elements: any[],
+  selfIndex: number,
+  requested: number,
+  pad: number = 2,
+): { left: number; right: number } {
+  let leftBudget = requested;
+  let rightBudget = requested;
+  const yTop = b.y;
+  const yBot = b.y + b.h;
+  for (let i = 0; i < elements.length; i++) {
+    if (i === selfIndex) continue;
+    const o = elements[i];
+    if (!o || o.type === "_skip" || !o.bounds) continue;
+    const ob = o.bounds;
+    // Vertical overlap?
+    if (ob.y + ob.h <= yTop || ob.y >= yBot) continue;
+    // Horizontal: must NOT already overlap our box horizontally.
+    if (ob.x < b.x + b.w && ob.x + ob.w > b.x) continue;
+    // Right neighbor: starts at/after our right edge
+    if (ob.x >= b.x + b.w) {
+      const gap = ob.x - (b.x + b.w) - pad;
+      if (gap < rightBudget) rightBudget = Math.max(0, gap);
+    }
+    // Left neighbor: ends at/before our left edge
+    else if (ob.x + ob.w <= b.x) {
+      const gap = b.x - (ob.x + ob.w) - pad;
+      if (gap < leftBudget) leftBudget = Math.max(0, gap);
+    }
+  }
+  return { left: leftBudget, right: rightBudget };
+}
+
 // --- Build pptx ---
 function buildPptx(
   slides: { extraction: Extraction; visualPngs: Map<number, Buffer> }[],
@@ -275,6 +314,7 @@ function buildPptx(
           const skipMergeMultiText = insideTextCount > 1;
 
           let mergedTextEl: any = null;
+          let mergedTextIndex = -1;
           for (let ti = ei + 1; ti < extraction.elements.length && !skipMergeMultiText; ti++) {
             const next = extraction.elements[ti];
             if (next.type !== "text" || !next.bounds) continue;
@@ -299,6 +339,7 @@ function buildPptx(
               }
               if (deeperFillsOver) break; // don't merge — let text render on its own
               mergedTextEl = next;
+              mergedTextIndex = ti;
               extraction.elements[ti] = { type: "_skip", bounds: nb };
               break;
             }
@@ -547,10 +588,22 @@ function buildPptx(
             // wider than Chrome, so grow the box opposite alignment to give
             // single-line text breathing room.
             const SLACK_PX = 12;
+            // Bounded slack: cap by horizontal distance to nearest sibling
+            // with vertical overlap. Iter 8 Agent A6 — prevents text columns
+            // (e.g., slide_16 API-latency table) from overlapping each other.
+            const sbudget = neighborSlackBudget(
+              { x: mb.x, y: mb.y, w: mb.w, h: mb.h },
+              extraction.elements,
+              mergedTextIndex,
+              SLACK_PX,
+            );
             let mbx = mb.x, mbw = mb.w;
-            if (declaredAlign === "left")        { mbw = mb.w + SLACK_PX; }
-            else if (declaredAlign === "right")  { mbx = mb.x - SLACK_PX; mbw = mb.w + SLACK_PX; }
-            else                                  { mbx = mb.x - SLACK_PX / 2; mbw = mb.w + SLACK_PX; }
+            if (declaredAlign === "left")        { mbw = mb.w + sbudget.right; }
+            else if (declaredAlign === "right")  { mbx = mb.x - sbudget.left; mbw = mb.w + sbudget.left; }
+            else                                  {
+              const half = Math.min(sbudget.left, sbudget.right, SLACK_PX / 2);
+              mbx = mb.x - half; mbw = mb.w + half * 2;
+            }
             const commonOpts: any = {
               x: px2in(mbx), y: px2in(mb.y), w: px2in(mbw), h: px2in(mb.h),
               align: declaredAlign,
@@ -673,9 +726,21 @@ function buildPptx(
             // pptxgenjs rotate is degrees clockwise 0–360.
             rotateDeg = ((rot % 360) + 360) % 360;
           } else {
-            if (align === "left")   { bw = b.w + SLACK_PX; }
-            else if (align === "right")  { bx = b.x - SLACK_PX; bw = b.w + SLACK_PX; }
-            else if (align === "center") { bx = b.x - SLACK_PX / 2; bw = b.w + SLACK_PX; }
+            // Bounded slack: cap by horizontal distance to nearest sibling
+            // with vertical overlap. Iter 8 Agent A6 — prevents text columns
+            // (e.g., slide_16 API-latency table) from overlapping each other.
+            const sbudget = neighborSlackBudget(
+              { x: b.x, y: b.y, w: b.w, h: b.h },
+              extraction.elements,
+              ei,
+              SLACK_PX,
+            );
+            if (align === "left")   { bw = b.w + sbudget.right; }
+            else if (align === "right")  { bx = b.x - sbudget.left; bw = b.w + sbudget.left; }
+            else if (align === "center") {
+              const half = Math.min(sbudget.left, sbudget.right, SLACK_PX / 2);
+              bx = b.x - half; bw = b.w + half * 2;
+            }
           }
 
           // Opacity: pptxgenjs text color is hex with no alpha. Approximate
