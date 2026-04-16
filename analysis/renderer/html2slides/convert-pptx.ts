@@ -1365,13 +1365,24 @@ async function main() {
   const htmlDir = resolve(args[0] || ".");
   let title = "Presentation";
   let outPath: string | null = null;
+  let noUpload = false;
+  let onlyFiles: string[] | null = null;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--title") title = args[++i];
     if (args[i] === "--out") outPath = args[++i];
+    // --no-upload: skip the Google Drive upload (and auth requirement).
+    // Use this when iterating on extraction/conversion — the sidecar pptx
+    // + rendered-regions.json are still written locally so you can parse
+    // them for measurement, but no Slides presentation is created.
+    if (args[i] === "--no-upload") noUpload = true;
+    // --only slide_NN.html[,slide_MM.html] — process only the given fixtures
+    // instead of every .html in the dir. Matches by basename.
+    if (args[i] === "--only") onlyFiles = args[++i].split(",").map(s => s.trim());
   }
 
   const htmlFiles = readdirSync(htmlDir)
     .filter(f => f.endsWith(".html"))
+    .filter(f => !onlyFiles || onlyFiles.includes(f))
     .sort()
     .map(f => join(htmlDir, f));
 
@@ -1419,6 +1430,11 @@ async function main() {
 
   // Post-process: inject <a:gradFill> into shapes tagged with name="GRAD_N"
   await injectGradients(pptxPath, (pres as any).__gradients || []);
+
+  if (noUpload) {
+    console.log("Done (no upload).");
+    return;
+  }
 
   // Step 3: Upload to Google Drive as Google Slides
   console.log("\nUploading to Google Slides...");
