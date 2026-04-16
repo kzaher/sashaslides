@@ -62,6 +62,35 @@ const FONT_MAP: Record<string, string> = {
 };
 function mapFont(font: string): string { return FONT_MAP[font] || font; }
 
+// Map per-corner radii to OOXML preset + flip flags. Centralised so the
+// outer/inner sandwich rects (rounded + partial border) and the table
+// outline pick the SAME preset — otherwise the bottom edge of a top-only
+// rounded card draws a curve from the outer rect even though the inner
+// fill is flat (slide_01 Professional pricing card).
+function cornerPresetFromRadii(cr: { tl: number; tr: number; br: number; bl: number }):
+  { preset: string; flipH: boolean; flipV: boolean } {
+  const mask =
+    (cr.tl > 2 ? 1 : 0) |
+    (cr.tr > 2 ? 2 : 0) |
+    (cr.br > 2 ? 4 : 0) |
+    (cr.bl > 2 ? 8 : 0);
+  switch (mask) {
+    case 0b0000: return { preset: "rect", flipH: false, flipV: false };
+    case 0b1111: return { preset: "roundRect", flipH: false, flipV: false };
+    case 0b0011: return { preset: "round2SameRect", flipH: false, flipV: false };  // top
+    case 0b1100: return { preset: "round2SameRect", flipH: false, flipV: true };   // bottom
+    case 0b0101: return { preset: "round2DiagRect", flipH: false, flipV: false };  // TL+BR
+    case 0b1010: return { preset: "round2DiagRect", flipH: true,  flipV: false };  // TR+BL
+    case 0b0010: return { preset: "round1Rect",     flipH: false, flipV: false };  // TR
+    case 0b0001: return { preset: "round1Rect",     flipH: true,  flipV: false };  // TL
+    case 0b0100: return { preset: "round1Rect",     flipH: false, flipV: true };   // BR
+    case 0b1000: return { preset: "round1Rect",     flipH: true,  flipV: true };   // BL
+    case 0b0110: return { preset: "roundRect",      flipH: false, flipV: false };  // right side fallback
+    case 0b1001: return { preset: "roundRect",      flipH: false, flipV: false };  // left side fallback
+    default:     return { preset: "roundRect",      flipH: false, flipV: false };
+  }
+}
+
 // --- Types ---
 interface Bounds { x: number; y: number; w: number; h: number; }
 interface ExtractedElement { type: string; bounds: Bounds; [key: string]: any; }
@@ -198,40 +227,19 @@ function buildPptx(
             && Math.abs(b.w - b.h) < b.w * 0.3;
           const anyRounded = cr.tl > 2 || cr.tr > 2 || cr.br > 2 || cr.bl > 2;
 
-          // Per-corner mask: TL=bit0, TR=bit1, BR=bit2, BL=bit3. Map to an
-          // OOXML preset + flips so asymmetric border-radius (e.g. top-only
-          // round on a card header) renders correctly rather than getting
-          // collapsed into an all-corners roundRect.
-          const mask =
-            (cr.tl > 2 ? 1 : 0) |
-            (cr.tr > 2 ? 2 : 0) |
-            (cr.br > 2 ? 4 : 0) |
-            (cr.bl > 2 ? 8 : 0);
-          let cornerPreset: string = "rect";
+          // Per-corner mask → OOXML preset + flips so asymmetric border-radius
+          // (e.g. top-only round on a card header) renders correctly rather
+          // than getting collapsed into an all-corners roundRect.
+          let cornerPreset: string;
           let cornerFlipH = false;
           let cornerFlipV = false;
           if (isCircle) {
             cornerPreset = "ellipse";
           } else if (anyRounded) {
-            switch (mask) {
-              case 0b1111: cornerPreset = "roundRect"; break;
-              // Two-corner same-side presets (default round2SameRect = top TL+TR).
-              case 0b0011: cornerPreset = "round2SameRect"; break;                           // top
-              case 0b1100: cornerPreset = "round2SameRect"; cornerFlipV = true; break;        // bottom
-              // Two-corner diagonal presets (default round2DiagRect = TL+BR).
-              case 0b0101: cornerPreset = "round2DiagRect"; break;                           // TL+BR
-              case 0b1010: cornerPreset = "round2DiagRect"; cornerFlipH = true; break;        // TR+BL
-              // Single-corner presets (default round1Rect = TR).
-              case 0b0010: cornerPreset = "round1Rect"; break;                               // TR
-              case 0b0001: cornerPreset = "round1Rect"; cornerFlipH = true; break;           // TL (flipH of TR)
-              case 0b0100: cornerPreset = "round1Rect"; cornerFlipV = true; break;           // BR
-              case 0b1000: cornerPreset = "round1Rect"; cornerFlipH = true; cornerFlipV = true; break; // BL
-              // Left/right-only: not expressible with flipH/V on round2SameRect.
-              // Fallback to all-four roundRect rather than rotating (would swap bounds).
-              case 0b0110: cornerPreset = "roundRect"; break;                                // right side
-              case 0b1001: cornerPreset = "roundRect"; break;                                // left side
-              default: cornerPreset = "roundRect"; break;
-            }
+            const cp = cornerPresetFromRadii(cr);
+            cornerPreset = cp.preset;
+            cornerFlipH = cp.flipH;
+            cornerFlipV = cp.flipV;
           } else {
             cornerPreset = "rect";
           }
@@ -419,13 +427,24 @@ function buildPptx(
               .filter(Boolean)
               .every((s: any) => s.style !== "dashed" && s.style !== "dotted");
             if (sameColor && allSolid && borderColors.length > 0) {
-              // 1. Outer = border color across the full rounded footprint.
-              slide.addShape("roundRect", {
+              // Both outer and inner sandwich rects MUST honor the same
+              // per-corner preset as the content shape — otherwise the
+              // outer's `roundRect` (all-4-corners) draws a curved bottom
+              // edge under a top-only-rounded card header (slide_01
+              // Professional pricing card).
+              const sandwichCp = cornerPresetFromRadii(cr);
+              const sandwichOuterOpts: any = {
                 x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
-                rectRadius: px2in(el.borderRadius),
                 fill: { color: hexToRgb(borderColors[0]) },
                 line: { type: "none" },
-              });
+              };
+              if (sandwichCp.preset !== "rect") {
+                sandwichOuterOpts.rectRadius = px2in(el.borderRadius);
+                if (sandwichCp.flipH) sandwichOuterOpts.flipH = true;
+                if (sandwichCp.flipV) sandwichOuterOpts.flipV = true;
+              }
+              // 1. Outer = border color across the full footprint, same corner mask.
+              slide.addShape(sandwichCp.preset, sandwichOuterOpts);
               // 2. Inner = card fill, inset by border widths on bordered sides only.
               const iTop = hasTop ? (bs.top.width || 0) : 0;
               const iBottom = hasBottom ? (bs.bottom.width || 0) : 0;
@@ -435,14 +454,28 @@ function buildPptx(
               const iy = b.y + iTop;
               const iw = Math.max(0, b.w - iLeft - iRight);
               const ih = Math.max(0, b.h - iTop - iBottom);
-              const innerR = Math.max(0, el.borderRadius - Math.max(iTop, iBottom, iLeft, iRight));
+              const innerInset = Math.max(iTop, iBottom, iLeft, iRight);
+              // Inner per-corner radii: shrink each rounded corner by the
+              // inset, leaving non-rounded corners flat.
+              const innerCr = {
+                tl: cr.tl > 2 ? Math.max(0, cr.tl - innerInset) : 0,
+                tr: cr.tr > 2 ? Math.max(0, cr.tr - innerInset) : 0,
+                br: cr.br > 2 ? Math.max(0, cr.br - innerInset) : 0,
+                bl: cr.bl > 2 ? Math.max(0, cr.bl - innerInset) : 0,
+              };
+              const innerCp = cornerPresetFromRadii(innerCr);
+              const innerR = Math.max(innerCr.tl, innerCr.tr, innerCr.br, innerCr.bl);
               const innerOpts: any = {
                 x: px2in(ix), y: px2in(iy), w: px2in(iw), h: px2in(ih),
                 fill: { color: hexToRgb(el.fill) },
                 line: { type: "none" },
               };
-              if (innerR > 0) innerOpts.rectRadius = px2in(innerR);
-              slide.addShape(innerR > 0 ? "roundRect" : "rect", innerOpts);
+              if (innerR > 0 && innerCp.preset !== "rect") {
+                innerOpts.rectRadius = px2in(innerR);
+                if (innerCp.flipH) innerOpts.flipH = true;
+                if (innerCp.flipV) innerOpts.flipV = true;
+              }
+              slide.addShape(innerR > 0 ? innerCp.preset : "rect", innerOpts);
               borderHandledRounded = true;
             }
           }
@@ -1206,11 +1239,18 @@ function buildPptx(
           // fill so it acts as a mask outline. Cells under the corners still
           // render square, but the combined visual reads as a rounded table.
           if (tableHasRadius) {
+            // Honor per-corner table radii — a table with `border-radius:
+            // 10px 10px 0 0` should outline only the top corners, not all 4.
+            const tableCp = cornerPresetFromRadii(tableCornerRadii);
             const outlineOpts: any = {
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
               fill: { type: "none" },
-              rectRadius: px2in(el.borderRadius),
             };
+            if (tableCp.preset !== "rect") {
+              outlineOpts.rectRadius = px2in(el.borderRadius);
+              if (tableCp.flipH) outlineOpts.flipH = true;
+              if (tableCp.flipV) outlineOpts.flipV = true;
+            }
             if (el.borderSides && (el.borderSides.top?.width || 0) > 0 && el.borderSides.top?.color) {
               outlineOpts.line = {
                 color: hexToRgb(el.borderSides.top.color),
@@ -1219,7 +1259,7 @@ function buildPptx(
             } else {
               outlineOpts.line = { type: "none" };
             }
-            slide.addShape("roundRect", outlineOpts);
+            slide.addShape(tableCp.preset, outlineOpts);
           }
           break;
         }
