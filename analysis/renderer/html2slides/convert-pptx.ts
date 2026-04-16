@@ -526,6 +526,33 @@ function buildPptx(
           break;
         }
 
+        case "triangle": {
+          // CSS border-triangle arrow → pptxgenjs `triangle` preset (apex-up
+          // by default). `rotate` selects which way the apex points:
+          //   0=up, 90=right, 180=down, 270=left.
+          //
+          // OOXML rotation rotates the shape about the bbox center but keeps
+          // the bbox axis-aligned and fixed in size. A 12×16 triangle rotated
+          // 90° would render inside a 12×16 slot, clipping apex/base. For 90°
+          // and 270° rotations we swap w and h around the center so the
+          // post-rotation shape fits its visual extent.
+          const rot = typeof el.rotate === "number" ? el.rotate : 0;
+          let rx = b.x, ry = b.y, rw = b.w, rh = b.h;
+          if (rot === 90 || rot === 270) {
+            const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+            rw = b.h; rh = b.w;
+            rx = cx - rw / 2; ry = cy - rh / 2;
+          }
+          const triOpts: any = {
+            x: px2in(rx), y: px2in(ry), w: px2in(rw), h: px2in(rh),
+            fill: { color: hexToRgb(el.fill || "#000000") },
+            line: { type: "none" },
+          };
+          if (rot !== 0) triOpts.rotate = rot;
+          slide.addShape("triangle", triOpts);
+          break;
+        }
+
         case "line": {
           const isVertical = b.h > b.w * 2;
           slide.addShape("line", {
