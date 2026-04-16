@@ -409,10 +409,39 @@ interface ExtractedElement {
 
   // --- TABLE EXTRACTION ---
   function extractTable(table: HTMLTableElement): ExtractedElement {
-    const bounds = getBounds(table);
+    let bounds = getBounds(table);
     const style = getStyle(table);
     const tableCs = getComputedStyle(table);
     const borderCollapse = tableCs.borderCollapse; // "collapse" | "separate"
+    // Detect a clipping wrapper ancestor — e.g. `.table-wrap { overflow:hidden;
+    // border-radius:12px }` around a <table>. CSS clips the table to the
+    // wrapper's rounded-rect; we must emulate that by (a) clipping the table's
+    // reported height to the wrapper's content box so subsequent siblings
+    // (legends, etc.) don't overlap, and (b) adopting the wrapper's corner
+    // radii so the outer corner cells render rounded.
+    let wrapperClip: { borderRadius: number; cornerRadii: any; bounds: Bounds } | null = null;
+    {
+      let anc: Element | null = table.parentElement;
+      while (anc && anc !== document.body) {
+        const acs = getComputedStyle(anc);
+        const ov = acs.overflow;
+        const clipsOverflow = ov === "hidden" || ov === "clip" || ov === "auto" || ov === "scroll";
+        const tl = parseFloat(acs.borderTopLeftRadius) || 0;
+        const tr = parseFloat(acs.borderTopRightRadius) || 0;
+        const br = parseFloat(acs.borderBottomRightRadius) || 0;
+        const bl = parseFloat(acs.borderBottomLeftRadius) || 0;
+        const maxR = Math.max(tl, tr, br, bl);
+        if (clipsOverflow && maxR > 0) {
+          wrapperClip = {
+            borderRadius: maxR,
+            cornerRadii: { tl, tr, br, bl },
+            bounds: getBounds(anc),
+          };
+          break;
+        }
+        anc = anc.parentElement;
+      }
+    }
     const rows: any[][] = [];
     const trs = table.querySelectorAll("tr");
     for (const tr of trs) {
@@ -455,12 +484,47 @@ interface ExtractedElement {
       }
       rows.push(cells);
     }
+    // Apply the clipping-wrapper adjustment: clip table height to wrapper's
+    // visible area, and adopt its corner radii (only when the table has none
+    // of its own).
+    let effectiveBorderRadius = style.borderRadius || 0;
+    let effectiveCornerRadii = style.cornerRadii;
+    if (wrapperClip) {
+      const wb = wrapperClip.bounds;
+      const clippedBottom = Math.min(bounds.y + bounds.h, wb.y + wb.h);
+      const clippedRight = Math.min(bounds.x + bounds.w, wb.x + wb.w);
+      const clippedTop = Math.max(bounds.y, wb.y);
+      const clippedLeft = Math.max(bounds.x, wb.x);
+      bounds = {
+        x: clippedLeft,
+        y: clippedTop,
+        w: Math.max(0, clippedRight - clippedLeft),
+        h: Math.max(0, clippedBottom - clippedTop),
+      };
+      // Also clip each row's/cell's bounds so per-cell rendering (fill, text)
+      // doesn't poke past the wrapper's rounded frame.
+      for (const row of rows) {
+        for (const cell of row) {
+          const cb = cell.bounds;
+          if (!cb) continue;
+          const cx = Math.max(cb.x, wb.x);
+          const cy = Math.max(cb.y, wb.y);
+          const cr = Math.min(cb.x + cb.w, wb.x + wb.w);
+          const cbot = Math.min(cb.y + cb.h, wb.y + wb.h);
+          cell.bounds = { x: cx, y: cy, w: Math.max(0, cr - cx), h: Math.max(0, cbot - cy) };
+        }
+      }
+      if (!(effectiveBorderRadius > 0)) {
+        effectiveBorderRadius = wrapperClip.borderRadius;
+        effectiveCornerRadii = wrapperClip.cornerRadii;
+      }
+    }
     return {
       type: "table", bounds, rows,
       bgColor: style.bgColor,
       borderColor: style.borderColor,
-      borderRadius: style.borderRadius,
-      cornerRadii: style.cornerRadii,
+      borderRadius: effectiveBorderRadius,
+      cornerRadii: effectiveCornerRadii,
       borderSides: style.borderSides,
       borderCollapse,
     };
