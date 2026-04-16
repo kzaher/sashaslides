@@ -1,7 +1,13 @@
 {
   "scripts": {
     "sudo_claude": "claude --dangerously-skip-permissions",
-    "sudo_claude_fork": "claude --dangerously-skip-permissions --fork-session --resume"
+    "sudo_claude_fork": "claude --dangerously-skip-permissions --fork-session --resume",
+    "regen:basics": "cd analysis/renderer/html2slides && bash regen-basics.sh",
+    "regen:complex": "cd analysis/renderer/html2slides && bash regen-complex.sh",
+    "regen": "npm run regen:basics && npm run regen:complex",
+    "rate:basics": "lsof -ti:3456 | xargs -r kill; npx tsx analysis/renderer/html2slides/rating-server.ts /tmp/sxs --port 3456",
+    "rate:complex": "lsof -ti:3457 | xargs -r kill; npx tsx analysis/renderer/html2slides/rating-server.ts /tmp/sxs-complex --port 3457",
+    "rate": "lsof -ti:3456,3457 | xargs -r kill; npm run rate:basics & npm run rate:complex"
   },
   "dependencies": {
     "chrome-remote-interface": "^0.34.0",

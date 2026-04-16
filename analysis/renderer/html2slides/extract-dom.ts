@@ -1435,21 +1435,25 @@ interface ExtractedElement {
       // (no top/left/right borders) and no background, the border is purely
       // decorative — convert it to textDecoration:'underline' so the converter
       // emits a native underline instead of a separate line element.
+      //
+      // IMPORTANT: this height reduction must ONLY fire for the inline-
+      // underline pattern. For full-border boxes like a pill button
+      // (`border: 1px solid X; padding: 10px 16px`), shrinking the text
+      // box by (bBot + padBot) makes the text container shorter than the
+      // rect, so even with `valign: middle` the text centers at (y + h/2)
+      // of the shrunken box — visibly above the pill's true center
+      // (slide_11 bug: 11 px upward offset).
       const bBot = style.borderBottom || 0;
       const padBot = parseFloat(cs.paddingBottom) || 0;
-      const borderAdjust = bBot > 0 ? (bBot + padBot) : 0;
+      const disp = style.display || "";
+      const isInlineTag = disp === "inline" || disp === "inline-block" || tag === "SPAN" || tag === "A";
+      const inlineBorderUnderline =
+        bBot > 0 && isInlineTag &&
+        !style.borderTop && !style.borderLeft && !style.borderRight && !style.bgColor;
+      const borderAdjust = inlineBorderUnderline ? (bBot + padBot) : 0;
       let textBounds = bounds;
-      let inlineBorderUnderline = false;
       if (borderAdjust > 0) {
         textBounds = { ...bounds, h: Math.max(bounds.h - borderAdjust, style.fontSize || 10) };
-        // Promote to underline only when border-bottom is the sole border and
-        // the element is inline/inline-block (span, a, etc.)
-        if (!style.borderTop && !style.borderLeft && !style.borderRight && !style.bgColor) {
-          const disp = style.display || "";
-          if (disp === "inline" || disp === "inline-block" || tag === "SPAN" || tag === "A") {
-            inlineBorderUnderline = true;
-          }
-        }
       }
       const baseStyle = {
         fontFamily: style.fontFamily,
@@ -1468,6 +1472,15 @@ interface ExtractedElement {
       };
       const runs = getTextRuns(el, style);
       const hasStyledRuns = runs.some(r => r.style !== null);
+      // Symmetric vertical padding (e.g. `padding: 10px 16px` on a pill
+      // button) makes Chrome render the single-line text at the visual
+      // vertical center of the border box, because the text line box is
+      // exactly `fontSize * lineHeight` tall and floats on the content area.
+      // pptxgenjs defaults to `valign: "top"` for text; without this hint the
+      // letters snap to the top of the box and look too high inside the
+      // pill. Mirror Chrome's behavior whenever top/bottom padding agree.
+      const verticallyCentered =
+        padTop > 2 && Math.abs(padTop - padBot) < 3;
       // Use a regex that excludes \u00a0 so leading/trailing nbsp (used as
       // visual indentation in code blocks like slide_15) survive. JS
       // String.trim() strips Unicode whitespace including nbsp.
@@ -1478,6 +1491,7 @@ interface ExtractedElement {
         style: baseStyle,
         zIndex: style.zIndex,
         position: style.position,
+        verticallyCentered,
         // Rotation info: non-zero `rotate` means CSS `transform: rotate(...)`
         // is on this element. getBoundingClientRect returns the post-transform
         // axis-aligned bbox; `naturalWidth/Height` is the pre-transform layout

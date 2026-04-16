@@ -398,10 +398,14 @@ function neighborSlackBudget(
 }
 
 // --- Build pptx ---
+// Per-slide list of rasterized regions we emitted as addImage — surfaced to
+// the SxS rating UI so reviewers can see which parts of the output aren't
+// native Slides primitives. Coordinates are normalized to 0..1 of slide size.
+type RenderedRegion = { x: number; y: number; w: number; h: number; kind: string };
 function buildPptx(
   slides: { extraction: Extraction; visualPngs: Map<number, Buffer> }[],
   title: string,
-): any {
+): { pres: any; renderedRegions: RenderedRegion[][] } {
   // ESM/CJS interop for pptxgenjs
   const pptxgenModule = require("pptxgenjs");
   const PptxGenJS = (pptxgenModule as any).default || pptxgenModule;
@@ -415,9 +419,13 @@ function buildPptx(
   pres.defineLayout({ name: "CUSTOM", width: SLIDE_W_IN, height: SLIDE_H_IN });
   pres.layout = "CUSTOM";
 
+  const renderedRegions: RenderedRegion[][] = [];
+
   for (let si = 0; si < slides.length; si++) {
     const { extraction, visualPngs } = slides[si];
     const slide = pres.addSlide();
+    const slideRegions: RenderedRegion[] = [];
+    renderedRegions.push(slideRegions);
 
     for (let ei = 0; ei < extraction.elements.length; ei++) {
       const el = extraction.elements[ei];
@@ -1336,6 +1344,11 @@ function buildPptx(
               data: `image/png;base64,${buf.toString("base64")}`,
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
             });
+            slideRegions.push({
+              x: b.x / SLIDE_W_PX, y: b.y / SLIDE_H_PX,
+              w: b.w / SLIDE_W_PX, h: b.h / SLIDE_H_PX,
+              kind: (el as any)._wasEmojiText ? "emoji" : el.type,
+            });
           }
           break;
         }
@@ -1343,7 +1356,7 @@ function buildPptx(
     }
   }
 
-  return pres;
+  return { pres, renderedRegions };
 }
 
 // --- Main ---
@@ -1384,11 +1397,25 @@ async function main() {
 
   // Step 2: Build pptx
   console.log("\nBuilding .pptx...");
-  const pres = buildPptx(slideData, title);
+  const { pres, renderedRegions } = buildPptx(slideData, title);
 
   const pptxPath = outPath || `/tmp/${title.replace(/[^a-zA-Z0-9]/g, "_")}.pptx`;
   await pres.writeFile({ fileName: pptxPath });
   console.log(`  Saved: ${pptxPath}`);
+
+  // Sidecar: per-slide rasterized regions so the SxS rating UI can warn the
+  // reviewer that the output isn't 100% native primitives and optionally
+  // highlight those regions. Keyed by slide_NN to match shot-originals.ts.
+  const regionsBySlide: Record<string, RenderedRegion[]> = {};
+  let totalRegions = 0;
+  for (let i = 0; i < renderedRegions.length; i++) {
+    const key = `slide_${String(i + 1).padStart(2, "0")}`;
+    regionsBySlide[key] = renderedRegions[i];
+    totalRegions += renderedRegions[i].length;
+  }
+  const regionsPath = join(dirname(pptxPath), "rendered-regions.json");
+  writeFileSync(regionsPath, JSON.stringify(regionsBySlide, null, 2));
+  console.log(`  Rendered regions: ${totalRegions} total across ${renderedRegions.length} slides → ${regionsPath}`);
 
   // Post-process: inject <a:gradFill> into shapes tagged with name="GRAD_N"
   await injectGradients(pptxPath, (pres as any).__gradients || []);
