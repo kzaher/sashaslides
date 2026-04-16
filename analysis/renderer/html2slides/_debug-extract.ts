@@ -5,7 +5,10 @@ import { resolve } from "path";
 
 const htmlPath = resolve(process.argv[2]);
 const outJson = process.argv[3] || "/tmp/extract.json";
-const EXTRACT_TS = readFileSync("/workspaces/sashaslides/analysis/renderer/html2slides/extract-dom.ts", "utf-8");
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+const __DIR__ = dirname(fileURLToPath(import.meta.url));
+const EXTRACT_TS = readFileSync(resolve(__DIR__, "extract-dom.ts"), "utf-8");
 const EXTRACT_JS = transformSync(EXTRACT_TS, { loader: "ts", target: "es2020" }).code;
 
 (async () => {

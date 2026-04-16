@@ -8,7 +8,7 @@
 # Goldens can only be written by the user via rating-server.ts — same rule.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-OUT=/tmp/sxs-complex
+OUT=/tmp/sxs-05
 BACKUP="$HERE/e2e/.ratings-complex.json"
 mkdir -p "$OUT/originals" "$OUT/slides" "$OUT/diffs"
 
