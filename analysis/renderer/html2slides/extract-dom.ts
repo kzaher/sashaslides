@@ -817,7 +817,12 @@ interface ExtractedElement {
           // text doesn't concatenate on the same line.
           const isBlock = cs.display === "block" || cs.display === "flex" ||
             cs.display === "grid" || cs.display === "table";
-          if (isBlock && runs.length > 0) {
+          // Don't emit \n for inline tags that only appear "block" because
+          // they are flex items inside a <li> (flex children get computed
+          // display:block).  The list extractor already handles line breaks
+          // between list items.
+          const inListItem = !!(node as Element).closest?.("li");
+          if (isBlock && !inListItem && runs.length > 0) {
             runs.push({ text: "\n", style: null });
           }
           // Inline backgrounds on span runs (`.code { background: #f0f4f8 }`,
