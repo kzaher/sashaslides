@@ -752,6 +752,68 @@ interface ExtractedElement {
     return { angle, stops };
   }
 
+  /**
+   * Detect CSS border-triangle: `width:0; height:0` (or near-zero) element
+   * whose painted area comes entirely from four asymmetric borders — one
+   * colored side + opposite-axis transparent sides — producing a triangle.
+   *
+   * Example (points right):
+   *   border-left: 12px solid #cbd5e1;
+   *   border-top: 8px solid transparent;
+   *   border-bottom: 8px solid transparent;
+   *   width: 0; height: 0;
+   *
+   * Returns { fill, rotate } when the element is a border-triangle, else null.
+   * `rotate` is degrees clockwise to apply to pptxgenjs `triangle` preset
+   * (apex-up by default): 0=up, 90=right, 180=down, 270=left.
+   */
+  function detectBorderTriangle(el: Element, s: ElementStyle, b: Bounds): { fill: string; rotate: number } | null {
+    // A CSS border-triangle's bounding box equals (borderLeft+borderRight) ×
+    // (borderTop+borderBottom) — there's no content inside. Checking the
+    // bounds against the border sums works regardless of `box-sizing`
+    // (`getComputedStyle(...).width` returns border-box width when
+    // `box-sizing: border-box` is inherited, which is misleading here).
+    const bT = s.borderTop || 0, bR = (s as any).borderRight || 0, bB = s.borderBottom || 0, bL = (s as any).borderLeft || 0;
+    const totalW = bL + bR, totalH = bT + bB;
+    // Bounds must match the border sums within 1px — i.e. content area is 0.
+    if (Math.abs(b.w - totalW) > 1.5 || Math.abs(b.h - totalH) > 1.5) return null;
+    // Avoid matching zero-sized boxes with no borders.
+    if (totalW < 2 || totalH < 2) return null;
+    const cT = s.borderTopColor, cR = (s as any).borderRightColor, cB = s.borderBottomColor, cL = (s as any).borderLeftColor;
+    // A side is "colored" if width > 0 and color is not null/transparent.
+    const sides = [
+      { dir: "top",    w: bT, c: cT, rotate: 180 }, // color on top → apex points down
+      { dir: "right",  w: bR, c: cR, rotate: 270 }, // color on right → apex points left
+      { dir: "bottom", w: bB, c: cB, rotate: 0   }, // color on bottom → apex points up
+      { dir: "left",   w: bL, c: cL, rotate: 90  }, // color on left → apex points right
+    ];
+    const colored = sides.filter(x => x.w > 0 && x.c);
+    if (colored.length !== 1) return null;
+    const only = colored[0];
+    // The two perpendicular sides must both exist with non-zero width (they
+    // define the triangle base) and be transparent (color null).
+    let perp1: { w: number; c: string | null }, perp2: { w: number; c: string | null };
+    if (only.dir === "left" || only.dir === "right") {
+      perp1 = { w: bT, c: cT }; perp2 = { w: bB, c: cB };
+    } else {
+      perp1 = { w: bL, c: cL }; perp2 = { w: bR, c: cR };
+    }
+    if (perp1.w <= 0 || perp2.w <= 0) return null;
+    if (perp1.c || perp2.c) return null; // must be transparent
+    return { fill: only.c!, rotate: only.rotate };
+  }
+
+  function emitTriangle(b: Bounds, fill: string, rotate: number, s: ElementStyle): void {
+    elements.push({
+      type: "triangle",
+      bounds: b,
+      fill,
+      rotate,
+      zIndex: s.zIndex,
+      position: s.position,
+    } as any);
+  }
+
   function emitRect(el: Element, s: ElementStyle, b: Bounds): void {
     // No size filter: if CSS paints a box, we extract it. Filtering by dimension
     // previously dropped 2px connector/divider divs. Zero-area elements are
@@ -800,6 +862,15 @@ interface ExtractedElement {
       zIndex: s.zIndex,
       position: s.position,
       boxShadow: s.boxShadow,
+      // Rotation: CSS transform: rotate(Xdeg). `bounds` is the post-transform
+      // axis-aligned bbox; naturalWidth/Height is the pre-transform layout box.
+      // Converter uses these to place the rotated rect at bbox center and
+      // apply pptxgenjs rotate. Without this, a rotated thin bar (e.g. a 2px
+      // line at -8°) extracts as a fat axis-aligned rect and paints as an
+      // ugly filled block instead of a thin slanted line.
+      rotate: s.rotate || 0,
+      naturalWidth: s.naturalWidth,
+      naturalHeight: s.naturalHeight,
     });
   }
 
@@ -1118,6 +1189,16 @@ interface ExtractedElement {
     }
 
     const directText = getDirectText(el);
+
+    // CSS border-triangle arrows: width:0; height:0 with one colored border
+    // side + transparent perpendicular sides. Emit as a preset triangle shape
+    // instead of a rect (which would render as a thin colored strip).
+    const tri = detectBorderTriangle(el, style, bounds);
+    if (tri) {
+      seen.add(el);
+      emitTriangle(bounds, tri.fill, tri.rotate, style);
+      return;
+    }
 
     emitRect(el, style, bounds);
     emitPseudoRect();

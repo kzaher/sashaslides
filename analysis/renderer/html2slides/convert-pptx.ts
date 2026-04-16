@@ -98,6 +98,46 @@ async function extractFromHtml(htmlPath: string): Promise<{ extraction: Extracti
   const { result } = await Runtime.evaluate({ expression: EXTRACT_JS, returnByValue: true });
   const extraction: Extraction = JSON.parse(result.value);
 
+  // Emoji detection: Slides lacks an emoji font, so glyphs like ⚡🔒📊🔍🧐💳
+  // render as tofu boxes. For text elements whose content is primarily emoji
+  // codepoints, rasterize the element region from Chrome and emit as an image.
+  const isEmojiCodepoint = (cp: number): boolean => {
+    // Misc symbols & dingbats
+    if (cp >= 0x2600 && cp <= 0x27BF) return true;
+    // Emoji presentation selector / ZWJ / variation selector — accompany emoji
+    if (cp === 0x200D || cp === 0xFE0F) return true;
+    // Regional indicators (flags)
+    if (cp >= 0x1F1E6 && cp <= 0x1F1FF) return true;
+    // Main emoji blocks
+    if (cp >= 0x1F300 && cp <= 0x1FAFF) return true;
+    // Supplemental symbols & pictographs / transport / enclosed
+    if (cp >= 0x2300 && cp <= 0x23FF) return true; // misc technical (⚙ etc.)
+    if (cp >= 0x25A0 && cp <= 0x25FF) return true; // geometric (▲ ■ etc. — usually fine but keep)
+    return false;
+  };
+  const looksLikeEmojiText = (s: string): boolean => {
+    if (!s) return false;
+    // Iterate real codepoints (surrogate-pair safe).
+    let emoji = 0, total = 0;
+    for (const ch of s) {
+      const cp = ch.codePointAt(0)!;
+      if (cp <= 0x20) continue; // whitespace
+      total++;
+      if (isEmojiCodepoint(cp)) emoji++;
+    }
+    if (total === 0) return false;
+    // Primarily emoji (allow a stray ascii char in ZWJ sequences).
+    return emoji / total >= 0.5 && total <= 4;
+  };
+  // Mark emoji text elements for rasterization — retype to "image" so the
+  // existing visualPngs pipeline handles capture + addImage.
+  for (const el of extraction.elements) {
+    if (el.type !== "text") continue;
+    if (!looksLikeEmojiText(el.text || "")) continue;
+    el.type = "image";
+    el._wasEmojiText = true;
+  }
+
   // Screenshot visual elements (svg/canvas/images)
   const visualPngs = new Map<number, Buffer>();
   for (let i = 0; i < extraction.elements.length; i++) {
@@ -283,6 +323,24 @@ function buildPptx(
               opacity: el.boxShadow.alpha ?? 0.25,
               angle: Math.round(angle),
             };
+          }
+
+          // Rotation: a CSS `transform: rotate(Xdeg)` element's bbox is the
+          // post-transform axis-aligned box. Drawing that box as-is turns a
+          // thin slanted line (e.g. `.profit-line { height:2px; rotate(-8deg) }`)
+          // into a fat filled rectangle. Re-center the shape on the bbox center
+          // at its natural (pre-transform) size and apply pptxgenjs rotate.
+          const rectRot = typeof (el as any).rotate === "number" ? (el as any).rotate : 0;
+          if (Math.abs(rectRot) > 0.5 && (el as any).naturalWidth && (el as any).naturalHeight) {
+            const cx = b.x + b.w / 2;
+            const cy = b.y + b.h / 2;
+            const nw = (el as any).naturalWidth;
+            const nh = (el as any).naturalHeight;
+            opts.x = px2in(cx - nw / 2);
+            opts.y = px2in(cy - nh / 2);
+            opts.w = px2in(nw);
+            opts.h = px2in(nh);
+            opts.rotate = ((rectRot % 360) + 360) % 360;
           }
 
           slide.addShape(shapeName, opts);
