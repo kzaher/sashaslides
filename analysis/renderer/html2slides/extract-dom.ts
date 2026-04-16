@@ -298,15 +298,63 @@ interface ExtractedElement {
       fontWeight: cs.fontWeight === "bold" || parseInt(cs.fontWeight) >= 600 ? "bold" : "normal",
       fontStyle: cs.fontStyle === "italic" ? "italic" : "normal",
       color: (() => {
-        // text-clip gradient fallback: when color is transparent because of
-        // `-webkit-text-fill-color: transparent`, use the first gradient stop
-        // from `background-image` so the glyphs remain visible instead of
-        // disappearing along with the suppressed rect fill.
+        // text-clip gradient fallback: when the effective glyph fill is
+        // transparent — either via `color: transparent` OR via the
+        // `-webkit-text-fill-color: transparent` override (which `cs.color`
+        // does NOT reflect) — pick a gradient stop from `background-image`
+        // so glyphs stay visible. If the bg behind the text is dark and the
+        // first stop is also dark, walk the stops for one with usable
+        // contrast; if all stops are dark/light-clashing, invert luminance.
         const rawColor = rgb2hex(cs.color);
-        if (rgbAlpha(cs.color) < 0.1) {
+        const fillCss = (cs as any).webkitTextFillColor || cs.getPropertyValue("-webkit-text-fill-color") || "";
+        const fillTransparent = fillCss && rgbAlpha(fillCss) < 0.1;
+        const colorTransparent = rgbAlpha(cs.color) < 0.1;
+        if (fillTransparent || colorTransparent) {
           const bgImg = cs.backgroundImage || "";
-          const m = bgImg.match(/(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|rgba\([^)]+\))/);
-          if (m) return rgb2hex(m[1]) || rawColor;
+          const stops = Array.from(bgImg.matchAll(/(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|rgba\([^)]+\))/g))
+            .map(m => rgb2hex(m[1])).filter(Boolean) as string[];
+          if (stops.length > 0) {
+            // Walk up the DOM for the first ancestor with a non-transparent
+            // background colour — that's what the glyphs visually sit on.
+            const lum = (hex: string) => {
+              const h = hex.replace("#", "");
+              const r = parseInt(h.slice(0, 2), 16) / 255;
+              const g = parseInt(h.slice(2, 4), 16) / 255;
+              const b = parseInt(h.slice(4, 6), 16) / 255;
+              return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            };
+            let bgHex = "#ffffff";
+            let p: Element | null = el;
+            while (p) {
+              const pcs = getComputedStyle(p as Element);
+              if (rgbAlpha(pcs.backgroundColor) > 0.5) { bgHex = rgb2hex(pcs.backgroundColor); break; }
+              const pbg = pcs.backgroundImage || "";
+              const pm = pbg.match(/(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|rgba\([^)]+\))/);
+              if (pm) { bgHex = rgb2hex(pm[1]) || bgHex; break; }
+              p = p.parentElement;
+            }
+            const bgL = lum(bgHex);
+            // Pick the stop with the highest luminance contrast vs bg.
+            let best = stops[0];
+            let bestContrast = Math.abs(lum(stops[0]) - bgL);
+            for (const s of stops.slice(1)) {
+              const c = Math.abs(lum(s) - bgL);
+              if (c > bestContrast) { best = s; bestContrast = c; }
+            }
+            // If even the best stop is too close to bg (delta < 0.25),
+            // brighten or darken it to guarantee visibility.
+            if (bestContrast < 0.25) {
+              const h = best.replace("#", "");
+              let r = parseInt(h.slice(0, 2), 16);
+              let g = parseInt(h.slice(2, 4), 16);
+              let b = parseInt(h.slice(4, 6), 16);
+              const target = bgL < 0.5 ? 1 : 0; // light bg -> darken, dark bg -> brighten
+              const blend = (v: number) => Math.round(v * 0.4 + target * 255 * 0.6);
+              r = blend(r); g = blend(g); b = blend(b);
+              best = "#" + [r, g, b].map(v => v.toString(16).padStart(2, "0")).join("");
+            }
+            return best;
+          }
         }
         return rawColor;
       })(),
