@@ -62,6 +62,157 @@ const FONT_MAP: Record<string, string> = {
 };
 function mapFont(font: string): string { return FONT_MAP[font] || font; }
 
+// Approximate CSS opacity by blending foreground with white (the dominant
+// slide background) — pptxgenjs text color is hex with no alpha. Good enough
+// for decorative watermark-style text like the oversized quote glyph in
+// slide_06. Module-scope so both the standalone text emitter and any future
+// run mapper can reuse it.
+function blendOpacity(hexColor: string, op: number): string {
+  const m = hexColor.replace("#", "").match(/.{2}/g);
+  if (!m || m.length < 3) return hexColor;
+  const [r, g, bl] = m.map(x => parseInt(x, 16));
+  const br = Math.round(r * op + 255 * (1 - op));
+  const bg = Math.round(g * op + 255 * (1 - op));
+  const bb = Math.round(bl * op + 255 * (1 - op));
+  return "#" + [br, bg, bb].map(v => v.toString(16).padStart(2, "0")).join("");
+}
+
+// Slack constant: Slides measures fonts a hair wider than Chrome, so a text
+// box sized to the exact DOM bound wraps a single line character-by-character.
+// Every text-emit path inflates the box by SLACK_PX in the direction opposite
+// alignment (or symmetrically for centered). Iter 8 Agent A6 introduced the
+// neighborSlackBudget cap to prevent overflow into adjacent text columns.
+const SLACK_PX = 12;
+
+// Map a single inline run to a pptxgenjs text-run options object. Honors the
+// standard cascade rs.X || parent.X plus highlight (CSS span background),
+// subscript/superscript, underline, strike, and uppercase transform.
+// `colorTransform` lets the caller apply blendOpacity (standalone text path)
+// or pass-through (merged-into-rect path).
+function mapRunOptions(
+  run: any,
+  parentStyle: any,
+  uppercase: boolean,
+  defaults: { color: string; fontSize: number },
+  colorTransform: (hex: string) => string = (h) => h,
+): { text: string; options: any } {
+  const rs = run.style || {};
+  const ps = parentStyle || {};
+  const opts: any = {
+    fontFace: mapFont(rs.fontFamily || ps.fontFamily || "Arial"),
+    fontSize: (rs.fontSize || ps.fontSize || defaults.fontSize) * PX2PT,
+    color: hexToRgb(colorTransform(rs.color || ps.color || defaults.color)),
+    bold: rs.fontWeight === "bold" || (!rs.fontWeight && ps.fontWeight === "bold"),
+    italic: rs.fontStyle === "italic" || (!rs.fontStyle && ps.fontStyle === "italic"),
+    underline: { style: (rs.textDecoration === "underline" || (!rs.textDecoration && ps.textDecoration === "underline")) ? "sng" : "none" },
+    strike: (rs.textDecoration === "line-through" || (!rs.textDecoration && ps.textDecoration === "line-through")) ? "sngStrike" : undefined,
+  };
+  if (rs.bgColor) opts.highlight = hexToRgb(rs.bgColor);
+  if (rs.verticalAlign === "sub") opts.subscript = true;
+  else if (rs.verticalAlign === "super") opts.superscript = true;
+  return { text: uppercase ? run.text.toUpperCase() : run.text, options: opts };
+}
+
+// Apply slack to a text bound: inflate opposite to alignment so single-line
+// text doesn't wrap. Caller supplies the per-side budget from
+// neighborSlackBudget so we don't overflow into adjacent columns.
+function applySlack(
+  b: { x: number; y: number; w: number; h: number },
+  align: "left" | "center" | "right",
+  budget: { left: number; right: number },
+): { x: number; y: number; w: number; h: number } {
+  if (align === "left")  return { x: b.x, y: b.y, w: b.w + budget.right, h: b.h };
+  if (align === "right") return { x: b.x - budget.left, y: b.y, w: b.w + budget.left, h: b.h };
+  const half = Math.min(budget.left, budget.right, SLACK_PX / 2);
+  return { x: b.x - half, y: b.y, w: b.w + half * 2, h: b.h };
+}
+
+// Unified text emitter: handles slack budgeting, rotation, valign, and per-run
+// mapping (with highlight/sub/super). Used by both the standalone "text"
+// element case and the rect-merged-text path (which shares all the same
+// styling concerns despite being lexically different sites).
+//
+// `opts.valign`: "top" | "middle" — caller picks (merged-into-rect always
+// centers vertically; standalone respects el.verticallyCentered).
+// `opts.applyOpacityBlend`: when true, fold style.opacity into text colors
+// (standalone path only — merged-rect path historically didn't do this).
+// `opts.selfIndex`: index in `elements` for neighborSlackBudget self-skip.
+function emitStyledText(
+  slide: any,
+  el: any,
+  bounds: { x: number; y: number; w: number; h: number },
+  elements: any[],
+  selfIndex: number,
+  valign: "top" | "middle",
+  applyOpacityBlend: boolean,
+  defaults: { color: string; fontSize: number },
+): void {
+  const s = el.style || {};
+  const xfm = s.textTransform === "uppercase";
+  const align: "left" | "center" | "right" =
+    s.textAlign === "center" ? "center" :
+    s.textAlign === "right" || s.textAlign === "end" ? "right" : "left";
+
+  // Rotation: a CSS `transform: rotate(Xdeg)` element's bbox is the
+  // post-transform axis-aligned box. Drawing that box as-is would squeeze
+  // rotated text (e.g. -90° y-axis title) into a narrow strip and wrap it
+  // letter-by-letter. Re-center on natural (pre-transform) dimensions and
+  // let pptxgenjs rotate.
+  const rot = typeof el.rotate === "number" ? el.rotate : 0;
+  let rotateDeg = 0;
+  let bx = bounds.x, by = bounds.y, bw = bounds.w, bh = bounds.h;
+  if (Math.abs(rot) > 0.5 && el.naturalWidth && el.naturalHeight) {
+    // Symmetric slack on the natural box so the last glyph survives Slides'
+    // wider measurement after rotation.
+    const natW = el.naturalWidth + SLACK_PX;
+    const natH = el.naturalHeight;
+    const cx = bounds.x + bounds.w / 2;
+    const cy = bounds.y + bounds.h / 2;
+    bx = cx - natW / 2; by = cy - natH / 2;
+    bw = natW; bh = natH;
+    rotateDeg = ((rot % 360) + 360) % 360;
+  } else {
+    const budget = neighborSlackBudget({ x: bx, y: by, w: bw, h: bh }, elements, selfIndex, SLACK_PX);
+    const slacked = applySlack({ x: bx, y: by, w: bw, h: bh }, align, budget);
+    bx = slacked.x; by = slacked.y; bw = slacked.w; bh = slacked.h;
+  }
+
+  const colorTransform = applyOpacityBlend && typeof s.opacity === "number" && s.opacity < 1
+    ? (hex: string) => blendOpacity(hex, s.opacity)
+    : (hex: string) => hex;
+
+  const commonOpts: any = {
+    x: px2in(bx), y: px2in(by), w: px2in(bw), h: px2in(bh),
+    valign,
+    align,
+    fill: { type: "none" },
+    line: { type: "none" },
+    margin: 0,
+  };
+  if (s.lineHeight && s.fontSize) commonOpts.lineSpacingMultiple = s.lineHeight / s.fontSize;
+  if (rotateDeg) commonOpts.rotate = rotateDeg;
+
+  if (el.runs && el.runs.length > 0) {
+    const textRuns = el.runs
+      .filter((r: any) => r.text.length > 0)
+      .map((run: any) => mapRunOptions(run, s, xfm, defaults, colorTransform));
+    slide.addText(textRuns, commonOpts);
+  } else {
+    let text = el.text || "";
+    if (xfm) text = text.toUpperCase();
+    slide.addText(text, {
+      ...commonOpts,
+      fontSize: (s.fontSize || defaults.fontSize) * PX2PT,
+      fontFace: mapFont(s.fontFamily || "Arial"),
+      color: hexToRgb(colorTransform(s.color || defaults.color)),
+      bold: s.fontWeight === "bold",
+      italic: s.fontStyle === "italic",
+      underline: s.textDecoration === "underline" ? { style: "sng" } : undefined,
+      strike: s.textDecoration === "line-through" ? "sngStrike" : undefined,
+    });
+  }
+}
+
 // Map per-corner radii to OOXML preset + flip flags. Centralised so the
 // outer/inner sandwich rects (rounded + partial border) and the table
 // outline pick the SAME preset — otherwise the bottom edge of a top-only
@@ -188,6 +339,18 @@ async function extractFromHtml(htmlPath: string): Promise<{ extraction: Extracti
 // Returns the maximum permissible slack on each side (>=0) capped by the
 // requested SLACK_PX. Iter 8 Agent A6 logic — fixes slide_16 API-latency tables
 // where uncapped right-slack made `/api/users` text overlap the next column.
+//
+// Why a budget at all: Slides measures glyphs ~1–3% wider than Chrome's
+// layout, so a textbox sized to the exact DOM bound wraps the last word onto
+// a phantom second line. Inflating the box by SLACK_PX (currently 12) on the
+// "free" side absorbs that drift. But unbounded slack lets a left-aligned
+// label punch into the sibling column to its right (table cells, tag rows,
+// stat-card pairs). The vertical-overlap test picks only siblings that share
+// a Y range, the horizontal-disjoint test rejects siblings that already
+// overlap horizontally (they're presumably parents/backgrounds), and the
+// remaining gap caps the slack — leaving non-conflicting text to enjoy the
+// full SLACK_PX padding. `pad=2` is a tiny extra buffer so adjacent boxes
+// don't touch even at integer-pixel grids.
 function neighborSlackBudget(
   b: { x: number; y: number; w: number; h: number },
   elements: any[],
@@ -559,94 +722,26 @@ function buildPptx(
           // Preserve per-run styling (font-size, color, weight) when the merged
           // text has styled inline children — e.g. `$19<span>/mo</span>` must
           // keep /mo at its smaller size after being absorbed into a card-header.
+          //
+          // Two-bug fix (slide_24 — deep-nest innermost text):
+          //   1. Alignment — hardcoding `align: "center"` forced every merged
+          //      text to center. `.innermost` inherits `text-align: start`
+          //      (left) and must stay left when absorbed into the parent rect.
+          //   2. Bounds — using the rect's `b` (level-4 at 837×164) makes the
+          //      text box wider than the source innermost div (769×96), so
+          //      wrap points shift. Fall back to `mergedTextEl.bounds` so
+          //      Chrome's wrap survives the merge; valign:"middle" still
+          //      centers vertically within the rect because the DOM y/h is
+          //      the flex-centered position Chrome already computed.
           if (mergedTextEl) {
-            const ms = mergedTextEl.style || {};
-            const xfm = ms.textTransform === "uppercase";
-            // Respect the merged text's own alignment and bounds.
-            //
-            // Two-bug fix (slide_24 — deep-nest innermost text):
-            //   1. Alignment — hardcoding `align: "center"` forced every
-            //      merged text to center. `.innermost` inherits the default
-            //      `text-align: start` (left) and must stay left when absorbed
-            //      into the parent rect. Pills/cards that want centered text
-            //      either set `text-align: center` explicitly or trip the
-            //      padding-based auto-center in extract-dom.ts — both already
-            //      tag textAlign on the text element, so respecting
-            //      ms.textAlign handles all cases.
-            //   2. Bounds — using the rect's `b` (level-4 at 837×164) makes
-            //      the text box wider than the source innermost div (769×96).
-            //      Wrap points shift and left/right-aligned glyphs drift
-            //      outward. Fall back to `mergedTextEl.bounds` so Chrome's
-            //      wrap survives the merge; valign:middle still centers
-            //      vertically within the rect because the DOM y/h is the
-            //      flex-centered position Chrome already computed.
             const mb = mergedTextEl.bounds || b;
-            const declaredAlign =
-              ms.textAlign === "center" ? "center" :
-              ms.textAlign === "right" || ms.textAlign === "end" ? "right" : "left";
-            // Slack mirrors the standalone text path — Slides measures a hair
-            // wider than Chrome, so grow the box opposite alignment to give
-            // single-line text breathing room.
-            const SLACK_PX = 12;
-            // Bounded slack: cap by horizontal distance to nearest sibling
-            // with vertical overlap. Iter 8 Agent A6 — prevents text columns
-            // (e.g., slide_16 API-latency table) from overlapping each other.
-            const sbudget = neighborSlackBudget(
-              { x: mb.x, y: mb.y, w: mb.w, h: mb.h },
-              extraction.elements,
-              mergedTextIndex,
-              SLACK_PX,
+            emitStyledText(
+              slide, mergedTextEl, mb,
+              extraction.elements, mergedTextIndex,
+              "middle",
+              false, // merged-rect path historically didn't fold opacity into color
+              { color: "#333333", fontSize: 14 },
             );
-            let mbx = mb.x, mbw = mb.w;
-            if (declaredAlign === "left")        { mbw = mb.w + sbudget.right; }
-            else if (declaredAlign === "right")  { mbx = mb.x - sbudget.left; mbw = mb.w + sbudget.left; }
-            else                                  {
-              const half = Math.min(sbudget.left, sbudget.right, SLACK_PX / 2);
-              mbx = mb.x - half; mbw = mb.w + half * 2;
-            }
-            const commonOpts: any = {
-              x: px2in(mbx), y: px2in(mb.y), w: px2in(mbw), h: px2in(mb.h),
-              align: declaredAlign,
-              valign: "middle",
-              fill: { type: "none" },
-              line: { type: "none" },
-              margin: 0,
-            };
-            if (ms.lineHeight && ms.fontSize) {
-              commonOpts.lineSpacingMultiple = ms.lineHeight / ms.fontSize;
-            }
-            if (mergedTextEl.runs && mergedTextEl.runs.length > 0) {
-              const textRuns = mergedTextEl.runs
-                .filter((r: any) => r.text.length > 0)
-                .map((run: any) => {
-                  const rs = run.style || {};
-                  const opts: any = {
-                    fontFace: mapFont(rs.fontFamily || ms.fontFamily || "Arial"),
-                    fontSize: (rs.fontSize || ms.fontSize || 14) * PX2PT,
-                    color: hexToRgb(rs.color || ms.color || "#333333"),
-                    bold: rs.fontWeight === "bold" || (!rs.fontWeight && ms.fontWeight === "bold"),
-                    italic: rs.fontStyle === "italic" || (!rs.fontStyle && ms.fontStyle === "italic"),
-                    underline: { style: (rs.textDecoration === "underline" || (!rs.textDecoration && ms.textDecoration === "underline")) ? "sng" : "none" },
-                    strike: (rs.textDecoration === "line-through" || (!rs.textDecoration && ms.textDecoration === "line-through")) ? "sngStrike" : undefined,
-                  };
-                  if (rs.bgColor) opts.highlight = hexToRgb(rs.bgColor);
-                  if (rs.verticalAlign === "sub") opts.subscript = true;
-                  else if (rs.verticalAlign === "super") opts.superscript = true;
-                  return { text: xfm ? run.text.toUpperCase() : run.text, options: opts };
-                });
-              slide.addText(textRuns, commonOpts);
-            } else {
-              let text = mergedTextEl.text || "";
-              if (xfm) text = text.toUpperCase();
-              slide.addText(text, {
-                ...commonOpts,
-                fontSize: (ms.fontSize || 14) * PX2PT,
-                fontFace: mapFont(ms.fontFamily || "Arial"),
-                color: hexToRgb(ms.color || "#333333"),
-                bold: ms.fontWeight === "bold",
-                italic: ms.fontStyle === "italic",
-              });
-            }
           }
 
           break;
@@ -694,140 +789,17 @@ function buildPptx(
         }
 
         case "text": {
-          const s = el.style || {};
-          let fullText = el.text || "";
-          if (s.textTransform === "uppercase") fullText = fullText.toUpperCase();
-
-          const align = s.textAlign === "center" ? "center" : s.textAlign === "right" ? "right" : "left";
-
-          // Slack: Slides renders fonts a hair wider than Chrome measures, so a
-          // text box sized to the exact DOM bound wraps a single line
-          // character-by-character. Extend the box by a small slack amount in
-          // the direction opposite alignment so single-line text has breathing
-          // room: left-aligned grows to the right, right-aligned grows to the
-          // left, centered grows both sides.
-          const SLACK_PX = 12;
-          let bx = b.x, bw = b.w, by = b.y, bh = b.h;
-          // Rotated text: CSS transform: rotate(Xdeg). `bounds` is the post-
-          // transform axis-aligned bbox — sized to a rotated wrapper. Using it
-          // as the pptxgenjs box would squeeze "Feature Completeness ↑" into a
-          // narrow vertical strip and wrap it letter-by-letter. Instead, place
-          // the box at its *natural* (pre-transform) dimensions centered on
-          // the bbox, and let pptxgenjs rotate it.
-          const rot = typeof el.rotate === "number" ? el.rotate : 0;
-          let rotateDeg = 0;
-          if (Math.abs(rot) > 0.5 && el.naturalWidth && el.naturalHeight) {
-            // Slack: same reason as the unrotated branch — Slides measures
-            // text a hair wider than Chrome, so a box sized to the exact
-            // pre-transform layout box wraps the last glyph onto a second
-            // line. For rotated text (e.g. a -90° y-axis title like
-            // "Feature Completeness →"), that orphan glyph appears as a
-            // separate stray character on the slide. Inflate the natural
-            // box symmetrically so it stays one line after rotation.
-            const slackW = SLACK_PX;
-            const natW = el.naturalWidth + slackW;
-            const natH = el.naturalHeight;
-            const cx = b.x + b.w / 2;
-            const cy = b.y + b.h / 2;
-            bx = cx - natW / 2;
-            by = cy - natH / 2;
-            bw = natW;
-            bh = natH;
-            // pptxgenjs rotate is degrees clockwise 0–360.
-            rotateDeg = ((rot % 360) + 360) % 360;
-          } else {
-            // Bounded slack: cap by horizontal distance to nearest sibling
-            // with vertical overlap. Iter 8 Agent A6 — prevents text columns
-            // (e.g., slide_16 API-latency table) from overlapping each other.
-            const sbudget = neighborSlackBudget(
-              { x: b.x, y: b.y, w: b.w, h: b.h },
-              extraction.elements,
-              ei,
-              SLACK_PX,
-            );
-            if (align === "left")   { bw = b.w + sbudget.right; }
-            else if (align === "right")  { bx = b.x - sbudget.left; bw = b.w + sbudget.left; }
-            else if (align === "center") {
-              const half = Math.min(sbudget.left, sbudget.right, SLACK_PX / 2);
-              bx = b.x - half; bw = b.w + half * 2;
-            }
-          }
-
-          // Opacity: pptxgenjs text color is hex with no alpha. Approximate
-          // CSS `opacity` by blending foreground with white (the dominant slide
-          // background) — good enough for decorative watermark-style text like
-          // the oversized quote glyph in slide_06.
-          const blendOpacity = (hexColor: string, op: number): string => {
-            const m = hexColor.replace("#", "").match(/.{2}/g);
-            if (!m || m.length < 3) return hexColor;
-            const [r, g, bl] = m.map(x => parseInt(x, 16));
-            const br = Math.round(r * op + 255 * (1 - op));
-            const bg = Math.round(g * op + 255 * (1 - op));
-            const bb = Math.round(bl * op + 255 * (1 - op));
-            return "#" + [br, bg, bb].map(v => v.toString(16).padStart(2, "0")).join("");
-          };
-          const effectiveColor = (raw: string) =>
-            typeof s.opacity === "number" && s.opacity < 1 ? blendOpacity(raw, s.opacity) : raw;
-
-          // Build text runs if available
-          if (el.runs && el.runs.length > 0) {
-            const textRuns = el.runs.filter((r: any) => r.text.length > 0).map((run: any) => {
-              const rs = run.style || {};
-              let runText = run.text;
-              if (s.textTransform === "uppercase") runText = runText.toUpperCase();
-              const runOpts: any = {
-                fontFace: mapFont(rs.fontFamily || s.fontFamily || "Arial"),
-                fontSize: (rs.fontSize || s.fontSize || 16) * PX2PT,
-                color: hexToRgb(effectiveColor(rs.color || s.color || "#000000")),
-                bold: rs.fontWeight === "bold" || (!rs.fontWeight && s.fontWeight === "bold"),
-                italic: rs.fontStyle === "italic" || (!rs.fontStyle && s.fontStyle === "italic"),
-                underline: { style: (rs.textDecoration === "underline" || (!rs.textDecoration && s.textDecoration === "underline")) ? "sng" : "none" },
-                strike: (rs.textDecoration === "line-through" || (!rs.textDecoration && s.textDecoration === "line-through")) ? "sngStrike" : undefined,
-              };
-              // Inline span background → pptxgenjs `highlight` (per-run fill
-              // behind the glyphs). Used by `.code { background: #f0f4f8 }`
-              // and `.highlight { background: #fefcbf }` constructs.
-              if (rs.bgColor) runOpts.highlight = hexToRgb(rs.bgColor);
-              // vertical-align: sub / super on a span.
-              if (rs.verticalAlign === "sub") runOpts.subscript = true;
-              else if (rs.verticalAlign === "super") runOpts.superscript = true;
-              return { text: runText, options: runOpts };
-            });
-
-            const textOpts: any = {
-              x: px2in(bx), y: px2in(by), w: px2in(bw), h: px2in(bh),
-              valign: el.verticallyCentered ? "middle" : "top",
-              align,
-              lineSpacingMultiple: s.lineHeight && s.fontSize ? s.lineHeight / s.fontSize : undefined,
-              fill: { type: "none" },
-              line: { type: "none" },
-              margin: 0,
-            };
-            if (rotateDeg) textOpts.rotate = rotateDeg;
-            slide.addText(textRuns, textOpts);
-          } else {
-            const textOpts: any = {
-              x: px2in(bx), y: px2in(by), w: px2in(bw), h: px2in(bh),
-              valign: el.verticallyCentered ? "middle" : "top",
-              align,
-              fontSize: (s.fontSize || 16) * PX2PT,
-              fontFace: mapFont(s.fontFamily || "Arial"),
-              color: hexToRgb(effectiveColor(s.color || "#000000")),
-              bold: s.fontWeight === "bold",
-              italic: s.fontStyle === "italic",
-              fill: { type: "none" },
-              line: { type: "none" },
-              margin: 0,
-            };
-            if (s.lineHeight && s.fontSize) {
-              textOpts.lineSpacingMultiple = s.lineHeight / s.fontSize;
-            }
-            if (s.textDecoration === "underline") textOpts.underline = { style: "sng" };
-            if (s.textDecoration === "line-through") textOpts.strike = "sngStrike";
-            if (rotateDeg) textOpts.rotate = rotateDeg;
-
-            slide.addText(fullText, textOpts);
-          }
+          // All slack/rotation/run-mapping logic lives in emitStyledText so
+          // this site stays a single dispatch. Standalone-text defaults are
+          // 16px / #000 (vs. the merged-into-rect path's 14px / #333 — those
+          // texts are absorbed into a card and inherit a card-text vibe).
+          emitStyledText(
+            slide, el, b,
+            extraction.elements, ei,
+            el.verticallyCentered ? "middle" : "top",
+            true, // standalone text honors style.opacity by blending toward white
+            { color: "#000000", fontSize: 16 },
+          );
           break;
         }
 
