@@ -812,6 +812,14 @@ interface ExtractedElement {
         } else if (INLINE_TAGS.includes(tag)) {
           const cs = getComputedStyle(node as Element);
           if (cs.position === "absolute" || cs.position === "fixed") continue;
+          // A span (or other inline tag) with `display: block` acts as a
+          // block-level element — insert a line break before its content so
+          // text doesn't concatenate on the same line.
+          const isBlock = cs.display === "block" || cs.display === "flex" ||
+            cs.display === "grid" || cs.display === "table";
+          if (isBlock && runs.length > 0) {
+            runs.push({ text: "\n", style: null });
+          }
           // Inline backgrounds on span runs (`.code { background: #f0f4f8 }`,
           // `.highlight { background: #fefcbf }`) — the rect emitter skips
           // these because they sit *inside* a text flow (no layout box of its
@@ -845,6 +853,17 @@ interface ExtractedElement {
             childStyle.verticalAlign !== "baseline";
           const runText = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
           runs.push({ text: runText, style: differs ? childStyle : null });
+        } else {
+          // Block-level children (div, p, etc.) — recurse so nested text
+          // content (e.g. `<div class="price">$29<span>/mo</span></div>`
+          // inside a <td>) produces styled runs instead of being lost.
+          const childCs = getComputedStyle(node as Element);
+          if (childCs.position === "absolute" || childCs.position === "fixed") continue;
+          if (childCs.display === "none") continue;
+          if (runs.length > 0) runs.push({ text: "\n", style: null });
+          const childStyle = getStyle(node as Element);
+          const childRuns = getTextRuns(node as Element, childStyle);
+          runs.push(...childRuns);
         }
       }
     }

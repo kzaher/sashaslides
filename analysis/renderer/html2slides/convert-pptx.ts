@@ -1253,12 +1253,17 @@ function buildPptx(
               }
 
               // Cell text (with padding + alignment).
+              // When a cell is clipped (e.g. wrapper overflow:hidden) padding
+              // can exceed the available height/width, yielding a 0-sized text
+              // box and invisible text.  Fall back to the full cell bounds when
+              // padding would consume the entire dimension.
               const pad = cell.padding || { top: 0, right: 0, bottom: 0, left: 0 };
-              const tb = {
-                x: cb.x + pad.left, y: cb.y + pad.top,
-                w: Math.max(0, cb.w - pad.left - pad.right),
-                h: Math.max(0, cb.h - pad.top - pad.bottom),
-              };
+              const padW = pad.left + pad.right;
+              const padH = pad.top + pad.bottom;
+              const tb = padH < cb.h && padW < cb.w
+                ? { x: cb.x + pad.left, y: cb.y + pad.top,
+                    w: cb.w - padW, h: cb.h - padH }
+                : { x: cb.x, y: cb.y, w: cb.w, h: cb.h };
               const text = cell.text || "";
               if (text.trim().length > 0) {
                 const align = cs.textAlign === "center" ? "center" : cs.textAlign === "right" ? "right" : "left";
