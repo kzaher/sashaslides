@@ -717,12 +717,22 @@ function buildPptx(
           const rot = typeof el.rotate === "number" ? el.rotate : 0;
           let rotateDeg = 0;
           if (Math.abs(rot) > 0.5 && el.naturalWidth && el.naturalHeight) {
+            // Slack: same reason as the unrotated branch — Slides measures
+            // text a hair wider than Chrome, so a box sized to the exact
+            // pre-transform layout box wraps the last glyph onto a second
+            // line. For rotated text (e.g. a -90° y-axis title like
+            // "Feature Completeness →"), that orphan glyph appears as a
+            // separate stray character on the slide. Inflate the natural
+            // box symmetrically so it stays one line after rotation.
+            const slackW = SLACK_PX;
+            const natW = el.naturalWidth + slackW;
+            const natH = el.naturalHeight;
             const cx = b.x + b.w / 2;
             const cy = b.y + b.h / 2;
-            bx = cx - el.naturalWidth / 2;
-            by = cy - el.naturalHeight / 2;
-            bw = el.naturalWidth;
-            bh = el.naturalHeight;
+            bx = cx - natW / 2;
+            by = cy - natH / 2;
+            bw = natW;
+            bh = natH;
             // pptxgenjs rotate is degrees clockwise 0–360.
             rotateDeg = ((rot % 360) + 360) % 360;
           } else {
