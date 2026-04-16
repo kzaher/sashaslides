@@ -229,6 +229,46 @@ interface ExtractedElement {
     return _origPush(...items);
   };
 
+  // Build a map of available font weights per family from document.fonts.
+  // CSS font matching uses the closest available weight when the exact one
+  // isn't loaded (e.g. Playfair Display loaded at 700 only → computed
+  // font-weight 400 actually renders as 700). We replicate Chrome's weight
+  // matching: for requested weight ≤ 500, prefer lighter then heavier; for
+  // > 500, prefer heavier then lighter.
+  const _fontWeightMap: Record<string, number[]> = {};
+  try {
+    for (const f of (document as any).fonts) {
+      const fam = f.family.replace(/['"]/g, "").trim();
+      const w = parseInt(f.weight) || 400;
+      if (!_fontWeightMap[fam]) _fontWeightMap[fam] = [];
+      if (!_fontWeightMap[fam].includes(w)) _fontWeightMap[fam].push(w);
+    }
+    for (const fam of Object.keys(_fontWeightMap)) _fontWeightMap[fam].sort((a, b) => a - b);
+  } catch (_) {}
+
+  function resolveRenderedWeight(family: string, computedWeight: number): "bold" | "normal" {
+    const available = _fontWeightMap[family];
+    if (!available || available.length === 0) {
+      return computedWeight >= 600 ? "bold" : "normal";
+    }
+    // If the exact weight is available, use it as-is
+    if (available.includes(computedWeight)) {
+      return computedWeight >= 600 ? "bold" : "normal";
+    }
+    // CSS font matching algorithm (simplified):
+    // If desired ≤ 500: try lighter weights first, then heavier
+    // If desired > 500: try heavier weights first, then lighter
+    let matched = available[0];
+    if (computedWeight <= 500) {
+      const lighter = available.filter(w => w <= computedWeight);
+      matched = lighter.length > 0 ? lighter[lighter.length - 1] : available[0];
+    } else {
+      const heavier = available.filter(w => w >= computedWeight);
+      matched = heavier.length > 0 ? heavier[0] : available[available.length - 1];
+    }
+    return matched >= 600 ? "bold" : "normal";
+  }
+
   function rgb2hex(rgb: string): string | null {
     if (!rgb || rgb === "transparent" || rgb === "rgba(0, 0, 0, 0)") return null;
     const m = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
@@ -295,7 +335,10 @@ interface ExtractedElement {
     return {
       fontFamily: cs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
       fontSize: parseFloat(cs.fontSize),
-      fontWeight: cs.fontWeight === "bold" || parseInt(cs.fontWeight) >= 600 ? "bold" : "normal",
+      fontWeight: resolveRenderedWeight(
+        cs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
+        cs.fontWeight === "bold" ? 700 : parseInt(cs.fontWeight) || 400,
+      ),
       fontStyle: cs.fontStyle === "italic" ? "italic" : "normal",
       color: (() => {
         // text-clip gradient fallback: when the effective glyph fill is
@@ -782,7 +825,10 @@ interface ExtractedElement {
             va === "sub" ? "sub" : va === "super" ? "super" : "baseline";
           const childStyle = {
             color: rgb2hex(cs.color),
-            fontWeight: (cs.fontWeight === "bold" || parseInt(cs.fontWeight) >= 600 ? "bold" : "normal") as "bold" | "normal",
+            fontWeight: resolveRenderedWeight(
+              cs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
+              cs.fontWeight === "bold" ? 700 : parseInt(cs.fontWeight) || 400,
+            ),
             fontStyle: (cs.fontStyle === "italic" ? "italic" : "normal") as "italic" | "normal",
             fontFamily: cs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
             fontSize: parseFloat(cs.fontSize),
@@ -1093,7 +1139,10 @@ interface ExtractedElement {
         style: {
           fontFamily: pcs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
           fontSize,
-          fontWeight: (pcs.fontWeight === "bold" || parseInt(pcs.fontWeight) >= 600) ? "bold" : "normal",
+          fontWeight: resolveRenderedWeight(
+            pcs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
+            pcs.fontWeight === "bold" ? 700 : parseInt(pcs.fontWeight) || 400,
+          ),
           fontStyle: pcs.fontStyle === "italic" ? "italic" : "normal",
           color: rgb2hex(pcs.color) || "#000000",
           textAlign: "center",
@@ -1144,7 +1193,10 @@ interface ExtractedElement {
         style: {
           fontFamily: scs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
           fontSize: parseFloat(scs.fontSize),
-          fontWeight: (scs.fontWeight === "bold" || parseInt(scs.fontWeight) >= 600) ? "bold" : "normal",
+          fontWeight: resolveRenderedWeight(
+            scs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
+            scs.fontWeight === "bold" ? 700 : parseInt(scs.fontWeight) || 400,
+          ),
           fontStyle: scs.fontStyle === "italic" ? "italic" : "normal",
           color: rgb2hex(scs.color) || "#000000",
           textAlign: "center",
@@ -1353,6 +1405,28 @@ interface ExtractedElement {
       seen.add(el);
       const padLeft = parseFloat(cs.paddingLeft) || 0;
       const padTop = parseFloat(cs.paddingTop) || 0;
+      // Border-bottom on inline text elements (e.g. active nav-link underline)
+      // inflates getBoundingClientRect height. Subtract it so the text box
+      // matches the text content area. When the element has ONLY border-bottom
+      // (no top/left/right borders) and no background, the border is purely
+      // decorative — convert it to textDecoration:'underline' so the converter
+      // emits a native underline instead of a separate line element.
+      const bBot = style.borderBottom || 0;
+      const padBot = parseFloat(cs.paddingBottom) || 0;
+      const borderAdjust = bBot > 0 ? (bBot + padBot) : 0;
+      let textBounds = bounds;
+      let inlineBorderUnderline = false;
+      if (borderAdjust > 0) {
+        textBounds = { ...bounds, h: Math.max(bounds.h - borderAdjust, style.fontSize || 10) };
+        // Promote to underline only when border-bottom is the sole border and
+        // the element is inline/inline-block (span, a, etc.)
+        if (!style.borderTop && !style.borderLeft && !style.borderRight && !style.bgColor) {
+          const disp = style.display || "";
+          if (disp === "inline" || disp === "inline-block" || tag === "SPAN" || tag === "A") {
+            inlineBorderUnderline = true;
+          }
+        }
+      }
       const baseStyle = {
         fontFamily: style.fontFamily,
         fontSize: style.fontSize,
@@ -1361,7 +1435,7 @@ interface ExtractedElement {
         color: style.color,
         textAlign: effectiveAlign,
         lineHeight: style.lineHeight,
-        textDecoration: style.textDecoration,
+        textDecoration: inlineBorderUnderline ? "underline" : style.textDecoration,
         textTransform: style.textTransform,
         letterSpacing: style.letterSpacing,
         paddingLeft: padLeft > 2 ? padLeft : 0,
@@ -1375,7 +1449,7 @@ interface ExtractedElement {
       // String.trim() strips Unicode whitespace including nbsp.
       const textEl: any = {
         type: "text",
-        bounds,
+        bounds: textBounds,
         text: directText.replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, ""),
         style: baseStyle,
         zIndex: style.zIndex,

@@ -62,11 +62,8 @@ const FONT_MAP: Record<string, string> = {
 };
 function mapFont(font: string): string { return FONT_MAP[font] || font; }
 
-// Approximate CSS opacity by blending foreground with white (the dominant
-// slide background) — pptxgenjs text color is hex with no alpha. Good enough
-// for decorative watermark-style text like the oversized quote glyph in
-// slide_06. Module-scope so both the standalone text emitter and any future
-// run mapper can reuse it.
+// DEPRECATED — replaced by pptxgenjs native `transparency` field which
+// handles any background color correctly. Kept for reference only.
 function blendOpacity(hexColor: string, op: number): string {
   const m = hexColor.replace("#", "").match(/.{2}/g);
   if (!m || m.length < 3) return hexColor;
@@ -87,26 +84,26 @@ const SLACK_PX = 12;
 // Map a single inline run to a pptxgenjs text-run options object. Honors the
 // standard cascade rs.X || parent.X plus highlight (CSS span background),
 // subscript/superscript, underline, strike, and uppercase transform.
-// `colorTransform` lets the caller apply blendOpacity (standalone text path)
-// or pass-through (merged-into-rect path).
+// `transparency` (0-100) is applied when the element has CSS opacity < 1.
 function mapRunOptions(
   run: any,
   parentStyle: any,
   uppercase: boolean,
   defaults: { color: string; fontSize: number },
-  colorTransform: (hex: string) => string = (h) => h,
+  transparency?: number,
 ): { text: string; options: any } {
   const rs = run.style || {};
   const ps = parentStyle || {};
   const opts: any = {
     fontFace: mapFont(rs.fontFamily || ps.fontFamily || "Arial"),
     fontSize: (rs.fontSize || ps.fontSize || defaults.fontSize) * PX2PT,
-    color: hexToRgb(colorTransform(rs.color || ps.color || defaults.color)),
+    color: hexToRgb(rs.color || ps.color || defaults.color),
     bold: rs.fontWeight === "bold" || (!rs.fontWeight && ps.fontWeight === "bold"),
     italic: rs.fontStyle === "italic" || (!rs.fontStyle && ps.fontStyle === "italic"),
     underline: { style: (rs.textDecoration === "underline" || (!rs.textDecoration && ps.textDecoration === "underline")) ? "sng" : "none" },
     strike: (rs.textDecoration === "line-through" || (!rs.textDecoration && ps.textDecoration === "line-through")) ? "sngStrike" : undefined,
   };
+  if (transparency && transparency > 0) opts.transparency = transparency;
   if (rs.bgColor) opts.highlight = hexToRgb(rs.bgColor);
   if (rs.verticalAlign === "sub") opts.subscript = true;
   else if (rs.verticalAlign === "super") opts.superscript = true;
@@ -134,7 +131,7 @@ function applySlack(
 //
 // `opts.valign`: "top" | "middle" — caller picks (merged-into-rect always
 // centers vertically; standalone respects el.verticallyCentered).
-// `opts.applyOpacityBlend`: when true, fold style.opacity into text colors
+// `opts.applyOpacityBlend`: when true, apply style.opacity as pptxgenjs transparency
 // (standalone path only — merged-rect path historically didn't do this).
 // `opts.selfIndex`: index in `elements` for neighborSlackBudget self-skip.
 function emitStyledText(
@@ -187,9 +184,12 @@ function emitStyledText(
     }
   }
 
-  const colorTransform = applyOpacityBlend && typeof s.opacity === "number" && s.opacity < 1
-    ? (hex: string) => blendOpacity(hex, s.opacity)
-    : (hex: string) => hex;
+  // Use native pptxgenjs `transparency` (0-100) for CSS opacity instead of
+  // blending toward white. This renders correctly regardless of the parent
+  // background color (critical for dark-bg watermarks like slide_09 HERO).
+  const textTransparency = applyOpacityBlend && typeof s.opacity === "number" && s.opacity < 1
+    ? Math.round((1 - s.opacity) * 100)
+    : undefined;
 
   const commonOpts: any = {
     x: px2in(bx), y: px2in(by), w: px2in(bw), h: px2in(bh),
@@ -205,21 +205,23 @@ function emitStyledText(
   if (el.runs && el.runs.length > 0) {
     const textRuns = el.runs
       .filter((r: any) => r.text.length > 0)
-      .map((run: any) => mapRunOptions(run, s, xfm, defaults, colorTransform));
+      .map((run: any) => mapRunOptions(run, s, xfm, defaults, textTransparency));
     slide.addText(textRuns, commonOpts);
   } else {
     let text = el.text || "";
     if (xfm) text = text.toUpperCase();
-    slide.addText(text, {
+    const textOpts: any = {
       ...commonOpts,
       fontSize: (s.fontSize || defaults.fontSize) * PX2PT,
       fontFace: mapFont(s.fontFamily || "Arial"),
-      color: hexToRgb(colorTransform(s.color || defaults.color)),
+      color: hexToRgb(s.color || defaults.color),
       bold: s.fontWeight === "bold",
       italic: s.fontStyle === "italic",
       underline: s.textDecoration === "underline" ? { style: "sng" } : undefined,
       strike: s.textDecoration === "line-through" ? "sngStrike" : undefined,
-    });
+    };
+    if (textTransparency && textTransparency > 0) textOpts.transparency = textTransparency;
+    slide.addText(text, textOpts);
   }
 }
 
@@ -807,7 +809,7 @@ function buildPptx(
             slide, el, b,
             extraction.elements, ei,
             el.verticallyCentered ? "middle" : "top",
-            true, // standalone text honors style.opacity by blending toward white
+            true, // standalone text honors style.opacity via pptxgenjs transparency
             { color: "#000000", fontSize: 16 },
           );
           break;
