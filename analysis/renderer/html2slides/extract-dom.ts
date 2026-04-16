@@ -1004,8 +1004,10 @@ interface ExtractedElement {
       // CSS border-triangle: 0×0 box with transparent top/bottom and a
       // colored side — skip as rect; downstream renderers can't reproduce
       // it cleanly. (Leave for a future targeted fix.)
+      const pseudoBgAlpha = rgbAlpha(pcs.backgroundColor);
+      const pseudoOpacity = parseFloat(pcs.opacity) || 1;
       elements.push({
-        type: "rect", bounds: pb, fill: bg || null, fillAlpha: 1,
+        type: "rect", bounds: pb, fill: bg || null, fillAlpha: pseudoBgAlpha * pseudoOpacity,
         gradient: null, borderRadius: br,
         cornerRadii: { tl: br, tr: br, br, bl: br },
         borderUniform: bwT === bwR && bwR === bwB && bwB === bwL,
