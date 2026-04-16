@@ -1320,10 +1320,13 @@ interface ExtractedElement {
       };
       const runs = getTextRuns(el, style);
       const hasStyledRuns = runs.some(r => r.style !== null);
+      // Use a regex that excludes \u00a0 so leading/trailing nbsp (used as
+      // visual indentation in code blocks like slide_15) survive. JS
+      // String.trim() strips Unicode whitespace including nbsp.
       const textEl: any = {
         type: "text",
         bounds,
-        text: directText.trim(),
+        text: directText.replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, ""),
         style: baseStyle,
         zIndex: style.zIndex,
         position: style.position,
