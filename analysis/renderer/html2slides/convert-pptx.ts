@@ -172,9 +172,19 @@ function emitStyledText(
     bw = natW; bh = natH;
     rotateDeg = ((rot % 360) + 360) % 360;
   } else {
-    const budget = neighborSlackBudget({ x: bx, y: by, w: bw, h: bh }, elements, selfIndex, SLACK_PX);
-    const slacked = applySlack({ x: bx, y: by, w: bw, h: bh }, align, budget);
-    bx = slacked.x; by = slacked.y; bw = slacked.w; bh = slacked.h;
+    // Single-line guard: slack only helps when the text is one line (last
+    // glyph gets breathing room against Slides' wider measurement). For
+    // multi-line text, Chrome's wrap is already baked into `bounds`; widening
+    // only shifts wrap points without benefit and can re-wrap unexpectedly
+    // (slide_10_mixed basics regression). Threshold 1.5× lineHeight = 1 line
+    // with anti-alias slop.
+    const lineH = (s.lineHeight && s.fontSize) ? s.lineHeight : (s.fontSize || 16) * 1.2;
+    const isSingleLine = bh <= lineH * 1.5;
+    if (isSingleLine) {
+      const budget = neighborSlackBudget({ x: bx, y: by, w: bw, h: bh }, elements, selfIndex, SLACK_PX);
+      const slacked = applySlack({ x: bx, y: by, w: bw, h: bh }, align, budget);
+      bx = slacked.x; by = slacked.y; bw = slacked.w; bh = slacked.h;
+    }
   }
 
   const colorTransform = applyOpacityBlend && typeof s.opacity === "number" && s.opacity < 1
