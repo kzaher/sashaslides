@@ -158,7 +158,44 @@ function buildPptx(
             && Math.abs(b.w - b.h) < b.w * 0.3;
           const anyRounded = cr.tl > 2 || cr.tr > 2 || cr.br > 2 || cr.bl > 2;
 
-          const shapeName = isCircle ? "ellipse" : anyRounded ? "roundRect" : "rect";
+          // Per-corner mask: TL=bit0, TR=bit1, BR=bit2, BL=bit3. Map to an
+          // OOXML preset + flips so asymmetric border-radius (e.g. top-only
+          // round on a card header) renders correctly rather than getting
+          // collapsed into an all-corners roundRect.
+          const mask =
+            (cr.tl > 2 ? 1 : 0) |
+            (cr.tr > 2 ? 2 : 0) |
+            (cr.br > 2 ? 4 : 0) |
+            (cr.bl > 2 ? 8 : 0);
+          let cornerPreset: string = "rect";
+          let cornerFlipH = false;
+          let cornerFlipV = false;
+          if (isCircle) {
+            cornerPreset = "ellipse";
+          } else if (anyRounded) {
+            switch (mask) {
+              case 0b1111: cornerPreset = "roundRect"; break;
+              // Two-corner same-side presets (default round2SameRect = top TL+TR).
+              case 0b0011: cornerPreset = "round2SameRect"; break;                           // top
+              case 0b1100: cornerPreset = "round2SameRect"; cornerFlipV = true; break;        // bottom
+              // Two-corner diagonal presets (default round2DiagRect = TL+BR).
+              case 0b0101: cornerPreset = "round2DiagRect"; break;                           // TL+BR
+              case 0b1010: cornerPreset = "round2DiagRect"; cornerFlipH = true; break;        // TR+BL
+              // Single-corner presets (default round1Rect = TR).
+              case 0b0010: cornerPreset = "round1Rect"; break;                               // TR
+              case 0b0001: cornerPreset = "round1Rect"; cornerFlipH = true; break;           // TL (flipH of TR)
+              case 0b0100: cornerPreset = "round1Rect"; cornerFlipV = true; break;           // BR
+              case 0b1000: cornerPreset = "round1Rect"; cornerFlipH = true; cornerFlipV = true; break; // BL
+              // Left/right-only: not expressible with flipH/V on round2SameRect.
+              // Fallback to all-four roundRect rather than rotating (would swap bounds).
+              case 0b0110: cornerPreset = "roundRect"; break;                                // right side
+              case 0b1001: cornerPreset = "roundRect"; break;                                // left side
+              default: cornerPreset = "roundRect"; break;
+            }
+          } else {
+            cornerPreset = "rect";
+          }
+          const shapeName = cornerPreset;
 
           // Scan for text to merge into this shape. IMPORTANT: only merge if
           // this rect is the *innermost* ancestor that fits the text. Otherwise
@@ -255,7 +292,10 @@ function buildPptx(
           // background. Clamping yields a proper stadium/pill shape.
           if (anyRounded && !isCircle) {
             const maxR = Math.min(b.w, b.h) / 2;
-            opts.rectRadius = px2in(Math.min(el.borderRadius, maxR));
+            const maxRadiusPx = Math.max(cr.tl, cr.tr, cr.br, cr.bl);
+            opts.rectRadius = px2in(Math.min(maxRadiusPx, maxR));
+            if (cornerFlipH) opts.flipH = true;
+            if (cornerFlipV) opts.flipV = true;
           }
 
           // Border outline (uniform)
