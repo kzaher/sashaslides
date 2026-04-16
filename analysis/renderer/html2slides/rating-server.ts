@@ -24,6 +24,7 @@ for (let i = 0; i < args.length; i++) {
   if (args[i] === "--port") port = parseInt(args[++i]);
 }
 
+interface RenderedRegion { x: number; y: number; w: number; h: number; kind: string; }
 interface SlideComparison {
   id: string;
   originalPng: string;
@@ -36,6 +37,10 @@ interface SlideComparison {
   diffPng?: string;        // /tmp/.../diffs/diff_slide_NN.png (pixelmatch output)
   diffStatus?: string;     // "ok" | "regressed" | "new" | "missing-current"
   diffPixels?: number;
+  // Rasterized regions the converter emitted as addImage instead of native
+  // primitives (visuals, images, emoji fallbacks). Surface these to the user
+  // because any region in this list represents a fidelity compromise.
+  renderedRegions?: RenderedRegion[];
 }
 
 function findComparisons(): SlideComparison[] {
@@ -110,6 +115,19 @@ function findComparisons(): SlideComparison[] {
       // Auto-bless: a slide that matches its golden has no diff to rate.
       if (r.status === "ok") c.status = "good";
     }
+  }
+
+  // Merge rendered-regions sidecar emitted by convert-pptx.ts. Keys are
+  // slide_NN and match the comparison id 1:1.
+  const regionsFile = join(resultsDir, "rendered-regions.json");
+  if (existsSync(regionsFile)) {
+    try {
+      const regions = JSON.parse(readFileSync(regionsFile, "utf-8")) as Record<string, RenderedRegion[]>;
+      for (const c of comparisons) {
+        const list = regions[c.id];
+        if (list && list.length > 0) c.renderedRegions = list;
+      }
+    } catch {}
   }
 
   // Load existing ratings (user ratings override auto-blessing).
@@ -207,6 +225,7 @@ const HTML = `<!DOCTYPE html>
   .slide-pair .panel.slides img { border-color: #e94560; }
   .slide-pair .panel.diff img { border-color: #f1c40f; background: #111; }
   .slide-pair .panel.slides canvas { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); cursor: crosshair; touch-action: none; border-radius: 4px; }
+  .slide-pair .panel.slides canvas.rendered-overlay { pointer-events: none; mix-blend-mode: plus-lighter; cursor: default; }
   .slide-pair .panel.original .diff-overlay { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); border-radius: 4px; pointer-events: none; }
   .slide-pair .panel.original canvas.diff-overlay { background: transparent; }
   .draw-toolbar { display: flex; gap: 8px; padding: 0 24px; align-items: center; font-size: 12px; color: #aaa; }
@@ -237,6 +256,8 @@ const HTML = `<!DOCTYPE html>
   .nav a.diff-new { box-shadow: inset 0 -3px 0 #8e44ad; color: #c39bd3; }
   .nav a.diff-ok { opacity: 0.6; }
   .regression-banner { background: #2a0a14; border-left: 4px solid #e94560; color: #ffb8c4; padding: 10px 16px; margin: 12px 24px; border-radius: 0 6px 6px 0; font-size: 14px; font-weight: 600; }
+  .rendered-banner { background: #2a1f0a; border-left: 4px solid #f1c40f; color: #ffe9a8; padding: 10px 16px; margin: 12px 24px; border-radius: 0 6px 6px 0; font-size: 14px; font-weight: 600; }
+  .rendered-banner .kinds { font-weight: 400; color: #c9b57a; margin-left: 8px; font-size: 13px; }
   .nav { display: flex; gap: 8px; padding: 8px 24px; flex-wrap: wrap; }
   .nav a { color: #4a90d9; text-decoration: none; font-size: 12px; padding: 4px 8px; border-radius: 4px; }
   .nav a:hover { background: #2a2a4e; }
@@ -256,12 +277,17 @@ const HTML = `<!DOCTYPE html>
   <div class="stats" id="stats"></div>
 </div>
 <div id="regressionBanner"></div>
+<div id="renderedBanner"></div>
 <div class="nav" id="nav"></div>
 <div class="labels"><span>Original HTML</span><span>Google Slides</span></div>
 <div class="slide-pair" id="pair"></div>
 <div class="draw-toolbar" id="drawToolbar">
   <label style="display:flex; gap:6px; align-items:center; cursor:pointer;">
     <input type="checkbox" id="showDiff" onchange="toggleShowDiff()"> Show diff at full size (hide small diff panel)
+  </label>
+  <span style="width: 24px;"></span>
+  <label style="display:flex; gap:6px; align-items:center; cursor:pointer;" title="Brightens rasterized regions on the Slides render by adding 128 to all RGB channels (via plus-lighter blend)">
+    <input type="checkbox" id="showRendered" onchange="toggleShowRendered()"> Highlight rendered regions (+128 channels)
   </label>
   <span style="width: 24px;"></span>
   <span>Draw on Slides render:</span>
@@ -342,12 +368,16 @@ function render() {
   const diffOverlay = (showDiff && c.slidesPng)
     ? '<canvas class="diff-overlay" id="diffCanvas"></canvas>'
     : '';
+  const renderedOverlayHtml = (c.renderedRegions && c.renderedRegions.length)
+    ? '<canvas class="rendered-overlay" id="renderedOverlay"></canvas>'
+    : '';
   const pairHtml =
     '<div class="panel original"><img id="originalImg" src="/img?path=' + encodeURIComponent(c.originalPng) + '">' + diffOverlay + '</div>' +
-    '<div class="panel slides"><img id="slidesImg" src="/img?path=' + encodeURIComponent(c.slidesPng) + '"><canvas id="drawCanvas"></canvas></div>';
+    '<div class="panel slides"><img id="slidesImg" src="/img?path=' + encodeURIComponent(c.slidesPng) + '">' + renderedOverlayHtml + '<canvas id="drawCanvas"></canvas></div>';
   document.getElementById('pair').innerHTML = pairHtml;
   setupDrawCanvas(c.annotationPng);
   if (showDiff) computeClientSideDiff();
+  paintRenderedOverlay(c);
 
   const badge = '<span class="status-badge status-' + c.status + '">' + c.status + '</span>';
   let diffBadge = '';
@@ -362,6 +392,22 @@ function render() {
     : '';
   const bannerEl = document.getElementById('regressionBanner');
   if (bannerEl) bannerEl.innerHTML = banner;
+
+  // Rendered-regions warning — fires whenever the converter fell back to a
+  // rasterized image instead of native Slides primitives. Non-empty means
+  // this slide isn't 100% native; reviewer can toggle the highlight overlay
+  // to see exactly where.
+  const rbEl = document.getElementById('renderedBanner');
+  if (rbEl) {
+    if (c.renderedRegions && c.renderedRegions.length) {
+      const kinds = {};
+      for (const r of c.renderedRegions) kinds[r.kind] = (kinds[r.kind] || 0) + 1;
+      const kindStr = Object.keys(kinds).map(k => k + '×' + kinds[k]).join(', ');
+      rbEl.innerHTML = '<div class="rendered-banner">⚠ RENDERED CONTENT — ' + c.renderedRegions.length + ' region(s) emitted as rasterized image(s) instead of native Slides primitives.<span class="kinds">(' + kindStr + ') — toggle "Highlight rendered regions" to see them.</span></div>';
+    } else {
+      rbEl.innerHTML = '';
+    }
+  }
   const visible = visibleComparisons();
   const visIdx = visible.findIndex(x => x.id === c.id);
   document.getElementById('slideId').innerHTML = c.id + badge + diffBadge + ' (' + (visIdx >= 0 ? visIdx+1 : '-') + '/' + visible.length + ' visible, ' + comparisons.length + ' total — ' + (showAll ? '<a href="#" onclick="showAll=false; render(); return false">only diffs</a>' : '<a href="#" onclick="showAll=true; render(); return false">show all</a>') + ')';
@@ -438,6 +484,35 @@ let showDiff = false;
 function toggleShowDiff() {
   showDiff = document.getElementById('showDiff').checked;
   render();
+}
+let showRendered = false;
+function toggleShowRendered() {
+  showRendered = document.getElementById('showRendered').checked;
+  paintRenderedOverlay(comparisons[currentIdx]);
+}
+
+// Paint the rendered-region highlight overlay on the Slides panel. Each
+// region is filled with rgb(128,128,128); combined with the canvas's
+// mix-blend-mode:plus-lighter this literally adds 128 to each channel of the
+// image below (clamped to 255). A transparent canvas when the checkbox is
+// off makes the panel render exactly as before.
+function paintRenderedOverlay(c) {
+  const canvas = document.getElementById('renderedOverlay');
+  if (!canvas) return;
+  const img = document.getElementById('slidesImg');
+  const init = () => {
+    canvas.width = img.naturalWidth || img.clientWidth;
+    canvas.height = img.naturalHeight || img.clientHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!showRendered || !c || !c.renderedRegions) return;
+    ctx.fillStyle = 'rgb(128,128,128)';
+    for (const r of c.renderedRegions) {
+      ctx.fillRect(r.x * canvas.width, r.y * canvas.height, r.w * canvas.width, r.h * canvas.height);
+    }
+  };
+  if (img && img.complete && img.naturalWidth) init();
+  else if (img) img.addEventListener('load', init, { once: true });
 }
 
 // Compute a per-pixel diff in the browser between the two <img>s currently
