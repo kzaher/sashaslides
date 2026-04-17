@@ -199,20 +199,26 @@ function emitStyledText(
     line: { type: "none" },
     margin: 0,
   };
+  // Two independent line-spacing rules combined:
+  //
+  // 1. (wave1a) Single-line vertically-centered text (e.g. CTA pill button
+  //    "Get Started") looks too high in Slides when spcPct > 1: Slides
+  //    centers the full line-box including leading but apportions the extra
+  //    leading below the glyphs, pushing visible text above the geometric
+  //    center. When the extractor flagged `verticallyCentered` AND valign is
+  //    "middle", skip spcPct entirely so the line-box equals the glyph box
+  //    and anchor=ctr centers the glyphs — not the inflated leading.
+  //
+  // 2. (wave1b) For the remaining cases (multi-line text, non-centered),
+  //    PowerPoint/Slides interpret <a:spcPct> as a percentage of the font's
+  //    DEFAULT line-spacing (~1.2 * fontSize) rather than of the font size
+  //    itself. Passing the raw CSS ratio 1.6 produced 1.6 * 1.2 = 1.92 *
+  //    fontSize pitch (~20% overspacing on slide_06 quote, slide_08 step
+  //    descs). Divide by 1.2 so emitted pitch matches the CSS line-height.
   if (s.lineHeight && s.fontSize) {
-    // Vertically-centered single-line text (e.g. CTA pill button
-    // "Get Started") looks too high in Slides when lineSpacingMultiple > 1:
-    // Slides centers the full line-box including leading, but apportions
-    // the extra leading below the glyphs, pushing visible text above the
-    // geometric center. Chrome measured +0 text-vs-box offset; Slides
-    // rendered at ~-7 px with spcPct=120% on slide_01 CTAs. Drop the
-    // multiplier when the extractor flagged `verticallyCentered` (single
-    // line of text sitting in a symmetrically-padded box) so the line-box
-    // equals the glyph box and anchor=ctr centers the glyphs, not the
-    // inflated leading. Multi-line blocks keep 1.2 for readable spacing.
     const isSingleLineCentered = valign === "middle" && el.verticallyCentered === true;
     if (!isSingleLineCentered) {
-      commonOpts.lineSpacingMultiple = s.lineHeight / s.fontSize;
+      commonOpts.lineSpacingMultiple = (s.lineHeight / s.fontSize) / 1.2;
     }
   }
   if (rotateDeg) commonOpts.rotate = rotateDeg;
@@ -916,16 +922,19 @@ function buildPptx(
             }).flat();
 
             // Honor CSS line-height when explicitly set (ratio != 1.2 default).
-            // Passing `lineSpacingMultiple` = CSS lineHeight/fontSize maps
-            // directly to OOXML `<a:lnSpc><a:spcPct>`, which Slides respects.
-            // Omitting it lets Slides fall back to its ~1.2 default (matches
-            // CSS `line-height: normal`).
+            // Passing `lineSpacingMultiple` maps to OOXML `<a:lnSpc><a:spcPct>`,
+            // but Slides applies that as a percentage of its DEFAULT line
+            // spacing (~1.2 * fontSize), not of fontSize itself. So pre-divide
+            // the CSS ratio by 1.2 before emitting (matches Wave 1B fix in
+            // emitStyledText). Omitting entirely lets Slides use its default,
+            // which matches CSS `line-height: normal` (~1.2).
             const firstIt = items[0] || {};
             const paraSpaceAfterPt = (firstIt.marginBottom || 0) * PX2PT;
             const ratio = firstIt.lineHeight && firstIt.fontSize
               ? firstIt.lineHeight / firstIt.fontSize
               : 0;
             const useRatio = ratio >= 1.05 && ratio <= 3.0 && Math.abs(ratio - 1.2) > 0.08;
+            const emittedRatio = ratio / 1.2;
             slide.addText(paragraphs, {
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
               valign: "top",
@@ -934,7 +943,7 @@ function buildPptx(
               line: { type: "none" },
               margin: 0,
               paraSpaceAfter: paraSpaceAfterPt > 0 ? paraSpaceAfterPt : undefined,
-              lineSpacingMultiple: useRatio ? ratio : undefined,
+              lineSpacingMultiple: useRatio ? emittedRatio : undefined,
             });
             break;
           }
