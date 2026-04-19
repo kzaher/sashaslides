@@ -201,13 +201,16 @@ function emitStyledText(
   };
   // Two independent line-spacing rules combined:
   //
-  // 1. (wave1a) Single-line vertically-centered text (e.g. CTA pill button
-  //    "Get Started") looks too high in Slides when spcPct > 1: Slides
-  //    centers the full line-box including leading but apportions the extra
-  //    leading below the glyphs, pushing visible text above the geometric
-  //    center. When the extractor flagged `verticallyCentered` AND valign is
-  //    "middle", skip spcPct entirely so the line-box equals the glyph box
-  //    and anchor=ctr centers the glyphs — not the inflated leading.
+  // 1. (wave1a / wave1a-v2) Single-line vertically-centered text (e.g. CTA
+  //    pill "Get Started") — we want Slides to position the visible glyphs
+  //    at the shape's geometric center when anchor="ctr". Empirically that
+  //    happens at spcPct=120000 (lineSpacingMultiple=1.2). Earlier we tried
+  //    SKIPPING lnSpc entirely so Slides would use its default, but that
+  //    default is UNSTABLE — Slides appears to infer a per-slide default
+  //    from other shapes' spcPct values. When wave1b landed and pushed all
+  //    non-centered text from 120000 → 100000, the inferred default moved
+  //    too, dropping CTA glyphs visibly below center (~7 slide-px). Pin the
+  //    rendering by emitting 1.2 explicitly.
   //
   // 2. (wave1b) For the remaining cases (multi-line text, non-centered),
   //    PowerPoint/Slides interpret <a:spcPct> as a percentage of the font's
@@ -217,7 +220,9 @@ function emitStyledText(
   //    descs). Divide by 1.2 so emitted pitch matches the CSS line-height.
   if (s.lineHeight && s.fontSize) {
     const isSingleLineCentered = valign === "middle" && el.verticallyCentered === true;
-    if (!isSingleLineCentered) {
+    if (isSingleLineCentered) {
+      commonOpts.lineSpacingMultiple = 1.2;
+    } else {
       commonOpts.lineSpacingMultiple = (s.lineHeight / s.fontSize) / 1.2;
     }
   }
