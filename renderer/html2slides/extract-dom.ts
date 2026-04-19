@@ -679,6 +679,16 @@ interface ExtractedElement {
         // Preserve styled inline child runs (e.g. <span class="check">✓</span>) so
         // colors on ✓/✗ prefixes survive into the rendered slide.
         const runs = getTextRuns(li, liStyle);
+        // Per-item pseudo-bullet color. `.bullet-list li.red::before { background: #e53e3e }`
+        // overrides the list-default on a per-row basis; the list-level color
+        // captured above only sees the first li. Probe each li's ::before
+        // backgroundColor individually so red/green/orange markers survive
+        // (slide_30 Key Priorities).
+        let liBulletColor: string | null = null;
+        if (hasPseudoBullet) {
+          const liBeforeCs = getComputedStyle(li, "::before");
+          liBulletColor = rgb2hex(liBeforeCs.backgroundColor) || rgb2hex(liBeforeCs.color) || pseudoBulletColor;
+        }
         items.push({
           text: text.trim(),
           runs,
@@ -708,6 +718,7 @@ interface ExtractedElement {
             bottom: parseFloat(liCs.paddingBottom) || 0,
             left: parseFloat(liCs.paddingLeft) || 0,
           },
+          bulletColor: liBulletColor,
           bounds: getBounds(li),
         });
         const nested = li.querySelector("ul, ol");
@@ -784,8 +795,19 @@ interface ExtractedElement {
         if (tag === "BR") {
           parts.push({ type: "br" });
         } else if (INLINE_TAGS.includes(tag)) {
-          const pos = getComputedStyle(node as Element).position;
-          if (pos === "absolute" || pos === "fixed") continue;
+          const cs = getComputedStyle(node as Element);
+          if (cs.position === "absolute" || cs.position === "fixed") continue;
+          // Insert a space when CSS margin introduces a visual gap between
+          // inline siblings — otherwise two `<span>`s like
+          // `<span>April</span><span style="margin-left:6px">2026</span>`
+          // concatenate as "April2026" (slide_18 header).
+          const mL = parseFloat(cs.marginLeft) || 0;
+          if (mL > 2) {
+            const prev = parts[parts.length - 1];
+            if (prev && prev.type === "text" && prev.value && !/\s$/.test(prev.value)) {
+              parts.push({ type: "text", value: " " });
+            }
+          }
           parts.push({ type: "text", value: node.textContent!.replace(/[ \t\n\r\f]+/g, " ") });
         }
       }
@@ -824,6 +846,16 @@ interface ExtractedElement {
           const inListItem = !!(node as Element).closest?.("li");
           if (isBlock && !inListItem && runs.length > 0) {
             runs.push({ text: "\n", style: null });
+          }
+          // Mirror getDirectText: a margin-left on the inline child
+          // introduces a visual gap between sibling spans that otherwise
+          // would concatenate (slide_18 "April 2026").
+          const mL = parseFloat(cs.marginLeft) || 0;
+          if (mL > 2 && runs.length > 0) {
+            const prev = runs[runs.length - 1];
+            if (prev.text && !/\s$/.test(prev.text) && prev.text !== "\n") {
+              runs.push({ text: " ", style: null });
+            }
           }
           // Inline backgrounds on span runs (`.code { background: #f0f4f8 }`,
           // `.highlight { background: #fefcbf }`) — the rect emitter skips
@@ -1156,9 +1188,31 @@ interface ExtractedElement {
       if (!content || content === "" || content === '""') continue;
       const fontSize = parseFloat(pcs.fontSize) || 14;
       if (bounds.w < 4 || bounds.h < 4) continue;
+      // Absolutely-positioned pseudos with explicit left/right land at their
+      // CSS offset, left-aligned — so `.pain::before { content:'!'; left:0 }`
+      // sits at the row start, not centred across the whole host.
+      let textBounds: Bounds = bounds;
+      let textAlign: "left" | "center" = "center";
+      if (pcs.position === "absolute") {
+        const hasExplicitLeft = pcs.left && pcs.left !== "auto";
+        const hasExplicitRight = pcs.right && pcs.right !== "auto";
+        if (hasExplicitLeft || hasExplicitRight) {
+          const pb = pseudoBounds(pcs, bounds);
+          if (pb) {
+            const minGlyphW = fontSize * 1.5;
+            textBounds = {
+              x: pb.x,
+              y: pb.y,
+              w: Math.max(pb.w, minGlyphW),
+              h: Math.max(pb.h, fontSize * 1.4),
+            };
+            textAlign = "left";
+          }
+        }
+      }
       elements.push({
         type: "text",
-        bounds,
+        bounds: textBounds,
         text: content,
         style: {
           fontFamily: pcs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
@@ -1169,7 +1223,7 @@ interface ExtractedElement {
           ),
           fontStyle: pcs.fontStyle === "italic" ? "italic" : "normal",
           color: rgb2hex(pcs.color) || "#000000",
-          textAlign: "center",
+          textAlign,
           lineHeight: parseFloat(pcs.lineHeight) || fontSize * 1.2,
           textDecoration: null,
           textTransform: "none",
@@ -1420,7 +1474,22 @@ interface ExtractedElement {
     const cs = getComputedStyle(el);
     const padL = parseFloat(cs.paddingLeft) || 0;
     const padR = parseFloat(cs.paddingRight) || 0;
-    if (effectiveAlign === "start" && padL > 5 && Math.abs(padL - padR) < 3) {
+    // "Pill button" centering heuristic: CSS default text-align:start renders
+    // visually centered inside pill chips because the text line box is tight
+    // on width. Qualify as a pill when EITHER vertical padding is symmetric
+    // and > 5 (a real padded chip) OR border-radius >= h/2 (truly pill-round
+    // tag). Always require horizontal-padding symmetry + single line of text.
+    // This preserves slide_10 `.period { padding:6px 14px; radius:8 }`
+    // (padT=6 passes), slide_30 `.tag { padding:3px 10px; radius:50 }`
+    // (radius >= h/2 passes), skips slide_18 `.event { padding:2px 6px;
+    // radius:4 }` (both fail) and slide_30 `.code-block` (multi-line).
+    const padT2 = parseFloat(cs.paddingTop) || 0;
+    const padB2 = parseFloat(cs.paddingBottom) || 0;
+    const lineH2 = style.lineHeight || (style.fontSize || 14) * 1.2;
+    const padVSymmetric = padT2 > 5 && Math.abs(padT2 - padB2) < 3;
+    const fullyRoundedPill = (style.borderRadius || 0) >= bounds.h / 2;
+    if (effectiveAlign === "start" && padL > 5 && Math.abs(padL - padR) < 3 &&
+        bounds.h < 2 * lineH2 && (padVSymmetric || fullyRoundedPill)) {
       effectiveAlign = "center";
     }
 
@@ -1455,6 +1524,24 @@ interface ExtractedElement {
       if (borderAdjust > 0) {
         textBounds = { ...bounds, h: Math.max(bounds.h - borderAdjust, style.fontSize || 10) };
       }
+      // Inset horizontal padding so pptxgenjs renders inside the CSS content
+      // box. Without this, right-aligned text (slide_10 `.y-label`
+      // `padding-right:8px`) hugs the outer right edge instead of ending 8px
+      // in, and left-aligned text with a decorative border (slide_30
+      // `.quote` `border-left:3px; padding-left:14px`) butts against the
+      // border instead of leaving the 14px gap. Skip inline tags since their
+      // bbox is already tight on the text.
+      if (!isInlineTag && (padL > 2 || padR > 2)) {
+        const minW = Math.max(style.fontSize || 10, 10);
+        const insetW = Math.max(textBounds.w - padL - padR, minW);
+        textBounds = { ...textBounds, x: textBounds.x + padL, w: insetW };
+      }
+      // bgColorBehind: nearest ancestor solid bg, sampled only when the
+      // element is semi-transparent. Google Slides drops <a:alpha> on text
+      // <a:solidFill> at PPTX import, so the converter folds opacity into
+      // the color by blending it against this bg instead of emitting alpha.
+      // Restored for slide_06 decorative quote watermark after commit 1be0daa
+      // broke it by switching to pptxgenjs native transparency.
       const baseStyle = {
         fontFamily: style.fontFamily,
         fontSize: style.fontSize,
@@ -1469,6 +1556,7 @@ interface ExtractedElement {
         paddingLeft: padLeft > 2 ? padLeft : 0,
         paddingTop: padTop > 2 ? padTop : 0,
         opacity: style.opacity !== undefined && style.opacity < 1 ? style.opacity : undefined,
+        bgColorBehind: style.opacity !== undefined && style.opacity < 1 ? detectBgColorBelow(el) : undefined,
       };
       const runs = getTextRuns(el, style);
       const hasStyledRuns = runs.some(r => r.style !== null);
