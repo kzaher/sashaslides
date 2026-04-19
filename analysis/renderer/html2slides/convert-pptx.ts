@@ -199,7 +199,22 @@ function emitStyledText(
     line: { type: "none" },
     margin: 0,
   };
-  if (s.lineHeight && s.fontSize) commonOpts.lineSpacingMultiple = s.lineHeight / s.fontSize;
+  if (s.lineHeight && s.fontSize) {
+    // Vertically-centered single-line text (e.g. CTA pill button
+    // "Get Started") looks too high in Slides when lineSpacingMultiple > 1:
+    // Slides centers the full line-box including leading, but apportions
+    // the extra leading below the glyphs, pushing visible text above the
+    // geometric center. Chrome measured +0 text-vs-box offset; Slides
+    // rendered at ~-7 px with spcPct=120% on slide_01 CTAs. Drop the
+    // multiplier when the extractor flagged `verticallyCentered` (single
+    // line of text sitting in a symmetrically-padded box) so the line-box
+    // equals the glyph box and anchor=ctr centers the glyphs, not the
+    // inflated leading. Multi-line blocks keep 1.2 for readable spacing.
+    const isSingleLineCentered = valign === "middle" && el.verticallyCentered === true;
+    if (!isSingleLineCentered) {
+      commonOpts.lineSpacingMultiple = s.lineHeight / s.fontSize;
+    }
+  }
   if (rotateDeg) commonOpts.rotate = rotateDeg;
 
   if (el.runs && el.runs.length > 0) {
