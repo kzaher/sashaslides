@@ -752,7 +752,20 @@ const server = createServer((req, res) => {
   if (url.pathname === "/img") {
     const imgPath = url.searchParams.get("path") || "";
     if (existsSync(imgPath) && imgPath.endsWith(".png")) {
-      res.writeHead(200, { "Content-Type": "image/png" });
+      // ETag based on mtime so browsers refetch after regen overwrites the
+      // thumbnail on disk. Without this, Chrome caches the previous render
+      // indefinitely and the rating UI shows stale content — reviewer thinks
+      // a fix didn't land when actually it did.
+      const st = statSync(imgPath);
+      const etag = `"${st.mtimeMs.toFixed(0)}-${st.size}"`;
+      if (req.headers["if-none-match"] === etag) {
+        res.writeHead(304); res.end(); return;
+      }
+      res.writeHead(200, {
+        "Content-Type": "image/png",
+        "Cache-Control": "no-cache, must-revalidate",
+        "ETag": etag,
+      });
       res.end(readFileSync(imgPath));
       return;
     }
