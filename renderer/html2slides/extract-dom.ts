@@ -1455,6 +1455,10 @@ interface ExtractedElement {
       if (borderAdjust > 0) {
         textBounds = { ...bounds, h: Math.max(bounds.h - borderAdjust, style.fontSize || 10) };
       }
+      // bgColorBehind: nearest ancestor solid bg, sampled only when the
+      // element is semi-transparent. Google Slides drops <a:alpha> on text
+      // <a:solidFill> at PPTX import, so the converter folds opacity into
+      // the color by blending it against this bg instead of emitting alpha.
       const baseStyle = {
         fontFamily: style.fontFamily,
         fontSize: style.fontSize,
@@ -1469,6 +1473,7 @@ interface ExtractedElement {
         paddingLeft: padLeft > 2 ? padLeft : 0,
         paddingTop: padTop > 2 ? padTop : 0,
         opacity: style.opacity !== undefined && style.opacity < 1 ? style.opacity : undefined,
+        bgColorBehind: style.opacity !== undefined && style.opacity < 1 ? detectBgColorBelow(el) : undefined,
       };
       const runs = getTextRuns(el, style);
       const hasStyledRuns = runs.some(r => r.style !== null);

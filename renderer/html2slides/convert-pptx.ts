@@ -62,16 +62,26 @@ const FONT_MAP: Record<string, string> = {
 };
 function mapFont(font: string): string { return FONT_MAP[font] || font; }
 
-// DEPRECATED — replaced by pptxgenjs native `transparency` field which
-// handles any background color correctly. Kept for reference only.
-function blendOpacity(hexColor: string, op: number): string {
-  const m = hexColor.replace("#", "").match(/.{2}/g);
-  if (!m || m.length < 3) return hexColor;
-  const [r, g, bl] = m.map(x => parseInt(x, 16));
-  const br = Math.round(r * op + 255 * (1 - op));
-  const bg = Math.round(g * op + 255 * (1 - op));
-  const bb = Math.round(bl * op + 255 * (1 - op));
-  return "#" + [br, bg, bb].map(v => v.toString(16).padStart(2, "0")).join("");
+// Approximate CSS opacity by blending the foreground toward a background
+// color. Google Slides silently drops <a:alpha> inside text <a:solidFill>
+// on PPTX import, so native `transparency` (which does work in PowerPoint)
+// leaves Slides-targeted renders fully opaque — the regression on slide_06
+// `.quote-mark` (faint indigo watermark behind italic quote). Blending
+// against the nearest ancestor bg (captured by the extractor as
+// `bgColorBehind`) works on any renderer and handles both light cards and
+// dark HERO watermarks correctly.
+function blendOpacity(hexColor: string, op: number, bgHex: string = "#ffffff"): string {
+  const parse = (h: string) => {
+    const m = h.replace("#", "").match(/.{2}/g);
+    if (!m || m.length < 3) return null;
+    return m.map(x => parseInt(x, 16));
+  };
+  const fg = parse(hexColor);
+  const bg = parse(bgHex) || [255, 255, 255];
+  if (!fg) return hexColor;
+  const mix = (f: number, b: number) => Math.round(f * op + b * (1 - op));
+  return "#" + [mix(fg[0], bg[0]), mix(fg[1], bg[1]), mix(fg[2], bg[2])]
+    .map(v => v.toString(16).padStart(2, "0")).join("");
 }
 
 // Slack constant: Slides measures fonts a hair wider than Chrome, so a text
@@ -84,26 +94,29 @@ const SLACK_PX = 12;
 // Map a single inline run to a pptxgenjs text-run options object. Honors the
 // standard cascade rs.X || parent.X plus highlight (CSS span background),
 // subscript/superscript, underline, strike, and uppercase transform.
-// `transparency` (0-100) is applied when the element has CSS opacity < 1.
+// `opacityBlend` folds CSS opacity into the run color by blending toward
+// the detected ancestor background (Google Slides drops <a:alpha> on text
+// solidFill, so native transparency can't be used).
 function mapRunOptions(
   run: any,
   parentStyle: any,
   uppercase: boolean,
   defaults: { color: string; fontSize: number },
-  transparency?: number,
+  opacityBlend?: { op: number; bg: string } | null,
 ): { text: string; options: any } {
   const rs = run.style || {};
   const ps = parentStyle || {};
+  const rawColor = rs.color || ps.color || defaults.color;
+  const blendedColor = opacityBlend ? blendOpacity(rawColor, opacityBlend.op, opacityBlend.bg) : rawColor;
   const opts: any = {
     fontFace: mapFont(rs.fontFamily || ps.fontFamily || "Arial"),
     fontSize: (rs.fontSize || ps.fontSize || defaults.fontSize) * PX2PT,
-    color: hexToRgb(rs.color || ps.color || defaults.color),
+    color: hexToRgb(blendedColor),
     bold: rs.fontWeight === "bold" || (!rs.fontWeight && ps.fontWeight === "bold"),
     italic: rs.fontStyle === "italic" || (!rs.fontStyle && ps.fontStyle === "italic"),
     underline: { style: (rs.textDecoration === "underline" || (!rs.textDecoration && ps.textDecoration === "underline")) ? "sng" : "none" },
     strike: (rs.textDecoration === "line-through" || (!rs.textDecoration && ps.textDecoration === "line-through")) ? "sngStrike" : undefined,
   };
-  if (transparency && transparency > 0) opts.transparency = transparency;
   if (rs.bgColor) opts.highlight = hexToRgb(rs.bgColor);
   if (rs.verticalAlign === "sub") opts.subscript = true;
   else if (rs.verticalAlign === "super") opts.superscript = true;
@@ -184,12 +197,17 @@ function emitStyledText(
     }
   }
 
-  // Use native pptxgenjs `transparency` (0-100) for CSS opacity instead of
-  // blending toward white. This renders correctly regardless of the parent
-  // background color (critical for dark-bg watermarks like slide_09 HERO).
-  const textTransparency = applyOpacityBlend && typeof s.opacity === "number" && s.opacity < 1
-    ? Math.round((1 - s.opacity) * 100)
-    : undefined;
+  // Fold CSS opacity into the text color by blending it against the detected
+  // ancestor background (`bgColorBehind`, sampled by the extractor). Native
+  // pptxgenjs `transparency` would emit <a:alpha> on the run's <a:solidFill>,
+  // but Google Slides drops that on PPTX import and leaves the glyph fully
+  // opaque — the slide_06 `.quote-mark` regression. Blending handles both
+  // light cards (slide_06 → faint lavender on white) and dark-bg watermarks
+  // (slide_09 HERO → faint dark on dark) uniformly, on any renderer.
+  const opacityBlend: { op: number; bg: string } | null =
+    applyOpacityBlend && typeof s.opacity === "number" && s.opacity < 1
+      ? { op: s.opacity, bg: s.bgColorBehind || "#ffffff" }
+      : null;
 
   const commonOpts: any = {
     x: px2in(bx), y: px2in(by), w: px2in(bw), h: px2in(bh),
@@ -231,22 +249,23 @@ function emitStyledText(
   if (el.runs && el.runs.length > 0) {
     const textRuns = el.runs
       .filter((r: any) => r.text.length > 0)
-      .map((run: any) => mapRunOptions(run, s, xfm, defaults, textTransparency));
+      .map((run: any) => mapRunOptions(run, s, xfm, defaults, opacityBlend));
     slide.addText(textRuns, commonOpts);
   } else {
     let text = el.text || "";
     if (xfm) text = text.toUpperCase();
+    const rawColor = s.color || defaults.color;
+    const blendedColor = opacityBlend ? blendOpacity(rawColor, opacityBlend.op, opacityBlend.bg) : rawColor;
     const textOpts: any = {
       ...commonOpts,
       fontSize: (s.fontSize || defaults.fontSize) * PX2PT,
       fontFace: mapFont(s.fontFamily || "Arial"),
-      color: hexToRgb(s.color || defaults.color),
+      color: hexToRgb(blendedColor),
       bold: s.fontWeight === "bold",
       italic: s.fontStyle === "italic",
       underline: s.textDecoration === "underline" ? { style: "sng" } : undefined,
       strike: s.textDecoration === "line-through" ? "sngStrike" : undefined,
     };
-    if (textTransparency && textTransparency > 0) textOpts.transparency = textTransparency;
     slide.addText(text, textOpts);
   }
 }
