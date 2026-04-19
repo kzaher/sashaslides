@@ -707,15 +707,23 @@ interface ExtractedElement {
         // Preserve styled inline child runs (e.g. <span class="check">✓</span>) so
         // colors on ✓/✗ prefixes survive into the rendered slide.
         const runs = getTextRuns(li, liStyle);
-        // Per-item pseudo-bullet color. `.bullet-list li.red::before { background: #e53e3e }`
-        // overrides the list-default on a per-row basis; the list-level color
-        // captured above only sees the first li. Probe each li's ::before
-        // backgroundColor individually so red/green/orange markers survive
-        // (slide_30 Key Priorities).
-        let liBulletColor: string | null = null;
+        // Per-item ::before colour: lists like slide_30 give each <li> its own
+        // coloured 8×8 dot via `li.red::before { background: #e53e3e }`. The
+        // top-level `pseudoBulletColor` only carries the FIRST item's colour,
+        // so per-item colour must be captured here for the converter to emit
+        // a coloured marker run per row. We gate both on `hasPseudoBullet`
+        // (cheap early-out, set when the list has any pseudo-bullet) AND on
+        // the individual ::before having `content` set (inside try/catch so
+        // browsers that throw on content-less pseudos don't explode).
+        let bulletColor: string | null = null;
         if (hasPseudoBullet) {
-          const liBeforeCs = getComputedStyle(li, "::before");
-          liBulletColor = rgb2hex(liBeforeCs.backgroundColor) || rgb2hex(liBeforeCs.color) || pseudoBulletColor;
+          try {
+            const liBeforeCs = getComputedStyle(li, "::before");
+            const beforeContent = liBeforeCs.content;
+            if (beforeContent && beforeContent !== "none" && beforeContent !== "normal") {
+              bulletColor = rgb2hex(liBeforeCs.backgroundColor) || rgb2hex(liBeforeCs.color) || pseudoBulletColor;
+            }
+          } catch (_) {}
         }
         items.push({
           text: text.trim(),
@@ -740,13 +748,13 @@ interface ExtractedElement {
           borderSides: liStyle.borderSides,
           borderRadius: liStyle.borderRadius,
           cornerRadii: liStyle.cornerRadii,
+          bulletColor,
           padding: {
             top: parseFloat(liCs.paddingTop) || 0,
             right: parseFloat(liCs.paddingRight) || 0,
             bottom: parseFloat(liCs.paddingBottom) || 0,
             left: parseFloat(liCs.paddingLeft) || 0,
           },
-          bulletColor: liBulletColor,
           bounds: getBounds(li),
         });
         const nested = li.querySelector("ul, ol");
@@ -823,20 +831,25 @@ interface ExtractedElement {
         if (tag === "BR") {
           parts.push({ type: "br" });
         } else if (INLINE_TAGS.includes(tag)) {
-          const cs = getComputedStyle(node as Element);
-          if (cs.position === "absolute" || cs.position === "fixed") continue;
-          // Insert a space when CSS margin introduces a visual gap between
-          // inline siblings — otherwise two `<span>`s like
-          // `<span>April</span><span style="margin-left:6px">2026</span>`
-          // concatenate as "April2026" (slide_18 header).
-          const mL = parseFloat(cs.marginLeft) || 0;
-          if (mL > 2) {
+          const childCs = getComputedStyle(node as Element);
+          if (childCs.position === "absolute" || childCs.position === "fixed") continue;
+          // Adjacent inline siblings separated only by `margin-left` (no
+          // whitespace text node between them, e.g. <span>April</span><span
+          // style="margin-left:6px">2026</span>) collapse into one token if
+          // we just concatenate. Insert a single space when the previous
+          // emitted text doesn't already end with whitespace and the new
+          // text doesn't already start with whitespace — prevents double
+          // spaces while still fixing slide_18's "April2026" collision.
+          const ml = parseFloat(childCs.marginLeft) || 0;
+          const text = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
+          if (ml > 2 && parts.length > 0) {
             const prev = parts[parts.length - 1];
-            if (prev && prev.type === "text" && prev.value && !/\s$/.test(prev.value)) {
+            const prevVal = prev.type === "text" ? (prev.value || "") : "";
+            if (prevVal && !/\s$/.test(prevVal) && !/^\s/.test(text)) {
               parts.push({ type: "text", value: " " });
             }
           }
-          parts.push({ type: "text", value: node.textContent!.replace(/[ \t\n\r\f]+/g, " ") });
+          parts.push({ type: "text", value: text });
         }
       }
     }
@@ -917,6 +930,18 @@ interface ExtractedElement {
             !!childStyle.bgColor ||
             childStyle.verticalAlign !== "baseline";
           const runText = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
+          // Insert a separator space when this inline span starts with a
+          // CSS `margin-left` gap and the previous run doesn't already end
+          // with whitespace (mirrors getDirectText). Without this, adjacent
+          // styled spans like <span>April</span><span style="margin-left:6px">2026</span>
+          // collapse into "April2026".
+          const ml = parseFloat(cs.marginLeft) || 0;
+          if (ml > 2 && runs.length > 0 && runText && !/^\s/.test(runText)) {
+            const prev = runs[runs.length - 1];
+            if (prev.text && !/\s$/.test(prev.text)) {
+              runs.push({ text: " ", style: null });
+            }
+          }
           runs.push({ text: runText, style: differs ? childStyle : null });
         } else {
           // Block-level children (div, p, etc.) — recurse so nested text
@@ -1528,20 +1553,28 @@ interface ExtractedElement {
     const padR = parseFloat(cs.paddingRight) || 0;
     // "Pill button" centering heuristic: CSS default text-align:start renders
     // visually centered inside pill chips because the text line box is tight
-    // on width. Qualify as a pill when EITHER vertical padding is symmetric
-    // and > 5 (a real padded chip) OR border-radius >= h/2 (truly pill-round
-    // tag). Always require horizontal-padding symmetry + single line of text.
-    // This preserves slide_10 `.period { padding:6px 14px; radius:8 }`
-    // (padT=6 passes), slide_30 `.tag { padding:3px 10px; radius:50 }`
-    // (radius >= h/2 passes), skips slide_18 `.event { padding:2px 6px;
-    // radius:4 }` (both fail) and slide_30 `.code-block` (multi-line).
+    // on width. Qualify as a pill when:
+    //   (1) horizontal padding is symmetric and > 5, AND
+    //   (2) EITHER vertical padding is symmetric and > 5 (a real padded chip)
+    //       OR border-radius >= h/2 (truly pill-round tag), AND
+    //   (3) bounds.h is under 2 lines tall (single-line content), AND
+    //   (4) the element isn't a clipped-overflow "fitted" container
+    //       (white-space:nowrap + overflow:hidden, like calendar event pills
+    //       on slide_18) and doesn't contain a <br> (multi-line blocks like
+    //       slide_30 .code-block). Both visually staircase when centered.
+    // This preserves slide_10 `.period { padding:6px 14px; radius:8 }`,
+    // slide_30 `.tag { padding:3px 10px; radius:50 }` (radius >= h/2).
     const padT2 = parseFloat(cs.paddingTop) || 0;
     const padB2 = parseFloat(cs.paddingBottom) || 0;
     const lineH2 = style.lineHeight || (style.fontSize || 14) * 1.2;
     const padVSymmetric = padT2 > 5 && Math.abs(padT2 - padB2) < 3;
     const fullyRoundedPill = (style.borderRadius || 0) >= bounds.h / 2;
+    const isClippedFitted = cs.whiteSpace === "nowrap"
+      && (cs.overflow === "hidden" || cs.overflowX === "hidden");
+    const hasLineBreaks = el.querySelector ? el.querySelector("br") !== null : false;
     if (effectiveAlign === "start" && padL > 5 && Math.abs(padL - padR) < 3 &&
-        bounds.h < 2 * lineH2 && (padVSymmetric || fullyRoundedPill)) {
+        bounds.h < 2 * lineH2 && (padVSymmetric || fullyRoundedPill) &&
+        !isClippedFitted && !hasLineBreaks) {
       effectiveAlign = "center";
     }
 
@@ -1549,6 +1582,7 @@ interface ExtractedElement {
     if (directText && directText.trim()) {
       seen.add(el);
       const padLeft = parseFloat(cs.paddingLeft) || 0;
+      const padRight = parseFloat(cs.paddingRight) || 0;
       const padTop = parseFloat(cs.paddingTop) || 0;
       // Border-bottom on inline text elements (e.g. active nav-link underline)
       // inflates getBoundingClientRect height. Subtract it so the text box
@@ -1610,6 +1644,7 @@ interface ExtractedElement {
         textTransform: style.textTransform,
         letterSpacing: style.letterSpacing,
         paddingLeft: padLeft > 2 ? padLeft : 0,
+        paddingRight: padRight > 2 ? padRight : 0,
         paddingTop: padTop > 2 ? padTop : 0,
         opacity: style.opacity !== undefined && style.opacity < 1 ? style.opacity : undefined,
         bgColorBehind: style.opacity !== undefined && style.opacity < 1 ? detectBgColorBelow(el) : undefined,

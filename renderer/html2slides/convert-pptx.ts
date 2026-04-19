@@ -182,6 +182,22 @@ function emitStyledText(
     bw = natW; bh = natH;
     rotateDeg = ((rot % 360) + 360) % 360;
   } else {
+    // Honor CSS horizontal padding: when the source element has
+    // `padding-left`/`padding-right` (e.g. `.quote { padding-left: 14px }`,
+    // y-axis label `padding-right: 8px`), `bounds` is the outer (border-box)
+    // rect from getBoundingClientRect. Without inset, text glues to the
+    // outer edge — right-aligned labels lose their gutter to the chart, and
+    // padded blockquotes overlap their `border-left` accent. Shrink the
+    // textbox to the inner content area before slack/emit so left/right
+    // alignment lands at the padded edges.
+    const padL = s.paddingLeft || 0;
+    const padR = s.paddingRight || 0;
+    if (padL > 0 || padR > 0) {
+      const shrinkL = Math.min(padL, Math.max(0, bw - 10));
+      const shrinkR = Math.min(padR, Math.max(0, bw - 10 - shrinkL));
+      bx += shrinkL;
+      bw -= shrinkL + shrinkR;
+    }
     // Single-line guard: slack only helps when the text is one line (last
     // glyph gets breathing room against Slides' wider measurement). For
     // multi-line text, Chrome's wrap is already baked into `bounds`; widening
@@ -896,21 +912,23 @@ function buildPptx(
             const anyItemHasStyledRuns = items.some((it: any) =>
               (it.runs || []).length > 0 && (it.runs || []).some((r: any) => r.style !== null)
             );
-            // Per-item colored pseudo-bullets (slide_30 `li.red::before`
-            // etc.) require a text-run marker because pptxgenjs' native
-            // `bullet` applies one color to the whole list. When the
-            // extractor captured any per-item bulletColor, switch to
-            // prepended markers regardless of run styling.
-            const hasColoredBullets = !ordered && !!el.hasPseudoBullet &&
-              items.some((it: any) => !!it.bulletColor);
-            const useNativeBullet = !anyItemHasStyledRuns && !hasColoredBullets;
+            // Per-item ::before bullet colours (e.g. slide_30 Key Priorities,
+            // where each <li.red>/<li.green>/etc gets its own coloured 8×8
+            // dot). pptxgenjs' native `bullet:` paints every marker in the
+            // paragraph's text colour, so when items carry distinct bullet
+            // colours we must emit the marker as a separately-coloured run
+            // instead and skip the native bullet entirely.
+            const anyPerItemBulletColor = !ordered && items.some((it: any) => !!it.bulletColor);
+            const useNativeBullet = !anyItemHasStyledRuns && !anyPerItemBulletColor;
             const paragraphs = items.map((it: any, ii: number) => {
               const marker = ordered ? `${ii + 1}.  ` : "•  ";
-              const markerColor = !ordered && it.bulletColor ? it.bulletColor : (it.color || listStyle.color || "#333333");
+              const markerColor = it.bulletColor || it.color || listStyle.color || "#333333";
               const rs = (it.runs && it.runs.length > 0) ? it.runs.filter((r: any) => r.text.length > 0) : null;
               if (rs && rs.length > 0 && rs.some((r: any) => r.style !== null)) {
                 const out: any[] = [];
                 if (!useNativeBullet) {
+                  // Plain marker prefix coloured per-item (falls back to the
+                  // item's text colour when there is no per-item bullet).
                   out.push({
                     text: marker,
                     options: {
@@ -949,9 +967,12 @@ function buildPptx(
                 baseOpts.bullet = ordered ? { type: "number", indent: 12 } : { indent: 12 };
                 return [{ text: it.text, options: baseOpts }];
               }
-              // Colored marker prefix when per-item bulletColor differs —
-              // emit marker as its own run so only the "●" carries the color.
-              if (!ordered && it.bulletColor) {
+              // Colored marker prefix when the list carries per-item bullet
+              // colours (e.g. slide_30 Key Priorities). Split into a
+              // coloured marker run + the item-coloured text run so each
+              // row's "●" matches its CSS ::before background while body
+              // text keeps the item colour.
+              if (!ordered && anyPerItemBulletColor) {
                 return [
                   {
                     text: marker,
@@ -961,7 +982,7 @@ function buildPptx(
                       color: hexToRgb(markerColor),
                     },
                   },
-                  { text: it.text, options: baseOpts },
+                  { text: it.text, options: { ...baseOpts } },
                 ];
               }
               return [{ text: marker + it.text, options: baseOpts }];
