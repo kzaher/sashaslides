@@ -14,9 +14,23 @@ mkdir -p "$OUT/originals" "$OUT/slides" "$OUT/diffs"
 TITLE="basics_$(date +%s)"
 cd "$HERE"
 
+fail() { echo "❌ FATAL: $*" >&2; exit 1; }
+
+# Track mtime of slides dir so we can verify thumbnails were actually rewritten.
+SLIDES_BEFORE=$(stat -c %Y "$OUT/slides" 2>/dev/null || echo 0)
+
 echo "=== Convert + upload ==="
-npx tsx convert-pptx.ts e2e/fixtures-basic --title "$TITLE" --out "$OUT/basics.pptx" 2>&1 | tee "$OUT/convert.log"
-PRES_ID=$(grep -oE 'presentation/d/[A-Za-z0-9_-]+' "$OUT/convert.log" | head -1 | cut -d/ -f3)
+# `| tee` captures output AND lets it stream to stdout. `set -o pipefail`
+# causes the pipeline to exit non-zero if convert-pptx fails, but `set -e`
+# then aborts silently. Use `if !` so we always reach an explicit fail()
+# with a pointer to the log. PIPESTATUS[0] gives the underlying npx exit.
+if ! npx tsx convert-pptx.ts e2e/fixtures-basic --title "$TITLE" --out "$OUT/basics.pptx" 2>&1 | tee "$OUT/convert.log"; then
+  fail "convert-pptx.ts exited non-zero (${PIPESTATUS[0]:-?}). Tail of log:
+$(tail -8 "$OUT/convert.log")"
+fi
+
+PRES_ID=$(grep -oE 'presentation/d/[A-Za-z0-9_-]+' "$OUT/convert.log" | head -1 | cut -d/ -f3 || true)
+[ -n "${PRES_ID:-}" ] || fail "convert-pptx completed but no presentation URL was printed. Check $OUT/convert.log (auth failure? upload failure?)"
 echo "Presentation: $PRES_ID"
 cat > "$OUT/meta.json" <<EOF
 { "htmlDir": "$HERE/e2e/fixtures-basic", "presentationId": "$PRES_ID" }
@@ -25,10 +39,24 @@ EOF
 echo "=== Screenshot originals + export thumbs (parallel) ==="
 npx tsx shot-originals.ts e2e/fixtures-basic "$OUT/originals" > "$OUT/shot.log" 2>&1 &
 SHOT_PID=$!
-npx tsx export-thumbs.ts "$PRES_ID" "$OUT/slides" > "$OUT/thumbs.log" 2>&1
-wait $SHOT_PID
+if ! npx tsx export-thumbs.ts "$PRES_ID" "$OUT/slides" > "$OUT/thumbs.log" 2>&1; then
+  wait $SHOT_PID || true
+  fail "export-thumbs.ts failed. Tail of log:
+$(tail -8 "$OUT/thumbs.log")"
+fi
+if ! wait $SHOT_PID; then
+  fail "shot-originals.ts failed. Tail of log:
+$(tail -8 "$OUT/shot.log")"
+fi
+
+# Verify at least one thumbnail was actually regenerated (mtime advanced).
+SLIDES_AFTER=$(stat -c %Y "$OUT/slides" 2>/dev/null || echo 0)
+[ "$SLIDES_AFTER" -gt "$SLIDES_BEFORE" ] || fail "slides dir mtime did not advance — thumbnails not updated. See $OUT/thumbs.log"
 
 echo "=== Pixel-perfect goldens check ==="
+# check-goldens intentionally exits non-zero when regressions are found so
+# CI can gate on it; we `|| true` ONLY here because the goal is to print the
+# summary + diffs, not to abort.
 npx tsx check-goldens.ts "$OUT/slides" "$OUT/diffs" --originals "$OUT/originals" || true
 
 echo ""
