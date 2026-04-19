@@ -1455,6 +1455,25 @@ interface ExtractedElement {
       if (borderAdjust > 0) {
         textBounds = { ...bounds, h: Math.max(bounds.h - borderAdjust, style.fontSize || 10) };
       }
+      // Blockquote pattern: `border-left: Npx solid X; padding-left: Ypx`.
+      // getBoundingClientRect puts bounds.x at the outer edge of the border,
+      // and border-left is drawn separately as a `line` element at that same
+      // x. Without this shift the text box starts on top of the bar, so the
+      // first glyph abuts (or overlaps) the border. Fire only when BOTH
+      // borderLeft and paddingLeft are present so wave-1c-style regressions
+      // on bullet-list items (`padding-left` reserves room for an absolutely
+      // positioned `::before` marker, no border) don't fire.
+      const blL = style.borderLeft || 0;
+      if (blL > 0 && padLeft > 2) {
+        const shift = blL + padLeft;
+        if (textBounds.w > shift + 20) {
+          textBounds = {
+            ...textBounds,
+            x: textBounds.x + shift,
+            w: textBounds.w - shift,
+          };
+        }
+      }
       const baseStyle = {
         fontFamily: style.fontFamily,
         fontSize: style.fontSize,

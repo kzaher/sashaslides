@@ -1290,17 +1290,24 @@ function buildPptx(
               }
 
               // Cell text (with padding + alignment).
-              // When a cell is clipped (e.g. wrapper overflow:hidden) padding
-              // can exceed the available height/width, yielding a 0-sized text
-              // box and invisible text.  Fall back to the full cell bounds when
-              // padding would consume the entire dimension.
+              // When a cell is clipped (e.g. wrapper overflow:hidden with a
+              // rounded corner) padding can exceed the available height or
+              // width, yielding a 0-sized text box and invisible text. Clamp
+              // each axis independently so a clipped-height cell still keeps
+              // its horizontal padding (slide_05 summary row: rounded-wrapper
+              // clip shortens the last row's height, but the 20-px left/right
+              // padding still fits comfortably inside the cell's width).
               const pad = cell.padding || { top: 0, right: 0, bottom: 0, left: 0 };
               const padW = pad.left + pad.right;
               const padH = pad.top + pad.bottom;
-              const tb = padH < cb.h && padW < cb.w
-                ? { x: cb.x + pad.left, y: cb.y + pad.top,
-                    w: cb.w - padW, h: cb.h - padH }
-                : { x: cb.x, y: cb.y, w: cb.w, h: cb.h };
+              const useH = padW < cb.w;
+              const useV = padH < cb.h;
+              const tb = {
+                x: useH ? cb.x + pad.left : cb.x,
+                y: useV ? cb.y + pad.top : cb.y,
+                w: useH ? cb.w - padW : cb.w,
+                h: useV ? cb.h - padH : cb.h,
+              };
               const text = cell.text || "";
               if (text.trim().length > 0) {
                 const align = cs.textAlign === "center" ? "center" : cs.textAlign === "right" ? "right" : "left";
