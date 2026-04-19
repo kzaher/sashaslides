@@ -30,6 +30,11 @@ Thumbs.db
 venv/
 .venv/
 
+# Auth tokens / OAuth credentials (never commit)
+.auth/*.json
+.auth/tokens.json
+.auth/google_oauth.json
+
 # Data
 data/
 *.db
