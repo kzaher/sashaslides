@@ -181,8 +181,14 @@ interface ElementStyle {
   clipPath: string | null;
   zIndex: number;
   position: string;
-  // Box shadow parsed components (null if no shadow)
+  // Box shadow parsed components (null if no shadow). `boxShadow` is the
+  // FIRST non-ring layer (used as an OOXML drop-shadow in convert-pptx).
+  // `shadowRings` enumerates every spread-only layer (`0 0 0 Npx color` or
+  // `0 0 Bpx Spx color` with spread > 0) — these can't be expressed as an
+  // OOXML shadow effect, so they're materialized as concentric halo rects
+  // painted behind the element in emitRect.
   boxShadow: { offsetX: number; offsetY: number; blur: number; spread: number; color: string | null; alpha: number } | null;
+  shadowRings: { spread: number; blur: number; color: string; alpha: number }[];
   // CSS transform rotation in degrees clockwise. 0 when no rotation. Extracted
   // from the computed `transform` matrix via atan2(b,a); ignores translation
   // and scale. Paired with `naturalWidth`/`naturalHeight` (pre-transform layout
@@ -460,21 +466,43 @@ interface ExtractedElement {
       })(),
       naturalWidth: (el as HTMLElement).offsetWidth || elBounds.width,
       naturalHeight: (el as HTMLElement).offsetHeight || elBounds.height,
-      // Parse box-shadow: offsetX offsetY blur spread color
-      boxShadow: (() => {
+      // Parse box-shadow — may be a comma-separated list of layers. `boxShadow`
+      // returns the FIRST non-ring (drop-shadow-style) layer; `shadowRings`
+      // returns every spread-only layer, which emitRect materializes as
+      // concentric halo rects (OOXML has no equivalent shadow effect).
+      ...(() => {
         const sh = cs.boxShadow;
-        if (!sh || sh === "none") return null;
-        const nums = sh.match(/(-?\d+(?:\.\d+)?)px/g);
-        if (!nums || nums.length < 2) return null;
-        const vals = nums.map(n => parseFloat(n));
-        const rgbaMatch = sh.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-        const alpha = rgbaMatch && rgbaMatch[4] !== undefined ? parseFloat(rgbaMatch[4]) : 1;
-        return {
-          offsetX: vals[0], offsetY: vals[1],
-          blur: vals[2] || 0, spread: vals[3] || 0,
-          color: rgb2hex(sh) || "#000000",
-          alpha,
-        };
+        if (!sh || sh === "none") return { boxShadow: null, shadowRings: [] as any[] };
+        // Split on top-level commas (never inside rgba()).
+        const parts: string[] = [];
+        let depth = 0, buf = "";
+        for (const ch of sh) {
+          if (ch === "(") depth++;
+          else if (ch === ")") depth--;
+          if (ch === "," && depth === 0) { parts.push(buf.trim()); buf = ""; }
+          else buf += ch;
+        }
+        if (buf.trim()) parts.push(buf.trim());
+        const layers = parts.map(p => {
+          const nums = p.match(/(-?\d+(?:\.\d+)?)px/g);
+          if (!nums || nums.length < 2) return null;
+          const vals = nums.map(n => parseFloat(n));
+          const rgbaMatch = p.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+          const alpha = rgbaMatch && rgbaMatch[4] !== undefined ? parseFloat(rgbaMatch[4]) : 1;
+          return {
+            offsetX: vals[0], offsetY: vals[1],
+            blur: vals[2] || 0, spread: vals[3] || 0,
+            color: rgb2hex(p) || "#000000",
+            alpha,
+          };
+        }).filter(Boolean) as any[];
+        // Ring = offset=0 and spread>0. These can't be expressed as a PPTX
+        // shadow effect; emit as concentric halo rects instead.
+        const rings = layers
+          .filter(l => l.offsetX === 0 && l.offsetY === 0 && l.spread > 0)
+          .map(l => ({ spread: l.spread, blur: l.blur, color: l.color, alpha: l.alpha }));
+        const drop = layers.find(l => !(l.offsetX === 0 && l.offsetY === 0 && l.spread > 0)) || null;
+        return { boxShadow: drop, shadowRings: rings };
       })(),
     };
   }
@@ -1030,6 +1058,30 @@ interface ExtractedElement {
      // (e.g. slide_28's `.badge.opacity-50 { opacity: 0.5 }`) render faded.
     const bgA = (s as any).bgAlpha ?? 1;
     const opA = typeof s.opacity === "number" && s.opacity < 1 ? s.opacity : 1;
+    // Spread-only box-shadow layers (`0 0 0 Npx color`) are concentric halo
+    // rings that OOXML's shadow effect can't express — materialize them as
+    // solid concentric rects painted BEHIND the element. CSS paints later
+    // layers first, so emit in reverse: the outermost ring goes down first,
+    // then inner rings on top, then the element last.
+    const rings = (s as any).shadowRings as { spread: number; blur: number; color: string; alpha: number }[] | undefined;
+    if (rings && rings.length) {
+      for (let i = rings.length - 1; i >= 0; i--) {
+        const ring = rings[i];
+        const sp = ring.spread;
+        const hb: Bounds = { x: b.x - sp, y: b.y - sp, w: b.w + 2 * sp, h: b.h + 2 * sp };
+        const haloR = s.borderRadius + sp;
+        elements.push({
+          type: "rect", bounds: hb, fill: ring.color,
+          fillAlpha: ring.alpha * opA,
+          gradient: null,
+          borderRadius: haloR,
+          cornerRadii: { tl: haloR, tr: haloR, br: haloR, bl: haloR },
+          borderUniform: true, borderSides: null,
+          borderColor: null, borderWidth: 0, borderStyle: "solid",
+          zIndex: s.zIndex, position: s.position, boxShadow: null,
+        } as any);
+      }
+    }
     elements.push({
       type: "rect", bounds: b, fill,
       fillAlpha: bgA * opA,
