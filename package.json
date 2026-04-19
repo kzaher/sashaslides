@@ -1,7 +1,8 @@
 {
   "scripts": {
     "sudo_claude": "claude --dangerously-skip-permissions",
-    "sudo_claude_fork": "claude --dangerously-skip-permissions --fork-session --resume",
+    "sudo_claude_fork": "claude --dangerously-skip-permissions --continue --fork-session",
+    "sudo_claude_resume": "claude --dangerously-skip-permissions --continue",
     "regen:basics": "cd analysis/renderer/html2slides && bash regen-basics.sh",
     "regen:complex": "cd analysis/renderer/html2slides && bash regen-complex.sh",
     "regen": "npm run regen:basics && npm run regen:complex",
