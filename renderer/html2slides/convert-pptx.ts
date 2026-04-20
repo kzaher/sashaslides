@@ -315,6 +315,42 @@ function cornerPresetFromRadii(cr: { tl: number; tr: number; br: number; bl: num
   }
 }
 
+/** True when the corner mask is side-rounded (TR+BR or TL+BL). OOXML has no
+ * preset for that shape, so the caller emits `roundRect` + squared-off
+ * overlays on the flat corner pair. */
+function needsFlatCornerOverlay(cr: { tl: number; tr: number; br: number; bl: number }): boolean {
+  const mask =
+    (cr.tl > 2 ? 1 : 0) |
+    (cr.tr > 2 ? 2 : 0) |
+    (cr.br > 2 ? 4 : 0) |
+    (cr.bl > 2 ? 8 : 0);
+  return mask === 0b0110 || mask === 0b1001;
+}
+
+/** Paint R×R rect overlays (same fill as the underlying shape) over the
+ * corners where `cr.<corner> <= 2`. Used to turn a `roundRect` emitted for
+ * a side-rounded mask into a stadium-with-flat-side shape (slide_25's
+ * `border-radius: 0 8px 8px 0`). */
+function emitFlatCornerOverlays(
+  slide: any,
+  b: Bounds,
+  cr: { tl: number; tr: number; br: number; bl: number },
+  fill: any,
+): void {
+  const rMax = Math.min(Math.max(cr.tl, cr.tr, cr.br, cr.bl), Math.min(b.w, b.h) / 2);
+  if (rMax <= 0 || !fill || fill.type === "none") return;
+  const paint = (x: number, y: number) => {
+    slide.addShape("rect", {
+      x: px2in(x), y: px2in(y), w: px2in(rMax), h: px2in(rMax),
+      fill, line: { type: "none" },
+    });
+  };
+  if (cr.tl <= 2) paint(b.x, b.y);
+  if (cr.tr <= 2) paint(b.x + b.w - rMax, b.y);
+  if (cr.br <= 2) paint(b.x + b.w - rMax, b.y + b.h - rMax);
+  if (cr.bl <= 2) paint(b.x, b.y + b.h - rMax);
+}
+
 // --- Types ---
 interface Bounds { x: number; y: number; w: number; h: number; }
 interface ExtractedElement { type: string; bounds: Bounds; [key: string]: any; }
@@ -497,10 +533,19 @@ function buildPptx(
         case "rect": {
           // Full-slide background
           if (b.w > SLIDE_W_PX * 0.9 && b.h > SLIDE_H_PX * 0.9) {
-            if (el.fill) {
-              slide.background = { fill: hexToRgb(el.fill) };
+            // pptxgenjs `slide.background` can only carry a solid fill, so
+            // skip this shortcut when the element owns a multi-stop gradient.
+            // The rect drops through to the regular shape path, and the
+            // post-processing gradFill injector rewrites <a:solidFill> →
+            // <a:gradFill> (slide_17 navy→purple body wash).
+            if (el.gradient && el.gradient.stops && el.gradient.stops.length >= 2) {
+              // fall through to shape path below
+            } else {
+              if (el.fill) {
+                slide.background = { fill: hexToRgb(el.fill) };
+              }
+              break;
             }
-            break;
           }
 
           // Determine shape type
@@ -678,6 +723,15 @@ function buildPptx(
 
           slide.addShape(shapeName, opts);
 
+          // Side-rounded masks (0b0110 = right side, 0b1001 = left side) emit
+          // as `roundRect` above with all-4 curves; square off the CSS-flat
+          // corner pair by painting R×R overlays in the same fill. Skipped
+          // for gradient rects so the GRAD_N tag on the parent shape keeps
+          // its solitary solidFill match for the injector.
+          if (anyRounded && !isCircle && !el.gradient && needsFlatCornerOverlay(cr) && opts.fill) {
+            emitFlatCornerOverlays(slide, b, cr, opts.fill);
+          }
+
           // Paint non-uniform border strips OVER the content shape so they
           // survive the bg fill (otherwise a 4px bottom-border on a white
           // card disappears under the white fill rect).
@@ -711,7 +765,20 @@ function buildPptx(
             const allSolid = [hasTop && bs.top, hasBottom && bs.bottom, hasLeft && bs.left, hasRight && bs.right]
               .filter(Boolean)
               .every((s: any) => s.style !== "dashed" && s.style !== "dotted");
-            if (sameColor && allSolid && borderColors.length > 0) {
+            // Only run the sandwich when at least one bordered side actually
+            // touches a rounded corner. slide_25's `border-left: 4px; border-radius: 0 8px 8px 0`
+            // has its single bordered side (left) on two flat corners (TL,BL);
+            // the sandwich would then paint a full-footprint border-coloured
+            // roundRect behind an inner fill that's inset only on the left,
+            // leaving a visible blue crescent at TR/BR where the outer's
+            // radius-8 curve extends past the inner's shrunk radius. In that
+            // geometry the flat-strip emitter does the right thing.
+            const roundedCornerOnBorderedSide =
+              (hasTop && (cr.tl > 2 || cr.tr > 2)) ||
+              (hasBottom && (cr.bl > 2 || cr.br > 2)) ||
+              (hasLeft && (cr.tl > 2 || cr.bl > 2)) ||
+              (hasRight && (cr.tr > 2 || cr.br > 2));
+            if (sameColor && allSolid && borderColors.length > 0 && roundedCornerOnBorderedSide) {
               // Both outer and inner sandwich rects MUST honor the same
               // per-corner preset as the content shape — otherwise the
               // outer's `roundRect` (all-4-corners) draws a curved bottom
@@ -730,6 +797,9 @@ function buildPptx(
               }
               // 1. Outer = border color across the full footprint, same corner mask.
               slide.addShape(sandwichCp.preset, sandwichOuterOpts);
+              if (needsFlatCornerOverlay(cr)) {
+                emitFlatCornerOverlays(slide, b, cr, sandwichOuterOpts.fill);
+              }
               // 2. Inner = card fill, inset by border widths on bordered sides only.
               const iTop = hasTop ? (bs.top.width || 0) : 0;
               const iBottom = hasBottom ? (bs.bottom.width || 0) : 0;
@@ -739,14 +809,18 @@ function buildPptx(
               const iy = b.y + iTop;
               const iw = Math.max(0, b.w - iLeft - iRight);
               const ih = Math.max(0, b.h - iTop - iBottom);
-              const innerInset = Math.max(iTop, iBottom, iLeft, iRight);
-              // Inner per-corner radii: shrink each rounded corner by the
-              // inset, leaving non-rounded corners flat.
+              // Inner per-corner radii: shrink each rounded corner by the MIN
+              // of its two adjacent-side insets. Using `max(insets)` across
+              // all sides caused a blue crescent at TR/BR on a left-only
+              // bordered card because a 4 px left-inset was subtracted from
+              // a radius whose adjacent sides (top, right) had 0 inset — the
+              // inner's curve pulled away from the outer's curve and the
+              // border-coloured ring leaked through on the non-bordered side.
               const innerCr = {
-                tl: cr.tl > 2 ? Math.max(0, cr.tl - innerInset) : 0,
-                tr: cr.tr > 2 ? Math.max(0, cr.tr - innerInset) : 0,
-                br: cr.br > 2 ? Math.max(0, cr.br - innerInset) : 0,
-                bl: cr.bl > 2 ? Math.max(0, cr.bl - innerInset) : 0,
+                tl: cr.tl > 2 ? Math.max(0, cr.tl - Math.min(iTop, iLeft)) : 0,
+                tr: cr.tr > 2 ? Math.max(0, cr.tr - Math.min(iTop, iRight)) : 0,
+                br: cr.br > 2 ? Math.max(0, cr.br - Math.min(iBottom, iRight)) : 0,
+                bl: cr.bl > 2 ? Math.max(0, cr.bl - Math.min(iBottom, iLeft)) : 0,
               };
               const innerCp = cornerPresetFromRadii(innerCr);
               const innerR = Math.max(innerCr.tl, innerCr.tr, innerCr.br, innerCr.bl);
@@ -761,6 +835,9 @@ function buildPptx(
                 if (innerCp.flipV) innerOpts.flipV = true;
               }
               slide.addShape(innerR > 0 ? innerCp.preset : "rect", innerOpts);
+              if (innerR > 0 && needsFlatCornerOverlay(innerCr)) {
+                emitFlatCornerOverlays(slide, { x: ix, y: iy, w: iw, h: ih }, innerCr, innerOpts.fill);
+              }
               borderHandledRounded = true;
             }
           }
