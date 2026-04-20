@@ -10,23 +10,16 @@
  *     && node dist/main-scaffolding.mjs
  */
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
-import { buildTasks, Cluster } from "./workspace-setup.js";
+import { buildTasks } from "./workspace-setup.js";
+// clusters.ts is the per-wave input — edit it to redeclare what you want
+// solved, then rebuild + run. Kept as a separate import (not inline) so
+// the build fails loudly when someone deletes it by mistake rather than
+// silently running an obsolete smoke cluster.
+import { CLUSTERS } from "./clusters.js";
 import { main } from "./main.js";
 
-// For smoke-testing we run a single tiny cluster. In production, edit this
-// or pass a JSON file via argv.
-const SMOKE_CLUSTERS: Cluster[] = [
-  {
-    task_id: "smoke-clipping",
-    cluster_description:
-      "Smoke test: verify the pipeline runs end-to-end on a single 2-slide cluster. " +
-      "The real fix is not expected to land here.",
-    slide_ids: ["slide_11", "slide_12"],
-  },
-];
-
 async function run() {
-  const tasks = buildTasks({ clusters: SMOKE_CLUSTERS });
+  const tasks = buildTasks({ clusters: CLUSTERS });
   console.error(`built ${tasks.length} task(s):`);
   for (const t of tasks) {
     console.error(`  ${t.task_id} @ ${t.workspace_dir} (port ${t.server_port})`);

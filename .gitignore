@@ -41,6 +41,7 @@ data/
 
 # Docker
 .docker/
+.claude/worktrees/*
 
 # html2slides local ratings backups
 analysis/renderer/html2slides/e2e/.ratings-complex.json

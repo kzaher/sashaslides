@@ -34,7 +34,11 @@ export interface ClaudeCallResult {
   errorMessage: string | null;
 }
 
-const DEFAULT_TIMEOUT_MS = 300_000;
+// Single long-running bug_solving send commonly takes 10-20 min because the
+// worker records pptx, compacts, writes analysis.md, and iterates on the fix
+// before returning. 5 min is too tight; 30 min leaves headroom without letting
+// runaway Bash steps hang the graph forever.
+const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 
 export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallResult> {
   const {

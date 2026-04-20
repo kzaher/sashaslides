@@ -1643,14 +1643,37 @@ interface ExtractedElement {
       //   - left-aligned text with a decorative border (slide_30 `.quote`
       //     `border-left:3px; padding-left:14px`) butts against the border
       //     instead of leaving the 14 px gap.
-      // This subsumes the narrower borderLeft-aware shift that the earlier
-      // padding cluster introduced — the padL shift by itself clears the
-      // 3 px border since bounds.x is the border-box outer edge. Skip
-      // inline tags since their bbox is already tight on the text.
+      // BUT: auto-sized tight-fit elements like slide_17 `.label-badge`
+      // (uppercase, letter-spacing:2px, padding:6px 20px) have bounds.w
+      // already ≈ text_width + padding. Unconditionally shrinking by
+      // padL+padR leaves zero horizontal slack — and Slides measures
+      // glyphs slightly wider than Chrome (text-transform + letter-
+      // spacing amplify the divergence), so the same text wraps to two
+      // lines in Slides even though it fit in Chrome.
+      //
+      // Guard: only inset if the widest laid-out line + SLACK still fits
+      // in bounds.w - padL - padR. For multi-line text (the .quote case)
+      // that's automatically true — the text already wrapped within the
+      // padded content box, so max-line-width equals content-width and
+      // insetting just shifts x without shrinking. For single-line tight
+      // text (.label-badge) the check fails and we skip the inset; the
+      // text then renders spanning the full border-box width, which is
+      // a superset of the content area — fine for text-align:left/right
+      // handling.
       if (!isInlineTag && (padL > 2 || padR > 2)) {
-        const minW = Math.max(style.fontSize || 10, 10);
-        const insetW = Math.max(textBounds.w - padL - padR, minW);
-        textBounds = { ...textBounds, x: textBounds.x + padL, w: insetW };
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const lineRects = [...range.getClientRects()].filter(r => r.width > 0);
+        const maxLineW = lineRects.length ? Math.max(...lineRects.map(r => r.width)) : 0;
+        const isMultiLine = lineRects.length > 1;
+        const available = textBounds.w - padL - padR;
+        const SLIDES_WIDTH_SLACK = 6;  // Slides glyph-measurement headroom
+        const safeToInset = isMultiLine || available >= maxLineW + SLIDES_WIDTH_SLACK;
+        if (safeToInset) {
+          const minW = Math.max(style.fontSize || 10, 10);
+          const insetW = Math.max(available, minW);
+          textBounds = { ...textBounds, x: textBounds.x + padL, w: insetW };
+        }
       }
       // bgColorBehind: nearest ancestor solid bg, sampled only when the
       // element is semi-transparent. Google Slides drops <a:alpha> on text
