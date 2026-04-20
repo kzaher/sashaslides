@@ -290,12 +290,77 @@ interface ExtractedElement {
     return m ? parseFloat(m[1]) : 1;
   }
 
-  /** Detect background color at the center of an element by walking up the DOM tree */
+  /** Pre-blend an rgba() color against a solid hex bg so the result is opaque.
+   * Slides drops per-run <a:alpha>, so a translucent chip border like
+   * `rgba(255,255,255,0.1)` over a navy card would otherwise be emitted as
+   * opaque `#FFFFFF` and paint a bright white outline. Returns null for a
+   * fully transparent input. */
+  function rgbaToBlendedHex(rgba: string, bgHex: string): string | null {
+    if (!rgba || rgba === "transparent" || rgba === "rgba(0, 0, 0, 0)") return null;
+    const m = rgba.match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\s*\)/);
+    if (!m) return rgb2hex(rgba);
+    const r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3]);
+    const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
+    const toHex = (v: number) => v.toString(16).padStart(2, "0");
+    if (a >= 1) return "#" + [r, g, b].map(toHex).join("");
+    const bm = (bgHex || "").replace("#", "").match(/^([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/);
+    const br = bm ? parseInt(bm[1], 16) : 255;
+    const bg = bm ? parseInt(bm[2], 16) : 255;
+    const bb = bm ? parseInt(bm[3], 16) : 255;
+    return "#" + [
+      Math.round(r * a + br * (1 - a)),
+      Math.round(g * a + bg * (1 - a)),
+      Math.round(b * a + bb * (1 - a)),
+    ].map(toHex).join("");
+  }
+
+  /** Arithmetic mean of all hex/rgb stops found in a CSS background-image
+   * declaration. Slides can't render a gradient as a glyph fill, so we
+   * collapse to the mean — palette-preserving and never more than halfway
+   * off any individual stop. */
+  function meanGradientStops(bgImg: string): string | null {
+    if (!bgImg || bgImg === "none") return null;
+    const hexes = Array.from(bgImg.matchAll(/(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|rgba\([^)]+\))/g))
+      .map(m => rgb2hex(m[1])).filter(Boolean) as string[];
+    if (hexes.length === 0) return null;
+    let r = 0, g = 0, b = 0;
+    for (const s of hexes) {
+      const h = s.replace("#", "");
+      r += parseInt(h.slice(0, 2), 16);
+      g += parseInt(h.slice(2, 4), 16);
+      b += parseInt(h.slice(4, 6), 16);
+    }
+    r = Math.round(r / hexes.length);
+    g = Math.round(g / hexes.length);
+    b = Math.round(b / hexes.length);
+    return "#" + [r, g, b].map(v => v.toString(16).padStart(2, "0")).join("");
+  }
+
+  /** Effective solid colour for glyphs when the run uses
+   * `-webkit-text-fill-color: transparent` (or `color: transparent`) over a
+   * `background-image` gradient. Returns null when the text is not
+   * gradient-clipped — caller falls back to `rgb2hex(cs.color)`. */
+  function resolveGradientTextColor(cs: CSSStyleDeclaration): string | null {
+    const fillCss = (cs as any).webkitTextFillColor || cs.getPropertyValue("-webkit-text-fill-color") || "";
+    const fillTransparent = fillCss && rgbAlpha(fillCss) < 0.1;
+    const colorTransparent = rgbAlpha(cs.color) < 0.1;
+    if (!fillTransparent && !colorTransparent) return null;
+    return meanGradientStops(cs.backgroundImage || "");
+  }
+
+  /** Detect background color at the center of an element by walking up the
+   * DOM tree. An ancestor with a gradient `background-image` (and no solid
+   * backgroundColor) contributes the arithmetic mean of its stops — so a
+   * semi-transparent glyph sitting on a gradient card blends against the
+   * gradient's midtone instead of whichever solid sits beneath the card. */
   function detectBgColorBelow(el: Element): string {
     let node: Element | null = el.parentElement;
     while (node) {
-      const bg = rgb2hex(getComputedStyle(node).backgroundColor);
+      const ncs = getComputedStyle(node);
+      const bg = rgb2hex(ncs.backgroundColor);
       if (bg) return bg;
+      const gradMean = meanGradientStops(ncs.backgroundImage || "");
+      if (gradMean) return gradMean;
       node = node.parentElement;
     }
     return "#ffffff"; // fallback: white
@@ -309,10 +374,21 @@ interface ExtractedElement {
     const bRight = parseFloat(cs.borderRightWidth) || 0;
     const bBottom = parseFloat(cs.borderBottomWidth) || 0;
     const bLeft = parseFloat(cs.borderLeftWidth) || 0;
-    const bTopColor = rgb2hex(cs.borderTopColor);
-    const bRightColor = rgb2hex(cs.borderRightColor);
-    const bBottomColor = rgb2hex(cs.borderBottomColor);
-    const bLeftColor = rgb2hex(cs.borderLeftColor);
+    // Border colours can be `rgba(…, <1)`. Pre-blend against the element's
+    // own bg (or the nearest ancestor bg, including a gradient mean) so the
+    // emitted hex already includes the alpha — Slides drops per-run
+    // <a:alpha>, and an rgba(255,255,255,0.1) border would otherwise
+    // render as opaque white (slide_17 chip outlines).
+    let _elBgCache: string | null = null;
+    const getElBg = (): string => _elBgCache ?? (_elBgCache = rgb2hex(cs.backgroundColor) || detectBgColorBelow(el));
+    const blendBorder = (c: string): string | null => {
+      if (!c || c === "transparent" || c === "rgba(0, 0, 0, 0)") return null;
+      return rgbAlpha(c) < 1 ? rgbaToBlendedHex(c, getElBg()) : rgb2hex(c);
+    };
+    const bTopColor = blendBorder(cs.borderTopColor);
+    const bRightColor = blendBorder(cs.borderRightColor);
+    const bBottomColor = blendBorder(cs.borderBottomColor);
+    const bLeftColor = blendBorder(cs.borderLeftColor);
     const bTopStyle = cs.borderTopStyle || "none";
     const bRightStyle = cs.borderRightStyle || "none";
     const bBottomStyle = cs.borderBottomStyle || "none";
@@ -346,67 +422,13 @@ interface ExtractedElement {
         cs.fontWeight === "bold" ? 700 : parseInt(cs.fontWeight) || 400,
       ),
       fontStyle: cs.fontStyle === "italic" ? "italic" : "normal",
-      color: (() => {
-        // text-clip gradient fallback: when the effective glyph fill is
-        // transparent — either via `color: transparent` OR via the
-        // `-webkit-text-fill-color: transparent` override (which `cs.color`
-        // does NOT reflect) — pick a gradient stop from `background-image`
-        // so glyphs stay visible. If the bg behind the text is dark and the
-        // first stop is also dark, walk the stops for one with usable
-        // contrast; if all stops are dark/light-clashing, invert luminance.
-        const rawColor = rgb2hex(cs.color);
-        const fillCss = (cs as any).webkitTextFillColor || cs.getPropertyValue("-webkit-text-fill-color") || "";
-        const fillTransparent = fillCss && rgbAlpha(fillCss) < 0.1;
-        const colorTransparent = rgbAlpha(cs.color) < 0.1;
-        if (fillTransparent || colorTransparent) {
-          const bgImg = cs.backgroundImage || "";
-          const stops = Array.from(bgImg.matchAll(/(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|rgba\([^)]+\))/g))
-            .map(m => rgb2hex(m[1])).filter(Boolean) as string[];
-          if (stops.length > 0) {
-            // Walk up the DOM for the first ancestor with a non-transparent
-            // background colour — that's what the glyphs visually sit on.
-            const lum = (hex: string) => {
-              const h = hex.replace("#", "");
-              const r = parseInt(h.slice(0, 2), 16) / 255;
-              const g = parseInt(h.slice(2, 4), 16) / 255;
-              const b = parseInt(h.slice(4, 6), 16) / 255;
-              return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-            };
-            let bgHex = "#ffffff";
-            let p: Element | null = el;
-            while (p) {
-              const pcs = getComputedStyle(p as Element);
-              if (rgbAlpha(pcs.backgroundColor) > 0.5) { bgHex = rgb2hex(pcs.backgroundColor); break; }
-              const pbg = pcs.backgroundImage || "";
-              const pm = pbg.match(/(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|rgba\([^)]+\))/);
-              if (pm) { bgHex = rgb2hex(pm[1]) || bgHex; break; }
-              p = p.parentElement;
-            }
-            const bgL = lum(bgHex);
-            // Pick the stop with the highest luminance contrast vs bg.
-            let best = stops[0];
-            let bestContrast = Math.abs(lum(stops[0]) - bgL);
-            for (const s of stops.slice(1)) {
-              const c = Math.abs(lum(s) - bgL);
-              if (c > bestContrast) { best = s; bestContrast = c; }
-            }
-            // If even the best stop is too close to bg (delta < 0.25),
-            // brighten or darken it to guarantee visibility.
-            if (bestContrast < 0.25) {
-              const h = best.replace("#", "");
-              let r = parseInt(h.slice(0, 2), 16);
-              let g = parseInt(h.slice(2, 4), 16);
-              let b = parseInt(h.slice(4, 6), 16);
-              const target = bgL < 0.5 ? 1 : 0; // light bg -> darken, dark bg -> brighten
-              const blend = (v: number) => Math.round(v * 0.4 + target * 255 * 0.6);
-              r = blend(r); g = blend(g); b = blend(b);
-              best = "#" + [r, g, b].map(v => v.toString(16).padStart(2, "0")).join("");
-            }
-            return best;
-          }
-        }
-        return rawColor;
-      })(),
+      // text-clip gradient fallback: when the effective glyph fill is
+      // transparent (`color: transparent` OR `-webkit-text-fill-color: transparent`),
+      // collapse the gradient stops to their arithmetic mean. The user's
+      // guidance for slide_17: "if PPT can't show gradient letters, at least
+      // set them to mean between colors" — a single stop picked by contrast
+      // drifts too far from the rendered look on visually-balanced gradients.
+      color: resolveGradientTextColor(cs) || rgb2hex(cs.color),
       bgColor: rgb2hex(cs.backgroundColor),
       bgAlpha: rgbAlpha(cs.backgroundColor),
       textAlign: cs.textAlign,
@@ -910,7 +932,11 @@ interface ExtractedElement {
           const verticalAlign: "sub" | "super" | "baseline" =
             va === "sub" ? "sub" : va === "super" ? "super" : "baseline";
           const childStyle = {
-            color: rgb2hex(cs.color),
+            // Inline gradient-text spans (`<span class="gradient-text">` with
+            // `-webkit-background-clip: text`) use `resolveGradientTextColor`
+            // first so slide_25's accent span resolves to the mean of its
+            // own stops instead of inheriting the paragraph colour.
+            color: resolveGradientTextColor(cs) || rgb2hex(cs.color),
             fontWeight: resolveRenderedWeight(
               cs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
               cs.fontWeight === "bold" ? 700 : parseInt(cs.fontWeight) || 400,
@@ -1746,9 +1772,20 @@ interface ExtractedElement {
     return null;
   }
   const bodyBg = rgb2hex(bodyCs.backgroundColor);
+  const bodyGrad = parseLinearGradient(bodyCs.backgroundImage) || parseLinearGradient(htmlCs.backgroundImage);
   const bodyGradColor = extractGradientColor(bodyCs.backgroundImage) || extractGradientColor(htmlCs.backgroundImage);
-  if ((!bodyBg || bodyBg === "#000000") && bodyGradColor) {
-    elements.unshift({ type: "rect", bounds: { x: 0, y: 0, w: W, h: H }, fill: bodyGradColor, borderWidth: 0, borderRadius: 0 });
+  if ((!bodyBg || bodyBg === "#000000") && (bodyGrad || bodyGradColor)) {
+    // Attach the parsed gradient alongside the first-stop solid fallback so
+    // the converter's gradFill injector rewrites <a:solidFill> into a real
+    // <a:gradFill> (slide_17 navy→purple body wash).
+    elements.unshift({
+      type: "rect",
+      bounds: { x: 0, y: 0, w: W, h: H },
+      fill: bodyGrad ? bodyGrad.stops[0].color : bodyGradColor,
+      gradient: bodyGrad,
+      borderWidth: 0,
+      borderRadius: 0,
+    });
   }
 
   // Paint order is already baked in by walk() (children visited in CSS paint
