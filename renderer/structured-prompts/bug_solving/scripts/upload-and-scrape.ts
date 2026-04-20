@@ -89,6 +89,11 @@ async function main() {
     { stdio: "inherit" },
   );
 
+  // Pull slide objectIds for per-slide #slide=id.<oid> deep links.
+  const slidesApi = google.slides({ version: "v1", auth });
+  const pres = await slidesApi.presentations.get({ presentationId: presId });
+  const slideObjectIds = (pres.data.slides || []).map(s => s.objectId || "");
+
   // Rename exported slide_NN.png → <slide_id>.png using input order.
   // export-thumbs writes slide_01.png, slide_02.png, etc. in upload order.
   const renames: Array<{ from: string; to: string }> = [];
@@ -104,13 +109,17 @@ async function main() {
     console.log(`  renamed ${renames.length} thumbnails to task-slide-ids`);
   }
 
-  // Emit a manifest for downstream consumers.
+  // Emit a manifest for downstream consumers. slide_object_ids is parallel
+  // to slides — filtered-rating-server.ts uses it to build
+  // `…/edit#slide=id.<oid>` deep links so the reviewer lands on the exact
+  // page inside the newly-uploaded presentation rather than slide 1.
   writeFileSync(
     resolve(out, "manifest.json"),
     JSON.stringify({
       task_title: title,
       presentation_id: presId,
       slides,
+      slide_object_ids: slideObjectIds,
       thumbnails: slides.map(s => `${s}.png`),
       created_at: new Date().toISOString(),
     }, null, 2),

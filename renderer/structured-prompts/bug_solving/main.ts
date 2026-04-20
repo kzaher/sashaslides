@@ -132,24 +132,25 @@ export function main(args: {
   const runTask = (s: Session, task: Task): SessionWithResult<TaskResult> => {
     const ids = slideIdsCsv(task);
     return s
-      // Step 1 — record original pptx (one file per slide, parallel).
+      // Step 1+2 are fused into a single send so we can start with a
+      //   SessionWithResult — executeShell is only available on that chain,
+      //   not on the bare Session returned by prependToNextPrompt. The worker
+      //   runs the BEFORE recorder via its own Bash tool, then writes
+      //   analysis.md + applies the fix; subsequent steps reclaim
+      //   executeShell because they run after a send.
       .prependToNextPrompt(analysisPromptFor(task))
-      .executeShell(() =>
-        `cd ${task.workspace_dir} && bash ${SCRIPTS.record} ` +
-        `--slides ${ids} --label before --out ${task.scratch_dir}/before`
-      )
-
-      // Step 2 — write analysis.md + apply code fix.
-      //   We send a prompt rather than executeShell so the worker actually
-      //   reads the annotations, writes analysis, and edits the source.
       .send({
         prompt: [
-          `The before-pptx files are now at ${task.scratch_dir}/before/<slide_id>.pptx.`,
-          `Write or UPDATE ${task.scratch_dir}/analysis.md using the template`,
-          `in the instructions you received. Then apply the minimal code fix to`,
+          `Step 1 — run this exact command via your Bash tool to record the`,
+          `BEFORE pptx for all slides in this task:`,
+          `  cd ${task.workspace_dir} && bash ${SCRIPTS.record} --slides ${ids} --label before --out ${task.scratch_dir}/before`,
+          ``,
+          `Step 2 — once that completes, write or UPDATE`,
+          `${task.scratch_dir}/analysis.md using the template in the`,
+          `instructions you received. Then apply the minimal code fix to`,
           `renderer/html2slides/extract-dom.ts and/or convert-pptx.ts. Do not`,
           `run git commit. When done, respond with exactly "FIX_APPLIED".`,
-        ].join(" "),
+        ].join("\n"),
       })
 
       // Step 3 — record new pptx.
@@ -232,18 +233,29 @@ export function main(args: {
       )
 
       // Step 8 — boot filtered rating server (backgrounded). Store URL.
+      //   --html-dir is inferred from the first slide's html_file parent; the
+      //   SxS UI uses it to expose "View HTML Source" per card. The Slides
+      //   deep link is auto-read from thumbnails/manifest.json written by
+      //   upload-and-scrape.ts in step 7.
       .combineWith<string, TaskResult>(
-        (branch) => branch.executeShell(() =>
-          `cd ${task.workspace_dir} && ` +
-          `lsof -ti:${task.server_port} | xargs -r kill 2>/dev/null; ` +
-          `nohup npx tsx ${SCRIPTS.filteredServer} ` +
-          `--port ${task.server_port} --slides ${ids} ` +
-          `--analysis ${task.scratch_dir}/analysis.md ` +
-          `--diffs ${task.scratch_dir}/diffs ` +
-          `--thumbnails ${task.scratch_dir}/thumbnails ` +
-          `> ${task.scratch_dir}/server.log 2>&1 & disown; ` +
-          `sleep 2; echo http://localhost:${task.server_port}`
-        ),
+        (branch) => branch.executeShell(() => {
+          const htmlDir = task.slides[0]?.html_file
+            ? task.slides[0].html_file.replace(/\/[^/]+$/, "")
+            : "";
+          return (
+            `cd ${task.workspace_dir} && ` +
+            `lsof -ti:${task.server_port} | xargs -r kill 2>/dev/null; ` +
+            `nohup npx tsx ${SCRIPTS.filteredServer} ` +
+            `--port ${task.server_port} --slides ${ids} ` +
+            `--analysis ${task.scratch_dir}/analysis.md ` +
+            `--diffs ${task.scratch_dir}/diffs ` +
+            `--thumbnails ${task.scratch_dir}/thumbnails ` +
+            (htmlDir ? `--html-dir ${htmlDir} ` : ``) +
+            `--task-title "${task.task_id}" ` +
+            `> ${task.scratch_dir}/server.log 2>&1 & disown; ` +
+            `sleep 2; echo http://localhost:${task.server_port}`
+          );
+        }),
         (partial, serverUrl) => ({ ...partial, sxs_url: serverUrl.trim() }),
       );
   };

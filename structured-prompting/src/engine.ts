@@ -301,7 +301,7 @@ export class ClaudeEngine {
           // as a StructuredOutput tool and returns the parsed value in
           // result.structured_output, so we just forward and read.
           const flatSchema = hasSchema ? flattenSchemaUnit(schemaUnit as { schema: any; components?: any }) : undefined;
-          const { ctx: nextCtx, response, usedResume, appliedForkFlag } = await this.materializeAndCall(
+          const { ctx: nextCtx, response, usedResume, appliedForkFlag, composedPrompt } = await this.materializeAndCall(
             graph,
             node,
             ctx,
@@ -352,14 +352,14 @@ export class ClaudeEngine {
             }
             graph.finishOk(
               node.id,
-              { parsed, text: response.text, appliedForkFlag },
+              { parsed, text: response.text, appliedForkFlag, composedPrompt },
               { sessionId: response.sessionId ?? usedResume, model: response.model ?? ctx.model },
             );
             return { value: parsed, ctx: nextCtx };
           }
           graph.finishOk(
             node.id,
-            { text: response.text, durationMs: response.durationMs, appliedForkFlag },
+            { text: response.text, durationMs: response.durationMs, appliedForkFlag, composedPrompt },
             { sessionId: response.sessionId ?? usedResume, model: response.model ?? ctx.model },
           );
           return { value: response.text, ctx: nextCtx };
@@ -596,7 +596,7 @@ export class ClaudeEngine {
     ctx: RunCtx,
     invoke: (resumeSid: string | null, forkFlag: boolean, composedPrompt: string) => Promise<Resp>,
     rawPrompt: string,
-  ): Promise<{ ctx: RunCtx; response: Resp; usedResume: string | null; appliedForkFlag: boolean }> {
+  ): Promise<{ ctx: RunCtx; response: Resp; usedResume: string | null; appliedForkFlag: boolean; composedPrompt: string }> {
     let resumeSid = ctx.claudeSessionId;
     let applyForkFlag = false;
 
@@ -641,7 +641,7 @@ export class ClaudeEngine {
       pendingCompact: false,
       pendingCompactNodeId: null,
     };
-    return { ctx: nextCtx, response, usedResume: resumeSid, appliedForkFlag: applyForkFlag };
+    return { ctx: nextCtx, response, usedResume: resumeSid, appliedForkFlag: applyForkFlag, composedPrompt: composed };
   }
 }
 
