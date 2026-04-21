@@ -380,7 +380,11 @@ interface ExtractedElement {
     // <a:alpha>, and an rgba(255,255,255,0.1) border would otherwise
     // render as opaque white (slide_17 chip outlines).
     let _elBgCache: string | null = null;
-    const getElBg = (): string => _elBgCache ?? (_elBgCache = rgb2hex(cs.backgroundColor) || detectBgColorBelow(el));
+    // Only use the element's own background when it is meaningfully opaque
+    // (≥50%). A nearly-transparent bg like rgba(255,255,255,0.05) would
+    // otherwise blend the border against white instead of the dark layer below.
+    const getElBg = (): string => _elBgCache ?? (_elBgCache =
+      (rgbAlpha(cs.backgroundColor) >= 0.5 ? rgb2hex(cs.backgroundColor) : null) || detectBgColorBelow(el));
     const blendBorder = (c: string): string | null => {
       if (!c || c === "transparent" || c === "rgba(0, 0, 0, 0)") return null;
       return rgbAlpha(c) < 1 ? rgbaToBlendedHex(c, getElBg()) : rgb2hex(c);
@@ -1112,9 +1116,12 @@ interface ExtractedElement {
     // previously dropped 2px connector/divider divs. Zero-area elements are
     // rejected upstream by isVisible().
     const hasBg = !!s.bgColor;
-    const hasGradient = s.backgroundImage && s.backgroundImage.includes("linear-gradient");
+    const hasLinearGradient = !!(s.backgroundImage && s.backgroundImage.includes("linear-gradient"));
+    // Radial gradients can't be expressed in OOXML but we approximate with first-stop solid.
+    const hasRadialGradient = !!(s.backgroundImage && s.backgroundImage.includes("radial-gradient") && !hasLinearGradient);
+    const hasGradient = hasLinearGradient;
     const hasBorder = s.borderWidth >= 1 && !!s.borderColor;
-    if (!hasBg && !hasGradient && !hasBorder) return;
+    if (!hasBg && !hasGradient && !hasRadialGradient && !hasBorder) return;
     // CSS text-clip gradient trick: `background: linear-gradient(...);
     // -webkit-background-clip: text; -webkit-text-fill-color: transparent`
     // fills only the text glyphs with the gradient. Emitting the gradient as
@@ -1132,9 +1139,24 @@ interface ExtractedElement {
     }
 
     // Parse gradient if present (use first color as solid fallback too)
-    let gradient = hasGradient ? parseLinearGradient(s.backgroundImage!) : null;
+    let gradient = hasLinearGradient ? parseLinearGradient(s.backgroundImage!) : null;
     if (gradient && !fill) {
       fill = gradient.stops[0].color; // solid fallback
+    }
+
+    // Radial-gradient: approximate as the center (first) color stop.
+    // OOXML has no radial-gradient equivalent — emit a semi-transparent solid
+    // so the glow element at least approximates the intent.
+    let radialFillAlpha: number | null = null;
+    if (hasRadialGradient && !fill) {
+      const m = (s.backgroundImage || "").match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\s*\)/);
+      if (m) {
+        const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
+        if (a > 0) {
+          fill = "#" + [m[1], m[2], m[3]].map(v => parseInt(v).toString(16).padStart(2, "0")).join("");
+          radialFillAlpha = a;
+        }
+      }
     }
 
     // Combine CSS `opacity` with rgba alpha so semi-transparent elements
@@ -1167,7 +1189,7 @@ interface ExtractedElement {
     }
     elements.push({
       type: "rect", bounds: b, fill,
-      fillAlpha: bgA * opA,
+      fillAlpha: (radialFillAlpha ?? bgA) * opA,
       gradient, // null or { angle, stops: [{color, position}] }
       borderRadius: s.borderRadius,
       cornerRadii: s.cornerRadii,
@@ -1245,24 +1267,60 @@ interface ExtractedElement {
       if (!bg && borderMax === 0 && br === 0) continue;
       const pb = pseudoBounds(pcs, bounds);
       if (!pb || pb.w < 1 || pb.h < 1) continue;
-      // SWOT-card top-accent: grow thin top-stripe pseudo by 2×
-      // parent border-top when colors match (cluster 8).
       const parentCs2 = getComputedStyle(el);
       const parentBT = parseFloat(parentCs2.borderTopWidth) || 0;
-      const parentBTColor = rgb2hex(parentCs2.borderTopColor);
-      if (parentBT > 0 && bg && parentBTColor && bg.toLowerCase() === parentBTColor.toLowerCase()
-          && Math.abs(pb.y - bounds.y) < 1.5 && pb.w >= bounds.w * 0.5 && pb.h <= 12) {
-        pb.h = pb.h + parentBT * 2;
-      }
+      const parentBL_w = parseFloat(parentCs2.borderLeftWidth) || 0;
+      const parentBR_w = parseFloat(parentCs2.borderRightWidth) || 0;
+      const parentBB_w = parseFloat(parentCs2.borderBottomWidth) || 0;
+      // pseudoBounds places the pseudo at bounds.x/y (border-box origin), but
+      // CSS `position:absolute` children are offset from the parent's PADDING
+      // edge (inside the border). Shift pb to the correct padding-box position
+      // so the corner flush-checks below work when the parent has a border.
+      pb.x += parentBL_w;
+      pb.y += parentBT;
       // CSS border-triangle: 0×0 box with transparent top/bottom and a
       // colored side — skip as rect; downstream renderers can't reproduce
       // it cleanly. (Leave for a future targeted fix.)
       const pseudoBgAlpha = rgbAlpha(pcs.backgroundColor);
       const pseudoOpacity = parseFloat(pcs.opacity) || 1;
+      // Pre-blend transparent pseudo fills against the parent background so
+      // Google Slides (which drops <a:alpha> from shape solidFill on import)
+      // renders the overlay at the correct opacity rather than 100%.
+      let pseudoFill = bg || null;
+      let pseudoFillAlpha = pseudoBgAlpha * pseudoOpacity;
+      if (pseudoFill && pseudoFillAlpha < 1) {
+        const parentBg = rgb2hex(parentCs2.backgroundColor) || detectBgColorBelow(el);
+        const blended = rgbaToBlendedHex(pcs.backgroundColor, parentBg);
+        if (blended) { pseudoFill = blended; pseudoFillAlpha = 1; }
+      }
+      // Inherit parent's corner radii for corners of the pseudo that are flush
+      // with the parent's corners. Comparison uses the INNER (padding-box) edge
+      // of the parent — pb has already been shifted to padding-box coordinates.
+      const pseudoCornerRadii = { tl: br, tr: br, br, bl: br };
+      const parentOv = parentCs2.overflow;
+      if (parentOv === "hidden" || parentOv === "clip") {
+        const pTL = parseFloat(parentCs2.borderTopLeftRadius) || 0;
+        const pTR = parseFloat(parentCs2.borderTopRightRadius) || 0;
+        const pBR = parseFloat(parentCs2.borderBottomRightRadius) || 0;
+        const pBL = parseFloat(parentCs2.borderBottomLeftRadius) || 0;
+        const innerX = bounds.x + parentBL_w;
+        const innerY = bounds.y + parentBT;
+        const innerRight = bounds.x + bounds.w - parentBR_w;
+        const innerBottom = bounds.y + bounds.h - parentBB_w;
+        const TOL = 2;
+        if (Math.abs(pb.x - innerX) < TOL && Math.abs(pb.y - innerY) < TOL)
+          pseudoCornerRadii.tl = Math.max(br, pTL);
+        if (Math.abs((pb.x + pb.w) - innerRight) < TOL && Math.abs(pb.y - innerY) < TOL)
+          pseudoCornerRadii.tr = Math.max(br, pTR);
+        if (Math.abs((pb.x + pb.w) - innerRight) < TOL && Math.abs((pb.y + pb.h) - innerBottom) < TOL)
+          pseudoCornerRadii.br = Math.max(br, pBR);
+        if (Math.abs(pb.x - innerX) < TOL && Math.abs((pb.y + pb.h) - innerBottom) < TOL)
+          pseudoCornerRadii.bl = Math.max(br, pBL);
+      }
       elements.push({
-        type: "rect", bounds: pb, fill: bg || null, fillAlpha: pseudoBgAlpha * pseudoOpacity,
-        gradient: null, borderRadius: br,
-        cornerRadii: { tl: br, tr: br, br, bl: br },
+        type: "rect", bounds: pb, fill: pseudoFill, fillAlpha: pseudoFillAlpha,
+        gradient: null, borderRadius: Math.max(br, pseudoCornerRadii.tl, pseudoCornerRadii.tr, pseudoCornerRadii.br, pseudoCornerRadii.bl),
+        cornerRadii: pseudoCornerRadii,
         borderUniform: bwT === bwR && bwR === bwB && bwB === bwL,
         borderSides: {
           top: { width: bwT, color: rgb2hex(pcs.borderTopColor), style: pcs.borderTopStyle },
@@ -1457,6 +1515,21 @@ interface ExtractedElement {
       seen.add(el);
       el.querySelectorAll("*").forEach(c => seen.add(c));
       elements.push({ type: "visual", bounds, tag: "css-effect" });
+      return;
+    }
+
+    // Large-radius overflow:hidden containers (e.g. phone device mockups with
+    // border-radius ≥ 20px) clip ALL children at the rounded boundary. PPTX
+    // shapes don't inherit parent clipping, so child rects and screenshots
+    // protrude past the rounded corners. Screenshot the whole container as a
+    // single visual — the browser handles the clipping naturally.
+    const elOv = elCs.overflow;
+    const elBR = parseFloat(elCs.borderTopLeftRadius) || 0;
+    if ((elOv === "hidden" || elOv === "clip") && elBR >= 20
+        && bounds.w >= 100 && bounds.h >= 100 && (el as HTMLElement).children.length > 0) {
+      seen.add(el);
+      el.querySelectorAll("*").forEach(c => seen.add(c));
+      elements.push({ type: "visual", bounds, tag: "clipped-container" });
       return;
     }
 
@@ -1692,8 +1765,13 @@ interface ExtractedElement {
         textDecoration: inlineBorderUnderline ? "underline" : style.textDecoration,
         textTransform: style.textTransform,
         letterSpacing: style.letterSpacing,
-        paddingLeft: padLeft > 2 ? padLeft : 0,
-        paddingRight: padRight > 2 ? padRight : 0,
+        // Non-inline horizontal padding is owned by the Range-probe inset
+        // above; emitting it again here would let convert-pptx shrink the
+        // textbox a second time and wrap auto-sized chips/buttons. Inline
+        // elements still carry their padding through because the probe
+        // skipped them under the !isInlineTag guard.
+        paddingLeft: isInlineTag && padLeft > 2 ? padLeft : 0,
+        paddingRight: isInlineTag && padRight > 2 ? padRight : 0,
         paddingTop: padTop > 2 ? padTop : 0,
         opacity: style.opacity !== undefined && style.opacity < 1 ? style.opacity : undefined,
         bgColorBehind: style.opacity !== undefined && style.opacity < 1 ? detectBgColorBelow(el) : undefined,

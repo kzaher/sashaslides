@@ -628,6 +628,17 @@ export class ClaudeEngine {
     const append = ctx.append.length ? "\n\n" + ctx.append.join("\n\n") : "";
     const composed = prepend + rawPrompt + append;
 
+    // Surface the composed prompt on the node's input BEFORE we await the
+    // CLI call — otherwise the monitor can't show "view entire prompt" on
+    // long-running sends. Kept under node.input so the monitor's existing
+    // JSON tree renders a StringReveal for it automatically; finishOk still
+    // copies composedPrompt onto node.output for completed sends.
+    const nodeInput = (_node as any).input;
+    const mergedInput = nodeInput && typeof nodeInput === "object"
+      ? { ...(nodeInput as Record<string, unknown>), composedPrompt: composed }
+      : { composedPrompt: composed };
+    graph.setInput(_node.id, mergedInput);
+
     const response = await invoke(resumeSid, applyForkFlag, composed);
 
     const nextCtx: RunCtx = {

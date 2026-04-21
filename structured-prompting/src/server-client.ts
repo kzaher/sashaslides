@@ -10,8 +10,11 @@
  */
 
 export const CLIENT_SCRIPT = `
-import { h, render } from "https://esm.sh/preact@10";
-import { useState, useEffect, useMemo, useCallback } from "https://esm.sh/preact@10/hooks";
+// Bare specifiers resolved by the <script type="importmap"> in server.ts's
+// HTML — Preact ships from our own server under /vendor/ so the monitor
+// doesn't depend on esm.sh being reachable from the reviewer's browser.
+import { h, render } from "preact";
+import { useState, useEffect, useMemo, useCallback } from "preact/hooks";
 
 // ---- small helpers --------------------------------------------------------
 function fmtDur(ms) {
@@ -156,8 +159,16 @@ function Detail(props) {
   const sumMs = sumMap.get(node.id);
   const selfMs = selfMap.get(node.id);
   const showSelf = sumMs != null && selfMs != null && Math.abs(sumMs - selfMs) > 1;
-  const composed = node.kind === "send" && node.output && typeof node.output.composedPrompt === "string"
-    ? node.output.composedPrompt : null;
+  // composedPrompt lives on node.output for finished sends AND on node.input
+  //   while the send is still running (engine.materializeAndCall writes it
+  //   BEFORE awaiting the CLI), so the reveal works in both states.
+  const composed = node.kind === "send"
+    ? (node.output && typeof node.output.composedPrompt === "string"
+        ? node.output.composedPrompt
+        : node.input && typeof node.input.composedPrompt === "string"
+          ? node.input.composedPrompt
+          : null)
+    : null;
 
   return h("div", null,
     h("h1", null, node.kind + " — " + node.label),
@@ -307,5 +318,13 @@ function App() {
   );
 }
 
-render(h(App), document.getElementById("root"));
+// Visible fallback so a JS failure doesn't just leave the page blank.
+try {
+  render(h(App), document.getElementById("root"));
+} catch (e) {
+  const root = document.getElementById("root");
+  if (root) root.innerHTML = "<pre style=\\"padding:16px;color:#f85149;white-space:pre-wrap\\">monitor crashed: " + (e && e.stack ? e.stack : String(e)) + "</pre>";
+  console.error("[sp monitor]", e);
+  throw e;
+}
 `;

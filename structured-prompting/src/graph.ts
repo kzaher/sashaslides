@@ -248,6 +248,17 @@ export class ComputationGraph {
     this.version++;
   }
 
+  /** Attach an object to the node's input without transitioning state.
+   *  Used to expose the composedPrompt on send nodes while they're still
+   *  running, so the monitor can show "view entire prompt" before the CLI
+   *  call returns. */
+  setInput(id: string, input: unknown) {
+    const n = this.nodes.get(id);
+    if (!n) return;
+    (n as any).input = input;
+    this.version++;
+  }
+
   setLabel(id: string, label: string) {
     const n = this.nodes.get(id);
     if (!n) return;

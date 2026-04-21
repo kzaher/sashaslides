@@ -1,13 +1,46 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { writeFileSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve, join } from "node:path";
+import { createRequire } from "node:module";
+import * as esbuild from "esbuild";
 import type { ComputationGraph } from "./graph.js";
 import { CLIENT_SCRIPT } from "./server-client.js";
 
-// The page is thin: CSS + an empty <body> that the Preact entry point
-// (server-client.ts → CLIENT_SCRIPT) renders into. Keeping it thin means
-// we never have to re-reason about server-rendered HTML vs. client-mounted
-// DOM conflicting — the server emits zero child elements for Preact to
-// diff against, so every re-render is deterministic.
+// Bundle Preact + hooks + server-client into a single classic IIFE. This
+// dodges every cross-browser ESM / import-map quirk the monitor page used
+// to hit: the emitted script has zero dynamic imports, zero network calls,
+// and runs under a plain <script> tag on any browser that supports ES2020.
+const require = createRequire(fileURLToPath(import.meta.url));
+
+function bundleClientScript(): string {
+  // Rewrite the exported CLIENT_SCRIPT (which was authored as an ES module
+  // with `import { h, render } from "preact"` etc.) through esbuild along
+  // with preact + preact/hooks as siblings. esbuild follows the "preact"
+  // and "preact/hooks" specifiers through the repo's node_modules and
+  // inlines everything.
+  const tmp = mkdtempSync(join(tmpdir(), "sp-monitor-"));
+  const entry = join(tmp, "client.js");
+  writeFileSync(entry, CLIENT_SCRIPT);
+  const result = esbuild.buildSync({
+    entryPoints: [entry],
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    target: ["es2020"],
+    write: false,
+    nodePaths: [
+      resolve(dirname(require.resolve("preact/package.json")), ".."),
+    ],
+    logLevel: "silent",
+  });
+  return result.outputFiles[0].text;
+}
+
+const BUNDLED_CLIENT = bundleClientScript();
+
 const HTML = `<!doctype html>
 <html>
 <head>
@@ -47,19 +80,15 @@ const HTML = `<!doctype html>
   #toolbar button { background:#21262d; color:var(--fg); border:1px solid #30363d; padding:4px 10px; font:inherit; font-size:11px; border-radius:4px; cursor:pointer; }
   #toolbar button:hover { background:#30363d; }
   #conn { color:var(--ok); }
-  /* Per-string reveal button — one per JSON string value in the detail
-     panel. Compact so inline strings still look like strings. */
   .revealBtn { background:#21262d; color:var(--muted); border:1px solid #30363d; padding:0 6px; font:inherit; font-size:10px; border-radius:3px; cursor:pointer; margin-left:6px; line-height:16px; }
   .revealBtn:hover { background:#30363d; color:var(--fg); }
-  /* JSON syntax coloring used by the JsonView component. */
   .json-key { color:#79c0ff; }
   .json-str { color:#a5d6ff; }
   .json-prim { color:#d2a8ff; }
   .json-null { color:#8b949e; font-style:italic; }
   .lsfull-body { margin:4px 0 8px; background:#0b1220; padding:8px 10px; border-radius:4px; font-size:12px; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; max-height:50vh; overflow:auto; color:#a5d6ff; border-left:2px solid #1f6feb; }
-  /* Tier indents — Preact may go deep when nested tryMultipleTimes + parallelFork
-     chains stack, so cap is 24 instead of 8. Each level is 14 px so very deep
-     trees still fit a left pane. */
+  #bootfallback { padding:20px; color:#8b949e; font-size:13px; }
+  #bootfallback b { color:#c9d1d9; }
   .tier0 { padding-left:0 }
   .tier1 { padding-left:14px }
   .tier2 { padding-left:28px }
@@ -88,8 +117,15 @@ const HTML = `<!doctype html>
 </style>
 </head>
 <body>
-<div id="root"></div>
-<script type="module">${CLIENT_SCRIPT}</script>
+<div id="root">
+  <div id="bootfallback">
+    <b>Structured Prompting Monitor</b><br>
+    Booting Preact UI… if this message is still visible after a few seconds
+    the classic-script bundle didn't run — open DevTools → Console to see
+    the error. The monitor needs no network access beyond this page.
+  </div>
+</div>
+<script>${BUNDLED_CLIENT}</script>
 </body>
 </html>`;
 
