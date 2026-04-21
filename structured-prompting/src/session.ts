@@ -203,6 +203,26 @@ export class Session {
     });
   }
 
+  /**
+   * Run a shell command at the orchestrator level, before any send in this
+   * chain — the command string is constant, no upstream value is needed.
+   * Returns a SessionWithResult<string> so later chain steps (send,
+   * executeShell, combineWith, …) all work normally. This is the idiomatic
+   * way to start a chain with a deterministic shell step rather than asking
+   * the model to run a command via its Bash tool. The engine's existing
+   * "executeShell" node kind is reused; buildCommand just ignores the
+   * (undefined) upstream.
+   */
+  executeShell(buildCommand: () => string): SessionWithResult<string> {
+    const node = this.graph.create({
+      parentId: this.tipNodeId,
+      kind: "executeShell",
+      label: "executeShell",
+      callbacks: { buildCommand: (buildCommand as unknown) as ShellBuildCallback },
+    });
+    return this.withResultAt<string>(node.id);
+  }
+
   pipe<T>(fn: DescFn<Session, SessionWithResult<T>>): SessionWithResult<T> {
     const node = this.graph.create({
       parentId: this.tipNodeId,

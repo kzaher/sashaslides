@@ -154,10 +154,23 @@ async function main() {
     // Worktree at this commit.
     const wtDir = resolve(repoRoot, ".claude/worktrees", `regscan-${sha.slice(0, 8)}-${Date.now()}`);
     execFileSync("git", ["worktree", "add", "--detach", wtDir, sha], { cwd: repoRoot, stdio: "inherit" });
-    // Symlink node_modules so convert-pptx resolves deps.
+    // Skip commits that predate the renderer/ move — they don't have the
+    // record-pptx.sh script at all, so we can't build their pptx.
+    const wtScript = resolve(wtDir, "renderer/structured-prompts/bug_solving/scripts/record-pptx.sh");
+    if (!existsSync(wtScript)) {
+      console.error(`  skipping ${sha.slice(0, 8)}: record-pptx.sh not at this commit`);
+      execFileSync("git", ["worktree", "remove", "--force", wtDir], { cwd: repoRoot });
+      continue;
+    }
+    // Symlink node_modules so convert-pptx resolves deps. The renderer-scoped
+    // one only exists on commits where renderer/ lives at the repo root —
+    // skip any symlink whose parent dir is absent on the worktree.
     for (const rel of ["node_modules", "renderer/node_modules"]) {
-      const main = resolve(repoRoot, rel); const wt = resolve(wtDir, rel);
-      if (existsSync(main)) execSync(`rm -rf "${wt}" && ln -s "${main}" "${wt}"`);
+      const main = resolve(repoRoot, rel);
+      const wt = resolve(wtDir, rel);
+      const wtParent = resolve(wt, "..");
+      if (!existsSync(main) || !existsSync(wtParent)) continue;
+      execSync(`rm -rf "${wt}" && ln -s "${main}" "${wt}"`);
     }
 
     const pptxDir = join(snapDir, sha, "pptx");

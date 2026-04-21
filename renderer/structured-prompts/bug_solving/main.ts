@@ -132,25 +132,26 @@ export function main(args: {
   const runTask = (s: Session, task: Task): SessionWithResult<TaskResult> => {
     const ids = slideIdsCsv(task);
     return s
-      // Step 1+2 are fused into a single send so we can start with a
-      //   SessionWithResult — executeShell is only available on that chain,
-      //   not on the bare Session returned by prependToNextPrompt. The worker
-      //   runs the BEFORE recorder via its own Bash tool, then writes
-      //   analysis.md + applies the fix; subsequent steps reclaim
-      //   executeShell because they run after a send.
+      // Step 1 — record BEFORE pptx deterministically at the orchestrator
+      //   level. No upstream is needed (Session.executeShell ignores it), so
+      //   the worker never asks the model to run a shell command — saves
+      //   tokens and removes a non-determinism.
+      .executeShell(() =>
+        `cd ${task.workspace_dir} && bash ${SCRIPTS.record} ` +
+        `--slides ${ids} --label before --out ${task.scratch_dir}/before`
+      )
+
+      // Step 2 — read user comments + annotations, write analysis.md, apply
+      //   the minimal code fix. prependToNextPrompt is consumed by this send.
       .prependToNextPrompt(analysisPromptFor(task))
       .send({
         prompt: [
-          `Step 1 — run this exact command via your Bash tool to record the`,
-          `BEFORE pptx for all slides in this task:`,
-          `  cd ${task.workspace_dir} && bash ${SCRIPTS.record} --slides ${ids} --label before --out ${task.scratch_dir}/before`,
-          ``,
-          `Step 2 — once that completes, write or UPDATE`,
-          `${task.scratch_dir}/analysis.md using the template in the`,
-          `instructions you received. Then apply the minimal code fix to`,
+          `The BEFORE pptx files are now at ${task.scratch_dir}/before/<slide_id>.pptx.`,
+          `Write or UPDATE ${task.scratch_dir}/analysis.md using the template in`,
+          `the instructions you received. Then apply the minimal code fix to`,
           `renderer/html2slides/extract-dom.ts and/or convert-pptx.ts. Do not`,
           `run git commit. When done, respond with exactly "FIX_APPLIED".`,
-        ].join("\n"),
+        ].join(" "),
       })
 
       // Step 3 — record new pptx.
@@ -166,10 +167,6 @@ export function main(args: {
         `--out ${task.scratch_dir}/diffs`
       )
 
-      // Step 5 — per-slide verdict fork. Each slide gets its own sub-session
-      //   that reads the diff + analysis + comment and emits JSON.
-      .fork()
-      .compact()
       .parallelFork(task.slides, (child, slide) =>
         child
           .prependToNextPrompt(
@@ -178,35 +175,65 @@ export function main(args: {
             `Diff: ${task.scratch_dir}/diffs/${slide.slide_id}.diff. ` +
             `User's original comment: "${slide.user_comment}".`,
           )
-          .send<SlideVerdict>({
+          .send({
             prompt: [
               `Read analysis.md (section for ${slide.slide_id}) and the diff file.`,
-              `Emit a single-object JSON with keys:`,
-              `  slide_id (string = "${slide.slide_id}"),`,
-              `  rationale (string, ≤500 chars — what changed and why),`,
-              `  isRegression (bool — true if the diff introduces NEW rendering`,
+              `Respond with ONLY a JSON object (no markdown fences, no prose before`,
+              `or after) on a single line or pretty-printed, with these keys:`,
+              `  slide_id: "${slide.slide_id}",`,
+              `  rationale: string (<=500 chars — what changed and why),`,
+              `  isRegression: boolean (true if the diff introduces NEW rendering`,
               `    problems not mentioned in analysis.md's "Expected diff"),`,
-              `  bugSolved (bool — true only if the diff clearly addresses the`,
+              `  bugSolved: boolean (true only if the diff clearly addresses the`,
               `    user's original comment AND matches the expected-diff claim).`,
+              `No StructuredOutput tool — just raw JSON in your reply.`,
             ].join(" "),
           }),
       )
 
-      // Step 6 — aggregate verdicts: throw on any regression or unsolved bug.
-      .combineWith<SlideVerdict[], TaskResult>(
-        (branch) => branch.send<TaskResult>({
+      // Step 6 — parse prose verdicts, aggregate, throw on any regression
+      //   or unsolved bug. The inner branch finishes with a fix-summary
+      //   prose reply that we keep verbatim as fix_summary.
+      .combineWith<string[], TaskResult>(
+        (branch) => branch.send({
           prompt: [
             `Write ${task.scratch_dir}/fix-summary.md — one paragraph covering`,
             `the root cause and what you changed, referencing file:line. Then`,
-            `emit a JSON object with: task_id="${task.task_id}",`,
-            `workspace_dir="${task.workspace_dir}",`,
-            `analysis_md="${task.scratch_dir}/analysis.md",`,
-            `verdicts=[] (leave empty, the orchestrator fills it),`,
-            `sxs_url="" (leave empty),`,
-            `fix_summary=<contents of fix-summary.md>.`,
+            `paste the contents of that file back in your reply (no JSON, no`,
+            `markdown fences). The orchestrator will use your reply verbatim as`,
+            `the fix_summary field.`,
           ].join(" "),
         }),
-        (verdicts, partial) => {
+        (rawVerdicts, fixSummary) => {
+          const verdicts: SlideVerdict[] = rawVerdicts.map((raw, i) => {
+            const slide_id = task.slides[i].slide_id;
+            // Strip optional markdown fences + any leading/trailing prose
+            // (agents sometimes ignore "JSON only" and wrap in ```json).
+            const stripped = raw.trim()
+              .replace(/^```(?:json)?\s*/i, "")
+              .replace(/\s*```$/i, "");
+            const firstBrace = stripped.indexOf("{");
+            const lastBrace = stripped.lastIndexOf("}");
+            const jsonSlice = firstBrace >= 0 && lastBrace > firstBrace
+              ? stripped.slice(firstBrace, lastBrace + 1)
+              : stripped;
+            try {
+              const parsed = JSON.parse(jsonSlice);
+              return {
+                slide_id: parsed.slide_id ?? slide_id,
+                rationale: String(parsed.rationale ?? "").slice(0, 500),
+                isRegression: Boolean(parsed.isRegression),
+                bugSolved: Boolean(parsed.bugSolved),
+              };
+            } catch (e) {
+              return {
+                slide_id,
+                rationale: `verdict parse failed: ${(e as Error).message}. raw: ${raw.slice(0, 200)}`,
+                isRegression: true,
+                bugSolved: false,
+              };
+            }
+          });
           const regressions = verdicts.filter(v => v.isRegression);
           const unsolved = verdicts.filter(v => !v.bugSolved);
           if (regressions.length > 0 || unsolved.length > 0) {
@@ -219,7 +246,14 @@ export function main(args: {
                 ...unsolved.map(r => `  - ${r.slide_id}: ${r.rationale}`));
             throw new Error(lines.join("\n"));
           }
-          return { ...partial, verdicts };
+          return {
+            task_id: task.task_id,
+            workspace_dir: task.workspace_dir,
+            analysis_md: `${task.scratch_dir}/analysis.md`,
+            verdicts,
+            sxs_url: "",
+            fix_summary: fixSummary,
+          };
         },
       )
 
@@ -260,24 +294,12 @@ export function main(args: {
       );
   };
 
-  // --- outer parallel fork with retry + model escalation ------------------
-  return args.session.fork().compact().parallelFork(args.tasks, (child, task) =>
+  return args.session.parallelFork(args.tasks, (child, task) =>
     child
-      .switchModel(Claude.sonnet)
       .try<Result<TaskResult>>(
         (s) => s.tryMultipleTimes<TaskResult>(
           task.retry_budget,
           (s2) => runTask(s2, task),
-          (s2, e) => s2
-            .fork()
-            .compact()
-            .switchModel(Claude.opus)
-            .prependToNextPrompt(
-              `Previous attempt failed with:\n${describeError(e)}\n\n` +
-              `analysis.md at ${task.scratch_dir}/analysis.md still contains your` +
-              ` prior findings — refine them rather than restart from scratch.`,
-            )
-            .tryMultipleTimes<TaskResult>(2, (s3) => runTask(s3, task)),
         ),
         // Don't cancel sibling tasks when one task fails outright.
         (s, e) => s.materializeError(describeError(e)),
