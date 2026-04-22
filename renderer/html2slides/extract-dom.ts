@@ -380,11 +380,24 @@ interface ExtractedElement {
     // <a:alpha>, and an rgba(255,255,255,0.1) border would otherwise
     // render as opaque white (slide_17 chip outlines).
     let _elBgCache: string | null = null;
-    // Only use the element's own background when it is meaningfully opaque
-    // (≥50%). A nearly-transparent bg like rgba(255,255,255,0.05) would
-    // otherwise blend the border against white instead of the dark layer below.
-    const getElBg = (): string => _elBgCache ?? (_elBgCache =
-      (rgbAlpha(cs.backgroundColor) >= 0.5 ? rgb2hex(cs.backgroundColor) : null) || detectBgColorBelow(el));
+    // The border pre-blend base must match what the HTML paints UNDER the
+    // border stroke — that is, the element's own bg composited on top of the
+    // ancestor bg. For a `.investor-card` with `rgba(255,255,255,0.05)` fill
+    // and `1px rgba(255,255,255,0.1)` border, a naïve blend against the body
+    // gradient alone underestimates the rendered border colour (it lands near
+    // #2B vs the HTML ~#36), so in Slides the outline fades into the body
+    // ("outer borders on cards missing", slide_17). Pre-blend the translucent
+    // own bg against the ancestor first, then use that opaque hex as the
+    // border's underlay.
+    const getElBg = (): string => {
+      if (_elBgCache) return _elBgCache;
+      const ownRgba = cs.backgroundColor;
+      const ownA = rgbAlpha(ownRgba);
+      if (ownA >= 1) return _elBgCache = rgb2hex(ownRgba) || detectBgColorBelow(el);
+      const ancestor = detectBgColorBelow(el);
+      if (ownA <= 0) return _elBgCache = ancestor;
+      return _elBgCache = rgbaToBlendedHex(ownRgba, ancestor) || ancestor;
+    };
     const blendBorder = (c: string): string | null => {
       if (!c || c === "transparent" || c === "rgba(0, 0, 0, 0)") return null;
       return rgbAlpha(c) < 1 ? rgbaToBlendedHex(c, getElBg()) : rgb2hex(c);
@@ -1049,6 +1062,49 @@ interface ExtractedElement {
     return { angle, stops };
   }
 
+  // Parse CSS radial-gradient into stops with per-stop alpha so the gradFill
+  // injector can emit an OOXML radial `<a:gradFill><a:path path="circle">` fill.
+  // `transparent` stops keep alpha=0; their color inherits the adjacent real
+  // stop's hex so OOXML's alpha interpolation doesn't bleed a stray dark tint.
+  function parseRadialGradient(bgImg: string): { type: "radial"; stops: { color: string; alpha: number; position: number }[] } | null {
+    if (!bgImg || !bgImg.includes("radial-gradient")) return null;
+    const startIdx = bgImg.indexOf("radial-gradient(") + "radial-gradient(".length;
+    const endIdx = bgImg.lastIndexOf(")");
+    if (startIdx < 0 || endIdx < startIdx) return null;
+    const parts = bgImg.substring(startIdx, endIdx);
+    const raw: { color: string; alpha: number; position: number | null }[] = [];
+    const tokenRegex = /(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}|transparent)\s*(\d+%)?/gi;
+    let cm;
+    while ((cm = tokenRegex.exec(parts)) !== null) {
+      const tok = cm[1];
+      const pos = cm[2] ? parseInt(cm[2]) / 100 : null;
+      const a = rgbAlpha(tok);
+      if (/^transparent$/i.test(tok) || a === 0) {
+        raw.push({ color: "#000000", alpha: 0, position: pos });
+      } else {
+        const hex = rgb2hex(tok);
+        if (hex) raw.push({ color: hex, alpha: a, position: pos });
+      }
+    }
+    if (raw.length < 2) return null;
+    if (raw[0].position === null) raw[0].position = 0;
+    if (raw[raw.length - 1].position === null) raw[raw.length - 1].position = 1;
+    for (let i = 1; i < raw.length - 1; i++) {
+      if (raw[i].position === null) raw[i].position = i / (raw.length - 1);
+    }
+    let lastReal = raw.find(s => s.alpha > 0)?.color;
+    if (lastReal) {
+      for (const s of raw) {
+        if (s.alpha === 0) s.color = lastReal!;
+        else lastReal = s.color;
+      }
+    }
+    return {
+      type: "radial",
+      stops: raw.map(s => ({ color: s.color, alpha: s.alpha, position: s.position as number })),
+    };
+  }
+
   /**
    * Detect CSS border-triangle: `width:0; height:0` (or near-zero) element
    * whose painted area comes entirely from four asymmetric borders — one
@@ -1144,25 +1200,58 @@ interface ExtractedElement {
       fill = gradient.stops[0].color; // solid fallback
     }
 
-    // Radial-gradient: approximate as the center (first) color stop.
-    // OOXML has no radial-gradient equivalent — emit a semi-transparent solid
-    // so the glow element at least approximates the intent.
+    // Radial-gradient: emit an OOXML radial `<a:gradFill><a:path path="circle">`
+    // via the injector so `.bg-glow` fades from its center stop out to the
+    // transparent edge stop instead of painting a hard-edged disc. Also compute
+    // a solid-color fallback (first non-transparent stop) so if the injector
+    // fails to patch the shape, the glow degrades to a visible ellipse rather
+    // than an invisible one.
     let radialFillAlpha: number | null = null;
-    if (hasRadialGradient && !fill) {
-      const m = (s.backgroundImage || "").match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\s*\)/);
-      if (m) {
-        const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
-        if (a > 0) {
-          fill = "#" + [m[1], m[2], m[3]].map(v => parseInt(v).toString(16).padStart(2, "0")).join("");
-          radialFillAlpha = a;
+    if (hasRadialGradient && !gradient) {
+      const radial = parseRadialGradient(s.backgroundImage!);
+      if (radial && radial.stops.length >= 2) {
+        gradient = radial as any;
+        if (!fill) {
+          const firstReal = radial.stops.find(st => st.alpha > 0) || radial.stops[0];
+          fill = firstReal.color;
+          if (firstReal.alpha < 1) radialFillAlpha = firstReal.alpha;
         }
       }
     }
 
     // Combine CSS `opacity` with rgba alpha so semi-transparent elements
      // (e.g. slide_28's `.badge.opacity-50 { opacity: 0.5 }`) render faded.
-    const bgA = (s as any).bgAlpha ?? 1;
+    let bgA = (s as any).bgAlpha ?? 1;
     const opA = typeof s.opacity === "number" && s.opacity < 1 ? s.opacity : 1;
+
+    // Pre-blend a translucent solid fill into an opaque hex when the element
+    // has a visible border AND the fill alpha is very low (≤10%). Google
+    // Slides composes a 1px translucent border over an alpha-ed solidFill
+    // unreliably at thumbnail scale — the card edge vanishes into the body
+    // (slide_17: "outer borders on cards (e.g. Green Capital) missing").
+    // Compositing upfront gives the shape a distinct opaque base tone so the
+    // border registers against it, and drops the `<a:alpha>` from the emitted
+    // fill XML. Scoped to bgA<0.1 so substantial translucent chips (e.g.
+    // `.label-badge` with 20% indigo fill — already visible at thumbnail
+    // scale) are left alone; only nearly-invisible fills (5% white over navy)
+    // get flattened. Skipped for gradient fills (handled by the gradFill
+    // injector) and for 0-alpha fills (fully transparent — user's intent).
+    if (fill && hasBorder && !gradient && bgA > 0 && bgA < 0.1) {
+      const ancestor = detectBgColorBelow(el);
+      const fm = fill.replace("#", "").match(/^([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/);
+      const am = (ancestor || "").replace("#", "").match(/^([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/);
+      if (fm && am) {
+        const fr = parseInt(fm[1], 16), fg = parseInt(fm[2], 16), fb = parseInt(fm[3], 16);
+        const ar = parseInt(am[1], 16), ag = parseInt(am[2], 16), ab = parseInt(am[3], 16);
+        const toHex2 = (v: number) => v.toString(16).padStart(2, "0");
+        fill = "#" + [
+          Math.round(fr * bgA + ar * (1 - bgA)),
+          Math.round(fg * bgA + ag * (1 - bgA)),
+          Math.round(fb * bgA + ab * (1 - bgA)),
+        ].map(toHex2).join("");
+        bgA = 1;
+      }
+    }
     // Spread-only box-shadow layers (`0 0 0 Npx color`) are concentric halo
     // rings that OOXML's shadow effect can't express — materialize them as
     // solid concentric rects painted BEHIND the element. CSS paints later
