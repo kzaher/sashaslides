@@ -649,7 +649,15 @@ function buildPptx(
 
           // Fill (gradient tagged via objectName for post-processing — pptxgenjs has no gradient API)
           if (el.gradient && el.gradient.stops && el.gradient.stops.length >= 2) {
-            opts.fill = { color: hexToRgb(el.gradient.stops[0].color) };
+            // Solid-fill fallback carries the first-stop alpha (important for
+            // radial gradients like `.bg-glow` whose first stop is 15% indigo
+            // — an opaque solid would paint a visible disc if the gradFill
+            // injection ever misses this shape).
+            const fallbackFill: any = { color: hexToRgb(el.gradient.stops[0].color) };
+            if (typeof el.fillAlpha === "number" && el.fillAlpha < 1) {
+              fallbackFill.transparency = Math.round((1 - el.fillAlpha) * 100);
+            }
+            opts.fill = fallbackFill;
             const gid = gradientRegistry.length;
             gradientRegistry.push(el.gradient);
             opts.objectName = `GRAD_${gid}`;
@@ -1639,13 +1647,22 @@ function cssAngleToOoxml(cssDeg: number): number {
   return Math.round(ooxml * 60000);
 }
 
-function buildGradFillXml(gradient: { angle: number; stops: { color: string; position: number }[] }): string {
-  const ang = cssAngleToOoxml(gradient.angle);
+function buildGradFillXml(gradient: { angle?: number; type?: string; stops: { color: string; position: number; alpha?: number }[] }): string {
   const gsItems = gradient.stops.map(s => {
     const pos = Math.round(Math.max(0, Math.min(1, s.position)) * 100000);
     const clr = hexToRgb(s.color);
-    return `<a:gs pos="${pos}"><a:srgbClr val="${clr}"/></a:gs>`;
+    const alphaXml = typeof s.alpha === "number" && s.alpha < 1
+      ? `<a:alpha val="${Math.round(s.alpha * 100000)}"/>`
+      : "";
+    return `<a:gs pos="${pos}"><a:srgbClr val="${clr}">${alphaXml}</a:srgbClr></a:gs>`;
   }).join("");
+  if (gradient.type === "radial") {
+    // All-50% fillToRect = gradient converges to shape center (matches
+    // CSS `radial-gradient(circle, …)`). `path="circle"` gives the concentric
+    // falloff; `path="rect"` would make the gradient square off at the bounds.
+    return `<a:gradFill rotWithShape="1"><a:gsLst>${gsItems}</a:gsLst><a:path path="circle"><a:fillToRect l="50000" t="50000" r="50000" b="50000"/></a:path></a:gradFill>`;
+  }
+  const ang = cssAngleToOoxml(gradient.angle ?? 180);
   return `<a:gradFill rotWithShape="1"><a:gsLst>${gsItems}</a:gsLst><a:lin ang="${ang}" scaled="0"/></a:gradFill>`;
 }
 
