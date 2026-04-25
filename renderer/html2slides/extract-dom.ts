@@ -1771,8 +1771,15 @@ interface ExtractedElement {
     const isClippedFitted = cs.whiteSpace === "nowrap"
       && (cs.overflow === "hidden" || cs.overflowX === "hidden");
     const hasLineBreaks = el.querySelector ? el.querySelector("br") !== null : false;
+    // Single-line check uses CONTENT height (bounds minus vertical padding) so
+    // tight pills with thin borders still qualify. The earlier `bounds.h <
+    // 2 * lineH2` test misfired on slide_17 `.label-badge` (padding 6 16, 1px
+    // border, lineH 14.4): bbox h ≈ 29 vs threshold 28.8 → gate skipped, label
+    // emitted with algn="l".
+    const contentH = bounds.h - padT2 - padB2;
+    const isSingleLineH = contentH < lineH2 * 1.5;
     if (effectiveAlign === "start" && padL > 5 && Math.abs(padL - padR) < 3 &&
-        bounds.h < 2 * lineH2 && (padVSymmetric || fullyRoundedPill) &&
+        isSingleLineH && (padVSymmetric || fullyRoundedPill) &&
         !isClippedFitted && !hasLineBreaks) {
       effectiveAlign = "center";
     }
