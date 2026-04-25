@@ -30,8 +30,9 @@
  *      (per-slide verdict JSON).
  */
 
-import { readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { resolve as resolvePath } from "path";
+import { createRequire } from "module";
 import {
   Claude,
   Session,
@@ -40,6 +41,56 @@ import {
   safelyJsonStringify,
 } from "../../../structured-prompting/src/index.js";
 import type { Result } from "../../../structured-prompting/src/types.js";
+
+// CommonJS shims for pixel-diff: pixelmatch + pngjs are CJS-only and live in
+// the repo root's node_modules. Using createRequire keeps esbuild's
+// `packages: external` happy while letting us call them from this ESM file.
+const _require = createRequire(import.meta.url);
+
+/**
+ * Produce a pixel-diff PNG between two reference images. Pixels that differ
+ * (above a small RGB threshold) are coloured red; matching pixels are
+ * left as a faded version of `aPath`. The two inputs are downscaled to a
+ * shared 1280×720 grid first so different DPRs / Slides-vs-Chrome
+ * resolution mismatches line up. Output is written to `diffPath`.
+ *
+ * Used by Step 7.5 (visual check) so the model gets a third image with
+ * "where do we still differ from the ground truth" pre-marked.
+ */
+function pixelDiffPng(aPath: string, bPath: string, diffPath: string): void {
+  const PNG = _require("pngjs").PNG;
+  const pixelmatch = _require("pixelmatch");
+  const W = 1280, H = 720;
+  const loadAndResize = (path: string) => {
+    const png = PNG.sync.read(readFileSync(path));
+    if (png.width === W && png.height === H) return png;
+    // Nearest-neighbor resize to W×H. Fast + good enough for diff overlay.
+    const out = new PNG({ width: W, height: H });
+    for (let y = 0; y < H; y++) {
+      const sy = Math.min(png.height - 1, Math.floor((y / H) * png.height));
+      for (let x = 0; x < W; x++) {
+        const sx = Math.min(png.width - 1, Math.floor((x / W) * png.width));
+        const si = (sy * png.width + sx) * 4;
+        const di = (y * W + x) * 4;
+        out.data[di] = png.data[si];
+        out.data[di + 1] = png.data[si + 1];
+        out.data[di + 2] = png.data[si + 2];
+        out.data[di + 3] = png.data[si + 3];
+      }
+    }
+    return out;
+  };
+  const a = loadAndResize(aPath);
+  const b = loadAndResize(bPath);
+  const diff = new PNG({ width: W, height: H });
+  pixelmatch(a.data, b.data, diff.data, W, H, {
+    threshold: 0.1,
+    diffColor: [255, 0, 0],   // red on differences
+    diffColorAlt: [255, 165, 0],
+    alpha: 0.4,                // matched pixels render as faded `a`
+  });
+  writeFileSync(diffPath, PNG.sync.write(diff));
+}
 
 // ---------- Types ----------
 
@@ -69,12 +120,50 @@ export interface Task {
   baseline_dir: string;
 }
 
-export interface SlideVerdict {
+export type SlideVerdict = {
   slide_id: string;
   rationale: string;
   isRegression: boolean;
   bugSolved: boolean;
-}
+};
+
+export type VisualVerdict = {
+  slide_id: string;
+  visualVerdict: "pass" | "fail";
+  reason: string;
+};
+
+// Manual JSON Schemas — typia's @typia/unplugin transformer reliably inlines
+// schemas only for files inside structured-prompting/, so we hand-write these
+// here. Engine flattens `{schema: {...}}` into the CLI's --json-schema flag;
+// the cast back to SessionWithResult<T> on the call site preserves the typed
+// chain for downstream consumers.
+const SLIDE_VERDICT_SCHEMA = {
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      slide_id:     { type: "string" },
+      rationale:    { type: "string" },
+      isRegression: { type: "boolean" },
+      bugSolved:    { type: "boolean" },
+    },
+    required: ["slide_id", "rationale", "isRegression", "bugSolved"],
+  },
+} as any;
+
+const VISUAL_VERDICT_SCHEMA = {
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      slide_id:      { type: "string" },
+      visualVerdict: { type: "string", enum: ["pass", "fail"] },
+      reason:        { type: "string" },
+    },
+    required: ["slide_id", "visualVerdict", "reason"],
+  },
+} as any;
 
 export interface TaskResult {
   task_id: string;
@@ -171,6 +260,12 @@ export function main(args: {
         `--out ${task.scratch_dir}/diffs`
       )
 
+      // Step 4-5 — per-slide verdict: split into TWO sends.
+      //   First send asks the model to read analysis.md + diff and write its
+      //   reasoning as prose to a file (zero JSON discipline, just
+      //   thinking). Second send is structured (typia-typed) and emits the
+      //   strict SlideVerdict shape — the engine parses, no manual
+      //   stripping/try-catch needed downstream.
       .parallelFork(task.slides, (child, slide) =>
         child
           .tryMultipleTimes(3, s => (s
@@ -182,25 +277,32 @@ export function main(args: {
             )
             .send({
               prompt: [
+                `Step A — REASONING ONLY (no structured output yet).`,
                 `Read analysis.md (section for ${slide.slide_id}) and the diff file.`,
-                `Respond with ONLY a JSON object (no markdown fences, no prose before`,
-                `or after) on a single line or pretty-printed, with these keys:`,
-                `  slide_id: "${slide.slide_id}",`,
-                `  rationale: string (<=500 chars — what changed and why),`,
-                `  isRegression: boolean (true if the diff introduces NEW rendering`,
-                `    problems not mentioned in analysis.md's "Expected diff"),`,
-                `  bugSolved: boolean (true only if the diff clearly addresses the`,
-                `    user's original comment AND matches the expected-diff claim).`,
-                `No StructuredOutput tool — just raw JSON in your reply.`,
+                `Write your full reasoning to ${task.scratch_dir}/${slide.slide_id}-verdict.md`,
+                `as plain markdown — what the diff changed, whether it addresses the`,
+                `user's comment, whether it introduces new regressions vs the analysis's`,
+                `"Expected diff" section. Then reply with exactly "VERDICT_THINKING_DONE".`,
               ].join(" "),
             })
+            .send({
+              schema: SLIDE_VERDICT_SCHEMA,
+              prompt: [
+                `Step B — emit your verdict as a SlideVerdict structured-output`,
+                `object. slide_id="${slide.slide_id}". rationale: <=500 chars`,
+                `summarising your ${slide.slide_id}-verdict.md analysis.`,
+                `isRegression=true iff the diff introduces NEW problems not in`,
+                `the "Expected diff" section. bugSolved=true iff the diff`,
+                `clearly fixes the user's comment AND matches the expected diff.`,
+              ].join(" "),
+            }) as SessionWithResult<SlideVerdict>
           )),
       )
 
-      // Step 6 — parse prose verdicts, aggregate, throw on any regression
-      //   or unsolved bug. The inner branch finishes with a fix-summary
-      //   prose reply that we keep verbatim as fix_summary.
-      .combineWith<string[], TaskResult>(
+      // Step 6 — aggregate typed verdicts. No JSON parsing needed — the
+      //   engine returned SlideVerdict[] directly thanks to send<T>. Branch
+      //   asks the worker for a one-paragraph fix-summary (keeps prose).
+      .combineWith<string, TaskResult>(
         (branch) => branch.send({
           prompt: [
             `Write ${task.scratch_dir}/fix-summary.md — one paragraph covering`,
@@ -210,36 +312,7 @@ export function main(args: {
             `the fix_summary field.`,
           ].join(" "),
         }),
-        (rawVerdicts, fixSummary) => {
-          const verdicts: SlideVerdict[] = rawVerdicts.map((raw, i) => {
-            const slide_id = task.slides[i].slide_id;
-            // Strip optional markdown fences + any leading/trailing prose
-            // (agents sometimes ignore "JSON only" and wrap in ```json).
-            const stripped = raw.trim()
-              .replace(/^```(?:json)?\s*/i, "")
-              .replace(/\s*```$/i, "");
-            const firstBrace = stripped.indexOf("{");
-            const lastBrace = stripped.lastIndexOf("}");
-            const jsonSlice = firstBrace >= 0 && lastBrace > firstBrace
-              ? stripped.slice(firstBrace, lastBrace + 1)
-              : stripped;
-            try {
-              const parsed = JSON.parse(jsonSlice);
-              return {
-                slide_id: parsed.slide_id ?? slide_id,
-                rationale: String(parsed.rationale ?? "").slice(0, 500),
-                isRegression: Boolean(parsed.isRegression),
-                bugSolved: Boolean(parsed.bugSolved),
-              };
-            } catch (e) {
-              return {
-                slide_id,
-                rationale: `verdict parse failed: ${(e as Error).message}. raw: ${raw.slice(0, 200)}`,
-                isRegression: true,
-                bugSolved: false,
-              };
-            }
-          });
+        (verdicts, fixSummary) => {
           const regressions = verdicts.filter(v => v.isRegression);
           const unsolved = verdicts.filter(v => !v.bugSolved);
           if (regressions.length > 0 || unsolved.length > 0) {
@@ -272,68 +345,72 @@ export function main(args: {
         `--out ${task.scratch_dir}/after`
       )
 
-      // Step 7.5 — visual check via vision. For each slide we hand Claude
-      //   three images: (1) Chrome render of the HTML fixture (ground truth),
-      //   (2) post-fix Slides render, (3) pre-fix baseline Slides render.
-      //   The model decides whether the user's reported bug is now fixed
-      //   AND no new visible regressions vs the baseline. If ANY slide
-      //   fails, throw → tryMultipleTimes retries the whole task. The
-      //   side-branch return value is discarded (combine returns upstream).
-      .combineWith<string[]>(
+      // Step 7.5 — visual check via vision. For each slide, generate a
+      //   pixel-diff PNG between the Chrome ground truth and the post-fix
+      //   Slides render (red marks on differences), then split the model
+      //   call into two sends:
+      //     (a) prose: model looks at test, baseline, and diff; writes its
+      //         observations to `${slide_id}-visual.md`.
+      //     (b) structured: send<VisualVerdict> emits the typed pass/fail.
+      //   Aggregate via assert: if ANY slide is "fail", throw →
+      //   tryMultipleTimes retries the whole task. Combine returns upstream
+      //   so the outer chain shape is preserved for Step 8.
+      .combineWith<VisualVerdict[]>(
         (branch) => branch
           .parallelFork(task.slides, (child, slide) => {
-            const origPath = resolvePath(task.baseline_dir, "originals", `${slide.slide_id}.png`);
-            const afterPath = resolvePath(task.scratch_dir, "after/thumbs", `${slide.slide_id}.png`);
-            const baselinePath = resolvePath(task.baseline_dir, "thumbs", `${slide.slide_id}.png`);
-            return child.send({
-              prompt: [
-                `Visual verification for ${slide.slide_id}.`,
-                `User's bug report: "${slide.user_comment}".`,
-                `Cluster hypothesis: ${task.cluster_description}`,
-                ``,
-                `Three PNG attachments (in order):`,
-                `  (1) Chrome render of the HTML fixture (ground truth);`,
-                `  (2) Post-fix Slides render (what we now produce);`,
-                `  (3) Pre-fix baseline Slides render (what main produced before this fix).`,
-                ``,
-                `Question: does (2) now visually resemble (1) in the area the user`,
-                `complained about? Is the user's reported bug fixed, AND does (2) NOT`,
-                `introduce visible regressions vs (3) elsewhere on the slide?`,
-                ``,
-                `Reply with ONLY a JSON object (no markdown fences, no prose):`,
-                `  slide_id: "${slide.slide_id}",`,
-                `  visualVerdict: "pass" | "fail",`,
-                `  reason: string (<=300 chars — what you see in the images).`,
-              ].join("\n"),
-              base64_attachments: [
-                readFileSync(origPath).toString("base64"),
-                readFileSync(afterPath).toString("base64"),
-                readFileSync(baselinePath).toString("base64"),
-              ],
-            });
+            const testPath = resolvePath(task.scratch_dir, "after/thumbs", `${slide.slide_id}.png`);
+            const baselinePath = resolvePath(task.baseline_dir, "originals", `${slide.slide_id}.png`);
+            const diffPath = resolvePath(task.scratch_dir, "after/diffs", `${slide.slide_id}-vs-truth.png`);
+            // Generate the marked-differences PNG inline so the model sees
+            // EXACTLY where the post-fix Slides render still diverges from
+            // the Chrome ground truth. Built lazily here (parallelFork apply
+            // runs at execution time, after Step 7's screenshots exist).
+            mkdirSync(resolvePath(task.scratch_dir, "after/diffs"), { recursive: true });
+            pixelDiffPng(baselinePath, testPath, diffPath);
+            return child
+              .send({
+                prompt: [
+                  `Visual verification — STEP A (reasoning, write to file).`,
+                  `Slide: ${slide.slide_id}. User's bug report: "${slide.user_comment}".`,
+                  `Cluster hypothesis: ${task.cluster_description}`,
+                  ``,
+                  `Three PNG attachments (in order):`,
+                  `  (1) test       — post-fix Slides render (what we now produce).`,
+                  `  (2) baseline   — Chrome render of the HTML fixture (ground truth).`,
+                  `  (3) diff       — pixel difference of (1) vs (2): RED pixels mark`,
+                  `                    where the post-fix render still differs from`,
+                  `                    ground truth. Faded pixels match.`,
+                  ``,
+                  `Open all three. Concentrate on areas the user flagged AND any large`,
+                  `red regions in (3) — those are the remaining defects. Write your`,
+                  `analysis to ${task.scratch_dir}/${slide.slide_id}-visual.md as`,
+                  `markdown: what's still off, what's fixed, severity. Then reply`,
+                  `with exactly "VISUAL_THINKING_DONE".`,
+                ].join("\n"),
+                base64_attachments: [
+                  readFileSync(testPath).toString("base64"),
+                  readFileSync(baselinePath).toString("base64"),
+                  readFileSync(diffPath).toString("base64"),
+                ],
+              })
+              .send({
+                schema: VISUAL_VERDICT_SCHEMA,
+                prompt: [
+                  `STEP B — emit your VisualVerdict structured-output object.`,
+                  `slide_id="${slide.slide_id}". visualVerdict="pass" iff the`,
+                  `user's reported bug is fixed AND no new visible regressions`,
+                  `appear vs the baseline. reason: <=300 chars summarising your`,
+                  `${slide.slide_id}-visual.md observations.`,
+                ].join(" "),
+              }) as SessionWithResult<VisualVerdict>;
           })
-          .assert((rawVerdicts) => {
-            const failed: string[] = [];
-            for (let i = 0; i < rawVerdicts.length; i++) {
-              const slide_id = task.slides[i].slide_id;
-              const stripped = rawVerdicts[i].trim()
-                .replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-              const firstBrace = stripped.indexOf("{");
-              const lastBrace = stripped.lastIndexOf("}");
-              const jsonSlice = firstBrace >= 0 && lastBrace > firstBrace
-                ? stripped.slice(firstBrace, lastBrace + 1)
-                : stripped;
-              try {
-                const v = JSON.parse(jsonSlice);
-                if (v.visualVerdict !== "pass") {
-                  failed.push(`${slide_id}: ${v.reason || "(no reason)"}`);
-                }
-              } catch (e) {
-                failed.push(`${slide_id}: visual verdict parse failed: ${(e as Error).message}; raw=${rawVerdicts[i].slice(0, 200)}`);
-              }
-            }
+          .assert((verdicts) => {
+            const failed = verdicts.filter(v => v.visualVerdict !== "pass");
             if (failed.length > 0) {
-              throw new Error(`VISUAL CHECK FAILED:\n  - ${failed.join("\n  - ")}`);
+              throw new Error(
+                `VISUAL CHECK FAILED:\n` +
+                failed.map(v => `  - ${v.slide_id}: ${v.reason}`).join("\n"),
+              );
             }
           }),
       )
