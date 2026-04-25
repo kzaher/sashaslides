@@ -243,13 +243,26 @@ function emitStyledText(
       ? { op: s.opacity, bg: s.bgColorBehind || "#ffffff" }
       : null;
 
+  // When valign="top" (anchor="t") and the source had CSS padding-top, fold
+  // it into the textbox's top inset (tIns). Without this, glyphs anchored to
+  // the textbox top sit at the box's true top edge, while siblings positioned
+  // relative to the same border-box (e.g. slide_19 `.touchpoint::before`
+  // bullets at `top:9px`) anchor to the box's CSS-correct origin — leaving
+  // the bullet visibly below the text's vertical center. Pushing the glyph
+  // down by `paddingTop * PX2PT` realigns the bullet with the text mid-line
+  // exactly as Chrome lays it out. valign="middle" (anchor="ctr") cases need
+  // no inset — Slides centers the glyph in the full box height.
+  // pptxgenjs `margin` array is [lIns, rIns, bIns, tIns] in points.
+  const padTopPt = (valign === "top" && typeof s.paddingTop === "number" && s.paddingTop > 0)
+    ? s.paddingTop * PX2PT
+    : 0;
   const commonOpts: any = {
     x: px2in(bx), y: px2in(by), w: px2in(bw), h: px2in(bh),
     valign,
     align,
     fill: { type: "none" },
     line: { type: "none" },
-    margin: 0,
+    margin: padTopPt > 0 ? [0, 0, 0, padTopPt] : 0,
   };
   // Two independent line-spacing rules combined:
   //
