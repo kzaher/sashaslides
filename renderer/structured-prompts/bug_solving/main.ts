@@ -133,37 +133,6 @@ export type VisualVerdict = {
   reason: string;
 };
 
-// Manual JSON Schemas — typia's @typia/unplugin transformer reliably inlines
-// schemas only for files inside structured-prompting/, so we hand-write these
-// here. Engine flattens `{schema: {...}}` into the CLI's --json-schema flag;
-// the cast back to SessionWithResult<T> on the call site preserves the typed
-// chain for downstream consumers.
-const SLIDE_VERDICT_SCHEMA = {
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      slide_id:     { type: "string" },
-      rationale:    { type: "string" },
-      isRegression: { type: "boolean" },
-      bugSolved:    { type: "boolean" },
-    },
-    required: ["slide_id", "rationale", "isRegression", "bugSolved"],
-  },
-} as any;
-
-const VISUAL_VERDICT_SCHEMA = {
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      slide_id:      { type: "string" },
-      visualVerdict: { type: "string", enum: ["pass", "fail"] },
-      reason:        { type: "string" },
-    },
-    required: ["slide_id", "visualVerdict", "reason"],
-  },
-} as any;
 
 export interface TaskResult {
   task_id: string;
@@ -285,8 +254,7 @@ export function main(args: {
                 `"Expected diff" section. Then reply with exactly "VERDICT_THINKING_DONE".`,
               ].join(" "),
             })
-            .send({
-              schema: SLIDE_VERDICT_SCHEMA,
+            .send<SlideVerdict>({
               prompt: [
                 `Step B — emit your verdict as a SlideVerdict structured-output`,
                 `object. slide_id="${slide.slide_id}". rationale: <=500 chars`,
@@ -295,7 +263,7 @@ export function main(args: {
                 `the "Expected diff" section. bugSolved=true iff the diff`,
                 `clearly fixes the user's comment AND matches the expected diff.`,
               ].join(" "),
-            }) as SessionWithResult<SlideVerdict>
+            })
           )),
       )
 
@@ -393,8 +361,7 @@ export function main(args: {
                   readFileSync(diffPath).toString("base64"),
                 ],
               })
-              .send({
-                schema: VISUAL_VERDICT_SCHEMA,
+              .send<VisualVerdict>({
                 prompt: [
                   `STEP B — emit your VisualVerdict structured-output object.`,
                   `slide_id="${slide.slide_id}". visualVerdict="pass" iff the`,
@@ -402,7 +369,7 @@ export function main(args: {
                   `appear vs the baseline. reason: <=300 chars summarising your`,
                   `${slide.slide_id}-visual.md observations.`,
                 ].join(" "),
-              }) as SessionWithResult<VisualVerdict>;
+              });
           })
           .assert((verdicts) => {
             const failed = verdicts.filter(v => v.visualVerdict !== "pass");
