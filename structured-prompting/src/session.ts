@@ -77,6 +77,15 @@ export interface SessionInit {
   cwd?: string;
   graph?: ComputationGraph;
   tipNodeId?: string;
+  /**
+   * Lexical container — the anchor node (root, parallelChild, tryAttempt,
+   * combineBranch, …) that this Session is "inside". Every chain step
+   * built off this Session shares the same containerId, so the UI groups
+   * `a().b().c()` as siblings under the anchor. Defaults to the graph's
+   * rootId; the engine overrides it when constructing sub-sessions inside
+   * a callback.
+   */
+  containerId?: string;
   // Phantom marker so SessionWithResult<T> can be reconstructed across clones.
   resultTypeMarker?: unknown;
 }
@@ -98,6 +107,8 @@ export class Session {
   readonly cwd: string;
   readonly graph: ComputationGraph;
   readonly tipNodeId: string;
+  /** Lexical container anchor; see SessionInit.containerId. */
+  readonly containerId: string;
 
   constructor(init: SessionInit = {}) {
     this.sessionId = init.sessionId ?? randomId();
@@ -105,6 +116,7 @@ export class Session {
     this.cwd = init.cwd ?? (typeof process !== "undefined" ? process.cwd() : "/");
     this.graph = init.graph ?? new ComputationGraph(this.sessionId);
     this.tipNodeId = init.tipNodeId ?? this.graph.rootId;
+    this.containerId = init.containerId ?? this.graph.rootId;
   }
 
   // --- core chainable operations (all sync, build description nodes) ------
@@ -112,6 +124,7 @@ export class Session {
   prependToNextPrompt(prefix: string): Session {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "prependToNextPrompt",
       label: `prepend: ${truncate(prefix, 48)}`,
       input: { text: prefix },
@@ -122,6 +135,7 @@ export class Session {
   appendToNextPrompt(suffix: string): Session {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "appendToNextPrompt",
       label: `append: ${truncate(suffix, 48)}`,
       input: { text: suffix },
@@ -132,6 +146,7 @@ export class Session {
   switchModel(model: ClaudeModel): Session {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "switchModel",
       label: `switchModel(${model})`,
       input: { model },
@@ -150,6 +165,7 @@ export class Session {
     const label = model ? `newSession(${model})` : "newSession";
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "newSession",
       label,
       input: { model: effective },
@@ -160,6 +176,7 @@ export class Session {
       cwd: this.cwd,
       graph: this.graph,
       tipNodeId: node.id,
+      containerId: this.containerId,
     });
   }
 
@@ -185,6 +202,7 @@ export class Session {
     const tail = hasSchema ? " <schema>" : "";
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "send",
       label: `send${tail}: ${promptLabel(args.prompt, 48)}`,
       input: { ...args },
@@ -193,13 +211,14 @@ export class Session {
   }
 
   fork(): ForkedSession {
-    const node = this.graph.create({ parentId: this.tipNodeId, kind: "fork", label: "fork" });
+    const node = this.graph.create({ parentId: this.tipNodeId, containerId: this.containerId, kind: "fork", label: "fork" });
     return new ForkedSession({
       sessionId: randomId(),
       model: this.model,
       cwd: this.cwd,
       graph: this.graph,
       tipNodeId: node.id,
+      containerId: this.containerId,
     });
   }
 
@@ -216,6 +235,7 @@ export class Session {
   executeShell(buildCommand: () => string): SessionWithResult<string> {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "executeShell",
       label: "executeShell",
       callbacks: { buildCommand: (buildCommand as unknown) as ShellBuildCallback },
@@ -226,6 +246,7 @@ export class Session {
   pipe<T>(fn: DescFn<Session, SessionWithResult<T>>): SessionWithResult<T> {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "pipe",
       label: "pipe",
       // Widen the user's typed fn to the graph's unknown-typed callback
@@ -242,6 +263,7 @@ export class Session {
   ): SessionWithResult<R[]> {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "parallelFork",
       label: `parallelFork(n=${inputs.length})`,
       input: { count: inputs.length, inputs: [...inputs] },
@@ -256,6 +278,7 @@ export class Session {
   ): SessionWithResult<R> {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "try",
       label: "try",
       callbacks: {
@@ -273,6 +296,7 @@ export class Session {
   ): SessionWithResult<R> {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "tryMultipleTimes",
       label: `tryMultipleTimes(max=${max})`,
       input: { max },
@@ -297,6 +321,7 @@ export class Session {
   materializeError<T = unknown>(error: string): SessionWithResult<Result<T>> {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "materializeError",
       label: `materializeError: ${truncate(error, 48)}`,
       input: { error },
@@ -313,6 +338,7 @@ export class Session {
       cwd: this.cwd,
       graph: this.graph,
       tipNodeId,
+      containerId: this.containerId,
     });
   }
 
@@ -323,6 +349,7 @@ export class Session {
       cwd: this.cwd,
       graph: this.graph,
       tipNodeId: this.tipNodeId,
+      containerId: this.containerId,
     });
   }
 
@@ -333,6 +360,7 @@ export class Session {
       cwd: this.cwd,
       graph: this.graph,
       tipNodeId,
+      containerId: this.containerId,
     });
   }
 }
@@ -340,13 +368,14 @@ export class Session {
 export class ForkedSession extends Session {
   /** Append a pending compact() node. Subsequent switchModel etc. chain under it. */
   compact(): CompactedSession {
-    const node = this.graph.create({ parentId: this.tipNodeId, kind: "compact", label: "compact" });
+    const node = this.graph.create({ parentId: this.tipNodeId, containerId: this.containerId, kind: "compact", label: "compact" });
     return new CompactedSession({
       sessionId: this.sessionId,
       model: this.model,
       cwd: this.cwd,
       graph: this.graph,
       tipNodeId: node.id,
+      containerId: this.containerId,
     });
   }
 }
@@ -380,6 +409,7 @@ export class SessionWithResult<T> extends Session {
   ): SessionWithResult<JointResult> {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "combineWith",
       label: "combineWith",
       callbacks: {
@@ -409,6 +439,7 @@ export class SessionWithResult<T> extends Session {
   executeShell(buildCommand: (r: T) => string): SessionWithResult<string> {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "executeShell",
       label: "executeShell",
       callbacks: { buildCommand: buildCommand as ShellBuildCallback },
@@ -420,6 +451,7 @@ export class SessionWithResult<T> extends Session {
   assert(check: (r: T) => void): SessionWithResult<T> {
     const node = this.graph.create({
       parentId: this.tipNodeId,
+      containerId: this.containerId,
       kind: "assert",
       label: "assert",
       callbacks: { check: check as AssertCheckCallback },

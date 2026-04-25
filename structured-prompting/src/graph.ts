@@ -103,6 +103,15 @@ export type NodeKind = keyof NodeKindSchemas;
 interface GraphNodeBase {
   id: string;
   parentId: string | null;
+  /**
+   * Lexical container — the anchor node (root, parallelChild, tryAttempt,
+   * combineBranch, tryFallback, pipe) that the user code building this node
+   * is "inside". Every chain step inside the same lambda body shares the
+   * same containerId. The UI tree groups siblings by containerId so a
+   * linear chain `a().b().c()` renders as 3 siblings under one container,
+   * not as a 3-deep diagonal cascade. Engine execution still uses parentId.
+   */
+  containerId: string | null;
   label: string;
   status: NodeStatus;
   createdAt: number;
@@ -142,6 +151,8 @@ type CallbacksField<K extends NodeKind> = "callbacks" extends keyof NodeKindSche
 
 export type CreateArgs<K extends NodeKind> = {
   parentId: string | null;
+  /** Lexical container; defaults to parentId when omitted. */
+  containerId?: string | null;
   label: string;
   kind: K;
 } & InputField<K> & CallbacksField<K>;
@@ -159,6 +170,7 @@ export class ComputationGraph {
     const root: GraphNode = {
       id: randomUUID(),
       parentId: null,
+      containerId: null,
       kind: "root",
       label,
       status: "pending",
@@ -183,12 +195,14 @@ export class ComputationGraph {
    */
   create<K extends NodeKind>(args: CreateArgs<K>): Extract<GraphNode, { kind: K }> {
     const { parentId, kind, label } = args;
+    const containerId = (args as { containerId?: string | null }).containerId ?? parentId;
     // Runtime object. The field layout is identical for every variant — only
     // the types of `input` / `callbacks` vary per kind, and those are enforced
     // by the CreateArgs<K> constraint above.
     const node = {
       id: randomUUID(),
       parentId,
+      containerId,
       kind,
       label,
       status: "pending" as NodeStatus,

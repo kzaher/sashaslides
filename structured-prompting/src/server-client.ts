@@ -23,18 +23,6 @@ function fmtDur(ms) {
   return (ms / 1000).toFixed(2) + "s";
 }
 
-/** Structural vs followup classification:
- *   child.createdAt >= parent.startedAt → structural (engine-spawned sub-
- *                                          tree, indent one level)
- *   otherwise                             → chain followup (same depth;
- *                                          .a().b() should not cascade).
- *  If parent hasn't started yet we treat all children as followups so
- *  not-yet-running trees stay flat instead of exploding indentation. */
-function isStructuralChild(parent, child) {
-  if (parent.startedAt == null) return false;
-  return child.createdAt >= parent.startedAt;
-}
-
 function computeDurations(nodes) {
   const sumMap = new Map();
   const selfMap = new Map();
@@ -189,8 +177,12 @@ function Detail(props) {
 // ---- Tree ----------------------------------------------------------------
 function TreeNode(props) {
   const { node, depth, graph, selectedId, onSelect, collapsed, onToggleCollapsed, sumMap, selfMap } = props;
+  // Tree nesting is by containerId (lexical lambda anchor), not parentId
+  // (linear chain predecessor). A chain like a().b().c() built off the same
+  // Session shares one containerId, so all three render as siblings under
+  // the anchor instead of as a 3-deep cascade.
   const kids = useMemo(
-    () => graph.nodes.filter(n => n.parentId === node.id).sort((a, b) => a.createdAt - b.createdAt),
+    () => graph.nodes.filter(n => n.containerId === node.id && n.id !== node.id).sort((a, b) => a.createdAt - b.createdAt),
     [graph.version, node.id],
   );
   const isCollapsed = collapsed.has(node.id);
@@ -220,7 +212,8 @@ function TreeNode(props) {
     !isCollapsed && kids.map(k => h(TreeNode, {
       key: k.id,
       node: k,
-      depth: isStructuralChild(node, k) ? depth + 1 : depth,
+      // All "kids" are now containerId-grouped siblings — always one level deeper.
+      depth: depth + 1,
       graph, selectedId, onSelect, collapsed, onToggleCollapsed, sumMap, selfMap,
     })),
   );
