@@ -87,10 +87,8 @@ export interface TaskResult {
 
 /** Path to the shell/ts helper scripts that live alongside main.ts. */
 const SCRIPTS = {
-  record: "renderer/structured-prompts/bug_solving/scripts/record-pptx.sh",
-  baseline: "renderer/structured-prompts/bug_solving/scripts/baseline-record.ts",
+  record: "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts",
   diff: "renderer/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts",
-  uploadScrape: "renderer/structured-prompts/bug_solving/scripts/upload-and-scrape.ts",
   filteredServer: "renderer/structured-prompts/bug_solving/scripts/filtered-rating-server.ts",
 };
 
@@ -141,9 +139,8 @@ export function main(args: {
     return s
       // Step 1 — read user comments + annotations, write analysis.md, apply
       //   the minimal code fix. The BEFORE pptx was already recorded ONCE
-      //   for the whole wave by baseline-record.ts at `task.baseline_dir` —
-      //   each task inherits it instead of rebuilding. prependToNextPrompt
-      //   is consumed by this send.
+      //   for the whole wave at `task.baseline_dir` (see Step 0 of main()) —
+      //   each task inherits it instead of rebuilding.
       .prependToNextPrompt(analysisPromptFor(task))
       .send({
         prompt: [
@@ -156,16 +153,19 @@ export function main(args: {
         ].join(" "),
       })
 
-      // Step 2 — record new pptx.
+      // Step 2 — quick post-fix recording: per-slide pptx ONLY (mode=pptx).
+      //   Cheapest possible record so the verdict step has a diff input
+      //   without paying the screenshot/upload tax on attempts that may
+      //   fail and retry.
       .executeShell(() =>
-        `cd ${task.workspace_dir} && bash ${SCRIPTS.record} ` +
-        `--slides ${ids} --label after --out ${task.scratch_dir}/after`
+        `cd ${task.workspace_dir} && npx tsx ${SCRIPTS.record} ` +
+        `--mode pptx --slides ${ids} --out ${task.scratch_dir}/after`
       )
 
       // Step 3 — diff shared baseline vs after.
       .executeShell(() =>
         `cd ${task.workspace_dir} && npx tsx ${SCRIPTS.diff} ` +
-        `--before ${task.baseline_dir}/pptx --after ${task.scratch_dir}/after ` +
+        `--before ${task.baseline_dir}/pptx --after ${task.scratch_dir}/after/pptx ` +
         `--out ${task.scratch_dir}/diffs`
       )
 
@@ -261,20 +261,21 @@ export function main(args: {
         },
       )
 
-      // Step 7 — upload consolidated pptx + scrape thumbnails.
-      //   executeShell receives the current result (TaskResult) and must
-      //   produce a command string; we just want the side effect here.
+      // Step 7 — top up the post-fix recording: now that the verdict is good,
+      //   add Chrome screenshots + Slides upload + thumbs scrape to the same
+      //   <after> dir. mode=full skips the pptx step (already done in Step 2).
       .executeShell(() =>
-        `cd ${task.workspace_dir} && npx tsx ${SCRIPTS.uploadScrape} ` +
-        `--slides ${ids} --title "${task.presentation_title}" ` +
-        `--out ${task.scratch_dir}/thumbnails`
+        `cd ${task.workspace_dir} && npx tsx ${SCRIPTS.record} ` +
+        `--mode full --slides ${ids} --title "${task.presentation_title}" ` +
+        `--out ${task.scratch_dir}/after`
       )
 
       // Step 8 — boot filtered rating server (backgrounded). Store URL.
-      //   --html-dir is inferred from the first slide's html_file parent; the
-      //   SxS UI uses it to expose "View HTML Source" per card. The Slides
-      //   deep link is auto-read from thumbnails/manifest.json written by
-      //   upload-and-scrape.ts in step 7.
+      //   --thumbnails reads the post-fix Slides scrape;
+      //   --baseline-dir reads main's pre-fix Slides scrape (left panel toggle);
+      //   --originals reads baseline's Chrome screenshots (left panel default);
+      //   --html-dir surfaces "View HTML Source" per card.
+      //   The Slides deep link is auto-read from thumbnails/manifest.json.
       .combineWith<string, TaskResult>(
         (branch) => branch.executeShell(() => {
           const htmlDir = task.slides[0]?.html_file
@@ -287,7 +288,8 @@ export function main(args: {
             `--port ${task.server_port} --slides ${ids} ` +
             `--analysis ${task.scratch_dir}/analysis.md ` +
             `--diffs ${task.scratch_dir}/diffs ` +
-            `--thumbnails ${task.scratch_dir}/thumbnails ` +
+            `--thumbnails ${task.scratch_dir}/after/thumbs ` +
+            `--originals ${task.baseline_dir}/originals ` +
             `--baseline-dir ${task.baseline_dir}/thumbs ` +
             (htmlDir ? `--html-dir ${htmlDir} ` : ``) +
             `--task-title "${task.task_id}" ` +
@@ -314,11 +316,8 @@ export function main(args: {
 
   return args.session
     .executeShell(() =>
-      `if [ -f "${baselineDir}/thumbs/manifest.json" ] && [ -d "${baselineDir}/pptx" ]; then ` +
-      `  echo "[baseline] reusing ${baselineDir}"; ` +
-      `else ` +
-      `  npx tsx ${SCRIPTS.baseline} --slides ${allSlides.join(",")} --out ${baselineDir}; ` +
-      `fi`
+      `npx tsx ${SCRIPTS.record} --mode full ` +
+      `--slides ${allSlides.join(",")} --out ${baselineDir}`
     )
     .parallelFork(args.tasks, (child, task) =>
       child
