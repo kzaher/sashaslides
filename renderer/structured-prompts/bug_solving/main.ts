@@ -30,6 +30,8 @@
  *      (per-slide verdict JSON).
  */
 
+import { readFileSync } from "fs";
+import { resolve as resolvePath } from "path";
 import {
   Claude,
   Session,
@@ -268,6 +270,72 @@ export function main(args: {
         `cd ${task.workspace_dir} && npx tsx ${SCRIPTS.record} ` +
         `--mode full --slides ${ids} --title "${task.presentation_title}" ` +
         `--out ${task.scratch_dir}/after`
+      )
+
+      // Step 7.5 — visual check via vision. For each slide we hand Claude
+      //   three images: (1) Chrome render of the HTML fixture (ground truth),
+      //   (2) post-fix Slides render, (3) pre-fix baseline Slides render.
+      //   The model decides whether the user's reported bug is now fixed
+      //   AND no new visible regressions vs the baseline. If ANY slide
+      //   fails, throw → tryMultipleTimes retries the whole task. The
+      //   side-branch return value is discarded (combine returns upstream).
+      .combineWith<string[]>(
+        (branch) => branch
+          .parallelFork(task.slides, (child, slide) => {
+            const origPath = resolvePath(task.baseline_dir, "originals", `${slide.slide_id}.png`);
+            const afterPath = resolvePath(task.scratch_dir, "after/thumbs", `${slide.slide_id}.png`);
+            const baselinePath = resolvePath(task.baseline_dir, "thumbs", `${slide.slide_id}.png`);
+            return child.send({
+              prompt: [
+                `Visual verification for ${slide.slide_id}.`,
+                `User's bug report: "${slide.user_comment}".`,
+                `Cluster hypothesis: ${task.cluster_description}`,
+                ``,
+                `Three PNG attachments (in order):`,
+                `  (1) Chrome render of the HTML fixture (ground truth);`,
+                `  (2) Post-fix Slides render (what we now produce);`,
+                `  (3) Pre-fix baseline Slides render (what main produced before this fix).`,
+                ``,
+                `Question: does (2) now visually resemble (1) in the area the user`,
+                `complained about? Is the user's reported bug fixed, AND does (2) NOT`,
+                `introduce visible regressions vs (3) elsewhere on the slide?`,
+                ``,
+                `Reply with ONLY a JSON object (no markdown fences, no prose):`,
+                `  slide_id: "${slide.slide_id}",`,
+                `  visualVerdict: "pass" | "fail",`,
+                `  reason: string (<=300 chars — what you see in the images).`,
+              ].join("\n"),
+              base64_attachments: [
+                readFileSync(origPath).toString("base64"),
+                readFileSync(afterPath).toString("base64"),
+                readFileSync(baselinePath).toString("base64"),
+              ],
+            });
+          })
+          .assert((rawVerdicts) => {
+            const failed: string[] = [];
+            for (let i = 0; i < rawVerdicts.length; i++) {
+              const slide_id = task.slides[i].slide_id;
+              const stripped = rawVerdicts[i].trim()
+                .replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+              const firstBrace = stripped.indexOf("{");
+              const lastBrace = stripped.lastIndexOf("}");
+              const jsonSlice = firstBrace >= 0 && lastBrace > firstBrace
+                ? stripped.slice(firstBrace, lastBrace + 1)
+                : stripped;
+              try {
+                const v = JSON.parse(jsonSlice);
+                if (v.visualVerdict !== "pass") {
+                  failed.push(`${slide_id}: ${v.reason || "(no reason)"}`);
+                }
+              } catch (e) {
+                failed.push(`${slide_id}: visual verdict parse failed: ${(e as Error).message}; raw=${rawVerdicts[i].slice(0, 200)}`);
+              }
+            }
+            if (failed.length > 0) {
+              throw new Error(`VISUAL CHECK FAILED:\n  - ${failed.join("\n  - ")}`);
+            }
+          }),
       )
 
       // Step 8 — boot filtered rating server (backgrounded). Store URL.
