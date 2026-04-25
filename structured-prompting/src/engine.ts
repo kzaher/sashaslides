@@ -374,6 +374,7 @@ export class ClaudeEngine {
             cwd: ctx.cwd,
             graph,
             tipNodeId: node.id,
+            containerId: node.id,
           });
           const subTip = fn(subSession);
           const sub = await this.runChain(graph, node.id, subTip.tipNodeId, ctx, upstream);
@@ -395,6 +396,7 @@ export class ClaudeEngine {
             cwd: ctx.cwd,
             graph,
             tipNodeId: branchNode.id,
+            containerId: branchNode.id,
           });
           installResult(branchSession, upstream);
           const subTip = exec(branchSession);
@@ -437,6 +439,7 @@ export class ClaudeEngine {
                 cwd: ctx.cwd,
                 graph,
                 tipNodeId: childNode.id,
+                containerId: childNode.id,
               });
               try {
                 const subTip = apply(childSession, input, i);
@@ -456,7 +459,7 @@ export class ClaudeEngine {
           const code = node.callbacks.code;
           const fallback = node.callbacks.fallback;
           try {
-            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: node.id });
+            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: node.id, containerId: node.id });
             const subTip = code(s);
             const sub = await this.runChain(graph, node.id, subTip.tipNodeId, ctx, upstream);
             graph.finishOk(node.id, { ok: true });
@@ -470,7 +473,7 @@ export class ClaudeEngine {
             });
             graph.start(fbNode.id);
             try {
-              const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id });
+              const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id, containerId: fbNode.id });
               const subTip = fallback(s, err);
               const sub = await this.runChain(graph, fbNode.id, subTip.tipNodeId, ctx, upstream);
               graph.finishOk(fbNode.id, safeValue(sub.value));
@@ -499,7 +502,7 @@ export class ClaudeEngine {
             });
             graph.start(attNode.id);
             try {
-              const s = new Session({ sessionId: randomId(), model: attemptCtx.model, cwd: attemptCtx.cwd, graph, tipNodeId: attNode.id });
+              const s = new Session({ sessionId: randomId(), model: attemptCtx.model, cwd: attemptCtx.cwd, graph, tipNodeId: attNode.id, containerId: attNode.id });
               const subTip = code(s);
               const interruptCtx: RunCtx = {
                 ...attemptCtx,
@@ -534,7 +537,7 @@ export class ClaudeEngine {
           });
           graph.start(fbNode.id);
           try {
-            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id });
+            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id, containerId: fbNode.id });
             const subTip = fallback(s, lastErr);
             const sub = await this.runChain(graph, fbNode.id, subTip.tipNodeId, ctx, upstream);
             graph.finishOk(fbNode.id, safeValue(sub.value));
