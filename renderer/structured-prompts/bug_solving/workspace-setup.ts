@@ -12,7 +12,7 @@
  * used to look up the exact user-comment strings so they travel into the
  * structured prompt verbatim.
  */
-import { readFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
 import { resolve } from "path";
 import type { SlideTask, Task } from "./main.js";
@@ -31,9 +31,10 @@ export interface BuildOptions {
   port_base: number;                // default: 4720
   retry_budget: number;             // default: 3
   repo_root: string;                // default: process.cwd()
+  baseline_dir: string;             // pre-recorded shared baseline (pptx + thumbs)
 }
 
-const DEFAULTS: Omit<BuildOptions, "clusters"> = {
+const DEFAULTS: Omit<BuildOptions, "clusters" | "baseline_dir"> = {
   ratings_json: "/tmp/sxs-complex/ratings.json",
   fixtures_dir: "renderer/html2slides/e2e/fixtures",
   sxs_dir: "/tmp/sxs-complex",
@@ -79,11 +80,28 @@ function createWorktree(opts: BuildOptions, task_id: string): string {
   execSync(`git worktree add -b "${branch}" "${dir}" HEAD`, {
     cwd: opts.repo_root, stdio: "inherit",
   });
+  // Git checkouts partially-track a few files under node_modules (LICENSE,
+  // package.json) but not the build outputs — convert-pptx.ts then fails
+  // with "Cannot find package 'googleapis/build/...'". Symlink the parent
+  // repo's node_modules directories into the worktree so dependencies
+  // resolve exactly as in the main checkout.
+  for (const rel of ["node_modules", "renderer/node_modules"]) {
+    const main = resolve(opts.repo_root, rel);
+    const wt = resolve(dir, rel);
+    const wtParent = resolve(wt, "..");
+    if (!existsSync(main) || !existsSync(wtParent)) continue;
+    execSync(`rm -rf "${wt}" && ln -s "${main}" "${wt}"`);
+  }
   return dir;
 }
 
-export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "clusters">): Task[] {
+export function buildTasks(
+  options: Partial<BuildOptions> & Pick<BuildOptions, "clusters" | "baseline_dir">,
+): Task[] {
   const opts: BuildOptions = { ...DEFAULTS, ...options };
+  if (!opts.baseline_dir || !existsSync(opts.baseline_dir)) {
+    throw new Error(`buildTasks: baseline_dir required and must exist (got ${opts.baseline_dir})`);
+  }
   const out: Task[] = [];
   for (let i = 0; i < opts.clusters.length; i++) {
     const c = opts.clusters[i];
@@ -91,6 +109,21 @@ export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "
     const workspace_dir = createWorktree(opts, c.task_id);
     const scratch_dir = resolve(workspace_dir, ".bug-solving-scratch");
     mkdirSync(scratch_dir, { recursive: true });
+    // Persist the original bug context (cluster hypothesis + per-slide
+    // user comments + annotation paths) so the SxS reviewer can see WHY this
+    // task exists without having to dig into the source ratings.json.
+    const bugContext = {
+      cluster_description: c.cluster_description,
+      slides: Object.fromEntries(slides.map(s => [s.slide_id, {
+        user_comment: s.user_comment,
+        annotation_png: s.annotation_png ?? null,
+      }])),
+    };
+    writeFileSync(
+      resolve(scratch_dir, "bug-context.json"),
+      JSON.stringify(bugContext, null, 2),
+    );
+
     out.push({
       task_id: c.task_id,
       workspace_dir,
@@ -100,6 +133,7 @@ export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "
       slides,
       cluster_description: c.cluster_description,
       retry_budget: opts.retry_budget,
+      baseline_dir: opts.baseline_dir,
     });
   }
   return out;
