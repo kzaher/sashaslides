@@ -182,34 +182,52 @@ function emitStyledText(
     bw = natW; bh = natH;
     rotateDeg = ((rot % 360) + 360) % 360;
   } else {
-    // Honor CSS horizontal padding: when the source element has
-    // `padding-left`/`padding-right` (e.g. `.quote { padding-left: 14px }`,
-    // y-axis label `padding-right: 8px`), `bounds` is the outer (border-box)
-    // rect from getBoundingClientRect. Without inset, text glues to the
-    // outer edge — right-aligned labels lose their gutter to the chart, and
-    // padded blockquotes overlap their `border-left` accent. Shrink the
-    // textbox to the inner content area before slack/emit so left/right
-    // alignment lands at the padded edges.
-    const padL = s.paddingLeft || 0;
-    const padR = s.paddingRight || 0;
-    if (padL > 0 || padR > 0) {
-      const shrinkL = Math.min(padL, Math.max(0, bw - 10));
-      const shrinkR = Math.min(padR, Math.max(0, bw - 10 - shrinkL));
-      bx += shrinkL;
-      bw -= shrinkL + shrinkR;
-    }
+    // Horizontal padding is now fully owned by extract-dom.ts' unified
+    // Range-probe gate (see the padding-inset block in getElements).
+    // baseStyle.paddingLeft/paddingRight are always 0, so re-applying an
+    // inset here would have nothing to shrink — and historically doubled
+    // the extract-dom inset for `.touchpoint` (slide_19, 12 px off),
+    // `.code-block` (slide_30, 32 px off), and forced wraps on
+    // `.api-badge`/`.status-badge` (slide_15) and `.btn` (slide_21) by
+    // dropping tight pills below the glyph-run budget. This site is kept
+    // empty deliberately so a future reviewer does not re-add the compound
+    // inset.
     // Single-line guard: slack only helps when the text is one line (last
     // glyph gets breathing room against Slides' wider measurement). For
     // multi-line text, Chrome's wrap is already baked into `bounds`; widening
     // only shifts wrap points without benefit and can re-wrap unexpectedly
     // (slide_10_mixed basics regression). Threshold 1.5× lineHeight = 1 line
-    // with anti-alias slop.
+    // with anti-alias slop. `el.singleLine` overrides the height-based
+    // heuristic when the extractor's Range probe confirmed a single line —
+    // necessary for pill buttons (slide_21 .btn) where the border-box height
+    // (padding + line) trips the threshold despite single-line text.
     const lineH = (s.lineHeight && s.fontSize) ? s.lineHeight : (s.fontSize || 16) * 1.2;
-    const isSingleLine = bh <= lineH * 1.5;
+    const isSingleLine = el.singleLine === true || bh <= lineH * 1.5;
     if (isSingleLine) {
-      const budget = neighborSlackBudget({ x: bx, y: by, w: bw, h: bh }, elements, selfIndex, SLACK_PX);
-      const slacked = applySlack({ x: bx, y: by, w: bw, h: bh }, align, budget);
-      bx = slacked.x; by = slacked.y; bw = slacked.w; bh = slacked.h;
+      // Pill text overlay (vertically-padded chip/button) needs a bigger
+      // slack budget than non-padded single-line text — the merged-rect path
+      // hands us the full border-box bounds, so the text is centered inside
+      // a box whose width already factors in horizontal padding. Without
+      // extra room the last word wraps under Slides' wider glyph metric.
+      // ~20% of bw matches the user's "width hack" hint and gives ≈ 26 px on
+      // a 130 px button. Still bounded by neighborSlackBudget so we don't
+      // overflow into siblings (e.g. tags in a flex row with an 8 px gap
+      // shrink the half to a couple of px).
+      const isPillOverlay = el.verticallyCentered === true && el.singleLine === true;
+      const requestedSlack = isPillOverlay
+        ? Math.max(SLACK_PX, Math.round(bw * 0.2))
+        : SLACK_PX;
+      const budget = neighborSlackBudget({ x: bx, y: by, w: bw, h: bh }, elements, selfIndex, requestedSlack);
+      if (isPillOverlay && align === "center") {
+        // Bypass applySlack's hard cap of SLACK_PX/2 per side — we want the
+        // full requested budget on each side (capped only by neighbor gaps).
+        const half = Math.min(budget.left, budget.right);
+        bx -= half;
+        bw += half * 2;
+      } else {
+        const slacked = applySlack({ x: bx, y: by, w: bw, h: bh }, align, budget);
+        bx = slacked.x; by = slacked.y; bw = slacked.w; bh = slacked.h;
+      }
     }
   }
 
@@ -246,19 +264,30 @@ function emitStyledText(
   //    too, dropping CTA glyphs visibly below center (~7 slide-px). Pin the
   //    rendering by emitting 1.2 explicitly.
   //
-  // 2. (wave1b) For the remaining cases (multi-line text, non-centered),
-  //    PowerPoint/Slides interpret <a:spcPct> as a percentage of the font's
-  //    DEFAULT line-spacing (~1.2 * fontSize) rather than of the font size
-  //    itself. Passing the raw CSS ratio 1.6 produced 1.6 * 1.2 = 1.92 *
-  //    fontSize pitch (~20% overspacing on slide_06 quote, slide_08 step
-  //    descs). Divide by 1.2 so emitted pitch matches the CSS line-height.
+  // 2. Multi-line / non-centered text: emit absolute `lineSpacing` (points,
+  //    serialised as `<a:spcPts val="N"/>`) rather than `lineSpacingMultiple`
+  //    (serialised as `<a:spcPct>`). spcPct is a percentage of Slides'
+  //    inferred per-font default line pitch, which empirically is *much*
+  //    smaller than 1.2 × fontSize for the fonts we use — so for large CSS
+  //    line-heights like 2.2 (slide_25 .text-block), a spcPct-based emit
+  //    under-shoots the CSS pitch by ~30 %, compounding into 90+ px of
+  //    cumulative drift down the paragraph (user's "entire main text is
+  //    somehow moved up"). Absolute points bypass the font-default layer:
+  //    Slides uses exactly the leading we ask for. `s.lineHeight * PX2PT`
+  //    converts CSS px directly to pts. For slides whose CSS line-height
+  //    already equals the default (~1.2 × fontSize) the emitted pitch is
+  //    unchanged, so this is a pure improvement for custom line-heights
+  //    (slide_25 2.2, slide_30 1.7, slide_06 1.6) and a no-op elsewhere.
   if (s.lineHeight && s.fontSize) {
     const isSingleLineCentered = valign === "middle" && el.verticallyCentered === true;
     if (isSingleLineCentered) {
       commonOpts.lineSpacingMultiple = 1.2;
     } else {
-      commonOpts.lineSpacingMultiple = (s.lineHeight / s.fontSize) / 1.2;
+      commonOpts.lineSpacing = s.lineHeight * PX2PT;
     }
+  }
+  if (typeof el.text === "string" && el.text.startsWith("The quick brown")) {
+    console.log("DEBUG textblock opts:", JSON.stringify({ lineSpacing: commonOpts.lineSpacing, lineSpacingMultiple: commonOpts.lineSpacingMultiple, lineHeight: s.lineHeight, fontSize: s.fontSize, valign }));
   }
   if (rotateDeg) commonOpts.rotate = rotateDeg;
 
