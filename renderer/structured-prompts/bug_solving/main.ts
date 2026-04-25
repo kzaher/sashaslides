@@ -88,6 +88,7 @@ export interface TaskResult {
 /** Path to the shell/ts helper scripts that live alongside main.ts. */
 const SCRIPTS = {
   record: "renderer/structured-prompts/bug_solving/scripts/record-pptx.sh",
+  baseline: "renderer/structured-prompts/bug_solving/scripts/baseline-record.ts",
   diff: "renderer/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts",
   uploadScrape: "renderer/structured-prompts/bug_solving/scripts/upload-and-scrape.ts",
   filteredServer: "renderer/structured-prompts/bug_solving/scripts/filtered-rating-server.ts",
@@ -298,15 +299,36 @@ export function main(args: {
       );
   };
 
-  return args.session.parallelFork(args.tasks, (child, task) =>
-    child
-      .try<Result<TaskResult>>(
-        (s) => s.tryMultipleTimes<TaskResult>(
-          task.retry_budget,
-          (s2) => runTask(s2, task),
+  // Step 0 — record main's BASELINE pptx + Slides thumbs ONCE for every
+  //   unique slide in the wave. Every per-task attempt later references
+  //   `${task.baseline_dir}/pptx` for diff and `${task.baseline_dir}/thumbs`
+  //   for the SxS "compare vs baseline" toggle. Idempotent: skipped if the
+  //   manifest already exists (e.g. retried wave with BUG_SOLVING_BASELINE_DIR).
+  const allSlides = [
+    ...new Set(args.tasks.flatMap(t => t.slides.map(s => s.slide_id))),
+  ].sort();
+  const baselineDir = args.tasks[0]?.baseline_dir;
+  if (!baselineDir) {
+    throw new Error("main: tasks must carry baseline_dir (set by buildTasks).");
+  }
+
+  return args.session
+    .executeShell(() =>
+      `if [ -f "${baselineDir}/thumbs/manifest.json" ] && [ -d "${baselineDir}/pptx" ]; then ` +
+      `  echo "[baseline] reusing ${baselineDir}"; ` +
+      `else ` +
+      `  npx tsx ${SCRIPTS.baseline} --slides ${allSlides.join(",")} --out ${baselineDir}; ` +
+      `fi`
+    )
+    .parallelFork(args.tasks, (child, task) =>
+      child
+        .try<Result<TaskResult>>(
+          (s) => s.tryMultipleTimes<TaskResult>(
+            task.retry_budget,
+            (s2) => runTask(s2, task),
+          ),
+          // Don't cancel sibling tasks when one task fails outright.
+          (s, e) => s.materializeError(describeError(e)),
         ),
-        // Don't cancel sibling tasks when one task fails outright.
-        (s, e) => s.materializeError(describeError(e)),
-      ),
-  );
+    );
 }
