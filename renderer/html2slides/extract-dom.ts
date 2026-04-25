@@ -1363,10 +1363,21 @@ interface ExtractedElement {
       const parentBB_w = parseFloat(parentCs2.borderBottomWidth) || 0;
       // pseudoBounds places the pseudo at bounds.x/y (border-box origin), but
       // CSS `position:absolute` children are offset from the parent's PADDING
-      // edge (inside the border). Shift pb to the correct padding-box position
-      // so the corner flush-checks below work when the parent has a border.
-      pb.x += parentBL_w;
-      pb.y += parentBT;
+      // edge (inside the border). Shift pb to the padding-box position so the
+      // corner flush-checks below work when the parent has a border.
+      //
+      // Half-shift, not full shift. OOXML `a:ln` is drawn CENTERED on the shape
+      // edge (algn="ctr" default, half outside / half inside), whereas CSS draws
+      // the border fully INSIDE the border-box. A full `parentBT` shift places
+      // the pseudo 1 CSS px below the border-box top, which overlaps the
+      // centered stroke's inner half and — combined with the stripe's own
+      // anti-aliased top edge — wipes out the parent's top-border row at sub-
+      // pixel render scales. Landing the pseudo at the border's INNER EDGE
+      // (half of parentBT) keeps the border's outer half visible above a flush
+      // top-accent stripe (slide_14 .logo-card::before) while leaving
+      // fill-parent pseudos (top/left/right/bottom all 0) essentially unchanged.
+      pb.x += parentBL_w / 2;
+      pb.y += parentBT / 2;
       // CSS border-triangle: 0×0 box with transparent top/bottom and a
       // colored side — skip as rect; downstream renderers can't reproduce
       // it cleanly. (Leave for a future targeted fix.)
@@ -1798,36 +1809,34 @@ interface ExtractedElement {
       if (borderAdjust > 0) {
         textBounds = { ...bounds, h: Math.max(bounds.h - borderAdjust, style.fontSize || 10) };
       }
-      // Inset horizontal padding so pptxgenjs renders inside the CSS content
-      // box. Without this:
-      //   - right-aligned text (slide_10 `.y-label` `padding-right:8px`)
-      //     hugs the outer right edge instead of ending 8 px in;
-      //   - left-aligned text with a decorative border (slide_30 `.quote`
-      //     `border-left:3px; padding-left:14px`) butts against the border
-      //     instead of leaving the 14 px gap.
-      // BUT: auto-sized tight-fit elements like slide_17 `.label-badge`
-      // (uppercase, letter-spacing:2px, padding:6px 20px) have bounds.w
-      // already ≈ text_width + padding. Unconditionally shrinking by
-      // padL+padR leaves zero horizontal slack — and Slides measures
-      // glyphs slightly wider than Chrome (text-transform + letter-
-      // spacing amplify the divergence), so the same text wraps to two
-      // lines in Slides even though it fit in Chrome.
+      // Unified horizontal-padding gate. Owns ALL inset decisions — applies to
+      // inline (span / a / inline-block) and non-inline tags alike. Previously
+      // the gate was scoped to non-inline, leaving inline chips like slide_15
+      // `.status-badge` (span, padding:3px 10px) to pass paddingLeft=10 down
+      // to convert-pptx, which then shrank the textbox 20 px and wrapped the
+      // pill. By running the Range probe here for every padded element and
+      // emitting paddingLeft=0 below, convert-pptx is a pure consumer (its
+      // inset site has been removed) and the double-shrink bug can't recur.
       //
-      // Guard: only inset if the widest laid-out line + SLACK still fits
-      // in bounds.w - padL - padR. For multi-line text (the .quote case)
-      // that's automatically true — the text already wrapped within the
-      // padded content box, so max-line-width equals content-width and
-      // insetting just shifts x without shrinking. For single-line tight
-      // text (.label-badge) the check fails and we skip the inset; the
-      // text then renders spanning the full border-box width, which is
-      // a superset of the content area — fine for text-align:left/right
-      // handling.
-      if (!isInlineTag && (padL > 2 || padR > 2)) {
+      // Gate logic:
+      //   * Multi-line Chrome wrap  → inset (text already wrapped inside
+      //     content-box; insetting just shifts x).
+      //   * Single-line with slack  → inset (available ≥ maxLineW + SLACK so
+      //     Slides' wider measurement still fits).
+      //   * Single-line tight       → keep border-box width (no inset). The
+      //     padded element's bounds already include the padding, so centering
+      //     over the border-box visually matches centering over the content-
+      //     box for symmetric padding. For left/right alignment with
+      //     asymmetric padding, full-width renders fine because text-anchor
+      //     lands on the border edge but the padding keeps it inside.
+      let probedSingleLine: boolean | undefined;
+      if (padL > 2 || padR > 2) {
         const range = document.createRange();
         range.selectNodeContents(el);
         const lineRects = [...range.getClientRects()].filter(r => r.width > 0);
         const maxLineW = lineRects.length ? Math.max(...lineRects.map(r => r.width)) : 0;
         const isMultiLine = lineRects.length > 1;
+        probedSingleLine = lineRects.length === 1;
         const available = textBounds.w - padL - padR;
         const SLIDES_WIDTH_SLACK = 6;  // Slides glyph-measurement headroom
         const safeToInset = isMultiLine || available >= maxLineW + SLIDES_WIDTH_SLACK;
@@ -1854,13 +1863,15 @@ interface ExtractedElement {
         textDecoration: inlineBorderUnderline ? "underline" : style.textDecoration,
         textTransform: style.textTransform,
         letterSpacing: style.letterSpacing,
-        // Non-inline horizontal padding is owned by the Range-probe inset
-        // above; emitting it again here would let convert-pptx shrink the
-        // textbox a second time and wrap auto-sized chips/buttons. Inline
-        // elements still carry their padding through because the probe
-        // skipped them under the !isInlineTag guard.
-        paddingLeft: isInlineTag && padLeft > 2 ? padLeft : 0,
-        paddingRight: isInlineTag && padRight > 2 ? padRight : 0,
+        // Horizontal padding is owned by the Range-probe inset above — it
+        // either folds padL/padR into textBounds or keeps the full border-
+        // box width for tight pills. Re-emitting paddingLeft/paddingRight
+        // here would compound with convert-pptx's inset pass, causing the
+        // double-shrink wraps documented in the probe comment. Setting both
+        // to 0 makes baseStyle a pure text-style carrier and convert-pptx a
+        // pure consumer of the bounds.
+        paddingLeft: 0,
+        paddingRight: 0,
         paddingTop: padTop > 2 ? padTop : 0,
         opacity: style.opacity !== undefined && style.opacity < 1 ? style.opacity : undefined,
         bgColorBehind: style.opacity !== undefined && style.opacity < 1 ? detectBgColorBelow(el) : undefined,
@@ -1874,8 +1885,17 @@ interface ExtractedElement {
       // pptxgenjs defaults to `valign: "top"` for text; without this hint the
       // letters snap to the top of the box and look too high inside the
       // pill. Mirror Chrome's behavior whenever top/bottom padding agree.
+      //
+      // Threshold is padTop >= 5, not > 2: small symmetric paddings like
+      // `.touchpoint { padding: 3px 0 }` (slide_19 bullet rows) create <1px of
+      // visual centering shift in Chrome but, once we emit anchor="ctr",
+      // Slides adds a noticeable implicit left inset to a pptx textbox whose
+      // bounds.x was already shifted by the Range-probe inset for the same
+      // element's padding-left — producing a doubled horizontal gap between
+      // the ::before bullet and the text. Genuine pill buttons (padding: 6px+
+      // vertically) still clear the threshold and keep vertical centering.
       const verticallyCentered =
-        padTop > 2 && Math.abs(padTop - padBot) < 3;
+        padTop >= 5 && Math.abs(padTop - padBot) < 3;
       // Use a regex that excludes \u00a0 so leading/trailing nbsp (used as
       // visual indentation in code blocks like slide_15) survive. JS
       // String.trim() strips Unicode whitespace including nbsp.
@@ -1887,6 +1907,13 @@ interface ExtractedElement {
         zIndex: style.zIndex,
         position: style.position,
         verticallyCentered,
+        // True only when the Range probe confirmed the text laid out on a
+        // single line in Chrome. The converter uses this to enable slack
+        // widening for vertically-padded pill buttons whose border-box
+        // height (padding + line) exceeds the lineH×1.5 single-line
+        // heuristic — without this hint the slack is skipped and Slides'
+        // wider glyph metric wraps the label (slide_21 .btn "View Details").
+        singleLine: probedSingleLine,
         // Rotation info: non-zero `rotate` means CSS `transform: rotate(...)`
         // is on this element. getBoundingClientRect returns the post-transform
         // axis-aligned bbox; `naturalWidth/Height` is the pre-transform layout
