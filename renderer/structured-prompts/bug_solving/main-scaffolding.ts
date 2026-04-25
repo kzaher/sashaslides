@@ -9,6 +9,9 @@
  *   npx tsx build.ts renderer/structured-prompts/bug_solving/main-scaffolding.ts \
  *     && node dist/main-scaffolding.mjs
  */
+import { execSync } from "child_process";
+import { existsSync, mkdirSync } from "fs";
+import { resolve } from "path";
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
 import { buildTasks } from "./workspace-setup.js";
 // clusters.ts is the per-wave input — edit it to redeclare what you want
@@ -18,9 +21,38 @@ import { buildTasks } from "./workspace-setup.js";
 import { CLUSTERS } from "./clusters.js";
 import { main } from "./main.js";
 
+/**
+ * Record the shared baseline ONCE for every unique slide in the wave.
+ * Every task then references this path instead of rebuilding its own
+ * "before" pptx inside its worktree. Re-uses an existing baseline if
+ * BUG_SOLVING_BASELINE_DIR is set in the env — useful when re-running
+ * the wave after a cluster fails.
+ */
+function recordSharedBaseline(): string {
+  const reuse = process.env.BUG_SOLVING_BASELINE_DIR;
+  if (reuse && existsSync(reuse)) {
+    console.error(`[baseline] reusing ${reuse}`);
+    return reuse;
+  }
+  const all = new Set<string>();
+  for (const c of CLUSTERS) for (const id of c.slide_ids) all.add(id);
+  const slides = [...all].sort();
+  const ts = Date.now();
+  const out = resolve(`/tmp/bs-baseline-${ts}`);
+  mkdirSync(out, { recursive: true });
+  console.error(`[baseline] recording ${slides.length} slide(s) → ${out}`);
+  execSync(
+    `npx tsx renderer/structured-prompts/bug_solving/scripts/baseline-record.ts ` +
+    `--slides ${slides.join(",")} --out ${out}`,
+    { stdio: "inherit" },
+  );
+  return out;
+}
+
 async function run() {
-  const tasks = buildTasks({ clusters: CLUSTERS });
-  console.error(`built ${tasks.length} task(s):`);
+  const baseline_dir = recordSharedBaseline();
+  const tasks = buildTasks({ clusters: CLUSTERS, baseline_dir });
+  console.error(`built ${tasks.length} task(s) with baseline=${baseline_dir}:`);
   for (const t of tasks) {
     console.error(`  ${t.task_id} @ ${t.workspace_dir} (port ${t.server_port})`);
   }

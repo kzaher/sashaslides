@@ -59,6 +59,12 @@ export interface Task {
   slides: SlideTask[];
   cluster_description: string;       // root-cause hypothesis for the wave
   retry_budget: number;              // e.g. 3
+  // Shared baseline recorded ONCE per wave on main's HEAD (see
+  // scripts/baseline-record.ts). Contains:
+  //   <baseline_dir>/pptx/<slide_id>.pptx    → consumed by the diff step
+  //   <baseline_dir>/thumbs/<slide_id>.png   → shown in the SxS as "baseline" toggle
+  //   <baseline_dir>/thumbs/manifest.json    → presentation_id + slide oids
+  baseline_dir: string;
 }
 
 export interface SlideVerdict {
@@ -132,63 +138,60 @@ export function main(args: {
   const runTask = (s: Session, task: Task): SessionWithResult<TaskResult> => {
     const ids = slideIdsCsv(task);
     return s
-      // Step 1 — record BEFORE pptx deterministically at the orchestrator
-      //   level. No upstream is needed (Session.executeShell ignores it), so
-      //   the worker never asks the model to run a shell command — saves
-      //   tokens and removes a non-determinism.
-      .executeShell(() =>
-        `cd ${task.workspace_dir} && bash ${SCRIPTS.record} ` +
-        `--slides ${ids} --label before --out ${task.scratch_dir}/before`
-      )
-
-      // Step 2 — read user comments + annotations, write analysis.md, apply
-      //   the minimal code fix. prependToNextPrompt is consumed by this send.
+      // Step 1 — read user comments + annotations, write analysis.md, apply
+      //   the minimal code fix. The BEFORE pptx was already recorded ONCE
+      //   for the whole wave by baseline-record.ts at `task.baseline_dir` —
+      //   each task inherits it instead of rebuilding. prependToNextPrompt
+      //   is consumed by this send.
       .prependToNextPrompt(analysisPromptFor(task))
       .send({
         prompt: [
-          `The BEFORE pptx files are now at ${task.scratch_dir}/before/<slide_id>.pptx.`,
-          `Write or UPDATE ${task.scratch_dir}/analysis.md using the template in`,
-          `the instructions you received. Then apply the minimal code fix to`,
-          `renderer/html2slides/extract-dom.ts and/or convert-pptx.ts. Do not`,
-          `run git commit. When done, respond with exactly "FIX_APPLIED".`,
+          `The shared BASELINE pptx files (main's current rendering) are at`,
+          `${task.baseline_dir}/pptx/<slide_id>.pptx — use them as the "before"`,
+          `reference. Write or UPDATE ${task.scratch_dir}/analysis.md using the`,
+          `template in the instructions you received. Then apply the minimal`,
+          `code fix to renderer/html2slides/extract-dom.ts and/or convert-pptx.ts.`,
+          `Do not run git commit. When done, respond with exactly "FIX_APPLIED".`,
         ].join(" "),
       })
 
-      // Step 3 — record new pptx.
+      // Step 2 — record new pptx.
       .executeShell(() =>
         `cd ${task.workspace_dir} && bash ${SCRIPTS.record} ` +
         `--slides ${ids} --label after --out ${task.scratch_dir}/after`
       )
 
-      // Step 4 — diff before vs after.
+      // Step 3 — diff shared baseline vs after.
       .executeShell(() =>
         `cd ${task.workspace_dir} && npx tsx ${SCRIPTS.diff} ` +
-        `--before ${task.scratch_dir}/before --after ${task.scratch_dir}/after ` +
+        `--before ${task.baseline_dir}/pptx --after ${task.scratch_dir}/after ` +
         `--out ${task.scratch_dir}/diffs`
       )
 
       .parallelFork(task.slides, (child, slide) =>
         child
-          .prependToNextPrompt(
-            `You are verifying the fix for ${slide.slide_id}. ` +
-            `Analysis: ${task.scratch_dir}/analysis.md. ` +
-            `Diff: ${task.scratch_dir}/diffs/${slide.slide_id}.diff. ` +
-            `User's original comment: "${slide.user_comment}".`,
-          )
-          .send({
-            prompt: [
-              `Read analysis.md (section for ${slide.slide_id}) and the diff file.`,
-              `Respond with ONLY a JSON object (no markdown fences, no prose before`,
-              `or after) on a single line or pretty-printed, with these keys:`,
-              `  slide_id: "${slide.slide_id}",`,
-              `  rationale: string (<=500 chars — what changed and why),`,
-              `  isRegression: boolean (true if the diff introduces NEW rendering`,
-              `    problems not mentioned in analysis.md's "Expected diff"),`,
-              `  bugSolved: boolean (true only if the diff clearly addresses the`,
-              `    user's original comment AND matches the expected-diff claim).`,
-              `No StructuredOutput tool — just raw JSON in your reply.`,
-            ].join(" "),
-          }),
+          .tryMultipleTimes(3, s => (s
+            .prependToNextPrompt(
+              `You are verifying the fix for ${slide.slide_id}. ` +
+              `Analysis: ${task.scratch_dir}/analysis.md. ` +
+              `Diff: ${task.scratch_dir}/diffs/${slide.slide_id}.diff. ` +
+              `User's original comment: "${slide.user_comment}".`,
+            )
+            .send({
+              prompt: [
+                `Read analysis.md (section for ${slide.slide_id}) and the diff file.`,
+                `Respond with ONLY a JSON object (no markdown fences, no prose before`,
+                `or after) on a single line or pretty-printed, with these keys:`,
+                `  slide_id: "${slide.slide_id}",`,
+                `  rationale: string (<=500 chars — what changed and why),`,
+                `  isRegression: boolean (true if the diff introduces NEW rendering`,
+                `    problems not mentioned in analysis.md's "Expected diff"),`,
+                `  bugSolved: boolean (true only if the diff clearly addresses the`,
+                `    user's original comment AND matches the expected-diff claim).`,
+                `No StructuredOutput tool — just raw JSON in your reply.`,
+              ].join(" "),
+            })
+          )),
       )
 
       // Step 6 — parse prose verdicts, aggregate, throw on any regression
@@ -284,6 +287,7 @@ export function main(args: {
             `--analysis ${task.scratch_dir}/analysis.md ` +
             `--diffs ${task.scratch_dir}/diffs ` +
             `--thumbnails ${task.scratch_dir}/thumbnails ` +
+            `--baseline-dir ${task.baseline_dir}/thumbs ` +
             (htmlDir ? `--html-dir ${htmlDir} ` : ``) +
             `--task-title "${task.task_id}" ` +
             `> ${task.scratch_dir}/server.log 2>&1 & disown; ` +
