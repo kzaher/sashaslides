@@ -48,6 +48,7 @@ interface Args {
   ratings_file: string | null;
   task_title: string;
   baseline_dir: string | null;        // pre-fix Slides-rendered thumbs (shared across wave)
+  bug_context: string | null;         // explicit path to bug-context.json
 }
 
 function parseArgs(argv: string[]): Args {
@@ -57,6 +58,7 @@ function parseArgs(argv: string[]): Args {
     ratings_file: null,
     task_title: "bug_solving",
     baseline_dir: null,
+    bug_context: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
@@ -70,6 +72,7 @@ function parseArgs(argv: string[]): Args {
     else if (v === "--ratings-file") a.ratings_file = resolve(argv[++i]);
     else if (v === "--task-title") a.task_title = argv[++i];
     else if (v === "--baseline-dir") a.baseline_dir = resolve(argv[++i]);
+    else if (v === "--bug-context") a.bug_context = resolve(argv[++i]);
   }
   if (!a.port || !a.slides || !a.analysis || !a.diffs || !a.thumbnails) {
     throw new Error(
@@ -175,10 +178,27 @@ interface BugContext {
   slides: Record<string, { user_comment: string; annotation_png: string | null }>;
 }
 
-function readBugContext(scratchDir: string): BugContext | null {
-  const p = join(scratchDir, "bug-context.json");
-  if (!existsSync(p)) return null;
-  try { return JSON.parse(readFileSync(p, "utf-8")) as BugContext; } catch { return null; }
+/**
+ * Resolve bug-context.json. Preferred: caller passes --bug-context with
+ * an absolute path to the file. Fallback: walk up from scratch dir up to
+ * 3 levels looking for bug-context.json (covers the case where ratings
+ * live in <scratch>/after/ratings.json but bug-context.json is in
+ * <scratch>/bug-context.json).
+ */
+function readBugContext(explicitPath: string | null, scratchDir: string): BugContext | null {
+  const candidates = explicitPath ? [explicitPath] : [];
+  let cur = scratchDir;
+  for (let i = 0; i < 4; i++) {
+    candidates.push(join(cur, "bug-context.json"));
+    const parent = dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  for (const p of candidates) {
+    if (!existsSync(p)) continue;
+    try { return JSON.parse(readFileSync(p, "utf-8")) as BugContext; } catch { /* try next */ }
+  }
+  return null;
 }
 
 function readRenderedRegions(thumbnailsDir: string): Record<string, RenderedRegion[]> {
@@ -205,7 +225,7 @@ function buildPayload(): {
   // bug-context.json sits next to ratings.json (the scratch dir). It carries
   // the cluster hypothesis + the original SxS user comments that motivated
   // the task — surfaced in the UI so the reviewer doesn't have to dig.
-  const bugCtx = readBugContext(dirname(args.ratings_file!));
+  const bugCtx = readBugContext(args.bug_context, dirname(args.ratings_file!));
   // rendered-regions.json keys are the pptx output index (slide_01, slide_02,
   // ...) from convert-pptx.ts — not the fixture id. In the filtered server
   // each args.slides[i] maps 1:1 to pptx slot i+1.
@@ -445,9 +465,13 @@ function SlideCard(props) {
   const [loupeZoom, setLoupeZoom] = useState(3);
   const [localStatus, setLocalStatus] = useState(s.status);
   const [saving, setSaving] = useState(false);
-  // Left-panel comparison source. "original" = Chrome HTML render (ground truth).
-  // "baseline" = main's pre-fix Slides render (regression check).
-  const [leftSource, setLeftSource] = useState(s.baseline ? "baseline" : "original");
+  // Left-panel comparison source. "original" = Chrome HTML render (ground
+  // truth — what the post-fix Slides render is supposed to match), "baseline"
+  // = main's pre-fix Slides render (regression check). Default to "original"
+  // because the primary question on a fix review is "does the post-fix
+  // render match the spec?", not "did anything regress vs the prior bad
+  // render?". Toggle the checkbox to switch.
+  const [leftSource, setLeftSource] = useState("original");
 
   const origRef = useRef(null);
   const slidesRef = useRef(null);
