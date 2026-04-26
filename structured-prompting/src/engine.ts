@@ -9,6 +9,10 @@ import { Claude, type ClaudeModel, type Result } from "./types.js";
 import { InterruptException, StructuredError, describeError } from "./errors.js";
 import { startMonitor, type MonitorServer } from "./server.js";
 import { realIO, killAllSpawned, type IO } from "./io.js";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import { existsSync } from "node:fs";
 
 export interface EngineOptions {
   port?: number;
@@ -112,6 +116,16 @@ export class ClaudeEngine {
       console.error(`\n┌── structured-prompting monitor\n│ ${monitor.url}\n└──\n`);
     }
     if (this.opts.hookSignals) installShutdownHooks(this);
+
+    // 1.5. Spawn the reaper supervisor — a detached process that polls
+    //      our PID and SIGKILLs every transitive descendant when we die.
+    //      setpriv-pdeathsig only protects ONE generation; the reaper
+    //      catches everything deeper (e.g. tool-use shells claude itself
+    //      forks). Spawned only once; subsequent execute() calls reuse it.
+    if (!_reaperSpawned) {
+      _reaperSpawned = true;
+      spawnReaper(process.pid);
+    }
 
     // 2. Build the description SYNCHRONOUSLY.
     session.graph.start(session.graph.rootId);
@@ -670,6 +684,31 @@ export class ClaudeEngine {
 }
 
 // ---- helpers ----------------------------------------------------------------
+
+let _reaperSpawned = false;
+
+/**
+ * Spawn the reaper as a detached process that survives this engine's
+ * death. Used to SIGKILL deep descendants (tool-use shells, sub-shells
+ * forked by the claude CLI) that pdeathsig can't reach.
+ */
+function spawnReaper(enginePid: number): void {
+  // reaper.ts lives next to this file. tsx is a peer dependency in our
+  // build (the engine itself is launched via `node dist/...` after esbuild,
+  // so tsx may not be on PATH at runtime — fall back to plain node).
+  const reaperSrc = resolve(dirname(fileURLToPath(import.meta.url)), "reaper.ts");
+  const reaperJs = reaperSrc.replace(/\.ts$/, ".js");
+  // Try compiled .js first (production), fall back to tsx-loading .ts (dev).
+  const cmd = existsSync(reaperJs) ? process.execPath : "npx";
+  const args = existsSync(reaperJs)
+    ? [reaperJs, String(enginePid)]
+    : ["tsx", reaperSrc, String(enginePid)];
+  const reaper = spawn(cmd, args, {
+    detached: true,
+    stdio: "ignore",
+  });
+  reaper.unref();
+}
 
 let _signalsInstalled = false;
 function installShutdownHooks(engine: ClaudeEngine) {
