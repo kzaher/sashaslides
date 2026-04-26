@@ -404,6 +404,7 @@ export function main(args: {
             `--thumbnails ${task.scratch_dir}/after/thumbs ` +
             `--originals ${task.baseline_dir}/originals ` +
             `--baseline-dir ${task.baseline_dir}/thumbs ` +
+            `--bug-context ${task.scratch_dir}/bug-context.json ` +
             (htmlDir ? `--html-dir ${htmlDir} ` : ``) +
             `--task-title "${task.task_id}" ` +
             `> ${task.scratch_dir}/server.log 2>&1 & disown; ` +
