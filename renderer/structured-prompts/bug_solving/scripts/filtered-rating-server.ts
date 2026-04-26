@@ -482,9 +482,16 @@ function SlideCard(props) {
   const colorRef = useRef(null);
   const sizeRef = useRef(null);
 
+  // Drawing canvas seed: prefer this task's saved annotation (the user
+  // came back after rating Bad and we restore their strokes). Fall back
+  // to the bug-context annotation from the prior SxS — those red marks
+  // ARE the spec for what's wrong, so they belong on the image
+  // immediately, not behind a "[annotation]" link.
   const savedAnnot = s.annotationPng
     ? "/img?path=" + encodeURIComponent(s.annotationPng) + "&t=" + Date.now()
-    : null;
+    : (s.originalAnnotationPng
+        ? "/img?path=" + encodeURIComponent(s.originalAnnotationPng) + "&t=" + Date.now()
+        : null);
   const handle = useDrawingCanvas(drawRef, slidesRef, savedAnnot, drawMode, colorRef, sizeRef);
   useClientSideDiff(origRef, slidesRef, diffRef, showDiff, s.id + ":" + leftSource);
 
