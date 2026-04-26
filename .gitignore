@@ -42,7 +42,9 @@ data/
 # Docker
 .docker/
 .claude/worktrees/*
+.claude/scheduled_tasks.lock
 
 # html2slides local ratings backups
 analysis/renderer/html2slides/e2e/.ratings-complex.json
 analysis/renderer/html2slides/e2e/.ratings-basics.json
+.bug-solving-scratch/
