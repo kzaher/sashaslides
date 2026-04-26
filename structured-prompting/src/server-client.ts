@@ -198,6 +198,75 @@ function JsonView(props) {
   return h("span", null, String(value));
 }
 
+// ---- AskPanel: free-form follow-up against a node's claude session -------
+// Posts {nodeId, prompt} to /api/ask. The server resumes the node's
+// claude session and forwards the prompt; the reply is shown below the
+// textarea. State is component-local so multi-line prompts don't get
+// nuked by the 250 ms graph poll. Also remembers the last reply so the
+// reviewer can copy it after switching nodes and back.
+function AskPanel(props) {
+  const { node } = props;
+  const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [reply, setReply] = useState(null);
+  const [err, setErr] = useState(null);
+  const submit = async () => {
+    if (!prompt.trim() || busy) return;
+    setBusy(true); setReply(null); setErr(null);
+    try {
+      const r = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nodeId: node.id, prompt }),
+      });
+      const json = await r.json();
+      if (!r.ok || json.error) {
+        setErr(json.error || ("HTTP " + r.status));
+      } else if (json.isError) {
+        setErr(json.errorMessage || "model returned isError");
+      } else {
+        setReply(json);
+      }
+    } catch (e) {
+      setErr(e && e.message ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+  // Right-click "Rerun this prompt" prefills with the original composed prompt.
+  const composed = node.output && typeof node.output.composedPrompt === "string"
+    ? node.output.composedPrompt
+    : null;
+  return h("div", { class: "sect" },
+    h("h2", null, "ask follow-up (resumes session " + node.sessionId.slice(0, 8) + ")"),
+    h("textarea", {
+      class: "ask-input",
+      placeholder: "type a question — the model has the same conversation context as this send",
+      rows: 3,
+      value: prompt,
+      onInput: (e) => setPrompt(e.target.value),
+      onKeyDown: (e) => {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit();
+      },
+      style: "width:100%;background:var(--pending);color:var(--fg);border:1px solid #30363d;border-radius:3px;padding:6px 8px;font:inherit;resize:vertical",
+    }),
+    h("div", { style: "display:flex;gap:8px;margin-top:6px;align-items:center" },
+      h("button", {
+        onClick: submit,
+        disabled: busy || !prompt.trim(),
+      }, busy ? "asking…" : "ask (ctrl/⌘+enter)"),
+      composed && h("button", {
+        onClick: () => setPrompt(composed),
+        title: "Prefill the textarea with the prompt this node originally sent — useful for retrying with the same input.",
+      }, "↺ rerun this prompt"),
+      reply && h("span", { style: "color:var(--muted);font-size:11px" },
+        fmtDur(reply.durationMs),
+        reply.costUsd != null ? " · $" + reply.costUsd.toFixed(4) : "",
+      ),
+    ),
+    err && h("pre", { style: "color:var(--err);margin-top:6px;white-space:pre-wrap" }, "error: " + err),
+    reply && h("pre", { style: "margin-top:8px;background:var(--bg);padding:10px;border-radius:3px;border:1px solid #30363d;white-space:pre-wrap" }, reply.text),
+  );
+}
+
 // ---- ComposedPromptReveal (send nodes only) ------------------------------
 function ComposedPromptReveal(props) {
   const text = props.text;
@@ -277,6 +346,10 @@ function Detail(props) {
     h("div", { class: "sect" }, h("h2", null, "input"), h("pre", null, h(JsonView, { value: node.input }))),
     h("div", { class: "sect" }, h("h2", null, "output"), h("pre", null, h(JsonView, { value: node.output }))),
     node.error ? h("div", { class: "sect" }, h("h2", null, "error"), h("pre", null, h(JsonView, { value: node.error }))) : null,
+    // Ask-follow-up panel — only on nodes that ran and have a session
+    // we can resume (every send carries one). Lets the reviewer probe
+    // the model's understanding without queuing more wave work.
+    node.sessionId && node.kind === "send" ? h(AskPanel, { node }) : null,
   );
 }
 
@@ -304,11 +377,28 @@ function TreeNode(props) {
     if (metric.id === "durationMs") return Math.abs(sum - self) > 1;
     return sum !== self && self !== 0;
   })();
+  // Right-click on a send node → select it AND scroll the AskPanel into
+  // view so the reviewer can run a follow-up directly. For non-send
+  // nodes the right-click just selects (no panel to anchor on). We use
+  // a setTimeout so the Detail panel is rendered before we try to find
+  // the ask-input textarea.
+  const onContext = (e) => {
+    e.preventDefault();
+    onSelect(node.id);
+    setTimeout(() => {
+      const ta = document.querySelector(".ask-input");
+      if (ta && ta.scrollIntoView) {
+        ta.scrollIntoView({ behavior: "smooth", block: "center" });
+        ta.focus();
+      }
+    }, 50);
+  };
   return h("div", null,
     h("div", {
       class: "node tier" + Math.min(depth, 24) + (selectedId === node.id ? " selected" : ""),
       title: node.status,
       onClick: () => onSelect(node.id),
+      onContextMenu: onContext,
     },
       h("span", {
         class: hasKids ? "chev" : "chev leaf",

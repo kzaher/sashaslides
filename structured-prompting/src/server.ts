@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import * as esbuild from "esbuild";
 import type { ComputationGraph } from "./graph.js";
 import { CLIENT_SCRIPT } from "./server-client.js";
+import { callClaude } from "./claude-cli.js";
 
 // Bundle Preact + hooks + server-client into a single classic IIFE. This
 // dodges every cross-browser ESM / import-map quirk the monitor page used
@@ -136,6 +137,48 @@ export interface MonitorServer {
   stop: () => Promise<void>;
 }
 
+interface AskRequest { nodeId: string; prompt: string }
+interface AskReply {
+  text: string;
+  sessionId: string | null;
+  durationMs: number;
+  costUsd: number | null;
+  isError: boolean;
+  errorMessage: string | null;
+}
+
+/**
+ * POST /api/ask handler. Resolves the node's claude session, fires off a
+ * single resume-then-prompt call via callClaude, returns the reply. Keeps
+ * the engine's main execute() loop oblivious — these queries don't mutate
+ * the graph and are NOT visible there. Useful for "what did the model
+ * see at this step?" diagnostics from the monitor UI.
+ */
+async function handleAsk(rawBody: string, graph: ComputationGraph): Promise<AskReply> {
+  const body = JSON.parse(rawBody) as AskRequest;
+  if (!body.nodeId || !body.prompt) {
+    throw new Error("/api/ask requires {nodeId, prompt}");
+  }
+  const node = graph.allNodes().find((n) => n.id === body.nodeId);
+  if (!node) throw new Error(`node not found: ${body.nodeId}`);
+  if (!node.sessionId) {
+    throw new Error(`node ${body.nodeId} has no sessionId — pick a send node that has run`);
+  }
+  const r = await callClaude({
+    prompt: body.prompt,
+    resume: node.sessionId,
+    model: (node.model as never) ?? undefined,
+  });
+  return {
+    text: r.text,
+    sessionId: r.sessionId,
+    durationMs: r.durationMs,
+    costUsd: r.costUsd,
+    isError: r.isError,
+    errorMessage: r.errorMessage,
+  };
+}
+
 export async function startMonitor(args: {
   graph: ComputationGraph;
   port?: number;
@@ -155,6 +198,25 @@ export async function startMonitor(args: {
     if (url === "/api/graph") {
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       res.end(JSON.stringify(graph.snapshot()));
+      return;
+    }
+    if (url === "/api/ask" && req.method === "POST") {
+      // Ad-hoc follow-up question against a node's claude session. The
+      // monitor UI exposes this as a textarea on send-node detail panels.
+      // Body: {nodeId, prompt}. Looks up the node's sessionId, calls
+      // `claude --resume <sid> -p <prompt>`, returns {text, sessionId,
+      // durationMs, costUsd, usage}.
+      let body = "";
+      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      req.on("end", () => {
+        void handleAsk(body, graph).then((reply) => {
+          res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+          res.end(JSON.stringify(reply));
+        }).catch((err: unknown) => {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        });
+      });
       return;
     }
     res.writeHead(404);
