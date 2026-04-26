@@ -886,10 +886,22 @@ async function runShell(args: { cmd: string; cwd: string; io: IO }): Promise<str
   if (r.exitCode !== 0) {
     // Non-zero exit from a user-supplied script. Tag with kind:"shellExit"
     // so isCatchable() lets a try/tryMultipleTimes branch swallow it for
-    // a retry. (See errors.ts.)
+    // a retry. Include BOTH stdout and stderr tails — wave-7 had a fatal
+    // ReferenceError that only surfaced in stdout and was hidden by the
+    // engine's old stderr-only message.
+    const stderrTail = r.stderr.slice(-800);
+    const stdoutTail = r.stdout.slice(-800);
     throw new StructuredError(
-      `shell command failed (code ${r.exitCode}): ${cmd}\n${r.stderr.slice(-800)}`,
-      { data: { kind: "shellExit", exitCode: r.exitCode, cmd, stderrTail: r.stderr.slice(-800) } },
+      `shell command failed (code ${r.exitCode}): ${cmd}\n` +
+      (stderrTail ? `--- stderr (last 800) ---\n${stderrTail}\n` : "") +
+      (stdoutTail ? `--- stdout (last 800) ---\n${stdoutTail}` : ""),
+      { data: {
+        kind: "shellExit",
+        exitCode: r.exitCode,
+        cmd,
+        stderrTail,
+        stdoutTail,
+      } },
     );
   }
   return r.stdout;

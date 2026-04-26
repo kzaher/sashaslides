@@ -139,14 +139,25 @@ export async function runReaper(opts: ReaperOptions): Promise<number[]> {
 }
 
 // ---- script entry point ----------------------------------------------------
-// Only run when invoked as `node reaper.js <pid>` — `import` from tests is
-// a no-op. We detect "is this the entrypoint?" via import.meta.url ===
-// process.argv[1] resolved to a file URL.
+// Only run when invoked as `node reaper.js <pid>` directly. Two false
+// positives we have to guard:
+//   * Engine bundle inlines this file → import.meta.url is the bundle's
+//     URL, which doesn't match `reaper.*`. Skip.
+//   * Tests / other modules import `./reaper.js` → import.meta.url IS
+//     `reaper.ts`, but the actual process entry (argv[1]) is the test
+//     file, NOT reaper. Skip.
+// So both conditions must hold:
+//   import.meta.url basename === reaper.{ts,js,mjs,cjs}
+//   argv[1] basename === reaper.{ts,js,mjs,cjs}
+const REAPER_BASENAME = /^reaper\.(ts|js|mjs|cjs)$/;
 const isEntry = (() => {
   try {
+    const urlBase = (import.meta.url.split("?")[0].split("#")[0].split("/").pop() ?? "");
+    if (!REAPER_BASENAME.test(urlBase)) return false;
     const argvPath = process.argv[1];
     if (!argvPath) return false;
-    return import.meta.url.endsWith(argvPath.split("/").pop() ?? "");
+    const argvBase = argvPath.split("/").pop() ?? "";
+    return REAPER_BASENAME.test(argvBase);
   } catch { return false; }
 })();
 
