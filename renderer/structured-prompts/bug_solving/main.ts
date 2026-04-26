@@ -38,6 +38,7 @@ import {
   Claude,
   Session,
   SessionWithResult,
+  ValidationError,
   describeError,
   safelyJsonStringify,
 } from "../../../structured-prompting/src/index.js";
@@ -285,7 +286,11 @@ export function main(args: {
             if (unsolved.length)
               lines.push(`UNSOLVED (${unsolved.length}):`,
                 ...unsolved.map(r => `  - ${r.slide_id}: ${r.rationale}`));
-            throw new Error(lines.join("\n"));
+            // ValidationError → tryMultipleTimes can retry. A bare Error
+            // would also be retried today, but isCatchable() rejects bare
+            // Errors so future bugs in this aggregator (e.g. a TypeError
+            // from a malformed verdict) abort the wave instead of looping.
+            throw new ValidationError(lines.join("\n"));
           }
           return {
             task_id: task.task_id,
@@ -368,7 +373,9 @@ export function main(args: {
           .assert((verdicts) => {
             const failed = verdicts.filter(v => v.visualVerdict !== "pass");
             if (failed.length > 0) {
-              throw new Error(
+              // ValidationError so tryMultipleTimes retries. See note on
+              // the verdict aggregator above and the doc on ValidationError.
+              throw new ValidationError(
                 `VISUAL CHECK FAILED:\n` +
                 failed.map(v => `  - ${v.slide_id}: ${v.reason}`).join("\n"),
               );

@@ -41,6 +41,74 @@ export class StructuredError extends Error {
 }
 
 /**
+ * The ONLY error type that try/tryMultipleTimes are allowed to catch.
+ *
+ * Why: a wave can spend a lot of money looping on retries. If a programmer
+ * bug (TypeError, ReferenceError, JSON.parse on garbage, etc.) gets caught
+ * by a retry handler, the wave will burn N attempts × M slides worth of
+ * tokens trying to "recover" from a bug that isn't recoverable. We want
+ * those bugs to PROPAGATE OUT and abort the wave immediately — no token
+ * hemorrhage.
+ *
+ * What counts as "validation":
+ *   * Verdict failures the orchestrator throws on purpose ("UNSOLVED",
+ *     "VISUAL CHECK FAILED", "REGRESSIONS"). The retry exists FOR these.
+ *   * Shell command non-zero exits — always wrapped as ValidationError by
+ *     the engine's runShell so a flaky `record-rendering` script triggers a
+ *     retry rather than aborting the whole wave.
+ *
+ * What does NOT count (must propagate):
+ *   * TypeError / ReferenceError / SyntaxError / out-of-memory.
+ *   * `JSON.parse` failures on malformed CLI output (likely a CLI bug).
+ *   * Unknown CLI exit codes that don't map to user-actionable retry.
+ *   * Node typia transform errors.
+ *
+ * Throw `new ValidationError(...)` from user-land to signal "this attempt
+ * failed validation, try again". Use `isCatchable(e)` from the engine's
+ * try/tryMultipleTimes branches before swallowing — the helper rethrows
+ * non-validation errors so we never accidentally absorb bugs.
+ */
+export class ValidationError extends StructuredError {
+  constructor(
+    message: string,
+    opts: { sessionId?: string | null; nodeId?: string | null; data?: unknown; cause?: unknown } = {},
+  ) {
+    super(message, opts);
+    this.name = "ValidationError";
+  }
+}
+
+/**
+ * Type guard + enforcement: returns true iff `e` is one of the error
+ * categories a retry/fallback may legitimately swallow:
+ *
+ *   * ValidationError       — orchestrator-thrown verdict failures
+ *                             (UNSOLVED, REGRESSIONS, VISUAL CHECK FAILED).
+ *   * InterruptException    — model-initiated abandon.
+ *   * StructuredError       — every error the engine itself raises:
+ *                              · CLI failure (network glitch, rate limit)
+ *                              · model returned non-conforming JSON for a
+ *                                send<T>(...) schema
+ *                              · shell command non-zero exit
+ *                              all of these are user-actionable on a retry
+ *                              (try a slightly different prompt, fix the
+ *                              code the script complained about, etc.).
+ *
+ * Plain Error, TypeError, ReferenceError, SyntaxError — programmer bugs.
+ * Those propagate up and abort the wave. See the comment on
+ * ValidationError for why this matters (token-burn protection).
+ *
+ * Call sites that want to swallow an error MUST gate on this; if it
+ * returns false, they should rethrow so the engine bubbles up and aborts.
+ */
+export function isCatchable(e: unknown): boolean {
+  if (e instanceof ValidationError) return true;
+  if (e instanceof InterruptException) return true;
+  if (e instanceof StructuredError) return true;
+  return false;
+}
+
+/**
  * Widen `SessionWithResult<T>` to `SessionWithResult<Result<T>>`.
  *
  * `T` is a subtype of `Result<T>` (`Result<T> = T | {error: string}`), so the
