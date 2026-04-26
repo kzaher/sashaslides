@@ -43,9 +43,18 @@ const DEFAULTS: Omit<BuildOptions, "clusters" | "baseline_dir"> = {
   repo_root: process.cwd(),
 };
 
-function readRatings(path: string): Record<string, any> {
+/** Shape of a single user verdict in the SxS ratings.json — only the
+ * fields we actually consume are typed; `comment` is the most important
+ * one as it carries the user's free-form bug description. */
+interface RawRating {
+  status?: "good" | "bad" | "pending";
+  comment?: string;
+  annotation?: string;
+}
+
+function readRatings(path: string): Record<string, RawRating> {
   if (!existsSync(path)) return {};
-  return JSON.parse(readFileSync(path, "utf-8"));
+  return JSON.parse(readFileSync(path, "utf-8")) as Record<string, RawRating>;
 }
 
 function buildSlideTasks(slideIds: string[], opts: BuildOptions): SlideTask[] {

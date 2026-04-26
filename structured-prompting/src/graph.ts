@@ -21,7 +21,7 @@ export type NodeStatus = "pending" | "running" | "ok" | "error";
 /** `session.send(args)` captures this as its input. */
 export interface SendNodeInput extends CommonSendArguments {
   prompt: PromptInput<unknown>;
-  schema?: IJsonSchemaUnit<any, any>;
+  schema?: IJsonSchemaUnit;
 }
 
 export type PipeCallback = (s: Session) => SessionWithResult<unknown>;

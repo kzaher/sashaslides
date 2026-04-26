@@ -50,7 +50,7 @@ export interface SendOptions<_R = string, T = unknown> extends CommonSendArgumen
    * `__type` parameter carries T so the `send` overloads can infer the
    * result type without any explicit generic on `send<...>`.
    */
-  schema?: IJsonSchemaUnit<any, any>;
+  schema?: IJsonSchemaUnit;
 }
 
 /**
@@ -185,7 +185,7 @@ export class Session {
    * the schema's phantom `__type`. Use this when you want to skip the build-
    * time transformer.
    */
-  send<U extends IJsonSchemaUnit<any, any>>(
+  send<U extends IJsonSchemaUnit>(
     args: CommonSendArguments & { prompt: PromptInput<unknown>; schema: U },
   ): SessionWithResult<NonNullable<U["__type"]>>;
   /**
@@ -197,7 +197,13 @@ export class Session {
   send<R = string>(
     args: CommonSendArguments & { prompt: PromptInput<unknown> },
   ): SessionWithResult<R>;
-  send(args: any): SessionWithResult<any> {
+  // Implementation signature carries an unknown args bag; the public
+  // overloads above narrow it for callers. Internally we only inspect a
+  // handful of well-known fields (`schema`, `prompt`).
+  send(args: CommonSendArguments & {
+    prompt: PromptInput<unknown>;
+    schema?: IJsonSchemaUnit;
+  }): SessionWithResult<unknown> {
     const hasSchema = args && args.schema !== undefined;
     const tail = hasSchema ? " <schema>" : "";
     const node = this.graph.create({
@@ -207,7 +213,7 @@ export class Session {
       label: `send${tail}: ${promptLabel(args.prompt, 48)}`,
       input: { ...args },
     });
-    return this.withResultAt<any>(node.id);
+    return this.withResultAt<unknown>(node.id);
   }
 
   fork(): ForkedSession {
@@ -425,13 +431,16 @@ export class SessionWithResult<T> extends Session {
    * At runtime the engine evaluates the prompt function with the real
    * upstream before issuing the CLI call.
    */
-  override send<U extends IJsonSchemaUnit<any, any>>(
+  override send<U extends IJsonSchemaUnit>(
     args: CommonSendArguments & { prompt: PromptInput<T>; schema: U },
   ): SessionWithResult<NonNullable<U["__type"]>>;
   override send<R = string>(
     args: CommonSendArguments & { prompt: PromptInput<T> },
   ): SessionWithResult<R>;
-  override send(args: any): SessionWithResult<any> {
+  override send(args: CommonSendArguments & {
+    prompt: PromptInput<T>;
+    schema?: IJsonSchemaUnit;
+  }): SessionWithResult<unknown> {
     return super.send(args);
   }
 
