@@ -376,14 +376,30 @@ export class ClaudeEngine {
             }
             graph.finishOk(
               node.id,
-              { parsed, text: response.text, appliedForkFlag, composedPrompt },
+              {
+                parsed,
+                text: response.text,
+                appliedForkFlag,
+                composedPrompt,
+                // Per-call token + USD breakdown — surfaced on every send
+                // so the monitor's per-node rollup can display tokens and
+                // USD alongside duration without rounding through the raw
+                // CLI JSON. See TokenUsage in claude-cli.ts.
+                usage: response.usage,
+              },
               { sessionId: response.sessionId ?? usedResume, model: response.model ?? ctx.model },
             );
             return { value: parsed, ctx: nextCtx };
           }
           graph.finishOk(
             node.id,
-            { text: response.text, durationMs: response.durationMs, appliedForkFlag, composedPrompt },
+            {
+              text: response.text,
+              durationMs: response.durationMs,
+              appliedForkFlag,
+              composedPrompt,
+              usage: response.usage,
+            },
             { sessionId: response.sessionId ?? usedResume, model: response.model ?? ctx.model },
           );
           return { value: response.text, ctx: nextCtx };
@@ -489,14 +505,7 @@ export class ClaudeEngine {
             graph.finishOk(node.id, { ok: true });
             return { value: sub.value, ctx: sub.ctx };
           } catch (err) {
-            // PROPAGATE non-validation errors (TypeError, parse failures,
-            // OOM, etc.) so the wave aborts immediately instead of looping
-            // through the fallback and burning tokens on a bug. See
-            // ValidationError doc in errors.ts.
-            if (!isCatchable(err)) {
-              graph.finishErr(node.id, err);
-              throw err;
-            }
+            rethrowIfBug(graph, node.id, err);
             const fbNode = graph.create({
               parentId: node.id,
               kind: "tryFallback",
@@ -551,14 +560,7 @@ export class ClaudeEngine {
               lastErr = err;
               graph.finishErr(attNode.id, err);
               if (err instanceof InterruptException) break;
-              // PROPAGATE programmer bugs / non-validation errors instead
-              // of retrying. Otherwise we'd blast `max` attempts × every
-              // sibling's tokens through a bug that retries can't fix.
-              // See ValidationError doc in errors.ts.
-              if (!isCatchable(err)) {
-                graph.finishErr(node.id, err);
-                throw err;
-              }
+              rethrowIfBug(graph, node.id, err);
               // inject error context for next attempt
               attemptCtx = {
                 ...attemptCtx,
@@ -700,6 +702,21 @@ export class ClaudeEngine {
 }
 
 // ---- helpers ----------------------------------------------------------------
+
+/**
+ * Use at the top of every `catch` block where a retry/fallback is allowed.
+ * If `err` isn't a recognized validation error (see isCatchable in
+ * errors.ts), mark `nodeId` as failed and rethrow so the wave aborts. This
+ * is the single chokepoint that prevents a programmer bug (TypeError,
+ * undefined access, etc.) from being silently swallowed and burning model
+ * tokens through retry loops.
+ */
+function rethrowIfBug(graph: ComputationGraph, nodeId: string, err: unknown): void {
+  if (!isCatchable(err)) {
+    graph.finishErr(nodeId, err);
+    throw err;
+  }
+}
 
 let _reaperSpawned = false;
 
