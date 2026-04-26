@@ -13,6 +13,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
+import { readProcessTree } from "./reaper.js";
 
 export interface EngineOptions {
   port?: number;
@@ -122,7 +123,17 @@ export class ClaudeEngine {
     //      setpriv-pdeathsig only protects ONE generation; the reaper
     //      catches everything deeper (e.g. tool-use shells claude itself
     //      forks). Spawned only once; subsequent execute() calls reuse it.
+    //
+    //      BEFORE spawning, exercise the /proc parser on this engine's
+    //      own PID. If the parser can't find us in the map OR returns a
+    //      PPID that disagrees with process.ppid, the reaper would later
+    //      either fail to detect engine death or fail to enumerate
+    //      descendants — both silent token-burning failure modes. Refuse
+    //      to start instead. This catches non-Linux hosts, oddly-mounted
+    //      /proc, and future kernel format changes at boot rather than
+    //      at the worst possible moment (engine crash).
     if (!_reaperSpawned) {
+      assertProcParserHealthy();
       _reaperSpawned = true;
       spawnReaper(process.pid);
     }
@@ -719,6 +730,31 @@ function rethrowIfBug(graph: ComputationGraph, nodeId: string, err: unknown): vo
 }
 
 let _reaperSpawned = false;
+
+/**
+ * Boot-time self-test for the /proc parser the reaper relies on. Throws
+ * a descriptive error if /proc/<self>/stat doesn't roundtrip — meaning
+ * the host is non-Linux, /proc is mounted oddly, or the stat format
+ * changed in a way our parser can't handle. The reaper would silently
+ * leak descendants in any of these cases, so failing fast at startup
+ * (before the engine begins burning tokens) is the safer move.
+ */
+function assertProcParserHealthy(): void {
+  const tree = readProcessTree();
+  const myPpid = tree.get(process.pid);
+  if (myPpid == null) {
+    throw new Error(
+      `[reaper] /proc parser failed self-test: own PID ${process.pid} not present in readProcessTree() output. ` +
+      `Refusing to start — the reaper would silently fail to track descendants on this host.`,
+    );
+  }
+  if (myPpid !== process.ppid) {
+    throw new Error(
+      `[reaper] /proc parser self-test mismatch: parsed PPID ${myPpid} for self, but process.ppid is ${process.ppid}. ` +
+      `Refusing to start — stat format may have changed.`,
+    );
+  }
+}
 
 /**
  * Spawn the reaper as a detached process that survives this engine's
