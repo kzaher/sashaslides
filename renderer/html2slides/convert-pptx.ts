@@ -1759,4 +1759,46 @@ async function injectGradients(pptxPath: string, registry: any[]): Promise<void>
   }
 }
 
+/**
+ * Rewrite every `<a:ln w="…">` in every slide XML to also carry
+ * `algn="in"`. pptxgenjs emits no `algn=` attribute, which OOXML treats
+ * as `algn="ctr"` (stroke straddles the geometry path). On small-radius
+ * roundRects (slide_11 SWOT cards) the outside-half of the stroke gets
+ * sub-pixel quantised differently on the curved corners than on the
+ * straight edges, making bottom borders look thicker than the corner
+ * curves. CSS borders draw fully INSIDE the border-box, so `algn="in"`
+ * matches the original. Idempotent — skips `<a:ln>` elements that
+ * already have an algn attribute.
+ */
+async function injectStrokeAlignment(pptxPath: string): Promise<void> {
+  const buf = readFileSync(pptxPath);
+  const zip = await JSZip.loadAsync(buf);
+  const slideFiles = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+
+  let patched = 0;
+  for (const name of slideFiles) {
+    const xml = await zip.file(name)!.async("string");
+    // Match `<a:ln w="..."` opening tags that don't already have algn=.
+    // The XML can be self-closing (<a:ln w="..."/>) or have children
+    // (<a:ln w="...">...</a:ln>). We only patch the opening tag.
+    let slidePatched = 0;
+    const next = xml.replace(/<a:ln\b([^>]*?)(\/?)>/g, (match: string, attrs: string, selfClose: string) => {
+      if (/\balgn\s*=/.test(attrs)) return match;          // already has algn
+      if (!/\bw\s*=/.test(attrs)) return match;            // no w=, leave alone
+      slidePatched++;
+      return `<a:ln${attrs} algn="in"${selfClose}>`;
+    });
+    if (slidePatched > 0) {
+      zip.file(name, next);
+      patched += slidePatched;
+    }
+  }
+
+  if (patched > 0) {
+    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    writeFileSync(pptxPath, out);
+    console.log(`  Stroke alignment: ${patched} <a:ln> rewrite(s) to algn="in"`);
+  }
+}
+
 main().catch(err => { console.error(err); process.exit(1); });
