@@ -24,12 +24,22 @@
  * Usage:
  *   npx tsx record-rendering.ts --slides slide_11,slide_14,... --out <dir> --mode full
  */
-import { execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { Readable } from "stream";
 import CDP from "chrome-remote-interface";
 import { google } from "googleapis";
+import { runCli, CliCommandError } from "../../../../structured-prompting/src/run-cli.js";
+
+/**
+ * Adapter for code that previously used execSync. runCli is async; every
+ * recordPptx / uploadAndScrape call site here is fine to await. On
+ * non-zero exit runCli throws CliCommandError with FULL stdout+stderr
+ * in the message — fixing the wave-7 problem where the engine surfaced
+ * only "shell command failed (code 1)" with no stack trace from the
+ * subprocess. The error rethrow preserves the type so the engine sees a
+ * StructuredError-compatible Error after wrapping in runShell.
+ */
 
 type Mode = "pptx" | "screenshots" | "full";
 type Args = { slides: string[]; out: string; title: string; fixtures: string; mode: Mode };
@@ -69,7 +79,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
  * concurrent tabs occasionally drop the WebSocket. Idempotent: skips
  * slides whose .pptx is already present.
  */
-function recordPptx(slides: string[], outDir: string, fixturesDir: string) {
+async function recordPptx(slides: string[], outDir: string, fixturesDir: string) {
   const missing = slides.filter(id => !existsSync(join(outDir, `${id}.pptx`)));
   if (missing.length === 0) {
     console.log(`  pptx: all ${slides.length} present, skipping`);
@@ -81,12 +91,13 @@ function recordPptx(slides: string[], outDir: string, fixturesDir: string) {
     if (!existsSync(join(fixturesDir, html))) {
       throw new Error(`fixture not found: ${join(fixturesDir, html)}`);
     }
-    execSync(
-      `npx tsx renderer/html2slides/convert-pptx.ts "${fixturesDir}" ` +
-      `--only "${html}" --title "record-${id}-${Date.now()}" ` +
-      `--out "${join(outDir, `${id}.pptx`)}" --no-upload`,
-      { stdio: ["ignore", "ignore", "inherit"] },
-    );
+    await runCli("npx", [
+      "tsx", "renderer/html2slides/convert-pptx.ts", fixturesDir,
+      "--only", html,
+      "--title", `record-${id}-${Date.now()}`,
+      "--out", join(outDir, `${id}.pptx`),
+      "--no-upload",
+    ]);
     console.log(`    ${id} → ${join(outDir, `${id}.pptx`)}`);
   }
 }
@@ -171,11 +182,13 @@ async function uploadAndScrape(
   const htmlList = slides.map(s => `${s}.html`).join(",");
 
   // Build combined pptx (single file with all slides).
-  execSync(
-    `npx tsx renderer/html2slides/convert-pptx.ts "${fixturesDir}" ` +
-    `--only "${htmlList}" --title "${title}" --out "${pptxPath}" --no-upload`,
-    { stdio: "inherit" },
-  );
+  await runCli("npx", [
+    "tsx", "renderer/html2slides/convert-pptx.ts", fixturesDir,
+    "--only", htmlList,
+    "--title", title,
+    "--out", pptxPath,
+    "--no-upload",
+  ]);
   if (!existsSync(pptxPath)) throw new Error("combined pptx not produced: " + pptxPath);
 
   // Upload as Google Slides presentation.
@@ -194,10 +207,9 @@ async function uploadAndScrape(
 
   // Scrape per-slide thumbnails (export-thumbs.ts handles the API +
   // CDP-fallback details we don't want to duplicate here).
-  execSync(
-    `npx tsx renderer/html2slides/export-thumbs.ts "${presId}" "${thumbsDir}"`,
-    { stdio: "inherit" },
-  );
+  await runCli("npx", [
+    "tsx", "renderer/html2slides/export-thumbs.ts", presId, thumbsDir,
+  ]);
 
   // Per-slide objectIds for deep links #slide=id.<oid>.
   const slidesApi = google.slides({ version: "v1", auth });
@@ -235,7 +247,7 @@ async function main() {
 
   console.log(`[record-rendering] mode=${mode} slides=${slides.length} → ${out}`);
 
-  recordPptx(slides, pptxDir, fixtures);
+  await recordPptx(slides, pptxDir, fixtures);
   if (mode !== "pptx") await screenshotFixtures(slides, fixtures, originalsDir);
   if (mode === "full") await uploadAndScrape(slides, thumbsDir, title, fixtures);
 
@@ -245,4 +257,14 @@ async function main() {
   if (mode === "full") console.log(`  thumbs    → ${thumbsDir}`);
 }
 
-main().catch((e) => { console.error("[record-rendering] failed:", e); process.exit(1); });
+main().catch((e: unknown) => {
+  // CliCommandError already includes full stdout+stderr in its message;
+  // just print the message + exit non-zero so the calling engine can
+  // surface it. Other Errors fall through to default behavior.
+  if (e instanceof CliCommandError) {
+    console.error(`[record-rendering] failed: ${e.message}`);
+  } else {
+    console.error("[record-rendering] failed:", e);
+  }
+  process.exit(1);
+});
