@@ -18,5 +18,8 @@
     "pngjs": "^7.0.0",
     "postcss-value-parser": "^4.2.0",
     "pptxgenjs": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/pngjs": "^6.0.5"
   }
 }

@@ -68,8 +68,8 @@ const combinedPlugin: esbuild.Plugin = {
       let transformed: string;
       try {
         transformed = await transformTypia(
-          args.path as any,
-          afterInject as any,
+          args.path,
+          afterInject,
           unpluginCtxStub,
           typiaOpts,
         );

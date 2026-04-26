@@ -8,7 +8,7 @@ import { callClaude, callClaudeFormatted } from "./claude-cli.js";
 import { Claude, type ClaudeModel, type Result } from "./types.js";
 import { InterruptException, StructuredError, describeError } from "./errors.js";
 import { startMonitor, type MonitorServer } from "./server.js";
-import { realIO, type IO } from "./io.js";
+import { realIO, killAllSpawned, type IO } from "./io.js";
 
 export interface EngineOptions {
   port?: number;
@@ -184,6 +184,11 @@ export class ClaudeEngine {
   }
 
   async shutdown(): Promise<void> {
+    // Reap CLI subprocesses (claude + any per-call shells) FIRST. Without
+    // this, a SIGTERM/SIGINT to the engine just orphans the children to
+    // PID 1 — they keep burning model tokens until they finish on their
+    // own. realIO tracks every spawn for exactly this reason.
+    try { killAllSpawned("SIGTERM"); } catch {}
     if (this.monitor) {
       try { await this.monitor.stop(); } catch {}
       this.monitor = null;
@@ -300,7 +305,9 @@ export class ClaudeEngine {
           // under `--json-schema`. The CLI itself hands the schema to the model
           // as a StructuredOutput tool and returns the parsed value in
           // result.structured_output, so we just forward and read.
-          const flatSchema = hasSchema ? flattenSchemaUnit(schemaUnit as { schema: any; components?: any }) : undefined;
+          const flatSchema = hasSchema
+            ? flattenSchemaUnit(schemaUnit as { schema: unknown; components?: unknown })
+            : undefined;
           const { ctx: nextCtx, response, usedResume, appliedForkFlag, composedPrompt } = await this.materializeAndCall(
             graph,
             node,
@@ -347,8 +354,11 @@ export class ClaudeEngine {
               });
             }
             const parsed = r.parsed;
-            if (parsed && typeof parsed === "object" && typeof (parsed as any).InterruptException !== "undefined") {
-              throw new InterruptException(String((parsed as any).InterruptException) || "InterruptException");
+            const interrupt = parsed && typeof parsed === "object"
+              ? (parsed as { InterruptException?: unknown }).InterruptException
+              : undefined;
+            if (typeof interrupt !== "undefined") {
+              throw new InterruptException(String(interrupt) || "InterruptException");
             }
             graph.finishOk(
               node.id,
@@ -584,7 +594,7 @@ export class ClaudeEngine {
       throw attachNodeMeta(e, node.id, ctx.claudeSessionId);
     }
     // Exhaustiveness fallthrough — should not happen.
-    throw new Error(`unknown node kind: ${(node as any).kind}`);
+    throw new Error(`unknown node kind: ${(node as { kind: string }).kind}`);
   }
 
   /**
@@ -636,7 +646,7 @@ export class ClaudeEngine {
     // long-running sends. Kept under node.input so the monitor's existing
     // JSON tree renders a StringReveal for it automatically; finishOk still
     // copies composedPrompt onto node.output for completed sends.
-    const nodeInput = (_node as any).input;
+    const nodeInput = (_node as { input: unknown }).input;
     const mergedInput = nodeInput && typeof nodeInput === "object"
       ? { ...(nodeInput as Record<string, unknown>), composedPrompt: composed }
       : { composedPrompt: composed };
@@ -679,7 +689,11 @@ function installResult<T>(swr: SessionWithResult<T>, value: unknown): void {
 
 function attachNodeMeta(e: unknown, nodeId: string, sessionId: string | null): unknown {
   if (e && typeof e === "object") {
-    try { (e as any).nodeId ??= nodeId; (e as any).sessionId ??= sessionId; } catch {}
+    try {
+      const meta = e as { nodeId?: string; sessionId?: string | null };
+      meta.nodeId ??= nodeId;
+      meta.sessionId ??= sessionId;
+    } catch {}
   }
   return e;
 }
@@ -691,25 +705,26 @@ function attachNodeMeta(e: unknown, nodeId: string, sessionId: string | null): u
  * object. This helper inlines a top-level `$ref` against the unit's components
  * so the resulting object is standalone.
  */
-function flattenSchemaUnit(unit: { schema: any; components?: any }): object {
+function flattenSchemaUnit(unit: { schema: unknown; components?: unknown }): object {
   const root = unit.schema;
-  if (!root || typeof root !== "object") return root ?? {};
-  if (typeof root.$ref === "string" && unit.components) {
-    const resolved = resolveRef(root.$ref, unit.components);
+  if (!root || typeof root !== "object") return (root as object | null) ?? {};
+  const refHolder = root as { $ref?: unknown };
+  if (typeof refHolder.$ref === "string" && unit.components) {
+    const resolved = resolveRef(refHolder.$ref, unit.components);
     if (resolved) return resolved;
   }
-  return root;
+  return root as object;
 }
 
-function resolveRef(ref: string, components: any): any | null {
+function resolveRef(ref: string, components: unknown): object | null {
   // "#/components/schemas/Foo" → components.schemas.Foo
   const parts = ref.replace(/^#\//, "").split("/");
-  let cur: any = { components };
+  let cur: unknown = { components };
   for (const p of parts) {
-    if (cur == null) return null;
-    cur = cur[p];
+    if (cur == null || typeof cur !== "object") return null;
+    cur = (cur as Record<string, unknown>)[p];
   }
-  return cur ?? null;
+  return cur && typeof cur === "object" ? (cur as object) : null;
 }
 
 /**
@@ -743,8 +758,11 @@ function truncate(s: string, n: number): string {
 }
 
 function randomId(): string {
-  if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
-    return (crypto as any).randomUUID();
+  const c = (typeof crypto !== "undefined" ? crypto : undefined) as
+    | (Crypto & { randomUUID?: () => string })
+    | undefined;
+  if (c && typeof c.randomUUID === "function") {
+    return c.randomUUID();
   }
   return "sp_" + Math.random().toString(36).slice(2, 10);
 }

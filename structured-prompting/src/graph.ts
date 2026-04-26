@@ -211,11 +211,13 @@ export class ComputationGraph {
       finishedAt: null,
       model: null,
       sessionId: null,
-      input: (args as any).input ?? null,
+      input: ("input" in args ? (args as { input: unknown }).input : null) ?? null,
       output: null,
       error: null,
       children: [] as string[],
-      ...(("callbacks" in args) ? { callbacks: (args as any).callbacks } : {}),
+      ...(("callbacks" in args)
+        ? { callbacks: (args as { callbacks: unknown }).callbacks }
+        : {}),
     } as unknown as Extract<GraphNode, { kind: K }>;
     this.nodes.set(node.id, node);
     if (parentId) {
@@ -233,7 +235,7 @@ export class ComputationGraph {
     n.startedAt = Date.now();
     if (extra.model !== undefined) n.model = extra.model;
     if (extra.sessionId !== undefined) n.sessionId = extra.sessionId;
-    if (extra.input !== undefined) (n as any).input = extra.input;
+    if (extra.input !== undefined) (n as { input: unknown }).input = extra.input;
     this.version++;
   }
 
@@ -253,11 +255,14 @@ export class ComputationGraph {
     if (!n) return;
     n.status = "error";
     n.finishedAt = Date.now();
-    const e = err as any;
+    const e = (err && typeof err === "object" ? err : {}) as {
+      message?: unknown;
+      stack?: unknown;
+    };
     n.error = {
-      message: e?.message ?? String(err),
-      stack: e?.stack,
-      data: e && typeof e === "object" ? { ...e } : undefined,
+      message: typeof e.message === "string" ? e.message : String(err),
+      stack: typeof e.stack === "string" ? e.stack : undefined,
+      data: err && typeof err === "object" ? { ...(err as object) } : undefined,
     };
     this.version++;
   }
@@ -269,7 +274,7 @@ export class ComputationGraph {
   setInput(id: string, input: unknown) {
     const n = this.nodes.get(id);
     if (!n) return;
-    (n as any).input = input;
+    (n as { input: unknown }).input = input;
     this.version++;
   }
 
@@ -317,7 +322,7 @@ export class ComputationGraph {
     // Strip non-serializable callbacks before emitting on the wire.
     const nodes = this.allNodes().map((n) => {
       const { ...rest } = n as GraphNode & { callbacks?: unknown };
-      delete (rest as any).callbacks;
+      delete (rest as { callbacks?: unknown }).callbacks;
       return rest;
     });
     return {
