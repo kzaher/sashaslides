@@ -2,16 +2,16 @@
   "slide_01": {
     "status": "good",
     "comment": "Bad vertical text alignment",
-    "ratedAt": "2026-04-20T05:48:16.767Z"
+    "ratedAt": "2026-04-22T07:31:28.258Z"
   },
   "slide_02": {
     "status": "good",
-    "ratedAt": "2026-04-20T05:48:23.665Z"
+    "ratedAt": "2026-04-22T07:31:46.256Z"
   },
   "slide_03": {
     "status": "good",
     "comment": "Wrong padding.",
-    "ratedAt": "2026-04-20T05:48:35.507Z"
+    "ratedAt": "2026-04-22T07:34:40.109Z"
   },
   "slide_04": {
     "status": "good",
@@ -55,8 +55,8 @@
   },
   "slide_11": {
     "status": "bad",
-    "comment": "The line height is horribly wrong here, and clipping",
-    "ratedAt": "2026-04-20T05:50:29.624Z",
+    "comment": "The top corners look reasonable, but the bottom corners are for some reason distorted.",
+    "ratedAt": "2026-04-22T07:25:00Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_11.png"
   },
   "slide_12": {
@@ -71,8 +71,8 @@
   },
   "slide_14": {
     "status": "bad",
-    "comment": "Now top borders on elements are wrong, not rounded, probably clipping library.",
-    "ratedAt": "2026-04-20T05:50:34.632Z",
+    "comment": "The top seems to be clipped like expected, but the border color is of the wrong color on center chips, colored vs gray.",
+    "ratedAt": "2026-04-22T07:25:00Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_14.png"
   },
   "slide_15": {
@@ -87,8 +87,8 @@
   },
   "slide_17": {
     "status": "bad",
-    "comment": "Middle glow is missing and outer borders on cards (e.g. \"Green Capital\" card)",
-    "ratedAt": "2026-04-20T05:52:41.295Z",
+    "comment": "It is amazing regarding gradients, but \"milestone achieved\" is left aligned and not center aligned.",
+    "ratedAt": "2026-04-22T07:25:00Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_17.png"
   },
   "slide_18": {
@@ -142,7 +142,7 @@
     "ratedAt": "2026-04-20T05:57:06.859Z"
   },
   "slide_28": {
-    "status": "bad",
+    "status": "good",
     "comment": "No rounded corners on top right card. This was fixed at some point.",
     "ratedAt": "2026-04-20T05:57:29.143Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_28.png"

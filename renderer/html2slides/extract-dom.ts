@@ -1768,6 +1768,18 @@ interface ExtractedElement {
     const lineH2 = style.lineHeight || (style.fontSize || 14) * 1.2;
     const padVSymmetric = padT2 > 5 && Math.abs(padT2 - padB2) < 3;
     const fullyRoundedPill = (style.borderRadius || 0) >= bounds.h / 2;
+    // Tight chip-with-own-bg: small symmetric padding (vertical ≤ 5) doesn't
+    // qualify as `padVSymmetric` and a small border-radius doesn't qualify as
+    // `fullyRoundedPill`, but if the element paints its OWN background color
+    // it's still a chip/badge — Chrome centers the text inside the tight box.
+    // slide_15 `.status-badge { padding:3px 10px; border-radius:4px;
+    // background:#1a4731 }` ("200 OK"): padT=3 fails `>5`, radius 4 < h/2=10,
+    // so neither existing clause fired and "200 OK" emitted left-top-anchored
+    // inside its green pill (wave-7 user feedback). The element's OWN bgColor
+    // is the discriminator: plain inline text without a styled bg never
+    // matches; padded cards/sections with bg + symmetric padding > 5 already
+    // hit `padVSymmetric` so behavior there is unchanged.
+    const chipWithOwnBg = !!style.bgColor && padT2 > 0 && Math.abs(padT2 - padB2) < 3;
     const isClippedFitted = cs.whiteSpace === "nowrap"
       && (cs.overflow === "hidden" || cs.overflowX === "hidden");
     const hasLineBreaks = el.querySelector ? el.querySelector("br") !== null : false;
@@ -1779,7 +1791,7 @@ interface ExtractedElement {
     const contentH = bounds.h - padT2 - padB2;
     const isSingleLineH = contentH < lineH2 * 1.5;
     if (effectiveAlign === "start" && padL > 5 && Math.abs(padL - padR) < 3 &&
-        isSingleLineH && (padVSymmetric || fullyRoundedPill) &&
+        isSingleLineH && (padVSymmetric || fullyRoundedPill || chipWithOwnBg) &&
         !isClippedFitted && !hasLineBreaks) {
       effectiveAlign = "center";
     }
@@ -1901,8 +1913,34 @@ interface ExtractedElement {
       // element's padding-left — producing a doubled horizontal gap between
       // the ::before bullet and the text. Genuine pill buttons (padding: 6px+
       // vertically) still clear the threshold and keep vertical centering.
+      //
+      // Multi-line content (e.g. slide_30 .code-block with multiple <br>s and
+      // padding:14px) must NOT be marked vertically centered — Chrome flows
+      // multi-line block text from the content-box top, not the geometric
+      // center. The convert-pptx merged-rect path used to hardcode "middle"
+      // for absorbed text, masking this; once that site honours
+      // verticallyCentered, multi-line code blocks must opt out so the first
+      // line sits at the requested padding-top instead of mid-box.
+      //
+      // Fully-rounded pill chips (border-radius >= h/2) with any symmetric
+      // vertical padding > 0 also qualify, even if padTop < 5: the chip is
+      // narrow enough that Chrome's centered glyph baseline visibly diverges
+      // from a top-anchored emit. This covers slide_30 `.tag` (padding:3px
+      // 10px, radius:50) which previously relied on the merged-rect path's
+      // hardcoded "middle" for centering.
+      const fullyRoundedPillVC =
+        (style.borderRadius || 0) >= bounds.h / 2 && padTop > 0;
+      // Same chip-with-own-bg rule as the alignment gate above: an element
+      // that paints its own bgColor with any symmetric vertical padding is a
+      // styled chip and Chrome centers the glyph baseline inside it. slide_15
+      // `.status-badge` (padding:3px 10px, radius:4, bg:#1a4731) takes this
+      // branch — without it the green pill emits anchor="t" and "200 OK"
+      // hugs the top edge of the badge instead of riding mid-line.
+      const chipWithOwnBgVC = !!style.bgColor && padTop > 0;
       const verticallyCentered =
-        padTop >= 5 && Math.abs(padTop - padBot) < 3;
+        !hasLineBreaks &&
+        Math.abs(padTop - padBot) < 3 &&
+        (padTop >= 5 || fullyRoundedPillVC || chipWithOwnBgVC);
       // Use a regex that excludes \u00a0 so leading/trailing nbsp (used as
       // visual indentation in code blocks like slide_15) survive. JS
       // String.trim() strips Unicode whitespace including nbsp.

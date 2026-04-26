@@ -943,10 +943,20 @@ function buildPptx(
           //      the flex-centered position Chrome already computed.
           if (mergedTextEl) {
             const mb = mergedTextEl.bounds || b;
+            // Honour the extractor's verticallyCentered flag instead of
+            // hardcoding "middle". Single-line absorbed text (chip labels,
+            // card headers, flex-centered content) keeps verticallyCentered=
+            // true and stays centered; multi-line absorbed text (slide_30
+            // .code-block, padding:14px, multiple <br>s) gets verticallyCentered=
+            // false and is emitted "top" so emitStyledText folds the CSS
+            // padding-top into the textbox's tIns — first line sits at the
+            // padding distance, matching Chrome's top-flowed layout.
+            const mergedValign: "top" | "middle" =
+              mergedTextEl.verticallyCentered === false ? "top" : "middle";
             emitStyledText(
               slide, mergedTextEl, mb,
               extraction.elements, mergedTextIndex,
-              "middle",
+              mergedValign,
               false, // merged-rect path historically didn't fold opacity into color
               { color: "#333333", fontSize: 14 },
             );
@@ -1655,6 +1665,15 @@ async function main() {
 
   // Post-process: inject <a:gradFill> into shapes tagged with name="GRAD_N"
   await injectGradients(pptxPath, (pres as any).__gradients || []);
+
+  // Post-process: rewrite every <a:ln w="…"> to <a:ln w="…" algn="in">.
+  // pptxgenjs emits no algn= attribute, which OOXML treats as algn="ctr"
+  // (stroke straddles the geometry path). On small-radius roundRects (SWOT
+  // cards on slide_11), the outside-half of the stroke gets sub-pixel
+  // quantised differently on the curved corners than on the straight edges,
+  // making bottom borders look thicker than the corner curves. CSS borders
+  // draw fully inside the border-box, so algn="in" matches the original.
+  await injectStrokeAlignment(pptxPath);
 
   if (noUpload) {
     console.log("Done (no upload).");
