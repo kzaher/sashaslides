@@ -6,7 +6,7 @@ import {
 import { ComputationGraph } from "./graph.js";
 import { callClaude, callClaudeFormatted } from "./claude-cli.js";
 import { Claude, type ClaudeModel, type Result } from "./types.js";
-import { InterruptException, StructuredError, describeError } from "./errors.js";
+import { InterruptException, StructuredError, describeError, isCatchable } from "./errors.js";
 import { startMonitor, type MonitorServer } from "./server.js";
 import { realIO, killAllSpawned, type IO } from "./io.js";
 import { spawn } from "node:child_process";
@@ -489,6 +489,14 @@ export class ClaudeEngine {
             graph.finishOk(node.id, { ok: true });
             return { value: sub.value, ctx: sub.ctx };
           } catch (err) {
+            // PROPAGATE non-validation errors (TypeError, parse failures,
+            // OOM, etc.) so the wave aborts immediately instead of looping
+            // through the fallback and burning tokens on a bug. See
+            // ValidationError doc in errors.ts.
+            if (!isCatchable(err)) {
+              graph.finishErr(node.id, err);
+              throw err;
+            }
             const fbNode = graph.create({
               parentId: node.id,
               kind: "tryFallback",
@@ -543,6 +551,14 @@ export class ClaudeEngine {
               lastErr = err;
               graph.finishErr(attNode.id, err);
               if (err instanceof InterruptException) break;
+              // PROPAGATE programmer bugs / non-validation errors instead
+              // of retrying. Otherwise we'd blast `max` attempts × every
+              // sibling's tokens through a bug that retries can't fix.
+              // See ValidationError doc in errors.ts.
+              if (!isCatchable(err)) {
+                graph.finishErr(node.id, err);
+                throw err;
+              }
               // inject error context for next attempt
               attemptCtx = {
                 ...attemptCtx,
@@ -810,11 +826,17 @@ async function runShell(args: { cmd: string; cwd: string; io: IO }): Promise<str
   const { cmd, cwd, io } = args;
   const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd });
   if (r.spawnError) {
+    // bash itself failed to launch — almost always a programmer bug
+    // (PATH, permissions). Propagate as a non-catchable StructuredError.
     throw new StructuredError(`shell spawn failed: ${r.spawnError}`);
   }
   if (r.exitCode !== 0) {
+    // Non-zero exit from a user-supplied script. Tag with kind:"shellExit"
+    // so isCatchable() lets a try/tryMultipleTimes branch swallow it for
+    // a retry. (See errors.ts.)
     throw new StructuredError(
       `shell command failed (code ${r.exitCode}): ${cmd}\n${r.stderr.slice(-800)}`,
+      { data: { kind: "shellExit", exitCode: r.exitCode, cmd, stderrTail: r.stderr.slice(-800) } },
     );
   }
   return r.stdout;
