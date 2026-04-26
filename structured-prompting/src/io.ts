@@ -195,14 +195,14 @@ export interface Matcher<R = unknown> {
 }
 
 export interface MockIOOptions {
-  matchers: Array<Matcher<any>>;
+  matchers: Array<Matcher<unknown>>;
 }
 
 export class MockIO implements IO {
   /** Every effect call, in order. Push-only. */
   readonly calls: EffectCall[] = [];
   /** Internal: per-matcher counter, parallel to `this.matchers`. */
-  private readonly matchers: Array<Matcher<any> & { _calls: number }>;
+  private readonly matchers: Array<Matcher<unknown> & { _calls: number }>;
 
   constructor(opts: MockIOOptions) {
     this.matchers = opts.matchers.map((m) => ({ ...m, _calls: 0 }));
@@ -212,7 +212,7 @@ export class MockIO implements IO {
   private dispatch(method: keyof IO, args: unknown[]): unknown {
     const call: EffectCall = { method, args, at: Date.now() };
     this.calls.push(call);
-    const hits: Array<Matcher<any> & { _calls: number }> = [];
+    const hits: Array<Matcher<unknown> & { _calls: number }> = [];
     for (const m of this.matchers) {
       if (m.when(call)) hits.push(m);
     }

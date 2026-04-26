@@ -28,7 +28,7 @@ export interface ClaudeCallResult {
   /** Populated by the CLI when `--json-schema` was passed: the model's
    * structured reply, already parsed into an object. Undefined otherwise. */
   structuredOutput: unknown;
-  raw: any;
+  raw: unknown;
   stderr: string;
   isError: boolean;
   errorMessage: string | null;
@@ -113,15 +113,26 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallRes
 
     // The CLI sometimes prefixes stdout with a stderr warning line ("no stdin
     // data received..."); find the JSON start before parsing.
-    let parsed: any = null;
+    /** Subset of the CLI's JSON result-frame shape that we read from. */
+    interface CliResultFrame {
+      type?: string;
+      is_error?: boolean;
+      result?: string;
+      session_id?: string;
+      duration_ms?: number;
+      modelUsage?: Record<string, unknown>;
+      total_cost_usd?: number;
+      structured_output?: unknown;
+    }
+    let parsed: CliResultFrame | null = null;
     const jsonStart = stdout.indexOf('{"type"');
     const jsonText = jsonStart >= 0 ? stdout.slice(jsonStart) : stdout;
     try {
-      parsed = JSON.parse(jsonText);
+      parsed = JSON.parse(jsonText) as CliResultFrame;
     } catch {
       // non-JSON output; fall through with parsed=null
     }
-    const ok = parsed && parsed.type === "result" && parsed.is_error === false;
+    const ok = parsed != null && parsed.type === "result" && parsed.is_error === false;
     return {
       text: parsed?.result ?? "",
       sessionId: parsed?.session_id ?? null,

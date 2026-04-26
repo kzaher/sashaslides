@@ -603,7 +603,7 @@ export class ClaudeEngine {
    * function with (resumeSid, forkFlag, composedPrompt). Returns the response
    * plus an updated ctx.
    */
-  private async materializeAndCall<Resp extends { sessionId: string | null; isError: boolean; errorMessage: string | null; raw: any; stderr: string }>(
+  private async materializeAndCall<Resp extends { sessionId: string | null; isError: boolean; errorMessage: string | null; raw: unknown; stderr: string }>(
     graph: ComputationGraph,
     _node: GraphNode,
     ctx: RunCtx,
