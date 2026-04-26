@@ -23,36 +23,113 @@ function fmtDur(ms) {
   return (ms / 1000).toFixed(2) + "s";
 }
 
-function computeDurations(nodes) {
-  const sumMap = new Map();
-  const selfMap = new Map();
-  const byParent = new Map();
+// Per-node metric formatters. Each metric appears in the dropdown, the
+// per-row column, and the detail panel sum. costUsd uses 4 decimals so a
+// $0.0042 send doesn't round to "$0".
+const METRICS = [
+  { id: "durationMs",        label: "duration (s)",  fmt: (v) => fmtDur(v) },
+  { id: "costUsd",           label: "cost (USD)",     fmt: (v) => v == null ? "—" : "$" + Number(v).toFixed(4) },
+  { id: "inputTokens",       label: "input tokens",   fmt: (v) => v == null ? "—" : Number(v).toLocaleString() },
+  { id: "outputTokens",      label: "output tokens",  fmt: (v) => v == null ? "—" : Number(v).toLocaleString() },
+  { id: "cacheReadTokens",   label: "cache-read tok", fmt: (v) => v == null ? "—" : Number(v).toLocaleString() },
+  { id: "cacheCreateTokens", label: "cache-write tok",fmt: (v) => v == null ? "—" : Number(v).toLocaleString() },
+];
+
+/**
+ * Per-node value for a given metric. Sends carry the entire token + USD
+ * payload on output.usage; non-send nodes return 0 except for duration
+ * (always wall-time of self).
+ */
+function nodeValue(node, metric) {
+  if (metric === "durationMs") {
+    if (node.startedAt == null) return null;
+    return (node.finishedAt ?? Date.now()) - node.startedAt;
+  }
+  const u = node.output && node.output.usage;
+  if (!u) return 0;
+  switch (metric) {
+    case "costUsd":           return u.costUsd ?? 0;
+    case "inputTokens":       return u.inputTokens ?? 0;
+    case "outputTokens":      return u.outputTokens ?? 0;
+    case "cacheReadTokens":   return u.cacheReadInputTokens ?? 0;
+    case "cacheCreateTokens": return u.cacheCreationInputTokens ?? 0;
+  }
+  return 0;
+}
+
+// Roll up a single metric over the visible-tree subtree of every node.
+// Subtree relation is containerId === parent.id, so this matches the
+// lexical lambda nesting the UI displays (rollups for a parallelFork
+// sum across all parallelChildren, etc.).
+//
+// For duration the rollup is the elapsed wall-time of the node itself;
+// selfMap subtracts the union of children's intervals so a parallel fork
+// that spends 10 s in 7 children doesn't double-count. For tokens and
+// USD the rollup is a plain SUM (every send's contribution is real
+// spend, no parallel-discount).
+function computeRollup(nodes, metric) {
+  const sumMap = new Map();   // metric value summed over node + descendants
+  const selfMap = new Map();  // node's own contribution (duration: minus parallel-overlap)
+  const byContainer = new Map();
   for (const n of nodes) {
-    const p = n.parentId == null ? "__root__" : n.parentId;
-    if (!byParent.has(p)) byParent.set(p, []);
-    byParent.get(p).push(n);
+    const c = n.containerId == null ? "__root__" : n.containerId;
+    if (!byContainer.has(c)) byContainer.set(c, []);
+    byContainer.get(c).push(n);
   }
   const now = Date.now();
-  for (const n of nodes) {
-    const wall = n.finishedAt != null && n.startedAt != null
-      ? n.finishedAt - n.startedAt
-      : (n.startedAt != null ? now - n.startedAt : null);
-    sumMap.set(n.id, wall);
-    const kids = (byParent.get(n.id) || []).filter(c => c.startedAt != null);
-    if (kids.length === 0) { selfMap.set(n.id, wall); continue; }
-    const intervals = kids
-      .map(c => [c.startedAt, c.finishedAt == null ? now : c.finishedAt])
-      .sort((a, b) => a[0] - b[0]);
-    let unionLen = 0;
-    let curS = intervals[0][0];
-    let curE = intervals[0][1];
-    for (let i = 1; i < intervals.length; i++) {
-      const [s, e] = intervals[i];
-      if (s <= curE) curE = Math.max(curE, e);
-      else { unionLen += (curE - curS); curS = s; curE = e; }
+
+  function durSum(node) {
+    return node.finishedAt != null && node.startedAt != null
+      ? node.finishedAt - node.startedAt
+      : (node.startedAt != null ? now - node.startedAt : null);
+  }
+
+  // Recursive sum over the subtree (visible children = nodes whose
+  // containerId === this node's id). Cache to avoid re-walking shared
+  // ancestors.
+  const cache = new Map();
+  function subtreeSum(node) {
+    if (cache.has(node.id)) return cache.get(node.id);
+    const own = nodeValue(node, metric) ?? 0;
+    let sum = typeof own === "number" ? own : 0;
+    const kids = byContainer.get(node.id) || [];
+    for (const k of kids) {
+      if (k.id === node.id) continue;
+      const s = subtreeSum(k);
+      if (typeof s === "number") sum += s;
     }
-    unionLen += (curE - curS);
-    selfMap.set(n.id, wall == null ? null : Math.max(0, wall - unionLen));
+    cache.set(node.id, sum);
+    return sum;
+  }
+
+  for (const n of nodes) {
+    if (metric === "durationMs") {
+      // Wall-clock: parent's elapsed time IS what we display, NOT the sum.
+      const wall = durSum(n);
+      sumMap.set(n.id, wall);
+      const kids = (byContainer.get(n.id) || []).filter(c => c.id !== n.id && c.startedAt != null);
+      if (kids.length === 0) { selfMap.set(n.id, wall); continue; }
+      const intervals = kids
+        .map(c => [c.startedAt, c.finishedAt == null ? now : c.finishedAt])
+        .sort((a, b) => a[0] - b[0]);
+      let unionLen = 0;
+      let curS = intervals[0][0];
+      let curE = intervals[0][1];
+      for (let i = 1; i < intervals.length; i++) {
+        const [s, e] = intervals[i];
+        if (s <= curE) curE = Math.max(curE, e);
+        else { unionLen += (curE - curS); curS = s; curE = e; }
+      }
+      unionLen += (curE - curS);
+      selfMap.set(n.id, wall == null ? null : Math.max(0, wall - unionLen));
+    } else {
+      // Tokens / cost: simple subtree sum. selfMap is just this node's
+      // own contribution (zero for non-send anchors, the actual call
+      // value for send nodes).
+      sumMap.set(n.id, subtreeSum(n));
+      const own = nodeValue(n, metric);
+      selfMap.set(n.id, typeof own === "number" ? own : 0);
+    }
   }
   return { sumMap, selfMap };
 }
@@ -140,13 +217,32 @@ function Detail(props) {
   const { graph, selectedId } = props;
   const node = graph.nodes.find(n => n.id === selectedId);
   if (!node) return h("h1", null, "node gone");
-  const { sumMap, selfMap } = useMemo(
-    () => computeDurations(graph.nodes),
+  // Detail panel always shows duration as the primary metric (it's the
+  // most universally informative). The dropdown's metric controls only
+  // the tree column. Cost / token sums are shown alongside as a separate
+  // line if any send descendant contributed.
+  const { sumMap: durSumMap, selfMap: durSelfMap } = useMemo(
+    () => computeRollup(graph.nodes, "durationMs"),
     [graph.version],
   );
-  const sumMs = sumMap.get(node.id);
-  const selfMs = selfMap.get(node.id);
+  const { sumMap: usdSumMap } = useMemo(
+    () => computeRollup(graph.nodes, "costUsd"),
+    [graph.version],
+  );
+  const { sumMap: inSumMap } = useMemo(
+    () => computeRollup(graph.nodes, "inputTokens"),
+    [graph.version],
+  );
+  const { sumMap: outSumMap } = useMemo(
+    () => computeRollup(graph.nodes, "outputTokens"),
+    [graph.version],
+  );
+  const sumMs = durSumMap.get(node.id);
+  const selfMs = durSelfMap.get(node.id);
   const showSelf = sumMs != null && selfMs != null && Math.abs(sumMs - selfMs) > 1;
+  const usd = usdSumMap.get(node.id) || 0;
+  const inT = inSumMap.get(node.id) || 0;
+  const outT = outSumMap.get(node.id) || 0;
   // composedPrompt lives on node.output for finished sends AND on node.input
   //   while the send is still running (engine.materializeAndCall writes it
   //   BEFORE awaiting the CLI), so the reveal works in both states.
@@ -167,6 +263,16 @@ function Detail(props) {
       node.model ? h("span", null, "model ", h("b", null, node.model)) : null,
       node.sessionId ? h("span", null, "session ", h("b", null, node.sessionId.slice(0, 8))) : null,
     ),
+    // Cost rollup line — always shown when this subtree contains at
+    // least one send. Hidden for purely-orchestration subtrees so the
+    // header doesn't clutter with $0 / 0 tok lines.
+    usd > 0 || inT > 0 || outT > 0
+      ? h("div", { class: "meta" },
+          h("span", null, "cost ", h("b", null, "$" + usd.toFixed(4))),
+          h("span", null, "in ", h("b", null, inT.toLocaleString()), " tok"),
+          h("span", null, "out ", h("b", null, outT.toLocaleString()), " tok"),
+        )
+      : null,
     composed != null ? h(ComposedPromptReveal, { text: composed }) : null,
     h("div", { class: "sect" }, h("h2", null, "input"), h("pre", null, h(JsonView, { value: node.input }))),
     h("div", { class: "sect" }, h("h2", null, "output"), h("pre", null, h(JsonView, { value: node.output }))),
@@ -176,7 +282,7 @@ function Detail(props) {
 
 // ---- Tree ----------------------------------------------------------------
 function TreeNode(props) {
-  const { node, depth, graph, selectedId, onSelect, collapsed, onToggleCollapsed, sumMap, selfMap } = props;
+  const { node, depth, graph, selectedId, onSelect, collapsed, onToggleCollapsed, sumMap, selfMap, metric } = props;
   // Tree nesting is by containerId (lexical lambda anchor), not parentId
   // (linear chain predecessor). A chain like a().b().c() built off the same
   // Session shares one containerId, so all three render as siblings under
@@ -187,9 +293,17 @@ function TreeNode(props) {
   );
   const isCollapsed = collapsed.has(node.id);
   const hasKids = kids.length > 0;
-  const sumMs = sumMap.get(node.id);
-  const selfMs = selfMap.get(node.id);
-  const showSelf = sumMs != null && selfMs != null && Math.abs(sumMs - selfMs) > 1;
+  const sum = sumMap.get(node.id);
+  const self = selfMap.get(node.id);
+  // showSelf: only when self differs meaningfully from sum (parallel
+  // duration, or self-only contribution for tokens). The tolerance is 1ms
+  // for duration so trivially-fast non-parallel nodes don't repeat the
+  // value; for everything else strict inequality.
+  const showSelf = (() => {
+    if (sum == null || self == null) return false;
+    if (metric.id === "durationMs") return Math.abs(sum - self) > 1;
+    return sum !== self && self !== 0;
+  })();
   return h("div", null,
     h("div", {
       class: "node tier" + Math.min(depth, 24) + (selectedId === node.id ? " selected" : ""),
@@ -203,10 +317,10 @@ function TreeNode(props) {
       h("span", { class: "status " + node.status }),
       h("span", { class: "kind" }, node.kind),
       h("span", { class: "label" }, node.label),
-      sumMs != null && h("span", { class: "dur" },
-        fmtDur(sumMs),
+      sum != null && h("span", { class: "dur" },
+        metric.fmt(sum),
         showSelf && h("span", { class: "sep" }, "·"),
-        showSelf && h("span", { class: "cum" }, "self " + fmtDur(selfMs)),
+        showSelf && h("span", { class: "cum" }, "self " + metric.fmt(self)),
       ),
     ),
     !isCollapsed && kids.map(k => h(TreeNode, {
@@ -214,7 +328,7 @@ function TreeNode(props) {
       node: k,
       // All "kids" are now containerId-grouped siblings — always one level deeper.
       depth: depth + 1,
-      graph, selectedId, onSelect, collapsed, onToggleCollapsed, sumMap, selfMap,
+      graph, selectedId, onSelect, collapsed, onToggleCollapsed, sumMap, selfMap, metric,
     })),
   );
 }
@@ -225,6 +339,11 @@ function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [connErr, setConnErr] = useState(null);
+  // Selected per-row rollup metric. Default to wall-clock duration since
+  // it's the most universally meaningful; the dropdown lets the reviewer
+  // switch to USD or token-class views to spot-check cost.
+  const [metricId, setMetricId] = useState("durationMs");
+  const metric = METRICS.find(m => m.id === metricId) || METRICS[0];
 
   useEffect(() => {
     let alive = true;
@@ -246,8 +365,8 @@ function App() {
   }, []);
 
   const { sumMap, selfMap } = useMemo(
-    () => graph ? computeDurations(graph.nodes) : { sumMap: new Map(), selfMap: new Map() },
-    [graph && graph.version],
+    () => graph ? computeRollup(graph.nodes, metricId) : { sumMap: new Map(), selfMap: new Map() },
+    [graph && graph.version, metricId],
   );
 
   const onToggleCollapsed = useCallback((id) => {
@@ -289,6 +408,20 @@ function App() {
       h("div", { id: "toolbar" },
         h("button", { onClick: expandAll }, "+ expand all"),
         h("button", { onClick: collapseAll }, "− collapse all"),
+        // Metric dropdown — controls which value is summed per-subtree
+        // and shown next to every row. Token / cost columns let the
+        // reviewer spot the "where did the wave's $ go" subtree at a
+        // glance without opening every send node.
+        h("label", { style: "margin-left:auto;display:flex;gap:6px;align-items:center;color:var(--muted);font-size:12px" },
+          "summary:",
+          h("select", {
+            value: metricId,
+            onChange: (e) => setMetricId(e.target.value),
+            style: "background:var(--pending);color:var(--fg);border:1px solid #30363d;border-radius:3px;padding:2px 6px",
+          },
+            METRICS.map(m => h("option", { key: m.id, value: m.id }, m.label)),
+          ),
+        ),
       ),
       h("div", { id: "treeBody" },
         rootNode
@@ -298,7 +431,7 @@ function App() {
               graph, selectedId,
               onSelect: setSelectedId,
               collapsed, onToggleCollapsed,
-              sumMap, selfMap,
+              sumMap, selfMap, metric,
             })
           : h("div", { style: "color:var(--muted)" }, "loading…"),
       ),

@@ -19,12 +19,41 @@ export interface ClaudeCallOptions {
   io?: IO;
 }
 
+/**
+ * Per-call token + USD accounting. Sourced from the CLI's `usage` block and
+ * `modelUsage[<model>]` entry. Populated for every send (including failures
+ * with isError=true if the model still consumed tokens before erroring).
+ *
+ * Cached input tokens come in two forms:
+ *   * cacheReadInputTokens  — server hit a cache (cheapest tier, ~10% of
+ *                              the input price)
+ *   * cacheCreationInputTokens — server wrote a new cache entry (full
+ *                              input price + 25% on top)
+ * The CLI returns these on the `usage` block too; we surface both so the
+ * monitor's per-node rollup can choose which counter to display.
+ */
+export interface TokenUsage {
+  /** Non-cached input tokens (full input rate). */
+  inputTokens: number;
+  /** Cache-read input tokens (cheap rate). */
+  cacheReadInputTokens: number;
+  /** Cache-creation input tokens (full rate + 25%). */
+  cacheCreationInputTokens: number;
+  /** Output tokens. */
+  outputTokens: number;
+  /** Total USD for this single call (sum across all token classes). */
+  costUsd: number;
+}
+
 export interface ClaudeCallResult {
   text: string;             // the `result` field from --output-format json
   sessionId: string | null;
   durationMs: number;
   model: string | null;
   costUsd: number | null;
+  /** Per-call token + USD breakdown. Null if the CLI returned no usage block
+   * (e.g. spawn failure before any model contact). */
+  usage: TokenUsage | null;
   /** Populated by the CLI when `--json-schema` was passed: the model's
    * structured reply, already parsed into an object. Undefined otherwise. */
   structuredOutput: unknown;
@@ -103,6 +132,7 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallRes
         durationMs: io.now() - started,
         model: model ?? null,
         costUsd: null,
+        usage: null,
         structuredOutput: undefined,
         raw: null,
         stderr,
@@ -114,15 +144,30 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallRes
     // The CLI sometimes prefixes stdout with a stderr warning line ("no stdin
     // data received..."); find the JSON start before parsing.
     /** Subset of the CLI's JSON result-frame shape that we read from. */
+    interface CliUsage {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_read_input_tokens?: number;
+      cache_creation_input_tokens?: number;
+    }
+    interface CliModelUsageEntry {
+      inputTokens?: number;
+      outputTokens?: number;
+      cacheReadInputTokens?: number;
+      cacheCreationInputTokens?: number;
+      costUSD?: number;
+    }
     interface CliResultFrame {
       type?: string;
       is_error?: boolean;
       result?: string;
       session_id?: string;
       duration_ms?: number;
-      modelUsage?: Record<string, unknown>;
+      modelUsage?: Record<string, CliModelUsageEntry>;
       total_cost_usd?: number;
       structured_output?: unknown;
+      usage?: CliUsage;
+      api_error_status?: string;
     }
     let parsed: CliResultFrame | null = null;
     const jsonStart = stdout.indexOf('{"type"');
@@ -133,12 +178,33 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallRes
       // non-JSON output; fall through with parsed=null
     }
     const ok = parsed != null && parsed.type === "result" && parsed.is_error === false;
+    // Pull token + cost numbers. Prefer modelUsage (per-model rollup that
+    // already includes prompt-cache surcharges and gives the authoritative
+    // costUSD); fall back to the top-level `usage` block if modelUsage is
+    // absent. Both are guarded with finite-number checks so a missing
+    // field defaults to 0 instead of NaN-poisoning the rollups.
+    const usage: TokenUsage | null = (() => {
+      if (parsed == null) return null;
+      const modelEntry = parsed.modelUsage
+        ? Object.values(parsed.modelUsage)[0]
+        : undefined;
+      const u = parsed.usage;
+      const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+      return {
+        inputTokens: num(modelEntry?.inputTokens ?? u?.input_tokens),
+        cacheReadInputTokens: num(modelEntry?.cacheReadInputTokens ?? u?.cache_read_input_tokens),
+        cacheCreationInputTokens: num(modelEntry?.cacheCreationInputTokens ?? u?.cache_creation_input_tokens),
+        outputTokens: num(modelEntry?.outputTokens ?? u?.output_tokens),
+        costUsd: num(modelEntry?.costUSD ?? parsed.total_cost_usd),
+      };
+    })();
     return {
       text: parsed?.result ?? "",
       sessionId: parsed?.session_id ?? null,
       durationMs: parsed?.duration_ms ?? io.now() - started,
       model: parsed?.modelUsage ? Object.keys(parsed.modelUsage)[0] ?? null : model ?? null,
       costUsd: typeof parsed?.total_cost_usd === "number" ? parsed.total_cost_usd : null,
+      usage,
       structuredOutput: parsed?.structured_output,
       raw: parsed,
       stderr,
