@@ -35,22 +35,30 @@ type Mode = "pptx" | "screenshots" | "full";
 type Args = { slides: string[]; out: string; title: string; fixtures: string; mode: Mode };
 
 function parseArgs(argv: string[]): Args {
-  const a: any = { fixtures: "renderer/html2slides/e2e/fixtures", mode: "full" };
+  const a: Partial<Args> = {
+    fixtures: "renderer/html2slides/e2e/fixtures",
+    mode: "full",
+  };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--slides") a.slides = argv[++i].split(",").map((s: string) => s.trim());
     else if (argv[i] === "--out") a.out = resolve(argv[++i]);
     else if (argv[i] === "--title") a.title = argv[++i];
     else if (argv[i] === "--fixtures") a.fixtures = argv[++i];
-    else if (argv[i] === "--mode") a.mode = argv[++i];
+    else if (argv[i] === "--mode") a.mode = argv[++i] as Mode;
   }
   if (!a.slides || !a.out) {
     throw new Error("usage: --slides <csv> --out <dir> [--title <name>] [--fixtures <dir>] [--mode pptx|screenshots|full]");
   }
-  if (!["pptx", "screenshots", "full"].includes(a.mode)) {
+  if (a.mode !== "pptx" && a.mode !== "screenshots" && a.mode !== "full") {
     throw new Error(`--mode must be one of: pptx, screenshots, full (got ${a.mode})`);
   }
-  if (!a.title) a.title = `bug_solving-${Date.now()}`;
-  return a as Args;
+  return {
+    slides: a.slides,
+    out: a.out,
+    title: a.title ?? `bug_solving-${Date.now()}`,
+    fixtures: a.fixtures!,
+    mode: a.mode,
+  };
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));

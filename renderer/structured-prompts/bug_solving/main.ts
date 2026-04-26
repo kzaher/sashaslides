@@ -32,7 +32,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { resolve as resolvePath } from "path";
-import { createRequire } from "module";
+import pixelmatch from "pixelmatch";
+import { PNG } from "pngjs";
 import {
   Claude,
   Session,
@@ -41,11 +42,6 @@ import {
   safelyJsonStringify,
 } from "../../../structured-prompting/src/index.js";
 import type { Result } from "../../../structured-prompting/src/types.js";
-
-// CommonJS shims for pixel-diff: pixelmatch + pngjs are CJS-only and live in
-// the repo root's node_modules. Using createRequire keeps esbuild's
-// `packages: external` happy while letting us call them from this ESM file.
-const _require = createRequire(import.meta.url);
 
 /**
  * Produce a pixel-diff PNG between two reference images. Pixels that differ
@@ -58,8 +54,6 @@ const _require = createRequire(import.meta.url);
  * "where do we still differ from the ground truth" pre-marked.
  */
 function pixelDiffPng(aPath: string, bPath: string, diffPath: string): void {
-  const PNG = _require("pngjs").PNG;
-  const pixelmatch = _require("pixelmatch");
   const W = 1280, H = 720;
   const loadAndResize = (path: string) => {
     const png = PNG.sync.read(readFileSync(path));

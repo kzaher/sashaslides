@@ -51,7 +51,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: any = {
+  const a: Partial<Args> = {
     originals: "/tmp/sxs-complex/originals",
     html_dir: null,
     ratings_file: null,
@@ -81,9 +81,24 @@ function parseArgs(argv: string[]): Args {
   // Default ratings file sits beside the scratch dir so a future retry can
   // read the user's verdicts alongside analysis.md.
   if (!a.ratings_file) {
-    a.ratings_file = resolve(dirname(a.thumbnails), "ratings.json");
+    a.ratings_file = resolve(dirname(a.thumbnails!), "ratings.json");
   }
-  return a as Args;
+  // Required fields are guaranteed populated by the validation above; the
+  // optional/defaulted ones are also populated. We materialize the final
+  // Args by spreading the partial — TypeScript narrows the assertion via
+  // the explicit return-type annotation.
+  return {
+    port: a.port!,
+    slides: a.slides!,
+    analysis: a.analysis!,
+    diffs: a.diffs!,
+    thumbnails: a.thumbnails!,
+    originals: a.originals!,
+    html_dir: a.html_dir!,
+    ratings_file: a.ratings_file,
+    task_title: a.task_title!,
+    baseline_dir: a.baseline_dir!,
+  };
 }
 
 function sectionFor(markdown: string, slideId: string): string | null {
@@ -216,7 +231,7 @@ function buildPayload(): {
       rendered: existsSync(rendered) ? rendered : null,
       htmlPath: htmlPath && existsSync(htmlPath) ? htmlPath : null,
       slidesUrl,
-      status: (r?.status as any) || "pending",
+      status: r?.status ?? "pending",
       comment: r?.comment || null,
       annotationPng: r?.annotation && existsSync(r.annotation) ? r.annotation
         : existsSync(annotPath) ? annotPath : null,
@@ -815,8 +830,9 @@ const server = createServer((req, res) => {
         console.log(`RATING: ${id} → ${status}${comment ? ` | ${comment}` : ""}${annotation ? " [+annotation]" : ""}`);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
-      } catch (e: any) {
-        res.writeHead(500); res.end(String(e && e.message ? e.message : e));
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        res.writeHead(500); res.end(msg);
       }
     });
     return;

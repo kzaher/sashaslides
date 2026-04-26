@@ -55,16 +55,82 @@ export interface IO {
 
 // ---------- realIO: production implementation ------------------------------
 
+/**
+ * Live children spawned by realIO. We register every spawn here so the
+ * engine's shutdown can reap them — without this, killing the engine
+ * (Ctrl-C, SIGTERM, uncaught exception) leaks claude CLI subprocesses
+ * which Node has reparented to PID 1, where they keep burning model
+ * tokens until they finish on their own.
+ *
+ * `killAllSpawned` is exported and called from engine.shutdown() and
+ * from the SIGINT/SIGTERM/uncaughtException handlers in engine.ts.
+ */
+const liveChildren = new Set<{ pid: number; kill: (sig: NodeJS.Signals) => boolean }>();
+
+export function killAllSpawned(signal: NodeJS.Signals = "SIGTERM"): number {
+  let killed = 0;
+  for (const child of liveChildren) {
+    try { if (child.kill(signal)) killed++; } catch {}
+  }
+  liveChildren.clear();
+  return killed;
+}
+
+// Hard kill on hard exit (uncaught exception / process.exit). 'exit' is
+// synchronous-only — no async work allowed — so we send SIGKILL to skip
+// the SIGTERM grace period.
+let exitHandlerInstalled = false;
+function ensureExitHandler() {
+  if (exitHandlerInstalled) return;
+  exitHandlerInstalled = true;
+  process.on("exit", () => {
+    for (const child of liveChildren) {
+      try { child.kill("SIGKILL"); } catch {}
+    }
+  });
+}
+
 export const realIO: IO = {
   async spawnCapture(args: SpawnCaptureArgs): Promise<SpawnCaptureResult> {
+    ensureExitHandler();
     const { command, args: procArgs, cwd, env, timeoutMs } = args;
     return new Promise<SpawnCaptureResult>((resolve) => {
       const spawnOpts: SpawnOptions = {
         cwd,
         env: (env ?? process.env) as NodeJS.ProcessEnv,
         stdio: ["ignore", "pipe", "pipe"],
+        // Detached so the child gets its own process group; we keep stdio
+        // attached so the parent still proxies output. This lets us
+        // signal the whole group (`process.kill(-pid, ...)`) on shutdown,
+        // catching any grandchildren the claude CLI might fork.
+        detached: true,
       };
-      const child = spawn(command, procArgs, spawnOpts);
+      // Wrap every spawn with `setpriv --pdeathsig SIGKILL --` so the
+      // KERNEL guarantees the child dies when this engine process dies,
+      // for ANY reason (Ctrl-C, SIGKILL, OOM, segfault). PR_SET_PDEATHSIG
+      // is a Linux prctl that fires immediately on parent death — no
+      // dependence on JS shutdown handlers running. Without this, killing
+      // the engine reparents children to PID 1 where they keep burning
+      // model tokens until they finish on their own. setpriv is in
+      // util-linux and present on every linux distro we run.
+      const wrappedCommand = "setpriv";
+      const wrappedArgs = ["--pdeathsig", "SIGKILL", "--", command, ...procArgs];
+      const child = spawn(wrappedCommand, wrappedArgs, spawnOpts);
+      // child.kill by default signals just the child; we want the whole
+      // group so claude's own subprocesses (e.g. tool-use shells) die too.
+      const groupKiller = {
+        pid: child.pid ?? -1,
+        kill(sig: NodeJS.Signals): boolean {
+          if (child.pid == null || child.pid <= 0) return false;
+          try {
+            process.kill(-child.pid, sig);
+            return true;
+          } catch {
+            try { return child.kill(sig); } catch { return false; }
+          }
+        },
+      };
+      liveChildren.add(groupKiller);
       let stdout = "";
       let stderr = "";
       let timedOut = false;
@@ -73,7 +139,7 @@ export const realIO: IO = {
       if (timeoutMs != null && timeoutMs > 0) {
         timer = setTimeout(() => {
           timedOut = true;
-          try { child.kill("SIGTERM"); } catch {}
+          try { groupKiller.kill("SIGTERM"); } catch {}
         }, timeoutMs);
       }
       child.stdout?.on("data", (d) => { stdout += d.toString(); });
@@ -81,10 +147,12 @@ export const realIO: IO = {
       child.on("error", (err) => {
         spawnError = err instanceof Error ? err.message : String(err);
         if (timer) clearTimeout(timer);
+        liveChildren.delete(groupKiller);
         resolve({ stdout, stderr, exitCode: null, signal: null, timedOut, spawnError });
       });
       child.on("close", (code, signal) => {
         if (timer) clearTimeout(timer);
+        liveChildren.delete(groupKiller);
         resolve({ stdout, stderr, exitCode: code, signal, timedOut, spawnError });
       });
     });
@@ -215,7 +283,7 @@ export class MockIO implements IO {
 function summarize(args: unknown[]): string {
   try {
     return args.map((a) => {
-      if (a && typeof a === "object" && "command" in (a as any)) {
+      if (a && typeof a === "object" && "command" in (a as Record<string, unknown>)) {
         const sa = a as SpawnCaptureArgs;
         return `{command:${JSON.stringify(sa.command)},args:[${sa.args.slice(0, 3).map((x) => JSON.stringify(x)).join(", ")}${sa.args.length > 3 ? ", …" : ""}]}`;
       }

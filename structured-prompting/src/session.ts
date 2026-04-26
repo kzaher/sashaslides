@@ -496,8 +496,11 @@ function promptLabel(p: unknown, n: number): string {
 }
 
 function randomId(): string {
-  if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
-    return (crypto as any).randomUUID();
+  const c = (typeof crypto !== "undefined" ? crypto : undefined) as
+    | (Crypto & { randomUUID?: () => string })
+    | undefined;
+  if (c && typeof c.randomUUID === "function") {
+    return c.randomUUID();
   }
   // fallback — should never run under node 22+
   return "sp_" + Math.random().toString(36).slice(2, 10);
