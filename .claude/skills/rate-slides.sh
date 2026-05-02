@@ -29,11 +29,11 @@ mkdir -p "$THUMBS_DIR"
 if [ -z "$PRES_ID" ]; then
   echo "  No presentation ID provided, running converter..."
   cd "$H2S_DIR"
-  # Extract title from dir name
   TITLE="$(basename "$(dirname "$HTML_DIR")")/$(basename "$HTML_DIR")"
-  OUTPUT=$(npx tsx convert-slides-api.ts "$HTML_DIR" --title "$TITLE" 2>&1)
-  echo "$OUTPUT"
-  PRES_ID=$(echo "$OUTPUT" | grep "ID:" | head -1 | sed 's/.*ID: //')
+  CONVERT_LOG="/tmp/rate-slides-convert-$$.log"
+  npx tsx convert-pptx.ts "$HTML_DIR" --title "$TITLE" 2>&1 | tee "$CONVERT_LOG"
+  PRES_ID=$(grep -oE 'presentation/d/[A-Za-z0-9_-]+' "$CONVERT_LOG" | head -1 | cut -d/ -f3)
+  [ -n "$PRES_ID" ] || { echo "❌ Could not extract presentation ID from converter output"; exit 1; }
   echo "  Created presentation: $PRES_ID"
 fi
 
