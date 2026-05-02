@@ -609,7 +609,7 @@ export class ClaudeEngine {
           const cmd = build(upstream);
           graph.setLabel(node.id, `executeShell: ${truncate(cmd, 60)}`);
           graph.start(node.id, { input: { cmd } });
-          const stdout = await runShell({ cmd, cwd: ctx.cwd, io: this.io });
+          const stdout = await runShell({ cmd, cwd: ctx.cwd, io: this.io, nodeId: node.id });
           graph.finishOk(node.id, { stdoutTail: stdout.slice(-400) });
           return { value: stdout, ctx };
         }
@@ -875,9 +875,9 @@ function randomId(): string {
   return "sp_" + Math.random().toString(36).slice(2, 10);
 }
 
-async function runShell(args: { cmd: string; cwd: string; io: IO }): Promise<string> {
-  const { cmd, cwd, io } = args;
-  const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd });
+async function runShell(args: { cmd: string; cwd: string; io: IO; nodeId?: string }): Promise<string> {
+  const { cmd, cwd, io, nodeId } = args;
+  const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd, nodeId });
   if (r.spawnError) {
     // bash itself failed to launch — almost always a programmer bug
     // (PATH, permissions). Propagate as a non-catchable StructuredError.

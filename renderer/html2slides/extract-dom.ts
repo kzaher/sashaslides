@@ -1865,6 +1865,63 @@ interface ExtractedElement {
           textBounds = { ...textBounds, x: textBounds.x + padL, w: insetW };
         }
       }
+      // Probe ACTUAL rendered line pitch via Range.getClientRects(). CSS
+      // `line-height` × font-size gives the spec leading (39.6 px for
+      // slide_25 .text-block: 18 × 2.2), but inline children with their
+      // own padding/border/font-size inflate individual line boxes —
+      // .code (1px border + 2px padding ≈ +6 px), .highlight (+2 px),
+      // .big (font-size 24 px). Chrome paints each line at its inflated
+      // box height; the average rendered pitch in the .text-block is
+      // ~43 px, not 39.6. Emitting the CSS-spec value as `spcPts`
+      // (convert-pptx.ts:299) makes Slides render uniformly tighter,
+      // pulling lines upward and leaving an apparent gap above the
+      // following block — the user's "entire main text is somehow moved
+      // up" report on slide_25. Use the median per-line pitch when it
+      // exceeds CSS line-height by ≥5 %; otherwise leave style.lineHeight
+      // (single-line text and plain paragraphs are unchanged).
+      // Range.getClientRects() on a paragraph with inline children (.code,
+      // .highlight, .big, .small/.sub super-/subscripts) returns ONE rect
+      // per inline box, not per line. On slide_25 .text-block, the first
+      // line yields 16 rects all at top=131 — for the bare text and each
+      // styled span — and subsequent lines have rects at slightly different
+      // tops (172.59, 176.59, 178.59) because vertical-aligned glyphs
+      // (super/sub) and inflated-line-box children (.code with padding,
+      // .big at 24px) sit at different y-offsets within the same line.
+      // A naïve consecutive-top diff produces noise pitches like 2, 4,
+      // 7.59 from same-line offsets, which pull the median below cssLH so
+      // the override never fires (the failure mode of the previous
+      // attempt: median came out 34.2, threshold 41.58, no override).
+      // Cluster tops within cssLH/2 first → one entry per visual line →
+      // then take consecutive-line pitches → median.
+      let measuredLinePitch: number | null = null;
+      const cssLH = style.lineHeight || (style.fontSize || 14) * 1.2;
+      try {
+        const lpRange = document.createRange();
+        lpRange.selectNodeContents(el);
+        const lpRects = [...lpRange.getClientRects()].filter(r => r.width > 0 && r.height > 0);
+        if (lpRects.length >= 2) {
+          const sortedTops = lpRects.map(r => r.top).sort((a, b) => a - b);
+          const clusterTol = cssLH * 0.5;
+          const lineTops: number[] = [];
+          for (const t of sortedTops) {
+            if (lineTops.length === 0 || (t - lineTops[lineTops.length - 1]) > clusterTol) {
+              lineTops.push(t);
+            }
+          }
+          if (lineTops.length >= 2) {
+            const pitches: number[] = [];
+            for (let i = 1; i < lineTops.length; i++) {
+              pitches.push(lineTops[i] - lineTops[i - 1]);
+            }
+            pitches.sort((a, b) => a - b);
+            measuredLinePitch = pitches[Math.floor(pitches.length / 2)];
+          }
+        }
+      } catch { /* ignore */ }
+      const effectiveLineHeight =
+        measuredLinePitch && measuredLinePitch > cssLH * 1.05
+          ? measuredLinePitch
+          : style.lineHeight;
       // bgColorBehind: nearest ancestor solid bg, sampled only when the
       // element is semi-transparent. Google Slides drops <a:alpha> on text
       // <a:solidFill> at PPTX import, so the converter folds opacity into
@@ -1878,7 +1935,7 @@ interface ExtractedElement {
         fontStyle: style.fontStyle,
         color: style.color,
         textAlign: effectiveAlign,
-        lineHeight: style.lineHeight,
+        lineHeight: effectiveLineHeight,
         textDecoration: inlineBorderUnderline ? "underline" : style.textDecoration,
         textTransform: style.textTransform,
         letterSpacing: style.letterSpacing,

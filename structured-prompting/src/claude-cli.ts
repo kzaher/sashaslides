@@ -17,6 +17,9 @@ export interface ClaudeCallOptions {
   jsonSchema?: object;
   /** Injected IO module — default `realIO`. Tests pass a MockIO. */
   io?: IO;
+  /** Owning graph node id — propagated to spawnCapture so /api/cancel can
+   *  target this branch's claude subprocess. */
+  nodeId?: string;
 }
 
 /**
