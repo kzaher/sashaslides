@@ -22,6 +22,10 @@ export interface SpawnCaptureArgs {
   env?: Record<string, string | undefined>;
   /** If set, the child is SIGTERM'd after this many ms and `timedOut` becomes true. */
   timeoutMs?: number;
+  /** Owning graph node id — used by /api/cancel to SIGKILL the subset of
+   *  live children that belong to a given subtree, without killing
+   *  unrelated work. Engine populates this on every spawn. */
+  nodeId?: string;
 }
 
 export interface SpawnCaptureResult {
@@ -62,17 +66,49 @@ export interface IO {
  * which Node has reparented to PID 1, where they keep burning model
  * tokens until they finish on their own.
  *
- * `killAllSpawned` is exported and called from engine.shutdown() and
- * from the SIGINT/SIGTERM/uncaughtException handlers in engine.ts.
+ * Each entry also carries the graph nodeId that owns the spawn so that
+ * /api/cancel can target a specific subtree (e.g. "kill the slide_15
+ * branch") without affecting siblings. `kill()` signals the child's
+ * whole process group via `process.kill(-pid, …)`, catching any
+ * grandchildren the agent itself forks (claude CLI tool-use shells).
+ *
+ * Exports:
+ *   killAllSpawned      — engine.shutdown() and exit/SIGINT/SIGTERM use this.
+ *   killSpawnedByNodeId — /api/cancel uses this to kill a specific subtree.
  */
-const liveChildren = new Set<{ pid: number; kill: (sig: NodeJS.Signals) => boolean }>();
+interface LiveChild {
+  pid: number;
+  nodeId?: string;
+  kill: (sig: NodeJS.Signals) => boolean;
+}
+const liveChildren = new Set<LiveChild>();
 
 export function killAllSpawned(signal: NodeJS.Signals = "SIGTERM"): number {
   let killed = 0;
   for (const child of liveChildren) {
-    try { if (child.kill(signal)) killed++; } catch {}
+    try { if (child.kill(signal)) killed++; } catch { /* already gone */ }
   }
   liveChildren.clear();
+  return killed;
+}
+
+/**
+ * Kill every live spawn whose owning nodeId is in `nodeIds`. Returns the
+ * number of process groups signaled. SIGKILL by default — when the user
+ * cancels a branch, they don't want a graceful shutdown, they want the
+ * tokens to stop accruing NOW.
+ */
+export function killSpawnedByNodeId(
+  nodeIds: ReadonlySet<string>,
+  signal: NodeJS.Signals = "SIGKILL",
+): number {
+  let killed = 0;
+  for (const child of liveChildren) {
+    if (child.nodeId && nodeIds.has(child.nodeId)) {
+      try { if (child.kill(signal)) killed++; } catch { /* already gone */ }
+      liveChildren.delete(child);
+    }
+  }
   return killed;
 }
 
@@ -93,7 +129,7 @@ function ensureExitHandler() {
 export const realIO: IO = {
   async spawnCapture(args: SpawnCaptureArgs): Promise<SpawnCaptureResult> {
     ensureExitHandler();
-    const { command, args: procArgs, cwd, env, timeoutMs } = args;
+    const { command, args: procArgs, cwd, env, timeoutMs, nodeId } = args;
     return new Promise<SpawnCaptureResult>((resolve) => {
       const spawnOpts: SpawnOptions = {
         cwd,
@@ -118,8 +154,9 @@ export const realIO: IO = {
       const child = spawn(wrappedCommand, wrappedArgs, spawnOpts);
       // child.kill by default signals just the child; we want the whole
       // group so claude's own subprocesses (e.g. tool-use shells) die too.
-      const groupKiller = {
+      const groupKiller: LiveChild = {
         pid: child.pid ?? -1,
+        nodeId,
         kill(sig: NodeJS.Signals): boolean {
           if (child.pid == null || child.pid <= 0) return false;
           try {

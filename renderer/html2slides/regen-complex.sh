@@ -26,8 +26,11 @@ cd "$HERE"
 
 fail() { echo "❌ FATAL: $*" >&2; exit 1; }
 
-# Track mtime of slides dir so we can verify thumbnails were actually rewritten.
-SLIDES_BEFORE=$(stat -c %Y "$OUT/slides" 2>/dev/null || echo 0)
+# Track newest thumbnail mtime so we can verify thumbnails were actually
+# rewritten. Directory mtime only advances on entry add/remove, not when
+# existing files are overwritten in place — so look at the files themselves.
+SLIDES_BEFORE=$(stat -c %Y "$OUT/slides"/*.png 2>/dev/null | sort -n | tail -1)
+SLIDES_BEFORE=${SLIDES_BEFORE:-0}
 
 echo "=== Convert + upload ==="
 # `| tee` captures output AND lets it stream to stdout. With `set -o
@@ -60,8 +63,9 @@ $(tail -8 "$OUT/shot.log")"
 fi
 
 # Verify at least one thumbnail was actually regenerated (mtime advanced).
-SLIDES_AFTER=$(stat -c %Y "$OUT/slides" 2>/dev/null || echo 0)
-[ "$SLIDES_AFTER" -gt "$SLIDES_BEFORE" ] || fail "slides dir mtime did not advance — thumbnails not updated. See $OUT/thumbs.log"
+SLIDES_AFTER=$(stat -c %Y "$OUT/slides"/*.png 2>/dev/null | sort -n | tail -1)
+SLIDES_AFTER=${SLIDES_AFTER:-0}
+[ "$SLIDES_AFTER" -gt "$SLIDES_BEFORE" ] || fail "newest thumbnail mtime did not advance — thumbnails not updated. See $OUT/thumbs.log"
 
 echo "=== Pixel-perfect goldens check ==="
 # check-goldens intentionally exits non-zero when regressions are found so

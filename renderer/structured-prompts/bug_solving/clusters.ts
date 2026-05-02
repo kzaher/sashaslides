@@ -1,98 +1,111 @@
 /**
- * Wave-8 cluster — ONE big cluster covering every slide that wave-7's
- * single-slide attempts couldn't land. Single-slide retries hit a
- * dead-end on each because the underlying issues are entangled
- * (top-border / clip-path / chip-anchor logic touches a shared region
- * of extract-dom.ts and convert-pptx.ts that 3 single-slide attempts
- * couldn't refactor cleanly).
+ * Wave-9 cluster — every still-open slide bug, ONE cluster, ONE worker
+ * branch. Single-slide retries kept regressing siblings because the
+ * underlying issues touch shared territory in extract-dom.ts and
+ * convert-pptx.ts. Letting one worker propose a coherent change and
+ * validate ALL the slides at once is the safest way to land them.
  *
- * Strategy: hand every failure to ONE worker on ONE branch so it can
- * propose a refactor that addresses all four at once, validate via the
- * existing verdict + visual gates per slide, retry up to 3 times.
+ * Five slides:
+ *   slide_11 — top-border stroke alignment + bullet height
+ *   slide_14 — rounded-card top-stripe clip
+ *   slide_15 — '200 OK' / cURL chip alignment variants
+ *   slide_25 — main text-block line-height (spcPct → spcPts)
+ *   slide_30 — chip anchor + .code-block padding (passed wave-7 visual,
+ *              included as a regression sentinel — the worker's edits
+ *              must NOT break what wave-7 fixed for slide_30)
  *
- * Wave-7 verdict trail (kept verbatim so the worker doesn't repeat the
- * dead-ends):
+ * Wave-7 verdict trail (verbatim — don't repeat the dead-ends):
  *
- *   slide_11 — "edits-not-landing": three retries each claimed to
- *              inject algn="in" into <a:ln> but the diff-pptx report
- *              consistently showed "no structural differences". Edits
- *              were not reaching the produced pptx because they were
- *              made to extract-dom.ts (which only changes the JSON
- *              extraction), while the actual injection should go
- *              through convert-pptx.ts's `injectStrokeAlignment`
- *              post-processor (which now exists at line 1730+ on main).
+ *   slide_11: 3 retries each claimed to inject algn="in" but the diff
+ *             showed "no structural differences". The edits hit
+ *             extract-dom.ts (which only changes JSON extraction) but
+ *             not convert-pptx.ts's `injectStrokeAlignment` post-
+ *             processor (now at line ~1730). VERIFY the produced pptx
+ *             slide1.xml differs from baseline before claiming success.
  *
- *   slide_14 — "clip-path-mask": every retry's visual check reported
- *              "Critical regression. Thin top accent stripe was
- *              expanded into a full-width band". The workers tried to
- *              fix the clip by expanding the stripe rather than
- *              clipping it through the parent's rounded geometry. They
- *              need to use a custGeom-based clip, NOT a roundRect with
- *              per-corner avLst.
+ *   slide_14: every retry's visual reported "Critical regression. Thin
+ *             top accent stripe was expanded into a full-width band".
+ *             Workers tried to fix the clip by widening the stripe
+ *             instead of clipping it through the parent's rounded
+ *             geometry. Use a:custGeom with a path that follows the
+ *             parent's rounded top corners — flat curve at top-left,
+ *             flat curve at top-right, straight bottom. NOT roundRect
+ *             with per-corner avLst.
  *
- *   slide_15 — "200ok-curl-chips": visual reported "Two chip-family
- *              alignment defects remain. '200 OK' pill: white text
- *              vertically off." Workers found a partial pattern but
- *              the .api-badge variant has different padding semantics
- *              than the generic .status-badge — they need separate
- *              handling, not a single unified gate.
+ *   slide_15: visual reported "'200 OK' pill: white text vertically
+ *             off". Workers found a partial pattern but the .api-badge
+ *             variant has different padding semantics than the generic
+ *             .status-badge — they need separate handling, not a single
+ *             unified gate that can't tell them apart.
  *
- *   slide_25 — "line-height-pitch": three retries all flipped
- *              anchor=ctr → t for one paragraph but never converted
- *              the spcPct → spcPts on the .text-block. The fix needs
- *              to walk every <a:p> in the slide's text frames and
- *              rewrite spcPct values to equivalent spcPts (computed
- *              from the line-height in CSS px → 100ths of pt).
+ *   slide_25: 3 retries flipped anchor=ctr→t for one paragraph but
+ *             never converted spcPct → spcPts on .text-block. Walk
+ *             every <a:p> in the slide's text frames and rewrite
+ *             spcPct=N to spcPts=M where M = round(line_height_px *
+ *             100 * 0.75). Verify the substitution lands in the
+ *             emitted XML.
+ *
+ *   slide_30: shipped successfully in wave-7 (chip anchor + tIns
+ *             padding for .code-block via existing slide_19 path).
+ *             Don't break it. The wave-7 worktree (now gone) used
+ *             extract-dom + convert-pptx changes that the visual
+ *             check passed; aim for compatible edits.
  */
 import type { Cluster } from "./workspace-setup.js";
 
 export const CLUSTERS: Cluster[] = [
   {
-    task_id: "wave8-multifix",
+    task_id: "wave9-multifix-all",
     cluster_description:
-      "FOUR slides need fixes that wave-7's single-slide retries couldn't " +
-      "land. The root issues touch shared territory in extract-dom.ts and " +
-      "convert-pptx.ts; isolated single-slide attempts kept regressing one " +
-      "while attempting to fix another. Tackle all four together. The four:" +
+      "FIVE slides need a coordinated fix. Single-slide retries (waves 5-7) " +
+      "kept failing because each fix regressed a sibling. Tackle them " +
+      "together — one branch, one set of edits, validated across all five." +
       "\n" +
-      "\n  slide_11 (top borders): edits must go through " +
-      "convert-pptx.ts's injectStrokeAlignment post-processor (now at " +
-      "line ~1730) to add algn=\"in\" to <a:ln> stroke elements. " +
-      "verticallyCentered/padTop interactions on .opportunity-card may " +
-      "also need tuning for bullet height. Wave-7 retries failed to land " +
-      "the pptx-XML change at all — verify the diff is non-empty before " +
-      "claiming success." +
+      "\nslide_11 (top borders + bullets): edits MUST land via " +
+      "convert-pptx.ts's injectStrokeAlignment post-processor (line " +
+      "~1730+) — that's the path that actually rewrites <a:ln> in the " +
+      "produced slide XML. Wave-7 retries kept editing extract-dom.ts " +
+      "and producing empty diffs. Verify the produced pptx differs from " +
+      "baseline at the OOXML level before claiming success. Bullet " +
+      "vertical alignment on .opportunity-card may also need a " +
+      "verticallyCentered/padTop tune." +
       "\n" +
-      "\n  slide_14 (top stripe clip): the .logo-card has rounded corners " +
-      "and a top accent stripe. Wave-7 retries 'expanded the stripe into " +
-      "a full-width band' (regression). Correct approach: emit the stripe " +
-      "as a custom geometry (a:custGeom) whose path follows the parent's " +
-      "rounded top corners — flat curve at top-left, flat curve at " +
-      "top-right, straight bottom. NOT a roundRect with per-corner avLst " +
-      "(that's what the failed attempts tried). " +
+      "\nslide_14 (top stripe clip): the .logo-card has rounded corners " +
+      "and an absolutely-positioned ::before stripe at top:0. Wave-7 " +
+      "retries 'expanded the stripe into a full-width band' (regression). " +
+      "Correct approach: emit the stripe as a:custGeom whose path follows " +
+      "the parent's rounded top corners — flat curve at top-left, flat " +
+      "curve at top-right, straight bottom. NOT a roundRect with per- " +
+      "corner avLst. Look at convert-pptx.ts shape emission for ::before " +
+      "pseudos with non-zero parent border-radius." +
       "\n" +
-      "\n  slide_15 (chip alignment): '200 OK' and 'cURL' chips still " +
-      "misalign. Wave-7 retries said the unified inline-aware " +
-      "horizontal-padding gate fired but those specific chips have " +
-      "different padding semantics. Inspect the fixture for those " +
-      "specific class names (.api-badge vs .status-badge), distinguish " +
-      "them in the gate, and apply separate handling without regressing " +
-      "the chips that already work." +
+      "\nslide_15 (chip alignment): '200 OK' and 'cURL' chips render " +
+      "with vertically-off text. The unified inline-aware horizontal- " +
+      "padding gate (extract-dom.ts ~line 1832) covers most chips but " +
+      "misses the .api-badge variant which has different padding. " +
+      "Inspect the fixture for those specific class names, distinguish " +
+      "them in the gate, apply separate handling without regressing " +
+      "the .status-badge chips that already work." +
       "\n" +
-      "\n  slide_25 (line height): main .text-block paragraphs render " +
-      "tighter than the Chrome baseline. Wave-7 retries kept flipping " +
-      "anchor=ctr→t for one paragraph but never replaced spcPct with " +
-      "spcPts. The fix: in convert-pptx.ts, walk every <a:p> emitted for " +
-      "a .text-block, and rewrite spcPct=N to spcPts=M where " +
-      "M = round(line_height_px * 100 * 0.75). Verify the substitution " +
-      "lands in the emitted XML — wave-7 retries reported 'no spcPts " +
-      "change' in the diff." +
+      "\nslide_25 (line height): main .text-block paragraphs render " +
+      "tighter than Chrome baseline. In convert-pptx.ts, walk every " +
+      "<a:p> emitted for a .text-block, replace spcPct=N with spcPts=M " +
+      "where M = round(line_height_px * 100 * 0.75). Verify the " +
+      "substitution lands in slide XML — wave-7 retries kept reporting " +
+      "'no spcPts change' in the diff." +
       "\n" +
-      "\n IMPORTANT: each slide gets its OWN verdict + visual check. The " +
-      "wave will retry the WHOLE 4-slide cluster up to 3 times; if any " +
-      "single slide regresses on a retry, the whole task retries. Make " +
-      "the smallest set of changes that solves all four — don't make 4 " +
+      "\nslide_30 (regression sentinel — shipped in wave-7): tag chips " +
+      "(TypeScript, Node.js, etc.) need anchor=\"ctr\", and .code-block " +
+      "text needs tIns padding folded from CSS padding-top via the " +
+      "slide_19 padTopPt path. Don't regress this. If your edits to " +
+      "extract-dom.ts or convert-pptx.ts break slide_30, the visual " +
+      "check will fail the whole task." +
+      "\n" +
+      "\nIMPORTANT: each slide gets its OWN verdict + visual check. The " +
+      "whole 5-slide bundle retries up to 3 times if ANY one regresses. " +
+      "Aim for the smallest set of changes that fixes the four broken " +
+      "slides without touching slide_30's behavior — don't make 5 " +
       "independent edits that conflict.",
-    slide_ids: ["slide_11", "slide_14", "slide_15", "slide_25"],
+    slide_ids: ["slide_11", "slide_14", "slide_15", "slide_25", "slide_30"],
   },
 ];
