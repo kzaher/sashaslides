@@ -4,8 +4,9 @@
  *
  * == SOURCE OF TRUTH: Border & Corner Radius Rendering Rules ==
  *
- * These rules define how CSS borders and border-radius map to Google Slides API shapes.
- * The converter (convert-slides-api.ts) implements these; this file extracts the data needed.
+ * These rules define how CSS borders and border-radius map to OOXML shapes
+ * emitted by pptxgenjs. The converter (convert-pptx.ts) implements these;
+ * this file extracts the data needed.
  *
  * --- CORNER RADIUS RULES ---
  *
