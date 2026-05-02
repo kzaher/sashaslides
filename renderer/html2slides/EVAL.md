@@ -4,10 +4,10 @@
 
 - **extract-dom.ts** — Injected into Chrome via CDP. Walks DOM, extracts elements as typed flat array.
   Source of truth for all rendering rules (border, corner radius, shadow, gradient, screenshot).
-- **convert-slides-api.ts** — Reads extraction JSON, builds Slides API `batchUpdate` requests.
-- **e2e/pipeline.ts** — Parallel pipeline: screenshot → convert → thumbnail → compare.
-- **e2e/fixtures/** — HTML test slides for E2E testing.
-- **rating-server.ts** — SxS comparison UI with links to HTML source and Google Slides.
+- **convert-pptx.ts** — Reads extractions, builds a `.pptx` via pptxgenjs, uploads to Google Drive as a Slides presentation.
+- **regen-basics.sh / regen-complex.sh** — Convert fixtures → pptx → Slides → thumbs → diff vs goldens.
+- **e2e/fixtures-basic/, e2e/fixtures/** — HTML test slides (basic primitives + complex layouts).
+- **rating-server.ts** — SxS comparison UI with links to HTML source and Google Slides; sole writer of `e2e/goldens*/`.
 
 ## Rendering Rules (documented in extract-dom.ts)
 
@@ -79,16 +79,4 @@
 
 ## E2E Test Pipeline
 
-```
-e2e/
-  fixtures/       ← HTML test slides
-  snapshots/      ← blessed thumbnails from accepted runs
-  runs/<ts>/      ← per-run artifacts
-    originals/    ← HTML screenshots
-    thumbs/       ← Slides API thumbnails
-    sxs/          ← side-by-side comparison data + ratings.json
-  eval-set/       ← rated slides (good+bad saved, skip ignored)
-```
-
-Run: `npx tsx e2e/pipeline.ts --parallelism 10 --port 3456`
-Skill: `/e2e-test`
+See `README.md` for the canonical workflow (`regen-basics.sh` / `regen-complex.sh` + pixel-perfect goldens). Goldens are user-only: rate **Good** in the SxS UI to bless.
