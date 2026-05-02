@@ -2,9 +2,9 @@
 /**
  * render-preview.ts — Render pptx extraction data back to PNGs for comparison
  *
- * Takes the _extractions.json from convert.ts and renders each slide's elements
- * back to HTML → PNG. This simulates what the .pptx looks like without needing
- * Google Slides or LibreOffice.
+ * Takes the _extractions.json sidecar from convert-pptx.ts and renders each
+ * slide's elements back to HTML → PNG. This simulates what the .pptx looks
+ * like without needing Google Slides or LibreOffice.
  *
  * Usage: npx tsx render-preview.ts <extractions.json> <output-dir>
  */

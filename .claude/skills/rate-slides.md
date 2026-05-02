@@ -1,6 +1,6 @@
 ---
 name: rate-slides
-description: Launch SxS rating server comparing original HTML screenshots vs Slides API output
+description: Launch SxS rating server comparing original HTML screenshots vs Google Slides rendering (HTML→pptx→Slides)
 user_invocable: true
 ---
 
