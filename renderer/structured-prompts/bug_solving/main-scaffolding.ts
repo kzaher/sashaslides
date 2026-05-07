@@ -6,7 +6,7 @@
  * engine keeps its monitor UI on port 4711 by default.
  *
  * Usage (real):
- *   npx tsx build.ts renderer/structured-prompts/bug_solving/main-scaffolding.ts \
+ *   npx tsx build.ts renderer/html2slides/structured-prompts/bug_solving/main-scaffolding.ts \
  *     && node dist/main-scaffolding.mjs
  */
 import { mkdirSync } from "fs";

@@ -41,6 +41,29 @@ export class StructuredError extends Error {
 }
 
 /**
+ * Shell-command non-zero exit. Deliberately NOT catchable by
+ * try/tryMultipleTimes — a script failure usually means a real bug in the
+ * user's code or the script itself, and the model retrying with the same
+ * input just burns tokens on the same failure. The orchestrator gives the
+ * user a UI button to retry the node manually after they've inspected and
+ * (typically) fixed the underlying cause.
+ *
+ * Bubbles past tryMultipleTimes and aborts the cluster's branch; other
+ * parallel branches keep running. The failed node's status becomes
+ * "error" in the graph, the user sees it red in the monitor, and a
+ * /api/retry POST kicks off a fresh attempt with the same input.
+ */
+export class FatalShellError extends StructuredError {
+  constructor(
+    message: string,
+    opts: { sessionId?: string | null; nodeId?: string | null; data?: unknown; cause?: unknown } = {},
+  ) {
+    super(message, opts);
+    this.name = "FatalShellError";
+  }
+}
+
+/**
  * The ONLY error type that try/tryMultipleTimes are allowed to catch.
  *
  * Why: a wave can spend a lot of money looping on retries. If a programmer
@@ -102,6 +125,11 @@ export class ValidationError extends StructuredError {
  * returns false, they should rethrow so the engine bubbles up and aborts.
  */
 export function isCatchable(e: unknown): boolean {
+  // FatalShellError is a StructuredError, but it's specifically NOT
+  // catchable: a script failure means the model+code state is broken and
+  // the user needs to look at it. Auto-retrying just re-runs the same
+  // failure. Check this BEFORE the generic StructuredError branch.
+  if (e instanceof FatalShellError) return false;
   if (e instanceof ValidationError) return true;
   if (e instanceof InterruptException) return true;
   if (e instanceof StructuredError) return true;

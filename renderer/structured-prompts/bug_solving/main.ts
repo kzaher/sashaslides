@@ -142,9 +142,9 @@ export interface TaskResult {
 
 /** Path to the shell/ts helper scripts that live alongside main.ts. */
 const SCRIPTS = {
-  record: "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts",
-  diff: "renderer/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts",
-  filteredServer: "renderer/structured-prompts/bug_solving/scripts/filtered-rating-server.ts",
+  record: "renderer/html2slides/structured-prompts/bug_solving/scripts/record-rendering.ts",
+  diff: "renderer/html2slides/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts",
+  filteredServer: "renderer/html2slides/structured-prompts/bug_solving/scripts/filtered-rating-server.ts",
 };
 
 const slideIdsCsv = (t: Task) => t.slides.map(s => s.slide_id).join(",");

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type { IJsonSchemaUnit } from "@typia/interface";
 import type { ClaudeModel } from "./types.js";
 import type {
@@ -52,6 +54,14 @@ export type ShellBuildCallback = (r: unknown) => string;
 export interface NodeKindSchemas {
   root: { input: null };
   send: { input: SendNodeInput };
+  /** Ad-hoc follow-up Q against an existing send. Created post-hoc by
+   *  POST /api/ask, NOT by the engine's main interpretation pass. The
+   *  resume anchor is the nearest ancestor (via parentId) carrying a
+   *  sessionId; the new node nests visually under the CLICKED node
+   *  (which may be a parallelFork / pipe / root with no sessionId of
+   *  its own). `anchorNodeId` records which ancestor was used. Always
+   *  resumes with --fork-session so the original branch stays clean. */
+  askFollowup: { input: { prompt: string; anchorNodeId?: string } };
   fork: { input: null };
   compact: { input: null };
   switchModel: { input: { model: ClaudeModel } };
@@ -164,6 +174,11 @@ export class ComputationGraph {
   startedAt = Date.now();
   finishedAt: number | null = null;
   version = 0;
+  /** When set, every mutation (`this.version++`) writes the snapshot here as
+   *  JSON. Lets the monitor server outlive the engine process — restart and
+   *  point a viewer at the file to keep asking ad-hoc follow-ups. Wiring is
+   *  best-effort; a write failure logs to stderr but never throws. */
+  private persistPath: string | null = null;
 
   constructor(label = "root") {
     this.id = randomUUID();
@@ -186,6 +201,48 @@ export class ComputationGraph {
     };
     this.nodes.set(root.id, root);
     this.rootId = root.id;
+  }
+
+  /** Enable persistence-on-mutate. Writes immediately so the file exists even
+   *  for never-touched graphs. No-op when `path` is null. */
+  enablePersistence(path: string | null) {
+    this.persistPath = path;
+    if (path) this.persist();
+  }
+
+  private persist() {
+    if (!this.persistPath) return;
+    try {
+      mkdirSync(dirname(this.persistPath), { recursive: true });
+      writeFileSync(this.persistPath, JSON.stringify(this.snapshot()));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[graph] persist failed:", (err as Error).message);
+    }
+  }
+
+  /** Rebuild a graph from a snapshot. Used by view-graph.ts to boot a
+   *  read-only monitor against a saved run. Callbacks are NOT preserved
+   *  (snapshot strips them) — only post-hoc askFollowup mutations are
+   *  expected on a restored graph. */
+  static fromSnapshot(snap: ReturnType<ComputationGraph["snapshot"]>): ComputationGraph {
+    const g = new ComputationGraph();
+    g.hydrate(snap);
+    return g;
+  }
+
+  /** Replace this graph's contents with a snapshot. Internal helper for
+   *  fromSnapshot — keeps private-field access local instead of forcing
+   *  fromSnapshot through unsafe casts. */
+  private hydrate(snap: ReturnType<ComputationGraph["snapshot"]>) {
+    (this as { id: string }).id = snap.id;
+    this.nodes = new Map();
+    for (const n of snap.nodes) this.nodes.set(n.id, n as GraphNode);
+    (this as { rootId: string }).rootId = snap.rootId;
+    this.startedAt = snap.startedAt;
+    this.finishedAt = snap.finishedAt;
+    this.version = snap.version;
+    this.persistPath = null;
   }
 
   /**
@@ -225,6 +282,7 @@ export class ComputationGraph {
       if (parent) parent.children.push(node.id);
     }
     this.version++;
+    this.persist();
     return node;
   }
 
@@ -237,6 +295,7 @@ export class ComputationGraph {
     if (extra.sessionId !== undefined) n.sessionId = extra.sessionId;
     if (extra.input !== undefined) (n as { input: unknown }).input = extra.input;
     this.version++;
+    this.persist();
   }
 
   finishOk(id: string, output: unknown, extra: Partial<Pick<GraphNodeBase, "sessionId" | "model">> = {}) {
@@ -248,6 +307,7 @@ export class ComputationGraph {
     if (extra.sessionId !== undefined) n.sessionId = extra.sessionId;
     if (extra.model !== undefined) n.model = extra.model;
     this.version++;
+    this.persist();
   }
 
   finishErr(id: string, err: unknown) {
@@ -265,6 +325,7 @@ export class ComputationGraph {
       data: err && typeof err === "object" ? { ...(err as object) } : undefined,
     };
     this.version++;
+    this.persist();
   }
 
   /** Attach an object to the node's input without transitioning state.
@@ -276,6 +337,7 @@ export class ComputationGraph {
     if (!n) return;
     (n as { input: unknown }).input = input;
     this.version++;
+    this.persist();
   }
 
   setLabel(id: string, label: string) {
@@ -283,6 +345,7 @@ export class ComputationGraph {
     if (!n) return;
     n.label = label;
     this.version++;
+    this.persist();
   }
 
   get(id: string): GraphNode | undefined {
@@ -316,6 +379,7 @@ export class ComputationGraph {
     root.finishedAt = Date.now();
     this.finishedAt = Date.now();
     this.version++;
+    this.persist();
   }
 
   snapshot() {

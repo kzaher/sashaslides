@@ -6,7 +6,7 @@ import {
 import { ComputationGraph } from "./graph.js";
 import { callClaude, callClaudeFormatted } from "./claude-cli.js";
 import { Claude, type ClaudeModel, type Result } from "./types.js";
-import { InterruptException, StructuredError, describeError, isCatchable } from "./errors.js";
+import { InterruptException, StructuredError, FatalShellError, describeError, isCatchable } from "./errors.js";
 import { startMonitor, type MonitorServer } from "./server.js";
 import { realIO, killAllSpawned, type IO } from "./io.js";
 import { spawn } from "node:child_process";
@@ -24,6 +24,14 @@ export interface EngineOptions {
   hookSignals?: boolean;
   /** Log banner URL when server boots. Default: true. */
   log?: boolean;
+  /**
+   * Path to write graph snapshots after every mutation. When set, the
+   * monitor's tree state survives a process restart — `view-graph.ts
+   * <path>` reads this file and serves the same UI (with /api/ask still
+   * functional, since each send carries its own forked claude session).
+   * Default: env `SP_GRAPH_PATH` if set, else null (no persistence).
+   */
+  graphPersistPath?: string | null;
   /**
    * IO module routing every side-effecting call (spawn, fs, clock, log).
    * Default `realIO`. Tests pass a `MockIO` here to record effects and
@@ -77,6 +85,7 @@ export class ClaudeEngine {
       persist: opts.persist ?? true,
       hookSignals: opts.hookSignals ?? true,
       log: opts.log ?? true,
+      graphPersistPath: opts.graphPersistPath ?? process.env.SP_GRAPH_PATH ?? null,
       io: opts.io ?? realIO,
     };
     this.io = this.opts.io;
@@ -100,6 +109,16 @@ export class ClaudeEngine {
     calculation: (s: Session) => SessionWithResult<R>,
   ): Promise<R> {
     this.activeGraph = session.graph;
+
+    // 0. Wire persistence — every graph mutation writes a JSON snapshot to
+    //    disk so a follow-up session can be re-attached via view-graph.ts.
+    if (this.opts.graphPersistPath) {
+      session.graph.enablePersistence(this.opts.graphPersistPath);
+      if (this.opts.log) {
+        // eslint-disable-next-line no-console
+        console.error(`[engine] graph persistence: ${this.opts.graphPersistPath}`);
+      }
+    }
 
     // 1. Boot a fresh monitor server.
     if (this.monitor) {
@@ -608,7 +627,10 @@ export class ClaudeEngine {
           const build = node.callbacks.buildCommand;
           const cmd = build(upstream);
           graph.setLabel(node.id, `executeShell: ${truncate(cmd, 60)}`);
-          graph.start(node.id, { input: { cmd } });
+          // Persist cwd alongside cmd so /api/retry can re-run this node
+          // post-hoc without needing the engine's RunCtx (which is gone
+          // by the time the engine has exited).
+          graph.start(node.id, { input: { cmd, cwd: ctx.cwd } });
           const stdout = await runShell({ cmd, cwd: ctx.cwd, io: this.io, nodeId: node.id });
           graph.finishOk(node.id, { stdoutTail: stdout.slice(-400) });
           return { value: stdout, ctx };
@@ -875,7 +897,7 @@ function randomId(): string {
   return "sp_" + Math.random().toString(36).slice(2, 10);
 }
 
-async function runShell(args: { cmd: string; cwd: string; io: IO; nodeId?: string }): Promise<string> {
+export async function runShell(args: { cmd: string; cwd: string; io: IO; nodeId?: string }): Promise<string> {
   const { cmd, cwd, io, nodeId } = args;
   const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd, nodeId });
   if (r.spawnError) {
@@ -884,14 +906,16 @@ async function runShell(args: { cmd: string; cwd: string; io: IO; nodeId?: strin
     throw new StructuredError(`shell spawn failed: ${r.spawnError}`);
   }
   if (r.exitCode !== 0) {
-    // Non-zero exit from a user-supplied script. Tag with kind:"shellExit"
-    // so isCatchable() lets a try/tryMultipleTimes branch swallow it for
-    // a retry. Include BOTH stdout and stderr tails — wave-7 had a fatal
-    // ReferenceError that only surfaced in stdout and was hidden by the
-    // engine's old stderr-only message.
+    // Non-zero exit from a user-supplied script. Throw FatalShellError so
+    // tryMultipleTimes does NOT auto-retry — a script failure usually
+    // means the worker's code state is broken and re-running with the
+    // same input just re-hits the same failure (token burn). The user
+    // retries the node manually from the monitor UI after fixing the
+    // underlying cause. Include BOTH stdout and stderr tails — wave-7
+    // had a fatal ReferenceError that only surfaced in stdout.
     const stderrTail = r.stderr.slice(-800);
     const stdoutTail = r.stdout.slice(-800);
-    throw new StructuredError(
+    throw new FatalShellError(
       `shell command failed (code ${r.exitCode}): ${cmd}\n` +
       (stderrTail ? `--- stderr (last 800) ---\n${stderrTail}\n` : "") +
       (stdoutTail ? `--- stdout (last 800) ---\n${stdoutTail}` : ""),

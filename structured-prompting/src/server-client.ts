@@ -205,14 +205,24 @@ function JsonView(props) {
 // nuked by the 250 ms graph poll. Also remembers the last reply so the
 // reviewer can copy it after switching nodes and back.
 function AskPanel(props) {
-  const { node } = props;
+  const { node, graph, onSelect } = props;
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
-  const [reply, setReply] = useState(null);
   const [err, setErr] = useState(null);
+  // Find the nearest ancestor (via parentId chain) carrying a sessionId.
+  // This is the node we'll fork from. The clicked node parents the new
+  // followup in the tree regardless — anchor only controls --resume.
+  const anchor = useMemo(() => {
+    let cur = node;
+    const byId = new Map(graph.nodes.map(n => [n.id, n]));
+    while (cur && !cur.sessionId && cur.parentId) {
+      cur = byId.get(cur.parentId);
+    }
+    return cur && cur.sessionId ? cur : null;
+  }, [graph.version, node.id]);
   const submit = async () => {
     if (!prompt.trim() || busy) return;
-    setBusy(true); setReply(null); setErr(null);
+    setBusy(true); setErr(null);
     try {
       const r = await fetch("/api/ask", {
         method: "POST",
@@ -223,9 +233,15 @@ function AskPanel(props) {
       if (!r.ok || json.error) {
         setErr(json.error || ("HTTP " + r.status));
       } else if (json.isError) {
+        // The askFollowup node was created and finalized as error; jump to
+        // it so the reviewer sees the failure inline with the rest of the tree.
+        if (json.newNodeId && onSelect) onSelect(json.newNodeId);
         setErr(json.errorMessage || "model returned isError");
       } else {
-        setReply(json);
+        // Success: clear the textarea and select the new node so its
+        // reply renders in the standard detail panel (same shape as a send).
+        setPrompt("");
+        if (json.newNodeId && onSelect) onSelect(json.newNodeId);
       }
     } catch (e) {
       setErr(e && e.message ? e.message : String(e));
@@ -235,35 +251,50 @@ function AskPanel(props) {
   const composed = node.output && typeof node.output.composedPrompt === "string"
     ? node.output.composedPrompt
     : null;
+  // Header copy explains what's happening: the new followup nests under
+  // the clicked node, but resumes from the nearest ancestor that has a
+  // claude session. When no ancestor has a session yet (very early in
+  // the run), the panel renders disabled with a hint.
+  const headerText = anchor
+    ? (anchor.id === node.id
+        ? "ask follow-up (forks session " + anchor.sessionId.slice(0, 8) + " from this node)"
+        : "ask follow-up (forks session " + anchor.sessionId.slice(0, 8) + " from ancestor " + anchor.kind + ")")
+    : "ask follow-up — disabled until first send completes";
+  const canSend = !!anchor;
   return h("div", { class: "sect" },
-    h("h2", null, "ask follow-up (resumes session " + node.sessionId.slice(0, 8) + ")"),
+    h("h2", null, headerText),
     h("textarea", {
       class: "ask-input",
-      placeholder: "type a question — the model has the same conversation context as this send",
+      placeholder: canSend
+        ? "type a question — the model has the same conversation context as the anchor send. enter to send, shift+enter for newline."
+        : "no completed send in this branch yet — once one finishes, this textarea becomes active",
       rows: 3,
       value: prompt,
       onInput: (e) => setPrompt(e.target.value),
       onKeyDown: (e) => {
-        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit();
+        // Plain Enter sends; Shift+Enter inserts a newline (standard chat
+        // UX). Ctrl/⌘+Enter kept as an alias for muscle memory.
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          if (canSend) submit();
+        }
       },
-      style: "width:100%;background:var(--pending);color:var(--fg);border:1px solid #30363d;border-radius:3px;padding:6px 8px;font:inherit;resize:vertical",
+      disabled: !canSend,
+      style: "width:100%;background:var(--pending);color:var(--fg);border:1px solid #30363d;border-radius:3px;padding:6px 8px;font:inherit;resize:vertical;opacity:" + (canSend ? "1" : "0.55"),
     }),
     h("div", { style: "display:flex;gap:8px;margin-top:6px;align-items:center" },
       h("button", {
         onClick: submit,
-        disabled: busy || !prompt.trim(),
-      }, busy ? "asking…" : "ask (ctrl/⌘+enter)"),
+        disabled: !canSend || busy || !prompt.trim(),
+      }, busy ? "asking…" : "send (enter)"),
       composed && h("button", {
         onClick: () => setPrompt(composed),
         title: "Prefill the textarea with the prompt this node originally sent — useful for retrying with the same input.",
       }, "↺ rerun this prompt"),
-      reply && h("span", { style: "color:var(--muted);font-size:11px" },
-        fmtDur(reply.durationMs),
-        reply.costUsd != null ? " · $" + reply.costUsd.toFixed(4) : "",
-      ),
+      busy && h("span", { style: "color:var(--muted);font-size:11px" },
+        "creating askFollowup node… reply lands as a new tree child"),
     ),
     err && h("pre", { style: "color:var(--err);margin-top:6px;white-space:pre-wrap" }, "error: " + err),
-    reply && h("pre", { style: "margin-top:8px;background:var(--bg);padding:10px;border-radius:3px;border:1px solid #30363d;white-space:pre-wrap" }, reply.text),
   );
 }
 
@@ -281,9 +312,68 @@ function ComposedPromptReveal(props) {
   );
 }
 
+// ---- RetryPanel: re-run a node in place ---------------------------------
+// POSTs /api/retry {nodeId}. Supported kinds:
+//   executeShell — re-run cmd in saved cwd. Replaces output.
+//   send / askFollowup — re-call claude with composedPrompt + same resume
+//     sessionId, fork:true.
+// Other kinds: panel renders a hint that the kind isn't retryable (the
+// engine's callbacks were stripped from the snapshot, so we can't
+// re-invoke parallelFork / pipe / try / etc.).
+function RetryPanel(props) {
+  const { node } = props;
+  const retryable = node.kind === "executeShell" || node.kind === "send" || node.kind === "askFollowup";
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState(null);
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true); setResult(null); setErr(null);
+    try {
+      const r = await fetch("/api/retry", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nodeId: node.id }),
+      });
+      const json = await r.json();
+      if (!r.ok || json.error) setErr(json.error || ("HTTP " + r.status));
+      else if (json.status === "error") setErr(json.message);
+      else setResult(json.message);
+    } catch (e) {
+      setErr(e && e.message ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+  if (!retryable) {
+    // Still render the section so the user sees an explanation when they
+    // click on a non-retryable kind, instead of wondering where the
+    // button went.
+    return h("div", { class: "sect" },
+      h("h2", null, "retry"),
+      h("div", { style: "color:var(--muted);font-size:11px" },
+        "kind \"" + node.kind + "\" is not retryable — only executeShell, send, and askFollowup nodes can be re-run from the UI " +
+        "(other kinds carry callbacks that were stripped from the persisted graph snapshot).",
+      ),
+    );
+  }
+  return h("div", { class: "sect" },
+    h("h2", null, "retry — " + node.kind),
+    h("div", { style: "display:flex;gap:8px;align-items:center" },
+      h("button", {
+        onClick: submit,
+        disabled: busy,
+        title: node.kind === "executeShell"
+          ? "Re-run the saved cmd in the saved cwd. Output replaces in place."
+          : "Re-call claude with the same composedPrompt + same resume sessionId, fork:true. Output replaces in place.",
+      }, busy ? "retrying…" : "↻ retry this node"),
+      result && h("span", { style: "color:var(--ok);font-size:11px" }, "✓ " + result),
+    ),
+    err && h("pre", { style: "color:var(--err);margin-top:6px;white-space:pre-wrap" }, "error: " + err),
+  );
+}
+
 // ---- Detail panel --------------------------------------------------------
 function Detail(props) {
-  const { graph, selectedId } = props;
+  const { graph, selectedId, onSelect } = props;
   const node = graph.nodes.find(n => n.id === selectedId);
   if (!node) return h("h1", null, "node gone");
   // Detail panel always shows duration as the primary metric (it's the
@@ -314,8 +404,10 @@ function Detail(props) {
   const outT = outSumMap.get(node.id) || 0;
   // composedPrompt lives on node.output for finished sends AND on node.input
   //   while the send is still running (engine.materializeAndCall writes it
-  //   BEFORE awaiting the CLI), so the reveal works in both states.
-  const composed = node.kind === "send"
+  //   BEFORE awaiting the CLI), so the reveal works in both states. Same
+  //   applies to askFollowup nodes (server.handleAsk writes it on output).
+  const carriesPrompt = node.kind === "send" || node.kind === "askFollowup";
+  const composed = carriesPrompt
     ? (node.output && typeof node.output.composedPrompt === "string"
         ? node.output.composedPrompt
         : node.input && typeof node.input.composedPrompt === "string"
@@ -343,13 +435,18 @@ function Detail(props) {
         )
       : null,
     composed != null ? h(ComposedPromptReveal, { text: composed }) : null,
+    h(RetryPanel, { node }),
     h("div", { class: "sect" }, h("h2", null, "input"), h("pre", null, h(JsonView, { value: node.input }))),
     h("div", { class: "sect" }, h("h2", null, "output"), h("pre", null, h(JsonView, { value: node.output }))),
     node.error ? h("div", { class: "sect" }, h("h2", null, "error"), h("pre", null, h(JsonView, { value: node.error }))) : null,
-    // Ask-follow-up panel — only on nodes that ran and have a session
-    // we can resume (every send carries one). Lets the reviewer probe
-    // the model's understanding without queuing more wave work.
-    node.sessionId && node.kind === "send" ? h(AskPanel, { node }) : null,
+    // Ask-follow-up panel — rendered on EVERY node. The panel walks up
+    // the parentId chain to find the nearest ancestor carrying a claude
+    // sessionId, and uses that as the resume anchor. The new followup
+    // node nests under the CLICKED node so the user sees the question
+    // visually attached where they put it. If no ancestor has a session
+    // yet (very early in the run), the panel renders disabled with a
+    // hint until the first send completes.
+    h(AskPanel, { node, graph, onSelect }),
   );
 }
 
@@ -405,7 +502,13 @@ function TreeNode(props) {
         onClick: (e) => { e.stopPropagation(); if (hasKids) onToggleCollapsed(node.id); },
       }, hasKids ? (isCollapsed ? "▸" : "▾") : ""),
       h("span", { class: "status " + node.status }),
-      h("span", { class: "kind" }, node.kind),
+      // askFollowup nodes get a distinct ↪ glyph + the "ask" label so
+      // they don't read as a parallelChild when sitting next to one. The
+      // anchor send still shows its normal kind; only the followup is
+      // marked.
+      node.kind === "askFollowup"
+        ? h("span", { class: "kind", style: "color:#79c0ff" }, "↪ ask")
+        : h("span", { class: "kind" }, node.kind),
       h("span", { class: "label" }, node.label),
       sum != null && h("span", { class: "dur" },
         metric.fmt(sum),
@@ -528,7 +631,7 @@ function App() {
     ),
     h("div", { id: "detail" },
       graph && selectedId
-        ? h(Detail, { graph, selectedId, key: selectedId })
+        ? h(Detail, { graph, selectedId, onSelect: setSelectedId, key: selectedId })
         : h("h1", null, "select a node"),
     ),
   );

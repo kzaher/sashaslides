@@ -1367,18 +1367,14 @@ interface ExtractedElement {
       // edge (inside the border). Shift pb to the padding-box position so the
       // corner flush-checks below work when the parent has a border.
       //
-      // Half-shift, not full shift. OOXML `a:ln` is drawn CENTERED on the shape
-      // edge (algn="ctr" default, half outside / half inside), whereas CSS draws
-      // the border fully INSIDE the border-box. A full `parentBT` shift places
-      // the pseudo 1 CSS px below the border-box top, which overlaps the
-      // centered stroke's inner half and — combined with the stripe's own
-      // anti-aliased top edge — wipes out the parent's top-border row at sub-
-      // pixel render scales. Landing the pseudo at the border's INNER EDGE
-      // (half of parentBT) keeps the border's outer half visible above a flush
-      // top-accent stripe (slide_14 .logo-card::before) while leaving
-      // fill-parent pseudos (top/left/right/bottom all 0) essentially unchanged.
-      pb.x += parentBL_w / 2;
-      pb.y += parentBT / 2;
+      // Full shift. `injectStrokeAlignment` (convert-pptx.ts) rewrites every
+      // `<a:ln w=…>` to `algn="in"`, so OOXML strokes are drawn fully INSIDE
+      // the border-box — matching CSS. The pseudo with `top:0` belongs at the
+      // padding-box top edge (parentBT below the border-box top), so the
+      // parent's full top-border row stays visible above a flush top-accent
+      // stripe like slide_14 `.logo-card::before` and slide_11 `.card::before`.
+      pb.x += parentBL_w;
+      pb.y += parentBT;
       // CSS border-triangle: 0×0 box with transparent top/bottom and a
       // colored side — skip as rect; downstream renderers can't reproduce
       // it cleanly. (Leave for a future targeted fix.)
@@ -1399,24 +1395,45 @@ interface ExtractedElement {
       // of the parent — pb has already been shifted to padding-box coordinates.
       const pseudoCornerRadii = { tl: br, tr: br, br, bl: br };
       const parentOv = parentCs2.overflow;
+      const pTL = parseFloat(parentCs2.borderTopLeftRadius) || 0;
+      const pTR = parseFloat(parentCs2.borderTopRightRadius) || 0;
+      const pBR = parseFloat(parentCs2.borderBottomRightRadius) || 0;
+      const pBL = parseFloat(parentCs2.borderBottomLeftRadius) || 0;
+      const innerX = bounds.x + parentBL_w;
+      const innerY = bounds.y + parentBT;
+      const innerRight = bounds.x + bounds.w - parentBR_w;
+      const innerBottom = bounds.y + bounds.h - parentBB_w;
+      const TOL = 2;
+      const flushTopLeft = Math.abs(pb.x - innerX) < TOL && Math.abs(pb.y - innerY) < TOL;
+      const flushTopRight = Math.abs((pb.x + pb.w) - innerRight) < TOL && Math.abs(pb.y - innerY) < TOL;
       if (parentOv === "hidden" || parentOv === "clip") {
-        const pTL = parseFloat(parentCs2.borderTopLeftRadius) || 0;
-        const pTR = parseFloat(parentCs2.borderTopRightRadius) || 0;
-        const pBR = parseFloat(parentCs2.borderBottomRightRadius) || 0;
-        const pBL = parseFloat(parentCs2.borderBottomLeftRadius) || 0;
-        const innerX = bounds.x + parentBL_w;
-        const innerY = bounds.y + parentBT;
-        const innerRight = bounds.x + bounds.w - parentBR_w;
-        const innerBottom = bounds.y + bounds.h - parentBB_w;
-        const TOL = 2;
-        if (Math.abs(pb.x - innerX) < TOL && Math.abs(pb.y - innerY) < TOL)
-          pseudoCornerRadii.tl = Math.max(br, pTL);
-        if (Math.abs((pb.x + pb.w) - innerRight) < TOL && Math.abs(pb.y - innerY) < TOL)
-          pseudoCornerRadii.tr = Math.max(br, pTR);
+        if (flushTopLeft) pseudoCornerRadii.tl = Math.max(br, pTL);
+        if (flushTopRight) pseudoCornerRadii.tr = Math.max(br, pTR);
         if (Math.abs((pb.x + pb.w) - innerRight) < TOL && Math.abs((pb.y + pb.h) - innerBottom) < TOL)
           pseudoCornerRadii.br = Math.max(br, pBR);
         if (Math.abs(pb.x - innerX) < TOL && Math.abs((pb.y + pb.h) - innerBottom) < TOL)
           pseudoCornerRadii.bl = Math.max(br, pBL);
+      }
+      // SWOT-card top-stripe merge: when the pseudo is the canonical
+      // `top:0; left:0; right:0; height:Npx` accent stripe AND its background
+      // matches the parent's top-border color exactly, the CSS intent is a
+      // single thicker color band combining the border row and the stripe.
+      // After the padding-box shift the OOXML stripe sits BELOW the algn="in"
+      // top border with a sub-pixel mismatch on rounded corners (round2SameRect
+      // adj clamps to min(w,h)/2 ≈ 2 px while the parent has 12 px corners),
+      // producing a visible step the user reads as broken clipping. Promote
+      // the stripe outward to cover the parent's top-border row so the band
+      // reads as one shape with the card's outer rounded top corners.
+      if (parentBT > 0 && flushTopLeft && flushTopRight && pseudoFill && pseudoFillAlpha === 1) {
+        const parentTopHex = rgb2hex(parentCs2.borderTopColor);
+        if (parentTopHex && parentTopHex.toLowerCase() === pseudoFill.toLowerCase()) {
+          pb.y -= parentBT;
+          pb.h += parentBT;
+          pb.x -= parentBL_w;
+          pb.w += parentBL_w + parentBR_w;
+          pseudoCornerRadii.tl = Math.max(pseudoCornerRadii.tl, pTL);
+          pseudoCornerRadii.tr = Math.max(pseudoCornerRadii.tr, pTR);
+        }
       }
       elements.push({
         type: "rect", bounds: pb, fill: pseudoFill, fillAlpha: pseudoFillAlpha,
@@ -1630,6 +1647,58 @@ interface ExtractedElement {
         && bounds.w >= 100 && bounds.h >= 100 && (el as HTMLElement).children.length > 0) {
       seen.add(el);
       el.querySelectorAll("*").forEach(c => seen.add(c));
+      // Spread-only box-shadow layers (`0 0 0 Npx color`) paint a concentric
+      // halo ring OUTSIDE the element's bbox — the screenshot capture clips at
+      // the element bounds and never sees these rings. Emit halo rects BEFORE
+      // the visual so the device's `box-shadow: ..., 0 0 0 2px #333` (slide_12)
+      // renders as a 2-px frame around the captured phone-mockup image.
+      // Mirrors the ring loop in emitRect (lines ~1262–1279).
+      const sh = elCs.boxShadow;
+      if (sh && sh !== "none") {
+        const parts: string[] = [];
+        let depth = 0, buf = "";
+        for (const ch of sh) {
+          if (ch === "(") depth++;
+          else if (ch === ")") depth--;
+          if (ch === "," && depth === 0) { parts.push(buf.trim()); buf = ""; }
+          else buf += ch;
+        }
+        if (buf.trim()) parts.push(buf.trim());
+        const rings: { spread: number; color: string; alpha: number }[] = [];
+        for (const p of parts) {
+          const nums = p.match(/(-?\d+(?:\.\d+)?)px/g);
+          if (!nums || nums.length < 2) continue;
+          const vals = nums.map(n => parseFloat(n));
+          const offsetX = vals[0], offsetY = vals[1], spread = vals[3] || 0;
+          if (offsetX !== 0 || offsetY !== 0 || spread <= 0) continue;
+          const rgbaMatch = p.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+          const alpha = rgbaMatch && rgbaMatch[4] !== undefined ? parseFloat(rgbaMatch[4]) : 1;
+          rings.push({ spread, color: rgb2hex(p) || "#000000", alpha });
+        }
+        // Outermost ring first so it paints behind inner rings + visual.
+        for (let i = rings.length - 1; i >= 0; i--) {
+          const ring = rings[i];
+          const sp = ring.spread;
+          const haloR = elBR + sp;
+          elements.push({
+            type: "rect",
+            bounds: { x: bounds.x - sp, y: bounds.y - sp, w: bounds.w + 2 * sp, h: bounds.h + 2 * sp },
+            fill: ring.color,
+            fillAlpha: ring.alpha,
+            gradient: null,
+            borderRadius: haloR,
+            cornerRadii: { tl: haloR, tr: haloR, br: haloR, bl: haloR },
+            borderUniform: true,
+            borderSides: null,
+            borderColor: null,
+            borderWidth: 0,
+            borderStyle: "solid",
+            zIndex: 0,
+            position: "static",
+            boxShadow: null,
+          } as any);
+        }
+      }
       elements.push({ type: "visual", bounds, tag: "clipped-container" });
       return;
     }
