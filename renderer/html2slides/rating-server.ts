@@ -93,8 +93,12 @@ function findComparisons(): SlideComparison[] {
       const c = comparisons[i];
       if (htmlFiles[i]) c.htmlFile = join(meta.htmlDir, htmlFiles[i]);
       if (meta.presentationId) {
-        const slideFrag = meta.slideIds?.[i] ? `#slide=id.${meta.slideIds[i]}` : "";
-        c.slidesUrl = `https://docs.google.com/presentation/d/${meta.presentationId}/edit${slideFrag}`;
+        // Both query (?slide=id.X) and fragment (#slide=id.X) are needed:
+        // the query selects the slide on first load, the fragment keeps it
+        // selected if Slides re-navigates after auth/sync.
+        const sid = meta.slideIds?.[i];
+        const slideQs = sid ? `?slide=id.${sid}#slide=id.${sid}` : "";
+        c.slidesUrl = `https://docs.google.com/presentation/d/${meta.presentationId}/edit${slideQs}`;
       }
     }
   }

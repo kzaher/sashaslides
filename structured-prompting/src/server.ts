@@ -9,6 +9,9 @@ import * as esbuild from "esbuild";
 import type { ComputationGraph } from "./graph.js";
 import { CLIENT_SCRIPT } from "./server-client.js";
 import { callClaude } from "./claude-cli.js";
+import { runShell } from "./engine.js";
+import { realIO } from "./io.js";
+import { FatalShellError } from "./errors.js";
 
 // Bundle Preact + hooks + server-client into a single classic IIFE. This
 // dodges every cross-browser ESM / import-map quirk the monitor page used
@@ -139,6 +142,8 @@ export interface MonitorServer {
 
 interface AskRequest { nodeId: string; prompt: string }
 interface AskReply {
+  /** ID of the newly-created askFollowup node so the client can auto-select it. */
+  newNodeId: string;
   text: string;
   sessionId: string | null;
   durationMs: number;
@@ -148,35 +153,187 @@ interface AskReply {
 }
 
 /**
- * POST /api/ask handler. Resolves the node's claude session, fires off a
- * single resume-then-prompt call via callClaude, returns the reply. Keeps
- * the engine's main execute() loop oblivious — these queries don't mutate
- * the graph and are NOT visible there. Useful for "what did the model
- * see at this step?" diagnostics from the monitor UI.
+ * POST /api/ask handler. Creates a new `askFollowup` graph node as a child
+ * of the anchor node, runs `claude --resume <sid> --fork-session -p
+ * <prompt>` so the original branch's session stays clean for further
+ * forks, and finalizes the new node with the response. The new node is a
+ * leaf side-branch (no downstream children, no engine interpretation),
+ * so the rest of the graph is untouched.
+ *
+ * Persists via the graph's mutation hook — if `enablePersistence(path)`
+ * was called, the snapshot on disk now includes this follow-up.
  */
+interface RetryRequest { nodeId: string }
+interface RetryReply {
+  nodeId: string;
+  kind: string;
+  status: "ok" | "error";
+  message: string;
+}
+
+/**
+ * POST /api/retry {nodeId}: re-run a node in place using its saved input.
+ *
+ * Useful when a downstream step crashed (e.g. record-rendering script
+ * couldn't find a path) and the user wants to resume after fixing the
+ * environment, without re-running the whole graph (which would re-burn
+ * tokens on the upstream sends). For shell nodes the cwd is read off
+ * `node.input.cwd` (saved by the engine at start time); for sends the
+ * resume target is the node's own sessionId (the session we resumed from
+ * the first time) and fork:true is forced so the original branch's
+ * downstream resume points stay clean.
+ */
+async function handleRetry(rawBody: string, graph: ComputationGraph): Promise<RetryReply> {
+  const body = JSON.parse(rawBody) as RetryRequest;
+  if (!body.nodeId) throw new Error("/api/retry requires {nodeId}");
+  const node = graph.get(body.nodeId);
+  if (!node) throw new Error(`node not found: ${body.nodeId}`);
+
+  if (node.kind === "executeShell") {
+    const input = (node.input ?? {}) as { cmd?: string; cwd?: string };
+    if (!input.cmd) throw new Error("executeShell node has no saved cmd to retry");
+    const cwd = input.cwd ?? process.cwd();
+    graph.start(node.id);
+    try {
+      const stdout = await runShell({ cmd: input.cmd, cwd, io: realIO, nodeId: node.id });
+      graph.finishOk(node.id, { stdoutTail: stdout.slice(-400), retried: true });
+      return { nodeId: node.id, kind: node.kind, status: "ok", message: "shell command succeeded" };
+    } catch (err) {
+      graph.finishErr(node.id, err);
+      const msg = err instanceof FatalShellError || err instanceof Error
+        ? err.message
+        : String(err);
+      return { nodeId: node.id, kind: node.kind, status: "error", message: msg };
+    }
+  }
+
+  if (node.kind === "send" || node.kind === "askFollowup") {
+    const composed = (node.output && typeof (node.output as { composedPrompt?: unknown }).composedPrompt === "string")
+      ? (node.output as { composedPrompt: string }).composedPrompt
+      : (node.input && typeof (node.input as { prompt?: unknown }).prompt === "string")
+        ? (node.input as { prompt: string }).prompt
+        : null;
+    if (!composed) throw new Error(`${node.kind} node has no composedPrompt or prompt to retry`);
+    // For retry we ALWAYS fork (whether or not the original send did).
+    // The original sessionId on this node is the session we resumed FROM
+    // last time — re-using it keeps the conversation context identical.
+    // fork:true ensures the retry doesn't append a turn to that session
+    // and pollute downstream resume points.
+    graph.start(node.id);
+    try {
+      const r = await callClaude({
+        prompt: composed,
+        resume: node.sessionId,
+        fork: true,
+        model: (node.model as never) ?? undefined,
+      });
+      if (r.isError) {
+        graph.finishErr(node.id, { message: r.errorMessage ?? "retry failed", data: { stderr: r.stderr } });
+        return { nodeId: node.id, kind: node.kind, status: "error", message: r.errorMessage ?? "send returned isError" };
+      }
+      graph.finishOk(
+        node.id,
+        {
+          text: r.text,
+          composedPrompt: composed,
+          durationMs: r.durationMs,
+          appliedForkFlag: true,
+          usage: r.usage,
+          retried: true,
+        },
+        { sessionId: r.sessionId, model: r.model ?? node.model },
+      );
+      return { nodeId: node.id, kind: node.kind, status: "ok", message: "send returned " + r.text.length + " chars" };
+    } catch (err) {
+      graph.finishErr(node.id, err);
+      throw err;
+    }
+  }
+
+  throw new Error(`node kind "${node.kind}" is not retryable from the UI (callbacks were stripped at engine exit)`);
+}
+
 async function handleAsk(rawBody: string, graph: ComputationGraph): Promise<AskReply> {
   const body = JSON.parse(rawBody) as AskRequest;
   if (!body.nodeId || !body.prompt) {
     throw new Error("/api/ask requires {nodeId, prompt}");
   }
-  const node = graph.allNodes().find((n) => n.id === body.nodeId);
+  const node = graph.get(body.nodeId);
   if (!node) throw new Error(`node not found: ${body.nodeId}`);
-  if (!node.sessionId) {
-    throw new Error(`node ${body.nodeId} has no sessionId — pick a send node that has run`);
+
+  // Walk the parentId chain to find the nearest ancestor that carries a
+  // claude sessionId. The clicked node may be a parallelFork / pipe /
+  // root with no sessionId of its own — in that case we fork from the
+  // most recent ancestor send. The new askFollowup node still parents
+  // the CLICKED node (so the user sees the question attached where they
+  // clicked it), even though the resume happens against the anchor.
+  let anchor = node;
+  while (!anchor.sessionId && anchor.parentId) {
+    const next = graph.get(anchor.parentId);
+    if (!next) break;
+    anchor = next;
   }
-  const r = await callClaude({
-    prompt: body.prompt,
-    resume: node.sessionId,
-    model: (node.model as never) ?? undefined,
+  if (!anchor.sessionId) {
+    throw new Error(
+      "no completed send in this branch yet — wait for the first claude " +
+      "round-trip to finish (sessionIds are populated when claude returns)",
+    );
+  }
+  const anchorModel = anchor.model ?? node.model;
+
+  // Create the askFollowup node BEFORE the CLI call so the monitor's
+  // 250ms poll picks it up in the "running" state and the user sees
+  // immediate feedback. parentId === containerId === clicked.id puts it
+  // visually under the clicked node in the tree.
+  const labelPreview = body.prompt.slice(0, 60).replace(/\s+/g, " ").trim();
+  const newNode = graph.create({
+    parentId: node.id,
+    containerId: node.id,
+    kind: "askFollowup",
+    label: labelPreview,
+    input: { prompt: body.prompt, anchorNodeId: anchor.id },
   });
-  return {
-    text: r.text,
-    sessionId: r.sessionId,
-    durationMs: r.durationMs,
-    costUsd: r.costUsd,
-    isError: r.isError,
-    errorMessage: r.errorMessage,
-  };
+  graph.start(newNode.id, { model: anchorModel, sessionId: anchor.sessionId });
+
+  try {
+    const r = await callClaude({
+      prompt: body.prompt,
+      resume: anchor.sessionId,
+      // Always fork: the anchor's session is shared with downstream sends
+      // in the original execution; a non-forked ad-hoc reply would push a
+      // new turn into that history and contaminate any future resume.
+      fork: true,
+      model: (anchorModel as never) ?? undefined,
+    });
+    if (r.isError) {
+      graph.finishErr(newNode.id, { message: r.errorMessage ?? "ask follow-up failed", data: { stderr: r.stderr } });
+    } else {
+      graph.finishOk(
+        newNode.id,
+        {
+          text: r.text,
+          composedPrompt: body.prompt,
+          durationMs: r.durationMs,
+          appliedForkFlag: true,
+          anchorNodeId: anchor.id,
+          usage: r.usage,
+        },
+        { sessionId: r.sessionId, model: r.model ?? anchorModel },
+      );
+    }
+    return {
+      newNodeId: newNode.id,
+      text: r.text,
+      sessionId: r.sessionId,
+      durationMs: r.durationMs,
+      costUsd: r.costUsd,
+      isError: r.isError,
+      errorMessage: r.errorMessage,
+    };
+  } catch (err) {
+    graph.finishErr(newNode.id, err);
+    throw err;
+  }
 }
 
 export async function startMonitor(args: {
@@ -198,6 +355,27 @@ export async function startMonitor(args: {
     if (url === "/api/graph") {
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       res.end(JSON.stringify(graph.snapshot()));
+      return;
+    }
+    if (url === "/api/retry" && req.method === "POST") {
+      // POST /api/retry {nodeId}: re-run an existing node from its saved
+      // input, in-place. Supported kinds:
+      //   executeShell — re-run `cmd` in the saved `cwd`. Replaces output.
+      //   send / askFollowup — re-call claude with the saved
+      //     composedPrompt and the node's prior resume sessionId, fork:true.
+      // Other kinds are not retryable from the UI (callbacks were stripped
+      // from the snapshot at engine exit and cannot be re-invoked).
+      let body = "";
+      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      req.on("end", () => {
+        void handleRetry(body, graph).then((reply) => {
+          res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+          res.end(JSON.stringify(reply));
+        }).catch((err: unknown) => {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        });
+      });
       return;
     }
     if (url === "/api/ask" && req.method === "POST") {

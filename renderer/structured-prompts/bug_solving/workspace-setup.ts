@@ -79,6 +79,52 @@ function buildSlideTasks(slideIds: string[], opts: BuildOptions): SlideTask[] {
   return out;
 }
 
+/**
+ * Remove every `.claude/worktrees/bs-*` worktree from prior runs.
+ *
+ * Why: each run creates fresh worktrees from current HEAD. Without cleanup,
+ * stale worktrees accumulate on disk and — more importantly — old branches
+ * named `bug_solving/<id>-<old-ts>` linger in the repo. The "fresh from
+ * HEAD" guarantee depends on starting clean. Best-effort: per-worktree
+ * removal failures are logged but don't abort the run.
+ *
+ * Active SxS review servers from a prior run will fail to serve files from
+ * a removed worktree — by the time you launch a new wave, the prior wave's
+ * review session is assumed done.
+ */
+export function cleanupStaleBugSolvingWorktrees(repo_root: string): void {
+  let raw: string;
+  try {
+    raw = execSync("git worktree list --porcelain", { cwd: repo_root, encoding: "utf-8" });
+  } catch {
+    return;
+  }
+  const wtPaths: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      const p = line.slice("worktree ".length).trim();
+      if (p.includes("/.claude/worktrees/bs-")) wtPaths.push(p);
+    }
+  }
+  for (const p of wtPaths) {
+    try {
+      execSync(`git worktree remove --force "${p}"`, { cwd: repo_root, stdio: "ignore" });
+    } catch {
+      // worktree-list and worktree-remove can disagree if the dir was
+      // already deleted manually; don't abort the run on a phantom entry.
+    }
+  }
+  // Prune any branches the removed worktrees left behind.
+  try {
+    const branches = execSync("git for-each-ref --format='%(refname:short)' refs/heads/bug_solving/", {
+      cwd: repo_root, encoding: "utf-8",
+    });
+    for (const b of branches.split("\n").map(s => s.trim()).filter(Boolean)) {
+      try { execSync(`git branch -D "${b}"`, { cwd: repo_root, stdio: "ignore" }); } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+}
+
 function createWorktree(opts: BuildOptions, task_id: string): string {
   const ts = Date.now();
   const dir = resolve(opts.repo_root, ".claude", "worktrees", `bs-${task_id}-${ts}`);
@@ -111,6 +157,11 @@ export function buildTasks(
   if (!opts.baseline_dir || !existsSync(opts.baseline_dir)) {
     throw new Error(`buildTasks: baseline_dir required and must exist (got ${opts.baseline_dir})`);
   }
+  // Ephemeral worktrees: every run starts by removing any leftover bs-*
+  // worktrees from prior runs. Bounds disk usage and prevents the "stale
+  // worktree" failure mode where a worker accidentally edits last wave's
+  // checkout. Fresh worktrees are then created below.
+  cleanupStaleBugSolvingWorktrees(opts.repo_root);
   const out: Task[] = [];
   for (let i = 0; i < opts.clusters.length; i++) {
     const c = opts.clusters[i];

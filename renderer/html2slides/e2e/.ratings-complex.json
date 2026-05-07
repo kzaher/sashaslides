@@ -5,64 +5,61 @@
     "ratedAt": "2026-04-22T07:31:28.258Z"
   },
   "slide_02": {
-    "status": "good",
-    "ratedAt": "2026-04-22T07:31:46.256Z"
+    "status": "bad",
+    "comment": "There is a regression with text offset inside of the circle.",
+    "ratedAt": "2026-05-02T08:01:07.868Z",
+    "annotation": "/tmp/sxs-complex/annotations/slide_02.png"
   },
   "slide_03": {
     "status": "good",
-    "comment": "Wrong padding.",
-    "ratedAt": "2026-04-22T07:34:40.109Z"
+    "ratedAt": "2026-05-02T08:01:32.709Z"
   },
   "slide_04": {
-    "status": "good",
-    "comment": "There are no radiating circles around the middle circle, the Phase 3 blue circle is empty",
-    "ratedAt": "2026-04-20T05:48:46.000Z",
+    "status": "bad",
+    "comment": "There is wrong line height for bottom text (ML-powered insights ...).",
+    "ratedAt": "2026-05-02T08:04:26.042Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_04.png"
   },
   "slide_05": {
     "status": "good",
     "comment": "Left text has wront padding.",
-    "ratedAt": "2026-04-20T05:48:57.182Z"
+    "ratedAt": "2026-05-02T08:04:37.604Z"
   },
   "slide_06": {
-    "status": "good",
-    "comment": "Line height in main text is wrong. The quotations aren't behind and transparent (this is a regression, this used to work)",
-    "ratedAt": "2026-04-20T05:49:15.658Z",
+    "status": "bad",
+    "comment": "wrong line height for center text and EW is aligned wrong.",
+    "ratedAt": "2026-05-02T08:05:28.001Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_06.png"
   },
   "slide_07": {
     "status": "good",
     "comment": "When there is a single line of text, then depending on text alignment leave more either on right side, left side or both sides (if center alignment)",
-    "ratedAt": "2026-04-20T05:49:24.571Z"
+    "ratedAt": "2026-05-02T08:05:46.113Z"
   },
   "slide_08": {
-    "status": "good",
+    "status": "bad",
     "comment": "line height is wrong.",
-    "ratedAt": "2026-04-20T05:49:34.295Z",
+    "ratedAt": "2026-05-02T08:05:56.993Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_08.png"
   },
   "slide_09": {
     "status": "good",
-    "comment": "Hero is of wrong color, probably something with gradient.",
-    "ratedAt": "2026-04-20T05:49:45.435Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_09.png"
+    "ratedAt": "2026-05-02T08:06:19.819Z"
   },
   "slide_10": {
     "status": "good",
-    "comment": "The labels on the legend on the left are moved to the right, some spacing to graph is wrong.",
-    "ratedAt": "2026-04-20T05:49:54.607Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_10.png"
+    "ratedAt": "2026-05-02T08:06:41.617Z"
   },
   "slide_11": {
     "status": "bad",
-    "comment": "The top corners look reasonable, but the bottom corners are for some reason distorted.",
-    "ratedAt": "2026-04-22T07:25:00Z",
+    "comment": "Clipping on top is wrong, line height is wrong as well.",
+    "ratedAt": "2026-05-02T08:07:12.165Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_11.png"
   },
   "slide_12": {
-    "status": "good",
-    "comment": "Cipping library and shape, edges aren't curved.",
-    "ratedAt": "2026-04-16T23:38:32.981Z",
+    "status": "bad",
+    "comment": "There are still regresions with clipping and corners. There is no black border around.",
+    "ratedAt": "2026-05-02T08:08:34.953Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_12.png"
   },
   "slide_13": {
@@ -72,66 +69,65 @@
   "slide_14": {
     "status": "bad",
     "comment": "The top seems to be clipped like expected, but the border color is of the wrong color on center chips, colored vs gray.",
-    "ratedAt": "2026-04-22T07:25:00Z",
+    "ratedAt": "2026-05-02T08:08:39.052Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_14.png"
   },
   "slide_15": {
-    "status": "bad",
+    "status": "good",
     "comment": "Anomalies with text in chips.",
-    "ratedAt": "2026-04-20T05:51:00.746Z",
+    "ratedAt": "2026-05-02T08:08:54.197Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_15.png"
   },
   "slide_16": {
     "status": "good",
-    "ratedAt": "2026-04-15T23:48:33.383Z"
+    "ratedAt": "2026-05-02T08:09:03.745Z"
   },
   "slide_17": {
     "status": "bad",
-    "comment": "It is amazing regarding gradients, but \"milestone achieved\" is left aligned and not center aligned.",
-    "ratedAt": "2026-04-22T07:25:00Z",
+    "comment": "SV, GC and NX are aligned vertically wrong (top vs middle).",
+    "ratedAt": "2026-05-02T08:09:53.404Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_17.png"
   },
   "slide_18": {
-    "status": "good",
-    "comment": "spacing between april and 2026  is wrong. Alignment of calendar items texts is wrong (center vs left).",
-    "ratedAt": "2026-04-20T05:52:50.506Z",
+    "status": "bad",
+    "comment": "April 2025 and arrows are aligned wrong, top vs middle it seems, also numbers are aligned wrong.",
+    "ratedAt": "2026-05-02T08:11:05.261Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_18.png"
   },
   "slide_19": {
-    "status": "bad",
-    "comment": "Padding is a bit to large on \"Google search ads\" to bullet and below (e.g. Complex pricin here to bullet)",
-    "ratedAt": "2026-04-20T05:53:46.739Z",
+    "status": "good",
+    "ratedAt": "2026-05-02T08:11:24.388Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_19.png"
   },
   "slide_20": {
     "status": "good",
     "comment": "Inner and outer circles are wrong, in the original outer circle is larger.",
-    "ratedAt": "2026-04-20T05:54:07.580Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_20.png"
+    "ratedAt": "2026-05-02T08:11:43.727Z"
   },
   "slide_21": {
     "status": "bad",
-    "comment": "Vide details is in two lines (maybe add width hack with artificially increasing let's say 20%)",
-    "ratedAt": "2026-04-20T05:55:16.917Z"
+    "comment": "A+ aligned wrong and wrong line height for text.",
+    "ratedAt": "2026-05-02T08:12:03.658Z"
   },
   "slide_22": {
-    "status": "good",
-    "ratedAt": "2026-04-20T05:55:28.984Z"
+    "status": "bad",
+    "comment": "3 is aligned wrong (top vs middle)",
+    "ratedAt": "2026-05-02T08:12:35.116Z",
+    "annotation": "/tmp/sxs-complex/annotations/slide_22.png"
   },
   "slide_23": {
     "status": "good",
-    "ratedAt": "2026-04-20T05:55:41.303Z"
+    "ratedAt": "2026-05-02T08:13:59.747Z"
   },
   "slide_24": {
-    "status": "good",
-    "comment": "alignment of center text and wrapping of right text",
-    "ratedAt": "2026-04-20T05:55:46.482Z"
+    "status": "bad",
+    "comment": "Each level adds 16px is totally busted and moved below, seems like line height is giantic.",
+    "ratedAt": "2026-05-02T08:14:36.783Z",
+    "annotation": "/tmp/sxs-complex/annotations/slide_24.png"
   },
   "slide_25": {
-    "status": "bad",
-    "comment": "The entire main text is somehow moved up.",
-    "ratedAt": "2026-04-20T05:56:47.356Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_25.png"
+    "status": "good",
+    "ratedAt": "2026-05-02T08:15:24.116Z"
   },
   "slide_26": {
     "status": "good",
@@ -142,19 +138,20 @@
     "ratedAt": "2026-04-20T05:57:06.859Z"
   },
   "slide_28": {
-    "status": "good",
-    "comment": "No rounded corners on top right card. This was fixed at some point.",
-    "ratedAt": "2026-04-20T05:57:29.143Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_28.png"
+    "status": "bad",
+    "comment": "100% is wrongly aligned, top vs middle",
+    "ratedAt": "2026-05-02T08:16:30.918Z"
   },
   "slide_29": {
-    "status": "good",
-    "ratedAt": "2026-04-20T05:57:46.186Z"
+    "status": "bad",
+    "comment": "Alignment od badge texts is wrong.",
+    "ratedAt": "2026-05-02T08:16:08.831Z",
+    "annotation": "/tmp/sxs-complex/annotations/slide_29.png"
   },
   "slide_30": {
     "status": "bad",
-    "comment": "Text align of code is wrong.",
-    "ratedAt": "2026-04-20T05:59:02.935Z",
+    "comment": "Line height of code is wrong.",
+    "ratedAt": "2026-05-02T08:15:53.713Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_30.png"
   }
 }

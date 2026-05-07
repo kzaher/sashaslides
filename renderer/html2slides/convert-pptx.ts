@@ -1125,20 +1125,22 @@ function buildPptx(
               return [{ text: marker + it.text, options: baseOpts }];
             }).flat();
 
-            // Honor CSS line-height when explicitly set (ratio != 1.2 default).
-            // Passing `lineSpacingMultiple` maps to OOXML `<a:lnSpc><a:spcPct>`,
-            // but Slides applies that as a percentage of its DEFAULT line
-            // spacing (~1.2 * fontSize), not of fontSize itself. So pre-divide
-            // the CSS ratio by 1.2 before emitting (matches Wave 1B fix in
-            // emitStyledText). Omitting entirely lets Slides use its default,
-            // which matches CSS `line-height: normal` (~1.2).
+            // Honor CSS line-height when explicitly set. Emit absolute
+            // `lineSpacing` (points → `<a:spcPts>`) rather than
+            // `lineSpacingMultiple` (`<a:spcPct>`) — Slides treats spcPct as
+            // a percentage of its inferred per-font default leading, which
+            // empirically under-shoots large CSS line-heights like 1.5 by
+            // ~25 % (slide_11 Opportunities bullets render too tight). Mirror
+            // the text-block path which uses absolute pt for the same reason.
             const firstIt = items[0] || {};
-            const paraSpaceAfterPt = (firstIt.marginBottom || 0) * PX2PT;
-            const ratio = firstIt.lineHeight && firstIt.fontSize
-              ? firstIt.lineHeight / firstIt.fontSize
-              : 0;
-            const useRatio = ratio >= 1.05 && ratio <= 3.0 && Math.abs(ratio - 1.2) > 0.08;
-            const emittedRatio = ratio / 1.2;
+            // CSS `li { padding: 4px 0 }` adds 8 px of inter-line spacing in the
+            // browser; OOXML paragraph spacing has no padding concept, so fold
+            // li padding-top + padding-bottom into paraSpaceAfter alongside
+            // marginBottom (slide_11 SWOT bullets render too tight without this).
+            const liPadV = ((firstIt.padding && firstIt.padding.top) || 0)
+              + ((firstIt.padding && firstIt.padding.bottom) || 0);
+            const paraSpaceAfterPt = ((firstIt.marginBottom || 0) + liPadV) * PX2PT;
+            const lineSpacingPt = firstIt.lineHeight ? firstIt.lineHeight * PX2PT : undefined;
             slide.addText(paragraphs, {
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
               valign: "top",
@@ -1147,7 +1149,7 @@ function buildPptx(
               line: { type: "none" },
               margin: 0,
               paraSpaceAfter: paraSpaceAfterPt > 0 ? paraSpaceAfterPt : undefined,
-              lineSpacingMultiple: useRatio ? emittedRatio : undefined,
+              lineSpacing: lineSpacingPt,
             });
             break;
           }
