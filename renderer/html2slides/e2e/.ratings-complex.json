@@ -5,9 +5,9 @@
     "ratedAt": "2026-04-22T07:31:28.258Z"
   },
   "slide_02": {
-    "status": "bad",
+    "status": "good",
     "comment": "There is a regression with text offset inside of the circle.",
-    "ratedAt": "2026-05-02T08:01:07.868Z",
+    "ratedAt": "2026-05-11T01:08:43.451Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_02.png"
   },
   "slide_03": {
@@ -15,9 +15,9 @@
     "ratedAt": "2026-05-02T08:01:32.709Z"
   },
   "slide_04": {
-    "status": "bad",
+    "status": "good",
     "comment": "There is wrong line height for bottom text (ML-powered insights ...).",
-    "ratedAt": "2026-05-02T08:04:26.042Z",
+    "ratedAt": "2026-05-11T01:08:49.602Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_04.png"
   },
   "slide_05": {
@@ -26,9 +26,9 @@
     "ratedAt": "2026-05-02T08:04:37.604Z"
   },
   "slide_06": {
-    "status": "bad",
-    "comment": "wrong line height for center text and EW is aligned wrong.",
-    "ratedAt": "2026-05-02T08:05:28.001Z",
+    "status": "good",
+    "comment": "Center text is moved or aligned wrong. On the original it's higher.",
+    "ratedAt": "2026-05-11T01:16:08.397Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_06.png"
   },
   "slide_07": {
@@ -37,9 +37,8 @@
     "ratedAt": "2026-05-02T08:05:46.113Z"
   },
   "slide_08": {
-    "status": "bad",
-    "comment": "line height is wrong.",
-    "ratedAt": "2026-05-02T08:05:56.993Z",
+    "status": "good",
+    "ratedAt": "2026-05-11T01:09:28.244Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_08.png"
   },
   "slide_09": {
@@ -48,18 +47,18 @@
   },
   "slide_10": {
     "status": "good",
-    "ratedAt": "2026-05-02T08:06:41.617Z"
+    "ratedAt": "2026-05-11T01:09:33.673Z"
   },
   "slide_11": {
     "status": "bad",
-    "comment": "Clipping on top is wrong, line height is wrong as well.",
-    "ratedAt": "2026-05-02T08:07:12.165Z",
+    "comment": "Spacing between bullets is wrong and top border clipping is wrong. Also it seems text position is slightly off. You've used spaces for spacing, please use bulleted list.",
+    "ratedAt": "2026-05-11T01:12:05.061Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_11.png"
   },
   "slide_12": {
     "status": "bad",
-    "comment": "There are still regresions with clipping and corners. There is no black border around.",
-    "ratedAt": "2026-05-02T08:08:34.953Z",
+    "comment": "On the bottom part there are gray leftovers.",
+    "ratedAt": "2026-05-11T01:12:31.613Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_12.png"
   },
   "slide_13": {
@@ -69,29 +68,28 @@
   "slide_14": {
     "status": "bad",
     "comment": "The top seems to be clipped like expected, but the border color is of the wrong color on center chips, colored vs gray.",
-    "ratedAt": "2026-05-02T08:08:39.052Z",
+    "ratedAt": "2026-05-11T01:12:37.588Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_14.png"
   },
   "slide_15": {
     "status": "good",
     "comment": "Anomalies with text in chips.",
-    "ratedAt": "2026-05-02T08:08:54.197Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_15.png"
+    "ratedAt": "2026-05-11T01:12:53.621Z"
   },
   "slide_16": {
     "status": "good",
-    "ratedAt": "2026-05-02T08:09:03.745Z"
+    "ratedAt": "2026-05-11T01:13:30.589Z"
   },
   "slide_17": {
-    "status": "bad",
+    "status": "good",
     "comment": "SV, GC and NX are aligned vertically wrong (top vs middle).",
-    "ratedAt": "2026-05-02T08:09:53.404Z",
+    "ratedAt": "2026-05-11T01:13:41.307Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_17.png"
   },
   "slide_18": {
-    "status": "bad",
+    "status": "good",
     "comment": "April 2025 and arrows are aligned wrong, top vs middle it seems, also numbers are aligned wrong.",
-    "ratedAt": "2026-05-02T08:11:05.261Z",
+    "ratedAt": "2026-05-11T01:13:51.926Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_18.png"
   },
   "slide_19": {
@@ -105,29 +103,27 @@
     "ratedAt": "2026-05-02T08:11:43.727Z"
   },
   "slide_21": {
-    "status": "bad",
+    "status": "good",
     "comment": "A+ aligned wrong and wrong line height for text.",
-    "ratedAt": "2026-05-02T08:12:03.658Z"
+    "ratedAt": "2026-05-11T01:13:57.487Z"
   },
   "slide_22": {
-    "status": "bad",
+    "status": "good",
     "comment": "3 is aligned wrong (top vs middle)",
-    "ratedAt": "2026-05-02T08:12:35.116Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_22.png"
+    "ratedAt": "2026-05-11T01:14:10.403Z"
   },
   "slide_23": {
     "status": "good",
-    "ratedAt": "2026-05-02T08:13:59.747Z"
+    "ratedAt": "2026-05-11T01:14:21.105Z"
   },
   "slide_24": {
-    "status": "bad",
-    "comment": "Each level adds 16px is totally busted and moved below, seems like line height is giantic.",
-    "ratedAt": "2026-05-02T08:14:36.783Z",
+    "status": "good",
+    "ratedAt": "2026-05-11T01:14:30.124Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_24.png"
   },
   "slide_25": {
     "status": "good",
-    "ratedAt": "2026-05-02T08:15:24.116Z"
+    "ratedAt": "2026-05-11T01:14:45.448Z"
   },
   "slide_26": {
     "status": "good",
@@ -135,23 +131,23 @@
   },
   "slide_27": {
     "status": "good",
-    "ratedAt": "2026-04-20T05:57:06.859Z"
+    "ratedAt": "2026-05-11T01:14:54.567Z"
   },
   "slide_28": {
-    "status": "bad",
+    "status": "good",
     "comment": "100% is wrongly aligned, top vs middle",
-    "ratedAt": "2026-05-02T08:16:30.918Z"
+    "ratedAt": "2026-05-11T01:14:59.153Z"
   },
   "slide_29": {
-    "status": "bad",
+    "status": "good",
     "comment": "Alignment od badge texts is wrong.",
-    "ratedAt": "2026-05-02T08:16:08.831Z",
+    "ratedAt": "2026-05-11T01:15:10.684Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_29.png"
   },
   "slide_30": {
-    "status": "bad",
+    "status": "good",
     "comment": "Line height of code is wrong.",
-    "ratedAt": "2026-05-02T08:15:53.713Z",
+    "ratedAt": "2026-05-11T01:15:48.580Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_30.png"
   }
 }

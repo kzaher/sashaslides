@@ -1,33 +1,43 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { writeFileSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve, join } from "node:path";
+import { dirname, resolve } from "node:path";
 import { createRequire } from "node:module";
 import * as esbuild from "esbuild";
 import type { ComputationGraph } from "./graph.js";
-import { CLIENT_SCRIPT } from "./server-client.js";
 import { callClaude } from "./claude-cli.js";
 import { runShell } from "./engine.js";
 import { realIO } from "./io.js";
 import { FatalShellError } from "./errors.js";
 
-// Bundle Preact + hooks + server-client into a single classic IIFE. This
-// dodges every cross-browser ESM / import-map quirk the monitor page used
-// to hit: the emitted script has zero dynamic imports, zero network calls,
-// and runs under a plain <script> tag on any browser that supports ES2020.
+// Bundle the Preact monitor UI (src/client/main.tsx) into a single classic
+// IIFE that the HTML response embeds inline. Zero dynamic imports, zero
+// network calls — runs under a plain <script> tag on any ES2020 browser.
+//
+// Done at server boot (not build time) so the same `tsx build.ts ...`
+// invocation that compiles the engine also bakes the latest client into
+// the dist bundle. esbuild follows JSX + tsx natively, resolves "preact"
+// and "preact/hooks" through the repo's node_modules, inlines them.
 const require = createRequire(fileURLToPath(import.meta.url));
 
 function bundleClientScript(): string {
-  // Rewrite the exported CLIENT_SCRIPT (which was authored as an ES module
-  // with `import { h, render } from "preact"` etc.) through esbuild along
-  // with preact + preact/hooks as siblings. esbuild follows the "preact"
-  // and "preact/hooks" specifiers through the repo's node_modules and
-  // inlines everything.
-  const tmp = mkdtempSync(join(tmpdir(), "sp-monitor-"));
-  const entry = join(tmp, "client.js");
-  writeFileSync(entry, CLIENT_SCRIPT);
+  // Resolve the source entry relative to THIS file's location so the
+  // bundle works whether server.ts is invoked from src/server/server.ts
+  // (via tsx) or from dist/main-scaffolding.mjs (after build.ts). In
+  // both cases src/client/main.tsx sits at ../../src/client/main.tsx
+  // from THIS module if running via tsx, but at the dist path it ships
+  // bundled — so prefer source-resolution from the import.meta.url-
+  // derived dirname when the file exists; otherwise fall back to a
+  // repo-root-relative search.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(here, "..", "client", "main.tsx"),                  // running from src/server/
+    resolve(here, "..", "src", "client", "main.tsx"),           // running from a sibling dir
+    resolve(here, "..", "..", "src", "client", "main.tsx"),     // running from dist/
+  ];
+  const entry = candidates.find(p => {
+    try { require.resolve(p); return true; } catch { return false; }
+  }) ?? candidates[0];
   const result = esbuild.buildSync({
     entryPoints: [entry],
     bundle: true,
@@ -35,6 +45,8 @@ function bundleClientScript(): string {
     platform: "browser",
     target: ["es2020"],
     write: false,
+    jsx: "automatic",
+    jsxImportSource: "preact",
     nodePaths: [
       resolve(dirname(require.resolve("preact/package.json")), ".."),
     ],
@@ -163,12 +175,24 @@ interface AskReply {
  * Persists via the graph's mutation hook — if `enablePersistence(path)`
  * was called, the snapshot on disk now includes this follow-up.
  */
-interface RetryRequest { nodeId: string }
+interface RetryRequest {
+  nodeId: string;
+  /** When true (default), also reset every transitive successor in the
+   *  graph so downstream nodes whose outputs were derived from this
+   *  node's stale value get recomputed. Pass `false` to retry just this
+   *  one node (useful when you know downstream nodes don't depend on
+   *  this node's output value). */
+  cascade?: boolean;
+}
 interface RetryReply {
   nodeId: string;
   kind: string;
   status: "ok" | "error";
   message: string;
+  /** When cascade was true, the list of node ids that got reset to
+   *  pending (this node + every transitive successor). The scheduler /
+   *  legacy engine will re-fire each of them on its next pass. */
+  resetNodeIds?: string[];
 }
 
 /**
@@ -189,21 +213,34 @@ async function handleRetry(rawBody: string, graph: ComputationGraph): Promise<Re
   const node = graph.get(body.nodeId);
   if (!node) throw new Error(`node not found: ${body.nodeId}`);
 
+  // Cascade reset (default true): also reset every transitive successor
+  // so downstream nodes whose outputs were derived from this stale value
+  // get recomputed by the scheduler / legacy engine on its next pass.
+  // The actual re-fire of the node happens below for shell/send kinds;
+  // for everything else, resetSubtree returns the affected node ids and
+  // the scheduler/engine handles re-execution.
+  const cascade = body.cascade !== false;
+  const resetNodeIds = cascade ? graph.resetSubtree(node.id) : (graph.resetNode(node.id), [node.id]);
+
   if (node.kind === "executeShell") {
     const input = (node.input ?? {}) as { cmd?: string; cwd?: string };
     if (!input.cmd) throw new Error("executeShell node has no saved cmd to retry");
     const cwd = input.cwd ?? process.cwd();
     graph.start(node.id);
     try {
-      const stdout = await runShell({ cmd: input.cmd, cwd, io: realIO, nodeId: node.id });
-      graph.finishOk(node.id, { stdoutTail: stdout.slice(-400), retried: true });
-      return { nodeId: node.id, kind: node.kind, status: "ok", message: "shell command succeeded" };
+      const { stdout, stderr } = await runShell({ cmd: input.cmd, cwd, io: realIO, nodeId: node.id });
+      graph.finishOk(node.id, {
+        stdoutTail: stdout.slice(-400),
+        stderrTail: stderr.slice(-400),
+        retried: true,
+      });
+      return { nodeId: node.id, kind: node.kind, status: "ok", message: "shell command succeeded", resetNodeIds };
     } catch (err) {
       graph.finishErr(node.id, err);
       const msg = err instanceof FatalShellError || err instanceof Error
         ? err.message
         : String(err);
-      return { nodeId: node.id, kind: node.kind, status: "error", message: msg };
+      return { nodeId: node.id, kind: node.kind, status: "error", message: msg, resetNodeIds };
     }
   }
 
@@ -229,7 +266,7 @@ async function handleRetry(rawBody: string, graph: ComputationGraph): Promise<Re
       });
       if (r.isError) {
         graph.finishErr(node.id, { message: r.errorMessage ?? "retry failed", data: { stderr: r.stderr } });
-        return { nodeId: node.id, kind: node.kind, status: "error", message: r.errorMessage ?? "send returned isError" };
+        return { nodeId: node.id, kind: node.kind, status: "error", message: r.errorMessage ?? "send returned isError", resetNodeIds };
       }
       graph.finishOk(
         node.id,
@@ -243,7 +280,7 @@ async function handleRetry(rawBody: string, graph: ComputationGraph): Promise<Re
         },
         { sessionId: r.sessionId, model: r.model ?? node.model },
       );
-      return { nodeId: node.id, kind: node.kind, status: "ok", message: "send returned " + r.text.length + " chars" };
+      return { nodeId: node.id, kind: node.kind, status: "ok", message: "send returned " + r.text.length + " chars", resetNodeIds };
     } catch (err) {
       graph.finishErr(node.id, err);
       throw err;

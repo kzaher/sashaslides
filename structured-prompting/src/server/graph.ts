@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { IJsonSchemaUnit } from "@typia/interface";
-import type { ClaudeModel } from "./types.js";
+import type { ClaudeModel, NodeStatus, GraphSnapshot, GraphNode as WireGraphNode } from "../api/wire.js";
 import type {
   CommonSendArguments,
   PromptInput,
@@ -10,7 +10,10 @@ import type {
   SessionWithResult,
 } from "./session.js";
 
-export type NodeStatus = "pending" | "running" | "ok" | "error";
+// NodeStatus is re-exported as a convenience for server-side imports
+// (engine, session) that already pulled it from this module — the wire
+// definition in api/wire.ts is the source of truth.
+export type { NodeStatus };
 
 // --- Per-kind payload types -------------------------------------------------
 //
@@ -108,7 +111,13 @@ export interface NodeKindSchemas {
 }
 
 /** Derived: every node kind known to the library. */
-export type NodeKind = keyof NodeKindSchemas;
+/**
+ * Local alias derived from NodeKindSchemas. Should be structurally identical
+ * to api's NodeKind union — if you add a kind, add it to api/wire.ts too.
+ * Not re-exported because api's NodeKind is the public/wire-level source of
+ * truth and server-internal code can rely on either.
+ */
+type NodeKind = keyof NodeKindSchemas;
 
 interface GraphNodeBase {
   id: string;
@@ -136,12 +145,12 @@ interface GraphNodeBase {
 }
 
 /**
- * GraphNode is a discriminated union on `kind`. In a `switch(node.kind) {
+ * RichGraphNode is a discriminated union on `kind`. In a `switch(node.kind) {
  * case "parallelFork": ... }` TypeScript narrows the variant so
  * `node.callbacks.apply` has the exact function type and `node.input.inputs`
  * is `readonly unknown[]` — no casts needed.
  */
-export type GraphNode = {
+export type RichGraphNode = {
   [K in NodeKind]: GraphNodeBase & { kind: K } & NodeKindSchemas[K];
 }[NodeKind];
 
@@ -169,7 +178,7 @@ export type CreateArgs<K extends NodeKind> = {
 
 export class ComputationGraph {
   readonly id: string;
-  private nodes = new Map<string, GraphNode>();
+  private nodes = new Map<string, RichGraphNode>();
   readonly rootId: string;
   startedAt = Date.now();
   finishedAt: number | null = null;
@@ -182,7 +191,7 @@ export class ComputationGraph {
 
   constructor(label = "root") {
     this.id = randomUUID();
-    const root: GraphNode = {
+    const root: RichGraphNode = {
       id: randomUUID(),
       parentId: null,
       containerId: null,
@@ -237,7 +246,7 @@ export class ComputationGraph {
   private hydrate(snap: ReturnType<ComputationGraph["snapshot"]>) {
     (this as { id: string }).id = snap.id;
     this.nodes = new Map();
-    for (const n of snap.nodes) this.nodes.set(n.id, n as GraphNode);
+    for (const n of snap.nodes) this.nodes.set(n.id, n as RichGraphNode);
     (this as { rootId: string }).rootId = snap.rootId;
     this.startedAt = snap.startedAt;
     this.finishedAt = snap.finishedAt;
@@ -250,7 +259,7 @@ export class ComputationGraph {
    * (and `callbacks`, where applicable) match the shape declared in
    * `NodeKindSchemas[K]`.
    */
-  create<K extends NodeKind>(args: CreateArgs<K>): Extract<GraphNode, { kind: K }> {
+  create<K extends NodeKind>(args: CreateArgs<K>): Extract<RichGraphNode, { kind: K }> {
     const { parentId, kind, label } = args;
     const containerId = (args as { containerId?: string | null }).containerId ?? parentId;
     // Runtime object. The field layout is identical for every variant — only
@@ -275,11 +284,18 @@ export class ComputationGraph {
       ...(("callbacks" in args)
         ? { callbacks: (args as { callbacks: unknown }).callbacks }
         : {}),
-    } as unknown as Extract<GraphNode, { kind: K }>;
+    } as unknown as Extract<RichGraphNode, { kind: K }>;
     this.nodes.set(node.id, node);
     if (parentId) {
       const parent = this.nodes.get(parentId);
       if (parent) parent.children.push(node.id);
+      // Auto-wire a default predecessor edge from parentId. The scheduler
+      // can run a parentId-built graph without the description-builder
+      // having to call setPredecessors() everywhere. Override later (e.g.
+      // parallelFork's aggregator) by calling setPredecessors() directly.
+      (node as { predecessors?: import("../api/wire.js").PredecessorEdge[] }).predecessors = [
+        { nodeId: parentId, condition: "ok" },
+      ];
     }
     this.version++;
     this.persist();
@@ -348,11 +364,107 @@ export class ComputationGraph {
     this.persist();
   }
 
-  get(id: string): GraphNode | undefined {
+  /** Wire a state-machine edge: this node fires when `predecessor.nodeId`
+   *  reaches `predecessor.condition`. Used by the v2 scheduler. Replaces
+   *  any prior predecessors. Callable repeatedly (e.g. during eager
+   *  expansion of fallback chains) — last write wins. */
+  setPredecessors(id: string, predecessors: import("../api/wire.js").PredecessorEdge[]): void {
+    const n = this.nodes.get(id);
+    if (!n) return;
+    (n as { predecessors?: import("../api/wire.js").PredecessorEdge[] }).predecessors = predecessors;
+    this.version++;
+    this.persist();
+  }
+
+  /** Set how the node combines its predecessor edges. Default is "all".
+   *  Aggregators (e.g. parallelFork post, try success-fan) flip to "any". */
+  setJoinMode(id: string, joinMode: import("../api/wire.js").JoinMode): void {
+    const n = this.nodes.get(id);
+    if (!n) return;
+    (n as { joinMode?: import("../api/wire.js").JoinMode }).joinMode = joinMode;
+    this.version++;
+    this.persist();
+  }
+
+  /**
+   * Reset one node to `pending`. Clears output, error, and timestamps so
+   * the scheduler will pick it up again on the next loop iteration. Used
+   * by /api/retry to re-fire a node's handler after the user has fixed
+   * whatever caused the original failure. The caller decides whether to
+   * cascade: see `resetSubtree`.
+   */
+  resetNode(id: string): void {
+    const n = this.nodes.get(id);
+    if (!n) return;
+    n.status = "pending";
+    n.startedAt = null;
+    n.finishedAt = null;
+    n.output = null;
+    n.error = null;
+    this.version++;
+    this.persist();
+  }
+
+  /**
+   * Reset a node AND every transitive successor (any node with a
+   * predecessor edge pointing back to this subtree). Used when retrying
+   * a node whose `ok` output was already consumed by downstream nodes —
+   * their stored outputs are derived from stale upstream and must be
+   * recomputed.
+   *
+   * Returns the list of reset node ids so the caller (typically the
+   * /api/retry handler) can report what changed. Idempotent: calling
+   * with an already-pending node id is a no-op tree-walk.
+   */
+  resetSubtree(rootId: string): string[] {
+    const reset: string[] = [];
+    const queue: string[] = [rootId];
+    const seen = new Set<string>();
+    // Build a reverse index: predecessorId → ids that depend on it
+    const reverse = new Map<string, string[]>();
+    for (const n of this.nodes.values()) {
+      const preds = (n as { predecessors?: import("../api/wire.js").PredecessorEdge[] }).predecessors;
+      if (!preds) continue;
+      for (const e of preds) {
+        if (!reverse.has(e.nodeId)) reverse.set(e.nodeId, []);
+        reverse.get(e.nodeId)!.push(n.id);
+      }
+    }
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      this.resetNode(id);
+      reset.push(id);
+      const successors = reverse.get(id);
+      if (successors) for (const sid of successors) queue.push(sid);
+    }
+    return reset;
+  }
+
+  /** Streaming partial-output writer. Used by `send` (writes
+   *  `partialText` / `partialUsage`) and `executeShell` (writes
+   *  `stdoutSoFar` / `stderrSoFar`) while the node is still `running`,
+   *  so the UI can render mid-flight progress on its 250 ms poll. The
+   *  patch is shallow-merged into `node.output`; existing keys not
+   *  mentioned in the patch are preserved. Does NOT transition the
+   *  node — that's still finishOk/finishErr's job. */
+  patchOutput(id: string, patch: Record<string, unknown>): void {
+    const n = this.nodes.get(id);
+    if (!n) return;
+    const prev = (n.output && typeof n.output === "object")
+      ? (n.output as Record<string, unknown>)
+      : {};
+    (n as { output: unknown }).output = { ...prev, ...patch };
+    this.version++;
+    this.persist();
+  }
+
+  get(id: string): RichGraphNode | undefined {
     return this.nodes.get(id);
   }
 
-  allNodes(): GraphNode[] {
+  allNodes(): RichGraphNode[] {
     return Array.from(this.nodes.values());
   }
 
@@ -360,8 +472,8 @@ export class ComputationGraph {
    * Return the linear chain from root to `tipId` following parent pointers.
    * This is the description-path the engine executes sequentially.
    */
-  pathToRoot(tipId: string): GraphNode[] {
-    const out: GraphNode[] = [];
+  pathToRoot(tipId: string): RichGraphNode[] {
+    const out: RichGraphNode[] = [];
     let id: string | null = tipId;
     while (id) {
       const n = this.nodes.get(id);
@@ -385,7 +497,7 @@ export class ComputationGraph {
   snapshot() {
     // Strip non-serializable callbacks before emitting on the wire.
     const nodes = this.allNodes().map((n) => {
-      const { ...rest } = n as GraphNode & { callbacks?: unknown };
+      const { ...rest } = n as RichGraphNode & { callbacks?: unknown };
       delete (rest as { callbacks?: unknown }).callbacks;
       return rest;
     });

@@ -1698,8 +1698,41 @@ interface ExtractedElement {
             boxShadow: null,
           } as any);
         }
+        elements.push({ type: "visual", bounds, tag: "clipped-container" });
+        // Stroke-only roundRect FRAME on top of the visual, matching the
+        // captured device's border-radius. pptxgenjs `addImage` only writes
+        // <p:pic prstGeom prst="rect">, so the captured PNG's RECTANGULAR
+        // corners cover the underlying halo's curved gray corners with the
+        // page background — making the spread shadow invisible at the corners
+        // (slide_12 ".device {box-shadow: 0 0 0 2px #333}"). The frame paints
+        // the ring colour over the outermost spread*2 px of the image (drawn
+        // INSIDE because `injectStrokeAlignment` forces algn="in"), so the
+        // ring follows the device's rounded corners. Use the OPAQUE outermost
+        // ring (highest spread) — translucent inner rings can't usefully
+        // over-paint a captured image. Frame zIndex high so it paints last.
+        const opaqueOuter = rings.find(r => r.alpha >= 0.95);
+        if (opaqueOuter) {
+          elements.push({
+            type: "rect",
+            bounds: { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h },
+            fill: null,
+            fillAlpha: 1,
+            gradient: null,
+            borderRadius: elBR,
+            cornerRadii: { tl: elBR, tr: elBR, br: elBR, bl: elBR },
+            borderUniform: true,
+            borderSides: null,
+            borderColor: opaqueOuter.color,
+            borderWidth: opaqueOuter.spread * 2,
+            borderStyle: "solid",
+            zIndex: 1000,
+            position: "static",
+            boxShadow: null,
+          } as any);
+        }
+      } else {
+        elements.push({ type: "visual", bounds, tag: "clipped-container" });
       }
-      elements.push({ type: "visual", bounds, tag: "clipped-container" });
       return;
     }
 
@@ -1984,14 +2017,29 @@ interface ExtractedElement {
               pitches.push(lineTops[i] - lineTops[i - 1]);
             }
             pitches.sort((a, b) => a - b);
-            measuredLinePitch = pitches[Math.floor(pitches.length / 2)];
+            // Drop trailing paragraph-break outliers (e.g. <br><br> in
+            // slide_24 .innermost): a pitch ≥ 1.5× the next-smaller is a
+            // paragraph gap, not a line pitch. Without this, sorted [24, 48]
+            // medians to 48 (Math.floor(2/2)=1) and the override fires
+            // wrongly, locking spcPts ≈ 27pt on bodies the user wants at
+            // their ratio line-height.
+            while (
+              pitches.length >= 2 &&
+              pitches[pitches.length - 1] >= pitches[pitches.length - 2] * 1.5
+            ) {
+              pitches.pop();
+            }
+            if (pitches.length >= 1) {
+              measuredLinePitch = pitches[Math.floor(pitches.length / 2)];
+            }
           }
         }
       } catch { /* ignore */ }
-      const effectiveLineHeight =
-        measuredLinePitch && measuredLinePitch > cssLH * 1.05
-          ? measuredLinePitch
-          : style.lineHeight;
+      const lineHeightMeasured =
+        measuredLinePitch != null && measuredLinePitch > cssLH * 1.05;
+      const effectiveLineHeight = lineHeightMeasured
+        ? (measuredLinePitch as number)
+        : style.lineHeight;
       // bgColorBehind: nearest ancestor solid bg, sampled only when the
       // element is semi-transparent. Google Slides drops <a:alpha> on text
       // <a:solidFill> at PPTX import, so the converter folds opacity into
@@ -2006,6 +2054,7 @@ interface ExtractedElement {
         color: style.color,
         textAlign: effectiveAlign,
         lineHeight: effectiveLineHeight,
+        lineHeightMeasured,
         textDecoration: inlineBorderUnderline ? "underline" : style.textDecoration,
         textTransform: style.textTransform,
         letterSpacing: style.letterSpacing,
@@ -2064,10 +2113,32 @@ interface ExtractedElement {
       // branch — without it the green pill emits anchor="t" and "200 OK"
       // hugs the top edge of the badge instead of riding mid-line.
       const chipWithOwnBgVC = !!style.bgColor && padTop > 0;
+      // Flex/grid container whose CSS already centers the glyph baseline.
+      // The chip/pill gates above both require padTop>0 (their job is to
+      // detect padded chips); they miss the very common pattern of a 0-padding
+      // shape (circle, square chip, mini-button) using flex/grid to center.
+      // Affected on wave-10B: slide_02 `.avatar`, slide_17 `.investor-icon`,
+      // slide_18 `.nav-btn` + today-day `.day-num`, slide_22 `.badge-overlap`,
+      // slide_28 `.opacity-badge`, slide_29 `.icon-circle` — all 0-padding,
+      // some with gradient bg (no bgColor) and some with solid bg, all of which
+      // previously emitted anchor="t" and so showed the letter glued to the
+      // top of the disc. Cross-axis direction matters: for `flex-direction:
+      // row` (default), vertical centering is `align-items: center`. For
+      // `column`, vertical centering moves to `justify-content: center`.
+      const flexDir = cs.flexDirection || "row";
+      const isFlexVC =
+        (style.display === "flex" || style.display === "inline-flex") &&
+        (flexDir === "column" || flexDir === "column-reverse"
+          ? style.justifyContent === "center"
+          : style.alignItems === "center");
+      const isGridVC =
+        (style.display === "grid" || style.display === "inline-grid") &&
+        style.alignItems === "center";
+      const flexCenteredShapeVC = isFlexVC || isGridVC;
       const verticallyCentered =
         !hasLineBreaks &&
         Math.abs(padTop - padBot) < 3 &&
-        (padTop >= 5 || fullyRoundedPillVC || chipWithOwnBgVC);
+        (padTop >= 5 || fullyRoundedPillVC || chipWithOwnBgVC || flexCenteredShapeVC);
       // Use a regex that excludes \u00a0 so leading/trailing nbsp (used as
       // visual indentation in code blocks like slide_15) survive. JS
       // String.trim() strips Unicode whitespace including nbsp.

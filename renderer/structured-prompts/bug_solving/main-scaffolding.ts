@@ -6,7 +6,7 @@
  * engine keeps its monitor UI on port 4711 by default.
  *
  * Usage (real):
- *   npx tsx build.ts renderer/html2slides/structured-prompts/bug_solving/main-scaffolding.ts \
+ *   npx tsx build.ts renderer/structured-prompts/bug_solving/main-scaffolding.ts \
  *     && node dist/main-scaffolding.mjs
  */
 import { mkdirSync } from "fs";
@@ -45,13 +45,38 @@ async function run() {
     console.error(`  ${t.task_id} @ ${t.workspace_dir} (port ${t.server_port})`);
   }
 
-  const engine = new ClaudeEngine({ port: 4711, persist: true });
+  // Graph persistence: every mutation writes a JSON snapshot to
+  // /tmp/bug_solving-graph-<ts>.json (overridable via env SP_GRAPH_PATH).
+  // After a crash, point `npx tsx structured-prompting/src/server/view-graph.ts <path>`
+  // at that file to re-attach the monitor + ask follow-ups against any
+  // node that still has a sessionId.
+  const graphPath = process.env.SP_GRAPH_PATH ?? `/tmp/bug_solving-graph-${Date.now()}.json`;
+  const engine = new ClaudeEngine({ port: 4711, persist: true, graphPersistPath: graphPath });
+  console.error(`[scaffold] graph persistence: ${graphPath}`);
   const session = new Session({ sessionId: `bug_solving-${Date.now()}` });
-  const results = await engine.execute(session, (s) => main({ session: s, tasks }));
+  let results: unknown;
+  try {
+    results = await engine.execute(session, (s) => main({ session: s, tasks }));
+  } catch (e) {
+    // Log the error in detail (was silently empty `{}` before because
+    // some thrown values are plain objects without enumerable props).
+    console.error("\n=== ENGINE THREW ===");
+    const err = e as { name?: string; message?: string; stack?: string; data?: unknown };
+    console.error(`name: ${err?.name ?? "<unknown>"}`);
+    console.error(`message: ${err?.message ?? String(e)}`);
+    if (err?.stack) console.error(`stack:\n${err.stack}`);
+    if (err?.data !== undefined) try { console.error(`data: ${JSON.stringify(err.data, null, 2)}`); } catch { /* ignore */ }
+    console.error(`graph snapshot persisted at: ${graphPath}`);
+    console.error("To re-attach the monitor against the saved graph:");
+    console.error(`  npx tsx structured-prompting/src/server/view-graph.ts ${graphPath}`);
+    console.error(`Monitor still live at ${engine.monitorUrl} for as long as this process runs.`);
+    return;
+  }
 
   console.error("\n=== RESULTS ===");
   console.error(JSON.stringify(results, null, 2));
   console.error(`\nMonitor still live at ${engine.monitorUrl}`);
+  console.error(`Graph snapshot persisted at: ${graphPath}`);
   console.error(
     "\nPer-task SxS servers (if step 8 completed successfully):\n" +
     tasks.map(t => `  ${t.task_id} → http://localhost:${t.server_port}`).join("\n"),
@@ -60,6 +85,11 @@ async function run() {
 }
 
 run().catch((e) => {
-  console.error("bug_solving crashed:", e);
+  // Surface FULL diagnostics — was previously empty `{}` for non-Error throws.
+  const err = e as { name?: string; message?: string; stack?: string };
+  console.error("bug_solving scaffold-level crash:");
+  console.error(`  name: ${err?.name ?? "<unknown>"}`);
+  console.error(`  message: ${err?.message ?? String(e)}`);
+  if (err?.stack) console.error(`  stack:\n${err.stack}`);
   process.exit(1);
 });

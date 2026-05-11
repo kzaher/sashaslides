@@ -5,7 +5,7 @@ import {
   type AssertCheckCallback,
   type CombineExecutionCallback,
   type CombineMergeCallback,
-  type GraphNode,
+  type RichGraphNode,
   type ParallelApplyCallback,
   type PipeCallback,
   type ShellBuildCallback,
@@ -250,14 +250,14 @@ export class Session {
   }
 
   pipe<T>(fn: DescFn<Session, SessionWithResult<T>>): SessionWithResult<T> {
+    // Lazy callback path: engine invokes fn at runtime (same reason as
+    // parallelFork — user code inside fn may read files produced by
+    // upstream nodes that don't exist at description-build time).
     const node = this.graph.create({
       parentId: this.tipNodeId,
       containerId: this.containerId,
       kind: "pipe",
       label: "pipe",
-      // Widen the user's typed fn to the graph's unknown-typed callback
-      // shape — safe because the engine only ever invokes it with values
-      // pulled from the same typed position in the description.
       callbacks: { fn: fn as PipeCallback },
     });
     return this.withResultAt<T>(node.id);
@@ -267,6 +267,15 @@ export class Session {
     inputs: readonly T[],
     apply: ParallelApplyFn<T, R>,
   ): SessionWithResult<R[]> {
+    // Lazy callback path: the engine invokes apply per-input at
+    // RUNTIME (after upstream nodes' outputs exist). Eager expansion
+    // was attempted here in an earlier phase but reverted: user code
+    // inside the apply callback frequently reads files produced by
+    // upstream nodes (e.g. main.ts:342's `pixelDiffPng(baselinePath,
+    // testPath, …)`), which don't exist at description-build time.
+    // Predecessor wiring stays on the parallelFork node itself —
+    // children created at runtime auto-default predecessors from
+    // parentId via graph.create's auto-defaulter.
     const node = this.graph.create({
       parentId: this.tipNodeId,
       containerId: this.containerId,
@@ -282,6 +291,7 @@ export class Session {
     code: TryFn<R>,
     fallback: TryFallbackFn<R>
   ): SessionWithResult<R> {
+    // Lazy callback path: engine invokes code/fallback at runtime.
     const node = this.graph.create({
       parentId: this.tipNodeId,
       containerId: this.containerId,
@@ -300,6 +310,7 @@ export class Session {
     code: TryFn<R>,
     fallback: TryFallbackFn<R> = (_s, e) => { throw e; },
   ): SessionWithResult<R> {
+    // Lazy callback path: engine invokes code/fallback per attempt at runtime.
     const node = this.graph.create({
       parentId: this.tipNodeId,
       containerId: this.containerId,
@@ -413,6 +424,7 @@ export class SessionWithResult<T> extends Session {
     execution: CombineExecFn<T, R>,
     combine: CombineFn<T, R, JointResult> = ((left: T, _right: R) => left as unknown as JointResult),
   ): SessionWithResult<JointResult> {
+    // Lazy callback path: engine invokes execution at runtime.
     const node = this.graph.create({
       parentId: this.tipNodeId,
       containerId: this.containerId,
@@ -515,6 +527,87 @@ function randomId(): string {
   return "sp_" + Math.random().toString(36).slice(2, 10);
 }
 
+/**
+ * Build a placeholder error object that the fallback callback receives at
+ * description-build time. Every property access returns a substitution
+ * token referencing the predecessor's error fields:
+ *
+ *   err.message → "{{<primaryTipId>.error.message}}"
+ *   err.name    → "{{<primaryTipId>.error.name}}"
+ *   String(err) → "{{<primaryTipId>.error}}"
+ *
+ * `describeError(err)` (in errors.ts) produces a JSON string with these
+ * tokens baked in. At fire-time the scheduler / legacy engine resolves
+ * tokens against the actual predecessor's `error` field.
+ *
+ * Uses a Proxy so unforeseen field accesses (e.g. `.data`, `.stack`)
+ * produce tokens too, without us having to enumerate every field a user
+ * might inspect.
+ */
+function makeErrPlaceholder(predecessorNodeId: string): unknown {
+  const base = `{{${predecessorNodeId}.error`;
+  return new Proxy({}, {
+    get(_target, prop) {
+      if (prop === Symbol.toPrimitive || prop === "toString") {
+        return () => `${base}}}`;
+      }
+      if (prop === "toJSON") {
+        return () => `${base}}}`;
+      }
+      if (typeof prop !== "string") return undefined;
+      return `${base}.${prop}}}`;
+    },
+  });
+}
+
+/**
+ * Walk backward from `tipId` along parentId until reaching the FIRST
+ * descendant of `containerId` — i.e., the node at the root of a chain
+ * that started directly off `containerId`. Used by try/tryMultipleTimes
+ * to find the head of the fallback chain so its predecessor edge can
+ * be re-targeted to fire on the primary's error instead of on the
+ * `try` node itself (the default).
+ */
+function walkBackTo(graph: ComputationGraph, tipId: string, containerId: string): string | null {
+  let cur: string | null = tipId;
+  while (cur) {
+    const n = graph.get(cur);
+    if (!n) return null;
+    if (n.parentId === containerId) return n.id;
+    cur = n.parentId;
+  }
+  return null;
+}
+
+/**
+ * Resolve `{{nodeId.error.field}}` substitution tokens against the
+ * current graph state. Used by the legacy engine's `materializeAndCall`
+ * (composing prepends into a final prompt) and by the v2 scheduler's
+ * `send` handler (same composition step).
+ *
+ * Token grammar (intentionally minimal — only what try/tryMultipleTimes
+ * actually emits):
+ *   {{<uuid>.error}}           → predecessor.error itself as JSON string
+ *   {{<uuid>.error.<field>}}   → predecessor.error[field] (commonly "message", "name")
+ *
+ * Unresolved tokens (predecessor doesn't exist, isn't errored, or the
+ * field is missing) are replaced with "<unresolved:{token}>" so the
+ * model still sees a parseable string — never silent corruption.
+ */
+export function resolveSubstitutions(text: string, graph: ComputationGraph): string {
+  if (!text || !text.includes("{{")) return text;
+  return text.replace(/\{\{([0-9a-f-]{8,})\.error(?:\.([a-zA-Z0-9_-]+))?\}\}/g, (full, nodeId: string, field?: string) => {
+    const n = graph.get(nodeId);
+    if (!n || !n.error) return `<unresolved:${full}>`;
+    if (!field) {
+      try { return JSON.stringify(n.error); } catch { return String(n.error.message); }
+    }
+    const v = (n.error as Record<string, unknown>)[field];
+    if (v == null) return `<unresolved:${full}>`;
+    return typeof v === "string" ? v : JSON.stringify(v);
+  });
+}
+
 // Re-export ClaudeModel sugar from types for convenience.
 export { Claude } from "./types.js";
-export type { GraphNode };
+export type { RichGraphNode };

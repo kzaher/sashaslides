@@ -26,6 +26,14 @@ export interface SpawnCaptureArgs {
    *  live children that belong to a given subtree, without killing
    *  unrelated work. Engine populates this on every spawn. */
   nodeId?: string;
+  /** Live stdout listener. Fires for every chunk as it arrives, BEFORE the
+   *  child exits. Used by the scheduler's executeShell handler to surface
+   *  `stdoutSoFar` on the graph node so the monitor UI sees output mid-run.
+   *  Chunks may split mid-line (Node delivers OS read() buffers verbatim);
+   *  callers that need line semantics should accumulate and split. */
+  onStdout?: (chunk: string) => void;
+  /** Live stderr listener — same contract as `onStdout`. */
+  onStderr?: (chunk: string) => void;
 }
 
 export interface SpawnCaptureResult {
@@ -179,8 +187,20 @@ export const realIO: IO = {
           try { groupKiller.kill("SIGTERM"); } catch {}
         }, timeoutMs);
       }
-      child.stdout?.on("data", (d) => { stdout += d.toString(); });
-      child.stderr?.on("data", (d) => { stderr += d.toString(); });
+      child.stdout?.on("data", (d) => {
+        const s = d.toString();
+        stdout += s;
+        if (args.onStdout) {
+          try { args.onStdout(s); } catch { /* listener errors must not abort the spawn */ }
+        }
+      });
+      child.stderr?.on("data", (d) => {
+        const s = d.toString();
+        stderr += s;
+        if (args.onStderr) {
+          try { args.onStderr(s); } catch { /* listener errors must not abort the spawn */ }
+        }
+      });
       child.on("error", (err) => {
         spawnError = err instanceof Error ? err.message : String(err);
         if (timer) clearTimeout(timer);

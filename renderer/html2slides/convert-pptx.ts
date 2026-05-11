@@ -277,30 +277,28 @@ function emitStyledText(
   //    too, dropping CTA glyphs visibly below center (~7 slide-px). Pin the
   //    rendering by emitting 1.2 explicitly.
   //
-  // 2. Multi-line / non-centered text: emit absolute `lineSpacing` (points,
-  //    serialised as `<a:spcPts val="N"/>`) rather than `lineSpacingMultiple`
-  //    (serialised as `<a:spcPct>`). spcPct is a percentage of Slides'
-  //    inferred per-font default line pitch, which empirically is *much*
-  //    smaller than 1.2 × fontSize for the fonts we use — so for large CSS
-  //    line-heights like 2.2 (slide_25 .text-block), a spcPct-based emit
-  //    under-shoots the CSS pitch by ~30 %, compounding into 90+ px of
-  //    cumulative drift down the paragraph (user's "entire main text is
-  //    somehow moved up"). Absolute points bypass the font-default layer:
-  //    Slides uses exactly the leading we ask for. `s.lineHeight * PX2PT`
-  //    converts CSS px directly to pts. For slides whose CSS line-height
-  //    already equals the default (~1.2 × fontSize) the emitted pitch is
-  //    unchanged, so this is a pure improvement for custom line-heights
-  //    (slide_25 2.2, slide_30 1.7, slide_06 1.6) and a no-op elsewhere.
+  // 2. Multi-line / non-centered text. Two sub-cases:
+  //    a. Inflated line metrics — extract-dom's Range probe measured a
+  //       per-line pitch wider than CSS spec (inline children with their own
+  //       padding / border / larger font-size on slide_25 `.text-block`).
+  //       Emit absolute `lineSpacing` (points → `<a:spcPts>`) so Slides
+  //       reproduces the measured pitch exactly. Relative `spcPct` here
+  //       under-shoots by ~30 %, the wave-9 slide_25 fix.
+  //    b. Uniform line metrics (everything else: `.code-block`, body text,
+  //       headings). Emit relative `lineSpacingMultiple = ratio/1.2` →
+  //       `<a:spcPct>`. Slides applies the multiplier to its native per-font
+  //       default leading; absolute spcPts at the CSS-spec value over- or
+  //       under-shoots Slides' natural pitch and produced the wave-9
+  //       regression on slide_04/06/08/21/24/30 ("line height is wrong").
   if (s.lineHeight && s.fontSize) {
     const isSingleLineCentered = valign === "middle" && el.verticallyCentered === true;
     if (isSingleLineCentered) {
       commonOpts.lineSpacingMultiple = 1.2;
-    } else {
+    } else if (s.inflatedLineMetrics) {
       commonOpts.lineSpacing = s.lineHeight * PX2PT;
+    } else {
+      commonOpts.lineSpacingMultiple = (s.lineHeight / s.fontSize) / 1.2;
     }
-  }
-  if (typeof el.text === "string" && el.text.startsWith("The quick brown")) {
-    console.log("DEBUG textblock opts:", JSON.stringify({ lineSpacing: commonOpts.lineSpacing, lineSpacingMultiple: commonOpts.lineSpacingMultiple, lineHeight: s.lineHeight, fontSize: s.fontSize, valign }));
   }
   if (rotateDeg) commonOpts.rotate = rotateDeg;
 
@@ -1125,13 +1123,13 @@ function buildPptx(
               return [{ text: marker + it.text, options: baseOpts }];
             }).flat();
 
-            // Honor CSS line-height when explicitly set. Emit absolute
-            // `lineSpacing` (points → `<a:spcPts>`) rather than
-            // `lineSpacingMultiple` (`<a:spcPct>`) — Slides treats spcPct as
-            // a percentage of its inferred per-font default leading, which
-            // empirically under-shoots large CSS line-heights like 1.5 by
-            // ~25 % (slide_11 Opportunities bullets render too tight). Mirror
-            // the text-block path which uses absolute pt for the same reason.
+            // Honor CSS line-height when materially different from Slides'
+            // default leading (~1.2× fontSize). Emit relative
+            // `lineSpacingMultiple` → `<a:spcPct>` so Slides scales its
+            // native per-font leading. Bullet items don't carry inline
+            // children that inflate per-line pitch (the slide_25 .text-block
+            // case), so absolute spcPts has no benefit here and over-applied
+            // in wave-9 (slide_11 SWOT bullets emitted spcPts@450 ≈ 4.5pt).
             const firstIt = items[0] || {};
             // CSS `li { padding: 4px 0 }` adds 8 px of inter-line spacing in the
             // browser; OOXML paragraph spacing has no padding concept, so fold
@@ -1140,7 +1138,11 @@ function buildPptx(
             const liPadV = ((firstIt.padding && firstIt.padding.top) || 0)
               + ((firstIt.padding && firstIt.padding.bottom) || 0);
             const paraSpaceAfterPt = ((firstIt.marginBottom || 0) + liPadV) * PX2PT;
-            const lineSpacingPt = firstIt.lineHeight ? firstIt.lineHeight * PX2PT : undefined;
+            const ratio = firstIt.lineHeight && firstIt.fontSize
+              ? firstIt.lineHeight / firstIt.fontSize
+              : 0;
+            const useRatio = ratio >= 1.05 && ratio <= 3.0 && Math.abs(ratio - 1.2) > 0.08;
+            const emittedRatio = ratio / 1.2;
             slide.addText(paragraphs, {
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
               valign: "top",
@@ -1149,7 +1151,7 @@ function buildPptx(
               line: { type: "none" },
               margin: 0,
               paraSpaceAfter: paraSpaceAfterPt > 0 ? paraSpaceAfterPt : undefined,
-              lineSpacing: lineSpacingPt,
+              lineSpacingMultiple: useRatio ? emittedRatio : undefined,
             });
             break;
           }
@@ -1626,22 +1628,28 @@ async function main() {
   if (htmlFiles.length === 0) { console.error("No HTML files found in", htmlDir); process.exit(1); }
   console.log(`Converting ${htmlFiles.length} HTML slides → pptx "${title}"`);
 
-  // Step 1: Extract DOM from all slides (parallel batches)
-  const EXTRACT_BATCH = 4;
+  // Step 1: Extract DOM from all slides — fully in parallel. Each slide opens
+  // its own short-lived Chrome tab via CDP.New; tabs are independent so there's
+  // no cross-talk. Override with EXTRACT_CONCURRENCY=N if Chrome gets unhappy.
+  const EXTRACT_CONCURRENCY = Number(process.env.EXTRACT_CONCURRENCY) || htmlFiles.length;
   const slideData: { extraction: Extraction; visualPngs: Map<number, Buffer> }[] = new Array(htmlFiles.length);
   const t0 = Date.now();
-  for (let i = 0; i < htmlFiles.length; i += EXTRACT_BATCH) {
-    const batch = htmlFiles.slice(i, i + EXTRACT_BATCH);
-    const results = await Promise.all(batch.map(async (f, bi) => {
-      const idx = i + bi;
+  let nextIdx = 0;
+  async function extractWorker() {
+    while (true) {
+      const idx = nextIdx++;
+      if (idx >= htmlFiles.length) return;
+      const f = htmlFiles[idx];
       console.log(`  [${idx + 1}/${htmlFiles.length}] Extracting ${f.split("/").pop()}...`);
       const data = await extractFromHtml(f);
       console.log(`    [${idx + 1}] ${data.extraction.elementCount} elements, ${data.visualPngs.size} visuals`);
-      return { idx, data };
-    }));
-    for (const { idx, data } of results) slideData[idx] = data;
+      slideData[idx] = data;
+    }
   }
-  console.log(`  Extraction: ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  await Promise.all(
+    Array.from({ length: Math.min(EXTRACT_CONCURRENCY, htmlFiles.length) }, () => extractWorker()),
+  );
+  console.log(`  Extraction: ${((Date.now() - t0) / 1000).toFixed(1)}s (concurrency=${Math.min(EXTRACT_CONCURRENCY, htmlFiles.length)})`);
 
   // Step 2: Build pptx
   console.log("\nBuilding .pptx...");

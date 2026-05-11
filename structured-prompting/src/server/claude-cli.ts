@@ -20,6 +20,20 @@ export interface ClaudeCallOptions {
   /** Owning graph node id — propagated to spawnCapture so /api/cancel can
    *  target this branch's claude subprocess. */
   nodeId?: string;
+  /**
+   * Streaming hooks. When `onPartialText` is set, this call switches the
+   * CLI to `--output-format stream-json` (which requires `--verbose`),
+   * parses each newline-delimited JSON event, and invokes `onPartialText`
+   * with the accumulated assistant-text so far on every assistant chunk.
+   * `onPartialUsage` fires whenever usage numbers are present in an
+   * event (e.g. cache-creation events have early input_tokens hints).
+   *
+   * On exit the result frame is parsed and returned as the normal
+   * ClaudeCallResult — same shape callers see today. Streaming is purely
+   * additive.
+   */
+  onPartialText?: (textSoFar: string) => void;
+  onPartialUsage?: (usage: TokenUsage) => void;
 }
 
 /**
@@ -66,11 +80,22 @@ export interface ClaudeCallResult {
   errorMessage: string | null;
 }
 
-// Single long-running bug_solving send commonly takes 10-20 min because the
+// Single long-running bug_solving send commonly takes 20-40 min because the
 // worker records pptx, compacts, writes analysis.md, and iterates on the fix
-// before returning. 5 min is too tight; 30 min leaves headroom without letting
-// runaway Bash steps hang the graph forever.
-const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+// before returning. 5 min is too tight; 60 min leaves headroom for multi-slide
+// clusters without letting runaway Bash steps hang the graph forever.
+//
+// Override at runtime via env `CLAUDE_TIMEOUT_MS=<ms>` — handy when a single
+// wave needs a longer budget without rebuilding the dist. Per-send override is
+// also available via `CommonSendArguments.timeout` in session.ts.
+const DEFAULT_TIMEOUT_MS = (() => {
+  const fromEnv = process.env.CLAUDE_TIMEOUT_MS;
+  if (fromEnv) {
+    const n = parseInt(fromEnv, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 60 * 60 * 1000;
+})();
 
 export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallResult> {
   const {
@@ -104,13 +129,15 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallRes
       ? `${prompt}\n\nAttachments (absolute paths): ${attachPaths.join(", ")}`
       : prompt;
 
+  const streaming = !!opts.onPartialText || !!opts.onPartialUsage;
   const procArgs = [
     "-p",
     fullPrompt,
     "--output-format",
-    "json",
+    streaming ? "stream-json" : "json",
     "--dangerously-skip-permissions",
   ];
+  if (streaming) procArgs.push("--verbose"); // claude requires --verbose with stream-json
   if (model) procArgs.push("--model", model);
   if (resume) {
     procArgs.push("--resume", resume);
@@ -120,13 +147,64 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallRes
   if (jsonSchema) procArgs.push("--json-schema", JSON.stringify(jsonSchema));
 
   const started = io.now();
+  // Streaming state — only populated when streaming=true. Buffered chunk
+  // accumulator (chunks can split mid-line, so we split on \n). The
+  // final `result` event is what we return; intermediate `assistant`
+  // events feed onPartialText.
+  let textSoFar = "";
+  let streamBuffer = "";
+  const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const handleStreamLine = (line: string): void => {
+    if (!line) return;
+    let evt: { type?: string; message?: { content?: Array<{ type?: string; text?: string }> }; usage?: Record<string, number> };
+    try { evt = JSON.parse(line); } catch { return; }
+    if (evt.type === "assistant" && evt.message && Array.isArray(evt.message.content)) {
+      for (const part of evt.message.content) {
+        if (part && part.type === "text" && typeof part.text === "string") {
+          textSoFar += part.text;
+        }
+      }
+      if (opts.onPartialText) {
+        try { opts.onPartialText(textSoFar); } catch { /* listener errors don't abort the call */ }
+      }
+    }
+    if (evt.usage && opts.onPartialUsage) {
+      const u = evt.usage;
+      try {
+        opts.onPartialUsage({
+          inputTokens: num(u.input_tokens),
+          cacheReadInputTokens: num(u.cache_read_input_tokens),
+          cacheCreationInputTokens: num(u.cache_creation_input_tokens),
+          outputTokens: num(u.output_tokens),
+          costUsd: 0, // per-event cost isn't surfaced; final result frame has the total
+        });
+      } catch { /* listener errors don't abort the call */ }
+    }
+  };
+  const onStdout = streaming
+    ? (chunk: string) => {
+        streamBuffer += chunk;
+        let nl = streamBuffer.indexOf("\n");
+        while (nl >= 0) {
+          handleStreamLine(streamBuffer.slice(0, nl));
+          streamBuffer = streamBuffer.slice(nl + 1);
+          nl = streamBuffer.indexOf("\n");
+        }
+      }
+    : undefined;
   try {
     const { stdout, stderr, exitCode, timedOut, spawnError } = await io.spawnCapture({
       command: "claude",
       args: procArgs,
       cwd,
       timeoutMs,
+      onStdout,
     });
+    // Drain any trailing buffered line (last event might not end in \n).
+    if (streaming && streamBuffer) {
+      handleStreamLine(streamBuffer);
+      streamBuffer = "";
+    }
 
     if (spawnError) {
       return {
@@ -173,12 +251,30 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallRes
       api_error_status?: string;
     }
     let parsed: CliResultFrame | null = null;
-    const jsonStart = stdout.indexOf('{"type"');
-    const jsonText = jsonStart >= 0 ? stdout.slice(jsonStart) : stdout;
-    try {
-      parsed = JSON.parse(jsonText) as CliResultFrame;
-    } catch {
-      // non-JSON output; fall through with parsed=null
+    if (streaming) {
+      // stream-json mode: stdout is NDJSON, one event per line. We want the
+      // FINAL `{"type":"result", ...}` frame (the only one carrying total
+      // usage, cost, session_id, and the structured_output payload). Walk
+      // lines bottom-up and parse the first one whose type is "result".
+      const lines = stdout.split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        try {
+          const frame = JSON.parse(line) as CliResultFrame;
+          if (frame.type === "result") { parsed = frame; break; }
+        } catch { /* keep scanning */ }
+      }
+    } else {
+      // Non-streaming: single JSON frame, possibly prefixed by a stderr
+      // warning line. Find the first '{"type"' and JSON.parse from there.
+      const jsonStart = stdout.indexOf('{"type"');
+      const jsonText = jsonStart >= 0 ? stdout.slice(jsonStart) : stdout;
+      try {
+        parsed = JSON.parse(jsonText) as CliResultFrame;
+      } catch {
+        // non-JSON output; fall through with parsed=null
+      }
     }
     const ok = parsed != null && parsed.type === "result" && parsed.is_error === false;
     // Pull token + cost numbers. Prefer modelUsage (per-model rollup that

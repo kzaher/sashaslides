@@ -1,7 +1,7 @@
 import {
   Session,
   SessionWithResult,
-  type GraphNode,
+  type RichGraphNode,
 } from "./session.js";
 import { ComputationGraph } from "./graph.js";
 import { callClaude, callClaudeFormatted } from "./claude-cli.js";
@@ -273,7 +273,7 @@ export class ClaudeEngine {
 
   private async runNode(
     graph: ComputationGraph,
-    node: GraphNode,
+    node: RichGraphNode,
     ctx: RunCtx,
     upstream: unknown,
   ): Promise<{ value: unknown; ctx: RunCtx }> {
@@ -352,6 +352,18 @@ export class ClaudeEngine {
           const flatSchema = hasSchema
             ? flattenSchemaUnit(schemaUnit as { schema: unknown; components?: unknown })
             : undefined;
+          // Streaming hook: every assistant chunk lands on the node's
+          // `output.partialText` via `graph.patchOutput`, bumping the
+          // graph version so the monitor's 250 ms poll surfaces the
+          // running response BEFORE the call returns. Same mechanism
+          // wires `partialUsage` for live token-counter updates.
+          // Switches the underlying CLI to `--output-format stream-json`.
+          const onPartialText = (textSoFar: string) => {
+            graph.patchOutput(node.id, { partialText: textSoFar });
+          };
+          const onPartialUsage = (usage: import("../api/wire.js").TokenUsage) => {
+            graph.patchOutput(node.id, { partialUsage: usage });
+          };
           const { ctx: nextCtx, response, usedResume, appliedForkFlag, composedPrompt } = await this.materializeAndCall(
             graph,
             node,
@@ -368,6 +380,8 @@ export class ClaudeEngine {
                     timeoutMs: args.timeout,
                     attachments: args.base64_attachments,
                     io: this.io,
+                    onPartialText,
+                    onPartialUsage,
                   })
                 : callClaude({
                     prompt: composedPrompt,
@@ -378,6 +392,8 @@ export class ClaudeEngine {
                     timeoutMs: args.timeout,
                     attachments: args.base64_attachments,
                     io: this.io,
+                    onPartialText,
+                    onPartialUsage,
                   }),
             rawPrompt,
           );
@@ -454,10 +470,6 @@ export class ClaudeEngine {
         case "combineWith": {
           const exec = node.callbacks.execution;
           const combine = node.callbacks.combine;
-          // Anchor the execution-callback's sub-description under a synthetic
-          // `combineBranch` wrapper so the UI can visibly indent the sub-chain
-          // while outer-chain followups (which also attach to this combineWith
-          // node) stay at the parent's indent level.
           const branchNode = graph.create({ parentId: node.id, kind: "combineBranch", label: "combineBranch" });
           graph.start(branchNode.id);
           const branchSession = new SessionWithResult<unknown>({
@@ -479,11 +491,26 @@ export class ClaudeEngine {
         case "parallelFork": {
           const apply = node.callbacks.apply;
           const { inputs } = node.input;
-          // Promise.all semantics: any child that throws cancels siblings and
-          // propagates. Users opt into per-child error-materialization by
-          // calling .materializeError(msg) inside their apply (typically from a
-          // try/tryMultipleTimes fallback).
-          const results = await Promise.all(
+          // Promise.allSettled semantics: every branch runs to completion
+          // (success or failure) before the parallelFork node makes any
+          // decision. A throw in branch N — whether from the apply lambda
+          // building the description (e.g. fs.readFileSync ENOENT on a
+          // missing input the user code synchronously reads) OR from a
+          // claude call deeper in N's chain — finishes ONLY that branch's
+          // parallelChild as `error` and lets siblings run. After all
+          // settle, if any branch rejected, we re-throw a single error so
+          // the surrounding `tryMultipleTimes` / `combineWith` see the
+          // failure and behave normally — but unrelated siblings already
+          // completed their own work, so a wave-level parallelFork (one
+          // parallelFork wrapping clusters, each cluster a parallelFork
+          // of slides) doesn't lose ALL clusters when a single slide
+          // crashes.
+          //
+          // If users want true per-branch error MATERIALIZATION (errors
+          // stored as `{error}` values in the result array instead of
+          // throwing), they wrap their branch in `try/tryMultipleTimes`
+          // with a `materializeError` fallback, same as before.
+          const settled = await Promise.allSettled(
             inputs.map(async (input, i) => {
               const childNode = graph.create({
                 parentId: node.id,
@@ -521,6 +548,24 @@ export class ClaudeEngine {
                 throw e;
               }
             }),
+          );
+          // Aggregate: if ANY branch rejected, throw the first rejection
+          // so the surrounding chain handles it (tryMultipleTimes catches
+          // ValidationError, lets bugs propagate). Successful siblings
+          // already finished their own subgraphs and are visible as ok.
+          const rejections = settled.filter(
+            (s): s is PromiseRejectedResult => s.status === "rejected",
+          );
+          if (rejections.length > 0) {
+            graph.finishErr(node.id, rejections[0].reason);
+            // If multiple branches failed, surface that in the message so
+            // the reviewer doesn't have to hunt — the first error becomes
+            // the thrown one, the rest land on their respective child
+            // nodes already marked `error`.
+            throw rejections[0].reason;
+          }
+          const results = settled.map(s =>
+            (s as PromiseFulfilledResult<unknown>).value,
           );
           graph.finishOk(node.id, { count: results.length });
           return { value: results, ctx };
@@ -563,7 +608,6 @@ export class ClaudeEngine {
           const fallback = node.callbacks.fallback;
           let lastErr: unknown = null;
           let attemptCtx = ctx;
-          // auto-inject Interrupt contract on every attempt
           attemptCtx = { ...attemptCtx, append: [...attemptCtx.append] };
           for (let i = 1; i <= max; i++) {
             const attNode = graph.create({
@@ -591,7 +635,6 @@ export class ClaudeEngine {
               graph.finishErr(attNode.id, err);
               if (err instanceof InterruptException) break;
               rethrowIfBug(graph, node.id, err);
-              // inject error context for next attempt
               attemptCtx = {
                 ...attemptCtx,
                 prepend: [
@@ -631,8 +674,28 @@ export class ClaudeEngine {
           // post-hoc without needing the engine's RunCtx (which is gone
           // by the time the engine has exited).
           graph.start(node.id, { input: { cmd, cwd: ctx.cwd } });
-          const stdout = await runShell({ cmd, cwd: ctx.cwd, io: this.io, nodeId: node.id });
-          graph.finishOk(node.id, { stdoutTail: stdout.slice(-400) });
+          // Streaming hooks: every stdout/stderr chunk lands on
+          // `output.stdoutSoFar` / `output.stderrSoFar` via
+          // `graph.patchOutput`. Monitor UI's 250 ms poll surfaces the
+          // growing output BEFORE the process exits — handy for
+          // long-running record-rendering / pixel-diff scripts where
+          // the reviewer wants to see progress without `tail -f`.
+          graph.patchOutput(node.id, { stdoutSoFar: "", stderrSoFar: "" });
+          let stdoutSoFar = "";
+          let stderrSoFar = "";
+          const { stdout, stderr } = await runShell({
+            cmd, cwd: ctx.cwd, io: this.io, nodeId: node.id,
+            onStdout: (chunk) => { stdoutSoFar += chunk; graph.patchOutput(node.id, { stdoutSoFar }); },
+            onStderr: (chunk) => { stderrSoFar += chunk; graph.patchOutput(node.id, { stderrSoFar }); },
+          });
+          // Save BOTH stdout and stderr tails on the node output. Some
+          // tools (e.g. tools/tsxx/) deliberately write their result-path
+          // banner to stderr; without persisting stderrTail those lines
+          // would be invisible in the monitor UI.
+          graph.finishOk(node.id, {
+            stdoutTail: stdout.slice(-400),
+            stderrTail: stderr.slice(-400),
+          });
           return { value: stdout, ctx };
         }
         case "assert": {
@@ -670,7 +733,7 @@ export class ClaudeEngine {
    */
   private async materializeAndCall<Resp extends { sessionId: string | null; isError: boolean; errorMessage: string | null; raw: unknown; stderr: string }>(
     graph: ComputationGraph,
-    _node: GraphNode,
+    _node: RichGraphNode,
     ctx: RunCtx,
     invoke: (resumeSid: string | null, forkFlag: boolean, composedPrompt: string) => Promise<Resp>,
     rawPrompt: string,
@@ -702,9 +765,16 @@ export class ClaudeEngine {
       if (resumeSid) applyForkFlag = true;
     }
 
-    const prepend = ctx.prepend.length ? ctx.prepend.join("\n\n") + "\n\n" : "";
-    const append = ctx.append.length ? "\n\n" + ctx.append.join("\n\n") : "";
-    const composed = prepend + rawPrompt + append;
+    // Resolve `{{<nodeId>.error.field}}` substitution tokens against
+    // the current graph state. Emitted by try/tryMultipleTimes' eager-
+    // expansion for prior-attempt-error refs in retry prompts.
+    const { resolveSubstitutions } = await import("./session.js");
+    const resolvedPrepend = ctx.prepend.map(s => resolveSubstitutions(s, graph));
+    const resolvedAppend = ctx.append.map(s => resolveSubstitutions(s, graph));
+    const resolvedRaw = resolveSubstitutions(rawPrompt, graph);
+    const prepend = resolvedPrepend.length ? resolvedPrepend.join("\n\n") + "\n\n" : "";
+    const append = resolvedAppend.length ? "\n\n" + resolvedAppend.join("\n\n") : "";
+    const composed = prepend + resolvedRaw + append;
 
     // Surface the composed prompt on the node's input BEFORE we await the
     // CLI call — otherwise the monitor can't show "view entire prompt" on
@@ -897,9 +967,11 @@ function randomId(): string {
   return "sp_" + Math.random().toString(36).slice(2, 10);
 }
 
-export async function runShell(args: { cmd: string; cwd: string; io: IO; nodeId?: string }): Promise<string> {
-  const { cmd, cwd, io, nodeId } = args;
-  const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd, nodeId });
+export async function runShell(
+  args: { cmd: string; cwd: string; io: IO; nodeId?: string; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void },
+): Promise<{ stdout: string; stderr: string }> {
+  const { cmd, cwd, io, nodeId, onStdout, onStderr } = args;
+  const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd, nodeId, onStdout, onStderr });
   if (r.spawnError) {
     // bash itself failed to launch — almost always a programmer bug
     // (PATH, permissions). Propagate as a non-catchable StructuredError.
@@ -928,7 +1000,7 @@ export async function runShell(args: { cmd: string; cwd: string; io: IO; nodeId?
       } },
     );
   }
-  return r.stdout;
+  return { stdout: r.stdout, stderr: r.stderr };
 }
 
 export const sharedClaudeEngine = new ClaudeEngine();

@@ -22,7 +22,7 @@ import {
   type Matcher,
   type SpawnCaptureArgs,
   type SpawnCaptureResult,
-} from "./index.js";
+} from "../index.js";
 
 // ---------------------------------------------------------------------------
 // Test harness

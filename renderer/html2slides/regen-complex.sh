@@ -8,7 +8,7 @@
 # Goldens can only be written by the user via rating-server.ts — same rule.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-OUT=/tmp/sxs-complex
+OUT=${REGEN_OUT:-/tmp/sxs-complex}
 BACKUP="$HERE/e2e/.ratings-complex.json"
 mkdir -p "$OUT/originals" "$OUT/slides" "$OUT/diffs"
 
@@ -29,7 +29,9 @@ fail() { echo "❌ FATAL: $*" >&2; exit 1; }
 # Track newest thumbnail mtime so we can verify thumbnails were actually
 # rewritten. Directory mtime only advances on entry add/remove, not when
 # existing files are overwritten in place — so look at the files themselves.
-SLIDES_BEFORE=$(stat -c %Y "$OUT/slides"/*.png 2>/dev/null | sort -n | tail -1)
+# `|| true` because a fresh OUT has no *.png and `stat` exits non-zero under
+# `set -o pipefail`, which would silently kill the whole script.
+SLIDES_BEFORE=$(stat -c %Y "$OUT/slides"/*.png 2>/dev/null | sort -n | tail -1) || true
 SLIDES_BEFORE=${SLIDES_BEFORE:-0}
 
 echo "=== Convert + upload ==="
@@ -63,7 +65,7 @@ $(tail -8 "$OUT/shot.log")"
 fi
 
 # Verify at least one thumbnail was actually regenerated (mtime advanced).
-SLIDES_AFTER=$(stat -c %Y "$OUT/slides"/*.png 2>/dev/null | sort -n | tail -1)
+SLIDES_AFTER=$(stat -c %Y "$OUT/slides"/*.png 2>/dev/null | sort -n | tail -1) || true
 SLIDES_AFTER=${SLIDES_AFTER:-0}
 [ "$SLIDES_AFTER" -gt "$SLIDES_BEFORE" ] || fail "newest thumbnail mtime did not advance — thumbnails not updated. See $OUT/thumbs.log"
 
