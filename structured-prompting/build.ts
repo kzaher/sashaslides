@@ -30,7 +30,7 @@ import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { injectSchemaIntoSendCalls } from "./src/transformer.ts";
+import { injectSchemaIntoSendCalls } from "./src/server/transformer.ts";
 
 // Repo root is the nearest ancestor of THIS file that contains
 // eslint.config.mjs — anchors path lookups so build.ts can be invoked

@@ -15,7 +15,7 @@ import {
   describeError,
   safelyJsonStringify,
 } from "../src/index.js";
-import type { Result } from "../src/types.js";
+import type { Result } from "../src/api/wire.js";
 
 export type TaskMeta = { workspace_dir: string; bug: string; measureCommand: string };
 export type FinalResult = { originalMeasurement: string; newMeasurement: string };

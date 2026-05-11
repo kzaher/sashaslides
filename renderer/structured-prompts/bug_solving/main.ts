@@ -42,7 +42,7 @@ import {
   describeError,
   safelyJsonStringify,
 } from "../../../structured-prompting/src/index.js";
-import type { Result } from "../../../structured-prompting/src/types.js";
+import type { Result } from "../../../structured-prompting/src/api/wire.js";
 
 /**
  * Produce a pixel-diff PNG between two reference images. Pixels that differ
@@ -142,10 +142,16 @@ export interface TaskResult {
 
 /** Path to the shell/ts helper scripts that live alongside main.ts. */
 const SCRIPTS = {
-  record: "renderer/html2slides/structured-prompts/bug_solving/scripts/record-rendering.ts",
-  diff: "renderer/html2slides/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts",
-  filteredServer: "renderer/html2slides/structured-prompts/bug_solving/scripts/filtered-rating-server.ts",
+  record: "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts",
+  diff: "renderer/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts",
+  filteredServer: "renderer/structured-prompts/bug_solving/scripts/filtered-rating-server.ts",
 };
+
+/** Path to the tsxx profiling launcher. Behaves like `npx tsx` but emits a
+ *  per-statement timing profile to /tmp/tsxx-XXXX/profile.txt on exit. Used
+ *  for the recording call sites where we want to know which step dominates
+ *  the per-task budget. See tools/tsxx/. */
+const TSXX = "node /workspaces/sashaslides/tools/tsxx/tsxx.mjs";
 
 const slideIdsCsv = (t: Task) => t.slides.map(s => s.slide_id).join(",");
 
@@ -213,7 +219,7 @@ export function main(args: {
       //   without paying the screenshot/upload tax on attempts that may
       //   fail and retry.
       .executeShell(() =>
-        `cd ${task.workspace_dir} && npx tsx ${SCRIPTS.record} ` +
+        `cd ${task.workspace_dir} && ${TSXX} ${SCRIPTS.record} ` +
         `--mode pptx --slides ${ids} --out ${task.scratch_dir}/after`
       )
 
@@ -307,7 +313,7 @@ export function main(args: {
       //   add Chrome screenshots + Slides upload + thumbs scrape to the same
       //   <after> dir. mode=full skips the pptx step (already done in Step 2).
       .executeShell(() =>
-        `cd ${task.workspace_dir} && npx tsx ${SCRIPTS.record} ` +
+        `cd ${task.workspace_dir} && ${TSXX} ${SCRIPTS.record} ` +
         `--mode full --slides ${ids} --title "${task.presentation_title}" ` +
         `--out ${task.scratch_dir}/after`
       )
@@ -430,7 +436,7 @@ export function main(args: {
 
   return args.session
     .executeShell(() =>
-      `npx tsx ${SCRIPTS.record} --mode full ` +
+      `${TSXX} ${SCRIPTS.record} --mode full ` +
       `--slides ${allSlides.join(",")} --out ${baselineDir}`
     )
     .parallelFork(args.tasks, (child, task) =>
