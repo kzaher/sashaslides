@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# html2slides-cli — convert HTML files to .pptx via the html2slides.html
+# JSON-RPC bridge.
+#
+# How it works:
+#   1. Creates a request directory inside the watch root (default /tmp/html2slides):
+#        $WATCH/request.<id>/
+#   2. Copies the input HTML files into it.
+#   3. Writes request.json (a JSON-RPC 2.0 envelope describing what to build).
+#   4. Waits for html2slides.html (open in a browser, watching the same dir)
+#      to pick up request.json, build the .pptx, and write back:
+#        request.json.log              (incremental log; this script tails it)
+#        result.pptx                   (the build output)
+#        request.json.result.json      (final { exitCode, response: {...} })
+#   5. On success, copies result.pptx → --out path, then cleans up the request dir.
+#
+# Usage:
+#   html2slides-cli --out out.pptx slides/*.html
+#   html2slides-cli --out deck.pptx --title "My Deck" a.html b.html c.html
+#
+# Env:
+#   HTML2SLIDES_DIR  — watch directory (default /tmp/html2slides)
+#   TIMEOUT_PICKUP   — seconds to wait for browser to detect request.json (default 60)
+#   TIMEOUT_BUILD    — seconds to wait for the build to finish (default 300)
+
+set -euo pipefail
+
+WATCH_DIR=${HTML2SLIDES_DIR:-/tmp/html2slides}
+TIMEOUT_PICKUP=${TIMEOUT_PICKUP:-60}
+TIMEOUT_BUILD=${TIMEOUT_BUILD:-300}
+
+OUT_PATH=""
+TITLE=""
+KEEP=0
+INPUTS=()
+
+usage() {
+  sed -n '2,/^set -e/p' "$0" | sed 's/^# \{0,1\}//;/^set -e/d'
+  exit 2
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o|--out)     OUT_PATH=$2; shift 2 ;;
+    -t|--title)   TITLE=$2;    shift 2 ;;
+    --keep)       KEEP=1;      shift   ;;
+    -h|--help)    usage                ;;
+    -*)           echo "unknown flag: $1" >&2; usage ;;
+    *)            INPUTS+=("$1"); shift ;;
+  esac
+done
+
+[ ${#INPUTS[@]} -gt 0 ] || { echo "error: at least one input HTML file required" >&2; usage; }
+[ -n "$OUT_PATH" ]      || { echo "error: --out is required" >&2; usage; }
+
+mkdir -p "$WATCH_DIR"
+REQ_ID="request.$(date +%s).$$.$RANDOM"
+REQ_DIR="$WATCH_DIR/$REQ_ID"
+mkdir -p "$REQ_DIR"
+[ -z "$TITLE" ] && TITLE="$REQ_ID"
+
+# Copy inputs into the request dir. Preserve only the basename — the browser
+# bridge resolves params.inputs as sibling files inside request.<id>/.
+INPUT_NAMES=()
+for src in "${INPUTS[@]}"; do
+  [ -f "$src" ] || { echo "error: not a file: $src" >&2; exit 2; }
+  name=$(basename -- "$src")
+  # Avoid duplicates if two arguments share a basename.
+  if [[ -e "$REQ_DIR/$name" ]]; then
+    base=${name%.*}; ext=${name##*.}
+    i=2
+    while [[ -e "$REQ_DIR/${base}_${i}.${ext}" ]]; do i=$((i+1)); done
+    name="${base}_${i}.${ext}"
+  fi
+  cp -- "$src" "$REQ_DIR/$name"
+  INPUT_NAMES+=("$name")
+done
+
+# Build request.json. We construct the JSON via python3 -c to handle escaping
+# correctly (filenames may contain quotes / unicode).
+REQ_JSON=$(REQ_ID="$REQ_ID" TITLE="$TITLE" OUT_NAME="result.pptx" \
+  INPUTS_LIST="${INPUT_NAMES[*]}" \
+  python3 -c '
+import json, os
+print(json.dumps({
+  "jsonrpc": "2.0",
+  "id": os.environ["REQ_ID"],
+  "method": "convert",
+  "params": {
+    "inputs": os.environ["INPUTS_LIST"].split(),
+    "output": os.environ["OUT_NAME"],
+    "title":  os.environ["TITLE"],
+  },
+}, indent=2))
+')
+
+# Atomic write of request.json (write-then-rename so the browser observer
+# never sees a half-written file).
+printf "%s\n" "$REQ_JSON" > "$REQ_DIR/request.json.tmp"
+mv "$REQ_DIR/request.json.tmp" "$REQ_DIR/request.json"
+
+LOG_FILE="$REQ_DIR/request.json.log"
+RESULT_FILE="$REQ_DIR/request.json.result.json"
+OUT_IN_REQ="$REQ_DIR/result.pptx"
+
+echo "→ submitted $REQ_ID"
+echo "  watch dir: $WATCH_DIR"
+echo "  inputs:    ${INPUT_NAMES[*]}"
+echo "  out:       $OUT_PATH"
+echo
+
+cleanup() {
+  if [[ ${TAIL_PID:-} ]]; then kill "$TAIL_PID" 2>/dev/null || true; wait "$TAIL_PID" 2>/dev/null || true; fi
+  if [[ $KEEP -eq 0 ]]; then rm -rf "$REQ_DIR"; fi
+}
+trap cleanup EXIT
+
+# Wait for browser to pick up the request (request.json gets DELETED by the
+# browser side and request.json.log gets created).
+deadline=$(( $(date +%s) + TIMEOUT_PICKUP ))
+while [ ! -f "$LOG_FILE" ]; do
+  if [ $(date +%s) -ge $deadline ]; then
+    echo "ERROR: browser never picked up the request (timeout ${TIMEOUT_PICKUP}s)." >&2
+    echo "  → is html2slides.html open and 'watching' \"$WATCH_DIR\"?" >&2
+    exit 3
+  fi
+  sleep 0.2
+done
+
+# Tail the log file until result.json appears.
+tail -n +1 -f "$LOG_FILE" &
+TAIL_PID=$!
+
+deadline=$(( $(date +%s) + TIMEOUT_BUILD ))
+while [ ! -f "$RESULT_FILE" ]; do
+  if [ $(date +%s) -ge $deadline ]; then
+    echo "ERROR: build did not finish within ${TIMEOUT_BUILD}s." >&2
+    exit 4
+  fi
+  sleep 0.2
+done
+
+# Give tail a beat to flush the last few lines, then stop it.
+sleep 0.3
+kill "$TAIL_PID" 2>/dev/null || true
+wait "$TAIL_PID" 2>/dev/null || true
+TAIL_PID=
+
+EXIT_CODE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("exitCode", 99))' "$RESULT_FILE")
+
+if [ "$EXIT_CODE" = "0" ]; then
+  [ -f "$OUT_IN_REQ" ] || { echo "ERROR: exitCode=0 but $OUT_IN_REQ missing" >&2; exit 5; }
+  mkdir -p "$(dirname -- "$OUT_PATH")"
+  cp -- "$OUT_IN_REQ" "$OUT_PATH"
+  size=$(stat -c %s "$OUT_PATH" 2>/dev/null || stat -f %z "$OUT_PATH")
+  echo
+  echo "✓ wrote $OUT_PATH ($size bytes)"
+else
+  echo "✗ build failed (exitCode=$EXIT_CODE)" >&2
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps(d.get("response",{}).get("error",{}), indent=2))' "$RESULT_FILE" >&2 || true
+fi
+
+exit "$EXIT_CODE"

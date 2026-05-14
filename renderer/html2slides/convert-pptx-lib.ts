@@ -1,29 +1,31 @@
 /**
- * convert-pptx-lib.ts — Library that converts HTML slides to .pptx and optionally
- * uploads to Google Slides. The CLI wrapper lives in convert-pptx.ts.
+ * convert-pptx-lib.ts — Pure HTML-extraction → .pptx-bytes core.
  *
- * Pipeline:
- *   1. Extract DOM from HTML files (reuses extract-dom.ts + Chrome CDP)
- *   2. Build .pptx with pptxgenjs (exact corner radii, native text, shapes)
- *   3. Upload .pptx to Google Drive as Google Slides presentation (unless noUpload)
+ * No filesystem, no Chrome DevTools Protocol, no network. Inputs are
+ * already-extracted slide data (the `{ extraction, visualPngs }` shape
+ * produced by extract-dom.ts inside any DOM environment — Node-CDP or
+ * a browser iframe) and the output is either a pptxgenjs Presentation
+ * object or a finished Uint8Array of bytes.
  *
- * Advantages over Slides API approach:
- *   - pptxgenjs rectRadius gives exact corner radii (OOXML adj attribute)
- *   - Native text is editable in Slides after import
- *   - Single file upload instead of hundreds of API calls
+ * Side-effectful counterparts (CDP-driven extraction, OAuth, file I/O,
+ * Google Drive upload) live in convert-pptx-io.ts.
  */
 
-import CDP from "chrome-remote-interface";
-import { google } from "googleapis";
-import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
-import { join, resolve, dirname } from "path";
-import { Readable } from "stream";
-import { createRequire } from "module";
-const require = createRequire("/workspaces/sashaslides/package.json");
+import * as pptxgenModule from "pptxgenjs";
+import type PptxGenJS from "pptxgenjs";
+import JSZip from "jszip";
 
-const CDP_PORT = 9222;
-const SLIDE_W_PX = 1280;
-const SLIDE_H_PX = 720;
+// pptxgenjs Slide / option types we reuse below. Keeping a single set of
+// aliases here means the body of buildPptx talks about typed objects
+// instead of sprinkling `any` on every `slide.addX(...)` call site.
+type Slide = PptxGenJS.Slide;
+type ShapeProps = PptxGenJS.ShapeProps;
+type TextProps = PptxGenJS.TextProps;
+type TextPropsOptions = PptxGenJS.TextPropsOptions;
+
+// Slide geometry — shared with the IO layer.
+export const SLIDE_W_PX = 1280;
+export const SLIDE_H_PX = 720;
 
 // pptxgenjs slide dimensions in inches (widescreen 16:9)
 const SLIDE_W_IN = 10;
@@ -34,18 +36,28 @@ const PX2IN = SLIDE_W_IN / SLIDE_W_PX; // 0.0078125
 // At 96dpi CSS, 1px = 0.75pt. But our slide is 10" for 1280px, so effective:
 const PX2PT = SLIDE_W_IN / SLIDE_W_PX * 72; // 10/1280*72 = 0.5625
 
-// Compile extract-dom.ts → JS at startup
-import { transformSync } from "esbuild";
-const EXTRACT_TS = readFileSync(join(dirname(new URL(import.meta.url).pathname), "extract-dom.ts"), "utf-8");
-const EXTRACT_JS = transformSync(EXTRACT_TS, { loader: "ts", target: "es2020" }).code;
-
-function sleep(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
-
 function px2in(px: number): number { return px * PX2IN; }
 
 function hexToRgb(hex: string): string {
   // pptxgenjs wants hex without # prefix
   return hex.replace("#", "").toUpperCase();
+}
+
+// Portable byte→base64. Buffer in Node; chunked btoa in browser (avoids
+// String.fromCharCode stack-overflow on large payloads).
+function bytesToBase64(bytes: Uint8Array | Buffer): string {
+  if (typeof Buffer !== "undefined" && bytes instanceof Buffer) {
+    return bytes.toString("base64");
+  }
+  let bin = "";
+  const u8 = bytes as Uint8Array;
+  const CHUNK = 0x8000;
+  for (let i = 0; i < u8.length; i += CHUNK) {
+    // `String.fromCharCode(...numbers)` typed cleanly; chunked so spread stays
+    // under the JS engine's call-arity limit (~64 K on V8) for big PNG payloads.
+    bin += String.fromCharCode(...u8.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
 }
 
 // Map web fonts to their closest Google Slides equivalents
@@ -96,17 +108,17 @@ const SLACK_PX = 12;
 // the detected ancestor background (Google Slides drops <a:alpha> on text
 // solidFill, so native transparency can't be used).
 function mapRunOptions(
-  run: any,
-  parentStyle: any,
+  run: TextRun,
+  parentStyle: ElementStyle | RunStyle | undefined,
   uppercase: boolean,
-  defaults: { color: string; fontSize: number },
-  opacityBlend?: { op: number; bg: string } | null,
-): { text: string; options: any } {
-  const rs = run.style || {};
-  const ps = parentStyle || {};
+  defaults: { readonly color: string; readonly fontSize: number },
+  opacityBlend?: { readonly op: number; readonly bg: string } | null,
+): TextProps {
+  const rs: RunStyle = run.style || {};
+  const ps: ElementStyle | RunStyle = parentStyle || {};
   const rawColor = rs.color || ps.color || defaults.color;
   const blendedColor = opacityBlend ? blendOpacity(rawColor, opacityBlend.op, opacityBlend.bg) : rawColor;
-  const opts: any = {
+  const opts: TextPropsOptions = {
     fontFace: mapFont(rs.fontFamily || ps.fontFamily || "Arial"),
     fontSize: (rs.fontSize || ps.fontSize || defaults.fontSize) * PX2PT,
     color: hexToRgb(blendedColor),
@@ -145,17 +157,32 @@ function applySlack(
 // `opts.applyOpacityBlend`: when true, apply style.opacity as pptxgenjs transparency
 // (standalone path only — merged-rect path historically didn't do this).
 // `opts.selfIndex`: index in `elements` for neighborSlackBudget self-skip.
+/** Text-like element argument accepted by emitStyledText. Covers both the
+ * standalone TextElement case and a "rect-merged-text" synthesised object
+ * that carries the same fields. */
+type TextLike = {
+  readonly bounds: Bounds;
+  readonly style?: ElementStyle;
+  readonly text?: string;
+  readonly runs?: readonly TextRun[];
+  readonly rotate?: number;
+  readonly naturalWidth?: number;
+  readonly naturalHeight?: number;
+  readonly singleLine?: boolean;
+  readonly verticallyCentered?: boolean;
+};
+
 function emitStyledText(
-  slide: any,
-  el: any,
-  bounds: { x: number; y: number; w: number; h: number },
-  elements: any[],
+  slide: Slide,
+  el: TextLike,
+  bounds: Bounds,
+  elements: readonly ExtractedElement[],
   selfIndex: number,
   valign: "top" | "middle",
   applyOpacityBlend: boolean,
-  defaults: { color: string; fontSize: number },
+  defaults: { readonly color: string; readonly fontSize: number },
 ): void {
-  const s = el.style || {};
+  const s: ElementStyle = el.style || {};
   const xfm = s.textTransform === "uppercase";
   const align: "left" | "center" | "right" =
     s.textAlign === "center" ? "center" :
@@ -254,7 +281,7 @@ function emitStyledText(
   const padTopPt = (valign === "top" && typeof s.paddingTop === "number" && s.paddingTop > 0)
     ? s.paddingTop * PX2PT
     : 0;
-  const commonOpts: any = {
+  const commonOpts: TextPropsOptions = {
     x: px2in(bx), y: px2in(by), w: px2in(bw), h: px2in(bh),
     valign,
     align,
@@ -310,16 +337,16 @@ function emitStyledText(
   if (rotateDeg) commonOpts.rotate = rotateDeg;
 
   if (el.runs && el.runs.length > 0) {
-    const textRuns = el.runs
-      .filter((r: any) => r.text.length > 0)
-      .map((run: any) => mapRunOptions(run, s, xfm, defaults, opacityBlend));
+    const textRuns: TextProps[] = el.runs
+      .filter((r) => r.text.length > 0)
+      .map((run) => mapRunOptions(run, s, xfm, defaults, opacityBlend));
     slide.addText(textRuns, commonOpts);
   } else {
     let text = el.text || "";
     if (xfm) text = text.toUpperCase();
     const rawColor = s.color || defaults.color;
     const blendedColor = opacityBlend ? blendOpacity(rawColor, opacityBlend.op, opacityBlend.bg) : rawColor;
-    const textOpts: any = {
+    const textOpts: TextPropsOptions = {
       ...commonOpts,
       fontSize: (s.fontSize || defaults.fontSize) * PX2PT,
       fontFace: mapFont(s.fontFamily || "Arial"),
@@ -379,13 +406,13 @@ function needsFlatCornerOverlay(cr: { tl: number; tr: number; br: number; bl: nu
  * a side-rounded mask into a stadium-with-flat-side shape (slide_25's
  * `border-radius: 0 8px 8px 0`). */
 function emitFlatCornerOverlays(
-  slide: any,
+  slide: Slide,
   b: Bounds,
-  cr: { tl: number; tr: number; br: number; bl: number },
-  fill: any,
+  cr: CornerRadii,
+  fill: ShapeProps["fill"],
 ): void {
   const rMax = Math.min(Math.max(cr.tl, cr.tr, cr.br, cr.bl), Math.min(b.w, b.h) / 2);
-  if (rMax <= 0 || !fill || fill.type === "none") return;
+  if (rMax <= 0 || !fill || (fill as { type?: string }).type === "none") return;
   const paint = (x: number, y: number) => {
     slide.addShape("rect", {
       x: px2in(x), y: px2in(y), w: px2in(rMax), h: px2in(rMax),
@@ -398,96 +425,217 @@ function emitFlatCornerOverlays(
   if (cr.bl <= 2) paint(b.x, b.y + b.h - rMax);
 }
 
-// --- Types ---
-interface Bounds { x: number; y: number; w: number; h: number; }
-interface ExtractedElement { type: string; bounds: Bounds; [key: string]: any; }
-interface Extraction { viewport: { w: number; h: number }; elementCount: number; elements: ExtractedElement[]; }
+// =========================================================================
+// Extracted-DOM data types
+// =========================================================================
+// extract-dom.ts emits a flat array of elements in CSS-paint order. Each
+// element is one of the variants below. Fields are mostly optional because
+// the extractor only populates what's relevant per variant (e.g. only
+// `text`/`runs`/`style` on text, only `fill`/`borderRadius`/`gradient` on
+// rect). Read-only at the API boundary (`Extraction.elements` is
+// `readonly`); per-element mutation (e.g. io.ts emoji retyping) is
+// expressed via copy-on-write rather than in-place edits.
 
-// --- Auth ---
-function getAuth() {
-  const creds = JSON.parse(readFileSync("/workspaces/sashaslides/.auth/google_oauth.json", "utf-8")).installed;
-  const tokens = JSON.parse(readFileSync("/workspaces/sashaslides/.auth/tokens.json", "utf-8"));
-  const oauth2 = new google.auth.OAuth2(creds.client_id, creds.client_secret, "http://localhost:8080");
-  oauth2.setCredentials(tokens);
-  oauth2.on("tokens", (newTokens: any) => {
-    const merged = { ...tokens, ...newTokens };
-    writeFileSync("/workspaces/sashaslides/.auth/tokens.json", JSON.stringify(merged, null, 2));
-  });
-  return oauth2;
+export interface Bounds { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
+
+export interface BorderSide {
+  readonly width: number;
+  readonly color: string;
+  readonly style?: "solid" | "dashed" | "dotted" | string;
+}
+export interface BorderSides {
+  readonly top: BorderSide;
+  readonly right: BorderSide;
+  readonly bottom: BorderSide;
+  readonly left: BorderSide;
+}
+export interface CornerRadii { readonly tl: number; readonly tr: number; readonly br: number; readonly bl: number }
+
+export interface GradientStop {
+  readonly color: string;
+  readonly position: number;
+  readonly alpha?: number;
+}
+export interface Gradient {
+  readonly angle?: number;
+  readonly type?: "linear" | "radial" | string;
+  readonly stops: readonly GradientStop[];
 }
 
-// --- DOM Extraction ---
-async function extractFromHtml(htmlPath: string): Promise<{ extraction: Extraction; visualPngs: Map<number, Buffer> }> {
-  const absPath = resolve(htmlPath);
-  const tab = await (CDP as any).New({ port: CDP_PORT, url: `file://${absPath}` });
-  await sleep(1200);
+export interface BoxShadowLayer {
+  readonly color: string;
+  readonly offsetX?: number;
+  readonly offsetY?: number;
+  readonly blur?: number;
+  readonly spread?: number;
+  readonly alpha?: number;
+  readonly inset?: boolean;
+}
 
-  const client = await CDP({ target: tab, port: CDP_PORT });
-  const { Page, Runtime, Emulation } = client;
-  await Page.enable();
-  await Runtime.enable();
-  await Emulation.setDeviceMetricsOverride({ width: SLIDE_W_PX, height: SLIDE_H_PX, deviceScaleFactor: 2, mobile: false });
-  await sleep(800);
-  await Runtime.evaluate({ expression: `document.fonts.ready.then(() => true)`, awaitPromise: true, returnByValue: true });
-  await sleep(300);
+/** Style fields shared between block-level elements and list items. */
+export interface ElementStyle {
+  readonly color?: string;
+  readonly fontFamily?: string;
+  readonly fontSize?: number;
+  readonly fontWeight?: "bold" | "normal" | string;
+  readonly fontStyle?: "italic" | "normal" | string;
+  readonly lineHeight?: number;
+  readonly lineHeightMeasured?: boolean;
+  readonly textAlign?: "left" | "center" | "right" | "end" | "justify" | string;
+  readonly textTransform?: "uppercase" | "lowercase" | "none" | string;
+  readonly textDecoration?: "underline" | "line-through" | "none" | string;
+  readonly opacity?: number;
+  readonly bgColor?: string;
+  readonly bgColorBehind?: string;
+  readonly paddingTop?: number;
+  readonly paddingRight?: number;
+  readonly paddingBottom?: number;
+  readonly paddingLeft?: number;
+}
 
-  const { result } = await Runtime.evaluate({ expression: EXTRACT_JS, returnByValue: true });
-  const extraction: Extraction = JSON.parse(result.value);
+/** Per-run inline style override. */
+export interface RunStyle {
+  readonly color?: string;
+  readonly fontFamily?: string;
+  readonly fontSize?: number;
+  readonly fontWeight?: "bold" | "normal" | string;
+  readonly fontStyle?: "italic" | "normal" | string;
+  readonly textDecoration?: "underline" | "line-through" | "none" | string;
+  readonly bgColor?: string;
+  readonly verticalAlign?: "sub" | "super" | "baseline" | string;
+}
 
-  // Emoji detection: Slides lacks an emoji font, so glyphs like ⚡🔒📊🔍🧐💳
-  // render as tofu boxes. For text elements whose content is primarily emoji
-  // codepoints, rasterize the element region from Chrome and emit as an image.
-  const isEmojiCodepoint = (cp: number): boolean => {
-    // Misc symbols & dingbats
-    if (cp >= 0x2600 && cp <= 0x27BF) return true;
-    // Emoji presentation selector / ZWJ / variation selector — accompany emoji
-    if (cp === 0x200D || cp === 0xFE0F) return true;
-    // Regional indicators (flags)
-    if (cp >= 0x1F1E6 && cp <= 0x1F1FF) return true;
-    // Main emoji blocks
-    if (cp >= 0x1F300 && cp <= 0x1FAFF) return true;
-    // Supplemental symbols & pictographs / transport / enclosed
-    if (cp >= 0x2300 && cp <= 0x23FF) return true; // misc technical (⚙ etc.)
-    if (cp >= 0x25A0 && cp <= 0x25FF) return true; // geometric (▲ ■ etc. — usually fine but keep)
-    return false;
-  };
-  const looksLikeEmojiText = (s: string): boolean => {
-    if (!s) return false;
-    // Iterate real codepoints (surrogate-pair safe).
-    let emoji = 0, total = 0;
-    for (const ch of s) {
-      const cp = ch.codePointAt(0)!;
-      if (cp <= 0x20) continue; // whitespace
-      total++;
-      if (isEmojiCodepoint(cp)) emoji++;
-    }
-    if (total === 0) return false;
-    // Primarily emoji (allow a stray ascii char in ZWJ sequences).
-    return emoji / total >= 0.5 && total <= 4;
-  };
-  // Mark emoji text elements for rasterization — retype to "image" so the
-  // existing visualPngs pipeline handles capture + addImage.
-  for (const el of extraction.elements) {
-    if (el.type !== "text") continue;
-    if (!looksLikeEmojiText(el.text || "")) continue;
-    el.type = "image";
-    el._wasEmojiText = true;
-  }
+/** One inline run inside a text/list element. `style: null` means "no
+ * per-run override" (use the element-level style); a present style
+ * record carries only the overridden fields. */
+export interface TextRun {
+  readonly text: string;
+  readonly style?: RunStyle | null;
+}
 
-  // Screenshot visual elements (svg/canvas/images)
-  const visualPngs = new Map<number, Buffer>();
-  for (let i = 0; i < extraction.elements.length; i++) {
-    const el = extraction.elements[i];
-    if ((el.type === "visual" || el.type === "image") && el.bounds.w > 5 && el.bounds.h > 5) {
-      const clip = { x: el.bounds.x, y: el.bounds.y, width: el.bounds.w, height: el.bounds.h, scale: 2 };
-      const ss = await Page.captureScreenshot({ format: "png", clip, captureBeyondViewport: true, omitBackground: true });
-      visualPngs.set(i, Buffer.from(ss.data, "base64"));
-    }
-  }
+export interface Padding { readonly top: number; readonly right: number; readonly bottom: number; readonly left: number }
 
-  await client.close();
-  await (CDP as any).Close({ port: CDP_PORT, id: tab.id });
-  return { extraction, visualPngs };
+/** Fields every element shares. */
+interface ElementCommon {
+  readonly bounds: Bounds;
+  readonly style?: ElementStyle;
+  readonly zIndex?: number;
+  readonly position?: string;
+  readonly rotate?: number;
+  readonly naturalWidth?: number;
+  readonly naturalHeight?: number;
+  readonly _domIdx?: number;
+}
+
+export interface RectElement extends ElementCommon {
+  readonly type: "rect";
+  readonly fill?: string | null;
+  readonly fillAlpha?: number;
+  readonly gradient?: Gradient | null;
+  readonly borderWidth?: number;
+  readonly borderColor?: string;
+  readonly borderStyle?: string;
+  readonly borderRadius?: number;
+  readonly cornerRadii?: CornerRadii;
+  readonly borderUniform?: boolean;
+  readonly borderSides?: BorderSides | null;
+  readonly boxShadow?: readonly BoxShadowLayer[] | null;
+}
+
+export interface TextElement extends ElementCommon {
+  readonly type: "text";
+  readonly text?: string;
+  readonly runs?: readonly TextRun[];
+  readonly singleLine?: boolean;
+  readonly verticallyCentered?: boolean;
+  readonly padding?: Padding;
+}
+
+export interface ListItem {
+  readonly text?: string;
+  readonly runs?: readonly TextRun[];
+  readonly bounds?: Bounds;
+  readonly fontFamily?: string;
+  readonly fontSize?: number;
+  readonly fontWeight?: string;
+  readonly fontStyle?: string;
+  readonly color?: string;
+  readonly bulletColor?: string;
+  readonly lineHeight?: number;
+  readonly marginBottom?: number;
+  readonly padding?: Padding;
+  readonly bgColor?: string;
+  readonly bgAlpha?: number;
+  readonly borderRadius?: number;
+  readonly borderSides?: BorderSides;
+}
+
+export interface ListElement extends ElementCommon {
+  readonly type: "list";
+  readonly items: readonly ListItem[];
+  readonly ordered?: boolean;
+  readonly anyStyledItem?: boolean;
+}
+
+export interface TableCell {
+  readonly text?: string;
+  readonly runs?: readonly TextRun[];
+  readonly bounds?: Bounds;
+  readonly bgColor?: string;
+  readonly borderSides?: BorderSides;
+  readonly colSpan?: number;
+  readonly rowSpan?: number;
+  readonly style?: ElementStyle;
+}
+export interface TableRow {
+  readonly cells: readonly TableCell[];
+  readonly bounds?: Bounds;
+}
+export interface TableElement extends ElementCommon {
+  readonly type: "table";
+  readonly rows: readonly TableRow[];
+}
+
+export interface VisualElement extends ElementCommon {
+  readonly type: "visual";
+  readonly tag?: string;
+  readonly cornerRadius?: number;
+}
+
+export interface ImageElement extends ElementCommon {
+  readonly type: "image";
+  readonly tag?: string;
+  readonly cornerRadius?: number;
+  /** Set by io-side when emoji text was retyped to "image". */
+  readonly _wasEmojiText?: boolean;
+}
+
+export interface SkipElement extends ElementCommon {
+  readonly type: "_skip";
+}
+
+/** Discriminated union over every variant extract-dom can emit. */
+export type ExtractedElement =
+  | RectElement
+  | TextElement
+  | ListElement
+  | TableElement
+  | VisualElement
+  | ImageElement
+  | SkipElement;
+
+export interface Extraction {
+  readonly viewport: { readonly w: number; readonly h: number };
+  readonly elementCount: number;
+  readonly elements: readonly ExtractedElement[];
+}
+
+/** Convenience for the buildPptx input shape: paired extraction + per-element
+ * rasterised PNGs keyed by element index. Buffer in Node, Uint8Array in
+ * browser; we accept both. */
+export interface SlideInput {
+  readonly extraction: Extraction;
+  readonly visualPngs: ReadonlyMap<number, Uint8Array | Buffer>;
 }
 
 // Bounded slack: extending a text box by SLACK_PX in some direction must not
@@ -508,8 +656,8 @@ async function extractFromHtml(htmlPath: string): Promise<{ extraction: Extracti
 // full SLACK_PX padding. `pad=2` is a tiny extra buffer so adjacent boxes
 // don't touch even at integer-pixel grids.
 function neighborSlackBudget(
-  b: { x: number; y: number; w: number; h: number },
-  elements: any[],
+  b: Bounds,
+  elements: readonly ExtractedElement[],
   selfIndex: number,
   requested: number,
   pad: number = 2,
@@ -545,17 +693,38 @@ function neighborSlackBudget(
 // Per-slide list of rasterized regions we emitted as addImage — surfaced to
 // the SxS rating UI so reviewers can see which parts of the output aren't
 // native Slides primitives. Coordinates are normalized to 0..1 of slide size.
-type RenderedRegion = { x: number; y: number; w: number; h: number; kind: string };
-function buildPptx(
-  slides: { extraction: Extraction; visualPngs: Map<number, Buffer> }[],
+export interface RenderedRegion { readonly x: number; readonly y: number; readonly w: number; readonly h: number; readonly kind: string }
+
+/** pptxgenjs Presentation augmented with our side-band registries:
+ *   __gradients: parsed CSS gradients, indexed by the GRAD_<n> objectName
+ *                tag we set on each gradient-bearing shape. injectGradients*
+ *                walks the saved XML and writes <a:gradFill> at the matching
+ *                shape. */
+export type PresentationWithRegistries = PptxGenJS & {
+  __gradients: Gradient[];
+};
+
+export function buildPptx(
+  slides: readonly SlideInput[],
   title: string,
-): { pres: any; renderedRegions: RenderedRegion[][] } {
-  // ESM/CJS interop for pptxgenjs
-  const pptxgenModule = require("pptxgenjs");
-  const PptxGenJS = (pptxgenModule as any).default || pptxgenModule;
-  const pres = new PptxGenJS();
-  const gradientRegistry: any[] = [];
-  (pres as any).__gradients = gradientRegistry;
+): { pres: PresentationWithRegistries; renderedRegions: RenderedRegion[][] } {
+  // ESM/CJS interop — `import * as pptxgenModule from "pptxgenjs"` lands a
+  // module-namespace wrapper whose shape varies by loader:
+  //   - Plain Node ESM:   M.default = <ctor>                    (1-level wrap)
+  //   - tsx from .mts:    M.default = { default: <ctor>, ... }  (2-level wrap)
+  //   - Browser stub:     M.default = <ctor>                    (1-level)
+  // Unwrap `.default` until we land on the actual constructor (a function).
+  const resolveCtor = (m: unknown): new () => PptxGenJS => {
+    let v: unknown = m;
+    while (typeof v !== "function" && v != null && typeof (v as { default?: unknown }).default !== "undefined") {
+      v = (v as { default: unknown }).default;
+    }
+    return v as new () => PptxGenJS;
+  };
+  const PptxGenJSCtor = resolveCtor(pptxgenModule);
+  const pres = new PptxGenJSCtor() as PresentationWithRegistries;
+  const gradientRegistry: Gradient[] = [];
+  pres.__gradients = gradientRegistry;
   pres.title = title;
   pres.layout = "LAYOUT_WIDE"; // 13.333" x 7.5" — wait, we want 10" x 5.625"
 
@@ -649,7 +818,7 @@ function buildPptx(
           }
           const skipMergeMultiText = insideTextCount > 1;
 
-          let mergedTextEl: any = null;
+          let mergedTextEl: TextElement | null = null;
           let mergedTextIndex = -1;
           for (let ti = ei + 1; ti < extraction.elements.length && !skipMergeMultiText; ti++) {
             const next = extraction.elements[ti];
@@ -689,7 +858,7 @@ function buildPptx(
              (bs.bottom?.width > 0 && bs.bottom?.color) || (bs.left?.width > 0 && bs.left?.color));
 
           // Content shape
-          const opts: any = {
+          const opts: ShapeProps = {
             x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
             line: { type: "none" },
           };
@@ -700,7 +869,7 @@ function buildPptx(
             // radial gradients like `.bg-glow` whose first stop is 15% indigo
             // — an opaque solid would paint a visible disc if the gradFill
             // injection ever misses this shape).
-            const fallbackFill: any = { color: hexToRgb(el.gradient.stops[0].color) };
+            const fallbackFill: NonNullable<ShapeProps["fill"]> = { color: hexToRgb(el.gradient.stops[0].color) };
             if (typeof el.fillAlpha === "number" && el.fillAlpha < 1) {
               fallbackFill.transparency = Math.round((1 - el.fillAlpha) * 100);
             }
@@ -709,7 +878,7 @@ function buildPptx(
             gradientRegistry.push(el.gradient);
             opts.objectName = `GRAD_${gid}`;
           } else if (el.fill) {
-            const fillOpts: any = { color: hexToRgb(el.fill) };
+            const fillOpts: NonNullable<ShapeProps["fill"]> = { color: hexToRgb(el.fill) };
             if (typeof el.fillAlpha === "number" && el.fillAlpha < 1) {
               // pptxgenjs `transparency` is percent-transparent: 0 = opaque, 100 = invisible.
               fillOpts.transparency = Math.round((1 - el.fillAlpha) * 100);
@@ -763,12 +932,12 @@ function buildPptx(
           // thin slanted line (e.g. `.profit-line { height:2px; rotate(-8deg) }`)
           // into a fat filled rectangle. Re-center the shape on the bbox center
           // at its natural (pre-transform) size and apply pptxgenjs rotate.
-          const rectRot = typeof (el as any).rotate === "number" ? (el as any).rotate : 0;
-          if (Math.abs(rectRot) > 0.5 && (el as any).naturalWidth && (el as any).naturalHeight) {
+          const rectRot = typeof el.rotate === "number" ? el.rotate : 0;
+          if (Math.abs(rectRot) > 0.5 && el.naturalWidth && el.naturalHeight) {
             const cx = b.x + b.w / 2;
             const cy = b.y + b.h / 2;
-            const nw = (el as any).naturalWidth;
-            const nh = (el as any).naturalHeight;
+            const nw = el.naturalWidth;
+            const nh = el.naturalHeight;
             opts.x = px2in(cx - nw / 2);
             opts.y = px2in(cy - nh / 2);
             opts.w = px2in(nw);
@@ -819,7 +988,7 @@ function buildPptx(
             const sameColor = borderColors.every((c: string) => c === borderColors[0]);
             const allSolid = [hasTop && bs.top, hasBottom && bs.bottom, hasLeft && bs.left, hasRight && bs.right]
               .filter(Boolean)
-              .every((s: any) => s.style !== "dashed" && s.style !== "dotted");
+              .every((s) => (s as BorderSide).style !== "dashed" && (s as BorderSide).style !== "dotted");
             // Only run the sandwich when at least one bordered side actually
             // touches a rounded corner. slide_25's `border-left: 4px; border-radius: 0 8px 8px 0`
             // has its single bordered side (left) on two flat corners (TL,BL);
@@ -840,7 +1009,7 @@ function buildPptx(
               // edge under a top-only-rounded card header (slide_01
               // Professional pricing card).
               const sandwichCp = cornerPresetFromRadii(cr);
-              const sandwichOuterOpts: any = {
+              const sandwichOuterOpts: ShapeProps = {
                 x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
                 fill: { color: hexToRgb(borderColors[0]) },
                 line: { type: "none" },
@@ -879,7 +1048,7 @@ function buildPptx(
               };
               const innerCp = cornerPresetFromRadii(innerCr);
               const innerR = Math.max(innerCr.tl, innerCr.tr, innerCr.br, innerCr.bl);
-              const innerOpts: any = {
+              const innerOpts: ShapeProps = {
                 x: px2in(ix), y: px2in(iy), w: px2in(iw), h: px2in(ih),
                 fill: { color: hexToRgb(el.fill) },
                 line: { type: "none" },
@@ -987,7 +1156,7 @@ function buildPptx(
             rw = b.h; rh = b.w;
             rx = cx - rw / 2; ry = cy - rh / 2;
           }
-          const triOpts: any = {
+          const triOpts: ShapeProps = {
             x: px2in(rx), y: px2in(ry), w: px2in(rw), h: px2in(rh),
             fill: { color: hexToRgb(el.fill || "#000000") },
             line: { type: "none" },
@@ -1036,7 +1205,7 @@ function buildPptx(
           //      boxes, separators, and mixed backgrounds.
           // The list's container background (bg+border+radius on the <ul>/<ol>
           // itself) is emitted as a separate "rect" element upstream in walk().
-          const items = (el.items || []).filter((it: any) => (it.text || "").trim().length > 0);
+          const items: readonly ListItem[] = (el.items || []).filter((it) => (it.text || "").trim().length > 0);
           if (items.length === 0) break;
           const listStyle = el.style || {};
           const ordered = !!el.ordered;
@@ -1051,8 +1220,8 @@ function buildPptx(
             // <a:buNone/> between runs, and Google Slides reads that and
             // drops the marker. Workaround: when ANY item has styled runs,
             // prepend the marker as a plain text run and skip `bullet`.
-            const anyItemHasStyledRuns = items.some((it: any) =>
-              (it.runs || []).length > 0 && (it.runs || []).some((r: any) => r.style !== null)
+            const anyItemHasStyledRuns = items.some((it) =>
+              (it.runs || []).length > 0 && (it.runs || []).some((r) => r.style !== null)
             );
             // Per-item ::before bullet colours (e.g. slide_30 Key Priorities,
             // where each <li.red>/<li.green>/etc gets its own coloured 8×8
@@ -1060,14 +1229,14 @@ function buildPptx(
             // paragraph's text colour, so when items carry distinct bullet
             // colours we must emit the marker as a separately-coloured run
             // instead and skip the native bullet entirely.
-            const anyPerItemBulletColor = !ordered && items.some((it: any) => !!it.bulletColor);
+            const anyPerItemBulletColor = !ordered && items.some((it) => !!it.bulletColor);
             const useNativeBullet = !anyItemHasStyledRuns && !anyPerItemBulletColor;
-            const paragraphs = items.map((it: any, ii: number) => {
+            const paragraphs = items.map((it: ListItem, ii: number) => {
               const marker = ordered ? `${ii + 1}.  ` : "•  ";
               const markerColor = it.bulletColor || it.color || listStyle.color || "#333333";
-              const rs = (it.runs && it.runs.length > 0) ? it.runs.filter((r: any) => r.text.length > 0) : null;
-              if (rs && rs.length > 0 && rs.some((r: any) => r.style !== null)) {
-                const out: any[] = [];
+              const rs: readonly TextRun[] | null = (it.runs && it.runs.length > 0) ? it.runs.filter((r) => r.text.length > 0) : null;
+              if (rs && rs.length > 0 && rs.some((r) => r.style !== null)) {
+                const out: TextProps[] = [];
                 if (!useNativeBullet) {
                   // Plain marker prefix coloured per-item (falls back to the
                   // item's text colour when there is no per-item bullet).
@@ -1080,9 +1249,9 @@ function buildPptx(
                     },
                   });
                 }
-                rs.forEach((run: any, ri: number) => {
-                  const s = run.style || {};
-                  const opts: any = {
+                rs.forEach((run: TextRun, ri: number) => {
+                  const s: RunStyle = run.style || {};
+                  const opts: TextPropsOptions = {
                     fontFace: mapFont(s.fontFamily || it.fontFamily || listStyle.fontFamily || "Arial"),
                     fontSize: (s.fontSize || it.fontSize || listStyle.fontSize || 14) * PX2PT,
                     color: hexToRgb(s.color || it.color || listStyle.color || "#333333"),
@@ -1097,7 +1266,7 @@ function buildPptx(
                 });
                 return out;
               }
-              const baseOpts: any = {
+              const baseOpts: TextPropsOptions = {
                 fontFace: mapFont(it.fontFamily || listStyle.fontFamily || "Arial"),
                 fontSize: (it.fontSize || listStyle.fontSize || 14) * PX2PT,
                 color: hexToRgb(it.color || listStyle.color || "#333333"),
@@ -1183,16 +1352,16 @@ function buildPptx(
             // the shape's `line`; non-uniform borders (e.g. a row with only
             // borderBottom, or a highlighted row with only borderLeft accent)
             // are painted as per-side strips so we don't draw a full outline.
-            const bs = it.borderSides || { top: {}, right: {}, bottom: {}, left: {} };
-            const sides = [bs.top, bs.right, bs.bottom, bs.left];
-            const uniformItemBorder = sides.every((s: any) =>
-              s && s.width === bs.top.width && s.color === bs.top.color && s.style === bs.top.style
+            const bs: BorderSides = it.borderSides || { top: { width: 0, color: "" }, right: { width: 0, color: "" }, bottom: { width: 0, color: "" }, left: { width: 0, color: "" } };
+            const sides: readonly BorderSide[] = [bs.top, bs.right, bs.bottom, bs.left];
+            const uniformItemBorder = sides.every((s) =>
+              s && s.width === bs.top.width && s.color === bs.top.color && s.style === bs.top.style,
             ) && (bs.top.width || 0) > 0;
             const hasItemBg = !!it.bgColor;
-            const hasAnyItemBorder = sides.some((s: any) => s && (s.width || 0) > 0 && s.color);
+            const hasAnyItemBorder = sides.some((s) => s && (s.width || 0) > 0 && s.color);
 
             if (hasItemBg || uniformItemBorder) {
-              const rectOpts: any = {
+              const rectOpts: ShapeProps = {
                 x: px2in(ib.x), y: px2in(ib.y), w: px2in(ib.w), h: px2in(ib.h),
                 line: { type: "none" },
               };
@@ -1221,7 +1390,7 @@ function buildPptx(
                 bs.bottom?.width > 0 && bs.bottom?.color ? { x: ib.x, y: ib.y + ib.h - bs.bottom.width, w: ib.w, h: bs.bottom.width, color: bs.bottom.color } : null,
                 bs.left?.width > 0 && bs.left?.color ? { x: ib.x, y: ib.y, w: bs.left.width, h: ib.h, color: bs.left.color } : null,
                 bs.right?.width > 0 && bs.right?.color ? { x: ib.x + ib.w - bs.right.width, y: ib.y, w: bs.right.width, h: ib.h, color: bs.right.color } : null,
-              ].filter(Boolean) as any[];
+              ].filter((s): s is { x: number; y: number; w: number; h: number; color: string } => s !== null);
               for (const s of strips) {
                 slide.addShape("rect", {
                   x: px2in(s.x), y: px2in(s.y), w: px2in(s.w), h: px2in(s.h),
@@ -1243,7 +1412,7 @@ function buildPptx(
             const ty = ib.y;
             const tw = Math.max(1, ib.w - ipad.left - ipad.right);
             const th = ib.h;
-            const textOpts: any = {
+            const textOpts: TextPropsOptions = {
               x: px2in(tx), y: px2in(ty), w: px2in(tw), h: px2in(th),
               valign: "middle",
               align: isPillLike ? "center" : it.textAlign === "center" ? "center" : it.textAlign === "right" ? "right" : "left",
@@ -1271,8 +1440,8 @@ function buildPptx(
             const showMarker = !el.isContainerList && !isPillLike;
             const marker = ordered ? `${ii + 1}.  ` : "•  ";
 
-            if (it.runs && it.runs.length > 0 && it.runs.some((r: any) => r.style !== null)) {
-              const textRuns: any[] = [];
+            if (it.runs && it.runs.length > 0 && it.runs.some((r) => r.style !== null)) {
+              const textRuns: TextProps[] = [];
               if (showMarker) {
                 textRuns.push({
                   text: marker,
@@ -1283,7 +1452,7 @@ function buildPptx(
                   },
                 });
               }
-              for (const run of it.runs.filter((r: any) => r.text.length > 0)) {
+              for (const run of it.runs.filter((r) => r.text.length > 0)) {
                 const rs = run.style || {};
                 textRuns.push({
                   text: run.text,
@@ -1328,18 +1497,20 @@ function buildPptx(
           // Decide path: a table is "native-eligible" if every cell has a
           // uniform per-side border (all four sides identical — or all
           // widths zero) and the table has no outer border-radius.
-          const cellUniformBorder = (cs: any): { width: number; color: string; style: string } | null => {
+          const cellUniformBorder = (
+            cs: { readonly borderSides?: BorderSides } | undefined,
+          ): { width: number; color: string; style: string } | null => {
             const bs = cs?.borderSides;
             if (!bs) return { width: 0, color: "", style: "none" };
-            const sides = [bs.top, bs.right, bs.bottom, bs.left];
-            const widths = sides.map((s: any) => s?.width || 0);
+            const sides: readonly BorderSide[] = [bs.top, bs.right, bs.bottom, bs.left];
+            const widths = sides.map((s) => s?.width || 0);
             const hasAny = widths.some((w: number) => w > 0);
             if (!hasAny) return { width: 0, color: "", style: "none" };
-            const same = sides.every((s: any) =>
-              s && s.width === bs.top.width && s.color === bs.top.color && s.style === bs.top.style
+            const same = sides.every((s) =>
+              s && s.width === bs.top.width && s.color === bs.top.color && s.style === bs.top.style,
             );
             if (!same) return null;
-            return { width: bs.top.width, color: bs.top.color, style: bs.top.style };
+            return { width: bs.top.width, color: bs.top.color, style: bs.top.style ?? "solid" };
           };
           let allCellsUniform = !tableHasRadius;
           let tableBorder: { width: number; color: string; style: string } | null = null;
@@ -1362,19 +1533,19 @@ function buildPptx(
           if (allCellsUniform && rows.length > 0) {
             // Build column widths from the first row's cell widths.
             const firstRow = rows[0];
-            const colW = firstRow.map((c: any) => px2in(c.bounds?.w || b.w / firstRow.length));
-            const tableRows = rows.map((row: any[]) => row.map((cell: any) => {
+            const colW = firstRow.map((c: TableCell) => px2in(c.bounds?.w || b.w / firstRow.length));
+            const tableRows = rows.map((row: readonly TableCell[]) => row.map((cell: TableCell) => {
               const cs = cell.style || {};
               const ub = cellUniformBorder(cs) || { width: 0, color: "", style: "none" };
               // pptxgenjs table cell border dashType: "dash" | "dashDot" | "lgDash" |
               // "lgDashDot" | "lgDashDotDot" | "solid" | "sysDash" | "sysDashDot" |
               // "sysDashDotDot" | "sysDot" | "none". Use "sysDot" for CSS dotted so
               // Google Slides preserves the dotted appearance (not a long dash).
-              const dashType = ub.style === "dashed" ? "dash" : ub.style === "dotted" ? "sysDot" : "solid";
-              const borderSpec = ub.width > 0
-                ? { type: dashType as any, pt: Math.max(0.5, ub.width * PX2PT), color: hexToRgb(ub.color) }
-                : { type: "none" as const, pt: 0, color: "000000" };
-              const cellOpts: any = {
+              const dashType: "dash" | "sysDot" | "solid" = ub.style === "dashed" ? "dash" : ub.style === "dotted" ? "sysDot" : "solid";
+              const borderSpec: { type: "dash" | "sysDot" | "solid" | "none"; pt: number; color: string } = ub.width > 0
+                ? { type: dashType, pt: Math.max(0.5, ub.width * PX2PT), color: hexToRgb(ub.color) }
+                : { type: "none", pt: 0, color: "000000" };
+              const cellOpts: TextPropsOptions = {
                 align: cs.textAlign === "center" ? "center" : cs.textAlign === "right" ? "right" : "left",
                 valign: "middle",
                 fontFace: mapFont(cs.fontFamily || "Arial"),
@@ -1433,7 +1604,7 @@ function buildPptx(
 
               // Cell background + outer line (pptxgenjs line is uniform; per-side
               // borders are painted as strips below).
-              const rectOpts: any = {
+              const rectOpts: ShapeProps = {
                 x: px2in(cb.x), y: px2in(cb.y), w: px2in(cb.w), h: px2in(cb.h),
                 line: { type: "none" },
               };
@@ -1447,10 +1618,10 @@ function buildPptx(
               }
 
               // Uniform border via shape line when all 4 sides match (common case).
-              const bs = cs.borderSides || { top: {}, bottom: {}, left: {}, right: {} };
-              const sides = [bs.top, bs.right, bs.bottom, bs.left];
-              const uniform = sides.every((s: any) =>
-                s && s.width === bs.top.width && s.color === bs.top.color && s.style === bs.top.style
+              const bs: BorderSides = cs.borderSides || { top: { width: 0, color: "" }, bottom: { width: 0, color: "" }, left: { width: 0, color: "" }, right: { width: 0, color: "" } };
+              const sides: readonly BorderSide[] = [bs.top, bs.right, bs.bottom, bs.left];
+              const uniform = sides.every((s) =>
+                s && s.width === bs.top.width && s.color === bs.top.color && s.style === bs.top.style,
               ) && (bs.top.width || 0) > 0;
 
               const corner = cornerOf(ri, ci, row.length);
@@ -1479,7 +1650,7 @@ function buildPptx(
                   bs.bottom?.width > 0 && bs.bottom?.color ? { x: cb.x, y: cb.y + cb.h - bs.bottom.width, w: cb.w, h: bs.bottom.width, color: bs.bottom.color, style: bs.bottom.style } : null,
                   bs.left?.width > 0 && bs.left?.color ? { x: cb.x, y: cb.y, w: bs.left.width, h: cb.h, color: bs.left.color, style: bs.left.style } : null,
                   bs.right?.width > 0 && bs.right?.color ? { x: cb.x + cb.w - bs.right.width, y: cb.y, w: bs.right.width, h: cb.h, color: bs.right.color, style: bs.right.style } : null,
-                ].filter(Boolean) as any[];
+                ].filter((s): s is { x: number; y: number; w: number; h: number; color: string; style?: string } => s !== null);
                 for (const s of strips) {
                   if (s.style === "dashed" || s.style === "dotted") {
                     // Render dashed/dotted as a line so dashType applies.
@@ -1525,7 +1696,7 @@ function buildPptx(
               const text = cell.text || "";
               if (text.trim().length > 0) {
                 const align = cs.textAlign === "center" ? "center" : cs.textAlign === "right" ? "right" : "left";
-                const textOpts: any = {
+                const textOpts: TextPropsOptions = {
                   x: px2in(tb.x), y: px2in(tb.y), w: px2in(tb.w), h: px2in(tb.h),
                   valign: "middle",
                   align,
@@ -1536,9 +1707,9 @@ function buildPptx(
                   italic: cs.fontStyle === "italic",
                   fill: { type: "none" }, line: { type: "none" }, margin: 0,
                 };
-                if (cell.runs && cell.runs.length > 0 && cell.runs.some((r: any) => r.style !== null)) {
-                  const textRuns = cell.runs.filter((r: any) => r.text.length > 0).map((run: any) => {
-                    const rs = run.style || {};
+                if (cell.runs && cell.runs.length > 0 && cell.runs.some((r) => r.style !== null)) {
+                  const textRuns = cell.runs.filter((r) => r.text.length > 0).map((run: TextRun) => {
+                    const rs: RunStyle = run.style || {};
                     return {
                       text: run.text,
                       options: {
@@ -1564,7 +1735,7 @@ function buildPptx(
             // Honor per-corner table radii — a table with `border-radius:
             // 10px 10px 0 0` should outline only the top corners, not all 4.
             const tableCp = cornerPresetFromRadii(tableCornerRadii);
-            const outlineOpts: any = {
+            const outlineOpts: ShapeProps = {
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
               fill: { type: "none" },
             };
@@ -1591,13 +1762,13 @@ function buildPptx(
           const buf = visualPngs.get(ei);
           if (buf) {
             slide.addImage({
-              data: `image/png;base64,${buf.toString("base64")}`,
+              data: `image/png;base64,${bytesToBase64(buf)}`,
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
             });
             slideRegions.push({
               x: b.x / SLIDE_W_PX, y: b.y / SLIDE_H_PX,
               w: b.w / SLIDE_W_PX, h: b.h / SLIDE_H_PX,
-              kind: (el as any)._wasEmojiText ? "emoji" : el.type,
+              kind: (el.type === "image" && el._wasEmojiText) ? "emoji" : el.type,
             });
           }
           break;
@@ -1609,120 +1780,11 @@ function buildPptx(
   return { pres, renderedRegions };
 }
 
-// --- Public API types ---
-export interface ConvertPptxOpts {
-  htmlDir: string;          // absolute or cwd-relative path; lib will resolve()
-  title?: string;            // default "Presentation"
-  outPath?: string | null;   // default null → /tmp/<sanitized-title>.pptx
-  noUpload?: boolean;        // default false
-  only?: string[] | null;    // list of basenames like ["slide_11.html", ...]; default null = all
-}
-
-export interface ConvertPptxResult {
-  pptxPath: string;          // where the .pptx was written
-  presId?: string;           // set only when not noUpload and upload succeeded
-  slideCount: number;
-  regionsPath: string;       // path to rendered-regions.json sidecar
-}
-
-// --- Entry point ---
-export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptxResult> {
-  const htmlDir = resolve(opts.htmlDir || ".");
-  const title = opts.title ?? "Presentation";
-  let outPath: string | null = opts.outPath ?? null;
-  const noUpload = opts.noUpload ?? false;
-  // --only slide_NN.html[,slide_MM.html] — process only the given fixtures
-  // instead of every .html in the dir. Matches by basename.
-  const onlyFiles: string[] | null = opts.only ?? null;
-
-  const htmlFiles = readdirSync(htmlDir)
-    .filter(f => f.endsWith(".html"))
-    .filter(f => !onlyFiles || onlyFiles.includes(f))
-    .sort()
-    .map(f => join(htmlDir, f));
-
-  if (htmlFiles.length === 0) { console.error("No HTML files found in", htmlDir); process.exit(1); }
-  console.log(`Converting ${htmlFiles.length} HTML slides → pptx "${title}"`);
-
-  // Step 1: Extract DOM from all slides (parallel batches)
-  const EXTRACT_BATCH = 4;
-  const slideData: { extraction: Extraction; visualPngs: Map<number, Buffer> }[] = new Array(htmlFiles.length);
-  const t0 = Date.now();
-  for (let i = 0; i < htmlFiles.length; i += EXTRACT_BATCH) {
-    const batch = htmlFiles.slice(i, i + EXTRACT_BATCH);
-    const results = await Promise.all(batch.map(async (f, bi) => {
-      const idx = i + bi;
-      console.log(`  [${idx + 1}/${htmlFiles.length}] Extracting ${f.split("/").pop()}...`);
-      const data = await extractFromHtml(f);
-      console.log(`    [${idx + 1}] ${data.extraction.elementCount} elements, ${data.visualPngs.size} visuals`);
-      return { idx, data };
-    }));
-    for (const { idx, data } of results) slideData[idx] = data;
-  }
-  console.log(`  Extraction: ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-
-  // Step 2: Build pptx
-  console.log("\nBuilding .pptx...");
-  const { pres, renderedRegions } = buildPptx(slideData, title);
-
-  const pptxPath = outPath || `/tmp/${title.replace(/[^a-zA-Z0-9]/g, "_")}.pptx`;
-  await pres.writeFile({ fileName: pptxPath });
-  console.log(`  Saved: ${pptxPath}`);
-
-  // Sidecar: per-slide rasterized regions so the SxS rating UI can warn the
-  // reviewer that the output isn't 100% native primitives and optionally
-  // highlight those regions. Keyed by slide_NN to match shot-originals.ts.
-  const regionsBySlide: Record<string, RenderedRegion[]> = {};
-  let totalRegions = 0;
-  for (let i = 0; i < renderedRegions.length; i++) {
-    const key = `slide_${String(i + 1).padStart(2, "0")}`;
-    regionsBySlide[key] = renderedRegions[i];
-    totalRegions += renderedRegions[i].length;
-  }
-  const regionsPath = join(dirname(pptxPath), "rendered-regions.json");
-  writeFileSync(regionsPath, JSON.stringify(regionsBySlide, null, 2));
-  console.log(`  Rendered regions: ${totalRegions} total across ${renderedRegions.length} slides → ${regionsPath}`);
-
-  // Post-process: inject <a:gradFill> into shapes tagged with name="GRAD_N"
-  await injectGradients(pptxPath, (pres as any).__gradients || []);
-
-  // Post-process: rewrite every <a:ln w="…"> to <a:ln w="…" algn="in">.
-  // pptxgenjs emits no algn= attribute, which OOXML treats as algn="ctr"
-  // (stroke straddles the geometry path). On small-radius roundRects (SWOT
-  // cards on slide_11), the outside-half of the stroke gets sub-pixel
-  // quantised differently on the curved corners than on the straight edges,
-  // making bottom borders look thicker than the corner curves. CSS borders
-  // draw fully inside the border-box, so algn="in" matches the original.
-  await injectStrokeAlignment(pptxPath);
-
-  if (noUpload) {
-    console.log("Done (no upload).");
-    return { pptxPath, slideCount: htmlFiles.length, regionsPath };
-  }
-
-  // Step 3: Upload to Google Drive as Google Slides
-  console.log("\nUploading to Google Slides...");
-  const auth = getAuth();
-  const driveApi = google.drive({ version: "v3", auth });
-
-  const buf = readFileSync(pptxPath);
-  const res = await driveApi.files.create({
-    requestBody: { name: title, mimeType: "application/vnd.google-apps.presentation" },
-    media: { mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", body: Readable.from(buf) },
-    fields: "id",
-  });
-  const presId = res.data.id;
-  console.log(`  → https://docs.google.com/presentation/d/${presId}/edit`);
-  console.log("Done.");
-  return { pptxPath, presId: presId ?? undefined, slideCount: htmlFiles.length, regionsPath };
-}
-
 // --- Gradient post-processing ---
 // pptxgenjs has no gradFill API. We mark gradient shapes with descr="GRAD:{json}" via altText,
 // then rewrite the saved .pptx XML to replace those shapes' <a:solidFill> with <a:gradFill>.
-const JSZip = require("jszip");
 
-function cssAngleToOoxml(cssDeg: number): number {
+export function cssAngleToOoxml(cssDeg: number): number {
   // CSS: 0deg=up (to top), clockwise. OOXML <a:lin ang=>: 0=east, clockwise, units of 60000ths deg.
   // CSS direction = OOXML direction rotated 90° CCW: ooxml = (css - 90 + 360) % 360.
   const ooxml = ((cssDeg - 90) % 360 + 360) % 360;
@@ -1748,12 +1810,15 @@ function buildGradFillXml(gradient: { angle?: number; type?: string; stops: { co
   return `<a:gradFill rotWithShape="1"><a:gsLst>${gsItems}</a:gsLst><a:lin ang="${ang}" scaled="0"/></a:gradFill>`;
 }
 
-async function injectGradients(pptxPath: string, registry: any[]): Promise<void> {
-  if (registry.length === 0) return;
-  const buf = readFileSync(pptxPath);
-  const zip = await JSZip.loadAsync(buf);
+/**
+ * Inject `<a:gradFill>` into every shape tagged `name="GRAD_<n>"` in the
+ * pptx zip. Pure — mutates the supplied JSZip instance in place; the caller
+ * is responsible for serialising back to bytes / a file. Returns the number
+ * of shapes patched (0 means nothing to do — caller can skip generateAsync).
+ */
+export async function injectGradientsIntoZip(zip: JSZip, registry: readonly Gradient[]): Promise<number> {
+  if (registry.length === 0) return 0;
   const slideFiles = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
-
   let patchedShapes = 0;
   for (const name of slideFiles) {
     let xml = await zip.file(name)!.async("string");
@@ -1763,21 +1828,12 @@ async function injectGradients(pptxPath: string, registry: any[]): Promise<void>
       if (!m) return spBlock;
       const gradient = registry[parseInt(m[1])];
       if (!gradient) return spBlock;
-      const gradXml = buildGradFillXml(gradient);
       slidePatched++;
-      return spBlock.replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/, gradXml);
+      return spBlock.replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/, buildGradFillXml(gradient));
     });
-    if (slidePatched > 0) {
-      zip.file(name, xml);
-      patchedShapes += slidePatched;
-    }
+    if (slidePatched > 0) { zip.file(name, xml); patchedShapes += slidePatched; }
   }
-
-  if (patchedShapes > 0) {
-    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    writeFileSync(pptxPath, out);
-    console.log(`  Gradient injection: ${patchedShapes} shape(s) patched`);
-  }
+  return patchedShapes;
 }
 
 /**
@@ -1789,19 +1845,14 @@ async function injectGradients(pptxPath: string, registry: any[]): Promise<void>
  * straight edges, making bottom borders look thicker than the corner
  * curves. CSS borders draw fully INSIDE the border-box, so `algn="in"`
  * matches the original. Idempotent — skips `<a:ln>` elements that
- * already have an algn attribute.
+ * already have an algn attribute. Pure (mutates zip in place; returns
+ * the count).
  */
-async function injectStrokeAlignment(pptxPath: string): Promise<void> {
-  const buf = readFileSync(pptxPath);
-  const zip = await JSZip.loadAsync(buf);
+export async function injectStrokeAlignmentIntoZip(zip: JSZip): Promise<number> {
   const slideFiles = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
-
   let patched = 0;
   for (const name of slideFiles) {
     const xml = await zip.file(name)!.async("string");
-    // Match `<a:ln w="..."` opening tags that don't already have algn=.
-    // The XML can be self-closing (<a:ln w="..."/>) or have children
-    // (<a:ln w="...">...</a:ln>). We only patch the opening tag.
     let slidePatched = 0;
     const next = xml.replace(/<a:ln\b([^>]*?)(\/?)>/g, (match: string, attrs: string, selfClose: string) => {
       if (/\balgn\s*=/.test(attrs)) return match;          // already has algn
@@ -1809,18 +1860,30 @@ async function injectStrokeAlignment(pptxPath: string): Promise<void> {
       slidePatched++;
       return `<a:ln${attrs} algn="in"${selfClose}>`;
     });
-    if (slidePatched > 0) {
-      zip.file(name, next);
-      patched += slidePatched;
-    }
+    if (slidePatched > 0) { zip.file(name, next); patched += slidePatched; }
   }
-
-  if (patched > 0) {
-    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    writeFileSync(pptxPath, out);
-    console.log(`  Stroke alignment: ${patched} <a:ln> rewrite(s) to algn="in"`);
-  }
+  return patched;
 }
 
 // --- Re-exports of internal helpers callers may want to reuse ---
-export { extractFromHtml, buildPptx, getAuth, injectGradients, injectStrokeAlignment };
+export { buildGradFillXml };
+
+// --- In-memory build (browser-friendly) ---
+// Returns a fully-patched .pptx as bytes. No fs, no Drive. Same buildPptx core
+// + same gradient/stroke post-processing as runConvertPptx, applied to the
+// JSZip in-memory instead of round-tripping through a file.
+export async function buildPptxInMemory(
+  slides: readonly SlideInput[],
+  title: string,
+): Promise<Uint8Array> {
+  const { pres } = buildPptx(slides, title);
+  const ab = (await pres.write({ outputType: "arraybuffer" })) as ArrayBuffer;
+  const zip = await JSZip.loadAsync(ab);
+
+  const gradPatched = await injectGradientsIntoZip(zip, pres.__gradients || []);
+  const strokePatched = await injectStrokeAlignmentIntoZip(zip);
+  if (gradPatched > 0) console.log(`  Gradient injection: ${gradPatched} shape(s) patched`);
+  if (strokePatched > 0) console.log(`  Stroke alignment: ${strokePatched} <a:ln> rewrite(s) to algn="in"`);
+
+  return await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+}

@@ -223,9 +223,17 @@ function SlidePair(props) {
   const diffRef = useRef(null);
   const drawRef = useRef(null);
   const renderedRef = useRef(null);
-  const savedAnnotation = comparison.annotationPng
-    ? "/img?path=" + encodeURIComponent(comparison.annotationPng) + "&t=" + Date.now()
-    : null;
+  // Stable URL — only re-computed when the saved annotation path actually
+  // changes (i.e. after a rate that wrote a new PNG). Without this memo,
+  // Date.now() produces a fresh string on every parent re-render (e.g.,
+  // each comment keystroke), which retriggers the savedAnnotationUrl
+  // useEffect in useDrawingCanvas and wipes any in-progress strokes.
+  const savedAnnotation = useMemo(
+    () => comparison.annotationPng
+      ? "/img?path=" + encodeURIComponent(comparison.annotationPng) + "&t=" + Date.now()
+      : null,
+    [comparison.annotationPng],
+  );
 
   const handle = useDrawingCanvas(drawRef, slidesRef, savedAnnotation, drawMode);
   drawHandleRef.current = handle;
@@ -424,13 +432,24 @@ function App() {
         annotation,
       }),
     });
-    // Patch the local comparison so the badge + nav class updates
-    // immediately without another round-trip.
-    setComparisons((prev) => prev.map((c) =>
+    // Patch local state so badge + nav class update immediately. Compute the
+    // updated list here so we can also decide whether this was the last
+    // visible item — when it is, navigate(1) has nowhere to go and the user
+    // is left looking at the same slide; raise an alert instead.
+    const updated = comparisons.map((c) =>
       c.id === current.id ? { ...c, status, comment: trimmed || undefined } : c
-    ));
+    );
+    setComparisons(updated);
+    const visibleAfter = updated.filter((c) => isComparisonVisible(c, showAll));
+    if (visibleAfter.length === 0) {
+      // setTimeout so React paints the new state (status badge etc.) first.
+      setTimeout(() => alert(
+        "All visible slides reviewed! 🎉\n\nClick \"show all\" to revisit good-rated slides, or close this tab."
+      ), 80);
+      return;
+    }
     navigate(1);
-  }, [current, comment, navigate]);
+  }, [current, comment, comparisons, showAll, navigate]);
 
   // Keyboard shortcuts — effect reattaches whenever rate/navigate close
   // over new state so the handler always sees the current slide.

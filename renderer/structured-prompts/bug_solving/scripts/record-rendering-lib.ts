@@ -22,7 +22,7 @@ import { join, resolve } from "path";
 import { Readable } from "stream";
 import CDP from "chrome-remote-interface";
 import { google } from "googleapis";
-import { runConvertPptx } from "../../../html2slides/convert-pptx-lib";
+import { runConvertPptx } from "../../../html2slides/convert-pptx-io";
 import { exportThumbs } from "../../../html2slides/export-thumbs-lib";
 
 export type Mode = "pptx" | "screenshots" | "full";
