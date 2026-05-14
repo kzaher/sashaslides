@@ -1631,8 +1631,16 @@ interface ExtractedElement {
       (clipP !== "none" && clipP !== "inset(0px)" && clipP.length > 0);
     if (hasCssVisual && bounds.w > 10 && bounds.h > 10) {
       seen.add(el);
-      el.querySelectorAll("*").forEach(c => seen.add(c));
+      // Mark the host so the screenshot loop can hide descendant text via
+      // injected CSS before capture. Children are NOT seen-marked: walk()
+      // recurses through them so their native text/rect content emits as
+      // editable overlays on top of the captured gradient/clip-path PNG.
+      // User feedback (slide_07 donuts, slide_13 funnel stages): "text should
+      // never be rendered, … put text as children so it's editable."
+      (el as HTMLElement).setAttribute("data-h2s-hide-text", "1");
       elements.push({ type: "visual", bounds, tag: "css-effect" });
+      const childArrCss = Array.from((el as HTMLElement).children);
+      for (const c of childArrCss) walk(c);
       return;
     }
 
@@ -1740,6 +1748,34 @@ interface ExtractedElement {
 
     // Flex/grid containers
     if ((style.display === "flex" || style.display === "inline-flex" || style.display === "grid" || style.display === "inline-grid") && (el as HTMLElement).children.length > 0) {
+      // Skip the flex/grid walk when every child is a chromeless inline tag
+      // (SPAN/A/etc. with no background, no border, not positioned). Such
+      // containers are pure rich-text rows — slide_15 .line wraps line-num /
+      // keyword / string / comment / punct spans, each colour-only. Falling
+      // through to the regular text-emit path runs getTextRuns() once on the
+      // container and produces ONE editable text element per row with one
+      // styled run per span, instead of the previous one-text-element-per-span
+      // fragmentation. Real flex layouts (rows of cards, legend dots, etc.)
+      // contain at least one widget child and continue down the existing
+      // branch unchanged.
+      const flexKids0 = Array.from((el as HTMLElement).children);
+      const allInlineChromeless = flexKids0.length > 0 && flexKids0.every(c => {
+        const ctag = (c.tagName || "").toUpperCase();
+        if (!INLINE_TAGS.includes(ctag)) return false;
+        const ccs = getComputedStyle(c);
+        if (ccs.position === "absolute" || ccs.position === "fixed") return false;
+        if (rgb2hex(ccs.backgroundColor)) return false;
+        const bw = (parseFloat(ccs.borderTopWidth) || 0) +
+                   (parseFloat(ccs.borderRightWidth) || 0) +
+                   (parseFloat(ccs.borderBottomWidth) || 0) +
+                   (parseFloat(ccs.borderLeftWidth) || 0);
+        if (bw > 0) return false;
+        return true;
+      });
+      if (allInlineChromeless) {
+        // Fall through to the post-flex code path which uses getTextRuns
+        // and emits a single text element with styled runs.
+      } else {
       emitRect(el, style, bounds);
       emitPseudoRect(el, bounds);
       emitPseudoText(el, bounds, style);
@@ -1820,6 +1856,7 @@ interface ExtractedElement {
       flexIndexed.sort((a, b) => a.b - b.b || a.i - b.i);
       for (const { c } of flexIndexed) walk(c);
       return;
+      } // end of !allInlineChromeless branch
     }
 
     const directText = getDirectText(el);
@@ -2253,6 +2290,24 @@ interface ExtractedElement {
   // _domIdx alone preserves that emission sequence. No type/y/z tiebreaking
   // needed — the walk itself is the ordering.
   elements.sort((a, b) => ((a as any)._domIdx ?? 0) - ((b as any)._domIdx ?? 0));
+
+  // Hide text inside CSS-effect visual hosts (conic-gradient / clip-path
+  // containers) before the screenshot loop runs. The walk above already
+  // emitted native text overlays for descendants of these hosts; without
+  // hiding the same text in the captured PNG, the user would see doubled
+  // glyphs (one baked into the bitmap, one editable on top). `color:
+  // transparent` + `-webkit-text-fill-color: transparent` covers both
+  // standard fills and gradient-text spans; `text-shadow:none` strips any
+  // remaining text decoration. Pseudo content is hidden too because the
+  // walk emits pseudo text natively as well.
+  const hideStyle = document.createElement("style");
+  hideStyle.id = "h2s-hide-visual-text";
+  hideStyle.textContent =
+    "[data-h2s-hide-text], [data-h2s-hide-text] *," +
+    "[data-h2s-hide-text]::before, [data-h2s-hide-text]::after," +
+    "[data-h2s-hide-text] *::before, [data-h2s-hide-text] *::after" +
+    "{color:transparent !important;-webkit-text-fill-color:transparent !important;text-shadow:none !important;}";
+  document.head.appendChild(hideStyle);
 
   return JSON.stringify({
     viewport: { w: W, h: H },

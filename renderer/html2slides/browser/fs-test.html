@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>fs-test — directory picker + observer</title>
+<style>
+  body { font: 14px/1.5 -apple-system, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; color: #111; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { color: #666; margin: 0 0 16px; }
+  button { font: inherit; padding: 7px 14px; border: 1px solid #ccc; border-radius: 6px; background: white; cursor: pointer; }
+  button.primary { background: #2563eb; color: white; border-color: #2563eb; }
+  .row { margin: 12px 0; display: flex; gap: 8px; align-items: center; }
+  #support { font: 11px/1.5 ui-monospace, monospace; background: #f3f4f6; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px; }
+  #support .yes { color: #16a34a; } #support .no { color: #dc2626; }
+  #log { font: 11px/1.45 ui-monospace, monospace; background: #0b1020; color: #cbd5e1;
+         padding: 10px; border-radius: 6px; height: 320px; overflow: auto; }
+  #log .added { color: #86efac; } #log .modified { color: #fbbf24; }
+  #log .deleted { color: #f87171; } #log .info { color: #93c5fd; }
+</style>
+</head>
+<body>
+<h1>File System Access API + FileSystemObserver</h1>
+<p class="sub">Pick a directory, then add/modify/delete files in it from your OS file manager — events appear below.</p>
+
+<div id="support"></div>
+
+<div class="row">
+  <button id="pick" class="primary">Pick directory</button>
+  <button id="stop" disabled>Stop watching</button>
+  <span id="dir-label" style="color:#666"></span>
+</div>
+
+<div id="log"></div>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const log = (msg, kind = 'info') => {
+    const line = document.createElement('div');
+    line.className = kind;
+    line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    $('#log').appendChild(line);
+    $('#log').scrollTop = $('#log').scrollHeight;
+  };
+
+  // Feature probes.
+  const hasPicker   = typeof window.showDirectoryPicker === 'function';
+  const hasObserver = typeof window.FileSystemObserver === 'function';
+  $('#support').innerHTML =
+    `showDirectoryPicker: <span class="${hasPicker ? 'yes' : 'no'}">${hasPicker ? 'yes' : 'NO — needs Chrome/Edge over https or localhost'}</span><br>` +
+    `FileSystemObserver: <span class="${hasObserver ? 'yes' : 'no'}">${hasObserver ? 'yes' : 'NO — Chrome 129+ required; falling back to polling'}</span>`;
+
+  let dirHandle = null;
+  let observer = null;
+  let pollTimer = null;
+  let pollState = new Map();   // path → lastModified, for the fallback
+
+  async function listDir(dir, prefix = '') {
+    const out = [];
+    for await (const [name, h] of dir.entries()) {
+      const path = prefix + name;
+      if (h.kind === 'file') {
+        const f = await h.getFile();
+        out.push({ path, mtime: f.lastModified, size: f.size });
+      } else if (h.kind === 'directory') {
+        out.push(...await listDir(h, path + '/'));
+      }
+    }
+    return out;
+  }
+
+  async function pollOnce() {
+    if (!dirHandle) return;
+    const files = await listDir(dirHandle);
+    const seen = new Set();
+    for (const f of files) {
+      seen.add(f.path);
+      const prev = pollState.get(f.path);
+      if (prev === undefined) log(`appeared  ${f.path}`, 'added');
+      else if (prev !== f.mtime) log(`modified  ${f.path}`, 'modified');
+      pollState.set(f.path, f.mtime);
+    }
+    for (const path of [...pollState.keys()]) {
+      if (!seen.has(path)) { log(`disappeared ${path}`, 'deleted'); pollState.delete(path); }
+    }
+  }
+
+  async function startWatch() {
+    if (hasObserver) {
+      observer = new FileSystemObserver((records) => {
+        for (const r of records) {
+          const path = r.relativePathComponents.join('/') || '<root>';
+          const kind =
+            r.type === 'appeared'    ? 'added'    :
+            r.type === 'disappeared' ? 'deleted'  :
+            r.type === 'modified'    ? 'modified' : 'info';
+          log(`${r.type.padEnd(11)} ${path}`, kind);
+        }
+      });
+      try {
+        await observer.observe(dirHandle, { recursive: true });
+        log('observer attached (recursive)', 'info');
+      } catch (e) {
+        log('observer.observe failed: ' + e.message + ' — using polling', 'info');
+        observer = null;
+        startPolling();
+      }
+    } else {
+      startPolling();
+    }
+  }
+
+  async function startPolling() {
+    pollState.clear();
+    await pollOnce();   // seed; treats current files as already-known
+    pollState = new Map();
+    pollState = new Map((await listDir(dirHandle)).map((f) => [f.path, f.mtime]));
+    log('polling every 800 ms (FileSystemObserver unavailable)', 'info');
+    pollTimer = setInterval(pollOnce, 800);
+  }
+
+  function stopWatch() {
+    if (observer) { observer.disconnect(); observer = null; }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    log('stopped', 'info');
+  }
+
+  $('#pick').addEventListener('click', async () => {
+    try {
+      dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+      $('#dir-label').textContent = '→ ' + dirHandle.name;
+      $('#stop').disabled = false;
+      log('picked: ' + dirHandle.name, 'info');
+      const files = await listDir(dirHandle);
+      log(`initial scan: ${files.length} file(s)`, 'info');
+      await startWatch();
+    } catch (e) {
+      if (e.name !== 'AbortError') log('picker error: ' + e.message, 'info');
+    }
+  });
+  $('#stop').addEventListener('click', stopWatch);
+</script>
+</body>
+</html>

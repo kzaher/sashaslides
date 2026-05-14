@@ -12,90 +12,91 @@
   },
   "slide_03": {
     "status": "good",
-    "ratedAt": "2026-05-02T08:01:32.709Z"
+    "ratedAt": "2026-05-14T13:55:17.297Z"
   },
   "slide_04": {
     "status": "good",
-    "comment": "There is wrong line height for bottom text (ML-powered insights ...).",
-    "ratedAt": "2026-05-11T01:08:49.602Z",
+    "ratedAt": "2026-05-14T13:55:29.863Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_04.png"
   },
   "slide_05": {
     "status": "good",
-    "comment": "Left text has wront padding.",
-    "ratedAt": "2026-05-02T08:04:37.604Z"
+    "ratedAt": "2026-05-14T13:55:37.738Z"
   },
   "slide_06": {
-    "status": "good",
-    "comment": "Center text is moved or aligned wrong. On the original it's higher.",
-    "ratedAt": "2026-05-11T01:16:08.397Z",
+    "status": "bad",
+    "comment": "Center text is moved or aligned wrong. On the original it's lower, also the Quote is positioned too high.",
+    "ratedAt": "2026-05-14T13:58:17.672Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_06.png"
   },
   "slide_07": {
-    "status": "good",
-    "comment": "When there is a single line of text, then depending on text alignment leave more either on right side, left side or both sides (if center alignment)",
-    "ratedAt": "2026-05-02T08:05:46.113Z"
+    "status": "bad",
+    "comment": "Why are bottom icons rendered? Also why are top circles rendered, can't we use svgs?",
+    "ratedAt": "2026-05-14T14:00:35.859Z",
+    "annotation": "/tmp/sxs-complex/annotations/slide_07.png"
   },
   "slide_08": {
     "status": "good",
-    "ratedAt": "2026-05-11T01:09:28.244Z",
+    "ratedAt": "2026-05-14T14:00:50.001Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_08.png"
   },
   "slide_09": {
     "status": "good",
-    "ratedAt": "2026-05-02T08:06:19.819Z"
+    "ratedAt": "2026-05-14T14:01:05.671Z"
   },
   "slide_10": {
     "status": "good",
-    "ratedAt": "2026-05-11T01:09:33.673Z"
+    "ratedAt": "2026-05-14T14:02:06.241Z"
   },
   "slide_11": {
     "status": "bad",
-    "comment": "Spacing between bullets is wrong and top border clipping is wrong. Also it seems text position is slightly off. You've used spaces for spacing, please use bulleted list.",
-    "ratedAt": "2026-05-11T01:12:05.061Z",
+    "comment": "Positioning of the text is wrong, it's somehow too high. The top border is also wrong. It should inherit cliping mask from parent and then try to construct clipped element from the mask or render the top border.",
+    "ratedAt": "2026-05-14T14:03:40.803Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_11.png"
   },
   "slide_12": {
     "status": "bad",
     "comment": "On the bottom part there are gray leftovers.",
-    "ratedAt": "2026-05-11T01:12:31.613Z",
+    "ratedAt": "2026-05-14T14:04:06.578Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_12.png"
   },
   "slide_13": {
-    "status": "good",
-    "ratedAt": "2026-04-16T00:18:42.953Z"
+    "status": "bad",
+    "comment": "Why are there so many rendered regions on the right, this looks like it should be possible to use some shape, text should never be rendered, if you need to render then render without text (text hidden), and then put text as children so it's editable? but these 32% conversion and other similar chips definitely look like they should be achievable by using shapes. If not possible explain why but make sure that the text is never baked into images..",
+    "ratedAt": "2026-05-14T14:06:41.611Z"
   },
   "slide_14": {
     "status": "bad",
-    "comment": "The top seems to be clipped like expected, but the border color is of the wrong color on center chips, colored vs gray.",
-    "ratedAt": "2026-05-11T01:12:37.588Z",
+    "comment": "The top seems to be clipped like expected. Make sure that the clipping mask passed from parent is applied correctly and either makes the top border rendered, or ideally uses some shape with clipping (which I think should be possible).",
+    "ratedAt": "2026-05-14T14:07:27.604Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_14.png"
   },
   "slide_15": {
-    "status": "good",
-    "comment": "Anomalies with text in chips.",
-    "ratedAt": "2026-05-11T01:12:53.621Z"
+    "status": "bad",
+    "comment": "Why can't you make the text just a single text area, at least why can't you make each line one text? I would expect that if there are spans inside of div, they should just mark style.",
+    "ratedAt": "2026-05-14T14:10:36.780Z",
+    "annotation": "/tmp/sxs-complex/annotations/slide_15.png"
   },
   "slide_16": {
     "status": "good",
-    "ratedAt": "2026-05-11T01:13:30.589Z"
+    "ratedAt": "2026-05-14T14:11:49.821Z",
+    "annotation": "/tmp/sxs-complex/annotations/slide_16.png"
   },
   "slide_17": {
-    "status": "good",
-    "comment": "SV, GC and NX are aligned vertically wrong (top vs middle).",
-    "ratedAt": "2026-05-11T01:13:41.307Z",
+    "status": "bad",
+    "comment": "Series A Founded and $15M are moved a bit up. Investigate why and fix this.",
+    "ratedAt": "2026-05-14T14:13:23.361Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_17.png"
   },
   "slide_18": {
     "status": "good",
     "comment": "April 2025 and arrows are aligned wrong, top vs middle it seems, also numbers are aligned wrong.",
-    "ratedAt": "2026-05-11T01:13:51.926Z",
+    "ratedAt": "2026-05-14T14:13:32.517Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_18.png"
   },
   "slide_19": {
     "status": "good",
-    "ratedAt": "2026-05-02T08:11:24.388Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_19.png"
+    "ratedAt": "2026-05-14T14:12:35.274Z"
   },
   "slide_20": {
     "status": "good",
@@ -114,40 +115,43 @@
   },
   "slide_23": {
     "status": "good",
-    "ratedAt": "2026-05-11T01:14:21.105Z"
+    "ratedAt": "2026-05-14T14:13:45.549Z"
   },
   "slide_24": {
     "status": "good",
-    "ratedAt": "2026-05-11T01:14:30.124Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_24.png"
+    "ratedAt": "2026-05-14T14:13:52.958Z"
   },
   "slide_25": {
-    "status": "good",
-    "ratedAt": "2026-05-11T01:14:45.448Z"
+    "status": "bad",
+    "comment": "The entire text is for some reason moved up, both main text and in the bottom banner. Understand why and fix.",
+    "ratedAt": "2026-05-14T14:14:40.040Z",
+    "annotation": "/tmp/sxs-complex/annotations/slide_25.png"
   },
   "slide_26": {
     "status": "good",
-    "ratedAt": "2026-04-20T05:56:58.372Z"
+    "ratedAt": "2026-05-14T14:14:50.002Z",
+    "annotation": "/tmp/sxs-complex/annotations/slide_26.png"
   },
   "slide_27": {
     "status": "good",
-    "ratedAt": "2026-05-11T01:14:54.567Z"
+    "ratedAt": "2026-05-14T14:14:57.552Z",
+    "annotation": "/tmp/sxs-complex/annotations/slide_27.png"
   },
   "slide_28": {
     "status": "good",
     "comment": "100% is wrongly aligned, top vs middle",
-    "ratedAt": "2026-05-11T01:14:59.153Z"
+    "ratedAt": "2026-05-14T14:15:03.695Z",
+    "annotation": "/tmp/sxs-complex/annotations/slide_28.png"
   },
   "slide_29": {
     "status": "good",
     "comment": "Alignment od badge texts is wrong.",
-    "ratedAt": "2026-05-11T01:15:10.684Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_29.png"
+    "ratedAt": "2026-05-14T14:15:15.646Z"
   },
   "slide_30": {
-    "status": "good",
-    "comment": "Line height of code is wrong.",
-    "ratedAt": "2026-05-11T01:15:48.580Z",
+    "status": "bad",
+    "comment": "It uses spacing for padding between bullet and text, can't bullets be colored, it not, then it's fine!",
+    "ratedAt": "2026-05-14T14:16:13.198Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_30.png"
   }
 }
