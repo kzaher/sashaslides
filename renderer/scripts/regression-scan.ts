@@ -38,7 +38,7 @@ type Args = {
 };
 
 function parseArgs(argv: string[]): Args {
-  const a: any = {
+  const a: Partial<Args> & { fixtures: string; out: string; repoRoot: string } = {
     fixtures: "renderer/html2slides/e2e/fixtures",
     out: "/tmp/regression-scan",
     repoRoot: process.cwd(),
@@ -110,7 +110,7 @@ function diffShape(i: number, a: ShapeSnap | undefined, b: ShapeSnap | undefined
   const fields: Array<keyof ShapeSnap> = ["text", "x", "y", "w", "h", "anchor", "align", "spcPct", "sz", "b", "colors", "insets", "lineRects"];
   const diffs: string[] = [];
   for (const f of fields) {
-    const av = (a as any)[f], bv = (b as any)[f];
+    const av: unknown = a[f], bv: unknown = b[f];
     if (JSON.stringify(av) !== JSON.stringify(bv)) {
       diffs.push(`${f}: ${JSON.stringify(av)} → ${JSON.stringify(bv)}`);
     }
@@ -179,7 +179,7 @@ async function main() {
       execFileSync("bash", [recordScript, "--slides", slides.join(","), "--label", sha.slice(0, 8), "--out", pptxDir], {
         cwd: wtDir, stdio: "inherit", env: { ...process.env },
       });
-    } catch (e: any) {
+    } catch (e) {
       console.error(`  FAILED to build at ${sha.slice(0, 8)}: ${e.message}`);
       execFileSync("git", ["worktree", "remove", "--force", wtDir], { cwd: repoRoot });
       continue;

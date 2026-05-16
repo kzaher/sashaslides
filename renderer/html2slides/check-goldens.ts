@@ -101,7 +101,7 @@ for (const f of currentFiles) {
         writeFileSync(diffPath, PNG.sync.write(diff));
         results.push({ file: f, status: "new", diffPixels: n, diffPath });
         continue;
-      } catch (e: any) {
+      } catch {
         // fall through — still mark as new
       }
     }

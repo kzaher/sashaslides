@@ -142,7 +142,7 @@ async function runIteration(
         stdio: "inherit",
       }
     );
-  } catch (err: any) {
+  } catch (err) {
     console.log(`  Renderer exited with error (may be partial success)`);
   }
 
@@ -150,7 +150,14 @@ async function runIteration(
 
   // Read metrics
   const metricsPath = join(iterDir, "render_metrics.json");
-  let metrics: any = {
+  interface RenderMetrics {
+    totalSlides: number;
+    totalTokens: number;
+    avgTokensPerSlide: number;
+    avgTimePerSlideMs: number;
+    [extra: string]: number;
+  }
+  let metrics: RenderMetrics = {
     totalSlides: htmlFiles.length,
     totalTokens: 0,
     avgTokensPerSlide: 0,

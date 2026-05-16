@@ -69,6 +69,10 @@ Important:
 * **Always analyze rating-UI pictures inside a sub-agent — never directly in the main context.** Images from `/tmp/sxs*/originals/`, `/tmp/sxs*/slides/`, `/tmp/sxs*/diffs/`, and `/tmp/sxs*/annotations/` are large and blow out the main window. Delegate: pass the absolute paths (original, rendered, annotation, diff) plus the user's comment from `ratings.json` to an Agent, and ask for a text-only report (what the user is pointing at, what's different, likely root cause). Then the main context ingests only the concise diagnosis and decides the fix. Never open those PNGs via Read in the orchestrator.
 * **Goldens are user-only.** `e2e/goldens/*.png` may ONLY be written by the user clicking "Good" in the SxS rating UI — that is the sole sanctioned writer. Claude must NEVER `cp`/`mv`/write files into `e2e/goldens/`, never run `check-goldens.ts --bless` (disabled anyway), never promote regenerated thumbs as goldens. If a fix looks right, regen + diff and hand the result back; let the user bless. The sentinel `e2e/goldens/.BLESSED_BY_USER_ONLY` documents this boundary in-tree.
 
+## TypeScript style (project-specific)
+
+* **For DOM vendor-prefix properties** (`webkitTextFillColor`, `backgroundClip`, etc.) define a typed accessor helper (`function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl`) rather than spreading `(cs as any).foo` across the codebase. extract-dom.ts already has this — extend it when you need another vendor property.
+
 ## TypeScript / Node tooling gotchas
 
 * **`pptxgenjs` ESM/CJS interop** needs `(pptxgenModule as any).default || pptxgenModule` — direct `import pptxgen from "pptxgenjs"` hits "not a constructor" under Node 22 ESM.

@@ -42,6 +42,17 @@ interface SlideComparison {
   // primitives (visuals, images, emoji fallbacks). Surface these to the user
   // because any region in this list represents a fidelity compromise.
   renderedRegions?: RenderedRegion[];
+  annotationPng?: string;    // /tmp/.../annotations/<id>.png — saved Draw strokes
+}
+
+interface RatingEntry {
+  status: "pending" | "good" | "bad";
+  comment?: string;
+  ratedAt?: string;
+  annotation?: string;
+  analysis?: string;
+  htmlFile?: string;
+  slidesUrl?: string;
 }
 
 function findComparisons(): SlideComparison[] {
@@ -147,7 +158,7 @@ function findComparisons(): SlideComparison[] {
         if (ratings[c.id].htmlFile) c.htmlFile = ratings[c.id].htmlFile;
         if (ratings[c.id].slidesUrl) c.slidesUrl = ratings[c.id].slidesUrl;
         if (ratings[c.id].annotation && existsSync(ratings[c.id].annotation)) {
-          (c as any).annotationPng = ratings[c.id].annotation;
+          c.annotationPng = ratings[c.id].annotation;
         }
       }
     }
@@ -159,7 +170,7 @@ function findComparisons(): SlideComparison[] {
 function saveRating(id: string, status: "good" | "bad", comment?: string, annotationPng?: string) {
   const ratingsFile = join(resultsDir, "ratings.json");
   const ratings = existsSync(ratingsFile) ? JSON.parse(readFileSync(ratingsFile, "utf-8")) : {};
-  const entry: any = { status, comment, ratedAt: new Date().toISOString() };
+  const entry: RatingEntry = { status, comment, ratedAt: new Date().toISOString() };
   if (annotationPng) {
     // Annotations persist under resultsDir/annotations/ so /tmp wipes only
     // break the PNGs, not the metadata.

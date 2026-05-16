@@ -217,11 +217,123 @@ interface TextRun {
   } | null;
 }
 
-interface ExtractedElement {
-  type: string;
-  bounds: Bounds;
-  [key: string]: any;
+// Per-CSS-property additions extract-dom carries past getComputedStyle.
+// `bgAlpha` and `shadowRings` are computed locally during style extraction
+// and stored on the same `cs`/`liStyle`/`style` object that downstream code
+// reads back, so the typed access does not need `as any`. Vendor-prefixed
+// CSS (webkit*, etc.) goes through `vendorCss()` below.
+interface ListItem {
+  text: string;
+  runs?: TextRun[];
+  bounds?: Bounds;
+  fontFamily?: string;
+  fontSize?: number;
+  fontWeight?: "bold" | "normal";
+  fontStyle?: "italic" | "normal";
+  color?: string | null;
+  bulletColor?: string;
+  lineHeight?: number;
+  marginBottom?: number;
+  padding?: { top: number; right: number; bottom: number; left: number };
+  bgColor?: string | null;
+  bgAlpha?: number;
+  borderRadius?: number;
+  borderSides?: BorderSides;
 }
+
+interface TableCell {
+  text?: string;
+  runs?: TextRun[];
+  isHeader?: boolean;
+  colspan?: number;
+  rowspan?: number;
+  bounds?: Bounds;
+  padding?: { top: number; right: number; bottom: number; left: number };
+  style?: Partial<ElementStyle>;
+  bgColor?: string | null;
+}
+type TableRow = TableCell[];
+
+interface BoxShadow {
+  offsetX: number;
+  offsetY: number;
+  blur: number;
+  spread: number;
+  color: string | null;
+  alpha: number;
+}
+interface ShadowRing {
+  spread: number;
+  blur: number;
+  color: string;
+  alpha: number;
+}
+
+interface GradientStop { color: string; position: number; alpha?: number }
+interface Gradient {
+  type?: "linear" | "radial";
+  angle?: number;
+  stops: GradientStop[];
+}
+
+/** Single permissive element shape. Each `type` variant uses only a subset
+ * of the optional fields; consumers narrow via the `type` discriminator.
+ * Kept as ONE interface (not a discriminated union) to keep the many
+ * `elements.push({...})` literals in this file legible — each emit site
+ * sets just the fields its variant needs and TypeScript verifies the
+ * shape without forcing one push per branch. */
+interface ExtractedElement {
+  type:
+    | "rect" | "text" | "list" | "table" | "visual" | "image"
+    | "triangle" | "line" | "br" | "_skip";
+  bounds: Bounds;
+  // Common
+  _domIdx?: number;
+  _wasEmojiText?: boolean;
+  zIndex?: number;
+  position?: string;
+  rotate?: number;
+  naturalWidth?: number;
+  naturalHeight?: number;
+  style?: Partial<ElementStyle> | null;
+  // rect / text shared
+  fill?: string | null;
+  fillAlpha?: number;
+  gradient?: Gradient | null;
+  borderWidth?: number;
+  borderColor?: string | null;
+  borderStyle?: string;
+  borderRadius?: number;
+  cornerRadii?: CornerRadii;
+  borderUniform?: boolean;
+  borderSides?: BorderSides | null;
+  boxShadow?: BoxShadow | null;
+  // text
+  text?: string;
+  runs?: TextRun[];
+  singleLine?: boolean;
+  verticallyCentered?: boolean;
+  padding?: { top: number; right: number; bottom: number; left: number };
+  // list
+  items?: ListItem[];
+  ordered?: boolean;
+  anyStyledItem?: boolean;
+  isContainerList?: boolean;
+  // table
+  rows?: TableRow[];
+  // visual / image
+  tag?: string;
+  cornerRadius?: number;
+}
+
+/** Vendor-prefixed CSS not in TypeScript's CSSStyleDeclaration. Cast a
+ * CSSStyleDeclaration through this when reading webkit* / -webkit-* etc. */
+type VendorCssDecl = CSSStyleDeclaration & {
+  webkitTextFillColor?: string;
+  webkitBackgroundClip?: string;
+  backgroundClip?: string;
+};
+function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as VendorCssDecl }
 
 // The entire extraction runs as an IIFE that returns JSON
 (() => {
@@ -231,7 +343,7 @@ interface ExtractedElement {
   const seen = new Set<Element>();
   let _domCounter = 0;
   const _origPush = elements.push.bind(elements);
-  (elements as any).push = (...items: ExtractedElement[]) => {
+  elements.push = (...items: ExtractedElement[]) => {
     for (const it of items) if (it && it._domIdx === undefined) it._domIdx = _domCounter++;
     return _origPush(...items);
   };
@@ -244,7 +356,7 @@ interface ExtractedElement {
   // > 500, prefer heavier then lighter.
   const _fontWeightMap: Record<string, number[]> = {};
   try {
-    for (const f of (document as any).fonts) {
+    for (const f of document.fonts) {
       const fam = f.family.replace(/['"]/g, "").trim();
       const w = parseInt(f.weight) || 400;
       if (!_fontWeightMap[fam]) _fontWeightMap[fam] = [];
@@ -342,7 +454,7 @@ interface ExtractedElement {
    * `background-image` gradient. Returns null when the text is not
    * gradient-clipped — caller falls back to `rgb2hex(cs.color)`. */
   function resolveGradientTextColor(cs: CSSStyleDeclaration): string | null {
-    const fillCss = (cs as any).webkitTextFillColor || cs.getPropertyValue("-webkit-text-fill-color") || "";
+    const fillCss = vendorCss(cs).webkitTextFillColor || cs.getPropertyValue("-webkit-text-fill-color") || "";
     const fillTransparent = fillCss && rgbAlpha(fillCss) < 0.1;
     const colorTransparent = rgbAlpha(cs.color) < 0.1;
     if (!fillTransparent && !colorTransparent) return null;
@@ -512,7 +624,7 @@ interface ExtractedElement {
       // concentric halo rects (OOXML has no equivalent shadow effect).
       ...(() => {
         const sh = cs.boxShadow;
-        if (!sh || sh === "none") return { boxShadow: null, shadowRings: [] as any[] };
+        if (!sh || sh === "none") return { boxShadow: null, shadowRings: [] as ShadowRing[] };
         // Split on top-level commas (never inside rgba()).
         const parts: string[] = [];
         let depth = 0, buf = "";
@@ -535,7 +647,7 @@ interface ExtractedElement {
             color: rgb2hex(p) || "#000000",
             alpha,
           };
-        }).filter(Boolean) as any[];
+        }).filter(Boolean);
         // Ring = offset=0 and spread>0. These can't be expressed as a PPTX
         // shadow effect; emit as concentric halo rects instead.
         const rings = layers
@@ -578,7 +690,7 @@ interface ExtractedElement {
     // reported height to the wrapper's content box so subsequent siblings
     // (legends, etc.) don't overlap, and (b) adopting the wrapper's corner
     // radii so the outer corner cells render rounded.
-    let wrapperClip: { borderRadius: number; cornerRadii: any; bounds: Bounds } | null = null;
+    let wrapperClip: { borderRadius: number; cornerRadii: CornerRadii; bounds: Bounds } | null = null;
     {
       let anc: Element | null = table.parentElement;
       while (anc && anc !== document.body) {
@@ -601,10 +713,10 @@ interface ExtractedElement {
         anc = anc.parentElement;
       }
     }
-    const rows: any[][] = [];
+    const rows: TableRow[] = [];
     const trs = table.querySelectorAll("tr");
     for (const tr of trs) {
-      const cells: any[] = [];
+      const cells: TableCell[] = [];
       const tds = tr.querySelectorAll("td, th");
       for (const td of tds) {
         const cs = getStyle(td);
@@ -630,7 +742,7 @@ interface ExtractedElement {
             fontStyle: cs.fontStyle,
             color: cs.color,
             bgColor: cs.bgColor,
-            bgAlpha: (cs as any).bgAlpha,
+            bgAlpha: cs.bgAlpha,
             textAlign: cs.textAlign,
             borderColor: cs.borderColor,
             borderWidth: cs.borderWidth,
@@ -694,7 +806,7 @@ interface ExtractedElement {
     const bounds = getBounds(list);
     const style = getStyle(list);
     const ordered = list.tagName === "OL";
-    const items: any[] = [];
+    const items: ListItem[] = [];
 
     const listCs = getComputedStyle(list);
     const columnCount = parseInt(listCs.columnCount) || 1;
@@ -781,7 +893,7 @@ interface ExtractedElement {
           marginTop,
           borderBottom: liStyle.borderBottom > 0 ? liStyle.borderBottomColor : null,
           bgColor: liStyle.bgColor,
-          bgAlpha: (liStyle as any).bgAlpha,
+          bgAlpha: liStyle.bgAlpha,
           borderColor: liStyle.borderColor,
           borderWidth: liStyle.borderWidth,
           borderStyle: liStyle.borderStyle,
@@ -837,7 +949,7 @@ interface ExtractedElement {
       // rounded rect / border around the bulleted list (e.g. features card).
       containerStyle: {
         bgColor: style.bgColor,
-        fillAlpha: (style as any).bgAlpha,
+        fillAlpha: style.bgAlpha,
         borderWidth: style.borderWidth,
         borderColor: style.borderColor,
         borderStyle: style.borderStyle,
@@ -904,6 +1016,21 @@ interface ExtractedElement {
 
   function getTextRuns(el: Element, parentStyle: ElementStyle): TextRun[] {
     const runs: TextRun[] = [];
+    // Flex/grid containers blockify inline-level children: an in-flow <span>
+    // inside `display:flex` reports computed `display:block` even though it
+    // lays out as an inline-row flex item with NO visual line break before
+    // it. The original isBlock-injects-\n logic was written for genuine
+    // `<span style="display:block">` patterns; honouring it for flex/grid
+    // items wedges a literal "\n" between every styled span on slide_15
+    // .line code rows (verified: 21 lines × ≥1 \n each in slide1.xml).
+    // pptxgenjs writes the \n into <a:t> and Slides renders each span on
+    // its own visual line. Detecting the parent display once disables the
+    // blockification-derived \n for flex/grid children while preserving it
+    // for real block spans.
+    const parentCs = getComputedStyle(el);
+    const parentIsFlexOrGrid =
+      parentCs.display === "flex" || parentCs.display === "inline-flex" ||
+      parentCs.display === "grid" || parentCs.display === "inline-grid";
     for (const node of el.childNodes) {
       if (node.nodeType === 3) {
         const t = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
@@ -925,7 +1052,7 @@ interface ExtractedElement {
           // display:block).  The list extractor already handles line breaks
           // between list items.
           const inListItem = !!(node as Element).closest?.("li");
-          if (isBlock && !inListItem && runs.length > 0) {
+          if (isBlock && !inListItem && !parentIsFlexOrGrid && runs.length > 0) {
             runs.push({ text: "\n", style: null });
           }
           // Mirror getDirectText: a margin-left on the inline child
@@ -1127,13 +1254,13 @@ interface ExtractedElement {
     // bounds against the border sums works regardless of `box-sizing`
     // (`getComputedStyle(...).width` returns border-box width when
     // `box-sizing: border-box` is inherited, which is misleading here).
-    const bT = s.borderTop || 0, bR = (s as any).borderRight || 0, bB = s.borderBottom || 0, bL = (s as any).borderLeft || 0;
+    const bT = s.borderTop || 0, bR = s.borderRight || 0, bB = s.borderBottom || 0, bL = s.borderLeft || 0;
     const totalW = bL + bR, totalH = bT + bB;
     // Bounds must match the border sums within 1px — i.e. content area is 0.
     if (Math.abs(b.w - totalW) > 1.5 || Math.abs(b.h - totalH) > 1.5) return null;
     // Avoid matching zero-sized boxes with no borders.
     if (totalW < 2 || totalH < 2) return null;
-    const cT = s.borderTopColor, cR = (s as any).borderRightColor, cB = s.borderBottomColor, cL = (s as any).borderLeftColor;
+    const cT = s.borderTopColor, cR = s.borderRightColor, cB = s.borderBottomColor, cL = s.borderLeftColor;
     // A side is "colored" if width > 0 and color is not null/transparent.
     const sides = [
       { dir: "top",    w: bT, c: cT, rotate: 180 }, // color on top → apex points down
@@ -1165,7 +1292,7 @@ interface ExtractedElement {
       rotate,
       zIndex: s.zIndex,
       position: s.position,
-    } as any);
+    });
   }
 
   function emitRect(el: Element, s: ElementStyle, b: Bounds): void {
@@ -1186,7 +1313,7 @@ interface ExtractedElement {
     // transparent text — worse than just rendering the text in the gradient's
     // dominant color. Skip the rect and let the text path paint it normally.
     const elCs2 = getComputedStyle(el);
-    const clip = (elCs2 as any).backgroundClip || (elCs2 as any).webkitBackgroundClip;
+    const clip = vendorCss(elCs2).backgroundClip || vendorCss(elCs2).webkitBackgroundClip;
     if (clip === "text") return;
 
     // For transparent elements with borders, detect background color underneath
@@ -1211,7 +1338,7 @@ interface ExtractedElement {
     if (hasRadialGradient && !gradient) {
       const radial = parseRadialGradient(s.backgroundImage!);
       if (radial && radial.stops.length >= 2) {
-        gradient = radial as any;
+        gradient = radial;
         if (!fill) {
           const firstReal = radial.stops.find(st => st.alpha > 0) || radial.stops[0];
           fill = firstReal.color;
@@ -1222,7 +1349,7 @@ interface ExtractedElement {
 
     // Combine CSS `opacity` with rgba alpha so semi-transparent elements
      // (e.g. slide_28's `.badge.opacity-50 { opacity: 0.5 }`) render faded.
-    let bgA = (s as any).bgAlpha ?? 1;
+    let bgA = s.bgAlpha ?? 1;
     const opA = typeof s.opacity === "number" && s.opacity < 1 ? s.opacity : 1;
 
     // Pre-blend a translucent solid fill into an opaque hex when the element
@@ -1258,7 +1385,7 @@ interface ExtractedElement {
     // solid concentric rects painted BEHIND the element. CSS paints later
     // layers first, so emit in reverse: the outermost ring goes down first,
     // then inner rings on top, then the element last.
-    const rings = (s as any).shadowRings as { spread: number; blur: number; color: string; alpha: number }[] | undefined;
+    const rings: ShadowRing[] | undefined = s.shadowRings;
     if (rings && rings.length) {
       for (let i = rings.length - 1; i >= 0; i--) {
         const ring = rings[i];
@@ -1274,7 +1401,7 @@ interface ExtractedElement {
           borderUniform: true, borderSides: null,
           borderColor: null, borderWidth: 0, borderStyle: "solid",
           zIndex: s.zIndex, position: s.position, boxShadow: null,
-        } as any);
+        });
       }
     }
     elements.push({
@@ -1414,26 +1541,96 @@ interface ExtractedElement {
         if (Math.abs(pb.x - innerX) < TOL && Math.abs((pb.y + pb.h) - innerBottom) < TOL)
           pseudoCornerRadii.bl = Math.max(br, pBL);
       }
-      // SWOT-card top-stripe merge: when the pseudo is the canonical
-      // `top:0; left:0; right:0; height:Npx` accent stripe AND its background
-      // matches the parent's top-border color exactly, the CSS intent is a
-      // single thicker color band combining the border row and the stripe.
-      // After the padding-box shift the OOXML stripe sits BELOW the algn="in"
-      // top border with a sub-pixel mismatch on rounded corners (round2SameRect
-      // adj clamps to min(w,h)/2 ≈ 2 px while the parent has 12 px corners),
-      // producing a visible step the user reads as broken clipping. Promote
-      // the stripe outward to cover the parent's top-border row so the band
-      // reads as one shape with the card's outer rounded top corners.
-      if (parentBT > 0 && flushTopLeft && flushTopRight && pseudoFill && pseudoFillAlpha === 1) {
-        const parentTopHex = rgb2hex(parentCs2.borderTopColor);
-        if (parentTopHex && parentTopHex.toLowerCase() === pseudoFill.toLowerCase()) {
-          pb.y -= parentBT;
-          pb.h += parentBT;
-          pb.x -= parentBL_w;
-          pb.w += parentBL_w + parentBR_w;
-          pseudoCornerRadii.tl = Math.max(pseudoCornerRadii.tl, pTL);
-          pseudoCornerRadii.tr = Math.max(pseudoCornerRadii.tr, pTR);
-        }
+      // Thin top accent stripe on a rounded overflow:hidden parent
+      // (slide_11 SWOT `.card::before { height:4px }`, slide_14 logo
+      // `.logo-card::before { height:3px }`). A single `round2SameRect`
+      // can't follow the parent's 12 px curve: the OOXML rectRadius is
+      // clamped to `min(w,h)/2 ≈ 2 px` because the stripe is only a few px
+      // tall, so its corners go almost flat and overshoot the card's curve.
+      //
+      // Replace the standalone stripe with a sandwich emitted at the parent's
+      // FULL bounds — pptxgenjs can then draw a real 12 px corner on the
+      // outer shape:
+      //   1. OUTER overlay: full parent bounds, stripe color, parent's
+      //      per-corner radii.
+      //   2. INNER overlay: parent's background color, inset by stripeH +
+      //      parentBT on top and parent border widths elsewhere, corners
+      //      shrunk by `min(adjacent insets)` (matches the existing rounded-
+      //      non-uniform-border sandwich in convert-pptx-lib.ts).
+      //   3. (slide_14) STROKE overlay: when the stripe color differs from
+      //      the parent's border color, paint the parent's border ring on
+      //      top so the side/bottom strips of the outer overlay (still in
+      //      stripe color) get repainted to the parent's border color.
+      const parentFillHex = rgb2hex(parentCs2.backgroundColor);
+      const isThinTopStripe =
+        flushTopLeft && flushTopRight &&
+        !!pseudoFill && pseudoFillAlpha === 1 &&
+        (parentOv === "hidden" || parentOv === "clip") &&
+        (pTL > 2 || pTR > 2) &&
+        pb.h > 0 &&
+        pb.h + parentBT < bounds.h - parentBB_w &&
+        !!parentFillHex;
+      if (isThinTopStripe) {
+        // Place OUTER+INNER at the parent's PADDING-BOX bounds (inside the
+        // parent's natural border ring), with corner radii shrunk by the
+        // adjacent parent border widths. This way the parent's own roundRect
+        // continues to paint the gray/accent perimeter, and the overlays
+        // paint only the area strictly inside the border — eliminating both
+        // the slide_14 perimeter-color regression and the slide_11 corner
+        // sliver where two same-radius arcs competed.
+        const stripeH = pb.h;
+        const ox = bounds.x + parentBL_w;
+        const oy = bounds.y + parentBT;
+        const ow = Math.max(0, bounds.w - parentBL_w - parentBR_w);
+        const oh = Math.max(0, bounds.h - parentBT - parentBB_w);
+        const outerCr = {
+          tl: pTL > 0 ? Math.max(0, pTL - Math.min(parentBT, parentBL_w)) : 0,
+          tr: pTR > 0 ? Math.max(0, pTR - Math.min(parentBT, parentBR_w)) : 0,
+          br: pBR > 0 ? Math.max(0, pBR - Math.min(parentBB_w, parentBR_w)) : 0,
+          bl: pBL > 0 ? Math.max(0, pBL - Math.min(parentBB_w, parentBL_w)) : 0,
+        };
+        // 1) OUTER overlay (accent stripe color), fills padding-box
+        elements.push({
+          type: "rect",
+          bounds: { x: ox, y: oy, w: ow, h: oh },
+          fill: pseudoFill, fillAlpha: 1,
+          gradient: null,
+          borderRadius: Math.max(outerCr.tl, outerCr.tr, outerCr.br, outerCr.bl),
+          cornerRadii: outerCr,
+          borderUniform: true,
+          borderSides: null,
+          borderColor: null,
+          borderWidth: 0,
+          borderStyle: "solid",
+          zIndex: 999, position: "absolute", boxShadow: null,
+        });
+        // 2) INNER overlay (parent fill), inset from OUTER's TOP by stripeH only
+        const innerCr = {
+          tl: Math.max(0, outerCr.tl - stripeH),
+          tr: Math.max(0, outerCr.tr - stripeH),
+          br: outerCr.br,
+          bl: outerCr.bl,
+        };
+        elements.push({
+          type: "rect",
+          bounds: {
+            x: ox,
+            y: oy + stripeH,
+            w: ow,
+            h: Math.max(0, oh - stripeH),
+          },
+          fill: parentFillHex, fillAlpha: 1,
+          gradient: null,
+          borderRadius: Math.max(innerCr.tl, innerCr.tr, innerCr.br, innerCr.bl),
+          cornerRadii: innerCr,
+          borderUniform: true,
+          borderSides: null,
+          borderColor: null,
+          borderWidth: 0,
+          borderStyle: "solid",
+          zIndex: 1000, position: "absolute", boxShadow: null,
+        });
+        continue;
       }
       elements.push({
         type: "rect", bounds: pb, fill: pseudoFill, fillAlpha: pseudoFillAlpha,
@@ -1450,7 +1647,7 @@ interface ExtractedElement {
         borderWidth: borderMax,
         borderStyle: pcs.borderTopStyle,
         zIndex: 999, position: "absolute", boxShadow: null,
-      } as any);
+      });
     }
   }
 
@@ -1514,7 +1711,7 @@ interface ExtractedElement {
         zIndex: style.zIndex,
         position: style.position,
         verticallyCentered: true,
-      } as any);
+      });
     }
   }
 
@@ -1540,7 +1737,7 @@ interface ExtractedElement {
       borderColor: sBW > 0 ? sBorderColor : null,
       borderWidth: sBW, borderStyle: scs.borderTopStyle,
       zIndex: 999, position: "relative", boxShadow: null,
-    } as any);
+    });
     const spText = (sp.textContent || "").replace(/\s+/g, " ").trim();
     if (spText) {
       elements.push({
@@ -1564,7 +1761,7 @@ interface ExtractedElement {
         runs: [{ text: spText, style: null }],
         zIndex: 999, position: "relative",
         verticallyCentered: true,
-      } as any);
+      });
     }
   }
 
@@ -1651,6 +1848,15 @@ interface ExtractedElement {
     // single visual — the browser handles the clipping naturally.
     const elOv = elCs.overflow;
     const elBR = parseFloat(elCs.borderTopLeftRadius) || 0;
+    const elBR_tl = parseFloat(elCs.borderTopLeftRadius) || 0;
+    const elBR_tr = parseFloat(elCs.borderTopRightRadius) || 0;
+    const elBR_br = parseFloat(elCs.borderBottomRightRadius) || 0;
+    const elBR_bl = parseFloat(elCs.borderBottomLeftRadius) || 0;
+    // Per-corner radii for the captured PNG so the downstream alpha-mask pass
+    // can punch the corner pixels transparent — without this, the rectangular
+    // screenshot bleeds ancestor-background pixels (light-blue on slide_12's
+    // .device inside .left) into the four corner cut-outs.
+    const containerCornerRadii = { tl: elBR_tl, tr: elBR_tr, br: elBR_br, bl: elBR_bl };
     if ((elOv === "hidden" || elOv === "clip") && elBR >= 20
         && bounds.w >= 100 && bounds.h >= 100 && (el as HTMLElement).children.length > 0) {
       seen.add(el);
@@ -1673,15 +1879,22 @@ interface ExtractedElement {
         }
         if (buf.trim()) parts.push(buf.trim());
         const rings: { spread: number; color: string; alpha: number }[] = [];
+        let dropShadow: { offsetX: number; offsetY: number; blur: number; color: string; alpha: number } | null = null;
         for (const p of parts) {
           const nums = p.match(/(-?\d+(?:\.\d+)?)px/g);
           if (!nums || nums.length < 2) continue;
           const vals = nums.map(n => parseFloat(n));
-          const offsetX = vals[0], offsetY = vals[1], spread = vals[3] || 0;
-          if (offsetX !== 0 || offsetY !== 0 || spread <= 0) continue;
+          const offsetX = vals[0], offsetY = vals[1], blur = vals[2] || 0, spread = vals[3] || 0;
           const rgbaMatch = p.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
           const alpha = rgbaMatch && rgbaMatch[4] !== undefined ? parseFloat(rgbaMatch[4]) : 1;
-          rings.push({ spread, color: rgb2hex(p) || "#000000", alpha });
+          const color = rgb2hex(p) || "#000000";
+          if (offsetX === 0 && offsetY === 0 && spread > 0) {
+            rings.push({ spread, color, alpha });
+          } else if ((offsetX !== 0 || offsetY !== 0 || blur > 0) && !dropShadow) {
+            // First drop-shadow layer (offset and/or blur, ignoring spread).
+            // `addImage` only supports a single shadow — first wins.
+            dropShadow = { offsetX, offsetY, blur, color, alpha };
+          }
         }
         // Outermost ring first so it paints behind inner rings + visual.
         for (let i = rings.length - 1; i >= 0; i--) {
@@ -1704,9 +1917,9 @@ interface ExtractedElement {
             zIndex: 0,
             position: "static",
             boxShadow: null,
-          } as any);
+          });
         }
-        elements.push({ type: "visual", bounds, tag: "clipped-container" });
+        elements.push({ type: "visual", bounds, tag: "clipped-container", cornerRadii: containerCornerRadii, boxShadow: dropShadow });
         // Stroke-only roundRect FRAME on top of the visual, matching the
         // captured device's border-radius. pptxgenjs `addImage` only writes
         // <p:pic prstGeom prst="rect">, so the captured PNG's RECTANGULAR
@@ -1736,10 +1949,10 @@ interface ExtractedElement {
             zIndex: 1000,
             position: "static",
             boxShadow: null,
-          } as any);
+          });
         }
       } else {
-        elements.push({ type: "visual", bounds, tag: "clipped-container" });
+        elements.push({ type: "visual", bounds, tag: "clipped-container", cornerRadii: containerCornerRadii });
       }
       return;
     }
@@ -1832,7 +2045,7 @@ interface ExtractedElement {
           zIndex: style.zIndex,
           position: style.position,
           verticallyCentered: true,
-        } as any);
+        });
       }
       // Sort children by CSS paint order so absolutely-positioned siblings
       // (e.g. `.badge{position:absolute;top:-14px}` on a pricing card) paint
@@ -2179,7 +2392,7 @@ interface ExtractedElement {
       // Use a regex that excludes \u00a0 so leading/trailing nbsp (used as
       // visual indentation in code blocks like slide_15) survive. JS
       // String.trim() strips Unicode whitespace including nbsp.
-      const textEl: any = {
+      const textEl: ExtractedElement = {
         type: "text",
         bounds: textBounds,
         text: directText.replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, ""),
@@ -2289,7 +2502,7 @@ interface ExtractedElement {
   // bucket order, parent rects pushed before descendants). A stable sort by
   // _domIdx alone preserves that emission sequence. No type/y/z tiebreaking
   // needed — the walk itself is the ordering.
-  elements.sort((a, b) => ((a as any)._domIdx ?? 0) - ((b as any)._domIdx ?? 0));
+  elements.sort((a, b) => (a._domIdx ?? 0) - (b._domIdx ?? 0));
 
   // Hide text inside CSS-effect visual hosts (conic-gradient / clip-path
   // containers) before the screenshot loop runs. The walk above already

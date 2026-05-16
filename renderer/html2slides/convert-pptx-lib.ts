@@ -9,6 +9,187 @@
  *
  * Side-effectful counterparts (CDP-driven extraction, OAuth, file I/O,
  * Google Drive upload) live in convert-pptx-io.ts.
+ *
+ * ─────────────────────────────────────────────────────────────────────
+ *  LAYOUT CONVERSION RULES  —  the contract every change must respect
+ * ─────────────────────────────────────────────────────────────────────
+ *
+ * 1. COORDINATE SPACE
+ *
+ *    HTML viewport  : 1280 × 720 CSS px (Chrome)
+ *    pptx slide     : 10 × 5.625 inches (16:9 custom layout)
+ *
+ *    Two constants:
+ *      PX2IN = 10 / 1280       = 0.0078125    (positioning, in inches)
+ *      PX2PT = 10 / 1280 × 72  = 0.5625       (font + paragraph spacing, points)
+ *
+ *    extract-dom.ts emits every element with a final border-box bound
+ *    in CSS px: { x, y, w, h }. convert-pptx-lib performs ONE px2in()
+ *    conversion per shape and never adjusts coordinates again. Off-
+ *    position bugs live in extract-dom.ts, not here.
+ *
+ *
+ * 2. TEXT
+ *
+ *    Each text-bearing element becomes a pptxgenjs textbox via
+ *    slide.addText(...). Two callers:
+ *
+ *      • standalone text element  → emitStyledText(slide, el, …)
+ *      • text-inside-rect (merged)→ emitStyledText(slide, el, …)
+ *
+ *    Both paths share emitStyledText() — the single source of truth
+ *    for rotation, slack, valign, padding folding, and run mapping.
+ *
+ *    Inline runs (<span>, <strong>, <em>, …) become a TextProps[] array
+ *    via mapRunOptions: per-run color, bold, italic, underline, strike,
+ *    sub/superscript, highlight (CSS span background).
+ *
+ *    Font mapping  — CSS family → closest Slides font via FONT_MAP
+ *      Helvetica / Helvetica Neue → Arial
+ *      -apple-system / Segoe UI   → Roboto
+ *      monospace                   → Courier New
+ *
+ *    Opacity       — CSS `opacity` is BAKED INTO the color via
+ *    blendOpacity() against the ancestor background (`bgColorBehind`,
+ *    sampled by the extractor). Reason: Slides drops `<a:alpha>` on
+ *    text runs on PPTX import, so native pptxgenjs `transparency`
+ *    silently fails. Blending against the bg is renderer-agnostic.
+ *
+ *
+ * 3. PADDING  — horizontal vs vertical, handled differently
+ *
+ *    HORIZONTAL  (padding-left / padding-right):
+ *      NOT applied here. extract-dom.ts runs a Range probe that
+ *      shrinks text bounds to the actual glyph extent. Re-applying a
+ *      padding inset in convert-pptx-lib doubles the inset — caused
+ *      real bugs on .touchpoint (slide_19), .code-block (slide_30),
+ *      .api-badge (slide_15), .btn (slide_21).
+ *
+ *    VERTICAL padding-top:
+ *      Folded into pptxgenjs `margin: [lIns, rIns, bIns, tIns]` as
+ *      tIns = paddingTop × PX2PT — but ONLY when valign === "top"
+ *      (anchor=t). Pushes the glyph down so siblings positioned
+ *      relative to the same border-box (e.g. .touchpoint::before
+ *      bullets at `top: 9px`) align with the text mid-line.
+ *      valign === "middle" needs no inset — Slides centres in the
+ *      full box.
+ *
+ *    VERTICAL padding-bottom:
+ *      Already baked into the bound's height by extract-dom; no
+ *      separate handling.
+ *
+ *
+ * 4. MARGINS
+ *
+ *    General rule: extract-dom's walk order bakes sibling spacing
+ *    into the final (x, y, w, h). convert-pptx-lib does not read a
+ *    `margin` field on most elements.
+ *
+ *    EXCEPTION — list items <li>:
+ *      paraSpaceAfter = (marginBottom + paddingTop + paddingBottom)
+ *                       × PX2PT
+ *      OOXML has no padding concept inside paragraphs. CSS
+ *      `li { padding: 4px 0 }` adds 8 px of inter-line air in the
+ *      browser; paraSpaceAfter is the only knob to spend that air.
+ *
+ *
+ * 5. ALIGNMENT
+ *
+ *    Horizontal:
+ *      textAlign === "center"           → align: "center"
+ *      textAlign === "right" | "end"    → align: "right"
+ *      default                          → align: "left"
+ *
+ *    Vertical:
+ *      el.verticallyCentered === true   → valign: "middle"
+ *      default                          → valign: "top"
+ *
+ *      verticallyCentered is set by extract-dom when CSS resolves to
+ *      flex / grid centering on short single-line text (the wave-10B
+ *      `flexCenteredShapeVC` clause) or a circle/pill with
+ *      line-height === height. NEVER set on .text-block, .code-block,
+ *      list items, or multi-line body text — those keep anchor=top.
+ *
+ *    Rotation (`transform: rotate(Xdeg)`):
+ *      Forwarded as pptxgenjs `rotate`. extract-dom gives a post-
+ *      transform axis-aligned bound, so we re-center on the natural
+ *      pre-transform dimensions to keep glyphs from wrap-squeezing.
+ *
+ *
+ * 6. SLACK  — preventing spurious wrap
+ *
+ *    Slides measures glyphs about 1–3 % wider than Chrome. A textbox
+ *    sized to the exact DOM bound wraps the last word. applySlack
+ *    inflates by SLACK_PX = 12 on the side opposite alignment:
+ *
+ *      align=left   → inflate right
+ *      align=right  → inflate left
+ *      align=center → inflate both sides by SLACK_PX/2
+ *
+ *    Capped by neighborSlackBudget: never overshoot the gap to the
+ *    nearest vertically-overlapping sibling (slide_16 API-latency
+ *    tables forced this cap).
+ *
+ *    Pill-overlay exception — centered single-line text inside a
+ *    chip/pill/button gets a budget of max(SLACK_PX, 20 % × width)
+ *    bypassing the SLACK_PX/2 cap, because the merged-rect path hands
+ *    us the full border-box width.
+ *
+ *
+ * 7. LINE SPACING  — three branches (this is the bug-prone zone)
+ *
+ *      if (lineHeight && fontSize) {
+ *        if (valign === "middle" && verticallyCentered) {
+ *          // BRANCH 1 — single-line centered shape text
+ *          lineSpacingMultiple = 1.2;
+ *        } else if (lineHeightMeasured === true) {
+ *          // BRANCH 2 — content-driven measured pitch (.text-block)
+ *          lineSpacing = lineHeight × PX2PT;     // absolute pts
+ *        } else {
+ *          // BRANCH 3 — default
+ *          lineSpacingMultiple = (lineHeight / fontSize) / 1.2;
+ *        }
+ *      }
+ *
+ *    BRANCH 1 (wave-1a): with anchor="ctr", Slides positions visible
+ *      glyphs at the shape center exactly when spcPct = 120000
+ *      (multiplier 1.2). Pin explicitly — skipping lnSpc lets Slides
+ *      infer a per-slide default that drifts when other shapes land.
+ *
+ *    BRANCH 2 (wave-10A): when extract-dom flags `lineHeightMeasured`
+ *      (.text-block on slide_25 with inline .code chips, .big,
+ *      .highlight inflating the line box past the CSS spec), use an
+ *      ABSOLUTE point value. spcPct can't represent content-driven
+ *      inflation because it's not a percentage of font leading.
+ *      Wave-9 emitted absolute pts unconditionally and broke every
+ *      plain paragraph; the flag re-narrows the gate.
+ *
+ *    BRANCH 3: default. Slides treats spcPct as a percentage of its
+ *      inferred font-default leading (≈ 1.2 × fontSize for the deck's
+ *      fonts), so dividing by 1.2 lands the rendered pitch on CSS
+ *      line-height.
+ *
+ *
+ * 8. WHY THIS DESIGN
+ *
+ *    a. One source of truth for coordinates. extract-dom emits final
+ *       border-box bounds; this module converts them once. "Fudge by
+ *       a couple of px" fixes belong in extract-dom, not here.
+ *
+ *    b. One source of truth for text emission. Standalone + merged-
+ *       rect text both flow through emitStyledText. Slack, rotation,
+ *       valign, padding folding live in exactly one function — a fix
+ *       on one path can't silently regress the other.
+ *
+ *    c. Slides ≠ PowerPoint. <a:alpha> on text, gradient stops, per-
+ *       bullet colours — Slides ignores or rewrites them on import.
+ *       We work around each at build time (blendOpacity) or via XML
+ *       post-process (injectGradientsIntoZip, injectStrokeAlignmentInZip).
+ *
+ *    d. Conservative gates. Every layout rule above is narrowed by an
+ *       extract-dom predicate (`lineHeightMeasured`, `verticallyCentered`,
+ *       `singleLine`). Blanket rules always broke another slide; every
+ *       wave has tightened — never widened — these gates.
  */
 
 import * as pptxgenModule from "pptxgenjs";
@@ -1226,11 +1407,18 @@ export function buildPptx(
             // Per-item ::before bullet colours (e.g. slide_30 Key Priorities,
             // where each <li.red>/<li.green>/etc gets its own coloured 8×8
             // dot). pptxgenjs' native `bullet:` paints every marker in the
-            // paragraph's text colour, so when items carry distinct bullet
-            // colours we must emit the marker as a separately-coloured run
-            // instead and skip the native bullet entirely.
+            // paragraph's text colour, so per-item bullet colour cannot be
+            // honoured through the native path.
+            //
+            // wave-12D decision: we always prefer native pptxgenjs bullets
+            // (<a:buChar>) over the literal "•  " text-prefix fallback —
+            // the user explicitly accepted monochrome bullets in exchange
+            // for a real bulleted list (proper hanging-indent, real wrap,
+            // editable list in Slides). The OLD gate `&& !anyPerItemBulletColor`
+            // forced the text-prefix path on slide_11 SWOT and slide_30 Key
+            // Priorities, breaking word-wrap.
             const anyPerItemBulletColor = !ordered && items.some((it) => !!it.bulletColor);
-            const useNativeBullet = !anyItemHasStyledRuns && !anyPerItemBulletColor;
+            const useNativeBullet = !anyItemHasStyledRuns;
             const paragraphs = items.map((it: ListItem, ii: number) => {
               const marker = ordered ? `${ii + 1}.  ` : "•  ";
               const markerColor = it.bulletColor || it.color || listStyle.color || "#333333";
@@ -1761,10 +1949,37 @@ export function buildPptx(
         case "image": {
           const buf = visualPngs.get(ei);
           if (buf) {
-            slide.addImage({
+            const imgOpts: NonNullable<Parameters<Slide["addImage"]>[0]> = {
               data: `image/png;base64,${bytesToBase64(buf)}`,
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
-            });
+            };
+            // Drop-shadow plumbed through from extract-dom.ts's clipped-
+            // container branch (e.g. slide_12 .device's `box-shadow: 0 0 0
+            // 2px #333`). Rendering the shadow natively via pptxgenjs lets
+            // it follow the image's rect cleanly — without this, the
+            // captured PNG bleeds halo pixels past its rounded corners
+            // ("gray leftovers" — wave-12B target).
+            // SAFETY: `boxShadow` is attached only on clipped-container visual
+            // elements by extract-dom (wave-12B); not on the generic
+            // VisualElement / ImageElement variant. We probe optionally and
+            // null-guard before reading any sub-field below.
+            const sh = (el as unknown as { boxShadow?: { blur?: number; offsetX?: number; offsetY?: number; color?: string; alpha?: number } }).boxShadow;
+            if (sh && ((sh.blur || 0) > 0 || (sh.offsetX || 0) !== 0 || (sh.offsetY || 0) !== 0)) {
+              const dx = sh.offsetX || 0;
+              const dy = sh.offsetY || 0;
+              let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+              if (dx === 0 && dy === 0) angle = 90;
+              if (angle < 0) angle += 360;
+              imgOpts.shadow = {
+                type: "outer",
+                blur: Math.min((sh.blur || 0) * PX2PT, 30),
+                offset: Math.sqrt(dx * dx + dy * dy) * PX2PT,
+                color: hexToRgb(sh.color || "#000000"),
+                opacity: sh.alpha ?? 0.25,
+                angle: Math.round(angle),
+              };
+            }
+            slide.addImage(imgOpts);
             slideRegions.push({
               x: b.x / SLIDE_W_PX, y: b.y / SLIDE_H_PX,
               w: b.w / SLIDE_W_PX, h: b.h / SLIDE_H_PX,

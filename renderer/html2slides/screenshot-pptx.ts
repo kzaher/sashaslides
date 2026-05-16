@@ -30,14 +30,14 @@ async function uploadAndOpen(pptxPath: string): Promise<string> {
 
   // Find the new Slides tab
   await sleep(5000);
-  const targets = await CDP.List({ port: CDP_PORT });
-  const tab = targets.find((t: any) => t.url.includes("docs.google.com/presentation"));
+  const targets: ReadonlyArray<{ id: string; url: string }> = await CDP.List({ port: CDP_PORT });
+  const tab = targets.find((t) => t.url.includes("docs.google.com/presentation"));
   return tab?.id || "";
 }
 
 async function screenshotSlides(tabId: string, outputDir: string, slideCount: number): Promise<number> {
-  const targets = await CDP.List({ port: CDP_PORT });
-  const tab = targets.find((t: any) => t.id === tabId || t.url.includes("docs.google.com/presentation"));
+  const targets: ReadonlyArray<{ id: string; url: string }> = await CDP.List({ port: CDP_PORT });
+  const tab = targets.find((t) => t.id === tabId || t.url.includes("docs.google.com/presentation"));
   if (!tab) return 0;
 
   const client = await CDP({ target: tab, port: CDP_PORT });
