@@ -99,7 +99,7 @@ function htmlToCdpCommands(
       `echo '${escapedPrompt}' | claude -p --model haiku --dangerously-skip-permissions 2>/dev/null`,
       { timeout: 30000, maxBuffer: 10 * 1024 * 1024, encoding: "utf-8" }
     );
-  } catch (err: any) {
+  } catch (err) {
     output = err.stdout?.toString() || "[]";
   }
 
@@ -169,9 +169,43 @@ function parseCommands(output: string): CdpCommand[] {
   return [];
 }
 
+// chrome-remote-interface ships no .d.ts. Narrow the boundary types we
+// actually invoke here — Runtime, Input, Page, captureScreenshot return shape
+// — and never spread `any` past this declaration.
+interface CDPRuntime {
+  enable(): Promise<unknown>;
+  evaluate(opts: { expression: string; awaitPromise?: boolean; returnByValue?: boolean }): Promise<{ result: { value?: unknown; description?: string }; exceptionDetails?: unknown }>;
+}
+interface CDPInput {
+  dispatchKeyEvent(opts: Record<string, unknown>): Promise<unknown>;
+  dispatchMouseEvent(opts: Record<string, unknown>): Promise<unknown>;
+  insertText(opts: { text: string }): Promise<unknown>;
+}
+interface CDPPage {
+  enable(): Promise<unknown>;
+  navigate(opts: { url: string }): Promise<unknown>;
+  captureScreenshot(opts?: { format?: string; clip?: { x: number; y: number; width: number; height: number; scale?: number }; captureBeyondViewport?: boolean }): Promise<{ data: string }>;
+  loadEventFired?(): Promise<unknown>;
+}
+interface CDPClient {
+  Runtime: CDPRuntime;
+  Input: CDPInput;
+  Page: CDPPage;
+  close(): Promise<void>;
+}
+interface CDPTarget { id: string; url: string; type: string }
+interface CDPStatic {
+  New(opts: { port: number; url?: string; targetId?: string }): Promise<CDPTarget>;
+  List(opts: { port: number }): Promise<CDPTarget[]>;
+  Close(opts: { port: number; id: string }): Promise<void>;
+}
+// SAFETY: chrome-remote-interface ships no .d.ts; CDPStatic mirrors the
+// documented signature of the three static methods (New/List/Close) we invoke.
+const CDPS = CDP as unknown as CDPStatic;
+
 async function executeCdpCommands(
   commands: CdpCommand[],
-  client: any
+  client: CDPClient,
 ): Promise<{ errors: string[]; commandCount: number }> {
   const { Runtime, Input } = client;
   const errors: string[] = [];
@@ -319,7 +353,7 @@ async function executeCdpCommands(
         default:
           errors.push(`Unknown command: ${cmd.action}`);
       }
-    } catch (err: any) {
+    } catch (err) {
       errors.push(`${cmd.action}: ${err.message}`);
     }
   }
@@ -328,9 +362,9 @@ async function executeCdpCommands(
 }
 
 async function createBlankSlides(
-  Runtime: any,
-  Input: any,
-  count: number
+  Runtime: CDPRuntime,
+  Input: CDPInput,
+  count: number,
 ): Promise<void> {
   // Create N blank slides via Ctrl+M
   for (let i = 0; i < count - 1; i++) {
@@ -367,7 +401,7 @@ async function createBlankSlides(
 }
 
 async function applySharedStyle(
-  Runtime: any,
+  Runtime: CDPRuntime,
   style: SharedStyle,
   presId: string
 ): Promise<void> {
@@ -472,16 +506,16 @@ async function main() {
   // Step 2: Connect to Chrome and execute commands
   console.log("\nPhase 2: Executing CDP commands in Google Slides...");
 
-  const targets = await CDP.List({ port: CDP_PORT });
-  let tab: any;
+  const targets: CDPTarget[] = await CDP.List({ port: CDP_PORT });
+  let tab: CDPTarget | undefined;
 
   if (presId) {
     tab = targets.find(
-      (t: any) => t.url.includes(presId) && t.url.includes("presentation")
+      (t) => t.url.includes(presId) && t.url.includes("presentation"),
     );
     if (!tab) {
       console.log("  Opening presentation...");
-      tab = await (CDP as any).New({
+      tab = await CDPS.New({
         port: CDP_PORT,
         url: `https://docs.google.com/presentation/d/${presId}/edit`,
       });
@@ -489,8 +523,8 @@ async function main() {
     }
   } else {
     // Find any open presentation or create new
-    tab = targets.find((t: any) =>
-      t.url.includes("docs.google.com/presentation")
+    tab = targets.find((t) =>
+      t.url.includes("docs.google.com/presentation"),
     );
     if (!tab) {
       console.error(

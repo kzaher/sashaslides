@@ -334,10 +334,15 @@ function Nav({ comparisons, currentIdx, onSelect, showAll }) {
       if (!isComparisonVisible(c, showAll)) return null;
       const cls = (i === currentIdx ? "current " : "") +
         "status-" + c.status + " diff-" + (c.diffStatus || "none");
+      // Hover surfaces the saved comment so the reviewer can scan all
+      // remarks without click-stepping through every slide. Title falls
+      // back to the slide id when there's no comment yet.
+      const tip = c.comment ? c.id + ": " + c.comment : c.id;
       return h("a", {
         key: c.id,
         href: "#",
         class: cls,
+        title: tip,
         onClick: (e) => { e.preventDefault(); onSelect(i); },
       }, c.id.replace("slide_", "S"));
     }),
@@ -387,10 +392,19 @@ function App() {
 
   useEffect(() => {
     refresh().then((data) => {
-      // Auto-select: first visible pending, or first visible.
+      // Auto-select priority: first pending, then first bad-rated (where the
+      // user already has a saved comment to react to), then first regressed-
+      // diff-only (good-rated slides whose render moved since the last
+      // golden). Without this layering, a fresh regen that produces
+      // regressed-diff slides parks the cursor on the first such slide
+      // (often unrelated and uncommented), so the user opens to an empty
+      // What's wrong box and has to scroll past untouched good-rated diffs
+      // to find the queue they care about.
       const visible = data.filter((c) => isComparisonVisible(c, false));
-      const pending = visible.find((c) => c.status === "pending");
-      const target = pending || visible[0];
+      const target =
+        visible.find((c) => c.status === "pending") ||
+        visible.find((c) => c.status === "bad") ||
+        visible[0];
       const idx = target ? data.findIndex((x) => x.id === target.id) : 0;
       setCurrentIdx(idx >= 0 ? idx : 0);
     });
@@ -443,8 +457,12 @@ function App() {
     const visibleAfter = updated.filter((c) => isComparisonVisible(c, showAll));
     if (visibleAfter.length === 0) {
       // setTimeout so React paints the new state (status badge etc.) first.
+      // IMPORTANT: this whole file body is wrapped in a JS template literal
+      // (CLIENT_SCRIPT). Backslash-sequences and backticks are interpreted at
+      // template-eval time and corrupt the served script. Keep strings AND
+      // comments in this file backslash-free; use single quotes inline.
       setTimeout(() => alert(
-        "All visible slides reviewed! 🎉\n\nClick \"show all\" to revisit good-rated slides, or close this tab."
+        "All visible slides reviewed — click 'show all' to revisit good-rated slides, or close this tab."
       ), 80);
       return;
     }

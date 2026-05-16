@@ -11,6 +11,18 @@ import CDP from "chrome-remote-interface";
 import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync } from "fs";
 import { resolve, join } from "path";
 
+// chrome-remote-interface ships no .d.ts. Narrow the boundary cast once.
+interface CDPStatic {
+  New(opts: { port: number; url?: string }): Promise<{ id: string }>;
+  Close(opts: { port: number; id: string }): Promise<void>;
+}
+interface CDPRemoteObject { value?: unknown; description?: string; preview?: unknown }
+interface CDPConsoleEvent { type: string; args: CDPRemoteObject[] }
+interface CDPExceptionEvent { exceptionDetails: { exception?: { description?: string }; text: string } }
+// SAFETY: chrome-remote-interface ships no .d.ts; CDPStatic mirrors the
+// documented signature of the two static methods (New/Close) we invoke.
+const CDPS = CDP as unknown as CDPStatic;
+
 const PORT = 9222;
 const HTML_PATH = resolve("/workspaces/sashaslides/renderer/html2slides/browser/html2slides.html");
 const FIXTURE_DIR = resolve("/workspaces/sashaslides/renderer/html2slides/e2e/fixtures");
@@ -23,7 +35,7 @@ async function main() {
   if (!existsSync(HTML_PATH)) throw new Error("missing " + HTML_PATH);
   mkdirSync(OUT_DIR, { recursive: true });
 
-  const target = await (CDP as any).New({ port: PORT, url: "about:blank" });
+  const target = await CDPS.New({ port: PORT, url: "about:blank" });
   const client = await CDP({ target, port: PORT });
   const { Page, Runtime } = client;
   await Page.enable();
@@ -31,10 +43,10 @@ async function main() {
 
   const logs: string[] = [];
   const errors: string[] = [];
-  Runtime.consoleAPICalled((p: any) => {
-    logs.push(`[${p.type}] ${p.args.map((a: any) => a.value ?? a.description ?? JSON.stringify(a.preview)).join(" ")}`);
+  Runtime.consoleAPICalled((p: CDPConsoleEvent) => {
+    logs.push(`[${p.type}] ${p.args.map((a: CDPRemoteObject) => a.value ?? a.description ?? JSON.stringify(a.preview)).join(" ")}`);
   });
-  Runtime.exceptionThrown((p: any) => {
+  Runtime.exceptionThrown((p: CDPExceptionEvent) => {
     errors.push("EXC: " + (p.exceptionDetails.exception?.description || p.exceptionDetails.text));
   });
 
@@ -128,7 +140,7 @@ async function main() {
   }
 
   await client.close();
-  await (CDP as any).Close({ port: PORT, id: target.id });
+  await CDPS.Close({ port: PORT, id: target.id });
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

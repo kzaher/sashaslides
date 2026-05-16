@@ -12,6 +12,7 @@
  */
 
 import { strict as assert } from "node:assert";
+import type { IJsonSchemaUnit } from "typia";
 import {
   Claude,
   ClaudeEngine,
@@ -270,7 +271,11 @@ async function main() {
           returns: claudeReply({ structuredOutput: { x: "ok" }, result: "Done." }),
         },
       ],
-      main: (s) => s.send({ prompt: "go", schema: schemaUnit as any }),
+      // SAFETY: schemaUnit is a hand-rolled minimal JSON-schema literal; the
+      // real IJsonSchemaUnit has many discriminants we don't model in tests.
+      // The send-path under test only reads .schema.{type,properties,required}
+      // so the structural overlap is exactly what we exercise here.
+      main: (s) => s.send({ prompt: "go", schema: schemaUnit as unknown as IJsonSchemaUnit }),
     });
     assert.deepEqual(value, { x: "ok" });
     assert.deepEqual(spawns(io), [
@@ -298,7 +303,10 @@ async function main() {
           returns: claudeReply({ result: "uh oh" }),
         },
       ],
-      main: (s) => s.send({ prompt: "go", schema: { schema: { type: "object", required: ["x"], properties: { x: { type: "string" } } } } as any }),
+      // SAFETY: as above — test passes a structurally-minimal IJsonSchemaUnit
+      // literal (only the .schema.{type,required,properties} fields the send
+      // path reads). Other IJsonSchemaUnit branches are untouched here.
+      main: (s) => s.send({ prompt: "go", schema: { schema: { type: "object", required: ["x"], properties: { x: { type: "string" } } } } as unknown as IJsonSchemaUnit }),
     });
     assert(threw instanceof Error);
     assert((threw as Error).message.includes("structured_output"));
@@ -592,7 +600,12 @@ async function main() {
         s.tryMultipleTimes(
           2,
           (s2) => s2.send({ prompt: "p" }),
-          (s2) => s2.materializeError<string>("fell-back") as any,
+          // SAFETY: tryMultipleTimes' fallback signature wants Session<R>, but
+          // materializeError returns Session<unknown> with the error baked in.
+          // Widening here is safe because the test then asserts on the
+          // materialised value through assert.deepEqual — we never read R off
+          // the returned session.
+          (s2) => s2.materializeError<string>("fell-back") as unknown as ReturnType<typeof s2.send>,
         ),
     });
     assert.deepEqual(value, { error: "fell-back" });
@@ -615,8 +628,11 @@ async function main() {
       main: (s) =>
         s.tryMultipleTimes(
           5,
-          (s2) => s2.send({ prompt: "p", schema: schemaUnit as any }) as any,
-          (s2, e) => { fallbackErr = e; return s2.materializeError<unknown>("recovered") as any; },
+          // SAFETY (same as above two casts): minimal IJsonSchemaUnit shape +
+          // materializeError-to-session widening; both safe because the test
+          // only asserts on the eventual materialised value.
+          (s2) => s2.send({ prompt: "p", schema: schemaUnit as unknown as IJsonSchemaUnit }) as unknown as ReturnType<typeof s2.send>,
+          (s2, e) => { fallbackErr = e; return s2.materializeError<unknown>("recovered") as unknown as ReturnType<typeof s2.send>; },
         ),
     });
     assert(fallbackErr instanceof InterruptException, "fallback should receive InterruptException");

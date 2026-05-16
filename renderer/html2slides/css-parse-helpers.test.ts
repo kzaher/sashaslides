@@ -13,7 +13,7 @@ function assert(label: string, condition: boolean, detail?: string) {
   }
 }
 
-function assertEq(label: string, actual: any, expected: any) {
+function assertEq<T>(label: string, actual: T, expected: T) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
   assert(label, a === e, `expected ${e}, got ${a}`);

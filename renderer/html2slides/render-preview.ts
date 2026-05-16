@@ -15,9 +15,78 @@ import { join } from "path";
 
 const CDP_PORT = 9222;
 
+// chrome-remote-interface has no .d.ts — narrow at the boundary.
+interface CDPStatic {
+  New(opts: { port: number; url?: string }): Promise<{ id: string }>;
+  Close(opts: { port: number; id: string }): Promise<void>;
+}
+// SAFETY: chrome-remote-interface ships no .d.ts; CDPStatic mirrors the
+// documented signature of the two static methods (New/Close) we invoke.
+const CDPS = CDP as unknown as CDPStatic;
+
+// Minimal preview-side view of an extracted element. extract-dom emits many
+// more fields than this module reads; we only declare what we touch here.
+interface PreviewBounds { x: number; y: number; w: number; h: number }
+interface PreviewRunStyle {
+  color?: string;
+  fontWeight?: "bold" | "normal";
+  fontStyle?: "italic" | "normal";
+  fontSize?: number;
+  textDecoration?: string | null;
+}
+interface PreviewRun { text?: string; style?: PreviewRunStyle | null }
+type PreviewStyle = Partial<PreviewRunStyle> & {
+  textAlign?: string;
+  textTransform?: string;
+  letterSpacing?: number;
+  lineHeight?: number;
+  fontSize?: number;
+  fontFamily?: string;
+  bgColor?: string | null;
+  borderColor?: string | null;
+};
+interface PreviewTableCell {
+  text?: string;
+  colspan?: number;
+  style?: PreviewStyle | null;
+}
+interface PreviewListItem {
+  text?: string;
+  level?: number;
+  fontWeight?: string;
+  color?: string;
+  fontSize?: number;
+  lineHeight?: number;
+  spacingAfter?: number;
+}
+interface PreviewElement {
+  type: string;
+  bounds: PreviewBounds;
+  // rect / line
+  fill?: string | null;
+  color?: string;
+  borderWidth?: number;
+  borderColor?: string | null;
+  borderRadius?: number;
+  // text
+  text?: string;
+  runs?: PreviewRun[];
+  style?: PreviewStyle | null;
+  // table
+  rows?: PreviewTableCell[][];
+  // list
+  ordered?: boolean;
+  columnCount?: number;
+  listStyleType?: string;
+  items?: PreviewListItem[];
+  // visual / image
+  pngData?: string;
+  src?: string;
+}
+
 function sleep(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
 
-function elementToHtml(el: any): string {
+function elementToHtml(el: PreviewElement): string {
   const b = el.bounds;
 
   switch (el.type) {
@@ -34,7 +103,7 @@ function elementToHtml(el: any): string {
       // Build text HTML — use runs if available for per-span styling
       let textHtml: string;
       if (el.runs && el.runs.length > 0) {
-        textHtml = el.runs.map((r: any) => {
+        textHtml = el.runs.map((r: PreviewRun) => {
           const t = (r.text || '').replace(/\n/g, '<br>');
           if (!r.style) return t;
           const rs = r.style;
@@ -139,7 +208,7 @@ async function main() {
     const tmpPath = join(outputDir, `_tmp_${slide.slide}.html`);
     writeFileSync(tmpPath, html);
 
-    const tab = await (CDP as any).New({ port: CDP_PORT, url: `file://${tmpPath}` });
+    const tab = await CDPS.New({ port: CDP_PORT, url: `file://${tmpPath}` });
     await sleep(800);
     const client = await CDP({ target: tab, port: CDP_PORT });
     await client.Page.enable();
@@ -148,7 +217,7 @@ async function main() {
     const ss = await client.Page.captureScreenshot({ format: "png" });
     writeFileSync(join(outputDir, `slide_${String(slide.slide).padStart(2, '0')}.png`), Buffer.from(ss.data, "base64"));
     await client.close();
-    await (CDP as any).Close({ port: CDP_PORT, id: tab.id });
+    await CDPS.Close({ port: CDP_PORT, id: tab.id });
 
     try { unlinkSync(tmpPath); } catch {}
     console.log(`  slide_${String(slide.slide).padStart(2, '0')}.png`);

@@ -33,9 +33,26 @@ import {
   SLIDE_W_PX,
   SLIDE_H_PX,
   type Extraction,
+  type SlideInput,
+  type Gradient,
 } from "./convert-pptx-lib.js";
 
 const CDP_PORT = 9222;
+
+// chrome-remote-interface ships no .d.ts, so its `New` / `Close` static
+// methods type as `any`. Narrow at the boundary via a typed shim — the
+// only place this codebase tolerates an `any`-bridging cast (external
+// API without types — see CLAUDE.md TypeScript style).
+interface CDPStatic {
+  New(opts: { port: number; url?: string }): Promise<{ id: string }>;
+  Close(opts: { port: number; id: string }): Promise<void>;
+}
+// SAFETY: `CDP` default export is the connect-fn; CDP.New / CDP.Close are
+// runtime-attached static methods documented at
+// https://github.com/cyrus-and/chrome-remote-interface#cdpnewoptions-callback
+// — `CDPStatic` mirrors the documented signature for the two static methods
+// we actually call. Untyped JS, runtime contract.
+const CDPS = CDP as unknown as CDPStatic;
 
 // Compile extract-dom.ts → JS once at module load. Only this Node-only file
 // reads the source; the browser bundle inlines the compiled string at build
@@ -53,7 +70,7 @@ export function getAuth() {
   const tokens = JSON.parse(readFileSync("/workspaces/sashaslides/.auth/tokens.json", "utf-8"));
   const oauth2 = new google.auth.OAuth2(creds.client_id, creds.client_secret, "http://localhost:8080");
   oauth2.setCredentials(tokens);
-  oauth2.on("tokens", (newTokens: any) => {
+  oauth2.on("tokens", (newTokens: Record<string, unknown>) => {
     const merged = { ...tokens, ...newTokens };
     writeFileSync("/workspaces/sashaslides/.auth/tokens.json", JSON.stringify(merged, null, 2));
   });
@@ -65,7 +82,7 @@ export async function extractFromHtml(
   htmlPath: string,
 ): Promise<{ extraction: Extraction; visualPngs: Map<number, Buffer> }> {
   const absPath = resolve(htmlPath);
-  const tab = await (CDP as any).New({ port: CDP_PORT, url: `file://${absPath}` });
+  const tab = await CDPS.New({ port: CDP_PORT, url: `file://${absPath}` });
   await sleep(1200);
 
   const client = await CDP({ target: tab, port: CDP_PORT });
@@ -122,7 +139,7 @@ export async function extractFromHtml(
     const numGlyphs = Math.max(1, visibleChars.length);
     const fontSize = el.style?.fontSize || 20;
     const align = el.style?.textAlign || "left";
-    const vCentered = (el as any).verticallyCentered === true;
+    const vCentered = el.verticallyCentered === true;
     const glyphW = Math.min(el.bounds.w, fontSize * 1.4 * numGlyphs);
     const glyphH = Math.min(el.bounds.h, fontSize * 1.4);
     let nx: number;
@@ -151,13 +168,13 @@ export async function extractFromHtml(
   }
 
   await client.close();
-  await (CDP as any).Close({ port: CDP_PORT, id: tab.id });
+  await CDPS.Close({ port: CDP_PORT, id: tab.id });
   return { extraction: retypedExtraction, visualPngs };
 }
 
 // --- File-based wrappers around the pure in-zip injection helpers --------
 
-export async function injectGradients(pptxPath: string, registry: readonly any[]): Promise<void> {
+export async function injectGradients(pptxPath: string, registry: readonly Gradient[]): Promise<void> {
   if (!registry || registry.length === 0) return;
   const buf = readFileSync(pptxPath);
   const zip = await JSZip.loadAsync(buf);
@@ -239,10 +256,10 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
 
   // Step 2: Build pptx
   console.log("\nBuilding .pptx...");
-  const { pres, renderedRegions } = buildPptx(slideData as any, title);
+  const { pres, renderedRegions } = buildPptx(slideData as readonly SlideInput[], title);
 
   const pptxPath = outPath || `/tmp/${title.replace(/[^a-zA-Z0-9]/g, "_")}.pptx`;
-  await (pres as any).writeFile({ fileName: pptxPath });
+  await pres.writeFile({ fileName: pptxPath });
   console.log(`  Saved: ${pptxPath}`);
 
   // Sidecar: per-slide rasterised regions so the SxS rating UI can warn the
@@ -259,7 +276,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   console.log(`  Rendered regions: ${totalRegions} total across ${renderedRegions.length} slides → ${regionsPath}`);
 
   // Post-process: inject <a:gradFill> into shapes tagged with name="GRAD_N"
-  await injectGradients(pptxPath, (pres as any).__gradients || []);
+  await injectGradients(pptxPath, pres.__gradients || []);
   // Post-process: every <a:ln w="…"> gains algn="in" — stroke paints inside.
   await injectStrokeAlignment(pptxPath);
 

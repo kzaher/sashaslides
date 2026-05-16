@@ -12,7 +12,7 @@
  *
  * After every file is processed, call buildPptxInMemory and trigger download.
  */
-import { buildPptxInMemory } from "../convert-pptx-lib";
+import { buildPptxInMemory, type Extraction, type ExtractedElement, type SlideInput } from "../convert-pptx-lib";
 
 // Build-time string substitution. `build.ts` replaces __EXTRACT_JS_LITERAL__
 // with the compiled extract-dom.ts source via esbuild `define`. The browser
@@ -24,7 +24,36 @@ declare const __EXTRACT_JS_LITERAL__: string;
 const SLIDE_W = 1280;
 const SLIDE_H = 720;
 
-type Slide = { extraction: any; visualPngs: Map<number, Uint8Array>; name: string };
+type Slide = { extraction: Extraction; visualPngs: Map<number, Uint8Array>; name: string };
+
+/** Boundary shim: showDirectoryPicker + FileSystemObserver are recent web
+ * APIs that some `lib.dom.d.ts` versions ship without; declare what we use. */
+interface FSDirHandlePerm { mode?: "read" | "readwrite" }
+interface FSWritable {
+  write(input: ArrayBufferLike | ArrayBufferView | Blob | string | { type: "write"; position?: number; data: BufferSource | Blob | string }): Promise<void>;
+  close(): Promise<void>;
+}
+interface FSFileHandle {
+  getFile(): Promise<File>;
+  createWritable(opts?: { keepExistingData?: boolean; mode?: "exclusive" | "siloed" }): Promise<FSWritable>;
+}
+interface FSDirHandle {
+  readonly name: string;
+  readonly kind: "directory";
+  entries(): AsyncIterableIterator<[string, FSFileHandle | FSDirHandle]>;
+  getFileHandle(name: string, opts?: { create?: boolean }): Promise<FSFileHandle>;
+  getDirectoryHandle(name: string, opts?: { create?: boolean }): Promise<FSDirHandle>;
+  removeEntry(name: string): Promise<void>;
+}
+type ShowDirectoryPicker = (opts?: FSDirHandlePerm) => Promise<FSDirHandle>;
+interface FSObserverRecord {
+  type: "appeared" | "disappeared" | "modified" | "moved" | "errored";
+  relativePathComponents?: string[];
+}
+type FSObserverCallback = (records: ReadonlyArray<FSObserverRecord>) => void;
+interface FSObserverCtor {
+  new(cb: FSObserverCallback): { observe(handle: FSDirHandle, opts?: { recursive?: boolean }): Promise<void> };
+}
 
 const $ = (sel: string) => document.querySelector(sel) as HTMLElement;
 
@@ -73,7 +102,11 @@ async function loadIntoIframe(html: string): Promise<HTMLIFrameElement> {
   const idoc = iframe.contentDocument!;
   await sleep(150);
   try {
-    await (idoc as any).fonts?.ready;
+    // SAFETY: `document.fonts` (FontFaceSet) is in modern TS lib.dom.d.ts as a
+    // FontFaceSet, but TS reads it through Document via a getter not present on
+    // all targets; the `?.` runtime guard makes the cast safe even when the
+    // property is undefined.
+    await (idoc as Document & { fonts?: { ready: Promise<unknown> } }).fonts?.ready;
   } catch {/* ignore */}
   await sleep(150);
   return iframe;
@@ -82,10 +115,12 @@ async function loadIntoIframe(html: string): Promise<HTMLIFrameElement> {
 /** Evaluate the precompiled extract-dom blob inside the iframe. extract-dom
  * ends with `return JSON.stringify(...)` inside an IIFE, so the eval expression
  * returns the JSON string directly. */
-function runExtractInIframe(iframe: HTMLIFrameElement): any {
-  const win = iframe.contentWindow as any;
-  const json = win.eval(__EXTRACT_JS_LITERAL__);
-  return typeof json === "string" ? JSON.parse(json) : json;
+function runExtractInIframe(iframe: HTMLIFrameElement): Extraction {
+  const win = iframe.contentWindow as (Window & { eval(s: string): unknown }) | null;
+  if (!win) throw new Error("iframe contentWindow not available");
+  const raw = win.eval(__EXTRACT_JS_LITERAL__);
+  const json = typeof raw === "string" ? JSON.parse(raw) : raw;
+  return json as Extraction;
 }
 
 /**
@@ -94,7 +129,7 @@ function runExtractInIframe(iframe: HTMLIFrameElement): any {
  * <canvas>, <svg>. Other tags log a warning and are skipped (renders as a
  * gap in the .pptx). 2× scale to match the Node CDP path.
  */
-async function rasterizeVisuals(iframe: HTMLIFrameElement, extraction: any): Promise<Map<number, Uint8Array>> {
+async function rasterizeVisuals(iframe: HTMLIFrameElement, extraction: Extraction): Promise<Map<number, Uint8Array>> {
   const out = new Map<number, Uint8Array>();
   const idoc = iframe.contentDocument!;
   const iwin = iframe.contentWindow!;
@@ -116,7 +151,7 @@ async function rasterizeVisuals(iframe: HTMLIFrameElement, extraction: any): Pro
 async function rasterizeElement(
   idoc: Document,
   iwin: Window,
-  el: any,
+  el: ExtractedElement,
   tag: string,
 ): Promise<Uint8Array | null> {
   const b = el.bounds;
@@ -139,7 +174,7 @@ async function rasterizeElement(
     ctx.drawImage(img, 0, 0, W, H);
   } else if (node instanceof iwin.HTMLCanvasElement || node instanceof HTMLCanvasElement) {
     ctx.drawImage(node as HTMLCanvasElement, 0, 0, W, H);
-  } else if (tag === "svg" || (typeof (iwin as any).SVGElement !== "undefined" && node instanceof (iwin as any).SVGElement)) {
+  } else if (tag === "svg" || (typeof iwin.SVGElement !== "undefined" && node instanceof iwin.SVGElement)) {
     const svgEl = node as SVGElement;
     // Ensure intrinsic size in serialization so the rendered img knows w/h.
     const cloned = svgEl.cloneNode(true) as SVGElement;
@@ -171,7 +206,7 @@ async function rasterizeElement(
  * Find the DOM node corresponding to an extracted element. extract-dom records
  * the element's tag plus its bounding-box; locate by tag+rect within the iframe.
  */
-function findNodeAt(idoc: Document, b: any, tag: string): Element | null {
+function findNodeAt(idoc: Document, b: { x: number; y: number; w: number; h: number }, tag: string): Element | null {
   const cands = idoc.getElementsByTagName(tag || "*");
   let best: { node: Element; dist: number } | null = null;
   for (let i = 0; i < cands.length; i++) {
@@ -185,7 +220,7 @@ function findNodeAt(idoc: Document, b: any, tag: string): Element | null {
   if (best) return best.node;
   // Fall back to elementsFromPoint inside center.
   const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-  const list = (idoc as any).elementsFromPoint?.(cx, cy) || [];
+  const list: Element[] = idoc.elementsFromPoint?.(cx, cy) ?? [];
   for (const n of list) {
     if (n.tagName.toLowerCase() === tag) return n;
   }
@@ -253,7 +288,7 @@ async function convertFiles(files: File[]): Promise<void> {
   log(`Assembling .pptx (${slides.length} slide(s))…`);
   setProgress(0, 1, "building pptx");
   const title = files[0].name.replace(/\.html?$/i, "") + (files.length > 1 ? "-deck" : "");
-  const bytes = await buildPptxInMemory(slides as any, title);
+  const bytes = await buildPptxInMemory(slides as readonly SlideInput[], title);
   setProgress(1, 1, "done");
   log(`pptx built: ${bytes.byteLength.toLocaleString()} bytes — downloading…`);
   downloadBytes(bytes, `${title}.pptx`);
@@ -340,7 +375,7 @@ function init() {
 //   6. Write request.json.result.json with `{ exitCode, response: {...} }`
 // Requests are processed serially; if more appear during a build, they queue.
 
-declare const FileSystemObserver: any;
+declare const FileSystemObserver: FSObserverCtor;
 
 type RpcReq = {
   jsonrpc?: string;
@@ -353,13 +388,18 @@ const processedReqs = new Set<string>();
 let bridgeQueue: Promise<void> = Promise.resolve();
 
 async function pickWatchDirAndStart() {
-  if (typeof (window as any).showDirectoryPicker !== "function") {
+  // SAFETY: `showDirectoryPicker` is a Chrome-only File System Access API
+  // not yet in baseline lib.dom.d.ts. We feature-detect immediately after
+  // (`typeof picker !== "function"`) before invoking, so the cast can only
+  // produce a function or undefined — never a wrong-shaped value.
+  const picker = (window as Window & { showDirectoryPicker?: ShowDirectoryPicker }).showDirectoryPicker;
+  if (typeof picker !== "function") {
     alert("This browser doesn't support showDirectoryPicker — needs Chrome/Edge.");
     return;
   }
-  let dirHandle: any;
+  let dirHandle: FSDirHandle;
   try {
-    dirHandle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
+    dirHandle = await picker({ mode: "readwrite" });
   } catch (e) {
     if ((e as Error).name !== "AbortError") log("picker: " + (e as Error).message, "warn");
     return;
@@ -374,7 +414,7 @@ async function pickWatchDirAndStart() {
   // Then attach observer (Chrome 129+) or fall back to polling.
   if (typeof FileSystemObserver === "function") {
     try {
-      const observer = new FileSystemObserver(async (records: any[]) => {
+      const observer = new FileSystemObserver((records) => {
         for (const r of records) {
           if (r.type === "appeared" || r.type === "modified") {
             const path = r.relativePathComponents || [];
@@ -395,17 +435,17 @@ async function pickWatchDirAndStart() {
   setInterval(() => { scanForRequests(dirHandle).catch(() => {}); }, 500);
 }
 
-async function scanForRequests(dirHandle: any) {
-  for await (const [name, h] of (dirHandle as any).entries()) {
+async function scanForRequests(dirHandle: FSDirHandle) {
+  for await (const [name, h] of dirHandle.entries()) {
     if (h.kind !== "directory" || !/^request\./.test(name)) continue;
     try {
-      await h.getFileHandle("request.json");  // throws if absent
+      await (h as FSDirHandle).getFileHandle("request.json");  // throws if absent
       enqueueRequest(dirHandle, name);
     } catch { /* no request.json yet */ }
   }
 }
 
-function enqueueRequest(rootDir: any, reqId: string) {
+function enqueueRequest(rootDir: FSDirHandle, reqId: string) {
   if (processedReqs.has(reqId)) return;
   processedReqs.add(reqId);
   // Serialize: chain onto bridgeQueue so multiple requests run one at a time.
@@ -414,7 +454,7 @@ function enqueueRequest(rootDir: any, reqId: string) {
   }));
 }
 
-async function processRequest(rootDir: any, reqId: string) {
+async function processRequest(rootDir: FSDirHandle, reqId: string) {
   log(`bridge: processing ${reqId}`, "info");
   const reqDir = await rootDir.getDirectoryHandle(reqId);
 
@@ -433,11 +473,11 @@ async function processRequest(rootDir: any, reqId: string) {
 
   // 2. Open log writer (exclusive mode so tail -f sees writes immediately).
   const logHandle = await reqDir.getFileHandle("request.json.log", { create: true });
-  let logWriter: any;
+  let logWriter: FSWritable;
   try {
-    logWriter = await logHandle.createWritable({ keepExistingData: false, mode: "exclusive" } as any);
+    logWriter = await logHandle.createWritable({ keepExistingData: false, mode: "exclusive" });
   } catch {
-    logWriter = await logHandle.createWritable({ keepExistingData: false } as any);
+    logWriter = await logHandle.createWritable({ keepExistingData: false });
   }
   let logBytes = 0;
   const writeLog = async (line: string) => {
@@ -454,8 +494,11 @@ async function processRequest(rootDir: any, reqId: string) {
   // 4. Install extraLogger so existing log() lines mirror into the log file.
   extraLogger = (msg, kind) => { writeLog(`[${kind}] ${msg}`); };
 
+  type RpcResponse =
+    | { jsonrpc: "2.0"; id: string; result: { outputPath: string; bytes: number; slides: number } }
+    | { jsonrpc: "2.0"; id: string; error: { code: number; message: string } };
   let exitCode = 0;
-  let response: any;
+  let response: RpcResponse | null = null;
   try {
     // Load each input file from the request directory.
     const files: File[] = [];
@@ -470,7 +513,7 @@ async function processRequest(rootDir: any, reqId: string) {
     }
     if (slides.length === 0) throw new Error("no input slides successfully processed");
     log(`Assembling .pptx (${slides.length} slide(s))…`);
-    const bytes = await buildPptxInMemory(slides as any, title);
+    const bytes = await buildPptxInMemory(slides as readonly SlideInput[], title);
     log(`pptx built: ${bytes.byteLength.toLocaleString()} bytes`);
 
     // Write the .pptx output into the request dir.

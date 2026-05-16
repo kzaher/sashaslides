@@ -6,9 +6,18 @@ import { transformSync } from "esbuild";
 const EXTRACT_TS = readFileSync(join(dirname(new URL(import.meta.url).pathname), "extract-dom.ts"), "utf-8");
 const EXTRACT_JS = transformSync(EXTRACT_TS, { loader: "ts", target: "es2020" }).code;
 
+// chrome-remote-interface ships no .d.ts. Narrow the boundary cast once.
+interface CDPStatic {
+  New(opts: { port: number; url: string }): Promise<{ id: string }>;
+  Close(opts: { port: number; id: string }): Promise<void>;
+}
+// SAFETY: chrome-remote-interface ships no .d.ts; CDPStatic mirrors the two
+// static methods (New/Close) we invoke as documented at the project README.
+const CDPS = CDP as unknown as CDPStatic;
+
 async function main() {
   const htmlPath = resolve(process.argv[2] || "slide_05.html");
-  const tab = await (CDP as any).New({ port: 9222, url: `file://${htmlPath}` });
+  const tab = await CDPS.New({ port: 9222, url: `file://${htmlPath}` });
   await new Promise(r => setTimeout(r, 1500));
   const client = await CDP({ target: tab, port: 9222 });
   const { Runtime, Emulation, Page } = client;
@@ -31,7 +40,7 @@ async function main() {
     } else if (el.type === "rect") {
       const cornerRadii = el.cornerRadii ? `cornerRadii={tl:${el.cornerRadii.tl},tr:${el.cornerRadii.tr},br:${el.cornerRadii.br},bl:${el.cornerRadii.bl}}` : "cornerRadii=none";
       const borderSides = el.borderSides ? `borderSides={top:${el.borderSides.top.width}/${el.borderSides.top.color},right:${el.borderSides.right.width}/${el.borderSides.right.color},bottom:${el.borderSides.bottom.width}/${el.borderSides.bottom.color},left:${el.borderSides.left.width}/${el.borderSides.left.color}}` : "borderSides=none";
-      const gradient = el.gradient ? `gradient={angle:${el.gradient.angle},stops:[${el.gradient.stops.map((s: any) => `${s.color}@${s.position}`).join(",")}]}` : "gradient=none";
+      const gradient = el.gradient ? `gradient={angle:${el.gradient.angle},stops:[${el.gradient.stops.map((s: { color: string; position: number }) => `${s.color}@${s.position}`).join(",")}]}` : "gradient=none";
       console.log(`rect  bounds=${JSON.stringify(el.bounds)}  fill=${el.fill}  ${cornerRadii}  ${borderSides}  ${gradient}`);
     } else {
       console.log(`${el.type}  bounds=${JSON.stringify(el.bounds)}  ${el.color || ""}`);
@@ -39,6 +48,6 @@ async function main() {
   }
 
   await client.close();
-  await (CDP as any).Close({ port: 9222, id: tab.id });
+  await CDPS.Close({ port: 9222, id: tab.id });
 }
 main().catch(e => { console.error(e); process.exit(1); });
