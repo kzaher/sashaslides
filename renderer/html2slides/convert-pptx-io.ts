@@ -30,6 +30,9 @@ import {
   buildPptx,
   injectGradientsIntoZip,
   injectStrokeAlignmentIntoZip,
+  injectShapeNoLineIntoZip,
+  injectCellNoBorderIntoZip,
+  injectClipGroupsIntoZip,
   SLIDE_W_PX,
   SLIDE_H_PX,
   type Extraction,
@@ -197,6 +200,39 @@ export async function injectStrokeAlignment(pptxPath: string): Promise<void> {
   }
 }
 
+export async function injectShapeNoLine(pptxPath: string): Promise<void> {
+  const buf = readFileSync(pptxPath);
+  const zip = await JSZip.loadAsync(buf);
+  const patched = await injectShapeNoLineIntoZip(zip);
+  if (patched > 0) {
+    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    writeFileSync(pptxPath, out);
+    console.log(`  Shape no-line: ${patched} empty <a:ln> rewrite(s) to <a:noFill/>`);
+  }
+}
+
+export async function injectCellNoBorder(pptxPath: string): Promise<void> {
+  const buf = readFileSync(pptxPath);
+  const zip = await JSZip.loadAsync(buf);
+  const patched = await injectCellNoBorderIntoZip(zip);
+  if (patched > 0) {
+    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    writeFileSync(pptxPath, out);
+    console.log(`  Cell no-border: ${patched} <a:ln[LRTB] w=0> rewrite(s) to <a:noFill/>`);
+  }
+}
+
+export async function injectClipGroups(pptxPath: string): Promise<void> {
+  const buf = readFileSync(pptxPath);
+  const zip = await JSZip.loadAsync(buf);
+  const created = await injectClipGroupsIntoZip(zip);
+  if (created > 0) {
+    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    writeFileSync(pptxPath, out);
+    console.log(`  Clip groups: ${created} <p:grpSp>(s) wrapping patch+host pairs`);
+  }
+}
+
 // --- Public API ----------------------------------------------------------
 
 export interface ConvertPptxOpts {
@@ -279,6 +315,19 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   await injectGradients(pptxPath, pres.__gradients || []);
   // Post-process: every <a:ln w="…"> gains algn="in" — stroke paints inside.
   await injectStrokeAlignment(pptxPath);
+  // Post-process: empty <a:ln></a:ln> → <a:ln><a:noFill/></a:ln> so Google
+  // Slides doesn't paint a default hairline on shapes that asked for no
+  // line (slide_17 shape-twice corner inner-fill rects).
+  await injectShapeNoLine(pptxPath);
+  // Post-process: heavy-form table-cell `<a:ln[LRTB] w="0" cap="flat"
+  // cmpd="sng" algn="ctr"><a:noFill/></a:ln[LRTB]>` → clean
+  // `<a:ln[LRTB]><a:noFill/></a:ln[LRTB]>` so Google Slides honours the
+  // noFill instead of painting a default hairline column divider between
+  // cells the CSS didn't separate (slide_17 rounded table, wave-21).
+  await injectCellNoBorder(pptxPath);
+  // Post-process: wrap (clipped-patch, host) pairs in native <p:grpSp> so
+  // Slides resize/move tracks them together (rule 3 in convert-pptx-lib).
+  await injectClipGroups(pptxPath);
 
   if (noUpload) {
     console.log("Done (no upload).");

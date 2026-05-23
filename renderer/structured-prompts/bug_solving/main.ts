@@ -30,8 +30,14 @@
  *      (per-slide verdict JSON).
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "fs";
+
+/** Best-effort directory listing — returns [] on ENOENT instead of throwing. */
+function readdirSyncSafe(p: string): string[] {
+  try { return readdirSync(p); } catch { return []; }
+}
 import { resolve as resolvePath } from "path";
+import { execSync } from "child_process";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 import {
@@ -54,6 +60,39 @@ import type { Result } from "../../../structured-prompting/src/api/wire.js";
  * Used by Step 7.5 (visual check) so the model gets a third image with
  * "where do we still differ from the ground truth" pre-marked.
  */
+
+/**
+ * Extract OOXML structural facts from a per-slide `.pptx` so the verdict
+ * model can answer "is this still a native table?" / "how many shapes?"
+ * without re-deriving from pixels.
+ *
+ * Counts: `<a:tbl>` (native pptx table), `<p:graphicFrame>` (the wrapper
+ * pptx uses for tables/charts), `<p:sp>` (every other shape), `<p:pic>`
+ * (raster image — should be ZERO for a fixture that has no <img>), and
+ * `<p:grpSp>` (clip-group wrappers from rule 3). Returns a one-line
+ * summary the prompt can include verbatim.
+ *
+ * Best-effort: failures (e.g. pptx not present) return "facts unavailable".
+ */
+function structuralFacts(pptxPath: string): string {
+  if (!existsSync(pptxPath)) return "facts unavailable (pptx missing)";
+  try {
+    const xml = execSync(
+      `unzip -p ${JSON.stringify(pptxPath)} ppt/slides/slide1.xml 2>/dev/null`,
+      { encoding: "utf-8", maxBuffer: 16 * 1024 * 1024 },
+    );
+    const count = (re: RegExp): number => (xml.match(re) ?? []).length;
+    const tbl = count(/<a:tbl[\s>]/g);
+    const gFrame = count(/<p:graphicFrame[\s>]/g);
+    const sp = count(/<p:sp[\s>]/g);
+    const pic = count(/<p:pic[\s>]/g);
+    const grpSp = count(/<p:grpSp[\s>]/g);
+    return `<a:tbl>=${tbl} <p:graphicFrame>=${gFrame} <p:sp>=${sp} <p:pic>=${pic} <p:grpSp>=${grpSp}`;
+  } catch {
+    return "facts unavailable (unzip failed)";
+  }
+}
+
 function pixelDiffPng(aPath: string, bPath: string, diffPath: string): void {
   const W = 1280, H = 720;
   const loadAndResize = (path: string) => {
@@ -113,6 +152,17 @@ export interface Task {
   //   <baseline_dir>/thumbs/<slide_id>.png   → shown in the SxS as "baseline" toggle
   //   <baseline_dir>/thumbs/manifest.json    → presentation_id + slide oids
   baseline_dir: string;
+  // Where each slide's fixture HTML lives. Propagated to record-rendering
+  // via `--fixtures` so multi-source clusters (e.g. tables that span
+  // fixtures-basic AND fixtures) can flatten into one dir under a
+  // namespaced ID (basic_slide_14, complex_slide_05) without collisions.
+  fixtures_dir: string;
+  // Where the prior wave's SxS rating server wrote per-annotation
+  // zoom-crops (3× nearest-neighbour blow-ups of the regions the user
+  // marked). Filenames: `<slide_id>(-NN)?-(rendered|original).png`.
+  // Step 7.5 attaches every matching crop to the visual-verification
+  // prompt so workers can see single-pixel detail the user flagged.
+  zoom_crops_dir: string;
 }
 
 export type SlideVerdict = {
@@ -140,11 +190,33 @@ export interface TaskResult {
 
 // ---------- Helpers ----------
 
-/** Path to the shell/ts helper scripts that live alongside main.ts. */
+/** Path to the shell/ts helper scripts that live alongside main.ts.
+ *
+ * IMPORTANT — worktree vs. parent repo:
+ *   - `record` runs from the worker's worktree (`cd ${task.workspace_dir}`),
+ *     because it MUST use the worktree's converter code — that's the whole
+ *     point of bug-solving. The worker is allowed (and expected) to edit
+ *     `renderer/html2slides/*.ts` in their worktree; `record-rendering`
+ *     then produces a pptx using those edits.
+ *   - `diff` and `filteredServer` are INFRASTRUCTURE: they don't depend on
+ *     the worker's converter code, so they must be PINNED to the parent
+ *     repo's copy. Without this pin, a worker who edits one of these
+ *     scripts in their worktree (mistakenly believing it's converter code)
+ *     poisons the post-pass for the whole wave. This actually happened
+ *     once: a worker rewrote `filtered-rating-server.ts` into a lossy
+ *     compatibility wrapper that dropped --html-dir / --baseline-dir /
+ *     --bug-context and never wired the Slides deep link from
+ *     thumbnails/manifest.json. The next wave seeded the broken copy
+ *     forward and the SxS lost its HTML + Slides links until restored.
+ */
+const PARENT_REPO_ROOT = process.cwd();
 const SCRIPTS = {
+  // Worktree-relative (the worker is allowed to edit converter code that
+  // record-rendering pulls in via tsx).
   record: "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts",
-  diff: "renderer/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts",
-  filteredServer: "renderer/structured-prompts/bug_solving/scripts/filtered-rating-server.ts",
+  // Pinned absolute to the parent repo so the worker can't break infra.
+  diff: resolvePath(PARENT_REPO_ROOT, "renderer/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts"),
+  filteredServer: resolvePath(PARENT_REPO_ROOT, "renderer/structured-prompts/bug_solving/scripts/filtered-rating-server.ts"),
 };
 
 /** Path to the tsxx profiling launcher. Behaves like `npx tsx` but emits a
@@ -239,7 +311,8 @@ export function main(args: {
       //   fail and retry.
       .executeShell(() =>
         `cd ${task.workspace_dir} && ${TSXX} ${SCRIPTS.record} ` +
-        `--mode pptx --slides ${ids} --out ${task.scratch_dir}/after`
+        `--mode pptx --slides ${ids} --fixtures ${task.fixtures_dir} ` +
+        `--out ${task.scratch_dir}/after`
       )
 
       // Step 3 — diff shared baseline vs after.
@@ -359,6 +432,7 @@ export function main(args: {
       .executeShell(() =>
         `cd ${task.workspace_dir} && ${TSXX} ${SCRIPTS.record} ` +
         `--mode full --slides ${ids} --title "${task.presentation_title}" ` +
+        `--fixtures ${task.fixtures_dir} ` +
         `--out ${task.scratch_dir}/after`
       )
 
@@ -384,39 +458,116 @@ export function main(args: {
             // runs at execution time, after Step 7's screenshots exist).
             mkdirSync(resolvePath(task.scratch_dir, "after/diffs"), { recursive: true });
             pixelDiffPng(baselinePath, testPath, diffPath);
+            // Pre-compute OOXML structural facts from the produced pptx so
+            // the model doesn't have to guess "is it a table?" from a pixel
+            // diff (the previous failure mode — workers refused to pass
+            // structurally-correct slides because vision can't confirm
+            // <a:tbl> presence).
+            const facts = structuralFacts(
+              resolvePath(task.scratch_dir, "after/pptx", `${slide.slide_id}.pptx`),
+            );
+            // Zoom-crops the user generated by drawing on the prior wave's
+            // SxS server. The filtered-rating-server writes a per-annotation
+            // crop of the marked region against BOTH the rendered thumbnail
+            // and the original Chrome screenshot to
+            //   <ratings-dir>/zoom-crops/<slide_id>(-NN)?-(rendered|original).png
+            // The NN is a 1-based zero-padded shape index (one rectangle or
+            // one pencil stroke = one annotation = one indexed crop pair).
+            // If present, attach them so the worker actually SEES the
+            // 1-pixel detail the user flagged — vision routinely misses
+            // single-pixel borders at slide-thumbnail resolution. Each shape
+            // gets its own pair; ordering is shape index then side.
+            const zoomCropsForSlide: string[] = [];
+            if (existsSync(task.zoom_crops_dir)) {
+              const slidePrefix = slide.slide_id;
+              // List, filter, sort: indexed shapes first (01, 02, …),
+              // then unindexed fallback ("<id>-rendered.png" /
+              // "<id>-original.png"). Within each, rendered then original
+              // so the worker sees "what we produce" before "what we want".
+              const all: string[] = [];
+              for (const f of readdirSyncSafe(task.zoom_crops_dir)) {
+                if (f === `${slidePrefix}.png`) continue;
+                if (!f.startsWith(`${slidePrefix}-`)) continue;
+                if (!f.endsWith(".png")) continue;
+                all.push(f);
+              }
+              all.sort();
+              for (const f of all) zoomCropsForSlide.push(resolvePath(task.zoom_crops_dir, f));
+            }
+            const haveZoomCrops = zoomCropsForSlide.length > 0;
+            const baseAttachments = [
+              readFileSync(testPath).toString("base64"),
+              readFileSync(baselinePath).toString("base64"),
+              readFileSync(diffPath).toString("base64"),
+            ];
+            const zoomAttachments = zoomCropsForSlide.map(
+              (p) => readFileSync(p).toString("base64"),
+            );
             return child
               .send({
                 prompt: [
                   `Visual verification — STEP A (reasoning, write to file).`,
-                  `Slide: ${slide.slide_id}. User's bug report: "${slide.user_comment}".`,
-                  `Cluster hypothesis: ${task.cluster_description}`,
+                  `Slide: ${slide.slide_id}.`,
                   ``,
-                  `Three PNG attachments (in order):`,
+                  `THE USER'S BUG REPORT (this is the ONLY thing the fix must address):`,
+                  `  """${slide.user_comment}"""`,
+                  ``,
+                  `Cluster hypothesis (background context, not the success criterion):`,
+                  `  ${task.cluster_description.split("\n")[0]}`,
+                  ``,
+                  `STRUCTURAL FACTS extracted directly from the produced pptx XML`,
+                  `(USE THESE — they answer "is it a table?" deterministically;`,
+                  `do NOT try to re-derive structure from pixels):`,
+                  `  slide XML element counts: ${facts}`,
+                  ``,
+                  `PNG attachments (in order):`,
                   `  (1) test       — post-fix Slides render (what we now produce).`,
                   `  (2) baseline   — Chrome render of the HTML fixture (ground truth).`,
                   `  (3) diff       — pixel difference of (1) vs (2): RED pixels mark`,
                   `                    where the post-fix render still differs from`,
                   `                    ground truth. Faded pixels match.`,
+                  ...(haveZoomCrops ? [
+                    `  (4..) zoom-crops — nearest-neighbour blow-ups of the EXACT`,
+                    `                    regions the user marked on the prior wave's`,
+                    `                    SxS UI. ORDERING: ` +
+                    zoomCropsForSlide.map((p, i) => `(${i+4}) ` + p.replace(/.*\//,"")).join(", ") + ".",
+                    `                    Each pair (rendered, original) is ONE marked`,
+                    `                    region. If you can't see the bug in the`,
+                    `                    full-slide thumbnails, LOOK HERE — these are`,
+                    `                    the precise pixels the user is pointing at.`,
+                    `                    If the post-fix zoom matches the original`,
+                    `                    zoom in EVERY marked region, PASS.`,
+                  ] : []),
                   ``,
-                  `Open all three. Concentrate on areas the user flagged AND any large`,
-                  `red regions in (3) — those are the remaining defects. Write your`,
-                  `analysis to ${task.scratch_dir}/${slide.slide_id}-visual.md as`,
-                  `markdown: what's still off, what's fixed, severity. Then reply`,
-                  `with exactly "VISUAL_THINKING_DONE".`,
+                  `FOCUS your analysis on whether THE USER'S BUG (quoted above) is`,
+                  `fixed. Unrelated pixel drift — text anti-aliasing, sub-pixel`,
+                  `padding shifts, font-metric rounding — IS NOT a failure. Whole-`,
+                  `slide red wash in the diff is usually just AA + font hinting`,
+                  `between Chrome and Slides; ignore unless the user flagged it.`,
+                  ``,
+                  `Structural complaints from the user (e.g. "it's not a table",`,
+                  `"emit as native shape") MUST be answered using the structural`,
+                  `facts above, NOT the pixel diff. If facts.<a:tbl> ≥ 1 and the`,
+                  `user said "not a table", the bug is FIXED.`,
+                  ``,
+                  `Write your analysis to ${task.scratch_dir}/${slide.slide_id}-visual.md`,
+                  `as markdown: (1) what the user reported, (2) whether it's fixed`,
+                  `(visually AND structurally${haveZoomCrops ? " AND in the zoom-crop" : ""}),`,
+                  `(3) severity of any remaining flagged-by-user issue. Then reply with`,
+                  `exactly "VISUAL_THINKING_DONE".`,
                 ].join("\n"),
-                base64_attachments: [
-                  readFileSync(testPath).toString("base64"),
-                  readFileSync(baselinePath).toString("base64"),
-                  readFileSync(diffPath).toString("base64"),
-                ],
+                base64_attachments: [...baseAttachments, ...zoomAttachments],
               })
               .send<VisualVerdict>({
                 prompt: [
                   `STEP B — emit your VisualVerdict structured-output object.`,
-                  `slide_id="${slide.slide_id}". visualVerdict="pass" iff the`,
-                  `user's reported bug is fixed AND no new visible regressions`,
-                  `appear vs the baseline. reason: <=300 chars summarising your`,
-                  `${slide.slide_id}-visual.md observations.`,
+                  `slide_id="${slide.slide_id}".`,
+                  `visualVerdict="pass" iff THE USER'S SPECIFIC BUG (quoted in Step A) is addressed —`,
+                  `EITHER visually fixed in the test render OR structurally satisfied per the OOXML facts.`,
+                  `Unrelated pixel drift (text AA, sub-pixel shifts, font metrics) is NOT a fail.`,
+                  `Only fail if the user's flagged issue is still visibly present OR a NEW major regression`,
+                  `(missing content, wrong colour bands, broken layout — not minor pixel noise) appeared.`,
+                  `reason: <=300 chars; cite the structural facts when relevant.`,
                 ].join(" "),
               });
           })
@@ -478,10 +629,19 @@ export function main(args: {
     throw new Error("main: tasks must carry baseline_dir (set by buildTasks).");
   }
 
+  // All tasks in a wave currently share the same fixtures_dir (set by the
+  // single buildTasks call). If a future wave needs heterogenous dirs per
+  // task we'd record per-task and skip the shared baseline.
+  const sharedFixtures = args.tasks[0]?.fixtures_dir;
+  if (!sharedFixtures) {
+    throw new Error("main: tasks must carry fixtures_dir (set by buildTasks).");
+  }
+
   return args.session
     .executeShell(() =>
       `${TSXX} ${SCRIPTS.record} --mode full ` +
-      `--slides ${allSlides.join(",")} --out ${baselineDir}`
+      `--slides ${allSlides.join(",")} --fixtures ${sharedFixtures} ` +
+      `--out ${baselineDir}`
     )
     .parallelFork(args.tasks, (child, task) =>
       child

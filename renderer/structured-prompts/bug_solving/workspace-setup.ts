@@ -21,6 +21,11 @@ export interface Cluster {
   task_id: string;                  // "clipping-curves"
   cluster_description: string;      // root-cause hypothesis
   slide_ids: string[];              // ["slide_11", "slide_12", ...]
+  /** Per-cluster override of the default wave retry_budget. When set, the
+   * worker gets this many attempts before the engine gives up on the
+   * cluster. Useful when a cluster is known-hard and we want more
+   * iterations than the default 3. Falls back to opts.retry_budget. */
+  retry_budget?: number;
 }
 
 export interface BuildOptions {
@@ -32,6 +37,12 @@ export interface BuildOptions {
   retry_budget: number;             // default: 3
   repo_root: string;                // default: process.cwd()
   baseline_dir: string;             // pre-recorded shared baseline (pptx + thumbs)
+  /** Worktree paths to KEEP across the cleanup sweep that runs before
+   * fresh worktrees are created. Use when the new wave wants to seed
+   * its files from a prior wave's worktree (which would otherwise be
+   * gc'd before the seed copy could happen). Absolute paths preferred;
+   * relatives are resolved against process.cwd(). */
+  preserve_worktrees?: readonly string[];
 }
 
 const DEFAULTS: Omit<BuildOptions, "clusters" | "baseline_dir"> = {
@@ -92,18 +103,19 @@ function buildSlideTasks(slideIds: string[], opts: BuildOptions): SlideTask[] {
  * a removed worktree — by the time you launch a new wave, the prior wave's
  * review session is assumed done.
  */
-export function cleanupStaleBugSolvingWorktrees(repo_root: string): void {
+export function cleanupStaleBugSolvingWorktrees(repo_root: string, preserve: readonly string[] = []): void {
   let raw: string;
   try {
     raw = execSync("git worktree list --porcelain", { cwd: repo_root, encoding: "utf-8" });
   } catch {
     return;
   }
+  const preserveSet = new Set(preserve.map((p) => resolve(p)));
   const wtPaths: string[] = [];
   for (const line of raw.split("\n")) {
     if (line.startsWith("worktree ")) {
       const p = line.slice("worktree ".length).trim();
-      if (p.includes("/.claude/worktrees/bs-")) wtPaths.push(p);
+      if (p.includes("/.claude/worktrees/bs-") && !preserveSet.has(resolve(p))) wtPaths.push(p);
     }
   }
   for (const p of wtPaths) {
@@ -161,7 +173,7 @@ export function buildTasks(
   // worktrees from prior runs. Bounds disk usage and prevents the "stale
   // worktree" failure mode where a worker accidentally edits last wave's
   // checkout. Fresh worktrees are then created below.
-  cleanupStaleBugSolvingWorktrees(opts.repo_root);
+  cleanupStaleBugSolvingWorktrees(opts.repo_root, opts.preserve_worktrees ?? []);
   const out: Task[] = [];
   for (let i = 0; i < opts.clusters.length; i++) {
     const c = opts.clusters[i];
@@ -192,8 +204,13 @@ export function buildTasks(
       presentation_title: `bug_solving-${c.task_id}-${Date.now()}`,
       slides,
       cluster_description: c.cluster_description,
-      retry_budget: opts.retry_budget,
+      retry_budget: c.retry_budget ?? opts.retry_budget,
       baseline_dir: opts.baseline_dir,
+      fixtures_dir: resolve(opts.repo_root, opts.fixtures_dir),
+      // The filtered-rating-server stores zoom-crops alongside ratings.json
+      // (sibling dir). Step 7.5 of main.ts reads from here to attach per-
+      // annotation crops to the worker's visual-verification prompt.
+      zoom_crops_dir: resolve(opts.ratings_json, "..", "zoom-crops"),
     });
   }
   return out;

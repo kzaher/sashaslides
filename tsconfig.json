@@ -14,8 +14,20 @@
     "lib": ["ES2022", "DOM"]
   },
   "include": [
+    "*.ts",
+    "types/**/*.d.ts",
     "renderer/**/*.ts",
-    "structured-prompting/src/**/*.ts",
-    "structured-prompting/build.ts"
+    "structured-prompting/**/*.ts",
+    "analysis/**/*.ts",
+    "presentations/**/*.ts",
+    "sashaslides/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/node_modules",
+    ".claude/worktrees",
+    "**/dist",
+    "**/build",
+    "structured-prompting/src/client/**"
   ]
 }

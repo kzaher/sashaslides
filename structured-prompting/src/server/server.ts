@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -451,6 +451,23 @@ export async function startMonitor(args: {
   const addr = server.address() as AddressInfo;
   const actualPort = addr.port;
   const url = `http://${host}:${actualPort}/`;
+
+  // Warm up: fire and forget a few self-requests so the first real visit
+  // hits warm V8 JIT, warm route-dispatch closures, and a pre-built graph
+  // snapshot. Without this the first /api/graph for a wave with ~200
+  // nodes can stall the UI for several seconds on cold start.
+  // Errors are swallowed — warmup is best-effort.
+  const warmOne = (path: string): void => {
+    const req = httpRequest({ host, port: actualPort, path, method: "GET" }, (res) => {
+      res.on("data", () => { /* drain */ });
+      res.on("error", () => { /* swallow */ });
+    });
+    req.on("error", () => { /* swallow */ });
+    req.end();
+  };
+  warmOne("/");
+  warmOne("/api/graph");
+
   return {
     server,
     port: actualPort,
