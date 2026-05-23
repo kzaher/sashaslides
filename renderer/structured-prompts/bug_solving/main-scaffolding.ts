@@ -9,8 +9,8 @@
  *   npx tsx build.ts renderer/structured-prompts/bug_solving/main-scaffolding.ts \
  *     && node dist/main-scaffolding.mjs
  */
-import { mkdirSync } from "fs";
-import { resolve } from "path";
+import { mkdirSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { dirname, resolve } from "path";
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
 import { buildTasks } from "./workspace-setup.js";
 // clusters.ts is the per-wave input — edit it to redeclare what you want
@@ -39,7 +39,57 @@ function chooseBaselineDir(): string {
 
 async function run() {
   const baseline_dir = chooseBaselineDir();
-  const tasks = buildTasks({ clusters: CLUSTERS, baseline_dir });
+  // Env-var overrides so a single skill invocation can target an arbitrary
+  // fixture/SxS dir (e.g. the table-only set under /tmp/tables-bs) without
+  // touching DEFAULTS in workspace-setup. Each var is optional — when unset
+  // workspace-setup keeps its complex-fixture defaults.
+  const fixtures_dir = process.env.BUG_SOLVING_FIXTURES_DIR;
+  const sxs_dir = process.env.BUG_SOLVING_SXS_DIR;
+  const ratings_json = process.env.BUG_SOLVING_RATINGS_JSON;
+  // When seeding from a prior bug-solving worktree, that worktree must be
+  // exempt from the cleanup sweep that runs at the start of buildTasks —
+  // otherwise the source files are gc'd before the seed copy fires.
+  const seedFrom = process.env.BUG_SOLVING_SEED_FROM;
+  const tasks = buildTasks({
+    clusters: CLUSTERS,
+    baseline_dir,
+    ...(fixtures_dir ? { fixtures_dir: resolve(fixtures_dir) } : {}),
+    ...(sxs_dir ? { sxs_dir: resolve(sxs_dir) } : {}),
+    ...(ratings_json ? { ratings_json: resolve(ratings_json) } : {}),
+    ...(seedFrom ? { preserve_worktrees: [resolve(seedFrom)] } : {}),
+  });
+
+  // Seed each worktree with starting-point files. Two env vars:
+  //   BUG_SOLVING_SEED_FILES  — comma-separated repo-relative paths.
+  //   BUG_SOLVING_SEED_FROM   — source repo root (default: process.cwd()).
+  // Use cases:
+  //   1. Seed from main's uncommitted edits: SEED_FROM unset → reads cwd.
+  //   2. Continue an iteration from a previous wave's worktree by setting
+  //      SEED_FROM to that worktree's path. Lets wave-N+1 build on the
+  //      worker's end state without forcing a commit between waves.
+  const seedSpec = process.env.BUG_SOLVING_SEED_FILES;
+  if (seedSpec) {
+    const seedPaths = seedSpec.split(",").map((s) => s.trim()).filter(Boolean);
+    const seedRoot = seedFrom ? resolve(seedFrom) : process.cwd();
+    console.error(`[seed] source: ${seedRoot}`);
+    for (const task of tasks) {
+      for (const rel of seedPaths) {
+        const src = resolve(seedRoot, rel);
+        const dst = resolve(task.workspace_dir, rel);
+        if (!existsSync(src)) {
+          console.error(`[seed] skip (missing in source): ${rel}`);
+          continue;
+        }
+        // copyFileSync follows the worktree's symlink for node_modules; the
+        // explicit readFileSync→writeFileSync detour is to avoid corrupting
+        // the source file when the worktree happens to symlink into it.
+        const data = readFileSync(src);
+        mkdirSync(dirname(dst), { recursive: true });
+        writeFileSync(dst, data);
+        console.error(`[seed] ${task.task_id}: ${rel}`);
+      }
+    }
+  }
   console.error(`built ${tasks.length} task(s) with baseline=${baseline_dir}:`);
   for (const t of tasks) {
     console.error(`  ${t.task_id} @ ${t.workspace_dir} (port ${t.server_port})`);

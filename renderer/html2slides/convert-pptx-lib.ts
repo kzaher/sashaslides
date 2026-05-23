@@ -607,6 +607,133 @@ function emitFlatCornerOverlays(
 }
 
 // =========================================================================
+// Clipping & grouping helpers (rule 3 in the layout doc above)
+// =========================================================================
+// extract-dom propagates a `clipMask` from any rounded `overflow:hidden|clip`
+// ancestor down to every emitted element. The emitter compares each
+// element's bounds against the mask (epsilon-aware). When the geometric
+// intersection differs from the element's own bounds — i.e., the element
+// would be visually clipped — we emit a rounded-rect "underlay patch" beneath
+// the element with the element's own fill and matching corner radii inherited
+// from the mask, then group the patch + element with a shared `objectName`
+// marker. A post-processing pass rewrites those marker pairs into native
+// `<p:grpSp>` wrappers so resize/move in Slides keeps them together.
+
+interface PatchGeometry {
+  readonly bounds: Bounds;
+  readonly cornerRadii: CornerRadii;
+}
+
+/** Decide whether an element with `bounds` needs an underlay patch under a
+ * given clipMask. Returns the patch geometry (clipped to mask bounds with
+ * the corner radii inherited where the element touches the mask edge) or
+ * `null` when no clipping happens (element is fully inside the rounded
+ * region, or no mask at all). `eps` (default 0.5px) absorbs sub-pixel
+ * layout jitter. */
+function computeClippedPatch(
+  bounds: Bounds,
+  mask: ClipMask | null | undefined,
+  eps = 0.5,
+): PatchGeometry | null {
+  if (!mask) return null;
+  const m = mask.bounds;
+  const cr = mask.cornerRadii;
+  const maxR = Math.max(cr.tl, cr.tr, cr.br, cr.bl);
+  if (maxR <= eps) return null;
+
+  // Rect-clip the element to mask bounds.
+  const x = Math.max(bounds.x, m.x);
+  const y = Math.max(bounds.y, m.y);
+  const r = Math.min(bounds.x + bounds.w, m.x + m.w);
+  const btm = Math.min(bounds.y + bounds.h, m.y + m.h);
+  if (r <= x + eps || btm <= y + eps) return null;
+  const clipped: Bounds = { x, y, w: r - x, h: btm - y };
+
+  // Does the rect-clip already differ from the element's bounds (epsilon)?
+  const boundsChanged =
+    Math.abs(clipped.x - bounds.x) > eps ||
+    Math.abs(clipped.y - bounds.y) > eps ||
+    Math.abs(clipped.w - bounds.w) > eps ||
+    Math.abs(clipped.h - bounds.h) > eps;
+
+  // Per-corner: the patch needs that corner's radius IFF the element actually
+  // reaches the mask edge at that corner. Equivalent for tables (corner cells
+  // hug the table frame) and for non-touching internal children (no radius).
+  const touchTL = (clipped.x <= m.x + eps) && (clipped.y <= m.y + eps);
+  const touchTR = (clipped.x + clipped.w >= m.x + m.w - eps) && (clipped.y <= m.y + eps);
+  const touchBR = (clipped.x + clipped.w >= m.x + m.w - eps) && (clipped.y + clipped.h >= m.y + m.h - eps);
+  const touchBL = (clipped.x <= m.x + eps) && (clipped.y + clipped.h >= m.y + m.h - eps);
+
+  // No mask edge touched and no rect change → element sits safely inside.
+  if (!boundsChanged && !touchTL && !touchTR && !touchBR && !touchBL) return null;
+
+  // Patch corner radii inherited where the host hugs the mask edge, capped
+  // to half the patch's smaller dimension so we don't generate degenerate
+  // ellipses on narrow cells.
+  const cap = Math.max(0, Math.min(clipped.w, clipped.h) / 2);
+  const patchCR: CornerRadii = {
+    tl: touchTL ? Math.min(cr.tl, cap) : 0,
+    tr: touchTR ? Math.min(cr.tr, cap) : 0,
+    br: touchBR ? Math.min(cr.br, cap) : 0,
+    bl: touchBL ? Math.min(cr.bl, cap) : 0,
+  };
+  // If no corner ended up with a radius (e.g. radius was already capped to
+  // zero), and bounds didn't actually change, there's nothing to do.
+  if (!boundsChanged && patchCR.tl === 0 && patchCR.tr === 0 && patchCR.br === 0 && patchCR.bl === 0) {
+    return null;
+  }
+  return { bounds: clipped, cornerRadii: patchCR };
+}
+
+/** Allocate a unique group id. Any block whose `objectName` starts with
+ * `<gid>__` participates in the group — the post-pass wraps all such blocks
+ * in one native `<p:grpSp>`. Two name flavours coexist:
+ *   - `<gid>__patch` + `<gid>__host` — original 2-member pair (rect clip case).
+ *   - `<gid>__m<N>`                 — N-member group (table shape-twice case,
+ *                                      where multiple per-corner-cell underlays
+ *                                      live in the same group as the native
+ *                                      `<a:tbl>` host).
+ * The post-pass groups by `<gid>` regardless of suffix. */
+let _groupCounter = 0;
+function nextGroupId(): string { return `h2s-grp-${++_groupCounter}`; }
+function patchName(gid: string): string { return `${gid}__patch`; }
+function hostName(gid: string): string { return `${gid}__host`; }
+function memberName(gid: string, idx: number): string { return `${gid}__m${idx}`; }
+
+/** Emit the underlay patch shape with the same fill as the host element. The
+ * caller (host emit path) will tag itself with the matching `hostName`. */
+function emitClipUnderlay(
+  slide: Slide,
+  patch: PatchGeometry,
+  fill: ShapeProps["fill"],
+  groupId: string,
+): void {
+  const cr = patch.cornerRadii;
+  const cp = cornerPresetFromRadii(cr);
+  const b = patch.bounds;
+  // Same widening pattern used elsewhere in this file for addShape preset
+  // names — pptxgenjs accepts a string but its .d.ts types it as a narrow
+  // enum, so existing calls (line ~1335, ~1373) widen at the call site.
+  const preset = cp.preset as Parameters<Slide["addShape"]>[0];
+  slide.addShape(preset, {
+    x: px2in(b.x),
+    y: px2in(b.y),
+    w: px2in(b.w),
+    h: px2in(b.h),
+    fill,
+    line: { type: "none" },
+    flipH: cp.flipH,
+    flipV: cp.flipV,
+    objectName: patchName(groupId),
+  });
+  // Side-rounded mask compensation (matches host path so the patch's
+  // squared-off corners line up with the rounded host above).
+  if (fill && needsFlatCornerOverlay(cr)) {
+    emitFlatCornerOverlays(slide, b, cr, fill);
+  }
+}
+
+// =========================================================================
 // Extracted-DOM data types
 // =========================================================================
 // extract-dom.ts emits a flat array of elements in CSS-paint order. Each
@@ -696,6 +823,15 @@ export interface TextRun {
 
 export interface Padding { readonly top: number; readonly right: number; readonly bottom: number; readonly left: number }
 
+/** Generic clip context propagated from a rounded `overflow:hidden|clip`
+ * ancestor in extract-dom. The emitter compares each element's bounds against
+ * `bounds` (epsilon-aware) and adds a rounded-corner underlay patch when the
+ * element would visually be clipped by the mask. */
+export interface ClipMask {
+  readonly bounds: Bounds;
+  readonly cornerRadii: CornerRadii;
+}
+
 /** Fields every element shares. */
 interface ElementCommon {
   readonly bounds: Bounds;
@@ -706,6 +842,12 @@ interface ElementCommon {
   readonly naturalWidth?: number;
   readonly naturalHeight?: number;
   readonly _domIdx?: number;
+  /** Propagated clip context from a rounded clipping ancestor; null when
+   * the element has no clipping context. */
+  readonly clipMask?: ClipMask | null;
+  /** Pre-assigned group id shared with an underlay patch — currently unused
+   * by extract-dom and reserved for future synthetic grouping. */
+  readonly _groupId?: string;
 }
 
 export interface RectElement extends ElementCommon {
@@ -926,6 +1068,23 @@ export function buildPptx(
       if (el.type === "_skip") continue;
       const b = el.bounds;
 
+      // Rule 1: a fully-transparent element with no content contributes
+      // nothing to the slide. Don't emit a phantom shape — it pollutes the
+      // outline pane in Slides and confuses post-pass element counting.
+      // Element types that may carry visible content even with a transparent
+      // background (text, list, table, image, visual) are left untouched.
+      if (el.type === "rect") {
+        const r = el as RectElement;
+        const hasFill = r.fill && r.fill !== "transparent" && (r.fillAlpha === undefined || r.fillAlpha > 0);
+        const hasBorder = (r.borderWidth || 0) > 0 && r.borderColor;
+        const hasSideBorder = r.borderSides
+          ? [r.borderSides.top, r.borderSides.right, r.borderSides.bottom, r.borderSides.left].some((s) => (s?.width || 0) > 0)
+          : false;
+        const hasShadow = !!r.boxShadow && (Array.isArray(r.boxShadow) ? r.boxShadow.length > 0 : true);
+        const hasGradient = !!r.gradient && !!r.gradient.stops && r.gradient.stops.length > 0;
+        if (!hasFill && !hasBorder && !hasSideBorder && !hasShadow && !hasGradient) continue;
+      }
+
       switch (el.type) {
         case "rect": {
           // Full-slide background
@@ -1124,6 +1283,20 @@ export function buildPptx(
             opts.w = px2in(nw);
             opts.h = px2in(nh);
             opts.rotate = ((rectRot % 360) + 360) % 360;
+          }
+
+          // Rule 3: rounded clipping mask from any `overflow:hidden` ancestor.
+          // When the host rect would visually be clipped by a parent's
+          // rounded corners, draw an underlay patch in the same fill with
+          // the rounded outline, then the host on top (sharp shape covered
+          // by the rounded patch above is invisible). Both shapes are tagged
+          // with the same group id; the JSZip post-process groups them so
+          // resize/move in Slides keeps them together.
+          const patch = computeClippedPatch(b, el.clipMask);
+          if (patch && opts.fill) {
+            const gid = nextGroupId();
+            emitClipUnderlay(slide, patch, opts.fill, gid);
+            opts.objectName = hostName(gid);
           }
 
           slide.addShape(shapeName, opts);
@@ -1682,12 +1855,33 @@ export function buildPptx(
           const tableHasRadius = (el.borderRadius || 0) > 0;
           const rowCount = rows.length;
 
-          // Decide path: a table is "native-eligible" if every cell has a
-          // uniform per-side border (all four sides identical — or all
-          // widths zero) and the table has no outer border-radius.
+          // Rule 3 (table case): synthMask captures the rounded-clip
+          // context — either inherited from a wrapping `overflow:hidden`
+          // ancestor (el.clipMask) or established by the table's own
+          // border-radius. The shape-twice algorithm below consumes it
+          // only inside the native-addTable branch.
+          const _synthMask: ClipMask | null = el.clipMask
+            ? el.clipMask
+            : (tableHasRadius
+                ? { bounds: b, cornerRadii: tableCornerRadii }
+                : null);
+          let _tableGid: string | null = null;
+
+          // Decide path: a table is "native-eligible" when every cell can
+          // describe its border with a single (width, color, style) triple.
+          // CSS allows per-side borders (e.g. a left-only green accent),
+          // but pptxgenjs cell borders here are one-spec-per-cell, so
+          // falling out of native means the table goes into a shape-stack
+          // fallback that LOSES rule 2 ("every <table> must be a native
+          // <a:tbl>"). Rather than refuse for non-uniform cells, we
+          // COERCE them: pick the side with the largest width as the
+          // dominant border and emit a console warning. The cell visually
+          // loses its per-side accent (a 3px green LEFT-only bar collapses
+          // into a 3px green frame on all 4 sides), but the table stays
+          // native — strict win on rule 2 vs the alternative.
           const cellUniformBorder = (
             cs: { readonly borderSides?: BorderSides } | undefined,
-          ): { width: number; color: string; style: string } | null => {
+          ): { width: number; color: string; style: string } => {
             const bs = cs?.borderSides;
             if (!bs) return { width: 0, color: "", style: "none" };
             const sides: readonly BorderSide[] = [bs.top, bs.right, bs.bottom, bs.left];
@@ -1697,42 +1891,152 @@ export function buildPptx(
             const same = sides.every((s) =>
               s && s.width === bs.top.width && s.color === bs.top.color && s.style === bs.top.style,
             );
-            if (!same) return null;
-            return { width: bs.top.width, color: bs.top.color, style: bs.top.style ?? "solid" };
+            if (same) {
+              return { width: bs.top.width, color: bs.top.color, style: bs.top.style ?? "solid" };
+            }
+            // Non-uniform: report the widest side so the corner-underlay's
+            // shape-twice has a sensible single border to draw against. Per-
+            // side rendering inside the table cell is handled by the 4-tuple
+            // `cellBorderTuple` below (pptxgenjs supports per-side cell
+            // borders via `border: [t, r, b, l]`).
+            let dominantIdx = 0;
+            for (let i = 1; i < 4; i++) {
+              if ((sides[i]?.width || 0) > (sides[dominantIdx]?.width || 0)) dominantIdx = i;
+            }
+            const dom = sides[dominantIdx];
+            return { width: dom.width, color: dom.color, style: dom.style ?? "solid" };
           };
-          let allCellsUniform = !tableHasRadius;
+          // Per-side border tuple for native pptxgenjs cells. The user's
+          // slide_15 complaint ("not a table in sides") flagged that
+          // coercing a 3px green LEFT-only accent into a 3px green frame
+          // around the whole cell loses the per-side styling. pptxgenjs's
+          // table cell `border` option accepts a `[t, r, b, l]` array of
+          // `{type, pt, color}` (verified at pptxgen.es.js:5341-5358) which
+          // emits `<a:lnT/lnR/lnB/lnL>` per cell — exactly what CSS encodes.
+          type BorderOpt = { type: "solid" | "dash" | "sysDot" | "none"; pt: number; color: string };
+          const sideToBorderOpt = (side: BorderSide | undefined): BorderOpt => {
+            if (!side || !side.width || side.width <= 0) return { type: "none", pt: 0, color: "000000" };
+            const dashType: BorderOpt["type"] = side.style === "dashed" ? "dash" : side.style === "dotted" ? "sysDot" : "solid";
+            return { type: dashType, pt: Math.max(0.5, side.width * PX2PT), color: hexToRgb(side.color || "#000000") };
+          };
+          // Compute the table-level border (declared on the `<table>`
+          // element itself, e.g. `table.rounded { border:1px solid #d1d5db }`).
+          // CSS does NOT bubble this into per-cell `getComputedStyle()`, so
+          // we read it from `el.borderSides` and graft it onto the outer-
+          // edge cells' tuples so the native <a:tbl> reproduces the visible
+          // outer frame.
+          const tableBorderSides = (el as { borderSides?: BorderSides | null }).borderSides;
+          const tableSideOpt = (key: "top" | "right" | "bottom" | "left"): BorderOpt =>
+            sideToBorderOpt(tableBorderSides ? tableBorderSides[key] : undefined);
+          const cellBorderTuple = (
+            cs: { readonly borderSides?: BorderSides } | undefined,
+            ri: number,
+            ci: number,
+            colCount: number,
+            rowCnt: number,
+          ): [BorderOpt, BorderOpt, BorderOpt, BorderOpt] => {
+            const bs = cs?.borderSides;
+            const t = sideToBorderOpt(bs?.top);
+            const r = sideToBorderOpt(bs?.right);
+            const bm = sideToBorderOpt(bs?.bottom);
+            const l = sideToBorderOpt(bs?.left);
+            // Fold table-level border onto outer-edge cells whose own side
+            // has no width. (Does not override an explicit per-cell border.)
+            const out: [BorderOpt, BorderOpt, BorderOpt, BorderOpt] = [t, r, bm, l];
+            if (ri === 0 && out[0].type === "none") out[0] = tableSideOpt("top");
+            if (ri === rowCnt - 1 && out[2].type === "none") out[2] = tableSideOpt("bottom");
+            if (ci === 0 && out[3].type === "none") out[3] = tableSideOpt("left");
+            if (ci === colCount - 1 && out[1].type === "none") out[1] = tableSideOpt("right");
+            return out;
+          };
+          // Rule 2: every HTML table emits as a native pptx <a:tbl>. With
+          // cellUniformBorder now coercing non-uniform borders to their
+          // dominant side (see helper above), ALL cells return a valid
+          // (width, color, style) triple — so `allCellsUniform` is always
+          // true, and the native path always fires. The per-cell shape
+          // fallback below is dead code for rule-2 compliance and remains
+          // only as a defensive backstop.
+          let allCellsUniform = true;
           let tableBorder: { width: number; color: string; style: string } | null = null;
-          if (allCellsUniform) {
-            for (const row of rows) for (const cell of row) {
-              const ub = cellUniformBorder(cell.style || {});
-              if (ub === null) { allCellsUniform = false; break; }
-              if (!tableBorder && ub.width > 0) tableBorder = ub;
-              else if (tableBorder && ub.width > 0 &&
-                (tableBorder.width !== ub.width || tableBorder.color !== ub.color || tableBorder.style !== ub.style)) {
-                // Mixed border widths across cells (e.g. separate-borders with
-                // different borders per header/body) — still native-eligible,
-                // but we'll pass borders per-cell via the `border` option.
-                tableBorder = null;
-                break;
-              }
+          for (const row of rows) for (const cell of row) {
+            const ub = cellUniformBorder(cell.style || {});
+            if (!tableBorder && ub.width > 0) tableBorder = ub;
+            else if (tableBorder && ub.width > 0 &&
+              (tableBorder.width !== ub.width || tableBorder.color !== ub.color || tableBorder.style !== ub.style)) {
+              // Mixed border widths across cells (different borders per
+              // header/body row) — still native-eligible, pptxgenjs accepts
+              // per-cell border specs via the `border` option.
+              tableBorder = null;
+              break;
             }
           }
 
           if (allCellsUniform && rows.length > 0) {
+            // Rule 3 (table case — "shape twice" per corner cell).
+            //
+            // The whole-table underlay patch the v1 code emitted couldn't
+            // satisfy all four corners: a single dominant fill bleeds
+            // through transparent body rows when the header is coloured,
+            // and the patch's CSS bounds don't match the native <a:tbl>'s
+            // rendered height so it overshoots vertically. The user's
+            // prescription: for each clipped corner cell, render TWO
+            // stacked rounded shapes underneath the table (bottom = cell
+            // border colour, top = cell fill, inset by the border width)
+            // and mark the cell itself transparent in the native <a:tbl>.
+            // Centre / non-corner cells stay normal.
+            //
+            // The 4 corner cells are identified positionally: first row
+            // first/last cell for the top corners, last row first/last
+            // cell for the bottom corners. colspan/rowspan edge cases
+            // are deferred to a follow-up — every fixture we test has
+            // rectangular row/col layout.
+            type CornerKind = "tl" | "tr" | "br" | "bl";
+            interface CornerSpec {
+              kind: CornerKind;
+              rowIdx: number;
+              cellIdx: number;
+              cell: TableCell;
+            }
+            const transparentCellKeys = new Set<string>();
+            const cornerSpecs: CornerSpec[] = [];
+            if (_synthMask) {
+              const cr = _synthMask.cornerRadii;
+              const lastRow = rows[rowCount - 1];
+              const r0last = (rows[0].length || 0) - 1;
+              const rLlast = (lastRow.length || 0) - 1;
+              if (cr.tl > 0 && rows[0][0])           cornerSpecs.push({ kind: "tl", rowIdx: 0,           cellIdx: 0,     cell: rows[0][0] });
+              if (cr.tr > 0 && rows[0][r0last])      cornerSpecs.push({ kind: "tr", rowIdx: 0,           cellIdx: r0last, cell: rows[0][r0last] });
+              if (cr.br > 0 && lastRow[rLlast])      cornerSpecs.push({ kind: "br", rowIdx: rowCount-1,  cellIdx: rLlast, cell: lastRow[rLlast] });
+              if (cr.bl > 0 && lastRow[0])           cornerSpecs.push({ kind: "bl", rowIdx: rowCount-1,  cellIdx: 0,     cell: lastRow[0] });
+              if (cornerSpecs.length > 0) {
+                _tableGid = nextGroupId();
+                for (const c of cornerSpecs) {
+                  transparentCellKeys.add(`${c.rowIdx}:${c.cellIdx}`);
+                }
+              }
+            }
+
             // Build column widths from the first row's cell widths.
             const firstRow = rows[0];
+            const colCnt = firstRow.length;
             const colW = firstRow.map((c: TableCell) => px2in(c.bounds?.w || b.w / firstRow.length));
-            const tableRows = rows.map((row: readonly TableCell[]) => row.map((cell: TableCell) => {
+            const cornerKindByKey = new Map<string, CornerKind>();
+            for (const c of cornerSpecs) cornerKindByKey.set(`${c.rowIdx}:${c.cellIdx}`, c.kind);
+            const tableRows = rows.map((row: readonly TableCell[], ri: number) => row.map((cell: TableCell, ci: number) => {
               const cs = cell.style || {};
-              const ub = cellUniformBorder(cs) || { width: 0, color: "", style: "none" };
-              // pptxgenjs table cell border dashType: "dash" | "dashDot" | "lgDash" |
-              // "lgDashDot" | "lgDashDotDot" | "solid" | "sysDash" | "sysDashDot" |
-              // "sysDashDotDot" | "sysDot" | "none". Use "sysDot" for CSS dotted so
-              // Google Slides preserves the dotted appearance (not a long dash).
-              const dashType: "dash" | "sysDot" | "solid" = ub.style === "dashed" ? "dash" : ub.style === "dotted" ? "sysDot" : "solid";
-              const borderSpec: { type: "dash" | "sysDot" | "solid" | "none"; pt: number; color: string } = ub.width > 0
-                ? { type: dashType, pt: Math.max(0.5, ub.width * PX2PT), color: hexToRgb(ub.color) }
-                : { type: "none", pt: 0, color: "000000" };
+              const transparent = transparentCellKeys.has(`${ri}:${ci}`);
+              // Per-side border tuple (CSS encodes them per side and
+              // pptxgenjs writes <a:lnT/lnR/lnB/lnL> from this array). For
+              // corner cells (transparent in <a:tbl>; shape-twice paints
+              // the corner) zero every side so the underlay owns the
+              // visible border ring.
+              let border: [BorderOpt, BorderOpt, BorderOpt, BorderOpt];
+              if (transparent) {
+                const none: BorderOpt = { type: "none", pt: 0, color: "000000" };
+                border = [none, none, none, none];
+              } else {
+                border = cellBorderTuple(cs, ri, ci, colCnt, rowCount);
+              }
               const cellOpts: TextPropsOptions = {
                 align: cs.textAlign === "center" ? "center" : cs.textAlign === "right" ? "right" : "left",
                 valign: "middle",
@@ -1741,18 +2045,264 @@ export function buildPptx(
                 color: hexToRgb(cs.color || "#111111"),
                 bold: cs.fontWeight === "bold" || cell.isHeader,
                 italic: cs.fontStyle === "italic",
-                border: borderSpec,
+                border: border as unknown as TextPropsOptions["border"],
               };
-              if (cs.bgColor) cellOpts.fill = { color: hexToRgb(cs.bgColor) };
+              if (!transparent && cs.bgColor) cellOpts.fill = { color: hexToRgb(cs.bgColor) };
               if (cell.colspan && cell.colspan > 1) cellOpts.colspan = cell.colspan;
               if (cell.rowspan && cell.rowspan > 1) cellOpts.rowspan = cell.rowspan;
+              // Cell padding → pptxgenjs cell margin (inches). pptxgenjs
+              // defaults to `[0.05, 0.1, 0.05, 0.1]` which is much narrower
+              // than typical CSS table padding (e.g. `14px 20px` in
+              // complex_slide_05). Without this, the left column reads as
+              // missing left padding compared to the Chrome baseline.
+              //
+              // Wide left-aligned col-0 cells get an extra leading-bump:
+              // feature-comparison tables in Chrome ride inside a
+              // `box-shadow`-haloed wrapper (e.g. `.table-wrap`), which
+              // pptx can't replicate, so the cell-edge sits flush against
+              // slide-bg with no transition. Visually this reads as "text
+              // hugs the border" even when CSS padding is honoured.
+              // Floor col-0's marL to ~0.5″ on wide cells to recover the
+              // perceived breathing room.
+              if (cell.padding) {
+                const p = cell.padding;
+                let leftPx = p.left;
+                const cellWidthPx = cell.bounds?.w || 0;
+                const isLeftAligned = cs.textAlign !== "center" && cs.textAlign !== "right";
+                if (ci === 0 && isLeftAligned && cellWidthPx > 200) {
+                  leftPx = Math.max(leftPx, 48);
+                }
+                cellOpts.margin = [px2in(p.top), px2in(p.right), px2in(p.bottom), px2in(leftPx)];
+              }
+              // Styled runs (e.g. `<span class="feature-desc">` rendered
+              // as a smaller grey secondary line below the main cell text)
+              // can't survive the plain-string `cell.text` path: pptxgenjs
+              // would render them concatenated at the parent style. Build
+              // a pptxgenjs `TableCell[]` array with per-paragraph styling
+              // when runs contain a `\n` separator or any per-run style.
+              const runs = cell.runs || [];
+              const hasNewline = runs.some((r) => r.text === "\n");
+              const hasStyledRun = runs.some((r) => r.style != null);
+              if (runs.length > 0 && (hasNewline || hasStyledRun)) {
+                interface RunOpts {
+                  fontFace: string;
+                  fontSize: number;
+                  color: string;
+                  bold: boolean;
+                  italic: boolean;
+                  breakLine?: boolean;
+                }
+                const entries: Array<{ text: string; options: RunOpts }> = [];
+                for (const r of runs) {
+                  if (r.text === "\n") {
+                    if (entries.length > 0) entries[entries.length - 1].options.breakLine = true;
+                    continue;
+                  }
+                  if (!r.text) continue;
+                  const rs = r.style || {};
+                  entries.push({
+                    text: r.text,
+                    options: {
+                      fontFace: mapFont(rs.fontFamily || cs.fontFamily || "Arial"),
+                      fontSize: (rs.fontSize || cs.fontSize || 14) * PX2PT,
+                      color: hexToRgb(rs.color || cs.color || "#111111"),
+                      bold: rs.fontWeight === "bold" || (!rs.fontWeight && (cs.fontWeight === "bold" || !!cell.isHeader)),
+                      italic: rs.fontStyle === "italic" || (!rs.fontStyle && cs.fontStyle === "italic"),
+                    },
+                  });
+                }
+                if (entries.length > 0) {
+                  return { text: entries as unknown as string, options: cellOpts };
+                }
+              }
               return { text: cell.text || "", options: cellOpts };
             }));
-            slide.addTable(tableRows, {
-              x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), colW,
+            // Compute the row heights (in inches) early so corner-shape
+            // positions can be derived from the native <a:tbl> layout, not
+            // from DOM cell bounds. The DOM cell rects are inset by the
+            // table's outer border (border-top/left/right/bottom of
+            // `<table>`), but the native pptx table's rows start exactly at
+            // its xfrm `b.y` (no implicit border padding), and columns at
+            // `b.x`. Positioning corner shapes from `cb.x/y` therefore
+            // mis-renders the corners by ~1 px (border-width) in each
+            // direction: top corners sit 1 px below row 0, bottom corners
+            // overhang the table by 1 px (the "phantom 5th row" the user
+            // flagged on slide_17 and complex_slide_05).
+            const rowH = rows.map((row) => (row[0]?.bounds ? px2in(row[0].bounds.h) : px2in(b.h / Math.max(1, rowCount))));
+            // Prefix sums (inches) → native cell origin for any (ri, ci):
+            //   x = px2in(b.x) + colXPrefix[ci]
+            //   y = px2in(b.y) + rowYPrefix[ri]
+            // width  = colW[ci]
+            // height = rowH[ri]
+            const colXPrefix: number[] = [0];
+            for (const w of colW) colXPrefix.push(colXPrefix[colXPrefix.length - 1] + w);
+            const rowYPrefix: number[] = [0];
+            for (const h of rowH) rowYPrefix.push(rowYPrefix[rowYPrefix.length - 1] + h);
+
+            // Emit per-corner shape-twice underlays BEFORE the addTable
+            // call so they paint behind it (the addShape z-order is the
+            // call order; native <a:tbl> renders last when added later).
+            if (_tableGid && cornerSpecs.length > 0) {
+              let memberIdx = 0;
+              // Pick the border colour the corner ring should display. The
+              // user's shape-twice prescription targets the table's OUTER
+              // border (e.g. `.rounded { border:1px solid #d1d5db }`), not
+              // the inter-cell row dividers. Prefer the table-level border
+              // first; only fall back to the cell's uniform border if it
+              // is a colour visibly distinct from `#fff` / the slide
+              // background — otherwise (e.g. `.colored td { border:1px
+              // solid #fff }`) we'd paint an invisible white ring around
+              // the cell and shrink the visible inner curve from
+              // `cornerR` to `cornerR-1`, which reads as "almost square"
+              // at thumbnail scale. With width=0 the corner emitter
+              // collapses to a single rounded rect of the cell's own
+              // fill at the FULL corner radius.
+              const isWhiteish = (hex: string): boolean => {
+                const h = (hex || "").replace(/^#/, "").toLowerCase();
+                if (h.length !== 6) return false;
+                const r = parseInt(h.slice(0, 2), 16);
+                const g = parseInt(h.slice(2, 4), 16);
+                const bl = parseInt(h.slice(4, 6), 16);
+                return r >= 240 && g >= 240 && bl >= 240;
+              };
+              const pickRingBorder = (cs: { readonly borderSides?: BorderSides } | undefined): { width: number; color: string } => {
+                if (tableBorderSides) {
+                  const t = tableBorderSides.top, r = tableBorderSides.right, bs = tableBorderSides.bottom, l = tableBorderSides.left;
+                  const w = Math.max(t?.width || 0, r?.width || 0, bs?.width || 0, l?.width || 0);
+                  if (w > 0) {
+                    const src = (t?.width || 0) >= w ? t : (r?.width || 0) >= w ? r : (bs?.width || 0) >= w ? bs : l;
+                    return { width: w, color: src?.color || "" };
+                  }
+                }
+                const cub = cellUniformBorder(cs);
+                if (cub.width > 0 && !isWhiteish(cub.color)) return { width: cub.width, color: cub.color };
+                return { width: 0, color: "" };
+              };
+              for (const corner of cornerSpecs) {
+                const cb = corner.cell.bounds;
+                if (!cb) continue;
+                const cs = corner.cell.style || {};
+                const cornerR = _synthMask!.cornerRadii[corner.kind];
+                const cellCR: CornerRadii = {
+                  tl: corner.kind === "tl" ? cornerR : 0,
+                  tr: corner.kind === "tr" ? cornerR : 0,
+                  br: corner.kind === "br" ? cornerR : 0,
+                  bl: corner.kind === "bl" ? cornerR : 0,
+                };
+                const ring = pickRingBorder(cs);
+                const bw = ring.width;
+                const fillHex = cs.bgColor ? hexToRgb(cs.bgColor) : "ffffff";
+                const cpOuter = cornerPresetFromRadii(cellCR);
+                // Native cell rect (inches) — derived from the table's own
+                // xfrm + colW/rowH so the shape lines up exactly with where
+                // the cell actually renders in <a:tbl>.
+                const cellX = px2in(b.x) + colXPrefix[corner.cellIdx];
+                const cellY = px2in(b.y) + rowYPrefix[corner.rowIdx];
+                const cellW = colW[corner.cellIdx];
+                const cellH = rowH[corner.rowIdx];
+                // Border width in inches for inset math; ring.width is in px.
+                const bwIn = px2in(bw);
+                if (bw > 0 && cellW > bwIn && cellH > bwIn) {
+                  // Sandwich: outer = border-colour rounded rect ONLY on
+                  // the two OUTER sides of this corner, inner = cell-fill
+                  // rounded rect filling the rest. Previously the outer
+                  // rect was full cell bounds and the inner rect was
+                  // inset only on outer sides — that left the bottom
+                  // (border-colour) rect exposed on the cell's INNER
+                  // edges, so a 1-pixel border line bled through where
+                  // the cell met its neighbour (basic_slide_17 corner
+                  // cells showed extra borders on right + bottom for
+                  // TL etc. — user's wave-19 verdict).
+                  //
+                  // Fix: both rects inset by border-width on opposite
+                  // pairs of sides. The outer rect inset on the INNER
+                  // sides (so it only reaches the cell's outer edges);
+                  // the inner rect inset on the OUTER sides (so the
+                  // border-colour outer rect shows through there). The
+                  // two rects overlap on the corner-cell interior; the
+                  // inner rect z-order on top covers everything except
+                  // the OUTER-side strips where the outer rect's
+                  // border colour is visible.
+                  const borderHex = hexToRgb(ring.color || "#000000");
+                  const outerInsetLeft   = (corner.kind === "tl" || corner.kind === "bl") ? 0    : bwIn;
+                  const outerInsetRight  = (corner.kind === "tr" || corner.kind === "br") ? 0    : bwIn;
+                  const outerInsetTop    = (corner.kind === "tl" || corner.kind === "tr") ? 0    : bwIn;
+                  const outerInsetBottom = (corner.kind === "bl" || corner.kind === "br") ? 0    : bwIn;
+                  slide.addShape(cpOuter.preset as Parameters<Slide["addShape"]>[0], {
+                    x: cellX + outerInsetLeft, y: cellY + outerInsetTop,
+                    w: cellW - outerInsetLeft - outerInsetRight,
+                    h: cellH - outerInsetTop - outerInsetBottom,
+                    fill: { color: borderHex },
+                    line: { type: "none" },
+                    flipH: cpOuter.flipH, flipV: cpOuter.flipV,
+                    rectRadius: px2in(cornerR),
+                    objectName: memberName(_tableGid, memberIdx++),
+                  });
+                  const innerCR: CornerRadii = {
+                    tl: Math.max(0, cellCR.tl - bw),
+                    tr: Math.max(0, cellCR.tr - bw),
+                    br: Math.max(0, cellCR.br - bw),
+                    bl: Math.max(0, cellCR.bl - bw),
+                  };
+                  const cpInner = cornerPresetFromRadii(innerCR);
+                  const innerInsetLeft   = (corner.kind === "tl" || corner.kind === "bl") ? bwIn : 0;
+                  const innerInsetRight  = (corner.kind === "tr" || corner.kind === "br") ? bwIn : 0;
+                  const innerInsetTop    = (corner.kind === "tl" || corner.kind === "tr") ? bwIn : 0;
+                  const innerInsetBottom = (corner.kind === "bl" || corner.kind === "br") ? bwIn : 0;
+                  slide.addShape(cpInner.preset as Parameters<Slide["addShape"]>[0], {
+                    x: cellX + innerInsetLeft, y: cellY + innerInsetTop,
+                    w: cellW - innerInsetLeft - innerInsetRight,
+                    h: cellH - innerInsetTop - innerInsetBottom,
+                    fill: { color: fillHex },
+                    line: { type: "none" },
+                    flipH: cpInner.flipH, flipV: cpInner.flipV,
+                    rectRadius: Math.max(0, px2in(cornerR - bw)),
+                    objectName: memberName(_tableGid, memberIdx++),
+                  });
+                } else {
+                  // No border on this corner cell: paint a single rounded
+                  // rect in the cell's own fill. Painting the default
+                  // borderHex here would flood the corner cell with gray
+                  // and bleed across the row (slide_17 "Storage row" bug).
+                  // Reference cb to avoid unused-binding lint.
+                  void cb;
+                  slide.addShape(cpOuter.preset as Parameters<Slide["addShape"]>[0], {
+                    x: cellX, y: cellY, w: cellW, h: cellH,
+                    fill: { color: fillHex },
+                    line: { type: "none" },
+                    flipH: cpOuter.flipH, flipV: cpOuter.flipV,
+                    rectRadius: px2in(cornerR),
+                    objectName: memberName(_tableGid, memberIdx++),
+                  });
+                }
+              }
+            }
+            // (rowH computed earlier so corner shapes can prefix-sum it.)
+            // Pin each row's height to its CSS height so Google Slides
+            // doesn't re-flow rows under the per-cell border tuples or
+            // shape-twice corner underlays — without an explicit `rowH`,
+            // pptxgenjs writes `<a:tr h="0">` and Slides auto-sizes,
+            // making the corner underlays float below the rendered table
+            // and producing a phantom blank row (slide_17, slide_05).
+            // Pin the graphicFrame's `<a:ext cy>` to sum(rowH). Without
+            // `h`, pptxgenjs falls back to a hard-coded 1 inch
+            // (pptxgen.es.js:5187 `cy || EMU`), and Google Slides
+            // compresses the rows to fit — leaving the shape-twice
+            // bottom-corner underlays floating below the rendered table
+            // (the "phantom row" bug, slide_17 / slide_05).
+            const tableH = rowH.reduce((a, b) => a + b, 0);
+            const tableOpts: Parameters<Slide["addTable"]>[1] = {
+              x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: tableH, colW, rowH,
               autoPage: false,
               fontFace: "Arial",
-            });
+            };
+            if (_tableGid) {
+              // pptxgenjs TableProps accepts objectName; the JSZip post-pass
+              // matches this against the underlay patch's objectName and
+              // wraps the pair in a <p:grpSp>.
+              (tableOpts as { objectName?: string }).objectName = hostName(_tableGid);
+            }
+            slide.addTable(tableRows, tableOpts);
             break;
           }
 
@@ -2080,6 +2630,183 @@ export async function injectStrokeAlignmentIntoZip(zip: JSZip): Promise<number> 
   return patched;
 }
 
+/**
+ * Rewrite empty `<a:ln></a:ln>` elements on shapes to `<a:ln><a:noFill/></a:ln>`.
+ * pptxgenjs `line: { type: "none" }` on `addShape()` emits a bare `<a:ln>`
+ * with no width, no fill, and no children. PowerPoint reads this as
+ * "inherit from theme", but Google Slides imports it as a default ~1pt
+ * stroke — which paints a hairline around shapes that explicitly asked for
+ * NO stroke. On the shape-twice corner-cell underlays for slide_17, the
+ * inner-fill rect's empty `<a:ln>` rendered as a thin line on its right
+ * and bottom edges, showing up as "border on the inner sides" of every
+ * corner cell. Forcing `<a:noFill/>` inside `<a:ln>` is the OOXML-correct
+ * way to say "stroke explicitly disabled" and both PowerPoint and Slides
+ * agree on that. Idempotent — only matches the literal empty form.
+ */
+export async function injectShapeNoLineIntoZip(zip: JSZip): Promise<number> {
+  const slideFiles = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+  let patched = 0;
+  for (const name of slideFiles) {
+    const xml = await zip.file(name)!.async("string");
+    let slidePatched = 0;
+    const next = xml.replace(/<a:ln><\/a:ln>/g, () => {
+      slidePatched++;
+      return "<a:ln><a:noFill/></a:ln>";
+    });
+    if (slidePatched > 0) { zip.file(name, next); patched += slidePatched; }
+  }
+  return patched;
+}
+
+/**
+ * Strip the attribute-heavy form of a "no border" table-cell line so Google
+ * Slides actually honours the noFill. pptxgenjs (pptxgen.es.js:5341-5358)
+ * emits every cell side as one of two forms — solid path, or, when our
+ * BorderOpt is `type:"none"`, the literal:
+ *   <a:lnL w="0" cap="flat" cmpd="sng" algn="ctr"><a:noFill/></a:lnL>
+ * PowerPoint reads `w="0"` + `<a:noFill/>` as "explicitly disabled". Google
+ * Slides reads the same XML as "explicit line, fall back to ~1pt default"
+ * and paints a hairline anyway, producing visible column dividers between
+ * cells that the CSS doesn't specify — the slide_17 rounded table flagged
+ * in wave-21 ("the bottom left cell has border also on top and right…").
+ * Same class of bug as the shape-line `<a:ln></a:ln>` rewrite above; same
+ * fix shape, just for the lnL/lnR/lnT/lnB cell variants. Idempotent.
+ */
+export async function injectCellNoBorderIntoZip(zip: JSZip): Promise<number> {
+  const slideFiles = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+  let patched = 0;
+  const re = /<a:(lnL|lnR|lnT|lnB) w="0" cap="flat" cmpd="sng" algn="ctr"><a:noFill\/><\/a:\1>/g;
+  for (const name of slideFiles) {
+    const xml = await zip.file(name)!.async("string");
+    let slidePatched = 0;
+    const next = xml.replace(re, (_m: string, side: string) => {
+      slidePatched++;
+      return `<a:${side}><a:noFill/></a:${side}>`;
+    });
+    if (slidePatched > 0) { zip.file(name, next); patched += slidePatched; }
+  }
+  return patched;
+}
+
+/**
+ * Wrap every cluster of shapes that share a `<gid>__` prefix in their
+ * pptxgenjs `objectName` into a single native `<p:grpSp>`. The previous
+ * pair-only design (gid__patch + gid__host) is a special case of the
+ * generalised N-member algorithm below.
+ *
+ * Algorithm per slide XML:
+ *   1. Scan top-level `<p:sp>` and `<p:graphicFrame>` blocks.
+ *   2. Read each block's objectName from `<p:cNvPr name="..."/>`. A name
+ *      matching `h2s-grp-<N>__<anything>` enrols the block in group N.
+ *   3. For each group with ≥ 2 members, compute the union bbox and emit
+ *      a `<p:grpSp>` containing all members in their original spTree
+ *      order. Members are rewritten in place at the EARLIEST member's
+ *      position; the others are removed from their later positions.
+ *      Children keep their absolute coordinates; grpSp's `chOff`/`chExt`
+ *      mirror `off`/`ext` so the descendant coordinate system matches.
+ *
+ * Pure: mutates the JSZip in place, returns the number of groups created.
+ */
+export async function injectClipGroupsIntoZip(zip: JSZip): Promise<number> {
+  const slideFiles = Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+  let groupCount = 0;
+
+  const blockRe = /<p:(sp|graphicFrame)>[\s\S]*?<\/p:\1>/g;
+  // Capture the gid prefix (h2s-grp-<N>) regardless of the role suffix
+  // after `__` (patch, host, m0, m1, …). Anything else is ignored.
+  const nameRe = /<p:cNvPr\b[^>]*\bname="(h2s-grp-\d+)__[^"]+"/;
+  const offRe = /<a:off\s+x="(-?\d+)"\s+y="(-?\d+)"\s*\/>/;
+  const extRe = /<a:ext\s+cx="(\d+)"\s+cy="(\d+)"\s*\/>/;
+
+  for (const name of slideFiles) {
+    const xml = await zip.file(name)!.async("string");
+    interface Block { start: number; end: number; raw: string; off: { x: number; y: number }; ext: { cx: number; cy: number } }
+    // gid → ordered list of member blocks (spTree order).
+    const groups = new Map<string, Block[]>();
+    blockRe.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = blockRe.exec(xml)) !== null) {
+      const raw = match[0];
+      const nm = raw.match(nameRe);
+      if (!nm) continue;
+      const gid = nm[1];
+      const off = raw.match(offRe);
+      const ext = raw.match(extRe);
+      if (!off || !ext) continue;
+      const block: Block = {
+        start: match.index,
+        end: match.index + raw.length,
+        raw,
+        off: { x: parseInt(off[1]), y: parseInt(off[2]) },
+        ext: { cx: parseInt(ext[1]), cy: parseInt(ext[2]) },
+      };
+      const list = groups.get(gid) ?? [];
+      list.push(block);
+      groups.set(gid, list);
+    }
+
+    if (groups.size === 0) continue;
+
+    interface GroupPlan { gid: string; anchor: Block; rest: Block[]; bbox: { x: number; y: number; cx: number; cy: number } }
+    const plans: GroupPlan[] = [];
+    const skipRanges: Array<{ start: number; end: number }> = [];
+    for (const [gid, blocks] of groups) {
+      if (blocks.length < 2) continue;
+      blocks.sort((a, b) => a.start - b.start);
+      const anchor = blocks[0];
+      const rest = blocks.slice(1);
+      const x = Math.min(...blocks.map((b) => b.off.x));
+      const y = Math.min(...blocks.map((b) => b.off.y));
+      const r = Math.max(...blocks.map((b) => b.off.x + b.ext.cx));
+      const btm = Math.max(...blocks.map((b) => b.off.y + b.ext.cy));
+      plans.push({ gid, anchor, rest, bbox: { x, y, cx: r - x, cy: btm - y } });
+      for (const b of rest) skipRanges.push({ start: b.start, end: b.end });
+    }
+
+    if (plans.length === 0) continue;
+
+    // Stitch the final XML: at each anchor's position we emit a `<p:grpSp>`
+    // containing the anchor + the rest of its group's members raw. Later
+    // positions of the non-anchor members are dropped via skipRanges.
+    plans.sort((p1, p2) => p1.anchor.start - p2.anchor.start);
+    skipRanges.sort((s1, s2) => s1.start - s2.start);
+
+    let out = "";
+    let cursor = 0;
+    let planIdx = 0;
+    let skipIdx = 0;
+    while (cursor < xml.length) {
+      const nextPlan = planIdx < plans.length ? plans[planIdx].anchor.start : Infinity;
+      const nextSkip = skipIdx < skipRanges.length ? skipRanges[skipIdx].start : Infinity;
+      const next = Math.min(nextPlan, nextSkip);
+      if (next === Infinity) {
+        out += xml.slice(cursor);
+        break;
+      }
+      out += xml.slice(cursor, next);
+      if (nextPlan <= nextSkip) {
+        const p = plans[planIdx++];
+        const groupName = `${p.gid}__grp`;
+        const childrenRaw = [p.anchor.raw, ...p.rest.map((b) => b.raw)].join("");
+        out += `<p:grpSp><p:nvGrpSpPr><p:cNvPr id="0" name="${groupName}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>` +
+               `<p:grpSpPr><a:xfrm><a:off x="${p.bbox.x}" y="${p.bbox.y}"/><a:ext cx="${p.bbox.cx}" cy="${p.bbox.cy}"/>` +
+               `<a:chOff x="${p.bbox.x}" y="${p.bbox.y}"/><a:chExt cx="${p.bbox.cx}" cy="${p.bbox.cy}"/></a:xfrm></p:grpSpPr>` +
+               childrenRaw +
+               `</p:grpSp>`;
+        cursor = p.anchor.end;
+        groupCount++;
+      } else {
+        const s = skipRanges[skipIdx++];
+        cursor = s.end;
+      }
+    }
+
+    zip.file(name, out);
+  }
+
+  return groupCount;
+}
+
 // --- Re-exports of internal helpers callers may want to reuse ---
 export { buildGradFillXml };
 
@@ -2097,8 +2824,14 @@ export async function buildPptxInMemory(
 
   const gradPatched = await injectGradientsIntoZip(zip, pres.__gradients || []);
   const strokePatched = await injectStrokeAlignmentIntoZip(zip);
+  const noLinePatched = await injectShapeNoLineIntoZip(zip);
+  const cellNoBorderPatched = await injectCellNoBorderIntoZip(zip);
+  const groupsCreated = await injectClipGroupsIntoZip(zip);
   if (gradPatched > 0) console.log(`  Gradient injection: ${gradPatched} shape(s) patched`);
   if (strokePatched > 0) console.log(`  Stroke alignment: ${strokePatched} <a:ln> rewrite(s) to algn="in"`);
+  if (noLinePatched > 0) console.log(`  Shape no-line: ${noLinePatched} empty <a:ln> rewrite(s) to <a:noFill/>`);
+  if (cellNoBorderPatched > 0) console.log(`  Cell no-border: ${cellNoBorderPatched} <a:ln[LRTB] w=0> rewrite(s) to <a:noFill/>`);
+  if (groupsCreated > 0) console.log(`  Clip groups: ${groupsCreated} <p:grpSp>(s) wrapping patch+host pairs`);
 
   return await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 }

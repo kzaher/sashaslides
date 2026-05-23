@@ -11,9 +11,116 @@
  */
 import { createServer, Server } from "http";
 import {
-  readFileSync, writeFileSync, existsSync, statSync, mkdirSync,
+  readFileSync, writeFileSync, existsSync, statSync, mkdirSync, readdirSync, unlinkSync,
 } from "fs";
 import { join, dirname } from "path";
+import { PNG } from "pngjs";
+
+/**
+ * Compute the bounding box of opaque pixels in a PNG. Returns null if the
+ * annotation is fully transparent (no strokes drawn). Used to find what
+ * the reviewer marked so we can generate a focused zoom-crop.
+ *
+ * `padding` (in input pixels) is added on all sides; the bbox is clamped
+ * to the image bounds. `alphaThreshold` (0-255) ignores fully-transparent
+ * pixels but keeps anti-aliased edges.
+ */
+function annotationBbox(
+  annotationPngBytes: Buffer,
+  padding = 20,
+  alphaThreshold = 8,
+): { x: number; y: number; w: number; h: number; canvasW: number; canvasH: number } | null {
+  const png = PNG.sync.read(annotationPngBytes);
+  const W = png.width, H = png.height;
+  let minX = W, minY = H, maxX = -1, maxY = -1;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const idx = (y * W + x) * 4 + 3; // alpha channel
+      if (png.data[idx] > alphaThreshold) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0 || maxY < 0) return null;
+  return {
+    x: Math.max(0, minX - padding),
+    y: Math.max(0, minY - padding),
+    w: Math.min(W, maxX + padding) - Math.max(0, minX - padding),
+    h: Math.min(H, maxY + padding) - Math.max(0, minY - padding),
+    canvasW: W,
+    canvasH: H,
+  };
+}
+
+/**
+ * Crop `srcPngBytes` to the bbox (expressed in annotation-canvas
+ * coordinates) and scale UP using nearest-neighbour so the output's
+ * longest edge approaches `targetLongestEdge`. The zoom is computed
+ * dynamically from the bbox size: small marks (e.g. circling a 1-pixel
+ * border line) get a high zoom, large marks (e.g. circling a whole
+ * row) get a low zoom — both end up roughly the same size on screen.
+ * Zoom is clamped to [`minZoom`, `maxZoom`] (1× to 10× by default)
+ * and forced to an integer so nearest-neighbour stays crisp.
+ *
+ * Returns the encoded PNG bytes.
+ */
+function zoomCropPng(
+  srcPngBytes: Buffer,
+  bbox: { x: number; y: number; w: number; h: number; canvasW: number; canvasH: number },
+  targetLongestEdge = 1200,
+  minZoom = 1,
+  maxZoom = 10,
+): Buffer {
+  const src = PNG.sync.read(srcPngBytes);
+  // The annotation canvas may be at a different resolution than the
+  // source thumbnail (e.g. annotation = 1280×720, thumb = 1600×900).
+  // Scale the bbox into source coordinates.
+  const sx = src.width / bbox.canvasW;
+  const sy = src.height / bbox.canvasH;
+  const cropX = Math.max(0, Math.round(bbox.x * sx));
+  const cropY = Math.max(0, Math.round(bbox.y * sy));
+  const cropW = Math.max(1, Math.min(src.width  - cropX, Math.round(bbox.w * sx)));
+  const cropH = Math.max(1, Math.min(src.height - cropY, Math.round(bbox.h * sy)));
+  const longest = Math.max(cropW, cropH);
+  const zoomRaw = Math.floor(targetLongestEdge / longest);
+  const zoom = Math.max(minZoom, Math.min(maxZoom, zoomRaw || 1));
+  const outW = cropW * zoom, outH = cropH * zoom;
+  const out = new PNG({ width: outW, height: outH });
+  for (let oy = 0; oy < outH; oy++) {
+    const srcY = cropY + Math.floor(oy / zoom);
+    for (let ox = 0; ox < outW; ox++) {
+      const srcX = cropX + Math.floor(ox / zoom);
+      const si = (srcY * src.width + srcX) * 4;
+      const oi = (oy   * outW       + ox  ) * 4;
+      out.data[oi    ] = src.data[si    ];
+      out.data[oi + 1] = src.data[si + 1];
+      out.data[oi + 2] = src.data[si + 2];
+      out.data[oi + 3] = src.data[si + 3];
+    }
+  }
+  return PNG.sync.write(out);
+}
+
+/**
+ * Read an existing zoom-crops directory and list the crop PNGs for a
+ * given slide. Multiple crops per slide are supported (named
+ * `<slide_id>.png`, `<slide_id>-2.png`, …). Used by buildPayload to
+ * surface what the reviewer flagged.
+ */
+function listZoomCrops(zoomDir: string, slideId: string): string[] {
+  if (!existsSync(zoomDir)) return [];
+  const entries = readdirSync(zoomDir);
+  const out: string[] = [];
+  for (const f of entries) {
+    if (f === `${slideId}.png` || f.startsWith(`${slideId}-`)) {
+      out.push(join(zoomDir, f));
+    }
+  }
+  return out.sort();
+}
 
 export interface Args {
   port: number;
@@ -101,6 +208,13 @@ export async function startFilteredRatingServer(args: Args): Promise<FilteredRat
     // reviewer can rate the fix without context-hunting in ratings.json.
     originalUserComment: string | null;
     originalAnnotationPng: string | null;
+    // 3× zoom-ins of regions the reviewer marked (one per side of the
+    // annotation: rendered + original). Generated server-side after each
+    // Bad rating with strokes; surfaced as a strip under the SxS so the
+    // reviewer can sanity-check what they flagged, AND so the worker's
+    // visual-verification prompt downstream gets the same focused pixels
+    // (no more "vision missed a 1-px line" verdicts).
+    zoomCrops: string[];
   }
 
   interface BugContext {
@@ -174,6 +288,7 @@ export async function startFilteredRatingServer(args: Args): Promise<FilteredRat
       const regionsKey = `slide_${String(i + 1).padStart(2, "0")}`;
       const regionsForSlide = regions[regionsKey] ?? regions[id];
       const bug = bugCtx?.slides[id];
+      const zoomDir = join(dirname(args.ratings_file!), "zoom-crops");
       return {
         id,
         original: existsSync(original) ? original : null,
@@ -189,6 +304,7 @@ export async function startFilteredRatingServer(args: Args): Promise<FilteredRat
         originalUserComment: bug?.user_comment || null,
         originalAnnotationPng: bug?.annotation_png && existsSync(bug.annotation_png)
           ? bug.annotation_png : null,
+        zoomCrops: listZoomCrops(zoomDir, id),
       };
     });
     return {
@@ -239,33 +355,67 @@ function Reveal(props) {
   );
 }
 
-// Drawing canvas: pointer capture, stroke history with Ctrl+Z undo, and
-// annotation bootstrap from a saved PNG. Imperative handles returned via
-// ref so the parent card can call toDataURL() when saving a Bad rating.
-function useDrawingCanvas(canvasRef, imgRef, savedAnnotationUrl, drawMode, colorRef, sizeRef) {
-  const historyRef = useRef([]);
-  const strokesRef = useRef(false);
+// Drawing canvas: tracks each annotation as a typed shape object so
+// the server can crop per-annotation (pencil shapes get padding from
+// the settings input; rectangle shapes get NO padding — the rect IS
+// the bbox). The visual canvas is repainted from the shape list, so
+// undo/clear can be trivial array operations.
+//
+// Shape:
+//   { kind: "pencil", points: [{x,y}...], color, width }
+//   { kind: "rect",   x, y, w, h, color, width }
+function useDrawingCanvas(canvasRef, imgRef, savedAnnotationUrl, drawMode, toolRef, colorRef, sizeRef) {
+  const shapesRef = useRef([]);              // committed shapes
+  const liveRef = useRef(null);              // shape currently being drawn
   const drawModeRef = useRef(drawMode);
   drawModeRef.current = drawMode;
+  const dpiScaleRef = useRef(1);
+
+  const repaint = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    const paintShape = (sh) => {
+      ctx.strokeStyle = sh.color || "#e94560";
+      ctx.lineWidth = sh.width || 4;
+      if (sh.kind === "pencil") {
+        const pts = sh.points;
+        if (pts.length < 1) return;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.stroke();
+      } else if (sh.kind === "rect") {
+        ctx.strokeRect(sh.x, sh.y, sh.w, sh.h);
+      }
+    };
+    for (const sh of shapesRef.current) paintShape(sh);
+    if (liveRef.current) paintShape(liveRef.current);
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const img = imgRef.current;
     if (!canvas || !img) return;
     canvas.style.pointerEvents = drawModeRef.current ? "auto" : "none";
-    strokesRef.current = false;
-    historyRef.current = [];
+    shapesRef.current = [];
+    liveRef.current = null;
     const init = () => {
       canvas.width = img.naturalWidth || img.clientWidth;
       canvas.height = img.naturalHeight || img.clientHeight;
+      dpiScaleRef.current = canvas.width / canvas.getBoundingClientRect().width;
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.lineCap = "round"; ctx.lineJoin = "round";
       if (savedAnnotationUrl) {
+        // Saved annotation rehydrates as a single immutable "background"
+        // image — the shape list stays empty so new shapes don't replay
+        // the saved pixels. We treat the saved annotation as decorative.
         const saved = new Image();
         saved.onload = () => {
           ctx.drawImage(saved, 0, 0, canvas.width, canvas.height);
-          strokesRef.current = true;
         };
         saved.src = savedAnnotationUrl;
       }
@@ -273,7 +423,6 @@ function useDrawingCanvas(canvasRef, imgRef, savedAnnotationUrl, drawMode, color
     if (img.complete && img.naturalWidth) init();
     else img.addEventListener("load", init, { once: true });
 
-    let drawing = false;
     const getPos = (e) => {
       const r = canvas.getBoundingClientRect();
       return {
@@ -283,25 +432,48 @@ function useDrawingCanvas(canvasRef, imgRef, savedAnnotationUrl, drawMode, color
     };
     const onDown = (e) => {
       if (!drawModeRef.current) return;
-      drawing = true;
       canvas.setPointerCapture(e.pointerId);
-      const ctx = canvas.getContext("2d");
-      historyRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-      if (historyRef.current.length > 50) historyRef.current.shift();
-      ctx.strokeStyle = (colorRef.current && colorRef.current.value) || "#e94560";
+      const tool = (toolRef.current && toolRef.current.value) || "pencil";
+      const color = (colorRef.current && colorRef.current.value) || "#e94560";
       const baseW = parseFloat((sizeRef.current && sizeRef.current.value) || "6");
-      ctx.lineWidth = baseW * (canvas.width / canvas.getBoundingClientRect().width);
+      const width = baseW * dpiScaleRef.current;
       const p = getPos(e);
-      ctx.beginPath(); ctx.moveTo(p.x, p.y);
+      if (tool === "rect") {
+        liveRef.current = { kind: "rect", x: p.x, y: p.y, w: 0, h: 0, color, width, _startX: p.x, _startY: p.y };
+      } else {
+        liveRef.current = { kind: "pencil", points: [p], color, width };
+      }
+      repaint();
     };
     const onMove = (e) => {
-      if (!drawing) return;
-      const ctx = canvas.getContext("2d");
+      if (!liveRef.current) return;
       const p = getPos(e);
-      ctx.lineTo(p.x, p.y); ctx.stroke();
-      strokesRef.current = true;
+      const sh = liveRef.current;
+      if (sh.kind === "rect") {
+        sh.x = Math.min(sh._startX, p.x);
+        sh.y = Math.min(sh._startY, p.y);
+        sh.w = Math.abs(p.x - sh._startX);
+        sh.h = Math.abs(p.y - sh._startY);
+      } else {
+        sh.points.push(p);
+      }
+      repaint();
     };
-    const onUp = () => { drawing = false; };
+    const onUp = () => {
+      if (!liveRef.current) return;
+      const sh = liveRef.current;
+      liveRef.current = null;
+      // Drop empty shapes (a click with no drag on rect, or a tap on pencil)
+      const ok =
+        sh.kind === "rect" ? (sh.w > 2 && sh.h > 2) :
+        sh.kind === "pencil" ? sh.points.length >= 2 :
+        false;
+      if (ok) {
+        if (sh.kind === "rect") { delete sh._startX; delete sh._startY; }
+        shapesRef.current.push(sh);
+      }
+      repaint();
+    };
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
@@ -319,28 +491,49 @@ function useDrawingCanvas(canvasRef, imgRef, savedAnnotationUrl, drawMode, color
     if (canvas) canvas.style.pointerEvents = drawMode ? "auto" : "none";
   }, [drawMode]);
 
+  // Serialise each shape into a bbox-in-canvas-coords descriptor the
+  // server can use directly for cropping. Rectangle shapes report their
+  // exact rect; pencil shapes report the bbox of their stroke points.
+  const serializeShapes = () => {
+    const out = [];
+    for (const sh of shapesRef.current) {
+      if (sh.kind === "rect") {
+        out.push({ kind: "rect", x: sh.x, y: sh.y, w: sh.w, h: sh.h });
+      } else if (sh.kind === "pencil") {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const p of sh.points) {
+          if (p.x < minX) minX = p.x;
+          if (p.x > maxX) maxX = p.x;
+          if (p.y < minY) minY = p.y;
+          if (p.y > maxY) maxY = p.y;
+        }
+        if (minX !== Infinity) {
+          out.push({ kind: "pencil", x: minX, y: minY, w: maxX - minX, h: maxY - minY });
+        }
+      }
+    }
+    return out;
+  };
+
   return {
-    hasStrokes: () => strokesRef.current,
+    hasStrokes: () => shapesRef.current.length > 0,
     toDataURL: () => {
       const c = canvasRef.current;
       return c ? c.toDataURL("image/png") : null;
     },
-    clear: () => {
+    shapes: () => serializeShapes(),
+    canvasSize: () => {
       const c = canvasRef.current;
-      if (!c) return;
-      const ctx = c.getContext("2d");
-      ctx.clearRect(0, 0, c.width, c.height);
-      strokesRef.current = false;
-      historyRef.current = [];
+      return c ? { w: c.width, h: c.height } : { w: 0, h: 0 };
+    },
+    clear: () => {
+      shapesRef.current = [];
+      liveRef.current = null;
+      repaint();
     },
     undo: () => {
-      const c = canvasRef.current;
-      if (!c || historyRef.current.length === 0) return;
-      const ctx = c.getContext("2d");
-      const prev = historyRef.current.pop();
-      ctx.clearRect(0, 0, c.width, c.height);
-      if (prev) ctx.putImageData(prev, 0, 0);
-      strokesRef.current = historyRef.current.length > 0 || !!prev;
+      shapesRef.current.pop();
+      repaint();
     },
   };
 }
@@ -411,6 +604,8 @@ function SlideCard(props) {
   const origOverlayRef = useRef(null);
   const colorRef = useRef(null);
   const sizeRef = useRef(null);
+  const toolRef = useRef(null);
+  const padRef = useRef(null);
 
   // Drawing canvas seed: prefer this task's saved annotation (the user
   // came back after rating Bad and we restore their strokes). Fall back
@@ -422,7 +617,7 @@ function SlideCard(props) {
     : (s.originalAnnotationPng
         ? "/img?path=" + encodeURIComponent(s.originalAnnotationPng) + "&t=" + Date.now()
         : null);
-  const handle = useDrawingCanvas(drawRef, slidesRef, savedAnnot, drawMode, colorRef, sizeRef);
+  const handle = useDrawingCanvas(drawRef, slidesRef, savedAnnot, drawMode, toolRef, colorRef, sizeRef);
   useClientSideDiff(origRef, slidesRef, diffRef, showDiff, s.id + ":" + leftSource);
 
   // Render-regions highlight (Slides pane): paints rgb(128,128,128) on each
@@ -447,56 +642,57 @@ function SlideCard(props) {
     else img.addEventListener("load", paint, { once: true });
   }, [showRendered, s.renderedRegions, s.rendered]);
 
-  // Magnifier loupe. Tracks the cursor on both panels; when hovering, a
-  // 200px floating lens shows the pixels under the cursor scaled N×, pulled
-  // from the *natural-resolution* source so zooming actually reveals
-  // sub-pixel detail instead of the displayed-size fuzz. Uses backgroundImage
-  // so we don't need to re-blit on every mousemove.
+  // Magnifier loupe. Listens at the DOCUMENT level so the draw-canvas's
+  // pointer-events:auto (when drawMode is on) can't block it — previous
+  // version bound mousemove on the panel and stopped working the moment
+  // you toggled Draw. Detects which image to magnify by hit-testing the
+  // cursor against the natural-resolution bounding rects of the per-card
+  // <img> refs. Uses backgroundImage so we don't re-blit per mousemove.
   useEffect(() => {
     if (!loupe) return;
     const size = 240;
-    const bind = (panelEl, imgEl, srcUrl) => {
-      if (!panelEl || !imgEl) return () => {};
-      const onMove = (e) => {
-        const lens = document.getElementById("loupe");
-        if (!lens) return;
-        const r = imgEl.getBoundingClientRect();
-        const relX = e.clientX - r.left;
-        const relY = e.clientY - r.top;
-        if (relX < 0 || relY < 0 || relX > r.width || relY > r.height) {
-          lens.style.display = "none";
-          return;
-        }
-        const nx = (relX / r.width) * imgEl.naturalWidth;
-        const ny = (relY / r.height) * imgEl.naturalHeight;
+    const targets = [
+      { img: origRef.current,   srcPath: s.original },
+      { img: slidesRef.current, srcPath: s.rendered },
+    ].filter((t) => t.img && t.srcPath);
+    if (targets.length === 0) return () => {};
+    const lens = document.getElementById("loupe");
+    if (!lens) return () => {};
+    const onMove = (e) => {
+      for (const { img, srcPath } of targets) {
+        const r = img.getBoundingClientRect();
+        if (e.clientX < r.left || e.clientX > r.right) continue;
+        if (e.clientY < r.top  || e.clientY > r.bottom) continue;
+        const nx = ((e.clientX - r.left) / r.width)  * img.naturalWidth;
+        const ny = ((e.clientY - r.top)  / r.height) * img.naturalHeight;
+        const srcUrl = "/img?path=" + encodeURIComponent(srcPath);
         lens.style.display = "block";
         lens.style.left = (e.clientX - size / 2) + "px";
-        lens.style.top = (e.clientY - size / 2) + "px";
-        lens.style.width = size + "px";
+        lens.style.top  = (e.clientY - size / 2) + "px";
+        lens.style.width  = size + "px";
         lens.style.height = size + "px";
         lens.style.backgroundImage = "url(" + srcUrl + ")";
-        lens.style.backgroundSize = (imgEl.naturalWidth * loupeZoom) + "px " + (imgEl.naturalHeight * loupeZoom) + "px";
+        lens.style.backgroundSize = (img.naturalWidth * loupeZoom) + "px " + (img.naturalHeight * loupeZoom) + "px";
         lens.style.backgroundPosition = \`-\${nx * loupeZoom - size / 2}px -\${ny * loupeZoom - size / 2}px\`;
-      };
-      const onLeave = () => { const l = document.getElementById("loupe"); if (l) l.style.display = "none"; };
-      panelEl.addEventListener("mousemove", onMove);
-      panelEl.addEventListener("mouseleave", onLeave);
-      return () => {
-        panelEl.removeEventListener("mousemove", onMove);
-        panelEl.removeEventListener("mouseleave", onLeave);
-      };
+        return;
+      }
+      lens.style.display = "none";
     };
-    const cleaners = [
-      bind(origOverlayRef.current, origRef.current, s.original ? "/img?path=" + encodeURIComponent(s.original) : ""),
-      bind(renderedOverlayRef.current && renderedOverlayRef.current.parentElement, slidesRef.current, s.rendered ? "/img?path=" + encodeURIComponent(s.rendered) : ""),
-    ];
-    return () => { cleaners.forEach(c => c()); };
+    document.addEventListener("mousemove", onMove, true); // capture so canvas can't swallow
+    return () => {
+      document.removeEventListener("mousemove", onMove, true);
+      if (lens) lens.style.display = "none";
+    };
   }, [loupe, loupeZoom, s.id, s.original, s.rendered]);
 
   const rate = useCallback(async (status) => {
     setSaving(true);
     try {
-      const annotation = handle.hasStrokes() ? handle.toDataURL() : undefined;
+      const hasShapes = handle.hasStrokes();
+      const annotation = hasShapes ? handle.toDataURL() : undefined;
+      const shapes = hasShapes ? handle.shapes() : undefined;
+      const canvasSize = hasShapes ? handle.canvasSize() : undefined;
+      const padding = padRef.current ? parseInt(padRef.current.value, 10) || 0 : 20;
       const resp = await fetch("/api/rate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -504,6 +700,9 @@ function SlideCard(props) {
           id: s.id, status,
           comment: (comment || "").trim() || undefined,
           annotation,
+          shapes,
+          canvasSize,
+          pencilPadding: padding,
         }),
       });
       if (!resp.ok) throw new Error(await resp.text());
@@ -609,9 +808,21 @@ function SlideCard(props) {
         class: "mini-btn" + (drawMode ? " active" : ""),
         onClick: () => setDrawMode(!drawMode),
       }, "Draw"),
+      h("label", { title: "Tool: ✏ pencil strokes (zoom-crop = stroke bbox + pencil padding) vs ▭ rectangle (zoom-crop = rect itself, no padding)" },
+        " tool ",
+        h("select", { ref: toolRef, defaultValue: "pencil" },
+          h("option", { value: "pencil" }, "✏ pencil"),
+          h("option", { value: "rect" }, "▭ rectangle"),
+        ),
+      ),
       h("input", { type: "color", ref: colorRef, defaultValue: "#e94560" }),
       h("label", null,
         h("input", { type: "range", ref: sizeRef, min: "2", max: "20", defaultValue: "6" }),
+        " px",
+      ),
+      h("label", { title: "Padding (in input pixels) added around each PENCIL annotation's bbox when generating zoom-crops. Rectangle annotations are NOT padded — the rect IS the crop." },
+        " pencil padding ",
+        h("input", { type: "number", ref: padRef, min: "0", max: "200", defaultValue: "20", style: "width:60px" }),
         " px",
       ),
       h("button", { class: "mini-btn", onClick: () => handle.undo() }, "Undo"),
@@ -636,6 +847,22 @@ function SlideCard(props) {
         onClick: () => rate("bad"),
       }, "Bad ✗"),
     ),
+    s.zoomCrops && s.zoomCrops.length > 0 &&
+      h("div", { class: "zoom-crops" },
+        h("div", { class: "zoom-crops-label" },
+          "🔍 Zoom-ins of marked region (" + s.zoomCrops.length + " crop(s) — pencil padded, rectangle untouched):",
+        ),
+        h("div", { class: "zoom-crops-row" },
+          s.zoomCrops.map((p) => {
+            const m = p.match(/-(rendered|original)\.png$/);
+            const role = m ? m[1] : "crop";
+            return h("figure", { class: "zoom-crop" },
+              h("figcaption", null, role + " · " + (p.split("/").pop() || "")),
+              h("img", { src: "/img?path=" + encodeURIComponent(p) + "&t=" + Date.now() }),
+            );
+          }),
+        ),
+      ),
     h("div", { class: "reveals" },
       h(Reveal, { kind: "analysis", slideId: s.id, label: "analysis", accent: "orange" }),
       h(Reveal, { kind: "diff", slideId: s.id, label: "diff analysis", accent: "yellow" }),
@@ -720,6 +947,12 @@ render(h(App), document.body);
   .panel canvas.diff-overlay { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); border-radius: 4px; pointer-events: none; }
   .panel canvas.rendered-overlay { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); border-radius: 4px; pointer-events: none; mix-blend-mode: plus-lighter; }
   .rendered-banner { margin-top: 8px; padding: 8px 12px; background: #2a1f0a; border-left: 4px solid #f1c40f; color: #ffe9a8; border-radius: 0 6px 6px 0; font-size: 13px; }
+  .zoom-crops { margin-top: 10px; padding: 10px 12px; background: #0e1f2e; border-left: 4px solid #3498db; border-radius: 0 6px 6px 0; }
+  .zoom-crops-label { font-size: 13px; color: #cfe4f7; margin-bottom: 8px; }
+  .zoom-crops-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .zoom-crop { margin: 0; background: #050a0e; padding: 6px; border-radius: 4px; }
+  .zoom-crop figcaption { color: #7dafd5; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .zoom-crop img { display: block; max-width: 100%; max-height: 380px; image-rendering: pixelated; border: 1px solid #1f2933; }
   .empty-panel { width: 100%; height: 200px; border: 2px dashed #555; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #666; font-size: 13px; padding: 0 16px; text-align: center; }
   .draw-toolbar { display: flex; gap: 8px; padding: 10px 0 4px; align-items: center; font-size: 12px; color: #aaa; flex-wrap: wrap; }
   .draw-toolbar label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
@@ -771,7 +1004,7 @@ render(h(App), document.body);
       req.on("data", (d) => (body += d));
       req.on("end", () => {
         try {
-          const { id, status, comment, annotation } = JSON.parse(body);
+          const { id, status, comment, annotation, shapes, canvasSize, pencilPadding } = JSON.parse(body);
           if (!id || (status !== "good" && status !== "bad")) {
             res.writeHead(400); res.end("bad request"); return;
           }
@@ -783,8 +1016,83 @@ render(h(App), document.body);
             mkdirSync(annotDir, { recursive: true });
             const annotPath = join(annotDir, `${id}.png`);
             const b64 = String(annotation).replace(/^data:image\/png;base64,/, "");
-            writeFileSync(annotPath, Buffer.from(b64, "base64"));
+            const annotBytes = Buffer.from(b64, "base64");
+            writeFileSync(annotPath, annotBytes);
             entry.annotation = annotPath;
+
+            // Generate zoom-crops PER ANNOTATION. The client sends a typed
+            // shape list (kind: "pencil"|"rect" + bbox in canvas coords).
+            // Pencil shapes get padded by `pencilPadding` (default 20px);
+            // rectangle shapes get NO padding — the rect IS the crop.
+            // Each annotation produces one crop per side (rendered +
+            // original), saved as `<slide>-<idx>-rendered.png` etc., so
+            // the UI can show them all and the worker prompt downstream
+            // can attach each one independently.
+            const zoomDir = join(dirname(args.ratings_file!), "zoom-crops");
+            try {
+              // First, wipe any pre-existing crops for this slide so a
+              // re-rate with fewer shapes doesn't leave stale ones around.
+              if (existsSync(zoomDir)) {
+                for (const f of readdirSync(zoomDir)) {
+                  if (f === `${id}.png` || f.startsWith(`${id}-`)) {
+                    try { unlinkSync(join(zoomDir, f)); } catch { /* swallow */ }
+                  }
+                }
+              }
+            } catch { /* swallow */ }
+            const padPx = typeof pencilPadding === "number" ? pencilPadding : 20;
+            const canvasW = canvasSize?.w || 0;
+            const canvasH = canvasSize?.h || 0;
+            const shapeList = Array.isArray(shapes) && canvasW > 0 && canvasH > 0
+              ? shapes
+              : null;
+
+            // Fallback path: no explicit shape list (old clients). Crop
+            // the whole annotation bbox with padding=20.
+            const useFallback = !shapeList || shapeList.length === 0;
+            try {
+              mkdirSync(zoomDir, { recursive: true });
+              const renderedPath = join(args.thumbnails, `${id}.png`);
+              const originalPath = join(args.originals, `${id}.png`);
+              const writeCrop = (
+                idx: number, side: "rendered" | "original",
+                srcPath: string, bbox: { x: number; y: number; w: number; h: number; canvasW: number; canvasH: number },
+              ) => {
+                if (!existsSync(srcPath)) return;
+                const out = zoomCropPng(readFileSync(srcPath), bbox);
+                writeFileSync(join(zoomDir, `${id}-${String(idx).padStart(2, "0")}-${side}.png`), out);
+              };
+              if (useFallback) {
+                const bb = annotationBbox(annotBytes, padPx, 8);
+                if (bb) {
+                  writeCrop(1, "rendered", renderedPath, bb);
+                  writeCrop(1, "original", originalPath, bb);
+                  // eslint-disable-next-line no-console
+                  console.log(`  zoom-crops: ${id} 1 fallback bbox → ${zoomDir}/`);
+                }
+              } else {
+                let written = 0;
+                for (let i = 0; i < shapeList.length; i++) {
+                  const sh = shapeList[i];
+                  if (typeof sh?.x !== "number" || typeof sh?.y !== "number") continue;
+                  const pad = sh.kind === "pencil" ? padPx : 0;
+                  const x = Math.max(0, Math.round(sh.x - pad));
+                  const y = Math.max(0, Math.round(sh.y - pad));
+                  const w = Math.min(canvasW - x, Math.round(sh.w + 2 * pad));
+                  const h = Math.min(canvasH - y, Math.round(sh.h + 2 * pad));
+                  if (w <= 1 || h <= 1) continue;
+                  const bb = { x, y, w, h, canvasW, canvasH };
+                  writeCrop(i + 1, "rendered", renderedPath, bb);
+                  writeCrop(i + 1, "original", originalPath, bb);
+                  written++;
+                }
+                // eslint-disable-next-line no-console
+                console.log(`  zoom-crops: ${id} ${written} shapes (padPx=${padPx}) → ${zoomDir}/`);
+              }
+            } catch (e: unknown) {
+              // eslint-disable-next-line no-console
+              console.warn(`  zoom-crops failed for ${id}: ${e instanceof Error ? e.message : String(e)}`);
+            }
           }
           ratings[id] = entry;
           writeRatings(args.ratings_file!, ratings);

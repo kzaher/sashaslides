@@ -141,6 +141,18 @@ interface BorderSides {
   left: { width: number; color: string | null; style: string };
 }
 
+// Active clipping region propagated from an ancestor with
+// `overflow:hidden|clip|auto|scroll` and any non-zero border-radius.
+// `bounds` is the inner content rect that the ancestor visually clips at.
+// `cornerRadii` are the rounded-corner radii in CSS px, capped to half-edge.
+// The emitter compares each emitted element's bounds to this mask: when the
+// intersection differs (epsilon-aware), it adds an underlay patch shape and
+// groups it with the element so re-size in Slides keeps them together.
+interface ClipMask {
+  bounds: Bounds;
+  cornerRadii: CornerRadii;
+}
+
 interface ElementStyle {
   fontFamily: string;
   fontSize: number;
@@ -324,6 +336,15 @@ interface ExtractedElement {
   // visual / image
   tag?: string;
   cornerRadius?: number;
+  // Generic clipping context inherited from an `overflow:hidden|clip` ancestor
+  // with rounded corners. Stamped onto every pushed element by the walker —
+  // the emitter then decides per-element whether the element's bounds need
+  // an underlay-patch + group (see convert-pptx-lib emitClippedPatch).
+  clipMask?: ClipMask | null;
+  // Internal group identifier shared by an underlay patch and the element it
+  // shields. Post-processed into a `<p:grpSp>` wrapper in the slide XML so
+  // that resize/move in Slides keeps the pair together.
+  _groupId?: string;
 }
 
 /** Vendor-prefixed CSS not in TypeScript's CSSStyleDeclaration. Cast a
@@ -342,11 +363,48 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
   const elements: ExtractedElement[] = [];
   const seen = new Set<Element>();
   let _domCounter = 0;
+  // Active clip mask for the element currently being emitted. walk() pushes
+  // a new mask on entry to any `overflow:hidden|clip` + rounded ancestor and
+  // pops on exit. Every elements.push() stamps this mask so downstream emit
+  // can decide whether to draw an underlay patch.
+  let _currentClipMask: ClipMask | null = null;
   const _origPush = elements.push.bind(elements);
   elements.push = (...items: ExtractedElement[]) => {
-    for (const it of items) if (it && it._domIdx === undefined) it._domIdx = _domCounter++;
+    for (const it of items) {
+      if (!it) continue;
+      if (it._domIdx === undefined) it._domIdx = _domCounter++;
+      if (it.clipMask === undefined) it.clipMask = _currentClipMask;
+    }
     return _origPush(...items);
   };
+
+  /** True when (a, b) overlap with epsilon tolerance. */
+  function rectsIntersect(a: Bounds, b: Bounds, eps = 0.5): boolean {
+    return !(a.x + a.w <= b.x + eps || b.x + b.w <= a.x + eps ||
+             a.y + a.h <= b.y + eps || b.y + b.h <= a.y + eps);
+  }
+  /** Geometric intersection of two axis-aligned rects (no clipping happens
+   * for cornerRadii here — that's resolved at emit time). Returns null if
+   * the rects don't overlap. */
+  function intersectBounds(a: Bounds, b: Bounds): Bounds | null {
+    const x = Math.max(a.x, b.x);
+    const y = Math.max(a.y, b.y);
+    const r = Math.min(a.x + a.w, b.x + b.w);
+    const btm = Math.min(a.y + a.h, b.y + b.h);
+    if (r <= x || btm <= y) return null;
+    return { x, y, w: r - x, h: btm - y };
+  }
+  /** Combine parent clip and a freshly-established local clip. The result
+   * inherits the local cornerRadii (those are the corners that will paint),
+   * and the bounds are the rect-intersection so children outside the parent
+   * window aren't reintroduced. */
+  function refineClipMask(parent: ClipMask | null, local: ClipMask): ClipMask {
+    if (!parent) return local;
+    const inter = intersectBounds(parent.bounds, local.bounds);
+    return inter
+      ? { bounds: inter, cornerRadii: local.cornerRadii }
+      : { bounds: { x: 0, y: 0, w: 0, h: 0 }, cornerRadii: local.cornerRadii };
+  }
 
   // Build a map of available font weights per family from document.fonts.
   // CSS font matching uses the closest available weight when the exact one
@@ -722,8 +780,31 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         const cs = getStyle(td);
         const cb = getBounds(td);
         const cCs = getComputedStyle(td);
+        // Suppress the cell's text when its visible content is entirely
+        // pill-style spans (inline-block + background + border-radius) —
+        // otherwise the cell text and the post-table `emitPillSpan`
+        // overlay both render the same string twice (wave-15 slide_05
+        // ".partial Partial"). The pill carries its own text via
+        // `emitPillSpan`, drawn on top.
+        const tdText = (td as HTMLElement).innerText.trim();
+        let cellTextForRender = tdText;
+        if (tdText) {
+          const pillSpans = Array.from(td.querySelectorAll(":scope > span")).filter(sp => {
+            const sCs = getComputedStyle(sp);
+            const sBg = rgb2hex(sCs.backgroundColor);
+            const sBR = parseFloat(sCs.borderTopLeftRadius) || 0;
+            return !!sBg && sBR > 0;
+          });
+          if (pillSpans.length > 0) {
+            const pillsText = pillSpans
+              .map(sp => (sp.textContent || "").replace(/\s+/g, " ").trim())
+              .filter(t => t.length > 0)
+              .join(" ");
+            if (pillsText && pillsText === tdText) cellTextForRender = "";
+          }
+        }
         cells.push({
-          text: (td as HTMLElement).innerText.trim(),
+          text: cellTextForRender,
           runs: getTextRuns(td, cs),
           isHeader: td.tagName === "TH",
           colspan: (td as HTMLTableCellElement).colSpan || 1,
@@ -1776,6 +1857,32 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     const bounds = getBounds(el);
     if (!isVisible(el, bounds)) return;
 
+    // Establish a clip mask for this element's DESCENDANTS when the element
+    // itself clips overflow with rounded corners. The mask the element
+    // *itself* renders under is the OUTER `_currentClipMask` (set by an
+    // ancestor); we restore it in `finally` so siblings see the correct
+    // ambient. The local clip is recorded into _walkLocalClip so we can
+    // re-enter children with it set without recomputing.
+    const _outerClipMask = _currentClipMask;
+    const _localClipCs = getComputedStyle(el);
+    const _localOv = _localClipCs.overflow;
+    const _localClips = _localOv === "hidden" || _localOv === "clip"
+                     || _localOv === "auto" || _localOv === "scroll";
+    const _ltl = parseFloat(_localClipCs.borderTopLeftRadius) || 0;
+    const _ltr = parseFloat(_localClipCs.borderTopRightRadius) || 0;
+    const _lbr = parseFloat(_localClipCs.borderBottomRightRadius) || 0;
+    const _lbl = parseFloat(_localClipCs.borderBottomLeftRadius) || 0;
+    const _localMaxR = Math.max(_ltl, _ltr, _lbr, _lbl);
+    const _hasLocalClip = _localClips && _localMaxR > 0;
+    // Mask propagated to children. Computed eagerly so each branch below can
+    // assign it before recursing (e.g. flex/grid loop, generic child loop).
+    const _childClipMask: ClipMask | null = _hasLocalClip
+      ? refineClipMask(_outerClipMask, {
+          bounds: { ...bounds },
+          cornerRadii: { tl: _ltl, tr: _ltr, br: _lbr, bl: _lbl },
+        })
+      : _outerClipMask;
+
     // TABLE
     if (tag === "TABLE") {
       seen.add(el);
@@ -1837,7 +1944,9 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       (el as HTMLElement).setAttribute("data-h2s-hide-text", "1");
       elements.push({ type: "visual", bounds, tag: "css-effect" });
       const childArrCss = Array.from((el as HTMLElement).children);
-      for (const c of childArrCss) walk(c);
+      _currentClipMask = _childClipMask;
+      try { for (const c of childArrCss) walk(c); }
+      finally { _currentClipMask = _outerClipMask; }
       return;
     }
 
@@ -2067,7 +2176,9 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       };
       const flexIndexed = flexChildren.map((c, i) => ({ c, i, b: flexPaintBucket(c) }));
       flexIndexed.sort((a, b) => a.b - b.b || a.i - b.i);
-      for (const { c } of flexIndexed) walk(c);
+      _currentClipMask = _childClipMask;
+      try { for (const { c } of flexIndexed) walk(c); }
+      finally { _currentClipMask = _outerClipMask; }
       return;
       } // end of !allInlineChromeless branch
     }
@@ -2465,7 +2576,9 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     };
     const indexed = childArr.map((c, i) => ({ c, i, b: paintBucket(c) }));
     indexed.sort((a, b) => a.b - b.b || a.i - b.i);
-    for (const { c } of indexed) walk(c);
+    _currentClipMask = _childClipMask;
+    try { for (const { c } of indexed) walk(c); }
+    finally { _currentClipMask = _outerClipMask; }
   }
 
   walk(document.body);
