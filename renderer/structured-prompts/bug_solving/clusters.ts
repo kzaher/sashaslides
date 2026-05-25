@@ -1,39 +1,49 @@
 /**
- * Wave-21 — same target as wave-20 (basic_slide_17) but the cluster
- * description is now STRICTLY the user's verbatim comment. No
- * editorialising, no inferring "1-px", no "extra", no per-corner expansion.
- * The user noticed wave-20's analysis.md echoed my paraphrase ("extra 1-px
- * borders on their INNER sides") rather than their exact words and flagged
- * it as a wrong restatement that biased the fix.
+ * Wave-31 — NARROW SCOPE. The rounded left table currently renders with a
+ * visible "double border" on its right edge: a doubled vertical line/stripe
+ * that doesn't exist in the baseline. The user only wants this one defect
+ * removed for now. All other residual issues (pink hairlines, missing
+ * borders elsewhere) are out of scope for this wave.
  *
- * Anything beyond the user's literal text is for the worker to derive from
- * the attached PNG attachments (rendered + baseline + diff + per-annotation
- * zoom-crops). Step 7.5 carries the zoom-crops the user drew on wave-19's
- * SxS so the worker can see exactly which pixels are flagged.
+ * Baseline: current main (= wave-29-A's convert-pptx-lib.ts already in
+ * main). Do NOT redesign the corner-clipping architecture — just locate
+ * the source of the extra inner vertical stroke on the right edge and
+ * remove/suppress it. Keep the rest of the slide visually unchanged.
  *
- * Cluster: 4 parallel attempts (same content), retry_budget 10 each.
+ * Cluster: 1 worker, retry_budget 4.
  */
 import type { Cluster } from "./workspace-setup.js";
 
 const BUG_DESCRIPTION =
-  "User flagged basic_slide_17 as BAD with the following comment (verbatim, " +
-  "do NOT paraphrase or infer beyond this text):" +
+  "NARROW-SCOPE wave. The user wants exactly one defect removed and " +
+  "nothing else changed:" +
   "\n" +
-  "\n  \"For the left table the bottom left cell has border also on top and " +
-  "right, when it shouldn't. similar for the right cell. for top left cell " +
-  "it has order on right and bottom, when it shouldn't have. same for the " +
-  "top right cell for left table.\"" +
+  "\n  \"Left table: I can see a double border on the right side of " +
+  "table. remove that border.\"" +
   "\n" +
-  "\nAttached to Step 7.5's visual-verification prompt are per-annotation " +
-  "zoom-crops the user drew over the prior wave's render. Those crops are " +
-  "the precise pixels the user is pointing at — use them to ground your " +
-  "diagnosis, not the cluster text.";
+  "\nThis is ONE OF FIVE bullets the user previously listed; the OTHER " +
+  "FOUR are out of scope for this wave — do not attempt to fix them, " +
+  "and do not let your fix make them worse." +
+  "\n" +
+  "\nConcretely: in the rendered `basic_slide_17`, look at the rounded " +
+  "left table's right edge (the column boundary between Status and the " +
+  "table's outer right border). You will see TWO vertical strokes very " +
+  "close together — one is the legitimate outer table border, the other " +
+  "is an extra inner stroke that shouldn't be there. Identify whichever " +
+  "code path emits the second stroke and suppress it. Likely candidates: " +
+  "(a) the per-corner shape-twice underlay's outer rect bleeds an inner " +
+  "stroke at its inner-side edge, (b) the native `<a:tbl>` per-cell " +
+  "right border is being drawn in addition to the underlay's right edge, " +
+  "(c) `pickRingBorder` is double-counting a side." +
+  "\n" +
+  "\nVERIFICATION RULE for Step 7.5: PASS if the double border on the " +
+  "left table's right edge is gone AND none of the other four bullets " +
+  "(left table TL pink hairlines, BL pink stripe, right table TL/BL " +
+  "missing white borders) have regressed visibly worse than the current " +
+  "main render. You do NOT need to fix any other bullet to pass.";
 
 const SLIDE_IDS = ["basic_slide_17"];
 
 export const CLUSTERS: Cluster[] = [
-  { task_id: "wave21-A", cluster_description: BUG_DESCRIPTION, slide_ids: SLIDE_IDS, retry_budget: 10 },
-  { task_id: "wave21-B", cluster_description: BUG_DESCRIPTION, slide_ids: SLIDE_IDS, retry_budget: 10 },
-  { task_id: "wave21-C", cluster_description: BUG_DESCRIPTION, slide_ids: SLIDE_IDS, retry_budget: 10 },
-  { task_id: "wave21-D", cluster_description: BUG_DESCRIPTION, slide_ids: SLIDE_IDS, retry_budget: 10 },
+  { task_id: "wave31-A", cluster_description: BUG_DESCRIPTION, slide_ids: SLIDE_IDS, retry_budget: 4 },
 ];
