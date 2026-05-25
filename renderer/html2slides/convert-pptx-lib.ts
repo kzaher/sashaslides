@@ -1854,6 +1854,15 @@ export function buildPptx(
           const tableCornerRadii = el.cornerRadii || { tl: 0, tr: 0, br: 0, bl: 0 };
           const tableHasRadius = (el.borderRadius || 0) > 0;
           const rowCount = rows.length;
+          // CSS layers the `<table>`'s own background BEHIND every cell:
+          // a transparent `<td>` shows the table bg, not the slide bg. Our
+          // per-cell extraction captures `cs.bgColor` faithfully but never
+          // emitted the table-level fill, so cells with no own bg rendered
+          // transparent in pptx and exposed whatever sat behind the table
+          // (slide_17's pink `.table-wrap` made this obvious — odd-row
+          // cells leaked pink instead of showing `#fff`). Plumb the table
+          // bg in as a fallback so the layered semantics survive.
+          const tableBgHex: string | undefined = (el as { bgColor?: string }).bgColor || undefined;
 
           // Rule 3 (table case): synthMask captures the rounded-clip
           // context — either inherited from a wrapping `overflow:hidden`
@@ -1928,6 +1937,20 @@ export function buildPptx(
           const tableBorderSides = (el as { borderSides?: BorderSides | null }).borderSides;
           const tableSideOpt = (key: "top" | "right" | "bottom" | "left"): BorderOpt =>
             sideToBorderOpt(tableBorderSides ? tableBorderSides[key] : undefined);
+          // True when a rounded post-table outline ring will be drawn on top
+          // of the native <a:tbl> (see ~L2557). When it WILL draw, folding
+          // `tableSideOpt` into native edge cells double-inks the perimeter:
+          // the outline's `algn="in"` 1 px stroke sits at the rect's inner
+          // edge, but native cell borders use `algn="ctr"` and straddle the
+          // cell edge — the two paint at DIFFERENT pixels and combine to a
+          // ~1.5 px gray bar (slide_17 L1 "double border on right side").
+          // Suppress the fold in that case; the outline alone carries the
+          // perimeter. Flat tables (no outline) keep the fold so they still
+          // have an outer frame.
+          const willDrawTableOutline = tableHasRadius
+            && !!tableBorderSides
+            && (tableBorderSides.top?.width || 0) > 0
+            && !!tableBorderSides.top?.color;
           const cellBorderTuple = (
             cs: { readonly borderSides?: BorderSides } | undefined,
             ri: number,
@@ -1943,10 +1966,12 @@ export function buildPptx(
             // Fold table-level border onto outer-edge cells whose own side
             // has no width. (Does not override an explicit per-cell border.)
             const out: [BorderOpt, BorderOpt, BorderOpt, BorderOpt] = [t, r, bm, l];
-            if (ri === 0 && out[0].type === "none") out[0] = tableSideOpt("top");
-            if (ri === rowCnt - 1 && out[2].type === "none") out[2] = tableSideOpt("bottom");
-            if (ci === 0 && out[3].type === "none") out[3] = tableSideOpt("left");
-            if (ci === colCount - 1 && out[1].type === "none") out[1] = tableSideOpt("right");
+            if (!willDrawTableOutline) {
+              if (ri === 0 && out[0].type === "none") out[0] = tableSideOpt("top");
+              if (ri === rowCnt - 1 && out[2].type === "none") out[2] = tableSideOpt("bottom");
+              if (ci === 0 && out[3].type === "none") out[3] = tableSideOpt("left");
+              if (ci === colCount - 1 && out[1].type === "none") out[1] = tableSideOpt("right");
+            }
             return out;
           };
           // Rule 2: every HTML table emits as a native pptx <a:tbl>. With
@@ -2025,15 +2050,27 @@ export function buildPptx(
             const tableRows = rows.map((row: readonly TableCell[], ri: number) => row.map((cell: TableCell, ci: number) => {
               const cs = cell.style || {};
               const transparent = transparentCellKeys.has(`${ri}:${ci}`);
-              // Per-side border tuple (CSS encodes them per side and
-              // pptxgenjs writes <a:lnT/lnR/lnB/lnL> from this array). For
-              // corner cells (transparent in <a:tbl>; shape-twice paints
-              // the corner) zero every side so the underlay owns the
-              // visible border ring.
+              // Per-side border tuple. For corner cells the OUTER-facing
+              // sides (e.g. top + left for TL) are owned by the shape-
+              // twice underlay; the INNER-facing sides keep the cell's
+              // CSS-resolved border so the table's inter-cell grid (the
+              // #fff lines in `.colored`, the #e5e7eb under-header line
+              // in `.rounded`) still draws across the corner cell.
               let border: [BorderOpt, BorderOpt, BorderOpt, BorderOpt];
               if (transparent) {
+                const cornerKind = cornerKindByKey.get(`${ri}:${ci}`)!;
+                const full = cellBorderTuple(cs, ri, ci, colCnt, rowCount);
                 const none: BorderOpt = { type: "none", pt: 0, color: "000000" };
-                border = [none, none, none, none];
+                const zeroTop    = cornerKind === "tl" || cornerKind === "tr";
+                const zeroRight  = cornerKind === "tr" || cornerKind === "br";
+                const zeroBottom = cornerKind === "bl" || cornerKind === "br";
+                const zeroLeft   = cornerKind === "tl" || cornerKind === "bl";
+                border = [
+                  zeroTop    ? none : full[0],
+                  zeroRight  ? none : full[1],
+                  zeroBottom ? none : full[2],
+                  zeroLeft   ? none : full[3],
+                ];
               } else {
                 border = cellBorderTuple(cs, ri, ci, colCnt, rowCount);
               }
@@ -2047,7 +2084,8 @@ export function buildPptx(
                 italic: cs.fontStyle === "italic",
                 border: border as unknown as TextPropsOptions["border"],
               };
-              if (!transparent && cs.bgColor) cellOpts.fill = { color: hexToRgb(cs.bgColor) };
+              const effectiveBg = cs.bgColor || tableBgHex;
+              if (!transparent && effectiveBg) cellOpts.fill = { color: hexToRgb(effectiveBg) };
               if (cell.colspan && cell.colspan > 1) cellOpts.colspan = cell.colspan;
               if (cell.rowspan && cell.rowspan > 1) cellOpts.rowspan = cell.rowspan;
               // Cell padding → pptxgenjs cell margin (inches). pptxgenjs
@@ -2142,101 +2180,205 @@ export function buildPptx(
             // Emit per-corner shape-twice underlays BEFORE the addTable
             // call so they paint behind it (the addShape z-order is the
             // call order; native <a:tbl> renders last when added later).
+            //
+            // Pair-merge: when TL+TR (or BL+BR) share the same effective
+            // bg and ring (width + colour), emit ONE round2SameRect shape
+            // spanning the FULL table width instead of two round1Rects.
+            // This is the user's explicit prescription ("If the bottom
+            // corner cells have the same background border, make sure
+            // they are a single shape. The same is valid for top cells.")
+            // and structurally eliminates any inter-corner seam between
+            // the two merged shapes' inner rects.
             if (_tableGid && cornerSpecs.length > 0) {
               let memberIdx = 0;
-              // Pick the border colour the corner ring should display. The
-              // user's shape-twice prescription targets the table's OUTER
-              // border (e.g. `.rounded { border:1px solid #d1d5db }`), not
-              // the inter-cell row dividers. Prefer the table-level border
-              // first; only fall back to the cell's uniform border if it
-              // is a colour visibly distinct from `#fff` / the slide
-              // background — otherwise (e.g. `.colored td { border:1px
-              // solid #fff }`) we'd paint an invisible white ring around
-              // the cell and shrink the visible inner curve from
-              // `cornerR` to `cornerR-1`, which reads as "almost square"
-              // at thumbnail scale. With width=0 the corner emitter
-              // collapses to a single rounded rect of the cell's own
-              // fill at the FULL corner radius.
-              const isWhiteish = (hex: string): boolean => {
-                const h = (hex || "").replace(/^#/, "").toLowerCase();
-                if (h.length !== 6) return false;
-                const r = parseInt(h.slice(0, 2), 16);
-                const g = parseInt(h.slice(2, 4), 16);
-                const bl = parseInt(h.slice(4, 6), 16);
-                return r >= 240 && g >= 240 && bl >= 240;
-              };
-              const pickRingBorder = (cs: { readonly borderSides?: BorderSides } | undefined): { width: number; color: string } => {
-                if (tableBorderSides) {
-                  const t = tableBorderSides.top, r = tableBorderSides.right, bs = tableBorderSides.bottom, l = tableBorderSides.left;
-                  const w = Math.max(t?.width || 0, r?.width || 0, bs?.width || 0, l?.width || 0);
-                  if (w > 0) {
-                    const src = (t?.width || 0) >= w ? t : (r?.width || 0) >= w ? r : (bs?.width || 0) >= w ? bs : l;
-                    return { width: w, color: src?.color || "" };
-                  }
-                }
-                const cub = cellUniformBorder(cs);
-                if (cub.width > 0 && !isWhiteish(cub.color)) return { width: cub.width, color: cub.color };
-                return { width: 0, color: "" };
-              };
-              for (const corner of cornerSpecs) {
-                const cb = corner.cell.bounds;
-                if (!cb) continue;
-                const cs = corner.cell.style || {};
-                const cornerR = _synthMask!.cornerRadii[corner.kind];
-                const cellCR: CornerRadii = {
-                  tl: corner.kind === "tl" ? cornerR : 0,
-                  tr: corner.kind === "tr" ? cornerR : 0,
-                  br: corner.kind === "br" ? cornerR : 0,
-                  bl: corner.kind === "bl" ? cornerR : 0,
+              // Pick the border colour the corner ring should display.
+              // Per-corner, look at the cell's two OUTER-facing sides
+              // (TL → top+left, TR → top+right, etc.) AND the table's
+              // outer borderSides on those same keys. Take the wider
+              // side's {width, color}. If both sides are 0, return 0
+              // (no ring) so the else-branch paints a single fill rect.
+              const pickRingBorder = (
+                cs: { readonly borderSides?: BorderSides } | undefined,
+                kind: CornerKind,
+              ): { width: number; color: string } => {
+                const bsCell = cs?.borderSides;
+                const sidePick = (
+                  cellSide: BorderSide | undefined,
+                  tblSide: BorderSide | undefined,
+                ): { w: number; c: string } => {
+                  const cw = cellSide?.width || 0;
+                  const tw = tblSide?.width || 0;
+                  if (tw === 0 && cw === 0) return { w: 0, c: "" };
+                  if (tw >= cw) return { w: tw, c: tblSide?.color || "#000000" };
+                  return { w: cw, c: cellSide?.color || "#000000" };
                 };
-                const ring = pickRingBorder(cs);
-                const bw = ring.width;
-                const fillHex = cs.bgColor ? hexToRgb(cs.bgColor) : "ffffff";
-                const cpOuter = cornerPresetFromRadii(cellCR);
-                // Native cell rect (inches) — derived from the table's own
-                // xfrm + colW/rowH so the shape lines up exactly with where
-                // the cell actually renders in <a:tbl>.
-                const cellX = px2in(b.x) + colXPrefix[corner.cellIdx];
-                const cellY = px2in(b.y) + rowYPrefix[corner.rowIdx];
-                const cellW = colW[corner.cellIdx];
-                const cellH = rowH[corner.rowIdx];
-                // Border width in inches for inset math; ring.width is in px.
+                const tBS = tableBorderSides || undefined;
+                let s1: { w: number; c: string };
+                let s2: { w: number; c: string };
+                switch (kind) {
+                  case "tl": s1 = sidePick(bsCell?.top,    tBS?.top);    s2 = sidePick(bsCell?.left,  tBS?.left);  break;
+                  case "tr": s1 = sidePick(bsCell?.top,    tBS?.top);    s2 = sidePick(bsCell?.right, tBS?.right); break;
+                  case "bl": s1 = sidePick(bsCell?.bottom, tBS?.bottom); s2 = sidePick(bsCell?.left,  tBS?.left);  break;
+                  case "br": s1 = sidePick(bsCell?.bottom, tBS?.bottom); s2 = sidePick(bsCell?.right, tBS?.right); break;
+                }
+                if (s1.w === 0 && s2.w === 0) return { width: 0, color: "" };
+                const max = s1.w >= s2.w ? s1 : s2;
+                return { width: max.w, color: max.c };
+              };
+              // Table-border width (inches) per side. For tables with a
+              // CSS outer border (e.g. `.rounded { border:1px solid #d1d5db }`)
+              // the per-`<td>` bounds we use to build `colW`/`rowH` are
+              // INSET by `tw` on each side, so `sum(colW) = b.w - twLeft -
+              // twRight`. The native <a:tbl> graphicFrame is shifted
+              // inward by `twLeft/twTop` below to align cells with the
+              // CSS content area, and the corner shapes' outer-side
+              // extensions push out by `tw` to reach the CSS outer
+              // perimeter where the post-table outline stroke lives.
+              const outerExtIn = (side: "top" | "right" | "bottom" | "left"): number =>
+                px2in(tableBorderSides?.[side]?.width || 0);
+              const twLeft   = outerExtIn("left");
+              const twRight  = outerExtIn("right");
+              const twTop    = outerExtIn("top");
+              const twBottom = outerExtIn("bottom");
+              // Inner overlap: outward extension on the corner shape's
+              // inner-facing sides. Set to 0 — any non-zero extension
+              // pushes the corner shape past the cell into adjacent
+              // rows/columns and covers their native `<a:tc>` border
+              // strokes (the E5E7EB row-divider under .rounded's blue
+              // header was being overpainted by the TL corner shape's
+              // 6 px blue inner extension, producing the L3 "pink/
+              // missing line" the user flagged). The native row above /
+              // beside still paints on top of the corner shape, so cell
+              // boundaries render cleanly; sub-pixel AA at the corner
+              // shape's edges is masked by the full-table underlay
+              // emitted below.
+              const innerOverlap = 0;
+
+              // Full-table BG underlay — paints (b.x, b.y, b.w, b.h) in
+              // the table's own outer-border colour (or the table bg
+              // colour when there's no outer border) BEFORE any corner /
+              // band shape, the native <a:tbl>, or the post-table outline
+              // stroke is drawn. Sits at the BOTTOM of this table's
+              // z-order. With the wrapper (slide_17's `.table-wrap`)
+              // painted PINK behind the table, every sub-pixel seam
+              // between the merged band, native cells, the outline
+              // stroke, and the rounded-corner curves used to leak pink
+              // (L1: faint 2 px parallel sliver inside the right edge;
+              // L3: pink hairline at the bottom of the blue header).
+              // Painting the underlay in the same colour the merged
+              // band's outer ring AND the outline stroke use means any
+              // residual leak shows the table's own border colour, not
+              // the wrapper — exactly what the user prescribed: "all
+              // borders should be coloured in the actual table as
+              // border". For the no-outer-border companions
+              // (`.rounded-nb`, `.colored-nb`) the underlay falls back
+              // to the table's bg colour, so the perimeter strip reads
+              // as table background (white) instead of wrapper pink.
+              {
+                const underlayCp = cornerPresetFromRadii(tableCornerRadii);
+                const tblTopBorder = tableBorderSides?.top;
+                const underlayHex =
+                  (tblTopBorder && tblTopBorder.width > 0 && tblTopBorder.color)
+                    ? hexToRgb(tblTopBorder.color)
+                    : (tableBgHex ? hexToRgb(tableBgHex) : "ffffff");
+                const underlayOpts: ShapeProps = {
+                  x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
+                  fill: { color: underlayHex },
+                  line: { type: "none" },
+                  objectName: memberName(_tableGid!, memberIdx++),
+                };
+                if (underlayCp.preset !== "rect") {
+                  underlayOpts.rectRadius = px2in(el.borderRadius);
+                  if (underlayCp.flipH) underlayOpts.flipH = true;
+                  if (underlayCp.flipV) underlayOpts.flipV = true;
+                }
+                slide.addShape(
+                  underlayCp.preset as Parameters<Slide["addShape"]>[0],
+                  underlayOpts,
+                );
+              }
+
+              // Build per-corner records once for both merge-eligibility
+              // and individual emission.
+              interface CornerInfo {
+                kind: CornerKind;
+                rowIdx: number;
+                cellIdx: number;
+                cell: TableCell;
+                bgHex: string;                          // resolved fill (hex, no '#')
+                ring: { width: number; color: string }; // ring.color may be ''
+                cornerR: number;
+              }
+              const infoByKind: Partial<Record<CornerKind, CornerInfo>> = {};
+              for (const corner of cornerSpecs) {
+                if (!corner.cell.bounds) continue;
+                const cs = corner.cell.style || {};
+                const bgSrc = cs.bgColor || tableBgHex;
+                infoByKind[corner.kind] = {
+                  kind: corner.kind,
+                  rowIdx: corner.rowIdx,
+                  cellIdx: corner.cellIdx,
+                  cell: corner.cell,
+                  bgHex: bgSrc ? hexToRgb(bgSrc) : "ffffff",
+                  ring: pickRingBorder(cs as { borderSides?: BorderSides } | undefined, corner.kind),
+                  cornerR: _synthMask!.cornerRadii[corner.kind],
+                };
+              }
+
+              const ringsEqual = (
+                a: { width: number; color: string },
+                bv: { width: number; color: string },
+              ): boolean =>
+                a.width === bv.width && (a.width === 0 || a.color === bv.color);
+
+              const canMergePair = (
+                a: CornerInfo | undefined,
+                bv: CornerInfo | undefined,
+              ): boolean =>
+                !!a && !!bv && a.bgHex === bv.bgHex
+                  && ringsEqual(a.ring, bv.ring)
+                  && a.cornerR === bv.cornerR;
+
+              // Emit a single-corner sandwich (the per-cell shape-twice
+              // overlay for one isolated corner).
+              const emitSingleCorner = (info: CornerInfo): void => {
+                const cellCR: CornerRadii = {
+                  tl: info.kind === "tl" ? info.cornerR : 0,
+                  tr: info.kind === "tr" ? info.cornerR : 0,
+                  br: info.kind === "br" ? info.cornerR : 0,
+                  bl: info.kind === "bl" ? info.cornerR : 0,
+                };
+                const bw = info.ring.width;
                 const bwIn = px2in(bw);
+                const cpOuter = cornerPresetFromRadii(cellCR);
+                const cellX = px2in(b.x) + twLeft + colXPrefix[info.cellIdx];
+                const cellY = px2in(b.y) + twTop  + rowYPrefix[info.rowIdx];
+                const cellW = colW[info.cellIdx];
+                const cellH = rowH[info.rowIdx];
+                const isOuterTop    = info.kind === "tl" || info.kind === "tr";
+                const isOuterRight  = info.kind === "tr" || info.kind === "br";
+                const isOuterBottom = info.kind === "bl" || info.kind === "br";
+                const isOuterLeft   = info.kind === "tl" || info.kind === "bl";
+                const extTop    = isOuterTop    ? twTop    : 0;
+                const extRight  = isOuterRight  ? twRight  : 0;
+                const extBottom = isOuterBottom ? twBottom : 0;
+                const extLeft   = isOuterLeft   ? twLeft   : 0;
                 if (bw > 0 && cellW > bwIn && cellH > bwIn) {
-                  // Sandwich: outer = border-colour rounded rect ONLY on
-                  // the two OUTER sides of this corner, inner = cell-fill
-                  // rounded rect filling the rest. Previously the outer
-                  // rect was full cell bounds and the inner rect was
-                  // inset only on outer sides — that left the bottom
-                  // (border-colour) rect exposed on the cell's INNER
-                  // edges, so a 1-pixel border line bled through where
-                  // the cell met its neighbour (basic_slide_17 corner
-                  // cells showed extra borders on right + bottom for
-                  // TL etc. — user's wave-19 verdict).
-                  //
-                  // Fix: both rects inset by border-width on opposite
-                  // pairs of sides. The outer rect inset on the INNER
-                  // sides (so it only reaches the cell's outer edges);
-                  // the inner rect inset on the OUTER sides (so the
-                  // border-colour outer rect shows through there). The
-                  // two rects overlap on the corner-cell interior; the
-                  // inner rect z-order on top covers everything except
-                  // the OUTER-side strips where the outer rect's
-                  // border colour is visible.
-                  const borderHex = hexToRgb(ring.color || "#000000");
-                  const outerInsetLeft   = (corner.kind === "tl" || corner.kind === "bl") ? 0    : bwIn;
-                  const outerInsetRight  = (corner.kind === "tr" || corner.kind === "br") ? 0    : bwIn;
-                  const outerInsetTop    = (corner.kind === "tl" || corner.kind === "tr") ? 0    : bwIn;
-                  const outerInsetBottom = (corner.kind === "bl" || corner.kind === "br") ? 0    : bwIn;
+                  const borderHex = hexToRgb(info.ring.color || "#000000");
+                  const outerOverLeft   = isOuterLeft   ? extLeft   : innerOverlap;
+                  const outerOverRight  = isOuterRight  ? extRight  : innerOverlap;
+                  const outerOverTop    = isOuterTop    ? extTop    : innerOverlap;
+                  const outerOverBottom = isOuterBottom ? extBottom : innerOverlap;
                   slide.addShape(cpOuter.preset as Parameters<Slide["addShape"]>[0], {
-                    x: cellX + outerInsetLeft, y: cellY + outerInsetTop,
-                    w: cellW - outerInsetLeft - outerInsetRight,
-                    h: cellH - outerInsetTop - outerInsetBottom,
+                    x: cellX - outerOverLeft,
+                    y: cellY - outerOverTop,
+                    w: cellW + outerOverLeft + outerOverRight,
+                    h: cellH + outerOverTop  + outerOverBottom,
                     fill: { color: borderHex },
                     line: { type: "none" },
                     flipH: cpOuter.flipH, flipV: cpOuter.flipV,
-                    rectRadius: px2in(cornerR),
-                    objectName: memberName(_tableGid, memberIdx++),
+                    rectRadius: px2in(info.cornerR),
+                    objectName: memberName(_tableGid!, memberIdx++),
                   });
                   const innerCR: CornerRadii = {
                     tl: Math.max(0, cellCR.tl - bw),
@@ -2245,36 +2387,122 @@ export function buildPptx(
                     bl: Math.max(0, cellCR.bl - bw),
                   };
                   const cpInner = cornerPresetFromRadii(innerCR);
-                  const innerInsetLeft   = (corner.kind === "tl" || corner.kind === "bl") ? bwIn : 0;
-                  const innerInsetRight  = (corner.kind === "tr" || corner.kind === "br") ? bwIn : 0;
-                  const innerInsetTop    = (corner.kind === "tl" || corner.kind === "tr") ? bwIn : 0;
-                  const innerInsetBottom = (corner.kind === "bl" || corner.kind === "br") ? bwIn : 0;
+                  const innerInsetLeft   = isOuterLeft   ? bwIn : 0;
+                  const innerInsetRight  = isOuterRight  ? bwIn : 0;
+                  const innerInsetTop    = isOuterTop    ? bwIn : 0;
+                  const innerInsetBottom = isOuterBottom ? bwIn : 0;
+                  const innerOverLeft   = isOuterLeft   ? 0 : innerOverlap;
+                  const innerOverRight  = isOuterRight  ? 0 : innerOverlap;
+                  const innerOverTop    = isOuterTop    ? 0 : innerOverlap;
+                  const innerOverBottom = isOuterBottom ? 0 : innerOverlap;
                   slide.addShape(cpInner.preset as Parameters<Slide["addShape"]>[0], {
-                    x: cellX + innerInsetLeft, y: cellY + innerInsetTop,
-                    w: cellW - innerInsetLeft - innerInsetRight,
-                    h: cellH - innerInsetTop - innerInsetBottom,
-                    fill: { color: fillHex },
+                    x: cellX + innerInsetLeft - innerOverLeft,
+                    y: cellY + innerInsetTop  - innerOverTop,
+                    w: cellW - innerInsetLeft - innerInsetRight + innerOverLeft + innerOverRight,
+                    h: cellH - innerInsetTop  - innerInsetBottom + innerOverTop  + innerOverBottom,
+                    fill: { color: info.bgHex },
+                    line: { type: "none" },
+                    flipH: cpInner.flipH, flipV: cpInner.flipV,
+                    rectRadius: Math.max(0, px2in(info.cornerR - bw)),
+                    objectName: memberName(_tableGid!, memberIdx++),
+                  });
+                } else {
+                  const innerOverLeft   = isOuterLeft   ? 0 : innerOverlap;
+                  const innerOverRight  = isOuterRight  ? 0 : innerOverlap;
+                  const innerOverTop    = isOuterTop    ? 0 : innerOverlap;
+                  const innerOverBottom = isOuterBottom ? 0 : innerOverlap;
+                  slide.addShape(cpOuter.preset as Parameters<Slide["addShape"]>[0], {
+                    x: cellX - extLeft - innerOverLeft,
+                    y: cellY - extTop  - innerOverTop,
+                    w: cellW + extLeft + extRight + innerOverLeft + innerOverRight,
+                    h: cellH + extTop  + extBottom + innerOverTop  + innerOverBottom,
+                    fill: { color: info.bgHex },
+                    line: { type: "none" },
+                    flipH: cpOuter.flipH, flipV: cpOuter.flipV,
+                    rectRadius: px2in(info.cornerR),
+                    objectName: memberName(_tableGid!, memberIdx++),
+                  });
+                }
+              };
+
+              // Emit a merged top or bottom band shape (spans full table
+              // width = px2in(b.w)). The outer rect carries the ring
+              // colour (or the bg when ring.width === 0); the inner rect
+              // (when ring.width > 0) carries the bg and is inset by
+              // `bwIn` on its three outer-facing sides.
+              const emitMergedBand = (
+                band: "top" | "bottom",
+                left: CornerInfo,
+              ): void => {
+                const cornerR = left.cornerR;
+                const bw = left.ring.width;
+                const bwIn = px2in(bw);
+                const isTop = band === "top";
+                const rowIdx = isTop ? 0 : rowCount - 1;
+                const cellH = rowH[rowIdx];
+                const bandCR: CornerRadii = isTop
+                  ? { tl: cornerR, tr: cornerR, br: 0, bl: 0 }
+                  : { tl: 0, tr: 0, br: cornerR, bl: cornerR };
+                const cpOuter = cornerPresetFromRadii(bandCR);
+                const outerX = px2in(b.x);
+                const outerW = px2in(b.w);
+                const outerY = isTop
+                  ? px2in(b.y)
+                  : (px2in(b.y) + twTop + rowYPrefix[rowIdx] - innerOverlap);
+                const extOuterV = isTop ? twTop : twBottom;
+                const outerH = cellH + extOuterV + innerOverlap;
+                const outerFillHex = (bw > 0 && left.ring.color)
+                  ? hexToRgb(left.ring.color)
+                  : left.bgHex;
+                slide.addShape(cpOuter.preset as Parameters<Slide["addShape"]>[0], {
+                  x: outerX, y: outerY, w: outerW, h: outerH,
+                  fill: { color: outerFillHex },
+                  line: { type: "none" },
+                  flipH: cpOuter.flipH, flipV: cpOuter.flipV,
+                  rectRadius: px2in(cornerR),
+                  objectName: memberName(_tableGid!, memberIdx++),
+                });
+                if (bw > 0 && cellH > bwIn && outerW > 2 * bwIn) {
+                  const innerCR: CornerRadii = isTop
+                    ? { tl: Math.max(0, cornerR - bw), tr: Math.max(0, cornerR - bw), br: 0, bl: 0 }
+                    : { tl: 0, tr: 0, br: Math.max(0, cornerR - bw), bl: Math.max(0, cornerR - bw) };
+                  const cpInner = cornerPresetFromRadii(innerCR);
+                  // Inset bwIn on the three outer-facing sides
+                  // (top: left+right+top; bottom: left+right+bottom).
+                  // The inner-facing side keeps the outer rect's
+                  // innerOverlap extension into the adjacent row.
+                  const innerX = outerX + bwIn;
+                  const innerW = outerW - 2 * bwIn;
+                  const innerY = isTop ? (outerY + bwIn) : outerY;
+                  const innerH = outerH - bwIn;
+                  slide.addShape(cpInner.preset as Parameters<Slide["addShape"]>[0], {
+                    x: innerX, y: innerY, w: innerW, h: innerH,
+                    fill: { color: left.bgHex },
                     line: { type: "none" },
                     flipH: cpInner.flipH, flipV: cpInner.flipV,
                     rectRadius: Math.max(0, px2in(cornerR - bw)),
-                    objectName: memberName(_tableGid, memberIdx++),
-                  });
-                } else {
-                  // No border on this corner cell: paint a single rounded
-                  // rect in the cell's own fill. Painting the default
-                  // borderHex here would flood the corner cell with gray
-                  // and bleed across the row (slide_17 "Storage row" bug).
-                  // Reference cb to avoid unused-binding lint.
-                  void cb;
-                  slide.addShape(cpOuter.preset as Parameters<Slide["addShape"]>[0], {
-                    x: cellX, y: cellY, w: cellW, h: cellH,
-                    fill: { color: fillHex },
-                    line: { type: "none" },
-                    flipH: cpOuter.flipH, flipV: cpOuter.flipV,
-                    rectRadius: px2in(cornerR),
-                    objectName: memberName(_tableGid, memberIdx++),
+                    objectName: memberName(_tableGid!, memberIdx++),
                   });
                 }
+              };
+
+              const tlInfo = infoByKind.tl;
+              const trInfo = infoByKind.tr;
+              const blInfo = infoByKind.bl;
+              const brInfo = infoByKind.br;
+              // Top band
+              if (canMergePair(tlInfo, trInfo)) {
+                emitMergedBand("top", tlInfo!);
+              } else {
+                if (tlInfo) emitSingleCorner(tlInfo);
+                if (trInfo) emitSingleCorner(trInfo);
+              }
+              // Bottom band
+              if (canMergePair(blInfo, brInfo)) {
+                emitMergedBand("bottom", blInfo!);
+              } else {
+                if (blInfo) emitSingleCorner(blInfo);
+                if (brInfo) emitSingleCorner(brInfo);
               }
             }
             // (rowH computed earlier so corner shapes can prefix-sum it.)
@@ -2291,8 +2519,30 @@ export function buildPptx(
             // bottom-corner underlays floating below the rendered table
             // (the "phantom row" bug, slide_17 / slide_05).
             const tableH = rowH.reduce((a, b) => a + b, 0);
+            // Shift the native <a:tbl> graphicFrame inward by the CSS
+            // outer table border width. Per-`<td>` bounds (the basis for
+            // `colW` / `rowH`) are INSET by `tw` on each side, so
+            // `sum(colW) = px2in(b.w) - twLeft - twRight`. Placing the
+            // graphicFrame at `(b.x, b.y, b.w, tableH)` leaves a
+            // `tw`-wide unpainted gap on the right + bottom of the table
+            // area — which `.table-wrap`'s pink shows through, reading
+            // as the "double border on right" and the "bottom border
+            // too high" the user reported on slide_17. Shifting the
+            // frame to `(b.x + twLeft, b.y + twTop, sumColW, sumRowH)`
+            // makes native cells fill the CSS content area exactly, so
+            // the post-table outline stroke (algn="in", 1 px) abuts the
+            // cell edges with zero gap.
+            const tableTw = (el as { borderSides?: BorderSides | null }).borderSides;
+            const tblTwLeft   = px2in(tableTw?.left?.width   || 0);
+            const tblTwTop    = px2in(tableTw?.top?.width    || 0);
+            const tableColSum = colW.reduce((acc: number, w: number) => acc + w, 0);
             const tableOpts: Parameters<Slide["addTable"]>[1] = {
-              x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: tableH, colW, rowH,
+              x: px2in(b.x) + tblTwLeft,
+              y: px2in(b.y) + tblTwTop,
+              w: tableColSum,
+              h: tableH,
+              colW,
+              rowH,
               autoPage: false,
               fontFace: "Arial",
             };
@@ -2303,6 +2553,48 @@ export function buildPptx(
               (tableOpts as { objectName?: string }).objectName = hostName(_tableGid);
             }
             slide.addTable(tableRows, tableOpts);
+            // Rounded-table outer outline. The per-corner shape-twice
+            // sandwich leaves a 1×bw px notch at each corner cell's
+            // inner-side corner where neither outer nor inner rect
+            // reaches; on a wrapper-with-non-slide-bg fixture
+            // (slide_17's pink `.table-wrap`) that notch leaks the
+            // wrapper colour, plus there is no table-level top/left
+            // border drawn at all in the native-addTable branch (the
+            // outline below was only reachable from the per-cell
+            // branch). Emit it here so the stroke covers the perimeter
+            // notches AND draws the table's own border on top of the
+            // native cells (`injectStrokeAlignment` later adds
+            // algn="in" so the stroke lives inside the geometry —
+            // pixel-aligned with the corner-shape outer ring).
+            // Post-table outline stroke is only needed when the underlay
+            // ISN'T already painting the border for us. When the table has
+            // a CSS outer border, the underlay above paints in that border
+            // colour and the native <a:tbl> graphicFrame is INSET by
+            // twLeft/twRight, so the exposed underlay strip already reads
+            // as the table border. Adding the outline stroke on top
+            // produces a visible DOUBLE LINE on the right + bottom edges
+            // (slide_17 L1). Skip the stroke in that case — the underlay
+            // strip is the border. For radius-only tables (`.colored`)
+            // there's no outer-border underlay to rely on; emit the stroke
+            // as before so the perimeter notches don't leak wrapper colour.
+            const hasOuterBorderUnderlay =
+              !!tableBorderSides
+              && (tableBorderSides.top?.width || 0) > 0
+              && !!tableBorderSides.top?.color;
+            if (tableHasRadius && !hasOuterBorderUnderlay) {
+              const tableCp = cornerPresetFromRadii(tableCornerRadii);
+              const outlineOpts: ShapeProps = {
+                x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
+                fill: { type: "none" },
+                line: { type: "none" },
+              };
+              if (tableCp.preset !== "rect") {
+                outlineOpts.rectRadius = px2in(el.borderRadius);
+                if (tableCp.flipH) outlineOpts.flipH = true;
+                if (tableCp.flipV) outlineOpts.flipV = true;
+              }
+              slide.addShape(tableCp.preset, outlineOpts);
+            }
             break;
           }
 
