@@ -2041,10 +2041,22 @@ export function buildPptx(
               }
             }
 
+            // Quantize all rounded-table geometry to 1/100" so the
+            // underlay rect, the per-corner shape-twice rects, the native
+            // <a:tbl> graphicFrame and the outline stroke all land on the
+            // SAME source-inch lattice. Without quantization each shape's
+            // edges sit at arbitrary fractional inches (the px → inch
+            // conversion is `* 10/1280 = * 0.0078125` per CSS pixel), and
+            // Slides rasterises shapes vs <a:graphicFrame> cells onto
+            // display pixels independently → 1-2 display-px seams at every
+            // corner/cell boundary (the entire "missing white border"
+            // family of complaints). Snapping all coords to 0.01"
+            // eliminates the per-shape fractional offset.
+            const q = (v: number): number => Math.round(v * 100) / 100;
             // Build column widths from the first row's cell widths.
             const firstRow = rows[0];
             const colCnt = firstRow.length;
-            const colW = firstRow.map((c: TableCell) => px2in(c.bounds?.w || b.w / firstRow.length));
+            const colW = firstRow.map((c: TableCell) => q(px2in(c.bounds?.w || b.w / firstRow.length)));
             const cornerKindByKey = new Map<string, CornerKind>();
             for (const c of cornerSpecs) cornerKindByKey.set(`${c.rowIdx}:${c.cellIdx}`, c.kind);
             const tableRows = rows.map((row: readonly TableCell[], ri: number) => row.map((cell: TableCell, ci: number) => {
@@ -2166,7 +2178,7 @@ export function buildPptx(
             // direction: top corners sit 1 px below row 0, bottom corners
             // overhang the table by 1 px (the "phantom 5th row" the user
             // flagged on slide_17 and complex_slide_05).
-            const rowH = rows.map((row) => (row[0]?.bounds ? px2in(row[0].bounds.h) : px2in(b.h / Math.max(1, rowCount))));
+            const rowH = rows.map((row) => q(row[0]?.bounds ? px2in(row[0].bounds.h) : px2in(b.h / Math.max(1, rowCount))));
             // Prefix sums (inches) → native cell origin for any (ri, ci):
             //   x = px2in(b.x) + colXPrefix[ci]
             //   y = px2in(b.y) + rowYPrefix[ri]
@@ -2241,18 +2253,24 @@ export function buildPptx(
               const twTop    = outerExtIn("top");
               const twBottom = outerExtIn("bottom");
               // Inner overlap: outward extension on the corner shape's
-              // inner-facing sides. Set to 0 — any non-zero extension
-              // pushes the corner shape past the cell into adjacent
-              // rows/columns and covers their native `<a:tc>` border
-              // strokes (the E5E7EB row-divider under .rounded's blue
-              // header was being overpainted by the TL corner shape's
-              // 6 px blue inner extension, producing the L3 "pink/
-              // missing line" the user flagged). The native row above /
-              // beside still paints on top of the corner shape, so cell
-              // boundaries render cleanly; sub-pixel AA at the corner
-              // shape's edges is masked by the full-table underlay
-              // emitted below.
-              const innerOverlap = 0;
+              // inner-facing sides. Small non-zero value covers the
+              // sub-pixel AA seam where the corner shape abuts the
+              // adjacent native cell (without it, the underlay leaks
+              // through as a hairline — the "white line below Week/Q4"
+              // defect on `.colored-nb`'s TL/TR corners). 2 px is well
+              // below the 6 px that previously regressed `.rounded`'s
+              // E5E7EB row-divider — at 2 px the native cell's lnT/lnB
+              // still paints fully on top of the corner shape's tail.
+              const innerOverlap = px2in(2);
+              // Outer-bottom overshoot: when there's no CSS border on the
+              // bottom side, Google Slides' native middle cells autogrow
+              // a few px past `tableBottomIn`. Extending the corner
+              // shape's outer bottom by this amount aligns it with where
+              // middle cells actually paint — closing the "bottom isn't
+              // aligned with table bottom" gap on BL/BR of `.colored-nb`.
+              // User explicitly sanctioned: "it's possible to go lower
+              // than needed to make sure there are no lines."
+              const outerOvershootBottom = px2in(3);
 
               // Full-table BG underlay — paints (b.x, b.y, b.w, b.h) in
               // the table's own outer-border colour (or the table bg
@@ -2282,13 +2300,13 @@ export function buildPptx(
                     ? hexToRgb(tblTopBorder.color)
                     : (tableBgHex ? hexToRgb(tableBgHex) : "ffffff");
                 const underlayOpts: ShapeProps = {
-                  x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
+                  x: q(px2in(b.x)), y: q(px2in(b.y)), w: q(px2in(b.w)), h: q(px2in(b.h)),
                   fill: { color: underlayHex },
                   line: { type: "none" },
                   objectName: memberName(_tableGid!, memberIdx++),
                 };
                 if (underlayCp.preset !== "rect") {
-                  underlayOpts.rectRadius = px2in(el.borderRadius);
+                  underlayOpts.rectRadius = q(px2in(el.borderRadius));
                   if (underlayCp.flipH) underlayOpts.flipH = true;
                   if (underlayCp.flipV) underlayOpts.flipV = true;
                 }
@@ -2363,12 +2381,23 @@ export function buildPptx(
                 const extRight  = isOuterRight  ? twRight  : 0;
                 const extBottom = isOuterBottom ? twBottom : 0;
                 const extLeft   = isOuterLeft   ? twLeft   : 0;
+                // When there's no CSS outer border on the bottom side
+                // (`.colored-nb`, `.rounded-nb`, `.colored`), the corner
+                // shape's bottom edge would sit exactly at `tableBottomIn`.
+                // Slides' native middle cells autogrow 1–2 px past that,
+                // leaving a visible white/pink sliver below the corner
+                // cells. Push the corner-shape bottom `outerOvershootBottom`
+                // px past `tableBottomIn` so it lines up with where the
+                // middle cells actually paint. User explicitly sanctioned:
+                // "it's possible to go lower than needed".
+                const oversBottomExt =
+                  (isOuterBottom && twBottom === 0) ? outerOvershootBottom : 0;
                 if (bw > 0 && cellW > bwIn && cellH > bwIn) {
                   const borderHex = hexToRgb(info.ring.color || "#000000");
                   const outerOverLeft   = isOuterLeft   ? extLeft   : innerOverlap;
                   const outerOverRight  = isOuterRight  ? extRight  : innerOverlap;
                   const outerOverTop    = isOuterTop    ? extTop    : innerOverlap;
-                  const outerOverBottom = isOuterBottom ? extBottom : innerOverlap;
+                  const outerOverBottom = isOuterBottom ? (extBottom + oversBottomExt) : innerOverlap;
                   slide.addShape(cpOuter.preset as Parameters<Slide["addShape"]>[0], {
                     x: cellX - outerOverLeft,
                     y: cellY - outerOverTop,
@@ -2394,7 +2423,7 @@ export function buildPptx(
                   const innerOverLeft   = isOuterLeft   ? 0 : innerOverlap;
                   const innerOverRight  = isOuterRight  ? 0 : innerOverlap;
                   const innerOverTop    = isOuterTop    ? 0 : innerOverlap;
-                  const innerOverBottom = isOuterBottom ? 0 : innerOverlap;
+                  const innerOverBottom = isOuterBottom ? oversBottomExt : innerOverlap;
                   slide.addShape(cpInner.preset as Parameters<Slide["addShape"]>[0], {
                     x: cellX + innerInsetLeft - innerOverLeft,
                     y: cellY + innerInsetTop  - innerOverTop,
@@ -2410,7 +2439,7 @@ export function buildPptx(
                   const innerOverLeft   = isOuterLeft   ? 0 : innerOverlap;
                   const innerOverRight  = isOuterRight  ? 0 : innerOverlap;
                   const innerOverTop    = isOuterTop    ? 0 : innerOverlap;
-                  const innerOverBottom = isOuterBottom ? 0 : innerOverlap;
+                  const innerOverBottom = isOuterBottom ? oversBottomExt : innerOverlap;
                   slide.addShape(cpOuter.preset as Parameters<Slide["addShape"]>[0], {
                     x: cellX - extLeft - innerOverLeft,
                     y: cellY - extTop  - innerOverTop,
@@ -2444,13 +2473,13 @@ export function buildPptx(
                   ? { tl: cornerR, tr: cornerR, br: 0, bl: 0 }
                   : { tl: 0, tr: 0, br: cornerR, bl: cornerR };
                 const cpOuter = cornerPresetFromRadii(bandCR);
-                const outerX = px2in(b.x);
-                const outerW = px2in(b.w);
-                const outerY = isTop
+                const outerX = q(px2in(b.x));
+                const outerW = q(px2in(b.w));
+                const outerY = q(isTop
                   ? px2in(b.y)
-                  : (px2in(b.y) + twTop + rowYPrefix[rowIdx] - innerOverlap);
+                  : (px2in(b.y) + twTop + rowYPrefix[rowIdx] - innerOverlap));
                 const extOuterV = isTop ? twTop : twBottom;
-                const outerH = cellH + extOuterV + innerOverlap;
+                const outerH = q(cellH + extOuterV + innerOverlap);
                 const outerFillHex = (bw > 0 && left.ring.color)
                   ? hexToRgb(left.ring.color)
                   : left.bgHex;
@@ -2459,7 +2488,7 @@ export function buildPptx(
                   fill: { color: outerFillHex },
                   line: { type: "none" },
                   flipH: cpOuter.flipH, flipV: cpOuter.flipV,
-                  rectRadius: px2in(cornerR),
+                  rectRadius: q(px2in(cornerR)),
                   objectName: memberName(_tableGid!, memberIdx++),
                 });
                 if (bw > 0 && cellH > bwIn && outerW > 2 * bwIn) {
@@ -2471,10 +2500,10 @@ export function buildPptx(
                   // (top: left+right+top; bottom: left+right+bottom).
                   // The inner-facing side keeps the outer rect's
                   // innerOverlap extension into the adjacent row.
-                  const innerX = outerX + bwIn;
-                  const innerW = outerW - 2 * bwIn;
-                  const innerY = isTop ? (outerY + bwIn) : outerY;
-                  const innerH = outerH - bwIn;
+                  const innerX = q(outerX + bwIn);
+                  const innerW = q(outerW - 2 * bwIn);
+                  const innerY = q(isTop ? (outerY + bwIn) : outerY);
+                  const innerH = q(outerH - bwIn);
                   slide.addShape(cpInner.preset as Parameters<Slide["addShape"]>[0], {
                     x: innerX, y: innerY, w: innerW, h: innerH,
                     fill: { color: left.bgHex },
@@ -2490,20 +2519,22 @@ export function buildPptx(
               const trInfo = infoByKind.tr;
               const blInfo = infoByKind.bl;
               const brInfo = infoByKind.br;
-              // Top band
-              if (canMergePair(tlInfo, trInfo)) {
-                emitMergedBand("top", tlInfo!);
-              } else {
-                if (tlInfo) emitSingleCorner(tlInfo);
-                if (trInfo) emitSingleCorner(trInfo);
-              }
-              // Bottom band
-              if (canMergePair(blInfo, brInfo)) {
-                emitMergedBand("bottom", blInfo!);
-              } else {
-                if (blInfo) emitSingleCorner(blInfo);
-                if (brInfo) emitSingleCorner(brInfo);
-              }
+              // Always emit per-corner shapes (round1Rect). The merged
+              // band path uses round2SameRect, whose OOXML preset
+              // declares adj1/adj2 — pptxgenjs writes a single `name="adj"`
+              // guide which Slides interprets against `max(W,H)` instead
+              // of `min(W,H)`, producing a wildly over-sized radius that
+              // cuts arcs into the band's BOTTOM corners (the TL/TR
+              // "white seam below Week/Q4" defect). round1Rect's preset
+              // declares `adj` (no suffix) and renders correctly.
+              // canMergePair / emitMergedBand are kept defined for now in
+              // case a future fix swaps the OOXML preset for the merged
+              // band, but are intentionally unused.
+              void canMergePair; void emitMergedBand;
+              if (tlInfo) emitSingleCorner(tlInfo);
+              if (trInfo) emitSingleCorner(trInfo);
+              if (blInfo) emitSingleCorner(blInfo);
+              if (brInfo) emitSingleCorner(brInfo);
             }
             // (rowH computed earlier so corner shapes can prefix-sum it.)
             // Pin each row's height to its CSS height so Google Slides
@@ -2533,14 +2564,14 @@ export function buildPptx(
             // the post-table outline stroke (algn="in", 1 px) abuts the
             // cell edges with zero gap.
             const tableTw = (el as { borderSides?: BorderSides | null }).borderSides;
-            const tblTwLeft   = px2in(tableTw?.left?.width   || 0);
-            const tblTwTop    = px2in(tableTw?.top?.width    || 0);
-            const tableColSum = colW.reduce((acc: number, w: number) => acc + w, 0);
+            const tblTwLeft   = q(px2in(tableTw?.left?.width   || 0));
+            const tblTwTop    = q(px2in(tableTw?.top?.width    || 0));
+            const tableColSum = q(colW.reduce((acc: number, w: number) => acc + w, 0));
             const tableOpts: Parameters<Slide["addTable"]>[1] = {
-              x: px2in(b.x) + tblTwLeft,
-              y: px2in(b.y) + tblTwTop,
+              x: q(px2in(b.x) + tblTwLeft),
+              y: q(px2in(b.y) + tblTwTop),
               w: tableColSum,
-              h: tableH,
+              h: q(tableH),
               colW,
               rowH,
               autoPage: false,
@@ -2566,35 +2597,13 @@ export function buildPptx(
             // native cells (`injectStrokeAlignment` later adds
             // algn="in" so the stroke lives inside the geometry —
             // pixel-aligned with the corner-shape outer ring).
-            // Post-table outline stroke is only needed when the underlay
-            // ISN'T already painting the border for us. When the table has
-            // a CSS outer border, the underlay above paints in that border
-            // colour and the native <a:tbl> graphicFrame is INSET by
-            // twLeft/twRight, so the exposed underlay strip already reads
-            // as the table border. Adding the outline stroke on top
-            // produces a visible DOUBLE LINE on the right + bottom edges
-            // (slide_17 L1). Skip the stroke in that case — the underlay
-            // strip is the border. For radius-only tables (`.colored`)
-            // there's no outer-border underlay to rely on; emit the stroke
-            // as before so the perimeter notches don't leak wrapper colour.
-            const hasOuterBorderUnderlay =
-              !!tableBorderSides
-              && (tableBorderSides.top?.width || 0) > 0
-              && !!tableBorderSides.top?.color;
-            if (tableHasRadius && !hasOuterBorderUnderlay) {
-              const tableCp = cornerPresetFromRadii(tableCornerRadii);
-              const outlineOpts: ShapeProps = {
-                x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
-                fill: { type: "none" },
-                line: { type: "none" },
-              };
-              if (tableCp.preset !== "rect") {
-                outlineOpts.rectRadius = px2in(el.borderRadius);
-                if (tableCp.flipH) outlineOpts.flipH = true;
-                if (tableCp.flipV) outlineOpts.flipV = true;
-              }
-              slide.addShape(tableCp.preset, outlineOpts);
-            }
+            // (Earlier versions of this code emitted a "post-table outline
+            // stroke" `addShape` here for the perimeter. With the
+            // full-table underlay + corner shape-twice combination the
+            // outline produced a visible double-border, and when I gated
+            // it out for the outer-border case I left an `addShape` with
+            // both fill+line set to none — an invisible shape stacked
+            // over every rounded table. Removed entirely.)
             break;
           }
 
