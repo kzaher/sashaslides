@@ -67,7 +67,11 @@ const outfile =
 // This step runs ESLint over ALL source the bundle will touch BEFORE we
 // invoke esbuild — fail fast, no half-built dist.
 {
-  const eslintBin = resolve(REPO_ROOT, "node_modules/.bin/eslint");
+  // eslint + typescript-eslint are declared under structured-prompting (see
+  // eslint.config.mjs), so the binary lives in SP_DIR/node_modules, not the
+  // repo-root node_modules (the root package.json doesn't own them, and a
+  // root `npm install` prunes any stray copy there).
+  const eslintBin = resolve(SP_DIR, "node_modules/.bin/eslint");
   const eslintConfig = resolve(REPO_ROOT, "eslint.config.mjs");
   const targets = [
     "renderer/structured-prompts/bug_solving",

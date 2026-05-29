@@ -20,4 +20,4 @@ RUN git clone --depth 1 https://github.com/novnc/noVNC.git /opt/noVNC \
 # Chrome profile directory
 RUN mkdir -p /home/node/chrome-profile && chown node:node /home/node/chrome-profile
 
-RUN npm install -g @anthropic-ai/claude-code @bazel/bazelisk
+RUN npm install -g @anthropic-ai/claude-code @bazel/bazelisk @openai/codex

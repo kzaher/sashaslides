@@ -1,6 +1,7 @@
 {
   "scripts": {
     "sudo_claude": "claude --dangerously-skip-permissions",
+    "sudo_codex": "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
     "sudo_claude_fork": "claude --dangerously-skip-permissions --continue --fork-session",
     "sudo_claude_resume": "claude --dangerously-skip-permissions --continue",
     "regen:basics": "cd analysis/renderer/html2slides && bash regen-basics.sh",

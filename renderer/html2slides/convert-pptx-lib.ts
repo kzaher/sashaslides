@@ -917,6 +917,12 @@ export interface TableRow {
 export interface TableElement extends ElementCommon {
   readonly type: "table";
   readonly rows: readonly TableRow[];
+  /** Debug marker — `<table data-shape-render="true|empty">`. When set,
+   * the converter renders the table via pure per-cell `addShape` rects
+   * + per-edge filled-rect borders (no native `<a:tbl>`). Used to verify
+   * the geometry layout in isolation from `<a:tc>` rendering quirks. */
+  readonly renderAsShapes?: boolean;
+  readonly shapeRenderEmpty?: boolean;
 }
 
 export interface VisualElement extends ElementCommon {
@@ -1026,6 +1032,180 @@ export interface RenderedRegion { readonly x: number; readonly y: number; readon
 export type PresentationWithRegistries = PptxGenJS & {
   __gradients: Gradient[];
 };
+
+/**
+ * Pure-shape table renderer — debug path for `<table data-shape-render>`.
+ *
+ * Emits per-cell `addShape("rect")` for cell fills and per-edge filled
+ * rect strips for borders, using the geometry validated in
+ * `tools/table-twoway/run.ts`. All coordinates are snapped to a 0.01"
+ * lattice so the output matches a `<p:sp>`-only path Slides renders
+ * deterministically (no `<a:tbl>` rasterisation quirks).
+ *
+ * Cell coordinates come from the per-cell `bounds` recorded by
+ * extract-dom (Chrome's getBoundingClientRect at 1280×720 viewport).
+ * That ensures the shape composition lines up with what the user saw
+ * in the browser preview.
+ */
+function renderTableAsShapes(slide: Slide, el: TableElement): void {
+  // Geometry — single source of truth, snapped ONCE to the 0.01" lattice
+  // (`q01`). This is the grid the Slides UI snaps hand-placed shapes to,
+  // so cells, borders, and any rounded-corner masks that consume the
+  // SAME prefix sums reference identical edge coordinates → continuations
+  // are exact. Mirrors `tools/table-twoway/run.ts:layoutTable`.
+  const q01 = (v: number): number => Math.round(v * 100) / 100;
+  const rows = el.rows || [];
+  if (rows.length === 0 || rows[0].length === 0) return;
+  const nRows = rows.length;
+  const nCols = rows[0].length;
+  const cellSize = (cell: TableCell): { w: number; h: number } => ({
+    w: cell.bounds?.w || 0,
+    h: cell.bounds?.h || 0,
+  });
+  // Column/row sizes from RAW px (row 0 for widths, col 0 for heights).
+  const colWraw = rows[0].map((c) => px2in(cellSize(c).w));
+  const rowHraw = rows.map((r) => px2in(cellSize(r[0]).h));
+  const tableX = px2in(el.bounds?.x || 0);
+  const tableY = px2in(el.bounds?.y || 0);
+  // Quantize CUMULATIVE gridline positions, NOT per-cell sizes. Snapping
+  // each tiny size independently (e.g. a 12px row = 0.09375" → 0.09") and
+  // summing accumulates drift — 4 such rows land 0.01" short, so the grid
+  // stops a couple display-px above the table bottom and the wrapper
+  // background shows through as a seam. Snapping the absolute edge instead
+  // keeps every gridline on the lattice AND makes cell sizes (edge[i+1] −
+  // edge[i]) sum exactly to the table extent — no drift, no seam.
+  const colEdges = [q01(tableX)];
+  { let acc = 0; for (const w of colWraw) { acc += w; colEdges.push(q01(tableX + acc)); } }
+  const rowEdges = [q01(tableY)];
+  { let acc = 0; for (const h of rowHraw) { acc += h; rowEdges.push(q01(tableY + acc)); } }
+  // Cell sizes as edge differences (already lattice-aligned, drift-free).
+  const colW = colWraw.map((_, ci) => q01(colEdges[ci + 1] - colEdges[ci]));
+  const rowH = rowHraw.map((_, ri) => q01(rowEdges[ri + 1] - rowEdges[ri]));
+
+  // Does any cell (or the table) carry a border? When borders exist they
+  // own the shared boundary pixel, so cell fills must NOT be extended
+  // (extension would paint over the border). With no borders, abutting
+  // `<p:sp>` rects can leave a 1-display-px gap at the shared edge that
+  // exposes whatever sits behind the table (e.g. `.colored-wrap`'s pink);
+  // we close it with an inclusive-edge extension below.
+  const sideW = (s?: { width?: number }): number => s?.width || 0;
+  const hasAnyBorder = rows.some((row) => row.some((c) => {
+    const bs = c.style?.borderSides;
+    return bs ? (sideW(bs.top) || sideW(bs.right) || sideW(bs.bottom) || sideW(bs.left)) > 0 : false;
+  })) || (el.borderSides
+    ? (sideW(el.borderSides.top) || sideW(el.borderSides.right) || sideW(el.borderSides.bottom) || sideW(el.borderSides.left)) > 0
+    : false);
+
+  // Inclusive-edge extension = exactly ONE display pixel (1/160"). Cells
+  // grow by 1px into their right/bottom neighbour (interior edges only —
+  // never past the table's outer right/bottom edge into the wrapper).
+  // Color-agnostic: the union of all cell rects has no sub-pixel hole, so
+  // no background ever shows through. Matches run.ts's `ONE_PX_IN` trick.
+  const ONE_PX_IN = 1 / 160;
+  const ext = hasAnyBorder ? 0 : ONE_PX_IN;
+
+  // Per-cell fill rects.
+  for (let ri = 0; ri < nRows; ri++) {
+    const row = rows[ri];
+    for (let ci = 0; ci < row.length; ci++) {
+      const cell = row[ci];
+      const bg = cell.style?.bgColor || el.bgColor;
+      if (!bg) continue;
+      const extRight  = ci < nCols - 1 ? ext : 0;
+      const extBottom = ri < nRows - 1 ? ext : 0;
+      slide.addShape("rect", {
+        x: colEdges[ci], y: rowEdges[ri], w: colW[ci] + extRight, h: rowH[ri] + extBottom,
+        fill: { color: hexToRgb(bg) },
+        line: { type: "none" },
+      });
+    }
+  }
+  // Text overlay (only when not shapeRenderEmpty). Per-cell, drawn AFTER
+  // all fills so glyphs sit on top.
+  if (!el.shapeRenderEmpty) {
+    for (let ri = 0; ri < rows.length; ri++) {
+      const row = rows[ri];
+      for (let ci = 0; ci < row.length; ci++) {
+        const cell = row[ci];
+        if (!cell.text) continue;
+        const cx = colEdges[ci];
+        const cy = rowEdges[ri];
+        const cwBase = colW[ci];
+        const chBase = rowH[ri];
+        slide.addText(cell.text, {
+          x: cx, y: cy, w: cwBase, h: chBase,
+          align: cell.style?.textAlign === "center" ? "center"
+            : cell.style?.textAlign === "right" ? "right" : "left",
+          valign: "middle",
+          fontFace: mapFont(cell.style?.fontFamily || "Arial"),
+          fontSize: (cell.style?.fontSize || 14) * PX2PT,
+          color: hexToRgb(cell.style?.color || "#111111"),
+          bold: cell.style?.fontWeight === "bold" || cell.isHeader,
+          italic: cell.style?.fontStyle === "italic",
+          margin: 0,
+        });
+      }
+    }
+  }
+
+  // Borders. Each cell carries per-side `borderSides`; pick the dominant
+  // side at each gridline. Inter-cell borders straddle the shared edge;
+  // outer-perimeter borders are nudged inward (algn="in" semantics) so
+  // they sit inside the table bounding box. All coords share the SAME
+  // q01 lattice + prefix sums as the cell fills above.
+  interface SideBorder { width: number; color: string }
+  const pickSide = (a: SideBorder | undefined, b: SideBorder | undefined): SideBorder | null => {
+    const aw = a?.width || 0, bw = b?.width || 0;
+    if (aw === 0 && bw === 0) return null;
+    return aw >= bw ? { width: aw, color: a!.color || "#000000" } : { width: bw, color: b!.color || "#000000" };
+  };
+  const tableSides = el.borderSides;
+  // Vertical gridlines (cols+1)
+  for (let ci = 0; ci <= rows[0].length; ci++) {
+    let dominant: SideBorder | null = null;
+    for (let ri = 0; ri < rows.length; ri++) {
+      const cell = rows[ri][ci - 1];
+      const cellRight = cell?.style?.borderSides?.right;
+      const cellLeft = rows[ri][ci]?.style?.borderSides?.left;
+      let side = pickSide(cellRight, cellLeft);
+      if (ci === 0 && tableSides?.left) side = pickSide(side ?? undefined, tableSides.left);
+      if (ci === rows[0].length && tableSides?.right) side = pickSide(side ?? undefined, tableSides.right);
+      if (side && (!dominant || side.width > dominant.width)) dominant = side;
+    }
+    if (!dominant) continue;
+    const bwIn = q01(px2in(dominant.width));
+    const gx = colEdges[ci];
+    const half = bwIn / 2;
+    const lx = ci === 0 ? q01(gx) : ci === nCols ? q01(gx - bwIn) : q01(gx - half);
+    slide.addShape("rect", {
+      x: lx, y: rowEdges[0], w: bwIn, h: q01(rowEdges[nRows] - rowEdges[0]),
+      fill: { color: hexToRgb(dominant.color) },
+      line: { type: "none" },
+    });
+  }
+  // Horizontal gridlines (rows+1)
+  for (let ri = 0; ri <= rows.length; ri++) {
+    let dominant: SideBorder | null = null;
+    for (let ci = 0; ci < rows[0].length; ci++) {
+      const cellBelow = rows[ri - 1]?.[ci]?.style?.borderSides?.bottom;
+      const cellAbove = rows[ri]?.[ci]?.style?.borderSides?.top;
+      let side = pickSide(cellBelow, cellAbove);
+      if (ri === 0 && tableSides?.top) side = pickSide(side ?? undefined, tableSides.top);
+      if (ri === rows.length && tableSides?.bottom) side = pickSide(side ?? undefined, tableSides.bottom);
+      if (side && (!dominant || side.width > dominant.width)) dominant = side;
+    }
+    if (!dominant) continue;
+    const bwIn = q01(px2in(dominant.width));
+    const gy = rowEdges[ri];
+    const half = bwIn / 2;
+    const ly = ri === 0 ? q01(gy) : ri === nRows ? q01(gy - bwIn) : q01(gy - half);
+    slide.addShape("rect", {
+      x: colEdges[0], y: ly, w: q01(colEdges[nCols] - colEdges[0]), h: bwIn,
+      fill: { color: hexToRgb(dominant.color) },
+      line: { type: "none" },
+    });
+  }
+}
 
 export function buildPptx(
   slides: readonly SlideInput[],
@@ -1843,6 +2023,15 @@ export function buildPptx(
         }
 
         case "table": {
+          // DEBUG path — `<table data-shape-render="true|empty">`. Render
+          // the entire table via per-cell addShape rects + per-edge filled
+          // rect borders, using the layoutTable approach validated in
+          // tools/table-twoway/. Bypasses native `<a:tbl>` so we can
+          // isolate geometry issues from `<a:tc>` rasterisation quirks.
+          if (el.renderAsShapes) {
+            renderTableAsShapes(slide, el);
+            break;
+          }
           // Two rendering paths:
           //   1. `addTable` (native, editable in Google Slides) when every
           //      cell shares the same uniform border (or has no border) and
@@ -2053,10 +2242,35 @@ export function buildPptx(
             // family of complaints). Snapping all coords to 0.01"
             // eliminates the per-shape fractional offset.
             const q = (v: number): number => Math.round(v * 100) / 100;
-            // Build column widths from the first row's cell widths.
+            // Content extent = table bounds minus the outer border (the
+            // per-`<td>` bounds exclude the table's CSS border). The native
+            // cells and the corner masks must span EXACTLY this, edge to
+            // edge — the underlay is painted at this same extent, so any
+            // shortfall exposes it as a white strip at the right/bottom.
+            const twL0 = px2in(tableBorderSides?.left?.width || 0);
+            const twR0 = px2in(tableBorderSides?.right?.width || 0);
+            const twT0 = px2in(tableBorderSides?.top?.width || 0);
+            const twB0 = px2in(tableBorderSides?.bottom?.width || 0);
+            const contentW = px2in(b.w) - twL0 - twR0;
+            const contentH = px2in(b.h) - twT0 - twB0;
+            // Column geometry — DRIFT-FREE and edge-anchored. Per-`<td>`
+            // bounds sum to ~1 px less than `contentW` (extraction floors
+            // each width), so scale the raw widths to fill `contentW`
+            // exactly, accumulate, and quantize each cumulative gridline to
+            // the 0.01" lattice; per-column widths are the differences.
+            // Quantizing each width independently then summing (the old
+            // approach) drifts short of the edge — that left the white
+            // underlay exposed as a strip at the TR/BR corners. Scaling +
+            // cumulative-then-difference makes the columns span exactly
+            // [0, contentW] with every gridline on the lattice.
             const firstRow = rows[0];
             const colCnt = firstRow.length;
-            const colW = firstRow.map((c: TableCell) => q(px2in(c.bounds?.w || b.w / firstRow.length)));
+            const colWraw = firstRow.map((c: TableCell) => px2in(c.bounds?.w || b.w / firstRow.length));
+            const colRawTotal = colWraw.reduce((a, w) => a + w, 0);
+            const colScale = colRawTotal > 0 ? contentW / colRawTotal : 1;
+            const colXPrefix: number[] = [0];
+            { let acc = 0; for (const w of colWraw) { acc += w * colScale; colXPrefix.push(q(acc)); } }
+            const colW = colWraw.map((_, i) => q(colXPrefix[i + 1] - colXPrefix[i]));
             const cornerKindByKey = new Map<string, CornerKind>();
             for (const c of cornerSpecs) cornerKindByKey.set(`${c.rowIdx}:${c.cellIdx}`, c.kind);
             const tableRows = rows.map((row: readonly TableCell[], ri: number) => row.map((cell: TableCell, ci: number) => {
@@ -2178,16 +2392,18 @@ export function buildPptx(
             // direction: top corners sit 1 px below row 0, bottom corners
             // overhang the table by 1 px (the "phantom 5th row" the user
             // flagged on slide_17 and complex_slide_05).
-            const rowH = rows.map((row) => q(row[0]?.bounds ? px2in(row[0].bounds.h) : px2in(b.h / Math.max(1, rowCount))));
-            // Prefix sums (inches) → native cell origin for any (ri, ci):
-            //   x = px2in(b.x) + colXPrefix[ci]
-            //   y = px2in(b.y) + rowYPrefix[ri]
-            // width  = colW[ci]
-            // height = rowH[ri]
-            const colXPrefix: number[] = [0];
-            for (const w of colW) colXPrefix.push(colXPrefix[colXPrefix.length - 1] + w);
+            // Row geometry — DRIFT-FREE, same cumulative-quantize model as
+            // the columns above (so the bottom corners reach the table's
+            // bottom edge with no exposed underlay strip). Prefix sums give
+            // the native cell origin for any (ri, ci):
+            //   x = px2in(b.x) + colXPrefix[ci]   width  = colW[ci]
+            //   y = px2in(b.y) + rowYPrefix[ri]   height = rowH[ri]
+            const rowHraw = rows.map((row) => row[0]?.bounds ? px2in(row[0].bounds.h) : px2in(b.h / Math.max(1, rowCount)));
+            const rowRawTotal = rowHraw.reduce((a, h) => a + h, 0);
+            const rowScale = rowRawTotal > 0 ? contentH / rowRawTotal : 1;
             const rowYPrefix: number[] = [0];
-            for (const h of rowH) rowYPrefix.push(rowYPrefix[rowYPrefix.length - 1] + h);
+            { let acc = 0; for (const h of rowHraw) { acc += h * rowScale; rowYPrefix.push(q(acc)); } }
+            const rowH = rowHraw.map((_, i) => q(rowYPrefix[i + 1] - rowYPrefix[i]));
 
             // Emit per-corner shape-twice underlays BEFORE the addTable
             // call so they paint behind it (the addShape z-order is the
@@ -2209,11 +2425,24 @@ export function buildPptx(
               // outer borderSides on those same keys. Take the wider
               // side's {width, color}. If both sides are 0, return 0
               // (no ring) so the else-branch paints a single fill rect.
+              // The outer ring on a clipped rounded corner = the border that
+              // survives the clip: the WIDER of the corner cell's own
+              // outer-facing border and the table's outer border on that
+              // side. For `.colored` (every cell has `border:1px #fff`, the
+              // table itself has none) this is the cell's 1px white border —
+              // which Chrome shows curving around each corner. Dropping it
+              // (the prior "table-border-only" attempt) is what left all
+              // four corner cells with NO outer border. For `.rounded`
+              // (table `border:1px #d1d5db`) the table border wins. Both 0
+              // ⇒ ring 0 ⇒ the corner is a single cell-coloured rounded fill
+              // (correct for `.colored-nb` / `.rounded-nb`, which have no
+              // cell borders).
               const pickRingBorder = (
                 cs: { readonly borderSides?: BorderSides } | undefined,
                 kind: CornerKind,
               ): { width: number; color: string } => {
                 const bsCell = cs?.borderSides;
+                const tBS = tableBorderSides || undefined;
                 const sidePick = (
                   cellSide: BorderSide | undefined,
                   tblSide: BorderSide | undefined,
@@ -2224,7 +2453,6 @@ export function buildPptx(
                   if (tw >= cw) return { w: tw, c: tblSide?.color || "#000000" };
                   return { w: cw, c: cellSide?.color || "#000000" };
                 };
-                const tBS = tableBorderSides || undefined;
                 let s1: { w: number; c: string };
                 let s2: { w: number; c: string };
                 switch (kind) {
@@ -2262,15 +2490,16 @@ export function buildPptx(
               // E5E7EB row-divider — at 2 px the native cell's lnT/lnB
               // still paints fully on top of the corner shape's tail.
               const innerOverlap = px2in(2);
-              // Outer-bottom overshoot: when there's no CSS border on the
-              // bottom side, Google Slides' native middle cells autogrow
-              // a few px past `tableBottomIn`. Extending the corner
-              // shape's outer bottom by this amount aligns it with where
-              // middle cells actually paint — closing the "bottom isn't
-              // aligned with table bottom" gap on BL/BR of `.colored-nb`.
-              // User explicitly sanctioned: "it's possible to go lower
-              // than needed to make sure there are no lines."
-              const outerOvershootBottom = px2in(3);
+              // Outer-bottom overshoot: a legacy nudge added back when the
+              // row geometry drifted short and the corner shape's bottom
+              // fell ABOVE where the native middle cells painted, leaving a
+              // gap. Now that row edges are drift-free + edge-anchored to
+              // the exact content height, the corner bottom already lands on
+              // `tableBottom`; the old 3 px overshoot instead makes BL/BR
+              // poke out BELOW the table (user: "bottom side is sticking
+              // out / too low"). Zero it so the corner bottom aligns exactly
+              // with the table's bottom edge.
+              const outerOvershootBottom = px2in(0);
 
               // Full-table BG underlay — paints (b.x, b.y, b.w, b.h) in
               // the table's own outer-border colour (or the table bg
@@ -2369,8 +2598,11 @@ export function buildPptx(
                 const bw = info.ring.width;
                 const bwIn = px2in(bw);
                 const cpOuter = cornerPresetFromRadii(cellCR);
-                const cellX = px2in(b.x) + twLeft + colXPrefix[info.cellIdx];
-                const cellY = px2in(b.y) + twTop  + rowYPrefix[info.rowIdx];
+                // Base on q(px2in(b.x/y)) — the SAME quantized origin the
+                // underlay and native <a:tbl> use — so the mask, the native
+                // cells, and the underlay share identical edge coordinates.
+                const cellX = q(px2in(b.x)) + twLeft + colXPrefix[info.cellIdx];
+                const cellY = q(px2in(b.y)) + twTop  + rowYPrefix[info.rowIdx];
                 const cellW = colW[info.cellIdx];
                 const cellH = rowH[info.rowIdx];
                 const isOuterTop    = info.kind === "tl" || info.kind === "tr";
@@ -2399,14 +2631,14 @@ export function buildPptx(
                   const outerOverTop    = isOuterTop    ? extTop    : innerOverlap;
                   const outerOverBottom = isOuterBottom ? (extBottom + oversBottomExt) : innerOverlap;
                   slide.addShape(cpOuter.preset as Parameters<Slide["addShape"]>[0], {
-                    x: cellX - outerOverLeft,
-                    y: cellY - outerOverTop,
-                    w: cellW + outerOverLeft + outerOverRight,
-                    h: cellH + outerOverTop  + outerOverBottom,
+                    x: q(cellX - outerOverLeft),
+                    y: q(cellY - outerOverTop),
+                    w: q(cellW + outerOverLeft + outerOverRight),
+                    h: q(cellH + outerOverTop  + outerOverBottom),
                     fill: { color: borderHex },
                     line: { type: "none" },
                     flipH: cpOuter.flipH, flipV: cpOuter.flipV,
-                    rectRadius: px2in(info.cornerR),
+                    rectRadius: q(px2in(info.cornerR)),
                     objectName: memberName(_tableGid!, memberIdx++),
                   });
                   const innerCR: CornerRadii = {
@@ -2425,14 +2657,14 @@ export function buildPptx(
                   const innerOverTop    = isOuterTop    ? 0 : innerOverlap;
                   const innerOverBottom = isOuterBottom ? oversBottomExt : innerOverlap;
                   slide.addShape(cpInner.preset as Parameters<Slide["addShape"]>[0], {
-                    x: cellX + innerInsetLeft - innerOverLeft,
-                    y: cellY + innerInsetTop  - innerOverTop,
-                    w: cellW - innerInsetLeft - innerInsetRight + innerOverLeft + innerOverRight,
-                    h: cellH - innerInsetTop  - innerInsetBottom + innerOverTop  + innerOverBottom,
+                    x: q(cellX + innerInsetLeft - innerOverLeft),
+                    y: q(cellY + innerInsetTop  - innerOverTop),
+                    w: q(cellW - innerInsetLeft - innerInsetRight + innerOverLeft + innerOverRight),
+                    h: q(cellH - innerInsetTop  - innerInsetBottom + innerOverTop  + innerOverBottom),
                     fill: { color: info.bgHex },
                     line: { type: "none" },
                     flipH: cpInner.flipH, flipV: cpInner.flipV,
-                    rectRadius: Math.max(0, px2in(info.cornerR - bw)),
+                    rectRadius: q(Math.max(0, px2in(info.cornerR - bw))),
                     objectName: memberName(_tableGid!, memberIdx++),
                   });
                 } else {
@@ -2441,14 +2673,14 @@ export function buildPptx(
                   const innerOverTop    = isOuterTop    ? 0 : innerOverlap;
                   const innerOverBottom = isOuterBottom ? oversBottomExt : innerOverlap;
                   slide.addShape(cpOuter.preset as Parameters<Slide["addShape"]>[0], {
-                    x: cellX - extLeft - innerOverLeft,
-                    y: cellY - extTop  - innerOverTop,
-                    w: cellW + extLeft + extRight + innerOverLeft + innerOverRight,
-                    h: cellH + extTop  + extBottom + innerOverTop  + innerOverBottom,
+                    x: q(cellX - extLeft - innerOverLeft),
+                    y: q(cellY - extTop  - innerOverTop),
+                    w: q(cellW + extLeft + extRight + innerOverLeft + innerOverRight),
+                    h: q(cellH + extTop  + extBottom + innerOverTop  + innerOverBottom),
                     fill: { color: info.bgHex },
                     line: { type: "none" },
                     flipH: cpOuter.flipH, flipV: cpOuter.flipV,
-                    rectRadius: px2in(info.cornerR),
+                    rectRadius: q(px2in(info.cornerR)),
                     objectName: memberName(_tableGid!, memberIdx++),
                   });
                 }
@@ -2509,7 +2741,7 @@ export function buildPptx(
                     fill: { color: left.bgHex },
                     line: { type: "none" },
                     flipH: cpInner.flipH, flipV: cpInner.flipV,
-                    rectRadius: Math.max(0, px2in(cornerR - bw)),
+                    rectRadius: q(Math.max(0, px2in(cornerR - bw))),
                     objectName: memberName(_tableGid!, memberIdx++),
                   });
                 }

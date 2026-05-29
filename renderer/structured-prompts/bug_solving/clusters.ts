@@ -1,44 +1,91 @@
 /**
- * Wave-32 — single worker, 10 attempts, full 5-bullet scope. Baseline now
- * includes the post-table-outline-stroke-skip fix in main (the underlay
- * strip is the sole perimeter border when the table has an outer border;
- * the double-border defect on `.rounded` should now be gone or much
- * reduced).
+ * Wave-33 — single worker, 10 attempts. Rounded-table corner masks on
+ * basics slide_17 (`renderer/html2slides/e2e/fixtures-basic/slide_17_table_rounded.html`).
  *
- * The worker should diagnose whatever residual defects remain against the
- * user's original 5-bullet comment, fix them, and not regress the now-
- * single perimeter line on `.rounded`/`.rounded-nb`.
+ * Since wave-32 the corner-mask path in `convert-pptx-lib.ts` was reworked
+ * (NOT by a worker — by main, this session). The worker MUST build on that
+ * state, not revert it. What changed and why (the retry trail):
  *
- * Cluster: 1 worker, retry_budget 10.
+ *   wave-32  → skipped the post-table outline stroke when the underlay
+ *              already paints the border (killed the `.rounded` double
+ *              border). DO NOT re-introduce that stroke.
+ *
+ *   session fixes since wave-32 (all in `convert-pptx-lib.ts`):
+ *     a) renderTableAsShapes + the corner-mask block were made DRIFT-FREE:
+ *        column/row geometry is built by quantising CUMULATIVE gridline
+ *        offsets (q01 = round to 0.01") and taking per-cell sizes as the
+ *        DIFFERENCE of adjacent quantised edges, then EDGE-ANCHORING the
+ *        last edge to `contentW/contentH = px2in(b.w/h) - outer borders`.
+ *        Quantising each size then summing (the old way) drifted short and
+ *        leaked the wrapper-pink/white underlay at the right & bottom. DO
+ *        NOT go back to per-cell quantise-then-sum.
+ *     b) `pickRingBorder` was reverted to use the WIDER of the corner
+ *        cell's own outer border and the table's outer border. For
+ *        `.colored` (cells have `border:1px #fff`, table has none) this
+ *        restores the 1px WHITE outer border that curves around each
+ *        corner. An earlier "table-border-only" attempt DELETED that border
+ *        — do NOT remove the corner cell's own border again.
+ *     c) `outerOvershootBottom` was set to 0 (was px2in(3)). With drift-free
+ *        rows the corner bottom now lands exactly on the table bottom; the
+ *        old 3px overshoot made BL/BR poke out below the table. Keep it 0
+ *        unless a real gap reappears (then use <= 1px).
+ *
+ * After (a)-(c) the user re-rated slide_17 BAD again. The remaining defects
+ * are now SMALL (sub-pixel / 1-2 display-px edge misalignment) on the
+ * corner cells of the bordered table, plus NEW white-leak + bottom-
+ * misalignment on the no-outer-border companion (`.colored-nb`). The worker
+ * should diagnose and close these residuals WITHOUT regressing (a)-(c) or
+ * the wave-32 single-perimeter-line fix.
+ *
+ * slide_17 layout (top→bottom, the relevant tables):
+ *   - row 1 right "top right table"  = `.colored`    (pastel cells, 1px
+ *     WHITE internal + outer borders, pink rounded wrapper) — uses the
+ *     native <a:tbl> + corner shape-twice masks.
+ *   - row 2 right "right center table" = `.colored-nb` (same pastels, NO
+ *     outer table border, cells have NO border) — corner masks should be a
+ *     single cell-coloured rounded fill (ring width 0); pink wrapper behind.
+ *
+ * Verify against the rendered thumb at /tmp/sxs/slides/slide_17.png + the
+ * pink wrapper. Cluster: 1 worker, retry_budget 10.
  */
 import type { Cluster } from "./workspace-setup.js";
 
 const BUG_DESCRIPTION =
-  "User flagged basic_slide_17 as BAD with the following comment (verbatim, " +
-  "do NOT paraphrase or infer beyond this text):" +
+  "User re-flagged basics slide_17 as BAD. Comment (verbatim — do NOT " +
+  "paraphrase or infer beyond this text):" +
   "\n" +
-  "\n  \"Left table:\n" +
-  "  * I can see a double border on the right side of table. remove that border.\n" +
-  "  * The right side of bottom left cell has pink stripe, and bottom border is a bit too high.\n" +
-  "  * Top left cell has pink border on the bottom and right side.\n" +
-  "  \n" +
-  "  Right table:\n" +
-  "  * Top left cell nas no white border on top and left.\n" +
-  "  * Bottom left cell has no white border on top, bottom and left sides.\n" +
-  "  \n" +
-  "  For this clipped cells, all borders should be colored in the actual table as border. The corner cell should only have outer border and background embedded in the shapes. If the bottom corner cells have the same background border, then make sure they are a single shape. The same is valid for top cells. Make sure that the clipped shape (in this case cell edges) covers at least some overlap below the border and other elements to remove any visual artifacts and ghost lines.\"" +
+  "\n  \"The problem with the top right table." +
+  "\n  * top left cell - slightly misaligned left edge." +
+  "\n  * top right cell - slightly misaligned right edge." +
+  "\n  * bottom left cell - slightly misaligned bottom edge." +
+  "\n  * bottom right cell - slightly misaligned bottom and right edge." +
+  "\n  " +
+  "\n  right center table:" +
+  "\n  * white on edge side of table." +
+  "\n  * white on top side of table." +
+  "\n  * bottom left cell - misaligned bottom." +
+  "\n  * bottom right cell - misaligned bottom.\"" +
   "\n" +
-  "\nStatus note: the double-border bullet (left-table right edge) was just " +
-  "addressed in main by skipping the post-table outline stroke when the " +
-  "underlay already paints the border. Do NOT re-introduce that stroke. " +
-  "The fixture also contains two no-outer-border variants below the " +
-  "original pair (`.rounded-nb`, `.colored-nb`) — your fix must work for " +
-  "both cases. The slide has a pink background behind each table for " +
-  "visibility. Per-annotation zoom-crops (5 annotations) are attached at " +
-  "Step 7.5.";
+  "\nContext: the four cells called out on the 'top right table' (`.colored`) " +
+  "are its CORNER cells, rendered by the shape-twice corner-mask block in " +
+  "`renderer/html2slides/convert-pptx-lib.ts` (the `if (_tableGid && " +
+  "cornerSpecs.length > 0)` block) — NOT the native <a:tbl> interior cells. " +
+  "The 'right center table' is `.colored-nb` (no outer border; corner masks " +
+  "should be a single cell-coloured rounded fill with ring width 0). The " +
+  "misalignments are now SMALL (1-2 display px at 160dpi; 1 CSS px = 1.25 " +
+  "slide px). 'white on edge/top side' on `.colored-nb` = the white full-" +
+  "table underlay showing through where the corner/edge shapes fall short " +
+  "of the table perimeter — tighten the shape extents so they reach the " +
+  "table edges exactly (or make the underlay match the cell colour there), " +
+  "with a small overlap below adjacent elements to kill ghost lines. Do NOT " +
+  "regress the changes listed in the wave-33 header doc (drift-free edge-" +
+  "anchored geometry; corner cells keep their own white border; " +
+  "outerOvershootBottom = 0; no post-table outline stroke; no double border). " +
+  "Per-annotation zoom-crops (4 annotations) are attached at Step 7.5; the " +
+  "slide has a pink wrapper behind each table for visibility.";
 
-const SLIDE_IDS = ["basic_slide_17"];
+const SLIDE_IDS = ["slide_17"];
 
 export const CLUSTERS: Cluster[] = [
-  { task_id: "wave32-A", cluster_description: BUG_DESCRIPTION, slide_ids: SLIDE_IDS, retry_budget: 10 },
+  { task_id: "wave33-A", cluster_description: BUG_DESCRIPTION, slide_ids: SLIDE_IDS, retry_budget: 10 },
 ];

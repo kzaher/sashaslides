@@ -7,7 +7,7 @@
 - **convert-pptx.ts** — Reads extractions, builds a `.pptx` via pptxgenjs, uploads to Google Drive as a Slides presentation.
 - **regen-basics.sh / regen-complex.sh** — Convert fixtures → pptx → Slides → thumbs → diff vs goldens.
 - **e2e/fixtures-basic/, e2e/fixtures/** — HTML test slides (basic primitives + complex layouts).
-- **rating-server.ts** — SxS comparison UI with links to HTML source and Google Slides; sole writer of `e2e/goldens*/`.
+- **serve-sxs.sh → filtered-rating-server** — the single SxS comparison UI (🔍 magnifier, annotation canvas, client-side diff overlay) with links to HTML source and Google Slides; sole writer of `e2e/goldens*/` (on the user's "Good" click, when launched with `--goldens-dir`).
 
 ## Rendering Rules (documented in extract-dom.ts)
 

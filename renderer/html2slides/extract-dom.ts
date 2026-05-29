@@ -871,6 +871,15 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         effectiveCornerRadii = wrapperClip.cornerRadii;
       }
     }
+    // Debug marker: when `<table data-shape-render="true">` or
+    // `data-shape-render="empty">` is set, the converter renders the
+    // entire table via shape-only emission (no native <a:tbl>). Use
+    // "empty" to also blank the cell text. Two values:
+    //   - "true"  → shape-render, keep content
+    //   - "empty" → shape-render, no content
+    const shapeRenderAttr = table.getAttribute("data-shape-render");
+    const renderAsShapes = shapeRenderAttr === "true" || shapeRenderAttr === "empty";
+    const shapeRenderEmpty = shapeRenderAttr === "empty";
     return {
       type: "table", bounds, rows,
       bgColor: style.bgColor,
@@ -879,6 +888,8 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       cornerRadii: effectiveCornerRadii,
       borderSides: style.borderSides,
       borderCollapse,
+      renderAsShapes,
+      shapeRenderEmpty,
     };
   }
 

@@ -11,7 +11,7 @@
  */
 import { createServer, Server } from "http";
 import {
-  readFileSync, writeFileSync, existsSync, statSync, mkdirSync, readdirSync, unlinkSync,
+  readFileSync, writeFileSync, existsSync, statSync, mkdirSync, readdirSync, unlinkSync, copyFileSync,
 } from "fs";
 import { join, dirname } from "path";
 import { PNG } from "pngjs";
@@ -134,6 +134,11 @@ export interface Args {
   task_title: string;
   baseline_dir: string | null;        // pre-fix Slides-rendered thumbs (shared across wave)
   bug_context: string | null;         // explicit path to bug-context.json
+  goldens_dir: string | null;         // GOLDENS MODE: when set, clicking "Good"
+                                      // copies <thumbnails>/<id>.png into this
+                                      // dir (the html2slides goldens bless). Left
+                                      // null for bug_solving clustering so that
+                                      // flow NEVER writes goldens.
 }
 
 export function sectionFor(markdown: string, slideId: string): string | null {
@@ -595,6 +600,15 @@ function SlideCard(props) {
   // render match the spec?", not "did anything regress vs the prior bad
   // render?". Toggle the checkbox to switch.
   const [leftSource, setLeftSource] = useState("original");
+  // Blink-comparator view: when flip is on (default), the two images are
+  // STACKED in one box and tiny tabs at the top pick which one is shown, so
+  // you can flick between original/rendered in place and spot differences
+  // instantly. activeSide = which panel is on top ("left" = original/
+  // baseline, "right" = rendered). Turn flip off for the classic
+  // side-by-side layout. (No backticks here — this whole component is inside
+  // a template-literal client script.)
+  const [flip, setFlip] = useState(true);
+  const [activeSide, setActiveSide] = useState("right");
 
   const origRef = useRef(null);
   const slidesRef = useRef(null);
@@ -651,10 +665,11 @@ function SlideCard(props) {
   useEffect(() => {
     if (!loupe) return;
     const size = 240;
+    const leftMagPath = leftSource === "baseline" ? s.baseline : s.original;
     const targets = [
-      { img: origRef.current,   srcPath: s.original },
-      { img: slidesRef.current, srcPath: s.rendered },
-    ].filter((t) => t.img && t.srcPath);
+      { img: origRef.current,   srcPath: leftMagPath, side: "left" },
+      { img: slidesRef.current, srcPath: s.rendered,  side: "right" },
+    ].filter((t) => t.img && t.srcPath && (!flip || t.side === activeSide));
     if (targets.length === 0) return () => {};
     const lens = document.getElementById("loupe");
     if (!lens) return () => {};
@@ -683,7 +698,7 @@ function SlideCard(props) {
       document.removeEventListener("mousemove", onMove, true);
       if (lens) lens.style.display = "none";
     };
-  }, [loupe, loupeZoom, s.id, s.original, s.rendered]);
+  }, [loupe, loupeZoom, s.id, s.original, s.rendered, s.baseline, flip, activeSide, leftSource]);
 
   const rate = useCallback(async (status) => {
     setSaving(true);
@@ -733,8 +748,34 @@ function SlideCard(props) {
         class: "original-bug-annot",
       }, "[annotation]"),
     ),
-    h("div", { class: "pair" },
-      h("div", { class: "panel original", ref: origOverlayRef },
+    // Blink-comparator tab strip: pick which single image fills the box, so
+    // flicking between them reveals pixel differences in place. The classic
+    // side-by-side layout is one toggle away.
+    h("div", { class: "flip-tabs" },
+      h("button", {
+        class: "flip-tab" + (flip && activeSide === "left" && leftSource === "original" ? " active" : ""),
+        onClick: () => { setFlip(true); setActiveSide("left"); setLeftSource("original"); },
+      }, "Original"),
+      s.baseline && h("button", {
+        class: "flip-tab" + (flip && activeSide === "left" && leftSource === "baseline" ? " active" : ""),
+        onClick: () => { setFlip(true); setActiveSide("left"); setLeftSource("baseline"); },
+      }, "Baseline"),
+      h("button", {
+        class: "flip-tab" + (flip && activeSide === "right" ? " active" : ""),
+        onClick: () => { setFlip(true); setActiveSide("right"); },
+      }, "Rendered"),
+      h("span", { style: "flex:1" }),
+      h("button", {
+        class: "flip-tab toggle" + (flip ? "" : " active"),
+        title: "Switch between blink-flip (stacked, tabs) and side-by-side",
+        onClick: () => setFlip(!flip),
+      }, flip ? "▣ Flip" : "⇄ Side-by-side"),
+    ),
+    h("div", { class: "pair" + (flip ? " flip" : "") },
+      h("div", {
+        class: "panel original" + (flip ? (activeSide === "left" ? " flip-active" : " flip-off") : ""),
+        ref: origOverlayRef,
+      },
         h("span", { class: "label" },
           leftSource === "baseline" ? "baseline (main, pre-fix)" : "original (Chrome)",
         ),
@@ -751,7 +792,9 @@ function SlideCard(props) {
         })(),
         showDiff && h("canvas", { class: "diff-overlay", ref: diffRef }),
       ),
-      h("div", { class: "panel rendered" },
+      h("div", {
+        class: "panel rendered" + (flip ? (activeSide === "right" ? " flip-active" : " flip-off") : ""),
+      },
         h("span", { class: "label" }, "rendered (Slides, fixed)"),
         s.rendered
           ? h("img", { ref: slidesRef, src: "/img?path=" + encodeURIComponent(s.rendered) })
@@ -873,6 +916,11 @@ function SlideCard(props) {
 function App() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
+  // ONE slide shown at a time, selected via the sticky top tab strip
+  // (S1, S2, …) — the navigation from the original rating-server: click a
+  // tab (or ←/→) to jump between slides instantly instead of scrolling a
+  // long stack of cards.
+  const [idx, setIdx] = useState(0);
   const refresh = useCallback(() => {
     fetch("/api/slides")
       .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(t); }))
@@ -880,11 +928,24 @@ function App() {
       .catch(e => setErr(String(e && e.message ? e.message : e)));
   }, []);
   useEffect(() => { refresh(); }, []);
+  // ←/→ (or p/n) move between slides; ignore while typing in a field.
+  useEffect(() => {
+    const onKey = (e) => {
+      const t = e.target;
+      if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.tagName === "SELECT")) return;
+      if (!data || !data.slides.length) return;
+      if (e.key === "ArrowRight" || e.key === "n") { setIdx(i => Math.min(data.slides.length - 1, i + 1)); }
+      else if (e.key === "ArrowLeft" || e.key === "p") { setIdx(i => Math.max(0, i - 1)); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [data]);
   if (err) return h("div", { class: "header" }, h("h1", null, "error: " + err));
   if (!data) return h("div", { class: "header" }, h("h1", null, "loading…"));
   const good = data.slides.filter(s => s.status === "good").length;
   const bad = data.slides.filter(s => s.status === "bad").length;
   const pending = data.slides.filter(s => s.status === "pending").length;
+  const cur = Math.min(idx, data.slides.length - 1);
   return h("div", null,
     h("div", { class: "header" },
       h("h1", null, data.task_title),
@@ -893,13 +954,25 @@ function App() {
         h("span", { style: "color:#27ae60" }, good + " good"), " · ",
         h("span", { style: "color:#c0392b" }, bad + " bad"), " · ",
         h("span", { style: "color:#888" }, pending + " pending"),
+        " · ", h("span", { style: "color:#aaa" }, (cur + 1) + "/" + data.slides.length),
       ),
       data.cluster_description && h("div", { class: "cluster-banner" },
         h("span", { class: "cluster-label" }, "Cluster hypothesis"), " ",
         data.cluster_description,
       ),
     ),
-    data.slides.map(s => h(SlideCard, { key: s.id, slide: s, onRated: refresh })),
+    // Sticky per-slide tab strip — S1..Sn, colour-coded by rating status,
+    // current highlighted. Click to jump to that slide.
+    h("div", { class: "slide-nav" },
+      data.slides.map((s, i) => h("button", {
+        key: s.id,
+        class: "slide-tab status-" + s.status + (i === cur ? " current" : ""),
+        title: s.id + " — " + s.status,
+        onClick: () => setIdx(i),
+      }, "S" + (i + 1))),
+    ),
+    // Only the selected slide's card is mounted (one-at-a-time view).
+    data.slides[cur] && h(SlideCard, { key: data.slides[cur].id, slide: data.slides[cur], onRated: refresh }),
     // Single floating loupe shared across cards — per-card effect toggles
     // display + repositions it via ref lookup on #loupe.
     h("div", {
@@ -920,6 +993,16 @@ render(h(App), document.body);
   .header { padding: 16px 24px; background: #16213e; }
   .header h1 { font-size: 18px; font-weight: 600; }
   .subtitle { font-size: 13px; color: #888; margin-top: 4px; }
+  /* Sticky per-slide tab strip (S1..Sn) — the original rating-server nav. */
+  .slide-nav { position: sticky; top: 0; z-index: 50; display: flex; gap: 6px; flex-wrap: wrap;
+    padding: 8px 24px; background: #16213e; border-bottom: 1px solid #0f1a30; }
+  .slide-tab { font-size: 12px; padding: 4px 9px; border-radius: 4px; border: 1px solid #2a3a5a;
+    background: #1a1a2e; color: #9fb3d0; cursor: pointer; }
+  .slide-tab:hover { background: #2a2a4e; color: #fff; }
+  .slide-tab.current { background: #4a90d9; color: #fff; border-color: #4a90d9; font-weight: 700; }
+  .slide-tab.status-good { box-shadow: inset 0 -3px 0 #27ae60; }
+  .slide-tab.status-bad { box-shadow: inset 0 -3px 0 #e94560; }
+  .slide-tab.status-pending { opacity: 0.75; }
   .cluster-banner { margin-top: 10px; padding: 8px 12px; background: #0f1a30; border-left: 3px solid #4a90d9; border-radius: 0 4px 4px 0; font-size: 12px; color: #c0d6e8; line-height: 1.5; }
   .cluster-label { font-weight: 600; color: #4a90d9; text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px; }
   .original-bug { margin: 4px 0 12px; padding: 8px 12px; background: #2e1a1a; border-left: 3px solid #c0392b; border-radius: 0 4px 4px 0; font-size: 13px; line-height: 1.5; }
@@ -939,6 +1022,19 @@ render(h(App), document.body);
   .links a:hover { background: #4a90d9; color: white; }
   .pair { display: flex; gap: 4px; align-items: flex-start; position: relative; }
   .panel { width: 49%; position: relative; }
+  /* Blink-comparator: stack both panels in one box; active on top, the
+     other hidden but kept mounted so flips are instant and refs/canvas
+     stay alive. Both images are 16:9 so they register exactly. */
+  .pair.flip { display: block; }
+  .pair.flip .panel { width: 100%; position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+  .pair.flip .panel.flip-active { position: relative; opacity: 1; pointer-events: auto; z-index: 1; }
+  .flip-tabs { display: flex; align-items: center; gap: 4px; margin: 6px 0 4px; }
+  .flip-tab { font-size: 11px; padding: 3px 10px; border-radius: 4px 4px 0 0; border: 1px solid #2a3a5a;
+    background: #16213e; color: #9fb3d0; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; }
+  .flip-tab:hover { background: #1d2d4f; color: #e0e0e0; }
+  .flip-tab.active { background: #27ae60; color: #fff; border-color: #27ae60; font-weight: 600; }
+  .flip-tab.toggle { border-radius: 4px; background: #0f1a30; }
+  .flip-tab.toggle.active { background: #4a90d9; border-color: #4a90d9; color: #fff; }
   .panel img { width: 100%; border: 2px solid #333; border-radius: 4px; display: block; background: #0f1a30; }
   .panel.original img { border-color: #4a90d9; }
   .panel.rendered img { border-color: #27ae60; }
@@ -988,7 +1084,14 @@ render(h(App), document.body);
     const url = new URL(req.url || "/", `http://localhost:${args.port}`);
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      res.writeHead(200, { "Content-Type": "text/html" });
+      // no-store so a browser that cached an older build of this page (e.g.
+      // before the image-tab nav was added) always re-fetches the current
+      // client JS instead of showing a stale UI.
+      res.writeHead(200, {
+        "Content-Type": "text/html",
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+      });
       res.end(HTML);
       return;
     }
@@ -1097,6 +1200,29 @@ render(h(App), document.body);
           ratings[id] = entry;
           writeRatings(args.ratings_file!, ratings);
           console.log(`RATING: ${id} → ${status}${comment ? ` | ${comment}` : ""}${annotation ? " [+annotation]" : ""}`);
+
+          // GOLDENS BLESS (ported from the retired rating-server.ts) — the
+          // ONLY sanctioned writer of e2e/goldens/. Gated on goldens MODE:
+          // fires only when launched with --goldens-dir (the html2slides
+          // basics/complex review). bug_solving clustering passes no
+          // --goldens-dir, so its "Good" verdicts NEVER touch goldens.
+          // Triggered exclusively by the user's "Good" click (same trust
+          // model as before) — never by an automated/agent path.
+          if (status === "good" && args.goldens_dir) {
+            try {
+              const thumb = join(args.thumbnails, `${id}.png`);
+              if (existsSync(thumb)) {
+                mkdirSync(args.goldens_dir, { recursive: true });
+                copyFileSync(thumb, join(args.goldens_dir, `${id}.png`));
+                console.log(`  BLESSED ${id} → ${args.goldens_dir}`);
+              } else {
+                console.warn(`  bless skipped: no thumb at ${thumb}`);
+              }
+            } catch (e: unknown) {
+              console.warn(`  bless failed for ${id}: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true }));
         } catch (e: unknown) {
