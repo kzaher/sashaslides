@@ -7,7 +7,20 @@
 // build.ts (structured-prompting/build.ts) runs ESLint before esbuild and
 // fails the build on any violation — so `: any`, `as any`, `<any>`, etc.
 // can't ship without a deliberate eslint-disable comment.
-import tseslint from "typescript-eslint";
+import { createRequire } from "node:module";
+
+// `typescript-eslint` (and `eslint` itself) are declared in
+// structured-prompting/package.json — the only project that lint-gates its
+// build — NOT in the repo-root package.json. So they install under
+// structured-prompting/node_modules, and a root `npm install` prunes any
+// copy placed in the root node_modules as "extraneous". Resolve the package
+// from where it actually lives by anchoring createRequire at the
+// structured-prompting package, so this config loads with no symlink and no
+// dependency on the root node_modules. (build.ts runs the eslint *binary*
+// from structured-prompting/node_modules for the same reason.)
+const tseslint = createRequire(
+  new URL("./structured-prompting/package.json", import.meta.url),
+)("typescript-eslint");
 
 export default tseslint.config(
   {

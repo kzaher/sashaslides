@@ -5,7 +5,7 @@
 # separate goldens dir (e2e/goldens-complex/) + output dir (/tmp/sxs-complex)
 # so it doesn't collide with the basics pipeline.
 #
-# Goldens can only be written by the user via rating-server.ts — same rule.
+# Goldens can only be written by the user via the SxS rating UI (serve-sxs.sh) — same rule.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT=${REGEN_OUT:-/tmp/sxs-complex}

@@ -43,6 +43,7 @@ function parseArgs(argv: string[]): Args {
     task_title: "bug_solving",
     baseline_dir: null,
     bug_context: null,
+    goldens_dir: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
@@ -57,12 +58,13 @@ function parseArgs(argv: string[]): Args {
     else if (v === "--task-title") a.task_title = argv[++i];
     else if (v === "--baseline-dir") a.baseline_dir = resolve(argv[++i]);
     else if (v === "--bug-context") a.bug_context = resolve(argv[++i]);
+    else if (v === "--goldens-dir") a.goldens_dir = resolve(argv[++i]);
   }
   if (!a.port || !a.slides || !a.analysis || !a.diffs || !a.thumbnails) {
     throw new Error(
       "usage: --port N --slides csv --analysis md --diffs dir --thumbnails dir " +
       "[--originals dir] [--html-dir dir] [--ratings-file file] [--task-title str] " +
-      "[--baseline-dir dir]",
+      "[--baseline-dir dir] [--goldens-dir dir]",
     );
   }
   // Default ratings file sits beside the scratch dir so a future retry can
@@ -85,6 +87,8 @@ function parseArgs(argv: string[]): Args {
     ratings_file: a.ratings_file,
     task_title: a.task_title!,
     baseline_dir: a.baseline_dir!,
+    bug_context: a.bug_context!,
+    goldens_dir: a.goldens_dir!,
   } as Args;
 }
 

@@ -5,7 +5,7 @@
 #   ./regen-basics.sh          # regen + check against goldens, write diffs to /tmp/sxs/diffs
 #
 # NOTE: There is no --bless flag here. Goldens can only be written by the
-# user via the SxS rating UI — see `rating-server.ts` and README.md.
+# user via the SxS rating UI — see `serve-sxs.sh` and README.md.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT=/tmp/sxs

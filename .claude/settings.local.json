@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p /workspaces/sashaslides/structured-prompting/skills)",
+      "Bash(mv /workspaces/sashaslides/.claude/skills/structured-prompting.md /workspaces/sashaslides/structured-prompting/skills/structured-prompting.md)",
+      "Bash(chmod +x /workspaces/sashaslides/bin/html2slides-cli)",
+      "Bash(cat)",
+      "Bash(chmod +x /workspaces/sashaslides/.claude/skills/html2slides-cli.sh)"
+    ]
+  }
+}
