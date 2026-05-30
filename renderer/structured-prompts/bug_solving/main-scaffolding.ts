@@ -1,145 +1,216 @@
 /**
- * Scaffolding for running the bug_solving structured prompt end-to-end.
+ * Runner for the bug_solving structured prompt.
  *
- * Parses the cluster list from argv (or falls back to a single smoke-test
- * cluster), builds tasks via workspace-setup, and executes main.ts. The
- * engine keeps its monitor UI on port 4711 by default.
+ * This file OWNS the process — it's what `node dist/main-scaffolding.mjs`
+ * actually executes. Its job:
+ *   1. Resolve the cluster list the user wants to work on.
+ *   2. Boot the ClaudeEngine (prints monitor URL to stderr on bind).
+ *   3. Run main() to completion.
+ *   4. For every successful TaskResult, spawn the filtered rating server
+ *      as a DIRECT child of this Node process (not nohup/disown) so the
+ *      servers die with the scaffolding on Ctrl-C / SIGTERM / exit.
+ *   5. Echo the engine URL + per-task SxS URLs one more time at the end.
  *
- * Usage (real):
- *   npx tsx build.ts renderer/structured-prompts/bug_solving/main-scaffolding.ts \
- *     && node dist/main-scaffolding.mjs
+ * ## Filling in task data (required before build)
+ *   The `CLUSTERS` import below points at `./clusters.ts`, which DOES NOT
+ *   EXIST in the repo. Create it with your actual bug clusters:
+ *
+ *     // renderer/structured-prompts/bug_solving/clusters.ts
+ *     import type { Cluster } from "./workspace-setup.js";
+ *     export const CLUSTERS: Cluster[] = [
+ *       {
+ *         task_id: "clipping-curves",
+ *         cluster_description: "overflow:hidden + border-radius not honored",
+ *         slide_ids: ["slide_11", "slide_12", "slide_14", "slide_28"],
+ *       },
+ *     ];
+ *
+ *   Until you create that file, the build will fail with
+ *   "Could not resolve './clusters.js'" — this is intentional. It prevents
+ *   accidental runs of an empty or demo cluster list.
+ *
+ * ## Build + run
+ *   npx tsx structured-prompting/build.ts \
+ *       renderer/structured-prompts/bug_solving/main-scaffolding.ts
+ *   node structured-prompting/dist/main-scaffolding.mjs
+ *
+ * ## Monitor URL
+ *   Engine prints it on stderr as soon as it binds the port (look for
+ *   `┌── structured-prompting monitor`). We echo it again at end of run.
  */
-import { mkdirSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "fs";
-import { dirname, resolve } from "path";
+import { spawn, type ChildProcess } from "child_process";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { resolve } from "path";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+const execFileAsync = promisify(execFile);
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
 import { buildTasks } from "./workspace-setup.js";
-// clusters.ts is the per-wave input — edit it to redeclare what you want
-// solved, then rebuild + run. Kept as a separate import (not inline) so
-// the build fails loudly when someone deletes it by mistake rather than
-// silently running an obsolete smoke cluster.
-import { CLUSTERS } from "./clusters.js";
-import { main } from "./main.js";
+import { main, type TaskResult, type SxsServerSpec } from "./main.js";
 
-/**
- * Choose a baseline directory path WITHOUT recording into it — the recording
- * itself is a graph node (see main.ts step 0) so it shows up in the monitor.
- * BUG_SOLVING_BASELINE_DIR overrides; scratch dir is created so the
- * baseline-record script can write into it.
- */
-function chooseBaselineDir(): string {
-  const reuse = process.env.BUG_SOLVING_BASELINE_DIR;
-  if (reuse) {
-    mkdirSync(reuse, { recursive: true });
-    return resolve(reuse);
-  }
-  const out = resolve(`/tmp/bs-baseline-${Date.now()}`);
-  mkdirSync(out, { recursive: true });
-  return out;
+// ❌ DO NOT REMOVE this import or replace with a dummy. Create the sibling
+// `./clusters.ts` file with your actual cluster definitions. esbuild will
+// refuse to build until that file exists — by design, to prevent
+// accidental smoke runs. See header for the file template.
+import { CLUSTERS } from "./clusters.js";
+
+// Absolute paths to helper scripts. Resolved from the repo root
+// (process.cwd()) — the canonical launch command is
+//   cd /workspaces/sashaslides && node structured-prompting/dist/main-scaffolding.mjs
+// Using process.cwd() keeps the resolution correct whether this file
+// runs as a .ts through tsx or as a bundled .mjs in structured-prompting/dist/.
+const REPO_ROOT = process.cwd();
+const BS_SCRIPTS = resolve(REPO_ROOT, "renderer/structured-prompts/bug_solving/scripts");
+const FILTERED_SERVER_TS = resolve(BS_SCRIPTS, "filtered-rating-server.ts");
+const RECORD_SCRIPT = resolve(BS_SCRIPTS, "record-pptx.sh");
+// Keep fileURLToPath import reachable even if we stop using HERE later.
+const _HERE = dirname(fileURLToPath(import.meta.url)); void _HERE;
+
+// Loose registry of launched children — we don't kill them on exit (they
+// are detached + unref()'d on purpose), we only track them for the end-of-
+// run summary count. Entries auto-drop if the OS cleans them up before we
+// print the summary.
+const children = new Set<ChildProcess>();
+
+function trackChild(ch: ChildProcess): void {
+  children.add(ch);
+  ch.on("exit", () => children.delete(ch));
 }
 
-async function run() {
-  const baseline_dir = chooseBaselineDir();
-  // Env-var overrides so a single skill invocation can target an arbitrary
-  // fixture/SxS dir (e.g. the table-only set under /tmp/tables-bs) without
-  // touching DEFAULTS in workspace-setup. Each var is optional — when unset
-  // workspace-setup keeps its complex-fixture defaults.
-  const fixtures_dir = process.env.BUG_SOLVING_FIXTURES_DIR;
-  const sxs_dir = process.env.BUG_SOLVING_SXS_DIR;
-  const ratings_json = process.env.BUG_SOLVING_RATINGS_JSON;
-  // When seeding from a prior bug-solving worktree, that worktree must be
-  // exempt from the cleanup sweep that runs at the start of buildTasks —
-  // otherwise the source files are gc'd before the seed copy fires.
-  const seedFrom = process.env.BUG_SOLVING_SEED_FROM;
-  const tasks = buildTasks({
-    clusters: CLUSTERS,
-    baseline_dir,
-    ...(fixtures_dir ? { fixtures_dir: resolve(fixtures_dir) } : {}),
-    ...(sxs_dir ? { sxs_dir: resolve(sxs_dir) } : {}),
-    ...(ratings_json ? { ratings_json: resolve(ratings_json) } : {}),
-    ...(seedFrom ? { preserve_worktrees: [resolve(seedFrom)] } : {}),
+// Rating servers are launched detached + unref()'d — they're meant to
+// survive scaffolding exit. We deliberately do NOT kill them from
+// process.on("exit" | "SIGINT" | "SIGTERM"); Ctrl-C on scaffolding
+// leaves the servers alive for continued review. The user kills them
+// with `lsof -ti:4720-4800 | xargs -r kill` when done. An
+// uncaughtException still exits non-zero but without touching children.
+process.on("uncaughtException", (e) => {
+  console.error("[scaffolding] uncaughtException:", e);
+  process.exit(1);
+});
+
+function launchFilteredServer(spec: SxsServerSpec): ChildProcess {
+  const args = [
+    "tsx", FILTERED_SERVER_TS,
+    "--port", String(spec.port),
+    "--slides", spec.slides.join(","),
+    "--analysis", spec.analysis_md,
+    "--diffs", spec.diffs_dir,
+    "--thumbnails", spec.thumbnails_dir,
+    "--task-title", spec.task_title,
+  ];
+  // Rating servers are post-run artifacts — the scaffolding should NOT
+  // wait for them, and killing the scaffolding shouldn't kill them.
+  // `detached: true` starts the child in a NEW process group so a SIGINT
+  // to this shell doesn't propagate, and `child.unref()` removes it from
+  // Node's event-loop refcount so `main()` returning lets the scaffolding
+  // exit while the server keeps running. The child's stdout/stderr go to
+  // a log file since we're about to exit and wouldn't read them anyway.
+  const ch = spawn("npx", args, {
+    detached: true,
+    stdio: ["ignore", "ignore", "ignore"],
   });
+  ch.unref();
+  trackChild(ch);
+  return ch;
+}
 
-  // Seed each worktree with starting-point files. Two env vars:
-  //   BUG_SOLVING_SEED_FILES  — comma-separated repo-relative paths.
-  //   BUG_SOLVING_SEED_FROM   — source repo root (default: process.cwd()).
-  // Use cases:
-  //   1. Seed from main's uncommitted edits: SEED_FROM unset → reads cwd.
-  //   2. Continue an iteration from a previous wave's worktree by setting
-  //      SEED_FROM to that worktree's path. Lets wave-N+1 build on the
-  //      worker's end state without forcing a commit between waves.
-  const seedSpec = process.env.BUG_SOLVING_SEED_FILES;
-  if (seedSpec) {
-    const seedPaths = seedSpec.split(",").map((s) => s.trim()).filter(Boolean);
-    const seedRoot = seedFrom ? resolve(seedFrom) : process.cwd();
-    console.error(`[seed] source: ${seedRoot}`);
-    for (const task of tasks) {
-      for (const rel of seedPaths) {
-        const src = resolve(seedRoot, rel);
-        const dst = resolve(task.workspace_dir, rel);
-        if (!existsSync(src)) {
-          console.error(`[seed] skip (missing in source): ${rel}`);
-          continue;
-        }
-        // copyFileSync follows the worktree's symlink for node_modules; the
-        // explicit readFileSync→writeFileSync detour is to avoid corrupting
-        // the source file when the worktree happens to symlink into it.
-        const data = readFileSync(src);
-        mkdirSync(dirname(dst), { recursive: true });
-        writeFileSync(dst, data);
-        console.error(`[seed] ${task.task_id}: ${rel}`);
-      }
+/** Record the BEFORE-state pptx for every task in parallel. These are
+ *  side-effect-only script invocations with no model judgement, so we
+ *  lift them out of main.ts — keeping the structured-prompt graph
+ *  focused on the steps that actually need model calls or typed flow.
+ *  Runs once at startup; main.ts records AFTER itself after the fix. */
+async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<void> {
+  console.error(`[scaffolding] recording BEFORE pptx for ${tasks.length} task(s) in parallel...`);
+  await Promise.all(tasks.map(async (t) => {
+    const ids = t.slides.map(s => s.slide_id).join(",");
+    const outDir = resolve(t.scratch_dir, "before");
+    try {
+      await execFileAsync("bash", [
+        RECORD_SCRIPT, "--slides", ids, "--label", "before", "--out", outDir,
+      ], { cwd: t.workspace_dir, maxBuffer: 32 * 1024 * 1024 });
+      console.error(`  [${t.task_id}] before pptx → ${outDir}`);
+    } catch (e: any) {
+      throw new Error(`record-before failed for ${t.task_id}: ${e.message}\nstdout:${e.stdout?.toString() ?? ""}\nstderr:${e.stderr?.toString() ?? ""}`);
     }
-  }
-  console.error(`built ${tasks.length} task(s) with baseline=${baseline_dir}:`);
+  }));
+}
+
+async function run(): Promise<void> {
+  const tasks = buildTasks({ clusters: CLUSTERS });
+  console.error(`[scaffolding] built ${tasks.length} task(s):`);
   for (const t of tasks) {
-    console.error(`  ${t.task_id} @ ${t.workspace_dir} (port ${t.server_port})`);
+    console.error(`  ${t.task_id} @ ${t.workspace_dir} (server port ${t.server_port})`);
   }
 
-  // Graph persistence: every mutation writes a JSON snapshot to
-  // /tmp/bug_solving-graph-<ts>.json (overridable via env SP_GRAPH_PATH).
-  // After a crash, point `npx tsx structured-prompting/src/server/view-graph.ts <path>`
-  // at that file to re-attach the monitor + ask follow-ups against any
-  // node that still has a sessionId.
-  const graphPath = process.env.SP_GRAPH_PATH ?? `/tmp/bug_solving-graph-${Date.now()}.json`;
-  const engine = new ClaudeEngine({ port: 4711, persist: true, graphPersistPath: graphPath });
-  console.error(`[scaffold] graph persistence: ${graphPath}`);
+  await recordBeforePptx(tasks);
+
+  const engine = new ClaudeEngine({ port: 4711, persist: true });
   const session = new Session({ sessionId: `bug_solving-${Date.now()}` });
-  let results: unknown;
-  try {
-    results = await engine.execute(session, (s) => main({ session: s, tasks }));
-  } catch (e) {
-    // Log the error in detail (was silently empty `{}` before because
-    // some thrown values are plain objects without enumerable props).
-    console.error("\n=== ENGINE THREW ===");
-    const err = e as { name?: string; message?: string; stack?: string; data?: unknown };
-    console.error(`name: ${err?.name ?? "<unknown>"}`);
-    console.error(`message: ${err?.message ?? String(e)}`);
-    if (err?.stack) console.error(`stack:\n${err.stack}`);
-    if (err?.data !== undefined) try { console.error(`data: ${JSON.stringify(err.data, null, 2)}`); } catch { /* ignore */ }
-    console.error(`graph snapshot persisted at: ${graphPath}`);
-    console.error("To re-attach the monitor against the saved graph:");
-    console.error(`  npx tsx structured-prompting/src/server/view-graph.ts ${graphPath}`);
-    console.error(`Monitor still live at ${engine.monitorUrl} for as long as this process runs.`);
-    return;
-  }
+  const results = await engine.execute(session, (s) => main({ session: s, tasks }));
 
   console.error("\n=== RESULTS ===");
   console.error(JSON.stringify(results, null, 2));
-  console.error(`\nMonitor still live at ${engine.monitorUrl}`);
-  console.error(`Graph snapshot persisted at: ${graphPath}`);
-  console.error(
-    "\nPer-task SxS servers (if step 8 completed successfully):\n" +
-    tasks.map(t => `  ${t.task_id} → http://localhost:${t.server_port}`).join("\n"),
-  );
-  console.error("\nPress Ctrl-C when done reviewing.");
+
+  // Launch filtered rating servers for every successful task, tracked so
+  // they die with this Node process on Ctrl-C / exit / SIGTERM.
+  const launchedUrls: string[] = [];
+  const failures: { idx: number; error: string }[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if ("error" in r) {
+      failures.push({ idx: i, error: String((r as { error: string }).error) });
+      continue;
+    }
+    const spec: SxsServerSpec = (r as TaskResult).sxs_server_spec;
+    launchFilteredServer(spec);
+    launchedUrls.push(`  ${(r as TaskResult).task_id} → http://localhost:${spec.port}`);
+  }
+
+  // Re-print the engine URL and every server URL at the end so the
+  // reviewer never has to scroll back through logs to find them.
+  console.error("\n=== MONITOR & SxS URLs ===");
+  if (engine.monitorUrl) console.error(`  engine monitor → ${engine.monitorUrl}`);
+  if (launchedUrls.length) {
+    console.error(`  filtered rating servers:`);
+    for (const u of launchedUrls) console.error(u);
+  }
+
+  // Loud failure reporting — previously a zero-success run silently exited
+  // 0, which is indistinguishable from a dry-run. Print a big banner with
+  // every failure's task_id + truncated error, and exit non-zero if there
+  // were ANY failures so the caller (or a watching shell script) notices.
+  if (failures.length) {
+    console.error(`\n❌ ${failures.length} of ${results.length} task(s) FAILED:`);
+    for (const f of failures) {
+      const tid = tasks[f.idx]?.task_id ?? `#${f.idx}`;
+      // Compress multiline JSON errors into a one-line-per-failure summary,
+      // then include the full error on the next indented line.
+      let parsed: any = null;
+      try { parsed = JSON.parse(f.error); } catch { /* fall through */ }
+      const msg = parsed?.message ?? f.error;
+      console.error(`  - ${tid}: ${String(msg).split("\n")[0].slice(0, 200)}`);
+      if (parsed?.stack) {
+        const firstFrame = String(parsed.stack).split("\n").slice(0, 3).join("\n    ");
+        console.error(`    ${firstFrame}`);
+      }
+    }
+    console.error(`\n  Inspect the computation graph at ${engine.monitorUrl ?? "(engine gone)"} for the full trace.`);
+  }
+
+  console.error(`\n[scaffolding] ${children.size} detached server(s) running.`);
+  if (children.size) console.error(`They will survive scaffolding exit; kill them with: lsof -ti:4720-4800 | xargs -r kill`);
+
+  // Done. The structured prompt has returned, rating-servers are detached
+  // with unref() so they keep running independently, and Node's event loop
+  // has no more work — this line runs and the process exits naturally
+  // (non-zero iff any task failed). The exit handlers installed earlier
+  // are no longer needed for children (they're unrefed and won't die with
+  // us) but they stay in place as a safety net for pre-launch crashes.
+  if (failures.length) process.exit(1);
 }
 
 run().catch((e) => {
-  // Surface FULL diagnostics — was previously empty `{}` for non-Error throws.
-  const err = e as { name?: string; message?: string; stack?: string };
-  console.error("bug_solving scaffold-level crash:");
-  console.error(`  name: ${err?.name ?? "<unknown>"}`);
-  console.error(`  message: ${err?.message ?? String(e)}`);
-  if (err?.stack) console.error(`  stack:\n${err.stack}`);
+  console.error("[scaffolding] crashed:", e);
   process.exit(1);
 });

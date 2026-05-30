@@ -1,102 +1,85 @@
 #!/usr/bin/env npx tsx
 /**
- * filtered-rating-server.ts — SxS rating UI for a single bug_solving task.
+ * filtered-rating-server.ts — COMPATIBILITY WRAPPER.
  *
- * Shows, per slide: original HTML screenshot (Chrome) vs the task's freshly
- * uploaded Slides render, plus the full review toolset the main
- * rating-server offers: Good/Bad/Skip buttons, a comment box, an
- * annotation canvas over the rendered image, a client-side diff overlay,
- * and task-specific "Show analysis" / "Show diff" reveals per slide.
+ * The bug_solving task-scoped rating UI is no longer a separate server;
+ * it lives in the standard `renderer/html2slides/rating-server.ts` behind
+ * the flags `--filter-slides`, `--slides-dir`, `--originals-dir`,
+ * `--task-analysis`, `--task-diffs`, `--task-title`. That way the
+ * task-scoped view keeps every standard rating-UI control (Good / Bad /
+ * Skip, annotations, Ctrl-Z undo, diff overlay, etc.) and just gains two
+ * extra buttons per slide.
  *
- * Per-slide links to the HTML source and the Google Slides page appear at
- * the top of each card when the relevant inputs are wired:
- *   * HTML source link:  --html-dir + "${slide_id}.html" (or --fixtures alias)
- *   * Google Slides link: read from <thumbnails>/manifest.json, which
- *     upload-and-scrape.ts writes with presentation_id + parallel
- *     slide_object_ids so we can build `…/edit#slide=id.<oid>` deep links.
+ * This file stays in the tree because the currently-deployed
+ * `main-scaffolding.mjs` bundle spawns `npx tsx <FILTERED_SERVER_TS>` with
+ * the old argv shape. Rather than kill in-flight clusters and rebuild, we
+ * translate the old flags into the new ones and exec rating-server.ts.
  *
- * Ratings (status + comment + annotation png) persist to
- * <thumbnails>/../ratings.json so a subsequent bug_solving retry can read
- * them. UI is Preact (esm.sh, no bundler) so reveal + draw state survives
- * re-renders.
- *
- * Usage:
- *   npx tsx filtered-rating-server.ts --port 4701 \
- *       --slides slide_04,slide_11 \
- *       --analysis /workspace/scratch/analysis.md \
- *       --diffs /workspace/scratch/diffs \
- *       --thumbnails /workspace/scratch/thumbnails \
- *       [--originals /tmp/sxs-complex/originals] \
- *       [--html-dir renderer/html2slides/e2e/fixtures] \
- *       [--ratings-file /workspace/scratch/ratings.json] \
- *       [--task-title "bug_solving: clipping"]
+ * Old argv (what scaffolding still passes):
+ *   --port N --slides csv --analysis md --diffs dir --thumbnails dir
+ *   [--originals dir] [--task-title str]
+ * New argv (forwarded to rating-server):
+ *   <scratch-as-resultsDir> --port N
+ *     --filter-slides csv
+ *     --slides-dir <old --thumbnails>
+ *     --originals-dir <old --originals || /tmp/sxs-complex/originals>
+ *     --task-analysis <old --analysis>
+ *     --task-diffs <old --diffs>
+ *     --task-title <old --task-title>
  */
+import { spawn } from "child_process";
 import { resolve, dirname } from "path";
-import { startFilteredRatingServer } from "./filtered-rating-server-lib";
-import type { Args } from "./filtered-rating-server-lib";
+import { fileURLToPath } from "url";
 
-function parseArgs(argv: string[]): Args {
-  const a: Partial<Args> = {
-    originals: "/tmp/sxs-complex/originals",
-    html_dir: null,
-    ratings_file: null,
-    task_title: "bug_solving",
-    baseline_dir: null,
-    bug_context: null,
-    goldens_dir: null,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const v = argv[i];
-    if (v === "--port") a.port = +argv[++i];
-    else if (v === "--slides") a.slides = argv[++i].split(",").map((s: string) => s.trim());
-    else if (v === "--analysis") a.analysis = resolve(argv[++i]);
-    else if (v === "--diffs") a.diffs = resolve(argv[++i]);
-    else if (v === "--thumbnails") a.thumbnails = resolve(argv[++i]);
-    else if (v === "--originals") a.originals = resolve(argv[++i]);
-    else if (v === "--html-dir" || v === "--fixtures") a.html_dir = resolve(argv[++i]);
-    else if (v === "--ratings-file") a.ratings_file = resolve(argv[++i]);
-    else if (v === "--task-title") a.task_title = argv[++i];
-    else if (v === "--baseline-dir") a.baseline_dir = resolve(argv[++i]);
-    else if (v === "--bug-context") a.bug_context = resolve(argv[++i]);
-    else if (v === "--goldens-dir") a.goldens_dir = resolve(argv[++i]);
-  }
-  if (!a.port || !a.slides || !a.analysis || !a.diffs || !a.thumbnails) {
-    throw new Error(
-      "usage: --port N --slides csv --analysis md --diffs dir --thumbnails dir " +
-      "[--originals dir] [--html-dir dir] [--ratings-file file] [--task-title str] " +
-      "[--baseline-dir dir] [--goldens-dir dir]",
-    );
-  }
-  // Default ratings file sits beside the scratch dir so a future retry can
-  // read the user's verdicts alongside analysis.md.
-  if (!a.ratings_file) {
-    a.ratings_file = resolve(dirname(a.thumbnails!), "ratings.json");
-  }
-  // Required fields are guaranteed populated by the validation above; the
-  // optional/defaulted ones are also populated. We materialize the final
-  // Args by spreading the partial — TypeScript narrows the assertion via
-  // the explicit return-type annotation.
-  return {
-    port: a.port!,
-    slides: a.slides!,
-    analysis: a.analysis!,
-    diffs: a.diffs!,
-    thumbnails: a.thumbnails!,
-    originals: a.originals!,
-    html_dir: a.html_dir!,
-    ratings_file: a.ratings_file,
-    task_title: a.task_title!,
-    baseline_dir: a.baseline_dir!,
-    bug_context: a.bug_context!,
-    goldens_dir: a.goldens_dir!,
-  } as Args;
+const argv = process.argv.slice(2);
+const get = (name: string): string | null => {
+  const i = argv.indexOf(name);
+  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
+};
+
+const port = get("--port") ?? "3456";
+const slidesCsv = get("--slides") ?? "";
+const analysis = get("--analysis");
+const diffs = get("--diffs");
+const thumbnails = get("--thumbnails");
+const originals = get("--originals") ?? "/tmp/sxs-complex/originals";
+const title = get("--task-title") ?? "bug_solving";
+
+if (!slidesCsv || !analysis || !diffs || !thumbnails) {
+  console.error("filtered-rating-server wrapper: missing required arg (--slides, --analysis, --diffs, --thumbnails)");
+  process.exit(2);
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  await startFilteredRatingServer(args);
-  // The lib starts the listener but doesn't keep the process alive on its
-  // own — but Node's HTTP server holds the event loop open as long as it's
-  // listening, so simply returning here is fine.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO = resolve(HERE, "../../../..");
+const RATING_SERVER = resolve(REPO, "renderer/html2slides/rating-server.ts");
+// The rating server takes a positional `results_dir`; the overrides make it
+// irrelevant, but we still pass something reasonable (the scratch dir the
+// thumbnails live under) so meta.json / ratings.json persistence works.
+const resultsDir = resolve(thumbnails, "..");
+
+const forwarded = [
+  "tsx", RATING_SERVER, resultsDir,
+  "--port", port,
+  "--filter-slides", slidesCsv,
+  "--slides-dir", thumbnails,
+  "--originals-dir", originals,
+  "--task-analysis", analysis,
+  "--task-diffs", diffs,
+  "--task-title", title,
+];
+
+console.log(`[filtered-rating-server wrapper] exec → npx ${forwarded.join(" ")}`);
+const ch = spawn("npx", forwarded, {
+  stdio: ["ignore", "inherit", "inherit"],
+  detached: false,
+});
+// Propagate signals and exit codes so scaffolding's exit-handlers reach
+// the underlying rating-server child.
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(sig, () => { try { ch.kill(sig); } catch {} });
 }
-main().catch(e => { console.error(e); process.exit(1); });
+ch.on("exit", (code, sig) => {
+  if (sig) process.kill(process.pid, sig);
+  else process.exit(code ?? 0);
+});

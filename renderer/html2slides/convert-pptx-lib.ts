@@ -2251,8 +2251,21 @@ export function buildPptx(
             const twR0 = px2in(tableBorderSides?.right?.width || 0);
             const twT0 = px2in(tableBorderSides?.top?.width || 0);
             const twB0 = px2in(tableBorderSides?.bottom?.width || 0);
-            const contentW = px2in(b.w) - twL0 - twR0;
-            const contentH = px2in(b.h) - twT0 - twB0;
+            // EDGE-ANCHORED table coords. Quantise the ABSOLUTE edges, never
+            // position+size separately: `q(px2in(b.x)) + q(px2in(b.w))`
+            // double-rounds (b.x 5.1875→5.19 AND b.w 4.125→4.13) and pushes
+            // the right/bottom edge ~1-2 display-px PAST the table box — the
+            // "slightly misaligned right/bottom edge" the user flagged on
+            // every corner. `q(px2in(b.x + b.w))` rounds the edge once, so
+            // the table spans exactly [xL,xR]×[yT,yB]. Everything below (the
+            // underlay, the corner/band masks via contentW/H, and the native
+            // <a:tbl>) anchors to these so they all end on the same pixel.
+            const xL = q(px2in(b.x));
+            const xR = q(px2in(b.x + b.w));
+            const yT = q(px2in(b.y));
+            const yB = q(px2in(b.y + b.h));
+            const contentW = (xR - xL) - twL0 - twR0;
+            const contentH = (yB - yT) - twT0 - twB0;
             // Column geometry — DRIFT-FREE and edge-anchored. Per-`<td>`
             // bounds sum to ~1 px less than `contentW` (extraction floors
             // each width), so scale the raw widths to fill `contentW`
@@ -2529,7 +2542,7 @@ export function buildPptx(
                     ? hexToRgb(tblTopBorder.color)
                     : (tableBgHex ? hexToRgb(tableBgHex) : "ffffff");
                 const underlayOpts: ShapeProps = {
-                  x: q(px2in(b.x)), y: q(px2in(b.y)), w: q(px2in(b.w)), h: q(px2in(b.h)),
+                  x: xL, y: yT, w: xR - xL, h: yB - yT,
                   fill: { color: underlayHex },
                   line: { type: "none" },
                   objectName: memberName(_tableGid!, memberIdx++),
@@ -2705,11 +2718,11 @@ export function buildPptx(
                   ? { tl: cornerR, tr: cornerR, br: 0, bl: 0 }
                   : { tl: 0, tr: 0, br: cornerR, bl: cornerR };
                 const cpOuter = cornerPresetFromRadii(bandCR);
-                const outerX = q(px2in(b.x));
-                const outerW = q(px2in(b.w));
+                const outerX = xL;
+                const outerW = xR - xL;
                 const outerY = q(isTop
-                  ? px2in(b.y)
-                  : (px2in(b.y) + twTop + rowYPrefix[rowIdx] - innerOverlap));
+                  ? yT
+                  : (yT + twTop + rowYPrefix[rowIdx] - innerOverlap));
                 const extOuterV = isTop ? twTop : twBottom;
                 const outerH = q(cellH + extOuterV + innerOverlap);
                 const outerFillHex = (bw > 0 && left.ring.color)
@@ -2800,8 +2813,8 @@ export function buildPptx(
             const tblTwTop    = q(px2in(tableTw?.top?.width    || 0));
             const tableColSum = q(colW.reduce((acc: number, w: number) => acc + w, 0));
             const tableOpts: Parameters<Slide["addTable"]>[1] = {
-              x: q(px2in(b.x) + tblTwLeft),
-              y: q(px2in(b.y) + tblTwTop),
+              x: q(xL + tblTwLeft),
+              y: q(yT + tblTwTop),
               w: tableColSum,
               h: q(tableH),
               colW,
