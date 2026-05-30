@@ -45,7 +45,7 @@ import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 const execFileAsync = promisify(execFile);
-import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
+import { ClaudeEngine, CodexEngine, Session } from "../../../structured-prompting/src/index.js";
 import { buildTasks } from "./workspace-setup.js";
 import { main, type TaskResult, type SxsServerSpec } from "./main.js";
 
@@ -137,7 +137,29 @@ async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<v
 }
 
 async function run(): Promise<void> {
-  const tasks = buildTasks({ clusters: CLUSTERS });
+  // `--engine=codex|claude` (or env BUG_SOLVING_ENGINE) selects the model
+  // backend. Both are the same `Engine` composed with a different
+  // `ModelDriver`, so the graph/monitor/interpreter behaviour is identical;
+  // only the CLI the workers call changes. Defaults to claude.
+  //
+  // Ports are split by engine so a claude run and a codex run can run in
+  // PARALLEL without colliding: monitor 4711 (claude) / 4712 (codex), and the
+  // per-task SxS server range [4720,4800) is halved — [4720,4760) for claude,
+  // [4760,4800) for codex.
+  const engineArg =
+    process.argv.find((a) => a.startsWith("--engine="))?.slice("--engine=".length)
+    ?? process.env.BUG_SOLVING_ENGINE
+    ?? "claude";
+  const engineKind = engineArg.toLowerCase();
+  if (engineKind !== "claude" && engineKind !== "codex") {
+    throw new Error(`--engine must be "claude" or "codex" (got "${engineArg}")`);
+  }
+  const isCodex = engineKind === "codex";
+  const monitorPort = isCodex ? 4712 : 4711;
+  const portBase = isCodex ? 4760 : 4720;
+  console.error(`[scaffold] engine: ${engineKind} (monitor :${monitorPort}, task ports ${portBase}-${portBase + 39})`);
+
+  const tasks = buildTasks({ clusters: CLUSTERS, port_base: portBase });
   console.error(`[scaffolding] built ${tasks.length} task(s):`);
   for (const t of tasks) {
     console.error(`  ${t.task_id} @ ${t.workspace_dir} (server port ${t.server_port})`);
@@ -145,7 +167,9 @@ async function run(): Promise<void> {
 
   await recordBeforePptx(tasks);
 
-  const engine = new ClaudeEngine({ port: 4711, persist: true });
+  const engine = isCodex
+    ? new CodexEngine({ port: monitorPort, persist: true })
+    : new ClaudeEngine({ port: monitorPort, persist: true });
   const session = new Session({ sessionId: `bug_solving-${Date.now()}` });
   const results = await engine.execute(session, (s) => main({ session: s, tasks }));
 
