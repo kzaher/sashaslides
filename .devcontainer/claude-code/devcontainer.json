@@ -14,6 +14,7 @@
   "mounts": [
     "source=polybot-chrome-profile,target=/home/node/chrome-profile,type=volume",
     "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind,consistency=cached",
+    "source=/home/k/snap/codex/34,target=/home/node/.codex,type=bind,consistency=cached",
     "source=/p/claude,target=/p/claude,type=bind"
   ],
   "containerEnv": {
