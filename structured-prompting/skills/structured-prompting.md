@@ -37,7 +37,7 @@ Each file exports a `main` that takes `{session, ...args}` and returns a `Sessio
 
 ```ts
 // structured-prompts/fix-bugs.ts
-import { sharedClaudeEngine, Session, Claude } from "../structured-prompting/src/index.js";
+import { ClaudeEngine, Session, Claude } from "../structured-prompting/src/index.js";
 
 type Measured = { measuredValue: string };
 
@@ -87,7 +87,7 @@ export function main({ session, tasks }: {
 
 // Run it.
 if (import.meta.url === `file://${process.argv[1]}`) {
-  sharedClaudeEngine
+  new ClaudeEngine()
     .execute(new Session({ sessionId: crypto.randomUUID() }), (s) =>
       main({ session: s, tasks: [/* ... */] }))
     .then((r) => console.log(JSON.stringify(r, null, 2)));
@@ -159,6 +159,186 @@ If `outfile` is omitted the default is `dist/<basename>.mjs`. Then `node <outfil
 - When Claude Code itself exits, the engine's `SIGTERM` / `SIGINT` hooks shut the monitor down. If a stray process is still bound to 4711, `lsof -ti:4711 | xargs -r kill`.
 
 Model selection via the `Claude` namespace (`src/types.ts`): `Claude.haiku`, `Claude.sonnet`, `Claude.opus` — chain after `.compact()` with `.switchModel(...)`.
+
+## File conventions (main.ts + main-scaffolding.ts)
+
+Non-trivial entry points split into **two files** — it keeps the reusable
+prompt logic separate from per-run task data.
+
+- **`main.ts`** — the structured prompt. Pure graph construction. Takes
+  `{session, tasks}` (or similar), returns `SessionWithResult<...>`. Does
+  NOT import `ClaudeEngine`, does NOT open ports, does NOT spawn
+  long-lived subprocesses. Its top comment block is mandatory and must
+  contain:
+
+    ```ts
+    /**
+     * <name> — one-line purpose.
+     *
+     * ## How to use
+     *   1. cd <project-root>
+     *   2. Edit main-scaffolding.ts: fill in the task list (the default
+     *      is an unresolved import so the build fails until you do).
+     *   3. Build: `npx tsx structured-prompting/build.ts structured-prompts/<name>/main-scaffolding.ts`
+     *   4. Run:   `node structured-prompting/dist/main-scaffolding.mjs`
+     *   5. Monitor URL is printed on the first two lines of stderr.
+     *
+     * ## Per-task pipeline (what main.ts actually does)
+     *   1. <describe step 1>
+     *   2. ...
+     *
+     * ## Return type
+     *   SessionWithResult<Array<Result<TaskResult>>> — one entry per task.
+     *   Each TaskResult carries enough for main-scaffolding to launch
+     *   follow-up side effects (e.g. a rating-server per task) AFTER the
+     *   structured prompt finishes. main.ts itself does not start them.
+     */
+    ```
+
+- **`main-scaffolding.ts`** — the runner that owns the process. It:
+  * instantiates `ClaudeEngine` (or `CodexEngine`),
+  * builds the task list (often via a sibling `workspace-setup.ts`),
+  * calls `engine.execute(session, (s) => main({session: s, tasks}))`,
+  * launches any post-run subprocesses as **direct `child_process.spawn`
+    children of this Node process** (NOT `nohup … & disown`), tracks
+    their PIDs in a Set, and registers `process.on('exit' | 'SIGINT' |
+    'SIGTERM', …)` handlers that `child.kill('SIGTERM')` each one. This
+    is how "when the main process dies, subprocesses die with it" is
+    achieved on POSIX — orphaned children get re-parented to init and
+    would otherwise linger.
+
+### Default: scaffolding MUST NOT build without real data
+
+Leave `main-scaffolding.ts` in a state that refuses to compile when the
+file is freshly checked out or left at its template. The enforced pattern:
+
+```ts
+// ❌ DO NOT REMOVE the following import until you've created
+// `./clusters.ts` with your actual task data. The build will fail —
+// that's by design; it prevents accidental "smoke-test" runs.
+import { CLUSTERS } from "./clusters.js";
+```
+
+`esbuild` refuses to resolve a non-existent import and aborts the build.
+Once the user writes their `clusters.ts` (or whatever the sibling file is
+named), the build succeeds. Don't ship a default stub that happens to
+compile — that's what led to smoke runs happening by accident.
+
+## Engine URL visibility
+
+`ClaudeEngine.start()` prints the monitor URL to stderr the moment the
+HTTP server binds:
+
+```
+┌── structured-prompting monitor
+│ http://127.0.0.1:4711/
+└──
+```
+
+That message is always visible when you start the structured prompt —
+it's the first thing stderr emits. Do NOT add custom `console.log`
+wrappers that could eat it. `main-scaffolding.ts` should echo the URL
+one more time at the end (after `engine.execute` resolves) alongside any
+per-task server URLs, so a reviewer scrolling to the bottom sees both
+without searching back through logs.
+
+## Subprocess lifetime
+
+The `main.ts` structured prompt does NOT spawn long-lived external
+processes. If a task needs a server (e.g. a per-task rating-server),
+`main.ts` emits a spec in its `TaskResult` (`{port, slides, paths…}`)
+and `main-scaffolding.ts` spawns the actual process AFTER
+`engine.execute` resolves. The contract is: **once `main()` returns,
+the scaffolding is done — it does not wait on servers**. Servers live
+as independent detached processes the user kills manually when the
+review is over.
+
+```ts
+for (const r of results) {
+  if ("error" in r) continue;
+  const ch = spawn("npx", ["tsx", "path/to/server.ts", ...args], {
+    detached: true,             // new process group, own session
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+  ch.unref();                   // remove from Node's event-loop refcount
+}
+// main() returned; the servers are detached; Node's event loop has no
+// more work → the scaffolding exits naturally (non-zero iff any task
+// failed). Ctrl-C on the scaffolding does NOT reach the servers; user
+// kills them with e.g. `lsof -ti:<port range> | xargs -r kill`.
+if (anyFailures) process.exit(1);
+```
+
+Why this pattern:
+- `engine.execute` returning is the "main script finished" signal. The
+  scaffolding printing a summary and exiting is correct — a zombie
+  scaffolding holding open a file descriptor to a long-dead engine
+  isn't useful to anyone.
+- `detached: true` + `child.unref()` makes the servers genuinely
+  independent. They keep running when the scaffolding exits and survive
+  the terminal closing.
+- The earlier pattern (`detached: false` + `process.on("SIGINT", kill
+  children)`) tied servers to the scaffolding lifecycle; that turned
+  out wrong for the "fire + review + kill when done" flow of
+  `bug_solving`-style tasks.
+- `nohup … & disown` in an `executeShell` call from `main.ts` is still
+  banned — it couples long-lived processes to the STRUCTURED-PROMPT's
+  execution graph, which is the wrong layer. Keep the split clean:
+  main.ts describes work, scaffolding owns processes.
+
+## Surfacing per-task servers back to the user
+
+When `main-scaffolding.ts` boots one rating/SxS server per task, the
+user won't know when each one is ready — the servers come up in
+parallel, sometimes minutes into a long run, and the user has probably
+moved on to another window. Pair the scaffolding with a **port-range
+notifier** consumed by the harness's `Monitor` tool so each new server
+produces one chat message the moment it starts listening.
+
+A minimal notifier (see
+`renderer/structured-prompts/bug_solving/scripts/notify-new-servers.sh`
+for the production version):
+
+```bash
+#!/usr/bin/env bash
+set -u
+PORT_FROM=${1:-4720}; PORT_TO=${2:-4800}
+STATE=""
+while :; do
+  active=""
+  for p in $(seq "$PORT_FROM" "$PORT_TO"); do
+    lsof -ti tcp:"$p" -sTCP:LISTEN >/dev/null 2>&1 && active+="$p"$'\n'
+  done
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    if ! grep -qxF "$p" <<< "$STATE"; then
+      title=$(curl -fsS -m 2 "http://localhost:$p/" 2>/dev/null \
+              | grep -oE '<title>[^<]*</title>' | head -1 | sed -E 's#</?title>##g')
+      printf 'NEW http://localhost:%s — %s\n' "$p" "${title:-(no title)}"
+      STATE+="$p"$'\n'
+    fi
+  done <<< "$active"
+  # drop ports that disappeared so a re-launch is re-announced
+  STATE=$(while IFS= read -r p; do [[ -n "$p" ]] && grep -qxF "$p" <<< "$active" && echo "$p"; done <<< "$STATE")
+  sleep 3
+done
+```
+
+Start it once per session under `Monitor` with `persistent: true`:
+
+```
+Monitor({
+  command: "bash path/to/notify-new-servers.sh",
+  description: "new SxS servers on :4720-4800",
+  persistent: true,
+  timeout_ms: 3600000,
+})
+```
+
+Every emitted `NEW http://localhost:<port>` line becomes one notification
+so the user can click straight into a new server's UI. The script drops
+a port from its internal state when the listener goes away, so if a task
+retries and re-binds the same port, the rebind is re-announced.
 
 ## Iteration workflow
 

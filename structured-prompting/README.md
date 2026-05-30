@@ -118,7 +118,7 @@ interface ClaudeEngine {
 Claude code usage
 ```
 ...
-return sharedClaudeEngine.execute(new Session({sessionId: "xxxx-xxx-xxxx-xxx"}), session => mainWithArguments({session, tasks: [....]}))
+return new ClaudeEngine().execute(new Session({sessionId: "xxxx-xxx-xxxx-xxx"}), session => mainWithArguments({session, tasks: [....]}))
 ...
 ```
 

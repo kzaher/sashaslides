@@ -53,7 +53,8 @@ async function test(name: string, fn: () => Promise<void>): Promise<void> {
 /** Fixed cwd so tests are stable regardless of where they're run from. */
 const TEST_CWD = "/test-cwd";
 /** Default timeout the CLI wrapper uses when callers don't override. */
-const DEFAULT_TIMEOUT = 300_000;
+// Keep in sync with DEFAULT_TIMEOUT_MS in src/claude-cli.ts.
+const DEFAULT_TIMEOUT = 30 * 60 * 1000;
 /**
  * Tail that `tryMultipleTimes` automatically appends to every attempt's prompt
  * (the engine's `InterruptException` escape hatch). Keep this in sync with
@@ -589,6 +590,37 @@ async function main() {
     });
     assert(threw instanceof Error, "engine should throw when default fallback re-throws");
     assert.equal(spawns(io).length, 3, "must attempt exactly max=3 before giving up");
+    assert.ok(
+      /boom/.test(String((threw as any).message ?? threw)),
+      `the thrown error must carry the LAST attempt's error ("boom"), got: ${String(threw)}`,
+    );
+  });
+
+  await test("tryMultipleTimes default fallback propagates inside parallelFork: failing child makes the whole run throw", async () => {
+    // Regression for the bug_solving pipeline where a single parallelFork
+    // child's retry exhaustion used to be swallowed. Without an explicit
+    // materializeError fallback, the throw MUST reach the outer run and
+    // the error message must contain the underlying retry failure so the
+    // caller sees which attempt's message propagated.
+    const { threw, io } = await runMock({
+      matchers: [
+        { name: "all fail", when: (c) => c.method === "spawnCapture", returns: claudeReply({ isError: true, result: "kaboom" }) },
+      ],
+      main: (s) =>
+        s.parallelFork([1, 2], (child, _input) =>
+          child.tryMultipleTimes(2, (s2) => s2.send({ prompt: "p" })),
+        ),
+    });
+    assert(threw instanceof Error, "parallelFork should surface the child's thrown error");
+    assert.ok(
+      /kaboom/.test(String((threw as any).message ?? threw)),
+      `the propagated error must carry the retry failure ("kaboom"), got: ${String(threw)}`,
+    );
+    // Each child retries twice, two children → 4 attempts total before Promise.all rejects.
+    // (Exact count can vary if Promise.all short-circuits; we only require it's at least 2
+    // from the first child that completed its retries, and no more than 4.)
+    const n = spawns(io).length;
+    assert.ok(n >= 2 && n <= 4, `expected 2..4 spawns across parallelFork retries, got ${n}`);
   });
 
   await test("tryMultipleTimes with custom fallback: fallback's result is returned after max attempts", async () => {

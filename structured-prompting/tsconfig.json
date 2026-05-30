@@ -14,12 +14,9 @@
     "lib": ["ES2022", "DOM"]
   },
   "include": [
-    "src/api/**/*.ts",
-    "src/server/**/*.ts",
-    "src/index.ts",
+    "src/**/*.ts",
     "example/**/*.ts",
     "build.ts",
     "../renderer/structured-prompts/**/*.ts"
-  ],
-  "exclude": ["src/client/**"]
+  ]
 }

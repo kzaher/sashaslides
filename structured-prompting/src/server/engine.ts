@@ -1,19 +1,16 @@
 import {
   Session,
   SessionWithResult,
-  type RichGraphNode,
+  type GraphNode,
 } from "./session.js";
 import { ComputationGraph } from "./graph.js";
-import { callClaude, callClaudeFormatted } from "./claude-cli.js";
+import { claudeDriver } from "./claude-cli.js";
+import { codexDriver } from "./codex-cli.js";
+import type { ModelDriver } from "./model-driver.js";
 import { Claude, type ClaudeModel, type Result } from "./types.js";
-import { InterruptException, StructuredError, FatalShellError, describeError, isCatchable } from "./errors.js";
+import { InterruptException, StructuredError, describeError } from "./errors.js";
 import { startMonitor, type MonitorServer } from "./server.js";
-import { realIO, killAllSpawned, type IO } from "./io.js";
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-import { existsSync } from "node:fs";
-import { readProcessTree } from "./reaper.js";
+import { realIO, type IO } from "./io.js";
 
 export interface EngineOptions {
   port?: number;
@@ -24,14 +21,6 @@ export interface EngineOptions {
   hookSignals?: boolean;
   /** Log banner URL when server boots. Default: true. */
   log?: boolean;
-  /**
-   * Path to write graph snapshots after every mutation. When set, the
-   * monitor's tree state survives a process restart — `view-graph.ts
-   * <path>` reads this file and serves the same UI (with /api/ask still
-   * functional, since each send carries its own forked claude session).
-   * Default: env `SP_GRAPH_PATH` if set, else null (no persistence).
-   */
-  graphPersistPath?: string | null;
   /**
    * IO module routing every side-effecting call (spawn, fs, clock, log).
    * Default `realIO`. Tests pass a `MockIO` here to record effects and
@@ -46,7 +35,7 @@ export interface EngineOptions {
  * the engine as it walks the description.
  */
 interface RunCtx {
-  claudeSessionId: string | null;
+  driverSessionId: string | null;
   model: ClaudeModel;
   cwd: string;
   /** Prepend strings queued by prependToNextPrompt description nodes; consumed by next send*. */
@@ -60,7 +49,7 @@ interface RunCtx {
 
 function cloneCtx(ctx: RunCtx): RunCtx {
   return {
-    claudeSessionId: ctx.claudeSessionId,
+    driverSessionId: ctx.driverSessionId,
     model: ctx.model,
     cwd: ctx.cwd,
     prepend: [...ctx.prepend],
@@ -72,20 +61,28 @@ function cloneCtx(ctx: RunCtx): RunCtx {
   };
 }
 
-export class ClaudeEngine {
+/**
+ * Provider-agnostic execution engine. All the logic (graph walk, monitor,
+ * description interpreter, session/fork/compact bookkeeping) lives here; the
+ * ONLY engine-specific part — how a prompt reaches the model CLI — is the
+ * injected `ModelDriver` (composition, not inheritance). `ClaudeEngine` and
+ * `CodexEngine` below are thin wrappers that pre-bind a driver.
+ */
+export class Engine {
   private monitor: MonitorServer | null = null;
   private activeGraph: ComputationGraph | null = null;
   private opts: Required<EngineOptions>;
+  private readonly driver: ModelDriver;
   readonly io: IO;
 
-  constructor(opts: EngineOptions = {}) {
+  constructor(driver: ModelDriver, opts: EngineOptions = {}) {
+    this.driver = driver;
     this.opts = {
       port: opts.port ?? 4711,
       host: opts.host ?? "127.0.0.1",
       persist: opts.persist ?? true,
       hookSignals: opts.hookSignals ?? true,
       log: opts.log ?? true,
-      graphPersistPath: opts.graphPersistPath ?? process.env.SP_GRAPH_PATH ?? null,
       io: opts.io ?? realIO,
     };
     this.io = this.opts.io;
@@ -110,16 +107,6 @@ export class ClaudeEngine {
   ): Promise<R> {
     this.activeGraph = session.graph;
 
-    // 0. Wire persistence — every graph mutation writes a JSON snapshot to
-    //    disk so a follow-up session can be re-attached via view-graph.ts.
-    if (this.opts.graphPersistPath) {
-      session.graph.enablePersistence(this.opts.graphPersistPath);
-      if (this.opts.log) {
-        // eslint-disable-next-line no-console
-        console.error(`[engine] graph persistence: ${this.opts.graphPersistPath}`);
-      }
-    }
-
     // 1. Boot a fresh monitor server.
     if (this.monitor) {
       try { await this.monitor.stop(); } catch {}
@@ -136,26 +123,6 @@ export class ClaudeEngine {
       console.error(`\n┌── structured-prompting monitor\n│ ${monitor.url}\n└──\n`);
     }
     if (this.opts.hookSignals) installShutdownHooks(this);
-
-    // 1.5. Spawn the reaper supervisor — a detached process that polls
-    //      our PID and SIGKILLs every transitive descendant when we die.
-    //      setpriv-pdeathsig only protects ONE generation; the reaper
-    //      catches everything deeper (e.g. tool-use shells claude itself
-    //      forks). Spawned only once; subsequent execute() calls reuse it.
-    //
-    //      BEFORE spawning, exercise the /proc parser on this engine's
-    //      own PID. If the parser can't find us in the map OR returns a
-    //      PPID that disagrees with process.ppid, the reaper would later
-    //      either fail to detect engine death or fail to enumerate
-    //      descendants — both silent token-burning failure modes. Refuse
-    //      to start instead. This catches non-Linux hosts, oddly-mounted
-    //      /proc, and future kernel format changes at boot rather than
-    //      at the worst possible moment (engine crash).
-    if (!_reaperSpawned) {
-      assertProcParserHealthy();
-      _reaperSpawned = true;
-      spawnReaper(process.pid);
-    }
 
     // 2. Build the description SYNCHRONOUSLY.
     session.graph.start(session.graph.rootId);
@@ -177,7 +144,7 @@ export class ClaudeEngine {
 
     // 3. Walk from root to tip, executing nodes in order against a RunCtx.
     const initialCtx: RunCtx = {
-      claudeSessionId: null,
+      driverSessionId: null,
       model: session.model,
       cwd: session.cwd,
       prepend: [],
@@ -228,11 +195,6 @@ export class ClaudeEngine {
   }
 
   async shutdown(): Promise<void> {
-    // Reap CLI subprocesses (claude + any per-call shells) FIRST. Without
-    // this, a SIGTERM/SIGINT to the engine just orphans the children to
-    // PID 1 — they keep burning model tokens until they finish on their
-    // own. realIO tracks every spawn for exactly this reason.
-    try { killAllSpawned("SIGTERM"); } catch {}
     if (this.monitor) {
       try { await this.monitor.stop(); } catch {}
       this.monitor = null;
@@ -273,11 +235,11 @@ export class ClaudeEngine {
 
   private async runNode(
     graph: ComputationGraph,
-    node: RichGraphNode,
+    node: GraphNode,
     ctx: RunCtx,
     upstream: unknown,
   ): Promise<{ value: unknown; ctx: RunCtx }> {
-    graph.start(node.id, { model: ctx.model, sessionId: ctx.claudeSessionId });
+    graph.start(node.id, { model: ctx.model, sessionId: ctx.driverSessionId });
     try {
       switch (node.kind) {
         // --- trivial passthroughs (state mutations) --------------------------
@@ -301,7 +263,7 @@ export class ClaudeEngine {
         }
         case "newSession": {
           const next = cloneCtx(ctx);
-          next.claudeSessionId = null;
+          next.driverSessionId = null;
           next.prepend = [];
           next.append = [];
           next.pendingFork = false;
@@ -349,28 +311,14 @@ export class ClaudeEngine {
           // under `--json-schema`. The CLI itself hands the schema to the model
           // as a StructuredOutput tool and returns the parsed value in
           // result.structured_output, so we just forward and read.
-          const flatSchema = hasSchema
-            ? flattenSchemaUnit(schemaUnit as { schema: unknown; components?: unknown })
-            : undefined;
-          // Streaming hook: every assistant chunk lands on the node's
-          // `output.partialText` via `graph.patchOutput`, bumping the
-          // graph version so the monitor's 250 ms poll surfaces the
-          // running response BEFORE the call returns. Same mechanism
-          // wires `partialUsage` for live token-counter updates.
-          // Switches the underlying CLI to `--output-format stream-json`.
-          const onPartialText = (textSoFar: string) => {
-            graph.patchOutput(node.id, { partialText: textSoFar });
-          };
-          const onPartialUsage = (usage: import("../api/wire.js").TokenUsage) => {
-            graph.patchOutput(node.id, { partialUsage: usage });
-          };
+          const flatSchema = hasSchema ? flattenSchemaUnit(schemaUnit as { schema: any; components?: any }) : undefined;
           const { ctx: nextCtx, response, usedResume, appliedForkFlag, composedPrompt } = await this.materializeAndCall(
             graph,
             node,
             ctx,
             async (resumeSid, forkFlag, composedPrompt) =>
               hasSchema
-                ? callClaudeFormatted({
+                ? this.driver.callFormatted({
                     prompt: composedPrompt,
                     jsonSchema: flatSchema!,
                     model: ctx.model,
@@ -380,10 +328,8 @@ export class ClaudeEngine {
                     timeoutMs: args.timeout,
                     attachments: args.base64_attachments,
                     io: this.io,
-                    onPartialText,
-                    onPartialUsage,
                   })
-                : callClaude({
+                : this.driver.call({
                     prompt: composedPrompt,
                     model: ctx.model,
                     resume: resumeSid,
@@ -392,8 +338,6 @@ export class ClaudeEngine {
                     timeoutMs: args.timeout,
                     attachments: args.base64_attachments,
                     io: this.io,
-                    onPartialText,
-                    onPartialUsage,
                   }),
             rawPrompt,
           );
@@ -414,38 +358,19 @@ export class ClaudeEngine {
               });
             }
             const parsed = r.parsed;
-            const interrupt = parsed && typeof parsed === "object"
-              ? (parsed as { InterruptException?: unknown }).InterruptException
-              : undefined;
-            if (typeof interrupt !== "undefined") {
-              throw new InterruptException(String(interrupt) || "InterruptException");
+            if (parsed && typeof parsed === "object" && typeof (parsed as any).InterruptException !== "undefined") {
+              throw new InterruptException(String((parsed as any).InterruptException) || "InterruptException");
             }
             graph.finishOk(
               node.id,
-              {
-                parsed,
-                text: response.text,
-                appliedForkFlag,
-                composedPrompt,
-                // Per-call token + USD breakdown — surfaced on every send
-                // so the monitor's per-node rollup can display tokens and
-                // USD alongside duration without rounding through the raw
-                // CLI JSON. See TokenUsage in claude-cli.ts.
-                usage: response.usage,
-              },
+              { parsed, text: response.text, appliedForkFlag, composedPrompt },
               { sessionId: response.sessionId ?? usedResume, model: response.model ?? ctx.model },
             );
             return { value: parsed, ctx: nextCtx };
           }
           graph.finishOk(
             node.id,
-            {
-              text: response.text,
-              durationMs: response.durationMs,
-              appliedForkFlag,
-              composedPrompt,
-              usage: response.usage,
-            },
+            { text: response.text, durationMs: response.durationMs, appliedForkFlag, composedPrompt },
             { sessionId: response.sessionId ?? usedResume, model: response.model ?? ctx.model },
           );
           return { value: response.text, ctx: nextCtx };
@@ -460,7 +385,6 @@ export class ClaudeEngine {
             cwd: ctx.cwd,
             graph,
             tipNodeId: node.id,
-            containerId: node.id,
           });
           const subTip = fn(subSession);
           const sub = await this.runChain(graph, node.id, subTip.tipNodeId, ctx, upstream);
@@ -470,6 +394,10 @@ export class ClaudeEngine {
         case "combineWith": {
           const exec = node.callbacks.execution;
           const combine = node.callbacks.combine;
+          // Anchor the execution-callback's sub-description under a synthetic
+          // `combineBranch` wrapper so the UI can visibly indent the sub-chain
+          // while outer-chain followups (which also attach to this combineWith
+          // node) stay at the parent's indent level.
           const branchNode = graph.create({ parentId: node.id, kind: "combineBranch", label: "combineBranch" });
           graph.start(branchNode.id);
           const branchSession = new SessionWithResult<unknown>({
@@ -478,7 +406,6 @@ export class ClaudeEngine {
             cwd: ctx.cwd,
             graph,
             tipNodeId: branchNode.id,
-            containerId: branchNode.id,
           });
           installResult(branchSession, upstream);
           const subTip = exec(branchSession);
@@ -491,26 +418,11 @@ export class ClaudeEngine {
         case "parallelFork": {
           const apply = node.callbacks.apply;
           const { inputs } = node.input;
-          // Promise.allSettled semantics: every branch runs to completion
-          // (success or failure) before the parallelFork node makes any
-          // decision. A throw in branch N — whether from the apply lambda
-          // building the description (e.g. fs.readFileSync ENOENT on a
-          // missing input the user code synchronously reads) OR from a
-          // claude call deeper in N's chain — finishes ONLY that branch's
-          // parallelChild as `error` and lets siblings run. After all
-          // settle, if any branch rejected, we re-throw a single error so
-          // the surrounding `tryMultipleTimes` / `combineWith` see the
-          // failure and behave normally — but unrelated siblings already
-          // completed their own work, so a wave-level parallelFork (one
-          // parallelFork wrapping clusters, each cluster a parallelFork
-          // of slides) doesn't lose ALL clusters when a single slide
-          // crashes.
-          //
-          // If users want true per-branch error MATERIALIZATION (errors
-          // stored as `{error}` values in the result array instead of
-          // throwing), they wrap their branch in `try/tryMultipleTimes`
-          // with a `materializeError` fallback, same as before.
-          const settled = await Promise.allSettled(
+          // Promise.all semantics: any child that throws cancels siblings and
+          // propagates. Users opt into per-child error-materialization by
+          // calling .materializeError(msg) inside their apply (typically from a
+          // try/tryMultipleTimes fallback).
+          const results = await Promise.all(
             inputs.map(async (input, i) => {
               const childNode = graph.create({
                 parentId: node.id,
@@ -520,7 +432,7 @@ export class ClaudeEngine {
               });
               graph.start(childNode.id);
               const childCtx: RunCtx = {
-                claudeSessionId: null,
+                driverSessionId: null,
                 model: ctx.model,
                 cwd: ctx.cwd,
                 prepend: [],
@@ -536,7 +448,6 @@ export class ClaudeEngine {
                 cwd: ctx.cwd,
                 graph,
                 tipNodeId: childNode.id,
-                containerId: childNode.id,
               });
               try {
                 const subTip = apply(childSession, input, i);
@@ -549,24 +460,6 @@ export class ClaudeEngine {
               }
             }),
           );
-          // Aggregate: if ANY branch rejected, throw the first rejection
-          // so the surrounding chain handles it (tryMultipleTimes catches
-          // ValidationError, lets bugs propagate). Successful siblings
-          // already finished their own subgraphs and are visible as ok.
-          const rejections = settled.filter(
-            (s): s is PromiseRejectedResult => s.status === "rejected",
-          );
-          if (rejections.length > 0) {
-            graph.finishErr(node.id, rejections[0].reason);
-            // If multiple branches failed, surface that in the message so
-            // the reviewer doesn't have to hunt — the first error becomes
-            // the thrown one, the rest land on their respective child
-            // nodes already marked `error`.
-            throw rejections[0].reason;
-          }
-          const results = settled.map(s =>
-            (s as PromiseFulfilledResult<unknown>).value,
-          );
           graph.finishOk(node.id, { count: results.length });
           return { value: results, ctx };
         }
@@ -574,13 +467,12 @@ export class ClaudeEngine {
           const code = node.callbacks.code;
           const fallback = node.callbacks.fallback;
           try {
-            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: node.id, containerId: node.id });
+            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: node.id });
             const subTip = code(s);
             const sub = await this.runChain(graph, node.id, subTip.tipNodeId, ctx, upstream);
             graph.finishOk(node.id, { ok: true });
             return { value: sub.value, ctx: sub.ctx };
           } catch (err) {
-            rethrowIfBug(graph, node.id, err);
             const fbNode = graph.create({
               parentId: node.id,
               kind: "tryFallback",
@@ -589,7 +481,7 @@ export class ClaudeEngine {
             });
             graph.start(fbNode.id);
             try {
-              const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id, containerId: fbNode.id });
+              const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id });
               const subTip = fallback(s, err);
               const sub = await this.runChain(graph, fbNode.id, subTip.tipNodeId, ctx, upstream);
               graph.finishOk(fbNode.id, safeValue(sub.value));
@@ -608,6 +500,7 @@ export class ClaudeEngine {
           const fallback = node.callbacks.fallback;
           let lastErr: unknown = null;
           let attemptCtx = ctx;
+          // auto-inject Interrupt contract on every attempt
           attemptCtx = { ...attemptCtx, append: [...attemptCtx.append] };
           for (let i = 1; i <= max; i++) {
             const attNode = graph.create({
@@ -617,7 +510,7 @@ export class ClaudeEngine {
             });
             graph.start(attNode.id);
             try {
-              const s = new Session({ sessionId: randomId(), model: attemptCtx.model, cwd: attemptCtx.cwd, graph, tipNodeId: attNode.id, containerId: attNode.id });
+              const s = new Session({ sessionId: randomId(), model: attemptCtx.model, cwd: attemptCtx.cwd, graph, tipNodeId: attNode.id });
               const subTip = code(s);
               const interruptCtx: RunCtx = {
                 ...attemptCtx,
@@ -634,7 +527,7 @@ export class ClaudeEngine {
               lastErr = err;
               graph.finishErr(attNode.id, err);
               if (err instanceof InterruptException) break;
-              rethrowIfBug(graph, node.id, err);
+              // inject error context for next attempt
               attemptCtx = {
                 ...attemptCtx,
                 prepend: [
@@ -652,7 +545,7 @@ export class ClaudeEngine {
           });
           graph.start(fbNode.id);
           try {
-            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id, containerId: fbNode.id });
+            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id });
             const subTip = fallback(s, lastErr);
             const sub = await this.runChain(graph, fbNode.id, subTip.tipNodeId, ctx, upstream);
             graph.finishOk(fbNode.id, safeValue(sub.value));
@@ -670,32 +563,9 @@ export class ClaudeEngine {
           const build = node.callbacks.buildCommand;
           const cmd = build(upstream);
           graph.setLabel(node.id, `executeShell: ${truncate(cmd, 60)}`);
-          // Persist cwd alongside cmd so /api/retry can re-run this node
-          // post-hoc without needing the engine's RunCtx (which is gone
-          // by the time the engine has exited).
-          graph.start(node.id, { input: { cmd, cwd: ctx.cwd } });
-          // Streaming hooks: every stdout/stderr chunk lands on
-          // `output.stdoutSoFar` / `output.stderrSoFar` via
-          // `graph.patchOutput`. Monitor UI's 250 ms poll surfaces the
-          // growing output BEFORE the process exits — handy for
-          // long-running record-rendering / pixel-diff scripts where
-          // the reviewer wants to see progress without `tail -f`.
-          graph.patchOutput(node.id, { stdoutSoFar: "", stderrSoFar: "" });
-          let stdoutSoFar = "";
-          let stderrSoFar = "";
-          const { stdout, stderr } = await runShell({
-            cmd, cwd: ctx.cwd, io: this.io, nodeId: node.id,
-            onStdout: (chunk) => { stdoutSoFar += chunk; graph.patchOutput(node.id, { stdoutSoFar }); },
-            onStderr: (chunk) => { stderrSoFar += chunk; graph.patchOutput(node.id, { stderrSoFar }); },
-          });
-          // Save BOTH stdout and stderr tails on the node output. Some
-          // tools (e.g. tools/tsxx/) deliberately write their result-path
-          // banner to stderr; without persisting stderrTail those lines
-          // would be invisible in the monitor UI.
-          graph.finishOk(node.id, {
-            stdoutTail: stdout.slice(-400),
-            stderrTail: stderr.slice(-400),
-          });
+          graph.start(node.id, { input: { cmd } });
+          const stdout = await runShell({ cmd, cwd: ctx.cwd, io: this.io });
+          graph.finishOk(node.id, { stdoutTail: stdout.slice(-400) });
           return { value: stdout, ctx };
         }
         case "assert": {
@@ -719,10 +589,10 @@ export class ClaudeEngine {
       }
     } catch (e) {
       graph.finishErr(node.id, e);
-      throw attachNodeMeta(e, node.id, ctx.claudeSessionId);
+      throw attachNodeMeta(e, node.id, ctx.driverSessionId);
     }
     // Exhaustiveness fallthrough — should not happen.
-    throw new Error(`unknown node kind: ${(node as { kind: string }).kind}`);
+    throw new Error(`unknown node kind: ${(node as any).kind}`);
   }
 
   /**
@@ -731,19 +601,19 @@ export class ClaudeEngine {
    * function with (resumeSid, forkFlag, composedPrompt). Returns the response
    * plus an updated ctx.
    */
-  private async materializeAndCall<Resp extends { sessionId: string | null; isError: boolean; errorMessage: string | null; raw: unknown; stderr: string }>(
+  private async materializeAndCall<Resp extends { sessionId: string | null; isError: boolean; errorMessage: string | null; raw: any; stderr: string }>(
     graph: ComputationGraph,
-    _node: RichGraphNode,
+    _node: GraphNode,
     ctx: RunCtx,
     invoke: (resumeSid: string | null, forkFlag: boolean, composedPrompt: string) => Promise<Resp>,
     rawPrompt: string,
   ): Promise<{ ctx: RunCtx; response: Resp; usedResume: string | null; appliedForkFlag: boolean; composedPrompt: string }> {
-    let resumeSid = ctx.claudeSessionId;
+    let resumeSid = ctx.driverSessionId;
     let applyForkFlag = false;
 
     if (ctx.pendingCompact) {
       if (resumeSid) {
-        const compactResp = await callClaude({
+        const compactResp = await this.driver.compact({
           prompt: "/compact",
           model: ctx.model,
           resume: resumeSid,
@@ -765,32 +635,14 @@ export class ClaudeEngine {
       if (resumeSid) applyForkFlag = true;
     }
 
-    // Resolve `{{<nodeId>.error.field}}` substitution tokens against
-    // the current graph state. Emitted by try/tryMultipleTimes' eager-
-    // expansion for prior-attempt-error refs in retry prompts.
-    const { resolveSubstitutions } = await import("./session.js");
-    const resolvedPrepend = ctx.prepend.map(s => resolveSubstitutions(s, graph));
-    const resolvedAppend = ctx.append.map(s => resolveSubstitutions(s, graph));
-    const resolvedRaw = resolveSubstitutions(rawPrompt, graph);
-    const prepend = resolvedPrepend.length ? resolvedPrepend.join("\n\n") + "\n\n" : "";
-    const append = resolvedAppend.length ? "\n\n" + resolvedAppend.join("\n\n") : "";
-    const composed = prepend + resolvedRaw + append;
-
-    // Surface the composed prompt on the node's input BEFORE we await the
-    // CLI call — otherwise the monitor can't show "view entire prompt" on
-    // long-running sends. Kept under node.input so the monitor's existing
-    // JSON tree renders a StringReveal for it automatically; finishOk still
-    // copies composedPrompt onto node.output for completed sends.
-    const nodeInput = (_node as { input: unknown }).input;
-    const mergedInput = nodeInput && typeof nodeInput === "object"
-      ? { ...(nodeInput as Record<string, unknown>), composedPrompt: composed }
-      : { composedPrompt: composed };
-    graph.setInput(_node.id, mergedInput);
+    const prepend = ctx.prepend.length ? ctx.prepend.join("\n\n") + "\n\n" : "";
+    const append = ctx.append.length ? "\n\n" + ctx.append.join("\n\n") : "";
+    const composed = prepend + rawPrompt + append;
 
     const response = await invoke(resumeSid, applyForkFlag, composed);
 
     const nextCtx: RunCtx = {
-      claudeSessionId: response.sessionId ?? resumeSid,
+      driverSessionId: response.sessionId ?? resumeSid,
       model: ctx.model,
       cwd: ctx.cwd,
       prepend: [],
@@ -800,79 +652,24 @@ export class ClaudeEngine {
       pendingCompact: false,
       pendingCompactNodeId: null,
     };
-    return { ctx: nextCtx, response, usedResume: resumeSid, appliedForkFlag: applyForkFlag, composedPrompt: composed };
+    return {
+      ctx: nextCtx,
+      response,
+      usedResume: resumeSid,
+      appliedForkFlag: applyForkFlag,
+      // Composed prompt = prepend blocks + caller's raw prompt + append
+      // blocks. The monitor surfaces this via a "Show entire prompt"
+      // reveal in the detail panel — useful for diagnosing why a model
+      // saw context the caller's own `prompt` string never carried.
+      composedPrompt: composed,
+    };
   }
 }
 
 // ---- helpers ----------------------------------------------------------------
 
-/**
- * Use at the top of every `catch` block where a retry/fallback is allowed.
- * If `err` isn't a recognized validation error (see isCatchable in
- * errors.ts), mark `nodeId` as failed and rethrow so the wave aborts. This
- * is the single chokepoint that prevents a programmer bug (TypeError,
- * undefined access, etc.) from being silently swallowed and burning model
- * tokens through retry loops.
- */
-function rethrowIfBug(graph: ComputationGraph, nodeId: string, err: unknown): void {
-  if (!isCatchable(err)) {
-    graph.finishErr(nodeId, err);
-    throw err;
-  }
-}
-
-let _reaperSpawned = false;
-
-/**
- * Boot-time self-test for the /proc parser the reaper relies on. Throws
- * a descriptive error if /proc/<self>/stat doesn't roundtrip — meaning
- * the host is non-Linux, /proc is mounted oddly, or the stat format
- * changed in a way our parser can't handle. The reaper would silently
- * leak descendants in any of these cases, so failing fast at startup
- * (before the engine begins burning tokens) is the safer move.
- */
-function assertProcParserHealthy(): void {
-  const tree = readProcessTree();
-  const myPpid = tree.get(process.pid);
-  if (myPpid == null) {
-    throw new Error(
-      `[reaper] /proc parser failed self-test: own PID ${process.pid} not present in readProcessTree() output. ` +
-      `Refusing to start — the reaper would silently fail to track descendants on this host.`,
-    );
-  }
-  if (myPpid !== process.ppid) {
-    throw new Error(
-      `[reaper] /proc parser self-test mismatch: parsed PPID ${myPpid} for self, but process.ppid is ${process.ppid}. ` +
-      `Refusing to start — stat format may have changed.`,
-    );
-  }
-}
-
-/**
- * Spawn the reaper as a detached process that survives this engine's
- * death. Used to SIGKILL deep descendants (tool-use shells, sub-shells
- * forked by the claude CLI) that pdeathsig can't reach.
- */
-function spawnReaper(enginePid: number): void {
-  // reaper.ts lives next to this file. tsx is a peer dependency in our
-  // build (the engine itself is launched via `node dist/...` after esbuild,
-  // so tsx may not be on PATH at runtime — fall back to plain node).
-  const reaperSrc = resolve(dirname(fileURLToPath(import.meta.url)), "reaper.ts");
-  const reaperJs = reaperSrc.replace(/\.ts$/, ".js");
-  // Try compiled .js first (production), fall back to tsx-loading .ts (dev).
-  const cmd = existsSync(reaperJs) ? process.execPath : "npx";
-  const args = existsSync(reaperJs)
-    ? [reaperJs, String(enginePid)]
-    : ["tsx", reaperSrc, String(enginePid)];
-  const reaper = spawn(cmd, args, {
-    detached: true,
-    stdio: "ignore",
-  });
-  reaper.unref();
-}
-
 let _signalsInstalled = false;
-function installShutdownHooks(engine: ClaudeEngine) {
+function installShutdownHooks(engine: Engine) {
   if (_signalsInstalled) return;
   _signalsInstalled = true;
   const handler = async (sig: string) => {
@@ -889,11 +686,7 @@ function installResult<T>(swr: SessionWithResult<T>, value: unknown): void {
 
 function attachNodeMeta(e: unknown, nodeId: string, sessionId: string | null): unknown {
   if (e && typeof e === "object") {
-    try {
-      const meta = e as { nodeId?: string; sessionId?: string | null };
-      meta.nodeId ??= nodeId;
-      meta.sessionId ??= sessionId;
-    } catch {}
+    try { (e as any).nodeId ??= nodeId; (e as any).sessionId ??= sessionId; } catch {}
   }
   return e;
 }
@@ -905,26 +698,25 @@ function attachNodeMeta(e: unknown, nodeId: string, sessionId: string | null): u
  * object. This helper inlines a top-level `$ref` against the unit's components
  * so the resulting object is standalone.
  */
-function flattenSchemaUnit(unit: { schema: unknown; components?: unknown }): object {
+function flattenSchemaUnit(unit: { schema: any; components?: any }): object {
   const root = unit.schema;
-  if (!root || typeof root !== "object") return (root as object | null) ?? {};
-  const refHolder = root as { $ref?: unknown };
-  if (typeof refHolder.$ref === "string" && unit.components) {
-    const resolved = resolveRef(refHolder.$ref, unit.components);
+  if (!root || typeof root !== "object") return root ?? {};
+  if (typeof root.$ref === "string" && unit.components) {
+    const resolved = resolveRef(root.$ref, unit.components);
     if (resolved) return resolved;
   }
-  return root as object;
+  return root;
 }
 
-function resolveRef(ref: string, components: unknown): object | null {
+function resolveRef(ref: string, components: any): any | null {
   // "#/components/schemas/Foo" → components.schemas.Foo
   const parts = ref.replace(/^#\//, "").split("/");
-  let cur: unknown = { components };
+  let cur: any = { components };
   for (const p of parts) {
-    if (cur == null || typeof cur !== "object") return null;
-    cur = (cur as Record<string, unknown>)[p];
+    if (cur == null) return null;
+    cur = cur[p];
   }
-  return cur && typeof cur === "object" ? (cur as object) : null;
+  return cur ?? null;
 }
 
 /**
@@ -958,50 +750,62 @@ function truncate(s: string, n: number): string {
 }
 
 function randomId(): string {
-  const c = (typeof crypto !== "undefined" ? crypto : undefined) as
-    | (Crypto & { randomUUID?: () => string })
-    | undefined;
-  if (c && typeof c.randomUUID === "function") {
-    return c.randomUUID();
+  if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
+    return (crypto as any).randomUUID();
   }
   return "sp_" + Math.random().toString(36).slice(2, 10);
 }
 
-export async function runShell(
-  args: { cmd: string; cwd: string; io: IO; nodeId?: string; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void },
-): Promise<{ stdout: string; stderr: string }> {
-  const { cmd, cwd, io, nodeId, onStdout, onStderr } = args;
-  const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd, nodeId, onStdout, onStderr });
+async function runShell(args: { cmd: string; cwd: string; io: IO }): Promise<string> {
+  const { cmd, cwd, io } = args;
+  const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd });
   if (r.spawnError) {
-    // bash itself failed to launch — almost always a programmer bug
-    // (PATH, permissions). Propagate as a non-catchable StructuredError.
     throw new StructuredError(`shell spawn failed: ${r.spawnError}`);
   }
   if (r.exitCode !== 0) {
-    // Non-zero exit from a user-supplied script. Throw FatalShellError so
-    // tryMultipleTimes does NOT auto-retry — a script failure usually
-    // means the worker's code state is broken and re-running with the
-    // same input just re-hits the same failure (token burn). The user
-    // retries the node manually from the monitor UI after fixing the
-    // underlying cause. Include BOTH stdout and stderr tails — wave-7
-    // had a fatal ReferenceError that only surfaced in stdout.
-    const stderrTail = r.stderr.slice(-800);
-    const stdoutTail = r.stdout.slice(-800);
-    throw new FatalShellError(
-      `shell command failed (code ${r.exitCode}): ${cmd}\n` +
-      (stderrTail ? `--- stderr (last 800) ---\n${stderrTail}\n` : "") +
-      (stdoutTail ? `--- stdout (last 800) ---\n${stdoutTail}` : ""),
-      { data: {
-        kind: "shellExit",
-        exitCode: r.exitCode,
-        cmd,
-        stderrTail,
-        stdoutTail,
-      } },
+    throw new StructuredError(
+      `shell command failed (code ${r.exitCode}): ${cmd}\n${r.stderr.slice(-800)}`,
     );
   }
-  return { stdout: r.stdout, stderr: r.stderr };
+  return r.stdout;
 }
 
-export const sharedClaudeEngine = new ClaudeEngine();
+/**
+ * Public engines = the shared `Engine` + a pre-bound `ModelDriver`, wired by
+ * COMPOSITION (each HAS-A `Engine`), NOT inheritance. Both reuse 100% of the
+ * engine logic; the only difference is which driver is injected. The public
+ * surface (`execute`, `shutdown`, `currentGraph`, `monitorUrl`, `io`) is
+ * delegated 1:1. (The handful of delegating lines are duplicated rather than
+ * shared via a base class, to keep this strictly composition.)
+ */
+export class ClaudeEngine {
+  private readonly engine: Engine;
+  readonly io: IO;
+  constructor(opts: EngineOptions = {}) {
+    this.engine = new Engine(claudeDriver, opts);
+    this.io = this.engine.io;
+  }
+  execute<R>(session: Session, calculation: (s: Session) => SessionWithResult<R>): Promise<R> {
+    return this.engine.execute(session, calculation);
+  }
+  shutdown(): Promise<void> { return this.engine.shutdown(); }
+  get currentGraph(): ComputationGraph | null { return this.engine.currentGraph; }
+  get monitorUrl(): string | null { return this.engine.monitorUrl; }
+}
+
+export class CodexEngine {
+  private readonly engine: Engine;
+  readonly io: IO;
+  constructor(opts: EngineOptions = {}) {
+    this.engine = new Engine(codexDriver, opts);
+    this.io = this.engine.io;
+  }
+  execute<R>(session: Session, calculation: (s: Session) => SessionWithResult<R>): Promise<R> {
+    return this.engine.execute(session, calculation);
+  }
+  shutdown(): Promise<void> { return this.engine.shutdown(); }
+  get currentGraph(): ComputationGraph | null { return this.engine.currentGraph; }
+  get monitorUrl(): string | null { return this.engine.monitorUrl; }
+}
+
 export { Claude };

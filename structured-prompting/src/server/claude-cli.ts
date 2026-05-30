@@ -1,12 +1,16 @@
 import { join } from "node:path";
 import { Buffer } from "node:buffer";
 import { tmpdir } from "node:os";
-import type { ClaudeModel } from "./types.js";
 import { realIO, type IO } from "./io.js";
+import type { ModelDriver } from "./model-driver.js";
 
 export interface ClaudeCallOptions {
   prompt: string;
-  model?: ClaudeModel;
+  /** Model id forwarded verbatim to the CLI's `--model`. Widened to string
+   *  (was ClaudeModel) so this shape doubles as the provider-agnostic
+   *  ModelCallOptions; the typed ClaudeModel selection lives at the Session
+   *  layer. */
+  model?: string;
   resume?: string | null;     // existing session_id to continue
   fork?: boolean;             // --fork-session (pairs with --resume)
   cwd?: string;
@@ -347,4 +351,17 @@ export async function callClaudeFormatted<R>(
   }
   return { ...r, parsed, parseError };
 }
+
+/**
+ * The Claude backend for the engine — a thin adapter over the functions
+ * above. Composed into `Engine` (see model-driver.ts / engine.ts) so the
+ * engine logic stays provider-agnostic. Compaction is Claude-CLI's `/compact`
+ * slash command sent into the resumed conversation.
+ */
+export const claudeDriver: ModelDriver = {
+  name: "claude",
+  call: (opts) => callClaude(opts),
+  callFormatted: (opts) => callClaudeFormatted(opts),
+  compact: (opts) => callClaude({ ...opts, prompt: "/compact" }),
+};
 
