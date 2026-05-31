@@ -51,26 +51,24 @@
 import type { Cluster } from "./workspace-setup.js";
 
 const BUG_DESCRIPTION =
-  "User re-flagged basics slide_17 as BAD. Comment (verbatim — do NOT " +
-  "paraphrase or infer beyond this text):" +
+  "User re-flagged basics slide_17 (slide_17_table_rounded) as BAD. Comment " +
+  "(verbatim — do NOT paraphrase or infer beyond this text):" +
   "\n" +
-  "\n  \"The problem with the top right table." +
-  "\n  * top left cell - slightly misaligned left edge." +
-  "\n  * top right cell - slightly misaligned right edge." +
-  "\n  * bottom left cell - slightly misaligned bottom edge." +
-  "\n  * bottom right cell - slightly misaligned bottom and right edge." +
+  "\n  \"Top right table:" +
+  "\n  * bottom left cell - border slightly misaligned." +
+  "\n  * bottom right cell - border slightly misaligned." +
   "\n  " +
-  "\n  right center table:" +
-  "\n  * white on edge side of table." +
-  "\n  * white on top side of table." +
-  "\n  * bottom left cell - misaligned bottom." +
-  "\n  * bottom right cell - misaligned bottom.\"" +
+  "\n  middle right table:" +
+  "\n  * White edge on left side (probably some background/border artifact)" +
+  "\n  * White edge on top side (probably some background/border artifact)" +
+  "\n  * bottom left cell - heavily misaligned bottom edge." +
+  "\n  * bottom right cell - heavily misaligned bottom edge.\"" +
   "\n" +
   "\nContext: the four cells called out on the 'top right table' (`.colored`) " +
   "are its CORNER cells, rendered by the shape-twice corner-mask block in " +
   "`renderer/html2slides/convert-pptx-lib.ts` (the `if (_tableGid && " +
   "cornerSpecs.length > 0)` block) — NOT the native <a:tbl> interior cells. " +
-  "The 'right center table' is `.colored-nb` (no outer border; corner masks " +
+  "The 'middle right table' is `.colored-nb` (no outer border; corner masks" +
   "should be a single cell-coloured rounded fill with ring width 0). The " +
   "misalignments are now SMALL (1-2 display px at 160dpi; 1 CSS px = 1.25 " +
   "slide px). 'white on edge/top side' on `.colored-nb` = the white full-" +
@@ -81,10 +79,10 @@ const BUG_DESCRIPTION =
   "regress the changes listed in the wave-33 header doc (drift-free edge-" +
   "anchored geometry; corner cells keep their own white border; " +
   "outerOvershootBottom = 0; no post-table outline stroke; no double border). " +
-  "Per-annotation zoom-crops (4 annotations) are attached at Step 7.5; the " +
+  "Per-annotation zoom-crops (6 annotations) are attached at Step 7.5; the " +
   "slide has a pink wrapper behind each table for visibility.";
 
-const SLIDE_IDS = ["slide_17"];
+const SLIDE_IDS = ["slide_17_table_rounded"];
 
 export const CLUSTERS: Cluster[] = [
   { task_id: "wave33-A", cluster_description: BUG_DESCRIPTION, slide_ids: SLIDE_IDS, retry_budget: 10 },

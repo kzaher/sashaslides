@@ -591,7 +591,7 @@ async function main() {
     assert(threw instanceof Error, "engine should throw when default fallback re-throws");
     assert.equal(spawns(io).length, 3, "must attempt exactly max=3 before giving up");
     assert.ok(
-      /boom/.test(String((threw as any).message ?? threw)),
+      /boom/.test(String((threw as { message?: unknown }).message ?? threw)),
       `the thrown error must carry the LAST attempt's error ("boom"), got: ${String(threw)}`,
     );
   });
@@ -613,7 +613,7 @@ async function main() {
     });
     assert(threw instanceof Error, "parallelFork should surface the child's thrown error");
     assert.ok(
-      /kaboom/.test(String((threw as any).message ?? threw)),
+      /kaboom/.test(String((threw as { message?: unknown }).message ?? threw)),
       `the propagated error must carry the retry failure ("kaboom"), got: ${String(threw)}`,
     );
     // Each child retries twice, two children → 4 attempts total before Promise.all rejects.

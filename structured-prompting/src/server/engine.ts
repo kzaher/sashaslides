@@ -1,7 +1,7 @@
 import {
   Session,
   SessionWithResult,
-  type GraphNode,
+  type RichGraphNode,
 } from "./session.js";
 import { ComputationGraph } from "./graph.js";
 import { claudeDriver } from "./claude-cli.js";
@@ -11,6 +11,14 @@ import { Claude, type ClaudeModel, type Result } from "./types.js";
 import { InterruptException, StructuredError, describeError } from "./errors.js";
 import { startMonitor, type MonitorServer } from "./server.js";
 import { realIO, type IO } from "./io.js";
+import { captureWorktreeDiff, indexFileForCwd } from "./git-diff.js";
+
+/**
+ * Node kinds that can change files on disk and are therefore worth capturing a
+ * working-tree diff for. "at least" send + executeShell — extend as new
+ * file-touching kinds appear.
+ */
+const FILE_MUTATING_KINDS = new Set<string>(["send", "executeShell"]);
 
 export interface EngineOptions {
   port?: number;
@@ -229,13 +237,31 @@ export class Engine {
       const out = await this.runNode(graph, node, currentCtx, current);
       current = out.value;
       currentCtx = out.ctx;
+      // After a file-mutating node finishes, snapshot the worktree so the UI
+      // can show what changed at (and up to) this step. Best-effort.
+      if (FILE_MUTATING_KINDS.has(node.kind) && currentCtx.cwd) {
+        await this.captureNodeDiff(graph, node.id, currentCtx.cwd);
+      }
     }
     return { value: current, ctx: currentCtx };
   }
 
+  /** Best-effort working-tree diff capture for a file-mutating node. Snapshots
+   *  the worktree at `cwd` and attaches the cumulative + per-node delta. Never
+   *  throws — a diff failure must not break the run. */
+  private async captureNodeDiff(graph: ComputationGraph, nodeId: string, cwd: string): Promise<void> {
+    try {
+      const prevTree = graph.prevSnapshotTree(nodeId);
+      const diff = await captureWorktreeDiff(this.io, cwd, prevTree, indexFileForCwd(cwd), nodeId);
+      if (diff) graph.setDiff(nodeId, diff);
+    } catch (err) {
+      console.error(`[engine] diff capture failed for ${nodeId}: ${(err as Error).message}`);
+    }
+  }
+
   private async runNode(
     graph: ComputationGraph,
-    node: GraphNode,
+    node: RichGraphNode,
     ctx: RunCtx,
     upstream: unknown,
   ): Promise<{ value: unknown; ctx: RunCtx }> {
@@ -259,6 +285,12 @@ export class Engine {
           const next = cloneCtx(ctx);
           next.model = node.input.model;
           graph.finishOk(node.id, { model: next.model }, { model: next.model });
+          return { value: upstream, ctx: next };
+        }
+        case "switchCwd": {
+          const next = cloneCtx(ctx);
+          next.cwd = node.input.cwd;
+          graph.finishOk(node.id, { cwd: next.cwd });
           return { value: upstream, ctx: next };
         }
         case "newSession": {
@@ -311,7 +343,7 @@ export class Engine {
           // under `--json-schema`. The CLI itself hands the schema to the model
           // as a StructuredOutput tool and returns the parsed value in
           // result.structured_output, so we just forward and read.
-          const flatSchema = hasSchema ? flattenSchemaUnit(schemaUnit as { schema: any; components?: any }) : undefined;
+          const flatSchema = hasSchema ? flattenSchemaUnit(schemaUnit as unknown as SchemaUnit) : undefined;
           const { ctx: nextCtx, response, usedResume, appliedForkFlag, composedPrompt } = await this.materializeAndCall(
             graph,
             node,
@@ -348,6 +380,10 @@ export class Engine {
               data: { raw: response.raw, stderr: response.stderr },
             });
           }
+          // CLI command to load THIS send's session for inspection — surfaced
+          // in the monitor so you can open the exact conversation (and verify
+          // whether it actually carried prior history).
+          const resumeCommand = this.driver.resumeCommand(response.sessionId ?? usedResume, ctx.cwd);
           if (hasSchema) {
             const r = response as typeof response & { parseError?: string | null; parsed?: unknown };
             if (r.parseError || r.parsed == null) {
@@ -358,19 +394,19 @@ export class Engine {
               });
             }
             const parsed = r.parsed;
-            if (parsed && typeof parsed === "object" && typeof (parsed as any).InterruptException !== "undefined") {
-              throw new InterruptException(String((parsed as any).InterruptException) || "InterruptException");
+            if (parsed && typeof parsed === "object" && typeof (parsed as Record<string, unknown>).InterruptException !== "undefined") {
+              throw new InterruptException(String((parsed as Record<string, unknown>).InterruptException) || "InterruptException");
             }
             graph.finishOk(
               node.id,
-              { parsed, text: response.text, appliedForkFlag, composedPrompt },
+              { parsed, text: response.text, appliedForkFlag, composedPrompt, resumeCommand },
               { sessionId: response.sessionId ?? usedResume, model: response.model ?? ctx.model },
             );
             return { value: parsed, ctx: nextCtx };
           }
           graph.finishOk(
             node.id,
-            { text: response.text, durationMs: response.durationMs, appliedForkFlag, composedPrompt },
+            { text: response.text, durationMs: response.durationMs, appliedForkFlag, composedPrompt, resumeCommand },
             { sessionId: response.sessionId ?? usedResume, model: response.model ?? ctx.model },
           );
           return { value: response.text, ctx: nextCtx };
@@ -385,6 +421,10 @@ export class Engine {
             cwd: ctx.cwd,
             graph,
             tipNodeId: node.id,
+            // Anchor the body's lexical container to THIS node so the UI
+            // nests the pipe's children under it (containerId defaults to
+            // rootId, which would flatten the whole subtree onto the root).
+            containerId: node.id,
           });
           const subTip = fn(subSession);
           const sub = await this.runChain(graph, node.id, subTip.tipNodeId, ctx, upstream);
@@ -406,6 +446,9 @@ export class Engine {
             cwd: ctx.cwd,
             graph,
             tipNodeId: branchNode.id,
+            // Anchor the sub-chain under the combineBranch wrapper (containerId
+            // defaults to rootId) so the UI indents it instead of flattening.
+            containerId: branchNode.id,
           });
           installResult(branchSession, upstream);
           const subTip = exec(branchSession);
@@ -448,6 +491,9 @@ export class Engine {
                 cwd: ctx.cwd,
                 graph,
                 tipNodeId: childNode.id,
+                // Lexical container anchor = this child node so its subtree
+                // nests under the parallelChild (not the root).
+                containerId: childNode.id,
               });
               try {
                 const subTip = apply(childSession, input, i);
@@ -467,7 +513,7 @@ export class Engine {
           const code = node.callbacks.code;
           const fallback = node.callbacks.fallback;
           try {
-            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: node.id });
+            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: node.id, containerId: node.id });
             const subTip = code(s);
             const sub = await this.runChain(graph, node.id, subTip.tipNodeId, ctx, upstream);
             graph.finishOk(node.id, { ok: true });
@@ -481,7 +527,7 @@ export class Engine {
             });
             graph.start(fbNode.id);
             try {
-              const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id });
+              const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id, containerId: fbNode.id });
               const subTip = fallback(s, err);
               const sub = await this.runChain(graph, fbNode.id, subTip.tipNodeId, ctx, upstream);
               graph.finishOk(fbNode.id, safeValue(sub.value));
@@ -510,7 +556,7 @@ export class Engine {
             });
             graph.start(attNode.id);
             try {
-              const s = new Session({ sessionId: randomId(), model: attemptCtx.model, cwd: attemptCtx.cwd, graph, tipNodeId: attNode.id });
+              const s = new Session({ sessionId: randomId(), model: attemptCtx.model, cwd: attemptCtx.cwd, graph, tipNodeId: attNode.id, containerId: attNode.id });
               const subTip = code(s);
               const interruptCtx: RunCtx = {
                 ...attemptCtx,
@@ -527,13 +573,28 @@ export class Engine {
               lastErr = err;
               graph.finishErr(attNode.id, err);
               if (err instanceof InterruptException) break;
-              // inject error context for next attempt
+              // Carry the worker's session FORWARD so the next attempt RESUMES
+              // it (full conversation history across all rounds) rather than
+              // starting cold with only an error string. We resume this
+              // attempt's first top-level send — the analyze/fix turn — not the
+              // verdict forks (which are independent judges with their own
+              // sessions). Identify it by containerId === this attempt node.
+              const resumeId = graph.allNodes()
+                .filter((n) => n.kind === "send" && n.containerId === attNode.id && n.sessionId)
+                .sort((a, b) => a.createdAt - b.createdAt)[0]?.sessionId ?? null;
               attemptCtx = {
                 ...attemptCtx,
-                prepend: [
-                  ...attemptCtx.prepend,
-                  `Previous attempt failed: ${describeError(err)}. Diagnose the cause before retrying.`,
-                ],
+                // Resume the same conversation next round when we found it.
+                driverSessionId: resumeId ?? attemptCtx.driverSessionId,
+                prepend: resumeId
+                  // The resumed session already holds every prior round, so we
+                  // only add the NEW failure — no re-stating old errors.
+                  ? [`Your previous attempt did not pass: ${describeError(err)}. You retain the FULL context of your earlier rounds in this same conversation. Diagnose what went wrong and try a DIFFERENT approach — do not repeat a fix the verdict already rejected.`]
+                  // Fresh-session fallback: accumulate errors so context isn't lost.
+                  : [
+                      ...attemptCtx.prepend,
+                      `Previous attempt failed: ${describeError(err)}. Diagnose the cause before retrying.`,
+                    ],
               };
             }
           }
@@ -545,7 +606,7 @@ export class Engine {
           });
           graph.start(fbNode.id);
           try {
-            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id });
+            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id, containerId: fbNode.id });
             const subTip = fallback(s, lastErr);
             const sub = await this.runChain(graph, fbNode.id, subTip.tipNodeId, ctx, upstream);
             graph.finishOk(fbNode.id, safeValue(sub.value));
@@ -592,7 +653,7 @@ export class Engine {
       throw attachNodeMeta(e, node.id, ctx.driverSessionId);
     }
     // Exhaustiveness fallthrough — should not happen.
-    throw new Error(`unknown node kind: ${(node as any).kind}`);
+    throw new Error(`unknown node kind: ${(node as { kind?: unknown }).kind}`);
   }
 
   /**
@@ -601,9 +662,9 @@ export class Engine {
    * function with (resumeSid, forkFlag, composedPrompt). Returns the response
    * plus an updated ctx.
    */
-  private async materializeAndCall<Resp extends { sessionId: string | null; isError: boolean; errorMessage: string | null; raw: any; stderr: string }>(
+  private async materializeAndCall<Resp extends { sessionId: string | null; isError: boolean; errorMessage: string | null; raw: unknown; stderr: string }>(
     graph: ComputationGraph,
-    _node: GraphNode,
+    _node: RichGraphNode,
     ctx: RunCtx,
     invoke: (resumeSid: string | null, forkFlag: boolean, composedPrompt: string) => Promise<Resp>,
     rawPrompt: string,
@@ -686,7 +747,8 @@ function installResult<T>(swr: SessionWithResult<T>, value: unknown): void {
 
 function attachNodeMeta(e: unknown, nodeId: string, sessionId: string | null): unknown {
   if (e && typeof e === "object") {
-    try { (e as any).nodeId ??= nodeId; (e as any).sessionId ??= sessionId; } catch {}
+    const meta = e as { nodeId?: string; sessionId?: string | null };
+    try { meta.nodeId ??= nodeId; meta.sessionId ??= sessionId; } catch {}
   }
   return e;
 }
@@ -698,7 +760,16 @@ function attachNodeMeta(e: unknown, nodeId: string, sessionId: string | null): u
  * object. This helper inlines a top-level `$ref` against the unit's components
  * so the resulting object is standalone.
  */
-function flattenSchemaUnit(unit: { schema: any; components?: any }): object {
+/** A JSON-Schema fragment is an untyped object tree keyed by string. */
+type JsonSchemaObject = Record<string, unknown>;
+
+/** typia's schema unit: a root schema plus the components it may $ref into. */
+interface SchemaUnit {
+  schema: JsonSchemaObject;
+  components?: JsonSchemaObject;
+}
+
+function flattenSchemaUnit(unit: SchemaUnit): JsonSchemaObject {
   const root = unit.schema;
   if (!root || typeof root !== "object") return root ?? {};
   if (typeof root.$ref === "string" && unit.components) {
@@ -708,15 +779,15 @@ function flattenSchemaUnit(unit: { schema: any; components?: any }): object {
   return root;
 }
 
-function resolveRef(ref: string, components: any): any | null {
+function resolveRef(ref: string, components: JsonSchemaObject): JsonSchemaObject | null {
   // "#/components/schemas/Foo" → components.schemas.Foo
   const parts = ref.replace(/^#\//, "").split("/");
-  let cur: any = { components };
+  let cur: unknown = { components };
   for (const p of parts) {
-    if (cur == null) return null;
-    cur = cur[p];
+    if (cur == null || typeof cur !== "object") return null;
+    cur = (cur as Record<string, unknown>)[p];
   }
-  return cur ?? null;
+  return cur != null && typeof cur === "object" ? (cur as JsonSchemaObject) : null;
 }
 
 /**
@@ -750,15 +821,16 @@ function truncate(s: string, n: number): string {
 }
 
 function randomId(): string {
-  if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
-    return (crypto as any).randomUUID();
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c && typeof c.randomUUID === "function") {
+    return c.randomUUID();
   }
   return "sp_" + Math.random().toString(36).slice(2, 10);
 }
 
-async function runShell(args: { cmd: string; cwd: string; io: IO }): Promise<string> {
-  const { cmd, cwd, io } = args;
-  const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd });
+export async function runShell(args: { cmd: string; cwd: string; io: IO; nodeId?: string }): Promise<string> {
+  const { cmd, cwd, io, nodeId } = args;
+  const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd, nodeId });
   if (r.spawnError) {
     throw new StructuredError(`shell spawn failed: ${r.spawnError}`);
   }

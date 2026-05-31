@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { IJsonSchemaUnit } from "@typia/interface";
-import type { ClaudeModel, NodeStatus, GraphSnapshot, GraphNode as WireGraphNode } from "../api/wire.js";
+import type { ClaudeModel, NodeStatus, GraphSnapshot, GraphNode as WireGraphNode, NodeDiff } from "../api/wire.js";
 import type {
   CommonSendArguments,
   PromptInput,
@@ -68,6 +68,7 @@ export interface NodeKindSchemas {
   fork: { input: null };
   compact: { input: null };
   switchModel: { input: { model: ClaudeModel } };
+  switchCwd: { input: { cwd: string } };
   newSession: { input: { model: ClaudeModel } };
   prependToNextPrompt: { input: { text: string } };
   appendToNextPrompt: { input: { text: string } };
@@ -142,6 +143,8 @@ interface GraphNodeBase {
   output: unknown;
   error: { message: string; stack?: string; data?: unknown } | null;
   children: string[];
+  /** Working-tree git diff captured after file-mutating nodes. See NodeDiff. */
+  diff?: NodeDiff | null;
 }
 
 /**
@@ -458,6 +461,32 @@ export class ComputationGraph {
     (n as { output: unknown }).output = { ...prev, ...patch };
     this.version++;
     this.persist();
+  }
+
+  /** Attach a captured working-tree diff to a node (file-mutating nodes only).
+   *  Bumps version + persists so the UI's poll picks it up. */
+  setDiff(id: string, diff: NodeDiff): void {
+    const n = this.nodes.get(id);
+    if (!n) return;
+    (n as { diff?: NodeDiff | null }).diff = diff;
+    this.version++;
+    this.persist();
+  }
+
+  /** Walk `parentId` from `id` to the nearest ancestor that already carries a
+   *  captured snapshot tree — that tree is the base for `id`'s per-node delta.
+   *  Returns null when no ancestor has been snapshotted yet (first mutating
+   *  node in the task), in which case the delta is taken vs HEAD. */
+  prevSnapshotTree(id: string): string | null {
+    let cur = this.nodes.get(id)?.parentId ?? null;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      seen.add(cur);
+      const n = this.nodes.get(cur);
+      if (n?.diff?.tree) return n.diff.tree;
+      cur = n?.parentId ?? null;
+    }
+    return null;
   }
 
   get(id: string): RichGraphNode | undefined {

@@ -21,6 +21,7 @@ export interface Cluster {
   task_id: string;                  // "clipping-curves"
   cluster_description: string;      // root-cause hypothesis
   slide_ids: string[];              // ["slide_11", "slide_12", ...]
+  retry_budget?: number;            // per-cluster attempt cap; falls back to the BuildOptions default
 }
 
 export interface BuildOptions {
@@ -42,9 +43,16 @@ const DEFAULTS: Omit<BuildOptions, "clusters"> = {
   repo_root: process.cwd(),
 };
 
-function readRatings(path: string): Record<string, any> {
+/** One rating entry as stored in ratings.json. Only `comment` is consumed
+ *  here; other fields (verdict, etc.) are ignored, so keep the shape minimal. */
+interface RatingEntry {
+  comment?: string;
+}
+
+function readRatings(path: string): Record<string, RatingEntry> {
   if (!existsSync(path)) return {};
-  return JSON.parse(readFileSync(path, "utf-8"));
+  // External untyped JSON boundary: parse once into the minimal shape we read.
+  return JSON.parse(readFileSync(path, "utf-8")) as Record<string, RatingEntry>;
 }
 
 function buildSlideTasks(slideIds: string[], opts: BuildOptions): SlideTask[] {
@@ -110,15 +118,22 @@ export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "
     const workspace_dir = createWorktree(opts, c.task_id);
     const scratch_dir = resolve(workspace_dir, ".bug-solving-scratch");
     mkdirSync(scratch_dir, { recursive: true });
+    // Model work-products (analysis.md / fix-summary.md) go here, NOT in the
+    // gitignored scratch dir, so they show up in the engine's per-node git
+    // diff. The binary pptx/diff artifacts stay under scratch_dir (ignored).
+    const analysis_dir = resolve(workspace_dir, "bug-solving-analysis");
+    mkdirSync(analysis_dir, { recursive: true });
     out.push({
       task_id: c.task_id,
       workspace_dir,
       scratch_dir,
+      analysis_dir,
+      fixtures_dir: opts.fixtures_dir,
       server_port: opts.port_base + i,
       presentation_title: `bug_solving-${c.task_id}-${Date.now()}`,
       slides,
       cluster_description: c.cluster_description,
-      retry_budget: opts.retry_budget,
+      retry_budget: c.retry_budget ?? opts.retry_budget,
     });
   }
   return out;
