@@ -14,8 +14,9 @@
  */
 
 import { createServer } from "http";
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, copyFileSync, statSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, copyFileSync, statSync, unlinkSync } from "fs";
 import { join, resolve, dirname } from "path";
+import { PNG } from "pngjs";
 
 const args = process.argv.slice(2);
 const resultsDir = resolve(args[0] || ".");
@@ -60,6 +61,133 @@ interface SlideComparison {
   // primitives (visuals, images, emoji fallbacks). Surface these to the user
   // because any region in this list represents a fidelity compromise.
   renderedRegions?: RenderedRegion[];
+  // Per-annotation zoom-crops: focused, nearest-neighbour-upscaled crops of
+  // each marked region, one per side (original + test/slides), shown below the
+  // slide so you can compare the exact spot you flagged at high zoom.
+  zoomCrops?: string[];
+}
+
+// Zoom-crops live alongside the annotations under the results dir so they
+// survive /tmp wipes the same way.
+const zoomDir = join(resultsDir, "zoom-crops");
+
+/**
+ * Crop `srcPngBytes` to `bbox` (in annotation-canvas coords) and scale UP with
+ * nearest-neighbour so the longest edge approaches `targetLongestEdge`. Zoom is
+ * derived from the bbox size (small marks zoom more) and clamped to an integer
+ * in [minZoom, maxZoom] so the upscale stays crisp. Returns PNG bytes.
+ */
+function zoomCropPng(
+  srcPngBytes: Buffer,
+  bbox: { x: number; y: number; w: number; h: number; canvasW: number; canvasH: number },
+  targetLongestEdge = 1200,
+  minZoom = 1,
+  maxZoom = 10,
+): Buffer {
+  const src = PNG.sync.read(srcPngBytes);
+  // The annotation canvas may differ in resolution from the source image;
+  // scale the bbox into source coordinates.
+  const sx = src.width / bbox.canvasW;
+  const sy = src.height / bbox.canvasH;
+  const cropX = Math.max(0, Math.round(bbox.x * sx));
+  const cropY = Math.max(0, Math.round(bbox.y * sy));
+  const cropW = Math.max(1, Math.min(src.width - cropX, Math.round(bbox.w * sx)));
+  const cropH = Math.max(1, Math.min(src.height - cropY, Math.round(bbox.h * sy)));
+  const longest = Math.max(cropW, cropH);
+  const zoomRaw = Math.floor(targetLongestEdge / longest);
+  const zoom = Math.max(minZoom, Math.min(maxZoom, zoomRaw || 1));
+  const outW = cropW * zoom, outH = cropH * zoom;
+  const out = new PNG({ width: outW, height: outH });
+  for (let oy = 0; oy < outH; oy++) {
+    const srcY = cropY + Math.floor(oy / zoom);
+    for (let ox = 0; ox < outW; ox++) {
+      const srcX = cropX + Math.floor(ox / zoom);
+      const si = (srcY * src.width + srcX) * 4;
+      const oi = (oy * outW + ox) * 4;
+      out.data[oi] = src.data[si];
+      out.data[oi + 1] = src.data[si + 1];
+      out.data[oi + 2] = src.data[si + 2];
+      out.data[oi + 3] = src.data[si + 3];
+    }
+  }
+  return PNG.sync.write(out);
+}
+
+/** Fallback when no explicit shape list is sent: the bounding box of all
+ *  non-transparent pixels in the flattened annotation PNG, padded. */
+function annotationBbox(
+  annotationPngBytes: Buffer,
+  padding = 20,
+  alphaThreshold = 8,
+): { x: number; y: number; w: number; h: number; canvasW: number; canvasH: number } | null {
+  const png = PNG.sync.read(annotationPngBytes);
+  const W = png.width, H = png.height;
+  let minX = W, minY = H, maxX = -1, maxY = -1;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (png.data[(y * W + x) * 4 + 3] > alphaThreshold) {
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0 || maxY < 0) return null;
+  const x = Math.max(0, minX - padding), y = Math.max(0, minY - padding);
+  return { x, y, w: Math.min(W, maxX + padding) - x, h: Math.min(H, maxY + padding) - y, canvasW: W, canvasH: H };
+}
+
+/** List crop PNGs for a slide (`<id>.png` or `<id>-NN-side.png`), sorted. */
+function listZoomCrops(dir: string, slideId: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter(f => f === `${slideId}.png` || f.startsWith(`${slideId}-`))
+    .map(f => join(dir, f))
+    .sort();
+}
+
+/** Crop original + test (slides) for each annotation shape (or the fallback
+ *  bbox) and write them under zoomDir. Returns the list of written crop paths.
+ *  Shapes are {x,y,w,h} in canvas coords; rect shapes are used as-is, others
+ *  (pencil) get `padPx` padding. */
+function generateZoomCrops(
+  id: string, originalPng: string, slidesPng: string,
+  annotBytes: Buffer,
+  shapes: Array<{ kind?: string; x: number; y: number; w: number; h: number }> | null,
+  canvasSize: { w: number; h: number } | null,
+  padPx: number,
+): string[] {
+  // Clear stale crops for this slide first so a re-rate with fewer marks
+  // doesn't leave orphans.
+  if (existsSync(zoomDir)) {
+    for (const f of readdirSync(zoomDir)) {
+      if (f === `${id}.png` || f.startsWith(`${id}-`)) { try { unlinkSync(join(zoomDir, f)); } catch {} }
+    }
+  }
+  mkdirSync(zoomDir, { recursive: true });
+  const written: string[] = [];
+  const writePair = (idx: number, bbox: { x: number; y: number; w: number; h: number; canvasW: number; canvasH: number }) => {
+    const sides: Array<["original" | "rendered", string]> = [["original", originalPng], ["rendered", slidesPng]];
+    for (const [side, srcPath] of sides) {
+      if (!existsSync(srcPath)) continue;
+      const outPath = join(zoomDir, `${id}-${String(idx).padStart(2, "0")}-${side}.png`);
+      try { writeFileSync(outPath, zoomCropPng(readFileSync(srcPath), bbox)); written.push(outPath); } catch {}
+    }
+  };
+  const canvasW = canvasSize?.w || 0, canvasH = canvasSize?.h || 0;
+  if (shapes && shapes.length && canvasW > 0 && canvasH > 0) {
+    shapes.forEach((sh, i) => {
+      const pad = sh.kind === "rect" ? 0 : padPx;
+      writePair(i + 1, {
+        x: Math.max(0, sh.x - pad), y: Math.max(0, sh.y - pad),
+        w: sh.w + pad * 2, h: sh.h + pad * 2, canvasW, canvasH,
+      });
+    });
+  } else {
+    // Fallback: one crop of the whole annotation bbox.
+    const bb = annotationBbox(annotBytes, padPx, 8);
+    if (bb) writePair(1, bb);
+  }
+  return written;
 }
 
 function findComparisons(): SlideComparison[] {
@@ -115,9 +243,16 @@ function findComparisons(): SlideComparison[] {
       : [];
     for (let i = 0; i < comparisons.length; i++) {
       const c = comparisons[i];
-      if (htmlFiles[i]) c.htmlFile = join(meta.htmlDir, htmlFiles[i]);
+      // Match the HTML source by slide id first (robust to --filter-slides,
+      // where comparisons[i] no longer lines up with htmlFiles[i]); fall back
+      // to positional matching only when no id match exists.
+      const byId = htmlFiles.find((f: string) => f.replace(/\.html$/, "") === c.id || f.startsWith(c.id + "."));
+      const htmlName = byId ?? htmlFiles[i];
+      if (htmlName) c.htmlFile = join(meta.htmlDir, htmlName);
       if (meta.presentationId) {
-        const slideFrag = meta.slideIds?.[i] ? `#slide=id.${meta.slideIds[i]}` : "";
+        // slideIds carry the per-slide object id for the #slide deep-link.
+        const sid = meta.slideIds?.[c.id] ?? meta.slideIds?.[i];
+        const slideFrag = sid ? `#slide=id.${sid}` : "";
         c.slidesUrl = `https://docs.google.com/presentation/d/${meta.presentationId}/edit${slideFrag}`;
       }
     }
@@ -173,6 +308,12 @@ function findComparisons(): SlideComparison[] {
     }
   }
 
+  // Attach any per-annotation zoom-crops on disk (independent of ratings).
+  for (const c of comparisons) {
+    const crops = listZoomCrops(zoomDir, c.id);
+    if (crops.length) (c as any).zoomCrops = crops;
+  }
+
   // --filter-slides narrows the list to a specific set of slide IDs.
   // Used by bug_solving tasks to show only the cluster's slides.
   if (filterSlides && filterSlides.length) {
@@ -182,10 +323,11 @@ function findComparisons(): SlideComparison[] {
   return comparisons;
 }
 
-function saveRating(id: string, status: "good" | "bad", comment?: string, annotationPng?: string) {
+function saveRating(id: string, status: "good" | "bad", comment?: string, annotationPng?: string): string | null {
   const ratingsFile = join(resultsDir, "ratings.json");
   const ratings = existsSync(ratingsFile) ? JSON.parse(readFileSync(ratingsFile, "utf-8")) : {};
   const entry: any = { status, comment, ratedAt: new Date().toISOString() };
+  let savedAnnotPath: string | null = null;
   if (annotationPng) {
     // Annotations persist under resultsDir/annotations/ so /tmp wipes only
     // break the PNGs, not the metadata.
@@ -195,6 +337,7 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
     const b64 = annotationPng.replace(/^data:image\/png;base64,/, "");
     writeFileSync(annotPath, Buffer.from(b64, "base64"));
     entry.annotation = annotPath;
+    savedAnnotPath = annotPath;
   }
   ratings[id] = entry;
   writeFileSync(ratingsFile, JSON.stringify(ratings, null, 2));
@@ -236,6 +379,7 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
       }
     }
   }
+  return savedAnnotPath;
 }
 
 const HTML = `<!DOCTYPE html>
@@ -259,12 +403,25 @@ const HTML = `<!DOCTYPE html>
   .slide-pair .panel.slides canvas.rendered-overlay { pointer-events: none; mix-blend-mode: plus-lighter; cursor: default; }
   .slide-pair .panel.original .diff-overlay { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); border-radius: 4px; pointer-events: none; }
   .slide-pair .panel.original canvas.diff-overlay { background: transparent; }
+  /* Blink-comparator: tabs stack the two panels and flick between them in
+     place (press f) so pixel-level shifts pop; toggle back to side-by-side. */
+  .flip-tabs { display: flex; align-items: center; gap: 4px; padding: 8px 24px 0; }
+  .flip-tab { font-size: 11px; padding: 3px 12px; border-radius: 4px 4px 0 0; border: 1px solid #2a3a5a; background: #16213e; color: #9fb3d0; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; }
+  .flip-tab:hover { background: #1d2d4f; color: #e0e0e0; }
+  .flip-tab.active { background: #27ae60; color: #fff; border-color: #27ae60; font-weight: 600; }
+  .flip-tab.toggle { border-radius: 4px; background: #0f1a30; margin-left: auto; }
+  .flip-tab.toggle.active { background: #4a90d9; border-color: #4a90d9; color: #fff; }
+  .slide-pair.flip { display: block; position: relative; }
+  .slide-pair.flip .panel { width: 100%; position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+  .slide-pair.flip .panel.flip-active { position: relative; opacity: 1; pointer-events: auto; z-index: 1; }
   .draw-toolbar { display: flex; gap: 8px; padding: 0 24px; align-items: center; font-size: 12px; color: #aaa; }
   .draw-toolbar button { background: #2a2a4e; color: #e0e0e0; border: 1px solid #444; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
   .draw-toolbar button.active { background: #e94560; border-color: #e94560; color: white; }
   .draw-toolbar input[type=color] { width: 28px; height: 24px; border: 1px solid #444; border-radius: 4px; background: transparent; cursor: pointer; }
   .labels { display: flex; gap: 4px; padding: 0 24px; }
   .labels span { width: 49%; text-align: center; font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+  .labels a { color: #4a90d9; text-decoration: none; font-weight: 600; }
+  .labels a:hover { text-decoration: underline; }
   .actions { display: flex; gap: 12px; padding: 12px 24px; justify-content: center; }
   .btn { padding: 12px 36px; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; transition: 0.2s; }
   .btn-good { background: #27ae60; color: white; }
@@ -300,6 +457,13 @@ const HTML = `<!DOCTYPE html>
   .comment-box textarea:focus { outline: none; border-color: #4a90d9; }
   .saved-comment { margin: 4px 24px; padding: 8px 12px; background: #2a2a4e; border-left: 3px solid #e94560; border-radius: 0 6px 6px 0; font-size: 13px; color: #ccc; }
   .saved-comment .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .zoom-crops { margin: 8px 24px; padding: 10px 12px; background: #0e1f2e; border-left: 4px solid #3498db; border-radius: 0 6px 6px 0; }
+  .zoom-crops-label { font-size: 13px; color: #cfe4f7; margin-bottom: 8px; }
+  .zoom-crops-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+  .zoom-crop-pair { display: flex; gap: 8px; background: #050a0e; padding: 6px; border-radius: 4px; }
+  .zoom-crop figure { margin: 0; }
+  .zoom-crop figcaption { color: #7dafd5; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; text-align: center; }
+  .zoom-crop img { display: block; max-width: 320px; max-height: 360px; image-rendering: pixelated; border: 1px solid #1f2933; }
 </style>
 </head>
 <body>
@@ -310,7 +474,12 @@ const HTML = `<!DOCTYPE html>
 <div id="regressionBanner"></div>
 <div id="renderedBanner"></div>
 <div class="nav" id="nav"></div>
-<div class="labels"><span>Original HTML</span><span>Google Slides</span></div>
+<div class="labels"><span id="labelOriginal">Original HTML</span><span id="labelSlides">Google Slides</span></div>
+<div class="flip-tabs" id="flipTabs">
+  <button class="flip-tab" id="flipOriginal" onclick="setFlipSide('left')" title="Show the original (target) full-size">Original</button>
+  <button class="flip-tab" id="flipRendered" onclick="setFlipSide('right')" title="Show the Slides render full-size">Rendered</button>
+  <button class="flip-tab toggle" id="flipToggle" onclick="toggleFlip()" title="Blink-flip (stacked, tab between) vs classic side-by-side. Press f to flick.">&#9635; Flip</button>
+</div>
 <div class="slide-pair" id="pair"></div>
 <div class="draw-toolbar" id="drawToolbar">
   <label style="display:flex; gap:6px; align-items:center; cursor:pointer;">
@@ -323,10 +492,18 @@ const HTML = `<!DOCTYPE html>
   <span style="width: 24px;"></span>
   <span>Draw on Slides render:</span>
   <button id="drawToggle" onclick="toggleDraw()">Draw</button>
+  <button id="toolPen" class="active" onclick="setTool('pen')" title="Freehand pen">&#9998; Pen</button>
+  <button id="toolRect" onclick="setTool('rect')" title="Drag to draw a rectangle">&#9645; Rect</button>
   <input type="color" id="drawColor" value="#e94560">
   <label><input type="range" id="drawSize" min="2" max="20" value="6"> px</label>
   <button onclick="clearDraw()">Clear</button>
+  <span style="width: 24px;"></span>
+  <label style="display:flex; gap:6px; align-items:center; cursor:pointer;" title="Hover over either image to magnify the region under the cursor"><input type="checkbox" id="loupeToggle" onchange="toggleLoupe()"> Magnifier</label>
+  <label style="display:flex; gap:4px; align-items:center;" title="Magnifier zoom level"><input type="range" id="loupeZoomCtl" min="2" max="10" value="3" style="width:70px;"> zoom</label>
 </div>
+<!-- Magnifier loupe: a fixed-position lens that follows the cursor and shows a
+     zoomed background-image of the image underneath. -->
+<div id="loupe" style="display:none; position:fixed; pointer-events:none; border:2px solid #e94560; border-radius:50%; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 4px 16px rgba(0,0,0,.5); z-index:2000; background-repeat:no-repeat;"></div>
 <div class="slide-id" id="slideId"></div>
 <div class="slide-links" id="slideLinks"></div>
 <div class="comment-box">
@@ -348,6 +525,7 @@ const HTML = `<!DOCTYPE html>
 <div id="taskAnalysisPanel" style="display:none; margin: 8px 24px; padding: 12px; background: #2a1f0a; border-left: 4px solid #e67e22; border-radius: 0 6px 6px 0;"><pre id="taskAnalysisBody" style="white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, monospace; font-size: 12px; color: #ffe9a8; max-height: 400px; overflow-y: auto;">loading…</pre></div>
 <div id="taskDiffPanel" style="display:none; margin: 8px 24px; padding: 12px; background: #2a2a0a; border-left: 4px solid #f1c40f; border-radius: 0 6px 6px 0;"><pre id="taskDiffBody" style="white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, monospace; font-size: 12px; color: #f5e49d; max-height: 400px; overflow-y: auto;">loading…</pre></div>
 <div id="savedComment"></div>
+<div id="zoomCrops"></div>
 <div class="analysis" id="analysis" style="display:none"></div>
 <div id="goldenReport" style="margin: 24px; padding: 12px 16px; background: #0f1a30; border-left: 4px solid #f1c40f; border-radius: 0 6px 6px 0; font-size: 13px; color: #ccc; font-family: ui-monospace, monospace;"></div>
 
@@ -438,6 +616,7 @@ function render() {
     '<div class="panel slides"><img id="slidesImg" src="/img?path=' + encodeURIComponent(c.slidesPng) + '">' + renderedOverlayHtml + '<canvas id="drawCanvas"></canvas></div>';
   document.getElementById('pair').innerHTML = pairHtml;
   setupDrawCanvas(c.annotationPng);
+  applyFlip(); // re-apply blink-comparator state to the freshly-rebuilt panels
   if (showDiff) computeClientSideDiff();
   paintRenderedOverlay(c);
 
@@ -474,11 +653,18 @@ function render() {
   const visIdx = visible.findIndex(x => x.id === c.id);
   document.getElementById('slideId').innerHTML = c.id + badge + diffBadge + ' (' + (visIdx >= 0 ? visIdx+1 : '-') + '/' + visible.length + ' visible, ' + comparisons.length + ' total — ' + (showAll ? '<a href="#" onclick="showAll=false; render(); return false">only diffs</a>' : '<a href="#" onclick="showAll=true; render(); return false">show all</a>') + ')';
 
-  // Links to HTML source and Google Slides page
-  let links = '';
-  if (c.htmlFile) links += '<a href="/html?path=' + encodeURIComponent(c.htmlFile) + '" target="_blank">View HTML Source</a>';
-  if (c.slidesUrl) links += '<a href="' + c.slidesUrl + '" target="_blank">Open in Google Slides</a>';
-  document.getElementById('slideLinks').innerHTML = links;
+  // Column headers double as links: "Original HTML" → the source fixture,
+  // "Google Slides" → the live presentation. Placed at the TOP, above each
+  // panel, instead of a separate strip at the bottom.
+  const lo = document.getElementById('labelOriginal');
+  const ls = document.getElementById('labelSlides');
+  if (lo) lo.innerHTML = c.htmlFile
+    ? '<a href="/html?path=' + encodeURIComponent(c.htmlFile) + '" target="_blank">Original HTML ↗</a>'
+    : 'Original HTML';
+  if (ls) ls.innerHTML = c.slidesUrl
+    ? '<a href="' + c.slidesUrl + '" target="_blank">Google Slides ↗</a>'
+    : 'Google Slides';
+  document.getElementById('slideLinks').innerHTML = ''; // links now live in the top labels
 
   // Stats
   const good = comparisons.filter(c => c.status === 'good').length;
@@ -506,6 +692,35 @@ function render() {
     savedEl.innerHTML = '';
   }
 
+  // Per-annotation zoom-crops: original (target) vs test (Slides) for each
+  // marked region, grouped by region index from the filename <id>-NN-side.png.
+  const zcEl = document.getElementById('zoomCrops');
+  if (c.zoomCrops && c.zoomCrops.length) {
+    const groups = {};
+    for (const p of c.zoomCrops) {
+      const m = p.match(/-(\\d+)-(original|rendered)\\.png$/);
+      const key = m ? m[1] : '00';
+      const side = m ? m[2] : 'crop';
+      (groups[key] = groups[key] || {})[side] = p;
+    }
+    const keys = Object.keys(groups).sort();
+    let html = '<div class="zoom-crops"><div class="zoom-crops-label">🔍 Marked regions — original (target) vs test (Slides render), ' + keys.length + ' region(s):</div><div class="zoom-crops-grid">';
+    for (const k of keys) {
+      const g = groups[k];
+      html += '<div class="zoom-crop-pair">';
+      [['original', 'original (target)'], ['rendered', 'test (slides)']].forEach(function(pair) {
+        if (g[pair[0]]) {
+          html += '<div class="zoom-crop"><figure><figcaption>' + pair[1] + '</figcaption><img src="/img?path=' + encodeURIComponent(g[pair[0]]) + '&t=' + Date.now() + '"></figure></div>';
+        }
+      });
+      html += '</div>';
+    }
+    html += '</div></div>';
+    zcEl.innerHTML = html;
+  } else {
+    zcEl.innerHTML = '';
+  }
+
   // Clear comment box for new slide
   document.getElementById('comment').value = c.comment || '';
 
@@ -525,25 +740,75 @@ async function rate(status) {
   const c = comparisons[currentIdx];
   const comment = document.getElementById('comment').value.trim();
   // Export annotation canvas if anything was drawn.
-  let annotation;
+  let annotation, shapes, canvasSize;
   const canvas = document.getElementById('drawCanvas');
   if (canvas && canvasHasStrokes) {
     annotation = canvas.toDataURL('image/png');
+    // Send the committed shapes (canvas coords) so the server can crop each
+    // marked region into an original|test pair. Empty when the annotation was
+    // loaded from disk rather than drawn this session → server falls back to
+    // the whole-annotation bbox.
+    shapes = drawShapes.slice();
+    canvasSize = { w: canvas.width, h: canvas.height };
   }
-  await fetch('/api/rate', {
+  const resp = await fetch('/api/rate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: c.id, status, comment: comment || undefined, annotation }),
+    body: JSON.stringify({ id: c.id, status, comment: comment || undefined, annotation, shapes, canvasSize, pencilPadding: 24 }),
   });
+  const result = await resp.json().catch(() => ({}));
   c.status = status;
   c.comment = comment || undefined;
+  if (result && Array.isArray(result.zoomCrops)) c.zoomCrops = result.zoomCrops.length ? result.zoomCrops : undefined;
+  // Persist the saved annotation path back onto the in-memory comparison so the
+  // re-render below (navigate → render → setupDrawCanvas) RELOADS the strokes
+  // instead of showing a blank canvas. Without this, rating "bad" wiped the
+  // drawing on single-slide sets (navigate stays on the same slide).
+  if (result && result.annotationPath) c.annotationPng = result.annotationPath;
   navigate(1);
 }
 
 // --- Draw overlay on Slides render ---
 let drawMode = false;
+let drawTool = 'pen'; // 'pen' (freehand) | 'rect' (drag rectangle)
+function setTool(t) {
+  drawTool = t;
+  document.getElementById('toolPen').classList.toggle('active', t === 'pen');
+  document.getElementById('toolRect').classList.toggle('active', t === 'rect');
+}
+
+// --- Blink-comparator flip ---
+let flipMode = true;    // true = stacked/tabbed (flick between); false = side-by-side
+let flipSide = 'left';  // 'left' = original (target), 'right' = rendered (Slides)
+function applyFlip() {
+  const pair = document.getElementById('pair');
+  if (!pair) return;
+  pair.classList.toggle('flip', flipMode);
+  const orig = pair.querySelector('.panel.original');
+  const slides = pair.querySelector('.panel.slides');
+  if (orig) orig.classList.toggle('flip-active', flipMode && flipSide === 'left');
+  if (slides) slides.classList.toggle('flip-active', flipMode && flipSide === 'right');
+  const set = (id, on) => { const e = document.getElementById(id); if (e) e.classList.toggle('active', on); };
+  set('flipOriginal', flipMode && flipSide === 'left');
+  set('flipRendered', flipMode && flipSide === 'right');
+  set('flipToggle', !flipMode);
+  const t = document.getElementById('flipToggle');
+  if (t) t.innerHTML = flipMode ? '&#9635; Flip' : '&#8644; Side-by-side';
+}
+function setFlipSide(side) { flipMode = true; flipSide = side; applyFlip(); }
+function toggleFlip() { flipMode = !flipMode; applyFlip(); }
+function flickFlip() { if (flipMode) { flipSide = flipSide === 'left' ? 'right' : 'left'; applyFlip(); } }
 let canvasHasStrokes = false;
 let drawHistory = []; // stack of ImageData snapshots, one per completed stroke
+let drawShapes = []; // committed annotation shapes (canvas coords) for per-region zoom-crops
+// Cached PNG of the draw canvas, composited into the magnifier so the loupe
+// shows your strokes over the Slides render (not just the bare image).
+// Refreshed whenever the drawing changes.
+let drawCanvasDataUrl = null;
+function refreshDrawCache() {
+  const c = document.getElementById('drawCanvas');
+  drawCanvasDataUrl = (c && canvasHasStrokes) ? c.toDataURL('image/png') : null;
+}
 function undoDraw() {
   const canvas = document.getElementById('drawCanvas');
   if (!canvas || drawHistory.length === 0) return;
@@ -552,6 +817,8 @@ function undoDraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (prev) ctx.putImageData(prev, 0, 0);
   canvasHasStrokes = drawHistory.length > 0 || !!prev;
+  drawShapes.pop();
+  refreshDrawCache();
 }
 let showDiff = false;
 function toggleShowDiff() {
@@ -650,6 +917,8 @@ function clearDraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   canvasHasStrokes = false;
   drawHistory = [];
+  drawShapes = [];
+  refreshDrawCache();
 }
 function setupDrawCanvas(annotationPath) {
   const img = document.getElementById('slidesImg');
@@ -659,6 +928,7 @@ function setupDrawCanvas(annotationPath) {
   document.getElementById('drawToggle').classList.toggle('active', drawMode);
   canvasHasStrokes = false;
   drawHistory = [];
+  drawShapes = [];
   const init = () => {
     canvas.width = img.naturalWidth || img.clientWidth;
     canvas.height = img.naturalHeight || img.clientHeight;
@@ -668,7 +938,7 @@ function setupDrawCanvas(annotationPath) {
     ctx.lineJoin = 'round';
     if (annotationPath) {
       const saved = new Image();
-      saved.onload = () => { ctx.drawImage(saved, 0, 0, canvas.width, canvas.height); canvasHasStrokes = true; };
+      saved.onload = () => { ctx.drawImage(saved, 0, 0, canvas.width, canvas.height); canvasHasStrokes = true; refreshDrawCache(); };
       saved.src = '/img?path=' + encodeURIComponent(annotationPath) + '&t=' + Date.now();
     }
   };
@@ -676,6 +946,10 @@ function setupDrawCanvas(annotationPath) {
   else img.onload = init;
 
   let drawing = false;
+  let rectStart = null;     // {x,y} where a rect drag began
+  let rectSnapshot = null;  // canvas state before the rect, restored each move for live preview
+  let lastPos = null;       // most recent pointer pos (rect end + pencil tracking)
+  let penBbox = null;       // accumulated bbox of the current pencil stroke
   const getPos = (e) => {
     const r = canvas.getBoundingClientRect();
     return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
@@ -686,20 +960,52 @@ function setupDrawCanvas(annotationPath) {
     const ctx = canvas.getContext('2d');
     // Snapshot current canvas BEFORE this stroke so Ctrl+Z can revert to it.
     // Cap history at 50 entries to bound memory.
-    drawHistory.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    const snap = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    drawHistory.push(snap);
     if (drawHistory.length > 50) drawHistory.shift();
     ctx.strokeStyle = document.getElementById('drawColor').value;
     ctx.lineWidth = parseFloat(document.getElementById('drawSize').value) * (canvas.width / canvas.getBoundingClientRect().width);
-    const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y);
+    const p = getPos(e); lastPos = p;
+    if (drawTool === 'rect') {
+      // Defer drawing to pointermove; keep the pre-rect image to redraw against.
+      rectStart = p; rectSnapshot = snap;
+    } else {
+      penBbox = { minX: p.x, minY: p.y, maxX: p.x, maxY: p.y };
+      ctx.beginPath(); ctx.moveTo(p.x, p.y);
+    }
   };
   canvas.onpointermove = (e) => {
     if (!drawing) return;
     const ctx = canvas.getContext('2d');
-    const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke();
+    const p = getPos(e); lastPos = p;
+    if (drawTool === 'rect') {
+      // Live preview: restore the pre-rect snapshot, then stroke the current box.
+      ctx.putImageData(rectSnapshot, 0, 0);
+      ctx.strokeRect(rectStart.x, rectStart.y, p.x - rectStart.x, p.y - rectStart.y);
+    } else {
+      if (penBbox) { penBbox.minX = Math.min(penBbox.minX, p.x); penBbox.minY = Math.min(penBbox.minY, p.y); penBbox.maxX = Math.max(penBbox.maxX, p.x); penBbox.maxY = Math.max(penBbox.maxY, p.y); }
+      ctx.lineTo(p.x, p.y); ctx.stroke();
+    }
     canvasHasStrokes = true;
   };
-  canvas.onpointerup = () => { drawing = false; };
-  canvas.onpointercancel = () => { drawing = false; };
+  const endStroke = () => {
+    if (drawing) {
+      // Commit this stroke's region (canvas coords) so the server can crop it.
+      // Rect → the box; pencil → the stroke's bounding box (padded server-side).
+      if (drawTool === 'rect' && rectStart && lastPos) {
+        const x = Math.min(rectStart.x, lastPos.x), y = Math.min(rectStart.y, lastPos.y);
+        const w = Math.abs(lastPos.x - rectStart.x), h = Math.abs(lastPos.y - rectStart.y);
+        if (w > 3 && h > 3) drawShapes.push({ kind: 'rect', x, y, w, h });
+      } else if (penBbox) {
+        const w = penBbox.maxX - penBbox.minX, h = penBbox.maxY - penBbox.minY;
+        if (w > 3 || h > 3) drawShapes.push({ kind: 'pencil', x: penBbox.minX, y: penBbox.minY, w, h });
+      }
+    }
+    drawing = false; rectStart = null; rectSnapshot = null; penBbox = null;
+    refreshDrawCache();
+  };
+  canvas.onpointerup = endStroke;
+  canvas.onpointercancel = endStroke;
 }
 
 function navigate(delta) {
@@ -731,9 +1037,56 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight' || e.key === 'n') navigate(1);
   if (e.key === 'ArrowLeft' || e.key === 'p') navigate(-1);
   if (e.key === 'g') rate('good');
+  if (e.key === 'f') { flickFlip(); e.preventDefault(); } // blink-flick original↔rendered
   if (e.key === 'b') { commentEl.focus(); e.preventDefault(); }
   if (e.key === 'Enter') { const comment = commentEl.value.trim(); if (comment) rate('bad'); }
 });
+
+// --- Magnifier loupe ---
+let loupeOn = false;
+function toggleLoupe() {
+  loupeOn = document.getElementById('loupeToggle').checked;
+  if (!loupeOn) { const l = document.getElementById('loupe'); if (l) l.style.display = 'none'; }
+}
+// Listen at the document level in CAPTURE phase so the draw-canvas's
+// pointer-events:auto (when Draw is on) can't block the magnifier. Hit-test
+// the cursor against the natural-resolution rects of the two <img>s and show a
+// zoomed CSS background-image of whichever one is under the cursor.
+document.addEventListener('mousemove', (e) => {
+  const lens = document.getElementById('loupe');
+  if (!lens) return;
+  if (!loupeOn) { lens.style.display = 'none'; return; }
+  const size = 240;
+  const zEl = document.getElementById('loupeZoomCtl');
+  const zoom = zEl ? parseFloat(zEl.value) : 3;
+  const imgs = [document.getElementById('originalImg'), document.getElementById('slidesImg')].filter(Boolean);
+  for (const img of imgs) {
+    if (!img.naturalWidth) continue;
+    const r = img.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) continue;
+    const nx = ((e.clientX - r.left) / r.width) * img.naturalWidth;
+    const ny = ((e.clientY - r.top) / r.height) * img.naturalHeight;
+    lens.style.display = 'block';
+    lens.style.left = (e.clientX - size / 2) + 'px';
+    lens.style.top = (e.clientY - size / 2) + 'px';
+    lens.style.width = size + 'px';
+    lens.style.height = size + 'px';
+    // Over the Slides render, composite the draw-canvas (your strokes) ON TOP of
+    // the image so the magnifier shows the annotation. The drawCanvas shares the
+    // image's natural resolution, so one backgroundSize/Position aligns both
+    // layers (CSS repeats a single value across all background images). The data
+    // URL MUST be quoted — it contains commas that would otherwise split the
+    // multi-background list.
+    const drawUrl = (img.id === 'slidesImg' && drawCanvasDataUrl) ? drawCanvasDataUrl : null;
+    lens.style.backgroundImage = drawUrl
+      ? ('url("' + drawUrl + '"), url("' + img.src + '")')
+      : ('url("' + img.src + '")');
+    lens.style.backgroundSize = (img.naturalWidth * zoom) + 'px ' + (img.naturalHeight * zoom) + 'px';
+    lens.style.backgroundPosition = (-(nx * zoom - size / 2)) + 'px ' + (-(ny * zoom - size / 2)) + 'px';
+    return;
+  }
+  lens.style.display = 'none';
+}, true);
 
 load();
 </script>
@@ -801,11 +1154,27 @@ const server = createServer((req, res) => {
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", () => {
-      const { id, status, comment, annotation } = JSON.parse(body);
-      saveRating(id, status, comment, annotation);
-      console.log(`RATING: ${id} → ${status}${comment ? ` | ${comment}` : ''}${annotation ? ' [+annotation]' : ''}`);
+      const { id, status, comment, annotation, shapes, canvasSize, pencilPadding } = JSON.parse(body);
+      const annotationPath = saveRating(id, status, comment, annotation);
+      // Per-annotation zoom-crops: crop original + test at each marked region.
+      let zoomCrops: string[] = [];
+      if (annotation) {
+        const comp = findComparisons().find(c => c.id === id);
+        if (comp) {
+          try {
+            const annotBytes = Buffer.from(String(annotation).replace(/^data:image\/png;base64,/, ""), "base64");
+            zoomCrops = generateZoomCrops(
+              id, comp.originalPng, comp.slidesPng, annotBytes,
+              Array.isArray(shapes) ? shapes : null,
+              canvasSize && typeof canvasSize.w === "number" ? canvasSize : null,
+              typeof pencilPadding === "number" ? pencilPadding : 20,
+            );
+          } catch (e) { console.error("zoom-crop generation failed:", (e as Error).message); }
+        }
+      }
+      console.log(`RATING: ${id} → ${status}${comment ? ` | ${comment}` : ''}${annotation ? ' [+annotation]' : ''}${zoomCrops.length ? ` [${zoomCrops.length} crops]` : ''}`);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
+      res.end(JSON.stringify({ ok: true, annotationPath, zoomCrops }));
     });
     return;
   }

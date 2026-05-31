@@ -363,5 +363,9 @@ export const claudeDriver: ModelDriver = {
   call: (opts) => callClaude(opts),
   callFormatted: (opts) => callClaudeFormatted(opts),
   compact: (opts) => callClaude({ ...opts, prompt: "/compact" }),
+  // Claude associates a resumable session with the project (cwd), so cd there
+  // first when known. `claude --resume <id>` reopens that conversation.
+  resumeCommand: (id, cwd) =>
+    id ? (cwd ? `(cd ${cwd} && claude --resume ${id})` : `claude --resume ${id}`) : null,
 };
 

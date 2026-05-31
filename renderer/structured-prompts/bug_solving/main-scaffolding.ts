@@ -39,7 +39,7 @@
  *   `┌── structured-prompting monitor`). We echo it again at end of run.
  */
 import { spawn, type ChildProcess } from "child_process";
-import { execFile } from "child_process";
+import { execFile, type ExecException } from "child_process";
 import { promisify } from "util";
 import { resolve } from "path";
 import { fileURLToPath } from "url";
@@ -63,7 +63,11 @@ import { CLUSTERS } from "./clusters.js";
 const REPO_ROOT = process.cwd();
 const BS_SCRIPTS = resolve(REPO_ROOT, "renderer/structured-prompts/bug_solving/scripts");
 const FILTERED_SERVER_TS = resolve(BS_SCRIPTS, "filtered-rating-server.ts");
-const RECORD_SCRIPT = resolve(BS_SCRIPTS, "record-pptx.sh");
+// record-pptx.sh was inlined into record-rendering.ts. We invoke the
+// WORKTREE's copy (per task) so BEFORE is measured by the exact same
+// pipeline as AFTER; this is the repo-root-relative path joined onto each
+// task's workspace_dir below.
+const RECORD_SCRIPT_REL = "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts";
 // Keep fileURLToPath import reachable even if we stop using HERE later.
 const _HERE = dirname(fileURLToPath(import.meta.url)); void _HERE;
 
@@ -125,13 +129,23 @@ async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<v
   await Promise.all(tasks.map(async (t) => {
     const ids = t.slides.map(s => s.slide_id).join(",");
     const outDir = resolve(t.scratch_dir, "before");
+    const recScript = resolve(t.workspace_dir, RECORD_SCRIPT_REL);
+    const fixturesDir = resolve(t.workspace_dir, t.fixtures_dir);
     try {
-      await execFileAsync("bash", [
-        RECORD_SCRIPT, "--slides", ids, "--label", "before", "--out", outDir,
-      ], { cwd: t.workspace_dir, maxBuffer: 32 * 1024 * 1024 });
-      console.error(`  [${t.task_id}] before pptx → ${outDir}`);
-    } catch (e: any) {
-      throw new Error(`record-before failed for ${t.task_id}: ${e.message}\nstdout:${e.stdout?.toString() ?? ""}\nstderr:${e.stderr?.toString() ?? ""}`);
+      // cwd = <workspace>/renderer so tsx + convert-pptx node_modules resolve.
+      // record-rendering writes pptx to <outDir>/pptx/<slide_id>.pptx.
+      await execFileAsync("npx", [
+        "tsx", recScript,
+        "--mode", "pptx", "--fixtures", fixturesDir,
+        "--slides", ids, "--out", outDir,
+      ], { cwd: resolve(t.workspace_dir, "renderer"), maxBuffer: 32 * 1024 * 1024 });
+      console.error(`  [${t.task_id}] before pptx → ${outDir}/pptx`);
+    } catch (e: unknown) {
+      // TS forbids a type annotation on the catch binding (ts(1196)), so the
+      // type goes on the narrowing instead. Node decorates the promisified
+      // execFile rejection (an ExecException) with the captured stdout/stderr.
+      const err = e as ExecException & { stdout?: string; stderr?: string };
+      throw new Error(`record-before failed for ${t.task_id}: ${err.message}\nstdout:${err.stdout ?? ""}\nstderr:${err.stderr ?? ""}`);
     }
   }));
 }
@@ -159,7 +173,15 @@ async function run(): Promise<void> {
   const portBase = isCodex ? 4760 : 4720;
   console.error(`[scaffold] engine: ${engineKind} (monitor :${monitorPort}, task ports ${portBase}-${portBase + 39})`);
 
-  const tasks = buildTasks({ clusters: CLUSTERS, port_base: portBase });
+  // Fixtures / SxS / ratings dirs are overridable via env so a run can target
+  // a different fixture set (e.g. fixtures-basic) without code edits. Each
+  // falls back to buildTasks' own default when the env var is unset.
+  const buildOpts: Parameters<typeof buildTasks>[0] = { clusters: CLUSTERS, port_base: portBase };
+  if (process.env.BUG_SOLVING_FIXTURES_DIR) buildOpts.fixtures_dir = process.env.BUG_SOLVING_FIXTURES_DIR;
+  if (process.env.BUG_SOLVING_SXS_DIR) buildOpts.sxs_dir = process.env.BUG_SOLVING_SXS_DIR;
+  if (process.env.BUG_SOLVING_RATINGS_JSON) buildOpts.ratings_json = process.env.BUG_SOLVING_RATINGS_JSON;
+  console.error(`[scaffold] fixtures_dir: ${buildOpts.fixtures_dir ?? "(default fixtures/)"}`);
+  const tasks = buildTasks(buildOpts);
   console.error(`[scaffolding] built ${tasks.length} task(s):`);
   for (const t of tasks) {
     console.error(`  ${t.task_id} @ ${t.workspace_dir} (server port ${t.server_port})`);
@@ -210,7 +232,9 @@ async function run(): Promise<void> {
       const tid = tasks[f.idx]?.task_id ?? `#${f.idx}`;
       // Compress multiline JSON errors into a one-line-per-failure summary,
       // then include the full error on the next indented line.
-      let parsed: any = null;
+      // f.error may be a JSON-serialized Error ({message,stack}) or a plain
+      // string; parse defensively and read only those two optional fields.
+      let parsed: { message?: string; stack?: string } | null = null;
       try { parsed = JSON.parse(f.error); } catch { /* fall through */ }
       const msg = parsed?.message ?? f.error;
       console.error(`  - ${tid}: ${String(msg).split("\n")[0].slice(0, 200)}`);
@@ -225,13 +249,22 @@ async function run(): Promise<void> {
   console.error(`\n[scaffolding] ${children.size} detached server(s) running.`);
   if (children.size) console.error(`They will survive scaffolding exit; kill them with: lsof -ti:4720-4800 | xargs -r kill`);
 
-  // Done. The structured prompt has returned, rating-servers are detached
-  // with unref() so they keep running independently, and Node's event loop
-  // has no more work — this line runs and the process exits naturally
-  // (non-zero iff any task failed). The exit handlers installed earlier
-  // are no longer needed for children (they're unrefed and won't die with
-  // us) but they stay in place as a safety net for pre-launch crashes.
-  if (failures.length) process.exit(1);
+  // Done. The structured prompt has returned and rating-servers are detached.
+  // On failure we DELIBERATELY do not process.exit(1) while the monitor is
+  // still serving (persist:true): the in-process monitor IS the trace, and
+  // exiting would tear it down exactly when you want to inspect the failure.
+  // The listening monitor keeps the event loop alive, so the process stays up
+  // and the computation graph remains viewable until you Ctrl-C. Only exit
+  // non-zero when there is no monitor to preserve (non-persistent / CI runs).
+  if (failures.length) {
+    if (engine.monitorUrl) {
+      console.error(`\n⚠  ${failures.length} task(s) failed — keeping the monitor ALIVE so you can inspect the trace:`);
+      console.error(`     ${engine.monitorUrl}`);
+      console.error(`     (the process stays up; Ctrl-C / kill it when done.)`);
+    } else {
+      process.exit(1);
+    }
+  }
 }
 
 run().catch((e) => {

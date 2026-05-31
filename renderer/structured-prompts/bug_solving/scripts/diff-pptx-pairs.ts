@@ -154,7 +154,7 @@ function diffSnapshots(before: SlideSnapshot, after: SlideSnapshot): string[] {
     const label = b.text || a.text ? `"${(a.text || b.text).slice(0, 40)}"` : `(shape#${i})`;
     const fieldDiffs: string[] = [];
     const cmp = (k: keyof ShapeSnapshot) => {
-      const bv = (b as any)[k], av = (a as any)[k];
+      const bv = b[k], av = a[k];
       if (JSON.stringify(bv) !== JSON.stringify(av)) {
         fieldDiffs.push(`    ${k}: ${JSON.stringify(bv)} → ${JSON.stringify(av)}`);
       }
@@ -201,8 +201,9 @@ async function main() {
         JSON.stringify({ slide_id: id, before: snapBefore, after: snapAfter }, null, 2),
       );
       emitted++;
-    } catch (e: any) {
-      writeFileSync(join(out, `${id}.diff`), `# diff error: ${e.message}\n`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      writeFileSync(join(out, `${id}.diff`), `# diff error: ${msg}\n`);
     }
   }
   console.log(`diff-pptx-pairs: ${emitted} diff file(s) written → ${out}`);

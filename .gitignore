@@ -48,3 +48,13 @@ data/
 analysis/renderer/html2slides/e2e/.ratings-complex.json
 analysis/renderer/html2slides/e2e/.ratings-basics.json
 .bug-solving-scratch/
+
+# Google-table reverse-engineering fuzz outputs (regenerable; bulky PNGs + measured data)
+renderer/html2slides/e2e/_fuzz/
+renderer/html2slides/e2e/_gtl-fixtures/
+renderer/html2slides/e2e/_border/
+renderer/html2slides/e2e/_gtl-out/
+renderer/html2slides/e2e/gtl-dataset*.json
+renderer/html2slides/e2e/google-table-measurements.json
+
+.sxs-complex/

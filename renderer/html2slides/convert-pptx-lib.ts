@@ -219,6 +219,22 @@ const PX2PT = SLIDE_W_IN / SLIDE_W_PX * 72; // 10/1280*72 = 0.5625
 
 function px2in(px: number): number { return px * PX2IN; }
 
+// Generic Google-Slides table row-height model. Fit + CROSS-SEED held-out
+// validated by e2e/google-table-fuzz.ts + google-table-fit.ts over 701 fuzzed
+// data points (font/border/padding/row/col/table sizes): trained on one fuzz
+// seed, tested on an independent seed → row RMSE 1.02px, R² 0.998, 95% within
+// 2px (train RMSE 1.08 ≈ test ⇒ no overfit). LAW (px, in the 1280px fixture
+// coordinate that px2in consumes):
+//   rendered = max( spec + 0.716,  1.1965·font·lines + 0.9817·(2·padY) + 0.509 )
+// The 1.1965 line-box factor is CSS `line-height: normal`; border width does
+// NOT grow the row (measured — adding it raised held-out RMSE 1.02→1.51px).
+// Re-fit with `npx tsx html2slides/e2e/google-table-fit.ts` and copy the
+// emitted GOOGLE_TABLE constants here.
+function predictGoogleRowHeightPx(specifiedPx: number, fontPx: number, lines = 1, padYpx = 0): number {
+  const floor = 1.1965 * fontPx * lines + 0.9817 * 2 * padYpx + 0.5089;
+  return Math.max(specifiedPx + 0.7161, floor);
+}
+
 function hexToRgb(hex: string): string {
   // pptxgenjs wants hex without # prefix
   return hex.replace("#", "").toUpperCase();
@@ -2513,6 +2529,22 @@ export function buildPptx(
               // out / too low"). Zero it so the corner bottom aligns exactly
               // with the table's bottom edge.
               const outerOvershootBottom = px2in(0);
+              // Ring-less bottom-corner overshoot. The RINGED path
+              // (`.colored`, bw>0) keeps `outerOvershootBottom = 0` — its
+              // cell borders make the native rows tall enough to clear
+              // Slides' min-row-height, so they don't autogrow and the
+              // corner shape's bottom already lands on the native bottom.
+              // But the RING-LESS else-branch corners (`.colored-nb`,
+              // `.rounded-nb`) sit on borderless rows that ARE shorter than
+              // Slides' min-row-height, so Slides autogrows the native middle
+              // cells ~3 px BELOW the corner shape (which is pinned to the XML
+              // table bottom `yB`). That leaves a pink wedge under each bottom
+              // corner — the user's ".colored-nb bottom L/R cell heavily
+              // misaligned bottom edge". The autogrow amount is now DERIVED
+              // per-corner from the measured 1.2×font line-box floor (computed
+              // inside emitSingleCorner as `ringlessOvershootBottom`), applied
+              // ONLY in the ring-less else-branch so the wave-33
+              // `outerOvershootBottom = 0` (ringed path) is preserved.
 
               // Full-table BG underlay — paints (b.x, b.y, b.w, b.h) in
               // the table's own outer-border colour (or the table bg
@@ -2537,10 +2569,50 @@ export function buildPptx(
               {
                 const underlayCp = cornerPresetFromRadii(tableCornerRadii);
                 const tblTopBorder = tableBorderSides?.top;
+                // Borderless tables leak the white underlay as a ~1 px seam
+                // through Slides' native-cell top/left inset (user:
+                // ".colored-nb white edge on left/top side"). When (a) there
+                // is no outer top border, (b) ALL four corner cells are
+                // border-less — so the perimeter has no intended border
+                // colour to preserve — and (c) the top row + left column
+                // resolve to a single uniform bg colour, paint the underlay in
+                // THAT colour. `.colored-nb`'s all-#111 header row + header
+                // column then absorb the seam. The right/bottom edges don't
+                // leak (native fill reaches xR; the underlay ends above the
+                // autogrown bottom), so a non-white underlay can't add a new
+                // seam there. `.colored` (white cell borders → not border-less)
+                // and `.rounded-nb` (indigo header row but white data left
+                // column → not uniform) fail the test and keep the white/bg
+                // fallback — no regression.
+                const cellBg = (c: TableCell): string | null => {
+                  const bg = c.style?.bgColor || tableBgHex;
+                  return bg ? hexToRgb(bg) : null;
+                };
+                const cellBorderless = (c: TableCell): boolean => {
+                  const bs = c.style?.borderSides;
+                  return !bs || !((bs.top?.width || 0) || (bs.right?.width || 0)
+                    || (bs.bottom?.width || 0) || (bs.left?.width || 0));
+                };
+                const uniformEdgeColor = (): string | null => {
+                  const top = rows[0];
+                  if (!top || top.length === 0) return null;
+                  if (!cornerSpecs.every((cs) => cellBorderless(cs.cell))) return null;
+                  const c0 = cellBg(top[0]);
+                  if (!c0) return null;
+                  for (const cell of top) if (cellBg(cell) !== c0) return null;
+                  for (const row of rows) {
+                    const lc = row[0];
+                    if (lc && cellBg(lc) !== c0) return null;
+                  }
+                  return c0;
+                };
+                const uec = (tblTopBorder && tblTopBorder.width > 0)
+                  ? null
+                  : uniformEdgeColor();
                 const underlayHex =
                   (tblTopBorder && tblTopBorder.width > 0 && tblTopBorder.color)
                     ? hexToRgb(tblTopBorder.color)
-                    : (tableBgHex ? hexToRgb(tableBgHex) : "ffffff");
+                    : (uec || (tableBgHex ? hexToRgb(tableBgHex) : "ffffff"));
                 const underlayOpts: ShapeProps = {
                   x: xL, y: yT, w: xR - xL, h: yB - yT,
                   fill: { color: underlayHex },
@@ -2618,6 +2690,22 @@ export function buildPptx(
                 const cellY = q(px2in(b.y)) + twTop  + rowYPrefix[info.rowIdx];
                 const cellW = colW[info.cellIdx];
                 const cellH = rowH[info.rowIdx];
+                // DERIVED auto-grow compensation (replaces a flat px2in(3)).
+                // Google Slides reserves ~one line-box (1.2 × cell font) as a
+                // row's minimum height — measured empirically in
+                // e2e/google-table-layout.ts: renderedRowH = max(specifiedH,
+                // 1.2·fontPx, contentH). A borderless ring-less row shorter than
+                // that line-box gets auto-grown DOWN by exactly the gap, so this
+                // corner's ring-less bottom mask must overshoot by the same
+                // PREDICTED amount (per its own cell's font) to meet the real
+                // cell bottom — no magic constant.
+                const cornerFontPx = info.cell.style?.fontSize ?? 14;
+                // Overshoot = how far Google auto-grows this row below its spec'd
+                // height, per the cross-seed-validated model: the row renders at
+                // max(spec, font line-box floor); the gap is the bottom mask's
+                // overshoot. cellH is inches → /PX2IN back to fixture px.
+                const predRenderedPx = predictGoogleRowHeightPx(cellH / PX2IN, cornerFontPx);
+                const ringlessOvershootBottom = Math.max(0, px2in(predRenderedPx) - cellH);
                 const isOuterTop    = info.kind === "tl" || info.kind === "tr";
                 const isOuterRight  = info.kind === "tr" || info.kind === "br";
                 const isOuterBottom = info.kind === "bl" || info.kind === "br";
@@ -2684,7 +2772,13 @@ export function buildPptx(
                   const innerOverLeft   = isOuterLeft   ? 0 : innerOverlap;
                   const innerOverRight  = isOuterRight  ? 0 : innerOverlap;
                   const innerOverTop    = isOuterTop    ? 0 : innerOverlap;
-                  const innerOverBottom = isOuterBottom ? oversBottomExt : innerOverlap;
+                  // Ring-less borderless bottom corners overshoot downward to
+                  // meet Slides' autogrown native row bottom (see
+                  // `ringlessOvershootBottom`). twBottom is always 0 here (a
+                  // bottom border would have produced a ring → bw>0 branch).
+                  const innerOverBottom = isOuterBottom
+                    ? (oversBottomExt + (twBottom === 0 ? ringlessOvershootBottom : 0))
+                    : innerOverlap;
                   slide.addShape(cpOuter.preset as Parameters<Slide["addShape"]>[0], {
                     x: q(cellX - extLeft - innerOverLeft),
                     y: q(cellY - extTop  - innerOverTop),

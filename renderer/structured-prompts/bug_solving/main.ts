@@ -93,7 +93,9 @@ export interface SlideTask {
 export interface Task {
   task_id: string;                   // stable slug, e.g. "clipping-curves"
   workspace_dir: string;             // git worktree created for this task
-  scratch_dir: string;               // per-task scratch (under workspace_dir)
+  scratch_dir: string;               // per-task scratch (under workspace_dir, GITIGNORED — binary pptx/diff artifacts)
+  analysis_dir: string;              // per-task model docs (under workspace_dir, NOT ignored — visible in the per-node diff)
+  fixtures_dir: string;              // repo-relative fixtures dir for this cluster's slides (e.g. fixtures-basic)
   server_port: number;               // unique port for the filtered rating server
   presentation_title: string;        // fork-unique, e.g. "bug_solving-clipping-curves-1713512345"
   slides: SlideTask[];
@@ -133,9 +135,11 @@ export interface TaskResult {
 
 /** Path to the shell/ts helper scripts that live alongside main.ts. */
 const SCRIPTS = {
-  record: "renderer/structured-prompts/bug_solving/scripts/record-pptx.sh",
+  // record-pptx.sh was inlined into record-rendering.ts (a tsx CLI). It must
+  // run with cwd = <workspace>/renderer so tsx + convert-pptx's node_modules
+  // resolve, and it writes per-slide pptx to <out>/pptx/<slide_id>.pptx.
+  record: "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts",
   diff: "renderer/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts",
-  uploadScrape: "renderer/structured-prompts/bug_solving/scripts/upload-and-scrape.ts",
   filteredServer: "renderer/structured-prompts/bug_solving/scripts/filtered-rating-server.ts",
 };
 
@@ -147,7 +151,8 @@ function analysisPromptFor(task: Task): string {
   return [
     `Task: ${task.task_id}`,
     `Workspace: ${task.workspace_dir}`,
-    `Scratch: ${task.scratch_dir}`,
+    `Scratch (binary artifacts, gitignored): ${task.scratch_dir}`,
+    `Analysis dir (write analysis.md / fix-summary.md HERE — it is tracked + shows in the diff): ${task.analysis_dir}`,
     `Cluster hypothesis: ${task.cluster_description}`,
     ``,
     `Slides in this task and the user's SxS comments for each:`,
@@ -162,7 +167,7 @@ function analysisPromptFor(task: Task): string {
     `  * For each slide, open the annotation PNG if it exists. The red strokes`,
     `    mark exactly where the user says the rendering is wrong.`,
     `  * Always disambiguate TEXT-vs-BOX when the comment is about alignment.`,
-    `  * Write your findings into ${task.scratch_dir}/analysis.md. Use one H2`,
+    `  * Write your findings into ${task.analysis_dir}/analysis.md. Use one H2`,
     `    section per slide. Each section must have: "User comment" (verbatim),`,
     `    "Observed in current render" (what you see), "Root cause" (file:line),`,
     `    "Fix strategy" (what you'll change), "Expected diff" (what the pptx`,
@@ -216,11 +221,11 @@ export function main(args: {
       .prependToNextPrompt(analysisPromptFor(task))
       .send({
         prompt: [
-          `The BEFORE-state pptx files are already at ${task.scratch_dir}/before/<slide_id>.pptx — the scaffolding recorded them before you started. Use them as reference if helpful.`,
+          `The BEFORE-state pptx files are already at ${task.scratch_dir}/before/pptx/<slide_id>.pptx — the scaffolding recorded them before you started. Use them as reference if helpful.`,
           ``,
           `Your only task right now:`,
           `  1. Inspect the annotation PNGs listed in the header.`,
-          `  2. Write (or UPDATE if it exists) ${task.scratch_dir}/analysis.md with one H2 section per slide using the template you were given.`,
+          `  2. Write (or UPDATE if it exists) ${task.analysis_dir}/analysis.md with one H2 section per slide using the template you were given.`,
           `  3. Apply the MINIMAL code fix in renderer/html2slides/extract-dom.ts and/or convert-pptx.ts.`,
           `  4. Do NOT run git commit, git stash, git checkout. Leave changes uncommitted.`,
           `  5. Do NOT record the AFTER pptx, do NOT run the diff script — the orchestrator runs those next.`,
@@ -235,16 +240,21 @@ export function main(args: {
         }
       })
 
-      // Step 3 — record AFTER pptx via shell (one file per slide, parallel).
+      // Step 3 — record AFTER pptx via shell (one file per slide). Runs from
+      // the WORKTREE's renderer/ so it picks up the worker's just-applied fix
+      // (record-rendering.ts → <out>/pptx/<slide_id>.pptx).
       .executeShell(() =>
-        `cd ${task.workspace_dir} && bash ${SCRIPTS.record} ` +
-        `--slides ${ids} --label after --out ${task.scratch_dir}/after`
+        `cd ${task.workspace_dir}/renderer && npx tsx ${task.workspace_dir}/${SCRIPTS.record} ` +
+        `--mode pptx --fixtures ${task.workspace_dir}/${task.fixtures_dir} ` +
+        `--slides ${ids} --out ${task.scratch_dir}/after`
       )
 
-      // Step 4 — pairwise diffs via shell.
+      // Step 4 — pairwise diffs via shell. before/after pptx live under the
+      // `pptx/` subdir that record-rendering writes; diff-pptx-pairs needs
+      // JSZip so it also runs from renderer/ for node_modules resolution.
       .executeShell(() =>
-        `cd ${task.workspace_dir} && npx tsx ${SCRIPTS.diff} ` +
-        `--before ${task.scratch_dir}/before --after ${task.scratch_dir}/after ` +
+        `cd ${task.workspace_dir}/renderer && npx tsx ${task.workspace_dir}/${SCRIPTS.diff} ` +
+        `--before ${task.scratch_dir}/before/pptx --after ${task.scratch_dir}/after/pptx ` +
         `--out ${task.scratch_dir}/diffs`
       )
 
@@ -259,7 +269,7 @@ export function main(args: {
         child
           .prependToNextPrompt(
             `You are verifying the fix for ${slide.slide_id}. ` +
-            `Analysis: ${task.scratch_dir}/analysis.md. ` +
+            `Analysis: ${task.analysis_dir}/analysis.md. ` +
             `Diff: ${task.scratch_dir}/diffs/${slide.slide_id}.diff. ` +
             `User's original comment: "${slide.user_comment}".`,
           )
@@ -284,7 +294,7 @@ export function main(args: {
       .combineWith<string, TaskResult>(
         (branch) => branch.send({
           prompt: [
-            `All per-slide verdicts are now in. Write ${task.scratch_dir}/fix-summary.md —`,
+            `All per-slide verdicts are now in. Write ${task.analysis_dir}/fix-summary.md —`,
             `one paragraph covering the root cause and what you changed, with file:line`,
             `references. After writing the file, reply with its contents verbatim (just`,
             `the text, no JSON, no code fence).`,
@@ -314,14 +324,17 @@ export function main(args: {
           const aggregate: TaskResult = {
             task_id: task.task_id,
             workspace_dir: task.workspace_dir,
-            analysis_md: `${task.scratch_dir}/analysis.md`,
+            analysis_md: `${task.analysis_dir}/analysis.md`,
             verdicts,
             sxs_server_spec: {
               port: task.server_port,
               slides: task.slides.map(s => s.slide_id),
-              analysis_md: `${task.scratch_dir}/analysis.md`,
+              analysis_md: `${task.analysis_dir}/analysis.md`,
               diffs_dir: `${task.scratch_dir}/diffs`,
-              thumbnails_dir: `${task.scratch_dir}/thumbnails`,
+              // record-rendering --mode full writes the Slides thumbnail to
+              // <out>/thumbs/<id>.png, so the SxS slides-dir must be that
+              // subdir (not the bare out dir) or the rating UI shows no render.
+              thumbnails_dir: `${task.scratch_dir}/thumbnails/thumbs`,
               task_title: `bug_solving: ${task.task_id}`,
             },
             fix_summary: fixSummary.trim(),
@@ -359,10 +372,17 @@ export function main(args: {
       //   server as a tracked child process (see file header:
       //   "subprocess lifetime").
       .combineWith<string, TaskResult>(
+        // upload-and-scrape.ts was inlined into record-rendering.ts (commit
+        // 346965d), so `--mode full` (pptx + Slides upload + thumb scrape) is
+        // the replacement. Runs from the worktree's renderer/ for node_modules.
+        // `|| true` makes it NON-FATAL: this is post-verdict productization for
+        // the SxS review — a flaky Google upload must NOT throw away an
+        // already-PASSED fix (which is exactly what the dead script was doing).
         (branch) => branch.executeShell(() =>
-          `cd ${task.workspace_dir} && npx tsx ${SCRIPTS.uploadScrape} ` +
+          `cd ${task.workspace_dir}/renderer && npx tsx ${task.workspace_dir}/${SCRIPTS.record} ` +
+          `--mode full --fixtures ${task.workspace_dir}/${task.fixtures_dir} ` +
           `--slides ${ids} --title "${task.presentation_title}" ` +
-          `--out ${task.scratch_dir}/thumbnails`
+          `--out ${task.scratch_dir}/thumbnails || true`
         ),
         (taskResult, _shellStdout) => taskResult,
       );
@@ -375,6 +395,12 @@ export function main(args: {
   // strip its (empty) context.
   return args.session.parallelFork(args.tasks, (child, task) =>
     child
+      // Point this task's whole chain (worker model `send`s + record/diff
+      // shells) at its OWN git worktree, not the scaffolding's main repo.
+      // Without this the worker's codex/claude --cd is the main checkout, so
+      // its edits never land in the worktree and record-after sees no change
+      // ("UNSOLVED: no structural differences").
+      .switchCwd(task.workspace_dir)
       .try<Result<TaskResult>>(
         (s) => s.tryMultipleTimes<TaskResult>(
           task.retry_budget,

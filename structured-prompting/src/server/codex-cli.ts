@@ -15,10 +15,24 @@ import type { FormattedResult, ModelDriver } from "./model-driver.js";
  * The option/result shapes are provider-neutral, so we reuse claude-cli's
  * directly rather than redeclaring them. The differences from Claude are:
  *   * subcommand is `codex exec` (non-interactive/headless), not `claude -p`.
- *   * Codex has NO `--json-schema` flag, so structured output is achieved by
- *     injecting the schema into the prompt and extracting the JSON locally.
+ *   * resume is the `codex exec resume <sessionId> [PROMPT]` subcommand form.
+ *   * structured output uses codex's native `--output-schema <FILE>` flag
+ *     (a JSON Schema file) — the final agent message is then pure JSON, which
+ *     we parse directly (a balanced-JSON extractor is kept only as a fallback).
  *   * Codex has no `/compact`, so compaction is a no-op.
- * All uncertain CLI-interface details are flagged with `// VERIFY:` comments.
+ *
+ * All CLI-interface details below were verified against `codex 0.135.0`
+ * (`codex exec --help`, `codex exec resume --help`, and live `--json` runs).
+ * The real `--json` event shape observed:
+ *   {"type":"thread.started","thread_id":"<uuid>"}
+ *   {"type":"turn.started"}
+ *   {"type":"item.completed","item":{"id":"...","type":"agent_message","text":"..."}}
+ *   {"type":"turn.completed","usage":{"input_tokens":N,"cached_input_tokens":N,
+ *                                     "output_tokens":N,"reasoning_output_tokens":N}}
+ *
+ * We read the final text from the `agent_message` item on the event stream
+ * (not `-o/--output-last-message`) so the whole call stays mockable through
+ * `io.spawnCapture`'s stdout — the only external surface tests can stub.
  */
 export type CodexCallOptions = ClaudeCallOptions;
 export type CodexCallResult = ClaudeCallResult;
@@ -35,12 +49,13 @@ const DEFAULT_TIMEOUT_MS = (() => {
 })();
 
 /**
- * Extract the first balanced top-level JSON object from a string. Codex has no
- * schema flag, so `callCodexFormatted` asks the model for raw JSON and we slice
- * it back out here — tolerant of leading prose or stray code fences. Returns the
- * object substring (still a string; caller JSON.parses it) or null if none
- * found. Scans for the first `{`, then walks counting brace depth while
- * skipping over string literals (so braces inside strings don't miscount).
+ * Extract the first balanced top-level JSON object from a string. Used as a
+ * FALLBACK in `callCodexFormatted`: with `--output-schema` the final message is
+ * already pure JSON, but if a model wraps it in prose / code fences we slice the
+ * object back out here. Returns the object substring (still a string; caller
+ * JSON.parses it) or null if none found. Scans for the first `{`, then walks
+ * counting brace depth while skipping string literals (so braces inside strings
+ * don't miscount).
  */
 export function extractFirstJsonObject(text: string): string | null {
   const start = text.indexOf("{");
@@ -72,7 +87,77 @@ export function extractFirstJsonObject(text: string): string | null {
   return null;
 }
 
+/** Codex `--json` token-usage block (from `turn.completed`). All optional. */
+interface CodexTokenUsage {
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  output_tokens?: number;
+  reasoning_output_tokens?: number;
+}
+
+/**
+ * One Codex `--json` event line. Only the fields we read are declared; every
+ * one is optional and guarded at the use site, so a schema drift across codex
+ * versions degrades to the raw-stdout fallback rather than crashing.
+ *
+ * Observed event types: `thread.started` (carries `thread_id`),
+ * `turn.started`, `item.completed` (carries `item`), `turn.completed`
+ * (carries `usage`).
+ */
+interface CodexItem {
+  id?: string;
+  // "agent_message" carries the assistant text in `text`. Other item types
+  // (reasoning, command_execution, ...) are ignored.
+  type?: string;
+  text?: string;
+}
+interface CodexEvent {
+  type?: string;
+  // session id lives here (verified field name on `thread.started`); also
+  // tolerate older/alternate names defensively.
+  thread_id?: string;
+  session_id?: string;
+  conversation_id?: string;
+  id?: string;
+  // `item.completed` payload.
+  item?: CodexItem;
+  // `turn.completed` payload.
+  usage?: CodexTokenUsage;
+  // error signalling (best-effort; not observed in normal runs).
+  error?: string | { message?: string };
+}
+
+/**
+ * The structured-prompting graph injects Claude model identifiers (`opus`,
+ * `sonnet`, `haiku`, or full `claude-…` ids) via switchModel and its defaults.
+ * Those are meaningless to codex, and a ChatGPT-account codex rejects them with
+ * a 400 ("The 'opus' model is not supported when using Codex with a ChatGPT
+ * account."). So we translate: a Claude-family token means "engine default",
+ * which for codex is "let codex pick its account default" — i.e. omit `--model`
+ * entirely (returns null). A non-Claude token (e.g. `gpt-5-codex`) is a genuine
+ * codex model the caller pinned, so it passes through unchanged.
+ */
+const CLAUDE_MODEL_TOKENS = new Set(["opus", "sonnet", "haiku"]);
+export function codexModelArg(model: string | undefined): string | null {
+  if (!model) return null;
+  const m = model.toLowerCase();
+  if (CLAUDE_MODEL_TOKENS.has(m) || m.startsWith("claude")) return null;
+  return model;
+}
+
 export async function callCodex(opts: CodexCallOptions): Promise<CodexCallResult> {
+  return callCodexInternal(opts, null);
+}
+
+/**
+ * Shared implementation for `callCodex` and `callCodexFormatted`. `schemaPath`,
+ * when non-null, is forwarded as `--output-schema <FILE>` so codex constrains
+ * the final message to that JSON Schema.
+ */
+async function callCodexInternal(
+  opts: CodexCallOptions,
+  schemaPath: string | null,
+): Promise<CodexCallResult> {
   const {
     prompt,
     model,
@@ -83,59 +168,70 @@ export async function callCodex(opts: CodexCallOptions): Promise<CodexCallResult
     io = realIO,
   } = opts;
 
-  // Dump attachments to a per-call temp dir and reference them by absolute
-  // path in the prompt. The directory is removed at the end of this call
-  // (success, error, or timeout) via the `finally` below. Identical to
-  // claude-cli's attachment handling.
-  const attachPaths: string[] = [];
+  // Per-call scratch dir holding materialised attachments. Removed in the
+  // `finally` below. Created lazily — only when there are attachments.
   let scratchDir: string | null = null;
+  const attachPaths: string[] = [];
   if (attachments.length > 0) {
-    scratchDir = io.mkdtempSync(join(tmpdir(), "sp-attach-"));
+    scratchDir = io.mkdtempSync(join(tmpdir(), "sp-codex-"));
     attachments.forEach((b64, i) => {
       const p = join(scratchDir!, `att_${i}.bin`);
       io.writeFileSync(p, Buffer.from(b64, "base64"));
       attachPaths.push(p);
     });
   }
-  const fullPrompt =
-    attachPaths.length > 0
-      ? `${prompt}\n\nAttachments (absolute paths): ${attachPaths.join(", ")}`
-      : prompt;
+  // Attachments are passed natively via `-i/--image`, so the prompt itself is
+  // left unmodified (codex attaches them to the initial prompt for us).
+  const fullPrompt = prompt;
 
-  // Build the argv for `codex exec`. Claude pipes the prompt to stdin; the
-  // shared `io.spawnCapture` uses stdio:["ignore",...] (no stdin write), so we
-  // pass the prompt as the trailing positional arg instead.
-  // VERIFY: `codex exec "<prompt>"` is Codex's non-interactive/headless mode,
-  //         with the prompt as the last positional argument.
+  // ----- Build argv for `codex exec` (+ optional `resume` subcommand) -------
+  // Forms:
+  //   fresh:   codex exec [OPTIONS] <PROMPT>
+  //   resume:  codex exec resume <SESSION_ID> [OPTIONS] <PROMPT>
   const procArgs: string[] = ["exec"];
 
-  // VERIFY: resume support. Codex's resume interface is uncertain. The
-  //         best-known form is `codex exec resume <sessionId>` as a leading
-  //         subcommand. If the installed CLI doesn't support it the run will
-  //         error out (captured, not thrown) and the caller sees isError; we
-  //         deliberately do NOT crash the process. If your Codex build uses a
-  //         flag instead (e.g. `--session <id>` / `-c <id>`), swap it here.
+  // Resume a prior conversation by id. Note: `codex 0.135.0` does NOT error on
+  // an unknown id — it starts a fresh thread instead — so we don't rely on a
+  // non-zero exit to detect a bad resume; we simply capture whatever thread id
+  // the run reports so the engine resumes the correct conversation next turn.
   if (resume) {
     procArgs.push("resume", resume);
   }
 
-  // VERIFY: `--json` makes `codex exec` emit newline-delimited JSON events on
-  //         stdout (last message/result event carries the final text). If your
-  //         build uses a different flag (e.g. `--output-format json`), change
-  //         it here. We parse defensively and fall back to raw stdout.
+  // `--json` → NDJSON events on stdout. We parse the final `agent_message`
+  // item from this stream (verified shape) — going through stdout (the one
+  // thing `io.spawnCapture` returns) keeps the whole call mockable, which a
+  // separate `--output-last-message` file read would break.
   procArgs.push("--json");
 
-  // VERIFY: `--model <m>` / `-m <m>` selects the model. Forward when set.
-  if (model) procArgs.push("--model", model);
+  // Structured-output: constrain the final message to a JSON Schema file.
+  if (schemaPath) {
+    procArgs.push("--output-schema", schemaPath);
+  }
 
-  // Skip interactive approval prompts so the headless run can't block on a
-  // confirmation. VERIFY: flag name — Codex uses an approval/sandbox policy
-  //         flag; `--dangerously-bypass-approvals-and-sandbox` is the
-  //         best-known fully-non-interactive switch. Adjust if your build
-  //         exposes `--full-auto` / `--ask-for-approval never` instead.
+  // Forward the model when set (`-m/--model`) — but only after translating
+  // away Claude-family identifiers the graph injects (see codexModelArg).
+  const codexModel = codexModelArg(model);
+  if (codexModel) procArgs.push("--model", codexModel);
+
+  // Codex-native working root. spawnCapture's `cwd` already sets the process
+  // cwd, but `-C/--cd` is how codex itself scopes the workspace. NOTE: the
+  // `exec resume` subcommand rejects `--cd` ("unexpected argument '--cd'") —
+  // a resumed session inherits its recorded cwd, and spawnCapture still sets
+  // the process cwd — so only pass `--cd` on a FRESH exec.
+  if (cwd && !resume) procArgs.push("--cd", cwd);
+
+  // Headless run: never block on an approval/sandbox prompt, and allow running
+  // outside a git repo (workers may run in arbitrary scratch dirs).
   procArgs.push("--dangerously-bypass-approvals-and-sandbox");
+  procArgs.push("--skip-git-repo-check");
 
-  // Prompt is the trailing positional arg.
+  // Attach images natively (repeatable `-i/--image <FILE>`).
+  for (const p of attachPaths) {
+    procArgs.push("--image", p);
+  }
+
+  // Prompt is the trailing positional arg (both for fresh and resume forms).
   procArgs.push(fullPrompt);
 
   const started = io.now();
@@ -153,7 +249,7 @@ export async function callCodex(opts: CodexCallOptions): Promise<CodexCallResult
         text: "",
         sessionId: null,
         durationMs: io.now() - started,
-        model: model ?? null,
+        model: codexModelArg(model),
         costUsd: null,
         usage: null,
         structuredOutput: undefined,
@@ -164,65 +260,19 @@ export async function callCodex(opts: CodexCallOptions): Promise<CodexCallResult
       };
     }
 
-    // ----- Parse the `codex exec --json` event stream --------------------
-    // VERIFY: event-stream shape. Codex emits NDJSON events; the final
-    //         assistant/result message holds the answer text. We scan all
-    //         lines, keeping the LAST event that carries assistant/result
-    //         text, and (if present) the last event carrying token usage and
-    //         a session id. Field names below are best-known guesses and are
-    //         all optional + guarded, so a schema mismatch degrades to the
-    //         raw-stdout fallback rather than crashing.
-    interface CodexTokenUsage {
-      input_tokens?: number;
-      output_tokens?: number;
-      cached_input_tokens?: number;
-      cache_creation_input_tokens?: number;
-      total_tokens?: number;
-    }
-    interface CodexEvent {
-      // Discriminator. VERIFY: values like "item.completed" / "agent_message" /
-      //   "message" / "result" / "turn.completed" depending on the build.
-      type?: string;
-      // Final answer text may live under any of these depending on the build.
-      text?: string;
-      message?: string | { content?: string; text?: string };
-      result?: string;
-      last_agent_message?: string;
-      role?: string;
-      // Session / conversation id.
-      session_id?: string;
-      conversation_id?: string;
-      id?: string;
-      // Token accounting.
-      usage?: CodexTokenUsage;
-      token_usage?: CodexTokenUsage;
-      // Total USD if the build surfaces it.
-      cost_usd?: number;
-      total_cost_usd?: number;
-      // Error signalling.
-      error?: string | { message?: string };
-    }
-
-    const pickText = (e: CodexEvent): string | null => {
-      if (typeof e.text === "string" && e.text.length > 0) return e.text;
-      if (typeof e.result === "string" && e.result.length > 0) return e.result;
-      if (typeof e.last_agent_message === "string" && e.last_agent_message.length > 0) {
-        return e.last_agent_message;
-      }
-      if (typeof e.message === "string" && e.message.length > 0) return e.message;
-      if (e.message && typeof e.message === "object") {
-        if (typeof e.message.text === "string" && e.message.text.length > 0) return e.message.text;
-        if (typeof e.message.content === "string" && e.message.content.length > 0) {
-          return e.message.content;
-        }
+    // ----- Parse the `codex exec --json` NDJSON event stream ----------------
+    const pickItemText = (e: CodexEvent): string | null => {
+      // Final answer lives on an `item.completed` event whose item is an
+      // `agent_message`. Keep the LAST such item's text.
+      if (e.item && e.item.type === "agent_message" && typeof e.item.text === "string" && e.item.text.length > 0) {
+        return e.item.text;
       }
       return null;
     };
 
-    let finalText: string | null = null;
+    let eventText: string | null = null;
     let sessionId: string | null = null;
     let usageEvt: CodexTokenUsage | undefined;
-    let costUsd: number | null = null;
     let streamErr: string | null = null;
     let sawAnyEvent = false;
 
@@ -232,42 +282,43 @@ export async function callCodex(opts: CodexCallOptions): Promise<CodexCallResult
       if (!line || line[0] !== "{") continue;
       let evt: CodexEvent;
       try {
-        // Untyped-JSON boundary: the CLI's event shape is external and only
-        // best-known, so we parse to `unknown` and assert the optional-field
-        // interface; every field access below is guarded.
+        // Untyped-JSON boundary: codex's event shape is external; we parse to
+        // the optional-field `CodexEvent` interface and guard every access.
         evt = JSON.parse(line) as CodexEvent;
       } catch {
         continue;
       }
       sawAnyEvent = true;
-      const t = pickText(evt);
-      if (t != null) finalText = t; // keep the last text-bearing event
-      const sid = evt.session_id ?? evt.conversation_id ?? evt.id;
+      const t = pickItemText(evt);
+      if (t != null) eventText = t; // keep the last agent_message text
+      const sid = evt.thread_id ?? evt.session_id ?? evt.conversation_id ?? evt.id;
       if (typeof sid === "string" && sid.length > 0) sessionId = sid;
-      const u = evt.usage ?? evt.token_usage;
-      if (u) usageEvt = u;
-      const c = evt.cost_usd ?? evt.total_cost_usd;
-      if (typeof c === "number" && Number.isFinite(c)) costUsd = c;
+      if (evt.usage) usageEvt = evt.usage;
       if (evt.error != null) {
         streamErr = typeof evt.error === "string" ? evt.error : (evt.error.message ?? "codex error");
       }
     }
 
-    // Fallback: if the output wasn't the expected JSON event stream at all,
-    // treat the whole stdout as the answer text (defensive — matches the
-    // spec's "if JSON parse fails, fall back to raw stdout as text").
-    if (!sawAnyEvent && stdout.trim().length > 0) {
+    // Final text: prefer the parsed `agent_message` event; fall back to raw
+    // stdout only if we never saw a structured event at all.
+    let finalText: string | null = null;
+    if (eventText != null && eventText.length > 0) {
+      finalText = eventText;
+    } else if (!sawAnyEvent && stdout.trim().length > 0) {
       finalText = stdout.trim();
     }
 
     const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    // Codex reports cached input separately from fresh input; map onto our
+    // TokenUsage shape (cacheReadInputTokens). Codex has no cache-creation
+    // counter or per-call USD, so those are 0/null.
     const usage: TokenUsage | null = usageEvt
       ? {
           inputTokens: num(usageEvt.input_tokens),
           cacheReadInputTokens: num(usageEvt.cached_input_tokens),
-          cacheCreationInputTokens: num(usageEvt.cache_creation_input_tokens),
+          cacheCreationInputTokens: 0,
           outputTokens: num(usageEvt.output_tokens),
-          costUsd: num(costUsd),
+          costUsd: 0,
         }
       : null;
 
@@ -281,10 +332,10 @@ export async function callCodex(opts: CodexCallOptions): Promise<CodexCallResult
       text: finalText ?? "",
       sessionId,
       durationMs: io.now() - started,
-      model: model ?? null,
-      costUsd,
+      model: codexModelArg(model),
+      costUsd: null, // codex --json does not surface per-call USD
       usage,
-      structuredOutput: undefined, // Codex has no native structured-output channel
+      structuredOutput: undefined, // structured value is parsed in callCodexFormatted
       raw: stdout,
       stderr,
       isError: !ok,
@@ -307,36 +358,57 @@ export async function callCodex(opts: CodexCallOptions): Promise<CodexCallResult
 }
 
 /**
- * Schema-constrained send for Codex. Unlike Claude there's no `--json-schema`
- * flag, so we inject the schema into the prompt and extract the first balanced
- * JSON object from the reply text. `parsed` is populated on success,
- * `parseError` on failure (never both).
+ * Schema-constrained send for Codex. Uses codex's native `--output-schema`
+ * flag: we write `opts.jsonSchema` to a temp `.json` file and pass it through,
+ * so the final agent message is pure JSON we can parse directly. The balanced
+ * JSON-object extractor is used only as a fallback when the message isn't
+ * already pure JSON. `parsed` is populated on success, `parseError` on failure
+ * (never both).
  */
 export async function callCodexFormatted<R>(
   opts: CodexCallOptions & { jsonSchema: object },
 ): Promise<FormattedResult<R>> {
-  const schemaInstruction =
-    `\n\nRespond with ONLY a JSON object matching this JSON Schema:\n` +
-    `${JSON.stringify(opts.jsonSchema)}\n` +
-    `No prose, no explanation, no code fences — just the raw JSON object.`;
-  const r = await callCodex({ ...opts, prompt: opts.prompt + schemaInstruction });
+  const io = opts.io ?? realIO;
+  // Write the schema to a temp file for `--output-schema`. Kept in its own
+  // scratch dir so it survives the call (callCodexInternal manages its OWN
+  // scratch dir for attachments / last-message) and is cleaned up here.
+  const schemaDir = io.mkdtempSync(join(tmpdir(), "sp-codex-schema-"));
+  const schemaPath = join(schemaDir, "schema.json");
+  io.writeFileSync(schemaPath, JSON.stringify(opts.jsonSchema));
+
+  let r: CodexCallResult;
+  try {
+    r = await callCodexInternal(opts, schemaPath);
+  } finally {
+    try {
+      io.rmSync(schemaDir, { recursive: true, force: true });
+    } catch {}
+  }
 
   let parsed: R | null = null;
   let parseError: string | null = null;
   if (r.isError) {
     parseError = r.errorMessage ?? "codex call failed before producing output";
   } else {
-    const jsonText = extractFirstJsonObject(r.text);
-    if (jsonText == null) {
-      parseError = "codex reply contained no JSON object to parse";
-    } else {
+    // With --output-schema the text should already be pure JSON; try that
+    // first, then fall back to extracting the first balanced object.
+    const tryParse = (s: string): boolean => {
       try {
         // Untyped-JSON boundary: the model's reply is external; we assert it
-        // matches the requested schema R. Callers that need stronger
-        // guarantees should validate `parsed` against the schema themselves.
-        parsed = JSON.parse(jsonText) as R;
-      } catch (e) {
-        parseError = `failed to parse codex JSON reply: ${e instanceof Error ? e.message : String(e)}`;
+        // matches the requested schema R. Callers needing stronger guarantees
+        // should validate `parsed` against the schema themselves.
+        parsed = JSON.parse(s) as R;
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const direct = r.text.trim();
+    if (!tryParse(direct)) {
+      const sliced = extractFirstJsonObject(r.text);
+      if (sliced == null || !tryParse(sliced)) {
+        parsed = null;
+        parseError = "codex reply could not be parsed as JSON matching the schema";
       }
     }
   }
@@ -358,12 +430,11 @@ export const codexDriver: ModelDriver = {
   call: (opts) => callCodex(opts),
   callFormatted: (opts) => callCodexFormatted(opts),
   compact: (opts) => {
-    const io = opts.io ?? realIO;
     const result: CodexCallResult = {
       text: "",
       sessionId: opts.resume ?? null, // preserve the conversation to resume from
       durationMs: 0,
-      model: opts.model ?? null,
+      model: codexModelArg(opts.model),
       costUsd: null,
       usage: null,
       structuredOutput: undefined,
@@ -372,9 +443,11 @@ export const codexDriver: ModelDriver = {
       isError: false,
       errorMessage: null,
     };
-    // Touch io.now() only to keep the field referenced for the no-op; avoids
-    // an unused-var lint while honouring the IO-discipline rule.
-    void io;
     return Promise.resolve(result);
   },
+  // `codex resume <id>` (interactive viewer; the `exec resume` variant needs a
+  // prompt). Codex filters its session picker by cwd and these sessions ran in
+  // a per-task worktree, so cd there first to make the session resolvable.
+  resumeCommand: (id, cwd) =>
+    id ? (cwd ? `(cd ${cwd} && codex resume ${id})` : `codex resume ${id}`) : null,
 };

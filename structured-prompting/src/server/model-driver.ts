@@ -43,4 +43,11 @@ export interface ModelDriver {
    * conversation to resume from afterwards.
    */
   compact(opts: ModelCallOptions): Promise<ModelCallResult>;
+  /**
+   * Shell command that LOADS this session in the provider CLI for inspection
+   * (e.g. `codex resume <id>` / `claude --resume <id>`). `cwd` is the dir the
+   * session ran in — codex filters its session picker by cwd, so the command
+   * cd's there first. Returns null when there is no session id to resume.
+   */
+  resumeCommand(sessionId: string | null, cwd?: string): string | null;
 }

@@ -12,6 +12,7 @@ import { RetryPanel } from "./RetryPanel.js";
 import { AskPanel } from "./AskPanel.js";
 import { JsonView } from "./JsonView.js";
 import { LiveOutput } from "./LiveOutput.js";
+import { Diff } from "./Diff.js";
 
 export function Detail(props: { graph: GraphSnapshot; selectedId: string; onSelect: (id: string) => void }) {
   const { graph, selectedId, onSelect } = props;
@@ -59,6 +60,14 @@ export function Detail(props: { graph: GraphSnapshot; selectedId: string; onSele
     ? composedFromOutput
     : typeof composedFromInput === "string" ? composedFromInput : null;
 
+  // CLI command to load this send's model session for inspection (stamped on
+  // the node output by the engine, via the driver). Lets you open the exact
+  // conversation and check whether it actually carried prior history.
+  const resumeCmdRaw = node.kind === "send"
+    ? (node.output as { resumeCommand?: unknown } | null)?.resumeCommand
+    : undefined;
+  const resumeCmd = typeof resumeCmdRaw === "string" && resumeCmdRaw ? resumeCmdRaw : null;
+
   return (
     <div>
       <h1>{node.kind + " — " + node.label}</h1>
@@ -78,7 +87,22 @@ export function Detail(props: { graph: GraphSnapshot; selectedId: string; onSele
       )}
       <LiveOutput node={node} />
       {composed != null && <ComposedPromptReveal text={composed} />}
+      {resumeCmd && (
+        <div class="sect">
+          <h2>load session in CLI</h2>
+          <pre
+            title="Click to select, then copy — opens this exact model session in the provider CLI so you can read its real history."
+            style={{
+              userSelect: "all", cursor: "text", margin: "0", padding: "8px 10px",
+              background: "#0d1117", border: "1px solid #30363d", borderRadius: "6px",
+              color: "#58a6ff", overflow: "auto", fontSize: "12px",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            }}
+          >{resumeCmd}</pre>
+        </div>
+      )}
       <RetryPanel node={node} />
+      {node.diff && <Diff diff={node.diff} />}
       <div class="sect"><h2>input</h2><pre><JsonView value={node.input} /></pre></div>
       <div class="sect"><h2>output</h2><pre><JsonView value={node.output} /></pre></div>
       {node.error && <div class="sect"><h2>error</h2><pre><JsonView value={node.error} /></pre></div>}

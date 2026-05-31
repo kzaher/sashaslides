@@ -21,6 +21,7 @@ export type NodeKind =
   | "fork"
   | "compact"
   | "switchModel"
+  | "switchCwd"
   | "newSession"
   | "prependToNextPrompt"
   | "appendToNextPrompt"
@@ -108,6 +109,31 @@ export interface GraphNode {
   predecessors?: PredecessorEdge[];
   /** How multiple predecessor edges combine. Default "all". */
   joinMode?: JoinMode;
+  /**
+   * Working-tree git diff captured by the engine after a file-mutating node
+   * (send / executeShell) finishes. Absent on nodes that don't change files
+   * or that ran outside a git worktree. See NodeDiff.
+   */
+  diff?: NodeDiff | null;
+}
+
+/**
+ * Per-node working-tree diff. The engine snapshots the task's git worktree
+ * after each file-mutating node and records both the cumulative change (vs the
+ * worktree's starting commit) and the delta attributable to that single node.
+ */
+export interface NodeDiff {
+  /** Unified `git diff` of everything changed since the task started (vs HEAD). */
+  cumulative: string;
+  /** Unified `git diff` of only what THIS node changed (vs the previous
+   *  file-mutating node's snapshot). Equals `cumulative` for the first node. */
+  delta: string;
+  /** `--stat` summary line(s) for the cumulative diff. */
+  stat: string;
+  /** git write-tree SHA of this snapshot — base for the next node's delta. */
+  tree: string;
+  /** True if either diff body was clamped for size. */
+  truncated: boolean;
 }
 
 /** What `GET /api/graph` returns and what view-graph.ts loads from disk. */

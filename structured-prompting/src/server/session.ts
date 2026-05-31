@@ -154,6 +154,21 @@ export class Session {
     return this.withModel(model).at(node.id);
   }
 
+  /** Switch the working directory that the next CLI calls (model `send`s and
+   *  `executeShell`) run in. Mirrors switchModel. Used to point a parallelFork
+   *  branch at its per-task git worktree so the worker edits the isolated
+   *  checkout instead of the scaffolding's main repo. */
+  switchCwd(cwd: string): Session {
+    const node = this.graph.create({
+      parentId: this.tipNodeId,
+      containerId: this.containerId,
+      kind: "switchCwd",
+      label: `switchCwd(${cwd})`,
+      input: { cwd },
+    });
+    return this.withCwd(cwd).at(node.id);
+  }
+
   /**
    * Start a fresh claude conversation. If `model` is provided, the new
    * session uses it; otherwise it inherits the current session's model.
@@ -364,6 +379,17 @@ export class Session {
       sessionId: this.sessionId,
       model,
       cwd: this.cwd,
+      graph: this.graph,
+      tipNodeId: this.tipNodeId,
+      containerId: this.containerId,
+    });
+  }
+
+  protected withCwd(cwd: string): Session {
+    return new Session({
+      sessionId: this.sessionId,
+      model: this.model,
+      cwd,
       graph: this.graph,
       tipNodeId: this.tipNodeId,
       containerId: this.containerId,
