@@ -14,8 +14,9 @@
   "mounts": [
     "source=polybot-chrome-profile,target=/home/node/chrome-profile,type=volume",
     "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind,consistency=cached",
-    "source=/home/k/snap/codex/34,target=/home/node/.codex,type=bind,consistency=cached",
-    "source=/p/claude,target=/p/claude,type=bind"
+    "source=${localEnv:HOME}/.codex,target=/home/node/.codex,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/Projects/claude,target=/p/claude,type=bind",
+    "source=${localEnv:HOME}/Projects/codepit/codepit-vscode/.deploy/codepit.codepit-vscode-0.1.0,target=/home/node/.codepit,type=bind"
   ],
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/node/.claude"

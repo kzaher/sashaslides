@@ -4,6 +4,7 @@
     "sudo_codex": "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
     "sudo_claude_fork": "claude --dangerously-skip-permissions --continue --fork-session",
     "sudo_claude_resume": "claude --dangerously-skip-permissions --continue",
+    "build:browser": "npx tsx renderer/html2slides/browser/build.ts",
     "regen:basics": "cd analysis/renderer/html2slides && bash regen-basics.sh",
     "regen:complex": "cd analysis/renderer/html2slides && bash regen-complex.sh",
     "regen": "npm run regen:basics && npm run regen:complex",
@@ -15,6 +16,7 @@
     "chrome-remote-interface": "^0.34.0",
     "esbuild": "^0.28.0",
     "googleapis": "^171.4.0",
+    "jszip": "^3.10.1",
     "pixelmatch": "^7.1.0",
     "pngjs": "^7.0.0",
     "postcss-value-parser": "^4.2.0",
@@ -22,6 +24,7 @@
   },
   "devDependencies": {
     "@types/pngjs": "^6.0.5",
+    "tsx": "^4.19.0",
     "typescript": "^6.0.3",
     "typia": "^12.1.1"
   }
