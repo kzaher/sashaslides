@@ -23,5 +23,9 @@ RUN protoc --python_out=. --pyi_out=. proto/sashaslides.proto
 
 ENV PYTHONPATH=/app
 
+RUN mkdir -p /home/node/.vscode-server/extensions \
+   && ln -sfn /opt/codepit-ext /home/node/.vscode-server/extensions/codepit.codepit-vscode-0.1.0 \
+   && chown -R node:node /home/node/.vscode-server
+
 # Default: run the composer server
 CMD ["python", "-m", "sashaslides.composer.server"]

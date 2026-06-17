@@ -83,6 +83,7 @@ export function getAuth() {
 // --- DOM Extraction ------------------------------------------------------
 export async function extractFromHtml(
   htmlPath: string,
+  tablesFormat: "native" | "baked" = "native",
 ): Promise<{ extraction: Extraction; visualPngs: Map<number, Buffer> }> {
   const absPath = resolve(htmlPath);
   const tab = await CDPS.New({ port: CDP_PORT, url: `file://${absPath}` });
@@ -136,6 +137,13 @@ export async function extractFromHtml(
   // "make sure that the text is never baked into images" + "Why are bottom
   // icons rendered?" — the rect was native, only the PNG masked it.
   const retypedElements = extraction.elements.map((el) => {
+    // tablesFormat=baked: rasterise each <table> as a single image so rounded
+    // corners and every nested element render pixel-perfect (the screenshot
+    // loop below captures it; the lib's image case emits slide.addImage). The
+    // native <a:tbl> path (which can't do rounded corners) is bypassed.
+    if (tablesFormat === "baked" && el.type === "table" && el.bounds.w > 5 && el.bounds.h > 5) {
+      return { ...el, type: "image" as const, _bakedTable: true };
+    }
     if (el.type !== "text" || !looksLikeEmojiText(el.text || "")) return el;
     const text = el.text || "";
     const visibleChars = Array.from(text).filter((c) => c.codePointAt(0)! > 0x20);
@@ -241,6 +249,8 @@ export interface ConvertPptxOpts {
   outPath?: string | null;   // default null → /tmp/<sanitized-title>.pptx
   noUpload?: boolean;        // default false
   only?: string[] | null;    // list of basenames like ["slide_11.html", ...]; default null = all
+  tablesFormat?: "native" | "baked"; // default "native" (editable <a:tbl>, square corners);
+                                     // "baked" rasterises tables (rounded corners + full fidelity)
 }
 
 export interface ConvertPptxResult {
@@ -257,6 +267,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   const outPath: string | null = opts.outPath ?? null;
   const noUpload = opts.noUpload ?? false;
   const onlyFiles: readonly string[] | null = opts.only ?? null;
+  const tablesFormat: "native" | "baked" = opts.tablesFormat ?? "native";
 
   const htmlFiles = readdirSync(htmlDir)
     .filter(f => f.endsWith(".html"))
@@ -266,6 +277,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
 
   if (htmlFiles.length === 0) { console.error("No HTML files found in", htmlDir); process.exit(1); }
   console.log(`Converting ${htmlFiles.length} HTML slides → pptx "${title}"`);
+  console.log(`  tablesFormat: ${tablesFormat}`);
 
   // Step 1: Extract DOM from all slides — fully in parallel. Each slide opens
   // its own short-lived Chrome tab via CDP.New; tabs are independent so there's
@@ -280,7 +292,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
       if (idx >= htmlFiles.length) return;
       const f = htmlFiles[idx];
       console.log(`  [${idx + 1}/${htmlFiles.length}] Extracting ${f.split("/").pop()}...`);
-      const data = await extractFromHtml(f);
+      const data = await extractFromHtml(f, tablesFormat);
       console.log(`    [${idx + 1}] ${data.extraction.elementCount} elements, ${data.visualPngs.size} visuals`);
       slideData[idx] = data;
     }

@@ -130,10 +130,10 @@ async function main() {
 </head>
 <body>
 <h1>html2slides</h1>
-<p class="sub">Drop one or more HTML slide files. They'll be converted to a single .pptx — all processing happens locally in this page.</p>
+<p class="sub">Drop one or more HTML slide files, or paste HTML with Ctrl+V. They'll be converted to a single .pptx — all processing happens locally in this page. The result is downloaded and copied to your clipboard.</p>
 
 <div id="dropzone">
-  <strong>Drop .html files here</strong>, or click to pick.<br>
+  <strong>Drop .html files here</strong>, click to pick, or paste HTML (Ctrl+V).<br>
   <span id="file-count">0</span> file(s) queued.
 </div>
 <input type="file" id="picker" accept=".html,.htm" multiple>

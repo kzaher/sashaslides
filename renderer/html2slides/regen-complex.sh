@@ -8,8 +8,26 @@
 # Goldens can only be written by the user via the SxS rating UI (serve-sxs.sh) — same rule.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-OUT=${REGEN_OUT:-/tmp/sxs-complex}
-BACKUP="$HERE/e2e/.ratings-complex.json"
+
+# --- Rendering parameters -------------------------------------------------
+# tablesFormat: native (default; editable <a:tbl>, square corners) | baked
+#   (rasterised tables — rounded corners + full fidelity). Pass via
+#   TABLES_FORMAT=baked or as $1. NON-DEFAULT params write to a SEPARATE path
+#   (/tmp/sxs-complex-<fmt>, goldens-complex-<fmt>, ratings backup suffix) so
+#   they never collide with the default-native baseline.
+TABLES_FORMAT="${TABLES_FORMAT:-${1:-native}}"
+case "$TABLES_FORMAT" in native|baked) ;; *) echo "❌ TABLES_FORMAT must be native|baked, got: $TABLES_FORMAT" >&2; exit 2 ;; esac
+
+if [ "$TABLES_FORMAT" = "native" ]; then
+  OUT=${REGEN_OUT:-/tmp/sxs-complex}
+  GOLDENS="$HERE/e2e/goldens-complex"
+  BACKUP="$HERE/e2e/.ratings-complex.json"
+else
+  OUT=${REGEN_OUT:-/tmp/sxs-complex-$TABLES_FORMAT}
+  GOLDENS="$HERE/e2e/goldens-complex-$TABLES_FORMAT"
+  BACKUP="$HERE/e2e/.ratings-complex-$TABLES_FORMAT.json"
+fi
+echo "tablesFormat=$TABLES_FORMAT  OUT=$OUT  goldens=$GOLDENS"
 mkdir -p "$OUT/originals" "$OUT/slides" "$OUT/diffs"
 
 # Ratings persistence: /tmp can be wiped between devcontainer sessions, so
@@ -39,7 +57,7 @@ echo "=== Convert + upload ==="
 # pipefail`, a convert-pptx failure makes the pipeline non-zero, but
 # `set -e` then aborts silently. Use `if !` so we always reach an explicit
 # fail() with a pointer to the log.
-if ! npx tsx convert-pptx.ts e2e/fixtures --title "$TITLE" --out "$OUT/complex.pptx" 2>&1 | tee "$OUT/convert.log"; then
+if ! npx tsx convert-pptx.ts e2e/fixtures --title "$TITLE" --out "$OUT/complex.pptx" --tables-format "$TABLES_FORMAT" 2>&1 | tee "$OUT/convert.log"; then
   fail "convert-pptx.ts exited non-zero (${PIPESTATUS[0]:-?}). Tail of log:
 $(tail -8 "$OUT/convert.log")"
 fi
@@ -48,7 +66,7 @@ PRES_ID=$(grep -oE 'presentation/d/[A-Za-z0-9_-]+' "$OUT/convert.log" | head -1 
 [ -n "${PRES_ID:-}" ] || fail "convert-pptx completed but no presentation URL was printed — upload may have failed. See $OUT/convert.log"
 echo "Presentation: $PRES_ID"
 cat > "$OUT/meta.json" <<EOF
-{ "htmlDir": "$HERE/e2e/fixtures", "goldensDir": "$HERE/e2e/goldens-complex", "ratingsBackup": "$BACKUP", "presentationId": "$PRES_ID" }
+{ "htmlDir": "$HERE/e2e/fixtures", "goldensDir": "$GOLDENS", "ratingsBackup": "$BACKUP", "presentationId": "$PRES_ID", "tablesFormat": "$TABLES_FORMAT", "renderParams": { "tablesFormat": "$TABLES_FORMAT" } }
 EOF
 
 echo "=== Screenshot originals + export thumbs (parallel) ==="
@@ -73,7 +91,7 @@ echo "=== Pixel-perfect goldens check ==="
 # check-goldens intentionally exits non-zero when regressions are found so
 # CI can gate on it; we `|| true` ONLY here because the goal is to print the
 # summary + diffs, not to abort.
-npx tsx check-goldens.ts "$OUT/slides" "$OUT/diffs" --goldens "$HERE/e2e/goldens-complex" --originals "$OUT/originals" || true
+npx tsx check-goldens.ts "$OUT/slides" "$OUT/diffs" --goldens "$GOLDENS" --originals "$OUT/originals" || true
 
 echo ""
 echo "Thumbs:  $OUT/slides/"
