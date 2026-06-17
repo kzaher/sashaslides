@@ -30,6 +30,7 @@
 import { spawn } from "child_process";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { existsSync } from "fs";
 
 const argv = process.argv.slice(2);
 const get = (name: string): string | null => {
@@ -42,7 +43,6 @@ const slidesCsv = get("--slides") ?? "";
 const analysis = get("--analysis");
 const diffs = get("--diffs");
 const thumbnails = get("--thumbnails");
-const originals = get("--originals") ?? "/tmp/sxs-complex/originals";
 const title = get("--task-title") ?? "bug_solving";
 
 if (!slidesCsv || !analysis || !diffs || !thumbnails) {
@@ -58,12 +58,23 @@ const RATING_SERVER = resolve(REPO, "renderer/html2slides/rating-server.ts");
 // thumbnails live under) so meta.json / ratings.json persistence works.
 const resultsDir = resolve(thumbnails, "..");
 
+// Originals dir: prefer the explicit flag, then the results dir's OWN originals/
+// (Chrome screenshots that record-rendering --mode full writes next to thumbs),
+// then the legacy shared dir only if it still exists. Never pass a non-existent
+// path — a stale /tmp/sxs-complex/originals used to crash the server on an
+// unguarded readdir. If none exist, omit the override entirely.
+const originals =
+  get("--originals") ??
+  (existsSync(resolve(resultsDir, "originals")) ? resolve(resultsDir, "originals")
+    : existsSync("/tmp/sxs-complex/originals") ? "/tmp/sxs-complex/originals"
+      : null);
+
 const forwarded = [
   "tsx", RATING_SERVER, resultsDir,
   "--port", port,
   "--filter-slides", slidesCsv,
   "--slides-dir", thumbnails,
-  "--originals-dir", originals,
+  ...(originals ? ["--originals-dir", originals] : []),
   "--task-analysis", analysis,
   "--task-diffs", diffs,
   "--task-title", title,
