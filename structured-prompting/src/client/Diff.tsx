@@ -67,7 +67,17 @@ export function Diff(props: { diff: NodeDiff }) {
         padding: "8px", maxHeight: "60vh",
       }}>
         {lines.map((line, i) => (
-          <div key={i} style={{ ...lineStyle(line), whiteSpace: "pre", padding: "0 4px" }}>
+          <div key={i} style={{
+            ...lineStyle(line),
+            // Wrap ONLY lines longer than 120 columns: pre-wrap keeps leading
+            // indentation and won't wrap content that fits, while maxWidth:120ch
+            // (≈120 monospace columns) caps the line so anything past column 120
+            // folds to the next row. break rules wrap unbroken tokens (long
+            // paths, minified/base64 blobs) at the same boundary.
+            whiteSpace: "pre-wrap", maxWidth: "120ch",
+            overflowWrap: "anywhere", wordBreak: "break-word",
+            padding: "0 4px",
+          }}>
             {line || " "}
           </div>
         ))}

@@ -119,6 +119,31 @@ function launchFilteredServer(spec: SxsServerSpec): ChildProcess {
   return ch;
 }
 
+/** Pre-flight the Google OAuth grant by running check-google-auth.ts (which
+ *  forces a token refresh). On failure, print the re-auth instructions and exit
+ *  non-zero BEFORE any worktrees are created — so a dead token can't silently
+ *  produce empty rating servers after a full multi-cluster run. Skippable via
+ *  BUG_SOLVING_SKIP_AUTH_PREFLIGHT=1 for solve-only runs that don't render. */
+async function preflightGoogleAuth(): Promise<void> {
+  if (process.env.BUG_SOLVING_SKIP_AUTH_PREFLIGHT === "1") {
+    console.error("[scaffold] auth pre-flight skipped (BUG_SOLVING_SKIP_AUTH_PREFLIGHT=1)");
+    return;
+  }
+  const script = resolve(REPO_ROOT, "renderer/structured-prompts/bug_solving/scripts/check-google-auth.ts");
+  try {
+    const { stdout } = await execFileAsync("npx", ["tsx", script], {
+      cwd: resolve(REPO_ROOT, "renderer"), maxBuffer: 4 * 1024 * 1024,
+    });
+    console.error(stdout.trim() || "[auth-preflight] OK");
+  } catch (e) {
+    const err = e as ExecException & { stdout?: string; stderr?: string };
+    console.error("\n❌ Google OAuth pre-flight FAILED — aborting before creating worktrees.");
+    console.error(((err.stdout ?? "") + (err.stderr ?? "")).trim() || err.message);
+    console.error("   Re-authorize, then re-run:  npx tsx /workspaces/sashaslides/.auth/generate-token.ts\n");
+    process.exit(1);
+  }
+}
+
 /** Record the BEFORE-state pptx for every task in parallel. These are
  *  side-effect-only script invocations with no model judgement, so we
  *  lift them out of main.ts — keeping the structured-prompt graph
@@ -181,6 +206,14 @@ async function run(): Promise<void> {
   if (process.env.BUG_SOLVING_SXS_DIR) buildOpts.sxs_dir = process.env.BUG_SOLVING_SXS_DIR;
   if (process.env.BUG_SOLVING_RATINGS_JSON) buildOpts.ratings_json = process.env.BUG_SOLVING_RATINGS_JSON;
   console.error(`[scaffold] fixtures_dir: ${buildOpts.fixtures_dir ?? "(default fixtures/)"}`);
+
+  // Pre-flight Google OAuth BEFORE creating worktrees. A dead grant makes every
+  // step-7 `record-rendering --mode full` upload fail with invalid_grant, which
+  // `|| true` swallows — leaving empty rating servers after a whole run. Fail
+  // loudly up front instead. Bypass with BUG_SOLVING_SKIP_AUTH_PREFLIGHT=1
+  // (e.g. a solve-only run that won't render thumbnails).
+  await preflightGoogleAuth();
+
   const tasks = buildTasks(buildOpts);
   console.error(`[scaffolding] built ${tasks.length} task(s):`);
   for (const t of tasks) {

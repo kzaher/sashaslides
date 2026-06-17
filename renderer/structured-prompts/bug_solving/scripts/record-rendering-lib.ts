@@ -148,7 +148,7 @@ async function screenshotFixtures(slides: string[], fixturesDir: string, outDir:
 }
 
 /** Google Drive + Slides oauth2 client built from the project's saved tokens. */
-function getGoogleAuth() {
+export function getGoogleAuth() {
   const credsPath = resolve("/workspaces/sashaslides/.auth/google_oauth.json");
   const tokensPath = resolve("/workspaces/sashaslides/.auth/tokens.json");
   if (!existsSync(credsPath) || !existsSync(tokensPath)) {
@@ -165,6 +165,28 @@ function getGoogleAuth() {
     writeFileSync(tokensPath, JSON.stringify({ ...tokens, ...newTokens }, null, 2));
   });
   return oauth2;
+}
+
+/**
+ * Pre-flight: force a token refresh so a dead/expired OAuth grant fails LOUDLY
+ * before a multi-cluster run, instead of every `--mode full` upload throwing
+ * `invalid_grant` that step-7's `|| true` silently swallows (which produces
+ * empty rating servers after a full run). `getAccessToken()` returns the cached
+ * token or refreshes via the refresh_token; a dead refresh token throws here.
+ * Returns the access-token expiry (ms epoch) on success.
+ */
+export async function assertGoogleAuthFresh(): Promise<{ expiry?: number }> {
+  const oauth2 = getGoogleAuth();
+  // Force a refresh (mark the cached access token expired) so we validate the
+  // long-lived REFRESH token — the thing that actually lapses for Testing-mode
+  // OAuth apps — rather than handing back a still-valid access token that would
+  // only fail mid-run once it needs refreshing. A dead refresh token throws
+  // `invalid_grant` here; a good one refreshes (and the `tokens` listener in
+  // getGoogleAuth persists the new token, so the run starts with a fresh hour).
+  if (oauth2.credentials) oauth2.credentials.expiry_date = 1;
+  const res = await oauth2.getAccessToken();
+  if (!res || !res.token) throw new Error("Google auth returned no access token");
+  return { expiry: oauth2.credentials?.expiry_date ?? undefined };
 }
 
 /**
