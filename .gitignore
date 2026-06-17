@@ -57,4 +57,12 @@ renderer/html2slides/e2e/_gtl-out/
 renderer/html2slides/e2e/gtl-dataset*.json
 renderer/html2slides/e2e/google-table-measurements.json
 
+# html2slides distribution build output — regenerable via `npm run build`
+# (mirrors source path: dist/renderer/html2slides/{browser,addon}/...).
+# Note: the generic `dist/` above already matches this; kept explicit for clarity.
+/dist/
+
+# Local SxS ratings backups (survive /tmp wipes; user-specific, not committed)
+renderer/html2slides/e2e/.ratings-backup/
+
 .sxs-complex/

@@ -9,11 +9,11 @@
  *   - pptxgenjs.bundle.js  → attaches window.PptxGenJS
  *   - jszip.min.js         → attaches window.JSZip
  *
- * Output:
- *   - html2slides.html (self-contained, no network deps)
+ * Output (mirrors the source path under the repo-root dist/ — gitignored):
+ *   - dist/renderer/html2slides/browser/html2slides.html (self-contained, no network deps)
  */
 import { build, transformSync } from "esbuild";
-import { readFileSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
@@ -197,7 +197,9 @@ ${mainJs}
 </body>
 </html>`;
 
-  const outPath = join(HERE, "html2slides.html");
+  const distDir = join(ROOT, "dist", "renderer", "html2slides", "browser");
+  mkdirSync(distDir, { recursive: true });
+  const outPath = join(distDir, "html2slides.html");
   writeFileSync(outPath, html);
   const totalKb = (html.length / 1024).toFixed(0);
   console.log(`\n✓ wrote ${outPath} (${totalKb} KB)`);

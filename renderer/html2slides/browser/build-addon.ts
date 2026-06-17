@@ -5,15 +5,15 @@
  *
  * It mirrors build.ts (same esbuild config / vendor inlining) but targets the
  * add-on instead of a standalone page. Output is a ready-to-push Apps Script
- * project under `addon/dist/`:
+ * project under the repo-root dist/ (gitignored), mirroring the source path:
  *
- *   addon/dist/
+ *   dist/renderer/html2slides/addon/
  *     appsscript.json   — manifest: V8, OAuth scopes, Advanced Drive Service
  *     Code.gs           — server: onOpen menu + showSidebar + insertPptxAfterCurrent
  *     Sidebar.html      — the html2slides UI with the whole client bundle inlined
  *
- * Push it with clasp (`cd addon/dist && clasp push`) or paste the three files
- * into Extensions → Apps Script on a presentation. See addon/README.md.
+ * Push it with clasp (`cd dist/renderer/html2slides/addon && clasp push`) or
+ * paste the three files into Extensions → Apps Script. See addon/README.md.
  */
 import { build, transformSync } from "esbuild";
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -22,7 +22,7 @@ import { fileURLToPath } from "url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../../..");
-const OUT = join(HERE, "..", "addon", "dist");
+const OUT = join(ROOT, "dist", "renderer", "html2slides", "addon");
 
 function readText(p: string): string { return readFileSync(p, "utf-8"); }
 

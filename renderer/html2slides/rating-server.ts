@@ -845,7 +845,27 @@ function undoDraw() {
 let showDiff = false;
 function toggleShowDiff() {
   showDiff = document.getElementById('showDiff').checked;
-  render();
+  // Toggle the diff overlay IN PLACE. A full render() would rebuild the #pair
+  // innerHTML — which destroys the draw canvas (losing in-progress
+  // annotations) and reset the comment box to the last-SAVED value (losing
+  // unsaved text). The diff canvas lives on the ORIGINAL panel and is
+  // independent of the draw canvas (SLIDES panel) and the comment box, so we
+  // add/remove just it and leave unsaved work intact.
+  const c = comparisons[currentIdx];
+  const origPanel = document.querySelector('#pair .panel.original');
+  if (!origPanel || !c) return;
+  let canvas = document.getElementById('diffCanvas');
+  if (showDiff && c.slidesPng) {
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.id = 'diffCanvas';
+      canvas.className = 'diff-overlay';
+      origPanel.appendChild(canvas);
+    }
+    computeClientSideDiff();
+  } else if (canvas) {
+    canvas.remove();
+  }
 }
 let showRendered = false;
 function toggleShowRendered() {

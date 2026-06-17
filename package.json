@@ -4,12 +4,14 @@
     "sudo_codex": "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
     "sudo_claude_fork": "claude --dangerously-skip-permissions --continue --fork-session",
     "sudo_claude_resume": "claude --dangerously-skip-permissions --continue",
+    "build": "npm run build:browser && npm run build:addon",
     "build:browser": "npx tsx renderer/html2slides/browser/build.ts",
-    "regen:basics": "cd analysis/renderer/html2slides && bash regen-basics.sh",
-    "regen:complex": "cd analysis/renderer/html2slides && bash regen-complex.sh",
+    "build:addon": "npx tsx renderer/html2slides/browser/build-addon.ts",
+    "regen:basics": "cd renderer/html2slides && bash regen-basics.sh",
+    "regen:complex": "cd renderer/html2slides && bash regen-complex.sh",
     "regen": "npm run regen:basics && npm run regen:complex",
-    "rate:basics": "lsof -ti:3456 | xargs -r kill; npx tsx analysis/renderer/html2slides/rating-server.ts /tmp/sxs --port 3456",
-    "rate:complex": "lsof -ti:3457 | xargs -r kill; npx tsx analysis/renderer/html2slides/rating-server.ts /tmp/sxs-complex --port 3457",
+    "rate:basics": "lsof -ti:3456 | xargs -r kill; npx tsx renderer/html2slides/rating-server.ts /tmp/sxs --port 3456",
+    "rate:complex": "lsof -ti:3457 | xargs -r kill; npx tsx renderer/html2slides/rating-server.ts /tmp/sxs-complex --port 3457",
     "rate": "lsof -ti:3456,3457 | xargs -r kill; npm run rate:basics & npm run rate:complex"
   },
   "dependencies": {
