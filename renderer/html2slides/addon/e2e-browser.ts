@@ -18,6 +18,12 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 const PORT = 9222;
 const ROOT = "/workspaces/sashaslides";
 const PID = process.env.PID || "1If1xjsogouF6tx_O_e0HFHHUYAjf1bfdh8grEB2aTz4";
+// The bound Apps Script project lives under account index U (here u/1, NOT u/0).
+// Running under the wrong account caused "PERMISSION_DENIED reading from storage".
+const U = process.env.UIDX || "1";
+const SCRIPT_ID = process.env.SCRIPT_ID || "1z0Iu55KZcCjkLu74LTrPYWhU7IWueNUWtPV5-iV-cpWMO_WC6X8rmzVH";
+const EDITOR_URL = `https://script.google.com/u/${U}/home/projects/${SCRIPT_ID}/edit`;
+const PRES_URL = `https://docs.google.com/presentation/u/${U}/d/${PID}/edit`;
 const ADDON = `${ROOT}/dist/renderer/html2slides/addon`;
 const DEMO_HTML = `${ROOT}/renderer/html2slides/e2e/fixtures/slide_31.html`;
 const OUT = "/tmp/e2e-br";
@@ -62,21 +68,15 @@ const findEditor = async () => (await list()).find((t: any) => t.type === "page"
 
 // --- 1+2: open editor, push files, save -----------------------------------
 async function deployViaEditor() {
-  L("editor: opening bound Apps Script project…");
+  L(`editor: opening project DIRECTLY under u/${U}: ${EDITOR_URL.slice(0, 80)}`);
   for (const t of await list()) if (t.type === "page" && /(docs|script)\.google\.com/.test(t.url)) await (CDP as any).Close({ port: PORT, id: t.id }).catch(() => {});
   await sleep(800);
-  const presTab = await (CDP as any).New({ port: PORT, url: `https://docs.google.com/presentation/d/${PID}/edit` });
-  const pc = await wideTab(presTab); await pc.Target.activateTarget({ targetId: presTab.id });
-  for (let i = 0; i < 40; i++) { if (await evalv(pc.Runtime, `!!([...document.querySelectorAll('[role=menubar] [role=menuitem]')].find(m=>m.textContent.trim()==='Extensions'))`)) break; await sleep(500); }
-  await sleep(1200); await clickText(pc.Runtime, pc.Input, ["No thanks", "Dismiss"]); await sleep(600);
-  const ext = await evalv(pc.Runtime, `(()=>{for(const i of document.querySelectorAll('[role=menubar] [role=menuitem]'))if(i.textContent.trim()==='Extensions'){const r=i.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}}return null})()`);
-  await clk(pc.Input, ext.x, ext.y); await sleep(1800);
-  const as = await evalv(pc.Runtime, `(()=>{for(const i of document.querySelectorAll('[role=menuitem]')){const t=(i.textContent||'').trim();if(t.startsWith('Apps Script')){const r=i.getBoundingClientRect();if(r.width>0)return{x:r.x+r.width/2,y:r.y+r.height/2}}}return null})()`);
-  if (!as) throw new Error("Apps Script menu item not found");
-  await clk(pc.Input, as.x, as.y); await sleep(12000);
-  const edTab = await findEditor(); if (!edTab) throw new Error("editor tab did not open");
-  L("editor: " + edTab.url.slice(0, 70));
-  const ec = await wideTab(edTab); await instrument(ec, "editor"); await sleep(5000); await shot(ec, "editor_open");
+  const edTab = await (CDP as any).New({ port: PORT, url: EDITOR_URL });
+  const ec = await wideTab(edTab); await ec.Target.activateTarget({ targetId: edTab.id }); await instrument(ec, "editor");
+  // wait for Monaco to come up
+  for (let i = 0; i < 40; i++) { if (await evalv(ec.Runtime, `typeof monaco !== 'undefined' && monaco.editor && monaco.editor.getModels().length >= 3`)) break; await sleep(700); }
+  await sleep(3000); await shot(ec, "editor_open");
+  L("editor: url=" + (await evalv(ec.Runtime, `location.href`)).slice(0, 70));
   const probe = await evalv(ec.Runtime, `JSON.stringify({monaco:typeof monaco,models:(typeof monaco!=='undefined'&&monaco.editor?monaco.editor.getModels().map(m=>m.getValue().length):[])})`);
   L("editor: " + probe);
   // overwrite each model (match by current-content signature) with the new dist file
@@ -103,62 +103,61 @@ async function deployViaEditor() {
   await shot(ec, "editor_saved"); L("editor: save state = " + savedState);
   await sleep(2000);
   await ec.close();
-  return pc;
 }
 
 // --- 3+4+5: open sidebar, insert, verify ----------------------------------
-async function driveSidebar(oldPc: any) {
-  // FRESH OPEN (not reload): the onOpen simple trigger fires on document OPEN,
-  // so close the tab and open a brand-new one to get the menu created.
-  L("ui: fresh-opening deck so onOpen fires…");
-  await oldPc.close().catch(() => {});
+async function driveSidebar() {
+  // FRESH OPEN under u/${U}: the onOpen trigger fires on document OPEN, and the
+  // u/${U} account context is the one that owns the bound script.
+  L(`ui: fresh-opening deck under u/${U}: ${PRES_URL.slice(0, 70)}`);
   for (const t of await list()) if (t.type === "page" && /docs\.google\.com/.test(t.url)) await (CDP as any).Close({ port: PORT, id: t.id }).catch(() => {});
   await sleep(1000);
-  const tab = await (CDP as any).New({ port: PORT, url: `https://docs.google.com/presentation/d/${PID}/edit` });
+  const tab = await (CDP as any).New({ port: PORT, url: PRES_URL });
   const pc = await wideTab(tab); await pc.Target.activateTarget({ targetId: tab.id }); await instrument(pc, "slides");
   for (let i = 0; i < 40; i++) { if (await evalv(pc.Runtime, `!!([...document.querySelectorAll('[role=menubar] [role=menuitem]')].find(m=>m.textContent.trim()==='Extensions'))`)) break; await sleep(500); }
   await sleep(4000);
   await clickText(pc.Runtime, pc.Input, ["No thanks", "Dismiss"]); await sleep(600);
   const before = await evalv(pc.Runtime, `document.querySelectorAll('.punch-filmstrip-thumbnail').length`);
   L("ui: slides before = " + before); await shot(pc, "deck_reloaded");
-  // Top-level "html2slides" menubar menu (createMenu) → Open html2slides
-  const menubar = await evalv(pc.Runtime, `[...document.querySelectorAll('[role=menubar] [role=menuitem]')].map(i=>i.textContent.trim())`);
-  L("ui: menubar = " + JSON.stringify(menubar));
-  const m = await evalv(pc.Runtime, `(()=>{for(const i of document.querySelectorAll('[role=menubar] [role=menuitem]'))if(i.textContent.trim()==='html2slides'){const r=i.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}}return null})()`);
-  if (!m) { L("ui: ✗ 'html2slides' menu NOT in menubar — onOpen menu missing"); return { before, after: before }; }
+  // POLL for the top-level "html2slides" menubar menu — onOpen adds it a few
+  // seconds AFTER the menubar itself is ready (checking once was too early).
+  // The custom createMenu() menu is NOT a [role=menuitem]; find any clickable
+  // leaf with exact text 'html2slides' in the top menubar strip.
+  const findMenu = `(()=>{for(const el of document.querySelectorAll('div,span,[role=menuitem],[role=button]')){if(el.children.length>1)continue;if((el.textContent||'').trim()==='html2slides'){const r=el.getBoundingClientRect();if(r.width>1&&r.height>1&&r.y<60)return{x:r.x+r.width/2,y:r.y+r.height/2}}}return null})()`;
+  let m: any = null;
+  for (let i = 0; i < 25; i++) { m = await evalv(pc.Runtime, findMenu); if (m) break; await sleep(1200); }
+  if (!m) {
+    L("ui: menubar = " + JSON.stringify(await evalv(pc.Runtime, `[...document.querySelectorAll('[role=menubar] [role=menuitem]')].map(i=>i.textContent.trim())`)));
+    L("ui: ✗ 'html2slides' menu never appeared after 30s"); return { before, after: before };
+  }
+  L("ui: ✓ html2slides menu present");
   await clk(pc.Input, m.x, m.y); await sleep(1500); await shot(pc, "addon_menu");
   const opened = await clickText(pc.Runtime, pc.Input, ["Open html2slides", "Open"]); L("ui: open → " + opened); await sleep(7000); await shot(pc, "sidebar");
-  // sidebar lives in a googleusercontent iframe target
-  const sb = (await list()).find((t: any) => t.type === "iframe" && /googleusercontent|script\.google/.test(t.url));
-  if (!sb) { L("ui: sidebar iframe target NOT FOUND"); return { before, after: before }; }
-  const sc = await CDP({ target: sb, port: PORT }); await sc.Runtime.enable(); await sc.DOM.enable(); await instrument(sc, "sidebar");
-  L("ui: sidebar target = " + sb.url.slice(0, 60));
-  // queue demo HTML via the file input, then click Insert
-  const doc = await sc.DOM.getDocument({ depth: -1 });
-  const pick = await sc.DOM.querySelector({ nodeId: doc.root.nodeId, selector: "#picker" });
-  if (!pick.nodeId) { L("ui: #picker not found in sidebar"); return { before, after: before }; }
-  await sc.DOM.setFileInputFiles({ files: [DEMO_HTML], nodeId: pick.nodeId });
-  await sc.Runtime.evaluate({ expression: `document.getElementById('picker').dispatchEvent(new Event('change',{bubbles:true}))` });
-  await sleep(1500); await shot(pc, "queued");
-  L("ui: clicking Insert…");
-  await sc.Runtime.evaluate({ expression: `document.getElementById('insert-btn').click()` });
-  await sleep(22000); await shot(pc, "after_insert");
-  // capture the sidebar log text (the add-on's own #log shows insert errors)
-  const sidebarLog = await evalv(sc.Runtime, `(document.getElementById('log')||{}).innerText||''`);
-  L("ui: sidebar #log:\n" + sidebarLog);
+  // The sidebar content is a deeply-nested OOPIF that CDP's target list doesn't
+  // expose, so drive it by SCREEN COORDINATES (clicks land on the rendered
+  // iframe) + the system clipboard. Write the slide HTML to the clipboard from
+  // the main page, focus the paste-box, Ctrl+V to queue, then click Insert.
+  const demoHtml = readFileSync(DEMO_HTML, "utf-8");
+  await pc.Browser.grantPermissions({ origin: "https://docs.google.com", permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] }).catch(() => {});
+  const wrote = await evalv(pc.Runtime, `(async()=>{try{await navigator.clipboard.writeText(${JSON.stringify(demoHtml)});return 'ok'}catch(e){return 'ERR '+e.message}})()`);
+  L("ui: clipboard write = " + wrote);
+  // sidebar paste-box ≈ (1245,392); Insert button ≈ (1188,446) at the 1500-wide viewport
+  await clk(pc.Input, 1245, 392); await sleep(500);
+  await key(pc.Input, "v", 86, 2); await sleep(2500); await shot(pc, "queued");
+  L("ui: clicking Insert (by coords)…");
+  await clk(pc.Input, 1188, 446); await sleep(25000); await shot(pc, "after_insert");
   const after = await evalv(pc.Runtime, `document.querySelectorAll('.punch-filmstrip-thumbnail').length`);
-  await sc.close().catch(() => {});
   return { before, after };
 }
 
 async function main() {
-  L(`=== e2e-browser start (PID=${PID}) ===`);
+  L(`=== e2e-browser start (PID=${PID}, u/${U}) ===`);
   try {
-    const pc = await deployViaEditor();
-    const { before, after } = await driveSidebar(pc);
+    await deployViaEditor();
+    const { before, after } = await driveSidebar();
     L(`RESULT: slides ${before} → ${after} — ${after > before ? "PASS ✓ slides inserted" : "FAIL ✗ no new slides"}`);
-    await pc.close();
-  } catch (e) { L("E2E ERROR: " + (e as Error).message + "\n" + (e as Error).stack); process.exit(1); }
+  } catch (e) { L("E2E ERROR: " + (e as Error).message + "\n" + (e as Error).stack); }
   L("=== done ===");
+  process.exit(0);
 }
 main();

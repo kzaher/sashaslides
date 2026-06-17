@@ -321,6 +321,57 @@ function init() {
   if (typeof google !== "undefined" && !(window as Window & { PptxGenJS?: unknown }).PptxGenJS) {
     log("loading converter libraries…", "info");
   }
+  detectAccountAndWarn();
+}
+
+/** Parse a Google `authuser` account index out of any URL-ish string. The most
+ * reliable source in a sidebar is the iframe host itself: Apps Script serves it
+ * from `n-<hash>-<N>lu-script.googleusercontent.com`, where <N> is the authuser. */
+function parseAuthUser(s: string | null | undefined): number | null {
+  if (!s) return null;
+  const m = s.match(/-(\d+)lu-script\.googleusercontent/)   // sidebar host: -<N>lu-
+    || s.match(/[?&]authuser=(\d+)/)
+    || s.match(/\/u\/(\d+)(?:\/|\b)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/** Show the non-default-account warning banner. */
+function warnNonDefaultAccount(idx: number | null): void {
+  try { ($("#trouble") as HTMLDetailsElement).open = true; } catch { /* no-op */ }
+  const who = idx != null && idx !== 0 ? `a non-default account (authuser=${idx})` : "a non-default Google account";
+  notice(
+    `⚠ <b>html2slides can't reach its server</b> — you're on ${who}. Google's add-on `
+    + `multi-login bug blocks server calls (PERMISSION_DENIED) on every account except your `
+    + `<b>default (u/0)</b>. Open this deck under your default Google account (or install the `
+    + `add-on), then reopen html2slides.`,
+    "warn",
+  );
+  log(`⚠ non-default account detected (authuser=${idx == null ? "?" : idx}) — server calls will fail`, "warn");
+}
+
+/** On load: parse the account index from client-side signals, and run a server
+ * health-check (the call that fails under the multi-login bug). Warn up front. */
+function detectAccountAndWarn(): void {
+  const signals: Record<string, string> = {
+    href: location.href,
+    referrer: document.referrer || "",
+    ancestors: (() => { try { return Array.from((location as unknown as { ancestorOrigins?: DOMStringList }).ancestorOrigins || []).join(" "); } catch { return ""; } })(),
+    name: window.name || "",
+  };
+  let idx: number | null = null;
+  for (const v of Object.values(signals)) { const p = parseAuthUser(v); if (p != null) { idx = p; break; } }
+  log(`authuser detect: index=${idx == null ? "?" : idx}`, "info");
+  // Non-default account index → warn IMMEDIATELY (no server round-trip needed).
+  if (idx != null && idx !== 0) { warnNonDefaultAccount(idx); return; }
+  // Index unknown → fall back to a tiny server round-trip that fails with
+  // PERMISSION_DENIED under the multi-login bug.
+  if (idx == null) {
+    gsCall<AuthInfo>((r) => r.getAuthInfo())
+      .catch((e: Error) => {
+        const msg = e?.message || String(e);
+        if (/PERMISSION_DENIED|storage|permission|authoriz/i.test(msg)) warnNonDefaultAccount(null);
+      });
+  }
 }
 
 if (document.readyState === "loading") {
