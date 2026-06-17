@@ -923,7 +923,8 @@ function setTool(t) {
 }
 
 // --- Blink-comparator flip ---
-let flipMode = true;    // true = stacked/tabbed (flick between); false = side-by-side
+let flipMode = false;   // false = side-by-side (DEFAULT); true = stacked/tabbed (flick between).
+                        // SxS shows both panels — incl. the rendered panel's annotation canvas.
 let flipSide = 'left';  // 'left' = original (target), 'right' = rendered (Slides)
 function applyFlip() {
   const pair = document.getElementById('pair');
