@@ -400,6 +400,7 @@ function findComparisons(): SlideComparison[] {
 function saveRating(id: string, status: "good" | "bad", comment?: string, annotationPng?: string): string | null {
   const ratingsFile = join(resultsDir, "ratings.json");
   const ratings = existsSync(ratingsFile) ? JSON.parse(readFileSync(ratingsFile, "utf-8")) : {};
+  const prior = ratings[id];
   const entry: any = { status, comment, ratedAt: new Date().toISOString() };
   let savedAnnotPath: string | null = null;
   if (annotationPng) {
@@ -412,6 +413,11 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
     writeFileSync(annotPath, Buffer.from(b64, "base64"));
     entry.annotation = annotPath;
     savedAnnotPath = annotPath;
+  } else if (prior && prior.annotation && existsSync(prior.annotation)) {
+    // No new drawing this time — PRESERVE the previously saved annotation so
+    // re-rating (e.g. editing the comment and hitting Bad again) never drops it.
+    entry.annotation = prior.annotation;
+    savedAnnotPath = prior.annotation;
   }
   ratings[id] = entry;
   writeFileSync(ratingsFile, JSON.stringify(ratings, null, 2));
@@ -503,6 +509,8 @@ const HTML = `<!DOCTYPE html>
   .slide-pair .panel.diff img { border-color: #f1c40f; background: #111; }
   .slide-pair .panel.slides canvas { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); cursor: crosshair; touch-action: none; border-radius: 4px; }
   .slide-pair .panel.slides canvas.rendered-overlay { pointer-events: none; mix-blend-mode: plus-lighter; cursor: default; }
+  .slide-pair .panel.slides img.prior-annot { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); pointer-events: none; opacity: 0.95; border-radius: 4px; }
+  .slide-pair .panel.slides img.prior-annot.hidden { display: none; }
   .slide-pair .panel.original .diff-overlay { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); border-radius: 4px; pointer-events: none; }
   .slide-pair .panel.original canvas.diff-overlay { background: transparent; }
   /* Blink-comparator: tabs stack the two panels and flick between them in
@@ -613,6 +621,7 @@ const HTML = `<!DOCTYPE html>
   <button id="toolRect" onclick="setTool('rect')" title="Drag to draw a rectangle">&#9645; Rect</button>
   <input type="color" id="drawColor" value="#e94560">
   <label><input type="range" id="drawSize" min="2" max="20" value="6"> px</label>
+  <label style="display:flex; gap:6px; align-items:center; cursor:pointer;" title="Overlay your prior-round annotation marks on the current render"><input type="checkbox" id="priorMarksToggle" checked onchange="applyPriorMarks()"> Prior marks</label>
   <button onclick="clearDraw()">Clear</button>
   <span style="width: 24px;"></span>
   <label style="display:flex; gap:6px; align-items:center; cursor:pointer;" title="Hover over either image to magnify the region under the cursor"><input type="checkbox" id="loupeToggle" onchange="toggleLoupe()"> Magnifier</label>
@@ -733,11 +742,18 @@ function render() {
   const renderedOverlayHtml = (c.renderedRegions && c.renderedRegions.length)
     ? '<canvas class="rendered-overlay" id="renderedOverlay"></canvas>'
     : '';
+  // Reconstruct the prior-round annotation on the CURRENT render: overlay the
+  // saved marks (same 16:9 bounds) on the Slides panel, toggleable via "Prior
+  // marks". pointer-events:none so it never blocks drawing new ones on top.
+  const priorAnnotHtml = c.origAnnotationPng
+    ? '<img class="prior-annot" id="priorAnnot" src="/img?path=' + encodeURIComponent(c.origAnnotationPng) + '">'
+    : '';
   const pairHtml =
     '<div class="panel original"><img id="originalImg" src="/img?path=' + encodeURIComponent(c.originalPng) + '">' + diffOverlay + '</div>' +
-    '<div class="panel slides"><img id="slidesImg" src="/img?path=' + encodeURIComponent(c.slidesPng) + '">' + renderedOverlayHtml + '<canvas id="drawCanvas"></canvas></div>';
+    '<div class="panel slides"><img id="slidesImg" src="/img?path=' + encodeURIComponent(c.slidesPng) + '">' + renderedOverlayHtml + priorAnnotHtml + '<canvas id="drawCanvas"></canvas></div>';
   document.getElementById('pair').innerHTML = pairHtml;
   setupDrawCanvas(c.annotationPng);
+  applyPriorMarks(); // honor the "Prior marks" toggle on the freshly-built panel
   applyFlip(); // re-apply blink-comparator state to the freshly-rebuilt panels
   if (showDiff) computeClientSideDiff();
   paintRenderedOverlay(c);
@@ -934,6 +950,13 @@ function setTool(t) {
   drawTool = t;
   document.getElementById('toolPen').classList.toggle('active', t === 'pen');
   document.getElementById('toolRect').classList.toggle('active', t === 'rect');
+}
+// Show/hide the prior-round annotation overlay on the current render per the
+// "Prior marks" checkbox. Called after every slide re-render too.
+function applyPriorMarks() {
+  const el = document.getElementById('priorAnnot');
+  const cb = document.getElementById('priorMarksToggle');
+  if (el && cb) el.classList.toggle('hidden', !cb.checked);
 }
 
 // --- Blink-comparator flip ---
