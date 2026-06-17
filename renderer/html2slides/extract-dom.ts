@@ -2421,8 +2421,42 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       effectiveAlign = "center";
     }
 
+    // "Pill-card" shape (slide_31 `.step`): a block container whose ONLY
+    // direct/inline text comes from an inline-block pill chip (`.chip`), while
+    // the real content lives in block children (<h3>, <p>) that each carry
+    // their own font-size/weight and margins. getDirectText() returns just the
+    // chip text, so without this guard the element takes the leaf merge path
+    // below and `getTextRuns` flattens chip+h3+p into ONE box: the chip
+    // duplicates (re-drawn by emitMergedChips), the <h3> loses its bold/large
+    // style (block text runs are pushed style:null at ~1147), and the inter-
+    // block margins collapse to a bare "\n" (~1242). Detect the shape — a
+    // promotable pill chip child (own bg + radius >= 4, the same set
+    // emitMergedChips promotes) alongside a block child with real text — and
+    // fall through to normal child recursion so each block becomes its own
+    // styled, margin-positioned text element and the chip is walked as a
+    // native pill (single drawer). The card's own bg rect was already emitted
+    // by emitRect above.
+    const _pillCardKids = Array.from((el as HTMLElement).children);
+    const _hasPillChipChild = _pillCardKids.some(c => {
+      const ccs = getComputedStyle(c);
+      if (ccs.display !== "inline-block") return false;
+      if (ccs.position === "absolute" || ccs.position === "fixed") return false;
+      const cbg = rgb2hex(ccs.backgroundColor);
+      const cbr = parseFloat(ccs.borderTopLeftRadius) || 0;
+      return !!cbg && cbr >= 4;
+    });
+    const _hasBlockTextChild = _pillCardKids.some(c => {
+      const ctag = (c.tagName || "").toUpperCase();
+      if (INLINE_TAGS.includes(ctag)) return false;
+      const ccs = getComputedStyle(c);
+      if (ccs.position === "absolute" || ccs.position === "fixed") return false;
+      if (ccs.display === "none") return false;
+      return !!(c.textContent && c.textContent.trim());
+    });
+    const isPillCard = _hasPillChipChild && _hasBlockTextChild;
+
     // Text content
-    if (directText && directText.trim()) {
+    if (directText && directText.trim() && !isPillCard) {
       seen.add(el);
       const padLeft = parseFloat(cs.paddingLeft) || 0;
       const padRight = parseFloat(cs.paddingRight) || 0;
