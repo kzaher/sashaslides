@@ -1265,7 +1265,10 @@ const server = createServer((req, res) => {
   const url = new URL(req.url || "/", `http://localhost:${port}`);
 
   if (url.pathname === "/" || url.pathname === "/index.html") {
-    res.writeHead(200, { "Content-Type": "text/html" });
+    // no-store: the whole client (inline JS) lives in this HTML; without it a
+    // browser caches stale JS and a code change (e.g. draw-mode default) never
+    // shows up on refresh.
+    res.writeHead(200, { "Content-Type": "text/html", "Cache-Control": "no-store, must-revalidate" });
     res.end(HTML);
     return;
   }
