@@ -73,6 +73,13 @@ interface SlideComparison {
   analysis?: string;
   htmlFile?: string;
   slidesUrl?: string;
+  // Round-1 provenance, populated from sxs-meta.json (written by the
+  // bug_solving harness). These are what the USER originally saw/typed when
+  // they rated the slide bad, surfaced per-card so a reviewer can always reach
+  // the source HTML, the live presentation, the annotation they drew, and the
+  // comment they wrote. All optional → older runs degrade gracefully.
+  origComment?: string;        // the original user comment from round-1 rating
+  origAnnotationPng?: string;  // absolute path (served via /img) to the round-1 annotation PNG
   diffPng?: string;        // /tmp/.../diffs/diff_slide_NN.png (pixelmatch output)
   diffStatus?: string;     // "ok" | "regressed" | "new" | "missing-current"
   diffPixels?: number;
@@ -274,6 +281,47 @@ function findComparisons(): SlideComparison[] {
         const slideFrag = sid ? `#slide=id.${sid}` : "";
         c.slidesUrl = `https://docs.google.com/presentation/d/${meta.presentationId}/edit${slideFrag}`;
       }
+    }
+  }
+
+  // Merge sxs-meta.json sidecar (written by the bug_solving harness, main.ts
+  // step 7). It carries the round-1 provenance for each slide so the SxS card
+  // can show: source HTML, live presentation URL, the original annotation the
+  // user drew, and the original comment they typed. Paths inside the sidecar
+  // are relative to resultsDir (the harness COPIES the html + annotation into
+  // resultsDir/source/ and resultsDir/orig-annotations/ so the existing static
+  // routes — /html relative-to-resultsDir, /img by absolute path — can serve
+  // them without exposing arbitrary absolute paths). Best-effort: a malformed
+  // or absent sidecar leaves every field undefined (older runs degrade fine).
+  const sxsMetaFile = join(resultsDir, "sxs-meta.json");
+  if (existsSync(sxsMetaFile)) {
+    try {
+      const sxsMeta = JSON.parse(readFileSync(sxsMetaFile, "utf-8")) as Record<string, {
+        html_file?: string;
+        presentation_url?: string;
+        original_comment?: string;
+        original_annotation?: string;
+        original_png?: string;
+      }>;
+      for (const c of comparisons) {
+        const m = sxsMeta[c.id];
+        if (!m) continue;
+        // html_file is stored relative to resultsDir (e.g. "source/slide_11.html").
+        if (m.html_file) {
+          const abs = resolve(resultsDir, m.html_file);
+          if (existsSync(abs)) c.htmlFile = abs;
+        }
+        if (m.presentation_url) c.slidesUrl = m.presentation_url;
+        if (m.original_comment) c.origComment = m.original_comment;
+        // original_annotation is stored relative to resultsDir
+        // (e.g. "orig-annotations/slide_11.png"); /img serves it by absolute path.
+        if (m.original_annotation) {
+          const abs = resolve(resultsDir, m.original_annotation);
+          if (existsSync(abs)) c.origAnnotationPng = abs;
+        }
+      }
+    } catch (e) {
+      console.error("sxs-meta.json present but unreadable:", (e as Error).message);
     }
   }
 
@@ -486,6 +534,16 @@ const HTML = `<!DOCTYPE html>
   .zoom-crop figure { margin: 0; }
   .zoom-crop figcaption { color: #7dafd5; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; text-align: center; }
   .zoom-crop img { display: block; max-width: 320px; max-height: 360px; image-rendering: pixelated; border: 1px solid #1f2933; }
+  .orig-meta { margin: 8px 24px; padding: 10px 14px; background: #1f2a3a; border-left: 4px solid #7dafd5; border-radius: 0 6px 6px 0; }
+  .orig-meta .om-title { font-size: 11px; color: #7dafd5; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .orig-meta .om-links { margin-bottom: 8px; font-size: 13px; }
+  .orig-meta .om-links a { color: #4a90d9; text-decoration: none; margin-right: 16px; }
+  .orig-meta .om-links a:hover { text-decoration: underline; }
+  .orig-meta .om-body { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  .orig-meta .om-annotation img { display: block; max-width: 360px; max-height: 280px; border: 1px solid #2f3b4d; border-radius: 4px; background: #050a0e; }
+  .orig-meta .om-annotation figcaption, .orig-meta .om-comment .om-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .orig-meta .om-comment { flex: 1; min-width: 200px; font-size: 13px; color: #ddd; white-space: pre-wrap; word-break: break-word; }
+  .orig-meta figure { margin: 0; }
 </style>
 </head>
 <body>
@@ -528,6 +586,11 @@ const HTML = `<!DOCTYPE html>
 <div id="loupe" style="display:none; position:fixed; pointer-events:none; border:2px solid #e94560; border-radius:50%; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 4px 16px rgba(0,0,0,.5); z-index:2000; background-repeat:no-repeat;"></div>
 <div class="slide-id" id="slideId"></div>
 <div class="slide-links" id="slideLinks"></div>
+<!-- Round-1 provenance panel: original source HTML link, live presentation
+     link, the original annotation the user drew, and the original comment they
+     typed. Populated from sxs-meta.json; hidden entirely when no provenance
+     exists for the current slide (older runs). -->
+<div id="origMeta"></div>
 <div class="comment-box">
   <textarea id="comment" placeholder="What's wrong? (optional — saved with Bad ratings)" rows="2"></textarea>
 </div>
@@ -712,6 +775,32 @@ function render() {
     savedEl.innerHTML = '<div class="saved-comment"><div class="label">Comment</div>' + c.comment.replace(/</g, '&lt;') + '</div>';
   } else {
     savedEl.innerHTML = '';
+  }
+
+  // Round-1 provenance panel: original source HTML, live presentation, the
+  // annotation the user drew, and the comment they typed when they rated the
+  // slide bad. Each piece is rendered only if present, and the whole panel is
+  // hidden when none exist (older runs without sxs-meta.json).
+  const omEl = document.getElementById('origMeta');
+  if (omEl) {
+    const parts = [];
+    const links = [];
+    if (c.htmlFile) links.push('<a href="/html?path=' + encodeURIComponent(c.htmlFile) + '" target="_blank">Original source HTML ↗</a>');
+    if (c.slidesUrl) links.push('<a href="' + c.slidesUrl + '" target="_blank">Open rendered presentation in Slides ↗</a>');
+    if (links.length) parts.push('<div class="om-links">' + links.join('') + '</div>');
+    const body = [];
+    if (c.origAnnotationPng) {
+      body.push('<div class="om-annotation"><figure><figcaption>Original annotation</figcaption><img src="/img?path=' + encodeURIComponent(c.origAnnotationPng) + '"></figure></div>');
+    }
+    if (c.origComment) {
+      body.push('<div class="om-comment"><div class="om-label">Original comment</div>' + c.origComment.replace(/</g, '&lt;') + '</div>');
+    }
+    if (body.length) parts.push('<div class="om-body">' + body.join('') + '</div>');
+    if (parts.length) {
+      omEl.innerHTML = '<div class="orig-meta"><div class="om-title">Round-1 provenance</div>' + parts.join('') + '</div>';
+    } else {
+      omEl.innerHTML = '';
+    }
   }
 
   // Per-annotation zoom-crops: original (target) vs test (Slides) for each

@@ -105,12 +105,18 @@ export async function extractFromHtml(
   // render as tofu boxes. For text elements whose content is primarily emoji
   // codepoints, rasterize the element region from Chrome and emit as an image.
   const isEmojiCodepoint = (cp: number): boolean => {
-    if (cp >= 0x2600 && cp <= 0x27BF) return true;       // Misc symbols & dingbats
+    // Glyphs that render fine in Slides' standard text fonts must stay TEXT
+    // (selectable/editable) — never rasterise them. User feedback (slide_07
+    // ✓ check icon, slide_13 ▼ conversion-chip arrows): "can't we use fonts
+    // in output?" / "text should never be rendered". These BMP symbol glyphs
+    // are NOT pictographic emoji and have reliable monochrome font coverage.
+    if (cp >= 0x25A0 && cp <= 0x25FF) return false;      // geometric ▲ ▼ ■ ● ○ (text-renderable)
+    if (cp >= 0x2713 && cp <= 0x2718) return false;      // check / cross marks ✓ ✔ ✗ ✘
+    if (cp >= 0x2600 && cp <= 0x27BF) return true;       // Misc symbols & dingbats (pictographs)
     if (cp === 0x200D || cp === 0xFE0F) return true;     // ZWJ / variation selector
     if (cp >= 0x1F1E6 && cp <= 0x1F1FF) return true;     // Regional indicators (flags)
     if (cp >= 0x1F300 && cp <= 0x1FAFF) return true;     // Main emoji blocks
     if (cp >= 0x2300 && cp <= 0x23FF) return true;       // misc technical (⚙ etc.)
-    if (cp >= 0x25A0 && cp <= 0x25FF) return true;       // geometric (▲ ■ etc.)
     return false;
   };
   const looksLikeEmojiText = (s: string): boolean => {

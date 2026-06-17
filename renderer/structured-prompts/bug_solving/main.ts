@@ -78,6 +78,70 @@ import {
   describeError,
 } from "../../../structured-prompting/src/index.js";
 import type { Result } from "../../../structured-prompting/src/types.js";
+import { writeFileSync, copyFileSync, mkdirSync, existsSync } from "fs";
+import { join } from "path";
+
+/**
+ * Write the sxs-meta.json sidecar consumed by rating-server.ts so each SxS card
+ * can show the round-1 provenance the user complained was missing: the original
+ * source HTML, the live presentation URL, the original annotation they drew, and
+ * the original comment they typed. The harness COPIES the html fixture + the
+ * annotation PNG into resultsDir (source/ and orig-annotations/) so the rating
+ * server's existing static routes can reach them (it cannot serve arbitrary
+ * absolute /tmp paths via /html). Best-effort and fully non-fatal — a throw here
+ * must NEVER convert an already-PASSED fix into a retry.
+ *
+ * @param resultsDir  the rating-server resultsDir (= <scratch>/thumbnails)
+ * @param slides      per-slide round-1 records (html_file, user_comment, annotation_png)
+ * @param shellStdout stdout of `record-rendering --mode full` (carries the
+ *                    `presentation: https://…/edit` line)
+ */
+function writeSxsMeta(resultsDir: string, slides: SlideTask[], shellStdout: string): void {
+  try {
+    // Parse the presentation URL the upload step printed. record-rendering-lib
+    // logs `    presentation: https://docs.google.com/presentation/d/<id>/edit`.
+    const m = shellStdout.match(/https:\/\/docs\.google\.com\/presentation\/d\/[A-Za-z0-9_-]+\/edit/);
+    const presentationUrl = m ? m[0] : undefined;
+
+    const sourceDir = join(resultsDir, "source");
+    const annotDir = join(resultsDir, "orig-annotations");
+    mkdirSync(resultsDir, { recursive: true });
+    mkdirSync(sourceDir, { recursive: true });
+    mkdirSync(annotDir, { recursive: true });
+
+    const meta: Record<string, {
+      html_file?: string;
+      presentation_url?: string;
+      original_comment?: string;
+      original_annotation?: string;
+      original_png?: string;
+    }> = {};
+
+    for (const s of slides) {
+      const entry: (typeof meta)[string] = {};
+      // Copy the source HTML into resultsDir/source/<id>.html (served via /html,
+      // which resolves relative to resultsDir).
+      if (s.html_file && existsSync(s.html_file)) {
+        const dst = join(sourceDir, `${s.slide_id}.html`);
+        try { copyFileSync(s.html_file, dst); entry.html_file = `source/${s.slide_id}.html`; } catch {}
+      }
+      if (presentationUrl) entry.presentation_url = presentationUrl;
+      if (s.user_comment) entry.original_comment = s.user_comment;
+      // Copy the original annotation PNG (served via /img by absolute path, but
+      // copy into resultsDir so it survives a /tmp wipe of the source).
+      if (s.annotation_png && existsSync(s.annotation_png)) {
+        const dst = join(annotDir, `${s.slide_id}.png`);
+        try { copyFileSync(s.annotation_png, dst); entry.original_annotation = `orig-annotations/${s.slide_id}.png`; } catch {}
+      }
+      if (s.original_png && existsSync(s.original_png)) entry.original_png = s.original_png;
+      meta[s.slide_id] = entry;
+    }
+
+    writeFileSync(join(resultsDir, "sxs-meta.json"), JSON.stringify(meta, null, 2));
+  } catch (e) {
+    console.error(`[writeSxsMeta] non-fatal: ${(e as Error).message}`);
+  }
+}
 
 // ---------- Types ----------
 
@@ -384,7 +448,16 @@ export function main(args: {
           `--slides ${ids} --title "${task.presentation_title}" ` +
           `--out ${task.scratch_dir}/thumbnails || true`
         ),
-        (taskResult, _shellStdout) => taskResult,
+        (taskResult, shellStdout) => {
+          // Best-effort: write the sxs-meta.json provenance sidecar into the
+          // rating-server resultsDir (= <scratch>/thumbnails) so every SxS card
+          // shows the original HTML link, the presentation URL parsed from the
+          // upload stdout, the original annotation, and the original comment.
+          // A throw here must not lose an already-PASSED fix → writeSxsMeta
+          // swallows its own errors.
+          writeSxsMeta(`${task.scratch_dir}/thumbnails`, task.slides, shellStdout);
+          return taskResult;
+        },
       );
   };
 

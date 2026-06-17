@@ -58,6 +58,27 @@ function showSidebar() {
 }
 
 /**
+ * Returns the consent URL + current status so the sidebar can offer a
+ * "Re-authorize" button. Apps Script does NOT re-prompt automatically once the
+ * scopes are granted (the v2->v3 Drive switch added no new scope), so a manual
+ * re-grant is the only way to refresh a stale/partial Drive authorization that
+ * causes PERMISSION_DENIED.
+ * @return {{status:string, url:string}}
+ */
+function getAuthInfo() {
+  var info = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL);
+  return { status: String(info.getAuthorizationStatus()), url: info.getAuthorizationUrl() };
+}
+
+/** Touch Drive with the user's auth so a missing/!granted drive scope throws
+ * the standard authorization prompt instead of a generic storage error. Used
+ * by the sidebar's "Test permissions" button. */
+function testDriveAccess() {
+  var about = Drive.About.get({ fields: 'user' }); // requires the drive scope
+  return { ok: true, user: about && about.user ? about.user.emailAddress : '(unknown)' };
+}
+
+/**
  * @param {string} base64  the .pptx bytes, base64-encoded
  * @param {string} title   display name for the temp converted file
  * @return {{inserted:number, at:number, title:string}}
@@ -72,15 +93,27 @@ function insertPptxAfterCurrent(base64, title) {
 
   var tempId = null;
   try {
-    // 1. Upload + convert pptx -> a temporary Google Slides file.
-    var converted = Drive.Files.insert(
-      { title: title, mimeType: MimeType.GOOGLE_SLIDES },
-      blob,
-      { convert: true }
+    // 1. Upload + convert pptx -> a temporary Google Slides file. Drive v3:
+    //    uploading a blob whose target resource mimeType is a Google type
+    //    converts it (the modern equivalent of the v2 convert:true flag, which
+    //    Google has sunset — its failure surfaces as PERMISSION_DENIED /
+    //    "server error occurred while reading from storage").
+    var converted = Drive.Files.create(
+      { name: title, mimeType: MimeType.GOOGLE_SLIDES },
+      blob
     );
     tempId = converted.id;
 
-    var src = SlidesApp.openById(tempId);
+    // A just-converted file can briefly 404 / PERMISSION_DENIED before its
+    // storage settles; retry openById a few times with a short backoff.
+    var src = null;
+    for (var attempt = 0; attempt < 5; attempt++) {
+      try { src = SlidesApp.openById(tempId); break; }
+      catch (openErr) {
+        if (attempt === 4) throw openErr;
+        Utilities.sleep(600);
+      }
+    }
     var srcSlides = src.getSlides();
     if (!srcSlides.length) throw new Error('converted deck had no slides');
 
@@ -117,7 +150,8 @@ function insertPptxAfterCurrent(base64, title) {
 // ---------------------------------------------------------------------------
 // Apps Script manifest. Full presentations + drive scopes are needed because
 // we openById() a *separate* converted file and write into the active deck;
-// the Advanced Drive Service (v2) provides the pptx->Slides `convert`.
+// the Advanced Drive Service (v3) provides the pptx->Slides conversion (upload
+// a blob with a Google target mimeType). v2's convert flag has been sunset.
 // ---------------------------------------------------------------------------
 const APPSSCRIPT_JSON = JSON.stringify({
   timeZone: "Etc/UTC",
@@ -130,7 +164,7 @@ const APPSSCRIPT_JSON = JSON.stringify({
   ],
   dependencies: {
     enabledAdvancedServices: [
-      { userSymbol: "Drive", serviceId: "drive", version: "v2" },
+      { userSymbol: "Drive", serviceId: "drive", version: "v3" },
     ],
   },
 }, null, 2);
@@ -177,8 +211,14 @@ async function main() {
   console.log(`addon bundle → ${mainJs.length.toLocaleString()} bytes JS`);
 
   // 3. Vendor bundles (attach window.JSZip / window.PptxGenJS).
-  const pptxBundle = readText(join(ROOT, "node_modules/pptxgenjs/dist/pptxgen.bundle.js"));
-  const jszipBundle = readText(join(ROOT, "node_modules/jszip/dist/jszip.min.js"));
+  //    UNLIKE the standalone page (build.ts), the add-on does NOT inline these:
+  //    Apps Script's HtmlService sanitises/relays the sidebar HTML and corrupts
+  //    a ~560 KB inlined minified blob (observed: "Uncaught SyntaxError: Invalid
+  //    or unexpected token" → `PptxGenJS is not defined`). The sidebar is always
+  //    online, so we load the vendors from a pinned CDN via <script src> (allowed
+  //    in IFRAME sandbox mode) and inline only our own ~240 KB bundle.
+  const JSZIP_CDN = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";
+  const PPTX_CDN = "https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js";
 
   // 4. Sidebar HTML. Same dropzone UI as the standalone page, sized for the
   //    narrow Slides sidebar. google.script.run is injected by HtmlService.
@@ -210,19 +250,40 @@ async function main() {
   #progress-bar { height: 100%; background: #2563eb; width: 0%; transition: width .15s; }
   #progress-label { font: 11px/1 ui-monospace, monospace; color: #666; min-height: 13px; }
   #log { font: 11px/1.45 ui-monospace, monospace; background: #0b1020; color: #cbd5e1;
-         padding: 8px; border-radius: 6px; height: 180px; overflow: auto; margin-top: 8px; }
+         padding: 8px; border-radius: 6px; height: 160px; overflow: auto; margin-top: 8px; }
   #log .warn { color: #fbbf24; }
   #log .error { color: #f87171; }
+  #paste-box { width: 100%; min-height: 44px; resize: vertical; margin: 8px 0 0;
+               font: 11px/1.4 ui-monospace, monospace; color: #111;
+               border: 1px solid #ccc; border-radius: 6px; padding: 6px 8px; }
+  #paste-box:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
+  body.dragging { outline: 3px dashed #3b82f6; outline-offset: -6px; }
+  body.dragging #dropzone { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
+  #trouble { margin: 8px 0 0; font-size: 12px; color: #666; }
+  #trouble summary { cursor: pointer; }
+  #notice { margin: 8px 0 0; }
+  #notice .box { padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.4; }
+  #notice .warn { background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; }
+  #notice .ok { background: #dcfce7; border: 1px solid #86efac; color: #166534; }
+  #notice a { color: #1d4ed8; font-weight: 600; }
 </style>
 </head>
-<body>
-<p class="sub">Paste HTML (Ctrl+V) or drop/pick .html files. They're converted locally and inserted right after the current slide.</p>
+<body tabindex="0">
+<p class="sub">Upload, drop, or paste slide HTML. It's converted locally and inserted right after the current slide.</p>
 
 <div id="dropzone">
-  <strong>Drop .html here</strong>, click to pick,<br>or paste HTML (Ctrl+V).<br>
+  <strong>Drop .html files anywhere in this panel</strong><br>
   <span id="file-count">0</span> file(s) queued.
 </div>
 <input type="file" id="picker" accept=".html,.htm" multiple>
+
+<div class="row">
+  <button id="upload-btn">📂 Upload files…</button>
+  <button id="paste-btn">📋 Paste from clipboard</button>
+</div>
+
+<textarea id="paste-box" placeholder="…or click here and press ⌘V / Ctrl+V to paste slide HTML"></textarea>
+
 <ul id="file-list"></ul>
 
 <div class="row">
@@ -230,16 +291,21 @@ async function main() {
   <button id="clear-btn">Clear</button>
 </div>
 
+<div id="notice"></div>
+<details id="trouble">
+  <summary>Insert failing? (permissions)</summary>
+  <div class="row">
+    <button id="reauth-btn">🔐 Re-authorize</button>
+    <button id="testperm-btn">🔎 Test permissions</button>
+  </div>
+</details>
+
 <div id="progress-wrap"><div id="progress-bar"></div></div>
 <div id="progress-label"></div>
 <div id="log"></div>
 
-<script>
-${jszipBundle}
-</script>
-<script>
-${pptxBundle}
-</script>
+<script src="${JSZIP_CDN}"></script>
+<script src="${PPTX_CDN}"></script>
 <script>
 ${mainJs}
 </script>
