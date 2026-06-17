@@ -914,7 +914,9 @@ async function rate(status) {
 }
 
 // --- Draw overlay on Slides render ---
-let drawMode = false;
+let drawMode = true;   // DEFAULT ON: the annotation canvas is live on load (pen
+                       // ready) so reviewers can draw immediately. Toggle "Draw"
+                       // off to interact with the slide / magnifier instead.
 let drawTool = 'pen'; // 'pen' (freehand) | 'rect' (drag rectangle)
 function setTool(t) {
   drawTool = t;
