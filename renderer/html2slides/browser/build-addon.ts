@@ -42,8 +42,12 @@ const CODE_GS = `/**
  */
 
 function onOpen(e) {
+  // createMenu() (not createAddonMenu()) — a plain top-level menubar menu that
+  // shows reliably for a container-BOUND script. createAddonMenu() is for
+  // PUBLISHED Editor Add-ons and is flaky/hidden for an unpublished bound
+  // script, which is why the "html2slides" menu was missing.
   SlidesApp.getUi()
-    .createAddonMenu()
+    .createMenu('html2slides')
     .addItem('Open html2slides', 'showSidebar')
     .addToUi();
 }

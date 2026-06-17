@@ -1,0 +1,98 @@
+// Codepit project configuration for the codepit repo itself.
+// Loaded by the VS Code extension on every "Codepit: New Sandbox".
+//
+// Format: JSONC — JSON with comments and trailing commas. Same parser
+// VS Code uses for settings.json.
+{
+  // Commands to run in every new sandbox terminal once the workspace
+  // copy is ready. Sent line-by-line as if you typed them and pressed
+  // Enter. Comment any out you don't want.
+  "startCommands": [
+    // "npm install",
+    // "npm run build",
+    // "npm test"
+  ],
+
+  // Subdirectory under the sandbox drive root where the host workspace
+  // is copied. Default: the workspace folder's basename (here: "codepit"
+  // → D:\codepit). Only override if you want a different layout.
+  // "workspaceSubdir": "codepit",
+
+  // Extra directory names to exclude from the workspace copy. Added on
+  // top of the built-in defaults (which always apply):
+  //   node_modules, .git, dist, bin, obj, Library, Temp, .codepit
+  "excludeFromCopy": [
+    "scratchpad",
+    ".vs",
+    ".vscode-server"
+  ],
+
+  // Operator-home-relative files/directories copied into the sandbox
+  // user's home directory after creation. These are explicit: Codepit
+  // does not infer tool settings paths.
+  "copyToSandboxHome": [
+    ".claude.json",
+    ".claude/settings.json",
+    ".claude/skills",
+    ".claude/hooks",
+    ".claude/.credentials.json",
+    ".claude/mcp-needs-auth-cache.json",
+    ".cache/claude-cli-nodejs",
+    ".agents",
+    ".codex/config.toml",
+    ".codex/hooks.json",
+    ".codex/auth.json"
+  ],
+
+  // NOTE: Linux/devcontainer config. Codepit selects the Docker sandbox on
+  // non-Windows hosts (process.platform !== "win32"), so the Windows-only
+  // sandboxUserGroups / ensureReadExecutePaths (hyperv local-group ACLs) are
+  // omitted here. claude + codex are installed globally in the dev container
+  // image (see .devcontainer/claude-code/Dockerfile) at npm-global/bin.
+  "templates": [
+    {
+      "name": "claude",
+      "botType": "claude",
+      "launch": {
+        "executable": "/usr/local/share/npm-global/bin/claude",
+        "args": ["--dangerously-skip-permissions"]
+      }
+    },
+    {
+      "name": "codex",
+      "botType": "codex",
+      "launch": {
+        "executable": "/usr/local/share/npm-global/bin/codex",
+        "args": [
+          "--dangerously-bypass-approvals-and-sandbox",
+          "--dangerously-bypass-hook-trust"
+        ]
+      }
+    }
+  ],
+
+  // Port the local Codepit debug server binds to (127.0.0.1 only).
+  // Required — without this set, the debug server doesn't start.
+  // Pick a unique port per workspace so two windows can't collide.
+  "debugServerPort": 9110,
+
+  "bridgeHost": "172.17.0.4",
+  "bridgePort": 9100,
+
+  // Workspace-relative path to a plain-text instruction file. Its
+  // contents are sent into every bot terminal AFTER the template
+  // launch starts. Edit the file to customize project-wide rules.
+  // Omit or set to "" to fall back to the extension's built-in default.
+  "commonInstructionPath": ".codepit/common-instruction.md",
+  "messageTemplates": [
+    {
+      "name": "Compare",
+      "messages": [
+        "Look at each other solutions, be inspired by each other and construct the best solution. Write a table with pros and cons for each solution. Find strengths and ideas in other solution and improve yours.",
+        "${bot_response.map(response => `Bot:${response.sandbox} said <response>${response.text}</response>\n    `)}\n\nFind inspiration in criticism, improve if you think the criticism is valid, again consider taking the best parts from other bots.\n",
+        "Perform final analysis which solution is better, present it in a table and give recommendation which to launch and why.\n",
+        "${bot_response.map(response => `Bot:${response.sandbox} said <response>${response.text}</response>\n    `)}\n\nGive launch recommendation."
+      ]
+    }
+  ]
+}
