@@ -572,7 +572,12 @@ const HTML = `<!DOCTYPE html>
   .orig-meta .om-links a { color: #4a90d9; text-decoration: none; margin-right: 16px; }
   .orig-meta .om-links a:hover { text-decoration: underline; }
   .orig-meta .om-body { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
-  .orig-meta .om-annotation img { display: block; max-width: 360px; max-height: 280px; border: 1px solid #2f3b4d; border-radius: 4px; background: #050a0e; }
+  /* Composite the annotation overlay ON TOP of the original slide so the drawn
+     marks read against the slide content, not a black field. */
+  .orig-meta .om-annotation .om-annot-stack { position: relative; display: inline-block; max-width: 360px; border: 1px solid #2f3b4d; border-radius: 4px; overflow: hidden; background: #050a0e; }
+  .orig-meta .om-annotation .om-annot-base { display: block; width: 100%; height: auto; }
+  .orig-meta .om-annotation .om-annot-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .orig-meta .om-annotation img.om-annot-solo { display: block; max-width: 360px; max-height: 280px; border: 1px solid #2f3b4d; border-radius: 4px; background: #050a0e; }
   .orig-meta .om-annotation figcaption, .orig-meta .om-comment .om-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
   .orig-meta .om-comment { flex: 1; min-width: 200px; font-size: 13px; color: #ddd; white-space: pre-wrap; word-break: break-word; }
   .orig-meta figure { margin: 0; }
@@ -822,7 +827,14 @@ function render() {
     if (links.length) parts.push('<div class="om-links">' + links.join('') + '</div>');
     const body = [];
     if (c.origAnnotationPng) {
-      body.push('<div class="om-annotation"><figure><figcaption>Original annotation</figcaption><img src="/img?path=' + encodeURIComponent(c.origAnnotationPng) + '"></figure></div>');
+      // Composite the overlay onto the original slide (same 16:9 bounds) so the
+      // drawn marks sit on the slide, not a black field. Fall back to the bare
+      // overlay if there's no original image to stack under it.
+      const annotImg = '/img?path=' + encodeURIComponent(c.origAnnotationPng);
+      const inner = c.originalPng
+        ? '<div class="om-annot-stack"><img class="om-annot-base" src="/img?path=' + encodeURIComponent(c.originalPng) + '"><img class="om-annot-overlay" src="' + annotImg + '"></div>'
+        : '<img class="om-annot-solo" src="' + annotImg + '">';
+      body.push('<div class="om-annotation"><figure><figcaption>Original annotation (your marks on the target)</figcaption>' + inner + '</figure></div>');
     }
     if (c.origComment) {
       body.push('<div class="om-comment"><div class="om-label">Original comment</div>' + c.origComment.replace(/</g, '&lt;') + '</div>');
