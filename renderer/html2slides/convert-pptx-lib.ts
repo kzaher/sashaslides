@@ -377,7 +377,18 @@ function emitStyledText(
   const rot = typeof el.rotate === "number" ? el.rotate : 0;
   let rotateDeg = 0;
   let bx = bounds.x, by = bounds.y, bw = bounds.w, bh = bounds.h;
-  if (Math.abs(rot) > 0.5 && el.naturalWidth && el.naturalHeight) {
+  // CSS writing-mode: vertical-* — emit a pptxgenjs `vert` body rotation rather
+  // than a box rotation. The element's bounds box is already the narrow/tall
+  // CSS column, so keep it axis-aligned and let `vert` flow text down it.
+  // `vertical-rl` (default text-orientation) → glyphs rotated 90°CW reading
+  // top→bottom = OOXML "vert"; an accompanying ~180° transform flips reading
+  // direction to bottom→top = "vert270" (slide_32 .axis: vertical-rl + rotate180).
+  const isVertical = typeof s.writingMode === "string" && s.writingMode.startsWith("vertical");
+  let vertOpt: "vert" | "vert270" | undefined;
+  if (isVertical) {
+    const r = ((rot % 360) + 360) % 360;
+    vertOpt = Math.abs(r - 180) < 30 ? "vert270" : "vert";
+  } else if (Math.abs(rot) > 0.5 && el.naturalWidth && el.naturalHeight) {
     // Symmetric slack on the natural box so the last glyph survives Slides'
     // wider measurement after rotation.
     const natW = el.naturalWidth + SLACK_PX;
@@ -462,13 +473,65 @@ function emitStyledText(
   const padTopPt = (valign === "top" && typeof s.paddingTop === "number" && s.paddingTop > 0)
     ? s.paddingTop * PX2PT
     : 0;
+  // Line-box vertical correction (systematic). Google Slides ALWAYS lays out
+  // text on a `line-height: normal` line box (≈ 1.197 × font), regardless of
+  // the spcPct we emit. When the source CSS line-height is TIGHTER than that
+  // (ratio < 1.197 — e.g. big headline/amount/quote-mark at `line-height: 1`),
+  // Slides anchors the top of its TALLER first line-box to the textbox top, so
+  // the glyphs ride up by ≈ ((1.197 − cssRatio) / 2) × font versus Chrome
+  // (~5px@48, 7px@72, 16px@160 — the proportional pattern the user reported on
+  // slide_17 `$15M`, slide_06 quote-mark). Push the glyphs back down by folding
+  // that half-gap into the textbox top inset (tIns). GATED to cssRatio < 1.197
+  // so normal paragraphs / lists / code blocks (line-height 1.2–1.7) are a
+  // strict no-op — they already match Chrome via the spcPct path and must NOT
+  // move (slide_04/08/24/30 bodies, slide_06 quote-text @1.6).
+  const SLIDES_NORMAL_LH = 1.197;
+  const fontPx = s.fontSize || defaults.fontSize;
+  const cssLHRatio = (s.lineHeight && s.fontSize) ? s.lineHeight / s.fontSize : 1.2;
+  const lineBoxFixPt =
+    valign === "top" && fontPx > 0 && cssLHRatio < SLIDES_NORMAL_LH
+      ? ((SLIDES_NORMAL_LH - cssLHRatio) / 2) * fontPx * PX2PT
+      : 0;
+  // Companion fix for vertically-centered, descender-less numerics (the "3"
+  // badge slide_22, "100%/50%/25%" badges slide_28). With anchor="ctr" Slides
+  // centers the LINE BOX, and the pinned spcPct 1.2 (below) makes that box
+  // taller than the glyph; a digit/percent has no descender so it sits visually
+  // above the geometric center ("top vs middle" in the user's words). Nudge the
+  // text down by folding a top inset — for anchor="ctr" the centering region
+  // shifts by tIns/2, so we double the target shift. Gated to numeric-only text
+  // (digits, %, $, ., ,, +, −) so lettered initials (EW/SV/GC/NX) and word
+  // labels stay put.
+  const isNumericCentered =
+    valign === "middle" &&
+    typeof el.text === "string" &&
+    el.text.trim().length > 0 &&
+    /^[\d%$.,+−–\-\s]+$/.test(el.text);
+  const centerDigitInsetPt =
+    isNumericCentered && fontPx > 0 ? 2 * (0.12 * fontPx) * PX2PT : 0;
+  // First-line leading compensation for the MEASURED-pitch (absolute spcPts)
+  // path. When extract-dom flagged `lineHeightMeasured` (inline children inflate
+  // the line boxes — slide_25 `.text-block` @ line-height 2.2 with .code/.big/
+  // .highlight chips), the block is emitted with absolute `<a:spcPts>` line
+  // spacing. Google Slides anchors the FIRST line's ascent at the textbox top
+  // WITHOUT the half-leading Chrome renders above it (`(lineHeight − font)/2`),
+  // so the whole paragraph rides up — the user's "the start of the text is moved
+  // up" report on slide_25 (~11px). Push the block down by that half-leading,
+  // folded into the top inset. GATED to `lineHeightMeasured` so plain spcPct
+  // paragraphs/lists (slide_04/08/24 bodies, slide_06 quote @1.6) are untouched
+  // (those position the first line correctly via the multiplier path).
+  const measuredFirstLineLeadPt =
+    valign === "top" && s.lineHeightMeasured === true &&
+    typeof s.lineHeight === "number" && fontPx > 0 && s.lineHeight > fontPx
+      ? ((s.lineHeight - fontPx) / 2) * PX2PT
+      : 0;
+  const tInsPt = padTopPt + lineBoxFixPt + centerDigitInsetPt + measuredFirstLineLeadPt;
   const commonOpts: TextPropsOptions = {
     x: px2in(bx), y: px2in(by), w: px2in(bw), h: px2in(bh),
     valign,
     align,
     fill: { type: "none" },
     line: { type: "none" },
-    margin: padTopPt > 0 ? [0, 0, 0, padTopPt] : 0,
+    margin: tInsPt > 0 ? [0, 0, 0, tInsPt] : 0,
   };
   // Two independent line-spacing rules combined:
   //
@@ -512,10 +575,8 @@ function emitStyledText(
       commonOpts.lineSpacingMultiple = (s.lineHeight / s.fontSize) / 1.2;
     }
   }
-  if (typeof el.text === "string" && el.text.startsWith("The quick brown")) {
-    console.log("DEBUG textblock opts:", JSON.stringify({ lineSpacing: commonOpts.lineSpacing, lineSpacingMultiple: commonOpts.lineSpacingMultiple, lineHeight: s.lineHeight, fontSize: s.fontSize, valign }));
-  }
   if (rotateDeg) commonOpts.rotate = rotateDeg;
+  if (vertOpt) commonOpts.vert = vertOpt;
 
   if (el.runs && el.runs.length > 0) {
     const textRuns: TextProps[] = el.runs
@@ -702,6 +763,7 @@ function emitClipUnderlay(
   patch: PatchGeometry,
   fill: ShapeProps["fill"],
   groupId: string,
+  patchObjectName?: string,
 ): void {
   const cr = patch.cornerRadii;
   const cp = cornerPresetFromRadii(cr);
@@ -719,7 +781,10 @@ function emitClipUnderlay(
     line: { type: "none" },
     flipH: cp.flipH,
     flipV: cp.flipV,
-    objectName: patchName(groupId),
+    // A gradient host passes its GRAD_<n> name so injectGradientsIntoZip fills
+    // the rounded underlay too (both shapes share the tag); otherwise the patch
+    // gets its own group name for the host/patch grouping post-pass.
+    objectName: patchObjectName || patchName(groupId),
   });
   // Side-rounded mask compensation (matches host path so the patch's
   // squared-off corners line up with the rounded host above).
@@ -786,6 +851,7 @@ export interface ElementStyle {
   readonly lineHeightMeasured?: boolean;
   readonly textAlign?: "left" | "center" | "right" | "end" | "justify" | string;
   readonly textTransform?: "uppercase" | "lowercase" | "none" | string;
+  readonly writingMode?: string | null;
   readonly textDecoration?: "underline" | "line-through" | "none" | string;
   readonly opacity?: number;
   readonly bgColor?: string;
@@ -1420,7 +1486,10 @@ export function buildPptx(
             opts.line = {
               color: hexToRgb(el.borderColor),
               width: Math.min(el.borderWidth * PX2PT, 6),
-              dashType: el.borderStyle === "dashed" ? "dash" : el.borderStyle === "dotted" ? "dot" : "solid",
+              // Thin (≤2px) dashed borders use the finer sysDash cadence;
+              // prstDash="dash" renders 1px hairline dividers as coarse long
+              // dashes that don't match the CSS look (slide_33 .out).
+              dashType: el.borderStyle === "dashed" ? (el.borderWidth <= 2 ? "sysDash" : "dash") : el.borderStyle === "dotted" ? "dot" : "solid",
             };
           }
 
@@ -1467,11 +1536,22 @@ export function buildPptx(
           // by the rounded patch above is invisible). Both shapes are tagged
           // with the same group id; the JSZip post-process groups them so
           // resize/move in Slides keeps them together.
+          // For a GRADIENT host the clip-underlay must NOT overwrite
+          // opts.objectName — that GRAD_<n> tag is what injectGradientsIntoZip
+          // matches on, and clobbering it (the original bug) left the pill with
+          // its transparent fallback fill (slide_32 P0/P1/P2 invisible). Instead
+          // tag the rounded underlay with the SAME GRAD_<n> name so the injector
+          // fills both, and leave the host tag intact. Solid hosts keep the
+          // original host/patch grouping.
           const patch = computeClippedPatch(b, el.clipMask);
           if (patch && opts.fill) {
             const gid = nextGroupId();
-            emitClipUnderlay(slide, patch, opts.fill, gid);
-            opts.objectName = hostName(gid);
+            if (el.gradient && typeof opts.objectName === "string") {
+              emitClipUnderlay(slide, patch, opts.fill, gid, opts.objectName);
+            } else {
+              emitClipUnderlay(slide, patch, opts.fill, gid);
+              opts.objectName = hostName(gid);
+            }
           }
 
           slide.addShape(shapeName, opts);
@@ -1616,7 +1696,10 @@ export function buildPptx(
                   line: {
                     color: hexToRgb(side.color),
                     width: Math.max((isHoriz ? side.h : side.w) * PX2PT, 1),
-                    dashType: side.style === "dashed" ? "dash" : "sysDot",
+                    // Thin (≤2px) dashed → finer sysDash cadence (slide_33
+                    // .out `border-top: 1px dashed`); coarse "dash" only for
+                    // thicker borders.
+                    dashType: side.style === "dashed" ? ((isHoriz ? side.h : side.w) <= 2 ? "sysDash" : "dash") : "sysDot",
                   },
                 });
               } else {
@@ -1697,7 +1780,7 @@ export function buildPptx(
 
         case "line": {
           const isVertical = b.h > b.w * 2;
-          slide.addShape("line", {
+          const lineOpts: ShapeProps = {
             x: px2in(b.x), y: px2in(b.y),
             w: isVertical ? 0 : px2in(b.w),
             h: isVertical ? px2in(b.h) : 0,
@@ -1705,7 +1788,11 @@ export function buildPptx(
               color: hexToRgb(el.color || "#000000"),
               width: Math.max(0.5, isVertical ? b.w * PX2PT : b.h * PX2PT),
             },
-          });
+          };
+          // Decorative dashed strips (e.g. slide_33 `.road::before` centerline)
+          // carry a dashType from extract-dom.
+          if (el.dashType && el.dashType !== "solid") lineOpts.line!.dashType = el.dashType;
+          slide.addShape("line", lineOpts);
           break;
         }
 
@@ -1738,6 +1825,7 @@ export function buildPptx(
           if (items.length === 0) break;
           const listStyle = el.style || {};
           const ordered = !!el.ordered;
+          const noListStyle = (el.listStyleType || "disc") === "none";
           const styled = !!el.anyStyledItem;
 
           if (!styled) {
@@ -1765,15 +1853,15 @@ export function buildPptx(
             // editable list in Slides). The OLD gate `&& !anyPerItemBulletColor`
             // forced the text-prefix path on slide_11 SWOT and slide_30 Key
             // Priorities, breaking word-wrap.
-            const anyPerItemBulletColor = !ordered && items.some((it) => !!it.bulletColor);
-            const useNativeBullet = !anyItemHasStyledRuns;
+            const anyPerItemBulletColor = !noListStyle && !ordered && items.some((it) => !!it.bulletColor);
+            const useNativeBullet = !noListStyle && !anyItemHasStyledRuns;
             const paragraphs = items.map((it: ListItem, ii: number) => {
               const marker = ordered ? `${ii + 1}.  ` : "•  ";
               const markerColor = it.bulletColor || it.color || listStyle.color || "#333333";
               const rs: readonly TextRun[] | null = (it.runs && it.runs.length > 0) ? it.runs.filter((r) => r.text.length > 0) : null;
               if (rs && rs.length > 0 && rs.some((r) => r.style !== null)) {
                 const out: TextProps[] = [];
-                if (!useNativeBullet) {
+                if (!noListStyle && !useNativeBullet) {
                   // Plain marker prefix coloured per-item (falls back to the
                   // item's text colour when there is no per-item bullet).
                   out.push({
@@ -1832,7 +1920,7 @@ export function buildPptx(
                   { text: it.text, options: { ...baseOpts } },
                 ];
               }
-              return [{ text: marker + it.text, options: baseOpts }];
+              return [{ text: noListStyle ? it.text : marker + it.text, options: baseOpts }];
             }).flat();
 
             // Honor CSS line-height when explicitly set. Emit
@@ -1859,13 +1947,26 @@ export function buildPptx(
               : 0;
             const liUseRatio = liRatio >= 1.05 && liRatio <= 3.0 && Math.abs(liRatio - 1.2) > 0.08;
             const liEmittedRatio = liRatio / 1.2;
+            // First-line leading compensation. `paraSpaceAfter` spaces items
+            // BETWEEN each other but never adds the leading Chrome renders ABOVE
+            // the FIRST line: the first <li>'s padding-top + half-leading
+            // ((ratio−1)/2 × font). Google Slides anchors the first paragraph at
+            // the textbox top, so the whole list rides up and packs against the
+            // card header — the user's "positioning of the text is too high"
+            // report on slide_11 (~7px: li padding-top 4px + half-leading 3.5px
+            // @ line-height 1.5). Fold that first-line lead into the textbox top
+            // inset. No-op for tight/zero-padding lists (lead ≤ 1px).
+            const liPadTopPx = (firstIt.padding && firstIt.padding.top) || 0;
+            const liFirstLineLeadPx =
+              liPadTopPx + (liUseRatio && firstIt.fontSize ? ((liRatio - 1) / 2) * firstIt.fontSize : 0);
+            const listTopInsetPt = liFirstLineLeadPx > 1 ? liFirstLineLeadPx * PX2PT : 0;
             slide.addText(paragraphs, {
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
               valign: "top",
               align: "left",
               fill: { type: "none" },
               line: { type: "none" },
-              margin: 0,
+              margin: listTopInsetPt > 0 ? [0, 0, 0, listTopInsetPt] : 0,
               paraSpaceAfter: paraSpaceAfterPt > 0 ? paraSpaceAfterPt : undefined,
               lineSpacingMultiple: liUseRatio ? liEmittedRatio : undefined,
             });
@@ -1973,7 +2074,7 @@ export function buildPptx(
             // bg/border/radius OR a majority of items use border-bottom as
             // row separator. In both cases the container is the visual,
             // rows inside never get markers.
-            const showMarker = !el.isContainerList && !isPillLike;
+            const showMarker = !el.isContainerList && !isPillLike && !noListStyle;
             const marker = ordered ? `${ii + 1}.  ` : "•  ";
 
             if (it.runs && it.runs.length > 0 && it.runs.some((r) => r.style !== null)) {
@@ -2332,7 +2433,7 @@ export function buildPptx(
                 let leftPx = p.left;
                 const cellWidthPx = cell.bounds?.w || 0;
                 const isLeftAligned = cs.textAlign !== "center" && cs.textAlign !== "right";
-                if (ci === 0 && isLeftAligned && cellWidthPx > 200) {
+                if (ci === 0 && isLeftAligned && cellWidthPx > 200 && p.left < 12) {
                   leftPx = Math.max(leftPx, 48);
                 }
                 cellOpts.margin = [px2in(p.top), px2in(p.right), px2in(p.bottom), px2in(leftPx)];

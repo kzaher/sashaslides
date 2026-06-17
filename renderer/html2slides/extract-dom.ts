@@ -166,6 +166,7 @@ interface ElementStyle {
   textDecoration: string | null;
   textTransform: string | null;
   letterSpacing: number;
+  writingMode: string | null;
   // Uniform border (convenience — max of all sides)
   borderColor: string | null;
   borderWidth: number;
@@ -320,6 +321,9 @@ interface ExtractedElement {
   borderUniform?: boolean;
   borderSides?: BorderSides | null;
   boxShadow?: BoxShadow | null;
+  // line
+  color?: string | null;
+  dashType?: string;
   // text
   text?: string;
   runs?: TextRun[];
@@ -368,6 +372,11 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
   // pops on exit. Every elements.push() stamps this mask so downstream emit
   // can decide whether to draw an underlay patch.
   let _currentClipMask: ClipMask | null = null;
+  // Elements emitted during the walk but appended only AFTER it completes, so
+  // they land at the end of the array (highest _domIdx → painted last, and no
+  // shifting of existing shape indices). Used for decorative overlays like the
+  // slide_33 `.road::before` centerline.
+  const _deferredEls: ExtractedElement[] = [];
   const _origPush = elements.push.bind(elements);
   elements.push = (...items: ExtractedElement[]) => {
     for (const it of items) {
@@ -624,6 +633,11 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       textDecoration: cs.textDecorationLine !== "none" ? cs.textDecorationLine : null,
       textTransform: cs.textTransform !== "none" ? cs.textTransform : null,
       letterSpacing: parseFloat(cs.letterSpacing) || 0,
+      // CSS writing-mode: vertical-rl/-lr text must map to a pptxgenjs `vert`
+      // body rotation, not a 180° box rotation (which yields upside-down
+      // horizontal text — slide_32 .axis). Captured here; consumed in
+      // convert-pptx-lib.ts emitStyledText.
+      writingMode: cs.writingMode && cs.writingMode !== "horizontal-tb" ? cs.writingMode : null,
       // Uniform border (convenience: use max width, first color)
       borderColor: bTopColor || bRightColor || bBottomColor || bLeftColor,
       borderWidth: Math.max(bTop, bRight, bBottom, bLeft),
@@ -1123,6 +1137,10 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     const parentIsFlexOrGrid =
       parentCs.display === "flex" || parentCs.display === "inline-flex" ||
       parentCs.display === "grid" || parentCs.display === "inline-grid";
+    const parentColumnGapPx = parentIsFlexOrGrid
+      ? (parseFloat(parentCs.columnGap) || parseFloat(parentCs.gap) || 0)
+      : 0;
+    let inlineFlowChildCount = 0;
     for (const node of el.childNodes) {
       if (node.nodeType === 3) {
         const t = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
@@ -1147,6 +1165,15 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
           if (isBlock && !inListItem && !parentIsFlexOrGrid && runs.length > 0) {
             runs.push({ text: "\n", style: null });
           }
+          const runText = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
+          if (parentColumnGapPx > 2 && inlineFlowChildCount > 0 && runText && !/^\s/.test(runText)) {
+            const gapFontSize = parseFloat(cs.fontSize) || parentStyle.fontSize || 16;
+            runs.push({
+              text: " ".repeat(Math.max(1, Math.round(parentColumnGapPx / gapFontSize))),
+              style: null,
+            });
+          }
+          if (runText) inlineFlowChildCount++;
           // Mirror getDirectText: a margin-left on the inline child
           // introduces a visual gap between sibling spans that otherwise
           // would concatenate (slide_18 "April 2026").
@@ -1192,7 +1219,6 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
             childStyle.textDecoration !== parentStyle.textDecoration ||
             !!childStyle.bgColor ||
             childStyle.verticalAlign !== "baseline";
-          const runText = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
           // Insert a separator space when this inline span starts with a
           // CSS `margin-left` gap and the previous run doesn't already end
           // with whitespace (mirrors getDirectText). Without this, adjacent
@@ -1573,9 +1599,70 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       const bwL = parseFloat(pcs.borderLeftWidth) || 0;
       const borderMax = Math.max(bwT, bwR, bwB, bwL);
       const br = parseFloat(pcs.borderTopLeftRadius) || 0;
-      if (!bg && borderMax === 0 && br === 0) continue;
+      // Pseudo with ONLY a background-IMAGE (gradient strip) — no solid
+      // fill/border/radius — is skipped by the solid-fill path below. Emit it
+      // as a thin line so decorative strips aren't dropped. slide_33
+      // `.road::before` is a repeating white→transparent gradient (a dashed
+      // centerline); a fixed `background-size` + a transparent stop marks the
+      // dash pattern → sysDash, otherwise a solid strip.
+      const pbgImg = pcs.backgroundImage || "";
+      if (!bg && borderMax === 0 && br === 0) {
+        if (pbgImg.includes("gradient")) {
+          const lpb = pseudoBounds(pcs, bounds);
+          if (lpb && lpb.w >= 1 && lpb.h >= 1 && (lpb.h <= 8 || lpb.w <= 8)) {
+            const bsize = pcs.backgroundSize || "";
+            const repeating = !!bsize && !/auto|cover|contain/.test(bsize);
+            const hasTransparentStop = /transparent|rgba\([^)]*,\s*0(?:\.0+)?\s*\)/.test(pbgImg);
+            // First gradient stop with non-trivial alpha = the visible dash color.
+            let stripColor = "#ffffff";
+            for (const tok of pbgImg.match(/rgba?\([^)]*\)|#[0-9a-fA-F]{3,8}/g) || []) {
+              const am = tok.match(/,\s*([\d.]+)\s*\)$/);
+              if (!am || parseFloat(am[1]) > 0.1) { stripColor = rgb2hex(tok) || "#ffffff"; break; }
+            }
+            // Deferred so it appends at the end of the array (paints on top of
+            // the road, and keeps existing shape indices stable for a clean diff).
+            _deferredEls.push({
+              type: "line",
+              bounds: lpb,
+              color: stripColor,
+              dashType: repeating && hasTransparentStop ? "sysDash" : "solid",
+              zIndex: 999,
+              position: "absolute",
+            });
+          }
+        }
+        continue;
+      }
       const pb = pseudoBounds(pcs, bounds);
-      if (!pb || pb.w < 1 || pb.h < 1) continue;
+      if (!pb) continue;
+      // CSS border-triangle emitted as a ::before/::after — `width:0; height:0`
+      // with exactly one coloured border side and transparent perpendiculars
+      // (slide_34 `.popup::before` speech-bubble tail). pseudoBounds returns a
+      // 0×0 box for `width:0/height:0`, so the rect path below would drop it via
+      // the `pb.w < 1` guard (rendering as nothing → "missing triangle"). Build
+      // the triangle's real bounding box from the border widths and reuse the
+      // host-path detectBorderTriangle/emitTriangle so the converter draws a
+      // preset triangle. detectBorderTriangle's own guard (exactly one coloured
+      // side, transparent perpendiculars, zero content box) leaves ordinary
+      // accent stripes/rings untouched.
+      {
+        const triStyle = {
+          borderTop: bwT, borderTopColor: rgb2hex(pcs.borderTopColor),
+          borderRight: bwR, borderRightColor: rgb2hex(pcs.borderRightColor),
+          borderBottom: bwB, borderBottomColor: rgb2hex(pcs.borderBottomColor),
+          borderLeft: bwL, borderLeftColor: rgb2hex(pcs.borderLeftColor),
+        } as unknown as ElementStyle;
+        const triBounds: Bounds = { x: pb.x, y: pb.y, w: bwL + bwR, h: bwT + bwB };
+        const tri = detectBorderTriangle(el, triStyle, triBounds);
+        if (tri) {
+          emitTriangle(triBounds, tri.fill, tri.rotate, {
+            zIndex: parseInt(pcs.zIndex) || 999,
+            position: pcs.position,
+          } as unknown as ElementStyle);
+          continue;
+        }
+      }
+      if (pb.w < 1 || pb.h < 1) continue;
       const parentCs2 = getComputedStyle(el);
       const parentBT = parseFloat(parentCs2.borderTopWidth) || 0;
       const parentBL_w = parseFloat(parentCs2.borderLeftWidth) || 0;
@@ -1675,9 +1762,19 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         const oy = bounds.y + parentBT;
         const ow = Math.max(0, bounds.w - parentBL_w - parentBR_w);
         const oh = Math.max(0, bounds.h - parentBT - parentBB_w);
+        // Square off the stripe's TOP corners. The stripe is a flat-topped bar
+        // that the parent's `border-radius + overflow:hidden` merely NIPS at the
+        // corners (slide_14 `.logo-card::before`, slide_11 `.card::before`) — it
+        // is NOT itself a rounded border. Inheriting the parent's per-corner
+        // radius here (pTL/pTR) curved the stripe colour DOWN the corners,
+        // because the OUTER overlay's 11px top arc extends ~11px below the 3px
+        // stripe band and the INNER fill (smaller, shifted-down arc) can't cover
+        // that sliver — read by the user as "rounded border vs straight top
+        // line". Emit a flat top (tl/tr = 0); the parent's own roundRect supplies
+        // the card curve and the recursive clip mask presents the corner cut.
         const outerCr = {
-          tl: pTL > 0 ? Math.max(0, pTL - Math.min(parentBT, parentBL_w)) : 0,
-          tr: pTR > 0 ? Math.max(0, pTR - Math.min(parentBT, parentBR_w)) : 0,
+          tl: 0,
+          tr: 0,
           br: pBR > 0 ? Math.max(0, pBR - Math.min(parentBB_w, parentBR_w)) : 0,
           bl: pBL > 0 ? Math.max(0, pBL - Math.min(parentBB_w, parentBL_w)) : 0,
         };
@@ -1857,6 +1954,38 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     }
   }
 
+  // Promote styled inline-block pill chips that were folded into a parent's
+  // merged text block. A chip with its OWN non-transparent background and a
+  // rounded corner (e.g. slide_31 `.chip` { display:inline-block; background:
+  // #ede9fe; border-radius:999px }) collapses to a flat highlighted run in the
+  // merge, losing its pill shape/colour/padding. Re-draw each as a standalone
+  // rect + centered text ON TOP of the merged text (later push → higher
+  // _domIdx → painted last). Gated on inline-block + own bg + radius ≥ 4 so
+  // plain inline highlight spans (slide_15/25 `.code` { display:inline }, no
+  // radius) keep their existing highlight-run behaviour and are NOT promoted.
+  // Chips are DEFERRED (collected here, flushed after the main walk) rather
+  // than emitted inline: appending them at the END of the element array gives
+  // them the highest _domIdx, so they (a) paint LAST — on top of the merged
+  // card text they replace — and (b) don't shift the indices of any existing
+  // shape, keeping the structural diff clean (chips show as pure ADDED shapes).
+  const _deferredChipSpans: Element[] = [];
+  function emitMergedChips(host: Element): void {
+    const cands = host.querySelectorAll("span, a, small, strong, b, em, i, label");
+    cands.forEach((sp) => {
+      const scs = getComputedStyle(sp);
+      if (scs.display !== "inline-block") return;
+      if (scs.position === "absolute" || scs.position === "fixed") return;
+      const sBg = rgb2hex(scs.backgroundColor);
+      const sBR = parseFloat(scs.borderTopLeftRadius) || 0;
+      if (!sBg || sBR < 4) return;
+      const sB = getBounds(sp);
+      // Single-line chip only (avoid promoting large inline-block blocks).
+      const lh = parseFloat(scs.lineHeight) || parseFloat(scs.fontSize) * 1.2 || 16;
+      if (sB.h > lh * 2.2) return;
+      _deferredChipSpans.push(sp);
+    });
+  }
+
   // --- MAIN WALK ---
   function walk(el: Element): void {
     if (seen.has(el)) return;
@@ -1980,7 +2109,18 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     if ((elOv === "hidden" || elOv === "clip") && elBR >= 20
         && bounds.w >= 100 && bounds.h >= 100 && (el as HTMLElement).children.length > 0) {
       seen.add(el);
-      el.querySelectorAll("*").forEach(c => seen.add(c));
+      // Mirror Path A (the conic-gradient / clip-path host above): do NOT
+      // seen-mark every descendant. Instead hide their TEXT in the captured
+      // PNG via injected CSS (`data-h2s-hide-text`) and re-walk the children
+      // below so their text + own-background rects re-emit as EDITABLE
+      // overlays, clipped to the device's rounded boundary via _childClipMask.
+      // The host PNG stays as background/chrome only (notch, bezel, screen
+      // gradient). User feedback (slide_12): "the entire center area is
+      // rendered as one picture instead of divided into elements … achievable
+      // with shapes … all the shapes are rounded rectangles with some
+      // clipping." Without hiding text first we'd get DOUBLED glyphs (baked +
+      // overlay); without the child walk the text is baked + uneditable.
+      (el as HTMLElement).setAttribute("data-h2s-hide-text", "1");
       // Spread-only box-shadow layers (`0 0 0 Npx color`) paint a concentric
       // halo ring OUTSIDE the element's bbox — the screenshot capture clips at
       // the element bounds and never sees these rings. Emit halo rects BEFORE
@@ -2074,6 +2214,16 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       } else {
         elements.push({ type: "visual", bounds, tag: "clipped-container", cornerRadii: containerCornerRadii });
       }
+      // Re-walk children as editable overlays ON TOP of the captured PNG,
+      // clipped to the device's rounded boundary (so child rects/text can't
+      // protrude past the rounded corners — that was Path C's original reason
+      // to seen-mark everything). The visual above already captured the
+      // chrome/background WITHOUT text (data-h2s-hide-text), so this produces
+      // no doubled glyphs. Mirrors Path A's recurse-under-_childClipMask.
+      const childArrDev = Array.from((el as HTMLElement).children);
+      _currentClipMask = _childClipMask;
+      try { for (const c of childArrDev) walk(c); }
+      finally { _currentClipMask = _outerClipMask; }
       return;
     }
 
@@ -2430,6 +2580,11 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         textDecoration: inlineBorderUnderline ? "underline" : style.textDecoration,
         textTransform: style.textTransform,
         letterSpacing: style.letterSpacing,
+        // CSS writing-mode: vertical-* — carry it onto the text element so
+        // convert-pptx emits a pptxgenjs `vert` body rotation instead of a
+        // 180° box rotation (slide_32 .axis). baseStyle is a hand-built
+        // carrier, so this field must be copied explicitly from getStyle.
+        writingMode: style.writingMode,
         // Horizontal padding is owned by the Range-probe inset above — it
         // either folds padL/padR into textBounds or keeps the full border-
         // box width for tight pills. Re-emitting paddingLeft/paddingRight
@@ -2560,6 +2715,9 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         textEl.text = allRuns.map(r => r.text).join("");
       }
       elements.push(textEl);
+      // Re-draw rounded inline-block pill chips that this merge flattened
+      // (slide_31 `.chip`) as standalone pills on top of the merged text.
+      if (hasStyledRuns) emitMergedChips(el);
       return;
     }
 
@@ -2593,6 +2751,12 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
   }
 
   walk(document.body);
+
+  // Flush deferred pill chips + decorative overlays at the very end so they
+  // paint on top of the content they augment and don't disturb existing shape
+  // indices (keeps the structural diff clean — they show as pure ADDED shapes).
+  for (const sp of _deferredChipSpans) emitPillSpan(sp);
+  for (const de of _deferredEls) elements.push(de);
 
   // Detect gradient backgrounds on body/html
   const bodyCs = getComputedStyle(document.body);
