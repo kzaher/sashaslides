@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Builds the self-contained renderer/html2slides/browser/html2slides.html
-# (single-file drag-drop converter), then serves it on http://localhost:PORT
-# so the user can open it directly. Run after any change to extract-dom.ts
-# or convert-pptx-lib.ts.
+# Builds the self-contained html2slides bundle to
+# dist/renderer/html2slides/browser/html2slides.html (single-file drag-drop
+# converter), then serves it on http://localhost:PORT so the user can open it
+# directly. Run after any change to extract-dom.ts or convert-pptx-lib.ts.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 PORT=${HTML2SLIDES_PORT:-3500}
-SERVE_DIR="$PWD/renderer/html2slides/browser"
+SERVE_DIR="$PWD/dist/renderer/html2slides/browser"
 LOG="/tmp/html2slides-serve.log"
 
 npx tsx renderer/html2slides/browser/build.ts
@@ -17,8 +17,8 @@ fuser -k "${PORT}/tcp" 2>/dev/null || true
 sleep 0.2
 
 # Background static server. Python's http.server is universally available
-# in this devcontainer; we serve only the browser/ dir so the HTML is the
-# only thing exposed.
+# in this devcontainer; we serve only the built browser/ dist dir so the HTML
+# is the only thing exposed.
 nohup python3 -m http.server "$PORT" --directory "$SERVE_DIR" \
   > "$LOG" 2>&1 &
 SERVER_PID=$!

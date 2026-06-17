@@ -1,5 +1,6 @@
 /**
- * Smoke test for browser/html2slides.html. Loads the page in headless Chrome,
+ * Smoke test for the built dist/renderer/html2slides/browser/html2slides.html.
+ * Loads the page in headless Chrome,
  * synthesizes a drag-drop of every fixture HTML file, clicks Convert, and
  * pulls the downloaded .pptx bytes out via fetch(blob:url) → Uint8Array.
  *
@@ -24,7 +25,7 @@ interface CDPExceptionEvent { exceptionDetails: { exception?: { description?: st
 const CDPS = CDP as unknown as CDPStatic;
 
 const PORT = 9222;
-const HTML_PATH = resolve("/workspaces/sashaslides/renderer/html2slides/browser/html2slides.html");
+const HTML_PATH = resolve("/workspaces/sashaslides/dist/renderer/html2slides/browser/html2slides.html");
 const FIXTURE_DIR = resolve("/workspaces/sashaslides/renderer/html2slides/e2e/fixtures");
 const FIXTURES: string[] =
   (process.env.FIXTURES?.split(",").map(s => s.trim()).filter(Boolean)) ??

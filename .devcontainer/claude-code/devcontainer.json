@@ -4,12 +4,17 @@
     "dockerfile": "Dockerfile",
     "options": ["--platform=linux/amd64"]
   },
-  "forwardPorts": [9222, 5900, 6080],
+  "forwardPorts": [9222, 5900, 6080, 3456, 3457, 3460, 3461, 3500],
   "portsAttributes": {
     "6080": {
       "label": "noVNC Desktop",
       "onAutoForward": "notify"
-    }
+    },
+    "3456": { "label": "SxS rating — basics", "onAutoForward": "notify" },
+    "3457": { "label": "SxS rating — complex", "onAutoForward": "notify" },
+    "3460": { "label": "SxS rating — baked basics", "onAutoForward": "silent" },
+    "3461": { "label": "SxS rating — baked complex", "onAutoForward": "silent" },
+    "3500": { "label": "html2slides bundle", "onAutoForward": "silent" }
   },
   "mounts": [
     "source=polybot-chrome-profile,target=/home/node/chrome-profile,type=volume",

@@ -16,8 +16,8 @@
   },
   "slide_04": {
     "status": "good",
-    "ratedAt": "2026-05-14T13:55:29.863Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_04.png"
+    "comment": "The text in these chips is in separate text layer vs inside of the chip and have the chip resize with it.",
+    "ratedAt": "2026-06-17T09:28:17.663Z"
   },
   "slide_05": {
     "status": "good",
