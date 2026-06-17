@@ -1780,8 +1780,14 @@ export function buildPptx(
 
         case "line": {
           const isVertical = b.h > b.w * 2;
+          // An OOXML line stroke is CENTERED on its position, so a decorative
+          // strip must sit on its CENTER axis, not its top/left edge. The strip
+          // bounds carry the full box (e.g. slide_33 `.road::before`: top:5px,
+          // height:4px → visual center is the road's center). Placing the stroke
+          // at `b.y` would render `b.h/2` (~2px) too high; center it instead.
           const lineOpts: ShapeProps = {
-            x: px2in(b.x), y: px2in(b.y),
+            x: px2in(isVertical ? b.x + b.w / 2 : b.x),
+            y: px2in(isVertical ? b.y : b.y + b.h / 2),
             w: isVertical ? 0 : px2in(b.w),
             h: isVertical ? px2in(b.h) : 0,
             line: {
