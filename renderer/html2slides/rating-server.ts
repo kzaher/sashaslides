@@ -229,8 +229,11 @@ function findComparisons(): SlideComparison[] {
   const slidesDir = slidesDirOverride
     ?? (existsSync(join(resultsDir, "slides")) ? join(resultsDir, "slides") : resultsDir);
 
-  // Pattern 1: originals/slide_01.png + slides/slide_01.png
-  if (originalsDir !== slidesDir) {
+  // Pattern 1: originals/slide_01.png + slides/slide_01.png.
+  // Guard existence: a stale/missing --originals-dir (e.g. a wiped /tmp path)
+  // must degrade to "no comparisons", NOT crash the whole server on an
+  // unguarded readdirSync inside the listen callback.
+  if (originalsDir !== slidesDir && existsSync(originalsDir) && existsSync(slidesDir)) {
     const origFiles = readdirSync(originalsDir).filter(f => f.match(/slide_\d+.*\.png$/)).sort();
     for (const f of origFiles) {
       const slidesFile = join(slidesDir, f);
@@ -246,7 +249,9 @@ function findComparisons(): SlideComparison[] {
   }
 
   // Pattern 2: slide_01_original.png + slide_01_slides.png
-  const allFiles = readdirSync(resultsDir).filter(f => f.endsWith("_original.png")).sort();
+  const allFiles = existsSync(resultsDir)
+    ? readdirSync(resultsDir).filter(f => f.endsWith("_original.png")).sort()
+    : [];
   for (const f of allFiles) {
     const base = f.replace("_original.png", "");
     const slidesFile = join(resultsDir, `${base}_slides.png`);
