@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #071a2b; padding: 54px 60px; display: flex; flex-direction: column; color: #e2e8f0; }
+.brand { font-size: 14px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #38bdf8; margin-bottom: 8px; }
+h1 { font-size: 36px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+.sub { font-size: 15px; color: #7d93ab; margin-bottom: 30px; }
+.journey { flex: 1; position: relative; }
+.road { position: absolute; left: 0; right: 0; top: 86px; height: 14px; background: linear-gradient(90deg, #ef4444, #f59e0b 50%, #14b8a6); border-radius: 8px; box-shadow: 0 0 24px rgba(20,184,166,0.25); }
+.road::before { content: ""; position: absolute; top: 5px; left: 12px; right: 12px; height: 4px; background-image: linear-gradient(90deg, rgba(255,255,255,0.85) 50%, transparent 50%); background-size: 40px 4px; }
+.stops { display: flex; justify-content: space-between; position: relative; }
+.stop { width: 31%; }
+.flag { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800; color: #fff; margin: 0 auto; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+.f0 { background: #ef4444; } .f1 { background: #f59e0b; } .f2 { background: #14b8a6; }
+.when { text-align: center; font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #7d93ab; margin: 56px 0 14px; text-transform: uppercase; }
+.panel { background: rgba(255,255,255,0.045); border: 1px solid rgba(125,147,171,0.25); border-radius: 16px; padding: 20px; text-align: center; }
+.name { font-size: 21px; font-weight: 800; color: #fff; margin-bottom: 7px; }
+.desc { font-size: 13px; color: #9fb3c8; line-height: 1.5; min-height: 58px; }
+.out { font-size: 12px; font-weight: 700; color: #cbd5e1; margin-top: 12px; padding-top: 12px; border-top: 1px dashed rgba(125,147,171,0.3); }
+</style></head><body>
+<div class="brand">Mentalward · Roadmap</div>
+<h1>The road to full mode</h1>
+<div class="sub">Three milestones — each ships value on its own, and clears the path to the next.</div>
+<div class="journey">
+  <div class="road"></div>
+  <div class="stops">
+    <div class="stop">
+      <div class="flag f0">P0</div>
+      <div class="when">Short term · next</div>
+      <div class="panel"><div class="name">Redirects</div><div class="desc">Route mental-health prompts to official, vetted resources.</div><div class="out">↗ 988lifeline.org · nimh.gov</div></div>
+    </div>
+    <div class="stop">
+      <div class="flag f1">P1</div>
+      <div class="when">Mid term</div>
+      <div class="panel"><div class="name">Online fixups</div><div class="desc">Verify cited medical sources online; rewrite anything wrongly transcribed.</div><div class="out">¹ rewrite ✓ — WHO, 2023</div></div>
+    </div>
+    <div class="stop">
+      <div class="flag f2">P2</div>
+      <div class="when">Long term · parallel</div>
+      <div class="panel"><div class="name">Upstreaming</div><div class="desc">Push losses back into the base models — Claude &amp; Codex.</div><div class="out">◆ full mode</div></div>
+    </div>
+  </div>
+</div>
+</body></html>

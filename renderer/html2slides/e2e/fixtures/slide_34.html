@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #f1f5f9; padding: 50px 60px; display: flex; flex-direction: column; position: relative; }
+.brand { font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #ef4444; margin-bottom: 6px; }
+h1 { font-size: 36px; font-weight: 800; color: #0f172a; margin-bottom: 24px; }
+.list { display: flex; flex-direction: column; gap: 14px; width: 620px; }
+.blk { background: #fff; border-radius: 13px; box-shadow: 0 4px 14px rgba(15,23,42,0.06); padding: 16px 20px; display: flex; align-items: center; gap: 16px; }
+.ic { width: 40px; height: 40px; flex-shrink: 0; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+.i1 { background: #fee2e2; } .i2 { background: #fef3c7; } .i3 { background: #ccfbf1; } .i4 { background: #e0f2fe; }
+.blk h3 { font-size: 17px; font-weight: 800; color: #0f172a; }
+.blk p { font-size: 12.5px; color: #475569; line-height: 1.4; }
+/* popup with a REAL border-triangle tail pointing left at the list */
+.popup { position: absolute; top: 150px; right: 56px; width: 400px; background: #1e1b4b; color: #fff; border-radius: 16px; padding: 22px 24px 22px 30px; box-shadow: 0 22px 60px rgba(30,27,75,0.5); z-index: 10; }
+/* speech-bubble tail as a ::before pseudo-element border-triangle — the edge case the converter drops */
+.popup::before { content: ""; position: absolute; left: -17px; top: 40px; width: 0; height: 0; border-style: solid; border-width: 12px 17px 12px 0; border-color: transparent #1e1b4b transparent transparent; }
+.popup .ph { font-size: 14px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #a5b4fc; margin-bottom: 16px; }
+/* each row marked by a rotated-border chevron (border-left+bottom rotated 45° = "<" edge case) */
+.r { position: relative; padding: 9px 0 9px 28px; border-bottom: 1px solid rgba(165,180,252,0.16); font-size: 13px; line-height: 1.4; color: #e0e7ff; }
+.r:last-child { border-bottom: none; }
+.r b { color: #fff; }
+.chev { position: absolute; left: 4px; top: 14px; width: 11px; height: 11px; border-left: 4px solid #818cf8; border-bottom: 4px solid #818cf8; transform: rotate(45deg); }
+</style></head><body>
+<div class="brand">Mentalward · P0 readiness</div>
+<h1>Launch blockers</h1>
+<div class="list">
+  <div class="blk"><div class="ic i1">🚨</div><div><h3>Crisis-detection gaps</h3><p>Misses some acute-risk phrasings — a fraction of high-risk prompts won't redirect.</p></div></div>
+  <div class="blk"><div class="ic i2">⚖️</div><div><h3>Clinical &amp; legal sign-off</h3><p>Redirect targets and disclaimers aren't reviewed by a clinician or legal yet.</p></div></div>
+  <div class="blk"><div class="ic i3">🐌</div><div><h3>Citation pipeline too slow</h3><p>P1 fixups need sub-second source lookups; the provider is rate-limited.</p></div></div>
+  <div class="blk"><div class="ic i4">🌍</div><div><h3>Limited geographic coverage</h3><p>Only US hotlines are mapped; non-US users get no localized redirect.</p></div></div>
+</div>
+<div class="popup">
+  <div class="ph">Next actions</div>
+  <div class="r"><span class="chev"></span><b>Expand red-team evals</b> + add a keyword safety net.</div>
+  <div class="r"><span class="chev"></span><b>Book clinician review</b>; legal approves disclaimers.</div>
+  <div class="r"><span class="chev"></span><b>Cache trusted sources</b>; add a fallback provider.</div>
+  <div class="r"><span class="chev"></span><b>Map EU/UK/APAC</b> resources; add geo-routing.</div>
+</div>
+</body></html>

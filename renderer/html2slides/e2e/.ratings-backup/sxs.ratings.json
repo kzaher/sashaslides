@@ -1,0 +1,28 @@
+{
+  "slide_07": {
+    "status": "bad",
+    "comment": "Red text, blue text and green text lack gap between.",
+    "ratedAt": "2026-06-17T08:43:38.556Z"
+  },
+  "slide_12": {
+    "status": "bad",
+    "comment": "* Output for Styled list items contains bullets when it shouldn't for left list and center list and for right list adds numbers when it shouldn't.",
+    "ratedAt": "2026-06-17T08:44:43.962Z"
+  },
+  "slide_14": {
+    "status": "bad",
+    "comment": "Wrong padding in table column, especially the first one.",
+    "ratedAt": "2026-06-17T08:45:48.094Z",
+    "annotation": "/tmp/sxs/annotations/slide_14.png"
+  },
+  "slide_15": {
+    "status": "bad",
+    "comment": "Issues with padding for txt in the first column.",
+    "ratedAt": "2026-06-17T08:46:53.039Z",
+    "annotation": "/tmp/sxs/annotations/slide_15.png"
+  },
+  "slide_17": {
+    "status": "good",
+    "ratedAt": "2026-06-17T08:47:37.145Z"
+  }
+}

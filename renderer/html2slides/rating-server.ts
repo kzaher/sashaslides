@@ -44,6 +44,25 @@ for (let i = 0; i < args.length; i++) {
   else if (v === "--task-title") taskTitle = args[++i];
 }
 
+// Render-parameter badge: surface which conversion mode produced these slides
+// (e.g. tablesFormat=baked) so a reviewer never confuses a baked-table run
+// with the default native one. Read from meta.json { renderParams?, tablesFormat? }.
+let renderBadgeHtml = "";
+try {
+  const _metaPath = join(resultsDir, "meta.json");
+  if (existsSync(_metaPath)) {
+    const _meta = JSON.parse(readFileSync(_metaPath, "utf-8"));
+    const _rp: Record<string, unknown> = { tablesFormat: _meta.tablesFormat, ...(_meta.renderParams || {}) };
+    const parts = Object.entries(_rp)
+      .filter(([, val]) => val != null && val !== "")
+      .map(([k, val]) => {
+        const cls = k === "tablesFormat" && val === "baked" ? "render-badge badge-baked" : "render-badge";
+        return `<span class="${cls}">${k}: ${val}</span>`;
+      });
+    renderBadgeHtml = parts.join("");
+  }
+} catch { /* meta is optional */ }
+
 interface RenderedRegion { x: number; y: number; w: number; h: number; kind: string; }
 interface SlideComparison {
   id: string;
@@ -392,6 +411,9 @@ const HTML = `<!DOCTYPE html>
   body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; }
   .header { padding: 16px 24px; background: #16213e; display: flex; justify-content: space-between; align-items: center; }
   .header h1 { font-size: 18px; font-weight: 600; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .render-badge { font-size: 12px; font-weight: 700; letter-spacing: 0.3px; padding: 4px 10px; border-radius: 999px; background: #2a3a5e; color: #9fb3d1; border: 1px solid #3a4a6e; }
+  .render-badge.badge-baked { background: #14532d; color: #86efac; border-color: #166534; }
   .stats { font-size: 14px; color: #888; }
   .slide-pair { display: flex; gap: 4px; padding: 12px 24px; align-items: flex-start; flex-wrap: wrap; }
   .slide-pair .panel { width: 49%; position: relative; }
@@ -469,7 +491,7 @@ const HTML = `<!DOCTYPE html>
 <body>
 <div class="header">
   <h1>${taskTitle || "html2slides Fidelity Rating"}</h1>
-  <div class="stats" id="stats"></div>
+  <div class="header-right">${renderBadgeHtml}<div class="stats" id="stats"></div></div>
 </div>
 <div id="regressionBanner"></div>
 <div id="renderedBanner"></div>

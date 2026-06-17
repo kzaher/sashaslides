@@ -2646,9 +2646,18 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     "{color:transparent !important;-webkit-text-fill-color:transparent !important;text-shadow:none !important;}";
   document.head.appendChild(hideStyle);
 
-  return JSON.stringify({
+  const __h2sJson = JSON.stringify({
     viewport: { w: W, h: H },
     elementCount: elements.length,
     elements,
   });
+  // Stash the result on a global as a side effect, in addition to returning it.
+  // The Node CDP path (Runtime.evaluate) and the browser eval() path both read
+  // the IIFE's return value (completion value) — unchanged. The add-on sidebar's
+  // no-eval fallback (script-tag injection, when Apps Script's CSP forbids eval)
+  // can't capture a completion value, so it reads window.__H2S_EXTRACT__ instead.
+  if (typeof window !== "undefined") {
+    (window as unknown as { __H2S_EXTRACT__?: string }).__H2S_EXTRACT__ = __h2sJson;
+  }
+  return __h2sJson;
 })();

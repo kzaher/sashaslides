@@ -12,19 +12,7 @@
  *
  * After every file is processed, call buildPptxInMemory and trigger download.
  */
-import { buildPptxInMemory, type Extraction, type ExtractedElement, type SlideInput } from "../convert-pptx-lib";
-
-// Build-time string substitution. `build.ts` replaces __EXTRACT_JS_LITERAL__
-// with the compiled extract-dom.ts source via esbuild `define`. The browser
-// path runs the compiled blob via `win.eval(__EXTRACT_JS_LITERAL__)` inside
-// the iframe — no setExtractJs needed (lib.ts no longer exposes one; the
-// Node-side extract-dom reader lives in convert-pptx-io.ts).
-declare const __EXTRACT_JS_LITERAL__: string;
-
-const SLIDE_W = 1280;
-const SLIDE_H = 720;
-
-type Slide = { extraction: Extraction; visualPngs: Map<number, Uint8Array>; name: string };
+import { buildPptxInMemory, processFile, type Slide, type SlideInput } from "./convert-core";
 
 /** Boundary shim: showDirectoryPicker + FileSystemObserver are recent web
  * APIs that some `lib.dom.d.ts` versions ship without; declare what we use. */
@@ -82,168 +70,6 @@ function setProgress(done: number, total: number, label = "") {
     total ? `${done}/${total} ${label}` : "";
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function loadIntoIframe(html: string): Promise<HTMLIFrameElement> {
-  const iframe = document.createElement("iframe");
-  iframe.style.cssText =
-    `position:fixed;left:-99999px;top:0;width:${SLIDE_W}px;height:${SLIDE_H}px;border:0;`;
-  iframe.setAttribute("sandbox", "allow-same-origin allow-scripts");
-  document.body.appendChild(iframe);
-
-  // Prefer srcdoc so the iframe inherits this page's origin (same-origin
-  // access to contentWindow/contentDocument is required to inject EXTRACT_JS).
-  iframe.srcdoc = html;
-  await new Promise<void>((res) => {
-    iframe.addEventListener("load", () => res(), { once: true });
-  });
-
-  // Settling: matches the Node CDP pipeline's `await sleep(800) ; fonts.ready ; sleep(300)`.
-  const idoc = iframe.contentDocument!;
-  await sleep(150);
-  try {
-    // SAFETY: `document.fonts` (FontFaceSet) is in modern TS lib.dom.d.ts as a
-    // FontFaceSet, but TS reads it through Document via a getter not present on
-    // all targets; the `?.` runtime guard makes the cast safe even when the
-    // property is undefined.
-    await (idoc as Document & { fonts?: { ready: Promise<unknown> } }).fonts?.ready;
-  } catch {/* ignore */}
-  await sleep(150);
-  return iframe;
-}
-
-/** Evaluate the precompiled extract-dom blob inside the iframe. extract-dom
- * ends with `return JSON.stringify(...)` inside an IIFE, so the eval expression
- * returns the JSON string directly. */
-function runExtractInIframe(iframe: HTMLIFrameElement): Extraction {
-  const win = iframe.contentWindow as (Window & { eval(s: string): unknown }) | null;
-  if (!win) throw new Error("iframe contentWindow not available");
-  const raw = win.eval(__EXTRACT_JS_LITERAL__);
-  const json = typeof raw === "string" ? JSON.parse(raw) : raw;
-  return json as Extraction;
-}
-
-/**
- * Rasterize visual/image elements. Walks the iframe DOM to find nodes at the
- * extracted bounds, then renders them to a PNG via canvas. Supports <img>,
- * <canvas>, <svg>. Other tags log a warning and are skipped (renders as a
- * gap in the .pptx). 2× scale to match the Node CDP path.
- */
-async function rasterizeVisuals(iframe: HTMLIFrameElement, extraction: Extraction): Promise<Map<number, Uint8Array>> {
-  const out = new Map<number, Uint8Array>();
-  const idoc = iframe.contentDocument!;
-  const iwin = iframe.contentWindow!;
-  for (let i = 0; i < extraction.elements.length; i++) {
-    const el = extraction.elements[i];
-    if (el.type !== "visual" && el.type !== "image") continue;
-    if (el.bounds.w <= 5 || el.bounds.h <= 5) continue;
-    const tag = (el.tag || "").toLowerCase();
-    try {
-      const png = await rasterizeElement(idoc, iwin, el, tag);
-      if (png) out.set(i, png);
-    } catch (e) {
-      log(`  rasterize fail [#${i}] <${tag}>: ${(e as Error).message}`, "warn");
-    }
-  }
-  return out;
-}
-
-async function rasterizeElement(
-  idoc: Document,
-  iwin: Window,
-  el: ExtractedElement,
-  tag: string,
-): Promise<Uint8Array | null> {
-  const b = el.bounds;
-  const node = findNodeAt(idoc, b, tag);
-  if (!node) {
-    log(`  no DOM node for visual [<${tag}> at ${b.x},${b.y} ${b.w}x${b.h}]`, "warn");
-    return null;
-  }
-
-  const W = Math.max(1, Math.round(b.w * 2));
-  const H = Math.max(1, Math.round(b.h * 2));
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d")!;
-
-  if (node instanceof iwin.HTMLImageElement || node instanceof HTMLImageElement) {
-    const img = node as HTMLImageElement;
-    if (!img.complete) await new Promise((r) => { img.onload = r; img.onerror = r; });
-    ctx.drawImage(img, 0, 0, W, H);
-  } else if (node instanceof iwin.HTMLCanvasElement || node instanceof HTMLCanvasElement) {
-    ctx.drawImage(node as HTMLCanvasElement, 0, 0, W, H);
-  } else if (tag === "svg" || (typeof iwin.SVGElement !== "undefined" && node instanceof iwin.SVGElement)) {
-    const svgEl = node as SVGElement;
-    // Ensure intrinsic size in serialization so the rendered img knows w/h.
-    const cloned = svgEl.cloneNode(true) as SVGElement;
-    if (!cloned.getAttribute("width")) cloned.setAttribute("width", String(b.w));
-    if (!cloned.getAttribute("height")) cloned.setAttribute("height", String(b.h));
-    const svgStr = new XMLSerializer().serializeToString(cloned);
-    const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const tmp = new Image();
-    tmp.crossOrigin = "anonymous";
-    await new Promise<void>((res, rej) => {
-      tmp.onload = () => res();
-      tmp.onerror = () => rej(new Error("svg image load failed"));
-      tmp.src = url;
-    });
-    ctx.drawImage(tmp, 0, 0, W, H);
-    URL.revokeObjectURL(url);
-  } else {
-    log(`  unsupported visual tag <${tag}> — skipping`, "warn");
-    return null;
-  }
-
-  const blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), "image/png"));
-  if (!blob) return null;
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
-/**
- * Find the DOM node corresponding to an extracted element. extract-dom records
- * the element's tag plus its bounding-box; locate by tag+rect within the iframe.
- */
-function findNodeAt(idoc: Document, b: { x: number; y: number; w: number; h: number }, tag: string): Element | null {
-  const cands = idoc.getElementsByTagName(tag || "*");
-  let best: { node: Element; dist: number } | null = null;
-  for (let i = 0; i < cands.length; i++) {
-    const r = cands[i].getBoundingClientRect();
-    if (Math.abs(r.width - b.w) > 2 || Math.abs(r.height - b.h) > 2) continue;
-    const dx = r.left - b.x;
-    const dy = r.top - b.y;
-    const dist = dx * dx + dy * dy;
-    if (dist <= 4 && (!best || dist < best.dist)) best = { node: cands[i], dist };
-  }
-  if (best) return best.node;
-  // Fall back to elementsFromPoint inside center.
-  const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-  const list: Element[] = idoc.elementsFromPoint?.(cx, cy) ?? [];
-  for (const n of list) {
-    if (n.tagName.toLowerCase() === tag) return n;
-  }
-  return list[0] || null;
-}
-
-async function processFile(file: File): Promise<Slide> {
-  const html = await file.text();
-  const iframe = await loadIntoIframe(html);
-  try {
-    const extraction = runExtractInIframe(iframe);
-    if (!extraction || !extraction.elements) {
-      throw new Error("extraction returned no elements");
-    }
-    log(`  ${file.name}: ${extraction.elements.length} elements`);
-    const visualPngs = await rasterizeVisuals(iframe, extraction);
-    log(`  ${file.name}: rasterized ${visualPngs.size} visuals`);
-    return { extraction, visualPngs, name: file.name };
-  } finally {
-    iframe.remove();
-  }
-}
-
 function downloadBytes(bytes: Uint8Array, name: string): void {
   const blob = new Blob([bytes], {
     type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -256,6 +82,37 @@ function downloadBytes(bytes: Uint8Array, name: string): void {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+/**
+ * Best-effort: place the generated .pptx onto the clipboard alongside the
+ * download. Browsers gate `clipboard.write` behind a secure context + transient
+ * user activation, and Chrome rejects arbitrary MIME types from the "sanitized"
+ * path — so we try the real MIME first, then fall back to a "web custom format"
+ * (always permitted, but only readable by web apps). Any failure is logged and
+ * never blocks the download that already happened.
+ */
+async function copyPptxToClipboard(bytes: Uint8Array, name: string): Promise<void> {
+  const clip = navigator.clipboard as Clipboard | undefined;
+  if (!clip || typeof ClipboardItem === "undefined") {
+    log("clipboard API unavailable — copy skipped (download completed)", "warn");
+    return;
+  }
+  const blob = new Blob([bytes], { type: PPTX_MIME });
+  try {
+    await clip.write([new ClipboardItem({ [PPTX_MIME]: blob })]);
+    log(`copied ${name} to clipboard`);
+    return;
+  } catch {
+    try {
+      await clip.write([new ClipboardItem({ ["web " + PPTX_MIME]: blob })]);
+      log(`copied ${name} to clipboard (web custom format)`);
+    } catch (e) {
+      log(`clipboard copy failed (${(e as Error).message}) — download completed`, "warn");
+    }
+  }
 }
 
 async function convertFiles(files: File[]): Promise<void> {
@@ -271,7 +128,7 @@ async function convertFiles(files: File[]): Promise<void> {
   for (let i = 0; i < files.length; i++) {
     log(`[${i + 1}/${files.length}] ${files[i].name}`);
     try {
-      const s = await processFile(files[i]);
+      const s = await processFile(files[i], log);
       slides.push(s);
     } catch (e) {
       log(`  ${files[i].name}: extraction failed: ${(e as Error).message}`, "error");
@@ -292,11 +149,13 @@ async function convertFiles(files: File[]): Promise<void> {
   setProgress(1, 1, "done");
   log(`pptx built: ${bytes.byteLength.toLocaleString()} bytes — downloading…`);
   downloadBytes(bytes, `${title}.pptx`);
+  await copyPptxToClipboard(bytes, `${title}.pptx`);
   ($("#convert-btn") as HTMLButtonElement).disabled = false;
 }
 
 // --- UI wiring ---
 const filesState: File[] = [];
+let pasteCounter = 0;
 function renderFileList() {
   const list = $("#file-list") as HTMLUListElement;
   list.innerHTML = "";
@@ -333,9 +192,44 @@ function init() {
     if (e.dataTransfer?.files) addFiles(e.dataTransfer.files);
   });
   drop.addEventListener("click", () => picker.click());
+  // Reset the value when the dialog is *opened*, not after `change`. Resetting
+  // inside the change handler races with the programmatic `picker.click()` and
+  // makes Chrome ignore the first selection after a convert+clear — you had to
+  // open the file dialog twice for it to register. The input's own `click`
+  // fires right before the dialog opens, so re-selecting the same file always
+  // emits a fresh `change`.
+  picker.addEventListener("click", () => { picker.value = ""; });
   picker.addEventListener("change", () => {
     if (picker.files) addFiles(picker.files);
-    picker.value = "";
+  });
+
+  // Ctrl+V / Cmd+V: paste HTML straight into the queue (no file needed). Also
+  // accepts an .html/.htm file pasted from the OS file manager. Skips when the
+  // paste targets a real form field so normal editing still works.
+  document.addEventListener("paste", (e) => {
+    const t = e.target as HTMLElement | null;
+    if (t && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName))) return;
+    const dt = e.clipboardData;
+    if (!dt) return;
+
+    // 1. A file copied in the OS (e.g. slide_01.html) lands in clipboardData.files.
+    const pastedFiles = Array.from(dt.files || []).filter((f) => /\.html?$/i.test(f.name));
+    if (pastedFiles.length) {
+      e.preventDefault();
+      addFiles(pastedFiles);
+      log(`pasted ${pastedFiles.length} file(s): ${pastedFiles.map((f) => f.name).join(", ")}`);
+      return;
+    }
+
+    // 2. Raw HTML/text content — wrap it as a synthetic .html file.
+    const html = dt.getData("text/html");
+    const text = dt.getData("text/plain");
+    const content = (html || text || "").trim();
+    if (!content) return;
+    e.preventDefault();
+    const name = `pasted_${String(++pasteCounter).padStart(2, "0")}.html`;
+    addFiles([new File([html || text], name, { type: "text/html" })]);
+    log(`pasted ${html ? "HTML" : "text"} content as ${name} (${content.length} chars)`);
   });
 
   ($("#convert-btn") as HTMLButtonElement).addEventListener("click", () => {
@@ -509,7 +403,7 @@ async function processRequest(rootDir: FSDirHandle, reqId: string) {
     const slides: Slide[] = [];
     for (let i = 0; i < files.length; i++) {
       log(`[${i + 1}/${files.length}] ${files[i].name}`);
-      slides.push(await processFile(files[i]));
+      slides.push(await processFile(files[i], log));
     }
     if (slides.length === 0) throw new Error("no input slides successfully processed");
     log(`Assembling .pptx (${slides.length} slide(s))…`);

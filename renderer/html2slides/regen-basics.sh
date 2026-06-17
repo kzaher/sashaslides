@@ -8,7 +8,20 @@
 # user via the SxS rating UI — see `serve-sxs.sh` and README.md.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-OUT=/tmp/sxs
+
+# tablesFormat: native (default) | baked. Pass via TABLES_FORMAT=baked or $1.
+# Non-default params write to a SEPARATE OUT + goldens path so the baked run
+# never overwrites the native baseline.
+TABLES_FORMAT="${TABLES_FORMAT:-${1:-native}}"
+case "$TABLES_FORMAT" in native|baked) ;; *) echo "❌ TABLES_FORMAT must be native|baked, got: $TABLES_FORMAT" >&2; exit 2 ;; esac
+if [ "$TABLES_FORMAT" = "native" ]; then
+  OUT=/tmp/sxs
+  GOLDENS="$HERE/e2e/goldens"
+else
+  OUT=/tmp/sxs-$TABLES_FORMAT
+  GOLDENS="$HERE/e2e/goldens-basic-$TABLES_FORMAT"
+fi
+echo "tablesFormat=$TABLES_FORMAT  OUT=$OUT  goldens=$GOLDENS"
 mkdir -p "$OUT/originals" "$OUT/slides" "$OUT/diffs"
 
 TITLE="basics_$(date +%s)"
@@ -19,7 +32,7 @@ fail() { echo "❌ FATAL: $*" >&2; exit 1; }
 # Track newest thumbnail mtime so we can verify thumbnails were actually
 # rewritten. Directory mtime only advances on entry add/remove, not when
 # existing files are overwritten in place — so look at the files themselves.
-SLIDES_BEFORE=$(stat -c %Y "$OUT/slides"/*.png 2>/dev/null | sort -n | tail -1)
+SLIDES_BEFORE=$(stat -c %Y "$OUT/slides"/*.png 2>/dev/null | sort -n | tail -1) || true
 SLIDES_BEFORE=${SLIDES_BEFORE:-0}
 
 echo "=== Convert + upload ==="
@@ -27,7 +40,7 @@ echo "=== Convert + upload ==="
 # causes the pipeline to exit non-zero if convert-pptx fails, but `set -e`
 # then aborts silently. Use `if !` so we always reach an explicit fail()
 # with a pointer to the log. PIPESTATUS[0] gives the underlying npx exit.
-if ! npx tsx convert-pptx.ts e2e/fixtures-basic --title "$TITLE" --out "$OUT/basics.pptx" 2>&1 | tee "$OUT/convert.log"; then
+if ! npx tsx convert-pptx.ts e2e/fixtures-basic --title "$TITLE" --out "$OUT/basics.pptx" --tables-format "$TABLES_FORMAT" 2>&1 | tee "$OUT/convert.log"; then
   fail "convert-pptx.ts exited non-zero (${PIPESTATUS[0]:-?}). Tail of log:
 $(tail -8 "$OUT/convert.log")"
 fi
@@ -36,7 +49,7 @@ PRES_ID=$(grep -oE 'presentation/d/[A-Za-z0-9_-]+' "$OUT/convert.log" | head -1 
 [ -n "${PRES_ID:-}" ] || fail "convert-pptx completed but no presentation URL was printed. Check $OUT/convert.log (auth failure? upload failure?)"
 echo "Presentation: $PRES_ID"
 cat > "$OUT/meta.json" <<EOF
-{ "htmlDir": "$HERE/e2e/fixtures-basic", "presentationId": "$PRES_ID" }
+{ "htmlDir": "$HERE/e2e/fixtures-basic", "goldensDir": "$GOLDENS", "presentationId": "$PRES_ID", "tablesFormat": "$TABLES_FORMAT", "renderParams": { "tablesFormat": "$TABLES_FORMAT" } }
 EOF
 
 echo "=== Screenshot originals + export thumbs (parallel) ==="
@@ -61,7 +74,7 @@ echo "=== Pixel-perfect goldens check ==="
 # check-goldens intentionally exits non-zero when regressions are found so
 # CI can gate on it; we `|| true` ONLY here because the goal is to print the
 # summary + diffs, not to abort.
-npx tsx check-goldens.ts "$OUT/slides" "$OUT/diffs" --originals "$OUT/originals" || true
+npx tsx check-goldens.ts "$OUT/slides" "$OUT/diffs" --goldens "$GOLDENS" --originals "$OUT/originals" || true
 
 echo ""
 echo "Thumbs:  $OUT/slides/"

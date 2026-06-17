@@ -16,7 +16,7 @@
     "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.codex,target=/home/node/.codex,type=bind,consistency=cached",
     "source=${localEnv:HOME}/Projects/claude,target=/p/claude,type=bind",
-    "source=${localEnv:HOME}/Projects/codepit/codepit-vscode/.deploy/codepit.codepit-vscode-0.1.0,target=/home/node/.codepit,type=bind"
+    "source=${localEnv:HOME}/Projects/codepit/codepit-vscode/.deploy/codepit.codepit-vscode-0.1.0,target=/opt/codepit-ext,type=bind"
   ],
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/node/.claude"
