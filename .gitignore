@@ -69,3 +69,5 @@ renderer/html2slides/e2e/google-table-measurements.json
 renderer/html2slides/e2e/.ratings-backup/
 
 .sxs-complex/
+# bug_solving persistent rating ledger
+.bug-solving-history/

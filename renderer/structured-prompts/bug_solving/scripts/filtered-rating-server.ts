@@ -78,6 +78,9 @@ const forwarded = [
   "--task-analysis", analysis,
   "--task-diffs", diffs,
   "--task-title", title,
+  // Persistent per-slide ledger so comments + annotations survive worktree
+  // cleanup / /tmp wipes and auto-populate the next round's provenance panel.
+  "--history-dir", "/workspaces/sashaslides/.bug-solving-history",
 ];
 
 console.log(`[filtered-rating-server wrapper] exec → npx ${forwarded.join(" ")}`);

@@ -55,21 +55,41 @@ function readRatings(path: string): Record<string, RatingEntry> {
   return JSON.parse(readFileSync(path, "utf-8")) as Record<string, RatingEntry>;
 }
 
+/** Persistent per-slide ledger of the LATEST user rating (comment + annotation),
+ *  written by the rating server's `--history-dir`. Survives worktree cleanup and
+ *  /tmp wipes, so a follow-up round reads the most recent feedback rather than
+ *  the original (possibly wiped) sxs ratings.json. */
+const HISTORY_DIR = "/workspaces/sashaslides/.bug-solving-history";
+interface LedgerEntry { comment?: string; annotation?: string }
+function readLedger(): Record<string, LedgerEntry> {
+  const f = resolve(HISTORY_DIR, "ratings.json");
+  if (!existsSync(f)) return {};
+  try { return JSON.parse(readFileSync(f, "utf-8")) as Record<string, LedgerEntry>; }
+  catch { return {}; }
+}
+
 function buildSlideTasks(slideIds: string[], opts: BuildOptions): SlideTask[] {
   const ratings = readRatings(opts.ratings_json);
+  const ledger = readLedger();
   const out: SlideTask[] = [];
   for (const id of slideIds) {
     const r = ratings[id] || {};
+    const led = ledger[id] || {};
     const html = resolve(opts.repo_root, opts.fixtures_dir, `${id}.html`);
     if (!existsSync(html)) {
       throw new Error(`fixture not found for ${id}: ${html}`);
     }
-    const annotation = resolve(opts.sxs_dir, "annotations", `${id}.png`);
+    // Prefer the persistent ledger (latest round's feedback) over the original
+    // sxs ratings.json / annotations dir, which may be stale or /tmp-wiped.
+    const sxsAnnotation = resolve(opts.sxs_dir, "annotations", `${id}.png`);
+    const annotation = (led.annotation && existsSync(led.annotation))
+      ? led.annotation
+      : (existsSync(sxsAnnotation) ? sxsAnnotation : undefined);
     out.push({
       slide_id: id,
       html_file: html,
-      user_comment: (r.comment as string | undefined) ?? "",
-      annotation_png: existsSync(annotation) ? annotation : undefined,
+      user_comment: (led.comment ?? (r.comment as string | undefined)) ?? "",
+      annotation_png: annotation,
       rendered_png: resolve(opts.sxs_dir, "slides", `${id}.png`),
       original_png: resolve(opts.sxs_dir, "originals", `${id}.png`),
     });

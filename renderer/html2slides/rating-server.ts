@@ -33,6 +33,7 @@ let originalsDirOverride: string | null = null; // --originals-dir path
 let taskAnalysisPath: string | null = null;     // --task-analysis md
 let taskDiffsDir: string | null = null;         // --task-diffs dir
 let taskTitle: string | null = null;            // --task-title str
+let historyDir: string | null = null;           // --history-dir persistent ledger
 for (let i = 0; i < args.length; i++) {
   const v = args[i];
   if (v === "--port") port = parseInt(args[++i]);
@@ -42,6 +43,7 @@ for (let i = 0; i < args.length; i++) {
   else if (v === "--task-analysis") taskAnalysisPath = resolve(args[++i]);
   else if (v === "--task-diffs") taskDiffsDir = resolve(args[++i]);
   else if (v === "--task-title") taskTitle = args[++i];
+  else if (v === "--history-dir") historyDir = resolve(args[++i]);
 }
 
 // Render-parameter badge: surface which conversion mode produced these slides
@@ -421,6 +423,31 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
     if (meta.ratingsBackup) {
       try { writeFileSync(meta.ratingsBackup, JSON.stringify(ratings, null, 2)); } catch {}
     }
+  }
+
+  // Mirror to the persistent per-slide LEDGER (--history-dir). Keyed by slide_id
+  // and OUTSIDE any worktree, so the comment + annotation survive worktree
+  // cleanup and /tmp wipes — the next round reads them back to auto-populate the
+  // provenance panel. Annotation PNG is copied into the ledger so it's not just
+  // a dangling path into a deleted scratch dir.
+  if (historyDir) {
+    try {
+      mkdirSync(historyDir, { recursive: true });
+      const ledgerFile = join(historyDir, "ratings.json");
+      const ledger = existsSync(ledgerFile) ? JSON.parse(readFileSync(ledgerFile, "utf-8")) : {};
+      const led: any = { status, comment, ratedAt: entry.ratedAt };
+      if (savedAnnotPath) {
+        const ledAnnotDir = join(historyDir, "annotations");
+        mkdirSync(ledAnnotDir, { recursive: true });
+        const ledAnnot = join(ledAnnotDir, `${id}.png`);
+        copyFileSync(savedAnnotPath, ledAnnot);
+        led.annotation = ledAnnot;
+      } else if (ledger[id]?.annotation) {
+        led.annotation = ledger[id].annotation; // keep last annotation if none redrawn
+      }
+      ledger[id] = led;
+      writeFileSync(ledgerFile, JSON.stringify(ledger, null, 2));
+    } catch { /* ledger mirror is best-effort, never break a rating save */ }
   }
 
   if (status === "good") {
@@ -837,8 +864,10 @@ function render() {
     zcEl.innerHTML = '';
   }
 
-  // Clear comment box for new slide
-  document.getElementById('comment').value = c.comment || '';
+  // Pre-fill the comment box: this round's saved comment if any, otherwise the
+  // prior round's comment (origComment) so the reviewer edits it in place rather
+  // than retyping. Falls back to empty for a never-commented slide.
+  document.getElementById('comment').value = c.comment || c.origComment || '';
 
   // Task-scoped reveal buttons: shown when --task-analysis or --task-diffs
   // was configured. Buttons reset to collapsed state on every slide change
