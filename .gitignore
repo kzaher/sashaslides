@@ -71,3 +71,6 @@ renderer/html2slides/e2e/.ratings-backup/
 .sxs-complex/
 # bug_solving persistent rating ledger
 .bug-solving-history/
+
+# full-deck re-rate scratch
+.sxs-recheck/

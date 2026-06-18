@@ -236,8 +236,11 @@ async function main() {
   body { font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
          margin: 0; padding: 12px; color: #111; }
   p.sub { color: #666; margin: 0 0 12px; font-size: 12px; }
-  #dropzone { border: 2px dashed #bbb; border-radius: 10px; padding: 20px 12px;
+  #dropzone { display: block; border: 2px dashed #bbb; border-radius: 10px; padding: 20px 12px;
               text-align: center; color: #555; cursor: pointer; transition: all .15s; }
+  .btn { display: inline-block; padding: 7px 12px; font: inherit; border: 1px solid #ccc;
+         background: white; border-radius: 6px; cursor: pointer; }
+  .btn:hover { background: #f3f4f6; }
   #dropzone.hover { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
   #dropzone strong { color: #111; }
   #picker { display: none; }
@@ -275,14 +278,16 @@ async function main() {
 <body tabindex="0">
 <p class="sub">Upload, drop, or paste slide HTML. It's converted locally and inserted right after the current slide.</p>
 
-<div id="dropzone">
-  <strong>Drop .html files anywhere in this panel</strong><br>
+<!-- Native <label for> opens the OS file dialog on a real click — a
+     programmatic input.click() is blocked inside the Apps Script sandbox. -->
+<label id="dropzone" for="picker">
+  <strong>Click to browse, or drop .html slides here</strong><br>
   <span id="file-count">0</span> file(s) queued.
-</div>
+</label>
 <input type="file" id="picker" accept=".html,.htm" multiple>
 
 <div class="row">
-  <button id="upload-btn">📂 Upload files…</button>
+  <label class="btn" for="picker">📂 Browse slide files…</label>
   <button id="paste-btn">📋 Paste from clipboard</button>
 </div>
 
