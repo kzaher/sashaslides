@@ -52,17 +52,17 @@ for (let i = 0; i < args.length; i++) {
 let renderBadgeHtml = "";
 try {
   const _metaPath = join(resultsDir, "meta.json");
-  if (existsSync(_metaPath)) {
-    const _meta = JSON.parse(readFileSync(_metaPath, "utf-8"));
-    const _rp: Record<string, unknown> = { tablesFormat: _meta.tablesFormat, ...(_meta.renderParams || {}) };
-    const parts = Object.entries(_rp)
-      .filter(([, val]) => val != null && val !== "")
-      .map(([k, val]) => {
-        const cls = k === "tablesFormat" && val === "baked" ? "render-badge badge-baked" : "render-badge";
-        return `<span class="${cls}">${k}: ${val}</span>`;
-      });
-    renderBadgeHtml = parts.join("");
-  }
+  const _meta = existsSync(_metaPath) ? JSON.parse(readFileSync(_metaPath, "utf-8")) : {};
+  // ALWAYS surface the conversion args on top; default tablesFormat to "native"
+  // so the badge is never silently empty (a reviewer must always see the mode).
+  const _rp: Record<string, unknown> = { tablesFormat: _meta.tablesFormat ?? "native", ...(_meta.renderParams || {}) };
+  const parts = Object.entries(_rp)
+    .filter(([, val]) => val != null && val !== "")
+    .map(([k, val]) => {
+      const cls = k === "tablesFormat" && val === "baked" ? "render-badge badge-baked" : "render-badge";
+      return `<span class="${cls}">${k}: ${val}</span>`;
+    });
+  renderBadgeHtml = parts.join("");
 } catch { /* meta is optional */ }
 
 interface RenderedRegion { x: number; y: number; w: number; h: number; kind: string; }
@@ -1215,10 +1215,25 @@ function navigate(delta) {
   const visible = visibleComparisons();
   if (visible.length === 0) return;
   const curId = comparisons[currentIdx] && comparisons[currentIdx].id;
-  let vIdx = visible.findIndex(c => c.id === curId);
-  if (vIdx < 0) vIdx = 0;
-  vIdx = Math.max(0, Math.min(visible.length - 1, vIdx + delta));
-  currentIdx = comparisons.findIndex(c => c.id === visible[vIdx].id);
+  const vIdx = visible.findIndex(c => c.id === curId);
+  if (vIdx < 0) {
+    // The current slide was just hidden (e.g. rated good). Don't fall back to
+    // visible[0]+delta (that jumps to a PREVIOUS slide). Instead land on the
+    // next visible slide AFTER its position in the full list (forward delta),
+    // or the previous remaining one (backward delta).
+    const fullIdx = currentIdx;
+    if (delta >= 0) {
+      const next = visible.find(c => comparisons.findIndex(x => x.id === c.id) > fullIdx);
+      currentIdx = comparisons.findIndex(c => c.id === (next || visible[visible.length - 1]).id);
+    } else {
+      const prevs = visible.filter(c => comparisons.findIndex(x => x.id === c.id) < fullIdx);
+      currentIdx = comparisons.findIndex(c => c.id === (prevs[prevs.length - 1] || visible[0]).id);
+    }
+    render();
+    return;
+  }
+  const t = Math.max(0, Math.min(visible.length - 1, vIdx + delta));
+  currentIdx = comparisons.findIndex(c => c.id === visible[t].id);
   render();
 }
 
