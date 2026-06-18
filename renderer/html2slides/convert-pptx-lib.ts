@@ -1543,18 +1543,44 @@ export function buildPptx(
           // tag the rounded underlay with the SAME GRAD_<n> name so the injector
           // fills both, and leave the host tag intact. Solid hosts keep the
           // original host/patch grouping.
+          // When a child is clipped by a rounded parent, the host MUST itself
+          // become the clipped, correctly-cornered shape — adopting the patch's
+          // bounds and rounding ONLY the corners that coincide with a rounded
+          // parent corner (computeClippedPatch already zeroed the non-touching
+          // ones). The previous "rounded underlay + full-square host on top"
+          // was a fake clip: the square host re-squared every corner. Reuse the
+          // existing [TL,TR,BR,BL] → ROUND_* preset mapping so e.g. a left-flush
+          // pill → roundRect+flat-right overlays (left rounded only), a top
+          // stripe / status-bar → round2SameRect (top rounded, bottom square).
+          let hostShapeName = shapeName;
+          let clipFlatCr: CornerRadii | null = null;
+          let clipFlatBounds: Bounds = b;
           const patch = computeClippedPatch(b, el.clipMask);
           if (patch && opts.fill) {
-            const gid = nextGroupId();
-            if (el.gradient && typeof opts.objectName === "string") {
-              emitClipUnderlay(slide, patch, opts.fill, gid, opts.objectName);
-            } else {
-              emitClipUnderlay(slide, patch, opts.fill, gid);
-              opts.objectName = hostName(gid);
+            const pcr = patch.cornerRadii;
+            const pcp = cornerPresetFromRadii(pcr);
+            const pb = patch.bounds;
+            opts.x = px2in(pb.x); opts.y = px2in(pb.y);
+            opts.w = px2in(pb.w); opts.h = px2in(pb.h);
+            hostShapeName = pcp.preset;
+            if (pcp.preset !== "rect") {
+              opts.rectRadius = px2in(Math.max(pcr.tl, pcr.tr, pcr.br, pcr.bl));
+              opts.flipH = pcp.flipH || undefined;
+              opts.flipV = pcp.flipV || undefined;
             }
+            // Side-rounded clip (TL+BL / TR+BR) has no OOXML preset — preset is
+            // roundRect, square off the flat corner pair after the host draws.
+            // For gradient hosts the overlay uses the solid fallback fill (the
+            // GRAD_n tag stays on the host so the gradient still injects).
+            clipFlatBounds = pb;
+            clipFlatCr = needsFlatCornerOverlay(pcr) ? pcr : null;
           }
 
-          slide.addShape(shapeName, opts);
+          slide.addShape(hostShapeName, opts);
+
+          if (clipFlatCr) {
+            emitFlatCornerOverlays(slide, clipFlatBounds, clipFlatCr, opts.fill);
+          }
 
           // Side-rounded masks (0b0110 = right side, 0b1001 = left side) emit
           // as `roundRect` above with all-4 curves; square off the CSS-flat
@@ -1779,6 +1805,29 @@ export function buildPptx(
         }
 
         case "line": {
+          const endpointLine = el as typeof el & {
+            x1?: number; y1?: number; x2?: number; y2?: number; strokeWidth?: number;
+          };
+          if (
+            typeof endpointLine.x1 === "number" && typeof endpointLine.y1 === "number" &&
+            typeof endpointLine.x2 === "number" && typeof endpointLine.y2 === "number"
+          ) {
+            const dx = endpointLine.x2 - endpointLine.x1;
+            const dy = endpointLine.y2 - endpointLine.y1;
+            const lineOpts: ShapeProps = {
+              x: px2in(Math.min(endpointLine.x1, endpointLine.x2)),
+              y: px2in(Math.min(endpointLine.y1, endpointLine.y2)),
+              w: px2in(Math.abs(dx)),
+              h: px2in(Math.abs(dy)),
+              line: {
+                color: hexToRgb(el.color || "#000000"),
+                width: Math.max(0.5, (endpointLine.strokeWidth || 1) * PX2PT),
+              },
+            };
+            if (dx * dy < 0) lineOpts.flipV = true;
+            slide.addShape("line", lineOpts);
+            break;
+          }
           const isVertical = b.h > b.w * 2;
           // An OOXML line stroke is CENTERED on its position, so a decorative
           // strip must sit on its CENTER axis, not its top/left edge. The strip
