@@ -78,7 +78,7 @@ import {
   describeError,
 } from "../../../structured-prompting/src/index.js";
 import type { Result } from "../../../structured-prompting/src/types.js";
-import { writeFileSync, copyFileSync, mkdirSync, existsSync } from "fs";
+import { writeFileSync, readFileSync, readdirSync, copyFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 
 /**
@@ -93,15 +93,23 @@ import { join } from "path";
  *
  * @param resultsDir  the rating-server resultsDir (= <scratch>/thumbnails)
  * @param slides      per-slide round-1 records (html_file, user_comment, annotation_png)
- * @param shellStdout stdout of `record-rendering --mode full` (carries the
- *                    `presentation: https://…/edit` line)
  */
-function writeSxsMeta(resultsDir: string, slides: SlideTask[], shellStdout: string): void {
+function writeSxsMeta(resultsDir: string, slides: SlideTask[]): void {
   try {
-    // Parse the presentation URL the upload step printed. record-rendering-lib
-    // logs `    presentation: https://docs.google.com/presentation/d/<id>/edit`.
-    const m = shellStdout.match(/https:\/\/docs\.google\.com\/presentation\/d\/[A-Za-z0-9_-]+\/edit/);
-    const presentationUrl = m ? m[0] : undefined;
+    // Read the STRUCTURED manifest record-rendering --mode full wrote
+    // (<thumbs>/manifest.json = { presentation_id, slides, ... }) rather than
+    // regex-scraping the upload's stdout. The presentation URL is derived from
+    // the typed presentation_id field.
+    let presentationUrl: string | undefined;
+    const manifestPath = join(resultsDir, "thumbs", "manifest.json");
+    if (existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as { presentation_id?: string };
+        if (typeof manifest.presentation_id === "string" && manifest.presentation_id) {
+          presentationUrl = `https://docs.google.com/presentation/d/${manifest.presentation_id}/edit`;
+        }
+      } catch { /* malformed manifest → no URL */ }
+    }
 
     const sourceDir = join(resultsDir, "source");
     const annotDir = join(resultsDir, "orig-annotations");
@@ -172,6 +180,52 @@ export interface SlideVerdict {
   rationale: string;
   isRegression: boolean;
   bugSolved: boolean;
+}
+
+/** How many times to re-prompt a single-slide verdict whose response doesn't
+ *  parse/validate into a SlideVerdict. */
+const VERDICT_RETRIES = 3;
+
+/**
+ * Typed, validated parse of a per-slide verdict response. Throws on malformed
+ * JSON or wrong field types — used as the verdict step's `assert` so a bad
+ * response is RETRIED (instead of the old "manual regex + silent fallback to
+ * isRegression=true"). The thrown message tells the retry what was wrong.
+ */
+function parseSlideVerdict(raw: string, expectedSlideId: string): SlideVerdict {
+  const m = raw.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("verdict response contained no JSON object");
+  let o: Record<string, unknown>;
+  try { o = JSON.parse(m[0]) as Record<string, unknown>; }
+  catch (e) { throw new Error(`verdict JSON did not parse: ${(e as Error).message}`); }
+  if (typeof o.rationale !== "string") throw new Error("verdict.rationale must be a string");
+  if (typeof o.isRegression !== "boolean") throw new Error("verdict.isRegression must be a boolean");
+  if (typeof o.bugSolved !== "boolean") throw new Error("verdict.bugSolved must be a boolean");
+  const slide_id = typeof o.slide_id === "string" && o.slide_id ? o.slide_id : expectedSlideId;
+  return { slide_id, rationale: o.rationale, isRegression: o.isRegression, bugSolved: o.bugSolved };
+}
+
+/**
+ * C2 off-target regression detection. Reads the whole-deck diff produced by
+ * step 4b (<scratch>/reg-diffs/<slide>.diff) and returns any slide NOT in this
+ * cluster whose pptx changed between HEAD and the worker's fix (its diff is not
+ * "(no structural differences detected)"). Those are unexpected regressions the
+ * fix introduced on unrelated slides and must fail the attempt.
+ */
+function detectOffTargetRegressions(task: Task): string[] {
+  const regDir = `${task.scratch_dir}/reg-diffs`;
+  if (!existsSync(regDir)) return [];
+  const clusterIds = new Set(task.slides.map(s => s.slide_id));
+  const out: string[] = [];
+  for (const f of readdirSync(regDir)) {
+    if (!f.endsWith(".diff")) continue;
+    const sid = f.replace(/\.diff$/, "");
+    if (clusterIds.has(sid)) continue; // cluster slides are EXPECTED to change
+    let txt = "";
+    try { txt = readFileSync(join(regDir, f), "utf-8"); } catch { continue; }
+    if (!/no structural differences/i.test(txt)) out.push(sid);
+  }
+  return out.sort();
 }
 
 /** Spec for a post-run rating server that main-scaffolding.ts will boot as
@@ -322,6 +376,31 @@ export function main(args: {
         `--out ${task.scratch_dir}/diffs`
       )
 
+      // Step 4b — REGRESSION SCAN across the WHOLE fixture deck (not just this
+      // cluster's slides). Render every fixture WITH the worker's fix
+      // (after-all) and WITHOUT it (baseline — the fix git-stashed, then
+      // restored), then diff. Step 6b fails the attempt if any NON-cluster
+      // slide changed (an off-target regression). Dirs are cleared first so a
+      // retry never diffs stale pptx (the round-2 idempotent-cache trap).
+      .executeShell(() => {
+        const wt = task.workspace_dir;
+        const fx = `${wt}/${task.fixtures_dir}`;
+        const sc = task.scratch_dir;
+        const rec = `${wt}/${SCRIPTS.record}`;
+        const dif = `${wt}/${SCRIPTS.diff}`;
+        return [
+          `cd ${wt}/renderer`,
+          `rm -rf ${sc}/after-all ${sc}/before-all ${sc}/reg-diffs`,
+          `ALL=$(ls ${fx}/slide_*.html | xargs -n1 basename | sed 's/[.]html$//' | sort -V | paste -sd,)`,
+          `npx tsx ${rec} --mode pptx --fixtures ${fx} --slides "$ALL" --out ${sc}/after-all`,
+          // baseline: stash the worker's tracked fix, render HEAD, restore.
+          `git -C ${wt} stash push -m bs-regbase >/dev/null 2>&1 || true`,
+          `npx tsx ${rec} --mode pptx --fixtures ${fx} --slides "$ALL" --out ${sc}/before-all`,
+          `git -C ${wt} stash list | grep -q bs-regbase && git -C ${wt} stash pop >/dev/null 2>&1 || true`,
+          `npx tsx ${dif} --before ${sc}/before-all/pptx --after ${sc}/after-all/pptx --out ${sc}/reg-diffs`,
+        ].join(" && ");
+      })
+
       // Step 5 — per-slide verdict fork. Each slide gets its own sub-
       // session that reads the diff + analysis + comment, emits a JSON
       // object as plain text, and we parse it in the combineWith below.
@@ -330,25 +409,31 @@ export function main(args: {
       // parent chain's conversation state directly, which helps them
       // know what happened in steps 1–4 without extra prompting.
       .parallelFork(task.slides, (child, slide) =>
-        child
-          .prependToNextPrompt(
-            `You are verifying the fix for ${slide.slide_id}. ` +
-            `Analysis: ${task.analysis_dir}/analysis.md. ` +
-            `Diff: ${task.scratch_dir}/diffs/${slide.slide_id}.diff. ` +
-            `User's original comment: "${slide.user_comment}".`,
-          )
-          .send({
-            prompt: [
-              `Read analysis.md (the H2 section for ${slide.slide_id}) and the diff file.`,
-              `Respond with ONLY a single-line JSON object (no prose, no code fences, no trailing commentary) with these keys:`,
-              `  slide_id     (string, must equal "${slide.slide_id}"),`,
-              `  rationale    (string, <=500 chars; what changed and why),`,
-              `  isRegression (boolean; true if the diff introduces NEW rendering problems not mentioned in analysis.md's Expected-diff section),`,
-              `  bugSolved    (boolean; true only if the diff clearly addresses the user's comment AND matches the Expected-diff claim).`,
-              `Example:`,
-              `{"slide_id":"${slide.slide_id}","rationale":"text moved from y=340 to y=364","isRegression":false,"bugSolved":true}`,
-            ].join(" "),
-          }),
+        // Retry the verdict prompt (up to VERDICT_RETRIES) until the response
+        // parses + validates into a SlideVerdict. The `assert` runs the typed
+        // parser; a throw triggers a re-send rather than accepting garbage.
+        child.tryMultipleTimes<string>(VERDICT_RETRIES, (c) =>
+          c
+            .prependToNextPrompt(
+              `You are verifying the fix for ${slide.slide_id}. ` +
+              `Analysis: ${task.analysis_dir}/analysis.md. ` +
+              `Diff: ${task.scratch_dir}/diffs/${slide.slide_id}.diff. ` +
+              `User's original comment: "${slide.user_comment}".`,
+            )
+            .send({
+              prompt: [
+                `Read analysis.md (the H2 section for ${slide.slide_id}) and the diff file.`,
+                `Respond with ONLY a single-line JSON object (no prose, no code fences, no trailing commentary) with these keys:`,
+                `  slide_id     (string, must equal "${slide.slide_id}"),`,
+                `  rationale    (string, <=500 chars; what changed and why),`,
+                `  isRegression (boolean; true if the diff introduces NEW rendering problems not mentioned in analysis.md's Expected-diff section),`,
+                `  bugSolved    (boolean; true only if the diff clearly addresses the user's comment AND matches the Expected-diff claim).`,
+                `Example:`,
+                `{"slide_id":"${slide.slide_id}","rationale":"text moved from y=340 to y=364","isRegression":false,"bugSolved":true}`,
+              ].join(" "),
+            })
+            .assert((raw: string) => { parseSlideVerdict(raw, slide.slide_id); }),
+        ),
       )
 
       // Step 6 — aggregate verdicts. Parse each slide's JSON response,
@@ -365,22 +450,17 @@ export function main(args: {
           ].join(" "),
         }),
         (verdictStrings, fixSummary) => {
+          // Each response already passed the validating `assert` (with retries),
+          // so parseSlideVerdict won't normally throw here. Keep a defensive
+          // fallback for the rare all-retries-failed case.
           const verdicts: SlideVerdict[] = verdictStrings.map((s, i) => {
             try {
-              const m = s.match(/\{[\s\S]*\}/);
-              if (!m) throw new Error("no JSON object in response");
-              const parsed = JSON.parse(m[0]);
-              return {
-                slide_id: String(parsed.slide_id ?? task.slides[i].slide_id),
-                rationale: String(parsed.rationale ?? "(missing)"),
-                isRegression: Boolean(parsed.isRegression),
-                bugSolved: Boolean(parsed.bugSolved),
-              };
+              return parseSlideVerdict(s, task.slides[i].slide_id);
             } catch (e) {
               return {
                 slide_id: task.slides[i].slide_id,
-                rationale: `(parse error: ${(e as Error).message}) raw=${s.slice(0, 200)}`,
-                isRegression: true,  // unparseable verdict is conservatively treated as regression
+                rationale: `(verdict unparseable after ${VERDICT_RETRIES} retries: ${(e as Error).message}) raw=${s.slice(0, 200)}`,
+                isRegression: true,  // conservatively treat an unparseable verdict as a regression
                 bugSolved: false,
               };
             }
@@ -410,18 +490,21 @@ export function main(args: {
       // assert() rejects the upstream on throw, which the surrounding
       // tryMultipleTimes then catches and routes to a retry attempt.
       .assert((tr: TaskResult) => {
+        const lines: string[] = [];
         const regressions = tr.verdicts.filter(v => v.isRegression);
         const unsolved = tr.verdicts.filter(v => !v.bugSolved);
-        if (regressions.length > 0 || unsolved.length > 0) {
-          const lines: string[] = [];
-          if (regressions.length)
-            lines.push(`REGRESSIONS (${regressions.length}):`,
-              ...regressions.map(r => `  - ${r.slide_id}: ${r.rationale}`));
-          if (unsolved.length)
-            lines.push(`UNSOLVED (${unsolved.length}):`,
-              ...unsolved.map(r => `  - ${r.slide_id}: ${r.rationale}`));
-          throw new Error(lines.join("\n"));
-        }
+        if (regressions.length)
+          lines.push(`REGRESSIONS (${regressions.length}):`,
+            ...regressions.map(r => `  - ${r.slide_id}: ${r.rationale}`));
+        if (unsolved.length)
+          lines.push(`UNSOLVED (${unsolved.length}):`,
+            ...unsolved.map(r => `  - ${r.slide_id}: ${r.rationale}`));
+        // C2: fail on off-target regressions — any non-cluster slide the fix
+        // unexpectedly changed (from the whole-deck diff in step 4b).
+        const offTarget = detectOffTargetRegressions(task);
+        if (offTarget.length)
+          lines.push(`OFF-TARGET REGRESSIONS (${offTarget.length}) — non-cluster slides changed by this fix: ${offTarget.join(", ")}`);
+        if (lines.length) throw new Error(lines.join("\n"));
       })
 
       // Step 7 — upload consolidated pptx + scrape thumbnails.
@@ -448,14 +531,14 @@ export function main(args: {
           `--slides ${ids} --title "${task.presentation_title}" ` +
           `--out ${task.scratch_dir}/thumbnails || true`
         ),
-        (taskResult, shellStdout) => {
+        (taskResult) => {
           // Best-effort: write the sxs-meta.json provenance sidecar into the
           // rating-server resultsDir (= <scratch>/thumbnails) so every SxS card
-          // shows the original HTML link, the presentation URL parsed from the
-          // upload stdout, the original annotation, and the original comment.
-          // A throw here must not lose an already-PASSED fix → writeSxsMeta
-          // swallows its own errors.
-          writeSxsMeta(`${task.scratch_dir}/thumbnails`, task.slides, shellStdout);
+          // shows the original HTML link, the presentation URL (read from the
+          // structured manifest.json the upload wrote — not scraped from stdout),
+          // the original annotation, and the original comment. A throw here must
+          // not lose an already-PASSED fix → writeSxsMeta swallows its own errors.
+          writeSxsMeta(`${task.scratch_dir}/thumbnails`, task.slides);
           return taskResult;
         },
       );
