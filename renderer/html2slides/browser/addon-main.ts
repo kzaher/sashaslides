@@ -255,10 +255,10 @@ function init() {
     }
   });
 
-  // Upload button + dropzone click → native file picker.
-  const openPicker = () => picker.click();
-  ($("#upload-btn") as HTMLButtonElement).addEventListener("click", openPicker);
-  drop.addEventListener("click", openPicker);
+  // The dropzone and "Browse slide files…" are <label for="picker"> elements, so
+  // a real click opens the OS dialog natively (a programmatic picker.click() is
+  // blocked inside the Apps Script sandbox). We only wire the input's events.
+  void drop;
   picker.addEventListener("click", () => { picker.value = ""; }); // re-pick same file works
   picker.addEventListener("change", () => { if (picker.files) addFiles(picker.files); });
 
