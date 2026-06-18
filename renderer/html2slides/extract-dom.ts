@@ -324,6 +324,11 @@ interface ExtractedElement {
   // line
   color?: string | null;
   dashType?: string;
+  strokeWidth?: number;
+  x1?: number;
+  y1?: number;
+  x2?: number;
+  y2?: number;
   // text
   text?: string;
   runs?: TextRun[];
@@ -1402,6 +1407,52 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     return { fill: only.c!, rotate: only.rotate };
   }
 
+  function borderChevronFromStyle(s: ElementStyle, b: Bounds): { color: string; width: number; rotate: number; bars: { x: number; y: number; w: number; h: number }[] } | null {
+    const width = s.naturalWidth || b.w;
+    const height = s.naturalHeight || b.h;
+    if (width < 2 || height < 2) return null;
+    if (Math.abs(width - height) > Math.max(2, Math.min(width, height) * 0.25)) return null;
+
+    const sides = [
+      { dir: "top", w: s.borderTop || 0, c: s.borderTopColor },
+      { dir: "right", w: s.borderRight || 0, c: s.borderRightColor },
+      { dir: "bottom", w: s.borderBottom || 0, c: s.borderBottomColor },
+      { dir: "left", w: s.borderLeft || 0, c: s.borderLeftColor },
+    ];
+    const colored = sides.filter(side => side.w > 0 && side.c);
+    if (colored.length !== 2) return null;
+    if (colored[0].c !== colored[1].c || Math.abs(colored[0].w - colored[1].w) > 0.5) return null;
+    const dirs = colored.map(side => side.dir).sort().join(",");
+    const adjacent = dirs === "left,top" || dirs === "bottom,left" || dirs === "bottom,right" || dirs === "right,top";
+    if (!adjacent) return null;
+    if (sides.some(side => !colored.includes(side) && side.w > 0 && side.c)) return null;
+
+    const bw = colored[0].w;
+    const bars = colored.map(side => {
+      if (side.dir === "top") return { x: 0, y: 0, w: width, h: bw };
+      if (side.dir === "right") return { x: width - bw, y: 0, w: bw, h: height };
+      if (side.dir === "bottom") return { x: 0, y: height - bw, w: width, h: bw };
+      return { x: 0, y: 0, w: bw, h: height };
+    });
+    return {
+      color: colored[0].c!,
+      width: bw,
+      rotate: s.rotate || 0,
+      bars,
+    };
+  }
+
+  function detectBorderChevron(el: Element, s: ElementStyle, b: Bounds): { color: string; width: number; rotate: number; sourceBounds: Bounds; sourceWidth: number; sourceHeight: number; bars: { x: number; y: number; w: number; h: number }[] } | null {
+    const ch = borderChevronFromStyle(s, b);
+    if (!ch) return null;
+    return {
+      ...ch,
+      sourceBounds: b,
+      sourceWidth: s.naturalWidth || b.w,
+      sourceHeight: s.naturalHeight || b.h,
+    };
+  }
+
   function emitTriangle(b: Bounds, fill: string, rotate: number, s: ElementStyle): void {
     elements.push({
       type: "triangle",
@@ -1411,6 +1462,65 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       zIndex: s.zIndex,
       position: s.position,
     });
+  }
+
+  function emitChevron(ch: { color: string; rotate: number; sourceBounds: Bounds; sourceWidth: number; sourceHeight: number; bars: { x: number; y: number; w: number; h: number }[] }, s: ElementStyle): void {
+    const cx = ch.sourceBounds.x + ch.sourceBounds.w / 2;
+    const cy = ch.sourceBounds.y + ch.sourceBounds.h / 2;
+    const localCx = ch.sourceWidth / 2;
+    const localCy = ch.sourceHeight / 2;
+    const rad = ch.rotate * Math.PI / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const project = (x: number, y: number): { x: number; y: number } => {
+      const dx = x - localCx;
+      const dy = y - localCy;
+      return {
+        x: cx + dx * cos - dy * sin,
+        y: cy + dx * sin + dy * cos,
+      };
+    };
+    for (const bar of ch.bars) {
+      const horizontal = bar.w >= bar.h;
+      const p1 = horizontal
+        ? project(bar.x, bar.y + bar.h / 2)
+        : project(bar.x + bar.w / 2, bar.y);
+      const p2 = horizontal
+        ? project(bar.x + bar.w, bar.y + bar.h / 2)
+        : project(bar.x + bar.w / 2, bar.y + bar.h);
+      elements.push({
+        type: "line",
+        bounds: {
+          x: Math.min(p1.x, p2.x),
+          y: Math.min(p1.y, p2.y),
+          w: Math.abs(p2.x - p1.x),
+          h: Math.abs(p2.y - p1.y),
+        },
+        color: ch.color,
+        strokeWidth: horizontal ? bar.h : bar.w,
+        x1: p1.x,
+        y1: p1.y,
+        x2: p2.x,
+        y2: p2.y,
+        zIndex: s.zIndex,
+        position: s.position,
+      });
+    }
+  }
+
+  function emitAbsoluteChildChevrons(host: Element): void {
+    for (const child of Array.from((host as HTMLElement).children)) {
+      if (seen.has(child)) continue;
+      const cs = getComputedStyle(child);
+      if (cs.position !== "absolute" && cs.position !== "fixed") continue;
+      const childBounds = getBounds(child);
+      if (!isVisible(child, childBounds)) continue;
+      const childStyle = getStyle(child);
+      const chev = detectBorderChevron(child, childStyle, childBounds);
+      if (!chev) continue;
+      seen.add(child);
+      emitChevron(chev, childStyle);
+    }
   }
 
   function emitRect(el: Element, s: ElementStyle, b: Bounds): void {
@@ -1651,8 +1761,26 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
           borderRight: bwR, borderRightColor: rgb2hex(pcs.borderRightColor),
           borderBottom: bwB, borderBottomColor: rgb2hex(pcs.borderBottomColor),
           borderLeft: bwL, borderLeftColor: rgb2hex(pcs.borderLeftColor),
+          rotate: (() => {
+            const tm = (pcs.transform || "").match(/matrix\(([^)]+)\)/);
+            if (!tm) return 0;
+            const nums = tm[1].split(",").map(n => parseFloat(n));
+            if (nums.length < 4) return 0;
+            const deg = Math.atan2(nums[1], nums[0]) * 180 / Math.PI;
+            return Math.abs(deg) < 0.1 ? 0 : deg;
+          })(),
+          naturalWidth: parseFloat(pcs.width) || pb.w || bwL + bwR,
+          naturalHeight: parseFloat(pcs.height) || pb.h || bwT + bwB,
         } as unknown as ElementStyle;
         const triBounds: Bounds = { x: pb.x, y: pb.y, w: bwL + bwR, h: bwT + bwB };
+        const chev = detectBorderChevron(el, triStyle, pb);
+        if (chev) {
+          emitChevron(chev, {
+            zIndex: parseInt(pcs.zIndex) || 999,
+            position: pcs.position,
+          } as unknown as ElementStyle);
+          continue;
+        }
         const tri = detectBorderTriangle(el, triStyle, triBounds);
         if (tri) {
           emitTriangle(triBounds, tri.fill, tri.rotate, {
@@ -1762,19 +1890,24 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         const oy = bounds.y + parentBT;
         const ow = Math.max(0, bounds.w - parentBL_w - parentBR_w);
         const oh = Math.max(0, bounds.h - parentBT - parentBB_w);
-        // Square off the stripe's TOP corners. The stripe is a flat-topped bar
-        // that the parent's `border-radius + overflow:hidden` merely NIPS at the
-        // corners (slide_14 `.logo-card::before`, slide_11 `.card::before`) — it
-        // is NOT itself a rounded border. Inheriting the parent's per-corner
-        // radius here (pTL/pTR) curved the stripe colour DOWN the corners,
-        // because the OUTER overlay's 11px top arc extends ~11px below the 3px
-        // stripe band and the INNER fill (smaller, shifted-down arc) can't cover
-        // that sliver — read by the user as "rounded border vs straight top
-        // line". Emit a flat top (tl/tr = 0); the parent's own roundRect supplies
-        // the card curve and the recursive clip mask presents the corner cut.
+        // ROUND the stripe's TOP corners to the parent's radius. The accent is
+        // clipped by the parent's `border-radius + overflow:hidden`, so its top
+        // corners follow the card's curve — they are NOT square. A previous
+        // round emitted a flat top (tl/tr = 0) on the theory that the parent's
+        // roundRect + a recursive clip mask would present the cut; but these
+        // synthetic OUTER/INNER overlays carry NO clipMask, so nothing nipped
+        // the corners and the flat-topped accent OVERHANGS the card's rounded
+        // top — the square colour poking past the curve is the "visible on the
+        // sides" defect the user flagged (slide_14). Inheriting pTL/pTR makes
+        // the OUTER overlay a `round2SameRect` (top rounded, flat bottom) — the
+        // "element which presents the cut". Because OUTER spans the parent's
+        // FULL height, the radius is a real ~11px (not clamped by the 3px stripe
+        // height), and the INNER overlay (inset by stripeH, corners shrunk by
+        // stripeH) keeps the visible accent a thin band that tapers cleanly down
+        // the corner curve rather than running a separate sliver.
         const outerCr = {
-          tl: 0,
-          tr: 0,
+          tl: pTL > 0 ? Math.max(0, pTL - Math.min(parentBT, parentBL_w)) : 0,
+          tr: pTR > 0 ? Math.max(0, pTR - Math.min(parentBT, parentBR_w)) : 0,
           br: pBR > 0 ? Math.max(0, pBR - Math.min(parentBB_w, parentBR_w)) : 0,
           bl: pBL > 0 ? Math.max(0, pBL - Math.min(parentBB_w, parentBL_w)) : 0,
         };
@@ -2349,6 +2482,13 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     // CSS border-triangle arrows: width:0; height:0 with one colored border
     // side + transparent perpendicular sides. Emit as a preset triangle shape
     // instead of a rect (which would render as a thin colored strip).
+    const chev = detectBorderChevron(el, style, bounds);
+    if (chev) {
+      seen.add(el);
+      emitChevron(chev, style);
+      return;
+    }
+
     const tri = detectBorderTriangle(el, style, bounds);
     if (tri) {
       seen.add(el);
@@ -2749,6 +2889,10 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         textEl.text = allRuns.map(r => r.text).join("");
       }
       elements.push(textEl);
+      // Direct-text containers return here and do not recurse children. Preserve
+      // absolutely-positioned decorative border chevrons such as slide_34
+      // `.r > .chev` before taking that fast path.
+      emitAbsoluteChildChevrons(el);
       // Re-draw rounded inline-block pill chips that this merge flattened
       // (slide_31 `.chip`) as standalone pills on top of the merged text.
       if (hasStyledRuns) emitMergedChips(el);
