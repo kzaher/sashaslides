@@ -228,6 +228,23 @@ function detectOffTargetRegressions(task: Task): string[] {
   return out.sort();
 }
 
+/** Off-target regressions to FAIL on. Prefers the visual gate's verdict
+ *  (<scratch>/offtarget-gate.json `regressions` = slides the image verifier
+ *  judged visibly WORSE after the fix). Falls back to the conservative binary
+ *  structural check (detectOffTargetRegressions) if the gate file is missing or
+ *  corrupt, so a gate-script failure can never silently drop the off-target
+ *  safety net. */
+function readOffTargetRegressions(task: Task): string[] {
+  const f = join(task.scratch_dir, "offtarget-gate.json");
+  if (existsSync(f)) {
+    try {
+      const o = JSON.parse(readFileSync(f, "utf-8")) as { regressions?: unknown };
+      if (Array.isArray(o.regressions)) return o.regressions.filter((s): s is string => typeof s === "string");
+    } catch { /* fall through to the structural check */ }
+  }
+  return detectOffTargetRegressions(task);
+}
+
 /** Spec for a post-run rating server that main-scaffolding.ts will boot as
  *  a tracked child process. main.ts returns this spec; it does NOT launch
  *  the server itself (see header: subprocess lifetime). */
@@ -259,6 +276,10 @@ const SCRIPTS = {
   record: "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts",
   diff: "renderer/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts",
   filteredServer: "renderer/structured-prompts/bug_solving/scripts/filtered-rating-server.ts",
+  // Visual off-target gate: renders changed non-cluster slides BEFORE/AFTER and
+  // image-verifies whether the change is a VISIBLE regression (vs the old binary
+  // structural fail). Writes <scratch>/offtarget-gate.json.
+  offtargetGate: "renderer/structured-prompts/bug_solving/scripts/offtarget-gate.ts",
 };
 
 const slideIdsCsv = (t: Task) => t.slides.map(s => s.slide_id).join(",");
@@ -425,6 +446,21 @@ export function main(args: {
         `--out ${task.scratch_dir}/thumbnails || true`,
       )
 
+      // Step 4d — VISUAL off-target gate. Reads step 4b's reg-diffs, and for any
+      // NON-cluster slide the fix changed structurally, renders it BEFORE/AFTER
+      // to Slides and asks an image-aware verifier whether the change is a
+      // VISIBLE regression (a benign reflow passes). Writes
+      // <scratch>/offtarget-gate.json, which step 6b reads. Best-effort
+      // (`|| true`): the helper always writes the file + exits 0, and step 6b
+      // falls back to the conservative binary structural check if it's missing.
+      .executeShell(() =>
+        `cd ${task.workspace_dir}/renderer && npx tsx ${task.workspace_dir}/${SCRIPTS.offtargetGate} ` +
+        `--scratch ${task.scratch_dir} --cluster ${ids} --workdir ${task.workspace_dir} ` +
+        `--fixtures ${task.workspace_dir}/${task.fixtures_dir} ` +
+        `--record ${task.workspace_dir}/${SCRIPTS.record} ` +
+        `--title "${task.presentation_title}-offtarget" || true`,
+      )
+
       // Step 5 — per-slide verdict fork. Each slide gets its own sub-
       // session that reads the diff + analysis + comment, emits a JSON
       // object as plain text, and we parse it in the combineWith below.
@@ -530,11 +566,12 @@ export function main(args: {
         if (unsolved.length)
           lines.push(`UNSOLVED (${unsolved.length}):`,
             ...unsolved.map(r => `  - ${r.slide_id}: ${r.rationale}`));
-        // C2: fail on off-target regressions — any non-cluster slide the fix
-        // unexpectedly changed (from the whole-deck diff in step 4b).
-        const offTarget = detectOffTargetRegressions(task);
+        // C2: fail on off-target regressions — but ONLY ones the step-4d visual
+        // gate confirmed are VISIBLY worse (not any structural change). Falls
+        // back to the binary structural check if the gate file is absent.
+        const offTarget = readOffTargetRegressions(task);
         if (offTarget.length)
-          lines.push(`OFF-TARGET REGRESSIONS (${offTarget.length}) — non-cluster slides changed by this fix: ${offTarget.join(", ")}`);
+          lines.push(`OFF-TARGET VISIBLE REGRESSIONS (${offTarget.length}) — non-cluster slides the image verifier judged visibly worse after this fix: ${offTarget.join(", ")}`);
         if (lines.length) throw new Error(lines.join("\n"));
       })
 
