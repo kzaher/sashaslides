@@ -392,14 +392,38 @@ export function main(args: {
           `cd ${wt}/renderer`,
           `rm -rf ${sc}/after-all ${sc}/before-all ${sc}/reg-diffs`,
           `ALL=$(ls ${fx}/slide_*.html | xargs -n1 basename | sed 's/[.]html$//' | sort -V | paste -sd,)`,
-          `npx tsx ${rec} --mode pptx --fixtures ${fx} --slides "$ALL" --out ${sc}/after-all`,
+          // RECORD_CONCURRENCY=1 forces SEQUENTIAL rendering of the whole-deck
+          // before/after passes. Concurrent Chrome tabs race on web-font load,
+          // shifting text metrics → nondeterministic pptx → PHANTOM off-target
+          // regressions (this is what falsely failed flex-panel-width: a no-op
+          // fix drew a disjoint set of "changed" slides each run). Sequential
+          // rendering is empirically byte-deterministic (full-deck HEAD-vs-HEAD
+          // = 0 structural drift), so the off-target diff reflects ONLY the fix.
+          `RECORD_CONCURRENCY=1 npx tsx ${rec} --mode pptx --fixtures ${fx} --slides "$ALL" --out ${sc}/after-all`,
           // baseline: stash the worker's tracked fix, render HEAD, restore.
           `git -C ${wt} stash push -m bs-regbase >/dev/null 2>&1 || true`,
-          `npx tsx ${rec} --mode pptx --fixtures ${fx} --slides "$ALL" --out ${sc}/before-all`,
+          `RECORD_CONCURRENCY=1 npx tsx ${rec} --mode pptx --fixtures ${fx} --slides "$ALL" --out ${sc}/before-all`,
           `git -C ${wt} stash list | grep -q bs-regbase && git -C ${wt} stash pop >/dev/null 2>&1 || true`,
           `npx tsx ${dif} --before ${sc}/before-all/pptx --after ${sc}/after-all/pptx --out ${sc}/reg-diffs`,
         ].join(" && ");
       })
+
+      // Step 4c — render the AFTER state to Google Slides BEFORE the verdict so
+      // each per-slide verifier can VISUALLY compare the target vs the post-fix
+      // render. This is what lets the verdict judge PIXEL-ONLY fixes the OOXML
+      // structural diff is blind to (e.g. a rounded-corner image mask whose
+      // <p:pic> XML is unchanged). The thumbnails dir is cleared first so every
+      // retry attempt re-renders the NEW fix (uploadAndScrape is idempotent on a
+      // present manifest and would otherwise reuse a stale render). Best-effort
+      // (`|| true`): a flaky Google upload must not block the verdict — the
+      // verifier falls back to the diff when the AFTER image is missing.
+      .executeShell(() =>
+        `rm -rf ${task.scratch_dir}/thumbnails && ` +
+        `cd ${task.workspace_dir}/renderer && npx tsx ${task.workspace_dir}/${SCRIPTS.record} ` +
+        `--mode full --fixtures ${task.workspace_dir}/${task.fixtures_dir} ` +
+        `--slides ${ids} --title "${task.presentation_title}" ` +
+        `--out ${task.scratch_dir}/thumbnails || true`,
+      )
 
       // Step 5 — per-slide verdict fork. Each slide gets its own sub-
       // session that reads the diff + analysis + comment, emits a JSON
@@ -417,19 +441,26 @@ export function main(args: {
             .prependToNextPrompt(
               `You are verifying the fix for ${slide.slide_id}. ` +
               `Analysis: ${task.analysis_dir}/analysis.md. ` +
-              `Diff: ${task.scratch_dir}/diffs/${slide.slide_id}.diff. ` +
+              `Diff (OOXML structural): ${task.scratch_dir}/diffs/${slide.slide_id}.diff. ` +
+              `TARGET render (what it SHOULD look like): ${slide.original_png}. ` +
+              `AFTER render (the post-fix Google-Slides output): ${task.scratch_dir}/thumbnails/thumbs/${slide.slide_id}.png. ` +
+              (slide.annotation_png ? `User annotation (red marks the defect): ${slide.annotation_png}. ` : ``) +
               `User's original comment: "${slide.user_comment}".`,
             )
             .send({
               prompt: [
                 `Read analysis.md (the H2 section for ${slide.slide_id}) and the diff file.`,
+                `Then use the Read tool to VIEW the TARGET render and the AFTER render (paths in the header).`,
+                `Compare them visually against the user's comment to judge whether the defect is fixed and nothing new broke.`,
+                `IMPORTANT: the OOXML diff can be EMPTY for a correct PIXEL-ONLY fix (e.g. a rasterized rounded-corner image mask). In that case judge from the IMAGES, not the diff — an empty diff is NOT evidence of failure.`,
+                `If the AFTER render file is missing/unreadable, judge from the diff + analysis alone and say so in the rationale.`,
                 `Respond with ONLY a single-line JSON object (no prose, no code fences, no trailing commentary) with these keys:`,
                 `  slide_id     (string, must equal "${slide.slide_id}"),`,
-                `  rationale    (string, <=500 chars; what changed and why),`,
-                `  isRegression (boolean; true if the diff introduces NEW rendering problems not mentioned in analysis.md's Expected-diff section),`,
-                `  bugSolved    (boolean; true only if the diff clearly addresses the user's comment AND matches the Expected-diff claim).`,
+                `  rationale    (string, <=500 chars; what changed visually and/or structurally, and why),`,
+                `  isRegression (boolean; true if the diff OR the AFTER image introduces NEW rendering problems not mentioned in analysis.md's Expected-diff section),`,
+                `  bugSolved    (boolean; true only if the AFTER render visually addresses the user's comment AND matches the Expected-diff claim; a pixel-only fix with an empty diff still counts as solved when the AFTER image is correct).`,
                 `Example:`,
-                `{"slide_id":"${slide.slide_id}","rationale":"text moved from y=340 to y=364","isRegression":false,"bugSolved":true}`,
+                `{"slide_id":"${slide.slide_id}","rationale":"device corners now rounded in the AFTER render; target and after match","isRegression":false,"bugSolved":true}`,
               ].join(" "),
             })
             .assert((raw: string) => { parseSlideVerdict(raw, slide.slide_id); }),
