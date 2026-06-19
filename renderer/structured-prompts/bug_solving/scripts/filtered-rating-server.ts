@@ -81,6 +81,12 @@ const forwarded = [
   // Persistent per-slide ledger so comments + annotations survive worktree
   // cleanup / /tmp wipes and auto-populate the next round's provenance panel.
   "--history-dir", "/workspaces/sashaslides/.bug-solving-history",
+  // CANDIDATE: this UI rates an UNMERGED bug_solving worktree fix. Verdicts go
+  // to candidates.json; the canonical per-slide ISSUE in ratings.json is NEVER
+  // overwritten by a post-fix "leftover" comment (only a merge to main updates
+  // the issue). This is what prevents a round-N rating from clobbering the
+  // original issue the way it did before this guard existed.
+  "--candidate",
 ];
 
 console.log(`[filtered-rating-server wrapper] exec → npx ${forwarded.join(" ")}`);
