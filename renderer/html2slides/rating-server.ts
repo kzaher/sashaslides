@@ -34,6 +34,14 @@ let taskAnalysisPath: string | null = null;     // --task-analysis md
 let taskDiffsDir: string | null = null;         // --task-diffs dir
 let taskTitle: string | null = null;            // --task-title str
 let historyDir: string | null = null;           // --history-dir persistent ledger
+// --candidate: this server is rating an UNMERGED fix attempt (a bug_solving
+// worktree render), NOT the canonical state of main. In candidate mode the
+// verdict is recorded to <history-dir>/candidates.json (so green-detection
+// still sees pass/fail), but the canonical per-slide ISSUE in ratings.json is
+// LEFT UNTOUCHED — only a fix that actually lands on main may update the issue.
+// Default (no flag) = canonical: the rating describes main's current render and
+// updates the ledger's issue as the source of truth.
+let candidateMode = false;
 for (let i = 0; i < args.length; i++) {
   const v = args[i];
   if (v === "--port") port = parseInt(args[++i]);
@@ -44,6 +52,7 @@ for (let i = 0; i < args.length; i++) {
   else if (v === "--task-diffs") taskDiffsDir = resolve(args[++i]);
   else if (v === "--task-title") taskTitle = args[++i];
   else if (v === "--history-dir") historyDir = resolve(args[++i]);
+  else if (v === "--candidate") candidateMode = true;
 }
 
 // Render-parameter badge: surface which conversion mode produced these slides
@@ -439,20 +448,42 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
   if (historyDir) {
     try {
       mkdirSync(historyDir, { recursive: true });
-      const ledgerFile = join(historyDir, "ratings.json");
-      const ledger = existsSync(ledgerFile) ? JSON.parse(readFileSync(ledgerFile, "utf-8")) : {};
-      const led: any = { status, comment, ratedAt: entry.ratedAt };
-      if (savedAnnotPath) {
-        const ledAnnotDir = join(historyDir, "annotations");
-        mkdirSync(ledAnnotDir, { recursive: true });
-        const ledAnnot = join(ledAnnotDir, `${id}.png`);
-        copyFileSync(savedAnnotPath, ledAnnot);
-        led.annotation = ledAnnot;
-      } else if (ledger[id]?.annotation) {
-        led.annotation = ledger[id].annotation; // keep last annotation if none redrawn
+      if (candidateMode) {
+        // CANDIDATE: this rating judges an UNMERGED fix attempt. Record the
+        // verdict in a SEPARATE store and DO NOT touch the canonical issue —
+        // overwriting it with a post-fix "leftover" comment would point the
+        // next round at a defect tied to a fix that never landed (and whose
+        // worktree gets nuked). Only a merge to main may update the issue.
+        const candFile = join(historyDir, "candidates.json");
+        const cand = existsSync(candFile) ? JSON.parse(readFileSync(candFile, "utf-8")) : {};
+        const rec: any = { status, comment, ratedAt: entry.ratedAt, taskTitle: taskTitle ?? null };
+        if (savedAnnotPath) {
+          const candAnnotDir = join(historyDir, "candidate-annotations");
+          mkdirSync(candAnnotDir, { recursive: true });
+          const candAnnot = join(candAnnotDir, `${id}.png`);
+          copyFileSync(savedAnnotPath, candAnnot);
+          rec.annotation = candAnnot;
+        }
+        cand[id] = rec;
+        writeFileSync(candFile, JSON.stringify(cand, null, 2));
+      } else {
+        // CANONICAL: this rating describes main's current render — the source of
+        // truth for the per-slide issue. Update the ledger.
+        const ledgerFile = join(historyDir, "ratings.json");
+        const ledger = existsSync(ledgerFile) ? JSON.parse(readFileSync(ledgerFile, "utf-8")) : {};
+        const led: any = { status, comment, ratedAt: entry.ratedAt };
+        if (savedAnnotPath) {
+          const ledAnnotDir = join(historyDir, "annotations");
+          mkdirSync(ledAnnotDir, { recursive: true });
+          const ledAnnot = join(ledAnnotDir, `${id}.png`);
+          copyFileSync(savedAnnotPath, ledAnnot);
+          led.annotation = ledAnnot;
+        } else if (ledger[id]?.annotation) {
+          led.annotation = ledger[id].annotation; // keep last annotation if none redrawn
+        }
+        ledger[id] = led;
+        writeFileSync(ledgerFile, JSON.stringify(ledger, null, 2));
       }
-      ledger[id] = led;
-      writeFileSync(ledgerFile, JSON.stringify(ledger, null, 2));
     } catch { /* ledger mirror is best-effort, never break a rating save */ }
   }
 
