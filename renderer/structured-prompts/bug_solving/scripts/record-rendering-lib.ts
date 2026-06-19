@@ -91,8 +91,14 @@ async function recordPptx(slides: string[], outDir: string, fixturesDir: string)
     console.log(`  pptx: all ${slides.length} present, skipping`);
     return;
   }
-  console.log(`  pptx: building ${missing.length}/${slides.length} (rest cached, concurrency=4)...`);
-  await pLimit(4, missing, async (id) => {
+  // Concurrency is env-overridable (RECORD_CONCURRENCY): the default 4 is fast,
+  // but concurrent Chrome tabs racing on web-font load make text metrics — and
+  // thus the emitted pptx — nondeterministic. Set RECORD_CONCURRENCY=1 to render
+  // SEQUENTIALLY for a byte-deterministic pass (regression gates / off-target
+  // scans), where a stable diff matters more than speed.
+  const recordConcurrency = Number(process.env.RECORD_CONCURRENCY) || 4;
+  console.log(`  pptx: building ${missing.length}/${slides.length} (rest cached, concurrency=${recordConcurrency})...`);
+  await pLimit(recordConcurrency, missing, async (id) => {
     const html = `${id}.html`;
     if (!existsSync(join(fixturesDir, html))) {
       throw new Error(`fixture not found: ${join(fixturesDir, html)}`);
