@@ -245,6 +245,12 @@ interface ListItem {
   fontStyle?: "italic" | "normal";
   color?: string | null;
   bulletColor?: string;
+  // True only when the ::before marker is a CSS-drawn filled DOT
+  // (empty content + a non-transparent background, e.g. slide_30 Key
+  // Priorities), as opposed to a literal glyph like content:'•' coloured
+  // via `color` (slide_11 SWOT). Lets the converter revive a dropped dot on
+  // a `list-style:none` list without touching glyph-marker lists.
+  bulletIsDot?: boolean;
   lineHeight?: number;
   marginBottom?: number;
   padding?: { top: number; right: number; bottom: number; left: number };
@@ -979,12 +985,19 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         // the individual ::before having `content` set (inside try/catch so
         // browsers that throw on content-less pseudos don't explode).
         let bulletColor: string | null = null;
+        let bulletIsDot = false;
         if (hasPseudoBullet) {
           try {
             const liBeforeCs = getComputedStyle(li, "::before");
             const beforeContent = liBeforeCs.content;
             if (beforeContent && beforeContent !== "none" && beforeContent !== "normal") {
-              bulletColor = rgb2hex(liBeforeCs.backgroundColor) || rgb2hex(liBeforeCs.color) || pseudoBulletColor;
+              const bgHex = rgb2hex(liBeforeCs.backgroundColor);
+              bulletColor = bgHex || rgb2hex(liBeforeCs.color) || pseudoBulletColor;
+              // A non-transparent background with EMPTY content is a CSS-drawn
+              // dot (the marker IS the box), distinct from a literal-glyph
+              // ::before (content:'•') coloured via `color`.
+              const emptyContent = beforeContent === '""' || beforeContent === "''";
+              bulletIsDot = !!bgHex && emptyContent;
             }
           } catch (_) {}
         }
@@ -1012,6 +1025,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
           borderRadius: liStyle.borderRadius,
           cornerRadii: liStyle.cornerRadii,
           bulletColor,
+          bulletIsDot,
           padding: {
             top: parseFloat(liCs.paddingTop) || 0,
             right: parseFloat(liCs.paddingRight) || 0,
@@ -2375,7 +2389,18 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       // contain at least one widget child and continue down the existing
       // branch unchanged.
       const flexKids0 = Array.from((el as HTMLElement).children);
-      const allInlineChromeless = flexKids0.length > 0 && flexKids0.every(c => {
+      // Distributed-justify rows (space-between / -around / -evenly) intentionally
+      // push their children apart along the main axis — e.g. slide_27
+      // `.stat-row { justify-content: space-between }` with `<span>label</span>
+      // <span class="val">+14.3%</span>`. Collapsing those into ONE text element
+      // (below) flattens them to a single left-aligned line and the trailing
+      // value never reaches the right edge. Excluding distributed rows here lets
+      // them fall through to the normal flex branch, which walks each span as its
+      // own text element at its real (already right-pushed) bounds — so the value
+      // renders flush right. Centered/left rows still collapse for clean rich text.
+      const _jc0 = style.justifyContent;
+      const isDistributedRow = _jc0 === "space-between" || _jc0 === "space-around" || _jc0 === "space-evenly";
+      const allInlineChromeless = !isDistributedRow && flexKids0.length > 0 && flexKids0.every(c => {
         const ctag = (c.tagName || "").toUpperCase();
         if (!INLINE_TAGS.includes(ctag)) return false;
         const ccs = getComputedStyle(c);
@@ -2558,7 +2583,48 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     if (effectiveAlign === "start" && padL > 5 && Math.abs(padL - padR) < 3 &&
         isSingleLineH && (padVSymmetric || fullyRoundedPill || chipWithOwnBg) &&
         !isClippedFitted && !hasLineBreaks) {
-      effectiveAlign = "center";
+      // TIGHT-vs-WIDE discriminator. The chip force-center is only valid when
+      // the box HUGS its content (shrink-to-fit pill): there the content FILLS
+      // the box, so start≈center visually and centering matches the render. A
+      // WIDE/STRETCHED box whose content occupies only a fraction of the width
+      // is NOT a chip — `text-align:start` there is a genuinely visible LEFT
+      // alignment that must be preserved.
+      //
+      // Measure the UNION horizontal extent of the content — all text-line
+      // rects PLUS direct child element rects — and compare to the content-box
+      // width. The UNION (not the widest single line) is essential for
+      // multi-child flex rows where each item is a separate box:
+      //   • slide_19 `.sentiment` (block flex stretched to full stage-card
+      //     width): emoji+short-label union ≈ 0.3–0.5 of the box → LEFT.
+      //   • slide_19 `.metric-pill` (flex, value + LONG label, shrink-to-fit in
+      //     a space-between row): union ≈ 1.0 → CENTER. (Its widest SINGLE span
+      //     is only ~0.6, so a max-line test wrongly left-aligned it — the bug
+      //     this union measurement fixes.)
+      //   • slide_21 `.inner-card-header` (full-width block banner): union ≈
+      //     0.34 → LEFT.
+      //   • slide_03 `.kpi-change`, slide_10 `.period`, slide_15 `.status-badge`,
+      //     slide_17 `.label-badge`, slide_21 `.tag`/`.btn`, slide_30 `.tag`:
+      //     union ≈ 0.95–1.0 → CENTER (unchanged from baseline).
+      // This covers flex and non-flex uniformly with no blanket flex rule (a
+      // blanket `!isFlex` wrongly left-aligned the tight inline-flex
+      // `.kpi-change` "▲ 12.5%").
+      let chipTextTight = true;
+      try {
+        const cr = document.createRange();
+        cr.selectNodeContents(el);
+        let lo = Infinity, hi = -Infinity;
+        for (const rc of Array.from(cr.getClientRects())) {
+          if (rc.width > 0) { lo = Math.min(lo, rc.left); hi = Math.max(hi, rc.right); }
+        }
+        for (const ch of Array.from((el as HTMLElement).children)) {
+          const cb = ch.getBoundingClientRect();
+          if (cb.width > 0) { lo = Math.min(lo, cb.left); hi = Math.max(hi, cb.right); }
+        }
+        const unionW = hi > lo ? hi - lo : 0;
+        const contentBoxW = bounds.w - padL - padR;
+        chipTextTight = contentBoxW <= 0 || unionW >= contentBoxW * 0.7;
+      } catch { chipTextTight = true; }
+      if (chipTextTight) effectiveAlign = "center";
     }
 
     // "Pill-card" shape (slide_31 `.step`): a block container whose ONLY

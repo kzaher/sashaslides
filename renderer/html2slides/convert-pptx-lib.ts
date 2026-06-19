@@ -945,6 +945,7 @@ export interface ListItem {
   readonly fontStyle?: string;
   readonly color?: string;
   readonly bulletColor?: string;
+  readonly bulletIsDot?: boolean;
   readonly lineHeight?: number;
   readonly marginBottom?: number;
   readonly padding?: Padding;
@@ -1908,7 +1909,15 @@ export function buildPptx(
             // editable list in Slides). The OLD gate `&& !anyPerItemBulletColor`
             // forced the text-prefix path on slide_11 SWOT and slide_30 Key
             // Priorities, breaking word-wrap.
-            const anyPerItemBulletColor = !noListStyle && !ordered && items.some((it) => !!it.bulletColor);
+            // A `list-style:none` list normally has no markers, EXCEPT when
+            // each <li> draws a CSS dot via `::before { content:''; background }`
+            // (slide_30 Key Priorities) — those filled dots ARE the bullets and
+            // were being dropped entirely ("There are no list items"). Revive
+            // the marker ONLY for that filled-dot case (`it.bulletIsDot`); a
+            // literal-glyph `::before { content:'•'; color }` list (slide_11
+            // SWOT) keeps its prior plain-text rendering untouched.
+            const anyDotBullet = noListStyle && !ordered && items.some((it) => !!it.bulletColor && it.bulletIsDot);
+            const anyPerItemBulletColor = (!noListStyle && !ordered && items.some((it) => !!it.bulletColor)) || anyDotBullet;
             const useNativeBullet = !noListStyle && !anyItemHasStyledRuns;
             const paragraphs = items.map((it: ListItem, ii: number) => {
               const marker = ordered ? `${ii + 1}.  ` : "•  ";
@@ -1916,9 +1925,11 @@ export function buildPptx(
               const rs: readonly TextRun[] | null = (it.runs && it.runs.length > 0) ? it.runs.filter((r) => r.text.length > 0) : null;
               if (rs && rs.length > 0 && rs.some((r) => r.style !== null)) {
                 const out: TextProps[] = [];
-                if (!noListStyle && !useNativeBullet) {
+                if (!useNativeBullet && (!noListStyle || anyDotBullet)) {
                   // Plain marker prefix coloured per-item (falls back to the
                   // item's text colour when there is no per-item bullet).
+                  // `anyDotBullet` lets a `list-style:none` list with CSS dot
+                  // markers still emit them in front of styled-run items.
                   out.push({
                     text: marker,
                     options: {
