@@ -598,6 +598,9 @@ function emitStyledText(
       underline: s.textDecoration === "underline" ? { style: "sng" } : undefined,
       strike: s.textDecoration === "line-through" ? "sngStrike" : undefined,
     };
+    if (typeof s.letterSpacing === "number" && s.letterSpacing !== 0) {
+      textOpts.charSpacing = s.letterSpacing * PX2PT;
+    }
     slide.addText(text, textOpts);
   }
 }
@@ -853,6 +856,7 @@ export interface ElementStyle {
   readonly textTransform?: "uppercase" | "lowercase" | "none" | string;
   readonly writingMode?: string | null;
   readonly textDecoration?: "underline" | "line-through" | "none" | string;
+  readonly letterSpacing?: number;
   readonly opacity?: number;
   readonly bgColor?: string;
   readonly bgColorBehind?: string;
@@ -870,6 +874,7 @@ export interface RunStyle {
   readonly fontWeight?: "bold" | "normal" | string;
   readonly fontStyle?: "italic" | "normal" | string;
   readonly textDecoration?: "underline" | "line-through" | "none" | string;
+  readonly letterSpacing?: number;
   readonly bgColor?: string;
   readonly verticalAlign?: "sub" | "super" | "baseline" | string;
 }
