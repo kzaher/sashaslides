@@ -27,12 +27,9 @@
     "CLAUDE_CONFIG_DIR": "/home/node/.claude"
   },
   "postCreateCommand": "npm install",
-  "postStartCommand": "bash .devcontainer/claude-code/setup-claude.sh && bash .devcontainer/start-chrome.sh &",
+  "postStartCommand": "bash /opt/codepit-ext/register-extension.sh; bash .devcontainer/claude-code/setup-claude.sh; bash .devcontainer/start-chrome.sh &",
   "customizations": {
     "vscode": {
-      "extensions": [
-        "anthropics.claude-code"
-      ],
       "settings": {
         "terminal.integrated.defaultProfile.linux": "bash"
       }

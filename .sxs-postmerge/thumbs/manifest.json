@@ -1,0 +1,20 @@
+{
+  "task_title": "post-merge-master",
+  "presentation_id": "1n5nqIBN1YLZkGbdqOFTZjxjPK57kBdBlOOuAyeaSPgY",
+  "slides": [
+    "slide_11",
+    "slide_14",
+    "slide_32"
+  ],
+  "slide_object_ids": [
+    "p1",
+    "p2",
+    "p3"
+  ],
+  "thumbnails": [
+    "slide_11.png",
+    "slide_14.png",
+    "slide_32.png"
+  ],
+  "created_at": "2026-06-20T15:35:48.729Z"
+}
