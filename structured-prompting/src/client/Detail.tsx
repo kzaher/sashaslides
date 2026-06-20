@@ -10,6 +10,7 @@ import { fmtDur, computeRollup } from "./helpers.js";
 import { ComposedPromptReveal } from "./ComposedPromptReveal.js";
 import { RetryPanel } from "./RetryPanel.js";
 import { AskPanel } from "./AskPanel.js";
+import { InjectPanel } from "./InjectPanel.js";
 import { JsonView } from "./JsonView.js";
 import { LiveOutput } from "./LiveOutput.js";
 import { Diff } from "./Diff.js";
@@ -106,6 +107,7 @@ export function Detail(props: { graph: GraphSnapshot; selectedId: string; onSele
       <div class="sect"><h2>input</h2><pre><JsonView value={node.input} /></pre></div>
       <div class="sect"><h2>output</h2><pre><JsonView value={node.output} /></pre></div>
       {node.error && <div class="sect"><h2>error</h2><pre><JsonView value={node.error} /></pre></div>}
+      <InjectPanel node={node} graph={graph} onSelect={onSelect} />
       <AskPanel node={node} graph={graph} onSelect={onSelect} />
     </div>
   );

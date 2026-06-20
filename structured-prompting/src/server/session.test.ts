@@ -53,8 +53,8 @@ async function test(name: string, fn: () => Promise<void>): Promise<void> {
 /** Fixed cwd so tests are stable regardless of where they're run from. */
 const TEST_CWD = "/test-cwd";
 /** Default timeout the CLI wrapper uses when callers don't override. */
-// Keep in sync with DEFAULT_TIMEOUT_MS in src/claude-cli.ts.
-const DEFAULT_TIMEOUT = 30 * 60 * 1000;
+// Keep in sync with DEFAULT_TIMEOUT_MS in src/server/claude-cli.ts (60 min).
+const DEFAULT_TIMEOUT = 60 * 60 * 1000;
 /**
  * Tail that `tryMultipleTimes` automatically appends to every attempt's prompt
  * (the engine's `InterruptException` escape hatch). Keep this in sync with
@@ -94,7 +94,21 @@ function claudeReply(body: {
   };
 }
 
-/** The always-present no-op matchers (clock + log). `now` returns monotonic ms. */
+/** A spawnCapture call against the `claude` binary — the predicate every
+ *  test's claude matcher uses so the base `git` matcher never collides
+ *  (MockIO forbids ambiguous double-matches). */
+function isClaudeSpawn(c: EffectCall): boolean {
+  return c.method === "spawnCapture" && (c.args[0] as SpawnCaptureArgs).command === "claude";
+}
+
+/** The always-present no-op matchers (clock + log + git diff-capture).
+ *  `now` returns monotonic ms. The `git` matcher absorbs the engine's
+ *  per-node working-tree diff-capture spawns so they (a) don't error the
+ *  engine's catch path and (b) don't advance the per-test claude/bash
+ *  matcher call-indices — keeping session-id sequencing deterministic.
+ *  Tests' own spawnCapture matchers therefore scope to a specific command
+ *  (claude via isClaudeSpawn, or bash), never to a bare `method ===
+ *  "spawnCapture"` that would also swallow git. */
 function baseMatchers(): Matcher[] {
   return [
     {
@@ -106,6 +120,12 @@ function baseMatchers(): Matcher[] {
       name: "log",
       when: (c) => c.method === "log",
       returns: undefined,
+      optional: true,
+    },
+    {
+      name: "git (diff-capture, ignored)",
+      when: (c) => c.method === "spawnCapture" && (c.args[0] as SpawnCaptureArgs).command === "git",
+      returns: { stdout: "", stderr: "", exitCode: 0, signal: null, timedOut: false, spawnError: null } as SpawnCaptureResult,
       optional: true,
     },
   ];
@@ -133,9 +153,30 @@ async function runMock<R>(opts: {
   return { value, threw, io, graph: engine.currentGraph! };
 }
 
-/** Every spawnCapture call in order, as the raw SpawnCaptureArgs object. */
+/**
+ * Every spawnCapture call in order, as the raw SpawnCaptureArgs object —
+ * with keys whose value is `undefined` stripped. callClaude/runShell now
+ * always pass `onStdout`/`nodeId` (undefined when not streaming / not
+ * engine-attributed); those carry no assertable signal, so dropping them
+ * keeps the exhaustive full-arg-list assertions stable across engine
+ * plumbing changes while still failing on any real flag drift.
+ */
 function spawns(io: MockIO): SpawnCaptureArgs[] {
-  return io.callsOf("spawnCapture").map((c) => c.args[0] as SpawnCaptureArgs);
+  return io.callsOf("spawnCapture")
+    .map((c) => c.args[0] as SpawnCaptureArgs)
+    // Drop the engine's per-node working-tree diff-capture `git` spawns —
+    // they're infrastructure, not part of the behavior under test, and the
+    // tests' matchers don't model them (the engine catches their MockIO
+    // "no matcher" miss and continues). Tests assert only the claude/bash
+    // calls their `main` issues.
+    .filter((raw) => raw.command !== "git")
+    .map((raw) => {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (v !== undefined) out[k] = v;
+      }
+      return out as unknown as SpawnCaptureArgs;
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +191,7 @@ async function main() {
   await test("send returns claude's `result` text and issues exactly one spawn", async () => {
     const alwaysPong: Matcher = {
       name: "pong",
-      when: (c) => c.method === "spawnCapture",
+      when: isClaudeSpawn,
       returns: claudeReply({ result: "pong" }),
     };
     const { value, io } = await runMock<string>({
@@ -175,7 +216,7 @@ async function main() {
 
   await test("switchModel changes the --model flag on the next send", async () => {
     const { io } = await runMock({
-      matchers: [{ name: "ok", when: (c) => c.method === "spawnCapture", returns: claudeReply({ result: "x" }) }],
+      matchers: [{ name: "ok", when: isClaudeSpawn, returns: claudeReply({ result: "x" }) }],
       main: (s) => s.switchModel(Claude.opus).send({ prompt: "hello" }),
     });
     assert.deepEqual(spawns(io), [
@@ -195,7 +236,7 @@ async function main() {
 
   await test("prependToNextPrompt + appendToNextPrompt produce a single composed prompt", async () => {
     const { io } = await runMock({
-      matchers: [{ name: "ok", when: (c) => c.method === "spawnCapture", returns: claudeReply({ result: "x" }) }],
+      matchers: [{ name: "ok", when: isClaudeSpawn, returns: claudeReply({ result: "x" }) }],
       main: (s) =>
         s.prependToNextPrompt("HEAD").appendToNextPrompt("TAIL").send({ prompt: "MID" }),
     });
@@ -216,7 +257,7 @@ async function main() {
 
   await test("prepend buffer is consumed by one send and does NOT leak to the next", async () => {
     const { io } = await runMock({
-      matchers: [{ name: "ok", when: (c) => c.method === "spawnCapture", returns: claudeReply({ result: "ok", sessionId: "sid-const" }) }],
+      matchers: [{ name: "ok", when: isClaudeSpawn, returns: claudeReply({ result: "ok", sessionId: "sid-const" }) }],
       main: (s) =>
         s.prependToNextPrompt("X").send({ prompt: "A" }).send({ prompt: "B" }),
     });
@@ -268,7 +309,7 @@ async function main() {
       matchers: [
         {
           name: "schema reply",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: claudeReply({ structuredOutput: { x: "ok" }, result: "Done." }),
         },
       ],
@@ -300,7 +341,7 @@ async function main() {
       matchers: [
         {
           name: "empty structured",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: claudeReply({ result: "uh oh" }),
         },
       ],
@@ -324,7 +365,7 @@ async function main() {
       matchers: [
         {
           name: "sequential",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: (_c: EffectCall, i: number) =>
             claudeReply({ sessionId: i === 0 ? "sid-A" : "sid-B", result: `r${i}` }),
         },
@@ -363,7 +404,7 @@ async function main() {
       matchers: [
         {
           name: "sequential",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: (_c: EffectCall, i: number) =>
             claudeReply({ sessionId: `sid-${i}`, result: `r${i}` }),
         },
@@ -403,7 +444,7 @@ async function main() {
       matchers: [
         {
           name: "sequential",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: (_c: EffectCall, i: number) =>
             claudeReply({ sessionId: `sid-${i}`, result: `r${i}` }),
         },
@@ -459,7 +500,7 @@ async function main() {
       matchers: [
         {
           name: "sequential",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: (_c: EffectCall, i: number) =>
             claudeReply({ sessionId: `sid-${i}`, result: "ok" }),
         },
@@ -498,7 +539,7 @@ async function main() {
       matchers: [
         {
           name: "sequential",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: (_c: EffectCall, i: number) => claudeReply({ sessionId: `sid-${i}`, result: "ok" }),
         },
       ],
@@ -534,7 +575,7 @@ async function main() {
   // -- tryMultipleTimes: retry semantics ------------------------------------
   await test("tryMultipleTimes: first attempt succeeds → exactly one spawn, prompt carries the auto-appended Interrupt tail", async () => {
     const { value, io } = await runMock<string>({
-      matchers: [{ name: "ok", when: (c) => c.method === "spawnCapture", returns: claudeReply({ result: "first-try" }) }],
+      matchers: [{ name: "ok", when: isClaudeSpawn, returns: claudeReply({ result: "first-try" }) }],
       main: (s) => s.tryMultipleTimes(3, (s2) => s2.send({ prompt: "ping" })),
     });
     assert.equal(value, "first-try");
@@ -558,7 +599,7 @@ async function main() {
       matchers: [
         {
           name: "fail-fail-ok",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: (_c: EffectCall, i: number) =>
             i < 2 ? claudeReply({ isError: true, result: "bad" }) : claudeReply({ result: "pong" }),
         },
@@ -584,7 +625,7 @@ async function main() {
   await test("tryMultipleTimes honors max: all fail, default fallback rethrows after exactly `max` spawns", async () => {
     const { threw, io } = await runMock({
       matchers: [
-        { name: "all fail", when: (c) => c.method === "spawnCapture", returns: claudeReply({ isError: true, result: "boom" }) },
+        { name: "all fail", when: isClaudeSpawn, returns: claudeReply({ isError: true, result: "boom" }) },
       ],
       main: (s) => s.tryMultipleTimes(3, (s2) => s2.send({ prompt: "p" })),
     });
@@ -604,7 +645,7 @@ async function main() {
     // caller sees which attempt's message propagated.
     const { threw, io } = await runMock({
       matchers: [
-        { name: "all fail", when: (c) => c.method === "spawnCapture", returns: claudeReply({ isError: true, result: "kaboom" }) },
+        { name: "all fail", when: isClaudeSpawn, returns: claudeReply({ isError: true, result: "kaboom" }) },
       ],
       main: (s) =>
         s.parallelFork([1, 2], (child, _input) =>
@@ -626,7 +667,7 @@ async function main() {
   await test("tryMultipleTimes with custom fallback: fallback's result is returned after max attempts", async () => {
     const { value, io } = await runMock<unknown>({
       matchers: [
-        { name: "all fail", when: (c) => c.method === "spawnCapture", returns: claudeReply({ isError: true, result: "boom" }) },
+        { name: "all fail", when: isClaudeSpawn, returns: claudeReply({ isError: true, result: "boom" }) },
       ],
       main: (s) =>
         s.tryMultipleTimes(
@@ -653,7 +694,7 @@ async function main() {
       matchers: [
         {
           name: "interrupt",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: claudeReply({ structuredOutput: { InterruptException: "give up" } }),
         },
       ],
@@ -677,7 +718,7 @@ async function main() {
       matchers: [
         {
           name: "two sends",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: (_c: EffectCall, i: number) => claudeReply({ sessionId: `sid-${i}`, result: i === 0 ? "A" : "B" }),
         },
       ],
@@ -720,7 +761,7 @@ async function main() {
   await test("combineWith: combine() throwing fails the combineWith node", async () => {
     const { threw } = await runMock({
       matchers: [
-        { name: "sends", when: (c) => c.method === "spawnCapture", returns: claudeReply({ result: "x" }) },
+        { name: "sends", when: isClaudeSpawn, returns: claudeReply({ result: "x" }) },
       ],
       main: (s) =>
         s.send({ prompt: "p" }).combineWith(
@@ -736,7 +777,7 @@ async function main() {
   await test("try: success path skips fallback entirely — exactly one spawn", async () => {
     let fallbackCalled = false;
     const { value, io } = await runMock<string>({
-      matchers: [{ name: "ok", when: (c) => c.method === "spawnCapture", returns: claudeReply({ result: "happy" }) }],
+      matchers: [{ name: "ok", when: isClaudeSpawn, returns: claudeReply({ result: "happy" }) }],
       main: (s) =>
         s.try<string>(
           (s2) => s2.send({ prompt: "p" }),
@@ -754,7 +795,7 @@ async function main() {
       matchers: [
         {
           name: "first fails, fallback ok",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: (_c: EffectCall, i: number) =>
             i === 0 ? claudeReply({ isError: true, result: "bad" }) : claudeReply({ result: "recovered" }),
         },
@@ -779,7 +820,7 @@ async function main() {
       matchers: [
         {
           name: "child send",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: (c: EffectCall, i: number) =>
             claudeReply({ sessionId: `sid-child-${i}`, result: `got:${(c.args[0] as SpawnCaptureArgs).args[1]}` }),
         },
@@ -822,7 +863,7 @@ async function main() {
       matchers: [
         {
           name: "B errors, A ok",
-          when: (c) => c.method === "spawnCapture",
+          when: isClaudeSpawn,
           returns: (c: EffectCall) => {
             const p = (c.args[0] as SpawnCaptureArgs).args[1]!;
             return p === "B"
@@ -851,13 +892,13 @@ async function main() {
 
   await test("assert passes through on success and throws on failure", async () => {
     const ok = await runMock<string>({
-      matchers: [{ name: "ok", when: (c) => c.method === "spawnCapture", returns: claudeReply({ result: "yes" }) }],
+      matchers: [{ name: "ok", when: isClaudeSpawn, returns: claudeReply({ result: "yes" }) }],
       main: (s) => s.send({ prompt: "p" }).assert((r) => { if (r !== "yes") throw new Error("bad"); }),
     });
     assert.equal(ok.value, "yes");
 
     const bad = await runMock({
-      matchers: [{ name: "ok", when: (c) => c.method === "spawnCapture", returns: claudeReply({ result: "no" }) }],
+      matchers: [{ name: "ok", when: isClaudeSpawn, returns: claudeReply({ result: "no" }) }],
       main: (s) => s.send({ prompt: "p" }).assert((_r) => { throw new Error("assert-boom"); }),
     });
     assert(bad.threw instanceof Error);
@@ -866,7 +907,7 @@ async function main() {
 
   await test("pipe runs its callback and returns its SessionWithResult's value", async () => {
     const { value } = await runMock<string>({
-      matchers: [{ name: "ok", when: (c) => c.method === "spawnCapture", returns: claudeReply({ result: "inside-pipe" }) }],
+      matchers: [{ name: "ok", when: isClaudeSpawn, returns: claudeReply({ result: "inside-pipe" }) }],
       main: (s) => s.pipe((inner) => inner.send({ prompt: "p" })),
     });
     assert.equal(value, "inside-pipe");
@@ -899,24 +940,27 @@ async function main() {
       main: (s) => s.send({ prompt: "p" }).executeShell((upstream) => `echo "${upstream}-tail"`),
     });
     assert.equal(value, "shell-output\n");
-    assert.deepEqual(spawns(io), [
-      {
-        command: "claude",
-        args: [
-          "-p", "p",
-          "--output-format", "json",
-          "--dangerously-skip-permissions",
-          "--model", "opus",
-        ],
-        cwd: TEST_CWD,
-        timeoutMs: DEFAULT_TIMEOUT,
-      },
-      {
-        command: "bash",
-        args: ["-c", `echo "derived-tail"`],
-        cwd: TEST_CWD,
-      },
-    ]);
+    const list = spawns(io);
+    assert.equal(list.length, 2, `expected 2 spawns, got ${list.length}`);
+    assert.deepEqual(list[0], {
+      command: "claude",
+      args: [
+        "-p", "p",
+        "--output-format", "json",
+        "--dangerously-skip-permissions",
+        "--model", "opus",
+      ],
+      cwd: TEST_CWD,
+      timeoutMs: DEFAULT_TIMEOUT,
+    });
+    // The bash spawn carries the same shape as before (runShell now also
+    // forwards an optional `nodeId`, which is undefined in this path and so
+    // stripped by spawns()). Assert the full command/args/cwd.
+    assert.deepEqual(list[1], {
+      command: "bash",
+      args: ["-c", `echo "derived-tail"`],
+      cwd: TEST_CWD,
+    });
   });
 
   // -- summary --------------------------------------------------------------

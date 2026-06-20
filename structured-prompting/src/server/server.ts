@@ -7,7 +7,7 @@ import * as esbuild from "esbuild";
 import type { ComputationGraph } from "./graph.js";
 import { callClaude } from "./claude-cli.js";
 import { runShell } from "./engine.js";
-import { realIO } from "./io.js";
+import { realIO, type IO } from "./io.js";
 import { FatalShellError } from "./errors.js";
 
 // Bundle the Preact monitor UI (src/client/main.tsx) into a single classic
@@ -373,6 +373,134 @@ async function handleAsk(rawBody: string, graph: ComputationGraph): Promise<AskR
   }
 }
 
+interface InjectRequest {
+  nodeId: string;
+  /** The new user message to send into THIS node's existing session. */
+  message: string;
+}
+interface InjectReply {
+  nodeId: string;
+  kind: string;
+  status: "ok" | "error";
+  /** Node ids whose completed state was ERASED (this node + every
+   *  transitive successor). The scheduler / legacy engine re-fires each
+   *  on its next pass; the node itself was already re-run here. */
+  resetNodeIds: string[];
+  /** Anchor session id the message was resumed against (NO fork). */
+  sessionId: string | null;
+  text: string;
+  message: string;
+  durationMs: number;
+  costUsd: number | null;
+  isError: boolean;
+  errorMessage: string | null;
+}
+
+/**
+ * POST /api/inject {nodeId, message}: send a NEW message into a node's
+ * EXISTING claude session and re-run that node from the message — under
+ * the SAME session (NO --fork-session), unlike /api/ask which always
+ * forks into a side branch.
+ *
+ * Semantics (the user's ask): "select a node, type a message (no fork,
+ * under the same session), then after it finishes that node and its
+ * dependencies continue — erase completed state". So this handler:
+ *
+ *   1. resolves the node + its anchor sessionId (walk parentId like
+ *      handleAsk, since the clicked node may be a container with no
+ *      session of its own);
+ *   2. ERASES completed state of the node AND every transitive successor
+ *      via graph.resetSubtree(nodeId) — they recompute downstream;
+ *   3. re-runs the node by calling claude with the injected message and
+ *      `fork: false` (same session, conversation history extended), then
+ *      finishOk/finishErr the node with the result — mirroring
+ *      handleRetry's send/askFollowup branch but fork:false and
+ *      prompt = the injected message.
+ *
+ * Downstream re-firing of the reset successors is the scheduler's job;
+ * this endpoint's contract is exactly: erase node+successors' completed
+ * state and re-run the node with the no-fork message.
+ *
+ * `io` is injected only for tests (MockIO); production passes realIO via
+ * callClaude's default.
+ */
+async function handleInject(rawBody: string, graph: ComputationGraph, io?: IO): Promise<InjectReply> {
+  const body = JSON.parse(rawBody) as InjectRequest;
+  if (!body.nodeId || !body.message) {
+    throw new Error("/api/inject requires {nodeId, message}");
+  }
+  const node = graph.get(body.nodeId);
+  if (!node) throw new Error(`node not found: ${body.nodeId}`);
+
+  // Resolve the resume anchor: nearest ancestor (via parentId) carrying a
+  // sessionId. Same walk as handleAsk — the clicked node may be a
+  // parallelFork / pipe / root with no session of its own.
+  let anchor = node;
+  while (!anchor.sessionId && anchor.parentId) {
+    const next = graph.get(anchor.parentId);
+    if (!next) break;
+    anchor = next;
+  }
+  if (!anchor.sessionId) {
+    throw new Error(
+      "no completed send in this branch yet — wait for the first claude " +
+      "round-trip to finish (sessionIds are populated when claude returns)",
+    );
+  }
+  const anchorModel = anchor.model ?? node.model;
+
+  // ERASE completed state: this node + every transitive successor reset to
+  // pending (output/error/timestamps cleared). Capture the ids so the
+  // caller can report what was reset; the scheduler re-fires them next pass.
+  const resetNodeIds = graph.resetSubtree(node.id);
+
+  // Re-run THIS node with the injected message, resuming the SAME session
+  // (fork:false). Unlike /api/ask, no new node is created and no fork
+  // flag is added — the message is appended to the live conversation.
+  graph.start(node.id, { model: anchorModel ?? undefined, sessionId: anchor.sessionId });
+  try {
+    const r = await callClaude({
+      prompt: body.message,
+      resume: anchor.sessionId,
+      fork: false,
+      model: (anchorModel as never) ?? undefined,
+      io,
+    });
+    if (r.isError) {
+      graph.finishErr(node.id, { message: r.errorMessage ?? "inject failed", data: { stderr: r.stderr } });
+      return {
+        nodeId: node.id, kind: node.kind, status: "error", resetNodeIds,
+        sessionId: r.sessionId, text: r.text, message: body.message,
+        durationMs: r.durationMs, costUsd: r.costUsd,
+        isError: true, errorMessage: r.errorMessage ?? "send returned isError",
+      };
+    }
+    graph.finishOk(
+      node.id,
+      {
+        text: r.text,
+        composedPrompt: body.message,
+        durationMs: r.durationMs,
+        appliedForkFlag: false,
+        injected: true,
+        usage: r.usage,
+      },
+      { sessionId: r.sessionId, model: r.model ?? anchorModel },
+    );
+    return {
+      nodeId: node.id, kind: node.kind, status: "ok", resetNodeIds,
+      sessionId: r.sessionId, text: r.text, message: body.message,
+      durationMs: r.durationMs, costUsd: r.costUsd,
+      isError: false, errorMessage: null,
+    };
+  } catch (err) {
+    graph.finishErr(node.id, err);
+    throw err;
+  }
+}
+
+export { handleInject };
+
 export async function startMonitor(args: {
   graph: ComputationGraph;
   port?: number;
@@ -425,6 +553,26 @@ export async function startMonitor(args: {
       req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
       req.on("end", () => {
         void handleAsk(body, graph).then((reply) => {
+          res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+          res.end(JSON.stringify(reply));
+        }).catch((err: unknown) => {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        });
+      });
+      return;
+    }
+    if (url === "/api/inject" && req.method === "POST") {
+      // POST /api/inject {nodeId, message}: send a new message into the
+      // node's EXISTING claude session (NO fork) and re-run the node from
+      // it. Erases the node + every transitive successor's completed state
+      // (resetSubtree) so downstream recomputes, then re-calls
+      // `claude --resume <sid> -p <message>` (no --fork-session). The
+      // no-fork counterpart of /api/ask.
+      let body = "";
+      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      req.on("end", () => {
+        void handleInject(body, graph).then((reply) => {
           res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
           res.end(JSON.stringify(reply));
         }).catch((err: unknown) => {
