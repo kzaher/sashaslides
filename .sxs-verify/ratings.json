@@ -1,0 +1,36 @@
+{
+  "slide_11": {
+    "status": "bad",
+    "comment": "The top border is wrong. It should inherit cliping mask from parent and then try to construct clipped element from the mask or render the top border. It shouldn't have curved edges, but straight lower edge., but the edges should be cut because of clipping with rounded corners.",
+    "ratedAt": "2026-06-19T22:00:39.604Z",
+    "annotation": "/workspaces/sashaslides/.sxs-verify/annotations/slide_11.png"
+  },
+  "slide_12": {
+    "status": "bad",
+    "comment": "The clipping fails for top black area with signal strength and bottom left right edges where the black area is clearly shown too big. It seems like there is something wrong with radius calculation, because both parts do seem rounded and of correct shape.",
+    "ratedAt": "2026-06-19T22:00:46.774Z",
+    "annotation": "/workspaces/sashaslides/.sxs-verify/annotations/slide_12.png"
+  },
+  "slide_13": {
+    "status": "bad",
+    "comment": "The arrow is in the wrong place, should be on left, and text should have padding on left. Looks like dimension calculation is wrong for down arrow and text. And also top and bottom text isn't left aligned (32%, conversion)",
+    "annotation": "/workspaces/sashaslides/.sxs-verify/annotations/slide_13.png"
+  },
+  "slide_14": {
+    "status": "bad",
+    "comment": "The top border is wrong. It should inherit cliping mask from parent and then try to construct clipped element from the mask or render the top border. It shouldn't have curved edges, but the edges should be cut because of clipping with rounded corners.",
+    "ratedAt": "2026-06-19T22:00:53.351Z",
+    "annotation": "/workspaces/sashaslides/.sxs-verify/annotations/slide_14.png"
+  },
+  "slide_16": {
+    "status": "bad",
+    "comment": "The font for before and after is wrong and vertical alignment is wrong.",
+    "annotation": "/workspaces/sashaslides/.sxs-verify/annotations/slide_16.png"
+  },
+  "slide_32": {
+    "status": "bad",
+    "comment": "The right side of gradient area shouldn't have rounded edge.",
+    "ratedAt": "2026-06-19T22:00:58.458Z",
+    "annotation": "/workspaces/sashaslides/.sxs-verify/annotations/slide_32.png"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "slide_11": {
+    "status": "bad",
+    "comment": "if the border is some shape which isn't achievable by built in shapes composition. Then just ignore it and print a warning, this behavior looks ugly and it's not even correct, there are white artifacts. Just remove it.",
+    "ratedAt": "2026-06-20T12:47:13.726Z",
+    "annotation": "/workspaces/sashaslides/.sxs-master/annotations/slide_11.png"
+  },
+  "slide_12": {
+    "status": "bad",
+    "comment": "The bottom shape is achievable by setting correct radius, at the moment the radiuses are wrong, so the bottom border anomaly is fixable by just correctly calculating dimensions. The top isn't fixable because corner radius is larger than 50% of dimension (using rectangle with 2 rounded edges only goes halfway). In this case just render the background into image. Make sure the rendered image is of sufficient resolution. Create 2x resolution because of retina displays.",
+    "ratedAt": "2026-06-20T12:49:43.716Z",
+    "annotation": "/workspaces/sashaslides/.sxs-master/annotations/slide_12.png"
+  },
+  "slide_14": {
+    "status": "bad",
+    "comment": "if the border is some shape which isn't achievable by built in shapes composition. Then just ignore it and print a warning, this behavior looks ugly and it's not even correct, there are white artifacts. Just remove it. Don't covert flat before element into curved border automatically.",
+    "ratedAt": "2026-06-20T12:50:37.468Z",
+    "annotation": "/workspaces/sashaslides/.sxs-master/annotations/slide_14.png"
+  },
+  "slide_32": {
+    "status": "bad",
+    "comment": "The right part of area needs straight edges. Since corner radiuses are less than half of dimension, then you can use the shape which has 2 pointed edges and 2 rounded edges + rotation (I think rounded edges are by default pointed up).",
+    "ratedAt": "2026-06-20T12:51:51.843Z",
+    "annotation": "/workspaces/sashaslides/.sxs-master/annotations/slide_32.png"
+  }
+}
