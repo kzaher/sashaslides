@@ -23,6 +23,8 @@ The enforcement script is `renderer/structured-prompts/bug_solving/scripts/merge
 
 5. **If the gate PASSES** (every changed slide ∈ intended, no anomalies): commit the merge to main. Mention in the commit body which slides changed and that the gate was clean.
 
+6. **ALWAYS re-rate on master after committing (the post-merge canonical step — do NOT skip).** The worktree ratings were `--candidate` (they did NOT update the canonical issue), and the gate is structural — neither confirms the *merged* result looks right on master. So: render ONLY the just-merged slides on current master (`record-rendering --mode full --slides <intended-csv>`) and boot a **CANONICAL** rating UI (no `--candidate`, with `--history-dir`) filtered to those slides. The user confirms each: a **good** rating flips the canonical ledger bad→good (so the next round won't re-attempt an already-fixed slide); anything still off stays bad and goes back to a round. Skipping this leaves the canonical ledger stale (still "bad" with the original issue) even though master is fixed.
+
 6. **Determinism is the prerequisite.** The gate trusts sequential rendering. If you ever doubt it, render the baseline twice and confirm `diff-pptx-pairs` reports 0 changes (HEAD-vs-HEAD). Never gate with concurrent renders.
 
 ## Run it
