@@ -385,6 +385,35 @@ function findComparisons(): SlideComparison[] {
     } catch {}
   }
 
+  // Surface the rendered Google-Slides URL from `record-rendering --mode full`'s
+  // manifest.json. It lives next to the thumbs (same place as rendered-regions)
+  // and carries { presentation_id, slides[], slide_object_ids[] } — NOT the
+  // `presentation_url` the sxs-meta path expects, so without this the
+  // "Open in Slides" link never appears. Build the per-slide deep-link from the
+  // presentation id + the object id of the matching slide.
+  const manifestFile = [
+    ...(slidesDirOverride ? [join(slidesDirOverride, "manifest.json")] : []),
+    join(resultsDir, "thumbs", "manifest.json"),
+    join(resultsDir, "manifest.json"),
+    join(resultsDir, "pptx", "manifest.json"),
+  ].find((p) => existsSync(p));
+  if (manifestFile) {
+    try {
+      const man = JSON.parse(readFileSync(manifestFile, "utf-8")) as {
+        presentation_id?: string; slides?: string[]; slide_object_ids?: string[];
+      };
+      if (man.presentation_id) {
+        for (const c of comparisons) {
+          if (c.slidesUrl) continue; // an explicit meta/ratings url wins
+          const idx = man.slides?.indexOf(c.id) ?? -1;
+          const oid = idx >= 0 ? man.slide_object_ids?.[idx] : undefined;
+          c.slidesUrl = `https://docs.google.com/presentation/d/${man.presentation_id}/edit`
+            + (oid ? `#slide=id.${oid}` : "");
+        }
+      }
+    } catch {}
+  }
+
   // Load existing ratings (user ratings override auto-blessing).
   const ratingsFile = join(resultsDir, "ratings.json");
   if (existsSync(ratingsFile)) {
