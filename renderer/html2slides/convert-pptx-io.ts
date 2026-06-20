@@ -21,7 +21,7 @@
 import CDP from "chrome-remote-interface";
 import { google } from "googleapis";
 import { readFileSync, writeFileSync, readdirSync } from "fs";
-import { join, resolve, dirname } from "path";
+import { join, resolve, dirname, basename } from "path";
 import { Readable } from "stream";
 import { transformSync } from "esbuild";
 import JSZip from "jszip";
@@ -321,7 +321,13 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   const regionsBySlide: Record<string, unknown> = {};
   let totalRegions = 0;
   for (let i = 0; i < renderedRegions.length; i++) {
-    const key = `slide_${String(i + 1).padStart(2, "0")}`;
+    // Key by the REAL fixture id (slide_NN from the input html), NOT the slide
+    // INDEX. renderedRegions[i] aligns 1:1 with htmlFiles[i]. Index keys
+    // (slide_01, slide_02…) broke the rating UI whenever a SUBSET was rendered
+    // (e.g. `--slides slide_12` → the lone slide got keyed slide_01), so the UI's
+    // lookup by comparison id (slide_12) missed it and the "Highlight rendered
+    // regions" checkbox had nothing to mark.
+    const key = basename(htmlFiles[i], ".html");
     regionsBySlide[key] = renderedRegions[i];
     totalRegions += renderedRegions[i].length;
   }
