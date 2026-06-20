@@ -1451,6 +1451,9 @@ export function buildPptx(
           };
 
           // Fill (gradient tagged via objectName for post-processing — pptxgenjs has no gradient API)
+          // `gradGid` is captured so the side-rounded clip path (below) can
+          // angle-compensate the registered gradient when it rotates the shape.
+          let gradGid = -1;
           if (el.gradient && el.gradient.stops && el.gradient.stops.length >= 2) {
             // Solid-fill fallback carries the first-stop alpha (important for
             // radial gradients like `.bg-glow` whose first stop is 15% indigo
@@ -1464,6 +1467,7 @@ export function buildPptx(
             const gid = gradientRegistry.length;
             gradientRegistry.push(el.gradient);
             opts.objectName = `GRAD_${gid}`;
+            gradGid = gid;
           } else if (el.fill) {
             const fillOpts: NonNullable<ShapeProps["fill"]> = { color: hexToRgb(el.fill) };
             if (typeof el.fillAlpha === "number" && el.fillAlpha < 1) {
@@ -1574,12 +1578,56 @@ export function buildPptx(
               opts.flipH = pcp.flipH || undefined;
               opts.flipV = pcp.flipV || undefined;
             }
-            // Side-rounded clip (TL+BL / TR+BR) has no OOXML preset — preset is
-            // roundRect, square off the flat corner pair after the host draws.
-            // For gradient hosts the overlay uses the solid fallback fill (the
-            // GRAD_n tag stays on the host so the gradient still injects).
-            clipFlatBounds = pb;
-            clipFlatCr = needsFlatCornerOverlay(pcr) ? pcr : null;
+            // Side-rounded clip (TL+BL / TR+BR) has no direct OOXML preset.
+            // The old path fell back to an all-corners `roundRect` + solid R×R
+            // corner overlays to square the flat pair — but on a GRADIENT host
+            // those overlays use the solid first-stop fallback fill, painting a
+            // mismatched solid block over the gradient and leaving the "straight"
+            // edge rounded with artifacts (slide_32 P0/P1/P2 pills clipped at the
+            // left edge of a rounded `.row`). Per the user's guidance: because
+            // the radii are < half the dimension, draw it as a SINGLE
+            // `round2SameRect` (rounds the TOP pair by default) rotated so the
+            // rounded pair lands on the correct side — 270° → left-rounded,
+            // 90° → right-rounded. No overlays, gradient injects onto the one
+            // shape. Rotating swaps the footprint's w/h, so emit the un-rotated
+            // shape with swapped ext, recentered on the patch center.
+            if (needsFlatCornerOverlay(pcr)) {
+              const leftRounded = pcr.tl > 2 && pcr.bl > 2; // else right-rounded (TR+BR)
+              const rot = leftRounded ? 270 : 90;
+              const cx = pb.x + pb.w / 2;
+              const cy = pb.y + pb.h / 2;
+              const W0 = pb.h; // un-rotated width  (becomes footprint height after 90/270)
+              const H0 = pb.w; // un-rotated height (becomes footprint width)
+              const rPx = Math.min(
+                Math.max(pcr.tl, pcr.tr, pcr.br, pcr.bl),
+                Math.min(W0, H0) / 2,
+              );
+              hostShapeName = "round2SameRect";
+              opts.x = px2in(cx - W0 / 2);
+              opts.y = px2in(cy - H0 / 2);
+              opts.w = px2in(W0);
+              opts.h = px2in(H0);
+              opts.rectRadius = px2in(rPx);
+              opts.rotate = rot;
+              opts.flipH = undefined;
+              opts.flipV = undefined;
+              clipFlatCr = null; // single shape — no squaring overlays
+              // Gradient fill rotates WITH the shape (rotWithShape="1"), so
+              // pre-rotate the stored angle by -rot to keep the visible
+              // direction unchanged.
+              if (gradGid >= 0) {
+                const g = gradientRegistry[gradGid];
+                if (g && g.type !== "radial") {
+                  gradientRegistry[gradGid] = {
+                    ...g,
+                    angle: (((g.angle ?? 180) - rot) % 360 + 360) % 360,
+                  };
+                }
+              }
+            } else {
+              clipFlatBounds = pb;
+              clipFlatCr = null;
+            }
           }
 
           slide.addShape(hostShapeName, opts);

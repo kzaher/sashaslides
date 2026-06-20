@@ -1910,80 +1910,27 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         pb.h + parentBT < bounds.h - parentBB_w &&
         !!parentFillHex;
       if (isThinTopStripe) {
-        // Place OUTER+INNER at the parent's PADDING-BOX bounds (inside the
-        // parent's natural border ring), with corner radii shrunk by the
-        // adjacent parent border widths. This way the parent's own roundRect
-        // continues to paint the gray/accent perimeter, and the overlays
-        // paint only the area strictly inside the border — eliminating both
-        // the slide_14 perimeter-color regression and the slide_11 corner
-        // sliver where two same-radius arcs competed.
-        const stripeH = pb.h;
-        const ox = bounds.x + parentBL_w;
-        const oy = bounds.y + parentBT;
-        const ow = Math.max(0, bounds.w - parentBL_w - parentBR_w);
-        const oh = Math.max(0, bounds.h - parentBT - parentBB_w);
-        // ROUND the stripe's TOP corners to the parent's radius. The accent is
-        // clipped by the parent's `border-radius + overflow:hidden`, so its top
-        // corners follow the card's curve — they are NOT square. A previous
-        // round emitted a flat top (tl/tr = 0) on the theory that the parent's
-        // roundRect + a recursive clip mask would present the cut; but these
-        // synthetic OUTER/INNER overlays carry NO clipMask, so nothing nipped
-        // the corners and the flat-topped accent OVERHANGS the card's rounded
-        // top — the square colour poking past the curve is the "visible on the
-        // sides" defect the user flagged (slide_14). Inheriting pTL/pTR makes
-        // the OUTER overlay a `round2SameRect` (top rounded, flat bottom) — the
-        // "element which presents the cut". Because OUTER spans the parent's
-        // FULL height, the radius is a real ~11px (not clamped by the 3px stripe
-        // height), and the INNER overlay (inset by stripeH, corners shrunk by
-        // stripeH) keeps the visible accent a thin band that tapers cleanly down
-        // the corner curve rather than running a separate sliver.
-        const outerCr = {
-          tl: pTL > 0 ? Math.max(0, pTL - Math.min(parentBT, parentBL_w)) : 0,
-          tr: pTR > 0 ? Math.max(0, pTR - Math.min(parentBT, parentBR_w)) : 0,
-          br: pBR > 0 ? Math.max(0, pBR - Math.min(parentBB_w, parentBR_w)) : 0,
-          bl: pBL > 0 ? Math.max(0, pBL - Math.min(parentBB_w, parentBL_w)) : 0,
-        };
-        // 1) OUTER overlay (accent stripe color), fills padding-box
-        elements.push({
-          type: "rect",
-          bounds: { x: ox, y: oy, w: ow, h: oh },
-          fill: pseudoFill, fillAlpha: 1,
-          gradient: null,
-          borderRadius: Math.max(outerCr.tl, outerCr.tr, outerCr.br, outerCr.bl),
-          cornerRadii: outerCr,
-          borderUniform: true,
-          borderSides: null,
-          borderColor: null,
-          borderWidth: 0,
-          borderStyle: "solid",
-          zIndex: 999, position: "absolute", boxShadow: null,
-        });
-        // 2) INNER overlay (parent fill), inset from OUTER's TOP by stripeH only
-        const innerCr = {
-          tl: Math.max(0, outerCr.tl - stripeH),
-          tr: Math.max(0, outerCr.tr - stripeH),
-          br: outerCr.br,
-          bl: outerCr.bl,
-        };
-        elements.push({
-          type: "rect",
-          bounds: {
-            x: ox,
-            y: oy + stripeH,
-            w: ow,
-            h: Math.max(0, oh - stripeH),
-          },
-          fill: parentFillHex, fillAlpha: 1,
-          gradient: null,
-          borderRadius: Math.max(innerCr.tl, innerCr.tr, innerCr.br, innerCr.bl),
-          cornerRadii: innerCr,
-          borderUniform: true,
-          borderSides: null,
-          borderColor: null,
-          borderWidth: 0,
-          borderStyle: "solid",
-          zIndex: 1000, position: "absolute", boxShadow: null,
-        });
+        // A thin (few-px) top-accent stripe clipped by the parent's rounded
+        // `overflow:hidden` corners is NOT reproducible by composing built-in
+        // shapes: a single `round2SameRect` at the stripe's own bounds clamps
+        // its rectRadius to `min(w,h)/2 ≈ 2px` (the stripe is only 3-4px tall),
+        // so the corners go flat and overshoot the card's ~12px curve. The
+        // previous fix synthesised an OUTER full-height rounded overlay + an
+        // INNER fill overlay to fake the cut, but the two same-radius arcs
+        // compete at the corners and leave white slivers / a wrongly-curved
+        // colored border poking past the card top.
+        //
+        // Per the user's guidance (slide_11 / slide_14): do NOT auto-convert a
+        // flat `::before` into a curved border — when the clipped stripe can't
+        // be drawn correctly with native shapes, omit it and warn. The parent's
+        // own roundRect still paints its perimeter; the accent is cleanly absent
+        // rather than artifacted.
+        try {
+          console.warn(
+            "[h2s] dropping clipped thin top-accent stripe (::before) — not " +
+            "representable by built-in shapes without artifacts; omitting it.",
+          );
+        } catch (_) {}
         continue;
       }
       elements.push({
