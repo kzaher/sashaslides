@@ -151,6 +151,20 @@ interface BorderSides {
 interface ClipMask {
   bounds: Bounds;
   cornerRadii: CornerRadii;
+  // True when the clipping ancestor itself is rasterised to a 2× PNG (the
+  // large-radius `clipped-container` device-mockup branch below). Children
+  // whose clipped region needs a corner radius > 50% of its own dimension
+  // can't be reproduced by a native roundRect (the OOXML `adj` maxes at 50%);
+  // because a correctly-rounded backing image already exists, the emitter
+  // skips the clamped native overlay for those corners instead of poking a
+  // squared-off shape past the device's true rounded edge.
+  rasterizedHost?: boolean;
+  // Absolute y (extraction px) where the rasterised top strip ends. Only the
+  // dark top region (status bar + notch + rounded top corners) is rasterised;
+  // child fills fully above this line are painted by the PNG and skipped, while
+  // everything below renders as native shapes. Undefined when the whole
+  // container is rasterised (no distinct bottom region).
+  rasterBottomY?: number;
 }
 
 interface ElementStyle {
@@ -2248,6 +2262,39 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       // clipping." Without hiding text first we'd get DOUBLED glyphs (baked +
       // overlay); without the child walk the text is baked + uneditable.
       (el as HTMLElement).setAttribute("data-h2s-hide-text", "1");
+      // Rasterise ONLY the "top black area", not the entire device. The device
+      // body decomposes into a short dark strip hugging the top (status bar +
+      // notch) and a tall content region below (the gradient screen). The top
+      // strip is the ONLY part a native roundRect can't reproduce: its corner
+      // radius (≥20px) exceeds 50% of the strip's small height, so the OOXML
+      // `adj` clamps ("only goes halfway"). The bottom region's radius is well
+      // under 50% of its height, so the gradient screen rounds its own bottom
+      // corners natively — and with NO full-device image behind it, there is no
+      // corner double-render / colour bleed (the pink crescent the user saw).
+      // topRegionH = the bottom of the children that hug the device top edge,
+      // floored to the corner radius so the curve is fully captured. When a
+      // child instead spans the full height (no distinct bottom region) this
+      // degrades to the original full-device capture.
+      let topRegionH = Math.max(elBR_tl, elBR_tr);
+      for (const c of Array.from((el as HTMLElement).children)) {
+        const cb = getBounds(c);
+        if (cb.h > 0 && cb.y <= bounds.y + 2) {
+          topRegionH = Math.max(topRegionH, cb.y + cb.h - bounds.y);
+        }
+      }
+      topRegionH = Math.min(topRegionH, bounds.h);
+      const hasDistinctBottom = topRegionH < bounds.h - 4;
+      const visualBounds = hasDistinctBottom
+        ? { x: bounds.x, y: bounds.y, w: bounds.w, h: topRegionH }
+        : bounds;
+      // Top strip is square along its bottom edge (it meets the native screen);
+      // only the device's true top corners get rounded in the image.
+      const visualCorners = hasDistinctBottom
+        ? { tl: elBR_tl, tr: elBR_tr, br: 0, bl: 0 }
+        : containerCornerRadii;
+      // Absolute y where the rasterised strip ends — child overlays fully above
+      // it are painted by the PNG and skipped by the emitter (see rasterizedHost).
+      const rasterBottomY = hasDistinctBottom ? bounds.y + topRegionH : undefined;
       // Spread-only box-shadow layers (`0 0 0 Npx color`) paint a concentric
       // halo ring OUTSIDE the element's bbox — the screenshot capture clips at
       // the element bounds and never sees these rings. Emit halo rects BEFORE
@@ -2266,7 +2313,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         }
         if (buf.trim()) parts.push(buf.trim());
         const rings: { spread: number; color: string; alpha: number }[] = [];
-        let dropShadow: { offsetX: number; offsetY: number; blur: number; color: string; alpha: number } | null = null;
+        let dropShadow: { offsetX: number; offsetY: number; blur: number; spread: number; color: string; alpha: number } | null = null;
         for (const p of parts) {
           const nums = p.match(/(-?\d+(?:\.\d+)?)px/g);
           if (!nums || nums.length < 2) continue;
@@ -2280,9 +2327,13 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
           } else if ((offsetX !== 0 || offsetY !== 0 || blur > 0) && !dropShadow) {
             // First drop-shadow layer (offset and/or blur, ignoring spread).
             // `addImage` only supports a single shadow — first wins.
-            dropShadow = { offsetX, offsetY, blur, color, alpha };
+            dropShadow = { offsetX, offsetY, blur, spread: 0, color, alpha };
           }
         }
+        // When only the top strip is rasterised, the device drop-shadow can't
+        // ride on that small PNG (it would float mid-device); hang it on the
+        // outermost full-device ring instead so it follows the whole frame.
+        const outerRingIdx = rings.reduce((bi, r, i, a) => (r.spread > a[bi].spread ? i : bi), 0);
         // Outermost ring first so it paints behind inner rings + visual.
         for (let i = rings.length - 1; i >= 0; i--) {
           const ring = rings[i];
@@ -2303,10 +2354,10 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
             borderStyle: "solid",
             zIndex: 0,
             position: "static",
-            boxShadow: null,
+            boxShadow: (hasDistinctBottom && i === outerRingIdx) ? dropShadow : null,
           });
         }
-        elements.push({ type: "visual", bounds, tag: "clipped-container", cornerRadii: containerCornerRadii, boxShadow: dropShadow });
+        elements.push({ type: "visual", bounds: visualBounds, tag: "clipped-container", cornerRadii: visualCorners, boxShadow: hasDistinctBottom ? null : dropShadow });
         // Stroke-only roundRect FRAME on top of the visual, matching the
         // captured device's border-radius. pptxgenjs `addImage` only writes
         // <p:pic prstGeom prst="rect">, so the captured PNG's RECTANGULAR
@@ -2339,7 +2390,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
           });
         }
       } else {
-        elements.push({ type: "visual", bounds, tag: "clipped-container", cornerRadii: containerCornerRadii });
+        elements.push({ type: "visual", bounds: visualBounds, tag: "clipped-container", cornerRadii: visualCorners });
       }
       // Re-walk children as editable overlays ON TOP of the captured PNG,
       // clipped to the device's rounded boundary (so child rects/text can't
@@ -2348,7 +2399,14 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       // chrome/background WITHOUT text (data-h2s-hide-text), so this produces
       // no doubled glyphs. Mirrors Path A's recurse-under-_childClipMask.
       const childArrDev = Array.from((el as HTMLElement).children);
-      _currentClipMask = _childClipMask;
+      // Flag the child mask as rasterised-host so the emitter knows a 2×
+      // device PNG already paints the rounded chrome: child overlays whose
+      // clipped corner radius exceeds 50% of their dimension (un-representable
+      // as a native roundRect — e.g. the navy status-bar strip / notch at the
+      // device top) are skipped and the backing image shows through instead.
+      _currentClipMask = _childClipMask
+        ? { ..._childClipMask, rasterizedHost: true, rasterBottomY }
+        : _childClipMask;
       try { for (const c of childArrDev) walk(c); }
       finally { _currentClipMask = _outerClipMask; }
       return;

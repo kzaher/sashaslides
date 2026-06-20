@@ -173,12 +173,19 @@ export async function extractFromHtml(
   });
   const retypedExtraction: Extraction = { ...extraction, elements: retypedElements };
 
-  // Screenshot visual elements (svg/canvas/images/emoji).
+  // Screenshot visual elements (svg/canvas/images/emoji + the large-radius
+  // `clipped-container` device mockups). Captured at 2× (RETINA_SCALE) so the
+  // rasterised >50%-corner fallback — where a device's rounded chrome can't be
+  // a native roundRect and is emitted as a PNG instead — stays retina-sharp
+  // (user: "Create 2x resolution because of retina displays"). The browser
+  // clips the capture to the element's true rounded geometry; `omitBackground`
+  // keeps the four corner cut-outs transparent.
+  const RETINA_SCALE = 2;
   const visualPngs = new Map<number, Buffer>();
   for (let i = 0; i < retypedExtraction.elements.length; i++) {
     const el = retypedExtraction.elements[i];
     if ((el.type === "visual" || el.type === "image") && el.bounds.w > 5 && el.bounds.h > 5) {
-      const clip = { x: el.bounds.x, y: el.bounds.y, width: el.bounds.w, height: el.bounds.h, scale: 2 };
+      const clip = { x: el.bounds.x, y: el.bounds.y, width: el.bounds.w, height: el.bounds.h, scale: RETINA_SCALE };
       const ss = await Page.captureScreenshot({ format: "png", clip, captureBeyondViewport: true, omitBackground: true });
       visualPngs.set(i, Buffer.from(ss.data, "base64"));
     }

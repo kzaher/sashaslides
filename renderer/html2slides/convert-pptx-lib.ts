@@ -896,6 +896,18 @@ export interface Padding { readonly top: number; readonly right: number; readonl
 export interface ClipMask {
   readonly bounds: Bounds;
   readonly cornerRadii: CornerRadii;
+  /** Set by extract-dom when the clipping ancestor is rasterised to a 2× PNG
+   * (the `clipped-container` device-mockup branch). Tells the patch emitter a
+   * correctly-rounded backing image already exists, so a child overlay whose
+   * required corner radius exceeds 50% of its clipped dimension (which a native
+   * roundRect can't represent) is skipped rather than drawn as a clamped,
+   * corner-poking shape over the device's true rounded edge. */
+  readonly rasterizedHost?: boolean;
+  /** Absolute y (px) where the rasterised top strip ends. Only the dark top
+   * region of the host is rasterised; a child fill fully above this line is
+   * already painted by the PNG, so its overlay is skipped. Undefined when the
+   * whole host is rasterised. */
+  readonly rasterBottomY?: number;
 }
 
 /** Fields every element shares. */
@@ -996,6 +1008,9 @@ export interface VisualElement extends ElementCommon {
   readonly type: "visual";
   readonly tag?: string;
   readonly cornerRadius?: number;
+  /** Per-corner radii the `clipped-container` device PNG was captured under —
+   * used to tag its rendered region descriptively. */
+  readonly cornerRadii?: CornerRadii;
 }
 
 export interface ImageElement extends ElementCommon {
@@ -1444,6 +1459,20 @@ export function buildPptx(
             ((bs.top?.width > 0 && bs.top?.color) || (bs.right?.width > 0 && bs.right?.color) ||
              (bs.bottom?.width > 0 && bs.bottom?.color) || (bs.left?.width > 0 && bs.left?.color));
 
+          // Rasterised top-strip skip: when a rounded clipping host had only its
+          // dark top region rasterised (rasterBottomY set), any fill fully above
+          // that line — the navy status bar, the black notch, the status dots —
+          // is already painted (correctly rounded) by the 2× device PNG. Skip
+          // the native overlay so a clamped/duplicate corner can't show over the
+          // image. The notch hugs the top edge without touching a rounded corner
+          // (so it has no clip patch), which is why this skip lives here rather
+          // than in the patch block below. Text rides on top via its own element.
+          {
+            const rby = el.clipMask?.rasterizedHost ? el.clipMask.rasterBottomY : undefined;
+            if (typeof rby === "number" && !mergedTextEl && !hasNonUniformBorder
+                && b.y + b.h <= rby + 0.5) break;
+          }
+
           // Content shape
           const opts: ShapeProps = {
             x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
@@ -1567,6 +1596,37 @@ export function buildPptx(
           let clipFlatBounds: Bounds = b;
           const patch = computeClippedPatch(b, el.clipMask);
           if (patch && opts.fill) {
+            // Un-representable corner: the clipped region needs a radius larger
+            // than 50% of its own dimension (e.g. slide_12's navy status-bar
+            // strip / notch hugging the device top — radius 32px on a ~44px
+            // strip). A native roundRect's `adj` maxes at 50% ("only goes
+            // halfway"), so emitting one here clamps the curve and the squared
+            // shoulder pokes past the device's true rounded edge. When the
+            // clipping host was rasterised to a 2× PNG (rasterizedHost), that
+            // backing image already paints the correct rounded chrome, so skip
+            // the clamped native overlay and let the image show through. Only
+            // applies to pure background fills (no merged text/border to lose).
+            // Sub-50% corners (e.g. the tall gradient screen at the device
+            // bottom) stay on the native roundRect path with the correct radius.
+            // No top-strip split (whole host rasterised): skip only the
+            // overlays whose clipped corner radius exceeds 50% of their
+            // dimension (un-representable); representable corners stay native.
+            // (The top-strip case is handled by the containment skip above,
+            // before the patch is even computed, so it also catches the notch
+            // which hugs the top edge without touching a rounded corner.)
+            if (el.clipMask?.rasterizedHost && typeof el.clipMask.rasterBottomY !== "number"
+                && !mergedTextEl && !hasNonUniformBorder) {
+              const mcr = el.clipMask.cornerRadii;
+              const pb0 = patch.bounds;
+              const capR = Math.min(pb0.w, pb0.h) / 2;
+              const reqR = Math.max(
+                patch.cornerRadii.tl > 0 ? mcr.tl : 0,
+                patch.cornerRadii.tr > 0 ? mcr.tr : 0,
+                patch.cornerRadii.br > 0 ? mcr.br : 0,
+                patch.cornerRadii.bl > 0 ? mcr.bl : 0,
+              );
+              if (reqR > capR + 0.5) break;
+            }
             const pcr = patch.cornerRadii;
             const pcp = cornerPresetFromRadii(pcr);
             const pb = patch.bounds;
@@ -2913,10 +2973,19 @@ export function buildPptx(
               };
             }
             slide.addImage(imgOpts);
+            // A large-radius `clipped-container` (phone/device mockup) is the
+            // rasterised >50%-corner fallback: its rounded chrome can't be a
+            // native roundRect, so it's emitted as this 2× PNG. Tag the region
+            // descriptively so the rating UI's "Highlight rendered regions"
+            // checkbox can mark/audit the device image.
+            const isClippedContainer =
+              el.type === "visual" && (el as VisualElement).tag === "clipped-container";
             slideRegions.push({
               x: b.x / SLIDE_W_PX, y: b.y / SLIDE_H_PX,
               w: b.w / SLIDE_W_PX, h: b.h / SLIDE_H_PX,
-              kind: (el.type === "image" && el._wasEmojiText) ? "emoji" : el.type,
+              kind: (el.type === "image" && el._wasEmojiText) ? "emoji"
+                : isClippedContainer ? "device-corner-image"
+                : el.type,
             });
           }
           break;
