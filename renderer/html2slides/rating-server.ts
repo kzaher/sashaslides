@@ -361,9 +361,21 @@ function findComparisons(): SlideComparison[] {
   }
 
   // Merge rendered-regions sidecar emitted by convert-pptx.ts. Keys are
-  // slide_NN and match the comparison id 1:1.
-  const regionsFile = join(resultsDir, "rendered-regions.json");
-  if (existsSync(regionsFile)) {
+  // slide_NN and match the comparison id 1:1. convert-pptx-io writes it next to
+  // the pptx (dirname(pptxPath)), which for `record-rendering --mode full` is
+  // the slides-dir / a pptx/ subdir — NOT the results-dir root. So probe the
+  // likely locations (results-dir, the --slides-dir, and pptx/ subdirs) and use
+  // the first that exists, or the checkbox "Highlight rendered regions" has no
+  // data to mark.
+  const regionCandidates = [
+    join(resultsDir, "rendered-regions.json"),
+    ...(slidesDirOverride ? [join(slidesDirOverride, "rendered-regions.json")] : []),
+    join(resultsDir, "pptx", "rendered-regions.json"),
+    join(resultsDir, "thumbs", "rendered-regions.json"),
+    join(resultsDir, "thumbs", "pptx", "rendered-regions.json"),
+  ];
+  const regionsFile = regionCandidates.find((p) => existsSync(p));
+  if (regionsFile) {
     try {
       const regions = JSON.parse(readFileSync(regionsFile, "utf-8")) as Record<string, RenderedRegion[]>;
       for (const c of comparisons) {
