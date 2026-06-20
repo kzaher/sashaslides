@@ -225,6 +225,13 @@ async function run(): Promise<void> {
   const engine = isCodex
     ? new CodexEngine({ port: monitorPort, persist: true })
     : new ClaudeEngine({ port: monitorPort, persist: true });
+  // BUG_SOLVING_USE_SCHEDULER=1 drives the graph via the new state-machine
+  // scheduler instead of the legacy one-shot interpreter (enables
+  // restart-from-node). Default off — the legacy path is unchanged.
+  if (process.env.BUG_SOLVING_USE_SCHEDULER === "1") {
+    engine.useScheduler = true;
+    console.error("[scaffold] useScheduler=true (state-machine scheduler path)");
+  }
   const session = new Session({ sessionId: `bug_solving-${Date.now()}` });
   const results = await engine.execute(session, (s) => main({ session: s, tasks }));
 
