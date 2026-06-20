@@ -222,6 +222,7 @@ interface TextRun {
     fontFamily: string;
     fontSize: number;
     textDecoration: string | null;
+    letterSpacing?: number;
     // Inline backgrounds (e.g. `<span class="code">`, `<span class="highlight">`)
     // — captured so the converter can apply pptxgenjs `highlight` per run.
     bgColor?: string | null;
@@ -1098,6 +1099,12 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
   // --- HELPERS ---
   const INLINE_TAGS = ["SPAN", "STRONG", "B", "EM", "I", "A", "CODE", "MARK", "SMALL", "SUB", "SUP", "U"];
 
+  function applyTextTransform(text: string, transform: string): string {
+    if (transform === "uppercase") return text.toUpperCase();
+    if (transform === "lowercase") return text.toLowerCase();
+    return text;
+  }
+
   function getDirectText(el: Element): string {
     const parts: { type: string; value?: string }[] = [];
     for (const node of el.childNodes) {
@@ -1184,7 +1191,8 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
           if (isBlock && !inListItem && !parentIsFlexOrGrid && runs.length > 0) {
             runs.push({ text: "\n", style: null });
           }
-          const runText = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
+          const rawRunText = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
+          const runText = applyTextTransform(rawRunText, cs.textTransform);
           if (parentColumnGapPx > 2 && inlineFlowChildCount > 0 && runText && !/^\s/.test(runText)) {
             const gapFontSize = parseFloat(cs.fontSize) || parentStyle.fontSize || 16;
             runs.push({
@@ -1228,6 +1236,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
             fontFamily: cs.fontFamily.split(",")[0].replace(/['"]/g, "").trim(),
             fontSize: parseFloat(cs.fontSize),
             textDecoration: cs.textDecorationLine !== "none" ? cs.textDecorationLine : null,
+            letterSpacing: parseFloat(cs.letterSpacing) || 0,
             bgColor: csBg && csBg !== parentBg ? csBg : null,
             verticalAlign,
           };
@@ -1236,6 +1245,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
             childStyle.fontStyle !== parentStyle.fontStyle ||
             childStyle.fontSize !== parentStyle.fontSize ||
             childStyle.textDecoration !== parentStyle.textDecoration ||
+            childStyle.letterSpacing !== parentStyle.letterSpacing ||
             !!childStyle.bgColor ||
             childStyle.verticalAlign !== "baseline";
           // Insert a separator space when this inline span starts with a
@@ -1251,6 +1261,14 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
             }
           }
           runs.push({ text: runText, style: differs ? childStyle : null });
+          const mr = parseFloat(cs.marginRight) || 0;
+          if (mr > 2 && runText) {
+            const gapFontSize = parseFloat(cs.fontSize) || parentStyle.fontSize || 16;
+            runs.push({
+              text: " ".repeat(Math.max(1, Math.round(mr / gapFontSize))),
+              style: null,
+            });
+          }
         } else {
           // Block-level children (div, p, etc.) — recurse so nested text
           // content (e.g. `<div class="price">$29<span>/mo</span></div>`
@@ -2021,6 +2039,21 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
             textAlign = "left";
           }
         }
+      } else if (which === "::before" && getDirectText(el).trim() !== "") {
+        // In-flow (non-absolute) ::before on a text-bearing host is a LEADING
+        // glyph PREFIX — slide_13 `.conversion-badge::before{content:'▼'}` is
+        // flex-item-1 sitting at the badge's left padding, ahead of the label.
+        // The default centers it over the FULL badge box (algn=ctr, cx=full
+        // width) so the glyph floats mid-badge to the RIGHT of the left-aligned
+        // label (the user's "arrow should be on the left" bug). Anchor it LEFT
+        // at the host's padding-left with a narrow glyph-width box and let the
+        // leaf text path inset the label past it. Decoupling the glyph's x from
+        // the label means it leads at the far left even when the label wraps.
+        const hostCs = getComputedStyle(el);
+        const hostPadL = parseFloat(hostCs.paddingLeft) || 0;
+        const glyphW = Math.max(fontSize * 2, 12);
+        textBounds = { x: bounds.x + hostPadL, y: bounds.y, w: glyphW, h: bounds.h };
+        textAlign = "left";
       }
       elements.push({
         type: "text",
@@ -2400,7 +2433,11 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       // renders flush right. Centered/left rows still collapse for clean rich text.
       const _jc0 = style.justifyContent;
       const isDistributedRow = _jc0 === "space-between" || _jc0 === "space-around" || _jc0 === "space-evenly";
-      const allInlineChromeless = !isDistributedRow && flexKids0.length > 0 && flexKids0.every(c => {
+      const hasInlineSpacingChild = flexKids0.some(c => {
+        const ccs = getComputedStyle(c);
+        return (parseFloat(ccs.letterSpacing) || 0) !== 0 || (parseFloat(ccs.marginRight) || 0) > 2;
+      });
+      const allInlineChromeless = !isDistributedRow && !hasInlineSpacingChild && flexKids0.length > 0 && flexKids0.every(c => {
         const ctag = (c.tagName || "").toUpperCase();
         if (!INLINE_TAGS.includes(ctag)) return false;
         const ccs = getComputedStyle(c);
@@ -2448,7 +2485,9 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         if (kids.length > 0) {
           const last = kids[kids.length - 1] as HTMLElement;
           const lb = getBounds(last);
-          textX = Math.max(bounds.x, lb.x + lb.w + gap);
+          const lcs = getComputedStyle(last);
+          const marginRight = parseFloat(lcs.marginRight) || 0;
+          textX = Math.max(bounds.x, lb.x + lb.w + marginRight + gap);
           textW = Math.max(20, bounds.w - (textX - bounds.x));
         }
         elements.push({
@@ -2540,6 +2579,27 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     const cs = getComputedStyle(el);
     const padL = parseFloat(cs.paddingLeft) || 0;
     const padR = parseFloat(cs.paddingRight) || 0;
+    // In-flow textual ::before leading marker (slide_13 `.conversion-badge`'s
+    // ▼). emitPseudoText emits the glyph as a separate LEFT-anchored element at
+    // the host's left padding; here we (a) keep the label LEFT-aligned (the
+    // chip-center heuristic would otherwise center it) and (b) inset the label
+    // past the glyph (`leadingMarkerInset`) so the two don't overlap.
+    let hasLeadingPseudoMarker = false;
+    let leadingMarkerInset = 0;
+    try {
+      const bcs = getComputedStyle(el, "::before");
+      const bRaw = bcs.content;
+      if (bRaw && bRaw !== "none" && bRaw !== "normal" &&
+          bcs.position !== "absolute" && bcs.position !== "fixed") {
+        const bGlyph = bRaw.replace(/^['"]|['"]$/g, "").trim();
+        if (bGlyph && bGlyph !== '""' && bGlyph !== "''") {
+          hasLeadingPseudoMarker = true;
+          const bSize = parseFloat(bcs.fontSize) || style.fontSize || 12;
+          const bGap = parseFloat(cs.columnGap) || parseFloat(cs.gap) || 0;
+          leadingMarkerInset = bSize + (bGap > 0 ? bGap : 4);
+        }
+      }
+    } catch { /* ignore pseudo read errors */ }
     // "Pill button" centering heuristic: CSS default text-align:start renders
     // visually centered inside pill chips because the text line box is tight
     // on width. Qualify as a pill when:
@@ -2582,7 +2642,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     const isSingleLineH = contentH < lineH2 * 1.5;
     if (effectiveAlign === "start" && padL > 5 && Math.abs(padL - padR) < 3 &&
         isSingleLineH && (padVSymmetric || fullyRoundedPill || chipWithOwnBg) &&
-        !isClippedFitted && !hasLineBreaks) {
+        !isClippedFitted && !hasLineBreaks && !hasLeadingPseudoMarker) {
       // TIGHT-vs-WIDE discriminator. The chip force-center is only valid when
       // the box HUGS its content (shrink-to-fit pill): there the content FILLS
       // the box, so start≈center visually and centering matches the render. A
@@ -2723,11 +2783,19 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         probedSingleLine = lineRects.length === 1;
         const available = textBounds.w - padL - padR;
         const SLIDES_WIDTH_SLACK = 6;  // Slides glyph-measurement headroom
-        const safeToInset = isMultiLine || available >= maxLineW + SLIDES_WIDTH_SLACK;
+        // A leading-marker badge keeps its label LEFT-aligned and must inset it
+        // BOTH by the left padding AND past the leading glyph so the label
+        // doesn't sit under the ▼. Force the inset (the tight shrink-to-fit
+        // badge would otherwise skip it) and keep the right edge at the border
+        // so the right padding is wrap slack.
+        const safeToInset = isMultiLine || available >= maxLineW + SLIDES_WIDTH_SLACK || hasLeadingPseudoMarker;
         if (safeToInset) {
           const minW = Math.max(style.fontSize || 10, 10);
-          const insetW = Math.max(available, minW);
-          textBounds = { ...textBounds, x: textBounds.x + padL, w: insetW };
+          const extraInset = hasLeadingPseudoMarker ? leadingMarkerInset : 0;
+          const insetW = hasLeadingPseudoMarker
+            ? Math.max(textBounds.w - padL - extraInset, minW)
+            : Math.max(available, minW);
+          textBounds = { ...textBounds, x: textBounds.x + padL + extraInset, w: insetW };
         }
       }
       // Probe ACTUAL rendered line pitch via Range.getClientRects(). CSS
