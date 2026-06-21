@@ -354,27 +354,14 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   writeFileSync(regionsPath, JSON.stringify(regionsBySlide, null, 2));
   console.log(`  Rendered regions: ${totalRegions} total across ${renderedRegions.length} slides → ${regionsPath}`);
 
-  // Post-process: inject <a:gradFill> into shapes tagged with name="GRAD_N"
-  await injectGradients(pptxPath, pres.__gradients || []);
-  // Post-process: every <a:ln w="…"> gains algn="in" — stroke paints inside.
-  await injectStrokeAlignment(pptxPath);
-  // Post-process: round2SameRect's single name="adj" → adj1/adj2 (pptxgenjs
-  // emits the wrong handle name, so the radius defaults to 16.667% and
-  // over-rounds — slide_12 device-screen / background bottom corners).
-  await injectRound2SameRectAdj(pptxPath);
-  // Post-process: empty <a:ln></a:ln> → <a:ln><a:noFill/></a:ln> so Google
-  // Slides doesn't paint a default hairline on shapes that asked for no
-  // line (slide_17 shape-twice corner inner-fill rects).
-  await injectShapeNoLine(pptxPath);
-  // Post-process: heavy-form table-cell `<a:ln[LRTB] w="0" cap="flat"
-  // cmpd="sng" algn="ctr"><a:noFill/></a:ln[LRTB]>` → clean
-  // `<a:ln[LRTB]><a:noFill/></a:ln[LRTB]>` so Google Slides honours the
-  // noFill instead of painting a default hairline column divider between
-  // cells the CSS didn't separate (slide_17 rounded table, wave-21).
-  await injectCellNoBorder(pptxPath);
-  // Post-process: wrap (clipped-patch, host) pairs in native <p:grpSp> so
-  // Slides resize/move tracks them together (rule 3 in convert-pptx-lib).
-  await injectClipGroups(pptxPath);
+  // ALL pptxgenjs OOXML fixes are now NATIVE in the vendored fork
+  // (deps/pptxgenjs/src) — no zip post-patches remain:
+  //   • gradient fills      → fill: { type: 'gradient' } → <a:gradFill>
+  //   • stroke align="in"   → width-bearing <a:ln> default
+  //   • round2SameRect      → adj1/adj2 handle naming
+  //   • empty <a:ln>        → <a:noFill/>
+  //   • table-cell noFill   → minimal border form
+  //   • shape groups        → slide.addGroup(...) → <p:grpSp>
 
   if (noUpload) {
     console.log("Done (no upload).");
