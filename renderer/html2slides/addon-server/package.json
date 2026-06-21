@@ -1,0 +1,21 @@
+{
+  "name": "html2slides-addon-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Externally-hosted UI + API for the html2slides Google Slides add-on (thin Apps Script shell loads this).",
+  "scripts": {
+    "start": "tsx server.ts",
+    "dev": "tsx watch server.ts"
+  },
+  "dependencies": {
+    "googleapis": "^144.0.0",
+    "jszip": "^3.10.1",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "@types/node": "^22.8.0",
+    "@types/pngjs": "^6.0.5"
+  }
+}

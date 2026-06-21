@@ -217,6 +217,13 @@ const PX2IN = SLIDE_W_IN / SLIDE_W_PX; // 0.0078125
 // At 96dpi CSS, 1px = 0.75pt. But our slide is 10" for 1280px, so effective:
 const PX2PT = SLIDE_W_IN / SLIDE_W_PX * 72; // 10/1280*72 = 0.5625
 
+// Workstream E (drawio round-trip): the magenta marker fill that flags the
+// off-canvas source text box. The add-on scans the Slides API for a text box
+// whose fill is exactly this colour to rediscover a diagram's editable
+// mxGraph XML. Off-canvas (below the slide) so it never paints; convention
+// shared with the add-on side. CONFIG.drawioMetaColor == "FF00FF".
+const CONFIG = { drawioMetaColor: "FF00FF" } as const;
+
 function px2in(px: number): number { return px * PX2IN; }
 
 function hexToRgb(hex: string): string {
@@ -943,6 +950,12 @@ interface ElementCommon {
   /** Pre-assigned group id shared with an underlay patch — currently unused
    * by extract-dom and reserved for future synthetic grouping. */
   readonly _groupId?: string;
+  /** Workstream E: true only on the rendered diagram element (<svg>/<img>)
+   * that pairs with an `Extraction.drawioSource`. When set, the converter
+   * tags this element's image `objectName = DRAWIO_IMG_<n>` to link it to the
+   * off-canvas `DRAWIO_SRC_<n>` source text box. Undefined on non-drawio
+   * slides → the converter does nothing extra (byte-identical preserved). */
+  readonly _drawioPaired?: boolean;
 }
 
 export interface RectElement extends ElementCommon {
@@ -1056,6 +1069,13 @@ export interface Extraction {
   readonly viewport: { readonly w: number; readonly h: number };
   readonly elementCount: number;
   readonly elements: readonly ExtractedElement[];
+  /** Workstream E: editable drawio (mxGraph) XML behind this slide's rendered
+   * diagram, lifted from the page's `<script
+   * type="application/vnd.drawio+xml" id="drawio-source">`. Present ONLY for
+   * slides that carry such a script; undefined otherwise. When set, the
+   * converter emits one extra off-canvas marker text box (see buildPptx) so
+   * the add-on can rediscover + re-edit the diagram. */
+  readonly drawioSource?: string;
 }
 
 /** Convenience for the buildPptx input shape: paired extraction + per-element
@@ -2984,6 +3004,13 @@ export function buildPptx(
               data: `image/png;base64,${bytesToBase64(buf)}`,
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
             };
+            // Workstream E: link a drawio-rendered diagram image to its
+            // off-canvas source box. `DRAWIO_IMG_<si>` matches the
+            // `DRAWIO_SRC_<si>` text box emitted after this element loop. Set
+            // ONLY when extract-dom flagged this element as the diagram pair —
+            // a no-op for every other image (objectName stays unset, byte
+            // output unchanged).
+            if (el._drawioPaired) imgOpts.objectName = `DRAWIO_IMG_${si}`;
             // Drop-shadow plumbed through from extract-dom.ts's clipped-
             // container branch (e.g. slide_12 .device's `box-shadow: 0 0 0
             // 2px #333`). Rendering the shadow natively via pptxgenjs lets
@@ -3029,6 +3056,48 @@ export function buildPptx(
           break;
         }
       }
+    }
+
+    // --- Workstream E: off-canvas drawio source marker ---
+    // When this slide carried a `#drawio-source` script, stash its editable
+    // mxGraph XML in ONE extra text box positioned BELOW the slide (y past the
+    // slide bottom), filled with the magenta marker colour (CONFIG.drawioMetaColor
+    // == "FF00FF"), and named `DRAWIO_SRC_<si>` to mirror the diagram image's
+    // `DRAWIO_IMG_<si>` objectName. It is off-canvas so it never renders, but
+    // the Slides API can discover it (scan for the marker fill / the
+    // DRAWIO_SRC_* name) and re-open the diagram for editing.
+    //
+    // BYTE-IDENTICAL GUARANTEE: this entire block is gated on
+    // `extraction.drawioSource` being set. extract-dom only sets it when a
+    // `#drawio-source` script is present, so for every other slide nothing new
+    // is emitted and the output is unchanged.
+    const drawioXml = extraction.drawioSource;
+    if (drawioXml) {
+      // A PROMINENT magenta panel placed BELOW the slide (off-canvas → not shown
+      // in the slideshow or thumbnail), holding the editable drawio source. It's
+      // styled to be unmistakable in the editor + selection pane: bold header
+      // label, dark-magenta border, and READABLE white text on the marker fill
+      // (CONFIG.drawioMetaColor). Named DRAWIO_SRC_<si> to mirror DRAWIO_IMG_<si>
+      // so the add-on can pair the source with its rendered diagram and re-open it.
+      slide.addText(
+        [
+          { text: "▼  drawio source — editable · not shown in slideshow · do not delete  ▼\n", options: { bold: true, fontSize: 11, color: "FFFFFF" } },
+          // Raw XML kept intact for clean re-parsing (parser strips to "<mxfile").
+          { text: drawioXml, options: { fontSize: 8, color: "FFFFFF" } },
+        ],
+        {
+          objectName: `DRAWIO_SRC_${si}`,
+          x: 0.3,
+          y: SLIDE_H_IN + 0.35,        // clearly below the slide bottom edge
+          w: SLIDE_W_IN - 0.6,
+          h: 1.6,
+          fill: { color: CONFIG.drawioMetaColor }, // prominent magenta marker
+          line: { color: "8B008B", width: 2 },     // dark-magenta border for extra pop
+          align: "left",
+          valign: "top",
+          isTextBox: true,
+        },
+      );
     }
   }
 

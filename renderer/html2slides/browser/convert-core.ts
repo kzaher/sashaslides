@@ -34,6 +34,15 @@ export type { SlideInput };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Rasterisation oversampling factor (per-element capture scale). Clamp to
+// [1,8]; default 2 (retina) so unchanged callers / the default UI value render
+// byte-identically. A non-finite/missing value falls back to 2.
+export function clampOversampling(n: number | undefined | null): number {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 2;
+  return Math.min(8, Math.max(1, v));
+}
+
 export async function loadIntoIframe(html: string): Promise<HTMLIFrameElement> {
   const iframe = document.createElement("iframe");
   iframe.style.cssText =
@@ -108,9 +117,9 @@ function runExtractInIframe(iframe: HTMLIFrameElement): Extraction {
  * Rasterize visual/image elements. Walks the iframe DOM to find nodes at the
  * extracted bounds, then renders them to a PNG via canvas. Supports <img>,
  * <canvas>, <svg>. Other tags log a warning and are skipped (renders as a
- * gap in the .pptx). 2× scale to match the Node CDP path.
+ * gap in the .pptx). `scale`× capture (default 2) to match the Node CDP path.
  */
-async function rasterizeVisuals(iframe: HTMLIFrameElement, extraction: Extraction, log: LogFn): Promise<Map<number, Uint8Array>> {
+async function rasterizeVisuals(iframe: HTMLIFrameElement, extraction: Extraction, log: LogFn, scale: number): Promise<Map<number, Uint8Array>> {
   const out = new Map<number, Uint8Array>();
   const idoc = iframe.contentDocument!;
   const iwin = iframe.contentWindow!;
@@ -120,7 +129,7 @@ async function rasterizeVisuals(iframe: HTMLIFrameElement, extraction: Extractio
     if (el.bounds.w <= 5 || el.bounds.h <= 5) continue;
     const tag = (el.tag || "").toLowerCase();
     try {
-      const png = await rasterizeElement(idoc, iwin, el, tag, log);
+      const png = await rasterizeElement(idoc, iwin, el, tag, log, scale);
       if (png) out.set(i, png);
     } catch (e) {
       log(`  rasterize fail [#${i}] <${tag}>: ${(e as Error).message}`, "warn");
@@ -135,6 +144,7 @@ async function rasterizeElement(
   el: ExtractedElement,
   tag: string,
   log: LogFn,
+  scale: number,
 ): Promise<Uint8Array | null> {
   const b = el.bounds;
   const node = findNodeAt(idoc, b, tag);
@@ -143,8 +153,8 @@ async function rasterizeElement(
     return null;
   }
 
-  const W = Math.max(1, Math.round(b.w * 2));
-  const H = Math.max(1, Math.round(b.h * 2));
+  const W = Math.max(1, Math.round(b.w * scale));
+  const H = Math.max(1, Math.round(b.h * scale));
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
@@ -209,7 +219,8 @@ function findNodeAt(idoc: Document, b: { x: number; y: number; w: number; h: num
   return list[0] || null;
 }
 
-export async function processFile(file: File, log: LogFn): Promise<Slide> {
+export async function processFile(file: File, log: LogFn, oversampling: number = 2): Promise<Slide> {
+  const scale = clampOversampling(oversampling);
   const html = await file.text();
   const iframe = await loadIntoIframe(html);
   try {
@@ -218,7 +229,7 @@ export async function processFile(file: File, log: LogFn): Promise<Slide> {
       throw new Error("extraction returned no elements");
     }
     log(`  ${file.name}: ${extraction.elements.length} elements`);
-    const visualPngs = await rasterizeVisuals(iframe, extraction, log);
+    const visualPngs = await rasterizeVisuals(iframe, extraction, log, scale);
     log(`  ${file.name}: rasterized ${visualPngs.size} visuals`);
     return { extraction, visualPngs, name: file.name };
   } finally {

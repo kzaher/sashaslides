@@ -1,0 +1,27 @@
+# sashaslides addon-server — fits the holosweat server (nginx + certbot front it).
+#
+# This container speaks PLAIN HTTP on 127.0.0.1:${HOST_PORT} only (never exposed
+# publicly). nginx terminates TLS for slides.holosweat.com and reverse-proxies to
+# it — same shape as api.holosweat.com -> localhost:5002. Certs are certbot's,
+# untouched by this stack.
+#
+# Its own compose project + dir (/root/sashaslides) so it never disturbs the
+# existing /root/holosweat/images stack. Built locally, pushed via the registry.
+
+services:
+  sashaslides:
+    image: holosweat-sashaslides:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - PORT=8787
+      - OVERSAMPLING_DEFAULT=2
+    # localhost-only publish — nginx (on the host) proxies to this. Nothing on a
+    # public interface, so no new firewall opening is required for the app port.
+    ports:
+      - "127.0.0.1:${HOST_PORT:-6000}:8787"
+    # drawio editor webapp is OPTIONAL for v1: /drawio 503s until you populate the
+    # submodule and rebuild with it baked in (see HOLOSWEAT-DEPLOY.md "drawio").
+    # Detection, export, oversampling, and the UI all work without it.

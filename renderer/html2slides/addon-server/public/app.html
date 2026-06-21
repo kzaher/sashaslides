@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>html2slides</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header><h1>html2slides</h1><span id="env-badge" class="badge">…</span></header>
+
+<!-- ── Insert HTML ─────────────────────────────────────────────── -->
+<section>
+  <h2>Insert HTML</h2>
+  <div class="row">
+    <input type="url" id="url-input" placeholder="https://example.com/slide.html — load HTML from an external site">
+    <button id="fetch-url-btn">Fetch &amp; queue</button>
+  </div>
+  <div id="dropzone" class="dropzone">Drop .html files, or paste HTML below</div>
+  <textarea id="paste-box" rows="4" placeholder="…or paste raw HTML here"></textarea>
+  <ul id="file-list" class="file-list"></ul>
+
+  <div class="row">
+    <label for="oversample">Oversampling resolution
+      <span class="hint">sharper embedded images; applies to HTML→image rasterization</span>
+    </label>
+    <input type="range" id="oversample" min="1" max="8" step="1" value="2">
+    <output id="oversample-out">2×</output>
+  </div>
+
+  <button id="insert-btn" class="primary">Insert after current slide</button>
+</section>
+
+<!-- ── Export ──────────────────────────────────────────────────── -->
+<section>
+  <h2>Export</h2>
+  <div class="row">
+    <label for="range-input">Slide range
+      <span class="hint">e.g. 1-5, 8, 11-13 — blank = all</span>
+    </label>
+    <input type="text" id="range-input" placeholder="all">
+  </div>
+  <label class="check"><input type="checkbox" id="skip-hidden" checked> Exclude skipped (hidden) slides</label>
+  <button id="export-png-btn">Download slides as PNG (.zip)</button>
+  <span class="hint">SVG export coming later — the Google API exports PNG only.</span>
+</section>
+
+<!-- ── drawio diagrams ─────────────────────────────────────────── -->
+<section>
+  <h2>drawio diagrams <span id="drawio-status" class="badge"></span></h2>
+  <p class="hint">PNGs in the deck that carry an embedded drawio diagram. Editing re-renders the
+    PNG and updates the hidden XML field stored below the slide.</p>
+  <div class="row"><button id="drawio-detect-btn">Detect in deck</button><button id="drawio-new-btn">New diagram</button></div>
+  <ul id="drawio-list" class="drawio-list"></ul>
+  <!-- drawio editor mounts here (iframe → /drawio self-hosted) -->
+  <div id="drawio-editor-wrap" hidden><iframe id="drawio-frame" title="drawio editor"></iframe></div>
+</section>
+
+<div id="log" class="log"></div>
+<script src="/static/app.js"></script>
+<script src="/static/feature-drawio.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# Caddy fronts the addon-server with automatic HTTPS.
+#
+# Caddy obtains a Let's Encrypt certificate on first request for $DOMAIN, then
+# RENEWS it automatically (~30 days before expiry) with no cron. Certs + ACME
+# account keys are stored under /data, which docker-compose maps to the named
+# volume `caddy_data` — so they're CACHED across restarts/redeploys and Caddy
+# never needlessly re-issues (staying clear of Let's Encrypt rate limits).
+#
+# {$DOMAIN} and {$ACME_EMAIL} come from the environment (see .env / compose).
+
+{
+	email {$ACME_EMAIL}
+	# Uncomment to test against the staging CA first (avoids burning rate limits):
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	# Long-cache the immutable UI/static assets; never cache the API.
+	@static path /static/* /drawio/*
+	header @static Cache-Control "public, max-age=86400"
+	@api path /api/*
+	header @api Cache-Control "no-store"
+
+	reverse_proxy app:8787 {
+		health_uri /healthz
+		health_interval 15s
+	}
+}

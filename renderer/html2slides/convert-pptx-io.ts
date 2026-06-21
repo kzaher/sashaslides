@@ -68,6 +68,15 @@ const EXTRACT_JS = transformSync(
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// Rasterisation oversampling factor (deviceScaleFactor + element capture
+// scale). Clamp to [1,8]; default 2. A non-finite/missing value falls back to 2
+// so unchanged callers stay byte-identical.
+export function clampOversampling(n: number | undefined | null): number {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 2;
+  return Math.min(8, Math.max(1, v));
+}
+
 // --- Auth ----------------------------------------------------------------
 export function getAuth() {
   const creds = JSON.parse(readFileSync("/workspaces/sashaslides/.auth/google_oauth.json", "utf-8")).installed;
@@ -82,10 +91,15 @@ export function getAuth() {
 }
 
 // --- DOM Extraction ------------------------------------------------------
+// `oversampling` is the rasterisation scale factor (deviceScaleFactor + the
+// per-element capture scale). Defaults to 2 (retina); clamped to [1,8] so an
+// unchanged caller and the default UI value both render byte-identically.
 export async function extractFromHtml(
   htmlPath: string,
   tablesFormat: "native" | "baked" = "native",
+  oversampling: number = 2,
 ): Promise<{ extraction: Extraction; visualPngs: Map<number, Buffer> }> {
+  const scale = clampOversampling(oversampling);
   const absPath = resolve(htmlPath);
   const tab = await CDPS.New({ port: CDP_PORT, url: `file://${absPath}` });
   await sleep(1200);
@@ -94,7 +108,7 @@ export async function extractFromHtml(
   const { Page, Runtime, Emulation } = client;
   await Page.enable();
   await Runtime.enable();
-  await Emulation.setDeviceMetricsOverride({ width: SLIDE_W_PX, height: SLIDE_H_PX, deviceScaleFactor: 2, mobile: false });
+  await Emulation.setDeviceMetricsOverride({ width: SLIDE_W_PX, height: SLIDE_H_PX, deviceScaleFactor: scale, mobile: false });
   await sleep(800);
   await Runtime.evaluate({ expression: `document.fonts.ready.then(() => true)`, awaitPromise: true, returnByValue: true });
   await sleep(300);
@@ -175,13 +189,13 @@ export async function extractFromHtml(
   const retypedExtraction: Extraction = { ...extraction, elements: retypedElements };
 
   // Screenshot visual elements (svg/canvas/images/emoji + the large-radius
-  // `clipped-container` device mockups). Captured at 2× (RETINA_SCALE) so the
-  // rasterised >50%-corner fallback — where a device's rounded chrome can't be
-  // a native roundRect and is emitted as a PNG instead — stays retina-sharp
-  // (user: "Create 2x resolution because of retina displays"). The browser
-  // clips the capture to the element's true rounded geometry; `omitBackground`
-  // keeps the four corner cut-outs transparent.
-  const RETINA_SCALE = 2;
+  // `clipped-container` device mockups). Captured at `oversampling`× (default
+  // 2 = retina) so the rasterised >50%-corner fallback — where a device's
+  // rounded chrome can't be a native roundRect and is emitted as a PNG instead
+  // — stays retina-sharp (user: "Create 2x resolution because of retina
+  // displays"). The browser clips the capture to the element's true rounded
+  // geometry; `omitBackground` keeps the four corner cut-outs transparent.
+  const RETINA_SCALE = scale;
   const visualPngs = new Map<number, Buffer>();
   for (let i = 0; i < retypedExtraction.elements.length; i++) {
     const el = retypedExtraction.elements[i];
@@ -276,6 +290,7 @@ export interface ConvertPptxOpts {
   only?: string[] | null;    // list of basenames like ["slide_11.html", ...]; default null = all
   tablesFormat?: "native" | "baked"; // default "native" (editable <a:tbl>, square corners);
                                      // "baked" rasterises tables (rounded corners + full fidelity)
+  oversampling?: number;             // rasterisation scale factor, clamped [1,8]; default 2 (retina)
 }
 
 export interface ConvertPptxResult {
@@ -293,6 +308,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   const noUpload = opts.noUpload ?? false;
   const onlyFiles: readonly string[] | null = opts.only ?? null;
   const tablesFormat: "native" | "baked" = opts.tablesFormat ?? "native";
+  const oversampling = clampOversampling(opts.oversampling);
 
   const htmlFiles = readdirSync(htmlDir)
     .filter(f => f.endsWith(".html"))
@@ -303,6 +319,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   if (htmlFiles.length === 0) { console.error("No HTML files found in", htmlDir); process.exit(1); }
   console.log(`Converting ${htmlFiles.length} HTML slides → pptx "${title}"`);
   console.log(`  tablesFormat: ${tablesFormat}`);
+  console.log(`  oversampling: ${oversampling}×`);
 
   // Step 1: Extract DOM from all slides — fully in parallel. Each slide opens
   // its own short-lived Chrome tab via CDP.New; tabs are independent so there's
@@ -317,7 +334,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
       if (idx >= htmlFiles.length) return;
       const f = htmlFiles[idx];
       console.log(`  [${idx + 1}/${htmlFiles.length}] Extracting ${f.split("/").pop()}...`);
-      const data = await extractFromHtml(f, tablesFormat);
+      const data = await extractFromHtml(f, tablesFormat, oversampling);
       console.log(`    [${idx + 1}] ${data.extraction.elementCount} elements, ${data.visualPngs.size} visuals`);
       slideData[idx] = data;
     }
