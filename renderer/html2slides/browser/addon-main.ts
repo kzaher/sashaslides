@@ -27,6 +27,22 @@ declare const google: {
     host: { close(): void; setHeight(h: number): void; editor: { focus(): void } };
   };
 };
+
+// The shared app.js shell (shell.html) exposes the oversampling slider via
+// `window.h2s.bridge.oversampling()` (1-8, default 2). When the sidebar runs
+// inside that shell we honour the slider; standalone we fall back to 2.
+interface H2sBridge { oversampling?: () => number }
+declare global {
+  interface Window { h2s?: { bridge?: H2sBridge } }
+}
+
+/** Read the UI oversampling value (clamped [1,8]); default 2 when absent. */
+function uiOversampling(): number {
+  let v = 2;
+  try { const b = window.h2s?.bridge?.oversampling; if (b) v = Number(b()); } catch { /* ignore */ }
+  if (!Number.isFinite(v)) return 2;
+  return Math.min(8, Math.max(1, v));
+}
 type InsertResult = { inserted: number; at: number; title: string };
 type AuthInfo = { status: string; url: string };
 type TestResult = { ok: boolean; user?: string };
@@ -106,12 +122,15 @@ async function convertAndInsert(files: File[]): Promise<void> {
   ($("#log") as HTMLDivElement).innerHTML = "";
   log(`Converting ${files.length} slide(s)…`);
 
+  const oversampling = uiOversampling();
+  if (oversampling !== 2) log(`oversampling: ${oversampling}×`);
+
   const slides: Slide[] = [];
   setProgress(0, files.length, "extracting");
   for (let i = 0; i < files.length; i++) {
     log(`[${i + 1}/${files.length}] ${files[i].name}`);
     try {
-      slides.push(await processFile(files[i], log));
+      slides.push(await processFile(files[i], log, oversampling));
     } catch (e) {
       log(`  ${files[i].name}: extraction failed: ${(e as Error).message}`, "error");
     }

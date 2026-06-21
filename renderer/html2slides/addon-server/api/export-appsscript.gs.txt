@@ -1,0 +1,125 @@
+/**
+ * export-appsscript.gs.txt — Apps Script (Code.gs) parallel of api/export.ts.
+ *
+ * This is the ADD-ON path. Whereas api/export.ts runs in the local dev server
+ * with the project's stored OAuth, the deployed Google Workspace add-on runs as
+ * the SIGNED-IN USER: Apps Script supplies the user's OAuth token via
+ * ScriptApp.getOAuthToken(), so there are no .auth/*.json files — the user's own
+ * Slides/Drive grants apply.
+ *
+ * Required OAuth scopes (appsscript.json "oauthScopes"):
+ *   https://www.googleapis.com/auth/presentations.readonly
+ *   https://www.googleapis.com/auth/script.external_request   (UrlFetchApp)
+ *
+ * Wire-up (Code.gs): the HtmlService client posts {presentationId, range,
+ * excludeHidden} via google.script.run.exportSlidesZip(payload); this returns a
+ * base64 data URL (or a Drive file id) the client turns into a download. Apps
+ * Script can't stream a binary HTTP response the way the Node server does, so
+ * the idiomatic move is to build the zip Blob and either (a) hand back its
+ * base64 bytes, or (b) save it to Drive and return the file URL.
+ *
+ * Paste the body below into Code.gs (drop the surrounding block comment).
+ */
+
+/* ---------------------------------------------------------------------------
+function parseRange_(range) {
+  // "1-5, 8, 11-13" -> {1:true,...} (1-based). Blank/empty -> null = all slides.
+  if (range == null) return null;
+  var trimmed = String(range).trim();
+  if (trimmed === '') return null;
+  var out = {};
+  var segs = trimmed.split(',');
+  for (var i = 0; i < segs.length; i++) {
+    var seg = segs[i].trim();
+    if (seg === '') continue;                 // tolerate "1,,3" / trailing comma
+    var dash = seg.indexOf('-');
+    if (dash === -1) {
+      var n = Number(seg);
+      if (!(n >= 1) || Math.floor(n) !== n) throw new Error('bad slide index "' + seg + '"');
+      out[n] = true;
+    } else {
+      var a = Number(seg.slice(0, dash).trim());
+      var b = Number(seg.slice(dash + 1).trim());
+      if (!(a >= 1) || !(b >= 1) || Math.floor(a) !== a || Math.floor(b) !== b) {
+        throw new Error('bad slide range "' + seg + '"');
+      }
+      var lo = Math.min(a, b), hi = Math.max(a, b);
+      for (var k = lo; k <= hi; k++) out[k] = true;
+    }
+  }
+  return out;
+}
+
+function exportSlidesZip(payload) {
+  // payload: { presentationId: string, range?: string, excludeHidden?: boolean }
+  var presentationId = payload && payload.presentationId;
+  if (!presentationId) throw new Error('missing presentationId');
+
+  var included = parseRange_(payload.range);          // {idx:true} or null=all
+  var wantExcludeHidden = payload.excludeHidden === true;
+
+  var token = ScriptApp.getOAuthToken();              // the signed-in user's OAuth
+  var auth = { headers: { Authorization: 'Bearer ' + token } };
+
+  // 1. List slides + the skip flag. The REST field slideProperties.isSkipped is
+  //    the editor's "Skip slide" toggle (same as a pptx show="0" import).
+  var metaUrl =
+    'https://slides.googleapis.com/v1/presentations/' + encodeURIComponent(presentationId) +
+    '?fields=slides(objectId,slideProperties/isSkipped)';
+  var metaResp = UrlFetchApp.fetch(metaUrl, auth);
+  var meta = JSON.parse(metaResp.getContentText());
+  var slides = meta.slides || [];
+
+  var sawSkipProp = false;
+  var blobs = [];
+  for (var i = 0; i < slides.length; i++) {
+    var oneBased = i + 1;
+    if (included && !included[oneBased]) continue;
+
+    var sp = slides[i].slideProperties || {};
+    if (sp.isSkipped != null) sawSkipProp = true;
+    if (wantExcludeHidden && sp.isSkipped === true) continue;
+
+    var slideId = slides[i].objectId;
+    if (!slideId) continue;
+
+    // 2. Per-slide thumbnail. getThumbnail returns a JSON {contentUrl}; the
+    //    contentUrl is a short-lived signed URL we fetch the PNG bytes from.
+    var thumbUrl =
+      'https://slides.googleapis.com/v1/presentations/' + encodeURIComponent(presentationId) +
+      '/pages/' + encodeURIComponent(slideId) + '/thumbnail' +
+      '?thumbnailProperties.mimeType=PNG&thumbnailProperties.thumbnailSize=LARGE';
+    var thumbResp = UrlFetchApp.fetch(thumbUrl, auth);
+    var contentUrl = JSON.parse(thumbResp.getContentText()).contentUrl;
+    if (!contentUrl) continue;
+
+    var pngResp = UrlFetchApp.fetch(contentUrl);       // signed URL: no auth header
+    var nn = (oneBased < 10 ? '0' : '') + oneBased;
+    blobs.push(pngResp.getBlob().setName('slide_' + nn + '.png'));
+  }
+
+  if (wantExcludeHidden && !sawSkipProp) {
+    Logger.log('[export] excludeHidden requested but no slide reported ' +
+               'slideProperties.isSkipped — filter was a no-op.');
+  }
+  if (blobs.length === 0) throw new Error('no slides matched the requested range/filter');
+
+  // 3. Utilities.zip bundles the PNG blobs into one zip Blob.
+  var zipBlob = Utilities.zip(blobs, 'slides.zip');
+
+  // 4a. Return base64 so the HtmlService client can build a download anchor:
+  //       var a = document.createElement('a');
+  //       a.href = 'data:application/zip;base64,' + result.base64;
+  //       a.download = 'slides.zip'; a.click();
+  return {
+    filename: 'slides.zip',
+    mimeType: 'application/zip',
+    base64: Utilities.base64Encode(zipBlob.getBytes())
+  };
+
+  // 4b. ...or save to Drive and return a link instead (better for large zips,
+  //     which can exceed the google.script.run return-size limit):
+  //   var file = DriveApp.createFile(zipBlob);
+  //   return { filename: 'slides.zip', url: file.getUrl(), id: file.getId() };
+}
+--------------------------------------------------------------------------- */

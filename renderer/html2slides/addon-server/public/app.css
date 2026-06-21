@@ -1,0 +1,26 @@
+:root { --bg:#fff; --fg:#1a1a2e; --mut:#6b7280; --acc:#5b21b6; --line:#e5e7eb; --warn:#b45309; }
+* { box-sizing:border-box; }
+body { font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; color:var(--fg); margin:0; padding:12px; background:var(--bg); }
+header { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+h1 { font-size:18px; margin:0; }
+h2 { font-size:14px; margin:0 0 8px; text-transform:uppercase; letter-spacing:.04em; color:var(--mut); }
+section { border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+.row { display:flex; align-items:center; gap:8px; margin:8px 0; flex-wrap:wrap; }
+label { font-weight:600; display:flex; flex-direction:column; }
+.hint { font-weight:400; color:var(--mut); font-size:12px; }
+input[type=url],input[type=text],textarea { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+input[type=range] { flex:1; }
+output { font-variant-numeric:tabular-nums; font-weight:700; min-width:2.5em; }
+button { padding:6px 12px; border:1px solid var(--line); border-radius:6px; background:#f9fafb; cursor:pointer; font:inherit; }
+button:hover { background:#f3f4f6; }
+button.primary { background:var(--acc); color:#fff; border-color:var(--acc); width:100%; padding:9px; font-weight:600; }
+.badge { font-size:11px; padding:2px 8px; border-radius:999px; background:#ede9fe; color:var(--acc); }
+.dropzone { border:2px dashed var(--line); border-radius:8px; padding:16px; text-align:center; color:var(--mut); margin:8px 0; }
+.dropzone.over { border-color:var(--acc); background:#faf5ff; }
+.file-list,.drawio-list { list-style:none; padding:0; margin:8px 0; }
+.file-list li,.drawio-list li { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; margin:4px 0; }
+.drawio-list li .thumb { width:40px; height:30px; object-fit:contain; border:1px solid var(--line); border-radius:3px; }
+.drawio-list li .name { flex:1; font-size:13px; }
+.check { flex-direction:row; align-items:center; gap:6px; font-weight:400; }
+.log { font:12px/1.4 ui-monospace,Menlo,monospace; color:var(--mut); white-space:pre-wrap; max-height:160px; overflow:auto; border-top:1px solid var(--line); padding-top:8px; }
+#drawio-frame { width:100%; height:60vh; border:1px solid var(--line); border-radius:6px; }

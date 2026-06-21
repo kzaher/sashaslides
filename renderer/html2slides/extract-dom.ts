@@ -375,6 +375,14 @@ interface ExtractedElement {
   // shields. Post-processed into a `<p:grpSp>` wrapper in the slide XML so
   // that resize/move in Slides keeps the pair together.
   _groupId?: string;
+  // Workstream E (drawio round-trip): set true on the SINGLE rendered diagram
+  // element (the <svg>/<img> that visualises a `<script
+  // type="application/vnd.drawio+xml" id="drawio-source">`). The converter
+  // tags this element's image `objectName = DRAWIO_IMG_<n>` and emits a paired
+  // off-canvas `DRAWIO_SRC_<n>` text box (fill #FF00FF) carrying the editable
+  // mxGraph XML, so the add-on can rediscover + re-open the diagram. Undefined
+  // (and thus byte-irrelevant) on every slide that has no drawio source.
+  _drawioPaired?: boolean;
 }
 
 /** Vendor-prefixed CSS not in TypeScript's CSSStyleDeclaration. Cast a
@@ -3127,10 +3135,58 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     "{color:transparent !important;-webkit-text-fill-color:transparent !important;text-shadow:none !important;}";
   document.head.appendChild(hideStyle);
 
+  // --- Workstream E: drawio editable-source round-trip ---
+  // If the page carries a `<script type="application/vnd.drawio+xml"
+  // id="drawio-source">` (the editable mxGraph XML behind a drawio-rendered
+  // diagram), surface its text on the extraction so the converter can stash it
+  // in an off-canvas marker text box (fill #FF00FF) below the slide. We also
+  // flag the SINGLE rendered diagram element it pairs with (the <svg> with
+  // `data-drawio`, else the first <img>/<svg> visual on the slide) so the
+  // converter can give that image the matching `DRAWIO_IMG_<n>` objectName.
+  // GUARD: when no such script exists, `drawioSource` is omitted entirely and
+  // no element is flagged — the downstream emit is a strict no-op (preserves
+  // the byte-identical-render guarantee for non-drawio slides).
+  let drawioSource: string | undefined;
+  {
+    const srcEl = document.getElementById("drawio-source");
+    if (srcEl && (srcEl.getAttribute("type") || "").indexOf("vnd.drawio+xml") >= 0) {
+      // textContent already unwraps the CDATA section ("<![CDATA[ … ]]>"); trim
+      // surrounding whitespace/newlines introduced by HTML pretty-printing.
+      const raw = (srcEl.textContent || "").trim();
+      if (raw) {
+        drawioSource = raw;
+        // Locate the rendered diagram element to pair with. Prefer an explicit
+        // `data-drawio` <svg>/<img>; otherwise fall back to the first visual or
+        // image element on the slide.
+        let pairedDom: Element | null = document.querySelector("[data-drawio]");
+        if (pairedDom && pairedDom.tagName !== "SVG" && pairedDom.tagName !== "IMG") {
+          pairedDom = pairedDom.querySelector("svg, img");
+        }
+        // Resolve to the extracted element. The walk seen-marks the <svg>/<img>
+        // and pushes one element for it; match by geometry (bounds) since the
+        // pushed element does not retain the DOM node reference.
+        let paired: ExtractedElement | undefined;
+        if (pairedDom) {
+          const pb = pairedDom.getBoundingClientRect();
+          paired = elements.find(
+            (e) => (e.type === "visual" || e.type === "image") &&
+              Math.abs(e.bounds.x - pb.left) < 1.5 && Math.abs(e.bounds.y - pb.top) < 1.5 &&
+              Math.abs(e.bounds.w - pb.width) < 1.5 && Math.abs(e.bounds.h - pb.height) < 1.5,
+          );
+        }
+        if (!paired) paired = elements.find((e) => e.type === "visual" || e.type === "image");
+        if (paired) paired._drawioPaired = true;
+      }
+    }
+  }
+
   const __h2sJson = JSON.stringify({
     viewport: { w: W, h: H },
     elementCount: elements.length,
     elements,
+    // Editable drawio XML for this slide's diagram (undefined when the page
+    // carries no `#drawio-source` script — see Workstream E above).
+    ...(drawioSource !== undefined ? { drawioSource } : {}),
   });
   // Stash the result on a global as a side effect, in addition to returning it.
   // The Node CDP path (Runtime.evaluate) and the browser eval() path both read

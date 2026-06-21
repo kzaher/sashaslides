@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- Thin shell served INSIDE the Apps Script sidebar. Code.gs fetches this from
+     the Node server (UrlFetchApp), replaces __ORIGIN__ with the server's https
+     origin, and returns it via HtmlService. The heavy UI bundle + drawio editor
+     then load cross-origin from the Node server (script-src), which keeps the
+     sidebar small enough to dodge HtmlService's large-inline-blob corruption. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<base href="__ORIGIN__/">
+<link rel="stylesheet" href="__ORIGIN__/static/app.css">
+</head>
+<body>
+<header><h1>html2slides</h1><span id="env-badge" class="badge">…</span></header>
+<div id="shell-root">Loading UI from __ORIGIN__ …</div>
+<script>
+  // Pull the full UI markup from the server and mount it, then load the logic.
+  fetch("__ORIGIN__/", { headers: { "x-shell": "1" } })
+    .then(r => r.text())
+    .then(html => {
+      const body = html.replace(/^[\s\S]*?<body[^>]*>/i, "").replace(/<\/body>[\s\S]*$/i, "");
+      document.getElementById("shell-root").outerHTML = body;
+      const s = document.createElement("script"); s.src = "__ORIGIN__/static/app.js"; document.body.appendChild(s);
+    })
+    .catch(e => { document.getElementById("shell-root").textContent = "Failed to load UI: " + e.message; });
+</script>
+</body>
+</html>
