@@ -833,6 +833,23 @@ export interface Gradient {
   readonly stops: readonly GradientStop[];
 }
 
+/**
+ * Build a native pptxgenjs gradient fill from a parsed CSS `Gradient`. Stops are
+ * pre-normalised to bare 6-hex (the fork emits `<a:srgbClr>` directly); the fork's
+ * `genXmlColorSelection` does the CSS→OOXML angle conversion and `<a:gradFill>` XML.
+ * Replaces the old GRAD_<n> objectName tag + `injectGradients` zip post-patch.
+ */
+function nativeGradientFill(g: Gradient): NonNullable<ShapeProps["fill"]> {
+  return {
+    type: "gradient",
+    gradient: {
+      angle: g.angle,
+      type: g.type,
+      stops: g.stops.map((s) => ({ color: hexToRgb(s.color), position: s.position, alpha: s.alpha })),
+    },
+  } as NonNullable<ShapeProps["fill"]>;
+}
+
 export interface BoxShadowLayer {
   readonly color: string;
   readonly offsetX?: number;
@@ -1484,19 +1501,19 @@ export function buildPptx(
           // angle-compensate the registered gradient when it rotates the shape.
           let gradGid = -1;
           if (el.gradient && el.gradient.stops && el.gradient.stops.length >= 2) {
-            // Solid-fill fallback carries the first-stop alpha (important for
-            // radial gradients like `.bg-glow` whose first stop is 15% indigo
-            // — an opaque solid would paint a visible disc if the gradFill
-            // injection ever misses this shape).
-            const fallbackFill: NonNullable<ShapeProps["fill"]> = { color: hexToRgb(el.gradient.stops[0].color) };
-            if (typeof el.fillAlpha === "number" && el.fillAlpha < 1) {
-              fallbackFill.transparency = Math.round((1 - el.fillAlpha) * 100);
-            }
-            opts.fill = fallbackFill;
+            // Native gradient fill — the vendored pptxgenjs fork emits <a:gradFill>
+            // directly from this spec (no GRAD_<n> tag + zip post-patch). The angle
+            // may be mutated below (flip/rotate clip compensation); opts.fill is
+            // re-synced from gradientRegistry[gradGid] just before addShape so the
+            // emitted gradient reflects the final, compensated angle.
             const gid = gradientRegistry.length;
             gradientRegistry.push(el.gradient);
-            opts.objectName = `GRAD_${gid}`;
             gradGid = gid;
+            opts.fill = nativeGradientFill(el.gradient);
+            // Keep the GRAD_<n> object name (vestigial — no longer a post-patch
+            // marker) so the migration to native gradient fills is byte-identical
+            // to the prior solidFill+injectGradients output.
+            opts.objectName = `GRAD_${gid}`;
           } else if (el.fill) {
             const fillOpts: NonNullable<ShapeProps["fill"]> = { color: hexToRgb(el.fill) };
             if (typeof el.fillAlpha === "number" && el.fillAlpha < 1) {
@@ -1705,6 +1722,11 @@ export function buildPptx(
               clipFlatCr = null;
             }
           }
+
+          // Re-sync the native gradient fill from the (possibly angle-mutated)
+          // registry entry so the emitted <a:gradFill> reflects the final, flip/
+          // rotate-compensated orientation.
+          if (gradGid >= 0) opts.fill = nativeGradientFill(gradientRegistry[gradGid]);
 
           slide.addShape(hostShapeName, opts);
 

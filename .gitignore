@@ -74,3 +74,6 @@ renderer/html2slides/e2e/.ratings-backup/
 
 # full-deck re-rate scratch
 .sxs-recheck/
+
+# fork-migration scratch (renders/diffs) — keep in /tmp normally
+.fork-*/
