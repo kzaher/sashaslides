@@ -1,0 +1,29 @@
+{
+  "task_title": "bug_solving-1781997850360",
+  "presentation_id": "1F1IwlKLJA9Kw8WDEQPfZCfuNLcoIlWbpZouFMkYvcbA",
+  "slides": [
+    "slide_01",
+    "slide_03",
+    "slide_12",
+    "slide_16",
+    "slide_21",
+    "slide_32"
+  ],
+  "slide_object_ids": [
+    "p1",
+    "p2",
+    "p3",
+    "p4",
+    "p5",
+    "p6"
+  ],
+  "thumbnails": [
+    "slide_01.png",
+    "slide_03.png",
+    "slide_12.png",
+    "slide_16.png",
+    "slide_21.png",
+    "slide_32.png"
+  ],
+  "created_at": "2026-06-20T23:24:52.591Z"
+}

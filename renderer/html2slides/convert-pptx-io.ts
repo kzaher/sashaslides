@@ -30,6 +30,7 @@ import {
   buildPptx,
   injectGradientsIntoZip,
   injectStrokeAlignmentIntoZip,
+  injectRound2SameRectAdjIntoZip,
   injectShapeNoLineIntoZip,
   injectCellNoBorderIntoZip,
   injectClipGroupsIntoZip,
@@ -221,6 +222,17 @@ export async function injectStrokeAlignment(pptxPath: string): Promise<void> {
   }
 }
 
+export async function injectRound2SameRectAdj(pptxPath: string): Promise<void> {
+  const buf = readFileSync(pptxPath);
+  const zip = await JSZip.loadAsync(buf);
+  const patched = await injectRound2SameRectAdjIntoZip(zip);
+  if (patched > 0) {
+    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    writeFileSync(pptxPath, out);
+    console.log(`  round2SameRect adj: ${patched} prstGeom(s) → adj1/adj2`);
+  }
+}
+
 export async function injectShapeNoLine(pptxPath: string): Promise<void> {
   const buf = readFileSync(pptxPath);
   const zip = await JSZip.loadAsync(buf);
@@ -346,6 +358,10 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   await injectGradients(pptxPath, pres.__gradients || []);
   // Post-process: every <a:ln w="…"> gains algn="in" — stroke paints inside.
   await injectStrokeAlignment(pptxPath);
+  // Post-process: round2SameRect's single name="adj" → adj1/adj2 (pptxgenjs
+  // emits the wrong handle name, so the radius defaults to 16.667% and
+  // over-rounds — slide_12 device-screen / background bottom corners).
+  await injectRound2SameRectAdj(pptxPath);
   // Post-process: empty <a:ln></a:ln> → <a:ln><a:noFill/></a:ln> so Google
   // Slides doesn't paint a default hairline on shapes that asked for no
   // line (slide_17 shape-twice corner inner-fill rects).

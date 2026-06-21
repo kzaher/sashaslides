@@ -1,0 +1,8 @@
+{
+  "slide_12": {
+    "status": "bad",
+    "comment": "I don't think the right items should be rendered. There is a wrong background radius on the background element and gradient is turned upside down (probably because element is rotated).",
+    "ratedAt": "2026-06-20T19:55:56.191Z",
+    "annotation": "/workspaces/sashaslides/.sxs-slide12/annotations/slide_12.png"
+  }
+}

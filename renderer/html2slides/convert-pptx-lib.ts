@@ -1637,6 +1637,22 @@ export function buildPptx(
               opts.rectRadius = px2in(Math.max(pcr.tl, pcr.tr, pcr.br, pcr.bl));
               opts.flipH = pcp.flipH || undefined;
               opts.flipV = pcp.flipV || undefined;
+              // A gradient fill rotates WITH the shape (rotWithShape="1"), so the
+              // corner-preset flip(s) mirror the fill too — a 135° screen gradient
+              // on a bottom-rounded device screen (round2SameRect + flipV) renders
+              // upside-down (slide_12). Pre-mirror the stored CSS angle by the same
+              // flip(s) so the VISIBLE direction is unchanged: vertical flip
+              // θ→180−θ, horizontal flip θ→360−θ (they compose). The sibling 90/270
+              // path below handles the rotation case (angle−rot).
+              if (gradGid >= 0 && (pcp.flipH || pcp.flipV)) {
+                const g = gradientRegistry[gradGid];
+                if (g && g.type !== "radial") {
+                  let a = (((g.angle ?? 180) % 360) + 360) % 360;
+                  if (pcp.flipV) a = (((180 - a) % 360) + 360) % 360;
+                  if (pcp.flipH) a = (((360 - a) % 360) + 360) % 360;
+                  gradientRegistry[gradGid] = { ...g, angle: a };
+                }
+              }
             }
             // Side-rounded clip (TL+BL / TR+BR) has no direct OOXML preset.
             // The old path fell back to an all-corners `roundRect` + solid R×R
@@ -3083,6 +3099,44 @@ export async function injectStrokeAlignmentIntoZip(zip: JSZip): Promise<number> 
 }
 
 /**
+ * Repair `round2SameRect` adjust-value naming. pptxgenjs writes a single
+ * `<a:gd name="adj" fmla="val N"/>` for every rounded preset (pptxgen.es.js
+ * ~L5464), but `round2SameRect`'s OOXML adjust handles are named **`adj1`**
+ * (the rounded corner pair) and **`adj2`** (the flat pair) — NOT `adj`. An
+ * unmatched `name="adj"` override is ignored, so the renderer falls back to the
+ * preset DEFAULT `adj1=16667` (16.667% of the short side) — over-rounding the
+ * corner (slide_12's device screen / background bottom corners rendered ~35px
+ * instead of the intended 24px). Rewrite `name="adj"` → `name="adj1"` inside a
+ * `round2SameRect` prstGeom and append `<a:gd name="adj2" fmla="val 0"/>` so the
+ * flat pair stays square. The shape's own flip/rotation (set at emit time)
+ * places the rounded pair on the correct side. Idempotent (skips blocks already
+ * carrying `adj1`); a no-op for renderers that already map positionally, so it
+ * can only help.
+ */
+export async function injectRound2SameRectAdjIntoZip(zip: JSZip): Promise<number> {
+  const slideFiles = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+  let patched = 0;
+  for (const name of slideFiles) {
+    const xml = await zip.file(name)!.async("string");
+    let slidePatched = 0;
+    const next = xml.replace(
+      /<a:prstGeom prst="round2SameRect"><a:avLst>([\s\S]*?)<\/a:avLst><\/a:prstGeom>/g,
+      (full: string, inner: string) => {
+        if (/name="adj1"/.test(inner) || !/name="adj"/.test(inner)) return full;
+        const renamed = inner.replace(/name="adj"/, 'name="adj1"');
+        const withAdj2 = /name="adj2"/.test(renamed)
+          ? renamed
+          : `${renamed}<a:gd name="adj2" fmla="val 0"/>`;
+        slidePatched++;
+        return `<a:prstGeom prst="round2SameRect"><a:avLst>${withAdj2}</a:avLst></a:prstGeom>`;
+      },
+    );
+    if (slidePatched > 0) { zip.file(name, next); patched += slidePatched; }
+  }
+  return patched;
+}
+
+/**
  * Rewrite empty `<a:ln></a:ln>` elements on shapes to `<a:ln><a:noFill/></a:ln>`.
  * pptxgenjs `line: { type: "none" }` on `addShape()` emits a bare `<a:ln>`
  * with no width, no fill, and no children. PowerPoint reads this as
@@ -3276,11 +3330,13 @@ export async function buildPptxInMemory(
 
   const gradPatched = await injectGradientsIntoZip(zip, pres.__gradients || []);
   const strokePatched = await injectStrokeAlignmentIntoZip(zip);
+  const round2Patched = await injectRound2SameRectAdjIntoZip(zip);
   const noLinePatched = await injectShapeNoLineIntoZip(zip);
   const cellNoBorderPatched = await injectCellNoBorderIntoZip(zip);
   const groupsCreated = await injectClipGroupsIntoZip(zip);
   if (gradPatched > 0) console.log(`  Gradient injection: ${gradPatched} shape(s) patched`);
   if (strokePatched > 0) console.log(`  Stroke alignment: ${strokePatched} <a:ln> rewrite(s) to algn="in"`);
+  if (round2Patched > 0) console.log(`  round2SameRect adj: ${round2Patched} prstGeom(s) → adj1/adj2`);
   if (noLinePatched > 0) console.log(`  Shape no-line: ${noLinePatched} empty <a:ln> rewrite(s) to <a:noFill/>`);
   if (cellNoBorderPatched > 0) console.log(`  Cell no-border: ${cellNoBorderPatched} <a:ln[LRTB] w=0> rewrite(s) to <a:noFill/>`);
   if (groupsCreated > 0) console.log(`  Clip groups: ${groupsCreated} <p:grpSp>(s) wrapping patch+host pairs`);
