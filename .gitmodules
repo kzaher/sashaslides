@@ -1,0 +1,3 @@
+[submodule "deps/pptxgenjs"]
+	path = deps/pptxgenjs
+	url = git@github.com:ExponentGmbH/PptxGenJS.git
