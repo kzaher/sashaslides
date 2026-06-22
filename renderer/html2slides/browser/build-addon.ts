@@ -22,6 +22,7 @@
  * paste the three files into Extensions → Apps Script. See addon/README.md.
  */
 import { build, transformSync } from "esbuild";
+import { execSync } from "child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -119,11 +120,13 @@ function testDriveAccess() {
 }
 
 /**
+ * Convert + insert the .pptx BEFORE or AFTER the current slide.
  * @param {string} base64  the .pptx bytes, base64-encoded
  * @param {string} title   display name for the temp converted file
+ * @param {boolean} before insert before the current slide (else after)
  * @return {{inserted:number, at:number, title:string}}
  */
-function insertPptxAfterCurrent(base64, title) {
+function insertPptx_(base64, title, before) {
   title = title || 'html2slides import';
   var blob = Utilities.newBlob(
     Utilities.base64Decode(base64),
@@ -160,14 +163,14 @@ function insertPptxAfterCurrent(base64, title) {
     var pres = SlidesApp.getActivePresentation();
     var slides = pres.getSlides();
 
-    // 2. Where is the current slide? Insert right after it; fall back to the end.
+    // 2. Where is the current slide? Insert before/after it; fall back to the end.
     var insertAt = slides.length;
     var sel = pres.getSelection();
     var cur = sel ? sel.getCurrentPage() : null;
     if (cur) {
       var curId = cur.getObjectId();
       for (var i = 0; i < slides.length; i++) {
-        if (slides[i].getObjectId() === curId) { insertAt = i + 1; break; }
+        if (slides[i].getObjectId() === curId) { insertAt = before ? i : i + 1; break; }
       }
     }
 
@@ -184,6 +187,327 @@ function insertPptxAfterCurrent(base64, title) {
       try { Drive.Files.remove(tempId); } catch (err) { /* leave it in Trash */ }
     }
   }
+}
+
+function insertPptxAfterCurrent(base64, title)  { return insertPptx_(base64, title, false); }
+function insertPptxBeforeCurrent(base64, title) { return insertPptx_(base64, title, true); }
+
+/** Parse "1-5, 8, 11-13" -> {idx:true} (1-based); blank -> null = all slides. */
+function parseRange_(range) {
+  if (range == null) return null;
+  var trimmed = String(range).trim();
+  if (trimmed === '') return null;
+  var out = {};
+  var segs = trimmed.split(',');
+  for (var i = 0; i < segs.length; i++) {
+    var seg = segs[i].trim();
+    if (seg === '') continue;
+    var dash = seg.indexOf('-');
+    if (dash === -1) {
+      var n = Number(seg);
+      if (!(n >= 1) || Math.floor(n) !== n) throw new Error('bad slide index "' + seg + '"');
+      out[n] = true;
+    } else {
+      var a = Number(seg.slice(0, dash).trim());
+      var b = Number(seg.slice(dash + 1).trim());
+      if (!(a >= 1) || !(b >= 1) || Math.floor(a) !== a || Math.floor(b) !== b) throw new Error('bad slide range "' + seg + '"');
+      var lo = Math.min(a, b), hi = Math.max(a, b);
+      for (var k = lo; k <= hi; k++) out[k] = true;
+    }
+  }
+  return out;
+}
+
+/**
+ * Fetch a Slides REST URL with the user's OAuth, turning the API-not-enabled 403
+ * into an actionable message (with the exact console URL to click). The Slides
+ * API must be enabled in the script's GCP project — the manifest declares the
+ * Slides advanced service so Apps Script auto-enables it, but a script that was
+ * authorised before that manifest landed still needs a one-time manual enable.
+ */
+function slidesFetch_(url, auth) {
+  var resp = UrlFetchApp.fetch(url, auth);
+  var code = resp.getResponseCode();
+  var text = resp.getContentText();
+  if (code === 200) return text;
+  if (code === 403) {
+    // Google's "API not enabled" body embeds the EXACT console URL for the right
+    // project — extract it verbatim (reconstructing it ourselves risks pointing at
+    // the wrong project, which silently enables nothing). The cleaner fix is to
+    // paste the manifest declaring the Slides advanced service (auto-enables the API).
+    var m = text.match(/https?:\\/\\/console\\.(?:developers|cloud)\\.google\\.com\\/[^\\s"'\\\\]+/);
+    if (m) {
+      throw new Error('The Google Slides API is not enabled for this add-on\\u2019s Google ' +
+        'Cloud project. EITHER re-paste the manifest (Project Settings \\u2192 appsscript.json) ' +
+        'which auto-enables it, OR open this exact link, click ENABLE, wait ~2 min, then retry ' +
+        'Export (don\\u2019t switch projects in the console):\\n' + m[0]);
+    }
+    throw new Error('Slides API permission error (403): ' + text.slice(0, 400));
+  }
+  throw new Error('Slides API request failed (' + code + '): ' + text.slice(0, 400));
+}
+
+/**
+ * Export the active deck's slides as a PNG zip, using the signed-in user's OAuth
+ * (getThumbnail PNG → Utilities.zip → base64). payload: { range?, excludeHidden? }.
+ * @return {{filename:string, mimeType:string, base64:string}}
+ */
+function exportSlidesZip(payload) {
+  payload = payload || {};
+  var presentationId = payload.presentationId || SlidesApp.getActivePresentation().getId();
+  var included = parseRange_(payload.range);
+  var wantExcludeHidden = payload.excludeHidden === true;
+
+  var token = ScriptApp.getOAuthToken();
+  var auth = { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true };
+  var base = 'https://slides.googleapis.com/v1/presentations/' + encodeURIComponent(presentationId);
+
+  var meta = JSON.parse(slidesFetch_(base + '?fields=slides(objectId,slideProperties/isSkipped)', auth));
+  var slides = meta.slides || [];
+  var blobs = [];
+  for (var i = 0; i < slides.length; i++) {
+    var oneBased = i + 1;
+    if (included && !included[oneBased]) continue;
+    var sp = slides[i].slideProperties || {};
+    if (wantExcludeHidden && sp.isSkipped === true) continue;
+    var slideId = slides[i].objectId;
+    if (!slideId) continue;
+    var thumbUrl = base + '/pages/' + encodeURIComponent(slideId) +
+      '/thumbnail?thumbnailProperties.mimeType=PNG&thumbnailProperties.thumbnailSize=LARGE';
+    var contentUrl = JSON.parse(slidesFetch_(thumbUrl, auth)).contentUrl;
+    if (!contentUrl) continue;
+    var nn = (oneBased < 10 ? '0' : '') + oneBased;
+    blobs.push(UrlFetchApp.fetch(contentUrl).getBlob().setName('slide_' + nn + '.png'));
+  }
+  if (blobs.length === 0) throw new Error('no slides matched the requested range/filter');
+  var zipBlob = Utilities.zip(blobs, 'slides.zip');
+  return { filename: 'slides.zip', mimeType: 'application/zip', base64: Utilities.base64Encode(zipBlob.getBytes()) };
+}
+
+/** drawio: enumerate the deck's rendered diagrams. A converted drawio slide
+ *  carries its editable mxGraph XML in an off-canvas magenta text box (written by
+ *  convert-pptx-lib "Workstream E"). We pair that XML with the slide's diagram
+ *  image so the sidebar can list + edit it. Returns [{id, name, dataUrl, xml}]. */
+function listDeckImages() {
+  var slides = SlidesApp.getActivePresentation().getSlides();
+  var out = [];
+  for (var s = 0; s < slides.length; s++) {
+    var xml = findDrawioXmlOnSlide_(slides[s]);
+    if (!xml) continue;
+    var images = slides[s].getImages();
+    var img = images.length ? images[0] : null;
+    var dataUrl = '';
+    if (img) {
+      var blob = img.getBlob();
+      dataUrl = 'data:' + (blob.getContentType() || 'image/png') + ';base64,' + Utilities.base64Encode(blob.getBytes());
+    }
+    out.push({
+      id: img ? img.getObjectId() : slides[s].getObjectId(),
+      slideIndex: s + 1,
+      name: 'Diagram \\u2014 slide ' + (s + 1),
+      dataUrl: dataUrl,
+      xml: xml,
+    });
+  }
+  return out;
+}
+
+/** Pull the editable mxGraph XML out of the off-canvas source box on a slide
+ *  (the box convert-pptx-lib fills with CONFIG.drawioMetaColor). Matched by text
+ *  content (contains <mxfile / <mxGraphModel), NOT shape name — the pptx cNvPr
+ *  name does not survive the Slides import, but the box text does. */
+function findDrawioXmlOnSlide_(slide) {
+  var shapes = slide.getShapes();
+  for (var i = 0; i < shapes.length; i++) {
+    var txt;
+    try { txt = shapes[i].getText().asString(); } catch (e) { continue; }
+    if (!txt) continue;
+    var a = txt.indexOf('<mxfile');
+    if (a !== -1) {
+      var close = txt.indexOf('</mxfile>', a);
+      return close !== -1 ? txt.substring(a, close + 9) : txt.substring(a).trim();
+    }
+    var g = txt.indexOf('<mxGraphModel');
+    if (g !== -1) return txt.substring(g).trim();
+  }
+  return null;
+}
+
+/** Decode a data:URL (or bare base64) into an Apps Script Blob. */
+function dataUrlToBlob_(dataUrl, name) {
+  var comma = dataUrl.indexOf(',');
+  var header = comma >= 0 ? dataUrl.substring(0, comma) : '';
+  var b64 = comma >= 0 ? dataUrl.substring(comma + 1) : dataUrl;
+  var ct = (header.match(/data:([^;]+)/) || [])[1] || 'image/png';
+  return Utilities.newBlob(Utilities.base64Decode(b64), ct, name || 'diagram.png');
+}
+
+/** Locate a Slides image by its object id across every slide. */
+function findImageById_(objectId) {
+  var slides = SlidesApp.getActivePresentation().getSlides();
+  for (var s = 0; s < slides.length; s++) {
+    var images = slides[s].getImages();
+    for (var i = 0; i < images.length; i++) {
+      if (images[i].getObjectId() === objectId) return images[i];
+    }
+  }
+  return null;
+}
+
+/** The current (selected) slide, falling back to the last slide. */
+function currentSlide_(pres) {
+  try {
+    var sel = pres.getSelection();
+    var page = sel ? sel.getCurrentPage() : null;
+    if (page && page.asSlide) return page.asSlide();
+  } catch (e) { /* no selection (headless) */ }
+  var slides = pres.getSlides();
+  return slides[slides.length - 1];
+}
+
+/** Replace an existing diagram image's bytes (drawio "Save" → new xmlpng). */
+function replaceImage(objectId, dataUrl) {
+  var img = findImageById_(objectId);
+  if (!img) throw new Error('image not found: ' + objectId);
+  img.replace(dataUrlToBlob_(dataUrl, 'diagram.png'));
+  return { ok: true, id: objectId };
+}
+
+/** Insert a brand-new diagram image on the current (or last) slide. */
+function insertImage(dataUrl) {
+  var pres = SlidesApp.getActivePresentation();
+  var image = currentSlide_(pres).insertImage(dataUrlToBlob_(dataUrl, 'diagram.png'));
+  return { ok: true, id: image.getObjectId() };
+}
+
+/** Delete a diagram image by object id. */
+function deleteImage(objectId) {
+  var img = findImageById_(objectId);
+  if (!img) throw new Error('image not found: ' + objectId);
+  img.remove();
+  return { ok: true };
+}
+
+/** HTML-escape (for seeding XML into a hidden textarea — safe vs </script>). */
+function htmlEscape_(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Open the self-hosted drawio editor BIG, in a modal dialog (the sidebar is too
+ *  narrow). The dialog hosts the editor iframe full-size, seeds the diagram XML,
+ *  and on Save exports an xmlpng → replaceImage (existing) or insertImage (new),
+ *  then closes. payload: { xml?, imageId? }. */
+function showDrawioDialog(payload) {
+  payload = payload || {};
+  var xml = payload.xml || '';
+  var imageId = payload.imageId || '';
+  // Hide ALL of drawio's own buttons (noSaveBtn=1 & saveAndExit=0 & noExitBtn=1) —
+  // its Save routes through an export SERVER we don't host. We drive save ourselves
+  // via the client-side {action:'export'} message, triggered by our own toolbar.
+  var src = SERVER_ORIGIN + '/drawio/?embed=1&proto=json&spin=1&libraries=1' +
+    '&noSaveBtn=1&saveAndExit=0&noExitBtn=1';
+  var html = '' +
+    '<!doctype html><html><head><meta charset="utf-8">' +
+    // Flexbox column (NOT position:fixed — fixed collapses inside Google's
+    // IFRAME_SANDBOX; height:100% + flex fills reliably).
+    '<style>html,body{margin:0;padding:0;height:100%;overflow:hidden;font:13px Roboto,Arial,sans-serif}' +
+    'body{display:flex;flex-direction:column}' +
+    '#bar{flex:0 0 44px;display:flex;align-items:center;gap:8px;' +
+    'padding:0 12px;background:#f1f3f4;border-bottom:1px solid #dadce0;box-sizing:border-box}' +
+    '#bar button{font:inherit;padding:7px 16px;border-radius:4px;border:1px solid #dadce0;cursor:pointer;background:#fff}' +
+    '#bar .save{background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:600}' +
+    '#bar button:disabled{opacity:.6;cursor:progress}' +
+    '#msg{color:#5f6368}' +
+    '#f{flex:1 1 auto;width:100%;border:0;display:block}' +
+    '</style></head><body>' +
+    '<div id="bar"><button class="save" id="saveBtn">Save &amp; Close</button>' +
+    '<button id="cancelBtn">Cancel</button><span id="msg"></span></div>' +
+    '<textarea id="seed" style="display:none">' + htmlEscape_(xml) + '</textarea>' +
+    '<iframe id="f" src="' + src + '"></iframe>' +
+    '<' + 'script>' +
+    'var XML=document.getElementById("seed").value;' +
+    'var IMAGE_ID=' + JSON.stringify(imageId) + ';' +
+    'var frame=document.getElementById("f");' +
+    'var saveBtn=document.getElementById("saveBtn");' +
+    'var saving=false;' +
+    'function setMsg(t){document.getElementById("msg").textContent=t||""}' +
+    'function post(o){try{frame.contentWindow.postMessage(JSON.stringify(o),"*")}catch(e){}}' +
+    'function done(){google.script.host.close()}' +
+    'document.getElementById("cancelBtn").onclick=done;' +
+    // Our Save: ask drawio for a high-res xmlpng (rendered client-side; scale:4 →
+    // 5120x2880 for a 1280x720 diagram). drawio replies {event:"export",data,xml}.
+    'saveBtn.onclick=function(){if(saving)return;saving=true;saveBtn.disabled=true;setMsg("Exporting\\u2026");' +
+    'post({action:"export",format:"xmlpng",scale:4,spin:"Exporting\\u2026"})};' +
+    // commit BOTH the PNG and the edited XML, so reopening shows the new version
+    // (the XML lives in the off-canvas source box, not in the image).
+    'function commit(png,xml){var err=function(e){saving=false;saveBtn.disabled=false;setMsg("");' +
+    'alert("Save failed: "+((e&&e.message)||e))};setMsg("Saving to slide\\u2026");' +
+    'google.script.run.withSuccessHandler(done).withFailureHandler(err)' +
+    '.saveDiagram({imageId:IMAGE_ID,png:png,xml:xml})}' +
+    'window.addEventListener("message",function(ev){var m=ev.data;if(typeof m!=="string")return;' +
+    'try{m=JSON.parse(m)}catch(e){return}' +
+    'if(m.event==="init"){post({action:"load",xml:XML,autosave:1})}' +
+    'else if(m.event==="export"){commit(m.data,m.xml||XML)}' +
+    'else if(m.event==="exit"){if(!saving)done()}});' +
+    '</' + 'script></body></html>';
+  var out = HtmlService.createHtmlOutput(html).setWidth(1600).setHeight(1000);
+  SlidesApp.getUi().showModalDialog(out, 'drawio editor');
+  return { ok: true };
+}
+
+/** Save an edited diagram: replace (or insert) the rendered PNG AND update the
+ *  off-canvas source box with the new XML, so reopening loads the edited version.
+ *  payload: { imageId?, png (dataUrl), xml }. */
+function saveDiagram(payload) {
+  payload = payload || {};
+  var blob = dataUrlToBlob_(payload.png || '', 'diagram.png');
+  var xml = payload.xml || '';
+  var imageId = payload.imageId || '';
+  if (imageId) {
+    var entry = findImageEntry_(imageId);
+    if (!entry) throw new Error('image not found: ' + imageId);
+    entry.image.replace(blob);
+    if (xml) updateOrCreateDrawioBox_(entry.slide, xml);
+    return { ok: true, id: imageId };
+  }
+  var slide = currentSlide_(SlidesApp.getActivePresentation());
+  var image = slide.insertImage(blob);
+  if (xml) updateOrCreateDrawioBox_(slide, xml);
+  return { ok: true, id: image.getObjectId() };
+}
+
+/** Like findImageById_ but also returns the slide the image is on. */
+function findImageEntry_(objectId) {
+  var slides = SlidesApp.getActivePresentation().getSlides();
+  for (var s = 0; s < slides.length; s++) {
+    var images = slides[s].getImages();
+    for (var i = 0; i < images.length; i++) {
+      if (images[i].getObjectId() === objectId) return { image: images[i], slide: slides[s] };
+    }
+  }
+  return null;
+}
+
+/** Update the slide's drawio source box with new XML, or create one off-canvas
+ *  (magenta marker, below the slide) if none exists yet. */
+function updateOrCreateDrawioBox_(slide, xml) {
+  var header = '\\u25BC  drawio source \\u2014 editable \\u00B7 not shown in slideshow \\u00B7 do not delete  \\u25BC\\n';
+  var shapes = slide.getShapes();
+  for (var i = 0; i < shapes.length; i++) {
+    var t;
+    try { t = shapes[i].getText().asString(); } catch (e) { continue; }
+    if (t && (t.indexOf('<mxfile') !== -1 || t.indexOf('<mxGraphModel') !== -1)) {
+      shapes[i].getText().setText(header + xml);
+      return;
+    }
+  }
+  // none yet (new diagram) — create an off-canvas magenta box below the slide.
+  var pres = SlidesApp.getActivePresentation();
+  var box = slide.insertTextBox(header + xml, 0, pres.getPageHeight() + 10, 480, 120);
+  try {
+    box.getFill().setSolidFill('#FF00FF');
+    box.getText().getTextStyle().setForegroundColor('#FFFFFF').setFontSize(8);
+  } catch (e) { /* styling is cosmetic — the text content is what matters */ }
 }
 `;
 
@@ -208,6 +532,10 @@ const APPSSCRIPT_JSON = JSON.stringify({
   dependencies: {
     enabledAdvancedServices: [
       { userSymbol: "Drive", serviceId: "drive", version: "v3" },
+      // Declaring the Slides advanced service makes Apps Script auto-enable the
+      // Slides API in the script's GCP project, so exportSlidesZip's getThumbnail
+      // REST calls (via UrlFetchApp) aren't 403'd on a fresh deploy.
+      { userSymbol: "Slides", serviceId: "slides", version: "v1" },
     ],
   },
 }, null, 2);
@@ -252,6 +580,28 @@ async function main() {
   }
   const mainJs = result.outputFiles[0].text;
   console.log(`addon bundle → ${mainJs.length.toLocaleString()} bytes JS`);
+
+  // 2b. Bundle insert-feature.ts → addon-server/public/convert-bundle.js (same
+  //     esbuild config: stubs + window globals for pptxgenjs/jszip + the inlined
+  //     extract-dom blob). This is what gives the SERVER-HOSTED UI its
+  //     bridge.insert(position): convert HTML→pptx in-browser, then google.script.run.
+  const convResult = await build({
+    entryPoints: [join(HERE, "insert-feature.ts")],
+    bundle: true, write: false, format: "iife", platform: "browser", target: "es2020",
+    minify: false, sourcemap: false,
+    alias: {
+      "fs": stubEmpty, "path": stubEmpty, "stream": stubEmpty, "url": stubEmpty,
+      "module": stubModule, "chrome-remote-interface": stubEmpty, "googleapis": stubEmpty, "esbuild": stubEmpty,
+      "pptxgenjs": join(HERE, "stubs", "pptxgenjs-global.ts"),
+      "jszip": join(HERE, "stubs", "jszip-global.ts"),
+    },
+    define: { __EXTRACT_JS_LITERAL__: JSON.stringify(extractJs) },
+    logLevel: "info",
+  });
+  const convertBundleJs = convResult.outputFiles![0].text;
+  const convertBundlePath = join(HERE, "..", "addon-server", "public", "convert-bundle.js");
+  writeFileSync(convertBundlePath, convertBundleJs);
+  console.log(`convert-bundle → ${convertBundleJs.length.toLocaleString()} bytes → ${convertBundlePath}`);
 
   // 3. Vendor bundles (attach window.JSZip / window.PptxGenJS).
   //    UNLIKE the standalone page (build.ts), the add-on does NOT inline these:
@@ -375,6 +725,20 @@ ${mainJs}
   console.log(`    appsscript.json  (manifest)`);
   console.log(`    Code.gs          (${CODE_GS.length.toLocaleString()} bytes)`);
   console.log(`    Sidebar.html     (${kb} KB, bundle inlined)`);
+
+  // Best-effort: copy Code.gs to the clipboard so it's one paste into Apps Script.
+  // macOS pbcopy / Windows clip / Linux xclip|xsel — silently skipped if absent
+  // (e.g. the Linux devcontainer has no clipboard).
+  const codeGsPath = join(OUT, "Code.gs");
+  const clip = process.platform === "darwin" ? "pbcopy"
+    : process.platform === "win32" ? "clip"
+    : "xclip -selection clipboard";
+  try {
+    execSync(`${clip} < ${JSON.stringify(codeGsPath)}`, { stdio: "ignore" });
+    console.log(`    📋 Code.gs copied to clipboard — paste it straight into Apps Script`);
+  } catch {
+    console.log(`    (clipboard copy skipped — paste from ${codeGsPath})`);
+  }
 }
 
 main().catch((e) => {

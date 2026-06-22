@@ -155,6 +155,7 @@ async function rasterizeElement(
 
   const W = Math.max(1, Math.round(b.w * scale));
   const H = Math.max(1, Math.round(b.h * scale));
+  log(`  raster <${tag}> bounds=${Math.round(b.w)}×${Math.round(b.h)}px scale=${scale}× → canvas ${W}×${H}px`);
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
@@ -168,10 +169,21 @@ async function rasterizeElement(
     ctx.drawImage(node as HTMLCanvasElement, 0, 0, W, H);
   } else if (tag === "svg" || (typeof iwin.SVGElement !== "undefined" && node instanceof iwin.SVGElement)) {
     const svgEl = node as SVGElement;
-    // Ensure intrinsic size in serialization so the rendered img knows w/h.
     const cloned = svgEl.cloneNode(true) as SVGElement;
-    if (!cloned.getAttribute("width")) cloned.setAttribute("width", String(b.w));
-    if (!cloned.getAttribute("height")) cloned.setAttribute("height", String(b.h));
+    // An SVG is VECTOR — rasterise it at the FULL oversampled size (W×H), not its
+    // CSS size. If we keep the element's own width/height (e.g. 1280×720) the
+    // browser renders the vector at that size and ctx.drawImage(...,W,H) then
+    // *bitmap-upscales* it → blurry. So preserve a viewBox (the vector coordinate
+    // space) and set width/height to W/H so the <img> renders the vector crisp at
+    // the target resolution and drawImage is a 1:1 copy.
+    if (!cloned.getAttribute("viewBox")) {
+      const iw = parseFloat(cloned.getAttribute("width") || "") || b.w;
+      const ih = parseFloat(cloned.getAttribute("height") || "") || b.h;
+      cloned.setAttribute("viewBox", `0 0 ${iw} ${ih}`);
+    }
+    log(`    svg src attrs width=${svgEl.getAttribute("width")} height=${svgEl.getAttribute("height")} viewBox=${svgEl.getAttribute("viewBox")} → re-set to ${W}×${H}`);
+    cloned.setAttribute("width", String(W));
+    cloned.setAttribute("height", String(H));
     const svgStr = new XMLSerializer().serializeToString(cloned);
     const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -182,6 +194,10 @@ async function rasterizeElement(
       tmp.onerror = () => rej(new Error("svg image load failed"));
       tmp.src = url;
     });
+    // naturalWidth/Height is the resolution the browser actually rasterised the
+    // SVG at — if this is NOT W×H, the width/height override didn't take and the
+    // image will be blurry (drawImage would upscale).
+    log(`    svg <img> natural ${tmp.naturalWidth}×${tmp.naturalHeight} (want ${W}×${H})${tmp.naturalWidth !== W ? " ⚠ MISMATCH — blurry" : " ✓"}`);
     ctx.drawImage(tmp, 0, 0, W, H);
     URL.revokeObjectURL(url);
   } else {
@@ -221,6 +237,7 @@ function findNodeAt(idoc: Document, b: { x: number; y: number; w: number; h: num
 
 export async function processFile(file: File, log: LogFn, oversampling: number = 2): Promise<Slide> {
   const scale = clampOversampling(oversampling);
+  log(`  oversampling requested=${oversampling} → clamped scale=${scale}× (slide canvas ${SLIDE_W}×${SLIDE_H}, full-slide visual would be ${SLIDE_W * scale}×${SLIDE_H * scale}px)`);
   const html = await file.text();
   const iframe = await loadIntoIframe(html);
   try {

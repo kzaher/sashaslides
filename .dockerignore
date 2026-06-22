@@ -1,0 +1,20 @@
+# Trim the Docker build context. Excludes only heavy/irrelevant things that NO
+# build needs — safe for every Dockerfile built from the repo root.
+**/node_modules
+.git
+.github
+.claude
+.agent
+dist
+**/*.log
+.sxs-*
+.fork-*
+.npm-cache*
+# drawio webapp IS needed (self-hosted editor at /drawio), but its .git history and
+# non-webapp source trees are not — keep only src/main/webapp in the build context.
+deps/drawio/.git
+deps/drawio/etc
+deps/drawio/src/main/mxgraph
+**/__pycache__
+**/*.pyc
+.venv

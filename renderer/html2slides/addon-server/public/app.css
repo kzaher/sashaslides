@@ -13,6 +13,9 @@ input[type=range] { flex:1; }
 output { font-variant-numeric:tabular-nums; font-weight:700; min-width:2.5em; }
 button { padding:6px 12px; border:1px solid var(--line); border-radius:6px; background:#f9fafb; cursor:pointer; font:inherit; }
 button:hover { background:#f3f4f6; }
+button:disabled,button.loading { opacity:.7; cursor:progress; }
+@keyframes h2s-pulse { 0%,100%{opacity:.7} 50%{opacity:.35} }
+button.loading { animation:h2s-pulse 1s ease-in-out infinite; }
 button.primary { background:var(--acc); color:#fff; border-color:var(--acc); width:100%; padding:9px; font-weight:600; }
 .badge { font-size:11px; padding:2px 8px; border-radius:999px; background:#ede9fe; color:var(--acc); }
 .dropzone { border:2px dashed var(--line); border-radius:8px; padding:16px; text-align:center; color:var(--mut); margin:8px 0; }

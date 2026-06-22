@@ -77,3 +77,5 @@ renderer/html2slides/e2e/.ratings-backup/
 
 # fork-migration scratch (renders/diffs) — keep in /tmp normally
 .fork-*/
+renderer/html2slides/addon-server/public/convert-bundle.js
+renderer/html2slides/addon-server/public/pptxgen.bundle.js
