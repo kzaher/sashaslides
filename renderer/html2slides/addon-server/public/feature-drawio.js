@@ -163,26 +163,22 @@ window.h2s.register(async (bridge) => {
     pending = null;
   }
 
-  // In the add-on we open the editor BIG in a modal dialog (Code.gs →
-  // showDrawioDialog); the sidebar is too narrow. The dialog itself does the
-  // save-back to the deck, so the sidebar just re-detects afterwards. In dev
+  // In the add-on we open the editor in a real browser TAB (true fullscreen, no
+  // Apps Script dialog chrome). The tab can't write to the deck itself, so it
+  // hands its saved result back through the server relay (one-time token); we
+  // poll that relay and do the deck write here via saveDiagram. In dev
   // (standalone) we fall back to the inline sidebar iframe.
   async function edit(item) {
     log("drawio: editing " + item.name);
     if (inAddon) {
+      // Re-fetch CURRENT xml — the cached `items` copy is pre-edit.
+      let xml = item.xml || "";
       try {
-        // Re-fetch the CURRENT XML from the deck — the cached `items` copy is
-        // pre-edit, so reopening from it would show the old state even though the
-        // last Save updated the source box.
-        let xml = item.xml || "";
-        try {
-          const fresh = (await gsCall("listDeckImages")) || [];
-          const match = fresh.find((x) => x.id === item.id);
-          if (match && match.xml) xml = match.xml;
-        } catch (e) { log("drawio: (using cached xml — refresh failed: " + e.message + ")"); }
-        await gsCall("showDrawioDialog", { xml, imageId: item.id });
-        log("drawio: editor opened — Save & Close writes back; reopen reflects your latest save.");
-      } catch (e) { log("drawio: open failed: " + e.message); }
+        const fresh = (await gsCall("listDeckImages")) || [];
+        const match = fresh.find((x) => x.id === item.id);
+        if (match && match.xml) xml = match.xml;
+      } catch (e) { log("drawio: (using cached xml — refresh failed: " + e.message + ")"); }
+      await openInTab(xml, item.id);
     } else {
       openEditor(item.xml || "", item);
     }
@@ -190,13 +186,49 @@ window.h2s.register(async (bridge) => {
 
   function newDiagram() {
     log("drawio: new diagram");
-    if (inAddon) {
-      gsCall("showDrawioDialog", { xml: "", imageId: "" })
-        .then(() => log("drawio: editor opened — Save inserts a new diagram, then click Detect to refresh."))
-        .catch((e) => log("drawio: open failed: " + e.message));
-    } else {
-      openEditor("", null);
-    }
+    if (inAddon) openInTab("", "");
+    else openEditor("", null);
+  }
+
+  // Option A as an RPC over window.opener — NO server relay. The sidebar opens the
+  // editor tab with only a short nonce in the URL hash; the tab then requests its
+  // seed (imageId + xml) over postMessage and posts its save back the same way.
+  // Pending edits are held here, keyed by nonce (supports concurrent edits).
+  const pendingEdits = Object.create(null);
+  let nonceSeq = 0;
+
+  function openInTab(xml, imageId) {
+    const nonce = "e" + (++nonceSeq) + "-" + Math.random().toString(36).slice(2, 9);
+    pendingEdits[nonce] = { xml: xml || "", imageId: imageId || "" };
+    const w = window.open("/edit.html#" + nonce, "_blank");
+    log(w
+      ? "drawio: editor opened in a new tab. Edit → Save & Close; keep THIS sidebar open — the deck updates when you save."
+      : "drawio: opened an editor tab (if none appeared, allow pop-ups). Keep this sidebar open.");
+  }
+
+  // The sidebar is the RPC "API" for the editor tab: it answers seed requests and
+  // receives saves. Both rely on the tab's window.opener pointing back here; the
+  // tab fails loudly if the browser severed it.
+  if (inAddon) {
+    const SERVER_ORIGIN = (() => { try { return new URL(document.baseURI).origin; } catch (e) { return ""; } })();
+    window.addEventListener("message", async (ev) => {
+      const m = ev.data;
+      if (!m || typeof m !== "object" || !m.nonce) return;
+      if (SERVER_ORIGIN && ev.origin !== SERVER_ORIGIN) return;   // tab is served from our origin
+      const pend = pendingEdits[m.nonce];
+      if (m.type === "drawio-edit-ready") {
+        if (!pend) return;                                        // unknown / expired nonce
+        try { ev.source.postMessage({ type: "drawio-seed", nonce: m.nonce, imageId: pend.imageId, xml: pend.xml }, ev.origin); } catch (e) {}
+      } else if (m.type === "drawio-save") {
+        log("drawio: received save from the editor tab — writing to the deck…");
+        try {
+          await gsCall("saveDiagram", { imageId: m.imageId || (pend && pend.imageId) || "", png: m.png, xml: m.xml });
+          log("drawio: ✓ diagram updated in the deck.");
+          delete pendingEdits[m.nonce];
+          await detect();
+        } catch (e) { log("drawio: deck write failed: " + e.message); }
+      }
+    });
   }
 
   async function del(item) {

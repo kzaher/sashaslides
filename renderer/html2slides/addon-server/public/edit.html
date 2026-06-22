@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>drawio editor — sashaslides</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; font: 14px Roboto, Arial, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  #bar { flex: 0 0 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px;
+         background: #1f1f1f; color: #e8eaed; box-sizing: border-box; }
+  #bar .title { font-weight: 600; }
+  #bar .spacer { flex: 1; }
+  #bar button { font: inherit; padding: 8px 18px; border-radius: 6px; border: 1px solid #5f6368;
+                background: #2d2d2d; color: #e8eaed; cursor: pointer; }
+  #bar .save { background: #1a73e8; color: #fff; border-color: #1a73e8; font-weight: 600; }
+  #bar button:disabled { opacity: .55; cursor: progress; }
+  #msg { color: #9aa0a6; font-size: 13px; }
+  #f { flex: 1 1 auto; width: 100%; border: 0; display: block; }
+  #fatal { display:none; flex:1; align-items:center; justify-content:center; padding:24px; text-align:center; }
+</style>
+</head>
+<body>
+  <div id="bar">
+    <span class="title">drawio</span>
+    <span id="msg">connecting to Slides…</span>
+    <span class="spacer"></span>
+    <button class="save" id="saveBtn" disabled>Save &amp; Close</button>
+    <button id="cancelBtn">Cancel</button>
+  </div>
+  <iframe id="f" title="drawio editor"></iframe>
+  <div id="fatal"></div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const setMsg = (t) => { $("#msg").textContent = t || ""; };
+  const frame = $("#f"), saveBtn = $("#saveBtn");
+  const nonce = location.hash.slice(1);     // correlation id minted by the sidebar
+  let seedXml = "", imageId = "", saving = false, ready = false, booted = false;
+
+  function show(t, color) {
+    $("#f").style.display = "none";
+    const f = $("#fatal"); f.style.display = "flex"; f.style.color = color || "#b00020"; f.textContent = t;
+    setMsg(""); saveBtn.style.display = "none";
+  }
+
+  // Option A as an RPC over window.opener: the sidebar is the "API". We ask it for
+  // our seed (load) and post the result back (save) — NO server relay.
+  if (!window.opener || !nonce) {
+    show("This editor lost its link to Google Slides (window.opener is null — the browser blocked it). " +
+         "Close this tab; edits can't be saved back through this path.", "#b00020");
+    return;
+  }
+
+  const toDrawio = (o) => { try { frame.contentWindow.postMessage(JSON.stringify(o), "*"); } catch (e) {} };
+  const toSidebar = (o) => { try { window.opener.postMessage(o, "*"); } catch (e) {} };
+
+  window.addEventListener("message", (ev) => {
+    const m = ev.data;
+    // (a) seed reply from the sidebar (an object, from our opener)
+    if (m && typeof m === "object" && m.type === "drawio-seed" && m.nonce === nonce && ev.source === window.opener) {
+      if (booted) return;
+      seedXml = m.xml || ""; imageId = m.imageId || "";
+      booted = true; clearInterval(askIv);
+      frame.src = "/drawio/?embed=1&proto=json&spin=1&libraries=1&noSaveBtn=1&saveAndExit=0&noExitBtn=1";
+      setMsg("loading editor…");
+      return;
+    }
+    // (b) drawio's own protocol messages (JSON strings, from the iframe)
+    if (typeof m !== "string") return;
+    let d; try { d = JSON.parse(m); } catch (e) { return; }
+    if (d.event === "init") {
+      toDrawio({ action: "load", xml: seedXml, autosave: 1 });
+      ready = true; saveBtn.disabled = false; setMsg("ready — edit, then Save & Close");
+    } else if (d.event === "export") {
+      submit(d.data, d.xml || seedXml);
+    } else if (d.event === "exit") {
+      if (!saving) window.close();
+    }
+  });
+
+  // request our seed from the sidebar (retry a few times in case it's mid-load)
+  let asks = 0;
+  toSidebar({ type: "drawio-edit-ready", nonce });
+  const askIv = setInterval(() => {
+    if (booted) { clearInterval(askIv); return; }
+    if (++asks > 12) { clearInterval(askIv); show("No response from Google Slides — is the add-on sidebar still open? Reopen it and try Edit again.", "#b00020"); return; }
+    toSidebar({ type: "drawio-edit-ready", nonce });
+  }, 500);
+
+  saveBtn.addEventListener("click", () => {
+    if (!ready || saving) return;
+    saving = true; saveBtn.disabled = true; setMsg("exporting…");
+    toDrawio({ action: "export", format: "xmlpng", scale: 4, spin: "Exporting…" });
+  });
+  $("#cancelBtn").addEventListener("click", () => window.close());
+
+  function submit(png, xml) {
+    toSidebar({ type: "drawio-save", nonce, imageId, png, xml });
+    show("✓ Saved. Return to Google Slides — the diagram updates in a moment. You can close this tab.", "#188038");
+    try { window.close(); } catch (e) {}
+  }
+})();
+</script>
+</body>
+</html>
