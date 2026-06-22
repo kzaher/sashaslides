@@ -11,9 +11,17 @@
 services:
   sashaslides:
     image: holosweat-sashaslides:latest
+    # Multi-stage build (see Dockerfile): the BUILDER stage runs native (fast on
+    # an arm64 Mac) and the RUNTIME stage is `FROM --platform=linux/amd64`, so the
+    # produced image is amd64 (matches the server) without QEMU-emulating the whole
+    # build. Context is the REPO ROOT because the build compiles the pptxgenjs fork
+    # + renderer source from scratch (nothing stale). args bake the deployed origin.
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: renderer/html2slides/addon-server/Dockerfile
+      args:
+        SERVER_ORIGIN: https://sashaslides.com
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
     environment:
       - PORT=8787

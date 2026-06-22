@@ -58,9 +58,17 @@ window.h2s.register(async (bridge) => {
     items = [];
     if (inAddon) {
       try {
-        // Code.gs → listDeckImages() returns [{ id, name, dataUrl }]
+        // Code.gs → listDeckImages() returns [{ id, name, dataUrl, xml }] where
+        // `xml` comes from the off-canvas source box the converter wrote.
         const imgs = await gsCall("listDeckImages");
         for (const img of imgs || []) {
+          // Preferred: editable XML already recovered from the source box — use it
+          // directly (it survives the pptx→Slides import; PNG metadata may not).
+          if (img.xml) {
+            items.push({ id: img.id, name: img.name || ("diagram-" + img.id), src: img.dataUrl, xml: img.xml });
+            continue;
+          }
+          // Fallback: a PNG that carries an embedded drawio chunk (no source box).
           try {
             const r = await api("/api/drawio/detect", {
               method: "POST",
@@ -105,8 +113,10 @@ window.h2s.register(async (bridge) => {
     if (listener) window.removeEventListener("message", listener);
     listener = (ev) => onEditorMessage(ev);
     window.addEventListener("message", listener);
-    // embed mode + json protocol; spin shows a loader until init
-    frame.src = "/drawio?embed=1&proto=json&spin=1&libraries=1&noSaveBtn=0";
+    // embed mode + json protocol; spin shows a loader until init.
+    // NOTE the TRAILING SLASH on /drawio/ — drawio's index.html uses relative
+    // asset paths (js/…, styles/…), so without it they'd resolve to /js/… (404).
+    frame.src = "/drawio/?embed=1&proto=json&spin=1&libraries=1&noSaveBtn=0";
   }
 
   function onEditorMessage(ev) {
@@ -153,14 +163,40 @@ window.h2s.register(async (bridge) => {
     pending = null;
   }
 
-  function edit(item) {
+  // In the add-on we open the editor BIG in a modal dialog (Code.gs →
+  // showDrawioDialog); the sidebar is too narrow. The dialog itself does the
+  // save-back to the deck, so the sidebar just re-detects afterwards. In dev
+  // (standalone) we fall back to the inline sidebar iframe.
+  async function edit(item) {
     log("drawio: editing " + item.name);
-    openEditor(item.xml || "", item);
+    if (inAddon) {
+      try {
+        // Re-fetch the CURRENT XML from the deck — the cached `items` copy is
+        // pre-edit, so reopening from it would show the old state even though the
+        // last Save updated the source box.
+        let xml = item.xml || "";
+        try {
+          const fresh = (await gsCall("listDeckImages")) || [];
+          const match = fresh.find((x) => x.id === item.id);
+          if (match && match.xml) xml = match.xml;
+        } catch (e) { log("drawio: (using cached xml — refresh failed: " + e.message + ")"); }
+        await gsCall("showDrawioDialog", { xml, imageId: item.id });
+        log("drawio: editor opened — Save & Close writes back; reopen reflects your latest save.");
+      } catch (e) { log("drawio: open failed: " + e.message); }
+    } else {
+      openEditor(item.xml || "", item);
+    }
   }
 
   function newDiagram() {
     log("drawio: new diagram");
-    openEditor("", null);
+    if (inAddon) {
+      gsCall("showDrawioDialog", { xml: "", imageId: "" })
+        .then(() => log("drawio: editor opened — Save inserts a new diagram, then click Detect to refresh."))
+        .catch((e) => log("drawio: open failed: " + e.message));
+    } else {
+      openEditor("", null);
+    }
   }
 
   async function del(item) {

@@ -23,7 +23,7 @@
  */
 
 import { createServer, IncomingMessage, ServerResponse } from "http";
-import { existsSync, statSync, createReadStream } from "fs";
+import { existsSync, statSync, createReadStream, readFileSync } from "fs";
 import { join, normalize, extname, dirname } from "path";
 import { fileURLToPath } from "url";
 import { apiHandlers } from "./registry.js";
@@ -47,8 +47,14 @@ const DRAWIO_DIR = DRAWIO_CANDIDATES.find((d) => existsSync(d)) || null;
 const PORT = Number(process.env.PORT) || 8787;
 const HOST = process.env.HOST || "0.0.0.0";
 
+// Build stamp written into the image at build time (Dockerfile → public/build-info.json),
+// surfaced via /api/config so the UI can show when it was last refreshed.
+let BUILD_DATE = "dev";
+try { BUILD_DATE = JSON.parse(readFileSync(join(PUBLIC_DIR, "build-info.json"), "utf8")).buildDate || "dev"; } catch { /* no stamp (dev) */ }
+
 // Default UI config — overridable via env so the container is configurable.
 const CONFIG = {
+  buildDate: BUILD_DATE,
   oversampling: { default: Number(process.env.OVERSAMPLING_DEFAULT) || 2, min: 1, max: 8 },
   drawioAvailable: Boolean(DRAWIO_DIR),
   // Marker fill used for the off-canvas drawio-XML text field so it's easy to
@@ -62,10 +68,24 @@ const MIME: Record<string, string> = {
   ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".gs": "text/plain; charset=utf-8",
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".woff2": "font/woff2",
   ".map": "application/json; charset=utf-8",
+  // drawio webapp assets (served under /drawio/) — fonts, stencils, icons.
+  ".gif": "image/gif",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".ttf": "font/ttf",
+  ".eot": "application/vnd.ms-fontobject",
+  ".otf": "font/otf",
+  ".xml": "application/xml; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".webp": "image/webp",
 };
 
 function send(res: ServerResponse, status: number, body: string | Buffer, type = "text/plain; charset=utf-8") {
@@ -116,7 +136,9 @@ const server = createServer(async (req, res) => {
     // cross-origin (script-src / iframe from googleusercontent.com), so allow it.
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    // `*` = allow any request header (the sidebar runs cross-origin in the Apps
+    // Script iframe; a too-narrow list fails the preflight → "Failed to fetch").
+    res.setHeader("Access-Control-Allow-Headers", "*");
     if (method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
     if (p === "/healthz") return send(res, 200, "ok");

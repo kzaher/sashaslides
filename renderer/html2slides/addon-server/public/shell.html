@@ -15,7 +15,9 @@
 <div id="shell-root">Loading UI from __ORIGIN__ …</div>
 <script>
   // Pull the full UI markup from the server and mount it, then load the logic.
-  fetch("__ORIGIN__/", { headers: { "x-shell": "1" } })
+  // NOTE: no custom headers — a simple GET avoids a CORS preflight (a custom
+  // header like x-shell would trigger one and fail inside the Apps Script iframe).
+  fetch("__ORIGIN__/")
     .then(r => r.text())
     .then(html => {
       const body = html.replace(/^[\s\S]*?<body[^>]*>/i, "").replace(/<\/body>[\s\S]*$/i, "");

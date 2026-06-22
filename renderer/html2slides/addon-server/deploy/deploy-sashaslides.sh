@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Push + serve sashaslides on the holosweat server, alongside the existing stack.
 #
-# Mirrors your registry-push flow (build local → push to the :5000 registry over
-# the SSH tunnel → pull remotely) but is ADDITIVE and ISOLATED:
+# Build locally → push to your :5000 registry over the SSH tunnel → pull remotely
+# (your existing flow). ADDITIVE and ISOLATED:
 #   • its OWN compose project/dir (/root/sashaslides) — never touches /root/holosweat
 #   • a NEW nginx site (sashaslides.com) + certbot cert — never touches existing sites/certs
 #   • UFW: UNTOUCHED — app port is loopback-only (127.0.0.1:6000) + 80/443 are yours; no ufw calls
@@ -18,23 +18,50 @@ DOMAIN="sashaslides.com"          # <-- the subdomain (A-record → server IP)
 ACME_EMAIL="krunoslav.zaher@gmail.com"         # <-- certbot registration email
 HOST_PORT="6000"                       # localhost port nginx proxies to (free one)
 IMAGE="holosweat-sashaslides:latest"
-REGISTRY_LOCAL="host.docker.internal:5000"   # your registry via the SSH tunnel
+# Registry tunnel: LOCAL port 6100 (NOT 5000 — macOS AirPlay Receiver owns 5000),
+# forwarded to the SERVER's registry which stays on 5000.
+# ⚠ ONE-TIME: add the matching entry to Docker Desktop ▸ Settings ▸ Docker Engine ▸
+#   "insecure-registries":  "host.docker.internal:6100"   (next to your :5000 one),
+#   then Apply & Restart.
+LOCAL_PORT="6100"
+REGISTRY_PORT="5000"                          # registry:2 container's port on the server
+REGISTRY_LOCAL="host.docker.internal:$LOCAL_PORT"
 REMOTE_DIR="/root/sashaslides"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CTX="$(cd "$HERE/.." && pwd)"          # addon-server/ (compose build context)
 
-# ── 0. SSH tunnel for the registry (:5000), like your other deploy ────────────
-echo "==> opening SSH tunnel to the registry (:5000)"
-ssh -fN -L 5000:localhost:5000 "$SERVER_USER@$SERVER"
-TUNNEL_PID=$(pgrep -f "ssh -fN -L 5000:localhost:5000 $SERVER_USER@$SERVER" | head -1 || true)
-trap '[ -n "${TUNNEL_PID:-}" ] && kill "$TUNNEL_PID" 2>/dev/null || true' EXIT
-sleep 2
+# ── 0. SSH tunnel:  Mac localhost:$LOCAL_PORT → server registry :$REGISTRY_PORT ─
+# Bound to 0.0.0.0 so Docker Desktop's host.docker.internal can reach the forward
+# (loopback-only binds aren't always reachable from the Docker VM on macOS). 6100
+# sidesteps the macOS AirPlay-on-5000 clash; we still guard in case it's busy.
+if lsof -nP -iTCP:"$LOCAL_PORT" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
+  echo "!! Local port $LOCAL_PORT is already in use:"
+  lsof -nP -iTCP:"$LOCAL_PORT" -sTCP:LISTEN 2>/dev/null | sed 's/^/   /'
+  echo "   Change LOCAL_PORT at the top of this script (and the insecure-registries entry to match)."
+  exit 1
+fi
+echo "==> opening SSH tunnel  localhost:$LOCAL_PORT → $SERVER registry :$REGISTRY_PORT"
+ssh -fN -L "0.0.0.0:$LOCAL_PORT:localhost:$REGISTRY_PORT" "$SERVER_USER@$SERVER"
+trap 'pkill -f "ssh -fN -L 0.0.0.0:$LOCAL_PORT:localhost:$REGISTRY_PORT $SERVER_USER@$SERVER" 2>/dev/null || true' EXIT
+# wait until the registry actually answers THROUGH the tunnel before pushing
+for i in $(seq 1 15); do
+  if curl -fsS "http://localhost:$LOCAL_PORT/v2/" >/dev/null 2>&1; then echo "  registry reachable through tunnel ✓"; break; fi
+  if [ "$i" = 15 ]; then
+    echo "!! registry not answering on localhost:$LOCAL_PORT through the tunnel:"
+    echo "   • is the registry:2 container up on the server?  ssh $SERVER_USER@$SERVER 'docker ps | grep registry'"
+    echo "   • did you add host.docker.internal:$LOCAL_PORT to Docker insecure-registries + Apply & Restart?"
+    exit 1
+  fi
+  sleep 1
+done
 
-# ── 1. build the image locally ────────────────────────────────────────────────
-echo "==> building $IMAGE"
-( cd "$CTX" && HOST_PORT="$HOST_PORT" docker compose build )
+# ── 1. build the image (multi-stage: compiles the pptxgenjs fork bundle +
+#       convert-bundle.js + Code.gs FROM SOURCE in the image — never stale, and
+#       needs NO node/esbuild/gulp on this machine, just Docker). ────────────────
+echo "==> building $IMAGE (from source — fork bundle + convert-bundle + Code.gs)"
+( cd "$CTX" && HOST_PORT="$HOST_PORT" BUILD_DATE="$(date -u '+%Y-%m-%d %H:%M UTC')" docker compose build )
 
-# ── 2. push via the registry ──────────────────────────────────────────────────
+# ── 2. tag + push to the registry (over the tunnel) ───────────────────────────
 echo "==> pushing $IMAGE → $REGISTRY_LOCAL"
 docker tag "$IMAGE" "$REGISTRY_LOCAL/$IMAGE"
 docker push "$REGISTRY_LOCAL/$IMAGE"
@@ -54,7 +81,7 @@ ssh "$SERVER_USER@$SERVER" DOMAIN="$DOMAIN" ACME_EMAIL="krunoslav.zaher@gmail.co
     REMOTE_DIR="$REMOTE_DIR" IMAGE="$IMAGE" 'bash -s' <<'REMOTE'
 set -euo pipefail
 
-# 4a. pull the pushed image from the local registry and retag to the compose name
+# 4a. pull the pushed image from the local registry, retag to the compose name
 docker pull "localhost:5000/$IMAGE"
 docker tag  "localhost:5000/$IMAGE" "$IMAGE"
 
@@ -95,14 +122,12 @@ docker compose -p sashaslides up -d
 echo "  -> sashaslides container:"; docker ps --filter name=sashaslides --format '     {{.Names}}  {{.Status}}  {{.Ports}}'
 REMOTE
 
-# ── 5. build the add-on Code.gs pointing at this domain (ready to paste) ──────
-REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
-echo "==> building add-on Code.gs (SERVER_ORIGIN=https://$DOMAIN)"
-( cd "$REPO_ROOT" && SERVER_ORIGIN="https://$DOMAIN" npx tsx renderer/html2slides/browser/build-addon.ts ) \
-  && echo "    → paste this into Apps Script: $REPO_ROOT/dist/renderer/html2slides/addon/Code.gs" \
-  || echo "    (add-on build skipped/failed — run it manually: SERVER_ORIGIN=https://$DOMAIN npm run build:addon)"
-
 # ── 6. verify ─────────────────────────────────────────────────────────────────
 echo "==> verifying https://$DOMAIN/healthz"
-curl -fsS "https://$DOMAIN/healthz" && echo " ✓ live" || echo " (DNS may still be propagating; retry shortly)"
-echo "All done. Server live at https://$DOMAIN — paste Code.gs into Apps Script to finish the add-on."
+sleep 3
+curl -fsS "https://$DOMAIN/healthz" && echo " ✓ live" || echo " (give the container a few seconds; re-check https://$DOMAIN/healthz)"
+echo ""
+echo "All done. Server live at https://$DOMAIN — everything was built fresh from source in the image."
+echo "Get the current Code.gs (built into the image, never stale) onto your clipboard with:"
+echo "    curl -s https://$DOMAIN/Code.gs | pbcopy"
+echo "then RE-PASTE it into Apps Script and reload the sidebar."

@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<header><h1>html2slides</h1><span id="env-badge" class="badge">…</span></header>
+<header><h1>html2slides</h1><span id="env-badge" class="badge">…</span><span id="build-badge" class="hint" style="margin-left:auto"></span></header>
 
 <!-- ── Insert HTML ─────────────────────────────────────────────── -->
 <section>
@@ -28,7 +28,11 @@
     <output id="oversample-out">2×</output>
   </div>
 
-  <button id="insert-btn" class="primary">Insert after current slide</button>
+  <div class="row">
+    <button id="insert-before-btn" class="primary">Insert BEFORE current slide</button>
+    <button id="insert-after-btn" class="primary">Insert AFTER current slide</button>
+    <button id="download-btn" class="primary" hidden>Download .pptx</button>
+  </div>
 </section>
 
 <!-- ── Export ──────────────────────────────────────────────────── -->
@@ -57,7 +61,10 @@
 </section>
 
 <div id="log" class="log"></div>
+<!-- app.js dynamically loads the vendors (jszip, pptxgenjs) + the feature bundles
+     (convert-bundle.js = Insert; feature-drawio.js). Inline <script>s here can't be
+     relied on: when the Apps Script shell injects this markup, they don't execute —
+     so app.js is the single bootstrap that loads everything via dynamic <script>. -->
 <script src="/static/app.js"></script>
-<script src="/static/feature-drawio.js"></script>
 </body>
 </html>
