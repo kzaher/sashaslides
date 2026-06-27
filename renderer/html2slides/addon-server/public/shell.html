@@ -11,8 +11,9 @@
 <link rel="stylesheet" href="__ORIGIN__/static/app.css">
 </head>
 <body>
-<header><h1>html2slides</h1><span id="env-badge" class="badge">…</span></header>
-<div id="shell-root">Loading UI from __ORIGIN__ …</div>
+<!-- No header here: app.html injects its own. A header in this shell would render
+     a SECOND title above it (and a duplicate #env-badge id). -->
+<div id="shell-root">Loading SashaSlides …</div>
 <script>
   // Pull the full UI markup from the server and mount it, then load the logic.
   // NOTE: no custom headers — a simple GET avoids a CORS preflight (a custom

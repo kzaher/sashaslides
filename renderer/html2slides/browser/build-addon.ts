@@ -65,8 +65,8 @@ function onOpen(e) {
   // PUBLISHED Editor Add-ons and is flaky/hidden for an unpublished bound
   // script, which is why the "html2slides" menu was missing.
   SlidesApp.getUi()
-    .createMenu('html2slides')
-    .addItem('Open html2slides', 'showSidebar')
+    .createMenu('SashaSlides')
+    .addItem('Open SashaSlides', 'showSidebar')
     .addToUi();
 }
 
@@ -82,7 +82,7 @@ function showSidebar() {
   var shell = UrlFetchApp.fetch(SERVER_ORIGIN + '/shell.html').getContentText();
   // Replace EVERY __ORIGIN__ (base href, stylesheet, fetch URLs, app.js src).
   var html = shell.split('__ORIGIN__').join(SERVER_ORIGIN);
-  var out = HtmlService.createHtmlOutput(html).setTitle('html2slides');
+  var out = HtmlService.createHtmlOutput(html).setTitle('SashaSlides');
   SlidesApp.getUi().showSidebar(out);
 }
 
@@ -282,6 +282,105 @@ function exportSlidesZip(payload) {
   if (blobs.length === 0) throw new Error('no slides matched the requested range/filter');
   var zipBlob = Utilities.zip(blobs, 'slides.zip');
   return { filename: 'slides.zip', mimeType: 'application/zip', base64: Utilities.base64Encode(zipBlob.getBytes()) };
+}
+
+/** Deck state for the bridge: total slides, current (1-based, 0 if none) and the
+ *  1-based indices of skipped (hidden) slides. */
+function getDeckState() {
+  var pres = SlidesApp.getActivePresentation();
+  var slides = pres.getSlides();
+  var auth = { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true };
+  var base = 'https://slides.googleapis.com/v1/presentations/' + encodeURIComponent(pres.getId());
+  var meta = JSON.parse(slidesFetch_(base + '?fields=slides(objectId,slideProperties/isSkipped)', auth));
+  var ms = meta.slides || [];
+  var skipped = [];
+  for (var i = 0; i < ms.length; i++) {
+    var sp = ms[i].slideProperties || {};
+    if (sp.isSkipped === true) skipped.push(i + 1);
+  }
+  var current = 0, curId = null;
+  try { var sel = pres.getSelection(); var page = sel ? sel.getCurrentPage() : null; if (page) curId = page.getObjectId(); } catch (e) {}
+  if (curId) { for (var j = 0; j < slides.length; j++) { if (slides[j].getObjectId() === curId) { current = j + 1; break; } } }
+  return { ok: true, count: slides.length, current: current, skipped: skipped };
+}
+
+/** Screenshot one or more slides as PNG. payload: { range?, indices?[], includeXml? }.
+ *  Default = the current slide. Returns { ok, slides:[{index, skipped, png, xml?}] }.
+ *  png is a data: URL. xml (only when includeXml) is the slide's OpenXML from a
+ *  best-effort .pptx export — null if it couldn't be resolved. */
+function screenshotSlides(payload) {
+  payload = payload || {};
+  var pres = SlidesApp.getActivePresentation();
+  var auth = { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true };
+  var base = 'https://slides.googleapis.com/v1/presentations/' + encodeURIComponent(pres.getId());
+  var meta = JSON.parse(slidesFetch_(base + '?fields=slides(objectId,slideProperties/isSkipped)', auth));
+  var ms = meta.slides || [];
+
+  var want = {};
+  if (payload.indices && payload.indices.length) {
+    for (var a = 0; a < payload.indices.length; a++) want[payload.indices[a]] = true;
+  } else if (payload.range != null && String(payload.range).trim() !== '') {
+    want = parseRange_(payload.range) || {};
+  } else {
+    want[getDeckState().current || ms.length] = true;
+  }
+
+  var xmlByIndex = payload.includeXml === true ? slideXmlMap_(pres.getId(), auth) : null;
+  var out = [];
+  for (var k = 0; k < ms.length; k++) {
+    var oneBased = k + 1;
+    if (!want[oneBased]) continue;
+    var sp2 = ms[k].slideProperties || {};
+    var entry = { index: oneBased, skipped: sp2.isSkipped === true, png: '' };
+    var thumb = base + '/pages/' + encodeURIComponent(ms[k].objectId) +
+      '/thumbnail?thumbnailProperties.mimeType=PNG&thumbnailProperties.thumbnailSize=LARGE';
+    var contentUrl = JSON.parse(slidesFetch_(thumb, auth)).contentUrl;
+    if (contentUrl) {
+      var blob = UrlFetchApp.fetch(contentUrl).getBlob();
+      entry.png = 'data:image/png;base64,' + Utilities.base64Encode(blob.getBytes());
+    }
+    if (xmlByIndex) entry.xml = xmlByIndex[oneBased] || null;
+    out.push(entry);
+  }
+  if (out.length === 0) throw new Error('no slides matched the requested range/indices');
+  return { ok: true, slides: out };
+}
+
+function between_(s, a, b) {
+  var i = s.indexOf(a); if (i === -1) return '';
+  i += a.length; var j = s.indexOf(b, i); return j === -1 ? '' : s.substring(i, j);
+}
+
+/** Best-effort map of 1-based slide order -> slide OpenXML, from a .pptx export.
+ *  Resolves order via presentation.xml sldIdLst + its rels. Returns {} on failure. */
+function slideXmlMap_(presId, auth) {
+  try {
+    var url = 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(presId) +
+      '/export?mimeType=application%2Fvnd.openxmlformats-officedocument.presentationml.presentation';
+    var files = Utilities.unzip(UrlFetchApp.fetch(url, auth).getBlob());
+    var byName = {};
+    for (var i = 0; i < files.length; i++) byName[files[i].getName()] = files[i];
+    var presXml = byName['ppt/presentation.xml'] ? byName['ppt/presentation.xml'].getDataAsString() : '';
+    var rels = byName['ppt/_rels/presentation.xml.rels'] ? byName['ppt/_rels/presentation.xml.rels'].getDataAsString() : '';
+    var ridTarget = {};
+    var rp = rels.split('<Relationship');
+    for (var r = 1; r < rp.length; r++) {
+      var id = between_(rp[r], ' Id="', '"'), tgt = between_(rp[r], ' Target="', '"');
+      if (id && tgt) ridTarget[id] = tgt;
+    }
+    var lst = between_(presXml, '<p:sldIdLst', '</p:sldIdLst>');
+    var map = {}, n = 0, sp = lst.split('<p:sldId');
+    for (var s = 1; s < sp.length; s++) {
+      var rid = between_(sp[s], 'r:id="', '"');
+      if (!rid) continue;
+      n++;
+      var name = (ridTarget[rid] || '').replace('../', '');
+      if (name.indexOf('ppt/') !== 0) name = 'ppt/' + name;
+      var f = byName[name] || byName['ppt/slides/' + name.split('/').pop()];
+      if (f) map[n] = f.getDataAsString();
+    }
+    return map;
+  } catch (e) { return {}; }
 }
 
 /** drawio: enumerate the deck's rendered diagrams. A converted drawio slide

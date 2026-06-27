@@ -1,0 +1,6 @@
+# Installed into a local .venv by run.sh / run.bat — never globally.
+aiohttp>=3.9
+# aiortc: the bridge answers the sidebar/display WebRTC offer (/pair).
+aiortc>=1.6
+# qrcode: renders the QR on the bridge's own pairing page.
+qrcode[pil]>=7.4
