@@ -11,6 +11,20 @@
   const log = (m) => { const el = $("#log"); el.textContent += m + "\n"; el.scrollTop = el.scrollHeight; };
   const inAddon = typeof google !== "undefined" && google.script && google.script.run;
 
+  // localStorage-backed <select>: restore the saved choice, persist on change,
+  // and run onApply(value) to show/hide the matching block. Wrapped in try/catch
+  // because storage can be blocked in the cross-origin Apps Script iframe.
+  const lsGet = (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
+  function bindSelect(sel, key, onApply) {
+    if (!sel) return;
+    const saved = lsGet(key);
+    if (saved && [...sel.options].some((o) => o.value === saved)) sel.value = saved;
+    const apply = () => { lsSet(key, sel.value); onApply(sel.value); };
+    sel.addEventListener("change", apply);
+    apply();
+  }
+
   // google.script.run wrapped as a promise (add-on mode only)
   const gsCall = (fn, ...args) => new Promise((resolve, reject) => {
     google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](...args);
@@ -26,9 +40,161 @@
   };
   window.h2s = { register: (init) => bridge.features.push(init), bridge };
 
+  // ── Automatic tab: pair with the local bridge over WebRTC (copy-paste signalling,
+  //    so the https sidebar never has to reach the http bridge), then insert the
+  //    slides Claude sends straight into THIS deck via the existing converter.
+  function setupClaudeBridge() {
+    const statusEl = $("#rtc-status");
+    const setStatus = (t) => { if (statusEl) statusEl.textContent = t; };
+
+    // Connection method dropdown (persisted): WebRTC | Local device.
+    bindSelect($("#connect-method"), "sasha.connectMethod", (v) => {
+      ["webrtc", "local"].forEach((m) => { const el = $("#cmethod-" + m); if (el) el.hidden = (m !== v); });
+    });
+
+    // Shared: turn an incoming command into a deck action and a reply. Used by
+    // both transports (WebRTC data channel and the Local-device WebSocket).
+    async function handleCommand(cmd) {
+      const reply = { id: cmd.id, ok: true };
+      try {
+        if (cmd.op === "add_slide") {
+          if (!bridge.insert) throw new Error("converter still loading — retry in a moment");
+          bridge.queue.length = 0;
+          bridge.queue.push({ name: "agent.html", html: cmd.html || "" });
+          await bridge.insert(cmd.position === "before" ? "before" : "after");
+          reply.inserted = true;
+          log("inserted a slide from the agent");
+        } else if (cmd.op === "get_state") {
+          reply.target = "google-slides";
+          if (inAddon) Object.assign(reply, await bridge.gsCall("getDeckState"));
+        } else if (cmd.op === "screenshot") {
+          if (!inAddon) throw new Error("screenshot needs the Slides add-on");
+          const res = await bridge.gsCall("screenshotSlides", {
+            range: cmd.range || null, indices: cmd.indices || null, includeXml: cmd.xml === true });
+          reply.slides = res.slides;
+          log("screenshot: " + (res.slides ? res.slides.length : 0) + " slide(s)");
+        } else {
+          reply.ok = false; reply.error = "op not supported in Slides mode: " + cmd.op;
+        }
+      } catch (e) { reply.ok = false; reply.error = String((e && e.message) || e); }
+      return reply;
+    }
+
+    // ── WebRTC (this sidebar is the offerer) ──
+    const offerEl = $("#rtc-offer"), answerEl = $("#rtc-answer");
+    const connectBtn = $("#rtc-connect"), copyBtn = $("#rtc-copy");
+    if (offerEl && connectBtn) {
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+      const ch = pc.createDataChannel("cmds");
+      ch.onopen = () => { setStatus("connected ✓"); log("agent connected (webrtc)"); };
+      ch.onclose = () => setStatus("disconnected");
+      ch.onmessage = async (ev) => {
+        let cmd; try { cmd = JSON.parse(ev.data); } catch { return; }
+        const r = await handleCommand(cmd);
+        try { ch.send(JSON.stringify(r)); } catch (_) {}
+      };
+      (async () => {
+        try {
+          await pc.setLocalDescription(await pc.createOffer());
+          await new Promise((r) => {
+            if (pc.iceGatheringState === "complete") return r();
+            pc.addEventListener("icegatheringstatechange",
+              () => pc.iceGatheringState === "complete" && r());
+          });
+          offerEl.value = btoa(JSON.stringify(pc.localDescription));
+        } catch (e) { setStatus("error"); log("offer error: " + e.message); }
+      })();
+      const copy = () => {
+        offerEl.select();
+        if (navigator.clipboard) navigator.clipboard.writeText(offerEl.value).catch(() => {});
+        else { try { document.execCommand("copy"); } catch (_) {} }
+      };
+      if (copyBtn) copyBtn.onclick = copy;
+      connectBtn.onclick = async () => {
+        const a = (answerEl.value || "").trim();
+        if (!a) { setStatus("paste the answer first"); return; }
+        try { await pc.setRemoteDescription(JSON.parse(atob(a))); setStatus("connecting…"); }
+        catch (e) { setStatus("bad answer"); log("answer error: " + e.message); }
+      };
+    }
+
+    // ── Local device: direct WebSocket to the bridge on this machine ──
+    let localWs = null;
+    function connectLocal() {
+      if (localWs && localWs.readyState <= 1) return;  // already connecting/open
+      setStatus("connecting…");
+      try { localWs = new WebSocket("ws://localhost:8787/ws"); }
+      catch (e) { setStatus("blocked — use WebRTC"); log("local connect failed: " + e.message); return; }
+      localWs.onopen = () => { setStatus("connected ✓ (local)"); log("agent connected (local)"); };
+      localWs.onmessage = async (ev) => {
+        let cmd; try { cmd = JSON.parse(ev.data); } catch { return; }
+        const r = await handleCommand(cmd);
+        try { localWs.send(JSON.stringify(r)); } catch (_) {}
+      };
+      localWs.onerror = () => { setStatus("blocked — use WebRTC"); log("local WS blocked (https→http localhost) or bridge not running on :8787"); };
+      localWs.onclose = () => { if (statusEl && /local/.test(statusEl.textContent)) setStatus("disconnected"); };
+    }
+    const localBtn = $("#local-connect");
+    if (localBtn) localBtn.onclick = connectLocal;
+
+    // Auto-reconnect on load when Local device was the last-used method, so
+    // reopening the sidebar silently re-establishes the link (no re-clicking).
+    if (($("#connect-method") || {}).value === "local") connectLocal();
+  }
+
   // ── shared UI: env badge, oversampling, HTML queue (insert) ──────────────────
   async function init() {
-    $("#env-badge").textContent = inAddon ? "add-on" : "dev (localhost)";
+    // tabs: Automatic (Claude bridge) | Manual (this UI) — wired first so a later
+    // Manual-panel init error can't disable tab switching.
+    document.querySelectorAll(".tab").forEach((t) => {
+      t.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
+        document.querySelectorAll(".panel").forEach((p) => { p.hidden = p.id !== "panel-" + t.dataset.tab; });
+      });
+    });
+    setupClaudeBridge(); // Automatic tab: WebRTC pairing + insert into this deck
+
+    // Automatic tab step 1: render the Script / Docker / Manual commands with THIS
+    // server's origin (the sidebar is injected cross-origin, so use <base href> via
+    // document.baseURI, NOT location), and wire the method dropdown + copy buttons.
+    (() => {
+      let origin; try { origin = new URL(document.baseURI).origin; } catch (_) { origin = location.origin; }
+      const set = (id, text) => { const el = $("#" + id); if (el) el.textContent = text; };
+      const copy = (btn, src) => {
+        const b = $("#" + btn), s = $("#" + src);
+        if (b && s) b.onclick = () => { if (navigator.clipboard) navigator.clipboard.writeText(s.textContent).catch(() => {}); };
+      };
+
+      set("install-cmd", `curl -fsSL ${origin}/install.sh | sh`);
+      const dockerRun =
+        'docker run --rm --name sasha-slides-bridge \\\n' +
+        '  -p 8787:8787 -p 50000:50000/udp \\\n' +
+        '  -e SASHA_RTC_PORT=50000 -e SASHA_RTC_HOST_IP=127.0.0.1 -e SASHA_DIR=/opt \\\n' +
+        `  python:3.14 bash -c "curl -fsSL ${origin}/install.sh | sh"`;
+      set("docker-cmd", dockerRun);
+      // refresh: remove the existing named container first, then re-run (install.sh
+      // re-pulls the server and overwrites the skill).
+      set("docker-refresh-cmd", "docker rm -f sasha-slides-bridge 2>/dev/null; " + dockerRun);
+      set("manual-cmd",
+        `curl -fsSL ${origin}/sasha-bridge.zip -o sasha-bridge.zip\n` +
+        'unzip sasha-bridge.zip && cd sasha-bridge\n' +
+        'python3 -m venv .venv\n' +
+        '.venv/bin/pip install -r requirements.txt\n' +
+        '.venv/bin/python wrapper.py serve');
+
+      copy("install-copy", "install-cmd");
+      copy("docker-copy", "docker-cmd");
+      copy("docker-refresh-copy", "docker-refresh-cmd");
+      copy("manual-copy", "manual-cmd");
+
+      bindSelect($("#install-method"), "sasha.installMethod", (v) => {
+        ["script", "docker", "manual"].forEach((m) => {
+          const el = $("#method-" + m); if (el) el.hidden = (m !== v);
+        });
+      });
+    })();
+
+    const envBadge = $("#env-badge"); if (envBadge) envBadge.textContent = inAddon ? "add-on" : "dev (localhost)";
     try { bridge.config = await (await fetch("/api/config")).json(); } catch { bridge.config = { oversampling: { default: 2, min: 1, max: 8 } }; }
     const bb = $("#build-badge"); if (bb) bb.textContent = "build " + (bridge.config.buildDate || "?");
 

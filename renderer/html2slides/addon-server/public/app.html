@@ -3,11 +3,103 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>html2slides</title>
+<title>SashaSlides</title>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<header><h1>html2slides</h1><span id="env-badge" class="badge">…</span><span id="build-badge" class="hint" style="margin-left:auto"></span></header>
+<!-- ── Tabs: Automatic (Claude bridge) | Manual (this UI) ───────── -->
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="auto">Automatic</button>
+  <button class="tab" data-tab="manual">Manual</button>
+</nav>
+
+<!-- ══ AUTOMATIC ═══ let Claude build slides over the local bridge ══ -->
+<div class="panel" id="panel-auto">
+  <section>
+    <h2>1 · Install &amp; run</h2>
+    <label class="hint" style="font-weight:600;flex-direction:row;align-items:center;gap:8px">
+      Install method
+      <select id="install-method">
+        <option value="script">Script (curl · recommended)</option>
+        <option value="docker">Docker</option>
+        <option value="manual">Manual</option>
+      </select>
+    </label>
+
+    <div class="method" id="method-script">
+      <p class="hint">One line. Asks where to install, builds a private Python
+        <code>venv</code> (nothing global), adds the skill to Claude Code or Codex
+        (auto-detected), and starts the bridge.</p>
+      <pre class="code"><code id="install-cmd">curl -fsSL …/install.sh | sh</code></pre>
+      <button id="install-copy">Copy command</button>
+      <p class="hint">macOS / Linux. Needs <code>python3</code>, <code>curl</code>, <code>unzip</code>.</p>
+    </div>
+
+    <div class="method" id="method-docker" hidden>
+      <p class="hint">Runs the bridge in a named container. WebRTC needs a pinned,
+        published UDP port; the env vars make the install fully non-interactive. It
+        detects Claude Code / Codex and installs the skill in the container.</p>
+      <pre class="code"><code id="docker-cmd">docker run …</code></pre>
+      <button id="docker-copy">Copy command</button>
+
+      <p class="hint" style="font-weight:600;margin-top:12px">Refresh / update (re-pull the
+        server &amp; skill, restart the bridge) — re-creates the named container:</p>
+      <pre class="code"><code id="docker-refresh-cmd">docker rm -f …</code></pre>
+      <button id="docker-refresh-copy">Copy command</button>
+
+      <p class="hint">Use your host’s LAN IP instead of <code>127.0.0.1</code> if the
+        browser is on another machine. (<code>--network host</code> works, Linux only.)</p>
+    </div>
+
+    <div class="method" id="method-manual" hidden>
+      <p class="hint">Set it up by hand — explicit steps, private venv, nothing global:</p>
+      <pre class="code"><code id="manual-cmd">…</code></pre>
+      <button id="manual-copy">Copy command</button>
+      <p class="hint">Then copy the unzipped <code>skill/</code> folder into
+        <code>~/.claude/skills/</code> (or your Codex prompts dir).</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2 · Connect Agent to this deck <span class="badge" id="rtc-status">not connected</span></h2>
+    <p class="hint">Once connected, the slides your agent builds insert straight into
+      <b>this</b> presentation.</p>
+    <label class="hint" style="font-weight:600;flex-direction:row;align-items:center;gap:8px">
+      Connection
+      <select id="connect-method">
+        <option value="webrtc">WebRTC (any machine/network)</option>
+        <option value="local">Local device (this machine)</option>
+      </select>
+    </label>
+
+    <div class="cmethod" id="cmethod-webrtc">
+      <label class="hint" style="font-weight:600;margin-top:4px">① Copy this connection request:</label>
+      <textarea id="rtc-offer" readonly rows="3" placeholder="generating…"></textarea>
+      <button id="rtc-copy">Copy request</button>
+
+      <p class="hint" style="margin-top:10px">② On the bridge machine, open
+        <a href="http://localhost:8787/" target="_blank" rel="noopener">localhost:8787</a> →
+        <b>Manual</b> tab → paste the request → copy the answer it gives you.</p>
+
+      <label class="hint" style="font-weight:600">③ Paste the answer here and connect:</label>
+      <textarea id="rtc-answer" rows="3" placeholder="paste answer…"></textarea>
+      <button id="rtc-connect" class="primary">Connect</button>
+      <p class="hint">Copy-pasted handshake (no network needed between this https panel
+        and your http bridge), so it works across machines on the same network.
+        Stuck on “connecting…” in <b>Docker</b>? Use the Docker install method in step&nbsp;1.</p>
+    </div>
+
+    <div class="cmethod" id="cmethod-local" hidden>
+      <p class="hint">Bridge running on <b>this</b> computer? Connect directly — no copy-paste.</p>
+      <button id="local-connect" class="primary">Connect to localhost:8787</button>
+      <p class="hint">If your browser blocks it (an https page reaching <code>http://localhost</code>),
+        switch to <b>WebRTC</b> above — that always works.</p>
+    </div>
+  </section>
+</div>
+
+<!-- ══ MANUAL ═══ the original html2slides sidebar ══════════════════ -->
+<div class="panel" id="panel-manual" hidden>
 
 <!-- ── Insert HTML ─────────────────────────────────────────────── -->
 <section>
@@ -59,6 +151,8 @@
   <!-- drawio editor mounts here (iframe → /drawio self-hosted) -->
   <div id="drawio-editor-wrap" hidden><iframe id="drawio-frame" title="drawio editor"></iframe></div>
 </section>
+
+</div><!-- /panel-manual -->
 
 <div id="log" class="log"></div>
 <!-- app.js dynamically loads the vendors (jszip, pptxgenjs) + the feature bundles

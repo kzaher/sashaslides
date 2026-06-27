@@ -159,6 +159,18 @@ const server = createServer(async (req, res) => {
       return send(res, 404, "drawio asset not found");
     }
 
+    // One-line installer: serve public/install.sh with __ORIGIN__ baked in so the
+    // piped `curl … | sh` downloads the bridge zip from this same origin.
+    if (p === "/install.sh") {
+      const proto = (req.headers["x-forwarded-proto"] as string)
+        || (url.hostname === "localhost" || url.hostname.startsWith("127.") ? "http" : "https");
+      const origin = `${proto}://${req.headers.host}`;
+      const sh = readFileSync(join(PUBLIC_DIR, "install.sh"), "utf8").split("__ORIGIN__").join(origin);
+      res.writeHead(200, { "Content-Type": "text/x-shellscript", "Cache-Control": "no-store" });
+      res.end(sh);
+      return;
+    }
+
     // UI shell + app + static
     if (p === "/" ) { if (serveStatic(res, PUBLIC_DIR, "app.html")) return; }
     if (p === "/shell.html") { if (serveStatic(res, PUBLIC_DIR, "shell.html")) return; }

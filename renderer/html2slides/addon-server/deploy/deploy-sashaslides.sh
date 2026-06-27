@@ -30,6 +30,16 @@ REMOTE_DIR="/root/sashaslides"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CTX="$(cd "$HERE/.." && pwd)"          # addon-server/ (compose build context)
 
+# ── regenerate the Claude-bridge skill zip served by the Automatic tab ────────
+# public/sasha-bridge.zip ships into the image via `COPY renderer`; rebuild it
+# here so a deploy is never stale.
+REPO_ROOT="$(cd "$CTX/../../.." && pwd)"
+if [ -f "$REPO_ROOT/bridge/build_zip.py" ]; then
+  echo "==> regenerating Automatic-tab download: public/sasha-bridge.zip"
+  python3 "$REPO_ROOT/bridge/build_zip.py" "$CTX/public/sasha-bridge.zip" \
+    || echo "   (zip regen failed — shipping the committed copy)"
+fi
+
 # ── 0. SSH tunnel:  Mac localhost:$LOCAL_PORT → server registry :$REGISTRY_PORT ─
 # Bound to 0.0.0.0 so Docker Desktop's host.docker.internal can reach the forward
 # (loopback-only binds aren't always reachable from the Docker VM on macOS). 6100

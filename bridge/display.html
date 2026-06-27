@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Sasha Slides — Display</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0b0d12; overflow: hidden;
+    font-family: ui-sans-serif, system-ui, sans-serif; color: #e7ecf3; }
+  #viewport { position: fixed; inset: 0; display: grid; place-items: center; }
+  /* Native 1280x720 stage, scaled to fit — screenshots capture at native res. */
+  #stage { width: 1280px; height: 720px; background: #fff; color: #111;
+    position: relative; transform-origin: center; box-shadow: 0 10px 60px rgba(0,0,0,.6); }
+  .slide { position: absolute; inset: 0; display: none; border: 0; background: #fff; }
+  .slide.active { display: block; }
+  /* Idle / pairing overlay */
+  #overlay { position: fixed; inset: 0; background: #0b0d12; display: grid;
+    place-items: center; z-index: 10; }
+  #overlay.hidden { display: none; }
+  .card { width: min(560px, 92vw); background: #141822; border: 1px solid #232a36;
+    border-radius: 16px; padding: 28px; box-shadow: 0 20px 80px rgba(0,0,0,.5); }
+  .card h1 { font-size: 20px; margin: 0 0 6px; }
+  .muted { color: #8b95a5; font-size: 14px; line-height: 1.5; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: #d9534f; margin-right: 7px; vertical-align: middle; }
+  .dot.on { background: #3fb950; }
+  textarea { width: 100%; box-sizing: border-box; height: 92px; margin-top: 10px;
+    background: #0d1017; color: #cfd6e2; border: 1px solid #2a3140; border-radius: 10px;
+    font-family: ui-monospace, monospace; font-size: 12px; padding: 10px; resize: vertical; }
+  button { margin-top: 12px; background: #2f81f7; color: #fff; border: 0; border-radius: 10px;
+    padding: 10px 16px; font-size: 14px; cursor: pointer; }
+  button.secondary { background: #232a36; }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; color: #8b95a5; font-size: 13px; }
+</style>
+</head>
+<body>
+  <div id="viewport"><div id="stage"></div></div>
+
+  <div id="overlay">
+    <div class="card">
+      <h1><span id="dot" class="dot"></span><span id="state">Connecting…</span></h1>
+      <p class="muted" id="hint">Trying the local connection…</p>
+
+      <details id="manualBox">
+        <summary>Can't connect automatically? Pair manually (WebRTC)</summary>
+        <p class="muted" style="margin-top:10px">1. Copy this device's offer and paste it into the
+          <b>Manual</b> tab on the computer running Sasha Slides:</p>
+        <textarea id="offer" readonly placeholder="generating offer…"></textarea>
+        <button class="secondary" id="copyOffer">Copy offer</button>
+        <p class="muted" style="margin-top:14px">2. Paste the answer you got back here, then connect:</p>
+        <textarea id="answer" placeholder="paste answer blob…"></textarea>
+        <button id="connectManual">Connect</button>
+      </details>
+    </div>
+  </div>
+
+<script>
+const stage = document.getElementById('stage');
+const overlay = document.getElementById('overlay');
+const dot = document.getElementById('dot');
+const stateEl = document.getElementById('state');
+const hintEl = document.getElementById('hint');
+
+let slides = [];      // array of html strings
+let current = -1;
+
+function fit() {
+  const s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+  stage.style.transform = `scale(${s})`;
+}
+window.addEventListener('resize', fit); fit();
+
+const EMPTY = '<!doctype html><body style="margin:0;width:1280px;height:720px;display:grid;' +
+  'place-items:center;font:42px sans-serif;color:#9aa4b2">empty slide</body>';
+
+// Slides are full 1280x720 HTML documents, exactly what the html2slides renderer
+// consumes (see renderer/html2slides/browser/convert-core.ts loadIntoIframe). They
+// must load as documents in an iframe via srcdoc -- innerHTML'ing into a <div> drops
+// the <head>/<style> and the body{width:1280px} rules never apply.
+function renderDeck() {
+  stage.innerHTML = '';
+  slides.forEach((html, i) => {
+    const el = document.createElement('iframe');
+    el.className = 'slide' + (i === current ? ' active' : '');
+    el.setAttribute('sandbox', 'allow-same-origin allow-scripts');
+    el.srcdoc = html || EMPTY;
+    stage.appendChild(el);
+  });
+}
+
+function slideFrame(i) { return stage.children[i == null ? current : i]; }
+function slideDoc(i) { const f = slideFrame(i); return f && f.contentDocument; }
+
+// Wait for an iframe's document to finish laying out before reading/capturing it.
+function frameReady(frame, timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    (function poll() {
+      const d = frame && frame.contentDocument;
+      if (d && d.readyState === 'complete' && d.body) return resolve(d);
+      if (Date.now() - t0 > timeoutMs) return resolve(d || null);
+      setTimeout(poll, 30);
+    })();
+  });
+}
+
+function show(i) {
+  if (i < 0 || i >= slides.length) return;
+  current = i;
+  [...stage.children].forEach((el, idx) => el.classList.toggle('active', idx === current));
+}
+
+// Capture a slide to PNG, in-browser (no CDP — so it works on a phone/projector too).
+// The slide lives in a same-origin iframe; serialize its <style> + body into an SVG
+// foreignObject and rasterize. Reliable for self-contained slides (inline styles,
+// data:-URI images). External images can taint the canvas; we surface that as an error.
+async function capturePng(i) {
+  const frame = slideFrame(i);
+  if (!frame) throw new Error('no such slide');
+  const doc = await frameReady(frame);
+  if (!doc || !doc.body) throw new Error('slide not ready');
+  const styles = [...doc.querySelectorAll('style')].map((n) => n.outerHTML).join('');
+  const bg = getComputedStyle(doc.body).backgroundColor || '#fff';
+  const body = doc.body.innerHTML;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720">` +
+    `<foreignObject width="100%" height="100%">` +
+    `<div xmlns="http://www.w3.org/1999/xhtml" style="width:1280px;height:720px;background:${bg}">` +
+    `${styles}${body}</div></foreignObject></svg>`;
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  const img = new Image();
+  try {
+    await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('rasterize failed')); img.src = url; });
+    const canvas = document.createElement('canvas');
+    canvas.width = 1280; canvas.height = 720;
+    canvas.getContext('2d').drawImage(img, 0, 0);
+    return canvas.toDataURL('image/png');
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// ---- drawio round-trip via the vendored editor's JSON embed protocol ----
+// Opens /drawio in embed mode, seeds it with the diagram XML, and reads back the
+// edited {xml, png}. autosave=true exports immediately (non-interactive); otherwise
+// the user edits and clicks "Save & Close".
+function editDiagram(seedXml, autosave) {
+  return new Promise((resolve, reject) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:50;background:#0b0d12;display:flex;flex-direction:column';
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:8px;padding:8px;background:#141822';
+    const save = document.createElement('button'); save.textContent = 'Save & Close';
+    const cancel = document.createElement('button'); cancel.textContent = 'Cancel'; cancel.className = 'secondary';
+    bar.append(save, cancel);
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'flex:1;width:100%;border:0;background:#fff';
+    frame.src = '/drawio/?embed=1&proto=json&spin=1&libraries=1&noSaveBtn=1&noExitBtn=1';
+    overlay.append(bar, frame);
+    document.body.appendChild(overlay);
+
+    let settled = false;
+    const post = (o) => frame.contentWindow.postMessage(JSON.stringify(o), '*');
+    const cleanup = () => { window.removeEventListener('message', onMsg); overlay.remove(); };
+    function onMsg(ev) {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.event === 'init') {
+        post({ action: 'load', xml: seedXml || '', autosave: 1 });
+        if (autosave) setTimeout(() => post({ action: 'export', format: 'xmlpng', scale: 2 }), 400);
+      } else if (m.event === 'export') {
+        settled = true; cleanup(); resolve({ png: m.data, xml: m.xml });
+      } else if (m.event === 'exit' && !settled) {
+        cleanup(); reject(new Error('cancelled'));
+      }
+    }
+    window.addEventListener('message', onMsg);
+    save.onclick = () => post({ action: 'export', format: 'xmlpng', scale: 2 });
+    cancel.onclick = () => { cleanup(); reject(new Error('cancelled')); };
+  });
+}
+
+// Write an edited diagram back into a slide's HTML: update the paired image src and
+// the <script id="drawio-source"> XML (same contract as extract-dom.ts).
+function applyDiagram(html, xml, png) {
+  const d = new DOMParser().parseFromString(html || EMPTY, 'text/html');
+  let src = d.getElementById('drawio-source');
+  if (!src) {
+    src = d.createElement('script');
+    src.type = 'application/vnd.drawio+xml'; src.id = 'drawio-source';
+    d.body.appendChild(src);
+  }
+  src.textContent = xml || '';
+  let img = d.querySelector('[data-drawio]') || d.querySelector('img');
+  if (!img) { img = d.createElement('img'); img.setAttribute('data-drawio', ''); d.body.appendChild(img); }
+  if (png) img.setAttribute('src', png);
+  return '<!DOCTYPE html>\n' + d.documentElement.outerHTML;
+}
+
+// ---- command protocol (identical over WS or WebRTC) ----
+async function handle(cmd) {
+  const reply = { id: cmd.id, ok: true };
+  try {
+    switch (cmd.op) {
+      case 'add_slide': {
+        const at = (cmd.index == null) ? slides.length : cmd.index;
+        slides.splice(at, 0, cmd.html || '');
+        renderDeck(); show(at);
+        Object.assign(reply, { index: at, count: slides.length });
+        break;
+      }
+      case 'replace_slide': {
+        const at = (cmd.index == null) ? current : cmd.index;
+        if (at < 0 || at >= slides.length) throw new Error('no slide to replace');
+        slides[at] = cmd.html || '';
+        renderDeck(); show(at);
+        Object.assign(reply, { index: at, count: slides.length });
+        break;
+      }
+      case 'goto': show(cmd.index); reply.index = current; break;
+      case 'get_state':
+        Object.assign(reply, { count: slides.length, current,
+          slides: slides.map((_, i) => ({ index: i })) });
+        break;
+      case 'screenshot': reply.png = await capturePng(cmd.index); break;
+      case 'get_slide_html': {
+        const at = (cmd.index == null) ? current : cmd.index;
+        if (at < 0 || at >= slides.length) throw new Error('no such slide');
+        Object.assign(reply, { index: at, html: slides[at] });
+        break;
+      }
+      case 'edit_diagram': {
+        const at = (cmd.index == null) ? current : cmd.index;
+        if (at < 0 || at >= slides.length) throw new Error('no such slide');
+        let seed = cmd.xml || '';
+        if (!seed) { const s = slideDoc(at) && slideDoc(at).getElementById('drawio-source'); if (s) seed = s.textContent.trim(); }
+        const out = await editDiagram(seed, cmd.autosave !== false);
+        slides[at] = applyDiagram(slides[at], out.xml, out.png);
+        renderDeck(); show(at);
+        Object.assign(reply, { index: at, xml: out.xml });
+        break;
+      }
+      default: reply.ok = false; reply.error = 'unknown op: ' + cmd.op;
+    }
+  } catch (e) { reply.ok = false; reply.error = String(e && e.message || e); }
+  return reply;
+}
+
+let sendRaw = null;
+function onMessage(raw) {
+  let cmd; try { cmd = JSON.parse(raw); } catch { return; }
+  handle(cmd).then(r => sendRaw && sendRaw(JSON.stringify(r)));
+}
+function connected(kind) {
+  dot.classList.add('on');
+  stateEl.textContent = 'Connected (' + kind + ')';
+  overlay.classList.add('hidden');
+}
+function disconnected() {
+  dot.classList.remove('on');
+  stateEl.textContent = 'Disconnected';
+  overlay.classList.remove('hidden');
+}
+
+// ---- default transport: WebSocket to same origin (localhost or LAN-scanned) ----
+function tryWebSocket(timeoutMs = 1200) {
+  return new Promise((resolve, reject) => {
+    if (location.protocol === 'file:') return reject(new Error('file://'));
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}/ws`);
+    const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, timeoutMs);
+    ws.onopen = () => {
+      clearTimeout(timer);
+      sendRaw = (s) => ws.send(s);
+      connected('local');
+      resolve(ws);
+    };
+    ws.onmessage = (ev) => onMessage(ev.data);
+    ws.onclose = () => { sendRaw = null; disconnected(); };
+    ws.onerror = () => { clearTimeout(timer); reject(new Error('ws error')); };
+  });
+}
+
+// ---- backup transport: WebRTC, this page is the OFFERER ----
+async function setupWebRtc() {
+  hintEl.textContent = 'No local connection. Pair manually below.';
+  document.getElementById('manualBox').open = true;
+  const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  const ch = pc.createDataChannel('cmds');           // create BEFORE the offer
+  ch.onopen = () => { sendRaw = (s) => ch.send(s); connected('webrtc'); };
+  ch.onmessage = (ev) => onMessage(ev.data);
+  ch.onclose = () => { sendRaw = null; disconnected(); };
+  await pc.setLocalDescription(await pc.createOffer());
+  await new Promise((r) => {                          // wait for ICE gathering complete
+    if (pc.iceGatheringState === 'complete') return r();
+    pc.addEventListener('icegatheringstatechange',
+      () => pc.iceGatheringState === 'complete' && r());
+  });
+  const blob = btoa(JSON.stringify(pc.localDescription));
+  document.getElementById('offer').value = blob;
+  document.getElementById('connectManual').onclick = async () => {
+    const ans = document.getElementById('answer').value.trim();
+    if (!ans) return;
+    await pc.setRemoteDescription(JSON.parse(atob(ans)));
+  };
+}
+
+document.getElementById('copyOffer').onclick = () =>
+  navigator.clipboard.writeText(document.getElementById('offer').value);
+
+(async function start() {
+  try { await tryWebSocket(); }
+  catch { await setupWebRtc(); }
+})();
+</script>
+</body>
+</html>
