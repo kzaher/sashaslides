@@ -247,9 +247,9 @@ window.h2s.register(async (bridge) => {
   // thus a remote agent can collaborate on the SAME diagrams you edit in this
   // panel: list them, read their XML, and write new XML back (re-rendered). ──
   async function apiList() {
-    if (!inAddon) return mockItems().map((m, i) => ({ id: m.id, slide: i + 1, name: m.name, xml: m.xml }));
+    if (!inAddon) return mockItems().map((m, i) => ({ id: m.id, slide: i + 1, name: m.name, box: null, xml: m.xml }));
     const imgs = (await gsCall("listDeckImages")) || [];
-    return imgs.filter((x) => x.xml).map((x) => ({ id: x.id, slide: x.slideIndex || null, name: x.name, xml: x.xml }));
+    return imgs.filter((x) => x.xml).map((x) => ({ id: x.id, slide: x.slideIndex || null, name: x.name, box: x.box || null, xml: x.xml }));
   }
   async function apiGet(id) {
     const m = (await apiList()).find((x) => x.id === id);
@@ -285,12 +285,17 @@ window.h2s.register(async (bridge) => {
       document.body.appendChild(ifr);
     });
   }
-  async function apiSet(id, xml) {
+  // pos (optional): { slide, x, y, w, h } — slide is 1-based; x,y,w,h are NORMALIZED
+  // [0,1] slide coordinates. Omitted → keep existing frame (edit) or fit+center (new).
+  async function apiSet(id, xml, pos) {
     const out = await renderXmlToPng(xml || "");
-    if (inAddon) await gsCall("saveDiagram", { imageId: id || "", png: out.png, xml: out.xml });
+    const payload = { imageId: id || "", png: out.png, xml: out.xml };
+    if (pos) ["slide", "x", "y", "w", "h"].forEach((k) => { if (pos[k] != null) payload[k] = pos[k]; });
+    let res = { id: id || null };
+    if (inAddon) res = await gsCall("saveDiagram", payload);  // {ok, id, slide}
     else log("drawio (dev): rendered diagram (" + ((out.png || "").length) + " bytes); deck save stubbed");
     await detect(); // refresh the panel list so a manual editor sees the change
-    return { id: id || null };
+    return res;
   }
   bridge.drawio = { list: apiList, get: apiGet, set: apiSet, render: renderXmlToPng };
 

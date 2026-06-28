@@ -44,7 +44,7 @@ pass it with `--html-file` (slides are self-contained HTML at 1280×720).
 .claude/skills/sasha-bridge.sh diagrams     --out-dir /tmp/diagrams       # + write each XML to a file
 .claude/skills/sasha-bridge.sh get-diagram  --id <ID> --out-xml /tmp/d.xml
 .claude/skills/sasha-bridge.sh edit-diagram --id <ID> --xml-file /tmp/d.xml   # update a deck diagram
-.claude/skills/sasha-bridge.sh edit-diagram --id "" --xml-file /tmp/new.xml   # add a NEW diagram
+.claude/skills/sasha-bridge.sh edit-diagram --id "" --xml-file /tmp/new.xml --slide 3 --x .1 --y .15 --w .8 --h .7
 .claude/skills/sasha-bridge.sh state
 ```
 
@@ -75,12 +75,22 @@ deck (a PNG plus an off-canvas XML source box). The user can edit them in the
 you can read/edit the **same** diagrams over the API — so you collaborate on one
 shared diagram:
 
-- `diagrams` lists every diagram: `{id, slide, name, xml}`. `--out-dir` writes
+- `diagrams` lists every diagram: `{id, slide, name, box, xml}` where `box` is the
+  current frame in normalized `[0,1]` slide coords `{x,y,w,h}`. `--out-dir` writes
   each XML to `diagram_<id>.drawio.xml` and keeps the rest inline.
 - `get-diagram --id <ID>` returns one diagram's drawio XML (`--out-xml` to save).
 - `edit-diagram --id <ID> --xml-file f.xml` replaces a diagram's XML; the sidebar
-  re-renders the PNG and updates the deck. `--id ""` adds a NEW diagram to the
-  current slide. (`screenshot` first to see each slide's `diagrams` and their ids.)
+  re-renders the PNG and updates the deck. `--id ""` adds a NEW diagram.
+  (`screenshot` first to see each slide's `diagrams` and their ids.)
+
+**Placement** (Slides). All coordinates are NORMALIZED `[0,1]` (fraction of the
+slide), so they're resolution-independent:
+- `--slide N` — which slide a NEW diagram goes on (1-based; default = current).
+- `--x --y` — top-left; `--w --h` — size. Omit them and a new diagram is fit to
+  ~80% of the slide preserving aspect and centered; an existing one keeps its
+  frame unless you pass coords (then it moves/resizes). The reply reports the
+  `slide` it landed on. Only the image moves — the off-canvas XML source box below
+  the slide is left in place.
 
 The `id` is the diagram's image object id from `diagrams`/`screenshot`. Edits flow
 both ways live: a diagram you write appears in the user's panel, and one they edit
