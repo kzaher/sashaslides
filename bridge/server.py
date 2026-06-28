@@ -73,6 +73,7 @@ def start_turn() -> None:
         return
     args = [
         binp, "-n", "--no-tls", "--no-dtls", "--no-cli",
+        "--log-file=stdout", "--simple-log", "--verbose",  # populate /tmp/coturn.log
         f"--listening-port={TURN_PORT}", "--listening-ip=0.0.0.0",
         # Both peers' relays live on THIS container, so relay over loopback and allow
         # it — coturn denies loopback/local peers by default, which breaks same-host
