@@ -22,6 +22,15 @@ window.h2s.register(async (bridge) => {
   const frame = $("#drawio-frame");
   const statusEl = $("#drawio-status");
 
+  // Render-resolution picker — persisted in localStorage, default 4×. Drives every
+  // render path (inline editor, editor tab, and agent edits that don't pass --scale).
+  const scaleEl = $("#drawio-scale");
+  if (scaleEl) {
+    try { const sv = localStorage.getItem("sasha.drawioScale"); if (sv) scaleEl.value = sv; } catch (e) { /* private mode */ }
+    scaleEl.addEventListener("change", () => { try { localStorage.setItem("sasha.drawioScale", scaleEl.value); } catch (e) {} });
+  }
+  function currentScale() { const v = scaleEl ? Number(scaleEl.value) : 0; return v > 0 ? v : 4; }
+
   // 4) reflect server capability in the badge
   const available = !!(bridge.config && bridge.config.drawioAvailable);
   statusEl.textContent = available ? "self-hosted ✓" : "editor unavailable";
@@ -126,8 +135,8 @@ window.h2s.register(async (bridge) => {
     if (msg.event === "init") {
       post({ action: "load", xml: pending ? pending.xml : "", autosave: 1 });
     } else if (msg.event === "save") {
-      // user hit save inside the editor → ask for a high-res PNG with XML embedded
-      post({ action: "export", format: "xmlpng", scale: 4, spin: "Exporting…" });
+      // user hit save inside the editor → ask for a PNG with XML embedded at the chosen scale
+      post({ action: "export", format: "xmlpng", scale: currentScale(), spin: "Exporting…" });
     } else if (msg.event === "export") {
       onExport(msg.data);
     } else if (msg.event === "exit") {
@@ -199,7 +208,7 @@ window.h2s.register(async (bridge) => {
 
   function openInTab(xml, imageId) {
     const nonce = "e" + (++nonceSeq) + "-" + Math.random().toString(36).slice(2, 9);
-    pendingEdits[nonce] = { xml: xml || "", imageId: imageId || "" };
+    pendingEdits[nonce] = { xml: xml || "", imageId: imageId || "", scale: currentScale() };
     const w = window.open("/edit.html#" + nonce, "_blank");
     log(w
       ? "drawio: editor opened in a new tab. Edit → Save & Close; keep THIS sidebar open — the deck updates when you save."
@@ -218,7 +227,7 @@ window.h2s.register(async (bridge) => {
       const pend = pendingEdits[m.nonce];
       if (m.type === "drawio-edit-ready") {
         if (!pend) return;                                        // unknown / expired nonce
-        try { ev.source.postMessage({ type: "drawio-seed", nonce: m.nonce, imageId: pend.imageId, xml: pend.xml }, ev.origin); } catch (e) {}
+        try { ev.source.postMessage({ type: "drawio-seed", nonce: m.nonce, imageId: pend.imageId, xml: pend.xml, scale: pend.scale }, ev.origin); } catch (e) {}
       } else if (m.type === "drawio-save") {
         log("drawio: received save from the editor tab — writing to the deck…");
         try {
@@ -291,7 +300,7 @@ window.h2s.register(async (bridge) => {
   // scale is the drawio render multiplier (default 4× for a crisp PNG).
   async function apiSet(id, xml, opts) {
     opts = opts || {};
-    const out = await renderXmlToPng(xml || "", opts.scale);
+    const out = await renderXmlToPng(xml || "", opts.scale || currentScale());
     const payload = { imageId: id || "", png: out.png, xml: out.xml };
     ["slide", "x", "y", "w", "h"].forEach((k) => { if (opts[k] != null) payload[k] = opts[k]; });
     let res = { id: id || null };

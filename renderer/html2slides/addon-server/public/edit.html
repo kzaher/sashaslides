@@ -37,7 +37,7 @@
   const setMsg = (t) => { $("#msg").textContent = t || ""; };
   const frame = $("#f"), saveBtn = $("#saveBtn");
   const nonce = location.hash.slice(1);     // correlation id minted by the sidebar
-  let seedXml = "", imageId = "", saving = false, ready = false, booted = false;
+  let seedXml = "", imageId = "", scale = 4, saving = false, ready = false, booted = false;
 
   function show(t, color) {
     $("#f").style.display = "none";
@@ -61,7 +61,7 @@
     // (a) seed reply from the sidebar (an object, from our opener)
     if (m && typeof m === "object" && m.type === "drawio-seed" && m.nonce === nonce && ev.source === window.opener) {
       if (booted) return;
-      seedXml = m.xml || ""; imageId = m.imageId || "";
+      seedXml = m.xml || ""; imageId = m.imageId || ""; scale = Number(m.scale) > 0 ? Number(m.scale) : 4;
       booted = true; clearInterval(askIv);
       frame.src = "/drawio/?embed=1&proto=json&spin=1&libraries=1&noSaveBtn=1&saveAndExit=0&noExitBtn=1";
       setMsg("loading editor…");
@@ -92,7 +92,7 @@
   saveBtn.addEventListener("click", () => {
     if (!ready || saving) return;
     saving = true; saveBtn.disabled = true; setMsg("exporting…");
-    toDrawio({ action: "export", format: "xmlpng", scale: 4, spin: "Exporting…" });
+    toDrawio({ action: "export", format: "xmlpng", scale: scale, spin: "Exporting…" });
   });
   $("#cancelBtn").addEventListener("click", () => window.close());
 
