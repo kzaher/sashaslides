@@ -126,8 +126,8 @@ window.h2s.register(async (bridge) => {
     if (msg.event === "init") {
       post({ action: "load", xml: pending ? pending.xml : "", autosave: 1 });
     } else if (msg.event === "save") {
-      // user hit save inside the editor → ask for a PNG with XML embedded
-      post({ action: "export", format: "xmlpng", spin: "Exporting…" });
+      // user hit save inside the editor → ask for a high-res PNG with XML embedded
+      post({ action: "export", format: "xmlpng", scale: 4, spin: "Exporting…" });
     } else if (msg.event === "export") {
       onExport(msg.data);
     } else if (msg.event === "exit") {
@@ -257,7 +257,8 @@ window.h2s.register(async (bridge) => {
   }
   // Render drawio XML → xmlpng headlessly via a hidden editor iframe (no UI), the
   // same embed protocol the inline editor uses. Resolves {png, xml}.
-  function renderXmlToPng(xml) {
+  function renderXmlToPng(xml, scale) {
+    scale = scale || 4;  // 1× is blurry; 4× → ~2048px after Google's import cap
     return new Promise((resolve, reject) => {
       const ifr = document.createElement("iframe");
       ifr.style.cssText = "position:fixed;left:-10000px;top:0;width:1280px;height:720px;border:0";
@@ -271,7 +272,7 @@ window.h2s.register(async (bridge) => {
       };
       // Ask for the PNG once — drawio doesn't reliably emit a `load` event, so we
       // fire export both on `load` (if it comes) and a short fallback after `init`.
-      const requestExport = () => { if (exportSent) return; exportSent = true; post({ action: "export", format: "xmlpng" }); };
+      const requestExport = () => { if (exportSent) return; exportSent = true; post({ action: "export", format: "xmlpng", scale: scale }); };
       const onMsg = (ev) => {
         if (ev.source !== ifr.contentWindow) return;
         let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
@@ -285,12 +286,14 @@ window.h2s.register(async (bridge) => {
       document.body.appendChild(ifr);
     });
   }
-  // pos (optional): { slide, x, y, w, h } — slide is 1-based; x,y,w,h are NORMALIZED
-  // [0,1] slide coordinates. Omitted → keep existing frame (edit) or fit+center (new).
-  async function apiSet(id, xml, pos) {
-    const out = await renderXmlToPng(xml || "");
+  // opts (optional): { slide, x, y, w, h, scale }. slide is 1-based; x,y,w,h are
+  // NORMALIZED [0,1] slide coords (omitted → keep frame on edit / fit+center on new);
+  // scale is the drawio render multiplier (default 4× for a crisp PNG).
+  async function apiSet(id, xml, opts) {
+    opts = opts || {};
+    const out = await renderXmlToPng(xml || "", opts.scale);
     const payload = { imageId: id || "", png: out.png, xml: out.xml };
-    if (pos) ["slide", "x", "y", "w", "h"].forEach((k) => { if (pos[k] != null) payload[k] = pos[k]; });
+    ["slide", "x", "y", "w", "h"].forEach((k) => { if (opts[k] != null) payload[k] = opts[k]; });
     let res = { id: id || null };
     if (inAddon) res = await gsCall("saveDiagram", payload);  // {ok, id, slide}
     else log("drawio (dev): rendered diagram (" + ((out.png || "").length) + " bytes); deck save stubbed");
