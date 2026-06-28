@@ -91,6 +91,9 @@ slide), so they're resolution-independent:
   frame unless you pass coords (then it moves/resizes). The reply reports the
   `slide` it landed on. Only the image moves — the off-canvas XML source box below
   the slide is left in place.
+- `--scale N` — drawio render resolution (default **4×**, already crisp). Google
+  downsamples imported images to ~2048px, so 4× is effectively the useful ceiling;
+  going higher won't store more pixels.
 
 The `id` is the diagram's image object id from `diagrams`/`screenshot`. Edits flow
 both ways live: a diagram you write appears in the user's panel, and one they edit

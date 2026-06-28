@@ -138,7 +138,7 @@ def cmd_edit_diagram(args) -> int:
                                      # reserves "id" for request correlation (server.py).
     if args.index is not None:
         cmd["index"] = args.index    # display.html mode
-    for k in ("slide", "x", "y", "w", "h"):  # placement (Slides): slide 1-based; x,y,w,h in [0,1]
+    for k in ("slide", "x", "y", "w", "h", "scale"):  # placement (1-based slide; x,y,w,h in [0,1]); scale = render res
         v = getattr(args, k, None)
         if v is not None:
             cmd[k] = v
@@ -235,6 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--y", type=float, default=None, help="Slides: top, normalized 0..1")
     e.add_argument("--w", type=float, default=None, help="Slides: width, normalized 0..1")
     e.add_argument("--h", type=float, default=None, help="Slides: height, normalized 0..1")
+    e.add_argument("--scale", type=float, default=None, help="drawio render scale (default 4×; higher = sharper)")
     e.add_argument("--interactive", action="store_true",
                    help="open the editor and wait for the user to Save & Close")
     e.add_argument("--out-xml", help="write the resulting diagram XML here")
