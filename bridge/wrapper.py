@@ -134,7 +134,8 @@ def cmd_screenshot(args) -> int:
 def cmd_edit_diagram(args) -> int:
     cmd = {"op": "edit_diagram", "autosave": not args.interactive}
     if getattr(args, "id", None) is not None:
-        cmd["id"] = args.id          # Google Slides mode: diagram object id ("" = new)
+        cmd["diagram_id"] = args.id  # Slides diagram id ("" = new). NOT "id": the bridge
+                                     # reserves "id" for request correlation (server.py).
     if args.index is not None:
         cmd["index"] = args.index    # display.html mode
     for k in ("slide", "x", "y", "w", "h"):  # placement (Slides): slide 1-based; x,y,w,h in [0,1]
@@ -171,7 +172,8 @@ def cmd_diagrams(args) -> int:
 
 
 def cmd_get_diagram(args) -> int:
-    res = _post(args.port, "/command", {"op": "get_diagram", "id": args.id}, timeout=60.0)
+    # diagram id travels as "diagram_id" (the bridge reserves "id" for correlation)
+    res = _post(args.port, "/command", {"op": "get_diagram", "diagram_id": args.id}, timeout=60.0)
     if res.get("ok") and args.out_xml and res.get("xml"):
         with open(args.out_xml, "w", encoding="utf-8") as fh:
             fh.write(res["xml"])
