@@ -169,10 +169,27 @@
         ch.onopen = () => { if (iceTimer) clearTimeout(iceTimer); setStatus("connected ✓"); log("✓ data channel open — agent connected (webrtc)"); };
         ch.onclose = () => { setStatus("disconnected"); log("data channel closed"); };
         ch.onerror = (e) => log("data channel error: " + ((e && e.message) || e));
+        // WebRTC data channels cap message size (~64KB), so chunk big replies
+        // (screenshot ranges) into {__chunk} frames; reassemble incoming chunks.
+        const DC_CHUNK = 16000, rx = {};
+        const dcSend = (str) => {
+          if (str.length <= DC_CHUNK) { ch.send(str); return; }
+          const id = Math.random().toString(36).slice(2, 10), n = Math.ceil(str.length / DC_CHUNK);
+          for (let i = 0; i < n; i++)
+            ch.send(JSON.stringify({ __chunk: 1, id, i, n, d: str.slice(i * DC_CHUNK, (i + 1) * DC_CHUNK) }));
+        };
         ch.onmessage = async (ev) => {
           let cmd; try { cmd = JSON.parse(ev.data); } catch { return; }
+          if (cmd && cmd.__chunk) {
+            const b = rx[cmd.id] || (rx[cmd.id] = { n: cmd.n, parts: {} });
+            b.parts[cmd.i] = cmd.d;
+            if (Object.keys(b.parts).length < b.n) return;
+            let full = ""; for (let i = 0; i < b.n; i++) full += b.parts[i];
+            delete rx[cmd.id];
+            try { cmd = JSON.parse(full); } catch { return; }
+          }
           const r = await handleCommand(cmd);
-          try { ch.send(JSON.stringify(r)); } catch (_) {}
+          try { dcSend(JSON.stringify(r)); } catch (_) {}
         };
 
         const mine = pc;

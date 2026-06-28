@@ -33,6 +33,13 @@ from aiohttp import WSMsgType, web
 HERE = Path(__file__).resolve().parent
 DEFAULT_PORT = int(os.environ.get("SASHA_BRIDGE_PORT", "8787"))
 
+# WebRTC data channels cap per-message size (~64KB negotiated), so large replies
+# (e.g. screenshot PNGs / multi-slide ranges) must be split. Messages longer than
+# this are sent as {"__chunk":1,"id","i","n","d"} frames and reassembled by the
+# peer. WebSocket (Local device) has no such cap and sends whole. Keep well under
+# the negotiated limit.
+DC_CHUNK = 16000
+
 # ── WebRTC behind Docker/NAT ──────────────────────────────────────────────────
 # aiortc/aioice give NO way to pin the ICE UDP port (host candidates bind to port
 # 0 = random) or to advertise a host-reachable address. So when the bridge runs in
@@ -335,13 +342,34 @@ async def pair(request: web.Request) -> web.Response:
 
         @pc.on("datachannel")
         def on_datachannel(channel) -> None:  # noqa: ANN001
+            rx: dict = {}  # reassembly buffers: msgid -> {"n", "parts"}
+
             def send_raw(s: str) -> None:
-                channel.send(s)
+                if len(s) <= DC_CHUNK:
+                    channel.send(s)
+                    return
+                mid = uuid.uuid4().hex[:8]
+                n = (len(s) + DC_CHUNK - 1) // DC_CHUNK
+                for i in range(n):
+                    channel.send(json.dumps(
+                        {"__chunk": 1, "id": mid, "i": i, "n": n, "d": s[i * DC_CHUNK:(i + 1) * DC_CHUNK]},
+                        separators=(",", ":")))
 
             display.attach(send_raw, "webrtc")
 
             @channel.on("message")
             def on_message(message) -> None:  # noqa: ANN001
+                if isinstance(message, str) and message.startswith('{"__chunk"'):
+                    try:
+                        c = json.loads(message)
+                    except Exception:
+                        return
+                    b = rx.setdefault(c["id"], {"n": c["n"], "parts": {}})
+                    b["parts"][c["i"]] = c["d"]
+                    if len(b["parts"]) == b["n"]:
+                        rx.pop(c["id"], None)
+                        display.on_message("".join(b["parts"][i] for i in range(b["n"])))
+                    return
                 display.on_message(message)
 
             @channel.on("close")
