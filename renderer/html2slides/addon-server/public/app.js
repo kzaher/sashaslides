@@ -146,9 +146,11 @@
         } else if (cmd.op === "edit_diagram") {
           if (!inAddon) throw new Error("diagrams need the Slides add-on");
           if (!bridge.drawio) throw new Error("diagrams feature still loading — retry in a moment");
-          const r = await bridge.drawio.set(cmd.id || "", cmd.xml || "");
-          reply.id = r.id;
-          log("edit_diagram: " + (cmd.id ? "updated " + cmd.id : "created new diagram"));
+          const pos = {};
+          ["slide", "x", "y", "w", "h"].forEach((k) => { if (cmd[k] != null) pos[k] = cmd[k]; });
+          const r = await bridge.drawio.set(cmd.id || "", cmd.xml || "", pos);
+          reply.id = (r && r.id) || null; if (r && r.slide) reply.slide = r.slide;
+          log("edit_diagram: " + (cmd.id ? "updated " + cmd.id : "created new diagram") + (r && r.slide ? " on slide " + r.slide : ""));
         } else {
           reply.ok = false; reply.error = "op not supported in Slides mode: " + cmd.op;
         }

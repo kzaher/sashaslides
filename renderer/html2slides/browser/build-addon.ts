@@ -388,23 +388,28 @@ function slideXmlMap_(presId, auth) {
  *  convert-pptx-lib "Workstream E"). We pair that XML with the slide's diagram
  *  image so the sidebar can list + edit it. Returns [{id, name, dataUrl, xml}]. */
 function listDeckImages() {
-  var slides = SlidesApp.getActivePresentation().getSlides();
+  var pres = SlidesApp.getActivePresentation();
+  var slides = pres.getSlides();
+  var pw = pres.getPageWidth(), ph = pres.getPageHeight();
   var out = [];
   for (var s = 0; s < slides.length; s++) {
     var xml = findDrawioXmlOnSlide_(slides[s]);
     if (!xml) continue;
     var images = slides[s].getImages();
     var img = images.length ? images[0] : null;
-    var dataUrl = '';
+    var dataUrl = '', box = null;
     if (img) {
       var blob = img.getBlob();
       dataUrl = 'data:' + (blob.getContentType() || 'image/png') + ';base64,' + Utilities.base64Encode(blob.getBytes());
+      // current frame as NORMALIZED [0,1] slide coords, so the agent can reason about layout
+      box = { x: img.getLeft() / pw, y: img.getTop() / ph, w: img.getWidth() / pw, h: img.getHeight() / ph };
     }
     out.push({
       id: img ? img.getObjectId() : slides[s].getObjectId(),
       slideIndex: s + 1,
       name: 'Diagram \\u2014 slide ' + (s + 1),
       dataUrl: dataUrl,
+      box: box,
       xml: xml,
     });
   }
@@ -559,20 +564,51 @@ function showDrawioDialog(payload) {
  *  payload: { imageId?, png (dataUrl), xml }. */
 function saveDiagram(payload) {
   payload = payload || {};
+  var pres = SlidesApp.getActivePresentation();
   var blob = dataUrlToBlob_(payload.png || '', 'diagram.png');
   var xml = payload.xml || '';
   var imageId = payload.imageId || '';
+  var hasPos = (payload.x != null || payload.y != null || payload.w != null || payload.h != null);
   if (imageId) {
     var entry = findImageEntry_(imageId);
     if (!entry) throw new Error('image not found: ' + imageId);
     entry.image.replace(blob);
-    if (xml) updateOrCreateDrawioBox_(entry.slide, xml);
-    return { ok: true, id: imageId };
+    if (xml) updateOrCreateDrawioBox_(entry.slide, xml);   // keep the off-canvas XML box in sync
+    if (hasPos) placeDiagram_(pres, entry.image, payload); // only move/resize when asked
+    return { ok: true, id: imageId, slide: slideIndexOf_(pres, entry.slide) };
   }
-  var slide = currentSlide_(SlidesApp.getActivePresentation());
+  // new diagram: target slide by 1-based index, else the current slide
+  var slides = pres.getSlides();
+  var slide = (payload.slide && payload.slide >= 1 && payload.slide <= slides.length)
+    ? slides[payload.slide - 1] : currentSlide_(pres);
   var image = slide.insertImage(blob);
   if (xml) updateOrCreateDrawioBox_(slide, xml);
-  return { ok: true, id: image.getObjectId() };
+  placeDiagram_(pres, image, payload);                     // fit/center by default, or explicit
+  return { ok: true, id: image.getObjectId(), slide: slideIndexOf_(pres, slide) };
+}
+
+/** Position/size a diagram image. x,y,w,h are NORMALIZED slide coordinates in
+ *  [0,1] (x,y = top-left fraction of the page; w,h = fraction of page size). With
+ *  none given, fit the image to ~80% of the page preserving its aspect and center
+ *  it (sane default vs the raw native size, which overflows the slide). Any
+ *  provided field overrides. Only the image moves — the off-canvas XML source box
+ *  below the slide is left untouched. */
+function placeDiagram_(pres, image, p) {
+  var pw = pres.getPageWidth(), ph = pres.getPageHeight();
+  var natW = image.getWidth(), natH = image.getHeight();
+  var fit = Math.min(pw * 0.8 / natW, ph * 0.8 / natH);
+  var w = (p.w != null) ? p.w * pw : natW * fit;
+  var h = (p.h != null) ? p.h * ph : natH * fit;
+  image.setWidth(w).setHeight(h);
+  image.setLeft((p.x != null) ? p.x * pw : (pw - w) / 2);
+  image.setTop((p.y != null) ? p.y * ph : (ph - h) / 2);
+}
+
+/** 1-based index of a slide in the deck (for reporting back where it landed). */
+function slideIndexOf_(pres, slide) {
+  var slides = pres.getSlides(), id = slide.getObjectId();
+  for (var i = 0; i < slides.length; i++) if (slides[i].getObjectId() === id) return i + 1;
+  return null;
 }
 
 /** Like findImageById_ but also returns the slide the image is on. */

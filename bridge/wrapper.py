@@ -137,6 +137,10 @@ def cmd_edit_diagram(args) -> int:
         cmd["id"] = args.id          # Google Slides mode: diagram object id ("" = new)
     if args.index is not None:
         cmd["index"] = args.index    # display.html mode
+    for k in ("slide", "x", "y", "w", "h"):  # placement (Slides): slide 1-based; x,y,w,h in [0,1]
+        v = getattr(args, k, None)
+        if v is not None:
+            cmd[k] = v
     if args.xml_file:
         cmd["xml"] = open(args.xml_file, encoding="utf-8").read()
     elif args.xml:
@@ -224,6 +228,11 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--index", type=int, default=None, help="display.html mode; default: current slide")
     e.add_argument("--xml", help="seed drawio XML")
     e.add_argument("--xml-file", help="seed drawio XML from file")
+    e.add_argument("--slide", type=int, default=None, help="Slides: target slide for a NEW diagram (1-based)")
+    e.add_argument("--x", type=float, default=None, help="Slides: left, normalized 0..1")
+    e.add_argument("--y", type=float, default=None, help="Slides: top, normalized 0..1")
+    e.add_argument("--w", type=float, default=None, help="Slides: width, normalized 0..1")
+    e.add_argument("--h", type=float, default=None, help="Slides: height, normalized 0..1")
     e.add_argument("--interactive", action="store_true",
                    help="open the editor and wait for the user to Save & Close")
     e.add_argument("--out-xml", help="write the resulting diagram XML here")
