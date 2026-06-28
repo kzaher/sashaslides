@@ -73,12 +73,12 @@
     <label class="hint" style="font-weight:600;flex-direction:row;align-items:center;gap:8px">
       Connection
       <select id="connect-method">
-        <option value="webrtc">WebRTC (any machine/network)</option>
         <option value="local">Local device (this machine)</option>
+        <option value="webrtc">WebRTC (other machine / network)</option>
       </select>
     </label>
 
-    <div class="cmethod" id="cmethod-webrtc">
+    <div class="cmethod" id="cmethod-webrtc" hidden>
       <label class="hint" style="font-weight:600;margin-top:4px">① Copy this connection request:</label>
       <textarea id="rtc-offer" readonly rows="3" placeholder="generating…"></textarea>
       <button id="rtc-copy">Copy request</button>
@@ -95,8 +95,10 @@
         Stuck on “connecting…” in <b>Docker</b>? Use the Docker install method in step&nbsp;1.</p>
     </div>
 
-    <div class="cmethod" id="cmethod-local" hidden>
-      <p class="hint">Bridge running on <b>this</b> computer? Connect directly — no copy-paste.</p>
+    <div class="cmethod" id="cmethod-local">
+      <p class="hint">Bridge running on <b>this</b> computer? Connect directly — no copy-paste.
+        Best choice when the bridge is on the same Mac (incl. Docker Desktop), since it
+        rides the reliable TCP port — WebRTC needs UDP, which Docker Desktop doesn't forward well.</p>
       <button id="local-connect" class="primary">Connect to localhost:8787</button>
       <p class="hint">If your browser blocks it (an https page reaching <code>http://localhost</code>),
         switch to <b>WebRTC</b> above — that always works.</p>
