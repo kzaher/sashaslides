@@ -13,6 +13,12 @@
   <button class="tab" data-tab="manual">Manual</button>
 </nav>
 
+<!-- Authorization status — checked on startup; insert/screenshot need Drive+Slides. -->
+<div id="auth-banner" class="auth" hidden>
+  <span id="auth-msg">checking authorization…</span>
+  <a id="auth-link" class="authlink" target="_blank" rel="noopener" hidden>Reauthorize</a>
+</div>
+
 <!-- ══ AUTOMATIC ═══ let Claude build slides over the local bridge ══ -->
 <div class="panel" id="panel-auto">
   <section>

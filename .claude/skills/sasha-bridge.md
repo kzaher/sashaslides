@@ -62,6 +62,12 @@ ranges modest (the WebRTC data channel caps message size — prefer the Local
 device connection for screenshots). `edit-diagram` needs the bridge running from
 the repo (so `/drawio` is served).
 
+If a deck op fails with `PERMISSION_DENIED` / "server error … reading from
+storage", the user's Google Drive/Slides authorization is stale (Apps Script
+won't re-prompt on its own). Tell them to click **Reauthorize** in the
+SashaSlides sidebar, approve, reload, and retry — `add_slide` now reports this as
+`ok:false` instead of a false success.
+
 ## Workflow guidance
 
 - After `add`/`replace`, take a `screenshot` and Read it to confirm the render
