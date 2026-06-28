@@ -138,45 +138,64 @@
 
     // ── WebRTC (this sidebar is the offerer) ──
     const offerEl = $("#rtc-offer"), answerEl = $("#rtc-answer");
-    const connectBtn = $("#rtc-connect"), copyBtn = $("#rtc-copy");
+    const connectBtn = $("#rtc-connect"), copyBtn = $("#rtc-copy"), turnChk = $("#rtc-turn");
     if (offerEl && connectBtn) {
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
       const cands = (sdp) => (sdp || "").split(/\r?\n/).filter((l) => l.indexOf("candidate:") >= 0);
-      let iceTimer = null;
+      let pc = null, iceTimer = null;
 
-      pc.oniceconnectionstatechange = () => {
-        log("ICE: " + pc.iceConnectionState);
-        if (pc.iceConnectionState === "failed")
-          log("✗ ICE FAILED — your browser can't reach the bridge's advertised address. " +
-              "In Docker, use the Docker install method (publishes the UDP port + sets SASHA_RTC_PORT/HOST_IP).");
-      };
-      pc.onconnectionstatechange = () => log("conn: " + pc.connectionState);
-      pc.onicegatheringstatechange = () => log("ICE gathering: " + pc.iceGatheringState);
-      pc.onicecandidateerror = (e) =>
-        log("ICE candidate error: " + (e.errorText || ("code " + e.errorCode)) + (e.url ? " [" + e.url + "]" : ""));
+      // (Re)build the peer + offer. With TURN on, force relay-only through the local
+      // coturn (turn:127.0.0.1:3478/tcp) so it works through Docker Desktop's NAT.
+      function buildPeer() {
+        if (pc) { try { pc.close(); } catch (_) {} }
+        const useTurn = !!(turnChk && turnChk.checked);
+        pc = new RTCPeerConnection(useTurn
+          ? { iceServers: [{ urls: "turn:127.0.0.1:3478?transport=tcp", username: "sasha", credential: "sasha-bridge" }], iceTransportPolicy: "relay" }
+          : { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+        if (useTurn) log("WebRTC: relaying through TURN (turn:127.0.0.1:3478?transport=tcp)");
 
-      const ch = pc.createDataChannel("cmds");
-      ch.onopen = () => { if (iceTimer) clearTimeout(iceTimer); setStatus("connected ✓"); log("✓ data channel open — agent connected (webrtc)"); };
-      ch.onclose = () => { setStatus("disconnected"); log("data channel closed"); };
-      ch.onerror = (e) => log("data channel error: " + ((e && e.message) || e));
-      ch.onmessage = async (ev) => {
-        let cmd; try { cmd = JSON.parse(ev.data); } catch { return; }
-        const r = await handleCommand(cmd);
-        try { ch.send(JSON.stringify(r)); } catch (_) {}
-      };
+        pc.oniceconnectionstatechange = () => {
+          log("ICE: " + pc.iceConnectionState);
+          if (pc.iceConnectionState === "failed")
+            log(useTurn
+              ? "✗ ICE FAILED with TURN — is coturn running in the bridge container (SASHA_TURN=1) and :3478/tcp published?"
+              : "✗ ICE FAILED — browser can't reach the bridge's address (Docker UDP). Try the TURN checkbox, or use Local device.");
+        };
+        pc.onconnectionstatechange = () => log("conn: " + pc.connectionState);
+        pc.onicegatheringstatechange = () => log("ICE gathering: " + pc.iceGatheringState);
+        pc.onicecandidateerror = (e) =>
+          log("ICE candidate error: " + (e.errorText || ("code " + e.errorCode)) + (e.url ? " [" + e.url + "]" : ""));
 
-      (async () => {
-        try {
-          await pc.setLocalDescription(await pc.createOffer());
-          await new Promise((r) => {
-            if (pc.iceGatheringState === "complete") return r();
-            pc.addEventListener("icegatheringstatechange",
-              () => pc.iceGatheringState === "complete" && r());
-          });
-          offerEl.value = btoa(JSON.stringify(pc.localDescription));
-          cands(pc.localDescription.sdp).forEach((l) => log("local " + l.replace(/^a=/, "")));
-        } catch (e) { setStatus("error"); log("offer error: " + e.message); }
-      })();
+        const ch = pc.createDataChannel("cmds");
+        ch.onopen = () => { if (iceTimer) clearTimeout(iceTimer); setStatus("connected ✓"); log("✓ data channel open — agent connected (webrtc)"); };
+        ch.onclose = () => { setStatus("disconnected"); log("data channel closed"); };
+        ch.onerror = (e) => log("data channel error: " + ((e && e.message) || e));
+        ch.onmessage = async (ev) => {
+          let cmd; try { cmd = JSON.parse(ev.data); } catch { return; }
+          const r = await handleCommand(cmd);
+          try { ch.send(JSON.stringify(r)); } catch (_) {}
+        };
+
+        const mine = pc;
+        (async () => {
+          try {
+            await mine.setLocalDescription(await mine.createOffer());
+            await new Promise((r) => {
+              if (mine.iceGatheringState === "complete") return r();
+              mine.addEventListener("icegatheringstatechange",
+                () => mine.iceGatheringState === "complete" && r());
+            });
+            if (mine !== pc) return; // a newer peer superseded this one
+            offerEl.value = btoa(JSON.stringify(mine.localDescription));
+            cands(mine.localDescription.sdp).forEach((l) => log("local " + l.replace(/^a=/, "")));
+          } catch (e) { setStatus("error"); log("offer error: " + e.message); }
+        })();
+      }
+
+      if (turnChk) {
+        if (lsGet("sasha.useTurn") === "1") turnChk.checked = true;
+        turnChk.onchange = () => { lsSet("sasha.useTurn", turnChk.checked ? "1" : "0"); setStatus("not connected"); buildPeer(); };
+      }
+      buildPeer();
 
       const copy = () => {
         offerEl.select();
@@ -192,7 +211,7 @@
         catch (e) { setStatus("bad answer"); log("answer decode failed: " + e.message); return; }
         const rc = cands(ans.sdp);
         rc.forEach((l) => log("remote " + l.replace(/^a=/, "")));
-        if (!rc.length) log("⚠ the answer has NO ICE candidate — the bridge gathered none (Docker VM?). Use the Docker install method.");
+        if (!rc.length && !(turnChk && turnChk.checked)) log("⚠ the answer has NO ICE candidate — the bridge gathered none (Docker VM?). Try the TURN checkbox.");
         try {
           await pc.setRemoteDescription(ans);
           setStatus("connecting…"); log("answer applied — running ICE checks…");
@@ -200,8 +219,8 @@
           iceTimer = setTimeout(() => {
             const st = pc.iceConnectionState;
             if (st !== "connected" && st !== "completed")
-              log("⏱ still not connected after 20s (ICE=" + st + "). The bridge's candidate (see 'remote …' above) " +
-                  "isn't reachable from your browser — that's the Docker NAT case.");
+              log("⏱ still not connected after 20s (ICE=" + st + "). " +
+                  ((turnChk && turnChk.checked) ? "Check coturn is running in the bridge + :3478/tcp published." : "Docker NAT — try the TURN checkbox, or use Local device."));
           }, 20000);
         } catch (e) { setStatus("bad answer"); log("setRemoteDescription failed: " + e.message); }
       };
@@ -265,6 +284,12 @@
       // refresh: remove the existing named container first, then re-run (install.sh
       // re-pulls the server and overwrites the skill).
       set("docker-refresh-cmd", "docker rm -f sasha-slides-bridge 2>/dev/null; " + dockerRun);
+      // TURN variant (Docker Desktop): coturn relay over TCP, no UDP port needed.
+      set("docker-turn-cmd",
+        'docker rm -f sasha-slides-bridge 2>/dev/null; docker run --rm --name sasha-slides-bridge \\\n' +
+        '  -p 8787:8787 -p 3478:3478/tcp \\\n' +
+        '  -e SASHA_TURN=1 -e SASHA_DIR=/opt \\\n' +
+        `  python:3.14 bash -c "apt-get update -qq && apt-get install -y -qq coturn && curl -fsSL ${origin}/install.sh | sh"`);
       set("manual-cmd",
         `curl -fsSL ${origin}/sasha-bridge.zip -o sasha-bridge.zip\n` +
         'unzip sasha-bridge.zip && cd sasha-bridge\n' +
@@ -275,6 +300,7 @@
       copy("install-copy", "install-cmd");
       copy("docker-copy", "docker-cmd");
       copy("docker-refresh-copy", "docker-refresh-cmd");
+      copy("docker-turn-copy", "docker-turn-cmd");
       copy("manual-copy", "manual-cmd");
 
       bindSelect($("#install-method"), "sasha.installMethod", (v) => {

@@ -44,7 +44,54 @@ DEFAULT_PORT = int(os.environ.get("SASHA_BRIDGE_PORT", "8787"))
 RTC_PORT = int(os.environ.get("SASHA_RTC_PORT", "0"))
 RTC_HOST_IP = os.environ.get("SASHA_RTC_HOST_IP", "")
 
-if RTC_PORT:
+# ── Optional TURN-over-TCP mode (for Docker Desktop, where -p …/udp is unreliable)
+# When SASHA_TURN=1 the bridge runs a coturn relay in THIS container. Both peers
+# reach it over reliable transports — the browser via the published TCP port
+# (turn:…?transport=tcp), aiortc via localhost — so WebRTC data is relayed without
+# ever depending on Docker's UDP forwarding. Needs `turnserver` (apt install coturn)
+# and `-p <SASHA_TURN_PORT>:<SASHA_TURN_PORT>/tcp` published.
+TURN_ENABLED = os.environ.get("SASHA_TURN", "").lower() in ("1", "true", "yes", "on")
+TURN_PORT = int(os.environ.get("SASHA_TURN_PORT", "3478"))
+TURN_USER = os.environ.get("SASHA_TURN_USER", "sasha")
+TURN_PASS = os.environ.get("SASHA_TURN_PASS", "sasha-bridge")
+TURN_REALM = "sasha"
+_turn_proc = None  # coturn subprocess handle
+
+
+def start_turn() -> None:
+    """Launch coturn in this container (TCP+UDP on TURN_PORT, long-term creds).
+    The browser connects over TCP (published), aiortc over localhost UDP — so the
+    relay never touches Docker's UDP port-forwarding."""
+    global _turn_proc
+    import shutil
+    import subprocess
+
+    binp = shutil.which("turnserver")
+    if not binp:
+        print("  TURN: SASHA_TURN=1 but 'turnserver' not found — install coturn "
+              "(apt-get install -y coturn), then restart.", flush=True)
+        return
+    args = [
+        binp, "-n", "--no-tls", "--no-dtls", "--no-cli",
+        f"--listening-port={TURN_PORT}", "--listening-ip=0.0.0.0",
+        "--lt-cred-mech", f"--user={TURN_USER}:{TURN_PASS}", f"--realm={TURN_REALM}",
+        "--min-port=49160", "--max-port=49200",
+    ]
+    _turn_proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print(f"  TURN: coturn relay started on :{TURN_PORT} "
+          f"(publish it: -p {TURN_PORT}:{TURN_PORT}/tcp · user {TURN_USER})", flush=True)
+
+
+def turn_ice_servers(transport: str):
+    """aiortc RTCIceServer list pointing at the local coturn (None if TURN off)."""
+    if not TURN_ENABLED:
+        return None
+    from aiortc import RTCIceServer
+    return [RTCIceServer(urls=[f"turn:127.0.0.1:{TURN_PORT}?transport={transport}"],
+                         username=TURN_USER, credential=TURN_PASS)]
+
+
+if RTC_PORT and not TURN_ENABLED:
     # Pin every ICE host candidate to RTC_PORT by intercepting the UDP bind. Only
     # aioice creates datagram endpoints here (the HTTP server is TCP), so this is
     # safe and version-independent (patches asyncio, not aioice internals).
@@ -252,7 +299,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
 # --------------------------------------------------------------------------- #
 async def pair(request: web.Request) -> web.Response:
     try:
-        from aiortc import RTCPeerConnection, RTCSessionDescription
+        from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
     except ImportError:
         return web.json_response(
             {"error": "aiortc not installed; run: pip install -r requirements.txt"},
@@ -263,10 +310,10 @@ async def pair(request: web.Request) -> web.Response:
         body = await request.json()
         offer = json.loads(base64.b64decode(body["offer"]))
 
-        # Forced-port mode pins EVERY peer to the same UDP port (RTC_PORT), so only
-        # one WebRTC peer can exist at a time — a leftover or re-pair would fail to
-        # bind ("address already in use") → 500. Close any previous peers first.
-        if RTC_PORT:
+        # Forced-port mode pins EVERY peer to the same UDP port, so a leftover or
+        # re-pair would fail to bind ("address already in use") → 500; close any
+        # previous peers first. (Harmless in TURN mode too.)
+        if RTC_PORT or TURN_ENABLED:
             for old in list(request.app["pcs"]):
                 try:
                     await old.close()
@@ -274,7 +321,10 @@ async def pair(request: web.Request) -> web.Response:
                     pass
                 request.app["pcs"].discard(old)
 
-        pc = RTCPeerConnection()
+        # TURN mode: aiortc relays through the local coturn (gets a relay candidate
+        # the browser can reach over TCP) instead of advertising a host candidate.
+        pc = (RTCPeerConnection(RTCConfiguration(iceServers=turn_ice_servers("udp")))
+              if TURN_ENABLED else RTCPeerConnection())
         request.app["pcs"].add(pc)
 
         @pc.on("datachannel")
@@ -305,11 +355,17 @@ async def pair(request: web.Request) -> web.Response:
 
         await pc.setRemoteDescription(RTCSessionDescription(sdp=offer["sdp"], type=offer["type"]))
         await pc.setLocalDescription(await pc.createAnswer())  # aiortc waits for ICE
-        answer = {"sdp": _force_host_candidate(pc.localDescription.sdp), "type": pc.localDescription.type}
-        _host = [l for l in answer["sdp"].splitlines() if "typ host" in l]
-        print("[pair] advertising host candidate: " +
-              (_host[0].strip() if _host else "NONE (srflx only — a browser behind Docker NAT can't reach it)"),
-              flush=True)
+        sdp_out = pc.localDescription.sdp if TURN_ENABLED else _force_host_candidate(pc.localDescription.sdp)
+        answer = {"sdp": sdp_out, "type": pc.localDescription.type}
+        if TURN_ENABLED:
+            _relay = [l for l in sdp_out.splitlines() if "typ relay" in l]
+            print("[pair] TURN relay candidate: " +
+                  (_relay[0].strip() if _relay else "NONE (coturn not reachable? check it started)"), flush=True)
+        else:
+            _host = [l for l in sdp_out.splitlines() if "typ host" in l]
+            print("[pair] advertising host candidate: " +
+                  (_host[0].strip() if _host else "NONE (srflx only — a browser behind Docker NAT can't reach it)"),
+                  flush=True)
         return web.json_response(
             {"answer": base64.b64encode(json.dumps(answer).encode()).decode()}
         )
@@ -479,7 +535,12 @@ def main(port: int = DEFAULT_PORT) -> None:
     print(f"  integration page : http://localhost:{port}/")
     print(f"  display (this PC) : http://localhost:{port}/display")
     print(f"  display (LAN/QR)  : http://{ip}:{port}/display")
-    if RTC_PORT and RTC_HOST_IP:
+    if TURN_ENABLED:
+        print("  WebRTC           : TURN-over-TCP mode ON (Docker Desktop) — relaying via local coturn")
+        start_turn()
+        import atexit
+        atexit.register(lambda: _turn_proc and _turn_proc.terminate())
+    elif RTC_PORT and RTC_HOST_IP:
         print(f"  WebRTC           : forced-port mode ON — advertising {RTC_HOST_IP}:{RTC_PORT} "
               f"(publish it: -p {RTC_PORT}:{RTC_PORT}/udp)")
     else:
