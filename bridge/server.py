@@ -74,12 +74,17 @@ def start_turn() -> None:
     args = [
         binp, "-n", "--no-tls", "--no-dtls", "--no-cli",
         f"--listening-port={TURN_PORT}", "--listening-ip=0.0.0.0",
+        # Both peers' relays live on THIS container, so relay over loopback and allow
+        # it — coturn denies loopback/local peers by default, which breaks same-host
+        # relay-to-relay. (Single-container TURN, not a public relay.)
+        "--relay-ip=127.0.0.1", "--allow-loopback-peers",
         "--lt-cred-mech", f"--user={TURN_USER}:{TURN_PASS}", f"--realm={TURN_REALM}",
         "--min-port=49160", "--max-port=49200",
     ]
-    _turn_proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print(f"  TURN: coturn relay started on :{TURN_PORT} "
-          f"(publish it: -p {TURN_PORT}:{TURN_PORT}/tcp · user {TURN_USER})", flush=True)
+    logf = open("/tmp/coturn.log", "w")  # noqa: SIM115 — lives for the process lifetime
+    _turn_proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT)
+    print(f"  TURN: coturn relay started on :{TURN_PORT} (logs → /tmp/coturn.log · "
+          f"publish -p {TURN_PORT}:{TURN_PORT}/tcp · user {TURN_USER})", flush=True)
 
 
 def turn_ice_servers(transport: str):
