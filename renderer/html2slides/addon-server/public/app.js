@@ -141,16 +141,18 @@
           log("list_diagrams: " + reply.diagrams.length + " diagram(s)");
         } else if (cmd.op === "get_diagram") {
           if (!bridge.drawio) throw new Error("diagrams feature still loading — retry in a moment");
-          reply.xml = await bridge.drawio.get(cmd.id);
-          if (reply.xml == null) { reply.ok = false; reply.error = "diagram not found: " + cmd.id; }
+          // NOTE: the diagram id travels as `diagram_id`, never `id` — the bridge
+          // reserves `id` for request correlation (server.py Display.command).
+          reply.xml = await bridge.drawio.get(cmd.diagram_id);
+          if (reply.xml == null) { reply.ok = false; reply.error = "diagram not found: " + cmd.diagram_id; }
         } else if (cmd.op === "edit_diagram") {
           if (!inAddon) throw new Error("diagrams need the Slides add-on");
           if (!bridge.drawio) throw new Error("diagrams feature still loading — retry in a moment");
           const pos = {};
           ["slide", "x", "y", "w", "h"].forEach((k) => { if (cmd[k] != null) pos[k] = cmd[k]; });
-          const r = await bridge.drawio.set(cmd.id || "", cmd.xml || "", pos);
-          reply.id = (r && r.id) || null; if (r && r.slide) reply.slide = r.slide;
-          log("edit_diagram: " + (cmd.id ? "updated " + cmd.id : "created new diagram") + (r && r.slide ? " on slide " + r.slide : ""));
+          const r = await bridge.drawio.set(cmd.diagram_id || "", cmd.xml || "", pos);
+          reply.diagram_id = (r && r.id) || null; if (r && r.slide) reply.slide = r.slide;  // NOT reply.id (correlation)
+          log("edit_diagram: " + (cmd.diagram_id ? "updated " + cmd.diagram_id : "created new diagram") + (r && r.slide ? " on slide " + r.slide : ""));
         } else {
           reply.ok = false; reply.error = "op not supported in Slides mode: " + cmd.op;
         }
