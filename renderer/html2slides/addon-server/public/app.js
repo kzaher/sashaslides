@@ -179,10 +179,22 @@
         (async () => {
           try {
             await mine.setLocalDescription(await mine.createOffer());
+            // Wait for ICE gathering, but DON'T hang forever: with relay-only policy
+            // and an unreachable TURN server the gather never completes, which would
+            // leave the offer stuck on "generating…". Time-box it and warn.
             await new Promise((r) => {
               if (mine.iceGatheringState === "complete") return r();
-              mine.addEventListener("icegatheringstatechange",
-                () => mine.iceGatheringState === "complete" && r());
+              let done = false;
+              const fin = (timedOut) => {
+                if (done) return; done = true;
+                mine.removeEventListener("icegatheringstatechange", onch); clearTimeout(tm);
+                if (timedOut) log("offer: ICE gathering didn't finish in 6s — TURN may be unreachable " +
+                                  "(start the Docker (TURN) container, publish :3478/tcp). Sending offer as-is.");
+                r();
+              };
+              const onch = () => { if (mine.iceGatheringState === "complete") fin(false); };
+              mine.addEventListener("icegatheringstatechange", onch);
+              const tm = setTimeout(() => fin(true), 6000);
             });
             if (mine !== pc) return; // a newer peer superseded this one
             offerEl.value = btoa(JSON.stringify(mine.localDescription));
