@@ -179,7 +179,19 @@ docker exec sasha-slides-bridge sh -c "grep -iE 'listener opened|relay endpoint|
   <p class="hint">Edit drawio diagrams embedded in this deck and collaborate with your agent —
     it can add or update diagrams while you edit them here, and vice versa. Editing re-renders
     the PNG and updates the hidden XML stored below the slide.</p>
-  <div class="row"><button id="drawio-detect-btn">Detect in deck</button><button id="drawio-new-btn">New diagram</button></div>
+  <div class="row">
+    <button id="drawio-detect-btn">Detect in deck</button>
+    <button id="drawio-new-btn">New diagram</button>
+    <label class="hint" style="flex-direction:row;align-items:center;gap:6px;margin-left:auto;font-weight:400">
+      Resolution
+      <select id="drawio-scale" title="render scale — Google caps stored images at ~2048px">
+        <option value="2">2×</option>
+        <option value="4" selected>4×</option>
+        <option value="6">6×</option>
+        <option value="8">8×</option>
+      </select>
+    </label>
+  </div>
   <ul id="drawio-list" class="drawio-list"></ul>
   <!-- drawio editor mounts here (iframe → /drawio self-hosted) -->
   <div id="drawio-editor-wrap" hidden><iframe id="drawio-frame" title="drawio editor"></iframe></div>
