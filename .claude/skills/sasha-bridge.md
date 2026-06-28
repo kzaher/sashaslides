@@ -57,10 +57,10 @@ read the saved PNG(s) to verify what the deck looks like before continuing.
 default = current slide) and writes `slide_NN.png` into `--out-dir`. Each
 returned slide reports `{index, skipped, saved}`. Add `--xml` to also fetch each
 slide's OpenXML (best-effort, written as `slide_NN.xml`). In the Google Slides
-add-on this exports via the user's OAuth; large ranges return many PNGs, so keep
-ranges modest (the WebRTC data channel caps message size — prefer the Local
-device connection for screenshots). `edit-diagram` needs the bridge running from
-the repo (so `/drawio` is served).
+add-on this exports via the user's OAuth. Large replies are chunked over the
+WebRTC data channel, so screenshots and multi-slide ranges work on either
+transport (Local device is still snappier for very large ranges).
+`edit-diagram` needs the bridge running from the repo (so `/drawio` is served).
 
 If a deck op fails with `PERMISSION_DENIED` / "server error … reading from
 storage", the user's Google Drive/Slides authorization is stale (Apps Script
