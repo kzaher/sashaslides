@@ -27,7 +27,8 @@
       Install method
       <select id="install-method">
         <option value="script">Script (curl · recommended)</option>
-        <option value="docker">Docker</option>
+        <option value="docker">Docker (Linux)</option>
+        <option value="docker-turn">Docker (TURN · Docker Desktop)</option>
         <option value="manual">Manual</option>
       </select>
     </label>
@@ -42,9 +43,9 @@
     </div>
 
     <div class="method" id="method-docker" hidden>
-      <p class="hint">Runs the bridge in a named container. WebRTC needs a pinned,
-        published UDP port; the env vars make the install fully non-interactive. It
-        detects Claude Code / Codex and installs the skill in the container.</p>
+      <p class="hint">Named container with the WebRTC UDP port pinned + published.
+        Works on <b>native Linux Docker</b> (UDP forwards). On <b>Docker Desktop
+        (Mac/Windows) UDP is unreliable — use “Docker (TURN)” instead.</b></p>
       <pre class="code"><code id="docker-cmd">docker run …</code></pre>
       <button id="docker-copy">Copy command</button>
 
@@ -53,15 +54,18 @@
       <pre class="code"><code id="docker-refresh-cmd">docker rm -f …</code></pre>
       <button id="docker-refresh-copy">Copy command</button>
 
-      <p class="hint" style="font-weight:600;margin-top:12px">On <b>Docker Desktop (Mac/Windows)</b>,
-        WebRTC needs TURN — UDP isn't forwarded reliably. This variant runs a coturn relay
-        in the container (TCP only); then tick <b>Relay through TURN</b> in step&nbsp;2:</p>
+      <p class="hint">Use your host’s LAN IP instead of <code>127.0.0.1</code> if the browser
+        is on another machine; <code>--network host</code> works on Linux only.</p>
+    </div>
+
+    <div class="method" id="method-docker-turn" hidden>
+      <p class="hint">For <b>Docker Desktop (Mac/Windows)</b>: UDP isn't forwarded reliably, so
+        this runs a <b>coturn</b> relay in the container and pairs over TCP. Recreates the
+        named container; only <code>:3478/tcp</code> is published.</p>
       <pre class="code"><code id="docker-turn-cmd">docker run …</code></pre>
       <button id="docker-turn-copy">Copy command</button>
-
-      <p class="hint">For same-machine, <b>Local device</b> is simpler than any of these.
-        Use your host’s LAN IP instead of <code>127.0.0.1</code> if the browser is on
-        another machine; <code>--network host</code> works on Linux only.</p>
+      <p class="hint">Then in step&nbsp;2 choose <b>WebRTC</b> and tick <b>Relay through TURN</b>.
+        (Same machine? <b>Local device</b> is simpler than any Docker option.)</p>
     </div>
 
     <div class="method" id="method-manual" hidden>
