@@ -261,18 +261,22 @@ window.h2s.register(async (bridge) => {
     return new Promise((resolve, reject) => {
       const ifr = document.createElement("iframe");
       ifr.style.cssText = "position:fixed;left:-10000px;top:0;width:1280px;height:720px;border:0";
-      let done = false;
+      let done = false, exportSent = false;
+      const post = (o) => { try { ifr.contentWindow.postMessage(JSON.stringify(o), "*"); } catch (e) { /* gone */ } };
       const finish = (err, val) => {
         if (done) return; done = true;
         window.removeEventListener("message", onMsg); clearTimeout(to);
         try { ifr.remove(); } catch (e) { /* already gone */ }
         err ? reject(err) : resolve(val);
       };
+      // Ask for the PNG once — drawio doesn't reliably emit a `load` event, so we
+      // fire export both on `load` (if it comes) and a short fallback after `init`.
+      const requestExport = () => { if (exportSent) return; exportSent = true; post({ action: "export", format: "xmlpng" }); };
       const onMsg = (ev) => {
         if (ev.source !== ifr.contentWindow) return;
         let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
-        if (m.event === "init") ifr.contentWindow.postMessage(JSON.stringify({ action: "load", xml: xml || "", autosave: 0 }), "*");
-        else if (m.event === "load") ifr.contentWindow.postMessage(JSON.stringify({ action: "export", format: "xmlpng" }), "*");
+        if (m.event === "init") { post({ action: "load", xml: xml || "", autosave: 0 }); setTimeout(requestExport, 600); }
+        else if (m.event === "load") requestExport();
         else if (m.event === "export") finish(null, { png: m.data, xml: m.xml || xml });
       };
       const to = setTimeout(() => finish(new Error("drawio render timed out (20s)")), 20000);
