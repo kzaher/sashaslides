@@ -535,10 +535,15 @@ def make_app(port: int) -> web.Application:
             return
         from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection
         await asyncio.sleep(1.5)  # let coturn finish binding
-        for transport in ("udp", "tcp"):
+        # 127.0.0.1 = coturn directly (no proxy). host.docker.internal/tcp goes out
+        # to the Docker host and back through the published port — i.e. the SAME
+        # round-trip the browser makes — but driven by the known-good aiortc client.
+        for host, transport in (("127.0.0.1", "udp"), ("127.0.0.1", "tcp"),
+                                ("host.docker.internal", "tcp")):
+            label = f"{host}/{transport}"
             try:
                 pc = RTCPeerConnection(RTCConfiguration(iceServers=[RTCIceServer(
-                    urls=[f"turn:127.0.0.1:{TURN_PORT}?transport={transport}"],
+                    urls=[f"turn:{host}:{TURN_PORT}?transport={transport}"],
                     username=TURN_USER, credential=TURN_PASS)]))
                 pc.createDataChannel("t")
                 await pc.setLocalDescription(await pc.createOffer())
@@ -548,14 +553,13 @@ def make_app(port: int) -> web.Application:
                     await asyncio.sleep(0.1)
                 relay = [l for l in (pc.localDescription.sdp or "").splitlines() if "typ relay" in l]
                 if relay:
-                    print(f"  TURN self-test [{transport}]: OK — coturn allocated relay "
-                          f"{' '.join(relay[0].split()[4:6])}", flush=True)
+                    print(f"  TURN self-test [{label}]: OK — relay {' '.join(relay[0].split()[4:6])}", flush=True)
                 else:
-                    print(f"  TURN self-test [{transport}]: FAIL — no relay candidate "
-                          f"(allocate over {transport} not working; see /tmp/coturn.log)", flush=True)
+                    print(f"  TURN self-test [{label}]: FAIL — no relay candidate "
+                          f"(allocate not working; see /tmp/coturn.log)", flush=True)
                 await pc.close()
             except Exception as exc:
-                print(f"  TURN self-test [{transport}] error: {exc}", flush=True)
+                print(f"  TURN self-test [{label}] error: {exc}", flush=True)
 
     app.on_startup.append(turn_selftest)
 
