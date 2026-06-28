@@ -294,6 +294,10 @@ async def pair(request: web.Request) -> web.Response:
     await pc.setRemoteDescription(RTCSessionDescription(sdp=offer["sdp"], type=offer["type"]))
     await pc.setLocalDescription(await pc.createAnswer())  # aiortc waits for ICE
     answer = {"sdp": _force_host_candidate(pc.localDescription.sdp), "type": pc.localDescription.type}
+    _host = [l for l in answer["sdp"].splitlines() if "typ host" in l]
+    print("[pair] advertising host candidate: " +
+          (_host[0].strip() if _host else "NONE (srflx only — a browser behind Docker NAT can't reach it)"),
+          flush=True)
     return web.json_response(
         {"answer": base64.b64encode(json.dumps(answer).encode()).decode()}
     )
@@ -459,6 +463,12 @@ def main(port: int = DEFAULT_PORT) -> None:
     print(f"  integration page : http://localhost:{port}/")
     print(f"  display (this PC) : http://localhost:{port}/display")
     print(f"  display (LAN/QR)  : http://{ip}:{port}/display")
+    if RTC_PORT and RTC_HOST_IP:
+        print(f"  WebRTC           : forced-port mode ON — advertising {RTC_HOST_IP}:{RTC_PORT} "
+              f"(publish it: -p {RTC_PORT}:{RTC_PORT}/udp)")
+    else:
+        print(f"  WebRTC           : forced-port mode OFF — host candidate as-gathered. For Docker set "
+              f"SASHA_RTC_PORT + SASHA_RTC_HOST_IP (got port={RTC_PORT or 'unset'}, host={RTC_HOST_IP or 'unset'})")
     web.run_app(make_app(port), host="0.0.0.0", port=port, print=None)
 
 
