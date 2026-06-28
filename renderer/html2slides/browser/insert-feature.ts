@@ -93,8 +93,13 @@ window.h2s?.register((bridge: Bridge) => {
       bridge.log(`✓ inserted ${r.inserted ?? slides.length} slide(s) ${position} the current slide${r.at ? ` (now at position ${r.at})` : ""}.`);
       // Keep the queue so you can re-insert (e.g. after changing oversampling).
       // Remove items manually with the ✕ in the list.
+      return r;
     } catch (e) {
-      bridge.log(`insert failed: ${(e as Error).message || String(e)}`, "error");
+      const msg = (e as Error).message || String(e);
+      bridge.log(`insert failed: ${msg}`, "error");
+      // Propagate so callers (the agent bridge, the insert buttons) see the
+      // failure instead of a false success — e.g. a Drive PERMISSION_DENIED.
+      throw new Error(msg);
     }
   };
   bridge.log("insert handler ready");

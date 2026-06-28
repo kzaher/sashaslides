@@ -40,6 +40,28 @@
   };
   window.h2s = { register: (init) => bridge.features.push(init), bridge };
 
+  // Authorization status (add-on only). insert/screenshot need Drive + Slides;
+  // Apps Script never re-prompts once scopes are granted, so a stale/partial grant
+  // (the usual cause of PERMISSION_DENIED on insert) needs a MANUAL re-auth.
+  async function checkAuth() {
+    const banner = $("#auth-banner"), msg = $("#auth-msg"), link = $("#auth-link");
+    if (!banner) return;
+    if (!inAddon) { banner.hidden = true; return; }
+    banner.hidden = false; banner.className = "auth"; msg.textContent = "checking authorization…";
+    // Pre-fill the manual Reauthorize link so it's always available.
+    gsCall("getAuthInfo").then((info) => { if (link && info && info.url) { link.href = info.url; link.hidden = false; } }).catch(() => {});
+    try {
+      const r = await gsCall("testDriveAccess");
+      banner.className = "auth ok";
+      msg.textContent = "✓ Authorized for Drive & Slides" + (r && r.user ? " — " + r.user : "");
+    } catch (e) {
+      banner.className = "auth warn";
+      msg.textContent = "⚠ Not authorized for Google Drive/Slides — inserts fail with PERMISSION_DENIED. Click Reauthorize, approve, then reload.";
+      if (link) link.hidden = false;
+      log("authorization check failed: " + ((e && e.message) || e));
+    }
+  }
+
   // ── Automatic tab: pair with the local bridge over WebRTC (copy-paste signalling,
   //    so the https sidebar never has to reach the http bridge), then insert the
   //    slides Claude sends straight into THIS deck via the existing converter.
@@ -76,7 +98,11 @@
         } else {
           reply.ok = false; reply.error = "op not supported in Slides mode: " + cmd.op;
         }
-      } catch (e) { reply.ok = false; reply.error = String((e && e.message) || e); }
+      } catch (e) {
+        reply.ok = false; reply.error = String((e && e.message) || e);
+        // surface the auth banner if the deck op was denied (stale Drive grant)
+        if (/PERMISSION_DENIED|not authoriz|authoriz/i.test(reply.error)) checkAuth();
+      }
       return reply;
     }
 
@@ -153,6 +179,7 @@
       });
     });
     setupClaudeBridge(); // Automatic tab: WebRTC pairing + insert into this deck
+    checkAuth();         // verify Drive/Slides authorization on startup
 
     // Automatic tab step 1: render the Script / Docker / Manual commands with THIS
     // server's origin (the sidebar is injected cross-origin, so use <base href> via
