@@ -53,8 +53,15 @@
       <pre class="code"><code id="docker-refresh-cmd">docker rm -f …</code></pre>
       <button id="docker-refresh-copy">Copy command</button>
 
-      <p class="hint">Use your host’s LAN IP instead of <code>127.0.0.1</code> if the
-        browser is on another machine. (<code>--network host</code> works, Linux only.)</p>
+      <p class="hint" style="font-weight:600;margin-top:12px">On <b>Docker Desktop (Mac/Windows)</b>,
+        WebRTC needs TURN — UDP isn't forwarded reliably. This variant runs a coturn relay
+        in the container (TCP only); then tick <b>Relay through TURN</b> in step&nbsp;2:</p>
+      <pre class="code"><code id="docker-turn-cmd">docker run …</code></pre>
+      <button id="docker-turn-copy">Copy command</button>
+
+      <p class="hint">For same-machine, <b>Local device</b> is simpler than any of these.
+        Use your host’s LAN IP instead of <code>127.0.0.1</code> if the browser is on
+        another machine; <code>--network host</code> works on Linux only.</p>
     </div>
 
     <div class="method" id="method-manual" hidden>
@@ -79,6 +86,8 @@
     </label>
 
     <div class="cmethod" id="cmethod-webrtc" hidden>
+      <label class="check" style="flex-direction:row;align-items:center;gap:6px;font-weight:400;margin:2px 0 8px">
+        <input type="checkbox" id="rtc-turn"> Relay through TURN (needed for Docker&nbsp;Desktop — start the bridge with <code>SASHA_TURN=1</code>)</label>
       <label class="hint" style="font-weight:600;margin-top:4px">① Copy this connection request:</label>
       <textarea id="rtc-offer" readonly rows="3" placeholder="generating…"></textarea>
       <button id="rtc-copy">Copy request</button>

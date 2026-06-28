@@ -67,6 +67,25 @@ prompts — `yes ''` does NOT work because the installer reads prompts from
 (for Claude/Codex), not in the bridge container. Avoid `./run.sh` in a bind mount —
 it often loses its exec bit / gains CRLF line endings.
 
+### Docker Desktop (Mac/Windows): use TURN, not `-p …/udp`
+
+Docker Desktop forwards TCP reliably but **UDP poorly**, so the forced-port WebRTC
+above stalls at "connecting…". Run a coturn relay in the same container instead —
+both peers reach it over reliable transports (browser via published TCP, aiortc via
+localhost), so no UDP forwarding is needed:
+
+```bash
+docker run --rm --name sasha-slides-bridge \
+  -p 8787:8787 -p 3478:3478/tcp \
+  -e SASHA_TURN=1 -e SASHA_DIR=/opt \
+  python:3.14 bash -c "apt-get update -qq && apt-get install -y -qq coturn && curl -fsSL <host>/install.sh | sh"
+```
+
+Then in the sidebar tick **Relay through TURN**. Env vars: `SASHA_TURN=1` (on),
+`SASHA_TURN_PORT` (3478), `SASHA_TURN_USER`/`SASHA_TURN_PASS` (`sasha`/`sasha-bridge`
+— must match the sidebar). Only `:3478/tcp` needs publishing; the relay ports stay
+inside the container. **Simplest of all on one machine: just use Local device.**
+
 - `SASHA_RTC_PORT` — the bridge pins aiortc's ICE UDP socket to this port.
 - `-p <port>:<port>/udp` — **must** publish it as UDP.
 - `SASHA_RTC_HOST_IP` — the bridge rewrites its advertised host candidate to this
