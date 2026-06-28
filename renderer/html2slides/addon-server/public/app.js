@@ -304,7 +304,7 @@
       copy("manual-copy", "manual-cmd");
 
       bindSelect($("#install-method"), "sasha.installMethod", (v) => {
-        ["script", "docker", "manual"].forEach((m) => {
+        ["script", "docker", "docker-turn", "manual"].forEach((m) => {
           const el = $("#method-" + m); if (el) el.hidden = (m !== v);
         });
       });
