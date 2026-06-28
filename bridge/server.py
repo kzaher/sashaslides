@@ -259,48 +259,64 @@ async def pair(request: web.Request) -> web.Response:
             status=501,
         )
 
-    body = await request.json()
-    offer = json.loads(base64.b64decode(body["offer"]))
+    try:
+        body = await request.json()
+        offer = json.loads(base64.b64decode(body["offer"]))
 
-    pc = RTCPeerConnection()
-    request.app["pcs"].add(pc)
+        # Forced-port mode pins EVERY peer to the same UDP port (RTC_PORT), so only
+        # one WebRTC peer can exist at a time — a leftover or re-pair would fail to
+        # bind ("address already in use") → 500. Close any previous peers first.
+        if RTC_PORT:
+            for old in list(request.app["pcs"]):
+                try:
+                    await old.close()
+                except Exception:
+                    pass
+                request.app["pcs"].discard(old)
 
-    @pc.on("datachannel")
-    def on_datachannel(channel) -> None:  # noqa: ANN001
-        def send_raw(s: str) -> None:
-            channel.send(s)
+        pc = RTCPeerConnection()
+        request.app["pcs"].add(pc)
 
-        display.attach(send_raw, "webrtc")
+        @pc.on("datachannel")
+        def on_datachannel(channel) -> None:  # noqa: ANN001
+            def send_raw(s: str) -> None:
+                channel.send(s)
 
-        @channel.on("message")
-        def on_message(message) -> None:  # noqa: ANN001
-            display.on_message(message)
+            display.attach(send_raw, "webrtc")
 
-        @channel.on("close")
-        def on_close() -> None:
-            if display.kind == "webrtc":
-                display.detach()
+            @channel.on("message")
+            def on_message(message) -> None:  # noqa: ANN001
+                display.on_message(message)
 
-    @pc.on("iceconnectionstatechange")
-    async def on_ice() -> None:
-        print(f"[pair] ICE: {pc.iceConnectionState}", flush=True)
+            @channel.on("close")
+            def on_close() -> None:
+                if display.kind == "webrtc":
+                    display.detach()
 
-    @pc.on("connectionstatechange")
-    async def on_state() -> None:
-        print(f"[pair] connection: {pc.connectionState}", flush=True)
-        if pc.connectionState in ("failed", "closed"):
-            request.app["pcs"].discard(pc)
+        @pc.on("iceconnectionstatechange")
+        async def on_ice() -> None:
+            print(f"[pair] ICE: {pc.iceConnectionState}", flush=True)
 
-    await pc.setRemoteDescription(RTCSessionDescription(sdp=offer["sdp"], type=offer["type"]))
-    await pc.setLocalDescription(await pc.createAnswer())  # aiortc waits for ICE
-    answer = {"sdp": _force_host_candidate(pc.localDescription.sdp), "type": pc.localDescription.type}
-    _host = [l for l in answer["sdp"].splitlines() if "typ host" in l]
-    print("[pair] advertising host candidate: " +
-          (_host[0].strip() if _host else "NONE (srflx only — a browser behind Docker NAT can't reach it)"),
-          flush=True)
-    return web.json_response(
-        {"answer": base64.b64encode(json.dumps(answer).encode()).decode()}
-    )
+        @pc.on("connectionstatechange")
+        async def on_state() -> None:
+            print(f"[pair] connection: {pc.connectionState}", flush=True)
+            if pc.connectionState in ("failed", "closed"):
+                request.app["pcs"].discard(pc)
+
+        await pc.setRemoteDescription(RTCSessionDescription(sdp=offer["sdp"], type=offer["type"]))
+        await pc.setLocalDescription(await pc.createAnswer())  # aiortc waits for ICE
+        answer = {"sdp": _force_host_candidate(pc.localDescription.sdp), "type": pc.localDescription.type}
+        _host = [l for l in answer["sdp"].splitlines() if "typ host" in l]
+        print("[pair] advertising host candidate: " +
+              (_host[0].strip() if _host else "NONE (srflx only — a browser behind Docker NAT can't reach it)"),
+              flush=True)
+        return web.json_response(
+            {"answer": base64.b64encode(json.dumps(answer).encode()).decode()}
+        )
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return web.json_response({"error": "pair failed: " + str(exc)}, status=500)
 
 
 # --------------------------------------------------------------------------- #
