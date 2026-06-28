@@ -527,6 +527,38 @@ def make_app(port: int) -> web.Application:
         app.router.add_get("/drawio/", drawio_index)
         app.router.add_static("/drawio/", str(DRAWIO_DIR), show_index=False)
 
+    async def turn_selftest(app: web.Application) -> None:
+        # Prove coturn can actually ALLOCATE over each transport, from inside the
+        # container (no Docker proxy, no browser). If tcp FAILs here, the bug is
+        # coturn/config; if tcp is OK, the browser's timeout is the proxy/browser path.
+        if not TURN_ENABLED:
+            return
+        from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection
+        await asyncio.sleep(1.5)  # let coturn finish binding
+        for transport in ("udp", "tcp"):
+            try:
+                pc = RTCPeerConnection(RTCConfiguration(iceServers=[RTCIceServer(
+                    urls=[f"turn:127.0.0.1:{TURN_PORT}?transport={transport}"],
+                    username=TURN_USER, credential=TURN_PASS)]))
+                pc.createDataChannel("t")
+                await pc.setLocalDescription(await pc.createOffer())
+                for _ in range(80):  # up to ~8s for the allocate
+                    if pc.iceGatheringState == "complete":
+                        break
+                    await asyncio.sleep(0.1)
+                relay = [l for l in (pc.localDescription.sdp or "").splitlines() if "typ relay" in l]
+                if relay:
+                    print(f"  TURN self-test [{transport}]: OK — coturn allocated relay "
+                          f"{' '.join(relay[0].split()[4:6])}", flush=True)
+                else:
+                    print(f"  TURN self-test [{transport}]: FAIL — no relay candidate "
+                          f"(allocate over {transport} not working; see /tmp/coturn.log)", flush=True)
+                await pc.close()
+            except Exception as exc:
+                print(f"  TURN self-test [{transport}] error: {exc}", flush=True)
+
+    app.on_startup.append(turn_selftest)
+
     async def close_pcs(app: web.Application) -> None:
         for pc in list(app["pcs"]):
             await pc.close()
