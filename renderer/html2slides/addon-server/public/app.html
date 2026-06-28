@@ -64,6 +64,13 @@
         named container; only <code>:3478/tcp</code> is published.</p>
       <pre class="code"><code id="docker-turn-cmd">docker run …</code></pre>
       <button id="docker-turn-copy">Copy command</button>
+
+      <p class="hint" style="font-weight:600;margin-top:12px">Verify — must show
+        <code>3478/tcp -&gt; 0.0.0.0:3478</code> and a <b>TCP</b> listener:</p>
+      <pre class="code"><code id="docker-turn-verify">docker port sasha-slides-bridge
+docker exec sasha-slides-bridge sh -c "grep -iE 'listener opened|relay endpoint|error|cannot' /tmp/coturn.log | head -20"</code></pre>
+      <button id="docker-turn-verify-copy">Copy command</button>
+
       <p class="hint">Then in step&nbsp;2 choose <b>WebRTC</b> and tick <b>Relay through TURN</b>.
         (Same machine? <b>Local device</b> is simpler than any Docker option.)</p>
     </div>

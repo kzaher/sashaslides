@@ -313,6 +313,7 @@
       copy("docker-copy", "docker-cmd");
       copy("docker-refresh-copy", "docker-refresh-cmd");
       copy("docker-turn-copy", "docker-turn-cmd");
+      copy("docker-turn-verify-copy", "docker-turn-verify");
       copy("manual-copy", "manual-cmd");
 
       bindSelect($("#install-method"), "sasha.installMethod", (v) => {
