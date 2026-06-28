@@ -48,8 +48,19 @@
     if (!banner) return;
     if (!inAddon) { banner.hidden = true; return; }
     banner.hidden = false; banner.className = "auth"; msg.textContent = "checking authorization…";
-    // Pre-fill the manual Reauthorize link so it's always available.
-    gsCall("getAuthInfo").then((info) => { if (link && info && info.url) { link.href = info.url; link.hidden = false; } }).catch(() => {});
+    // Make the Reauthorize button always work: pre-fill its href, and on click
+    // fetch the consent URL on demand if it wasn't ready yet (open in a new tab).
+    if (link) {
+      link.hidden = false;
+      gsCall("getAuthInfo").then((info) => { if (info && info.url) link.href = info.url; }).catch(() => {});
+      link.onclick = async (ev) => {
+        if (!link.getAttribute("href")) {
+          ev.preventDefault();
+          try { const info = await gsCall("getAuthInfo"); if (info && info.url) window.open(info.url, "_blank", "noopener"); }
+          catch (e) { log("could not get authorization URL: " + ((e && e.message) || e)); }
+        }
+      };
+    }
     try {
       const r = await gsCall("testDriveAccess");
       banner.className = "auth ok";
