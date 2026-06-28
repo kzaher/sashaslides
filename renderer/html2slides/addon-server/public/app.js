@@ -141,14 +141,30 @@
     const connectBtn = $("#rtc-connect"), copyBtn = $("#rtc-copy");
     if (offerEl && connectBtn) {
       const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+      const cands = (sdp) => (sdp || "").split(/\r?\n/).filter((l) => l.indexOf("candidate:") >= 0);
+      let iceTimer = null;
+
+      pc.oniceconnectionstatechange = () => {
+        log("ICE: " + pc.iceConnectionState);
+        if (pc.iceConnectionState === "failed")
+          log("✗ ICE FAILED — your browser can't reach the bridge's advertised address. " +
+              "In Docker, use the Docker install method (publishes the UDP port + sets SASHA_RTC_PORT/HOST_IP).");
+      };
+      pc.onconnectionstatechange = () => log("conn: " + pc.connectionState);
+      pc.onicegatheringstatechange = () => log("ICE gathering: " + pc.iceGatheringState);
+      pc.onicecandidateerror = (e) =>
+        log("ICE candidate error: " + (e.errorText || ("code " + e.errorCode)) + (e.url ? " [" + e.url + "]" : ""));
+
       const ch = pc.createDataChannel("cmds");
-      ch.onopen = () => { setStatus("connected ✓"); log("agent connected (webrtc)"); };
-      ch.onclose = () => setStatus("disconnected");
+      ch.onopen = () => { if (iceTimer) clearTimeout(iceTimer); setStatus("connected ✓"); log("✓ data channel open — agent connected (webrtc)"); };
+      ch.onclose = () => { setStatus("disconnected"); log("data channel closed"); };
+      ch.onerror = (e) => log("data channel error: " + ((e && e.message) || e));
       ch.onmessage = async (ev) => {
         let cmd; try { cmd = JSON.parse(ev.data); } catch { return; }
         const r = await handleCommand(cmd);
         try { ch.send(JSON.stringify(r)); } catch (_) {}
       };
+
       (async () => {
         try {
           await pc.setLocalDescription(await pc.createOffer());
@@ -158,19 +174,36 @@
               () => pc.iceGatheringState === "complete" && r());
           });
           offerEl.value = btoa(JSON.stringify(pc.localDescription));
+          cands(pc.localDescription.sdp).forEach((l) => log("local " + l.replace(/^a=/, "")));
         } catch (e) { setStatus("error"); log("offer error: " + e.message); }
       })();
+
       const copy = () => {
         offerEl.select();
         if (navigator.clipboard) navigator.clipboard.writeText(offerEl.value).catch(() => {});
         else { try { document.execCommand("copy"); } catch (_) {} }
       };
       if (copyBtn) copyBtn.onclick = copy;
+
       connectBtn.onclick = async () => {
         const a = (answerEl.value || "").trim();
         if (!a) { setStatus("paste the answer first"); return; }
-        try { await pc.setRemoteDescription(JSON.parse(atob(a))); setStatus("connecting…"); }
-        catch (e) { setStatus("bad answer"); log("answer error: " + e.message); }
+        let ans; try { ans = JSON.parse(atob(a)); }
+        catch (e) { setStatus("bad answer"); log("answer decode failed: " + e.message); return; }
+        const rc = cands(ans.sdp);
+        rc.forEach((l) => log("remote " + l.replace(/^a=/, "")));
+        if (!rc.length) log("⚠ the answer has NO ICE candidate — the bridge gathered none (Docker VM?). Use the Docker install method.");
+        try {
+          await pc.setRemoteDescription(ans);
+          setStatus("connecting…"); log("answer applied — running ICE checks…");
+          if (iceTimer) clearTimeout(iceTimer);
+          iceTimer = setTimeout(() => {
+            const st = pc.iceConnectionState;
+            if (st !== "connected" && st !== "completed")
+              log("⏱ still not connected after 20s (ICE=" + st + "). The bridge's candidate (see 'remote …' above) " +
+                  "isn't reachable from your browser — that's the Docker NAT case.");
+          }, 20000);
+        } catch (e) { setStatus("bad answer"); log("setRemoteDescription failed: " + e.message); }
       };
     }
 
