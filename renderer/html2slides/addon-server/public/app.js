@@ -43,32 +43,51 @@
   // Authorization status (add-on only). insert/screenshot need Drive + Slides;
   // Apps Script never re-prompts once scopes are granted, so a stale/partial grant
   // (the usual cause of PERMISSION_DENIED on insert) needs a MANUAL re-auth.
+  // Apps Script can't show its OAuth consent prompt inside our cross-origin
+  // thin-shell sidebar, so authorization must be completed ONCE from the editor.
+  var EDITOR_STEPS = "Open <b>Extensions → Apps Script</b>, pick a function " +
+    "(e.g. <code>getDeckState</code>) and click <b>Run</b> once to approve all " +
+    "permissions, then reload this presentation.";
   async function checkAuth() {
     const banner = $("#auth-banner"), msg = $("#auth-msg"), link = $("#auth-link");
     if (!banner) return;
     if (!inAddon) { banner.hidden = true; return; }
     banner.hidden = false; banner.className = "auth"; msg.textContent = "checking authorization…";
-    // Make the Reauthorize button always work: pre-fill its href, and on click
-    // fetch the consent URL on demand if it wasn't ready yet (open in a new tab).
+
+    // Try to get the consent URL. If THIS fails too, the script has no working
+    // authorization at all and the prompt can't be shown from here.
+    let authUrl = null;
+    try { const info = await gsCall("getAuthInfo"); authUrl = info && info.url; } catch (_) {}
+
     if (link) {
       link.hidden = false;
-      gsCall("getAuthInfo").then((info) => { if (info && info.url) link.href = info.url; }).catch(() => {});
-      link.onclick = async (ev) => {
-        if (!link.getAttribute("href")) {
-          ev.preventDefault();
-          try { const info = await gsCall("getAuthInfo"); if (info && info.url) window.open(info.url, "_blank", "noopener"); }
-          catch (e) { log("could not get authorization URL: " + ((e && e.message) || e)); }
-        }
+      if (authUrl) link.href = authUrl;
+      link.onclick = (ev) => {
+        if (link.getAttribute("href")) return;            // normal anchor → new tab
+        ev.preventDefault();                               // no URL → guide instead
+        banner.className = "auth warn"; msg.innerHTML = "Authorization can't be started here. " + EDITOR_STEPS;
       };
     }
+
     try {
       const r = await gsCall("testDriveAccess");
       banner.className = "auth ok";
       msg.textContent = "✓ Authorized for Drive & Slides" + (r && r.user ? " — " + r.user : "");
+      if (link) link.hidden = true;
     } catch (e) {
       banner.className = "auth warn";
-      msg.textContent = "⚠ Not authorized for Google Drive/Slides — inserts fail with PERMISSION_DENIED. Click Reauthorize, approve, then reload.";
-      if (link) link.hidden = false;
+      if (authUrl) {
+        msg.textContent = "⚠ Not authorized for Drive/Slides — click Reauthorize, approve, then reload.";
+      } else {
+        // getAuthInfo failed too → every Apps Script call is denied. By far the
+        // most common cause is multi-login (wrong Google account active); else the
+        // add-on was never authorized and our sidebar can't show the prompt.
+        msg.innerHTML = "⚠ Every Apps Script call returns PERMISSION_DENIED. Usually this means " +
+          "you're signed into <b>multiple Google accounts</b> — open this deck in the account that " +
+          "installed the add-on (a window/profile with only that account, or the right " +
+          "<code>/u/N/</code> in the URL). Otherwise: " + EDITOR_STEPS;
+        if (link) link.hidden = true;
+      }
       log("authorization check failed: " + ((e && e.message) || e));
     }
   }
