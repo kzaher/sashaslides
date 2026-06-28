@@ -23,19 +23,26 @@ import socket
 import struct
 import sys
 
-HOST = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
+# Default to "localhost" (NOT 127.0.0.1): on Docker Desktop for Mac the IPv4
+# 127.0.0.1 published-port path can hang while localhost (IPv6 ::1) works.
+# create_connection() also tries both families, like the browser does.
+HOST = sys.argv[1] if len(sys.argv) > 1 else "localhost"
 
 
 def http_control(host: str, port: int = 8787) -> str:
-    s = socket.socket()
-    s.settimeout(4)
     try:
-        s.connect((host, port))
+        s = socket.create_connection((host, port), timeout=4)
+    except socket.timeout:
+        return "TIMEOUT (connect)"
+    except Exception as e:  # noqa: BLE001
+        return f"{type(e).__name__}: {e}"
+    try:
+        s.settimeout(4)
         s.sendall(b"GET /info HTTP/1.0\r\nHost: localhost\r\n\r\n")
         data = s.recv(64)
         return f"OK — {data[:16]!r}" if data else "EMPTY (no data)"
     except socket.timeout:
-        return "TIMEOUT"
+        return "TIMEOUT (no reply)"
     except Exception as e:  # noqa: BLE001
         return f"{type(e).__name__}: {e}"
     finally:
@@ -46,10 +53,16 @@ def turn_test(host: str, port: int = 3478) -> str:
     MAGIC = 0x2112A442
     attr = struct.pack(">HH", 0x0019, 4) + bytes([17, 0, 0, 0])  # REQUESTED-TRANSPORT=UDP
     msg = struct.pack(">HHI", 0x0003, len(attr), MAGIC) + os.urandom(12) + attr  # Allocate
-    s = socket.socket()
-    s.settimeout(4)
     try:
-        s.connect((host, port))
+        s = socket.create_connection((host, port), timeout=4)
+    except socket.timeout:
+        return "TIMEOUT (connect)"
+    except ConnectionRefusedError:
+        return "REFUSED (nothing listening on the host port)"
+    except Exception as e:  # noqa: BLE001
+        return f"{type(e).__name__}: {e}"
+    try:
+        s.settimeout(4)
         s.sendall(msg)
         data = s.recv(1024)
         if data and len(data) >= 2:

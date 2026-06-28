@@ -144,14 +144,14 @@
       let pc = null, iceTimer = null;
 
       // (Re)build the peer + offer. With TURN on, force relay-only through the local
-      // coturn (turn:127.0.0.1:3478/tcp) so it works through Docker Desktop's NAT.
+      // coturn (turn:localhost:3478/tcp) so it works through Docker Desktop's NAT.
       function buildPeer() {
         if (pc) { try { pc.close(); } catch (_) {} }
         const useTurn = !!(turnChk && turnChk.checked);
         pc = new RTCPeerConnection(useTurn
-          ? { iceServers: [{ urls: "turn:127.0.0.1:3478?transport=tcp", username: "sasha", credential: "sasha-bridge" }], iceTransportPolicy: "relay" }
+          ? { iceServers: [{ urls: "turn:localhost:3478?transport=tcp", username: "sasha", credential: "sasha-bridge" }], iceTransportPolicy: "relay" }
           : { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-        if (useTurn) log("WebRTC: relaying through TURN (turn:127.0.0.1:3478?transport=tcp)");
+        if (useTurn) log("WebRTC: relaying through TURN (turn:localhost:3478?transport=tcp)");
 
         pc.oniceconnectionstatechange = () => {
           log("ICE: " + pc.iceConnectionState);
