@@ -169,18 +169,21 @@ docker exec sasha-slides-bridge sh -c "grep -iE 'listener opened|relay endpoint|
   <span class="hint">SVG export coming later — the Google API exports PNG only.</span>
 </section>
 
-<!-- ── drawio diagrams ─────────────────────────────────────────── -->
-<section>
-  <h2>drawio diagrams <span id="drawio-status" class="badge"></span></h2>
-  <p class="hint">PNGs in the deck that carry an embedded drawio diagram. Editing re-renders the
-    PNG and updates the hidden XML field stored below the slide.</p>
+</div><!-- /panel-manual -->
+
+<!-- ── Diagrams (SHARED — rendered under BOTH Automatic & Manual so you can
+     collaborate on diagrams while an agent is connected. Single instance: the
+     drawio feature binds these element IDs, so it must not be duplicated.) ── -->
+<section id="drawio-section">
+  <h2>Diagrams <span id="drawio-status" class="badge"></span></h2>
+  <p class="hint">Edit drawio diagrams embedded in this deck and collaborate with your agent —
+    it can add or update diagrams while you edit them here, and vice versa. Editing re-renders
+    the PNG and updates the hidden XML stored below the slide.</p>
   <div class="row"><button id="drawio-detect-btn">Detect in deck</button><button id="drawio-new-btn">New diagram</button></div>
   <ul id="drawio-list" class="drawio-list"></ul>
   <!-- drawio editor mounts here (iframe → /drawio self-hosted) -->
   <div id="drawio-editor-wrap" hidden><iframe id="drawio-frame" title="drawio editor"></iframe></div>
 </section>
-
-</div><!-- /panel-manual -->
 
 <div id="log" class="log"></div>
 <!-- app.js dynamically loads the vendors (jszip, pptxgenjs) + the feature bundles

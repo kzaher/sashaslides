@@ -242,6 +242,54 @@ window.h2s.register(async (bridge) => {
     render();
   }
 
+  // ── agent/API surface — list, read, and edit deck diagrams programmatically.
+  // Exposed on `bridge.drawio` so the command handler (WebRTC / Local device) and
+  // thus a remote agent can collaborate on the SAME diagrams you edit in this
+  // panel: list them, read their XML, and write new XML back (re-rendered). ──
+  async function apiList() {
+    if (!inAddon) return mockItems().map((m, i) => ({ id: m.id, slide: i + 1, name: m.name, xml: m.xml }));
+    const imgs = (await gsCall("listDeckImages")) || [];
+    return imgs.filter((x) => x.xml).map((x) => ({ id: x.id, slide: x.slideIndex || null, name: x.name, xml: x.xml }));
+  }
+  async function apiGet(id) {
+    const m = (await apiList()).find((x) => x.id === id);
+    return m ? m.xml : null;
+  }
+  // Render drawio XML → xmlpng headlessly via a hidden editor iframe (no UI), the
+  // same embed protocol the inline editor uses. Resolves {png, xml}.
+  function renderXmlToPng(xml) {
+    return new Promise((resolve, reject) => {
+      const ifr = document.createElement("iframe");
+      ifr.style.cssText = "position:fixed;left:-10000px;top:0;width:1280px;height:720px;border:0";
+      let done = false;
+      const finish = (err, val) => {
+        if (done) return; done = true;
+        window.removeEventListener("message", onMsg); clearTimeout(to);
+        try { ifr.remove(); } catch (e) { /* already gone */ }
+        err ? reject(err) : resolve(val);
+      };
+      const onMsg = (ev) => {
+        if (ev.source !== ifr.contentWindow) return;
+        let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+        if (m.event === "init") ifr.contentWindow.postMessage(JSON.stringify({ action: "load", xml: xml || "", autosave: 0 }), "*");
+        else if (m.event === "load") ifr.contentWindow.postMessage(JSON.stringify({ action: "export", format: "xmlpng" }), "*");
+        else if (m.event === "export") finish(null, { png: m.data, xml: m.xml || xml });
+      };
+      const to = setTimeout(() => finish(new Error("drawio render timed out (20s)")), 20000);
+      window.addEventListener("message", onMsg);
+      ifr.src = "/drawio/?embed=1&proto=json&spin=1&libraries=1";  // self-hosted, same origin
+      document.body.appendChild(ifr);
+    });
+  }
+  async function apiSet(id, xml) {
+    const out = await renderXmlToPng(xml || "");
+    if (inAddon) await gsCall("saveDiagram", { imageId: id || "", png: out.png, xml: out.xml });
+    else log("drawio (dev): rendered diagram (" + ((out.png || "").length) + " bytes); deck save stubbed");
+    await detect(); // refresh the panel list so a manual editor sees the change
+    return { id: id || null };
+  }
+  bridge.drawio = { list: apiList, get: apiGet, set: apiSet, render: renderXmlToPng };
+
   // ── wire panel buttons ────────────────────────────────────────────────────
   $("#drawio-detect-btn").addEventListener("click", detect);
   $("#drawio-new-btn").addEventListener("click", newDiagram);

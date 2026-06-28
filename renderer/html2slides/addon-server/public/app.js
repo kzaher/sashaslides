@@ -124,7 +124,31 @@
           const res = await bridge.gsCall("screenshotSlides", {
             range: cmd.range || null, indices: cmd.indices || null, includeXml: cmd.xml === true });
           reply.slides = res.slides;
+          // also list editable drawio diagrams per slide so the agent can edit them
+          if (bridge.drawio && Array.isArray(reply.slides)) {
+            try {
+              const bySlide = {};
+              for (const d of await bridge.drawio.list())
+                (bySlide[d.slide] = bySlide[d.slide] || []).push({ id: d.id, name: d.name });
+              for (const s of reply.slides) s.diagrams = bySlide[s.index] || [];
+            } catch (e) { log("diagram list (screenshot): " + e.message); }
+          }
           log("screenshot: " + (res.slides ? res.slides.length : 0) + " slide(s)");
+        } else if (cmd.op === "list_diagrams") {
+          if (!inAddon) throw new Error("diagrams need the Slides add-on");
+          if (!bridge.drawio) throw new Error("diagrams feature still loading — retry in a moment");
+          reply.diagrams = await bridge.drawio.list();
+          log("list_diagrams: " + reply.diagrams.length + " diagram(s)");
+        } else if (cmd.op === "get_diagram") {
+          if (!bridge.drawio) throw new Error("diagrams feature still loading — retry in a moment");
+          reply.xml = await bridge.drawio.get(cmd.id);
+          if (reply.xml == null) { reply.ok = false; reply.error = "diagram not found: " + cmd.id; }
+        } else if (cmd.op === "edit_diagram") {
+          if (!inAddon) throw new Error("diagrams need the Slides add-on");
+          if (!bridge.drawio) throw new Error("diagrams feature still loading — retry in a moment");
+          const r = await bridge.drawio.set(cmd.id || "", cmd.xml || "");
+          reply.id = r.id;
+          log("edit_diagram: " + (cmd.id ? "updated " + cmd.id : "created new diagram"));
         } else {
           reply.ok = false; reply.error = "op not supported in Slides mode: " + cmd.op;
         }

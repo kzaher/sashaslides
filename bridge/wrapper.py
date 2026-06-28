@@ -133,14 +133,41 @@ def cmd_screenshot(args) -> int:
 
 def cmd_edit_diagram(args) -> int:
     cmd = {"op": "edit_diagram", "autosave": not args.interactive}
+    if getattr(args, "id", None) is not None:
+        cmd["id"] = args.id          # Google Slides mode: diagram object id ("" = new)
     if args.index is not None:
-        cmd["index"] = args.index
+        cmd["index"] = args.index    # display.html mode
     if args.xml_file:
         cmd["xml"] = open(args.xml_file, encoding="utf-8").read()
     elif args.xml:
         cmd["xml"] = args.xml
-    timeout = 600.0 if args.interactive else 60.0  # interactive waits for the user
+    timeout = 600.0 if args.interactive else 120.0  # interactive waits for the user
     res = _post(args.port, "/command", cmd, timeout=timeout)
+    if res.get("ok") and args.out_xml and res.get("xml"):
+        with open(args.out_xml, "w", encoding="utf-8") as fh:
+            fh.write(res["xml"])
+        res["saved_xml"] = os.path.abspath(args.out_xml)
+    return _emit(res)
+
+
+def cmd_diagrams(args) -> int:
+    res = _post(args.port, "/command", {"op": "list_diagrams"}, timeout=60.0)
+    diagrams = res.get("diagrams")
+    if isinstance(diagrams, list) and args.out_dir:
+        os.makedirs(args.out_dir, exist_ok=True)
+        for d in diagrams:
+            xml = d.get("xml") or ""
+            if xml:
+                fn = os.path.join(args.out_dir, f"diagram_{d.get('id', 'x')}.drawio.xml")
+                with open(fn, "w", encoding="utf-8") as fh:
+                    fh.write(xml)
+                d["saved_xml"] = os.path.abspath(fn)
+            d.pop("xml", None)
+    return _emit(res)
+
+
+def cmd_get_diagram(args) -> int:
+    res = _post(args.port, "/command", {"op": "get_diagram", "id": args.id}, timeout=60.0)
     if res.get("ok") and args.out_xml and res.get("xml"):
         with open(args.out_xml, "w", encoding="utf-8") as fh:
             fh.write(res["xml"])
@@ -192,14 +219,24 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out-dir", help="output dir for Slides-mode PNGs/XML (default: cwd)")
     s.set_defaults(func=cmd_screenshot)
 
-    e = add("edit-diagram", help="open/seed a drawio diagram on a slide")
-    e.add_argument("--index", type=int, default=None, help="default: current slide")
+    e = add("edit-diagram", help="create/update a drawio diagram (Slides: --id; display: --index)")
+    e.add_argument("--id", default=None, help="Slides diagram id (from 'diagrams'/'screenshot'); '' = new")
+    e.add_argument("--index", type=int, default=None, help="display.html mode; default: current slide")
     e.add_argument("--xml", help="seed drawio XML")
     e.add_argument("--xml-file", help="seed drawio XML from file")
     e.add_argument("--interactive", action="store_true",
                    help="open the editor and wait for the user to Save & Close")
     e.add_argument("--out-xml", help="write the resulting diagram XML here")
     e.set_defaults(func=cmd_edit_diagram)
+
+    dl = add("diagrams", help="list drawio diagrams in the deck (Slides mode)")
+    dl.add_argument("--out-dir", help="write each diagram's XML here instead of inline")
+    dl.set_defaults(func=cmd_diagrams)
+
+    gd = add("get-diagram", help="read one diagram's drawio XML (Slides mode)")
+    gd.add_argument("--id", required=True, help="diagram id from 'diagrams'/'screenshot'")
+    gd.add_argument("--out-xml", help="write the XML to this file")
+    gd.set_defaults(func=cmd_get_diagram)
 
     raw = add("raw", help="send a raw JSON command")
     raw.add_argument("--json", required=True)

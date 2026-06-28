@@ -40,7 +40,11 @@ pass it with `--html-file` (slides are self-contained HTML at 1280×720).
 .claude/skills/sasha-bridge.sh screenshot   --out-dir /tmp/shots              # current slide
 .claude/skills/sasha-bridge.sh screenshot   --range 1-5 --out-dir /tmp/shots  # a range
 .claude/skills/sasha-bridge.sh screenshot   --indices 1,3 --xml --out-dir /tmp/shots
-.claude/skills/sasha-bridge.sh edit-diagram --index 0 --xml-file /tmp/d.xml --out-xml /tmp/d.xml
+.claude/skills/sasha-bridge.sh diagrams                                   # list deck diagrams
+.claude/skills/sasha-bridge.sh diagrams     --out-dir /tmp/diagrams       # + write each XML to a file
+.claude/skills/sasha-bridge.sh get-diagram  --id <ID> --out-xml /tmp/d.xml
+.claude/skills/sasha-bridge.sh edit-diagram --id <ID> --xml-file /tmp/d.xml   # update a deck diagram
+.claude/skills/sasha-bridge.sh edit-diagram --id "" --xml-file /tmp/new.xml   # add a NEW diagram
 .claude/skills/sasha-bridge.sh state
 ```
 
@@ -59,8 +63,31 @@ returned slide reports `{index, skipped, saved}`. Add `--xml` to also fetch each
 slide's OpenXML (best-effort, written as `slide_NN.xml`). In the Google Slides
 add-on this exports via the user's OAuth. Large replies are chunked over the
 WebRTC data channel, so screenshots and multi-slide ranges work on either
-transport (Local device is still snappier for very large ranges).
-`edit-diagram` needs the bridge running from the repo (so `/drawio` is served).
+transport (Local device is still snappier for very large ranges). Each returned
+slide also carries `diagrams: [{id, name}]` — the editable drawio diagrams on
+that slide.
+
+### drawio diagrams (collaborate with the user)
+
+In the Google Slides add-on, diagrams are real drawio diagrams embedded in the
+deck (a PNG plus an off-canvas XML source box). The user can edit them in the
+**Diagrams** panel of the sidebar (visible under both Automatic and Manual), and
+you can read/edit the **same** diagrams over the API — so you collaborate on one
+shared diagram:
+
+- `diagrams` lists every diagram: `{id, slide, name, xml}`. `--out-dir` writes
+  each XML to `diagram_<id>.drawio.xml` and keeps the rest inline.
+- `get-diagram --id <ID>` returns one diagram's drawio XML (`--out-xml` to save).
+- `edit-diagram --id <ID> --xml-file f.xml` replaces a diagram's XML; the sidebar
+  re-renders the PNG and updates the deck. `--id ""` adds a NEW diagram to the
+  current slide. (`screenshot` first to see each slide's `diagrams` and their ids.)
+
+The `id` is the diagram's image object id from `diagrams`/`screenshot`. Edits flow
+both ways live: a diagram you write appears in the user's panel, and one they edit
+shows up on your next `diagrams`/`get-diagram`. Slides-mode diagram editing renders
+via the sidebar's own self-hosted drawio (no repo needed); the `edit-diagram
+--index N` form instead drives a diagram on the bridge's **display.html** surface
+and needs the bridge running from the repo (so `/drawio` is served).
 
 If a deck op fails with `PERMISSION_DENIED` / "server error … reading from
 storage", the user's Google Drive/Slides authorization is stale (Apps Script
