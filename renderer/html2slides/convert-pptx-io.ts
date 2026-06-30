@@ -18,8 +18,10 @@
  *                                  (unless noUpload) upload to Drive.
  */
 
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import { google } from "googleapis";
+import type { Credentials } from "google-auth-library";
+import type { CdpModule } from "../../types/cdp-types.ts";
 import { readFileSync, writeFileSync, readdirSync } from "fs";
 import { join, resolve, dirname, basename } from "path";
 import { Readable } from "stream";
@@ -43,20 +45,12 @@ import {
 
 const CDP_PORT = 9222;
 
-// chrome-remote-interface ships no .d.ts, so its `New` / `Close` static
-// methods type as `any`. Narrow at the boundary via a typed shim — the
-// only place this codebase tolerates an `any`-bridging cast (external
-// API without types — see CLAUDE.md TypeScript style).
-interface CDPStatic {
-  New(opts: { port: number; url?: string }): Promise<{ id: string }>;
-  Close(opts: { port: number; id: string }): Promise<void>;
-}
-// SAFETY: `CDP` default export is the connect-fn; CDP.New / CDP.Close are
-// runtime-attached static methods documented at
+// chrome-remote-interface ships no .d.ts; its default export is declared
+// `unknown` (types/ambient.d.ts). `CdpModule` is the shared, precise boundary
+// type covering the connect-fn plus the runtime-attached New / Close / List
+// static methods documented at
 // https://github.com/cyrus-and/chrome-remote-interface#cdpnewoptions-callback
-// — `CDPStatic` mirrors the documented signature for the two static methods
-// we actually call. Untyped JS, runtime contract.
-const CDPS = CDP as unknown as CDPStatic;
+const CDP = CDPraw as CdpModule;
 
 // Compile extract-dom.ts → JS once at module load. Only this Node-only file
 // reads the source; the browser bundle inlines the compiled string at build
@@ -83,7 +77,7 @@ export function getAuth() {
   const tokens = JSON.parse(readFileSync("/workspaces/sashaslides/.auth/tokens.json", "utf-8"));
   const oauth2 = new google.auth.OAuth2(creds.client_id, creds.client_secret, "http://localhost:8080");
   oauth2.setCredentials(tokens);
-  oauth2.on("tokens", (newTokens: Record<string, unknown>) => {
+  oauth2.on("tokens", (newTokens: Credentials) => {
     const merged = { ...tokens, ...newTokens };
     writeFileSync("/workspaces/sashaslides/.auth/tokens.json", JSON.stringify(merged, null, 2));
   });
@@ -101,7 +95,7 @@ export async function extractFromHtml(
 ): Promise<{ extraction: Extraction; visualPngs: Map<number, Buffer> }> {
   const scale = clampOversampling(oversampling);
   const absPath = resolve(htmlPath);
-  const tab = await CDPS.New({ port: CDP_PORT, url: `file://${absPath}` });
+  const tab = await CDP.New({ port: CDP_PORT, url: `file://${absPath}` });
   await sleep(1200);
 
   const client = await CDP({ target: tab, port: CDP_PORT });
@@ -114,6 +108,7 @@ export async function extractFromHtml(
   await sleep(300);
 
   const { result } = await Runtime.evaluate({ expression: EXTRACT_JS, returnByValue: true });
+  if (typeof result.value !== "string") throw new Error("extract-dom did not return a JSON string");
   const extraction: Extraction = JSON.parse(result.value);
 
   // Emoji detection: Slides lacks an emoji font, so glyphs like ⚡🔒📊🔍🧐💳
@@ -207,7 +202,7 @@ export async function extractFromHtml(
   }
 
   await client.close();
-  await CDPS.Close({ port: CDP_PORT, id: tab.id });
+  await CDP.Close({ port: CDP_PORT, id: tab.id });
   return { extraction: retypedExtraction, visualPngs };
 }
 
@@ -351,6 +346,14 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   const pptxPath = outPath || `/tmp/${title.replace(/[^a-zA-Z0-9]/g, "_")}.pptx`;
   await pres.writeFile({ fileName: pptxPath });
   console.log(`  Saved: ${pptxPath}`);
+
+  // OOXML post-patches. The product (sidebar) goes through buildPptxInMemory,
+  // which applies these in-zip; this file-write path (regen/convert-pptx) uses
+  // STOCK pptxgenjs and must apply the same patches so its output matches the
+  // sidebar. Gradient fills (solid placeholder → <a:gradFill>) + inside stroke
+  // alignment were silently dropped when these moved to the (unloaded-here) fork.
+  await injectGradients(pptxPath, pres.__gradients || []);
+  await injectStrokeAlignment(pptxPath);
 
   // Sidecar: per-slide rasterised regions so the SxS rating UI can warn the
   // reviewer that the output isn't 100% native primitives.

@@ -13,26 +13,26 @@
  * 5. Delete the original plain slides
  */
 
-import CDP from "chrome-remote-interface";
+import { cdp as CDP, type CDPClient, type CDPInput } from "./cdp.ts";
 
 const ORIGINAL_PRES_URL = "https://docs.google.com/presentation/d/1xegFC0RQiZd-WaRogVOfSHVqmOFUVPbHUsOHSzPKUUY/edit";
 const STYLED_PRES_NAME = "presentation";
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
-async function pressKey(input: any, key: string, keyCode: number, modifiers = 0) {
+async function pressKey(input: CDPInput, key: string, keyCode: number, modifiers = 0) {
   await input.dispatchKeyEvent({ type: "rawKeyDown", key, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers });
   await sleep(30);
   await input.dispatchKeyEvent({ type: "keyUp", key, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers });
 }
 
-async function clickAt(input: any, x: number, y: number) {
+async function clickAt(input: CDPInput, x: number, y: number) {
   await input.dispatchMouseEvent({ type: "mousePressed", x, y, button: "left", clickCount: 1 });
   await sleep(40);
   await input.dispatchMouseEvent({ type: "mouseReleased", x, y, button: "left", clickCount: 1 });
 }
 
-async function findAndClickByText(client: CDP.Client, texts: string[], opts: { parentSelector?: string; maxY?: number } = {}): Promise<boolean> {
+async function findAndClickByText(client: CDPClient, texts: string[], opts: { parentSelector?: string; maxY?: number } = {}): Promise<boolean> {
   const { Runtime, Input } = client;
   const parentSel = opts.parentSelector ? JSON.stringify(opts.parentSelector) : "null";
   const maxY = opts.maxY ?? 10000;
@@ -157,7 +157,7 @@ async function main() {
 
   const allTargets = await CDP.List({ port: 9222 });
   const pickerTarget = allTargets.find(
-    (t: any) =>
+    (t) =>
       t.type === "iframe" &&
       (t.url.includes("docs.google.com/picker") ||
         t.url.includes("picker.google.com") ||

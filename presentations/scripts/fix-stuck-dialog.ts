@@ -1,6 +1,46 @@
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+
+/** A located button as returned by the in-page `findButtons` query. */
+interface FoundButton {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  y_val: number;
+}
+
+function isFoundButtonArray(value: unknown): value is FoundButton[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (b): b is FoundButton =>
+        typeof b === "object" &&
+        b !== null &&
+        typeof (b as Record<string, unknown>).x === "number" &&
+        typeof (b as Record<string, unknown>).y === "number" &&
+        typeof (b as Record<string, unknown>).width === "number" &&
+        typeof (b as Record<string, unknown>).height === "number" &&
+        typeof (b as Record<string, unknown>).y_val === "number"
+    )
+  );
+}
+
+/** Shape of the dialog-presence probe run via `Runtime.evaluate`. */
+interface DialogPresence {
+  modal: boolean;
+  dialog: boolean;
+}
+
+function isDialogPresence(value: unknown): value is DialogPresence {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as Record<string, unknown>).modal === "boolean" &&
+    typeof (value as Record<string, unknown>).dialog === "boolean"
+  );
+}
 
 const screenshotDir = "/workspaces/sashaslides/presentations/1/screenshots";
 mkdirSync(screenshotDir, { recursive: true });
@@ -37,7 +77,7 @@ async function main() {
     console.log("Screenshot 1 taken");
 
     // Helper to find buttons
-    async function findButtons(text: string) {
+    async function findButtons(text: string): Promise<FoundButton[]> {
       const r = await Runtime.evaluate({
         expression: `(() => {
           const out = [];
@@ -59,7 +99,7 @@ async function main() {
         })()`,
         returnByValue: true,
       });
-      return r.result.value || [];
+      return isFoundButtonArray(r.result.value) ? r.result.value : [];
     }
 
     // Helper to click
@@ -97,7 +137,7 @@ async function main() {
     console.log("Looking for 'Import slides' button...");
     const importButtons = await findButtons("Import slides");
     console.log(`Found ${importButtons.length} 'Import slides' buttons`);
-    const dialogButton = importButtons.find((b: any) => b.y_val > 500);
+    const dialogButton = importButtons.find((b) => b.y_val > 500);
     if (dialogButton) {
       console.log(
         `Found Import slides dialog button at (${dialogButton.x}, ${dialogButton.y})`
@@ -117,9 +157,10 @@ async function main() {
       })()`,
       returnByValue: true,
     });
-    let dialogStillOpen =
-      (dialogCheck.result.value as any)?.modal ||
-      (dialogCheck.result.value as any)?.dialog;
+    const dialogCheckValue = dialogCheck.result.value;
+    let dialogStillOpen = isDialogPresence(dialogCheckValue)
+      ? dialogCheckValue.modal || dialogCheckValue.dialog
+      : false;
 
     // Try Enter key if dialog still open
     if (dialogStillOpen) {
@@ -145,9 +186,10 @@ async function main() {
         })()`,
         returnByValue: true,
       });
-      dialogStillOpen =
-        (dialogCheck2.result.value as any)?.modal ||
-        (dialogCheck2.result.value as any)?.dialog;
+      const dialogCheck2Value = dialogCheck2.result.value;
+      dialogStillOpen = isDialogPresence(dialogCheck2Value)
+        ? dialogCheck2Value.modal || dialogCheck2Value.dialog
+        : false;
     }
 
     // Wait for import

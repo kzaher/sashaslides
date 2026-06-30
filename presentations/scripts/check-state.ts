@@ -12,6 +12,18 @@ interface PageScreenshot {
   data: string;
 }
 
+// `ws` ships no usable types in this repo (its module is declared `unknown` in
+// types/ambient.d.ts). Narrow the default export to the minimal constructor
+// surface this file uses, at the boundary.
+interface WsSocket {
+  on(event: string, listener: (data: string) => void): void;
+  send(data: string): void;
+  close(): void;
+}
+interface WsConstructor {
+  new (url: string): WsSocket;
+}
+
 async function connectToChrome(
   wsUrl: string
 ): Promise<{
@@ -19,7 +31,7 @@ async function connectToChrome(
   close: () => void;
 }> {
   const WebSocket = await import("ws");
-  const ws = new WebSocket.default(wsUrl);
+  const ws = new (WebSocket.default as WsConstructor)(wsUrl);
 
   // Wait for WebSocket to open
   await new Promise<void>((resolve, reject) => {

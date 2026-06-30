@@ -2,7 +2,7 @@
  * Delete all slides from the original presentation, then import fresh from
  * the updated presentation. Uses the working File > Import slides flow.
  */
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { writeFileSync } from "node:fs";
 
 const ORIG_ID = "1xegFC0RQiZd-WaRogVOfSHVqmOFUVPbHUsOHSzPKUUY";

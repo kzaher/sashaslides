@@ -7,19 +7,55 @@
  * Usage: npx tsx upload-pptx-to-slides.ts <path-to-pptx>
  */
 
-import CDP from "chrome-remote-interface";
+import CDPDefault from "chrome-remote-interface";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 
+// chrome-remote-interface ships no .d.ts (its default export types as
+// `unknown` via types/ambient.d.ts). Narrow the boundary into the methods we
+// actually invoke — the only place untyped CDP becomes typed.
+interface CDPTarget { id: string; url: string; type: string }
+interface CDPEvalResult { result: { value?: unknown; description?: string }; exceptionDetails?: unknown }
+interface CDPInput {
+  dispatchKeyEvent(opts: Record<string, unknown>): Promise<unknown>;
+  dispatchMouseEvent(opts: Record<string, unknown>): Promise<unknown>;
+}
+interface CDPRuntime {
+  evaluate(opts: { expression: string; awaitPromise?: boolean; returnByValue?: boolean }): Promise<CDPEvalResult>;
+}
+interface CDPPage {
+  enable(): Promise<unknown>;
+  loadEventFired(): Promise<unknown>;
+}
+interface CDPDom {
+  enable(): Promise<unknown>;
+  getDocument(opts: { depth: number }): Promise<{ root: { nodeId: number } }>;
+  querySelector(opts: { nodeId: number; selector: string }): Promise<{ nodeId: number }>;
+  querySelectorAll(opts: { nodeId: number; selector: string }): Promise<{ nodeIds: number[] }>;
+  setFileInputFiles(opts: { files: string[]; nodeId: number }): Promise<unknown>;
+}
+interface CDPClient {
+  Page: CDPPage;
+  Runtime: CDPRuntime;
+  Input: CDPInput;
+  DOM: CDPDom;
+  close(): Promise<void>;
+}
+interface CDPModule {
+  (opts?: { target?: { id: string; url: string }; port?: number }): Promise<CDPClient>;
+  New(opts: { port: number; url?: string }): Promise<CDPTarget>;
+}
+const CDP = CDPDefault as CDPModule;
+
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
-async function pressKey(input: any, key: string, keyCode: number, modifiers = 0) {
+async function pressKey(input: CDPInput, key: string, keyCode: number, modifiers = 0) {
   await input.dispatchKeyEvent({ type: "rawKeyDown", key, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers });
   await sleep(30);
   await input.dispatchKeyEvent({ type: "keyUp", key, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers });
 }
 
-async function clickAt(input: any, x: number, y: number) {
+async function clickAt(input: CDPInput, x: number, y: number) {
   await input.dispatchMouseEvent({ type: "mousePressed", x, y, button: "left", clickCount: 1 });
   await sleep(30);
   await input.dispatchMouseEvent({ type: "mouseReleased", x, y, button: "left", clickCount: 1 });

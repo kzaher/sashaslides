@@ -2,12 +2,58 @@ import * as fs from "fs";
 import * as path from "path";
 import * as http from "http";
 
-async function httpGet(url: string): Promise<any> {
-  return new Promise((resolve, reject) => {
+// ── Boundary types ─────────────────────────────────────────────────────────
+// The Chrome DevTools /json endpoint entry (only the fields we read).
+interface DevtoolsTarget {
+  url: string;
+  webSocketDebuggerUrl: string;
+}
+
+// `ws` ships its types behind `unknown` in types/ambient.d.ts; narrow the
+// minimal surface this script drives.
+type WSListener = (...args: unknown[]) => void;
+interface WSInstance {
+  send(data: string): void;
+  close(): void;
+  on(event: "message", cb: (data: string) => void): void;
+  on(event: string, cb: WSListener): void;
+}
+interface WSConstructor {
+  new (url: string): WSInstance;
+}
+
+// CDP wire response. Runtime.evaluate nests its JS value at
+// `.result.result.value`; Page.captureScreenshot puts the PNG at `.result.data`.
+interface CDPInnerResult {
+  value?: unknown;
+  description?: string;
+}
+interface CDPCommandPayload {
+  result?: CDPInnerResult;
+  value?: unknown;
+  data?: string;
+  exceptionDetails?: unknown;
+}
+interface CDPWireResponse {
+  id?: number;
+  method?: string;
+  result?: CDPCommandPayload;
+}
+
+// Shape returned by the "click a button" evaluate snippets.
+interface ClickProbe {
+  clicked: boolean;
+  x?: number;
+  y?: number;
+  text?: string;
+}
+
+function httpGet<T>(url: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     http.get(url, (res) => {
       let data = "";
-      res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => resolve(JSON.parse(data)));
+      res.on("data", (chunk: Buffer | string) => (data += chunk));
+      res.on("end", () => resolve(JSON.parse(data) as T));
     }).on("error", reject);
   });
 }
@@ -18,9 +64,9 @@ async function main() {
   try {
     // Get list of targets
     const debugUrl = "http://localhost:9222/json";
-    const targets = await httpGet(debugUrl);
+    const targets = await httpGet<DevtoolsTarget[]>(debugUrl);
 
-    const targetInfo = targets.find((t: any) => t.url.includes("1xegFC0RQiZd"));
+    const targetInfo = targets.find((t) => t.url.includes("1xegFC0RQiZd"));
     if (!targetInfo) {
       console.error("Tab with 1xegFC0RQiZd not found");
       process.exit(1);
@@ -29,14 +75,20 @@ async function main() {
     console.log(`Found tab: ${targetInfo.url}`);
     const wsUrl = targetInfo.webSocketDebuggerUrl;
 
-    // Use WebSocket to connect via native Node API
-    const ws = new (await import("ws")).default(wsUrl);
+    // Use WebSocket to connect via native Node API.
+    // SAFETY: `ws` ships no usable .d.ts (default export typed `unknown`);
+    // assert the documented constructor signature at this single boundary.
+    const WSImpl = (await import("ws")).default as WSConstructor;
+    const ws = new WSImpl(wsUrl);
 
     let messageId = 1;
-    const pendingMessages: Map<number, any> = new Map();
+    const pendingMessages = new Map<number, (value: CDPWireResponse) => void>();
 
-    const sendCommand = (method: string, params?: any) => {
-      return new Promise((resolve) => {
+    const sendCommand = (
+      method: string,
+      params?: Record<string, unknown>
+    ): Promise<CDPWireResponse> => {
+      return new Promise<CDPWireResponse>((resolve) => {
         const id = messageId++;
         pendingMessages.set(id, resolve);
         ws.send(
@@ -51,11 +103,11 @@ async function main() {
 
     ws.on("message", (data: string) => {
       try {
-        const msg = JSON.parse(data);
+        const msg = JSON.parse(data) as CDPWireResponse;
         if (msg.id && pendingMessages.has(msg.id)) {
           const resolve = pendingMessages.get(msg.id);
           pendingMessages.delete(msg.id);
-          resolve(msg);
+          resolve?.(msg);
         }
       } catch (e) {
         // Ignore parse errors
@@ -63,7 +115,7 @@ async function main() {
     });
 
     // Wait for connection
-    await new Promise((r) => ws.on("open", r));
+    await new Promise<void>((r) => ws.on("open", () => r()));
 
     // Enable Runtime
     await sendCommand("Runtime.enable");
@@ -87,7 +139,8 @@ async function main() {
       returnByValue: true,
     });
     console.log("Select all result:", JSON.stringify(selectAllResult, null, 2));
-    const selectAllClicked = selectAllResult?.result?.result?.value?.clicked || false;
+    const selectAllProbe = selectAllResult.result?.result?.value as ClickProbe | undefined;
+    const selectAllClicked = selectAllProbe?.clicked || false;
 
     // Wait 300ms
     await new Promise((r) => setTimeout(r, 300));
@@ -111,7 +164,8 @@ async function main() {
       returnByValue: true,
     });
     console.log("Import result:", JSON.stringify(importResult, null, 2));
-    const importClicked = importResult?.result?.result?.value?.clicked || false;
+    const importProbe = importResult.result?.result?.value as ClickProbe | undefined;
+    const importClicked = importProbe?.clicked || false;
 
     // Poll for dialog closure (max 3 seconds)
     let dialogClosed = false;
@@ -155,7 +209,8 @@ async function main() {
       returnByValue: true,
     });
 
-    const finalSlideCount = slideCountResult.result?.value || 0;
+    const rawSlideCount = slideCountResult.result?.value;
+    const finalSlideCount = typeof rawSlideCount === "number" ? rawSlideCount : 0;
     const totalRuntime = Date.now() - startTime;
 
     console.log(`\n=== RESULTS ===`);

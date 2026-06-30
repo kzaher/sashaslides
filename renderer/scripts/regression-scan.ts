@@ -180,7 +180,7 @@ async function main() {
         cwd: wtDir, stdio: "inherit", env: { ...process.env },
       });
     } catch (e) {
-      console.error(`  FAILED to build at ${sha.slice(0, 8)}: ${e.message}`);
+      console.error(`  FAILED to build at ${sha.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
       execFileSync("git", ["worktree", "remove", "--force", wtDir], { cwd: repoRoot });
       continue;
     }

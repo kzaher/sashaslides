@@ -1,7 +1,7 @@
 /**
  * Opens Import slides dialog and takes a screenshot to see what's in it.
  */
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { writeFileSync } from "node:fs";
 
 async function main() {

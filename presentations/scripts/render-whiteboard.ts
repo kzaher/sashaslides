@@ -8,7 +8,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 
 // ── Slide parsing ──────────────────────────────────────────────────────────
 
@@ -65,7 +65,11 @@ function parseSlides(md: string): SlideData[] {
           }
         }
         if (inTable && table) {
-          table = { ...table, rows: [...table.rows, cells] };
+          // Capture the narrowed (non-null) value in a const so the spread
+          // type-checks: TS drops the truthiness narrowing of `table` when it
+          // also appears as the assignment target on the same line.
+          const prev: NonNullable<SlideData["table"]> = table;
+          table = { ...prev, rows: [...prev.rows, cells] };
           continue;
         }
       } else {

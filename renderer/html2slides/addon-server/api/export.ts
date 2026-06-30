@@ -20,6 +20,7 @@ import { get as httpsGet } from "https";
 import { get as httpGet } from "http";
 import { readFileSync, writeFileSync } from "fs";
 import { google } from "googleapis";
+import type { Credentials } from "google-auth-library";
 import JSZip from "jszip";
 import { registerApi } from "../registry.js";
 
@@ -85,7 +86,7 @@ function getAuth() {
   );
   const oauth2 = new google.auth.OAuth2(creds.client_id, creds.client_secret, "http://localhost");
   oauth2.setCredentials(tokens);
-  oauth2.on("tokens", (newTokens: Record<string, unknown>) => {
+  oauth2.on("tokens", (newTokens: Credentials) => {
     const merged = { ...tokens, ...newTokens };
     writeFileSync("/workspaces/sashaslides/.auth/tokens.json", JSON.stringify(merged, null, 2));
   });

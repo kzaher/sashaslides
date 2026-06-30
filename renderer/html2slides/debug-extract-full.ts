@@ -1,7 +1,8 @@
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import { readFileSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { transformSync } from "esbuild";
+import type { CdpModule } from "../../types/cdp-types.ts";
 
 const EXTRACT_TS = readFileSync(
   join(process.cwd(), "renderer/html2slides/extract-dom.ts"),
@@ -9,15 +10,13 @@ const EXTRACT_TS = readFileSync(
 );
 const EXTRACT_JS = transformSync(EXTRACT_TS, { loader: "ts", target: "es2020" }).code;
 
-interface CDPStatic {
-  New(opts: { port: number; url: string }): Promise<{ id: string }>;
-  Close(opts: { port: number; id: string }): Promise<void>;
-}
-const CDPS = CDP as unknown as CDPStatic;
+// chrome-remote-interface ships no .d.ts; its default export is declared
+// `unknown` (types/ambient.d.ts). Narrow it to the typed boundary once.
+const CDP = CDPraw as CdpModule;
 
 async function main() {
   const htmlPath = resolve(process.argv[2]);
-  const tab = await CDPS.New({ port: 9222, url: `file://${htmlPath}` });
+  const tab = await CDP.New({ port: 9222, url: `file://${htmlPath}` });
   await new Promise(r => setTimeout(r, 1500));
   const client = await CDP({ target: tab, port: 9222 });
   const { Runtime, Emulation, Page } = client;
@@ -27,6 +26,7 @@ async function main() {
   await new Promise(r => setTimeout(r, 800));
 
   const { result } = await Runtime.evaluate({ expression: EXTRACT_JS, returnByValue: true });
+  if (typeof result.value !== "string") throw new Error("extract-dom did not return a JSON string");
   const data = JSON.parse(result.value);
 
   for (let i = 0; i < data.elements.length; i++) {
@@ -51,6 +51,6 @@ async function main() {
   }
 
   await client.close();
-  await CDPS.Close({ port: 9222, id: tab.id });
+  await CDP.Close({ port: 9222, id: tab.id });
 }
 main().catch(e => { console.error(e); process.exit(1); });

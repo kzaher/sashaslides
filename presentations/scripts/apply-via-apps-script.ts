@@ -8,7 +8,7 @@
  * This is the programmatic approach — Apps Script has full native Slides API access.
  */
 
-import CDP from "chrome-remote-interface";
+import { cdp as CDP, type CDPInput } from "./cdp.ts";
 import { readFileSync } from "node:fs";
 
 function sleep(ms: number) {
@@ -105,13 +105,13 @@ function applyWhiteboardStyle() {
 }
 `;
 
-async function pressKey(input: any, key: string, keyCode: number, modifiers = 0) {
+async function pressKey(input: CDPInput, key: string, keyCode: number, modifiers = 0) {
   await input.dispatchKeyEvent({ type: "rawKeyDown", key, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers });
   await sleep(30);
   await input.dispatchKeyEvent({ type: "keyUp", key, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers });
 }
 
-async function clickAt(input: any, x: number, y: number) {
+async function clickAt(input: CDPInput, x: number, y: number) {
   await input.dispatchMouseEvent({ type: "mousePressed", x, y, button: "left", clickCount: 1 });
   await sleep(30);
   await input.dispatchMouseEvent({ type: "mouseReleased", x, y, button: "left", clickCount: 1 });

@@ -8,21 +8,19 @@
  *   npx tsx renderer/html2slides/browser/_smoke.ts
  *   FIXTURES=slide_07.html,slide_25.html npx tsx renderer/html2slides/browser/_smoke.ts
  */
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync } from "fs";
 import { resolve, join } from "path";
+import type {
+  CdpModule,
+  CdpConsoleApiEvent,
+  CdpExceptionThrownEvent,
+  CdpRemoteObject,
+} from "../../../types/cdp-types.ts";
 
-// chrome-remote-interface ships no .d.ts. Narrow the boundary cast once.
-interface CDPStatic {
-  New(opts: { port: number; url?: string }): Promise<{ id: string }>;
-  Close(opts: { port: number; id: string }): Promise<void>;
-}
-interface CDPRemoteObject { value?: unknown; description?: string; preview?: unknown }
-interface CDPConsoleEvent { type: string; args: CDPRemoteObject[] }
-interface CDPExceptionEvent { exceptionDetails: { exception?: { description?: string }; text: string } }
-// SAFETY: chrome-remote-interface ships no .d.ts; CDPStatic mirrors the
-// documented signature of the two static methods (New/Close) we invoke.
-const CDPS = CDP as unknown as CDPStatic;
+// chrome-remote-interface ships no .d.ts; its default export is declared
+// `unknown` (types/ambient.d.ts). Narrow it to the typed boundary once.
+const CDP = CDPraw as CdpModule;
 
 const PORT = 9222;
 const HTML_PATH = resolve("/workspaces/sashaslides/dist/renderer/html2slides/browser/html2slides.html");
@@ -36,7 +34,7 @@ async function main() {
   if (!existsSync(HTML_PATH)) throw new Error("missing " + HTML_PATH);
   mkdirSync(OUT_DIR, { recursive: true });
 
-  const target = await CDPS.New({ port: PORT, url: "about:blank" });
+  const target = await CDP.New({ port: PORT, url: "about:blank" });
   const client = await CDP({ target, port: PORT });
   const { Page, Runtime } = client;
   await Page.enable();
@@ -44,10 +42,10 @@ async function main() {
 
   const logs: string[] = [];
   const errors: string[] = [];
-  Runtime.consoleAPICalled((p: CDPConsoleEvent) => {
-    logs.push(`[${p.type}] ${p.args.map((a: CDPRemoteObject) => a.value ?? a.description ?? JSON.stringify(a.preview)).join(" ")}`);
+  Runtime.consoleAPICalled((p: CdpConsoleApiEvent) => {
+    logs.push(`[${p.type}] ${p.args.map((a: CdpRemoteObject) => a.value ?? a.description ?? JSON.stringify(a.preview)).join(" ")}`);
   });
-  Runtime.exceptionThrown((p: CDPExceptionEvent) => {
+  Runtime.exceptionThrown((p: CdpExceptionThrownEvent) => {
     errors.push("EXC: " + (p.exceptionDetails.exception?.description || p.exceptionDetails.text));
   });
 
@@ -113,7 +111,8 @@ async function main() {
       expression: `window.__downloadBytes ? window.__downloadBytes.byteLength : 0`,
       returnByValue: true,
     });
-    if (r.result.value > 0) { bytes = r.result.value; break; }
+    const byteLen = r.result.value;
+    if (typeof byteLen === "number" && byteLen > 0) { bytes = byteLen; break; }
     await new Promise(r => setTimeout(r, 500));
   }
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
@@ -141,7 +140,7 @@ async function main() {
   }
 
   await client.close();
-  await CDPS.Close({ port: PORT, id: target.id });
+  await CDP.Close({ port: PORT, id: target.id });
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

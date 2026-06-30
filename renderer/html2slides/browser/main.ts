@@ -22,6 +22,7 @@ interface FSWritable {
   close(): Promise<void>;
 }
 interface FSFileHandle {
+  readonly kind: "file";
   getFile(): Promise<File>;
   createWritable(opts?: { keepExistingData?: boolean; mode?: "exclusive" | "siloed" }): Promise<FSWritable>;
 }
@@ -71,7 +72,10 @@ function setProgress(done: number, total: number, label = "") {
 }
 
 function downloadBytes(bytes: Uint8Array, name: string): void {
-  const blob = new Blob([bytes], {
+  // pptxgenjs/JSZip produce a Uint8Array over a real ArrayBuffer in the
+  // browser; narrow the generic buffer param (default ArrayBufferLike includes
+  // SharedArrayBuffer, which Blob's BufferSource rejects) at the API boundary.
+  const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], {
     type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   });
   const url = URL.createObjectURL(blob);
@@ -100,7 +104,7 @@ async function copyPptxToClipboard(bytes: Uint8Array, name: string): Promise<voi
     log("clipboard API unavailable — copy skipped (download completed)", "warn");
     return;
   }
-  const blob = new Blob([bytes], { type: PPTX_MIME });
+  const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: PPTX_MIME });
   try {
     await clip.write([new ClipboardItem({ [PPTX_MIME]: blob })]);
     log(`copied ${name} to clipboard`);

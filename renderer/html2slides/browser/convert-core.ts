@@ -122,7 +122,10 @@ function runExtractInIframe(iframe: HTMLIFrameElement): Extraction {
 async function rasterizeVisuals(iframe: HTMLIFrameElement, extraction: Extraction, log: LogFn, scale: number): Promise<Map<number, Uint8Array>> {
   const out = new Map<number, Uint8Array>();
   const idoc = iframe.contentDocument!;
-  const iwin = iframe.contentWindow!;
+  // `contentWindow` is typed `Window` (WindowProxy), but a same-origin iframe's
+  // window also exposes the global DOM constructors (`HTMLImageElement`, …) that
+  // `instanceof` checks need — those live on `typeof globalThis`.
+  const iwin = iframe.contentWindow! as Window & typeof globalThis;
   for (let i = 0; i < extraction.elements.length; i++) {
     const el = extraction.elements[i];
     if (el.type !== "visual" && el.type !== "image") continue;
@@ -140,7 +143,7 @@ async function rasterizeVisuals(iframe: HTMLIFrameElement, extraction: Extractio
 
 async function rasterizeElement(
   idoc: Document,
-  iwin: Window,
+  iwin: Window & typeof globalThis,
   el: ExtractedElement,
   tag: string,
   log: LogFn,

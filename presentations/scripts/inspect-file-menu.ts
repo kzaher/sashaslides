@@ -1,4 +1,4 @@
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 
 async function main() {
   const targets = await CDP.List({ port: 9222 });

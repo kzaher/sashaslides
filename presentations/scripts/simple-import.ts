@@ -100,6 +100,7 @@ async function importSlides() {
     const importResult = await page.evaluate(() => {
       const btns = document.querySelectorAll("button, [role='button']");
       for (const b of btns) {
+        if (!(b instanceof HTMLElement)) continue;
         if (b.textContent?.trim() === "Import slides") {
           const r = b.getBoundingClientRect();
           if (r.y > 400 && r.width > 0) {

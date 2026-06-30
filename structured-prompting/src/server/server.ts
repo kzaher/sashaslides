@@ -228,10 +228,15 @@ async function handleRetry(rawBody: string, graph: ComputationGraph): Promise<Re
     const cwd = input.cwd ?? process.cwd();
     graph.start(node.id);
     try {
-      const { stdout, stderr } = await runShell({ cmd: input.cmd, cwd, io: realIO, nodeId: node.id });
+      // TODO(types): runShell resolves to the captured stdout string only —
+      // on success stderr is discarded (on failure it is folded into the
+      // thrown StructuredError). The previous `{ stdout, stderr }` destructure
+      // read undefined props off that string; record the stdout tail and leave
+      // stderr empty to match the actual runShell contract.
+      const stdout = await runShell({ cmd: input.cmd, cwd, io: realIO, nodeId: node.id });
       graph.finishOk(node.id, {
         stdoutTail: stdout.slice(-400),
-        stderrTail: stderr.slice(-400),
+        stderrTail: "",
         retried: true,
       });
       return { nodeId: node.id, kind: node.kind, status: "ok", message: "shell command succeeded", resetNodeIds };

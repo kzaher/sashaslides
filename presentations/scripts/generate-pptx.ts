@@ -128,18 +128,27 @@ function parseSlides(md: string): SlideData[] {
       if (line.includes("|") && !line.startsWith("#")) {
         const cells = line.split("|").map((c) => c.trim()).filter(Boolean);
         if (/^[\s|:-]+$/.test(line)) continue;
+        // `started` lets `inTable = true` flow forward to the append check
+        // within this iteration (instead of only via the loop back-edge after
+        // a `continue`), which is what TS's control-flow analysis needs to
+        // prove the append block reachable — otherwise it narrows `table` to
+        // `never` and rejects the spread. Behaviour is identical to the prior
+        // start-then-continue / append-then-continue structure.
+        let started = false;
         if (!inTable) {
           const next = lines[li + 1];
           if (next && /^[\s|:-]+$/.test(next)) {
             table = { headers: cells, rows: [] };
             inTable = true;
-            continue;
+            started = true;
           }
         }
-        if (inTable && table) {
+        let consumed = started;
+        if (!started && inTable && table) {
           table = { ...table, rows: [...table.rows, cells] };
-          continue;
+          consumed = true;
         }
+        if (consumed) continue;
       } else {
         inTable = false;
       }

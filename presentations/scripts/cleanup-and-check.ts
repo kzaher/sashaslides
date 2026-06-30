@@ -1,8 +1,13 @@
 /**
  * Close broken tabs and screenshot the actual original presentation.
  */
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import { writeFileSync } from "node:fs";
+import type { CdpModule } from "../../types/cdp-types.ts";
+
+// chrome-remote-interface ships no .d.ts (its default export is `unknown` —
+// see types/ambient.d.ts). Narrow it once to the precise CdpModule surface.
+const CDP = CDPraw as CdpModule;
 
 async function main() {
   const targets = await CDP.List({ port: 9222 });

@@ -12,8 +12,11 @@
  *
  * Artifacts: /tmp/e2e-br/NN_*.png  and  /tmp/e2e-br/console.log
  */
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import type { CdpModule } from "../../../types/cdp-types.ts";
+
+const CDP = CDPraw as CdpModule;
 
 const PORT = 9222;
 const ROOT = "/workspaces/sashaslides";

@@ -5,7 +5,12 @@
  * Handles the authorization popup flow by detecting the new CDP target.
  */
 
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
+import type { CdpModule, CdpClient } from "../../types/cdp-types.ts";
+
+// chrome-remote-interface ships no .d.ts (its default export is `unknown` —
+// see types/ambient.d.ts). Narrow it once to the precise CdpModule surface.
+const CDP = CDPraw as CdpModule;
 
 const SCRIPT_URL =
   "https://script.google.com/u/0/home/projects/15g4CIxvCH4IHh5a3kGotU8vnPv8_h9nfJbt/edit";
@@ -25,7 +30,7 @@ async function clickAt(input: any, x: number, y: number) {
 }
 
 // Handle OAuth consent flow in a tab
-async function handleAuthTab(client: CDP.Client): Promise<void> {
+async function handleAuthTab(client: CdpClient): Promise<void> {
   const { Runtime, Input } = client;
 
   // Click through the auth flow

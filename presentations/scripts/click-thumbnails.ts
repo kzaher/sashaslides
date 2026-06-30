@@ -1,4 +1,10 @@
-import CDP from "chrome-remote-interface";
+import {
+  cdp as CDP,
+  type CDPClient,
+  type CDPRuntime,
+  type CDPPage,
+  type CDPInput,
+} from "./cdp.ts";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -9,8 +15,8 @@ async function main() {
   const startTime = Date.now();
   console.log("Starting thumbnail click script...");
 
-  let client: CDP.Client | null = null;
-  let Runtime: any, Page: any, Input: any;
+  let client: CDPClient | null = null;
+  let Runtime: CDPRuntime, Page: CDPPage, Input: CDPInput;
 
   try {
     // 1. Connect to Chrome port 9222
@@ -101,7 +107,7 @@ async function main() {
         });
 
         const clicked = result.result.value;
-        if (clicked && clicked > 0) {
+        if (typeof clicked === "number" && clicked > 0) {
           clickedCount = clicked;
           console.log(`Clicked ${clicked} elements using selector: ${selector}`);
           break;

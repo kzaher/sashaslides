@@ -19,9 +19,11 @@
  *   google-chrome-stable --headless=new --remote-debugging-port=9222 \
  *     --no-sandbox --user-data-dir=/home/node/chrome-profile
  */
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import { readFileSync } from "fs";
+import type { CdpModule } from "../../../types/cdp-types.ts";
 
+const CDP = CDPraw as CdpModule;
 const PORT = 9222;
 const ADDON = "/workspaces/sashaslides/dist/renderer/html2slides/addon";
 const U = process.env.UIDX || "0";

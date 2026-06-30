@@ -203,6 +203,20 @@ type Slide = PptxGenJS.Slide;
 type ShapeProps = PptxGenJS.ShapeProps;
 type TextProps = PptxGenJS.TextProps;
 type TextPropsOptions = PptxGenJS.TextPropsOptions;
+type ShapeName = PptxGenJS.SHAPE_NAME;
+type TableCellProps = PptxGenJS.TableCellProps;
+type BorderProps = PptxGenJS.BorderProps;
+type ShapeLineProps = NonNullable<ShapeProps["line"]>;
+// The published pptxgenjs dash-type union omits several valid OOXML
+// `<a:prstDash>` presets (notably "dot"). This file emits those raw OOXML
+// values directly, so the produced dash strings are asserted to the library's
+// (narrower) dashType at the call site. See `asDashType`.
+type DashTypeValue = NonNullable<ShapeLineProps["dashType"]>;
+// TODO(types): pptxgenjs 4.0.1's `dashType` union lacks "dot" (a valid OOXML
+// preset). The runtime passes it through verbatim, so we narrow-assert here.
+function asDashType(value: "solid" | "dash" | "sysDash" | "sysDot" | "dot"): DashTypeValue {
+  return value as DashTypeValue;
+}
 
 // Slide geometry — shared with the IO layer.
 export const SLIDE_W_PX = 1280;
@@ -618,7 +632,7 @@ function emitStyledText(
 // rounded card draws a curve from the outer rect even though the inner
 // fill is flat (slide_01 Professional pricing card).
 function cornerPresetFromRadii(cr: { tl: number; tr: number; br: number; bl: number }):
-  { preset: string; flipH: boolean; flipV: boolean } {
+  { preset: ShapeName; flipH: boolean; flipV: boolean } {
   const mask =
     (cr.tl > 2 ? 1 : 0) |
     (cr.tr > 2 ? 2 : 0) |
@@ -846,15 +860,31 @@ export interface Gradient {
  * `genXmlColorSelection` does the CSS→OOXML angle conversion and `<a:gradFill>` XML.
  * Replaces the old GRAD_<n> objectName tag + `injectGradients` zip post-patch.
  */
+/** Native gradient shape fill, modelled after the OOXML `<a:gradFill>` shape
+ * the vendored pptxgenjs fork accepts. The stock pptxgenjs `ShapeFillProps`
+ * type only models solid/none fills, so `type` is declared wide enough to
+ * remain assignable to it via a structural assertion (no `unknown` bridge
+ * needed). */
+interface NativeGradientFill {
+  readonly type: string;
+  readonly gradient: {
+    readonly angle?: number;
+    readonly type?: string;
+    readonly stops: ReadonlyArray<{ readonly color: string; readonly position: number; readonly alpha?: number }>;
+  };
+}
 function nativeGradientFill(g: Gradient): NonNullable<ShapeProps["fill"]> {
-  return {
+  const fill: NativeGradientFill = {
     type: "gradient",
     gradient: {
       angle: g.angle,
       type: g.type,
       stops: g.stops.map((s) => ({ color: hexToRgb(s.color), position: s.position, alpha: s.alpha })),
     },
-  } as NonNullable<ShapeProps["fill"]>;
+  };
+  // TODO(types): the published pptxgenjs `ShapeFillProps` omits gradient fills
+  // that the fork supports; assert the structurally-compatible shape.
+  return fill as NonNullable<ShapeProps["fill"]>;
 }
 
 export interface BoxShadowLayer {
@@ -888,6 +918,9 @@ export interface ElementStyle {
   readonly paddingRight?: number;
   readonly paddingBottom?: number;
   readonly paddingLeft?: number;
+  readonly bgAlpha?: number;
+  readonly borderRadius?: number;
+  readonly borderSides?: BorderSides;
 }
 
 /** Per-run inline style override. */
@@ -970,7 +1003,7 @@ export interface RectElement extends ElementCommon {
   readonly cornerRadii?: CornerRadii;
   readonly borderUniform?: boolean;
   readonly borderSides?: BorderSides | null;
-  readonly boxShadow?: readonly BoxShadowLayer[] | null;
+  readonly boxShadow?: BoxShadowLayer | null;
 }
 
 export interface TextElement extends ElementCommon {
@@ -1000,6 +1033,10 @@ export interface ListItem {
   readonly bgAlpha?: number;
   readonly borderRadius?: number;
   readonly borderSides?: BorderSides;
+  readonly textAlign?: string;
+  /** Bottom-separator colour for a row-style list item (CSS `border-bottom`),
+   * passed straight to a thin divider line. */
+  readonly borderBottom?: string;
 }
 
 export interface ListElement extends ElementCommon {
@@ -1007,6 +1044,10 @@ export interface ListElement extends ElementCommon {
   readonly items: readonly ListItem[];
   readonly ordered?: boolean;
   readonly anyStyledItem?: boolean;
+  readonly listStyleType?: string;
+  /** True when the <ul>/<ol> is itself the visual (own bg/border/radius or a
+   * majority of items use a border-bottom separator) — rows never get markers. */
+  readonly isContainerList?: boolean;
 }
 
 export interface TableCell {
@@ -1015,17 +1056,22 @@ export interface TableCell {
   readonly bounds?: Bounds;
   readonly bgColor?: string;
   readonly borderSides?: BorderSides;
-  readonly colSpan?: number;
-  readonly rowSpan?: number;
+  readonly colspan?: number;
+  readonly rowspan?: number;
+  readonly isHeader?: boolean;
+  readonly padding?: Padding;
   readonly style?: ElementStyle;
 }
-export interface TableRow {
-  readonly cells: readonly TableCell[];
-  readonly bounds?: Bounds;
-}
+/** A table row is the raw array of its cells (matches extract-dom's emitted
+ * shape). */
+export type TableRow = readonly TableCell[];
 export interface TableElement extends ElementCommon {
   readonly type: "table";
   readonly rows: readonly TableRow[];
+  readonly bgColor?: string;
+  readonly borderRadius?: number;
+  readonly cornerRadii?: CornerRadii;
+  readonly borderSides?: BorderSides | null;
   /** Debug marker — `<table data-shape-render="true|empty">`. When set,
    * the converter renders the table via pure per-cell `addShape` rects
    * + per-edge filled-rect borders (no native `<a:tbl>`). Used to verify
@@ -1055,6 +1101,31 @@ export interface SkipElement extends ElementCommon {
   readonly type: "_skip";
 }
 
+/** CSS border-triangle arrow → pptxgenjs `triangle` preset. */
+export interface TriangleElement extends ElementCommon {
+  readonly type: "triangle";
+  readonly fill?: string | null;
+}
+
+/** A standalone hairline/decorative line. Either endpoint-defined
+ * (`x1/y1/x2/y2`) or a thin decorative strip described by `bounds`. */
+export interface LineElement extends ElementCommon {
+  readonly type: "line";
+  readonly color?: string | null;
+  readonly dashType?: string;
+  readonly strokeWidth?: number;
+  readonly x1?: number;
+  readonly y1?: number;
+  readonly x2?: number;
+  readonly y2?: number;
+}
+
+/** A line break placeholder emitted by extract-dom; carries no geometry the
+ * converter renders. */
+export interface BrElement extends ElementCommon {
+  readonly type: "br";
+}
+
 /** Discriminated union over every variant extract-dom can emit. */
 export type ExtractedElement =
   | RectElement
@@ -1063,12 +1134,17 @@ export type ExtractedElement =
   | TableElement
   | VisualElement
   | ImageElement
+  | TriangleElement
+  | LineElement
+  | BrElement
   | SkipElement;
 
 export interface Extraction {
   readonly viewport: { readonly w: number; readonly h: number };
   readonly elementCount: number;
-  readonly elements: readonly ExtractedElement[];
+  /** Mutable: the emitter replaces merged-away text elements in place with a
+   * `_skip` sentinel (so their index is preserved for the post-pass). */
+  readonly elements: ExtractedElement[];
   /** Workstream E: editable drawio (mxGraph) XML behind this slide's rendered
    * diagram, lifted from the page's `<script
    * type="application/vnd.drawio+xml" id="drawio-source">`. Present ONLY for
@@ -1413,7 +1489,7 @@ export function buildPptx(
           // Per-corner mask → OOXML preset + flips so asymmetric border-radius
           // (e.g. top-only round on a card header) renders correctly rather
           // than getting collapsed into an all-corners roundRect.
-          let cornerPreset: string;
+          let cornerPreset: ShapeName;
           let cornerFlipH = false;
           let cornerFlipV = false;
           if (isCircle) {
@@ -1529,10 +1605,11 @@ export function buildPptx(
             const gid = gradientRegistry.length;
             gradientRegistry.push(el.gradient);
             gradGid = gid;
-            opts.fill = nativeGradientFill(el.gradient);
-            // Keep the GRAD_<n> object name (vestigial — no longer a post-patch
-            // marker) so the migration to native gradient fills is byte-identical
-            // to the prior solidFill+injectGradients output.
+            // Emit a SOLID placeholder fill (first stop). Stock pptxgenjs can't
+            // emit shape gradients, but injectGradientsIntoZip rewrites this
+            // <a:solidFill> into the real <a:gradFill> via the GRAD_<n> tag below.
+            opts.fill = { color: hexToRgb(el.gradient.stops[0].color) };
+            // GRAD_<n> object name marks the shape for the gradient injector.
             opts.objectName = `GRAD_${gid}`;
           } else if (el.fill) {
             const fillOpts: NonNullable<ShapeProps["fill"]> = { color: hexToRgb(el.fill) };
@@ -1558,19 +1635,20 @@ export function buildPptx(
           }
 
           // Border outline (uniform)
-          if (!hasNonUniformBorder && uniform && el.borderWidth > 0 && el.borderColor) {
+          if (!hasNonUniformBorder && uniform && el.borderWidth !== undefined && el.borderWidth > 0 && el.borderColor) {
+            const borderW = el.borderWidth;
             opts.line = {
               color: hexToRgb(el.borderColor),
-              width: Math.min(el.borderWidth * PX2PT, 6),
+              width: Math.min(borderW * PX2PT, 6),
               // Thin (≤2px) dashed borders use the finer sysDash cadence;
               // prstDash="dash" renders 1px hairline dividers as coarse long
               // dashes that don't match the CSS look (slide_33 .out).
-              dashType: el.borderStyle === "dashed" ? (el.borderWidth <= 2 ? "sysDash" : "dash") : el.borderStyle === "dotted" ? "dot" : "solid",
+              dashType: asDashType(el.borderStyle === "dashed" ? (borderW <= 2 ? "sysDash" : "dash") : el.borderStyle === "dotted" ? "dot" : "solid"),
             };
           }
 
           // Box shadow
-          if (el.boxShadow && (el.boxShadow.blur > 0 || el.boxShadow.offsetX !== 0 || el.boxShadow.offsetY !== 0)) {
+          if (el.boxShadow && ((el.boxShadow.blur ?? 0) > 0 || el.boxShadow.offsetX !== 0 || el.boxShadow.offsetY !== 0)) {
             const dx = el.boxShadow.offsetX || 0;
             const dy = el.boxShadow.offsetY || 0;
             // OOXML shadow dir: 0°=east, 90°=south — matches CSS offsetY>0=down
@@ -1579,7 +1657,7 @@ export function buildPptx(
             if (angle < 0) angle += 360;
             opts.shadow = {
               type: "outer",
-              blur: Math.min(el.boxShadow.blur * PX2PT, 30),
+              blur: Math.min((el.boxShadow.blur ?? 0) * PX2PT, 30),
               offset: Math.sqrt(dx * dx + dy * dy) * PX2PT,
               color: hexToRgb(el.boxShadow.color || "#000000"),
               opacity: el.boxShadow.alpha ?? 0.25,
@@ -1743,10 +1821,10 @@ export function buildPptx(
             }
           }
 
-          // Re-sync the native gradient fill from the (possibly angle-mutated)
-          // registry entry so the emitted <a:gradFill> reflects the final, flip/
-          // rotate-compensated orientation.
-          if (gradGid >= 0) opts.fill = nativeGradientFill(gradientRegistry[gradGid]);
+          // Keep the solid placeholder in sync with the (possibly angle-mutated)
+          // registry entry; injectGradientsIntoZip reads the registry directly for
+          // the final <a:gradFill>, so only the first-stop placeholder matters here.
+          if (gradGid >= 0) opts.fill = { color: hexToRgb(gradientRegistry[gradGid].stops[0].color) };
 
           slide.addShape(hostShapeName, opts);
 
@@ -1822,7 +1900,7 @@ export function buildPptx(
                 line: { type: "none" },
               };
               if (sandwichCp.preset !== "rect") {
-                sandwichOuterOpts.rectRadius = px2in(el.borderRadius);
+                sandwichOuterOpts.rectRadius = px2in(el.borderRadius ?? 0);
                 if (sandwichCp.flipH) sandwichOuterOpts.flipH = true;
                 if (sandwichCp.flipV) sandwichOuterOpts.flipV = true;
               }
@@ -2018,7 +2096,9 @@ export function buildPptx(
           };
           // Decorative dashed strips (e.g. slide_33 `.road::before` centerline)
           // carry a dashType from extract-dom.
-          if (el.dashType && el.dashType !== "solid") lineOpts.line!.dashType = el.dashType;
+          // TODO(types): `dashType` is a raw OOXML preset string from extract-dom;
+          // the published pptxgenjs union is narrower than the valid preset set.
+          if (el.dashType && el.dashType !== "solid") lineOpts.line!.dashType = el.dashType as DashTypeValue;
           slide.addShape("line", lineOpts);
           break;
         }
@@ -2089,7 +2169,12 @@ export function buildPptx(
             // SWOT) keeps its prior plain-text rendering untouched.
             const anyDotBullet = noListStyle && !ordered && items.some((it) => !!it.bulletColor && it.bulletIsDot);
             const anyPerItemBulletColor = (!noListStyle && !ordered && items.some((it) => !!it.bulletColor)) || anyDotBullet;
-            const useNativeBullet = !noListStyle && !anyItemHasStyledRuns;
+            // Exclude ORDERED lists from the native autonumber path: pptxgenjs
+            // hardcodes its autonumber buFont to the theme major font (Calibri
+            // Light), so "1." markers render smaller/thinner than the item's
+            // Arial (slide_12). The text-marker fallback (`marker + it.text`)
+            // emits the number in the item's own font/size instead.
+            const useNativeBullet = !noListStyle && !anyItemHasStyledRuns && !ordered;
             const paragraphs = items.map((it: ListItem, ii: number) => {
               const marker = ordered ? `${ii + 1}.  ` : "•  ";
               const markerColor = it.bulletColor || it.color || listStyle.color || "#333333";
@@ -2251,7 +2336,7 @@ export function buildPptx(
                 rectOpts.line = {
                   color: hexToRgb(bs.top.color),
                   width: Math.min((bs.top.width || 0) * PX2PT, 6),
-                  dashType: bs.top.style === "dashed" ? "dash" : bs.top.style === "dotted" ? "dot" : "solid",
+                  dashType: asDashType(bs.top.style === "dashed" ? "dash" : bs.top.style === "dotted" ? "dot" : "solid"),
                 };
               }
               const rounded = it.borderRadius && it.borderRadius > 0;
@@ -2637,7 +2722,7 @@ export function buildPptx(
               } else {
                 border = cellBorderTuple(cs, ri, ci, colCnt, rowCount);
               }
-              const cellOpts: TextPropsOptions = {
+              const cellOpts: TableCellProps = {
                 align: cs.textAlign === "center" ? "center" : cs.textAlign === "right" ? "right" : "left",
                 valign: "middle",
                 fontFace: mapFont(cs.fontFamily || "Arial"),
@@ -2645,7 +2730,10 @@ export function buildPptx(
                 color: hexToRgb(cs.color || "#111111"),
                 bold: cs.fontWeight === "bold" || cell.isHeader,
                 italic: cs.fontStyle === "italic",
-                border: border as unknown as TextPropsOptions["border"],
+                // TODO(types): BorderOpt carries "sysDot" (valid OOXML, accepted by
+                // the fork) which the published BorderProps union omits; the tuple
+                // overlaps BorderProps so a direct assertion is type-checked.
+                border: border as [BorderProps, BorderProps, BorderProps, BorderProps],
               };
               const effectiveBg = cs.bgColor || tableBgHex;
               if (!transparent && effectiveBg) cellOpts.fill = { color: hexToRgb(effectiveBg) };
@@ -2663,17 +2751,13 @@ export function buildPptx(
               // pptx can't replicate, so the cell-edge sits flush against
               // slide-bg with no transition. Visually this reads as "text
               // hugs the border" even when CSS padding is honoured.
-              // Floor col-0's marL to ~0.5″ on wide cells to recover the
-              // perceived breathing room.
+              // Honor the cell's CSS padding directly. (A previous col-0 "48px
+              // floor" on wide left-aligned cells — added for box-shadow-halo
+              // wrapper tables — shifted plain tables' first column ~0.5″ right
+              // [slide_15], so it's removed; CSS padding is authoritative.)
               if (cell.padding) {
                 const p = cell.padding;
-                let leftPx = p.left;
-                const cellWidthPx = cell.bounds?.w || 0;
-                const isLeftAligned = cs.textAlign !== "center" && cs.textAlign !== "right";
-                if (ci === 0 && isLeftAligned && cellWidthPx > 200 && p.left < 12) {
-                  leftPx = Math.max(leftPx, 48);
-                }
-                cellOpts.margin = [px2in(p.top), px2in(p.right), px2in(p.bottom), px2in(leftPx)];
+                cellOpts.margin = [px2in(p.top), px2in(p.right), px2in(p.bottom), px2in(p.left)];
               }
               // Styled runs (e.g. `<span class="feature-desc">` rendered
               // as a smaller grey secondary line below the main cell text)
@@ -2819,7 +2903,7 @@ export function buildPptx(
           //   TR cell  → no flip (stays TR)
           //   BL cell  → flipH + flipV (TR→BL)
           //   BR cell  → flipV (TR→BR)
-          const cornerOf = (ri: number, ci: number, colCount: number): { shape: string; flipH?: boolean; flipV?: boolean } | null => {
+          const cornerOf = (ri: number, ci: number, colCount: number): { shape: ShapeName; flipH?: boolean; flipV?: boolean } | null => {
             if (!tableHasRadius) return null;
             if (ri === 0 && ci === 0 && tableCornerRadii.tl > 0) return { shape: "round1Rect", flipH: true };
             if (ri === 0 && ci === colCount - 1 && tableCornerRadii.tr > 0) return { shape: "round1Rect" };
@@ -2839,7 +2923,7 @@ export function buildPptx(
               // rendered as a single outer rounded frame after the loop so
               // individual corner cells stay square — avoids pill-shaped
               // header cells from per-cell rectRadius clipping.
-              const cellR = (cs.borderRadius || 0) > 0 ? cs.borderRadius : 0;
+              const cellR = (cs.borderRadius || 0) > 0 ? (cs.borderRadius ?? 0) : 0;
 
               // Cell background + outer line (pptxgenjs line is uniform; per-side
               // borders are painted as strips below).
@@ -2867,7 +2951,7 @@ export function buildPptx(
               const rounded = cellR > 0;
               if (rounded) rectOpts.rectRadius = px2in(cellR);
               if (corner) {
-                rectOpts.rectRadius = px2in(el.borderRadius);
+                rectOpts.rectRadius = px2in(el.borderRadius ?? 0);
                 if (corner.flipH) rectOpts.flipH = true;
                 if (corner.flipV) rectOpts.flipV = true;
               }
@@ -2876,10 +2960,10 @@ export function buildPptx(
                 rectOpts.line = {
                   color: hexToRgb(bs.top.color),
                   width: Math.min((bs.top.width || 0) * PX2PT, 6),
-                  dashType: bs.top.style === "dashed" ? "dash" : bs.top.style === "dotted" ? "dot" : "solid",
+                  dashType: asDashType(bs.top.style === "dashed" ? "dash" : bs.top.style === "dotted" ? "dot" : "solid"),
                 };
               }
-              const shapeToDraw = corner ? corner.shape : (rounded ? "roundRect" : "rect");
+              const shapeToDraw: ShapeName = corner ? corner.shape : (rounded ? "roundRect" : "rect");
               slide.addShape(shapeToDraw, rectOpts);
 
               // Non-uniform per-side border strips
@@ -2889,7 +2973,7 @@ export function buildPptx(
                   bs.bottom?.width > 0 && bs.bottom?.color ? { x: cb.x, y: cb.y + cb.h - bs.bottom.width, w: cb.w, h: bs.bottom.width, color: bs.bottom.color, style: bs.bottom.style } : null,
                   bs.left?.width > 0 && bs.left?.color ? { x: cb.x, y: cb.y, w: bs.left.width, h: cb.h, color: bs.left.color, style: bs.left.style } : null,
                   bs.right?.width > 0 && bs.right?.color ? { x: cb.x + cb.w - bs.right.width, y: cb.y, w: bs.right.width, h: cb.h, color: bs.right.color, style: bs.right.style } : null,
-                ].filter((s): s is { x: number; y: number; w: number; h: number; color: string; style?: string } => s !== null);
+                ].filter((s): s is { x: number; y: number; w: number; h: number; color: string; style: string | undefined } => s !== null);
                 for (const s of strips) {
                   if (s.style === "dashed" || s.style === "dotted") {
                     // Render dashed/dotted as a line so dashType applies.
@@ -2979,7 +3063,7 @@ export function buildPptx(
               fill: { type: "none" },
             };
             if (tableCp.preset !== "rect") {
-              outlineOpts.rectRadius = px2in(el.borderRadius);
+              outlineOpts.rectRadius = px2in(el.borderRadius ?? 0);
               if (tableCp.flipH) outlineOpts.flipH = true;
               if (tableCp.flipV) outlineOpts.flipV = true;
             }
@@ -3115,7 +3199,7 @@ export function cssAngleToOoxml(cssDeg: number): number {
   return Math.round(ooxml * 60000);
 }
 
-function buildGradFillXml(gradient: { angle?: number; type?: string; stops: { color: string; position: number; alpha?: number }[] }): string {
+function buildGradFillXml(gradient: { readonly angle?: number; readonly type?: string; readonly stops: ReadonlyArray<{ readonly color: string; readonly position: number; readonly alpha?: number }> }): string {
   const gsItems = gradient.stops.map(s => {
     const pos = Math.round(Math.max(0, Math.min(1, s.position)) * 100000);
     const clr = hexToRgb(s.color);

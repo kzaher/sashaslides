@@ -6,7 +6,7 @@
  * Also generates an HTML page for whiteboard-style icon reference.
  */
 
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { writeFileSync, mkdirSync } from "node:fs";
 
 async function main() {

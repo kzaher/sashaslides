@@ -1,4 +1,4 @@
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 

@@ -5,9 +5,37 @@
  * Usage: npx tsx screenshot-pptx.ts <pptx-path> <output-dir> [--presentation <existing-id>]
  */
 
-import CDP from "chrome-remote-interface";
+import CDPDefault from "chrome-remote-interface";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join, resolve, basename } from "path";
+
+// chrome-remote-interface ships no .d.ts (its default export types as
+// `unknown` via types/ambient.d.ts). Narrow the boundary into the methods we
+// actually invoke — the only place untyped CDP becomes typed.
+interface CDPTarget { id: string; url: string; type: string }
+interface CDPEvalResult { result: { value?: unknown; description?: string }; exceptionDetails?: unknown }
+interface CDPRuntime {
+  enable(): Promise<unknown>;
+  evaluate(opts: { expression: string; awaitPromise?: boolean; returnByValue?: boolean }): Promise<CDPEvalResult>;
+}
+interface CDPEmulation {
+  setDeviceMetricsOverride(opts: { width: number; height: number; deviceScaleFactor: number; mobile: boolean }): Promise<unknown>;
+}
+interface CDPPage {
+  enable(): Promise<unknown>;
+  captureScreenshot(opts?: { format?: string; clip?: { x: number; y: number; width: number; height: number; scale?: number }; captureBeyondViewport?: boolean }): Promise<{ data: string }>;
+}
+interface CDPClient {
+  Page: CDPPage;
+  Runtime: CDPRuntime;
+  Emulation: CDPEmulation;
+  close(): Promise<void>;
+}
+interface CDPModule {
+  (opts?: { target?: { id: string; url: string }; port?: number }): Promise<CDPClient>;
+  List(opts: { port: number }): Promise<CDPTarget[]>;
+}
+const CDP = CDPDefault as CDPModule;
 
 const CDP_PORT = 9222;
 
@@ -55,7 +83,7 @@ async function screenshotSlides(tabId: string, outputDir: string, slideCount: nu
     expression: `document.querySelectorAll('.punch-filmstrip-thumbnail').length`,
     returnByValue: true,
   });
-  const count = countResult.value || slideCount;
+  const count = typeof countResult.value === "number" && countResult.value > 0 ? countResult.value : slideCount;
 
   mkdirSync(outputDir, { recursive: true });
   let captured = 0;
@@ -90,10 +118,11 @@ async function screenshotSlides(tabId: string, outputDir: string, slideCount: nu
       returnByValue: true,
     });
 
-    if (canvasResult.value) {
+    const canvasRect = canvasResult.value as { x: number; y: number; width: number; height: number } | null;
+    if (canvasRect) {
       const ss = await Page.captureScreenshot({
         format: "png",
-        clip: { ...canvasResult.value, scale: 2 },
+        clip: { ...canvasRect, scale: 2 },
         captureBeyondViewport: true,
       });
       writeFileSync(join(outputDir, `slide_${String(i + 1).padStart(2, "0")}.png`), Buffer.from(ss.data, "base64"));

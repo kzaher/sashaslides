@@ -4,7 +4,7 @@
  * Then takes screenshots of slides 1, 4, 8, 15 for verification.
  */
 
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { writeFileSync, mkdirSync } from "node:fs";
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
