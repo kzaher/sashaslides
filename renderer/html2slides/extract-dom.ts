@@ -207,7 +207,14 @@ interface ElementStyle {
   alignItems: string;
   backgroundImage: string | null;
   clipPath: string | null;
-  zIndex: number;
+  // null means CSS `z-index: auto` (inherit stacking context) — distinct from
+  // an explicit `0`. See the extraction comment in getStyle.
+  zIndex: number | null;
+  // Padding carried onto text/shape style carriers (baseStyle, pill spans).
+  // Optional because most style objects fold padding into bounds instead.
+  paddingLeft?: number;
+  paddingRight?: number;
+  paddingTop?: number;
   position: string;
   // Box shadow parsed components (null if no shadow). `boxShadow` is the
   // FIRST non-ring layer (used as an OOXML drop-shadow in convert-pptx).
@@ -229,7 +236,9 @@ interface ElementStyle {
 
 interface TextRun {
   text: string;
-  style: {
+  // Optional so a run emitted via conditional spread (`...(r.style ? {…} : {})`)
+  // — which omits the key entirely for unstyled runs — still satisfies the type.
+  style?: {
     color: string | null;
     fontWeight: "bold" | "normal";
     fontStyle: "italic" | "normal";
@@ -254,12 +263,16 @@ interface ListItem {
   text: string;
   runs?: TextRun[];
   bounds?: Bounds;
+  level?: number;
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: "bold" | "normal";
   fontStyle?: "italic" | "normal";
   color?: string | null;
-  bulletColor?: string;
+  textAlign?: string;
+  spacingAfter?: number;
+  marginTop?: number;
+  bulletColor?: string | null;
   // True only when the ::before marker is a CSS-drawn filled DOT
   // (empty content + a non-transparent background, e.g. slide_30 Key
   // Priorities), as opposed to a literal glyph like content:'•' coloured
@@ -271,8 +284,15 @@ interface ListItem {
   padding?: { top: number; right: number; bottom: number; left: number };
   bgColor?: string | null;
   bgAlpha?: number;
+  // border-bottom carries the bottom border COLOUR (or null) — used to detect
+  // row-separator list items.
+  borderBottom?: string | null;
+  borderColor?: string | null;
+  borderWidth?: number;
+  borderStyle?: string;
   borderRadius?: number;
   borderSides?: BorderSides;
+  cornerRadii?: CornerRadii;
 }
 
 interface TableCell {
@@ -324,7 +344,7 @@ interface ExtractedElement {
   // Common
   _domIdx?: number;
   _wasEmojiText?: boolean;
-  zIndex?: number;
+  zIndex?: number | null;
   position?: string;
   rotate?: number;
   naturalWidth?: number;
@@ -361,10 +381,33 @@ interface ExtractedElement {
   ordered?: boolean;
   anyStyledItem?: boolean;
   isContainerList?: boolean;
+  columnCount?: number;
+  listStyleType?: string;
+  hasPseudoBullet?: boolean;
+  pseudoBulletChar?: string | null;
+  pseudoBulletColor?: string | null;
+  // The list container's own box (background / border / radius) so the
+  // converter can paint the wrapping card behind the bulleted rows.
+  containerStyle?: {
+    bgColor: string | null;
+    fillAlpha: number;
+    borderWidth: number;
+    borderColor: string | null;
+    borderStyle: string;
+    borderSides: BorderSides;
+    borderRadius: number;
+    cornerRadii: CornerRadii;
+    padding: { top: number; right: number; bottom: number; left: number };
+  };
   // table
   rows?: TableRow[];
+  bgColor?: string | null;
+  borderCollapse?: string;
+  renderAsShapes?: boolean;
+  shapeRenderEmpty?: boolean;
   // visual / image
   tag?: string;
+  src?: string;
   cornerRadius?: number;
   // Generic clipping context inherited from an `overflow:hidden|clip` ancestor
   // with rounded corners. Stamped onto every pushed element by the walker —
@@ -753,7 +796,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
             color: rgb2hex(p) || "#000000",
             alpha,
           };
-        }).filter(Boolean);
+        }).filter((l): l is NonNullable<typeof l> => l !== null);
         // Ring = offset=0 and spread>0. These can't be expressed as a PPTX
         // shadow effect; emit as concentric halo rects instead.
         const rings = layers
@@ -1085,7 +1128,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     // borderRadius instead. If an <li> has borderBottom AND no other
     // decoration, it reads as a divider between rows, not a card.
     const rowSeparatorCount = items.filter(it =>
-      !!it.borderBottom && !it.bgColor && !(it.borderRadius > 0)
+      !!it.borderBottom && !it.bgColor && !((it.borderRadius ?? 0) > 0)
     ).length;
     const isContainerList = containerHasBox || rowSeparatorCount >= Math.max(1, Math.ceil(items.length / 2));
     return {
@@ -1217,8 +1260,12 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
           const runText = applyTextTransform(rawRunText, cs.textTransform);
           if (parentColumnGapPx > 2 && inlineFlowChildCount > 0 && runText && !/^\s/.test(runText)) {
             const gapFontSize = parseFloat(cs.fontSize) || parentStyle.fontSize || 16;
+            // Convert the flex/grid gap to spaces by the SPACE-GLYPH advance
+            // (~0.28·em for Arial), not the full em — else the gap is ~3.6× too
+            // narrow (slide_07: 40px gap rendered ~13px instead of ~40px).
+            const spaceAdvancePx = gapFontSize * 0.33;
             runs.push({
-              text: " ".repeat(Math.max(1, Math.round(parentColumnGapPx / gapFontSize))),
+              text: " ".repeat(Math.max(1, Math.round(parentColumnGapPx / spaceAdvancePx))),
               style: null,
             });
           }
@@ -1286,8 +1333,9 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
           const mr = parseFloat(cs.marginRight) || 0;
           if (mr > 2 && runText) {
             const gapFontSize = parseFloat(cs.fontSize) || parentStyle.fontSize || 16;
+            const spaceAdvancePx = gapFontSize * 0.33;  // space-glyph advance, not the em
             runs.push({
-              text: " ".repeat(Math.max(1, Math.round(mr / gapFontSize))),
+              text: " ".repeat(Math.max(1, Math.round(mr / spaceAdvancePx))),
               style: null,
             });
           }
@@ -1605,7 +1653,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     }
 
     // Parse gradient if present (use first color as solid fallback too)
-    let gradient = hasLinearGradient ? parseLinearGradient(s.backgroundImage!) : null;
+    let gradient: Gradient | null = hasLinearGradient ? parseLinearGradient(s.backgroundImage!) : null;
     if (gradient && !fill) {
       fill = gradient.stops[0].color; // solid fallback
     }

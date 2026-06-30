@@ -31,10 +31,8 @@ declare const google: {
 // The shared app.js shell (shell.html) exposes the oversampling slider via
 // `window.h2s.bridge.oversampling()` (1-8, default 2). When the sidebar runs
 // inside that shell we honour the slider; standalone we fall back to 2.
-interface H2sBridge { oversampling?: () => number }
-declare global {
-  interface Window { h2s?: { bridge?: H2sBridge } }
-}
+// The `window.h2s` / H2sBridge shape is declared ambiently in ./h2s-host.d.ts
+// (shared with insert-feature.ts).
 
 /** Read the UI oversampling value (clamped [1,8]); default 2 when absent. */
 function uiOversampling(): number {

@@ -7,7 +7,7 @@
  * Usage: npx tsx presentations/scripts/screenshot-slides.ts <presentation-url> [output-dir]
  */
 
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { writeFileSync, mkdirSync } from "node:fs";
 
 async function main() {

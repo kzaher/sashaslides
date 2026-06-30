@@ -3,9 +3,14 @@
  * Connects to the Chrome instance running in the devcontainer.
  */
 
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { CdpModule, CdpClient } from "../../../types/cdp-types.ts";
+
+// chrome-remote-interface ships no .d.ts; its default export is declared
+// `unknown` (types/ambient.d.ts). Narrow it to the typed boundary once.
+const CDP = CDPraw as CdpModule;
 
 export type ScreenshotOptions = Readonly<{
   /** Chrome DevTools Protocol host. Default: localhost */
@@ -56,7 +61,7 @@ export async function screenshotSlide(
   // But we can also use the slide index via the present mode trick
   const slideUrl = buildSlideUrl(presentationUrl, slideIndex);
 
-  let client: CDP.Client | null = null;
+  let client: CdpClient | null = null;
   try {
     client = await CDP({ host: opts.host, port: opts.port });
     const { Page, Emulation, Runtime } = client;

@@ -17,10 +17,96 @@
  *   (google-chrome-stable --headless=new --remote-debugging-port=9222
  *    --no-sandbox --user-data-dir=/home/node/chrome-profile)
  */
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import { execFileSync } from "child_process";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { basename, resolve } from "path";
+
+// chrome-remote-interface ships no .d.ts (its default export is `unknown`; see
+// types/ambient.d.ts). Narrow it once here to the precise subset of the CDP
+// surface this script actually drives — including the DOM domain used to inject
+// the upload file input, which the shared types/cdp-types.ts does not cover.
+interface CdpTarget {
+  id: string;
+  type: string;
+  url: string;
+  webSocketDebuggerUrl?: string;
+}
+interface CdpRemoteResult {
+  result: { value: unknown };
+  exceptionDetails?: unknown;
+}
+interface CdpRuntime {
+  evaluate(params: {
+    expression: string;
+    returnByValue?: boolean;
+    awaitPromise?: boolean;
+  }): Promise<CdpRemoteResult>;
+}
+interface CdpInput {
+  dispatchMouseEvent(params: {
+    type: string;
+    x: number;
+    y: number;
+    button?: string;
+    clickCount?: number;
+  }): Promise<void>;
+  dispatchKeyEvent(params: {
+    type: string;
+    key?: string;
+    windowsVirtualKeyCode?: number;
+  }): Promise<void>;
+  insertText(params: { text: string }): Promise<void>;
+}
+interface CdpPage {
+  enable(): Promise<void>;
+  loadEventFired(): Promise<void>;
+  captureScreenshot(params?: { format?: string }): Promise<{ data: string }>;
+}
+interface CdpDomNode {
+  nodeId: number;
+}
+interface CdpDom {
+  enable(): Promise<void>;
+  getDocument(params: { depth: number }): Promise<{ root: CdpDomNode }>;
+  querySelector(params: {
+    nodeId: number;
+    selector: string;
+  }): Promise<{ nodeId: number }>;
+  setFileInputFiles(params: {
+    files: string[];
+    nodeId: number;
+  }): Promise<void>;
+}
+interface CdpTargetDomain {
+  activateTarget(params: { targetId: string }): Promise<void>;
+}
+interface CdpEmulation {
+  setDeviceMetricsOverride(params: {
+    width: number;
+    height: number;
+    deviceScaleFactor: number;
+    mobile: boolean;
+  }): Promise<void>;
+}
+interface CdpClient {
+  Runtime: CdpRuntime;
+  Input: CdpInput;
+  Page: CdpPage;
+  DOM: CdpDom;
+  Target: CdpTargetDomain;
+  Emulation: CdpEmulation;
+  close(): Promise<void>;
+}
+interface CdpModule {
+  (opts?: { target?: CdpTarget | string; port?: number }): Promise<CdpClient>;
+  New(opts: { port: number; url?: string }): Promise<CdpTarget>;
+  Close(opts: { port: number; id: string }): Promise<void>;
+  List(opts: { port: number }): Promise<CdpTarget[]>;
+}
+// SAFETY: single boundary assertion mapping the untyped default export onto the
+// documented runtime contract above; every call site below is then fully typed.
+const CDP = CDPraw as CdpModule;
 
 const PORT = 9222;
 const ROOT = "/workspaces/sashaslides";

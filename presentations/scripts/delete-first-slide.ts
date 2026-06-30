@@ -1,7 +1,7 @@
 /**
  * Delete the first slide of the original presentation (a leftover blank).
  */
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 

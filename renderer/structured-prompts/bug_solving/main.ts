@@ -77,7 +77,7 @@ import {
   SessionWithResult,
   describeError,
 } from "../../../structured-prompting/src/index.js";
-import type { Result } from "../../../structured-prompting/src/types.js";
+import type { Result } from "../../../structured-prompting/src/index.js";
 import { writeFileSync, readFileSync, readdirSync, copyFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 

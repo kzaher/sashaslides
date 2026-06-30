@@ -1,7 +1,10 @@
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import { readFileSync } from "fs";
 import { transformSync } from "esbuild";
 import { resolve } from "path";
+import type { CdpModule } from "./types/cdp-types.ts";
+
+const CDP = CDPraw as CdpModule;
 
 const EXTRACT_TS = readFileSync("analysis/renderer/html2slides/extract-dom.ts", "utf-8");
 const EXTRACT_JS = transformSync(EXTRACT_TS, { loader: "ts", target: "es2020" }).code;

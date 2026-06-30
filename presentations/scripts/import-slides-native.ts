@@ -13,7 +13,7 @@
  * 5. Delete the original plain slides (they'll be at the start)
  */
 
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 

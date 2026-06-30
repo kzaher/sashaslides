@@ -479,7 +479,14 @@ export class SessionWithResult<T> extends Session {
     prompt: PromptInput<T>;
     schema?: IJsonSchemaUnit;
   }): SessionWithResult<unknown> {
-    return super.send(args);
+    // The base `send` is typed over `PromptInput<unknown>`; a `PromptInput<T>`
+    // only differs in the (contravariant) prompt-fn parameter, which the engine
+    // always invokes with the matching upstream `T` at runtime — so widening the
+    // prompt type to delegate to the base implementation is sound.
+    return super.send<unknown>(args as CommonSendArguments & {
+      prompt: PromptInput<unknown>;
+      schema?: IJsonSchemaUnit;
+    });
   }
 
   /** Describe a shell command whose string form depends on the upstream result. */

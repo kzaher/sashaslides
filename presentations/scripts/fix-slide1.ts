@@ -1,4 +1,4 @@
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 
 async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 

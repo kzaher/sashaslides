@@ -11,7 +11,7 @@
  * Usage: npx tsx apply-backgrounds.ts [image-dir] [slide-count]
  */
 
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { createServer } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";

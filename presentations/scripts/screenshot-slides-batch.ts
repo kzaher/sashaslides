@@ -1,5 +1,36 @@
-import CDP from "chrome-remote-interface";
+import CDPDefault from "chrome-remote-interface";
 import { writeFileSync } from "node:fs";
+
+// chrome-remote-interface ships no .d.ts (its default export types as
+// `unknown` via types/ambient.d.ts). Narrow the boundary into the methods we
+// actually invoke — the only place untyped CDP becomes typed.
+interface CDPTarget { id: string; url: string; type: string }
+interface CDPEvalResult { result: { value?: unknown; description?: string }; exceptionDetails?: unknown }
+interface CDPRuntime {
+  evaluate(opts: { expression: string; awaitPromise?: boolean; returnByValue?: boolean }): Promise<CDPEvalResult>;
+}
+interface CDPInput {
+  dispatchMouseEvent(opts: Record<string, unknown>): Promise<unknown>;
+}
+interface CDPPage {
+  enable(): Promise<unknown>;
+  captureScreenshot(opts?: { format?: string }): Promise<{ data: string }>;
+}
+interface CDPTargetDomain {
+  activateTarget(opts: { targetId: string }): Promise<unknown>;
+}
+interface CDPClient {
+  Runtime: CDPRuntime;
+  Input: CDPInput;
+  Page: CDPPage;
+  Target: CDPTargetDomain;
+  close(): Promise<void>;
+}
+interface CDPModule {
+  (opts?: { target?: { id: string; url: string }; port?: number }): Promise<CDPClient>;
+  List(opts: { port: number }): Promise<CDPTarget[]>;
+}
+const CDP = CDPDefault as CDPModule;
 
 async function main() {
   const nums = process.argv.slice(2).map(Number);
@@ -29,7 +60,7 @@ async function main() {
       })()`,
       returnByValue: true,
     }).then(async (r) => {
-      const pos = r.result.value as any;
+      const pos = r.result.value as { x: number; y: number } | null;
       if (pos) {
         await Input.dispatchMouseEvent({ type: "mousePressed", x: pos.x, y: pos.y, button: "left", clickCount: 1 });
         await Input.dispatchMouseEvent({ type: "mouseReleased", x: pos.x, y: pos.y, button: "left", clickCount: 1 });

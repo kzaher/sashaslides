@@ -1,5 +1,8 @@
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import * as fs from "fs";
+import type { CdpModule } from "../../types/cdp-types.ts";
+
+const CDP = CDPraw as CdpModule;
 
 const startTime = Date.now();
 

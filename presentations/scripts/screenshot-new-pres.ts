@@ -1,5 +1,32 @@
-import CDP from "chrome-remote-interface";
+import CDPDefault from "chrome-remote-interface";
 import { writeFileSync, mkdirSync } from "node:fs";
+
+// chrome-remote-interface ships no .d.ts (its default export types as
+// `unknown` via types/ambient.d.ts). Narrow the boundary into the methods we
+// actually invoke — the only place untyped CDP becomes typed.
+interface CDPTarget { id: string; url: string; type: string }
+interface CDPEvalResult { result: { value?: unknown; description?: string }; exceptionDetails?: unknown }
+interface CDPRuntime {
+  evaluate(opts: { expression: string; awaitPromise?: boolean; returnByValue?: boolean }): Promise<CDPEvalResult>;
+}
+interface CDPInput {
+  dispatchMouseEvent(opts: Record<string, unknown>): Promise<unknown>;
+}
+interface CDPPage {
+  enable(): Promise<unknown>;
+  captureScreenshot(opts?: { format?: string }): Promise<{ data: string }>;
+}
+interface CDPClient {
+  Runtime: CDPRuntime;
+  Input: CDPInput;
+  Page: CDPPage;
+  close(): Promise<void>;
+}
+interface CDPModule {
+  (opts?: { target?: { id: string; url: string }; port?: number }): Promise<CDPClient>;
+  List(opts: { port: number }): Promise<CDPTarget[]>;
+}
+const CDP = CDPDefault as CDPModule;
 
 async function main() {
   const slideNum = parseInt(process.argv[2] ?? "1", 10);

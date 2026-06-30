@@ -12,7 +12,12 @@
  * 4. Delete the leftover first slide
  */
 
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
+import type { CdpModule, CdpClient } from "../../types/cdp-types.ts";
+
+// chrome-remote-interface ships no .d.ts (its default export is `unknown` —
+// see types/ambient.d.ts). Narrow it once to the precise CdpModule surface.
+const CDP = CDPraw as CdpModule;
 
 const ORIGINAL_ID = "1xegFC0RQiZd-WaRogVOfSHVqmOFUVPbHUsOHSzPKUUY";
 const STYLED_ID = "1yYcZXgK2MGr7kdvt613iX7f7GJwmnG1D";
@@ -52,7 +57,7 @@ async function getSlideCount(runtime: any): Promise<number> {
   return result.result.value as number;
 }
 
-async function focusPresentationTab(id: string): Promise<CDP.Client> {
+async function focusPresentationTab(id: string): Promise<CdpClient> {
   const targets = await CDP.List({ port: 9222 });
   let tab = targets.find(
     (t: { type: string; url: string }) =>

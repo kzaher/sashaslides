@@ -8,15 +8,18 @@
  * Processes slides in parallel batches for speed.
  */
 
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import { writeFileSync, mkdirSync, readdirSync } from "fs";
 import { join, resolve } from "path";
+import type { CdpModule } from "../../types/cdp-types.ts";
+
+const CDP = CDPraw as CdpModule;
 
 const CDP_PORT = 9222;
 const BATCH_SIZE = 5; // parallel tabs at once
 
 async function screenshotOne(filePath: string, outPath: string): Promise<void> {
-  const tab = await (CDP as any).New({ port: CDP_PORT, url: `file://${filePath}` });
+  const tab = await CDP.New({ port: CDP_PORT, url: `file://${filePath}` });
   try {
     const client = await CDP({ target: tab, port: CDP_PORT });
     const { Page, Emulation, Runtime } = client;
@@ -34,7 +37,7 @@ async function screenshotOne(filePath: string, outPath: string): Promise<void> {
     writeFileSync(outPath, Buffer.from(screenshot.data, "base64"));
     await client.close();
   } finally {
-    await (CDP as any).Close({ port: CDP_PORT, id: tab.id }).catch(() => {});
+    await CDP.Close({ port: CDP_PORT, id: tab.id }).catch(() => {});
   }
 }
 

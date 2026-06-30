@@ -1,5 +1,11 @@
 import CDP from "chrome-remote-interface";
 import fs from "fs";
+import type { CDPClient, CDPStatic } from "./cdp-types.ts";
+
+// SAFETY: chrome-remote-interface ships no .d.ts (default export typed
+// `unknown` in types/ambient.d.ts). Asserting that `unknown` to the local
+// `CDPStatic` narrows the documented connect-fn we invoke.
+const CDPS: CDPStatic = CDP as CDPStatic;
 
 const TAB_ID = "1xegFC0RQiZd";
 const MAX_ITERATIONS = 50;
@@ -7,9 +13,9 @@ const STABILIZE_THRESHOLD = 3;
 const TARGET_SLIDES = 38;
 
 async function main() {
-  let client;
+  let client: CDPClient | undefined;
   try {
-    client = await CDP({ port: 9222 });
+    client = await CDPS({ port: 9222 });
 
     const { Target, Page, Input, Runtime } = client;
 
@@ -38,7 +44,7 @@ async function main() {
 
     await new Promise((r) => setTimeout(r, 2000));
 
-    const pageUrl = await TargetRuntime.evaluate({
+    const pageUrl = await TargetRuntime.evaluate<string>({
       expression: "window.location.href",
     }).then((r) => r.result.value);
     console.log(`Connected to: ${pageUrl}`);
@@ -53,10 +59,10 @@ async function main() {
     }).then((r) => r.result.value);
     console.log(`Page elements:`, bodyInfo);
 
-    let startCount = await TargetRuntime.evaluate({
+    let startCount = await TargetRuntime.evaluate<number>({
       expression:
         "document.querySelectorAll('[data-slide-id]').length",
-    }).then((r) => r.result.value);
+    }).then((r) => r.result.value ?? 0);
 
     console.log(`Starting slide count: ${startCount}`);
 
@@ -116,11 +122,11 @@ async function main() {
 
       await new Promise((r) => setTimeout(r, 200));
 
-      const currentCountResult = await TargetRuntime.evaluate({
+      const currentCountResult = await TargetRuntime.evaluate<number>({
         expression:
           "document.querySelectorAll('.punch-filmstrip-thumbnail').length",
       });
-      const currentCount = currentCountResult.result.value;
+      const currentCount = currentCountResult.result.value ?? 0;
 
       previousCounts.push(currentCount);
       if (previousCounts.length > STABILIZE_THRESHOLD) {

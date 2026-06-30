@@ -5,7 +5,7 @@
  * rendered through Chrome. Creates a library of icons for use in the presentation.
  */
 
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { writeFileSync, mkdirSync } from "node:fs";
 
 type IconDef = {

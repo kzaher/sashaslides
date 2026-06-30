@@ -17,12 +17,18 @@
  */
 
 import CDP from "chrome-remote-interface";
+import type { CDPClient, CDPInput, CDPStatic } from "./cdp-types.ts";
+
+// SAFETY: chrome-remote-interface ships no .d.ts (default export typed
+// `unknown` in types/ambient.d.ts). Asserting that `unknown` to the local
+// `CDPStatic` narrows the documented connect-fn + static methods we invoke.
+const CDPS: CDPStatic = CDP as CDPStatic;
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function pressKey(input: any, key: string, keyCode: number, modifiers = 0) {
+async function pressKey(input: CDPInput, key: string, keyCode: number, modifiers = 0) {
   await input.dispatchKeyEvent({
     type: "rawKeyDown",
     key,
@@ -40,7 +46,7 @@ async function pressKey(input: any, key: string, keyCode: number, modifiers = 0)
   });
 }
 
-async function clickAt(input: any, x: number, y: number) {
+async function clickAt(input: CDPInput, x: number, y: number) {
   await input.dispatchMouseEvent({ type: "mousePressed", x, y, button: "left", clickCount: 1 });
   await sleep(30);
   await input.dispatchMouseEvent({ type: "mouseReleased", x, y, button: "left", clickCount: 1 });
@@ -48,7 +54,7 @@ async function clickAt(input: any, x: number, y: number) {
 
 // ── Apply background to current slide ──────────────────────────────────────
 
-async function applyBackground(client: CDP.Client, color: string) {
+async function applyBackground(client: CDPClient, color: string) {
   const { Runtime, Input } = client;
 
   // Click "Background..." button in the toolbar
@@ -205,7 +211,7 @@ async function applyBackground(client: CDP.Client, color: string) {
 
 // ── Change font of selected text ───────────────────────────────────────────
 
-async function changeFont(client: CDP.Client, fontName: string) {
+async function changeFont(client: CDPClient, fontName: string) {
   const { Runtime, Input } = client;
 
   // Click on the font dropdown in the toolbar
@@ -242,7 +248,7 @@ async function changeFont(client: CDP.Client, fontName: string) {
 
 // ── Change font color of selected text ─────────────────────────────────────
 
-async function changeFontColor(client: CDP.Client, color: string) {
+async function changeFontColor(client: CDPClient, color: string) {
   const { Runtime, Input } = client;
 
   // Find the font color button (usually has a colored underline)
@@ -347,7 +353,7 @@ async function changeFontColor(client: CDP.Client, color: string) {
 // ── Style a single text element (title or body) ────────────────────────────
 
 async function styleTextElement(
-  client: CDP.Client,
+  client: CDPClient,
   fontName: string,
   color: string,
   fontSize?: number
@@ -370,7 +376,7 @@ async function styleTextElement(
   }
 }
 
-async function changeFontSize(client: CDP.Client, size: number) {
+async function changeFontSize(client: CDPClient, size: number) {
   const { Runtime, Input } = client;
 
   const sizeResult = await Runtime.evaluate({
@@ -404,17 +410,16 @@ async function changeFontSize(client: CDP.Client, size: number) {
 async function main() {
   const slideCount = parseInt(process.argv[2] ?? "19", 10);
 
-  const targets = await CDP.List({ port: 9222 });
+  const targets = await CDPS.List({ port: 9222 });
   const tab = targets.find(
-    (t: { type: string; url: string }) =>
-      t.type === "page" && t.url.includes("docs.google.com/presentation")
+    (t) => t.type === "page" && t.url.includes("docs.google.com/presentation")
   );
   if (!tab) {
     console.error("No Slides tab found");
     process.exit(1);
   }
 
-  const client = await CDP({ target: tab });
+  const client = await CDPS({ target: tab });
   const { Runtime, Input } = client;
 
   // First, apply background to ALL slides at once

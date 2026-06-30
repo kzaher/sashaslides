@@ -5,7 +5,7 @@
  * Searches for presentation.pptx and opens it.
  */
 
-import CDP from "chrome-remote-interface";
+import { cdp as CDP, type CDPInput } from "./cdp.ts";
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 

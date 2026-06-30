@@ -13,13 +13,44 @@ const driveApi = google.drive({ version: "v3", auth: oauth2 });
 const EMU = 914400;
 const PX2EMU = 9144000 / 1280;
 
+// chrome-remote-interface ships no .d.ts (its default export types as `unknown`
+// via types/ambient.d.ts). Describe the connect-fn + the runtime-attached static
+// methods we call as a precise interface and narrow the boundary value into it.
+interface CDPTab {
+  id: string;
+}
+interface CDPClient {
+  Page: {
+    enable(): Promise<void>;
+    captureScreenshot(opts: {
+      format: "png" | "jpeg";
+      clip: { x: number; y: number; width: number; height: number; scale: number };
+    }): Promise<{ data: string }>;
+  };
+  Emulation: {
+    setDeviceMetricsOverride(opts: {
+      width: number;
+      height: number;
+      deviceScaleFactor: number;
+      mobile: boolean;
+    }): Promise<void>;
+  };
+  close(): Promise<void>;
+}
+interface CDPModule {
+  (opts: { target: CDPTab; port: number }): Promise<CDPClient>;
+  New(opts: { port: number; url?: string }): Promise<CDPTab>;
+  Close(opts: { port: number; id: string }): Promise<void>;
+}
+const cdp = CDP as CDPModule;
+
 async function renderSvgToPng(svgHtml: string, w: number, h: number): Promise<Buffer> {
-  const tab = await (CDP as any).New({
+  const tab = await cdp.New({
     port: 9222,
     url: `data:text/html,${encodeURIComponent(svgHtml)}`,
   });
   await new Promise(r => setTimeout(r, 500));
-  const client = await CDP({ target: tab, port: 9222 });
+  const client = await cdp({ target: tab, port: 9222 });
   const { Page, Emulation } = client;
   await Page.enable();
   await Emulation.setDeviceMetricsOverride({ width: w, height: h, deviceScaleFactor: 2, mobile: false });
@@ -29,7 +60,7 @@ async function renderSvgToPng(svgHtml: string, w: number, h: number): Promise<Bu
     clip: { x: 0, y: 0, width: w, height: h, scale: 2 },
   });
   await client.close();
-  await (CDP as any).Close({ port: 9222, id: tab.id });
+  await cdp.Close({ port: 9222, id: tab.id });
   return Buffer.from(ss.data, "base64");
 }
 

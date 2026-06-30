@@ -1,4 +1,4 @@
-import CDP from 'chrome-remote-interface';
+import { cdp as CDP } from './cdp.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -8,10 +8,10 @@ import * as path from 'path';
 
   // Find target with 1xegFC0RQiZd
   const targetInfos = await CDP.List({ port: 9222 });
-  const target = targetInfos.find((t: any) => t.url.includes('1xegFC0RQiZd')) || targetInfos[0];
+  const target = targetInfos.find((t) => t.url.includes('1xegFC0RQiZd')) || targetInfos[0];
 
   // Reconnect to specific tab
-  const tabProtocol = await CDP({ target: (target as any).webSocketDebuggerUrl });
+  const tabProtocol = await CDP({ target: target.webSocketDebuggerUrl });
   const { Runtime: R, Page: P } = tabProtocol;
 
   await P.enable();

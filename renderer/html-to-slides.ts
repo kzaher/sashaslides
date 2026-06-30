@@ -100,7 +100,12 @@ function htmlToCdpCommands(
       { timeout: 30000, maxBuffer: 10 * 1024 * 1024, encoding: "utf-8" }
     );
   } catch (err) {
-    output = err.stdout?.toString() || "[]";
+    // execSync throws an Error carrying the captured `stdout` buffer.
+    const stdout =
+      err instanceof Error && "stdout" in err
+        ? (err as Error & { stdout?: { toString(): string } }).stdout
+        : undefined;
+    output = stdout?.toString() || "[]";
   }
 
   const timeMs = Date.now() - start;
@@ -187,21 +192,42 @@ interface CDPPage {
   captureScreenshot(opts?: { format?: string; clip?: { x: number; y: number; width: number; height: number; scale?: number }; captureBeyondViewport?: boolean }): Promise<{ data: string }>;
   loadEventFired?(): Promise<unknown>;
 }
+interface CDPEmulation {
+  setDeviceMetricsOverride(opts: { width: number; height: number; deviceScaleFactor: number; mobile: boolean }): Promise<unknown>;
+}
 interface CDPClient {
   Runtime: CDPRuntime;
   Input: CDPInput;
   Page: CDPPage;
+  Emulation: CDPEmulation;
   close(): Promise<void>;
 }
 interface CDPTarget { id: string; url: string; type: string }
 interface CDPStatic {
+  (opts?: { target?: CDPTarget; port?: number }): Promise<CDPClient>;
   New(opts: { port: number; url?: string; targetId?: string }): Promise<CDPTarget>;
   List(opts: { port: number }): Promise<CDPTarget[]>;
   Close(opts: { port: number; id: string }): Promise<void>;
 }
 // SAFETY: chrome-remote-interface ships no .d.ts; CDPStatic mirrors the
-// documented signature of the three static methods (New/List/Close) we invoke.
-const CDPS = CDP as unknown as CDPStatic;
+// documented contract — the default export is callable to open a client and
+// also carries the New/List/Close static methods we invoke. `CDP` is typed
+// `unknown` by the ambient declaration, so a single assertion narrows it.
+const CDPS: CDPStatic = CDP as CDPStatic;
+
+// Validates a `Runtime.evaluate` result (typed `unknown`) into a screenshot
+// clip rectangle before it is spread into `Page.captureScreenshot`.
+interface ClipRect { x: number; y: number; width: number; height: number }
+function isClipRect(v: unknown): v is ClipRect {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.x === "number" &&
+    typeof r.y === "number" &&
+    typeof r.width === "number" &&
+    typeof r.height === "number"
+  );
+}
 
 async function executeCdpCommands(
   commands: CdpCommand[],
@@ -354,7 +380,7 @@ async function executeCdpCommands(
           errors.push(`Unknown command: ${cmd.action}`);
       }
     } catch (err) {
-      errors.push(`${cmd.action}: ${err.message}`);
+      errors.push(`${cmd.action}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -506,7 +532,7 @@ async function main() {
   // Step 2: Connect to Chrome and execute commands
   console.log("\nPhase 2: Executing CDP commands in Google Slides...");
 
-  const targets: CDPTarget[] = await CDP.List({ port: CDP_PORT });
+  const targets: CDPTarget[] = await CDPS.List({ port: CDP_PORT });
   let tab: CDPTarget | undefined;
 
   if (presId) {
@@ -534,7 +560,7 @@ async function main() {
     }
   }
 
-  const client = await CDP({ target: tab, port: CDP_PORT });
+  const client = await CDPS({ target: tab, port: CDP_PORT });
   const { Page, Runtime, Input, Emulation } = client;
 
   await Page.enable();
@@ -563,7 +589,9 @@ async function main() {
     returnByValue: true,
   });
 
-  const needed = htmlFiles.length - (existingCount.result.value || 1);
+  const existingValue = existingCount.result.value;
+  const existing = typeof existingValue === "number" && existingValue ? existingValue : 1;
+  const needed = htmlFiles.length - existing;
   if (needed > 0) {
     console.log(`  Creating ${needed} additional slides...`);
     await createBlankSlides(Runtime, Input, needed + 1);
@@ -635,10 +663,11 @@ async function main() {
       returnByValue: true,
     });
 
-    if (canvas.result.value) {
+    const canvasRect = canvas.result.value;
+    if (isClipRect(canvasRect)) {
       const screenshot = await Page.captureScreenshot({
         format: "png",
-        clip: { ...canvas.result.value, scale: 2 },
+        clip: { ...canvasRect, scale: 2 },
         captureBeyondViewport: true,
       });
       writeFileSync(

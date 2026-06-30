@@ -9,20 +9,16 @@
  * Usage: npx tsx render-preview.ts <extractions.json> <output-dir>
  */
 
-import CDP from "chrome-remote-interface";
+import CDPraw from "chrome-remote-interface";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
+import type { CdpModule } from "../../types/cdp-types.ts";
 
 const CDP_PORT = 9222;
 
-// chrome-remote-interface has no .d.ts — narrow at the boundary.
-interface CDPStatic {
-  New(opts: { port: number; url?: string }): Promise<{ id: string }>;
-  Close(opts: { port: number; id: string }): Promise<void>;
-}
-// SAFETY: chrome-remote-interface ships no .d.ts; CDPStatic mirrors the
-// documented signature of the two static methods (New/Close) we invoke.
-const CDPS = CDP as unknown as CDPStatic;
+// chrome-remote-interface ships no .d.ts (its default export is `unknown` —
+// see types/ambient.d.ts). Narrow it once to the precise CdpModule surface.
+const CDP = CDPraw as CdpModule;
 
 // Minimal preview-side view of an extracted element. extract-dom emits many
 // more fields than this module reads; we only declare what we touch here.
@@ -91,7 +87,7 @@ function elementToHtml(el: PreviewElement): string {
 
   switch (el.type) {
     case "rect":
-      return `<div style="position:absolute;left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;background:${el.fill||'transparent'};${el.borderWidth>0?`border:${el.borderWidth}px solid ${el.borderColor||'#ccc'};`:''}${el.borderRadius>0?`border-radius:${el.borderRadius}px;`:''}"></div>`;
+      return `<div style="position:absolute;left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;background:${el.fill||'transparent'};${(el.borderWidth ?? 0)>0?`border:${el.borderWidth}px solid ${el.borderColor||'#ccc'};`:''}${(el.borderRadius ?? 0)>0?`border-radius:${el.borderRadius}px;`:''}"></div>`;
     case "line": {
       const isVert = b.h > b.w * 2;
       const lw = isVert ? Math.max(1, b.w) : b.w;
@@ -140,7 +136,7 @@ function elementToHtml(el: PreviewElement): string {
         html += '<tr>';
         for (const cell of row) {
           const cs = cell.style || {};
-          html += `<td style="padding:4px 8px;font-family:${cs.fontFamily||'Arial'},sans-serif;font-size:${cs.fontSize||14}px;font-weight:${cs.fontWeight||'normal'};color:${cs.color||'#333'};background:${cs.bgColor||'transparent'};border:1px solid ${cs.borderColor||'#ccc'};text-align:${cs.textAlign||'left'};"${cell.colspan>1?` colspan="${cell.colspan}"`:''}">${cell.text||''}</td>`;
+          html += `<td style="padding:4px 8px;font-family:${cs.fontFamily||'Arial'},sans-serif;font-size:${cs.fontSize||14}px;font-weight:${cs.fontWeight||'normal'};color:${cs.color||'#333'};background:${cs.bgColor||'transparent'};border:1px solid ${cs.borderColor||'#ccc'};text-align:${cs.textAlign||'left'};"${(cell.colspan ?? 1)>1?` colspan="${cell.colspan}"`:''}">${cell.text||''}</td>`;
         }
         html += '</tr>';
       }
@@ -156,7 +152,10 @@ function elementToHtml(el: PreviewElement): string {
       for (const item of el.items || []) {
         const spacing = item.spacingAfter ? `padding:${Math.round(item.spacingAfter/2)}px 0;` : '';
         const lh = item.lineHeight ? `line-height:${item.lineHeight}px;` : '';
-        html += `<li style="margin-left:${item.level*20}px;font-weight:${item.fontWeight||'normal'};color:${item.color||'#333'};font-size:${item.fontSize||16}px;${lh}${spacing}break-inside:avoid;">${item.text}</li>`;
+        // TODO(types): item.level is optional; when absent the original code
+        // multiplied undefined → NaN ("margin-left:NaNpx"). `?? NaN` preserves
+        // that exact runtime behaviour while satisfying the type checker.
+        html += `<li style="margin-left:${(item.level ?? NaN)*20}px;font-weight:${item.fontWeight||'normal'};color:${item.color||'#333'};font-size:${item.fontSize||16}px;${lh}${spacing}break-inside:avoid;">${item.text}</li>`;
       }
       html += `</${tag}>`;
       return html;
@@ -208,7 +207,7 @@ async function main() {
     const tmpPath = join(outputDir, `_tmp_${slide.slide}.html`);
     writeFileSync(tmpPath, html);
 
-    const tab = await CDPS.New({ port: CDP_PORT, url: `file://${tmpPath}` });
+    const tab = await CDP.New({ port: CDP_PORT, url: `file://${tmpPath}` });
     await sleep(800);
     const client = await CDP({ target: tab, port: CDP_PORT });
     await client.Page.enable();
@@ -217,7 +216,7 @@ async function main() {
     const ss = await client.Page.captureScreenshot({ format: "png" });
     writeFileSync(join(outputDir, `slide_${String(slide.slide).padStart(2, '0')}.png`), Buffer.from(ss.data, "base64"));
     await client.close();
-    await CDPS.Close({ port: CDP_PORT, id: tab.id });
+    await CDP.Close({ port: CDP_PORT, id: tab.id });
 
     try { unlinkSync(tmpPath); } catch {}
     console.log(`  slide_${String(slide.slide).padStart(2, '0')}.png`);

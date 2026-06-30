@@ -5,7 +5,7 @@ const JSZip = require("jszip");
 
 (async () => {
   const zip = await JSZip.loadAsync(readFileSync("/tmp/verify.pptx"));
-  const xml = await zip.file("ppt/slides/slide1.xml")!.async("string");
+  const xml: string = await zip.file("ppt/slides/slide1.xml")!.async("string");
   const sps = xml.match(/<p:sp>[\s\S]*?<\/p:sp>/g) || [];
   const EMU2PX = 1280 / 9144000;
 

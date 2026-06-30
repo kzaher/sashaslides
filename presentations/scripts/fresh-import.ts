@@ -7,7 +7,7 @@
  * - Click Import slides (via PointerEvent)
  * - Verify final slide count
  */
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { writeFileSync } from "node:fs";
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }

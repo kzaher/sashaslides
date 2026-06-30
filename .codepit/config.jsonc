@@ -13,42 +13,39 @@
     // "npm test"
   ],
 
-  // Subdirectory under the sandbox drive root where the host workspace
-  // is copied. Default: the workspace folder's basename (here: "codepit"
-  // → D:\codepit). Only override if you want a different layout.
-  // "workspaceSubdir": "codepit",
+  // Background processes spawned per sandbox alongside the terminal.
+  // Each entry is a shell command line, run with cwd = sandboxRoot.
+  // The processes are tree-killed when the sandbox is destroyed.
+  // Use case: one Unity editor instance per sandbox.
 
-  // Extra directory names to exclude from the workspace copy. Added on
-  // top of the built-in defaults (which always apply):
-  //   node_modules, .git, dist, bin, obj, Library, Temp, .codepit
-  "excludeFromCopy": [
-    "scratchpad",
-    ".vs",
-    ".vscode-server"
+  // Each entry is { source, destination }: source absolute / ~-home-relative /
+  // bare home-relative; destination sandbox-profile-relative.
+  // LINK from the shared bot-config root in the bot user's home (ensure the
+  // sandbox group has read/exec on it, e.g. via codepit setup script).
+  "linkToSandboxHome": [
+    { "source": "~/.claude",      "destination": "~/.claude" },
+    { "source": "~/.codex",       "destination": "~/.codex" },
+    { "source": "~/.claude.json", "destination": "~/.claude.json" }
   ],
 
-  // Operator-home-relative files/directories copied into the sandbox
-  // user's home directory after creation. These are explicit: Codepit
-  // does not infer tool settings paths.
-  "copyToSandboxHome": [
-    ".claude.json",
-    ".claude/settings.json",
-    ".claude/skills",
-    ".claude/hooks",
-    ".claude/.credentials.json",
-    ".claude/mcp-needs-auth-cache.json",
-    ".cache/claude-cli-nodejs",
-    ".agents",
-    ".codex/config.toml",
-    ".codex/hooks.json",
-    ".codex/auth.json"
+    // Template groups — named bundles of BASE/default properties merged into
+  // their member templates. Membership is owned by the GROUP: each group lists
+  // its child template names in "templates" (a template name may appear in
+  // MORE THAN ONE group). Scalars: the template's value wins; arrays: the
+  // group's entries come first, then the template's are appended
+  // (sandboxUserGroups deduped). See ARCHITECTURE.md / template.ts.
+  "templateGroups": [
+    {
+      // Common base for the bot templates (claude, codex). Holds the parts
+      // both share so each template below only carries its own unique bits.
+      "name": "bots",
+      "templates": ["claude", "codex"],
+      // Both bots join these groups; each template appends its own
+      // (CodepitClaudeUsers / CodepitCodexUsers).
+      "sandboxUserGroups": ["CodepitUsers", "docker"],
+    }
   ],
 
-  // NOTE: Linux/devcontainer config. Codepit selects the Docker sandbox on
-  // non-Windows hosts (process.platform !== "win32"), so the Windows-only
-  // sandboxUserGroups / ensureReadExecutePaths (hyperv local-group ACLs) are
-  // omitted here. claude + codex are installed globally in the dev container
-  // image (see .devcontainer/claude-code/Dockerfile) at npm-global/bin.
   "templates": [
     {
       "name": "claude",
@@ -56,7 +53,8 @@
       "launch": {
         "executable": "/usr/local/share/npm-global/bin/claude",
         "args": ["--dangerously-skip-permissions"]
-      }
+      },
+      "sandboxUserGroups": ["CodepitUsers", "CodepitClaudeUsers", "docker"]
     },
     {
       "name": "codex",
@@ -67,17 +65,21 @@
           "--dangerously-bypass-approvals-and-sandbox",
           "--dangerously-bypass-hook-trust"
         ]
-      }
+      },
+      "sandboxUserGroups": ["CodepitUsers", "CodepitCodexUsers", "docker"],
+      "ensureReadExecutePaths": [
+        {
+          "group": "CodepitCodexUsers",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex"
+        }
+      ]
     }
   ],
 
   // Port the local Codepit debug server binds to (127.0.0.1 only).
   // Required — without this set, the debug server doesn't start.
   // Pick a unique port per workspace so two windows can't collide.
-  "debugServerPort": 9110,
-
-  "bridgeHost": "172.17.0.4",
-  "bridgePort": 9100,
+  "debugServerPort": 9103,
 
   // Workspace-relative path to a plain-text instruction file. Its
   // contents are sent into every bot terminal AFTER the template
@@ -88,9 +90,9 @@
     {
       "name": "Compare",
       "messages": [
-        "Look at each other solutions, be inspired by each other and construct the best solution. Write a table with pros and cons for each solution. Find strengths and ideas in other solution and improve yours.",
-        "${bot_response.map(response => `Bot:${response.sandbox} said <response>${response.text}</response>\n    `)}\n\nFind inspiration in criticism, improve if you think the criticism is valid, again consider taking the best parts from other bots.\n",
-        "Perform final analysis which solution is better, present it in a table and give recommendation which to launch and why.\n",
+        "Look at each other solutions, be inspired by each other and construct the best solution. Write a table with pros and cons for each solution. Find strengths and ideas in other solution and improve yours. Make you you've built the best possible solution, steal good ideas and superior implementation from the other side.",
+        "${bot_response.map(response => `Bot:${response.sandbox} said <response>${response.text}</response>\n    `)}\n\nFind inspiration in criticism, improve if you think the criticism is valid, again consider taking the best parts from other bots. Never suggest me to merge two approaches, you merge them, build the best approach and fight for it with arguments.",
+        "Perform final analysis which solution is better, present it in a table and give recommendation which to launch and why.",
         "${bot_response.map(response => `Bot:${response.sandbox} said <response>${response.text}</response>\n    `)}\n\nGive launch recommendation."
       ]
     }

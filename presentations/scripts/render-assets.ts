@@ -9,13 +9,14 @@
  * Uses rough.js + whiteboard-graphs.js, rendered in Chrome at high DPI.
  */
 
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 // ── Slide parsing (same as generate-pptx.ts) ───────────────────────────────
 
-type TableData = { headers: string[]; rows: string[][] } | null;
+type TableRows = { headers: string[]; rows: string[][] };
+type TableData = TableRows | null;
 
 type ParsedSlide = {
   title: string;
@@ -65,7 +66,11 @@ function parseSlides(md: string): ParsedSlide[] {
           }
         }
         if (inTable && table) {
-          table = { ...table, rows: [...table.rows, cells] };
+          // `prev` is annotated to break TS's circular-inference on the
+          // self-referential spread assignment (`table = {...table}`), which
+          // otherwise widens `table` to a non-spreadable type.
+          const prev: TableRows = table;
+          table = { ...prev, rows: [...prev.rows, cells] };
           continue;
         }
       } else {

@@ -10,7 +10,7 @@
  *   <output-dir>/storyline.md          — extracted storyline (titles + key points in order)
  */
 
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "../../presentations/scripts/cdp.ts";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 
@@ -321,12 +321,12 @@ async function main() {
   // Find or open the presentation tab
   const targets = await CDP.List({ port: CDP_PORT });
   let tab = targets.find(
-    (t: any) => t.url.includes(presId) && t.url.includes("presentation")
+    (t) => t.url.includes(presId) && t.url.includes("presentation")
   );
 
   if (!tab) {
     console.log("Opening presentation in new tab...");
-    tab = await (CDP as any).New({
+    tab = await CDP.New({
       port: CDP_PORT,
       url: `https://docs.google.com/presentation/d/${presId}/edit`,
     });
@@ -368,7 +368,10 @@ async function main() {
     expression: `document.querySelector('[aria-label="Rename"]')?.value || document.title || 'Untitled'`,
     returnByValue: true,
   });
-  const presTitle = titleResult.value || "Untitled";
+  const presTitle =
+    typeof titleResult.value === "string" && titleResult.value
+      ? titleResult.value
+      : "Untitled";
 
   const slides: ExtractedSlide[] = [];
 

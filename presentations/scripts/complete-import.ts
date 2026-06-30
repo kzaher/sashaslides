@@ -2,7 +2,7 @@
  * Complete a stuck Import Slides dialog: select all + import button via
  * PointerEvent dispatches. Fast-fail polling.
  */
-import CDP from "chrome-remote-interface";
+import { cdp as CDP } from "./cdp.ts";
 import { writeFileSync } from "node:fs";
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }

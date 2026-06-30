@@ -94,18 +94,21 @@ const typiaOpts = resolveOptions({ log: false });
 // Minimal stub for the unplugin context that transformTypia expects. It
 // primarily uses it for logging (`warn`/`error`) and cache hints — safe to
 // no-op for our purposes.
-/** Shape of the unplugin Context we hand to typia. We type the bits typia
- *  reads (warn/error/debug + a couple of no-op hooks) and let the rest stay
- *  unknown — the cast at the call site narrows to `Parameters<typeof
- *  transformTypia>[2]` since the upstream type is too loose to model precisely. */
+/** Shape of the unplugin Context we hand to typia. `transformTypia` only ever
+ *  reads `.warn` (via its `warnDiagnostic` helper); every other member is a
+ *  no-op the upstream type requires structurally. We pull the exact `parse` /
+ *  `getNativeBuildContext` return types out of the declared parameter type so
+ *  this stub is genuinely assignable to it (no cast at the call site). */
+type UnContextParam = Parameters<typeof transformTypia>[2];
+type StubAstNode = ReturnType<NonNullable<UnContextParam["parse"]>>;
 interface UnpluginCtxStub {
   warn: (...args: unknown[]) => void;
   error: (...args: unknown[]) => void;
   debug: (...args: unknown[]) => void;
   addWatchFile: (path: string) => void;
   emitFile: (file: unknown) => string;
-  getNativeBuildContext: () => undefined;
-  parse: (code: string) => Record<string, unknown>;
+  getNativeBuildContext?: UnContextParam["getNativeBuildContext"];
+  parse: (code: string) => StubAstNode;
   getWatchFiles: () => string[];
 }
 const unpluginCtxStub: UnpluginCtxStub = {
@@ -114,8 +117,9 @@ const unpluginCtxStub: UnpluginCtxStub = {
   debug: (..._args: unknown[]) => {},
   addWatchFile: (_p: string) => {},
   emitFile: (_f: unknown) => "",
-  getNativeBuildContext: () => undefined,
-  parse: (_c: string) => ({}),
+  // `parse` is never invoked by `transformTypia`; return an empty node typed as
+  // the upstream AST node so the stub stays assignable without altering runtime.
+  parse: (_c: string): StubAstNode => ({} as StubAstNode),
   getWatchFiles: () => [] as string[],
 };
 
@@ -130,9 +134,15 @@ const combinedPlugin: esbuild.Plugin = {
       // Step 2: hand to typia to inline the generic → JSON Schema literal.
       let transformed: string;
       try {
+        // `transformTypia` takes branded `ID` / `Source` strings (type-fest
+        // `Tagged<string, …>`). Those brands aren't exported, so reference the
+        // exact declared parameter types via `Parameters<…>` and assert the
+        // plain strings into them — type-fest sanctions casting the underlying
+        // type into a tag (see Tagged docs).
+        type TransformArgs = Parameters<typeof transformTypia>;
         transformed = await transformTypia(
-          args.path,
-          afterInject,
+          args.path as TransformArgs[0],
+          afterInject as TransformArgs[1],
           unpluginCtxStub,
           typiaOpts,
         );

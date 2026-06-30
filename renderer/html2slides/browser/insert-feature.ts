@@ -11,21 +11,13 @@
  * google.script.run with the base64 bytes.
  */
 import { processFile, buildPptxInMemory, type Slide, type SlideInput } from "./convert-core";
+// H2sBridge + the window.h2s shape are declared ambiently (shared with
+// addon-main.ts) in ./h2s-host.d.ts.
 
-type LogFn = (msg: string, kind?: "info" | "error") => void;
-interface QueueItem { name: string; html: string }
-interface Bridge {
-  queue: QueueItem[];
-  log: LogFn;
-  oversampling?: () => number;
-  inAddon?: boolean;
-  insert?: (position: "before" | "after" | "download") => Promise<void>;
-}
 interface GsRunner { [fn: string]: (...a: unknown[]) => void }
 declare const google: {
   script: { run: { withSuccessHandler: (f: (v: unknown) => void) => { withFailureHandler: (f: (e: Error) => void) => GsRunner } } };
 } | undefined;
-declare global { interface Window { h2s?: { register: (f: (b: Bridge) => void) => void; bridge: Bridge } } }
 
 /** Chunked base64 — avoids a call-stack overflow on multi-hundred-KB decks. */
 function bytesToBase64(bytes: Uint8Array): string {
@@ -48,7 +40,7 @@ function gsRun(fn: string, ...args: unknown[]): Promise<unknown> {
   });
 }
 
-window.h2s?.register((bridge: Bridge) => {
+window.h2s?.register((bridge: H2sBridge) => {
   bridge.insert = async (position: "before" | "after" | "download") => {
     const items = bridge.queue.slice().sort((a, b) => a.name.localeCompare(b.name));
     if (items.length === 0) { bridge.log("nothing queued"); return; }
@@ -76,7 +68,7 @@ window.h2s?.register((bridge: Bridge) => {
 
     // Standalone (or explicit Download): hand the file to the browser.
     if (position === "download" || !bridge.inAddon) {
-      const blob = new Blob([bytes as Uint8Array], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
+      const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = title + ".pptx";
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
