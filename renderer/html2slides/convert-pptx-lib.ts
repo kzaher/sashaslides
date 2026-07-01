@@ -332,6 +332,11 @@ function mapRunOptions(
   if (rs.bgColor) opts.highlight = hexToRgb(rs.bgColor);
   if (rs.verticalAlign === "sub") opts.subscript = true;
   else if (rs.verticalAlign === "super") opts.superscript = true;
+  // Propagate CSS letter-spacing → run charSpacing (run over element), matching
+  // the no-runs branch; the styled-runs path was dropping it so text packed
+  // tighter than the original (slide_12/34/03).
+  const ls = typeof rs.letterSpacing === "number" ? rs.letterSpacing : ps.letterSpacing;
+  if (typeof ls === "number" && ls !== 0) opts.charSpacing = ls * PX2PT;
   return { text: uppercase ? run.text.toUpperCase() : run.text, options: opts };
 }
 
@@ -2168,7 +2173,10 @@ export function buildPptx(
             // literal-glyph `::before { content:'•'; color }` list (slide_11
             // SWOT) keeps its prior plain-text rendering untouched.
             const anyDotBullet = noListStyle && !ordered && items.some((it) => !!it.bulletColor && it.bulletIsDot);
-            const anyPerItemBulletColor = (!noListStyle && !ordered && items.some((it) => !!it.bulletColor)) || anyDotBullet;
+            // list-style:none with a LITERAL-GLYPH ::before ('•', color) — slide_11
+            // SWOT — was dropping its markers entirely; revive them too.
+            const anyGlyphBullet = noListStyle && !ordered && items.some((it) => !!it.bulletColor && !it.bulletIsDot);
+            const anyPerItemBulletColor = (!noListStyle && !ordered && items.some((it) => !!it.bulletColor)) || anyDotBullet || anyGlyphBullet;
             // Exclude ORDERED lists from the native autonumber path: pptxgenjs
             // hardcodes its autonumber buFont to the theme major font (Calibri
             // Light), so "1." markers render smaller/thinner than the item's

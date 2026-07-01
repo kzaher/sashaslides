@@ -104,8 +104,28 @@ export async function extractFromHtml(
   await Runtime.enable();
   await Emulation.setDeviceMetricsOverride({ width: SLIDE_W_PX, height: SLIDE_H_PX, deviceScaleFactor: scale, mobile: false });
   await sleep(800);
-  await Runtime.evaluate({ expression: `document.fonts.ready.then(() => true)`, awaitPromise: true, returnByValue: true });
-  await sleep(300);
+  // Robust font-readiness gate. `document.fonts.ready` can resolve BEFORE a
+  // fonts.googleapis.com @font-face stylesheet has registered its faces, so
+  // extraction would measure FALLBACK-font metrics (~1px shorter line boxes) and
+  // every block drifts up cumulatively ("moved up, worse toward the bottom").
+  // Wait for stylesheets, force-load every declared face, then poll fonts.check()
+  // for every family actually used before extracting.
+  await Runtime.evaluate({
+    awaitPromise: true,
+    returnByValue: true,
+    expression: `(async () => {
+      await Promise.all([...document.querySelectorAll('link[rel=stylesheet]')].map(
+        l => l.sheet ? 0 : new Promise(r => { l.addEventListener('load', r); l.addEventListener('error', r); setTimeout(r, 3000); })));
+      await Promise.all([...document.fonts].map(f => f.load().catch(() => {})));
+      await document.fonts.ready;
+      const fams = [...new Set([...document.querySelectorAll('*')].map(
+        e => getComputedStyle(e).fontFamily.split(',')[0].replace(/["']/g, '').trim()).filter(Boolean))];
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline && !fams.every(f => document.fonts.check('16px "' + f + '"')))
+        await new Promise(r => setTimeout(r, 50));
+      return true;
+    })()`,
+  });
 
   const { result } = await Runtime.evaluate({ expression: EXTRACT_JS, returnByValue: true });
   if (typeof result.value !== "string") throw new Error("extract-dom did not return a JSON string");
