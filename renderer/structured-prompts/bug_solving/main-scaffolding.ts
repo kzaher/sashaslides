@@ -244,6 +244,15 @@ async function run(): Promise<void> {
   const failures: { idx: number; error: string }[] = [];
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
+    // Defensive: a result can be null/undefined if the engine's result
+    // propagation drops a task's return (observed under the state-machine
+    // scheduler). `"error" in r` throws on null — the very crash that turned a
+    // whole solved run into an unrecoverable one. Treat a missing result as a
+    // failure so productization for the OTHER tasks still runs.
+    if (r == null || typeof r !== "object") {
+      failures.push({ idx: i, error: `task produced no result (got ${r === null ? "null" : typeof r}) — likely a scheduler result-propagation drop` });
+      continue;
+    }
     if ("error" in r) {
       failures.push({ idx: i, error: String((r as { error: string }).error) });
       continue;

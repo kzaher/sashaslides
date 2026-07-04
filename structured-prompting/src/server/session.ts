@@ -112,7 +112,7 @@ export class Session {
 
   constructor(init: SessionInit = {}) {
     this.sessionId = init.sessionId ?? randomId();
-    this.model = init.model ?? "opus";
+    this.model = init.model ?? "fable";
     this.cwd = init.cwd ?? (typeof process !== "undefined" ? process.cwd() : "/");
     this.graph = init.graph ?? new ComputationGraph(this.sessionId);
     this.tipNodeId = init.tipNodeId ?? this.graph.rootId;

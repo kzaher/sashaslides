@@ -31,6 +31,7 @@ import JSZip from "jszip";
 import {
   buildPptx,
   injectGradientsIntoZip,
+  injectBulletColorsIntoZip,
   injectStrokeAlignmentIntoZip,
   injectRound2SameRectAdjIntoZip,
   injectShapeNoLineIntoZip,
@@ -41,6 +42,7 @@ import {
   type Extraction,
   type SlideInput,
   type Gradient,
+  type BulletColorList,
 } from "./convert-pptx-lib.js";
 
 const CDP_PORT = 9222;
@@ -240,6 +242,18 @@ export async function injectGradients(pptxPath: string, registry: readonly Gradi
   }
 }
 
+export async function injectBulletColors(pptxPath: string, registry: readonly BulletColorList[]): Promise<void> {
+  if (!registry || registry.length === 0) return;
+  const buf = readFileSync(pptxPath);
+  const zip = await JSZip.loadAsync(buf);
+  const patched = await injectBulletColorsIntoZip(zip, registry);
+  if (patched > 0) {
+    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    writeFileSync(pptxPath, out);
+    console.log(`  Bullet colors: ${patched} <a:buClr> insertion(s)`);
+  }
+}
+
 export async function injectStrokeAlignment(pptxPath: string): Promise<void> {
   const buf = readFileSync(pptxPath);
   const zip = await JSZip.loadAsync(buf);
@@ -373,7 +387,16 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   // sidebar. Gradient fills (solid placeholder → <a:gradFill>) + inside stroke
   // alignment were silently dropped when these moved to the (unloaded-here) fork.
   await injectGradients(pptxPath, pres.__gradients || []);
+  await injectBulletColors(pptxPath, pres.__bulletColors || []);
   await injectStrokeAlignment(pptxPath);
+  // round2SameRect adj→adj1/adj2 repair was ALSO dropped in the same move:
+  // without it Google ignores the misnamed `adj` guide and renders the
+  // preset DEFAULT adj1=16667 (16.667% of the short side) — slide_12's
+  // device screen re-rounds its bottom corners to ~47px instead of the
+  // intended 32px, opening a dark crescent between the screen and the
+  // frame ring at both bottom corners. Touches only round2SameRect
+  // prstGeoms, so it cannot perturb other slides.
+  await injectRound2SameRectAdj(pptxPath);
 
   // Sidecar: per-slide rasterised regions so the SxS rating UI can warn the
   // reviewer that the output isn't 100% native primitives.

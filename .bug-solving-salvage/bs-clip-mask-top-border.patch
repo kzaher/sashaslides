@@ -1,0 +1,48 @@
+diff --git a/renderer/html2slides/convert-pptx-io.ts b/renderer/html2slides/convert-pptx-io.ts
+index 43a6d5de..6c2a08f1 100644
+--- a/renderer/html2slides/convert-pptx-io.ts
++++ b/renderer/html2slides/convert-pptx-io.ts
+@@ -142,7 +142,14 @@ export async function extractFromHtml(
+     // are NOT pictographic emoji and have reliable monochrome font coverage.
+     if (cp >= 0x25A0 && cp <= 0x25FF) return false;      // geometric ▲ ▼ ■ ● ○ (text-renderable)
+     if (cp >= 0x2713 && cp <= 0x2718) return false;      // check / cross marks ✓ ✔ ✗ ✘
+-    if (cp >= 0x2600 && cp <= 0x27BF) return true;       // Misc symbols & dingbats (pictographs)
++    // Miscellaneous Symbols (U+2600–U+26FF) default to TEXT presentation per
++    // Unicode (Emoji_Presentation=No) when no VS16 selector follows — ⚙ gear
++    // U+2699, ⚠ warning U+26A0, ⚡ voltage U+26A1, ★☆ stars, ⚖ scale — and
++    // have reliable monochrome coverage in Slides' font stack, so keep them as
++    // editable TEXT. User feedback (slide_07): "Why are bottom icons rendered?
++    // … can't we use fonts in output?". Only the Dingbats block (U+2700–U+27BF,
++    // ✂ ✈ ✉ ✨ etc.) stays rasterised — those are Emoji_Presentation=Yes.
++    if (cp >= 0x2700 && cp <= 0x27BF) return true;       // Dingbats (pictographs)
+     if (cp === 0x200D || cp === 0xFE0F) return true;     // ZWJ / variation selector
+     if (cp >= 0x1F1E6 && cp <= 0x1F1FF) return true;     // Regional indicators (flags)
+     if (cp >= 0x1F300 && cp <= 0x1FAFF) return true;     // Main emoji blocks
+diff --git a/renderer/html2slides/extract-dom.ts b/renderer/html2slides/extract-dom.ts
+index f55e9eb1..b1782efa 100644
+--- a/renderer/html2slides/extract-dom.ts
++++ b/renderer/html2slides/extract-dom.ts
+@@ -2494,9 +2494,22 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
+       // renders flush right. Centered/left rows still collapse for clean rich text.
+       const _jc0 = style.justifyContent;
+       const isDistributedRow = _jc0 === "space-between" || _jc0 === "space-around" || _jc0 === "space-evenly";
++      // Only letter-spacing blocks the rich-text collapse. A child marginRight
++      // does NOT: getTextRuns() already converts an inline child's marginRight
++      // (and marginLeft) into injected space runs (see ~line 1333), so the gap
++      // survives inside the single collapsed text element. slide_15's code rows
++      // (`.line`) wrap a `.line-num` span with `margin-right:16px` — the old
++      // marginRight guard forced every `.line` back to one-text-box-per-span
++      // fragmentation (line-num / keyword / string / … as separate boxes with
++      // the inter-span whitespace dropped → "curl-XPOST" glued). User feedback
++      // (slide_15): "make the text a single text area … spans inside a div
++      // should just mark style" + "the spacing … is glued together". Keeping
++      // only the letterSpacing test still excludes slide_16 `.half-header`
++      // (`.half-label` has letter-spacing:2px) so its flex-header valign fix
++      // stays intact.
+       const hasInlineSpacingChild = flexKids0.some(c => {
+         const ccs = getComputedStyle(c);
+-        return (parseFloat(ccs.letterSpacing) || 0) !== 0 || (parseFloat(ccs.marginRight) || 0) > 2;
++        return (parseFloat(ccs.letterSpacing) || 0) !== 0;
+       });
+       const allInlineChromeless = !isDistributedRow && !hasInlineSpacingChild && flexKids0.length > 0 && flexKids0.every(c => {
+         const ctag = (c.tagName || "").toUpperCase();

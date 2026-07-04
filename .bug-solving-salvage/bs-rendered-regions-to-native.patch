@@ -1,0 +1,45 @@
+diff --git a/renderer/html2slides/convert-pptx-io.ts b/renderer/html2slides/convert-pptx-io.ts
+index 43a6d5de..6fb81f81 100644
+--- a/renderer/html2slides/convert-pptx-io.ts
++++ b/renderer/html2slides/convert-pptx-io.ts
+@@ -374,6 +374,16 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
+   // alignment were silently dropped when these moved to the (unloaded-here) fork.
+   await injectGradients(pptxPath, pres.__gradients || []);
+   await injectStrokeAlignment(pptxPath);
++  // round2SameRect adj naming (adj1/adj2) + empty-<a:ln> → <a:noFill/> + table
++  // cell no-border are NOT native in stock pptxgenjs — only in the vendored fork
++  // used by buildPptxInMemory. A prior refactor dropped these calls here on the
++  // false assumption they'd gone native, regressing slide_12: the `.screen`
++  // round2SameRect fell back to bare `adj` (default oversized radius, wrong
++  // corners) and 43 no-stroke shapes emitted default ~1pt Google strokes (the
++  // "black borders too big"). Re-apply to match the product path / rated-good.
++  await injectRound2SameRectAdj(pptxPath);
++  await injectShapeNoLine(pptxPath);
++  await injectCellNoBorder(pptxPath);
+ 
+   // Sidecar: per-slide rasterised regions so the SxS rating UI can warn the
+   // reviewer that the output isn't 100% native primitives.
+@@ -394,14 +404,15 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
+   writeFileSync(regionsPath, JSON.stringify(regionsBySlide, null, 2));
+   console.log(`  Rendered regions: ${totalRegions} total across ${renderedRegions.length} slides → ${regionsPath}`);
+ 
+-  // ALL pptxgenjs OOXML fixes are now NATIVE in the vendored fork
+-  // (deps/pptxgenjs/src) — no zip post-patches remain:
+-  //   • gradient fills      → fill: { type: 'gradient' } → <a:gradFill>
+-  //   • stroke align="in"   → width-bearing <a:ln> default
+-  //   • round2SameRect      → adj1/adj2 handle naming
+-  //   • empty <a:ln>        → <a:noFill/>
+-  //   • table-cell noFill   → minimal border form
+-  //   • shape groups        → slide.addGroup(...) → <p:grpSp>
++  // NOTE: this file-write path uses STOCK pptxgenjs (pres.writeFile), so the
++  // OOXML fixes below are applied as zip post-patches above — they are NOT
++  // native here (only in the vendored fork consumed by buildPptxInMemory):
++  //   • gradient fills      → <a:gradFill>            (injectGradients)
++  //   • stroke align="in"   → width-bearing <a:ln>    (injectStrokeAlignment)
++  //   • round2SameRect      → adj1/adj2 handle naming (injectRound2SameRectAdj)
++  //   • empty <a:ln>        → <a:noFill/>             (injectShapeNoLine)
++  //   • table-cell noFill   → minimal border form     (injectCellNoBorder)
++  // Only shape groups are native (slide.addGroup(...) → <p:grpSp>).
+ 
+   if (noUpload) {
+     console.log("Done (no upload).");
