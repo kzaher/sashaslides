@@ -51,7 +51,13 @@ export function assertCleanTree(repoRoot: string, paths: string[] = ["renderer/h
   }
   if (!porcelain) return; // clean under the scoped paths → proceed.
 
-  const dirtyFiles = porcelain.split("\n").map((l) => l.trim()).filter(Boolean);
+  // Exclude user-only TEST BASELINES: goldens are user-blessed (tooling must
+  // never touch them) and the SxS `*.ratings-complex.json` is a scratch artifact.
+  // Neither is converter SOURCE, so a dirty golden/rating must NOT block a run.
+  const IGNORE_BASELINE = /(e2e\/goldens|ratings-complex\.json|\.ratings-complex)/;
+  const dirtyFiles = porcelain.split("\n").map((l) => l.trim()).filter(Boolean)
+    .filter((l) => !IGNORE_BASELINE.test(l));
+  if (!dirtyFiles.length) return; // only user-only test baselines dirty → proceed.
   const allowDirty = process.env.BUG_SOLVING_ALLOW_DIRTY === "1";
   const header =
     `Dirty working tree under [${paths.join(", ")}] — ${dirtyFiles.length} uncommitted change(s):\n` +
