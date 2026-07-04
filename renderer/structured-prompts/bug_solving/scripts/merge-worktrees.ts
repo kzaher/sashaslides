@@ -40,6 +40,11 @@
 import { execSync, execFileSync } from "node:child_process";
 import { existsSync, readdirSync, mkdirSync, writeFileSync, rmSync, readFileSync, statSync } from "node:fs";
 import { resolve, basename, join } from "node:path";
+import { computeChanges, applyChanges, type FileChange } from "./patcher.js";
+
+// Converter payload globs the patcher diffs/composes over. Matches the old
+// `renderer/html2slides/*.ts` git-diff pathspec (top-level converter .ts).
+const CONVERTER_GLOBS = ["renderer/html2slides/*.ts"];
 
 type Args = {
   worktrees: string[]; base?: string; clean: boolean; commit: boolean;
@@ -100,17 +105,35 @@ function main() {
 
   const wts = args.worktrees.map((s) => resolveWorktree(s, repo));
   console.error(`Base: ${base.slice(0, 12)}   Worktrees (${wts.length}):`);
+
+  // Materialise the BASE as a plain directory so the git-agnostic patcher can
+  // diff dir-vs-dir. Today we use `git worktree add` to produce that dir; once
+  // branching switches to full disk copies, `baseDir` is just a copy — the
+  // compute/compose below is unchanged (it never touches git). Always cleaned up.
+  const baseWt = join(args.out, "base-checkout");
+  const baseBranch = `sp/merge-base-${Date.now()}`;
+  const cleanupBase = () => {
+    try { sh(`git worktree remove --force "${baseWt}"`, repo); } catch { /* */ }
+    try { sh(`git branch -D ${baseBranch}`, repo); } catch { /* */ }
+  };
+  cleanupBase();
+  sh(`git worktree add -b ${baseBranch} "${baseWt}" ${base}`, repo);
+
   const intended = new Set<string>();
-  const plan: { wt: string; patch: string; slides: string[]; lines: number }[] = [];
+  // Each worktree's converter change = a git-agnostic dir-vs-dir diff (base copy
+  // vs the worker's copy), scoped to the converter globs. `lines` is the count of
+  // changed files (the reporting granularity; the old per-hunk line count was
+  // patch-format-specific and is no longer meaningful without a git patch).
+  const plan: { wt: string; changes: FileChange[]; slides: string[]; lines: number }[] = [];
   for (const wt of wts) {
-    const patch = sh(`git -C "${wt}" diff ${base} -- 'renderer/html2slides/*.ts'`, repo);
+    const changes = computeChanges(baseWt, wt, CONVERTER_GLOBS);
     const slides = intendedSlides(wt);
     slides.forEach((s) => intended.add(s));
-    const pfile = join(args.out, "patches", `${basename(wt)}.patch`);
-    writeFileSync(pfile, patch);
-    plan.push({ wt, patch: pfile, slides, lines: patch.split("\n").length });
-    console.error(`  • ${basename(wt)}  →  slides=[${slides.join(",") || "?"}]  (${patch ? patch.split("\n").length : 0} diff lines)`);
-    if (!patch.trim()) console.error(`    ⚠ empty converter diff — worker made no .ts change (skipped)`);
+    // Persist the computed change-set (git-agnostic) for post-mortem inspection.
+    writeFileSync(join(args.out, "patches", `${basename(wt)}.changes.json`), JSON.stringify(changes, null, 2));
+    plan.push({ wt, changes, slides, lines: changes.length });
+    console.error(`  • ${basename(wt)}  →  slides=[${slides.join(",") || "?"}]  (${changes.length} changed file(s))`);
+    if (!changes.length) console.error(`    ⚠ empty converter diff — worker made no .ts change (skipped)`);
   }
   const intendedCsv = [...intended].sort().join(",");
   console.error(`Intended (allowed-to-change) slides: ${intendedCsv || "(none!)"}`);
@@ -120,25 +143,30 @@ function main() {
     sh(`git checkout ${base} -- renderer/html2slides`, repo);
   }
 
-  // Apply each patch with a 3-way merge into the working tree + index, so
-  // overlapping edits from sibling worktrees combine instead of clobbering.
+  // Compose each worktree's change-set onto the working tree via the git-agnostic
+  // 3-way merge (base = change.before, theirs = change.after, ours = the working
+  // tree's CURRENT content). Overlapping-but-non-conflicting edits from sibling
+  // worktrees combine; a real line conflict is reported. We stage after each so
+  // reporting matches the old flow, but the COMPOSE never shells out to git.
   const conflicts: string[] = [];
   for (const p of plan) {
-    if (!readFileSync(p.patch, "utf8").trim()) continue;
-    try {
-      // 3-way apply (composes overlapping-context hunks from sibling worktrees),
-      // then stage so the index matches the tree — otherwise the NEXT patch's
-      // --3way base-reconstruction fails with "does not match index".
-      execFileSync("git", ["apply", "--3way", "--whitespace=nowarn", p.patch], { cwd: repo, stdio: ["ignore", "pipe", "pipe"] });
+    if (!p.changes.length) continue;
+    const res = applyChanges(repo, p.changes);
+    if (res.ok) {
       execFileSync("git", ["add", "--", "renderer/html2slides"], { cwd: repo, stdio: ["ignore", "pipe", "pipe"] });
       console.error(`  ✓ applied ${basename(p.wt)}`);
-    } catch (e) {
-      // --3way leaves conflict markers on a real conflict; surface which file.
-      const msg = (e as { stderr?: Buffer }).stderr?.toString() || String(e);
-      conflicts.push(`${basename(p.wt)}: ${msg.split("\n")[0]}`);
-      console.error(`  ✗ CONFLICT applying ${basename(p.wt)} — ${msg.split("\n")[0]}`);
+    } else {
+      // Materialise the conflict marker view on disk (mirrors git's --3way) so a
+      // human can resolve, and name the file(s).
+      for (const cf of res.conflicts) {
+        try { writeFileSync(join(repo, cf.path), cf.merged); } catch { /* */ }
+      }
+      const files = res.conflicts.map((c) => c.path).join(", ");
+      conflicts.push(`${basename(p.wt)}: ${files}`);
+      console.error(`  ✗ CONFLICT applying ${basename(p.wt)} — ${files}`);
     }
   }
+  cleanupBase();
   if (conflicts.length) {
     writeResult(args, { base, plan: summ(plan), intended: [...intended], conflicts, applied: false });
     fail(`patch conflict(s): ${conflicts.length}. Working tree left with markers for manual resolve.`);
