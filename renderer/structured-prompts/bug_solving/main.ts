@@ -359,6 +359,14 @@ function analysisPromptFor(task: Task): string {
 
 // ---------- Main ----------
 
+// FINAL MERGE PHASE (opt-in, separate graph): once clusters are solved here and
+// rated GREEN in the candidate ledger, the accept/merge of those green clusters
+// onto the accepted state is ALSO expressible as an engine graph — see
+// `mergePhase` in ./merge-phase.ts (compose → conflict→resolver-send→assert →
+// pixel-perfect-outside-accepted retest → promote/revert), launched by
+// ./merge-phase-runner.ts. It runs as its OWN engine (own staging worktree +
+// port) so it does not disturb this scaffolding's monitor; the procedural
+// scripts/accept-solved-bugs.ts remains as the interactive alternative.
 export function main(args: {
   session: Session;
   tasks: Task[];
