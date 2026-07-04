@@ -46,7 +46,7 @@ import { fileURLToPath } from "url";
 import { dirname } from "path";
 const execFileAsync = promisify(execFile);
 import { ClaudeEngine, CodexEngine, Session } from "../../../structured-prompting/src/index.js";
-import { buildTasks } from "./workspace-setup.js";
+import { buildTasks, assertCleanTree } from "./workspace-setup.js";
 import { main, type TaskResult, type SxsServerSpec } from "./main.js";
 
 // ❌ DO NOT REMOVE this import or replace with a dummy. Create the sibling
@@ -214,6 +214,13 @@ async function run(): Promise<void> {
   // (e.g. a solve-only run that won't render thumbnails).
   await preflightGoogleAuth();
 
+  // Refuse to run against a DIRTY converter tree BEFORE any worktree is created.
+  // Worktrees fork from HEAD, so uncommitted renderer/html2slides changes would
+  // be silently excluded from every worker. Scoped to the converter dir so
+  // unrelated untracked scratch dirs don't block; BUG_SOLVING_ALLOW_DIRTY=1 warns
+  // instead of failing.
+  assertCleanTree(REPO_ROOT, ["renderer/html2slides"]);
+
   const tasks = buildTasks(buildOpts);
   console.error(`[scaffolding] built ${tasks.length} task(s):`);
   for (const t of tasks) {
@@ -232,7 +239,12 @@ async function run(): Promise<void> {
     engine.useScheduler = true;
     console.error("[scaffold] useScheduler=true (state-machine scheduler path)");
   }
-  const session = new Session({ sessionId: `bug_solving-${Date.now()}` });
+  // Worker model: BUG_SOLVING_MODEL (e.g. "opus" for Opus 4.8, "fable", "sonnet",
+  // "haiku") overrides the engine default. ctx.model is sticky (engine fix), so
+  // every send — fix, verify, fix-summary — uses this exact model.
+  const bsModel = process.env.BUG_SOLVING_MODEL as ("opus" | "sonnet" | "haiku" | "fable" | undefined);
+  const session = new Session({ sessionId: `bug_solving-${Date.now()}`, ...(bsModel ? { model: bsModel } : {}) });
+  if (bsModel) console.error(`[scaffold] worker model override: ${bsModel}`);
   const results = await engine.execute(session, (s) => main({ session: s, tasks }));
 
   console.error("\n=== RESULTS ===");

@@ -80,6 +80,7 @@ import {
 import type { Result } from "../../../structured-prompting/src/index.js";
 import { writeFileSync, readFileSync, readdirSync, copyFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
+import { fixtureSetSlug } from "./workspace-setup.js";
 
 /**
  * Write the sxs-meta.json sidecar consumed by rating-server.ts so each SxS card
@@ -157,9 +158,25 @@ export interface SlideTask {
   slide_id: string;                  // "slide_11"
   html_file: string;                 // absolute path to the fixture HTML
   user_comment: string;              // text pulled from ratings.json
-  annotation_png?: string;           // absolute path if present
+  annotation_png?: string;           // absolute path if present (transparent marks, ~1600x900)
+  composite_png?: string;            // absolute path if written: annotation applied onto the
+                                     //   target render, marked region colour-shifted to MAX
+                                     //   contrast — shows WHERE the user marked, on the slide
   rendered_png: string;              // absolute path in /tmp/sxs-complex/slides
   original_png: string;              // absolute path in /tmp/sxs-complex/originals
+
+  // ---- Consolidated per-task image dir (all under the WORKTREE scratch) ----
+  // Every image a worker needs for this slide lives in ONE dir keyed by the
+  // fixture set:  <worktree>/.bug-solving-scratch/<fixtureSetSlug>/slide_NN_*.png
+  // These are COPIES/derivations of the scattered /tmp sources, materialized in
+  // buildTasks() AFTER the worktree exists. All absolute paths inside the worktree.
+  img_original?: string;             // slide_NN_original.png  — the TARGET render
+  img_annotations?: string;          // slide_NN_annotations.png — RAW annotation (may be absent)
+  img_attempt?: string;              // slide_NN_attempt.png — the render being evaluated
+                                     //   (build-time = OUR CURRENT render; verify-time refreshed
+                                     //    from the just-recorded AFTER thumbnail)
+  img_highlighted?: string;          // slide_NN_highlighted_attempt.png — max-contrast composite
+                                     //   (annotation applied over the slide)
 }
 
 export interface Task {
@@ -280,6 +297,10 @@ const SCRIPTS = {
   // image-verifies whether the change is a VISIBLE regression (vs the old binary
   // structural fail). Writes <scratch>/offtarget-gate.json.
   offtargetGate: "renderer/structured-prompts/bug_solving/scripts/offtarget-gate.ts",
+  // Refresh CLI (`refresh` mode): overwrites the consolidated slide_NN_attempt.png
+  // (and re-composites slide_NN_highlighted_attempt.png over the AFTER render)
+  // from the just-recorded AFTER thumbnail so the verifier sees the real attempt.
+  composite: "renderer/structured-prompts/bug_solving/scripts/annotation-composite.ts",
 };
 
 const slideIdsCsv = (t: Task) => t.slides.map(s => s.slide_id).join(",");
@@ -294,17 +315,36 @@ function analysisPromptFor(task: Task): string {
     `Analysis dir (write analysis.md / fix-summary.md HERE — it is tracked + shows in the diff): ${task.analysis_dir}`,
     `Cluster hypothesis: ${task.cluster_description}`,
     ``,
-    `Slides in this task and the user's SxS comments for each:`,
-    ...task.slides.map(s =>
-      `  - ${s.slide_id}: "${s.user_comment}"` +
-      (s.annotation_png ? ` (annotation: ${s.annotation_png})` : ``)
-    ),
+    `Slides in this task, the user's SxS comments, and the IMAGE MANIFEST for each.`,
+    `Open EACH listed image with the Read tool (it renders PNGs visually):`,
+    ...task.slides.flatMap(s => {
+      // All images live in ONE consolidated per-task dir inside this worktree,
+      // keyed by the fixture set — self-describing filenames.
+      const target = s.img_original ?? s.original_png;
+      const attempt = s.img_attempt ?? s.rendered_png;
+      const lines = [
+        ``,
+        `  ${s.slide_id}: "${s.user_comment}"`,
+        `    - TARGET (what the slide SHOULD look like): ${target}`,
+        `    - ATTEMPT (what the converter currently produces — the defect is HERE): ${attempt}`,
+      ];
+      const rawAnn = s.img_annotations ?? s.annotation_png;
+      if (rawAnn)
+        lines.push(`    - RAW ANNOTATION (the user's marks alone, on transparent bg — just to see the shapes): ${rawAnn}`);
+      const highlighted = s.img_highlighted ?? s.composite_png;
+      if (highlighted)
+        lines.push(`    - HIGHLIGHTED ATTEMPT, MAX CONTRAST (the user's marks applied over the TARGET slide with the marked region colour-shifted for maximum visibility — THIS shows you EXACTLY WHERE on the slide the user is pointing): ${highlighted}`);
+      return lines;
+    }),
     ``,
     `How to incorporate the user's comments into your analysis:`,
     `  * The user's words are ground truth — do not argue with them. Your job is`,
     `    to explain the WHY and propose the minimal fix.`,
-    `  * For each slide, open the annotation PNG if it exists. The red strokes`,
-    `    mark exactly where the user says the rendering is wrong.`,
+    `  * Open ALL of the images above with the Read tool (it renders PNGs`,
+    `    visually). The RAW ANNOTATION alone is meaningless (transparent`,
+    `    rectangles on nothing) — use the HIGHLIGHTED ATTEMPT (max-contrast`,
+    `    composite) to locate the marked region on the actual slide, then compare`,
+    `    the ATTEMPT vs TARGET in that region to see the defect.`,
     `  * Always disambiguate TEXT-vs-BOX when the comment is about alignment.`,
     `  * Write your findings into ${task.analysis_dir}/analysis.md. Use one H2`,
     `    section per slide. Each section must have: "User comment" (verbatim),`,
@@ -363,7 +403,7 @@ export function main(args: {
           `The BEFORE-state pptx files are already at ${task.scratch_dir}/before/pptx/<slide_id>.pptx — the scaffolding recorded them before you started. Use them as reference if helpful.`,
           ``,
           `Your only task right now:`,
-          `  1. Inspect the annotation PNGs listed in the header.`,
+          `  1. Open EVERY image in the per-slide IMAGE MANIFEST from the header with the Read tool (TARGET, ATTEMPT, RAW ANNOTATION, and the HIGHLIGHTED ATTEMPT max-contrast composite). Use the highlighted attempt to locate the marked region on the slide, then compare ATTEMPT vs TARGET there.`,
           `  2. Write (or UPDATE if it exists) ${task.analysis_dir}/analysis.md with one H2 section per slide using the template you were given.`,
           `  3. Apply the MINIMAL code fix in renderer/html2slides/extract-dom.ts and/or convert-pptx.ts.`,
           `  4. Do NOT run git commit, git stash, git checkout. Leave changes uncommitted.`,
@@ -461,6 +501,28 @@ export function main(args: {
         `--title "${task.presentation_title}-offtarget" || true`,
       )
 
+      // Step 4e — REFRESH the consolidated per-slide attempt images from the
+      // AFTER thumbnails step 4c just rendered, so the verifier's
+      // slide_NN_attempt.png (and slide_NN_highlighted_attempt.png) reflect the
+      // REAL post-fix render rather than the build-time "our current render".
+      // Best-effort per slide (`|| true`) — a missing AFTER thumb just leaves
+      // the build-time attempt in place (the CLI logs and keeps it).
+      .executeShell(() => {
+        const slug = fixtureSetSlug(task.fixtures_dir);
+        const dir = `${task.scratch_dir}/${slug}`;
+        const composite = `${task.workspace_dir}/${SCRIPTS.composite}`;
+        const cmds = task.slides.map(s => {
+          const after = `${task.scratch_dir}/thumbnails/thumbs/${s.slide_id}.png`;
+          const attempt = `${dir}/${s.slide_id}_attempt.png`;
+          const highlighted = `${dir}/${s.slide_id}_highlighted_attempt.png`;
+          // Pass the raw annotation (if any) so the highlighted composite is
+          // rebuilt over the AFTER render.
+          const ann = s.img_annotations ? ` "${s.img_annotations}" "${highlighted}"` : ``;
+          return `npx tsx ${composite} refresh "${after}" "${attempt}"${ann} || true`;
+        });
+        return `cd ${task.workspace_dir}/renderer && ${cmds.join(" && ")}`;
+      })
+
       // Step 5 — per-slide verdict fork. Each slide gets its own sub-
       // session that reads the diff + analysis + comment, emits a JSON
       // object as plain text, and we parse it in the combineWith below.
@@ -478,24 +540,28 @@ export function main(args: {
               `You are verifying the fix for ${slide.slide_id}. ` +
               `Analysis: ${task.analysis_dir}/analysis.md. ` +
               `Diff (OOXML structural): ${task.scratch_dir}/diffs/${slide.slide_id}.diff. ` +
-              `TARGET render (what it SHOULD look like): ${slide.original_png}. ` +
-              `AFTER render (the post-fix Google-Slides output): ${task.scratch_dir}/thumbnails/thumbs/${slide.slide_id}.png. ` +
-              (slide.annotation_png ? `User annotation (red marks the defect): ${slide.annotation_png}. ` : ``) +
+              // Consolidated per-task images (one dir, self-describing names). The
+              // ATTEMPT + HIGHLIGHTED ATTEMPT were refreshed in step 4e from the
+              // just-recorded AFTER render, so they reflect the REAL post-fix output.
+              `TARGET render (what it SHOULD look like): ${slide.img_original ?? slide.original_png}. ` +
+              `ATTEMPT render (the post-fix Google-Slides output): ${slide.img_attempt ?? `${task.scratch_dir}/thumbnails/thumbs/${slide.slide_id}.png`}. ` +
+              ((slide.img_annotations ?? slide.annotation_png) ? `RAW annotation (the user's marks alone, on transparent bg): ${slide.img_annotations ?? slide.annotation_png}. ` : ``) +
+              ((slide.img_highlighted ?? slide.composite_png) ? `HIGHLIGHTED ATTEMPT (max contrast — shows WHERE the user marked, over the render): ${slide.img_highlighted ?? slide.composite_png}. ` : ``) +
               `User's original comment: "${slide.user_comment}".`,
             )
             .send({
               prompt: [
                 `Read analysis.md (the H2 section for ${slide.slide_id}) and the diff file.`,
-                `Then use the Read tool to VIEW (open as images — the Read tool renders a PNG visually) ALL of these from the header: the TARGET render, the AFTER render, AND — if a "User annotation" path is listed — the ANNOTATION image. You MUST open the annotation when one is provided.`,
-                `The annotation's red marks show EXACTLY where the user says the defect is. FOCUS your judgement on that MARKED REGION: locate the same region in the AFTER render and the TARGET, and decide whether the specific defect the user circled is gone — not whether the slide merely looks broadly okay.`,
-                `Compare TARGET vs AFTER (within the marked region first, then overall) against the user's comment to judge whether the defect is fixed and nothing new broke.`,
+                `Then use the Read tool to VIEW (open as images — the Read tool renders a PNG visually) ALL of these from the header: the TARGET render, the ATTEMPT render, AND — if listed — the "RAW annotation" and the "HIGHLIGHTED ATTEMPT" (max-contrast composite) images. You MUST open the highlighted attempt when one is provided.`,
+                `The RAW annotation alone is transparent marks on nothing — open the HIGHLIGHTED ATTEMPT to locate the marked region ON the render (the marked region is colour-shifted so it pops). FOCUS your judgement on that MARKED REGION: locate the same region in the ATTEMPT render and the TARGET, and decide whether the specific defect the user marked is gone — not whether the slide merely looks broadly okay.`,
+                `Compare TARGET vs ATTEMPT (within the marked region first, then overall) against the user's comment to judge whether the defect is fixed and nothing new broke.`,
                 `IMPORTANT: the OOXML diff can be EMPTY for a correct PIXEL-ONLY fix (e.g. a rasterized rounded-corner image mask). In that case judge from the IMAGES, not the diff — an empty diff is NOT evidence of failure.`,
-                `If the AFTER render file is missing/unreadable, judge from the diff + analysis alone and say so in the rationale.`,
+                `If the ATTEMPT render file is missing/unreadable, judge from the diff + analysis alone and say so in the rationale.`,
                 `Respond with ONLY a single-line JSON object (no prose, no code fences, no trailing commentary) with these keys:`,
                 `  slide_id     (string, must equal "${slide.slide_id}"),`,
                 `  rationale    (string, <=500 chars; what changed visually and/or structurally, and why),`,
                 `  isRegression (boolean; true if the diff OR the AFTER image introduces NEW rendering problems not mentioned in analysis.md's Expected-diff section),`,
-                `  bugSolved    (boolean; true ONLY if the user's MARKED REGION (from the annotation) in the AFTER render now matches the TARGET — the circled defect is visibly GONE — AND the user's comment is addressed AND it matches the Expected-diff claim. A pixel-only fix with an empty diff still counts as solved when the AFTER image's marked region is correct. If an annotation was provided but you could not open it, set bugSolved=false and say so in the rationale).`,
+                `  bugSolved    (boolean; true ONLY if the user's MARKED REGION (from the annotation) in the ATTEMPT render now matches the TARGET — the circled defect is visibly GONE — AND the user's comment is addressed AND it matches the Expected-diff claim. A pixel-only fix with an empty diff still counts as solved when the ATTEMPT image's marked region is correct. If an annotation was provided but you could not open it, set bugSolved=false and say so in the rationale).`,
                 `Example:`,
                 `{"slide_id":"${slide.slide_id}","rationale":"device corners now rounded in the AFTER render; target and after match","isRegression":false,"bugSolved":true}`,
               ].join(" "),
