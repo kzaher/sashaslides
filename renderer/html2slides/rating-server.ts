@@ -559,6 +559,54 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
   return savedAnnotPath;
 }
 
+/** Truly clear a slide's persisted annotation: delete the flattened annotation
+ *  PNG + all of its zoom-crops, and drop the `annotation` reference from
+ *  ratings.json (and the --history-dir ledger / candidate mirrors) so a later
+ *  save can't resurrect it via saveRating's "preserve prior annotation" branch.
+ *  The rating status/comment are left intact — only the drawing is removed. */
+function clearAnnotation(id: string): void {
+  // 1. Delete the flattened annotation PNG.
+  const annotPath = join(resultsDir, "annotations", `${id}.png`);
+  if (existsSync(annotPath)) { try { unlinkSync(annotPath); } catch {} }
+
+  // 2. Delete this slide's zoom-crops (<id>.png and <id>-NN-side.png).
+  if (existsSync(zoomDir)) {
+    for (const f of readdirSync(zoomDir)) {
+      if (f === `${id}.png` || f.startsWith(`${id}-`)) { try { unlinkSync(join(zoomDir, f)); } catch {} }
+    }
+  }
+
+  // 3. Drop the annotation reference from ratings.json so the next save's
+  //    preserve-prior-annotation branch can't bring it back.
+  const ratingsFile = join(resultsDir, "ratings.json");
+  if (existsSync(ratingsFile)) {
+    try {
+      const ratings = JSON.parse(readFileSync(ratingsFile, "utf-8"));
+      if (ratings[id] && ratings[id].annotation) {
+        delete ratings[id].annotation;
+        writeFileSync(ratingsFile, JSON.stringify(ratings, null, 2));
+      }
+    } catch { /* best-effort */ }
+  }
+
+  // 4. Mirror the removal to the persistent ledger / candidate stores so the
+  //    next round doesn't re-surface the cleared drawing from --history-dir.
+  if (historyDir) {
+    const stores: Array<[string, string]> = candidateMode
+      ? [[join(historyDir, "candidates.json"), join(historyDir, "candidate-annotations", `${id}.png`)]]
+      : [[join(historyDir, "ratings.json"), join(historyDir, "annotations", `${id}.png`)]];
+    for (const [store, png] of stores) {
+      if (existsSync(png)) { try { unlinkSync(png); } catch {} }
+      if (existsSync(store)) {
+        try {
+          const j = JSON.parse(readFileSync(store, "utf-8"));
+          if (j[id] && j[id].annotation) { delete j[id].annotation; writeFileSync(store, JSON.stringify(j, null, 2)); }
+        } catch { /* best-effort */ }
+      }
+    }
+  }
+}
+
 const HTML = `<!DOCTYPE html>
 <html>
 <head>
@@ -1185,15 +1233,40 @@ function toggleDraw() {
   const canvas = document.getElementById('drawCanvas');
   if (canvas) canvas.style.pointerEvents = drawMode ? 'auto' : 'none';
 }
-function clearDraw() {
+async function clearDraw() {
   const canvas = document.getElementById('drawCanvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
   canvasHasStrokes = false;
   drawHistory = [];
   drawShapes = [];
   refreshDrawCache();
+  // The drawCanvas is NOT the only place an annotation shows: the candidate view
+  // ALSO overlays the prior/original annotation as a separate <img id="priorAnnot">
+  // (and a rendered-overlay). Clearing only the canvas left those rectangles on
+  // screen → "Clear doesn't work". Hide them too.
+  const priorAnnotEl = document.getElementById('priorAnnot');
+  if (priorAnnotEl) priorAnnotEl.style.display = 'none';
+  document.querySelectorAll('.rendered-overlay, .prior-annot, .om-annot-overlay').forEach(function (n) { (n).style.display = 'none'; });
+  // Also drop any LOADED/PERSISTED annotation so a re-render doesn't reload it
+  // from disk and a later save doesn't preserve it. Reset the in-memory state,
+  // wipe the zoom-crops panel, and tell the server to delete the annotation PNG
+  // + zoom-crops for this slide.
+  const c = comparisons[currentIdx];
+  if (!c) return;
+  c.annotationPng = undefined;
+  c.zoomCrops = undefined;
+  const zcEl = document.getElementById('zoomCrops');
+  if (zcEl) zcEl.innerHTML = '';
+  try {
+    await fetch('/api/clear-annotation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: c.id }),
+    });
+  } catch (e) { /* clearing the live canvas already succeeded; server delete is best-effort */ }
 }
 function setupDrawCanvas(annotationPath) {
   const img = document.getElementById('slidesImg');
@@ -1468,6 +1541,24 @@ const server = createServer((req, res) => {
       console.log(`RATING: ${id} → ${status}${comment ? ` | ${comment}` : ''}${annotation ? ' [+annotation]' : ''}${zoomCrops.length ? ` [${zoomCrops.length} crops]` : ''}`);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, annotationPath, zoomCrops }));
+    });
+    return;
+  }
+
+  // Truly clear a slide's persisted annotation (PNG + zoom-crops + the
+  // annotation reference in ratings.json / ledger). Wired to the "Clear" button
+  // so wiping the live canvas ALSO removes the saved drawing on disk — otherwise
+  // it reloads on the next render.
+  if (url.pathname === "/api/clear-annotation" && req.method === "POST") {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      let id = "";
+      try { ({ id } = JSON.parse(body)); } catch { /* malformed body → no-op */ }
+      if (id) clearAnnotation(id);
+      console.log(`CLEAR-ANNOTATION: ${id || "(no id)"}`);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: !!id }));
     });
     return;
   }
