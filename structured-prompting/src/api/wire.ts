@@ -195,6 +195,54 @@ export type Result<T> = T | { error: string };
 /** Claude CLI model aliases passed to `claude --model`. */
 export type ClaudeModel = "haiku" | "sonnet" | "opus" | "fable";
 
+// ── Conversation transcript (Claude web-UI viewer) ─────────────────────────
+
+/** One normalized content block on a transcript turn. */
+export interface TranscriptBlock {
+  type: "text" | "thinking" | "tool_use" | "tool_result" | "image" | "document" | "unknown";
+  /** text / thinking / fallback body */
+  text?: string;
+  /** tool_use */
+  name?: string;
+  input?: unknown;
+  id?: string;
+  /** tool_result linkage + body */
+  toolUseId?: string;
+  isError?: boolean;
+  resultText?: string;
+  /** image data URL (image blocks + image tool_results) */
+  dataUrl?: string;
+  raw?: unknown;
+}
+
+export interface TranscriptTurn {
+  role: "user" | "assistant";
+  uuid: string | null;
+  timestamp: string | null;
+  cwd: string | null;
+  blocks: TranscriptBlock[];
+}
+
+/** GET /api/transcript?session=<id> reply. */
+export interface TranscriptReply {
+  sessionId: string;
+  path: string | null;
+  cwd: string | null;
+  /** Which CLI produced the transcript we parsed — lets the client badge it.
+   *  "claude" = ~/.claude/projects/*.jsonl; "codex" = ~/.codex/sessions
+   *  rollout-*.jsonl. Null when no transcript was found for the session. */
+  source: "claude" | "codex" | null;
+  turns: TranscriptTurn[];
+}
+
+/** POST /api/session-send request body. */
+export interface SessionSendRequest {
+  sessionId: string;
+  cwd?: string;
+  message: string;
+  images?: Array<{ media_type: string; data: string }>;
+}
+
 /**
  * Sugar namespace so user code can write `Claude.haiku` / `Claude.switchOpus`
  * matching the README spec. Lives in api/ because user code on the server
