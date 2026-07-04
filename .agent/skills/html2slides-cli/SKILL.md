@@ -5,7 +5,7 @@ description: CLI bridge that submits HTML slides to the html2slides.html browser
 Submit a conversion job via the JSON-RPC filesystem bridge:
 
 ```bash
-bash .claude/skills/html2slides-cli.sh --out /tmp/deck.pptx slides/*.html
+bash .agent/skills/html2slides-cli/html2slides-cli.sh --out /tmp/deck.pptx slides/*.html
 ```
 
 The shell script forwards every argument to `bin/html2slides-cli`. It expects

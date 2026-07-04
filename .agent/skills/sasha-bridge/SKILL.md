@@ -18,7 +18,7 @@ slide, or read deck state.
 The bridge server must be running and a display must be connected. Check with:
 
 ```bash
-.claude/skills/sasha-bridge.sh state
+.agent/skills/sasha-bridge/sasha-bridge.sh state
 ```
 
 If it reports `bridge not reachable`, tell the user to run `python wrapper.py
@@ -32,20 +32,20 @@ The skill forwards to `bridge/wrapper.py`. Write slide HTML to a temp file and
 pass it with `--html-file` (slides are self-contained HTML at 1280×720).
 
 ```bash
-.claude/skills/sasha-bridge.sh add          --html-file /tmp/slide.html      # append + show
-.claude/skills/sasha-bridge.sh add          --html-file /tmp/s.html --index 2 # insert at 2
-.claude/skills/sasha-bridge.sh replace      --html-file /tmp/slide.html       # replace CURRENT slide
-.claude/skills/sasha-bridge.sh replace      --index 0 --html-file /tmp/s.html # replace slide 0
-.claude/skills/sasha-bridge.sh goto         --index 3
-.claude/skills/sasha-bridge.sh screenshot   --out-dir /tmp/shots              # current slide
-.claude/skills/sasha-bridge.sh screenshot   --range 1-5 --out-dir /tmp/shots  # a range
-.claude/skills/sasha-bridge.sh screenshot   --indices 1,3 --xml --out-dir /tmp/shots
-.claude/skills/sasha-bridge.sh diagrams                                   # list deck diagrams
-.claude/skills/sasha-bridge.sh diagrams     --out-dir /tmp/diagrams       # + write each XML to a file
-.claude/skills/sasha-bridge.sh get-diagram  --id <ID> --out-xml /tmp/d.xml
-.claude/skills/sasha-bridge.sh edit-diagram --id <ID> --xml-file /tmp/d.xml   # update a deck diagram
-.claude/skills/sasha-bridge.sh edit-diagram --id "" --xml-file /tmp/new.xml --slide 3 --x .1 --y .15 --w .8 --h .7
-.claude/skills/sasha-bridge.sh state
+.agent/skills/sasha-bridge/sasha-bridge.sh add          --html-file /tmp/slide.html      # append + show
+.agent/skills/sasha-bridge/sasha-bridge.sh add          --html-file /tmp/s.html --index 2 # insert at 2
+.agent/skills/sasha-bridge/sasha-bridge.sh replace      --html-file /tmp/slide.html       # replace CURRENT slide
+.agent/skills/sasha-bridge/sasha-bridge.sh replace      --index 0 --html-file /tmp/s.html # replace slide 0
+.agent/skills/sasha-bridge/sasha-bridge.sh goto         --index 3
+.agent/skills/sasha-bridge/sasha-bridge.sh screenshot   --out-dir /tmp/shots              # current slide
+.agent/skills/sasha-bridge/sasha-bridge.sh screenshot   --range 1-5 --out-dir /tmp/shots  # a range
+.agent/skills/sasha-bridge/sasha-bridge.sh screenshot   --indices 1,3 --xml --out-dir /tmp/shots
+.agent/skills/sasha-bridge/sasha-bridge.sh diagrams                                   # list deck diagrams
+.agent/skills/sasha-bridge/sasha-bridge.sh diagrams     --out-dir /tmp/diagrams       # + write each XML to a file
+.agent/skills/sasha-bridge/sasha-bridge.sh get-diagram  --id <ID> --out-xml /tmp/d.xml
+.agent/skills/sasha-bridge/sasha-bridge.sh edit-diagram --id <ID> --xml-file /tmp/d.xml   # update a deck diagram
+.agent/skills/sasha-bridge/sasha-bridge.sh edit-diagram --id "" --xml-file /tmp/new.xml --slide 3 --x .1 --y .15 --w .8 --h .7
+.agent/skills/sasha-bridge/sasha-bridge.sh state
 ```
 
 Slides are full self-contained 1280×720 HTML documents (own `<head><style>`,

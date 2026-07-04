@@ -95,8 +95,8 @@ analysis/layout-matching/
 | `analysis/scripts/layout-matching.ts` | Library: `describeSlide()`, `matchLayout()` |
 | `analysis/scripts/run-layout-eval.ts` | Eval orchestrator (describe → match → score) |
 | `analysis/layout-matching/ground-truth.json` | Hand-labelled layout categories |
-| `.claude/skills/layout-match-slides.md` | Skill definition |
-| `.claude/skills/layout-match-slides.sh` | Skill entry point |
+| `.agent/skills/layout-match-slides/SKILL.md` | Skill definition |
+| `.agent/skills/layout-match-slides/layout-match-slides.sh` | Skill entry point |
 
 ## Integration with slide generation
 

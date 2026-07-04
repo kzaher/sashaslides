@@ -19,11 +19,11 @@ user_invocable: true
 
 ```bash
 # Chrome must be on :9222 for the gate.
-bash .claude/skills/merge-worktrees.sh device-frame-ring metric-pill-center-wrap colored-native-bullets
+bash .agent/skills/merge-worktrees/merge-worktrees.sh device-frame-ring metric-pill-center-wrap colored-native-bullets
 # land it if clean:
-bash .claude/skills/merge-worktrees.sh device-frame-ring metric-pill-center-wrap colored-native-bullets --commit
+bash .agent/skills/merge-worktrees/merge-worktrees.sh device-frame-ring metric-pill-center-wrap colored-native-bullets --commit
 # reproduce from a clean base (discard prior uncommitted converter edits first):
-bash .claude/skills/merge-worktrees.sh <names...> --clean
+bash .agent/skills/merge-worktrees/merge-worktrees.sh <names...> --clean
 ```
 
 Worktree specs are a path or a task name (globs `.claude/worktrees/bs-<name>-*`, newest wins).
