@@ -458,7 +458,7 @@ export class Engine {
           graph.finishOk(
             node.id,
             { text: response.text, durationMs: response.durationMs, appliedForkFlag, composedPrompt, resumeCommand },
-            { sessionId: response.sessionId ?? usedResume, model: response.model ?? ctx.model },
+            { sessionId: response.sessionId ?? usedResume, model: ctx.model },
           );
           return { value: response.text, ctx: nextCtx };
         }
@@ -715,7 +715,7 @@ export class Engine {
    */
   private async materializeAndCall<Resp extends { sessionId: string | null; isError: boolean; errorMessage: string | null; raw: unknown; stderr: string }>(
     graph: ComputationGraph,
-    _node: RichGraphNode,
+    node: RichGraphNode,
     ctx: RunCtx,
     invoke: (resumeSid: string | null, forkFlag: boolean, composedPrompt: string) => Promise<Resp>,
     rawPrompt: string,
@@ -750,6 +750,14 @@ export class Engine {
     const prepend = ctx.prepend.length ? ctx.prepend.join("\n\n") + "\n\n" : "";
     const append = ctx.append.length ? "\n\n" + ctx.append.join("\n\n") : "";
     const composed = prepend + rawPrompt + append;
+
+    // Expose the real composed prompt (prepend header + body + append) on the
+    // running node's output BEFORE the CLI call, mirroring the scheduler
+    // (scheduler.ts:534). Without this, a running send only showed the raw
+    // `.send({prompt})` body — the monitor's "entire prompt sent to claude"
+    // reveal was empty until finishOk. finishOk later replaces output (which
+    // also carries composedPrompt), so display is consistent running→finished.
+    graph.patchOutput(node.id, { composedPrompt: composed, partialText: "" });
 
     const response = await invoke(resumeSid, applyForkFlag, composed);
 

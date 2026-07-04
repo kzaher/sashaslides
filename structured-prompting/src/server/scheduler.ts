@@ -619,7 +619,7 @@ function makeSendHandler(state: SchedulerState): KindHandler {
         }
         ctx.setValue(node.id, parsed);
         graph.finishOk(node.id, { parsed, text: r.text, composedPrompt, appliedForkFlag: applyFork, ctxPatch },
-          { sessionId: r.sessionId ?? resumeSid, model: r.model ?? ctx.model });
+          { sessionId: r.sessionId ?? resumeSid, model: ctx.model });
         return;
       }
 
@@ -627,7 +627,7 @@ function makeSendHandler(state: SchedulerState): KindHandler {
       graph.finishOk(node.id, {
         text: r.text, composedPrompt, durationMs: r.durationMs, usage: r.usage,
         appliedForkFlag: applyFork, ctxPatch,
-      }, { sessionId: r.sessionId ?? resumeSid, model: r.model ?? ctx.model });
+      }, { sessionId: r.sessionId ?? resumeSid, model: ctx.model });
     } catch (err) {
       graph.finishErr(node.id, err);
     }
