@@ -1,8 +1,10 @@
-import { createServer, request as httpRequest, type Server } from "node:http";
+import { createServer, request as httpRequest, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join } from "node:path";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import * as esbuild from "esbuild";
 import type { ComputationGraph } from "./graph.js";
 import { callClaude } from "./claude-cli.js";
@@ -20,24 +22,21 @@ import { FatalShellError } from "./errors.js";
 // and "preact/hooks" through the repo's node_modules, inlines them.
 const require = createRequire(fileURLToPath(import.meta.url));
 
-function bundleClientScript(): string {
-  // Resolve the source entry relative to THIS file's location so the
-  // bundle works whether server.ts is invoked from src/server/server.ts
-  // (via tsx) or from dist/main-scaffolding.mjs (after build.ts). In
-  // both cases src/client/main.tsx sits at ../../src/client/main.tsx
-  // from THIS module if running via tsx, but at the dist path it ships
-  // bundled — so prefer source-resolution from the import.meta.url-
-  // derived dirname when the file exists; otherwise fall back to a
-  // repo-root-relative search.
+/** Resolve the client entry once (src/client/main.tsx), robust to whether
+ *  server.ts runs via tsx (from src/server/) or from a sibling/dist layout. */
+function resolveClientEntry(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [
     resolve(here, "..", "client", "main.tsx"),                  // running from src/server/
     resolve(here, "..", "src", "client", "main.tsx"),           // running from a sibling dir
     resolve(here, "..", "..", "src", "client", "main.tsx"),     // running from dist/
   ];
-  const entry = candidates.find(p => {
+  return candidates.find(p => {
     try { require.resolve(p); return true; } catch { return false; }
   }) ?? candidates[0];
+}
+
+function runEsbuild(entry: string): string {
   const result = esbuild.buildSync({
     entryPoints: [entry],
     bundle: true,
@@ -55,9 +54,94 @@ function bundleClientScript(): string {
   return result.outputFiles[0].text;
 }
 
-const BUNDLED_CLIENT = bundleClientScript();
+/**
+ * Newest mtime (ms) across every client source file, so we can re-bundle the
+ * Preact UI on demand in dev without restarting the engine. Walks the
+ * `src/client/` tree once per request (a handful of stat() calls — cheap) and
+ * returns the max mtime; a missing dir returns 0 so the first bundle still
+ * runs. Only `.ts`/`.tsx` files count (styles/assets are inlined in the .tsx).
+ */
+function newestClientMtime(entry: string): number {
+  const clientRoot = dirname(entry); // src/client/
+  let newest = 0;
+  const walk = (dir: string): void => {
+    let entries: string[];
+    try { entries = readdirSync(dir); } catch { return; }
+    for (const name of entries) {
+      const full = join(dir, name);
+      let st;
+      try { st = statSync(full); } catch { continue; }
+      if (st.isDirectory()) {
+        if (name === "node_modules" || name === ".git") continue;
+        walk(full);
+      } else if (name.endsWith(".ts") || name.endsWith(".tsx")) {
+        if (st.mtimeMs > newest) newest = st.mtimeMs;
+      }
+    }
+  };
+  walk(clientRoot);
+  return newest;
+}
 
-const HTML = `<!doctype html>
+/**
+ * mtime-cached client bundler. On each call it stats the client source tree;
+ * if nothing changed since the cached bundle it returns the cache (no esbuild
+ * run). On a source change it re-bundles and refreshes the cache. If esbuild
+ * THROWS (a typo mid-edit), it keeps serving the last-good bundle and stashes
+ * the error text in `lastBundleError` so the page can surface it instead of
+ * blanking — and it does NOT advance `cachedMtime`, so the next refresh after
+ * the fix re-bundles again. First call bundles unconditionally.
+ */
+let clientEntry: string | null = null;
+let cachedBundle: string | null = null;
+let cachedMtime = -1;
+let lastBundleError: string | null = null;
+
+function getClientBundle(): { js: string; error: string | null } {
+  if (clientEntry === null) clientEntry = resolveClientEntry();
+  const mtime = newestClientMtime(clientEntry);
+  if (cachedBundle !== null && mtime === cachedMtime) {
+    return { js: cachedBundle, error: lastBundleError };
+  }
+  try {
+    const js = runEsbuild(clientEntry);
+    cachedBundle = js;
+    cachedMtime = mtime;
+    lastBundleError = null;
+    return { js, error: null };
+  } catch (err) {
+    lastBundleError = err instanceof Error ? (err.message + (err.stack ? "" : "")) : String(err);
+    // Keep last-good bundle if we have one; otherwise surface the error inline.
+    if (cachedBundle !== null) return { js: cachedBundle, error: lastBundleError };
+    const safe = JSON.stringify(lastBundleError);
+    const fallback = `document.getElementById("root").innerHTML =
+      '<pre style="color:#f85149;white-space:pre-wrap;padding:20px">client bundle error:\\n' +
+      ${safe}.replace(/[<>&]/g, function(c){return {'<':'&lt;','>':'&gt;','&':'&amp;'}[c];}) + '</pre>';`;
+    return { js: fallback, error: lastBundleError };
+  }
+}
+
+/**
+ * Build the monitor HTML with the current client bundle inlined. Called
+ * per-request (cheap: the bundle itself is mtime-cached by getClientBundle).
+ * When a re-bundle failed but a last-good bundle exists, a small red banner
+ * is injected above the app announcing the stale bundle + esbuild error.
+ */
+function renderHtml(): string {
+  const { js, error } = getClientBundle();
+  const errorBanner = error
+    ? `<script>console.error(${JSON.stringify("client re-bundle failed (serving last good bundle):\n" + error)});
+       window.addEventListener("DOMContentLoaded", function(){
+         var b=document.createElement("div");
+         b.style.cssText="position:fixed;top:0;left:0;right:0;z-index:9999;background:#5a1d1d;color:#ffb4b4;font:11px ui-monospace,monospace;padding:4px 10px;white-space:pre-wrap;border-bottom:1px solid #f85149";
+         b.textContent=${JSON.stringify("client re-bundle failed — showing last good UI. " + error.split("\n")[0])};
+         document.body.appendChild(b);
+       });</script>`
+    : "";
+  return HTML_HEAD + `<script>${js}</script>` + errorBanner + HTML_TAIL;
+}
+
+const HTML_HEAD = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
@@ -81,6 +165,8 @@ const HTML = `<!doctype html>
   .status.running { background:var(--run); animation: pulse 0.9s ease-in-out infinite; box-shadow:0 0 6px 1px var(--run); }
   .status.pending { background:transparent; border:2px dashed var(--pending); width:10px; height:10px; box-shadow:none; }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+  .cv-spinner { display:inline-block; animation: cvspin 0.9s linear infinite; }
+  @keyframes cvspin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
   .kind { color:var(--muted); }
   .label { overflow:hidden; text-overflow:ellipsis; }
   .dur { color:var(--muted); font-size:11px; margin-left:auto; padding-left:8px; flex-shrink:0; }
@@ -141,8 +227,12 @@ const HTML = `<!doctype html>
     the error. The monitor needs no network access beyond this page.
   </div>
 </div>
-<script>${BUNDLED_CLIENT}</script>
-</body>
+`;
+
+// The client bundle + optional error banner are spliced in between HEAD and
+// TAIL by renderHtml() on each request (see getClientBundle for the mtime
+// cache). Kept as two constants so the `<script>` injection point is explicit.
+const HTML_TAIL = `</body>
 </html>`;
 
 export interface MonitorServer {
@@ -506,6 +596,444 @@ async function handleInject(rawBody: string, graph: ComputationGraph, io?: IO): 
 
 export { handleInject };
 
+// ── Conversation transcript (Claude web-UI viewer) ─────────────────────────
+//
+// The monitor's ConversationView reads the CLI transcript for a send node's
+// sessionId and renders it as a Claude-web-UI-style chat, plus a sticky
+// composer that continues the SAME session (resume, no fork) with SSE
+// streaming. These handlers back that view.
+
+/** A normalized content block on a transcript turn. Mirrors the CLI JSONL
+ *  block shapes but trims them to what the client renders. */
+interface TranscriptBlock {
+  type: "text" | "thinking" | "tool_use" | "tool_result" | "image" | "document" | "unknown";
+  /** text / thinking body */
+  text?: string;
+  /** tool_use */
+  name?: string;
+  input?: unknown;
+  id?: string;
+  /** tool_result linkage + body (string, or nested blocks flattened to text/images) */
+  toolUseId?: string;
+  isError?: boolean;
+  resultText?: string;
+  /** image (base64 data URL) — used by both `image` blocks and image tool_results */
+  dataUrl?: string;
+  /** raw for anything we don't special-case */
+  raw?: unknown;
+}
+
+interface TranscriptTurn {
+  role: "user" | "assistant";
+  uuid: string | null;
+  timestamp: string | null;
+  cwd: string | null;
+  blocks: TranscriptBlock[];
+}
+
+interface TranscriptReply {
+  sessionId: string;
+  /** Resolved absolute path of the .jsonl we parsed (for debugging). */
+  path: string | null;
+  /** Most-recent non-empty cwd seen in the transcript — the client sends
+   *  follow-ups against this dir. */
+  cwd: string | null;
+  /** Which CLI produced the transcript — "claude" (~/.claude/projects) or
+   *  "codex" (~/.codex/sessions rollout files). Null when nothing matched. */
+  source: "claude" | "codex" | null;
+  turns: TranscriptTurn[];
+}
+
+/** Turn a CLI content block into our normalized TranscriptBlock. */
+function normalizeBlock(b: unknown): TranscriptBlock | null {
+  if (typeof b === "string") return { type: "text", text: b };
+  if (!b || typeof b !== "object") return null;
+  const o = b as Record<string, unknown>;
+  const t = typeof o.type === "string" ? o.type : "unknown";
+  if (t === "text") return { type: "text", text: typeof o.text === "string" ? o.text : "" };
+  if (t === "thinking") return { type: "thinking", text: typeof o.thinking === "string" ? o.thinking : "" };
+  if (t === "tool_use") {
+    return {
+      type: "tool_use",
+      name: typeof o.name === "string" ? o.name : "tool",
+      input: o.input,
+      id: typeof o.id === "string" ? o.id : undefined,
+    };
+  }
+  if (t === "tool_result") {
+    // content may be a string, or an array of {type:"text"|"image"} blocks.
+    let resultText = "";
+    let dataUrl: string | undefined;
+    const c = o.content;
+    if (typeof c === "string") {
+      resultText = c;
+    } else if (Array.isArray(c)) {
+      for (const part of c) {
+        if (part && typeof part === "object") {
+          const p = part as Record<string, unknown>;
+          if (p.type === "text" && typeof p.text === "string") resultText += p.text;
+          else if (p.type === "image") {
+            const src = p.source as Record<string, unknown> | undefined;
+            if (src && typeof src.data === "string") {
+              const mt = typeof src.media_type === "string" ? src.media_type : "image/png";
+              if (!dataUrl) dataUrl = `data:${mt};base64,${src.data}`;
+            }
+          }
+        }
+      }
+    }
+    return {
+      type: "tool_result",
+      toolUseId: typeof o.tool_use_id === "string" ? o.tool_use_id : undefined,
+      isError: o.is_error === true,
+      resultText,
+      dataUrl,
+    };
+  }
+  if (t === "image") {
+    const src = o.source as Record<string, unknown> | undefined;
+    if (src && src.type === "base64" && typeof src.data === "string") {
+      const mt = typeof src.media_type === "string" ? src.media_type : "image/png";
+      return { type: "image", dataUrl: `data:${mt};base64,${src.data}` };
+    }
+    // Some transcripts store an image as a file path; surface it as text.
+    return { type: "image", text: typeof (src?.data) === "string" ? String(src?.data) : "(image)" };
+  }
+  if (t === "document") {
+    return { type: "document", text: "(attached document)" };
+  }
+  return { type: "unknown", raw: b };
+}
+
+/**
+ * Locate `<session>.jsonl` under `~/.claude/projects/*<dir>*` and parse it
+ * into ordered turns. A session id is globally unique, so the first project
+ * dir that contains the file wins. Non-message lines (mode, permission-mode,
+ * summary, attachment, file-history-snapshot, system, …) are skipped.
+ *
+ * If no Claude transcript exists for this id we fall through to the codex
+ * rollout parser (`readCodexTranscript`) so codex-driven sessions still get
+ * a chat view. Both paths return the SAME normalized `TranscriptTurn[]`
+ * shape; the `source` field says which CLI produced it. Never throws — a
+ * parse/IO failure degrades to an empty transcript.
+ */
+function readTranscript(sessionId: string): TranscriptReply {
+  const projectsRoot = join(homedir(), ".claude", "projects");
+  let hit: string | null = null;
+  try {
+    if (existsSync(projectsRoot)) {
+      for (const dir of readdirSync(projectsRoot)) {
+        const candidate = join(projectsRoot, dir, `${sessionId}.jsonl`);
+        if (existsSync(candidate)) { hit = candidate; break; }
+      }
+    }
+  } catch { /* fall through to codex */ }
+
+  // No Claude transcript for this id → try codex.
+  if (!hit) return readCodexTranscript(sessionId);
+
+  const turns: TranscriptTurn[] = [];
+  let cwd: string | null = null;
+  try {
+    const raw = readFileSync(hit, "utf8");
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let o: Record<string, unknown>;
+      try { o = JSON.parse(trimmed) as Record<string, unknown>; } catch { continue; }
+      const type = o.type;
+      if (type !== "user" && type !== "assistant") continue;
+      const msg = o.message as Record<string, unknown> | undefined;
+      if (!msg) continue;
+      const role = msg.role === "assistant" ? "assistant" : "user";
+      if (typeof o.cwd === "string" && o.cwd) cwd = o.cwd;
+      const content = msg.content;
+      const blocks: TranscriptBlock[] = [];
+      if (typeof content === "string") {
+        blocks.push({ type: "text", text: content });
+      } else if (Array.isArray(content)) {
+        for (const b of content) {
+          const nb = normalizeBlock(b);
+          if (nb) blocks.push(nb);
+        }
+      }
+      if (blocks.length === 0) continue;
+      turns.push({
+        role,
+        uuid: typeof o.uuid === "string" ? o.uuid : null,
+        timestamp: typeof o.timestamp === "string" ? o.timestamp : null,
+        cwd: typeof o.cwd === "string" ? o.cwd : null,
+        blocks,
+      });
+    }
+  } catch {
+    // A read/parse failure mid-file: return whatever we accumulated so far.
+  }
+  return { sessionId, path: hit, cwd, source: "claude", turns };
+}
+
+// ── Codex rollout transcript ───────────────────────────────────────────────
+//
+// Codex (`codex exec`, see codex-cli.ts) records each session as a JSONL
+// "rollout" file under ~/.codex/sessions/YYYY/MM/DD/rollout-<ISO>-<id>.jsonl,
+// where <id> is the codex thread/session id (the `thread_id` codex-cli captures
+// as `sessionId`, and the `payload.id` on the leading `session_meta` line).
+//
+// Line schema (verified against codex 0.135–0.140 rollouts on disk):
+//   {"type":"session_meta","payload":{"id","cwd","cli_version",…}}   ← first line
+//   {"type":"turn_context","payload":{…}}
+//   {"type":"event_msg","payload":{"type":"task_started"|"token_count"|…}}
+//   {"type":"response_item","payload":{ …OpenAI-style item… }}
+// The `response_item` payloads are the conversation. Their `type` is one of:
+//   message            role:"user"|"assistant"|"developer", content:[{type:
+//                      "input_text"|"output_text"|"input_image", text|image_url}]
+//   reasoning          summary:[{type:"summary_text",text}], encrypted_content
+//   function_call      {name, arguments(JSON string), call_id}
+//   function_call_output {call_id, output: string | [{type:"input_image"|
+//                      "input_text", image_url|text}]}
+//   custom_tool_call   {name, input(string), call_id}   (e.g. apply_patch)
+//   custom_tool_call_output {call_id, output(string)}
+//
+// Mapping onto our normalized blocks:
+//   user/developer input_text  → user   text
+//   assistant output_text      → assistant text
+//   reasoning summary_text     → assistant thinking (encrypted-only → skipped)
+//   function_call / custom_tool_call        → assistant tool_use (name+input)
+//   function_call_output / custom_tool_call_output → user tool_result
+//   input_image (data URL)     → image block on the owning turn
+//
+// Ordering + timestamps are preserved from the file. Unknown types are skipped
+// and the parser never throws (returns {turns:[]} on any failure).
+
+/** Find the codex rollout file whose filename embeds `sessionId`. The id is
+ *  the trailing UUID in `rollout-<ISO>-<uuid>.jsonl`, so a filename `.includes`
+ *  match on the id is sufficient and cheap (no need to open every file). */
+function findCodexRollout(sessionId: string): string | null {
+  const root = join(homedir(), ".codex", "sessions");
+  if (!sessionId || !existsSync(root)) return null;
+  // Layout is sessions/YYYY/MM/DD/rollout-*.jsonl — walk 3 levels of dirs.
+  const walk = (dir: string, depth: number): string | null => {
+    let entries: string[];
+    try { entries = readdirSync(dir); } catch { return null; }
+    // At leaf depth, match rollout files; otherwise recurse into subdirs.
+    for (const name of entries) {
+      const full = join(dir, name);
+      if (depth >= 3) {
+        if (name.endsWith(".jsonl") && name.includes(sessionId)) return full;
+      } else {
+        const found = walk(full, depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  return walk(root, 0);
+}
+
+/** One block of codex message `content[]` (input_text/output_text/input_image). */
+function codexContentBlocks(content: unknown): TranscriptBlock[] {
+  const out: TranscriptBlock[] = [];
+  if (!Array.isArray(content)) return out;
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    const p = part as Record<string, unknown>;
+    const pt = p.type;
+    if ((pt === "input_text" || pt === "output_text" || pt === "text") && typeof p.text === "string") {
+      if (p.text) out.push({ type: "text", text: p.text });
+    } else if ((pt === "input_image" || pt === "image") && typeof p.image_url === "string") {
+      // image_url is already a data: URL in codex rollouts.
+      out.push({ type: "image", dataUrl: p.image_url });
+    }
+  }
+  return out;
+}
+
+/** Turn a codex `function_call_output` / `custom_tool_call_output` `output`
+ *  field (string, or an array of input_text/input_image parts) into a
+ *  tool_result block. */
+function codexToolResult(callId: string | undefined, output: unknown, isError: boolean): TranscriptBlock {
+  let resultText = "";
+  let dataUrl: string | undefined;
+  if (typeof output === "string") {
+    resultText = output;
+  } else if (Array.isArray(output)) {
+    for (const part of output) {
+      if (!part || typeof part !== "object") continue;
+      const p = part as Record<string, unknown>;
+      if ((p.type === "input_text" || p.type === "output_text" || p.type === "text") && typeof p.text === "string") {
+        resultText += p.text;
+      } else if ((p.type === "input_image" || p.type === "image") && typeof p.image_url === "string") {
+        if (!dataUrl) dataUrl = p.image_url;
+      }
+    }
+  } else if (output && typeof output === "object") {
+    // Some codex versions nest {content:[…]} or {output:"…"}.
+    const o = output as Record<string, unknown>;
+    if (typeof o.output === "string") resultText = o.output;
+    else if (Array.isArray(o.content)) {
+      for (const part of o.content) {
+        if (part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string") {
+          resultText += (part as Record<string, unknown>).text as string;
+        }
+      }
+    }
+  }
+  return { type: "tool_result", toolUseId: callId, isError, resultText, dataUrl };
+}
+
+function readCodexTranscript(sessionId: string): TranscriptReply {
+  const hit = findCodexRollout(sessionId);
+  if (!hit) return { sessionId, path: null, cwd: null, source: null, turns: [] };
+
+  const turns: TranscriptTurn[] = [];
+  let cwd: string | null = null;
+  try {
+    const raw = readFileSync(hit, "utf8");
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let o: Record<string, unknown>;
+      try { o = JSON.parse(trimmed) as Record<string, unknown>; } catch { continue; }
+      const ts = typeof o.timestamp === "string" ? o.timestamp : null;
+
+      // session_meta carries the working dir the session ran in.
+      if (o.type === "session_meta") {
+        const p = o.payload as Record<string, unknown> | undefined;
+        if (p && typeof p.cwd === "string" && p.cwd) cwd = p.cwd;
+        continue;
+      }
+      if (o.type !== "response_item") continue;
+      const p = o.payload as Record<string, unknown> | undefined;
+      if (!p || typeof p !== "object") continue;
+      const itemType = typeof p.type === "string" ? p.type : "";
+
+      if (itemType === "message") {
+        const rawRole = typeof p.role === "string" ? p.role : "user";
+        // developer/system prompts render on the user side of the chat.
+        const role: "user" | "assistant" = rawRole === "assistant" ? "assistant" : "user";
+        const blocks = codexContentBlocks(p.content);
+        if (blocks.length === 0) continue;
+        turns.push({ role, uuid: null, timestamp: ts, cwd, blocks });
+        continue;
+      }
+
+      if (itemType === "reasoning") {
+        // Prefer human-readable summary_text; encrypted_content is opaque, skip.
+        const summary = p.summary;
+        let text = "";
+        if (Array.isArray(summary)) {
+          for (const s of summary) {
+            if (s && typeof s === "object" && typeof (s as Record<string, unknown>).text === "string") {
+              text += (s as Record<string, unknown>).text as string;
+            }
+          }
+        }
+        if (!text) continue; // encrypted-only reasoning has nothing to show
+        turns.push({ role: "assistant", uuid: null, timestamp: ts, cwd, blocks: [{ type: "thinking", text }] });
+        continue;
+      }
+
+      if (itemType === "function_call" || itemType === "custom_tool_call") {
+        const name = typeof p.name === "string" ? p.name : "tool";
+        const callId = typeof p.call_id === "string" ? p.call_id : undefined;
+        // function_call → `arguments` (JSON string); custom_tool_call → `input`.
+        let input: unknown = p.arguments ?? p.input;
+        if (typeof input === "string") {
+          try { input = JSON.parse(input); } catch { /* keep the raw string */ }
+        }
+        turns.push({
+          role: "assistant", uuid: null, timestamp: ts, cwd,
+          blocks: [{ type: "tool_use", name, input, id: callId }],
+        });
+        continue;
+      }
+
+      if (itemType === "function_call_output" || itemType === "custom_tool_call_output") {
+        const callId = typeof p.call_id === "string" ? p.call_id : undefined;
+        const block = codexToolResult(callId, p.output, false);
+        turns.push({ role: "user", uuid: null, timestamp: ts, cwd, blocks: [block] });
+        continue;
+      }
+      // Unknown response_item type → skip.
+    }
+  } catch {
+    // Best-effort: return whatever was accumulated before the failure.
+  }
+  return { sessionId, path: hit, cwd, source: "codex", turns };
+}
+
+interface SessionSendRequest {
+  sessionId: string;
+  cwd?: string;
+  message: string;
+  images?: Array<{ media_type: string; data: string }>;
+}
+
+/**
+ * POST /api/session-send: continue the SAME claude session (resume, NO fork)
+ * with a new user message and stream the reply back as Server-Sent Events.
+ *
+ * Streaming frames (each `data:` line is one JSON object):
+ *   {type:"delta", text}   — accumulated assistant text so far
+ *   {type:"done",  text, sessionId}  — final assistant text + (new) session id
+ *   {type:"error", error}  — the call failed
+ *
+ * Images are written to a per-call temp dir and referenced by absolute path
+ * via callClaude's `attachments` (base64) mechanism, which appends the paths
+ * to the prompt — the CLI then reads them as file attachments.
+ */
+async function handleSessionSend(rawBody: string, res: ServerResponse): Promise<void> {
+  let body: SessionSendRequest;
+  try {
+    body = JSON.parse(rawBody) as SessionSendRequest;
+  } catch {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  if (!body.sessionId || !body.message) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "/api/session-send requires {sessionId, message}" }));
+    return;
+  }
+
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-store",
+    connection: "keep-alive",
+  });
+  const emit = (obj: unknown) => {
+    try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch { /* client gone */ }
+  };
+
+  // Materialize attached images so the CLI can read them. callClaude accepts
+  // base64 `attachments`, dumps them to a scratch dir, and appends the paths
+  // to the prompt (then cleans up in its finally). We pass PNG/JPEG bytes as-is.
+  const attachments = Array.isArray(body.images)
+    ? body.images.map(i => i.data).filter(d => typeof d === "string")
+    : [];
+
+  try {
+    const r = await callClaude({
+      prompt: body.message,
+      resume: body.sessionId,
+      fork: false,          // CONTINUE the same session — a real continuation.
+      cwd: body.cwd,
+      attachments,
+      onPartialText: (textSoFar) => emit({ type: "delta", text: textSoFar }),
+    });
+    if (r.isError) {
+      emit({ type: "error", error: r.errorMessage ?? "session-send failed" });
+    } else {
+      emit({ type: "done", text: r.text, sessionId: r.sessionId });
+    }
+  } catch (err) {
+    emit({ type: "error", error: err instanceof Error ? err.message : String(err) });
+  } finally {
+    try { res.end(); } catch { /* already closed */ }
+  }
+}
+
 export async function startMonitor(args: {
   graph: ComputationGraph;
   port?: number;
@@ -519,7 +1047,10 @@ export async function startMonitor(args: {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store",
       });
-      res.end(HTML);
+      // Re-bundled on demand: renderHtml() → getClientBundle() stats the
+      // client source tree and only re-runs esbuild when a .ts/.tsx changed.
+      // Edit a client file → refresh the browser → new UI, no engine restart.
+      res.end(renderHtml());
       return;
     }
     if (url === "/api/graph") {
@@ -563,6 +1094,43 @@ export async function startMonitor(args: {
         }).catch((err: unknown) => {
           res.writeHead(500, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        });
+      });
+      return;
+    }
+    if (url.startsWith("/api/transcript") && req.method === "GET") {
+      // GET /api/transcript?session=<id>: parse the CLI JSONL transcript for
+      // this session into ordered {role, blocks[]} turns for the conversation
+      // viewer. Returns {sessionId, path, cwd, turns}.
+      const qi = url.indexOf("?");
+      const params = new URLSearchParams(qi >= 0 ? url.slice(qi + 1) : "");
+      const session = params.get("session") ?? "";
+      try {
+        const reply = session ? readTranscript(session) : { sessionId: "", path: null, cwd: null, source: null, turns: [] };
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify(reply));
+      } catch (err) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+    if (url === "/api/session-send" && req.method === "POST") {
+      // POST /api/session-send {sessionId, cwd, message, images?}: continue the
+      // same claude session (resume, no fork) and stream the reply as SSE.
+      let body = "";
+      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      req.on("end", () => {
+        void handleSessionSend(body, res).catch((err: unknown) => {
+          try {
+            if (!res.headersSent) {
+              res.writeHead(500, { "content-type": "application/json" });
+              res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+            } else {
+              res.write(`data: ${JSON.stringify({ type: "error", error: err instanceof Error ? err.message : String(err) })}\n\n`);
+              res.end();
+            }
+          } catch { /* client gone */ }
         });
       });
       return;

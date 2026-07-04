@@ -8,7 +8,9 @@ import { useState } from "preact/hooks";
 
 export function ComposedPromptReveal(props: { text: string }) {
   const { text } = props;
-  const [shown, setShown] = useState(false);
+  // Default EXPANDED: this IS the real message sent to the model (prepend header
+  // + body + append), so show it by default rather than hiding it behind a click.
+  const [shown, setShown] = useState(true);
   return (
     <div class="sect">
       <h2>
