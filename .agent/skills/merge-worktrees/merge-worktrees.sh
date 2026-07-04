@@ -3,7 +3,7 @@
 # Name the worktrees (path or task name); it extracts each one's converter diff,
 # applies them (3-way, resolving overlaps), derives the intended slide set from
 # each worktree's before/pptx, typechecks, and runs the pixel-perfect gate.
-#   bash .claude/skills/merge-worktrees.sh device-frame-ring metric-pill-center-wrap colored-native-bullets [--commit] [--rate] [--clean]
+#   bash .agent/skills/merge-worktrees/merge-worktrees.sh device-frame-ring metric-pill-center-wrap colored-native-bullets [--commit] [--rate] [--clean]
 set -uo pipefail
 REPO="${REPO:-/workspaces/sashaslides}"; cd "$REPO"
 if [ "$#" -eq 0 ]; then

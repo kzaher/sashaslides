@@ -5,7 +5,7 @@ description: Rebuild the standalone drag-and-drop html2slides.html bundle.
 Run the build script:
 
 ```bash
-bash .claude/skills/build-html2slides.sh
+bash .agent/skills/build-html2slides/build-html2slides.sh
 ```
 
 This inlines extract-dom.ts (compiled), main.ts (bundled with esbuild),

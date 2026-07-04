@@ -4,7 +4,7 @@ description: Launch SxS rating server comparing original HTML screenshots vs Goo
 user_invocable: true
 ---
 
-Launch the side-by-side rating server for comparing HTML slide screenshots against Google Slides API output. Execute the script at `.claude/skills/rate-slides.sh`.
+Launch the side-by-side rating server for comparing HTML slide screenshots against Google Slides API output. Execute the script at `.agent/skills/rate-slides/rate-slides.sh`.
 
 Arguments: `<html-dir> [presentation-id]`
 

@@ -6,7 +6,7 @@ user_invocable: true
 
 **Scope: html2slides converter bugs only.** This skill targets the HTML→pptx→Google-Slides converter at `renderer/html2slides/convert-pptx.ts` (and `extract-dom.ts`). It is NOT a general bug-solving skill — it consumes the SxS rating output of `regen-complex.sh` (`/tmp/sxs-complex/ratings.json`), hands the bad-rated slides to Opus workers, and expects them to fix the converter so the slides re-render correctly.
 
-Runs the bug_solving structured-prompt pipeline (`renderer/structured-prompts/bug_solving/main-scaffolding.ts`) against the clusters declared in `renderer/structured-prompts/bug_solving/clusters.ts`. The script is `.claude/skills/solve-bug-clusters.sh`.
+Runs the bug_solving structured-prompt pipeline (`renderer/structured-prompts/bug_solving/main-scaffolding.ts`) against the clusters declared in `renderer/structured-prompts/bug_solving/clusters.ts`. The script is `.agent/skills/solve-bug-clusters/solve-bug-clusters.sh`.
 
 ## Workflow this fits into (html2slides only)
 

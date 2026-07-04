@@ -3,7 +3,7 @@
 # boot a FILTERED rating UI on the changed slides if the gate blocks).
 #
 # Usage:
-#   bash .claude/skills/merge-green-workers.sh <intended-csv> [--rate] [--port N]
+#   bash .agent/skills/merge-green-workers/merge-green-workers.sh <intended-csv> [--rate] [--port N]
 #
 # <intended-csv> = the slides the merge is ALLOWED to change (the green clusters'
 # slide ids). The gate BLOCKS (exit 1) if any other slide's render changed.

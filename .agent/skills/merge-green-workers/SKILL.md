@@ -6,7 +6,7 @@ user_invocable: true
 
 **Scope: html2slides converter merges only.** Use this when you've solved bug_solving clusters (see `/solve-bug-clusters`), the user has rated the resulting renders Good/Bad, and you're about to merge the GREEN clusters' fixes into `main`. It enforces the merging protocol so a fix can never silently regress a slide it wasn't supposed to touch.
 
-The enforcement script is `renderer/structured-prompts/bug_solving/scripts/merge-gate.ts`; run it via `.claude/skills/merge-green-workers.sh`.
+The enforcement script is `renderer/structured-prompts/bug_solving/scripts/merge-gate.ts`; run it via `.agent/skills/merge-green-workers/merge-green-workers.sh`.
 
 ## The merging protocol (do every step)
 
@@ -31,9 +31,9 @@ The enforcement script is `renderer/structured-prompts/bug_solving/scripts/merge
 
 ```bash
 # intended = union of the green clusters' slide ids (the only slides allowed to change)
-bash .claude/skills/merge-green-workers.sh slide_19,slide_21,slide_27,slide_30
+bash .agent/skills/merge-green-workers/merge-green-workers.sh slide_19,slide_21,slide_27,slide_30
 # add --rate to render the changed slides to Slides + boot a FILTERED rating UI on block:
-bash .claude/skills/merge-green-workers.sh slide_19,slide_21,slide_27,slide_30 --rate
+bash .agent/skills/merge-green-workers/merge-green-workers.sh slide_19,slide_21,slide_27,slide_30 --rate
 ```
 
 Exit code: `0` PASS (safe to commit) · `1` BLOCK (unexpected slide changed) · `2` setup error.

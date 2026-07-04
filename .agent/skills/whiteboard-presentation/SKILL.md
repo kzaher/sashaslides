@@ -15,7 +15,7 @@ Generate a whiteboard-styled Google Slides presentation from a markdown slides f
 4. Opens it as a Google Slides presentation
 5. (Optional) imports the slides into an existing presentation via `File > Import slides`
 
-**Execute:** `.claude/skills/whiteboard-presentation.sh <slides.md> [presentation-url]`
+**Execute:** `.agent/skills/whiteboard-presentation/whiteboard-presentation.sh <slides.md> [presentation-url]`
 
 - Argument 1: path to slides.md (default: `presentations/1/slides.md`)
 - Argument 2: optional — existing presentation URL to import into. If omitted, creates a new presentation from the .pptx upload.

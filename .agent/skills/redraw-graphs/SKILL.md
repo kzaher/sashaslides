@@ -17,6 +17,6 @@ Re-render all hand-drawn assets (graphs, tables, underlines) from `presentations
 
 Each graph image has an `altText` of the form `graph:showcase_bar`. In Google Slides, right-click the image → **Alt text** → read the description to see the config key, then edit the matching entry in `graphs.json`.
 
-**Execute:** `.claude/skills/redraw-graphs.sh`
+**Execute:** `.agent/skills/redraw-graphs/redraw-graphs.sh`
 
 No arguments — always operates on `presentations/1/graphs.json` and the original presentation.

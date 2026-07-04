@@ -4,7 +4,7 @@ description: Run layout matching eval or match a slide against templates
 user_invocable: true
 ---
 
-Run the layout matching pipeline. Execute the script at `.claude/skills/layout-match-slides.sh`.
+Run the layout matching pipeline. Execute the script at `.agent/skills/layout-match-slides/layout-match-slides.sh`.
 
 This skill either:
 1. Runs the full eval across 3 prompt candidates to find the best layout matching strategy
