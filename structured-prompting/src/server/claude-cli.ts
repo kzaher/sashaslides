@@ -305,7 +305,18 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallRes
       text: parsed?.result ?? "",
       sessionId: parsed?.session_id ?? null,
       durationMs: parsed?.duration_ms ?? io.now() - started,
-      model: parsed?.modelUsage ? Object.keys(parsed.modelUsage)[0] ?? null : model ?? null,
+      // Report the model that did the MAIN work, not modelUsage's first key.
+      // `claude --model fable` also invokes haiku for a sub-task, so modelUsage
+      // has both keys and [0] was wrongly reporting haiku. Prefer the key that
+      // matches the requested model token, else the heaviest by output tokens.
+      model: ((): string | null => {
+        const mu = parsed?.modelUsage;
+        if (!mu) return model ?? null;
+        const keys = Object.keys(mu);
+        if (keys.length <= 1) return keys[0] ?? model ?? null;
+        if (model) { const m = keys.find((k) => k.includes(model)); if (m) return m; }
+        return keys.slice().sort((a, b) => (mu[b]?.outputTokens ?? 0) - (mu[a]?.outputTokens ?? 0))[0] ?? null;
+      })(),
       costUsd: typeof parsed?.total_cost_usd === "number" ? parsed.total_cost_usd : null,
       usage,
       structuredOutput: parsed?.structured_output,
