@@ -524,11 +524,49 @@ function commitAccept(s: State, c: Cluster, reason: string): void {
   fastForwardTarget(s);
 }
 
-/** Revert the staged merge back to the pre-merge commit, mark rejected. */
+/**
+ * DEMOTE a rejected cluster's slides back to "loss" so the NEXT clustering round
+ * re-solves them (mirrors merge-phase.ts's MergeOps.demoteForResolve). The next
+ * round classifies a cluster GREEN only if every slide is `good` in
+ * candidates.json (classify(), line ~255) — so flipping each slide to `bad` here
+ * makes the cluster RED (a loss) next time. Also annotates the canonical
+ * ratings.json issue WITHOUT clobbering the user's original comment. Idempotent
+ * + best-effort (never throws — a demote failure must not break an accept run).
+ */
+function demoteForResolve(slides: string[], clusterTask: string, reason: string): void {
+  if (!slides.length) return;
+  const now = new Date().toISOString();
+  try { mkdirSync(historyDir, { recursive: true }); } catch { /* */ }
+  try {
+    const candFile = join(historyDir, "candidates.json");
+    const cand: Record<string, Record<string, unknown>> = existsSync(candFile) ? JSON.parse(readFileSync(candFile, "utf8")) : {};
+    for (const sid of slides) {
+      const prev = (cand[sid] as Record<string, unknown> | undefined) ?? {};
+      if (prev.status === "bad" && prev.mergeFailed === true && prev.mergeFailedCluster === clusterTask) continue;
+      cand[sid] = { ...prev, status: "bad", mergeFailed: true, mergeFailedCluster: clusterTask, mergeFailedReason: reason, mergeFailedAt: now };
+    }
+    writeFileSync(candFile, JSON.stringify(cand, null, 2));
+  } catch (e) { console.error(`[accept] demoteForResolve(candidates) best-effort failure for ${clusterTask}: ${(e as Error).message}`); }
+  try {
+    const ledgerFile = join(historyDir, "ratings.json");
+    const ledger: Record<string, Record<string, unknown>> = existsSync(ledgerFile) ? JSON.parse(readFileSync(ledgerFile, "utf8")) : {};
+    for (const sid of slides) {
+      const prev = (ledger[sid] as Record<string, unknown> | undefined) ?? {};
+      if (prev.mergeFailed === true && prev.mergeFailedCluster === clusterTask) continue;
+      ledger[sid] = { ...prev, mergeFailed: true, mergeFailedCluster: clusterTask, mergeFailedReason: reason, mergeFailedAt: now };
+    }
+    writeFileSync(ledgerFile, JSON.stringify(ledger, null, 2));
+  } catch (e) { console.error(`[accept] demoteForResolve(ratings) best-effort failure for ${clusterTask}: ${(e as Error).message}`); }
+}
+
+/** Revert the staged merge back to the pre-merge commit, mark rejected. In
+ *  ADDITION, demote the cluster's slides so the next clustering round re-solves
+ *  them (the merge failed even though the cluster was green). */
 function revertReject(s: State, c: Cluster, reason: string): void {
   sh(`git -C "${s.stagingDir}" restore --source ${c.preMergeCommit} --staged --worktree -- renderer/html2slides`, repo);
   c.status = "rejected";
-  console.error(`❌ REJECTED ${c.task} — reverted the merge (${reason}). Accepted state unchanged.`);
+  demoteForResolve(c.slides, c.task, reason);
+  console.error(`❌ REJECTED ${c.task} — reverted the merge (${reason}). Accepted state unchanged. Slides [${c.slides.join(",")}] demoted for re-solve.`);
 }
 
 /** Finalize an in_review cluster from the human's ratings of the RIPPLE slides.
@@ -719,8 +757,10 @@ async function resolveConflictWithAgent(
     cleanupTmp();
     const why = engineErr ? `engine error: ${engineErr}` : saidFailed ? `agent replied: ${agentReply.slice(0, 200)}` : `conflict markers still present in [${conflictedFiles.join(", ")}]`;
     c.status = "rejected";
+    // Feed this unresolved-conflict cluster BACK to the next clustering round.
+    demoteForResolve(c.slides, c.task, `unresolved merge conflict in [${conflictedFiles.join(", ")}]: ${why}`);
     console.error(`\n🔗 Agent could NOT resolve — inspect the reasoning at: ${engine.monitorUrl ?? "(no monitor)"}; the cluster was reverted.`);
-    console.error(`❌ REJECTED ${c.task} — auto-resolve failed (${why}). Accepted state unchanged.`);
+    console.error(`❌ REJECTED ${c.task} — auto-resolve failed (${why}). Accepted state unchanged. Slides [${c.slides.join(",")}] demoted for re-solve.`);
     return "rejected";
   }
 
