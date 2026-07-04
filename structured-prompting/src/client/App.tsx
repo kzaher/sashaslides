@@ -180,7 +180,8 @@ export function App() {
       </div>
       <div id="detail">
         {graph && selectedId
-          ? <Detail graph={graph} selectedId={selectedId} onSelect={setSelectedId} key={selectedId} />
+          ? <Detail graph={graph} selectedId={selectedId} onSelect={setSelectedId} />
+
           : <h1>select a node</h1>}
       </div>
       </div>

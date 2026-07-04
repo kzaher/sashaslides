@@ -52,7 +52,7 @@ export function TreeNode(props: TreeNodeProps): preact.JSX.Element {
     setTimeout(() => {
       const ta = document.querySelector(".ask-input") as HTMLTextAreaElement | null;
       if (ta && ta.scrollIntoView) {
-        ta.scrollIntoView({ behavior: "smooth", block: "center" });
+        ta.scrollIntoView({ behavior: "smooth", block: "nearest" });
         ta.focus();
       }
     }, 50);
