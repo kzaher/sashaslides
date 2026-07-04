@@ -1,0 +1,63 @@
+diff --git a/renderer/html2slides/extract-dom.ts b/renderer/html2slides/extract-dom.ts
+index f55e9eb1..50265e88 100644
+--- a/renderer/html2slides/extract-dom.ts
++++ b/renderer/html2slides/extract-dom.ts
+@@ -2621,7 +2621,42 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
+       return;
+     }
+ 
+-    emitRect(el, style, bounds);
++    // Inline-underline detection, hoisted above emitRect. When an inline
++    // element (a / span / inline-block) has ONLY a border-bottom (no other
++    // border side, no background), that border IS the text underline (e.g. an
++    // active nav-link: `.nav-link.active { border-bottom: 2px solid X }`). The
++    // text path below converts it to a native `textDecoration:'underline'`, so
++    // emitRect must NOT ALSO paint the bottom border as a rect — otherwise the
++    // slide shows TWO underlines (painted border rect + native text underline)
++    // stacked nearly-coincident (slide_09: "There are two underlines"). Strip
++    // the bottom border from the style handed to emitRect; the native underline
++    // in the text path remains the single source of the line. The same boolean
++    // is recomputed in the text block below (kept there for its border/height
++    // adjustments); this outer copy only gates the rect suppression.
++    const _uDisp = style.display || "";
++    const _uIsInlineTag = _uDisp === "inline" || _uDisp === "inline-block" || tag === "SPAN" || tag === "A";
++    const inlineBorderUnderline =
++      (style.borderBottom || 0) > 0 && _uIsInlineTag &&
++      !style.borderTop && !style.borderLeft && !style.borderRight && !style.bgColor;
++    let rectStyle = style;
++    if (inlineBorderUnderline) {
++      rectStyle = {
++        ...style,
++        borderBottom: 0,
++        borderBottomColor: null,
++        // The uniform convenience fields fold border-bottom into borderWidth/
++        // borderColor (Math.max / first-color). With the bottom stripped and no
++        // other side present these collapse to 0/null, so emitRect's hasBorder
++        // gate is false and no border rect is emitted at all.
++        borderWidth: Math.max(style.borderTop || 0, style.borderRight || 0, style.borderLeft || 0),
++        borderColor: style.borderTopColor || style.borderRightColor || style.borderLeftColor,
++        borderSides: {
++          ...style.borderSides,
++          bottom: { width: 0, color: null, style: "none" },
++        },
++      };
++    }
++    emitRect(el, rectStyle, bounds);
+     emitPseudoRect(el, bounds);
+     emitPseudoText(el, bounds, style);
+     // Borders are handled by emitRect's borderSides data — no separate border lines
+@@ -2804,11 +2839,9 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
+       // (slide_11 bug: 11 px upward offset).
+       const bBot = style.borderBottom || 0;
+       const padBot = parseFloat(cs.paddingBottom) || 0;
+-      const disp = style.display || "";
+-      const isInlineTag = disp === "inline" || disp === "inline-block" || tag === "SPAN" || tag === "A";
+-      const inlineBorderUnderline =
+-        bBot > 0 && isInlineTag &&
+-        !style.borderTop && !style.borderLeft && !style.borderRight && !style.bgColor;
++      // inlineBorderUnderline is computed once above emitRect (where it gates
++      // the bottom-border suppression that prevents a doubled underline);
++      // reuse that same boolean here for the text-box height adjustment.
+       const borderAdjust = inlineBorderUnderline ? (bBot + padBot) : 0;
+       let textBounds = bounds;
+       if (borderAdjust > 0) {

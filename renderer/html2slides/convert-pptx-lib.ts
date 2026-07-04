@@ -231,6 +231,14 @@ const PX2IN = SLIDE_W_IN / SLIDE_W_PX; // 0.0078125
 // At 96dpi CSS, 1px = 0.75pt. But our slide is 10" for 1280px, so effective:
 const PX2PT = SLIDE_W_IN / SLIDE_W_PX * 72; // 10/1280*72 = 0.5625
 
+// Tracking scale: CSS letter-spacing px to OOXML charSpacing pt. Calibrated
+// against Google's rendering, which lays `spc` out tighter than the slide
+// geometry scale: at PX2PT (0.5625) a 2px letter-spacing emits spc=113 and
+// 'PRODUCT FEATURES' (slide_12 .section-label) measures ~165px vs the 185px
+// target (~11% under). The plain 96-dpi px→pt factor lands it: 2px → 1.5pt
+// (spc=150), matching the measured target.
+const LETTER_SPACING_PX2PT = 0.75;
+
 // Workstream E (drawio round-trip): the magenta marker fill that flags the
 // off-canvas source text box. The add-on scans the Slides API for a text box
 // whose fill is exactly this colour to rediscover a diagram's editable
@@ -336,7 +344,7 @@ function mapRunOptions(
   // the no-runs branch; the styled-runs path was dropping it so text packed
   // tighter than the original (slide_12/34/03).
   const ls = typeof rs.letterSpacing === "number" ? rs.letterSpacing : ps.letterSpacing;
-  if (typeof ls === "number" && ls !== 0) opts.charSpacing = ls * PX2PT;
+  if (typeof ls === "number" && ls !== 0) opts.charSpacing = ls * LETTER_SPACING_PX2PT;
   return { text: uppercase ? run.text.toUpperCase() : run.text, options: opts };
 }
 
@@ -625,7 +633,7 @@ function emitStyledText(
       strike: s.textDecoration === "line-through" ? "sngStrike" : undefined,
     };
     if (typeof s.letterSpacing === "number" && s.letterSpacing !== 0) {
-      textOpts.charSpacing = s.letterSpacing * PX2PT;
+      textOpts.charSpacing = s.letterSpacing * LETTER_SPACING_PX2PT;
     }
     slide.addText(text, textOpts);
   }
@@ -857,6 +865,15 @@ export interface Gradient {
   readonly angle?: number;
   readonly type?: "linear" | "radial" | string;
   readonly stops: readonly GradientStop[];
+}
+
+/** Per-paragraph native-bullet colors for one BUCLR_<n>-tagged list textbox.
+ *  `colors[i]` is the bare-6-hex bullet color of paragraph i (item order), or
+ *  null when that paragraph's marker keeps the default (text-colored) bullet.
+ *  pptxgenjs 4.0.1 cannot write `<a:buClr>` at all, so the colors ride this
+ *  side-band registry and injectBulletColorsIntoZip patches them post-hoc. */
+export interface BulletColorList {
+  readonly colors: readonly (string | null)[];
 }
 
 /**
@@ -1228,9 +1245,13 @@ export interface RenderedRegion { readonly x: number; readonly y: number; readon
  *   __gradients: parsed CSS gradients, indexed by the GRAD_<n> objectName
  *                tag we set on each gradient-bearing shape. injectGradients*
  *                walks the saved XML and writes <a:gradFill> at the matching
- *                shape. */
+ *                shape.
+ *   __bulletColors: per-paragraph native-bullet colors, indexed by the
+ *                BUCLR_<n> objectName tag on each colored-bullet list
+ *                textbox. injectBulletColors* inserts <a:buClr> per <a:p>. */
 export type PresentationWithRegistries = PptxGenJS & {
   __gradients: Gradient[];
+  __bulletColors: BulletColorList[];
 };
 
 /**
@@ -1428,6 +1449,8 @@ export function buildPptx(
   const pres = new PptxGenJSCtor() as PresentationWithRegistries;
   const gradientRegistry: Gradient[] = [];
   pres.__gradients = gradientRegistry;
+  const bulletColorRegistry: BulletColorList[] = [];
+  pres.__bulletColors = bulletColorRegistry;
   pres.title = title;
   pres.layout = "LAYOUT_WIDE"; // 13.333" x 7.5" — wait, we want 10" x 5.625"
 
@@ -2168,8 +2191,8 @@ export function buildPptx(
             // A `list-style:none` list normally has no markers, EXCEPT when
             // each <li> draws a CSS dot via `::before { content:''; background }`
             // (slide_30 Key Priorities) — those filled dots ARE the bullets and
-            // were being dropped entirely ("There are no list items"). Revive
-            // the marker ONLY for that filled-dot case (`it.bulletIsDot`); a
+            // were being dropped entirely ("There are no list items"). Those
+            // dot-bullet lists now go NATIVE (see useNativeBullet below); a
             // literal-glyph `::before { content:'•'; color }` list (slide_11
             // SWOT) keeps its prior plain-text rendering untouched.
             const anyDotBullet = noListStyle && !ordered && items.some((it) => !!it.bulletColor && it.bulletIsDot);
@@ -2182,7 +2205,15 @@ export function buildPptx(
             // Light), so "1." markers render smaller/thinner than the item's
             // Arial (slide_12). The text-marker fallback (`marker + it.text`)
             // emits the number in the item's own font/size instead.
-            const useNativeBullet = !noListStyle && !anyItemHasStyledRuns && !ordered;
+            //
+            // `anyDotBullet` lists (list-style:none + CSS dot ::before,
+            // slide_30) take the NATIVE path too: user feedback wave-13 —
+            // "Not a list element, just text with bullets" — the typed
+            // '•  ' glyph run is not a real Slides list. Per-item bullet
+            // COLOR (which pptxgenjs cannot express) is recorded in
+            // bulletColorRegistry and injected as <a:buClr> by the
+            // injectBulletColorsIntoZip post-patch.
+            const useNativeBullet = (!noListStyle || anyDotBullet) && !anyItemHasStyledRuns && !ordered;
             const paragraphs = items.map((it: ListItem, ii: number) => {
               const marker = ordered ? `${ii + 1}.  ` : "•  ";
               const markerColor = it.bulletColor || it.color || listStyle.color || "#333333";
@@ -2229,7 +2260,12 @@ export function buildPptx(
                 breakLine: true,
               };
               if (useNativeBullet) {
-                baseOpts.bullet = ordered ? { type: "number", indent: 12 } : { indent: 12 };
+                // CSS-dot items (::before filled box) get ● (U+25CF) so the
+                // native marker approximates the original fat 8×8 dot — the
+                // default • renders visibly smaller than the CSS dot.
+                baseOpts.bullet = it.bulletIsDot && it.bulletColor
+                  ? { characterCode: "25CF", indent: 12 }
+                  : { indent: 12 };
                 return [{ text: it.text, options: baseOpts }];
               }
               // Colored marker prefix when the list carries per-item bullet
@@ -2290,6 +2326,16 @@ export function buildPptx(
             const liFirstLineLeadPx =
               liPadTopPx + (liUseRatio && firstIt.fontSize ? ((liRatio - 1) / 2) * firstIt.fontSize : 0);
             const listTopInsetPt = liFirstLineLeadPx > 1 ? liFirstLineLeadPx * PX2PT : 0;
+            // Per-item native-bullet colors ride the side-band registry
+            // (pptxgenjs has no <a:buClr> support); the BUCLR_<n> objectName
+            // tag is how injectBulletColorsIntoZip finds this textbox. One
+            // registry slot per item paragraph, null = keep default marker.
+            const nativeBulletColors: (string | null)[] = useNativeBullet
+              ? items.map((it) => (it.bulletColor ? hexToRgb(it.bulletColor) : null))
+              : [];
+            const needBulletClr = nativeBulletColors.some((c) => c !== null);
+            const bulletClrName = needBulletClr ? `BUCLR_${bulletColorRegistry.length}` : undefined;
+            if (needBulletClr) bulletColorRegistry.push({ colors: nativeBulletColors });
             slide.addText(paragraphs, {
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
               valign: "top",
@@ -2299,6 +2345,7 @@ export function buildPptx(
               margin: listTopInsetPt > 0 ? [0, 0, 0, listTopInsetPt] : 0,
               paraSpaceAfter: paraSpaceAfterPt > 0 ? paraSpaceAfterPt : undefined,
               lineSpacingMultiple: liUseRatio ? liEmittedRatio : undefined,
+              objectName: bulletClrName,
             });
             break;
           }
@@ -3253,6 +3300,45 @@ export async function injectGradientsIntoZip(zip: JSZip, registry: readonly Grad
 }
 
 /**
+ * Insert `<a:buClr>` into native-bullet paragraphs of BUCLR_<n>-tagged list
+ * textboxes. pptxgenjs 4.0.1 emits only `<a:buSzPct/><a:buChar/>` (no bullet
+ * color at all — pptxgen.es.js ~5849-5894), so per-item colored bullets
+ * (slide_30 Key Priorities: `li.red::before { background:#e53e3e }` dots)
+ * cannot be expressed at build time. buildPptx records each such textbox's
+ * per-paragraph colors in `pres.__bulletColors[n]` and names the shape
+ * BUCLR_<n>; this patch walks the shape's `<a:buChar>` paragraphs in item
+ * order and prepends `<a:buClr><a:srgbClr val="RRGGBB"/></a:buClr>` — buClr
+ * must come BEFORE buSzPct/buFont/buChar per CT_TextParagraphProperties.
+ * Google Slides imports `<a:buClr>` as a native colored bullet. A null color
+ * leaves that paragraph's marker default (follows the run color). Pure
+ * (mutates zip in place; returns the patched-paragraph count).
+ */
+export async function injectBulletColorsIntoZip(zip: JSZip, registry: readonly BulletColorList[]): Promise<number> {
+  if (registry.length === 0) return 0;
+  const slideFiles = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+  let patched = 0;
+  for (const name of slideFiles) {
+    let xml = await zip.file(name)!.async("string");
+    let slidePatched = 0;
+    xml = xml.replace(/<p:sp>[\s\S]*?<\/p:sp>/g, (spBlock: string) => {
+      const m = spBlock.match(/name="BUCLR_(\d+)"/);
+      if (!m) return spBlock;
+      const entry = registry[parseInt(m[1])];
+      if (!entry) return spBlock;
+      let para = 0;
+      return spBlock.replace(/<a:buSzPct val="100000"\/><a:buChar /g, (bu: string) => {
+        const color = entry.colors[para++];
+        if (!color) return bu;
+        slidePatched++;
+        return `<a:buClr><a:srgbClr val="${color}"/></a:buClr>${bu}`;
+      });
+    });
+    if (slidePatched > 0) { zip.file(name, xml); patched += slidePatched; }
+  }
+  return patched;
+}
+
+/**
  * Rewrite every `<a:ln w="…">` in every slide XML to also carry
  * `algn="in"`. pptxgenjs emits no `algn=` attribute, which OOXML treats
  * as `algn="ctr"` (stroke straddles the geometry path). On small-radius
@@ -3512,12 +3598,14 @@ export async function buildPptxInMemory(
   const zip = await JSZip.loadAsync(ab);
 
   const gradPatched = await injectGradientsIntoZip(zip, pres.__gradients || []);
+  const buClrPatched = await injectBulletColorsIntoZip(zip, pres.__bulletColors || []);
   const strokePatched = await injectStrokeAlignmentIntoZip(zip);
   const round2Patched = await injectRound2SameRectAdjIntoZip(zip);
   const noLinePatched = await injectShapeNoLineIntoZip(zip);
   const cellNoBorderPatched = await injectCellNoBorderIntoZip(zip);
   const groupsCreated = await injectClipGroupsIntoZip(zip);
   if (gradPatched > 0) console.log(`  Gradient injection: ${gradPatched} shape(s) patched`);
+  if (buClrPatched > 0) console.log(`  Bullet colors: ${buClrPatched} <a:buClr> insertion(s)`);
   if (strokePatched > 0) console.log(`  Stroke alignment: ${strokePatched} <a:ln> rewrite(s) to algn="in"`);
   if (round2Patched > 0) console.log(`  round2SameRect adj: ${round2Patched} prstGeom(s) → adj1/adj2`);
   if (noLinePatched > 0) console.log(`  Shape no-line: ${noLinePatched} empty <a:ln> rewrite(s) to <a:noFill/>`);

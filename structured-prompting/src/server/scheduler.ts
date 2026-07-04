@@ -641,7 +641,7 @@ function makePipeHandler(_state: SchedulerState): KindHandler {
     graph.start(node.id);
     const fn = (node as RichGraphNode & { callbacks?: { fn?: (s: Session) => SessionWithResult<unknown> } }).callbacks?.fn;
     if (typeof fn !== "function") { graph.finishErr(node.id, new Error("pipe: missing fn callback")); return; }
-    const sub = new Session({ model: (ctx.model ?? "opus") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: node.id, containerId: node.id });
+    const sub = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: node.id, containerId: node.id });
     const tip = fn(sub);
     const value = await ctx.driveSub({
       fromId: node.id, tipId: tip.tipNodeId, upstream: ctx.upstream,
@@ -658,7 +658,7 @@ function makeCombineWithHandler(state: SchedulerState): KindHandler {
     const cbs = (node as RichGraphNode & { callbacks?: { execution?: (s: SessionWithResult<unknown>) => SessionWithResult<unknown>; combine?: (l: unknown, r: unknown) => unknown } }).callbacks;
     if (!cbs?.execution || !cbs?.combine) { graph.finishErr(node.id, new Error("combineWith: missing callbacks")); return; }
     const branch = graph.create({ parentId: node.id, kind: "combineBranch", label: "combineBranch" });
-    const branchSession = new SessionWithResult<unknown>({ model: (ctx.model ?? "opus") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: branch.id, containerId: branch.id });
+    const branchSession = new SessionWithResult<unknown>({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: branch.id, containerId: branch.id });
     const tip = cbs.execution(branchSession);
     state.values.set(branch.id, ctx.upstream);
     const rightVal = await ctx.driveSub({
@@ -679,7 +679,7 @@ function makeParallelForkHandler(state: SchedulerState): KindHandler {
     if (typeof apply !== "function") { graph.finishErr(node.id, new Error("parallelFork: missing apply callback")); return; }
     const results = await Promise.all(input.inputs.map(async (childInput, i) => {
       const childNode = graph.create({ parentId: node.id, kind: "parallelChild", label: `child #${i}`, input: { index: i, input: childInput } });
-      const childSession = new Session({ model: (ctx.model ?? "opus") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: childNode.id, containerId: childNode.id });
+      const childSession = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: childNode.id, containerId: childNode.id });
       try {
         const tip = apply(childSession, childInput, i);
         const value = await ctx.driveSub({
@@ -711,7 +711,7 @@ function makeTryMultipleTimesHandler(state: SchedulerState): KindHandler {
     let extraPrepend: string[] = [];
     for (let i = 1; i <= max; i++) {
       const att = graph.create({ parentId: node.id, kind: "tryAttempt", label: `attempt ${i}/${max}` });
-      const s = new Session({ model: (ctx.model ?? "opus") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: att.id, containerId: att.id });
+      const s = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: att.id, containerId: att.id });
       try {
         const tip = cbs.code(s);
         const value = await ctx.driveSub({
@@ -743,7 +743,7 @@ function makeTryMultipleTimesHandler(state: SchedulerState): KindHandler {
     }
     // Fallback chain.
     const fb = graph.create({ parentId: node.id, kind: "tryFallback", label: "fallback after retries", input: { error: describeError(lastErr) } });
-    const s = new Session({ model: (ctx.model ?? "opus") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: fb.id, containerId: fb.id });
+    const s = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: fb.id, containerId: fb.id });
     try {
       const tip = cbs.fallback(s, lastErr);
       const value = await ctx.driveSub({
@@ -766,14 +766,14 @@ function makeTryHandler(_state: SchedulerState): KindHandler {
     const cbs = (node as RichGraphNode & { callbacks?: { code?: (s: Session) => SessionWithResult<unknown>; fallback?: (s: Session, e: unknown) => SessionWithResult<unknown> } }).callbacks;
     if (!cbs?.code || !cbs?.fallback) { graph.finishErr(node.id, new Error("try: missing callbacks")); return; }
     try {
-      const s = new Session({ model: (ctx.model ?? "opus") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: node.id, containerId: node.id });
+      const s = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: node.id, containerId: node.id });
       const tip = cbs.code(s);
       const value = await ctx.driveSub({ fromId: node.id, tipId: tip.tipNodeId, upstream: ctx.upstream, seedCtx: seedFromCtx(ctx) });
       ctx.setValue(node.id, value);
       graph.finishOk(node.id, { ok: true });
     } catch (err) {
       const fb = graph.create({ parentId: node.id, kind: "tryFallback", label: "fallback", input: { error: describeError(err) } });
-      const s = new Session({ model: (ctx.model ?? "opus") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: fb.id, containerId: fb.id });
+      const s = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: fb.id, containerId: fb.id });
       try {
         const tip = cbs.fallback(s, err);
         const value = await ctx.driveSub({ fromId: fb.id, tipId: tip.tipNodeId, upstream: ctx.upstream, seedCtx: { model: ctx.model, cwd: ctx.cwd } });

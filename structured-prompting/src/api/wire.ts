@@ -193,7 +193,7 @@ export interface TokenUsage {
 export type Result<T> = T | { error: string };
 
 /** Claude CLI model aliases passed to `claude --model`. */
-export type ClaudeModel = "haiku" | "sonnet" | "opus";
+export type ClaudeModel = "haiku" | "sonnet" | "opus" | "fable";
 
 /**
  * Sugar namespace so user code can write `Claude.haiku` / `Claude.switchOpus`
@@ -206,7 +206,9 @@ export const Claude = {
   haiku: "haiku" as ClaudeModel,
   sonnet: "sonnet" as ClaudeModel,
   opus: "opus" as ClaudeModel,
+  fable: "fable" as ClaudeModel,
   switchHaiku: "haiku" as ClaudeModel,
   switchSonnet: "sonnet" as ClaudeModel,
   switchOpus: "opus" as ClaudeModel,
+  switchFable: "fable" as ClaudeModel,
 } as const;

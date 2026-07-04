@@ -177,6 +177,10 @@ interface ElementStyle {
   bgAlpha: number;
   textAlign: string;
   lineHeight: number;
+  // True when lineHeight is the MEASURED median line pitch (inline children
+  // inflated the line boxes beyond the CSS spec) rather than the CSS value —
+  // the converter emits absolute <a:spcPts> line spacing for measured pitches.
+  lineHeightMeasured?: boolean;
   textDecoration: string | null;
   textTransform: string | null;
   letterSpacing: number;
@@ -2414,31 +2418,39 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
           });
         }
         elements.push({ type: "visual", bounds: visualBounds, tag: "clipped-container", cornerRadii: visualCorners, boxShadow: hasDistinctBottom ? null : dropShadow });
-        // Stroke-only roundRect FRAME on top of the visual, matching the
-        // captured device's border-radius. pptxgenjs `addImage` only writes
-        // <p:pic prstGeom prst="rect">, so the captured PNG's RECTANGULAR
-        // corners cover the underlying halo's curved gray corners with the
-        // page background — making the spread shadow invisible at the corners
-        // (slide_12 ".device {box-shadow: 0 0 0 2px #333}"). The frame paints
-        // the ring colour over the outermost spread*2 px of the image (drawn
-        // INSIDE because `injectStrokeAlignment` forces algn="in"), so the
-        // ring follows the device's rounded corners. Use the OPAQUE outermost
-        // ring (highest spread) — translucent inner rings can't usefully
-        // over-paint a captured image. Frame zIndex high so it paints last.
+        // Stroke-only roundRect FRAME on top of the visual, tracing the CSS
+        // spread ring EXACTLY. pptxgenjs `addImage` only writes <p:pic
+        // prstGeom prst="rect">, so the captured PNG's RECTANGULAR corners
+        // are opaque page-background pixels that cover the underlying halo's
+        // curved corners — the ring must be re-painted ON TOP at the corners
+        // (slide_12 ".device {box-shadow: 0 0 0 2px #333}"). The frame sits
+        // on the halo's inflated bounds with borderWidth == spread: with the
+        // `algn="in"` stroke `injectStrokeAlignment` forces, the band
+        // occupies exactly [device edge, device edge + spread] — a thin
+        // spread-px ring whose inner arc lands at the device's own radius
+        // (matched corners). Anything wider (the old spread*2 stroke at
+        // device bounds) eats INTO the screen and reads as a fat bezel with a
+        // mismatched inner corner radius. Same xfrm as the halo ⇒ identical
+        // EMU rounding ⇒ the filled halo behind never peeks past the frame.
+        // Use the OPAQUE outermost ring (highest spread) — translucent inner
+        // rings can't usefully over-paint a captured image. Frame zIndex high
+        // so it paints last.
         const opaqueOuter = rings.find(r => r.alpha >= 0.95);
         if (opaqueOuter) {
+          const osp = opaqueOuter.spread;
+          const frameR = elBR + osp;
           elements.push({
             type: "rect",
-            bounds: { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h },
+            bounds: { x: bounds.x - osp, y: bounds.y - osp, w: bounds.w + 2 * osp, h: bounds.h + 2 * osp },
             fill: null,
             fillAlpha: 1,
             gradient: null,
-            borderRadius: elBR,
-            cornerRadii: { tl: elBR, tr: elBR, br: elBR, bl: elBR },
+            borderRadius: frameR,
+            cornerRadii: { tl: frameR, tr: frameR, br: frameR, bl: frameR },
             borderUniform: true,
             borderSides: null,
             borderColor: opaqueOuter.color,
-            borderWidth: opaqueOuter.spread * 2,
+            borderWidth: osp,
             borderStyle: "solid",
             zIndex: 1000,
             position: "static",
@@ -3082,6 +3094,88 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         }
         textEl.runs = allRuns;
         textEl.text = allRuns.map(r => r.text).join("");
+      }
+      // Flex-centered mixed-font-size children: split into per-child text
+      // elements at Chrome's own span rects instead of merging into one
+      // multi-run paragraph (slide_19 `.sentiment` = 18px emoji + 11px word,
+      // `.metric-pill` = 16px bold value + 11px label). A flex row with
+      // `align-items: center` centers EACH item's line box independently,
+      // but Slides lays a merged paragraph out with all runs BASELINE-aligned
+      // on a line box sized by the tallest run, so the smaller run's glyphs
+      // sit visibly below the pill's vertical center (user: "Cautious not
+      // centered"). A per-run `<a:rPr baseline="...">` raise can't express
+      // this either — Google Slides quantizes baseline offsets to
+      // SUPERSCRIPT/SUBSCRIPT and auto-shrinks the offset run's font.
+      // Splitting also makes each child a genuine `singleLine` element with
+      // its own slack budget in the converter, so the long 11px label
+      // ("Avg. Time to Purchase") stops wrapping under Slides' wider glyph
+      // metrics — the merged element probed as multi-line (Range returns one
+      // client rect PER SPAN) and so got neither `singleLine` nor any slack.
+      // Gate: cross-axis-centered row, ≥2 leaf inline-tag children with text,
+      // no bare text nodes, no child backgrounds (chip children keep the
+      // merged+emitMergedChips path), and ≥2 distinct child font sizes —
+      // uniform sizes share font metrics, so baseline-align == center-align
+      // and the merged paragraph already renders correctly.
+      const flexSplitChildren = (() => {
+        if (!flexCenteredShapeVC || hasLineBreaks) return null;
+        if (flexDir !== "row") return null;
+        const bareText = Array.from(el.childNodes).some(
+          (n) => n.nodeType === 3 && !!n.textContent && !!n.textContent.trim());
+        if (bareText) return null;
+        const kids = Array.from((el as HTMLElement).children).filter((c) => {
+          const kcs = getComputedStyle(c);
+          return kcs.display !== "none" && kcs.position !== "absolute" &&
+            kcs.position !== "fixed" && !!(c.textContent && c.textContent.trim());
+        });
+        if (kids.length < 2) return null;
+        const allLeafInline = kids.every((c) => {
+          if (!INLINE_TAGS.includes((c.tagName || "").toUpperCase())) return false;
+          if (c.children.length > 0) return false;
+          return !rgb2hex(getComputedStyle(c).backgroundColor);
+        });
+        if (!allLeafInline) return null;
+        const sizes = new Set(kids.map(
+          (c) => Math.round(parseFloat(getComputedStyle(c).fontSize) || 0)));
+        if (sizes.size < 2) return null;
+        return kids;
+      })();
+      if (flexSplitChildren) {
+        for (const ch of flexSplitChildren) {
+          const kcs = getComputedStyle(ch);
+          const kb = getBounds(ch);
+          const kFamily = kcs.fontFamily.split(",")[0].replace(/['"]/g, "").trim();
+          const kFont = parseFloat(kcs.fontSize) || style.fontSize;
+          elements.push({
+            type: "text",
+            bounds: kb,
+            text: (ch.textContent || "").replace(/[ \t\n\r\f]+/g, " ").trim(),
+            style: {
+              ...baseStyle,
+              fontFamily: kFamily,
+              fontSize: kFont,
+              fontWeight: resolveRenderedWeight(
+                kFamily, kcs.fontWeight === "bold" ? 700 : parseInt(kcs.fontWeight) || 400),
+              fontStyle: (kcs.fontStyle === "italic" ? "italic" : "normal") as "italic" | "normal",
+              color: resolveGradientTextColor(kcs) || rgb2hex(kcs.color),
+              // The box hugs the glyph run, so center-anchor == Chrome's
+              // position, and it stays fixed under the converter's
+              // symmetric single-line slack.
+              textAlign: "center",
+              lineHeight: parseFloat(kcs.lineHeight) || kFont * 1.2,
+              lineHeightMeasured: false,
+              textDecoration: kcs.textDecorationLine !== "none" ? kcs.textDecorationLine : null,
+              textTransform: kcs.textTransform,
+              letterSpacing: parseFloat(kcs.letterSpacing) || 0,
+              paddingTop: 0,
+            },
+            zIndex: style.zIndex,
+            position: style.position,
+            verticallyCentered: true,
+            singleLine: true,
+          });
+        }
+        emitAbsoluteChildChevrons(el);
+        return;
       }
       elements.push(textEl);
       // Direct-text containers return here and do not recurse children. Preserve
