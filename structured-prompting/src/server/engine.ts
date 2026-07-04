@@ -446,7 +446,12 @@ export class Engine {
             graph.finishOk(
               node.id,
               { parsed, text: response.text, appliedForkFlag, composedPrompt, resumeCommand },
-              { sessionId: response.sessionId ?? usedResume, model: response.model ?? ctx.model },
+              // Propagate the REQUESTED model (ctx.model), NOT the served one:
+              // `claude --model fable` uses haiku for a sub-task, so response.model
+              // can come back as haiku; writing that into ctx downgraded every
+              // later --resume send to haiku. ctx.model is sticky to what was
+              // asked for (only switchModel changes it).
+              { sessionId: response.sessionId ?? usedResume, model: ctx.model },
             );
             return { value: parsed, ctx: nextCtx };
           }
