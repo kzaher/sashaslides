@@ -283,7 +283,7 @@ async function handleRetry(rawBody: string, graph: ComputationGraph): Promise<Re
           usage: r.usage,
           retried: true,
         },
-        { sessionId: r.sessionId, model: r.model ?? node.model },
+        { sessionId: r.sessionId, model: node.model },
       );
       return { nodeId: node.id, kind: node.kind, status: "ok", message: "send returned " + r.text.length + " chars", resetNodeIds };
     } catch (err) {
@@ -360,7 +360,7 @@ async function handleAsk(rawBody: string, graph: ComputationGraph): Promise<AskR
           anchorNodeId: anchor.id,
           usage: r.usage,
         },
-        { sessionId: r.sessionId, model: r.model ?? anchorModel },
+        { sessionId: r.sessionId, model: anchorModel },
       );
     }
     return {
@@ -490,7 +490,7 @@ async function handleInject(rawBody: string, graph: ComputationGraph, io?: IO): 
         injected: true,
         usage: r.usage,
       },
-      { sessionId: r.sessionId, model: r.model ?? anchorModel },
+      { sessionId: r.sessionId, model: anchorModel },
     );
     return {
       nodeId: node.id, kind: node.kind, status: "ok", resetNodeIds,
