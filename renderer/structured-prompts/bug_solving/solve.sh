@@ -5,10 +5,12 @@
 #   npm run solve -- --model sonnet                pick the solver model
 #   npm run solve -- --engine codex                pick the engine
 #   npm run solve -- --model haiku --engine codex  both
+#   npm run solve -- --attempts 3                  retries per cluster before giving up
 #   npm run solve -- --clean | --continue          discard / resume persisted overlays
 #
-# --model  = opus | sonnet | haiku | fable   (unsupported → error)
-# --engine = claude | codex                  (unsupported → error)
+# --model    = opus | sonnet | haiku | fable   (unsupported → error)
+# --engine   = claude | codex                  (unsupported → error)
+# --attempts = positive integer                (overrides per-cluster retry_budget)
 #
 # Solves the clusters in clusters.ts (regenerate with `npm run solve:clusters`).
 # Each fork solves in a JAILED, copy-free overlay sandbox; boots its own rating UI
@@ -22,13 +24,16 @@ BUNDLE="structured-prompting/dist/main-scaffolding.mjs"   # build + launch the S
 # --- args: --model / --engine (validated), everything else passed through -------
 MODEL="${BUG_SOLVING_MODEL:-opus}"
 ENGINE="${BUG_SOLVING_ENGINE:-claude}"
+ATTEMPTS="${BUG_SOLVING_RETRY_BUDGET:-5}"
 PASS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --model)   MODEL="${2:?--model needs a value}"; shift 2 ;;
-    --model=*)  MODEL="${1#*=}"; shift ;;
-    --engine)  ENGINE="${2:?--engine needs a value}"; shift 2 ;;
-    --engine=*) ENGINE="${1#*=}"; shift ;;
+    --model)     MODEL="${2:?--model needs a value}"; shift 2 ;;
+    --model=*)    MODEL="${1#*=}"; shift ;;
+    --engine)    ENGINE="${2:?--engine needs a value}"; shift 2 ;;
+    --engine=*)   ENGINE="${1#*=}"; shift ;;
+    --attempts)  ATTEMPTS="${2:?--attempts needs a value}"; shift 2 ;;
+    --attempts=*) ATTEMPTS="${1#*=}"; shift ;;
     *) PASS+=("$1"); shift ;;
   esac
 done
@@ -40,7 +45,11 @@ case "$ENGINE" in
   claude|codex) ;;
   *) echo "❌ unsupported --engine '$ENGINE' — must be one of: claude | codex" >&2; exit 2 ;;
 esac
-echo "▶ model=$MODEL  engine=$ENGINE  extra=[${PASS[*]:-}]"
+case "$ATTEMPTS" in
+  ''|*[!0-9]*) echo "❌ --attempts '$ATTEMPTS' must be a positive integer" >&2; exit 2 ;;
+esac
+[ "$ATTEMPTS" -ge 1 ] || { echo "❌ --attempts must be >= 1 (got $ATTEMPTS)" >&2; exit 2; }
+echo "▶ model=$MODEL  engine=$ENGINE  attempts=$ATTEMPTS  extra=[${PASS[*]:-}]"
 
 # 1. Chrome on :9222 (rendering needs it) — start if absent.
 if ! curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
@@ -64,6 +73,7 @@ grep -oE 'slide-[0-9]+-[a-z-]+' "$BUNDLE" | sort -u | sed 's/^/    /' || true
 #    fixture/SxS/ratings dirs default to the complex set (override by exporting).
 echo "▶ launching solver (Ctrl-C to stop) …"
 BUG_SOLVING_MODEL="$MODEL" \
+BUG_SOLVING_RETRY_BUDGET="$ATTEMPTS" \
 BUG_SOLVING_SXS_DIR="${BUG_SOLVING_SXS_DIR:-/tmp/sxs-complex}" \
 BUG_SOLVING_RATINGS_JSON="${BUG_SOLVING_RATINGS_JSON:-/tmp/sxs-complex/ratings.json}" \
 BUG_SOLVING_FIXTURES_DIR="${BUG_SOLVING_FIXTURES_DIR:-renderer/html2slides/e2e/fixtures}" \

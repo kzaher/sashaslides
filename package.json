@@ -10,7 +10,7 @@
     "test:e2e": "bash renderer/structured-prompts/bug_solving/run-tests.sh --e2e",
     "test:jail-claude": "RUN_CLAUDE_JAIL=1 npx tsx renderer/structured-prompts/bug_solving/claude-in-jail.e2e.test.ts",
     "solve:clusters": "npx tsx renderer/structured-prompts/bug_solving/generate-clusters.ts --retry-budget 5 --write",
-    "solve": "bash renderer/structured-prompts/bug_solving/solve.sh --model opus --engine claude",
+    "solve": "bash renderer/structured-prompts/bug_solving/solve.sh --model opus --engine claude --attempts 5",
     "build": "npm run typecheck && npm run build:browser && npm run build:addon",
     "build:browser": "npx tsx renderer/html2slides/browser/build.ts",
     "build:addon": "npx tsx renderer/html2slides/browser/build-addon.ts",

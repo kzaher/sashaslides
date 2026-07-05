@@ -280,7 +280,18 @@ async function run(): Promise<void> {
   // Fixtures / SxS / ratings dirs are overridable via env so a run can target
   // a different fixture set (e.g. fixtures-basic) without code edits. Each
   // falls back to buildTasks' own default when the env var is unset.
-  const buildOpts: Parameters<typeof buildTasks>[0] = { clusters: CLUSTERS, port_base: portBase };
+  // BUG_SOLVING_RETRY_BUDGET (solve.sh --attempts) OVERRIDES the per-cluster
+  // retry_budget for the whole run, so the attempt count is a run-level knob.
+  const retryBudget = process.env.BUG_SOLVING_RETRY_BUDGET
+    ? Number(process.env.BUG_SOLVING_RETRY_BUDGET) : undefined;
+  const clusters = (retryBudget && retryBudget >= 1)
+    ? CLUSTERS.map((c) => ({ ...c, retry_budget: retryBudget }))
+    : CLUSTERS;
+  const buildOpts: Parameters<typeof buildTasks>[0] = { clusters, port_base: portBase };
+  if (retryBudget && retryBudget >= 1) {
+    buildOpts.retry_budget = retryBudget;
+    console.error(`[scaffold] retry budget (attempts) override: ${retryBudget}`);
+  }
   if (process.env.BUG_SOLVING_FIXTURES_DIR) buildOpts.fixtures_dir = process.env.BUG_SOLVING_FIXTURES_DIR;
   if (process.env.BUG_SOLVING_SXS_DIR) buildOpts.sxs_dir = process.env.BUG_SOLVING_SXS_DIR;
   if (process.env.BUG_SOLVING_RATINGS_JSON) buildOpts.ratings_json = process.env.BUG_SOLVING_RATINGS_JSON;
