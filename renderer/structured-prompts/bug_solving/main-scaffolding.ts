@@ -4,12 +4,29 @@
  * This file OWNS the process — it's what `node dist/main-scaffolding.mjs`
  * actually executes. Its job:
  *   1. Resolve the cluster list the user wants to work on.
- *   2. Boot the ClaudeEngine (prints monitor URL to stderr on bind).
- *   3. Run main() to completion.
- *   4. For every successful TaskResult, spawn the filtered rating server
- *      as a DIRECT child of this Node process (not nohup/disown) so the
- *      servers die with the scaffolding on Ctrl-C / SIGTERM / exit.
- *   5. Echo the engine URL + per-task SxS URLs one more time at the end.
+ *   2. Pre-flight Google auth + assert a clean converter tree.
+ *   3. Build the per-task worktrees + record the BEFORE-state pptx.
+ *   4. Boot the ClaudeEngine (prints monitor URL to stderr on bind).
+ *   5. Run main() to completion.
+ *
+ * The rating gate + accept/merge now live INSIDE the graph (see main.ts):
+ *   - each SOLVED fork boots its OWN rating UI and BLOCKS on the human rating
+ *     (runTask steps A1–A3), then writes a rating-outcome.json marker;
+ *   - AFTER the parallelFork barrier a FINAL merge phase (finalMergePhase) folds
+ *     every GREEN cluster together with the LLM conflict resolver + whole-deck
+ *     regression recording (mergePhase) and promotes the clean result.
+ * The scaffolding therefore no longer boots UIs or runs a post-run accept — it
+ * just prints the results, the monitor URL, and any failures.
+ *
+ * ## Rating/merge env gates (handled inside the graph — see main.ts)
+ *   BUG_SOLVING_NO_ACCEPT=1          forks boot UIs but SKIP their waits; the
+ *                                    final merge phase is a no-op (nothing lands).
+ *   BUG_SOLVING_RATING_TIMEOUT_MS=N  per-fork blocking-wait budget.
+ *       Default (unset): 0 = wait FOREVER when stdin is a TTY; a finite
+ *       default (30 min) when NOT a TTY, after which still-unrated slides
+ *       are treated as NOT-GREEN so an unattended run can't hang.
+ *       An explicit value applies regardless of TTY; 0 = forever always.
+ *   BUG_SOLVING_MERGE_TARGET, BUG_SOLVING_KEEP_STAGING  (see deriveMergeArgs).
  *
  * ## Filling in task data (required before build)
  *   The `CLUSTERS` import below points at `./clusters.ts`, which DOES NOT
@@ -38,7 +55,6 @@
  *   Engine prints it on stderr as soon as it binds the port (look for
  *   `┌── structured-prompting monitor`). We echo it again at end of run.
  */
-import { spawn, type ChildProcess } from "child_process";
 import { execFile, type ExecException } from "child_process";
 import { promisify } from "util";
 import { resolve } from "path";
@@ -47,7 +63,7 @@ import { dirname } from "path";
 const execFileAsync = promisify(execFile);
 import { ClaudeEngine, CodexEngine, Session } from "../../../structured-prompting/src/index.js";
 import { buildTasks, assertCleanTree } from "./workspace-setup.js";
-import { main, type TaskResult, type SxsServerSpec } from "./main.js";
+import { main, type TaskResult } from "./main.js";
 
 // ❌ DO NOT REMOVE this import or replace with a dummy. Create the sibling
 // `./clusters.ts` file with your actual cluster definitions. esbuild will
@@ -61,8 +77,6 @@ import { CLUSTERS } from "./clusters.js";
 // Using process.cwd() keeps the resolution correct whether this file
 // runs as a .ts through tsx or as a bundled .mjs in structured-prompting/dist/.
 const REPO_ROOT = process.cwd();
-const BS_SCRIPTS = resolve(REPO_ROOT, "renderer/structured-prompts/bug_solving/scripts");
-const FILTERED_SERVER_TS = resolve(BS_SCRIPTS, "filtered-rating-server.ts");
 // record-pptx.sh was inlined into record-rendering.ts. We invoke the
 // WORKTREE's copy (per task) so BEFORE is measured by the exact same
 // pipeline as AFTER; this is the repo-root-relative path joined onto each
@@ -71,53 +85,14 @@ const RECORD_SCRIPT_REL = "renderer/structured-prompts/bug_solving/scripts/recor
 // Keep fileURLToPath import reachable even if we stop using HERE later.
 const _HERE = dirname(fileURLToPath(import.meta.url)); void _HERE;
 
-// Loose registry of launched children — we don't kill them on exit (they
-// are detached + unref()'d on purpose), we only track them for the end-of-
-// run summary count. Entries auto-drop if the OS cleans them up before we
-// print the summary.
-const children = new Set<ChildProcess>();
-
-function trackChild(ch: ChildProcess): void {
-  children.add(ch);
-  ch.on("exit", () => children.delete(ch));
-}
-
-// Rating servers are launched detached + unref()'d — they're meant to
-// survive scaffolding exit. We deliberately do NOT kill them from
-// process.on("exit" | "SIGINT" | "SIGTERM"); Ctrl-C on scaffolding
-// leaves the servers alive for continued review. The user kills them
-// with `lsof -ti:4720-4800 | xargs -r kill` when done. An
-// uncaughtException still exits non-zero but without touching children.
+// The per-fork rating UIs are now booted INSIDE the graph (runTask step A1,
+// detached via setsid), not here — so the scaffolding tracks no child servers.
+// An uncaughtException still exits non-zero. Those detached servers survive
+// scaffolding exit; the user kills them with `lsof -ti:4720-4800 | xargs -r kill`.
 process.on("uncaughtException", (e) => {
   console.error("[scaffolding] uncaughtException:", e);
   process.exit(1);
 });
-
-function launchFilteredServer(spec: SxsServerSpec): ChildProcess {
-  const args = [
-    "tsx", FILTERED_SERVER_TS,
-    "--port", String(spec.port),
-    "--slides", spec.slides.join(","),
-    "--analysis", spec.analysis_md,
-    "--diffs", spec.diffs_dir,
-    "--thumbnails", spec.thumbnails_dir,
-    "--task-title", spec.task_title,
-  ];
-  // Rating servers are post-run artifacts — the scaffolding should NOT
-  // wait for them, and killing the scaffolding shouldn't kill them.
-  // `detached: true` starts the child in a NEW process group so a SIGINT
-  // to this shell doesn't propagate, and `child.unref()` removes it from
-  // Node's event-loop refcount so `main()` returning lets the scaffolding
-  // exit while the server keeps running. The child's stdout/stderr go to
-  // a log file since we're about to exit and wouldn't read them anyway.
-  const ch = spawn("npx", args, {
-    detached: true,
-    stdio: ["ignore", "ignore", "ignore"],
-  });
-  ch.unref();
-  trackChild(ch);
-  return ch;
-}
 
 /** Pre-flight the Google OAuth grant by running check-google-auth.ts (which
  *  forces a token refresh). On failure, print the re-auth instructions and exit
@@ -221,6 +196,17 @@ async function run(): Promise<void> {
   // instead of failing.
   assertCleanTree(REPO_ROOT, ["renderer/html2slides"]);
 
+  // Notify config. Each successfully-solved thread boots its OWN rating UI and
+  // blocks until you've rated every slide good/bad; the UI pings you when it
+  // comes up. Make the mechanism explicit AT START: a stdout notice is the
+  // guaranteed baseline (always printed), and BUG_SOLVING_NOTIFY_CMD layers a
+  // real notifier (desktop toast / webhook / etc.) on top. Tokens {url} {title}
+  // {slides} {port} {dir} are substituted per UI. Announce to STDOUT so the human
+  // (and any log-watcher) knows how they'll be told a cluster is ready.
+  const notifyCmd = process.env.BUG_SOLVING_NOTIFY_CMD;
+  if (notifyCmd) console.log(`🔔 NOTIFY USER: notify command DEFINED → ${notifyCmd}`);
+  else console.log(`🔔 NOTIFY USER: stdout-only (set BUG_SOLVING_NOTIFY_CMD='<cmd with {url} {title} {slides}>' for a real notifier)`);
+
   const tasks = buildTasks(buildOpts);
   console.error(`[scaffolding] built ${tasks.length} task(s):`);
   for (const t of tasks) {
@@ -250,17 +236,18 @@ async function run(): Promise<void> {
   console.error("\n=== RESULTS ===");
   console.error(JSON.stringify(results, null, 2));
 
-  // Launch filtered rating servers for every successful task, tracked so
-  // they die with this Node process on Ctrl-C / exit / SIGTERM.
-  const launchedUrls: string[] = [];
+  // Tally per-task success/failure for the end-of-run banner. The rating UIs +
+  // the accept/merge all ran INSIDE the graph already (each solved fork booted
+  // its own UI, blocked on the human rating, and the final merge phase folded the
+  // GREEN clusters). The scaffolding just summarizes and preserves the monitor.
   const failures: { idx: number; error: string }[] = [];
+  const succeeded: string[] = [];
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
     // Defensive: a result can be null/undefined if the engine's result
     // propagation drops a task's return (observed under the state-machine
     // scheduler). `"error" in r` throws on null — the very crash that turned a
-    // whole solved run into an unrecoverable one. Treat a missing result as a
-    // failure so productization for the OTHER tasks still runs.
+    // whole solved run into an unrecoverable one.
     if (r == null || typeof r !== "object") {
       failures.push({ idx: i, error: `task produced no result (got ${r === null ? "null" : typeof r}) — likely a scheduler result-propagation drop` });
       continue;
@@ -269,18 +256,15 @@ async function run(): Promise<void> {
       failures.push({ idx: i, error: String((r as { error: string }).error) });
       continue;
     }
-    const spec: SxsServerSpec = (r as TaskResult).sxs_server_spec;
-    launchFilteredServer(spec);
-    launchedUrls.push(`  ${(r as TaskResult).task_id} → http://localhost:${spec.port}`);
+    const tr = r as TaskResult;
+    succeeded.push(`  ${tr.task_id} → rated=${tr.rated} green=${tr.green}${tr.bad_slides.length ? ` bad=[${tr.bad_slides.join(",")}]` : ""} (port ${tr.sxs_server_spec.port})`);
   }
 
-  // Re-print the engine URL and every server URL at the end so the
-  // reviewer never has to scroll back through logs to find them.
-  console.error("\n=== MONITOR & SxS URLs ===");
+  console.error("\n=== MONITOR & PER-FORK SxS URLs ===");
   if (engine.monitorUrl) console.error(`  engine monitor → ${engine.monitorUrl}`);
-  if (launchedUrls.length) {
-    console.error(`  filtered rating servers:`);
-    for (const u of launchedUrls) console.error(u);
+  if (succeeded.length) {
+    console.error(`  solved forks (rating UIs were booted + gated inside the graph):`);
+    for (const u of succeeded) console.error(u);
   }
 
   // Loud failure reporting — previously a zero-success run silently exited
@@ -307,8 +291,8 @@ async function run(): Promise<void> {
     console.error(`\n  Inspect the computation graph at ${engine.monitorUrl ?? "(engine gone)"} for the full trace.`);
   }
 
-  console.error(`\n[scaffolding] ${children.size} detached server(s) running.`);
-  if (children.size) console.error(`They will survive scaffolding exit; kill them with: lsof -ti:4720-4800 | xargs -r kill`);
+  console.error(`\n[scaffolding] per-fork rating servers were booted inside the graph (detached via setsid).`);
+  console.error(`They will survive scaffolding exit; kill them with: lsof -ti:4720-4800 | xargs -r kill`);
 
   // Done. The structured prompt has returned and rating-servers are detached.
   // On failure we DELIBERATELY do not process.exit(1) while the monitor is

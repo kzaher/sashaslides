@@ -33,4 +33,4 @@ Worktree specs are a path or a task name (globs `.claude/worktrees/bs-<name>-*`,
 **Exit:** `0` PASS (safe / committed) · `1` BLOCK (unexpected slide changed) · `2` conflict / tsc error / setup.
 **Result JSON:** `/tmp/merge-worktrees/merge-worktrees.json` → `{ base, plan[], intended[], conflicts[], tscErrors, gate }`.
 
-Note: the gate trusts sequential rendering (`RECORD_CONCURRENCY=1`). Related: `/accept-solved-bugs` (fully automatic green/red classification + intermediate-worktree promotion to main) wraps this. `/merge-green-workers` is the older gate-only skill.
+Note: the gate trusts sequential rendering (`RECORD_CONCURRENCY=1`). Related: the bug_solving pipeline (`/solve-bug-clusters`) now accepts solved clusters automatically via its POST-RUN rating-gated accept phase (main-scaffolding.ts → accept-orchestration.ts → merge-phase.ts); each solved thread's fix is composed onto the accepted state only after the human rates every slide good in its per-thread rating UI. `/merge-green-workers` is the older gate-only skill.

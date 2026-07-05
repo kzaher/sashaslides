@@ -30,21 +30,21 @@
  *      also re-announces a port when an old listener dies and a new
  *      one binds — convenient when restarting a server.
  *
- * ## Scaffolding lifecycle (detached servers, clean exit)
- *   main-scaffolding.ts launches one rating server per successful
- *   TaskResult as a `detached: true` child with `child.unref()`. That
- *   means:
- *     * When `main()` (this structured prompt) returns and
- *       engine.execute resolves, the scaffolding prints a summary
- *       and EXITS. It does not wait for servers.
- *     * The servers survive the scaffolding — they're in their own
- *       process group with no parent refcount. They stay up until the
- *       user kills them manually:
- *         lsof -ti:4720-4800 | xargs -r kill
- *     * Ctrl-C on the scaffolding does NOT reach the servers.
- *   The earlier "wait on children" design was removed — a zombie
- *   scaffolding holding open references to servers after the work
- *   graph was done served no purpose.
+ * ## Scaffolding lifecycle (detached servers + rating-gated accept)
+ *   When `main()` (this solve-only structured prompt) returns and
+ *   engine.execute resolves, main-scaffolding.ts:
+ *     1. boots one rating server per SUCCESSFUL TaskResult (detached +
+ *        unref()'d, so they survive scaffolding exit) — ALL up front so
+ *        the human can rate every thread in parallel;
+ *     2. runs the POST-RUN, per-thread RATING-GATED accept phase
+ *        (accept-orchestration.ts): serially per thread it BLOCKS until
+ *        the human rates every slide good/bad, then GREEN (all good) →
+ *        accept via mergePhase on the SAME engine; RED (any bad, or a
+ *        non-TTY rating deadline) → demote for re-solve, NOT accepted.
+ *   The accept is opt-out via `BUG_SOLVING_NO_ACCEPT=1` (leaves the UIs
+ *   up and exits, the old behavior). The servers stay up until the user
+ *   kills them (`lsof -ti:4720-4800 | xargs -r kill`); Ctrl-C on the
+ *   scaffolding does NOT reach them.
  *
  * ## Per-task pipeline (retryable up to task.retry_budget times)
  *   1. record-pptx.sh → one .pptx per slide, parallel, --no-upload (BEFORE)
@@ -58,18 +58,16 @@
  *      restarts
  *   7. upload-and-scrape.ts → uploads a combined pptx under a
  *      fork-unique title, scrapes per-slide PNG thumbnails
- *   8. (NOT booted here — see note below) emits a SxsServerSpec in the
- *      TaskResult so main-scaffolding.ts can spawn the filtered rating
- *      server as a tracked child process AFTER this prompt resolves
+ *   8. emits a SxsServerSpec in the TaskResult so main-scaffolding.ts can
+ *      boot the filtered rating server AFTER this prompt resolves, and so
+ *      the rating-gated accept phase can locate the thread's ratings.json.
  *
- * ## Return type & subprocess lifetime
- *   Returns `SessionWithResult<Array<Result<TaskResult>>>`. Each
- *   TaskResult carries an `sxs_server_spec`, NOT a running URL. The
- *   scaffolding is responsible for spawning the rating servers as
- *   tracked children so they die with the Node process on Ctrl-C /
- *   SIGTERM / exit. main.ts intentionally does not shell out to
- *   `nohup … & disown` — that would orphan the servers past the parent's
- *   death.
+ * ## Return type
+ *   `main()` is SOLVE-ONLY and returns
+ *   `SessionWithResult<Array<Result<TaskResult>>>` (the parallelFork
+ *   results). Each TaskResult carries an `sxs_server_spec`, NOT a running
+ *   URL. The accept/merge is NOT chained into this graph — it runs
+ *   post-run in the scaffolding, gated by the per-thread human rating.
  */
 
 import {
@@ -79,8 +77,11 @@ import {
 } from "../../../structured-prompting/src/index.js";
 import type { Result } from "../../../structured-prompting/src/index.js";
 import { writeFileSync, readFileSync, readdirSync, copyFileSync, mkdirSync, existsSync } from "fs";
+import { execSync } from "child_process";
 import { join } from "path";
 import { fixtureSetSlug } from "./workspace-setup.js";
+import { realMergeOps, mergePhase, type MergeCluster, type MergePhaseArgs, type MergeReport } from "./merge-phase.js";
+import { acceptDisabled } from "./accept-orchestration.js";
 
 /**
  * Write the sxs-meta.json sidecar consumed by rating-server.ts so each SxS card
@@ -281,6 +282,52 @@ export interface TaskResult {
   verdicts: SlideVerdict[];
   sxs_server_spec: SxsServerSpec;    // scaffolding boots the server, not main.ts
   fix_summary: string;               // one-paragraph summary emitted by the worker
+
+  // ---- Per-fork rating outcome (folded in by runTask steps A1–A3) ----
+  // A fork only reaches the rating gate once its verdict PASSED (step 6b did not
+  // throw). These fields reflect the human rating recorded in the fork's own UI:
+  rated: boolean;                    // true once every slide got a good/bad verdict
+  green: boolean;                    // true iff rated && every slide is `good`
+  bad_slides: string[];              // slides rated bad (or, on a timeout, unrated)
+}
+
+/** The outcome marker each fork writes at `<scratch>/rating-outcome.json` once
+ *  its rating gate resolves (or is skipped under NO_ACCEPT). The FINAL merge
+ *  phase reads these from disk to decide which clusters are GREEN. Shape must
+ *  match scripts/wait-for-ratings.ts's writer. */
+export interface RatingOutcomeMarker {
+  task_id: string;
+  rated: boolean;
+  green: boolean;
+  good: string[];
+  bad: string[];
+  unrated: string[];
+  slides: string[];
+}
+
+/** Where a task's rating-outcome marker lives. */
+export const ratingMarkerPath = (task: Task): string =>
+  join(task.scratch_dir, "rating-outcome.json");
+
+/** Read + validate a task's rating-outcome marker. Returns null if the marker is
+ *  absent (fork failed / never rated) or malformed — the FINAL merge phase and
+ *  step A3 treat null as "unrated, not green". */
+export function readRatingMarker(task: Task): RatingOutcomeMarker | null {
+  const f = ratingMarkerPath(task);
+  if (!existsSync(f)) return null;
+  try {
+    const o = JSON.parse(readFileSync(f, "utf8")) as Partial<RatingOutcomeMarker>;
+    if (typeof o.green !== "boolean") return null;
+    return {
+      task_id: typeof o.task_id === "string" ? o.task_id : task.task_id,
+      rated: o.rated === true,
+      green: o.green,
+      good: Array.isArray(o.good) ? o.good.filter((s): s is string => typeof s === "string") : [],
+      bad: Array.isArray(o.bad) ? o.bad.filter((s): s is string => typeof s === "string") : [],
+      unrated: Array.isArray(o.unrated) ? o.unrated.filter((s): s is string => typeof s === "string") : [],
+      slides: Array.isArray(o.slides) ? o.slides.filter((s): s is string => typeof s === "string") : [],
+    };
+  } catch { return null; }
 }
 
 // ---------- Helpers ----------
@@ -301,7 +348,15 @@ const SCRIPTS = {
   // (and re-composites slide_NN_highlighted_attempt.png over the AFTER render)
   // from the just-recorded AFTER thumbnail so the verifier sees the real attempt.
   composite: "renderer/structured-prompts/bug_solving/scripts/annotation-composite.ts",
+  // Rating gate CLI (`wait-for-ratings`): boots INSIDE the fork after step 7 —
+  // BLOCKS on the cluster's ratings.json, then writes rating-outcome.json.
+  waitRatings: "renderer/structured-prompts/bug_solving/scripts/wait-for-ratings.ts",
 };
+
+/** History dir the per-fork rating server + gate mirror verdicts into (the
+ *  persistent ledger the next clustering round reads). Matches
+ *  filtered-rating-server.ts's hard-coded --history-dir. */
+const HISTORY_DIR = "/workspaces/sashaslides/.bug-solving-history";
 
 const slideIdsCsv = (t: Task) => t.slides.map(s => s.slide_id).join(",");
 
@@ -357,16 +412,276 @@ function analysisPromptFor(task: Task): string {
   ].join("\n");
 }
 
+// ---------- Merge-phase args (shared with the scaffolding's accept phase) ----------
+//
+// The accept/merge itself no longer runs INSIDE this solve graph — it runs
+// POST-RUN in main-scaffolding.ts, gated by the per-thread human rating (see
+// accept-orchestration.ts). `deriveMergeArgs` is EXPORTED so the scaffolding can
+// build the same staging worktree + realMergeOps it always did, and hand the
+// GREEN (all-rated-good) clusters to `mergePhase` on the SAME engine/monitor.
+
+/**
+ * Run a shell command in `cwd`, returning stdout (throws on non-zero). Passed
+ * into `realMergeOps` so the production merge ops drive git + record/diff
+ * scripts.
+ */
+function mergeSh(cmd: string, cwd: string): string {
+  return execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+/**
+ * Derive the merge-phase args from THIS run's tasks. Every input the merge
+ * needs is already on the `Task[]`:
+ *   - each cluster = one Task → its `workspace_dir` (the modified side the
+ *     patcher composes) + its intended slides (`slides[].slide_id`).
+ *   - `base` = the run's fork ref: worktrees fork from HEAD at launch, so
+ *     `git rev-parse HEAD` in the repo IS that fork ref (the scaffolding runs
+ *     this before any promote commit touches HEAD).
+ *   - `target` = the branch the accepted state accumulates onto. Default the
+ *     current branch; overridable via `BUG_SOLVING_MERGE_TARGET`.
+ *   - `fixturesDir` = the repo-absolute fixture deck (shared across tasks; the
+ *     merge retest renders the WHOLE deck, so any task's dir works — they all
+ *     point at the same fixture set for a run).
+ *
+ * A dedicated staging worktree (the accumulating accepted state) is created off
+ * `base` so the merge does NOT disturb the scaffolding's tree; it's torn down
+ * after the phase unless `BUG_SOLVING_KEEP_STAGING=1`.
+ */
+export interface DerivedMergeArgs {
+  args: MergePhaseArgs;
+  stagingDir: string;
+  stagingBranch: string;
+  cleanup: () => void;
+}
+export function deriveMergeArgs(repo: string, tasks: Task[]): DerivedMergeArgs {
+  const clusters: MergeCluster[] = tasks.map((t) => ({
+    task: t.task_id,
+    dir: t.workspace_dir,
+    slides: t.slides.map((s) => s.slide_id),
+  }));
+
+  // base = the run's fork ref (HEAD at launch — worktrees forked from it).
+  const base = mergeSh("git rev-parse HEAD", repo).trim();
+  // target = the branch to accumulate onto; default = current branch.
+  const target = process.env.BUG_SOLVING_MERGE_TARGET
+    ?? mergeSh("git rev-parse --abbrev-ref HEAD", repo).trim();
+
+  // Fixtures: every task in a run shares one fixture set; use task[0]'s
+  // (repo-absolute). fixtures_dir is repo-relative on the Task.
+  const fixturesDir = tasks.length
+    ? join(tasks[0].workspace_dir, tasks[0].fixtures_dir)
+    : join(repo, "renderer/html2slides/e2e/fixtures");
+
+  // Staging worktree = the accumulating accepted state, forked off <base>.
+  const ts = String(Date.now());
+  const stagingDir = join(repo, ".claude/worktrees", `merge-phase-${ts}`);
+  const stagingBranch = `sp/merge-phase-${ts}`;
+  mergeSh(`git worktree add -b ${stagingBranch} "${stagingDir}" ${base}`, repo);
+
+  const ops = realMergeOps({ repo, base, staging: stagingDir, fixturesDir, sh: mergeSh });
+
+  const cleanup = () => {
+    if (process.env.BUG_SOLVING_KEEP_STAGING === "1") return;
+    try { mergeSh(`git worktree remove --force "${stagingDir}"`, repo); } catch { /* */ }
+    try { mergeSh(`git branch -D ${stagingBranch}`, repo); } catch { /* */ }
+  };
+
+  return {
+    args: { clusters, base, staging: stagingDir, fixturesDir, ops },
+    stagingDir,
+    stagingBranch,
+    cleanup,
+  };
+}
+
+// ---------- Final merge phase (after the parallelFork barrier) ----------
+//
+// The rating gate now lives INSIDE each fork (runTask steps A1–A3): a solved
+// fork boots its own UI, blocks on the human rating, and writes a
+// rating-outcome.json marker. AFTER the whole parallelFork barrier, this final
+// phase reads those markers off disk, folds every GREEN cluster together WITH
+// the LLM conflict resolver (mergePhase), whose renderAndDiff step IS the
+// whole-deck regression recording, and promotes the clean result onto the
+// target. RED / unrated clusters are excluded and demoted for re-solve.
+
+/** A cluster classified by its on-disk rating marker. */
+export interface ClassifiedCluster {
+  cluster: MergeCluster;
+  /** the outcome marker (null = missing/malformed = treated as not-green). */
+  outcome: RatingOutcomeMarker | null;
+  green: boolean;
+}
+
+/** Injected surface so the green-selection + demotion is unit-testable with no
+ *  engine / git / filesystem. */
+export interface GreenSelectionDeps {
+  /** read a task's rating-outcome marker (default: readRatingMarker). */
+  readMarker: (task: Task) => RatingOutcomeMarker | null;
+  /** demote an excluded cluster's slides back to the ledger for re-solve
+   *  (mirrors realMergeOps.demoteForResolve). Non-throwing + idempotent. */
+  demote: (slides: string[], cluster: string, reason: string) => void;
+  /** per-line logging (default console.error). */
+  log?: (msg: string) => void;
+}
+
+/**
+ * PURE green-selection: classify every task by its rating marker, DEMOTE the
+ * non-green ones (rated bad / unrated / no marker), and return the GREEN
+ * MergeClusters to fold. No engine, no git — every side-effect is on `deps`, so
+ * this unit-tests directly. Returns both the green clusters (for mergePhase) and
+ * the full classification (for logging).
+ */
+export function selectGreenClusters(
+  tasks: Task[],
+  deps: GreenSelectionDeps,
+): { green: MergeCluster[]; classified: ClassifiedCluster[] } {
+  const log = deps.log ?? ((m: string) => console.error(m));
+  const classified: ClassifiedCluster[] = [];
+  const green: MergeCluster[] = [];
+
+  for (const t of tasks) {
+    const cluster: MergeCluster = {
+      task: t.task_id,
+      dir: t.workspace_dir,
+      slides: t.slides.map((s) => s.slide_id),
+    };
+    const outcome = deps.readMarker(t);
+    const isGreen = outcome?.green === true;
+    classified.push({ cluster, outcome, green: isGreen });
+
+    if (isGreen) {
+      green.push(cluster);
+      log(`[merge-final] ${t.task_id} → GREEN (all rated good) — accept candidate.`);
+    } else {
+      const reason = outcome == null
+        ? "no rating marker (fork failed or never rated) — excluded from merge"
+        : outcome.bad.length
+          ? `user rated ${outcome.bad.join(", ")} bad`
+          : outcome.unrated.length
+            ? `rating incomplete — unrated slide(s) [${outcome.unrated.join(", ")}]`
+            : "not green";
+      log(`[merge-final] ${t.task_id} → EXCLUDED (${reason}) — demoting for re-solve.`);
+      try { deps.demote(cluster.slides, cluster.task, reason); }
+      catch (e) { log(`[merge-final] demote threw for ${t.task_id} (continuing): ${(e as Error)?.message ?? String(e)}`); }
+    }
+  }
+  return { green, classified };
+}
+
+/**
+ * Wire the FINAL merge phase onto a chain after the parallelFork barrier. Runs
+ * as engine nodes (monitor-visible). Because the execution branch can't receive
+ * the fork results, it reads each cluster's rating-outcome marker OFF DISK (the
+ * forks wrote them before the barrier). GREEN clusters → mergePhase (LLM compose
+ * + conflict resolution + whole-deck regression recording); non-green → demoted.
+ * Under BUG_SOLVING_NO_ACCEPT the whole phase is a no-op (the forks skipped
+ * their waits too). Returns a SessionWithResult<MergeReport|null> (the report is
+ * logged; main() discards it and returns the TaskResults).
+ */
+export function finalMergePhase(
+  branch: Session,
+  opts: {
+    repo: string;
+    tasks: Task[];
+    /** injected for tests; production uses the real disk/git wiring. */
+    readMarker?: (task: Task) => RatingOutcomeMarker | null;
+    demote?: (slides: string[], cluster: string, reason: string) => void;
+    /** run mergePhase over the green clusters. Default: real deriveMergeArgs +
+     *  mergePhase + cleanup. */
+    runMerge?: (s: Session, green: MergeCluster[]) => SessionWithResult<MergeReport>;
+    disabled?: (env: NodeJS.ProcessEnv) => boolean;
+    log?: (msg: string) => void;
+  },
+): SessionWithResult<MergeReport | null> {
+  const log = opts.log ?? ((m: string) => console.error(m));
+  const disabled = opts.disabled ?? acceptDisabled;
+
+  // NO_ACCEPT → skip the merge entirely (forks already booted UIs + skipped
+  // their waits). Return a null report on a real (no-op) node.
+  if (disabled(process.env)) {
+    log("[merge-final] BUG_SOLVING_NO_ACCEPT=1 → skipping final merge; leaving fixes in their worktrees.");
+    return branch
+      .executeShell(() => `echo merge-final:skipped-no-accept`)
+      .combineWith<string, MergeReport | null>(
+        (b) => b.executeShell(() => `echo merge-final:skipped-leaf`),
+        () => null,
+      );
+  }
+
+  // Real demote (ledger only — never touches staging), reusable for excluded
+  // clusters. realMergeOps.demoteForResolve is idempotent + non-throwing.
+  const demote = opts.demote ?? ((slides: string[], cluster: string, reason: string) => {
+    try {
+      const ops = realMergeOps({ repo: opts.repo, base: "HEAD", staging: opts.repo, fixturesDir: opts.repo, sh: mergeSh, historyDir: HISTORY_DIR });
+      ops.demoteForResolve(slides, cluster, reason);
+    } catch (e) {
+      log(`[merge-final] demote wiring failure for ${cluster} (non-fatal): ${(e as Error)?.message ?? String(e)}`);
+    }
+  });
+  const readMarker = opts.readMarker ?? readRatingMarker;
+
+  // Select GREEN clusters at RUNTIME from the on-disk markers (demoting the rest)
+  // inside a pipe so it runs at exec time, after the forks wrote their markers.
+  // The pipe body's returned SessionWithResult carries the (logged-only) report.
+  return branch
+    .executeShell(() => `echo merge-final:selecting-green`)
+    .pipe<MergeReport | null>((s) => {
+      const { green } = selectGreenClusters(opts.tasks, { readMarker, demote, log });
+      if (green.length === 0) {
+        log("[merge-final] no GREEN clusters — nothing to merge.");
+        return installNullReport(s);
+      }
+      log(`[merge-final] folding ${green.length} GREEN cluster(s): ${green.map((g) => g.task).join(", ")}`);
+      // Real merge: deriveMergeArgs (staging worktree + realMergeOps) + the
+      // mergePhase graph, torn down after. Injectable for tests.
+      if (opts.runMerge) return opts.runMerge(s, green).combineWith<string, MergeReport | null>(
+        (b2) => b2.executeShell(() => `echo merge-final:done`),
+        (rep) => logMergeReport(rep, log),
+      );
+      const derived = deriveMergeArgs(opts.repo, opts.tasks);
+      log(`[merge-final] staging worktree: ${derived.stagingDir} (branch ${derived.stagingBranch})`);
+      return mergePhase(s, { ...derived.args, clusters: green })
+        .combineWith<string, MergeReport | null>(
+          (b2) => b2.executeShell(() => `echo merge-final:cleanup`),
+          (rep) => { try { derived.cleanup(); } catch { /* */ } return logMergeReport(rep, log); },
+        );
+    });
+}
+
+/** Install a null MergeReport on a real graph node (mirrors merge-phase's
+ *  installValue). */
+function installNullReport(session: Session): SessionWithResult<MergeReport | null> {
+  return session
+    .executeShell(() => `echo merge-final:no-green`)
+    .combineWith<string, MergeReport | null>(
+      (b) => b.executeShell(() => `echo merge-final:no-green-leaf`),
+      () => null,
+    );
+}
+
+/** Log the final MergeReport (accepted / rejected+demoted / conflicts) and
+ *  return it. */
+function logMergeReport(report: MergeReport, log: (m: string) => void): MergeReport {
+  log("\n================ FINAL MERGE PHASE COMPLETE ================");
+  log(`accepted (${report.accepted.length}): ${report.accepted.join(", ") || "(none)"}`);
+  log(`rejected (${report.rejected.length}): ${report.rejected.map((r) => `${r.task} (${r.reason})${r.demotedSlides.length ? ` → demoted: [${r.demotedSlides.join(",")}]` : ""}`).join("; ") || "(none)"}`);
+  log(`conflicts (${report.conflicts.length}): ${report.conflicts.map((c) => `${c.task}[${c.files.join(",")}]=${c.resolved ? "resolved" : "UNRESOLVED"}`).join("; ") || "(none)"}`);
+  log(`per-slide captures: ${Object.keys(report.perSlide).length} slide(s)`);
+  log("==========================================================\n");
+  return report;
+}
+
 // ---------- Main ----------
 
-// FINAL MERGE PHASE (opt-in, separate graph): once clusters are solved here and
-// rated GREEN in the candidate ledger, the accept/merge of those green clusters
-// onto the accepted state is ALSO expressible as an engine graph — see
-// `mergePhase` in ./merge-phase.ts (compose → conflict→resolver-send→assert →
-// pixel-perfect-outside-accepted retest → promote/revert), launched by
-// ./merge-phase-runner.ts. It runs as its OWN engine (own staging worktree +
-// port) so it does not disturb this scaffolding's monitor; the procedural
-// scripts/accept-solved-bugs.ts remains as the interactive alternative.
+// main() runs the parallelFork solve+verify+fix-summary graph AND the per-fork
+// rating gate (each solved fork boots its own UI and BLOCKS on the human rating,
+// steps A1–A3), THEN — after the parallelFork barrier — a FINAL merge phase
+// (finalMergePhase) folds every GREEN cluster together with the LLM conflict
+// resolver + whole-deck regression recording (mergePhase) and promotes the clean
+// result. The merge report is LOGGED, not returned: main() still returns the
+// per-task TaskResults (`SessionWithResult<Array<Result<TaskResult>>>`). Under
+// BUG_SOLVING_NO_ACCEPT the forks skip their waits and the final phase is a
+// no-op. Nothing lands until a human rates every slide of a thread good.
 export function main(args: {
   session: Session;
   tasks: Task[];
@@ -624,6 +939,12 @@ export function main(args: {
               task_title: `bug_solving: ${task.task_id}`,
             },
             fix_summary: fixSummary.trim(),
+            // Rating fields default to unrated/not-green; steps A1–A3 (below)
+            // boot the fork's UI, BLOCK on the human rating, then overwrite these
+            // from the rating-outcome.json marker.
+            rated: false,
+            green: false,
+            bad_slides: [],
           };
           return aggregate;
         },
@@ -684,6 +1005,76 @@ export function main(args: {
           writeSxsMeta(`${task.scratch_dir}/thumbnails`, task.slides);
           return taskResult;
         },
+      )
+
+      // ── Step A1 — BOOT this fork's rating server DETACHED ──────────────────
+      // Only a SOLVED fork reaches here (step 6b threw for a failed verdict).
+      // The server survives this node (setsid + `& disown`) so the human can
+      // rate it while the fork blocks in A2 and the OTHER forks run in parallel.
+      // filtered-rating-server.ts translates the old argv into rating-server.ts
+      // (which prints the notify line + runs BUG_SOLVING_NOTIFY_CMD on boot),
+      // pointed at this cluster's thumbnails + diffs + analysis, filtered to its
+      // slides, with the persistent --history-dir. Under BUG_SOLVING_NO_ACCEPT
+      // we still boot the UI for review (the wait in A2 is skipped).
+      .combineWith<string, TaskResult>(
+        (branch) => branch.executeShell((tr) => {
+          const spec = tr.sxs_server_spec;
+          const server = `${task.workspace_dir}/${SCRIPTS.filteredServer}`;
+          const log = `${task.scratch_dir}/rating-server.log`;
+          const inner =
+            `npx tsx ${server} ` +
+            `--port ${spec.port} ` +
+            `--slides ${spec.slides.join(",")} ` +
+            `--analysis ${spec.analysis_md} ` +
+            `--diffs ${spec.diffs_dir} ` +
+            `--thumbnails ${spec.thumbnails_dir} ` +
+            `--task-title "${spec.task_title}"`;
+          // setsid + `& disown` detaches the server so it outlives this node.
+          return (
+            `cd ${task.workspace_dir}/renderer && ` +
+            `setsid ${inner} > ${log} 2>&1 < /dev/null & disown; ` +
+            `echo "[rating-server] ${task.task_id} → http://localhost:${spec.port} (log ${log})"`
+          );
+        }),
+        (taskResult) => taskResult,
+      )
+
+      // ── Step A2 — BLOCK on this cluster's ratings.json (wait-for-ratings) ───
+      // Polls the fork's own ratings.json until every slide is good/bad (honoring
+      // BUG_SOLVING_NO_ACCEPT → skip, and BUG_SOLVING_RATING_TIMEOUT_MS/TTY →
+      // finite deadline). On completion it WRITES the rating-outcome.json marker
+      // and prints a summary. ALWAYS exits 0 (a timeout writes green:false).
+      .combineWith<string, TaskResult>(
+        (branch) => branch.executeShell(() => {
+          const wait = `${task.workspace_dir}/${SCRIPTS.waitRatings}`;
+          const ids = slideIdsCsv(task);
+          return (
+            `cd ${task.workspace_dir}/renderer && npx tsx ${wait} ` +
+            `--results-dir ${task.scratch_dir}/thumbnails ` +
+            `--slides ${ids} ` +
+            `--task-id ${task.task_id} ` +
+            `--marker ${ratingMarkerPath(task)} ` +
+            `--history-dir ${HISTORY_DIR}`
+          );
+        }),
+        (taskResult) => taskResult,
+      )
+
+      // ── Step A3 — fold the rating outcome into the TaskResult ──────────────
+      // Read the marker the wait wrote and set rated/green/bad_slides. A missing
+      // or malformed marker is conservatively treated as unrated + not-green.
+      .combineWith<string, TaskResult>(
+        (branch) => branch.executeShell(() => `echo rating-marker-read ${task.task_id}`),
+        (taskResult) => {
+          const outcome = readRatingMarker(task);
+          return {
+            ...taskResult,
+            rated: outcome?.rated ?? false,
+            green: outcome?.green ?? false,
+            // bad_slides = rated-bad slides plus (on a timeout) any still-unrated.
+            bad_slides: outcome ? [...outcome.bad, ...outcome.unrated] : [],
+          };
+        },
       );
   };
 
@@ -692,21 +1083,39 @@ export function main(args: {
   // fork()/compact() on the outer session isn't needed — the scaffolding
   // root carries no real prior conversation, and compact() would just
   // strip its (empty) context.
-  return args.session.parallelFork(args.tasks, (child, task) =>
-    child
-      // Point this task's whole chain (worker model `send`s + record/diff
-      // shells) at its OWN git worktree, not the scaffolding's main repo.
-      // Without this the worker's codex/claude --cd is the main checkout, so
-      // its edits never land in the worktree and record-after sees no change
-      // ("UNSOLVED: no structural differences").
-      .switchCwd(task.workspace_dir)
-      .try<Result<TaskResult>>(
-        (s) => s.tryMultipleTimes<TaskResult>(
-          task.retry_budget,
-          (s2) => runTask(s2, task),
+  //
+  // Each fork now runs the solve+verify+fix-summary chain AND its own rating
+  // gate (runTask steps A1–A3: boot the fork's UI → BLOCK on the human rating →
+  // write rating-outcome.json). AFTER the whole parallelFork barrier, a FINAL
+  // merge phase (finalMergePhase) reads those markers off disk and folds the
+  // GREEN clusters through mergePhase (LLM compose + conflict resolution +
+  // whole-deck regression recording). The merge report is LOGGED, not returned —
+  // main() still yields the per-task TaskResults.
+  const repo = process.cwd();
+  return args.session
+    .parallelFork(args.tasks, (child, task) =>
+      child
+        // Point this task's whole chain (worker model `send`s + record/diff
+        // shells) at its OWN git worktree, not the scaffolding's main repo.
+        // Without this the worker's codex/claude --cd is the main checkout, so
+        // its edits never land in the worktree and record-after sees no change
+        // ("UNSOLVED: no structural differences").
+        .switchCwd(task.workspace_dir)
+        .try<Result<TaskResult>>(
+          (s) => s.tryMultipleTimes<TaskResult>(
+            task.retry_budget,
+            (s2) => runTask(s2, task),
+          ),
+          // Don't cancel sibling tasks when one task fails outright.
+          (s, e) => s.materializeError(describeError(e)),
         ),
-        // Don't cancel sibling tasks when one task fails outright.
-        (s, e) => s.materializeError(describeError(e)),
-      ),
-  );
+    )
+    // FINAL PHASE: fold GREEN clusters after the barrier. The execution branch
+    // (finalMergePhase) can't receive `taskResults` — it reads the rating-outcome
+    // markers the forks wrote before the barrier — so the combine callback simply
+    // discards the (logged-only) merge report and returns the TaskResults.
+    .combineWith<MergeReport | null, Array<Result<TaskResult>>>(
+      (branch) => finalMergePhase(branch, { repo, tasks: args.tasks }),
+      (taskResults, _mergeReport) => taskResults,
+    );
 }
