@@ -218,8 +218,13 @@ async function callCodexInternal(
   // cwd, but `-C/--cd` is how codex itself scopes the workspace. NOTE: the
   // `exec resume` subcommand rejects `--cd` ("unexpected argument '--cd'") —
   // a resumed session inherits its recorded cwd, and spawnCapture still sets
-  // the process cwd — so only pass `--cd` on a FRESH exec.
-  if (cwd && !resume) procArgs.push("--cd", cwd);
+  // the process cwd — so only pass `--cd` on a FRESH exec. Also DROP `--cd`
+  // when running inside an overlay branch: the branch runner sets the process
+  // cwd to the merged working-tree root (which is NOT `cwd`'s path — that
+  // points outside the namespace-local mount), so passing it would scope codex
+  // to the real repo instead of the branch. Inheriting the process cwd is
+  // correct inside a branch.
+  if (cwd && !resume && !opts.branchId) procArgs.push("--cd", cwd);
 
   // Headless run: never block on an approval/sandbox prompt, and allow running
   // outside a git repo (workers may run in arbitrary scratch dirs).
@@ -242,6 +247,7 @@ async function callCodexInternal(
       cwd,
       timeoutMs,
       nodeId: opts.nodeId,
+      branchId: opts.branchId,
     });
 
     if (spawnError) {

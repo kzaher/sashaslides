@@ -53,6 +53,7 @@ async function test(name: string, fn: () => Promise<void> | void): Promise<void>
 function mkTask(task_id: string, slideIds: string[]): Task {
   return {
     task_id,
+    branch_id: `bs-${task_id}-test`,
     workspace_dir: `/wt/${task_id}`,
     scratch_dir: `/wt/${task_id}/.scratch`,
     analysis_dir: `/wt/${task_id}/.analysis`,

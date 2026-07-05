@@ -274,6 +274,7 @@ function makeTask(fx: Fixture, task_id: string, dir: string, slides: string[]): 
   mkdirSync(scratch, { recursive: true });
   return {
     task_id,
+    branch_id: `bs-${task_id}-test`,
     workspace_dir: dir,
     scratch_dir: scratch,
     analysis_dir: join(dir, "bug-solving-analysis"),

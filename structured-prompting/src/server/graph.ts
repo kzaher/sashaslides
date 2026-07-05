@@ -69,6 +69,10 @@ export interface NodeKindSchemas {
   compact: { input: null };
   switchModel: { input: { model: ClaudeModel } };
   switchCwd: { input: { cwd: string } };
+  /** Opt-in overlay-branch anchor: every command in this context's chain runs
+   *  inside the named overlayfs branch (namespace-local COW mount over the
+   *  working tree). See io.ts spawn injection. */
+  switchBranch: { input: { branchId: string } };
   newSession: { input: { model: ClaudeModel } };
   prependToNextPrompt: { input: { text: string } };
   appendToNextPrompt: { input: { text: string } };

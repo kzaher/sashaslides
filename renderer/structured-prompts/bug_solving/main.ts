@@ -182,9 +182,10 @@ export interface SlideTask {
 
 export interface Task {
   task_id: string;                   // stable slug, e.g. "clipping-curves"
-  workspace_dir: string;             // git worktree created for this task
-  scratch_dir: string;               // per-task scratch (under workspace_dir, GITIGNORED — binary pptx/diff artifacts)
-  analysis_dir: string;              // per-task model docs (under workspace_dir, NOT ignored — visible in the per-node diff)
+  branch_id: string;                 // overlay branch id (bs-<task>-<ts>); the fork runs INSIDE it
+  workspace_dir: string;             // repo root (the branch's merged view resolves repo-relative paths from here)
+  scratch_dir: string;               // REPO-RELATIVE scratch, created INSIDE the branch (binary pptx/diff artifacts)
+  analysis_dir: string;              // REPO-RELATIVE model docs dir, created INSIDE the branch (analysis.md / fix-summary.md)
   fixtures_dir: string;              // repo-relative fixtures dir for this cluster's slides (e.g. fixtures-basic)
   server_port: number;               // unique port for the filtered rating server
   presentation_title: string;        // fork-unique, e.g. "bug_solving-clipping-curves-1713512345"
@@ -351,6 +352,9 @@ const SCRIPTS = {
   // Rating gate CLI (`wait-for-ratings`): boots INSIDE the fork after step 7 —
   // BLOCKS on the cluster's ratings.json, then writes rating-outcome.json.
   waitRatings: "renderer/structured-prompts/bug_solving/scripts/wait-for-ratings.ts",
+  // The overlay-branch runner itself (repo-relative). Used from inside a fork's
+  // branch to spin a FRESH base branch for the whole-deck baseline render.
+  overlayBranch: "renderer/structured-prompts/bug_solving/scripts/overlay-branch.sh",
 };
 
 /** History dir the per-fork rating server + gate mirror verdicts into (the
@@ -360,14 +364,26 @@ const HISTORY_DIR = "/workspaces/sashaslides/.bug-solving-history";
 
 const slideIdsCsv = (t: Task) => t.slides.map(s => s.slide_id).join(",");
 
+/**
+ * Every executeShell command runs INSIDE the fork's overlay branch (the engine
+ * wraps it via overlay-branch.sh once `.switchBranch(branch_id)` is set). The
+ * branch runner sets cwd = the merged working-tree root, so at command start
+ * `$PWD` IS the repo root inside the branch. We capture it as `$ROOT` so
+ * repo-relative paths (scripts, fixtures, scratch — all stored repo-relative on
+ * the Task) resolve as absolute paths inside the branch, then cd into
+ * `renderer/` for node_modules resolution. Prefix a command body with this and
+ * reference `"$ROOT/<repo-relative-path>"` everywhere.
+ */
+const BRANCH_CD_RENDERER = `ROOT="$PWD"; cd "$ROOT/renderer"`;
+
 /** Build the per-slide analysis prompt text. Included in the first-round
  *  prompt so the worker knows exactly how to treat user SxS comments. */
 function analysisPromptFor(task: Task): string {
   return [
     `Task: ${task.task_id}`,
-    `Workspace: ${task.workspace_dir}`,
-    `Scratch (binary artifacts, gitignored): ${task.scratch_dir}`,
-    `Analysis dir (write analysis.md / fix-summary.md HERE — it is tracked + shows in the diff): ${task.analysis_dir}`,
+    `You are running INSIDE an isolated overlay branch (${task.branch_id}); your cwd is the repository root and every edit is captured in the branch's private layer (the base working tree is untouched).`,
+    `Scratch (binary artifacts, repo-relative inside the branch): ${task.scratch_dir}`,
+    `Analysis dir (write analysis.md / fix-summary.md HERE, repo-relative inside the branch): ${task.analysis_dir}`,
     `Cluster hypothesis: ${task.cluster_description}`,
     ``,
     `Slides in this task, the user's SxS comments, and the IMAGE MANIFEST for each.`,
@@ -742,22 +758,23 @@ export function main(args: {
         }
       })
 
-      // Step 3 — record AFTER pptx via shell (one file per slide). Runs from
-      // the WORKTREE's renderer/ so it picks up the worker's just-applied fix
+      // Step 3 — record AFTER pptx via shell (one file per slide). Runs INSIDE
+      // the branch (cwd = repo root → renderer/) so it picks up the worker's
+      // just-applied fix from the branch's upper layer
       // (record-rendering.ts → <out>/pptx/<slide_id>.pptx).
       .executeShell(() =>
-        `cd ${task.workspace_dir}/renderer && npx tsx ${task.workspace_dir}/${SCRIPTS.record} ` +
-        `--mode pptx --fixtures ${task.workspace_dir}/${task.fixtures_dir} ` +
-        `--slides ${ids} --out ${task.scratch_dir}/after`
+        `${BRANCH_CD_RENDERER} && npx tsx "$ROOT/${SCRIPTS.record}" ` +
+        `--mode pptx --fixtures "$ROOT/${task.fixtures_dir}" ` +
+        `--slides ${ids} --out "$ROOT/${task.scratch_dir}/after"`
       )
 
       // Step 4 — pairwise diffs via shell. before/after pptx live under the
       // `pptx/` subdir that record-rendering writes; diff-pptx-pairs needs
       // JSZip so it also runs from renderer/ for node_modules resolution.
       .executeShell(() =>
-        `cd ${task.workspace_dir}/renderer && npx tsx ${task.workspace_dir}/${SCRIPTS.diff} ` +
-        `--before ${task.scratch_dir}/before/pptx --after ${task.scratch_dir}/after/pptx ` +
-        `--out ${task.scratch_dir}/diffs`
+        `${BRANCH_CD_RENDERER} && npx tsx "$ROOT/${SCRIPTS.diff}" ` +
+        `--before "$ROOT/${task.scratch_dir}/before/pptx" --after "$ROOT/${task.scratch_dir}/after/pptx" ` +
+        `--out "$ROOT/${task.scratch_dir}/diffs"`
       )
 
       // Step 4b — REGRESSION SCAN across the WHOLE fixture deck (not just this
@@ -767,15 +784,23 @@ export function main(args: {
       // slide changed (an off-target regression). Dirs are cleared first so a
       // retry never diffs stale pptx (the round-2 idempotent-cache trap).
       .executeShell(() => {
-        const wt = task.workspace_dir;
-        const fx = `${wt}/${task.fixtures_dir}`;
-        const sc = task.scratch_dir;
-        const rec = `${wt}/${SCRIPTS.record}`;
-        const dif = `${wt}/${SCRIPTS.diff}`;
+        const fx = task.fixtures_dir;
+        const rec = SCRIPTS.record;
+        // Shared /tmp scratch OUTSIDE the overlay (readable from BOTH this fix
+        // branch and the fresh base branch below): before/after whole-deck pptx
+        // land here so the diff can compare them.
+        const reg = `/tmp/bs-reg-${task.branch_id}`;
+        // Baseline runs in a SEPARATE overlay branch whose upper is EMPTY, so
+        // its lower (the unmodified working tree) renders WITHOUT the fix. It
+        // captures its OWN repo root as $R (a different merged mount than $ROOT).
+        const baseInner =
+          `R="$PWD"; cd "$R/renderer" && ` +
+          `A=$(ls "$R/${fx}"/slide_*.html | xargs -n1 basename | sed "s/[.]html$//" | sort -V | paste -sd,) && ` +
+          `RECORD_CONCURRENCY=1 npx tsx "$R/${rec}" --mode pptx --fixtures "$R/${fx}" --slides "$A" --out ${reg}/before-all`;
         return [
-          `cd ${wt}/renderer`,
-          `rm -rf ${sc}/after-all ${sc}/before-all ${sc}/reg-diffs`,
-          `ALL=$(ls ${fx}/slide_*.html | xargs -n1 basename | sed 's/[.]html$//' | sort -V | paste -sd,)`,
+          BRANCH_CD_RENDERER,
+          `rm -rf ${reg} "$ROOT/${task.scratch_dir}/reg-diffs" && mkdir -p ${reg}`,
+          `ALL=$(ls "$ROOT/${fx}"/slide_*.html | xargs -n1 basename | sed 's/[.]html$//' | sort -V | paste -sd,)`,
           // RECORD_CONCURRENCY=1 forces SEQUENTIAL rendering of the whole-deck
           // before/after passes. Concurrent Chrome tabs race on web-font load,
           // shifting text metrics → nondeterministic pptx → PHANTOM off-target
@@ -783,12 +808,13 @@ export function main(args: {
           // fix drew a disjoint set of "changed" slides each run). Sequential
           // rendering is empirically byte-deterministic (full-deck HEAD-vs-HEAD
           // = 0 structural drift), so the off-target diff reflects ONLY the fix.
-          `RECORD_CONCURRENCY=1 npx tsx ${rec} --mode pptx --fixtures ${fx} --slides "$ALL" --out ${sc}/after-all`,
-          // baseline: stash the worker's tracked fix, render HEAD, restore.
-          `git -C ${wt} stash push -m bs-regbase >/dev/null 2>&1 || true`,
-          `RECORD_CONCURRENCY=1 npx tsx ${rec} --mode pptx --fixtures ${fx} --slides "$ALL" --out ${sc}/before-all`,
-          `git -C ${wt} stash list | grep -q bs-regbase && git -C ${wt} stash pop >/dev/null 2>&1 || true`,
-          `npx tsx ${dif} --before ${sc}/before-all/pptx --after ${sc}/after-all/pptx --out ${sc}/reg-diffs`,
+          // AFTER = this branch (has the fix), rendered to the shared /tmp scratch.
+          `RECORD_CONCURRENCY=1 npx tsx "$ROOT/${rec}" --mode pptx --fixtures "$ROOT/${fx}" --slides "$ALL" --out ${reg}/after-all`,
+          // BEFORE = a FRESH base branch (empty upper → pristine converter). The
+          // worker's edits live in THIS branch's upper, so `git stash` can't
+          // toggle them; a separate empty-upper branch gives the unmodified tree.
+          `bash "$ROOT/${SCRIPTS.overlayBranch}" run bs-regbase-${task.branch_id} bash -c '${baseInner}'`,
+          `npx tsx "$ROOT/${SCRIPTS.diff}" --before ${reg}/before-all/pptx --after ${reg}/after-all/pptx --out "$ROOT/${task.scratch_dir}/reg-diffs"`,
         ].join(" && ");
       })
 
@@ -802,11 +828,11 @@ export function main(args: {
       // (`|| true`): a flaky Google upload must not block the verdict — the
       // verifier falls back to the diff when the AFTER image is missing.
       .executeShell(() =>
-        `rm -rf ${task.scratch_dir}/thumbnails && ` +
-        `cd ${task.workspace_dir}/renderer && npx tsx ${task.workspace_dir}/${SCRIPTS.record} ` +
-        `--mode full --fixtures ${task.workspace_dir}/${task.fixtures_dir} ` +
+        `${BRANCH_CD_RENDERER} && rm -rf "$ROOT/${task.scratch_dir}/thumbnails" && ` +
+        `npx tsx "$ROOT/${SCRIPTS.record}" ` +
+        `--mode full --fixtures "$ROOT/${task.fixtures_dir}" ` +
         `--slides ${ids} --title "${task.presentation_title}" ` +
-        `--out ${task.scratch_dir}/thumbnails || true`,
+        `--out "$ROOT/${task.scratch_dir}/thumbnails" || true`,
       )
 
       // Step 4d — VISUAL off-target gate. Reads step 4b's reg-diffs, and for any
@@ -817,10 +843,10 @@ export function main(args: {
       // (`|| true`): the helper always writes the file + exits 0, and step 6b
       // falls back to the conservative binary structural check if it's missing.
       .executeShell(() =>
-        `cd ${task.workspace_dir}/renderer && npx tsx ${task.workspace_dir}/${SCRIPTS.offtargetGate} ` +
-        `--scratch ${task.scratch_dir} --cluster ${ids} --workdir ${task.workspace_dir} ` +
-        `--fixtures ${task.workspace_dir}/${task.fixtures_dir} ` +
-        `--record ${task.workspace_dir}/${SCRIPTS.record} ` +
+        `${BRANCH_CD_RENDERER} && npx tsx "$ROOT/${SCRIPTS.offtargetGate}" ` +
+        `--scratch "$ROOT/${task.scratch_dir}" --cluster ${ids} --workdir "$ROOT" ` +
+        `--fixtures "$ROOT/${task.fixtures_dir}" ` +
+        `--record "$ROOT/${SCRIPTS.record}" ` +
         `--title "${task.presentation_title}-offtarget" || true`,
       )
 
@@ -832,18 +858,19 @@ export function main(args: {
       // the build-time attempt in place (the CLI logs and keeps it).
       .executeShell(() => {
         const slug = fixtureSetSlug(task.fixtures_dir);
-        const dir = `${task.scratch_dir}/${slug}`;
-        const composite = `${task.workspace_dir}/${SCRIPTS.composite}`;
+        const dir = `"$ROOT/${task.scratch_dir}/${slug}"`;
+        const composite = `"$ROOT/${SCRIPTS.composite}"`;
         const cmds = task.slides.map(s => {
-          const after = `${task.scratch_dir}/thumbnails/thumbs/${s.slide_id}.png`;
+          const after = `"$ROOT/${task.scratch_dir}/thumbnails/thumbs/${s.slide_id}.png"`;
           const attempt = `${dir}/${s.slide_id}_attempt.png`;
           const highlighted = `${dir}/${s.slide_id}_highlighted_attempt.png`;
           // Pass the raw annotation (if any) so the highlighted composite is
-          // rebuilt over the AFTER render.
-          const ann = s.img_annotations ? ` "${s.img_annotations}" "${highlighted}"` : ``;
-          return `npx tsx ${composite} refresh "${after}" "${attempt}"${ann} || true`;
+          // rebuilt over the AFTER render. Annotations live in /tmp (outside the
+          // overlay), reachable by absolute path inside the branch.
+          const ann = s.img_annotations ? ` "${s.img_annotations}" ${highlighted}` : ``;
+          return `npx tsx ${composite} refresh ${after} ${attempt}${ann} || true`;
         });
-        return `cd ${task.workspace_dir}/renderer && ${cmds.join(" && ")}`;
+        return `${BRANCH_CD_RENDERER} && mkdir -p ${dir} && ${cmds.join(" && ")}`;
       })
 
       // Step 5 — per-slide verdict fork. Each slide gets its own sub-
@@ -990,10 +1017,10 @@ export function main(args: {
         // the SxS review — a flaky Google upload must NOT throw away an
         // already-PASSED fix (which is exactly what the dead script was doing).
         (branch) => branch.executeShell(() =>
-          `cd ${task.workspace_dir}/renderer && npx tsx ${task.workspace_dir}/${SCRIPTS.record} ` +
-          `--mode full --fixtures ${task.workspace_dir}/${task.fixtures_dir} ` +
+          `${BRANCH_CD_RENDERER} && npx tsx "$ROOT/${SCRIPTS.record}" ` +
+          `--mode full --fixtures "$ROOT/${task.fixtures_dir}" ` +
           `--slides ${ids} --title "${task.presentation_title}" ` +
-          `--out ${task.scratch_dir}/thumbnails || true`
+          `--out "$ROOT/${task.scratch_dir}/thumbnails" || true`
         ),
         (taskResult) => {
           // Best-effort: write the sxs-meta.json provenance sidecar into the
@@ -1019,21 +1046,26 @@ export function main(args: {
       .combineWith<string, TaskResult>(
         (branch) => branch.executeShell((tr) => {
           const spec = tr.sxs_server_spec;
-          const server = `${task.workspace_dir}/${SCRIPTS.filteredServer}`;
-          const log = `${task.scratch_dir}/rating-server.log`;
+          // spec.analysis_md / diffs_dir / thumbnails_dir are repo-relative
+          // (built from task.scratch_dir / analysis_dir); resolve them as
+          // absolute inside the branch via $ROOT. The rating server binds
+          // localhost:<port>, reachable from the host (the branch shares the
+          // host network namespace — only user+mount are unshared).
+          const server = `"$ROOT/${SCRIPTS.filteredServer}"`;
+          const log = `"$ROOT/${task.scratch_dir}/rating-server.log"`;
           const inner =
             `npx tsx ${server} ` +
             `--port ${spec.port} ` +
             `--slides ${spec.slides.join(",")} ` +
-            `--analysis ${spec.analysis_md} ` +
-            `--diffs ${spec.diffs_dir} ` +
-            `--thumbnails ${spec.thumbnails_dir} ` +
+            `--analysis "$ROOT/${spec.analysis_md}" ` +
+            `--diffs "$ROOT/${spec.diffs_dir}" ` +
+            `--thumbnails "$ROOT/${spec.thumbnails_dir}" ` +
             `--task-title "${spec.task_title}"`;
           // setsid + `& disown` detaches the server so it outlives this node.
           return (
-            `cd ${task.workspace_dir}/renderer && ` +
+            `${BRANCH_CD_RENDERER} && ` +
             `setsid ${inner} > ${log} 2>&1 < /dev/null & disown; ` +
-            `echo "[rating-server] ${task.task_id} → http://localhost:${spec.port} (log ${log})"`
+            `echo "[rating-server] ${task.task_id} → http://localhost:${spec.port} (log ${task.scratch_dir}/rating-server.log)"`
           );
         }),
         (taskResult) => taskResult,
@@ -1046,14 +1078,19 @@ export function main(args: {
       // and prints a summary. ALWAYS exits 0 (a timeout writes green:false).
       .combineWith<string, TaskResult>(
         (branch) => branch.executeShell(() => {
-          const wait = `${task.workspace_dir}/${SCRIPTS.waitRatings}`;
+          const wait = `"$ROOT/${SCRIPTS.waitRatings}"`;
           const ids = slideIdsCsv(task);
+          // --history-dir is an ABSOLUTE path OUTSIDE the repo (/workspaces/…/
+          // .bug-solving-history) → it is part of the overlay LOWER, so a write
+          // there from inside the branch lands in the branch upper (isolated).
+          // The persistent ledger mirror is best-effort here; task 9's merge
+          // rewrite reconciles ledgers from branch state.
           return (
-            `cd ${task.workspace_dir}/renderer && npx tsx ${wait} ` +
-            `--results-dir ${task.scratch_dir}/thumbnails ` +
+            `${BRANCH_CD_RENDERER} && npx tsx ${wait} ` +
+            `--results-dir "$ROOT/${task.scratch_dir}/thumbnails" ` +
             `--slides ${ids} ` +
             `--task-id ${task.task_id} ` +
-            `--marker ${ratingMarkerPath(task)} ` +
+            `--marker "$ROOT/${ratingMarkerPath(task)}" ` +
             `--history-dir ${HISTORY_DIR}`
           );
         }),
@@ -1095,12 +1132,13 @@ export function main(args: {
   return args.session
     .parallelFork(args.tasks, (child, task) =>
       child
-        // Point this task's whole chain (worker model `send`s + record/diff
-        // shells) at its OWN git worktree, not the scaffolding's main repo.
-        // Without this the worker's codex/claude --cd is the main checkout, so
-        // its edits never land in the worktree and record-after sees no change
-        // ("UNSOLVED: no structural differences").
-        .switchCwd(task.workspace_dir)
+        // Run this task's WHOLE chain (worker model `send`s + record/diff
+        // shells) INSIDE its own overlay branch — a zero-copy COW mount over the
+        // working tree. Every command is wrapped via overlay-branch.sh, so the
+        // worker's edits + scratch land in the branch's isolated upper layer and
+        // never touch the base tree (nor sibling forks). Replaces the old git
+        // worktree + switchCwd.
+        .switchBranch(task.branch_id)
         .try<Result<TaskResult>>(
           (s) => s.tryMultipleTimes<TaskResult>(
             task.retry_budget,

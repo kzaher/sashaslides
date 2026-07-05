@@ -75,6 +75,9 @@ export interface SchedulerCtx {
   model: string | null;
   /** Working directory passed to claude / shell. */
   cwd: string;
+  /** Opt-in overlay branch id (set by switchBranch); null = no branch. When
+   *  set, send/executeShell run inside the branch's overlayfs mount. */
+  branchId: string | null;
   /** Strings to prepend to the next send's prompt (FIFO). */
   prepend: readonly string[];
   /** Strings to append (FIFO). */
@@ -138,6 +141,7 @@ const CTX_KEYS = [
   "claudeSessionId",
   "model",
   "cwd",
+  "branchId",
   "prepend",
   "append",
   "pendingFork",
@@ -149,6 +153,7 @@ interface CtxPatch {
   claudeSessionId?: string | null;
   model?: string | null;
   cwd?: string;
+  branchId?: string | null;
   prependAdd?: string[];
   appendAdd?: string[];
   pendingFork?: boolean;
@@ -219,6 +224,7 @@ function deriveCtx(
       claudeSessionId: patch.claudeSessionId !== undefined ? patch.claudeSessionId : acc.claudeSessionId,
       model: patch.model !== undefined ? patch.model : acc.model,
       cwd: patch.cwd !== undefined ? patch.cwd : acc.cwd,
+      branchId: patch.branchId !== undefined ? patch.branchId : acc.branchId,
       prepend: patch.prependAdd ? [...acc.prepend, ...patch.prependAdd] : acc.prepend,
       append: patch.appendAdd ? [...acc.append, ...patch.appendAdd] : acc.append,
       pendingFork: patch.pendingFork !== undefined ? patch.pendingFork : acc.pendingFork,
@@ -233,6 +239,7 @@ function baseCtx(state: SchedulerState, seed: Partial<SchedulerCtx>): SchedulerC
     claudeSessionId: seed.claudeSessionId ?? null,
     model: seed.model ?? null,
     cwd: seed.cwd ?? process.cwd(),
+    branchId: seed.branchId ?? null,
     prepend: seed.prepend ?? [],
     append: seed.append ?? [],
     pendingFork: seed.pendingFork ?? false,
@@ -423,6 +430,12 @@ const passthroughHandlers: Array<[string, KindHandler]> = [
     ctx.setValue(node.id, ctx.upstream);
     graph.finishOk(node.id, { cwd: input.cwd, ctxPatch: { cwd: input.cwd } });
   }],
+  ["switchBranch", async (node, graph, ctx) => {
+    graph.start(node.id);
+    const input = node.input as { branchId: string };
+    ctx.setValue(node.id, ctx.upstream);
+    graph.finishOk(node.id, { branchId: input.branchId, ctxPatch: { branchId: input.branchId } });
+  }],
   ["newSession", async (node, graph, ctx) => {
     graph.start(node.id);
     const input = node.input as { model: string };
@@ -492,6 +505,7 @@ function makeExecuteShellHandler(state: SchedulerState): KindHandler {
       args: ["-c", cmd],
       cwd,
       nodeId: node.id,
+      branchId: ctx.branchId ?? undefined,
       onStdout: (chunk) => { stdoutSoFar += chunk; graph.patchOutput(node.id, { stdoutSoFar }); },
       onStderr: (chunk) => { stderrSoFar += chunk; graph.patchOutput(node.id, { stderrSoFar }); },
     });
@@ -545,6 +559,7 @@ function makeSendHandler(state: SchedulerState): KindHandler {
         fork: ctx.pendingFork,
         model: (ctx.model ?? undefined) as ClaudeModel | undefined,
         cwd: ctx.cwd,
+        branchId: ctx.branchId ?? undefined,
         io: state.io,
       });
       if (compactResp.isError) {
@@ -570,6 +585,7 @@ function makeSendHandler(state: SchedulerState): KindHandler {
             fork: applyFork,
             model: (ctx.model ?? undefined) as ClaudeModel | undefined,
             cwd: ctx.cwd,
+            branchId: ctx.branchId ?? undefined,
             timeoutMs: input.timeout,
             attachments: input.base64_attachments,
             nodeId: node.id,
@@ -582,6 +598,7 @@ function makeSendHandler(state: SchedulerState): KindHandler {
             fork: applyFork,
             model: (ctx.model ?? undefined) as ClaudeModel | undefined,
             cwd: ctx.cwd,
+            branchId: ctx.branchId ?? undefined,
             timeoutMs: input.timeout,
             attachments: input.base64_attachments,
             nodeId: node.id,
