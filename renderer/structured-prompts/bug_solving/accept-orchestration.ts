@@ -39,7 +39,29 @@
  *       (forever). TTY is no longer consulted.
  */
 import type { RatingSplit } from "./rating-gate.js";
-import type { MergeCluster, MergeReport } from "./merge-phase.js";
+
+// ---------------------------------------------------------------------------
+// Legacy accept-phase types (self-contained). This is the OLD post-run,
+// scaffolding-driven accept path; the live flow now folds GREEN clusters INSIDE
+// the graph via llm-merge.ts (finalMergePhase). These types are kept only so the
+// legacy `runAcceptPhase` orchestration + its unit test still compile — they are
+// intentionally decoupled from the new llm-merge MergeReport shape.
+// ---------------------------------------------------------------------------
+
+/** A GREEN cluster to fold (legacy shape: identified by its worktree `dir`). */
+export interface MergeCluster {
+  task: string;
+  dir: string;
+  slides: string[];
+}
+
+/** The legacy accept-engine report shape (opaque to this orchestration). */
+export interface MergeReport {
+  accepted: string[];
+  rejected: Array<{ task: string; reason: string; demotedSlides: string[] }>;
+  conflicts: Array<{ task: string; files: string[]; resolved: boolean }>;
+  perSlide: Record<string, unknown>;
+}
 
 /** A successfully-solved task the accept phase gates on. Minimal projection of
  *  main.ts's `TaskResult` + its `Task` — just what the accept phase needs. */

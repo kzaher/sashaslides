@@ -27,7 +27,7 @@ import {
   type AcceptDeps,
 } from "./accept-orchestration.js";
 import type { RatingSplit } from "./rating-gate.js";
-import type { MergeCluster, MergeReport } from "./merge-phase.js";
+import type { MergeCluster, MergeReport } from "./accept-orchestration.js";
 
 // ---------------------------------------------------------------------------
 // tiny harness

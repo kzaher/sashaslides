@@ -11,10 +11,12 @@
  *
  * The rating gate + accept/merge now live INSIDE the graph (see main.ts):
  *   - each SOLVED fork boots its OWN rating UI and BLOCKS on the human rating
- *     (runTask steps A1–A3), then writes a rating-outcome.json marker;
+ *     (runTask steps A1–A3), then writes a rating-outcome.json marker to its
+ *     shared dir (outside the overlay, so the final phase can read it);
  *   - AFTER the parallelFork barrier a FINAL merge phase (finalMergePhase) folds
- *     every GREEN cluster together with the LLM conflict resolver + whole-deck
- *     regression recording (mergePhase) and promotes the clean result.
+ *     every GREEN cluster together with the SIMPLE LLM MERGE (llm-merge.ts): base
+ *     + each fork's converter version → one LLM-merged file, retest, promote onto
+ *     the working tree.
  * The scaffolding therefore no longer boots UIs or runs a post-run accept — it
  * just prints the results, the monitor URL, and any failures.
  *
@@ -26,7 +28,6 @@
  *       default (30 min) when NOT a TTY, after which still-unrated slides
  *       are treated as NOT-GREEN so an unattended run can't hang.
  *       An explicit value applies regardless of TTY; 0 = forever always.
- *   BUG_SOLVING_MERGE_TARGET, BUG_SOLVING_KEEP_STAGING  (see deriveMergeArgs).
  *
  * ## Filling in task data (required before build)
  *   The `CLUSTERS` import below points at `./clusters.ts`, which DOES NOT

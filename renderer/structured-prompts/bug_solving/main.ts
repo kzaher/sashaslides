@@ -77,10 +77,9 @@ import {
 } from "../../../structured-prompting/src/index.js";
 import type { Result } from "../../../structured-prompting/src/index.js";
 import { writeFileSync, readFileSync, readdirSync, copyFileSync, mkdirSync, existsSync } from "fs";
-import { execSync } from "child_process";
 import { join } from "path";
 import { fixtureSetSlug } from "./workspace-setup.js";
-import { realMergeOps, mergePhase, type MergeCluster, type MergePhaseArgs, type MergeReport } from "./merge-phase.js";
+import { llmMerge, ledgerDemote, realLlmMergeOps, type GreenCluster, type MergeReport } from "./llm-merge.js";
 import { acceptDisabled } from "./accept-orchestration.js";
 
 /**
@@ -184,6 +183,11 @@ export interface Task {
   task_id: string;                   // stable slug, e.g. "clipping-curves"
   branch_id: string;                 // overlay branch id (bs-<task>-<ts>); the fork runs INSIDE it
   workspace_dir: string;             // repo root (the branch's merged view resolves repo-relative paths from here)
+  shared_dir: string;                // ABSOLUTE, OUTSIDE the overlay (/overlays/shared/<run-id>/<task_id>).
+                                     //   A command run inside the fork's branch can write here and the
+                                     //   result is visible from OUTSIDE the overlay — used for the
+                                     //   rating-outcome marker so the final merge (which runs outside any
+                                     //   branch) can read it. See ratingMarkerPath.
   scratch_dir: string;               // REPO-RELATIVE scratch, created INSIDE the branch (binary pptx/diff artifacts)
   analysis_dir: string;              // REPO-RELATIVE model docs dir, created INSIDE the branch (analysis.md / fix-summary.md)
   fixtures_dir: string;              // repo-relative fixtures dir for this cluster's slides (e.g. fixtures-basic)
@@ -292,8 +296,8 @@ export interface TaskResult {
   bad_slides: string[];              // slides rated bad (or, on a timeout, unrated)
 }
 
-/** The outcome marker each fork writes at `<scratch>/rating-outcome.json` once
- *  its rating gate resolves (or is skipped under NO_ACCEPT). The FINAL merge
+/** The outcome marker each fork writes at `<shared_dir>/rating-outcome.json`
+ *  once its rating gate resolves (or is skipped under NO_ACCEPT). The FINAL merge
  *  phase reads these from disk to decide which clusters are GREEN. Shape must
  *  match scripts/wait-for-ratings.ts's writer. */
 export interface RatingOutcomeMarker {
@@ -306,9 +310,14 @@ export interface RatingOutcomeMarker {
   slides: string[];
 }
 
-/** Where a task's rating-outcome marker lives. */
+/** Where a task's rating-outcome marker lives. This is an ABSOLUTE path on the
+ *  shared `/overlays/shared/<run-id>/<task_id>` volume — OUTSIDE any fork's
+ *  overlay — so a marker written by wait-for-ratings.ts running INSIDE the fork's
+ *  branch is visible to the final merge phase, which runs OUTSIDE the branch.
+ *  (Writing it under the repo-relative scratch would land it in the branch's
+ *  private upper layer, invisible from outside — the task-8 cross-boundary gap.) */
 export const ratingMarkerPath = (task: Task): string =>
-  join(task.scratch_dir, "rating-outcome.json");
+  join(task.shared_dir, "rating-outcome.json");
 
 /** Read + validate a task's rating-outcome marker. Returns null if the marker is
  *  absent (fork failed / never rated) or malformed — the FINAL merge phase and
@@ -429,113 +438,41 @@ function analysisPromptFor(task: Task): string {
   ].join("\n");
 }
 
-// ---------- Merge-phase args (shared with the scaffolding's accept phase) ----------
-//
-// The accept/merge itself no longer runs INSIDE this solve graph — it runs
-// POST-RUN in main-scaffolding.ts, gated by the per-thread human rating (see
-// accept-orchestration.ts). `deriveMergeArgs` is EXPORTED so the scaffolding can
-// build the same staging worktree + realMergeOps it always did, and hand the
-// GREEN (all-rated-good) clusters to `mergePhase` on the SAME engine/monitor.
+// ---------- Fixtures dir (shared across a run) ----------
 
-/**
- * Run a shell command in `cwd`, returning stdout (throws on non-zero). Passed
- * into `realMergeOps` so the production merge ops drive git + record/diff
- * scripts.
- */
-function mergeSh(cmd: string, cwd: string): string {
-  return execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-}
-
-/**
- * Derive the merge-phase args from THIS run's tasks. Every input the merge
- * needs is already on the `Task[]`:
- *   - each cluster = one Task → its `workspace_dir` (the modified side the
- *     patcher composes) + its intended slides (`slides[].slide_id`).
- *   - `base` = the run's fork ref: worktrees fork from HEAD at launch, so
- *     `git rev-parse HEAD` in the repo IS that fork ref (the scaffolding runs
- *     this before any promote commit touches HEAD).
- *   - `target` = the branch the accepted state accumulates onto. Default the
- *     current branch; overridable via `BUG_SOLVING_MERGE_TARGET`.
- *   - `fixturesDir` = the repo-absolute fixture deck (shared across tasks; the
- *     merge retest renders the WHOLE deck, so any task's dir works — they all
- *     point at the same fixture set for a run).
- *
- * A dedicated staging worktree (the accumulating accepted state) is created off
- * `base` so the merge does NOT disturb the scaffolding's tree; it's torn down
- * after the phase unless `BUG_SOLVING_KEEP_STAGING=1`.
- */
-export interface DerivedMergeArgs {
-  args: MergePhaseArgs;
-  stagingDir: string;
-  stagingBranch: string;
-  cleanup: () => void;
-}
-export function deriveMergeArgs(repo: string, tasks: Task[]): DerivedMergeArgs {
-  const clusters: MergeCluster[] = tasks.map((t) => ({
-    task: t.task_id,
-    dir: t.workspace_dir,
-    slides: t.slides.map((s) => s.slide_id),
-  }));
-
-  // base = the run's fork ref (HEAD at launch — worktrees forked from it).
-  const base = mergeSh("git rev-parse HEAD", repo).trim();
-  // target = the branch to accumulate onto; default = current branch.
-  const target = process.env.BUG_SOLVING_MERGE_TARGET
-    ?? mergeSh("git rev-parse --abbrev-ref HEAD", repo).trim();
-
-  // Fixtures: every task in a run shares one fixture set; use task[0]'s
-  // (repo-absolute). fixtures_dir is repo-relative on the Task.
-  const fixturesDir = tasks.length
+/** The repo-absolute fixture deck for the merge retest. Every task in a run
+ *  shares one fixture set, so task[0]'s dir is authoritative. */
+function runFixturesDir(repo: string, tasks: Task[]): string {
+  return tasks.length
     ? join(tasks[0].workspace_dir, tasks[0].fixtures_dir)
     : join(repo, "renderer/html2slides/e2e/fixtures");
-
-  // Staging worktree = the accumulating accepted state, forked off <base>.
-  const ts = String(Date.now());
-  const stagingDir = join(repo, ".claude/worktrees", `merge-phase-${ts}`);
-  const stagingBranch = `sp/merge-phase-${ts}`;
-  mergeSh(`git worktree add -b ${stagingBranch} "${stagingDir}" ${base}`, repo);
-
-  const ops = realMergeOps({ repo, base, staging: stagingDir, fixturesDir, sh: mergeSh });
-
-  const cleanup = () => {
-    if (process.env.BUG_SOLVING_KEEP_STAGING === "1") return;
-    try { mergeSh(`git worktree remove --force "${stagingDir}"`, repo); } catch { /* */ }
-    try { mergeSh(`git branch -D ${stagingBranch}`, repo); } catch { /* */ }
-  };
-
-  return {
-    args: { clusters, base, staging: stagingDir, fixturesDir, ops },
-    stagingDir,
-    stagingBranch,
-    cleanup,
-  };
 }
 
 // ---------- Final merge phase (after the parallelFork barrier) ----------
 //
-// The rating gate now lives INSIDE each fork (runTask steps A1–A3): a solved
-// fork boots its own UI, blocks on the human rating, and writes a
-// rating-outcome.json marker. AFTER the whole parallelFork barrier, this final
-// phase reads those markers off disk, folds every GREEN cluster together WITH
-// the LLM conflict resolver (mergePhase), whose renderAndDiff step IS the
-// whole-deck regression recording, and promotes the clean result onto the
-// target. RED / unrated clusters are excluded and demoted for re-solve.
+// The rating gate lives INSIDE each fork (runTask steps A1–A3): a solved fork
+// boots its own UI, blocks on the human rating, and writes a rating-outcome.json
+// marker to its SHARED dir (outside the overlay). AFTER the whole parallelFork
+// barrier, this final phase reads those markers off disk and folds every GREEN
+// cluster together with the SIMPLE LLM MERGE (llm-merge.ts): base + each green
+// fork's version of a changed converter file → one LLM-merged file, retest, and
+// promote onto the working tree. RED / unrated clusters are excluded + demoted.
 
 /** A cluster classified by its on-disk rating marker. */
 export interface ClassifiedCluster {
-  cluster: MergeCluster;
+  cluster: GreenCluster;
   /** the outcome marker (null = missing/malformed = treated as not-green). */
   outcome: RatingOutcomeMarker | null;
   green: boolean;
 }
 
 /** Injected surface so the green-selection + demotion is unit-testable with no
- *  engine / git / filesystem. */
+ *  engine / workspace / filesystem. */
 export interface GreenSelectionDeps {
   /** read a task's rating-outcome marker (default: readRatingMarker). */
   readMarker: (task: Task) => RatingOutcomeMarker | null;
   /** demote an excluded cluster's slides back to the ledger for re-solve
-   *  (mirrors realMergeOps.demoteForResolve). Non-throwing + idempotent. */
+   *  (mirrors llm-merge's ledgerDemote). Non-throwing + idempotent. */
   demote: (slides: string[], cluster: string, reason: string) => void;
   /** per-line logging (default console.error). */
   log?: (msg: string) => void;
@@ -543,23 +480,23 @@ export interface GreenSelectionDeps {
 
 /**
  * PURE green-selection: classify every task by its rating marker, DEMOTE the
- * non-green ones (rated bad / unrated / no marker), and return the GREEN
- * MergeClusters to fold. No engine, no git — every side-effect is on `deps`, so
- * this unit-tests directly. Returns both the green clusters (for mergePhase) and
- * the full classification (for logging).
+ * non-green ones (rated bad / unrated / no marker), and return the GREEN clusters
+ * (each addressed by its fork's branch_id) to fold. No engine, no workspace —
+ * every side-effect is on `deps`, so this unit-tests directly. Returns both the
+ * green clusters (for llmMerge) and the full classification (for logging).
  */
 export function selectGreenClusters(
   tasks: Task[],
   deps: GreenSelectionDeps,
-): { green: MergeCluster[]; classified: ClassifiedCluster[] } {
+): { green: GreenCluster[]; classified: ClassifiedCluster[] } {
   const log = deps.log ?? ((m: string) => console.error(m));
   const classified: ClassifiedCluster[] = [];
-  const green: MergeCluster[] = [];
+  const green: GreenCluster[] = [];
 
   for (const t of tasks) {
-    const cluster: MergeCluster = {
+    const cluster: GreenCluster = {
       task: t.task_id,
-      dir: t.workspace_dir,
+      branch_id: t.branch_id,
       slides: t.slides.map((s) => s.slide_id),
     };
     const outcome = deps.readMarker(t);
@@ -589,23 +526,22 @@ export function selectGreenClusters(
  * Wire the FINAL merge phase onto a chain after the parallelFork barrier. Runs
  * as engine nodes (monitor-visible). Because the execution branch can't receive
  * the fork results, it reads each cluster's rating-outcome marker OFF DISK (the
- * forks wrote them before the barrier). GREEN clusters → mergePhase (LLM compose
- * + conflict resolution + whole-deck regression recording); non-green → demoted.
- * Under BUG_SOLVING_NO_ACCEPT the whole phase is a no-op (the forks skipped
- * their waits too). Returns a SessionWithResult<MergeReport|null> (the report is
- * logged; main() discards it and returns the TaskResults).
+ * forks wrote them to their shared dirs before the barrier). GREEN clusters →
+ * llmMerge (base + each fork's version → one LLM-merged file, retest, promote);
+ * non-green → demoted. Under BUG_SOLVING_NO_ACCEPT the whole phase is a no-op
+ * (the forks skipped their waits too). Returns a SessionWithResult<MergeReport|
+ * null> (the report is logged; main() discards it and returns the TaskResults).
  */
 export function finalMergePhase(
   branch: Session,
   opts: {
     repo: string;
     tasks: Task[];
-    /** injected for tests; production uses the real disk/git wiring. */
+    /** injected for tests; production uses the real disk wiring. */
     readMarker?: (task: Task) => RatingOutcomeMarker | null;
     demote?: (slides: string[], cluster: string, reason: string) => void;
-    /** run mergePhase over the green clusters. Default: real deriveMergeArgs +
-     *  mergePhase + cleanup. */
-    runMerge?: (s: Session, green: MergeCluster[]) => SessionWithResult<MergeReport>;
+    /** run llmMerge over the green clusters. Default: real llmMerge + realLlmMergeOps. */
+    runMerge?: (s: Session, green: GreenCluster[]) => SessionWithResult<MergeReport>;
     disabled?: (env: NodeJS.ProcessEnv) => boolean;
     log?: (msg: string) => void;
   },
@@ -616,7 +552,7 @@ export function finalMergePhase(
   // NO_ACCEPT → skip the merge entirely (forks already booted UIs + skipped
   // their waits). Return a null report on a real (no-op) node.
   if (disabled(process.env)) {
-    log("[merge-final] BUG_SOLVING_NO_ACCEPT=1 → skipping final merge; leaving fixes in their worktrees.");
+    log("[merge-final] BUG_SOLVING_NO_ACCEPT=1 → skipping final merge; leaving fixes in their forks.");
     return branch
       .executeShell(() => `echo merge-final:skipped-no-accept`)
       .combineWith<string, MergeReport | null>(
@@ -625,15 +561,10 @@ export function finalMergePhase(
       );
   }
 
-  // Real demote (ledger only — never touches staging), reusable for excluded
-  // clusters. realMergeOps.demoteForResolve is idempotent + non-throwing.
+  // Real demote (ledger only). ledgerDemote is idempotent + non-throwing.
   const demote = opts.demote ?? ((slides: string[], cluster: string, reason: string) => {
-    try {
-      const ops = realMergeOps({ repo: opts.repo, base: "HEAD", staging: opts.repo, fixturesDir: opts.repo, sh: mergeSh, historyDir: HISTORY_DIR });
-      ops.demoteForResolve(slides, cluster, reason);
-    } catch (e) {
-      log(`[merge-final] demote wiring failure for ${cluster} (non-fatal): ${(e as Error)?.message ?? String(e)}`);
-    }
+    try { ledgerDemote(HISTORY_DIR, slides, cluster, reason); }
+    catch (e) { log(`[merge-final] demote wiring failure for ${cluster} (non-fatal): ${(e as Error)?.message ?? String(e)}`); }
   });
   const readMarker = opts.readMarker ?? readRatingMarker;
 
@@ -649,23 +580,22 @@ export function finalMergePhase(
         return installNullReport(s);
       }
       log(`[merge-final] folding ${green.length} GREEN cluster(s): ${green.map((g) => g.task).join(", ")}`);
-      // Real merge: deriveMergeArgs (staging worktree + realMergeOps) + the
-      // mergePhase graph, torn down after. Injectable for tests.
-      if (opts.runMerge) return opts.runMerge(s, green).combineWith<string, MergeReport | null>(
+      // llmMerge: base + each fork's converter version → LLM-merged file(s),
+      // retest, promote onto the working tree. Injectable for tests.
+      const runMerge = opts.runMerge ?? ((s2: Session, g: GreenCluster[]) =>
+        llmMerge(s2, {
+          repo: opts.repo,
+          greenClusters: g,
+          ops: realLlmMergeOps({ repo: opts.repo, fixturesDir: runFixturesDir(opts.repo, opts.tasks), historyDir: HISTORY_DIR }),
+        }));
+      return runMerge(s, green).combineWith<string, MergeReport | null>(
         (b2) => b2.executeShell(() => `echo merge-final:done`),
         (rep) => logMergeReport(rep, log),
       );
-      const derived = deriveMergeArgs(opts.repo, opts.tasks);
-      log(`[merge-final] staging worktree: ${derived.stagingDir} (branch ${derived.stagingBranch})`);
-      return mergePhase(s, { ...derived.args, clusters: green })
-        .combineWith<string, MergeReport | null>(
-          (b2) => b2.executeShell(() => `echo merge-final:cleanup`),
-          (rep) => { try { derived.cleanup(); } catch { /* */ } return logMergeReport(rep, log); },
-        );
     });
 }
 
-/** Install a null MergeReport on a real graph node (mirrors merge-phase's
+/** Install a null MergeReport on a real graph node (mirrors llm-merge's
  *  installValue). */
 function installNullReport(session: Session): SessionWithResult<MergeReport | null> {
   return session
@@ -676,14 +606,14 @@ function installNullReport(session: Session): SessionWithResult<MergeReport | nu
     );
 }
 
-/** Log the final MergeReport (accepted / rejected+demoted / conflicts) and
- *  return it. */
+/** Log the final MergeReport (mode / accepted / rejected+demoted / merged files)
+ *  and return it. */
 function logMergeReport(report: MergeReport, log: (m: string) => void): MergeReport {
   log("\n================ FINAL MERGE PHASE COMPLETE ================");
+  log(`mode: ${report.mode}`);
   log(`accepted (${report.accepted.length}): ${report.accepted.join(", ") || "(none)"}`);
   log(`rejected (${report.rejected.length}): ${report.rejected.map((r) => `${r.task} (${r.reason})${r.demotedSlides.length ? ` → demoted: [${r.demotedSlides.join(",")}]` : ""}`).join("; ") || "(none)"}`);
-  log(`conflicts (${report.conflicts.length}): ${report.conflicts.map((c) => `${c.task}[${c.files.join(",")}]=${c.resolved ? "resolved" : "UNRESOLVED"}`).join("; ") || "(none)"}`);
-  log(`per-slide captures: ${Object.keys(report.perSlide).length} slide(s)`);
+  log(`merged files (${report.mergedFiles.length}): ${report.mergedFiles.join(", ") || "(none)"}`);
   log("==========================================================\n");
   return report;
 }
@@ -1086,12 +1016,15 @@ export function main(args: {
           // there from inside the branch lands in the branch upper (isolated).
           // The persistent ledger mirror is best-effort here; task 9's merge
           // rewrite reconciles ledgers from branch state.
+          // --marker is an ABSOLUTE /overlays/shared path OUTSIDE the overlay, so
+          // the marker this wait writes from INSIDE the branch is visible to the
+          // final merge phase running outside it (NOT prefixed with $ROOT).
           return (
             `${BRANCH_CD_RENDERER} && npx tsx ${wait} ` +
             `--results-dir "$ROOT/${task.scratch_dir}/thumbnails" ` +
             `--slides ${ids} ` +
             `--task-id ${task.task_id} ` +
-            `--marker "$ROOT/${ratingMarkerPath(task)}" ` +
+            `--marker "${ratingMarkerPath(task)}" ` +
             `--history-dir ${HISTORY_DIR}`
           );
         }),
