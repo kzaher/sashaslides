@@ -140,13 +140,23 @@ export function regressionGate(args: RegressionGateArgs): GateResult {
   }
 
   // NON-TARGETED slides: must be UNCHANGED vs the accepted base. The universe is
-  // the whole classified deck minus the green set.
+  // the whole classified deck minus the green set. CLASS-AWARE (mirrors the green
+  // comparison): a pixel-perfect slide must be pixel-identical vs the accepted
+  // base; an xml-stable (or unstable) slide need only match on xml + rendered-
+  // parts — its raw pixels wobble run-to-run, so a blind pixel compare would
+  // FALSELY ripple it (this is the xml serial-mutation case).
   for (const sid of classifiedSlides(args.stability)) {
     if (green.has(sid)) continue;
     const cur = args.record(sid);
     const ref = args.base(sid);
-    if (!unchanged(cur, ref)) {
-      violations.push({ slide: sid, kind: "ripple", detail: `non-targeted slide changed vs accepted base (ripple)` });
+    // Identical pixels ALWAYS prove "unchanged". A pixel-perfect slide requires
+    // that. An xml-stable slide, whose pixels wobble run-to-run, is ALSO unchanged
+    // if its xml + rendered-parts match (so wobble alone doesn't ripple it).
+    const same = pixelPerfect.has(sid)
+      ? pixelIdentical(cur, ref)
+      : (pixelIdentical(cur, ref) || xmlPlusRenderedParts(cur, ref));
+    if (!same) {
+      violations.push({ slide: sid, kind: "ripple", detail: `non-targeted ${pixelPerfect.has(sid) ? "pixel-perfect" : "xml-stable"} slide changed vs accepted base (ripple)` });
       changed.push(sid);
     }
   }
