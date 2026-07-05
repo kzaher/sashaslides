@@ -328,10 +328,12 @@ async function cliMain(): Promise<void> {
   console.error(`[stability] wrote ${args.out}`);
 }
 
-const isCliMain = (() => {
-  try { return !!process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]); }
-  catch { return false; }
-})();
+// BUNDLE-SAFE main guard: in the esbuild single-file bundle EVERY module's
+// import.meta.url equals the bundle's own URL, so comparing it to argv[1] fires
+// for every imported CLI-hybrid (this killed the solver at startup: the CLI saw
+// no --slides, printed usage, and process.exit'ed). Match the ENTRY FILENAME
+// instead — true only for `npx tsx .../stability.ts`, never inside a bundle.
+const isCliMain = !!process.argv[1] && /(^|\/)stability\.(ts|mts|js|mjs)$/.test(process.argv[1]);
 
 if (isCliMain) {
   cliMain().catch((e) => {

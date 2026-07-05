@@ -224,10 +224,10 @@ export async function resumeMerge(args: ResumeMergeArgs): Promise<ResumeMergeRes
 }
 
 // ── Standalone entry: `npx tsx resume-merge.ts [--engine=claude|codex]` ───────
-const isMain = (() => {
-  try { return process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]; }
-  catch { return false; }
-})();
+// BUNDLE-SAFE main guard (see stability.ts): compare the ENTRY FILENAME, not
+// import.meta.url, which equals the bundle URL for every module in the esbuild
+// bundle and made this CLI fire at import time inside main-scaffolding.
+const isMain = !!process.argv[1] && /(^|\/)resume-merge\.(ts|mts|js|mjs)$/.test(process.argv[1]);
 if (isMain) {
   const engineArg = process.argv.find((a) => a.startsWith("--engine="))?.slice("--engine=".length);
   const engine = (engineArg?.toLowerCase() === "codex") ? "codex" : "claude";
