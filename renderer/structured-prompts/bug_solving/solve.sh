@@ -6,11 +6,13 @@
 #   npm run renderer:solver:run -- --engine codex                pick the engine
 #   npm run renderer:solver:run -- --model haiku --engine codex  both
 #   npm run renderer:solver:run -- --attempts 3                  retries per cluster before giving up
+#   npm run renderer:solver:run -- --validation-model haiku      cheaper per-slide verdict model
 #   npm run renderer:solver:run -- --clean | --continue          discard / resume persisted overlays
 #   npm run renderer:solver:run -- --no-regen                   keep hand-edited clusters.ts
 #
 # --model    = opus | sonnet | haiku | fable   (unsupported → error)
 # --engine   = claude | codex                  (unsupported → error)
+# --validation-model = opus|sonnet|haiku|fable  (per-slide verdict; default = --model)
 # --attempts = positive integer                (overrides per-cluster retry_budget)
 #
 # Regenerates clusters.ts from the reconciled ledgers on every fresh run (skip
@@ -25,6 +27,7 @@ BUNDLE="structured-prompting/dist/main-scaffolding.mjs"   # build + launch the S
 
 # --- args: --model / --engine (validated), everything else passed through -------
 MODEL="${BUG_SOLVING_MODEL:-opus}"
+VALMODEL="${BUG_SOLVING_VALIDATION_MODEL:-}"   # per-slide verdict model; default = solver model
 ENGINE="${BUG_SOLVING_ENGINE:-claude}"
 ATTEMPTS="${BUG_SOLVING_RETRY_BUDGET:-5}"
 REGEN=1          # fresh solve regenerates clusters.ts from the reconciled ledgers
@@ -33,6 +36,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --model)     MODEL="${2:?--model needs a value}"; shift 2 ;;
     --model=*)    MODEL="${1#*=}"; shift ;;
+    --validation-model)  VALMODEL="${2:?--validation-model needs a value}"; shift 2 ;;
+    --validation-model=*) VALMODEL="${1#*=}"; shift ;;
     --engine)    ENGINE="${2:?--engine needs a value}"; shift 2 ;;
     --engine=*)   ENGINE="${1#*=}"; shift ;;
     --attempts)  ATTEMPTS="${2:?--attempts needs a value}"; shift 2 ;;
@@ -42,10 +47,13 @@ while [ $# -gt 0 ]; do
     *) PASS+=("$1"); shift ;;
   esac
 done
-case "$MODEL" in
-  opus|sonnet|haiku|fable) ;;
-  *) echo "❌ unsupported --model '$MODEL' — must be one of: opus | sonnet | haiku | fable" >&2; exit 2 ;;
-esac
+[ -n "$VALMODEL" ] || VALMODEL="$MODEL"       # default: verdict uses the solver model
+for m in "$MODEL:--model" "$VALMODEL:--validation-model"; do
+  case "${m%%:*}" in
+    opus|sonnet|haiku|fable) ;;
+    *) echo "❌ unsupported ${m#*:} '${m%%:*}' — must be one of: opus | sonnet | haiku | fable" >&2; exit 2 ;;
+  esac
+done
 case "$ENGINE" in
   claude|codex) ;;
   *) echo "❌ unsupported --engine '$ENGINE' — must be one of: claude | codex" >&2; exit 2 ;;
@@ -54,7 +62,7 @@ case "$ATTEMPTS" in
   ''|*[!0-9]*) echo "❌ --attempts '$ATTEMPTS' must be a positive integer" >&2; exit 2 ;;
 esac
 [ "$ATTEMPTS" -ge 1 ] || { echo "❌ --attempts must be >= 1 (got $ATTEMPTS)" >&2; exit 2; }
-echo "▶ model=$MODEL  engine=$ENGINE  attempts=$ATTEMPTS  extra=[${PASS[*]:-}]"
+echo "▶ model=$MODEL  validation-model=$VALMODEL  engine=$ENGINE  attempts=$ATTEMPTS  extra=[${PASS[*]:-}]"
 
 # 0. Regenerate clusters.ts from the reconciled, checked ledgers (one cluster per
 #    bad slide). Skipped on --continue (resume must solve the SAME clusters) and
@@ -89,6 +97,7 @@ grep -oE 'slide-[0-9]+-[a-z-]+' "$BUNDLE" | sort -u | sed 's/^/    /' || true
 #    fixture/SxS/ratings dirs default to the complex set (override by exporting).
 echo "▶ launching solver (Ctrl-C to stop) …"
 BUG_SOLVING_MODEL="$MODEL" \
+ BUG_SOLVING_VALIDATION_MODEL="$VALMODEL" \
 BUG_SOLVING_RETRY_BUDGET="$ATTEMPTS" \
 BUG_SOLVING_SXS_DIR="${BUG_SOLVING_SXS_DIR:-/tmp/sxs-complex}" \
 BUG_SOLVING_RATINGS_JSON="${BUG_SOLVING_RATINGS_JSON:-/tmp/sxs-complex/ratings.json}" \
