@@ -68,6 +68,15 @@ import {
   cleanupCowWorkspace,
   type CowWorkspace,
 } from "../../../structured-prompting/src/workspace/cow-workspace.js";
+import { makeRegressionRetest } from "./regression-gate.js";
+import {
+  type RenderRecord,
+  type StabilityClassification,
+  STABILITY_JSON,
+  loadStability,
+  extractSlideXml,
+  extractRenderedPartsHash,
+} from "./stability.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -456,21 +465,49 @@ export interface RealLlmMergeOpsDeps {
   /** persistent per-slide ledger dir the NEXT clustering round reads. Default
    *  `<repo>/.bug-solving-history`. */
   historyDir?: string;
+  /** stability.json the 3× classifier wrote at solve start. Default STABILITY_JSON
+   *  (`/overlays/shared/stability.json`). Missing → every slide treated xml-stable. */
+  stabilityPath?: string;
+  /** SxS results dir whose `thumbs/`|`slides/` hold the user-approved (LGTM'd)
+   *  renders. When a green slide's LGTM render isn't on disk, the gate falls back
+   *  to that slide's PRE-MERGE (base) render. Default: BUG_SOLVING_SXS_DIR env. */
+  sxsDir?: string;
+  /** render timeout per whole-deck record (ms). Default 20 min. */
+  timeoutMs?: number;
+}
+
+const REC_REL = "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts";
+
+/** Read a single slide's render record out of a record-rendering `--out` dir:
+ *  Google thumbnail (pixel), slide XML, and embedded rendered-parts hash. */
+function recordFromDir(dir: string, slideId: string): RenderRecord {
+  const png = join(dir, "thumbs", `${slideId}.png`);
+  const pptx = join(dir, "pptx", `${slideId}.pptx`);
+  const rec: RenderRecord = {};
+  if (existsSync(png)) rec.pngPath = png;
+  const xml = extractSlideXml(pptx);
+  if (xml != null) rec.xml = xml;
+  const parts = extractRenderedPartsHash(pptx);
+  if (parts != null) rec.renderedPartsHash = parts;
+  return rec;
 }
 
 /**
- * Production `MergeOps`. `retest` renders the whole deck at the workspace state
- * (inside its overlay, so it sees the merged files) and at the base tree, then
- * structural-diffs — returning the changed slide ids. `promote` copies the merged
- * files onto the base. `demote` writes the candidates/ratings ledger. (Task 10
- * refines the retest's stability/pixel gating; this is the straightforward
- * whole-deck structural diff.)
+ * Production `MergeOps`. `retest` is the DUAL-CLASS regression gate
+ * (regression-gate.ts): it renders the whole deck in the merge workspace and
+ * compares GREEN slides against their LGTM'd render (pixel-identical for the
+ * pixel-perfect stability class, xml+rendered-parts otherwise) and NON-TARGETED
+ * slides against the accepted base (any change = ripple). It carries the accepted
+ * base across sequential folds so a previously-merged fork's change isn't
+ * re-flagged as the next fork's ripple. `promote` copies the merged files onto
+ * the base; `demote` writes the candidates/ratings ledger.
  */
 export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
   const repo = deps.repo;
   const fixturesDir = deps.fixturesDir ?? join(repo, "renderer/html2slides/e2e/fixtures");
-  const REC = "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts";
-  const DIFF = "renderer/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts";
+  const stabilityPath = deps.stabilityPath ?? STABILITY_JSON;
+  const sxsDir = deps.sxsDir ?? process.env.BUG_SOLVING_SXS_DIR;
+  const timeoutMs = deps.timeoutMs ?? 20 * 60 * 1000;
 
   const deckIds = (): string[] =>
     readdirSync(fixturesDir)
@@ -478,38 +515,76 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
       .map((f) => f.replace(/\.html$/, ""))
       .sort();
 
-  // Base render is stable across a merge phase (base tree does not change), so
-  // render it once and reuse.
+  const scratch = join("/tmp", `llm-merge-gate-${process.pid}`);
+  const csv = (): string => deckIds().join(",");
+
+  // Base render (the pre-merge tree) is stable across a merge phase → render once.
   let baselineDir: string | null = null;
+  const baseRecord = (slideId: string): RenderRecord => {
+    if (baselineDir === null) {
+      baselineDir = join(scratch, "baseline");
+      mkdirSync(baselineDir, { recursive: true });
+      execRepo(
+        `cd "${join(repo, "renderer")}" && RECORD_CONCURRENCY=1 npx tsx "${join(repo, REC_REL)}" ` +
+          `--mode full --fixtures "${fixturesDir}" --slides "${csv()}" --title "llm-merge-base-${Date.now()}" --out "${baselineDir}"`,
+        timeoutMs,
+      );
+    }
+    return recordFromDir(baselineDir, slideId);
+  };
+
+  // LGTM render: the user-approved thumbnail from the SxS dir if present; else
+  // the pre-merge base render of that slide.
+  const lgtmRecord = (slideId: string): RenderRecord => {
+    if (sxsDir) {
+      for (const sub of ["thumbs", "slides", "originals"]) {
+        const png = join(sxsDir, sub, `${slideId}.png`);
+        if (existsSync(png)) {
+          const rec: RenderRecord = { pngPath: png };
+          // pair with the base render's xml/parts so xml-stable class can compare.
+          const b = baseRecord(slideId);
+          if (b.xml != null) rec.xml = b.xml;
+          if (b.renderedPartsHash != null) rec.renderedPartsHash = b.renderedPartsHash;
+          return rec;
+        }
+      }
+    }
+    return baseRecord(slideId);
+  };
+
+  // Render the merged deck INSIDE the workspace overlay, once per retest call.
+  let mergeSeq = 0;
+  const renderMergeDeck = (ws: CowWorkspace): ((slideId: string) => RenderRecord) => {
+    const postOut = join(scratch, `post-${ws.id}-${mergeSeq++}`);
+    mkdirSync(postOut, { recursive: true });
+    ws.runShell(
+      `cd renderer && RECORD_CONCURRENCY=1 npx tsx "${REC_REL}" ` +
+        `--mode full --fixtures "${fixturesDir}" --slides "${csv()}" --title "llm-merge-post-${Date.now()}" --out "$PWD/../${postOut}"`,
+    );
+    return (slideId: string) => recordFromDir(postOut, slideId);
+  };
+
+  const loadStabilityOrFallback = (): StabilityClassification => {
+    const s = loadStability(stabilityPath);
+    if (s) return s;
+    // Degrade: no stability.json → treat the whole deck as xml-stable (the weaker
+    // gate) so a missing classifier never over-fails a merge.
+    const ids = deckIds();
+    return { pixelPerfect: [], xmlStable: ids, unstable: [], warning: `[stability] no ${stabilityPath} — defaulting all ${ids.length} slide(s) to xml-stable`, attempts: 0 };
+  };
+
+  const retest = makeRegressionRetest({
+    loadStability: loadStabilityOrFallback,
+    renderMergeDeck,
+    baseRecord,
+    lgtmRecord,
+    log: (m) => console.error(m),
+  });
 
   return {
-    retest(ws, _intendedSlides) {
-      const ids = deckIds();
-      if (ids.length === 0) return { changed: [] };
-      const csv = ids.join(",");
-      const scratch = `/tmp/llm-merge-${ws.id}`;
-      const postOut = join(scratch, "post");
-
-      if (baselineDir === null) {
-        baselineDir = join(scratch, "baseline");
-        mkdirSync(baselineDir, { recursive: true });
-        execRepo(`cd "${join(repo, "renderer")}" && RECORD_CONCURRENCY=1 npx tsx "${join(repo, REC)}" --mode pptx --fixtures "${fixturesDir}" --slides "${csv}" --out "${baselineDir}"`);
-      }
-      // Render the merged state INSIDE the workspace overlay.
-      mkdirSync(postOut, { recursive: true });
-      ws.runShell(`cd renderer && RECORD_CONCURRENCY=1 npx tsx "${REC}" --mode pptx --fixtures "${fixturesDir}" --slides "${csv}" --out "${postOut}"`);
-
-      const diffOut = join(scratch, "diff");
-      execRepo(`npx tsx "${join(repo, DIFF)}" --before "${join(baselineDir, "pptx")}" --after "${join(postOut, "pptx")}" --out "${diffOut}"`);
-      const changed: string[] = [];
-      try {
-        for (const f of readdirSync(diffOut)) {
-          if (!f.endsWith(".diff")) continue;
-          const txt = readFileSync(join(diffOut, f), "utf8");
-          if (!/no structural differences/i.test(txt)) changed.push(f.replace(/\.diff$/, ""));
-        }
-      } catch { /* no diffs dir → nothing changed */ }
-      return { changed: changed.sort() };
+    retest(ws, intendedSlides) {
+      if (deckIds().length === 0) return { changed: [] };
+      return retest(ws, intendedSlides);
     },
     promote(ws, files) {
       ws.promote(files);
@@ -520,8 +595,8 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
   };
 }
 
-function execRepo(cmd: string): void {
-  execSync(cmd, { stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 });
+function execRepo(cmd: string, timeoutMs = 20 * 60 * 1000): void {
+  execSync(cmd, { stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs });
 }
 
 // ---------------------------------------------------------------------------
