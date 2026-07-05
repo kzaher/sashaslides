@@ -201,6 +201,42 @@ function pureTests(): void {
     const rControl = retestFresh(dummyWs, ["slide_02"]);
     ok("(6c) control: without A's clean fold, slide_01 DOES ripple for B", rControl.changed.includes("slide_01"), JSON.stringify(rControl));
   }
+
+  // (7) SAME serial target-mutation but for the XML-STABLE class — the base-advance
+  //     must compare fork B's non-targeted slide_01 against A's POST-FOLD *xml*
+  //     (not the original), and pixel wobble must NOT ripple it.
+  {
+    const stability = stab({ xmlStable: ["slide_01", "slide_02"] });
+    let mergeState: Record<string, RenderRecord> = {};
+    const mk = (xml: string, parts: string, px: string): RenderRecord => ({ xmlHash: xml, renderedPartsHash: parts, pixelHash: px });
+    const retest = makeRegressionRetest({
+      loadStability: () => stability,
+      renderMergeDeck: () => (sid) => mergeState[sid] ?? {},
+      baseRecord: asFn({ slide_01: mk("PRE_1", "PRE_1", "wobble0"), slide_02: mk("PRE_2", "PRE_2", "wobble0") }),
+      lgtmRecord: asFn({ slide_01: mk("A_XML", "A_PARTS", "wobbleA"), slide_02: mk("B_XML", "B_PARTS", "wobbleB") }),
+    });
+    const dummyWs = {} as CowWorkspace;
+
+    // fork A folds: slide_01 xml→A_XML (matches its LGTM); pixel wobbles (irrelevant for xml-stable).
+    mergeState = { slide_01: mk("A_XML", "A_PARTS", "wobble1"), slide_02: mk("PRE_2", "PRE_2", "wobble1") };
+    const r1 = retest(dummyWs, ["slide_01"]);
+    ok("(7) xml-stable fork A clean retest → no ripple", r1.changed.length === 0, JSON.stringify(r1));
+
+    // fork B folds: slide_01 keeps A_XML (accepted) but pixels wobble AGAIN; slide_02→B_XML.
+    mergeState = { slide_01: mk("A_XML", "A_PARTS", "wobble2"), slide_02: mk("B_XML", "B_PARTS", "wobble2") };
+    const r2 = retest(dummyWs, ["slide_02"]);
+    ok("(7b) xml-stable fork B → A's accepted XML NOT re-flagged (base advanced) + pixel wobble ignored", r2.changed.length === 0, JSON.stringify(r2));
+
+    // Control: without A's clean fold, slide_01's xml (A_XML) differs from PRE_1 → ripples for B.
+    const retestFresh = makeRegressionRetest({
+      loadStability: () => stability,
+      renderMergeDeck: () => (sid) => mergeState[sid] ?? {},
+      baseRecord: asFn({ slide_01: mk("PRE_1", "PRE_1", "wobble0"), slide_02: mk("PRE_2", "PRE_2", "wobble0") }),
+      lgtmRecord: asFn({ slide_01: mk("A_XML", "A_PARTS", "wobbleA"), slide_02: mk("B_XML", "B_PARTS", "wobbleB") }),
+    });
+    const rControl = retestFresh(dummyWs, ["slide_02"]);
+    ok("(7c) control: without A's fold, slide_01 XML change DOES ripple for B", rControl.changed.includes("slide_01"), JSON.stringify(rControl));
+  }
 }
 
 // ---------------------------------------------------------------------------
