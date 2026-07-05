@@ -200,36 +200,42 @@ export function cleanupAllCowWorkspaces(upperRoot?: string): void {
   }
 }
 
-let registered = false;
 /**
- * Idempotent. Runs a STARTUP SWEEP (reaps workspaces leaked by a prior
- * crashed/-9'd run) and wires cleanup into every trappable death path
- * (exit / SIGINT / SIGTERM / SIGHUP / uncaughtException). SIGKILL is
- * untrappable — covered by the next run's startup sweep.
- *
- * Call ONCE, early, before any workspace is created.
+ * Reap exactly ONE workspace by id (unmount any leaked merged mount + delete its
+ * on-disk upper/work/merged). Best-effort, synchronous, never-throws. Wraps
+ * `workspace.sh rm <id>`. Used by the cleanup-ON-SUCCESS path (a green cluster's
+ * fix has been merged + promoted onto the real tree, so its solve overlay is no
+ * longer needed). When `upperRoot` is omitted, the shell falls back to its env
+ * default (COW_WORKSPACE_ROOT / OVERLAY_BRANCH_ROOT / `/overlays/branches`).
  */
-export function registerCowCleanup(upperRoot?: string): void {
-  if (registered) return;
-  registered = true;
-
-  const reap = () => cleanupAllCowWorkspaces(upperRoot);
-
-  // 1) STARTUP SWEEP — reap workspaces leaked by a previous crashed/-9'd run.
-  reap();
-
-  // 2) DEATH HANDLERS. 'exit' must be synchronous — reap is (execSync).
-  process.on("exit", reap);
-  const sigExit: Record<string, number> = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
-  for (const sig of Object.keys(sigExit)) {
-    process.on(sig as NodeJS.Signals, () => {
-      reap();
-      process.exit(sigExit[sig]);
-    });
+export function cleanupCowWorkspace(id: string, upperRoot?: string): void {
+  try {
+    const env = upperRoot
+      ? { ...process.env, COW_WORKSPACE_ROOT: resolve(upperRoot) }
+      : process.env;
+    execSync(`bash "${WORKSPACE_SCRIPT}" rm ${id}`, { stdio: "ignore", timeout: 30_000, env });
+  } catch {
+    /* best-effort */
   }
-  process.on("uncaughtException", (err) => {
-    console.error("[cow-workspace] uncaughtException — reaping workspaces before exit:", err);
-    reap();
-    process.exit(1);
-  });
+}
+
+/**
+ * ⚠ PERSISTENCE CONTRACT — this is now a DELIBERATE NO-OP.
+ *
+ * COW workspaces used to auto-reap on a startup sweep + on every trappable death
+ * path (exit/SIGINT/SIGTERM/SIGHUP/uncaughtException). That was REMOVED: overlays
+ * must SURVIVE a crash/exit so in-progress solve work isn't destroyed and can be
+ * resumed (bug_solving's --continue resume-merge). Nothing reaps overlays on
+ * death anymore. Removal is now EXPLICIT + INTENTIONAL only:
+ *   - success: `cleanupCowWorkspace(id)` reaps one merged+promoted cluster,
+ *   - `--clean`: `cleanupAllCowWorkspaces()` discards ALL prior state,
+ *   - manual:   `workspace.sh cleanup-all`.
+ *
+ * Kept as an exported no-op (rather than deleted) so existing callers/tests that
+ * reference it still compile; it intentionally installs NO handlers and runs NO
+ * sweep.
+ */
+export function registerCowCleanup(_upperRoot?: string): void {
+  /* intentionally empty — see the PERSISTENCE CONTRACT above. */
+  void _upperRoot;
 }

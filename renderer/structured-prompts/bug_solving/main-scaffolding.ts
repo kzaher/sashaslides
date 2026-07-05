@@ -62,10 +62,19 @@ import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 const execFileAsync = promisify(execFile);
+import { rmSync } from "fs";
 import { ClaudeEngine, CodexEngine, Session, WORKSPACE_SCRIPT } from "../../../structured-prompting/src/index.js";
 import { buildTasks } from "./workspace-setup.js";
 import { main, type TaskResult } from "./main.js";
-import { registerOverlayCleanup } from "./overlay-cleanup.js";
+import { cleanupAllOverlays } from "./overlay-cleanup.js";
+import {
+  detectPriorState,
+  decideStartup,
+  parseStartupFlags,
+  DEFAULT_BRANCHES_ROOT,
+  DEFAULT_SHARED_ROOT,
+} from "./startup-detection.js";
+import { resumeMerge } from "./resume-merge.js";
 
 // ❌ DO NOT REMOVE this import or replace with a dummy. Create the sibling
 // `./clusters.ts` file with your actual cluster definitions. esbuild will
@@ -159,10 +168,11 @@ async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<v
 }
 
 async function run(): Promise<void> {
-  // Register overlay-branch cleanup FIRST — before any branch is created. This
-  // sweeps branches leaked by a prior SIGKILL'd run (startup) and reaps all
-  // overlays on every trappable death path (exit/SIGINT/SIGTERM/SIGHUP/uncaught).
-  registerOverlayCleanup();
+  // NOTE: overlays now PERSIST across crashes/exit — there is NO auto-reap
+  // startup sweep and NO death handlers (see cow-workspace.ts's PERSISTENCE
+  // CONTRACT). Removal is EXPLICIT only: on a successful merge (per-cluster, in
+  // llm-merge.ts), or via --clean/--continue below. So instead of registering a
+  // reaper here, we DETECT prior overlay state and refuse to clobber it.
 
   // `--engine=codex|claude` (or env BUG_SOLVING_ENGINE) selects the model
   // backend. Both are the same `Engine` composed with a different
@@ -185,6 +195,37 @@ async function run(): Promise<void> {
   const monitorPort = isCodex ? 4712 : 4711;
   const portBase = isCodex ? 4760 : 4720;
   console.error(`[scaffold] engine: ${engineKind} (monitor :${monitorPort}, task ports ${portBase}-${portBase + 39})`);
+
+  // JAIL ON for solve + merge. Set BEFORE any workspace.sh run (recordBeforePptx,
+  // the engine's per-fork solve commands, and the final merge). Every `run` then
+  // sandboxes the worker CLI + retest: base repo + the worker's state dir(s)
+  // overlay copy-on-write, /tmp is a disposable tmpfs, everything else read-only.
+  // Include BOTH claude + codex state dirs (colon-sep; a missing one is harmless).
+  process.env.COW_WORKSPACE_JAIL = "1";
+  process.env.COW_WORKSPACE_OVERLAY_EXTRA =
+    process.env.COW_WORKSPACE_OVERLAY_EXTRA ?? "/home/node/.claude:/home/node/.codex";
+  console.error(`[scaffold] jail ON (COW_WORKSPACE_JAIL=1, extra=${process.env.COW_WORKSPACE_OVERLAY_EXTRA})`);
+
+  // STARTUP DETECTION — overlays persist, so a fresh run must not clobber prior
+  // state. --clean discards it; --continue resumes merging it; neither + state
+  // present → hard error naming both options.
+  const flags = parseStartupFlags(process.argv, process.env);
+  const prior = detectPriorState(DEFAULT_BRANCHES_ROOT, DEFAULT_SHARED_ROOT);
+  const decision = decideStartup(prior, flags);
+  if (decision.action === "error") {
+    console.error(`\n❌ ${decision.message}`);
+    process.exit(2);
+  } else if (decision.action === "resume") {
+    console.error("[scaffold] --continue → RESUME-MERGE on persisted overlays (skipping solve).");
+    await resumeMerge({ repo: REPO_ROOT, engine: engineKind });
+    console.error("[scaffold] resume-merge done.");
+    return;
+  } else if (decision.action === "clean") {
+    console.error("[scaffold] --clean → discarding ALL prior overlay state, then FRESH solve.");
+    cleanupAllOverlays();
+    try { rmSync(DEFAULT_SHARED_ROOT, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+  // action === "fresh" (or post-clean) → continue below.
 
   // Fixtures / SxS / ratings dirs are overridable via env so a run can target
   // a different fixture set (e.g. fixtures-basic) without code edits. Each

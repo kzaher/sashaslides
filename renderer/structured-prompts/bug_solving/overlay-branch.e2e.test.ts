@@ -92,27 +92,35 @@ function main() {
     ok("(6) cleanup-all reaps all branches", Number(before) > 0 && after === "0", `before=${before} after=${after}`);
     ok("(6b) no overlay mounts leaked into host ns", mounts === "0", `mounts=${mounts}`);
 
-    // 7) death-handler + startup-sweep via the real overlay-cleanup module.
-    //    (a) startup sweep wipes a stale branch; (b) 'exit' handler reaps on normal exit.
-    mkdirSync(`${ROOT}/stale_kill9/upper`, { recursive: true });
+    // 7) PERSISTENCE CONTRACT (auto-reap REMOVED): overlays must SURVIVE a
+    //    crash/exit so work isn't lost + can be resumed.
+    //    (a) registerOverlayCleanup is a NO-OP → a stale branch is NOT swept at
+    //        startup; (b) a branch created in a process still EXISTS after that
+    //        process exits (no 'exit' death-handler reaps it).
+    mkdirSync(`${ROOT}/stale_persist/upper`, { recursive: true });
     const driver = "/tmp/ov-e2e-driver.mjs";
     writeFileSync(driver, `
       process.env.OVERLAY_BRANCH_ROOT = ${JSON.stringify(ROOT)};
       const { registerOverlayCleanup } = await import(${JSON.stringify(resolve(REPO, "renderer/structured-prompts/bug_solving/overlay-cleanup.ts"))});
       const { execSync } = await import("child_process");
-      registerOverlayCleanup();                       // startup sweep runs here
+      registerOverlayCleanup();                       // NO-OP now: no startup sweep
       const afterSweep = execSync("ls ${ROOT} 2>/dev/null | wc -l").toString().trim();
       execSync('bash ${SH} run exitbr bash -c true'); // create a branch
       const created = execSync("ls ${ROOT} 2>/dev/null | wc -l").toString().trim();
       console.log("SWEEP=" + afterSweep + " CREATED=" + created);
-      process.exit(0);                                // triggers 'exit' handler → reaps
+      process.exit(0);                                // NO 'exit' handler → nothing reaps
     `);
     const out = execSync(`npx tsx ${driver}`, { env, encoding: "utf8" });
-    const sweep = /SWEEP=(\d+)/.exec(out)?.[1];
-    const created = /CREATED=(\d+)/.exec(out)?.[1];
-    const afterExit = existsSync(ROOT) ? sh(`ls ${ROOT} 2>/dev/null | wc -l`).trim() : "0";
-    ok("(7) startup sweep wipes a stale (kill -9) branch", sweep === "0", `afterSweep=${sweep}`);
-    ok("(7b) 'exit' death-handler reaps branches on normal exit", created === "1" && afterExit === "0", `created=${created} afterExit=${afterExit}`);
+    const sweep = Number(/SWEEP=(\d+)/.exec(out)?.[1]);
+    const afterExit = existsSync(ROOT) ? Number(sh(`ls ${ROOT} 2>/dev/null | wc -l`).trim()) : 0;
+    ok("(7) registerOverlayCleanup is a NO-OP — stale branch NOT swept at startup", sweep >= 1, `afterSweep=${sweep}`);
+    ok("(7b) branch PERSISTS after the creating process exits (no death-reap)", afterExit >= 1, `afterExit=${afterExit}`);
+    // 7c) explicit single-workspace reap removes exactly that one.
+    const beforeRm = Number(sh(`ls ${ROOT} 2>/dev/null | wc -l`).trim());
+    sh(`bash "${SH}" rm exitbr`);
+    const afterRm = existsSync(`${ROOT}/exitbr`) ? 1 : 0;
+    const stillStale = existsSync(`${ROOT}/stale_persist`) ? 1 : 0;
+    ok("(7c) `rm <id>` reaps exactly one workspace, leaves the others", afterRm === 0 && stillStale === 1 && beforeRm >= 2, `afterRm=${afterRm} stillStale=${stillStale} before=${beforeRm}`);
     rmSync(driver, { force: true });
   } finally {
     try { sh(`bash "${SH}" cleanup-all`); } catch { /* */ }
