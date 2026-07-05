@@ -62,9 +62,11 @@ import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 const execFileAsync = promisify(execFile);
-import { rmSync } from "fs";
+import { rmSync, existsSync, readdirSync } from "fs";
+import { join } from "path";
 import { ClaudeEngine, CodexEngine, Session, WORKSPACE_SCRIPT } from "../../../structured-prompting/src/index.js";
 import { buildTasks } from "./workspace-setup.js";
+import { classifyStability, defaultStabilityRecorder, writeStabilityJson, STABILITY_JSON } from "./stability.js";
 import { main, type TaskResult } from "./main.js";
 import { cleanupAllOverlays } from "./overlay-cleanup.js";
 import {
@@ -167,6 +169,48 @@ async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<v
   }));
 }
 
+/**
+ * 3× STABILITY CLASSIFICATION — runs at solve start, INDEPENDENTLY of the solve.
+ * Records the WHOLE fixture deck `attempts` (default 3) times BEFORE any fix,
+ * buckets each slide pixel-perfect / xml-stable / unstable, writes STABILITY_JSON
+ * (outside overlays, like the rating markers) that the final merge's regression
+ * gate reads, and PRINTS the warning naming the not-stable slides.
+ *
+ * NON-FATAL: a failure here must never abort the solve — the merge gate degrades
+ * to xml-stable for the whole deck when stability.json is absent. Skip entirely
+ * with BUG_SOLVING_SKIP_STABILITY=1 (e.g. a fast solve-only run).
+ */
+async function recordStabilityClassification(fixturesDirRel: string): Promise<void> {
+  if (process.env.BUG_SOLVING_SKIP_STABILITY === "1") {
+    console.error("[scaffold] stability classification skipped (BUG_SOLVING_SKIP_STABILITY=1)");
+    return;
+  }
+  try {
+    const fixturesAbs = join(REPO_ROOT, fixturesDirRel);
+    if (!existsSync(fixturesAbs)) { console.error(`[stability] fixtures dir not found (${fixturesAbs}) — skipping`); return; }
+    const deck = readdirSync(fixturesAbs)
+      .filter((f) => /^slide_\d+\.html$/.test(f))
+      .map((f) => f.replace(/\.html$/, ""))
+      .sort();
+    if (deck.length === 0) { console.error("[stability] no slide_*.html fixtures — skipping"); return; }
+    const attempts = Number(process.env.BUG_SOLVING_STABILITY_ATTEMPTS) || 3;
+    console.error(`[scaffold] recording ${deck.length} slide(s) ${attempts}× for stability classification (independent of solve)...`);
+    const record = defaultStabilityRecorder({
+      repo: REPO_ROOT,
+      fixturesDir: fixturesDirRel,
+      slides: deck,
+      scratchDir: join("/tmp", `bug-solving-stability-${process.pid}`),
+    });
+    const classification = classifyStability(deck, { record, attempts });
+    writeStabilityJson(STABILITY_JSON, classification);
+    console.error(classification.warning);
+    console.error(`[scaffold] stability.json → ${STABILITY_JSON} ` +
+      `(pixelPerfect=${classification.pixelPerfect.length}, xmlStable=${classification.xmlStable.length}, unstable=${classification.unstable.length})`);
+  } catch (e) {
+    console.error(`[scaffold] stability classification FAILED (non-fatal — merge gate degrades to xml-stable): ${(e as Error)?.message ?? String(e)}`);
+  }
+}
+
 async function run(): Promise<void> {
   // NOTE: overlays now PERSIST across crashes/exit — there is NO auto-reap
   // startup sweep and NO death handlers (see cow-workspace.ts's PERSISTENCE
@@ -204,7 +248,13 @@ async function run(): Promise<void> {
   process.env.COW_WORKSPACE_JAIL = "1";
   process.env.COW_WORKSPACE_OVERLAY_EXTRA =
     process.env.COW_WORKSPACE_OVERLAY_EXTRA ?? "/home/node/.claude:/home/node/.codex";
-  console.error(`[scaffold] jail ON (COW_WORKSPACE_JAIL=1, extra=${process.env.COW_WORKSPACE_OVERLAY_EXTRA})`);
+  // The jail runs the worker inside `unshare --map-root-user`, so the CLI sees
+  // itself as root and refuses `--dangerously-skip-permissions` ("cannot be used
+  // with root/sudo") — which is TRUE, we ARE sandboxing it. IS_SANDBOX=1 tells the
+  // CLI it's in a sandbox so it allows skip-permissions. Proven: claude edits a
+  // file inside the jail with IS_SANDBOX=1 (see claude-in-jail.e2e.test.ts).
+  process.env.IS_SANDBOX = process.env.IS_SANDBOX ?? "1";
+  console.error(`[scaffold] jail ON (COW_WORKSPACE_JAIL=1, IS_SANDBOX=1, extra=${process.env.COW_WORKSPACE_OVERLAY_EXTRA})`);
 
   // STARTUP DETECTION — overlays persist, so a fresh run must not clobber prior
   // state. --clean discards it; --continue resumes merging it; neither + state
@@ -265,6 +315,11 @@ async function run(): Promise<void> {
   }
 
   await recordBeforePptx(tasks);
+
+  // 3× stability classification over the whole deck (independent, non-fatal).
+  // The final merge's regression gate reads STABILITY_JSON to decide, per green
+  // slide, whether pixel-identity or only xml+rendered-parts is required.
+  await recordStabilityClassification(buildOpts.fixtures_dir ?? "renderer/html2slides/e2e/fixtures");
 
   const engine = isCodex
     ? new CodexEngine({ port: monitorPort, persist: true })
