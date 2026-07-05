@@ -29,7 +29,7 @@ inserts the slides right after the slide you're currently on.**
 ## Build
 
 ```bash
-npm run build:addon   # or: npx tsx renderer/html2slides/browser/build-addon.ts
+npm run renderer:build:addon   # or: npx tsx renderer/html2slides/browser/build-addon.ts
 # → dist/renderer/html2slides/addon/{appsscript.json, Code.gs, Sidebar.html}
 ```
 

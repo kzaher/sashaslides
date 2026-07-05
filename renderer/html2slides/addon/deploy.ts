@@ -10,7 +10,7 @@
  * each file's content via the editor's own Monaco API, then save (Ctrl+S).
  *
  * Usage:
- *   npm run build:addon          # regenerate dist/.../addon/{Code.gs,...}
+ *   npm run renderer:build:addon          # regenerate dist/.../addon/{Code.gs,...}
  *   npx tsx renderer/html2slides/addon/deploy.ts
  *   # or, with overrides:
  *   SCRIPT_ID=<id> UIDX=1 npx tsx .../deploy.ts

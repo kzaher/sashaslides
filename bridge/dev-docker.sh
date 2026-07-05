@@ -13,9 +13,9 @@
 #   ./bridge/dev-docker.sh bash      # shell into the container
 #   ./bridge/dev-docker.sh logs      # follow the bridge log
 #
-# Iteration loop:  (edit bridge code) -> npm run deploy -> ./bridge/dev-docker.sh
+# Iteration loop:  (edit bridge code) -> npm run renderer:deploy -> ./bridge/dev-docker.sh
 # refresh -> ./bridge/dev-docker.sh claude.  Sidebar (app.js) changes still need
-# `npm run deploy` + a sidebar reload — refresh only updates the bridge half.
+# `npm run renderer:deploy` + a sidebar reload — refresh only updates the bridge half.
 set -euo pipefail
 NAME=sasha-slides-bridge
 ORIGIN=${SASHA_ORIGIN:-https://sashaslides.com}
@@ -65,7 +65,7 @@ case "${1:-}" in
       sleep 2
     done
     docker exec "$NAME" bash -c "tail -n 20 /tmp/bridge.log" 2>/dev/null || true
-    echo "==> dev container ready. Edit code -> 'npm run deploy' -> '$0 refresh' -> '$0 claude'."
+    echo "==> dev container ready. Edit code -> 'npm run renderer:deploy' -> '$0 refresh' -> '$0 claude'."
     ;;
   refresh)
     echo "==> re-pulling bridge code ($ORIGIN/sasha-bridge.zip) + restarting ..."
