@@ -162,8 +162,16 @@ function createOverlayBranch(task_id: string): { branch_id: string } {
 const SCRATCH_REL = ".bug-solving-scratch";
 const ANALYSIS_REL = "bug-solving-analysis";
 
+/** Shared, outside-the-overlay root for this run's cross-boundary artifacts
+ *  (rating-outcome markers). A command run INSIDE a fork's branch can write under
+ *  here and the result is visible OUTSIDE the overlay (it's the ext4 upperRoot
+ *  volume, not part of any branch's lower/upper). Each run gets its own subdir so
+ *  parallel runs don't collide; each task gets its own subdir under that. */
+const SHARED_ROOT = "/overlays/shared";
+
 export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "clusters">): Task[] {
   const opts: BuildOptions = { ...DEFAULTS, ...options };
+  const runId = `run-${Date.now()}`;
   const out: Task[] = [];
   for (let i = 0; i < opts.clusters.length; i++) {
     const c = opts.clusters[i];
@@ -177,9 +185,12 @@ export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "
       task_id: c.task_id,
       branch_id,
       // Repo root — the branch's merged view resolves the repo-relative
-      // scratch/analysis/script paths from here. Retained for the merge phase
-      // (task 9 replaces the merge to read branch state via overlay-branch.sh).
+      // scratch/analysis/script paths from here. Also the base tree the final
+      // LLM merge overlays + promotes onto.
       workspace_dir: opts.repo_root,
+      // ABSOLUTE, OUTSIDE the overlay — the fork's rating-outcome marker lands
+      // here so the final merge (running outside any branch) can read it.
+      shared_dir: `${SHARED_ROOT}/${runId}/${c.task_id}`,
       scratch_dir: SCRATCH_REL,
       analysis_dir: ANALYSIS_REL,
       fixtures_dir: opts.fixtures_dir,

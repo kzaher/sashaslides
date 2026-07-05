@@ -2,7 +2,8 @@
  * rating-marker.test.ts — the rating-outcome marker path + read/validate helpers
  * (main.ts: ratingMarkerPath / readRatingMarker / RatingOutcomeMarker).
  *
- * ratingMarkerPath derives <scratch_dir>/rating-outcome.json; readRatingMarker
+ * ratingMarkerPath derives <shared_dir>/rating-outcome.json (an absolute path on
+ * the shared /overlays volume, OUTSIDE the fork's overlay); readRatingMarker
  * parses+validates it, returning null for absent/malformed/wrong-typed markers
  * and sanitizing the string arrays. No engine execution — just the pure helpers.
  */
@@ -18,13 +19,15 @@ function ok(name: string, cond: boolean, extra = "") {
 }
 
 /** Minimal Task carrying only the fields ratingMarkerPath/readRatingMarker use
- *  (scratch_dir + task_id); the rest are filler to satisfy the type. */
-function mkTask(scratchDir: string, taskId = "clip"): Task {
+ *  (shared_dir + task_id); the rest are filler to satisfy the type. The marker
+ *  now lives under shared_dir, so point it at the passed (real tmp) dir. */
+function mkTask(sharedDir: string, taskId = "clip"): Task {
   return {
     task_id: taskId,
     branch_id: `bs-${taskId}-test`,
     workspace_dir: "/nope",
-    scratch_dir: scratchDir,
+    shared_dir: sharedDir,
+    scratch_dir: "/nope-scratch",
     analysis_dir: "/nope",
     fixtures_dir: "fixtures-basic",
     server_port: 0,
@@ -39,11 +42,11 @@ function main() {
   console.log("\nrating-marker tests (marker path + read/validate)\n");
   const root = mkdtempSync(join(tmpdir(), "rm-"));
 
-  // (1) ratingMarkerPath = <scratch>/rating-outcome.json
+  // (1) ratingMarkerPath = <shared_dir>/rating-outcome.json
   {
     const t = mkTask(join(root, "s1"));
-    ok("(1) ratingMarkerPath = <scratch>/rating-outcome.json",
-      ratingMarkerPath(t) === join(t.scratch_dir, "rating-outcome.json"), ratingMarkerPath(t));
+    ok("(1) ratingMarkerPath = <shared_dir>/rating-outcome.json",
+      ratingMarkerPath(t) === join(t.shared_dir, "rating-outcome.json"), ratingMarkerPath(t));
   }
 
   // (2) round-trip green:true
