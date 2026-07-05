@@ -69,9 +69,32 @@ case "$cmd" in
     mkdir -p "$b"/{upper,work,merged}
     # Everything overlay-related happens INSIDE one userns+mountns. The mount is
     # only visible here; the child cmd runs with cwd = the merged view.
+    #
+    # JAIL MODE (opt-in via COW_WORKSPACE_JAIL=1) — contain ALL of the child's
+    # writes to the sandbox: COW-overlay the base (repo) AND each path in
+    # COW_WORKSPACE_OVERLAY_EXTRA (colon-separated, e.g. the worker CLI's state
+    # dirs ~/.claude:~/.codex), give it a disposable tmpfs /tmp, then remount the
+    # rest of the fs READ-ONLY so any stray write outside the sandbox FAILS. The
+    # /overlays volume (where the uppers live) is a separate mount → stays rw, so
+    # copy-up still works. NO chroot (that breaks the worker CLI). When
+    # COW_WORKSPACE_JAIL is unset the block is skipped → byte-identical to before.
+    export _CW_JAIL="${COW_WORKSPACE_JAIL:-}" _CW_EXTRA="${COW_WORKSPACE_OVERLAY_EXTRA:-}" _CW_B="$b"
     exec unshare -Urm --map-root-user bash -c '
       set -e
       mount -t overlay overlay -o "lowerdir='"$BASE"',upperdir='"$b"'/upper,workdir='"$b"'/work" "'"$b"'/merged"
+      if [ -n "$_CW_JAIL" ]; then
+        mount --make-rprivate / 2>/dev/null || true
+        i=0; IFS=":"; for p in $_CW_EXTRA; do
+          if [ -d "$p" ]; then
+            mkdir -p "$_CW_B/extra$i/upper" "$_CW_B/extra$i/work"
+            mount -t overlay overlay -o "lowerdir=$p,upperdir=$_CW_B/extra$i/upper,workdir=$_CW_B/extra$i/work" "$p" 2>/dev/null || true
+          fi
+          i=$((i+1))
+        done; unset IFS
+        mount -t tmpfs tmpfs /tmp 2>/dev/null || true
+        # lockdown: overlays + tmpfs + the /overlays volume stay writable; all else RO.
+        mount -o remount,bind,ro / 2>/dev/null || mount -o remount,ro / 2>/dev/null || true
+      fi
       cd "'"$b"'/merged"
       "$@"
     ' bash "$@"
