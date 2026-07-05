@@ -242,19 +242,23 @@ async function run(): Promise<void> {
 
   // JAIL ON for solve + merge. Set BEFORE any workspace.sh run (recordBeforePptx,
   // the engine's per-fork solve commands, and the final merge). Every `run` then
-  // sandboxes the worker CLI + retest: base repo + the worker's state dir(s)
-  // overlay copy-on-write, /tmp is a disposable tmpfs, everything else read-only.
-  // Include BOTH claude + codex state dirs (colon-sep; a missing one is harmless).
+  // sandboxes the worker CLI + retest: the base REPO is overlay copy-on-write,
+  // /tmp is a disposable tmpfs, everything else read-only.
   process.env.COW_WORKSPACE_JAIL = "1";
-  process.env.COW_WORKSPACE_OVERLAY_EXTRA =
-    process.env.COW_WORKSPACE_OVERLAY_EXTRA ?? "/home/node/.claude:/home/node/.codex";
+  // The worker CLI's OWN state (~/.claude / ~/.codex sessions) must PERSIST to
+  // the real fs — the monitor + `claude --resume` read it from there. So it is
+  // SHARED read-write (NOT copy-on-write); only the repo is sandboxed. (Overlaying
+  // it isolated the session files in the fork's private upper → the monitor's
+  // transcripts came up empty.) Include BOTH dirs; a missing one is harmless.
+  process.env.COW_WORKSPACE_SHARE_RW =
+    process.env.COW_WORKSPACE_SHARE_RW ?? "/home/node/.claude:/home/node/.codex";
   // The jail runs the worker inside `unshare --map-root-user`, so the CLI sees
   // itself as root and refuses `--dangerously-skip-permissions` ("cannot be used
   // with root/sudo") — which is TRUE, we ARE sandboxing it. IS_SANDBOX=1 tells the
   // CLI it's in a sandbox so it allows skip-permissions. Proven: claude edits a
   // file inside the jail with IS_SANDBOX=1 (see claude-in-jail.e2e.test.ts).
   process.env.IS_SANDBOX = process.env.IS_SANDBOX ?? "1";
-  console.error(`[scaffold] jail ON (COW_WORKSPACE_JAIL=1, IS_SANDBOX=1, extra=${process.env.COW_WORKSPACE_OVERLAY_EXTRA})`);
+  console.error(`[scaffold] jail ON (COW_WORKSPACE_JAIL=1, IS_SANDBOX=1, share-rw=${process.env.COW_WORKSPACE_SHARE_RW})`);
 
   // STARTUP DETECTION — overlays persist, so a fresh run must not clobber prior
   // state. --clean discards it; --continue resumes merging it; neither + state
