@@ -232,10 +232,13 @@ if (isMain) {
   const engineArg = process.argv.find((a) => a.startsWith("--engine="))?.slice("--engine=".length);
   const engine = (engineArg?.toLowerCase() === "codex") ? "codex" : "claude";
   // JAIL ON for the merge (same as main-scaffolding) — every workspace.sh run
-  // jails the merge worker + retest into the sandbox.
+  // jails the merge worker + retest into the sandbox. The worker CLI's state dirs
+  // are SHARED read-write (not overlaid) so its sessions persist to the real fs
+  // for the monitor + `claude --resume`; only the repo is sandboxed.
   process.env.COW_WORKSPACE_JAIL = "1";
-  process.env.COW_WORKSPACE_OVERLAY_EXTRA =
-    process.env.COW_WORKSPACE_OVERLAY_EXTRA ?? "/home/node/.claude:/home/node/.codex";
+  process.env.COW_WORKSPACE_SHARE_RW =
+    process.env.COW_WORKSPACE_SHARE_RW ?? "/home/node/.claude:/home/node/.codex";
+  process.env.IS_SANDBOX = process.env.IS_SANDBOX ?? "1";
   resumeMerge({ repo: process.cwd(), engine })
     .then((r) => { if ((r.report?.rejected.length ?? 0) > 0) process.exitCode = 0; })
     .catch((e) => { console.error("[resume-merge] crashed:", e); process.exit(1); });
