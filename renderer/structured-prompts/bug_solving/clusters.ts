@@ -7,6 +7,13 @@
  */
 import type { Cluster } from "./workspace-setup.js";
 
+const C_SLIDE_03: Cluster = {
+  task_id: "slide-03-everything-moved-bit",
+  slide_ids: ["slide_03"],
+  retry_budget: 5,
+  cluster_description: "slide_03 — Everything is moved up a bit everywhere, entire list, small 0.3pp down, bars on graphs.\n\nApproach: analyze the TARGET (original) vs the ATTEMPT (current render) + the annotation, find the ROOT CAUSE in renderer/html2slides/extract-dom.ts and/or convert-pptx*.ts, apply the MINIMAL fix, and DO NOT regress the other slides (render a couple of neighbours to confirm).",
+};
+
 const C_SLIDE_11: Cluster = {
   task_id: "slide-11-list-output-possible",
   slide_ids: ["slide_11"],
@@ -18,7 +25,7 @@ const C_SLIDE_13: Cluster = {
   task_id: "slide-13-many-rendered-regions",
   slide_ids: ["slide_13"],
   retry_budget: 5,
-  cluster_description: "slide_13 — Why are there so many rendered regions on the right, this looks like it should be possible to use some shape, text should never be rendered, if you need to render then render without text (text hidden), and then put text as children so it's editable?\n\nPRIOR ATTEMPTS REJECTED (2×): a native-trapezoid emit was tried before but the user rated it bad — the funnel stage bodies STILL came out RASTERISED (or wrong orientation). So a previous change did NOT actually stop the rasterisation. VERIFY by PIXEL-PROBING the AFTER render that the 4 stage bodies are flat-colour VECTOR shapes (crisp edges, editable) with NO bitmap regions on the right — do NOT trust the OOXML diff or repeat the failed approach blindly.\n\nApproach: analyze the TARGET (original) vs the ATTEMPT (current render) + the annotation, find the ROOT CAUSE in renderer/html2slides/extract-dom.ts and/or convert-pptx*.ts, apply the MINIMAL fix, and DO NOT regress the other slides (render a couple of neighbours to confirm).",
+  cluster_description: "slide_13 — Why are there so many rendered regions on the right, this looks like it should be possible to support trapezoid shape and more generic shapes with gradient.\n\nApproach: analyze the TARGET (original) vs the ATTEMPT (current render) + the annotation, find the ROOT CAUSE in renderer/html2slides/extract-dom.ts and/or convert-pptx*.ts, apply the MINIMAL fix, and DO NOT regress the other slides (render a couple of neighbours to confirm).",
 };
 
 const C_SLIDE_14: Cluster = {
@@ -28,4 +35,4 @@ const C_SLIDE_14: Cluster = {
   cluster_description: "slide_14 — The top border style is transferred wrong, like rounded border vs straight top line which is clipped by the mask of the element (there is clipping code which works recursively when it tries to then overlap clipping elements and reuse some existing ones.\nIn this case there should be an element which can present this cut.\n\nApproach: analyze the TARGET (original) vs the ATTEMPT (current render) + the annotation, find the ROOT CAUSE in renderer/html2slides/extract-dom.ts and/or convert-pptx*.ts, apply the MINIMAL fix, and DO NOT regress the other slides (render a couple of neighbours to confirm).",
 };
 
-export const CLUSTERS: Cluster[] = [C_SLIDE_11, C_SLIDE_13, C_SLIDE_14];
+export const CLUSTERS: Cluster[] = [C_SLIDE_03, C_SLIDE_11, C_SLIDE_13, C_SLIDE_14];
