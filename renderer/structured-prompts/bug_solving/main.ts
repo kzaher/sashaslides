@@ -993,6 +993,10 @@ export function main(args: {
             `--analysis "$ROOT/${spec.analysis_md}" ` +
             `--diffs "$ROOT/${spec.diffs_dir}" ` +
             `--thumbnails "$ROOT/${spec.thumbnails_dir}" ` +
+            // MERGE/VERDICT gate: this per-fork UI's ONLY considered signal is the
+            // Good/Bad verdict, so it boots READ-ONLY (no comment/annotation
+            // editing). The normal defect-identification rating stays editable.
+            `--read-only ` +
             `--task-title "${spec.task_title}"`;
           // setsid + `& disown` detaches the server so it outlives this node.
           return (

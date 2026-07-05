@@ -44,6 +44,10 @@ const analysis = get("--analysis");
 const diffs = get("--diffs");
 const thumbnails = get("--thumbnails");
 const title = get("--task-title") ?? "bug_solving";
+// --read-only (boolean passthrough): the MERGE/VERDICT gate boots this UI
+// read-only (only the Good/Bad verdict is considered), so forward the flag to
+// rating-server.ts. Absent by default → editable.
+const readOnly = argv.includes("--read-only");
 
 if (!slidesCsv || !analysis || !diffs || !thumbnails) {
   console.error("filtered-rating-server wrapper: missing required arg (--slides, --analysis, --diffs, --thumbnails)");
@@ -78,6 +82,7 @@ const forwarded = [
   "--task-analysis", analysis,
   "--task-diffs", diffs,
   "--task-title", title,
+  ...(readOnly ? ["--read-only"] : []),
   // Persistent per-slide ledger so comments + annotations survive worktree
   // cleanup / /tmp wipes and auto-populate the next round's provenance panel.
   "--history-dir", "/workspaces/sashaslides/.bug-solving-history",
