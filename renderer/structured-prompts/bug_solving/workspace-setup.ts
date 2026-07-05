@@ -1,7 +1,12 @@
 /**
  * Build the list of Task objects that main.ts will iterate over. Each task:
- *   - gets a fresh git worktree rooted at .claude/worktrees/bs-<task_id>-<ts>
- *   - gets a scratch dir under that worktree for before/after/diffs/etc.
+ *   - gets an OVERLAY BRANCH id (bs-<task>-<ts>). There is NO git worktree and
+ *     NO disk copy: the overlay is mounted lazily, per-command, by
+ *     scripts/overlay-branch.sh (lower = the working tree, upper = /overlays).
+ *     Every command the fork runs (worker model calls + record/diff shells)
+ *     executes INSIDE that branch (engine `switchBranch`), so its edits +
+ *     scratch land in the branch's isolated upper layer, never on the base tree.
+ *   - uses REPO-RELATIVE scratch / analysis dirs, created inside the branch.
  *   - bundles the per-slide SlideTask records (html path, user comment, png
  *     paths) from ratings.json
  *   - gets a unique server port allocated in the range [4720, 4800)
@@ -11,70 +16,15 @@
  * together (from the wave-planning categorization). The ratings.json is
  * used to look up the exact user-comment strings so they travel into the
  * structured prompt verbatim.
+ *
+ * NOTE: the old `assertCleanTree` "no dirty files" gate was DELETED — the
+ * overlay lower IS the working tree, so uncommitted changes ride into every
+ * branch naturally; the gate is obsolete.
  */
-import { readFileSync, existsSync, mkdirSync, copyFileSync } from "fs";
-import { execSync } from "child_process";
+import { readFileSync, existsSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import type { SlideTask, Task } from "./main.js";
 import { makeAnnotationComposite } from "./scripts/annotation-composite.js";
-
-/**
- * Fail EARLY if the main working tree is dirty under the converter paths.
- *
- * Worktrees (and the coming full-disk-copy branches) fork from HEAD, so any
- * UNCOMMITTED converter change in the main tree is silently EXCLUDED from every
- * worker — and then confuses merge/accept ("the fix isn't in the diff"). This
- * preflight refuses to run against a dirty converter tree so a human commits or
- * stashes first, rather than discovering the omission after a whole run.
- *
- * Scope: we check ONLY the paths in `paths` (default the converter dir
- * `renderer/html2slides`), so unrelated untracked scratch dirs elsewhere in the
- * repo don't block a run. `git status --porcelain -- <paths>` reports BOTH
- * tracked modifications AND untracked files UNDER those paths (so a stray new
- * .ts/.html fixture there is caught too), which is exactly the state that would
- * be lost across the HEAD fork.
- *
- * Escape hatch: BUG_SOLVING_ALLOW_DIRTY=1 downgrades the failure to a warning
- * for power users who KNOW the dirty state is intentional/irrelevant.
- */
-export function assertCleanTree(repoRoot: string, paths: string[] = ["renderer/html2slides"]): void {
-  let porcelain = "";
-  try {
-    porcelain = execSync(`git status --porcelain -- ${paths.map((p) => `"${p}"`).join(" ")}`, {
-      cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-    }).trim();
-  } catch (e) {
-    // If git itself fails (not a repo, etc.) that's a setup problem worth
-    // surfacing — but don't hard-fail the run on it; warn and continue.
-    console.error(`[preflight] warning: could not check working-tree cleanliness: ${(e as Error).message}`);
-    return;
-  }
-  if (!porcelain) return; // clean under the scoped paths → proceed.
-
-  // Exclude user-only TEST BASELINES: goldens are user-blessed (tooling must
-  // never touch them) and the SxS `*.ratings-complex.json` is a scratch artifact.
-  // Neither is converter SOURCE, so a dirty golden/rating must NOT block a run.
-  const IGNORE_BASELINE = /(e2e\/goldens|ratings-complex\.json|\.ratings-complex)/;
-  const dirtyFiles = porcelain.split("\n").map((l) => l.trim()).filter(Boolean)
-    .filter((l) => !IGNORE_BASELINE.test(l));
-  if (!dirtyFiles.length) return; // only user-only test baselines dirty → proceed.
-  const allowDirty = process.env.BUG_SOLVING_ALLOW_DIRTY === "1";
-  const header =
-    `Dirty working tree under [${paths.join(", ")}] — ${dirtyFiles.length} uncommitted change(s):\n` +
-    dirtyFiles.map((f) => `    ${f}`).join("\n");
-  if (allowDirty) {
-    console.error(`⚠ ${header}\n  BUG_SOLVING_ALLOW_DIRTY=1 set — proceeding anyway (these changes will NOT be in the worktrees).`);
-    return;
-  }
-  throw new Error(
-    `${header}\n\n` +
-    `  Worktrees (and disk-copy branches) fork from HEAD, so these UNCOMMITTED changes would be\n` +
-    `  SILENTLY EXCLUDED from every worker — causing merge/accept confusion later.\n` +
-    `  Commit or stash them first:\n` +
-    `      git add -A && git commit -m "wip"   # or:  git stash\n` +
-    `  Then re-run. To override (you know what you're doing): BUG_SOLVING_ALLOW_DIRTY=1`,
-  );
-}
 
 /**
  * Turn a repo-relative fixtures dir path into a dir-safe slug so that
@@ -190,88 +140,27 @@ function buildSlideTasks(slideIds: string[], opts: BuildOptions): SlideTask[] {
   return out;
 }
 
-function createWorktree(opts: BuildOptions, task_id: string): string {
-  const ts = Date.now();
-  const dir = resolve(opts.repo_root, ".claude", "worktrees", `bs-${task_id}-${ts}`);
-  const branch = `bug_solving/${task_id}-${ts}`;
-  mkdirSync(resolve(opts.repo_root, ".claude", "worktrees"), { recursive: true });
-  execSync(`git worktree add -b "${branch}" "${dir}" HEAD`, {
-    cwd: opts.repo_root, stdio: "inherit",
-  });
-
-  // Replace the partially-tracked node_modules directories with symlinks
-  // back to the main repo's fully-installed ones. Some packages (e.g.
-  // googleapis) have only package.json/README tracked in git — the
-  // worktree's checkout is missing build artifacts. Without the
-  // symlinks, `npx tsx renderer/html2slides/convert-pptx.ts` fails with
-  // ERR_MODULE_NOT_FOUND.
-  //
-  // We symlink both the repo-root node_modules and renderer/node_modules
-  // (separate package there). structured-prompting/ isn't needed — the
-  // worktree's worker code only runs renderer/ scripts.
-  for (const rel of ["node_modules", "renderer/node_modules"]) {
-    const wtNm = resolve(dir, rel);
-    const mainNm = resolve(opts.repo_root, rel);
-    if (!existsSync(mainNm)) continue;
-    try {
-      execSync(`rm -rf "${wtNm}" && ln -s "${mainNm}" "${wtNm}"`, { stdio: "inherit" });
-    } catch (e) {
-      console.error(`warning: failed to symlink ${rel} in worktree ${dir}: ${e}`);
-    }
-  }
-  return dir;
+/**
+ * Allocate a deterministic-per-run overlay branch id. NO git worktree, NO copy,
+ * NO mount here — the overlay is mounted lazily on the FIRST command the engine
+ * runs inside the branch (`overlay-branch.sh run <id> …`), with the working tree
+ * as the lower layer and the branch's edits captured in its upper layer on the
+ * /overlays volume. node_modules ride in the shared lower layer (gitignored, so
+ * never counted as a change), so no symlink dance is needed either.
+ */
+function createOverlayBranch(task_id: string): { branch_id: string } {
+  return { branch_id: `bs-${task_id}-${Date.now()}` };
 }
 
 /**
- * Consolidate every image a worker needs for each slide into ONE dir under the
- * task's worktree scratch, keyed by the fixture set:
- *   <workspace_dir>/.bug-solving-scratch/<fixtureSetSlug>/slide_NN_{original,annotations,attempt,highlighted_attempt}.png
- *
- * The scattered /tmp/sxs-complex sources (originals/ annotations/ slides/) stay
- * as the SOURCE of truth; these are COPIES inside the worktree so the worker
- * finds everything in its own workspace. Mutates each SlideTask in place with
- * the four resolved absolute `img_*` paths. Called from buildTasks AFTER the
- * worktree exists (buildSlideTasks runs before workspace_dir is known).
+ * Repo-relative scratch + analysis dirs. Both live INSIDE each fork's overlay
+ * branch (created there at runtime), so every task can reuse the SAME relative
+ * path without colliding — the branches are isolated. The record/diff scripts
+ * write here (branch upper layer = disposable); the worker writes analysis.md /
+ * fix-summary.md into the analysis dir.
  */
-function materializeConsolidatedImages(
-  slides: SlideTask[],
-  workspace_dir: string,
-  scratch_dir: string,
-  fixturesDir: string,
-): void {
-  const slug = fixtureSetSlug(fixturesDir);
-  const dir = resolve(scratch_dir, slug);
-  try { mkdirSync(dir, { recursive: true }); } catch { /* best-effort */ }
-
-  for (const s of slides) {
-    const id = s.slide_id; // "slide_04"
-    const original = resolve(dir, `${id}_original.png`);
-    const annotations = resolve(dir, `${id}_annotations.png`);
-    const attempt = resolve(dir, `${id}_attempt.png`);
-    const highlighted = resolve(dir, `${id}_highlighted_attempt.png`);
-
-    // TARGET render.
-    if (s.original_png && existsSync(s.original_png)) {
-      try { copyFileSync(s.original_png, original); s.img_original = original; } catch { /* best-effort */ }
-    }
-    // RAW annotation (may be absent → skip; leave img_annotations undefined).
-    if (s.annotation_png && existsSync(s.annotation_png)) {
-      try { copyFileSync(s.annotation_png, annotations); s.img_annotations = annotations; } catch { /* best-effort */ }
-    }
-    // The render being evaluated — at build time this is OUR CURRENT render.
-    // (The verify path later refreshes this from the AFTER thumbnail.)
-    if (s.rendered_png && existsSync(s.rendered_png)) {
-      try { copyFileSync(s.rendered_png, attempt); s.img_attempt = attempt; } catch { /* best-effort */ }
-    }
-    // Max-contrast composite (annotation applied over the TARGET slide). Only
-    // when an annotation exists and the helper actually wrote the file.
-    if (s.annotation_png && existsSync(s.annotation_png) && s.original_png && existsSync(s.original_png)) {
-      if (makeAnnotationComposite(s.original_png, s.annotation_png, highlighted)) {
-        s.img_highlighted = highlighted;
-      }
-    }
-  }
-}
+const SCRATCH_REL = ".bug-solving-scratch";
+const ANALYSIS_REL = "bug-solving-analysis";
 
 export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "clusters">): Task[] {
   const opts: BuildOptions = { ...DEFAULTS, ...options };
@@ -279,23 +168,20 @@ export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "
   for (let i = 0; i < opts.clusters.length; i++) {
     const c = opts.clusters[i];
     const slides = buildSlideTasks(c.slide_ids, opts);
-    const workspace_dir = createWorktree(opts, c.task_id);
-    const scratch_dir = resolve(workspace_dir, ".bug-solving-scratch");
-    mkdirSync(scratch_dir, { recursive: true });
-    // Consolidate every per-slide image into ONE fixture-set-keyed dir under
-    // this worktree's scratch, now that workspace_dir exists. Mutates `slides`
-    // in place with the four img_* absolute paths.
-    materializeConsolidatedImages(slides, workspace_dir, scratch_dir, opts.fixtures_dir);
-    // Model work-products (analysis.md / fix-summary.md) go here, NOT in the
-    // gitignored scratch dir, so they show up in the engine's per-node git
-    // diff. The binary pptx/diff artifacts stay under scratch_dir (ignored).
-    const analysis_dir = resolve(workspace_dir, "bug-solving-analysis");
-    mkdirSync(analysis_dir, { recursive: true });
+    const { branch_id } = createOverlayBranch(c.task_id);
+    // No per-slide image consolidation/copy: the /tmp/sxs-complex sources
+    // (originals/ annotations/ composites/) are outside the overlay lower, so
+    // they remain readable by their absolute paths INSIDE the branch. The
+    // prompts fall back to those absolute paths (SlideTask.original_png etc.).
     out.push({
       task_id: c.task_id,
-      workspace_dir,
-      scratch_dir,
-      analysis_dir,
+      branch_id,
+      // Repo root — the branch's merged view resolves the repo-relative
+      // scratch/analysis/script paths from here. Retained for the merge phase
+      // (task 9 replaces the merge to read branch state via overlay-branch.sh).
+      workspace_dir: opts.repo_root,
+      scratch_dir: SCRATCH_REL,
+      analysis_dir: ANALYSIS_REL,
       fixtures_dir: opts.fixtures_dir,
       server_port: opts.port_base + i,
       presentation_title: `bug_solving-${c.task_id}-${Date.now()}`,

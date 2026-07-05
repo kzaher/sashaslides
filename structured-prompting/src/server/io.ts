@@ -11,7 +11,19 @@
 
 import { spawn, type SpawnOptions } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { Buffer as NodeBuffer } from "node:buffer";
+
+/**
+ * Absolute path to the overlay-branch runner. When a spawn carries a
+ * `branchId`, the command is re-wrapped as
+ *   overlay-branch.sh run <branchId> -- <command> <args...>
+ * so it executes inside that branch's namespace-local overlayfs mount (cwd =
+ * merged working-tree root). Overridable via env for tests / relocations.
+ */
+const OVERLAY_BRANCH_SH =
+  process.env.OVERLAY_BRANCH_SCRIPT ??
+  resolve(process.cwd(), "renderer/structured-prompts/bug_solving/scripts/overlay-branch.sh");
 
 // ---------- Shared types ----------------------------------------------------
 
@@ -26,6 +38,15 @@ export interface SpawnCaptureArgs {
    *  live children that belong to a given subtree, without killing
    *  unrelated work. Engine populates this on every spawn. */
   nodeId?: string;
+  /**
+   * Opt-in overlay branch id. When set, the command is re-wrapped to run
+   * INSIDE the named overlayfs branch (via overlay-branch.sh) — the branch
+   * runner sets cwd = the merged working-tree root, so pass repo-relative
+   * commands. Undefined = the command runs normally (byte-identical to the
+   * pre-branch spawn). The `setpriv --pdeathsig` guard stays OUTSIDE the
+   * branch wrapper so it still fires on engine death.
+   */
+  branchId?: string;
   /** Live stdout listener. Fires for every chunk as it arrives, BEFORE the
    *  child exits. Used by the scheduler's executeShell handler to surface
    *  `stdoutSoFar` on the graph node so the monitor UI sees output mid-run.
@@ -137,7 +158,15 @@ function ensureExitHandler() {
 export const realIO: IO = {
   async spawnCapture(args: SpawnCaptureArgs): Promise<SpawnCaptureResult> {
     ensureExitHandler();
-    const { command, args: procArgs, cwd, env, timeoutMs, nodeId } = args;
+    const { command, args: procArgs, cwd, env, timeoutMs, nodeId, branchId } = args;
+    // OPT-IN overlay branch: when branchId is set, rewrite (command,args) so the
+    // command runs INSIDE that branch's overlayfs mount. This happens BEFORE the
+    // setpriv wrap below, so the pdeathsig guard still wraps the whole thing.
+    // When branchId is UNSET this is a no-op and the spawn is byte-identical.
+    const effCommand = branchId ? "bash" : command;
+    const effArgs = branchId
+      ? [OVERLAY_BRANCH_SH, "run", branchId, command, ...procArgs]
+      : procArgs;
     return new Promise<SpawnCaptureResult>((resolve) => {
       const spawnOpts: SpawnOptions = {
         cwd,
@@ -158,7 +187,7 @@ export const realIO: IO = {
       // model tokens until they finish on their own. setpriv is in
       // util-linux and present on every linux distro we run.
       const wrappedCommand = "setpriv";
-      const wrappedArgs = ["--pdeathsig", "SIGKILL", "--", command, ...procArgs];
+      const wrappedArgs = ["--pdeathsig", "SIGKILL", "--", effCommand, ...effArgs];
       const child = spawn(wrappedCommand, wrappedArgs, spawnOpts);
       // child.kill by default signals just the child; we want the whole
       // group so claude's own subprocesses (e.g. tool-use shells) die too.

@@ -62,7 +62,7 @@ import { fileURLToPath } from "url";
 import { dirname } from "path";
 const execFileAsync = promisify(execFile);
 import { ClaudeEngine, CodexEngine, Session } from "../../../structured-prompting/src/index.js";
-import { buildTasks, assertCleanTree } from "./workspace-setup.js";
+import { buildTasks } from "./workspace-setup.js";
 import { main, type TaskResult } from "./main.js";
 import { registerOverlayCleanup } from "./overlay-cleanup.js";
 
@@ -83,6 +83,10 @@ const REPO_ROOT = process.cwd();
 // pipeline as AFTER; this is the repo-root-relative path joined onto each
 // task's workspace_dir below.
 const RECORD_SCRIPT_REL = "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts";
+// The overlay-branch runner (absolute). Same resolution as overlay-cleanup.ts.
+const OVERLAY_BRANCH_SH =
+  process.env.OVERLAY_BRANCH_SCRIPT ??
+  resolve(REPO_ROOT, "renderer/structured-prompts/bug_solving/scripts/overlay-branch.sh");
 // Keep fileURLToPath import reachable even if we stop using HERE later.
 const _HERE = dirname(fileURLToPath(import.meta.url)); void _HERE;
 
@@ -129,18 +133,21 @@ async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<v
   console.error(`[scaffolding] recording BEFORE pptx for ${tasks.length} task(s) in parallel...`);
   await Promise.all(tasks.map(async (t) => {
     const ids = t.slides.map(s => s.slide_id).join(",");
-    const outDir = resolve(t.scratch_dir, "before");
-    const recScript = resolve(t.workspace_dir, RECORD_SCRIPT_REL);
-    const fixturesDir = resolve(t.workspace_dir, t.fixtures_dir);
+    // Record BEFORE INSIDE the task's overlay branch so the pptx lands in the
+    // SAME branch scratch the worker (and step-4 diff) later read. Paths are
+    // repo-relative, resolved to absolute via $ROOT (= the branch's merged root).
+    // This is the UNMODIFIED tree (the worker hasn't run yet), so it's the true
+    // BEFORE state. cwd = renderer/ inside the branch for node_modules.
+    const inner =
+      `ROOT="$PWD"; cd "$ROOT/renderer" && ` +
+      `npx tsx "$ROOT/${RECORD_SCRIPT_REL}" --mode pptx ` +
+      `--fixtures "$ROOT/${t.fixtures_dir}" --slides ${ids} ` +
+      `--out "$ROOT/${t.scratch_dir}/before"`;
     try {
-      // cwd = <workspace>/renderer so tsx + convert-pptx node_modules resolve.
-      // record-rendering writes pptx to <outDir>/pptx/<slide_id>.pptx.
-      await execFileAsync("npx", [
-        "tsx", recScript,
-        "--mode", "pptx", "--fixtures", fixturesDir,
-        "--slides", ids, "--out", outDir,
-      ], { cwd: resolve(t.workspace_dir, "renderer"), maxBuffer: 32 * 1024 * 1024 });
-      console.error(`  [${t.task_id}] before pptx → ${outDir}/pptx`);
+      await execFileAsync("bash", [
+        OVERLAY_BRANCH_SH, "run", t.branch_id, "bash", "-c", inner,
+      ], { cwd: REPO_ROOT, maxBuffer: 32 * 1024 * 1024 });
+      console.error(`  [${t.task_id}] before pptx → (branch ${t.branch_id}) ${t.scratch_dir}/before/pptx`);
     } catch (e: unknown) {
       // TS forbids a type annotation on the catch binding (ts(1196)), so the
       // type goes on the narrowing instead. Node decorates the promisified
@@ -195,12 +202,9 @@ async function run(): Promise<void> {
   // (e.g. a solve-only run that won't render thumbnails).
   await preflightGoogleAuth();
 
-  // Refuse to run against a DIRTY converter tree BEFORE any worktree is created.
-  // Worktrees fork from HEAD, so uncommitted renderer/html2slides changes would
-  // be silently excluded from every worker. Scoped to the converter dir so
-  // unrelated untracked scratch dirs don't block; BUG_SOLVING_ALLOW_DIRTY=1 warns
-  // instead of failing.
-  assertCleanTree(REPO_ROOT, ["renderer/html2slides"]);
+  // (The old assertCleanTree "no dirty files" gate was DELETED: the overlay
+  // lower IS the working tree, so uncommitted converter changes ride into every
+  // branch naturally — the gate is obsolete.)
 
   // Notify config. Each successfully-solved thread boots its OWN rating UI and
   // blocks until you've rated every slide good/bad; the UI pings you when it

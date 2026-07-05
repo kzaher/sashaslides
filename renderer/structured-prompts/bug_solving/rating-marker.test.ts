@@ -22,6 +22,7 @@ function ok(name: string, cond: boolean, extra = "") {
 function mkTask(scratchDir: string, taskId = "clip"): Task {
   return {
     task_id: taskId,
+    branch_id: `bs-${taskId}-test`,
     workspace_dir: "/nope",
     scratch_dir: scratchDir,
     analysis_dir: "/nope",

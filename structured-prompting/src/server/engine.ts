@@ -47,6 +47,9 @@ interface RunCtx {
   driverSessionId: string | null;
   model: ClaudeModel;
   cwd: string;
+  /** Opt-in overlay branch id (set by switchBranch). When set, every command
+   *  for this context runs inside the branch's overlayfs mount. */
+  branchId?: string;
   /** Prepend strings queued by prependToNextPrompt description nodes; consumed by next send*. */
   prepend: string[];
   append: string[];
@@ -61,6 +64,7 @@ function cloneCtx(ctx: RunCtx): RunCtx {
     driverSessionId: ctx.driverSessionId,
     model: ctx.model,
     cwd: ctx.cwd,
+    branchId: ctx.branchId,
     prepend: [...ctx.prepend],
     append: [...ctx.append],
     pendingFork: ctx.pendingFork,
@@ -176,7 +180,7 @@ export class Engine {
         await runScheduler(session.graph, registry, {
           io: this.io,
           values,
-          seedCtx: { model: session.model, cwd: session.cwd },
+          seedCtx: { model: session.model, cwd: session.cwd, branchId: session.branchId ?? null },
         });
         const tip = session.graph.get(descriptionTip.tipNodeId);
         if (tip && tip.status === "error") {
@@ -201,6 +205,7 @@ export class Engine {
       driverSessionId: null,
       model: session.model,
       cwd: session.cwd,
+      branchId: session.branchId,
       prepend: [],
       append: [],
       pendingFork: false,
@@ -339,6 +344,12 @@ export class Engine {
           graph.finishOk(node.id, { cwd: next.cwd });
           return { value: upstream, ctx: next };
         }
+        case "switchBranch": {
+          const next = cloneCtx(ctx);
+          next.branchId = node.input.branchId;
+          graph.finishOk(node.id, { branchId: next.branchId });
+          return { value: upstream, ctx: next };
+        }
         case "newSession": {
           const next = cloneCtx(ctx);
           next.driverSessionId = null;
@@ -403,6 +414,7 @@ export class Engine {
                     resume: resumeSid,
                     fork: forkFlag,
                     cwd: ctx.cwd,
+                    branchId: ctx.branchId,
                     timeoutMs: args.timeout,
                     attachments: args.base64_attachments,
                     io: this.io,
@@ -413,6 +425,7 @@ export class Engine {
                     resume: resumeSid,
                     fork: forkFlag,
                     cwd: ctx.cwd,
+                    branchId: ctx.branchId,
                     timeoutMs: args.timeout,
                     attachments: args.base64_attachments,
                     io: this.io,
@@ -529,6 +542,10 @@ export class Engine {
                 driverSessionId: null,
                 model: ctx.model,
                 cwd: ctx.cwd,
+                // Inherit the parent's branch (like model/cwd). In bug_solving
+                // the parent is unbranched and each child sets its own branch
+                // via switchBranch inside its apply body.
+                branchId: ctx.branchId,
                 prepend: [],
                 append: [],
                 pendingFork: false,
@@ -676,7 +693,7 @@ export class Engine {
           const cmd = build(upstream);
           graph.setLabel(node.id, `executeShell: ${truncate(cmd, 60)}`);
           graph.start(node.id, { input: { cmd } });
-          const stdout = await runShell({ cmd, cwd: ctx.cwd, io: this.io });
+          const stdout = await runShell({ cmd, cwd: ctx.cwd, io: this.io, branchId: ctx.branchId });
           graph.finishOk(node.id, { stdoutTail: stdout.slice(-400) });
           return { value: stdout, ctx };
         }
@@ -731,6 +748,7 @@ export class Engine {
           resume: resumeSid,
           fork: ctx.pendingFork,
           cwd: ctx.cwd,
+          branchId: ctx.branchId,
           io: this.io,
         });
         if (compactResp.isError) {
@@ -765,6 +783,7 @@ export class Engine {
       driverSessionId: response.sessionId ?? resumeSid,
       model: ctx.model,
       cwd: ctx.cwd,
+      branchId: ctx.branchId,
       prepend: [],
       append: [],
       pendingFork: false,
@@ -887,9 +906,9 @@ function randomId(): string {
   return "sp_" + Math.random().toString(36).slice(2, 10);
 }
 
-export async function runShell(args: { cmd: string; cwd: string; io: IO; nodeId?: string }): Promise<string> {
-  const { cmd, cwd, io, nodeId } = args;
-  const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd, nodeId });
+export async function runShell(args: { cmd: string; cwd: string; io: IO; nodeId?: string; branchId?: string }): Promise<string> {
+  const { cmd, cwd, io, nodeId, branchId } = args;
+  const r = await io.spawnCapture({ command: "bash", args: ["-c", cmd], cwd, nodeId, branchId });
   if (r.spawnError) {
     throw new StructuredError(`shell spawn failed: ${r.spawnError}`);
   }

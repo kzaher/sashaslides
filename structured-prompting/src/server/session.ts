@@ -86,6 +86,14 @@ export interface SessionInit {
    * a callback.
    */
   containerId?: string;
+  /**
+   * Opt-in overlay branch id. When set, the engine runs EVERY command for this
+   * session's chain (model CLI + executeShell) inside the named overlayfs
+   * branch (a namespace-local COW mount over the working tree). Undefined =
+   * commands run normally (byte-identical to the pre-branch behaviour). Set via
+   * `switchBranch(id)`; propagated through clones like model/cwd.
+   */
+  branchId?: string;
   // Phantom marker so SessionWithResult<T> can be reconstructed across clones.
   resultTypeMarker?: unknown;
 }
@@ -109,6 +117,8 @@ export class Session {
   readonly tipNodeId: string;
   /** Lexical container anchor; see SessionInit.containerId. */
   readonly containerId: string;
+  /** Opt-in overlay branch id; see SessionInit.branchId. Undefined = no branch. */
+  readonly branchId?: string;
 
   constructor(init: SessionInit = {}) {
     this.sessionId = init.sessionId ?? randomId();
@@ -117,6 +127,7 @@ export class Session {
     this.graph = init.graph ?? new ComputationGraph(this.sessionId);
     this.tipNodeId = init.tipNodeId ?? this.graph.rootId;
     this.containerId = init.containerId ?? this.graph.rootId;
+    this.branchId = init.branchId;
   }
 
   // --- core chainable operations (all sync, build description nodes) ------
@@ -170,6 +181,27 @@ export class Session {
   }
 
   /**
+   * Run EVERY subsequent CLI call (model `send`s and `executeShell`) in this
+   * chain INSIDE the named overlayfs branch — a namespace-local COW mount over
+   * the working tree (see scripts/overlay-branch.sh + io.ts spawn injection).
+   * Opt-in and sticky (propagates through clones like switchCwd/switchModel):
+   * once set, the branch id rides every command until a new branch is set.
+   * Used by bug_solving to isolate each parallel fork's edits without a git
+   * worktree or a disk copy. When never called, spawns are byte-identical to
+   * today.
+   */
+  switchBranch(branchId: string): Session {
+    const node = this.graph.create({
+      parentId: this.tipNodeId,
+      containerId: this.containerId,
+      kind: "switchBranch",
+      label: `switchBranch(${branchId})`,
+      input: { branchId },
+    });
+    return this.withBranch(branchId).at(node.id);
+  }
+
+  /**
    * Start a fresh claude conversation. If `model` is provided, the new
    * session uses it; otherwise it inherits the current session's model.
    * Equivalent to `.newSession().switchModel(m)` but without the extra graph
@@ -189,6 +221,7 @@ export class Session {
       sessionId: randomId(),
       model: effective,
       cwd: this.cwd,
+      branchId: this.branchId,
       graph: this.graph,
       tipNodeId: node.id,
       containerId: this.containerId,
@@ -237,6 +270,7 @@ export class Session {
       sessionId: randomId(),
       model: this.model,
       cwd: this.cwd,
+      branchId: this.branchId,
       graph: this.graph,
       tipNodeId: node.id,
       containerId: this.containerId,
@@ -368,6 +402,7 @@ export class Session {
       sessionId: this.sessionId,
       model: this.model,
       cwd: this.cwd,
+      branchId: this.branchId,
       graph: this.graph,
       tipNodeId,
       containerId: this.containerId,
@@ -379,6 +414,7 @@ export class Session {
       sessionId: this.sessionId,
       model,
       cwd: this.cwd,
+      branchId: this.branchId,
       graph: this.graph,
       tipNodeId: this.tipNodeId,
       containerId: this.containerId,
@@ -390,6 +426,20 @@ export class Session {
       sessionId: this.sessionId,
       model: this.model,
       cwd,
+      branchId: this.branchId,
+      graph: this.graph,
+      tipNodeId: this.tipNodeId,
+      containerId: this.containerId,
+    });
+  }
+
+  /** Clone with a new overlay branch id (mirrors withCwd). */
+  protected withBranch(branchId: string): Session {
+    return new Session({
+      sessionId: this.sessionId,
+      model: this.model,
+      cwd: this.cwd,
+      branchId,
       graph: this.graph,
       tipNodeId: this.tipNodeId,
       containerId: this.containerId,
@@ -401,6 +451,7 @@ export class Session {
       sessionId: this.sessionId,
       model: this.model,
       cwd: this.cwd,
+      branchId: this.branchId,
       graph: this.graph,
       tipNodeId,
       containerId: this.containerId,
@@ -416,6 +467,7 @@ export class ForkedSession extends Session {
       sessionId: this.sessionId,
       model: this.model,
       cwd: this.cwd,
+      branchId: this.branchId,
       graph: this.graph,
       tipNodeId: node.id,
       containerId: this.containerId,

@@ -22,6 +22,7 @@ export type NodeKind =
   | "compact"
   | "switchModel"
   | "switchCwd"
+  | "switchBranch"
   | "newSession"
   | "prependToNextPrompt"
   | "appendToNextPrompt"

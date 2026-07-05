@@ -24,6 +24,11 @@ export interface ClaudeCallOptions {
   /** Owning graph node id — propagated to spawnCapture so /api/cancel can
    *  target this branch's claude subprocess. */
   nodeId?: string;
+  /** Opt-in overlay branch id. Forwarded to spawnCapture, which re-wraps the
+   *  CLI invocation to run INSIDE that overlayfs branch. The branch runner sets
+   *  cwd = merged working-tree root, so claude needs no `--cd` (it has none).
+   *  Undefined = normal spawn. */
+  branchId?: string;
   /**
    * Streaming hooks. When `onPartialText` is set, this call switches the
    * CLI to `--output-format stream-json` (which requires `--verbose`),
@@ -202,6 +207,7 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallRes
       args: procArgs,
       cwd,
       timeoutMs,
+      branchId: opts.branchId,
       onStdout,
     });
     // Drain any trailing buffered line (last event might not end in \n).
