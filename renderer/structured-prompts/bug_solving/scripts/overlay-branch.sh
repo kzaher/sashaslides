@@ -40,8 +40,17 @@ fi
 id="${1:?branch-id}"; shift || true
 b="$ROOT/$id"
 
+# The /overlays volume is root-owned on a fresh container start; self-heal so
+# `node` can create branch dirs (idempotent, only sudo-chowns when needed).
+ensure_root_writable() {
+  [ -d "$ROOT" ] && [ -w "$ROOT" ] && return 0
+  sudo mkdir -p "$ROOT" 2>/dev/null || return 1
+  sudo chown -R "$(id -u):$(id -g)" "$(dirname "$ROOT")" 2>/dev/null || sudo chown -R "$(id -u):$(id -g)" "$ROOT" 2>/dev/null
+}
+
 case "$cmd" in
   run)
+    ensure_root_writable
     mkdir -p "$b"/{upper,work,merged}
     # Everything overlay-related happens INSIDE one userns+mountns. The mount is
     # only visible here; the child cmd runs with cwd = the merged view.
