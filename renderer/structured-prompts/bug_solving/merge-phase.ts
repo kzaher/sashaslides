@@ -1,12 +1,13 @@
 /**
- * merge-phase.ts — the FINAL MERGE PHASE of bug_solving, as a structured-prompting
- * GRAPH that runs on the engine (monitor-visible) instead of a procedural script.
+ * merge-phase.ts — the ACCEPT / MERGE ENGINE of bug_solving, as a structured-
+ * prompting GRAPH that runs on the engine (monitor-visible).
  *
- * This is the graph twin of scripts/accept-solved-bugs.ts. That script drives the
- * accept/merge as an imperative loop; here the SAME logic is expressed as engine
- * NODES so the monitor shows the compose → conflict-resolution → retest for every
- * cluster, and so the whole thing is unit-testable with a MOCKED LLM (see
- * merge-phase.test.ts).
+ * This is invoked POST-RUN from main-scaffolding.ts's rating-gated accept phase
+ * (accept-orchestration.ts): once the human has rated every slide of a thread
+ * good (GREEN), that cluster is folded into the accepted state here. The accept
+ * logic is expressed as engine NODES so the monitor shows the compose →
+ * conflict-resolution → retest for every cluster, and so the whole thing is
+ * unit-testable with a MOCKED LLM (see merge-phase.test.ts).
  *
  * ## Graph shape (per accepted / GREEN cluster, in a deterministic order)
  *
@@ -63,8 +64,7 @@ import {
 import type { ClaudeModel } from "../../../structured-prompting/src/index.js";
 import { computeChanges, applyChanges, type Conflict } from "./scripts/patcher.js";
 
-// Converter payload globs the patcher composes over (top-level converter .ts),
-// mirroring accept-solved-bugs' CONVERTER_GLOBS.
+// Converter payload globs the patcher composes over (top-level converter .ts).
 export const CONVERTER_GLOBS = ["renderer/html2slides/*.ts"];
 
 // Conflict markers the resolver assert scans for.
@@ -173,10 +173,10 @@ export interface MergeOps {
    * marks the ledger the next round reads.
    *
    * The next round classifies a cluster GREEN only if EVERY slide is `good` in
-   * `.bug-solving-history/candidates.json` (merge-phase-runner.ts:86-88,
-   * accept-solved-bugs.ts:255-257). So demotion flips each slide's candidates
-   * status to `bad` — which makes the cluster RED (not green) next time, i.e. a
-   * loss to re-solve. It also annotates the canonical `ratings.json` issue
+   * `.bug-solving-history/candidates.json`. So demotion flips each slide's
+   * candidates status to `bad` — which makes the cluster RED (not green) next
+   * time, i.e. a loss to re-solve. It also annotates the canonical `ratings.json`
+   * issue
    * (workspace-setup.ts readLedger, consumed by the worker prompt) with a
    * `mergeFailed`/`reason` note WITHOUT clobbering the user's original comment.
    *
@@ -201,12 +201,30 @@ export interface RealMergeOpsDeps {
    *  (candidates.json for green-detection + ratings.json for the issue text).
    *  Default `<repo>/.bug-solving-history`. */
   historyDir?: string;
+  /**
+   * OPTIONAL overrides for the ONLY methods that need Chrome + the Google Slides
+   * upload/thumbnail path — render+structural-diff and per-slide screenshot/XML
+   * capture. These cannot run in a hermetic (no-network, no-Chrome) test, so an
+   * integration test injects scripted fakes for JUST these while every other
+   * method (compose / revert / promote / tsc / readStagingFile / demoteForResolve)
+   * runs for REAL against the temp git repo. When omitted (production), the real
+   * record-rendering + diff-pptx-pairs + unzip paths are used.
+   *
+   * `renderAndDiff` and `captureSlide` are keyed by their normal signatures; the
+   * fake can inspect the on-disk composed staging tree to key its answer per
+   * cluster. `tscConverterErrors` is exposed too because the real one shells out
+   * to `npx tsc` on the staging tree (slow / environment-heavy) — a test that is
+   * not exercising the tsc gate can stub it to 0.
+   */
+  renderAndDiff?: (baselineDir: string | null, outDir: string) => string[];
+  captureSlide?: (slideId: string) => PerSlideCapture;
+  tscConverterErrors?: () => number;
 }
 
 /**
  * Production MergeOps. The COMPOSE goes through the git-agnostic patcher
  * (computeChanges base→cluster + applyChanges onto staging) exactly like
- * accept-solved-bugs' `--compose patcher` path; promote/revert/render use git +
+ * the patcher `--compose patcher` path; promote/revert/render use git +
  * the record-rendering / diff-pptx-pairs scripts. Kept out of the graph so the
  * graph stays deterministic + testable.
  */
@@ -254,6 +272,7 @@ export function realMergeOps(deps: RealMergeOpsDeps): MergeOps {
       sh(`git -C "${staging}" -c user.email=merge@bug-solving -c user.name=merge-phase commit -q -m "SashaSlides: accept solved bug (${cluster.task})" -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"`, repo);
     },
     tscConverterErrors() {
+      if (deps.tscConverterErrors) return deps.tscConverterErrors();
       try { sh("npx tsc --noEmit", staging); return 0; }
       catch (e) {
         const out = (e as { stdout?: Buffer }).stdout?.toString() || (e as Error).message || "";
@@ -261,6 +280,7 @@ export function realMergeOps(deps: RealMergeOpsDeps): MergeOps {
       }
     },
     renderAndDiff(baselineDir, outDir) {
+      if (deps.renderAndDiff) return deps.renderAndDiff(baselineDir, outDir);
       const ids = deckIds();
       mkdirSync(outDir, { recursive: true });
       const postPptx = join(outDir, "pptx");
@@ -277,6 +297,7 @@ export function realMergeOps(deps: RealMergeOpsDeps): MergeOps {
       return out.sort();
     },
     captureSlide(slideId) {
+      if (deps.captureSlide) return deps.captureSlide(slideId);
       // best-effort thumbnail path (populated by a --mode full render elsewhere)
       // and the slide's pptx XML unzipped from the just-rendered pptx.
       let xml: string | null = null;
@@ -301,8 +322,7 @@ export function realMergeOps(deps: RealMergeOpsDeps): MergeOps {
       try { mkdirSync(historyDir, { recursive: true }); } catch { /* */ }
 
       // (1) candidates.json — the GATE the next round's green-detection reads
-      // (merge-phase-runner.ts:86-88 / accept-solved-bugs.ts:255-257: a cluster
-      // is green ONLY if every slide is `good` here). Flip each demoted slide to
+      // (a cluster is green ONLY if every slide is `good` here). Flip each demoted slide to
       // `bad` so the cluster is classified RED next time = a loss to re-solve.
       try {
         const candFile = join(historyDir, "candidates.json");
@@ -356,7 +376,7 @@ export function realMergeOps(deps: RealMergeOpsDeps): MergeOps {
 }
 
 // ---------------------------------------------------------------------------
-// Conflict-resolver prompt (mirrors accept-solved-bugs.buildResolvePrompt)
+// Conflict-resolver prompt
 // ---------------------------------------------------------------------------
 
 /** Build the RESOLVE prompt the agent runs (in the staging cwd) to merge a

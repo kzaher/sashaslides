@@ -1,7 +1,7 @@
 /**
  * patcher.ts — a BACKEND-NEUTRAL patch/compose engine for bug_solving.
  *
- * Today the compose logic in merge-worktrees.ts / accept-solved-bugs.ts is
+ * Today the compose logic in merge-worktrees.ts / merge-phase.ts is
  * git-specific (`git diff <base>`, `git apply --3way`, `git cherry-pick`). The
  * team is switching branching from git worktrees to FULL DISK COPIES (a
  * "worktree" becomes a plain directory copy, no git metadata). This module
