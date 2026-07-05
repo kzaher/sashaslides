@@ -506,7 +506,12 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
   const ratingsFile = join(resultsDir, "ratings.json");
   const ratings = existsSync(ratingsFile) ? JSON.parse(readFileSync(ratingsFile, "utf-8")) : {};
   const prior = ratings[id];
-  const entry: any = { status, comment, ratedAt: new Date().toISOString() };
+  const entry: any = { status, ratedAt: new Date().toISOString() };
+  // READ-ONLY comments: a rating never overwrites the comment. Use the new one
+  // only if explicitly provided (legacy callers), otherwise PRESERVE whatever
+  // the ledger already holds so the good/bad verdict leaves it untouched.
+  const keepComment = comment !== undefined ? comment : prior?.comment;
+  if (keepComment !== undefined) entry.comment = keepComment;
   let savedAnnotPath: string | null = null;
   if (annotationPng) {
     // Annotations persist under resultsDir/annotations/ so /tmp wipes only
@@ -552,7 +557,11 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
         // worktree gets nuked). Only a merge to main may update the issue.
         const candFile = join(historyDir, "candidates.json");
         const cand = existsSync(candFile) ? JSON.parse(readFileSync(candFile, "utf-8")) : {};
-        const rec: any = { status, comment, ratedAt: entry.ratedAt, taskTitle: taskTitle ?? null };
+        // Preserve the store's existing comment (read-only): a verdict only
+        // updates status, never the comment.
+        const candComment = comment !== undefined ? comment : cand[id]?.comment;
+        const rec: any = { status, ratedAt: entry.ratedAt, taskTitle: taskTitle ?? null };
+        if (candComment !== undefined) rec.comment = candComment;
         if (savedAnnotPath) {
           const candAnnotDir = join(historyDir, "candidate-annotations");
           mkdirSync(candAnnotDir, { recursive: true });
@@ -567,7 +576,11 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
         // truth for the per-slide issue. Update the ledger.
         const ledgerFile = join(historyDir, "ratings.json");
         const ledger = existsSync(ledgerFile) ? JSON.parse(readFileSync(ledgerFile, "utf-8")) : {};
-        const led: any = { status, comment, ratedAt: entry.ratedAt };
+        // Preserve the ledger's existing comment (read-only): a verdict only
+        // updates status, never the comment.
+        const ledComment = comment !== undefined ? comment : ledger[id]?.comment;
+        const led: any = { status, ratedAt: entry.ratedAt };
+        if (ledComment !== undefined) led.comment = ledComment;
         if (savedAnnotPath) {
           const ledAnnotDir = join(historyDir, "annotations");
           mkdirSync(ledAnnotDir, { recursive: true });
@@ -781,6 +794,11 @@ const HTML = `<!DOCTYPE html>
   <button class="flip-tab toggle" id="flipToggle" onclick="toggleFlip()" title="Blink-flip (stacked, tab between) vs classic side-by-side. Press f to flick.">&#9635; Flip</button>
 </div>
 <div class="slide-pair" id="pair"></div>
+<!-- READ-ONLY view toolbar. All drawing/annotation controls (Pen, Rect, Draw,
+     Clear, colour, size, prior-marks toggle) were removed: the ONLY UI control
+     that mutates state is the Good/Bad rating. What remains are purely visual
+     view aids that touch no server state: diff overlay, rendered-region
+     highlight, and the magnifier loupe. -->
 <div class="draw-toolbar" id="drawToolbar">
   <label style="display:flex; gap:6px; align-items:center; cursor:pointer;">
     <input type="checkbox" id="showDiff" onchange="toggleShowDiff()"> Show diff at full size (hide small diff panel)
@@ -789,15 +807,6 @@ const HTML = `<!DOCTYPE html>
   <label style="display:flex; gap:6px; align-items:center; cursor:pointer;" title="Brightens rasterized regions on the Slides render by adding 128 to all RGB channels (via plus-lighter blend)">
     <input type="checkbox" id="showRendered" onchange="toggleShowRendered()"> Highlight rendered regions (+128 channels)
   </label>
-  <span style="width: 24px;"></span>
-  <span>Draw on Slides render:</span>
-  <button id="drawToggle" onclick="toggleDraw()">Draw</button>
-  <button id="toolPen" class="active" onclick="setTool('pen')" title="Freehand pen">&#9998; Pen</button>
-  <button id="toolRect" onclick="setTool('rect')" title="Drag to draw a rectangle">&#9645; Rect</button>
-  <input type="color" id="drawColor" value="#e94560">
-  <label><input type="range" id="drawSize" min="2" max="20" value="6"> px</label>
-  <label style="display:flex; gap:6px; align-items:center; cursor:pointer;" title="Overlay your prior-round annotation marks on the current render"><input type="checkbox" id="priorMarksToggle" checked onchange="applyPriorMarks()"> Prior marks</label>
-  <button onclick="clearDraw()">Clear</button>
   <span style="width: 24px;"></span>
   <label style="display:flex; gap:6px; align-items:center; cursor:pointer;" title="Hover over either image to magnify the region under the cursor"><input type="checkbox" id="loupeToggle" onchange="toggleLoupe()"> Magnifier</label>
   <label style="display:flex; gap:4px; align-items:center;" title="Magnifier zoom level"><input type="range" id="loupeZoomCtl" min="2" max="10" value="3" style="width:70px;"> zoom</label>
@@ -812,9 +821,9 @@ const HTML = `<!DOCTYPE html>
      typed. Populated from sxs-meta.json; hidden entirely when no provenance
      exists for the current slide (older runs). -->
 <div id="origMeta"></div>
-<div class="comment-box">
-  <textarea id="comment" placeholder="What's wrong? (optional — saved with Bad ratings)" rows="2"></textarea>
-</div>
+<!-- READ-ONLY: no comment <textarea>. The only mutating controls are Good/Bad.
+     Any existing comment still DISPLAYS read-only in #savedComment / #origMeta
+     below. "Skip" only navigates (records no status), so it's kept as nav. -->
 <div class="actions">
   <button class="btn btn-good" onclick="rate('good')">Good ✓</button>
   <button class="btn btn-bad" onclick="rate('bad')">Bad ✗</button>
@@ -917,18 +926,22 @@ function render() {
   const renderedOverlayHtml = (c.renderedRegions && c.renderedRegions.length)
     ? '<canvas class="rendered-overlay" id="renderedOverlay"></canvas>'
     : '';
-  // Reconstruct the prior-round annotation on the CURRENT render: overlay the
-  // saved marks (same 16:9 bounds) on the Slides panel, toggleable via "Prior
-  // marks". pointer-events:none so it never blocks drawing new ones on top.
+  // READ-ONLY annotation display. Existing annotations still RENDER as static
+  // overlays on the Slides panel (same 16:9 bounds, pointer-events:none) so the
+  // reviewer can see what was marked — but there is no draw canvas and nothing
+  // to edit. Two possible overlays: the round-1 provenance annotation
+  // (origAnnotationPng) and this round's previously-saved annotation
+  // (annotationPng), whichever exist on disk.
   const priorAnnotHtml = c.origAnnotationPng
     ? '<img class="prior-annot" id="priorAnnot" src="/img?path=' + encodeURIComponent(c.origAnnotationPng) + '">'
     : '';
+  const savedAnnotHtml = c.annotationPng
+    ? '<img class="prior-annot" id="savedAnnot" src="/img?path=' + encodeURIComponent(c.annotationPng) + '">'
+    : '';
   const pairHtml =
     '<div class="panel original"><img id="originalImg" src="/img?path=' + encodeURIComponent(c.originalPng) + '">' + diffOverlay + '</div>' +
-    '<div class="panel slides"><img id="slidesImg" src="/img?path=' + encodeURIComponent(c.slidesPng) + '">' + renderedOverlayHtml + priorAnnotHtml + '<canvas id="drawCanvas"></canvas></div>';
+    '<div class="panel slides"><img id="slidesImg" src="/img?path=' + encodeURIComponent(c.slidesPng) + '">' + renderedOverlayHtml + priorAnnotHtml + savedAnnotHtml + '</div>';
   document.getElementById('pair').innerHTML = pairHtml;
-  setupDrawCanvas(c.annotationPng);
-  applyPriorMarks(); // honor the "Prior marks" toggle on the freshly-built panel
   applyFlip(); // re-apply blink-comparator state to the freshly-rebuilt panels
   if (showDiff) computeClientSideDiff();
   paintRenderedOverlay(c);
@@ -1067,10 +1080,8 @@ function render() {
     zcEl.innerHTML = '';
   }
 
-  // Pre-fill the comment box: this round's saved comment if any, otherwise the
-  // prior round's comment (origComment) so the reviewer edits it in place rather
-  // than retyping. Falls back to empty for a never-commented slide.
-  document.getElementById('comment').value = c.comment || c.origComment || '';
+  // (Comment box removed — comments are READ-ONLY; they display in
+  // #savedComment / #origMeta above and cannot be typed or edited here.)
 
   // Task-scoped reveal buttons: shown when --task-analysis or --task-diffs
   // was configured. Buttons reset to collapsed state on every slide change
@@ -1085,54 +1096,22 @@ function render() {
 }
 
 async function rate(status) {
+  // READ-ONLY UI: a rating records ONLY the good/bad status. No comment, no
+  // annotation, no draw-shapes are sent — the server ignores them anyway. The
+  // existing comment/annotation in the ledger are left untouched.
   const c = comparisons[currentIdx];
-  const comment = document.getElementById('comment').value.trim();
-  // Export annotation canvas if anything was drawn.
-  let annotation, shapes, canvasSize;
-  const canvas = document.getElementById('drawCanvas');
-  if (canvas && canvasHasStrokes) {
-    annotation = canvas.toDataURL('image/png');
-    // Send the committed shapes (canvas coords) so the server can crop each
-    // marked region into an original|test pair. Empty when the annotation was
-    // loaded from disk rather than drawn this session → server falls back to
-    // the whole-annotation bbox.
-    shapes = drawShapes.slice();
-    canvasSize = { w: canvas.width, h: canvas.height };
-  }
-  const resp = await fetch('/api/rate', {
+  await fetch('/api/rate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: c.id, status, comment: comment || undefined, annotation, shapes, canvasSize, pencilPadding: 24 }),
-  });
-  const result = await resp.json().catch(() => ({}));
+    body: JSON.stringify({ id: c.id, status }),
+  }).catch(() => {});
   c.status = status;
-  c.comment = comment || undefined;
-  if (result && Array.isArray(result.zoomCrops)) c.zoomCrops = result.zoomCrops.length ? result.zoomCrops : undefined;
-  // Persist the saved annotation path back onto the in-memory comparison so the
-  // re-render below (navigate → render → setupDrawCanvas) RELOADS the strokes
-  // instead of showing a blank canvas. Without this, rating "bad" wiped the
-  // drawing on single-slide sets (navigate stays on the same slide).
-  if (result && result.annotationPath) c.annotationPng = result.annotationPath;
   navigate(1);
 }
 
-// --- Draw overlay on Slides render ---
-let drawMode = true;   // DEFAULT ON: the annotation canvas is live on load (pen
-                       // ready) so reviewers can draw immediately. Toggle "Draw"
-                       // off to interact with the slide / magnifier instead.
-let drawTool = 'pen'; // 'pen' (freehand) | 'rect' (drag rectangle)
-function setTool(t) {
-  drawTool = t;
-  document.getElementById('toolPen').classList.toggle('active', t === 'pen');
-  document.getElementById('toolRect').classList.toggle('active', t === 'rect');
-}
-// Show/hide the prior-round annotation overlay on the current render per the
-// "Prior marks" checkbox. Called after every slide re-render too.
-function applyPriorMarks() {
-  const el = document.getElementById('priorAnnot');
-  const cb = document.getElementById('priorMarksToggle');
-  if (el && cb) el.classList.toggle('hidden', !cb.checked);
-}
+// (Draw overlay removed — the annotation canvas, pen/rect tools, prior-marks
+//  toggle and all pointer drawing handlers are gone. Annotations are display
+//  only, rendered as static <img> overlays in render().)
 
 // --- Blink-comparator flip ---
 let flipMode = false;   // false = side-by-side (DEFAULT); true = stacked/tabbed (flick between).
@@ -1156,28 +1135,6 @@ function applyFlip() {
 function setFlipSide(side) { flipMode = true; flipSide = side; applyFlip(); }
 function toggleFlip() { flipMode = !flipMode; applyFlip(); }
 function flickFlip() { if (flipMode) { flipSide = flipSide === 'left' ? 'right' : 'left'; applyFlip(); } }
-let canvasHasStrokes = false;
-let drawHistory = []; // stack of ImageData snapshots, one per completed stroke
-let drawShapes = []; // committed annotation shapes (canvas coords) for per-region zoom-crops
-// Cached PNG of the draw canvas, composited into the magnifier so the loupe
-// shows your strokes over the Slides render (not just the bare image).
-// Refreshed whenever the drawing changes.
-let drawCanvasDataUrl = null;
-function refreshDrawCache() {
-  const c = document.getElementById('drawCanvas');
-  drawCanvasDataUrl = (c && canvasHasStrokes) ? c.toDataURL('image/png') : null;
-}
-function undoDraw() {
-  const canvas = document.getElementById('drawCanvas');
-  if (!canvas || drawHistory.length === 0) return;
-  const ctx = canvas.getContext('2d');
-  const prev = drawHistory.pop();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (prev) ctx.putImageData(prev, 0, 0);
-  canvasHasStrokes = drawHistory.length > 0 || !!prev;
-  drawShapes.pop();
-  refreshDrawCache();
-}
 let showDiff = false;
 function toggleShowDiff() {
   showDiff = document.getElementById('showDiff').checked;
@@ -1282,135 +1239,6 @@ function computeClientSideDiff() {
     console.log('client diff: ' + count + ' pixels');
   });
 }
-function toggleDraw() {
-  drawMode = !drawMode;
-  document.getElementById('drawToggle').classList.toggle('active', drawMode);
-  const canvas = document.getElementById('drawCanvas');
-  if (canvas) canvas.style.pointerEvents = drawMode ? 'auto' : 'none';
-}
-async function clearDraw() {
-  const canvas = document.getElementById('drawCanvas');
-  if (canvas) {
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }
-  canvasHasStrokes = false;
-  drawHistory = [];
-  drawShapes = [];
-  refreshDrawCache();
-  // The drawCanvas is NOT the only place an annotation shows: the candidate view
-  // ALSO overlays the prior/original annotation as a separate <img id="priorAnnot">
-  // (and a rendered-overlay). Clearing only the canvas left those rectangles on
-  // screen → "Clear doesn't work". Hide them too.
-  const priorAnnotEl = document.getElementById('priorAnnot');
-  if (priorAnnotEl) priorAnnotEl.style.display = 'none';
-  document.querySelectorAll('.rendered-overlay, .prior-annot, .om-annot-overlay').forEach(function (n) { (n).style.display = 'none'; });
-  // Also drop any LOADED/PERSISTED annotation so a re-render doesn't reload it
-  // from disk and a later save doesn't preserve it. Reset the in-memory state,
-  // wipe the zoom-crops panel, and tell the server to delete the annotation PNG
-  // + zoom-crops for this slide.
-  const c = comparisons[currentIdx];
-  if (!c) return;
-  c.annotationPng = undefined;
-  c.zoomCrops = undefined;
-  const zcEl = document.getElementById('zoomCrops');
-  if (zcEl) zcEl.innerHTML = '';
-  try {
-    await fetch('/api/clear-annotation', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: c.id }),
-    });
-  } catch (e) { /* clearing the live canvas already succeeded; server delete is best-effort */ }
-}
-function setupDrawCanvas(annotationPath) {
-  const img = document.getElementById('slidesImg');
-  const canvas = document.getElementById('drawCanvas');
-  if (!img || !canvas) return;
-  canvas.style.pointerEvents = drawMode ? 'auto' : 'none';
-  document.getElementById('drawToggle').classList.toggle('active', drawMode);
-  canvasHasStrokes = false;
-  drawHistory = [];
-  drawShapes = [];
-  const init = () => {
-    canvas.width = img.naturalWidth || img.clientWidth;
-    canvas.height = img.naturalHeight || img.clientHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    if (annotationPath) {
-      const saved = new Image();
-      saved.onload = () => { ctx.drawImage(saved, 0, 0, canvas.width, canvas.height); canvasHasStrokes = true; refreshDrawCache(); };
-      saved.src = '/img?path=' + encodeURIComponent(annotationPath) + '&t=' + Date.now();
-    }
-  };
-  if (img.complete && img.naturalWidth) init();
-  else img.onload = init;
-
-  let drawing = false;
-  let rectStart = null;     // {x,y} where a rect drag began
-  let rectSnapshot = null;  // canvas state before the rect, restored each move for live preview
-  let lastPos = null;       // most recent pointer pos (rect end + pencil tracking)
-  let penBbox = null;       // accumulated bbox of the current pencil stroke
-  const getPos = (e) => {
-    const r = canvas.getBoundingClientRect();
-    return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
-  };
-  canvas.onpointerdown = (e) => {
-    if (!drawMode) return;
-    drawing = true; canvas.setPointerCapture(e.pointerId);
-    const ctx = canvas.getContext('2d');
-    // Snapshot current canvas BEFORE this stroke so Ctrl+Z can revert to it.
-    // Cap history at 50 entries to bound memory.
-    const snap = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    drawHistory.push(snap);
-    if (drawHistory.length > 50) drawHistory.shift();
-    ctx.strokeStyle = document.getElementById('drawColor').value;
-    ctx.lineWidth = parseFloat(document.getElementById('drawSize').value) * (canvas.width / canvas.getBoundingClientRect().width);
-    const p = getPos(e); lastPos = p;
-    if (drawTool === 'rect') {
-      // Defer drawing to pointermove; keep the pre-rect image to redraw against.
-      rectStart = p; rectSnapshot = snap;
-    } else {
-      penBbox = { minX: p.x, minY: p.y, maxX: p.x, maxY: p.y };
-      ctx.beginPath(); ctx.moveTo(p.x, p.y);
-    }
-  };
-  canvas.onpointermove = (e) => {
-    if (!drawing) return;
-    const ctx = canvas.getContext('2d');
-    const p = getPos(e); lastPos = p;
-    if (drawTool === 'rect') {
-      // Live preview: restore the pre-rect snapshot, then stroke the current box.
-      ctx.putImageData(rectSnapshot, 0, 0);
-      ctx.strokeRect(rectStart.x, rectStart.y, p.x - rectStart.x, p.y - rectStart.y);
-    } else {
-      if (penBbox) { penBbox.minX = Math.min(penBbox.minX, p.x); penBbox.minY = Math.min(penBbox.minY, p.y); penBbox.maxX = Math.max(penBbox.maxX, p.x); penBbox.maxY = Math.max(penBbox.maxY, p.y); }
-      ctx.lineTo(p.x, p.y); ctx.stroke();
-    }
-    canvasHasStrokes = true;
-  };
-  const endStroke = () => {
-    if (drawing) {
-      // Commit this stroke's region (canvas coords) so the server can crop it.
-      // Rect → the box; pencil → the stroke's bounding box (padded server-side).
-      if (drawTool === 'rect' && rectStart && lastPos) {
-        const x = Math.min(rectStart.x, lastPos.x), y = Math.min(rectStart.y, lastPos.y);
-        const w = Math.abs(lastPos.x - rectStart.x), h = Math.abs(lastPos.y - rectStart.y);
-        if (w > 3 && h > 3) drawShapes.push({ kind: 'rect', x, y, w, h });
-      } else if (penBbox) {
-        const w = penBbox.maxX - penBbox.minX, h = penBbox.maxY - penBbox.minY;
-        if (w > 3 || h > 3) drawShapes.push({ kind: 'pencil', x: penBbox.minX, y: penBbox.minY, w, h });
-      }
-    }
-    drawing = false; rectStart = null; rectSnapshot = null; penBbox = null;
-    refreshDrawCache();
-  };
-  canvas.onpointerup = endStroke;
-  canvas.onpointercancel = endStroke;
-}
-
 function navigate(delta) {
   const visible = visibleComparisons();
   if (visible.length === 0) return;
@@ -1438,26 +1266,13 @@ function navigate(delta) {
 }
 
 document.addEventListener('keydown', e => {
-  // Ctrl/Cmd+Z — undo last drawing stroke (works globally, even while typing
-  // in the comment box, so drawing workflow isn't interrupted).
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-    undoDraw();
-    e.preventDefault();
-    return;
-  }
-  const commentEl = document.getElementById('comment');
-  // Don't intercept keys when typing in the comment box
-  if (document.activeElement === commentEl) {
-    if (e.key === 'Escape') { commentEl.blur(); e.preventDefault(); }
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { rate('bad'); e.preventDefault(); }
-    return;
-  }
+  // READ-ONLY keyboard: navigation + the two rating verdicts only. No comment
+  // box to type in, no drawing undo.
   if (e.key === 'ArrowRight' || e.key === 'n') navigate(1);
   if (e.key === 'ArrowLeft' || e.key === 'p') navigate(-1);
   if (e.key === 'g') rate('good');
+  if (e.key === 'b') rate('bad');
   if (e.key === 'f') { flickFlip(); e.preventDefault(); } // blink-flick original↔rendered
-  if (e.key === 'b') { commentEl.focus(); e.preventDefault(); }
-  if (e.key === 'Enter') { const comment = commentEl.value.trim(); if (comment) rate('bad'); }
 });
 
 // --- Magnifier loupe ---
@@ -1489,16 +1304,9 @@ document.addEventListener('mousemove', (e) => {
     lens.style.top = (e.clientY - size / 2) + 'px';
     lens.style.width = size + 'px';
     lens.style.height = size + 'px';
-    // Over the Slides render, composite the draw-canvas (your strokes) ON TOP of
-    // the image so the magnifier shows the annotation. The drawCanvas shares the
-    // image's natural resolution, so one backgroundSize/Position aligns both
-    // layers (CSS repeats a single value across all background images). The data
-    // URL MUST be quoted — it contains commas that would otherwise split the
-    // multi-background list.
-    const drawUrl = (img.id === 'slidesImg' && drawCanvasDataUrl) ? drawCanvasDataUrl : null;
-    lens.style.backgroundImage = drawUrl
-      ? ('url("' + drawUrl + '"), url("' + img.src + '")')
-      : ('url("' + img.src + '")');
+    // View-only magnifier: show a zoomed background-image of whichever image is
+    // under the cursor. (No draw-canvas compositing — there are no strokes.)
+    lens.style.backgroundImage = 'url("' + img.src + '")';
     lens.style.backgroundSize = (img.naturalWidth * zoom) + 'px ' + (img.naturalHeight * zoom) + 'px';
     lens.style.backgroundPosition = (-(nx * zoom - size / 2)) + 'px ' + (-(ny * zoom - size / 2)) + 'px';
     return;
@@ -1575,46 +1383,34 @@ const server = createServer((req, res) => {
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", () => {
-      const { id, status, comment, annotation, shapes, canvasSize, pencilPadding } = JSON.parse(body);
-      const annotationPath = saveRating(id, status, comment, annotation);
-      // Per-annotation zoom-crops: crop original + test at each marked region.
-      let zoomCrops: string[] = [];
-      if (annotation) {
-        const comp = findComparisons().find(c => c.id === id);
-        if (comp) {
-          try {
-            const annotBytes = Buffer.from(String(annotation).replace(/^data:image\/png;base64,/, ""), "base64");
-            zoomCrops = generateZoomCrops(
-              id, comp.originalPng, comp.slidesPng, annotBytes,
-              Array.isArray(shapes) ? shapes : null,
-              canvasSize && typeof canvasSize.w === "number" ? canvasSize : null,
-              typeof pencilPadding === "number" ? pencilPadding : 20,
-            );
-          } catch (e) { console.error("zoom-crop generation failed:", (e as Error).message); }
-        }
+      // READ-ONLY UI: a rating records ONLY the good/bad status. Any comment,
+      // annotation, draw-shape or canvas fields are IGNORED — they are never
+      // read here, so the ledger's existing comment/annotation stay untouched
+      // (saveRating preserves them when none is passed). No zoom-crops are
+      // written on a rating anymore.
+      let id = "", status = "";
+      try { ({ id, status } = JSON.parse(body)); } catch { /* malformed → 400 below */ }
+      if (!id || (status !== "good" && status !== "bad")) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "expected { id, status: 'good' | 'bad' }" }));
+        return;
       }
-      console.log(`RATING: ${id} → ${status}${comment ? ` | ${comment}` : ''}${annotation ? ' [+annotation]' : ''}${zoomCrops.length ? ` [${zoomCrops.length} crops]` : ''}`);
+      saveRating(id, status);
+      console.log(`RATING: ${id} → ${status}`);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, annotationPath, zoomCrops }));
+      res.end(JSON.stringify({ ok: true }));
     });
     return;
   }
 
-  // Truly clear a slide's persisted annotation (PNG + zoom-crops + the
-  // annotation reference in ratings.json / ledger). Wired to the "Clear" button
-  // so wiping the live canvas ALSO removes the saved drawing on disk — otherwise
-  // it reloads on the next render.
-  if (url.pathname === "/api/clear-annotation" && req.method === "POST") {
-    let body = "";
-    req.on("data", (d) => (body += d));
-    req.on("end", () => {
-      let id = "";
-      try { ({ id } = JSON.parse(body)); } catch { /* malformed body → no-op */ }
-      if (id) clearAnnotation(id);
-      console.log(`CLEAR-ANNOTATION: ${id || "(no id)"}`);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: !!id }));
-    });
+  // Annotation-mutation is DISABLED in the read-only UI. The clear-annotation
+  // write path used to delete a slide's persisted drawing + zoom-crops; there is
+  // no longer any drawing tool, so this endpoint is gone (410 Gone). Existing
+  // annotations still DISPLAY (served read-only via /img); they just can't be
+  // cleared or edited from the UI.
+  if (url.pathname === "/api/clear-annotation") {
+    res.writeHead(410, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "annotation editing disabled (read-only rating UI)" }));
     return;
   }
 
