@@ -9,7 +9,7 @@
     "renderer:solver:all-tests": "bash renderer/structured-prompts/bug_solving/run-tests.sh",
     "renderer:solver:e2e-tests": "bash renderer/structured-prompts/bug_solving/run-tests.sh --e2e",
     "renderer:solver:test-jail-claude": "RUN_CLAUDE_JAIL=1 npx tsx renderer/structured-prompts/bug_solving/claude-in-jail.e2e.test.ts",
-    "renderer:solver:run": "bash renderer/structured-prompts/bug_solving/solve.sh --model opus --engine claude --attempts 5",
+    "renderer:solver:run": "bash renderer/structured-prompts/bug_solving/solve.sh --model opus --engine claude --validation-model opus --attempts 5",
     "renderer:build": "npm run typecheck && npm run renderer:build:browser && npm run renderer:build:addon",
     "renderer:build:browser": "npx tsx renderer/html2slides/browser/build.ts",
     "renderer:build:addon": "npx tsx renderer/html2slides/browser/build-addon.ts",

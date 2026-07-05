@@ -74,6 +74,7 @@ import {
   Session,
   SessionWithResult,
   describeError,
+  type ClaudeModel,
 } from "../../../structured-prompting/src/index.js";
 import type { Result } from "../../../structured-prompting/src/index.js";
 import { writeFileSync, readFileSync, readdirSync, copyFileSync, mkdirSync, existsSync } from "fs";
@@ -208,6 +209,10 @@ export interface SlideVerdict {
 /** How many times to re-prompt a single-slide verdict whose response doesn't
  *  parse/validate into a SlideVerdict. */
 const VERDICT_RETRIES = 3;
+// Optional SEPARATE model for the per-slide VALIDATION (verdict) step — usually a
+// smaller/cheaper one (sonnet|haiku). Set via solve.sh --validation-model →
+// BUG_SOLVING_VALIDATION_MODEL. Unset → verdicts inherit the solver model.
+const VALIDATION_MODEL = (process.env.BUG_SOLVING_VALIDATION_MODEL || undefined) as ClaudeModel | undefined;
 
 /**
  * Typed, validated parse of a per-slide verdict response. Throws on malformed
@@ -817,7 +822,13 @@ export function main(args: {
         // Retry the verdict prompt (up to VERDICT_RETRIES) until the response
         // parses + validates into a SlideVerdict. The `assert` runs the typed
         // parser; a throw triggers a re-send rather than accepting garbage.
-        child.tryMultipleTimes<string>(VERDICT_RETRIES, (c) =>
+        //
+        // The per-slide VALIDATION (verdict) can use a SEPARATE, cheaper model
+        // than the solver — set BUG_SOLVING_VALIDATION_MODEL (solve.sh
+        // --validation-model, e.g. sonnet|haiku). Unset → inherits the solver
+        // model. `switchModel` is sticky, so every verdict retry uses it.
+        (VALIDATION_MODEL ? child.switchModel(VALIDATION_MODEL) : child)
+          .tryMultipleTimes<string>(VERDICT_RETRIES, (c) =>
           c
             .prependToNextPrompt(
               `You are verifying the fix for ${slide.slide_id}. ` +
