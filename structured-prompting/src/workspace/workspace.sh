@@ -70,18 +70,28 @@ case "$cmd" in
     # Everything overlay-related happens INSIDE one userns+mountns. The mount is
     # only visible here; the child cmd runs with cwd = the merged view.
     #
-    # JAIL MODE (opt-in via COW_WORKSPACE_JAIL=1) — contain ALL of the child's
-    # writes to the sandbox: COW-overlay the base (repo) AND each path in
-    # COW_WORKSPACE_OVERLAY_EXTRA (colon-separated, e.g. the worker CLI's state
-    # dirs ~/.claude:~/.codex), give it a disposable tmpfs /tmp, then remount the
-    # rest of the fs READ-ONLY so any stray write outside the sandbox FAILS. The
-    # /overlays volume (where the uppers live) is a separate mount → stays rw, so
-    # copy-up still works. NO chroot (that breaks the worker CLI). When
-    # COW_WORKSPACE_JAIL is unset the block is skipped → byte-identical to before.
-    export _CW_JAIL="${COW_WORKSPACE_JAIL:-}" _CW_EXTRA="${COW_WORKSPACE_OVERLAY_EXTRA:-}" _CW_B="$b"
+    # The COW overlay is mounted OVER THE BASE PATH ITSELF (namespace-local), so
+    # the child's cwd is the REAL base path (e.g. /workspaces/sashaslides), not an
+    # /overlays/... mountpoint. This keeps a worker CLI's project identity (claude
+    # files sessions under a cwd-derived project slug) correct, so `claude --resume`
+    # + the monitor find them. Outside the namespace the real base is untouched.
+    #
+    # JAIL MODE (opt-in via COW_WORKSPACE_JAIL=1) — contain the child's writes:
+    #   - COW-overlay the base (repo) → repo edits are sandboxed + disposable.
+    #   - Each path in COW_WORKSPACE_OVERLAY_EXTRA (colon-sep) is ALSO COW-overlaid.
+    #   - Each path in COW_WORKSPACE_SHARE_RW (colon-sep) is left SHARED READ-WRITE
+    #     — the worker CLI's own state (~/.claude/~/.codex sessions) MUST persist to
+    #     the real fs so the monitor + `claude --resume` can read them; it is not
+    #     repo state. These are separate mounts, so the ro-lockdown (which is
+    #     non-recursive) leaves them writable.
+    #   - tmpfs /tmp (disposable), then remount the rest of the fs READ-ONLY.
+    # The /overlays volume (uppers) is a separate mount → stays rw. NO chroot.
+    # When COW_WORKSPACE_JAIL is unset the jail block is skipped.
+    export _CW_JAIL="${COW_WORKSPACE_JAIL:-}" _CW_EXTRA="${COW_WORKSPACE_OVERLAY_EXTRA:-}" \
+           _CW_SHARE="${COW_WORKSPACE_SHARE_RW:-}" _CW_B="$b" _CW_BASE="$BASE"
     exec unshare -Urm --map-root-user bash -c '
       set -e
-      mount -t overlay overlay -o "lowerdir='"$BASE"',upperdir='"$b"'/upper,workdir='"$b"'/work" "'"$b"'/merged"
+      mount -t overlay overlay -o "lowerdir=$_CW_BASE,upperdir=$_CW_B/upper,workdir=$_CW_B/work" "$_CW_BASE"
       if [ -n "$_CW_JAIL" ]; then
         mount --make-rprivate / 2>/dev/null || true
         i=0; IFS=":"; for p in $_CW_EXTRA; do
@@ -92,10 +102,16 @@ case "$cmd" in
           i=$((i+1))
         done; unset IFS
         mount -t tmpfs tmpfs /tmp 2>/dev/null || true
-        # lockdown: overlays + tmpfs + the /overlays volume stay writable; all else RO.
+        # lockdown: remount root READ-ONLY (non-recursive → shared-rw submounts,
+        # overlays, tmpfs, /overlays all stay writable).
         mount -o remount,bind,ro / 2>/dev/null || mount -o remount,ro / 2>/dev/null || true
+        # re-assert SHARE_RW paths writable in case they sit on the / mount (bind
+        # them rw so the worker CLI can persist its session state to the real fs).
+        IFS=":"; for p in $_CW_SHARE; do
+          [ -d "$p" ] && { mount -o remount,bind,rw "$p" 2>/dev/null || mount --bind "$p" "$p" 2>/dev/null || true; }
+        done; unset IFS
       fi
-      cd "'"$b"'/merged"
+      cd "$_CW_BASE"
       "$@"
     ' bash "$@"
     ;;
