@@ -6,7 +6,7 @@
  *
  * This is the ONE test that spends a real (cheap, haiku) model call, so it is
  * OPT-IN: it runs only with RUN_CLAUDE_JAIL=1 (and real overlays + a claude CLI);
- * otherwise it SKIPS loudly. Run it with:  npm run test:jail-claude
+ * otherwise it SKIPS loudly. Run it with:  npm run renderer:solver:test-jail-claude
  *
  * The jail runs the worker as root-in-userns, so claude refuses
  * --dangerously-skip-permissions unless IS_SANDBOX=1 (accurate: it IS sandboxed);

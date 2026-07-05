@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run-tests.sh — run the bug_solving test suite. Invoked from the ROOT via:
-#   npm run test:bug-solving     # all unit + integration + e2e tests
-#   npm run test:e2e             # only the *e2e* tests (real overlay/git; nothing but recording+LLM mocked)
+#   npm run renderer:solver:all-tests     # all unit + integration + e2e tests
+#   npm run renderer:solver:e2e-tests             # only the *e2e* tests (real overlay/git; nothing but recording+LLM mocked)
 # Exits non-zero on the first failing file. Run from repo root (npm sets cwd there).
 set -uo pipefail
 DIR="renderer/structured-prompts/bug_solving"
