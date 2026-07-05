@@ -7,12 +7,14 @@
 #   npm run renderer:solver:run -- --model haiku --engine codex  both
 #   npm run renderer:solver:run -- --attempts 3                  retries per cluster before giving up
 #   npm run renderer:solver:run -- --clean | --continue          discard / resume persisted overlays
+#   npm run renderer:solver:run -- --no-regen                   keep hand-edited clusters.ts
 #
 # --model    = opus | sonnet | haiku | fable   (unsupported → error)
 # --engine   = claude | codex                  (unsupported → error)
 # --attempts = positive integer                (overrides per-cluster retry_budget)
 #
-# Solves the clusters in clusters.ts (regenerate with `npm run renderer:solver:clusters`).
+# Regenerates clusters.ts from the reconciled ledgers on every fresh run (skip
+# with --no-regen to keep hand edits; --continue never regenerates), then solves.
 # Each fork solves in a JAILED, copy-free overlay sandbox; boots its own rating UI
 # and BLOCKS for your good/bad; green forks go through the LLM merge + regression
 # gate. Overlays PERSIST — on a re-run the engine makes you pick --clean/--continue.
@@ -25,6 +27,7 @@ BUNDLE="structured-prompting/dist/main-scaffolding.mjs"   # build + launch the S
 MODEL="${BUG_SOLVING_MODEL:-opus}"
 ENGINE="${BUG_SOLVING_ENGINE:-claude}"
 ATTEMPTS="${BUG_SOLVING_RETRY_BUDGET:-5}"
+REGEN=1          # fresh solve regenerates clusters.ts from the reconciled ledgers
 PASS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -34,6 +37,8 @@ while [ $# -gt 0 ]; do
     --engine=*)   ENGINE="${1#*=}"; shift ;;
     --attempts)  ATTEMPTS="${2:?--attempts needs a value}"; shift 2 ;;
     --attempts=*) ATTEMPTS="${1#*=}"; shift ;;
+    --no-regen)  REGEN=0; shift ;;          # keep hand-edited clusters.ts as-is
+    --continue)  REGEN=0; PASS+=("$1"); shift ;;  # resume = same clusters, never regen
     *) PASS+=("$1"); shift ;;
   esac
 done
@@ -50,6 +55,17 @@ case "$ATTEMPTS" in
 esac
 [ "$ATTEMPTS" -ge 1 ] || { echo "❌ --attempts must be >= 1 (got $ATTEMPTS)" >&2; exit 2; }
 echo "▶ model=$MODEL  engine=$ENGINE  attempts=$ATTEMPTS  extra=[${PASS[*]:-}]"
+
+# 0. Regenerate clusters.ts from the reconciled, checked ledgers (one cluster per
+#    bad slide). Skipped on --continue (resume must solve the SAME clusters) and
+#    --no-regen (preserve hand-enriched descriptions). Attempts are NOT baked in
+#    here — --attempts above is the run-level knob.
+if [ "$REGEN" = "1" ]; then
+  echo "▶ regenerating clusters.ts from reconciled ledgers …"
+  npx tsx renderer/structured-prompts/bug_solving/generate-clusters.ts --write
+else
+  echo "▶ keeping existing clusters.ts (no regen)"
+fi
 
 # 1. Chrome on :9222 (rendering needs it) — start if absent.
 if ! curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
