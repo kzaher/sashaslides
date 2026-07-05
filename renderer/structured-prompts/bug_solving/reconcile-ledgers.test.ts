@@ -335,12 +335,24 @@ function main() {
         history: loadLedger(paths.history),
         live: loadLedger(paths.live),
       });
-      ok("(17) real ledgers → badSet === [slide_11, slide_13, slide_14]",
-        JSON.stringify(r.badSet) === '["slide_11","slide_13","slide_14"]', JSON.stringify(r.badSet));
-      ok("(17a) slide_11 flagged baseline-good-but-candidates-bad demote",
-        r.slides.slide_11?.conflicts.some((c) => /baseline=good but candidates=bad/.test(c)) === true);
-      ok("(17b) slide_14 flagged baseline-good-but-candidates-bad demote",
-        r.slides.slide_14?.conflicts.some((c) => /baseline=good but candidates=bad/.test(c)) === true);
+      // NOTE: the reconciler's CORRECTNESS is fully covered by the synthetic
+      // cases above. This real-ledger case must NOT hardcode the bad set — the
+      // live candidates.json drifts as the user rates (e.g. slide_03 became bad).
+      // Instead assert the INVARIANTS: badSet is sorted, every entry needsSolve,
+      // and — since candidates is the top status authority — EVERY candidates-bad
+      // slide lands in badSet.
+      const candBad = Object.entries(loadLedger(paths.candidates))
+        .filter(([, v]) => (v as { status?: string }).status === "bad")
+        .map(([id]) => id).sort();
+      ok("(17) real badSet is sorted + every entry needsSolve",
+        JSON.stringify(r.badSet) === JSON.stringify([...r.badSet].sort()) &&
+        r.badSet.every((id) => r.slides[id]?.needsSolve === true), JSON.stringify(r.badSet));
+      ok("(17a) every candidates-bad slide is in badSet (candidates = top authority)",
+        candBad.every((id) => r.badSet.includes(id)), `candBad=${JSON.stringify(candBad)} badSet=${JSON.stringify(r.badSet)}`);
+      // For any slide bad-in-candidates but good-in-baseline, the demote conflict is recorded.
+      const demoted = candBad.filter((id) => (loadLedger(paths.baseline)[id] as { status?: string } | undefined)?.status === "good");
+      ok("(17b) baseline-good-but-candidates-bad slides carry the demote conflict",
+        demoted.every((id) => r.slides[id]?.conflicts.some((c) => /baseline=good but candidates=bad/.test(c))), JSON.stringify(demoted));
     } else {
       console.log("  ⊘ (17) real-ledger badSet case skipped (ledger file absent — portable)");
     }
