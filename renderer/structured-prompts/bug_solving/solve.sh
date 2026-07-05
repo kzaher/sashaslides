@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # solve.sh — build + launch the bug_solving cluster solver end-to-end.
 # Run from the repo root:
-#   npm run solve                                  fresh (defaults: --model opus --engine claude)
-#   npm run solve -- --model sonnet                pick the solver model
-#   npm run solve -- --engine codex                pick the engine
-#   npm run solve -- --model haiku --engine codex  both
-#   npm run solve -- --attempts 3                  retries per cluster before giving up
-#   npm run solve -- --clean | --continue          discard / resume persisted overlays
+#   npm run renderer:solver:run                                  fresh (defaults: --model opus --engine claude)
+#   npm run renderer:solver:run -- --model sonnet                pick the solver model
+#   npm run renderer:solver:run -- --engine codex                pick the engine
+#   npm run renderer:solver:run -- --model haiku --engine codex  both
+#   npm run renderer:solver:run -- --attempts 3                  retries per cluster before giving up
+#   npm run renderer:solver:run -- --clean | --continue          discard / resume persisted overlays
 #
 # --model    = opus | sonnet | haiku | fable   (unsupported → error)
 # --engine   = claude | codex                  (unsupported → error)
 # --attempts = positive integer                (overrides per-cluster retry_budget)
 #
-# Solves the clusters in clusters.ts (regenerate with `npm run solve:clusters`).
+# Solves the clusters in clusters.ts (regenerate with `npm run renderer:solver:clusters`).
 # Each fork solves in a JAILED, copy-free overlay sandbox; boots its own rating UI
 # and BLOCKS for your good/bad; green forks go through the LLM merge + regression
 # gate. Overlays PERSIST — on a re-run the engine makes you pick --clean/--continue.
