@@ -11,6 +11,7 @@
  * layout (`<library>/src/index.js`) so existing imports keep working.
  */
 export * from "./api/wire.js";
+export * from "./workspace/cow-workspace.js";
 export * from "./server/graph.js";
 export * from "./server/session.js";
 export * from "./server/engine.js";

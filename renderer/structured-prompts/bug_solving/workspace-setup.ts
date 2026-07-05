@@ -2,7 +2,7 @@
  * Build the list of Task objects that main.ts will iterate over. Each task:
  *   - gets an OVERLAY BRANCH id (bs-<task>-<ts>). There is NO git worktree and
  *     NO disk copy: the overlay is mounted lazily, per-command, by
- *     scripts/overlay-branch.sh (lower = the working tree, upper = /overlays).
+ *     structured-prompting's workspace.sh (lower = the working tree, upper = /overlays).
  *     Every command the fork runs (worker model calls + record/diff shells)
  *     executes INSIDE that branch (engine `switchBranch`), so its edits +
  *     scratch land in the branch's isolated upper layer, never on the base tree.

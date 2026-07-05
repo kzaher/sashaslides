@@ -61,7 +61,7 @@ import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 const execFileAsync = promisify(execFile);
-import { ClaudeEngine, CodexEngine, Session } from "../../../structured-prompting/src/index.js";
+import { ClaudeEngine, CodexEngine, Session, WORKSPACE_SCRIPT } from "../../../structured-prompting/src/index.js";
 import { buildTasks } from "./workspace-setup.js";
 import { main, type TaskResult } from "./main.js";
 import { registerOverlayCleanup } from "./overlay-cleanup.js";
@@ -83,10 +83,9 @@ const REPO_ROOT = process.cwd();
 // pipeline as AFTER; this is the repo-root-relative path joined onto each
 // task's workspace_dir below.
 const RECORD_SCRIPT_REL = "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts";
-// The overlay-branch runner (absolute). Same resolution as overlay-cleanup.ts.
-const OVERLAY_BRANCH_SH =
-  process.env.OVERLAY_BRANCH_SCRIPT ??
-  resolve(REPO_ROOT, "renderer/structured-prompts/bug_solving/scripts/overlay-branch.sh");
+// The COW-workspace runner (absolute), owned by the structured-prompting
+// library. A bug_solving branch is just a CowWorkspace over the repo.
+const OVERLAY_BRANCH_SH = WORKSPACE_SCRIPT;
 // Keep fileURLToPath import reachable even if we stop using HERE later.
 const _HERE = dirname(fileURLToPath(import.meta.url)); void _HERE;
 

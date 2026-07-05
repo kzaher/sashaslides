@@ -11,19 +11,20 @@
 
 import { spawn, type SpawnOptions } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
 import type { Buffer as NodeBuffer } from "node:buffer";
+import { WORKSPACE_SCRIPT } from "../workspace/cow-workspace.js";
 
 /**
- * Absolute path to the overlay-branch runner. When a spawn carries a
+ * Absolute path to the generic COW-workspace runner. When a spawn carries a
  * `branchId`, the command is re-wrapped as
- *   overlay-branch.sh run <branchId> -- <command> <args...>
- * so it executes inside that branch's namespace-local overlayfs mount (cwd =
- * merged working-tree root). Overridable via env for tests / relocations.
+ *   workspace.sh run <branchId> -- <command> <args...>
+ * so it executes inside that workspace's namespace-local overlayfs mount (cwd =
+ * merged working-tree root). The path is owned by the workspace library
+ * (structured-prompting/src/workspace/workspace.sh) — the engine no longer
+ * references any bug_solving path. Overridable via COW_WORKSPACE_SCRIPT (or the
+ * legacy OVERLAY_BRANCH_SCRIPT) for tests / relocations.
  */
-const OVERLAY_BRANCH_SH =
-  process.env.OVERLAY_BRANCH_SCRIPT ??
-  resolve(process.cwd(), "renderer/structured-prompts/bug_solving/scripts/overlay-branch.sh");
+const OVERLAY_BRANCH_SH = WORKSPACE_SCRIPT;
 
 // ---------- Shared types ----------------------------------------------------
 

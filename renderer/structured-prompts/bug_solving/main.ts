@@ -352,9 +352,10 @@ const SCRIPTS = {
   // Rating gate CLI (`wait-for-ratings`): boots INSIDE the fork after step 7 —
   // BLOCKS on the cluster's ratings.json, then writes rating-outcome.json.
   waitRatings: "renderer/structured-prompts/bug_solving/scripts/wait-for-ratings.ts",
-  // The overlay-branch runner itself (repo-relative). Used from inside a fork's
-  // branch to spin a FRESH base branch for the whole-deck baseline render.
-  overlayBranch: "renderer/structured-prompts/bug_solving/scripts/overlay-branch.sh",
+  // The COW-workspace runner (repo-relative), owned by the structured-prompting
+  // library. Used from inside a fork's branch to spin a FRESH base branch for
+  // the whole-deck baseline render.
+  overlayBranch: "structured-prompting/src/workspace/workspace.sh",
 };
 
 /** History dir the per-fork rating server + gate mirror verdicts into (the
