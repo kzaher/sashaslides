@@ -9,7 +9,9 @@
     "build": "npx tsx build.ts",
     "example": "lsof -ti:4711 | xargs -r kill; npx tsx build.ts example/main-scaffolding.ts && node dist/main-scaffolding.mjs",
     "example:monitor": "open http://127.0.0.1:4711/",
-    "test": "npx tsx src/server/session.test.ts && npx tsx src/server/reaper.test.ts && npx tsx src/server/inject.test.ts"
+    "test": "npx tsx src/server/session.test.ts && npx tsx src/server/reaper.test.ts && npx tsx src/server/inject.test.ts",
+    "test:e2e": "npx tsx src/workspace/cow-workspace.e2e.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@types/node": "^25.6.0",
