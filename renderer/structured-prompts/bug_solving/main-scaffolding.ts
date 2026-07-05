@@ -64,6 +64,7 @@ const execFileAsync = promisify(execFile);
 import { ClaudeEngine, CodexEngine, Session } from "../../../structured-prompting/src/index.js";
 import { buildTasks, assertCleanTree } from "./workspace-setup.js";
 import { main, type TaskResult } from "./main.js";
+import { registerOverlayCleanup } from "./overlay-cleanup.js";
 
 // ❌ DO NOT REMOVE this import or replace with a dummy. Create the sibling
 // `./clusters.ts` file with your actual cluster definitions. esbuild will
@@ -151,6 +152,11 @@ async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<v
 }
 
 async function run(): Promise<void> {
+  // Register overlay-branch cleanup FIRST — before any branch is created. This
+  // sweeps branches leaked by a prior SIGKILL'd run (startup) and reaps all
+  // overlays on every trappable death path (exit/SIGINT/SIGTERM/SIGHUP/uncaught).
+  registerOverlayCleanup();
+
   // `--engine=codex|claude` (or env BUG_SOLVING_ENGINE) selects the model
   // backend. Both are the same `Engine` composed with a different
   // `ModelDriver`, so the graph/monitor/interpreter behaviour is identical;

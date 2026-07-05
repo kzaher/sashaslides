@@ -18,6 +18,7 @@
   },
   "mounts": [
     "source=polybot-chrome-profile,target=/home/node/chrome-profile,type=volume",
+    "source=sashaslides-overlays,target=/overlays,type=volume",
     "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.codex,target=/home/node/.codex,type=bind,consistency=cached",
     "source=${localEnv:HOME}/Projects/claude,target=/p/claude,type=bind",
@@ -35,6 +36,6 @@
       }
     }
   },
-  "runArgs": ["--shm-size=2g", "--platform=linux/amd64"],
+  "runArgs": ["--shm-size=2g", "--platform=linux/amd64", "--cap-add=SYS_ADMIN", "--security-opt=apparmor=unconfined"],
   "remoteUser": "node"
 }
