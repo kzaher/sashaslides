@@ -18,6 +18,7 @@
  */
 import { resolve } from "path";
 import { recordRendering, type Mode } from "./record-rendering-lib";
+import { resolveRecordIo, describeRecordIo } from "../sxs-io.js";
 
 type Args = { slides: string[]; out: string; title?: string; fixtures?: string; mode: Mode };
 
@@ -46,6 +47,18 @@ function parseArgs(argv: string[]): Args {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  // Resolve + print the documented I/O contract (sxs-io.ts) so a caller sees
+  // exactly which files are INPUTS (fixtures) and where each OUTPUT lands
+  // (pptx/, screenshots/, thumbs/, manifest.json) for the selected mode —
+  // instead of inferring it from a bare --out dir.
+  const io = resolveRecordIo({
+    fixturesDir: args.fixtures ?? "renderer/html2slides/e2e/fixtures",
+    slides: args.slides,
+    outDir: args.out,
+    mode: args.mode,
+    title: args.title,
+  });
+  console.error(`\n${describeRecordIo(io)}\n`);
   await recordRendering(args);
 }
 

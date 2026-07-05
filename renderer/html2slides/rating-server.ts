@@ -16,7 +16,9 @@
 import { createServer } from "http";
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, copyFileSync, statSync, unlinkSync } from "fs";
 import { join, resolve, dirname } from "path";
+import { execSync } from "child_process";
 import { PNG } from "pngjs";
+import { resolveRatingIo, describeRatingIo } from "../structured-prompts/bug_solving/sxs-io.js";
 
 const args = process.argv.slice(2);
 const resultsDir = resolve(args[0] || ".");
@@ -42,6 +44,14 @@ let historyDir: string | null = null;           // --history-dir persistent ledg
 // Default (no flag) = canonical: the rating describes main's current render and
 // updates the ledger's issue as the source of truth.
 let candidateMode = false;
+// --notify-cmd: a shell command executed ONCE when this rating UI comes up, so a
+// human is actively pinged that a cluster is waiting to be rated. Configurable via
+// the flag or BUG_SOLVING_NOTIFY_CMD. Tokens {url} {port} {title} {slides} {dir}
+// are substituted; the same values are also exported as env vars (RATING_URL,
+// RATING_PORT, RATING_TITLE, RATING_SLIDES, RATING_DIR). Regardless of whether a
+// command is set, a "🔔 NOTIFY USER" line is ALWAYS printed to stdout on boot so an
+// orchestrator (or the human) watching stdout always learns a UI is waiting.
+let notifyCmd: string | null = process.env.BUG_SOLVING_NOTIFY_CMD ?? null;
 for (let i = 0; i < args.length; i++) {
   const v = args[i];
   if (v === "--port") port = parseInt(args[++i]);
@@ -53,6 +63,51 @@ for (let i = 0; i < args.length; i++) {
   else if (v === "--task-title") taskTitle = args[++i];
   else if (v === "--history-dir") historyDir = resolve(args[++i]);
   else if (v === "--candidate") candidateMode = true;
+  else if (v === "--notify-cmd") notifyCmd = args[++i];
+}
+
+// Resolve the full, documented I/O contract (sxs-io.ts) from the parsed flags.
+// This is the single source of truth for WHICH files this server reads (slides,
+// originals, manifest, meta, source, orig-annotations) and WRITES (ratings.json,
+// annotations/, zoom-crops/) and mirrors to the LEDGER (candidates.json). It is
+// printed on boot (describeRatingIo) so the interface is never implicit. The
+// existing per-function path derivations below match these documented defaults.
+const io = resolveRatingIo({
+  resultsDir,
+  slidesDir: slidesDirOverride ?? undefined,
+  originalsDir: originalsDirOverride ?? undefined,
+  filterSlides,
+  historyDir: historyDir ?? undefined,
+  candidateMode,
+});
+
+/** Fire the per-UI notification when the server comes up. ALWAYS prints a
+ *  "🔔 NOTIFY USER" line to stdout (the guaranteed baseline notifier); then, if a
+ *  --notify-cmd / BUG_SOLVING_NOTIFY_CMD is configured, runs it with the UI's
+ *  context. Never throws — a broken notifier must not take down the rating UI. */
+function fireNotify(url: string): void {
+  const title = taskTitle ?? resultsDir;
+  const slides = (filterSlides ?? []).join(",");
+  console.log(`🔔 NOTIFY USER: rate "${title}" → ${url}${slides ? ` (slides: ${slides})` : ""}`);
+  if (!notifyCmd) {
+    console.log(`  (no --notify-cmd / BUG_SOLVING_NOTIFY_CMD — stdout notice only)`);
+    return;
+  }
+  const cmd = notifyCmd
+    .split("{url}").join(url)
+    .split("{port}").join(String(port))
+    .split("{title}").join(title)
+    .split("{slides}").join(slides)
+    .split("{dir}").join(resultsDir);
+  try {
+    execSync(cmd, {
+      stdio: "inherit",
+      env: { ...process.env, RATING_URL: url, RATING_PORT: String(port), RATING_TITLE: title, RATING_SLIDES: slides, RATING_DIR: resultsDir },
+    });
+    console.log(`  notify-cmd ran: ${cmd}`);
+  } catch (e) {
+    console.error(`  ⚠ notify-cmd failed (non-fatal): ${(e as Error).message}`);
+  }
 }
 
 // Render-parameter badge: surface which conversion mode produced these slides
@@ -1652,8 +1707,11 @@ const server = createServer((req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`\n  Rating server: http://localhost:${port}\n`);
+  const url = `http://localhost:${port}`;
+  console.log(`\n  Rating server: ${url}\n`);
   console.log(`  Results dir: ${resultsDir}`);
   console.log(`  Comparisons: ${findComparisons().length}`);
-  console.log(`\n  Keyboard: g=good, b=bad, n/→=next, p/←=prev\n`);
+  console.log(`\n${describeRatingIo(io)}\n`);
+  console.log(`  Keyboard: g=good, b=bad, n/→=next, p/←=prev\n`);
+  fireNotify(url);
 });
