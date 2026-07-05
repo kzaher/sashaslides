@@ -498,6 +498,8 @@ export function selectGreenClusters(
       task: t.task_id,
       branch_id: t.branch_id,
       slides: t.slides.map((s) => s.slide_id),
+      // ABSOLUTE shared dir — reaped with the solve overlay on a successful merge.
+      shared_dir: t.shared_dir,
     };
     const outcome = deps.readMarker(t);
     const isGreen = outcome?.green === true;

@@ -59,12 +59,13 @@
  * mock ONLY the LLM (via MockIO) + `retest`; the workspace, filesystem, and
  * ledger run for real. Production wires `realLlmMergeOps(...)`.
  */
-import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { Session, SessionWithResult } from "../../../structured-prompting/src/index.js";
 import {
   createCowWorkspace,
+  cleanupCowWorkspace,
   type CowWorkspace,
 } from "../../../structured-prompting/src/workspace/cow-workspace.js";
 
@@ -83,6 +84,24 @@ export interface GreenCluster {
   /** the cluster's own targeted (already-approved) slides. Changes to THESE are
    *  intended; a change to any OTHER slide is a ripple regression. */
   slides: string[];
+  /** ABSOLUTE path to the fork's shared dir (`/overlays/shared/<run>/<task>`)
+   *  holding its rating-outcome.json. Reaped ONLY when this cluster is
+   *  successfully merged + promoted (cleanup-on-success). Optional — when unset,
+   *  only the solve overlay is reaped. */
+  shared_dir?: string;
+}
+
+/**
+ * Cleanup-ON-SUCCESS: a green cluster whose fix has been merged + promoted onto
+ * the REAL working tree no longer needs its solve overlay — reap it (and its
+ * shared dir). A demoted/rejected cluster is NEVER passed here: its overlay is
+ * LEFT on disk so it can be inspected / re-merged. Best-effort + never-throws.
+ */
+function reapAcceptedCluster(cluster: GreenCluster, upperRoot?: string): void {
+  try { cleanupCowWorkspace(cluster.branch_id, upperRoot); } catch { /* best-effort */ }
+  if (cluster.shared_dir) {
+    try { rmSync(cluster.shared_dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
 }
 
 /** The final report. */
@@ -284,6 +303,9 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
           report.accepted = green.map((g) => g.task);
           report.mergedFiles = files;
           try { allWs.cleanup(); } catch { /* best-effort */ }
+          // Cleanup-ON-SUCCESS: every green cluster was promoted → reap each
+          // cluster's solve overlay + shared dir (the throwaway merge ws above).
+          for (const g of green) reapAcceptedCluster(g, args.upperRoot);
           return `echo llm-merge:all-promoted [${files.join(",")}]`;
         })
         .pipe((sp) => installValue(sp, report));
@@ -324,6 +346,9 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
   // forks fold in). `keptFiles` = files owned by a kept fork (what we promote).
   const accepted: Record<string, string> = {};
   const keptFiles = new Set<string>();
+  // Clusters kept (clean) — reaped ONLY after the final promote (cleanup-on-
+  // success). Rejected clusters are demoted + LEFT for inspection/re-merge.
+  const keptClusters: GreenCluster[] = [];
 
   // Which files each fork changed (rel → this fork's version), computed now.
   const forkFilesOf = (cluster: GreenCluster): Array<{ rel: string; content: string }> => {
@@ -385,6 +410,7 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
       sc.executeShell(() => {
         if (perForkState.ripple.length === 0) {
           report.accepted.push(cluster.task);
+          keptClusters.push(cluster);
           for (const { rel } of forkFiles) keptFiles.add(rel);
           return `echo llm-merge:seq-keep ${cluster.task}`;
         }
@@ -409,6 +435,9 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
       if (files.length) ops.promote(seqWs, files);
       report.mergedFiles = files;
       try { seqWs.cleanup(); } catch { /* best-effort */ }
+      // Cleanup-ON-SUCCESS: reap the kept clusters' solve overlays + shared dirs
+      // now that their fix is promoted. Rejected clusters were left untouched.
+      for (const g of keptClusters) reapAcceptedCluster(g, ctx.upperRoot);
       return `echo llm-merge:seq-promoted [${files.join(",")}]`;
     }),
   );
