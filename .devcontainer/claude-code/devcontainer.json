@@ -28,7 +28,7 @@
     "CLAUDE_CONFIG_DIR": "/home/node/.claude"
   },
   "postCreateCommand": "npm install",
-  "postStartCommand": "bash /opt/codepit-ext/register-extension.sh; bash .devcontainer/claude-code/setup-claude.sh; bash .devcontainer/start-chrome.sh &",
+  "postStartCommand": "sudo chown node:node /overlays 2>/dev/null || true; bash /opt/codepit-ext/register-extension.sh; bash .devcontainer/claude-code/setup-claude.sh; bash .devcontainer/start-chrome.sh &",
   "customizations": {
     "vscode": {
       "settings": {
