@@ -183,7 +183,7 @@ export class Session {
   /**
    * Run EVERY subsequent CLI call (model `send`s and `executeShell`) in this
    * chain INSIDE the named overlayfs branch — a namespace-local COW mount over
-   * the working tree (see workspace/workspace.sh + io.ts spawn injection).
+   * the working tree (see cow-workspace/workspace.sh + io.ts spawn injection).
    * Opt-in and sticky (propagates through clones like switchCwd/switchModel):
    * once set, the branch id rides every command until a new branch is set.
    * Used by bug_solving to isolate each parallel fork's edits without a git

@@ -369,7 +369,7 @@ const SCRIPTS = {
   // The COW-workspace runner (repo-relative), owned by the structured-prompting
   // library. Used from inside a fork's branch to spin a FRESH base branch for
   // the whole-deck baseline render.
-  overlayBranch: "structured-prompting/src/workspace/workspace.sh",
+  overlayBranch: "cow-workspace/workspace.sh",
 };
 
 /** History dir the per-fork rating server + gate mirror verdicts into (the

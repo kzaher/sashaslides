@@ -42,7 +42,7 @@ import {
 import {
   createCowWorkspace,
   type CowWorkspace,
-} from "../../../structured-prompting/src/workspace/cow-workspace.js";
+} from "../../../cow-workspace/cow-workspace.js";
 import { llmMerge, type GreenCluster, type MergeOps, type MergeReport } from "./llm-merge.js";
 
 // ---------------------------------------------------------------------------

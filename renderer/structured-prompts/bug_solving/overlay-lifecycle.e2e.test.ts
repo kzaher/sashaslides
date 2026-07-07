@@ -33,14 +33,14 @@ import {
 } from "../../../structured-prompting/src/server/io.js";
 import {
   createCowWorkspace, type CowWorkspace,
-} from "../../../structured-prompting/src/workspace/cow-workspace.js";
+} from "../../../cow-workspace/cow-workspace.js";
 import { llmMerge, type GreenCluster, type MergeOps, type MergeReport } from "./llm-merge.js";
 import { detectPriorState, decideStartup } from "./startup-detection.js";
 import { resumeMerge } from "./resume-merge.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = "/workspaces/sashaslides";
-const SH = `${REPO}/structured-prompting/src/workspace/workspace.sh`;
+const SH = `${REPO}/cow-workspace/workspace.sh`;
 
 let passed = 0, failed = 0;
 const failures: Array<{ name: string; err: unknown }> = [];
@@ -190,7 +190,7 @@ async function main(): Promise<void> {
     try {
       writeFileSync(driver, `
         process.env.COW_WORKSPACE_ROOT = ${JSON.stringify(UPPER_ROOT)};
-        const { createCowWorkspace } = await import(${JSON.stringify(resolve(REPO, "structured-prompting/src/workspace/cow-workspace.ts"))});
+        const { createCowWorkspace } = await import(${JSON.stringify(resolve(REPO, "cow-workspace/cow-workspace.ts"))});
         const { registerOverlayCleanup } = await import(${JSON.stringify(resolve(HERE, "overlay-cleanup.ts"))});
         registerOverlayCleanup();                    // no-op: no startup sweep, no death handler
         const ws = createCowWorkspace({ base: ${JSON.stringify(base)}, id: ${JSON.stringify(id)}, upperRoot: ${JSON.stringify(UPPER_ROOT)} });

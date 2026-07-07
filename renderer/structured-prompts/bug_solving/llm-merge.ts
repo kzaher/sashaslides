@@ -67,7 +67,7 @@ import {
   createCowWorkspace,
   cleanupCowWorkspace,
   type CowWorkspace,
-} from "../../../structured-prompting/src/workspace/cow-workspace.js";
+} from "../../../cow-workspace/cow-workspace.js";
 import { makeRegressionRetest } from "./regression-gate.js";
 import {
   type RenderRecord,

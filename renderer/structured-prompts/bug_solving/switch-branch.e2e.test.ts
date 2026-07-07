@@ -28,7 +28,7 @@ import { resolve } from "path";
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
 
 const REPO = "/workspaces/sashaslides";
-const SH = `${REPO}/structured-prompting/src/workspace/workspace.sh`;
+const SH = `${REPO}/cow-workspace/workspace.sh`;
 const ROOT = "/overlays/switch-branch-e2e"; // isolated root — never touches a live run
 const CANARY = "renderer/html2slides/convert-pptx.ts"; // a real tracked converter file
 const BRANCH = `sb-e2e-${process.pid}`;

@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, writeFileSync, rmSync, appendFileSync, readFileS
 import { resolve } from "path";
 
 const REPO = "/workspaces/sashaslides";
-const SH = `${REPO}/structured-prompting/src/workspace/workspace.sh`;
+const SH = `${REPO}/cow-workspace/workspace.sh`;
 const ROOT = "/overlays/e2e-branches"; // isolated root so we never touch a live run's branches
 const env = { ...process.env, OVERLAY_BRANCH_ROOT: ROOT };
 const CANARY = "renderer/html2slides/convert-pptx.ts"; // a real tracked converter file

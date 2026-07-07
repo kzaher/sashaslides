@@ -40,8 +40,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /**
  * Absolute path to the workspace.sh runner. Resolution order:
  *   1. COW_WORKSPACE_SCRIPT / OVERLAY_BRANCH_SCRIPT env override,
- *   2. beside this module (source / tsx runs — src/workspace/workspace.sh),
- *   3. cwd-relative structured-prompting/src/workspace/workspace.sh (for the
+ *   2. beside this module (source / tsx runs — cow-workspace/workspace.sh),
+ *   3. cwd-relative cow-workspace/workspace.sh (for the
  *      esbuild bundle, whose module dir is dist/ and has no sibling .sh; the
  *      canonical launch cwd is the repo root).
  */
@@ -50,7 +50,7 @@ export const WORKSPACE_SCRIPT: string = (() => {
   if (override) return resolve(override);
   const beside = resolve(HERE, "workspace.sh");
   if (existsSync(beside)) return beside;
-  const fromCwd = resolve(process.cwd(), "structured-prompting/src/workspace/workspace.sh");
+  const fromCwd = resolve(process.cwd(), "cow-workspace/workspace.sh");
   if (existsSync(fromCwd)) return fromCwd;
   return beside; // best-effort; run() will surface a clear error if it's missing
 })();
