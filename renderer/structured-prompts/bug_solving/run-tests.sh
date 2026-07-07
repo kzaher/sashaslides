@@ -5,7 +5,7 @@
 # Exits non-zero on the first failing file. Run from repo root (npm sets cwd there).
 set -uo pipefail
 DIR="renderer/structured-prompts/bug_solving"
-WS="structured-prompting/src/workspace"   # generic COW-workspace library tests
+WS="cow-workspace"   # generic COW-workspace library tests
 mode="${1:-all}"
 if [ "$mode" = "--e2e" ] || [ "$mode" = "e2e" ]; then
   mapfile -t files < <(ls "$DIR"/*e2e*.test.ts "$WS"/*e2e*.test.ts 2>/dev/null)

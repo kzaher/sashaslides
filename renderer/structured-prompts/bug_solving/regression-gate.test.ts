@@ -36,7 +36,7 @@ import {
   createCowWorkspace,
   cleanupAllCowWorkspaces,
   type CowWorkspace,
-} from "../../../structured-prompting/src/workspace/cow-workspace.js";
+} from "../../../cow-workspace/cow-workspace.js";
 import {
   regressionGate,
   makeRegressionRetest,

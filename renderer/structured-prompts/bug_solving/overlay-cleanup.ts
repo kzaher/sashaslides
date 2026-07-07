@@ -16,7 +16,7 @@ import {
   registerCowCleanup,
   cleanupAllCowWorkspaces,
   cleanupCowWorkspace,
-} from "../../../structured-prompting/src/workspace/cow-workspace.js";
+} from "../../../cow-workspace/cow-workspace.js";
 
 /** Best-effort, synchronous, never-throws reap of ALL overlay branches
  *  (used by --clean). No explicit upperRoot: the runner honors

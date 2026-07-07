@@ -27,7 +27,7 @@
  * (only the rendering is mocked in tests). `makeRegressionRetest` wraps it as the
  * `MergeOps.retest(ws, intendedSlides) → {changed}` seam llm-merge drives.
  */
-import type { CowWorkspace } from "../../../structured-prompting/src/workspace/cow-workspace.js";
+import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
 import {
   type RenderRecord,
   type StabilityClassification,

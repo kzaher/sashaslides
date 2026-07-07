@@ -17,7 +17,7 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 
-const SH = resolve(dirname(fileURLToPath(import.meta.url)), "../../../structured-prompting/src/workspace/workspace.sh");
+const SH = resolve(dirname(fileURLToPath(import.meta.url)), "../../../cow-workspace/workspace.sh");
 let passed = 0, failed = 0;
 const ok = (n: string, c: boolean, e = "") => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.log(`  ✗ ${n}${e ? ` — ${e}` : ""}`); } };
 
