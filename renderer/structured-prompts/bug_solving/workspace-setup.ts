@@ -21,7 +21,7 @@
  * overlay lower IS the working tree, so uncommitted changes ride into every
  * branch naturally; the gate is obsolete.
  */
-import { readFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, existsSync, mkdirSync, copyFileSync } from "fs";
 import { resolve } from "path";
 import type { SlideTask, Task } from "./main.js";
 import { makeAnnotationComposite } from "./scripts/annotation-composite.js";
@@ -169,6 +169,36 @@ const ANALYSIS_REL = "bug-solving-analysis";
  *  parallel runs don't collide; each task gets its own subdir under that. */
 const SHARED_ROOT = "/overlays/shared";
 
+/**
+ * Stage each slide's SxS images into a JAIL-VISIBLE dir and populate the
+ * consolidated `img_*` fields (absolute paths) on the SlideTask.
+ *
+ * WHY this is required: the worker runs inside the COW jail, where `/tmp` is a
+ * fresh tmpfs — the host's `/tmp/sxs-complex/{originals,slides,...}` sources are
+ * INVISIBLE there, and the slide PNGs live ONLY under /tmp (not in the repo tree,
+ * so the overlay lower can't surface them either). We copy them into
+ * `<shared_dir>/images/` on the `/overlays` volume, which is a SEPARATE mount the
+ * jail leaves readable (the same cross-boundary channel the rating-outcome
+ * markers use). The `img_*` absolute paths resolve identically on the host and
+ * inside the jail, so the prompt's `img_original ?? original_png` fallback now
+ * lands on a file the worker can actually open. Best-effort per image: a missing
+ * source (e.g. no annotation → no composite) simply leaves that field undefined.
+ */
+function stageSlideImages(slides: SlideTask[], imagesDir: string): void {
+  try { mkdirSync(imagesDir, { recursive: true }); } catch { /* best-effort */ }
+  const copy = (src: string | undefined, name: string): string | undefined => {
+    if (!src || !existsSync(src)) return undefined;
+    const dst = resolve(imagesDir, name);
+    try { copyFileSync(src, dst); return dst; } catch { return undefined; }
+  };
+  for (const s of slides) {
+    s.img_original = copy(s.original_png, `${s.slide_id}_original.png`);
+    s.img_attempt = copy(s.rendered_png, `${s.slide_id}_attempt.png`);
+    s.img_annotations = copy(s.annotation_png, `${s.slide_id}_annotations.png`);
+    s.img_highlighted = copy(s.composite_png, `${s.slide_id}_highlighted_attempt.png`);
+  }
+}
+
 export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "clusters">): Task[] {
   const opts: BuildOptions = { ...DEFAULTS, ...options };
   const runId = `run-${Date.now()}`;
@@ -177,10 +207,14 @@ export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "
     const c = opts.clusters[i];
     const slides = buildSlideTasks(c.slide_ids, opts);
     const { branch_id } = createOverlayBranch(c.task_id);
-    // No per-slide image consolidation/copy: the /tmp/sxs-complex sources
-    // (originals/ annotations/ composites/) are outside the overlay lower, so
-    // they remain readable by their absolute paths INSIDE the branch. The
-    // prompts fall back to those absolute paths (SlideTask.original_png etc.).
+    const shared_dir = `${SHARED_ROOT}/${runId}/${c.task_id}`;
+    // Consolidate this task's per-slide SxS images into the jail-visible shared
+    // dir (on the /overlays volume). The worker runs inside the COW jail, where
+    // /tmp is a fresh tmpfs, so the /tmp/sxs-complex sources are UNREACHABLE by
+    // their absolute paths — we must copy them somewhere the jail can read. This
+    // populates SlideTask.img_* (absolute /overlays paths) which the prompts
+    // prefer over the dead /tmp fallbacks.
+    stageSlideImages(slides, `${shared_dir}/images`);
     out.push({
       task_id: c.task_id,
       branch_id,
@@ -190,7 +224,7 @@ export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "
       workspace_dir: opts.repo_root,
       // ABSOLUTE, OUTSIDE the overlay — the fork's rating-outcome marker lands
       // here so the final merge (running outside any branch) can read it.
-      shared_dir: `${SHARED_ROOT}/${runId}/${c.task_id}`,
+      shared_dir,
       scratch_dir: SCRATCH_REL,
       analysis_dir: ANALYSIS_REL,
       fixtures_dir: opts.fixtures_dir,
