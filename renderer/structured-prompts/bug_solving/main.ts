@@ -643,28 +643,37 @@ export function stabilityBranch(
   session: Session,
   opts: { repo: string; fixturesDirRel: string },
 ): SessionWithResult<string> {
+  return session.executeShell(() => stabilityCommand(opts));
+}
+
+/**
+ * PURE (env + fs) builder for the stability node's shell command. Extracted from
+ * stabilityBranch so it's directly unit-testable. Returns:
+ *   • an `echo …skipped` when NO_ACCEPT or BUG_SOLVING_SKIP_STABILITY (no merge
+ *     will consult the gate),
+ *   • an `echo …no fixtures` when the deck is empty/unreadable,
+ *   • otherwise the stability.ts CLI invocation, ALWAYS suffixed `|| echo …` so it
+ *     exits 0 (a flaky render must never cancel the sibling fork branch).
+ */
+export function stabilityCommand(opts: { repo: string; fixturesDirRel: string }): string {
   const skip = acceptDisabled(process.env) || process.env.BUG_SOLVING_SKIP_STABILITY === "1";
+  if (skip) return `echo "[stability] skipped (no-accept / BUG_SOLVING_SKIP_STABILITY)"`;
   const attempts = Number(process.env.BUG_SOLVING_STABILITY_ATTEMPTS) || 3;
   const STABILITY_SCRIPT = "renderer/structured-prompts/bug_solving/stability.ts";
-  return session.executeShell(() => {
-    // No merge will run (or stability explicitly skipped) → keep the node but do
-    // no rendering; the gate isn't consulted when nothing is being merged.
-    if (skip) return `echo "[stability] skipped (no-accept / BUG_SOLVING_SKIP_STABILITY)"`;
-    let deck: string[] = [];
-    try {
-      deck = readdirSync(join(opts.repo, opts.fixturesDirRel))
-        .filter((f) => /^slide_\d+\.html$/.test(f))
-        .map((f) => f.replace(/\.html$/, ""))
-        .sort();
-    } catch { /* fixtures dir unreadable → skip below */ }
-    if (deck.length === 0) return `echo "[stability] no slide_*.html fixtures — skipping"`;
-    const csv = deck.join(",");
-    return (
-      `cd "${opts.repo}" && npx tsx "${join(opts.repo, STABILITY_SCRIPT)}" ` +
-      `--slides "${csv}" --out "${STABILITY_JSON}" --fixtures "${opts.fixturesDirRel}" --attempts ${attempts} ` +
-      `|| echo "[stability] non-fatal failure — merge gate degrades to xml-stable"`
-    );
-  });
+  let deck: string[] = [];
+  try {
+    deck = readdirSync(join(opts.repo, opts.fixturesDirRel))
+      .filter((f) => /^slide_\d+\.html$/.test(f))
+      .map((f) => f.replace(/\.html$/, ""))
+      .sort();
+  } catch { /* fixtures dir unreadable → empty deck → skip below */ }
+  if (deck.length === 0) return `echo "[stability] no slide_*.html fixtures — skipping"`;
+  const csv = deck.join(",");
+  return (
+    `cd "${opts.repo}" && npx tsx "${join(opts.repo, STABILITY_SCRIPT)}" ` +
+    `--slides "${csv}" --out "${STABILITY_JSON}" --fixtures "${opts.fixturesDirRel}" --attempts ${attempts} ` +
+    `|| echo "[stability] non-fatal failure — merge gate degrades to xml-stable"`
+  );
 }
 
 // ---------- Main ----------

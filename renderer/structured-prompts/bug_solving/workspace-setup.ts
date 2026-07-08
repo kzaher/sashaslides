@@ -184,7 +184,7 @@ const SHARED_ROOT = "/overlays/shared";
  * lands on a file the worker can actually open. Best-effort per image: a missing
  * source (e.g. no annotation → no composite) simply leaves that field undefined.
  */
-function stageSlideImages(slides: SlideTask[], imagesDir: string): void {
+export function stageSlideImages(slides: SlideTask[], imagesDir: string): void {
   try { mkdirSync(imagesDir, { recursive: true }); } catch { /* best-effort */ }
   const copy = (src: string | undefined, name: string): string | undefined => {
     if (!src || !existsSync(src)) return undefined;
@@ -197,6 +197,18 @@ function stageSlideImages(slides: SlideTask[], imagesDir: string): void {
     s.img_annotations = copy(s.annotation_png, `${s.slide_id}_annotations.png`);
     s.img_highlighted = copy(s.composite_png, `${s.slide_id}_highlighted_attempt.png`);
   }
+}
+
+/**
+ * Filter clusters to the one(s) matching `--only` (BUG_SOLVING_ONLY): exact
+ * task_id, a substring of it, or a slide id contained in the cluster. Empty
+ * `only` → all clusters (a fresh copy). Pure — no env, no process.exit; the
+ * caller decides what an empty result means (main-scaffolding errors + exits 2).
+ */
+export function selectOnlyClusters(clusters: readonly Cluster[], only: string): Cluster[] {
+  const q = (only ?? "").trim();
+  if (!q) return [...clusters];
+  return clusters.filter((c) => c.task_id === q || c.task_id.includes(q) || c.slide_ids.includes(q));
 }
 
 export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "clusters">): Task[] {
