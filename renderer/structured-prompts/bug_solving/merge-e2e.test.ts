@@ -8,17 +8,26 @@
  * base tree, the REAL dual-class regression gate reading a REAL stability.json, the
  * REAL all-at-once→sequential fallback, and the REAL demote ledger (candidates.json).
  *
+ * Terminology: a fork's fold either KEEPS its stability (binary/pixel for a
+ * pixel-perfect slide; xml + rendered for an xml-stable slide) or it doesn't — a
+ * fold that doesn't keep stability is simply NOT MERGED (there is no "violation").
+ *
  * Cases:
- *   (1) clean all-at-once            → both forks promoted; ledger untouched.
- *   (2) non-targeted ripple          → sequential fallback: keep + promote the
- *       clean fork, roll back + REAL-demote the diverging fork; fork B folds on
- *       the POST-fork-A base (serial target mutation, via the tagged LLM log).
- *   (3) green pixel-class violation  → reject + real demote (base rolled back).
- *   (4) green xml-class parts change → reject + real demote (xml-stable branch).
- *   (5) no green clusters            → no-op: no promote, no demote.
- *   (6) human marker round-trip      → a rating-outcome written inside a workspace
+ *   (1) clean all-at-once            → both forks merged; ledger untouched.
+ *   (2) non-targeted ripple          → sequential fallback: keep + merge the clean
+ *       fork, roll back + REAL-demote the diverging fork; fork B folds on the
+ *       POST-fork-A base (serial target mutation, via the tagged LLM log).
+ *   (3) pixel-perfect fork can't keep binary stability      → not merged + demoted.
+ *   (4) xml-stable fork can't keep xml+rendered stability   → not merged + demoted.
+ *   (5) no green clusters            → no-op: no merge, no demote.
+ *   (6) CONTINUE past a fork that can't keep stability — a later fork that DOES
+ *       keep its stability still merges (one failure never blocks the others).
+ *   (7) a MERGED green is the reference — a later fork that would regress it doesn't
+ *       keep that slide's stability → not merged; the merged green is preserved.
+ *   (8) human marker round-trip      → a rating-outcome written inside a workspace
  *       is readable outside (the green/red hand-off the merge reads).
- * Plus: proof the ONLY mocked calls were LLM + recording (tagged), and no leaks.
+ *   (9) no /overlays leaks.
+ * Plus: proof the ONLY mocked calls were LLM + recording (tagged).
  *
  * Requires CAP_SYS_ADMIN + /overlays; SKIPs loudly (exit 0) otherwise.
  */
@@ -133,8 +142,8 @@ async function main(): Promise<void> {
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
-  // (3) green pixel-class violation → reject + real demote.
-  await test("(3) green pixel-class violation → reject + REAL demote (base rolled back)", async () => {
+  // (3) a pixel-perfect fork that can't keep BINARY stability → not merged.
+  await test("(3) pixel-perfect fork can't keep binary stability → not merged + REAL demote (base rolled back)", async () => {
     const { base, fixturesDir, stabilityPath, historyDir } = setupBase("pixviol", { pixelPerfect: ["slide_01"], xmlStable: ["slide_02"], unstable: [] });
     const fixMap = { slide_01: "FIX_A" };
     const wsA = makeFork(base, UPPER, uid("pv-a"), "FIX_A");
@@ -152,8 +161,8 @@ async function main(): Promise<void> {
     } finally { wsA.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
-  // (4) green xml-class violation: same xml, DIFFERENT rendered-parts.
-  await test("(4) green xml-class rendered-parts change → reject + REAL demote", async () => {
+  // (4) an xml-stable fork that can't keep XML+RENDERED stability → not merged.
+  await test("(4) xml-stable fork can't keep xml+rendered stability → not merged + REAL demote", async () => {
     const { base, fixturesDir, stabilityPath, historyDir } = setupBase("xmlviol", { pixelPerfect: [], xmlStable: ["slide_02"], unstable: [] });
     const wsA = makeFork(base, UPPER, uid("xv-a"), "FIX_B");
     const green = [greenCluster("task-b", wsA, ["slide_02"])];
@@ -189,8 +198,66 @@ async function main(): Promise<void> {
     } finally { rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
-  // (6) human green/red marker round-trips across the overlay boundary.
-  await test("(6) human rating marker written inside a workspace is readable outside", async () => {
+  // (6) CONTINUE past a fork that can't keep stability — the fold keeps going and
+  //     still merges a fork that DOES keep its stability (Q1).
+  await test("(6) a fork that can't keep stability is skipped; the fold CONTINUES and a stable fork still merges", async () => {
+    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("continue", { pixelPerfect: ["slide_01"], xmlStable: ["slide_02"], unstable: [] });
+    const wsA = makeFork(base, UPPER, uid("k-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("k-b"), "FIX_B");
+    const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
+    const has = (ws: import("../../../cow-workspace/cow-workspace.js").CowWorkspace, f: string) => new RegExp(f).test(ws.readUpperFile(CONVERTER_REL) ?? BASE_FILE);
+    // slide_01 (A, pixel): LGTM UNREACHABLE → A can NEVER keep binary stability.
+    // slide_02 (B, xml): keeps xml+rendered stability once FIX_B is folded.
+    const recording = recordingSeam({
+      tag: "R:continue",
+      base: (sid) => sid === "slide_01" ? { pixelHash: "s01-base" } : { xmlHash: "s02-base", renderedPartsHash: "s02-base" },
+      lgtm: (sid) => sid === "slide_01" ? { pixelHash: "UNREACHABLE" } : { xmlHash: "s02-fix", renderedPartsHash: "s02-fix" },
+      merge: (ws, sid) => sid === "slide_01"
+        ? { pixelHash: has(ws, "FIX_A") ? "s01-A" : "s01-base" }
+        : (has(ws, "FIX_B") ? { xmlHash: "s02-fix", renderedPartsHash: "s02-fix" } : { xmlHash: "s02-base", renderedPartsHash: "s02-base" }),
+    });
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
+    try {
+      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm: mockLlm(mergeComposer, { tag: "L:merge-compose" }) });
+      assert.equal(report!.mode, "sequential");
+      assert.deepEqual(report!.accepted, ["task-b"], "B kept stability → merged; A's failure did NOT block it");
+      assert.deepEqual(report!.rejected.map((r) => r.task), ["task-a"], "A couldn't keep binary stability → not merged");
+      assert.ok(/FIX_B/.test(readFileSync(join(base, CONVERTER_REL), "utf8")), "B's fix promoted");
+      assert.equal(candStatus(historyDir, "slide_01"), "bad", "A demoted");
+      assert.equal(candStatus(historyDir, "slide_02"), undefined, "B NOT demoted");
+    } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
+  });
+
+  // (7) a MERGED green is the new reference — a later fork that would regress it
+  //     doesn't keep that slide's stability → not merged; merged green preserved (Q2).
+  await test("(7) a merged green is the reference — a later fork regressing it doesn't keep stability → not merged; merged green preserved", async () => {
+    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("locked", { pixelPerfect: ["slide_01"], xmlStable: ["slide_02"], unstable: [] });
+    const wsA = makeFork(base, UPPER, uid("l-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("l-b"), "FIX_B");
+    const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
+    const has = (ws: import("../../../cow-workspace/cow-workspace.js").CowWorkspace, f: string) => new RegExp(f).test(ws.readUpperFile(CONVERTER_REL) ?? BASE_FILE);
+    // slide_01 (A, pixel): stable with FIX_A alone (== its LGTM/merged state), but
+    // FIX_B REGRESSES it. slide_02 (B, xml): keeps stability with FIX_B.
+    const recording = recordingSeam({
+      tag: "R:locked",
+      base: (sid) => sid === "slide_01" ? { pixelHash: "s01-base" } : { xmlHash: "s02-base", renderedPartsHash: "s02-base" },
+      lgtm: (sid) => sid === "slide_01" ? { pixelHash: "s01-A" } : { xmlHash: "s02-fix", renderedPartsHash: "s02-fix" },
+      merge: (ws, sid) => sid === "slide_01"
+        ? { pixelHash: has(ws, "FIX_B") ? "s01-REGRESSED" : (has(ws, "FIX_A") ? "s01-A" : "s01-base") }
+        : (has(ws, "FIX_B") ? { xmlHash: "s02-fix", renderedPartsHash: "s02-fix" } : { xmlHash: "s02-base", renderedPartsHash: "s02-base" }),
+    });
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
+    try {
+      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm: mockLlm(mergeComposer, { tag: "L:merge-compose" }) });
+      assert.equal(report!.mode, "sequential");
+      assert.deepEqual(report!.accepted, ["task-a"], "A merged first + locked in as the reference");
+      assert.deepEqual(report!.rejected.map((r) => r.task), ["task-b"], "B regressed A's merged slide → didn't keep its stability → not merged");
+      const merged = readFileSync(join(base, CONVERTER_REL), "utf8");
+      assert.ok(/FIX_A/.test(merged) && !/FIX_B/.test(merged), "A's merged fix PRESERVED; B's regressing fold rolled back");
+      assert.equal(candStatus(historyDir, "slide_02"), "bad", "B demoted");
+    } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
+  });
+
+  // (8) human green/red marker round-trips across the overlay boundary.
+  await test("(8) human rating marker written inside a workspace is readable outside", async () => {
     const base = mkdtempSync(join(tmpdir(), "merge-e2e-marker-"));
     const runId = uid("run");
     const sharedDir = `/overlays/shared/${runId}/task-x`;
@@ -211,7 +278,7 @@ async function main(): Promise<void> {
     } finally { ws.cleanup(); rmSync(base, { recursive: true, force: true }); try { rmSync(`/overlays/shared/${runId}`, { recursive: true, force: true }); } catch { /* */ } }
   });
 
-  await test("(7) no /overlays leaks after all merges", async () => {
+  await test("(9) no /overlays leaks after all merges", async () => {
     const leftover = existsSync(UPPER) ? readdirSync(UPPER) : [];
     assert.deepEqual(leftover, [], `UPPER should be empty, found ${JSON.stringify(leftover)}`);
   });
