@@ -42,6 +42,12 @@ export type ParallelApplyCallback = (
   input: unknown,
   index: number,
 ) => SessionWithResult<unknown>;
+/** One branch of a `parallelCombine` node — builds a sub-chain from a fresh
+ *  session (lazy, like parallelFork's apply) so its nodes are created at runtime
+ *  under the branch wrapper. The branches run CONCURRENTLY (Promise.all). */
+export type ParallelBranchCallback = (s: Session) => SessionWithResult<unknown>;
+/** Joins the N branch results (positional) into the parallelCombine node's value. */
+export type ParallelCombineCallback = (...vals: unknown[]) => unknown;
 export type TryCodeCallback = (s: Session) => SessionWithResult<unknown>;
 export type TryFallbackCallback = (
   s: Session,
@@ -96,6 +102,14 @@ export interface NodeKindSchemas {
   parallelFork: {
     input: { count: number; inputs: readonly unknown[] };
     callbacks: { apply: ParallelApplyCallback };
+  };
+  /** N heterogeneous branches run CONCURRENTLY (Promise.all), then a combine
+   *  lambda joins their (positional) results. Like parallelFork + a final
+   *  reducer, but each branch is its own typed sub-chain rather than one apply
+   *  over a homogeneous input list. Surfaced via Session.parallelCombineWith{1..5}. */
+  parallelCombine: {
+    input: { count: number };
+    callbacks: { branches: ParallelBranchCallback[]; combine: ParallelCombineCallback };
   };
   try: {
     input: null;

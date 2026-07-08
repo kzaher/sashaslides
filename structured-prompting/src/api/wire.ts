@@ -34,6 +34,7 @@ export type NodeKind =
   | "pipe"
   | "combineWith"
   | "parallelFork"
+  | "parallelCombine"
   | "try"
   | "tryMultipleTimes"
   | "assert"

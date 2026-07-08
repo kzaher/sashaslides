@@ -577,6 +577,61 @@ export class Engine {
           graph.finishOk(node.id, { count: results.length });
           return { value: results, ctx };
         }
+        case "parallelCombine": {
+          // N heterogeneous branches run CONCURRENTLY (Promise.all — same
+          // cancellation semantics as parallelFork: a branch that throws cancels
+          // its siblings and propagates), each under its own `combineBranch`
+          // wrapper so the UI shows it as a distinct indented thread. When all
+          // resolve, the combine lambda joins their positional results.
+          const branches = node.callbacks.branches;
+          const combine = node.callbacks.combine;
+          const results = await Promise.all(
+            branches.map(async (branchFn, i) => {
+              const branchNode = graph.create({
+                parentId: node.id,
+                kind: "combineBranch",
+                label: `parallelBranch #${i}`,
+              });
+              graph.start(branchNode.id);
+              // Fresh ctx per branch (mirrors parallelFork's childCtx) so the
+              // concurrent branches never share mutable prepend/append/pending
+              // state. model/cwd/branch inherit; a branch sets its own branch via
+              // switchBranch inside its body if it needs one.
+              const branchCtx: RunCtx = {
+                driverSessionId: null,
+                model: ctx.model,
+                cwd: ctx.cwd,
+                branchId: ctx.branchId,
+                prepend: [],
+                append: [],
+                pendingFork: false,
+                pendingForkNodeId: null,
+                pendingCompact: false,
+                pendingCompactNodeId: null,
+              };
+              const branchSession = new Session({
+                sessionId: randomId(),
+                model: ctx.model,
+                cwd: ctx.cwd,
+                graph,
+                tipNodeId: branchNode.id,
+                containerId: branchNode.id,
+              });
+              try {
+                const subTip = branchFn(branchSession);
+                const sub = await this.runChain(graph, branchNode.id, subTip.tipNodeId, branchCtx, undefined);
+                graph.finishOk(branchNode.id, safeValue(sub.value));
+                return sub.value;
+              } catch (e) {
+                graph.finishErr(branchNode.id, e);
+                throw e;
+              }
+            }),
+          );
+          const joint = combine(...results);
+          graph.finishOk(node.id, { joint: safeValue(joint) });
+          return { value: joint, ctx };
+        }
         case "try": {
           const code = node.callbacks.code;
           const fallback = node.callbacks.fallback;

@@ -336,6 +336,80 @@ export class Session {
     return this.withResultAt<R[]>(node.id);
   }
 
+  /**
+   * Run 1–5 HETEROGENEOUS branches CONCURRENTLY (Promise.all, like parallelFork)
+   * and join their results with a combine lambda — `parallelFork + a final
+   * reducer`, but each branch is its own typed sub-chain instead of one `apply`
+   * over a homogeneous input list. Each branch shows as its own indented thread
+   * in the monitor; the barrier waits on ALL of them, THEN calls `combine` with
+   * their results positionally.
+   *
+   * Branches are LAZY builders `(s: Session) => SessionWithResult<T>` (same idiom
+   * as parallelFork's apply / combineWith's execution) so their nodes are created
+   * at runtime under the branch wrapper. A branch that throws cancels its
+   * siblings (parallelFork semantics) — make a branch non-throwing (e.g. shell
+   * `… || echo`, or a try/materializeError) if it must not abort the others.
+   */
+  parallelCombineWith1<A, R>(
+    b1: (s: Session) => SessionWithResult<A>,
+    combine: (a: A) => R,
+  ): SessionWithResult<R> {
+    return this.parallelCombine([b1], (v) => combine(v[0] as A));
+  }
+  parallelCombineWith2<A, B, R>(
+    b1: (s: Session) => SessionWithResult<A>,
+    b2: (s: Session) => SessionWithResult<B>,
+    combine: (a: A, b: B) => R,
+  ): SessionWithResult<R> {
+    return this.parallelCombine([b1, b2], (v) => combine(v[0] as A, v[1] as B));
+  }
+  parallelCombineWith3<A, B, C, R>(
+    b1: (s: Session) => SessionWithResult<A>,
+    b2: (s: Session) => SessionWithResult<B>,
+    b3: (s: Session) => SessionWithResult<C>,
+    combine: (a: A, b: B, c: C) => R,
+  ): SessionWithResult<R> {
+    return this.parallelCombine([b1, b2, b3], (v) => combine(v[0] as A, v[1] as B, v[2] as C));
+  }
+  parallelCombineWith4<A, B, C, D, R>(
+    b1: (s: Session) => SessionWithResult<A>,
+    b2: (s: Session) => SessionWithResult<B>,
+    b3: (s: Session) => SessionWithResult<C>,
+    b4: (s: Session) => SessionWithResult<D>,
+    combine: (a: A, b: B, c: C, d: D) => R,
+  ): SessionWithResult<R> {
+    return this.parallelCombine([b1, b2, b3, b4], (v) => combine(v[0] as A, v[1] as B, v[2] as C, v[3] as D));
+  }
+  parallelCombineWith5<A, B, C, D, E, R>(
+    b1: (s: Session) => SessionWithResult<A>,
+    b2: (s: Session) => SessionWithResult<B>,
+    b3: (s: Session) => SessionWithResult<C>,
+    b4: (s: Session) => SessionWithResult<D>,
+    b5: (s: Session) => SessionWithResult<E>,
+    combine: (a: A, b: B, c: C, d: D, e: E) => R,
+  ): SessionWithResult<R> {
+    return this.parallelCombine([b1, b2, b3, b4, b5], (v) => combine(v[0] as A, v[1] as B, v[2] as C, v[3] as D, v[4] as E));
+  }
+
+  /** Shared builder for the typed parallelCombineWith{1..5} arities. */
+  private parallelCombine<R>(
+    branches: Array<(s: Session) => SessionWithResult<unknown>>,
+    combine: (vals: unknown[]) => R,
+  ): SessionWithResult<R> {
+    const node = this.graph.create({
+      parentId: this.tipNodeId,
+      containerId: this.containerId,
+      kind: "parallelCombine",
+      label: `parallelCombine(n=${branches.length})`,
+      input: { count: branches.length },
+      callbacks: {
+        branches,
+        combine: ((...vals: unknown[]) => combine(vals)) as (...vals: unknown[]) => unknown,
+      },
+    });
+    return this.withResultAt<R>(node.id);
+  }
+
   try<R = string>(
     code: TryFn<R>,
     fallback: TryFallbackFn<R>
