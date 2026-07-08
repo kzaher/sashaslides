@@ -65,7 +65,7 @@ const execFileAsync = promisify(execFile);
 import { rmSync, existsSync } from "fs";
 import { join } from "path";
 import { ClaudeEngine, CodexEngine, Session, WORKSPACE_SCRIPT } from "../../../structured-prompting/src/index.js";
-import { buildTasks } from "./workspace-setup.js";
+import { buildTasks, selectOnlyClusters } from "./workspace-setup.js";
 // (stability recording now lives in the main graph — main.ts:stabilityBranch)
 import { main, type TaskResult } from "./main.js";
 import { cleanupAllOverlays } from "./overlay-cleanup.js";
@@ -253,9 +253,7 @@ async function run(): Promise<void> {
   // --only (BUG_SOLVING_ONLY): limit the run to ONE cluster for fast E2E testing.
   // Matches on exact task_id, a substring of it, or a slide id in the cluster.
   const only = (process.env.BUG_SOLVING_ONLY || "").trim();
-  const baseClusters = only
-    ? CLUSTERS.filter((c) => c.task_id === only || c.task_id.includes(only) || c.slide_ids.includes(only))
-    : CLUSTERS;
+  const baseClusters = selectOnlyClusters(CLUSTERS, only);
   if (only && baseClusters.length === 0) {
     console.error(`\n❌ --only "${only}" matched no cluster. Available: ${CLUSTERS.map((c) => c.task_id).join(", ")}`);
     process.exit(2);
