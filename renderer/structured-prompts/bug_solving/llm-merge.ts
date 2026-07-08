@@ -346,7 +346,7 @@ interface SeqCtx {
 }
 
 function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeReport> {
-  const { green, fileForks, baseContent, intendedSet, allIntendedSlides, ops, report } = ctx;
+  const { green, fileForks, baseContent, ops, report } = ctx;
   report.mode = "sequential";
 
   const seqWs = createCowWorkspace({ base: ctx.repo, id: `llm-merge-seq-${process.pid}-${Date.now()}`, upperRoot: ctx.upperRoot });
@@ -405,12 +405,21 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
       });
     }
 
-    // Retest the deck at the post-fold workspace state.
+    // Retest at the post-fold state. SCOPE the stability-checked ("green") set to
+    // the greens IN PLAY at THIS fold: the ALREADY-KEPT forks (they must not
+    // regress — a kept green is now the reference) PLUS this fork (it must keep
+    // its own stability). NOT-yet-folded forks are deliberately EXCLUDED — their
+    // slides sit at base (unfixed) here, so checking them against their fixed LGTM
+    // would falsely fail this fork and couple every fork's fate to every other's.
+    // With this scoping the fold CONTINUES past a fork that fails to keep
+    // stability, keeping each fork that does.
     chain = chain.pipe((sc) =>
       sc.executeShell(() => {
-        const { changed } = ops.retest(seqWs, allIntendedSlides);
-        perForkState.ripple = changed.filter((sid) => !intendedSet.has(sid));
-        return `echo llm-merge:seq-retest ${cluster.task} changed=[${changed.join(",")}]`;
+        const greenInPlay = [...new Set([...keptClusters.flatMap((c) => c.slides), ...cluster.slides])];
+        const greenSet = new Set(greenInPlay);
+        const { changed } = ops.retest(seqWs, greenInPlay);
+        perForkState.ripple = changed.filter((sid) => !greenSet.has(sid));
+        return `echo llm-merge:seq-retest ${cluster.task} green=[${greenInPlay.join(",")}] changed=[${changed.join(",")}]`;
       }),
     );
 
