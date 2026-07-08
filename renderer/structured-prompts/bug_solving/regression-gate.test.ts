@@ -13,30 +13,12 @@
  *       ripple; base = pristine → same change IS flagged (gate uses given base)
  *   (6) adapter advances the accepted base after a clean fork (serial mutation)
  *
- * Wire-through (REAL overlays + engine + promote + demote; render + LLM mocked):
- *   (7) clean gate                → all-at-once promote
- *   (8) pixel-class green violation → sequential fallback + demote
- * SKIPs loudly (exit 0) without CAP_SYS_ADMIN + /overlays.
+ * PURE only: these feed regressionGate/makeRegressionRetest plain RenderRecords
+ * (data — the recording is the mocked surface). The full merge THROUGH the real
+ * gate (real overlays/engine/promote/ledger, mocking only the LLM + the recording)
+ * lives in merge-e2e.test.ts.
  */
-import { strict as assert } from "node:assert";
-import { execSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
-import {
-  MockIO,
-  type EffectCall,
-  type Matcher,
-  type SpawnCaptureArgs,
-  type SpawnCaptureResult,
-} from "../../../structured-prompting/src/server/io.js";
-import {
-  createCowWorkspace,
-  cleanupAllCowWorkspaces,
-  type CowWorkspace,
-} from "../../../cow-workspace/cow-workspace.js";
+import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
 import {
   regressionGate,
   makeRegressionRetest,
@@ -46,7 +28,6 @@ import {
   GREEN_REGRESSION_SENTINEL,
 } from "./regression-gate.js";
 import type { RenderRecord, StabilityClassification } from "./stability.js";
-import { llmMerge, type GreenCluster, type MergeOps, type MergeReport } from "./llm-merge.js";
 
 // ---------------------------------------------------------------------------
 // harness
@@ -57,11 +38,6 @@ function ok(name: string, cond: boolean, extra = ""): void {
   if (cond) { passed++; console.log(`  \x1b[32m✓\x1b[0m ${name}`); }
   else { failed++; console.log(`  \x1b[31m✗\x1b[0m ${name}${extra ? ` — ${extra}` : ""}`); failures.push({ name, err: extra }); }
 }
-async function atest(name: string, fn: () => Promise<void>): Promise<void> {
-  try { await fn(); passed++; console.log(`  \x1b[32m✓\x1b[0m ${name}`); }
-  catch (e) { failed++; failures.push({ name, err: e }); console.log(`  \x1b[31m✗\x1b[0m ${name}`); console.log(`      ${((e as Error)?.message ?? String(e)).split("\n").slice(0, 6).join("\n      ")}`); }
-}
-
 const stab = (o: Partial<StabilityClassification>): StabilityClassification => ({
   pixelPerfect: o.pixelPerfect ?? [], xmlStable: o.xmlStable ?? [], unstable: o.unstable ?? [],
   warning: o.warning ?? "", attempts: o.attempts ?? 3,
@@ -239,177 +215,19 @@ function pureTests(): void {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Wire-through (REAL overlays + engine; render + LLM mocked)
-// ---------------------------------------------------------------------------
-function overlayAvailable(): string | null {
-  if (!existsSync("/overlays")) return "no /overlays volume";
-  try { execSync("unshare -Urm --map-root-user true", { stdio: "ignore" }); }
-  catch { return "user namespaces unavailable (SYS_ADMIN?)"; }
-  return null;
-}
-function claudeReply(result: string): SpawnCaptureResult {
-  return { stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result, session_id: "mock", duration_ms: 1, total_cost_usd: 0 }), stderr: "", exitCode: 0, signal: null, timedOut: false, spawnError: null };
-}
-const bashReply = (stdout = ""): SpawnCaptureResult => ({ stdout, stderr: "", exitCode: 0, signal: null, timedOut: false, spawnError: null });
-const isClaude = (c: EffectCall): boolean => c.method === "spawnCapture" && (c.args[0] as SpawnCaptureArgs).command === "claude";
-const isBash = (c: EffectCall): boolean => c.method === "spawnCapture" && (c.args[0] as SpawnCaptureArgs).command === "bash";
-function baseMatchers(): Matcher[] {
-  return [
-    { name: "now", when: (c) => c.method === "now", returns: (_c: EffectCall, i: number) => 1_700_000_000_000 + i },
-    { name: "log", when: (c) => c.method === "log", returns: undefined, optional: true },
-    { name: "bash-echo", when: isBash, returns: bashReply(""), optional: true },
-    { name: "git-diff-capture", when: (c) => c.method === "spawnCapture" && (c.args[0] as SpawnCaptureArgs).command === "git", returns: bashReply(""), optional: true },
-    { name: "writeFileSync", when: (c) => c.method === "writeFileSync", returns: undefined, optional: true },
-    { name: "rmSync", when: (c) => c.method === "rmSync", returns: undefined, optional: true },
-    { name: "mkdtempSync", when: (c) => c.method === "mkdtempSync", returns: "/tmp/mock-x", optional: true },
-  ];
-}
-function fencedBlocks(prompt: string): string[] {
-  return prompt.split("```").filter((_, i) => i % 2 === 1).map((b) => b.replace(/^\n/, "").replace(/\n$/, ""));
-}
-/** Mock LLM: union the base block with every FIX_ line from the proposals. */
-function mockMerge(prompt: string): string {
-  const [base, ...proposals] = fencedBlocks(prompt);
-  const have = new Set((base ?? "").split("\n"));
-  const out = (base ?? "").split("\n");
-  for (const p of proposals) for (const line of p.split("\n")) if (/FIX_/.test(line) && !have.has(line)) { have.add(line); out.push(line); }
-  return out.join("\n");
-}
-
-const CONVERTER_REL = "renderer/html2slides/convert-pptx.ts";
-const BASE_FILE = ["// convert-pptx.ts (test fixture)", "export const A = 1;", ""].join("\n");
-const sha = (s: string) => createHash("sha256").update(s).digest("hex");
-
-/** Which fix line drives which slide's render (fix→slide map). A slide's render
- *  only depends on its OWN fix, so an unrelated fork's edit doesn't ripple it. */
-const FIX_FOR_SLIDE: Record<string, string> = { slide_01: "FIX_A" };
-/** Model a per-slide render from the converter file content. */
-function perSlideRecord(sid: string, content: string): RenderRecord {
-  const fix = FIX_FOR_SLIDE[sid];
-  const active = fix && new RegExp(fix).test(content) ? fix : "";
-  const key = sha(`${sid}|${active}`);
-  return { pixelHash: key, xmlHash: key, renderedPartsHash: key };
-}
-
-function makeFork(base: string, upperRoot: string, id: string, fixConst: string): CowWorkspace {
-  const ws = createCowWorkspace({ base, upperRoot, id });
-  const line = `export const ${fixConst} = "${fixConst}";`;
-  const r = ws.run("bash", ["-c", `printf '%s\\n' '${line}' >> ${CONVERTER_REL}`]);
-  if (r.code !== 0) throw new Error(`fork edit failed for ${id}: ${r.stderr}`);
-  return ws;
-}
-
-/** Build the gate-backed ops. Rendering is MOCKED (perSlideRecord over the ws
- *  converter content); promote is REAL; demote is captured. */
-function gateOps(base: string, lgtm: (sid: string) => RenderRecord, demoteCalls: Array<{ slides: string[]; task: string; reason: string }>): MergeOps {
-  const stability = stab({ pixelPerfect: ["slide_01"], xmlStable: ["slide_02"], unstable: ["slide_03"] });
-  const retest = makeRegressionRetest({
-    loadStability: () => stability,
-    renderMergeDeck: (ws) => {
-      const content = ws.readUpperFile(CONVERTER_REL) ?? (existsSync(join(base, CONVERTER_REL)) ? readFileSync(join(base, CONVERTER_REL), "utf8") : BASE_FILE);
-      return (sid) => perSlideRecord(sid, content);
-    },
-    baseRecord: (sid) => perSlideRecord(sid, BASE_FILE),
-    lgtmRecord: lgtm,
-  });
-  return {
-    retest,
-    promote(ws, files) { ws.promote(files); },
-    demote(slides, task, reason) { demoteCalls.push({ slides, task, reason }); },
-  };
-}
-
-async function runMerge(base: string, green: GreenCluster[], ops: MergeOps, upperRoot: string): Promise<MergeReport | undefined> {
-  const io = new MockIO({
-    matchers: [
-      ...baseMatchers(),
-      { name: "llm-merge", when: isClaude, returns: (c: EffectCall) => {
-        const a = c.args[0] as SpawnCaptureArgs; const pi = a.args.indexOf("-p");
-        return claudeReply(mockMerge(pi >= 0 ? (a.args[pi + 1] ?? "") : ""));
-      } },
-    ],
-  });
-  const engine = new ClaudeEngine({ io, persist: false, hookSignals: false, log: false, port: 0 });
-  try {
-    return await engine.execute(new Session({ sessionId: "gate-wire", cwd: base }),
-      (s) => llmMerge(s, { repo: base, greenClusters: green, ops, upperRoot }));
-  } finally { await engine.shutdown(); }
-}
-
-async function wireTests(upperRoot: string): Promise<void> {
-  // (7) clean gate → all-at-once promote.
-  await atest("(7) clean gate → all-at-once promote (green pixel matches LGTM)", async () => {
-    const base = mkdtempSync(join(tmpdir(), "gate-clean-"));
-    mkdirSync(join(base, "renderer/html2slides"), { recursive: true });
-    writeFileSync(join(base, CONVERTER_REL), BASE_FILE);
-    const wsA = makeFork(base, upperRoot, `gc-a-${process.pid}-${Date.now()}`, "FIX_A");
-    const green: GreenCluster[] = [{ task: "task-a", branch_id: wsA.id, slides: ["slide_01"] }];
-    // LGTM(slide_01) = the render of base+FIX_A → matches the merged output → clean.
-    const lgtm = (sid: string) => perSlideRecord(sid, BASE_FILE + `export const FIX_A = "FIX_A";\n`);
-    const demoteCalls: Array<{ slides: string[]; task: string; reason: string }> = [];
-    try {
-      const report = await runMerge(base, green, gateOps(base, lgtm, demoteCalls), upperRoot);
-      assert.equal(report?.mode, "all-at-once", `mode=${report?.mode}`);
-      assert.deepEqual(report?.accepted, ["task-a"], "task-a accepted");
-      assert.ok(/FIX_A/.test(readFileSync(join(base, CONVERTER_REL), "utf8")), "promoted base has FIX_A");
-      assert.equal(demoteCalls.length, 0, "no demote on clean path");
-    } finally {
-      wsA.cleanup(); rmSync(base, { recursive: true, force: true });
-    }
-  });
-
-  // (8) pixel-class green violation → sequential fallback + demote.
-  await atest("(8) pixel-class green violation → sequential fallback + demote", async () => {
-    const base = mkdtempSync(join(tmpdir(), "gate-viol-"));
-    mkdirSync(join(base, "renderer/html2slides"), { recursive: true });
-    writeFileSync(join(base, CONVERTER_REL), BASE_FILE);
-    const wsA = makeFork(base, upperRoot, `gv-a-${process.pid}-${Date.now()}`, "FIX_A");
-    const green: GreenCluster[] = [{ task: "task-a", branch_id: wsA.id, slides: ["slide_01"] }];
-    // LGTM(slide_01) is an UNREACHABLE approved render → the merge can never match
-    // it → pixel-perfect green violation on every attempt.
-    const lgtm = (sid: string): RenderRecord => sid === "slide_01" ? { pixelHash: "APPROVED_UNREACHABLE" } : perSlideRecord(sid, BASE_FILE);
-    const demoteCalls: Array<{ slides: string[]; task: string; reason: string }> = [];
-    try {
-      const report = await runMerge(base, green, gateOps(base, lgtm, demoteCalls), upperRoot);
-      assert.equal(report?.mode, "sequential", `mode=${report?.mode}`);
-      assert.deepEqual(report?.accepted, [], "nothing accepted");
-      assert.deepEqual(report?.rejected.map((r) => r.task), ["task-a"], "task-a rejected");
-      assert.ok(!/FIX_A/.test(readFileSync(join(base, CONVERTER_REL), "utf8")), "base rolled back (no FIX_A)");
-      assert.equal(demoteCalls.length, 1, "exactly one demote");
-      assert.deepEqual(demoteCalls[0].slides, ["slide_01"], "demoted the green slide");
-    } finally {
-      wsA.cleanup(); rmSync(base, { recursive: true, force: true });
-    }
-  });
-}
 
 // ---------------------------------------------------------------------------
-async function main(): Promise<void> {
+// The full merge-through-the-REAL-gate wire-through (real overlays + engine +
+// promote + real ledger demote, mocking ONLY the LLM + the Slides recording per
+// the mock policy) now lives in merge-e2e.test.ts. This file keeps the PURE
+// gate/adapter unit tests, which feed regressionGate/makeRegressionRetest plain
+// RenderRecords (data, not a mocked component).
+function main(): void {
   pureTests();
-
-  const skip = overlayAvailable();
-  const UPPER_ROOT = "/overlays/regression-gate-test";
-  if (skip) {
-    console.log(`\n  ⚠ SKIP wire-through — ${skip} (needs SYS_ADMIN + /overlays). Not a failure.\n`);
-  } else {
-    console.log("\nregression-gate WIRE-THROUGH (REAL overlays + engine + promote/demote; render + LLM mocked)\n");
-    try { rmSync(UPPER_ROOT, { recursive: true, force: true }); } catch { /* */ }
-    try {
-      await wireTests(UPPER_ROOT);
-      const leftover = existsSync(UPPER_ROOT) ? readdirSync(UPPER_ROOT) : [];
-      ok("(9) no /overlays leaks after wire-through cleanup", leftover.length === 0, JSON.stringify(leftover));
-    } finally {
-      // ALWAYS reap overlays (known hang if orphan test overlays linger).
-      cleanupAllCowWorkspaces(UPPER_ROOT);
-      try { rmSync(UPPER_ROOT, { recursive: true, force: true }); } catch { /* */ }
-    }
-  }
-
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
   if (failed) {
     for (const f of failures) console.log(`  ✗ ${f.name}\n    ${(f.err as Error)?.stack ?? String(f.err)}`);
     process.exit(1);
   }
 }
-main().catch((e) => { console.error(e); cleanupAllCowWorkspaces("/overlays/regression-gate-test"); process.exit(1); });
+main();
