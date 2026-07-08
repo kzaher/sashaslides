@@ -4,3 +4,6 @@
 [submodule "deps/drawio"]
 	path = deps/drawio
 	url = https://github.com/jgraph/drawio.git
+[submodule "cow-workspace"]
+	path = cow-workspace
+	url = git@github.com:ExponentGmbH/cow-workspace.git
