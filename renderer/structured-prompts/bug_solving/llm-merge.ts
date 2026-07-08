@@ -474,6 +474,26 @@ export interface RealLlmMergeOpsDeps {
   sxsDir?: string;
   /** render timeout per whole-deck record (ms). Default 20 min. */
   timeoutMs?: number;
+  /** TEST SEAM — override the Google-Slides recording (record-rendering --mode
+   *  full). Production leaves this UNSET (real render). Injecting it lets the FULL
+   *  merge run E2E without Google: real gate, real overlays, real promote, real
+   *  ledger demote — the ONLY mocked pieces become the LLM (via MockIO) and this
+   *  recording. When set, its functions REPLACE the three record-rendering
+   *  shell-outs; everything else (deckIds, stability load, promote, demote) is
+   *  unchanged and real. */
+  render?: MergeRenderSeam;
+}
+
+/** The three render points realLlmMergeOps feeds to the regression gate. In
+ *  production each shells `record-rendering --mode full` (Google upload + thumb
+ *  scrape); a test injects deterministic RenderRecords instead. */
+export interface MergeRenderSeam {
+  /** pre-merge (base tree) render of a slide. */
+  baseRecord(slideId: string): RenderRecord;
+  /** user-approved (LGTM) render of a green slide. */
+  lgtmRecord(slideId: string): RenderRecord;
+  /** render the merged deck INSIDE a workspace overlay → per-slide lookup. */
+  renderMergeDeck(ws: CowWorkspace): (slideId: string) => RenderRecord;
 }
 
 const REC_REL = "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts";
@@ -573,11 +593,14 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
     return { pixelPerfect: [], xmlStable: ids, unstable: [], warning: `[stability] no ${stabilityPath} — defaulting all ${ids.length} slide(s) to xml-stable`, attempts: 0 };
   };
 
+  // The render seam (Google recording) is the ONLY injectable-for-tests point;
+  // when unset, the real record-rendering shell-outs above are used.
+  const seam = deps.render;
   const retest = makeRegressionRetest({
     loadStability: loadStabilityOrFallback,
-    renderMergeDeck,
-    baseRecord,
-    lgtmRecord,
+    renderMergeDeck: seam?.renderMergeDeck ?? renderMergeDeck,
+    baseRecord: seam?.baseRecord ?? baseRecord,
+    lgtmRecord: seam?.lgtmRecord ?? lgtmRecord,
     log: (m) => console.error(m),
   });
 
