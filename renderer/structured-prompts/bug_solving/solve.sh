@@ -9,8 +9,10 @@
 #   npm run renderer:solver:run -- --validation-model haiku      cheaper per-slide verdict model
 #   npm run renderer:solver:run -- --clean | --continue          discard / resume persisted overlays
 #   npm run renderer:solver:run -- --no-regen                   keep hand-edited clusters.ts
+#   npm run renderer:solver:run -- --only slide-03               solve ONE cluster (substring/task_id/slide match)
 #
 # --model    = opus | sonnet | haiku | fable   (unsupported → error)
+# --only     = a task_id, a substring of it, or a slide id (e.g. slide_03) — run just that cluster
 # --engine   = claude | codex                  (unsupported → error)
 # --validation-model = opus|sonnet|haiku|fable  (per-slide verdict; default = --model)
 # --attempts = positive integer                (overrides per-cluster retry_budget)
@@ -30,6 +32,7 @@ MODEL="${BUG_SOLVING_MODEL:-opus}"
 VALMODEL="${BUG_SOLVING_VALIDATION_MODEL:-}"   # per-slide verdict model; default = solver model
 ENGINE="${BUG_SOLVING_ENGINE:-claude}"
 ATTEMPTS="${BUG_SOLVING_RETRY_BUDGET:-5}"
+ONLY="${BUG_SOLVING_ONLY:-}"   # limit the run to ONE cluster (task_id / substring / slide id)
 REGEN=1          # fresh solve regenerates clusters.ts from the reconciled ledgers
 PASS=()
 while [ $# -gt 0 ]; do
@@ -42,6 +45,8 @@ while [ $# -gt 0 ]; do
     --engine=*)   ENGINE="${1#*=}"; shift ;;
     --attempts)  ATTEMPTS="${2:?--attempts needs a value}"; shift 2 ;;
     --attempts=*) ATTEMPTS="${1#*=}"; shift ;;
+    --only)      ONLY="${2:?--only needs a value}"; shift 2 ;;   # solve just this cluster
+    --only=*)     ONLY="${1#*=}"; shift ;;
     --no-regen)  REGEN=0; shift ;;          # keep hand-edited clusters.ts as-is
     --continue)  REGEN=0; PASS+=("$1"); shift ;;  # resume = same clusters, never regen
     *) PASS+=("$1"); shift ;;
@@ -62,7 +67,7 @@ case "$ATTEMPTS" in
   ''|*[!0-9]*) echo "❌ --attempts '$ATTEMPTS' must be a positive integer" >&2; exit 2 ;;
 esac
 [ "$ATTEMPTS" -ge 1 ] || { echo "❌ --attempts must be >= 1 (got $ATTEMPTS)" >&2; exit 2; }
-echo "▶ model=$MODEL  validation-model=$VALMODEL  engine=$ENGINE  attempts=$ATTEMPTS  extra=[${PASS[*]:-}]"
+echo "▶ model=$MODEL  validation-model=$VALMODEL  engine=$ENGINE  attempts=$ATTEMPTS${ONLY:+  only=$ONLY}  extra=[${PASS[*]:-}]"
 
 # 0. Regenerate clusters.ts from the reconciled, checked ledgers (one cluster per
 #    bad slide). Skipped on --continue (resume must solve the SAME clusters) and
@@ -98,6 +103,7 @@ grep -oE 'slide-[0-9]+-[a-z-]+' "$BUNDLE" | sort -u | sed 's/^/    /' || true
 echo "▶ launching solver (Ctrl-C to stop) …"
 BUG_SOLVING_MODEL="$MODEL" \
  BUG_SOLVING_VALIDATION_MODEL="$VALMODEL" \
+BUG_SOLVING_ONLY="$ONLY" \
 BUG_SOLVING_RETRY_BUDGET="$ATTEMPTS" \
 BUG_SOLVING_SXS_DIR="${BUG_SOLVING_SXS_DIR:-/tmp/sxs-complex}" \
 BUG_SOLVING_RATINGS_JSON="${BUG_SOLVING_RATINGS_JSON:-/tmp/sxs-complex/ratings.json}" \

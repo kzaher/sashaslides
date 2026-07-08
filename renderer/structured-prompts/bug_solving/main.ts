@@ -82,6 +82,7 @@ import { join } from "path";
 import { fixtureSetSlug } from "./workspace-setup.js";
 import { llmMerge, ledgerDemote, realLlmMergeOps, type GreenCluster, type MergeReport } from "./llm-merge.js";
 import { acceptDisabled } from "./accept-orchestration.js";
+import { STABILITY_JSON } from "./stability.js";
 
 /**
  * Write the sxs-meta.json sidecar consumed by rating-server.ts so each SxS card
@@ -625,6 +626,47 @@ function logMergeReport(report: MergeReport, log: (m: string) => void): MergeRep
   return report;
 }
 
+// ---------- Stability branch (runs PARALLEL to the solve forks) ----------
+//
+// The 3× whole-deck stability classification feeds ONLY the final merge's
+// regression gate (STABILITY_JSON, read at merge time). It's INDEPENDENT of the
+// forks, so it runs as its OWN branch CONCURRENTLY with the fork-set (see main()'s
+// outer parallelFork over ["forks","stability"]) — visible as its own thread in
+// the engine UI, joined at the barrier BEFORE the merge. Previously this blocked
+// the whole run ~5 min at startup before any solver could begin.
+//
+// Rendered as a single `executeShell` node invoking stability.ts's standalone CLI
+// (record + classify + write). The command ALWAYS exits 0 (`|| echo …`) so a flaky
+// render can NEVER cancel the sibling fork branch (parallelFork cancels siblings on
+// throw); the merge gate degrades to xml-stable when STABILITY_JSON is absent.
+export function stabilityBranch(
+  session: Session,
+  opts: { repo: string; fixturesDirRel: string },
+): SessionWithResult<string> {
+  const skip = acceptDisabled(process.env) || process.env.BUG_SOLVING_SKIP_STABILITY === "1";
+  const attempts = Number(process.env.BUG_SOLVING_STABILITY_ATTEMPTS) || 3;
+  const STABILITY_SCRIPT = "renderer/structured-prompts/bug_solving/stability.ts";
+  return session.executeShell(() => {
+    // No merge will run (or stability explicitly skipped) → keep the node but do
+    // no rendering; the gate isn't consulted when nothing is being merged.
+    if (skip) return `echo "[stability] skipped (no-accept / BUG_SOLVING_SKIP_STABILITY)"`;
+    let deck: string[] = [];
+    try {
+      deck = readdirSync(join(opts.repo, opts.fixturesDirRel))
+        .filter((f) => /^slide_\d+\.html$/.test(f))
+        .map((f) => f.replace(/\.html$/, ""))
+        .sort();
+    } catch { /* fixtures dir unreadable → skip below */ }
+    if (deck.length === 0) return `echo "[stability] no slide_*.html fixtures — skipping"`;
+    const csv = deck.join(",");
+    return (
+      `cd "${opts.repo}" && npx tsx "${join(opts.repo, STABILITY_SCRIPT)}" ` +
+      `--slides "${csv}" --out "${STABILITY_JSON}" --fixtures "${opts.fixturesDirRel}" --attempts ${attempts} ` +
+      `|| echo "[stability] non-fatal failure — merge gate degrades to xml-stable"`
+    );
+  });
+}
+
 // ---------- Main ----------
 
 // main() runs the parallelFork solve+verify+fix-summary graph AND the per-fork
@@ -1080,31 +1122,55 @@ export function main(args: {
   // whole-deck regression recording). The merge report is LOGGED, not returned —
   // main() still yields the per-task TaskResults.
   const repo = process.cwd();
+  const fixturesDirRel = args.tasks[0]?.fixtures_dir ?? "renderer/html2slides/e2e/fixtures";
+
+  // ── TWO PARALLEL HETEROGENEOUS BRANCHES, joined, THEN merge ──────────────
+  // The engine's only true-parallel primitive is parallelFork (Promise.all over
+  // its children). We run it over the two labels ["forks","stability"] so the
+  // SOLVE fork-set and the STABILITY classification execute CONCURRENTLY as two
+  // sibling threads in the engine UI:
+  //   • "forks"     → the per-task fork-set (nested parallelFork: solve+verify+
+  //                   fix-summary + the per-fork human rating gate).
+  //   • "stability" → the whole-deck 3× classification (its own thread), which
+  //                   only the final merge gate needs. Runs alongside the solve
+  //                   instead of blocking startup for ~5 min.
+  // The barrier waits on BOTH, then combineWith runs the FINAL merge phase (which
+  // reads the forks' on-disk rating markers + STABILITY_JSON — both ready by now).
+  // combineWith stays SEQUENTIAL by design: the merge MUST run after the barrier.
+  const FORKS = "forks", STABILITY = "stability";
   return args.session
-    .parallelFork(args.tasks, (child, task) =>
-      child
-        // Run this task's WHOLE chain (worker model `send`s + record/diff
-        // shells) INSIDE its own overlay branch — a zero-copy COW mount over the
-        // working tree. Every command is wrapped via overlay-branch.sh, so the
-        // worker's edits + scratch land in the branch's isolated upper layer and
-        // never touch the base tree (nor sibling forks). Replaces the old git
-        // worktree + switchCwd.
-        .switchBranch(task.branch_id)
-        .try<Result<TaskResult>>(
-          (s) => s.tryMultipleTimes<TaskResult>(
-            task.retry_budget,
-            (s2) => runTask(s2, task),
-          ),
-          // Don't cancel sibling tasks when one task fails outright.
-          (s, e) => s.materializeError(describeError(e)),
-        ),
+    .parallelFork<string, Array<Result<TaskResult>> | string>(
+      [FORKS, STABILITY],
+      (child, which) =>
+        which === STABILITY
+          ? stabilityBranch(child, { repo, fixturesDirRel })
+          : child.parallelFork(args.tasks, (c, task) =>
+              c
+                // Run this task's WHOLE chain (worker model `send`s + record/diff
+                // shells) INSIDE its own overlay branch — a zero-copy COW mount
+                // over the working tree. Every command is wrapped via
+                // overlay-branch.sh, so the worker's edits + scratch land in the
+                // branch's isolated upper layer and never touch the base tree
+                // (nor sibling forks). Replaces the old git worktree + switchCwd.
+                .switchBranch(task.branch_id)
+                .try<Result<TaskResult>>(
+                  (s) => s.tryMultipleTimes<TaskResult>(
+                    task.retry_budget,
+                    (s2) => runTask(s2, task),
+                  ),
+                  // Don't cancel sibling tasks when one task fails outright.
+                  (s, e) => s.materializeError(describeError(e)),
+                ),
+            ),
     )
     // FINAL PHASE: fold GREEN clusters after the barrier. The execution branch
-    // (finalMergePhase) can't receive `taskResults` — it reads the rating-outcome
-    // markers the forks wrote before the barrier — so the combine callback simply
-    // discards the (logged-only) merge report and returns the TaskResults.
+    // (finalMergePhase) can't receive the branch results — it reads the
+    // rating-outcome markers the forks wrote before the barrier — so the combine
+    // callback discards the (logged-only) merge report and returns the
+    // TaskResults from the "forks" branch (index 0; index 1 is the stability
+    // node's echo string).
     .combineWith<MergeReport | null, Array<Result<TaskResult>>>(
       (branch) => finalMergePhase(branch, { repo, tasks: args.tasks }),
-      (taskResults, _mergeReport) => taskResults,
+      (branchResults) => (branchResults[0] as Array<Result<TaskResult>>),
     );
 }

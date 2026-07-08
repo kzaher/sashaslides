@@ -62,11 +62,11 @@ import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 const execFileAsync = promisify(execFile);
-import { rmSync, existsSync, readdirSync } from "fs";
+import { rmSync, existsSync } from "fs";
 import { join } from "path";
 import { ClaudeEngine, CodexEngine, Session, WORKSPACE_SCRIPT } from "../../../structured-prompting/src/index.js";
 import { buildTasks } from "./workspace-setup.js";
-import { classifyStability, defaultStabilityRecorder, writeStabilityJson, STABILITY_JSON } from "./stability.js";
+// (stability recording now lives in the main graph — main.ts:stabilityBranch)
 import { main, type TaskResult } from "./main.js";
 import { cleanupAllOverlays } from "./overlay-cleanup.js";
 import {
@@ -169,47 +169,9 @@ async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<v
   }));
 }
 
-/**
- * 3× STABILITY CLASSIFICATION — runs at solve start, INDEPENDENTLY of the solve.
- * Records the WHOLE fixture deck `attempts` (default 3) times BEFORE any fix,
- * buckets each slide pixel-perfect / xml-stable / unstable, writes STABILITY_JSON
- * (outside overlays, like the rating markers) that the final merge's regression
- * gate reads, and PRINTS the warning naming the not-stable slides.
- *
- * NON-FATAL: a failure here must never abort the solve — the merge gate degrades
- * to xml-stable for the whole deck when stability.json is absent. Skip entirely
- * with BUG_SOLVING_SKIP_STABILITY=1 (e.g. a fast solve-only run).
- */
-async function recordStabilityClassification(fixturesDirRel: string): Promise<void> {
-  if (process.env.BUG_SOLVING_SKIP_STABILITY === "1") {
-    console.error("[scaffold] stability classification skipped (BUG_SOLVING_SKIP_STABILITY=1)");
-    return;
-  }
-  try {
-    const fixturesAbs = join(REPO_ROOT, fixturesDirRel);
-    if (!existsSync(fixturesAbs)) { console.error(`[stability] fixtures dir not found (${fixturesAbs}) — skipping`); return; }
-    const deck = readdirSync(fixturesAbs)
-      .filter((f) => /^slide_\d+\.html$/.test(f))
-      .map((f) => f.replace(/\.html$/, ""))
-      .sort();
-    if (deck.length === 0) { console.error("[stability] no slide_*.html fixtures — skipping"); return; }
-    const attempts = Number(process.env.BUG_SOLVING_STABILITY_ATTEMPTS) || 3;
-    console.error(`[scaffold] recording ${deck.length} slide(s) ${attempts}× for stability classification (independent of solve)...`);
-    const record = defaultStabilityRecorder({
-      repo: REPO_ROOT,
-      fixturesDir: fixturesDirRel,
-      slides: deck,
-      scratchDir: join("/tmp", `bug-solving-stability-${process.pid}`),
-    });
-    const classification = classifyStability(deck, { record, attempts });
-    writeStabilityJson(STABILITY_JSON, classification);
-    console.error(classification.warning);
-    console.error(`[scaffold] stability.json → ${STABILITY_JSON} ` +
-      `(pixelPerfect=${classification.pixelPerfect.length}, xmlStable=${classification.xmlStable.length}, unstable=${classification.unstable.length})`);
-  } catch (e) {
-    console.error(`[scaffold] stability classification FAILED (non-fatal — merge gate degrades to xml-stable): ${(e as Error)?.message ?? String(e)}`);
-  }
-}
+// (The 3× stability classification moved OUT of the scaffolding pre-step and INTO
+// the main graph as a parallel "stability" branch — see main.ts:stabilityBranch.
+// It no longer blocks startup; it runs concurrently with the solve fork-set.)
 
 async function run(): Promise<void> {
   // NOTE: overlays now PERSIST across crashes/exit — there is NO auto-reap
@@ -288,9 +250,20 @@ async function run(): Promise<void> {
   // retry_budget for the whole run, so the attempt count is a run-level knob.
   const retryBudget = process.env.BUG_SOLVING_RETRY_BUDGET
     ? Number(process.env.BUG_SOLVING_RETRY_BUDGET) : undefined;
-  const clusters = (retryBudget && retryBudget >= 1)
-    ? CLUSTERS.map((c) => ({ ...c, retry_budget: retryBudget }))
+  // --only (BUG_SOLVING_ONLY): limit the run to ONE cluster for fast E2E testing.
+  // Matches on exact task_id, a substring of it, or a slide id in the cluster.
+  const only = (process.env.BUG_SOLVING_ONLY || "").trim();
+  const baseClusters = only
+    ? CLUSTERS.filter((c) => c.task_id === only || c.task_id.includes(only) || c.slide_ids.includes(only))
     : CLUSTERS;
+  if (only && baseClusters.length === 0) {
+    console.error(`\n❌ --only "${only}" matched no cluster. Available: ${CLUSTERS.map((c) => c.task_id).join(", ")}`);
+    process.exit(2);
+  }
+  if (only) console.error(`[scaffold] --only "${only}" → solving ${baseClusters.length} cluster(s): ${baseClusters.map((c) => c.task_id).join(", ")}`);
+  const clusters = (retryBudget && retryBudget >= 1)
+    ? baseClusters.map((c) => ({ ...c, retry_budget: retryBudget }))
+    : baseClusters;
   const buildOpts: Parameters<typeof buildTasks>[0] = { clusters, port_base: portBase };
   if (retryBudget && retryBudget >= 1) {
     buildOpts.retry_budget = retryBudget;
@@ -331,10 +304,12 @@ async function run(): Promise<void> {
 
   await recordBeforePptx(tasks);
 
-  // 3× stability classification over the whole deck (independent, non-fatal).
-  // The final merge's regression gate reads STABILITY_JSON to decide, per green
-  // slide, whether pixel-identity or only xml+rendered-parts is required.
-  await recordStabilityClassification(buildOpts.fixtures_dir ?? "renderer/html2slides/e2e/fixtures");
+  // NOTE: the 3× whole-deck stability classification is NO LONGER a blocking
+  // pre-step here. It now runs INSIDE the main graph as its own "stability"
+  // branch, CONCURRENTLY with the solve fork-set (main.ts's outer parallelFork
+  // over ["forks","stability"]), joined at the barrier before the final merge.
+  // This removed the ~5-min startup stall and makes stability a monitor-visible
+  // thread. See main.ts:stabilityBranch.
 
   const engine = isCodex
     ? new CodexEngine({ port: monitorPort, persist: true })
