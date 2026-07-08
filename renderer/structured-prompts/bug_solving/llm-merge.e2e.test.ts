@@ -1,6 +1,12 @@
 /**
- * llm-merge.e2e.test.ts — REAL end-to-end for the SIMPLE LLM merge
- * (llm-merge.ts). Nothing but the LLM (via MockIO) + `ops.retest` is mocked;
+ * llm-merge.e2e.test.ts — REAL end-to-end for the SIMPLE LLM merge ORCHESTRATION
+ * (llm-merge.ts): all-at-once → sequential fallback, promote, target mutation.
+ * Here `ops.retest` is SCRIPTED (a canned changed-set queue) to drive those
+ * control-flow paths deterministically. For the merge run through the REAL
+ * regression gate — where ONLY the LLM and the Google recording are mocked and
+ * the gate/stability/ledger are real — see merge-e2e.test.ts.
+ *
+ * Nothing but the LLM (via MockIO) + `ops.retest` is mocked here;
  * the COW workspaces, the filesystem, promote, and the demote ledger are REAL.
  *
  * The base is a throwaway /tmp dir with a converter file at the real converter
