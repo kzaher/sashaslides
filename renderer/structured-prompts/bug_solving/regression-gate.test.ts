@@ -5,7 +5,7 @@
  * filesystem, promote, and ledger demote are REAL.
  *
  * Pure gate:
- *   (1) pixel-perfect green slide, 1-pixel diff vs LGTM     → green-pixel violation
+ *   (1) pixel-perfect green slide, 1-pixel diff vs LGTM     → did NOT keep binary stability
  *   (2) xml-stable green slide, same xml+parts, diff pixel  → OK
  *   (3) non-targeted slide changed vs base                  → ripple in `changed`
  *   (4) all-clean                                           → ok, empty changed
@@ -25,7 +25,7 @@ import {
   pixelIdentical,
   xmlPlusRenderedParts,
   unchanged,
-  GREEN_REGRESSION_SENTINEL,
+  GREEN_INSTABILITY_SENTINEL,
 } from "./regression-gate.js";
 import type { RenderRecord, StabilityClassification } from "./stability.js";
 
@@ -59,7 +59,7 @@ function pureTests(): void {
     unchanged({ pixelHash: "P", xmlHash: "X" }, { pixelHash: "P", xmlHash: "DIFF" }) === true &&
     unchanged({ pixelHash: "P" }, { pixelHash: "Q" }) === false);
 
-  // (1) pixel-perfect green slide with a 1-pixel diff vs LGTM → violation.
+  // (1) pixel-perfect green slide with a 1-pixel diff vs LGTM → did NOT keep binary stability.
   {
     const res = regressionGate({
       stability: stab({ pixelPerfect: ["slide_01"] }),
@@ -68,8 +68,8 @@ function pureTests(): void {
       lgtm: asFn({ slide_01: { pixelHash: "LGTM" } }),
       base: asFn({}),
     });
-    ok("(1) pixel-perfect green ≠ LGTM → green-pixel violation + not ok",
-      !res.ok && res.violations.length === 1 && res.violations[0].kind === "green-pixel" && res.changed.includes(GREEN_REGRESSION_SENTINEL),
+    ok("(1) pixel-perfect green ≠ LGTM → did NOT keep binary stability + not ok",
+      !res.ok && res.findings.length === 1 && res.findings[0].kind === "binary-unstable" && res.changed.includes(GREEN_INSTABILITY_SENTINEL),
       JSON.stringify(res));
   }
 
@@ -82,9 +82,9 @@ function pureTests(): void {
       lgtm: asFn({ slide_02: { xmlHash: "X", renderedPartsHash: "R", pixelHash: "DIFFPIX" } }),
       base: asFn({}),
     });
-    ok("(2) xml-stable green, xml+parts match, pixel differs → ok", res.ok && res.violations.length === 0 && res.changed.length === 0, JSON.stringify(res));
+    ok("(2) xml-stable green, xml+parts match, pixel differs → ok", res.ok && res.findings.length === 0 && res.changed.length === 0, JSON.stringify(res));
   }
-  // (2b) xml-stable green with rendered-parts CHANGED → violation.
+  // (2b) xml-stable green with rendered-parts CHANGED → did NOT keep stability.
   {
     const res = regressionGate({
       stability: stab({ xmlStable: ["slide_02"] }),
@@ -93,8 +93,8 @@ function pureTests(): void {
       lgtm: asFn({ slide_02: { xmlHash: "X", renderedPartsHash: "R" } }),
       base: asFn({}),
     });
-    ok("(2b) xml-stable green, rendered-parts changed → green-xml-parts violation",
-      !res.ok && res.violations[0]?.kind === "green-xml-parts" && res.changed.includes(GREEN_REGRESSION_SENTINEL), JSON.stringify(res));
+    ok("(2b) xml-stable green, rendered-parts changed → did NOT keep xml+rendered stability",
+      !res.ok && res.findings[0]?.kind === "xml-rendered-unstable" && res.changed.includes(GREEN_INSTABILITY_SENTINEL), JSON.stringify(res));
   }
 
   // (3) non-targeted slide changed vs base → ripple in `changed`.
@@ -107,7 +107,7 @@ function pureTests(): void {
       base: asFn({ slide_03: { pixelHash: "OLD" } }),
     });
     ok("(3) non-targeted changed → ripple in changed",
-      !res.ok && res.changed.includes("slide_03") && !res.changed.includes(GREEN_REGRESSION_SENTINEL) && res.violations[0].kind === "ripple",
+      !res.ok && res.changed.includes("slide_03") && !res.changed.includes(GREEN_INSTABILITY_SENTINEL) && res.findings[0].kind === "ripple",
       JSON.stringify(res));
   }
 
@@ -120,7 +120,7 @@ function pureTests(): void {
       lgtm: asFn({ slide_01: { pixelHash: "SAME" } }),
       base: asFn({ slide_02: { pixelHash: "B2" } }),
     });
-    ok("(4) all-clean → ok, empty changed", res.ok && res.changed.length === 0 && res.violations.length === 0, JSON.stringify(res));
+    ok("(4) all-clean → ok, empty changed", res.ok && res.changed.length === 0 && res.findings.length === 0, JSON.stringify(res));
   }
 
   // (5) SERIAL target-mutation (pure): fork B's gate. slide_01 was mutated by the
