@@ -79,28 +79,40 @@ export function unchanged(a: RenderRecord, b: RenderRecord): boolean {
 // regressionGate — pure, synchronous
 // ---------------------------------------------------------------------------
 
-export interface GateViolation {
+/**
+ * Something the gate flagged about a slide's fold. There are no "violations" —
+ * either a green slide KEEPS its stability or it doesn't, and a non-targeted slide
+ * may ripple:
+ *   · "binary-unstable"       — a pixel-perfect green slide did not keep BINARY
+ *                               stability (pixels not identical to its LGTM).
+ *   · "xml-rendered-unstable" — an xml-stable green slide did not keep XML+RENDERED
+ *                               stability (xml or rendered-parts changed vs LGTM).
+ *   · "ripple"                — a NON-TARGETED slide changed vs the accepted base.
+ */
+export interface GateFinding {
   slide: string;
-  kind: "green-pixel" | "green-xml-parts" | "ripple";
+  kind: "binary-unstable" | "xml-rendered-unstable" | "ripple";
   detail: string;
 }
 
 export interface GateResult {
   ok: boolean;
   /** the ripple set fed to llm-merge's fallback trigger (non-targeted changes +
-   *  the GREEN_REGRESSION sentinel when any green slide violated its class). */
+   *  the GREEN_INSTABILITY sentinel when any green slide didn't keep its class'
+   *  stability). */
   changed: string[];
-  violations: GateViolation[];
+  findings: GateFinding[];
 }
 
 /**
- * A GREEN-class violation is on an INTENDED slide, so it can't express itself as
- * a ripple via llm-merge's `changed - intended` filter. We surface it with this
- * reserved, never-intended id in `changed` so a green regression still forces the
- * all-at-once → sequential fallback (and, in the sequential fold, a rollback +
- * demote). The real offending slide ids ride alongside it for logging.
+ * A green slide that didn't keep its stability is on an INTENDED slide, so it
+ * can't express itself as a ripple via llm-merge's `changed - intended` filter.
+ * We surface it with this reserved, never-intended id in `changed` so a green
+ * instability still forces the all-at-once → sequential fallback (and, in the
+ * sequential fold, a rollback + demote). The real slide ids ride alongside it for
+ * logging.
  */
-export const GREEN_REGRESSION_SENTINEL = "__green_regression__";
+export const GREEN_INSTABILITY_SENTINEL = "__green_unstable__";
 
 export interface RegressionGateArgs {
   /** reference render for a NON-TARGETED slide (the accepted / base state). */
@@ -121,20 +133,20 @@ export interface RegressionGateArgs {
 export function regressionGate(args: RegressionGateArgs): GateResult {
   const pixelPerfect = new Set(args.stability.pixelPerfect);
   const green = new Set(args.greenSlides);
-  const violations: GateViolation[] = [];
+  const findings: GateFinding[] = [];
   const changed: string[] = [];
 
-  // GREEN slides: compare CURRENT vs LGTM, strictness by stability class.
+  // GREEN slides: did each KEEP its stability vs LGTM? strictness by class.
   for (const sid of args.greenSlides) {
     const cur = args.record(sid);
     const ref = args.lgtm(sid);
     if (pixelPerfect.has(sid)) {
       if (!pixelIdentical(cur, ref)) {
-        violations.push({ slide: sid, kind: "green-pixel", detail: `pixel-perfect green slide differs from LGTM render (pixels not identical)` });
+        findings.push({ slide: sid, kind: "binary-unstable", detail: `pixel-perfect green slide did not keep binary stability (pixels not identical to LGTM)` });
       }
     } else {
       if (!xmlPlusRenderedParts(cur, ref)) {
-        violations.push({ slide: sid, kind: "green-xml-parts", detail: `xml-stable green slide differs from LGTM (xml or rendered-parts changed)` });
+        findings.push({ slide: sid, kind: "xml-rendered-unstable", detail: `xml-stable green slide did not keep xml+rendered stability (xml or rendered-parts changed vs LGTM)` });
       }
     }
   }
@@ -156,17 +168,18 @@ export function regressionGate(args: RegressionGateArgs): GateResult {
       ? pixelIdentical(cur, ref)
       : (pixelIdentical(cur, ref) || xmlPlusRenderedParts(cur, ref));
     if (!same) {
-      violations.push({ slide: sid, kind: "ripple", detail: `non-targeted ${pixelPerfect.has(sid) ? "pixel-perfect" : "xml-stable"} slide changed vs accepted base (ripple)` });
+      findings.push({ slide: sid, kind: "ripple", detail: `non-targeted ${pixelPerfect.has(sid) ? "pixel-perfect" : "xml-stable"} slide changed vs accepted base (ripple)` });
       changed.push(sid);
     }
   }
 
-  if (violations.some((v) => v.kind !== "ripple")) changed.push(GREEN_REGRESSION_SENTINEL);
+  // Any green slide that didn't keep its stability → raise the sentinel.
+  if (findings.some((f) => f.kind !== "ripple")) changed.push(GREEN_INSTABILITY_SENTINEL);
 
   return {
-    ok: violations.length === 0,
+    ok: findings.length === 0,
     changed: [...new Set(changed)].sort(),
-    violations,
+    findings,
   };
 }
 
@@ -191,7 +204,8 @@ export interface RegressionRetestDeps {
 /**
  * Wrap `regressionGate` as the synchronous `retest(ws, intendedSlides) →
  * {changed}` seam. Holds the ACCEPTED-BASE across calls: after any CLEAN fork
- * (ok, no violation) it advances the base for that fork's intended slides to
+ * (ok — every green kept its stability, no ripple) it advances the base for that
+ * fork's intended slides to
  * their current render — so the NEXT fork in the sequential fold is compared
  * against the post-previous-fork state (serial target-mutation). A rippling
  * fork's writes are rolled back by llm-merge before the next retest, so its base
@@ -218,8 +232,8 @@ export function makeRegressionRetest(deps: RegressionRetestDeps): (ws: CowWorksp
     if (deps.log) {
       deps.log(
         `[regression-gate] intended=[${intendedSlides.join(",")}] ok=${res.ok} ` +
-          `changed=[${res.changed.join(",")}] violations=${res.violations.length}` +
-          (res.violations.length ? ` (${res.violations.map((v) => `${v.slide}:${v.kind}`).join("; ")})` : ""),
+          `changed=[${res.changed.join(",")}] findings=${res.findings.length}` +
+          (res.findings.length ? ` (${res.findings.map((f) => `${f.slide}:${f.kind}`).join("; ")})` : ""),
       );
     }
     // Advance the accepted base only for a CLEAN fold — this fork's targets are
