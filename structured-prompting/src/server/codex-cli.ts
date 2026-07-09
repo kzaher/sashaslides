@@ -236,8 +236,22 @@ async function callCodexInternal(
     procArgs.push("--image", p);
   }
 
-  // Prompt is the trailing positional arg (both for fresh and resume forms).
-  procArgs.push(fullPrompt);
+  // Prompt is normally the trailing positional arg. A huge prompt (an LLM merge
+  // over full source files) would blow the argv per-string cap (~128KB
+  // MAX_ARG_STRLEN) → `spawn E2BIG`. Above a safe threshold, OMIT the positional
+  // and feed the prompt on STDIN via a temp FILE — `codex exec` reads its
+  // instructions from stdin when no PROMPT is given (per `codex exec --help`).
+  // A file, not a pipe, so a huge prompt can't fill the pipe buffer and hang.
+  const PROMPT_ARGV_LIMIT = 96 * 1024;
+  let promptFile: string | null = null;
+  if (Buffer.byteLength(fullPrompt, "utf8") > PROMPT_ARGV_LIMIT) {
+    if (!scratchDir) scratchDir = io.mkdtempSync(join(tmpdir(), "sp-codex-"));
+    promptFile = join(scratchDir, "prompt.txt");
+    io.writeFileSync(promptFile, fullPrompt);
+    // no positional prompt → codex reads it from stdin (the file)
+  } else {
+    procArgs.push(fullPrompt);
+  }
 
   const started = io.now();
   try {
@@ -248,6 +262,7 @@ async function callCodexInternal(
       timeoutMs,
       nodeId: opts.nodeId,
       branchId: opts.branchId,
+      stdinFile: promptFile ?? undefined,
     });
 
     if (spawnError) {
