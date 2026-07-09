@@ -82,7 +82,25 @@ import { resumeMerge } from "./resume-merge.js";
 // `./clusters.ts` file with your actual cluster definitions. esbuild will
 // refuse to build until that file exists — by design, to prevent
 // accidental smoke runs. See header for the file template.
-import { CLUSTERS } from "./clusters.js";
+import { clustersFromRatings } from "./generate-clusters.js";
+import { join as pathJoin } from "node:path";
+import type { Cluster } from "./workspace-setup.js";
+
+/** At solve start, print the slides you marked BAD (the clusters) with the paths
+ *  to each: the source fixture, the TARGET (original) + ATTEMPT (current) renders,
+ *  the annotation, and the live comment. */
+function printBrokenSlides(clusters: Cluster[], ratingsPath: string, sxsDir: string, fixturesDir: string): void {
+  console.error(`\n[scaffold] broken slides marked for solving (from ${ratingsPath}): ${clusters.length ? clusters.map((c) => c.slide_ids.join(",")).join(", ") : "(none)"}`);
+  for (const c of clusters) {
+    const id = c.slide_ids[0];
+    const comment = c.cluster_description.split("\n")[0].replace(/^.*? — /, "");
+    console.error(`  ■ ${id} — "${comment}"`);
+    console.error(`      fixture:    ${pathJoin(fixturesDir, `${id}.html`)}`);
+    console.error(`      TARGET:     ${pathJoin(sxsDir, "originals", `${id}.png`)}`);
+    console.error(`      ATTEMPT:    ${pathJoin(sxsDir, "slides", `${id}.png`)}`);
+    console.error(`      annotation: ${pathJoin(sxsDir, "annotations", `${id}.png`)}`);
+  }
+}
 
 // Absolute paths to helper scripts. Resolved from the repo root
 // (process.cwd()) — the canonical launch command is
@@ -250,12 +268,27 @@ async function run(): Promise<void> {
   // retry_budget for the whole run, so the attempt count is a run-level knob.
   const retryBudget = process.env.BUG_SOLVING_RETRY_BUDGET
     ? Number(process.env.BUG_SOLVING_RETRY_BUDGET) : undefined;
+
+  // Clusters come DIRECTLY from the live SxS ratings — the slides you actually
+  // marked BAD (with their live comments) are the source of truth at solve start.
+  // No clusters.ts, no ledger reconciliation that could let a stale history
+  // override your current ratings.
+  const ratingsPath = process.env.BUG_SOLVING_RATINGS_JSON ?? "/tmp/sxs-complex/ratings.json";
+  const sxsDir = process.env.BUG_SOLVING_SXS_DIR ?? "/tmp/sxs-complex";
+  const fixturesDir = process.env.BUG_SOLVING_FIXTURES_DIR ?? "renderer/html2slides/e2e/fixtures";
+  const liveClusters = clustersFromRatings(ratingsPath, { retryBudget });
+  printBrokenSlides(liveClusters, ratingsPath, sxsDir, fixturesDir);
+  if (liveClusters.length === 0) {
+    console.error(`\n❌ No slides marked BAD in ${ratingsPath} — nothing to solve. Rate slides bad in the SxS UI first.`);
+    process.exit(2);
+  }
+
   // --only (BUG_SOLVING_ONLY): limit the run to ONE cluster for fast E2E testing.
   // Matches on exact task_id, a substring of it, or a slide id in the cluster.
   const only = (process.env.BUG_SOLVING_ONLY || "").trim();
-  const baseClusters = selectOnlyClusters(CLUSTERS, only);
+  const baseClusters = selectOnlyClusters(liveClusters, only);
   if (only && baseClusters.length === 0) {
-    console.error(`\n❌ --only "${only}" matched no cluster. Available: ${CLUSTERS.map((c) => c.task_id).join(", ")}`);
+    console.error(`\n❌ --only "${only}" matched no marked-bad slide. Available: ${liveClusters.map((c) => c.task_id).join(", ")}`);
     process.exit(2);
   }
   if (only) console.error(`[scaffold] --only "${only}" → solving ${baseClusters.length} cluster(s): ${baseClusters.map((c) => c.task_id).join(", ")}`);
