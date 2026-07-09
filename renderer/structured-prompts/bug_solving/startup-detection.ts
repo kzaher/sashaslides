@@ -86,7 +86,9 @@ export function decideStartup(state: PriorState, flags: StartupFlags): StartupDe
       message:
         `Prior overlay state found at ${DEFAULT_BRANCHES_ROOT} (${n} workspace${n === 1 ? "" : "s"})` +
         (m ? ` and ${DEFAULT_SHARED_ROOT} (${m} run dir${m === 1 ? "" : "s"})` : "") +
-        `. Re-run with --clean to discard it or --continue to resume merging.`,
+        `.\n   Resume-merge it:  npm run renderer:solver:run -- --continue` +
+        `\n   Or discard it:    npm run renderer:solver:run -- --clean` +
+        `\n   (the '--' is required — 'npm run … --continue' without it is swallowed by npm and runs a fresh solve.)`,
     };
   }
   return { action: "fresh" };
