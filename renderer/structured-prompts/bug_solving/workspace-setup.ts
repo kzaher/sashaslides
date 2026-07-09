@@ -72,6 +72,8 @@ const DEFAULTS: Omit<BuildOptions, "clusters"> = {
  *  here; other fields (verdict, etc.) are ignored, so keep the shape minimal. */
 interface RatingEntry {
   comment?: string;
+  /** absolute path to the user's drawn annotation PNG (rating server writes it). */
+  annotation?: string;
 }
 
 function readRatings(path: string): Record<string, RatingEntry> {
@@ -80,22 +82,8 @@ function readRatings(path: string): Record<string, RatingEntry> {
   return JSON.parse(readFileSync(path, "utf-8")) as Record<string, RatingEntry>;
 }
 
-/** Persistent per-slide ledger of the LATEST user rating (comment + annotation),
- *  written by the rating server's `--history-dir`. Survives worktree cleanup and
- *  /tmp wipes, so a follow-up round reads the most recent feedback rather than
- *  the original (possibly wiped) sxs ratings.json. */
-const HISTORY_DIR = "/workspaces/sashaslides/.bug-solving-history";
-interface LedgerEntry { comment?: string; annotation?: string }
-function readLedger(): Record<string, LedgerEntry> {
-  const f = resolve(HISTORY_DIR, "ratings.json");
-  if (!existsSync(f)) return {};
-  try { return JSON.parse(readFileSync(f, "utf-8")) as Record<string, LedgerEntry>; }
-  catch { return {}; }
-}
-
 function buildSlideTasks(slideIds: string[], opts: BuildOptions): SlideTask[] {
   const ratings = readRatings(opts.ratings_json);
-  const ledger = readLedger();
   // Max-contrast composites (annotation applied onto the target render) land
   // here so workers get a single image that shows BOTH the slide and where the
   // user marked. mkdir once.
@@ -104,16 +92,15 @@ function buildSlideTasks(slideIds: string[], opts: BuildOptions): SlideTask[] {
   const out: SlideTask[] = [];
   for (const id of slideIds) {
     const r = ratings[id] || {};
-    const led = ledger[id] || {};
     const html = resolve(opts.repo_root, opts.fixtures_dir, `${id}.html`);
     if (!existsSync(html)) {
       throw new Error(`fixture not found for ${id}: ${html}`);
     }
-    // Prefer the persistent ledger (latest round's feedback) over the original
-    // sxs ratings.json / annotations dir, which may be stale or /tmp-wiped.
+    // Comment + annotation come ONLY from the live SxS rating (the slide you
+    // actually marked). No .bug-solving-history ledger — it could be stale.
     const sxsAnnotation = resolve(opts.sxs_dir, "annotations", `${id}.png`);
-    const annotation = (led.annotation && existsSync(led.annotation))
-      ? led.annotation
+    const annotation = (r.annotation && existsSync(r.annotation))
+      ? r.annotation
       : (existsSync(sxsAnnotation) ? sxsAnnotation : undefined);
     const original_png = resolve(opts.sxs_dir, "originals", `${id}.png`);
     // For any slide with an annotation, build the max-contrast composite over
@@ -130,7 +117,7 @@ function buildSlideTasks(slideIds: string[], opts: BuildOptions): SlideTask[] {
     out.push({
       slide_id: id,
       html_file: html,
-      user_comment: (led.comment ?? (r.comment as string | undefined)) ?? "",
+      user_comment: (r.comment as string | undefined) ?? "",
       annotation_png: annotation,
       composite_png,
       rendered_png: resolve(opts.sxs_dir, "slides", `${id}.png`),

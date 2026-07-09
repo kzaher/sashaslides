@@ -69,16 +69,11 @@ esac
 [ "$ATTEMPTS" -ge 1 ] || { echo "❌ --attempts must be >= 1 (got $ATTEMPTS)" >&2; exit 2; }
 echo "▶ model=$MODEL  validation-model=$VALMODEL  engine=$ENGINE  attempts=$ATTEMPTS${ONLY:+  only=$ONLY}  extra=[${PASS[*]:-}]"
 
-# 0. Regenerate clusters.ts from the reconciled, checked ledgers (one cluster per
-#    bad slide). Skipped on --continue (resume must solve the SAME clusters) and
-#    --no-regen (preserve hand-enriched descriptions). Attempts are NOT baked in
-#    here — --attempts above is the run-level knob.
-if [ "$REGEN" = "1" ]; then
-  echo "▶ regenerating clusters.ts from reconciled ledgers …"
-  npx tsx renderer/structured-prompts/bug_solving/generate-clusters.ts --write
-else
-  echo "▶ keeping existing clusters.ts (no regen)"
-fi
+# 0. NO clusters.ts / no regen: clusters are derived at solve start DIRECTLY from
+#    the live SxS ratings (the slides you marked BAD, with their live comments +
+#    annotations). See main-scaffolding.ts → clustersFromRatings. The scaffolding
+#    prints the broken slides + their paths at start.
+echo "▶ clusters come from the live SxS ratings (slides marked BAD) at solve start"
 
 # 1. Chrome on :9222 (rendering needs it) — start if absent.
 if ! curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
