@@ -18,7 +18,7 @@
   "slide_04": {
     "status": "bad",
     "comment": "Bad tick positioning, not centered.",
-    "ratedAt": "2026-07-03T08:48:30.129Z",
+    "ratedAt": "2026-07-05T18:14:21.427Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_04.png"
   },
   "slide_05": {
@@ -60,15 +60,14 @@
     "annotation": "/tmp/sxs-complex/annotations/slide_11.png"
   },
   "slide_12": {
-    "status": "bad",
+    "status": "good",
     "comment": "Black borders are too big, wrong corner radius. Also letter spacing is wrong on produce features, but unusre can this be fixed.",
-    "ratedAt": "2026-07-03T08:48:40.874Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_12.png"
+    "ratedAt": "2026-07-05T18:14:46.049Z"
   },
   "slide_13": {
     "status": "bad",
-    "comment": "Why are there so many rendered regions on the right, this looks like it should be possible to use some shape, text should never be rendered, if you need to render then render without text (text hidden), and then put text as children so it's editable?",
-    "ratedAt": "2026-07-03T08:48:49.135Z",
+    "comment": "Why are there so many rendered regions on the right, this looks like it should be possible to support trapezoid shape and more generic shapes with gradient.",
+    "ratedAt": "2026-07-05T18:15:34.607Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_13.png"
   },
   "slide_14": {
@@ -98,8 +97,8 @@
   },
   "slide_19": {
     "status": "bad",
-    "comment": "CAutious not centered. bottom text is in two lines.",
-    "ratedAt": "2026-07-03T08:48:54.625Z",
+    "comment": "The icons on the left side of buttons look like they have white background. On the bottom side the red text is misaligned with exclamation marks.",
+    "ratedAt": "2026-07-05T18:17:30.081Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_19.png"
   },
   "slide_20": {
@@ -110,7 +109,7 @@
   "slide_21": {
     "status": "good",
     "comment": "A+ aligned wrong and wrong line height for text.",
-    "ratedAt": "2026-06-30T23:19:30.097Z"
+    "ratedAt": "2026-07-05T18:18:39.220Z"
   },
   "slide_22": {
     "status": "good",
@@ -152,10 +151,9 @@
     "annotation": "/tmp/sxs-complex/annotations/slide_29.png"
   },
   "slide_30": {
-    "status": "bad",
+    "status": "good",
     "comment": "Not a list element, just text with bullets. can't bullets in a list in slides be colored?",
-    "ratedAt": "2026-07-03T08:49:02.042Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_30.png"
+    "ratedAt": "2026-07-05T18:19:26.869Z"
   },
   "slide_31": {
     "status": "good",
@@ -166,8 +164,7 @@
   "slide_32": {
     "status": "good",
     "comment": "It does feel like bottom rectangle is moved up, the more to the bottom, the bigger the error.",
-    "ratedAt": "2026-07-01T18:39:45.002Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_32.png"
+    "ratedAt": "2026-07-05T18:19:38.746Z"
   },
   "slide_33": {
     "status": "good",
