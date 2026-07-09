@@ -30,6 +30,7 @@ let port = 3456;
 // provided markdown) and "Show diff analysis" (renders the slide_id.diff
 // + .summary.json from the provided directory).
 let filterSlides: string[] | null = null;      // --filter-slides csv
+let exitWhenAllRated = false;                   // --exit-when-all-rated: poll + exit(0) when every filter slide is good/bad
 let slidesDirOverride: string | null = null;    // --slides-dir path
 let originalsDirOverride: string | null = null; // --originals-dir path
 let taskAnalysisPath: string | null = null;     // --task-analysis md
@@ -66,6 +67,7 @@ for (let i = 0; i < args.length; i++) {
   const v = args[i];
   if (v === "--port") port = parseInt(args[++i]);
   else if (v === "--filter-slides") filterSlides = args[++i].split(",").map(s => s.trim());
+  else if (v === "--exit-when-all-rated") exitWhenAllRated = true;
   else if (v === "--slides-dir") slidesDirOverride = resolve(args[++i]);
   else if (v === "--originals-dir") originalsDirOverride = resolve(args[++i]);
   else if (v === "--task-analysis") taskAnalysisPath = resolve(args[++i]);
@@ -1857,4 +1859,23 @@ server.listen(port, () => {
   console.log(`\n${describeRatingIo(io)}\n`);
   console.log(`  Keyboard: g=good, b=bad, n/→=next, p/←=prev\n`);
   fireNotify(url);
+
+  // Per-fork gate: poll every 5s and EXIT(0) once every filtered slide is rated
+  // good/bad, so the solver's rating-gate node (which runs this server in the
+  // FOREGROUND) unblocks — no detached process, no leaked capture pipe.
+  if (exitWhenAllRated && filterSlides && filterSlides.length) {
+    const ratingsFile = join(resultsDir, "ratings.json");
+    const wanted = filterSlides;
+    const poll = setInterval(() => {
+      let ratings: Record<string, { status?: string }> = {};
+      try { if (existsSync(ratingsFile)) ratings = JSON.parse(readFileSync(ratingsFile, "utf-8")); } catch { /* mid-write */ }
+      const allRated = wanted.every((id) => { const s = ratings[id]?.status; return s === "good" || s === "bad"; });
+      if (allRated) {
+        clearInterval(poll);
+        console.log(`\n  ✓ all ${wanted.length} slide(s) rated → rating server on :${port} exiting.\n`);
+        server.close(() => process.exit(0));
+        setTimeout(() => process.exit(0), 1500).unref(); // force-exit if a browser keeps a socket open
+      }
+    }, 5000);
+  }
 });

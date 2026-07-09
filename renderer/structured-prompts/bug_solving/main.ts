@@ -1053,11 +1053,20 @@ export function main(args: {
             // editing). The normal defect-identification rating stays editable.
             `--read-only ` +
             `--task-title "${spec.task_title}"`;
-          // setsid + `& disown` detaches the server so it outlives this node.
+          // NO_ACCEPT (machine-only, no human to rate): don't block — skip the UI.
+          // A2's wait is skipped too, so the fork proceeds without a rating.
+          if (acceptDisabled(process.env)) {
+            return `${BRANCH_CD_RENDERER} && echo "[rating-server] NO_ACCEPT → skipping ${task.task_id} rating UI"`;
+          }
+          // Run the server in the FOREGROUND: it self-exits(0) once every slide
+          // is rated (--exit-when-all-rated, poll every 5s), so THIS node is the
+          // wait. We do NOT detach it — `setsid … & disown` leaked the engine's
+          // capture pipe (the node hung forever, so the rating was never seen).
+          // stderr → the log (progress); the URL is printed to the node output.
           return (
             `${BRANCH_CD_RENDERER} && ` +
-            `setsid ${inner} > ${log} 2>&1 < /dev/null & disown; ` +
-            `echo "[rating-server] ${task.task_id} → http://localhost:${spec.port} (log ${task.scratch_dir}/rating-server.log)"`
+            `echo "[rating-server] ${task.task_id} → http://localhost:${spec.port} — rate GOOD/BAD; it closes when done (log ${task.scratch_dir}/rating-server.log)" && ` +
+            `${inner} 2> ${log}`
           );
         }),
         (taskResult) => taskResult,
