@@ -10,7 +10,7 @@
  */
 
 import { spawn, type SpawnOptions } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, openSync, closeSync } from "node:fs";
 import type { Buffer as NodeBuffer } from "node:buffer";
 import { WORKSPACE_SCRIPT } from "../../../cow-workspace/cow-workspace.js";
 
@@ -56,6 +56,12 @@ export interface SpawnCaptureArgs {
   onStdout?: (chunk: string) => void;
   /** Live stderr listener — same contract as `onStdout`. */
   onStderr?: (chunk: string) => void;
+  /** If set, this FILE is fed to the child's stdin (fd 0). Used to pass a very
+   *  large prompt (e.g. an LLM merge over full source files) that would blow the
+   *  argv `MAX_ARG_STRLEN` limit as a `-p <prompt>` argument (spawn E2BIG). The
+   *  child inherits the OPEN fd, so it works even inside an overlay jail where the
+   *  path isn't visible. Undefined → stdin is /dev/null (byte-identical to before). */
+  stdinFile?: string;
 }
 
 export interface SpawnCaptureResult {
@@ -168,11 +174,18 @@ export const realIO: IO = {
     const effArgs = branchId
       ? [OVERLAY_BRANCH_SH, "run", branchId, command, ...procArgs]
       : procArgs;
+    // Open the stdin file (if any) as an fd the child inherits. A file — not a
+    // pipe — so a huge prompt can't fill the pipe buffer and hang (the child
+    // reads at its own pace). Falls back to /dev/null if the open fails.
+    let stdinFd: number | undefined;
+    if (args.stdinFile) {
+      try { stdinFd = openSync(args.stdinFile, "r"); } catch { stdinFd = undefined; }
+    }
     return new Promise<SpawnCaptureResult>((resolve) => {
       const spawnOpts: SpawnOptions = {
         cwd,
         env: (env ?? process.env) as NodeJS.ProcessEnv,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [stdinFd ?? "ignore", "pipe", "pipe"],
         // Detached so the child gets its own process group; we keep stdio
         // attached so the parent still proxies output. This lets us
         // signal the whole group (`process.kill(-pid, ...)`) on shutdown,
@@ -190,6 +203,8 @@ export const realIO: IO = {
       const wrappedCommand = "setpriv";
       const wrappedArgs = ["--pdeathsig", "SIGKILL", "--", effCommand, ...effArgs];
       const child = spawn(wrappedCommand, wrappedArgs, spawnOpts);
+      // The child has its own dup of the stdin fd now; drop the parent's copy.
+      if (stdinFd !== undefined) { try { closeSync(stdinFd); } catch { /* */ } }
       // child.kill by default signals just the child; we want the whole
       // group so claude's own subprocesses (e.g. tool-use shells) die too.
       const groupKiller: LiveChild = {
