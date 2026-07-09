@@ -131,23 +131,19 @@ const combinedPlugin: esbuild.Plugin = {
       const raw = await readFile(args.path, "utf8");
       const loader = args.path.endsWith(".tsx") ? "tsx" : "ts";
 
-      // CHEAP GATE (typia's transform spins up the TS compiler per file — ~2-5s
-      // each — so we run it ONLY on files that can possibly produce a typia call).
-      // typia has work iff the file either (a) has a `.send<T>(…)` call that the
-      // schema-injector rewrites into `typia.json.schema<T>()`, or (b) already
-      // calls `typia.*` by hand. The injector trigger is `.send<`, NOT the word
-      // "typia" (a file needing injection does NOT contain "typia" yet — the
-      // injector ADDS it), so BOTH signals are required. A file with neither can
-      // never yield a typia call → skip inject + transform entirely.
-      const maybeSend = /\.send\s*</.test(raw);
-      const maybeTypia = /\btypia\s*\.\s*[A-Za-z]/.test(raw);
-      if (!maybeSend && !maybeTypia) return { contents: raw, loader };
-
       // Step 1: rewrite .send<T>({...}) → inject typia.json.schema<T>() call.
-      const { code: afterInject } = injectSchemaIntoSendCalls(raw, args.path);
-      // If injection changed nothing AND there's no hand-written typia call, the
-      // post-inject source contains no typia.* to inline → typia is a no-op. Skip.
-      if (afterInject === raw && !maybeTypia) return { contents: raw, loader };
+      // injectSchemaIntoSendCalls self-fast-paths on ITS OWN trigger, so running
+      // it on every file is cheap AND authoritative — we don't re-guess which
+      // send forms it handles.
+      const { code: afterInject, changed } = injectSchemaIntoSendCalls(raw, args.path);
+
+      // CHEAP GATE: typia's transform spins up the TS compiler per file (~2-5s
+      // each), so we run it ONLY when there's actually a `typia.*` call to inline:
+      // either the injector just added one (`changed`), or the source calls typia
+      // by hand. A file with neither is a guaranteed no-op → skip it (this is the
+      // whole ~44-92s → ~4s win; for main-scaffolding NO file needs typia).
+      const needsTypia = changed || /\btypia\s*\.\s*[A-Za-z]/.test(raw);
+      if (!needsTypia) return { contents: afterInject, loader };
 
       // Step 2: hand to typia to inline the generic → JSON Schema literal.
       let transformed: string;
