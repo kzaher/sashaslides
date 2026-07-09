@@ -255,9 +255,14 @@ export function defaultStabilityRecorder(deps: DefaultRecorderDeps): StabilityRe
     if (!outDir) {
       outDir = join(deps.scratchDir, `attempt_${attemptIdx}`);
       mkdirSync(outDir, { recursive: true });
+      // The recorder runs from `renderer/`, so `--fixtures` MUST be absolute —
+      // a repo-root-relative path (e.g. "renderer/html2slides/e2e/fixtures") would
+      // resolve against renderer/ and DOUBLE to renderer/renderer/… ("fixture not
+      // found"). resolve() leaves an already-absolute fixturesDir untouched.
+      const fixturesAbs = resolve(deps.repo, deps.fixturesDir);
       execSync(
         `cd "${join(deps.repo, "renderer")}" && RECORD_CONCURRENCY=1 npx tsx "${join(deps.repo, REC)}" ` +
-          `--mode full --fixtures "${deps.fixturesDir}" --slides "${csv}" ` +
+          `--mode full --fixtures "${fixturesAbs}" --slides "${csv}" ` +
           `--title "stability-a${attemptIdx}-${Date.now()}" --out "${outDir}"`,
         { stdio: "ignore", timeout: deps.timeoutMs ?? 20 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 },
       );
