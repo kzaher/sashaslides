@@ -338,9 +338,9 @@ async function run(): Promise<void> {
   else console.log(`🔔 NOTIFY USER: stdout-only (set BUG_SOLVING_NOTIFY_CMD='<cmd with {url} {title} {slides}>' for a real notifier)`);
 
   const tasks = buildTasks(buildOpts);
-  console.error(`[scaffolding] built ${tasks.length} task(s):`);
+  console.error(`[scaffolding] built ${tasks.length} task(s). When a slide SOLVES it boots a read-only rating UI on its port — open it and mark GOOD/BAD:`);
   for (const t of tasks) {
-    console.error(`  ${t.task_id} @ ${t.workspace_dir} (server port ${t.server_port})`);
+    console.error(`  ${t.slides.map((s) => s.slide_id).join(",").padEnd(24)} → http://localhost:${t.server_port}   [${t.task_id}]`);
   }
 
   await recordBeforePptx(tasks);
