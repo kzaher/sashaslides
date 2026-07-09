@@ -88,9 +88,16 @@ curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1 || { ech
 echo "▶ building $BUNDLE …"
 npx tsx structured-prompting/build.ts renderer/structured-prompts/bug_solving/main-scaffolding.ts "$BUNDLE"
 
-# 3. Show the clusters actually baked into the bundle (catch a stale build).
-echo "▶ clusters in bundle:"
-grep -oE 'slide-[0-9]+-[a-z-]+' "$BUNDLE" | sort -u | sed 's/^/    /' || true
+# 3. Show which slides are currently marked BAD in the live SxS ratings — these
+#    become the clusters at solve start (clustersFromRatings). No longer baked
+#    into the bundle, so grepping the bundle would (misleadingly) show nothing.
+RJSON="${BUG_SOLVING_RATINGS_JSON:-/tmp/sxs-complex/ratings.json}"
+echo "▶ slides marked BAD in $RJSON (→ clusters):"
+if [ -f "$RJSON" ]; then
+  npx tsx -e 'const r=require(process.argv[1]);const bad=Object.keys(r).filter(k=>((r[k].status??r[k].verdict??"")+"").toLowerCase()==="bad"||r[k].good===false).sort();console.log(bad.length?"    "+bad.join(", "):"    (none — rate slides BAD in the SxS UI first)")' "$RJSON" 2>/dev/null || echo "    (could not read ratings)"
+else
+  echo "    (no ratings file at $RJSON — nothing to solve)"
+fi
 
 # 4. Launch (foreground so you see the monitor + rating URLs; Ctrl-C to stop).
 #    --model → BUG_SOLVING_MODEL, --engine → the scaffolding --engine flag; the
