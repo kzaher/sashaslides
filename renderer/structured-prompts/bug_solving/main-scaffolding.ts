@@ -167,11 +167,21 @@ async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<v
     // repo-relative, resolved to absolute via $ROOT (= the branch's merged root).
     // This is the UNMODIFIED tree (the worker hasn't run yet), so it's the true
     // BEFORE state. cwd = renderer/ inside the branch for node_modules.
+    // Render TWO pristine BEFORE sets, both here (host-level, ONE overlay mount,
+    // before the worker touches the converter):
+    //   • before      = this cluster's slides   → step 4's pairwise diff.
+    //   • before-all  = the WHOLE fixture deck   → step 4b's off-target scan.
+    // before-all is staged NOW so step 4b never has to re-render the baseline
+    // inside the worker's jail — a nested overlay mount there is kernel-rejected.
     const inner =
       `ROOT="$PWD"; cd "$ROOT/renderer" && ` +
       `npx tsx "$ROOT/${RECORD_SCRIPT_REL}" --mode pptx ` +
       `--fixtures "$ROOT/${t.fixtures_dir}" --slides ${ids} ` +
-      `--out "$ROOT/${t.scratch_dir}/before"`;
+      `--out "$ROOT/${t.scratch_dir}/before" && ` +
+      `ALL=$(ls "$ROOT/${t.fixtures_dir}"/slide_*.html | xargs -n1 basename | sed 's/[.]html$//' | sort -V | paste -sd,) && ` +
+      `RECORD_CONCURRENCY=1 npx tsx "$ROOT/${RECORD_SCRIPT_REL}" --mode pptx ` +
+      `--fixtures "$ROOT/${t.fixtures_dir}" --slides "$ALL" ` +
+      `--out "$ROOT/${t.scratch_dir}/before-all"`;
     try {
       await execFileAsync("bash", [
         OVERLAY_BRANCH_SH, "run", t.branch_id, "bash", "-c", inner,

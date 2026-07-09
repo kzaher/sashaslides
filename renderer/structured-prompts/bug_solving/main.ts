@@ -779,31 +779,24 @@ export function main(args: {
         // branch and the fresh base branch below): before/after whole-deck pptx
         // land here so the diff can compare them.
         const reg = `/tmp/bs-reg-${task.branch_id}`;
-        // Baseline runs in a SEPARATE overlay branch whose upper is EMPTY, so
-        // its lower (the unmodified working tree) renders WITHOUT the fix. It
-        // captures its OWN repo root as $R (a different merged mount than $ROOT).
-        const baseInner =
-          `R="$PWD"; cd "$R/renderer" && ` +
-          `A=$(ls "$R/${fx}"/slide_*.html | xargs -n1 basename | sed "s/[.]html$//" | sort -V | paste -sd,) && ` +
-          `RECORD_CONCURRENCY=1 npx tsx "$R/${rec}" --mode pptx --fixtures "$R/${fx}" --slides "$A" --out ${reg}/before-all`;
         return [
           BRANCH_CD_RENDERER,
           `rm -rf ${reg} "$ROOT/${task.scratch_dir}/reg-diffs" && mkdir -p ${reg}`,
           `ALL=$(ls "$ROOT/${fx}"/slide_*.html | xargs -n1 basename | sed 's/[.]html$//' | sort -V | paste -sd,)`,
           // RECORD_CONCURRENCY=1 forces SEQUENTIAL rendering of the whole-deck
-          // before/after passes. Concurrent Chrome tabs race on web-font load,
-          // shifting text metrics → nondeterministic pptx → PHANTOM off-target
-          // regressions (this is what falsely failed flex-panel-width: a no-op
-          // fix drew a disjoint set of "changed" slides each run). Sequential
-          // rendering is empirically byte-deterministic (full-deck HEAD-vs-HEAD
-          // = 0 structural drift), so the off-target diff reflects ONLY the fix.
+          // AFTER pass. Concurrent Chrome tabs race on web-font load, shifting
+          // text metrics → nondeterministic pptx → PHANTOM off-target regressions
+          // (this falsely failed flex-panel-width: a no-op fix drew a disjoint set
+          // of "changed" slides each run). Sequential rendering is empirically
+          // byte-deterministic, so the off-target diff reflects ONLY the fix.
           // AFTER = this branch (has the fix), rendered to the shared /tmp scratch.
           `RECORD_CONCURRENCY=1 npx tsx "$ROOT/${rec}" --mode pptx --fixtures "$ROOT/${fx}" --slides "$ALL" --out ${reg}/after-all`,
-          // BEFORE = a FRESH base branch (empty upper → pristine converter). The
-          // worker's edits live in THIS branch's upper, so `git stash` can't
-          // toggle them; a separate empty-upper branch gives the unmodified tree.
-          `bash "$ROOT/${SCRIPTS.overlayBranch}" run bs-regbase-${task.branch_id} bash -c '${baseInner}'`,
-          `npx tsx "$ROOT/${SCRIPTS.diff}" --before ${reg}/before-all/pptx --after ${reg}/after-all/pptx --out "$ROOT/${task.scratch_dir}/reg-diffs"`,
+          // BEFORE = the pristine whole-deck baseline recordBeforePptx staged at
+          // startup (this branch's `before-all`, rendered BEFORE the worker ran).
+          // We do NOT re-render it here: mounting a fresh baseline overlay inside
+          // the worker's jail is a nested overlay (overlay-over-overlay), which
+          // the kernel rejects ("wrong fs type … on overlay", exit 32).
+          `npx tsx "$ROOT/${SCRIPTS.diff}" --before "$ROOT/${task.scratch_dir}/before-all/pptx" --after ${reg}/after-all/pptx --out "$ROOT/${task.scratch_dir}/reg-diffs"`,
         ].join(" && ");
       })
 
