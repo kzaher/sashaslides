@@ -129,8 +129,26 @@ const combinedPlugin: esbuild.Plugin = {
     build.onLoad({ filter: /\.tsx?$/ }, async (args) => {
       if (args.path.includes("/node_modules/")) return undefined;
       const raw = await readFile(args.path, "utf8");
+      const loader = args.path.endsWith(".tsx") ? "tsx" : "ts";
+
+      // CHEAP GATE (typia's transform spins up the TS compiler per file — ~2-5s
+      // each — so we run it ONLY on files that can possibly produce a typia call).
+      // typia has work iff the file either (a) has a `.send<T>(…)` call that the
+      // schema-injector rewrites into `typia.json.schema<T>()`, or (b) already
+      // calls `typia.*` by hand. The injector trigger is `.send<`, NOT the word
+      // "typia" (a file needing injection does NOT contain "typia" yet — the
+      // injector ADDS it), so BOTH signals are required. A file with neither can
+      // never yield a typia call → skip inject + transform entirely.
+      const maybeSend = /\.send\s*</.test(raw);
+      const maybeTypia = /\btypia\s*\.\s*[A-Za-z]/.test(raw);
+      if (!maybeSend && !maybeTypia) return { contents: raw, loader };
+
       // Step 1: rewrite .send<T>({...}) → inject typia.json.schema<T>() call.
       const { code: afterInject } = injectSchemaIntoSendCalls(raw, args.path);
+      // If injection changed nothing AND there's no hand-written typia call, the
+      // post-inject source contains no typia.* to inline → typia is a no-op. Skip.
+      if (afterInject === raw && !maybeTypia) return { contents: raw, loader };
+
       // Step 2: hand to typia to inline the generic → JSON Schema literal.
       let transformed: string;
       try {
@@ -150,10 +168,7 @@ const combinedPlugin: esbuild.Plugin = {
         console.error(`[sp] typia transform failed for ${args.path}:`, (e as Error).message);
         transformed = afterInject;
       }
-      return {
-        contents: transformed,
-        loader: args.path.endsWith(".tsx") ? "tsx" : "ts",
-      };
+      return { contents: transformed, loader };
     });
   },
 };
