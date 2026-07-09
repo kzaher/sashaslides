@@ -139,13 +139,26 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallRes
       : prompt;
 
   const streaming = !!opts.onPartialText || !!opts.onPartialUsage;
-  const procArgs = [
-    "-p",
-    fullPrompt,
+  // argv has a per-string cap (~128KB MAX_ARG_STRLEN on Linux); a big prompt (an
+  // LLM merge over full source files) blows it → `spawn E2BIG`. Above a safe
+  // threshold, feed the prompt on STDIN via a temp FILE (`claude -p` reads it) —
+  // a file, not a pipe, so it can't fill the pipe buffer and hang.
+  const PROMPT_ARGV_LIMIT = 96 * 1024;
+  let promptFile: string | null = null;
+  const procArgs = ["-p"];
+  if (Buffer.byteLength(fullPrompt, "utf8") > PROMPT_ARGV_LIMIT) {
+    if (!scratchDir) scratchDir = io.mkdtempSync(join(tmpdir(), "sp-prompt-"));
+    promptFile = join(scratchDir, "prompt.txt");
+    io.writeFileSync(promptFile, fullPrompt);
+    // no positional prompt → claude reads it from stdin (the file)
+  } else {
+    procArgs.push(fullPrompt);
+  }
+  procArgs.push(
     "--output-format",
     streaming ? "stream-json" : "json",
     "--dangerously-skip-permissions",
-  ];
+  );
   if (streaming) procArgs.push("--verbose"); // claude requires --verbose with stream-json
   if (model) procArgs.push("--model", model);
   if (resume) {
@@ -209,6 +222,7 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeCallRes
       timeoutMs,
       branchId: opts.branchId,
       onStdout,
+      stdinFile: promptFile ?? undefined,
     });
     // Drain any trailing buffered line (last event might not end in \n).
     if (streaming && streamBuffer) {
