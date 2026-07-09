@@ -83,6 +83,9 @@ const forwarded = [
   "--task-diffs", diffs,
   "--task-title", title,
   ...(readOnly ? ["--read-only"] : []),
+  // Poll + self-exit(0) once every filtered slide is rated, so the solver runs
+  // this in the FOREGROUND (no detached pipe to hang the rating-gate node).
+  "--exit-when-all-rated",
   // Persistent per-slide ledger so comments + annotations survive worktree
   // cleanup / /tmp wipes and auto-populate the next round's provenance panel.
   "--history-dir", "/workspaces/sashaslides/.bug-solving-history",
