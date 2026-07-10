@@ -59,9 +59,10 @@
  * mock ONLY the LLM (via MockIO) + `retest`; the workspace, filesystem, and
  * ledger run for real. Production wires `realLlmMergeOps(...)`.
  */
-import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rmSync, mkdtempSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { Session, SessionWithResult } from "../../../structured-prompting/src/index.js";
 import {
   createCowWorkspace,
@@ -167,10 +168,43 @@ const PROPOSAL_LABELS = ["A", "B", "C", "D", "E", "F", "G", "H"];
 export function buildMergePrompt(relPath: string, base: string, proposals: string[]): string {
   const parts: string[] = [`Base version of ${relPath}:`, "```", base, "```", ""];
   proposals.forEach((p, i) => {
-    parts.push(`Proposed version ${PROPOSAL_LABELS[i] ?? String(i + 1)}:`, "```", p, "```", "");
+    const label = PROPOSAL_LABELS[i] ?? String(i + 1);
+    // Full file AND its unified diff vs base — the diff shows the model EXACTLY
+    // what this fork changed, so it can apply both forks' changes without having
+    // to re-derive them by eyeballing two large files.
+    parts.push(`Proposed version ${label} (full file):`, "```", p, "```", "");
+    parts.push(`Diff — proposed version ${label} vs base (unified):`, "```diff", diffVsBase(base, p, `version-${label}`), "```", "");
   });
   parts.push("Return ONLY the merged file contents that incorporates all fixes. No explanation, no code fences.");
   return parts.join("\n");
+}
+
+/** Unified diff of `other` vs `base` (via coreutils `diff -u`, so it scales to
+ *  large source files). Returns a friendly note when identical / on error —
+ *  never throws (a merge must not die on a diff). */
+function diffVsBase(base: string, other: string, label: string): string {
+  if (base === other) return "(identical to base — this fork changed nothing in this file)";
+  let dir: string | null = null;
+  try {
+    dir = mkdtempSync(join(tmpdir(), "sp-mdiff-"));
+    const baseF = join(dir, "base"), otherF = join(dir, "other");
+    writeFileSync(baseF, base);
+    writeFileSync(otherF, other);
+    try {
+      // diff exits 0 when identical (handled above), 1 when they differ (throws
+      // with the diff on .stdout), ≥2 on a real error.
+      execSync(`diff -u --label base --label ${JSON.stringify(label)} ${JSON.stringify(baseF)} ${JSON.stringify(otherF)}`, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+      return "(identical to base)";
+    } catch (e) {
+      const err = e as { status?: number; stdout?: string; message?: string };
+      if (err.status === 1 && typeof err.stdout === "string") return err.stdout.replace(/\n+$/, "");
+      return `(diff unavailable: ${err.message ?? "error"})`;
+    }
+  } catch (e) {
+    return `(diff unavailable: ${(e as Error).message})`;
+  } finally {
+    if (dir) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* */ } }
+  }
 }
 
 /** Strip a single wrapping ``` fence (with optional language tag) if the model
