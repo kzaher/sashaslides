@@ -66,10 +66,16 @@ function claudeResult(result: string): SpawnCaptureResult {
 /** Convenience LLM reply for the merge compose: base + every NEW `FIX_` line from
  *  the proposals (simulates "incorporate all the fixes"). */
 export function mergeComposer(prompt: string): string {
-  const [base, ...proposals] = fencedBlocks(prompt);
+  // Blocks after the base are the forks' FULL files AND their unified diffs (a
+  // "```diff" block per fork). Strip a leading +/- so a diff-added `+FIX_x` line
+  // normalises to the same text as the full-file `FIX_x` line and dedupes.
+  const [base, ...rest] = fencedBlocks(prompt);
   const have = new Set((base ?? "").split("\n"));
   const extra: string[] = [];
-  for (const p of proposals) for (const line of p.split("\n")) if (/FIX_/.test(line) && !have.has(line)) { have.add(line); extra.push(line); }
+  for (const block of rest) for (const raw of block.split("\n")) {
+    const line = raw.replace(/^[+-]/, "");
+    if (/FIX_/.test(line) && !have.has(line)) { have.add(line); extra.push(line); }
+  }
   return [...(base ?? "").split("\n"), ...extra].join("\n");
 }
 /** The ```-fenced blocks of a merge prompt; block 0 = the base version. */
