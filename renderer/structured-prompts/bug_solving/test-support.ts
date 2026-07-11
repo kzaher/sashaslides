@@ -21,7 +21,7 @@ import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
 import { llmMerge, type GreenCluster, type MergeOps, type MergeRenderSeam, type MergeReport } from "./llm-merge.js";
 import type { RenderRecord } from "./stability.js";
 import { execSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // ───────────────────────── (L) the LLM call ─────────────────────────────────
@@ -63,24 +63,67 @@ function claudeResult(result: string): SpawnCaptureResult {
   return { stdout: JSON.stringify({ type: "result", subtype: "success", is_error: false, result, session_id: "mock", duration_ms: 1, total_cost_usd: 0 }), stderr: "", exitCode: 0, signal: null, timedOut: false, spawnError: null };
 }
 
-/** Convenience LLM reply for the merge compose: base + every NEW `FIX_` line from
- *  the proposals (simulates "incorporate all the fixes"). */
-export function mergeComposer(prompt: string): string {
-  // Blocks after the base are the forks' FULL files AND their unified diffs (a
-  // "```diff" block per fork). Strip a leading +/- so a diff-added `+FIX_x` line
-  // normalises to the same text as the full-file `FIX_x` line and dedupes.
-  const [base, ...rest] = fencedBlocks(prompt);
-  const have = new Set((base ?? "").split("\n"));
-  const extra: string[] = [];
-  for (const block of rest) for (const raw of block.split("\n")) {
-    const line = raw.replace(/^[+-]/, "");
-    if (/FIX_/.test(line) && !have.has(line)) { have.add(line); extra.push(line); }
-  }
-  return [...(base ?? "").split("\n"), ...extra].join("\n");
+/** A record of one agentic merge-edit the mock model performed on disk. */
+export interface MergeEdit { target: string; before: string; after: string; conflicted: boolean; }
+
+/**
+ * The mock stand-in for the model's AGENTIC edit-and-verify pass. The real model
+ * would Read + Edit the merged file at EDIT_TARGET in place; the mock does the
+ * same file effect: it reads EDIT_TARGET from the prompt, and if the 3-way merge
+ * left diff3 conflict markers it resolves them (default: keep BOTH sides — the
+ * union of ours+theirs), writing the result back. A CLEAN merge is left untouched
+ * (byte-exact), exactly as a good model leaves a clean merge alone.
+ *
+ * Returns `{ reply, edits }`: pass `reply` to `mockLlm`, and assert on `edits`
+ * (each has the pre/post content + whether it was a conflict) — e.g. to prove a
+ * clean disjoint merge made NO edit, or that a serial fold's target already
+ * carried the prior fork's fix.
+ */
+export function mergeEditor(opts: { resolve?: (block: ConflictBlock) => string } = {}): { reply: (prompt: string) => string; edits: MergeEdit[] } {
+  const edits: MergeEdit[] = [];
+  const resolve = opts.resolve ?? ((b) => [...b.ours, ...b.theirs].join("\n"));
+  const reply = (prompt: string): string => {
+    const m = prompt.match(/EDIT_TARGET:\s*(\S+)/);
+    if (!m) return "no EDIT_TARGET in prompt";
+    const target = m[1];
+    let before: string;
+    try { before = readFileSync(target, "utf8"); } catch { return `EDIT_TARGET unreadable: ${target}`; }
+    const conflicted = /^<<<<<<< /m.test(before);
+    const after = conflicted ? resolveConflicts(before, resolve) : before;
+    if (after !== before) writeFileSync(target, after);
+    edits.push({ target, before, after, conflicted });
+    return conflicted ? "resolved conflict markers (kept both fixes)" : "verified clean merge; no edits";
+  };
+  return { reply, edits };
 }
-/** The ```-fenced blocks of a merge prompt; block 0 = the base version. */
-export function fencedBlocks(prompt: string): string[] {
-  return prompt.split("```").filter((_, i) => i % 2 === 1).map((b) => b.replace(/^\n/, "").replace(/\n$/, ""));
+
+/** The three regions of one diff3 conflict block. */
+export interface ConflictBlock { ours: string[]; base: string[]; theirs: string[]; }
+
+/** Replace every diff3 conflict block (<<<<<<< / ||||||| / ======= / >>>>>>>)
+ *  with `resolve(block)`; pass non-conflict lines through unchanged. */
+export function resolveConflicts(content: string, resolve: (b: ConflictBlock) => string): string {
+  const lines = content.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].startsWith("<<<<<<< ")) {
+      const ours: string[] = [], base: string[] = [], theirs: string[] = [];
+      let bucket = ours;
+      i++;
+      while (i < lines.length && !lines[i].startsWith(">>>>>>> ")) {
+        if (lines[i].startsWith("||||||| ")) { bucket = base; i++; continue; }
+        if (lines[i] === "=======") { bucket = theirs; i++; continue; }
+        bucket.push(lines[i]); i++;
+      }
+      i++; // skip the >>>>>>> line
+      const resolved = resolve({ ours, base, theirs });
+      if (resolved.length) out.push(...resolved.split("\n"));
+    } else {
+      out.push(lines[i]); i++;
+    }
+  }
+  return out.join("\n");
 }
 
 // ─────────────────────── (R) the Slides recording ───────────────────────────

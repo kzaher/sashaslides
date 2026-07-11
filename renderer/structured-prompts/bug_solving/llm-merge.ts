@@ -1,66 +1,70 @@
 /**
- * llm-merge.ts — the SIMPLE, LLM-performed merge engine for bug_solving.
+ * llm-merge.ts — the 3-way-merge-FIRST, LLM-verified merge engine for bug_solving.
  *
- * Replaces the old git/patcher `merge-phase.ts`. It folds the converter fixes
- * from every GREEN (user-approved) fork into one accepted working tree using the
- * generic copy-on-write workspace library (`cow-workspace.ts`) — NO git, NO
- * 3-way patcher, NO conflict markers.
+ * Folds the converter fixes from every GREEN (user-approved) fork into one
+ * accepted working tree using the generic copy-on-write workspace library
+ * (`cow-workspace.ts`).
  *
- * ## The LLM's role is MINIMAL
+ * ## Default is a MECHANICAL 3-way merge — the LLM only edits + verifies
  *
- * The model is only ever asked ONE thing, per file, with no bug-solving state
- * baked in:
+ * The old design asked the model to REGENERATE the whole merged file ("return
+ * ONLY the merged contents"). For a ~5k-line converter the model cannot reproduce
+ * every line verbatim, so it drifted globally → the render of EVERY slide changed
+ * → the gate correctly rejected the merge (and each call cost ~$15 / ~9 min).
  *
- *     Base version of <file>:
- *     ```
- *     <base contents>
- *     ```
- *     Proposed version A:
- *     ```
- *     <fork A's contents>
- *     ```
- *     Proposed version B:
- *     ```
- *     <fork B's contents>
- *     ```
- *     Return ONLY the merged file contents that incorporates all fixes.
+ * The fix: DON'T regenerate. Per file we do a real `git merge-file --diff3` 3-way
+ * merge of the fork versions onto the base (`mergeThree`/`mergeN`). Non-conflicting
+ * hunks — the common case, since independent bug fixes touch different regions —
+ * are applied BYTE-EXACTLY, so untargeted slides render identically and the gate
+ * passes. Only when two fixes touch the SAME region does git leave diff3 conflict
+ * markers; then, and only then, does the model have real work.
  *
- * That is the WHOLE prompt (`buildMergePrompt`). No conflict markers, no retest
- * instructions, no "keep both sides" protocol, no state machine. Every decision
- * about WHICH files need the LLM, WHEN to retest, whether to promote/demote, and
- * the all-at-once → sequential fallback is PLAIN CODE in this module, around the
- * `send` calls.
+ * The model is invoked AGENTICALLY (it edits the file on disk with its own tools):
+ * we write the 3-way result into the merge workspace's upper layer, write the base
+ * / each fork's full file / each fork's unified diff-vs-base to a scratch dir, and
+ * hand the model their PATHS (`mergeEditPrompt`) — NOT their inline contents. It is
+ * told to EDIT the merged file in place: resolve any conflict markers (the prompt
+ * explains diff3 marker anatomy) and verify each fix is intact, making the MINIMAL
+ * edits (never a reformat/rewrite — that would re-introduce the global drift). A
+ * clean 3-way merge means the model makes no edits at all. After the send we read
+ * the (possibly edited) file back out of the upper.
+ *
+ * Every decision about WHICH files need merging, WHEN to retest, promote/demote,
+ * and the all-at-once → sequential fallback is PLAIN CODE in this module.
  *
  * ## Flow (plain code)
  *
  *   1. Collect, per changed converter file, the set of fork versions: `base` =
  *      the real working tree, plus each green fork's version (read straight from
  *      its COW upper layer). A file changed by only ONE fork has no conflict → we
- *      take that fork's version verbatim, NO LLM.
+ *      take that fork's version verbatim, NO merge, NO LLM.
  *   2. ALL-AT-ONCE: one merge COW workspace over the repo. For each MULTI-fork
- *      file, ONE `buildMergePrompt` send → write the returned contents into the
- *      workspace upper. Single-fork files: write their version directly. Then
- *      `ops.retest(mergeWs, allIntendedSlides)`.
+ *      file: `mergeN` 3-way-merges the forks → write into the workspace upper →
+ *      ONE agentic `mergeEditPrompt` send (the model resolves/verifies the file in
+ *      place) → read it back. Single-fork files: write their version directly.
+ *      Then `ops.retest(mergeWs, allIntendedSlides)`.
  *   3. Retest clean (nothing OUTSIDE the intended slide set changed) →
  *      `mergeWs.promote(mergedFiles)` copies the merged files onto the REAL tree
  *      (the user commits). Report accepted. Done.
  *   4. Retest ripples (or a merge send failed) → SEQUENTIAL fallback: a fresh
  *      merge workspace; fold forks one at a time. For each fork, for each of its
- *      files, LLM-merge that fork's version into the CURRENT accepted file (which
- *      already includes the forks folded before it — the target MUTATES), write
- *      it, `ops.retest`. Keep the fork if clean; otherwise roll its writes back
- *      to the pre-fork accepted content and `ops.demote(slides, task, reason)`.
- *      Promote the final accepted set.
+ *      files, 3-way-merge that fork's version into the CURRENT accepted file (which
+ *      already includes the forks folded before it — the target MUTATES), let the
+ *      model edit/verify it, read back, `ops.retest`. Keep the fork if clean;
+ *      otherwise roll its writes back to the pre-fork accepted content and
+ *      `ops.demote(slides, task, reason)`. Promote the final accepted set.
  *
  * ## Testability seam (`ops`)
  *
  * The only side-effects the orchestration performs beyond the workspace fs are
  * `retest` / `promote` / `demote`, bundled on an injectable `MergeOps`. Tests
- * mock ONLY the LLM (via MockIO) + `retest`; the workspace, filesystem, and
- * ledger run for real. Production wires `realLlmMergeOps(...)`.
+ * mock ONLY the LLM (via MockIO) + the recording; the workspace, filesystem, git
+ * 3-way merge, and ledger run for real. The LLM mock stands in for the model's
+ * agentic edit — it reads EDIT_TARGET from the prompt and resolves markers on
+ * disk. Production wires `realLlmMergeOps(...)`.
  */
 import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rmSync, mkdtempSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Session, SessionWithResult } from "../../../structured-prompting/src/index.js";
@@ -160,23 +164,57 @@ export interface LlmMergeArgs {
 
 const PROPOSAL_LABELS = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
+/** A fork's fix for one file: its owning task + its full file content. */
+interface ForkVersion { task: string; content: string; }
+
+// ── The mechanical 3-way merge (git merge-file --diff3) — the DEFAULT ────────
+
 /**
- * The WHOLE LLM prompt: base + N proposed versions → the single merged file.
- * Deliberately carries NO bug-solving context, NO markers, NO retest/state
- * instructions. Exported so tests can assert exactly what the model saw.
+ * One `git merge-file --diff3` 3-way merge: fold `other`'s (base→other) change
+ * into `cur`, using `base` as the common ancestor. Non-overlapping hunks are
+ * applied byte-exactly; an overlapping change is left as a diff3 conflict block
+ * (`<<<<<<< / ||||||| / ======= / >>>>>>>`). NEVER throws — on a git spawn error
+ * it returns `cur` flagged conflicted so the LLM pass is forced to look.
  */
-export function buildMergePrompt(relPath: string, base: string, proposals: string[]): string {
-  const parts: string[] = [`Base version of ${relPath}:`, "```", base, "```", ""];
-  proposals.forEach((p, i) => {
-    const label = PROPOSAL_LABELS[i] ?? String(i + 1);
-    // Full file AND its unified diff vs base — the diff shows the model EXACTLY
-    // what this fork changed, so it can apply both forks' changes without having
-    // to re-derive them by eyeballing two large files.
-    parts.push(`Proposed version ${label} (full file):`, "```", p, "```", "");
-    parts.push(`Diff — proposed version ${label} vs base (unified):`, "```diff", diffVsBase(base, p, `version-${label}`), "```", "");
-  });
-  parts.push("Return ONLY the merged file contents that incorporates all fixes. No explanation, no code fences.");
-  return parts.join("\n");
+export function mergeThree(base: string, cur: string, other: string, labels: { cur: string; base: string; other: string }): { content: string; conflicted: boolean } {
+  if (cur === other) return { content: cur, conflicted: false };
+  if (base === cur) return { content: other, conflicted: false };   // cur unchanged → take other's diff verbatim
+  if (base === other) return { content: cur, conflicted: false };   // other unchanged → keep cur
+  let dir: string | null = null;
+  try {
+    dir = mkdtempSync(join(tmpdir(), "sp-3way-"));
+    const curF = join(dir, "cur"), baseF = join(dir, "base"), otherF = join(dir, "other");
+    writeFileSync(curF, cur); writeFileSync(baseF, base); writeFileSync(otherF, other);
+    const r = spawnSync("git", ["merge-file", "-p", "--diff3", "-L", labels.cur, "-L", labels.base, "-L", labels.other, curF, baseF, otherF], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    // status: 0 clean, >0 conflict count, null on spawn failure.
+    if (r.status == null || typeof r.stdout !== "string") return { content: cur, conflicted: true };
+    return { content: r.stdout, conflicted: /^<<<<<<< /m.test(r.stdout) };
+  } catch {
+    return { content: cur, conflicted: true };
+  } finally {
+    if (dir) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* */ } }
+  }
+}
+
+/**
+ * Fold N fork versions onto `base` by iterating `mergeThree` (base is the shared
+ * ancestor at every step). Returns the combined content + whether ANY conflict
+ * markers remain. One fork → its content verbatim (no merge).
+ */
+export function mergeN(base: string, forks: ForkVersion[]): { content: string; conflicted: boolean } {
+  if (forks.length === 0) return { content: base, conflicted: false };
+  let cur = forks[0].content;
+  let conflicted = false;
+  for (let i = 1; i < forks.length; i++) {
+    const r = mergeThree(base, cur, forks[i].content, {
+      cur: i === 1 ? `fix: ${forks[0].task}` : "merged so far",
+      base: "base",
+      other: `fix: ${forks[i].task}`,
+    });
+    cur = r.content;
+    conflicted = conflicted || r.conflicted;
+  }
+  return { content: cur, conflicted };
 }
 
 /** Unified diff of `other` vs `base` (via coreutils `diff -u`, so it scales to
@@ -207,11 +245,79 @@ function diffVsBase(base: string, other: string, label: string): string {
   }
 }
 
-/** Strip a single wrapping ``` fence (with optional language tag) if the model
- *  ignored "no code fences". Leaves fence-free content untouched. */
-function stripFence(s: string): string {
-  const m = s.match(/^\s*```[^\n]*\n([\s\S]*?)\n?```\s*$/);
-  return m ? m[1] : s;
+// ── The agentic edit-and-verify prompt (PATHS, not inline contents) ──────────
+
+/** Absolute paths to the reference material the model reads to review a merge. */
+interface MergeInputPaths {
+  basePath: string;
+  forks: Array<{ label: string; task: string; fullPath: string; diffPath: string }>;
+}
+
+/**
+ * Write the reference material the model reads to REVIEW a merge — the base
+ * version, and each fork's FULL file + its unified diff vs base — into `dir`,
+ * returning their absolute paths. (The merged file the model EDITS lives in the
+ * workspace upper, addressed separately as EDIT_TARGET.)
+ */
+function writeMergeInputs(dir: string, rel: string, base: string, forks: ForkVersion[]): MergeInputPaths {
+  mkdirSync(dir, { recursive: true });
+  const flat = rel.replace(/\//g, "__");
+  const basePath = join(dir, `base--${flat}`);
+  writeFileSync(basePath, base);
+  const out = forks.map((f, i) => {
+    const label = PROPOSAL_LABELS[i] ?? String(i + 1);
+    const fullPath = join(dir, `fix-${label}-${f.task}--${flat}`);
+    const diffPath = join(dir, `fix-${label}-${f.task}--${flat}.diff`);
+    writeFileSync(fullPath, f.content);
+    writeFileSync(diffPath, diffVsBase(base, f.content, `fix-${f.task}`));
+    return { label, task: f.task, fullPath, diffPath };
+  });
+  return { basePath, forks: out };
+}
+
+/**
+ * The agentic edit-and-verify prompt. The model gets FILE PATHS (not inline
+ * contents) and edits the already-3-way-merged file IN PLACE with its tools —
+ * never regenerating it. Explains diff3 conflict-marker anatomy. Exported so
+ * tests can assert what the model was told.
+ */
+export function mergeEditPrompt(opts: { rel: string; editTarget: string; inputs: MergeInputPaths; conflicted: boolean }): string {
+  const { rel, editTarget, inputs, conflicted } = opts;
+  const n = inputs.forks.length;
+  const lines: string[] = [];
+  lines.push(`You are integrating ${n} independent, already-approved bug fix(es) into a single copy of \`${rel}\`.`);
+  lines.push("");
+  lines.push("A 3-way merge has ALREADY been produced for you. EDIT THAT FILE IN PLACE using your Read + Edit tools — do NOT print it, do NOT regenerate it:");
+  lines.push(`  EDIT_TARGET: ${editTarget}`);
+  lines.push("");
+  lines.push("Reference material (read as needed; do NOT edit these):");
+  lines.push(`  base (the common ancestor both fixes started from): ${inputs.basePath}`);
+  for (const f of inputs.forks) {
+    lines.push(`  fix ${f.label} [${f.task}] — full file:            ${f.fullPath}`);
+    lines.push(`  fix ${f.label} [${f.task}] — unified diff vs base: ${f.diffPath}`);
+  }
+  lines.push("");
+  if (conflicted) {
+    lines.push("The merged file CONTAINS CONFLICT MARKERS: two fixes changed the same region and git could not combine them. A diff3 conflict block looks EXACTLY like this:");
+    lines.push("");
+    lines.push("    <<<<<<< <label of one side>");
+    lines.push("        ...lines from ONE fix...");
+    lines.push("    ||||||| base");
+    lines.push("        ...the ORIGINAL base lines both fixes diverged from...");
+    lines.push("    =======");
+    lines.push("        ...lines from the OTHER fix...");
+    lines.push("    >>>>>>> <label of the other side>");
+    lines.push("");
+    lines.push("Resolve EVERY such block by writing the code that preserves BOTH fixes' intent (reconcile the two sides using the base section and each fix's diff to see what each was doing — usually you keep both changes), then DELETE all four marker lines (<<<<<<<, |||||||, =======, >>>>>>>).");
+  } else {
+    lines.push("The 3-way merge was CLEAN (no conflict markers). Your job is only to VERIFY: confirm each fix's change (per its diff) is present and correct and the file is valid TypeScript. If it is already correct — which is expected for a clean merge — make NO edits at all.");
+  }
+  lines.push("");
+  lines.push("Rules:");
+  lines.push("- Make the MINIMAL edits necessary. Do NOT reformat, reorder, or rewrite unrelated code — any incidental change re-renders other slides and fails the merge gate.");
+  lines.push("- When you finish there must be ZERO conflict markers left in the file.");
+  lines.push("- Your text reply is ignored; the ONLY thing that matters is the edited file on disk.");
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -304,29 +410,39 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
 
   return session.try<MergeReport>(
     (s) => {
-      // One minimal send per multi-fork file. The file set is known now
-      // (forks are done), so the chain shape is fixed.
+      // Per multi-fork file: 3-way merge → write the result into the merge
+      // workspace upper → ONE agentic edit/verify send (the model resolves any
+      // conflict markers + verifies in place) → read it back. The file set is
+      // known now (forks are done), so the chain shape is fixed.
+      const inputsRoot = mkdtempSync(join(tmpdir(), "sp-merge-inputs-all-"));
       let chain: SessionWithResult<unknown> = installValue(s, "all-at-once:start");
       for (const rel of multiForkFiles) {
-        const proposals = fileForks.get(rel)!.map((f) => f.content);
-        const bc = baseContent(rel);
-        chain = chain.pipe((sc) =>
-          sc
-            .send({ prompt: buildMergePrompt(rel, bc, proposals) })
+        chain = chain.pipe((sc) => {
+          const forks: ForkVersion[] = fileForks.get(rel)!.map((f) => ({ task: f.cluster.task, content: f.content }));
+          const bc = baseContent(rel);
+          const { content: merged, conflicted } = mergeN(bc, forks);
+          allWs.writeUpperFile(rel, merged);                       // 3-way result → upper (the model edits it in place)
+          const editTarget = join(allWs.upperDir(), rel);
+          const inputs = writeMergeInputs(join(inputsRoot, rel.replace(/\//g, "__")), rel, bc, forks);
+          // The model edits the ABSOLUTE editTarget (an overlay-upper path) with
+          // its tools — no switchCwd (a sticky cwd into a to-be-deleted overlay
+          // would leave later nodes spawning in a vanished dir → setpriv ENOENT).
+          return sc
+            .send({ prompt: mergeEditPrompt({ rel, editTarget, inputs, conflicted }) })
             .combineWith<string, string>(
-              (b) => b.executeShell(() => `echo llm-merge:all-merged ${shq(rel)}`),
-              (resp) => { allState.merged[rel] = stripFence(resp); return resp; },
-            ),
-        );
+              (b) => b.executeShell(() => `echo llm-merge:all-edited ${shq(rel)} conflicted=${conflicted}`),
+              () => { allState.merged[rel] = allWs.readUpperFile(rel) ?? merged; return allState.merged[rel]; },
+            );
+        });
       }
 
-      // Write everything into the merge workspace + retest ONCE; stash the
-      // ripple set on allState so the following assert can throw on it (a throw
-      // routes the try to the sequential fallback).
+      // Write the single-fork files verbatim + retest ONCE; stash the ripple set
+      // on allState so the following assert can throw on it (a throw routes the
+      // try to the sequential fallback). Multi-fork files are already written +
+      // model-edited in the upper by the loop above.
       const allRipple: { set: string[] } = { set: [] };
       const retested = chain.pipe((sc) =>
         sc.executeShell(() => {
-          for (const rel of multiForkFiles) allWs.writeUpperFile(rel, allState.merged[rel]);
           for (const rel of singleForkFiles) allWs.writeUpperFile(rel, fileForks.get(rel)![0].content);
           const { changed } = ops.retest(allWs, allIntendedSlides);
           allRipple.set = changed.filter((sid) => !intendedSet.has(sid));
@@ -384,6 +500,7 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
   report.mode = "sequential";
 
   const seqWs = createCowWorkspace({ base: ctx.repo, id: `llm-merge-seq-${process.pid}-${Date.now()}`, upperRoot: ctx.upperRoot });
+  const seqInputsRoot = mkdtempSync(join(tmpdir(), "sp-merge-inputs-seq-"));
 
   // The CURRENT accepted contents per file (starts empty = base; mutates as
   // forks fold in). `keptFiles` = files owned by a kept fork (what we promote).
@@ -420,20 +537,26 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
       }),
     );
 
-    // One minimal send per file, folding THIS fork's version into the CURRENT
-    // accepted content. Building the prompt INSIDE the pipe body captures the
-    // exec-time accepted state — so a later fork sees earlier forks' folds.
+    // Per file: 3-way merge THIS fork's version into the CURRENT accepted content
+    // (original base as the shared ancestor) → write into the seq workspace upper
+    // → one agentic edit/verify send → read it back. Doing this INSIDE the pipe
+    // body captures the exec-time accepted state, so a later fork folds onto the
+    // forks kept before it (the target MUTATES).
     for (const { rel, content } of forkFiles) {
       chain = chain.pipe((sc) => {
         const current = cur(rel);            // includes prior folded forks
+        const bc = baseContent(rel);
+        const { content: merged, conflicted } = mergeThree(bc, current, content, { cur: "merged so far", base: "base", other: `fix: ${cluster.task}` });
+        seqWs.writeUpperFile(rel, merged);
+        const editTarget = join(seqWs.upperDir(), rel);
+        const inputs = writeMergeInputs(join(seqInputsRoot, `${cluster.task}--${rel.replace(/\//g, "__")}`), rel, bc, [{ task: cluster.task, content }]);
         return sc
-          .send({ prompt: buildMergePrompt(rel, current, [content]) })
+          .send({ prompt: mergeEditPrompt({ rel, editTarget, inputs, conflicted }) })
           .combineWith<string, string>(
-            (b) => b.executeShell(() => `echo llm-merge:seq-merged ${cluster.task} ${shq(rel)}`),
-            (resp) => {
-              accepted[rel] = stripFence(resp);
-              seqWs.writeUpperFile(rel, accepted[rel]);
-              return resp;
+            (b) => b.executeShell(() => `echo llm-merge:seq-edited ${cluster.task} ${shq(rel)} conflicted=${conflicted}`),
+            () => {
+              accepted[rel] = seqWs.readUpperFile(rel) ?? merged;
+              return accepted[rel];
             },
           );
       });

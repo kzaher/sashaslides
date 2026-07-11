@@ -34,7 +34,7 @@ import { realLlmMergeOps, ledgerDemote, type GreenCluster } from "./llm-merge.js
 import { writeStabilityJson } from "./stability.js";
 import { detectPriorState, decideStartup } from "./startup-detection.js";
 import { resumeMerge } from "./resume-merge.js";
-import { mockLlm, mergeComposer, recordingFromContent, contentRecord, greenCluster, runRealMerge } from "./test-support.js";
+import { mockLlm, mergeEditor, recordingFromContent, contentRecord, greenCluster, runRealMerge } from "./test-support.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = "/workspaces/sashaslides";
@@ -193,7 +193,7 @@ async function main(): Promise<void> {
     const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: BASE_FILE, fixMap, tag: "R:C1", lgtm: (sid) => sid === "slide_02" ? contentRecord("slide_02", BASE_FILE, fixMap) : undefined });
     const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
     try {
-      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER_ROOT, llm: mockLlm(mergeComposer, { tag: "L:merge-compose" }) });
+      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER_ROOT, llm: mockLlm(mergeEditor().reply, { tag: "L:merge-edit" }) });
       assert.equal(report!.mode, "sequential", "fell back to sequential");
       assert.deepEqual(report!.accepted, ["task-a"], "only A accepted");
       assert.deepEqual(report!.rejected.map((r) => r.task), ["task-b"], "B rejected");
@@ -235,7 +235,7 @@ async function main(): Promise<void> {
     try {
       const res = await resumeMerge({
         repo: base, branchesRoot: UPPER_ROOT, sharedRoot: SHARED, upperRoot: UPPER_ROOT,
-        ops, io: mockLlm(mergeComposer, { tag: "L:merge-compose" }).io,
+        ops, io: mockLlm(mergeEditor().reply, { tag: "L:merge-edit" }).io,
         demote: (slides, task, reason) => ledgerDemote(historyDir, slides, task, reason), // REAL ledger → temp
         log: () => { /* quiet */ },
       });
