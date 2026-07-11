@@ -325,10 +325,31 @@ export async function recordRendering(opts: RecordRenderingOpts): Promise<Record
 
   console.log(`[record-rendering] mode=${mode} slides=${slides.length} → ${out}`);
 
+  // ASSERT every phase produced a COMPLETE set — fail EARLY + LOUD rather than
+  // emitting a partial result a downstream gate misreads (a pptx-only render made
+  // the merge flag all 34 slides). Each phase's per-slide output must exist.
+  const assertComplete = (dir: string, ext: string, label: string): void => {
+    const missing = slides.filter((id) => !existsSync(join(dir, `${id}.${ext}`)));
+    if (missing.length > 0) {
+      throw new Error(`[record-rendering] INCOMPLETE ${label}: ${missing.length}/${slides.length} missing (${missing.slice(0, 4).join(", ")}${missing.length > 4 ? ", …" : ""}) in ${dir} — failing early instead of emitting a partial render.`);
+    }
+  };
+
+  // Full mode needs Google — verify the token is live BEFORE rendering, so a dead
+  // token fails here with a clear message (not silently as an empty thumb set).
+  if (mode === "full") await assertGoogleAuthFresh();
+
   await recordPptx(slides, pptxDir, fixtures);
-  if (mode !== "pptx") await screenshotFixtures(slides, fixtures, originalsDir);
+  assertComplete(pptxDir, "pptx", "pptx");
+  if (mode !== "pptx") {
+    await screenshotFixtures(slides, fixtures, originalsDir);
+    assertComplete(originalsDir, "png", "screenshots");
+  }
   let presId: string | undefined;
-  if (mode === "full") presId = await uploadAndScrape(slides, thumbsDir, title, fixtures);
+  if (mode === "full") {
+    presId = await uploadAndScrape(slides, thumbsDir, title, fixtures);
+    assertComplete(thumbsDir, "png", "thumbnails");
+  }
 
   console.log(`[record-rendering] done.`);
   console.log(`  pptx      → ${pptxDir}`);
