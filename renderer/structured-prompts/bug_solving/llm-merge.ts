@@ -957,6 +957,7 @@ interface MergeRatingViaUIArgs {
  * so nothing is promoted without an explicit human OK. See docs/merge-flow.drawio
  * (states ALL_AT_ONCE_RATE / SEQ_RATE).
  */
+let mergeRatingRound = 0;
 function mergeRatingViaUI(a: MergeRatingViaUIArgs): MergeRatingVerdict {
   const dir = mkdtempSync(join(tmpdir(), "sp-merge-rate-"));
   const slidesDir = join(dir, "slides"), originalsDir = join(dir, "originals");
@@ -968,7 +969,14 @@ function mergeRatingViaUI(a: MergeRatingViaUIArgs): MergeRatingVerdict {
     const orig = a.approvedPng(sid);
     if (orig && existsSync(orig)) { try { copyFileSync(orig, join(originalsDir, `${sid}.png`)); } catch { /* */ } }
   }
-  const port = Number(process.env.MERGE_RATE_PORT ?? 4790);
+  // Use a FRESH port per rating round so a slow-to-exit prior server can't cause
+  // EADDRINUSE, and FREE the port before + after (a rating that times out must not
+  // leave a server holding the port for the next round — the bug that auto-rejected
+  // every fold). basePort default 4790.
+  const basePort = Number(process.env.MERGE_RATE_PORT ?? 4790);
+  const port = basePort + (mergeRatingRound++ % 20);
+  const freePort = (): void => { try { execSync(`lsof -ti:${port} 2>/dev/null | xargs -r kill -9`, { stdio: "ignore" }); } catch { /* */ } };
+  freePort();
   const cmd =
     `cd ${JSON.stringify(join(a.repo, "renderer"))} && npx tsx ${JSON.stringify(RATING_SERVER_FROM_RENDERER)} ${JSON.stringify(dir)} ` +
     `--read-only --reject-all-button --exit-when-all-rated --filter-slides ${JSON.stringify(a.changed.join(","))} ` +
@@ -983,6 +991,7 @@ function mergeRatingViaUI(a: MergeRatingViaUIArgs): MergeRatingVerdict {
     console.error(`[merge-rate] rating UI failed (${(e as Error).message}) — treating every changed slide as RED (nothing promoted without a human OK)`);
     return { green: [], red: a.changed };
   } finally {
+    freePort();   // kill the rating server so it never lingers on the port for the next round
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* */ }
   }
 }

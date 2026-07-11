@@ -1870,6 +1870,20 @@ const server = createServer((req, res) => {
   res.end("Not found");
 });
 
+// Defensive: if the chosen port is momentarily still held (a prior rating server
+// that hasn't fully exited), fall back to the next port instead of crashing on an
+// unhandled 'error' event. The bound port is printed below either way.
+const basePort = port;
+server.on("error", (e: NodeJS.ErrnoException) => {
+  if (e.code === "EADDRINUSE" && port < basePort + 25) {
+    port += 1;
+    console.error(`  [rating-server] port ${port - 1} in use → trying ${port}`);
+    setTimeout(() => server.listen(port), 150);
+  } else {
+    console.error(`  [rating-server] listen failed: ${e.message}`);
+    process.exit(1);
+  }
+});
 server.listen(port, () => {
   const url = `http://localhost:${port}`;
   console.log(`\n  Rating server: ${url}\n`);
