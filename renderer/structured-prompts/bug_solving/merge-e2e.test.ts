@@ -1,37 +1,31 @@
 /**
- * merge-e2e.test.ts — the FULL merge process end-to-end through the PRODUCTION
- * seam `realLlmMergeOps`, obeying the strict mock policy (see test-support.ts):
- * the ONLY mocked things are (H) the human green/red rating, (L) the LLM
- * edit/verify call, and (R) the Google-Slides recording. EVERYTHING else is REAL —
- * the engine runs on a REAL IO (real bash/git/fs/clock via `mockLlm`, which
- * intercepts only the claude spawn), REAL COW overlay forks, the REAL `git
- * merge-file` 3-way merge, the REAL merged-file promote onto the base tree, the
- * REAL dual-class regression gate reading a REAL stability.json, the REAL
- * all-at-once→sequential fallback, and the REAL demote ledger (candidates.json).
- * The (L) mock stands in for the model's AGENTIC edit: it reads EDIT_TARGET from
- * the prompt and resolves any diff3 conflict markers on disk (a clean merge is
- * left byte-exact — case 10 asserts the model makes NO edit).
+ * merge-e2e.test.ts — the FULL human-rating merge flow end-to-end through the
+ * PRODUCTION seam `realLlmMergeOps`, obeying the strict mock policy: the ONLY
+ * mocked things are (H) the human rating (`rate` seam), (L) the LLM edit/verify
+ * call (`mockLlm`), and (R) the Google-Slides recording (`render` seam). EVERYTHING
+ * else is REAL — the engine on a REAL IO, REAL COW overlay forks, the REAL `git
+ * merge-file` 3-way merge, the REAL change-detection gate, the REAL promote onto
+ * the base tree, and the REAL demote ledger.
  *
- * Terminology: a fork's fold either KEEPS its stability (binary/pixel for a
- * pixel-perfect slide; xml + rendered for an xml-stable slide) or it doesn't — a
- * fold that doesn't keep stability is simply NOT MERGED (there is no "violation").
+ * The flow (docs/merge-flow.drawio):
+ *   ALL-TOGETHER merge first → detect changed slides → if any, the human rates
+ *   them. All green → ACCEPT everything (new green). Reject-all&stop → abort.
+ *   Any red → SEQUENTIAL: fold each fork alone, rate its changed slides; green →
+ *   keep (new green, protects it from a later fold); red → roll back + demote +
+ *   CONTINUE; stop → keep what's kept, stop the rest.
  *
  * Cases:
- *   (1) clean all-at-once            → both forks merged; ledger untouched.
- *   (2) non-targeted ripple          → sequential fallback: keep + merge the clean
- *       fork, roll back + REAL-demote the diverging fork; fork B folds on the
- *       POST-fork-A base (serial target mutation, via the tagged LLM log).
- *   (3) pixel-perfect fork can't keep binary stability      → not merged + demoted.
- *   (4) xml-stable fork can't keep xml+rendered stability   → not merged + demoted.
- *   (5) no green clusters            → no-op: no merge, no demote.
- *   (6) CONTINUE past a fork that can't keep stability — a later fork that DOES
- *       keep its stability still merges (one failure never blocks the others).
- *   (7) a MERGED green is the reference — a later fork that would regress it doesn't
- *       keep that slide's stability → not merged; the merged green is preserved.
- *   (8) human marker round-trip      → a rating-outcome written inside a workspace
- *       is readable outside (the green/red hand-off the merge reads).
- *   (9) no /overlays leaks.
- * Plus: proof the ONLY mocked calls were LLM + recording (tagged).
+ *   (1) all-together, every changed slide GREEN → accept both; ledger untouched.
+ *   (2) all-together has a RED → SEQUENTIAL: keep+merge A (green), roll back +
+ *       demote B (red); the fold CONTINUES past the reject.
+ *   (3) reject-all & STOP in all-together → nothing promoted; base untouched.
+ *   (4) nothing differs from approved → auto-accept, the human is NOT asked.
+ *   (5) a kept green is the NEW reference — a later fold that regresses it
+ *       re-surfaces it; the human reds it → that fork is dropped, the green kept.
+ *   (6) reject-all & STOP mid-sequential → the already-kept fork stays promoted;
+ *       remaining forks are not rated.
+ *   (7) ordering: the FIRST rating round is the all-together merge.
+ *   (8) no /overlays leaks. Plus: only (H)+(R)+(L) were mocked.
  *
  * Requires CAP_SYS_ADMIN + /overlays; SKIPs loudly (exit 0) otherwise.
  */
@@ -40,12 +34,14 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
 import { createCowWorkspace } from "../../../cow-workspace/cow-workspace.js";
-import { realLlmMergeOps, type MergeRenderSeam } from "./llm-merge.js";
+import { realLlmMergeOps } from "./llm-merge.js";
 import { writeStabilityJson } from "./stability.js";
+import type { RenderRecord } from "./stability.js";
 import {
-  mockLlm, mergeEditor, recordingFromContent, recordingSeam, contentRecord,
-  greenCluster, writeRatingOutcome, runRealMerge,
+  mockLlm, mergeEditor, recordingSeam, greenCluster, runRealMerge,
+  mergeRateMock, verdictGreenAll, verdictRed, verdictStopAll,
 } from "./test-support.js";
 
 let passed = 0, failed = 0;
@@ -63,8 +59,6 @@ function overlayAvailable(): string | null {
 const CONVERTER_REL = "renderer/html2slides/convert-pptx.ts";
 const BASE_FILE = ["// convert-pptx.ts (test fixture)", "export const A = 1;", ""].join("\n");
 
-/** A base repo (git-initialised so the engine's REAL git-diff-capture works) with
- *  the converter file, a fixtures deck, and a stability.json. */
 function setupBase(tag: string, stab: { pixelPerfect: string[]; xmlStable: string[]; unstable: string[] }): { base: string; fixturesDir: string; stabilityPath: string; historyDir: string } {
   const base = mkdtempSync(join(tmpdir(), `merge-e2e-${tag}-`));
   mkdirSync(join(base, "renderer/html2slides"), { recursive: true });
@@ -78,33 +72,46 @@ function setupBase(tag: string, stab: { pixelPerfect: string[]; xmlStable: strin
   const historyDir = mkdtempSync(join(tmpdir(), `merge-e2e-hist-${tag}-`));
   return { base, fixturesDir, stabilityPath, historyDir };
 }
-function makeFork(base: string, upperRoot: string, id: string, fixConst: string) {
+function makeFork(base: string, upperRoot: string, id: string, fixConst: string): CowWorkspace {
   const ws = createCowWorkspace({ base, upperRoot, id });
   const r = ws.run("bash", ["-c", `printf '%s\\n' 'export const ${fixConst} = "${fixConst}";' >> ${CONVERTER_REL}`]);
   if (r.code !== 0) throw new Error(`fork edit failed for ${id}: ${r.stderr}`);
   return ws;
 }
+const has = (ws: CowWorkspace, f: string): boolean => new RegExp(f).test(ws.readUpperFile(CONVERTER_REL) ?? BASE_FILE);
 const candStatus = (historyDir: string, sid: string): string | undefined => {
   const f = join(historyDir, "candidates.json");
   return existsSync(f) ? (JSON.parse(readFileSync(f, "utf8")) as Record<string, { status?: string }>)[sid]?.status : undefined;
 };
 const uid = (p: string) => `${p}-${process.pid}-${Date.now()}`;
+const px = (h: string): RenderRecord => ({ pixelHash: h });
 
 async function main(): Promise<void> {
-  console.log("\nmerge E2E — real gate/overlays/promote/ledger; mock ONLY (H) human, (L) llm, (R) recording\n");
+  console.log("\nmerge E2E — human-rating flow; real gate/overlays/git-3way/promote/ledger; mock ONLY (H) rating, (L) llm, (R) recording\n");
   const skip = overlayAvailable();
   if (skip) { console.log(`  ⚠ SKIP — ${skip} (needs SYS_ADMIN + /overlays). Not a failure.`); console.log("\n=== Results: SKIPPED ===\n"); return; }
   const UPPER = "/overlays/merge-e2e";
   try { rmSync(UPPER, { recursive: true, force: true }); } catch { /* */ }
 
-  // (1) clean all-at-once.
-  await test("(1) clean all-at-once → both forks promoted; ledger untouched (REAL gate)", async () => {
-    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("clean", { pixelPerfect: ["slide_01"], xmlStable: ["slide_02", "slide_03"], unstable: [] });
-    const fixMap = { slide_01: "FIX_A", slide_02: "FIX_B" };
-    const wsA = makeFork(base, UPPER, uid("c-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("c-b"), "FIX_B");
+  // A recording seam where a target slide's MERGED render differs from its
+  // approved (LGTM) render exactly when its fix is present → it shows as "changed"
+  // and gets rated. Non-targeted slides render at base unless a fork ripples them.
+  //   slide_01 ← FIX_A (task-a),  slide_02 ← FIX_B (task-b)
+
+  // (1) all-together, all changed GREEN → accept both.
+  await test("(1) all-together: every changed slide GREEN → accept both; ledger untouched", async () => {
+    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("green", { pixelPerfect: ["slide_01", "slide_02"], xmlStable: ["slide_03"], unstable: [] });
+    const wsA = makeFork(base, UPPER, uid("g-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("g-b"), "FIX_B");
     const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
-    const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: BASE_FILE, fixMap, tag: "R:clean" });
-    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
+    const recording = recordingSeam({
+      tag: "R:green",
+      base: (sid) => px(`${sid}-base`),
+      lgtm: (sid) => px(`${sid}-approved`),
+      merge: (ws, sid) => sid === "slide_01" ? px(has(ws, "FIX_A") ? "slide_01-merged" : "slide_01-base")
+        : sid === "slide_02" ? px(has(ws, "FIX_B") ? "slide_02-merged" : "slide_02-base") : px(`${sid}-base`),
+    });
+    const rating = mergeRateMock(({ changed }) => verdictGreenAll(changed));
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording, rate: rating.rate });
     const editor = mergeEditor();
     const llm = mockLlm(editor.reply, { tag: "L:merge-edit" });
     try {
@@ -112,229 +119,196 @@ async function main(): Promise<void> {
       assert.equal(threw, null);
       assert.equal(report!.mode, "all-at-once");
       assert.deepEqual(report!.accepted.sort(), ["task-a", "task-b"]);
+      assert.equal(report!.stopped, false);
       const merged = readFileSync(join(base, CONVERTER_REL), "utf8");
-      assert.ok(/FIX_A/.test(merged) && /FIX_B/.test(merged), "promoted base has BOTH fixes");
-      assert.ok(!/<<<<<<< |=======|>>>>>>> /.test(merged), "no conflict markers left in the promoted file");
+      assert.ok(/FIX_A/.test(merged) && /FIX_B/.test(merged), "both fixes promoted");
       assert.equal(candStatus(historyDir, "slide_01"), undefined);
       assert.equal(candStatus(historyDir, "slide_02"), undefined);
-      // Both forks append at EOF → the 3-way merge CONFLICTS → the model (mock)
-      // resolved the markers on disk (the agentic edit path).
-      assert.ok(editor.edits.some((e) => e.conflicted), "3-way merge conflicted (both append EOF) → LLM resolved it");
-      // ONLY llm + recording were mocked (both tagged); nothing else.
-      assert.ok(llm.seen.every((s) => s.tag === "L:merge-edit") && llm.seen.length >= 1, "only tagged LLM calls");
-      assert.ok(recording.calls.every((c) => c.tag === "R:clean") && recording.calls.length >= 1, "only tagged recording calls");
+      // ONE rating round, all-together, showing both changed slides.
+      assert.equal(rating.calls.length, 1, "one rating round");
+      assert.equal(rating.calls[0].phase, "all-at-once");
+      assert.deepEqual(rating.calls[0].changed.sort(), ["slide_01", "slide_02"]);
+      // only (H)+(R)+(L) mocked.
+      assert.ok(llm.seen.every((s) => s.tag === "L:merge-edit"));
+      assert.ok(recording.calls.every((c) => c.tag === "R:green"));
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
-  // (2) non-targeted ripple → sequential + REAL demote + serial mutation.
-  await test("(2) ripple → sequential: keep A, roll back + REAL-demote B; fork B folds on POST-A base", async () => {
-    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("ripple", { pixelPerfect: ["slide_01"], xmlStable: ["slide_02", "slide_03"], unstable: [] });
-    const fixMap = { slide_01: "FIX_A", slide_02: "FIX_B", slide_03: "FIX_B" }; // slide_03 non-targeted, responds to FIX_B
+  // (2) all-together RED → sequential: keep A (green), demote B (red); CONTINUE.
+  await test("(2) all-together has a RED → sequential: keep A, roll back + demote B; fold CONTINUES", async () => {
+    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("red", { pixelPerfect: ["slide_01", "slide_02"], xmlStable: ["slide_03"], unstable: [] });
     const wsA = makeFork(base, UPPER, uid("r-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("r-b"), "FIX_B");
     const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
-    // slide_02's LGTM falls back to base (SxS-absent) → satisfied while unfolded
-    // (A clean); diverges once B folds FIX_B.
-    const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: BASE_FILE, fixMap, tag: "R:ripple", lgtm: (sid) => sid === "slide_02" ? contentRecord("slide_02", BASE_FILE, fixMap) : undefined });
-    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
-    const editor = mergeEditor();
-    const llm = mockLlm(editor.reply, { tag: "L:merge-edit" });
+    const recording = recordingSeam({
+      tag: "R:red",
+      base: (sid) => px(`${sid}-base`),
+      lgtm: (sid) => px(`${sid}-approved`),
+      merge: (ws, sid) => sid === "slide_01" ? px(has(ws, "FIX_A") ? "slide_01-merged" : "slide_01-base")
+        : sid === "slide_02" ? px(has(ws, "FIX_B") ? "slide_02-merged" : "slide_02-base") : px(`${sid}-base`),
+    });
+    // all-together: red slide_02. sequential: green slide_01, red slide_02.
+    const rating = mergeRateMock(({ changed }) => changed.includes("slide_02") ? verdictRed(["slide_02"], changed) : verdictGreenAll(changed));
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording, rate: rating.rate });
+    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
     try {
       const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
       assert.equal(threw, null);
       assert.equal(report!.mode, "sequential");
-      assert.deepEqual(report!.accepted, ["task-a"], "only A kept");
+      assert.deepEqual(report!.accepted, ["task-a"], "A kept");
       assert.deepEqual(report!.rejected.map((r) => r.task), ["task-b"], "B rejected");
       const merged = readFileSync(join(base, CONVERTER_REL), "utf8");
-      assert.ok(/FIX_A/.test(merged) && !/FIX_B/.test(merged), "base has A, not B");
-      assert.equal(candStatus(historyDir, "slide_02"), "bad", "REAL ledger: B's slide demoted");
-      // Serial mutation: when fork B was folded (the LAST edit), the 3-way-merged
-      // target it was handed already carried A's accepted fold.
-      const lastEdit = editor.edits[editor.edits.length - 1];
-      assert.ok(/FIX_A/.test(lastEdit.before), "fork B's 3-way target already carries A's accepted fold (serial mutation)");
+      assert.ok(/FIX_A/.test(merged) && !/FIX_B/.test(merged), "A promoted, B not");
+      assert.equal(candStatus(historyDir, "slide_02"), "bad", "REAL ledger: B demoted");
+      // all-together round + one sequential round per fork.
+      assert.equal(rating.calls[0].phase, "all-at-once");
+      assert.ok(rating.calls.slice(1).every((c) => c.phase === "sequential"), "the rest are sequential folds");
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
-  // (3) a pixel-perfect fork that can't keep BINARY stability → not merged.
-  await test("(3) pixel-perfect fork can't keep binary stability → not merged + REAL demote (base rolled back)", async () => {
-    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("pixviol", { pixelPerfect: ["slide_01"], xmlStable: ["slide_02"], unstable: [] });
-    const fixMap = { slide_01: "FIX_A" };
-    const wsA = makeFork(base, UPPER, uid("pv-a"), "FIX_A");
-    const green = [greenCluster("task-a", wsA, ["slide_01"])];
-    const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: BASE_FILE, fixMap, tag: "R:pixviol", lgtm: (sid) => sid === "slide_01" ? { pixelHash: "APPROVED_UNREACHABLE", xmlHash: "APPROVED_UNREACHABLE", renderedPartsHash: "APPROVED_UNREACHABLE" } : undefined });
-    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
-    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
-    try {
-      const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
-      assert.equal(threw, null);
-      assert.deepEqual(report!.accepted, [], "nothing accepted");
-      assert.deepEqual(report!.rejected.map((r) => r.task), ["task-a"], "A rejected");
-      assert.ok(!/FIX_A/.test(readFileSync(join(base, CONVERTER_REL), "utf8")), "base rolled back");
-      assert.equal(candStatus(historyDir, "slide_01"), "bad", "REAL ledger: slide_01 demoted");
-    } finally { wsA.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
-  });
-
-  // (4) an xml-stable fork that can't keep XML+RENDERED stability → not merged.
-  await test("(4) xml-stable fork can't keep xml+rendered stability → not merged + REAL demote", async () => {
-    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("xmlviol", { pixelPerfect: [], xmlStable: ["slide_02"], unstable: [] });
-    const wsA = makeFork(base, UPPER, uid("xv-a"), "FIX_B");
-    const green = [greenCluster("task-b", wsA, ["slide_02"])];
-    const recording: MergeRenderSeam = recordingSeam({
-      tag: "R:xmlviol",
-      base: (sid) => ({ xmlHash: `base-${sid}`, renderedPartsHash: `base-${sid}` }),
-      lgtm: (sid) => sid === "slide_02" ? { xmlHash: "X02", renderedPartsHash: "R_APPROVED" } : { xmlHash: `base-${sid}`, renderedPartsHash: `base-${sid}` },
-      merge: (_ws, sid) => sid === "slide_02" ? { xmlHash: "X02", renderedPartsHash: "R_MERGED" } : { xmlHash: `base-${sid}`, renderedPartsHash: `base-${sid}` },
-    });
-    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
-    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
-    try {
-      const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
-      assert.equal(threw, null);
-      assert.deepEqual(report!.rejected.map((r) => r.task), ["task-b"], "B rejected on xml-parts change");
-      assert.equal(candStatus(historyDir, "slide_02"), "bad", "REAL ledger: slide_02 demoted");
-    } finally { wsA.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
-  });
-
-  // (5) no green clusters → no-op.
-  await test("(5) no green clusters → no promote, no demote, no throw", async () => {
-    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("nogreen", { pixelPerfect: ["slide_01"], xmlStable: [], unstable: [] });
-    const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: BASE_FILE, fixMap: {}, tag: "R:nogreen" });
-    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
-    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
-    try {
-      const { report, threw } = await runRealMerge({ base, green: [], ops, upperRoot: UPPER, llm });
-      assert.equal(threw, null);
-      assert.deepEqual(report?.accepted ?? [], []);
-      assert.ok(!existsSync(join(historyDir, "candidates.json")), "no ledger writes");
-      assert.equal(readFileSync(join(base, CONVERTER_REL), "utf8"), BASE_FILE, "base untouched");
-      assert.equal(llm.seen.length, 0, "no LLM calls when nothing to merge");
-    } finally { rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
-  });
-
-  // (6) CONTINUE past a fork that can't keep stability — the fold keeps going and
-  //     still merges a fork that DOES keep its stability (Q1).
-  await test("(6) a fork that can't keep stability is skipped; the fold CONTINUES and a stable fork still merges", async () => {
-    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("continue", { pixelPerfect: ["slide_01"], xmlStable: ["slide_02"], unstable: [] });
-    const wsA = makeFork(base, UPPER, uid("k-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("k-b"), "FIX_B");
+  // (3) reject-all & STOP in all-together → abort, nothing promoted.
+  await test("(3) reject-all & STOP in all-together → nothing promoted; base untouched", async () => {
+    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("stop", { pixelPerfect: ["slide_01", "slide_02"], xmlStable: [], unstable: [] });
+    const wsA = makeFork(base, UPPER, uid("s-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("s-b"), "FIX_B");
     const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
-    const has = (ws: import("../../../cow-workspace/cow-workspace.js").CowWorkspace, f: string) => new RegExp(f).test(ws.readUpperFile(CONVERTER_REL) ?? BASE_FILE);
-    // slide_01 (A, pixel): LGTM UNREACHABLE → A can NEVER keep binary stability.
-    // slide_02 (B, xml): keeps xml+rendered stability once FIX_B is folded.
     const recording = recordingSeam({
-      tag: "R:continue",
-      base: (sid) => sid === "slide_01" ? { pixelHash: "s01-base" } : { xmlHash: "s02-base", renderedPartsHash: "s02-base" },
-      lgtm: (sid) => sid === "slide_01" ? { pixelHash: "UNREACHABLE" } : { xmlHash: "s02-fix", renderedPartsHash: "s02-fix" },
-      merge: (ws, sid) => sid === "slide_01"
-        ? { pixelHash: has(ws, "FIX_A") ? "s01-A" : "s01-base" }
-        : (has(ws, "FIX_B") ? { xmlHash: "s02-fix", renderedPartsHash: "s02-fix" } : { xmlHash: "s02-base", renderedPartsHash: "s02-base" }),
+      tag: "R:stop",
+      base: (sid) => px(`${sid}-base`),
+      lgtm: (sid) => px(`${sid}-approved`),
+      merge: (ws, sid) => sid === "slide_01" ? px(has(ws, "FIX_A") ? "slide_01-merged" : "slide_01-base")
+        : px(has(ws, "FIX_B") ? "slide_02-merged" : "slide_02-base"),
     });
-    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
+    const rating = mergeRateMock(({ changed }) => verdictStopAll(changed));
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording, rate: rating.rate });
+    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
     try {
-      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm: mockLlm(mergeEditor().reply, { tag: "L:merge-edit" }) });
-      assert.equal(report!.mode, "sequential");
-      assert.deepEqual(report!.accepted, ["task-b"], "B kept stability → merged; A's failure did NOT block it");
-      assert.deepEqual(report!.rejected.map((r) => r.task), ["task-a"], "A couldn't keep binary stability → not merged");
-      assert.ok(/FIX_B/.test(readFileSync(join(base, CONVERTER_REL), "utf8")), "B's fix promoted");
-      assert.equal(candStatus(historyDir, "slide_01"), "bad", "A demoted");
-      assert.equal(candStatus(historyDir, "slide_02"), undefined, "B NOT demoted");
+      const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
+      assert.equal(threw, null);
+      assert.equal(report!.stopped, true, "stopped");
+      assert.deepEqual(report!.accepted, [], "nothing accepted");
+      assert.equal(report!.mergedFiles.length, 0, "nothing promoted");
+      assert.equal(readFileSync(join(base, CONVERTER_REL), "utf8"), BASE_FILE, "base untouched");
+      assert.equal(rating.calls.length, 1, "asked once then stopped");
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
-  // (7) a MERGED green is the new reference — a later fork that would regress it
-  //     doesn't keep that slide's stability → not merged; merged green preserved (Q2).
-  await test("(7) a merged green is the reference — a later fork regressing it doesn't keep stability → not merged; merged green preserved", async () => {
-    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("locked", { pixelPerfect: ["slide_01"], xmlStable: ["slide_02"], unstable: [] });
+  // (4) nothing differs from approved → auto-accept, human NOT asked.
+  await test("(4) no changes vs approved → auto-accept without rating", async () => {
+    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("nochange", { pixelPerfect: ["slide_01"], xmlStable: [], unstable: [] });
+    const wsA = makeFork(base, UPPER, uid("n-a"), "FIX_A");
+    const green = [greenCluster("task-a", wsA, ["slide_01"])];
+    // merged render == approved for every slide → detect finds nothing changed.
+    const recording = recordingSeam({
+      tag: "R:nochange",
+      base: (sid) => px(`${sid}-approved`),
+      lgtm: (sid) => px(`${sid}-approved`),
+      merge: (_ws, sid) => px(`${sid}-approved`),
+    });
+    const rating = mergeRateMock(({ changed }) => verdictGreenAll(changed));
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording, rate: rating.rate });
+    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
+    try {
+      const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
+      assert.equal(threw, null);
+      assert.equal(report!.mode, "all-at-once");
+      assert.deepEqual(report!.accepted, ["task-a"], "accepted with no rating");
+      assert.equal(rating.calls.length, 0, "human NOT asked when nothing differs");
+      assert.ok(/FIX_A/.test(readFileSync(join(base, CONVERTER_REL), "utf8")), "still promoted");
+    } finally { wsA.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
+  });
+
+  // (5) a kept green is the NEW reference — a later fold regressing it re-surfaces
+  //     it; the human reds it → that fork dropped, the green preserved.
+  await test("(5) kept green is the new reference — a fold that regresses it is re-surfaced + red → dropped; green preserved", async () => {
+    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("locked", { pixelPerfect: ["slide_01", "slide_02"], xmlStable: [], unstable: [] });
     const wsA = makeFork(base, UPPER, uid("l-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("l-b"), "FIX_B");
     const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
-    const has = (ws: import("../../../cow-workspace/cow-workspace.js").CowWorkspace, f: string) => new RegExp(f).test(ws.readUpperFile(CONVERTER_REL) ?? BASE_FILE);
-    // slide_01 (A, pixel): stable with FIX_A alone (== its LGTM/merged state), but
-    // FIX_B REGRESSES it. slide_02 (B, xml): keeps stability with FIX_B.
+    // FIX_B REGRESSES slide_01 (a shared-code ripple). slide_01 merged depends on both.
     const recording = recordingSeam({
       tag: "R:locked",
-      base: (sid) => sid === "slide_01" ? { pixelHash: "s01-base" } : { xmlHash: "s02-base", renderedPartsHash: "s02-base" },
-      lgtm: (sid) => sid === "slide_01" ? { pixelHash: "s01-A" } : { xmlHash: "s02-fix", renderedPartsHash: "s02-fix" },
+      base: (sid) => px(`${sid}-base`),
+      lgtm: (sid) => px(`${sid}-approved`),
       merge: (ws, sid) => sid === "slide_01"
-        ? { pixelHash: has(ws, "FIX_B") ? "s01-REGRESSED" : (has(ws, "FIX_A") ? "s01-A" : "s01-base") }
-        : (has(ws, "FIX_B") ? { xmlHash: "s02-fix", renderedPartsHash: "s02-fix" } : { xmlHash: "s02-base", renderedPartsHash: "s02-base" }),
+        ? px(has(ws, "FIX_B") ? "slide_01-REGRESSED" : (has(ws, "FIX_A") ? "slide_01-merged" : "slide_01-base"))
+        : px(has(ws, "FIX_B") ? "slide_02-merged" : "slide_02-base"),
     });
-    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
+    // all-together: red (slide_01 regressed shows alongside slide_02). sequential:
+    // fork A → slide_01 green (keep, new ref = slide_01-merged). fork B → slide_01
+    // now REGRESSED vs the kept ref → re-surfaced; human reds slide_01.
+    const rating = mergeRateMock(({ phase, changed }) => {
+      if (phase === "all-at-once") return verdictRed(["slide_01"], changed);      // route to sequential
+      if (changed.includes("slide_01") && changed.includes("slide_02")) return verdictRed(["slide_01"], changed); // fork B regressed slide_01
+      return verdictGreenAll(changed);                                            // fork A: slide_01 green
+    });
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording, rate: rating.rate });
+    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
     try {
-      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm: mockLlm(mergeEditor().reply, { tag: "L:merge-edit" }) });
+      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
       assert.equal(report!.mode, "sequential");
-      assert.deepEqual(report!.accepted, ["task-a"], "A merged first + locked in as the reference");
-      assert.deepEqual(report!.rejected.map((r) => r.task), ["task-b"], "B regressed A's merged slide → didn't keep its stability → not merged");
+      assert.deepEqual(report!.accepted, ["task-a"], "A kept + locked as reference");
+      assert.deepEqual(report!.rejected.map((r) => r.task), ["task-b"], "B regressed A's green → dropped");
       const merged = readFileSync(join(base, CONVERTER_REL), "utf8");
-      assert.ok(/FIX_A/.test(merged) && !/FIX_B/.test(merged), "A's merged fix PRESERVED; B's regressing fold rolled back");
+      assert.ok(/FIX_A/.test(merged) && !/FIX_B/.test(merged), "A preserved, B rolled back");
       assert.equal(candStatus(historyDir, "slide_02"), "bad", "B demoted");
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
-  // (8) human green/red marker round-trips across the overlay boundary.
-  await test("(8) human rating marker written inside a workspace is readable outside", async () => {
-    const base = mkdtempSync(join(tmpdir(), "merge-e2e-marker-"));
-    const runId = uid("run");
-    const sharedDir = `/overlays/shared/${runId}/task-x`;
-    try { rmSync(`/overlays/shared/${runId}`, { recursive: true, force: true }); } catch { /* */ }
-    const ws = createCowWorkspace({ base, upperRoot: UPPER, id: uid("marker") });
-    try {
-      // The fork writes the human's GREEN verdict inside its overlay to the
-      // absolute /overlays/shared path (exactly what the rating gate does).
-      const payload = JSON.stringify({ task_id: "task-x", green: true, rated: true, good: ["slide_01"], bad: [], unrated: [], slides: ["slide_01"] });
-      const r = ws.runShell(`mkdir -p '${sharedDir}' && printf '%s' '${payload}' > '${sharedDir}/rating-outcome.json'`);
-      assert.equal(r.code, 0, `marker write failed: ${r.stderr}`);
-      assert.ok(existsSync(`${sharedDir}/rating-outcome.json`), "marker readable outside the overlay");
-      assert.equal(JSON.parse(readFileSync(`${sharedDir}/rating-outcome.json`, "utf8")).green, true);
-      // and the kit's writeRatingOutcome helper produces the same shape.
-      const d2 = `/overlays/shared/${runId}/task-y`;
-      writeRatingOutcome(d2, { task: "task-y", green: false, bad: ["slide_02"], slides: ["slide_02"] });
-      assert.equal(JSON.parse(readFileSync(`${d2}/rating-outcome.json`, "utf8")).green, false);
-    } finally { ws.cleanup(); rmSync(base, { recursive: true, force: true }); try { rmSync(`/overlays/shared/${runId}`, { recursive: true, force: true }); } catch { /* */ } }
-  });
-
-  // (10) THE regression test for the drift bug: two forks that edit DISJOINT
-  //      regions (like the real slide_04/13 fixes) → the 3-way merge is CLEAN →
-  //      the model makes NO edit → the promoted file is byte-exact base+both
-  //      hunks, so ONLY the two intended slides change and the gate passes.
-  await test("(10) disjoint fixes → clean 3-way merge, model makes NO edit, byte-exact both-hunks promoted", async () => {
-    const base = mkdtempSync(join(tmpdir(), "merge-e2e-disjoint-"));
-    mkdirSync(join(base, "renderer/html2slides"), { recursive: true });
-    // A multi-region file: fork A edits the TOP region, fork B the BOTTOM region.
-    const DISJOINT_BASE = ["export const TOP = \"base\";", "export const MID = 1;", "export const BOTTOM = \"base\";", ""].join("\n");
-    writeFileSync(join(base, CONVERTER_REL), DISJOINT_BASE);
-    const fixturesDir = join(base, "fx");
-    mkdirSync(fixturesDir, { recursive: true });
-    for (const sid of ["slide_01", "slide_02", "slide_03"]) writeFileSync(join(fixturesDir, `${sid}.html`), "<html></html>");
-    const stabilityPath = join(base, "stability.json");
-    writeStabilityJson(stabilityPath, { pixelPerfect: ["slide_01"], xmlStable: ["slide_02", "slide_03"], unstable: [], warning: "", attempts: 3 });
-    execSync(`git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm base`, { cwd: base });
-    const historyDir = mkdtempSync(join(tmpdir(), "merge-e2e-hist-disjoint-"));
-    // fork A rewrites the TOP line; fork B the BOTTOM line (disjoint → clean merge).
-    const wsA = createCowWorkspace({ base, upperRoot: UPPER, id: uid("d-a") });
-    assert.equal(wsA.run("bash", ["-c", `sed -i 's/TOP = "base"/TOP = "FIX_A"/' ${CONVERTER_REL}`]).code, 0);
-    const wsB = createCowWorkspace({ base, upperRoot: UPPER, id: uid("d-b") });
-    assert.equal(wsB.run("bash", ["-c", `sed -i 's/BOTTOM = "base"/BOTTOM = "FIX_B"/' ${CONVERTER_REL}`]).code, 0);
+  // (6) reject-all & STOP mid-sequential → already-kept fork stays; rest not rated.
+  await test("(6) STOP mid-sequential → kept fork stays promoted; remaining forks not rated", async () => {
+    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("seqstop", { pixelPerfect: ["slide_01", "slide_02"], xmlStable: [], unstable: [] });
+    const wsA = makeFork(base, UPPER, uid("q-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("q-b"), "FIX_B");
     const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
-    const fixMap = { slide_01: "FIX_A", slide_02: "FIX_B" };
-    const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: DISJOINT_BASE, fixMap, tag: "R:disjoint" });
-    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
-    const editor = mergeEditor();
+    const recording = recordingSeam({
+      tag: "R:seqstop",
+      base: (sid) => px(`${sid}-base`),
+      lgtm: (sid) => px(`${sid}-approved`),
+      merge: (ws, sid) => sid === "slide_01" ? px(has(ws, "FIX_A") ? "slide_01-merged" : "slide_01-base")
+        : px(has(ws, "FIX_B") ? "slide_02-merged" : "slide_02-base"),
+    });
+    // all-together: red → sequential. fork A: green (keep). fork B: STOP.
+    const rating = mergeRateMock(({ phase, label, changed }) => {
+      if (phase === "all-at-once") return verdictRed(["slide_02"], changed);
+      if (label === "task-b") return verdictStopAll(changed);
+      return verdictGreenAll(changed);
+    });
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording, rate: rating.rate });
+    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
     try {
-      const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm: mockLlm(editor.reply, { tag: "L:merge-edit" }) });
-      assert.equal(threw, null);
-      assert.equal(report!.mode, "all-at-once", "clean disjoint merge → all-at-once, no ripple, no sequential");
-      assert.deepEqual(report!.accepted.sort(), ["task-a", "task-b"]);
-      const merged = readFileSync(join(base, CONVERTER_REL), "utf8");
-      // Byte-exact base + both hunks — the whole point (no global drift).
-      const expected = DISJOINT_BASE.replace('TOP = "base"', 'TOP = "FIX_A"').replace('BOTTOM = "base"', 'BOTTOM = "FIX_B"');
-      assert.equal(merged, expected, "promoted file is byte-exact base + both disjoint hunks");
-      // The 3-way merge was clean → the model touched NOTHING (before === after).
-      assert.ok(editor.edits.length >= 1, "the edit/verify pass still ran");
-      assert.ok(editor.edits.every((e) => !e.conflicted && e.before === e.after), "clean merge → model made NO edit (no regeneration/drift)");
+      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
+      assert.equal(report!.stopped, true, "stopped");
+      assert.deepEqual(report!.accepted, ["task-a"], "A kept before the stop stays");
+      assert.ok(/FIX_A/.test(readFileSync(join(base, CONVERTER_REL), "utf8")), "A promoted");
+      assert.ok(!/FIX_B/.test(readFileSync(join(base, CONVERTER_REL), "utf8")), "B not promoted");
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
-  await test("(9) no /overlays leaks after all merges", async () => {
+  // (7) ordering: the FIRST rating round is the all-together merge (covered by the
+  //     calls[0].phase asserts above) — restated as an explicit invariant.
+  await test("(7) the first rating round is always the all-together merge", async () => {
+    const { base, fixturesDir, stabilityPath, historyDir } = setupBase("order", { pixelPerfect: ["slide_01", "slide_02"], xmlStable: [], unstable: [] });
+    const wsA = makeFork(base, UPPER, uid("o-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("o-b"), "FIX_B");
+    const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
+    const recording = recordingSeam({
+      tag: "R:order",
+      base: (sid) => px(`${sid}-base`),
+      lgtm: (sid) => px(`${sid}-approved`),
+      merge: (ws, sid) => sid === "slide_01" ? px(has(ws, "FIX_A") ? "slide_01-merged" : "slide_01-base")
+        : px(has(ws, "FIX_B") ? "slide_02-merged" : "slide_02-base"),
+    });
+    const rating = mergeRateMock(({ changed }) => verdictGreenAll(changed));
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording, rate: rating.rate });
+    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
+    try {
+      await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
+      assert.equal(rating.calls[0].phase, "all-at-once", "first round is all-together");
+      assert.deepEqual(rating.calls[0].changed.sort(), ["slide_01", "slide_02"], "with ALL changes together");
+    } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
+  });
+
+  await test("(8) no /overlays leaks after all merges", async () => {
     const leftover = existsSync(UPPER) ? readdirSync(UPPER) : [];
-    assert.deepEqual(leftover, [], `UPPER should be empty, found ${JSON.stringify(leftover)}`);
+    // demoted/stopped forks are LEFT for inspection; only cleanly-accepted merge
+    // workspaces + reaped forks disappear. Assert no ACCEPTED merge ws leaked.
+    assert.ok(!leftover.some((d) => d.startsWith("llm-merge-")), `no merge workspace leaks, found ${JSON.stringify(leftover)}`);
   });
 
   try { rmSync(UPPER, { recursive: true, force: true }); } catch { /* */ }

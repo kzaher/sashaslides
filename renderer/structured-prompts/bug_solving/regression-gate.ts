@@ -24,8 +24,11 @@
  * accepted change is NOT re-flagged as this fork's ripple).
  *
  * `regressionGate` is a PURE, SYNCHRONOUS function over injected record seams
- * (only the rendering is mocked in tests). `makeRegressionRetest` wraps it as the
- * `MergeOps.retest(ws, intendedSlides) → {changed}` seam llm-merge drives.
+ * (only the rendering is mocked in tests). `makeChangeGate` wraps it into the
+ * `detect` / `commitAccepted` pair llm-merge drives: the gate no longer
+ * auto-accepts/rejects — it reports the CHANGED slides, a HUMAN rates them
+ * (llm-merge's `rateChanged`), and an accepted-green slide's render becomes its
+ * new reference. See docs/merge-flow.drawio for the full state machine.
  */
 import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
 import {
@@ -184,11 +187,11 @@ export function regressionGate(args: RegressionGateArgs): GateResult {
 }
 
 // ---------------------------------------------------------------------------
-// makeRegressionRetest — the stateful MergeOps.retest adapter
+// makeChangeGate — stateful adapter: DETECT changed slides + COMMIT accepted ones
 // ---------------------------------------------------------------------------
 
-export interface RegressionRetestDeps {
-  /** load the stability classification for THIS retest (re-read per call so a
+export interface ChangeGateDeps {
+  /** load the stability classification for THIS detect (re-read per call so a
    *  freshly-written stability.json is picked up). */
   loadStability: () => StabilityClassification;
   /** render the merge workspace's CURRENT deck once and return a per-slide
@@ -201,44 +204,68 @@ export interface RegressionRetestDeps {
   log?: (msg: string) => void;
 }
 
+/** Which slides a merge changes relative to their approved reference, and the
+ *  per-slide findings behind it (for logging / the rating UI). */
+export interface ChangeDetection {
+  /** the real slide ids that DIFFER from their approved reference (green slides
+   *  vs their LGTM, non-targeted vs base) — the set to show the human. */
+  changedSlides: string[];
+  findings: GateFinding[];
+}
+
 /**
- * Wrap `regressionGate` as the synchronous `retest(ws, intendedSlides) →
- * {changed}` seam. Holds the ACCEPTED-BASE across calls: after any CLEAN fork
- * (ok — every green kept its stability, no ripple) it advances the base for that
- * fork's intended slides to
- * their current render — so the NEXT fork in the sequential fold is compared
- * against the post-previous-fork state (serial target-mutation). A rippling
- * fork's writes are rolled back by llm-merge before the next retest, so its base
- * is deliberately NOT advanced.
+ * The merge no longer AUTO-passes/fails on the gate: it surfaces the changed
+ * slides to a HUMAN (llm-merge's `rateChanged`). `makeChangeGate` wraps
+ * `regressionGate` with the mutable reference the flow needs:
+ *   · `detect(ws, intendedSlides)` renders the workspace deck and returns the
+ *     slides that differ from their current reference (approved-LGTM for a green
+ *     slide, base for a non-targeted one) — exactly the slides to rate.
+ *   · `commitAccepted(slides)` advances BOTH references for the human-GREENED
+ *     slides to their render in the last `detect` — the "new green". So a later
+ *     fold that doesn't touch them sees them as unchanged (not re-rated), and a
+ *     later fold that REGRESSES a newly-green slide re-surfaces it for rating.
+ * A rejected fork's writes are rolled back by llm-merge before the next detect,
+ * and `commitAccepted` is NOT called for it, so its reference is unchanged.
  */
-export function makeRegressionRetest(deps: RegressionRetestDeps): (ws: CowWorkspace, intendedSlides: string[]) => { changed: string[] } {
+export interface ChangeGate {
+  detect(ws: CowWorkspace, intendedSlides: string[]): ChangeDetection;
+  commitAccepted(slides: string[]): void;
+}
+
+export function makeChangeGate(deps: ChangeGateDeps): ChangeGate {
   const acceptedBase = new Map<string, RenderRecord>();
+  const acceptedLgtm = new Map<string, RenderRecord>();
   const base = (sid: string): RenderRecord => {
     if (!acceptedBase.has(sid)) acceptedBase.set(sid, deps.baseRecord(sid));
     return acceptedBase.get(sid)!;
   };
+  const lgtm = (sid: string): RenderRecord => {
+    if (!acceptedLgtm.has(sid)) acceptedLgtm.set(sid, deps.lgtmRecord(sid));
+    return acceptedLgtm.get(sid)!;
+  };
+  let lastRender: ((sid: string) => RenderRecord) | null = null;
 
-  return (ws, intendedSlides) => {
-    const stability = deps.loadStability();
-    const lookup = deps.renderMergeDeck(ws);
-    const res = regressionGate({
-      base,
-      greenSlides: intendedSlides,
-      stability,
-      lgtm: deps.lgtmRecord,
-      record: lookup,
-      mergeWs: ws,
-    });
-    if (deps.log) {
-      deps.log(
-        `[regression-gate] intended=[${intendedSlides.join(",")}] ok=${res.ok} ` +
-          `changed=[${res.changed.join(",")}] findings=${res.findings.length}` +
+  return {
+    detect(ws, intendedSlides) {
+      const stability = deps.loadStability();
+      const lookup = deps.renderMergeDeck(ws);
+      lastRender = lookup;
+      const res = regressionGate({ base, greenSlides: intendedSlides, stability, lgtm, record: lookup, mergeWs: ws });
+      const changedSlides = [...new Set(res.findings.map((f) => f.slide))].sort();
+      deps.log?.(
+        `[change-gate] intended=[${intendedSlides.join(",")}] changed=[${changedSlides.join(",")}] ` +
+          `findings=${res.findings.length}` +
           (res.findings.length ? ` (${res.findings.map((f) => `${f.slide}:${f.kind}`).join("; ")})` : ""),
       );
-    }
-    // Advance the accepted base only for a CLEAN fold — this fork's targets are
-    // now the green state subsequent forks must preserve.
-    if (res.ok) for (const sid of intendedSlides) acceptedBase.set(sid, lookup(sid));
-    return { changed: res.changed };
+      return { changedSlides, findings: res.findings };
+    },
+    commitAccepted(slides) {
+      if (!lastRender) return;
+      for (const sid of slides) {
+        const rec = lastRender(sid);
+        acceptedBase.set(sid, rec);
+        acceptedLgtm.set(sid, rec);
+      }
+    },
   };
 }

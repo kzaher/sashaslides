@@ -18,7 +18,7 @@
 import { realIO, type IO, type SpawnCaptureArgs, type SpawnCaptureResult } from "../../../structured-prompting/src/server/io.js";
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
 import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
-import { llmMerge, type GreenCluster, type MergeOps, type MergeRenderSeam, type MergeReport } from "./llm-merge.js";
+import { llmMerge, type GreenCluster, type MergeOps, type MergeRatingArgs, type MergeRatingVerdict, type MergeRenderSeam, type MergeReport } from "./llm-merge.js";
 import type { RenderRecord } from "./stability.js";
 import { execSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -201,6 +201,27 @@ export function writeRatingOutcome(sharedDir: string, m: { task: string; green: 
   const payload = { task_id: m.task, green: m.green, rated: true, good: m.good ?? [], bad: m.bad ?? [], unrated: m.unrated ?? [], slides: m.slides ?? [] };
   writeFileSync(join(sharedDir, "rating-outcome.json"), JSON.stringify(payload));
 }
+
+// ───────── (H) human rating of a MERGE's changed slides ─────────────────────
+/** A merge-rating mock = the (H) human in the 3-mock policy for the merge flow.
+ *  `decide` returns the verdict over the changed slides shown at each rating
+ *  round; every call is recorded so a test can assert the ratings the human saw
+ *  (phase, label, changed set). */
+export interface MergeRateMock {
+  rate: (a: MergeRatingArgs) => MergeRatingVerdict;
+  calls: Array<{ phase: "all-at-once" | "sequential"; label: string; changed: string[] }>;
+}
+export function mergeRateMock(decide: (c: { phase: "all-at-once" | "sequential"; label: string; changed: string[] }) => MergeRatingVerdict): MergeRateMock {
+  const calls: MergeRateMock["calls"] = [];
+  return {
+    calls,
+    rate: (a) => { const c = { phase: a.phase, label: a.label, changed: [...a.changed] }; calls.push(c); return decide(c); },
+  };
+}
+/** Convenience verdicts. */
+export const verdictGreenAll = (changed: string[]): MergeRatingVerdict => ({ green: [...changed], red: [], stopAll: false });
+export const verdictRed = (red: string[], changed: string[]): MergeRatingVerdict => ({ green: changed.filter((s) => !red.includes(s)), red: [...red], stopAll: false });
+export const verdictStopAll = (changed: string[]): MergeRatingVerdict => ({ green: [], red: [...changed], stopAll: true });
 
 // ───────── run a merge with ONLY the LLM mocked at the engine level ──────────
 /** Execute `llmMerge` on a REAL engine whose IO mocks only the LLM. `ops` should
