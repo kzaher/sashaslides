@@ -104,11 +104,23 @@ async function pLimit<T, R>(concurrency: number, items: readonly T[], fn: (item:
 }
 
 /**
- * Per-slide pptx (--no-upload). Built with bounded concurrency (4
- * at a time) — convert-pptx opens a fresh Chrome tab per slide for
- * DOM extraction, and >4 concurrent tabs occasionally drop the
- * WebSocket. concurrency=4 is the empirical sweet spot. Idempotent:
- * skips slides whose .pptx is already present.
+ * The ONE bounded-concurrency knob for every step that opens Chrome tabs (pptx
+ * DOM-extraction AND screenshots). Each concurrent tab is a WebSocket to Chrome,
+ * and too many at once make Chrome drop connections ("socket hang up") and race
+ * on web-font load (nondeterministic metrics). Env-overridable via
+ * `RECORD_CONCURRENCY`; the merge / regression render sets it to `1` for a fully
+ * sequential, drop-free, byte-deterministic pass. Default lowered to 2 (was 4) —
+ * reliability over raw speed.
+ */
+function chromeConcurrency(): number {
+  const n = Number(process.env.RECORD_CONCURRENCY);
+  return Number.isFinite(n) && n > 0 ? n : 2;
+}
+
+/**
+ * Per-slide pptx (--no-upload). Built with bounded concurrency (see
+ * `chromeConcurrency`) — convert-pptx opens a fresh Chrome tab per slide for DOM
+ * extraction. Idempotent: skips slides whose .pptx is already present.
  */
 async function recordPptx(slides: string[], outDir: string, fixturesDir: string) {
   const missing = slides.filter((id) => !existsSync(join(outDir, `${id}.pptx`)));
@@ -116,14 +128,9 @@ async function recordPptx(slides: string[], outDir: string, fixturesDir: string)
     console.log(`  pptx: all ${slides.length} present, skipping`);
     return;
   }
-  // Concurrency is env-overridable (RECORD_CONCURRENCY): the default 4 is fast,
-  // but concurrent Chrome tabs racing on web-font load make text metrics — and
-  // thus the emitted pptx — nondeterministic. Set RECORD_CONCURRENCY=1 to render
-  // SEQUENTIALLY for a byte-deterministic pass (regression gates / off-target
-  // scans), where a stable diff matters more than speed.
-  const recordConcurrency = Number(process.env.RECORD_CONCURRENCY) || 4;
-  console.log(`  pptx: building ${missing.length}/${slides.length} (rest cached, concurrency=${recordConcurrency})...`);
-  await pLimit(recordConcurrency, missing, async (id) => {
+  const conc = chromeConcurrency();
+  console.log(`  pptx: building ${missing.length}/${slides.length} (rest cached, concurrency=${conc})...`);
+  await pLimit(conc, missing, async (id) => {
     const html = `${id}.html`;
     if (!existsSync(join(fixturesDir, html))) {
       throw new Error(`fixture not found: ${join(fixturesDir, html)}`);
@@ -150,8 +157,9 @@ async function screenshotFixtures(slides: string[], fixturesDir: string, outDir:
     console.log(`  screenshots: all ${slides.length} present, skipping`);
     return;
   }
-  console.log(`  screenshots: capturing ${missing.length}/${slides.length} (rest cached, concurrency=4)...`);
-  await pLimit(4, missing, async (id) => {
+  const conc = chromeConcurrency();
+  console.log(`  screenshots: capturing ${missing.length}/${slides.length} (rest cached, concurrency=${conc})...`);
+  await pLimit(conc, missing, async (id) => {
     const htmlPath = resolve(fixturesDir, `${id}.html`);
     const outPath = join(outDir, `${id}.png`);
     const target = await CDP.New({ port: PORT, url: "about:blank" });
