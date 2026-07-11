@@ -129,8 +129,6 @@ export interface MergeReport {
   rejected: Array<{ task: string; reason: string; demotedSlides: string[] }>;
   /** repo-relative converter files written onto the real tree by the promote. */
   mergedFiles: string[];
-  /** the human pressed "reject all & stop" — remaining forks were not rated. */
-  stopped: boolean;
 }
 
 /** The human's verdict over the changed slides shown in the rating UI. */
@@ -139,8 +137,10 @@ export interface MergeRatingVerdict {
   green: string[];
   /** changed slides the human REJECTED. */
   red: string[];
-  /** the human pressed "reject all slides and stop rating" — reject everything
-   *  shown AND stop rating any further forks. */
+  /** the human pressed "reject all slides and stop rating" — a CONVENIENCE that
+   *  marks every shown slide red without clicking each (e.g. 20 slides). It is
+   *  NOT a halt: the merge treats it exactly like "all shown red" and CONTINUES
+   *  (abandon all-together → sequential; a sequential fork → drop it, next fork). */
   stopAll: boolean;
 }
 
@@ -401,7 +401,7 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
   const isConverter = args.converterFilter ?? defaultConverterFilter;
   const ops = args.ops ?? realLlmMergeOps({ repo });
 
-  const report: MergeReport = { mode: "noop", accepted: [], rejected: [], mergedFiles: [], stopped: false };
+  const report: MergeReport = { mode: "noop", accepted: [], rejected: [], mergedFiles: [] };
 
   // ── (1) Collect fork versions per changed converter file (synchronous) ──────
   // A bug_solving fork already IS a CowWorkspace over the repo; its changed
@@ -495,21 +495,17 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
             return `echo llm-merge:all-accept-nochange [${report.mergedFiles.join(",")}]`;
           }
           const verdict = ops.rateChanged({ changed: changedSlides, ws: allWs, phase: "all-at-once", label: "all-together" });
-          if (verdict.stopAll) {                                  // reject all & stop
-            report.mode = "all-at-once";
-            report.stopped = true;
-            report.rejected = green.map((g) => ({ task: g.task, reason: "human pressed reject-all & stop", demotedSlides: g.slides }));
-            try { allWs.cleanup(); } catch { /* */ }              // overlays LEFT (not reaped) for inspection
-            decision.outcome = "stopped";
-            return `echo llm-merge:all-stopped changed=[${changedSlides.join(",")}]`;
-          }
-          if (verdict.red.length === 0) {                         // ALL changed slides green → accept
+          if (!verdict.stopAll && verdict.red.length === 0) {     // ALL changed slides green → accept the combined merge
             acceptAll(changedSlides);
             decision.outcome = "accepted";
             return `echo llm-merge:all-accept green=[${verdict.green.join(",")}]`;
           }
-          decision.outcome = "rejected";                          // some red → isolate via sequential
-          return `echo llm-merge:all-rejected red=[${verdict.red.join(",")}]`;
+          // Any red — OR "reject all & stop" — ABANDONS the all-together merge and
+          // proceeds to SEQUENTIAL (fold each fork alone). In the all-together stage
+          // "reject all & stop" means "stop trying to merge them together, isolate
+          // them individually"; only a stop in the SEQUENTIAL stage truly halts.
+          decision.outcome = "rejected";
+          return `echo llm-merge:all-rejected ${verdict.stopAll ? "stop-all→sequential" : `red=[${verdict.red.join(",")}]`}`;
         }),
       );
 
@@ -571,19 +567,15 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
 
   const cur = (rel: string): string => (rel in accepted ? accepted[rel] : baseContent(rel));
 
-  // Set once the human presses "reject all & stop" — subsequent forks are skipped.
-  const stopFlag = { value: false };
-
   let chain: SessionWithResult<unknown> = installValue(session, "sequential:start");
 
   for (const cluster of green) {
     const forkFiles = forkFilesOf(cluster);
     const perForkState = { pre: {} as Record<string, string> };
 
-    // Snapshot the pre-fork accepted content for rollback (skip once stopped).
+    // Snapshot the pre-fork accepted content for rollback.
     chain = chain.pipe((sc) =>
       sc.executeShell(() => {
-        if (stopFlag.value) return `echo llm-merge:seq-skip ${cluster.task} (stopped)`;
         perForkState.pre = {};
         for (const { rel } of forkFiles) perForkState.pre[rel] = cur(rel);
         return `echo llm-merge:seq-begin ${cluster.task}`;
@@ -594,10 +586,9 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
     // (original base as the shared ancestor) → write into the seq workspace upper
     // → one agentic edit/verify send → read it back. Doing this INSIDE the pipe
     // body captures the exec-time accepted state, so a later fork folds onto the
-    // forks kept before it (the target MUTATES). Skipped once stopped.
+    // forks kept before it (the target MUTATES).
     for (const { rel, content } of forkFiles) {
       chain = chain.pipe((sc) => {
-        if (stopFlag.value) return installValue(sc, "seq-skip");
         const current = cur(rel);            // includes prior folded forks
         const bc = baseContent(rel);
         const { content: merged, conflicted } = mergeThree(bc, current, content, { cur: "merged so far", base: "base", other: `fix: ${cluster.task}` });
@@ -620,9 +611,10 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
     // SEQ_RATE). greens IN PLAY = the kept forks' slides (a kept green is now the
     // reference and must not regress) PLUS this fork's. Not-yet-folded forks sit
     // at base, so they're compared against base and don't couple to this fork.
+    // The fold ALWAYS continues to the next fork — "reject all & stop" is just a
+    // convenience for "red every shown slide", not a halt.
     chain = chain.pipe((sc) =>
       sc.executeShell(() => {
-        if (stopFlag.value) return `echo llm-merge:seq-skip ${cluster.task} (stopped)`;
         const greenInPlay = [...new Set([...keptClusters.flatMap((c) => c.slides), ...cluster.slides])];
         const { changedSlides } = ops.detectChanged(seqWs, greenInPlay);
         const keep = (): void => {
@@ -644,19 +636,14 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
           return `echo llm-merge:seq-keep-nochange ${cluster.task}`;
         }
         const verdict = ops.rateChanged({ changed: changedSlides, ws: seqWs, phase: "sequential", label: cluster.task });
-        if (verdict.stopAll) {                                   // reject THIS fork AND stop the rest
-          stopFlag.value = true;
-          report.stopped = true;
-          rollbackDemote("human pressed reject-all & stop");
-          return `echo llm-merge:seq-stop ${cluster.task}`;
-        }
-        if (verdict.red.length === 0) {                          // all changed slides green → keep + new green
+        if (!verdict.stopAll && verdict.red.length === 0) {      // all changed slides green → keep + new green
           keep();
           ops.commitAccepted(changedSlides);
           return `echo llm-merge:seq-keep ${cluster.task} green=[${verdict.green.join(",")}]`;
         }
-        rollbackDemote(`human rejected changed slide(s) [${verdict.red.join(", ")}]`);   // some red → drop + continue
-        return `echo llm-merge:seq-reject ${cluster.task} red=[${verdict.red.join(",")}]`;
+        // any red — OR reject-all — drops THIS fork + demotes; the fold CONTINUES.
+        rollbackDemote(verdict.stopAll ? "human reject-all'd this fork's changed slides" : `human rejected changed slide(s) [${verdict.red.join(", ")}]`);
+        return `echo llm-merge:seq-reject ${cluster.task} ${verdict.stopAll ? "reject-all" : `red=[${verdict.red.join(",")}]`}`;
       }),
     );
   }
