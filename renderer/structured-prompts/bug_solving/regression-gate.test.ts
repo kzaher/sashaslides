@@ -21,7 +21,7 @@
 import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
 import {
   regressionGate,
-  makeRegressionRetest,
+  makeChangeGate,
   pixelIdentical,
   xmlPlusRenderedParts,
   unchanged,
@@ -142,16 +142,16 @@ function pureTests(): void {
       !badCase.ok && badCase.changed.includes("slide_01"), JSON.stringify(badCase));
   }
 
-  // (6) makeRegressionRetest ADVANCES the accepted base after a clean fork so the
-  //     next fork compares against the post-previous-fork state.
+  // (6) makeChangeGate: commitAccepted ADVANCES the reference after a green fork so
+  //     the next fold compares against the post-previous-fork state.
   {
     const stability = stab({ pixelPerfect: ["slide_01", "slide_02"] });
-    // mergeState mutates between retest calls (like the sequential COW workspace).
+    // mergeState mutates between detect calls (like the sequential COW workspace).
     let mergeState: Record<string, RenderRecord> = {};
-    const retest = makeRegressionRetest({
+    const gate = makeChangeGate({
       loadStability: () => stability,
       renderMergeDeck: () => (sid) => mergeState[sid] ?? {},
-      // pristine base: slide_01 differs from A's render → WOULD ripple if base never advanced.
+      // pristine base: slide_01 differs from A's render → WOULD ripple if reference never advanced.
       baseRecord: asFn({ slide_01: { pixelHash: "PRISTINE_1" }, slide_02: { pixelHash: "PRISTINE_2" } }),
       lgtmRecord: asFn({ slide_01: { pixelHash: "A_RENDER" }, slide_02: { pixelHash: "B_RENDER" } }),
     });
@@ -159,33 +159,34 @@ function pureTests(): void {
 
     // fork A folds: slide_01 becomes A_RENDER (matches its LGTM), slide_02 untouched (pristine).
     mergeState = { slide_01: { pixelHash: "A_RENDER" }, slide_02: { pixelHash: "PRISTINE_2" } };
-    const r1 = retest(dummyWs, ["slide_01"]);
-    ok("(6) fork A clean retest → no ripple", r1.changed.length === 0, JSON.stringify(r1));
+    const r1 = gate.detect(dummyWs, ["slide_01"]);
+    ok("(6) fork A detect → nothing changed vs approved", r1.changedSlides.length === 0, JSON.stringify(r1));
+    gate.commitAccepted(["slide_01"]);   // human greened A → A_RENDER is now slide_01's reference
 
     // fork B folds: slide_01 stays A_RENDER (accepted), slide_02 becomes B_RENDER (matches LGTM).
     mergeState = { slide_01: { pixelHash: "A_RENDER" }, slide_02: { pixelHash: "B_RENDER" } };
-    const r2 = retest(dummyWs, ["slide_02"]);
-    ok("(6b) fork B retest → A's accepted change NOT re-flagged (base advanced)", r2.changed.length === 0, JSON.stringify(r2));
+    const r2 = gate.detect(dummyWs, ["slide_02"]);
+    ok("(6b) fork B detect → A's accepted change NOT re-flagged (reference advanced)", r2.changedSlides.length === 0, JSON.stringify(r2));
 
-    // Control: a FRESH adapter that never saw A clean would ripple slide_01 for B.
-    const retestFresh = makeRegressionRetest({
+    // Control: a FRESH gate that never committed A would surface slide_01 for B.
+    const gateFresh = makeChangeGate({
       loadStability: () => stability,
       renderMergeDeck: () => (sid) => mergeState[sid] ?? {},
       baseRecord: asFn({ slide_01: { pixelHash: "PRISTINE_1" }, slide_02: { pixelHash: "PRISTINE_2" } }),
       lgtmRecord: asFn({ slide_01: { pixelHash: "A_RENDER" }, slide_02: { pixelHash: "B_RENDER" } }),
     });
-    const rControl = retestFresh(dummyWs, ["slide_02"]);
-    ok("(6c) control: without A's clean fold, slide_01 DOES ripple for B", rControl.changed.includes("slide_01"), JSON.stringify(rControl));
+    const rControl = gateFresh.detect(dummyWs, ["slide_02"]);
+    ok("(6c) control: without committing A, slide_01 DOES surface for B", rControl.changedSlides.includes("slide_01"), JSON.stringify(rControl));
   }
 
-  // (7) SAME serial target-mutation but for the XML-STABLE class — the base-advance
-  //     must compare fork B's non-targeted slide_01 against A's POST-FOLD *xml*
-  //     (not the original), and pixel wobble must NOT ripple it.
+  // (7) SAME serial target-mutation but for the XML-STABLE class — the advance must
+  //     compare fork B's non-targeted slide_01 against A's POST-FOLD *xml* (not the
+  //     original), and pixel wobble must NOT surface it.
   {
     const stability = stab({ xmlStable: ["slide_01", "slide_02"] });
     let mergeState: Record<string, RenderRecord> = {};
     const mk = (xml: string, parts: string, px: string): RenderRecord => ({ xmlHash: xml, renderedPartsHash: parts, pixelHash: px });
-    const retest = makeRegressionRetest({
+    const gate = makeChangeGate({
       loadStability: () => stability,
       renderMergeDeck: () => (sid) => mergeState[sid] ?? {},
       baseRecord: asFn({ slide_01: mk("PRE_1", "PRE_1", "wobble0"), slide_02: mk("PRE_2", "PRE_2", "wobble0") }),
@@ -195,23 +196,24 @@ function pureTests(): void {
 
     // fork A folds: slide_01 xml→A_XML (matches its LGTM); pixel wobbles (irrelevant for xml-stable).
     mergeState = { slide_01: mk("A_XML", "A_PARTS", "wobble1"), slide_02: mk("PRE_2", "PRE_2", "wobble1") };
-    const r1 = retest(dummyWs, ["slide_01"]);
-    ok("(7) xml-stable fork A clean retest → no ripple", r1.changed.length === 0, JSON.stringify(r1));
+    const r1 = gate.detect(dummyWs, ["slide_01"]);
+    ok("(7) xml-stable fork A detect → nothing changed", r1.changedSlides.length === 0, JSON.stringify(r1));
+    gate.commitAccepted(["slide_01"]);   // human greened A → A_XML/A_PARTS is now slide_01's reference
 
     // fork B folds: slide_01 keeps A_XML (accepted) but pixels wobble AGAIN; slide_02→B_XML.
     mergeState = { slide_01: mk("A_XML", "A_PARTS", "wobble2"), slide_02: mk("B_XML", "B_PARTS", "wobble2") };
-    const r2 = retest(dummyWs, ["slide_02"]);
-    ok("(7b) xml-stable fork B → A's accepted XML NOT re-flagged (base advanced) + pixel wobble ignored", r2.changed.length === 0, JSON.stringify(r2));
+    const r2 = gate.detect(dummyWs, ["slide_02"]);
+    ok("(7b) xml-stable fork B → A's accepted XML NOT re-flagged (reference advanced) + pixel wobble ignored", r2.changedSlides.length === 0, JSON.stringify(r2));
 
-    // Control: without A's clean fold, slide_01's xml (A_XML) differs from PRE_1 → ripples for B.
-    const retestFresh = makeRegressionRetest({
+    // Control: without committing A, slide_01's xml (A_XML) differs from PRE_1 → surfaces for B.
+    const gateFresh = makeChangeGate({
       loadStability: () => stability,
       renderMergeDeck: () => (sid) => mergeState[sid] ?? {},
       baseRecord: asFn({ slide_01: mk("PRE_1", "PRE_1", "wobble0"), slide_02: mk("PRE_2", "PRE_2", "wobble0") }),
       lgtmRecord: asFn({ slide_01: mk("A_XML", "A_PARTS", "wobbleA"), slide_02: mk("B_XML", "B_PARTS", "wobbleB") }),
     });
-    const rControl = retestFresh(dummyWs, ["slide_02"]);
-    ok("(7c) control: without A's fold, slide_01 XML change DOES ripple for B", rControl.changed.includes("slide_01"), JSON.stringify(rControl));
+    const rControl = gateFresh.detect(dummyWs, ["slide_02"]);
+    ok("(7c) control: without committing A, slide_01 XML change DOES surface for B", rControl.changedSlides.includes("slide_01"), JSON.stringify(rControl));
   }
 }
 

@@ -73,7 +73,7 @@ import {
   cleanupCowWorkspace,
   type CowWorkspace,
 } from "../../../cow-workspace/cow-workspace.js";
-import { makeRegressionRetest } from "./regression-gate.js";
+import { makeChangeGate } from "./regression-gate.js";
 import {
   type RenderRecord,
   type StabilityClassification,
@@ -118,25 +118,56 @@ function reapAcceptedCluster(cluster: GreenCluster, upperRoot?: string): void {
   }
 }
 
-/** The final report. */
+/** The final report. See docs/merge-flow.drawio for the state machine. */
 export interface MergeReport {
   /** how the merge landed. */
   mode: "all-at-once" | "sequential" | "noop";
-  /** task slugs whose fix was folded into the promoted tree. */
+  /** task slugs whose fix was folded into the promoted tree (human-accepted). */
   accepted: string[];
-  /** clusters dropped during the sequential fallback (rippled / could not fold).
-   *  `demotedSlides` = the slide ids fed back to the ledger for re-solve. */
+  /** clusters dropped — the human REJECTED a changed slide, or the fold could not
+   *  keep a prior green. `demotedSlides` = ids fed back to the ledger for re-solve. */
   rejected: Array<{ task: string; reason: string; demotedSlides: string[] }>;
   /** repo-relative converter files written onto the real tree by the promote. */
   mergedFiles: string[];
+  /** the human pressed "reject all & stop" — remaining forks were not rated. */
+  stopped: boolean;
 }
 
-/** The (small) injectable side-effect surface. */
+/** The human's verdict over the changed slides shown in the rating UI. */
+export interface MergeRatingVerdict {
+  /** changed slides the human ACCEPTED (become the new green reference). */
+  green: string[];
+  /** changed slides the human REJECTED. */
+  red: string[];
+  /** the human pressed "reject all slides and stop rating" — reject everything
+   *  shown AND stop rating any further forks. */
+  stopAll: boolean;
+}
+
+/** What the flow hands `rateChanged`: the changed slides + which merge stage +
+ *  the workspace whose upper holds the merged renders. */
+export interface MergeRatingArgs {
+  changed: string[];
+  ws: CowWorkspace;
+  phase: "all-at-once" | "sequential";
+  label: string;
+}
+
+/** The (small) injectable side-effect surface. Tests mock ONLY `rateChanged` (the
+ *  human) + the render seam feeding `detectChanged`; git/overlays/promote are real. */
 export interface MergeOps {
-  /** Render the deck at the workspace's CURRENT state and structural-diff it
-   *  against the base tree; return the slide ids that CHANGED. A merge is clean
-   *  iff every changed slide is in `intendedSlides`. */
-  retest(ws: CowWorkspace, intendedSlides: string[]): { changed: string[] };
+  /** Render the merge workspace's CURRENT deck and return the slides that DIFFER
+   *  from their approved reference (green vs LGTM, non-targeted vs base) — the set
+   *  to show the human. */
+  detectChanged(ws: CowWorkspace, intendedSlides: string[]): { changedSlides: string[] };
+  /** After the human GREENS a set of changed slides, advance their reference to
+   *  the current merged render (the "new green") so a later fold that doesn't
+   *  touch them won't re-surface them, but one that REGRESSES them will. */
+  commitAccepted(slides: string[]): void;
+  /** HUMAN rating — BLOCKS until the user rates. Shows the changed slides (merged
+   *  vs approved) with a per-slide green/red and a "reject all & stop" button.
+   *  Synchronous (the production impl blocks on the rating UI). */
+  rateChanged(args: MergeRatingArgs): MergeRatingVerdict;
   /** Copy the given merged files from the workspace upper onto the base tree. */
   promote(ws: CowWorkspace, files: string[]): void;
   /** Feed a dropped cluster's slides back to the ledger for re-solve. Must be
@@ -350,11 +381,12 @@ const shq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`;
 // The merge graph
 // ---------------------------------------------------------------------------
 
-/** Sentinel: the all-at-once merge rippled → route to the sequential fallback. */
-class AllAtOnceRippled extends Error {
-  constructor(public readonly ripple: string[]) {
-    super(`all-at-once merge rippled to non-intended slides [${ripple.join(", ")}]`);
-    this.name = "AllAtOnceRippled";
+/** Sentinel: the human REJECTED ≥1 changed slide in the all-together merge →
+ *  route to the sequential fallback (fold each fork alone, rate each). */
+class AllAtOnceRejected extends Error {
+  constructor(public readonly changed: string[]) {
+    super(`human rejected a changed slide in the all-together merge; changed=[${changed.join(", ")}]`);
+    this.name = "AllAtOnceRejected";
   }
 }
 
@@ -369,7 +401,7 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
   const isConverter = args.converterFilter ?? defaultConverterFilter;
   const ops = args.ops ?? realLlmMergeOps({ repo });
 
-  const report: MergeReport = { mode: "noop", accepted: [], rejected: [], mergedFiles: [] };
+  const report: MergeReport = { mode: "noop", accepted: [], rejected: [], mergedFiles: [], stopped: false };
 
   // ── (1) Collect fork versions per changed converter file (synchronous) ──────
   // A bug_solving fork already IS a CowWorkspace over the repo; its changed
@@ -436,40 +468,57 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
         });
       }
 
-      // Write the single-fork files verbatim + retest ONCE; stash the ripple set
-      // on allState so the following assert can throw on it (a throw routes the
-      // try to the sequential fallback). Multi-fork files are already written +
-      // model-edited in the upper by the loop above.
-      const allRipple: { set: string[] } = { set: [] };
-      const retested = chain.pipe((sc) =>
+      // Write the single-fork files verbatim, then DETECT the changed slides and
+      // (if any) show them to the HUMAN. Three outcomes (see docs/merge-flow.drawio,
+      // state ALL_AT_ONCE_RATE): all-green/no-change → ACCEPT everything; stop →
+      // reject everything and STOP; any-red → route to the SEQUENTIAL fallback so
+      // each fork is folded + rated alone. A throw routes the try to the fallback.
+      const decision = { outcome: "" as "accepted" | "stopped" | "rejected", changed: [] as string[] };
+      const acceptAll = (greened: string[]): void => {
+        const files = [...multiForkFiles, ...singleForkFiles];
+        ops.promote(allWs, files);
+        if (greened.length) ops.commitAccepted(greened);
+        report.mode = "all-at-once";
+        report.accepted = green.map((g) => g.task);
+        report.mergedFiles = files;
+        try { allWs.cleanup(); } catch { /* best-effort */ }
+        for (const g of green) reapAcceptedCluster(g, args.upperRoot);
+      };
+      const decided = chain.pipe((sc) =>
         sc.executeShell(() => {
           for (const rel of singleForkFiles) allWs.writeUpperFile(rel, fileForks.get(rel)![0].content);
-          const { changed } = ops.retest(allWs, allIntendedSlides);
-          allRipple.set = changed.filter((sid) => !intendedSet.has(sid));
-          return `echo llm-merge:all-retest changed=[${changed.join(",")}] ripple=[${allRipple.set.join(",")}]`;
+          const { changedSlides } = ops.detectChanged(allWs, allIntendedSlides);
+          decision.changed = changedSlides;
+          if (changedSlides.length === 0) {                       // nothing differs from approved → accept
+            acceptAll([]);
+            decision.outcome = "accepted";
+            return `echo llm-merge:all-accept-nochange [${report.mergedFiles.join(",")}]`;
+          }
+          const verdict = ops.rateChanged({ changed: changedSlides, ws: allWs, phase: "all-at-once", label: "all-together" });
+          if (verdict.stopAll) {                                  // reject all & stop
+            report.mode = "all-at-once";
+            report.stopped = true;
+            report.rejected = green.map((g) => ({ task: g.task, reason: "human pressed reject-all & stop", demotedSlides: g.slides }));
+            try { allWs.cleanup(); } catch { /* */ }              // overlays LEFT (not reaped) for inspection
+            decision.outcome = "stopped";
+            return `echo llm-merge:all-stopped changed=[${changedSlides.join(",")}]`;
+          }
+          if (verdict.red.length === 0) {                         // ALL changed slides green → accept
+            acceptAll(changedSlides);
+            decision.outcome = "accepted";
+            return `echo llm-merge:all-accept green=[${verdict.green.join(",")}]`;
+          }
+          decision.outcome = "rejected";                          // some red → isolate via sequential
+          return `echo llm-merge:all-rejected red=[${verdict.red.join(",")}]`;
         }),
       );
 
-      return retested
-        .assert(() => {
-          if (allRipple.set.length > 0) throw new AllAtOnceRippled(allRipple.set);
-        })
-        .executeShell(() => {
-          // Clean: promote the merged set onto the real tree.
-          const files = [...multiForkFiles, ...singleForkFiles];
-          ops.promote(allWs, files);
-          report.mode = "all-at-once";
-          report.accepted = green.map((g) => g.task);
-          report.mergedFiles = files;
-          try { allWs.cleanup(); } catch { /* best-effort */ }
-          // Cleanup-ON-SUCCESS: every green cluster was promoted → reap each
-          // cluster's solve overlay + shared dir (the throwaway merge ws above).
-          for (const g of green) reapAcceptedCluster(g, args.upperRoot);
-          return `echo llm-merge:all-promoted [${files.join(",")}]`;
-        })
-        .pipe((sp) => installValue(sp, report));
+      return decided
+        .assert(() => { if (decision.outcome === "rejected") throw new AllAtOnceRejected(decision.changed); })
+        .pipe((sp) => installValue(sp, report));   // accepted | stopped → done (no fallback)
     },
-    // Fallback: all-at-once failed (ripple or a merge send error) → SEQUENTIAL.
+    // Fallback: the human rejected ≥1 changed slide in the all-together merge →
+    // SEQUENTIAL: fold each fork alone and rate it.
     (s) => {
       try { allWs.cleanup(); } catch { /* */ }
       return sequentialFold(s, {
@@ -522,15 +571,19 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
 
   const cur = (rel: string): string => (rel in accepted ? accepted[rel] : baseContent(rel));
 
+  // Set once the human presses "reject all & stop" — subsequent forks are skipped.
+  const stopFlag = { value: false };
+
   let chain: SessionWithResult<unknown> = installValue(session, "sequential:start");
 
   for (const cluster of green) {
     const forkFiles = forkFilesOf(cluster);
-    const perForkState = { pre: {} as Record<string, string>, ripple: [] as string[] };
+    const perForkState = { pre: {} as Record<string, string> };
 
-    // Snapshot the pre-fork accepted content for rollback.
+    // Snapshot the pre-fork accepted content for rollback (skip once stopped).
     chain = chain.pipe((sc) =>
       sc.executeShell(() => {
+        if (stopFlag.value) return `echo llm-merge:seq-skip ${cluster.task} (stopped)`;
         perForkState.pre = {};
         for (const { rel } of forkFiles) perForkState.pre[rel] = cur(rel);
         return `echo llm-merge:seq-begin ${cluster.task}`;
@@ -541,9 +594,10 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
     // (original base as the shared ancestor) → write into the seq workspace upper
     // → one agentic edit/verify send → read it back. Doing this INSIDE the pipe
     // body captures the exec-time accepted state, so a later fork folds onto the
-    // forks kept before it (the target MUTATES).
+    // forks kept before it (the target MUTATES). Skipped once stopped.
     for (const { rel, content } of forkFiles) {
       chain = chain.pipe((sc) => {
+        if (stopFlag.value) return installValue(sc, "seq-skip");
         const current = cur(rel);            // includes prior folded forks
         const bc = baseContent(rel);
         const { content: merged, conflicted } = mergeThree(bc, current, content, { cur: "merged so far", base: "base", other: `fix: ${cluster.task}` });
@@ -562,42 +616,47 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
       });
     }
 
-    // Retest at the post-fold state. SCOPE the stability-checked ("green") set to
-    // the greens IN PLAY at THIS fold: the ALREADY-KEPT forks (they must not
-    // regress — a kept green is now the reference) PLUS this fork (it must keep
-    // its own stability). NOT-yet-folded forks are deliberately EXCLUDED — their
-    // slides sit at base (unfixed) here, so checking them against their fixed LGTM
-    // would falsely fail this fork and couple every fork's fate to every other's.
-    // With this scoping the fold CONTINUES past a fork that fails to keep
-    // stability, keeping each fork that does.
+    // DETECT this fold's changed slides + RATE them (docs/merge-flow.drawio state
+    // SEQ_RATE). greens IN PLAY = the kept forks' slides (a kept green is now the
+    // reference and must not regress) PLUS this fork's. Not-yet-folded forks sit
+    // at base, so they're compared against base and don't couple to this fork.
     chain = chain.pipe((sc) =>
       sc.executeShell(() => {
+        if (stopFlag.value) return `echo llm-merge:seq-skip ${cluster.task} (stopped)`;
         const greenInPlay = [...new Set([...keptClusters.flatMap((c) => c.slides), ...cluster.slides])];
-        const greenSet = new Set(greenInPlay);
-        const { changed } = ops.retest(seqWs, greenInPlay);
-        perForkState.ripple = changed.filter((sid) => !greenSet.has(sid));
-        return `echo llm-merge:seq-retest ${cluster.task} green=[${greenInPlay.join(",")}] changed=[${changed.join(",")}]`;
-      }),
-    );
-
-    // Keep (clean) or roll back + demote (rippled).
-    chain = chain.pipe((sc) =>
-      sc.executeShell(() => {
-        if (perForkState.ripple.length === 0) {
+        const { changedSlides } = ops.detectChanged(seqWs, greenInPlay);
+        const keep = (): void => {
           report.accepted.push(cluster.task);
           keptClusters.push(cluster);
           for (const { rel } of forkFiles) keptFiles.add(rel);
-          return `echo llm-merge:seq-keep ${cluster.task}`;
+        };
+        const rollbackDemote = (reason: string): void => {
+          for (const { rel } of forkFiles) {
+            accepted[rel] = perForkState.pre[rel];
+            seqWs.writeUpperFile(rel, perForkState.pre[rel]);
+          }
+          report.rejected.push({ task: cluster.task, reason, demotedSlides: cluster.slides });
+          try { ops.demote(cluster.slides, cluster.task, reason); } catch { /* non-fatal */ }
+        };
+        if (changedSlides.length === 0) {                        // nothing differs from reference → keep silently
+          keep();
+          ops.commitAccepted(cluster.slides);
+          return `echo llm-merge:seq-keep-nochange ${cluster.task}`;
         }
-        // Roll each of this fork's files back to the pre-fork accepted content.
-        for (const { rel } of forkFiles) {
-          accepted[rel] = perForkState.pre[rel];
-          seqWs.writeUpperFile(rel, perForkState.pre[rel]);
+        const verdict = ops.rateChanged({ changed: changedSlides, ws: seqWs, phase: "sequential", label: cluster.task });
+        if (verdict.stopAll) {                                   // reject THIS fork AND stop the rest
+          stopFlag.value = true;
+          report.stopped = true;
+          rollbackDemote("human pressed reject-all & stop");
+          return `echo llm-merge:seq-stop ${cluster.task}`;
         }
-        const reason = `rippled to non-intended slide(s) [${perForkState.ripple.join(", ")}]`;
-        report.rejected.push({ task: cluster.task, reason, demotedSlides: cluster.slides });
-        try { ops.demote(cluster.slides, cluster.task, reason); } catch { /* non-fatal */ }
-        return `echo llm-merge:seq-rollback ${cluster.task}`;
+        if (verdict.red.length === 0) {                          // all changed slides green → keep + new green
+          keep();
+          ops.commitAccepted(changedSlides);
+          return `echo llm-merge:seq-keep ${cluster.task} green=[${verdict.green.join(",")}]`;
+        }
+        rollbackDemote(`human rejected changed slide(s) [${verdict.red.join(", ")}]`);   // some red → drop + continue
+        return `echo llm-merge:seq-reject ${cluster.task} red=[${verdict.red.join(",")}]`;
       }),
     );
   }
@@ -648,6 +707,10 @@ export interface RealLlmMergeOpsDeps {
    *  shell-outs; everything else (deckIds, stability load, promote, demote) is
    *  unchanged and real. */
   render?: MergeRenderSeam;
+  /** TEST SEAM — override the HUMAN rating. Production leaves this UNSET (real
+   *  rating UI). Injecting it is how the merge flow runs E2E without a human: it
+   *  IS the (H) human mock in the 3-mock policy. */
+  rate?: (args: MergeRatingArgs) => MergeRatingVerdict;
 }
 
 /** The three render points realLlmMergeOps feeds to the regression gate. In
@@ -764,12 +827,15 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
     return baseRecord(slideId);
   };
 
-  // Render the merged deck INSIDE the workspace overlay, once per retest call.
+  // Render the merged deck INSIDE the workspace overlay, once per detect call.
+  // Track the LAST render dir so the rating UI can show the merged thumbnails.
   let mergeSeq = 0;
+  let lastMergeRenderDir: string | null = null;
   const renderMergeDeck = (ws: CowWorkspace): ((slideId: string) => RenderRecord) => {
     const { cmd, outDir } = mergeRenderCommand(ws, {
       recRel: REC_REL, fixturesDir, slidesCsv: csv(), outRel: `.gate-render-${mergeSeq++}`, title: `llm-merge-post-${Date.now()}`,
     });
+    lastMergeRenderDir = outDir;
     const r = ws.runShell(cmd);
     // Non-fatal but loud: an empty render means the gate compares base against
     // NOTHING and rips every slide. This is exactly the bug that silently made
@@ -789,10 +855,10 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
     return { pixelPerfect: [], xmlStable: ids, unstable: [], warning: `[stability] no ${stabilityPath} — defaulting all ${ids.length} slide(s) to xml-stable`, attempts: 0 };
   };
 
-  // The render seam (Google recording) is the ONLY injectable-for-tests point;
-  // when unset, the real record-rendering shell-outs above are used.
+  // The render seam (Google recording) is the ONLY injectable-for-tests point for
+  // change DETECTION; when unset, the real record-rendering shell-outs above are used.
   const seam = deps.render;
-  const retest = makeRegressionRetest({
+  const gate = makeChangeGate({
     loadStability: loadStabilityOrFallback,
     renderMergeDeck: seam?.renderMergeDeck ?? renderMergeDeck,
     baseRecord: seam?.baseRecord ?? baseRecord,
@@ -800,10 +866,31 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
     log: (m) => console.error(m),
   });
 
+  // The HUMAN rating is the other allowed mock. When `deps.rate` is unset,
+  // production boots the merge rating UI (blocks on the user). It shows each
+  // changed slide's MERGED render (from the last detect's overlay output) against
+  // the approved reference (SxS thumbnail, else the pre-merge base render).
+  const rate = deps.rate ?? ((a: MergeRatingArgs): MergeRatingVerdict =>
+    mergeRatingViaUI({
+      repo,
+      changed: a.changed,
+      phase: a.phase,
+      label: a.label,
+      mergedDir: lastMergeRenderDir,
+      approvedPng: (sid) => approvedRefPng(sxsDir, baselineDir, sid),
+      timeoutMs,
+    }));
+
   return {
-    retest(ws, intendedSlides) {
-      if (deckIds().length === 0) return { changed: [] };
-      return retest(ws, intendedSlides);
+    detectChanged(ws, intendedSlides) {
+      if (deckIds().length === 0) return { changedSlides: [] };
+      return gate.detect(ws, intendedSlides);
+    },
+    commitAccepted(slides) {
+      gate.commitAccepted(slides);
+    },
+    rateChanged(args) {
+      return rate(args);
     },
     promote(ws, files) {
       ws.promote(files);
@@ -814,8 +901,76 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
   };
 }
 
+/** The approved-reference PNG shown as "original" in the merge rating UI: the SxS
+ *  approved thumbnail if present, else the slide's pre-merge base render. */
+function approvedRefPng(sxsDir: string | undefined, baselineDir: string | null, sid: string): string | null {
+  if (sxsDir) {
+    for (const sub of ["thumbs", "slides", "originals"]) {
+      const p = join(sxsDir, sub, `${sid}.png`);
+      if (existsSync(p)) return p;
+    }
+  }
+  if (baselineDir) {
+    const p = join(baselineDir, "thumbs", `${sid}.png`);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
 function execRepo(cmd: string, timeoutMs = 20 * 60 * 1000): void {
   execSync(cmd, { stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs });
+}
+
+// ---------------------------------------------------------------------------
+// mergeRatingViaUI — the production HUMAN rating (boots the merge rating UI)
+// ---------------------------------------------------------------------------
+
+const MERGE_RATE_REL = "renderer/structured-prompts/bug_solving/scripts/merge-rate.ts";
+
+interface MergeRatingViaUIArgs {
+  repo: string;
+  changed: string[];
+  phase: "all-at-once" | "sequential";
+  label: string;
+  /** overlay dir holding the merged renders (`<dir>/thumbs/<sid>.png`). */
+  mergedDir: string | null;
+  /** the approved-reference PNG shown as "original" for a slide. */
+  approvedPng: (sid: string) => string | null;
+  timeoutMs: number;
+}
+
+/**
+ * Boot the merge rating UI and BLOCK until the human rates every changed slide
+ * (or presses "reject all & stop"), then return their verdict. Assembles a
+ * per-slide pair (merged "test" vs approved "original") into an input file, execs
+ * the blocking `merge-rate.ts` (which boots rating-server.ts + waits + writes the
+ * verdict), and parses it. A rating that can't be collected is treated as
+ * reject-all & stop so nothing is promoted without an explicit human OK. See
+ * docs/merge-flow.drawio (states ALL_AT_ONCE_RATE / SEQ_RATE).
+ */
+function mergeRatingViaUI(a: MergeRatingViaUIArgs): MergeRatingVerdict {
+  const dir = mkdtempSync(join(tmpdir(), "sp-merge-rate-"));
+  const inputPath = join(dir, "input.json");
+  const outPath = join(dir, "verdict.json");
+  const slides = a.changed.map((sid) => ({
+    slide: sid,
+    test: a.mergedDir ? join(a.mergedDir, "thumbs", `${sid}.png`) : null,
+    original: a.approvedPng(sid),
+  }));
+  writeFileSync(inputPath, JSON.stringify({ phase: a.phase, label: a.label, slides }, null, 2));
+  try {
+    execSync(
+      `cd ${JSON.stringify(a.repo)} && npx tsx ${JSON.stringify(join(a.repo, MERGE_RATE_REL))} ${JSON.stringify(inputPath)} ${JSON.stringify(outPath)}`,
+      { stdio: "inherit", timeout: a.timeoutMs },
+    );
+    const v = JSON.parse(readFileSync(outPath, "utf8")) as Partial<MergeRatingVerdict>;
+    return { green: v.green ?? [], red: v.red ?? [], stopAll: !!v.stopAll };
+  } catch (e) {
+    console.error(`[merge-rate] rating UI failed (${(e as Error).message}) — treating as reject-all & stop`);
+    return { green: [], red: a.changed, stopAll: true };
+  } finally {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* */ }
+  }
 }
 
 // ---------------------------------------------------------------------------

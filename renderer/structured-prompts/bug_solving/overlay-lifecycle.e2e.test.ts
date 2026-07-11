@@ -34,7 +34,7 @@ import { realLlmMergeOps, ledgerDemote, type GreenCluster } from "./llm-merge.js
 import { writeStabilityJson } from "./stability.js";
 import { detectPriorState, decideStartup } from "./startup-detection.js";
 import { resumeMerge } from "./resume-merge.js";
-import { mockLlm, mergeEditor, recordingFromContent, contentRecord, greenCluster, runRealMerge } from "./test-support.js";
+import { mockLlm, mergeEditor, recordingFromContent, contentRecord, greenCluster, runRealMerge, mergeRateMock, verdictGreenAll, verdictRed } from "./test-support.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = "/workspaces/sashaslides";
@@ -191,7 +191,10 @@ async function main(): Promise<void> {
     // all-at-once fails → sequential: A clean (kept), B rolled back + REAL-demoted.
     const fixMap = { slide_01: "FIX_A", slide_02: "FIX_B", slide_03: "FIX_B" };
     const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: BASE_FILE, fixMap, tag: "R:C1", lgtm: (sid) => sid === "slide_02" ? contentRecord("slide_02", BASE_FILE, fixMap) : undefined });
-    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
+    // (H) human REDS the rippled non-target slide_03 whenever it surfaces (all-together
+    // → route to sequential; fork B → drop). Fork A surfaces nothing → auto-kept.
+    const rating = mergeRateMock(({ changed }) => verdictRed(changed.filter((s) => s === "slide_03"), changed));
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording, rate: rating.rate });
     try {
       const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER_ROOT, llm: mockLlm(mergeEditor().reply, { tag: "L:merge-edit" }) });
       assert.equal(report!.mode, "sequential", "fell back to sequential");
@@ -231,7 +234,10 @@ async function main(): Promise<void> {
     mk("taskC", false, ["slide_03"], ["slide_03"]);
     // REAL gate: A+B fold clean all-at-once (slide_03 untouched by FIX_A/FIX_B).
     const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: BASE_FILE, fixMap: { slide_01: "FIX_A", slide_02: "FIX_B" }, tag: "R:R1" });
-    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
+    // A+B fold clean (nothing differs from approved) → auto-accepted, human not asked;
+    // green-all seam is defensive in case a slide surfaces.
+    const rating = mergeRateMock(({ changed }) => verdictGreenAll(changed));
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording, rate: rating.rate });
     try {
       const res = await resumeMerge({
         repo: base, branchesRoot: UPPER_ROOT, sharedRoot: SHARED, upperRoot: UPPER_ROOT,
