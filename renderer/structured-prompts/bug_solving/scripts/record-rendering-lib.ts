@@ -157,33 +157,36 @@ async function screenshotFixtures(slides: string[], fixturesDir: string, outDir:
     console.log(`  screenshots: all ${slides.length} present, skipping`);
     return;
   }
-  const conc = chromeConcurrency();
-  console.log(`  screenshots: capturing ${missing.length}/${slides.length} (rest cached, concurrency=${conc})...`);
-  await pLimit(conc, missing, async (id) => {
-    const htmlPath = resolve(fixturesDir, `${id}.html`);
-    const outPath = join(outDir, `${id}.png`);
+  const conc = Math.min(chromeConcurrency(), missing.length);
+  console.log(`  screenshots: capturing ${missing.length}/${slides.length} (rest cached, concurrency=${conc}, tab-reuse)...`);
+  // Each worker owns ONE reused tab for its whole lifetime: navigate → capture per
+  // slide, close the tab ONCE at the end. No per-slide CDP.New/CDP.Close churn (the
+  // tab-leak + Chrome-wedge source). A shared cursor hands the next slide to
+  // whichever worker is free; the finally always closes the tab.
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
     const target = await CDP.New({ port: PORT, url: "about:blank" });
     const client = await CDP({ target, port: PORT });
     try {
       const { Page, Emulation } = client;
       await Page.enable();
-      await Emulation.setDeviceMetricsOverride({
-        width: 1280, height: 720, deviceScaleFactor: 2, mobile: false,
-      });
-      await Page.navigate({ url: "file://" + htmlPath });
-      await Page.loadEventFired();
-      await sleep(300);
-      const { data } = await Page.captureScreenshot({
-        format: "png",
-        clip: { x: 0, y: 0, width: 1280, height: 720, scale: 1 },
-      });
-      writeFileSync(outPath, Buffer.from(data, "base64"));
-      console.log(`    ${id} → ${outPath}`);
+      await Emulation.setDeviceMetricsOverride({ width: 1280, height: 720, deviceScaleFactor: 2, mobile: false });
+      for (let i = cursor++; i < missing.length; i = cursor++) {
+        const id = missing[i];
+        const outPath = join(outDir, `${id}.png`);
+        await Page.navigate({ url: "file://" + resolve(fixturesDir, `${id}.html`) });
+        await Page.loadEventFired();
+        await sleep(300);
+        const { data } = await Page.captureScreenshot({ format: "png", clip: { x: 0, y: 0, width: 1280, height: 720, scale: 1 } });
+        writeFileSync(outPath, Buffer.from(data, "base64"));
+        console.log(`    ${id} → ${outPath}`);
+      }
     } finally {
-      await client.close();
-      await CDP.Close({ port: PORT, id: target.id });
+      try { await client.close(); } catch { /* */ }
+      try { await CDP.Close({ port: PORT, id: target.id }); } catch { /* */ }
     }
-  });
+  };
+  await Promise.all(Array.from({ length: conc }, () => worker()));
 }
 
 /** Google Drive + Slides oauth2 client built from the project's saved tokens. */
