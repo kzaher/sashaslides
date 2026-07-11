@@ -816,21 +816,35 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
 
   // Render the merged deck INSIDE the workspace overlay, once per detect call.
   // Track the LAST render dir so the rating UI can show the merged thumbnails.
+  // record-rendering hits Google/Chrome and can flake transiently ("socket hang
+  // up" when Chrome is overloaded), so RETRY. An empty render must NEVER be passed
+  // through as records: recordFromDir would then read nothing → every slide reads
+  // as "changed" → the human is asked to rate all 34 phantom slides. So after the
+  // retries, THROW — a loud abort (re-runnable) beats a meaningless rating round.
+  const RENDER_ATTEMPTS = 3;
   let mergeSeq = 0;
   let lastMergeRenderDir: string | null = null;
   const renderMergeDeck = (ws: CowWorkspace): ((slideId: string) => RenderRecord) => {
-    const { cmd, outDir } = mergeRenderCommand(ws, {
-      recRel: REC_REL, fixturesDir, slidesCsv: csv(), outRel: `.gate-render-${mergeSeq++}`, title: `llm-merge-post-${Date.now()}`,
-    });
-    lastMergeRenderDir = outDir;
-    const r = ws.runShell(cmd);
-    // Non-fatal but loud: an empty render means the gate compares base against
-    // NOTHING and rips every slide. This is exactly the bug that silently made
-    // every merge fail — surface it instead of returning empty records.
-    if (r.code !== 0 || !existsSync(join(outDir, "pptx"))) {
-      console.error(`[llm-merge] merge render produced NO output (exit ${r.code}); read dir=${outDir}\n${(r.stderr || "").split("\n").slice(-8).join("\n")}`);
+    const seq = mergeSeq++;
+    let lastErr = "";
+    for (let attempt = 1; attempt <= RENDER_ATTEMPTS; attempt++) {
+      const { cmd, outDir } = mergeRenderCommand(ws, {
+        recRel: REC_REL, fixturesDir, slidesCsv: csv(), outRel: `.gate-render-${seq}-a${attempt}`, title: `llm-merge-post-${Date.now()}-a${attempt}`,
+      });
+      const r = ws.runShell(cmd);
+      if (r.code === 0 && existsSync(join(outDir, "pptx"))) {
+        lastMergeRenderDir = outDir;
+        return (slideId: string) => recordFromDir(outDir, slideId);
+      }
+      lastErr = (r.stderr || "").split("\n").slice(-6).join("\n");
+      console.error(`[llm-merge] merge render attempt ${attempt}/${RENDER_ATTEMPTS} produced NO output (exit ${r.code}); read dir=${outDir}\n${lastErr}`);
+      if (attempt < RENDER_ATTEMPTS) ws.runShell("sleep 4");   // brief backoff for a transient Chrome/Google flake
     }
-    return (slideId: string) => recordFromDir(outDir, slideId);
+    throw new Error(
+      `[llm-merge] merge render produced no output after ${RENDER_ATTEMPTS} attempts — REFUSING to treat an empty ` +
+        `render as "all slides changed". Check that Chrome on :9222 is healthy (leaked chrome procs → "socket hang up"): ` +
+        `\`pkill -f "remote-debugging-port=9222"\` then relaunch Chrome, and re-run \`-- --continue\`.\nLast render stderr:\n${lastErr}`,
+    );
   };
 
   const loadStabilityOrFallback = (): StabilityClassification => {
