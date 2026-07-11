@@ -98,9 +98,14 @@ export async function extractFromHtml(
   const scale = clampOversampling(oversampling);
   const absPath = resolve(htmlPath);
   const tab = await CDP.New({ port: CDP_PORT, url: `file://${absPath}` });
+  // The tab MUST be closed even if extraction throws (socket hang up, font
+  // timeout, …) — an orphaned tab per failed render is what leaked Chrome to
+  // dozens of procs and started dropping WebSockets. So everything below runs in
+  // a try/finally that always closes the client + tab.
+  let client: Awaited<ReturnType<typeof CDP>> | null = null;
+  try {
   await sleep(1200);
-
-  const client = await CDP({ target: tab, port: CDP_PORT });
+  client = await CDP({ target: tab, port: CDP_PORT });
   const { Page, Runtime, Emulation } = client;
   await Page.enable();
   await Runtime.enable();
@@ -223,9 +228,11 @@ export async function extractFromHtml(
     }
   }
 
-  await client.close();
-  await CDP.Close({ port: CDP_PORT, id: tab.id });
   return { extraction: retypedExtraction, visualPngs };
+  } finally {
+    try { if (client) await client.close(); } catch { /* */ }
+    try { await CDP.Close({ port: CDP_PORT, id: tab.id }); } catch { /* */ }
+  }
 }
 
 // --- File-based wrappers around the pure in-zip injection helpers --------
