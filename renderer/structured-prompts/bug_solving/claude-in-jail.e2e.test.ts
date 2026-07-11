@@ -16,8 +16,8 @@ import { execSync } from "child_process";
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { createCowWorkspace, cleanupAllCowWorkspaces } from "../../../cow-workspace/cow-workspace.js";
 
-const SH = resolve(dirname(fileURLToPath(import.meta.url)), "../../../cow-workspace/workspace.sh");
 let passed = 0, failed = 0;
 const ok = (n: string, c: boolean, e = "") => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.log(`  ✗ ${n}${e ? ` — ${e}` : ""}`); } };
 
@@ -37,21 +37,17 @@ function main() {
   const base = mkdtempSync("/overlays/cij-base-");
   writeFileSync(join(base, "NOTES.md"), "# Notes\n\nStatus: pending\n");
   const root = `/overlays/cij-${process.pid}`;
-  const env = {
-    ...process.env,
-    COW_WORKSPACE_ROOT: root, COW_WORKSPACE_BASE: base,
-    COW_WORKSPACE_JAIL: "1", COW_WORKSPACE_OVERLAY_EXTRA: "/home/node/.claude",
-    IS_SANDBOX: "1",
-  } as NodeJS.ProcessEnv;
   const id = "cij";
+  const ws = createCowWorkspace({ base, upperRoot: root, id, jail: true, overlayExtra: ["/home/node/.claude"] });
   try {
-    execSync(`bash "${SH}" cleanup-all`, { env, stdio: "ignore" });
-    // Run claude on a plain editing task INSIDE the jail. `env IS_SANDBOX=1` is
-    // belt-and-suspenders (also set in the parent env).
-    const cmd = `bash "${SH}" run ${id} env IS_SANDBOX=1 claude -p --model haiku --dangerously-skip-permissions ` +
-      JSON.stringify("In NOTES.md, change the Status line from 'pending' to 'done'. Just make that one edit.");
+    cleanupAllCowWorkspaces(root);
+    // Run claude on a plain editing task INSIDE the jail (jail:true). `env
+    // IS_SANDBOX=1` marks the child as sandboxed.
     let ran = true;
-    try { execSync(cmd, { env, stdio: "ignore", timeout: 180_000 }); } catch { ran = false; }
+    try {
+      ran = ws.run("env", ["IS_SANDBOX=1", "claude", "-p", "--model", "haiku", "--dangerously-skip-permissions",
+        "In NOTES.md, change the Status line from 'pending' to 'done'. Just make that one edit."]).code === 0;
+    } catch { ran = false; }
 
     const upperNotes = `${root}/${id}/upper/NOTES.md`;
     const upper = existsSync(upperNotes) ? readFileSync(upperNotes, "utf8") : "";
@@ -61,7 +57,7 @@ function main() {
     ok("claude MUTATED the file (Status → done) — proof it functioned in the jail", /status:\s*done/i.test(upper), upper.slice(0, 80));
     ok("the mutation was CONTAINED (real base still 'pending')", /status:\s*pending/i.test(baseNotes));
   } finally {
-    try { execSync(`bash "${SH}" cleanup-all`, { env, stdio: "ignore" }); } catch { /* */ }
+    try { cleanupAllCowWorkspaces(root); } catch { /* */ }
     rmSync(base, { recursive: true, force: true });
   }
 

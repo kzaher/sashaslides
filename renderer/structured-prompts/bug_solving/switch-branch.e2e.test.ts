@@ -26,9 +26,9 @@ import { execSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
+import { createCowWorkspace, cleanupAllCowWorkspaces } from "../../../cow-workspace/cow-workspace.js";
 
 const REPO = "/workspaces/sashaslides";
-const SH = `${REPO}/cow-workspace/workspace.sh`;
 const ROOT = "/overlays/switch-branch-e2e"; // isolated root — never touches a live run
 const CANARY = "renderer/html2slides/convert-pptx.ts"; // a real tracked converter file
 const BRANCH = `sb-e2e-${process.pid}`;
@@ -44,9 +44,6 @@ let passed = 0, failed = 0;
 function ok(name: string, cond: boolean, extra = "") {
   if (cond) { passed++; console.log(`  ✓ ${name}`); } else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
 }
-function sh(cmd: string): string {
-  return execSync(cmd, { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-}
 
 function overlayAvailable(): string | null {
   if (!existsSync("/overlays")) return "no /overlays volume";
@@ -61,7 +58,7 @@ async function main() {
   if (skip) { console.log(`  ⚠ SKIP — ${skip} (needs SYS_ADMIN + /overlays). Not a failure.`); console.log("\n=== Results: SKIPPED ===\n"); return; }
 
   // clean slate + capture the exact base content of the canary.
-  try { sh(`bash "${SH}" cleanup-all`); } catch { /* */ }
+  try { cleanupAllCowWorkspaces(ROOT); } catch { /* */ }
   const baseCanary = readFileSync(resolve(REPO, CANARY), "utf8");
 
   // Ephemeral monitor port (0 → OS-assigned) so we never bind :4711. No persist
@@ -88,7 +85,7 @@ async function main() {
       tail.includes(MARKER), `tail=${JSON.stringify(tail.trim())}`);
 
     // (a) the edit is a real tracked change in the branch's upper layer.
-    const changed = sh(`bash "${SH}" changed ${BRANCH}`).trim().split("\n").filter(Boolean);
+    const changed = createCowWorkspace({ base: REPO, upperRoot: ROOT, id: BRANCH }).changed();
     ok("(a) switchBranch edit shows in `overlay-branch.sh changed`",
       changed.includes(CANARY), `changed=${JSON.stringify(changed)}`);
 
@@ -100,7 +97,7 @@ async function main() {
     ok("(engine) switchBranch graph ran to completion", false, (e as Error)?.message ?? String(e));
   } finally {
     try { await engine.shutdown(); } catch { /* */ }
-    try { sh(`bash "${SH}" cleanup-all`); } catch { /* */ }
+    try { cleanupAllCowWorkspaces(ROOT); } catch { /* */ }
     // hard-assert we left the base working tree exactly as we found it.
     const finalCanary = readFileSync(resolve(REPO, CANARY), "utf8");
     ok("(final) base working tree restored byte-for-byte", finalCanary === baseCanary);
