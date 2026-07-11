@@ -828,18 +828,25 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
         recRel: REC_REL, fixturesDir, slidesCsv: csv(), outRel: `.gate-render-${seq}-a${attempt}`, title: `llm-merge-post-${Date.now()}-a${attempt}`,
       });
       const r = ws.runShell(cmd);
-      if (r.code === 0 && existsSync(join(outDir, "pptx"))) {
+      // ASSERT a COMPLETE render — the gate compares THUMBNAILS (pixels), so a
+      // pptx-only render (Google scrape produced no thumbs) must NOT be accepted:
+      // recordFromDir would then read empty pixels → every slide reads "changed" →
+      // the human is asked to rate all 34 phantom slides (the exact bug we hit).
+      const thumbsDir = join(outDir, "thumbs");
+      const wantThumbs = csv().split(",").filter(Boolean).length;
+      const haveThumbs = existsSync(thumbsDir) ? readdirSync(thumbsDir).filter((f) => /^slide_\d+\.png$/.test(f)).length : 0;
+      if (r.code === 0 && haveThumbs >= wantThumbs) {
         lastMergeRenderDir = outDir;
         return (slideId: string) => recordFromDir(outDir, slideId);
       }
-      lastErr = (r.stderr || "").split("\n").slice(-6).join("\n");
-      console.error(`[llm-merge] merge render attempt ${attempt}/${RENDER_ATTEMPTS} produced NO output (exit ${r.code}); read dir=${outDir}\n${lastErr}`);
+      lastErr = `exit=${r.code} thumbs=${haveThumbs}/${wantThumbs}\n${(r.stderr || "").split("\n").slice(-6).join("\n")}`;
+      console.error(`[llm-merge] merge render attempt ${attempt}/${RENDER_ATTEMPTS} INCOMPLETE (exit ${r.code}, thumbs ${haveThumbs}/${wantThumbs}); read dir=${outDir}\n${lastErr}`);
       if (attempt < RENDER_ATTEMPTS) ws.runShell("sleep 4");   // brief backoff for a transient Chrome/Google flake
     }
     throw new Error(
-      `[llm-merge] merge render produced no output after ${RENDER_ATTEMPTS} attempts — REFUSING to treat an empty ` +
-        `render as "all slides changed". Check that Chrome on :9222 is healthy (leaked chrome procs → "socket hang up"): ` +
-        `\`pkill -f "remote-debugging-port=9222"\` then relaunch Chrome, and re-run \`-- --continue\`.\nLast render stderr:\n${lastErr}`,
+      `[llm-merge] merge render did not produce a complete thumbnail set after ${RENDER_ATTEMPTS} attempts — REFUSING ` +
+        `to treat an empty/partial render as "all slides changed". Chrome on :9222 healthy? (leaked tabs → wedge): ` +
+        `\`pkill -9 -e chrome\` then relaunch one, and re-run \`-- --continue\`.\nLast: ${lastErr}`,
     );
   };
 
