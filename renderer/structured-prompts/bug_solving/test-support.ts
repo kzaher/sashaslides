@@ -218,10 +218,11 @@ export function mergeRateMock(decide: (c: { phase: "all-at-once" | "sequential";
     rate: (a) => { const c = { phase: a.phase, label: a.label, changed: [...a.changed] }; calls.push(c); return decide(c); },
   };
 }
-/** Convenience verdicts. */
-export const verdictGreenAll = (changed: string[]): MergeRatingVerdict => ({ green: [...changed], red: [], stopAll: false });
-export const verdictRed = (red: string[], changed: string[]): MergeRatingVerdict => ({ green: changed.filter((s) => !red.includes(s)), red: [...red], stopAll: false });
-export const verdictStopAll = (changed: string[]): MergeRatingVerdict => ({ green: [], red: [...changed], stopAll: true });
+/** Convenience verdicts (the human's per-slide good/bad). */
+export const verdictGreenAll = (changed: string[]): MergeRatingVerdict => ({ green: [...changed], red: [] });
+export const verdictRed = (red: string[], changed: string[]): MergeRatingVerdict => ({ green: changed.filter((s) => !red.includes(s)), red: [...red] });
+/** The "Reject ALL" button = red every shown slide. */
+export const verdictStopAll = (changed: string[]): MergeRatingVerdict => ({ green: [], red: [...changed] });
 
 // ───────── run a merge with ONLY the LLM mocked at the engine level ──────────
 /** Execute `llmMerge` on a REAL engine whose IO mocks only the LLM. `ops` should

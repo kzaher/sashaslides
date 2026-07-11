@@ -55,6 +55,12 @@ let candidateMode = false;
 // This flag is passed ONLY by the merge/verdict rating boot (the per-fork gate);
 // the normal rate:complex / rate:basics invocations stay editable.
 let readOnly = false;
+// --reject-all-button: show a single "Reject ALL & stop" button that marks EVERY
+// filtered slide BAD in one click (a convenience when a whole batch is wrong, e.g.
+// 20 slides — no per-slide clicking). Passed ONLY by the MERGE rating boot; it is
+// NOT a special verdict — it just reds every shown slide, and --exit-when-all-rated
+// then closes the UI. Default (no flag) = hidden.
+let rejectAllButton = false;
 // --notify-cmd: a shell command executed ONCE when this rating UI comes up, so a
 // human is actively pinged that a cluster is waiting to be rated. Configurable via
 // the flag or BUG_SOLVING_NOTIFY_CMD. Tokens {url} {port} {title} {slides} {dir}
@@ -76,6 +82,7 @@ for (let i = 0; i < args.length; i++) {
   else if (v === "--history-dir") historyDir = resolve(args[++i]);
   else if (v === "--candidate") candidateMode = true;
   else if (v === "--read-only") readOnly = true;
+  else if (v === "--reject-all-button") rejectAllButton = true;
   else if (v === "--notify-cmd") notifyCmd = args[++i];
 }
 
@@ -883,6 +890,7 @@ ${readOnly ? "" : `<div class="comment-box">
   <button class="btn btn-good" onclick="rate('good')">Good ✓</button>
   <button class="btn btn-bad" onclick="rate('bad')">Bad ✗</button>
   <button class="btn btn-skip" onclick="navigate(1)">Skip →</button>
+  ${rejectAllButton ? `<button class="btn btn-bad" style="background:#5a1616" onclick="rejectAllStop()" title="Mark EVERY shown slide Bad in one click, then close">Reject ALL &amp; stop ✗✗</button>` : ""}
 </div>
 <!-- bug_solving task-scoped reveal buttons. Hidden unless the server was
      started with --task-analysis / --task-diffs. Each button toggles a
@@ -1156,6 +1164,17 @@ ${readOnly ? `  // READ-ONLY: no comment box — the comment DISPLAYS read-only 
     document.getElementById('showAnalysisBtn').classList.remove('active');
     document.getElementById('showDiffAnalysisBtn').classList.remove('active');
   }
+}
+
+async function rejectAllStop() {
+  // Convenience: mark EVERY filtered slide Bad in one shot (no per-slide clicks),
+  // then close. --exit-when-all-rated sees them all rated and exits the server.
+  if (!confirm('Mark ALL ' + comparisons.length + ' shown slide(s) BAD and close?')) return;
+  for (const c of comparisons) {
+    await fetch('/api/rate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id, status: 'bad' }) }).catch(() => {});
+    c.status = 'bad';
+  }
+  document.body.innerHTML = '<h1 style="padding:40px;font-family:system-ui">All ' + comparisons.length + ' slide(s) marked Bad. Closing…</h1>';
 }
 
 ${readOnly ? `async function rate(status) {
