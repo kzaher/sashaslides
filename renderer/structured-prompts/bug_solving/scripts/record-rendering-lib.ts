@@ -118,6 +118,27 @@ function chromeConcurrency(): number {
 }
 
 /**
+ * Close EVERY open page in Chrome before a render, so it starts from a clean slate.
+ * This breaks the leak CASCADE: once a socket drops mid-batch, the render's own
+ * per-slide CDP.Close calls fail (dead connection) and its tabs orphan; those pile
+ * up across renders/retries until Chrome is overloaded and drops MORE sockets. A
+ * fresh render can't clean the previous one's orphans via a dead connection — but
+ * it CAN reap them here through a fresh connection. Uses a fresh CDP List/Close, so
+ * it's independent of any wedged connection. GATED on RECORD_REAP_TABS=1 (set only
+ * by the SEQUENTIAL merge/baseline renders) so it never reaps a PARALLEL solve
+ * render's in-flight tabs.
+ */
+async function reapAllPages(port: number): Promise<void> {
+  if (process.env.RECORD_REAP_TABS !== "1") return;
+  try {
+    const list = (await CDP.List({ port })) as Array<{ id: string; type: string }>;
+    const pages = list.filter((t) => t.type === "page");
+    for (const t of pages) { try { await CDP.Close({ port, id: t.id }); } catch { /* */ } }
+    if (pages.length) console.log(`  [reap] closed ${pages.length} pre-existing tab(s) for a clean render`);
+  } catch { /* chrome down / no targets — fine */ }
+}
+
+/**
  * Per-slide pptx (--no-upload). Built with bounded concurrency (see
  * `chromeConcurrency`) — convert-pptx opens a fresh Chrome tab per slide for DOM
  * extraction. Idempotent: skips slides whose .pptx is already present.
@@ -341,6 +362,10 @@ export async function recordRendering(opts: RecordRenderingOpts): Promise<Record
   // Full mode needs Google — verify the token is live BEFORE rendering, so a dead
   // token fails here with a clear message (not silently as an empty thumb set).
   if (mode === "full") await assertGoogleAuthFresh();
+
+  // Start from a clean Chrome (reap orphaned tabs from a prior crashed/wedged
+  // render) so this render can't inherit the leak cascade. Gated (see reapAllPages).
+  await reapAllPages(9222);
 
   await recordPptx(slides, pptxDir, fixtures);
   assertComplete(pptxDir, "pptx", "pptx");

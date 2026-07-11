@@ -730,7 +730,7 @@ export function mergeRenderCommand(
   const recFromRenderer = opts.recRel.replace(/^renderer\//, "");
   const mode = opts.mode ?? "full";
   const cmd =
-    `cd renderer && RECORD_CONCURRENCY=1 npx tsx ${JSON.stringify(recFromRenderer)} ` +
+    `cd renderer && RECORD_REAP_TABS=1 RECORD_CONCURRENCY=1 npx tsx ${JSON.stringify(recFromRenderer)} ` +
     `--mode ${mode} --fixtures ${JSON.stringify(opts.fixturesDir)} --slides ${JSON.stringify(opts.slidesCsv)} ` +
     `--title ${JSON.stringify(opts.title)} --out ${JSON.stringify("../" + opts.outRel)}`;
   return { cmd, outDir: join(ws.upperDir(), opts.outRel) };
@@ -783,7 +783,7 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
       baselineDir = join(scratch, "baseline");
       mkdirSync(baselineDir, { recursive: true });
       execRepo(
-        `cd "${join(repo, "renderer")}" && RECORD_CONCURRENCY=1 npx tsx "${join(repo, REC_REL)}" ` +
+        `cd "${join(repo, "renderer")}" && RECORD_REAP_TABS=1 RECORD_CONCURRENCY=1 npx tsx "${join(repo, REC_REL)}" ` +
           `--mode full --fixtures "${fixturesDir}" --slides "${csv()}" --title "llm-merge-base-${Date.now()}" --out "${baselineDir}"`,
         timeoutMs,
       );
