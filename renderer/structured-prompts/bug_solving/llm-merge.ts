@@ -664,6 +664,32 @@ export interface MergeRenderSeam {
 
 const REC_REL = "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts";
 
+/**
+ * Build the in-overlay merge-render command + the HOST path its output lands at.
+ * Exported so a test can pin the two path-handshake invariants that silently
+ * broke every merge (empty renders → total ripple):
+ *   1. NO doubled `renderer/`: the command `cd renderer` first, so the script
+ *      path must be relative to `renderer/` — REC_REL's leading `renderer/` is
+ *      stripped (else `renderer/renderer/...` → ERR_MODULE_NOT_FOUND).
+ *   2. Output is written to `../<outRel>` — i.e. the overlay's repo root — which
+ *      copies-up into the overlay UPPER, so it's HOST-visible at
+ *      `<upperDir>/<outRel>`, which is exactly where we read it. (Writing to an
+ *      absolute /tmp path from inside the overlay lands in the namespace-local
+ *      tree that is torn down when runShell returns → nothing to read.)
+ */
+export function mergeRenderCommand(
+  ws: CowWorkspace,
+  opts: { recRel: string; fixturesDir: string; slidesCsv: string; outRel: string; title: string; mode?: string },
+): { cmd: string; outDir: string } {
+  const recFromRenderer = opts.recRel.replace(/^renderer\//, "");
+  const mode = opts.mode ?? "full";
+  const cmd =
+    `cd renderer && RECORD_CONCURRENCY=1 npx tsx ${JSON.stringify(recFromRenderer)} ` +
+    `--mode ${mode} --fixtures ${JSON.stringify(opts.fixturesDir)} --slides ${JSON.stringify(opts.slidesCsv)} ` +
+    `--title ${JSON.stringify(opts.title)} --out ${JSON.stringify("../" + opts.outRel)}`;
+  return { cmd, outDir: join(ws.upperDir(), opts.outRel) };
+}
+
 /** Read a single slide's render record out of a record-rendering `--out` dir:
  *  Google thumbnail (pixel), slide XML, and embedded rendered-parts hash. */
 function recordFromDir(dir: string, slideId: string): RenderRecord {
@@ -741,13 +767,17 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
   // Render the merged deck INSIDE the workspace overlay, once per retest call.
   let mergeSeq = 0;
   const renderMergeDeck = (ws: CowWorkspace): ((slideId: string) => RenderRecord) => {
-    const postOut = join(scratch, `post-${ws.id}-${mergeSeq++}`);
-    mkdirSync(postOut, { recursive: true });
-    ws.runShell(
-      `cd renderer && RECORD_CONCURRENCY=1 npx tsx "${REC_REL}" ` +
-        `--mode full --fixtures "${fixturesDir}" --slides "${csv()}" --title "llm-merge-post-${Date.now()}" --out "$PWD/../${postOut}"`,
-    );
-    return (slideId: string) => recordFromDir(postOut, slideId);
+    const { cmd, outDir } = mergeRenderCommand(ws, {
+      recRel: REC_REL, fixturesDir, slidesCsv: csv(), outRel: `.gate-render-${mergeSeq++}`, title: `llm-merge-post-${Date.now()}`,
+    });
+    const r = ws.runShell(cmd);
+    // Non-fatal but loud: an empty render means the gate compares base against
+    // NOTHING and rips every slide. This is exactly the bug that silently made
+    // every merge fail — surface it instead of returning empty records.
+    if (r.code !== 0 || !existsSync(join(outDir, "pptx"))) {
+      console.error(`[llm-merge] merge render produced NO output (exit ${r.code}); read dir=${outDir}\n${(r.stderr || "").split("\n").slice(-8).join("\n")}`);
+    }
+    return (slideId: string) => recordFromDir(outDir, slideId);
   };
 
   const loadStabilityOrFallback = (): StabilityClassification => {
