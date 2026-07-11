@@ -1,12 +1,16 @@
 /**
  * merge-e2e.test.ts — the FULL merge process end-to-end through the PRODUCTION
  * seam `realLlmMergeOps`, obeying the strict mock policy (see test-support.ts):
- * the ONLY mocked things are (H) the human green/red rating, (L) the LLM compose
- * call, and (R) the Google-Slides recording. EVERYTHING else is REAL — the engine
- * runs on a REAL IO (real bash/git/fs/clock via `mockLlm`, which intercepts only
- * the claude spawn), REAL COW overlay forks, the REAL merged-file promote onto the
- * base tree, the REAL dual-class regression gate reading a REAL stability.json, the
- * REAL all-at-once→sequential fallback, and the REAL demote ledger (candidates.json).
+ * the ONLY mocked things are (H) the human green/red rating, (L) the LLM
+ * edit/verify call, and (R) the Google-Slides recording. EVERYTHING else is REAL —
+ * the engine runs on a REAL IO (real bash/git/fs/clock via `mockLlm`, which
+ * intercepts only the claude spawn), REAL COW overlay forks, the REAL `git
+ * merge-file` 3-way merge, the REAL merged-file promote onto the base tree, the
+ * REAL dual-class regression gate reading a REAL stability.json, the REAL
+ * all-at-once→sequential fallback, and the REAL demote ledger (candidates.json).
+ * The (L) mock stands in for the model's AGENTIC edit: it reads EDIT_TARGET from
+ * the prompt and resolves any diff3 conflict markers on disk (a clean merge is
+ * left byte-exact — case 10 asserts the model makes NO edit).
  *
  * Terminology: a fork's fold either KEEPS its stability (binary/pixel for a
  * pixel-perfect slide; xml + rendered for an xml-stable slide) or it doesn't — a
@@ -40,7 +44,7 @@ import { createCowWorkspace } from "../../../cow-workspace/cow-workspace.js";
 import { realLlmMergeOps, type MergeRenderSeam } from "./llm-merge.js";
 import { writeStabilityJson } from "./stability.js";
 import {
-  mockLlm, mergeComposer, fencedBlocks, recordingFromContent, recordingSeam, contentRecord,
+  mockLlm, mergeEditor, recordingFromContent, recordingSeam, contentRecord,
   greenCluster, writeRatingOutcome, runRealMerge,
 } from "./test-support.js";
 
@@ -101,7 +105,8 @@ async function main(): Promise<void> {
     const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
     const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: BASE_FILE, fixMap, tag: "R:clean" });
     const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
-    const llm = mockLlm(mergeComposer, { tag: "L:merge-compose" });
+    const editor = mergeEditor();
+    const llm = mockLlm(editor.reply, { tag: "L:merge-edit" });
     try {
       const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
       assert.equal(threw, null);
@@ -109,10 +114,14 @@ async function main(): Promise<void> {
       assert.deepEqual(report!.accepted.sort(), ["task-a", "task-b"]);
       const merged = readFileSync(join(base, CONVERTER_REL), "utf8");
       assert.ok(/FIX_A/.test(merged) && /FIX_B/.test(merged), "promoted base has BOTH fixes");
+      assert.ok(!/<<<<<<< |=======|>>>>>>> /.test(merged), "no conflict markers left in the promoted file");
       assert.equal(candStatus(historyDir, "slide_01"), undefined);
       assert.equal(candStatus(historyDir, "slide_02"), undefined);
+      // Both forks append at EOF → the 3-way merge CONFLICTS → the model (mock)
+      // resolved the markers on disk (the agentic edit path).
+      assert.ok(editor.edits.some((e) => e.conflicted), "3-way merge conflicted (both append EOF) → LLM resolved it");
       // ONLY llm + recording were mocked (both tagged); nothing else.
-      assert.ok(llm.seen.every((s) => s.tag === "L:merge-compose") && llm.seen.length >= 1, "only tagged LLM calls");
+      assert.ok(llm.seen.every((s) => s.tag === "L:merge-edit") && llm.seen.length >= 1, "only tagged LLM calls");
       assert.ok(recording.calls.every((c) => c.tag === "R:clean") && recording.calls.length >= 1, "only tagged recording calls");
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
@@ -127,7 +136,8 @@ async function main(): Promise<void> {
     // (A clean); diverges once B folds FIX_B.
     const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: BASE_FILE, fixMap, tag: "R:ripple", lgtm: (sid) => sid === "slide_02" ? contentRecord("slide_02", BASE_FILE, fixMap) : undefined });
     const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
-    const llm = mockLlm(mergeComposer, { tag: "L:merge-compose" });
+    const editor = mergeEditor();
+    const llm = mockLlm(editor.reply, { tag: "L:merge-edit" });
     try {
       const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
       assert.equal(threw, null);
@@ -137,8 +147,10 @@ async function main(): Promise<void> {
       const merged = readFileSync(join(base, CONVERTER_REL), "utf8");
       assert.ok(/FIX_A/.test(merged) && !/FIX_B/.test(merged), "base has A, not B");
       assert.equal(candStatus(historyDir, "slide_02"), "bad", "REAL ledger: B's slide demoted");
-      const lastBase = fencedBlocks(llm.seen[llm.seen.length - 1].prompt)[0] ?? "";
-      assert.ok(/FIX_A/.test(lastBase), "fork B's LLM base already carries A's accepted fold (serial mutation)");
+      // Serial mutation: when fork B was folded (the LAST edit), the 3-way-merged
+      // target it was handed already carried A's accepted fold.
+      const lastEdit = editor.edits[editor.edits.length - 1];
+      assert.ok(/FIX_A/.test(lastEdit.before), "fork B's 3-way target already carries A's accepted fold (serial mutation)");
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
@@ -150,7 +162,7 @@ async function main(): Promise<void> {
     const green = [greenCluster("task-a", wsA, ["slide_01"])];
     const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: BASE_FILE, fixMap, tag: "R:pixviol", lgtm: (sid) => sid === "slide_01" ? { pixelHash: "APPROVED_UNREACHABLE", xmlHash: "APPROVED_UNREACHABLE", renderedPartsHash: "APPROVED_UNREACHABLE" } : undefined });
     const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
-    const llm = mockLlm(mergeComposer, { tag: "L:merge-compose" });
+    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
     try {
       const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
       assert.equal(threw, null);
@@ -173,7 +185,7 @@ async function main(): Promise<void> {
       merge: (_ws, sid) => sid === "slide_02" ? { xmlHash: "X02", renderedPartsHash: "R_MERGED" } : { xmlHash: `base-${sid}`, renderedPartsHash: `base-${sid}` },
     });
     const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
-    const llm = mockLlm(mergeComposer, { tag: "L:merge-compose" });
+    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
     try {
       const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
       assert.equal(threw, null);
@@ -187,7 +199,7 @@ async function main(): Promise<void> {
     const { base, fixturesDir, stabilityPath, historyDir } = setupBase("nogreen", { pixelPerfect: ["slide_01"], xmlStable: [], unstable: [] });
     const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: BASE_FILE, fixMap: {}, tag: "R:nogreen" });
     const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
-    const llm = mockLlm(mergeComposer, { tag: "L:merge-compose" });
+    const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
     try {
       const { report, threw } = await runRealMerge({ base, green: [], ops, upperRoot: UPPER, llm });
       assert.equal(threw, null);
@@ -217,7 +229,7 @@ async function main(): Promise<void> {
     });
     const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
     try {
-      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm: mockLlm(mergeComposer, { tag: "L:merge-compose" }) });
+      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm: mockLlm(mergeEditor().reply, { tag: "L:merge-edit" }) });
       assert.equal(report!.mode, "sequential");
       assert.deepEqual(report!.accepted, ["task-b"], "B kept stability → merged; A's failure did NOT block it");
       assert.deepEqual(report!.rejected.map((r) => r.task), ["task-a"], "A couldn't keep binary stability → not merged");
@@ -246,7 +258,7 @@ async function main(): Promise<void> {
     });
     const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
     try {
-      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm: mockLlm(mergeComposer, { tag: "L:merge-compose" }) });
+      const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm: mockLlm(mergeEditor().reply, { tag: "L:merge-edit" }) });
       assert.equal(report!.mode, "sequential");
       assert.deepEqual(report!.accepted, ["task-a"], "A merged first + locked in as the reference");
       assert.deepEqual(report!.rejected.map((r) => r.task), ["task-b"], "B regressed A's merged slide → didn't keep its stability → not merged");
@@ -276,6 +288,48 @@ async function main(): Promise<void> {
       writeRatingOutcome(d2, { task: "task-y", green: false, bad: ["slide_02"], slides: ["slide_02"] });
       assert.equal(JSON.parse(readFileSync(`${d2}/rating-outcome.json`, "utf8")).green, false);
     } finally { ws.cleanup(); rmSync(base, { recursive: true, force: true }); try { rmSync(`/overlays/shared/${runId}`, { recursive: true, force: true }); } catch { /* */ } }
+  });
+
+  // (10) THE regression test for the drift bug: two forks that edit DISJOINT
+  //      regions (like the real slide_04/13 fixes) → the 3-way merge is CLEAN →
+  //      the model makes NO edit → the promoted file is byte-exact base+both
+  //      hunks, so ONLY the two intended slides change and the gate passes.
+  await test("(10) disjoint fixes → clean 3-way merge, model makes NO edit, byte-exact both-hunks promoted", async () => {
+    const base = mkdtempSync(join(tmpdir(), "merge-e2e-disjoint-"));
+    mkdirSync(join(base, "renderer/html2slides"), { recursive: true });
+    // A multi-region file: fork A edits the TOP region, fork B the BOTTOM region.
+    const DISJOINT_BASE = ["export const TOP = \"base\";", "export const MID = 1;", "export const BOTTOM = \"base\";", ""].join("\n");
+    writeFileSync(join(base, CONVERTER_REL), DISJOINT_BASE);
+    const fixturesDir = join(base, "fx");
+    mkdirSync(fixturesDir, { recursive: true });
+    for (const sid of ["slide_01", "slide_02", "slide_03"]) writeFileSync(join(fixturesDir, `${sid}.html`), "<html></html>");
+    const stabilityPath = join(base, "stability.json");
+    writeStabilityJson(stabilityPath, { pixelPerfect: ["slide_01"], xmlStable: ["slide_02", "slide_03"], unstable: [], warning: "", attempts: 3 });
+    execSync(`git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm base`, { cwd: base });
+    const historyDir = mkdtempSync(join(tmpdir(), "merge-e2e-hist-disjoint-"));
+    // fork A rewrites the TOP line; fork B the BOTTOM line (disjoint → clean merge).
+    const wsA = createCowWorkspace({ base, upperRoot: UPPER, id: uid("d-a") });
+    assert.equal(wsA.run("bash", ["-c", `sed -i 's/TOP = "base"/TOP = "FIX_A"/' ${CONVERTER_REL}`]).code, 0);
+    const wsB = createCowWorkspace({ base, upperRoot: UPPER, id: uid("d-b") });
+    assert.equal(wsB.run("bash", ["-c", `sed -i 's/BOTTOM = "base"/BOTTOM = "FIX_B"/' ${CONVERTER_REL}`]).code, 0);
+    const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
+    const fixMap = { slide_01: "FIX_A", slide_02: "FIX_B" };
+    const recording = recordingFromContent({ converterRel: CONVERTER_REL, baseFileContent: DISJOINT_BASE, fixMap, tag: "R:disjoint" });
+    const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording });
+    const editor = mergeEditor();
+    try {
+      const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm: mockLlm(editor.reply, { tag: "L:merge-edit" }) });
+      assert.equal(threw, null);
+      assert.equal(report!.mode, "all-at-once", "clean disjoint merge → all-at-once, no ripple, no sequential");
+      assert.deepEqual(report!.accepted.sort(), ["task-a", "task-b"]);
+      const merged = readFileSync(join(base, CONVERTER_REL), "utf8");
+      // Byte-exact base + both hunks — the whole point (no global drift).
+      const expected = DISJOINT_BASE.replace('TOP = "base"', 'TOP = "FIX_A"').replace('BOTTOM = "base"', 'BOTTOM = "FIX_B"');
+      assert.equal(merged, expected, "promoted file is byte-exact base + both disjoint hunks");
+      // The 3-way merge was clean → the model touched NOTHING (before === after).
+      assert.ok(editor.edits.length >= 1, "the edit/verify pass still ran");
+      assert.ok(editor.edits.every((e) => !e.conflicted && e.before === e.after), "clean merge → model made NO edit (no regeneration/drift)");
+    } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
   await test("(9) no /overlays leaks after all merges", async () => {
