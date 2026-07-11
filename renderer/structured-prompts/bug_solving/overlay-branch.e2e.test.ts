@@ -12,9 +12,9 @@
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync, appendFileSync, readFileSync } from "fs";
 import { resolve } from "path";
+import { createCowWorkspace, cleanupAllCowWorkspaces, cleanupCowWorkspace } from "../../../cow-workspace/cow-workspace.js";
 
 const REPO = "/workspaces/sashaslides";
-const SH = `${REPO}/cow-workspace/workspace.sh`;
 const ROOT = "/overlays/e2e-branches"; // isolated root so we never touch a live run's branches
 const env = { ...process.env, OVERLAY_BRANCH_ROOT: ROOT };
 const CANARY = "renderer/html2slides/convert-pptx.ts"; // a real tracked converter file
@@ -28,7 +28,7 @@ function sh(cmd: string): string {
 }
 /** run a command inside a branch, return stdout */
 function inBranch(id: string, bash: string): string {
-  return execSync(`bash "${SH}" run ${id} bash -c ${JSON.stringify(bash)}`, { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  return createCowWorkspace({ base: REPO, upperRoot: ROOT, id }).runShell(bash).stdout;
 }
 
 function overlayAvailable(): string | null {
@@ -44,7 +44,7 @@ function main() {
   if (skip) { console.log(`  ⚠ SKIP — ${skip} (needs SYS_ADMIN + /overlays). Not a failure.`); console.log("\n=== Results: SKIPPED ===\n"); return; }
 
   // clean slate + ensure base canary content known
-  try { sh(`bash "${SH}" cleanup-all`); } catch { /* */ }
+  try { cleanupAllCowWorkspaces(ROOT); } catch { /* */ }
   const baseCanary = readFileSync(resolve(REPO, CANARY), "utf8");
 
   try {
@@ -63,12 +63,12 @@ function main() {
 
     // 3) changed lists the TRACKED changed file.
     inBranch("b3", `echo "// e2e-b3" >> ${CANARY}`);
-    const changed = sh(`bash "${SH}" changed b3`).trim().split("\n").filter(Boolean);
+    const changed = createCowWorkspace({ base: REPO, upperRoot: ROOT, id: "b3" }).changed();
     ok("(3) changed lists the edited tracked file", changed.includes(CANARY), `changed=${JSON.stringify(changed)}`);
 
     // 4) gitignore honored — a change to an IGNORED path is NOT reported as changed.
     inBranch("b4", `echo x > node_modules/.e2e-ignored-probe 2>/dev/null || true; echo "// e2e-b4" >> ${CANARY}`);
-    const changed4 = sh(`bash "${SH}" changed b4`).trim().split("\n").filter(Boolean);
+    const changed4 = createCowWorkspace({ base: REPO, upperRoot: ROOT, id: "b4" }).changed();
     ok("(4) gitignore honored — ignored file not in changed set",
       changed4.every(f => !f.includes("node_modules")) && changed4.includes(CANARY), `changed=${JSON.stringify(changed4)}`);
 
@@ -86,7 +86,7 @@ function main() {
 
     // 6) cleanup-all reaps every branch + leaves 0 mounts.
     const before = sh(`ls ${ROOT} 2>/dev/null | wc -l`).trim();
-    sh(`bash "${SH}" cleanup-all`);
+    cleanupAllCowWorkspaces(ROOT);
     const after = existsSync(ROOT) ? sh(`ls ${ROOT} 2>/dev/null | wc -l`).trim() : "0";
     const mounts = sh(`mount | grep -c ${ROOT} || true`).trim();
     ok("(6) cleanup-all reaps all branches", Number(before) > 0 && after === "0", `before=${before} after=${after}`);
@@ -103,9 +103,10 @@ function main() {
       process.env.OVERLAY_BRANCH_ROOT = ${JSON.stringify(ROOT)};
       const { registerOverlayCleanup } = await import(${JSON.stringify(resolve(REPO, "renderer/structured-prompts/bug_solving/overlay-cleanup.ts"))});
       const { execSync } = await import("child_process");
+      const { createCowWorkspace } = await import(${JSON.stringify(resolve(REPO, "cow-workspace/cow-workspace.ts"))});
       registerOverlayCleanup();                       // NO-OP now: no startup sweep
       const afterSweep = execSync("ls ${ROOT} 2>/dev/null | wc -l").toString().trim();
-      execSync('bash ${SH} run exitbr bash -c true'); // create a branch
+      createCowWorkspace({ base: ${JSON.stringify(REPO)}, upperRoot: ${JSON.stringify(ROOT)}, id: "exitbr" }).runShell("true"); // create a branch
       const created = execSync("ls ${ROOT} 2>/dev/null | wc -l").toString().trim();
       console.log("SWEEP=" + afterSweep + " CREATED=" + created);
       process.exit(0);                                // NO 'exit' handler → nothing reaps
@@ -117,13 +118,13 @@ function main() {
     ok("(7b) branch PERSISTS after the creating process exits (no death-reap)", afterExit >= 1, `afterExit=${afterExit}`);
     // 7c) explicit single-workspace reap removes exactly that one.
     const beforeRm = Number(sh(`ls ${ROOT} 2>/dev/null | wc -l`).trim());
-    sh(`bash "${SH}" rm exitbr`);
+    cleanupCowWorkspace("exitbr", ROOT);
     const afterRm = existsSync(`${ROOT}/exitbr`) ? 1 : 0;
     const stillStale = existsSync(`${ROOT}/stale_persist`) ? 1 : 0;
     ok("(7c) `rm <id>` reaps exactly one workspace, leaves the others", afterRm === 0 && stillStale === 1 && beforeRm >= 2, `afterRm=${afterRm} stillStale=${stillStale} before=${beforeRm}`);
     rmSync(driver, { force: true });
   } finally {
-    try { sh(`bash "${SH}" cleanup-all`); } catch { /* */ }
+    try { cleanupAllCowWorkspaces(ROOT); } catch { /* */ }
     // hard-assert we left the base working tree exactly as we found it
     const finalCanary = readFileSync(resolve(REPO, CANARY), "utf8");
     ok("(final) base working tree restored byte-for-byte", finalCanary === baseCanary);

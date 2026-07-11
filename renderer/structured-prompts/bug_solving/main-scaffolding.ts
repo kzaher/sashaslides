@@ -64,7 +64,7 @@ import { dirname } from "path";
 const execFileAsync = promisify(execFile);
 import { rmSync, existsSync } from "fs";
 import { join } from "path";
-import { ClaudeEngine, CodexEngine, Session, WORKSPACE_SCRIPT } from "../../../structured-prompting/src/index.js";
+import { ClaudeEngine, CodexEngine, Session, branchRunCommand } from "../../../structured-prompting/src/index.js";
 import { buildTasks, selectOnlyClusters } from "./workspace-setup.js";
 // (stability recording now lives in the main graph — main.ts:stabilityBranch)
 import { main, type TaskResult } from "./main.js";
@@ -113,9 +113,8 @@ const REPO_ROOT = process.cwd();
 // pipeline as AFTER; this is the repo-root-relative path joined onto each
 // task's workspace_dir below.
 const RECORD_SCRIPT_REL = "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts";
-// The COW-workspace runner (absolute), owned by the structured-prompting
-// library. A bug_solving branch is just a CowWorkspace over the repo.
-const OVERLAY_BRANCH_SH = WORKSPACE_SCRIPT;
+// A bug_solving branch is just a CowWorkspace over the repo; branchRunCommand
+// builds the raw `unshare … node ns-exec.mjs …` spawn to run inside it (no bash).
 // Keep fileURLToPath import reachable even if we stop using HERE later.
 const _HERE = dirname(fileURLToPath(import.meta.url)); void _HERE;
 
@@ -183,9 +182,8 @@ async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<v
       `--fixtures "$ROOT/${t.fixtures_dir}" --slides "$ALL" ` +
       `--out "$ROOT/${t.scratch_dir}/before-all"`;
     try {
-      await execFileAsync("bash", [
-        OVERLAY_BRANCH_SH, "run", t.branch_id, "bash", "-c", inner,
-      ], { cwd: REPO_ROOT, maxBuffer: 32 * 1024 * 1024 });
+      const bs = branchRunCommand(t.branch_id, "bash", ["-c", inner]);
+      await execFileAsync(bs.command, bs.args, { cwd: REPO_ROOT, env: bs.env, maxBuffer: 32 * 1024 * 1024 });
       console.error(`  [${t.task_id}] before pptx → (branch ${t.branch_id}) ${t.scratch_dir}/before/pptx`);
     } catch (e: unknown) {
       // TS forbids a type annotation on the catch binding (ts(1196)), so the

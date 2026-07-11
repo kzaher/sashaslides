@@ -29,7 +29,7 @@ import {
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createCowWorkspace, type CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
+import { createCowWorkspace, cleanupAllCowWorkspaces, cleanupCowWorkspace, type CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
 import { realLlmMergeOps, ledgerDemote, type GreenCluster } from "./llm-merge.js";
 import { writeStabilityJson } from "./stability.js";
 import { detectPriorState, decideStartup } from "./startup-detection.js";
@@ -38,7 +38,6 @@ import { mockLlm, mergeEditor, recordingFromContent, contentRecord, greenCluster
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = "/workspaces/sashaslides";
-const SH = `${REPO}/cow-workspace/workspace.sh`;
 
 let passed = 0, failed = 0;
 const failures: Array<{ name: string; err: unknown }> = [];
@@ -168,7 +167,7 @@ async function main(): Promise<void> {
       assert.ok(existsSync(join(UPPER_ROOT, id, "upper", "persist_probe.txt")), "the edit must persist in the upper layer");
     } finally {
       rmSync(driver, { force: true });
-      try { execSync(`bash "${SH}" rm ${id}`, { env: { ...process.env, COW_WORKSPACE_ROOT: UPPER_ROOT }, stdio: "ignore" }); } catch { /* */ }
+      try { cleanupCowWorkspace(id, UPPER_ROOT); } catch { /* */ }
       rmSync(base, { recursive: true, force: true });
     }
   });
@@ -271,9 +270,8 @@ async function main(): Promise<void> {
     writeFileSync(join(base, "file.txt"), "base\n");
     writeFileSync(join(stateDir, "session"), "orig\n");
     const root = `/overlays/lc-jail-${process.pid}`;
-    const jailEnv = { ...process.env, COW_WORKSPACE_ROOT: root, COW_WORKSPACE_BASE: base, COW_WORKSPACE_JAIL: "1", COW_WORKSPACE_OVERLAY_EXTRA: `${stateDir}:/home/node/.codex` } as NodeJS.ProcessEnv;
     const canWrite = (id: string, cmd: string): boolean => {
-      try { execSync(`bash "${SH}" run ${id} bash -c ${JSON.stringify(cmd)}`, { env: jailEnv, stdio: "ignore" }); return true; }
+      try { return createCowWorkspace({ base, upperRoot: root, id, jail: true, overlayExtra: [stateDir, "/home/node/.codex"] }).runShell(cmd).code === 0; }
       catch { return false; }
     };
     try {
@@ -284,7 +282,7 @@ async function main(): Promise<void> {
       assert.equal(readFileSync(join(stateDir, "session"), "utf8"), "orig\n", "real state dir untouched (write stayed in overlay upper)");
       assert.ok(!existsSync("/var/__lc_jail_leak"), "no leak to real /var");
     } finally {
-      try { execSync(`bash "${SH}" cleanup-all`, { env: jailEnv, stdio: "ignore" }); } catch { /* */ }
+      try { cleanupAllCowWorkspaces(root); } catch { /* */ }
       try { if (existsSync("/var/__lc_jail_leak")) execSync("sudo rm -f /var/__lc_jail_leak"); } catch { /* */ }
       rmSync(base, { recursive: true, force: true });
       rmSync(stateDir, { recursive: true, force: true });
@@ -294,7 +292,7 @@ async function main(): Promise<void> {
   // ── leave overlays clean ───────────────────────────────────────────────────
   await test("(Z) tests reap their own overlays (isolated roots empty/removed)", () => {
     // Reap the demoted/bad overlays the success/resume tests intentionally left.
-    try { execSync(`bash "${SH}" cleanup-all`, { env: { ...process.env, COW_WORKSPACE_ROOT: UPPER_ROOT }, stdio: "ignore" }); } catch { /* */ }
+    try { cleanupAllCowWorkspaces(UPPER_ROOT); } catch { /* */ }
     rmSync(UPPER_ROOT, { recursive: true, force: true });
     rmSync(SHARED, { recursive: true, force: true });
     assert.ok(!existsSync(UPPER_ROOT), "UPPER_ROOT removed");

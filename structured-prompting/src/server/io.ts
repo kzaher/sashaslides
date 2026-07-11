@@ -12,19 +12,17 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, openSync, closeSync } from "node:fs";
 import type { Buffer as NodeBuffer } from "node:buffer";
-import { WORKSPACE_SCRIPT } from "../../../cow-workspace/cow-workspace.js";
+import { branchRunCommand } from "../../../cow-workspace/cow-workspace.js";
 
 /**
- * Absolute path to the generic COW-workspace runner. When a spawn carries a
- * `branchId`, the command is re-wrapped as
- *   workspace.sh run <branchId> -- <command> <args...>
- * so it executes inside that workspace's namespace-local overlayfs mount (cwd =
- * merged working-tree root). The path is owned by the workspace library
- * (cow-workspace/workspace.sh) — the engine no longer
- * references any bug_solving path. Overridable via COW_WORKSPACE_SCRIPT (or the
- * legacy OVERLAY_BRANCH_SCRIPT) for tests / relocations.
+ * When a spawn carries a `branchId`, `branchRunCommand` (from the cow-workspace
+ * library) re-wraps (command, args, env) into a raw
+ *   unshare -Urm --map-root-user node ns-exec.mjs <command> <args...>
+ * so the command executes inside that workspace's namespace-local overlayfs mount
+ * (cwd = merged working-tree root). No bash, no shell script — the engine owns no
+ * workspace mechanics. Base/root/jail policy is read from the spawn's env
+ * (COW_WORKSPACE_*), which a launcher sets.
  */
-const OVERLAY_BRANCH_SH = WORKSPACE_SCRIPT;
 
 // ---------- Shared types ----------------------------------------------------
 
@@ -166,14 +164,15 @@ export const realIO: IO = {
   async spawnCapture(args: SpawnCaptureArgs): Promise<SpawnCaptureResult> {
     ensureExitHandler();
     const { command, args: procArgs, cwd, env, timeoutMs, nodeId, branchId } = args;
-    // OPT-IN overlay branch: when branchId is set, rewrite (command,args) so the
-    // command runs INSIDE that branch's overlayfs mount. This happens BEFORE the
-    // setpriv wrap below, so the pdeathsig guard still wraps the whole thing.
-    // When branchId is UNSET this is a no-op and the spawn is byte-identical.
-    const effCommand = branchId ? "bash" : command;
-    const effArgs = branchId
-      ? [OVERLAY_BRANCH_SH, "run", branchId, command, ...procArgs]
-      : procArgs;
+    // OPT-IN overlay branch: when branchId is set, rewrite (command,args,env) so the
+    // command runs INSIDE that branch's overlayfs mount (raw `unshare … node
+    // ns-exec.mjs …` — no bash). This happens BEFORE the setpriv wrap below, so the
+    // pdeathsig guard still wraps the whole thing. When branchId is UNSET this is a
+    // no-op and the spawn is byte-identical.
+    const branchSpawn = branchId ? branchRunCommand(branchId, command, procArgs, (env ?? process.env) as NodeJS.ProcessEnv) : null;
+    const effCommand = branchSpawn ? branchSpawn.command : command;
+    const effArgs = branchSpawn ? branchSpawn.args : procArgs;
+    const effEnv = branchSpawn ? branchSpawn.env : ((env ?? process.env) as NodeJS.ProcessEnv);
     // Open the stdin file (if any) as an fd the child inherits. A file — not a
     // pipe — so a huge prompt can't fill the pipe buffer and hang (the child
     // reads at its own pace). Falls back to /dev/null if the open fails.
@@ -184,7 +183,7 @@ export const realIO: IO = {
     return new Promise<SpawnCaptureResult>((resolve) => {
       const spawnOpts: SpawnOptions = {
         cwd,
-        env: (env ?? process.env) as NodeJS.ProcessEnv,
+        env: effEnv,
         stdio: [stdinFd ?? "ignore", "pipe", "pipe"],
         // Detached so the child gets its own process group; we keep stdio
         // attached so the parent still proxies output. This lets us
