@@ -2,72 +2,25 @@
  * bug_solving — structured prompt for resolving a clustered batch of
  * html2slides rendering bugs across one or more slides.
  *
- * ## How to use
- *   1. cd /workspaces/sashaslides
- *   2. Create a sibling `./clusters.ts` that exports `CLUSTERS` of type
- *      `Cluster[]` (see `workspace-setup.ts`). Example:
- *        export const CLUSTERS = [
- *          { task_id: "clipping", cluster_description: "...",
- *            slide_ids: ["slide_11", "slide_12", "slide_14", "slide_28"] },
- *        ];
- *      main-scaffolding.ts imports CLUSTERS from that file by default and
- *      refuses to build until you create it. This is intentional — it
- *      prevents accidental smoke runs.
- *   3. Build:  `npx tsx structured-prompting/build.ts renderer/structured-prompts/bug_solving/main-scaffolding.ts`
- *   4. Run:    `node structured-prompting/dist/main-scaffolding.mjs`
- *   5. The engine monitor URL is printed on the first lines of stderr
- *      (look for `┌── structured-prompting monitor`). Scaffolding prints
- *      it again at the end along with per-task SxS server URLs.
- *   6. Separately, start the port-range notifier ONCE per session so
- *      per-task SxS servers surface in chat as they come up:
- *        Monitor({
- *          command: "bash renderer/structured-prompts/bug_solving/scripts/notify-new-servers.sh",
- *          persistent: true, timeout_ms: 3600000,
- *          description: "bug_solving SxS servers",
- *        })
- *      Each task that successfully finishes will produce one
- *      `NEW http://localhost:<port>` line in the chat. The notifier
- *      also re-announces a port when an old listener dies and a new
- *      one binds — convenient when restarting a server.
+ * ## Flow
+ *   The end-to-end flow is a STATE MACHINE, documented (not narrated in prose
+ *   here) in `docs/merge-flow.drawio`. Two pages:
+ *     · "top-level pipeline (main.ts)" — CLUSTERS → SOLVE_FANOUT → PER_FORK_RATE
+ *       → COLLECT_GREEN → MERGE_PHASE → DONE.
+ *     · "merge-flow" — the MERGE_PHASE sub-machine: ALL_MERGE → ALL_DETECT →
+ *       ALL_AT_ONCE_RATE → {ACCEPT_ALL | STOPPED | SEQ_*} (llm-merge.ts).
+ *   Code comments reference states by id (e.g. SOLVE_FANOUT, PER_FORK_RATE)
+ *   instead of restating the flow. Open the diagram to follow the sequence.
  *
- * ## Scaffolding lifecycle (detached servers + rating-gated accept)
- *   When `main()` (this solve-only structured prompt) returns and
- *   engine.execute resolves, main-scaffolding.ts:
- *     1. boots one rating server per SUCCESSFUL TaskResult (detached +
- *        unref()'d, so they survive scaffolding exit) — ALL up front so
- *        the human can rate every thread in parallel;
- *     2. runs the POST-RUN, per-thread RATING-GATED accept phase
- *        (accept-orchestration.ts): serially per thread it BLOCKS until
- *        the human rates every slide good/bad, then GREEN (all good) →
- *        accept via mergePhase on the SAME engine; RED (any bad, or a
- *        non-TTY rating deadline) → demote for re-solve, NOT accepted.
- *   The accept is opt-out via `BUG_SOLVING_NO_ACCEPT=1` (leaves the UIs
- *   up and exits, the old behavior). The servers stay up until the user
- *   kills them (`lsof -ti:4720-4800 | xargs -r kill`); Ctrl-C on the
- *   scaffolding does NOT reach them.
+ * ## How to run
+ *   `npm run renderer:solver:run` (solve.sh) builds + launches. Clusters are the
+ *   slides marked BAD in the live SxS ratings.json (NO clusters.ts). `--continue`
+ *   skips solve and resumes MERGE_PHASE off the persisted overlays + green markers;
+ *   `--clean` wipes prior state. The engine monitor + per-task SxS URLs are printed.
  *
- * ## Per-task pipeline (retryable up to task.retry_budget times)
- *   1. record-pptx.sh → one .pptx per slide, parallel, --no-upload (BEFORE)
- *   2. worker writes analysis.md + applies code fix
- *   3. record-pptx.sh → AFTER
- *   4. diff-pptx-pairs.ts → OOXML-level diff + summary.json per slide
- *   5. parallelFork per slide: sub-session emits a typed JSON verdict
- *      {slide_id, rationale, isRegression, bugSolved}
- *   6. aggregate verdicts — throw if any isRegression || !bugSolved;
- *      analysis.md is kept so the next attempt refines rather than
- *      restarts
- *   7. upload-and-scrape.ts → uploads a combined pptx under a
- *      fork-unique title, scrapes per-slide PNG thumbnails
- *   8. emits a SxsServerSpec in the TaskResult so main-scaffolding.ts can
- *      boot the filtered rating server AFTER this prompt resolves, and so
- *      the rating-gated accept phase can locate the thread's ratings.json.
- *
- * ## Return type
- *   `main()` is SOLVE-ONLY and returns
- *   `SessionWithResult<Array<Result<TaskResult>>>` (the parallelFork
- *   results). Each TaskResult carries an `sxs_server_spec`, NOT a running
- *   URL. The accept/merge is NOT chained into this graph — it runs
- *   post-run in the scaffolding, gated by the per-thread human rating.
+ * `main()` is SOLVE-ONLY: it returns the parallelFork `Array<Result<TaskResult>>`.
+ * PER_FORK_RATE + MERGE_PHASE run post-run in main-scaffolding.ts (opt-out with
+ * `BUG_SOLVING_NO_ACCEPT=1`).
  */
 
 import {

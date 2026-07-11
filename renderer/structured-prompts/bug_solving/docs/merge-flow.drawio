@@ -1,0 +1,169 @@
+<mxfile host="65bd71144e">
+    <diagram id="merge-flow" name="bug_solving merge + human-rating flow">
+        <mxGraphModel dx="1654" dy="704" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="1500" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title" value="bug_solving MERGE + HUMAN-RATING flow&#xa;(llm-merge.ts llmMerge / sequentialFold; regression-gate.ts makeChangeGate; realLlmMergeOps.rateChanged)&#xa;State ids are referenced from the code comments." style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="10" width="820" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="START" value="START&#xa;Collect GREEN forks; per converter file gather each fork&#39;s version.&#xa;(llmMerge: fileForks)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
+                    <mxGeometry x="320" y="90" width="260" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="NOOP" value="NOOP&#xa;no fork touched a converter file&#xa;→ done (mode=noop)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" parent="1" vertex="1">
+                    <mxGeometry x="640" y="90" width="220" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="ALL_MERGE" value="ALL_MERGE&#xa;3-way merge (git merge-file) EVERY fork onto base → LLM edits/verifies each&#xa;file in place (mergeN + mergeEditPrompt)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="190" width="300" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="ALL_DETECT" value="ALL_DETECT&#xa;render merged deck → detectChanged(): any slide DIFFERING&#xa;from its approved reference (i.e. NOT pixel-perfect)?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="270" width="300" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="ALL_AT_ONCE_RATE" value="ALL_AT_ONCE_RATE  (HUMAN)&#xa;show the changed slides (merged vs approved).&#xa;buttons: green / red per slide + REJECT ALL &amp; STOP." style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="1" vertex="1">
+                    <mxGeometry x="290" y="380" width="320" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="ACCEPT_ALL" value="ACCEPT_ALL&#xa;promote all merged files; commitAccepted(changed)=new green;&#xa;reap fork overlays. (mode=all-at-once)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
+                    <mxGeometry x="20" y="400" width="230" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="SEQ_START" value="SEQ_START&#xa;a red OR reject-all in all-together → fold each fork ALONE and rate it&#xa;(sequentialFold; mode=sequential)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="560" width="300" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="SEQ_FOLD" value="SEQ_FOLD  (next fork)&#xa;3-way merge THIS fork into the current accepted tree → LLM edits/verifies." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="660" width="300" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="SEQ_DETECT" value="SEQ_DETECT&#xa;detectChanged() over greens-in-play (kept forks + this one).&#xa;nothing changed → SEQ_KEEP directly." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="750" width="300" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="SEQ_RATE" value="SEQ_RATE  (HUMAN)&#xa;rate this fold&#39;s changed slides.&#xa;green / red per slide + REJECT ALL &amp; STOP." style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="1" vertex="1">
+                    <mxGeometry x="290" y="840" width="320" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="SEQ_KEEP" value="SEQ_KEEP&#xa;keep fork; commitAccepted(changed)=new green&#xa;(protects it from a later fold)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
+                    <mxGeometry x="800" y="830" width="230" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="SEQ_REJECT" value="SEQ_REJECT&#xa;roll this fork back to pre-fold; demote its slides&#xa;to the ledger for re-solve; CONTINUE." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" parent="1" vertex="1">
+                    <mxGeometry x="800" y="990" width="230" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="MORE" value="more forks?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" parent="1" vertex="1">
+                    <mxGeometry x="330" y="1000" width="140" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="SEQ_PROMOTE" value="SEQ_PROMOTE&#xa;promote the KEPT forks&#39; files; reap kept overlays.&#xa;(a dropped fork never halts the fold)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="1120" width="300" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="DONE" value="DONE — return MergeReport&#xa;{ mode, accepted[], rejected[], mergedFiles[] }" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="1220" width="300" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_start_noop" value="no converter files" style="endArrow=block;html=1;" parent="1" source="START" target="NOOP" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_start_all" value="≥1 fork" style="endArrow=block;html=1;" parent="1" source="START" target="ALL_MERGE" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_all_detect" style="endArrow=block;html=1;" parent="1" source="ALL_MERGE" target="ALL_DETECT" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_detect_rate" value="changed (not pixel-perfect) → ASK HUMAN" style="endArrow=block;html=1;strokeColor=#d79b00;" parent="1" source="ALL_DETECT" target="ALL_AT_ONCE_RATE" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_detect_accept" value="all pixel-perfect (no change) → NO human, auto-accept" style="endArrow=block;html=1;strokeColor=#82b366;" parent="1" source="ALL_DETECT" target="ACCEPT_ALL" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="135" y="330"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e_rate_accept" value="all green / no change" style="endArrow=block;html=1;" parent="1" source="ALL_AT_ONCE_RATE" target="ACCEPT_ALL" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_rate_seq" value="any red — OR reject-all &amp; stop&#xa;(abandon all-together, isolate individually)" style="endArrow=block;html=1;strokeColor=#d79b00;" parent="1" source="ALL_AT_ONCE_RATE" target="SEQ_START" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_accept_done" style="endArrow=block;html=1;" parent="1" source="ACCEPT_ALL" target="DONE" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="135" y="1250"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e_seq_fold" style="endArrow=block;html=1;" parent="1" source="SEQ_START" target="SEQ_FOLD" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_fold_detect" style="endArrow=block;html=1;" parent="1" source="SEQ_FOLD" target="SEQ_DETECT" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_detect_srate" style="endArrow=block;html=1;" parent="1" source="SEQ_DETECT" target="SEQ_RATE" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_srate_keep" value="all green / no change" style="endArrow=block;html=1;" parent="1" source="SEQ_RATE" target="SEQ_KEEP" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_srate_reject" value="any red — OR reject all &amp; stop&#xa;(convenience: reds every shown slide; NOT a halt)" style="endArrow=block;html=1;strokeColor=#b85450;" parent="1" source="SEQ_RATE" target="SEQ_REJECT" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_keep_more" style="endArrow=block;html=1;" parent="1" source="SEQ_KEEP" target="MORE" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_reject_more" style="endArrow=block;html=1;" parent="1" source="SEQ_REJECT" target="MORE" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_more_fold" value="yes (next fork)" style="endArrow=block;html=1;" parent="1" source="MORE" target="SEQ_FOLD" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="260" y="1040"/>
+                            <mxPoint x="260" y="690"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e_more_promote" value="no" style="endArrow=block;html=1;" parent="1" source="MORE" target="SEQ_PROMOTE" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_promote_done" style="endArrow=block;html=1;" parent="1" source="SEQ_PROMOTE" target="DONE" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+    <diagram id="pipeline" name="top-level pipeline (main.ts)">
+        <mxGraphModel dx="1050" dy="760" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="1100" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="p_title" value="TOP-LEVEL bug_solving pipeline (main.ts / main-scaffolding.ts).&#xa;State ids are referenced from main.ts comments. The MERGE_PHASE expands to the &quot;merge-flow&quot; page.&#xa;--continue skips SOLVE..PER_FORK_RATE and RESUME_MERGE enters at MERGE_PHASE off the persisted overlays + markers." style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+                    <mxGeometry x="40" y="10" width="820" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="CLUSTERS" value="CLUSTERS&#xa;read slides marked BAD in the live SxS ratings.json → one cluster per broken slide&#xa;(clustersFromRatings)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+                    <mxGeometry x="290" y="90" width="320" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="SOLVE_FANOUT" value="SOLVE_FANOUT&#xa;parallelFork: one COW-overlay worker PER cluster. Each records before/after,&#xa;edits the converter, self-verifies (validation model)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+                    <mxGeometry x="290" y="180" width="320" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="PER_FORK_RATE" value="PER_FORK_RATE  (HUMAN)&#xa;each fork boots its own SxS rating UI; the user marks GOOD/BAD.&#xa;A GOOD fork writes rating-outcome.json (green marker) to its shared dir." style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+                    <mxGeometry x="280" y="280" width="340" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="COLLECT_GREEN" value="COLLECT_GREEN&#xa;gather the forks with a GREEN marker → GreenCluster[]&#xa;(BAD forks are demoted for re-solve and LEFT)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+                    <mxGeometry x="290" y="420" width="320" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="MERGE_PHASE" value="MERGE_PHASE  →  see &quot;merge-flow&quot; page&#xa;llmMerge(GreenCluster[]) : all-together merge → rate → sequential.&#xa;(--continue / RESUME_MERGE enters HERE off persisted overlays + markers.)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;dashed=1;" vertex="1" parent="1">
+                    <mxGeometry x="270" y="520" width="360" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="PIPE_DONE" value="DONE — MergeReport printed by the scaffolding" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+                    <mxGeometry x="290" y="630" width="320" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="pe1" style="endArrow=block;html=1;" edge="1" parent="1" source="CLUSTERS" target="SOLVE_FANOUT">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="pe2" style="endArrow=block;html=1;" edge="1" parent="1" source="SOLVE_FANOUT" target="PER_FORK_RATE">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="pe3" style="endArrow=block;html=1;" edge="1" parent="1" source="PER_FORK_RATE" target="COLLECT_GREEN">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="pe4" style="endArrow=block;html=1;" edge="1" parent="1" source="COLLECT_GREEN" target="MERGE_PHASE">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="pe5" style="endArrow=block;html=1;" edge="1" parent="1" source="MERGE_PHASE" target="PIPE_DONE">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

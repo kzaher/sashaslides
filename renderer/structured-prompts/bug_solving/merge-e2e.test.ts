@@ -119,7 +119,6 @@ async function main(): Promise<void> {
       assert.equal(threw, null);
       assert.equal(report!.mode, "all-at-once");
       assert.deepEqual(report!.accepted.sort(), ["task-a", "task-b"]);
-      assert.equal(report!.stopped, false);
       const merged = readFileSync(join(base, CONVERTER_REL), "utf8");
       assert.ok(/FIX_A/.test(merged) && /FIX_B/.test(merged), "both fixes promoted");
       assert.equal(candStatus(historyDir, "slide_01"), undefined);
@@ -165,8 +164,9 @@ async function main(): Promise<void> {
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
-  // (3) reject-all & STOP in all-together → abort, nothing promoted.
-  await test("(3) reject-all & STOP in all-together → nothing promoted; base untouched", async () => {
+  // (3) reject-all in all-together does NOT abort — it ABANDONS the combined merge
+  //     and proceeds to sequential (where reject-all just drops each fork).
+  await test("(3) reject-all in all-together → sequential; reject-all each fork → nothing promoted, both demoted", async () => {
     const { base, fixturesDir, stabilityPath, historyDir } = setupBase("stop", { pixelPerfect: ["slide_01", "slide_02"], xmlStable: [], unstable: [] });
     const wsA = makeFork(base, UPPER, uid("s-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("s-b"), "FIX_B");
     const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
@@ -177,17 +177,20 @@ async function main(): Promise<void> {
       merge: (ws, sid) => sid === "slide_01" ? px(has(ws, "FIX_A") ? "slide_01-merged" : "slide_01-base")
         : px(has(ws, "FIX_B") ? "slide_02-merged" : "slide_02-base"),
     });
-    const rating = mergeRateMock(({ changed }) => verdictStopAll(changed));
+    const rating = mergeRateMock(({ changed }) => verdictStopAll(changed));   // reject-all everywhere
     const ops = realLlmMergeOps({ repo: base, fixturesDir, stabilityPath, historyDir, render: recording, rate: rating.rate });
     const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
     try {
       const { report, threw } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
       assert.equal(threw, null);
-      assert.equal(report!.stopped, true, "stopped");
+      assert.equal(report!.mode, "sequential", "reject-all abandoned all-together → sequential");
       assert.deepEqual(report!.accepted, [], "nothing accepted");
+      assert.deepEqual(report!.rejected.map((r) => r.task).sort(), ["task-a", "task-b"], "both forks dropped");
       assert.equal(report!.mergedFiles.length, 0, "nothing promoted");
       assert.equal(readFileSync(join(base, CONVERTER_REL), "utf8"), BASE_FILE, "base untouched");
-      assert.equal(rating.calls.length, 1, "asked once then stopped");
+      assert.equal(rating.calls[0].phase, "all-at-once", "first round all-together");
+      assert.equal(candStatus(historyDir, "slide_01"), "bad");
+      assert.equal(candStatus(historyDir, "slide_02"), "bad");
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
@@ -252,8 +255,9 @@ async function main(): Promise<void> {
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
-  // (6) reject-all & STOP mid-sequential → already-kept fork stays; rest not rated.
-  await test("(6) STOP mid-sequential → kept fork stays promoted; remaining forks not rated", async () => {
+  // (6) reject-all is a CONVENIENCE (red every shown slide), NOT a halt: a
+  //     reject-all on one sequential fork drops it and the fold CONTINUES.
+  await test("(6) reject-all on a sequential fork drops it + CONTINUES; earlier kept fork stays", async () => {
     const { base, fixturesDir, stabilityPath, historyDir } = setupBase("seqstop", { pixelPerfect: ["slide_01", "slide_02"], xmlStable: [], unstable: [] });
     const wsA = makeFork(base, UPPER, uid("q-a"), "FIX_A"), wsB = makeFork(base, UPPER, uid("q-b"), "FIX_B");
     const green = [greenCluster("task-a", wsA, ["slide_01"]), greenCluster("task-b", wsB, ["slide_02"])];
@@ -264,7 +268,7 @@ async function main(): Promise<void> {
       merge: (ws, sid) => sid === "slide_01" ? px(has(ws, "FIX_A") ? "slide_01-merged" : "slide_01-base")
         : px(has(ws, "FIX_B") ? "slide_02-merged" : "slide_02-base"),
     });
-    // all-together: red → sequential. fork A: green (keep). fork B: STOP.
+    // all-together: red → sequential. fork A: green (keep). fork B: reject-all (drop, continue).
     const rating = mergeRateMock(({ phase, label, changed }) => {
       if (phase === "all-at-once") return verdictRed(["slide_02"], changed);
       if (label === "task-b") return verdictStopAll(changed);
@@ -274,10 +278,12 @@ async function main(): Promise<void> {
     const llm = mockLlm(mergeEditor().reply, { tag: "L:merge-edit" });
     try {
       const { report } = await runRealMerge({ base, green, ops, upperRoot: UPPER, llm });
-      assert.equal(report!.stopped, true, "stopped");
-      assert.deepEqual(report!.accepted, ["task-a"], "A kept before the stop stays");
+      assert.equal(report!.mode, "sequential");
+      assert.deepEqual(report!.accepted, ["task-a"], "A kept");
+      assert.deepEqual(report!.rejected.map((r) => r.task), ["task-b"], "B reject-all'd → dropped (fold continued to it)");
       assert.ok(/FIX_A/.test(readFileSync(join(base, CONVERTER_REL), "utf8")), "A promoted");
       assert.ok(!/FIX_B/.test(readFileSync(join(base, CONVERTER_REL), "utf8")), "B not promoted");
+      assert.equal(candStatus(historyDir, "slide_02"), "bad", "B demoted");
     } finally { wsA.cleanup(); wsB.cleanup(); rmSync(base, { recursive: true, force: true }); rmSync(historyDir, { recursive: true, force: true }); }
   });
 
