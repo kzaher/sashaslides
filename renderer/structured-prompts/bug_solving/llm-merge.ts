@@ -63,7 +63,7 @@
  * agentic edit — it reads EDIT_TARGET from the prompt and resolves markers on
  * disk. Production wires `realLlmMergeOps(...)`.
  */
-import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rmSync, mkdtempSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rmSync, mkdtempSync, copyFileSync } from "node:fs";
 import { execSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -131,17 +131,15 @@ export interface MergeReport {
   mergedFiles: string[];
 }
 
-/** The human's verdict over the changed slides shown in the rating UI. */
+/** The human's verdict over the changed slides shown in the rating UI = the SxS
+ *  good/bad per slide (rating-server.ts ratings.json). The "Reject ALL & stop"
+ *  button is just a convenience that reds every shown slide, so it needs no
+ *  separate flag: it lands here as `red = every shown slide`. */
 export interface MergeRatingVerdict {
-  /** changed slides the human ACCEPTED (become the new green reference). */
+  /** changed slides the human marked GOOD → ACCEPT (become the new green reference). */
   green: string[];
-  /** changed slides the human REJECTED. */
+  /** changed slides the human marked BAD → REJECT. */
   red: string[];
-  /** the human pressed "reject all slides and stop rating" — a CONVENIENCE that
-   *  marks every shown slide red without clicking each (e.g. 20 slides). It is
-   *  NOT a halt: the merge treats it exactly like "all shown red" and CONTINUES
-   *  (abandon all-together → sequential; a sequential fork → drop it, next fork). */
-  stopAll: boolean;
 }
 
 /** What the flow hands `rateChanged`: the changed slides + which merge stage +
@@ -495,17 +493,15 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
             return `echo llm-merge:all-accept-nochange [${report.mergedFiles.join(",")}]`;
           }
           const verdict = ops.rateChanged({ changed: changedSlides, ws: allWs, phase: "all-at-once", label: "all-together" });
-          if (!verdict.stopAll && verdict.red.length === 0) {     // ALL changed slides green → accept the combined merge
+          if (verdict.red.length === 0) {                         // ALL changed slides green → accept the combined merge
             acceptAll(changedSlides);
             decision.outcome = "accepted";
             return `echo llm-merge:all-accept green=[${verdict.green.join(",")}]`;
           }
-          // Any red — OR "reject all & stop" — ABANDONS the all-together merge and
-          // proceeds to SEQUENTIAL (fold each fork alone). In the all-together stage
-          // "reject all & stop" means "stop trying to merge them together, isolate
-          // them individually"; only a stop in the SEQUENTIAL stage truly halts.
+          // Any red (incl. "reject all") ABANDONS the all-together merge → SEQUENTIAL
+          // (fold each fork alone), which then isolates which fix is at fault.
           decision.outcome = "rejected";
-          return `echo llm-merge:all-rejected ${verdict.stopAll ? "stop-all→sequential" : `red=[${verdict.red.join(",")}]`}`;
+          return `echo llm-merge:all-rejected red=[${verdict.red.join(",")}]`;
         }),
       );
 
@@ -636,14 +632,14 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
           return `echo llm-merge:seq-keep-nochange ${cluster.task}`;
         }
         const verdict = ops.rateChanged({ changed: changedSlides, ws: seqWs, phase: "sequential", label: cluster.task });
-        if (!verdict.stopAll && verdict.red.length === 0) {      // all changed slides green → keep + new green
+        if (verdict.red.length === 0) {                          // all changed slides green → keep + new green
           keep();
           ops.commitAccepted(changedSlides);
           return `echo llm-merge:seq-keep ${cluster.task} green=[${verdict.green.join(",")}]`;
         }
-        // any red — OR reject-all — drops THIS fork + demotes; the fold CONTINUES.
-        rollbackDemote(verdict.stopAll ? "human reject-all'd this fork's changed slides" : `human rejected changed slide(s) [${verdict.red.join(", ")}]`);
-        return `echo llm-merge:seq-reject ${cluster.task} ${verdict.stopAll ? "reject-all" : `red=[${verdict.red.join(",")}]`}`;
+        // any red (incl. reject-all) drops THIS fork + demotes; the fold CONTINUES.
+        rollbackDemote(`human rejected changed slide(s) [${verdict.red.join(", ")}]`);
+        return `echo llm-merge:seq-reject ${cluster.task} red=[${verdict.red.join(",")}]`;
       }),
     );
   }
@@ -926,7 +922,10 @@ function execRepo(cmd: string, timeoutMs = 20 * 60 * 1000): void {
 // mergeRatingViaUI — the production HUMAN rating (boots the merge rating UI)
 // ---------------------------------------------------------------------------
 
-const MERGE_RATE_REL = "renderer/structured-prompts/bug_solving/scripts/merge-rate.ts";
+// The merge rating uses the ONE canonical SxS rating UI (rating-server.ts), run
+// from the renderer dir. --read-only = verdict-only, --reject-all-button adds the
+// batch-reject convenience, --exit-when-all-rated makes it block-then-exit.
+const RATING_SERVER_FROM_RENDERER = "html2slides/rating-server.ts";
 
 interface MergeRatingViaUIArgs {
   repo: string;
@@ -941,34 +940,41 @@ interface MergeRatingViaUIArgs {
 }
 
 /**
- * Boot the merge rating UI and BLOCK until the human rates every changed slide
- * (or presses "reject all & stop"), then return their verdict. Assembles a
- * per-slide pair (merged "test" vs approved "original") into an input file, execs
- * the blocking `merge-rate.ts` (which boots rating-server.ts + waits + writes the
- * verdict), and parses it. A rating that can't be collected is treated as
- * reject-all & stop so nothing is promoted without an explicit human OK. See
- * docs/merge-flow.drawio (states ALL_AT_ONCE_RATE / SEQ_RATE).
+ * Boot the canonical SxS rating UI (rating-server.ts) on the changed slides and
+ * BLOCK until the human rates each Good/Bad (or hits "Reject ALL & stop"), then
+ * return the verdict. Stages each changed slide's MERGED render into `slides/`
+ * (the SxS "test"/attempt) and its APPROVED render into `originals/`, then runs
+ * rating-server.ts foreground with `--read-only --reject-all-button
+ * --exit-when-all-rated` — it exits when every filtered slide is good/bad, and we
+ * read its `ratings.json`. A rating that can't be collected is treated as all-red
+ * so nothing is promoted without an explicit human OK. See docs/merge-flow.drawio
+ * (states ALL_AT_ONCE_RATE / SEQ_RATE).
  */
 function mergeRatingViaUI(a: MergeRatingViaUIArgs): MergeRatingVerdict {
   const dir = mkdtempSync(join(tmpdir(), "sp-merge-rate-"));
-  const inputPath = join(dir, "input.json");
-  const outPath = join(dir, "verdict.json");
-  const slides = a.changed.map((sid) => ({
-    slide: sid,
-    test: a.mergedDir ? join(a.mergedDir, "thumbs", `${sid}.png`) : null,
-    original: a.approvedPng(sid),
-  }));
-  writeFileSync(inputPath, JSON.stringify({ phase: a.phase, label: a.label, slides }, null, 2));
+  const slidesDir = join(dir, "slides"), originalsDir = join(dir, "originals");
+  mkdirSync(slidesDir, { recursive: true });
+  mkdirSync(originalsDir, { recursive: true });
+  for (const sid of a.changed) {
+    const test = a.mergedDir ? join(a.mergedDir, "thumbs", `${sid}.png`) : null;
+    if (test && existsSync(test)) { try { copyFileSync(test, join(slidesDir, `${sid}.png`)); } catch { /* */ } }
+    const orig = a.approvedPng(sid);
+    if (orig && existsSync(orig)) { try { copyFileSync(orig, join(originalsDir, `${sid}.png`)); } catch { /* */ } }
+  }
+  const port = Number(process.env.MERGE_RATE_PORT ?? 4790);
+  const cmd =
+    `cd ${JSON.stringify(join(a.repo, "renderer"))} && npx tsx ${JSON.stringify(RATING_SERVER_FROM_RENDERER)} ${JSON.stringify(dir)} ` +
+    `--read-only --reject-all-button --exit-when-all-rated --filter-slides ${JSON.stringify(a.changed.join(","))} ` +
+    `--port ${port} --task-title ${JSON.stringify(`MERGE rating — ${a.phase}: ${a.label}`)}`;
   try {
-    execSync(
-      `cd ${JSON.stringify(a.repo)} && npx tsx ${JSON.stringify(join(a.repo, MERGE_RATE_REL))} ${JSON.stringify(inputPath)} ${JSON.stringify(outPath)}`,
-      { stdio: "inherit", timeout: a.timeoutMs },
-    );
-    const v = JSON.parse(readFileSync(outPath, "utf8")) as Partial<MergeRatingVerdict>;
-    return { green: v.green ?? [], red: v.red ?? [], stopAll: !!v.stopAll };
+    execSync(cmd, { stdio: "inherit", timeout: a.timeoutMs });
+    const ratings = JSON.parse(readFileSync(join(dir, "ratings.json"), "utf8")) as Record<string, { status?: string }>;
+    const green: string[] = [], red: string[] = [];
+    for (const sid of a.changed) (ratings[sid]?.status === "good" ? green : red).push(sid);
+    return { green, red };
   } catch (e) {
-    console.error(`[merge-rate] rating UI failed (${(e as Error).message}) — treating as reject-all & stop`);
-    return { green: [], red: a.changed, stopAll: true };
+    console.error(`[merge-rate] rating UI failed (${(e as Error).message}) — treating every changed slide as RED (nothing promoted without a human OK)`);
+    return { green: [], red: a.changed };
   } finally {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* */ }
   }
