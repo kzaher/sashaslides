@@ -16,10 +16,9 @@
     "annotation": "/tmp/sxs-complex/annotations/slide_03.png"
   },
   "slide_04": {
-    "status": "bad",
-    "comment": "Bad tick positioning, not centered.",
-    "ratedAt": "2026-07-05T18:14:21.427Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_04.png"
+    "status": "good",
+    "ratedAt": "2026-07-12T00:56:16.602Z",
+    "comment": "Bad tick positioning, not centered."
   },
   "slide_05": {
     "status": "good",
@@ -65,10 +64,9 @@
     "ratedAt": "2026-07-05T18:14:46.049Z"
   },
   "slide_13": {
-    "status": "bad",
-    "comment": "Why are there so many rendered regions on the right, this looks like it should be possible to support trapezoid shape and more generic shapes with gradient.",
-    "ratedAt": "2026-07-05T18:15:34.607Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_13.png"
+    "status": "good",
+    "ratedAt": "2026-07-12T00:56:28.337Z",
+    "comment": "Why are there so many rendered regions on the right, this looks like it should be possible to support trapezoid shape and more generic shapes with gradient."
   },
   "slide_14": {
     "status": "good",
@@ -96,10 +94,9 @@
     "ratedAt": "2026-06-30T23:18:32.658Z"
   },
   "slide_19": {
-    "status": "bad",
-    "comment": "The icons on the left side of buttons look like they have white background. On the bottom side the red text is misaligned with exclamation marks.",
-    "ratedAt": "2026-07-05T18:17:30.081Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_19.png"
+    "status": "good",
+    "ratedAt": "2026-07-12T00:56:47.262Z",
+    "comment": "The icons on the left side of buttons look like they have white background. On the bottom side the red text is misaligned with exclamation marks."
   },
   "slide_20": {
     "status": "good",

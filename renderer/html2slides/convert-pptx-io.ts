@@ -104,25 +104,35 @@ export async function extractFromHtml(
   // a try/finally that always closes the client + tab.
   let client: Awaited<ReturnType<typeof CDP>> | null = null;
   try {
-  await sleep(1200);
   client = await CDP({ target: tab, port: CDP_PORT });
   const { Page, Runtime, Emulation } = client;
   await Page.enable();
   await Runtime.enable();
+  // Wait for the REAL page-load event, not a fixed sleep. The tab was opened
+  // with the file:// URL, so `load` may have already fired before we connected
+  // — check readyState first, else await the event (bounded, so a stuck page
+  // can't hang forever).
+  {
+    const loaded = Page.loadEventFired();
+    const rs = await Runtime.evaluate({ expression: "document.readyState", returnByValue: true });
+    if (rs.result?.value !== "complete") await Promise.race([loaded, sleep(5000)]);
+  }
   await Emulation.setDeviceMetricsOverride({ width: SLIDE_W_PX, height: SLIDE_H_PX, deviceScaleFactor: scale, mobile: false });
-  await sleep(800);
-  // Robust font-readiness gate. `document.fonts.ready` can resolve BEFORE a
-  // fonts.googleapis.com @font-face stylesheet has registered its faces, so
-  // extraction would measure FALLBACK-font metrics (~1px shorter line boxes) and
-  // every block drifts up cumulatively ("moved up, worse toward the bottom").
-  // Wait for stylesheets, force-load every declared face, then poll fonts.check()
-  // for every family actually used before extracting.
+  // Asset-readiness gate — screenshot only once every asset the render depends
+  // on has actually finished loading, never on a timer. Waits for: stylesheets,
+  // every <img>, and every @font-face. `document.fonts.ready` can resolve
+  // BEFORE a fonts.googleapis.com face registers (extraction would then measure
+  // FALLBACK-font metrics — ~1px shorter line boxes, every block drifting up
+  // cumulatively), so we ALSO poll fonts.check() per used family. Each wait is
+  // individually bounded (setTimeout fallback) so one stuck asset can't hang the
+  // render.
   await Runtime.evaluate({
     awaitPromise: true,
     returnByValue: true,
     expression: `(async () => {
-      await Promise.all([...document.querySelectorAll('link[rel=stylesheet]')].map(
-        l => l.sheet ? 0 : new Promise(r => { l.addEventListener('load', r); l.addEventListener('error', r); setTimeout(r, 3000); })));
+      const settle = (el) => new Promise(r => { el.addEventListener('load', r); el.addEventListener('error', r); setTimeout(r, 3000); });
+      await Promise.all([...document.querySelectorAll('link[rel=stylesheet]')].map(l => l.sheet ? 0 : settle(l)));
+      await Promise.all([...document.images].map(img => img.complete ? 0 : settle(img)));
       await Promise.all([...document.fonts].map(f => f.load().catch(() => {})));
       await document.fonts.ready;
       const fams = [...new Set([...document.querySelectorAll('*')].map(

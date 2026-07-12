@@ -732,14 +732,15 @@ export function main(args: {
           BRANCH_CD_RENDERER,
           `rm -rf ${reg} "$ROOT/${task.scratch_dir}/reg-diffs" && mkdir -p ${reg}`,
           `ALL=$(ls "$ROOT/${fx}"/slide_*.html | xargs -n1 basename | sed 's/[.]html$//' | sort -V | paste -sd,)`,
-          // RECORD_CONCURRENCY=1 forces SEQUENTIAL rendering of the whole-deck
-          // AFTER pass. Concurrent Chrome tabs race on web-font load, shifting
-          // text metrics → nondeterministic pptx → PHANTOM off-target regressions
-          // (this falsely failed flex-panel-width: a no-op fix drew a disjoint set
-          // of "changed" slides each run). Sequential rendering is empirically
-          // byte-deterministic, so the off-target diff reflects ONLY the fix.
-          // AFTER = this branch (has the fix), rendered to the shared /tmp scratch.
-          `RECORD_CONCURRENCY=1 npx tsx "$ROOT/${rec}" --mode pptx --fixtures "$ROOT/${fx}" --slides "$ALL" --out ${reg}/after-all`,
+          // Whole-deck AFTER pass. Formerly RECORD_CONCURRENCY=1 because
+          // concurrent Chrome tabs raced on web-font load → shifted text metrics
+          // → nondeterministic pptx → PHANTOM off-target regressions (this falsely
+          // failed flex-panel-width). That race is now closed by the
+          // asset-readiness gate in convert-pptx-io (waits for stylesheets/fonts/
+          // images, not a timer): verified all 34 fixtures render byte-identical
+          // extractSlideXml + extractRenderedPartsHash at concurrency=5 vs serial,
+          // at 2.6× the speed. Env-overridable back to 1 via MERGE_RENDER_CONCURRENCY.
+          `RECORD_CONCURRENCY=${process.env.MERGE_RENDER_CONCURRENCY || "5"} npx tsx "$ROOT/${rec}" --mode pptx --fixtures "$ROOT/${fx}" --slides "$ALL" --out ${reg}/after-all`,
           // BEFORE = the pristine whole-deck baseline recordBeforePptx staged at
           // startup (this branch's `before-all`, rendered BEFORE the worker ran).
           // We do NOT re-render it here: mounting a fresh baseline overlay inside

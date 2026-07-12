@@ -241,8 +241,10 @@ export interface DefaultRecorderDeps {
 /**
  * The production recorder: renders the WHOLE deck once per attempt with
  * record-rendering `--mode full` (Google thumbnail = pixel truth) + reads the
- * per-slide pptx (xml + rendered-parts). Sequential (RECORD_CONCURRENCY=1) so a
- * concurrency race can't be misread as instability. The render for an attempt is
+ * per-slide pptx (xml + rendered-parts). Runs at RECORD_CONCURRENCY=5 (was 1);
+ * the asset-readiness gate makes concurrent extraction byte-deterministic, so a
+ * concurrency race can no longer be misread as instability (verified: 34
+ * fixtures byte-identical xml+parts at 5 vs serial). The render for an attempt is
  * memoized — the first slide of attempt K renders all of attempt K.
  */
 export function defaultStabilityRecorder(deps: DefaultRecorderDeps): StabilityRecorder {
@@ -261,7 +263,7 @@ export function defaultStabilityRecorder(deps: DefaultRecorderDeps): StabilityRe
       // found"). resolve() leaves an already-absolute fixturesDir untouched.
       const fixturesAbs = resolve(deps.repo, deps.fixturesDir);
       execSync(
-        `cd "${join(deps.repo, "renderer")}" && RECORD_CONCURRENCY=1 npx tsx "${join(deps.repo, REC)}" ` +
+        `cd "${join(deps.repo, "renderer")}" && RECORD_CONCURRENCY=${process.env.MERGE_RENDER_CONCURRENCY || "5"} npx tsx "${join(deps.repo, REC)}" ` +
           `--mode full --fixtures "${fixturesAbs}" --slides "${csv}" ` +
           `--title "stability-a${attemptIdx}-${Date.now()}" --out "${outDir}"`,
         { stdio: "ignore", timeout: deps.timeoutMs ?? 20 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 },

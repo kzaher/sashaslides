@@ -710,6 +710,17 @@ export interface MergeRenderSeam {
 
 const REC_REL = "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts";
 
+// Concurrency for the merge/baseline GATE renders. Was 1 (fully serial) as a
+// belt-and-suspenders against (a) the tab-leak cascade and (b) web-font-load
+// races producing nondeterministic metrics that would FALSE-ripple the gate.
+// Both are now closed: the leak by reap-tabs-at-start + screenshot tab-reuse +
+// finally-close; the font race by the asset-readiness gate in convert-pptx-io.
+// Verified: at concurrency=5, all 34 fixtures produce byte-identical
+// extractSlideXml + extractRenderedPartsHash vs serial (the gate sees no
+// change) at 2.6× the speed. Env-overridable to drop back to 1 if Chrome ever
+// gets unhappy on a constrained host.
+const GATE_RENDER_CONCURRENCY = process.env.MERGE_RENDER_CONCURRENCY || "5";
+
 /**
  * Build the in-overlay merge-render command + the HOST path its output lands at.
  * Exported so a test can pin the two path-handshake invariants that silently
@@ -730,7 +741,7 @@ export function mergeRenderCommand(
   const recFromRenderer = opts.recRel.replace(/^renderer\//, "");
   const mode = opts.mode ?? "full";
   const cmd =
-    `cd renderer && RECORD_REAP_TABS=1 RECORD_CONCURRENCY=1 npx tsx ${JSON.stringify(recFromRenderer)} ` +
+    `cd renderer && RECORD_REAP_TABS=1 RECORD_CONCURRENCY=${GATE_RENDER_CONCURRENCY} npx tsx ${JSON.stringify(recFromRenderer)} ` +
     `--mode ${mode} --fixtures ${JSON.stringify(opts.fixturesDir)} --slides ${JSON.stringify(opts.slidesCsv)} ` +
     `--title ${JSON.stringify(opts.title)} --out ${JSON.stringify("../" + opts.outRel)}`;
   return { cmd, outDir: join(ws.upperDir(), opts.outRel) };
@@ -783,7 +794,7 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
       baselineDir = join(scratch, "baseline");
       mkdirSync(baselineDir, { recursive: true });
       execRepo(
-        `cd "${join(repo, "renderer")}" && RECORD_REAP_TABS=1 RECORD_CONCURRENCY=1 npx tsx "${join(repo, REC_REL)}" ` +
+        `cd "${join(repo, "renderer")}" && RECORD_REAP_TABS=1 RECORD_CONCURRENCY=${GATE_RENDER_CONCURRENCY} npx tsx "${join(repo, REC_REL)}" ` +
           `--mode full --fixtures "${fixturesDir}" --slides "${csv()}" --title "llm-merge-base-${Date.now()}" --out "${baselineDir}"`,
         timeoutMs,
       );

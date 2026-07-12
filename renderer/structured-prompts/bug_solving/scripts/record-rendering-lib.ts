@@ -108,13 +108,18 @@ async function pLimit<T, R>(concurrency: number, items: readonly T[], fn: (item:
  * DOM-extraction AND screenshots). Each concurrent tab is a WebSocket to Chrome,
  * and too many at once make Chrome drop connections ("socket hang up") and race
  * on web-font load (nondeterministic metrics). Env-overridable via
- * `RECORD_CONCURRENCY`; the merge / regression render sets it to `1` for a fully
- * sequential, drop-free, byte-deterministic pass. Default lowered to 2 (was 4) —
- * reliability over raw speed.
+ * `RECORD_CONCURRENCY`. Default is 5: the two historical hazards of parallel
+ * tabs are now closed — the tab-leak cascade by reap-tabs-at-start + screenshot
+ * tab-reuse + finally-close, and the web-font-load race (nondeterministic
+ * metrics) by the asset-readiness gate in convert-pptx-io. Verified: all 34
+ * fixtures render byte-identical extractSlideXml + extractRenderedPartsHash at
+ * concurrency=5 vs serial, at ~2.6× the speed. Set RECORD_CONCURRENCY=1 (or
+ * MERGE_RENDER_CONCURRENCY=1 for the gate renders) to drop back to serial on a
+ * constrained host, or if many forks render at once and 5×N tabs pressure Chrome.
  */
 function chromeConcurrency(): number {
   const n = Number(process.env.RECORD_CONCURRENCY);
-  return Number.isFinite(n) && n > 0 ? n : 2;
+  return Number.isFinite(n) && n > 0 ? n : 5;
 }
 
 /**
