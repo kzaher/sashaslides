@@ -33,6 +33,17 @@
       </select>
     </label>
 
+    <!-- Optional target document. EMPTY → installs the bridge (agent → this
+         deck). SET → the same install.sh, with ?doc=<id>, binds the SashaSlides
+         ADD-ON to that deck/doc (clasp) instead. Every command below rewrites
+         live to carry the id. -->
+    <label class="hint" style="font-weight:600;flex-direction:column;align-items:stretch;gap:4px;margin-top:8px">
+      Target document <span style="font-weight:400">(optional — set to install the add-on onto a specific deck/doc)</span>
+      <input id="install-doc-input" type="text" style="min-width:0"
+             placeholder="empty = bridge · or a doc id / https://docs.google.com/…/d/&lt;id&gt;/edit">
+      <span id="install-doc-note" class="hint" style="font-weight:400;margin:0"></span>
+    </label>
+
     <div class="method" id="method-script">
       <p class="hint">One line. Asks where to install, builds a private Python
         <code>venv</code> (nothing global), adds the skill to Claude Code or Codex
@@ -171,20 +182,6 @@ docker exec sasha-slides-bridge sh -c "grep -iE 'listener opened|relay endpoint|
 
 </div><!-- /panel-manual -->
 
-
-<!-- ── Install the add-on onto a specific deck / doc ─────────────────────── -->
-<section id="install-section">
-  <h2>Install add-on</h2>
-  <p class="hint">Paste a Google Slides deck or Google Doc id (or its URL) to get a one-line
-    installer that binds the SashaSlides add-on to that document. Auth persists across runs
-    (re-login only when the stored token expires); re-running updates the same script.</p>
-  <div class="row">
-    <input id="install-doc-input" type="text" style="flex:1;min-width:0"
-           placeholder="doc id or https://docs.google.com/presentation/d/…/edit">
-    <button id="install-copy-btn" disabled>Copy</button>
-  </div>
-  <pre id="install-cmd" style="white-space:pre-wrap;word-break:break-all;margin:6px 0 0;font-size:12px"></pre>
-</section>
 
 <!-- ── Diagrams (SHARED — rendered under BOTH Automatic & Manual so you can
      collaborate on diagrams while an agent is connected. Single instance: the
