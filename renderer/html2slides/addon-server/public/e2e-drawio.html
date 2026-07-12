@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>drawio e2e harness</title>
+<style>html,body{margin:0;height:100%}#f{width:100%;height:100%;border:0}</style>
+</head>
+<body>
+<iframe id="f" title="drawio"></iframe>
+<script>
+// E2E harness for the self-hosted drawio editor (used by e2e/drawio-editor.e2e.ts).
+// Exposes __run(xml): load the editor, seed the XML, run the SAME dual-export
+// chain the sidebar/edit-tab use (xmlpng → xmlsvg), resolve {png, svg, xml}.
+(() => {
+  const frame = document.getElementById("f");
+  const post = (o) => { try { frame.contentWindow.postMessage(JSON.stringify(o), "*"); } catch (e) {} };
+  window.__run = (xml) => new Promise((resolve, reject) => {
+    let png = null;
+    const onMsg = (ev) => {
+      if (ev.source !== frame.contentWindow) return;
+      let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.event === "init") {
+        post({ action: "load", xml: xml || "", autosave: 0 });
+        setTimeout(() => post({ action: "export", format: "xmlpng", scale: 2 }), 800);
+      } else if (m.event === "export") {
+        if (png === null) { png = m.data; post({ action: "export", format: "xmlsvg" }); }
+        else { window.removeEventListener("message", onMsg); resolve({ png, svg: m.data, xml: m.xml || xml }); }
+      }
+    };
+    window.addEventListener("message", onMsg);
+    setTimeout(() => { window.removeEventListener("message", onMsg); reject(new Error("editor round-trip timed out (30s)")); }, 30000);
+    frame.src = "/drawio/?embed=1&proto=json&spin=1";
+  });
+})();
+</script>
+</body>
+</html>

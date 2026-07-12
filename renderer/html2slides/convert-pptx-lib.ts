@@ -195,6 +195,18 @@
 import * as pptxgenModule from "pptxgenjs";
 import type PptxGenJS from "pptxgenjs";
 import JSZip from "jszip";
+/** Deterministic 8-hex digest (FNV-1a 32-bit) — platform-neutral: this module
+ * is ALSO bundled for the browser (Sidebar.html), where node:crypto doesn't
+ * exist. Collision strength is irrelevant here; the digest only makes drawio
+ * diagramIds stable across re-runs of the converter. */
+function fnv1a8(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
 
 // pptxgenjs Slide / option types we reuse below. Keeping a single set of
 // aliases here means the body of buildPptx talks about typed objects
@@ -239,12 +251,10 @@ const PX2PT = SLIDE_W_IN / SLIDE_W_PX * 72; // 10/1280*72 = 0.5625
 // (spc=150), matching the measured target.
 const LETTER_SPACING_PX2PT = 0.75;
 
-// Workstream E (drawio round-trip): the magenta marker fill that flags the
-// off-canvas source text box. The add-on scans the Slides API for a text box
-// whose fill is exactly this colour to rediscover a diagram's editable
-// mxGraph XML. Off-canvas (below the slide) so it never paints; convention
-// shared with the add-on side. CONFIG.drawioMetaColor == "FF00FF".
-const CONFIG = { drawioMetaColor: "FF00FF" } as const;
+// Phase 1 (drawio round-trip): the editable drawio source is stored as an
+// `.drawio.svg` on Google Drive and linked from the on-slide image (see
+// runConvertPptx), NOT in an on-slide magenta marker text box. The former
+// `CONFIG.drawioMetaColor` ("FF00FF") off-canvas-marker convention is retired.
 
 function px2in(px: number): number { return px * PX2IN; }
 
@@ -1005,11 +1015,12 @@ interface ElementCommon {
   /** Pre-assigned group id shared with an underlay patch — currently unused
    * by extract-dom and reserved for future synthetic grouping. */
   readonly _groupId?: string;
-  /** Workstream E: true only on the rendered diagram element (<svg>/<img>)
-   * that pairs with an `Extraction.drawioSource`. When set, the converter
-   * tags this element's image `objectName = DRAWIO_IMG_<n>` to link it to the
-   * off-canvas `DRAWIO_SRC_<n>` source text box. Undefined on non-drawio
-   * slides → the converter does nothing extra (byte-identical preserved). */
+  /** Phase 1 (drawio): true only on the rendered diagram element (<svg>/<img>)
+   * that pairs with an `Extraction.drawioSource`. When set, the converter tags
+   * this element's image with `altText = drawio:<diagramId>` and collects the
+   * source into `drawioDiagrams` for the post-upload Drive upload + image link
+   * (see runConvertPptx step 4). Undefined on non-drawio slides → the
+   * converter does nothing extra (byte-identical preserved). */
   readonly _drawioPaired?: boolean;
 }
 
@@ -1186,6 +1197,24 @@ export interface Extraction {
    * converter emits one extra off-canvas marker text box (see buildPptx) so
    * the add-on can rediscover + re-edit the diagram. */
   readonly drawioSource?: string;
+  /** Phase 1: outerHTML of the rendered diagram element WHEN it is an inline
+   * `<svg>`, so `buildEditableSvg` can wrap the real SVG geometry as the
+   * editable drawio image on Drive. Omitted when the paired visual is a raster
+   * `<img>`/PNG (a minimal wrapper is emitted instead) and on every non-drawio
+   * slide (byte-identical preserved). */
+  readonly drawioBaseSvg?: string;
+}
+
+/** Phase 1: one editable drawio diagram lifted out of a slide during buildPptx.
+ * `runConvertPptx` uploads each as a `.drawio.svg` to Drive after the
+ * presentation upload, then links the on-slide image to it. Empty array when no
+ * slide carried a drawio source. */
+export interface DrawioDiagram {
+  readonly slideIndex1: number;   // 1-based slide number
+  readonly diagramId: string;     // `slide<n>_<sha256(xml).slice(0,8)>`
+  readonly xml: string;           // editable mxGraph/mxfile XML
+  readonly baseSvg?: string;      // rendered <svg> outerHTML when available
+  readonly altText: string;       // `drawio:<diagramId>` (mirrors the image's descr)
 }
 
 /** Convenience for the buildPptx input shape: paired extraction + per-element
@@ -1443,7 +1472,7 @@ function renderTableAsShapes(slide: Slide, el: TableElement): void {
 export function buildPptx(
   slides: readonly SlideInput[],
   title: string,
-): { pres: PresentationWithRegistries; renderedRegions: RenderedRegion[][] } {
+): { pres: PresentationWithRegistries; renderedRegions: RenderedRegion[][]; drawioDiagrams: DrawioDiagram[] } {
   // ESM/CJS interop — `import * as pptxgenModule from "pptxgenjs"` lands a
   // module-namespace wrapper whose shape varies by loader:
   //   - Plain Node ESM:   M.default = <ctor>                    (1-level wrap)
@@ -1471,6 +1500,7 @@ export function buildPptx(
   pres.layout = "CUSTOM";
 
   const renderedRegions: RenderedRegion[][] = [];
+  const drawioDiagrams: DrawioDiagram[] = [];
 
   for (let si = 0; si < slides.length; si++) {
     const { extraction, visualPngs } = slides[si];
@@ -3195,13 +3225,29 @@ export function buildPptx(
               data: `image/png;base64,${bytesToBase64(buf)}`,
               x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
             };
-            // Workstream E: link a drawio-rendered diagram image to its
-            // off-canvas source box. `DRAWIO_IMG_<si>` matches the
-            // `DRAWIO_SRC_<si>` text box emitted after this element loop. Set
-            // ONLY when extract-dom flagged this element as the diagram pair —
-            // a no-op for every other image (objectName stays unset, byte
-            // output unchanged).
-            if (el._drawioPaired) imgOpts.objectName = `DRAWIO_IMG_${si}`;
+            // Phase 1: a drawio-rendered diagram image gets a DETERMINISTIC
+            // identity so the post-upload pass (runConvertPptx) can find it in
+            // the imported Slides deck and link it to its editable `.drawio.svg`
+            // on Drive. `objectName` sets the pptx cNvPr name (does NOT survive
+            // Slides import) and `altText` sets the cNvPr descr (DOES survive as
+            // the image's description/alt-text). Gated on `_drawioPaired` +
+            // `drawioSource` — a strict no-op for every other image (byte output
+            // unchanged on non-drawio slides).
+            if (el._drawioPaired && extraction.drawioSource) {
+              const si1 = si + 1;
+              const hash = fnv1a8(extraction.drawioSource);
+              const diagramId = `slide${si1}_${hash}`;
+              const altText = `drawio:${diagramId}`;
+              imgOpts.objectName = `DRAWIO_IMG_${si}`;
+              imgOpts.altText = altText;
+              drawioDiagrams.push({
+                slideIndex1: si1,
+                diagramId,
+                xml: extraction.drawioSource,
+                baseSvg: extraction.drawioBaseSvg,
+                altText,
+              });
+            }
             // Drop-shadow plumbed through from extract-dom.ts's clipped-
             // container branch (e.g. slide_12 .device's `box-shadow: 0 0 0
             // 2px #333`). Rendering the shadow natively via pptxgenjs lets
@@ -3249,50 +3295,15 @@ export function buildPptx(
       }
     }
 
-    // --- Workstream E: off-canvas drawio source marker ---
-    // When this slide carried a `#drawio-source` script, stash its editable
-    // mxGraph XML in ONE extra text box positioned BELOW the slide (y past the
-    // slide bottom), filled with the magenta marker colour (CONFIG.drawioMetaColor
-    // == "FF00FF"), and named `DRAWIO_SRC_<si>` to mirror the diagram image's
-    // `DRAWIO_IMG_<si>` objectName. It is off-canvas so it never renders, but
-    // the Slides API can discover it (scan for the marker fill / the
-    // DRAWIO_SRC_* name) and re-open the diagram for editing.
-    //
-    // BYTE-IDENTICAL GUARANTEE: this entire block is gated on
-    // `extraction.drawioSource` being set. extract-dom only sets it when a
-    // `#drawio-source` script is present, so for every other slide nothing new
-    // is emitted and the output is unchanged.
-    const drawioXml = extraction.drawioSource;
-    if (drawioXml) {
-      // A PROMINENT magenta panel placed BELOW the slide (off-canvas → not shown
-      // in the slideshow or thumbnail), holding the editable drawio source. It's
-      // styled to be unmistakable in the editor + selection pane: bold header
-      // label, dark-magenta border, and READABLE white text on the marker fill
-      // (CONFIG.drawioMetaColor). Named DRAWIO_SRC_<si> to mirror DRAWIO_IMG_<si>
-      // so the add-on can pair the source with its rendered diagram and re-open it.
-      slide.addText(
-        [
-          { text: "▼  drawio source — editable · not shown in slideshow · do not delete  ▼\n", options: { bold: true, fontSize: 11, color: "FFFFFF" } },
-          // Raw XML kept intact for clean re-parsing (parser strips to "<mxfile").
-          { text: drawioXml, options: { fontSize: 8, color: "FFFFFF" } },
-        ],
-        {
-          objectName: `DRAWIO_SRC_${si}`,
-          x: 0.3,
-          y: SLIDE_H_IN + 0.35,        // clearly below the slide bottom edge
-          w: SLIDE_W_IN - 0.6,
-          h: 1.6,
-          fill: { color: CONFIG.drawioMetaColor }, // prominent magenta marker
-          line: { color: "8B008B", width: 2 },     // dark-magenta border for extra pop
-          align: "left",
-          valign: "top",
-          isTextBox: true,
-        },
-      );
-    }
+    // Phase 1: the drawio editable source is NO LONGER stashed in an on-slide
+    // hidden magenta text box. Instead the paired image (tagged with
+    // `altText = drawio:<diagramId>` above) is collected into `drawioDiagrams`,
+    // and runConvertPptx uploads each as an editable `.drawio.svg` to Drive
+    // after the presentation upload, then links the on-slide image to it. This
+    // keeps the slide XML free of the off-canvas marker box entirely.
   }
 
-  return { pres, renderedRegions };
+  return { pres, renderedRegions, drawioDiagrams };
 }
 
 // --- Gradient post-processing ---

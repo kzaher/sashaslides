@@ -1,42 +1,4 @@
-#!/usr/bin/env npx tsx
 /**
- * build-addon.ts — Bundles the Google Slides add-on (sidebar + bound Apps
- * Script) from the shared browser conversion core.
- *
- * It mirrors build.ts (same esbuild config / vendor inlining) but targets the
- * add-on instead of a standalone page. Output is a ready-to-push Apps Script
- * project under the repo-root dist/ (gitignored), mirroring the source path:
- *
- *   dist/renderer/html2slides/addon/
- *     appsscript.json   — manifest: V8, OAuth scopes (incl. external_request), Advanced Drive Service
- *     Code.gs           — server: onOpen menu + showSidebar (thin shell) + fetchExternalHtml + insertPptxAfterCurrent
- *     Sidebar.html      — fallback sidebar with the client bundle inlined (the thin-shell
- *                         showSidebar() no longer uses it; kept for offline/standalone use)
- *
- * THIN SHELL: showSidebar() now fetches /shell.html from the externally-hosted
- * Node server (addon-server) via UrlFetchApp, bakes in SERVER_ORIGIN, and serves
- * that — the heavy UI loads cross-origin from the server, so the add-on shell is
- * tiny and the UI updates without redeploying. Set SERVER_ORIGIN in Code.gs.
- *
- * Push it with clasp (`cd dist/renderer/html2slides/addon && clasp push`) or
- * paste the three files into Extensions → Apps Script. See addon/README.md.
- */
-import { build, transformSync } from "esbuild";
-import { execSync } from "child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
-import { dirname, join, resolve } from "path";
-import { fileURLToPath } from "url";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, "../../..");
-const OUT = join(ROOT, "dist", "renderer", "html2slides", "addon");
-
-function readText(p: string): string { return readFileSync(p, "utf-8"); }
-
-// ---------------------------------------------------------------------------
-// Apps Script server (Code.gs) — plain V8 JavaScript, served as a .gs file.
-// ---------------------------------------------------------------------------
-const CODE_GS = `/**
  * html2slides — Google Slides add-on server.
  *
  * The sidebar (Sidebar.html) builds the .pptx entirely client-side and sends
@@ -57,7 +19,7 @@ const CODE_GS = `/**
 // !!! SET THIS to the https origin of your deployed addon-server (Caddy/TLS in
 // front of it). No trailing slash. e.g. 'https://slides.your-domain.com'.
 // -----------------------------------------------------------------------------
-var SERVER_ORIGIN = 'https://slides.example.com';
+var SERVER_ORIGIN = 'https://sashaslides.com';
 
 // ── container detection: the SAME script can be bound to a Slides deck OR a
 // Google Doc. Every drawio entry point routes on this instead of assuming
@@ -258,12 +220,12 @@ function slidesFetch_(url, auth) {
     // project — extract it verbatim (reconstructing it ourselves risks pointing at
     // the wrong project, which silently enables nothing). The cleaner fix is to
     // paste the manifest declaring the Slides advanced service (auto-enables the API).
-    var m = text.match(/https?:\\/\\/console\\.(?:developers|cloud)\\.google\\.com\\/[^\\s"'\\\\]+/);
+    var m = text.match(/https?:\/\/console\.(?:developers|cloud)\.google\.com\/[^\s"'\\]+/);
     if (m) {
-      throw new Error('The Google Slides API is not enabled for this add-on\\u2019s Google ' +
-        'Cloud project. EITHER re-paste the manifest (Project Settings \\u2192 appsscript.json) ' +
+      throw new Error('The Google Slides API is not enabled for this add-on\u2019s Google ' +
+        'Cloud project. EITHER re-paste the manifest (Project Settings \u2192 appsscript.json) ' +
         'which auto-enables it, OR open this exact link, click ENABLE, wait ~2 min, then retry ' +
-        'Export (don\\u2019t switch projects in the console):\\n' + m[0]);
+        'Export (don\u2019t switch projects in the console):\n' + m[0]);
     }
     throw new Error('Slides API permission error (403): ' + text.slice(0, 400));
   }
@@ -415,11 +377,11 @@ function slideXmlMap_(presId, auth) {
 // off-canvas magenta XML box is retired (no writer remains; convert-pptx now
 // links the imported image to Drive in its post-upload pass).
 
-var DRAWIO_EXT_RE = /\\.drawio(\\.svg|\\.png)?$/i;
+var DRAWIO_EXT_RE = /\.drawio(\.svg|\.png)?$/i;
 
 /** Drive fileId from a drive.google.com URL (file/d/<id>/… or open?id=<id>). */
 function drawioFileIdFromUrl_(url) {
-  var m = String(url || '').match(/\\/file\\/d\\/([A-Za-z0-9_-]+)/) ||
+  var m = String(url || '').match(/\/file\/d\/([A-Za-z0-9_-]+)/) ||
           String(url || '').match(/[?&]id=([A-Za-z0-9_-]+)/);
   return m ? m[1] : null;
 }
@@ -451,7 +413,7 @@ function svgAttrUnescape_(s) {
 
 /** mxfile XML out of editable-SVG content (root content="…" attribute). */
 function xmlFromEditableSvg_(svg) {
-  var m = String(svg).match(/<svg[^>]*\\scontent="([^"]*)"/);
+  var m = String(svg).match(/<svg[^>]*\scontent="([^"]*)"/);
   return m ? svgAttrUnescape_(m[1]) : null;
 }
 
@@ -460,8 +422,8 @@ function xmlFromEditableSvg_(svg) {
  *  (the client extracts the PNG text chunk via /api/drawio/detect). */
 function xmlFromDriveFile_(fileId, name) {
   var f = DriveApp.getFileById(fileId);
-  if (/\\.drawio\\.svg$/i.test(name)) return xmlFromEditableSvg_(f.getBlob().getDataAsString());
-  if (/\\.drawio$/i.test(name)) return f.getBlob().getDataAsString();
+  if (/\.drawio\.svg$/i.test(name)) return xmlFromEditableSvg_(f.getBlob().getDataAsString());
+  if (/\.drawio$/i.test(name)) return f.getBlob().getDataAsString();
   return null;
 }
 
@@ -516,7 +478,7 @@ function listDeckImages() {
         out.push({
           id: img.getObjectId(),
           slideIndex: s + 1,
-          name: dl.name || ('Diagram \\u2014 slide ' + (s + 1)),
+          name: dl.name || ('Diagram \u2014 slide ' + (s + 1)),
           dataUrl: 'data:' + (blob.getContentType() || 'image/png') + ';base64,' + Utilities.base64Encode(blob.getBytes()),
           // current frame as NORMALIZED [0,1] slide coords, so the agent can reason about layout
           box: { x: img.getLeft() / pw, y: img.getTop() / ph, w: img.getWidth() / pw, h: img.getHeight() / ph },
@@ -657,18 +619,18 @@ function showDrawioDialog(payload) {
     // client-side; scale:4 → 5120x2880 for a 1280x720 diagram), then an xmlsvg
     // (rendered editable SVG) that saveDiagram writes to the Drive-side
     // <diagramId>.drawio.svg. drawio replies {event:"export",format,data,xml}.
-    'saveBtn.onclick=function(){if(saving)return;saving=true;saveBtn.disabled=true;setMsg("Exporting\\u2026");' +
-    'pendingPng=null;post({action:"export",format:"xmlpng",scale:4,spin:"Exporting\\u2026"})};' +
+    'saveBtn.onclick=function(){if(saving)return;saving=true;saveBtn.disabled=true;setMsg("Exporting\u2026");' +
+    'pendingPng=null;post({action:"export",format:"xmlpng",scale:4,spin:"Exporting\u2026"})};' +
     'function commit(png,svg,xml){var err=function(e){saving=false;saveBtn.disabled=false;setMsg("");' +
-    'alert("Save failed: "+((e&&e.message)||e))};setMsg("Saving\\u2026");' +
+    'alert("Save failed: "+((e&&e.message)||e))};setMsg("Saving\u2026");' +
     'google.script.run.withSuccessHandler(done).withFailureHandler(err)' +
     '.saveDiagram({imageId:IMAGE_ID,diagramId:DIAGRAM_ID,png:png,svg:svg,xml:xml})}' +
     'window.addEventListener("message",function(ev){var m=ev.data;if(typeof m!=="string")return;' +
     'try{m=JSON.parse(m)}catch(e){return}' +
     'if(m.event==="init"){post({action:"load",xml:XML,autosave:1})}' +
     'else if(m.event==="export"){' +
-    'if(pendingPng===null){pendingPng=m.data;setMsg("Exporting SVG\\u2026");' +
-    'post({action:"export",format:"xmlsvg",spin:"Exporting\\u2026"})}' +
+    'if(pendingPng===null){pendingPng=m.data;setMsg("Exporting SVG\u2026");' +
+    'post({action:"export",format:"xmlsvg",spin:"Exporting\u2026"})}' +
     'else{commit(pendingPng,m.data,m.xml||XML)}}' +
     'else if(m.event==="exit"){if(!saving)done()}});' +
     '</' + 'script></body></html>';
@@ -855,242 +817,3 @@ function getSelectedDrawio() {
   }
   return null;
 }
-`;
-
-// ---------------------------------------------------------------------------
-// Apps Script manifest. Full presentations + drive scopes are needed because
-// we openById() a *separate* converted file and write into the active deck;
-// the Advanced Drive Service (v3) provides the pptx->Slides conversion (upload
-// a blob with a Google target mimeType). v2's convert flag has been sunset.
-// ---------------------------------------------------------------------------
-const APPSSCRIPT_JSON = JSON.stringify({
-  timeZone: "Etc/UTC",
-  exceptionLogging: "STACKDRIVER",
-  runtimeVersion: "V8",
-  oauthScopes: [
-    "https://www.googleapis.com/auth/presentations",
-    // Docs container support (drawio side panel in Google Docs — the same
-    // script can be bound to a Doc; containerInfo_() routes on the host).
-    "https://www.googleapis.com/auth/documents",
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/script.container.ui",
-    // UrlFetchApp — showSidebar() fetches the thin shell from the Node server
-    // and fetchExternalHtml() relays external URLs for the UI (CORS-safe path).
-    "https://www.googleapis.com/auth/script.external_request",
-  ],
-  dependencies: {
-    enabledAdvancedServices: [
-      { userSymbol: "Drive", serviceId: "drive", version: "v3" },
-      // Declaring the Slides advanced service makes Apps Script auto-enable the
-      // Slides API in the script's GCP project, so exportSlidesZip's getThumbnail
-      // REST calls (via UrlFetchApp) aren't 403'd on a fresh deploy.
-      { userSymbol: "Slides", serviceId: "slides", version: "v1" },
-    ],
-  },
-}, null, 2);
-
-async function main() {
-  // 1. Compile extract-dom.ts -> JS string (same as build.ts).
-  const extractTs = readText(join(HERE, "..", "extract-dom.ts"));
-  const extractJs = transformSync(extractTs, { loader: "ts", target: "es2020" }).code;
-  console.log(`extract-dom.ts → ${extractJs.length.toLocaleString()} bytes JS`);
-
-  // 2. Bundle addon-main.ts (same aliases/define as build.ts).
-  const stubEmpty = join(HERE, "stubs", "empty.ts");
-  const stubModule = join(HERE, "stubs", "module.ts");
-  const result = await build({
-    entryPoints: [join(HERE, "addon-main.ts")],
-    bundle: true,
-    write: false,
-    format: "iife",
-    platform: "browser",
-    target: "es2020",
-    minify: false,
-    sourcemap: false,
-    alias: {
-      "fs": stubEmpty,
-      "path": stubEmpty,
-      "stream": stubEmpty,
-      "url": stubEmpty,
-      "module": stubModule,
-      "chrome-remote-interface": stubEmpty,
-      "googleapis": stubEmpty,
-      "esbuild": stubEmpty,
-      "pptxgenjs": join(HERE, "stubs", "pptxgenjs-global.ts"),
-      "jszip": join(HERE, "stubs", "jszip-global.ts"),
-    },
-    define: {
-      __EXTRACT_JS_LITERAL__: JSON.stringify(extractJs),
-    },
-    logLevel: "info",
-  });
-  if (!result.outputFiles || result.outputFiles.length === 0) {
-    throw new Error("esbuild produced no output");
-  }
-  const mainJs = result.outputFiles[0].text;
-  console.log(`addon bundle → ${mainJs.length.toLocaleString()} bytes JS`);
-
-  // 2b. Bundle insert-feature.ts → addon-server/public/convert-bundle.js (same
-  //     esbuild config: stubs + window globals for pptxgenjs/jszip + the inlined
-  //     extract-dom blob). This is what gives the SERVER-HOSTED UI its
-  //     bridge.insert(position): convert HTML→pptx in-browser, then google.script.run.
-  const convResult = await build({
-    entryPoints: [join(HERE, "insert-feature.ts")],
-    bundle: true, write: false, format: "iife", platform: "browser", target: "es2020",
-    minify: false, sourcemap: false,
-    alias: {
-      "fs": stubEmpty, "path": stubEmpty, "stream": stubEmpty, "url": stubEmpty,
-      "module": stubModule, "chrome-remote-interface": stubEmpty, "googleapis": stubEmpty, "esbuild": stubEmpty,
-      "pptxgenjs": join(HERE, "stubs", "pptxgenjs-global.ts"),
-      "jszip": join(HERE, "stubs", "jszip-global.ts"),
-    },
-    define: { __EXTRACT_JS_LITERAL__: JSON.stringify(extractJs) },
-    logLevel: "info",
-  });
-  const convertBundleJs = convResult.outputFiles![0].text;
-  const convertBundlePath = join(HERE, "..", "addon-server", "public", "convert-bundle.js");
-  writeFileSync(convertBundlePath, convertBundleJs);
-  console.log(`convert-bundle → ${convertBundleJs.length.toLocaleString()} bytes → ${convertBundlePath}`);
-
-  // 3. Vendor bundles (attach window.JSZip / window.PptxGenJS).
-  //    UNLIKE the standalone page (build.ts), the add-on does NOT inline these:
-  //    Apps Script's HtmlService sanitises/relays the sidebar HTML and corrupts
-  //    a ~560 KB inlined minified blob (observed: "Uncaught SyntaxError: Invalid
-  //    or unexpected token" → `PptxGenJS is not defined`). The sidebar is always
-  //    online, so we load the vendors from a pinned CDN via <script src> (allowed
-  //    in IFRAME sandbox mode) and inline only our own ~240 KB bundle.
-  const JSZIP_CDN = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";
-  const PPTX_CDN = "https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js";
-
-  // 4. Sidebar HTML. Same dropzone UI as the standalone page, sized for the
-  //    narrow Slides sidebar. google.script.run is injected by HtmlService.
-  const sidebar = `<!DOCTYPE html>
-<html>
-<head>
-<base target="_top">
-<meta charset="utf-8">
-<style>
-  * { box-sizing: border-box; }
-  body { font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-         margin: 0; padding: 12px; color: #111; }
-  p.sub { color: #666; margin: 0 0 12px; font-size: 12px; }
-  #dropzone { display: block; border: 2px dashed #bbb; border-radius: 10px; padding: 20px 12px;
-              text-align: center; color: #555; cursor: pointer; transition: all .15s; }
-  .btn { display: inline-block; padding: 7px 12px; font: inherit; border: 1px solid #ccc;
-         background: white; border-radius: 6px; cursor: pointer; }
-  .btn:hover { background: #f3f4f6; }
-  #dropzone.hover { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
-  #dropzone strong { color: #111; }
-  #picker { display: none; }
-  .row { display: flex; gap: 8px; margin: 12px 0; align-items: center; flex-wrap: wrap; }
-  button { padding: 7px 12px; font: inherit; border: 1px solid #ccc; background: white;
-           border-radius: 6px; cursor: pointer; }
-  button:disabled { opacity: .4; cursor: not-allowed; }
-  button.primary { background: #2563eb; color: white; border-color: #2563eb; }
-  button.primary:disabled { background: #93c5fd; border-color: #93c5fd; }
-  #file-list { margin: 0; padding: 0 0 0 20px; max-height: 110px; overflow: auto;
-               font: 11px/1.5 ui-monospace, monospace; color: #444; }
-  #file-list li { list-style: disc; }
-  #progress-wrap { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; margin: 6px 0; }
-  #progress-bar { height: 100%; background: #2563eb; width: 0%; transition: width .15s; }
-  #progress-label { font: 11px/1 ui-monospace, monospace; color: #666; min-height: 13px; }
-  #log { font: 11px/1.45 ui-monospace, monospace; background: #0b1020; color: #cbd5e1;
-         padding: 8px; border-radius: 6px; height: 160px; overflow: auto; margin-top: 8px; }
-  #log .warn { color: #fbbf24; }
-  #log .error { color: #f87171; }
-  #paste-box { width: 100%; min-height: 44px; resize: vertical; margin: 8px 0 0;
-               font: 11px/1.4 ui-monospace, monospace; color: #111;
-               border: 1px solid #ccc; border-radius: 6px; padding: 6px 8px; }
-  #paste-box:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
-  body.dragging { outline: 3px dashed #3b82f6; outline-offset: -6px; }
-  body.dragging #dropzone { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
-  #trouble { margin: 8px 0 0; font-size: 12px; color: #666; }
-  #trouble summary { cursor: pointer; }
-  #notice { margin: 8px 0 0; }
-  #notice .box { padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.4; }
-  #notice .warn { background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; }
-  #notice .ok { background: #dcfce7; border: 1px solid #86efac; color: #166534; }
-  #notice a { color: #1d4ed8; font-weight: 600; }
-</style>
-</head>
-<body tabindex="0">
-<p class="sub">Upload, drop, or paste slide HTML. It's converted locally and inserted right after the current slide.</p>
-
-<!-- Native <label for> opens the OS file dialog on a real click — a
-     programmatic input.click() is blocked inside the Apps Script sandbox. -->
-<label id="dropzone" for="picker">
-  <strong>Click to browse, or drop .html slides here</strong><br>
-  <span id="file-count">0</span> file(s) queued.
-</label>
-<input type="file" id="picker" accept=".html,.htm" multiple>
-
-<div class="row">
-  <label class="btn" for="picker">📂 Browse slide files…</label>
-  <button id="paste-btn">📋 Paste from clipboard</button>
-</div>
-
-<textarea id="paste-box" placeholder="…or click here and press ⌘V / Ctrl+V to paste slide HTML"></textarea>
-
-<ul id="file-list"></ul>
-
-<div class="row">
-  <button id="insert-btn" class="primary" disabled>Insert after current slide</button>
-  <button id="clear-btn">Clear</button>
-</div>
-
-<div id="notice"></div>
-<details id="trouble">
-  <summary>Insert failing? (permissions)</summary>
-  <div class="row">
-    <button id="reauth-btn">🔐 Re-authorize</button>
-    <button id="testperm-btn">🔎 Test permissions</button>
-  </div>
-</details>
-
-<div id="progress-wrap"><div id="progress-bar"></div></div>
-<div id="progress-label"></div>
-<div id="log"></div>
-
-<script src="${JSZIP_CDN}"></script>
-<script src="${PPTX_CDN}"></script>
-<script>
-${mainJs}
-</script>
-</body>
-</html>`;
-
-  // 5. Emit the project.
-  mkdirSync(OUT, { recursive: true });
-  writeFileSync(join(OUT, "appsscript.json"), APPSSCRIPT_JSON);
-  // Bake the deployed UI origin in from the environment so you don't hand-edit
-  // Code.gs: `SERVER_ORIGIN=https://slides.yourdomain.com npx tsx browser/build-addon.ts`.
-  const serverOrigin = process.env.SERVER_ORIGIN || "https://slides.example.com";
-  if (serverOrigin === "https://slides.example.com") console.warn("  ⚠ SERVER_ORIGIN not set — Code.gs will point at the placeholder origin");
-  writeFileSync(join(OUT, "Code.gs"), CODE_GS.split("https://slides.example.com").join(serverOrigin));
-  writeFileSync(join(OUT, "Sidebar.html"), sidebar);
-
-  const kb = (sidebar.length / 1024).toFixed(0);
-  console.log(`\n✓ wrote Apps Script project to ${OUT}`);
-  console.log(`    appsscript.json  (manifest)`);
-  console.log(`    Code.gs          (${CODE_GS.length.toLocaleString()} bytes)`);
-  console.log(`    Sidebar.html     (${kb} KB, bundle inlined)`);
-
-  // Best-effort: copy Code.gs to the clipboard so it's one paste into Apps Script.
-  // macOS pbcopy / Windows clip / Linux xclip|xsel — silently skipped if absent
-  // (e.g. the Linux devcontainer has no clipboard).
-  const codeGsPath = join(OUT, "Code.gs");
-  const clip = process.platform === "darwin" ? "pbcopy"
-    : process.platform === "win32" ? "clip"
-    : "xclip -selection clipboard";
-  try {
-    execSync(`${clip} < ${JSON.stringify(codeGsPath)}`, { stdio: "ignore" });
-    console.log(`    📋 Code.gs copied to clipboard — paste it straight into Apps Script`);
-  } catch {
-    console.log(`    (clipboard copy skipped — paste from ${codeGsPath})`);
-  }
-}
-
-main().catch((e) => {
-  console.error("build-addon failed:", e);
-  process.exit(1);
-});

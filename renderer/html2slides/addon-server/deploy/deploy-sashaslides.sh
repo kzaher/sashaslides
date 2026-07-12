@@ -18,12 +18,12 @@ DOMAIN="sashaslides.com"          # <-- the subdomain (A-record → server IP)
 ACME_EMAIL="krunoslav.zaher@gmail.com"         # <-- certbot registration email
 HOST_PORT="6000"                       # localhost port nginx proxies to (free one)
 IMAGE="holosweat-sashaslides:latest"
-# Registry tunnel: LOCAL port 6100 (NOT 5000 — macOS AirPlay Receiver owns 5000),
-# forwarded to the SERVER's registry which stays on 5000.
+# Registry tunnel: LOCAL port 45012 (NOT 5000 — macOS AirPlay Receiver owns 5000;
+# NOT 6100 — VS Code grabbed it), forwarded to the SERVER's registry which stays on 5000.
 # ⚠ ONE-TIME: add the matching entry to Docker Desktop ▸ Settings ▸ Docker Engine ▸
-#   "insecure-registries":  "host.docker.internal:6100"   (next to your :5000 one),
+#   "insecure-registries":  "host.docker.internal:45012"   (next to your :5000 one),
 #   then Apply & Restart.
-LOCAL_PORT="6100"
+LOCAL_PORT="45012"
 REGISTRY_PORT="5000"                          # registry:2 container's port on the server
 REGISTRY_LOCAL="host.docker.internal:$LOCAL_PORT"
 REMOTE_DIR="/root/sashaslides"
@@ -39,6 +39,18 @@ if [ -f "$REPO_ROOT/bridge/build_zip.py" ]; then
   python3 "$REPO_ROOT/bridge/build_zip.py" "$CTX/public/sasha-bridge.zip" \
     || echo "   (zip regen failed — shipping the committed copy)"
 fi
+
+# ── regenerate the Apps Script add-on bundle served at /addon-bundle/* ────────
+# install.sh?doc=<id> downloads these three files and clasp-pushes them onto the
+# target deck/doc, so a deploy must never ship a stale bundle.
+echo "==> regenerating add-on bundle: public/addon-bundle/ (SERVER_ORIGIN=https://$DOMAIN)"
+( cd "$REPO_ROOT/renderer/html2slides" && SERVER_ORIGIN="https://$DOMAIN" npx tsx browser/build-addon.ts ) \
+  || { echo "!! add-on bundle build failed"; exit 1; }
+mkdir -p "$CTX/public/addon-bundle"
+for f in Code.gs appsscript.json Sidebar.html; do
+  cp "$REPO_ROOT/dist/renderer/html2slides/addon/$f" "$CTX/public/addon-bundle/$f" \
+    || { echo "!! bundle file missing: $f"; exit 1; }
+done
 
 # ── 0. SSH tunnel:  Mac localhost:$LOCAL_PORT → server registry :$REGISTRY_PORT ─
 # Bound to 0.0.0.0 so Docker Desktop's host.docker.internal can reach the forward

@@ -3366,6 +3366,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
   // no element is flagged — the downstream emit is a strict no-op (preserves
   // the byte-identical-render guarantee for non-drawio slides).
   let drawioSource: string | undefined;
+  let drawioBaseSvg: string | undefined;
   {
     const srcEl = document.getElementById("drawio-source");
     if (srcEl && (srcEl.getAttribute("type") || "").indexOf("vnd.drawio+xml") >= 0) {
@@ -3380,6 +3381,14 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         let pairedDom: Element | null = document.querySelector("[data-drawio]");
         if (pairedDom && pairedDom.tagName !== "SVG" && pairedDom.tagName !== "IMG") {
           pairedDom = pairedDom.querySelector("svg, img");
+        }
+        // Phase 1: when the paired diagram is an inline <svg>, capture its
+        // outerHTML so buildEditableSvg can wrap the REAL rendered SVG (its
+        // `content=` attribute makes it round-trip as an editable drawio file).
+        // For a raster <img> there is no SVG to wrap, so drawioBaseSvg stays
+        // undefined and a minimal wrapper is emitted downstream instead.
+        if (pairedDom && pairedDom.tagName === "SVG") {
+          drawioBaseSvg = pairedDom.outerHTML;
         }
         // Resolve to the extracted element. The walk seen-marks the <svg>/<img>
         // and pushes one element for it; match by geometry (bounds) since the
@@ -3406,6 +3415,10 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     // Editable drawio XML for this slide's diagram (undefined when the page
     // carries no `#drawio-source` script — see Workstream E above).
     ...(drawioSource !== undefined ? { drawioSource } : {}),
+    // Phase 1: outerHTML of the paired inline <svg> (undefined for raster
+    // <img> diagrams and every non-drawio slide) so buildEditableSvg can wrap
+    // the real SVG as the editable Drive-stored drawio image.
+    ...(drawioBaseSvg !== undefined ? { drawioBaseSvg } : {}),
   });
   // Stash the result on a global as a side effect, in addition to returning it.
   // The Node CDP path (Runtime.evaluate) and the browser eval() path both read

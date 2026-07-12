@@ -111,12 +111,12 @@ window.h2s.register(async (bridge) => {
   }
 
   // ── editor ───────────────────────────────────────────────────────────────
-  let pending = null;     // { xml, item } seeded once the editor signals init
+  let pending = null;     // { xml, item, diagramId, png } seeded once the editor signals init
   let listener = null;
 
-  function openEditor(seedXml, item) {
+  function openEditor(seedXml, item, diagramId) {
     if (!available) { log("drawio editor unavailable (submodule not populated)"); return; }
-    pending = { xml: seedXml || "", item: item || null };
+    pending = { xml: seedXml || "", item: item || null, diagramId: diagramId || "", png: null };
     wrap.hidden = false;
     // (re)attach the message bridge for the editor iframe
     if (listener) window.removeEventListener("message", listener);
@@ -135,10 +135,17 @@ window.h2s.register(async (bridge) => {
     if (msg.event === "init") {
       post({ action: "load", xml: pending ? pending.xml : "", autosave: 1 });
     } else if (msg.event === "save") {
-      // user hit save inside the editor → ask for a PNG with XML embedded at the chosen scale
+      // user hit save inside the editor → dual export: xmlpng for the deck
+      // image, then xmlsvg for the Drive-side editable .drawio.svg.
+      if (pending) pending.png = null;
       post({ action: "export", format: "xmlpng", scale: currentScale(), spin: "Exporting…" });
     } else if (msg.event === "export") {
-      onExport(msg.data);
+      if (pending && pending.png === null) {
+        pending.png = msg.data;
+        post({ action: "export", format: "xmlsvg", spin: "Exporting…" });
+      } else {
+        onExport(pending ? pending.png : msg.data, msg.data, msg.xml || (pending && pending.xml) || "");
+      }
     } else if (msg.event === "exit") {
       closeEditor();
     }
@@ -149,18 +156,22 @@ window.h2s.register(async (bridge) => {
     catch (e) { log("drawio post failed: " + e.message); }
   }
 
-  async function onExport(dataUrl) {
-    if (!dataUrl) { log("drawio export: empty payload"); return; }
+  async function onExport(png, svg, xml) {
+    if (!png) { log("drawio export: empty payload"); return; }
     const target = pending && pending.item;
+    const diagramId = (pending && pending.diagramId) || "";
     if (inAddon) {
       try {
-        // replace the existing image, or insert a new one
-        if (target && target.id) await gsCall("replaceImage", target.id, dataUrl);
-        else await gsCall("insertImage", dataUrl);
-        log("drawio: diagram saved to deck");
+        // saveDiagram replaces/inserts the image AND writes the editable SVG
+        // back to its Drive file (drawio/<kind>/<id>/<diagramId>.drawio.svg).
+        await gsCall("saveDiagram", {
+          imageId: (target && target.id) || "",
+          diagramId, png, svg, xml,
+        });
+        log("drawio: diagram saved (image + Drive .drawio.svg)");
       } catch (e) { log("drawio save failed: " + e.message); }
     } else {
-      log("drawio (dev): exported PNG (" + dataUrl.length + " bytes data-url); save is stubbed");
+      log("drawio (dev): exported PNG (" + png.length + " bytes) + SVG (" + ((svg || "").length) + " bytes); save is stubbed");
     }
     await detect(); // refresh list
   }
@@ -194,9 +205,60 @@ window.h2s.register(async (bridge) => {
   }
 
   function newDiagram() {
-    log("drawio: new diagram");
-    if (inAddon) openInTab("", "");
-    else openEditor("", null);
+    // A new diagram needs an id — it names the Drive file
+    // (drawio/<kind>/<containerId>/<id>.drawio.svg) the image will link to.
+    const id = (window.prompt("Diagram id (names the Drive file <id>.drawio.svg):", "") || "").trim();
+    if (!id) { log("drawio: new diagram cancelled (no id)"); return; }
+    if (!/^[A-Za-z0-9._-]+$/.test(id)) { log("drawio: invalid id (use letters, digits, . _ -)"); return; }
+    log("drawio: new diagram " + id);
+    if (inAddon) openInTab("", "", id);
+    else openEditor("", null, id);
+  }
+
+  // ── upload an existing .drawio / .drawio.svg / .drawio.png file ──────────
+  // The FILE NAME (minus the drawio extension) becomes the diagram id; the
+  // parsed XML is rendered to a PNG, inserted, linked, and the editable SVG is
+  // written to Drive — after that the diagram round-trips like any other.
+  async function uploadDrawio(file) {
+    const m = file.name.match(/^(.*?)\.drawio(\.svg|\.png)?$/i);
+    if (!m) { log("drawio: not a drawio file (expect .drawio/.drawio.svg/.drawio.png): " + file.name); return; }
+    const diagramId = m[1];
+    const ext = (m[2] || "").toLowerCase();
+    try {
+      let xml = null;
+      if (ext === ".png") {
+        const dataUrl = await new Promise((res, rej) => {
+          const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file);
+        });
+        const r = await api("/api/drawio/detect", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ png: dataUrl }),
+        }).then((x) => x.json());
+        if (!r.isDrawio) throw new Error("no drawio XML embedded in the PNG");
+        xml = r.xml;
+      } else {
+        const text = await file.text();
+        xml = ext === ".svg" ? extractSvgContentAttr(text) : text;
+        if (!xml) throw new Error("no drawio XML found in the file");
+      }
+      log("drawio: uploading " + diagramId + "…");
+      const out = await renderXmlToPng(xml, currentScale());
+      if (inAddon) {
+        await gsCall("saveDiagram", { imageId: "", diagramId, png: out.png, svg: out.svg, xml: out.xml });
+        log("drawio: ✓ " + diagramId + " inserted + stored on Drive");
+        await detect();
+      } else {
+        log("drawio (dev): parsed " + diagramId + " (" + xml.length + " chars xml); insert is stubbed");
+      }
+    } catch (e) { log("drawio upload failed: " + e.message); }
+  }
+
+  // mxfile XML out of an editable SVG's root content="…" attribute.
+  function extractSvgContentAttr(svg) {
+    const m2 = String(svg).match(/<svg[^>]*\scontent="([^"]*)"/);
+    if (!m2) return null;
+    return m2[1].replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
   }
 
   // Option A as an RPC over window.opener — NO server relay. The sidebar opens the
@@ -206,9 +268,9 @@ window.h2s.register(async (bridge) => {
   const pendingEdits = Object.create(null);
   let nonceSeq = 0;
 
-  function openInTab(xml, imageId) {
+  function openInTab(xml, imageId, diagramId) {
     const nonce = "e" + (++nonceSeq) + "-" + Math.random().toString(36).slice(2, 9);
-    pendingEdits[nonce] = { xml: xml || "", imageId: imageId || "", scale: currentScale() };
+    pendingEdits[nonce] = { xml: xml || "", imageId: imageId || "", diagramId: diagramId || "", scale: currentScale() };
     const w = window.open("/edit.html#" + nonce, "_blank");
     log(w
       ? "drawio: editor opened in a new tab. Edit → Save & Close; keep THIS sidebar open — the deck updates when you save."
@@ -227,12 +289,16 @@ window.h2s.register(async (bridge) => {
       const pend = pendingEdits[m.nonce];
       if (m.type === "drawio-edit-ready") {
         if (!pend) return;                                        // unknown / expired nonce
-        try { ev.source.postMessage({ type: "drawio-seed", nonce: m.nonce, imageId: pend.imageId, xml: pend.xml, scale: pend.scale }, ev.origin); } catch (e) {}
+        try { ev.source.postMessage({ type: "drawio-seed", nonce: m.nonce, imageId: pend.imageId, diagramId: pend.diagramId || "", xml: pend.xml, scale: pend.scale }, ev.origin); } catch (e) {}
       } else if (m.type === "drawio-save") {
-        log("drawio: received save from the editor tab — writing to the deck…");
+        log("drawio: received save from the editor tab — writing to the deck + Drive…");
         try {
-          await gsCall("saveDiagram", { imageId: m.imageId || (pend && pend.imageId) || "", png: m.png, xml: m.xml });
-          log("drawio: ✓ diagram updated in the deck.");
+          await gsCall("saveDiagram", {
+            imageId: m.imageId || (pend && pend.imageId) || "",
+            diagramId: m.diagramId || (pend && pend.diagramId) || "",
+            png: m.png, svg: m.svg, xml: m.xml,
+          });
+          log("drawio: ✓ diagram updated (deck image + Drive .drawio.svg).");
           delete pendingEdits[m.nonce];
           await detect();
         } catch (e) { log("drawio: deck write failed: " + e.message); }
@@ -264,14 +330,16 @@ window.h2s.register(async (bridge) => {
     const m = (await apiList()).find((x) => x.id === id);
     return m ? m.xml : null;
   }
-  // Render drawio XML → xmlpng headlessly via a hidden editor iframe (no UI), the
-  // same embed protocol the inline editor uses. Resolves {png, xml}.
+  // Render drawio XML headlessly via a hidden editor iframe (no UI), the same
+  // embed protocol the inline editor uses. Exports BOTH an xmlpng (the deck
+  // image) and an xmlsvg (the rendered editable SVG stored on Drive).
+  // Resolves {png, svg, xml}.
   function renderXmlToPng(xml, scale) {
     scale = scale || 4;  // 1× is blurry; 4× → ~2048px after Google's import cap
     return new Promise((resolve, reject) => {
       const ifr = document.createElement("iframe");
       ifr.style.cssText = "position:fixed;left:-10000px;top:0;width:1280px;height:720px;border:0";
-      let done = false, exportSent = false;
+      let done = false, exportSent = false, png = null;
       const post = (o) => { try { ifr.contentWindow.postMessage(JSON.stringify(o), "*"); } catch (e) { /* gone */ } };
       const finish = (err, val) => {
         if (done) return; done = true;
@@ -287,7 +355,10 @@ window.h2s.register(async (bridge) => {
         let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
         if (m.event === "init") { post({ action: "load", xml: xml || "", autosave: 0 }); setTimeout(requestExport, 600); }
         else if (m.event === "load") requestExport();
-        else if (m.event === "export") finish(null, { png: m.data, xml: m.xml || xml });
+        else if (m.event === "export") {
+          if (png === null) { png = m.data; post({ action: "export", format: "xmlsvg" }); }
+          else finish(null, { png, svg: m.data, xml: m.xml || xml });
+        }
       };
       const to = setTimeout(() => finish(new Error("drawio render timed out (20s)")), 20000);
       window.addEventListener("message", onMsg);
@@ -301,7 +372,7 @@ window.h2s.register(async (bridge) => {
   async function apiSet(id, xml, opts) {
     opts = opts || {};
     const out = await renderXmlToPng(xml || "", opts.scale || currentScale());
-    const payload = { imageId: id || "", png: out.png, xml: out.xml };
+    const payload = { imageId: id || "", diagramId: (opts.diagramId || ""), png: out.png, svg: out.svg, xml: out.xml };
     ["slide", "x", "y", "w", "h"].forEach((k) => { if (opts[k] != null) payload[k] = opts[k]; });
     let res = { id: id || null };
     if (inAddon) res = await gsCall("saveDiagram", payload);  // {ok, id, slide}
@@ -314,6 +385,39 @@ window.h2s.register(async (bridge) => {
   // ── wire panel buttons ────────────────────────────────────────────────────
   $("#drawio-detect-btn").addEventListener("click", detect);
   $("#drawio-new-btn").addEventListener("click", newDiagram);
+  const uploadBtn = $("#drawio-upload-btn"), uploadInput = $("#drawio-upload-input");
+  if (uploadBtn && uploadInput) {
+    uploadBtn.addEventListener("click", () => uploadInput.click());
+    uploadInput.addEventListener("change", async () => {
+      const f = uploadInput.files && uploadInput.files[0];
+      uploadInput.value = "";           // allow re-selecting the same file
+      if (f) await uploadDrawio(f);
+    });
+  }
+
+  // ── selection-driven editing (Slides): poll the container selection; when
+  // the user selects an IMAGE whose link resolves to a *.drawio(.svg|.png)
+  // file, load it straight into the editor UI (inline iframe — window.open
+  // would be popup-blocked outside a click handler). Docs has no selection
+  // API for images, so this stays a Slides affordance; the list covers Docs. ──
+  if (inAddon) {
+    let lastSelId = null, pollBusy = false;
+    setInterval(async () => {
+      if (pollBusy || !wrap.hidden) return;   // don't fight an open editor
+      pollBusy = true;
+      try {
+        const sel = await gsCall("getSelectedDrawio");
+        if (sel && sel.id && sel.id !== lastSelId) {
+          lastSelId = sel.id;
+          log("drawio: selected diagram " + (sel.name || sel.id) + " — loading into editor…");
+          openEditor(sel.xml || "", { id: sel.id, name: sel.name || sel.id }, "");
+        } else if (!sel) {
+          lastSelId = null;                   // selection left the diagram → re-arm
+        }
+      } catch (e) { /* transient gsCall failure — next tick retries */ }
+      finally { pollBusy = false; }
+    }, 2500);
+  }
 
   render(); // start with the empty-state hint
 });
