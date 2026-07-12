@@ -29,6 +29,13 @@ import { transformSync } from "esbuild";
 import JSZip from "jszip";
 
 import {
+  buildEditableSvg,
+  drawioFileName,
+  drawioFolderSegments,
+  ensureFolderPath,
+  uploadDrawioSvg,
+} from "./drawio-store.ts";
+import {
   buildPptx,
   injectGradientsIntoZip,
   injectBulletColorsIntoZip,
@@ -392,7 +399,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
 
   // Step 2: Build pptx
   console.log("\nBuilding .pptx...");
-  const { pres, renderedRegions } = buildPptx(slideData as readonly SlideInput[], title);
+  const { pres, renderedRegions, drawioDiagrams } = buildPptx(slideData as readonly SlideInput[], title);
 
   const pptxPath = outPath || `/tmp/${title.replace(/[^a-zA-Z0-9]/g, "_")}.pptx`;
   await pres.writeFile({ fileName: pptxPath });
@@ -464,6 +471,53 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   });
   const presId = res.data.id;
   console.log(`  → https://docs.google.com/presentation/d/${presId}/edit`);
+
+  // Step 4 (Phase 1, drawio): upload each editable diagram source as a
+  // `.drawio.svg` under drawio/slide/<presId>/ on Drive, then link the on-slide
+  // image to it. The image is found by its alt-text description
+  // (`drawio:<diagramId>`, set at build time — cNvPr descr survives the Slides
+  // import where objectName does not). The link is a REAL image hyperlink via
+  // updateImageProperties fields:"link"; the Drive webViewLink ends in the
+  // fileId, so the editor detects editability by URL shape + resolves the file
+  // by path. Strict no-op when the deck carries no drawio diagrams.
+  if (presId && drawioDiagrams.length > 0) {
+    console.log(`\nUploading ${drawioDiagrams.length} drawio diagram(s) to Drive...`);
+    const slidesApi = google.slides({ version: "v1", auth });
+    const folderId = await ensureFolderPath(driveApi, drawioFolderSegments("slide", presId));
+    // Map altText (description) → image objectId from the imported deck.
+    const presRes = await slidesApi.presentations.get({ presentationId: presId });
+    const imageByDescr = new Map<string, string>();
+    for (const page of presRes.data.slides ?? []) {
+      for (const pe of page.pageElements ?? []) {
+        if (pe.image && pe.description) imageByDescr.set(pe.description, pe.objectId!);
+      }
+    }
+    for (const d of drawioDiagrams) {
+      const svg = buildEditableSvg(d.xml, d.baseSvg);
+      const { fileId, webViewLink } = await uploadDrawioSvg(driveApi, folderId, drawioFileName(d.diagramId), svg);
+      const objectId = imageByDescr.get(d.altText);
+      if (!objectId) {
+        // The image MUST be present — a miss means the altText didn't survive
+        // import (a converter bug), so fail loudly rather than silently
+        // dropping the diagram's editability.
+        throw new Error(`drawio: no imported image with description ${JSON.stringify(d.altText)} (diagram ${d.diagramId})`);
+      }
+      await slidesApi.presentations.batchUpdate({
+        presentationId: presId,
+        requestBody: {
+          requests: [{
+            updateImageProperties: {
+              objectId,
+              imageProperties: { link: { url: webViewLink } },
+              fields: "link",
+            },
+          }],
+        },
+      });
+      console.log(`  ${d.diagramId} → drive:${fileId} (linked image ${objectId})`);
+    }
+  }
+
   console.log("Done.");
   return { pptxPath, presId: presId ?? undefined, slideCount: htmlFiles.length, regionsPath };
 }

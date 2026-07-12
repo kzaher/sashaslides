@@ -171,17 +171,36 @@ docker exec sasha-slides-bridge sh -c "grep -iE 'listener opened|relay endpoint|
 
 </div><!-- /panel-manual -->
 
+
+<!-- ── Install the add-on onto a specific deck / doc ─────────────────────── -->
+<section id="install-section">
+  <h2>Install add-on</h2>
+  <p class="hint">Paste a Google Slides deck or Google Doc id (or its URL) to get a one-line
+    installer that binds the SashaSlides add-on to that document. Auth persists across runs
+    (re-login only when the stored token expires); re-running updates the same script.</p>
+  <div class="row">
+    <input id="install-doc-input" type="text" style="flex:1;min-width:0"
+           placeholder="doc id or https://docs.google.com/presentation/d/…/edit">
+    <button id="install-copy-btn" disabled>Copy</button>
+  </div>
+  <pre id="install-cmd" style="white-space:pre-wrap;word-break:break-all;margin:6px 0 0;font-size:12px"></pre>
+</section>
+
 <!-- ── Diagrams (SHARED — rendered under BOTH Automatic & Manual so you can
      collaborate on diagrams while an agent is connected. Single instance: the
      drawio feature binds these element IDs, so it must not be duplicated.) ── -->
 <section id="drawio-section">
   <h2>Diagrams <span id="drawio-status" class="badge"></span></h2>
-  <p class="hint">Edit drawio diagrams embedded in this deck and collaborate with your agent —
-    it can add or update diagrams while you edit them here, and vice versa. Editing re-renders
-    the PNG and updates the hidden XML stored below the slide.</p>
+  <p class="hint">Edit drawio diagrams in this deck or doc and collaborate with your agent —
+    it can add or update diagrams while you edit them here, and vice versa. Each diagram's
+    editable source lives on Drive as drawio/&lt;slide|doc&gt;/&lt;id&gt;/&lt;name&gt;.drawio.svg,
+    linked from the image; saving re-renders the PNG and updates the Drive file.
+    Selecting a linked diagram image loads it here automatically.</p>
   <div class="row">
     <button id="drawio-detect-btn">Detect in deck</button>
     <button id="drawio-new-btn">New diagram</button>
+    <button id="drawio-upload-btn" title="Insert a local .drawio / .drawio.svg / .drawio.png — the file name becomes the diagram id">Upload drawio</button>
+    <input id="drawio-upload-input" type="file" accept=".drawio,.svg,.png,.drawio.svg,.drawio.png" style="display:none">
     <label class="hint" style="flex-direction:row;align-items:center;gap:6px;margin-left:auto;font-weight:400">
       Resolution
       <select id="drawio-scale" title="render scale — Google caps stored images at ~2048px">

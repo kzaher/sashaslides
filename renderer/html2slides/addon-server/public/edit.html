@@ -37,7 +37,8 @@
   const setMsg = (t) => { $("#msg").textContent = t || ""; };
   const frame = $("#f"), saveBtn = $("#saveBtn");
   const nonce = location.hash.slice(1);     // correlation id minted by the sidebar
-  let seedXml = "", imageId = "", scale = 4, saving = false, ready = false, booted = false;
+  let seedXml = "", imageId = "", diagramId = "", scale = 4, saving = false, ready = false, booted = false;
+  let pendingPng = null;   // first export (xmlpng) parked while the xmlsvg export runs
 
   function show(t, color) {
     $("#f").style.display = "none";
@@ -61,7 +62,7 @@
     // (a) seed reply from the sidebar (an object, from our opener)
     if (m && typeof m === "object" && m.type === "drawio-seed" && m.nonce === nonce && ev.source === window.opener) {
       if (booted) return;
-      seedXml = m.xml || ""; imageId = m.imageId || ""; scale = Number(m.scale) > 0 ? Number(m.scale) : 4;
+      seedXml = m.xml || ""; imageId = m.imageId || ""; diagramId = m.diagramId || ""; scale = Number(m.scale) > 0 ? Number(m.scale) : 4;
       booted = true; clearInterval(askIv);
       frame.src = "/drawio/?embed=1&proto=json&spin=1&libraries=1&noSaveBtn=1&saveAndExit=0&noExitBtn=1";
       setMsg("loading editor…");
@@ -74,7 +75,14 @@
       toDrawio({ action: "load", xml: seedXml, autosave: 1 });
       ready = true; saveBtn.disabled = false; setMsg("ready — edit, then Save & Close");
     } else if (d.event === "export") {
-      submit(d.data, d.xml || seedXml);
+      // Two-step export: first reply is the xmlpng (slide image), then we ask
+      // for an xmlsvg (rendered editable SVG for the Drive-side .drawio.svg).
+      if (pendingPng === null) {
+        pendingPng = d.data; setMsg("exporting SVG…");
+        toDrawio({ action: "export", format: "xmlsvg", spin: "Exporting…" });
+      } else {
+        submit(pendingPng, d.data, d.xml || seedXml);
+      }
     } else if (d.event === "exit") {
       if (!saving) window.close();
     }
@@ -92,12 +100,13 @@
   saveBtn.addEventListener("click", () => {
     if (!ready || saving) return;
     saving = true; saveBtn.disabled = true; setMsg("exporting…");
+    pendingPng = null;
     toDrawio({ action: "export", format: "xmlpng", scale: scale, spin: "Exporting…" });
   });
   $("#cancelBtn").addEventListener("click", () => window.close());
 
-  function submit(png, xml) {
-    toSidebar({ type: "drawio-save", nonce, imageId, png, xml });
+  function submit(png, svg, xml) {
+    toSidebar({ type: "drawio-save", nonce, imageId, diagramId, png, svg, xml });
     show("✓ Saved. Return to Google Slides — the diagram updates in a moment. You can close this tab.", "#188038");
     try { window.close(); } catch (e) {}
   }

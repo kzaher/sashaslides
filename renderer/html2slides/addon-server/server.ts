@@ -159,13 +159,27 @@ const server = createServer(async (req, res) => {
       return send(res, 404, "drawio asset not found");
     }
 
-    // One-line installer: serve public/install.sh with __ORIGIN__ baked in so the
-    // piped `curl … | sh` downloads the bridge zip from this same origin.
+    // One-line installers, both under /install.sh:
+    //   no params      → the Sasha bridge installer (public/install.sh)
+    //   ?doc=<id>      → the ADD-ON installer for that Slides deck / Google Doc
+    //                    (public/install-addon.sh with the id baked in; binds an
+    //                    Apps Script project via clasp and pushes /addon-bundle/*)
     if (p === "/install.sh") {
       const proto = (req.headers["x-forwarded-proto"] as string)
         || (url.hostname === "localhost" || url.hostname.startsWith("127.") ? "http" : "https");
       const origin = `${proto}://${req.headers.host}`;
-      const sh = readFileSync(join(PUBLIC_DIR, "install.sh"), "utf8").split("__ORIGIN__").join(origin);
+      const doc = url.searchParams.get("doc");
+      let template = "install.sh";
+      let sh: string;
+      if (doc != null) {
+        if (!/^[A-Za-z0-9_-]{20,}$/.test(doc)) return send(res, 400, "invalid doc id (expect the id from docs.google.com/…/d/<id>/edit)");
+        template = "install-addon.sh";
+        sh = readFileSync(join(PUBLIC_DIR, template), "utf8")
+          .split("__ORIGIN__").join(origin)
+          .split("__DOC_ID__").join(doc);
+      } else {
+        sh = readFileSync(join(PUBLIC_DIR, template), "utf8").split("__ORIGIN__").join(origin);
+      }
       res.writeHead(200, { "Content-Type": "text/x-shellscript", "Cache-Control": "no-store" });
       res.end(sh);
       return;

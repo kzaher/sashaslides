@@ -454,6 +454,7 @@
       await loadScript("/static/pptxgen.bundle.js");   // OUR fork (gradient/round2/group fixes) — NOT the stock CDN
       await loadScript("/static/convert-bundle.js");   // base href → the server; sets bridge.insert
       await loadScript("/static/feature-drawio.js");
+      await loadScript("/static/feature-install.js");  // add-on install-link builder
     } catch (e) { log("feature load: " + e.message); }
 
     // run feature registrations (convert-bundle → bridge.insert, drawio → its panel)
