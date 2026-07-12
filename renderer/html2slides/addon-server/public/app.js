@@ -331,28 +331,55 @@
         if (b && s) b.onclick = () => { if (navigator.clipboard) navigator.clipboard.writeText(s.textContent).catch(() => {}); };
       };
 
-      set("install-cmd", `curl -fsSL ${origin}/install.sh | sh`);
-      const dockerRun =
-        'docker run --rm --name sasha-slides-bridge \\\n' +
-        '  -p 8787:8787 -p 50000:50000/udp \\\n' +
-        '  -e SASHA_RTC_PORT=50000 -e SASHA_RTC_HOST_IP=127.0.0.1 -e SASHA_DIR=/opt \\\n' +
-        `  python:3.14 bash -c "curl -fsSL ${origin}/install.sh | sh"`;
-      set("docker-cmd", dockerRun);
-      // refresh: remove the existing named container first, then re-run (install.sh
-      // re-pulls the server and overwrites the skill).
-      set("docker-refresh-cmd", "docker rm -f sasha-slides-bridge 2>/dev/null; " + dockerRun);
-      // TURN variant (Docker Desktop): coturn relay over TCP, no UDP port needed.
-      set("docker-turn-cmd",
-        'docker rm -f sasha-slides-bridge 2>/dev/null; docker run --rm --name sasha-slides-bridge \\\n' +
-        '  -p 8787:8787 -p 3478:3478/tcp \\\n' +
-        '  -e SASHA_TURN=1 -e SASHA_DIR=/opt \\\n' +
-        `  python:3.14 bash -c "apt-get update -qq && apt-get install -y -qq coturn && curl -fsSL ${origin}/install.sh | sh"`);
-      set("manual-cmd",
-        `curl -fsSL ${origin}/sasha-bridge.zip -o sasha-bridge.zip\n` +
-        'unzip sasha-bridge.zip && cd sasha-bridge\n' +
-        'python3 -m venv .venv\n' +
-        '.venv/bin/pip install -r requirements.txt\n' +
-        '.venv/bin/python wrapper.py serve');
+      // Optional target document: empty → bridge installer; a valid id →
+      // `install.sh?doc=<id>` (binds the SashaSlides ADD-ON to that deck/doc).
+      // Accepts a bare id or any docs.google.com URL. Every install.sh URL below
+      // is built through installUrl() so a set doc rewrites ALL commands
+      // (script + docker) at once; the add-on installer needs `bash`, so the
+      // pipe switches sh→bash when a doc is set.
+      const docInput = $("#install-doc-input");
+      const docNote = $("#install-doc-note");
+      const extractDoc = (s) => {
+        s = String(s || "").trim();
+        const m = s.match(/\/d\/([A-Za-z0-9_-]{20,})/) || s.match(/[?&]id=([A-Za-z0-9_-]{20,})/);
+        if (m) return m[1];
+        return /^[A-Za-z0-9_-]{20,}$/.test(s) ? s : (s ? null : "");
+      };
+      const buildCommands = () => {
+        const raw = docInput ? docInput.value : "";
+        const doc = extractDoc(raw);
+        // doc === "" (blank) → bridge; a string → add-on; null → invalid input
+        const invalid = doc === null;
+        const q = doc ? `?doc=${doc}` : "";
+        const shell = doc ? "bash" : "sh";
+        const installUrl = `${origin}/install.sh${q}`;
+        if (docNote) docNote.textContent = invalid
+          ? "⚠ not a document id or docs.google.com URL — using the bridge installer"
+          : doc ? "→ installs the SashaSlides add-on onto this document"
+                : "→ installs the local bridge (agent builds into the open deck)";
+        const curl = `curl -fsSL "${installUrl}" | ${shell}`;
+        set("install-cmd", curl);
+        const dockerRun =
+          'docker run --rm --name sasha-slides-bridge \\\n' +
+          '  -p 8787:8787 -p 50000:50000/udp \\\n' +
+          '  -e SASHA_RTC_PORT=50000 -e SASHA_RTC_HOST_IP=127.0.0.1 -e SASHA_DIR=/opt \\\n' +
+          `  python:3.14 bash -c 'curl -fsSL "${installUrl}" | ${shell}'`;
+        set("docker-cmd", dockerRun);
+        set("docker-refresh-cmd", "docker rm -f sasha-slides-bridge 2>/dev/null; " + dockerRun);
+        set("docker-turn-cmd",
+          'docker rm -f sasha-slides-bridge 2>/dev/null; docker run --rm --name sasha-slides-bridge \\\n' +
+          '  -p 8787:8787 -p 3478:3478/tcp \\\n' +
+          '  -e SASHA_TURN=1 -e SASHA_DIR=/opt \\\n' +
+          `  python:3.14 bash -c 'apt-get update -qq && apt-get install -y -qq coturn && curl -fsSL "${installUrl}" | ${shell}'`);
+        set("manual-cmd",
+          `curl -fsSL ${origin}/sasha-bridge.zip -o sasha-bridge.zip\n` +
+          'unzip sasha-bridge.zip && cd sasha-bridge\n' +
+          'python3 -m venv .venv\n' +
+          '.venv/bin/pip install -r requirements.txt\n' +
+          '.venv/bin/python wrapper.py serve');
+      };
+      buildCommands();
+      if (docInput) docInput.addEventListener("input", buildCommands);
 
       copy("install-copy", "install-cmd");
       copy("docker-copy", "docker-cmd");
@@ -454,7 +481,6 @@
       await loadScript("/static/pptxgen.bundle.js");   // OUR fork (gradient/round2/group fixes) — NOT the stock CDN
       await loadScript("/static/convert-bundle.js");   // base href → the server; sets bridge.insert
       await loadScript("/static/feature-drawio.js");
-      await loadScript("/static/feature-install.js");  // add-on install-link builder
     } catch (e) { log("feature load: " + e.message); }
 
     // run feature registrations (convert-bundle → bridge.insert, drawio → its panel)

@@ -49,10 +49,17 @@ function onOpen(e) {
   // shows reliably for a container-BOUND script. createAddonMenu() is for
   // PUBLISHED Editor Add-ons and is flaky/hidden for an unpublished bound
   // script, which is why the "html2slides" menu was missing.
-  containerUi_()
-    .createMenu('SashaSlides')
-    .addItem('Open SashaSlides', 'showSidebar')
-    .addToUi();
+  //
+  // CRITICAL: onOpen is a SIMPLE trigger — it runs WITHOUT data scopes, so
+  // SlidesApp.getActivePresentation() / DocumentApp.getActiveDocument() THROW
+  // here (they need the presentations/documents scope). Only getUi() (the
+  // script.container.ui scope) is available. So we must NOT call containerInfo_/
+  // containerUi_ (which probe getActive*) from onOpen — instead try each app's
+  // getUi() directly and let the wrong-container one throw. The FIRST one that
+  // builds the menu wins; the same script is only ever bound to one host.
+  var made = false;
+  try { SlidesApp.getUi().createMenu('SashaSlides').addItem('Open SashaSlides', 'showSidebar').addToUi(); made = true; } catch (e1) { /* not Slides */ }
+  if (!made) { try { DocumentApp.getUi().createMenu('SashaSlides').addItem('Open SashaSlides', 'showSidebar').addToUi(); } catch (e2) { /* not Docs either */ } }
 }
 
 function onInstall(e) {
