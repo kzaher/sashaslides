@@ -343,7 +343,7 @@ interface Gradient {
 interface ExtractedElement {
   type:
     | "rect" | "text" | "list" | "table" | "visual" | "image"
-    | "triangle" | "line" | "br" | "_skip";
+    | "triangle" | "line" | "br" | "poly" | "_skip";
   bounds: Bounds;
   // Common
   _domIdx?: number;
@@ -366,6 +366,9 @@ interface ExtractedElement {
   borderUniform?: boolean;
   borderSides?: BorderSides | null;
   boxShadow?: BoxShadow | null;
+  // poly (clip-path: polygon(...) host rendered as a native custGeom shape)
+  // Points are px offsets relative to `bounds` top-left, in path order.
+  points?: { x: number; y: number }[];
   // line
   color?: string | null;
   dashType?: string;
@@ -1419,6 +1422,32 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     return { angle, stops };
   }
 
+  /** Parse `clip-path: polygon(x1 y1, x2 y2, …)` into px points relative to the
+   * element's border box. `%` resolves against w/h, `px`/bare-number stay px.
+   * Drops an optional leading fill-rule (`nonzero`/`evenodd`). Returns null on
+   * anything it can't fully parse so the caller falls back to rasterising. */
+  function parsePolygonClip(clipP: string, w: number, h: number): { x: number; y: number }[] | null {
+    const m = clipP.match(/polygon\(([^)]*)\)/);
+    if (!m) return null;
+    let body = m[1].trim().replace(/^(nonzero|evenodd)\s*,\s*/i, "");
+    const lenToPx = (v: string, ref: number): number | null => {
+      v = v.trim();
+      const n = parseFloat(v);
+      if (isNaN(n)) return null;
+      return v.endsWith("%") ? (n / 100) * ref : n; // px or bare number → px
+    };
+    const pts: { x: number; y: number }[] = [];
+    for (const pair of body.split(",").map(s => s.trim()).filter(Boolean)) {
+      const coords = pair.split(/\s+/);
+      if (coords.length < 2) return null;
+      const x = lenToPx(coords[0], w);
+      const y = lenToPx(coords[1], h);
+      if (x === null || y === null) return null;
+      pts.push({ x, y });
+    }
+    return pts.length >= 3 ? pts : null;
+  }
+
   // Parse CSS radial-gradient into stops with per-stop alpha so the gradFill
   // injector can emit an OOXML radial `<a:gradFill><a:path path="circle">` fill.
   // `transparent` stops keep alpha=0; their color inherits the adjacent real
@@ -2057,7 +2086,16 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
               w: Math.max(pb.w, minGlyphW),
               h: Math.max(pb.h, fontSize * 1.4),
             };
-            textAlign = "left";
+            // A pseudo pinned on BOTH sides (e.g. `inset:0`) is a stretched
+            // full-box overlay, NOT an edge marker — its own justify-content /
+            // text-align decides the glyph x. slide_04's `.dot.done::after`
+            // (`inset:0; display:flex; justify-content:center`) centers the ✓
+            // across the whole dot. Only anchor LEFT when a single side is
+            // pinned (a true edge marker like `.pain::before{left:0}`).
+            const bothSidesPinned = hasExplicitLeft && hasExplicitRight;
+            const selfCentered = pcs.justifyContent === "center" ||
+                                 pcs.textAlign === "center";
+            textAlign = bothSidesPinned && selfCentered ? "center" : "left";
           }
         }
       } else if (which === "::before" && getDirectText(el).trim() !== "") {
@@ -2271,6 +2309,45 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     const elCs = getComputedStyle(el);
     const bgImg = elCs.backgroundImage || "";
     const clipP = elCs.clipPath || "";
+
+    // A `clip-path: polygon(...)` host whose fill is a solid colour or a
+    // linear-gradient is a NATIVE shape — emit it as a custGeom freeform with
+    // the polygon's points instead of rasterising a rectangular PNG. This is
+    // what turns slide_13's four funnel trapezoids from four "rendered region"
+    // screenshots into four editable, gradient-capable Slides shapes. Only take
+    // this path when the background is a solid/linear-gradient we can express;
+    // conic-gradients, real background images, and non-polygon clips still fall
+    // through to the rasteriser below.
+    if (clipP.trim().startsWith("polygon(") && bounds.w > 10 && bounds.h > 10
+        && !bgImg.includes("conic-gradient") && !bgImg.includes("url(")
+        && !bgImg.includes("radial-gradient")) {
+      const pts = parsePolygonClip(clipP, bounds.w, bounds.h);
+      const polyFill = rgb2hex(elCs.backgroundColor);
+      const polyFillAlpha = rgbAlpha(elCs.backgroundColor);
+      const polyGradient = bgImg.includes("linear-gradient")
+        ? parseLinearGradient(bgImg) : null;
+      // Need at least a triangle and SOME fill (solid or gradient) to be worth
+      // emitting as a shape; otherwise fall through to the generic handler.
+      if (pts && pts.length >= 3 && ((polyFill && polyFillAlpha > 0) || polyGradient)) {
+        seen.add(el);
+        elements.push({
+          type: "poly",
+          bounds,
+          points: pts,
+          fill: polyFill,
+          fillAlpha: polyFillAlpha,
+          gradient: polyGradient,
+          zIndex: parseInt(elCs.zIndex) || null,
+          position: elCs.position,
+        });
+        // Walk children so their text/rects re-emit as EDITABLE overlays on top
+        // of the native shape (mirrors the raster path's child re-walk, but
+        // without hiding text — nothing is baked into a PNG here).
+        for (const c of Array.from((el as HTMLElement).children)) walk(c);
+        return;
+      }
+    }
+
     const hasCssVisual =
       (bgImg !== "none" && bgImg.includes("conic-gradient")) ||
       (clipP !== "none" && clipP !== "inset(0px)" && clipP.length > 0);

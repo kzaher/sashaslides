@@ -178,7 +178,7 @@ async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<v
       `--fixtures "$ROOT/${t.fixtures_dir}" --slides ${ids} ` +
       `--out "$ROOT/${t.scratch_dir}/before" && ` +
       `ALL=$(ls "$ROOT/${t.fixtures_dir}"/slide_*.html | xargs -n1 basename | sed 's/[.]html$//' | sort -V | paste -sd,) && ` +
-      `RECORD_CONCURRENCY=1 npx tsx "$ROOT/${RECORD_SCRIPT_REL}" --mode pptx ` +
+      `RECORD_CONCURRENCY=${process.env.MERGE_RENDER_CONCURRENCY || "5"} npx tsx "$ROOT/${RECORD_SCRIPT_REL}" --mode pptx ` +
       `--fixtures "$ROOT/${t.fixtures_dir}" --slides "$ALL" ` +
       `--out "$ROOT/${t.scratch_dir}/before-all"`;
     try {

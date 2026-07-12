@@ -1148,6 +1148,17 @@ export interface BrElement extends ElementCommon {
   readonly type: "br";
 }
 
+/** A `clip-path: polygon(...)` host rendered as a native `custGeom` freeform.
+ * `points` are px offsets relative to `bounds` top-left, in path order. Carries
+ * a solid (`fill`/`fillAlpha`) OR linear-gradient fill. */
+export interface PolyElement extends ElementCommon {
+  readonly type: "poly";
+  readonly points?: { readonly x: number; readonly y: number }[];
+  readonly fill?: string | null;
+  readonly fillAlpha?: number;
+  readonly gradient?: Gradient | null;
+}
+
 /** Discriminated union over every variant extract-dom can emit. */
 export type ExtractedElement =
   | RectElement
@@ -1158,6 +1169,7 @@ export type ExtractedElement =
   | ImageElement
   | TriangleElement
   | LineElement
+  | PolyElement
   | BrElement
   | SkipElement;
 
@@ -2079,6 +2091,46 @@ export function buildPptx(
           };
           if (rot !== 0) triOpts.rotate = rot;
           slide.addShape("triangle", triOpts);
+          break;
+        }
+
+        case "poly": {
+          // CSS `clip-path: polygon(...)` host → native `custGeom` freeform.
+          // Emitting the polygon as a real Slides shape (instead of a rasterised
+          // PNG) makes trapezoids/arbitrary convex shapes editable and lets them
+          // carry a solid OR linear-gradient fill. slide_13's four funnel stages
+          // are the motivating case: four screenshots collapse into four shapes.
+          const pts = el.points || [];
+          if (pts.length < 3) break;
+          // Points arrive as px offsets relative to the shape's bbox top-left;
+          // custGeom expects them in the frame's own inch coordinate space.
+          const polyPoints: NonNullable<ShapeProps["points"]> = pts.map((p) => ({
+            x: px2in(p.x), y: px2in(p.y),
+          }));
+          polyPoints.push({ close: true });
+          const polyOpts: ShapeProps = {
+            x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
+            points: polyPoints,
+            line: { type: "none" },
+          };
+          if (el.gradient && el.gradient.stops && el.gradient.stops.length >= 2) {
+            // Same GRAD_<n> placeholder + zip-injection dance as the rect path:
+            // stock pptxgenjs can't emit a shape <a:gradFill>, so tag the shape
+            // and let injectGradientsIntoZip rewrite the solid placeholder.
+            const gid = gradientRegistry.length;
+            gradientRegistry.push(el.gradient);
+            polyOpts.fill = { color: hexToRgb(el.gradient.stops[0].color) };
+            polyOpts.objectName = `GRAD_${gid}`;
+          } else if (el.fill) {
+            const fillOpts: NonNullable<ShapeProps["fill"]> = { color: hexToRgb(el.fill) };
+            if (typeof el.fillAlpha === "number" && el.fillAlpha < 1) {
+              fillOpts.transparency = Math.round((1 - el.fillAlpha) * 100);
+            }
+            polyOpts.fill = fillOpts;
+          }
+          // `custGeom` is a valid runtime shape (pptxgen.es.js emits <a:custGeom>)
+          // but the published SHAPE_NAME union omits it — cast like the preset path.
+          slide.addShape("custGeom" as Parameters<Slide["addShape"]>[0], polyOpts);
           break;
         }
 
