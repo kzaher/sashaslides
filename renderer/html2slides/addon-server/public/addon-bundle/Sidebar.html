@@ -4004,7 +4004,14 @@
   {
     const srcEl = document.getElementById("drawio-source");
     if (srcEl && (srcEl.getAttribute("type") || "").indexOf("vnd.drawio+xml") >= 0) {
-      const raw = (srcEl.textContent || "").trim();
+      const rawText = srcEl.textContent || "";
+      const slice = (open, close) => {
+        const a = rawText.indexOf(open);
+        if (a < 0) return void 0;
+        const b = rawText.lastIndexOf(close);
+        return b > a ? rawText.slice(a, b + close.length) : void 0;
+      };
+      const raw = slice("<mxfile", "</mxfile>") || slice("<mxGraphModel", "</mxGraphModel>") || "";
       if (raw) {
         drawioSource = raw;
         let pairedDom = document.querySelector("[data-drawio]");
@@ -6098,7 +6105,14 @@
   {
     const srcEl = document.getElementById("drawio-source");
     if (srcEl && (srcEl.getAttribute("type") || "").indexOf("vnd.drawio+xml") >= 0) {
-      const raw = (srcEl.textContent || "").trim();
+      const rawText = srcEl.textContent || "";
+      const slice = (open, close) => {
+        const a = rawText.indexOf(open);
+        if (a < 0) return void 0;
+        const b = rawText.lastIndexOf(close);
+        return b > a ? rawText.slice(a, b + close.length) : void 0;
+      };
+      const raw = slice("<mxfile", "</mxfile>") || slice("<mxGraphModel", "</mxGraphModel>") || "";
       if (raw) {
         drawioSource = raw;
         let pairedDom = document.querySelector("[data-drawio]");

@@ -3370,9 +3370,20 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
   {
     const srcEl = document.getElementById("drawio-source");
     if (srcEl && (srcEl.getAttribute("type") || "").indexOf("vnd.drawio+xml") >= 0) {
-      // textContent already unwraps the CDATA section ("<![CDATA[ … ]]>"); trim
-      // surrounding whitespace/newlines introduced by HTML pretty-printing.
-      const raw = (srcEl.textContent || "").trim();
+      // In HTML (not XHTML) a <script>'s textContent is the LITERAL text — so a
+      // "<![CDATA[ … ]]>" wrapper the author added survives verbatim, and any
+      // pretty-print whitespace too. Pull ONLY the drawio document out (the same
+      // <mxfile>…</mxfile> / <mxGraphModel>…</mxGraphModel> slice drawio's own
+      // Editor.extractGraphModelFromText uses) so what we store is a clean,
+      // drawio-parseable file with no CDATA/junk. Do NOT re-wrap or re-encode it.
+      const rawText = srcEl.textContent || "";
+      const slice = (open: string, close: string): string | undefined => {
+        const a = rawText.indexOf(open);
+        if (a < 0) return undefined;
+        const b = rawText.lastIndexOf(close);
+        return b > a ? rawText.slice(a, b + close.length) : undefined;
+      };
+      const raw = slice("<mxfile", "</mxfile>") || slice("<mxGraphModel", "</mxGraphModel>") || "";
       if (raw) {
         drawioSource = raw;
         // Locate the rendered diagram element to pair with. Prefer an explicit
