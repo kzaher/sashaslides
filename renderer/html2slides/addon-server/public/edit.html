@@ -25,8 +25,8 @@
     <span class="title">drawio</span>
     <span id="msg">connecting to Slides…</span>
     <span class="spacer"></span>
-    <button class="save" id="saveBtn" disabled>Save &amp; Close</button>
-    <button id="cancelBtn">Cancel</button>
+    <button class="save" id="saveBtn" disabled>Save</button>
+    <button id="cancelBtn">Close</button>
   </div>
   <iframe id="f" title="drawio editor"></iframe>
   <div id="fatal"></div>
@@ -72,7 +72,11 @@
     if (typeof m !== "string") return;
     let d; try { d = JSON.parse(m); } catch (e) { return; }
     if (d.event === "init") {
-      toDrawio({ action: "load", xml: seedXml, autosave: 1 });
+      // Hand drawio the EXACT seed file (raw .drawio.svg / mxfile, or a PNG
+      // data-uri) and let drawio's own loader extract the diagram — no unwrap.
+      toDrawio(/^data:image\/png/i.test(seedXml)
+        ? { action: "load", xmlpng: seedXml, autosave: 1 }
+        : { action: "load", xml: seedXml, autosave: 1 });
       ready = true; saveBtn.disabled = false; setMsg("ready — edit, then Save & Close");
     } else if (d.event === "export") {
       // Two-step export: first reply is the xmlpng (slide image), then we ask
@@ -106,9 +110,14 @@
   $("#cancelBtn").addEventListener("click", () => window.close());
 
   function submit(png, svg, xml) {
+    // Hand the save to the sidebar (window.opener RPC) and KEEP EDITING — no
+    // close, no teardown. The editor stays live so you can save again; a
+    // transient status confirms the write.
     toSidebar({ type: "drawio-save", nonce, imageId, diagramId, png, svg, xml });
-    show("✓ Saved. Return to Google Slides — the diagram updates in a moment. You can close this tab.", "#188038");
-    try { window.close(); } catch (e) {}
+    saving = false; saveBtn.disabled = false;
+    setMsg("✓ saved to the deck — keep editing, or Close");
+    if (submit._t) clearTimeout(submit._t);
+    submit._t = setTimeout(() => { if (!saving) setMsg("ready — edit, then Save"); }, 4000);
   }
 })();
 </script>

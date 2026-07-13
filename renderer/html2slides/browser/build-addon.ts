@@ -449,27 +449,19 @@ function imageDrawioLink_(img) {
   } catch (e) { return null; }  // dangling link / no access → not editable
 }
 
-/** Attribute-unescape (reverse of the escape used when embedding XML in the
- *  SVG content= attribute). &amp; LAST so nested entities survive. */
-function svgAttrUnescape_(s) {
-  return String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
-}
-
-/** mxfile XML out of editable-SVG content (root content="…" attribute). */
-function xmlFromEditableSvg_(svg) {
-  var m = String(svg).match(/<svg[^>]*\\scontent="([^"]*)"/);
-  return m ? svgAttrUnescape_(m[1]) : null;
-}
-
-/** Read the editable XML for a drawio Drive file by its name convention:
- *  .drawio.svg → content attr; .drawio → the raw mxfile; .drawio.png → null
- *  (the client extracts the PNG text chunk via /api/drawio/detect). */
-function xmlFromDriveFile_(fileId, name) {
+/** Read a drawio Drive file's EXACT bytes for the editor to open — no hand
+ *  unwrapping. drawio's own loader extracts the diagram (verified: the load
+ *  action with a raw editable .drawio.svg round-trips), so we hand it verbatim:
+ *    .drawio.svg / .drawio → the raw text (SVG with content= attr, or mxfile)
+ *    .drawio.png           → a data:image/png URI (drawio load handles xmlpng)
+ *  The editor wrapper picks the load form by sniffing the returned string. */
+function drawioFileData_(fileId, name) {
   var f = DriveApp.getFileById(fileId);
-  if (/\\.drawio\\.svg$/i.test(name)) return xmlFromEditableSvg_(f.getBlob().getDataAsString());
-  if (/\\.drawio$/i.test(name)) return f.getBlob().getDataAsString();
-  return null;
+  if (/\\.drawio\\.png$/i.test(name)) {
+    var b = f.getBlob();
+    return 'data:' + (b.getContentType() || 'image/png') + ';base64,' + Utilities.base64Encode(b.getBytes());
+  }
+  return f.getBlob().getDataAsString();   // .drawio.svg or .drawio → verbatim text
 }
 
 /** Minimal editable SVG when the editor didn't hand us a rendered xmlsvg. */
@@ -527,7 +519,7 @@ function listDeckImages() {
           dataUrl: 'data:' + (blob.getContentType() || 'image/png') + ';base64,' + Utilities.base64Encode(blob.getBytes()),
           // current frame as NORMALIZED [0,1] slide coords, so the agent can reason about layout
           box: { x: img.getLeft() / pw, y: img.getTop() / ph, w: img.getWidth() / pw, h: img.getHeight() / ph },
-          xml: dl.fileId ? xmlFromDriveFile_(dl.fileId, dl.name) : null,
+          xml: dl.fileId ? drawioFileData_(dl.fileId, dl.name) : null,
           driveFileId: dl.fileId,
           driveName: dl.name,
         });
@@ -549,7 +541,7 @@ function listDeckImages() {
       name: ddl.name || ('Diagram ' + (d + 1)),
       dataUrl: 'data:' + (dblob.getContentType() || 'image/png') + ';base64,' + Utilities.base64Encode(dblob.getBytes()),
       box: null,
-      xml: ddl.fileId ? xmlFromDriveFile_(ddl.fileId, ddl.name) : null,
+      xml: ddl.fileId ? drawioFileData_(ddl.fileId, ddl.name) : null,
       driveFileId: ddl.fileId,
       driveName: ddl.name,
     });
@@ -857,7 +849,7 @@ function getSelectedDrawio() {
       id: img.getObjectId(),
       name: dl.name,
       driveFileId: dl.fileId,
-      xml: dl.fileId ? xmlFromDriveFile_(dl.fileId, dl.name) : null,
+      xml: dl.fileId ? drawioFileData_(dl.fileId, dl.name) : null,
     };
   }
   return null;

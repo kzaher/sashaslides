@@ -133,7 +133,10 @@ window.h2s.register(async (bridge) => {
     if (typeof msg !== "string") return;          // drawio sends JSON strings
     try { msg = JSON.parse(msg); } catch { return; }
     if (msg.event === "init") {
-      post({ action: "load", xml: pending ? pending.xml : "", autosave: 1 });
+      // Hand drawio the EXACT file (raw .drawio.svg / mxfile, or a PNG data-uri)
+      // and let ITS loader extract the diagram — no unwrapping here. A PNG goes
+      // via xmlpng; everything else via xml (drawio reads the SVG content= attr).
+      post(drawioLoadAction(pending ? pending.xml : ""));
     } else if (msg.event === "save") {
       // user hit save inside the editor → dual export: xmlpng for the deck
       // image, then xmlsvg for the Drive-side editable .drawio.svg.
@@ -154,6 +157,18 @@ window.h2s.register(async (bridge) => {
   function post(obj) {
     try { frame.contentWindow.postMessage(JSON.stringify(obj), "*"); }
     catch (e) { log("drawio post failed: " + e.message); }
+  }
+
+  // Build the official drawio `load` action for a raw seed. A PNG data-uri uses
+  // xmlpng (drawio extracts its embedded chunk); a raw .drawio.svg / mxfile uses
+  // xml (drawio reads the SVG content= attr / parses the mxfile). We never
+  // unwrap the file ourselves — drawio's loader does it.
+  function drawioLoadAction(seed, autosave) {
+    seed = seed || "";
+    const as = autosave === undefined ? 1 : autosave;
+    return /^data:image\/png/i.test(seed)
+      ? { action: "load", xmlpng: seed, autosave: as }
+      : { action: "load", xml: seed, autosave: as };
   }
 
   async function onExport(png, svg, xml) {
@@ -185,9 +200,12 @@ window.h2s.register(async (bridge) => {
 
   // In the add-on we open the editor in a real browser TAB (true fullscreen, no
   // Apps Script dialog chrome). The tab can't write to the deck itself, so it
-  // hands its saved result back through the server relay (one-time token); we
-  // poll that relay and do the deck write here via saveDiagram. In dev
-  // (standalone) we fall back to the inline sidebar iframe.
+  // hands its saved result back to THIS sidebar over window.opener.postMessage —
+  // NO server relay, NO server session, NO polling. The URL hash carries only a
+  // client-side Math.random() nonce (never sent to the server) to correlate the
+  // tab with its pending edit; the seed (xml/imageId) and the save both travel
+  // window.opener ⇄ tab, and the deck write is a gsCall(saveDiagram) to Apps
+  // Script. In dev (standalone) we fall back to the inline sidebar iframe.
   async function edit(item) {
     log("drawio: editing " + item.name);
     if (inAddon) {
