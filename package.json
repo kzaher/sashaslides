@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "reauth": "npx tsx .auth/generate-token.ts",
     "sudo_claude": "claude --dangerously-skip-permissions",
     "sudo_codex": "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
     "sudo_claude_fork": "claude --dangerously-skip-permissions --continue --fork-session",

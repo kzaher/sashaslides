@@ -45,6 +45,7 @@ let historyDir: string | null = null;           // --history-dir persistent ledg
 // Default (no flag) = canonical: the rating describes main's current render and
 // updates the ledger's issue as the source of truth.
 let candidateMode = false;
+let showAllDefault = false;                     // --show-all: start with EVERY slide visible, not just diffs
 // --read-only: serve the VERDICT-ONLY rating UI. All comment editing + every
 // annotation drawing tool (pen/rect/clear/colour/size/prior-marks + the draw
 // canvas & handlers) are stripped from the client, and the mutating endpoints
@@ -83,6 +84,7 @@ for (let i = 0; i < args.length; i++) {
   else if (v === "--candidate") candidateMode = true;
   else if (v === "--read-only") readOnly = true;
   else if (v === "--reject-all-button") rejectAllButton = true;
+  else if (v === "--show-all") showAllDefault = true;
   else if (v === "--notify-cmd") notifyCmd = args[++i];
 }
 
@@ -936,7 +938,7 @@ async function toggleTaskPanel(kind) {
   }
 }
 
-let showAll = false;
+let showAll = ${showAllDefault};
 function visibleComparisons() {
   // By default, hide slides that match their blessed golden (status=good +
   // diffStatus=ok). Show everything else: regressed, new fixtures, bad, pending.

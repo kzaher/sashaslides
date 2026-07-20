@@ -1,6 +1,0 @@
-# Managed by Codepit. Only config.jsonc + common-instruction.md are committed;
-# everything else here (generated codepit CLI, runtime state, private/) is local-only.
-*
-!.gitignore
-!config.jsonc
-!common-instruction.md
