@@ -174,5 +174,29 @@
     "comment": "Card moved up. Wrong padding below the first item and horizontal line. Looks like some letter spacing is missing, not sure can something be done there.",
     "ratedAt": "2026-07-01T18:40:43.434Z",
     "annotation": "/tmp/sxs-complex/annotations/slide_34.png"
+  },
+  "slide_35": {
+    "status": "good",
+    "ratedAt": "2026-07-21T17:13:46.752Z",
+    "comment": "Numbers aren't styled, no chips on the right, fonts on the item are off.",
+    "annotation": "/tmp/sxs-complex/annotations/slide_35.png"
+  },
+  "slide_36": {
+    "status": "good",
+    "ratedAt": "2026-07-21T17:13:52.099Z",
+    "comment": "Nothing is there, golden numbers, text of list item, subtitle, nothing is there.",
+    "annotation": "/tmp/sxs-complex/annotations/slide_36.png"
+  },
+  "slide_37": {
+    "status": "good",
+    "ratedAt": "2026-07-21T17:13:56.152Z",
+    "comment": "Left yellow border isn't rounded like it should be, no numbers, nothing on the right side, no subtitle. Looking more accurately, everything is cramped into a single row.",
+    "annotation": "/tmp/sxs-complex/annotations/slide_37.png"
+  },
+  "slide_38": {
+    "status": "good",
+    "ratedAt": "2026-07-21T17:14:00.808Z",
+    "comment": "Left border is wrong, everything is camped into a single row.",
+    "annotation": "/tmp/sxs-complex/annotations/slide_38.png"
   }
 }

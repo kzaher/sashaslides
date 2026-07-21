@@ -1013,9 +1013,15 @@ export function main(args: {
           // wait. We do NOT detach it — `setsid … & disown` leaked the engine's
           // capture pipe (the node hung forever, so the rating was never seen).
           // stderr → the log (progress); the URL is printed to the node output.
+          // The scaffolding (orchestrator) announces "✅ RATING UI READY → url"
+          // to the human's stderr the moment this port starts listening (a
+          // port-watcher spun up around engine.execute) — the ONLY place the
+          // human actually sees, since this node's stdout is captured by the
+          // engine. Here we just run the server foreground (it IS the gate) with
+          // stderr → log.
           return (
             `${BRANCH_CD_RENDERER} && ` +
-            `echo "[rating-server] ${task.task_id} → http://localhost:${spec.port} — rate GOOD/BAD; it closes when done (log ${task.scratch_dir}/rating-server.log)" && ` +
+            `echo "[rating-server] ${task.task_id} → http://localhost:${spec.port} (log ${task.scratch_dir}/rating-server.log)" && ` +
             `${inner} 2> ${log}`
           );
         }),

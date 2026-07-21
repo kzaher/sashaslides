@@ -65,6 +65,70 @@ export function clustersFromRatings(ratingsPath: string, opts: { retryBudget?: n
     });
 }
 
+/**
+ * Manually GROUP the auto per-slide clusters into shared clusters. `specRaw` is a
+ * JSON-ish nested array of slide ids — single OR double quotes, ids may be
+ * `slide_35` / `S_35` / `35` (matched by number). Each inner array becomes ONE
+ * cluster that merges those slides' auto clusters (so they're solved as one root
+ * cause + one fork). Every BAD slide NOT named keeps its own per-slide cluster.
+ *
+ *   --clusters="[['slide_35','slide_36','slide_37','slide_38']]"   → 1 cluster
+ *   --clusters="[['slide_35','slide_36'],['slide_10','slide_11']]" → 2 clusters
+ *
+ * Only slides that are already in `auto` (i.e. marked BAD) can be grouped — a
+ * name that matches no bad slide is skipped with a warning.
+ */
+export function applyManualClusters(auto: Cluster[], specRaw: string): Cluster[] {
+  const raw = (specRaw ?? "").trim();
+  if (!raw) return auto;
+  let spec: unknown;
+  try {
+    spec = JSON.parse(raw.replace(/'/g, '"'));
+  } catch (e) {
+    throw new Error(
+      `--clusters: not valid JSON (${(e as Error).message}). ` +
+        `Example: --clusters="[['slide_35','slide_36','slide_37','slide_38']]"`,
+    );
+  }
+  if (!Array.isArray(spec) || !spec.every((g) => Array.isArray(g))) {
+    throw new Error("--clusters must be an array of arrays, e.g. [['slide_35','slide_36']]");
+  }
+  const numOf = (s: unknown): number => Number(String(s).replace(/[^0-9]/g, "")) || -1;
+  const byNum = new Map<number, Cluster>();
+  for (const c of auto) for (const sid of c.slide_ids) byNum.set(numOf(sid), c);
+
+  const grouped = new Set<Cluster>();
+  const merged: Cluster[] = [];
+  for (const group of spec as unknown[][]) {
+    const members = [
+      ...new Set(group.map(numOf).map((n) => byNum.get(n)).filter((c): c is Cluster => !!c)),
+    ];
+    if (members.length === 0) {
+      console.error(`[clusters] manual group ${JSON.stringify(group)} matched no BAD slide — skipped`);
+      continue;
+    }
+    if (members.length === 1) {
+      // A single-member group is a no-op grouping — keep the cluster as-is.
+      grouped.add(members[0]);
+      merged.push(members[0]);
+      continue;
+    }
+    members.forEach((c) => grouped.add(c));
+    const slide_ids = [...new Set(members.flatMap((c) => c.slide_ids))].sort((a, b) => numOf(a) - numOf(b));
+    merged.push({
+      task_id: members[0].task_id,
+      slide_ids,
+      cluster_description:
+        `Manual cluster of ${slide_ids.length} slides (${slide_ids.join(", ")}) — solve as ONE ` +
+        `shared root cause, one fix.\n` +
+        members.map((c) => c.cluster_description).join("\n"),
+      ...(members[0].retry_budget ? { retry_budget: members[0].retry_budget } : {}),
+    });
+  }
+  const rest = auto.filter((c) => !grouped.has(c));
+  return [...merged, ...rest];
+}
+
 /** Short issue keyword derived from the issue text, for a readable task slug.
  *  Takes the first few alphanumeric words, lowercased, dash-joined; empty issue
  *  → "issue". */

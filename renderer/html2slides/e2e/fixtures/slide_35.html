@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #f7f8fa; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; }
+.panel { width: 900px; background: #ffffff; border-radius: 16px; border-left: 10px solid #f5b800; box-shadow: 0 10px 40px rgba(0,0,0,0.08); padding: 40px 48px; }
+h1 { font-size: 34px; font-weight: 800; color: #1a202c; margin-bottom: 4px; }
+.sub { font-size: 15px; color: #8a94a6; margin-bottom: 28px; }
+ol { list-style: none; }
+.item { display: flex; align-items: flex-start; gap: 20px; padding: 18px 0; border-bottom: 1px solid #eef0f4; }
+.item:last-child { border-bottom: none; }
+.num { flex: 0 0 44px; height: 44px; border-radius: 50%; background: #fff7dd; color: #b58900; font-size: 20px; font-weight: 800; display: flex; align-items: center; justify-content: center; border: 2px solid #f5b800; }
+.body { flex: 1; }
+.title { font-size: 18px; font-weight: 700; color: #26303f; margin-bottom: 3px; }
+.desc { font-size: 14px; color: #6b7688; }
+.sev { flex: 0 0 auto; align-self: center; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 20px; }
+.high { background: #fdecea; color: #d64545; }
+.med { background: #fff4e0; color: #c47f14; }
+.low { background: #eaf6ee; color: #2f9e57; }
+</style></head><body>
+<div class="panel">
+  <h1>Open Issues</h1>
+  <p class="sub">Prioritized backlog · sprint 24 · 4 items</p>
+  <ol>
+    <li class="item"><div class="num">1</div><div class="body"><div class="title">Checkout fails on Safari</div><div class="desc">Payment button unresponsive on iOS 17 Safari; ~8% of mobile sessions affected.</div></div><span class="sev high">High</span></li>
+    <li class="item"><div class="num">2</div><div class="body"><div class="title">Slow dashboard load</div><div class="desc">Initial render exceeds 3.2s on cold cache; blocking analytics queries.</div></div><span class="sev med">Medium</span></li>
+    <li class="item"><div class="num">3</div><div class="body"><div class="title">Email digest duplicates</div><div class="desc">Weekly digest sent twice to users in the EU timezone bucket.</div></div><span class="sev med">Medium</span></li>
+    <li class="item"><div class="num">4</div><div class="body"><div class="title">Broken avatar fallback</div><div class="desc">Missing initials placeholder when the profile image 404s.</div></div><span class="sev low">Low</span></li>
+  </ol>
+</div>
+</body></html>

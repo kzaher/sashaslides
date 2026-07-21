@@ -2225,6 +2225,39 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     });
   }
 
+  // A "structured card list" is an <ol>/<ul> whose <li> rows are multi-part
+  // cards (a styled number badge, a title, a description, and often a right-side
+  // chip) rather than plain text bullets. extractList() flattens each <li>'s
+  // whole subtree into one {text,runs} record, which drops the badge shapes,
+  // collapses the block children onto a single unstyled line, and inlines the
+  // absolutely-positioned chips (slides 35-38). We instead let the generic walk
+  // recursion handle those lists, so every child becomes its own positioned
+  // shape / styled text box (the same path that renders display:flex div-cards).
+  // Trigger: some <li> has >=2 visible element children AND at least one child
+  // is a badge/chip/card — position:absolute|fixed, OR (own background OR
+  // border) combined with a border-radius. Plain bulleted / numbered / pricing
+  // lists (text-only <li>, or a single inline span, no absolute/decorated
+  // children) fail this test and keep the native extractList path.
+  function isStructuredCardList(listEl: HTMLElement): boolean {
+    for (const li of Array.from(listEl.children)) {
+      if (li.tagName !== "LI") continue;
+      const childEls = Array.from(li.children).filter(c => {
+        const t = (c.tagName || "").toUpperCase();
+        if (t === "UL" || t === "OL") return false;
+        return getComputedStyle(c).display !== "none";
+      });
+      if (childEls.length < 2) continue;
+      for (const c of childEls) {
+        const ccs = getComputedStyle(c);
+        if (ccs.position === "absolute" || ccs.position === "fixed") return true;
+        const cst = getStyle(c);
+        const decorated = !!cst.bgColor || (cst.borderWidth || 0) > 0;
+        if (decorated && (cst.borderRadius || 0) > 0) return true;
+      }
+    }
+    return false;
+  }
+
   // --- MAIN WALK ---
   function walk(el: Element): void {
     if (seen.has(el)) return;
@@ -2278,7 +2311,8 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
 
     // LIST
     if (tag === "UL" || tag === "OL") {
-      if (!el.parentElement || el.parentElement.tagName.toUpperCase() !== "LI") {
+      if ((!el.parentElement || el.parentElement.tagName.toUpperCase() !== "LI")
+          && !isStructuredCardList(el as HTMLElement)) {
         seen.add(el);
         el.querySelectorAll("li, ul, ol").forEach(c => seen.add(c));
         // Emit the list's own background/border/radius rect BEFORE the list
