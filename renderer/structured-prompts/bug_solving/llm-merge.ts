@@ -892,6 +892,12 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
       phase: a.phase,
       label: a.label,
       mergedDir: lastMergeRenderDir,
+      // TARGET = the fixture Chrome screenshot the SxS/solve use as "original"
+      // (<sxsDir>/originals/<sid>.png) — what the slide SHOULD look like.
+      targetPng: (sid) => {
+        const p = sxsDir ? join(sxsDir, "originals", `${sid}.png`) : null;
+        return p && existsSync(p) ? p : null;
+      },
       approvedPng: (sid) => approvedRefPng(sxsDir, baselineDir, sid),
       timeoutMs,
     }));
@@ -952,7 +958,14 @@ interface MergeRatingViaUIArgs {
   label: string;
   /** overlay dir holding the merged renders (`<dir>/thumbs/<sid>.png`). */
   mergedDir: string | null;
-  /** the approved-reference PNG shown as "original" for a slide. */
+  /** the TARGET — the fixture Chrome screenshot ("what the slide SHOULD look
+   *  like"), shown on the "Original HTML" side. This is the correct reference
+   *  for judging a fix. Preferred over approvedPng. */
+  targetPng: (sid: string) => string | null;
+  /** FALLBACK only: the approved/prior render, used when no fixture target
+   *  screenshot exists (e.g. a slide with no rendered original). NOTE: for a
+   *  brand-new slide with no blessed golden this is the OLD (pre-fix) render, so
+   *  it must NOT be the primary "original" — that showed the broken version. */
   approvedPng: (sid: string) => string | null;
   timeoutMs: number;
 }
@@ -977,7 +990,11 @@ function mergeRatingViaUI(a: MergeRatingViaUIArgs): MergeRatingVerdict {
   for (const sid of a.changed) {
     const test = a.mergedDir ? join(a.mergedDir, "thumbs", `${sid}.png`) : null;
     if (test && existsSync(test)) { try { copyFileSync(test, join(slidesDir, `${sid}.png`)); } catch { /* */ } }
-    const orig = a.approvedPng(sid);
+    // "Original HTML" side = the fixture TARGET (what it should look like), NOT
+    // the approved/old render. For new slides the approved fallback IS the broken
+    // pre-fix render, which made the SxS compare broken-vs-fixed instead of
+    // target-vs-fixed. Prefer the fixture screenshot; approved is fallback only.
+    const orig = (() => { const t = a.targetPng(sid); return t && existsSync(t) ? t : a.approvedPng(sid); })();
     if (orig && existsSync(orig)) { try { copyFileSync(orig, join(originalsDir, `${sid}.png`)); } catch { /* */ } }
   }
   // Use a FRESH port per rating round so a slow-to-exit prior server can't cause

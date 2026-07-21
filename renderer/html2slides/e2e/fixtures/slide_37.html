@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #fffdf5; display: flex; flex-direction: column; justify-content: center; padding: 60px 100px 60px 120px; }
+.head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 34px; }
+h1 { font-size: 40px; font-weight: 800; color: #2b2410; }
+.count { font-size: 15px; font-weight: 700; color: #b58900; background: #fff3c4; padding: 4px 12px; border-radius: 20px; }
+.rows { list-style: none; }
+.row { position: relative; background: #ffffff; border-radius: 12px; border-left: 6px solid #f5b800; padding: 20px 30px 20px 42px; margin-bottom: 16px; box-shadow: 0 3px 12px rgba(120,90,0,0.07); }
+.num { position: absolute; left: -26px; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; border-radius: 50%; background: #ffffff; border: 3px solid #f5b800; color: #b58900; font-size: 22px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(181,137,0,0.18); }
+.title { font-size: 20px; font-weight: 700; color: #322a12; }
+.meta { font-size: 13px; color: #8a7f5c; margin-top: 2px; }
+.owner { position: absolute; right: 30px; top: 50%; transform: translateY(-50%); text-align: right; }
+.owner b { font-size: 13px; font-weight: 700; color: #5b5335; display: block; }
+.owner span { font-size: 12px; color: #a99a6a; }
+</style></head><body>
+<div class="head"><h1>Blockers</h1><span class="count">4 to resolve</span></div>
+<ol class="rows">
+<li class="row"><div class="num">1</div><div class="title">API keys not rotating</div><div class="meta">Secrets manager · security review pending</div><div class="owner"><b>Priya</b><span>ETA today</span></div></li>
+<li class="row"><div class="num">2</div><div class="title">Migration lock timeout</div><div class="meta">Postgres · blocks the 3.2 release</div><div class="owner"><b>Marco</b><span>ETA Thu</span></div></li>
+<li class="row"><div class="num">3</div><div class="title">Flaky e2e on CI</div><div class="meta">Playwright · ~1 in 6 runs red</div><div class="owner"><b>Sasha</b><span>ETA Fri</span></div></li>
+<li class="row"><div class="num">4</div><div class="title">Missing GDPR export</div><div class="meta">Compliance · legal deadline</div><div class="owner"><b>Lena</b><span>ETA next wk</span></div></li>
+</ol>
+</body></html>

@@ -82,7 +82,8 @@ import { resumeMerge } from "./resume-merge.js";
 // `./clusters.ts` file with your actual cluster definitions. esbuild will
 // refuse to build until that file exists — by design, to prevent
 // accidental smoke runs. See header for the file template.
-import { clustersFromRatings } from "./generate-clusters.js";
+import { clustersFromRatings, applyManualClusters } from "./generate-clusters.js";
+import http from "node:http";
 import { join as pathJoin } from "node:path";
 import type { Cluster } from "./workspace-setup.js";
 
@@ -284,7 +285,18 @@ async function run(): Promise<void> {
   const ratingsPath = process.env.BUG_SOLVING_RATINGS_JSON ?? "/tmp/sxs-complex/ratings.json";
   const sxsDir = process.env.BUG_SOLVING_SXS_DIR ?? "/tmp/sxs-complex";
   const fixturesDir = process.env.BUG_SOLVING_FIXTURES_DIR ?? "renderer/html2slides/e2e/fixtures";
-  const liveClusters = clustersFromRatings(ratingsPath, { retryBudget });
+  let liveClusters = clustersFromRatings(ratingsPath, { retryBudget });
+  // --clusters (BUG_SOLVING_CLUSTERS): manually GROUP the auto per-slide clusters,
+  // e.g. --clusters="[['slide_35','slide_36','slide_37','slide_38']]" solves those
+  // four as ONE cluster (one root cause + one fork) instead of four issues.
+  const manualClusterSpec = (process.env.BUG_SOLVING_CLUSTERS || "").trim();
+  if (manualClusterSpec) {
+    liveClusters = applyManualClusters(liveClusters, manualClusterSpec);
+    console.error(
+      `[scaffold] --clusters applied → ${liveClusters.length} cluster(s): ` +
+        liveClusters.map((c) => `${c.task_id}[${c.slide_ids.join(",")}]`).join(" · "),
+    );
+  }
   printBrokenSlides(liveClusters, ratingsPath, sxsDir, fixturesDir);
   if (liveClusters.length === 0) {
     console.error(`\n❌ No slides marked BAD in ${ratingsPath} — nothing to solve. Rate slides bad in the SxS UI first.`);
@@ -336,9 +348,14 @@ async function run(): Promise<void> {
   else console.log(`🔔 NOTIFY USER: stdout-only (set BUG_SOLVING_NOTIFY_CMD='<cmd with {url} {title} {slides}>' for a real notifier)`);
 
   const tasks = buildTasks(buildOpts);
-  console.error(`[scaffolding] built ${tasks.length} task(s). When a slide SOLVES it boots a read-only rating UI on its port — open it and mark GOOD/BAD:`);
+  // Do NOT print a live-looking URL here — the server isn't up yet. Just show
+  // the RESERVED port per cluster; the actual clickable URL is printed the
+  // moment the UI is listening (a "✅ RATING UI READY → open http://…" line
+  // from the rating-gate node — see main.ts), so you open it when it's real,
+  // not when it's merely reserved.
+  console.error(`[scaffolding] built ${tasks.length} task(s). Each cluster boots its OWN read-only rating UI WHEN it solves — watch for a "✅ RATING UI READY" line with the URL, then open it and mark GOOD/BAD. Reserved ports (not live yet):`);
   for (const t of tasks) {
-    console.error(`  ${t.slides.map((s) => s.slide_id).join(",").padEnd(24)} → http://localhost:${t.server_port}   [${t.task_id}]`);
+    console.error(`  ${t.slides.map((s) => s.slide_id).join(",").padEnd(24)} :${t.server_port}   [${t.task_id}]  (opens on solve)`);
   }
 
   await recordBeforePptx(tasks);
@@ -366,7 +383,37 @@ async function run(): Promise<void> {
   const bsModel = process.env.BUG_SOLVING_MODEL as ("opus" | "sonnet" | "haiku" | "fable" | undefined);
   const session = new Session({ sessionId: `bug_solving-${Date.now()}`, ...(bsModel ? { model: bsModel } : {}) });
   if (bsModel) console.error(`[scaffold] worker model override: ${bsModel}`);
-  const results = await engine.execute(session, (s) => main({ session: s, tasks }));
+
+  // Announce each cluster's rating UI to STDERR (what the human watching this
+  // process actually sees) the MOMENT its port starts listening — not at start.
+  // The UIs boot deep inside the engine graph where their own stdout is captured
+  // and never reaches the terminal, so the orchestrator watches the ports itself.
+  const announcedPorts = new Set<number>();
+  const portWatch = setInterval(() => {
+    for (const t of tasks) {
+      if (announcedPorts.has(t.server_port)) continue;
+      const req = http.get({ host: "127.0.0.1", port: t.server_port, path: "/", timeout: 800 }, (res) => {
+        if (!announcedPorts.has(t.server_port)) {
+          announcedPorts.add(t.server_port);
+          console.error(
+            `\n✅ RATING UI READY → open http://localhost:${t.server_port} and mark GOOD/BAD  ` +
+              `[${t.task_id}: ${t.slides.map((s) => s.slide_id).join(",")}]\n`,
+          );
+        }
+        res.resume();
+      });
+      req.on("error", () => { /* not up yet */ });
+      req.on("timeout", () => req.destroy());
+    }
+  }, 1500);
+  portWatch.unref?.();
+
+  let results;
+  try {
+    results = await engine.execute(session, (s) => main({ session: s, tasks }));
+  } finally {
+    clearInterval(portWatch);
+  }
 
   console.error("\n=== RESULTS ===");
   console.error(JSON.stringify(results, null, 2));

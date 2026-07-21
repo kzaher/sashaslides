@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; font-family: 'Inter', sans-serif; background: #eef1f6; display: flex; align-items: stretch; }
+.rail { width: 320px; background: linear-gradient(160deg, #1f2a44, #2b3a5e); color: #fff; padding: 56px 40px; display: flex; flex-direction: column; justify-content: center; }
+.rail h1 { font-size: 40px; font-weight: 800; line-height: 1.1; margin-bottom: 14px; }
+.rail p { font-size: 14px; color: #aab6d4; line-height: 1.6; }
+.rail .kpi { margin-top: 28px; font-size: 60px; font-weight: 800; color: #f5b800; line-height: 1; }
+.rail .kpi span { font-size: 16px; color: #aab6d4; font-weight: 500; }
+.list { flex: 1; padding: 52px 64px 52px 84px; display: flex; flex-direction: column; justify-content: center; gap: 24px; list-style: none; }
+.item { position: relative; background: #ffffff; border-radius: 12px; border-left: 6px solid #f5b800; padding: 20px 26px 20px 40px; box-shadow: 0 4px 14px rgba(31,42,68,0.09); }
+.num { position: absolute; left: -26px; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; border-radius: 50%; background: #ffffff; border: 4px solid #f5b800; color: #b58900; font-size: 22px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(31,42,68,0.14); }
+.title { font-size: 18px; font-weight: 700; color: #1f2a44; }
+.desc { font-size: 13px; color: #6b7688; margin-top: 2px; }
+.pct { position: absolute; right: 26px; top: 50%; transform: translateY(-50%); font-size: 22px; font-weight: 800; color: #d97706; }
+</style></head><body>
+<div class="rail">
+  <h1>Top 4 Issues</h1>
+  <p>Aggregated from support tickets and error tracking over the last 30 days.</p>
+  <div class="kpi">1,284 <span>reports</span></div>
+</div>
+<ol class="list">
+  <li class="item"><div class="num">1</div><div class="title">Login loop after reset</div><div class="desc">Session not cleared after a password change</div><div class="pct">41%</div></li>
+  <li class="item"><div class="num">2</div><div class="title">Attachment upload stalls</div><div class="desc">Files over 25MB time out silently</div><div class="pct">27%</div></li>
+  <li class="item"><div class="num">3</div><div class="title">Wrong timezone on invoices</div><div class="desc">UTC used instead of account locale</div><div class="pct">19%</div></li>
+  <li class="item"><div class="num">4</div><div class="title">Search misses recent items</div><div class="desc">Index lag up to 90 seconds</div><div class="pct">13%</div></li>
+</ol>
+</body></html>
