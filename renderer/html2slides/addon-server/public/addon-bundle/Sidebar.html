@@ -3332,6 +3332,25 @@
       _deferredChipSpans.push(sp);
     });
   }
+  function isStructuredCardList(listEl) {
+    for (const li of Array.from(listEl.children)) {
+      if (li.tagName !== "LI") continue;
+      const childEls = Array.from(li.children).filter((c) => {
+        const t = (c.tagName || "").toUpperCase();
+        if (t === "UL" || t === "OL") return false;
+        return getComputedStyle(c).display !== "none";
+      });
+      if (childEls.length < 2) continue;
+      for (const c of childEls) {
+        const ccs = getComputedStyle(c);
+        if (ccs.position === "absolute" || ccs.position === "fixed") return true;
+        const cst = getStyle(c);
+        const decorated = !!cst.bgColor || (cst.borderWidth || 0) > 0;
+        if (decorated && (cst.borderRadius || 0) > 0) return true;
+      }
+    }
+    return false;
+  }
   function walk(el) {
     if (seen.has(el)) return;
     const tag = (el.tagName || "").toUpperCase();
@@ -3361,7 +3380,7 @@
       return;
     }
     if (tag === "UL" || tag === "OL") {
-      if (!el.parentElement || el.parentElement.tagName.toUpperCase() !== "LI") {
+      if ((!el.parentElement || el.parentElement.tagName.toUpperCase() !== "LI") && !isStructuredCardList(el)) {
         seen.add(el);
         el.querySelectorAll("li, ul, ol").forEach((c) => seen.add(c));
         const listStyle = getStyle(el);
@@ -5433,6 +5452,25 @@
       _deferredChipSpans.push(sp);
     });
   }
+  function isStructuredCardList(listEl) {
+    for (const li of Array.from(listEl.children)) {
+      if (li.tagName !== "LI") continue;
+      const childEls = Array.from(li.children).filter((c) => {
+        const t = (c.tagName || "").toUpperCase();
+        if (t === "UL" || t === "OL") return false;
+        return getComputedStyle(c).display !== "none";
+      });
+      if (childEls.length < 2) continue;
+      for (const c of childEls) {
+        const ccs = getComputedStyle(c);
+        if (ccs.position === "absolute" || ccs.position === "fixed") return true;
+        const cst = getStyle(c);
+        const decorated = !!cst.bgColor || (cst.borderWidth || 0) > 0;
+        if (decorated && (cst.borderRadius || 0) > 0) return true;
+      }
+    }
+    return false;
+  }
   function walk(el) {
     if (seen.has(el)) return;
     const tag = (el.tagName || "").toUpperCase();
@@ -5462,7 +5500,7 @@
       return;
     }
     if (tag === "UL" || tag === "OL") {
-      if (!el.parentElement || el.parentElement.tagName.toUpperCase() !== "LI") {
+      if ((!el.parentElement || el.parentElement.tagName.toUpperCase() !== "LI") && !isStructuredCardList(el)) {
         seen.add(el);
         el.querySelectorAll("li, ul, ol").forEach((c) => seen.add(c));
         const listStyle = getStyle(el);

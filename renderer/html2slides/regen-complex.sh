@@ -93,6 +93,13 @@ echo "=== Pixel-perfect goldens check ==="
 # summary + diffs, not to abort.
 npx tsx check-goldens.ts "$OUT/slides" "$OUT/diffs" --goldens "$GOLDENS" --originals "$OUT/originals" || true
 
+# Invalidate the GOOD rating of any slide whose current render REGRESSED vs its
+# blessed golden — a stale "good" no longer reflects reality, so it flips to BAD
+# (surfaced in the SxS + re-solvable). Writes ratings.json + the repo-mirrored
+# backup. Only currently-GOOD, genuinely-regressed slides are touched.
+echo "=== Invalidate regressed goldens in ratings ==="
+npx tsx invalidate-regressed.ts "$OUT/diffs/regression-report.json" "$OUT/ratings.json" "$BACKUP" || true
+
 echo ""
 echo "Thumbs:  $OUT/slides/"
 echo "Diffs:   $OUT/diffs/ (diff_slide_NN.png for any regression)"
