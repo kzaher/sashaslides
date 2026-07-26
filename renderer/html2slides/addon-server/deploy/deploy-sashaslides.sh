@@ -7,8 +7,14 @@
 #   • a NEW nginx site (sashaslides.com) + certbot cert — never touches existing sites/certs
 #   • UFW: UNTOUCHED — app port is loopback-only (127.0.0.1:6000) + 80/443 are yours; no ufw calls
 #
+# This is now a THIN WRAPPER: the sashaslides-specific steps (bridge zip + add-on
+# bundle regen, image build, nginx site + certbot) live here; the generic
+# "ship image to Hetzner + restart container + verify" part is delegated to the
+# COMMON script  prod/scripts/deploy_hetzner.sh  in the claude repo
+# (override its location with DEPLOY_HETZNER_SH=/path/to/deploy_hetzner.sh).
+#
 # Run from your local machine (where you have Docker + the populated repo):
-#   bash deploy-sashaslides.sh
+#   bash deploy-sashaslides.sh [--dry-run]
 set -euo pipefail
 
 # ── config ───────────────────────────────────────────────────────────────────
@@ -24,91 +30,69 @@ IMAGE="holosweat-sashaslides:latest"
 #   "insecure-registries":  "host.docker.internal:45012"   (next to your :5000 one),
 #   then Apply & Restart.
 LOCAL_PORT="45012"
-REGISTRY_PORT="5000"                          # registry:2 container's port on the server
-REGISTRY_LOCAL="host.docker.internal:$LOCAL_PORT"
 REMOTE_DIR="/root/sashaslides"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CTX="$(cd "$HERE/.." && pwd)"          # addon-server/ (compose build context)
 
-# ── regenerate the Claude-bridge skill zip served by the Automatic tab ────────
-# public/sasha-bridge.zip ships into the image via `COPY renderer`; rebuild it
-# here so a deploy is never stale.
+DRY=0
+[ "${1:-}" = "--dry-run" ] && DRY=1
+
+# ── locate the common deploy script ──────────────────────────────────────────
 REPO_ROOT="$(cd "$CTX/../../.." && pwd)"
-if [ -f "$REPO_ROOT/bridge/build_zip.py" ]; then
-  echo "==> regenerating Automatic-tab download: public/sasha-bridge.zip"
-  python3 "$REPO_ROOT/bridge/build_zip.py" "$CTX/public/sasha-bridge.zip" \
-    || echo "   (zip regen failed — shipping the committed copy)"
+COMMON="${DEPLOY_HETZNER_SH:-}"
+if [ -z "$COMMON" ]; then
+  for c in "$REPO_ROOT/../claude/prod/scripts/deploy_hetzner.sh" \
+           /workspaces/claude/prod/scripts/deploy_hetzner.sh; do
+    [ -f "$c" ] && COMMON="$c" && break
+  done
 fi
-
-# ── regenerate the Apps Script add-on bundle served at /addon-bundle/* ────────
-# install.sh?doc=<id> downloads these three files and clasp-pushes them onto the
-# target deck/doc, so a deploy must never ship a stale bundle.
-echo "==> regenerating add-on bundle: public/addon-bundle/ (SERVER_ORIGIN=https://$DOMAIN)"
-( cd "$REPO_ROOT/renderer/html2slides" && SERVER_ORIGIN="https://$DOMAIN" npx tsx browser/build-addon.ts ) \
-  || { echo "!! add-on bundle build failed"; exit 1; }
-mkdir -p "$CTX/public/addon-bundle"
-for f in Code.gs appsscript.json Sidebar.html; do
-  cp "$REPO_ROOT/dist/renderer/html2slides/addon/$f" "$CTX/public/addon-bundle/$f" \
-    || { echo "!! bundle file missing: $f"; exit 1; }
-done
-
-# ── 0. SSH tunnel:  Mac localhost:$LOCAL_PORT → server registry :$REGISTRY_PORT ─
-# Bound to 0.0.0.0 so Docker Desktop's host.docker.internal can reach the forward
-# (loopback-only binds aren't always reachable from the Docker VM on macOS). 6100
-# sidesteps the macOS AirPlay-on-5000 clash; we still guard in case it's busy.
-if lsof -nP -iTCP:"$LOCAL_PORT" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
-  echo "!! Local port $LOCAL_PORT is already in use:"
-  lsof -nP -iTCP:"$LOCAL_PORT" -sTCP:LISTEN 2>/dev/null | sed 's/^/   /'
-  echo "   Change LOCAL_PORT at the top of this script (and the insecure-registries entry to match)."
+[ -n "$COMMON" ] && [ -f "$COMMON" ] || {
+  echo "!! common deploy script not found — set DEPLOY_HETZNER_SH=/path/to/deploy_hetzner.sh" >&2
   exit 1
-fi
-echo "==> opening SSH tunnel  localhost:$LOCAL_PORT → $SERVER registry :$REGISTRY_PORT"
-ssh -fN -L "0.0.0.0:$LOCAL_PORT:localhost:$REGISTRY_PORT" "$SERVER_USER@$SERVER"
-trap 'pkill -f "ssh -fN -L 0.0.0.0:$LOCAL_PORT:localhost:$REGISTRY_PORT $SERVER_USER@$SERVER" 2>/dev/null || true' EXIT
-# wait until the registry actually answers THROUGH the tunnel before pushing
-for i in $(seq 1 15); do
-  if curl -fsS "http://localhost:$LOCAL_PORT/v2/" >/dev/null 2>&1; then echo "  registry reachable through tunnel ✓"; break; fi
-  if [ "$i" = 15 ]; then
-    echo "!! registry not answering on localhost:$LOCAL_PORT through the tunnel:"
-    echo "   • is the registry:2 container up on the server?  ssh $SERVER_USER@$SERVER 'docker ps | grep registry'"
-    echo "   • did you add host.docker.internal:$LOCAL_PORT to Docker insecure-registries + Apply & Restart?"
-    exit 1
+}
+
+if [ "$DRY" = 1 ]; then
+  echo "~ [dry-run] skipping: sasha-bridge.zip regen, add-on bundle regen, docker compose build"
+else
+  # ── regenerate the Claude-bridge skill zip served by the Automatic tab ──────
+  # public/sasha-bridge.zip ships into the image via `COPY renderer`; rebuild it
+  # here so a deploy is never stale.
+  if [ -f "$REPO_ROOT/bridge/build_zip.py" ]; then
+    echo "==> regenerating Automatic-tab download: public/sasha-bridge.zip"
+    python3 "$REPO_ROOT/bridge/build_zip.py" "$CTX/public/sasha-bridge.zip" \
+      || echo "   (zip regen failed — shipping the committed copy)"
   fi
-  sleep 1
-done
 
-# ── 1. build the image (multi-stage: compiles the pptxgenjs fork bundle +
-#       convert-bundle.js + Code.gs FROM SOURCE in the image — never stale, and
-#       needs NO node/esbuild/gulp on this machine, just Docker). ────────────────
-echo "==> building $IMAGE (from source — fork bundle + convert-bundle + Code.gs)"
-( cd "$CTX" && HOST_PORT="$HOST_PORT" BUILD_DATE="$(date -u '+%Y-%m-%d %H:%M UTC')" docker compose build )
+  # ── regenerate the Apps Script add-on bundle served at /addon-bundle/* ──────
+  # install.sh?doc=<id> downloads these three files and clasp-pushes them onto the
+  # target deck/doc, so a deploy must never ship a stale bundle.
+  echo "==> regenerating add-on bundle: public/addon-bundle/ (SERVER_ORIGIN=https://$DOMAIN)"
+  ( cd "$REPO_ROOT/renderer/html2slides" && SERVER_ORIGIN="https://$DOMAIN" npx tsx browser/build-addon.ts ) \
+    || { echo "!! add-on bundle build failed"; exit 1; }
+  mkdir -p "$CTX/public/addon-bundle"
+  for f in Code.gs appsscript.json Sidebar.html; do
+    cp "$REPO_ROOT/dist/renderer/html2slides/addon/$f" "$CTX/public/addon-bundle/$f" \
+      || { echo "!! bundle file missing: $f"; exit 1; }
+  done
 
-# ── 2. tag + push to the registry (over the tunnel) ───────────────────────────
-echo "==> pushing $IMAGE → $REGISTRY_LOCAL"
-docker tag "$IMAGE" "$REGISTRY_LOCAL/$IMAGE"
-docker push "$REGISTRY_LOCAL/$IMAGE"
+  # ── build the image (multi-stage: compiles the pptxgenjs fork bundle +
+  #     convert-bundle.js + Code.gs FROM SOURCE in the image — never stale, and
+  #     needs NO node/esbuild/gulp on this machine, just Docker). ──────────────
+  echo "==> building $IMAGE (from source — fork bundle + convert-bundle + Code.gs)"
+  ( cd "$CTX" && HOST_PORT="$HOST_PORT" BUILD_DATE="$(date -u '+%Y-%m-%d %H:%M UTC')" docker compose build )
+fi
 
-# ── 3. copy compose + env + nginx site to the server ──────────────────────────
-echo "==> staging compose + nginx site on $SERVER:$REMOTE_DIR"
-ssh "$SERVER_USER@$SERVER" "mkdir -p $REMOTE_DIR"
-# .env consumed by compose (HOST_PORT); created if absent.
-printf 'HOST_PORT=%s\nOVERSAMPLING_DEFAULT=2\n' "$HOST_PORT" > /tmp/sashaslides.env
-scp /tmp/sashaslides.env            "$SERVER_USER@$SERVER:$REMOTE_DIR/.env"
-scp "$CTX/docker-compose.yml"       "$SERVER_USER@$SERVER:$REMOTE_DIR/docker-compose.yml"
-scp "$HERE/nginx-sashaslides.conf"  "$SERVER_USER@$SERVER:/tmp/nginx-sashaslides.conf"
-
-# ── 4. remote: pull image, cert, nginx site, bring up (all additive) ──────────
-echo "==> remote: pull, certbot, nginx, compose up"
-ssh "$SERVER_USER@$SERVER" DOMAIN="$DOMAIN" ACME_EMAIL="krunoslav.zaher@gmail.com" \
-    REMOTE_DIR="$REMOTE_DIR" IMAGE="$IMAGE" 'bash -s' <<'REMOTE'
+# ── stage nginx site + cert (sashaslides-specific, additive) ─────────────────
+if [ "$DRY" = 1 ]; then
+  echo "~ [dry-run] would: scp $HERE/nginx-sashaslides.conf → $SERVER:/tmp/ ; ssh certbot certonly (if no cert) ; install sites-available/$DOMAIN ; nginx -t ; systemctl reload nginx"
+else
+  echo "==> staging nginx site + certbot on $SERVER"
+  scp "$HERE/nginx-sashaslides.conf" "$SERVER_USER@$SERVER:/tmp/nginx-sashaslides.conf"
+  ssh "$SERVER_USER@$SERVER" DOMAIN="$DOMAIN" ACME_EMAIL="$ACME_EMAIL" 'bash -s' <<'REMOTE'
 set -euo pipefail
 
-# 4a. pull the pushed image from the local registry, retag to the compose name
-docker pull "localhost:5000/$IMAGE"
-docker tag  "localhost:5000/$IMAGE" "$IMAGE"
-
-# 4b. obtain the cert (idempotent — certbot skips if it's still valid). Uses the
-#     nginx authenticator; does NOT modify your other sites.
+# obtain the cert (idempotent — certbot skips if it's still valid). Uses the
+# nginx authenticator; does NOT modify your other sites.
 if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
   echo "  -> certbot: obtaining cert for $DOMAIN"
   certbot certonly --nginx --non-interactive --agree-tos -m "$ACME_EMAIL" -d "$DOMAIN" || {
@@ -120,7 +104,7 @@ else
   echo "  -> cert for $DOMAIN already present (certbot renews it on its own timer)"
 fi
 
-# 4c. install the NEW nginx site (does not touch existing sites)
+# install the NEW nginx site (does not touch existing sites)
 cp /tmp/nginx-sashaslides.conf "/etc/nginx/sites-available/$DOMAIN"
 ln -sf "/etc/nginx/sites-available/$DOMAIN" "/etc/nginx/sites-enabled/$DOMAIN"
 # proxy_params is shipped by nginx on Debian/Ubuntu; create if your box lacks it.
@@ -133,21 +117,32 @@ PP
 nginx -t                       # abort on a bad config rather than reload-break
 systemctl reload nginx         # graceful: existing sites/connections unaffected
 
-# 4d. bring up sashaslides as its OWN compose project (isolated from your stack)
-cd "$REMOTE_DIR"
-docker compose -p sashaslides up -d
-
-# 4e. firewall — NOTHING TO DO. The app port is loopback-only (127.0.0.1:6000)
-#     and 80/443 are already handled by your existing nginx. This script makes
-#     ZERO ufw changes (no allow/deny/delete/reset) — your rules stay exactly as-is.
-
-echo "  -> sashaslides container:"; docker ps --filter name=sashaslides --format '     {{.Names}}  {{.Status}}  {{.Ports}}'
+# firewall — NOTHING TO DO. The app port is loopback-only (127.0.0.1:6000)
+# and 80/443 are already handled by your existing nginx. This script makes
+# ZERO ufw changes (no allow/deny/reset) — your rules stay exactly as-is.
 REMOTE
+fi
 
-# ── 6. verify ─────────────────────────────────────────────────────────────────
-echo "==> verifying https://$DOMAIN/healthz"
-sleep 3
-curl -fsS "https://$DOMAIN/healthz" && echo " ✓ live" || echo " (give the container a few seconds; re-check https://$DOMAIN/healthz)"
+# ── .env consumed by compose on the server (HOST_PORT) ───────────────────────
+printf 'HOST_PORT=%s\nOVERSAMPLING_DEFAULT=2\n' "$HOST_PORT" > /tmp/sashaslides.env
+
+# ── ship image + restart + verify via the COMMON script ──────────────────────
+# (tunnel :45012 → registry :5000, tag/push, remote pull+retag,
+#  docker compose -p sashaslides up -d in /root/sashaslides, health poll)
+echo "==> delegating to common deploy script: $COMMON"
+EXTRA=()
+[ "$DRY" = 1 ] && EXTRA+=(--dry-run)
+DEPLOY_SSH_USER="$SERVER_USER" \
+DEPLOY_SSH_HOST="$SERVER" \
+DEPLOY_TUNNEL_PORT="$LOCAL_PORT" \
+bash "$COMMON" "$IMAGE" sashaslides \
+  --compose-file "$CTX/docker-compose.yml" \
+  --env-file /tmp/sashaslides.env \
+  --remote-dir "$REMOTE_DIR" \
+  --project sashaslides \
+  --health-url "https://$DOMAIN/healthz" \
+  ${EXTRA[@]+"${EXTRA[@]}"}
+
 echo ""
 echo "All done. Server live at https://$DOMAIN — everything was built fresh from source in the image."
 echo "Get the current Code.gs (built into the image, never stale) onto your clipboard with:"
