@@ -1,8 +1,10 @@
 {
   "scripts": {
     "reauth": "npx tsx .auth/generate-token.ts",
-    "sudo_claude": "claude --dangerously-skip-permissions",
-    "sudo_codex": "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
+    "sudo_claude": "node /workspaces/claude/avemachina/dist/acp/cli/wrapped-claude.js --dangerously-skip-permissions",
+    "sudo_codex": "node /workspaces/claude/avemachina/dist/acp/cli/wrapped-codex.js --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
+    "avemachina_sudo_claude": "node /workspaces/claude/avemachina/dist/acp/cli/wrapped-claude.js --dangerously-skip-permissions",
+    "avemachina_sudo_codex": "node /workspaces/claude/avemachina/dist/acp/cli/wrapped-codex.js --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
     "sudo_claude_fork": "claude --dangerously-skip-permissions --continue --fork-session",
     "sudo_claude_resume": "claude --dangerously-skip-permissions --continue",
     "reinstall": "rm -rf node_modules renderer/node_modules && npm install && npm install --prefix renderer",

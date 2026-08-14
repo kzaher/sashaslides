@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en" style="height:100%">
+<head><meta charset="utf-8"><title>nanobox — real VM boot probe</title>
+<style>html,body{height:100%;margin:0;background:#0b0a09;color:#e8e2da;font-family:ui-monospace,monospace}
+#status{padding:8px 12px;color:#D97757;font-size:13px}
+#console{height:calc(100% - 40px);margin:0;padding:8px 12px;font-size:12.5px;white-space:pre-wrap;overflow:auto}</style></head>
+<body>
+<div id="status">loading CheerpX 1.2.8…</div>
+<pre id="console"></pre>
+<script type="module">
+const status = document.getElementById("status");
+const consoleEl = document.getElementById("console");
+const PROBE = [
+  "echo ===NANOBOX_PROBE===",
+  "uname -a",
+  "echo ARCH=$(dpkg --print-architecture 2>/dev/null || echo unknown)",
+  "grep PRETTY /etc/os-release 2>/dev/null",
+  "for b in node npm python3 tar gzip; do printf '%s=' $b; (command -v $b || echo MISSING); done",
+  "echo APP_MOUNT:; ls -la /app 2>&1 | head",
+  "echo ===PROBE_DONE===",
+].join("; ");
+
+try {
+  const CheerpX = await import("https://cxrtnc.leaningtech.com/1.2.8/cx.esm.js");
+  status.textContent = "CheerpX loaded; creating devices…";
+  const cloud = await CheerpX.CloudDevice.create("wss://disks.webvm.io/debian_large_20230522_5044875331.ext2");
+  const idb = await CheerpX.IDBDevice.create("nanobox-blocks");
+  const overlay = await CheerpX.OverlayDevice.create(cloud, idb);
+  const web = await CheerpX.WebDevice.create("vm/payload");
+  const data = await CheerpX.DataDevice.create();
+  status.textContent = "devices ready; booting Linux…";
+
+  const cx = await CheerpX.Linux.create({
+    mounts: [
+      { type: "ext2", path: "/", dev: overlay },
+      { type: "dir", path: "/app", dev: web },
+      { type: "dir", path: "/data", dev: data },
+      { type: "devs", path: "/dev" },
+      { type: "proc", path: "/proc" },
+    ],
+  });
+  cx.setConsole(consoleEl);
+  status.textContent = "kernel up; running probe as root…";
+  window.__cx = cx;
+
+  const code = await cx.run("/bin/bash", ["-c", PROBE], {
+    env: ["HOME=/root", "USER=root", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/app/bin", "LANG=C", "LC_ALL=C"],
+    cwd: "/root", uid: 0, gid: 0,
+  });
+  status.textContent = `probe finished (exit ${code})`;
+  window.__vmprobe = { code, text: consoleEl.textContent };
+} catch (e) {
+  status.textContent = "ERROR: " + (e && e.message || e);
+  window.__vmerror = String(e && e.stack || e);
+  consoleEl.textContent += "\n[boot error] " + (e && e.stack || e) + "\n";
+}
+</script>
+</body>
+</html>

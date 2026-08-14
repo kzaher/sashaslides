@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en" style="height:100%">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nanobox — real Linux in the browser</title>
+<style>
+html,body{height:100%;margin:0;background:#0b0a09;color:#e8e2da;font-family:ui-sans-serif,system-ui,sans-serif}
+header{padding:12px 16px;border-bottom:1px solid #241f1b;display:flex;align-items:center;gap:12px}
+header b{color:#D97757}.mono{font-family:ui-monospace,monospace}
+#status{color:#9c9187;font-size:12.5px;margin-left:auto}
+#console{height:calc(100% - 100px);margin:0;padding:12px 16px;font-family:ui-monospace,monospace;font-size:13px;white-space:pre-wrap;overflow:auto;outline:none}
+.dot{width:8px;height:8px;border-radius:50%;background:#e0b23a;display:inline-block}
+.dot.up{background:#57c06a;box-shadow:0 0 8px #57c06a}
+</style></head>
+<body>
+<header>
+  <svg viewBox="0 0 120 120" width="26" height="26" aria-label="nanobox"><g fill="#D97757">
+    <rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(0 60 60)"/><rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(45 60 60)"/><rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(90 60 60)"/><rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(135 60 60)"/><rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(180 60 60)"/><rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(225 60 60)"/><rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(270 60 60)"/><rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(315 60 60)"/>
+  </g></svg>
+  <div><b class="mono">nanobox</b> — real Debian Linux, running entirely in your browser tab <span class="mono" style="color:#6f665e">(CheerpX x86)</span></div>
+  <div id="status"><span class="dot" id="dot"></span> booting…</div>
+</header>
+<pre id="console" tabindex="0"></pre>
+<script type="module">
+const consoleEl = document.getElementById("console"), statusEl = document.getElementById("status"), dot = document.getElementById("dot");
+const setStatus = (t, up) => { statusEl.innerHTML = `<span class="dot ${up?"up":""}"></span> ${t}`; };
+const INFO = 'clear; echo "=== nanobox: real Linux in the browser ==="; uname -a; echo; grep PRETTY /etc/os-release; echo; echo "cpu: $(grep -c ^processor /proc/cpuinfo) core(s), $(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2)"; echo "mem: $(free -h 2>/dev/null | awk \'/Mem:/{print $2}\')"; echo; echo "you are $(whoami) in $(pwd)"; echo "try: ls /, cat /etc/debian_version, python3 --version, node --version"; echo; exec bash --login';
+try {
+  const CheerpX = await import("https://cxrtnc.leaningtech.com/1.2.8/cx.esm.js");
+  setStatus("loading disk…");
+  const cloud = await CheerpX.CloudDevice.create("wss://disks.webvm.io/debian_large_20230522_5044875331.ext2");
+  const idb = await CheerpX.IDBDevice.create("nanobox-blocks");
+  const overlay = await CheerpX.OverlayDevice.create(cloud, idb);
+  const data = await CheerpX.DataDevice.create();
+  setStatus("booting kernel…");
+  const cx = await CheerpX.Linux.create({ mounts: [
+    { type: "ext2", path: "/", dev: overlay },
+    { type: "dir", path: "/data", dev: data },
+    { type: "devs", path: "/dev" }, { type: "proc", path: "/proc" } ] });
+  cx.setConsole(consoleEl);
+  window.__cx = cx;
+  setStatus("running", true);
+  consoleEl.focus();
+  await cx.run("/bin/bash", ["-c", INFO], {
+    env: ["HOME=/root","USER=root","TERM=xterm","PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","LANG=C","LC_ALL=C"],
+    cwd: "/root", uid: 0, gid: 0 });
+  setStatus("shell exited", false);
+} catch (e) { setStatus("error: " + (e && e.message || e), false); consoleEl.textContent += "\n[boot error] " + (e && e.stack || e); }
+</script>
+</body></html>

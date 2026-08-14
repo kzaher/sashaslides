@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en" style="height:100%">
+<head><meta charset="utf-8"><title>nanobox — claude in the VM</title>
+<style>html,body{height:100%;margin:0;background:#0b0a09;color:#e8e2da;font-family:ui-monospace,monospace}
+#status{padding:8px 12px;color:#D97757;font-size:13px}#console{height:calc(100% - 40px);margin:0;padding:8px 12px;font-size:12.5px;white-space:pre-wrap;overflow:auto}</style></head>
+<body>
+<div id="status">loading…</div><pre id="console" tabindex="0"></pre>
+<script type="module">
+const status = document.getElementById("status"), consoleEl = document.getElementById("console");
+const log = (s) => { status.textContent = s; };
+// Launch claude to its login/onboarding screen. HOME=/root (writable overlay) for its config.
+const LAUNCH = "chmod +x /data/node; cd /root; export HOME=/root; echo '--- launching claude (cli.js) ---'; /data/node /data/cli.js; echo \"--- claude exited $? ---\"";
+async function fetchBytes(u) { const r = await fetch(u); if (!r.ok) throw new Error(u + " -> " + r.status); return new Uint8Array(await r.arrayBuffer()); }
+try {
+  const CheerpX = await import("https://cxrtnc.leaningtech.com/1.2.8/cx.esm.js");
+  log("devices…");
+  const cloud = await CheerpX.CloudDevice.create("wss://disks.webvm.io/debian_large_20230522_5044875331.ext2");
+  const idb = await CheerpX.IDBDevice.create("nanobox-blocks");
+  const overlay = await CheerpX.OverlayDevice.create(cloud, idb);
+  const data = await CheerpX.DataDevice.create();
+  log("booting…");
+  const cx = await CheerpX.Linux.create({ mounts: [
+    { type: "ext2", path: "/", dev: overlay },
+    { type: "dir", path: "/data", dev: data },
+    { type: "devs", path: "/dev" }, { type: "proc", path: "/proc" } ] });
+  cx.setConsole(consoleEl);
+  window.__cx = cx;
+  log("fetching node18 + cli.js…");
+  const [nodeBytes, cliBytes] = await Promise.all([
+    fetchBytes("payload/node/bin/node"),
+    fetchBytes("payload/claudejs/node_modules/@anthropic-ai/claude-code/cli.js"),
+  ]);
+  await data.writeFile("/node", nodeBytes);
+  await data.writeFile("/cli.js", cliBytes);
+  log("launching claude in VM (slow — V8 on i386)…");
+  consoleEl.focus();
+  window.__claudeStarted = Date.now();
+  // fire-and-forget: claude blocks waiting for login; we screenshot the live console
+  cx.run("/bin/bash", ["-lc", LAUNCH], {
+    env: ["HOME=/root", "USER=root", "TERM=xterm-256color", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"],
+    cwd: "/root", uid: 0, gid: 0 }).then((code) => { window.__claudeExit = code; log("claude process exited " + code); });
+} catch (e) { log("ERROR: " + (e && e.message || e)); window.__vmerror = String(e && e.stack || e); consoleEl.textContent += "\n[err] " + (e && e.stack || e); }
+</script>
+</body></html>

@@ -1,0 +1,12 @@
+{
+  "name": "nanobox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Run Linux in the browser (CheerpX) with a user-picked local directory as its home, mounted through a unit-tested 3-way sync layer. Tailscale for egress.",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "test:watch": "node --test --watch \"test/*.test.js\"",
+    "serve": "node server.mjs"
+  }
+}
