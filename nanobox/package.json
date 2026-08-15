@@ -7,6 +7,12 @@
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
     "test:watch": "node --test --watch \"test/*.test.js\"",
-    "serve": "node server.mjs"
+    "serve": "node server.mjs",
+    "test:boot": "node test/boot-browser.mjs",
+    "build:vm": "./vm-build/build.sh"
+  },
+  "dependencies": {
+    "chrome-remote-interface": "^0.34.0",
+    "ws": "^8.21.3"
   }
 }

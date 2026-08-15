@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nanobox — agent CLIs in a browser VM</title>
+<link rel="stylesheet" href="./vendor/xterm.css">
+<style>
+  html,body{height:100%;margin:0;background:#0d0b0a;color:#e8e2da;font-family:ui-sans-serif,system-ui,sans-serif}
+  body{display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #241f1b;flex-wrap:wrap}
+  header b{color:#D97757}
+  .sub{color:#9c9187;font-size:12.5px}
+  label{font-size:12.5px;color:#9c9187;display:flex;align-items:center;gap:6px}
+  select,input{background:#1c1815;color:#e8e2da;border:1px solid #362e28;border-radius:6px;padding:5px 8px;font:inherit;font-size:12.5px}
+  button{background:#D97757;color:#180f0b;border:0;padding:7px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px}
+  button:disabled{opacity:.5;cursor:default}
+  .launch{font-size:12.5px;color:#6f665e}
+  .launch a{color:#D97757;text-decoration:none;border-bottom:1px dotted #5a4438;margin-left:8px}
+  .launch a:hover{border-bottom-style:solid}
+  #status{margin-left:auto;font-size:12.5px;color:#9c9187;font-family:ui-monospace,monospace}
+  .dot{width:8px;height:8px;border-radius:50%;background:#e0b23a;display:inline-block;margin-right:6px}
+  .dot.up{background:#57c06a;box-shadow:0 0 8px #57c06a}.dot.err{background:#e05a4a}
+  #term{flex:1;min-height:0;padding:6px 8px}
+  .xterm{height:100%}
+</style>
+</head>
+<body>
+<header>
+  <b>nanobox</b>
+  <span class="sub">real Linux + a real agent CLI, entirely in this tab</span>
+  <label>engine
+    <select id="backend">
+      <option value="qemu">QEMU&rarr;wasm (JIT, faster)</option>
+      <option value="wasi">container2wasm WASI (Bochs)</option>
+    </select>
+  </label>
+  <label>image
+    <select id="image">
+      <option value="claude">claude</option>
+      <option value="codex">codex</option>
+      <option value="agy">antigravity (agy)</option>
+      <option value="base">base (shell)</option>
+    </select>
+  </label>
+  <label>cmd <input id="cmd" size="22" placeholder="(image default)"></label>
+  <button id="boot">Boot</button>
+  <span class="launch">open in a new tab:
+    <a href="./?backend=wasi&image=claude" target="_blank">claude</a>
+    <a href="./?backend=wasi&image=codex" target="_blank">codex</a>
+    <a href="./?backend=wasi&image=agy" target="_blank">agy</a>
+    <a href="./?backend=qemu&image=base" target="_blank">shell</a>
+  </span>
+  <span id="status"><span class="dot" id="dot"></span><span id="statusText">idle</span></span>
+</header>
+<div id="term"></div>
+
+<script src="./vendor/xterm.js"></script>
+<script src="./vendor/addon-fit.js"></script>
+<script src="./vendor/xterm-pty.js"></script>
+<script src="./dist/runcontainer.js"></script>
+<script>
+// The two engines differ only in how the wasm gets instantiated:
+//
+//   qemu  QEMU compiled with emscripten (TCG JIT -> wasm). Runs on the main thread; the container
+//         image is streamed in over 9p by imagemounter.wasm in a worker.
+//   wasi  container2wasm's single WASI module (Bochs inside). Runs in a worker, driven over the
+//         xterm-pty TtyServer/TtyClient channel.
+//
+// Both runtimes are --external-bundle builds, so the same wasm boots any of the images under
+// ./images/ — chosen at boot time, not at build time.
+const DEFAULT_CMD = {
+  claude: "/usr/local/bin/claude",
+  codex:  "/usr/local/bin/codex",
+  agy:    "/usr/local/bin/agy",
+  base:   "/bin/sh",
+};
+
+// Which engine each image *can* run on. This is not a preference — it is what the emulated CPU
+// supports. QEMU-wasm's guest CPU has no AES/PCLMUL and no AVX2, and it cannot be given any
+// (an explicit -cpu of any kind crashes this build inside TCI's helper dispatch), so:
+//   claude  Bun-compiled, needs AVX2   -> SIGILL on qemu, fine on Bochs
+//   agy     Go, built with pclmul      -> SIGILL on qemu, fine on Bochs
+//   codex   Rust, plain x86-64         -> execs fine on qemu (`--version`, `codex login`), but its
+//                                       full-screen TUI never paints there, so it gets Bochs too
+// Bochs is configured as a corei7_haswell_4770 and is built --enable-avx, which is why the slow
+// engine is the capable one.
+const DEFAULT_BACKEND = { claude: "wasi", agy: "wasi", codex: "wasi", base: "qemu" };
+const NEEDS_BOCHS = new Set(["claude", "agy", "codex"]);
+
+// The VM's egress path ends in a plain `fetch` from this page (container2wasm's network stack
+// terminates the guest's TLS in the browser and re-issues the request). Cross-origin, that fetch is
+// subject to CORS, so every request to a normal API host fails and the guest sees 503 — which a CLI
+// reports as "check your internet connection". Send those through nanobox's own server instead,
+// which has no such restriction. Same-origin fetches (the runtime, the image blobs) are untouched.
+(() => {
+  const origFetch = window.fetch.bind(window);
+  window.fetch = async (input, init = {}) => {
+    const url = typeof input === "string" ? input : input.url;
+    let target;
+    try { target = new URL(url, location.href); } catch { return origFetch(input, init); }
+    if (target.origin === location.origin || !/^https?:$/.test(target.protocol)) return origFetch(input, init);
+    const headers = {};
+    new Headers((typeof input === "object" && input.headers) || init.headers || {}).forEach((v, k) => (headers[k] = v));
+    const spec = { url: target.href, method: (init.method || (typeof input === "object" && input.method) || "GET").toUpperCase(), headers };
+    const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(spec))))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    // always POST to the gateway (the real method rides in the target spec) so a request body
+    // survives regardless of what the guest used
+    return origFetch(new URL("/net/fetch", location.origin), {
+      method: "POST",
+      headers: { "x-nanobox-target": encoded },
+      body: init.body ?? undefined,
+    });
+  };
+})();
+
+// Boot failures inside the emulator stack surface as unhandled rejections; keep their stacks.
+addEventListener("unhandledrejection", (e) => {
+  console.error("nanobox unhandled rejection:", (e.reason && (e.reason.stack || e.reason.message)) || e.reason);
+});
+addEventListener("error", (e) => { console.error("nanobox error:", e.message, e.filename + ":" + e.lineno); });
+
+const qs = new URLSearchParams(location.search);
+const el = (id) => document.getElementById(id);
+const setStatus = (t, cls) => { el("statusText").textContent = t; el("dot").className = "dot" + (cls ? " " + cls : ""); if (window.nanobox) window.nanobox.state = t; };
+
+el("image").value = qs.get("image") || "claude";
+el("backend").value = qs.get("backend") || DEFAULT_BACKEND[el("image").value] || "qemu";
+el("cmd").value = qs.get("cmd") || "";
+// changing the image moves the engine to one that image can actually run on
+el("image").onchange = () => { el("backend").value = DEFAULT_BACKEND[el("image").value] || "qemu"; };
+el("boot").onclick = () => {
+  const p = new URLSearchParams({ backend: el("backend").value, image: el("image").value });
+  if (el("cmd").value.trim()) p.set("cmd", el("cmd").value.trim());
+  location.search = "?" + p.toString();
+};
+
+const xterm = new Terminal({ fontSize: 13, convertEol: false, scrollback: 5000,
+  theme: { background: "#0d0b0a", foreground: "#e8e2da" } });
+const fit = new FitAddon.FitAddon();
+xterm.loadAddon(fit);
+xterm.open(el("term"));
+fit.fit();
+addEventListener("resize", () => { try { fit.fit(); } catch {} });
+const { master, slave } = openpty();
+// The guest runs its own line discipline (it is a full Linux tty), so xterm-pty's JS-side one must
+// get out of the way: leave it canonical and it buffers and echoes keystrokes instead of passing
+// them through, which looks exactly like a TUI ignoring your keyboard.
+{
+  const t = slave.ioctl("TCGETS");
+  t.iflag &= ~(ISTRIP | INLCR | IGNCR | ICRNL | IXON);
+  t.oflag &= ~OPOST;
+  t.lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+  slave.ioctl("TCSETS", new Termios(t.iflag, t.oflag, t.cflag, t.lflag, t.cc));
+}
+xterm.loadAddon(master);
+xterm.focus();
+
+// Test hook: the boot tests read the console the same way a human does — off the screen.
+window.nanobox = {
+  xterm,
+  screen() {
+    const b = xterm.buffer.active, out = [];
+    for (let i = 0; i < b.length; i++) out.push(b.getLine(i).translateToString(true));
+    return out.join("\n");
+  },
+  state: "loading",
+  // type into the VM the way the terminal itself does, without depending on window focus
+  send(data) { xterm._core.coreService.triggerDataEvent(data, true); },
+};
+// keep the guest's winsize in sync so full-screen TUIs (every agent CLI is one) lay out correctly
+const pushSize = () => { try { slave.notifyResize?.(xterm.cols, xterm.rows); } catch {} };
+xterm.onResize(pushSize);
+
+// nanobox's terminal is the VM console: everything below writes to it, so a failure is visible.
+const say = (s) => xterm.write(s.replace(/\n/g, "\r\n"));
+
+async function bootWASI(imageAddr, cmd) {
+  const vmImage = new URL("./wasi/out.wasm.gzip", location.href).href;
+  const mounter = new URL("./imagemounter.wasm.gzip", location.href).href;
+  const stackWorker = new URL("./dist/stack-worker.js", location.href).href;
+  setStatus("fetching runtime…");
+  const info = await RunContainer.createContainerWASI(vmImage, imageAddr, stackWorker, mounter);
+  setStatus("booting (Bochs)…", "up");
+  const worker = new Worker(new URL("./wasi-worker.js", location.href).href);
+  worker.postMessage({ type: "init", info, args: cmd });
+  new TtyServer(slave).start(worker);
+}
+
+async function bootQEMU(imageAddr, cmd) {
+  const base = new URL("./qemu/", location.href).href;
+  const mounter = new URL("./imagemounter.wasm.gzip", location.href).href;
+  const stackWorker = new URL("./dist/stack-worker.js", location.href).href;
+
+  let Module = {};
+  Module.pty = slave;
+  let readableCallbacks = [];
+  Module.pty.onReadable(() => { const cbs = readableCallbacks; readableCallbacks = []; cbs.forEach((cb) => cb()); });
+  Module.preRun = [];
+  Module.preRun.push((mod) => {
+    // emscripten polls the TTY; route that at the xterm-pty slave instead of stdin.
+    mod.TTY.stream_ops.poll = (stream, timeout, notifyCallback) => {
+      if (Module.pty.readable) return 1;
+      if (notifyCallback != null) {
+        notifyCallback.registerCleanupFunc(() => {
+          const i = readableCallbacks.indexOf(notifyCallback);
+          if (i != -1) readableCallbacks.splice(i, 1);
+        });
+        readableCallbacks.push(notifyCallback);
+      }
+      return 0;
+    };
+  });
+
+  // QEMU's own argv comes from qemu/arg-module.js, which the runtime imports for us. Intercept the
+  // assignment so ?cpu=/?mem=/?smp= can retune the VM without rebuilding a 140 MB runtime.
+  // Note the default CPU model matters: -cpu max or Haswell make the guest's Go init die in
+  // sysMemStat accounting (a TCG-on-wasm miscompile), while a plain qemu64 lacks the AES/PCLMUL and
+  // AVX2 that agy and claude need. See vm-build/README-cpu.md.
+  const overrides = { cpu: qs.get("cpu"), mem: qs.get("mem"), smp: qs.get("smp") };
+  Object.defineProperty(Module, "arguments", {
+    configurable: true,
+    get() { return this._args; },
+    set(v) {
+      let a = v.slice();
+      const put = (flag, value) => {
+        const i = a.indexOf(flag);
+        if (i === -1) a.splice(a.indexOf("-nographic"), 0, flag, value);
+        else a[i + 1] = value;
+      };
+      if (overrides.cpu) put("-cpu", overrides.cpu);
+      if (overrides.mem) put("-m", overrides.mem.endsWith("M") ? overrides.mem : overrides.mem + "M");
+      if (overrides.smp) put("-smp", `${overrides.smp},sockets=${overrides.smp}`);
+      // a restored snapshot is tied to the machine it was taken on; retuning means cold boot
+      if (overrides.cpu || overrides.mem || overrides.smp) {
+        const i = a.indexOf("-incoming");
+        if (i !== -1) a.splice(i, 2);
+      }
+      console.log("nanobox qemu argv:", a.join(" "));
+      this._args = a;
+    },
+  });
+
+  setStatus("fetching runtime…");
+  // `c:` overrides the image's CMD inside the VM's init.
+  const extraInfo = cmd && cmd.length ? "c: " + cmd.map((a) => a.replace(/ /g, "\\ ")).join(" ") + "\n" : "";
+  await RunContainer.createContainerQEMUWasm(
+    Module,
+    base + "out.js",
+    imageAddr,
+    stackWorker,
+    mounter,
+    base + "arg-module.js",
+    base + "load.js",
+    (p) => base + p,
+    { log: (...a) => console.log(...a), extraInfo },
+  );
+  setStatus("booting (QEMU)…", "up");
+}
+
+(async () => {
+  if (!qs.has("image") && !qs.has("backend")) {
+    say("\x1b[38;5;173mnanobox\x1b[0m — pick an image and press Boot. Real x86_64 Linux, in this tab.\n\n" +
+        "  image   a 3.9 MB glibc Ubuntu with one agent CLI in it. Boot it and you get that CLI's\n" +
+        "          real sign-in screen — codex ~50s, agy ~80s, claude ~4min.\n" +
+        "  engine  the image picks one for you. Bochs emulates a Haswell, which is what the agent\n" +
+        "          binaries need; QEMU→wasm is much faster but its CPU is too old for them, so it\n" +
+        "          is the one to use for the plain shell.\n");
+    setStatus("idle");
+    return;
+  }
+  const backend = el("backend").value, image = el("image").value;
+  const cmdStr = el("cmd").value.trim() || DEFAULT_CMD[image] || "";
+  const cmd = cmdStr ? cmdStr.split(/\s+/) : [];
+  const imageAddr = new URL("./images/" + image + "/", location.href).href;
+  el("boot").disabled = true;
+  if (backend === "qemu" && NEEDS_BOCHS.has(image)) {
+    say(`\x1b[33mheads up:\x1b[0m ${image} on the QEMU engine won't get far — its CPU has no ` +
+        `AVX2/PCLMUL and its TUI doesn't paint. Switch the engine to container2wasm WASI (Bochs).\n\n`);
+  }
+  const MB = { base: 3, claude: 98, codex: 99, agy: 57 }[image] ?? 100;
+  say(`\x1b[38;5;173mnanobox\x1b[0m booting \x1b[1m${image}\x1b[0m on \x1b[1m${backend}\x1b[0m — running: ${cmdStr}\n` +
+      `pulling ~${MB} MB of container image into the tab, then emulating x86_64. Give it a minute.\n\n`);
+  try {
+    if (backend === "wasi") await bootWASI(imageAddr, cmd);
+    else await bootQEMU(imageAddr, cmd);
+  } catch (e) {
+    setStatus("failed", "err");
+    say(`\r\n\x1b[31mboot failed:\x1b[0m ${e && e.message || e}\r\n`);
+    console.error(e);
+  }
+})();
+</script>
+</body>
+</html>

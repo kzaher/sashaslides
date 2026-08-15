@@ -1,0 +1,9 @@
+node_modules/
+
+# Browser-VM build artifacts — hundreds of MB, all reproducible with vm-build/build.sh
+public/c2w/qemu/
+public/c2w/wasi/
+public/c2w/images/
+public/c2w/dist/
+public/c2w/vendor/
+public/c2w/imagemounter.wasm.gzip

@@ -16,8 +16,7 @@ import { createReadStream, mkdtempSync } from "node:fs";
 import { join, resolve, extname, normalize, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
-import wsPkg from "ws";
-const WebSocketServer = wsPkg.Server || wsPkg.WebSocketServer;
+import { WebSocketServer } from "ws";
 
 const PORT = Number(process.env.PORT || 8088);
 const PUBLIC_DIR = resolve(new URL("./public", import.meta.url).pathname);
@@ -60,6 +59,56 @@ function runAgent(tool, prompt, model) {
   });
 }
 
+// --- egress gateway for the browser VM ------------------------------------
+// container2wasm's in-browser network stack terminates the VM's TLS itself and then re-issues each
+// request with the page's `fetch`. That works for CORS-enabled hosts and nothing else: api.anthropic.com
+// and friends answer without an Access-Control-Allow-Origin for us, the fetch rejects, and the VM
+// sees "503 Service Unavailable" — which is what an agent CLI reports as "check your internet
+// connection". So the page routes cross-origin requests here instead (see the fetch shim in
+// public/c2w/index.html) and this server makes them, where the same-origin policy does not apply.
+//
+// Localhost dev server, VM egress only: it forwards http/https to a caller-named target, so don't
+// expose it on a public interface.
+const HOP_BY_HOP = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "te",
+  "trailer", "proxy-authorization", "proxy-authenticate", "host", "content-length"]);
+
+async function handleNetFetch(req, res) {
+  let spec;
+  try {
+    spec = JSON.parse(Buffer.from(req.headers["x-nanobox-target"] || "", "base64url").toString("utf8"));
+    if (!/^https?:$/.test(new URL(spec.url).protocol)) throw new Error("only http(s)");
+  } catch (e) {
+    res.writeHead(400, { "content-type": "text/plain" }).end(`bad target: ${e.message}`);
+    return;
+  }
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  const body = chunks.length ? Buffer.concat(chunks) : undefined;
+  const headers = {};
+  for (const [k, v] of Object.entries(spec.headers || {})) if (!HOP_BY_HOP.has(k.toLowerCase())) headers[k] = v;
+  try {
+    const upstream = await fetch(spec.url, {
+      method: spec.method || "GET",
+      headers,
+      body: ["GET", "HEAD"].includes((spec.method || "GET").toUpperCase()) ? undefined : body,
+      redirect: "manual",
+    });
+    const out = {};
+    upstream.headers.forEach((v, k) => { if (!HOP_BY_HOP.has(k.toLowerCase())) out[k] = v; });
+    out["access-control-allow-origin"] = "*";
+    out["access-control-expose-headers"] = "*";
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    out["content-length"] = String(buf.length);
+    if (LOG_NET) console.error(`[net] ${spec.method || "GET"} ${spec.url} -> ${upstream.status} ${buf.length}b`);
+    res.writeHead(upstream.status, out);
+    res.end(buf);
+  } catch (e) {
+    if (LOG_NET) console.error(`[net] ${spec.url} -> ${e.message}`);
+    res.writeHead(502, { "content-type": "text/plain", "access-control-allow-origin": "*" });
+    res.end(`nanobox gateway: ${e.message}`);
+  }
+}
+
 async function handleAgent(req, res) {
   let body = "";
   for await (const c of req) { body += c; if (body.length > 1 << 20) break; }
@@ -77,12 +126,16 @@ async function handleAgent(req, res) {
 process.on("uncaughtException", (e) => console.error("[uncaught]", e && e.message || e));
 
 const LOG_REQ = process.env.LOG_REQ === "1";
+const LOG_NET = process.env.LOG_NET !== "0"; // the VM's egress log is useful by default
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://localhost:${PORT}`);
     if (LOG_REQ) res.on("finish", () => console.error(`${res.statusCode} ${req.method} ${url.pathname}${req.headers.range ? " [" + req.headers.range + "]" : ""}`));
     if (url.pathname === "/api/agent" && req.method === "POST") return void (await handleAgent(req, res));
-    const rel = url.pathname === "/" ? "/index.html" : url.pathname;
+    if (url.pathname === "/net/fetch") return void (await handleNetFetch(req, res));
+    // A trailing slash means "the index of that directory" (/c2w/ -> /c2w/index.html); a bare
+    // directory path still 404s, because CheerpX's WebDevice probes those.
+    const rel = url.pathname.endsWith("/") ? url.pathname + "index.html" : url.pathname;
     const filePath = normalize(join(PUBLIC_DIR, rel));
     if (relative(PUBLIC_DIR, filePath).startsWith("..")) { res.writeHead(403).end(); return; }
     const st = await fsStat(filePath);
