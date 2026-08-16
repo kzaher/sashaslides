@@ -11,7 +11,8 @@ CFLAGS="${CFLAGS:-}"
 case "${1:-static}" in
   static)
     docker run --rm -v "$PWD":/w -w /w alpine:3.20 sh -c \
-      "apk add -q gcc musl-dev && gcc -std=gnu11 -Wall -Wextra -static -O2 -s $CFLAGS -o nbnode nbnode.c && ls -la nbnode && file nbnode 2>/dev/null || true"
+      "apk add -q gcc musl-dev && gcc -std=gnu11 -Wall -Wextra -static -O2 -s $CFLAGS -o nbnode nbnode.c && gcc -static -O2 -s -o hctest hctest.c && gcc -static -O2 -s -o hcbench hcbench.c && ls -la nbnode hctest hcbench"
+    cp nbnode ../../web/native/nbnode   # served to the browser (bundle share /bundle/nb/node)
     ;;
   host) gcc -std=gnu11 -Wall -Wextra -O2 -g $CFLAGS -o nbnode-host nbnode.c && ls -la nbnode-host ;;
   test) "$0" host && exec node test.mjs ./nbnode-host ;;

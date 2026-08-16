@@ -13,3 +13,11 @@ web/native/node_modules/
 web/native/cli.js
 web/native/claude-cli.js
 web/native/runtime.js.map
+# built binaries / bundles (rebuild: guest/nbnode/build.sh, web/native/build.mjs — see build-all.sh)
+guest/nbnode/nbnode
+guest/nbnode/nbnode-host
+guest/nbnode/hctest
+guest/nbnode/hcbench
+web/native/nbnode
+web/native/runtime.js
+web/src/node_modules
