@@ -91,6 +91,21 @@ function serveFile(req, res, filePath) {
 }
 const HOP = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "te", "trailer", "proxy-authorization", "proxy-authenticate", "host", "content-length"]);
 await import("./web/netpolicy.js"); // NanoboxNetPolicy: the host allow-list shared with the pages
+// client-side error reporting (web/native/src/report.js, pages): appended to work/client-errors.log
+// as JSON lines and echoed here — the server-side cause of "Error writing file"-style CLI messages
+const LOGDIR = resolve(HERE, "work"); try { mkdirSync(LOGDIR, { recursive: true }); } catch {}
+async function clientLog(req, res) {
+  const chunks = []; for await (const c of req) { chunks.push(c); if (chunks.reduce((n, b) => n + b.length, 0) > 1 << 20) break; }
+  let recs = []; try { recs = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { res.writeHead(400); res.end(); return; }
+  if (!Array.isArray(recs)) recs = [recs];
+  const { appendFileSync } = await import("node:fs");
+  for (const r of recs.slice(0, 500)) {
+    const line = JSON.stringify(Object.assign({ at: new Date().toISOString(), ip: req.socket.remoteAddress }, r));
+    try { appendFileSync(join(LOGDIR, "client-errors.log"), line + "\n"); } catch {}
+    console.log(`[client] ${r.kind || "?"} ${(r.message || r.key || "").toString().slice(0, 160)}${r.syscall ? " (" + r.syscall + " " + (r.path || "") + ")" : ""}${r.stack ? "\n    " + String(r.stack).split("\n").slice(1, 4).join("\n    ") : ""}`);
+  }
+  res.writeHead(204); res.end();
+}
 async function netFetch(req, res) {
   let spec;
   try { spec = JSON.parse(Buffer.from(req.headers["x-nanobox-target"] || "", "base64url").toString("utf8")); if (!/^https?:$/.test(new URL(spec.url).protocol)) throw 0; }
@@ -137,6 +152,7 @@ const server = createServer(async (req, res) => {
   if (process.env.LOG_REQ) res.on("finish", () => console.log(`${res.statusCode} ${req.method} ${url.pathname}${req.headers.range ? " [" + req.headers.range + "]" : ""}`));
   let p = normalize(decodeURIComponent(url.pathname));
   if (req.method === "POST" && p === "/net/fetch") return netFetch(req, res);
+  if (req.method === "POST" && p === "/log") return clientLog(req, res);
   if (p === "/") p = "/index.html";
   if (p === "/engine/opt/out.wasm.gzip") return serveFile(req, res, ENGINE);
   if (p === "/engine/opt/slim/out.wasm.gzip") return serveFile(req, res, ENGINE.replace(/out\.wasm\.gzip$/, "out-slim.wasm.gzip")); // no boot.iso; not for identity pages

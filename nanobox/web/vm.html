@@ -27,6 +27,7 @@
   <span id="stats"></span>
 </footer>
 
+<script src="/report.js"></script>
 <script src="/netpolicy.js"></script>
 <script src="/proxyext.js"></script>
 <script>
@@ -206,7 +207,7 @@ async function boot() {
       if (d.event === "engine") el("status").textContent = d.optimized ? `running (JIT ${d.jit ? d.jit.level + ":" + d.jit.threshold : "off"}${d.bundles ? ", " + d.bundles + " precompiled modules" : ""}${direct ? ", direct rootfs" : ""})` : "running";
       if (d.event === "image") el("status").textContent = `image: layer ${d.layer} ${d.stage} (${(d.size / 1e6).toFixed(0)} MB)`;
       if (d.event === "bundle-ready") el("status").textContent = `image unpacked: ${d.files} entries in ${d.ms} ms` + (d.cache ? ` (${d.cache.hits} layers from browser cache, ${d.cache.misses} downloaded)` : "");
-      if (d.event === "error") { el("status").textContent = "error: " + d.message; }
+      if (d.event === "error") { el("status").textContent = "error: " + d.message; if (window.NanoboxReport) NanoboxReport.event("vm-worker-error", { message: d.message, engine, image }); }
     }
     else if (d.type === "nanobox-stats") {
       window.nanobox.stats = d;

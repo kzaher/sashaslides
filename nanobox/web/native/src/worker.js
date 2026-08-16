@@ -4,7 +4,7 @@
 //   page -> worker: {type:"init", cfg}  {type:"stdin", data}  {type:"resize", cols, rows}  {type:"dump"}
 //   worker -> page: {type:"event", event, ...}  {type:"stdout", fd, data}  {type:"exit", code}  {type:"missing", ...}
 import { Buffer } from "buffer";
-import { fixBuffer } from "./buffer-fix.js";
+import { fixBuffer, setBufferThrowHook } from "./buffer-fix.js";
 fixBuffer(Buffer);
 // the polyfills' CommonJS module objects (mutable: makeMisc adds the Node APIs they lack)
 import events from "events";
@@ -25,6 +25,8 @@ import { makeTty, makeOs, makeProcess, ProcessExit } from "./process.js";
 import { makeChildProcess, makeNet, makeHttp } from "./procnet.js";
 import { makeMisc } from "./misc.js";
 import { record, noteMissing, dump as dumpMissing, setOnFirst } from "./record.js";
+import { initReport, report, reportError, installGlobalHandlers } from "./report.js";
+initReport({}); installGlobalHandlers(); setBufferThrowHook((e, where) => reportError("buffer-throw", e, { fn: where }));
 import { esmToCjs } from "./esm2cjs.js";
 
 const post = (m, transfer) => self.postMessage(m, transfer || []);
@@ -162,7 +164,7 @@ async function main(cfg) {
       Promise.resolve().then(() => (0, eval)(d.code)).then((v) => post({ type: "eval", id: d.id, value: typeof v === "string" ? v : JSON.stringify(v, null, 1) }), (e) => post({ type: "eval", id: d.id, error: String(e && e.stack || e) }));
     }
   };
-  setOnFirst((r) => ev("missing", { key: r.key, kind: r.kind, stack: r.stack }));
+  setOnFirst((r) => { ev("missing", { key: r.key, kind: r.kind, stack: r.stack }); report("missing-api", { key: r.key, kind: r.kind, stack: r.stack }); });
 
   // ---- Node globals ----
   self.global = self;

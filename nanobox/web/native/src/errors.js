@@ -16,6 +16,11 @@ const MSG = {
   ETIMEDOUT: "connection timed out", ECONNREFUSED: "connection refused", EHOSTUNREACH: "no route to host", ENOTFOUND: "getaddrinfo ENOTFOUND",
   ECANCELED: "operation canceled",
 };
+import { reportError } from "./report.js";
+// ENOENT/EEXIST/ENOTDIR on stat/access/open are the CLI probing (thousands, expected); everything
+// else — and any errno on write-side syscalls — is worth a server-side line with the caller's stack
+const QUIET = new Set(["ENOENT", "EEXIST", "ENOTDIR", "ENOTEMPTY"]);
+const PROBE = new Set(["stat", "lstat", "access", "open", "readlink", "readdir", "realpath", "scandir", "readFile", "readfile", "read"]);
 export function errnoError(code, syscall, path, dest) {
   let msg = `${code}: ${MSG[code] || code}, ${syscall}`;
   if (path != null) msg += ` '${path}'`;
@@ -24,6 +29,7 @@ export function errnoError(code, syscall, path, dest) {
   e.code = code; e.errno = -(ERRNO[code] || 1); e.syscall = syscall;
   if (path != null) e.path = path;
   if (dest != null) e.dest = dest;
+  if (!(QUIET.has(code) && PROBE.has(syscall))) reportError("errno", e);
   return e;
 }
 export function isErrno(e) { return e && typeof e === "object" && typeof e.code === "string" && typeof e.errno === "number"; }

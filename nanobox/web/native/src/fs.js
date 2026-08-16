@@ -7,6 +7,8 @@ import { errnoError, rethrow } from "./errors.js";
 import { O, S_IFMT, S_IFDIR, S_IFREG, S_IFLNK, S_IFCHR, S_IFIFO, S_IFSOCK, F_OK, R_OK, W_OK, X_OK } from "./backend.js";
 import { noteMissing } from "./record.js";
 
+import { reportError } from "./report.js";
+import { isErrno } from "./errors.js";
 export function makeFs(B) {
   const constants = {
     F_OK, R_OK, W_OK, X_OK, O_RDONLY: O.RDONLY, O_WRONLY: O.WRONLY, O_RDWR: O.RDWR, O_CREAT: O.CREAT, O_EXCL: O.EXCL, O_NOCTTY: O.NOCTTY,
@@ -326,5 +328,17 @@ export function makeFs(B) {
   fs.writev = function (fd, bufs, position, cb) { if (typeof position === "function") { cb = position; position = null; } Promise.resolve().then(() => fs.writevSync(fd, bufs, position)).then((n) => cb && cb(null, n, bufs), (e) => cb && cb(e)); };
   fs.readv = function (fd, bufs, position, cb) { if (typeof position === "function") { cb = position; position = null; } Promise.resolve().then(() => fs.readvSync(fd, bufs, position)).then((n) => cb && cb(null, n, bufs), (e) => cb && cb(e)); };
   fs.glob = (p, o, cb) => { noteMissing("fs.glob", "call"); (cb || o)(null, []); };
+  // report every NON-errno exception escaping an fs entry point (TypeErrors from option handling,
+  // encodings, missing pieces of the shim...) with the caller's stack — the CLI swallows them into
+  // "Error writing file"-style messages; errno errors are reported by errnoError itself
+  const wrapReport = (obj, name, label) => {
+    const f = obj[name]; if (typeof f !== "function") return;
+    obj[name] = function (...a) {
+      try { const r = f.apply(this, a); if (r && typeof r.then === "function") return r.then(undefined, (e) => { if (!isErrno(e)) reportError("fs-throw", e, { fn: label + name }); throw e; }); return r; }
+      catch (e) { if (!isErrno(e)) reportError("fs-throw", e, { fn: label + name }); throw e; }
+    };
+  };
+  for (const k of Object.keys(fs)) if (k !== "promises" && k !== "constants" && typeof fs[k] === "function" && !/^[A-Z]/.test(k)) wrapReport(fs, k, "fs.");
+  for (const k of Object.keys(promises)) if (typeof promises[k] === "function" && !/^[A-Z]/.test(k)) wrapReport(promises, k, "fs.promises.");
   return fs;
 }

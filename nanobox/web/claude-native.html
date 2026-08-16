@@ -26,6 +26,7 @@
   <span id="status">loading…</span>
   <span id="stats"></span>
 </footer>
+<script src="/report.js"></script>
 <script src="/c2w/vendor/xterm.js"></script>
 <script src="/c2w/vendor/addon-fit.js"></script>
 <script src="/c2w/vendor/xterm-pty.js"></script>
@@ -137,7 +138,7 @@ async function bootVm(runtimeCfg) {
     if (d.type === "nanobox-event") {
       log("vm:" + d.event, Object.assign({}, d, { type: undefined }));
       if (vmStartMs == null && d.event === "start-direct") { vmStartMs = now(); log("vm-start", { ms: Math.round(vmStartMs) }); }
-      if (d.event === "error") { el("status").textContent = "vm error: " + d.message; }
+      if (d.event === "error") { el("status").textContent = "vm error: " + d.message; if (window.NanoboxReport) NanoboxReport.event("vm-worker-error", { message: d.message }); }
     } else if (d.type === "nanobox-stats") { window.nanobox.stats = d; if (d.io) { const s = window.nanobox.samples; s.push({ t: Math.round(d.t), icount: d.icount, io: d.io, jit: d.installed }); if (s.length > 2000) s.shift(); } el("stats").textContent = d.icount ? `icount ${(Number(d.icount) / 1e9).toFixed(2)}G · missing APIs ${missing.length}` : ""; }
   };
   vmWorker.onerror = (e) => { failed = true; timerEl.className = "err"; el("status").textContent = "vm worker error: " + e.message; log("error", { message: e.message }); };

@@ -21,5 +21,10 @@ export function fixBuffer(Buffer) {
   const byteLength = Buffer.byteLength; Buffer.byteLength = (s, enc, ...r) => (typeof s === "string" && isB64u(enc)) ? byteLength.call(Buffer, toStd(s), "base64") : byteLength.call(Buffer, s, enc, ...r);
   const alloc = Buffer.alloc; Buffer.alloc = (n, fill, enc) => isB64u(enc) ? alloc.call(Buffer, n, Buffer.from(fill, "base64url")) : alloc.call(Buffer, n, fill, enc);
   const fill = Buffer.prototype.fill; Buffer.prototype.fill = function (v, a, b, enc) { if (isB64u(enc)) return fill.call(this, Buffer.from(v, "base64url"), a, b); if (isB64u(b)) return fill.call(this, Buffer.from(v, "base64url"), a); if (isB64u(a)) return fill.call(this, Buffer.from(v, "base64url")); return fill.call(this, v, a, b, enc); };
+  // report encodings/arguments the polyfill rejects (they surface in the CLI as generic errors)
+  for (const name of ["from", "alloc", "byteLength", "concat"]) { const f = Buffer[name]; Buffer[name] = function (...a) { try { return f.apply(Buffer, a); } catch (e) { onThrow && onThrow(e, "Buffer." + name); throw e; } }; }
+  for (const name of ["toString", "write", "fill"]) { const f = Buffer.prototype[name]; Buffer.prototype[name] = function (...a) { try { return f.apply(this, a); } catch (e) { onThrow && onThrow(e, "Buffer#" + name); throw e; } }; }
   return Buffer;
 }
+let onThrow = null;
+export function setBufferThrowHook(f) { onThrow = f; }

@@ -28,6 +28,7 @@
   <span id="phases"></span>
   <span id="stats"></span>
 </footer>
+<script src="/report.js"></script>
 <script src="/netpolicy.js"></script>
 <script src="/proxyext.js"></script>
 <script>
@@ -182,7 +183,7 @@ function startPersist() {
       if (d.stage === "fetched") el("status").textContent = `installing: ${(d.bytes / 1e6).toFixed(1)} MB from ${new URL(d.url).hostname}`;
       return;
     }
-    if (d.type === "error") { fail("install failed: " + d.message.slice(0, 200)); return; }
+    if (d.type === "error") { fail("install failed: " + d.message.slice(0, 200)); if (window.NanoboxReport) NanoboxReport.event("installer-error", { message: d.message }); return; }
     if (d.type === "ready") {
       ph.installMs = now();
       install = { ms: d.ms, store: d.store, usage: d.usage, packages: d.packages.length, fromCache: d.stats.fromCache, downloadBytes: d.stats.direct + d.stats.relayed, direct: d.stats.direct, relayed: d.stats.relayed, downloads: d.stats.downloads, list: d.packages, journals: d.journals };
@@ -228,7 +229,7 @@ async function bootVm() {
       if (d.event === "image-loaded") ph.imageMs = now();
       if (d.event === "persist-applied") ph.persistMs = now();
       if (d.event === "start-direct" && ph.vmStartMs == null) { ph.vmStartMs = now(); el("status").textContent = "booting the guest…"; log("vm-start", { ms: Math.round(ph.vmStartMs) }); }
-      if (d.event === "error") fail("vm error: " + d.message);
+      if (d.event === "error") { fail("vm error: " + d.message); if (window.NanoboxReport) NanoboxReport.event("vm-worker-error", { message: d.message }); }
     } else if (d.type === "nanobox-perf") { perf.vm = { requests: d.requests, resources: d.resources, cache: d.cache }; }
     else if (d.type === "nanobox-stats") { window.nanobox.stats = d; if (d.io) { const s = window.nanobox.samples; s.push({ t: Math.round(d.t), icount: d.icount, io: d.io, jit: d.installed }); if (s.length > 2000) s.shift(); } el("stats").textContent = d.icount ? `icount ${(Number(d.icount) / 1e9).toFixed(2)}G` + (cli === "claude" ? ` · missing APIs ${missing.length}` : "") : ""; }
   };
