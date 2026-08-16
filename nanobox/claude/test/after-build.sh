@@ -11,7 +11,8 @@ say() { echo "$*" | tee -a "$REP"; }
 until grep -q BUILD-DONE build/eh-nb.log 2>/dev/null; do sleep 5; done
 say "# after-build $(date -u +%FT%TZ): $(tail -1 build/eh-nb.log)"
 grep -q "rc=0" build/eh-nb.log || { say "build failed"; say "AFTER-BUILD-DONE rc=1"; exit 1; }
-rm -f build/eh-nb/out.wasm.gz build/eh-nb/out.wasm.gzip; gzip -1 -k build/eh-nb/out.wasm && mv build/eh-nb/out.wasm.gz build/eh-nb/out.wasm.gzip
+rm -f build/eh-nb/out.wasm.gz build/eh-nb/out.wasm.gzip; gzip -9 -k build/eh-nb/out.wasm && mv build/eh-nb/out.wasm.gz build/eh-nb/out.wasm.gzip   # -9: 36 MB vs 40 MB at -1
+[ -f build/eh-nb/out-slim.wasm ] && { rm -f build/eh-nb/out-slim.wasm.gz build/eh-nb/out-slim.wasm.gzip; gzip -9 -k build/eh-nb/out-slim.wasm && mv build/eh-nb/out-slim.wasm.gz build/eh-nb/out-slim.wasm.gzip; }
 say "engine $(sha256sum build/eh-nb/out.wasm | cut -c1-12), $(stat -c %s build/eh-nb/out.wasm) bytes; gzip regenerated"
 say ""; say "## gate"; ./test/gate.sh > work/gate/gate-run.log 2>&1; grc=$?
 grep -E "IDENTITY|BISECT|RESULT|no divergence|DIVERGENCE" work/gate/latest.md | cut -c1-200 | sed 's/^/    /' | tee -a "$REP"

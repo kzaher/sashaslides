@@ -23,6 +23,7 @@ import { makeTty, makeOs, makeProcess, ProcessExit } from "./process.js";
 import { makeChildProcess, makeNet, makeHttp } from "./procnet.js";
 import { makeMisc } from "./misc.js";
 import { record, noteMissing, dump as dumpMissing, setOnFirst } from "./record.js";
+import { esmToCjs } from "./esm2cjs.js";
 
 const post = (m, transfer) => self.postMessage(m, transfer || []);
 const T0 = performance.now();
@@ -34,26 +35,47 @@ importScripts(new URL("/wasifs.js", location.href).href, new URL("/oci.js", loca
 
 self.onmessage = (m) => { if (m.data && m.data.type === "init") { self.onmessage = null; main(m.data.cfg).catch((e) => { ev("fatal", { message: String(e && e.stack || e) }); }); } };
 
-// --- egress: everything cross-origin goes through the server's /net/fetch gateway (same override as vm.html) ---
+// --- egress: only the vendors that do not answer CORS go through the server's POST /net/fetch relay
+// (web/netpolicy.js — the same allow-list the server enforces); everything else (npm registry,
+// raw.githubusercontent, auth/api.openai, ...) is fetched directly by the browser. Bytes are counted
+// per host and per path (direct / relayed / our origin) for the data-accounting table.
+importScripts(new URL("/netpolicy.js", location.href).href);
 const origFetch = self.fetch.bind(self);
+const netlog = [];
+const netBytes = { origin: 0, direct: 0, relayed: 0, hosts: {} };   // hosts: host -> { path, bytes, requests }
+function countBytes(path, host, r) {
+  const rec = netBytes.hosts[host] || (netBytes.hosts[host] = { path, bytes: 0, requests: 0 });
+  rec.requests++;
+  const len = Number(r && r.headers && r.headers.get("content-length")) || 0;
+  if (len) { rec.bytes += len; netBytes[path] += len; return r; }
+  // no content-length (chunked): count the body as it streams by
+  if (!r || !r.body) return r;
+  let n = 0;
+  const counted = r.body.pipeThrough(new TransformStream({ transform(chunk, c) { n += chunk.byteLength; rec.bytes += chunk.byteLength; netBytes[path] += chunk.byteLength; c.enqueue(chunk); } }));
+  return new Response(counted, { status: r.status, statusText: r.statusText, headers: r.headers });
+}
 async function gatewayFetch(input, init = {}) {
   const url0 = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   let target;
   try { target = new URL(url0, location.href); } catch { return origFetch(input, init); }
-  if (target.origin === location.origin || !/^https?:$/.test(target.protocol)) return origFetch(input, init);
+  if (target.origin === location.origin || !/^https?:$/.test(target.protocol)) return origFetch(input, init).then((r) => countBytes("origin", target.host, r));
+  const method = (init.method || (typeof input === "object" && !(input instanceof URL) && input.method) || "GET").toUpperCase();
+  if (!self.NanoboxNetPolicy.isProxied(target.hostname)) {
+    netlog.push({ t: Math.round(performance.now() - T0), method, url: target.href, via: "direct" });
+    ev("net", { method, url: target.href, via: "direct" });
+    return origFetch(input, init).then((r) => countBytes("direct", target.hostname, r));
+  }
   const headers = {};
   new Headers((typeof input === "object" && !(input instanceof URL) && input.headers) || init.headers || {}).forEach((v, k) => (headers[k] = v));
-  const method = (init.method || (typeof input === "object" && !(input instanceof URL) && input.method) || "GET").toUpperCase();
   let body = init.body;
   if (body === undefined && typeof input === "object" && !(input instanceof URL) && input.body) body = await input.arrayBuffer();
   if (body && typeof body.getReader === "function") body = await new Response(body).arrayBuffer();
   const spec = { url: target.href, method, headers };
   const encoded = btoa(String.fromCharCode(...enc.encode(JSON.stringify(spec)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  netlog.push({ t: Math.round(performance.now() - T0), method, url: target.href });
-  ev("net", { method, url: target.href });
-  return origFetch(new URL("/net/fetch", location.origin), { method: "POST", headers: { "x-nanobox-target": encoded }, body: ["GET", "HEAD"].includes(method) ? undefined : body, signal: init.signal });
+  netlog.push({ t: Math.round(performance.now() - T0), method, url: target.href, via: "relay" });
+  ev("net", { method, url: target.href, via: "relay" });
+  return origFetch(new URL("/net/fetch", location.origin), { method: "POST", headers: { "x-nanobox-target": encoded }, body: ["GET", "HEAD"].includes(method) ? undefined : body, signal: init.signal }).then((r) => countBytes("relayed", target.hostname, r));
 }
-const netlog = [];
 
 async function loadRootfs(cfg) {
   const F = self.NanoboxFs, Oci = self.NanoboxOci, Cache = self.NanoboxCache;
@@ -87,6 +109,15 @@ async function loadRootfs(cfg) {
   for (const { l, i } of layers) {
     if (!datas[i]) { skipped.push(i); continue; }
     files += Oci.applyLayer(root, datas[i]);
+  }
+  // packages the first-run installer put into the guest's rootfs (web/native/installer.js — the same
+  // tars the VM worker applied): grafted here too so image-path reads stay on the host fast path
+  if (cfg.packages && cfg.packages.length) {
+    importScripts(new URL("/native/installer.js", location.href).href);
+    const tp = performance.now(); let pf = 0;
+    for (const p of cfg.packages) pf += self.NanoboxInstaller.applyPackage(root, p).files;
+    ev("packages", { n: cfg.packages.length, files: pf, ms: Math.round(performance.now() - tp) });
+    files += pf;
   }
   ev("rootfs", { files, compressedBytes: bytes, ms: Math.round(performance.now() - t0), skipped });
   return { root, config, manifest };
@@ -132,7 +163,7 @@ async function main(cfg) {
     const d = m.data; if (!d) return;
     if (d.type === "stdin" && !vm) B.ttyInput(new Uint8Array(d.data));
     else if (d.type === "resize" && !vm) B.ttyResize(d.cols, d.rows);
-    else if (d.type === "dump") post({ type: "missing", ...dumpMissing(), spawns: child_process._spawnLog, net: netlog, backendOps: B.stats.ops, backendStats: vm ? { guest: B.stats.guest, image: B.stats.image, dirty: [...B.dirty], channel: guest.stats } : null, required: Object.fromEntries(required) });
+    else if (d.type === "dump") post({ type: "missing", ...dumpMissing(), spawns: child_process._spawnLog, net: netlog, netBytes, backendOps: B.stats.ops, backendStats: vm ? { guest: B.stats.guest, image: B.stats.image, dirty: [...B.dirty], channel: guest.stats } : null, required: Object.fromEntries(required) });
     else if (d.type === "eval") { // debugging aid: window.nanobox.eval("code") runs in the worker scope
       Promise.resolve().then(() => (0, eval)(d.code)).then((v) => post({ type: "eval", id: d.id, value: typeof v === "string" ? v : JSON.stringify(v, null, 1) }), (e) => post({ type: "eval", id: d.id, error: String(e && e.stack || e) }));
     }
@@ -204,10 +235,21 @@ async function main(cfg) {
   ev("runtime-ready", { env: Object.keys(env).length, files: img.manifest.layers.length, backend: vm ? "vm" : "mem", cwd, argv });
 
   // ---- load the bundle (importScripts: V8 code cache on repeat loads) ----
+  // cfg.cliUrl: a prepared (esbuild-transformed) bundle from our server. Without it, the script the
+  // guest asked us to run (argv[1] -> cliPath) is read from the rootfs — the vendor's own cli.js as
+  // the installer laid it out — and transformed here (esm2cjs.js), then loaded from a blob: URL.
   const tl = performance.now();
   ev("bundle-load-start");
   try {
-    importScripts(cfg.cliUrl);
+    let url = cfg.cliUrl;
+    if (!url) {
+      const tt = performance.now();
+      const bytes = B.call("readFile", cliPath);
+      const r = esmToCjs(new TextDecoder().decode(bytes), { fileUrl: "file://" + cliPath });
+      url = URL.createObjectURL(new Blob([r.code], { type: "text/javascript" }));
+      ev("bundle-transformed", { bytes: bytes.length, imports: r.imports, dynamicImports: r.dynamicImports, ms: Math.round(performance.now() - tt) });
+    }
+    importScripts(url);
   } catch (e) {
     if (!(e && e.isProcessExit)) { ev("bundle-error", { message: String(e && e.stack || e).slice(0, 4000) }); uncaught(e, "uncaughtException"); }
   }

@@ -175,7 +175,8 @@ setInterval(() => {
 // boot
 const say = (s) => xterm.write(s.replace(/\n/g, "\r\n"));
 async function boot() {
-  const vmImage = engine === "opt" ? new URL("/engine/opt/out.wasm.gzip", location.href).href : new URL("/c2w/wasi/out.wasm.gzip", location.href).href;
+  // ?slim=1: the engine without the embedded boot.iso (kernel already in the snapshot; ~6 MB less; ticks differ -> not for the identity compare pages)
+  const vmImage = engine === "opt" ? new URL(qs.get("slim") === "1" ? "/engine/opt/slim/out.wasm.gzip" : "/engine/opt/out.wasm.gzip", location.href).href : new URL("/c2w/wasi/out.wasm.gzip", location.href).href;
   // network stack + proxy CA (+ 9p image server for the original engine): nanobox's build carries the
   // MITM-certificate NotBefore fix (rustls/webpki clients such as codex rejected the year-1 certs)
   const mounter = new URL(qs.get("mounter") === "stock" ? "/c2w/imagemounter.wasm.gzip" : "/engine/imagemounter.wasm.gzip", location.href).href;

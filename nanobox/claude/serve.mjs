@@ -119,6 +119,7 @@ createServer(async (req, res) => {
   if (req.method === "POST" && p === "/net/fetch") return netFetch(req, res);
   if (p === "/") p = "/index.html";
   if (p === "/engine/opt/out.wasm.gzip") return serveFile(req, res, ENGINE);
+  if (p === "/engine/opt/slim/out.wasm.gzip") return serveFile(req, res, ENGINE.replace(/out\.wasm\.gzip$/, "out-slim.wasm.gzip")); // no boot.iso; not for identity pages
   // network stack + 9p image server (imagemounter.wasm) with nanobox's fix (build-imagemounter.sh:
   // MITM certificates carry a NotBefore; upstream leaves Go's zero time = year 1, which webpki/rustls
   // clients such as codex reject) — falls back to the shipped one when not built

@@ -135,6 +135,10 @@ if [ "$DO_WIZER" = 1 ]; then
   cp "$PACK/rootfs.bin" "$PACK/boot.iso" "$MINPACK/"
   log "wasi-vfs pack"
   "$WASI_VFS" pack "$OUT/bochs.wizer.wasm" --mapdir /pack::"$MINPACK" -o "$OUT/out.wasm"
+  # slim variant for the pages that don't need memory identity: no boot.iso (the kernel is already
+  # loaded in the snapshot; the guest's later CD-ROM probe changes ticks, hence not for identity)
+  SLIMPACK="$OUT/slimpack"; rm -rf "$SLIMPACK"; mkdir -p "$SLIMPACK"; cp "$PACK/rootfs.bin" "$SLIMPACK/"
+  "$WASI_VFS" pack "$OUT/bochs.wizer.wasm" --mapdir /pack::"$SLIMPACK" -o "$OUT/out-slim.wasm"
 else
   "$WASI_VFS" pack "$OUT/bochs.opt.wasm" --mapdir /pack::"$PACK" -o "$OUT/out.wasm"
 fi
