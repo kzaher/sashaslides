@@ -1,4 +1,5 @@
-// nanobox/claude — a read-only in-memory WASI filesystem WITH symbolic links.
+// nanobox/claude — an in-memory WASI filesystem WITH symbolic links; read-only except for the
+// subtrees `cfg.writable(path)` admits (the sandbox's persistent /bundle/persist, see sandbox-worker.js).
 //
 // container2wasm's browser runtime serves preopened directories to the guest over Bochs' built-in
 // virtio-9p device (bochs/wasm.cc). Its WASI shim (@bjorn3/browser_wasi_shim 0.2.x) has no symlink
@@ -7,11 +8,20 @@
 // answers those calls itself; everything else falls through to the shim untouched.
 //
 //   const tree = NanoboxFs.dir();  NanoboxFs.add(tree, "rootfs/bin/sh", { symlink: "busybox" }) ...
-//   const fs = NanoboxFs.attach(wasi.wasiImport, { fd: 6, name: "bundle", root: tree, memory: () => inst.exports.memory });
+//   const fs = NanoboxFs.attach(wasi.wasiImport, { fd: 6, name: "bundle", root: tree, memory: () => inst.exports.memory,
+//                                writable: (path) => path[0] === "persist",   // canonical path array from the tree root
+//                                onChange: (ev) => … });                        // {op:"write"|"mkdir"|"remove"|"rename"|"symlink"|"link", path, to?}
+//   Writes: path_open O_CREAT/O_TRUNC/O_EXCL, fd_write/fd_pwrite (a written file's data becomes a private
+//   growable buffer — image files stay views into their layer tar until first written), fd_filestat_set_size,
+//   fd_allocate, path_create_directory, path_unlink_file, path_remove_directory, path_rename, path_symlink,
+//   path_link, *_set_times (accepted, timestamps stay fixed) — all EROFS outside the writable subtrees, and
+//   `onChange` fires once per completed change (write: at fd_close/fd_sync of a modified fd) with the
+//   canonical path — that is what the sandbox journals to OPFS. WASI carries no mode: created files are
+//   0644, directories 0755 (the 9p server's chmod is ENOTSUP anyway).
 //
 // Works in a classic worker (self.NanoboxFs) and in node (globalThis.NanoboxFs after import).
 (function (global) {
-  const E = { SUCCESS: 0, BADF: 8, EXIST: 20, INVAL: 28, ISDIR: 31, LOOP: 32, NAMETOOLONG: 37, NOENT: 44, NOTDIR: 54, NOTSUP: 58, ROFS: 69, SPIPE: 70 };
+  const E = { SUCCESS: 0, BADF: 8, EXIST: 20, INVAL: 28, ISDIR: 31, LOOP: 32, NAMETOOLONG: 37, NOENT: 44, NOTDIR: 54, NOTEMPTY: 55, NOTSUP: 58, PERM: 63, ROFS: 69, SPIPE: 70 };
   const FT = { UNKNOWN: 0, DIR: 3, REG: 4, LNK: 7 };
   const OFLAG = { CREAT: 1, DIRECTORY: 2, EXCL: 4, TRUNC: 8 };
   const FIXED_TIME_NS = 1700000000n * 1000000000n; // deterministic timestamps (2023-11-14T22:13:20Z)
@@ -67,12 +77,53 @@
     const FIRST_FD = cfg.firstFd || 10000;
     const fds = new Map(); // fd -> { node, pos, name, path } (path: canonical, from the tree root, no symlinks — see resolve)
     let nextFd = FIRST_FD;
-    const stats = { opens: 0, reads: 0, readBytes: 0, readdirs: 0, stats: 0, readlinks: 0 };
+    const stats = { opens: 0, reads: 0, readBytes: 0, readdirs: 0, stats: 0, readlinks: 0, writes: 0, writeBytes: 0, changes: 0 };
     const view = () => new DataView(memory().buffer);
     const u8 = () => new Uint8Array(memory().buffer);
     const readPath = (ptr, len) => dec.decode(u8().subarray(ptr, ptr + len));
     const mine = (fd) => fd === PRE_FD || fds.has(fd);
     const nodeOf = (fd) => (fd === PRE_FD ? ROOT : fds.get(fd).node);
+    const writable = cfg.writable || (() => false);
+    const onChange = cfg.onChange || (() => {});
+    const change = (op, path, extra) => { stats.changes++; try { onChange(Object.assign({ op, path }, extra || {})); } catch (e) {} };
+    // split "a/b/c" resolved against base into { dir (node), dirPath (canonical array), name }; the parent must exist
+    function parentOf(base, path, basePath) {
+      const parts = path.split("/").filter((p) => p && p !== ".");
+      if (!parts.length) return { err: E.INVAL };
+      const name = parts.pop();
+      if (name === "..") return { err: E.INVAL };
+      const r = parts.length ? resolve(base, parts.join("/"), true, basePath) : { node: base, path: basePath ? basePath.slice() : [] };
+      if (r.err) return r;
+      if (r.node.t !== "d") return { err: E.NOTDIR };
+      return { dir: r.node, dirPath: r.path, name };
+    }
+    const canWrite = (dirPath, name) => writable(dirPath.concat(name));
+    // make a file's data private and at least `len` long (image files are views into a shared layer tar)
+    function ensureCap(node, len) {
+      const cur = fileData(node);
+      if (node.buf && node.buf.byteLength >= len && cur.buffer === node.buf.buffer && cur.byteOffset === 0) return;
+      const cap = Math.max(len, cur.byteLength * 2, 4096);
+      const nb = new Uint8Array(cap); nb.set(cur.subarray(0, Math.min(cur.byteLength, len)));
+      node.buf = nb; node.data = nb.subarray(0, cur.byteLength);
+    }
+    function setSize(node, size) {
+      const cur = fileData(node);
+      if (size === cur.byteLength) return;
+      ensureCap(node, size);
+      if (size > cur.byteLength) node.buf.fill(0, cur.byteLength, size);
+      node.data = node.buf.subarray(0, size);
+    }
+    // write `bytes` at `pos` (gathered from iovecs); returns bytes written
+    function writeAt(node, pos, iovs, iovsLen) {
+      const v = view(), h = u8(); let n = 0;
+      for (let i = 0; i < iovsLen; i++) n += v.getUint32(iovs + i * 8 + 4, true);
+      const end = pos + n; const cur = fileData(node);
+      ensureCap(node, Math.max(end, cur.byteLength));
+      if (end > cur.byteLength) { if (pos > cur.byteLength) node.buf.fill(0, cur.byteLength, pos); node.data = node.buf.subarray(0, end); }
+      let off = pos;
+      for (let i = 0; i < iovsLen; i++) { const buf = v.getUint32(iovs + i * 8, true), len = v.getUint32(iovs + i * 8 + 4, true); node.buf.set(h.subarray(buf, buf + len), off); off += len; }
+      return n;
+    }
 
     // resolve `path` relative to `base` (a dir node); intermediate symlinks are followed within
     // this tree, the last component only when `follow`. `basePath` is base's canonical path (the
@@ -148,18 +199,31 @@
         if (!mine(fd)) return undefined;
         const base = nodeOf(fd); if (base.t !== "d") return E.NOTDIR;
         const path = readPath(pathPtr, pathLen);
-        if (oflags & (OFLAG.CREAT | OFLAG.TRUNC)) { const r0 = resolve(base, path, true); if (r0.err === E.NOENT || (oflags & OFLAG.TRUNC)) return E.ROFS; if (oflags & OFLAG.EXCL) return E.EXIST; }
-        const r = resolve(base, path, !!(dirflags & 1), pathOf(fd));
+        let created = false, truncated = false;
+        if (oflags & (OFLAG.CREAT | OFLAG.TRUNC)) {
+          const r0 = resolve(base, path, true, pathOf(fd));
+          if (r0.err && r0.err !== E.NOENT) return r0.err;
+          if (r0.err === E.NOENT) {
+            if (!(oflags & OFLAG.CREAT)) return E.NOENT;
+            const p = parentOf(base, path, pathOf(fd)); if (p.err) return p.err;
+            if (!canWrite(p.dirPath, p.name)) return E.ROFS;
+            const node = file(new Uint8Array(0)); node.mode = 0o644; p.dir.e.set(p.name, node); created = true;
+          } else {
+            if (oflags & OFLAG.EXCL) return E.EXIST;
+            if (oflags & OFLAG.TRUNC) { if (r0.node.t === "d") return E.ISDIR; if (!writable(r0.path)) return E.ROFS; setSize(r0.node, 0); truncated = true; }
+          }
+        }
+        const r = resolve(base, path, !!(dirflags & 1) || created, pathOf(fd));
         if (r.err) return r.err;
         if (r.node.t === "l") return E.LOOP; // O_NOFOLLOW on a symlink
         if ((oflags & OFLAG.DIRECTORY) && r.node.t !== "d") return E.NOTDIR;
         const nfd = nextFd++;
-        fds.set(nfd, { node: r.node, pos: 0, name: path, path: r.path });
+        fds.set(nfd, { node: r.node, pos: 0, name: path, path: r.path, written: created || truncated, append: !!(fdflags & 1) });
         view().setUint32(openedFdPtr, nfd, true);
         stats.opens++;
         return E.SUCCESS;
       },
-      fd_close(fd) { if (!fds.has(fd)) return undefined; fds.delete(fd); return E.SUCCESS; },
+      fd_close(fd) { if (!fds.has(fd)) return undefined; const f = fds.get(fd); fds.delete(fd); if (f.written) change("write", f.path); return E.SUCCESS; },
       fd_read(fd, iovs, iovsLen, nreadPtr) {
         if (!mine(fd)) return undefined;
         const f = fds.get(fd); if (!f) return E.BADF; if (f.node.t === "d") return E.ISDIR;
@@ -172,8 +236,19 @@
         const data = fileData(f.node); const n = copyOut(iovs, iovsLen, data, Number(offset));
         view().setUint32(nreadPtr, n, true); stats.reads++; stats.readBytes += n; return E.SUCCESS;
       },
-      fd_write(fd) { if (!mine(fd)) return undefined; return E.ROFS; },
-      fd_pwrite(fd) { if (!mine(fd)) return undefined; return E.ROFS; },
+      fd_write(fd, iovs, iovsLen, nwrittenPtr) {
+        if (!mine(fd)) return undefined;
+        const f = fds.get(fd); if (!f) return E.BADF; if (f.node.t === "d") return E.ISDIR; if (!writable(f.path)) return E.ROFS;
+        if (f.append) f.pos = sizeOf(f.node);
+        const n = writeAt(f.node, f.pos, iovs, iovsLen); f.pos += n; f.written = true;
+        view().setUint32(nwrittenPtr, n, true); stats.writes++; stats.writeBytes += n; return E.SUCCESS;
+      },
+      fd_pwrite(fd, iovs, iovsLen, offset, nwrittenPtr) {
+        if (!mine(fd)) return undefined;
+        const f = fds.get(fd); if (!f) return E.BADF; if (f.node.t === "d") return E.ISDIR; if (!writable(f.path)) return E.ROFS;
+        const n = writeAt(f.node, Number(offset), iovs, iovsLen); f.written = true;
+        view().setUint32(nwrittenPtr, n, true); stats.writes++; stats.writeBytes += n; return E.SUCCESS;
+      },
       fd_seek(fd, offset, whence, newPtr) {
         if (!mine(fd)) return undefined;
         const f = fds.get(fd); if (!f) return E.BADF; if (f.node.t === "d") return E.ISDIR;
@@ -185,8 +260,8 @@
       fd_filestat_get(fd, buf) { if (!mine(fd)) return undefined; writeFilestat(buf, nodeOf(fd)); stats.stats++; return E.SUCCESS; },
       fd_fdstat_get(fd, buf) { if (!mine(fd)) return undefined; writeFdstat(buf, nodeOf(fd)); return E.SUCCESS; },
       fd_fdstat_set_flags(fd) { if (!mine(fd)) return undefined; return E.SUCCESS; },
-      fd_sync(fd) { if (!mine(fd)) return undefined; return E.SUCCESS; },
-      fd_datasync(fd) { if (!mine(fd)) return undefined; return E.SUCCESS; },
+      fd_sync(fd) { if (!mine(fd)) return undefined; const f = fds.get(fd); if (f && f.written) { f.written = false; change("write", f.path); } return E.SUCCESS; },
+      fd_datasync(fd) { if (!mine(fd)) return undefined; const f = fds.get(fd); if (f && f.written) { f.written = false; change("write", f.path); } return E.SUCCESS; },
       fd_readdir(fd, buf, bufLen, cookie, bufusedPtr) {
         if (!mine(fd)) return undefined;
         const d = nodeOf(fd); if (d.t !== "d") return E.NOTDIR;
@@ -221,16 +296,78 @@
         const b = enc.encode(r.node.target); const n = Math.min(b.length, bufLen);
         u8().set(b.subarray(0, n), buf); view().setUint32(bufusedPtr, n, true); stats.readlinks++; return E.SUCCESS;
       },
-      path_filestat_set_times(fd) { if (!mine(fd)) return undefined; return E.ROFS; },
-      path_create_directory(fd) { if (!mine(fd)) return undefined; return E.ROFS; },
-      path_unlink_file(fd) { if (!mine(fd)) return undefined; return E.ROFS; },
-      path_remove_directory(fd) { if (!mine(fd)) return undefined; return E.ROFS; },
-      path_symlink(oldPtr, oldLen, fd) { if (!mine(fd)) return undefined; return E.ROFS; },
-      path_link(fd) { if (!mine(fd)) return undefined; return E.ROFS; },
-      path_rename(fd) { if (!mine(fd)) return undefined; return E.ROFS; },
-      fd_allocate(fd) { if (!mine(fd)) return undefined; return E.ROFS; },
-      fd_filestat_set_size(fd) { if (!mine(fd)) return undefined; return E.ROFS; },
-      fd_filestat_set_times(fd) { if (!mine(fd)) return undefined; return E.ROFS; },
+      path_filestat_set_times(fd, flags, pathPtr, pathLen) {
+        if (!mine(fd)) return undefined;
+        const base = nodeOf(fd); if (base.t !== "d") return E.NOTDIR;
+        const r = resolve(base, readPath(pathPtr, pathLen), !!(flags & 1), pathOf(fd)); if (r.err) return r.err;
+        return writable(r.path) ? E.SUCCESS : E.ROFS; // timestamps are fixed (deterministic tree); accepted so tar/cp/utimes succeed
+      },
+      path_create_directory(fd, pathPtr, pathLen) {
+        if (!mine(fd)) return undefined;
+        const base = nodeOf(fd); if (base.t !== "d") return E.NOTDIR;
+        const p = parentOf(base, readPath(pathPtr, pathLen), pathOf(fd)); if (p.err) return p.err;
+        if (p.dir.e.has(p.name)) return E.EXIST;
+        if (!canWrite(p.dirPath, p.name)) return E.ROFS;
+        const d = dir(); d.mode = 0o755; p.dir.e.set(p.name, d); change("mkdir", p.dirPath.concat(p.name)); return E.SUCCESS;
+      },
+      path_unlink_file(fd, pathPtr, pathLen) {
+        if (!mine(fd)) return undefined;
+        const base = nodeOf(fd); if (base.t !== "d") return E.NOTDIR;
+        const p = parentOf(base, readPath(pathPtr, pathLen), pathOf(fd)); if (p.err) return p.err;
+        const n = p.dir.e.get(p.name); if (!n) return E.NOENT; if (n.t === "d") return E.ISDIR;
+        if (!canWrite(p.dirPath, p.name)) return E.ROFS;
+        p.dir.e.delete(p.name); change("remove", p.dirPath.concat(p.name)); return E.SUCCESS;
+      },
+      path_remove_directory(fd, pathPtr, pathLen) {
+        if (!mine(fd)) return undefined;
+        const base = nodeOf(fd); if (base.t !== "d") return E.NOTDIR;
+        const p = parentOf(base, readPath(pathPtr, pathLen), pathOf(fd)); if (p.err) return p.err;
+        const n = p.dir.e.get(p.name); if (!n) return E.NOENT; if (n.t !== "d") return E.NOTDIR; if (n.e.size) return E.NOTEMPTY;
+        if (!canWrite(p.dirPath, p.name)) return E.ROFS;
+        p.dir.e.delete(p.name); change("remove", p.dirPath.concat(p.name)); return E.SUCCESS;
+      },
+      path_symlink(oldPtr, oldLen, fd, newPtr, newLen) {
+        if (!mine(fd)) return undefined;
+        const base = nodeOf(fd); if (base.t !== "d") return E.NOTDIR;
+        const p = parentOf(base, readPath(newPtr, newLen), pathOf(fd)); if (p.err) return p.err;
+        if (p.dir.e.has(p.name)) return E.EXIST;
+        if (!canWrite(p.dirPath, p.name)) return E.ROFS;
+        p.dir.e.set(p.name, symlink(readPath(oldPtr, oldLen))); change("symlink", p.dirPath.concat(p.name)); return E.SUCCESS;
+      },
+      path_link(oldFd, oldFlags, oldPtr, oldLen, newFd, newPtr, newLen) {
+        if (!mine(oldFd) && !mine(newFd)) return undefined;
+        if (!mine(oldFd) || !mine(newFd)) return E.NOTSUP;
+        const ob = nodeOf(oldFd), nb = nodeOf(newFd); if (ob.t !== "d" || nb.t !== "d") return E.NOTDIR;
+        const r = resolve(ob, readPath(oldPtr, oldLen), !!(oldFlags & 1), pathOf(oldFd)); if (r.err) return r.err; if (r.node.t === "d") return E.PERM;
+        const p = parentOf(nb, readPath(newPtr, newLen), pathOf(newFd)); if (p.err) return p.err;
+        if (p.dir.e.has(p.name)) return E.EXIST;
+        if (!canWrite(p.dirPath, p.name)) return E.ROFS;
+        p.dir.e.set(p.name, r.node); change("link", p.dirPath.concat(p.name)); return E.SUCCESS; // same node = same inode
+      },
+      path_rename(fd, oldPtr, oldLen, newFd, newPtr, newLen) {
+        if (!mine(fd) && !mine(newFd)) return undefined;
+        if (!mine(fd) || !mine(newFd)) return E.NOTSUP;
+        const ob = nodeOf(fd), nb = nodeOf(newFd); if (ob.t !== "d" || nb.t !== "d") return E.NOTDIR;
+        const po = parentOf(ob, readPath(oldPtr, oldLen), pathOf(fd)); if (po.err) return po.err;
+        const src = po.dir.e.get(po.name); if (!src) return E.NOENT;
+        const pn = parentOf(nb, readPath(newPtr, newLen), pathOf(newFd)); if (pn.err) return pn.err;
+        if (!canWrite(po.dirPath, po.name) || !canWrite(pn.dirPath, pn.name)) return E.ROFS;
+        const dst = pn.dir.e.get(pn.name);
+        if (dst) { if (dst === src) return E.SUCCESS; if (dst.t === "d" && src.t !== "d") return E.ISDIR; if (dst.t !== "d" && src.t === "d") return E.NOTDIR; if (dst.t === "d" && dst.e.size) return E.NOTEMPTY; }
+        po.dir.e.delete(po.name); pn.dir.e.set(pn.name, src);
+        change("rename", po.dirPath.concat(po.name), { to: pn.dirPath.concat(pn.name) }); return E.SUCCESS;
+      },
+      fd_allocate(fd, offset, len) {
+        if (!mine(fd)) return undefined;
+        const f = fds.get(fd); if (!f) return E.BADF; if (f.node.t !== "f") return E.INVAL; if (!writable(f.path)) return E.ROFS;
+        const end = Number(offset) + Number(len); if (end > sizeOf(f.node)) { setSize(f.node, end); f.written = true; } return E.SUCCESS;
+      },
+      fd_filestat_set_size(fd, size) {
+        if (!mine(fd)) return undefined;
+        const f = fds.get(fd); if (!f) return E.BADF; if (f.node.t !== "f") return E.INVAL; if (!writable(f.path)) return E.ROFS;
+        setSize(f.node, Number(size)); f.written = true; return E.SUCCESS;
+      },
+      fd_filestat_set_times(fd) { if (!mine(fd)) return undefined; const f = fds.get(fd); if (!f) return E.SUCCESS; return writable(f.path) ? E.SUCCESS : E.ROFS; },
       fd_advise(fd) { if (!mine(fd)) return undefined; return E.SUCCESS; },
       fd_renumber(fd) { if (!mine(fd)) return undefined; return E.NOTSUP; },
     };

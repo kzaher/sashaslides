@@ -1,18 +1,23 @@
 // nanobox/claude — the VM worker of web/sandbox.html: opt-worker.js (unchanged, imported as-is) plus
-// what the first-run sandbox needs around it, hooked through the globals opt-worker.js looks up at
-// call time (classic scripts share one global scope, so its `cfg`, `ev`, `NanoboxOci`, `NbRun`,
-// `fetch` are all reachable here without editing it):
-//   * cfg.packagesPort (MessagePort): the installer's packages ({key,name,version,meta,tar} — the
-//     vendors' tarballs, gunzipped) arrive here and are grafted onto the image rootfs
-//     (NanoboxInstaller.applyPackage) right after the OCI layers, BEFORE the container starts, so
-//     the guest sees /usr/local/lib/node_modules/… and /usr/local/bin/{claude,codex,agy} as part
-//     of the image. The engine download, the image layers and the installer all run in parallel;
-//     the VM starts when all three are in.
+// what the sandbox needs around it, hooked through the globals opt-worker.js looks up at call time
+// (classic scripts share one global scope, so its `ev`, `NanoboxOci`, `NanoboxFs`, `NbRun`, `fetch`
+// are all reachable here without editing it):
+//   * cfg.persistPort (MessagePort from the persist worker, web/native/installer.js): the packages
+//     ({key,name,version,meta,tar} — the vendors' tarballs, gunzipped) and the journals of earlier
+//     sessions arrive here and are laid out in a second bundle subtree, bundle/persist/{usr/local,
+//     root,home,var} (NanoboxInstaller.applyPackage / NanoboxOci.applyLayer), BEFORE the container
+//     starts; the runtime spec bind-mounts /mnt/wasi0/bundle/persist/<p> onto /<p>, so the guest sees
+//     node, npm and the CLIs under /usr/local and its home under /root — as part of the image. The
+//     engine download, the image layers and the installer run in parallel; the VM starts when all are in.
+//   * the persist subtree is WRITABLE (wasifs.js `writable`): every completed guest write under it
+//     (file close/fsync, mkdir, unlink, rename, symlink) becomes a tar record with OCI whiteouts and
+//     is posted back to the persist worker over the same port, which journals it to OPFS — so
+//     ~/.claude, ~/.codex, `npm i -g …` survive page reloads and are shared by every page on the origin.
 //   * byte accounting: every fetch this worker makes (engine, image layers, JIT bundles, spec, the
 //     shim) is counted per URL and posted to the page as {type:"nanobox-perf"} just before the VM
 //     starts (the VM loop never yields afterwards, so it cannot be asked later).
 importScripts(new URL("/opt-worker.js", location.href).href);
-importScripts(new URL("/native/installer.js", location.href).href);   // NanoboxInstaller.applyPackage (wasifs/oci already loaded above)
+importScripts(new URL("/native/installer.js", location.href).href);   // NanoboxInstaller (wasifs/oci already loaded above)
 
 // ---- byte accounting -----------------------------------------------------------------------------
 const nbNet = { requests: [] };
@@ -33,16 +38,20 @@ const nbNet = { requests: [] };
   };
 }
 
-// ---- installed packages -> the rootfs, before the container starts ---------------------------------
-let nbPackages = null;   // Promise<packages[]> once init carried cfg.packagesPort
+// ---- the persistent subtree ----------------------------------------------------------------------
+const F = self.NanoboxFs, I = self.NanoboxInstaller;
+let nbPersist = null;      // Promise<{packages, journals}> once init carried cfg.persistPort
+let persistPort = null;
+const persistDir = F.dir(); // becomes bundle/persist
+let persistReady = false;
 {
   const inner = self.onmessage;
   self.onmessage = (m) => {
     const d = m.data;
-    if (d && typeof d === "object" && d.type === "init" && d.cfg && d.cfg.packagesPort) {
-      const port = d.cfg.packagesPort;
-      nbPackages = new Promise((res, rej) => { port.onmessage = (e) => { const x = e.data || {}; if (x.type === "packages") res(x.packages || []); else if (x.type === "error") rej(new Error(x.message)); }; });
-      nbPackages.catch(() => {});
+    if (d && typeof d === "object" && d.type === "init" && d.cfg && d.cfg.persistPort) {
+      persistPort = d.cfg.persistPort;
+      nbPersist = new Promise((res, rej) => { persistPort.onmessage = (e) => { const x = e.data || {}; if (x.type === "persist") res({ packages: x.packages || [], journals: x.journals || [] }); else if (x.type === "error") rej(new Error(x.message)); }; });
+      nbPersist.catch(() => {});
     }
     return inner(m);
   };
@@ -51,18 +60,41 @@ let nbPackages = null;   // Promise<packages[]> once init carried cfg.packagesPo
     async load(addr, opts) {
       const img = await oci.load(addr, opts);
       ev("image-loaded", { files: img.files, compressedBytes: img.compressedBytes, ms: Math.round(img.ms), cache: img.cache || null });
-      if (nbPackages) {
+      if (nbPersist) {
         const tw = performance.now();
-        const pkgs = await nbPackages;   // the installer may still be downloading: wait here (the engine fetch goes on in parallel)
+        const { packages, journals } = await nbPersist;   // the installer may still be downloading: wait here (the engine fetch goes on in parallel)
         const waitMs = Math.round(performance.now() - tw);
         const ta = performance.now(); let files = 0;
-        for (const p of pkgs) { const r = self.NanoboxInstaller.applyPackage(img.rootfs, p); files += r.files; }
-        img.files += files;
-        ev("packages-applied", { n: pkgs.length, files, waitMs, applyMs: Math.round(performance.now() - ta), keys: pkgs.map((p) => p.key) });
+        for (const p of packages) files += I.applyPackage(persistDir, p).files;
+        for (const t of journals) files += oci.applyLayer(persistDir, t);
+        // the mount points always exist; /var seeded from the image (var/tmp), the rest start empty
+        for (const p of I.PERSIST_ROOTS) F.add(persistDir, p, { dir: true });
+        const imgVar = F.lookup(img.rootfs, "var"), pVar = F.lookup(persistDir, "var");
+        if (imgVar && pVar && !pVar.e.size) for (const [k, v] of imgVar.e) pVar.e.set(k, v);
+        persistReady = true;
+        ev("persist-applied", { packages: packages.length, journals: journals.length, files, waitMs, applyMs: Math.round(performance.now() - ta), keys: packages.map((p) => p.key) });
       }
       return img;
     },
   });
+  // the bundle share gets the persist subtree, writable, journaled back to the persist worker
+  const attach0 = F.attach;
+  F.attach = (imp, cfg) => {
+    if (persistReady && cfg.root) cfg.root.e.set("persist", persistDir);
+    const wcfg = Object.assign({
+      writable: (path) => path[0] === "persist",
+      onChange: (chg) => {
+        if (!persistPort) return;
+        try {
+          const entries = I.journal.entries(cfg.root, chg);
+          if (!entries.length) return;
+          const tar = I.tar.pack(entries);
+          persistPort.postMessage({ type: "journal", tar: tar.buffer, op: chg.op, path: chg.path.slice(1).join("/") }, [tar.buffer]);
+        } catch (e) { ev("journal-error", { message: String(e && e.message || e) }); }
+      },
+    }, cfg);
+    return attach0(imp, wcfg);
+  };
   // just before the VM starts: hand the page everything this worker fetched
   const start0 = self.NbRun.startContainer;
   self.NbRun.startContainer = function () {

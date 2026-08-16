@@ -28,25 +28,26 @@
 </footer>
 
 <script src="/netpolicy.js"></script>
+<script src="/proxyext.js"></script>
 <script>
 // The VM's egress path ends in a plain `fetch` from this page (container2wasm's network stack
 // terminates the guest's TLS in the browser and re-issues the request). Cross-origin that fetch is
-// subject to CORS and the guest sees 503, so route it through the server's /net/fetch gateway —
-// same override as nanobox's public/c2w/index.html (serve.mjs implements the gateway).
+// subject to CORS and the guest sees 503, so it is routed by web/proxyext.js: through the nanobox
+// proxy extension when it is installed (every cross-origin request, no server involved), else
+// through the server's /net/fetch relay for the vendors that don't answer CORS (web/netpolicy.js),
+// else straight from the browser. window.nanoboxNetRoutes counts the routes taken (tests read it).
 (() => {
   const origFetch = window.fetch.bind(window);
+  const routes = window.nanoboxNetRoutes = { extension: 0, relay: 0, direct: 0, blocked: 0, log: [] };
+  const detected = NanoboxProxy.detect(300).then((present) => { console.log(`[nanobox] proxy extension ${present ? "detected: cross-origin requests go through it" : "not installed: relay for " + NanoboxNetPolicy.PROXY_HOSTS.length + " vendor hosts, direct otherwise"}`); return present; });
+  const onRoute = ({ route, method, url }) => { routes[route]++; routes.log.push({ route, method, url }); if (routes.log.length > 500) routes.log.shift(); };
   window.fetch = async (input, init = {}) => {
-    const url = typeof input === "string" ? input : input.url;
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     let target;
     try { target = new URL(url, location.href); } catch { return origFetch(input, init); }
+    // same-origin (engine, image layers, bundles) never waits for the detection handshake
     if (target.origin === location.origin || !/^https?:$/.test(target.protocol)) return origFetch(input, init);
-    // only the vendors that don't answer CORS go through the relay (web/netpolicy.js, same list as the server)
-    if (!NanoboxNetPolicy.isProxied(target.hostname)) return origFetch(input, init);
-    const headers = {};
-    new Headers((typeof input === "object" && input.headers) || init.headers || {}).forEach((v, k) => (headers[k] = v));
-    const spec = { url: target.href, method: (init.method || (typeof input === "object" && input.method) || "GET").toUpperCase(), headers };
-    const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(spec)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    return origFetch(new URL("/net/fetch", location.origin), { method: "POST", headers: { "x-nanobox-target": encoded }, body: init.body ?? undefined });
+    return NanoboxProxy.workerFetch(origFetch, input, init, { extension: await detected, onRoute });
   };
 })();
 </script>

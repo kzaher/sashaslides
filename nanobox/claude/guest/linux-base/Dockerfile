@@ -1,15 +1,10 @@
-# nanobox-node-base: a small Linux + the official Node.js 22 (with the npm it ships) and NOTHING else —
-# no CLI is baked in. The CLIs (claude / codex / agy) are installed at first run by the in-browser
-# installer (web/native/installer.js) straight from the vendors' servers into the rootfs the VM sees.
+# nanobox-linux-base: the smallest Linux userland the sandbox needs and NOTHING else — busybox, CA
+# certificates, glibc + libstdc++ (the official Node.js binary is glibc-linked and needs libstdc++).
+# No node, no CLI: the first-run installer (web/native/installer.js) fetches node-linux-x64 + npm and
+# the CLIs (claude / codex / agy) from the vendors' servers into the persistent /usr/local the VM mounts.
 #
-#   /usr/local/bin/node                 official Node.js 22 binary (from the node:22-bookworm-slim image)
-#   /usr/local/lib/node_modules/npm     the npm that ships with that node, /usr/local/bin/{npm,npx} links
-#   rootfs = the minimal glibc Ubuntu 24.04 recipe of nanobox-base + libstdc++ (node needs it)
-#
-# Same recipe as ../claude-npm/Dockerfile minus `npm install -g @anthropic-ai/claude-code`.
-# Built by ../../build-node-base.sh, which also exports it as an OCI layout for the browser VM.
-ARG NODE_IMAGE=node:22-bookworm-slim
-
+# Same rootfs recipe as ../claude-npm/Dockerfile (nanobox-base + libstdc++), minus everything else.
+# Built by ../../build-linux-base.sh, which also exports it as an OCI layout for the browser VM.
 # --- the minimal distro (identical recipe to nanobox-base, plus libstdc++ for node) --------------
 FROM ubuntu:24.04 AS rootfs
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates busybox-static
@@ -37,16 +32,9 @@ RUN set -eux; \
     printf 'NAME="nanobox"\nID=nanobox\nID_LIKE=ubuntu\nPRETTY_NAME="nanobox (minimal Ubuntu 24.04 glibc)"\n' > /rootfs/etc/os-release; \
     du -sh /rootfs
 
-# --- the official node + its npm ---------------------------------------------------------------------
-FROM ${NODE_IMAGE} AS node
-RUN node --version && npm --version && ls -la /usr/local/bin && du -sh /usr/local/lib/node_modules/npm
-
-# --- the image (node in its own layer: pages that run the JS on the browser's V8 skip it by history) --
-FROM scratch AS nanobox-node-base
+# --- the image ---------------------------------------------------------------------------------------
+FROM scratch AS nanobox-linux-base
 COPY --from=rootfs /rootfs/ /
-COPY --from=node /usr/local/bin/node /usr/local/bin/node
-COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
-RUN ["/bin/busybox", "sh", "-c", "ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx"]
 ENV PATH=/usr/local/bin:/bin:/usr/bin \
     HOME=/root \
     TERM=xterm-256color \

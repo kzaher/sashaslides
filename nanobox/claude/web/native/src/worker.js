@@ -110,13 +110,18 @@ async function loadRootfs(cfg) {
     if (!datas[i]) { skipped.push(i); continue; }
     files += Oci.applyLayer(root, datas[i]);
   }
-  // packages the first-run installer put into the guest's rootfs (web/native/installer.js — the same
-  // tars the VM worker applied): grafted here too so image-path reads stay on the host fast path
-  if (cfg.packages && cfg.packages.length) {
+  // the sandbox's persistent tree (web/native/installer.js): the packages the first-run installer laid
+  // out (claude's, here) and the journals of guest writes — the same tars the VM worker applied under
+  // bundle/persist — grafted here too, so image-path reads stay on the host fast path and this copy
+  // agrees with what the guest sees at /usr/local (an `npm i -g` done in the guest included)
+  if (cfg.persistPort) {
     importScripts(new URL("/native/installer.js", location.href).href);
-    const tp = performance.now(); let pf = 0;
-    for (const p of cfg.packages) pf += self.NanoboxInstaller.applyPackage(root, p).files;
-    ev("packages", { n: cfg.packages.length, files: pf, ms: Math.round(performance.now() - tp) });
+    const tw = performance.now();
+    const { packages, journals } = await new Promise((res, rej) => { cfg.persistPort.onmessage = (e) => { const x = e.data || {}; if (x.type === "persist") res({ packages: x.packages || [], journals: x.journals || [] }); else if (x.type === "error") rej(new Error(x.message)); }; });
+    const waitMs = Math.round(performance.now() - tw), tp = performance.now(); let pf = 0;
+    for (const p of packages) pf += self.NanoboxInstaller.applyPackage(root, p).files;
+    for (const t of journals) pf += Oci.applyLayer(root, t);
+    ev("persist", { packages: packages.length, journals: journals.length, files: pf, waitMs, ms: Math.round(performance.now() - tp) });
     files += pf;
   }
   ev("rootfs", { files, compressedBytes: bytes, ms: Math.round(performance.now() - t0), skipped });

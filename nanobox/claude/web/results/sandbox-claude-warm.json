@@ -1,0 +1,783 @@
+{
+  "cli": "claude",
+  "cold": false,
+  "url": "http://localhost:8093/sandbox.html?cli=claude",
+  "verdict": {
+    "signinMs": 5264,
+    "loadMs": 1379,
+    "bootMs": 1348,
+    "runMs": 2536,
+    "engineMs": 382,
+    "imageMs": 370,
+    "installMs": 1347,
+    "persistMs": 1357,
+    "helloMs": 2756,
+    "bundleMs": 412,
+    "transformMs": 167,
+    "icount": "620032409"
+  },
+  "date": "2026-08-16T17:43:10.860Z",
+  "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+  "install": {
+    "ms": 1319,
+    "store": "opfs",
+    "usage": {
+      "usage": 936053662,
+      "quota": 11673471902
+    },
+    "packages": 3,
+    "fromCache": 2,
+    "downloadBytes": 18682444,
+    "direct": 18682444,
+    "relayed": 0,
+    "downloads": [
+      {
+        "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/2.1.112",
+        "via": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 3118,
+        "ms": 264
+      },
+      {
+        "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.112.tgz",
+        "via": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 18679326,
+        "ms": 702
+      }
+    ],
+    "list": [
+      {
+        "cli": "node",
+        "key": "pkg-node-linux-x64@22.23.2",
+        "name": "node-linux-x64",
+        "version": "22.23.2",
+        "files": 2729,
+        "unpackedBytes": 183774506,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 330
+        }
+      },
+      {
+        "cli": "node",
+        "key": "pkg-npm@10.9.8",
+        "name": "npm",
+        "version": "10.9.8",
+        "files": 2011,
+        "unpackedBytes": 11682638,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 21
+        }
+      },
+      {
+        "cli": "claude",
+        "key": "pkg-@anthropic-ai~claude-code@2.1.112",
+        "name": "@anthropic-ai/claude-code",
+        "version": "2.1.112",
+        "files": 10,
+        "unpackedBytes": 21603853,
+        "tarBytes": 0,
+        "download": {
+          "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.112.tgz",
+          "bytes": 18679326,
+          "fromCache": false,
+          "ms": 1149,
+          "gunzipMs": 153,
+          "integrity": "sha512-9FUgJ0EOvILyhIqxFKNVliebiUjL68dwpEW3eGSSe0vkVDJ1c5qMDNWc22gW3zkD7zRAqtfQPSGv0t4vMM2DPA=="
+        }
+      }
+    ],
+    "journals": {
+      "count": 4,
+      "bytes": 19968
+    }
+  },
+  "accounting": {
+    "ours": {
+      "runtime/pages": 2164344,
+      "jit-bundles": 739
+    },
+    "oursTotal": 2165083,
+    "vendorDirect": {
+      "registry.npmjs.org": 18682444,
+      "raw.githubusercontent.com": 174160
+    },
+    "vendorDirectTotal": 18856604,
+    "vendorRelay": {
+      "api.anthropic.com": 20,
+      "platform.claude.com": 19
+    },
+    "vendorRelayTotal": 39
+  },
+  "events": [
+    {
+      "event": "boot",
+      "t": 14,
+      "cli": "claude",
+      "install": [
+        "claude"
+      ],
+      "noCache": false
+    },
+    {
+      "event": "install-start",
+      "t": 14,
+      "clis": [
+        "claude"
+      ]
+    },
+    {
+      "event": "install:store",
+      "t": 5,
+      "stage": "store",
+      "kind": "opfs"
+    },
+    {
+      "event": "install:resolve",
+      "t": 7,
+      "stage": "resolve",
+      "key": "pkg-@anthropic-ai~claude-code@2.1.112",
+      "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/2.1.112"
+    },
+    {
+      "event": "install:cached",
+      "t": 28,
+      "stage": "cached",
+      "key": "pkg-npm@10.9.8",
+      "bytes": 13265920
+    },
+    {
+      "event": "install:package",
+      "t": 41,
+      "stage": "package",
+      "key": "pkg-npm@10.9.8",
+      "files": 2011,
+      "unpackedBytes": 11682638,
+      "fromCache": true
+    },
+    {
+      "event": "vm-runtime-ready",
+      "t": 290
+    },
+    {
+      "event": "install:fetched",
+      "t": 271,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/2.1.112",
+      "via": "direct",
+      "bytes": 3118,
+      "ms": 264
+    },
+    {
+      "event": "init",
+      "t": 3.824999988079071
+    },
+    {
+      "event": "start",
+      "t": 4.684999972581863
+    },
+    {
+      "event": "install:cached",
+      "t": 336,
+      "stage": "cached",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "bytes": 186952704
+    },
+    {
+      "event": "image",
+      "t": 28.400000005960464,
+      "stage": "cached",
+      "layer": 0,
+      "size": 8802304
+    },
+    {
+      "event": "image",
+      "t": 29.930000007152557,
+      "stage": "applied",
+      "layer": 0,
+      "files": 314
+    },
+    {
+      "event": "image",
+      "t": 29.96500000357628,
+      "stage": "cached",
+      "layer": 1,
+      "size": 1024
+    },
+    {
+      "event": "image",
+      "t": 29.969999998807907,
+      "stage": "applied",
+      "layer": 1,
+      "files": 314
+    },
+    {
+      "event": "image-loaded",
+      "t": 34.089999973773956,
+      "files": 314,
+      "compressedBytes": 0,
+      "ms": 30,
+      "cache": {
+        "hits": 2,
+        "misses": 0,
+        "bytes": 8803328
+      }
+    },
+    {
+      "event": "install:package",
+      "t": 349,
+      "stage": "package",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "files": 2729,
+      "unpackedBytes": 183774506,
+      "fromCache": true
+    },
+    {
+      "event": "engine-cached",
+      "t": 48.28499999642372,
+      "bytes": 29794297
+    },
+    {
+      "event": "engine-fetched",
+      "t": 48.349999994039536,
+      "bytes": 29794297,
+      "ms": 45
+    },
+    {
+      "event": "worker-start",
+      "t": 35,
+      "backend": "vm"
+    },
+    {
+      "event": "layer",
+      "t": 51,
+      "i": 1,
+      "size": 1024,
+      "cached": true
+    },
+    {
+      "event": "layer",
+      "t": 71,
+      "i": 0,
+      "size": 8802304,
+      "cached": true
+    },
+    {
+      "event": "jit-bundles",
+      "t": 369.00999999046326,
+      "files": 0,
+      "modules": 0,
+      "keys": 0,
+      "ms": 364
+    },
+    {
+      "event": "install:fetched",
+      "t": 973,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.112.tgz",
+      "via": "direct",
+      "bytes": 18679326,
+      "ms": 702
+    },
+    {
+      "event": "install:verified",
+      "t": 1002,
+      "stage": "verified",
+      "key": "pkg-@anthropic-ai~claude-code@2.1.112",
+      "integrity": "sha512"
+    },
+    {
+      "event": "install:package",
+      "t": 1282,
+      "stage": "package",
+      "key": "pkg-@anthropic-ai~claude-code@2.1.112",
+      "files": 10,
+      "unpackedBytes": 21603853,
+      "fromCache": false
+    },
+    {
+      "event": "persist",
+      "t": 989,
+      "packages": 1,
+      "journals": 4,
+      "files": 29,
+      "waitMs": 912,
+      "ms": 1
+    },
+    {
+      "event": "rootfs",
+      "t": 989,
+      "files": 343,
+      "compressedBytes": 0,
+      "ms": 946,
+      "skipped": []
+    },
+    {
+      "event": "waiting-hello",
+      "t": 989
+    },
+    {
+      "event": "installed",
+      "t": 1347,
+      "ms": 1319,
+      "store": "opfs",
+      "packages": 3,
+      "fromCache": 2,
+      "downloadBytes": 18682444,
+      "journals": {
+        "count": 4,
+        "bytes": 19968
+      }
+    },
+    {
+      "event": "persist-applied",
+      "t": 1023.1499999761581,
+      "packages": 3,
+      "journals": 4,
+      "files": 4769,
+      "waitMs": 969,
+      "applyMs": 21,
+      "keys": [
+        "pkg-node-linux-x64@22.23.2",
+        "pkg-npm@10.9.8",
+        "pkg-@anthropic-ai~claude-code@2.1.112"
+      ]
+    },
+    {
+      "event": "bundle-ready",
+      "t": 1045.119999974966,
+      "files": 314,
+      "compressedBytes": 0,
+      "ms": 1041,
+      "cache": {
+        "hits": 2,
+        "misses": 0,
+        "bytes": 8803328
+      }
+    },
+    {
+      "event": "start-direct",
+      "t": 1045.1499999761581
+    },
+    {
+      "event": "vm-start",
+      "t": 1379,
+      "ms": 1379
+    },
+    {
+      "event": "instantiated",
+      "t": 1142.2649999856949,
+      "compileMs": 96
+    },
+    {
+      "event": "hostchan",
+      "t": 1143.5699999928474,
+      "on": true
+    },
+    {
+      "event": "engine",
+      "t": 1143.594999998808,
+      "optimized": true,
+      "jit": {
+        "level": 2,
+        "threshold": 2000
+      },
+      "bundles": 0
+    },
+    {
+      "event": "guest-booted",
+      "t": 2728,
+      "ms": 2728
+    },
+    {
+      "event": "hello",
+      "t": 2407,
+      "argv": [
+        "node",
+        "/usr/local/bin/claude"
+      ],
+      "cwd": "/root",
+      "pid": 1,
+      "cols": 80,
+      "rows": 25,
+      "isatty": 7
+    },
+    {
+      "event": "runtime-ready",
+      "t": 2411,
+      "env": 11,
+      "files": 2,
+      "backend": "vm",
+      "cwd": "/root",
+      "argv": [
+        "node",
+        "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+      ]
+    },
+    {
+      "event": "bundle-load-start",
+      "t": 2411
+    },
+    {
+      "event": "bundle-transformed",
+      "t": 2578,
+      "bytes": 13711684,
+      "imports": 872,
+      "dynamicImports": 13,
+      "ms": 167
+    },
+    {
+      "event": "bundle-loaded",
+      "t": 2823,
+      "ms": 412
+    },
+    {
+      "event": "missing",
+      "t": 2849,
+      "key": "process.type",
+      "kind": "get",
+      "stack": "at blob:http://localhost:8093/148d126f-31db-4ac3-98a4-9ae8e49a5c36:118:186"
+    },
+    {
+      "event": "missing",
+      "t": 2849,
+      "key": "process.__nwjs",
+      "kind": "get",
+      "stack": "at blob:http://localhost:8093/148d126f-31db-4ac3-98a4-9ae8e49a5c36:118:217"
+    },
+    {
+      "event": "missing",
+      "t": 2974,
+      "key": "fs.watchFile",
+      "kind": "call",
+      "stack": "at cE_ (blob:http://localhost:8093/148d126f-31db-4ac3-98a4-9ae8e49a5c36:501:22214)"
+    },
+    {
+      "event": "missing",
+      "t": 3012,
+      "key": "process.__signal_exit_emitter__",
+      "kind": "get",
+      "stack": "at blob:http://localhost:8093/148d126f-31db-4ac3-98a4-9ae8e49a5c36:479:9009"
+    },
+    {
+      "event": "net",
+      "t": 3587,
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md",
+      "via": "direct"
+    },
+    {
+      "event": "net",
+      "t": 4277,
+      "method": "GET",
+      "url": "https://api.anthropic.com/api/hello",
+      "via": "relay"
+    },
+    {
+      "event": "net",
+      "t": 4278,
+      "method": "GET",
+      "url": "https://platform.claude.com/v1/oauth/hello",
+      "via": "relay"
+    },
+    {
+      "event": "missing",
+      "t": 4328,
+      "key": "fs.watch",
+      "kind": "call",
+      "stack": "at hA4 (blob:http://localhost:8093/148d126f-31db-4ac3-98a4-9ae8e49a5c36:602:20394)"
+    },
+    {
+      "event": "install:journal",
+      "t": 4870,
+      "stage": "journal",
+      "name": "journal/01786902189882-0-9ft3.tar",
+      "bytes": 8704,
+      "records": 40
+    },
+    {
+      "event": "prompt",
+      "t": 5015,
+      "name": "claude theme"
+    },
+    {
+      "event": "signin",
+      "t": 5264,
+      "ms": 5264,
+      "loadMs": 1379,
+      "bootMs": 1348,
+      "runMs": 2536
+    }
+  ],
+  "persistLog": [
+    {
+      "t": 4870,
+      "stage": "journal",
+      "name": "journal/01786902189882-0-9ft3.tar",
+      "bytes": 8704,
+      "records": 40
+    }
+  ],
+  "missing": [
+    {
+      "key": "process.type",
+      "kind": "get",
+      "count": 1,
+      "stack": "at blob:http://localhost:8093/148d126f-31db-4ac3-98a4-9ae8e49a5c36:118:186"
+    },
+    {
+      "key": "process.__nwjs",
+      "kind": "get",
+      "count": 1,
+      "stack": "at blob:http://localhost:8093/148d126f-31db-4ac3-98a4-9ae8e49a5c36:118:217"
+    },
+    {
+      "key": "fs.watchFile",
+      "kind": "call",
+      "count": 1,
+      "stack": "at cE_ (blob:http://localhost:8093/148d126f-31db-4ac3-98a4-9ae8e49a5c36:501:22214)"
+    },
+    {
+      "key": "process.__signal_exit_emitter__",
+      "kind": "get",
+      "count": 1,
+      "stack": "at blob:http://localhost:8093/148d126f-31db-4ac3-98a4-9ae8e49a5c36:479:9009"
+    },
+    {
+      "key": "fs.watch",
+      "kind": "call",
+      "count": 1,
+      "stack": "at hA4 (blob:http://localhost:8093/148d126f-31db-4ac3-98a4-9ae8e49a5c36:602:20394)"
+    }
+  ],
+  "spawns": [
+    {
+      "file": "which",
+      "args": [
+        "npm"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "which",
+      "args": [
+        "bun"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--version"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/etc/claude-code/.claude/commands"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/root/.claude/commands"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/etc/claude-code/.claude/agents"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/root/.claude/agents"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "which",
+      "args": [
+        "deno"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "which",
+      "args": [
+        "yarn"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "which",
+      "args": [
+        "node"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "which",
+      "args": [
+        "pnpm"
+      ],
+      "cwd": "/root"
+    }
+  ],
+  "net": [
+    {
+      "t": 3587,
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md",
+      "via": "direct"
+    },
+    {
+      "t": 4277,
+      "method": "GET",
+      "url": "https://api.anthropic.com/api/hello",
+      "via": "relay"
+    },
+    {
+      "t": 4278,
+      "method": "GET",
+      "url": "https://platform.claude.com/v1/oauth/hello",
+      "via": "relay"
+    }
+  ],
+  "netBytes": {
+    "origin": 0,
+    "direct": 174160,
+    "relayed": 39,
+    "hosts": {
+      "raw.githubusercontent.com": {
+        "path": "direct",
+        "bytes": 174160,
+        "requests": 1
+      },
+      "api.anthropic.com": {
+        "path": "relayed",
+        "bytes": 20,
+        "requests": 1
+      },
+      "platform.claude.com": {
+        "path": "relayed",
+        "bytes": 19,
+        "requests": 1
+      }
+    }
+  },
+  "backendOps": {
+    "info": 6,
+    "realpath": 14,
+    "ttySize": 2,
+    "readFile": 30,
+    "ttySetRaw": 2,
+    "isatty": 9,
+    "stat": 40,
+    "open": 4,
+    "readdir": 30,
+    "mkdir": 27,
+    "readlink": 8,
+    "writeFile": 18,
+    "rename": 1,
+    "utimes": 8,
+    "spawn": 11,
+    "ttyWrite": 12,
+    "copyFile": 2,
+    "chmod": 7,
+    "unlink": 7,
+    "rmdir": 8
+  },
+  "backendStats": {
+    "guest": 243,
+    "image": 3,
+    "dirty": [
+      "/root",
+      "/root/.claude.json.tmp.1.1786902188371",
+      "/root/.claude.json",
+      "/root/.claude.json.lock",
+      "/root/.claude/backups",
+      "/root/.claude/backups/.claude.json.corrupted.1786902188501",
+      "/root/.claude/backups/.claude.json.backup.1786902188532",
+      "/root/.claude.json.tmp.1.1786902188548",
+      "/root/.claude.json.tmp.1.1786902188592",
+      "/root/.claude.json.tmp.1.1786902188659",
+      "/root/.claude.json.tmp.1.1786902188729",
+      "/root/.claude/cache",
+      "/root/.claude/cache/changelog.md",
+      "/root/.claude.json.tmp.1.1786902189527",
+      "/root/.claude.json.tmp.1.1786902190032",
+      "/root/.claude.json.tmp.1.1786902190073"
+    ],
+    "channel": {
+      "sent": 313,
+      "recv": 357,
+      "bytesOut": 536251,
+      "bytesIn": 10772
+    }
+  },
+  "screenTail": [
+    "nanobox/claude SANDBOX — image linux-base (Linux only: no node, no CLI) boots in the emulated VM while the first-run installer fetches node + claude from the vendors into the",
+    " persistent /usr/local; then runs claude on this browser's V8 (guest-side node shim)",
+    "Claude configuration file at /root/.claude.json is corrupted: Unexpected end of JSON input",
+    "The corrupted file has been backed up to: /root/.claude/backups/.claude.json.corrupted.1786902188501",
+    "Welcome to Claude Code v2.1.112",
+    "…………………………………………………………………………………………………………………………………………………………",
+    "     *                                       █████▓▓░",
+    "                                 *         ███▓░     ░░",
+    "            ░░░░░░                        ███▓░",
+    "    ░░░   ░░░░░░░░░░                      ███▓░",
+    "   ░░░░░░░░░░░░░░░░░░░    *                ██▓░░      ▓",
+    "                                             ░▓▓███▓▓░",
+    " *                                 ░░░░",
+    "                                 ░░░░░░░░",
+    "                               ░░░░░░░░░░░░░░░░",
+    "       █████████                                        *",
+    "      ██▄█████▄██                        *",
+    "       █████████      *",
+    "…………………█ █   █ █………………………………………………………………………………………………………………",
+    " Claude Code can be used with your Claude subscription or billed based on API ",
+    " usage through your Console account.                     ",
+    " Select login method:",
+    " ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise",
+    "   2. Anthropic Console account · API usage billing",
+    "   3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, or Vertex AI"
+  ]
+}

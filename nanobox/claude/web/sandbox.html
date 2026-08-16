@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>nanobox · sandbox (node-base + first-run installer)</title>
+<title>nanobox · sandbox (linux-base + first-run installer + persistent tree)</title>
 <link rel="stylesheet" href="/c2w/vendor/xterm.css">
 <style>
   html,body{height:100%;margin:0;background:#0d0b0a;color:#e8e2da;font-family:ui-sans-serif,system-ui,sans-serif}
@@ -71,25 +71,30 @@ window.nanoboxNet = { requests: [] };
 <script src="/c2w/dist/runcontainer.js"></script>
 <script src="/native/hcring.js"></script>
 <script>
-// The sandbox: a small Linux + system node (image node-base — no CLI inside) boots in the emulated
-// VM while the FIRST-RUN INSTALLER (web/native/installer.js, its own worker) fetches the requested
-// CLIs from the vendors' servers (npm registry directly; the agy manifest/tarball through the
-// /net/fetch relay), verifies them and hands the unpacked packages to the VM worker
-// (web/sandbox-worker.js = opt-worker.js + graft-before-start) — the guest sees them as part of the
-// image. Installed packages persist in the Cache API: the second visit downloads nothing.
+// The sandbox: the smallest Linux (image linux-base: busybox + glibc + libstdc++, no node, no CLI)
+// boots in the emulated VM while the FIRST-RUN INSTALLER (web/native/installer.js — the persist
+// worker) fetches node + npm + the requested CLIs from the vendors' servers (npm registry directly;
+// the agy manifest/tarball through the /net/fetch relay), verifies them and hands the unpacked
+// packages to the VM worker (web/sandbox-worker.js = opt-worker.js + a writable bundle/persist
+// subtree) — the guest sees them under /usr/local (bind mounts of the persistent tree over
+// /usr/local, /root, /home, /var). The tree persists in OPFS and is shared by every page on this
+// origin: the second visit downloads nothing, and what the CLIs write (~/.claude, ~/.codex, …) is
+// journaled back and survives reloads.
 //   claude runs as JavaScript on this browser's V8 (the runtime worker behind the guest-side node shim,
-//   backend #2 of docs/claude-native.md); codex and agy are x86-64 Linux binaries and run in the guest.
+//   backend #2 of docs/claude-native.md, spec config-vm.json: PATH=/bundle/nb first); codex and agy are
+//   x86-64 Linux binaries and run in the guest (spec config-persist.json: the real node in PATH).
 // Query string:
 //   cli=claude|codex|agy       what to start (default claude)
-//   install=claude,codex,agy   what to install (default: the cli)
-//   image=node-base   jit=L:T   cache=0 (bypass all browser-side caches)   reset=1 (clear them first)
+//   install=claude,codex,agy   what to install/mount (default: the cli; node + npm always)
+//   image=linux-base   jit=L:T   cache=0 (bypass the engine/image caches; re-download the packages too)
+//   reset=1  wipe the persistent tree first (a true first run)   engine=slim|full (default slim)
 //   sharp=1  also install claude's optional @img/sharp-linux-x64 + libvips   auto=0  no prompt auto-answer
 //   env=K=V,K=V  extra environment for the CLI
 const qs = new URLSearchParams(location.search);
-const image = qs.get("image") || "node-base";
+const image = qs.get("image") || "linux-base";
 const cli = qs.get("cli") || "claude";
-const installList = (qs.get("install") || cli).split(",").filter(Boolean);
-if (!installList.includes(cli)) installList.push(cli);
+const installList = (qs.get("install") || (cli === "sh" ? "" : cli)).split(",").filter(Boolean);
+if (cli !== "sh" && !installList.includes(cli)) installList.push(cli);
 const auto = qs.get("auto") !== "0";
 const noCache = qs.get("cache") === "0";
 const el = (id) => document.getElementById(id);
@@ -99,17 +104,19 @@ const SIGNIN = {
   claude: /sign in|log in|claude\.ai\/oauth|authenticate|subscription|api key|browser didn't open/i,
   codex:  /sign in|log in|chatgpt|api key|authenticate|auth\.openai/i,
   agy:    /sign in|log in|google|authenticate|antigravity\.google|paste.*code/i,
+  sh:     /~ #|# $/,
 };
 const PROMPTS = [
   { name: "claude theme", when: /choose the text style|dark mode|light mode/i, send: "\r" },
   { name: "claude continue", when: /press enter to continue|continue\?/i, send: "\r" },
   { name: "trust folder", when: /do you trust|trust the files/i, send: "\r" },
 ];
-const ph = { engineMs: null, imageMs: null, installMs: null, vmStartMs: null, bootMs: null, helloMs: null, bundleMs: null, transformMs: null, runStartMs: null, signinMs: null };
+const ph = { engineMs: null, imageMs: null, installMs: null, persistMs: null, vmStartMs: null, bootMs: null, helloMs: null, bundleMs: null, transformMs: null, runStartMs: null, signinMs: null };
 let failed = false, exitCode = null;
 const events = [], missing = [];
 const perf = { vm: null, installer: null, runtime: null };   // byte accounting from the workers
-let install = null;   // the installer's summary
+let install = null;   // the persist worker's summary (packages, downloads, store)
+let persistWorker = null; const persistLog = [];
 function log(event, extra) {
   const rec = Object.assign({ event, t: Math.round(now()) }, extra || {});
   events.push(rec);
@@ -134,7 +141,8 @@ window.nanobox = {
   dump() { return new Promise((res) => { if (!worker) return res(null); lastMissing = res; worker.postMessage({ type: "dump" }); }); },
   eval(code) { const id = ++evalId; return new Promise((res, rej) => { evals.set(id, { res, rej }); worker.postMessage({ type: "eval", id, code }); }); },
   pageResources() { return performance.getEntriesByType("resource").map((e) => ({ name: e.name, transferSize: e.transferSize, encodedBodySize: e.encodedBodySize, decodedBodySize: e.decodedBodySize })); },
-  pageNet: window.nanoboxNet,
+  pageNet: window.nanoboxNet, get persistLog() { return persistLog; },
+  flushPersist() { persistWorker && persistWorker.postMessage({ type: "flush" }); },
   stats: null, samples: [],
 };
 const timerEl = el("timer");
@@ -165,30 +173,31 @@ setInterval(() => {
 const say = (s) => xterm.write(s.replace(/\n/g, "\r\n"));
 const fail = (msg) => { failed = true; timerEl.className = "err"; el("status").textContent = msg; log("error", { message: String(msg) }); };
 
-// ---- the installer worker (its packages go to the VM worker over a MessageChannel; claude's also to the runtime worker) ----
-const pkgChan = new MessageChannel();
-let installedResolve; const installed = new Promise((r) => (installedResolve = r));
-function startInstaller() {
+// ---- the persist worker: opens the persistent tree (OPFS), installs what is missing from the vendors,
+// hands the packages + journals to the VM worker (and claude's to the runtime worker) over MessageChannels,
+// then keeps journaling the guest's writes that the VM worker sends back ----
+const vmChan = new MessageChannel(), rtChan = new MessageChannel();
+function startPersist() {
   const w = new Worker(new URL("/native/installer.js", location.href).href);
-  const t = performance.now();
+  persistWorker = w;
   w.onmessage = (m) => {
     const d = m.data; if (!d) return;
-    if (d.type === "progress") { const { type, ...rest } = d; log("install:" + d.stage, rest); if (d.stage === "fetched") el("status").textContent = `installing: ${(d.bytes / 1e6).toFixed(1)} MB from ${new URL(d.url).hostname}`; return; }
-    if (d.type === "error") { fail("install failed: " + d.message.slice(0, 200)); pkgChan.port1.postMessage({ type: "error", message: d.message }); installedResolve(null); return; }
-    if (d.type === "installed") {
+    if (d.type === "progress") {
+      const { type, ...rest } = d; log("install:" + d.stage, rest);
+      if (d.stage === "journal" || d.stage === "compacted") persistLog.push(rest);
+      if (d.stage === "fetched") el("status").textContent = `installing: ${(d.bytes / 1e6).toFixed(1)} MB from ${new URL(d.url).hostname}`;
+      return;
+    }
+    if (d.type === "error") { fail("install failed: " + d.message.slice(0, 200)); return; }
+    if (d.type === "ready") {
       ph.installMs = now();
-      install = { ms: d.ms, packages: d.packages.length, fromCache: d.stats.fromCache, downloadBytes: d.stats.direct + d.stats.relayed, direct: d.stats.direct, relayed: d.stats.relayed, list: d.packages.map((p) => ({ cli: p.cli, key: p.key, name: p.name, version: p.version, files: p.files, unpackedBytes: p.unpackedBytes, tarBytes: p.tar.byteLength, download: p.download })) };
+      install = { ms: d.ms, store: d.store, usage: d.usage, packages: d.packages.length, fromCache: d.stats.fromCache, downloadBytes: d.stats.direct + d.stats.relayed, direct: d.stats.direct, relayed: d.stats.relayed, downloads: d.stats.downloads, list: d.packages, journals: d.journals };
       perf.installer = { downloads: d.stats.downloads, resources: d.resources };
-      log("installed", Object.assign({}, install, { list: undefined }));
-      // the runtime worker (claude on this V8) needs the claude package(s) in ITS rootfs copy: give it a copy, the VM worker the originals
-      const forRuntime = cli === "claude" ? d.packages.filter((p) => p.cli === "claude").map((p) => Object.assign({}, p, { tar: p.tar.slice() })) : [];
-      pkgChan.port1.postMessage({ type: "packages", packages: d.packages }, d.packages.map((p) => p.tar.buffer));
-      installedResolve(forRuntime);
-      w.terminate();
+      log("installed", { ms: d.ms, store: d.store, packages: d.packages.length, fromCache: d.stats.fromCache, downloadBytes: install.downloadBytes, journals: d.journals });
     }
   };
-  w.onerror = (e) => { fail("installer worker error: " + e.message); };
-  w.postMessage({ type: "install", clis: installList, opts: { noCache, sharp: qs.get("sharp") === "1" } });
+  w.onerror = (e) => { fail("persist worker error: " + e.message); };
+  w.postMessage({ type: "open", clis: installList, opts: { noCache, sharp: qs.get("sharp") === "1", reset: qs.get("reset") === "1", noOpfs: qs.get("opfs") === "0" }, vmPort: vmChan.port1, runtimePort: cli === "claude" ? rtChan.port1 : null }, cli === "claude" ? [vmChan.port1, rtChan.port1] : [vmChan.port1]);
   log("install-start", { clis: installList });
 }
 
@@ -201,7 +210,8 @@ async function bootVm() {
   { const t = slave.ioctl("TCGETS"); t.iflag &= ~(ISTRIP | INLCR | IGNCR | ICRNL | IXON); t.oflag &= ~OPOST; t.lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN); slave.ioctl("TCSETS", new Termios(t.iflag, t.oflag, t.cflag, t.lflag, t.cc)); }
   xterm.loadAddon(master);
   xterm.onResize(() => { try { slave.notifyResize?.(xterm.cols, xterm.rows); } catch {} });
-  const vmImage = new URL("/engine/opt/out.wasm.gzip", location.href).href;
+  // the slim engine (no embedded boot.iso) unless ?engine=full — the identity pages keep the full one
+  const vmImage = new URL(qs.get("engine") === "full" ? "/engine/opt/out.wasm.gzip" : "/engine/opt/slim/out.wasm.gzip", location.href).href;
   const mounter = new URL("/engine/imagemounter.wasm.gzip", location.href).href;
   const stackWorker = new URL("/c2w/dist/stack-worker.js", location.href).href;
   const imageAddr = new URL("/c2w/images/" + image + "/", location.href).href;
@@ -219,6 +229,7 @@ async function bootVm() {
       log("vm:" + d.event, Object.assign({}, d, { type: undefined }));
       if ((d.event === "engine-fetched" || d.event === "engine-cached") && ph.engineMs == null) ph.engineMs = now();
       if (d.event === "image-loaded") ph.imageMs = now();
+      if (d.event === "persist-applied") ph.persistMs = now();
       if (d.event === "start-direct" && ph.vmStartMs == null) { ph.vmStartMs = now(); el("status").textContent = "booting the guest…"; log("vm-start", { ms: Math.round(ph.vmStartMs) }); }
       if (d.event === "error") fail("vm error: " + d.message);
     } else if (d.type === "nanobox-perf") { perf.vm = { requests: d.requests, resources: d.resources, cache: d.cache }; }
@@ -227,28 +238,29 @@ async function bootVm() {
   vmWorker.onerror = (e) => fail("vm worker error: " + e.message);
   // what the guest runs (NanoboxInstaller.command, mirrored here so the page needs no installer code):
   const CMD = {
-    claude: { argv: ["/usr/local/bin/claude"], env: {} },
-    codex: { argv: ["/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"], env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: "/usr/local/lib/node_modules/@openai/codex" } },
-    agy: { argv: ["/usr/local/bin/agy"], env: {} },
+    claude: { argv: ["/usr/local/bin/claude"], env: {}, spec: "config-vm.json" },
+    codex: { argv: ["/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"], env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: "/usr/local/lib/node_modules/@openai/codex", CODEX_HOME: "/tmp/.codex" /* TEMPORARY: sqlite needs fcntl locks, which the engine's 9p server refuses (fs_lock ENOTSUP) — drop once fixed so ~/.codex persists */ }, spec: "config-persist.json" },
+    agy: { argv: ["/usr/local/bin/agy"], env: {}, spec: "config-persist.json" },
+    sh: { argv: ["/bin/sh"], env: {}, spec: "config-persist.json" },   // cli=sh: a shell in the guest (probing the persistent tree)
   };
   const c = CMD[cli] || { argv: [cli], env: {} };
   const env = Object.assign({}, c.env); for (const kv of (qs.get("env") || "").split(",").filter(Boolean)) { const i = kv.indexOf("="); env[kv.slice(0, i)] = kv.slice(i + 1); }
   const envArgs = Object.keys(env).length ? ["/bin/env", ...Object.entries(env).map(([k, v]) => k + "=" + v)] : [];
   const args = ["/bin/sh", "-c", "printf '\\033]777;nb-booted\\007'; exec \"$0\" \"$@\"", ...envArgs, ...c.argv, ...(qs.get("args") || "").split(" ").filter(Boolean)];
+  // claude: config-vm.json (hvc1 + PATH=/bundle/nb:… + persist mounts); codex/agy: config-persist.json (persist mounts only)
+  const specName = c.spec || (cli === "claude" ? "config-vm.json" : "config-persist.json");
   vmWorker.postMessage({ type: "init", info, args, cfg: {
-    jit, direct: true, imageAddr, specUrl: new URL("/images/" + image + "/config-vm.json", location.href).href,
+    jit, direct: true, imageAddr, specUrl: new URL("/images/" + image + "/" + specName, location.href).href,
     jitBundles, engineTag, noCache,
-    hostChan: { sab: toGuest.sab, inSab: fromGuest.sab },
-    bundleFiles: [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }],
-    packagesPort: pkgChan.port2,
-  } }, [pkgChan.port2]);
+    hostChan: cli === "claude" ? { sab: toGuest.sab, inSab: fromGuest.sab } : undefined,
+    bundleFiles: cli === "claude" ? [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }] : [],
+    persistPort: vmChan.port2,
+  } }, [vmChan.port2]);
   new TtyServer(slave).start(vmWorker, onVmMessage);
   el("status").textContent = "engine + image + install…";
   if (cli === "claude") {
     // the runtime worker: connects to the rings, waits for the shim's HELLO, then runs cli.js (read from
     // the installed package in its rootfs copy, transformed in the worker — nothing from our server)
-    const packages = await installed;
-    if (!packages) return;
     worker = new Worker(new URL("/native/runtime.js", location.href).href);
     worker.onmessage = onRuntimeMessage;
     worker.onerror = (e) => log("worker-error", { message: e.message });
@@ -256,8 +268,8 @@ async function bootVm() {
       backend: "vm", toGuest: toGuest.sab, fromGuest: fromGuest.sab,
       imageUrl: imageAddr, specUrl: new URL("/images/" + image + "/config.json", location.href).href,
       cliPath: "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js",   // fallback only: argv[1] from HELLO wins
-      packages, cols: xterm.cols, rows: xterm.rows, env: {}, noCache, skipNodeLayer: true,
-    } }, packages.map((p) => p.tar.buffer));
+      persistPort: rtChan.port2, cols: xterm.cols, rows: xterm.rows, env: {}, noCache, skipNodeLayer: true,
+    } }, [rtChan.port2]);
   }
 }
 function onRuntimeMessage(m) {
@@ -278,10 +290,10 @@ function onRuntimeMessage(m) {
 }
 async function boot() {
   el("engine").textContent = `sandbox: ${image} in the VM + first-run installer (${installList.join(", ")}) → ${cli}`;
-  say(`\x1b[38;5;173mnanobox/claude\x1b[0m SANDBOX — image \x1b[1m${image}\x1b[0m (Linux + node, no CLI inside) boots in the emulated VM while the first-run installer fetches \x1b[1m${installList.join(", ")}\x1b[0m from the vendors; then runs \x1b[1m${cli}\x1b[0m${cli === "claude" ? " on this browser's V8 (guest-side node shim)" : " in the guest"}\n\n`);
-  if (qs.get("reset") === "1") { try { await caches.delete("nanobox-v1"); log("cache-reset"); } catch {} }
+  say(`\x1b[38;5;173mnanobox/claude\x1b[0m SANDBOX — image \x1b[1m${image}\x1b[0m (Linux only: no node, no CLI) boots in the emulated VM while the first-run installer fetches node + \x1b[1m${installList.join(", ")}\x1b[0m from the vendors into the persistent /usr/local; then runs \x1b[1m${cli}\x1b[0m${cli === "claude" ? " on this browser's V8 (guest-side node shim)" : " in the guest"}\n\n`);
+  if (qs.get("reset") === "1") { try { await caches.delete("nanobox-v1"); log("cache-reset"); } catch {} }   // the persist worker wipes its own store
   log("boot", { cli, install: installList, noCache });
-  startInstaller();
+  startPersist();
   bootVm().catch((e) => fail("boot failed: " + (e && e.message || e)));
 }
 boot();

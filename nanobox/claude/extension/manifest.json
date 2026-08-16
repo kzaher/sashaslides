@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "nanobox proxy",
+  "version": "0.1.0",
+  "description": "Lets nanobox pages served from localhost make cross-origin HTTP(S) requests without a server relay: the page hands the request to this extension, the extension fetches it (host_permissions bypass CORS) and hands the response back. Forwards only; stores nothing.",
+  "minimum_chrome_version": "110",
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "host_permissions": ["<all_urls>"]
+}
