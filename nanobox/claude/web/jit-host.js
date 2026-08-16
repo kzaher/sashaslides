@@ -66,8 +66,8 @@
   async function preload(urls, engineTag) {
     const t = performance.now();
     const tag = await Promise.resolve(engineTag);
-    const files = await Promise.all((urls || []).map((u) => fetch(u, { credentials: "same-origin" })
-      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); })
+    const get = (u) => (global.NanoboxCache ? global.NanoboxCache.fetchValidated(u) : fetch(u, { credentials: "same-origin" }).then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); }));
+    const files = await Promise.all((urls || []).map((u) => get(u)
       .then((buf) => ({ u, buf }))
       .catch((e) => { console.warn(`[nanobox-jit] bundle ${u}: ${e.message}, ignored`); return null; })));
     for (const f of files) {

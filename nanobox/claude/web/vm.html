@@ -62,6 +62,8 @@
 //   direct=0          opt only: serve the image through container2wasm's network 9p path instead of
 //                     unpacking it in the VM worker and serving it over the built-in virtio-9p
 //   auto=0            do not auto-answer onboarding prompts
+//   cache=0           opt only: bypass the browser-side cache (Cache API) of engine / image layers /
+//                     bundles; default: cached, ETag-validated (a rebuilt engine is picked up)
 //   bundle=0|1        opt only: pre-computed JIT translations (/engine/opt/jit/kernel.nbjb +
 //                     <image>.nbjb, produced by harness --jit-bundle-out). Default: on when the
 //                     server lists them in /engine/opt/jit/index.json; bundle=0 never, bundle=1 tries
@@ -86,11 +88,20 @@ const PROMPTS = [
 ];
 
 const qs = new URLSearchParams(location.search);
+// ?netlog=1: log every message the network stack worker sends to this page (http_send addresses etc.)
+if (qs.get("netlog") === "1") {
+  const W = window.Worker;
+  window.Worker = class extends W {
+    set onmessage(f) { super.onmessage = (m) => { const d = m.data; if (d && d.type && d.type !== "notify-send-from-net") console.log("[netlog]", d.type, d.address ? new TextDecoder().decode(d.address) : "", d.req ? new TextDecoder().decode(d.req).slice(0, 200) : ""); return f(m); }; }
+    get onmessage() { return super.onmessage; }
+  };
+}
 const engine = qs.get("engine") === "opt" ? "opt" : "orig";
 const image = qs.get("image") || "codex";
 const auto = qs.get("auto") !== "0";
 const cmdStr = (qs.get("cmd") || DEFAULT_CMD[image] || "").trim();
-const cmd = cmdStr ? cmdStr.split(/\s+/) : [];
+// shell-like split: "double" and 'single' quoted tokens may contain spaces
+const cmd = cmdStr ? Array.from(cmdStr.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g), (m) => m[1] ?? m[2] ?? m[3]) : [];
 const jitSpec = qs.get("jit") || "2:2000";
 const direct = engine === "opt" && qs.get("direct") !== "0";
 const bundleOpt = qs.get("bundle"); // null = auto (whatever the server has), "0" = off, "1" = force
@@ -99,6 +110,7 @@ const post = (m) => { try { parent.postMessage(Object.assign({ type: "nanobox", 
 const T0 = performance.now();
 const now = () => performance.now() - T0;
 let signinMs = null, failed = false;
+let runStartMs = null;   // when the VM started executing (after engine download+compile, image unpack, bundle compile): the load/run split
 const events = [];
 function log(event, extra) {
   const rec = Object.assign({ event, t: Math.round(now()) }, extra || {});
@@ -128,7 +140,7 @@ xterm.loadAddon(master);
 xterm.onResize(() => { try { slave.notifyResize?.(xterm.cols, xterm.rows); } catch {} });
 
 window.nanobox = {
-  xterm, engine, image, events,
+  xterm, engine, image, events, get runStartMs() { return runStartMs; },
   screen() { const b = xterm.buffer.active, out = []; for (let i = 0; i < b.length; i++) out.push(b.getLine(i).translateToString(true)); return out.join("\n"); },
   send(data) { xterm._core.coreService.triggerDataEvent(data, true); },
   get signinMs() { return signinMs; },
@@ -140,7 +152,7 @@ window.nanobox = {
 // timer
 const timerEl = el("timer");
 function fmt(ms) { return (ms / 1000).toFixed(1) + " s"; }
-setInterval(() => { if (signinMs == null && !failed) timerEl.textContent = fmt(now()); }, 100);
+setInterval(() => { if (signinMs == null && !failed) timerEl.textContent = fmt(now()) + (runStartMs != null ? ` (load ${fmt(runStartMs)} + run ${fmt(now() - runStartMs)})` : " (loading)"); }, 100);
 
 // sign-in detection + onboarding, off the screen text (what a human sees)
 const answered = new Set();
@@ -150,9 +162,10 @@ setInterval(() => {
   if (auto && image === "claude") for (const p of PROMPTS) if (!answered.has(p.name) && p.when.test(s)) { answered.add(p.name); log("prompt", { name: p.name }); window.nanobox.send(p.send); return; }
   if (SIGNIN[image] && SIGNIN[image].test(s)) {
     signinMs = now();
-    timerEl.textContent = fmt(signinMs); timerEl.className = "done";
+    const loadMs = runStartMs != null ? runStartMs : null, runMs = runStartMs != null ? signinMs - runStartMs : null;
+    timerEl.textContent = fmt(signinMs) + (loadMs != null ? ` (load ${fmt(loadMs)} + run ${fmt(runMs)})` : ""); timerEl.className = "done";
     el("status").textContent = "sign-in screen reached";
-    log("signin", { ms: Math.round(signinMs) });
+    log("signin", { ms: Math.round(signinMs), loadMs: loadMs != null ? Math.round(loadMs) : null, runMs: runMs != null ? Math.round(runMs) : null });
   }
 }, 250);
 
@@ -160,7 +173,9 @@ setInterval(() => {
 const say = (s) => xterm.write(s.replace(/\n/g, "\r\n"));
 async function boot() {
   const vmImage = engine === "opt" ? new URL("/engine/opt/out.wasm.gzip", location.href).href : new URL("/c2w/wasi/out.wasm.gzip", location.href).href;
-  const mounter = new URL("/c2w/imagemounter.wasm.gzip", location.href).href;
+  // network stack + proxy CA (+ 9p image server for the original engine): nanobox's build carries the
+  // MITM-certificate NotBefore fix (rustls/webpki clients such as codex rejected the year-1 certs)
+  const mounter = new URL(qs.get("mounter") === "stock" ? "/c2w/imagemounter.wasm.gzip" : "/engine/imagemounter.wasm.gzip", location.href).href;
   const stackWorker = new URL("/c2w/dist/stack-worker.js", location.href).href;
   const imageAddr = new URL("/c2w/images/" + image + "/", location.href).href;
   say(`\x1b[38;5;173mnanobox/claude\x1b[0m ${engine === "opt" ? "OPTIMIZED" : "ORIGINAL"} engine — booting \x1b[1m${image}\x1b[0m, running: ${cmdStr}\n\n`);
@@ -178,9 +193,14 @@ async function boot() {
     if (!d || typeof d !== "object") return;
     if (d.type === "nanobox-event") {
       log("worker:" + d.event, Object.assign({}, d, { type: undefined }));
+      // VM start: direct mode starts the engine after engine+image+bundles are ready ("start-direct");
+      // the stock path (original engine) starts right after instantiation and loads the image while running
+      if (runStartMs == null && (d.event === "start-direct" || (d.event === "instantiated" && !(engine === "opt" && direct)))) { runStartMs = now(); log("run-start", { loadMs: Math.round(runStartMs) }); }
+      if (d.event === "engine-cached") el("status").textContent = `engine from browser cache (${(d.bytes / 1e6).toFixed(0)} MB)`;
+      if (d.event === "engine-fetched" && !d.cached) el("status").textContent = `engine downloaded (${(d.bytes / 1e6).toFixed(0)} MB in ${(d.ms / 1000).toFixed(1)} s)`;
       if (d.event === "engine") el("status").textContent = d.optimized ? `running (JIT ${d.jit ? d.jit.level + ":" + d.jit.threshold : "off"}${d.bundles ? ", " + d.bundles + " precompiled modules" : ""}${direct ? ", direct rootfs" : ""})` : "running";
       if (d.event === "image") el("status").textContent = `image: layer ${d.layer} ${d.stage} (${(d.size / 1e6).toFixed(0)} MB)`;
-      if (d.event === "bundle-ready") el("status").textContent = `image unpacked: ${d.files} entries in ${d.ms} ms`;
+      if (d.event === "bundle-ready") el("status").textContent = `image unpacked: ${d.files} entries in ${d.ms} ms` + (d.cache ? ` (${d.cache.hits} layers from browser cache, ${d.cache.misses} downloaded)` : "");
       if (d.event === "error") { el("status").textContent = "error: " + d.message; }
     }
     else if (d.type === "nanobox-stats") {
@@ -208,7 +228,7 @@ async function boot() {
   worker.postMessage({ type: "init", info, args: cmd, cfg: {
     jit, noBeat: qs.get("beat") === "0", trace: qs.get("trace") === "1",
     direct, imageAddr, specUrl: new URL("/images/" + image + "/config.json", location.href).href,
-    jitBundles, engineTag,
+    jitBundles, engineTag, noCache: qs.get("cache") === "0",
   } });
   el("status").textContent = "booting… (" + (qs.get("worker") === "stock" ? "stock worker" : direct ? "nanobox worker, direct rootfs" : "nanobox worker") + ")";
   new TtyServer(slave).start(worker, onWorkerMessage);

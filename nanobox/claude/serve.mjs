@@ -7,6 +7,7 @@
 //   /web/*, /*.html, /*.js  -> web/
 //   /c2w/*         -> ../public/c2w/*  (the ORIGINAL engine, its JS glue, imagemounter, the images)
 //   /engine/opt/out.wasm.gzip -> the OPTIMIZED engine (default build/eh-nb/out.wasm.gzip)
+//   /engine/imagemounter.wasm.gzip -> build/imagemounter-nb.wasm.gzip (fixed MITM certs, build-imagemounter.sh) or the shipped one
 //   /engine/opt/jit/*  -> pre-computed JIT bundles (.nbjb, harness --jit-bundle-out) from --jit-dir
 //                      (default build/eh-nb/jit, created if missing); /engine/opt/jit/index.json is
 //                      generated: {engineTag, files:[{name,size,mtime}]} so vm.html can pick the
@@ -27,6 +28,7 @@ const opt = (name, def) => { const i = args.indexOf(name); return i >= 0 ? args[
 const PORT = Number(opt("--port", process.env.PORT || 8093));
 const ENGINE = resolve(HERE, opt("--engine", "build/eh-nb/out.wasm.gzip"));
 const JITDIR = resolve(HERE, opt("--jit-dir", "build/eh-nb/jit"));
+const MOUNTER = resolve(HERE, opt("--mounter", "build/imagemounter-nb.wasm.gzip"));
 const WEB = join(HERE, "web");
 try { mkdirSync(JITDIR, { recursive: true }); } catch {}
 // engine tag of the served engine (gunzip + hash once, on the first index.json request; keyed by
@@ -68,7 +70,11 @@ function serveFile(req, res, filePath) {
   headers(res, filePath);
   res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Last-Modified", st.mtime.toUTCString());
-  res.setHeader("ETag", `"${st.size}-${Math.floor(st.mtimeMs)}"`);
+  const etag = `"${st.size}-${Math.floor(st.mtimeMs)}"`;
+  res.setHeader("ETag", etag);
+  // browser-side cache validation (web/cachefetch.js: HEAD to compare ETags; conditional GET -> 304)
+  if (req.method === "HEAD") { res.setHeader("content-length", st.size); res.writeHead(200); res.end(); return; }
+  if (req.headers["if-none-match"] === etag) { res.writeHead(304); res.end(); return; }
   const onErr = (s) => s.on("error", () => { try { res.destroy(); } catch {} });
   const range = req.headers.range;
   if (range) {
@@ -94,7 +100,9 @@ async function netFetch(req, res) {
   try {
     const r = await fetch(spec.url, { method: spec.method || "GET", headers: h, body: ["GET", "HEAD"].includes(spec.method) ? undefined : body, redirect: "manual" });
     console.log(`[net] ${spec.method} ${spec.url} -> ${r.status}`);
-    const out = {}; r.headers.forEach((v, k) => { if (!HOP.has(k)) out[k] = v; });
+    // node's fetch already decoded gzip/br bodies; forwarding the upstream content-encoding made the
+    // browser try to decode again (ERR_CONTENT_DECODING_FAILED -> empty body -> codex "EOF while parsing")
+    const out = {}; r.headers.forEach((v, k) => { if (!HOP.has(k) && k !== "content-encoding") out[k] = v; });
     res.writeHead(r.status, out);
     res.end(Buffer.from(await r.arrayBuffer()));
   } catch (e) { console.log(`[net] ${spec.method} ${spec.url} -> error ${e.message}`); res.writeHead(502); res.end(String(e.message)); }
@@ -107,6 +115,10 @@ createServer(async (req, res) => {
   if (req.method === "POST" && p === "/net/fetch") return netFetch(req, res);
   if (p === "/") p = "/index.html";
   if (p === "/engine/opt/out.wasm.gzip") return serveFile(req, res, ENGINE);
+  // network stack + 9p image server (imagemounter.wasm) with nanobox's fix (build-imagemounter.sh:
+  // MITM certificates carry a NotBefore; upstream leaves Go's zero time = year 1, which webpki/rustls
+  // clients such as codex reject) — falls back to the shipped one when not built
+  if (p === "/engine/imagemounter.wasm.gzip") return serveFile(req, res, existsSync(MOUNTER) ? MOUNTER : join(C2W, "imagemounter.wasm.gzip"));
   if (p === "/engine/opt/jit/index.json" && !existsSync(join(JITDIR, "index.json"))) return jitIndex(res);
   if (p.startsWith("/engine/opt/jit/")) return serveFile(req, res, join(JITDIR, p.slice(16)));
   if (p.startsWith("/c2w/")) return serveFile(req, res, join(C2W, p.slice(5)));

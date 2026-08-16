@@ -71,8 +71,8 @@ async function main() {
   while ((Date.now() - t0) / 1000 < TIMEOUT_S) {
     await sleep(1000);
     const st = ENGINE
-      ? await evalJson("window.nanobox ? ({events: window.nanobox.events, signinMs: window.nanobox.signinMs, failed: window.nanobox.failed, stats: window.nanobox.stats}) : null")
-      : await evalJson("window.nanoboxCompare ? ({events: window.nanoboxCompare.events, orig: window.nanoboxCompare.orig, opt: window.nanoboxCompare.opt}) : null");
+      ? await evalJson("window.nanobox ? ({events: window.nanobox.events, signinMs: window.nanobox.signinMs, runStartMs: window.nanobox.runStartMs, failed: window.nanobox.failed, stats: window.nanobox.stats}) : null")
+      : await evalJson("window.nanoboxCompare ? ({events: window.nanoboxCompare.events, orig: window.nanoboxCompare.orig, opt: window.nanoboxCompare.opt, optLoad: window.nanoboxCompare.optLoad, optRun: window.nanoboxCompare.optRun}) : null");
     if (!st) continue;
     for (; seen < st.events.length; seen++) {
       const e = st.events[seen];
@@ -83,9 +83,9 @@ async function main() {
     if (Date.now() - lastShot > 15000) { lastShot = Date.now(); await shot("progress"); }
     if (ENGINE) {
       if (st.stats && st.stats.icount) process.stdout.write(`\r  t+${Math.round((Date.now() - t0) / 1000)}s icount=${st.stats.icount} jit=${st.stats.installed ?? "-"}   `);
-      if (st.signinMs != null) { verdict = { signinMs: st.signinMs }; break; }
+      if (st.signinMs != null) { verdict = { signinMs: st.signinMs, loadMs: st.runStartMs ?? null, runMs: st.runStartMs != null ? st.signinMs - st.runStartMs : null }; break; }
       if (st.failed) { verdict = { failed: true }; break; }
-    } else if (st.orig != null && st.opt != null) { verdict = { orig: st.orig, opt: st.opt, speedup: st.orig / st.opt }; break; }
+    } else if (st.orig != null && st.opt != null) { verdict = { orig: st.orig, opt: st.opt, speedup: st.orig / st.opt, optLoad: st.optLoad ?? null, optRun: st.optRun ?? null }; break; }
   }
   await shot("final");
   const finalState = ENGINE ? await evalJson("window.nanobox ? window.nanobox.screen() : ''") : null;

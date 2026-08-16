@@ -15,6 +15,7 @@
 importScripts(new URL("/c2w/vendor/workerTools.js", location.href).href);
 importScripts(new URL("/c2w/dist/worker-util.js", location.href).href);   // stock RunContainer (original engine)
 importScripts(new URL("./dist/nb-worker-util.js", location.href).href);   // NbRun: fork with bundle/extraFds/hook options
+importScripts(new URL("./cachefetch.js", location.href).href);
 importScripts(new URL("./jit-bundle.js", location.href).href);
 importScripts(new URL("./jit-host.js", location.href).href);
 importScripts(new URL("./wasifs.js", location.href).href);
@@ -123,9 +124,14 @@ if (MODE === "full") WebAssembly.instantiate = function (src, imports) {
 //   bundle/rootfs/...               the unpacked layers
 let enginePromise = null, bundlePromise = null;
 function fetchEngine(url) {
-  return fetch(url, { credentials: "same-origin" }).then((r) => r.blob()).then((blob) =>
-    new Response(blob.stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+  const t = performance.now();
+  return NanoboxCache.fetchValidated(url, { onHit: (n) => ev("engine-cached", { bytes: n }) }).then((gz) => {
+    ev("engine-fetched", { bytes: gz.byteLength, ms: Math.round(performance.now() - t) });
+    return new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+  });
 }
+// OCI layers: content-addressed (digest) -> cached decompressed tar, never validated
+const layerCache = { get: (digest) => NanoboxCache.getBytes("layer:" + digest), put: (digest, bytes) => NanoboxCache.putBytes("layer:" + digest, bytes) };
 // engine identity for the bundle check (same rule as harness/run.mjs: length + sha256 of head/tail MiB)
 async function engineTagOf(bytes) {
   const digest = await crypto.subtle.digest("SHA-256", NanoboxJitBundle.engineTagInput(bytes));
@@ -143,14 +149,14 @@ function startPreload() {
 async function buildBundle() {
   const t = performance.now();
   const [img, spec] = await Promise.all([
-    NanoboxOci.load(cfg.imageAddr, { onProgress: (p) => ev("image", p) }),
+    NanoboxOci.load(cfg.imageAddr, { onProgress: (p) => ev("image", p), cache: cfg.noCache ? null : layerCache }),
     fetch(cfg.specUrl, { credentials: "same-origin" }).then((r) => { if (!r.ok) throw new Error("spec " + r.status); return r.arrayBuffer(); }),
   ]);
   const root = NanoboxFs.dir();
   NanoboxFs.add(root, "config/config.json", { data: new Uint8Array(spec) });
   NanoboxFs.add(root, "config/imageconfig.json", { data: img.configBytes });
   root.e.set("rootfs", img.rootfs);
-  ev("bundle-ready", { files: img.files, compressedBytes: img.compressedBytes, ms: Math.round(performance.now() - t) });
+  ev("bundle-ready", { files: img.files, compressedBytes: img.compressedBytes, ms: Math.round(performance.now() - t), cache: img.cache || null });
   return root;
 }
 async function startDirect(ttyClient) {

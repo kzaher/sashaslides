@@ -29,7 +29,9 @@
     if (d.event === "signin") {
       // measured from the moment this page created both frames, so both timers share one t0
       res[d.engine] = performance.now() - T0;
-      timers[d.engine].textContent = fmt(res[d.engine]);
+      // load = engine download+compile, image unpack, bundle compile; run = VM start -> sign-in
+      if (d.loadMs != null) { res[d.engine + "Load"] = d.loadMs; res[d.engine + "Run"] = d.runMs; }
+      timers[d.engine].textContent = fmt(res[d.engine]) + (d.loadMs != null ? ` (load ${fmt(d.loadMs)} + run ${fmt(d.runMs)})` : "");
       timers[d.engine].classList.add("done");
     }
     if (d.event === "error") timers[d.engine].classList.add("err");

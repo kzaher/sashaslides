@@ -71,6 +71,33 @@ at 50–98 % of wall time; the same guest work takes ~7 s in the node harness. T
 unpacks the OCI layers in the VM worker and serves them through Bochs' built-in virtio-9p as a WASI
 preopen (512 KiB reads, `cache=loose`), so `runc` starts the CLI 1.0 s after the engine starts.
 
+## Signing in for real (egress), load/run split, browser cache (2026-08-16, fourth round)
+
+* **codex "Sign in with Device Code" failed** with `error sending request for url (https://auth.openai.com/...)`
+  while claude's preflight worked. Diagnosis (in-guest `RUST_LOG=trace codex login --device-auth`,
+  see `test/codex-login-probe.mjs` / `test/vm-cmd-probe.mjs`): the guest→proxy path was fine (busybox
+  `wget` over http reached the gateway), codex loaded the proxy CA from `SSL_CERT_FILE`, the TLS
+  handshake ran — and rustls dropped the connection after the server certificate. The MITM
+  certificates container2wasm's in-browser proxy (imagemounter.wasm / c2w-net-proxy, Go) issues
+  have **no `NotBefore`** → Go's zero time, year 1 → webpki rejects it (`BadDerTime`); OpenSSL /
+  BoringSSL clients (Bun, Node) accept it, which is why claude never noticed. Fix:
+  `patches/c2w-imagemounter-notbefore.patch` + `build-imagemounter.sh` → `build/imagemounter-nb.wasm.gzip`,
+  served at `/engine/imagemounter.wasm.gzip` and used by `vm.html` for both engines (`?mounter=stock`
+  = the shipped one). Second bug behind it: the `/net/fetch` gateway forwarded the upstream
+  `content-encoding: gzip` after node's fetch had already decoded the body → the browser failed to
+  decode → empty body → codex "EOF while parsing a value" (the same `ERR_CONTENT_DECODING_FAILED`
+  was in claude's console). Now stripped. Result: codex shows the device link + one-time code.
+* **Load / run split**: every timer now reads `total (load L + run R)` — load = engine download +
+  compile, image unpack, bundle compile; run = VM start → sign-in (`run-start` event; results JSON
+  carries `loadMs`/`runMs`). On this container: 6.8 s = 2.7 load + 4.1 run cold.
+* **Browser-side cache** (`web/cachefetch.js`, Cache API): engine (ETag-validated by a HEAD, so a
+  rebuilt engine is picked up), decompressed OCI layers (content-addressed), JIT bundles. serve.mjs
+  answers HEAD and `If-None-Match` → 304. Reload: load 2.7 → 1.0 s. `?cache=0` bypasses.
+  Through a port-forward tunnel the first load is dominated by ~170 MB of downloads (that is the
+  "35 s" seen remotely); after one visit it is gone.
+* Compare pages default to the recorded original time (`?orig=live` boots it), `vm.html` accepts
+  quoted `cmd=` arguments, `?netlog=1` logs the network stack's messages.
+
 ## Regions, batching, pre-computed bundles (2026-08-16, second round)
 
 Built after the profile showed where the time goes (`TASKS.md` is the live task list):

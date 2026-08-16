@@ -1,0 +1,40 @@
+diff --git a/extras/c2w-net-proxy/main.go b/extras/c2w-net-proxy/main.go
+index bf0a53e..94742d8 100644
+--- a/extras/c2w-net-proxy/main.go
++++ b/extras/c2w-net-proxy/main.go
+@@ -89,6 +89,7 @@ func generateCert(host string) (*tls.Certificate, error) {
+ 		Subject: pkix.Name{
+ 			CommonName: host,
+ 		},
++		NotBefore:   time.Now().Add(-24 * time.Hour), // nanobox: Go's zero NotBefore (year 1) is rejected by webpki/rustls clients (codex)
+ 		NotAfter:    time.Now().Add(365 * 24 * time.Hour),
+ 		KeyUsage:    x509.KeyUsageDigitalSignature,
+ 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+@@ -397,6 +398,7 @@ func main() {
+ 			Organization:       []string{"proxy"},
+ 			Country:            []string{"US"},
+ 		},
++		NotBefore:             time.Now().Add(-24 * time.Hour), // nanobox: see above
+ 		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+ 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+ 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+diff --git a/extras/imagemounter/main.go b/extras/imagemounter/main.go
+index 09c160a..37ac107 100644
+--- a/extras/imagemounter/main.go
++++ b/extras/imagemounter/main.go
+@@ -124,6 +124,7 @@ func generateCert(host string) (*tls.Certificate, error) {
+ 		Subject: pkix.Name{
+ 			CommonName: host,
+ 		},
++		NotBefore:   time.Now().Add(-24 * time.Hour), // nanobox: Go's zero NotBefore (year 1) is rejected by webpki/rustls clients (codex)
+ 		NotAfter:    time.Now().Add(365 * 24 * time.Hour),
+ 		KeyUsage:    x509.KeyUsageDigitalSignature,
+ 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+@@ -467,6 +468,7 @@ func main() {
+ 			Organization:       []string{"proxy"},
+ 			Country:            []string{"US"},
+ 		},
++		NotBefore:             time.Now().Add(-24 * time.Hour), // nanobox: see above
+ 		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+ 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+ 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},

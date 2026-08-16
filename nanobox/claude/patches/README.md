@@ -13,3 +13,6 @@
 - `wasi-vfs-0.6.3-skip-nondir-prestat.patch` — tolerate non-directory prestats (container2wasm's socket fds).
 - `wizer-v11-wasm-exceptions.patch` — enable the exceptions proposal in wizer's wasmtime config.
 Apply with `git apply` in the respective checkouts (see build-bochs.sh / work/build-pack-nb.sh).
+- `c2w-imagemounter-notbefore.patch` — container2wasm v0.8.4 `extras/imagemounter` + `extras/c2w-net-proxy`:
+  the in-browser TLS MITM proxy's CA and per-host certificates get a `NotBefore` (upstream leaves Go's
+  zero time = year 1, which webpki/rustls clients such as codex reject). Built by `build-imagemounter.sh`.
