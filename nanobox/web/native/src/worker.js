@@ -27,11 +27,14 @@ import { record, noteMissing, dump as dumpMissing, setOnFirst } from "./record.j
 import { initReport, report, reportError, installGlobalHandlers } from "./report.js";
 initReport({}); installGlobalHandlers(); setBufferThrowHook((e, where) => reportError("buffer-throw", e, { fn: where }));
 import { esmToCjs } from "./esm2cjs.js";
+import { makeBun, BUN_VERSION, BUN_REVISION } from "./bun-globals.js";
 
 const post = (m, transfer) => self.postMessage(m, transfer || []);
 const T0 = performance.now();
 const ev = (event, extra) => post(Object.assign({ type: "event", event, t: Math.round(performance.now() - T0) }, extra || {}));
 const enc = new TextEncoder();
+// Bun standalone entries: `// @bun …` banner + the CJS wrapper Bun's own loader calls (bunfs.js)
+const BUN_CJS_ENTRY = /^\/\/ @bun[^\n]*\n\(function\s*\(\s*exports\s*,\s*require\s*,\s*module\s*,\s*__filename\s*,\s*__dirname\s*\)/;
 
 // the runtime's own helper scripts (shared with the VM pages)
 importScripts(new URL("/wasifs.js", location.href).href, new URL("/oci.js", location.href).href, new URL("/cachefetch.js", location.href).href);
@@ -251,9 +254,28 @@ async function main(cfg) {
     if (!url) {
       const tt = performance.now();
       const bytes = B.call("readFile", cliPath);
-      const r = esmToCjs(new TextDecoder().decode(bytes), { fileUrl: "file://" + cliPath });
-      url = URL.createObjectURL(new Blob([r.code], { type: "text/javascript" }));
-      ev("bundle-transformed", { bytes: bytes.length, imports: r.imports, dynamicImports: r.dynamicImports, ms: Math.round(performance.now() - tt) });
+      const text = new TextDecoder().decode(bytes);
+      const bunCjs = BUN_CJS_ENTRY.exec(text);
+      if (bunCjs) {
+        // a Bun program (Claude Code's native build, its JS extracted by web/native/bunfs.js at
+        // install time): give it the `Bun` global it calls unconditionally. Only then — the npm
+        // build branches on `typeof Bun` and its Node path is the one we support.
+        self.Bun = makeBun({ B, fs, path, os, child_process, proc, require });
+        proc.versions.bun = BUN_VERSION; proc.revision = BUN_REVISION; proc.isBun = true;
+        // a standalone Bun program IS its executable, and the CLI relaunches itself through
+        // process.execPath — point it at the launcher the installer wrote, not at our shim
+        if (cliPath.includes("/claude-native/")) proc.execPath = "/usr/local/bin/claude";
+        // Bun's standalone build stores the entry already wrapped as
+        // `(function(exports, require, module, __filename, __dirname){…})` — call it with our module
+        // context instead of running the ESM->CJS transform (nothing to rewrite, 26 MB not touched)
+        const call = `\n(module.exports, require, module, ${JSON.stringify(cliPath)}, ${JSON.stringify(self.__dirname)});\n`;
+        url = URL.createObjectURL(new Blob([text, call], { type: "text/javascript" }));
+        ev("bundle-bun-cjs", { bytes: bytes.length, ms: Math.round(performance.now() - tt) });
+      } else {
+        const r = esmToCjs(text, { fileUrl: "file://" + cliPath });
+        url = URL.createObjectURL(new Blob([r.code], { type: "text/javascript" }));
+        ev("bundle-transformed", { bytes: bytes.length, imports: r.imports, dynamicImports: r.dynamicImports, ms: Math.round(performance.now() - tt) });
+      }
     }
     importScripts(url);
   } catch (e) {

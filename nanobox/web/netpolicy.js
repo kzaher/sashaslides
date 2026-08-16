@@ -8,6 +8,7 @@
   // hosts that need the relay (verified 2026-08-16: no Access-Control-Allow-Origin on these)
   const PROXY_HOSTS = [
     "api.anthropic.com",            // Claude Code preflight /api/hello, event logging
+    "downloads.claude.ai",          // Claude Code's native (Bun) build: /claude-code-releases/… (Range requests)
     "platform.claude.com",          // /v1/oauth/hello
     "chatgpt.com", "ab.chatgpt.com",// codex telemetry / plugins
     "antigravity-cli-auto-updater-974169037036.us-central1.run.app", // agy manifest

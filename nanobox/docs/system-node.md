@@ -35,3 +35,38 @@ for paths outside the image (home dir, /tmp, /proc, sockets), and for child proc
 The same `claude-npm` image booted on the emulated engine (system node's V8 as x86 under our trace
 JIT) — measured separately; plus V8 flags friendlier to the trace JIT (`--jitless`: Ignition's
 small stable dispatch loop compiles well; `--single-threaded`, `--max-lazy`).
+
+## Track C: the NATIVE build (Bun) on the browser's V8
+
+Claude Code's native installer ships a **Bun standalone executable** (324 MB, Bun 1.4.0 + JavaScriptCore),
+so there is no `node` process to shadow — but the program's JavaScript is inside it as plain text:
+Bun stores every embedded file in the ELF section `.bun` as `\0/$bunfs/<name>\0<contents>\0` records,
+and the entry is already wrapped the way a CommonJS loader wants it:
+
+```
+\0/$bunfs/root/cli\0// @bun @bytecode @bun-cjs
+(function(exports, require, module, __filename, __dirname) { …26.6 MB… })
+```
+
+(The `@bytecode` blob next to it is JavaScriptCore's cache — useless off JSC, and unnecessary: the
+source beside it is complete.) `web/native/bunfs.js` reads those records (`tools/bun-extract.mjs` is
+the same parser as a CLI, `test/bunfs-unit.mjs` covers it), so the sandbox can install the native
+build's JS and run it on the browser's V8 exactly like the npm build — same guest, same shim, same
+syscalls in Linux. Claude Code itself is not modified: the entry is stored and executed verbatim,
+the runtime just calls the wrapper with its module context (`bundle-bun-cjs` in the page log).
+
+Measured on 2.1.233: 12 embedded files — the 26.6 MB entry, `mermaid.min.js` (3.3 MB),
+`hljsBundle.generated.min.js` (1.0 MB), `chart.umd.min.js`, `payload.template.html.asset` (2.2 MB)
+and three `.node` addons; V8 parses+compiles the entry in 373 ms (lazy). The bundle reads its assets
+by their literal `/$bunfs/root/...` path, so the installer writes them at exactly that path in the
+guest. `downloads.claude.ai` serves the binary with `accept-ranges: bytes` and no CORS header, so
+the installer range-fetches only the last 64 MB (where the sources live) through the relay — or
+directly with the proxy extension.
+
+What that build needs beyond Node: a `Bun` global (`web/native/src/bun-globals.js`). The 2.1.233
+bundle calls, unconditionally, `Bun.stringWidth` / `wrapAnsi` / `stripANSI` (every TUI frame),
+`Bun.hash`, `Bun.which`, `Bun.semver.order`, `Bun.YAML`, `Bun.TOML`, `Bun.deepEquals`, `Bun.spawn`,
+`Bun.file`, `Bun.isStandaloneExecutable`, and — feature-gated — `Bun.Terminal`, `listen`, `connect`,
+`serve`, `SQL`, `WebView`, `Transpiler`, `gc`, `ant.memoryPressureLevel`. Everything with a side
+effect goes through the same syscall backend as the Node shims; anything not implemented is recorded
+and surfaces in the page's missing-API list and the server error log.

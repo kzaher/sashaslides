@@ -9,14 +9,14 @@
     "serve": "./build-all.sh && node serve.mjs",
     "build": "./build-all.sh",
     "test": "npm run -s test:unit && npm run -s test:engine && npm run -s test:e2e",
-    "test:unit": "node --test \"test/*.test.js\" && node test/wasifs-write-unit.mjs && node test/installer-unit.mjs && node test/jit-host-unit.mjs && (cd guest/nbnode && ./build.sh test)",
+    "test:unit": "node --test \"test/*.test.js\" && node test/wasifs-write-unit.mjs && node test/installer-unit.mjs && node test/bunfs-unit.mjs && node test/bun-globals-unit.mjs && node test/jit-host-unit.mjs && (cd guest/nbnode && ./build.sh test)",
     "test:engine": "npm run -s test:identity && npm run -s test:gate && npm run -s test:bundle-roundtrip && npm run -s test:checkpoint && npm run -s test:nbnode-rpc",
     "test:identity": "./test/identity.sh both --jit 2:2000",
     "test:gate": "./test/gate.sh",
     "test:bundle-roundtrip": "./test/bundle-roundtrip.sh",
     "test:checkpoint": "./test/checkpoint-roundtrip.sh",
     "test:nbnode-rpc": "cd harness && node run.mjs ../build/eh-nb/out.wasm --oci http://localhost:8093/c2w/images/codex/ --spec ../test/hc-test-spec.json --oci-cache ../work/oci-cache --bundle-file nb/node=../guest/nbnode/nbnode --cmd '/bin/sh -c \"exec /bundle/nb/node cli.js --arg1\"' --nbnode-test --timeout 25",
-    "test:e2e": "npm run -s test:e2e-codex && npm run -s test:e2e-agy && npm run -s test:e2e-claude && npm run -s test:e2e-native && npm run -s test:e2e-native-vm && npm run -s test:e2e-sandbox && npm run -s test:e2e-codex-login",
+    "test:e2e": "npm run -s test:e2e-codex && npm run -s test:e2e-agy && npm run -s test:e2e-claude && npm run -s test:e2e-native && npm run -s test:e2e-native-vm && npm run -s test:e2e-sandbox && npm run -s test:e2e-claude-tui && npm run -s test:e2e-typing && npm run -s test:e2e-codex-login",
     "test:e2e-codex": "node test/e2e.mjs codex --jit 2:2000",
     "test:e2e-agy": "node test/e2e.mjs agy --jit 2:2000",
     "test:e2e-claude": "node test/e2e.mjs claude --jit 2:2000",
@@ -31,7 +31,9 @@
     "chrome": "google-chrome-stable --headless=new --remote-debugging-port=9222 --remote-allow-origins=* --no-sandbox --disable-gpu --disable-dev-shm-usage --user-data-dir=/tmp/nanobox-chrome --window-size=1280,900 about:blank",
     "pack": "node tools/pack.mjs --check",
     "postinstall": "npm run -s build:vendor || true",
-    "build:vendor": "./build-all.sh vendor"
+    "build:vendor": "./build-all.sh vendor",
+    "test:e2e-claude-tui": "node test/e2e-claude-tui.mjs --cli both",
+    "test:e2e-typing": "node test/e2e-typing-latency.mjs"
   },
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "^0.2.17",

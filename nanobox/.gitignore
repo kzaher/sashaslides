@@ -44,3 +44,5 @@ web/results/*.png
 public/vm/vendor/xterm.js
 public/vm/vendor/xterm.css
 public/vm/vendor/addon-fit.js
+# dev-only: locally extracted Bun bundle (tools/bun-extract.mjs), served at /native/local/
+web/native/local/

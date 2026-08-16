@@ -126,7 +126,9 @@ const SYNC = {
   ttyWrite(fd, bytes) { (fd === 2 ? this.g.stderr : this.g.stdout)(bytes); return bytes.byteLength; },
   ttySetRaw(on) { this.g.ttyRaw(!!on); return true; },
   isatty(fd) { const h = this.g.hello; return h ? !!(h.isatty & (1 << fd)) : fd < 3; },
-  spawn(spec) { const cid = this.cid++; try { this.g.sync.spawn(cid, [spec.file, ...(spec.args || [])], envList(spec.env), spec.cwd || this.cwd, 1); return { pid: cid }; } catch (e) { return { error: e.code || "ENOENT" }; } },
+  // spec.pty: run the child on a pty in the guest (flags bit1 of the shim's SPAWN, guest/nbnode/nbnode.c) —
+  // what `Bun.Terminal` and the sandbox's extra terminals need; bit0 = pipe its stdio to us
+  spawn(spec) { const cid = this.cid++; try { this.g.sync.spawn(cid, [spec.file, ...(spec.args || [])], envList(spec.env), spec.cwd || this.cwd, spec.pty ? 3 : 1); return { pid: cid }; } catch (e) { return { error: e.code || "ENOENT" }; } },
   spawnSync(spec) {
     // spawn, then keep draining the ring (events are dispatched by g.callSync's loop / g.drain) until CHILD_EXIT
     const cid = this.cid++;

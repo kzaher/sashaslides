@@ -147,9 +147,22 @@ export function makeFs(B) {
     fsyncSync(fd) { sync("fsync", fd); },
     fdatasyncSync(fd) { sync("fsync", fd); },
     opendirSync(p, opts) { return new Dir(pathOf(p), opts); },
-    watch(p, opts, listener) { const w = new FSWatcher(); if (typeof opts === "function") listener = opts; if (listener) w.on("change", listener); noteMissing("fs.watch", "call"); return w; },
-    watchFile(p, opts, listener) { noteMissing("fs.watchFile", "call"); },
-    unwatchFile() {},
+    watch(p, opts, listener) { if (typeof opts === "function") { listener = opts; opts = {}; } const w = new FSWatcher(pathOf(p), opts, "watch"); if (listener) w.on("change", listener); return w; },
+    // fs.watchFile/watch: the guest has no inotify channel to us, so poll the backend's stat — the
+    // interval the caller asks for (config reload, plugin/skill directories: seconds, not frames)
+    watchFile(p, opts, listener) {
+      if (typeof opts === "function") { listener = opts; opts = {}; }
+      const key = pathOf(p);
+      const w = watchers.get(key) || new FSWatcher(key, opts, "watchFile");
+      watchers.set(key, w);
+      if (listener) w.on("changeStat", listener);
+      return w;
+    },
+    unwatchFile(p, listener) {
+      const key = pathOf(p), w = watchers.get(key); if (!w) return;
+      if (listener) w.off("changeStat", listener); else w.removeAllListeners("changeStat");
+      if (w.listenerCount("changeStat") === 0) { w.close(); watchers.delete(key); }
+    },
     createReadStream(p, opts) { return new ReadStream(p, opts); },
     createWriteStream(p, opts) { return new WriteStream(p, opts); },
     globSync() { noteMissing("fs.globSync", "call"); return []; },
@@ -162,7 +175,31 @@ export function makeFs(B) {
     else { if (!o.force && fs.existsSync(b) && o.errorOnExist) throw errnoError("EEXIST", "cp", b); fs.copyFileSync(a, b); }
   }
 
-  class FSWatcher extends EventEmitter { close() { this.emit("close"); } ref() { return this; } unref() { return this; } }
+  // Polling watcher (there is no inotify path from the guest to this worker): stat every
+  // `interval` ms and report the transitions node's watchers report. Cheap: one stat per file per
+  // tick, on paths the program itself asked us to watch.
+  class FSWatcher extends EventEmitter {
+    constructor(path, opts, kind) {
+      super();
+      this.path = path; this.closed = false;
+      const interval = Math.max(200, (opts && opts.interval) || 1000);
+      let prev = statOrNull(path);
+      if (kind === "watchFile" && opts && opts.bigint === undefined) queueMicrotask(() => { if (prev) this.emit("changeStat", prev, prev); });
+      this._timer = setInterval(() => {
+        const now = statOrNull(path);
+        if (same(prev, now)) return;
+        const before = prev; prev = now;
+        if (kind === "watchFile") { this.emit("changeStat", now || zeroStat(), before || zeroStat()); return; }
+        this.emit("change", now && before ? "change" : "rename", path.replace(/^.*\//, ""));
+      }, interval);
+    }
+    close() { if (this.closed) return; this.closed = true; clearInterval(this._timer); this.emit("close"); }
+    ref() { return this; } unref() { return this; }
+  }
+  const watchers = new Map();
+  function statOrNull(p) { try { return fs.statSync(p); } catch { return null; } }
+  function zeroStat() { return { dev: 0, ino: 0, mode: 0, nlink: 0, uid: 0, gid: 0, rdev: 0, size: 0, blksize: 0, blocks: 0, atimeMs: 0, mtimeMs: 0, ctimeMs: 0, birthtimeMs: 0, isFile: () => false, isDirectory: () => false }; }
+  function same(a, b) { if (!a || !b) return !a && !b; return a.mtimeMs === b.mtimeMs && a.size === b.size && a.ino === b.ino && a.mode === b.mode; }
   class Dir {
     constructor(p, opts) { this.path = p; this._entries = null; this._i = 0; this._opts = opts; }
     _load() { if (!this._entries) this._entries = readdirImpl((d) => sync("readdir", d), this.path, { withFileTypes: true }, false); }

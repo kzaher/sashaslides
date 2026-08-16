@@ -117,7 +117,17 @@ export function makeNet(B) {
   // tls
   class TLSSocket extends Socket { constructor(sock, opts) { super(); this.encrypted = true; this.authorized = true; this.alpnProtocol = false; this.servername = opts && opts.servername; } getPeerCertificate() { return {}; } getProtocol() { return "TLSv1.3"; } getCipher() { return { name: "TLS_AES_256_GCM_SHA384", version: "TLSv1.3" }; } getSession() {} setSession() {} isSessionReused() { return false; } }
   const tlsConnect = (...args) => { let o = args[0], cb; if (typeof o !== "object") { o = { port: args[0], host: typeof args[1] === "string" ? args[1] : undefined }; cb = args.find((a) => typeof a === "function"); } else cb = args[1]; const s = new TLSSocket(null, o); if (cb) s.once("secureConnect", cb); s.on("connect", () => s.emit("secureConnect")); return s.connect(Object.assign({}, o, { _tls: true })); };
-  const tls = { TLSSocket, connect: tlsConnect, createServer: (o, l) => new Server(o, l), Server, createSecureContext: (o) => ({ context: o }), SecureContext: class {}, checkServerIdentity: () => undefined, getCiphers: () => ["tls_aes_256_gcm_sha384"], rootCertificates: [], DEFAULT_MIN_VERSION: "TLSv1.2", DEFAULT_MAX_VERSION: "TLSv1.3", DEFAULT_CIPHERS: "", DEFAULT_ECDH_CURVE: "auto", CLIENT_RENEG_LIMIT: 3, CLIENT_RENEG_WINDOW: 600 };
+  // getCACertificates(type): node >= 22.15. TLS is terminated by the gateway, so "the CAs in use"
+  // is whatever the guest trusts — read the container's bundle when asked, and never fail: the
+  // callers are diagnostics ("custom CA configured?"), not the request path.
+  const getCACertificates = (type) => {
+    if (type === "extra") { const extra = envOf("NODE_EXTRA_CA_CERTS") || envOf("SSL_CERT_FILE"); return extra ? readPems(extra) : []; }
+    if (type === "bundled" || type === "default" || type === undefined) return readPems("/etc/ssl/certs/ca-certificates.crt");
+    return [];
+  };
+  const envOf = (name) => { try { return B.call("info").env[name]; } catch { return undefined; } };
+  const readPems = (path) => { try { const text = new TextDecoder().decode(B.call("readFile", path)); return text.split(/(?=-----BEGIN CERTIFICATE-----)/).filter((p) => p.includes("BEGIN CERTIFICATE")); } catch { return []; } };
+  const tls = { getCACertificates, TLSSocket, connect: tlsConnect, createServer: (o, l) => new Server(o, l), Server, createSecureContext: (o) => ({ context: o }), SecureContext: class {}, checkServerIdentity: () => undefined, getCiphers: () => ["tls_aes_256_gcm_sha384"], rootCertificates: [], DEFAULT_MIN_VERSION: "TLSv1.2", DEFAULT_MAX_VERSION: "TLSv1.3", DEFAULT_CIPHERS: "", DEFAULT_ECDH_CURVE: "auto", CLIENT_RENEG_LIMIT: 3, CLIENT_RENEG_WINDOW: 600 };
   // dns: resolution happens host-side in the gateway; only literal answers here
   const lookupErr = (host) => { const e = new Error(`getaddrinfo ENOTFOUND ${host}`); e.code = "ENOTFOUND"; e.errno = -3008; e.syscall = "getaddrinfo"; e.hostname = host; return e; };
   const lookup = (host, opts, cb) => { if (typeof opts === "function") { cb = opts; opts = {}; } opts = typeof opts === "number" ? { family: opts } : opts || {}; const done = (addr, fam) => queueMicrotask(() => (opts.all ? cb(null, [{ address: addr, family: fam }]) : cb(null, addr, fam))); if (host === "localhost" || host === "127.0.0.1" || !host) return done("127.0.0.1", 4); if (isIPv4(host)) return done(host, 4); if (isIPv6(host)) return done(host, 6); noteMissing("dns.lookup(" + host + ")", "call"); queueMicrotask(() => cb(lookupErr(host))); };

@@ -18,6 +18,13 @@
 //           -> cli_linux_x64.tar.gz (one file: `antigravity`) -> /usr/local/bin/agy 755. Neither host answers
 //           CORS: both go through the server's POST /net/fetch relay (web/netpolicy.js allow-list, the same
 //           request encoding as vm.html / the runtime worker).
+//   claude-native  the CURRENT Claude Code (downloads.claude.ai/claude-code-releases/latest -> manifest.json
+//           -> linux-x64/claude, a 324 MB Bun standalone executable). Its JavaScript sits in the binary as
+//           plain text, so we RANGE-FETCH only the tail that holds it (67 of 324 MB), extract the modules
+//           with web/native/bunfs.js and install them as files: the 26.6 MB entry verbatim as
+//           /usr/local/lib/claude-native/cli.js (Bun's own CJS wrapper — the runtime evaluates it as is),
+//           every other module at the literal path the bundle opens it by (/$bunfs/root/…), and
+//           /usr/local/bin/claude as a launcher for the guest-side node shim.   -> relay (no CORS)
 //
 // A "package" is { key, name, version, tar, meta }: `tar` = the vendor's tarball gunzipped and otherwise
 // UNTOUCHED (integrity: sha512 from the registry's dist.integrity / the agy manifest, checked before
@@ -32,23 +39,27 @@
 //       packages/<key>.tar + .json (immutable), journal/<t>-<n>.tar (guest writes, applied in name order)
 //
 // As a dedicated worker (`new Worker("/native/installer.js")` — the sandbox's PERSIST WORKER):
-//   page -> {type:"open", clis, opts:{noCache, sharp, reset}, vmPort, runtimePort?}
+//   page -> {type:"open", clis, opts:{noCache, sharp, reset, verifyFull}, vmPort, runtimePort?, runtimeCli?}
 //   worker -> page: {type:"progress",…} … {type:"ready", summary} | {type:"error", message}
 //   worker -> vmPort: {type:"persist", packages:[…tars transferred…], journals:[…]}  (runtimePort: copies of
-//             claude's packages + the journals)
+//             the packages of runtimeCli — claude / claude-native — + the journals)
 //   vmPort -> worker: {type:"journal", tar}  guest writes from the VM worker, batched into journal/*.tar
 // Also loadable with importScripts() (needs wasifs.js + oci.js + cachefetch.js first) and in node.
 (function (global) {
   const F = () => global.NanoboxFs, Oci = () => global.NanoboxOci;
+  const bunFs = () => { const b = global.NanoboxBunFs; if (!b) throw new Error("installer: web/native/bunfs.js must be loaded for the claude-native target"); return b; };
   const enc = new TextEncoder(), dec = new TextDecoder();
   const REGISTRY = "https://registry.npmjs.org/";
   const AGY_MANIFEST = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json";
+  const CLAUDE_RELEASES = "https://downloads.claude.ai/claude-code-releases";
   const NM = "usr/local/lib/node_modules/";
   const KEYV = "pkg-";   // store file names: packages/<KEYV><name with / as ~>@<version>.tar
   // the persistent tree's mount points (must match tools/genspec-vm.mjs --persist): /usr/local (node +
   // the CLIs), /root, /home, /var (configs, sqlite, ~/.claude, ~/.codex) — all served through the
   // bundle share (virtio-9p wasi0)
-  const PERSIST_ROOTS = ["usr/local", "root", "home", "var"];
+  // ("$bunfs" only in the --shim spec (config-vm.json): claude-native's bundle opens its assets by
+  // their literal /$bunfs/root/… paths, so the directory the installer fills is bind-mounted there too)
+  const PERSIST_ROOTS = ["usr/local", "root", "home", "var", "$bunfs"];
 
   // what each CLI is made of. `into` = where the package directory's CONTENT is merged (default NM+name);
   // `bins` "auto" = usr/local/bin/<bin> -> ../lib/node_modules/<name>/<target> from package.json (like npm -g);
@@ -74,6 +85,13 @@
       ],
     },
     agy: { tarball: { name: "agy", manifest: AGY_MANIFEST, place: [{ from: "antigravity", to: "usr/local/bin/agy", mode: 0o755 }] } },
+    "claude-native": { bun: {
+      name: "claude-native", releases: CLAUDE_RELEASES, platform: "linux-x64",
+      entry: "/$bunfs/root/cli",                // the program's entry inside the binary (Bun's own name)
+      lib: "usr/local/lib/claude-native",       // the entry module lands here as cli.js
+      bin: "usr/local/bin/claude",              // a launcher: the guest-side node shim runs cli.js
+      shim: "/bundle/nb/node",                  // where the page mounts the shim (config-vm.json PATH)
+    } },
   };
   const CLIS = Object.keys(CATALOG).filter((c) => c !== "node");
 
@@ -92,14 +110,16 @@
   }
   // `via` is the vendor's CORS situation ("direct": answers CORS; "relay": needs our /net/fetch relay
   // — or the proxy extension when the page has it: ctx.route(url) says which, web/proxyext.js)
-  async function getBytes(url, ctx, via) {
+  // `init` (a Range header for the Bun binary's tail) travels through every route: the relay forwards
+  // request headers and the 206 verbatim (serve.mjs netFetch), the extension builds a real Request.
+  async function getBytes(url, ctx, via, init) {
     const t = performance.now();
-    const r = await (via === "relay" ? ctx.relay : ctx.fetch)(url);
+    const r = await (via === "relay" ? ctx.relay : ctx.fetch)(url, init);
     if (!r.ok) throw new Error(`${via} fetch ${url}: ${r.status}`);
     const buf = new Uint8Array(await r.arrayBuffer());
-    const rec = { url, via, route: ctx.route ? ctx.route(url) : via, host: new URL(url).hostname, bytes: buf.length, ms: Math.round(performance.now() - t) };
+    const rec = { url, via, route: ctx.route ? ctx.route(url) : via, host: new URL(url).hostname, bytes: buf.length, ms: Math.round(performance.now() - t), status: r.status };
     ctx.downloads.push(rec);
-    ctx.progress({ stage: "fetched", url, via, bytes: buf.length, ms: rec.ms });
+    ctx.progress({ stage: "fetched", url, via, bytes: buf.length, ms: rec.ms, status: r.status });
     return buf;
   }
 
@@ -156,6 +176,99 @@
     await ctx.keep(manKey, { tar: enc.encode(JSON.stringify(manifest)), meta: { kind: "manifest" } });
     return finish(pkg, ctx);
   }
+  // ---- a Bun standalone executable (claude-native) -------------------------------------------------
+  // The vendor ships ONE binary (324 MB) whose JavaScript is plain text inside it (web/native/bunfs.js):
+  // we fetch only the tail that holds the sources (NanoboxBunFs.SEARCH_TAIL_BYTES = 64 MB; they occupy
+  // the last ~36 MB) with a Range request, extract the modules and PACK THEM AS A TAR — from there on
+  // the package is like any other: stored under packages/<key>.tar, applied into the tree by
+  // applyPackage, and the second visit downloads nothing.
+  //
+  // CHECKSUM CAVEAT: the manifest's sha256 covers the WHOLE 324 MB binary and cannot be checked against
+  // a 67 MB slice. What we record in the store instead (meta.source) is the version, the exact byte
+  // range, the vendor's whole-file checksum as documentation, and the sha256 OF THE EXTRACTED ENTRY.
+  // opts.verifyFull downloads the whole binary once and checks the vendor's checksum for real.
+  async function bunPackage(spec, cli, ctx) {
+    const t0 = performance.now();
+    const manKey = KEYV + spec.name + "-manifest";
+    const manifest = await bunManifest(spec, ctx, manKey);
+    const key = keyOf(spec.name, manifest.version);
+    const pkg = { cli, key, name: spec.name, version: manifest.version, meta: { kind: "files", name: spec.name, version: manifest.version, source: manifest }, tar: null, download: null };
+    const have = await ctx.have(key);
+    if (have) {
+      pkg.tar = have;
+      const stored = await ctx.haveMeta(key);   // the provenance recorded on the cold run (range, entry sha256)
+      if (stored) pkg.meta = stored;
+      pkg.download = { url: null, bytes: 0, fromCache: true, ms: Math.round(performance.now() - t0) };
+      ctx.progress({ stage: "cached", key, bytes: have.length });
+      return finish(pkg, ctx);
+    }
+    const { mods, main, range, checksum } = await bunSlice(spec, manifest, key, ctx);
+    if (!main) throw new Error(`claude-native ${manifest.version}: no entry module in ${range.bytes} bytes of the binary's tail`);
+    const entryPath = spec.lib + "/cli.js";
+    const entries = [{ path: entryPath, type: "f", data: main.bytes(), mode: 0o644 }];
+    // every OTHER module at the path the bundle opens it by (/$bunfs/root/…): the runtime worker holds
+    // the same tree in memory and answers those reads from it. NOTE: a module whose content is binary
+    // (the .node addons) is cut at its first NUL by the record format — they cannot load on V8 anyway.
+    for (const m of mods) if (m !== main) entries.push({ path: m.name.replace(/^\/+/, ""), type: "f", data: m.bytes(), mode: 0o644 });
+    entries.push({ path: spec.bin, type: "f", data: enc.encode(`#!/bin/sh\nexec ${spec.shim} /${entryPath} "$@"\n`), mode: 0o755 });
+    const entrySha256 = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", main.bytes())));
+    pkg.meta = { kind: "files", name: spec.name, version: manifest.version,
+      install: { entry: "/" + entryPath, bin: "/" + spec.bin, modules: mods.map((m) => ({ name: m.name, bytes: m.len })) },
+      source: { url: manifest.url, fileBytes: manifest.size, fileSha256: manifest.checksum, fileSha256Verified: !!checksum, range, entry: { name: main.name, bytes: main.len, sha256: entrySha256 }, at: new Date().toISOString() } };
+    pkg.tar = tarPack(entries);
+    pkg.download = { url: manifest.url, bytes: range.bytes, fromCache: false, ms: Math.round(performance.now() - t0), integrity: checksum ? "sha256 (whole binary)" : "sha256 of the extracted entry (recorded, not vendor-signed)" };
+    ctx.progress({ stage: "verified", key, integrity: pkg.download.integrity, entrySha256, modules: mods.length });
+    await ctx.keep(key, pkg);
+    await ctx.keep(manKey, { tar: enc.encode(JSON.stringify(manifest)), meta: { kind: "manifest" } });
+    return finish(pkg, ctx);
+  }
+  // latest -> manifest.json -> the platform's {binary, checksum, size} (cached with the package, like agy's)
+  async function bunManifest(spec, ctx, manKey) {
+    const cached = await ctx.have(manKey);
+    if (cached) return JSON.parse(dec.decode(cached));
+    ctx.progress({ stage: "resolve", key: KEYV + spec.name, url: spec.releases + "/latest", via: "relay" });
+    const version = dec.decode(await getBytes(spec.releases + "/latest", ctx, "relay")).trim();
+    if (!/^\d+\.\d+\.\d+/.test(version)) throw new Error("claude-native: not a version at /latest: " + JSON.stringify(version.slice(0, 40)));
+    const doc = JSON.parse(dec.decode(await getBytes(`${spec.releases}/${version}/manifest.json`, ctx, "relay")));
+    const p = (doc.platforms || {})[spec.platform];
+    if (!p) throw new Error(`claude-native: manifest ${version} has no ${spec.platform}`);
+    const binary = p.binary || "claude";
+    return { version, platform: spec.platform, binary, checksum: p.checksum || null, size: Number(p.size) || 0, url: `${spec.releases}/${version}/${spec.platform}/${binary}` };
+  }
+  // the bytes to parse: the tail (Range, ~67 of 324 MB) — a bigger tail if the entry is not in it, and
+  // the WHOLE binary (checked against the vendor's sha256) when opts.verifyFull asked for it
+  async function bunSlice(spec, manifest, key, ctx) {
+    if (ctx.verifyFull) {
+      ctx.progress({ stage: "range", key, url: manifest.url, range: "whole file", of: manifest.size });
+      const bytes = await getBytes(manifest.url, ctx, "relay");
+      const got = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+      if (manifest.checksum && got !== manifest.checksum.toLowerCase()) throw new Error(`claude-native ${manifest.version}: sha256 mismatch (manifest ${manifest.checksum.slice(0, 16)}… vs downloaded ${got.slice(0, 16)}…)`);
+      const mods = bunFs().modules(bytes);
+      return { mods, main: entryOf(spec, mods), range: { start: 0, end: bytes.length - 1, bytes: bytes.length, of: manifest.size, whole: true }, checksum: got };
+    }
+    let last = null;
+    for (const want of [bunFs().SEARCH_TAIL_BYTES, bunFs().SEARCH_TAIL_BYTES * 4]) {
+      const take = manifest.size ? Math.min(want, manifest.size) : want;
+      const start = manifest.size ? manifest.size - take : null;
+      const header = start != null ? `bytes=${start}-${manifest.size - 1}` : `bytes=-${take}`;
+      ctx.progress({ stage: "range", key, url: manifest.url, range: header, of: manifest.size });
+      const bytes = await getBytes(manifest.url, ctx, "relay", { headers: { Range: header } });
+      const from = start != null ? start : Math.max(0, (manifest.size || bytes.length) - bytes.length);
+      const mods = bunFs().modules(bytes);
+      last = { mods, main: spec.entry ? named(spec, mods) : entryOf(spec, mods), range: { start: from, end: from + bytes.length - 1, bytes: bytes.length, of: manifest.size, whole: bytes.length >= (manifest.size || Infinity) }, checksum: null };
+      if (last.main) return last;
+      if (last.range.whole) break;
+    }
+    // the vendor renamed the entry (or this is not the binary we think it is): fall back to bunfs.js'
+    // heuristic on the biggest slice we fetched — bunPackage reports it when that finds nothing either
+    if (last) last.main = entryOf(spec, last.mods);
+    return last;
+  }
+  // the entry by the name the catalog knows (a truncated slice holds OTHER @bun-wrapped modules, so the
+  // "biggest wrapped module" heuristic would happily accept a 2 KB one and install that as the CLI)
+  const named = (spec, mods) => (spec.entry ? mods.find((m) => m.name === spec.entry) || null : null);
+  const entryOf = (spec, mods) => named(spec, mods) || bunFs().entry(mods);
+
   // dry-run apply into a scratch tree: file count + unpacked size (validates the tar early)
   function finish(pkg, ctx) {
     const r = applyPackage(F().dir(), pkg);
@@ -175,6 +288,12 @@
   }
   function applyPackage(root, pkg) {
     const Fs = F(), meta = pkg.meta;
+    // "files" (claude-native): the tar built at install time already IS the layout (paths relative to /)
+    if (meta.kind === "files") {
+      const files = Oci().applyLayer(root, pkg.tar);
+      let bytes = 0; for (const e of tarSummary(pkg.tar, Infinity)) if (e.type === "0" || e.type === "\0") bytes += e.size;
+      return { files, bytes };
+    }
     const tmp = Fs.dir();
     Oci().applyLayer(tmp, pkg.tar);
     let files = 0, bytes = 0;
@@ -213,18 +332,26 @@
   // agy:    the native binary, same.
   function command(cli) {
     if (cli === "claude") return { argv: ["/usr/local/bin/claude"], env: {}, spec: "config-vm.json", shim: true };
+    // claude-native: the same launcher path, but /usr/local/bin/claude is a `sh` script that runs the
+    // extracted Bun entry (/usr/local/lib/claude-native/cli.js) through the shim — argv[1] in the shim's
+    // HELLO is what the runtime worker loads, so nothing else has to know about the layout
+    if (cli === "claude-native") return { argv: ["/usr/local/bin/claude"], env: {}, spec: "config-vm.json", shim: true };
     if (cli === "codex") return { argv: ["/" + NM + "@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"], env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: "/" + NM + "@openai/codex" }, spec: "config-persist.json", shim: false };
     if (cli === "agy") return { argv: ["/usr/local/bin/agy"], env: {}, spec: "config-persist.json", shim: false };
     throw new Error("unknown cli " + cli);
   }
   // the package specs a set of CLIs needs (node first)
+  // (opts.noNode: without the always-installed node + npm — the unit test, which stubs the network for
+  // one CLI only, and a claude-native run that never spawns a real node)
   function packagesFor(clis, opts) {
     const out = [];
-    for (const cli of ["node", ...clis.filter((c) => c !== "node")]) {
+    const list = opts && opts.noNode ? clis.filter((c) => c !== "node") : ["node", ...clis.filter((c) => c !== "node")];
+    for (const cli of list) {
       const c = CATALOG[cli]; if (!c) throw new Error("unknown cli " + cli + " (have " + CLIS.join(", ") + ")");
       for (const p of c.packages || []) out.push({ cli, npm: p });
-      if (c.optional) for (const [flag, list] of Object.entries(c.optional)) if (opts && opts[flag]) for (const p of list) out.push({ cli, npm: p });
+      if (c.optional) for (const [flag, list2] of Object.entries(c.optional)) if (opts && opts[flag]) for (const p of list2) out.push({ cli, npm: p });
       if (c.tarball) out.push({ cli, tarball: c.tarball });
+      if (c.bun) out.push({ cli, bun: c.bun });
     }
     return out;
   }
@@ -238,12 +365,14 @@
       relay: opts.relay || relayFetch,
       route: opts.route || null,
       have: opts.noCache ? async () => null : (opts.have || (async () => null)),
+      haveMeta: opts.noCache ? async () => null : (opts.haveMeta || (async () => null)),
       keep: opts.keep || (async () => {}),
       progress: opts.onProgress || (() => {}),
+      verifyFull: !!opts.verifyFull,
       downloads: [],
     };
     const t0 = performance.now();
-    const packages = await Promise.all(packagesFor(clis, opts).map((j) => (j.npm ? npmPackage(j.npm, j.cli, ctx) : tarballPackage(j.tarball, j.cli, ctx))));
+    const packages = await Promise.all(packagesFor(clis, opts).map((j) => (j.npm ? npmPackage(j.npm, j.cli, ctx) : j.bun ? bunPackage(j.bun, j.cli, ctx) : tarballPackage(j.tarball, j.cli, ctx))));
     const stats = { ms: Math.round(performance.now() - t0), downloads: ctx.downloads, direct: ctx.downloads.filter((d) => d.via === "direct").reduce((s, d) => s + d.bytes, 0), relayed: ctx.downloads.filter((d) => d.via === "relay").reduce((s, d) => s + d.bytes, 0), fromCache: packages.filter((p) => p.download && p.download.fromCache).length, packages: packages.length };
     return { packages, stats };
   }
@@ -367,7 +496,7 @@
 
   // ---- as the sandbox's persist worker -----------------------------------------------------------
   if (typeof importScripts === "function" && typeof self !== "undefined" && self.constructor && self.constructor.name === "DedicatedWorkerGlobalScope" && !global.NanoboxFs) {
-    importScripts(new URL("/wasifs.js", location.href).href, new URL("/oci.js", location.href).href, new URL("/netpolicy.js", location.href).href, new URL("/proxyext.js", location.href).href);
+    importScripts(new URL("/wasifs.js", location.href).href, new URL("/oci.js", location.href).href, new URL("/netpolicy.js", location.href).href, new URL("/proxyext.js", location.href).href, new URL("/native/bunfs.js", location.href).href);
     const T0 = performance.now();
     const routes = {};   // route -> count (direct | extension | relay | blocked), for the accounting
     const post = (m, tr) => self.postMessage(m, tr || []);
@@ -392,20 +521,23 @@
       // what is stored
       const stored = new Set(await store.list("packages"));
       const have = async (key) => (opts.noCache ? null : stored.has("packages/" + key + ".tar") ? await store.read("packages/" + key + ".tar") : null);
+      // the recorded provenance of a cached package (claude-native: version, byte range, entry sha256)
+      const haveMeta = async (key) => { if (opts.noCache) return null; const b = await store.read("packages/" + key + ".json"); try { return b ? JSON.parse(dec.decode(b)) : null; } catch { return null; } };
       const keep = async (key, pkg) => { if (opts.noCache) return; try { await store.write("packages/" + key + ".tar", pkg.tar); await store.write("packages/" + key + ".json", enc.encode(JSON.stringify(pkg.meta))); } catch (e) { progress({ stage: "store-error", key, message: String(e && e.message || e) }); } };
       // every vendor request goes through the shared routing policy: the extension when the page has it,
       // else the relay for the no-CORS vendors and a direct browser fetch for the rest
       const ext = !!opts.proxyExtension;
-      const routed = (u) => self.NanoboxProxy.workerFetch(fetch, u, {}, { extension: ext, onRoute: ({ route }) => { routes[route] = (routes[route] || 0) + 1; } });
-      const { packages, stats } = await install(clis, Object.assign({}, opts, { have, keep, onProgress: progress, fetch: routed, relay: routed, route: (u) => self.NanoboxProxy.route(u, { extension: ext }) }));
+      const routed = (u, init) => self.NanoboxProxy.workerFetch(fetch, u, init || {}, { extension: ext, onRoute: ({ route }) => { routes[route] = (routes[route] || 0) + 1; } });
+      const { packages, stats } = await install(clis, Object.assign({}, opts, { have, haveMeta, keep, onProgress: progress, fetch: routed, relay: routed, route: (u) => self.NanoboxProxy.route(u, { extension: ext }) }));
       stats.routes = routes;
       // journals (guest writes of earlier sessions), oldest first; compact when many
       const jnames = await store.list("journal");
       const journals = []; for (const n of jnames) { const t = await store.read(n); if (t) journals.push(t); }
       const jbytes = journals.reduce((s, t) => s + t.byteLength, 0);
       const out = packages.map((p) => ({ cli: p.cli, key: p.key, name: p.name, version: p.version, meta: p.meta, files: p.files, unpackedBytes: p.unpackedBytes, download: p.download, tar: p.tar }));
-      if (d.runtimePort) {   // the runtime worker (claude on the browser V8) gets copies of claude's packages + the journals
-        const mine = out.filter((p) => p.cli === "claude").map((p) => Object.assign({}, p, { tar: p.tar.slice() }));
+      if (d.runtimePort) {   // the runtime worker (claude on the browser V8) gets copies of that CLI's packages + the journals
+        const runtimeCli = d.runtimeCli || "claude";
+        const mine = out.filter((p) => p.cli === runtimeCli).map((p) => Object.assign({}, p, { tar: p.tar.slice() }));
         const js = journals.map((t) => t.slice());
         d.runtimePort.postMessage({ type: "persist", packages: mine, journals: js }, mine.map((p) => p.tar.buffer).concat(js.map((t) => t.buffer)));
       }

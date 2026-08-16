@@ -1,0 +1,212 @@
+{
+  "cli": "claude-native",
+  "cold": {
+    "date": "2026-08-16T22:09:26.428Z",
+    "verdict": {
+      "signinMs": null,
+      "loadMs": 3003,
+      "bootMs": 1245,
+      "runMs": null,
+      "engineMs": 858,
+      "imageMs": 1269,
+      "installMs": 2977,
+      "persistMs": 2996,
+      "helloMs": 4277,
+      "bundleMs": 590,
+      "transformMs": null,
+      "icount": "528756190",
+      "until": "bundle"
+    },
+    "accounting": {
+      "ours": {
+        "runtime/pages": 2997278,
+        "jit-bundles": 12750747,
+        "other": 300,
+        "image": 3926237,
+        "spec": 2830,
+        "engine": 29794763,
+        "shim": 63244
+      },
+      "oursTotal": 49535399,
+      "oursCached": {},
+      "oursCachedTotal": 0,
+      "vendorDirect": {
+        "registry.npmjs.org": 54614905
+      },
+      "vendorDirectTotal": 54614905,
+      "vendorRelay": {
+        "downloads.claude.ai": 67110896
+      },
+      "vendorRelayTotal": 67110896,
+      "routes": {
+        "page": {},
+        "runtime": {}
+      }
+    },
+    "install": {
+      "ms": 2637,
+      "packages": 3,
+      "fromCache": 0,
+      "downloadBytes": 121725801,
+      "store": "opfs",
+      "list": [
+        {
+          "cli": "node",
+          "key": "pkg-node-linux-x64@22.23.2",
+          "name": "node-linux-x64",
+          "version": "22.23.2",
+          "files": 2729,
+          "unpackedBytes": 183774506,
+          "tarBytes": 0,
+          "download": {
+            "url": "https://registry.npmjs.org/node-linux-x64/-/node-linux-x64-22.23.2.tgz",
+            "bytes": 51576724,
+            "fromCache": false,
+            "ms": 932,
+            "gunzipMs": 670,
+            "integrity": "sha512-lfi+07N7Y+NCz+WrWIu+VmHkXuTLuDv6JLpCAH5n+MvZeG4x9SoSGVJ+h8lUJwJKXGwZUJCdDXo6zZoLw16RGA=="
+          }
+        },
+        {
+          "cli": "node",
+          "key": "pkg-npm@10.9.8",
+          "name": "npm",
+          "version": "10.9.8",
+          "files": 2011,
+          "unpackedBytes": 11682638,
+          "tarBytes": 0,
+          "download": {
+            "url": "https://registry.npmjs.org/npm/-/npm-10.9.8.tgz",
+            "bytes": 2973275,
+            "fromCache": false,
+            "ms": 82,
+            "gunzipMs": 55,
+            "integrity": "sha512-fYwb6ODSmHkqrJQQaCxY3M2lPf/mpgC7ik0HSzzIwG5CGtabRp4bNqikatvCoT42b5INQSqudVH0R7yVmC9hVg=="
+          }
+        },
+        {
+          "cli": "claude-native",
+          "key": "pkg-claude-native@2.1.233",
+          "name": "claude-native",
+          "version": "2.1.233",
+          "files": 12,
+          "unpackedBytes": 33339387,
+          "tarBytes": 0,
+          "download": {
+            "url": "https://downloads.claude.ai/claude-code-releases/2.1.233/linux-x64/claude",
+            "bytes": 67108864,
+            "fromCache": false,
+            "ms": 2520,
+            "integrity": "sha256 of the extracted entry (recorded, not vendor-signed)"
+          }
+        }
+      ],
+      "journals": {
+        "count": 0,
+        "bytes": 0
+      }
+    }
+  },
+  "warm": {
+    "date": "2026-08-16T22:09:33.129Z",
+    "verdict": {
+      "signinMs": null,
+      "loadMs": 1026,
+      "bootMs": 1305,
+      "runMs": null,
+      "engineMs": 691,
+      "imageMs": 655,
+      "installMs": 664,
+      "persistMs": 691,
+      "helloMs": 2356,
+      "bundleMs": 607,
+      "transformMs": null,
+      "icount": "541184319",
+      "until": "bundle"
+    },
+    "accounting": {
+      "ours": {
+        "runtime/pages": 7200,
+        "jit-bundles": 1039,
+        "other": 300,
+        "image": 1935,
+        "spec": 2830,
+        "engine": 300,
+        "shim": 300
+      },
+      "oursTotal": 13904,
+      "oursCached": {
+        "engine (Cache API)": 29794463,
+        "image layers (Cache API, decompressed)": 8803328,
+        "bundles/shim (Cache API)": 12812652
+      },
+      "oursCachedTotal": 51410443,
+      "vendorDirect": {},
+      "vendorDirectTotal": 0,
+      "vendorRelay": {},
+      "vendorRelayTotal": 0,
+      "routes": {
+        "page": {},
+        "runtime": {}
+      }
+    },
+    "install": {
+      "ms": 338,
+      "packages": 3,
+      "fromCache": 3,
+      "downloadBytes": 0,
+      "store": "opfs",
+      "list": [
+        {
+          "cli": "node",
+          "key": "pkg-node-linux-x64@22.23.2",
+          "name": "node-linux-x64",
+          "version": "22.23.2",
+          "files": 2729,
+          "unpackedBytes": 183774506,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 301
+          }
+        },
+        {
+          "cli": "node",
+          "key": "pkg-npm@10.9.8",
+          "name": "npm",
+          "version": "10.9.8",
+          "files": 2011,
+          "unpackedBytes": 11682638,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 23
+          }
+        },
+        {
+          "cli": "claude-native",
+          "key": "pkg-claude-native@2.1.233",
+          "name": "claude-native",
+          "version": "2.1.233",
+          "files": 12,
+          "unpackedBytes": 33339387,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 58
+          }
+        }
+      ],
+      "journals": {
+        "count": 0,
+        "bytes": 0
+      }
+    }
+  }
+}

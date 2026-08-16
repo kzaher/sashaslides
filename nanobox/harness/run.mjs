@@ -34,12 +34,16 @@ import { WASI, wasi as wasitype, PreopenDirectory, File, Directory } from "@bjor
 
 const argv = process.argv.slice(2);
 if (argv.length === 0) { console.error("usage: run.mjs <out.wasm> [options]"); process.exit(2); }
-const opts = { wasm: argv[0], cmd: null, stdinFile: null, type: [], dumpDir: null, timeout: 0, quiet: false, clock: "frozen", stats: false, transcript: null, noStdin: false, mounts: [], jit: null, jitDump: null, replies: [], savePhys: [], jitBundle: [], jitBundleOut: null, bundleFiles: [] };
+const opts = { wasm: argv[0], cmd: null, stdinFile: null, type: [], afterExpect: [], ioLog: null, pagesMark: null, dumpDir: null, timeout: 0, quiet: false, clock: "frozen", stats: false, transcript: null, noStdin: false, mounts: [], jit: null, jitDump: null, replies: [], savePhys: [], jitBundle: [], jitBundleOut: null, bundleFiles: [] };
 for (let i = 1; i < argv.length; i++) {
   const a = argv[i], v = () => argv[++i];
   if (a === "--cmd") opts.cmd = v();
   else if (a === "--stdin-file") opts.stdinFile = v();
   else if (a === "--type") opts.type.push(v());
+  else if (a === "--after-expect") opts.afterExpect.push(v()); // TEXT@MS — type TEXT, MS ms after --expect fired; --expect then does NOT stop the run (it runs to --timeout)
+  else if (a === "--stop-after-expect") opts.stopAfterExpect = Number(v()); // with --after-expect: finish MS ms after --expect fired (deterministic window, unlike the absolute --timeout)
+  else if (a === "--io-log") opts.ioLog = v();                 // JSONL of every console/stdin event with {wallMs, icount, ticks}: key injected / stdin byte taken by the engine / guest output chunk
+  else if (a === "--pages-mark") opts.pagesMark = v();         // with --pages: also write the page profile at each --after-expect injection, as PREFIX.<n>
   else if (a === "--dump-dir") opts.dumpDir = v();
   else if (a === "--timeout") opts.timeout = Number(v());
   else if (a === "--quiet") opts.quiet = true;
@@ -133,6 +137,7 @@ const transcript = [];     // everything the guest wrote
 const dumps = [];          // {label, icount, ticks, sha256, blocks, wallMs}
 let markerCount = 0;
 function onGuestOutput(bytes) {
+  if (opts.ioLog) ioLog("out", { n: bytes.length, text: Buffer.from(bytes).toString("latin1").slice(0, 160) });
   transcript.push(Buffer.from(bytes));
   if (!opts.quiet) process.stdout.write(Buffer.from(bytes));
   outBuf += Buffer.from(bytes).toString("latin1");
@@ -152,12 +157,32 @@ function onGuestOutput(bytes) {
     expectSeen = true;
     takeDump("expect");
     console.error(`[harness] EXPECT ${opts.expect ? JSON.stringify(opts.expect) : opts.expectRe} seen at ${(performance.now() - t0).toFixed(1)} ms`);
-    if (ckpt.armed) ckpt.finishAfter = 0; // the checkpoint lands one trace later (see armCheckpoint); finish() then
+    if (opts.afterExpect.length) { expectAtMs = performance.now() - t0; ioLog("expect", {}); } // keep running: the scripted keystrokes come next
+    else if (ckpt.armed) ckpt.finishAfter = 0; // the checkpoint lands one trace later (see armCheckpoint); finish() then
     else finish(0);
   }
   if (outBuf.length > 4096) outBuf = outBuf.slice(-4096);
 }
 let expectSeen = false;
+let expectAtMs = null;      // --after-expect: wall time (ms since t0) at which --expect fired
+
+// ---- I/O event log (--io-log) ------------------------------------------------------------------
+// Every console/stdin event stamped with wall time AND the guest's own clock (icount/ticks), so a
+// keystroke can be isolated: "key" = harness queued the bytes, "poll" = the engine's virtio-console
+// rx timer looked at stdin (hit=1 when it found something), "in" = the engine actually read the
+// bytes, "out" = the guest wrote to the console.
+const ioEvents = [];
+function ioLog(kind, extra) {
+  if (!opts.ioLog) return;
+  const ex = inst && inst.exports;
+  const rec = { kind, wallMs: +(performance.now() - t0).toFixed(3) };
+  if (ex && ex.nanobox_icount_lo) {
+    rec.icount = Number(u64(ex.nanobox_icount_lo(), ex.nanobox_icount_hi()));
+    rec.ticks = Number(u64(ex.nanobox_ticks_lo(), ex.nanobox_ticks_hi()));
+    rec.rip = "0x" + u64(ex.nanobox_rip_lo(), ex.nanobox_rip_hi()).toString(16);
+  }
+  ioEvents.push(Object.assign(rec, extra));
+}
 
 // ---- guest RAM snapshot ----------------------------------------------------------------------
 function u64(lo, hi) { return (BigInt(hi >>> 0) << 32n) | BigInt(lo >>> 0); }
@@ -207,9 +232,20 @@ const ERRNO_INVAL = 28, ERRNO_BADF = 8;
 let stdinQueue = Buffer.alloc(0);
 if (opts.stdinFile) stdinQueue = fs.readFileSync(opts.stdinFile);
 const typed = opts.type.map((s) => { const at = s.lastIndexOf("@"); return { text: JSON.parse('"' + s.slice(0, at) + '"'), atMs: Number(s.slice(at + 1)), done: false }; });
+const afterTyped = opts.afterExpect.map((s) => { const at = s.lastIndexOf("@"); return { text: JSON.parse('"' + s.slice(0, at) + '"'), atMs: Number(s.slice(at + 1)), done: false }; });
+let keyMarks = 0;
 function feedTyped() {
   const now = performance.now() - t0;
-  for (const t of typed) if (!t.done && now >= t.atMs) { t.done = true; stdinQueue = Buffer.concat([stdinQueue, Buffer.from(t.text, "utf8")]); }
+  for (const t of typed) if (!t.done && now >= t.atMs) { t.done = true; stdinQueue = Buffer.concat([stdinQueue, Buffer.from(t.text, "utf8")]); ioLog("key", { text: t.text }); }
+  if (expectAtMs == null) return;
+  if (opts.stopAfterExpect && now - expectAtMs >= opts.stopAfterExpect) { console.error(`[harness] STOP at expect+${(now - expectAtMs).toFixed(1)} ms`); finish(0); }
+  for (const t of afterTyped) if (!t.done && now - expectAtMs >= t.atMs) {
+    t.done = true; stdinQueue = Buffer.concat([stdinQueue, Buffer.from(t.text, "utf8")]);
+    ioLog("key", { text: t.text });
+    console.error(`[harness] KEY ${JSON.stringify(t.text)} at ${now.toFixed(1)} ms (expect+${(now - expectAtMs).toFixed(1)} ms)`);
+    if (opts.pagesMark && opts.pages) writePagesProfile(`${opts.pagesMark}.${keyMarks}`, opts.focus ? `${opts.focus.slice(0, opts.focus.indexOf(":") + 1)}${opts.pagesMark}-focus.${keyMarks}` : null);
+    keyMarks++;
+  }
 }
 const shimFdRead = imp.fd_read.bind(imp);
 imp.fd_read = (fd, iovs_ptr, iovs_len, nread_ptr) => {
@@ -224,6 +260,7 @@ imp.fd_read = (fd, iovs_ptr, iovs_len, nread_ptr) => {
     heap.set(stdinQueue.subarray(0, take), io.buf); stdinQueue = stdinQueue.subarray(take); n += take;
   }
   view.setUint32(nread_ptr, n, true);
+  if (n && opts.ioLog) ioLog("in", { n, text: Buffer.from(heap.subarray(iovs[0].buf, iovs[0].buf + n)).toString("latin1") });
   return 0;
 };
 imp.fd_write = (fd, iovs_ptr, iovs_len, nwritten_ptr) => {
@@ -260,6 +297,7 @@ imp.poll_oneoff = (in_ptr, out_ptr, nsubs, nevents_ptr) => {
   const events = [];
   const clock = subs.find((s) => s.tag === 0), rd = subs.find((s) => s.tag === 1 && s.fd === 0);
   if (rd && stdinQueue.length > 0) events.push({ userdata: rd.userdata, type: 1 });
+  if (rd && opts.ioLog) ioLog("poll", { hit: events.length ? 1 : 0 });
   if (clock) {
     // Deterministic host: a clock wait never actually sleeps unless we're waiting for scripted stdin.
     if (events.length === 0 && opts.clock === "real" && clock.timeout > 0n) {
@@ -797,16 +835,11 @@ function finish(code) {
     fs.writeFileSync(sp.file, page); console.error(`[harness] saved phys page 0x${sp.addr.toString(16)} -> ${sp.file}${ptr ? "" : " (never touched: zeros)"}`);
   }
   if (opts.pages && ex && ex.nanobox_pages_n) {
-    const n = ex.nanobox_pages_n(); const lines = ["# lpage count ppage flags traces  (flags: 1 user, 2 kernel, 4 physical page changed)"];
-    for (let i = 0; i < n; i++) { const lp = ex.nanobox_pages_get(i, 0); if (lp < 0) continue; lines.push(`${lp} ${ex.nanobox_pages_get(i, 1)} ${ex.nanobox_pages_get(i, 2)} ${ex.nanobox_pages_get(i, 3)} ${ex.nanobox_pages_get(i, 4)}`); }
-    fs.writeFileSync(opts.pages, lines.join("\n") + "\n");
+    writePagesProfile(opts.pages, opts.focus || null);
     summary.pages = { used: ex.nanobox_pages_used(), dropped: ex.nanobox_pages_dropped(), file: opts.pages };
-    if (opts.focus) {
-      const c = opts.focus.indexOf(":"); const base = BigInt(opts.focus.slice(0, c)) & ~0xfffn; const rows = ["# addr instructions traces"];
-      for (let o = 0; o < 4096; o++) { const t = ex.nanobox_focus_get(o, 1); if (t > 0) rows.push(`0x${(base + BigInt(o)).toString(16)} ${ex.nanobox_focus_get(o, 0)} ${t}`); }
-      fs.writeFileSync(opts.focus.slice(c + 1), rows.join("\n") + "\n");
-    }
+    if (opts.pagesMark) summary.pagesMarks = keyMarks;
   }
+  if (opts.ioLog) { fs.writeFileSync(opts.ioLog, ioEvents.map((e) => JSON.stringify(e)).join("\n") + "\n"); summary.ioLog = { file: opts.ioLog, events: ioEvents.length }; }
   if (netStub) summary.net = netStub.stats;
   if (ckpt.written) summary.checkpoint = { file: ckpt.written.file, label: ckpt.label, writeMs: +ckpt.written.ms.toFixed(1) };
   else if (opts.checkpointOut) console.error(`[harness] checkpoint NOT written: ${ckpt.armed ? `armed at "${ckpt.label}" but the engine ran no further trace` : `marker "${opts.checkpointAt}" never seen`}`);
@@ -815,6 +848,8 @@ function finish(code) {
     const ic = u64(ex.nanobox_icount_lo(), ex.nanobox_icount_hi());
     summary.icount = ic.toString(); summary.mips = +(Number(ic) / 1e6 / (wall / 1000)).toFixed(2);
     summary.ticks = u64(ex.nanobox_ticks_lo(), ex.nanobox_ticks_hi()).toString();
+    // final counters, so a window can be isolated by subtracting the ones recorded at a marker/--expect
+    if (ex.nanobox_stat) summary.statsEnd = { traces: ex.nanobox_stat(2), jitTraces: ex.nanobox_stat(3), jitCompiled: ex.nanobox_stat(4), loopbacks: ex.nanobox_stat(5), links: ex.nanobox_stat(6), slow: ex.nanobox_stat(7), linkFail: [8,9,10,11,12,13,14,15].map((i) => ex.nanobox_stat(i)), cache: ex.nanobox_jit_cache_stat ? [ex.nanobox_jit_cache_stat(0), ex.nanobox_jit_cache_stat(1), ex.nanobox_jit_cache_stat(2)] : null };
   }
   if (jitState.table) {
     summary.jit = { installed: jitState.installed, batches: jitState.batches, released: jitState.released, live: jitState.fns.size, bytes: jitState.bytes, compileMs: +jitState.compileMs.toFixed(1), tableMs: +jitState.tableMs.toFixed(1) };
@@ -854,4 +889,18 @@ function finish(code) {
   if (opts.transcript) fs.writeFileSync(opts.transcript, Buffer.concat(transcript));
   console.error("\n[harness] SUMMARY " + JSON.stringify(summary));
   process.exit(code === 0 ? 0 : (code || 0));
+}
+
+// --pages / --focus: dump the engine's per-page instruction profile (cumulative counters). Called at
+// exit and, with --pages-mark, at every scripted keystroke so one keystroke can be isolated by diff.
+function writePagesProfile(file, focus) {
+  const ex = inst && inst.exports;
+  if (!ex || !ex.nanobox_pages_n) return;
+  const n = ex.nanobox_pages_n(); const lines = ["# lpage count ppage flags traces  (flags: 1 user, 2 kernel, 4 physical page changed)"];
+  for (let i = 0; i < n; i++) { const lp = ex.nanobox_pages_get(i, 0); if (lp < 0) continue; lines.push(`${lp} ${ex.nanobox_pages_get(i, 1)} ${ex.nanobox_pages_get(i, 2)} ${ex.nanobox_pages_get(i, 3)} ${ex.nanobox_pages_get(i, 4)}`); }
+  fs.writeFileSync(file, lines.join("\n") + "\n");
+  if (!focus) return;
+  const c = focus.indexOf(":"); const base = BigInt(focus.slice(0, c)) & ~0xfffn; const rows = ["# addr instructions traces"];
+  for (let o = 0; o < 4096; o++) { const t = ex.nanobox_focus_get(o, 1); if (t > 0) rows.push(`0x${(base + BigInt(o)).toString(16)} ${ex.nanobox_focus_get(o, 0)} ${t}`); }
+  fs.writeFileSync(focus.slice(c + 1), rows.join("\n") + "\n");
 }

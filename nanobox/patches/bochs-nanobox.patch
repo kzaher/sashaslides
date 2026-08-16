@@ -498,503 +498,6 @@ index 81292dad9..d6725427c 100644
 +  if (idx >= (BX_MEM_THIS len / BX_MEM_THIS block_size)) return NULL;
 +  return BX_MEM_THIS blocks[idx];
 +}
-diff --git a/bochs/pc_system.h b/bochs/pc_system.h
-index 4eb4f8bfa..c9aa91b83 100644
---- a/bochs/pc_system.h
-+++ b/bochs/pc_system.h
-@@ -36,6 +36,7 @@ extern double m_ips;
- 
- class BOCHSAPI bx_pc_system_c : private logfunctions {
- private:
-+  friend class nanobox_pc_system_access; // nanobox: the trace JIT inlines the tick countdown
- 
-   // ===============================
-   // Timer oriented private features
-diff --git a/bochs/plugin.cc b/bochs/plugin.cc
-index 888aaade9..40aa2cb0d 100644
---- a/bochs/plugin.cc
-+++ b/bochs/plugin.cc
-@@ -1066,6 +1066,7 @@ plugin_t bx_builtin_plugins[] = {
-   BUILTIN_OPTPCI_PLUGIN_ENTRY(packVirtio9p),
-   BUILTIN_OPTPCI_PLUGIN_ENTRY(stdioVirtioConsole),
-   BUILTIN_OPTPCI_PLUGIN_ENTRY(socketVirtioNet),
-+  BUILTIN_OPTPCI_PLUGIN_ENTRY(nanoboxVirtioConsole),
- #if BX_SUPPORT_SOUNDLOW
-   BUILTIN_SND_PLUGIN_ENTRY(dummy),
-   BUILTIN_SND_PLUGIN_ENTRY(file),
-diff --git a/bochs/plugin.h b/bochs/plugin.h
-index eecb8ecb5..49ce3f891 100644
---- a/bochs/plugin.h
-+++ b/bochs/plugin.h
-@@ -80,6 +80,7 @@ extern "C" {
- #define BX_PLUGIN_PACK_VIRTIO_9P "packVirtio9p"
- #define BX_PLUGIN_STDIO_VIRTIO_CONSOLE "stdioVirtioConsole"
- #define BX_PLUGIN_SOCKET_VIRTIO_NET "socketVirtioNet"
-+#define BX_PLUGIN_NANOBOX_VIRTIO_CONSOLE "nanoboxVirtioConsole"   // nanobox: second console = host channel (/dev/hvc1 <-> JS hooks)
- 
- #define BX_REGISTER_DEVICE_DEVMODEL(a,b,c,d) pluginRegisterDeviceDevmodel(a,b,c,d)
- #define BX_UNREGISTER_DEVICE_DEVMODEL(a,b) pluginUnregisterDeviceDevmodel(a,b)
-@@ -497,6 +498,7 @@ PLUGIN_ENTRY_FOR_MODULE(mapdirVirtio9p);
- PLUGIN_ENTRY_FOR_MODULE(packVirtio9p);
- PLUGIN_ENTRY_FOR_MODULE(stdioVirtioConsole);
- PLUGIN_ENTRY_FOR_MODULE(socketVirtioNet);
-+PLUGIN_ENTRY_FOR_MODULE(nanoboxVirtioConsole);
- #endif
- 
- #ifdef __cplusplus
-diff --git a/bochs/wasm.cc b/bochs/wasm.cc
-index 602f4b907..ad1c56986 100644
---- a/bochs/wasm.cc
-+++ b/bochs/wasm.cc
-@@ -261,6 +261,45 @@ PLUGIN_ENTRY_FOR_MODULE(stdioVirtioConsole)
-   return 0; // Success
- }
- 
-+/////////////////////////////////////////////////////////////////////////
-+// nanobox host channel: a second virtio-console (/dev/hvc1 in the guest). Guest writes go to the
-+// JS host through hook slot 6 (hc_write(ptr,len)); the host feeds bytes in through hook slot 7
-+// (hc_read(ptr,max) -> n), polled by the console's rx timer. Used by the "system node" shim: node's
-+// JavaScript runs on the browser's V8, its syscalls are served by the shim inside the guest.
-+/////////////////////////////////////////////////////////////////////////
-+extern "C" {
-+static void nanobox_hc_write_placeholder(const uint8_t *, unsigned) {}
-+static unsigned nanobox_hc_read_placeholder(uint8_t *, unsigned) { return 0; }
-+}
-+typedef void (*hook_hc_write_t)(const uint8_t *buf, unsigned len);
-+typedef unsigned (*hook_hc_read_t)(uint8_t *buf, unsigned max);
-+static hook_hc_write_t volatile hook_hc_write = nanobox_hc_write_placeholder;
-+static hook_hc_read_t volatile hook_hc_read = nanobox_hc_read_placeholder;
-+extern "C" __attribute__((export_name("nanobox_hc_hook_slot"), used)) unsigned nanobox_hc_hook_slot(unsigned k)
-+{
-+  return k == 0 ? (unsigned)(uintptr_t) hook_hc_write : k == 1 ? (unsigned)(uintptr_t) hook_hc_read : 0;
-+}
-+static void hostchan_write(void *opaque, const uint8_t *buf, int len) { hook_hc_write(buf, (unsigned) len); }
-+static int hostchan_read(void *opaque, uint8_t *buf, int len) { return (int) hook_hc_read(buf, (unsigned) len); }
-+bx_virtio_console_ctrl_c *nanobox_v;
-+PLUGIN_ENTRY_FOR_MODULE(nanoboxVirtioConsole)
-+{
-+  if (mode == PLUGIN_INIT) {
-+    CharacterDevice *dev = (CharacterDevice *)mallocz(sizeof(*dev));
-+    dev->opaque = NULL; dev->write_data = hostchan_write; dev->read_data = hostchan_read;
-+    nanobox_v = new bx_virtio_console_ctrl_c(BX_PLUGIN_NANOBOX_VIRTIO_CONSOLE, dev);
-+    nanobox_v->hostchan = true;
-+    BX_REGISTER_DEVICE_DEVMODEL(plugin, type, nanobox_v, BX_PLUGIN_NANOBOX_VIRTIO_CONSOLE);
-+  } else if (mode == PLUGIN_FINI) {
-+    delete nanobox_v;
-+  } else if (mode == PLUGIN_PROBE) {
-+    return (int)PLUGTYPE_STANDARD;
-+  } else if (mode == PLUGIN_FLAGS) {
-+    return PLUGFLAG_PCI;
-+  }
-+  return 0;
-+}
-+
- bx_virtio_net_ctrl_c *socket0;
- EthernetDevice *socket_net;
- static EthernetDevice *socket_net_init();
-@@ -609,7 +648,26 @@ static mode_t host_mode_to_p9(mode_t m) {
-     return ret;
- }
- 
--static void stat_to_qid(FSQID *qid, const struct stat *st)
-+#ifdef NANOBOX_DETERMINISTIC
-+#define NANOBOX_ZERO(x) memset(&(x), 0, sizeof(x))
-+#else
-+#define NANOBOX_ZERO(x) do {} while (0)
-+#endif
-+#ifdef NANOBOX_DETERMINISTIC
-+// nanobox: the 9p server used to hand the guest the HOST's inode numbers and timestamps of the
-+// files it serves. Those leak build-machine state into guest memory (the guest boots inside Wizer
-+// at build time, so the snapshot -- and every dump derived from it -- depended on the inode
-+// numbers/mtimes of the build directory). Replace them with values derived from the path only.
-+static uint64_t nanobox_path_id(const char *path)
-+{
-+    uint64_t h = 0xcbf29ce484222325ull;
-+    for (const unsigned char *p = (const unsigned char *)path; *p; p++) { h ^= *p; h *= 0x100000001b3ull; }
-+    return h ? h : 1;
-+}
-+#define NANOBOX_FIXED_TIME 1700000000
-+#endif
-+
-+static void stat_to_qid(FSQID *qid, const struct stat *st, const char *path)
- {
-     if (S_ISDIR(st->st_mode))
-         qid->type = P9_QTDIR;
-@@ -618,11 +676,26 @@ static void stat_to_qid(FSQID *qid, const struct stat *st)
-     else
-         qid->type = P9_QTFILE;
-     qid->version = 0; /* no caching on client */
-+#ifdef NANOBOX_DETERMINISTIC
-+    // nanobox host filesystems (dev tagged "nb") give every node a stable inode number that
-+    // survives rename — use it as the qid path so the 9p client (cache=loose) keeps the SAME inode
-+    // (and its dirty/cached pages) across `write tmp; rename tmp target; read target`; a path-hash
-+    // qid made the renamed file a new inode whose read came from the server's not-yet-written view
-+    // (Claude Code's ~/.claude.json "corrupted", npm reify staging). Inodes are assigned in tree
-+    // build order, so they are as deterministic as the path hash. Other preopens keep the hash.
-+    if (((Bit64u) st->st_dev >> 16) == 0x6e62 && st->st_ino) qid->path = st->st_ino;
-+    else qid->path = nanobox_path_id(path);
-+#else
-     qid->path = st->st_ino;
-+#endif
- }
- 
- static void fs_statfs(FSDevice *fs1, FSStatFS *st)
- {
-+#ifdef NANOBOX_DETERMINISTIC
-+    // upstream leaves every field uninitialised (the guest saw host stack garbage in statfs())
-+    st->f_bsize = 4096; st->f_blocks = 1 << 20; st->f_bfree = st->f_bavail = 1 << 19; st->f_files = 1 << 16; st->f_ffree = 1 << 15;
-+#endif
-     //FSDeviceDisk *fs = (FSDeviceDisk *)fs1;
-     //struct statfs st1;
-     //statfs(fs->root_path, &st1);
-@@ -670,6 +743,7 @@ static int fs_attach(FSDevice *fs1, FSFile **pf,
- {
-     FSDeviceDisk *fs = (FSDeviceDisk *)fs1;
-     struct stat st;
-+    NANOBOX_ZERO(st);
-     FSFile *f;
- 
-     if (strcmp(fs->root_path, "") == 0) {
-@@ -688,7 +762,7 @@ static int fs_attach(FSDevice *fs1, FSFile **pf,
-         return -errno_to_p9(errno);
-     }
-     f = fid_create(fs1, strdup(fs->root_path), uid);
--    stat_to_qid(qid, &st);
-+    stat_to_qid(qid, &st, fs->root_path);
-     *pf = f;
-     return 0;
- }
-@@ -718,6 +792,7 @@ static int fs_walk(FSDevice *fs, FSFile **pf, FSQID *qids,
- {
-     char *path, *path1;
-     struct stat st;
-+    NANOBOX_ZERO(st);
-     int i;
- 
-     path = strdup(f->path);
-@@ -740,9 +815,13 @@ static int fs_walk(FSDevice *fs, FSFile **pf, FSQID *qids,
-         } else if (is_preopen) {
-             qids[i].type = P9_QTDIR;
-             qids[i].version = 0;
-+#ifdef NANOBOX_DETERMINISTIC
-+            qids[i].path = nanobox_path_id(path1); // distinct qid per share: with two preopens the guest (cache=loose) otherwise merges them into one inode
-+#else
-             qids[i].path = 0;
-+#endif
-         } else {
--            stat_to_qid(&qids[i], &st);
-+            stat_to_qid(&qids[i], &st, path1);
-         }
-     }
-     *pf = fid_create(fs, path, f->uid);
-@@ -755,6 +834,7 @@ static int fs_mkdir(FSDevice *fs, FSQID *qid, FSFile *f,
- {
-     char *path;
-     struct stat st;
-+    NANOBOX_ZERO(st);
-     
-     path = compose_path(f->path, name);
-     if (mkdir(path, mode) < 0) {
-@@ -765,21 +845,24 @@ static int fs_mkdir(FSDevice *fs, FSQID *qid, FSFile *f,
-         free(path);
-         return -errno_to_p9(errno);
-     }
-+    stat_to_qid(qid, &st, path);
-     free(path);
--    stat_to_qid(qid, &st);
-     return 0;
- }
- 
- static int fs_open(FSDevice *fs, FSQID *qid, FSFile *f, uint32_t flags, void *opaque)
- {
-     struct stat st;
-+    NANOBOX_ZERO(st);
-     fs_close(fs, f);
- 
-     if ((stat(f->path, &st) != 0) && !is_infofile(fs, f->path))
-         return -errno_to_p9(errno);
--    stat_to_qid(qid, &st);
-+    stat_to_qid(qid, &st, f->path);
- 
--    if (flags & P9_O_DIRECTORY) {
-+    // nanobox: a directory opened without O_DIRECTORY (overlayfs opens the lower dir that way, so
-+    // every readdir through the container's overlay root failed with EPROTO) is still a directory
-+    if ((flags & P9_O_DIRECTORY) || S_ISDIR(st.st_mode)) {
-         DIR *dirp;
-         dirp = opendir(f->path);
-         if (!dirp)
-@@ -808,6 +891,7 @@ static int fs_create(FSDevice *fs, FSQID *qid, FSFile *f, const char *name,
-                      uint32_t flags, uint32_t mode, uint32_t gid)
- {
-     struct stat st;
-+    NANOBOX_ZERO(st);
-     char *path;
-     int ret, fd;
- 
-@@ -830,7 +914,7 @@ static int fs_create(FSDevice *fs, FSQID *qid, FSFile *f, const char *name,
-     f->is_opened = true;
-     f->is_dir = false;
-     f->u.fd = fd;
--    stat_to_qid(qid, &st);
-+    stat_to_qid(qid, &st, f->path);
-     return 0;
- }
- 
-@@ -885,7 +969,18 @@ static int fs_readdir(FSDevice *fs, FSFile *f, uint64_t offset,
-         buf[pos++] = type;
-         put_le32(buf + pos, 0); /* version */
-         pos += 4;
-+#ifdef NANOBOX_DETERMINISTIC
-+        {
-+            // same rule as stat_to_qid: nanobox-tagged nodes -> their stable inode, else the path hash
-+            char *fullp = compose_path(f->path, de->d_name);
-+            struct stat qst; NANOBOX_ZERO(qst);
-+            if (lstat(fullp, &qst) == 0 && ((Bit64u) qst.st_dev >> 16) == 0x6e62 && qst.st_ino) put_le64(buf + pos, qst.st_ino);
-+            else put_le64(buf + pos, nanobox_path_id(fullp));
-+            free(fullp);
-+        }
-+#else
-         put_le64(buf + pos, de->d_ino);
-+#endif
-         pos += 8;
-         put_le64(buf + pos, offset);
-         pos += 8;
-@@ -955,7 +1050,13 @@ static void fs_close(FSDevice *fs, FSFile *f)
- static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
- {
-     struct stat st1;
-+    NANOBOX_ZERO(st1);
-     int is_preopen = false;
-+#ifdef NANOBOX_DETERMINISTIC
-+    // nanobox: the special cases below leave fields (uid/gid/nlink/rdev/times/...) uninitialised, so
-+    // the guest received whatever happened to be on the host stack. Make the reply reproducible.
-+    memset(st, 0, sizeof(*st));
-+#endif
- 
-     if (is_infofile(fs, f->path)) {
-         FSDeviceDisk *fs1 = (FSDeviceDisk *)fs;
-@@ -981,7 +1082,11 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
-     if (is_preopen) {
-         st->qid.type = P9_QTDIR;
-         st->qid.version = 0;
-+#ifdef NANOBOX_DETERMINISTIC
-+        st->qid.path = nanobox_path_id(f->path);
-+#else
-         st->qid.path = 0;
-+#endif
-         st->st_mode = P9_S_IFDIR;
-         st->st_blocks = 0;
-         st->st_blksize = 4096;
-@@ -1000,13 +1105,27 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
-     if (lstat(f->path, &st1) != 0) {
-         return -P9_ENOENT;
-     }
--    stat_to_qid(&st->qid, &st1);
-+    stat_to_qid(&st->qid, &st1, f->path);
-     st->st_mode = host_mode_to_p9(st1.st_mode);
-+#ifdef NANOBOX_DETERMINISTIC
-+    // WASI filestats carry no permission bits (wasi-libc reports mode 0, so nothing on a host
-+    // directory is executable in the guest). nanobox's host filesystems smuggle the real mode
-+    // through the dev field, tagged 0x6e62 ("nb") in the upper bits.
-+    if (((Bit64u)st1.st_dev >> 16) == 0x6e62)
-+        st->st_mode = (st->st_mode & ~07777) | ((Bit32u)st1.st_dev & 07777);
-+#endif
-     st->st_uid = st1.st_uid;
-     st->st_gid = st1.st_gid;
-     st->st_nlink = st1.st_nlink;
-     st->st_rdev = st1.st_rdev;
-     st->st_size = st1.st_size;
-+#ifdef NANOBOX_DETERMINISTIC
-+    st->st_blksize = 4096;
-+    st->st_blocks = (st1.st_size + 511) / 512;
-+    st->st_atime_sec = NANOBOX_FIXED_TIME; st->st_atime_nsec = 0;
-+    st->st_mtime_sec = NANOBOX_FIXED_TIME; st->st_mtime_nsec = 0;
-+    st->st_ctime_sec = NANOBOX_FIXED_TIME; st->st_ctime_nsec = 0;
-+#else
-     st->st_blksize = st1.st_blksize;
-     st->st_blocks = st1.st_blocks;
-     st->st_atime_sec = st1.st_atim.tv_sec;
-@@ -1015,6 +1134,7 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
-     st->st_mtime_nsec = st1.st_mtim.tv_nsec;
-     st->st_ctime_sec = st1.st_ctim.tv_sec;
-     st->st_ctime_nsec = st1.st_ctim.tv_nsec;
-+#endif
-     return 0;
- }
- 
-@@ -1025,8 +1145,11 @@ static int fs_setattr(FSDevice *fs, FSFile *f, uint32_t mask,
- {
-     bool ctime_updated = false;
- 
-+    // nanobox: WASI has no chown/chmod; accept them silently instead of answering ENOTSUP (a positive
-+    // value here reached the guest as EPROTO: "chmod: Protocol error", codex "could not create PATH
-+    // aliases"); modes of host files are handled on the host side (wasifs.js keeps them)
-     if (mask & (P9_SETATTR_UID | P9_SETATTR_GID)) {
--        return P9_ENOTSUP; // TODO
-+        ctime_updated = true; // accepted (ignored)
- //        if (lchown(f->path, (mask & P9_SETATTR_UID) ? uid : -1,
- //                   (mask & P9_SETATTR_GID) ? gid : -1) < 0)
- //            return -errno_to_p9(errno);
-@@ -1034,7 +1157,7 @@ static int fs_setattr(FSDevice *fs, FSFile *f, uint32_t mask,
-     }
-     /* must be done after uid change for suid */
-     if (mask & P9_SETATTR_MODE) {
--        return P9_ENOTSUP; // TODO
-+        ctime_updated = true; // accepted (ignored, see above); also satisfies the CTIME check below
- //        if (chmod(f->path, mode) < 0)
- //            return -errno_to_p9(errno);
- //        ctime_updated = true;
-@@ -1075,7 +1198,7 @@ static int fs_setattr(FSDevice *fs, FSFile *f, uint32_t mask,
-         ctime_updated = true;
-     }
-     if ((mask & P9_SETATTR_CTIME) && !ctime_updated) {
--        return P9_ENOTSUP; // TODO
-+        // nanobox: a bare ctime touch is accepted (P9_ENOTSUP here was a positive value -> malformed reply -> EPROTO)
- //        if (lchown(f->path, -1, -1) < 0)
- //            return -errno_to_p9(errno);
-     }
-@@ -1100,6 +1223,7 @@ static int fs_symlink(FSDevice *fs, FSQID *qid,
- {
-     char *path;
-     struct stat st;
-+    NANOBOX_ZERO(st);
-     
-     path = compose_path(f->path, name);
-     if (symlink(symgt, path) < 0) {
-@@ -1110,8 +1234,8 @@ static int fs_symlink(FSDevice *fs, FSQID *qid,
-         free(path);
-         return -errno_to_p9(errno);
-     }
-+    stat_to_qid(qid, &st, path);
-     free(path);
--    stat_to_qid(qid, &st);
-     return 0;
- }
- 
-@@ -1179,7 +1303,9 @@ static int fs_unlinkat(FSDevice *fs, FSFile *f, const char *name)
- 
- static int fs_lock(FSDevice *fs, FSFile *f, const FSLock *lock)
- {
--    return P9_ENOTSUP; // TODO
-+    // nanobox: single client, no contention: every lock succeeds (P9_ENOTSUP here reached the guest
-+    // as ENOLCK on every fcntl lock -> sqlite "database is locked" for codex's state DB)
-+    return P9_LOCK_SUCCESS;
- //    int ret;
- //    struct flock fl;
- //    
-@@ -1205,7 +1331,8 @@ static int fs_lock(FSDevice *fs, FSFile *f, const FSLock *lock)
- 
- static int fs_getlock(FSDevice *fs, FSFile *f, FSLock *lock)
- {
--    return P9_ENOTSUP; // TODO
-+    lock->type = P9_LOCK_TYPE_UNLCK; // nanobox: nobody else holds locks
-+    return 0;
- //    int ret;
- //    struct flock fl;
- //    
-@@ -1239,6 +1366,7 @@ FSDevice *fs_disk_init_with_info(const char *root_path, const char *info_path, F
- {
-     FSDeviceDisk *fs;
-     struct stat st;
-+    NANOBOX_ZERO(st);
- 
-     if (strcmp(root_path, "") != 0) {
-         lstat(root_path, &st);
-@@ -1354,7 +1482,7 @@ void bx_virtio_ctrl_c::virtio_add_pci_capability(int cfg_type, Bit8u bar, Bit32u
- void bx_virtio_ctrl_c::init(char *plugin_name, Bit16u pci_device_id, Bit32u class_id, Bit16u device_id, Bit32u device_features, const char *descr)
- {
-   BX_VIRTIO_THIS s.next_cap_offset = 0x40;
--  BX_VIRTIO_THIS s.devfunc = 0;
-+  BX_VIRTIO_THIS s.devfunc = BX_VIRTIO_THIS devfunc_want;   // 0 = auto-assign a slot
-   BX_VIRTIO_THIS s.device_features = device_features;
-   DEV_register_pci_handlers(this, &BX_VIRTIO_THIS s.devfunc, plugin_name, descr);
- 
-@@ -2226,6 +2354,7 @@ int bx_virtio_9p_ctrl_c::device_recv(int queue_idx, int desc_idx, int read_size,
-     case 8: /* statfs */
-         {
-             FSStatFS st;
-+            NANOBOX_ZERO(st);
- 
-             fs->fs_statfs(fs, &st);
-             buf_len = marshall(buf, sizeof(buf),
-@@ -2777,7 +2906,16 @@ bx_virtio_console_ctrl_c::~bx_virtio_console_ctrl_c()
- 
- void bx_virtio_console_ctrl_c::init()
- {
-+  // nanobox: the host channel console is PCI function 1 of the stdio console's slot (the i440fx
-+  // has 5 slots and 9p x2 + console + net + usb-ehci take them all); the stdio console advertises
-+  // itself as multi-function so Linux scans function 1 and finds it AFTER hvc0
-+  if (hostchan) {
-+    extern bx_virtio_console_ctrl_c *stdio_v;
-+    if (stdio_v && (stdio_v->devfunc_get() & 0xf8)) BX_VIRTIO_CONSOLE_THIS devfunc_want = (stdio_v->devfunc_get() & 0xf8) | 1;
-+    else BX_PANIC(("nanobox host channel: stdio console not initialised first"));
-+  }
-   bx_virtio_ctrl_c::init(BX_VIRTIO_CONSOLE_THIS plugin_name, 0x1003, 0x0780, 3, 1 << 0, "Virtio-console"); // initialize as virtio-console
-+  if (!hostchan) BX_VIRTIO_CONSOLE_THIS pci_conf[0x0e] |= 0x80; // multi-function header: function 1 = nanobox host channel
- 
-   BX_VIRTIO_CONSOLE_THIS config_space_size = 4;
-   QueueState *qs = &BX_VIRTIO_CONSOLE_THIS s.queue[0];
-@@ -2884,6 +3022,17 @@ static void console_get_size(STDIODevice *s, int *pw, int *ph)
- void bx_virtio_console_ctrl_c::rx_timer_handler(void *this_ptr)
- {
-     bx_virtio_console_ctrl_c *class_ptr = (bx_virtio_console_ctrl_c *)this_ptr;
-+    if (class_ptr->hostchan) {
-+      // nanobox host channel: pull whatever the host queued (up to what the guest's rx queue takes)
-+      int got = 0;
-+      if (class_ptr->virtio_console_can_write_data()) {
-+        uint8_t buf[4096];
-+        int len = min_int(class_ptr->virtio_console_get_write_len(), (int) sizeof(buf));
-+        if (len > 0) { got = class_ptr->dev.cs->read_data(class_ptr->dev.cs->opaque, buf, len); if (got > 0) class_ptr->virtio_console_write_data(buf, got); }
-+      }
-+      bx_pc_system.activate_timer(class_ptr->timer_id, got > 0 ? 100 : 2000 /*2ms*/, false);
-+      return;
-+    }
-     fd_set rfds, wfds, efds;
-     int fd_max, ret = 0, delay;
-     struct timeval tv;
-diff --git a/bochs/wasm.h b/bochs/wasm.h
-index 1952f42da..97e53f9dc 100644
---- a/bochs/wasm.h
-+++ b/bochs/wasm.h
-@@ -61,6 +61,7 @@ int write_info(FSVirtFile *f, int pos, int len, const char *str);
- int putchar_info(FSVirtFile *f, int pos, char c);
- 
- #ifdef WASI
-+#include <wasi/api.h>
- typedef struct preopen {
-     /// The path prefix associated with the file descriptor.
-     const char *prefix;
-@@ -328,7 +329,13 @@ typedef struct {
- 
- #define MAX_QUEUE 8
- #define MAX_CONFIG_SPACE_SIZE 256
-+#ifdef NANOBOX_DETERMINISTIC
-+// nanobox: the guest mounts the host 9p shares with msize=524288 (128 pages per request); with 16
-+// descriptors such a request never fits the ring and the 9p client waits for space forever.
-+#define MAX_QUEUE_NUM 256
-+#else
- #define MAX_QUEUE_NUM 16
-+#endif
- 
- #define VRING_DESC_F_NEXT	1
- #define VRING_DESC_F_WRITE	2
-@@ -358,6 +365,8 @@ public:
- 
-   Bit32u config_space_size; /* in bytes, must be multiple of 4 */
-   Bit8u config_space[MAX_CONFIG_SPACE_SIZE];
-+  Bit8u devfunc_want = 0;   // nanobox: non-zero = register at this exact PCI devfunc (function != 0 of an occupied slot) instead of auto-assigning a slot (all 5 slots are taken)
-+  Bit8u devfunc_get() { return s.devfunc; }
- 
-   struct {
-     Bit8u devfunc;
-@@ -535,6 +544,7 @@ public:
-   void virtio_console_resize_event(int width, int height);
-   static void rx_timer_handler(void *this_ptr);
- 
-+  bool hostchan = false;   // nanobox: this console is the host channel (bytes to/from JS hooks, no stdin)
- private:
-   char *plugin_name;
-   int timer_id;
 diff --git a/bochs/nanobox.cc b/bochs/nanobox.cc
 new file mode 100644
 index 000000000..c5350a6af
@@ -4392,3 +3895,524 @@ index 000000000..c6aebdb37
 +} // namespace nbw
 +
 +#endif
+diff --git a/bochs/pc_system.h b/bochs/pc_system.h
+index 4eb4f8bfa..c9aa91b83 100644
+--- a/bochs/pc_system.h
++++ b/bochs/pc_system.h
+@@ -36,6 +36,7 @@ extern double m_ips;
+ 
+ class BOCHSAPI bx_pc_system_c : private logfunctions {
+ private:
++  friend class nanobox_pc_system_access; // nanobox: the trace JIT inlines the tick countdown
+ 
+   // ===============================
+   // Timer oriented private features
+diff --git a/bochs/plugin.cc b/bochs/plugin.cc
+index 888aaade9..40aa2cb0d 100644
+--- a/bochs/plugin.cc
++++ b/bochs/plugin.cc
+@@ -1066,6 +1066,7 @@ plugin_t bx_builtin_plugins[] = {
+   BUILTIN_OPTPCI_PLUGIN_ENTRY(packVirtio9p),
+   BUILTIN_OPTPCI_PLUGIN_ENTRY(stdioVirtioConsole),
+   BUILTIN_OPTPCI_PLUGIN_ENTRY(socketVirtioNet),
++  BUILTIN_OPTPCI_PLUGIN_ENTRY(nanoboxVirtioConsole),
+ #if BX_SUPPORT_SOUNDLOW
+   BUILTIN_SND_PLUGIN_ENTRY(dummy),
+   BUILTIN_SND_PLUGIN_ENTRY(file),
+diff --git a/bochs/plugin.h b/bochs/plugin.h
+index eecb8ecb5..49ce3f891 100644
+--- a/bochs/plugin.h
++++ b/bochs/plugin.h
+@@ -80,6 +80,7 @@ extern "C" {
+ #define BX_PLUGIN_PACK_VIRTIO_9P "packVirtio9p"
+ #define BX_PLUGIN_STDIO_VIRTIO_CONSOLE "stdioVirtioConsole"
+ #define BX_PLUGIN_SOCKET_VIRTIO_NET "socketVirtioNet"
++#define BX_PLUGIN_NANOBOX_VIRTIO_CONSOLE "nanoboxVirtioConsole"   // nanobox: second console = host channel (/dev/hvc1 <-> JS hooks)
+ 
+ #define BX_REGISTER_DEVICE_DEVMODEL(a,b,c,d) pluginRegisterDeviceDevmodel(a,b,c,d)
+ #define BX_UNREGISTER_DEVICE_DEVMODEL(a,b) pluginUnregisterDeviceDevmodel(a,b)
+@@ -497,6 +498,7 @@ PLUGIN_ENTRY_FOR_MODULE(mapdirVirtio9p);
+ PLUGIN_ENTRY_FOR_MODULE(packVirtio9p);
+ PLUGIN_ENTRY_FOR_MODULE(stdioVirtioConsole);
+ PLUGIN_ENTRY_FOR_MODULE(socketVirtioNet);
++PLUGIN_ENTRY_FOR_MODULE(nanoboxVirtioConsole);
+ #endif
+ 
+ #ifdef __cplusplus
+diff --git a/bochs/wasm.cc b/bochs/wasm.cc
+index 602f4b907..b961adef6 100644
+--- a/bochs/wasm.cc
++++ b/bochs/wasm.cc
+@@ -49,6 +49,7 @@
+  */
+ 
+ #include "iodev/iodev.h"
++#include "cpu/cpu.h"   // nanobox: BX_CPU()->activity_state, for the console rx poll period
+ 
+ #if BX_SUPPORT_PCI
+ 
+@@ -261,6 +262,45 @@ PLUGIN_ENTRY_FOR_MODULE(stdioVirtioConsole)
+   return 0; // Success
+ }
+ 
++/////////////////////////////////////////////////////////////////////////
++// nanobox host channel: a second virtio-console (/dev/hvc1 in the guest). Guest writes go to the
++// JS host through hook slot 6 (hc_write(ptr,len)); the host feeds bytes in through hook slot 7
++// (hc_read(ptr,max) -> n), polled by the console's rx timer. Used by the "system node" shim: node's
++// JavaScript runs on the browser's V8, its syscalls are served by the shim inside the guest.
++/////////////////////////////////////////////////////////////////////////
++extern "C" {
++static void nanobox_hc_write_placeholder(const uint8_t *, unsigned) {}
++static unsigned nanobox_hc_read_placeholder(uint8_t *, unsigned) { return 0; }
++}
++typedef void (*hook_hc_write_t)(const uint8_t *buf, unsigned len);
++typedef unsigned (*hook_hc_read_t)(uint8_t *buf, unsigned max);
++static hook_hc_write_t volatile hook_hc_write = nanobox_hc_write_placeholder;
++static hook_hc_read_t volatile hook_hc_read = nanobox_hc_read_placeholder;
++extern "C" __attribute__((export_name("nanobox_hc_hook_slot"), used)) unsigned nanobox_hc_hook_slot(unsigned k)
++{
++  return k == 0 ? (unsigned)(uintptr_t) hook_hc_write : k == 1 ? (unsigned)(uintptr_t) hook_hc_read : 0;
++}
++static void hostchan_write(void *opaque, const uint8_t *buf, int len) { hook_hc_write(buf, (unsigned) len); }
++static int hostchan_read(void *opaque, uint8_t *buf, int len) { return (int) hook_hc_read(buf, (unsigned) len); }
++bx_virtio_console_ctrl_c *nanobox_v;
++PLUGIN_ENTRY_FOR_MODULE(nanoboxVirtioConsole)
++{
++  if (mode == PLUGIN_INIT) {
++    CharacterDevice *dev = (CharacterDevice *)mallocz(sizeof(*dev));
++    dev->opaque = NULL; dev->write_data = hostchan_write; dev->read_data = hostchan_read;
++    nanobox_v = new bx_virtio_console_ctrl_c(BX_PLUGIN_NANOBOX_VIRTIO_CONSOLE, dev);
++    nanobox_v->hostchan = true;
++    BX_REGISTER_DEVICE_DEVMODEL(plugin, type, nanobox_v, BX_PLUGIN_NANOBOX_VIRTIO_CONSOLE);
++  } else if (mode == PLUGIN_FINI) {
++    delete nanobox_v;
++  } else if (mode == PLUGIN_PROBE) {
++    return (int)PLUGTYPE_STANDARD;
++  } else if (mode == PLUGIN_FLAGS) {
++    return PLUGFLAG_PCI;
++  }
++  return 0;
++}
++
+ bx_virtio_net_ctrl_c *socket0;
+ EthernetDevice *socket_net;
+ static EthernetDevice *socket_net_init();
+@@ -609,7 +649,26 @@ static mode_t host_mode_to_p9(mode_t m) {
+     return ret;
+ }
+ 
+-static void stat_to_qid(FSQID *qid, const struct stat *st)
++#ifdef NANOBOX_DETERMINISTIC
++#define NANOBOX_ZERO(x) memset(&(x), 0, sizeof(x))
++#else
++#define NANOBOX_ZERO(x) do {} while (0)
++#endif
++#ifdef NANOBOX_DETERMINISTIC
++// nanobox: the 9p server used to hand the guest the HOST's inode numbers and timestamps of the
++// files it serves. Those leak build-machine state into guest memory (the guest boots inside Wizer
++// at build time, so the snapshot -- and every dump derived from it -- depended on the inode
++// numbers/mtimes of the build directory). Replace them with values derived from the path only.
++static uint64_t nanobox_path_id(const char *path)
++{
++    uint64_t h = 0xcbf29ce484222325ull;
++    for (const unsigned char *p = (const unsigned char *)path; *p; p++) { h ^= *p; h *= 0x100000001b3ull; }
++    return h ? h : 1;
++}
++#define NANOBOX_FIXED_TIME 1700000000
++#endif
++
++static void stat_to_qid(FSQID *qid, const struct stat *st, const char *path)
+ {
+     if (S_ISDIR(st->st_mode))
+         qid->type = P9_QTDIR;
+@@ -618,11 +677,26 @@ static void stat_to_qid(FSQID *qid, const struct stat *st)
+     else
+         qid->type = P9_QTFILE;
+     qid->version = 0; /* no caching on client */
++#ifdef NANOBOX_DETERMINISTIC
++    // nanobox host filesystems (dev tagged "nb") give every node a stable inode number that
++    // survives rename — use it as the qid path so the 9p client (cache=loose) keeps the SAME inode
++    // (and its dirty/cached pages) across `write tmp; rename tmp target; read target`; a path-hash
++    // qid made the renamed file a new inode whose read came from the server's not-yet-written view
++    // (Claude Code's ~/.claude.json "corrupted", npm reify staging). Inodes are assigned in tree
++    // build order, so they are as deterministic as the path hash. Other preopens keep the hash.
++    if (((Bit64u) st->st_dev >> 16) == 0x6e62 && st->st_ino) qid->path = st->st_ino;
++    else qid->path = nanobox_path_id(path);
++#else
+     qid->path = st->st_ino;
++#endif
+ }
+ 
+ static void fs_statfs(FSDevice *fs1, FSStatFS *st)
+ {
++#ifdef NANOBOX_DETERMINISTIC
++    // upstream leaves every field uninitialised (the guest saw host stack garbage in statfs())
++    st->f_bsize = 4096; st->f_blocks = 1 << 20; st->f_bfree = st->f_bavail = 1 << 19; st->f_files = 1 << 16; st->f_ffree = 1 << 15;
++#endif
+     //FSDeviceDisk *fs = (FSDeviceDisk *)fs1;
+     //struct statfs st1;
+     //statfs(fs->root_path, &st1);
+@@ -670,6 +744,7 @@ static int fs_attach(FSDevice *fs1, FSFile **pf,
+ {
+     FSDeviceDisk *fs = (FSDeviceDisk *)fs1;
+     struct stat st;
++    NANOBOX_ZERO(st);
+     FSFile *f;
+ 
+     if (strcmp(fs->root_path, "") == 0) {
+@@ -688,7 +763,7 @@ static int fs_attach(FSDevice *fs1, FSFile **pf,
+         return -errno_to_p9(errno);
+     }
+     f = fid_create(fs1, strdup(fs->root_path), uid);
+-    stat_to_qid(qid, &st);
++    stat_to_qid(qid, &st, fs->root_path);
+     *pf = f;
+     return 0;
+ }
+@@ -718,6 +793,7 @@ static int fs_walk(FSDevice *fs, FSFile **pf, FSQID *qids,
+ {
+     char *path, *path1;
+     struct stat st;
++    NANOBOX_ZERO(st);
+     int i;
+ 
+     path = strdup(f->path);
+@@ -740,9 +816,13 @@ static int fs_walk(FSDevice *fs, FSFile **pf, FSQID *qids,
+         } else if (is_preopen) {
+             qids[i].type = P9_QTDIR;
+             qids[i].version = 0;
++#ifdef NANOBOX_DETERMINISTIC
++            qids[i].path = nanobox_path_id(path1); // distinct qid per share: with two preopens the guest (cache=loose) otherwise merges them into one inode
++#else
+             qids[i].path = 0;
++#endif
+         } else {
+-            stat_to_qid(&qids[i], &st);
++            stat_to_qid(&qids[i], &st, path1);
+         }
+     }
+     *pf = fid_create(fs, path, f->uid);
+@@ -755,6 +835,7 @@ static int fs_mkdir(FSDevice *fs, FSQID *qid, FSFile *f,
+ {
+     char *path;
+     struct stat st;
++    NANOBOX_ZERO(st);
+     
+     path = compose_path(f->path, name);
+     if (mkdir(path, mode) < 0) {
+@@ -765,21 +846,24 @@ static int fs_mkdir(FSDevice *fs, FSQID *qid, FSFile *f,
+         free(path);
+         return -errno_to_p9(errno);
+     }
++    stat_to_qid(qid, &st, path);
+     free(path);
+-    stat_to_qid(qid, &st);
+     return 0;
+ }
+ 
+ static int fs_open(FSDevice *fs, FSQID *qid, FSFile *f, uint32_t flags, void *opaque)
+ {
+     struct stat st;
++    NANOBOX_ZERO(st);
+     fs_close(fs, f);
+ 
+     if ((stat(f->path, &st) != 0) && !is_infofile(fs, f->path))
+         return -errno_to_p9(errno);
+-    stat_to_qid(qid, &st);
++    stat_to_qid(qid, &st, f->path);
+ 
+-    if (flags & P9_O_DIRECTORY) {
++    // nanobox: a directory opened without O_DIRECTORY (overlayfs opens the lower dir that way, so
++    // every readdir through the container's overlay root failed with EPROTO) is still a directory
++    if ((flags & P9_O_DIRECTORY) || S_ISDIR(st.st_mode)) {
+         DIR *dirp;
+         dirp = opendir(f->path);
+         if (!dirp)
+@@ -808,6 +892,7 @@ static int fs_create(FSDevice *fs, FSQID *qid, FSFile *f, const char *name,
+                      uint32_t flags, uint32_t mode, uint32_t gid)
+ {
+     struct stat st;
++    NANOBOX_ZERO(st);
+     char *path;
+     int ret, fd;
+ 
+@@ -830,7 +915,7 @@ static int fs_create(FSDevice *fs, FSQID *qid, FSFile *f, const char *name,
+     f->is_opened = true;
+     f->is_dir = false;
+     f->u.fd = fd;
+-    stat_to_qid(qid, &st);
++    stat_to_qid(qid, &st, f->path);
+     return 0;
+ }
+ 
+@@ -885,7 +970,18 @@ static int fs_readdir(FSDevice *fs, FSFile *f, uint64_t offset,
+         buf[pos++] = type;
+         put_le32(buf + pos, 0); /* version */
+         pos += 4;
++#ifdef NANOBOX_DETERMINISTIC
++        {
++            // same rule as stat_to_qid: nanobox-tagged nodes -> their stable inode, else the path hash
++            char *fullp = compose_path(f->path, de->d_name);
++            struct stat qst; NANOBOX_ZERO(qst);
++            if (lstat(fullp, &qst) == 0 && ((Bit64u) qst.st_dev >> 16) == 0x6e62 && qst.st_ino) put_le64(buf + pos, qst.st_ino);
++            else put_le64(buf + pos, nanobox_path_id(fullp));
++            free(fullp);
++        }
++#else
+         put_le64(buf + pos, de->d_ino);
++#endif
+         pos += 8;
+         put_le64(buf + pos, offset);
+         pos += 8;
+@@ -955,7 +1051,13 @@ static void fs_close(FSDevice *fs, FSFile *f)
+ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
+ {
+     struct stat st1;
++    NANOBOX_ZERO(st1);
+     int is_preopen = false;
++#ifdef NANOBOX_DETERMINISTIC
++    // nanobox: the special cases below leave fields (uid/gid/nlink/rdev/times/...) uninitialised, so
++    // the guest received whatever happened to be on the host stack. Make the reply reproducible.
++    memset(st, 0, sizeof(*st));
++#endif
+ 
+     if (is_infofile(fs, f->path)) {
+         FSDeviceDisk *fs1 = (FSDeviceDisk *)fs;
+@@ -981,7 +1083,11 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
+     if (is_preopen) {
+         st->qid.type = P9_QTDIR;
+         st->qid.version = 0;
++#ifdef NANOBOX_DETERMINISTIC
++        st->qid.path = nanobox_path_id(f->path);
++#else
+         st->qid.path = 0;
++#endif
+         st->st_mode = P9_S_IFDIR;
+         st->st_blocks = 0;
+         st->st_blksize = 4096;
+@@ -1000,13 +1106,27 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
+     if (lstat(f->path, &st1) != 0) {
+         return -P9_ENOENT;
+     }
+-    stat_to_qid(&st->qid, &st1);
++    stat_to_qid(&st->qid, &st1, f->path);
+     st->st_mode = host_mode_to_p9(st1.st_mode);
++#ifdef NANOBOX_DETERMINISTIC
++    // WASI filestats carry no permission bits (wasi-libc reports mode 0, so nothing on a host
++    // directory is executable in the guest). nanobox's host filesystems smuggle the real mode
++    // through the dev field, tagged 0x6e62 ("nb") in the upper bits.
++    if (((Bit64u)st1.st_dev >> 16) == 0x6e62)
++        st->st_mode = (st->st_mode & ~07777) | ((Bit32u)st1.st_dev & 07777);
++#endif
+     st->st_uid = st1.st_uid;
+     st->st_gid = st1.st_gid;
+     st->st_nlink = st1.st_nlink;
+     st->st_rdev = st1.st_rdev;
+     st->st_size = st1.st_size;
++#ifdef NANOBOX_DETERMINISTIC
++    st->st_blksize = 4096;
++    st->st_blocks = (st1.st_size + 511) / 512;
++    st->st_atime_sec = NANOBOX_FIXED_TIME; st->st_atime_nsec = 0;
++    st->st_mtime_sec = NANOBOX_FIXED_TIME; st->st_mtime_nsec = 0;
++    st->st_ctime_sec = NANOBOX_FIXED_TIME; st->st_ctime_nsec = 0;
++#else
+     st->st_blksize = st1.st_blksize;
+     st->st_blocks = st1.st_blocks;
+     st->st_atime_sec = st1.st_atim.tv_sec;
+@@ -1015,6 +1135,7 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
+     st->st_mtime_nsec = st1.st_mtim.tv_nsec;
+     st->st_ctime_sec = st1.st_ctim.tv_sec;
+     st->st_ctime_nsec = st1.st_ctim.tv_nsec;
++#endif
+     return 0;
+ }
+ 
+@@ -1025,8 +1146,11 @@ static int fs_setattr(FSDevice *fs, FSFile *f, uint32_t mask,
+ {
+     bool ctime_updated = false;
+ 
++    // nanobox: WASI has no chown/chmod; accept them silently instead of answering ENOTSUP (a positive
++    // value here reached the guest as EPROTO: "chmod: Protocol error", codex "could not create PATH
++    // aliases"); modes of host files are handled on the host side (wasifs.js keeps them)
+     if (mask & (P9_SETATTR_UID | P9_SETATTR_GID)) {
+-        return P9_ENOTSUP; // TODO
++        ctime_updated = true; // accepted (ignored)
+ //        if (lchown(f->path, (mask & P9_SETATTR_UID) ? uid : -1,
+ //                   (mask & P9_SETATTR_GID) ? gid : -1) < 0)
+ //            return -errno_to_p9(errno);
+@@ -1034,7 +1158,7 @@ static int fs_setattr(FSDevice *fs, FSFile *f, uint32_t mask,
+     }
+     /* must be done after uid change for suid */
+     if (mask & P9_SETATTR_MODE) {
+-        return P9_ENOTSUP; // TODO
++        ctime_updated = true; // accepted (ignored, see above); also satisfies the CTIME check below
+ //        if (chmod(f->path, mode) < 0)
+ //            return -errno_to_p9(errno);
+ //        ctime_updated = true;
+@@ -1075,7 +1199,7 @@ static int fs_setattr(FSDevice *fs, FSFile *f, uint32_t mask,
+         ctime_updated = true;
+     }
+     if ((mask & P9_SETATTR_CTIME) && !ctime_updated) {
+-        return P9_ENOTSUP; // TODO
++        // nanobox: a bare ctime touch is accepted (P9_ENOTSUP here was a positive value -> malformed reply -> EPROTO)
+ //        if (lchown(f->path, -1, -1) < 0)
+ //            return -errno_to_p9(errno);
+     }
+@@ -1100,6 +1224,7 @@ static int fs_symlink(FSDevice *fs, FSQID *qid,
+ {
+     char *path;
+     struct stat st;
++    NANOBOX_ZERO(st);
+     
+     path = compose_path(f->path, name);
+     if (symlink(symgt, path) < 0) {
+@@ -1110,8 +1235,8 @@ static int fs_symlink(FSDevice *fs, FSQID *qid,
+         free(path);
+         return -errno_to_p9(errno);
+     }
++    stat_to_qid(qid, &st, path);
+     free(path);
+-    stat_to_qid(qid, &st);
+     return 0;
+ }
+ 
+@@ -1179,7 +1304,9 @@ static int fs_unlinkat(FSDevice *fs, FSFile *f, const char *name)
+ 
+ static int fs_lock(FSDevice *fs, FSFile *f, const FSLock *lock)
+ {
+-    return P9_ENOTSUP; // TODO
++    // nanobox: single client, no contention: every lock succeeds (P9_ENOTSUP here reached the guest
++    // as ENOLCK on every fcntl lock -> sqlite "database is locked" for codex's state DB)
++    return P9_LOCK_SUCCESS;
+ //    int ret;
+ //    struct flock fl;
+ //    
+@@ -1205,7 +1332,8 @@ static int fs_lock(FSDevice *fs, FSFile *f, const FSLock *lock)
+ 
+ static int fs_getlock(FSDevice *fs, FSFile *f, FSLock *lock)
+ {
+-    return P9_ENOTSUP; // TODO
++    lock->type = P9_LOCK_TYPE_UNLCK; // nanobox: nobody else holds locks
++    return 0;
+ //    int ret;
+ //    struct flock fl;
+ //    
+@@ -1239,6 +1367,7 @@ FSDevice *fs_disk_init_with_info(const char *root_path, const char *info_path, F
+ {
+     FSDeviceDisk *fs;
+     struct stat st;
++    NANOBOX_ZERO(st);
+ 
+     if (strcmp(root_path, "") != 0) {
+         lstat(root_path, &st);
+@@ -1354,7 +1483,7 @@ void bx_virtio_ctrl_c::virtio_add_pci_capability(int cfg_type, Bit8u bar, Bit32u
+ void bx_virtio_ctrl_c::init(char *plugin_name, Bit16u pci_device_id, Bit32u class_id, Bit16u device_id, Bit32u device_features, const char *descr)
+ {
+   BX_VIRTIO_THIS s.next_cap_offset = 0x40;
+-  BX_VIRTIO_THIS s.devfunc = 0;
++  BX_VIRTIO_THIS s.devfunc = BX_VIRTIO_THIS devfunc_want;   // 0 = auto-assign a slot
+   BX_VIRTIO_THIS s.device_features = device_features;
+   DEV_register_pci_handlers(this, &BX_VIRTIO_THIS s.devfunc, plugin_name, descr);
+ 
+@@ -2226,6 +2355,7 @@ int bx_virtio_9p_ctrl_c::device_recv(int queue_idx, int desc_idx, int read_size,
+     case 8: /* statfs */
+         {
+             FSStatFS st;
++            NANOBOX_ZERO(st);
+ 
+             fs->fs_statfs(fs, &st);
+             buf_len = marshall(buf, sizeof(buf),
+@@ -2777,7 +2907,16 @@ bx_virtio_console_ctrl_c::~bx_virtio_console_ctrl_c()
+ 
+ void bx_virtio_console_ctrl_c::init()
+ {
++  // nanobox: the host channel console is PCI function 1 of the stdio console's slot (the i440fx
++  // has 5 slots and 9p x2 + console + net + usb-ehci take them all); the stdio console advertises
++  // itself as multi-function so Linux scans function 1 and finds it AFTER hvc0
++  if (hostchan) {
++    extern bx_virtio_console_ctrl_c *stdio_v;
++    if (stdio_v && (stdio_v->devfunc_get() & 0xf8)) BX_VIRTIO_CONSOLE_THIS devfunc_want = (stdio_v->devfunc_get() & 0xf8) | 1;
++    else BX_PANIC(("nanobox host channel: stdio console not initialised first"));
++  }
+   bx_virtio_ctrl_c::init(BX_VIRTIO_CONSOLE_THIS plugin_name, 0x1003, 0x0780, 3, 1 << 0, "Virtio-console"); // initialize as virtio-console
++  if (!hostchan) BX_VIRTIO_CONSOLE_THIS pci_conf[0x0e] |= 0x80; // multi-function header: function 1 = nanobox host channel
+ 
+   BX_VIRTIO_CONSOLE_THIS config_space_size = 4;
+   QueueState *qs = &BX_VIRTIO_CONSOLE_THIS s.queue[0];
+@@ -2884,6 +3023,17 @@ static void console_get_size(STDIODevice *s, int *pw, int *ph)
+ void bx_virtio_console_ctrl_c::rx_timer_handler(void *this_ptr)
+ {
+     bx_virtio_console_ctrl_c *class_ptr = (bx_virtio_console_ctrl_c *)this_ptr;
++    if (class_ptr->hostchan) {
++      // nanobox host channel: pull whatever the host queued (up to what the guest's rx queue takes)
++      int got = 0;
++      if (class_ptr->virtio_console_can_write_data()) {
++        uint8_t buf[4096];
++        int len = min_int(class_ptr->virtio_console_get_write_len(), (int) sizeof(buf));
++        if (len > 0) { got = class_ptr->dev.cs->read_data(class_ptr->dev.cs->opaque, buf, len); if (got > 0) class_ptr->virtio_console_write_data(buf, got); }
++      }
++      bx_pc_system.activate_timer(class_ptr->timer_id, got > 0 ? 100 : 2000 /*2ms*/, false);
++      return;
++    }
+     fd_set rfds, wfds, efds;
+     int fd_max, ret = 0, delay;
+     struct timeval tv;
+@@ -2927,7 +3077,14 @@ void bx_virtio_console_ctrl_c::rx_timer_handler(void *this_ptr)
+     if (ret > 0) {
+       bx_pc_system.activate_timer(class_ptr->timer_id, 100, false); /* not continuous */
+     } else {
+-      bx_pc_system.activate_timer(class_ptr->timer_id, 10000/*10ms*/, false); /* not continuous */
++      // nanobox: this period is GUEST time. While the guest is halted Bochs jumps its clock straight
++      // to the next timer, so 10 ms of guest time costs ~0.15 ms of wall time and a keystroke is seen
++      // at once; while the guest is RUNNING (a TUI redrawing) the same 10 ms is real emulated work --
++      // and it becomes a full wall 10 ms once `cpu: ips=` matches the engine's true throughput. Poll
++      // 4x more often in that case; still 25x cheaper than the 100 us period used right after a hit.
++      const unsigned idle_period_us =
++        (BX_CPU(0)->activity_state == BX_CPU_C::BX_ACTIVITY_STATE_ACTIVE) ? 2500 : 10000;
++      bx_pc_system.activate_timer(class_ptr->timer_id, idle_period_us, false); /* not continuous */
+     }
+ }
+ 
+diff --git a/bochs/wasm.h b/bochs/wasm.h
+index 1952f42da..97e53f9dc 100644
+--- a/bochs/wasm.h
++++ b/bochs/wasm.h
+@@ -61,6 +61,7 @@ int write_info(FSVirtFile *f, int pos, int len, const char *str);
+ int putchar_info(FSVirtFile *f, int pos, char c);
+ 
+ #ifdef WASI
++#include <wasi/api.h>
+ typedef struct preopen {
+     /// The path prefix associated with the file descriptor.
+     const char *prefix;
+@@ -328,7 +329,13 @@ typedef struct {
+ 
+ #define MAX_QUEUE 8
+ #define MAX_CONFIG_SPACE_SIZE 256
++#ifdef NANOBOX_DETERMINISTIC
++// nanobox: the guest mounts the host 9p shares with msize=524288 (128 pages per request); with 16
++// descriptors such a request never fits the ring and the 9p client waits for space forever.
++#define MAX_QUEUE_NUM 256
++#else
+ #define MAX_QUEUE_NUM 16
++#endif
+ 
+ #define VRING_DESC_F_NEXT	1
+ #define VRING_DESC_F_WRITE	2
+@@ -358,6 +365,8 @@ public:
+ 
+   Bit32u config_space_size; /* in bytes, must be multiple of 4 */
+   Bit8u config_space[MAX_CONFIG_SPACE_SIZE];
++  Bit8u devfunc_want = 0;   // nanobox: non-zero = register at this exact PCI devfunc (function != 0 of an occupied slot) instead of auto-assigning a slot (all 5 slots are taken)
++  Bit8u devfunc_get() { return s.devfunc; }
+ 
+   struct {
+     Bit8u devfunc;
+@@ -535,6 +544,7 @@ public:
+   void virtio_console_resize_event(int width, int height);
+   static void rx_timer_handler(void *this_ptr);
+ 
++  bool hostchan = false;   // nanobox: this console is the host channel (bytes to/from JS hooks, no stdin)
+ private:
+   char *plugin_name;
+   int timer_id;

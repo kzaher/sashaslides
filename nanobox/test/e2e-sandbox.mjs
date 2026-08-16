@@ -2,7 +2,10 @@
 // Drive web/sandbox.html in headless Chrome (CDP :9222): the linux-base image boots in the VM while the
 // first-run installer fetches node + the CLI from the vendors into the persistent tree; wait for the
 // CLI's sign-in screen; report the phase timings and the byte accounting (our origin vs vendors).
-//   node test/e2e-sandbox.mjs --cli claude|codex|agy [--cold] [--timeout 180] [--q "extra=query"] [--out web/results]
+//   node test/e2e-sandbox.mjs --cli claude|claude-native|codex|agy [--cold] [--timeout 180] [--q "extra=query"] [--out web/results]
+//   --until bundle   stop at "the runtime loaded the CLI's bundle" instead of at the sign-in screen
+//            (claude-native while the runtime's Bun globals are still being built: the install and the
+//            26.6 MB bundle load are measurable long before the CLI can reach its sign-in screen)
 //   --cold   a true first run: the page wipes the persistent tree + caches (?reset=1) and Chrome's HTTP
 //            cache is disabled for the run; without it a warm run (everything cached, nothing downloaded)
 //   -> web/results/sandbox-<cli>-<cold|warm>.{json,png,console.log}
@@ -16,6 +19,8 @@ const opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] :
 const PORT = Number(opt("--port", 8093)), CDP_PORT = Number(opt("--cdp", 9222));
 const TIMEOUT_S = Number(opt("--timeout", 180));
 const CLI = opt("--cli", "claude");
+const ON_V8 = CLI === "claude" || CLI === "claude-native";   // runs in the runtime worker (dump/bundle timings)
+const UNTIL = opt("--until", "signin");
 const COLD = argv.includes("--cold");
 const OUT = opt("--out", join(HERE, "../web/results"));
 const TAG = opt("--tag", `sandbox-${CLI}-${COLD ? "cold" : "warm"}`);
@@ -43,12 +48,20 @@ while ((Date.now() - t0) / 1000 < TIMEOUT_S) {
   const st = await ev("window.nanobox ? ({events: window.nanobox.events, phases: window.nanobox.phases, failed: window.nanobox.failed, exitCode: window.nanobox.exitCode, icount: window.nanobox.stats && window.nanobox.stats.icount}) : null");
   if (!st) continue;
   for (; seen < st.events.length; seen++) { const e = st.events[seen]; if (e.event === "worker:missing" || e.event === "vm:image" || e.event === "vm:jit-bundles") continue; console.log(`  +${(e.t / 1000).toFixed(1).padStart(6)}s ${e.event}${e.name ? " " + e.name : ""}${e.stage ? "" : ""}${e.key ? " " + e.key : ""}${e.message ? " " + String(e.message).slice(0, 300) : ""}${e.text ? " " + String(e.text).slice(0, 200) : ""}${e.bytes != null ? " " + (e.bytes / 1e6).toFixed(1) + " MB" : ""}${e.ms != null && e.event !== "signin" ? " " + e.ms + " ms" : ""}${e.url ? " " + (e.method || "") + " " + e.url : ""}${e.waitMs != null ? " wait " + e.waitMs + " ms" : ""}${e.files != null ? " files " + e.files : ""}`); }
-  if (st.phases.signinMs != null) { const p = st.phases; const boot = p.bootMs != null ? p.bootMs : p.helloMs; verdict = { signinMs: Math.round(p.signinMs), loadMs: p.vmStartMs != null ? Math.round(p.vmStartMs) : null, bootMs: boot != null && p.vmStartMs != null ? Math.round(boot - p.vmStartMs) : null, runMs: boot != null ? Math.round(p.signinMs - boot) : null, engineMs: p.engineMs != null ? Math.round(p.engineMs) : null, imageMs: p.imageMs != null ? Math.round(p.imageMs) : null, installMs: p.installMs != null ? Math.round(p.installMs) : null, persistMs: p.persistMs != null ? Math.round(p.persistMs) : null, helloMs: p.helloMs != null ? Math.round(p.helloMs) : null, bundleMs: p.bundleMs, transformMs: p.transformMs, icount: st.icount || undefined }; break; }
-  if (st.failed) { verdict = { failed: true, exitCode: st.exitCode }; break; }
+  if (st.phases.signinMs != null) { verdict = timings(st); break; }
+  if (UNTIL === "bundle" && st.phases.bundleMs != null) { verdict = Object.assign(timings(st), { until: "bundle" }); break; }
+  if (st.failed) { verdict = Object.assign(timings(st), { failed: true, exitCode: st.exitCode }); break; }
 }
+// every phase the page timed, whatever the run ended on (a failed run still shows install/boot/bundle)
+function timings(st) {
+  const p = st.phases, boot = p.bootMs != null ? p.bootMs : p.helloMs;
+  const ms = (v) => (v != null ? Math.round(v) : null);
+  return { signinMs: ms(p.signinMs), loadMs: ms(p.vmStartMs), bootMs: boot != null && p.vmStartMs != null ? Math.round(boot - p.vmStartMs) : null, runMs: boot != null && p.signinMs != null ? Math.round(p.signinMs - boot) : null, engineMs: ms(p.engineMs), imageMs: ms(p.imageMs), installMs: ms(p.installMs), persistMs: ms(p.persistMs), helloMs: ms(p.helloMs), bundleMs: p.bundleMs, transformMs: p.transformMs, icount: st.icount || undefined };
+}
+
 // ---- byte accounting -------------------------------------------------------------------------------
 await sleep(500);
-const dump = CLI === "claude" ? await ev("window.nanobox.dump().catch(() => null)") : null;
+const dump = ON_V8 ? await ev("window.nanobox.dump().catch(() => null)") : null;
 const acct = await ev(`(() => { const n = window.nanobox; return { pageResources: n.pageResources(), pageNet: n.pageNet.requests, perf: n.perf, install: n.installInfo, persistLog: n.persistLog }; })()`);
 const origin = `http://localhost:${PORT}`;
 const rows = new Map(); // url -> {bytes (wire), cached (served from the HTTP cache / Cache API), via, kind}

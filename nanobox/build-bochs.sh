@@ -128,6 +128,17 @@ else
 fi
 
 # --- wizer pre-init + wasi-vfs pack ---------------------------------------------------------------
+# nanobox: the guest clock. Bochs turns instructions into simulated seconds through `cpu: ips`, and
+# container2wasm ships ips=40000000 while this engine executes ~200 M/s -- so guest time ran ~5x fast
+# and every timer, timeout and TUI animation tick fired ~5x too often per real second (idle burn
+# 20.0 -> 5.3 M instr/s once matched; docs/codex-typing.md 6). The pack is generated (gitignored), so
+# normalise it here, idempotently, instead of hand-editing it after every image build.
+IPS="${NB_IPS:-200000000}"
+if [ -f "$PACK/bochsrc" ] && ! grep -q "ips=$IPS," "$PACK/bochsrc"; then
+  sed -i "s/^cpu: ips=[0-9]*,/cpu: ips=$IPS,/" "$PACK/bochsrc"
+  log "bochsrc: cpu ips -> $IPS ($PACK/bochsrc)"
+fi
+
 if [ "$DO_WIZER" = 1 ]; then
   log "wizer (pre-initialising with $PACK)"
   WASMTIME_BACKTRACE_DETAILS=1 "$WIZER" "${WIZER_ARGS[@]}" --mapdir /pack::"$PACK" -o "$OUT/bochs.wizer.wasm" "$OUT/bochs.opt.wasm"

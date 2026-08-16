@@ -1,0 +1,35 @@
+{
+ "cli": "claude",
+ "ok": true,
+ "signinMs": 4261.875,
+ "checks": {
+  "signin": true,
+  "tui": true,
+  "file": true,
+  "spawn": true,
+  "auth": true,
+  "render": true,
+  "state": true,
+  "apis": true
+ },
+ "failures": [],
+ "missing": [
+  "net.Server.listen(43877)"
+ ],
+ "spawns": [
+  "which",
+  "which",
+  "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+  "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+  "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+  "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+  "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+  "which",
+  "which",
+  "which",
+  "which",
+  "/bin/sh",
+  "xdg-open"
+ ],
+ "at": "2026-08-16T22:24:57.461Z"
+}

@@ -51,6 +51,9 @@
 //                    the workers. jit=L:T as vm.html.
 const qs = new URLSearchParams(location.search);
 const image = qs.get("image") || "claude-npm";
+// ?build=bun-local: the NATIVE (Bun) build, its JS extracted by tools/bun-extract.mjs into
+// web/native/local/ — read from the guest like the sandbox does, not from a prepared bundle
+const bunLocal = qs.get("build") === "bun-local";
 const backend = qs.get("backend") === "vm" ? "vm" : "mem";
 const auto = qs.get("auto") !== "0";
 const el = (id) => document.getElementById(id);
@@ -142,11 +145,24 @@ async function bootVm(runtimeCfg) {
     } else if (d.type === "nanobox-stats") { window.nanobox.stats = d; if (d.io) { const s = window.nanobox.samples; s.push({ t: Math.round(d.t), icount: d.icount, io: d.io, jit: d.installed }); if (s.length > 2000) s.shift(); } el("stats").textContent = d.icount ? `icount ${(Number(d.icount) / 1e9).toFixed(2)}G · missing APIs ${missing.length}` : ""; }
   };
   vmWorker.onerror = (e) => { failed = true; timerEl.className = "err"; el("status").textContent = "vm worker error: " + e.message; log("error", { message: e.message }); };
-  vmWorker.postMessage({ type: "init", info, args: ["/usr/local/bin/claude"], cfg: {
+  // ?build=bun-local: run the NATIVE (Bun) build instead of the npm one — its JS extracted from the
+  // standalone executable by tools/bun-extract.mjs into web/native/local/ (dev route: the sandbox page
+  // installs the same thing from the vendor). The shim gets the bundle straight from the share, so no
+  // install step is involved; the assets keep the literal /$bunfs path the bundle opens them by.
+  const bundleFiles = [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }];
+  if (bunLocal) {
+    bundleFiles.push({ name: "nb/claude-native/cli.js", url: new URL("/native/local/cli-native.js", location.href).href, mode: 0o644 });
+    for (const asset of ["mermaid.min.js", "hljsBundle.generated.min.js", "chart.umd.min.js", "payload.template.html.asset"])
+      bundleFiles.push({ name: "nb/bunfs/" + asset, url: new URL("/native/local/" + asset, location.href).href, mode: 0o644 });
+  }
+  const guestArgs = bunLocal
+    ? ["/bin/sh", "-c", "mkdir -p '/$bunfs/root' && cp /bundle/nb/bunfs/* '/$bunfs/root/' 2>/dev/null; exec /bundle/nb/node /bundle/nb/claude-native/cli.js"]
+    : ["/usr/local/bin/claude"];
+  vmWorker.postMessage({ type: "init", info, args: guestArgs, cfg: {
     jit, direct: true, imageAddr, specUrl: new URL("/images/" + image + "/config-vm.json", location.href).href,
     jitBundles, engineTag, noCache: qs.get("cache") === "0",
     hostChan: { sab: toGuest.sab, inSab: fromGuest.sab },
-    bundleFiles: [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }],
+    bundleFiles,
   } });
   new TtyServer(slave).start(vmWorker, onVmMessage);
   el("status").textContent = "booting the guest…";
@@ -164,7 +180,7 @@ function boot() {
   const runtimeCfg = {
     imageUrl: new URL("/c2w/images/" + image + "/", location.href).href,
     specUrl: new URL("/images/" + image + "/config.json", location.href).href,
-    cliUrl: new URL(qs.get("cli") || "/native/claude-cli.js", location.href).href,
+    cliUrl: bunLocal ? null : new URL(qs.get("cli") || "/native/claude-cli.js", location.href).href,
     cliPath: "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js",
     args: (qs.get("args") || "").split(" ").filter(Boolean),
     cols: xterm.cols, rows: xterm.rows, env,

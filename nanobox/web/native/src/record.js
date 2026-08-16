@@ -12,6 +12,7 @@ function firstUserFrame() {
   return (st[0] || "").trim();
 }
 export function noteMissing(key, kind = "get") {
+  if (kind === "get" && EXPECTED_UNDEFINED.has(key)) return;
   const rec = missing.get(key);
   if (rec) { rec.count++; return; }
   const r = { key, kind, count: 1, stack: firstUserFrame() };
@@ -27,6 +28,11 @@ export function dump() {
   return { missing: [...missing.values()].sort((a, b) => b.count - a.count), calls: [...calls.entries()].map(([k, n]) => ({ key: k, count: n })) };
 }
 
+// Reads whose CORRECT answer is `undefined` — runtime-detection probes ("am I Electron / NW.js /
+// a browser?") and slots a library creates on first use. Recording them as gaps would hide the real
+// ones; the list is meant to be short enough to read.
+const EXPECTED_UNDEFINED = new Set(["process.type", "process.__nwjs", "process.__signal_exit_emitter__", "process.browser",
+  "process.electron", "process.versions.electron", "process.versions.nw", "process.__signal_exit_emitter__v3", "process.resourcesPath"]);
 const SKIP = new Set(["then", "catch", "finally", "toJSON", "constructor", "prototype", "__esModule", "default", "inspect", "valueOf", "toString",
   "asymmetricMatch", "nodeType", "$$typeof", "@@__IMMUTABLE_ITERABLE__@@", "@@__IMMUTABLE_RECORD__@@", "_isMockFunction", "length", "name",
   "arguments", "caller", "apply", "call", "bind"]);

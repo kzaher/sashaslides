@@ -28,7 +28,8 @@
 //       symlink(target, path) link(a, b) chmod(path, mode) chown(path, uid, gid) utimes(path, atime, mtime)
 //       truncate(pathOrFd, len) copyFile(a, b, flags) rm(path, recursive, force) mkdtemp(prefix) fsync(fd)
 //   tty: ttySize() -> {cols, rows}  ttyWrite(fd, bytes)  ttySetRaw(bool)  isatty(fd)
-//   proc: spawn({file, args, cwd, env, stdio}) -> {pid} | {error: code}   procInput(pid, bytes|null)
+//   proc: spawn({file, args, cwd, env, stdio, pty}) -> {pid} | {error: code}   procInput(pid, bytes|null)
+//         (pty: run the child on a pseudo-terminal — only the guest backend can, Bun.Terminal uses it)
 //         spawnSync(spec) -> {status, signal, stdout, stderr} | {error: code}
 //         procKill(pid, signal)
 //   net: netConnect({host, port, tls}) -> {id} | {error: code}   netWrite(id, bytes)  netEnd(id)
