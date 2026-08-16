@@ -121,9 +121,24 @@ async function netFetch(req, res) {
     console.log(`[net] ${spec.method} ${spec.url} -> ${r.status}`);
     // node's fetch already decoded gzip/br bodies; forwarding the upstream content-encoding made the
     // browser try to decode again (ERR_CONTENT_DECODING_FAILED -> empty body -> codex "EOF while parsing")
-    const out = {}; r.headers.forEach((v, k) => { if (!HOP.has(k) && k !== "content-encoding") out[k] = v; });
+    // node's fetch already decoded gzip/br bodies, so content-encoding AND content-length would both
+    // describe the wire form, not what we forward (a kept content-encoding made the browser decode
+    // twice -> ERR_CONTENT_DECODING_FAILED -> empty body -> codex "EOF while parsing")
+    const out = {}; r.headers.forEach((v, k) => { if (!HOP.has(k) && k !== "content-encoding" && k !== "content-length") out[k] = v; });
     res.writeHead(r.status, out);
-    res.end(Buffer.from(await r.arrayBuffer()));
+    // STREAM the body through instead of buffering it: MCP's "streamable HTTP" transport keeps the
+    // response open (SSE), so `await r.arrayBuffer()` never resolves and the guest's client gives up
+    // with "Transport channel closed, when send initialized notification" (codex_apps at startup).
+    if (!r.body) { res.end(); return; }
+    const reader = r.body.getReader();
+    res.on("close", () => { try { reader.cancel(); } catch {} });
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!res.write(Buffer.from(value))) await new Promise((resolve) => res.once("drain", resolve));
+      if (typeof res.flush === "function") res.flush();
+    }
+    res.end();
   } catch (e) { console.log(`[net] ${spec.method} ${spec.url} -> error ${e.message}`); res.writeHead(502); res.end(String(e.message)); }
 }
 
