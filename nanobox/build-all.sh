@@ -41,7 +41,7 @@ for step in "${STEPS[@]}"; do case "$step" in
     if newer build/imagemounter-nb.wasm.gzip patches/c2w-imagemounter-notbefore.patch build-imagemounter.sh; then log "imagemounter: up to date"; else log "imagemounter"; ./build-imagemounter.sh; fi ;;
   engine)
     if newer build/eh-nb/out.wasm.gzip bochs/bochs/nanobox_jit.cc bochs/bochs/nanobox.cc bochs/bochs/wasm.cc bochs/bochs/wasm.h bochs/bochs/cpu/icache.h bochs/bochs/cpu/cpu.cc build-bochs.sh work/pack-out-nb/pack/rootfs.bin && [ -f build/eh-nb/out-slim.wasm.gzip ]; then log "engine: up to date"; else
-      log "engine (build-bochs.sh eh-nb, ~6 min)"; ./build-bochs.sh eh-nb --pack work/pack-out-nb/pack
+      log "engine (build-bochs.sh eh-nb, ~6 min)"; ./tools/export-patches.sh; ./build-bochs.sh eh-nb --pack work/pack-out-nb/pack
       for v in out out-slim; do rm -f build/eh-nb/$v.wasm.gz build/eh-nb/$v.wasm.gzip; gzip -9 -k build/eh-nb/$v.wasm && mv build/eh-nb/$v.wasm.gz build/eh-nb/$v.wasm.gzip; done
       # a rebuilt engine invalidates the JIT bundles (engine tag) — record them again in the bundles step
       rm -f build/eh-nb/jit/*.nbjb

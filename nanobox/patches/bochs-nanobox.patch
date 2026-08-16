@@ -22,7 +22,7 @@ index 234779104..1c4441e30 100644
   logio.h misc/bswap.h plugin.h extplugin.h param_names.h pc_system.h \
   bx_debug/debug.h config.h osdep.h memory/memory-bochs.h \
 diff --git a/bochs/cpu/cpu.cc b/bochs/cpu/cpu.cc
-index e6ea3661e..7c7150fab 100644
+index e6ea3661e..8e40dbe83 100644
 --- a/bochs/cpu/cpu.cc
 +++ b/bochs/cpu/cpu.cc
 @@ -30,6 +30,7 @@
@@ -71,7 +71,7 @@ index e6ea3661e..7c7150fab 100644
 +        nanobox_jit_call(entry); jitted = true;
 +      }
 +      else {
-+        if (nanobox_jit_level && ++entry->hot >= nanobox_jit_threshold) nanobox_jit_maybe_compile(entry);
++        if (nanobox_jit_level && ++*BX_CPU_THIS_PTR iCache.hotOf(entry) >= nanobox_jit_threshold) nanobox_jit_maybe_compile(entry);
 +        if (entry->jitfn) { nanobox_jit_call(entry); jitted = true; }
 +        else BX_CPU_CALL_METHOD(i->execute1, (i)); // might iterate repeat instruction
 +      }
@@ -168,7 +168,7 @@ index 23a27c6b1..7bff484ce 100644
    BX_EXECUTE_INSTRUCTION(i);                           \
  }
 diff --git a/bochs/cpu/icache.cc b/bochs/cpu/icache.cc
-index e0f65950f..fa0bdd878 100644
+index e0f65950f..076af44ac 100644
 --- a/bochs/cpu/icache.cc
 +++ b/bochs/cpu/icache.cc
 @@ -29,6 +29,7 @@
@@ -193,6 +193,15 @@ index e0f65950f..fa0bdd878 100644
  
    for (unsigned i=0; i<BX_SMP_PROCESSORS; i++) {
      BX_CPU(i)->async_event |= BX_ASYNC_EVENT_STOP_TRACE;
+@@ -80,7 +85,7 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAdd
+ {
+   bxICacheEntry_c *entry = BX_CPU_THIS_PTR iCache.get_entry(pAddr, BX_CPU_THIS_PTR fetchModeMask);
+ 
+-  BX_CPU_THIS_PTR iCache.alloc_trace(entry);
++  BX_CPU_THIS_PTR iCache.alloc_trace(entry, pAddr);
+ 
+   // Cache miss. We weren't so lucky, but let's be optimistic - try to build
+   // trace from incoming instruction bytes stream !
 @@ -110,6 +115,10 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAdd
  
    for (unsigned n=0;n < quantum;n++)
@@ -237,7 +246,7 @@ index e0f65950f..fa0bdd878 100644
    if (BX_CPU_THIS_PTR cpu_mode == BX_MODE_LONG_64)
      ret = fetchDecode64(fetchBuffer, i, remainingInPage+fetchBufferLimit);
 diff --git a/bochs/cpu/icache.h b/bochs/cpu/icache.h
-index 71df0892e..a62ed7ead 100644
+index 71df0892e..c99624757 100644
 --- a/bochs/cpu/icache.h
 +++ b/bochs/cpu/icache.h
 @@ -47,6 +47,8 @@ public:
@@ -249,7 +258,22 @@ index 71df0892e..a62ed7ead 100644
  
    BX_CPP_INLINE void markICache(bx_phy_address pAddr, unsigned len)
    {
-@@ -111,8 +113,15 @@ struct bxICacheEntry_c
+@@ -101,8 +103,12 @@ BX_CPP_INLINE void bxPageWriteStampTable::resetWriteStamps(void)
+ 
+ extern bxPageWriteStampTable pageWriteStampTable;
+ 
+-#define BxICacheEntries (64  * 1024)  // Must be a power of 2.
+-#define BxICacheMemPool (576 * 1024)
++// nanobox: 64 K direct-mapped entries + a 576 K-instruction pool flushed wholesale on wrap made the
++// startups thrash (hot traces re-decoded ~124x, lukewarm code never reaching the JIT threshold —
++// docs/hotpaths-codex.md): 4x entries with a mixing hash, 4x pool, and the hotness counters live
++// in a side table that survives eviction and flushes.
++#define BxICacheEntries (256 * 1024)  // Must be a power of 2.
++#define BxICacheMemPool (2304 * 1024)
+ 
+ struct bxICacheEntry_c
+ {
+@@ -111,8 +117,15 @@ struct bxICacheEntry_c
  
    Bit32u tlen;          // Trace length in instructions
    bxInstruction_c *i;
@@ -265,7 +289,7 @@ index 71df0892e..a62ed7ead 100644
  #define BX_MAX_TRACE_LENGTH 32
  
  static const bx_phy_address BX_ICACHE_INVALID_PHY_ADDRESS = bx_phy_address(-1);
-@@ -121,6 +130,7 @@ BX_CPP_INLINE void flushSMC(bxICacheEntry_c *e)
+@@ -121,6 +134,7 @@ BX_CPP_INLINE void flushSMC(bxICacheEntry_c *e)
  {
    if (e->pAddr != BX_ICACHE_INVALID_PHY_ADDRESS) {
      e->pAddr = BX_ICACHE_INVALID_PHY_ADDRESS;
@@ -273,16 +297,46 @@ index 71df0892e..a62ed7ead 100644
  #if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
      extern void genDummyICacheEntry(bxInstruction_c *i);
  //  for (unsigned instr=0;instr < e->tlen; instr++)
-@@ -162,6 +172,8 @@ public:
+@@ -133,6 +147,11 @@ BX_CPP_INLINE void flushSMC(bxICacheEntry_c *e)
+ class BOCHSAPI bxICache_c {
+ public:
+   bxICacheEntry_c entry[BxICacheEntries];
++  // nanobox: per-slot execution counters that survive eviction and flushes for the SAME trace
++  // (hotAddr remembers whose counter it is; a different trace landing in the slot starts at 0 —
++  // letting it inherit the count compiled 3x more, mostly lukewarm, traces and cost 1 s on codex)
++  Bit32u hot[BxICacheEntries];
++  bx_phy_address hotAddr[BxICacheEntries];
+   bxInstruction_c mpool[BxICacheMemPool];
+   unsigned mpindex;
+ 
+@@ -151,18 +170,24 @@ public:
+   BX_CPP_INLINE static unsigned hash(bx_phy_address pAddr, unsigned fetchModeMask)
+   {
+ //  return ((pAddr + (pAddr << 2) + (pAddr>>6)) & (BxICacheEntries-1)) ^ fetchModeMask;
+-    return ((pAddr) & (BxICacheEntries-1)) ^ fetchModeMask;
++    // nanobox: mix the address bits above the index into the PAGE part of the index only — a 4 KiB
++    // page must still map to one contiguous, page-aligned block of 4096 slots (handleSMC walks it
++    // as such from get_entry(LPFOf(pAddr), 0)); the JIT's link function inlines the same formula
++    return ((pAddr ^ ((pAddr >> 18) & ~(bx_phy_address) 0xfff)) & (BxICacheEntries-1)) ^ fetchModeMask;
+   }
+ 
+-  BX_CPP_INLINE void alloc_trace(bxICacheEntry_c *e)
++  BX_CPP_INLINE void alloc_trace(bxICacheEntry_c *e, bx_phy_address pAddr)
+   {
++    if (hotAddr[e - entry] != pAddr) { hotAddr[e - entry] = pAddr; hot[e - entry] = 0; }
+     // took +1 garbend for instruction chaining speedup (end-of-trace opcode)
+     if ((mpindex + BX_MAX_TRACE_LENGTH + 1) > BxICacheMemPool) {
+       flushICacheEntries();
      }
      e->i = &mpool[mpindex];
      e->tlen = 0;
 +    if (e->jitfn) nanobox_jit_entry_invalidate(e); // nanobox: slot reused for another trace
-+    e->hot = 0;
    }
++  BX_CPP_INLINE Bit32u *hotOf(bxICacheEntry_c *e) { return &hot[e - entry]; }
  
    BX_CPP_INLINE void commit_trace(unsigned len) { mpindex += len; }
-@@ -214,9 +226,12 @@ BX_CPP_INLINE void bxICache_c::flushICacheEntries(void)
+ 
+@@ -214,9 +239,11 @@ BX_CPP_INLINE void bxICache_c::flushICacheEntries(void)
    bxICacheEntry_c* e = entry;
    unsigned i;
  
@@ -291,7 +345,6 @@ index 71df0892e..a62ed7ead 100644
      e->pAddr = BX_ICACHE_INVALID_PHY_ADDRESS;
      e->traceMask = 0;
 +    e->jitfn = 0;
-+    e->hot = 0;
    }
  
    nextPageSplitIndex = 0;
@@ -321,6 +374,18 @@ index 2103999ab..142f913b8 100644
  extern "C" {
  #include "jmp.h"
  }
+diff --git a/bochs/iodev/devices.cc b/bochs/iodev/devices.cc
+index 3447ec3e3..5802f52fc 100644
+--- a/bochs/iodev/devices.cc
++++ b/bochs/iodev/devices.cc
+@@ -364,6 +364,7 @@ void bx_devices_c::init(BX_MEM_C *newmem)
+   PLUG_load_plugin(packVirtio9p, PLUGTYPE_STANDARD);
+   PLUG_load_plugin(stdioVirtioConsole, PLUGTYPE_STANDARD);
+   PLUG_load_plugin(socketVirtioNet, PLUGTYPE_STANDARD);
++  PLUG_load_plugin(nanoboxVirtioConsole, PLUGTYPE_STANDARD);
+ #endif
+   bx_init_plugins();
+ 
 diff --git a/bochs/iodev/slowdown_timer.cc b/bochs/iodev/slowdown_timer.cc
 index f75d39096..de2a09713 100644
 --- a/bochs/iodev/slowdown_timer.cc
@@ -445,11 +510,89 @@ index 4eb4f8bfa..c9aa91b83 100644
  
    // ===============================
    // Timer oriented private features
+diff --git a/bochs/plugin.cc b/bochs/plugin.cc
+index 888aaade9..40aa2cb0d 100644
+--- a/bochs/plugin.cc
++++ b/bochs/plugin.cc
+@@ -1066,6 +1066,7 @@ plugin_t bx_builtin_plugins[] = {
+   BUILTIN_OPTPCI_PLUGIN_ENTRY(packVirtio9p),
+   BUILTIN_OPTPCI_PLUGIN_ENTRY(stdioVirtioConsole),
+   BUILTIN_OPTPCI_PLUGIN_ENTRY(socketVirtioNet),
++  BUILTIN_OPTPCI_PLUGIN_ENTRY(nanoboxVirtioConsole),
+ #if BX_SUPPORT_SOUNDLOW
+   BUILTIN_SND_PLUGIN_ENTRY(dummy),
+   BUILTIN_SND_PLUGIN_ENTRY(file),
+diff --git a/bochs/plugin.h b/bochs/plugin.h
+index eecb8ecb5..49ce3f891 100644
+--- a/bochs/plugin.h
++++ b/bochs/plugin.h
+@@ -80,6 +80,7 @@ extern "C" {
+ #define BX_PLUGIN_PACK_VIRTIO_9P "packVirtio9p"
+ #define BX_PLUGIN_STDIO_VIRTIO_CONSOLE "stdioVirtioConsole"
+ #define BX_PLUGIN_SOCKET_VIRTIO_NET "socketVirtioNet"
++#define BX_PLUGIN_NANOBOX_VIRTIO_CONSOLE "nanoboxVirtioConsole"   // nanobox: second console = host channel (/dev/hvc1 <-> JS hooks)
+ 
+ #define BX_REGISTER_DEVICE_DEVMODEL(a,b,c,d) pluginRegisterDeviceDevmodel(a,b,c,d)
+ #define BX_UNREGISTER_DEVICE_DEVMODEL(a,b) pluginUnregisterDeviceDevmodel(a,b)
+@@ -497,6 +498,7 @@ PLUGIN_ENTRY_FOR_MODULE(mapdirVirtio9p);
+ PLUGIN_ENTRY_FOR_MODULE(packVirtio9p);
+ PLUGIN_ENTRY_FOR_MODULE(stdioVirtioConsole);
+ PLUGIN_ENTRY_FOR_MODULE(socketVirtioNet);
++PLUGIN_ENTRY_FOR_MODULE(nanoboxVirtioConsole);
+ #endif
+ 
+ #ifdef __cplusplus
 diff --git a/bochs/wasm.cc b/bochs/wasm.cc
-index 602f4b907..4a7cd4f79 100644
+index 602f4b907..ad1c56986 100644
 --- a/bochs/wasm.cc
 +++ b/bochs/wasm.cc
-@@ -609,7 +609,26 @@ static mode_t host_mode_to_p9(mode_t m) {
+@@ -261,6 +261,45 @@ PLUGIN_ENTRY_FOR_MODULE(stdioVirtioConsole)
+   return 0; // Success
+ }
+ 
++/////////////////////////////////////////////////////////////////////////
++// nanobox host channel: a second virtio-console (/dev/hvc1 in the guest). Guest writes go to the
++// JS host through hook slot 6 (hc_write(ptr,len)); the host feeds bytes in through hook slot 7
++// (hc_read(ptr,max) -> n), polled by the console's rx timer. Used by the "system node" shim: node's
++// JavaScript runs on the browser's V8, its syscalls are served by the shim inside the guest.
++/////////////////////////////////////////////////////////////////////////
++extern "C" {
++static void nanobox_hc_write_placeholder(const uint8_t *, unsigned) {}
++static unsigned nanobox_hc_read_placeholder(uint8_t *, unsigned) { return 0; }
++}
++typedef void (*hook_hc_write_t)(const uint8_t *buf, unsigned len);
++typedef unsigned (*hook_hc_read_t)(uint8_t *buf, unsigned max);
++static hook_hc_write_t volatile hook_hc_write = nanobox_hc_write_placeholder;
++static hook_hc_read_t volatile hook_hc_read = nanobox_hc_read_placeholder;
++extern "C" __attribute__((export_name("nanobox_hc_hook_slot"), used)) unsigned nanobox_hc_hook_slot(unsigned k)
++{
++  return k == 0 ? (unsigned)(uintptr_t) hook_hc_write : k == 1 ? (unsigned)(uintptr_t) hook_hc_read : 0;
++}
++static void hostchan_write(void *opaque, const uint8_t *buf, int len) { hook_hc_write(buf, (unsigned) len); }
++static int hostchan_read(void *opaque, uint8_t *buf, int len) { return (int) hook_hc_read(buf, (unsigned) len); }
++bx_virtio_console_ctrl_c *nanobox_v;
++PLUGIN_ENTRY_FOR_MODULE(nanoboxVirtioConsole)
++{
++  if (mode == PLUGIN_INIT) {
++    CharacterDevice *dev = (CharacterDevice *)mallocz(sizeof(*dev));
++    dev->opaque = NULL; dev->write_data = hostchan_write; dev->read_data = hostchan_read;
++    nanobox_v = new bx_virtio_console_ctrl_c(BX_PLUGIN_NANOBOX_VIRTIO_CONSOLE, dev);
++    nanobox_v->hostchan = true;
++    BX_REGISTER_DEVICE_DEVMODEL(plugin, type, nanobox_v, BX_PLUGIN_NANOBOX_VIRTIO_CONSOLE);
++  } else if (mode == PLUGIN_FINI) {
++    delete nanobox_v;
++  } else if (mode == PLUGIN_PROBE) {
++    return (int)PLUGTYPE_STANDARD;
++  } else if (mode == PLUGIN_FLAGS) {
++    return PLUGFLAG_PCI;
++  }
++  return 0;
++}
++
+ bx_virtio_net_ctrl_c *socket0;
+ EthernetDevice *socket_net;
+ static EthernetDevice *socket_net_init();
+@@ -609,7 +648,26 @@ static mode_t host_mode_to_p9(mode_t m) {
      return ret;
  }
  
@@ -477,12 +620,19 @@ index 602f4b907..4a7cd4f79 100644
  {
      if (S_ISDIR(st->st_mode))
          qid->type = P9_QTDIR;
-@@ -618,11 +637,19 @@ static void stat_to_qid(FSQID *qid, const struct stat *st)
+@@ -618,11 +676,26 @@ static void stat_to_qid(FSQID *qid, const struct stat *st)
      else
          qid->type = P9_QTFILE;
      qid->version = 0; /* no caching on client */
 +#ifdef NANOBOX_DETERMINISTIC
-+    qid->path = nanobox_path_id(path);
++    // nanobox host filesystems (dev tagged "nb") give every node a stable inode number that
++    // survives rename — use it as the qid path so the 9p client (cache=loose) keeps the SAME inode
++    // (and its dirty/cached pages) across `write tmp; rename tmp target; read target`; a path-hash
++    // qid made the renamed file a new inode whose read came from the server's not-yet-written view
++    // (Claude Code's ~/.claude.json "corrupted", npm reify staging). Inodes are assigned in tree
++    // build order, so they are as deterministic as the path hash. Other preopens keep the hash.
++    if (((Bit64u) st->st_dev >> 16) == 0x6e62 && st->st_ino) qid->path = st->st_ino;
++    else qid->path = nanobox_path_id(path);
 +#else
      qid->path = st->st_ino;
 +#endif
@@ -497,7 +647,7 @@ index 602f4b907..4a7cd4f79 100644
      //FSDeviceDisk *fs = (FSDeviceDisk *)fs1;
      //struct statfs st1;
      //statfs(fs->root_path, &st1);
-@@ -670,6 +697,7 @@ static int fs_attach(FSDevice *fs1, FSFile **pf,
+@@ -670,6 +743,7 @@ static int fs_attach(FSDevice *fs1, FSFile **pf,
  {
      FSDeviceDisk *fs = (FSDeviceDisk *)fs1;
      struct stat st;
@@ -505,7 +655,7 @@ index 602f4b907..4a7cd4f79 100644
      FSFile *f;
  
      if (strcmp(fs->root_path, "") == 0) {
-@@ -688,7 +716,7 @@ static int fs_attach(FSDevice *fs1, FSFile **pf,
+@@ -688,7 +762,7 @@ static int fs_attach(FSDevice *fs1, FSFile **pf,
          return -errno_to_p9(errno);
      }
      f = fid_create(fs1, strdup(fs->root_path), uid);
@@ -514,7 +664,7 @@ index 602f4b907..4a7cd4f79 100644
      *pf = f;
      return 0;
  }
-@@ -718,6 +746,7 @@ static int fs_walk(FSDevice *fs, FSFile **pf, FSQID *qids,
+@@ -718,6 +792,7 @@ static int fs_walk(FSDevice *fs, FSFile **pf, FSQID *qids,
  {
      char *path, *path1;
      struct stat st;
@@ -522,7 +672,7 @@ index 602f4b907..4a7cd4f79 100644
      int i;
  
      path = strdup(f->path);
-@@ -740,9 +769,13 @@ static int fs_walk(FSDevice *fs, FSFile **pf, FSQID *qids,
+@@ -740,9 +815,13 @@ static int fs_walk(FSDevice *fs, FSFile **pf, FSQID *qids,
          } else if (is_preopen) {
              qids[i].type = P9_QTDIR;
              qids[i].version = 0;
@@ -537,7 +687,7 @@ index 602f4b907..4a7cd4f79 100644
          }
      }
      *pf = fid_create(fs, path, f->uid);
-@@ -755,6 +788,7 @@ static int fs_mkdir(FSDevice *fs, FSQID *qid, FSFile *f,
+@@ -755,6 +834,7 @@ static int fs_mkdir(FSDevice *fs, FSQID *qid, FSFile *f,
  {
      char *path;
      struct stat st;
@@ -545,7 +695,7 @@ index 602f4b907..4a7cd4f79 100644
      
      path = compose_path(f->path, name);
      if (mkdir(path, mode) < 0) {
-@@ -765,19 +799,20 @@ static int fs_mkdir(FSDevice *fs, FSQID *qid, FSFile *f,
+@@ -765,21 +845,24 @@ static int fs_mkdir(FSDevice *fs, FSQID *qid, FSFile *f,
          free(path);
          return -errno_to_p9(errno);
      }
@@ -566,9 +716,14 @@ index 602f4b907..4a7cd4f79 100644
 -    stat_to_qid(qid, &st);
 +    stat_to_qid(qid, &st, f->path);
  
-     if (flags & P9_O_DIRECTORY) {
+-    if (flags & P9_O_DIRECTORY) {
++    // nanobox: a directory opened without O_DIRECTORY (overlayfs opens the lower dir that way, so
++    // every readdir through the container's overlay root failed with EPROTO) is still a directory
++    if ((flags & P9_O_DIRECTORY) || S_ISDIR(st.st_mode)) {
          DIR *dirp;
-@@ -808,6 +843,7 @@ static int fs_create(FSDevice *fs, FSQID *qid, FSFile *f, const char *name,
+         dirp = opendir(f->path);
+         if (!dirp)
+@@ -808,6 +891,7 @@ static int fs_create(FSDevice *fs, FSQID *qid, FSFile *f, const char *name,
                       uint32_t flags, uint32_t mode, uint32_t gid)
  {
      struct stat st;
@@ -576,7 +731,7 @@ index 602f4b907..4a7cd4f79 100644
      char *path;
      int ret, fd;
  
-@@ -830,7 +866,7 @@ static int fs_create(FSDevice *fs, FSQID *qid, FSFile *f, const char *name,
+@@ -830,7 +914,7 @@ static int fs_create(FSDevice *fs, FSQID *qid, FSFile *f, const char *name,
      f->is_opened = true;
      f->is_dir = false;
      f->u.fd = fd;
@@ -585,14 +740,17 @@ index 602f4b907..4a7cd4f79 100644
      return 0;
  }
  
-@@ -885,7 +921,15 @@ static int fs_readdir(FSDevice *fs, FSFile *f, uint64_t offset,
+@@ -885,7 +969,18 @@ static int fs_readdir(FSDevice *fs, FSFile *f, uint64_t offset,
          buf[pos++] = type;
          put_le32(buf + pos, 0); /* version */
          pos += 4;
 +#ifdef NANOBOX_DETERMINISTIC
 +        {
++            // same rule as stat_to_qid: nanobox-tagged nodes -> their stable inode, else the path hash
 +            char *fullp = compose_path(f->path, de->d_name);
-+            put_le64(buf + pos, nanobox_path_id(fullp));
++            struct stat qst; NANOBOX_ZERO(qst);
++            if (lstat(fullp, &qst) == 0 && ((Bit64u) qst.st_dev >> 16) == 0x6e62 && qst.st_ino) put_le64(buf + pos, qst.st_ino);
++            else put_le64(buf + pos, nanobox_path_id(fullp));
 +            free(fullp);
 +        }
 +#else
@@ -601,7 +759,7 @@ index 602f4b907..4a7cd4f79 100644
          pos += 8;
          put_le64(buf + pos, offset);
          pos += 8;
-@@ -955,7 +999,13 @@ static void fs_close(FSDevice *fs, FSFile *f)
+@@ -955,7 +1050,13 @@ static void fs_close(FSDevice *fs, FSFile *f)
  static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
  {
      struct stat st1;
@@ -615,7 +773,7 @@ index 602f4b907..4a7cd4f79 100644
  
      if (is_infofile(fs, f->path)) {
          FSDeviceDisk *fs1 = (FSDeviceDisk *)fs;
-@@ -981,7 +1031,11 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
+@@ -981,7 +1082,11 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
      if (is_preopen) {
          st->qid.type = P9_QTDIR;
          st->qid.version = 0;
@@ -627,7 +785,7 @@ index 602f4b907..4a7cd4f79 100644
          st->st_mode = P9_S_IFDIR;
          st->st_blocks = 0;
          st->st_blksize = 4096;
-@@ -1000,13 +1054,27 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
+@@ -1000,13 +1105,27 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
      if (lstat(f->path, &st1) != 0) {
          return -P9_ENOENT;
      }
@@ -656,7 +814,7 @@ index 602f4b907..4a7cd4f79 100644
      st->st_blksize = st1.st_blksize;
      st->st_blocks = st1.st_blocks;
      st->st_atime_sec = st1.st_atim.tv_sec;
-@@ -1015,6 +1083,7 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
+@@ -1015,6 +1134,7 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
      st->st_mtime_nsec = st1.st_mtim.tv_nsec;
      st->st_ctime_sec = st1.st_ctim.tv_sec;
      st->st_ctime_nsec = st1.st_ctim.tv_nsec;
@@ -664,7 +822,38 @@ index 602f4b907..4a7cd4f79 100644
      return 0;
  }
  
-@@ -1100,6 +1169,7 @@ static int fs_symlink(FSDevice *fs, FSQID *qid,
+@@ -1025,8 +1145,11 @@ static int fs_setattr(FSDevice *fs, FSFile *f, uint32_t mask,
+ {
+     bool ctime_updated = false;
+ 
++    // nanobox: WASI has no chown/chmod; accept them silently instead of answering ENOTSUP (a positive
++    // value here reached the guest as EPROTO: "chmod: Protocol error", codex "could not create PATH
++    // aliases"); modes of host files are handled on the host side (wasifs.js keeps them)
+     if (mask & (P9_SETATTR_UID | P9_SETATTR_GID)) {
+-        return P9_ENOTSUP; // TODO
++        ctime_updated = true; // accepted (ignored)
+ //        if (lchown(f->path, (mask & P9_SETATTR_UID) ? uid : -1,
+ //                   (mask & P9_SETATTR_GID) ? gid : -1) < 0)
+ //            return -errno_to_p9(errno);
+@@ -1034,7 +1157,7 @@ static int fs_setattr(FSDevice *fs, FSFile *f, uint32_t mask,
+     }
+     /* must be done after uid change for suid */
+     if (mask & P9_SETATTR_MODE) {
+-        return P9_ENOTSUP; // TODO
++        ctime_updated = true; // accepted (ignored, see above); also satisfies the CTIME check below
+ //        if (chmod(f->path, mode) < 0)
+ //            return -errno_to_p9(errno);
+ //        ctime_updated = true;
+@@ -1075,7 +1198,7 @@ static int fs_setattr(FSDevice *fs, FSFile *f, uint32_t mask,
+         ctime_updated = true;
+     }
+     if ((mask & P9_SETATTR_CTIME) && !ctime_updated) {
+-        return P9_ENOTSUP; // TODO
++        // nanobox: a bare ctime touch is accepted (P9_ENOTSUP here was a positive value -> malformed reply -> EPROTO)
+ //        if (lchown(f->path, -1, -1) < 0)
+ //            return -errno_to_p9(errno);
+     }
+@@ -1100,6 +1223,7 @@ static int fs_symlink(FSDevice *fs, FSQID *qid,
  {
      char *path;
      struct stat st;
@@ -672,7 +861,7 @@ index 602f4b907..4a7cd4f79 100644
      
      path = compose_path(f->path, name);
      if (symlink(symgt, path) < 0) {
-@@ -1110,8 +1180,8 @@ static int fs_symlink(FSDevice *fs, FSQID *qid,
+@@ -1110,8 +1234,8 @@ static int fs_symlink(FSDevice *fs, FSQID *qid,
          free(path);
          return -errno_to_p9(errno);
      }
@@ -682,7 +871,28 @@ index 602f4b907..4a7cd4f79 100644
      return 0;
  }
  
-@@ -1239,6 +1309,7 @@ FSDevice *fs_disk_init_with_info(const char *root_path, const char *info_path, F
+@@ -1179,7 +1303,9 @@ static int fs_unlinkat(FSDevice *fs, FSFile *f, const char *name)
+ 
+ static int fs_lock(FSDevice *fs, FSFile *f, const FSLock *lock)
+ {
+-    return P9_ENOTSUP; // TODO
++    // nanobox: single client, no contention: every lock succeeds (P9_ENOTSUP here reached the guest
++    // as ENOLCK on every fcntl lock -> sqlite "database is locked" for codex's state DB)
++    return P9_LOCK_SUCCESS;
+ //    int ret;
+ //    struct flock fl;
+ //    
+@@ -1205,7 +1331,8 @@ static int fs_lock(FSDevice *fs, FSFile *f, const FSLock *lock)
+ 
+ static int fs_getlock(FSDevice *fs, FSFile *f, FSLock *lock)
+ {
+-    return P9_ENOTSUP; // TODO
++    lock->type = P9_LOCK_TYPE_UNLCK; // nanobox: nobody else holds locks
++    return 0;
+ //    int ret;
+ //    struct flock fl;
+ //    
+@@ -1239,6 +1366,7 @@ FSDevice *fs_disk_init_with_info(const char *root_path, const char *info_path, F
  {
      FSDeviceDisk *fs;
      struct stat st;
@@ -690,7 +900,16 @@ index 602f4b907..4a7cd4f79 100644
  
      if (strcmp(root_path, "") != 0) {
          lstat(root_path, &st);
-@@ -2226,6 +2297,7 @@ int bx_virtio_9p_ctrl_c::device_recv(int queue_idx, int desc_idx, int read_size,
+@@ -1354,7 +1482,7 @@ void bx_virtio_ctrl_c::virtio_add_pci_capability(int cfg_type, Bit8u bar, Bit32u
+ void bx_virtio_ctrl_c::init(char *plugin_name, Bit16u pci_device_id, Bit32u class_id, Bit16u device_id, Bit32u device_features, const char *descr)
+ {
+   BX_VIRTIO_THIS s.next_cap_offset = 0x40;
+-  BX_VIRTIO_THIS s.devfunc = 0;
++  BX_VIRTIO_THIS s.devfunc = BX_VIRTIO_THIS devfunc_want;   // 0 = auto-assign a slot
+   BX_VIRTIO_THIS s.device_features = device_features;
+   DEV_register_pci_handlers(this, &BX_VIRTIO_THIS s.devfunc, plugin_name, descr);
+ 
+@@ -2226,6 +2354,7 @@ int bx_virtio_9p_ctrl_c::device_recv(int queue_idx, int desc_idx, int read_size,
      case 8: /* statfs */
          {
              FSStatFS st;
@@ -698,8 +917,43 @@ index 602f4b907..4a7cd4f79 100644
  
              fs->fs_statfs(fs, &st);
              buf_len = marshall(buf, sizeof(buf),
+@@ -2777,7 +2906,16 @@ bx_virtio_console_ctrl_c::~bx_virtio_console_ctrl_c()
+ 
+ void bx_virtio_console_ctrl_c::init()
+ {
++  // nanobox: the host channel console is PCI function 1 of the stdio console's slot (the i440fx
++  // has 5 slots and 9p x2 + console + net + usb-ehci take them all); the stdio console advertises
++  // itself as multi-function so Linux scans function 1 and finds it AFTER hvc0
++  if (hostchan) {
++    extern bx_virtio_console_ctrl_c *stdio_v;
++    if (stdio_v && (stdio_v->devfunc_get() & 0xf8)) BX_VIRTIO_CONSOLE_THIS devfunc_want = (stdio_v->devfunc_get() & 0xf8) | 1;
++    else BX_PANIC(("nanobox host channel: stdio console not initialised first"));
++  }
+   bx_virtio_ctrl_c::init(BX_VIRTIO_CONSOLE_THIS plugin_name, 0x1003, 0x0780, 3, 1 << 0, "Virtio-console"); // initialize as virtio-console
++  if (!hostchan) BX_VIRTIO_CONSOLE_THIS pci_conf[0x0e] |= 0x80; // multi-function header: function 1 = nanobox host channel
+ 
+   BX_VIRTIO_CONSOLE_THIS config_space_size = 4;
+   QueueState *qs = &BX_VIRTIO_CONSOLE_THIS s.queue[0];
+@@ -2884,6 +3022,17 @@ static void console_get_size(STDIODevice *s, int *pw, int *ph)
+ void bx_virtio_console_ctrl_c::rx_timer_handler(void *this_ptr)
+ {
+     bx_virtio_console_ctrl_c *class_ptr = (bx_virtio_console_ctrl_c *)this_ptr;
++    if (class_ptr->hostchan) {
++      // nanobox host channel: pull whatever the host queued (up to what the guest's rx queue takes)
++      int got = 0;
++      if (class_ptr->virtio_console_can_write_data()) {
++        uint8_t buf[4096];
++        int len = min_int(class_ptr->virtio_console_get_write_len(), (int) sizeof(buf));
++        if (len > 0) { got = class_ptr->dev.cs->read_data(class_ptr->dev.cs->opaque, buf, len); if (got > 0) class_ptr->virtio_console_write_data(buf, got); }
++      }
++      bx_pc_system.activate_timer(class_ptr->timer_id, got > 0 ? 100 : 2000 /*2ms*/, false);
++      return;
++    }
+     fd_set rfds, wfds, efds;
+     int fd_max, ret = 0, delay;
+     struct timeval tv;
 diff --git a/bochs/wasm.h b/bochs/wasm.h
-index 1952f42da..c243f4f95 100644
+index 1952f42da..97e53f9dc 100644
 --- a/bochs/wasm.h
 +++ b/bochs/wasm.h
 @@ -61,6 +61,7 @@ int write_info(FSVirtFile *f, int pos, int len, const char *str);
@@ -724,6 +978,23 @@ index 1952f42da..c243f4f95 100644
  
  #define VRING_DESC_F_NEXT	1
  #define VRING_DESC_F_WRITE	2
+@@ -358,6 +365,8 @@ public:
+ 
+   Bit32u config_space_size; /* in bytes, must be multiple of 4 */
+   Bit8u config_space[MAX_CONFIG_SPACE_SIZE];
++  Bit8u devfunc_want = 0;   // nanobox: non-zero = register at this exact PCI devfunc (function != 0 of an occupied slot) instead of auto-assigning a slot (all 5 slots are taken)
++  Bit8u devfunc_get() { return s.devfunc; }
+ 
+   struct {
+     Bit8u devfunc;
+@@ -535,6 +544,7 @@ public:
+   void virtio_console_resize_event(int width, int height);
+   static void rx_timer_handler(void *this_ptr);
+ 
++  bool hostchan = false;   // nanobox: this console is the host channel (bytes to/from JS hooks, no stdin)
+ private:
+   char *plugin_name;
+   int timer_id;
 diff --git a/bochs/nanobox.cc b/bochs/nanobox.cc
 new file mode 100644
 index 000000000..c5350a6af
@@ -946,10 +1217,10 @@ index 000000000..c5350a6af
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..fff65e68c
+index 000000000..8592b74d8
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,2795 @@
+@@ -0,0 +1,2883 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -1092,6 +1363,7 @@ index 000000000..fff65e68c
 +
 +static void nanobox_jit_cache_clear(void);
 +extern unsigned nanobox_jit_merge;
++extern unsigned nanobox_jit_probe2;
 +static unsigned nanobox_link_fn = 0;   // table index of the shared trace-linking epilogue function (0 = not built)
 +bxICacheEntry_c *nanobox_dbg_cur_entry = NULL; // dbg mode: the region block that ran last (cpu_loop only knows the region entry)
 +
@@ -1187,6 +1459,7 @@ index 000000000..fff65e68c
 +  // last successful DTLB probe (page cache): lpf, host page address, access bits, physical page
 +  // frame and "no icache stamp on this page" flag. Reset at trace entry and after handler steps.
 +  uint32_t C_lpf, C_host, C_bits, C_ppf, C_free;
++  uint32_t D_lpf, D_host, D_bits, D_ppf, D_free;   // second probe-cache entry (the previously used page): loops that alternate between two pages (JSC's GC sweep: bitmap + cells) no longer take the full DTLB probe on every access
 +
 +  int depth;             // structured-control nesting depth (blocks/ifs/loops currently open)
 +  int loopDepth;         // depth value just inside the trace loop (-1 = no loop emitted)
@@ -1308,7 +1581,7 @@ index 000000000..fff65e68c
 +    for (unsigned r = 0; r < 16; r++) cs.regLoaded[r] = cs.regDirty[r] = false;
 +    cs.lfLoaded = cs.lfDirty = false; cs.acmLoaded = false;
 +    // the probe cache lives in locals; a handler may have flushed the TLB
-+    if (em) { em->i64c(-1); em->set(C_lpf); }
++    if (em) { em->i64c(-1); em->set(C_lpf); em->i64c(-1); em->set(D_lpf); }
 +  }
 +  CacheState snapshot() { return cs; }
 +  void restore(const CacheState &s) { cs = s; }
@@ -1402,9 +1675,11 @@ index 000000000..fff65e68c
 +    endb();
 +    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
 +    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR eipPageBias), 3); em->op(I64_ADD); em->set(T[0]);
-+    // pAddr = pAddrFetchPage + eipBiased; entry = &iCache.entry[(pAddr & mask) ^ fetchModeMask]
++    // pAddr = pAddrFetchPage + eipBiased; entry = &iCache.entry[bxICache_c::hash(pAddr, fetchModeMask)]
++    //   = ((pAddr ^ ((pAddr >> 18) & ~0xfff)) & (entries-1)) ^ fetchModeMask   (keep in sync with cpu/icache.h)
 +    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR pAddrFetchPage), 3); em->get(T[0]); em->op(I64_ADD); em->set(T[1]); // pAddr
-+    em->get(T[1]); em->op(I32_WRAP_I64); em->i32c(BxICacheEntries - 1); em->op(I32_AND);
++    em->get(T[1]); em->get(T[1]); em->i64c(18); em->op(I64_SHR_U); em->i64c(~0xfffLL); em->op(I64_AND); em->op(I64_XOR);
++    em->op(I32_WRAP_I64); em->i32c(BxICacheEntries - 1); em->op(I32_AND);
 +    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR fetchModeMask), 2); em->op(I32_XOR);
 +    em->i32c(sizeof(bxICacheEntry_c)); em->op(I32_MUL); em->i32c(ADDR(BX_CPU_THIS_PTR iCache.entry[0])); em->op(I32_ADD); em->set(T32[0]); // entry
 +    em->get(T32[0]); em->mem(I64_LOAD, ICE_OFF(pAddr), 3); em->get(T[1]); em->op(I64_NE);
@@ -1576,8 +1851,22 @@ index 000000000..fff65e68c
 +        em->get(C_bits); em->i32c(bit); em->get(L_upl); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
 +        em->br(1); // hit
 +      endb();
++      if (nanobox_jit_probe2) {
++        // second entry: same page + span + permission -> swap it to the front and count it as a hit
++        blk();
++          em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(D_lpf); em->op(I64_NE); em->br_if(0);
++          if (size > 1) {
++            em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0);
++            acmGet(); em->i64c(size - 1); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0);
++          }
++          em->get(D_bits); em->i32c(bit); em->get(L_upl); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
++          swapProbeEntries();
++          em->br(1); // hit (entry 2 promoted)
++        endb();
++      }
 +      tlbProbeFull(la, size, bit, slowDepth + 1);
-+      // remember this page
++      // remember this page (the previous front entry becomes the second entry)
++      if (nanobox_jit_probe2) { em->get(C_lpf); em->set(D_lpf); em->get(C_host); em->set(D_host); em->get(C_bits); em->set(D_bits); em->get(C_ppf); em->set(D_ppf); em->get(C_free); em->set(D_free); }
 +      em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->set(C_lpf);
 +      em->get(T32[0]); em->mem(I32_LOAD, TLB_OFF(hostPageAddr), 2); em->set(C_host);
 +      em->get(T32[0]); em->mem(I32_LOAD, TLB_OFF(accessBits), 2); em->set(C_bits);
@@ -1585,6 +1874,14 @@ index 000000000..fff65e68c
 +      em->get(C_ppf); em->op(I32_WRAP_I64); em->i32c(LPF_MASK_LO); em->op(I32_AND); em->i32c(10); em->op(I32_SHR_U);
 +      em->i32c((uint32_t)(uintptr_t) pageWriteStampTable.nanobox_fgm()); em->op(I32_ADD); em->mem(I32_LOAD, 0, 2); em->op(I32_EQZ); em->set(C_free);
 +    endb();
++  }
++  void swapProbeEntries() {
++    // C <-> D through the wasm stack (values pushed, then popped in reverse into the other set)
++    em->get(C_lpf); em->get(D_lpf); em->set(C_lpf); em->set(D_lpf);
++    em->get(C_host); em->get(D_host); em->set(C_host); em->set(D_host);
++    em->get(C_bits); em->get(D_bits); em->set(C_bits); em->set(D_bits);
++    em->get(C_ppf); em->get(D_ppf); em->set(C_ppf); em->set(D_ppf);
++    em->get(C_free); em->get(D_free); em->set(C_free); em->set(D_free);
 +  }
 +  // Note: tlbProbe's two blocks are structured so that a full-probe failure branches to
 +  // `slowDepth` as seen from the *caller* (hence +1 inside the extra block).
@@ -2259,6 +2556,65 @@ index 000000000..fff65e68c
 +      return true;
 +    }
 +
++    // ---- ROL/ROR by CL (register forms; JSC's GC sweep loop lives on `rol %cl,%r9`)
++    case BX_IA_ROL_Eq: case BX_IA_ROL_Ed: case BX_IA_ROR_Eq: case BX_IA_ROR_Ed: {
++      if (!R) return false;
++      unsigned size = (ia == BX_IA_ROL_Eq || ia == BX_IA_ROR_Eq) ? 8 : 4;
++      bool rol = (ia == BX_IA_ROL_Eq || ia == BX_IA_ROL_Ed);
++      uint32_t op1 = T[0], res = T[1], cnt = T[2]; uint32_t cf = T32[3], of = T32[4];
++      regGet(R_RCX); em->i64c(size == 8 ? 0x3f : 0x1f); em->op(I64_AND); em->set(cnt);
++      // 32-bit forms clear the upper half even for a zero count; count == 0 keeps flags + value
++      if (size == 4) { pushReg32(dst); regSetFromStack(dst); }
++      lfLoad(); regEnsureLoaded(dst);
++      em->get(cnt); em->i64c(0); em->op(I64_NE); iff();
++        if (size == 8) regGet(dst); else pushReg32(dst);
++        em->set(op1);
++        if (size == 8) { em->get(op1); em->get(cnt); em->op(rol ? I64_ROTL : I64_ROTR); }
++        else { em->get(op1); em->op(I32_WRAP_I64); em->get(cnt); em->op(I32_WRAP_I64); em->op(rol ? I32_ROTL : I32_ROTR); em->op(I64_EXTEND_I32_U); }
++        em->set(res);
++        em->get(res); regSetFromStack(dst);
++        unsigned top = size * 8 - 1;
++        if (rol) { // cf = bit0; of = bit0 ^ bit(top)
++          em->get(res); em->op(I32_WRAP_I64); em->i32c(1); em->op(I32_AND); em->set(cf);
++          em->get(res); em->i64c(top); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->i32c(1); em->op(I32_AND); em->get(cf); em->op(I32_XOR); em->set(of);
++        } else {   // cf = bit(top); of = bit(top-1) ^ bit(top)
++          em->get(res); em->i64c(top); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->i32c(1); em->op(I32_AND); em->set(cf);
++          em->get(res); em->i64c(top - 1); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->i32c(1); em->op(I32_AND); em->get(cf); em->op(I32_XOR); em->set(of);
++        }
++        setFlagsOxxxxC(of, cf);
++      endb();
++      return true;
++    }
++    // ---- TZCNT / LZCNT: result = ctz/clz(op); set_CF(!op) [OF kept]; set_ZF(!result)
++    case BX_IA_TZCNT_GqEq: case BX_IA_TZCNT_GdEd: case BX_IA_LZCNT_GqEq: case BX_IA_LZCNT_GdEd: {
++      unsigned size = (ia == BX_IA_TZCNT_GqEq || ia == BX_IA_LZCNT_GqEq) ? 8 : 4;
++      bool tz = (ia == BX_IA_TZCNT_GqEq || ia == BX_IA_TZCNT_GdEd);
++      uint32_t op1 = T[0], res = T[1]; uint32_t cf = T32[3], zf = T32[4];
++      if (R) { if (size == 8) regGet(src); else pushReg32(src); }
++      else { pushEA(k); em->set(t0); emitRead(k, MK_RD_LIN, seg, size, t0); }
++      em->set(op1);
++      if (size == 8) { em->get(op1); em->op(tz ? I64_CTZ : I64_CLZ); }
++      else { em->get(op1); em->op(I32_WRAP_I64); em->op(tz ? I32_CTZ : I32_CLZ); em->op(I64_EXTEND_I32_U); }
++      em->set(res);
++      em->get(res); regSetFromStack(dst);
++      if (flagsLive) {
++        lfLoad();
++        em->get(op1); em->op(I64_EQZ); em->set(cf);          // set_CF(!op1): auxbits = (aux & ~(PO|CF)) | ((OF^cf)<<PO) | (cf<<CF), OF = ((aux + (1<<PO)) >> CF) & 1
++        em->get(L_lfa); em->i64c(1LL << 30); em->op(I64_ADD); em->i64c(31); em->op(I64_SHR_U); em->i64c(1); em->op(I64_AND);   // OF (i64)
++        em->get(cf); em->op(I64_EXTEND_I32_U); em->op(I64_XOR); em->i64c(30); em->op(I64_SHL);                                    // (OF^cf)<<30
++        em->get(L_lfa); em->i64c(~0xC0000000LL); em->op(I64_AND); em->op(I64_OR);
++        em->get(cf); em->op(I64_EXTEND_I32_U); em->i64c(31); em->op(I64_SHL); em->op(I64_OR);
++        em->set(L_lfa);
++        // set_ZF(!res): res == 0 -> assert_ZF: aux ^= ((lfr>>63)&1)<<SD(0) ^ (lfr&255)<<PDB(8), lfr = 0; else clear_ZF: lfr |= 0x100
++        em->get(res); em->op(I64_EQZ); em->set(zf);
++        em->get(L_lfa); em->get(L_lfr); em->i64c(63); em->op(I64_SHR_U); em->op(I64_XOR); em->get(L_lfr); em->i64c(255); em->op(I64_AND); em->i64c(8); em->op(I64_SHL); em->op(I64_XOR); // aux'
++        em->get(L_lfa); em->get(zf); em->op(SELECT); em->set(L_lfa);
++        em->i64c(0); em->get(L_lfr); em->i64c(0x100); em->op(I64_OR); em->get(zf); em->op(SELECT); em->set(L_lfr);
++        lfMarkSet();
++      }
++      return true;
++    }
++
 +    // ---- indirect CALL / JMP
 +    case BX_IA_CALL_Eq: case BX_IA_JMP_Eq: {
 +      // target first (a memory form may fault: nothing done yet); non-canonical -> deopt (handler raises #GP)
@@ -2929,6 +3285,7 @@ index 000000000..fff65e68c
 +    W = em->addLocal(I64);
 +    for (unsigned t = 0; t < 6; t++) T32[t] = em->addLocal(I32);
 +    C_lpf = em->addLocal(I64); C_host = em->addLocal(I32); C_bits = em->addLocal(I32); C_ppf = em->addLocal(I64); C_free = em->addLocal(I32);
++    D_lpf = em->addLocal(I64); D_host = em->addLocal(I32); D_bits = em->addLocal(I32); D_ppf = em->addLocal(I64); D_free = em->addLocal(I32);
 +    L_cur = em->addLocal(I32);
 +    L_regp = em->addLocal(I32);
 +  }
@@ -3432,7 +3789,7 @@ index 000000000..fff65e68c
 +  while (*ptr >= 0) {
 +    AttachRec &a = nb_attach[*ptr];
 +    if (a.ppage == pp && (a.mask & mask)) {
-+      if (nanobox_attach_live(a)) { a.entry->jitfn = 0; a.entry->hot = 0; }
++      if (nanobox_attach_live(a)) { a.entry->jitfn = 0; *BX_CPU_THIS_PTR iCache.hotOf(a.entry) = 0; }
 +      int idx = *ptr; *ptr = a.next; a.next = nb_attach_free; nb_attach_free = idx; nb_attach_used--;
 +    } else ptr = &a.next;
 +  }
@@ -3481,7 +3838,7 @@ index 000000000..fff65e68c
 +// called by serveICacheMiss() once a trace has been decoded into `e`
 +void nanobox_jit_after_decode(bxICacheEntry_c *e)
 +{
-+  e->hot = 0;
++  // (the slot's hotness counter is deliberately kept: a re-decoded trace inherits it)
 +  if (!nanobox_jit_level || nanobox_dbg_mode) return;
 +  unsigned nreal;
 +  Bit64u key = nanobox_jit_hash(e, nreal);
@@ -3558,7 +3915,7 @@ index 000000000..fff65e68c
 +  nanobox_batch_stats[0]++;
 +  for (unsigned i = 0; i < nb_npending; i++) {
 +    Pending &pd = nb_pending[i];
-+    if (!ok || out[i] == 0) { if (pd.reg) delete pd.reg; if (pd.e->pAddr == pd.pAddr) pd.e->hot = 0; continue; }
++    if (!ok || out[i] == 0) { if (pd.reg) delete pd.reg; if (pd.e->pAddr == pd.pAddr) *BX_CPU_THIS_PTR iCache.hotOf(pd.e) = 0; continue; }
 +    unsigned fn = out[i];
 +    hook_note(fn, (unsigned)(pd.key & 0xffffffffu), (unsigned)(pd.key >> 32));
 +    nanobox_stats.jit_compiled++; nanobox_batch_stats[1]++;
@@ -3646,6 +4003,8 @@ index 000000000..fff65e68c
 +// callees, call continuations), so a bundle recorded from a run covers whole pages, not only the
 +// paths taken. Decoding is host-only (iCache entries), so it does not change guest behaviour.
 +unsigned nanobox_jit_eager = 0;
++unsigned nanobox_jit_probe2 = 1;   // two-entry probe cache in JIT'd traces (default on; nanobox_set_jit_probe2(0) for A/B)
++NB_EXPORT(nanobox_set_jit_probe2) void nanobox_set_jit_probe2(unsigned on) { nanobox_jit_probe2 = on; }
 +unsigned nanobox_jit_merge = 0;    // merge runs of register pushes / pops into one probed span (experiment flag)
 +NB_EXPORT(nanobox_set_jit_merge) void nanobox_set_jit_merge(unsigned on) { nanobox_jit_merge = on; }
 +NB_EXPORT(nanobox_set_jit_eager) void nanobox_set_jit_eager(unsigned on) { nanobox_jit_eager = on; }
@@ -3729,7 +4088,7 @@ index 000000000..fff65e68c
 +  // 2. plain trace
 +  unsigned nreal = 0;
 +  Bit64u key = nanobox_jit_hash(e, nreal);
-+  if (!nanobox_jit_compile_one(e, NULL, key)) e->hot = 0;
++  if (!nanobox_jit_compile_one(e, NULL, key)) *BX_CPU_THIS_PTR iCache.hotOf(e) = 0;
 +}
 +
 +void nanobox_jit_entry_invalidate(bxICacheEntry_c *e)
@@ -3738,7 +4097,7 @@ index 000000000..fff65e68c
 +  // (dbg mode used to release the function here; a region function is shared by all its member
 +  // entries, so releasing it for one would break the others -> dbg mode simply leaks translations)
 +  e->jitfn = 0;
-+  e->hot = 0;
++  *BX_CPU_THIS_PTR iCache.hotOf(e) = 0;
 +}
 +
 +void nanobox_jit_flush_all(void)

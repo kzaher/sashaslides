@@ -28,11 +28,11 @@ untar() { # archive dir-to-check
 # ---- sources ------------------------------------------------------------------------------------
 if ! have bochs/bochs/nanobox_jit.cc; then
   [ -d bochs/.git ] || { log "clone ktock/Bochs"; git clone -q https://github.com/ktock/Bochs bochs; }
-  (cd bochs && git checkout -q a88d1f687 && git apply --3way "$HERE/patches/bochs-nanobox.patch") && log "bochs patched"
+  (cd bochs && git checkout -q a88d1f687 && git apply "$HERE/patches/bochs-nanobox.patch") && log "bochs patched"
 fi
 if ! have work/c2w-src/extras/imagemounter/genspec/main.go; then
   [ -d work/c2w-src/.git ] || { log "clone container2wasm v0.8.4"; git clone -q --branch v0.8.4 --depth 1 https://github.com/container2wasm/container2wasm work/c2w-src; }
-  (cd work/c2w-src && for p in c2w-init-virtio-bundle c2w-imagemounter-genspec c2w-imagemounter-notbefore; do git apply --3way "$HERE/patches/$p.patch" || true; done) && log "c2w patched"
+  (cd work/c2w-src && for p in c2w-init-virtio-bundle c2w-imagemounter-genspec c2w-imagemounter-notbefore; do git apply "$HERE/patches/$p.patch" || true; done) && log "c2w patched"
 fi
 
 # ---- prebuilt toolchains -------------------------------------------------------------------------
@@ -57,7 +57,7 @@ need_cargo() { command -v cargo >/dev/null 2>&1 && return 0; [ -x "$HOME/.cargo/
 if ! have "$TC/wizer-eh"; then
   need_cargo
   [ -d work/wizer-src/.git ] || { log "clone wizer v11.0.3"; git clone -q --branch v11.0.3 --depth 1 https://github.com/bytecodealliance/wizer work/wizer-src; }
-  (cd work/wizer-src && git apply --3way "$HERE/patches/wizer-v11-wasm-exceptions.patch" 2>/dev/null || true; log "cargo build wizer (minutes)"; cargo build -q --release --features env_logger 2>&1 | tail -3 || cargo build -q --release 2>&1 | tail -3)
+  (cd work/wizer-src && git apply "$HERE/patches/wizer-v11-wasm-exceptions.patch" 2>/dev/null || true; log "cargo build wizer (minutes)"; cargo build -q --release --features env_logger 2>&1 | tail -3 || cargo build -q --release 2>&1 | tail -3)
   cp work/wizer-src/target/release/wizer "$TC/wizer-eh"; mkdir -p "$TC/wizer11-include"; cp work/wizer-src/include/wizer.h "$TC/wizer11-include/wizer.h"
 fi
 if ! have "$TC/wasi-vfs-0.6.3-nanobox/libwasi_vfs.a"; then
@@ -65,7 +65,7 @@ if ! have "$TC/wasi-vfs-0.6.3-nanobox/libwasi_vfs.a"; then
   [ -d work/wasi-vfs-src/.git ] || { log "clone wasi-vfs v0.6.3"; git clone -q --branch v0.6.3 --depth 1 https://github.com/kateinoigakukun/wasi-vfs work/wasi-vfs-src; }
   (cd work/wasi-vfs-src && log "cargo build wasi-vfs cli"; cargo build -q --release -p wasi-vfs-cli 2>&1 | tail -3
    mkdir -p "$TC/wasi-vfs-0.6.3"; cp target/release/wasi-vfs "$TC/wasi-vfs-0.6.3/wasi-vfs"
-   git apply --3way "$HERE/patches/wasi-vfs-0.6.3-skip-nondir-prestat.patch" 2>/dev/null || true
+   git apply "$HERE/patches/wasi-vfs-0.6.3-skip-nondir-prestat.patch" 2>/dev/null || true
    log "cargo build libwasi_vfs (patched, wasm32)"; cargo build -q --release --target wasm32-unknown-unknown -p wasi-vfs 2>&1 | tail -3
    mkdir -p "$TC/wasi-vfs-0.6.3-nanobox"; cp target/wasm32-unknown-unknown/release/libwasi_vfs.a "$TC/wasi-vfs-0.6.3-nanobox/libwasi_vfs.a")
 fi
