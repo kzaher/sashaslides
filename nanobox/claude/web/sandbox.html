@@ -29,39 +29,33 @@
   <span id="stats"></span>
 </footer>
 <script src="/netpolicy.js"></script>
+<script src="/proxyext.js"></script>
 <script>
 // The guest's network egress ends in a plain fetch from this page (container2wasm's stack worker):
-// same override as vm.html — only the vendors that don't answer CORS go through the /net/fetch relay
-// (web/netpolicy.js), everything else is fetched directly. Every response is counted per host.
-window.nanoboxNet = { requests: [] };
+// web/proxyext.js routes every cross-origin request — through the nanobox proxy extension when it is
+// installed (detected below, before anything starts), else through the /net/fetch relay for the
+// vendors that don't answer CORS (web/netpolicy.js) and directly for the rest. Every response is
+// counted per host and route (window.nanoboxNet).
+window.nanoboxNet = { requests: [], routes: {}, extension: null };
 (() => {
   const origFetch = window.fetch.bind(window);
   const count = (rec, r) => {
-    const len = Number(r.headers.get("content-length")) || 0;
-    if (len || !r.body) { rec.bytes = len; rec.status = r.status; return r; }
-    const counted = r.body.pipeThrough(new TransformStream({ transform(c, ctl) { rec.bytes += c.byteLength; ctl.enqueue(c); } }));
     rec.status = r.status;
+    const len = Number(r.headers.get("content-length")) || 0;
+    if (len || !r.body) { rec.bytes = len; return r; }
+    const counted = r.body.pipeThrough(new TransformStream({ transform(c, ctl) { rec.bytes += c.byteLength; ctl.enqueue(c); } }));
     return new Response(counted, { status: r.status, statusText: r.statusText, headers: r.headers });
   };
-  window.fetch = async (input, init = {}) => {
+  window.fetch = (input, init = {}) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    let target;
-    try { target = new URL(url, location.href); } catch { return origFetch(input, init); }
+    let target; try { target = new URL(url, location.href); } catch { return origFetch(input, init); }
     const method = (init.method || (typeof input === "object" && !(input instanceof URL) && input.method) || "GET").toUpperCase();
     if (target.origin === location.origin || !/^https?:$/.test(target.protocol)) {
       const rec = { url: target.href, method, via: "origin", bytes: 0 }; window.nanoboxNet.requests.push(rec);
       return origFetch(input, init).then((r) => count(rec, r));
     }
-    if (!NanoboxNetPolicy.isProxied(target.hostname)) {
-      const rec = { url: target.href, method, via: "direct", host: target.hostname, bytes: 0 }; window.nanoboxNet.requests.push(rec);
-      return origFetch(input, init).then((r) => count(rec, r));
-    }
-    const headers = {};
-    new Headers((typeof input === "object" && !(input instanceof URL) && input.headers) || init.headers || {}).forEach((v, k) => (headers[k] = v));
-    const spec = { url: target.href, method, headers };
-    const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(spec)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    const rec = { url: target.href, method, via: "relay", host: target.hostname, bytes: 0 }; window.nanoboxNet.requests.push(rec);
-    return origFetch(new URL("/net/fetch", location.origin), { method: "POST", headers: { "x-nanobox-target": encoded }, body: init.body ?? undefined }).then((r) => count(rec, r));
+    const rec = { url: target.href, method, via: "direct", host: target.hostname, bytes: 0 }; window.nanoboxNet.requests.push(rec);
+    return NanoboxProxy.workerFetch(origFetch, input, init, { extension: !!window.nanoboxNet.extension, onRoute: ({ route }) => { rec.via = route === "relay" ? "relay" : route; window.nanoboxNet.routes[route] = (window.nanoboxNet.routes[route] || 0) + 1; } }).then((r) => count(rec, r));
   };
 })();
 </script>
@@ -118,7 +112,7 @@ const perf = { vm: null, installer: null, runtime: null };   // byte accounting 
 let install = null;   // the persist worker's summary (packages, downloads, store)
 let persistWorker = null; const persistLog = [];
 function log(event, extra) {
-  const rec = Object.assign({ event, t: Math.round(now()) }, extra || {});
+  const rec = Object.assign({}, extra || {}, { event, t: Math.round(now()) });
   events.push(rec);
   console.log(`[nanobox sandbox/${cli}] +${(rec.t / 1000).toFixed(1)}s ${event}`, extra ? JSON.stringify(extra).slice(0, 300) : "");
   try { parent.postMessage(Object.assign({ type: "nanobox", engine: "sandbox", image, cli }, rec), "*"); } catch {}
@@ -179,7 +173,7 @@ const fail = (msg) => { failed = true; timerEl.className = "err"; el("status").t
 const vmChan = new MessageChannel(), rtChan = new MessageChannel();
 function startPersist() {
   const w = new Worker(new URL("/native/installer.js", location.href).href);
-  persistWorker = w;
+  persistWorker = w; NanoboxProxy.bridgeWorker(w);
   w.onmessage = (m) => {
     const d = m.data; if (!d) return;
     if (d.type === "progress") {
@@ -197,7 +191,7 @@ function startPersist() {
     }
   };
   w.onerror = (e) => { fail("persist worker error: " + e.message); };
-  w.postMessage({ type: "open", clis: installList, opts: { noCache, sharp: qs.get("sharp") === "1", reset: qs.get("reset") === "1", noOpfs: qs.get("opfs") === "0" }, vmPort: vmChan.port1, runtimePort: cli === "claude" ? rtChan.port1 : null }, cli === "claude" ? [vmChan.port1, rtChan.port1] : [vmChan.port1]);
+  w.postMessage({ type: "open", clis: installList, opts: { noCache, sharp: qs.get("sharp") === "1", reset: qs.get("reset") === "1", noOpfs: qs.get("opfs") === "0", proxyExtension: !!window.nanoboxNet.extension }, vmPort: vmChan.port1, runtimePort: cli === "claude" ? rtChan.port1 : null }, cli === "claude" ? [vmChan.port1, rtChan.port1] : [vmChan.port1]);
   log("install-start", { clis: installList });
 }
 
@@ -239,7 +233,7 @@ async function bootVm() {
   // what the guest runs (NanoboxInstaller.command, mirrored here so the page needs no installer code):
   const CMD = {
     claude: { argv: ["/usr/local/bin/claude"], env: {}, spec: "config-vm.json" },
-    codex: { argv: ["/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"], env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: "/usr/local/lib/node_modules/@openai/codex", CODEX_HOME: "/tmp/.codex" /* TEMPORARY: sqlite needs fcntl locks, which the engine's 9p server refuses (fs_lock ENOTSUP) — drop once fixed so ~/.codex persists */ }, spec: "config-persist.json" },
+    codex: { argv: ["/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"], env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: "/usr/local/lib/node_modules/@openai/codex" }, spec: "config-persist.json" },
     agy: { argv: ["/usr/local/bin/agy"], env: {}, spec: "config-persist.json" },
     sh: { argv: ["/bin/sh"], env: {}, spec: "config-persist.json" },   // cli=sh: a shell in the guest (probing the persistent tree)
   };
@@ -254,7 +248,7 @@ async function bootVm() {
     jitBundles, engineTag, noCache,
     hostChan: cli === "claude" ? { sab: toGuest.sab, inSab: fromGuest.sab } : undefined,
     bundleFiles: cli === "claude" ? [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }] : [],
-    persistPort: vmChan.port2,
+    persistPort: vmChan.port2, fslog: qs.get("fslog") === "1",
   } }, [vmChan.port2]);
   new TtyServer(slave).start(vmWorker, onVmMessage);
   el("status").textContent = "engine + image + install…";
@@ -262,13 +256,14 @@ async function bootVm() {
     // the runtime worker: connects to the rings, waits for the shim's HELLO, then runs cli.js (read from
     // the installed package in its rootfs copy, transformed in the worker — nothing from our server)
     worker = new Worker(new URL("/native/runtime.js", location.href).href);
+    NanoboxProxy.bridgeWorker(worker);
     worker.onmessage = onRuntimeMessage;
     worker.onerror = (e) => log("worker-error", { message: e.message });
     worker.postMessage({ type: "init", cfg: {
       backend: "vm", toGuest: toGuest.sab, fromGuest: fromGuest.sab,
       imageUrl: imageAddr, specUrl: new URL("/images/" + image + "/config.json", location.href).href,
       cliPath: "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js",   // fallback only: argv[1] from HELLO wins
-      persistPort: rtChan.port2, cols: xterm.cols, rows: xterm.rows, env: {}, noCache, skipNodeLayer: true,
+      persistPort: rtChan.port2, cols: xterm.cols, rows: xterm.rows, env: {}, noCache, skipNodeLayer: true, proxyExtension: !!window.nanoboxNet.extension,
     } }, [rtChan.port2]);
   }
 }
@@ -292,7 +287,8 @@ async function boot() {
   el("engine").textContent = `sandbox: ${image} in the VM + first-run installer (${installList.join(", ")}) → ${cli}`;
   say(`\x1b[38;5;173mnanobox/claude\x1b[0m SANDBOX — image \x1b[1m${image}\x1b[0m (Linux only: no node, no CLI) boots in the emulated VM while the first-run installer fetches node + \x1b[1m${installList.join(", ")}\x1b[0m from the vendors into the persistent /usr/local; then runs \x1b[1m${cli}\x1b[0m${cli === "claude" ? " on this browser's V8 (guest-side node shim)" : " in the guest"}\n\n`);
   if (qs.get("reset") === "1") { try { await caches.delete("nanobox-v1"); log("cache-reset"); } catch {} }   // the persist worker wipes its own store
-  log("boot", { cli, install: installList, noCache });
+  window.nanoboxNet.extension = await NanoboxProxy.detect();
+  log("boot", { cli, install: installList, noCache, proxyExtension: window.nanoboxNet.extension });
   startPersist();
   bootVm().catch((e) => fail("boot failed: " + (e && e.message || e)));
 }

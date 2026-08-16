@@ -45,7 +45,10 @@
   const AGY_MANIFEST = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json";
   const NM = "usr/local/lib/node_modules/";
   const KEYV = "pkg-";   // store file names: packages/<KEYV><name with / as ~>@<version>.tar
-  const PERSIST_ROOTS = ["usr/local", "root", "home", "var"];   // must match tools/genspec-vm.mjs --persist
+  // the persistent tree's mount points (must match tools/genspec-vm.mjs --persist): /usr/local (node +
+  // the CLIs), /root, /home, /var (configs, sqlite, ~/.claude, ~/.codex) — all served through the
+  // bundle share (virtio-9p wasi0)
+  const PERSIST_ROOTS = ["usr/local", "root", "home", "var"];
 
   // what each CLI is made of. `into` = where the package directory's CONTENT is merged (default NM+name);
   // `bins` "auto" = usr/local/bin/<bin> -> ../lib/node_modules/<name>/<target> from package.json (like npm -g);
@@ -87,12 +90,14 @@
     const base = (global.location && global.location.origin && /^https?:/.test(global.location.origin)) ? global.location.origin : "http://localhost:8093";
     return fetch(new URL("/net/fetch", base), { method: "POST", headers: { "x-nanobox-target": encoded } });
   }
+  // `via` is the vendor's CORS situation ("direct": answers CORS; "relay": needs our /net/fetch relay
+  // — or the proxy extension when the page has it: ctx.route(url) says which, web/proxyext.js)
   async function getBytes(url, ctx, via) {
     const t = performance.now();
     const r = await (via === "relay" ? ctx.relay : ctx.fetch)(url);
     if (!r.ok) throw new Error(`${via} fetch ${url}: ${r.status}`);
     const buf = new Uint8Array(await r.arrayBuffer());
-    const rec = { url, via, host: new URL(url).hostname, bytes: buf.length, ms: Math.round(performance.now() - t) };
+    const rec = { url, via, route: ctx.route ? ctx.route(url) : via, host: new URL(url).hostname, bytes: buf.length, ms: Math.round(performance.now() - t) };
     ctx.downloads.push(rec);
     ctx.progress({ stage: "fetched", url, via, bytes: buf.length, ms: rec.ms });
     return buf;
@@ -231,6 +236,7 @@
     const ctx = {
       fetch: opts.fetch || ((u, i) => fetch(u, i)),
       relay: opts.relay || relayFetch,
+      route: opts.route || null,
       have: opts.noCache ? async () => null : (opts.have || (async () => null)),
       keep: opts.keep || (async () => {}),
       progress: opts.onProgress || (() => {}),
@@ -280,9 +286,11 @@
     return out;
   }
   const whiteout = (path) => { const i = path.lastIndexOf("/"); return { path: (i >= 0 ? path.slice(0, i + 1) : "") + ".wh." + path.slice(i + 1), type: "f", data: new Uint8Array(0) }; };
-  // one wasifs onChange event -> tar entries relative to the persist root (path[0] === "persist" is dropped)
-  function journalEntries(root, ev) {
-    const rel = (p) => p.slice(1).join("/");
+  // one wasifs onChange event -> tar entries relative to the persist root: `strip` leading path
+  // components are dropped (1 for the bundle share where the tree sits under "persist/", 0 for the pack share)
+  function journalEntries(root, ev, strip) {
+    const n = strip == null ? 1 : strip;
+    const rel = (p) => p.slice(n).join("/");
     const cur = (p) => F().lookup(root, p.join("/"));
     switch (ev.op) {
       case "write": case "mkdir": case "symlink": case "link": { const n = cur(ev.path); return n ? entriesOf(n, rel(ev.path)) : [whiteout(rel(ev.path))]; }
@@ -352,8 +360,9 @@
 
   // ---- as the sandbox's persist worker -----------------------------------------------------------
   if (typeof importScripts === "function" && typeof self !== "undefined" && self.constructor && self.constructor.name === "DedicatedWorkerGlobalScope" && !global.NanoboxFs) {
-    importScripts(new URL("/wasifs.js", location.href).href, new URL("/oci.js", location.href).href);
+    importScripts(new URL("/wasifs.js", location.href).href, new URL("/oci.js", location.href).href, new URL("/netpolicy.js", location.href).href, new URL("/proxyext.js", location.href).href);
     const T0 = performance.now();
+    const routes = {};   // route -> count (direct | extension | relay | blocked), for the accounting
     const post = (m, tr) => self.postMessage(m, tr || []);
     const progress = (p) => post(Object.assign({ type: "progress", t: Math.round(performance.now() - T0) }, p));
     let store = null, journalQueue = [], journalTimer = null, journalSeq = 0, journalBytes = 0, journalWrites = 0;
@@ -377,7 +386,12 @@
       const stored = new Set(await store.list("packages"));
       const have = async (key) => (opts.noCache ? null : stored.has("packages/" + key + ".tar") ? await store.read("packages/" + key + ".tar") : null);
       const keep = async (key, pkg) => { if (opts.noCache) return; try { await store.write("packages/" + key + ".tar", pkg.tar); await store.write("packages/" + key + ".json", enc.encode(JSON.stringify(pkg.meta))); } catch (e) { progress({ stage: "store-error", key, message: String(e && e.message || e) }); } };
-      const { packages, stats } = await install(clis, Object.assign({}, opts, { have, keep, onProgress: progress }));
+      // every vendor request goes through the shared routing policy: the extension when the page has it,
+      // else the relay for the no-CORS vendors and a direct browser fetch for the rest
+      const ext = !!opts.proxyExtension;
+      const routed = (u) => self.NanoboxProxy.workerFetch(fetch, u, {}, { extension: ext, onRoute: ({ route }) => { routes[route] = (routes[route] || 0) + 1; } });
+      const { packages, stats } = await install(clis, Object.assign({}, opts, { have, keep, onProgress: progress, fetch: routed, relay: routed, route: (u) => self.NanoboxProxy.route(u, { extension: ext }) }));
+      stats.routes = routes;
       // journals (guest writes of earlier sessions), oldest first; compact when many
       const jnames = await store.list("journal");
       const journals = []; for (const n of jnames) { const t = await store.read(n); if (t) journals.push(t); }

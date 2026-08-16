@@ -35,48 +35,34 @@ importScripts(new URL("/wasifs.js", location.href).href, new URL("/oci.js", loca
 
 self.onmessage = (m) => { if (m.data && m.data.type === "init") { self.onmessage = null; main(m.data.cfg).catch((e) => { ev("fatal", { message: String(e && e.stack || e) }); }); } };
 
-// --- egress: only the vendors that do not answer CORS go through the server's POST /net/fetch relay
-// (web/netpolicy.js — the same allow-list the server enforces); everything else (npm registry,
-// raw.githubusercontent, auth/api.openai, ...) is fetched directly by the browser. Bytes are counted
-// per host and per path (direct / relayed / our origin) for the data-accounting table.
-importScripts(new URL("/netpolicy.js", location.href).href);
+// --- egress: web/proxyext.js decides the route of every cross-origin request — "extension" (the
+// nanobox proxy extension, when the page detected it: cfg.proxyExtension), else "relay" for the vendors
+// that do not answer CORS (web/netpolicy.js — the same allow-list the server enforces) and "direct"
+// for everything else (npm registry, raw.githubusercontent, auth/api.openai, ...); "blocked" for cloud
+// metadata hosts. Bytes are counted per host and per route for the data-accounting table.
+importScripts(new URL("/netpolicy.js", location.href).href, new URL("/proxyext.js", location.href).href);
 const origFetch = self.fetch.bind(self);
 const netlog = [];
-const netBytes = { origin: 0, direct: 0, relayed: 0, hosts: {} };   // hosts: host -> { path, bytes, requests }
+const netBytes = { origin: 0, direct: 0, relayed: 0, extension: 0, blocked: 0, hosts: {}, routes: {} };   // hosts: host -> { path, bytes, requests }
+let proxyExtension = false;
 function countBytes(path, host, r) {
   const rec = netBytes.hosts[host] || (netBytes.hosts[host] = { path, bytes: 0, requests: 0 });
   rec.requests++;
   const len = Number(r && r.headers && r.headers.get("content-length")) || 0;
   if (len) { rec.bytes += len; netBytes[path] += len; return r; }
-  // no content-length (chunked): count the body as it streams by
   if (!r || !r.body) return r;
-  let n = 0;
-  const counted = r.body.pipeThrough(new TransformStream({ transform(chunk, c) { n += chunk.byteLength; rec.bytes += chunk.byteLength; netBytes[path] += chunk.byteLength; c.enqueue(chunk); } }));
+  const counted = r.body.pipeThrough(new TransformStream({ transform(chunk, c) { rec.bytes += chunk.byteLength; netBytes[path] += chunk.byteLength; c.enqueue(chunk); } }));
   return new Response(counted, { status: r.status, statusText: r.statusText, headers: r.headers });
 }
-async function gatewayFetch(input, init = {}) {
+const ROUTE_PATH = { direct: "direct", relay: "relayed", extension: "extension", blocked: "blocked" };
+function gatewayFetch(input, init = {}) {
   const url0 = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  let target;
-  try { target = new URL(url0, location.href); } catch { return origFetch(input, init); }
+  let target; try { target = new URL(url0, location.href); } catch { return origFetch(input, init); }
   if (target.origin === location.origin || !/^https?:$/.test(target.protocol)) return origFetch(input, init).then((r) => countBytes("origin", target.host, r));
-  const method = (init.method || (typeof input === "object" && !(input instanceof URL) && input.method) || "GET").toUpperCase();
-  if (!self.NanoboxNetPolicy.isProxied(target.hostname)) {
-    netlog.push({ t: Math.round(performance.now() - T0), method, url: target.href, via: "direct" });
-    ev("net", { method, url: target.href, via: "direct" });
-    return origFetch(input, init).then((r) => countBytes("direct", target.hostname, r));
-  }
-  const headers = {};
-  new Headers((typeof input === "object" && !(input instanceof URL) && input.headers) || init.headers || {}).forEach((v, k) => (headers[k] = v));
-  let body = init.body;
-  if (body === undefined && typeof input === "object" && !(input instanceof URL) && input.body) body = await input.arrayBuffer();
-  if (body && typeof body.getReader === "function") body = await new Response(body).arrayBuffer();
-  const spec = { url: target.href, method, headers };
-  const encoded = btoa(String.fromCharCode(...enc.encode(JSON.stringify(spec)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  netlog.push({ t: Math.round(performance.now() - T0), method, url: target.href, via: "relay" });
-  ev("net", { method, url: target.href, via: "relay" });
-  return origFetch(new URL("/net/fetch", location.origin), { method: "POST", headers: { "x-nanobox-target": encoded }, body: ["GET", "HEAD"].includes(method) ? undefined : body, signal: init.signal }).then((r) => countBytes("relayed", target.hostname, r));
+  let chosen = "direct";
+  return self.NanoboxProxy.workerFetch(origFetch, input, init, { extension: proxyExtension, onRoute: ({ route, method, url }) => { chosen = route; netBytes.routes[route] = (netBytes.routes[route] || 0) + 1; netlog.push({ t: Math.round(performance.now() - T0), method, url, via: route }); ev("net", { method, url, via: route }); } })
+    .then((r) => countBytes(ROUTE_PATH[chosen] || "direct", target.hostname, r));
 }
-
 async function loadRootfs(cfg) {
   const F = self.NanoboxFs, Oci = self.NanoboxOci, Cache = self.NanoboxCache;
   const base = cfg.imageUrl;
@@ -129,7 +115,8 @@ async function loadRootfs(cfg) {
 }
 
 async function main(cfg) {
-  ev("worker-start", { backend: cfg.backend || "mem" });
+  ev("worker-start", { backend: cfg.backend || "mem", proxyExtension: !!cfg.proxyExtension });
+  proxyExtension = !!cfg.proxyExtension;
   const vm = cfg.backend === "vm";
   let guest = null, helloP = null;
   if (vm) {

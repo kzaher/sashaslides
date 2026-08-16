@@ -1,0 +1,94 @@
+{
+  "cli": "claude",
+  "warm": {
+    "date": "2026-08-16T17:54:59.933Z",
+    "verdict": {
+      "signinMs": 4761,
+      "loadMs": 1132,
+      "bootMs": 1404,
+      "runMs": 2226,
+      "engineMs": 761,
+      "imageMs": 740,
+      "installMs": 789,
+      "persistMs": 813,
+      "helloMs": 2563,
+      "bundleMs": 405,
+      "transformMs": 165,
+      "icount": "627606541"
+    },
+    "accounting": {
+      "ours": {
+        "runtime/pages": 4200,
+        "jit-bundles": 739
+      },
+      "oursTotal": 4939,
+      "vendorDirect": {
+        "raw.githubusercontent.com": 174160
+      },
+      "vendorDirectTotal": 174160,
+      "vendorRelay": {
+        "api.anthropic.com": 20,
+        "platform.claude.com": 19
+      },
+      "vendorRelayTotal": 39
+    },
+    "install": {
+      "ms": 456,
+      "packages": 3,
+      "fromCache": 3,
+      "downloadBytes": 0,
+      "store": "opfs",
+      "list": [
+        {
+          "cli": "node",
+          "key": "pkg-node-linux-x64@22.23.2",
+          "name": "node-linux-x64",
+          "version": "22.23.2",
+          "files": 2729,
+          "unpackedBytes": 183774506,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 392
+          }
+        },
+        {
+          "cli": "node",
+          "key": "pkg-npm@10.9.8",
+          "name": "npm",
+          "version": "10.9.8",
+          "files": 2011,
+          "unpackedBytes": 11682638,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 26
+          }
+        },
+        {
+          "cli": "claude",
+          "key": "pkg-@anthropic-ai~claude-code@2.1.112",
+          "name": "@anthropic-ai/claude-code",
+          "version": "2.1.112",
+          "files": 10,
+          "unpackedBytes": 21603853,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 89
+          }
+        }
+      ],
+      "journals": {
+        "count": 3,
+        "bytes": 14336
+      }
+    }
+  }
+}

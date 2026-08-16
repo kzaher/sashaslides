@@ -28,7 +28,7 @@ mkdir -p "$HERE/web/images/linux-base"
 node "$HERE/tools/genspec.mjs" "$OUT" "$HERE/web/images/claude/config.json" "$HERE/web/images/linux-base"
 # config-vm.json: + /dev/hvc1 + PATH=/bundle/nb:... (the node shim) + the persistent bind mounts (claude on the browser V8)
 # config-persist.json: only the persistent bind mounts (codex / agy: native binaries in the guest, real node in PATH)
-PERSIST=usr/local,root,home,var
+PERSIST=usr/local,root,home,var   # must match web/native/installer.js PERSIST_ROOTS
 node "$HERE/tools/genspec-vm.mjs" "$HERE/web/images/linux-base/config.json" "$HERE/web/images/linux-base/config-vm.json" --shim --persist "$PERSIST"
 node "$HERE/tools/genspec-vm.mjs" "$HERE/web/images/linux-base/config.json" "$HERE/web/images/linux-base/config-persist.json" --persist "$PERSIST"
 ls -la "$HERE/web/images/linux-base"

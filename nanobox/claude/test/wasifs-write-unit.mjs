@@ -25,7 +25,7 @@ check("create in persist", r === E.SUCCESS, r);
 const np = heap; heap += 4;
 r = wasi.fd_pwrite(fd, iov('{"a":1}'), 1, 0n, np); check("pwrite", r === E.SUCCESS && dv.getUint32(np, true) === 7);
 r = wasi.fd_pwrite(fd, iov('X'), 1, 3n, np); check("pwrite at offset", r === E.SUCCESS);
-wasi.fd_close(fd);
+wasi.fd_close(fd); fs.flushDirty(0);
 check("content", dec.decode(F.lookup(root, "persist/root/.claude.json").data) === '{"aX:1}', dec.decode(F.lookup(root, "persist/root/.claude.json").data));
 check("change event", changes.at(-1) === "write:persist/root/.claude.json", changes.at(-1));
 // 2. EROFS outside persist
@@ -33,11 +33,11 @@ check("change event", changes.at(-1) === "write:persist/root/.claude.json", chan
 [r, fd] = open("rootfs/etc/hosts", 0); r = wasi.fd_pwrite(fd, iov("x"), 1, 0n, np); check("write image file -> EROFS", r === E.ROFS, r); wasi.fd_close(fd);
 // 3. write to an image-derived file under persist (view into shared buffer) makes a private copy
 [r, fd] = open("persist/root/.claude/settings.json", 0);
-r = wasi.fd_pwrite(fd, iov('{"theme":"dark"}'), 1, 0n, np); wasi.fd_close(fd);
+r = wasi.fd_pwrite(fd, iov('{"theme":"dark"}'), 1, 0n, np); wasi.fd_close(fd); fs.flushDirty(0);
 check("overwrite existing", dec.decode(F.lookup(root, "persist/root/.claude/settings.json").data) === '{"theme":"dark"}');
 // 4. append flag
 [r, fd] = open("persist/root/log.txt", CREAT, 1);
-wasi.fd_write(fd, iov("a\n"), 1, np); wasi.fd_write(fd, iov("b\n"), 1, np); wasi.fd_close(fd);
+wasi.fd_write(fd, iov("a\n"), 1, np); wasi.fd_write(fd, iov("b\n"), 1, np); wasi.fd_close(fd); fs.flushDirty(0);
 check("append", dec.decode(F.lookup(root, "persist/root/log.txt").data) === "a\nb\n");
 // 5. mkdir / rename / unlink / rmdir / symlink / truncate
 { const [p, l] = str("persist/root/dir"); check("mkdir", wasi.path_create_directory(6, p, l) === E.SUCCESS); }
@@ -46,7 +46,7 @@ check("append", dec.decode(F.lookup(root, "persist/root/log.txt").data) === "a\n
 { const [p, l] = str("persist/root/dir"); check("rmdir", wasi.path_remove_directory(6, p, l) === E.SUCCESS); }
 { const [t, tl] = str("../lib/node_modules/x/cli.js"), [p, l] = str("persist/usr/local/bin/x"); check("symlink", wasi.path_symlink(t, tl, 6, p, l) === E.SUCCESS && F.lookup(root, "persist/usr/local/bin/x").t === "l"); }
 [r, fd] = open("persist/root/.claude.json", 0); check("truncate", wasi.fd_filestat_set_size(fd, 2n) === E.SUCCESS && F.lookup(root, "persist/root/.claude.json").data.byteLength === 2); wasi.fd_close(fd);
-[r, fd] = open("persist/root/.claude.json", CREAT | EXCL); check("O_EXCL on existing -> EEXIST", r === E.EXIST, r);
+[r, fd] = open("persist/root/.claude.json", CREAT | EXCL); check("O_EXCL on existing -> EEXIST", r === E.EXIST, r); fs.flushDirty(0);
 { const [p, l] = str("rootfs/etc/hosts"); check("unlink outside -> EROFS", wasi.path_unlink_file(6, p, l) === E.ROFS); }
 // 6. read back through fd_read
 [r, fd] = open("persist/root/.claude/settings.json", 0); { const dp = heap; heap += 64; const ip = heap; heap += 8; dv.setUint32(ip, dp, true); dv.setUint32(ip + 4, 64, true); wasi.fd_read(fd, ip, 1, np); check("read back", dec.decode(u8.subarray(dp, dp + dv.getUint32(np, true))) === '{"theme":"dark"}'); }

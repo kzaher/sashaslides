@@ -51,21 +51,30 @@ await sleep(500);
 const dump = CLI === "claude" ? await ev("window.nanobox.dump().catch(() => null)") : null;
 const acct = await ev(`(() => { const n = window.nanobox; return { pageResources: n.pageResources(), pageNet: n.pageNet.requests, perf: n.perf, install: n.installInfo, persistLog: n.persistLog }; })()`);
 const origin = `http://localhost:${PORT}`;
-const rows = new Map(); // url -> {bytes, via, kind}
-const add = (u, bytes, via, kind) => { const cur = rows.get(u); if (cur) { cur.bytes = Math.max(cur.bytes, bytes); if (kind) cur.kind = kind; } else rows.set(u, { bytes, via, kind }); };
+const rows = new Map(); // url -> {bytes (wire), cached (served from the HTTP cache / Cache API), via, kind}
+const add = (u, bytes, via, kind, cached) => { const cur = rows.get(u); if (cur) { cur.bytes = Math.max(cur.bytes, bytes); cur.cached = Math.max(cur.cached || 0, cached || 0); if (kind) cur.kind = kind; } else rows.set(u, { bytes, via, kind, cached: cached || 0 }); };
 const kindOf = (u) => { try { const p = new URL(u).pathname; if (p.includes("/engine/opt/") && p.endsWith("out.wasm.gzip")) return "engine"; if (p.includes("imagemounter")) return "imagemounter"; if (p.startsWith("/c2w/images/")) return "image"; if (p.startsWith("/engine/opt/jit/")) return "jit-bundles"; if (p === "/net/fetch") return "relay"; if (p.startsWith("/images/")) return "spec"; if (p.endsWith("nbnode")) return "shim"; if (/\.(js|css|html)$/.test(p) || p === "/sandbox.html") return "runtime/pages"; return "other"; } catch { return "other"; } };
-for (const r of acct.pageResources || []) if (r.name.startsWith(origin)) add(r.name, r.transferSize || 0, "origin", kindOf(r.name));
-for (const src of [acct.perf && acct.perf.vm, acct.perf && acct.perf.installer]) for (const r of (src && src.resources) || []) if (r.name.startsWith(origin)) add(r.name, r.transferSize || 0, "origin", kindOf(r.name));
+const httpCached = (r) => (r.transferSize ? 0 : (r.encodedBodySize || r.decodedBodySize || 0));
+for (const r of acct.pageResources || []) if (r.name.startsWith(origin)) add(r.name, r.transferSize || 0, "origin", kindOf(r.name), httpCached(r));
+for (const src of [acct.perf && acct.perf.vm, acct.perf && acct.perf.installer]) for (const r of (src && src.resources) || []) if (r.name.startsWith(origin)) add(r.name, r.transferSize || 0, "origin", kindOf(r.name), httpCached(r));
 for (const r of (acct.perf && acct.perf.vm && acct.perf.vm.requests) || []) if (r.method !== "HEAD") add(r.url + (r.method === "POST" ? "#" + Math.random() : ""), r.bytes || 0, "origin", kindOf(r.url));
-for (const r of acct.pageNet || []) { if (r.via === "origin") add(r.url, r.bytes || 0, "origin", kindOf(r.url)); else add(r.url + "#" + Math.random(), r.bytes || 0, r.via, r.host); }
+for (const r of acct.pageNet || []) { if (r.via === "origin") add(r.url, r.bytes || 0, "origin", kindOf(r.url)); else add(r.url + "#" + Math.random(), r.bytes || 0, r.via === "relay" ? "relay" : "direct", r.host); }
 const vendorDirect = {}, vendorRelay = {};
 for (const d of (acct.install && acct.install.downloads) || []) { const t = d.via === "relay" ? vendorRelay : vendorDirect; t[d.host] = (t[d.host] || 0) + d.bytes; }
 if (dump && dump.netBytes) for (const [h, rec] of Object.entries(dump.netBytes.hosts || {})) { const t = rec.path === "relayed" ? vendorRelay : rec.path === "direct" ? vendorDirect : null; if (t) t[h] = (t[h] || 0) + rec.bytes; }
 for (const [u, r] of rows) if (r.via === "direct") vendorDirect[r.kind] = (vendorDirect[r.kind] || 0) + r.bytes; else if (r.via === "relay") vendorRelay[r.kind] = (vendorRelay[r.kind] || 0) + r.bytes;
-const ours = {}; let oursTotal = 0;
-for (const [u, r] of rows) if (r.via === "origin" && r.kind !== "relay") { ours[r.kind] = (ours[r.kind] || 0) + r.bytes; oursTotal += r.bytes; }
+const ours = {}, oursCached = {}; let oursTotal = 0;
+for (const [u, r] of rows) if (r.via === "origin" && r.kind !== "relay") { ours[r.kind] = (ours[r.kind] || 0) + r.bytes; oursTotal += r.bytes; if (r.cached) oursCached[r.kind] = (oursCached[r.kind] || 0) + r.cached; }
+// served from the Cache API (engine / JIT bundles / shim: NanoboxCache; image layers: the layer cache) — no wire bytes
+const vmCache = acct.perf && acct.perf.vm && acct.perf.vm.cache;
+const engEv = (await ev("window.nanobox.events.find((e) => e.event === 'vm:engine-cached')")) || null;
+const imgEv = (await ev("window.nanobox.events.find((e) => e.event === 'vm:image-loaded')")) || null;
+if (engEv && engEv.bytes) oursCached["engine (Cache API)"] = engEv.bytes;
+if (imgEv && imgEv.cache && imgEv.cache.bytes) oursCached["image layers (Cache API, decompressed)"] = imgEv.cache.bytes;
+if (vmCache && vmCache.bytesFromCache) { const rest = vmCache.bytesFromCache - (engEv && engEv.bytes || 0) - (imgEv && imgEv.cache && imgEv.cache.bytes || 0); if (rest > 0) oursCached["bundles/shim (Cache API)"] = rest; }
 const sum = (o) => Object.values(o).reduce((s, v) => s + v, 0);
-const accounting = { ours, oursTotal, vendorDirect, vendorDirectTotal: sum(vendorDirect), vendorRelay, vendorRelayTotal: sum(vendorRelay) };
+const accounting = { ours, oursTotal, oursCached, oursCachedTotal: sum(oursCached), vendorDirect, vendorDirectTotal: sum(vendorDirect), vendorRelay, vendorRelayTotal: sum(vendorRelay), routes: { page: acct.pageNet && window_routes(acct), installer: acct.install && acct.install.routes, runtime: dump && dump.netBytes && dump.netBytes.routes } };
+function window_routes(a) { const o = {}; for (const r of a.pageNet || []) if (r.via !== "origin") o[r.via] = (o[r.via] || 0) + 1; return o; }
 const screen = (await ev("window.nanobox ? window.nanobox.screen() : ''")) || "";
 try { const { data } = await Page.captureScreenshot({ format: "png" }); writeFileSync(join(OUT, `${TAG}.png`), Buffer.from(data, "base64")); } catch {}
 const rec = { cli: CLI, cold: COLD, url, verdict, date: new Date().toISOString(), browser: await ev("navigator.userAgent"), install: acct.install, accounting, events: (await ev("window.nanobox.events")).filter((e) => e.event !== "worker:missing" && e.event !== "vm:image"), persistLog: acct.persistLog, missing: dump ? dump.missing : null, spawns: dump ? dump.spawns : null, net: dump ? dump.net : null, netBytes: dump ? dump.netBytes : null, backendOps: dump ? dump.backendOps : null, backendStats: dump ? dump.backendStats : null, screenTail: screen.trim().split("\n").filter((l) => l.trim()).slice(-25) };
@@ -75,6 +84,7 @@ console.log("\n--- screen ---\n" + rec.screenTail.join("\n"));
 const mb = (b) => (b / 1e6).toFixed(1).padStart(7) + " MB";
 console.log(`\n--- bytes (${COLD ? "cold" : "warm"}) ---`);
 console.log(`  our origin      ${mb(oursTotal)}   ` + Object.entries(ours).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${(v / 1e6).toFixed(1)}`).join(", "));
+console.log(`  (from caches)   ${mb(accounting.oursCachedTotal)}   ` + Object.entries(oursCached).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${(v / 1e6).toFixed(1)}`).join(", "));
 console.log(`  vendors direct  ${mb(accounting.vendorDirectTotal)}   ` + Object.entries(vendorDirect).map(([k, v]) => `${k} ${(v / 1e6).toFixed(1)}`).join(", "));
 console.log(`  vendors relayed ${mb(accounting.vendorRelayTotal)}   ` + Object.entries(vendorRelay).map(([k, v]) => `${k} ${(v / 1e6).toFixed(1)}`).join(", "));
 if (acct.install) console.log(`  install: ${acct.install.packages} packages, ${acct.install.fromCache} from the store (${acct.install.store}), downloaded ${(acct.install.downloadBytes / 1e6).toFixed(1)} MB in ${acct.install.ms} ms; journals ${JSON.stringify(acct.install.journals)}`);

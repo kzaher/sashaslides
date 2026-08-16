@@ -1,0 +1,103 @@
+{
+  "cli": "codex",
+  "cold": {
+    "date": "2026-08-16T17:41:19.474Z",
+    "verdict": null,
+    "accounting": {
+      "ours": {
+        "runtime/pages": 521729,
+        "jit-bundles": 739
+      },
+      "oursTotal": 522468,
+      "vendorDirect": {
+        "registry.npmjs.org": 176646764
+      },
+      "vendorDirectTotal": 176646764,
+      "vendorRelay": {
+        "ab.chatgpt.com": 16
+      },
+      "vendorRelayTotal": 16
+    },
+    "install": {
+      "ms": 6972,
+      "packages": 4,
+      "fromCache": 0,
+      "downloadBytes": 176646764,
+      "store": "opfs",
+      "list": [
+        {
+          "cli": "node",
+          "key": "pkg-node-linux-x64@22.23.2",
+          "name": "node-linux-x64",
+          "version": "22.23.2",
+          "files": 2729,
+          "unpackedBytes": 183774506,
+          "tarBytes": 0,
+          "download": {
+            "url": "https://registry.npmjs.org/node-linux-x64/-/node-linux-x64-22.23.2.tgz",
+            "bytes": 51576724,
+            "fromCache": false,
+            "ms": 3259,
+            "gunzipMs": 483,
+            "integrity": "sha512-lfi+07N7Y+NCz+WrWIu+VmHkXuTLuDv6JLpCAH5n+MvZeG4x9SoSGVJ+h8lUJwJKXGwZUJCdDXo6zZoLw16RGA=="
+          }
+        },
+        {
+          "cli": "node",
+          "key": "pkg-npm@10.9.8",
+          "name": "npm",
+          "version": "10.9.8",
+          "files": 2011,
+          "unpackedBytes": 11682638,
+          "tarBytes": 0,
+          "download": {
+            "url": "https://registry.npmjs.org/npm/-/npm-10.9.8.tgz",
+            "bytes": 2973275,
+            "fromCache": false,
+            "ms": 1437,
+            "gunzipMs": 37,
+            "integrity": "sha512-fYwb6ODSmHkqrJQQaCxY3M2lPf/mpgC7ik0HSzzIwG5CGtabRp4bNqikatvCoT42b5INQSqudVH0R7yVmC9hVg=="
+          }
+        },
+        {
+          "cli": "codex",
+          "key": "pkg-@openai~codex@0.147.0",
+          "name": "@openai/codex",
+          "version": "0.147.0",
+          "files": 4,
+          "unpackedBytes": 11652,
+          "tarBytes": 0,
+          "download": {
+            "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.147.0.tgz",
+            "bytes": 4495,
+            "fromCache": false,
+            "ms": 678,
+            "gunzipMs": 1,
+            "integrity": "sha512-EQLEXecAG2ptxI7UpBMo2TR/ga5596/c/OsYF/0LoUDh5JANZ7IoGqlzBEWbuEVQ76JePIbtTW/ihCkp1a7Z3w=="
+          }
+        },
+        {
+          "cli": "codex",
+          "key": "pkg-@openai~codex@0.147.0-linux-x64",
+          "name": "@openai/codex",
+          "version": "0.147.0-linux-x64",
+          "files": 8,
+          "unpackedBytes": 314801778,
+          "tarBytes": 0,
+          "download": {
+            "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.147.0-linux-x64.tgz",
+            "bytes": 122020574,
+            "fromCache": false,
+            "ms": 6156,
+            "gunzipMs": 924,
+            "integrity": "sha512-0W9MBxPpWW0cSkNqrTDN2jR7rzzT7oNMhQY5446lT2Lw5cz5yhDTck4Va9rjkQEm+HlFzP/dmEMSZbXfJsINmw=="
+          }
+        }
+      ],
+      "journals": {
+        "count": 0,
+        "bytes": 0
+      }
+    }
+  }
+}

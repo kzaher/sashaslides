@@ -9,6 +9,8 @@
 //     starts; the runtime spec bind-mounts /mnt/wasi0/bundle/persist/<p> onto /<p>, so the guest sees
 //     node, npm and the CLIs under /usr/local and its home under /root — as part of the image. The
 //     engine download, the image layers and the installer run in parallel; the VM starts when all are in.
+//     (The 9p share is mounted cache=loose by the guest init; the engine's 9p qids for this tree are
+//     the nodes' stable inode numbers, so the client's cache stays coherent across tmp+rename writes.)
 //   * the persist subtree is WRITABLE (wasifs.js `writable`): every completed guest write under it
 //     (file close/fsync, mkdir, unlink, rename, symlink) becomes a tar record with OCI whiteouts and
 //     is posted back to the persist worker over the same port, which journals it to OPFS — so
@@ -48,6 +50,7 @@ let persistReady = false;
   const inner = self.onmessage;
   self.onmessage = (m) => {
     const d = m.data;
+    if (d && typeof d === "object" && d.type === "init" && d.cfg && d.cfg.fslog) self.nbFsLog = true;
     if (d && typeof d === "object" && d.type === "init" && d.cfg && d.cfg.persistPort) {
       persistPort = d.cfg.persistPort;
       nbPersist = new Promise((res, rej) => { persistPort.onmessage = (e) => { const x = e.data || {}; if (x.type === "persist") res({ packages: x.packages || [], journals: x.journals || [] }); else if (x.type === "error") rej(new Error(x.message)); }; });
@@ -77,31 +80,50 @@ let persistReady = false;
       return img;
     },
   });
-  // the bundle share gets the persist subtree, writable, journaled back to the persist worker
+  // journal one wasifs change (from either share) back to the persist worker
+  const journal = (root, strip) => (chg) => {
+    if (!persistPort) return;
+    try {
+      const entries = I.journal.entries(root, chg, strip);
+      if (!entries.length) return;
+      const tar = I.tar.pack(entries);
+      persistPort.postMessage({ type: "journal", tar: tar.buffer, op: chg.op, path: chg.path.slice(strip).join("/") }, [tar.buffer]);
+    } catch (e) { ev("journal-error", { message: String(e && e.message || e) }); }
+  };
+  // the bundle share gets the persist subtree (writable — its /usr/local is what gets bind-mounted),
+  // journaled back to the persist worker
   const attach0 = F.attach;
   F.attach = (imp, cfg) => {
     if (persistReady && cfg.root) cfg.root.e.set("persist", persistDir);
     const wcfg = Object.assign({
       writable: (path) => path[0] === "persist",
-      onChange: (chg) => {
-        if (!persistPort) return;
-        try {
-          const entries = I.journal.entries(cfg.root, chg);
-          if (!entries.length) return;
-          const tar = I.tar.pack(entries);
-          persistPort.postMessage({ type: "journal", tar: tar.buffer, op: chg.op, path: chg.path.slice(1).join("/") }, [tar.buffer]);
-        } catch (e) { ev("journal-error", { message: String(e && e.message || e) }); }
-      },
+      onChange: journal(cfg.root, 1),
+      // ?fslog=1: every mutating / opening 9p op on the persist subtree as an event (debugging)
+      log: self.nbFsLog ? (name, args, r, path) => { if (/^(fd_read|fd_pread|fd_seek|fd_tell|fd_filestat_get|fd_fdstat_get|path_filestat_get|fd_readdir|path_readlink|fd_prestat)/.test(name)) return; if (path && !/^persist/.test(path) && name.startsWith("path_")) return; ev("fs", { share: cfg.name, op: name, path, r, a: name.startsWith("fd_") ? args[0] : undefined, x: name === "fd_filestat_set_size" ? String(args[1]) : name === "fd_pwrite" ? "off " + String(args[3]) : name === "fd_write" ? "n=" + args[2] : undefined }); } : undefined,
     }, cfg);
+    ev("persist-attach", { persist: persistReady, share: cfg.name, fd: cfg.fd });
     return attach0(imp, wcfg);
   };
   // just before the VM starts: hand the page everything this worker fetched
+  // (NbRun is an esbuild namespace object with getter-only exports: replace the object, not the property)
   const start0 = self.NbRun.startContainer;
-  self.NbRun.startContainer = function () {
+  self.NbRun = Object.assign({}, self.NbRun, { startContainer: function () {
     try {
       const resources = (performance.getEntriesByType ? performance.getEntriesByType("resource") : []).map((e) => ({ name: e.name, transferSize: e.transferSize, encodedBodySize: e.encodedBodySize, decodedBodySize: e.decodedBodySize }));
       postMessage({ type: "nanobox-perf", requests: nbNet.requests, resources, cache: self.NanoboxCache ? self.NanoboxCache.stats : null });
     } catch (e) {}
     return start0.apply(this, arguments);
+  } });
+  // content journaling: the guest's 9p client writes back after close, so wasifs reports a written
+  // path once it has been quiet for a while — pumped from the engine's poll_oneoff (the VM loop
+  // never yields; opt-worker.js already wraps WebAssembly.instantiate — this wraps its wrapper)
+  const inst0 = WebAssembly.instantiate;
+  WebAssembly.instantiate = function (src, imports) {
+    const wasi = imports && imports.wasi_snapshot_preview1;
+    if (wasi && wasi.poll_oneoff) {
+      const poll = wasi.poll_oneoff; let last = 0;
+      wasi.poll_oneoff = function () { const now = performance.now(); if (now - last > 100) { last = now; try { if (bundleFs && bundleFs.dirty) bundleFs.flushDirty(400); } catch (e) {} } return poll.apply(this, arguments); };
+    }
+    return inst0.call(WebAssembly, src, imports);
   };
 }

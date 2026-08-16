@@ -15,8 +15,10 @@
 //   growable buffer — image files stay views into their layer tar until first written), fd_filestat_set_size,
 //   fd_allocate, path_create_directory, path_unlink_file, path_remove_directory, path_rename, path_symlink,
 //   path_link, *_set_times (accepted, timestamps stay fixed) — all EROFS outside the writable subtrees, and
-//   `onChange` fires once per completed change (write: at fd_close/fd_sync of a modified fd) with the
-//   canonical path — that is what the sandbox journals to OPFS. WASI carries no mode: created files are
+//   `onChange` fires once per completed change with the canonical path — structure changes (mkdir,
+//   remove, rename, symlink, link) at once, content changes ("write") from `fs.flushDirty(quietMs)`
+//   once a written path has been quiet for quietMs (the guest's 9p client writes back after close) —
+//   that is what the sandbox journals to OPFS. WASI carries no mode: created files are
 //   0644, directories 0755 (the 9p server's chmod is ENOTSUP anyway).
 //
 // Works in a classic worker (self.NanoboxFs) and in node (globalThis.NanoboxFs after import).
@@ -86,6 +88,18 @@
     const writable = cfg.writable || (() => false);
     const onChange = cfg.onChange || (() => {});
     const change = (op, path, extra) => { stats.changes++; try { onChange(Object.assign({ op, path }, extra || {})); } catch (e) {} };
+    // content changes are reported LATER, not at fd_close: the guest's 9p client (cache=loose) writes back
+    // dirty pages through its own writeback fid, often after the user's fd is closed — so a written path
+    // is marked dirty (with the time of its last write) and `flushDirty(quietMs)` reports it once no
+    // write has hit it for `quietMs` (the sandbox worker calls it from the engine's poll hook)
+    const dirty = new Map(); // key -> { path, t }
+    const touch = (path) => { const k = path.join("/"); const d = dirty.get(k); if (d) d.t = performance.now(); else dirty.set(k, { path: path.slice(), t: performance.now() }); };
+    function flushDirty(quietMs) {
+      if (!dirty.size) return 0;
+      const now = performance.now(); let n = 0;
+      for (const [k, d] of dirty) if (now - d.t >= (quietMs || 0)) { dirty.delete(k); change("write", d.path); n++; }
+      return n;
+    }
     // split "a/b/c" resolved against base into { dir (node), dirPath (canonical array), name }; the parent must exist
     function parentOf(base, path, basePath) {
       const parts = path.split("/").filter((p) => p && p !== ".");
@@ -210,7 +224,7 @@
             const node = file(new Uint8Array(0)); node.mode = 0o644; p.dir.e.set(p.name, node); created = true;
           } else {
             if (oflags & OFLAG.EXCL) return E.EXIST;
-            if (oflags & OFLAG.TRUNC) { if (r0.node.t === "d") return E.ISDIR; if (!writable(r0.path)) return E.ROFS; setSize(r0.node, 0); truncated = true; }
+            if (oflags & OFLAG.TRUNC) { if (r0.node.t === "d") return E.ISDIR; if (!writable(r0.path)) return E.ROFS; setSize(r0.node, 0); truncated = true; touch(r0.path); }
           }
         }
         const r = resolve(base, path, !!(dirflags & 1) || created, pathOf(fd));
@@ -223,7 +237,7 @@
         stats.opens++;
         return E.SUCCESS;
       },
-      fd_close(fd) { if (!fds.has(fd)) return undefined; const f = fds.get(fd); fds.delete(fd); if (f.written) change("write", f.path); return E.SUCCESS; },
+      fd_close(fd) { if (!fds.has(fd)) return undefined; const f = fds.get(fd); fds.delete(fd); if (f.written) touch(f.path); return E.SUCCESS; },
       fd_read(fd, iovs, iovsLen, nreadPtr) {
         if (!mine(fd)) return undefined;
         const f = fds.get(fd); if (!f) return E.BADF; if (f.node.t === "d") return E.ISDIR;
@@ -240,13 +254,13 @@
         if (!mine(fd)) return undefined;
         const f = fds.get(fd); if (!f) return E.BADF; if (f.node.t === "d") return E.ISDIR; if (!writable(f.path)) return E.ROFS;
         if (f.append) f.pos = sizeOf(f.node);
-        const n = writeAt(f.node, f.pos, iovs, iovsLen); f.pos += n; f.written = true;
+        const n = writeAt(f.node, f.pos, iovs, iovsLen); f.pos += n; f.written = true; touch(f.path);
         view().setUint32(nwrittenPtr, n, true); stats.writes++; stats.writeBytes += n; return E.SUCCESS;
       },
       fd_pwrite(fd, iovs, iovsLen, offset, nwrittenPtr) {
         if (!mine(fd)) return undefined;
         const f = fds.get(fd); if (!f) return E.BADF; if (f.node.t === "d") return E.ISDIR; if (!writable(f.path)) return E.ROFS;
-        const n = writeAt(f.node, Number(offset), iovs, iovsLen); f.written = true;
+        const n = writeAt(f.node, Number(offset), iovs, iovsLen); f.written = true; touch(f.path);
         view().setUint32(nwrittenPtr, n, true); stats.writes++; stats.writeBytes += n; return E.SUCCESS;
       },
       fd_seek(fd, offset, whence, newPtr) {
@@ -260,8 +274,8 @@
       fd_filestat_get(fd, buf) { if (!mine(fd)) return undefined; writeFilestat(buf, nodeOf(fd)); stats.stats++; return E.SUCCESS; },
       fd_fdstat_get(fd, buf) { if (!mine(fd)) return undefined; writeFdstat(buf, nodeOf(fd)); return E.SUCCESS; },
       fd_fdstat_set_flags(fd) { if (!mine(fd)) return undefined; return E.SUCCESS; },
-      fd_sync(fd) { if (!mine(fd)) return undefined; const f = fds.get(fd); if (f && f.written) { f.written = false; change("write", f.path); } return E.SUCCESS; },
-      fd_datasync(fd) { if (!mine(fd)) return undefined; const f = fds.get(fd); if (f && f.written) { f.written = false; change("write", f.path); } return E.SUCCESS; },
+      fd_sync(fd) { if (!mine(fd)) return undefined; const f = fds.get(fd); if (f && f.written) touch(f.path); return E.SUCCESS; },
+      fd_datasync(fd) { if (!mine(fd)) return undefined; const f = fds.get(fd); if (f && f.written) touch(f.path); return E.SUCCESS; },
       fd_readdir(fd, buf, bufLen, cookie, bufusedPtr) {
         if (!mine(fd)) return undefined;
         const d = nodeOf(fd); if (d.t !== "d") return E.NOTDIR;
@@ -316,7 +330,7 @@
         const p = parentOf(base, readPath(pathPtr, pathLen), pathOf(fd)); if (p.err) return p.err;
         const n = p.dir.e.get(p.name); if (!n) return E.NOENT; if (n.t === "d") return E.ISDIR;
         if (!canWrite(p.dirPath, p.name)) return E.ROFS;
-        p.dir.e.delete(p.name); change("remove", p.dirPath.concat(p.name)); return E.SUCCESS;
+        p.dir.e.delete(p.name); dirty.delete(p.dirPath.concat(p.name).join("/")); change("remove", p.dirPath.concat(p.name)); return E.SUCCESS;
       },
       path_remove_directory(fd, pathPtr, pathLen) {
         if (!mine(fd)) return undefined;
@@ -355,28 +369,46 @@
         const dst = pn.dir.e.get(pn.name);
         if (dst) { if (dst === src) return E.SUCCESS; if (dst.t === "d" && src.t !== "d") return E.ISDIR; if (dst.t !== "d" && src.t === "d") return E.NOTDIR; if (dst.t === "d" && dst.e.size) return E.NOTEMPTY; }
         po.dir.e.delete(po.name); pn.dir.e.set(pn.name, src);
+        // a still-dirty source keeps its pending content report, under the new name
+        const ok = po.dirPath.concat(po.name).join("/"), nk = pn.dirPath.concat(pn.name).join("/");
+        for (const [k, d] of [...dirty]) if (k === ok || k.startsWith(ok + "/")) { dirty.delete(k); const np = pn.dirPath.concat(pn.name, d.path.slice(po.dirPath.length + 1)); dirty.set(np.join("/"), { path: np, t: d.t }); }
         change("rename", po.dirPath.concat(po.name), { to: pn.dirPath.concat(pn.name) }); return E.SUCCESS;
       },
       fd_allocate(fd, offset, len) {
         if (!mine(fd)) return undefined;
         const f = fds.get(fd); if (!f) return E.BADF; if (f.node.t !== "f") return E.INVAL; if (!writable(f.path)) return E.ROFS;
-        const end = Number(offset) + Number(len); if (end > sizeOf(f.node)) { setSize(f.node, end); f.written = true; } return E.SUCCESS;
+        const end = Number(offset) + Number(len); if (end > sizeOf(f.node)) { setSize(f.node, end); f.written = true; touch(f.path); } return E.SUCCESS;
       },
       fd_filestat_set_size(fd, size) {
         if (!mine(fd)) return undefined;
         const f = fds.get(fd); if (!f) return E.BADF; if (f.node.t !== "f") return E.INVAL; if (!writable(f.path)) return E.ROFS;
-        setSize(f.node, Number(size)); f.written = true; return E.SUCCESS;
+        setSize(f.node, Number(size)); f.written = true; touch(f.path); return E.SUCCESS;
       },
       fd_filestat_set_times(fd) { if (!mine(fd)) return undefined; const f = fds.get(fd); if (!f) return E.SUCCESS; return writable(f.path) ? E.SUCCESS : E.ROFS; },
       fd_advise(fd) { if (!mine(fd)) return undefined; return E.SUCCESS; },
       fd_renumber(fd) { if (!mine(fd)) return undefined; return E.NOTSUP; },
+    };
+    // the path argument(s) of a path_* call, for cfg.log
+    const logPath = (name, a) => {
+      try {
+        switch (name) {
+          case "path_open": return readPath(a[2], a[3]);
+          case "path_readlink": return readPath(a[1], a[2]);
+          case "path_rename": return readPath(a[1], a[2]) + " -> " + readPath(a[4], a[5]);
+          case "path_symlink": return readPath(a[3], a[4]) + " -> " + readPath(a[0], a[1]);
+          case "path_link": return readPath(a[2], a[3]) + " => " + readPath(a[5], a[6]);
+          case "path_filestat_get": case "path_filestat_set_times": return readPath(a[2], a[3]);
+          case "path_create_directory": case "path_unlink_file": case "path_remove_directory": return readPath(a[1], a[2]);
+          default: return "";
+        }
+      } catch (e) { return "?"; }
     };
     for (const name of Object.keys(impl)) {
       const orig = wasiImport[name];
       const f = impl[name];
       wasiImport[name] = function () {
         const r = f.apply(null, arguments);
-        if (cfg.log && r !== undefined) cfg.log(name, Array.from(arguments), r, name.startsWith("path_") ? readPath(arguments[name === "path_open" ? 2 : name === "path_readlink" ? 1 : 2], arguments[name === "path_open" ? 3 : name === "path_readlink" ? 2 : 3]) : "");
+        if (cfg.log && r !== undefined) cfg.log(name, Array.from(arguments), r, logPath(name, arguments));
         if (r !== undefined) return r; return orig ? orig.apply(this, arguments) : E.NOTSUP;
       };
     }
@@ -395,7 +427,7 @@
       nextFd = s.nextFd;
       if (s.stats) Object.assign(stats, s.stats);
     }
-    return { stats, fds, root: ROOT, snapshot, restore };
+    return { stats, fds, root: ROOT, snapshot, restore, flushDirty, get dirty() { return dirty.size; } };
   }
 
   global.NanoboxFs = { dir, file, symlink, add, remove, lookup, attach, E, FT };

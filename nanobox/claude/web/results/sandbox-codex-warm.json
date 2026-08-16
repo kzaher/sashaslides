@@ -1,0 +1,399 @@
+{
+  "cli": "codex",
+  "cold": false,
+  "url": "http://localhost:8093/sandbox.html?cli=codex",
+  "verdict": {
+    "signinMs": 7513,
+    "loadMs": 1089,
+    "bootMs": 1272,
+    "runMs": 5152,
+    "engineMs": 733,
+    "imageMs": 711,
+    "installMs": 876,
+    "persistMs": 986,
+    "helloMs": null,
+    "bundleMs": null,
+    "transformMs": null,
+    "icount": "814806505"
+  },
+  "date": "2026-08-16T18:05:51.615Z",
+  "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+  "install": {
+    "ms": 547,
+    "store": "opfs",
+    "usage": {
+      "usage": 936107288,
+      "quota": 11673525528
+    },
+    "packages": 4,
+    "fromCache": 4,
+    "downloadBytes": 0,
+    "direct": 0,
+    "relayed": 0,
+    "downloads": [],
+    "list": [
+      {
+        "cli": "node",
+        "key": "pkg-node-linux-x64@22.23.2",
+        "name": "node-linux-x64",
+        "version": "22.23.2",
+        "files": 2729,
+        "unpackedBytes": 183774506,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 313
+        }
+      },
+      {
+        "cli": "node",
+        "key": "pkg-npm@10.9.8",
+        "name": "npm",
+        "version": "10.9.8",
+        "files": 2011,
+        "unpackedBytes": 11682638,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 28
+        }
+      },
+      {
+        "cli": "codex",
+        "key": "pkg-@openai~codex@0.147.0",
+        "name": "@openai/codex",
+        "version": "0.147.0",
+        "files": 4,
+        "unpackedBytes": 11652,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 4
+        }
+      },
+      {
+        "cli": "codex",
+        "key": "pkg-@openai~codex@0.147.0-linux-x64",
+        "name": "@openai/codex",
+        "version": "0.147.0-linux-x64",
+        "files": 8,
+        "unpackedBytes": 314801778,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 533
+        }
+      }
+    ],
+    "journals": {
+      "count": 2,
+      "bytes": 10240
+    }
+  },
+  "accounting": {
+    "ours": {
+      "runtime/pages": 6300,
+      "jit-bundles": 1039,
+      "image": 1935,
+      "spec": 2550,
+      "engine": 300
+    },
+    "oursTotal": 12124,
+    "oursCached": {
+      "engine (Cache API)": 29794610,
+      "image layers (Cache API, decompressed)": 8803328,
+      "bundles/shim (Cache API)": 12749708
+    },
+    "oursCachedTotal": 51347646,
+    "vendorDirect": {
+      "api.github.com": 0,
+      "files.openai.com": 0
+    },
+    "vendorDirectTotal": 0,
+    "vendorRelay": {
+      "chatgpt.com": 207
+    },
+    "vendorRelayTotal": 207,
+    "routes": {
+      "page": {
+        "direct": 3,
+        "relay": 2
+      },
+      "runtime": null
+    }
+  },
+  "events": [
+    {
+      "cli": "codex",
+      "install": [
+        "codex"
+      ],
+      "noCache": false,
+      "proxyExtension": false,
+      "event": "boot",
+      "t": 313
+    },
+    {
+      "clis": [
+        "codex"
+      ],
+      "event": "install-start",
+      "t": 314
+    },
+    {
+      "t": 332,
+      "stage": "store",
+      "kind": "opfs",
+      "event": "install:store"
+    },
+    {
+      "t": 338,
+      "stage": "cached",
+      "key": "pkg-@openai~codex@0.147.0",
+      "bytes": 15360,
+      "event": "install:cached"
+    },
+    {
+      "t": 339,
+      "stage": "package",
+      "key": "pkg-@openai~codex@0.147.0",
+      "files": 4,
+      "unpackedBytes": 11652,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "t": 362,
+      "stage": "cached",
+      "key": "pkg-npm@10.9.8",
+      "bytes": 13265920,
+      "event": "install:cached"
+    },
+    {
+      "t": 371,
+      "stage": "package",
+      "key": "pkg-npm@10.9.8",
+      "files": 2011,
+      "unpackedBytes": 11682638,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "event": "vm-runtime-ready",
+      "t": 611
+    },
+    {
+      "t": 647,
+      "stage": "cached",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "bytes": 186952704,
+      "event": "install:cached"
+    },
+    {
+      "t": 659,
+      "stage": "package",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "files": 2729,
+      "unpackedBytes": 183774506,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "event": "vm:init",
+      "t": 683
+    },
+    {
+      "event": "vm:start",
+      "t": 684
+    },
+    {
+      "event": "vm:image-loaded",
+      "t": 711,
+      "files": 314,
+      "compressedBytes": 0,
+      "ms": 27,
+      "cache": {
+        "hits": 2,
+        "misses": 0,
+        "bytes": 8803328
+      }
+    },
+    {
+      "event": "vm:engine-cached",
+      "t": 733,
+      "bytes": 29794610
+    },
+    {
+      "event": "vm:engine-fetched",
+      "t": 733,
+      "bytes": 29794610,
+      "ms": 50
+    },
+    {
+      "t": 868,
+      "stage": "cached",
+      "key": "pkg-@openai~codex@0.147.0-linux-x64",
+      "bytes": 314808320,
+      "event": "install:cached"
+    },
+    {
+      "t": 868,
+      "stage": "package",
+      "key": "pkg-@openai~codex@0.147.0-linux-x64",
+      "files": 8,
+      "unpackedBytes": 314801778,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "ms": 547,
+      "store": "opfs",
+      "packages": 4,
+      "fromCache": 4,
+      "downloadBytes": 0,
+      "journals": {
+        "count": 2,
+        "bytes": 10240
+      },
+      "event": "installed",
+      "t": 876
+    },
+    {
+      "event": "vm:persist-applied",
+      "t": 986,
+      "packages": 4,
+      "journals": 2,
+      "files": 4759,
+      "waitMs": 256,
+      "applyMs": 19,
+      "keys": [
+        "pkg-node-linux-x64@22.23.2",
+        "pkg-npm@10.9.8",
+        "pkg-@openai~codex@0.147.0",
+        "pkg-@openai~codex@0.147.0-linux-x64"
+      ]
+    },
+    {
+      "event": "vm:bundle-ready",
+      "t": 986,
+      "files": 314,
+      "compressedBytes": 0,
+      "ms": 302,
+      "cache": {
+        "hits": 2,
+        "misses": 0,
+        "bytes": 8803328
+      }
+    },
+    {
+      "event": "vm:jit-bundles",
+      "t": 1089,
+      "files": 0,
+      "modules": 0,
+      "keys": 0,
+      "ms": 405
+    },
+    {
+      "event": "vm:start-direct",
+      "t": 1089
+    },
+    {
+      "ms": 1089,
+      "event": "vm-start",
+      "t": 1089
+    },
+    {
+      "event": "vm:persist-attach",
+      "t": 1090,
+      "persist": true,
+      "share": "bundle",
+      "fd": 6
+    },
+    {
+      "event": "vm:instantiated",
+      "t": 1185,
+      "compileMs": 95
+    },
+    {
+      "event": "vm:engine",
+      "t": 1186,
+      "optimized": true,
+      "jit": {
+        "level": 2,
+        "threshold": 2000
+      },
+      "bundles": 0
+    },
+    {
+      "ms": 2362,
+      "event": "guest-booted",
+      "t": 2362
+    },
+    {
+      "t": 4229,
+      "stage": "journal",
+      "name": "journal/01786903547715-0-s8gi.tar",
+      "bytes": 13312,
+      "records": 8,
+      "event": "install:journal"
+    },
+    {
+      "t": 6947,
+      "stage": "journal",
+      "name": "journal/01786903550434-1-oupc.tar",
+      "bytes": 373248,
+      "records": 58,
+      "event": "install:journal"
+    },
+    {
+      "ms": 7513,
+      "loadMs": 1089,
+      "bootMs": 1272,
+      "runMs": 5152,
+      "event": "signin",
+      "t": 7513
+    }
+  ],
+  "persistLog": [
+    {
+      "t": 3900,
+      "stage": "journal",
+      "name": "journal/01786903547715-0-s8gi.tar",
+      "bytes": 13312,
+      "records": 8
+    },
+    {
+      "t": 6619,
+      "stage": "journal",
+      "name": "journal/01786903550434-1-oupc.tar",
+      "bytes": 373248,
+      "records": 58
+    }
+  ],
+  "missing": null,
+  "spawns": null,
+  "net": null,
+  "netBytes": null,
+  "backendOps": null,
+  "backendStats": null,
+  "screenTail": [
+    "Welcome to Codex, OpenAI's command-line coding agent",
+    "  Sign in with ChatGPT to use Codex as part of your paid plan",
+    "  or connect an API key for usage-based billing",
+    "> 1. Sign in with ChatGPT",
+    "     Usage included with Plus, Pro, Business, and Enterprise plans",
+    "  2. Sign in with Device Code",
+    "     Sign in from another device with a one-time code",
+    "  3. Provide your own API key",
+    "     Pay for what you use",
+    "  Press enter to continue"
+  ]
+}
