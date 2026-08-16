@@ -112,7 +112,27 @@ async function netFetch(req, res) {
   } catch (e) { console.log(`[net] ${spec.method} ${spec.url} -> error ${e.message}`); res.writeHead(502); res.end(String(e.message)); }
 }
 
-createServer(async (req, res) => {
+// `npm start` semantics: if a previous serve.mjs still holds the port, replace it (kill it and listen
+// again); a foreign process on the port is an error. Only processes whose command line is our
+// serve.mjs are ever killed (found through /proc, no pkill patterns).
+function killPreviousServer() {
+  let killed = 0;
+  try {
+    for (const pid of readdirSync("/proc").filter((d) => /^\d+$/.test(d))) {
+      if (Number(pid) === process.pid) continue;
+      let argv = []; try { argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean); } catch { continue; }
+      // exactly `node .../serve.mjs [--port N]` (argv, not a substring: a shell whose command LINE
+      // mentions serve.mjs must not match), on the same port
+      if (!/(^|\/)node$/.test(argv[0] || "") || !/(^|\/)serve\.mjs$/.test(argv[1] || "")) continue;
+      const pi = argv.indexOf("--port"); const theirPort = pi >= 0 ? Number(argv[pi + 1]) : 8093;
+      if (theirPort === PORT) {
+        try { process.kill(Number(pid), "SIGTERM"); killed++; } catch {}
+      }
+    }
+  } catch {}
+  return killed;
+}
+const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   if (process.env.LOG_REQ) res.on("finish", () => console.log(`${res.statusCode} ${req.method} ${url.pathname}${req.headers.range ? " [" + req.headers.range + "]" : ""}`));
   let p = normalize(decodeURIComponent(url.pathname));
@@ -129,6 +149,18 @@ createServer(async (req, res) => {
   if (p.startsWith("/c2w/")) return serveFile(req, res, join(C2W, p.slice(5)));
   if (p.startsWith("/web/")) return serveFile(req, res, join(WEB, p.slice(5)));
   return serveFile(req, res, join(WEB, p));
-}).listen(PORT, () => {
-  console.log(`nanobox: http://localhost:${PORT}/  (optimized engine: ${ENGINE}${existsSync(ENGINE) ? "" : "  <-- MISSING"}; JIT bundles: ${JITDIR})`);
 });
+const announce = () => console.log(`nanobox: http://localhost:${PORT}/  (optimized engine: ${ENGINE}${existsSync(ENGINE) ? "" : "  <-- MISSING"}; JIT bundles: ${JITDIR})`);
+let retried = false;
+server.on("error", (e) => {
+  if (e.code === "EADDRINUSE" && !retried) {
+    retried = true;
+    const n = killPreviousServer();
+    console.log(`port ${PORT} busy: ${n ? "replaced the previous serve.mjs (" + n + " process)" : "held by another process, retrying once"}`);
+    setTimeout(() => server.listen(PORT), 700);
+    return;
+  }
+  console.error(String(e && e.message || e)); process.exit(1);
+});
+server.once("listening", announce);
+server.listen(PORT);
