@@ -20,7 +20,7 @@ import { reportError } from "./report.js";
 // ENOENT/EEXIST/ENOTDIR on stat/access/open are the CLI probing (thousands, expected); everything
 // else — and any errno on write-side syscalls — is worth a server-side line with the caller's stack
 const QUIET = new Set(["ENOENT", "EEXIST", "ENOTDIR", "ENOTEMPTY"]);
-const PROBE = new Set(["stat", "lstat", "access", "open", "readlink", "readdir", "realpath", "scandir", "readFile", "readfile", "read"]);
+const PROBE = new Set(["stat", "lstat", "access", "readlink", "readdir", "realpath", "scandir", "readFile", "readfile", "read"]);
 export function errnoError(code, syscall, path, dest) {
   let msg = `${code}: ${MSG[code] || code}, ${syscall}`;
   if (path != null) msg += ` '${path}'`;

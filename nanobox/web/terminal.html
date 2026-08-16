@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>nanobox terminal</title>
+<link rel="stylesheet" href="/c2w/vendor/xterm.css">
+<style>html,body{margin:0;height:100%;background:#0d0b0a;color:#e8e2da;font-family:ui-monospace,monospace}#term{position:absolute;inset:0 0 26px 0}footer{position:absolute;left:0;right:0;bottom:0;height:26px;line-height:26px;padding:0 10px;font-size:12px;color:#9c9187;background:#1c1815}</style>
+</head><body>
+<div id="term"></div><footer><span id="status">connecting to the sandbox…</span></footer>
+<script src="/report.js"></script>
+<script src="/c2w/vendor/xterm.js"></script>
+<script src="/c2w/vendor/addon-fit.js"></script>
+<script>
+// A second (third, ...) terminal attached to a running sandbox page: /bin/sh -l on a pty in the same
+// guest. The sandbox page (sandbox.html?cli=claude, "＋ terminal") owns the VM; if it closes, this shell dies.
+const sb = new URLSearchParams(location.search).get("sb");
+const chan = new BroadcastChannel("nanobox-term-" + sb);
+const id = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
+const xterm = new Terminal({ cursorBlink: true, convertEol: false, fontSize: 14, theme: { background: "#0d0b0a" } });
+const fit = new FitAddon.FitAddon(); xterm.loadAddon(fit); xterm.open(document.getElementById("term")); fit.fit();
+const enc = new TextEncoder();
+xterm.onData((s) => { const b = enc.encode(s); chan.postMessage({ type: "term-in", id, data: b.buffer }); });
+window.addEventListener("resize", () => fit.fit());
+chan.onmessage = (m) => { const d = m.data; if (!d || d.id !== id) return;
+  if (d.type === "term-out") xterm.write(new Uint8Array(d.data));
+  if (d.type === "term-opened") document.getElementById("status").textContent = "shell in the sandbox guest (/bin/sh -l) — same VM as the sandbox page";
+  if (d.type === "term-exit") { document.getElementById("status").textContent = "shell exited (code " + d.code + ")"; xterm.write("\r\n[exited]\r\n"); } };
+chan.postMessage({ type: "term-open", id, cols: xterm.cols, rows: xterm.rows });
+window.addEventListener("pagehide", () => chan.postMessage({ type: "term-close", id }));
+setTimeout(() => { if (document.getElementById("status").textContent.startsWith("connecting")) document.getElementById("status").textContent = "no sandbox answered — open this from a running sandbox page's ＋ terminal link"; }, 4000);
+</script></body></html>

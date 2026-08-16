@@ -25,6 +25,7 @@
   <span id="engine">sandbox</span>
   <span id="timer">0.0 s</span>
   <span id="status">loading…</span>
+  <a id="newterm" href="#" title="open another terminal attached to this sandbox (a shell in the same guest, new tab)" style="color:#e0b23a;text-decoration:none">＋ terminal</a>
   <span id="phases"></span>
   <span id="stats"></span>
 </footer>
@@ -271,8 +272,15 @@ async function bootVm() {
     } }, [rtChan.port2]);
   }
 }
+// ---- extra terminals: terminal.html?sb=<id> tabs talk to this page over a BroadcastChannel; this page
+// relays to the runtime worker, which spawns a login shell on a pty in the same guest (claude sandbox) ----
+const SB_ID = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
+const termChan = new BroadcastChannel("nanobox-term-" + SB_ID);
+termChan.onmessage = (m) => { const d = m.data; if (!d || !worker) return; if (d.type === "term-open" || d.type === "term-in" || d.type === "term-close") worker.postMessage(d); };
+el("newterm").onclick = (e) => { e.preventDefault(); if (!worker) { el("status").textContent = "extra terminals need the claude sandbox (runtime worker) — not yet for codex/agy"; return; } window.open("/terminal.html?sb=" + SB_ID, "_blank"); };
 function onRuntimeMessage(m) {
   const d = m.data; if (!d) return;
+  if (d.type === "term-out" || d.type === "term-opened" || d.type === "term-exit") { termChan.postMessage(d); return; }
   if (d.type === "event") {
     const { type, ...rest } = d;
     log("worker:" + d.event, rest);

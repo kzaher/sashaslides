@@ -155,11 +155,22 @@ async function main(cfg) {
     B.tty.cols = cfg.cols || 80; B.tty.rows = cfg.rows || 24;
     try { B.mkdir(cwd, true, 0o755); } catch {}
   }
+  // extra terminals (page id -> guest child id); their pty output arrives as "proc" events of the backend
+  const terms = new Map(); const env0 = env;
+  if (vm) B.on("proc", (evt) => { for (const [id, cid] of terms) if (evt.pid === cid) { if (evt.stream) { const copy = evt.data.slice(); post({ type: "term-out", id, data: copy }, [copy.buffer]); } else if (evt.exit != null || evt.signal) { post({ type: "term-exit", id, code: evt.exit }); terms.delete(id); } } });
   self.onmessage = (m) => {
     const d = m.data; if (!d) return;
     if (d.type === "stdin" && !vm) B.ttyInput(new Uint8Array(d.data));
     else if (d.type === "resize" && !vm) B.ttyResize(d.cols, d.rows);
     else if (d.type === "dump") post({ type: "missing", ...dumpMissing(), spawns: child_process._spawnLog, net: netlog, netBytes, backendOps: B.stats.ops, backendStats: vm ? { guest: B.stats.guest, image: B.stats.image, dirty: [...B.dirty], channel: guest.stats } : null, required: Object.fromEntries(required) });
+    else if (d.type === "term-open" && vm) { // extra terminal: a login shell in the guest on a pty, I/O relayed to the page
+      const cid = B.cid++; terms.set(d.id, cid);
+      const env = Object.entries(env0).map(([k, v]) => k + "=" + v).concat([`COLUMNS=${d.cols || 80}`, `LINES=${d.rows || 24}`, "TERM=xterm-256color"]);
+      try { B.g.spawn(cid, ["/bin/sh", "-l"], env, cwd, 2).then(() => post({ type: "term-opened", id: d.id }), (e) => post({ type: "term-out", id: d.id, data: enc.encode(`\r\n[shell failed: ${e.message}]\r\n`) })); }
+      catch (e) { post({ type: "term-out", id: d.id, data: enc.encode(`\r\n[shell failed: ${e.message}]\r\n`) }); }
+    }
+    else if (d.type === "term-in" && vm) { const cid = terms.get(d.id); if (cid) B.g.childStdin(cid, new Uint8Array(d.data)); }
+    else if (d.type === "term-close" && vm) { const cid = terms.get(d.id); if (cid) { B.g.kill(cid, 9); terms.delete(d.id); } }
     else if (d.type === "eval") { // debugging aid: window.nanobox.eval("code") runs in the worker scope
       Promise.resolve().then(() => (0, eval)(d.code)).then((v) => post({ type: "eval", id: d.id, value: typeof v === "string" ? v : JSON.stringify(v, null, 1) }), (e) => post({ type: "eval", id: d.id, error: String(e && e.stack || e) }));
     }
