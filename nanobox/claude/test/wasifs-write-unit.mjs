@@ -48,6 +48,11 @@ check("append", dec.decode(F.lookup(root, "persist/root/log.txt").data) === "a\n
 [r, fd] = open("persist/root/.claude.json", 0); check("truncate", wasi.fd_filestat_set_size(fd, 2n) === E.SUCCESS && F.lookup(root, "persist/root/.claude.json").data.byteLength === 2); wasi.fd_close(fd);
 [r, fd] = open("persist/root/.claude.json", CREAT | EXCL); check("O_EXCL on existing -> EEXIST", r === E.EXIST, r); fs.flushDirty(0);
 { const [p, l] = str("rootfs/etc/hosts"); check("unlink outside -> EROFS", wasi.path_unlink_file(6, p, l) === E.ROFS); }
+// 5b. an fd opened before a rename keeps writing to the renamed file, dirtying the NEW path (9p writeback fid)
+[r, fd] = open("persist/root/cfg.tmp", CREAT);
+{ const [p, l] = str("persist/root/cfg.tmp"), [q, m] = str("persist/root/cfg.json"); wasi.path_rename(6, p, l, 6, q, m); }
+r = wasi.fd_pwrite(fd, iov('{"late":true}'), 1, 0n, np); wasi.fd_close(fd); changes.length = 0; fs.flushDirty(0);
+check("late write lands in the renamed file", dec.decode(F.lookup(root, "persist/root/cfg.json").data) === '{"late":true}' && changes.includes("write:persist/root/cfg.json"), changes.join(","));
 // 6. read back through fd_read
 [r, fd] = open("persist/root/.claude/settings.json", 0); { const dp = heap; heap += 64; const ip = heap; heap += 8; dv.setUint32(ip, dp, true); dv.setUint32(ip + 4, 64, true); wasi.fd_read(fd, ip, 1, np); check("read back", dec.decode(u8.subarray(dp, dp + dv.getUint32(np, true))) === '{"theme":"dark"}'); }
 console.log("changes:", changes.join(", "));

@@ -369,9 +369,13 @@
         const dst = pn.dir.e.get(pn.name);
         if (dst) { if (dst === src) return E.SUCCESS; if (dst.t === "d" && src.t !== "d") return E.ISDIR; if (dst.t !== "d" && src.t === "d") return E.NOTDIR; if (dst.t === "d" && dst.e.size) return E.NOTEMPTY; }
         po.dir.e.delete(po.name); pn.dir.e.set(pn.name, src);
-        // a still-dirty source keeps its pending content report, under the new name
+        // a still-dirty source keeps its pending content report, under the new name — and so do the
+        // open fds below it (the guest's 9p writeback fid keeps writing the renamed file: those writes
+        // must dirty the NEW path)
         const ok = po.dirPath.concat(po.name).join("/"), nk = pn.dirPath.concat(pn.name).join("/");
-        for (const [k, d] of [...dirty]) if (k === ok || k.startsWith(ok + "/")) { dirty.delete(k); const np = pn.dirPath.concat(pn.name, d.path.slice(po.dirPath.length + 1)); dirty.set(np.join("/"), { path: np, t: d.t }); }
+        const oldN = po.dirPath.length + 1;
+        for (const [k, d] of [...dirty]) if (k === ok || k.startsWith(ok + "/")) { dirty.delete(k); const np = pn.dirPath.concat(pn.name, d.path.slice(oldN)); dirty.set(np.join("/"), { path: np, t: d.t }); }
+        for (const f of fds.values()) { const k = f.path.join("/"); if (k === ok || k.startsWith(ok + "/")) f.path = pn.dirPath.concat(pn.name, f.path.slice(oldN)); }
         change("rename", po.dirPath.concat(po.name), { to: pn.dirPath.concat(pn.name) }); return E.SUCCESS;
       },
       fd_allocate(fd, offset, len) {
