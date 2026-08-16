@@ -37,6 +37,20 @@ count of the last sync). So:
    match (label, icount, ticks, sha256) at every checkpoint. Any divergence bisects to the first
    differing trace.
 
+## The sandbox (Linux-only image + first-run installer + persistent tree) — `docs/sandbox.md`
+
+`web/sandbox.html?cli=claude|codex|agy`: the VM boots `linux-base` (busybox + glibc + libstdc++, 3.9 MB — no
+node, no CLI) while an installer on the browser's V8 (`web/native/installer.js`) fetches node 22 + npm and
+the CLI from the vendors' servers (registry.npmjs.org directly, Google's agy tarball through the relay),
+verifies sha512, lays them out like `npm install -g` in ONE persistent tree (OPFS `nanobox-persist/`,
+shared by every page on the origin) that the container bind-mounts over `/usr/local /root /home /var`
+(`web/sandbox-worker.js` = `opt-worker.js` + a writable `bundle/persist` subtree; `wasifs.js` grew the
+WASI write ops; guest writes are journaled back to OPFS). Second visit: nothing downloaded. Sign-in
+(headless Chrome, cold → warm): claude 5.5 → 4.8 s, codex 11.3 → 8.0 s, agy 22.5 → 20.3 s; bytes from our
+origin cold ≈ 47–49 MB (engine 29.8 + kernel bundle 12.8 + image 3.9 + pages), warm ≈ 0; from the vendors
+cold 73 / 177 / 110 MB (node 54.6 + the CLI). `./build-linux-base.sh`, `test/sandbox-matrix.sh`,
+`tools/sandbox-report.mjs`, results in `web/results/sandbox-*.json`.
+
 ## The browser artifact (the deliverable)
 
 ```sh

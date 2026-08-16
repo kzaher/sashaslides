@@ -1,25 +1,52 @@
 {
   "cli": "codex",
   "cold": {
-    "date": "2026-08-16T17:41:19.474Z",
-    "verdict": null,
+    "date": "2026-08-16T18:14:37.531Z",
+    "verdict": {
+      "signinMs": 11265,
+      "loadMs": 3757,
+      "bootMs": 1402,
+      "runMs": 6105,
+      "engineMs": 893,
+      "imageMs": 807,
+      "installMs": 3739,
+      "persistMs": 3757,
+      "helloMs": null,
+      "bundleMs": null,
+      "transformMs": null,
+      "icount": "851034287"
+    },
     "accounting": {
       "ours": {
-        "runtime/pages": 521729,
-        "jit-bundles": 739
+        "runtime/pages": 513774,
+        "jit-bundles": 12750747,
+        "image": 3926237,
+        "spec": 2550,
+        "engine": 29794763
       },
-      "oursTotal": 522468,
+      "oursTotal": 46988071,
+      "oursCached": {},
+      "oursCachedTotal": 0,
       "vendorDirect": {
-        "registry.npmjs.org": 176646764
+        "registry.npmjs.org": 176646764,
+        "api.github.com": 0,
+        "files.openai.com": 0
       },
       "vendorDirectTotal": 176646764,
       "vendorRelay": {
-        "ab.chatgpt.com": 16
+        "chatgpt.com": 207
       },
-      "vendorRelayTotal": 16
+      "vendorRelayTotal": 207,
+      "routes": {
+        "page": {
+          "direct": 3,
+          "relay": 2
+        },
+        "runtime": null
+      }
     },
     "install": {
-      "ms": 6972,
+      "ms": 3398,
       "packages": 4,
       "fromCache": 0,
       "downloadBytes": 176646764,
@@ -37,8 +64,8 @@
             "url": "https://registry.npmjs.org/node-linux-x64/-/node-linux-x64-22.23.2.tgz",
             "bytes": 51576724,
             "fromCache": false,
-            "ms": 3259,
-            "gunzipMs": 483,
+            "ms": 848,
+            "gunzipMs": 578,
             "integrity": "sha512-lfi+07N7Y+NCz+WrWIu+VmHkXuTLuDv6JLpCAH5n+MvZeG4x9SoSGVJ+h8lUJwJKXGwZUJCdDXo6zZoLw16RGA=="
           }
         },
@@ -54,8 +81,8 @@
             "url": "https://registry.npmjs.org/npm/-/npm-10.9.8.tgz",
             "bytes": 2973275,
             "fromCache": false,
-            "ms": 1437,
-            "gunzipMs": 37,
+            "ms": 81,
+            "gunzipMs": 57,
             "integrity": "sha512-fYwb6ODSmHkqrJQQaCxY3M2lPf/mpgC7ik0HSzzIwG5CGtabRp4bNqikatvCoT42b5INQSqudVH0R7yVmC9hVg=="
           }
         },
@@ -71,8 +98,8 @@
             "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.147.0.tgz",
             "bytes": 4495,
             "fromCache": false,
-            "ms": 678,
-            "gunzipMs": 1,
+            "ms": 306,
+            "gunzipMs": 5,
             "integrity": "sha512-EQLEXecAG2ptxI7UpBMo2TR/ga5596/c/OsYF/0LoUDh5JANZ7IoGqlzBEWbuEVQ76JePIbtTW/ihCkp1a7Z3w=="
           }
         },
@@ -88,8 +115,8 @@
             "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.147.0-linux-x64.tgz",
             "bytes": 122020574,
             "fromCache": false,
-            "ms": 6156,
-            "gunzipMs": 924,
+            "ms": 2397,
+            "gunzipMs": 986,
             "integrity": "sha512-0W9MBxPpWW0cSkNqrTDN2jR7rzzT7oNMhQY5446lT2Lw5cz5yhDTck4Va9rjkQEm+HlFzP/dmEMSZbXfJsINmw=="
           }
         }
@@ -97,6 +124,129 @@
       "journals": {
         "count": 0,
         "bytes": 0
+      }
+    }
+  },
+  "warm": {
+    "date": "2026-08-16T18:14:49.311Z",
+    "verdict": {
+      "signinMs": 8011,
+      "loadMs": 1096,
+      "bootMs": 1458,
+      "runMs": 5456,
+      "engineMs": 724,
+      "imageMs": 710,
+      "installMs": 912,
+      "persistMs": 987,
+      "helloMs": null,
+      "bundleMs": null,
+      "transformMs": null,
+      "icount": "835109263"
+    },
+    "accounting": {
+      "ours": {
+        "runtime/pages": 6300,
+        "jit-bundles": 1039,
+        "image": 1935,
+        "spec": 2550,
+        "engine": 300
+      },
+      "oursTotal": 12124,
+      "oursCached": {
+        "engine (Cache API)": 29794463,
+        "image layers (Cache API, decompressed)": 8803328,
+        "bundles/shim (Cache API)": 12749708
+      },
+      "oursCachedTotal": 51347499,
+      "vendorDirect": {
+        "api.github.com": 0,
+        "raw.githubusercontent.com": 584,
+        "files.openai.com": 0
+      },
+      "vendorDirectTotal": 584,
+      "vendorRelay": {
+        "chatgpt.com": 207
+      },
+      "vendorRelayTotal": 207,
+      "routes": {
+        "page": {
+          "direct": 4,
+          "relay": 2
+        },
+        "runtime": null
+      }
+    },
+    "install": {
+      "ms": 584,
+      "packages": 4,
+      "fromCache": 4,
+      "downloadBytes": 0,
+      "store": "opfs",
+      "list": [
+        {
+          "cli": "node",
+          "key": "pkg-node-linux-x64@22.23.2",
+          "name": "node-linux-x64",
+          "version": "22.23.2",
+          "files": 2729,
+          "unpackedBytes": 183774506,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 320
+          }
+        },
+        {
+          "cli": "node",
+          "key": "pkg-npm@10.9.8",
+          "name": "npm",
+          "version": "10.9.8",
+          "files": 2011,
+          "unpackedBytes": 11682638,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 28
+          }
+        },
+        {
+          "cli": "codex",
+          "key": "pkg-@openai~codex@0.147.0",
+          "name": "@openai/codex",
+          "version": "0.147.0",
+          "files": 4,
+          "unpackedBytes": 11652,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 4
+          }
+        },
+        {
+          "cli": "codex",
+          "key": "pkg-@openai~codex@0.147.0-linux-x64",
+          "name": "@openai/codex",
+          "version": "0.147.0-linux-x64",
+          "files": 8,
+          "unpackedBytes": 314801778,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 565
+          }
+        }
+      ],
+      "journals": {
+        "count": 4,
+        "bytes": 434688
       }
     }
   }

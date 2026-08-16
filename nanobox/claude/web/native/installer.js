@@ -308,6 +308,13 @@
     for (const p of touched) { const n = F().lookup(root, p); if (n) { if (n.t === "d") entries.push({ path: p, type: "d", mode: n.mode }); else entries.push(...entriesOf(n, p)); } else entries.push(whiteout(p)); }
     return tarPack(entries);
   }
+  // [{path, size, type}] of the first n entries of a tar (debugging / journal progress events)
+  function tarSummary(tar, n) {
+    const out = []; let off = 0; const b = tar; const str = (o, l) => { let e = o; while (e < o + l && b[e] !== 0) e++; return dec.decode(b.subarray(o, e)); };
+    let longName = null;
+    while (off + 512 <= b.length && out.length < n) { if (b[off] === 0) { off += 512; continue; } const size = parseInt(str(off + 124, 12).trim(), 8) || 0; const type = String.fromCharCode(b[off + 156] || 48); let name = str(off, 100); const data = off + 512; off = data + ((size + 511) & ~511); if (type === "L") { longName = str(data, size); continue; } if (longName) { name = longName; longName = null; } out.push({ path: name, size, type }); }
+    return out;
+  }
   function collectPaths(tar, set) {
     // reuse applyLayer's parsing by applying into a scratch dir and walking it, plus whiteout names
     const scratch = F().dir(); Oci().applyLayer(scratch, tar);
@@ -372,7 +379,7 @@
       const tars = journalQueue; journalQueue = [];
       const merged = tars.length === 1 ? tars[0] : journalCompact(tars);
       const name = "journal/" + String(Date.now()).padStart(14, "0") + "-" + (journalSeq++).toString(36) + "-" + Math.random().toString(36).slice(2, 6) + ".tar";
-      try { await store.write(name, merged); journalBytes += merged.byteLength; journalWrites++; progress({ stage: "journal", name, bytes: merged.byteLength, records: tars.length }); }
+      try { await store.write(name, merged); journalBytes += merged.byteLength; journalWrites++; progress({ stage: "journal", name, bytes: merged.byteLength, records: tars.length, entries: tarSummary(merged, 24) }); }
       catch (e) { progress({ stage: "journal-error", message: String(e && e.message || e) }); }
     }
     async function open(d) {

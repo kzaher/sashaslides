@@ -1,0 +1,1089 @@
+{
+  "cli": "agy",
+  "cold": true,
+  "url": "http://localhost:8093/sandbox.html?cli=agy&reset=1",
+  "verdict": {
+    "signinMs": 22516,
+    "loadMs": 4503,
+    "bootMs": 1353,
+    "runMs": 16660,
+    "engineMs": 879,
+    "imageMs": 805,
+    "installMs": 4483,
+    "persistMs": 4503,
+    "helloMs": null,
+    "bundleMs": null,
+    "transformMs": null,
+    "icount": "2055439608"
+  },
+  "date": "2026-08-16T18:15:15.658Z",
+  "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+  "install": {
+    "ms": 4149,
+    "store": "opfs",
+    "usage": {
+      "usage": 457733684,
+      "quota": 11195151924
+    },
+    "packages": 3,
+    "fromCache": 0,
+    "downloadBytes": 110201240,
+    "direct": 54614905,
+    "relayed": 55586335,
+    "downloads": [
+      {
+        "url": "https://registry.npmjs.org/node-linux-x64/22.23.2",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 1531,
+        "ms": 4
+      },
+      {
+        "url": "https://registry.npmjs.org/npm/10.9.8",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 63375,
+        "ms": 4
+      },
+      {
+        "url": "https://registry.npmjs.org/npm/-/npm-10.9.8.tgz",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 2973275,
+        "ms": 15
+      },
+      {
+        "url": "https://registry.npmjs.org/node-linux-x64/-/node-linux-x64-22.23.2.tgz",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 51576724,
+        "ms": 205
+      },
+      {
+        "url": "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json",
+        "via": "relay",
+        "route": "relay",
+        "host": "antigravity-cli-auto-updater-974169037036.us-central1.run.app",
+        "bytes": 303,
+        "ms": 322
+      },
+      {
+        "url": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.13-6057583128215552/linux-x64/cli_linux_x64.tar.gz",
+        "via": "relay",
+        "route": "relay",
+        "host": "storage.googleapis.com",
+        "bytes": 55586032,
+        "ms": 2580
+      }
+    ],
+    "list": [
+      {
+        "cli": "node",
+        "key": "pkg-node-linux-x64@22.23.2",
+        "name": "node-linux-x64",
+        "version": "22.23.2",
+        "files": 2729,
+        "unpackedBytes": 183774506,
+        "tarBytes": 0,
+        "download": {
+          "url": "https://registry.npmjs.org/node-linux-x64/-/node-linux-x64-22.23.2.tgz",
+          "bytes": 51576724,
+          "fromCache": false,
+          "ms": 915,
+          "gunzipMs": 618,
+          "integrity": "sha512-lfi+07N7Y+NCz+WrWIu+VmHkXuTLuDv6JLpCAH5n+MvZeG4x9SoSGVJ+h8lUJwJKXGwZUJCdDXo6zZoLw16RGA=="
+        }
+      },
+      {
+        "cli": "node",
+        "key": "pkg-npm@10.9.8",
+        "name": "npm",
+        "version": "10.9.8",
+        "files": 2011,
+        "unpackedBytes": 11682638,
+        "tarBytes": 0,
+        "download": {
+          "url": "https://registry.npmjs.org/npm/-/npm-10.9.8.tgz",
+          "bytes": 2973275,
+          "fromCache": false,
+          "ms": 88,
+          "gunzipMs": 63,
+          "integrity": "sha512-fYwb6ODSmHkqrJQQaCxY3M2lPf/mpgC7ik0HSzzIwG5CGtabRp4bNqikatvCoT42b5INQSqudVH0R7yVmC9hVg=="
+        }
+      },
+      {
+        "cli": "agy",
+        "key": "pkg-agy@1.1.13",
+        "name": "agy",
+        "version": "1.1.13",
+        "files": 1,
+        "unpackedBytes": 206160344,
+        "tarBytes": 0,
+        "download": {
+          "url": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.13-6057583128215552/linux-x64/cli_linux_x64.tar.gz",
+          "bytes": 55586032,
+          "fromCache": false,
+          "ms": 3538,
+          "gunzipMs": 548,
+          "integrity": "sha512-hex"
+        }
+      }
+    ],
+    "journals": {
+      "count": 0,
+      "bytes": 0
+    }
+  },
+  "accounting": {
+    "ours": {
+      "runtime/pages": 513774,
+      "jit-bundles": 12750747,
+      "image": 3926237,
+      "spec": 2550,
+      "engine": 29794763
+    },
+    "oursTotal": 46988071,
+    "oursCached": {},
+    "oursCachedTotal": 0,
+    "vendorDirect": {
+      "registry.npmjs.org": 54614905,
+      "antigravity-unleash.goog": 368863,
+      "playwright.azureedge.net": 0,
+      "playwright-akamai.azureedge.net": 0,
+      "playwright-verizon.azureedge.net": 0
+    },
+    "vendorDirectTotal": 54983768,
+    "vendorRelay": {
+      "antigravity-cli-auto-updater-974169037036.us-central1.run.app": 303,
+      "storage.googleapis.com": 55586032,
+      "play.googleapis.com": 420
+    },
+    "vendorRelayTotal": 55586755,
+    "routes": {
+      "page": {
+        "direct": 5,
+        "relay": 5
+      },
+      "runtime": null
+    }
+  },
+  "events": [
+    {
+      "event": "cache-reset",
+      "t": 18
+    },
+    {
+      "cli": "agy",
+      "install": [
+        "agy"
+      ],
+      "noCache": false,
+      "proxyExtension": false,
+      "event": "boot",
+      "t": 318
+    },
+    {
+      "clis": [
+        "agy"
+      ],
+      "event": "install-start",
+      "t": 319
+    },
+    {
+      "t": 371,
+      "stage": "reset",
+      "event": "install:reset"
+    },
+    {
+      "t": 371,
+      "stage": "store",
+      "kind": "opfs",
+      "event": "install:store"
+    },
+    {
+      "t": 373,
+      "stage": "resolve",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "url": "https://registry.npmjs.org/node-linux-x64/22.23.2",
+      "event": "install:resolve"
+    },
+    {
+      "t": 373,
+      "stage": "resolve",
+      "key": "pkg-npm@10.9.8",
+      "url": "https://registry.npmjs.org/npm/10.9.8",
+      "event": "install:resolve"
+    },
+    {
+      "t": 373,
+      "stage": "resolve",
+      "key": "pkg-agy",
+      "url": "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json",
+      "via": "relay",
+      "event": "install:resolve"
+    },
+    {
+      "t": 377,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/node-linux-x64/22.23.2",
+      "via": "direct",
+      "bytes": 1531,
+      "ms": 4,
+      "event": "install:fetched"
+    },
+    {
+      "t": 377,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/npm/10.9.8",
+      "via": "direct",
+      "bytes": 63375,
+      "ms": 4,
+      "event": "install:fetched"
+    },
+    {
+      "t": 393,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/npm/-/npm-10.9.8.tgz",
+      "via": "direct",
+      "bytes": 2973275,
+      "ms": 15,
+      "event": "install:fetched"
+    },
+    {
+      "t": 398,
+      "stage": "verified",
+      "key": "pkg-npm@10.9.8",
+      "integrity": "sha512",
+      "event": "install:verified"
+    },
+    {
+      "t": 551,
+      "stage": "package",
+      "key": "pkg-npm@10.9.8",
+      "files": 2011,
+      "unpackedBytes": 11682638,
+      "fromCache": false,
+      "event": "install:package"
+    },
+    {
+      "t": 582,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/node-linux-x64/-/node-linux-x64-22.23.2.tgz",
+      "via": "direct",
+      "bytes": 51576724,
+      "ms": 205,
+      "event": "install:fetched"
+    },
+    {
+      "event": "vm-runtime-ready",
+      "t": 630
+    },
+    {
+      "t": 671,
+      "stage": "verified",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "integrity": "sha512",
+      "event": "install:verified"
+    },
+    {
+      "event": "vm:init",
+      "t": 688
+    },
+    {
+      "event": "vm:start",
+      "t": 688
+    },
+    {
+      "t": 696,
+      "stage": "fetched",
+      "url": "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json",
+      "via": "relay",
+      "bytes": 303,
+      "ms": 322,
+      "event": "install:fetched"
+    },
+    {
+      "event": "vm:image-loaded",
+      "t": 805,
+      "files": 314,
+      "compressedBytes": 3924031,
+      "ms": 118,
+      "cache": {
+        "hits": 0,
+        "misses": 2,
+        "bytes": 0
+      }
+    },
+    {
+      "event": "vm:engine-fetched",
+      "t": 879,
+      "bytes": 29794463,
+      "ms": 192
+    },
+    {
+      "event": "vm:jit-bundles",
+      "t": 1359,
+      "files": 0,
+      "modules": 0,
+      "keys": 0,
+      "ms": 672
+    },
+    {
+      "t": 1835,
+      "stage": "package",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "files": 2729,
+      "unpackedBytes": 183774506,
+      "fromCache": false,
+      "event": "install:package"
+    },
+    {
+      "t": 3275,
+      "stage": "fetched",
+      "url": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.13-6057583128215552/linux-x64/cli_linux_x64.tar.gz",
+      "via": "relay",
+      "bytes": 55586032,
+      "ms": 2580,
+      "event": "install:fetched"
+    },
+    {
+      "t": 3362,
+      "stage": "verified",
+      "key": "pkg-agy@1.1.13",
+      "integrity": "sha512",
+      "event": "install:verified"
+    },
+    {
+      "t": 4482,
+      "stage": "package",
+      "key": "pkg-agy@1.1.13",
+      "files": 1,
+      "unpackedBytes": 206160344,
+      "fromCache": false,
+      "event": "install:package"
+    },
+    {
+      "ms": 4149,
+      "store": "opfs",
+      "packages": 3,
+      "fromCache": 0,
+      "downloadBytes": 110201240,
+      "journals": {
+        "count": 0,
+        "bytes": 0
+      },
+      "event": "installed",
+      "t": 4483
+    },
+    {
+      "event": "vm:persist-applied",
+      "t": 4502,
+      "packages": 3,
+      "journals": 0,
+      "files": 4741,
+      "waitMs": 3678,
+      "applyMs": 19,
+      "keys": [
+        "pkg-node-linux-x64@22.23.2",
+        "pkg-npm@10.9.8",
+        "pkg-agy@1.1.13"
+      ]
+    },
+    {
+      "event": "vm:bundle-ready",
+      "t": 4503,
+      "files": 314,
+      "compressedBytes": 3924031,
+      "ms": 3816,
+      "cache": {
+        "hits": 0,
+        "misses": 2,
+        "bytes": 0
+      }
+    },
+    {
+      "event": "vm:start-direct",
+      "t": 4503
+    },
+    {
+      "ms": 4503,
+      "event": "vm-start",
+      "t": 4503
+    },
+    {
+      "event": "vm:persist-attach",
+      "t": 4503,
+      "persist": true,
+      "share": "bundle",
+      "fd": 6
+    },
+    {
+      "event": "vm:instantiated",
+      "t": 4603,
+      "compileMs": 99
+    },
+    {
+      "event": "vm:engine",
+      "t": 4603,
+      "optimized": true,
+      "jit": {
+        "level": 2,
+        "threshold": 2000
+      },
+      "bundles": 0
+    },
+    {
+      "ms": 5855,
+      "event": "guest-booted",
+      "t": 5855
+    },
+    {
+      "t": 15513,
+      "stage": "journal",
+      "name": "journal/01786904107959-0-mlxt.tar",
+      "bytes": 8704,
+      "records": 11,
+      "entries": [
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/log/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.cli.log.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/cli.log",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/crashes/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/installation_id",
+          "size": 36,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/log/cli-20260816_181518.log",
+          "size": 661,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/jetski_state.pbtxt",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.865d7396-d70d-4cd1-88b4-bdb5249937b9.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/",
+          "size": 0,
+          "type": "5"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "t": 17018,
+      "stage": "journal",
+      "name": "journal/01786904109465-1-sjz2.tar",
+      "bytes": 23040,
+      "records": 40,
+      "entries": [
+        {
+          "path": "root/.gemini/config/config.json",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/.wh.config.json.adff9378-2cd3-4301-b198-f0de0d3c6c96.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/projects/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/ms-playwright-go/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/ms-playwright-go/1.57.0/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/brain/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/knowledge/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversations/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/permissioned-github/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/jetski_state.pbtxt",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.63725ad0-1d9c-4bb6-a83b-041e2997e73c.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.f467f3d0-dfe2-47f2-b6bf-0440142d2947.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/mcp_config.json",
+          "size": 0,
+          "type": "0"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "t": 20297,
+      "stage": "journal",
+      "name": "journal/01786904112743-2-empk.tar",
+      "bytes": 47104,
+      "records": 13,
+      "entries": [
+        {
+          "path": "usr/local/bin/.wh..update_test698130652",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/updater/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.conversation_summaries.db-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/last_check.timestamp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/updater/update.lock",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/cache/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/projects/default-cli-project.json",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/projects/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/projects/.wh.default-cli-project.json.93ae58a2-2fe6-4fe4-ac79-e6cf2f60fe26.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversation_summaries.db",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversation_summaries.db-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversation_summaries.db-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/cache/default_project_id.txt",
+          "size": 0,
+          "type": "0"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "ms": 22516,
+      "loadMs": 4503,
+      "bootMs": 1353,
+      "runMs": 16660,
+      "event": "signin",
+      "t": 22516
+    },
+    {
+      "t": 23136,
+      "stage": "journal",
+      "name": "journal/01786904115581-3-5a93.tar",
+      "bytes": 1536,
+      "records": 1,
+      "entries": [
+        {
+          "path": "root/.gemini/antigravity-cli/bin/",
+          "size": 0,
+          "type": "5"
+        }
+      ],
+      "event": "install:journal"
+    }
+  ],
+  "persistLog": [
+    {
+      "t": 15179,
+      "stage": "journal",
+      "name": "journal/01786904107959-0-mlxt.tar",
+      "bytes": 8704,
+      "records": 11,
+      "entries": [
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/log/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.cli.log.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/cli.log",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/crashes/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/installation_id",
+          "size": 36,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/log/cli-20260816_181518.log",
+          "size": 661,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/jetski_state.pbtxt",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.865d7396-d70d-4cd1-88b4-bdb5249937b9.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/",
+          "size": 0,
+          "type": "5"
+        }
+      ]
+    },
+    {
+      "t": 16684,
+      "stage": "journal",
+      "name": "journal/01786904109465-1-sjz2.tar",
+      "bytes": 23040,
+      "records": 40,
+      "entries": [
+        {
+          "path": "root/.gemini/config/config.json",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/.wh.config.json.adff9378-2cd3-4301-b198-f0de0d3c6c96.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/projects/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/ms-playwright-go/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/ms-playwright-go/1.57.0/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/brain/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/knowledge/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversations/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/builtin/skills/permissioned-github/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/jetski_state.pbtxt",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.63725ad0-1d9c-4bb6-a83b-041e2997e73c.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.f467f3d0-dfe2-47f2-b6bf-0440142d2947.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/mcp_config.json",
+          "size": 0,
+          "type": "0"
+        }
+      ]
+    },
+    {
+      "t": 19963,
+      "stage": "journal",
+      "name": "journal/01786904112743-2-empk.tar",
+      "bytes": 47104,
+      "records": 13,
+      "entries": [
+        {
+          "path": "usr/local/bin/.wh..update_test698130652",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/updater/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.conversation_summaries.db-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/last_check.timestamp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/updater/update.lock",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/cache/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/projects/default-cli-project.json",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/projects/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/projects/.wh.default-cli-project.json.93ae58a2-2fe6-4fe4-ac79-e6cf2f60fe26.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversation_summaries.db",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversation_summaries.db-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversation_summaries.db-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/cache/default_project_id.txt",
+          "size": 0,
+          "type": "0"
+        }
+      ]
+    },
+    {
+      "t": 22802,
+      "stage": "journal",
+      "name": "journal/01786904115581-3-5a93.tar",
+      "bytes": 1536,
+      "records": 1,
+      "entries": [
+        {
+          "path": "root/.gemini/antigravity-cli/bin/",
+          "size": 0,
+          "type": "5"
+        }
+      ]
+    }
+  ],
+  "missing": null,
+  "spawns": null,
+  "net": null,
+  "netBytes": null,
+  "backendOps": null,
+  "backendStats": null,
+  "screenTail": [
+    "▄▀▀▄",
+    "    ▀▀▀▀▀▀",
+    "   ▀▀▀▀▀▀▀▀",
+    "  ▄▀▀    ▀▀▄",
+    " ▄▀▀      ▀▀▄",
+    " Welcome to the Antigravity CLI. You are currently not signed in.",
+    " Select login method:",
+    " > 1. Google OAuth",
+    "   2. Use a Google Cloud project",
+    " [Use arrow keys to navigate, Enter to select]"
+  ]
+}

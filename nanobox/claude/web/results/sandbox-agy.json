@@ -1,56 +1,59 @@
 {
-  "cli": "claude",
+  "cli": "agy",
   "cold": {
-    "date": "2026-08-16T18:14:13.928Z",
+    "date": "2026-08-16T18:15:15.658Z",
     "verdict": {
-      "signinMs": 5513,
-      "loadMs": 1930,
-      "bootMs": 1321,
-      "runMs": 2262,
-      "engineMs": 868,
-      "imageMs": 1234,
-      "installMs": 1905,
-      "persistMs": 1924,
-      "helloMs": 3283,
-      "bundleMs": 419,
-      "transformMs": 166,
-      "icount": "622762611"
+      "signinMs": 22516,
+      "loadMs": 4503,
+      "bootMs": 1353,
+      "runMs": 16660,
+      "engineMs": 879,
+      "imageMs": 805,
+      "installMs": 4483,
+      "persistMs": 4503,
+      "helloMs": null,
+      "bundleMs": null,
+      "transformMs": null,
+      "icount": "2055439608"
     },
     "accounting": {
       "ours": {
-        "runtime/pages": 2673759,
+        "runtime/pages": 513774,
         "jit-bundles": 12750747,
         "image": 3926237,
-        "spec": 2721,
-        "engine": 29794463,
-        "shim": 62944
+        "spec": 2550,
+        "engine": 29794763
       },
-      "oursTotal": 49210871,
+      "oursTotal": 46988071,
       "oursCached": {},
       "oursCachedTotal": 0,
       "vendorDirect": {
-        "registry.npmjs.org": 73297349,
-        "raw.githubusercontent.com": 174160
+        "registry.npmjs.org": 54614905,
+        "antigravity-unleash.goog": 368863,
+        "playwright.azureedge.net": 0,
+        "playwright-akamai.azureedge.net": 0,
+        "playwright-verizon.azureedge.net": 0
       },
-      "vendorDirectTotal": 73471509,
+      "vendorDirectTotal": 54983768,
       "vendorRelay": {
-        "api.anthropic.com": 20,
-        "platform.claude.com": 19
+        "antigravity-cli-auto-updater-974169037036.us-central1.run.app": 303,
+        "storage.googleapis.com": 55586032,
+        "play.googleapis.com": 420
       },
-      "vendorRelayTotal": 39,
+      "vendorRelayTotal": 55586755,
       "routes": {
-        "page": {},
-        "runtime": {
-          "direct": 1,
-          "relay": 2
-        }
+        "page": {
+          "direct": 5,
+          "relay": 5
+        },
+        "runtime": null
       }
     },
     "install": {
-      "ms": 1570,
+      "ms": 4149,
       "packages": 3,
       "fromCache": 0,
-      "downloadBytes": 73297349,
+      "downloadBytes": 110201240,
       "store": "opfs",
       "list": [
         {
@@ -65,8 +68,8 @@
             "url": "https://registry.npmjs.org/node-linux-x64/-/node-linux-x64-22.23.2.tgz",
             "bytes": 51576724,
             "fromCache": false,
-            "ms": 875,
-            "gunzipMs": 591,
+            "ms": 915,
+            "gunzipMs": 618,
             "integrity": "sha512-lfi+07N7Y+NCz+WrWIu+VmHkXuTLuDv6JLpCAH5n+MvZeG4x9SoSGVJ+h8lUJwJKXGwZUJCdDXo6zZoLw16RGA=="
           }
         },
@@ -82,26 +85,26 @@
             "url": "https://registry.npmjs.org/npm/-/npm-10.9.8.tgz",
             "bytes": 2973275,
             "fromCache": false,
-            "ms": 70,
-            "gunzipMs": 50,
+            "ms": 88,
+            "gunzipMs": 63,
             "integrity": "sha512-fYwb6ODSmHkqrJQQaCxY3M2lPf/mpgC7ik0HSzzIwG5CGtabRp4bNqikatvCoT42b5INQSqudVH0R7yVmC9hVg=="
           }
         },
         {
-          "cli": "claude",
-          "key": "pkg-@anthropic-ai~claude-code@2.1.112",
-          "name": "@anthropic-ai/claude-code",
-          "version": "2.1.112",
-          "files": 10,
-          "unpackedBytes": 21603853,
+          "cli": "agy",
+          "key": "pkg-agy@1.1.13",
+          "name": "agy",
+          "version": "1.1.13",
+          "files": 1,
+          "unpackedBytes": 206160344,
           "tarBytes": 0,
           "download": {
-            "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.112.tgz",
-            "bytes": 18679326,
+            "url": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.13-6057583128215552/linux-x64/cli_linux_x64.tar.gz",
+            "bytes": 55586032,
             "fromCache": false,
-            "ms": 1193,
-            "gunzipMs": 151,
-            "integrity": "sha512-9FUgJ0EOvILyhIqxFKNVliebiUjL68dwpEW3eGSSe0vkVDJ1c5qMDNWc22gW3zkD7zRAqtfQPSGv0t4vMM2DPA=="
+            "ms": 3538,
+            "gunzipMs": 548,
+            "integrity": "sha512-hex"
           }
         }
       ],
@@ -112,56 +115,57 @@
     }
   },
   "warm": {
-    "date": "2026-08-16T18:14:22.463Z",
+    "date": "2026-08-16T18:15:39.758Z",
     "verdict": {
-      "signinMs": 4770,
-      "loadMs": 1164,
-      "bootMs": 1387,
-      "runMs": 2219,
-      "engineMs": 827,
-      "imageMs": 781,
-      "installMs": 785,
-      "persistMs": 807,
-      "helloMs": 2580,
-      "bundleMs": 427,
-      "transformMs": 177,
-      "icount": "621359324"
+      "signinMs": 20261,
+      "loadMs": 1127,
+      "bootMs": 1361,
+      "runMs": 17773,
+      "engineMs": 757,
+      "imageMs": 709,
+      "installMs": 734,
+      "persistMs": 756,
+      "helloMs": null,
+      "bundleMs": null,
+      "transformMs": null,
+      "icount": "2007772137"
     },
     "accounting": {
       "ours": {
-        "runtime/pages": 6600,
+        "runtime/pages": 6300,
         "jit-bundles": 1039,
         "image": 1935,
-        "spec": 2721,
-        "engine": 300,
-        "shim": 300
+        "spec": 2550,
+        "engine": 300
       },
-      "oursTotal": 12895,
+      "oursTotal": 12124,
       "oursCached": {
         "engine (Cache API)": 29794463,
         "image layers (Cache API, decompressed)": 8803328,
-        "bundles/shim (Cache API)": 12812652
+        "bundles/shim (Cache API)": 12749708
       },
-      "oursCachedTotal": 51410443,
+      "oursCachedTotal": 51347499,
       "vendorDirect": {
-        "raw.githubusercontent.com": 174160
+        "antigravity-unleash.goog": 368863,
+        "playwright.azureedge.net": 0,
+        "playwright-akamai.azureedge.net": 0,
+        "playwright-verizon.azureedge.net": 0
       },
-      "vendorDirectTotal": 174160,
+      "vendorDirectTotal": 368863,
       "vendorRelay": {
-        "api.anthropic.com": 20,
-        "platform.claude.com": 19
+        "play.googleapis.com": 252
       },
-      "vendorRelayTotal": 39,
+      "vendorRelayTotal": 252,
       "routes": {
-        "page": {},
-        "runtime": {
-          "direct": 1,
-          "relay": 2
-        }
+        "page": {
+          "direct": 5,
+          "relay": 3
+        },
+        "runtime": null
       }
     },
     "install": {
-      "ms": 447,
+      "ms": 407,
       "packages": 3,
       "fromCache": 3,
       "downloadBytes": 0,
@@ -179,7 +183,7 @@
             "url": null,
             "bytes": 0,
             "fromCache": true,
-            "ms": 373
+            "ms": 313
           }
         },
         {
@@ -194,28 +198,28 @@
             "url": null,
             "bytes": 0,
             "fromCache": true,
-            "ms": 39
+            "ms": 25
           }
         },
         {
-          "cli": "claude",
-          "key": "pkg-@anthropic-ai~claude-code@2.1.112",
-          "name": "@anthropic-ai/claude-code",
-          "version": "2.1.112",
-          "files": 10,
-          "unpackedBytes": 21603853,
+          "cli": "agy",
+          "key": "pkg-agy@1.1.13",
+          "name": "agy",
+          "version": "1.1.13",
+          "files": 1,
+          "unpackedBytes": 206160344,
           "tarBytes": 0,
           "download": {
             "url": null,
             "bytes": 0,
             "fromCache": true,
-            "ms": 124
+            "ms": 388
           }
         }
       ],
       "journals": {
-        "count": 1,
-        "bytes": 9728
+        "count": 4,
+        "bytes": 80384
       }
     }
   }

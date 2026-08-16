@@ -214,7 +214,10 @@ async function bootVm() {
   log("vm-runtime-ready");
   let jitBundles = null, engineTag = null;
   if (jit && qs.get("bundle") !== "0") {
-    try { const r = await fetch(new URL("/engine/opt/jit/index.json", location.href).href, { credentials: "same-origin" }); if (r.ok) { const idx = await r.json(); engineTag = idx.engineTag || null; const have = new Set((idx.files || []).map((f) => f.name)); jitBundles = ["kernel.nbjb", image + ".nbjb"].filter((n) => have.has(n)).map((n) => new URL("/engine/opt/jit/" + n, location.href).href); if (!jitBundles.length) jitBundles = null; } } catch {}
+    try { const r = await fetch(new URL("/engine/opt/jit/index.json", location.href).href, { credentials: "same-origin" }); if (r.ok) { const idx = await r.json(); engineTag = idx.engineTag || null; const have = new Set((idx.files || []).map((f) => f.name)); // the kernel bundle + this image's + the CLI's own (recorded from the vm.html images: content-keyed, so
+      // the same binary from the vendor hits it wherever it is loaded); ?clibundle=1 adds the CLI's (agy: −0.5 s for +34 MB — off by default)
+      const names = ["kernel.nbjb", image + ".nbjb"].concat(qs.get("clibundle") === "1" ? [cli + ".nbjb"] : []);
+      jitBundles = names.filter((n) => have.has(n)).map((n) => new URL("/engine/opt/jit/" + n, location.href).href); if (!jitBundles.length) jitBundles = null; } } catch {}
   }
   const vmWorker = new Worker(new URL("/sandbox-worker.js", location.href).href);
   const onVmMessage = (m) => {

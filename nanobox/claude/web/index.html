@@ -31,6 +31,19 @@
     <li><a href="vm.html?engine=opt&amp;image=claude-npm&amp;cmd=%2Fbin%2Fenv%20NODE_EXTRA_CA_CERTS%3D%2F.wasmenv%2Fproxy.crt%20%2Fusr%2Flocal%2Fbin%2Fclaude"><b>claude-npm</b> — Claude Code 2.1.112 installed with <code>npm install -g</code> on system Node.js 22 <small>(emulated, optimized engine; 84.4 s, 7.8 G instructions — <code>build-claude-npm.sh</code>)</small></a></li>
     <li><a href="claude-native.html"><b>claude-native</b> — the same cli.js run directly on this browser's V8 in a Web Worker, no emulation <small>(sign-in in ~1.0–1.3 s with the in-memory rootfs; <a href="claude-native.html?backend=vm">?backend=vm</a> = files/tty/child processes in the emulated guest through the nbnode shim, ~4.0–4.3 s; a separate track without memory identity — <code>docs/claude-native.md</code>)</small></a></li>
   </ul>
+  <h2 style="font-size:16px;color:#e8e2da;margin:26px 0 6px">Sandbox: Linux only from us, everything else from the vendors (no memory identity)</h2>
+  <p>We serve a 3.9 MB Linux rootfs + the engine (29.8 MB slim) + optional kernel JIT bundle; on first visit a JavaScript installer
+     fetches <b>node</b> (npm registry), <b>npm</b>, <b>claude</b> (npm, 2.1.112 = last release on system node), <b>codex</b> (npm) directly
+     from the vendors with sha512 checks and <b>agy</b> (Google) through the relay; everything lands in a persistent, browser-filesystem-backed
+     <code>/usr/local</code>, <code>/root</code>, <code>/home</code>, <code>/var</code> shared by all pages of this origin (second visit: zero downloads).
+     Claude Code runs on the browser's V8 (its <code>node</code> in the guest is the shim), codex/agy run natively in the guest:</p>
+  <ul>
+    <li><a href="sandbox.html?cli=claude"><b>sandbox.html?cli=claude</b> — cold 5.5 s (install 73 MB in 1.6 s) · warm 4.8 s</a></li>
+    <li><a href="sandbox.html?cli=codex"><b>sandbox.html?cli=codex</b> — cold 11.3 s (177 MB) · warm 8.0 s</a></li>
+    <li><a href="sandbox.html?cli=agy"><b>sandbox.html?cli=agy</b> — cold 22.5 s (110 MB) · warm 20.3 s</a></li>
+  </ul>
+  <p style="color:#9c9187;font-size:13px">Cross-origin traffic: through the <a href="../extension/README.md">open-source proxy extension</a> when installed (0 relay hits),
+     else our relay only for the vendors that don't answer CORS (<code>web/netpolicy.js</code>, enforced server-side), else direct browser fetch. Details: <code>docs/sandbox.md</code>.</p>
   <h2 style="font-size:16px;color:#e8e2da;margin:26px 0 6px">claude on system node — two more pages (no memory identity)</h2>
   <p>Claude Code installed the official way (<code>npm install -g @anthropic-ai/claude-code</code>, system Node.js 22 — the npm
      package runs <code>cli.js</code> on whatever <code>node</code> is on PATH; the "native" installer/original image instead ships
@@ -39,6 +52,17 @@
     <li><a href="claude-native.html?backend=vm"><b>claude-native.html?backend=vm</b> — <b>system node = the browser's V8</b>: the guest's <code>node</code> is a shim; Claude Code's JS runs on the page's V8, every file/tty/child-process call is executed inside the real Linux guest over <code>/dev/hvc1</code>. <b>Sign-in in ~4.0 s</b> (VM boot 0.9 s + shim hello 2.1 s + run 1.6 s).</a></li>
     <li><a href="claude-native.html"><b>claude-native.html</b> — same JS on the browser's V8 with an in-memory rootfs (no VM at all): <b>~1.0–1.3 s</b>.</a></li>
     <li><a href="vm.html?engine=opt&image=claude-npm"><b>vm.html?engine=opt&amp;image=claude-npm</b> — the same image fully emulated (system node's V8 as x86 under the trace JIT): 84 s — node's flat, self-modifying V8 code is a worse fit for the trace JIT than Bun's one GC loop.</a></li>
+  </ul>
+  <h2 style="font-size:16px;color:#e8e2da;margin:26px 0 6px">the sandbox — Linux-only image, first-run installer, persistent tree (<code>docs/sandbox.md</code>)</h2>
+  <p>The image is busybox + glibc (3.9 MB, <code>linux-base</code>). On the first visit an installer running on this browser's V8 fetches
+     node 22 + npm and the CLI <b>from the vendors' servers</b> (npm registry / Google; sha512-verified) into ONE persistent tree
+     (OPFS, shared by every page on this origin) that the VM mounts over <code>/usr/local /root /home /var</code>; the guest's writes
+     (<code>~/.claude.json</code>, <code>~/.codex</code>, …) are journaled back. The second visit downloads nothing.</p>
+  <ul>
+    <li><a href="sandbox.html?cli=claude"><b>sandbox.html?cli=claude</b> — Claude Code 2.1.112 (npm) on this browser's V8 behind the guest shim: <b>5.5 s cold / 4.8 s warm</b> to sign-in</a></li>
+    <li><a href="sandbox.html?cli=codex"><b>sandbox.html?cli=codex</b> — Codex 0.147.0 (npm platform binary, runs in the guest): <b>11.3 s cold / 8.0 s warm</b></a></li>
+    <li><a href="sandbox.html?cli=agy"><b>sandbox.html?cli=agy</b> — Antigravity CLI 1.1.13 (Google's tarball, relayed): <b>22.5 s cold / 20.3 s warm</b></a></li>
+    <li><a href="sandbox.html?cli=sh&install=claude,codex,agy"><b>sandbox.html?cli=sh</b> — a busybox shell in the guest with the persistent tree mounted (<code>?install=…</code> chooses what is mounted; <code>?reset=1</code> wipes the tree)</a></li>
   </ul>
   <h2 style="font-size:16px;color:#e8e2da;margin:26px 0 6px">What the optimized engine is</h2>
   <p>The same Bochs machine model as the original (same devices, BIOS, kernel, rootfs, instruction-count
