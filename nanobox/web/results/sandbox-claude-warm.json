@@ -3,27 +3,27 @@
   "cold": false,
   "url": "http://localhost:8093/sandbox.html?cli=claude",
   "verdict": {
-    "signinMs": 4260,
-    "loadMs": 1035,
-    "bootMs": 1222,
-    "runMs": 2003,
-    "engineMs": 699,
-    "imageMs": 680,
-    "installMs": 667,
-    "persistMs": 698,
-    "helloMs": 2284,
-    "bundleMs": 409,
+    "signinMs": 4514,
+    "loadMs": 1310,
+    "bootMs": 1248,
+    "runMs": 1956,
+    "engineMs": 962,
+    "imageMs": 923,
+    "installMs": 698,
+    "persistMs": 942,
+    "helloMs": 2584,
+    "bundleMs": 401,
     "transformMs": 165,
-    "icount": "612063289"
+    "icount": "608529514"
   },
-  "date": "2026-08-16T18:34:00.948Z",
+  "date": "2026-08-16T18:53:59.167Z",
   "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
   "install": {
-    "ms": 343,
+    "ms": 369,
     "store": "opfs",
     "usage": {
-      "usage": 1176581672,
-      "quota": 11913999912
+      "usage": 1985345576,
+      "quota": 12722763816
     },
     "packages": 3,
     "fromCache": 3,
@@ -44,7 +44,7 @@
           "url": null,
           "bytes": 0,
           "fromCache": true,
-          "ms": 286
+          "ms": 320
         }
       },
       {
@@ -59,7 +59,7 @@
           "url": null,
           "bytes": 0,
           "fromCache": true,
-          "ms": 21
+          "ms": 23
         }
       },
       {
@@ -74,7 +74,7 @@
           "url": null,
           "bytes": 0,
           "fromCache": true,
-          "ms": 67
+          "ms": 77
         }
       }
     ],
@@ -85,14 +85,14 @@
   },
   "accounting": {
     "ours": {
-      "runtime/pages": 50121,
+      "runtime/pages": 6600,
       "jit-bundles": 1039,
-      "image": 1935,
-      "spec": 2721,
+      "image": 2535,
+      "spec": 3021,
       "engine": 300,
       "shim": 300
     },
-    "oursTotal": 56416,
+    "oursTotal": 13795,
     "oursCached": {
       "engine (Cache API)": 29794463,
       "image layers (Cache API, decompressed)": 8803328,
@@ -125,30 +125,30 @@
       "noCache": false,
       "proxyExtension": false,
       "event": "boot",
-      "t": 309
+      "t": 312
     },
     {
       "clis": [
         "claude"
       ],
       "event": "install-start",
-      "t": 310
+      "t": 313
     },
     {
-      "t": 329,
+      "t": 335,
       "stage": "store",
       "kind": "opfs",
       "event": "install:store"
     },
     {
-      "t": 351,
+      "t": 359,
       "stage": "cached",
       "key": "pkg-npm@10.9.8",
       "bytes": 13265920,
       "event": "install:cached"
     },
     {
-      "t": 360,
+      "t": 371,
       "stage": "package",
       "key": "pkg-npm@10.9.8",
       "files": 2011,
@@ -157,14 +157,14 @@
       "event": "install:package"
     },
     {
-      "t": 398,
+      "t": 413,
       "stage": "cached",
       "key": "pkg-@anthropic-ai~claude-code@2.1.112",
       "bytes": 49344512,
       "event": "install:cached"
     },
     {
-      "t": 398,
+      "t": 414,
       "stage": "package",
       "key": "pkg-@anthropic-ai~claude-code@2.1.112",
       "files": 10,
@@ -174,25 +174,17 @@
     },
     {
       "event": "vm-runtime-ready",
-      "t": 578
+      "t": 589
     },
     {
-      "t": 617,
+      "t": 657,
       "stage": "cached",
       "key": "pkg-node-linux-x64@22.23.2",
       "bytes": 186952704,
       "event": "install:cached"
     },
     {
-      "event": "vm:init",
-      "t": 630
-    },
-    {
-      "event": "vm:start",
-      "t": 630
-    },
-    {
-      "t": 637,
+      "t": 668,
       "stage": "package",
       "key": "pkg-node-linux-x64@22.23.2",
       "files": 2729,
@@ -201,7 +193,7 @@
       "event": "install:package"
     },
     {
-      "ms": 343,
+      "ms": 369,
       "store": "opfs",
       "packages": 3,
       "fromCache": 3,
@@ -211,20 +203,22 @@
         "bytes": 10752
       },
       "event": "installed",
-      "t": 667
+      "t": 698
     },
     {
-      "event": "worker:worker-start",
-      "t": 671,
-      "backend": "vm",
-      "proxyExtension": false
+      "event": "vm:init",
+      "t": 893
+    },
+    {
+      "event": "vm:start",
+      "t": 894
     },
     {
       "event": "vm:image-loaded",
-      "t": 680,
+      "t": 923,
       "files": 314,
       "compressedBytes": 0,
-      "ms": 50,
+      "ms": 30,
       "cache": {
         "hits": 2,
         "misses": 0,
@@ -232,22 +226,14 @@
       }
     },
     {
-      "event": "worker:layer",
-      "t": 687,
-      "i": 1,
-      "size": 1024,
-      "cached": true
-    },
-    {
-      "event": "worker:layer",
-      "t": 697,
-      "i": 0,
-      "size": 8802304,
-      "cached": true
+      "event": "worker:worker-start",
+      "t": 931,
+      "backend": "vm",
+      "proxyExtension": false
     },
     {
       "event": "vm:persist-applied",
-      "t": 698,
+      "t": 942,
       "packages": 3,
       "journals": 2,
       "files": 4757,
@@ -260,19 +246,33 @@
       ]
     },
     {
+      "event": "worker:layer",
+      "t": 949,
+      "i": 1,
+      "size": 1024,
+      "cached": true
+    },
+    {
+      "event": "worker:layer",
+      "t": 962,
+      "i": 0,
+      "size": 8802304,
+      "cached": true
+    },
+    {
       "event": "vm:engine-cached",
-      "t": 698,
+      "t": 962,
       "bytes": 29794463
     },
     {
       "event": "vm:engine-fetched",
-      "t": 699,
+      "t": 962,
       "bytes": 29794463,
-      "ms": 70
+      "ms": 69
     },
     {
       "event": "worker:persist",
-      "t": 703,
+      "t": 967,
       "packages": 1,
       "journals": 2,
       "files": 17,
@@ -281,22 +281,22 @@
     },
     {
       "event": "worker:rootfs",
-      "t": 703,
+      "t": 967,
       "files": 331,
       "compressedBytes": 0,
-      "ms": 25,
+      "ms": 28,
       "skipped": []
     },
     {
       "event": "worker:waiting-hello",
-      "t": 703
+      "t": 967
     },
     {
       "event": "vm:bundle-ready",
-      "t": 934,
+      "t": 980,
       "files": 314,
       "compressedBytes": 0,
-      "ms": 305,
+      "ms": 87,
       "cache": {
         "hits": 2,
         "misses": 0,
@@ -305,41 +305,41 @@
     },
     {
       "event": "vm:jit-bundles",
-      "t": 1035,
+      "t": 1310,
       "files": 0,
       "modules": 0,
       "keys": 0,
-      "ms": 405
+      "ms": 416
     },
     {
       "event": "vm:start-direct",
-      "t": 1035
+      "t": 1310
     },
     {
-      "ms": 1035,
+      "ms": 1310,
       "event": "vm-start",
-      "t": 1035
+      "t": 1310
     },
     {
       "event": "vm:persist-attach",
-      "t": 1035,
+      "t": 1311,
       "persist": true,
       "share": "bundle",
       "fd": 6
     },
     {
       "event": "vm:instantiated",
-      "t": 1132,
-      "compileMs": 96
+      "t": 1411,
+      "compileMs": 100
     },
     {
       "event": "vm:hostchan",
-      "t": 1133,
+      "t": 1412,
       "on": true
     },
     {
       "event": "vm:engine",
-      "t": 1133,
+      "t": 1412,
       "optimized": true,
       "jit": {
         "level": 2,
@@ -348,13 +348,13 @@
       "bundles": 0
     },
     {
-      "ms": 2257,
+      "ms": 2558,
       "event": "guest-booted",
-      "t": 2257
+      "t": 2558
     },
     {
       "event": "worker:hello",
-      "t": 2284,
+      "t": 2584,
       "argv": [
         "node",
         "/usr/local/bin/claude"
@@ -367,7 +367,7 @@
     },
     {
       "event": "worker:runtime-ready",
-      "t": 2287,
+      "t": 2590,
       "env": 11,
       "files": 2,
       "backend": "vm",
@@ -379,11 +379,11 @@
     },
     {
       "event": "worker:bundle-load-start",
-      "t": 2287
+      "t": 2590
     },
     {
       "event": "worker:bundle-transformed",
-      "t": 2452,
+      "t": 2753,
       "bytes": 13711684,
       "imports": 872,
       "dynamicImports": 13,
@@ -391,26 +391,26 @@
     },
     {
       "event": "worker:bundle-loaded",
-      "t": 2696,
-      "ms": 409
+      "t": 2990,
+      "ms": 401
     },
     {
       "event": "worker:net",
-      "t": 3110,
+      "t": 3378,
       "method": "GET",
       "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md",
       "via": "direct"
     },
     {
       "event": "worker:net",
-      "t": 3674,
+      "t": 3990,
       "method": "GET",
       "url": "https://api.anthropic.com/api/hello",
       "via": "relay"
     },
     {
       "event": "worker:net",
-      "t": 3674,
+      "t": 3991,
       "method": "GET",
       "url": "https://platform.claude.com/v1/oauth/hello",
       "via": "relay"
@@ -418,15 +418,15 @@
     {
       "name": "claude theme",
       "event": "prompt",
-      "t": 4012
+      "t": 4266
     },
     {
-      "ms": 4260,
-      "loadMs": 1035,
-      "bootMs": 1222,
-      "runMs": 2003,
+      "ms": 4514,
+      "loadMs": 1310,
+      "bootMs": 1248,
+      "runMs": 1956,
       "event": "signin",
-      "t": 4260
+      "t": 4514
     }
   ],
   "persistLog": [],
@@ -435,31 +435,31 @@
       "key": "process.type",
       "kind": "get",
       "count": 1,
-      "stack": "at blob:http://localhost:8093/5846b168-0748-472f-92ad-9eb3efa596d8:118:186"
+      "stack": "at blob:http://localhost:8093/930fd88c-3b1c-47d4-802d-a044ce961394:118:186"
     },
     {
       "key": "process.__nwjs",
       "kind": "get",
       "count": 1,
-      "stack": "at blob:http://localhost:8093/5846b168-0748-472f-92ad-9eb3efa596d8:118:217"
+      "stack": "at blob:http://localhost:8093/930fd88c-3b1c-47d4-802d-a044ce961394:118:217"
     },
     {
       "key": "fs.watchFile",
       "kind": "call",
       "count": 1,
-      "stack": "at cE_ (blob:http://localhost:8093/5846b168-0748-472f-92ad-9eb3efa596d8:501:22214)"
+      "stack": "at cE_ (blob:http://localhost:8093/930fd88c-3b1c-47d4-802d-a044ce961394:501:22214)"
     },
     {
       "key": "process.__signal_exit_emitter__",
       "kind": "get",
       "count": 1,
-      "stack": "at blob:http://localhost:8093/5846b168-0748-472f-92ad-9eb3efa596d8:479:9009"
+      "stack": "at blob:http://localhost:8093/930fd88c-3b1c-47d4-802d-a044ce961394:479:9009"
     },
     {
       "key": "fs.watch",
       "kind": "call",
       "count": 1,
-      "stack": "at hA4 (blob:http://localhost:8093/5846b168-0748-472f-92ad-9eb3efa596d8:602:20394)"
+      "stack": "at hA4 (blob:http://localhost:8093/930fd88c-3b1c-47d4-802d-a044ce961394:602:20394)"
     }
   ],
   "spawns": [
@@ -567,19 +567,19 @@
   ],
   "net": [
     {
-      "t": 2474,
+      "t": 2479,
       "method": "GET",
       "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md",
       "via": "direct"
     },
     {
-      "t": 3038,
+      "t": 3092,
       "method": "GET",
       "url": "https://api.anthropic.com/api/hello",
       "via": "relay"
     },
     {
-      "t": 3038,
+      "t": 3092,
       "method": "GET",
       "url": "https://platform.claude.com/v1/oauth/hello",
       "via": "relay"
@@ -643,11 +643,11 @@
       "/root",
       "/root/.claude.json.lock",
       "/root/.claude/backups",
-      "/root/.claude/backups/.claude.json.backup.1786905239716",
-      "/root/.claude.json.tmp.1.1786905239730",
+      "/root/.claude/backups/.claude.json.backup.1786906437983",
+      "/root/.claude.json.tmp.1.1786906437996",
       "/root/.claude.json",
-      "/root/.claude.json.tmp.1.1786905240167",
-      "/root/.claude.json.tmp.1.1786905240190"
+      "/root/.claude.json.tmp.1.1786906438364",
+      "/root/.claude.json.tmp.1.1786906438389"
     ],
     "channel": {
       "sent": 170,

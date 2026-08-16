@@ -3,27 +3,27 @@
   "cold": false,
   "url": "http://localhost:8093/sandbox.html?cli=agy",
   "verdict": {
-    "signinMs": 20261,
-    "loadMs": 1127,
-    "bootMs": 1361,
-    "runMs": 17773,
-    "engineMs": 757,
-    "imageMs": 709,
-    "installMs": 734,
-    "persistMs": 756,
+    "signinMs": 18766,
+    "loadMs": 1060,
+    "bootMs": 1270,
+    "runMs": 16436,
+    "engineMs": 708,
+    "imageMs": 670,
+    "installMs": 670,
+    "persistMs": 690,
     "helloMs": null,
     "bundleMs": null,
     "transformMs": null,
-    "icount": "2007772137"
+    "icount": "2266411216"
   },
-  "date": "2026-08-16T18:15:39.758Z",
+  "date": "2026-08-16T18:54:26.412Z",
   "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
   "install": {
-    "ms": 407,
+    "ms": 341,
     "store": "opfs",
     "usage": {
-      "usage": 457814852,
-      "quota": 11195233092
+      "usage": 1985745328,
+      "quota": 12723163568
     },
     "packages": 3,
     "fromCache": 3,
@@ -44,7 +44,7 @@
           "url": null,
           "bytes": 0,
           "fromCache": true,
-          "ms": 313
+          "ms": 277
         }
       },
       {
@@ -59,7 +59,7 @@
           "url": null,
           "bytes": 0,
           "fromCache": true,
-          "ms": 25
+          "ms": 26
         }
       },
       {
@@ -74,13 +74,13 @@
           "url": null,
           "bytes": 0,
           "fromCache": true,
-          "ms": 388
+          "ms": 323
         }
       }
     ],
     "journals": {
       "count": 4,
-      "bytes": 80384
+      "bytes": 410112
     }
   },
   "accounting": {
@@ -106,13 +106,13 @@
     },
     "vendorDirectTotal": 368863,
     "vendorRelay": {
-      "play.googleapis.com": 252
+      "play.googleapis.com": 420
     },
-    "vendorRelayTotal": 252,
+    "vendorRelayTotal": 420,
     "routes": {
       "page": {
         "direct": 5,
-        "relay": 3
+        "relay": 5
       },
       "runtime": null
     }
@@ -126,30 +126,30 @@
       "noCache": false,
       "proxyExtension": false,
       "event": "boot",
-      "t": 310
+      "t": 312
     },
     {
       "clis": [
         "agy"
       ],
       "event": "install-start",
-      "t": 311
+      "t": 313
     },
     {
-      "t": 330,
+      "t": 332,
       "stage": "store",
       "kind": "opfs",
       "event": "install:store"
     },
     {
-      "t": 357,
+      "t": 360,
       "stage": "cached",
       "key": "pkg-npm@10.9.8",
       "bytes": 13265920,
       "event": "install:cached"
     },
     {
-      "t": 365,
+      "t": 369,
       "stage": "package",
       "key": "pkg-npm@10.9.8",
       "files": 2011,
@@ -159,17 +159,17 @@
     },
     {
       "event": "vm-runtime-ready",
-      "t": 607
+      "t": 581
     },
     {
-      "t": 644,
+      "t": 611,
       "stage": "cached",
       "key": "pkg-node-linux-x64@22.23.2",
       "bytes": 186952704,
       "event": "install:cached"
     },
     {
-      "t": 656,
+      "t": 623,
       "stage": "package",
       "key": "pkg-node-linux-x64@22.23.2",
       "files": 2729,
@@ -179,33 +179,21 @@
     },
     {
       "event": "vm:init",
-      "t": 670
+      "t": 641
     },
     {
       "event": "vm:start",
-      "t": 671
+      "t": 642
     },
     {
-      "event": "vm:image-loaded",
-      "t": 708,
-      "files": 314,
-      "compressedBytes": 0,
-      "ms": 37,
-      "cache": {
-        "hits": 2,
-        "misses": 0,
-        "bytes": 8803328
-      }
-    },
-    {
-      "t": 719,
+      "t": 657,
       "stage": "cached",
       "key": "pkg-agy@1.1.13",
       "bytes": 206161920,
       "event": "install:cached"
     },
     {
-      "t": 719,
+      "t": 657,
       "stage": "package",
       "key": "pkg-agy@1.1.13",
       "files": 1,
@@ -214,26 +202,38 @@
       "event": "install:package"
     },
     {
-      "ms": 407,
+      "event": "vm:image-loaded",
+      "t": 670,
+      "files": 314,
+      "compressedBytes": 0,
+      "ms": 29,
+      "cache": {
+        "hits": 2,
+        "misses": 0,
+        "bytes": 8803328
+      }
+    },
+    {
+      "ms": 341,
       "store": "opfs",
       "packages": 3,
       "fromCache": 3,
       "downloadBytes": 0,
       "journals": {
         "count": 4,
-        "bytes": 80384
+        "bytes": 410112
       },
       "event": "installed",
-      "t": 734
+      "t": 670
     },
     {
       "event": "vm:persist-applied",
-      "t": 756,
+      "t": 689,
       "packages": 3,
       "journals": 4,
-      "files": 4804,
-      "waitMs": 28,
-      "applyMs": 21,
+      "files": 4816,
+      "waitMs": 1,
+      "applyMs": 18,
       "keys": [
         "pkg-node-linux-x64@22.23.2",
         "pkg-npm@10.9.8",
@@ -242,10 +242,10 @@
     },
     {
       "event": "vm:bundle-ready",
-      "t": 756,
+      "t": 690,
       "files": 314,
       "compressedBytes": 0,
-      "ms": 86,
+      "ms": 48,
       "cache": {
         "hits": 2,
         "misses": 0,
@@ -254,47 +254,47 @@
     },
     {
       "event": "vm:engine-cached",
-      "t": 756,
+      "t": 708,
       "bytes": 29794463
     },
     {
       "event": "vm:engine-fetched",
-      "t": 757,
+      "t": 709,
       "bytes": 29794463,
-      "ms": 87
+      "ms": 67
     },
     {
       "event": "vm:jit-bundles",
-      "t": 1127,
+      "t": 1059,
       "files": 0,
       "modules": 0,
       "keys": 0,
-      "ms": 456
+      "ms": 418
     },
     {
       "event": "vm:start-direct",
-      "t": 1127
+      "t": 1060
     },
     {
-      "ms": 1127,
+      "ms": 1060,
       "event": "vm-start",
-      "t": 1127
+      "t": 1060
     },
     {
       "event": "vm:persist-attach",
-      "t": 1127,
+      "t": 1060,
       "persist": true,
       "share": "bundle",
       "fd": 6
     },
     {
       "event": "vm:instantiated",
-      "t": 1230,
-      "compileMs": 103
+      "t": 1162,
+      "compileMs": 102
     },
     {
       "event": "vm:engine",
-      "t": 1231,
+      "t": 1163,
       "optimized": true,
       "jit": {
         "level": 2,
@@ -303,22 +303,17 @@
       "bundles": 0
     },
     {
-      "ms": 2488,
+      "ms": 2330,
       "event": "guest-booted",
-      "t": 2488
+      "t": 2330
     },
     {
-      "t": 12793,
+      "t": 11115,
       "stage": "journal",
-      "name": "journal/01786904131586-0-a4dp.tar",
-      "bytes": 5632,
-      "records": 3,
+      "name": "journal/01786906458126-0-c5jf.tar",
+      "bytes": 7168,
+      "records": 9,
       "entries": [
-        {
-          "path": "root/.gemini/antigravity-cli/.wh.cli.log.tmp",
-          "size": 0,
-          "type": "0"
-        },
         {
           "path": "root/",
           "size": 0,
@@ -333,6 +328,16 @@
           "path": "root/.gemini/antigravity-cli/",
           "size": 0,
           "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/log/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.cli.log.tmp",
+          "size": 0,
+          "type": "0"
         },
         {
           "path": "root/.gemini/antigravity-cli/cli.log",
@@ -340,158 +345,33 @@
           "type": "2"
         },
         {
-          "path": "root/.gemini/antigravity-cli/log/cli-20260816_181542.log",
+          "path": "root/.gemini/antigravity-cli/crashes/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/installation_id",
+          "size": 36,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/log/cli-20260816_185430.log",
           "size": 661,
           "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/log/",
-          "size": 0,
-          "type": "5"
         }
       ],
       "event": "install:journal"
     },
     {
-      "t": 14524,
+      "t": 12704,
       "stage": "journal",
-      "name": "journal/01786904133316-1-nly1.tar",
-      "bytes": 16384,
-      "records": 49,
+      "name": "journal/01786906459715-1-7ly6.tar",
+      "bytes": 23552,
+      "records": 41,
       "entries": [
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/hooks.md",
+          "path": "root/.gemini/antigravity-cli/jetski_state.pbtxt",
           "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/json_configs.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/mcp_servers.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/plugins.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/rules.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/skills.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/app.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/cli.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/ide.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/sdk.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/SKILL.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/permissioned-github/SKILL.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/permissioned-github/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/keep.txt",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/.checksum",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/",
-          "size": 0,
-          "type": "5"
-        }
-      ],
-      "event": "install:journal"
-    },
-    {
-      "t": 16444,
-      "stage": "journal",
-      "name": "journal/01786904135236-2-g2jw.tar",
-      "bytes": 76288,
-      "records": 16,
-      "entries": [
-        {
-          "path": "root/.gemini/antigravity-cli/log/cli-20260816_181542.log",
-          "size": 4879,
           "type": "0"
         },
         {
@@ -510,14 +390,59 @@
           "type": "5"
         },
         {
-          "path": "root/.gemini/antigravity-cli/log/",
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.280ef9df-099d-44e4-8c22-eb500d9a8db7.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/",
           "size": 0,
           "type": "5"
         },
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md",
-          "size": 5321,
+          "path": "root/.gemini/config/config.json",
+          "size": 0,
           "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/.wh.config.json.b5097be7-db43-479f-b0bc-353c826b1e10.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/projects/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/ms-playwright-go/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/ms-playwright-go/1.57.0/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/brain/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/knowledge/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversations/",
+          "size": 0,
+          "type": "5"
         },
         {
           "path": "root/.gemini/antigravity-cli/builtin/",
@@ -535,44 +460,9 @@
           "type": "5"
         },
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/hooks.md",
-          "size": 10421,
-          "type": "0"
-        },
-        {
           "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/",
           "size": 0,
           "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/json_configs.md",
-          "size": 3983,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/mcp_servers.md",
-          "size": 2966,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/plugins.md",
-          "size": 3692,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/rules.md",
-          "size": 1063,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/skills.md",
-          "size": 2650,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/SKILL.md",
-          "size": 2955,
-          "type": "0"
         },
         {
           "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/",
@@ -580,52 +470,37 @@
           "type": "5"
         },
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/app.md",
-          "size": 3852,
-          "type": "0"
-        },
-        {
           "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/",
           "size": 0,
           "type": "5"
         },
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/cli.md",
-          "size": 1686,
+          "path": "root/.gemini/antigravity-cli/builtin/skills/permissioned-github/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.e952f89b-4e4e-4552-905e-8667b3e3d240.tmp",
+          "size": 0,
           "type": "0"
         },
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/ide.md",
-          "size": 3399,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/sdk.md",
-          "size": 3130,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/permissioned-github/SKILL.md",
-          "size": 6485,
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.2dd2a006-eeb3-46f3-bffc-4578b5b6056a.tmp",
+          "size": 0,
           "type": "0"
         }
       ],
       "event": "install:journal"
     },
     {
-      "t": 18025,
+      "t": 15777,
       "stage": "journal",
-      "name": "journal/01786904136818-3-3r3v.tar",
-      "bytes": 40448,
-      "records": 6,
+      "name": "journal/01786906462789-2-jxqx.tar",
+      "bytes": 47104,
+      "records": 13,
       "entries": [
         {
-          "path": "usr/local/bin/.wh..update_test1070843052",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/config/projects/default-cli-project.json",
+          "path": "usr/local/bin/.wh..update_test2213097297",
           "size": 0,
           "type": "0"
         },
@@ -638,6 +513,31 @@
           "path": "root/.gemini/",
           "size": 0,
           "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/updater/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.conversation_summaries.db-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/cache/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/projects/default-cli-project.json",
+          "size": 0,
+          "type": "0"
         },
         {
           "path": "root/.gemini/config/",
@@ -650,19 +550,29 @@
           "type": "5"
         },
         {
-          "path": "root/.gemini/config/projects/.wh.default-cli-project.json.4128f0b8-5ceb-43aa-bafd-edb2ed455162.tmp",
+          "path": "root/.gemini/config/projects/.wh.default-cli-project.json.19c56c77-7d80-4b83-b017-e98407ab3b28.tmp",
           "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/last_check.timestamp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/updater/update.lock",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversation_summaries.db",
+          "size": 4096,
           "type": "0"
         },
         {
           "path": "root/.gemini/antigravity-cli/conversation_summaries.db-shm",
           "size": 32768,
           "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/",
-          "size": 0,
-          "type": "5"
         },
         {
           "path": "root/.gemini/antigravity-cli/conversation_summaries.db-wal",
@@ -673,37 +583,62 @@
           "path": "root/.gemini/antigravity-cli/cache/default_project_id.txt",
           "size": 0,
           "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/cache/",
-          "size": 0,
-          "type": "5"
         }
       ],
       "event": "install:journal"
     },
     {
-      "ms": 20261,
-      "loadMs": 1127,
-      "bootMs": 1361,
-      "runMs": 17773,
+      "t": 17410,
+      "stage": "journal",
+      "name": "journal/01786906464421-3-f8pa.tar",
+      "bytes": 3584,
+      "records": 2,
+      "entries": [
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/bin/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/bin/webm_encoder",
+          "size": 0,
+          "type": "0"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "ms": 18766,
+      "loadMs": 1060,
+      "bootMs": 1270,
+      "runMs": 16436,
       "event": "signin",
-      "t": 20261
+      "t": 18766
     }
   ],
   "persistLog": [
     {
-      "t": 12466,
+      "t": 10786,
       "stage": "journal",
-      "name": "journal/01786904131586-0-a4dp.tar",
-      "bytes": 5632,
-      "records": 3,
+      "name": "journal/01786906458126-0-c5jf.tar",
+      "bytes": 7168,
+      "records": 9,
       "entries": [
-        {
-          "path": "root/.gemini/antigravity-cli/.wh.cli.log.tmp",
-          "size": 0,
-          "type": "0"
-        },
         {
           "path": "root/",
           "size": 0,
@@ -718,6 +653,16 @@
           "path": "root/.gemini/antigravity-cli/",
           "size": 0,
           "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/log/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.cli.log.tmp",
+          "size": 0,
+          "type": "0"
         },
         {
           "path": "root/.gemini/antigravity-cli/cli.log",
@@ -725,156 +670,32 @@
           "type": "2"
         },
         {
-          "path": "root/.gemini/antigravity-cli/log/cli-20260816_181542.log",
+          "path": "root/.gemini/antigravity-cli/crashes/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/installation_id",
+          "size": 36,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/log/cli-20260816_185430.log",
           "size": 661,
           "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/log/",
-          "size": 0,
-          "type": "5"
         }
       ]
     },
     {
-      "t": 14198,
+      "t": 12375,
       "stage": "journal",
-      "name": "journal/01786904133316-1-nly1.tar",
-      "bytes": 16384,
-      "records": 49,
+      "name": "journal/01786906459715-1-7ly6.tar",
+      "bytes": 23552,
+      "records": 41,
       "entries": [
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/hooks.md",
+          "path": "root/.gemini/antigravity-cli/jetski_state.pbtxt",
           "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/json_configs.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/mcp_servers.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/plugins.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/rules.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/skills.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/app.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/cli.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/ide.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/sdk.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/SKILL.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/permissioned-github/SKILL.md",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/permissioned-github/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/keep.txt",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/.checksum",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/",
-          "size": 0,
-          "type": "5"
-        },
-        {
-          "path": "root/.gemini/",
-          "size": 0,
-          "type": "5"
-        }
-      ]
-    },
-    {
-      "t": 16117,
-      "stage": "journal",
-      "name": "journal/01786904135236-2-g2jw.tar",
-      "bytes": 76288,
-      "records": 16,
-      "entries": [
-        {
-          "path": "root/.gemini/antigravity-cli/log/cli-20260816_181542.log",
-          "size": 4879,
           "type": "0"
         },
         {
@@ -893,14 +714,59 @@
           "type": "5"
         },
         {
-          "path": "root/.gemini/antigravity-cli/log/",
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.280ef9df-099d-44e4-8c22-eb500d9a8db7.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/",
           "size": 0,
           "type": "5"
         },
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md",
-          "size": 5321,
+          "path": "root/.gemini/config/config.json",
+          "size": 0,
           "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/.wh.config.json.b5097be7-db43-479f-b0bc-353c826b1e10.tmp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/config/projects/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/ms-playwright-go/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.cache/ms-playwright-go/1.57.0/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/brain/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/knowledge/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversations/",
+          "size": 0,
+          "type": "5"
         },
         {
           "path": "root/.gemini/antigravity-cli/builtin/",
@@ -918,44 +784,9 @@
           "type": "5"
         },
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/hooks.md",
-          "size": 10421,
-          "type": "0"
-        },
-        {
           "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/",
           "size": 0,
           "type": "5"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/json_configs.md",
-          "size": 3983,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/mcp_servers.md",
-          "size": 2966,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/plugins.md",
-          "size": 3692,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/rules.md",
-          "size": 1063,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/skills.md",
-          "size": 2650,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/SKILL.md",
-          "size": 2955,
-          "type": "0"
         },
         {
           "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/",
@@ -963,51 +794,36 @@
           "type": "5"
         },
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/app.md",
-          "size": 3852,
-          "type": "0"
-        },
-        {
           "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/",
           "size": 0,
           "type": "5"
         },
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/cli.md",
-          "size": 1686,
+          "path": "root/.gemini/antigravity-cli/builtin/skills/permissioned-github/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.e952f89b-4e4e-4552-905e-8667b3e3d240.tmp",
+          "size": 0,
           "type": "0"
         },
         {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/ide.md",
-          "size": 3399,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/sdk.md",
-          "size": 3130,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/builtin/skills/permissioned-github/SKILL.md",
-          "size": 6485,
+          "path": "root/.gemini/antigravity-cli/.wh.jetski_state.pbtxt.2dd2a006-eeb3-46f3-bffc-4578b5b6056a.tmp",
+          "size": 0,
           "type": "0"
         }
       ]
     },
     {
-      "t": 17699,
+      "t": 15448,
       "stage": "journal",
-      "name": "journal/01786904136818-3-3r3v.tar",
-      "bytes": 40448,
-      "records": 6,
+      "name": "journal/01786906462789-2-jxqx.tar",
+      "bytes": 47104,
+      "records": 13,
       "entries": [
         {
-          "path": "usr/local/bin/.wh..update_test1070843052",
-          "size": 0,
-          "type": "0"
-        },
-        {
-          "path": "root/.gemini/config/projects/default-cli-project.json",
+          "path": "usr/local/bin/.wh..update_test2213097297",
           "size": 0,
           "type": "0"
         },
@@ -1020,6 +836,31 @@
           "path": "root/.gemini/",
           "size": 0,
           "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/updater/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/.wh.conversation_summaries.db-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/cache/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/config/projects/default-cli-project.json",
+          "size": 0,
+          "type": "0"
         },
         {
           "path": "root/.gemini/config/",
@@ -1032,19 +873,29 @@
           "type": "5"
         },
         {
-          "path": "root/.gemini/config/projects/.wh.default-cli-project.json.4128f0b8-5ceb-43aa-bafd-edb2ed455162.tmp",
+          "path": "root/.gemini/config/projects/.wh.default-cli-project.json.19c56c77-7d80-4b83-b017-e98407ab3b28.tmp",
           "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/last_check.timestamp",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/updater/update.lock",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/conversation_summaries.db",
+          "size": 4096,
           "type": "0"
         },
         {
           "path": "root/.gemini/antigravity-cli/conversation_summaries.db-shm",
           "size": 32768,
           "type": "0"
-        },
-        {
-          "path": "root/.gemini/antigravity-cli/",
-          "size": 0,
-          "type": "5"
         },
         {
           "path": "root/.gemini/antigravity-cli/conversation_summaries.db-wal",
@@ -1055,11 +906,40 @@
           "path": "root/.gemini/antigravity-cli/cache/default_project_id.txt",
           "size": 0,
           "type": "0"
-        },
+        }
+      ]
+    },
+    {
+      "t": 17081,
+      "stage": "journal",
+      "name": "journal/01786906464421-3-f8pa.tar",
+      "bytes": 3584,
+      "records": 2,
+      "entries": [
         {
-          "path": "root/.gemini/antigravity-cli/cache/",
+          "path": "root/",
           "size": 0,
           "type": "5"
+        },
+        {
+          "path": "root/.gemini/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/bin/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.gemini/antigravity-cli/bin/webm_encoder",
+          "size": 0,
+          "type": "0"
         }
       ]
     }

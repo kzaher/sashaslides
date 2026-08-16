@@ -126,7 +126,14 @@ export function makeMisc(B, ctx) {
   bufmod.resolveObjectURL = () => undefined;
   bufmod.default = bufmod;
   // ---- path: posix everywhere ----
-  add(path, "posix", path); add(path, "win32", Object.assign({}, path, { sep: "\\", delimiter: ";" })); add(path, "matchesGlob", (() => false)); add(path, "toNamespacedPath", ((p) => p)); path.default = path;
+  add(path, "posix", path);
+  // path-browserify ships `win32: null` (the key exists, so add() would keep the null): Claude Code
+  // reads `path.win32.sep` even on Linux (regexes over both separators) -> "Cannot read properties
+  // of null (reading 'sep')" when writing a file. Provide a win32 flavour: posix functions with the
+  // Windows separator/delimiter (only the constants matter off-Windows).
+  const win32 = Object.assign({}, path, { sep: "\\", delimiter: ";" }); win32.posix = path; win32.win32 = win32;
+  if (path.win32 == null) Object.defineProperty(path, "win32", { value: win32, writable: true, configurable: true, enumerable: true });
+  add(path, "matchesGlob", (() => false)); add(path, "toNamespacedPath", ((p) => p)); path.default = path;
   // ---- assert / string_decoder / querystring pass through ----
   add(assert, "strict", assert); assert.default = assert; string_decoder.default = string_decoder; querystring.default = querystring; add(querystring, "escape", encodeURIComponent); add(querystring, "unescape", decodeURIComponent);
 

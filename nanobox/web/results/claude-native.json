@@ -3,58 +3,59 @@
   "backend": "mem",
   "url": "http://localhost:8093/claude-native.html?image=claude-npm",
   "verdict": {
-    "signinMs": 1261,
-    "loadMs": 413,
-    "runMs": 848,
-    "bundleMs": 237
+    "signinMs": 1263,
+    "loadMs": 424,
+    "runMs": 839,
+    "bundleMs": 254
   },
-  "date": "2026-08-16T16:46:15.056Z",
+  "date": "2026-08-16T18:53:49.317Z",
   "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
   "events": [
     {
       "event": "boot",
-      "t": 11,
+      "t": 13,
       "backend": "mem"
     },
     {
       "event": "worker-start",
-      "t": 33,
-      "backend": "mem"
+      "t": 36,
+      "backend": "mem",
+      "proxyExtension": false
     },
     {
       "event": "layer",
-      "t": 43,
+      "t": 47,
       "i": 3,
       "size": 1024,
       "cached": true
     },
     {
       "event": "layer",
-      "t": 60,
+      "t": 59,
       "i": 0,
       "size": 8802304,
       "cached": true
     },
     {
       "event": "layer",
-      "t": 108,
+      "t": 109,
       "i": 2,
       "size": 41635840,
       "cached": true
     },
     {
       "event": "rootfs",
-      "t": 110,
+      "t": 111,
       "files": 365,
       "compressedBytes": 0,
-      "ms": 77,
+      "ms": 75,
       "skipped": [
         1
       ]
     },
     {
       "event": "runtime-ready",
-      "t": 116,
+      "t": 117,
       "env": 4,
       "files": 4,
       "backend": "mem",
@@ -66,92 +67,96 @@
     },
     {
       "event": "bundle-load-start",
-      "t": 116
+      "t": 117
     },
     {
       "event": "bundle-loaded",
-      "t": 352,
-      "ms": 237
+      "t": 371,
+      "ms": 254
     },
     {
       "event": "run-start",
-      "t": 413,
-      "loadMs": 413,
-      "bundleMs": 237,
+      "t": 424,
+      "loadMs": 424,
+      "bundleMs": 254,
       "helloMs": null,
       "vmStartMs": null
     },
     {
       "event": "missing",
-      "t": 378,
+      "t": 396,
       "key": "process.type",
       "kind": "get",
       "stack": "at http://localhost:8093/native/claude-cli.js:111:184"
     },
     {
       "event": "missing",
-      "t": 378,
+      "t": 396,
       "key": "process.__nwjs",
       "kind": "get",
       "stack": "at http://localhost:8093/native/claude-cli.js:111:218"
     },
     {
       "event": "missing",
-      "t": 450,
+      "t": 474,
       "key": "fs.watchFile",
       "kind": "call",
       "stack": "at cE_ (http://localhost:8093/native/claude-cli.js:494:23068)"
     },
     {
       "event": "missing",
-      "t": 453,
+      "t": 477,
       "key": "process.__signal_exit_emitter__",
       "kind": "get",
       "stack": "at http://localhost:8093/native/claude-cli.js:472:9101"
     },
     {
       "event": "net",
-      "t": 454,
+      "t": 478,
       "method": "HEAD",
-      "url": "https://api.anthropic.com/"
+      "url": "https://api.anthropic.com",
+      "via": "relay"
     },
     {
       "event": "net",
-      "t": 477,
+      "t": 504,
       "method": "GET",
-      "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md"
+      "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md",
+      "via": "direct"
     },
     {
       "event": "net",
-      "t": 516,
+      "t": 546,
       "method": "GET",
-      "url": "https://api.anthropic.com/api/hello"
+      "url": "https://api.anthropic.com/api/hello",
+      "via": "relay"
     },
     {
       "event": "net",
-      "t": 517,
+      "t": 546,
       "method": "GET",
-      "url": "https://platform.claude.com/v1/oauth/hello"
+      "url": "https://platform.claude.com/v1/oauth/hello",
+      "via": "relay"
     },
     {
       "event": "missing",
-      "t": 528,
+      "t": 559,
       "key": "fs.watch",
       "kind": "call",
       "stack": "at hA4 (http://localhost:8093/native/claude-cli.js:595:20951)"
     },
     {
       "event": "prompt",
-      "t": 1011,
+      "t": 1013,
       "name": "claude theme"
     },
     {
       "event": "signin",
-      "t": 1261,
-      "ms": 1261,
-      "loadMs": 413,
-      "runMs": 848,
-      "bundleMs": 237
+      "t": 1263,
+      "ms": 1263,
+      "loadMs": 424,
+      "runMs": 839,
+      "bundleMs": 254
     }
   ],
   "missing": [
@@ -292,24 +297,28 @@
   ],
   "net": [
     {
-      "t": 454,
+      "t": 478,
       "method": "HEAD",
-      "url": "https://api.anthropic.com/"
+      "url": "https://api.anthropic.com",
+      "via": "relay"
     },
     {
-      "t": 477,
+      "t": 504,
       "method": "GET",
-      "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md"
+      "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md",
+      "via": "direct"
     },
     {
-      "t": 516,
+      "t": 546,
       "method": "GET",
-      "url": "https://api.anthropic.com/api/hello"
+      "url": "https://api.anthropic.com/api/hello",
+      "via": "relay"
     },
     {
-      "t": 517,
+      "t": 546,
       "method": "GET",
-      "url": "https://platform.claude.com/v1/oauth/hello"
+      "url": "https://platform.claude.com/v1/oauth/hello",
+      "via": "relay"
     }
   ],
   "backendOps": {
@@ -371,7 +380,7 @@
     "constants": 1
   },
   "screenTail": [
-    "nanobox/claude NATIVE track — Claude Code's JS on this browser's V8 (Web Worker, no emulation), image claude-npm",
+    "nanobox NATIVE track — Claude Code's JS on this browser's V8 (Web Worker, no emulation), image claude-npm",
     "Welcome to Claude Code v2.1.112",
     "…………………………………………………………………………………………………………………………………………………………",
     "     *                                       █████▓▓░",
