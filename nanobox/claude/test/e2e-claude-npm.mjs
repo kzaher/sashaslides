@@ -51,7 +51,7 @@ await Page.navigate({ url });
 await Page.loadEventFired();
 const ev = async (e) => (await Runtime.evaluate({ expression: e, returnByValue: true })).result.value;
 const answered = new Set(); const events = [];
-let verdict = null, seen = 0;
+let verdict = null, seen = 0, lastIcount = null;
 while ((Date.now() - t0) / 1000 < TIMEOUT_S) {
   await sleep(250);
   const st = await ev("window.nanobox ? ({screen: window.nanobox.screen(), events: window.nanobox.events, runStartMs: window.nanobox.runStartMs, failed: window.nanobox.failed, stats: window.nanobox.stats}) : null");
@@ -70,7 +70,7 @@ while ((Date.now() - t0) / 1000 < TIMEOUT_S) {
     break;
   }
   if (st.failed) { verdict = { failed: true }; break; }
-  if (st.stats && st.stats.icount) process.stdout.write(`\r  t+${Math.round((Date.now() - t0) / 1000)}s icount=${st.stats.icount}   `);
+  if (st.stats && st.stats.icount && st.stats.icount !== lastIcount) { lastIcount = st.stats.icount; if (Math.round((Date.now() - t0) / 1000) % 10 === 0) console.log(`  t+${Math.round((Date.now() - t0) / 1000)}s icount=${st.stats.icount}`); }
 }
 const screen = (await ev("window.nanobox ? window.nanobox.screen() : ''")) || "";
 try { const { data } = await Page.captureScreenshot({ format: "png" }); writeFileSync(join(OUT, `${IMAGE}-${ENGINE}.png`), Buffer.from(data, "base64")); } catch {}

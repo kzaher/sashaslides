@@ -45,7 +45,7 @@ while ((Date.now() - t0) / 1000 < TIMEOUT_S) {
 const dump = await ev("window.nanobox.dump().catch(() => null)");
 const screen = (await ev("window.nanobox ? window.nanobox.screen() : ''")) || "";
 try { const { data } = await Page.captureScreenshot({ format: "png" }); writeFileSync(join(OUT, `${TAG}.png`), Buffer.from(data, "base64")); } catch {}
-const rec = { image: IMAGE, url, verdict, date: new Date().toISOString(), browser: await ev("navigator.userAgent"), events: (await ev("window.nanobox.events")).filter((e) => e.event !== "worker:missing"), missing: dump ? dump.missing : null, stubCalls: dump ? dump.calls : null, spawns: dump ? dump.spawns : null, net: dump ? dump.net : null, backendOps: dump ? dump.backendOps : null, screenTail: screen.trim().split("\n").filter((l) => l.trim()).slice(-25) };
+const rec = { image: IMAGE, url, verdict, date: new Date().toISOString(), browser: await ev("navigator.userAgent"), events: (await ev("window.nanobox.events")).filter((e) => e.event !== "worker:missing"), missing: dump ? dump.missing : null, stubCalls: dump ? dump.calls : null, spawns: dump ? dump.spawns : null, net: dump ? dump.net : null, backendOps: dump ? dump.backendOps : null, required: dump ? dump.required : null, screenTail: screen.trim().split("\n").filter((l) => l.trim()).slice(-25) };
 writeFileSync(join(OUT, `${TAG}.json`), JSON.stringify(rec, null, 2));
 writeFileSync(join(OUT, `${TAG}.console.log`), consoleLines.join("\n"));
 console.log("\n--- screen ---\n" + rec.screenTail.join("\n"));

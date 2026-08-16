@@ -28,6 +28,8 @@
     <li><a href="claude.html"><b>claude</b> — Claude Code <small>(Bun-compiled; needs AVX2)</small></a></li>
     <li><a href="codex.html"><b>codex</b> — OpenAI Codex <small>(Rust)</small></a></li>
     <li><a href="agy.html"><b>agy</b> — Antigravity CLI <small>(Go; needs PCLMUL)</small></a></li>
+    <li><a href="vm.html?engine=opt&amp;image=claude-npm&amp;cmd=%2Fbin%2Fenv%20NODE_EXTRA_CA_CERTS%3D%2F.wasmenv%2Fproxy.crt%20%2Fusr%2Flocal%2Fbin%2Fclaude"><b>claude-npm</b> — Claude Code 2.1.112 installed with <code>npm install -g</code> on system Node.js 22 <small>(emulated, optimized engine; 84.4 s, 7.8 G instructions — <code>build-claude-npm.sh</code>)</small></a></li>
+    <li><a href="claude-native.html"><b>claude-native</b> — the same cli.js run directly on this browser's V8 in a Web Worker, no emulation <small>(sign-in in ~1.3 s; a separate track without memory identity — <code>docs/claude-native.md</code>)</small></a></li>
   </ul>
   <h2 style="font-size:16px;color:#e8e2da;margin:26px 0 6px">What the optimized engine is</h2>
   <p>The same Bochs machine model as the original (same devices, BIOS, kernel, rootfs, instruction-count

@@ -112,7 +112,10 @@ if (MODE === "full") WebAssembly.instantiate = function (src, imports) {
         if (cfg && cfg.hostChan && inst.exports.nanobox_hc_hook_slot) {
           const hc = NanoboxHostChan.attach(inst, inst.exports.__indirect_function_table, NanoboxJit.trampoline);
           const ring = NanoboxHcRing.reader(cfg.hostChan.sab);
-          hc.onData = (b) => cfg.hostChan.port.postMessage({ type: "hc", data: b }, [b.buffer]);
+          // guest -> host: into the inSab ring when given (the runtime worker reads it synchronously,
+          // Atomics.wait-ing for the reply of a sync fs call), else over the port
+          if (cfg.hostChan.inSab) { const inW = NanoboxHcRing.writer(cfg.hostChan.inSab); hc.onData = (b) => inW.write(b); }
+          else hc.onData = (b) => cfg.hostChan.port.postMessage({ type: "hc", data: b }, [b.buffer]);
           // replace the queue-based read with the ring
           const ex = inst.exports; const mem = () => new Uint8Array(ex.memory.buffer);
           ex.__indirect_function_table.set(ex.nanobox_hc_hook_slot(1), NanoboxJit.trampoline([0x7f, 0x7f], [0x7f], (ptr, max) => { const b = ring.read(max); if (!b) return 0; mem().set(b, ptr); return b.length; }));

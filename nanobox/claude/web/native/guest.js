@@ -56,10 +56,36 @@
       }
     };
     const feed = P.framer(onFrame);
-    if (cfg.port) {
+    // guest -> host bytes: (a) inSab ring (SharedArrayBuffer, lets callSync block with Atomics.wait —
+    // required by the Node-compat layer's synchronous fs API), (b) a MessagePort, (c) a transport object
+    let inRing = null, inCtl = null;
+    if (cfg.inSab) {
+      inRing = global.NanoboxHcRing.reader(cfg.inSab); inCtl = new Int32Array(cfg.inSab, 0, 3);
+      g.drain = () => { let n = 0; for (;;) { const b = inRing.read(1 << 16); if (!b) break; g.stats.bytesIn += b.length; feed(b); n += b.length; } return n; };
+      // idle polling for events (stdin, child output) while no sync call is in progress
+      g.pollTimer = setInterval(() => { try { g.drain(); } catch (e) { console.error("[guest] drain", e); } }, 5);
+    } else if (cfg.port) {
       cfg.port.onmessage = (m) => { const d = m.data; if (d && d.type === "hc") { g.stats.bytesIn += d.data.length; feed(new Uint8Array(d.data)); } };
       if (cfg.port.start) cfg.port.start();
     } else cfg.transport.onData = (b) => { g.stats.bytesIn += b.length; feed(b); };
+    // synchronous request (inSab transports only): blocks this worker until the reply frame arrived,
+    // dispatching any events that come first. Returns the parsed value or throws the errno Error.
+    g.callSync = (op, build, parse, timeoutMs) => {
+      if (!inRing) throw new Error("callSync needs an inSab transport");
+      const id = nextId++; const w = new P.W(); if (build) build(w);
+      let done = false, result, error;
+      pending.set(id, { resolve: (v) => { done = true; result = v; }, reject: (e) => { done = true; error = e; }, parse, op });
+      send(w.frame(op, id));
+      const deadline = Date.now() + (timeoutMs || 30000);
+      while (!done) {
+        if (!g.drain()) {
+          const tail = Atomics.load(inCtl, 1);
+          if (Atomics.load(inCtl, 0) === tail) Atomics.wait(inCtl, 1, tail, 20);   // sleep until the VM worker appends
+        }
+        if (Date.now() > deadline) { pending.delete(id); throw Object.assign(new Error("guest RPC timeout (op " + op + ")"), { code: "ETIMEDOUT", errno: 110 }); }
+      }
+      if (error) throw error; return result;
+    };
     // ---- requests
     g.open = (path, flags, mode) => call(OP.OPEN, (w) => w.str(path).i32(flags | 0).i32(mode | 0), (r) => r.i32());
     g.close = (fd) => call(OP.CLOSE, (w) => w.i32(fd));
@@ -95,6 +121,38 @@
     g.kill = (cid, sig) => fire(OP.KILL, (w) => w.u32(cid).i32(sig | 0));
     g.getpid = () => call(OP.GETPID, null, (r) => r.i32());
     g.hrtime = () => call(OP.HRTIME, null, (r) => r.i64());
+    // synchronous twins of every request (backend #2 of the Node-compat layer calls these)
+    g.sync = {};
+    const S = (name, op, build, parse) => { g.sync[name] = (...a) => g.callSync(op, build ? (w) => build(w, ...a) : null, parse); };
+    S("open", OP.OPEN, (w, path, flags, mode) => w.str(path).i32(flags | 0).i32(mode | 0), (r) => r.i32());
+    S("close", OP.CLOSE, (w, fd) => w.i32(fd));
+    S("read", OP.READ, (w, fd, len, off) => w.i32(fd).u32(len).i64(off == null ? -1 : off), (r) => r.bin());
+    S("write", OP.WRITE, (w, fd, data, off) => w.i32(fd).i64(off == null ? -1 : off).bin(data), (r) => r.i32());
+    S("stat", OP.STAT, (w, path) => w.str(path), P.readStat);
+    S("lstat", OP.LSTAT, (w, path) => w.str(path), P.readStat);
+    S("fstat", OP.FSTAT, (w, fd) => w.i32(fd), P.readStat);
+    S("readdir", OP.READDIR, (w, path) => w.str(path), (r) => r.list((x) => ({ name: x.str(), type: x.u8() })));
+    S("readlink", OP.READLINK, (w, path) => w.str(path), (r) => r.str());
+    S("mkdir", OP.MKDIR, (w, path, mode) => w.str(path).i32(mode == null ? 0o777 : mode));
+    S("unlink", OP.UNLINK, (w, path) => w.str(path));
+    S("rmdir", OP.RMDIR, (w, path) => w.str(path));
+    S("rename", OP.RENAME, (w, a, b) => w.str(a).str(b));
+    S("access", OP.ACCESS, (w, path, mode) => w.str(path).i32(mode | 0));
+    S("chmod", OP.CHMOD, (w, path, mode) => w.str(path).i32(mode));
+    S("realpath", OP.REALPATH, (w, path) => w.str(path), (r) => r.str());
+    S("utimes", OP.UTIMES, (w, path, a, m) => w.str(path).i64(a).i64(m));
+    S("truncate", OP.TRUNCATE, (w, path, len) => w.str(path).i64(len));
+    S("ftruncate", OP.FTRUNCATE, (w, fd, len) => w.i32(fd).i64(len));
+    S("symlink", OP.SYMLINK, (w, t, p) => w.str(t).str(p));
+    S("link", OP.LINK, (w, a, b) => w.str(a).str(b));
+    S("fsync", OP.FSYNC, (w, fd) => w.i32(fd));
+    S("chown", OP.CHOWN, (w, path, uid, gid) => w.str(path).i32(uid).i32(gid));
+    S("fchmod", OP.FCHMOD, (w, fd, mode) => w.i32(fd).i32(mode));
+    S("ttySize", OP.TTY_SIZE, null, (r) => ({ cols: r.i32(), rows: r.i32() }));
+    S("spawn", OP.SPAWN, (w, cid, argv, env, cwd, flags) => w.u32(cid).list(argv, (x, a) => x.str(a)).list(env, (x, e) => x.str(e)).str(cwd || "/").i32(flags | 0), (r) => r.i32());
+    S("getpid", OP.GETPID, null, (r) => r.i32());
+    S("hrtime", OP.HRTIME, null, (r) => r.i64());
+    g.sync.readFile = (path) => { const fd = g.sync.open(path, 0, 0); try { const chunks = []; for (;;) { const b = g.sync.read(fd, 1 << 20, -1); if (!b.length) break; chunks.push(b); } const n = chunks.reduce((s, c) => s + c.length, 0); const out = new Uint8Array(n); let o = 0; for (const c of chunks) { out.set(c, o); o += c.length; } return out; } finally { g.sync.close(fd); } };
     // convenience: whole-file read through the guest (open/read loop/close)
     g.readFile = async (path) => { const fd = await g.open(path, 0, 0); try { const chunks = []; for (;;) { const b = await g.read(fd, 1 << 20, -1); if (!b.length) break; chunks.push(b); } const n = chunks.reduce((s, c) => s + c.length, 0); const out = new Uint8Array(n); let o = 0; for (const c of chunks) { out.set(c, o); o += c.length; } return out; } finally { await g.close(fd); } };
     return g;

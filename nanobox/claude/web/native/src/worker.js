@@ -110,7 +110,7 @@ async function main(cfg) {
     const d = m.data; if (!d) return;
     if (d.type === "stdin") B.ttyInput(new Uint8Array(d.data));
     else if (d.type === "resize") B.ttyResize(d.cols, d.rows);
-    else if (d.type === "dump") post({ type: "missing", ...dumpMissing(), spawns: B.spawnLog, net: netlog, backendOps: B.stats.ops });
+    else if (d.type === "dump") post({ type: "missing", ...dumpMissing(), spawns: B.spawnLog, net: netlog, backendOps: B.stats.ops, required: Object.fromEntries(required) });
     else if (d.type === "eval") { // debugging aid: window.nanobox.eval("code") runs in the worker scope
       Promise.resolve().then(() => (0, eval)(d.code)).then((v) => post({ type: "eval", id: d.id, value: typeof v === "string" ? v : JSON.stringify(v, null, 1) }), (e) => post({ type: "eval", id: d.id, error: String(e && e.stack || e) }));
     }
@@ -131,11 +131,12 @@ async function main(cfg) {
   const { http, https, http2 } = makeHttp(B, net);
   const ctx = { proc, fs, path, util, events, stream, url, zlib, crypto, assert, querystring, string_decoder, bufferModule, os, tty, child_process, net, tls, dns, http, https, http2, require: null };
   const mods = makeMisc(B, ctx);
-  const cache = new Map();
+  const cache = new Map(); const required = new Map(); // id -> count (what the bundle asked for)
   const notFound = (id) => { const e = new Error(`Cannot find module '${id}'\nRequire stack:\n- ${cliPath}`); e.code = "MODULE_NOT_FOUND"; e.requireStack = [cliPath]; return e; };
   function tryRequire(id0) {
     let id = String(id0);
     if (id.startsWith("node:")) id = id.slice(5);
+    required.set(id, (required.get(id) || 0) + 1);
     if (cache.has(id)) return cache.get(id);
     const m = mods[id];
     if (m === undefined) return undefined;

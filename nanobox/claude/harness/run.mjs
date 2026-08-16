@@ -532,10 +532,10 @@ function installJitHost(inst) {
       // the VM runs); host->guest bytes come through the shared ring read by the engine's hook
       const ring = NanoboxHcRing.create(1 << 20); const rr = NanoboxHcRing.reader(ring.sab);
       table.set(ex.nanobox_hc_hook_slot(1), trampoline([0x7f, 0x7f], [0x7f], (ptr, max) => { const b = rr.read(max); if (!b) return 0; new Uint8Array(mem()).set(b, ptr); return b.length; }));
-      const w = new Worker(new URL("./nbnode-test-worker.mjs", import.meta.url), { workerData: { ringSab: ring.sab } });
-      w.on("message", (m) => { if (m.type === "log") console.error(m.text); });
+      const inRing = NanoboxHcRing.create(4 << 20); const inW = NanoboxHcRing.writer(inRing.sab);
+      const w = new Worker(new URL("./nbnode-test-worker.mjs", import.meta.url), { workerData: { ringSab: ring.sab, inSab: inRing.sab } });
       w.on("error", (e) => console.error("[nbnode-test] worker error " + (e && e.stack || e)));
-      hostChanHandler = (b) => w.postMessage({ type: "hc", data: b }, [b.buffer]);
+      hostChanHandler = (b) => inW.write(b);   // guest -> host through the SAB ring (sync-capable, like the browser)
     }
     let hcIn = 0;
     hostChan.onData = (b) => {
