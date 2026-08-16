@@ -27,6 +27,7 @@
   <span id="stats"></span>
 </footer>
 
+<script src="/netpolicy.js"></script>
 <script>
 // The VM's egress path ends in a plain `fetch` from this page (container2wasm's network stack
 // terminates the guest's TLS in the browser and re-issues the request). Cross-origin that fetch is
@@ -39,6 +40,8 @@
     let target;
     try { target = new URL(url, location.href); } catch { return origFetch(input, init); }
     if (target.origin === location.origin || !/^https?:$/.test(target.protocol)) return origFetch(input, init);
+    // only the vendors that don't answer CORS go through the relay (web/netpolicy.js, same list as the server)
+    if (!NanoboxNetPolicy.isProxied(target.hostname)) return origFetch(input, init);
     const headers = {};
     new Headers((typeof input === "object" && input.headers) || init.headers || {}).forEach((v, k) => (headers[k] = v));
     const spec = { url: target.href, method: (init.method || (typeof input === "object" && input.method) || "GET").toUpperCase(), headers };

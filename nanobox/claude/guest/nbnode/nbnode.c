@@ -514,6 +514,7 @@ int main(int argc, char **argv) {
     do chan_fd = open(dev, O_RDWR | O_NOCTTY | O_CLOEXEC); while (chan_fd < 0 && errno == EINTR);
     if (chan_fd < 0) { fprintf(stderr, "nbnode: cannot open channel %s: %s\n", dev, strerror(errno)); return 1; }
     struct termios t; if (tcgetattr(chan_fd, &t) == 0) { cfmakeraw(&t); tcsetattr(chan_fd, TCSANOW, &t); }
+    ioctl(chan_fd, TIOCEXCL); /* exclusive: no other guest process can open the host channel and forge frames while we run */
   }
   set_nonblock(chan_fd);
   { struct stat st; if (fstat(0, &st) < 0) stdin_on = 0; }

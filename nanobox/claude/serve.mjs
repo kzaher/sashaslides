@@ -90,10 +90,14 @@ function serveFile(req, res, filePath) {
   onErr(createReadStream(filePath)).pipe(res);
 }
 const HOP = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "te", "trailer", "proxy-authorization", "proxy-authenticate", "host", "content-length"]);
+await import("./web/netpolicy.js"); // NanoboxNetPolicy: the host allow-list shared with the pages
 async function netFetch(req, res) {
   let spec;
   try { spec = JSON.parse(Buffer.from(req.headers["x-nanobox-target"] || "", "base64url").toString("utf8")); if (!/^https?:$/.test(new URL(spec.url).protocol)) throw 0; }
   catch { res.writeHead(400); res.end("bad target"); return; }
+  // allow-list: the relay exists only for vendors that don't answer CORS; everything else must be
+  // fetched by the browser directly (closes the open-proxy / SSRF-into-localhost hole)
+  if (!globalThis.NanoboxNetPolicy.isProxied(spec.url)) { console.log(`[net] ${spec.method} ${spec.url} -> 403 (not in the relay allow-list; fetch it directly)`); res.writeHead(403); res.end("host not relayed: fetch it directly from the browser (see web/netpolicy.js)"); return; }
   const chunks = []; for await (const c of req) chunks.push(c);
   const body = chunks.length ? Buffer.concat(chunks) : undefined;
   const h = {}; for (const [k, v] of Object.entries(spec.headers || {})) if (!HOP.has(k.toLowerCase())) h[k] = v;
