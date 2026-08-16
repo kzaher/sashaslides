@@ -1,0 +1,9 @@
+{
+  "url": "http://localhost:8093/codex.html",
+  "verdict": {
+    "orig": 59311,
+    "opt": 7567.814999997616,
+    "speedup": 7.837268749304612
+  },
+  "elapsedS": 59.554
+}

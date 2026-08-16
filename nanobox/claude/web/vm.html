@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nanobox VM</title>
+<link rel="stylesheet" href="/c2w/vendor/xterm.css">
+<style>
+  html,body{height:100%;margin:0;background:#0d0b0a;color:#e8e2da;font-family:ui-sans-serif,system-ui,sans-serif}
+  body{display:flex;flex-direction:column}
+  #term{flex:1;min-height:0;padding:4px 6px}
+  .xterm{height:100%}
+  footer{display:flex;align-items:baseline;gap:14px;padding:6px 10px;border-top:1px solid #241f1b;font-size:12.5px;color:#9c9187;flex-wrap:wrap}
+  footer b{color:#e8e2da}
+  #timer{font-family:ui-monospace,monospace;font-size:26px;color:#e0b23a;min-width:120px}
+  #timer.done{color:#57c06a}
+  #timer.err{color:#e05a4a}
+  #engine{color:#D97757;font-weight:600}
+  #stats{font-family:ui-monospace,monospace;font-size:11.5px;color:#6f665e;margin-left:auto;text-align:right;white-space:pre}
+</style>
+</head>
+<body>
+<div id="term"></div>
+<footer>
+  <span id="engine">engine</span>
+  <span id="timer">0.0 s</span>
+  <span id="status">loading…</span>
+  <span id="stats"></span>
+</footer>
+
+<script>
+// The VM's egress path ends in a plain `fetch` from this page (container2wasm's network stack
+// terminates the guest's TLS in the browser and re-issues the request). Cross-origin that fetch is
+// subject to CORS and the guest sees 503, so route it through the server's /net/fetch gateway —
+// same override as nanobox's public/c2w/index.html (serve.mjs implements the gateway).
+(() => {
+  const origFetch = window.fetch.bind(window);
+  window.fetch = async (input, init = {}) => {
+    const url = typeof input === "string" ? input : input.url;
+    let target;
+    try { target = new URL(url, location.href); } catch { return origFetch(input, init); }
+    if (target.origin === location.origin || !/^https?:$/.test(target.protocol)) return origFetch(input, init);
+    const headers = {};
+    new Headers((typeof input === "object" && input.headers) || init.headers || {}).forEach((v, k) => (headers[k] = v));
+    const spec = { url: target.href, method: (init.method || (typeof input === "object" && input.method) || "GET").toUpperCase(), headers };
+    const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(spec)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return origFetch(new URL("/net/fetch", location.origin), { method: "POST", headers: { "x-nanobox-target": encoded }, body: init.body ?? undefined });
+  };
+})();
+</script>
+<script src="/c2w/vendor/xterm.js"></script>
+<script src="/c2w/vendor/addon-fit.js"></script>
+<script src="/c2w/vendor/xterm-pty.js"></script>
+<script src="/c2w/dist/runcontainer.js"></script>
+<script>
+// One VM, one terminal, one timer. Query string:
+//   engine=orig|opt   orig = the shipped container2wasm/Bochs engine (public/c2w/wasi/out.wasm.gzip)
+//                     opt  = nanobox/claude's engine (Bochs + native wasm-EH + trace JIT)
+//   image=codex|claude|agy|base
+//   cmd=...           override the image's default command
+//   jit=<level>:<threshold>  (opt only; default 2:2000)   jit=0 runs the optimized build interpreted
+//   region=N          opt only: max blocks per JIT region (0 = single-trace translations only)
+//   direct=0          opt only: serve the image through container2wasm's network 9p path instead of
+//                     unpacking it in the VM worker and serving it over the built-in virtio-9p
+//   auto=0            do not auto-answer onboarding prompts
+//   bundle=0|1        opt only: pre-computed JIT translations (/engine/opt/jit/kernel.nbjb +
+//                     <image>.nbjb, produced by harness --jit-bundle-out). Default: on when the
+//                     server lists them in /engine/opt/jit/index.json; bundle=0 never, bundle=1 tries
+//                     the two files even if the index is unavailable
+// The timer starts when this page starts booting and stops when the CLI's sign-in screen is on the
+// terminal. Events are also posted to the parent window ({type:"nanobox", ...}).
+// claude: Claude Code is a Bun binary — it ignores the SSL_CERT_FILE the runtime sets for the
+// in-browser TLS proxy and needs NODE_EXTRA_CA_CERTS to trust it (both engines get the same command)
+const DEFAULT_CMD = { claude: "/bin/env NODE_EXTRA_CA_CERTS=/.wasmenv/proxy.crt /usr/local/bin/claude", codex: "/usr/local/bin/codex", agy: "/usr/local/bin/agy", base: "/bin/sh" };
+// what counts as "the sign-in screen is up", per CLI (same rules as nanobox's test/boot-browser.mjs)
+const SIGNIN = {
+  claude: /sign in|log in|claude\.ai\/oauth|authenticate|subscription|api key|browser didn't open/i,
+  codex:  /sign in|log in|chatgpt|api key|authenticate|auth\.openai/i,
+  agy:    /sign in|log in|google|authenticate|antigravity\.google|paste.*code/i,
+  base:   /~ #|\$ $|# $/,
+};
+// onboarding that stands between boot and the sign-in screen; answered once each, like a human would
+const PROMPTS = [
+  { name: "claude theme", when: /choose the text style|dark mode|light mode/i, send: "\r" },
+  { name: "claude continue", when: /press enter to continue|continue\?/i, send: "\r" },
+  { name: "trust folder", when: /do you trust|trust the files/i, send: "\r" },
+];
+
+const qs = new URLSearchParams(location.search);
+const engine = qs.get("engine") === "opt" ? "opt" : "orig";
+const image = qs.get("image") || "codex";
+const auto = qs.get("auto") !== "0";
+const cmdStr = (qs.get("cmd") || DEFAULT_CMD[image] || "").trim();
+const cmd = cmdStr ? cmdStr.split(/\s+/) : [];
+const jitSpec = qs.get("jit") || "2:2000";
+const direct = engine === "opt" && qs.get("direct") !== "0";
+const bundleOpt = qs.get("bundle"); // null = auto (whatever the server has), "0" = off, "1" = force
+const el = (id) => document.getElementById(id);
+const post = (m) => { try { parent.postMessage(Object.assign({ type: "nanobox", engine, image }, m), "*"); } catch {} };
+const T0 = performance.now();
+const now = () => performance.now() - T0;
+let signinMs = null, failed = false;
+const events = [];
+function log(event, extra) {
+  const rec = Object.assign({ event, t: Math.round(now()) }, extra || {});
+  events.push(rec);
+  console.log(`[nanobox ${engine}/${image}] +${(rec.t / 1000).toFixed(1)}s ${event}`, extra ? JSON.stringify(extra) : "");
+  post(rec);
+}
+el("engine").textContent = engine === "opt" ? "optimized (Bochs + wasm-EH + trace JIT)" : "original (container2wasm Bochs)";
+document.title = `${engine} · ${image}`;
+
+// terminal (verbatim from public/c2w/index.html: the guest owns the line discipline)
+const xterm = new Terminal({ fontSize: 12, convertEol: false, scrollback: 2000, theme: { background: "#0d0b0a", foreground: "#e8e2da" } });
+const fit = new FitAddon.FitAddon();
+xterm.loadAddon(fit);
+xterm.open(el("term"));
+fit.fit();
+addEventListener("resize", () => { try { fit.fit(); } catch {} });
+const { master, slave } = openpty();
+{
+  const t = slave.ioctl("TCGETS");
+  t.iflag &= ~(ISTRIP | INLCR | IGNCR | ICRNL | IXON);
+  t.oflag &= ~OPOST;
+  t.lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+  slave.ioctl("TCSETS", new Termios(t.iflag, t.oflag, t.cflag, t.lflag, t.cc));
+}
+xterm.loadAddon(master);
+xterm.onResize(() => { try { slave.notifyResize?.(xterm.cols, xterm.rows); } catch {} });
+
+window.nanobox = {
+  xterm, engine, image, events,
+  screen() { const b = xterm.buffer.active, out = []; for (let i = 0; i < b.length; i++) out.push(b.getLine(i).translateToString(true)); return out.join("\n"); },
+  send(data) { xterm._core.coreService.triggerDataEvent(data, true); },
+  get signinMs() { return signinMs; },
+  get failed() { return failed; },
+  stats: null,
+  samples: [],   // heartbeat history: [{t, icount, io:{pollN,pollMs,...}, jit}]
+};
+
+// timer
+const timerEl = el("timer");
+function fmt(ms) { return (ms / 1000).toFixed(1) + " s"; }
+setInterval(() => { if (signinMs == null && !failed) timerEl.textContent = fmt(now()); }, 100);
+
+// sign-in detection + onboarding, off the screen text (what a human sees)
+const answered = new Set();
+setInterval(() => {
+  if (signinMs != null || failed) return;
+  const s = window.nanobox.screen();
+  if (auto && image === "claude") for (const p of PROMPTS) if (!answered.has(p.name) && p.when.test(s)) { answered.add(p.name); log("prompt", { name: p.name }); window.nanobox.send(p.send); return; }
+  if (SIGNIN[image] && SIGNIN[image].test(s)) {
+    signinMs = now();
+    timerEl.textContent = fmt(signinMs); timerEl.className = "done";
+    el("status").textContent = "sign-in screen reached";
+    log("signin", { ms: Math.round(signinMs) });
+  }
+}, 250);
+
+// boot
+const say = (s) => xterm.write(s.replace(/\n/g, "\r\n"));
+async function boot() {
+  const vmImage = engine === "opt" ? new URL("/engine/opt/out.wasm.gzip", location.href).href : new URL("/c2w/wasi/out.wasm.gzip", location.href).href;
+  const mounter = new URL("/c2w/imagemounter.wasm.gzip", location.href).href;
+  const stackWorker = new URL("/c2w/dist/stack-worker.js", location.href).href;
+  const imageAddr = new URL("/c2w/images/" + image + "/", location.href).href;
+  say(`\x1b[38;5;173mnanobox/claude\x1b[0m ${engine === "opt" ? "OPTIMIZED" : "ORIGINAL"} engine — booting \x1b[1m${image}\x1b[0m, running: ${cmdStr}\n\n`);
+  el("status").textContent = "fetching runtime + image…";
+  log("boot");
+  // direct mode: the stack worker still provides the network + proxy CA, but no image server
+  const info = await RunContainer.createContainerWASI(vmImage, direct ? "" : imageAddr, stackWorker, mounter);
+  log("runtime-ready");
+  el("status").textContent = "booting…";
+  // worker=stock uses container2wasm's own wasi-worker.js verbatim (no JIT host, no heartbeat)
+  const worker = new Worker(new URL(qs.get("worker") === "stock" ? "/c2w/wasi-worker.js" : "./opt-worker.js" + (qs.get("wmode") ? "?mode=" + qs.get("wmode") : ""), location.href).href);
+  // TtyServer owns worker.onmessage; it hands every non-tty message to this callback
+  const onWorkerMessage = (m) => {
+    const d = m.data;
+    if (!d || typeof d !== "object") return;
+    if (d.type === "nanobox-event") {
+      log("worker:" + d.event, Object.assign({}, d, { type: undefined }));
+      if (d.event === "engine") el("status").textContent = d.optimized ? `running (JIT ${d.jit ? d.jit.level + ":" + d.jit.threshold : "off"}${d.bundles ? ", " + d.bundles + " precompiled modules" : ""}${direct ? ", direct rootfs" : ""})` : "running";
+      if (d.event === "image") el("status").textContent = `image: layer ${d.layer} ${d.stage} (${(d.size / 1e6).toFixed(0)} MB)`;
+      if (d.event === "bundle-ready") el("status").textContent = `image unpacked: ${d.files} entries in ${d.ms} ms`;
+      if (d.event === "error") { el("status").textContent = "error: " + d.message; }
+    }
+    else if (d.type === "nanobox-stats") {
+      window.nanobox.stats = d;
+      if (d.io) { const s = window.nanobox.samples; s.push({ t: Math.round(d.t), icount: d.icount, io: d.io, jit: d.installed }); if (s.length > 2000) s.shift(); }
+      const mips = d.icount ? (Number(d.icount) / 1e6 / (d.t / 1000)).toFixed(0) : "?";
+      el("stats").textContent = d.icount ? `icount ${(Number(d.icount) / 1e9).toFixed(2)}G  ${mips} MIPS avg` + (d.installed != null ? `\njit: ${d.installed} traces, ${(d.bytes / 1e6).toFixed(1)} MB, compile ${d.compileMs} ms` : "") + (d.bundleHits != null ? `\nbundle: ${d.bundleHits} hits, ${d.bundleInst}/${d.bundleModules} modules` : "") : "";
+    }
+  };
+  worker.onerror = (e) => { failed = true; timerEl.className = "err"; el("status").textContent = "worker error: " + e.message; log("error", { message: e.message }); };
+  let jit = null;
+  if (engine === "opt" && jitSpec !== "0") { const [l, t] = jitSpec.split(":"); jit = { level: Number(l), threshold: Number(t || 0) }; if (qs.get("region") != null) jit.region = Number(qs.get("region")); }
+  // pre-computed JIT bundles: kernel (shared by all images) + this image's, only those the server has
+  let jitBundles = null, engineTag = null;
+  if (jit && bundleOpt !== "0") {
+    const want = ["kernel.nbjb", image + ".nbjb"];
+    try {
+      const r = await fetch(new URL("/engine/opt/jit/index.json", location.href).href, { credentials: "same-origin" });
+      if (r.ok) { const idx = await r.json(); engineTag = idx.engineTag || null; const have = new Set((idx.files || []).map((f) => f.name)); jitBundles = want.filter((n) => have.has(n)); }
+      else if (bundleOpt === "1") jitBundles = want; // no index: the worker ignores 404s
+    } catch (e) { if (bundleOpt === "1") jitBundles = want; }
+    if (jitBundles && jitBundles.length) { jitBundles = jitBundles.map((n) => new URL("/engine/opt/jit/" + n, location.href).href); log("jit-bundles", { files: jitBundles.map((u) => u.split("/").pop()) }); }
+    else jitBundles = null;
+  }
+  worker.postMessage({ type: "init", info, args: cmd, cfg: {
+    jit, noBeat: qs.get("beat") === "0", trace: qs.get("trace") === "1",
+    direct, imageAddr, specUrl: new URL("/images/" + image + "/config.json", location.href).href,
+    jitBundles, engineTag,
+  } });
+  el("status").textContent = "booting… (" + (qs.get("worker") === "stock" ? "stock worker" : direct ? "nanobox worker, direct rootfs" : "nanobox worker") + ")";
+  new TtyServer(slave).start(worker, onWorkerMessage);
+}
+boot().catch((e) => { failed = true; timerEl.className = "err"; el("status").textContent = "boot failed: " + (e && e.message || e); say(`\r\n\x1b[31mboot failed:\x1b[0m ${e && e.message || e}\r\n`); log("error", { message: String(e && e.message || e) }); });
+</script>
+</body>
+</html>

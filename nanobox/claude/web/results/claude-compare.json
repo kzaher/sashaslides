@@ -1,0 +1,9 @@
+{
+  "url": "http://localhost:8093/claude.html",
+  "verdict": {
+    "orig": 244050.86500000954,
+    "opt": 49307.04500000179,
+    "speedup": 4.949614502349526
+  },
+  "elapsedS": 244.186
+}

@@ -1,0 +1,11 @@
+# build trees / downloaded toolchains / big artifacts (all reproducible via scripts here)
+work/
+bochs/
+build/
+*.wasm
+*.wasm.gz
+*.wasm.gzip
+*.log
+guest/tests/bin/
+guest/tests/core.*
+*.cpuprofile
