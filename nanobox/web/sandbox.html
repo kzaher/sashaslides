@@ -25,6 +25,7 @@
   <span id="engine">sandbox</span>
   <span id="timer">0.0 s</span>
   <span id="status">loading…</span>
+  <span id="persist" title="the persistent tree (/usr/local, /root, /home, /var) lives in this browser's storage; 'saves' = journal writes of guest changes">state: …</span>
   <a id="newterm" href="#" title="open another terminal attached to this sandbox (a shell in the same guest, new tab)" style="color:#e0b23a;text-decoration:none">＋ terminal</a>
   <span id="phases"></span>
   <span id="stats"></span>
@@ -181,6 +182,11 @@ function startPersist() {
     if (d.type === "progress") {
       const { type, ...rest } = d; log("install:" + d.stage, rest);
       if (d.stage === "journal" || d.stage === "compacted") persistLog.push(rest);
+      // persistence health: what store, and every journal write/failure — to the footer and the server log
+      if (d.stage === "store") { persist.kind = d.kind; if (window.NanoboxReport) NanoboxReport.event("persist-store", { kind: d.kind }); }
+      if (d.stage === "journal") { persist.writes++; persist.bytes += d.bytes || 0; persist.last = Date.now(); }
+      if (d.stage === "journal-error") { persist.errors++; if (window.NanoboxReport) NanoboxReport.event("persist-journal-error", { message: d.message }); }
+      updatePersistFooter();
       if (d.stage === "fetched") el("status").textContent = `installing: ${(d.bytes / 1e6).toFixed(1)} MB from ${new URL(d.url).hostname}`;
       return;
     }
@@ -274,6 +280,8 @@ async function bootVm() {
 }
 // ---- extra terminals: terminal.html?sb=<id> tabs talk to this page over a BroadcastChannel; this page
 // relays to the runtime worker, which spawns a login shell on a pty in the same guest (claude sandbox) ----
+const persist = { kind: "?", writes: 0, bytes: 0, errors: 0, last: 0 };
+function updatePersistFooter() { const e = el("persist"); if (!e) return; e.textContent = `state: ${persist.kind}${persist.kind === "opfs" ? "" : persist.kind === "cache" ? " (Cache API fallback)" : ""} · ${persist.writes} saves${persist.errors ? " · " + persist.errors + " FAILED" : ""}`; e.style.color = persist.errors ? "#e5484d" : "#9c9187"; }
 const SB_ID = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
 const termChan = new BroadcastChannel("nanobox-term-" + SB_ID);
 termChan.onmessage = (m) => { const d = m.data; if (!d || !worker) return; if (d.type === "term-open" || d.type === "term-in" || d.type === "term-close") worker.postMessage(d); };

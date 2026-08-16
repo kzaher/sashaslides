@@ -544,7 +544,11 @@ int main(int argc, char **argv) {
       if (c->in >= 0 && (c->inq_off < c->inq.n || c->close_in)) { pf[n].fd = c->in; pf[n].events = POLLOUT; kind[n] = K_IN; own[n++] = c; }
     }
     for (int i = 0; i < n; i++) pf[i].revents = 0;
-    int rc = poll(pf, (nfds_t) n, -1);
+    /* durability: the guest's 9p client (cache=loose) writes dirty pages back lazily; the host journals
+       them only when they arrive, so force a writeback every 3 s (cheap when nothing is dirty) — a
+       tab closed right after a save then loses at most 3 s of state */
+    int rc = poll(pf, (nfds_t) n, 3000);
+    if (rc == 0) { sync(); continue; }
     if (rc < 0) { if (errno == EINTR) continue; die("poll failed"); }
     for (int i = 0; i < n; i++) {
       if (!pf[i].revents) continue;
