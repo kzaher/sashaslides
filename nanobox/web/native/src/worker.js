@@ -4,6 +4,8 @@
 //   page -> worker: {type:"init", cfg}  {type:"stdin", data}  {type:"resize", cols, rows}  {type:"dump"}
 //   worker -> page: {type:"event", event, ...}  {type:"stdout", fd, data}  {type:"exit", code}  {type:"missing", ...}
 import { Buffer } from "buffer";
+import { fixBuffer } from "./buffer-fix.js";
+fixBuffer(Buffer);
 // the polyfills' CommonJS module objects (mutable: makeMisc adds the Node APIs they lack)
 import events from "events";
 import stream from "readable-stream";
