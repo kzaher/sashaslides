@@ -1,0 +1,364 @@
+{
+  "image": "claude-npm",
+  "url": "http://localhost:8093/claude-native.html?image=claude-npm",
+  "verdict": null,
+  "date": "2026-08-16T16:31:23.691Z",
+  "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+  "events": [
+    {
+      "event": "boot",
+      "t": 10
+    },
+    {
+      "event": "worker-start",
+      "t": 31
+    },
+    {
+      "event": "layer",
+      "t": 44,
+      "i": 3,
+      "size": 1024,
+      "cached": true
+    },
+    {
+      "event": "layer",
+      "t": 54,
+      "i": 0,
+      "size": 8802304,
+      "cached": true
+    },
+    {
+      "event": "layer",
+      "t": 99,
+      "i": 2,
+      "size": 41635840,
+      "cached": true
+    },
+    {
+      "event": "rootfs",
+      "t": 101,
+      "files": 365,
+      "compressedBytes": 0,
+      "ms": 69,
+      "skipped": [
+        1
+      ]
+    },
+    {
+      "event": "runtime-ready",
+      "t": 106,
+      "env": 4,
+      "files": 4
+    },
+    {
+      "event": "bundle-load-start",
+      "t": 106
+    },
+    {
+      "event": "bundle-loaded",
+      "t": 347,
+      "ms": 241
+    },
+    {
+      "event": "run-start",
+      "t": 398,
+      "loadMs": 398,
+      "bundleMs": 241
+    },
+    {
+      "event": "missing",
+      "t": 372,
+      "key": "process.type",
+      "kind": "get",
+      "stack": "at http://localhost:8093/native/claude-cli.js:111:184"
+    },
+    {
+      "event": "missing",
+      "t": 372,
+      "key": "process.__nwjs",
+      "kind": "get",
+      "stack": "at http://localhost:8093/native/claude-cli.js:111:218"
+    },
+    {
+      "event": "missing",
+      "t": 445,
+      "key": "fs.watchFile",
+      "kind": "call",
+      "stack": "at cE_ (http://localhost:8093/native/claude-cli.js:494:23068)"
+    },
+    {
+      "event": "missing",
+      "t": 449,
+      "key": "process.__signal_exit_emitter__",
+      "kind": "get",
+      "stack": "at http://localhost:8093/native/claude-cli.js:472:9101"
+    },
+    {
+      "event": "net",
+      "t": 455,
+      "method": "HEAD",
+      "url": "https://api.anthropic.com/"
+    },
+    {
+      "event": "net",
+      "t": 475,
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md"
+    },
+    {
+      "event": "net",
+      "t": 514,
+      "method": "GET",
+      "url": "https://api.anthropic.com/api/hello"
+    },
+    {
+      "event": "net",
+      "t": 515,
+      "method": "GET",
+      "url": "https://platform.claude.com/v1/oauth/hello"
+    },
+    {
+      "event": "missing",
+      "t": 526,
+      "key": "fs.watch",
+      "kind": "call",
+      "stack": "at hA4 (http://localhost:8093/native/claude-cli.js:595:20951)"
+    },
+    {
+      "event": "net",
+      "t": 5910,
+      "method": "GET",
+      "url": "https://api.anthropic.com/api/hello"
+    },
+    {
+      "event": "net",
+      "t": 11017,
+      "method": "GET",
+      "url": "https://api.anthropic.com/api/hello"
+    }
+  ],
+  "missing": [
+    {
+      "key": "process.type",
+      "kind": "get",
+      "count": 1,
+      "stack": "at http://localhost:8093/native/claude-cli.js:111:184"
+    },
+    {
+      "key": "process.__nwjs",
+      "kind": "get",
+      "count": 1,
+      "stack": "at http://localhost:8093/native/claude-cli.js:111:218"
+    },
+    {
+      "key": "fs.watchFile",
+      "kind": "call",
+      "count": 1,
+      "stack": "at cE_ (http://localhost:8093/native/claude-cli.js:494:23068)"
+    },
+    {
+      "key": "process.__signal_exit_emitter__",
+      "kind": "get",
+      "count": 1,
+      "stack": "at http://localhost:8093/native/claude-cli.js:472:9101"
+    },
+    {
+      "key": "fs.watch",
+      "kind": "call",
+      "count": 1,
+      "stack": "at hA4 (http://localhost:8093/native/claude-cli.js:595:20951)"
+    }
+  ],
+  "stubCalls": [],
+  "spawns": [
+    {
+      "file": "which",
+      "args": [
+        "npm"
+      ],
+      "cwd": "/root",
+      "t": 1786897794066
+    },
+    {
+      "file": "which",
+      "args": [
+        "bun"
+      ],
+      "cwd": "/root",
+      "t": 1786897794066
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--version"
+      ],
+      "cwd": "/root",
+      "t": 1786897794077
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/etc/claude-code/.claude/commands"
+      ],
+      "cwd": "/root",
+      "t": 1786897794077
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/root/.claude/commands"
+      ],
+      "cwd": "/root",
+      "t": 1786897794077
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/etc/claude-code/.claude/agents"
+      ],
+      "cwd": "/root",
+      "t": 1786897794077
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/root/.claude/agents"
+      ],
+      "cwd": "/root",
+      "t": 1786897794077
+    },
+    {
+      "file": "which",
+      "args": [
+        "yarn"
+      ],
+      "cwd": "/root",
+      "t": 1786897794138
+    },
+    {
+      "file": "which",
+      "args": [
+        "deno"
+      ],
+      "cwd": "/root",
+      "t": 1786897794138
+    },
+    {
+      "file": "which",
+      "args": [
+        "pnpm"
+      ],
+      "cwd": "/root",
+      "t": 1786897794163
+    },
+    {
+      "file": "which",
+      "args": [
+        "node"
+      ],
+      "cwd": "/root",
+      "t": 1786897794163
+    }
+  ],
+  "net": [
+    {
+      "t": 455,
+      "method": "HEAD",
+      "url": "https://api.anthropic.com/"
+    },
+    {
+      "t": 475,
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md"
+    },
+    {
+      "t": 514,
+      "method": "GET",
+      "url": "https://api.anthropic.com/api/hello"
+    },
+    {
+      "t": 515,
+      "method": "GET",
+      "url": "https://platform.claude.com/v1/oauth/hello"
+    },
+    {
+      "t": 5910,
+      "method": "GET",
+      "url": "https://api.anthropic.com/api/hello"
+    },
+    {
+      "t": 11017,
+      "method": "GET",
+      "url": "https://api.anthropic.com/api/hello"
+    }
+  ],
+  "backendOps": {
+    "info": 5,
+    "ttySize": 2,
+    "realpath": 10,
+    "ttySetRaw": 2,
+    "isatty": 9,
+    "stat": 39,
+    "readFile": 30,
+    "open": 4,
+    "readdir": 24,
+    "mkdir": 24,
+    "readlink": 5,
+    "writeFile": 13,
+    "rename": 5,
+    "utimes": 5,
+    "copyFile": 1,
+    "chmod": 4,
+    "rmdir": 5,
+    "spawn": 11,
+    "ttyWrite": 9,
+    "write": 1,
+    "unlink": 7
+  },
+  "screenTail": [
+    "nanobox/claude NATIVE track — Claude Code's JS on this browser's V8 (Web Worker, no emulation), image claude-npm",
+    "Welcome to Claude Code v2.1.112",
+    "…………………………………………………………………………………………………………………………………………………………",
+    "     *                                       █████▓▓░",
+    "                                 *         ███▓░     ░░",
+    "            ░░░░░░                        ███▓░",
+    "    ░░░   ░░░░░░░░░░                      ███▓░",
+    "   ░░░░░░░░░░░░░░░░░░░    *                ██▓░░      ▓",
+    "                                             ░▓▓███▓▓░",
+    " *                                 ░░░░",
+    "                                 ░░░░░░░░",
+    "                               ░░░░░░░░░░░░░░░░",
+    "       █████████                                        *",
+    "      ██▄█████▄██                        *",
+    "       █████████      *",
+    "…………………█ █   █ █………………………………………………………………………………………………………………",
+    " Unable to connect to Anthropic services",
+    " Failed to connect to api.anthropic.com: ECONNRESET",
+    " Please check your internet connection and network settings.",
+    " Note: Claude Code might not be available in your country. Check supported countries at https://anthropic.com/supported-countries"
+  ]
+}

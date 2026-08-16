@@ -34,7 +34,7 @@ import { WASI, wasi as wasitype, PreopenDirectory, File, Directory } from "@bjor
 
 const argv = process.argv.slice(2);
 if (argv.length === 0) { console.error("usage: run.mjs <out.wasm> [options]"); process.exit(2); }
-const opts = { wasm: argv[0], cmd: null, stdinFile: null, type: [], dumpDir: null, timeout: 0, quiet: false, clock: "frozen", stats: false, transcript: null, noStdin: false, mounts: [], jit: null, jitDump: null, replies: [], savePhys: [], jitBundle: [], jitBundleOut: null };
+const opts = { wasm: argv[0], cmd: null, stdinFile: null, type: [], dumpDir: null, timeout: 0, quiet: false, clock: "frozen", stats: false, transcript: null, noStdin: false, mounts: [], jit: null, jitDump: null, replies: [], savePhys: [], jitBundle: [], jitBundleOut: null, bundleFiles: [] };
 for (let i = 1; i < argv.length; i++) {
   const a = argv[i], v = () => argv[++i];
   if (a === "--cmd") opts.cmd = v();
@@ -70,7 +70,11 @@ for (let i = 1; i < argv.length; i++) {
   else if (a === "--oci") opts.oci = v();               // external-bundle engines: image layout base URL (…/c2w/images/codex/), unpacked
                                                         // in-process (web/oci.js) and served to the guest via the built-in virtio-9p (web/wasifs.js)
   else if (a === "--spec") opts.spec = v();             // with --oci: the OCI runtime spec file (web/images/<image>/config.json)
-  else if (a === "--net") opts.net = true;              // pass --net=socket (dead link: nothing ever connects); implied by --oci
+  else if (a === "--net") opts.net = true;
+  else if (a === "--hc-echo") opts.hcEcho = true;      // host channel smoke test: echo guest bytes back
+  else if (a === "--nbnode-test") opts.nbnodeTest = true;
+  else if (a === "--bundle-file") opts.bundleFiles.push(v()); // NAME=HOSTFILE -> /bundle/NAME in the container (mode 755) // system-node RPC test: drive the guest nbnode shim through the channel
+  else if (a === "--hc-log") opts.hcLog = true;              // pass --net=socket (dead link: nothing ever connects); implied by --oci
   else if (a === "--oci-cache") opts.ociCache = v();    // with --oci: directory holding decompressed layer tars (<digest>.tar), filled on first use
   else if (a === "--checkpoint-out") opts.checkpointOut = v(); // write a checkpoint file when the guest reaches --checkpoint-at (JIT must be off)
   else if (a === "--checkpoint-at") opts.checkpointAt = v();   // marker label ("@@NANOBOX-DUMP:LABEL@@") or "expect" (when --expect fires)
@@ -88,6 +92,10 @@ const t0 = performance.now();
 const FIXED_EPOCH_NS = 1_700_000_000n * 1_000_000_000n; // 2023-11-14T22:13:20Z, same as bochsrc time0
 const wasmBytes = fs.readFileSync(opts.wasm);
 await import("../web/jit-bundle.js"); // NanoboxJitBundle: bundle file format + engine tag (shared with the browser host)
+await import("../web/native/hostchan.js"); // NanoboxHostChan: /dev/hvc1 <-> JS byte stream
+await import("../web/native/proto.js"); await import("../web/native/hcring.js"); await import("../web/native/guest.js"); // system-node RPC client
+import { Worker } from "worker_threads";
+let hostChan = null, hostChanHandler = null;
 const args = ["arg0"];
 if (opts.noStdin) args.push("--no-stdin");
 if (opts.oci || opts.net) args.push("--net=socket=listenfd=9", "--mac", "02:00:00:00:00:01"); // fd 9/10 are served by the netstub below
@@ -516,11 +524,34 @@ function installJitHost(inst) {
   if (ex.nanobox_hook_slot(4)) table.set(ex.nanobox_hook_slot(4), trampoline([0x7f, 0x7f, 0x7f], [], note));
   if (ex.nanobox_hook_slot(5)) table.set(ex.nanobox_hook_slot(5), trampoline([0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f], [0x7f], installBatch));
   if (opts.jitBundle.length && !ex.nanobox_hook_slot(3)) console.error("[harness] WARNING: this engine has no lookup hook (slot 3); --jit-bundle has no effect");
+  // host channel (/dev/hvc1 in the guest): --hc-echo echoes guest bytes back (device smoke test)
+  hostChan = globalThis.NanoboxHostChan ? NanoboxHostChan.attach(inst, table, trampoline) : null;
+  if (hostChan) {
+    if (opts.nbnodeTest) {
+      // the runtime side lives in a worker thread (this thread never yields to its event loop while
+      // the VM runs); host->guest bytes come through the shared ring read by the engine's hook
+      const ring = NanoboxHcRing.create(1 << 20); const rr = NanoboxHcRing.reader(ring.sab);
+      table.set(ex.nanobox_hc_hook_slot(1), trampoline([0x7f, 0x7f], [0x7f], (ptr, max) => { const b = rr.read(max); if (!b) return 0; new Uint8Array(mem()).set(b, ptr); return b.length; }));
+      const w = new Worker(new URL("./nbnode-test-worker.mjs", import.meta.url), { workerData: { ringSab: ring.sab } });
+      w.on("message", (m) => { if (m.type === "log") console.error(m.text); });
+      w.on("error", (e) => console.error("[nbnode-test] worker error " + (e && e.stack || e)));
+      hostChanHandler = (b) => w.postMessage({ type: "hc", data: b }, [b.buffer]);
+    }
+    let hcIn = 0;
+    hostChan.onData = (b) => {
+      hcIn += b.length;
+      const txt = new TextDecoder().decode(b);
+      if (opts.hcEcho) { const m = /^bench (\d+)\n/.exec(txt); if (m) { const n = Number(m[1]); const chunk = new Uint8Array(65536).fill(66); for (let s = 0; s < n; s += chunk.length) hostChan.send(s + chunk.length <= n ? chunk : chunk.subarray(0, n - s)); console.error(`[hc] bench: queued ${n} bytes for the guest`); } else hostChan.send(b); }
+      if (opts.hcLog) console.error("[hc] guest->host " + b.length + " bytes (total " + hcIn + "): " + JSON.stringify(txt.slice(0, 80)));
+      if (hostChanHandler) hostChanHandler(b);
+    };
+  }
   if (opts.jit) {
     const [lvl, thr] = opts.jit.split(":");
     ex.nanobox_set_jit(Number(lvl), Number(thr || 0));
     if (process.env.NANOBOX_JIT_EAGER && ex.nanobox_set_jit_eager) { ex.nanobox_set_jit_eager(1); console.error("[harness] JIT page-eager sweep on (recording mode)"); }
     if (process.env.NANOBOX_JIT_MERGE && ex.nanobox_set_jit_merge) { ex.nanobox_set_jit_merge(1); console.error("[harness] JIT merged push/pop runs on"); }
+    if (process.env.NANOBOX_JIT_PROBE2 === "0" && ex.nanobox_set_jit_probe2) { ex.nanobox_set_jit_probe2(0); console.error("[harness] JIT two-entry probe cache OFF (A/B)"); }
     if (opts.jitMaxlen && ex.nanobox_set_jit_maxlen) ex.nanobox_set_jit_maxlen(Number(opts.jitMaxlen));
     if (opts.jitRegion != null && ex.nanobox_set_jit_region) ex.nanobox_set_jit_region(Number(opts.jitRegion));
     if (opts.jitDump) fs.mkdirSync(opts.jitDump, { recursive: true });
@@ -715,6 +746,8 @@ if (opts.oci) {
   const img = await NanoboxOci.load(opts.oci, { cache });
   const root = NanoboxFs.dir();
   NanoboxFs.add(root, "config/config.json", { data: new Uint8Array(fs.readFileSync(opts.spec)) });
+  // --bundle-file NAME=HOSTFILE: extra files in the bundle share (visible in the container at /bundle/NAME, executable)
+  for (const bf of opts.bundleFiles) { const eq = bf.indexOf("="); NanoboxFs.add(root, bf.slice(0, eq), { data: new Uint8Array(fs.readFileSync(bf.slice(eq + 1))), mode: 0o755 }); }
   NanoboxFs.add(root, "config/imageconfig.json", { data: img.configBytes });
   root.e.set("rootfs", img.rootfs);
   const bfd = fds.length; // preopen scans stop at the first BADF, so no gaps

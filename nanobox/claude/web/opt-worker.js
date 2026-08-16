@@ -18,6 +18,8 @@ importScripts(new URL("./dist/nb-worker-util.js", location.href).href);   // NbR
 importScripts(new URL("./cachefetch.js", location.href).href);
 importScripts(new URL("./jit-bundle.js", location.href).href);
 importScripts(new URL("./jit-host.js", location.href).href);
+importScripts(new URL("./native/hostchan.js", location.href).href);   // /dev/hvc1 <-> JS byte stream (system-node design)
+importScripts(new URL("./native/hcring.js", location.href).href);
 importScripts(new URL("./wasifs.js", location.href).href);
 importScripts(new URL("./oci.js", location.href).href);
 
@@ -105,6 +107,17 @@ if (MODE === "full") WebAssembly.instantiate = function (src, imports) {
         // parallel with the engine fetch; in non-direct mode this is the only wait point)
         if (jitPreload) { try { await jitPreload; } catch (e) { ev("error", { message: "jit bundles: " + (e && e.message || e) }); } }
         const ok = cfg && cfg.jit ? NanoboxJit.install(inst, cfg.jit) : false;
+        // host channel: guest -> host bytes go out on cfg.hostChan.port (to the runtime worker),
+        // host -> guest bytes come in through the shared ring (drained by the engine's rx timer hook)
+        if (cfg && cfg.hostChan && inst.exports.nanobox_hc_hook_slot) {
+          const hc = NanoboxHostChan.attach(inst, inst.exports.__indirect_function_table, NanoboxJit.trampoline);
+          const ring = NanoboxHcRing.reader(cfg.hostChan.sab);
+          hc.onData = (b) => cfg.hostChan.port.postMessage({ type: "hc", data: b }, [b.buffer]);
+          // replace the queue-based read with the ring
+          const ex = inst.exports; const mem = () => new Uint8Array(ex.memory.buffer);
+          ex.__indirect_function_table.set(ex.nanobox_hc_hook_slot(1), NanoboxJit.trampoline([0x7f, 0x7f], [0x7f], (ptr, max) => { const b = ring.read(max); if (!b) return 0; mem().set(b, ptr); return b.length; }));
+          ev("hostchan", { on: true });
+        }
         ev("engine", { optimized: true, jit: ok ? cfg.jit : null, bundles: jitPreload ? NanoboxJit.state.bundleModules : undefined });
       } else {
         ev("engine", { optimized: false });
@@ -155,6 +168,12 @@ async function buildBundle() {
   const root = NanoboxFs.dir();
   NanoboxFs.add(root, "config/config.json", { data: new Uint8Array(spec) });
   NanoboxFs.add(root, "config/imageconfig.json", { data: img.configBytes });
+  // extra files in the bundle share (visible at /bundle/<name> in the container), e.g. the system-node
+  // shim: cfg.bundleFiles = [{ name: "nb/node", url: "/native/nbnode", mode: 0o755 }]
+  for (const bf of cfg.bundleFiles || []) {
+    const bytes = await NanoboxCache.fetchValidated(new URL(bf.url, location.href).href);
+    NanoboxFs.add(root, bf.name, { data: new Uint8Array(bytes), mode: bf.mode || 0o755 });
+  }
   root.e.set("rootfs", img.rootfs);
   ev("bundle-ready", { files: img.files, compressedBytes: img.compressedBytes, ms: Math.round(performance.now() - t), cache: img.cache || null });
   return root;

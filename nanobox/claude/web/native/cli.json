@@ -1,0 +1,11 @@
+{
+  "version": "2.1.112",
+  "source": "usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+  "layer": "sha256:2259beb0c3344343571f282a921f5e3405e49331ec6d6b235a8c9b36f058fc13",
+  "image": "public/c2w/images/claude-npm",
+  "sha256": "bc3358282800e3e99daa8e71ac5b7b1566bd0d7ca7eb94f714a7859365d3163f",
+  "bytes": 13711684,
+  "transformedBytes": 14072927,
+  "transform": "esbuild transform format=cjs (ESM imports -> require; import.meta.url defined; whitespace-only minification), no bundling, no renaming",
+  "date": "2026-08-16T16:26:58.737Z"
+}

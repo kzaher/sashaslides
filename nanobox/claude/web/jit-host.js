@@ -269,5 +269,5 @@
     return out;
   }
 
-  global.NanoboxJit = { install, preload, exportBundle, stats, state };
+  global.NanoboxJit = { install, preload, exportBundle, stats, state, trampoline };
 })(self);

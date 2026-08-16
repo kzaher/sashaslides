@@ -9,3 +9,7 @@ build/
 guest/tests/bin/
 guest/tests/core.*
 *.cpuprofile
+web/native/node_modules/
+web/native/cli.js
+web/native/claude-cli.js
+web/native/runtime.js.map
