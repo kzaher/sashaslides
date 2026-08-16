@@ -83,6 +83,17 @@ Status legend: [ ] todo · [~] in progress · [x] done. Everything is E2E-gated:
       retry; the lever is elsewhere (see D5: `linkFail[4]` 10 M cpu_loop returns for "next trace not
       compiled", `linkFail[2]` 21.9 M fetch-window refills).
 
+## I. Hot-path work from docs/hotpaths-codex.md (2026-08-16, agent-measured)
+- [~] I1 iCache thrash: 64 K direct-mapped entries + 576 K pool flushed wholesale on wrap re-decoded
+      hot traces ~124x per boot and reset the hotness counters (lukewarm code never reached T=2000).
+      Now: 256 K entries with a mixing hash, 2304 K pool, per-slot `hot[]` side table that survives
+      alloc_trace/flush (a re-decoded trace inherits its counter). Gate + measure.
+- [ ] I2 Cheap short traces so T can drop to ~200 (successor cache in the link epilogue, out-of-line
+      full DTLB probe, multi-entry probe cache across blocks, trimmed prologue) — the report's −1.0…1.5 s.
+- [ ] I3 Cross-page hop refill through the successor cache (`linkFail[2]` 21.9 M).
+- [~] I4 Claude: `ROL/ROR r,CL` (JSC GC sweep: 168 M handler steps per 24 s) and `TZCNT/LZCNT` (82 M)
+      templates. Gate + measure.
+
 ## D. Measurements / investigations
 - [x] D1 Per-page instruction profile (kernel/user split, concentration) for the three CLIs.
 - [x] D2 Focus histogram inside the hottest page (Claude = JSC GC sweep loops).
