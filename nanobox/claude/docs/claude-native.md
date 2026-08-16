@@ -56,11 +56,11 @@ kernel-heavy codex/agy startups. Screenshot + JSON: `web/results/claude-npm-opt.
 ## 2. The native page
 
 ```
-web/claude-native.html          the page (xterm.js, timer, prompt auto-answer, window.nanobox accessor)
+web/claude-native.html          the page (xterm.js, timer, prompt auto-answer, window.nanobox accessor; ?backend=vm boots the VM too)
 web/native/runtime.js           the worker (built by web/native/build.mjs from web/native/src/*.js, 2.0 MB)
 web/native/claude-cli.js        cli.js from the image, ESM->CJS transformed (tools/native-prepare.mjs, gitignored, 14 MB)
 web/native/cli.json             provenance: version 2.1.112, image, layer, SHA-256 of the original cli.js
-test/e2e-native.mjs             headless-Chrome driver -> web/results/claude-native.{json,png}
+test/e2e-native.mjs             headless-Chrome driver -> web/results/claude-native.{json,png}  (--backend vm -> claude-native-vm.*)
 test/native-probe.mjs           open, wait for sign-in, send keys, print the screen (post-sign-in probing)
 test/native-eval.mjs            evaluate JS inside the running worker (debugging)
 ```
@@ -112,13 +112,27 @@ netConnect({host,port,tls})->{id}|{error} netWrite(id, bytes) netEnd(id)
   `netConnect` → `ECONNREFUSED` (recorded). HTTP is not a backend op: `http`/`https`/global `fetch`
   end in the worker's `fetch`, which routes every cross-origin request through the server's
   `POST /net/fetch` gateway (same encoding as `vm.html`'s override, `x-nanobox-target`).
-* **Backend #2 — the VM track's guest-side `node` shim** (the coordinator's, in progress): the same
-  operations executed inside the emulated Linux guest. It lives in another worker, so
-  `SyncChannel` (client) / `serveSync` (responder) in `backend.js` carry `{id, op, args}` over a
-  MessagePort and the reply back through a SharedArrayBuffer with `Atomics.wait/notify` (chunked for
-  big payloads), which turns the asynchronous responder into the synchronous contract that
-  `readFileSync`, `statSync`, `spawnSync` need. Events (`tty`, `proc`, `net`) are plain messages.
-  Nothing in `fs.js`/`process.js`/`procnet.js` changes when the object behind `B` is swapped.
+* **Backend #2 — `GuestBackend`** (`web/native/src/backend-guest.js`, `?backend=vm`): the same
+  operations executed inside the emulated Linux guest by the VM track's `nbnode` shim
+  (`guest/nbnode/nbnode.c`, installed as `/usr/local/bin/node` through `/bundle/nb`, spec
+  `web/images/claude-npm/config-vm.json`; wire protocol `web/native/proto.js`, client
+  `web/native/guest.js`, rings `web/native/hcring.js` — see `docs/system-node.md`). The page boots the
+  optimized engine exactly like `vm.html` (direct rootfs, `opt-worker.js`, the page's xterm is the
+  guest tty through xterm-pty) and creates two SharedArrayBuffer rings; the runtime worker
+  `NanoboxGuest.connect({ringSab, inSab})`s, waits for the shim's HELLO (argv/env/cwd/tty of the
+  container process — that is what `process.argv`, `process.env`, `process.cwd()` become), then loads
+  cli.js. `g.sync.*` blocks the runtime worker with `Atomics.wait` on the guest→host ring until the
+  reply frame arrives (events such as STDIN / CHILD_OUT are dispatched meanwhile) — the synchronous
+  contract for `readFileSync`, `statSync`, `spawnSync`; the promise/callback APIs use the async twins.
+  Fast path: reads of image paths (the OCI rootfs the runtime worker already holds) are answered by
+  the in-memory tree unless this layer wrote/removed/renamed under the path or it is under
+  `/dev /proc /sys /tmp /run /root /home` (guest-only by nature); on the sign-in run 223 operations
+  went to the guest and 2 to the image (everything Claude Code touches at startup is under `/root`).
+  Child processes are real: `which npm|bun|…` and `rg` run in the guest (busybox / the vendored rg),
+  their output/exit come back as CHILD_OUT/CHILD_EXIT events → the `ChildProcess` streams. Nothing in
+  `fs.js`/`process.js`/`procnet.js` changes between the two backends. (`backend.js` also keeps a
+  generic `SyncChannel`/`serveSync` pair — postMessage requests + SAB replies — for a responder that is
+  not the guest shim.)
 
 ### What the layer implements
 
@@ -187,10 +201,17 @@ Headless Chrome 151 (`test/e2e-native.mjs`, `web/results/claude-native.json`), p
 
 | | total | load (rootfs + bundle) | run |
 |---|---|---|---|
-| warm (Cache API layers + V8 code cache) | **1.0–1.3 s** | 0.39–0.45 s (rootfs 65 ms + bundle 240–270 ms) | 0.62–0.86 s |
-| cold (`?cache=0`, HTTP cache disabled; `claude-native-cold.json`) | **1.8 s** | 0.90 s (rootfs 320 ms + bundle 390 ms) | 0.87 s |
+| backend #1 (in-memory rootfs), warm (Cache API layers + V8 code cache) | **1.0–1.3 s** | 0.39–0.45 s (rootfs 65 ms + bundle 240–270 ms) | 0.62–0.86 s |
+| backend #1, cold (`?cache=0`, HTTP cache disabled; `claude-native-cold.json`) | **1.8 s** | 0.90 s (rootfs 320 ms + bundle 390 ms) | 0.87 s |
+| **backend #2 (`?backend=vm`: files/tty/child processes in the emulated guest via nbnode; `claude-native-vm.json`)** | **4.0–4.3 s** | 2.4–2.7 s (engine + image 0.7 s, VM start at 0.9–1.2 s, guest boot → shim HELLO at 2.1–2.4 s, bundle 245 ms) | 1.6 s (0.59 G guest instructions) |
 | emulated claude-npm (same cli.js, node 22 in the VM) | 84.4 s | 2.2 s | 82.1 s |
 | emulated claude (Bun 2.1.233) | 49.3–52.6 s | ~2 s | ~48 s |
+
+Backend #2's run phase (1.6 s vs 0.7 s) is the price of ~225 synchronous round trips into the guest
+(0.85 ms each in the harness, more in the browser while the guest is also drawing) plus the guest's
+own work (`which`, `rg` children, `~/.claude.json` writes, tty output through hvc → tty → xterm-pty);
+its load phase is the VM boot. Against the fully emulated node (84.4 s) that is 20×, against the
+emulated Bun binary (49–53 s) 12×.
 
 Pressing Enter on the sign-in screen goes on to the real OAuth flow: `xdg-open` fails (recorded),
 Claude Code prints "Browser didn't open? Use the url below to sign in" + the authorize URL and
@@ -202,8 +223,10 @@ Claude Code prints "Browser didn't open? Use the url below to sign in" + the aut
 * **Child processes** — the big one: `rg` (file search, custom commands/agents discovery), `git`
   (repo detection, status, diffs), `which`, `xdg-open`, shells for the Bash tool, `claude` itself
   as an MCP subprocess. Backend #1 says ENOENT to all; backend #2 forwards `spawn`/`spawnSync` +
-  `proc` events into the guest, where these programs exist and run for real. `spawnSync` needs the
-  synchronous channel (Atomics.wait) — that is why the interface is RPC-shaped with a sync mode.
+  `proc` events into the guest, where these programs exist and run for real (verified for `which`
+  and `rg` on the sign-in run). Still to do there: pty children (flag bit1), `xdg-open` (nothing to
+  open a browser with in the guest — the paste-code OAuth path is the one that works), and the
+  network for children (the guest's stack goes through the same proxy as before).
 * **fs.watch / watchFile** (settings, `.claude` dirs) — stubbed watchers that never fire; backend #2
   can push change events (`fs` kind) if it runs inotify in the guest.
 * **net.Server** — the OAuth callback server (`listen(57001)`) pretends to listen; nothing can connect

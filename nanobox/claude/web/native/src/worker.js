@@ -17,6 +17,7 @@ import url from "url";
 import querystring from "querystring-es3";
 import bufferModule from "buffer";
 import { MemBackend } from "./backend.js";
+import { GuestBackend } from "./backend-guest.js";
 import { makeFs } from "./fs.js";
 import { makeTty, makeOs, makeProcess, ProcessExit } from "./process.js";
 import { makeChildProcess, makeNet, makeHttp } from "./procnet.js";
@@ -92,25 +93,46 @@ async function loadRootfs(cfg) {
 }
 
 async function main(cfg) {
-  ev("worker-start");
+  ev("worker-start", { backend: cfg.backend || "mem" });
+  const vm = cfg.backend === "vm";
+  let guest = null, helloP = null;
+  if (vm) {
+    // backend #2: the guest-side node shim talks to us over the two SAB rings the page created
+    importScripts(new URL("/native/proto.js", location.href).href, new URL("/native/hcring.js", location.href).href, new URL("/native/guest.js", location.href).href);
+    guest = self.NanoboxGuest.connect({ ringSab: cfg.toGuest, inSab: cfg.fromGuest });
+    helloP = new Promise((res) => { guest.onHello = (h) => { ev("hello", { argv: h.argv, cwd: h.cwd, pid: h.pid, cols: h.cols, rows: h.rows, isatty: h.isatty }); res(h); }; });
+    guest.onLog = (t) => ev("nbnode-log", { text: t });
+  }
   const img = await loadRootfs(cfg);
-  const spec = await (await origFetch(cfg.specUrl)).json();
-  // env: first occurrence wins (glibc getenv semantics; the spec repeats TERM)
-  const env = {}; for (const kv of spec.process.env) { const i = kv.indexOf("="); const k = kv.slice(0, i); if (!(k in env)) env[k] = kv.slice(i + 1); }
-  Object.assign(env, cfg.env || {});
-  const cwd = spec.process.cwd || "/root";
-  const cliPath = cfg.cliPath; // /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js
-  const argv = ["/usr/local/bin/node", cliPath, ...(cfg.args || [])];
-
-  // ---- backend #1 ----
-  const B = new MemBackend(img.root, { env, argv, cwd, ttyWrite: (fd, bytes) => { const copy = bytes.slice(); post({ type: "stdout", fd, data: copy }, [copy.buffer]); } });
-  B.tty.cols = cfg.cols || 80; B.tty.rows = cfg.rows || 24;
-  try { B.mkdir(cwd, true, 0o755); } catch {}
+  let env, cwd, cliPath, argv, B;
+  if (vm) {
+    ev("waiting-hello");
+    const hello = await helloP;
+    const image = new MemBackend(img.root, { cwd: hello.cwd });
+    B = new GuestBackend({ g: guest, image, inSab: cfg.fromGuest, cwd: hello.cwd });
+    const info = B.call("info");
+    env = info.env; cwd = info.cwd; argv = hello.argv.slice();
+    // the main script as node sees it: realpath of argv[1] (/usr/local/bin/claude -> .../cli.js)
+    let script = argv[1] || cfg.cliPath; try { script = B.call("realpath", script); } catch {} 
+    cliPath = script; argv[1] = script;
+  } else {
+    const spec = await (await origFetch(cfg.specUrl)).json();
+    // env: first occurrence wins (glibc getenv semantics; the spec repeats TERM)
+    env = {}; for (const kv of spec.process.env) { const i = kv.indexOf("="); const k = kv.slice(0, i); if (!(k in env)) env[k] = kv.slice(i + 1); }
+    Object.assign(env, cfg.env || {});
+    cwd = spec.process.cwd || "/root";
+    cliPath = cfg.cliPath; // /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js
+    argv = ["/usr/local/bin/node", cliPath, ...(cfg.args || [])];
+    // ---- backend #1 ----
+    B = new MemBackend(img.root, { env, argv, cwd, ttyWrite: (fd, bytes) => { const copy = bytes.slice(); post({ type: "stdout", fd, data: copy }, [copy.buffer]); } });
+    B.tty.cols = cfg.cols || 80; B.tty.rows = cfg.rows || 24;
+    try { B.mkdir(cwd, true, 0o755); } catch {}
+  }
   self.onmessage = (m) => {
     const d = m.data; if (!d) return;
-    if (d.type === "stdin") B.ttyInput(new Uint8Array(d.data));
-    else if (d.type === "resize") B.ttyResize(d.cols, d.rows);
-    else if (d.type === "dump") post({ type: "missing", ...dumpMissing(), spawns: B.spawnLog, net: netlog, backendOps: B.stats.ops, required: Object.fromEntries(required) });
+    if (d.type === "stdin" && !vm) B.ttyInput(new Uint8Array(d.data));
+    else if (d.type === "resize" && !vm) B.ttyResize(d.cols, d.rows);
+    else if (d.type === "dump") post({ type: "missing", ...dumpMissing(), spawns: child_process._spawnLog, net: netlog, backendOps: B.stats.ops, backendStats: vm ? { guest: B.stats.guest, image: B.stats.image, dirty: [...B.dirty], channel: guest.stats } : null, required: Object.fromEntries(required) });
     else if (d.type === "eval") { // debugging aid: window.nanobox.eval("code") runs in the worker scope
       Promise.resolve().then(() => (0, eval)(d.code)).then((v) => post({ type: "eval", id: d.id, value: typeof v === "string" ? v : JSON.stringify(v, null, 1) }), (e) => post({ type: "eval", id: d.id, error: String(e && e.stack || e) }));
     }
@@ -125,7 +147,7 @@ async function main(cfg) {
   const info = B.call("info");
   const os = makeOs(B, info);
   let exitCode = null;
-  const proc = makeProcess(B, tty, { onExit: (c) => { exitCode = c; ev("exit", { code: c }); post({ type: "exit", code: c }); }, getBuiltinModule: (id) => tryRequire(id) });
+  const proc = makeProcess(B, tty, { onExit: (c) => { exitCode = c; ev("exit", { code: c }); post({ type: "exit", code: c }); if (vm) { try { guest.exit(c); } catch {} } }, getBuiltinModule: (id) => tryRequire(id) });
   const child_process = makeChildProcess(B, proc);
   const { net, tls, dns } = makeNet(B);
   const { http, https, http2 } = makeHttp(B, net);
@@ -179,7 +201,7 @@ async function main(cfg) {
   };
   self.addEventListener("error", (e) => { if (uncaught(e.error || e.message, "uncaughtException")) e.preventDefault(); });
   self.addEventListener("unhandledrejection", (e) => { if (uncaught(e.reason, "unhandledRejection")) e.preventDefault(); });
-  ev("runtime-ready", { env: Object.keys(env).length, files: img.manifest.layers.length });
+  ev("runtime-ready", { env: Object.keys(env).length, files: img.manifest.layers.length, backend: vm ? "vm" : "mem", cwd, argv });
 
   // ---- load the bundle (importScripts: V8 code cache on repeat loads) ----
   const tl = performance.now();

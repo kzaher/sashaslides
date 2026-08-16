@@ -14,10 +14,11 @@ const PORT = Number(opt("--port", 8093)), CDP_PORT = Number(opt("--cdp", 9222));
 const TIMEOUT_S = Number(opt("--timeout", 120));
 const IMAGE = opt("--image", "claude-npm");
 const OUT = opt("--out", join(HERE, "../web/results"));
-const TAG = opt("--tag", "claude-native");
+const BACKEND = opt("--backend", "mem");   // mem (backend #1, in-memory rootfs) | vm (backend #2: guest-side node shim in the emulated VM)
+const TAG = opt("--tag", BACKEND === "vm" ? "claude-native-vm" : "claude-native");
 mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const url = `http://localhost:${PORT}/claude-native.html?image=${IMAGE}${opt("--q", "") ? "&" + opt("--q", "") : ""}`;
+const url = `http://localhost:${PORT}/claude-native.html?image=${IMAGE}${BACKEND === "vm" ? "&backend=vm" : ""}${opt("--q", "") ? "&" + opt("--q", "") : ""}`;
 const tab = await CDP.New({ port: CDP_PORT, url: "about:blank" });
 const client = await CDP({ target: tab, port: CDP_PORT });
 const { Page, Runtime, Emulation, Network, Log } = client;
@@ -36,16 +37,16 @@ const ev = async (e) => (await Runtime.evaluate({ expression: e, returnByValue: 
 let seen = 0, verdict = null;
 while ((Date.now() - t0) / 1000 < TIMEOUT_S) {
   await sleep(250);
-  const st = await ev("window.nanobox ? ({events: window.nanobox.events, signinMs: window.nanobox.signinMs, runStartMs: window.nanobox.runStartMs, bundleMs: window.nanobox.bundleMs, failed: window.nanobox.failed, exitCode: window.nanobox.exitCode}) : null");
+  const st = await ev("window.nanobox ? ({events: window.nanobox.events, signinMs: window.nanobox.signinMs, runStartMs: window.nanobox.runStartMs, bundleMs: window.nanobox.bundleMs, helloMs: window.nanobox.helloMs, vmStartMs: window.nanobox.vmStartMs, failed: window.nanobox.failed, exitCode: window.nanobox.exitCode, icount: window.nanobox.stats && window.nanobox.stats.icount}) : null");
   if (!st) continue;
-  for (; seen < st.events.length; seen++) { const e = st.events[seen]; if (e.event === "worker:missing") continue; console.log(`  +${(e.t / 1000).toFixed(1).padStart(6)}s ${e.event}${e.name ? " " + e.name : ""}${e.message ? " " + String(e.message).slice(0, 300) : ""}${e.ms != null && e.event !== "signin" ? " " + e.ms + " ms" : ""}${e.url ? " " + e.method + " " + e.url : ""}`); }
-  if (st.signinMs != null) { verdict = { signinMs: Math.round(st.signinMs), loadMs: Math.round(st.runStartMs), runMs: Math.round(st.signinMs - st.runStartMs), bundleMs: st.bundleMs }; break; }
+  for (; seen < st.events.length; seen++) { const e = st.events[seen]; if (e.event === "worker:missing" || e.event === "vm:image") continue; console.log(`  +${(e.t / 1000).toFixed(1).padStart(6)}s ${e.event}${e.name ? " " + e.name : ""}${e.message ? " " + String(e.message).slice(0, 300) : ""}${e.text ? " " + String(e.text).slice(0, 200) : ""}${e.ms != null && e.event !== "signin" ? " " + e.ms + " ms" : ""}${e.url ? " " + e.method + " " + e.url : ""}${e.argv ? " " + JSON.stringify(e.argv) : ""}`); }
+  if (st.signinMs != null) { verdict = { signinMs: Math.round(st.signinMs), loadMs: Math.round(st.runStartMs), runMs: Math.round(st.signinMs - st.runStartMs), bundleMs: st.bundleMs, helloMs: st.helloMs != null ? Math.round(st.helloMs) : undefined, vmStartMs: st.vmStartMs != null ? Math.round(st.vmStartMs) : undefined, icount: st.icount || undefined }; break; }
   if (st.failed) { verdict = { failed: true, exitCode: st.exitCode }; break; }
 }
 const dump = await ev("window.nanobox.dump().catch(() => null)");
 const screen = (await ev("window.nanobox ? window.nanobox.screen() : ''")) || "";
 try { const { data } = await Page.captureScreenshot({ format: "png" }); writeFileSync(join(OUT, `${TAG}.png`), Buffer.from(data, "base64")); } catch {}
-const rec = { image: IMAGE, url, verdict, date: new Date().toISOString(), browser: await ev("navigator.userAgent"), events: (await ev("window.nanobox.events")).filter((e) => e.event !== "worker:missing"), missing: dump ? dump.missing : null, stubCalls: dump ? dump.calls : null, spawns: dump ? dump.spawns : null, net: dump ? dump.net : null, backendOps: dump ? dump.backendOps : null, required: dump ? dump.required : null, screenTail: screen.trim().split("\n").filter((l) => l.trim()).slice(-25) };
+const rec = { image: IMAGE, backend: BACKEND, url, verdict, date: new Date().toISOString(), browser: await ev("navigator.userAgent"), events: (await ev("window.nanobox.events")).filter((e) => e.event !== "worker:missing"), missing: dump ? dump.missing : null, stubCalls: dump ? dump.calls : null, spawns: dump ? dump.spawns : null, net: dump ? dump.net : null, backendOps: dump ? dump.backendOps : null, backendStats: dump ? dump.backendStats : null, required: dump ? dump.required : null, screenTail: screen.trim().split("\n").filter((l) => l.trim()).slice(-25) };
 writeFileSync(join(OUT, `${TAG}.json`), JSON.stringify(rec, null, 2));
 writeFileSync(join(OUT, `${TAG}.console.log`), consoleLines.join("\n"));
 console.log("\n--- screen ---\n" + rec.screenTail.join("\n"));

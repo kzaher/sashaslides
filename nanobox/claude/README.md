@@ -194,9 +194,13 @@ Full write-up: `docs/claude-native.md`. In short:
   answer synchronous calls through `Atomics.wait`). **Sign-in screen in 1.0–1.3 s** warm (rootfs 65 ms +
   bundle 250 ms + run 0.6–0.9 s), 1.8 s cold (`node test/e2e-native.mjs`, `web/results/claude-native.*`);
   the recorded missing-API list is 5 properties (`fs.watch/watchFile`, three environment probes), 11
-  child processes (`which`, `rg`) and 4 HTTP requests before the screen. No memory identity by
-  construction — a separate track. Beyond sign-in it needs child-process forwarding (rg/git/xdg-open),
-  a real callback listener for OAuth (the paste-code path works), watchers — see the doc.
+  child processes (`which`, `rg`) and 4 HTTP requests before the screen. **`?backend=vm`** plugs in
+  backend #2 (`web/native/src/backend-guest.js` over the VM track's `nbnode` shim + `guest.js`/`proto.js`/
+  `hcring.js`, `docs/system-node.md`): the emulated guest does files, tty and child processes for real
+  while the JS runs on V8 — **sign-in in 4.0–4.3 s** (VM boot to the shim's HELLO 2.1–2.4 s + run 1.6 s,
+  0.59 G guest instructions; `web/results/claude-native-vm.*`), 20× the fully emulated node. No memory
+  identity by construction — a separate track. Beyond sign-in: pty children, xdg-open, a real OAuth
+  callback listener (the paste-code path works), watchers — see the doc.
 
 ## Memory identity (the second requirement)
 
@@ -415,7 +419,8 @@ work/                 toolchains, c2w sources, packs, profiles (gitignored)
   the VM's poll (a JS timer never could) and the bisector defaults to a 30 s watchdog per run.
 - 2026-08-16 (fifth round): `claude-npm` image (npm-installed Claude Code 2.1.112 on Node 22; emulated
   sign-in 84.4 s / 7.84 G instructions vs Bun 49–53 s / 17.9 G) and the native-V8 page (`claude-native.html`,
-  sign-in in ~1.0–1.3 s, syscall-backend interface for the VM-side node shim) — `docs/claude-native.md`.
+  sign-in in ~1.0–1.3 s with the in-memory backend, 4.0–4.3 s with `?backend=vm` = files/tty/processes in
+  the emulated guest through the nbnode shim) — `docs/claude-native.md`.
 - 2026-08-16 (third round): two register/stack experiments behind flags, run serially (see "Stack
   peepholes / register file experiments"): merged push/pop runs (`NANOBOX_JIT_MERGE=1`) ≈ −2 %, in
   the noise; registers in wasm globals ≈ +4 %, a negative result — removed again (the JIT already keeps
