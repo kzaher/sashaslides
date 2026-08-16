@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nanobox · sandbox (linux-base + first-run installer + persistent tree)</title>
+<link rel="stylesheet" href="/c2w/vendor/xterm.css">
+<style>
+  html,body{height:100%;margin:0;background:#0d0b0a;color:#e8e2da;font-family:ui-sans-serif,system-ui,sans-serif}
+  body{display:flex;flex-direction:column}
+  #term{flex:1;min-height:0;padding:4px 6px}
+  .xterm{height:100%}
+  footer{display:flex;align-items:baseline;gap:14px;padding:6px 10px;border-top:1px solid #241f1b;font-size:12.5px;color:#9c9187;flex-wrap:wrap}
+  footer b{color:#e8e2da}
+  #timer{font-family:ui-monospace,monospace;font-size:26px;color:#e0b23a;min-width:120px}
+  #timer.done{color:#57c06a}
+  #timer.err{color:#e05a4a}
+  #engine{color:#D97757;font-weight:600}
+  #phases{font-family:ui-monospace,monospace;font-size:11.5px;color:#8f857b;white-space:pre}
+  #stats{font-family:ui-monospace,monospace;font-size:11.5px;color:#6f665e;margin-left:auto;text-align:right;white-space:pre}
+</style>
+</head>
+<body>
+<div id="term"></div>
+<footer>
+  <span id="engine">sandbox</span>
+  <span id="timer">0.0 s</span>
+  <span id="status">loading…</span>
+  <span id="phases"></span>
+  <span id="stats"></span>
+</footer>
+<script src="/netpolicy.js"></script>
+<script src="/proxyext.js"></script>
+<script>
+// The guest's network egress ends in a plain fetch from this page (container2wasm's stack worker):
+// web/proxyext.js routes every cross-origin request — through the nanobox proxy extension when it is
+// installed (detected below, before anything starts), else through the /net/fetch relay for the
+// vendors that don't answer CORS (web/netpolicy.js) and directly for the rest. Every response is
+// counted per host and route (window.nanoboxNet).
+window.nanoboxNet = { requests: [], routes: {}, extension: null };
+(() => {
+  const origFetch = window.fetch.bind(window);
+  const count = (rec, r) => {
+    rec.status = r.status;
+    const len = Number(r.headers.get("content-length")) || 0;
+    if (len || !r.body) { rec.bytes = len; return r; }
+    const counted = r.body.pipeThrough(new TransformStream({ transform(c, ctl) { rec.bytes += c.byteLength; ctl.enqueue(c); } }));
+    return new Response(counted, { status: r.status, statusText: r.statusText, headers: r.headers });
+  };
+  window.fetch = (input, init = {}) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    let target; try { target = new URL(url, location.href); } catch { return origFetch(input, init); }
+    const method = (init.method || (typeof input === "object" && !(input instanceof URL) && input.method) || "GET").toUpperCase();
+    if (target.origin === location.origin || !/^https?:$/.test(target.protocol)) {
+      const rec = { url: target.href, method, via: "origin", bytes: 0 }; window.nanoboxNet.requests.push(rec);
+      return origFetch(input, init).then((r) => count(rec, r));
+    }
+    const rec = { url: target.href, method, via: "direct", host: target.hostname, bytes: 0 }; window.nanoboxNet.requests.push(rec);
+    return NanoboxProxy.workerFetch(origFetch, input, init, { extension: !!window.nanoboxNet.extension, onRoute: ({ route }) => { rec.via = route === "relay" ? "relay" : route; window.nanoboxNet.routes[route] = (window.nanoboxNet.routes[route] || 0) + 1; } }).then((r) => count(rec, r));
+  };
+})();
+</script>
+<script src="/c2w/vendor/xterm.js"></script>
+<script src="/c2w/vendor/addon-fit.js"></script>
+<script src="/c2w/vendor/xterm-pty.js"></script>
+<script src="/c2w/dist/runcontainer.js"></script>
+<script src="/native/hcring.js"></script>
+<script>
+// The sandbox: the smallest Linux (image linux-base: busybox + glibc + libstdc++, no node, no CLI)
+// boots in the emulated VM while the FIRST-RUN INSTALLER (web/native/installer.js — the persist
+// worker) fetches node + npm + the requested CLIs from the vendors' servers (npm registry directly;
+// the agy manifest/tarball through the /net/fetch relay), verifies them and hands the unpacked
+// packages to the VM worker (web/sandbox-worker.js = opt-worker.js + a writable bundle/persist
+// subtree) — the guest sees them under /usr/local (bind mounts of the persistent tree over
+// /usr/local, /root, /home, /var). The tree persists in OPFS and is shared by every page on this
+// origin: the second visit downloads nothing, and what the CLIs write (~/.claude, ~/.codex, …) is
+// journaled back and survives reloads.
+//   claude runs as JavaScript on this browser's V8 (the runtime worker behind the guest-side node shim,
+//   backend #2 of docs/claude-native.md, spec config-vm.json: PATH=/bundle/nb first); codex and agy are
+//   x86-64 Linux binaries and run in the guest (spec config-persist.json: the real node in PATH).
+// Query string:
+//   cli=claude|codex|agy       what to start (default claude)
+//   install=claude,codex,agy   what to install/mount (default: the cli; node + npm always)
+//   image=linux-base   jit=L:T   cache=0 (bypass the engine/image caches; re-download the packages too)
+//   reset=1  wipe the persistent tree first (a true first run)   engine=slim|full (default slim)
+//   sharp=1  also install claude's optional @img/sharp-linux-x64 + libvips   auto=0  no prompt auto-answer
+//   env=K=V,K=V  extra environment for the CLI
+const qs = new URLSearchParams(location.search);
+const image = qs.get("image") || "linux-base";
+const cli = qs.get("cli") || "claude";
+const installList = (qs.get("install") || (cli === "sh" ? "" : cli)).split(",").filter(Boolean);
+if (cli !== "sh" && !installList.includes(cli)) installList.push(cli);
+const auto = qs.get("auto") !== "0";
+const noCache = qs.get("cache") === "0";
+const el = (id) => document.getElementById(id);
+const T0 = performance.now();
+const now = () => performance.now() - T0;
+const SIGNIN = {
+  claude: /sign in|log in|claude\.ai\/oauth|authenticate|subscription|api key|browser didn't open/i,
+  codex:  /sign in|log in|chatgpt|api key|authenticate|auth\.openai/i,
+  agy:    /sign in|log in|google|authenticate|antigravity\.google|paste.*code/i,
+  sh:     /~ #|# $/,
+};
+const PROMPTS = [
+  { name: "claude theme", when: /choose the text style|dark mode|light mode/i, send: "\r" },
+  { name: "claude continue", when: /press enter to continue|continue\?/i, send: "\r" },
+  { name: "trust folder", when: /do you trust|trust the files/i, send: "\r" },
+];
+const ph = { engineMs: null, imageMs: null, installMs: null, persistMs: null, vmStartMs: null, bootMs: null, helloMs: null, bundleMs: null, transformMs: null, runStartMs: null, signinMs: null };
+let failed = false, exitCode = null;
+const events = [], missing = [];
+const perf = { vm: null, installer: null, runtime: null };   // byte accounting from the workers
+let install = null;   // the persist worker's summary (packages, downloads, store)
+let persistWorker = null; const persistLog = [];
+function log(event, extra) {
+  const rec = Object.assign({}, extra || {}, { event, t: Math.round(now()) });
+  events.push(rec);
+  console.log(`[nanobox sandbox/${cli}] +${(rec.t / 1000).toFixed(1)}s ${event}`, extra ? JSON.stringify(extra).slice(0, 300) : "");
+  try { parent.postMessage(Object.assign({ type: "nanobox", engine: "sandbox", image, cli }, rec), "*"); } catch {}
+}
+const xterm = new Terminal({ fontSize: 12, convertEol: false, scrollback: 2000, theme: { background: "#0d0b0a", foreground: "#e8e2da" }, allowProposedApi: true });
+const fit = new FitAddon.FitAddon();
+xterm.loadAddon(fit);
+xterm.open(el("term"));
+fit.fit();
+addEventListener("resize", () => { try { fit.fit(); } catch {} });
+// the "guest booted, CLI exec'd" mark: the command is wrapped in `sh -c 'printf "\e]777;nb-booted\a"; exec …'`
+// — an OSC xterm swallows; this handler timestamps it (for claude the shim's HELLO says the same thing)
+try { xterm.parser.registerOscHandler(777, (data) => { if (/nb-booted/.test(data) && ph.bootMs == null) { ph.bootMs = now(); log("guest-booted", { ms: Math.round(ph.bootMs) }); el("status").textContent = "running " + cli; } return true; }); } catch (e) { console.warn("no OSC handler", e); }
+let worker = null, lastMissing = null, evalId = 0; const evals = new Map();
+window.nanobox = {
+  xterm, engine: "sandbox", image, cli, install: installList, events, missing, phases: ph, perf,
+  get signinMs() { return ph.signinMs; }, get failed() { return failed; }, get runStartMs() { return ph.runStartMs; }, get exitCode() { return exitCode; }, get installInfo() { return install; },
+  screen() { const b = xterm.buffer.active, out = []; for (let i = 0; i < b.length; i++) out.push(b.getLine(i).translateToString(true)); return out.join("\n"); },
+  send(data) { xterm._core.coreService.triggerDataEvent(data, true); },   // into the VM's tty, like a user typing
+  dump() { return new Promise((res) => { if (!worker) return res(null); lastMissing = res; worker.postMessage({ type: "dump" }); }); },
+  eval(code) { const id = ++evalId; return new Promise((res, rej) => { evals.set(id, { res, rej }); worker.postMessage({ type: "eval", id, code }); }); },
+  pageResources() { return performance.getEntriesByType("resource").map((e) => ({ name: e.name, transferSize: e.transferSize, encodedBodySize: e.encodedBodySize, decodedBodySize: e.decodedBodySize })); },
+  pageNet: window.nanoboxNet, get persistLog() { return persistLog; },
+  flushPersist() { persistWorker && persistWorker.postMessage({ type: "flush" }); },
+  stats: null, samples: [],
+};
+const timerEl = el("timer");
+const fmt = (ms) => (ms / 1000).toFixed(1) + " s";
+function phasesText() {
+  const p = [];
+  if (ph.engineMs != null) p.push(`engine ${fmt(ph.engineMs)}`);
+  if (ph.imageMs != null) p.push(`image ${fmt(ph.imageMs)}`);
+  if (ph.installMs != null) p.push(`install ${fmt(ph.installMs)}${install ? (install.fromCache === install.packages ? " (cached)" : ` (${(install.downloadBytes / 1e6).toFixed(0)} MB)`) : ""}`);
+  if (ph.vmStartMs != null) p.push(`vm start ${fmt(ph.vmStartMs)}`);
+  if (ph.bootMs != null) p.push(`booted ${fmt(ph.bootMs)}`);
+  return p.join(" · ");
+}
+setInterval(() => { if (ph.signinMs == null && !failed) timerEl.textContent = fmt(now()); el("phases").textContent = phasesText(); }, 100);
+const answered = new Set();
+setInterval(() => {
+  if (ph.signinMs != null || failed) return;
+  const s = window.nanobox.screen();
+  if (auto && cli === "claude") for (const p of PROMPTS) if (!answered.has(p.name) && p.when.test(s)) { answered.add(p.name); log("prompt", { name: p.name }); window.nanobox.send(p.send); return; }
+  if (SIGNIN[cli] && SIGNIN[cli].test(s)) {
+    ph.signinMs = now();
+    const boot = ph.bootMs != null ? ph.bootMs : ph.helloMs;
+    timerEl.textContent = fmt(ph.signinMs) + (ph.vmStartMs != null && boot != null ? ` (load ${fmt(ph.vmStartMs)} + boot ${fmt(boot - ph.vmStartMs)} + run ${fmt(ph.signinMs - boot)})` : ""); timerEl.className = "done";
+    el("status").textContent = "sign-in screen reached";
+    log("signin", { ms: Math.round(ph.signinMs), loadMs: ph.vmStartMs != null ? Math.round(ph.vmStartMs) : null, bootMs: boot != null ? Math.round(boot - ph.vmStartMs) : null, runMs: boot != null ? Math.round(ph.signinMs - boot) : null });
+  }
+}, 250);
+const say = (s) => xterm.write(s.replace(/\n/g, "\r\n"));
+const fail = (msg) => { failed = true; timerEl.className = "err"; el("status").textContent = msg; log("error", { message: String(msg) }); };
+
+// ---- the persist worker: opens the persistent tree (OPFS), installs what is missing from the vendors,
+// hands the packages + journals to the VM worker (and claude's to the runtime worker) over MessageChannels,
+// then keeps journaling the guest's writes that the VM worker sends back ----
+const vmChan = new MessageChannel(), rtChan = new MessageChannel();
+function startPersist() {
+  const w = new Worker(new URL("/native/installer.js", location.href).href);
+  persistWorker = w; NanoboxProxy.bridgeWorker(w);
+  w.onmessage = (m) => {
+    const d = m.data; if (!d) return;
+    if (d.type === "progress") {
+      const { type, ...rest } = d; log("install:" + d.stage, rest);
+      if (d.stage === "journal" || d.stage === "compacted") persistLog.push(rest);
+      if (d.stage === "fetched") el("status").textContent = `installing: ${(d.bytes / 1e6).toFixed(1)} MB from ${new URL(d.url).hostname}`;
+      return;
+    }
+    if (d.type === "error") { fail("install failed: " + d.message.slice(0, 200)); return; }
+    if (d.type === "ready") {
+      ph.installMs = now();
+      install = { ms: d.ms, store: d.store, usage: d.usage, packages: d.packages.length, fromCache: d.stats.fromCache, downloadBytes: d.stats.direct + d.stats.relayed, direct: d.stats.direct, relayed: d.stats.relayed, downloads: d.stats.downloads, list: d.packages, journals: d.journals };
+      perf.installer = { downloads: d.stats.downloads, resources: d.resources };
+      log("installed", { ms: d.ms, store: d.store, packages: d.packages.length, fromCache: d.stats.fromCache, downloadBytes: install.downloadBytes, journals: d.journals });
+    }
+  };
+  w.onerror = (e) => { fail("persist worker error: " + e.message); };
+  w.postMessage({ type: "open", clis: installList, opts: { noCache, sharp: qs.get("sharp") === "1", reset: qs.get("reset") === "1", noOpfs: qs.get("opfs") === "0", proxyExtension: !!window.nanoboxNet.extension }, vmPort: vmChan.port1, runtimePort: cli === "claude" ? rtChan.port1 : null }, cli === "claude" ? [vmChan.port1, rtChan.port1] : [vmChan.port1]);
+  log("install-start", { clis: installList });
+}
+
+// ---- the VM (opt-worker.js via sandbox-worker.js, direct rootfs, guest-side node shim) ----
+async function bootVm() {
+  const jitSpec = qs.get("jit") || "2:2000";
+  let jit = null; if (jitSpec !== "0") { const [l, t] = jitSpec.split(":"); jit = { level: Number(l), threshold: Number(t || 0) }; }
+  const toGuest = NanoboxHcRing.create(1 << 20), fromGuest = NanoboxHcRing.create(4 << 20);
+  const { master, slave } = openpty();
+  { const t = slave.ioctl("TCGETS"); t.iflag &= ~(ISTRIP | INLCR | IGNCR | ICRNL | IXON); t.oflag &= ~OPOST; t.lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN); slave.ioctl("TCSETS", new Termios(t.iflag, t.oflag, t.cflag, t.lflag, t.cc)); }
+  xterm.loadAddon(master);
+  xterm.onResize(() => { try { slave.notifyResize?.(xterm.cols, xterm.rows); } catch {} });
+  // the slim engine (no embedded boot.iso) unless ?engine=full — the identity pages keep the full one
+  const vmImage = new URL(qs.get("engine") === "full" ? "/engine/opt/out.wasm.gzip" : "/engine/opt/slim/out.wasm.gzip", location.href).href;
+  const mounter = new URL("/engine/imagemounter.wasm.gzip", location.href).href;
+  const stackWorker = new URL("/c2w/dist/stack-worker.js", location.href).href;
+  const imageAddr = new URL("/c2w/images/" + image + "/", location.href).href;
+  el("status").textContent = "fetching engine…";
+  const info = await RunContainer.createContainerWASI(vmImage, "", stackWorker, mounter);
+  log("vm-runtime-ready");
+  let jitBundles = null, engineTag = null;
+  if (jit && qs.get("bundle") !== "0") {
+    try { const r = await fetch(new URL("/engine/opt/jit/index.json", location.href).href, { credentials: "same-origin" }); if (r.ok) { const idx = await r.json(); engineTag = idx.engineTag || null; const have = new Set((idx.files || []).map((f) => f.name)); // the kernel bundle + this image's + the CLI's own (recorded from the vm.html images: content-keyed, so
+      // the same binary from the vendor hits it wherever it is loaded); ?clibundle=1 adds the CLI's (agy: −0.5 s for +34 MB — off by default)
+      const names = ["kernel.nbjb", image + ".nbjb"].concat(qs.get("clibundle") === "1" ? [cli + ".nbjb"] : []);
+      jitBundles = names.filter((n) => have.has(n)).map((n) => new URL("/engine/opt/jit/" + n, location.href).href); if (!jitBundles.length) jitBundles = null; } } catch {}
+  }
+  const vmWorker = new Worker(new URL("/sandbox-worker.js", location.href).href);
+  const onVmMessage = (m) => {
+    const d = m.data; if (!d || typeof d !== "object") return;
+    if (d.type === "nanobox-event") {
+      log("vm:" + d.event, Object.assign({}, d, { type: undefined }));
+      if ((d.event === "engine-fetched" || d.event === "engine-cached") && ph.engineMs == null) ph.engineMs = now();
+      if (d.event === "image-loaded") ph.imageMs = now();
+      if (d.event === "persist-applied") ph.persistMs = now();
+      if (d.event === "start-direct" && ph.vmStartMs == null) { ph.vmStartMs = now(); el("status").textContent = "booting the guest…"; log("vm-start", { ms: Math.round(ph.vmStartMs) }); }
+      if (d.event === "error") fail("vm error: " + d.message);
+    } else if (d.type === "nanobox-perf") { perf.vm = { requests: d.requests, resources: d.resources, cache: d.cache }; }
+    else if (d.type === "nanobox-stats") { window.nanobox.stats = d; if (d.io) { const s = window.nanobox.samples; s.push({ t: Math.round(d.t), icount: d.icount, io: d.io, jit: d.installed }); if (s.length > 2000) s.shift(); } el("stats").textContent = d.icount ? `icount ${(Number(d.icount) / 1e9).toFixed(2)}G` + (cli === "claude" ? ` · missing APIs ${missing.length}` : "") : ""; }
+  };
+  vmWorker.onerror = (e) => fail("vm worker error: " + e.message);
+  // what the guest runs (NanoboxInstaller.command, mirrored here so the page needs no installer code):
+  const CMD = {
+    claude: { argv: ["/usr/local/bin/claude"], env: {}, spec: "config-vm.json" },
+    codex: { argv: ["/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"], env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: "/usr/local/lib/node_modules/@openai/codex" }, spec: "config-persist.json" },
+    agy: { argv: ["/usr/local/bin/agy"], env: {}, spec: "config-persist.json" },
+    sh: { argv: ["/bin/sh"], env: {}, spec: "config-persist.json" },   // cli=sh: a shell in the guest (probing the persistent tree)
+  };
+  const c = CMD[cli] || { argv: [cli], env: {} };
+  const env = Object.assign({}, c.env); for (const kv of (qs.get("env") || "").split(",").filter(Boolean)) { const i = kv.indexOf("="); env[kv.slice(0, i)] = kv.slice(i + 1); }
+  const envArgs = Object.keys(env).length ? ["/bin/env", ...Object.entries(env).map(([k, v]) => k + "=" + v)] : [];
+  const args = ["/bin/sh", "-c", "printf '\\033]777;nb-booted\\007'; exec \"$0\" \"$@\"", ...envArgs, ...c.argv, ...(qs.get("args") || "").split(" ").filter(Boolean)];
+  // claude: config-vm.json (hvc1 + PATH=/bundle/nb:… + persist mounts); codex/agy: config-persist.json (persist mounts only)
+  const specName = c.spec || (cli === "claude" ? "config-vm.json" : "config-persist.json");
+  vmWorker.postMessage({ type: "init", info, args, cfg: {
+    jit, direct: true, imageAddr, specUrl: new URL("/images/" + image + "/" + specName, location.href).href,
+    jitBundles, engineTag, noCache,
+    hostChan: cli === "claude" ? { sab: toGuest.sab, inSab: fromGuest.sab } : undefined,
+    bundleFiles: cli === "claude" ? [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }] : [],
+    persistPort: vmChan.port2, fslog: qs.get("fslog") === "1",
+  } }, [vmChan.port2]);
+  new TtyServer(slave).start(vmWorker, onVmMessage);
+  el("status").textContent = "engine + image + install…";
+  if (cli === "claude") {
+    // the runtime worker: connects to the rings, waits for the shim's HELLO, then runs cli.js (read from
+    // the installed package in its rootfs copy, transformed in the worker — nothing from our server)
+    worker = new Worker(new URL("/native/runtime.js", location.href).href);
+    NanoboxProxy.bridgeWorker(worker);
+    worker.onmessage = onRuntimeMessage;
+    worker.onerror = (e) => log("worker-error", { message: e.message });
+    worker.postMessage({ type: "init", cfg: {
+      backend: "vm", toGuest: toGuest.sab, fromGuest: fromGuest.sab,
+      imageUrl: imageAddr, specUrl: new URL("/images/" + image + "/config.json", location.href).href,
+      cliPath: "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js",   // fallback only: argv[1] from HELLO wins
+      persistPort: rtChan.port2, cols: xterm.cols, rows: xterm.rows, env: {}, noCache, skipNodeLayer: true, proxyExtension: !!window.nanoboxNet.extension,
+    } }, [rtChan.port2]);
+  }
+}
+function onRuntimeMessage(m) {
+  const d = m.data; if (!d) return;
+  if (d.type === "event") {
+    const { type, ...rest } = d;
+    log("worker:" + d.event, rest);
+    if (d.event === "hello") { ph.helloMs = now(); if (ph.bootMs == null) el("status").textContent = "guest shim connected"; }
+    if (d.event === "bundle-transformed") ph.transformMs = d.ms;
+    if (d.event === "bundle-loaded") { ph.bundleMs = d.ms; ph.runStartMs = now(); el("status").textContent = "running claude"; }
+    if (d.event === "missing") missing.push(rest);
+    if (d.event === "fatal" || d.event === "bundle-error") fail(d.event + ": " + (d.message || "").slice(0, 200));
+    if (d.event === "exit") { exitCode = d.code; el("status").textContent = "exited with code " + d.code; if (ph.signinMs == null) fail("exited with code " + d.code); }
+    return;
+  }
+  if (d.type === "missing") { perf.runtime = { netBytes: d.netBytes, net: d.net }; window.nanobox.dumpData = d; if (lastMissing) { lastMissing(d); lastMissing = null; } return; }
+  if (d.type === "eval") { const p = evals.get(d.id); evals.delete(d.id); if (p) (d.error ? p.rej(new Error(d.error)) : p.res(d.value)); return; }
+}
+async function boot() {
+  el("engine").textContent = `sandbox: ${image} in the VM + first-run installer (${installList.join(", ")}) → ${cli}`;
+  say(`\x1b[38;5;173mnanobox\x1b[0m SANDBOX — image \x1b[1m${image}\x1b[0m (Linux only: no node, no CLI) boots in the emulated VM while the first-run installer fetches node + \x1b[1m${installList.join(", ")}\x1b[0m from the vendors into the persistent /usr/local; then runs \x1b[1m${cli}\x1b[0m${cli === "claude" ? " on this browser's V8 (guest-side node shim)" : " in the guest"}\n\n`);
+  if (qs.get("reset") === "1") { try { await caches.delete("nanobox-v1"); log("cache-reset"); } catch {} }   // the persist worker wipes its own store
+  window.nanoboxNet.extension = await NanoboxProxy.detect();
+  log("boot", { cli, install: installList, noCache, proxyExtension: window.nanoboxNet.extension });
+  startPersist();
+  bootVm().catch((e) => fail("boot failed: " + (e && e.message || e)));
+}
+boot();
+</script>
+</body>
+</html>

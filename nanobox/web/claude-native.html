@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nanobox · Claude Code native (V8)</title>
+<link rel="stylesheet" href="/c2w/vendor/xterm.css">
+<style>
+  html,body{height:100%;margin:0;background:#0d0b0a;color:#e8e2da;font-family:ui-sans-serif,system-ui,sans-serif}
+  body{display:flex;flex-direction:column}
+  #term{flex:1;min-height:0;padding:4px 6px}
+  .xterm{height:100%}
+  footer{display:flex;align-items:baseline;gap:14px;padding:6px 10px;border-top:1px solid #241f1b;font-size:12.5px;color:#9c9187;flex-wrap:wrap}
+  footer b{color:#e8e2da}
+  #timer{font-family:ui-monospace,monospace;font-size:26px;color:#e0b23a;min-width:120px}
+  #timer.done{color:#57c06a}
+  #timer.err{color:#e05a4a}
+  #engine{color:#D97757;font-weight:600}
+  #stats{font-family:ui-monospace,monospace;font-size:11.5px;color:#6f665e;margin-left:auto;text-align:right;white-space:pre}
+</style>
+</head>
+<body>
+<div id="term"></div>
+<footer>
+  <span id="engine">native (browser V8, no emulation)</span>
+  <span id="timer">0.0 s</span>
+  <span id="status">loading…</span>
+  <span id="stats"></span>
+</footer>
+<script src="/c2w/vendor/xterm.js"></script>
+<script src="/c2w/vendor/addon-fit.js"></script>
+<script src="/c2w/vendor/xterm-pty.js"></script>
+<script src="/c2w/dist/runcontainer.js"></script>
+<script src="/native/hcring.js"></script>
+<script>
+// Claude Code's own JavaScript (cli.js from the claude-npm image, see tools/native-prepare.mjs) run
+// directly on this browser's V8 in a Web Worker behind a Node-compat layer (web/native/runtime.js:
+// fs over an in-memory rootfs unpacked from the same OCI image, process/tty wired to this xterm,
+// fetch through the server's /net/fetch gateway). NO x86 emulation, no memory identity — a
+// separate track from vm.html. Query string:
+//   image=claude-npm   OCI layout at /c2w/images/<image>/ + spec at /images/<image>/config.json
+//   cli=/native/claude-cli.js  the prepared bundle;  args=...  extra CLI arguments (space separated)
+//   auto=0   do not auto-answer the onboarding prompts;  cache=0  bypass the Cache API layer cache
+//   node=1   also unpack the layer holding usr/local/bin/node (skipped by default: 120 MB of dead weight here)
+//   env=K=V,K=V   extra environment
+//   backend=mem|vm   mem (default): backend #1, in-memory rootfs, this page's xterm is the tty.
+//                    vm: backend #2 — the emulated optimized engine boots the claude-npm image with the
+//                    guest-side node shim (web/native/nbnode as /usr/local/bin/node via /bundle/nb, spec
+//                    config-vm.json); files/tty/child processes happen in the guest, the JS runs in the
+//                    runtime worker; the terminal is the VM's tty (xterm-pty), the two SAB rings connect
+//                    the workers. jit=L:T as vm.html.
+const qs = new URLSearchParams(location.search);
+const image = qs.get("image") || "claude-npm";
+const backend = qs.get("backend") === "vm" ? "vm" : "mem";
+const auto = qs.get("auto") !== "0";
+const el = (id) => document.getElementById(id);
+const T0 = performance.now();
+const now = () => performance.now() - T0;
+const SIGNIN = /sign in|log in|claude\.ai\/oauth|authenticate|subscription|api key|browser didn't open/i;
+const PROMPTS = [
+  { name: "claude theme", when: /choose the text style|dark mode|light mode/i, send: "\r" },
+  { name: "claude continue", when: /press enter to continue|continue\?/i, send: "\r" },
+  { name: "trust folder", when: /do you trust|trust the files/i, send: "\r" },
+];
+let signinMs = null, failed = false, runStartMs = null, bundleMs = null, exitCode = null, helloMs = null, vmStartMs = null;
+const events = [], missing = [];
+function log(event, extra) {
+  const rec = Object.assign({ event, t: Math.round(now()) }, extra || {});
+  events.push(rec);
+  console.log(`[nanobox native/${image}] +${(rec.t / 1000).toFixed(1)}s ${event}`, extra ? JSON.stringify(extra).slice(0, 300) : "");
+  try { parent.postMessage(Object.assign({ type: "nanobox", engine: "native", image }, rec), "*"); } catch {}
+}
+const xterm = new Terminal({ fontSize: 12, convertEol: false, scrollback: 2000, theme: { background: "#0d0b0a", foreground: "#e8e2da" }, allowProposedApi: true });
+const fit = new FitAddon.FitAddon();
+xterm.loadAddon(fit);
+xterm.open(el("term"));
+fit.fit();
+addEventListener("resize", () => { try { fit.fit(); } catch {} });
+const enc = new TextEncoder(), dec = new TextDecoder();
+let worker = null, lastMissing = null, evalId = 0; const evals = new Map();
+window.nanobox = {
+  xterm, engine: "native", image, backend, events, missing,
+  get signinMs() { return signinMs; }, get failed() { return failed; }, get runStartMs() { return runStartMs; }, get bundleMs() { return bundleMs; }, get exitCode() { return exitCode; }, get helloMs() { return helloMs; }, get vmStartMs() { return vmStartMs; },
+  screen() { const b = xterm.buffer.active, out = []; for (let i = 0; i < b.length; i++) out.push(b.getLine(i).translateToString(true)); return out.join("\n"); },
+  // keyboard: mem = straight to the runtime worker's process.stdin; vm = into the VM's tty (like a user typing)
+  send(data) { if (backend === "vm") { xterm._core.coreService.triggerDataEvent(data, true); return; } const bytes = enc.encode(data); worker && worker.postMessage({ type: "stdin", data: bytes }, [bytes.buffer]); },
+  dump() { return new Promise((res) => { lastMissing = res; worker.postMessage({ type: "dump" }); }); },
+  eval(code) { const id = ++evalId; return new Promise((res, rej) => { evals.set(id, { res, rej }); worker.postMessage({ type: "eval", id, code }); }); },
+  stats: null,
+};
+if (backend === "mem") { xterm.onData((d) => window.nanobox.send(d)); xterm.onResize(({ cols, rows }) => worker && worker.postMessage({ type: "resize", cols, rows })); }
+window.nanobox.stats = null; window.nanobox.samples = [];
+const timerEl = el("timer");
+const fmt = (ms) => (ms / 1000).toFixed(1) + " s";
+setInterval(() => { if (signinMs == null && !failed) timerEl.textContent = fmt(now()) + (runStartMs != null ? ` (load ${fmt(runStartMs)} + run ${fmt(now() - runStartMs)})` : " (loading)"); }, 100);
+const answered = new Set();
+setInterval(() => {
+  if (signinMs != null || failed) return;
+  const s = window.nanobox.screen();
+  if (auto) for (const p of PROMPTS) if (!answered.has(p.name) && p.when.test(s)) { answered.add(p.name); log("prompt", { name: p.name }); window.nanobox.send(p.send); return; }
+  if (SIGNIN.test(s)) {
+    signinMs = now();
+    const loadMs = runStartMs != null ? runStartMs : null, runMs = runStartMs != null ? signinMs - runStartMs : null;
+    timerEl.textContent = fmt(signinMs) + (loadMs != null ? ` (load ${fmt(loadMs)} + run ${fmt(runMs)})` : ""); timerEl.className = "done";
+    el("status").textContent = "sign-in screen reached";
+    log("signin", { ms: Math.round(signinMs), loadMs: loadMs != null ? Math.round(loadMs) : null, runMs: runMs != null ? Math.round(runMs) : null, bundleMs });
+  }
+}, 250);
+const say = (s) => xterm.write(s.replace(/\n/g, "\r\n"));
+// ---- backend=vm: the emulated VM (opt-worker.js, direct rootfs) with the guest-side node shim; the
+// runtime worker and the VM worker are joined by two SAB rings (host->guest requests, guest->host replies+events)
+async function bootVm(runtimeCfg) {
+  el("engine").textContent = "native V8 + emulated guest (backend #2: files/tty/processes in the VM)";
+  say(`\x1b[38;5;173mnanobox\x1b[0m NATIVE track, backend=vm — Claude Code's JS on this browser's V8, Linux side (files, tty, child processes) in the emulated \x1b[1m${image}\x1b[0m guest through the nbnode shim\n\n`);
+  const jitSpec = qs.get("jit") || "2:2000";
+  let jit = null; if (jitSpec !== "0") { const [l, t] = jitSpec.split(":"); jit = { level: Number(l), threshold: Number(t || 0) }; }
+  const toGuest = NanoboxHcRing.create(1 << 20), fromGuest = NanoboxHcRing.create(4 << 20);
+  // the VM's tty is this page's terminal (verbatim from vm.html: the guest owns the line discipline)
+  const { master, slave } = openpty();
+  { const t = slave.ioctl("TCGETS"); t.iflag &= ~(ISTRIP | INLCR | IGNCR | ICRNL | IXON); t.oflag &= ~OPOST; t.lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN); slave.ioctl("TCSETS", new Termios(t.iflag, t.oflag, t.cflag, t.lflag, t.cc)); }
+  xterm.loadAddon(master);
+  xterm.onResize(() => { try { slave.notifyResize?.(xterm.cols, xterm.rows); } catch {} });
+  const vmImage = new URL("/engine/opt/out.wasm.gzip", location.href).href;
+  const mounter = new URL("/engine/imagemounter.wasm.gzip", location.href).href;
+  const stackWorker = new URL("/c2w/dist/stack-worker.js", location.href).href;
+  const imageAddr = new URL("/c2w/images/" + image + "/", location.href).href;
+  el("status").textContent = "fetching engine…";
+  const info = await RunContainer.createContainerWASI(vmImage, "", stackWorker, mounter);
+  log("vm-runtime-ready");
+  // JIT bundles: kernel + image if the server has them (as vm.html)
+  let jitBundles = null, engineTag = null;
+  if (jit && qs.get("bundle") !== "0") {
+    try { const r = await fetch(new URL("/engine/opt/jit/index.json", location.href).href, { credentials: "same-origin" }); if (r.ok) { const idx = await r.json(); engineTag = idx.engineTag || null; const have = new Set((idx.files || []).map((f) => f.name)); jitBundles = ["kernel.nbjb", image + ".nbjb"].filter((n) => have.has(n)).map((n) => new URL("/engine/opt/jit/" + n, location.href).href); if (!jitBundles.length) jitBundles = null; } } catch {}
+  }
+  const vmWorker = new Worker(new URL("/opt-worker.js", location.href).href);
+  const onVmMessage = (m) => {
+    const d = m.data; if (!d || typeof d !== "object") return;
+    if (d.type === "nanobox-event") {
+      log("vm:" + d.event, Object.assign({}, d, { type: undefined }));
+      if (vmStartMs == null && d.event === "start-direct") { vmStartMs = now(); log("vm-start", { ms: Math.round(vmStartMs) }); }
+      if (d.event === "error") { el("status").textContent = "vm error: " + d.message; }
+    } else if (d.type === "nanobox-stats") { window.nanobox.stats = d; if (d.io) { const s = window.nanobox.samples; s.push({ t: Math.round(d.t), icount: d.icount, io: d.io, jit: d.installed }); if (s.length > 2000) s.shift(); } el("stats").textContent = d.icount ? `icount ${(Number(d.icount) / 1e9).toFixed(2)}G · missing APIs ${missing.length}` : ""; }
+  };
+  vmWorker.onerror = (e) => { failed = true; timerEl.className = "err"; el("status").textContent = "vm worker error: " + e.message; log("error", { message: e.message }); };
+  vmWorker.postMessage({ type: "init", info, args: ["/usr/local/bin/claude"], cfg: {
+    jit, direct: true, imageAddr, specUrl: new URL("/images/" + image + "/config-vm.json", location.href).href,
+    jitBundles, engineTag, noCache: qs.get("cache") === "0",
+    hostChan: { sab: toGuest.sab, inSab: fromGuest.sab },
+    bundleFiles: [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }],
+  } });
+  new TtyServer(slave).start(vmWorker, onVmMessage);
+  el("status").textContent = "booting the guest…";
+  // the runtime worker: connects to the rings, waits for the shim's HELLO, then runs cli.js
+  startRuntime(Object.assign(runtimeCfg, { backend: "vm", toGuest: toGuest.sab, fromGuest: fromGuest.sab }));
+}
+function startRuntime(cfg) {
+  worker = new Worker(new URL("/native/runtime.js", location.href).href);
+  worker.onmessage = onRuntimeMessage;
+  worker.onerror = (e) => { log("worker-error", { message: e.message }); };
+  worker.postMessage({ type: "init", cfg });
+}
+function boot() {
+  const env = {}; for (const kv of (qs.get("env") || "").split(",").filter(Boolean)) { const i = kv.indexOf("="); env[kv.slice(0, i)] = kv.slice(i + 1); }
+  const runtimeCfg = {
+    imageUrl: new URL("/c2w/images/" + image + "/", location.href).href,
+    specUrl: new URL("/images/" + image + "/config.json", location.href).href,
+    cliUrl: new URL(qs.get("cli") || "/native/claude-cli.js", location.href).href,
+    cliPath: "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+    args: (qs.get("args") || "").split(" ").filter(Boolean),
+    cols: xterm.cols, rows: xterm.rows, env,
+    noCache: qs.get("cache") === "0",
+    skipNodeLayer: qs.get("node") !== "1", // the layer holding usr/local/bin/node (found via the image history)
+  };
+  log("boot", { backend });
+  if (backend === "vm") { bootVm(runtimeCfg).catch((e) => { failed = true; timerEl.className = "err"; el("status").textContent = "boot failed: " + (e && e.message || e); log("error", { message: String(e && e.message || e) }); }); return; }
+  say(`\x1b[38;5;173mnanobox\x1b[0m NATIVE track — Claude Code's JS on this browser's V8 (Web Worker, no emulation), image \x1b[1m${image}\x1b[0m\n\n`);
+  el("status").textContent = "starting worker…";
+  startRuntime(runtimeCfg);
+}
+function onRuntimeMessage(m) {
+  {
+    const d = m.data; if (!d) return;
+    if (d.type === "stdout") { xterm.write(new Uint8Array(d.data)); return; }
+    if (d.type === "event") {
+      const { type, ...rest } = d;
+      log("worker:" + d.event, rest);
+      if (d.event === "rootfs") el("status").textContent = `rootfs: ${d.files} files (${(d.compressedBytes / 1e6).toFixed(1)} MB fetched, ${d.ms} ms)`;
+      if (d.event === "runtime-ready") el("status").textContent = "loading Claude Code bundle…";
+      if (d.event === "hello") { helloMs = now(); el("status").textContent = "guest shim connected"; }
+      if (d.event === "bundle-loaded") { bundleMs = d.ms; runStartMs = now(); el("status").textContent = "running"; log("run-start", { loadMs: Math.round(runStartMs), bundleMs, helloMs: helloMs != null ? Math.round(helloMs) : null, vmStartMs: vmStartMs != null ? Math.round(vmStartMs) : null }); }
+      if (d.event === "missing") missing.push(rest);
+      if (d.event === "fatal" || d.event === "bundle-error") { failed = true; timerEl.className = "err"; el("status").textContent = d.event + ": " + (d.message || "").slice(0, 200); }
+      if (d.event === "exit") { exitCode = d.code; el("status").textContent = "exited with code " + d.code; if (signinMs == null) { failed = true; timerEl.className = "err"; } }
+      if (backend === "mem") el("stats").textContent = `events ${events.length}  missing APIs ${missing.length}`;
+      return;
+    }
+    if (d.type === "missing") { window.nanobox.dumpData = d; if (lastMissing) { lastMissing(d); lastMissing = null; } return; }
+    if (d.type === "eval") { const p = evals.get(d.id); evals.delete(d.id); if (p) (d.error ? p.rej(new Error(d.error)) : p.res(d.value)); return; }
+  }
+}
+boot();
+</script>
+</body>
+</html>

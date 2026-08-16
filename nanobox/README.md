@@ -1,5 +1,31 @@
 # nanobox
 
+**Optimized browser VM + system-node sandbox** (the main deliverable — details in
+[`docs/engine.md`](docs/engine.md), [`docs/sandbox.md`](docs/sandbox.md), [`docs/system-node.md`](docs/system-node.md),
+[`TASKS.md`](TASKS.md)):
+
+- `npm start` (= `node serve.mjs`, port 8093) → http://localhost:8093/ — compare pages (original vs
+  optimized engine, byte-identical guest RAM: codex 6.8 s vs 59 s, agy ~15 s vs 77 s, claude ~54 s vs 244 s),
+  `sandbox.html?cli=claude|codex|agy` (Linux from us, node + the CLIs installed from the vendors at first
+  run, persistent browser filesystem, Claude Code's JS on the browser's V8 with syscalls in the guest:
+  claude 4.8 s warm), `claude-native.html`, `vm.html?engine=opt&image=…`.
+- Build everything that is gitignored: `npm run build` (shim + runtime bundle + linux-base image),
+  `npm run build:engine` + `build:engine:ref` + `build:after` (engine, reference engine, gate, bundles),
+  `build:imagemounter`, `build:images`, `build:bundles`; or `./build-all.sh all`.
+- Tests: `npm test` (unit: 3-way sync + wasifs/installer/jit-host/shim), `npm run test:identity` /
+  `test:gate` / `test:bisect` / `test:bundle-roundtrip` / `test:checkpoint` / `test:nbnode-rpc` (engine,
+  harness), `npm run test:e2e:*` (headless Chrome on :9222 — `npm run chrome` — against the server:
+  codex/agy/claude compare pages, `native`, `native-vm`, `sandbox[:codex|:agy|:matrix]`, `proxyext`,
+  `codex-login`, `claude-npm`).
+- Production packing: `npm run pack` (→ `dist/`, sandbox images; `pack:full` adds the compare-page
+  images; `--tar --check` options in `tools/pack.mjs`), then `npm run pack:serve` or `cd dist && npm start`.
+- `extension/`: the open-source proxy extension (proxy-less egress when installed; else the relay only
+  for the non-CORS vendors in `web/netpolicy.js`, direct browser fetch otherwise).
+
+---
+
+## The CheerpX experiment (earlier track, `server.mjs` / `public/app.js`)
+
 Run Linux in a browser tab, make a **folder you pick your VM's home**, mount extra directories, and
 sync everything through a **unit-tested 3-way sync engine**. Tailscale gives the VM network egress.
 Chromium only (needs the File System Access API). User-initiated by design.

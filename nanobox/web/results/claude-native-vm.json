@@ -1,0 +1,594 @@
+{
+  "image": "claude-npm",
+  "backend": "vm",
+  "url": "http://localhost:8093/claude-native.html?image=claude-npm&backend=vm",
+  "verdict": {
+    "signinMs": 4761,
+    "loadMs": 3219,
+    "runMs": 1542,
+    "bundleMs": 240,
+    "helloMs": 2975,
+    "vmStartMs": 1780,
+    "icount": "580287263"
+  },
+  "date": "2026-08-16T18:34:13.280Z",
+  "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+  "events": [
+    {
+      "event": "boot",
+      "t": 9,
+      "backend": "vm"
+    },
+    {
+      "event": "vm-runtime-ready",
+      "t": 261
+    },
+    {
+      "event": "init",
+      "t": 0.2800000011920929
+    },
+    {
+      "event": "start",
+      "t": 0.9899999797344208
+    },
+    {
+      "event": "worker-start",
+      "t": 33,
+      "backend": "vm",
+      "proxyExtension": false
+    },
+    {
+      "event": "image",
+      "t": 51.49000000953674,
+      "stage": "fetched",
+      "layer": 0,
+      "size": 3924066
+    },
+    {
+      "event": "layer",
+      "t": 48,
+      "i": 3,
+      "size": 1024,
+      "cached": true
+    },
+    {
+      "event": "engine-cached",
+      "t": 107.94499999284744,
+      "bytes": 36020925
+    },
+    {
+      "event": "engine-fetched",
+      "t": 108.00499999523163,
+      "bytes": 36020925,
+      "ms": 108
+    },
+    {
+      "event": "layer",
+      "t": 109,
+      "i": 0,
+      "size": 8802304,
+      "cached": false
+    },
+    {
+      "event": "image",
+      "t": 143.02500000596046,
+      "stage": "unpacked",
+      "layer": 0,
+      "size": 8802304
+    },
+    {
+      "event": "layer",
+      "t": 285,
+      "i": 2,
+      "size": 41635840,
+      "cached": false
+    },
+    {
+      "event": "rootfs",
+      "t": 286,
+      "files": 365,
+      "compressedBytes": 20275008,
+      "ms": 247,
+      "skipped": [
+        1
+      ]
+    },
+    {
+      "event": "waiting-hello",
+      "t": 286
+    },
+    {
+      "event": "image",
+      "t": 430.205000013113,
+      "stage": "applied",
+      "layer": 0,
+      "files": 314
+    },
+    {
+      "event": "image",
+      "t": 542.3900000154972,
+      "stage": "fetched",
+      "layer": 1,
+      "size": 45011463
+    },
+    {
+      "event": "jit-bundles",
+      "t": 611.8599999845028,
+      "files": 1,
+      "modules": 221,
+      "keys": 2928,
+      "ms": 611
+    },
+    {
+      "event": "image",
+      "t": 938.1349999904633,
+      "stage": "unpacked",
+      "layer": 1,
+      "size": 124839936
+    },
+    {
+      "event": "image",
+      "t": 1240.5399999916553,
+      "stage": "applied",
+      "layer": 1,
+      "files": 318
+    },
+    {
+      "event": "image",
+      "t": 1240.580000013113,
+      "stage": "fetched",
+      "layer": 2,
+      "size": 16350942
+    },
+    {
+      "event": "image",
+      "t": 1367.205000013113,
+      "stage": "unpacked",
+      "layer": 2,
+      "size": 41635840
+    },
+    {
+      "event": "image",
+      "t": 1477.25,
+      "stage": "applied",
+      "layer": 2,
+      "files": 369
+    },
+    {
+      "event": "image",
+      "t": 1477.2849999964237,
+      "stage": "cached",
+      "layer": 3,
+      "size": 1024
+    },
+    {
+      "event": "image",
+      "t": 1477.2899999916553,
+      "stage": "applied",
+      "layer": 3,
+      "files": 369
+    },
+    {
+      "event": "bundle-ready",
+      "t": 1480.324999988079,
+      "files": 369,
+      "compressedBytes": 65286471,
+      "ms": 1480,
+      "cache": {
+        "hits": 1,
+        "misses": 3,
+        "bytes": 1024
+      }
+    },
+    {
+      "event": "start-direct",
+      "t": 1480.3499999940395
+    },
+    {
+      "event": "vm-start",
+      "t": 1780,
+      "ms": 1780
+    },
+    {
+      "event": "instantiated",
+      "t": 1587.375,
+      "compileMs": 106
+    },
+    {
+      "event": "hostchan",
+      "t": 1591.5699999928474,
+      "on": true
+    },
+    {
+      "event": "engine",
+      "t": 1591.6149999797344,
+      "optimized": true,
+      "jit": {
+        "level": 2,
+        "threshold": 2000
+      },
+      "bundles": 221
+    },
+    {
+      "event": "hello",
+      "t": 2660,
+      "argv": [
+        "node",
+        "/usr/local/bin/claude"
+      ],
+      "cwd": "/root",
+      "pid": 1,
+      "cols": 80,
+      "rows": 25,
+      "isatty": 7
+    },
+    {
+      "event": "runtime-ready",
+      "t": 2664,
+      "env": 9,
+      "files": 4,
+      "backend": "vm",
+      "cwd": "/root",
+      "argv": [
+        "node",
+        "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+      ]
+    },
+    {
+      "event": "bundle-load-start",
+      "t": 2664
+    },
+    {
+      "event": "bundle-loaded",
+      "t": 2904,
+      "ms": 240
+    },
+    {
+      "event": "run-start",
+      "t": 3219,
+      "loadMs": 3219,
+      "bundleMs": 240,
+      "helloMs": 2975,
+      "vmStartMs": 1780
+    },
+    {
+      "event": "missing",
+      "t": 2946,
+      "key": "process.type",
+      "kind": "get",
+      "stack": "at http://localhost:8093/native/claude-cli.js:111:184"
+    },
+    {
+      "event": "missing",
+      "t": 2946,
+      "key": "process.__nwjs",
+      "kind": "get",
+      "stack": "at http://localhost:8093/native/claude-cli.js:111:218"
+    },
+    {
+      "event": "missing",
+      "t": 3045,
+      "key": "fs.watchFile",
+      "kind": "call",
+      "stack": "at cE_ (http://localhost:8093/native/claude-cli.js:494:23068)"
+    },
+    {
+      "event": "missing",
+      "t": 3068,
+      "key": "process.__signal_exit_emitter__",
+      "kind": "get",
+      "stack": "at http://localhost:8093/native/claude-cli.js:472:9101"
+    },
+    {
+      "event": "net",
+      "t": 3405,
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md",
+      "via": "direct"
+    },
+    {
+      "event": "net",
+      "t": 3960,
+      "method": "GET",
+      "url": "https://api.anthropic.com/api/hello",
+      "via": "relay"
+    },
+    {
+      "event": "net",
+      "t": 3960,
+      "method": "GET",
+      "url": "https://platform.claude.com/v1/oauth/hello",
+      "via": "relay"
+    },
+    {
+      "event": "missing",
+      "t": 3990,
+      "key": "fs.watch",
+      "kind": "call",
+      "stack": "at hA4 (http://localhost:8093/native/claude-cli.js:595:20951)"
+    },
+    {
+      "event": "prompt",
+      "t": 4509,
+      "name": "claude theme"
+    },
+    {
+      "event": "signin",
+      "t": 4761,
+      "ms": 4761,
+      "loadMs": 3219,
+      "runMs": 1542,
+      "bundleMs": 240
+    }
+  ],
+  "missing": [
+    {
+      "key": "process.type",
+      "kind": "get",
+      "count": 1,
+      "stack": "at http://localhost:8093/native/claude-cli.js:111:184"
+    },
+    {
+      "key": "process.__nwjs",
+      "kind": "get",
+      "count": 1,
+      "stack": "at http://localhost:8093/native/claude-cli.js:111:218"
+    },
+    {
+      "key": "fs.watchFile",
+      "kind": "call",
+      "count": 1,
+      "stack": "at cE_ (http://localhost:8093/native/claude-cli.js:494:23068)"
+    },
+    {
+      "key": "process.__signal_exit_emitter__",
+      "kind": "get",
+      "count": 1,
+      "stack": "at http://localhost:8093/native/claude-cli.js:472:9101"
+    },
+    {
+      "key": "fs.watch",
+      "kind": "call",
+      "count": 1,
+      "stack": "at hA4 (http://localhost:8093/native/claude-cli.js:595:20951)"
+    }
+  ],
+  "stubCalls": [],
+  "spawns": [
+    {
+      "file": "which",
+      "args": [
+        "npm"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "which",
+      "args": [
+        "bun"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--version"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/etc/claude-code/.claude/commands"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/root/.claude/commands"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/etc/claude-code/.claude/agents"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/x64-linux/rg",
+      "args": [
+        "--files",
+        "--hidden",
+        "--follow",
+        "--no-ignore",
+        "--glob",
+        "*.md",
+        "/root/.claude/agents"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "which",
+      "args": [
+        "yarn"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "which",
+      "args": [
+        "deno"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "which",
+      "args": [
+        "pnpm"
+      ],
+      "cwd": "/root"
+    },
+    {
+      "file": "which",
+      "args": [
+        "node"
+      ],
+      "cwd": "/root"
+    }
+  ],
+  "net": [
+    {
+      "t": 3405,
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md",
+      "via": "direct"
+    },
+    {
+      "t": 3960,
+      "method": "GET",
+      "url": "https://api.anthropic.com/api/hello",
+      "via": "relay"
+    },
+    {
+      "t": 3960,
+      "method": "GET",
+      "url": "https://platform.claude.com/v1/oauth/hello",
+      "via": "relay"
+    }
+  ],
+  "backendOps": {
+    "info": 6,
+    "realpath": 14,
+    "ttySize": 2,
+    "ttySetRaw": 2,
+    "isatty": 9,
+    "stat": 38,
+    "readFile": 27,
+    "open": 4,
+    "readdir": 27,
+    "mkdir": 26,
+    "readlink": 8,
+    "writeFile": 10,
+    "rename": 8,
+    "utimes": 8,
+    "copyFile": 1,
+    "chmod": 7,
+    "rmdir": 8,
+    "spawn": 11,
+    "ttyWrite": 9
+  },
+  "backendStats": {
+    "guest": 223,
+    "image": 2,
+    "dirty": [
+      "/root",
+      "/root/.claude.json.tmp.1.1786905251839",
+      "/root/.claude.json",
+      "/root/.claude.json.lock",
+      "/root/.claude/backups",
+      "/root/.claude/backups/.claude.json.backup.1786905251873",
+      "/root/.claude.json.tmp.1.1786905251883",
+      "/root/.claude.json.tmp.1.1786905251959",
+      "/root/.claude.json.tmp.1.1786905251996",
+      "/root/.claude.json.tmp.1.1786905252018",
+      "/root/.claude/cache",
+      "/root/.claude/cache/changelog.md",
+      "/root/.claude.json.tmp.1.1786905252655",
+      "/root/.claude.json.tmp.1.1786905252972",
+      "/root/.claude.json.tmp.1.1786905252993"
+    ],
+    "channel": {
+      "sent": 274,
+      "recv": 317,
+      "bytesOut": 534209,
+      "bytesIn": 9798
+    }
+  },
+  "required": {
+    "module": 5,
+    "crypto": 117,
+    "fs": 74,
+    "process": 27,
+    "os": 77,
+    "path": 284,
+    "fs/promises": 159,
+    "net": 17,
+    "url": 30,
+    "stream": 34,
+    "util": 38,
+    "http": 20,
+    "https": 10,
+    "http2": 2,
+    "zlib": 7,
+    "events": 14,
+    "tty": 6,
+    "async_hooks": 13,
+    "child_process": 44,
+    "path/win32": 1,
+    "timers/promises": 1,
+    "buffer": 15,
+    "assert": 33,
+    "tls": 3,
+    "stream/consumers": 1,
+    "readline": 2,
+    "path/posix": 3,
+    "vm": 3,
+    "stream/promises": 1,
+    "v8": 1,
+    "dns": 2,
+    "perf_hooks": 2,
+    "inspector": 1,
+    "constants": 1,
+    "querystring": 1,
+    "diagnostics_channel": 1,
+    "console": 1,
+    "util/types": 2,
+    "worker_threads": 2,
+    "string_decoder": 1
+  },
+  "screenTail": [
+    "nanobox NATIVE track, backend=vm — Claude Code's JS on this browser's V8, Linux side (files, tty, child processes) in the emulated claude-npm guest through the nbnode shim",
+    "Welcome to Claude Code v2.1.112",
+    "…………………………………………………………………………………………………………………………………………………………",
+    "     *                                       █████▓▓░",
+    "                                 *         ███▓░     ░░",
+    "            ░░░░░░                        ███▓░",
+    "    ░░░   ░░░░░░░░░░                      ███▓░",
+    "   ░░░░░░░░░░░░░░░░░░░    *                ██▓░░      ▓",
+    "                                             ░▓▓███▓▓░",
+    " *                                 ░░░░",
+    "                                 ░░░░░░░░",
+    "                               ░░░░░░░░░░░░░░░░",
+    "       █████████                                        *",
+    "      ██▄█████▄██                        *",
+    "       █████████      *",
+    "…………………█ █   █ █………………………………………………………………………………………………………………",
+    " Claude Code can be used with your Claude subscription or billed based on API ",
+    " usage through your Console account.                     ",
+    " Select login method:",
+    " ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise",
+    "   2. Anthropic Console account · API usage billing",
+    "   3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, or Vertex AI"
+  ]
+}
