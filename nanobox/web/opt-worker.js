@@ -1,3 +1,17 @@
+// No cache for this engine build yet: record what we compile and hand it to the page to upload, so the
+// next run starts warm. Recording runs at the normal threshold (a low one covers more but costs boot
+// time: 8.4 -> 12.9 s at 200), and is capped, because encoding happens on this thread.
+let autoExportAt = 0;
+function exportAutoBundleSync() {
+  if (autoUploaded || autoCached || !autoTag) return;
+  autoUploaded = true;
+  try {
+    const t0 = performance.now();
+    const bytes = NanoboxJit.exportBundle(autoTag);
+    postMessage({ type: "nanobox-jitexport", tag: autoTag, bytes, auto: true, ms: Math.round(performance.now() - t0) }, [bytes.buffer]);
+  } catch (e) { ev("error", { message: "jit cache export: " + (e && e.message || e) }); }
+}
+
 // Worker for both engines. Same runtime glue as nanobox's public/c2w/wasi-worker.js (container2wasm's
 // worker-util.js + xterm-pty's TtyClient); on top of it:
 //   * the JIT host (jit-host.js) is attached when the engine exports the nanobox hooks — the
@@ -81,6 +95,16 @@ if (MODE === "full") WebAssembly.instantiate = function (src, imports) {
       const f = wasi[name]; if (!f) return;
       wasi[name] = function () { const t = performance.now(); const r = f.apply(this, arguments); const dt = performance.now() - t; io[key + "N"]++; io[key + "Ms"] += dt; if (key === "poll") beat(false); return r; };
     };
+    // While the engine runs it owns this thread: the worker's event loop never turns, so a message
+    // asking for the JIT cache is never received and a fetch could never resolve here. The guest's
+    // poll is the synchronous hook that runs often (~1500/s), so the export happens there and the
+    // PAGE — which does have a live event loop — performs the upload.
+    { const basePoll = wasi.poll_oneoff;
+      wasi.poll_oneoff = function () {
+        const r = basePoll.apply(this, arguments);
+        if (autoExportAt && performance.now() >= autoExportAt) { autoExportAt = 0; exportAutoBundleSync(); }
+        return r;
+      }; }
     wrap("poll_oneoff", "poll"); wrap("clock_time_get", "clock"); wrap("sock_send", "send"); wrap("sock_recv", "recv"); wrap("fd_read", "read"); wrap("fd_write", "write");
     if (cfg && cfg.trace) {
       // console/tty tracing: what the guest writes to the terminal, what it reads, and what it waits for
@@ -125,13 +149,16 @@ if (MODE === "full") WebAssembly.instantiate = function (src, imports) {
         // threshold would cover more but costs boot time (8.4 -> 12.9 s at 200), so that stays opt-in
         // via ?recthreshold=N.
         const recording = !!cfg.jitRecord || (!!cfg.jitAutoDir && !autoCached);
-        const jitCfg = Object.assign({}, cfg.jit, { record: recording });
+        const jitCfg = Object.assign({}, cfg.jit, { record: recording, recordMax: cfg.jitRecordMax || 3000 });
         if (recording && cfg.jitRecordThreshold) jitCfg.threshold = cfg.jitRecordThreshold;
         const ok = cfg && cfg.jit ? NanoboxJit.install(inst, jitCfg) : false;
         // the page drives the upload (this worker's event loop is inside the emulation loop), but it
         // must only do so for a run that actually recorded — otherwise it exports an empty bundle and
         // overwrites a good cache with it
-        if (recording) ev("jit-recording", { tag: autoTag, threshold: jitCfg.threshold });
+        if (recording) {
+          ev("jit-recording", { tag: autoTag, threshold: jitCfg.threshold });
+          autoExportAt = performance.now() + (cfg.jitRecordUploadMs || 60000);
+        }
         // host channel: guest -> host bytes go out on cfg.hostChan.port (to the runtime worker),
         // host -> guest bytes come in through the shared ring (drained by the engine's rx timer hook)
         if (cfg && cfg.hostChan && inst.exports.nanobox_hc_hook_slot) {

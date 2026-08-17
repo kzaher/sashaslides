@@ -57,7 +57,7 @@
     bundleSlots: new Set(),
     bundleHits: 0, bundleMisses: 0, bundleInst: 0, bundleModules: 0, bundleFiles: 0, bundleLoadMs: 0, bundleInstMs: 0, bundleTag: null,
     // optional recording of what the engine installs (cfg.record): [{bytes, keys, funcKeys}] -> exportBundle()
-    record: false, records: [], fnRecord: new Map() };
+    record: false, records: [], recordMax: 3000, fnRecord: new Map() };
 
   // Fetch + compile bundle files. `engineTag` is the tag of the engine that will run (string, or a
   // promise of one — the worker computes it from the engine bytes while they download); a bundle
@@ -110,6 +110,7 @@
     const table = ex.__indirect_function_table, memory = ex.memory;
     state.table = table; state.memory = memory;
     state.record = !!(cfg && cfg.record);
+    if (cfg && cfg.recordMax) state.recordMax = cfg.recordMax;
     const allocSlot = () => {
       // grow the table in big chunks (per-call table.grow is O(table size) in V8)
       if (!state.free.length) { const base = table.grow(65536); for (let k = 65535; k >= 0; k--) state.free.push(base + k); }
@@ -153,7 +154,10 @@
       // the record keeps the bytes only when recording (exportBundle); the link module always (byte compare)
       const first = nInstalls++ === 0;
       const rec = state.record || first ? { bytes, keys, funcKeys: names.map(() => [0, 0]) } : null;
-      if (rec && state.record) state.records.push(rec);
+      // Bounded: the export runs in this worker, which is saturated by the emulation loop, so a big
+      // bundle takes minutes to encode and never lands in a short session. 3000 traces is ~10 MB,
+      // which measured as enough to cut a replay's runtime compilation from 2317 traces to 40.
+      if (rec && state.record && state.records.length < state.recordMax) state.records.push(rec);
       state.installed += names.length; state.bytes += len;
       if (!state.link && names.length === 1 && first) {
         // first install of the run: the engine's link function

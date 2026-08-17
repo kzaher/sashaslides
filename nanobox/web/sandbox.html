@@ -290,16 +290,16 @@ async function bootVm() {
   const onVmMessage = (m) => {
     const d = m.data; if (!d || typeof d !== "object") return;
     if (d.type === "nanobox-pages") { const res = pagesWaiter; pagesWaiter = null; res && res(d.rows); return; }
-    if (d.type === "nanobox-jitexport") { const res = jitExportWaiter; jitExportWaiter = null; res && res(d); return; }
-    // This run is recording a JIT cache (the worker says so only when recording is really on).
-    // Upload it once the workload has settled, so the next visit starts with the code compiled.
-    // The worker cannot schedule this itself — its event loop is inside the emulation loop.
-    if (d.type === "nanobox-event" && d.event === "jit-recording" && d.tag) {
-      setTimeout(() => {
-        window.nanobox.exportJit("auto-" + d.tag + ".nbjb")
-          .then((r) => log("jit-cache-recorded", r || {}))
+    if (d.type === "nanobox-jitexport") {
+      // unsolicited (auto): the worker exported its JIT cache from inside the emulation loop and this
+      // page has the live event loop, so the upload happens here
+      if (d.auto) {
+        if (d.bytes && d.tag) fetch("/jit/upload?name=" + encodeURIComponent("auto-" + d.tag + ".nbjb"), { method: "POST", body: d.bytes })
+          .then(async (r) => log("jit-cache-recorded", { tag: d.tag, bytes: d.bytes.byteLength, exportMs: d.ms, saved: r.ok ? await r.text() : "HTTP " + r.status }))
           .catch((e) => log("jit-cache-failed", { message: String(e && e.message || e) }));
-      }, Number(qs.get("recms") || 60000));
+        return;
+      }
+      const res = jitExportWaiter; jitExportWaiter = null; res && res(d); return;
     }
     if (d.type === "nanobox-event") {
       log("vm:" + d.event, Object.assign({}, d, { type: undefined }));
