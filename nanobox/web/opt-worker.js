@@ -35,6 +35,19 @@ let bundleFs = null;     // NanoboxFs.attach() result in direct mode (its .stats
 let jitPreload = null;   // NanoboxJit.preload() promise when cfg.jitBundles is set (awaited before the engine starts)
 const ev = (event, extra) => postMessage(Object.assign({ type: "nanobox-event", event, t: performance.now() - t0 }, extra || {}));
 
+// [linear page, instructions, physical page, flags(1 user, 2 kernel, 4 physical page changed)]
+function pagesProfile() {
+  const ex = engineInst && engineInst.exports;
+  if (!ex || !ex.nanobox_pages_n) return null;
+  const rows = [];
+  for (let i = 0, n = ex.nanobox_pages_n(); i < n; i++) {
+    const lp = ex.nanobox_pages_get(i, 0);
+    if (lp < 0) continue;
+    rows.push([lp, ex.nanobox_pages_get(i, 1), ex.nanobox_pages_get(i, 2), ex.nanobox_pages_get(i, 3)]);
+  }
+  return rows;
+}
+
 function beat(force) {
   const now = performance.now();
   if (!force && now - lastBeat < 1000) return;
@@ -207,6 +220,10 @@ onmessage = (msg) => {
     if (cfg.jitBundles && cfg.jitBundles.length && cfg.jit) startPreload();
     return;
   }
+  // the engine's per-page instruction profile (what the harness gets with --pages), on demand: the
+  // only way to see what the guest actually executes in the browser, where the workload has real
+  // network and the harness's does not (docs/codex-typing.md)
+  if (typeof req === "object" && req.type === "pages") { postMessage({ type: "nanobox-pages", rows: pagesProfile() }); return; }
   if (MODE !== "plain") ev("start");
   const tty = new TtyClient(req);
   if (cfg && cfg.direct) startDirect(tty).catch((e) => ev("error", { message: "direct start: " + (e && e.message || e) }));

@@ -266,7 +266,29 @@
       out.ticks = u64(ex.nanobox_ticks_lo(), ex.nanobox_ticks_hi()).toString();
     }
     if (ex.nanobox_stat) out.traces = ex.nanobox_stat(2), out.jitTraces = ex.nanobox_stat(3), out.compiled = ex.nanobox_stat(4);
+    const fb = fallbacks(inst);
+    if (fb) out.fallbacks = fb;
     return out;
+  }
+
+  // With profiling level 3 the engine counts, per opcode, how many executed instructions inside JIT'd
+  // traces ran inline and how many left the trace for a Bochs handler step. The handler-step list is
+  // the template shopping list, and it is only truthful under the real workload — a browser run does
+  // TLS and network, which a harness run with no egress never touches (docs/codex-typing.md).
+  function fallbacks(inst) {
+    const ex = inst.exports;
+    if (!ex.nanobox_jit_nops || !ex.nanobox_jit_opstat || !ex.nanobox_jit_opname) return null;
+    const heap = new Uint8Array(ex.memory.buffer);
+    const readName = (ia) => { let p = ex.nanobox_jit_opname(ia), e = p; while (heap[e]) e++; return String.fromCharCode(...heap.subarray(p, e)).replace("BX_IA_", ""); };
+    let inline = 0, fallback = 0; const rows = [];
+    for (let ia = 0, n = ex.nanobox_jit_nops(); ia < n; ia++) {
+      const f = ex.nanobox_jit_opstat(ia, 2), i = ex.nanobox_jit_opstat(ia, 3);
+      inline += i; fallback += f;
+      if (f) rows.push([ia, f]);
+    }
+    if (!inline && !fallback) return null;                       // level < 3: the counters stay at zero
+    rows.sort((a, b) => b[1] - a[1]);
+    return { inline, fallback, top: rows.slice(0, 25).map(([ia, f]) => [readName(ia), f]) };
   }
 
   global.NanoboxJit = { install, preload, exportBundle, stats, state, trampoline };
