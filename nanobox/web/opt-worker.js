@@ -119,7 +119,7 @@ if (MODE === "full") WebAssembly.instantiate = function (src, imports) {
         // the bundles must be compiled before the first lookup (usually long done: they load in
         // parallel with the engine fetch; in non-direct mode this is the only wait point)
         if (jitPreload) { try { await jitPreload; } catch (e) { ev("error", { message: "jit bundles: " + (e && e.message || e) }); } }
-        const ok = cfg && cfg.jit ? NanoboxJit.install(inst, cfg.jit) : false;
+        const ok = cfg && cfg.jit ? NanoboxJit.install(inst, Object.assign({}, cfg.jit, { record: !!cfg.jitRecord })) : false;
         // host channel: guest -> host bytes go out on cfg.hostChan.port (to the runtime worker),
         // host -> guest bytes come in through the shared ring (drained by the engine's rx timer hook)
         if (cfg && cfg.hostChan && inst.exports.nanobox_hc_hook_slot) {
@@ -224,6 +224,20 @@ onmessage = (msg) => {
   // only way to see what the guest actually executes in the browser, where the workload has real
   // network and the harness's does not (docs/codex-typing.md)
   if (typeof req === "object" && req.type === "pages") { postMessage({ type: "nanobox-pages", rows: pagesProfile() }); return; }
+  // Export everything the JIT compiled in THIS run as a bundle. The sandbox runs the slim engine,
+  // which cannot boot in the harness (no embedded boot.iso), so harness-recorded bundles carry the
+  // full engine's tag and are rejected here -- the browser has to record its own, and what it records
+  // is exactly the startup path a user hits.
+  if (typeof req === "object" && req.type === "jitexport") {
+    (async () => {
+      try {
+        const tag = enginePromise ? await enginePromise.then(engineTagOf) : (cfg.engineTag || "");
+        const bytes = NanoboxJit.exportBundle(tag);
+        postMessage({ type: "nanobox-jitexport", tag, bytes }, [bytes.buffer]);
+      } catch (e) { postMessage({ type: "nanobox-jitexport", error: String(e && e.message || e) }); }
+    })();
+    return;
+  }
   if (MODE !== "plain") ev("start");
   const tty = new TtyClient(req);
   if (cfg && cfg.direct) startDirect(tty).catch((e) => ev("error", { message: "direct start: " + (e && e.message || e) }));

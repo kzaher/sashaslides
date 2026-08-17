@@ -16,7 +16,7 @@
 //
 // Sends the COOP/COEP headers the SharedArrayBuffer-based runtime needs. No dependencies.
 import { createServer } from "node:http";
-import { createReadStream, existsSync, statSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { createReadStream, existsSync, statSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve, extname, normalize } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
@@ -106,6 +106,21 @@ async function clientLog(req, res) {
   }
   res.writeHead(204); res.end();
 }
+// A bundle recorded by the browser itself (window.nanobox.exportJit()): the sandbox runs the slim
+// engine, which the harness cannot boot, so this is the only way to get precomputed JIT code whose
+// engine tag matches what the page actually loads. Dev-server only: names are restricted to *.nbjb
+// inside JITDIR, and the index is rebuilt from the directory on the next request anyway.
+async function jitUpload(req, res, u) {
+  const name = String(u.searchParams.get("name") || "").replace(/[^a-zA-Z0-9._-]/g, "");
+  if (!/^[a-zA-Z0-9._-]+\.nbjb$/.test(name)) { res.writeHead(400); res.end("bad name"); return; }
+  const chunks = []; for await (const c of req) chunks.push(c);
+  const bytes = Buffer.concat(chunks);
+  const file = join(JITDIR, name);
+  try { writeFileSync(file, bytes); } catch (e) { res.writeHead(500); res.end(String(e.message)); return; }
+  console.log(`[jit] saved ${name} (${(bytes.length / 1e6).toFixed(1)} MB) from the browser`);
+  res.writeHead(200, { "content-type": "text/plain" }); res.end(`${name} ${bytes.length}`);
+}
+
 async function netFetch(req, res) {
   let spec;
   try { spec = JSON.parse(Buffer.from(req.headers["x-nanobox-target"] || "", "base64url").toString("utf8")); if (!/^https?:$/.test(new URL(spec.url).protocol)) throw 0; }
@@ -168,6 +183,7 @@ const server = createServer(async (req, res) => {
   let p = normalize(decodeURIComponent(url.pathname));
   if (req.method === "POST" && p === "/net/fetch") return netFetch(req, res);
   if (req.method === "POST" && p === "/log") return clientLog(req, res);
+  if (req.method === "POST" && p === "/jit/upload") return jitUpload(req, res, u);
   if (p === "/") p = "/index.html";
   if (p === "/engine/opt/out.wasm.gzip") return serveFile(req, res, ENGINE);
   if (p === "/engine/opt/slim/out.wasm.gzip") return serveFile(req, res, ENGINE.replace(/out\.wasm\.gzip$/, "out-slim.wasm.gzip")); // no boot.iso; not for identity pages

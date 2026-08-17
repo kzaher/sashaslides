@@ -143,13 +143,23 @@ addEventListener("resize", () => { try { fit.fit(); } catch {} });
 try { xterm.parser.registerOscHandler(777, (data) => { if (/nb-booted/.test(data) && ph.bootMs == null) { ph.bootMs = now(); log("guest-booted", { ms: Math.round(ph.bootMs) }); el("status").textContent = "running " + cli; } return true; }); } catch (e) { console.warn("no OSC handler", e); }
 let worker = null, lastMissing = null, evalId = 0; const evals = new Map();
 // keystroke -> first painted byte, filled in by the pty hook in bootVm
-let pagesWaiter = null, vmWorkerRef = null;
+let pagesWaiter = null, jitExportWaiter = null, vmWorkerRef = null;
 const typing = { at: 0, first: 0, settleTimer: 0, firstSamples: [], settleSamples: [], median: 0, settle: 0, worst: 0 };
 window.nanobox = {
   xterm, engine: "sandbox", image, cli, install: installList, events, missing, phases: ph, perf,
   get signinMs() { return ph.signinMs; }, get failed() { return failed; }, get runStartMs() { return ph.runStartMs; }, get exitCode() { return exitCode; }, get installInfo() { return install; },
   screen() { const b = xterm.buffer.active, out = []; for (let i = 0; i < b.length; i++) out.push(b.getLine(i).translateToString(true)); return out.join("\n"); },
   send(data) { xterm._core.coreService.triggerDataEvent(data, true); },   // into the VM's tty, like a user typing
+  // Record what this run compiled and hand it to the server as a .nbjb bundle, so the NEXT run of
+  // this engine starts with the code already compiled instead of interpreting until the JIT threshold.
+  exportJit(name) {
+    return new Promise((res) => { if (!vmWorkerRef) return res(null); jitExportWaiter = res; vmWorkerRef.postMessage({ type: "jitexport" }); })
+      .then(async (d) => {
+        if (!d || d.error || !d.bytes) return { error: (d && d.error) || "no bundle" };
+        const r = await fetch("/jit/upload?name=" + encodeURIComponent(name || (image + "-slim.nbjb")), { method: "POST", body: d.bytes });
+        return { tag: d.tag, bytes: d.bytes.byteLength, saved: r.ok ? await r.text() : "HTTP " + r.status };
+      });
+  },
   pages() { return new Promise((res) => { if (!vmWorkerRef) return res(null); pagesWaiter = res; vmWorkerRef.postMessage({ type: "pages" }); }); },
   dump() { return new Promise((res) => { if (!worker) return res(null); lastMissing = res; worker.postMessage({ type: "dump" }); }); },
   eval(code) { const id = ++evalId; return new Promise((res, rej) => { evals.set(id, { res, rej }); worker.postMessage({ type: "eval", id, code }); }); },
@@ -286,8 +296,14 @@ async function bootVm() {
   function push(list, value) { list.push(value); if (list.length > 20) list.shift(); }
   function median(list) { const s = [...list].sort((a, b) => a - b); return s[s.length >> 1]; }
   xterm.onResize(() => { try { slave.notifyResize?.(xterm.cols, xterm.rows); } catch {} });
-  // the slim engine (no embedded boot.iso) unless ?engine=full — the identity pages keep the full one
-  const vmImage = new URL(qs.get("engine") === "full" ? "/engine/opt/out.wasm.gzip" : "/engine/opt/slim/out.wasm.gzip", location.href).href;
+  // The FULL engine by default, even though the slim one (no embedded boot.iso, 33.6 vs 40.1 MB
+  // gzipped) would be a smaller download: JIT bundles are keyed by a fingerprint of the engine build,
+  // the recorded ones are made with the full engine, and the harness cannot boot the slim engine to
+  // record its own (no boot.iso). Loading slim therefore meant every bundle was rejected and the
+  // sandbox booted with a COLD JIT -- ~6000 traces compiled while the user waits, everything
+  // interpreted until it crossed the 2000-execution threshold. 6.5 MB, cached after the first visit,
+  // buys precompiled code on every boot. ?engine=slim opts back out.
+  const vmImage = new URL(qs.get("engine") === "slim" ? "/engine/opt/slim/out.wasm.gzip" : "/engine/opt/out.wasm.gzip", location.href).href;
   const mounter = new URL("/engine/imagemounter.wasm.gzip", location.href).href;
   const stackWorker = new URL("/c2w/dist/stack-worker.js", location.href).href;
   const imageAddr = new URL("/c2w/images/" + image + "/", location.href).href;
@@ -298,7 +314,11 @@ async function bootVm() {
   if (jit && qs.get("bundle") !== "0") {
     try { const r = await fetch(new URL("/engine/opt/jit/index.json", location.href).href, { credentials: "same-origin" }); if (r.ok) { const idx = await r.json(); engineTag = idx.engineTag || null; const have = new Set((idx.files || []).map((f) => f.name)); // the kernel bundle + this image's + the CLI's own (recorded from the vm.html images: content-keyed, so
       // the same binary from the vendor hits it wherever it is loaded); ?clibundle=1 adds the CLI's (agy: −0.5 s for +34 MB — off by default)
-      const names = ["kernel.nbjb", image + ".nbjb"].concat(qs.get("clibundle") === "1" ? [cli + ".nbjb"] : []);
+      // *-slim.nbjb are recorded by the browser itself (window.nanobox.exportJit()) against the slim
+      // engine this page loads; the harness-recorded ones carry the full engine's tag and the worker
+      // drops them. Ask for both and let the tag check decide.
+      const names = ["kernel.nbjb", image + ".nbjb", image + "-slim.nbjb", cli + "-slim.nbjb"]
+        .concat(qs.get("clibundle") === "1" ? [cli + ".nbjb"] : []);
       jitBundles = names.filter((n) => have.has(n)).map((n) => new URL("/engine/opt/jit/" + n, location.href).href); if (!jitBundles.length) jitBundles = null; } } catch {}
   }
   const vmWorker = new Worker(new URL("/sandbox-worker.js", location.href).href);
@@ -306,6 +326,7 @@ async function bootVm() {
   const onVmMessage = (m) => {
     const d = m.data; if (!d || typeof d !== "object") return;
     if (d.type === "nanobox-pages") { const res = pagesWaiter; pagesWaiter = null; res && res(d.rows); return; }
+    if (d.type === "nanobox-jitexport") { const res = jitExportWaiter; jitExportWaiter = null; res && res(d); return; }
     if (d.type === "nanobox-event") {
       log("vm:" + d.event, Object.assign({}, d, { type: undefined }));
       if ((d.event === "engine-fetched" || d.event === "engine-cached") && ph.engineMs == null) ph.engineMs = now();
@@ -336,6 +357,7 @@ async function bootVm() {
   vmWorker.postMessage({ type: "init", info, args, cfg: {
     jit, direct: true, imageAddr, specUrl: new URL("/images/" + image + "/" + specName, location.href).href,
     jitBundles, engineTag, noCache,
+    jitRecord: qs.get("record") === "1",   // keep the compiled modules so window.nanobox.exportJit() can write a bundle
     hostChan: onV8 ? { sab: toGuest.sab, inSab: fromGuest.sab } : undefined,
     bundleFiles: onV8 ? [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }] : [],
     persistPort: vmChan.port2, fslog: qs.get("fslog") === "1",
