@@ -121,3 +121,41 @@ Status legend: [ ] todo · [~] in progress · [x] done. Everything is E2E-gated:
 - [x] E2 `bisect.mjs` (--ignore-icount), `netstub.js`, `--reply/--expect-re/--save-phys/--pages/--focus`.
 - [x] E3 Bisect must exercise regions: in dbg mode transitions call the fingerprint hook at every
       trace boundary (like the self-loop does) instead of disabling linking.
+
+## J. Trace boundaries and frozen code (2026-08-17, measured on the codex sandbox)
+
+Baseline this section is judged against (level-3 codex run, boot + typing, ~15 s): **107.3 M** links
+(trace -> trace tail calls), **35.4 M** cross-page fetch-window refills, **5.59 M** hops whose target
+was not compiled, epilogue ~35 wasm ops/hop ~= **3.7 G ops** against ~2.5 G guest instructions
+emulated. Regions average **2.3 blocks** (formed 980 / blocks 2270) because the former follows only
+direct targets already decoded on the same or one adjacent page, so calls and returns always end a
+region -- turning regions off costs just 9 %. The in-trace loopback path is the shape to copy: it
+keeps registers in locals, skips the hash/lookup/tail call, re-checks async_event and the fetch
+window every iteration (which is why identity holds), and costs ~10-12 ops against the epilogue's 35.
+
+- [ ] J1 State in tail-call parameters: pass the hot guest registers AND the icount/countdown pair as
+      parameters of the linking tail call instead of committing them to the CPU struct, spilling only
+      on paths that can fault or leave to the interpreter. This is the loopback's trick across a
+      function boundary; the wasm type system is what forces it into parameters. Changes the trace
+      function signature -> re-record every bundle, re-run the gate. Expect the spill/reload and the
+      per-hop memory bookkeeping to go; ~10 of ~35 ops.
+- [ ] J2 Caller-side successor cache: the trace tail-calls the link epilogue with its own site id, the
+      epilogue keeps (pAddr -> iCache entry, jitfn, jitarg) per site and revalidates against the entry
+      (entry->pAddr == pAddr, jitfn != 0) so SMC and evictions stay correct. Removes the hash and, on
+      the ~67 % of hops that stay on the same page, the fetch-window refill.
+- [ ] J3 Frozen code pages. A page that has been decoded as code and survived startup is marked frozen
+      in the table the TLB probe already consults; stores to a frozen page skip the write stamp
+      entirely AND stop forcing `needAsyncCheck` (today any trace with a store must check async_event
+      because handleSMC signals through BX_ASYNC_EVENT_STOP_TRACE). Precedent: `regionKernel` already
+      assumes kernel text is fixed after boot ("3 SMC events after boot"). Wasm has no page
+      permissions, so a violation is a software test, not a trap: hard error for workloads declared
+      static (codex is a static musl binary), deopt-and-unfreeze for guests that legitimately emit
+      code (kernel module load, ftrace, a JIT inside the guest).
+- [ ] J4 The payoff of J3: with code known frozen, decode and compile AHEAD of execution across
+      boundaries -- superblocks with inlined direct calls -- instead of discovering successors only
+      once they have been decoded. This is the only item that removes boundaries rather than making
+      each one cheaper, and the .nbjb bundles are already the AOT delivery mechanism for it.
+- [ ] J5 Not to be done: checking async_event/timers only every Nth hop. The decision must stay at
+      every boundary or interrupts land on a different instruction than the interpreter picks and
+      guest RAM diverges -- that is exactly what test/identity.sh asserts. Worth at most ~6 % (the
+      per-hop bookkeeping), all of which J1 gets soundly.
