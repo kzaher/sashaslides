@@ -159,3 +159,37 @@ window every iteration (which is why identity holds), and costs ~10-12 ops again
       every boundary or interrupts land on a different instruction than the interpreter picks and
       guest RAM diverges -- that is exactly what test/identity.sh asserts. Worth at most ~6 % (the
       per-hop bookkeeping), all of which J1 gets soundly.
+
+### J results (2026-08-17, four variants built and measured in parallel, integrated in sequence)
+
+Machine noise, established over 6 interleaved baseline runs: **±4 % MIPS, ±8 % boot, ±8 % keystroke**.
+Anything below ~5 % is unresolvable here, so every number under that is reported as noise, not as a win.
+
+- **J5 (ceiling, throwaway build `build/j5`) — the epilogue is not where the time is.** Deleting ~30-40 %
+  of its ops moves throughput by −6 %…+3 %. Deleting every statistics store from generated code: −0.4 %.
+  A sound successor cache: −1.6 % ± 5 %. **Checking async/timer every Nth hop is NEGATIVE** (−6.3 % at
+  N=8, −3.2 % at N=32) — the hop counter costs what the skipped checks cost and the deferred
+  BX_SYNC_TIME makes the epilogue bail to cpu_loop more often, with the guest doing identical work
+  (icount to prompt 1.184 G vs 1.186 G). J5's earlier "worth at most ~6 %" is revised to **≤ 0 %**.
+  Also: an unrevalidated successor cache WEDGES the guest — not from RET/indirect targets (a RIP compare
+  guards those) but from user-space RIP aliasing across address spaces and a cached jitarg going stale
+  when an entry is re-decoded at the same pAddr (the trace pool wraps every ~600 K instructions).
+  Note the 107.3 M links/15 s baseline was measured under level-3 profiling, which is itself ~9 % slower
+  than the shipping configuration.
+- **J3 (frozen pages, `build/j3`) — correct, cheap, and buys nothing on its own.** The JIT store fast
+  path **never once** reaches a page carrying code marks in this workload (`link_fail[6] == 0`): `C_free`
+  already short-circuits it 100 % of the time, so the fine-granularity lookup J3 removes was never
+  executing. `needAsyncCheck` cannot be dropped soundly — a store's target page is unknown at compile
+  time, and a private SMC flag would change which instruction an interrupt lands on. **The census is the
+  real product: 5,238 code pages frozen at the prompt, ZERO violating stores across boot + typing.**
+  Guest code is genuinely immutable after startup, which is what J4 needs. The permissive unfreeze path
+  is untested precisely because nothing ever violated.
+- **J1 / J2** — see their reports; both are enablers rather than wins, per J5's ceiling.
+- **Region formation is the bottleneck, not the epilogue.** `nanobox_form_region()` BFSes over direct
+  branch targets only, and skips any successor not already decoded (`se->tlen == 0`) or off-page, so
+  calls and returns always end a region: 2.3 blocks per region, and disabling regions costs only 9 %.
+  **J4 (decode ahead across boundaries, inline direct calls) is the only item left with headroom.**
+- **Measurement trap for anyone comparing engines**: `.nbjb` bundles are engine-tag keyed and are
+  silently REFUSED by any other build, so passing `build/eh-nb/jit/*.nbjb` to a variant gives the
+  baseline precompiled code and the variant none. Record per-engine bundles, or run both with none
+  (costs ~0.3 s of boot, nothing in steady state).

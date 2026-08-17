@@ -291,11 +291,10 @@ async function bootVm() {
     const d = m.data; if (!d || typeof d !== "object") return;
     if (d.type === "nanobox-pages") { const res = pagesWaiter; pagesWaiter = null; res && res(d.rows); return; }
     if (d.type === "nanobox-jitexport") { const res = jitExportWaiter; jitExportWaiter = null; res && res(d); return; }
-    // No JIT cache exists for this engine build: this run is recording one (at a low threshold, so it
-    // covers far more than the steady-state 2000 would). Upload it once the workload has settled, so
-    // the next visit starts with the code already compiled. The worker cannot schedule this itself —
-    // its event loop is inside the emulation loop.
-    if (d.type === "nanobox-event" && d.event === "jit-bundles" && d.autoCached === false && d.tag) {
+    // This run is recording a JIT cache (the worker says so only when recording is really on).
+    // Upload it once the workload has settled, so the next visit starts with the code compiled.
+    // The worker cannot schedule this itself — its event loop is inside the emulation loop.
+    if (d.type === "nanobox-event" && d.event === "jit-recording" && d.tag) {
       setTimeout(() => {
         window.nanobox.exportJit("auto-" + d.tag + ".nbjb")
           .then((r) => log("jit-cache-recorded", r || {}))

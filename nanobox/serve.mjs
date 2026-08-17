@@ -111,11 +111,22 @@ async function clientLog(req, res) {
 // engine tag matches what the page actually loads. Dev-server only: names are restricted to *.nbjb
 // inside JITDIR, and the index is rebuilt from the directory on the next request anyway.
 async function jitUpload(req, res, u) {
+  try { await jitUploadInner(req, res, u); }
+  catch (e) { console.log(`[jit] upload failed: ${e.message}`); try { res.writeHead(500); res.end(String(e.message)); } catch {} }
+}
+async function jitUploadInner(req, res, u) {
   const name = String(u.searchParams.get("name") || "").replace(/[^a-zA-Z0-9._-]/g, "");
   if (!/^[a-zA-Z0-9._-]+\.nbjb$/.test(name)) { res.writeHead(400); res.end("bad name"); return; }
   const chunks = []; for await (const c of req) chunks.push(c);
   const bytes = Buffer.concat(chunks);
   const file = join(JITDIR, name);
+  // never let a run that recorded little overwrite a richer cache (an export from a non-recording run
+  // is a few bytes and would silently destroy a good one)
+  const had = existsSync(file) ? statSync(file).size : 0;
+  if (bytes.length < had && u.searchParams.get("force") !== "1") {
+    console.log(`[jit] refused ${name}: ${bytes.length} bytes would replace ${had}`);
+    res.writeHead(409, { "content-type": "text/plain" }); res.end(`refused: ${bytes.length} < ${had}`); return;
+  }
   try { writeFileSync(file, bytes); } catch (e) { res.writeHead(500); res.end(String(e.message)); return; }
   console.log(`[jit] saved ${name} (${(bytes.length / 1e6).toFixed(1)} MB) from the browser`);
   res.writeHead(200, { "content-type": "text/plain" }); res.end(`${name} ${bytes.length}`);
@@ -183,7 +194,7 @@ const server = createServer(async (req, res) => {
   let p = normalize(decodeURIComponent(url.pathname));
   if (req.method === "POST" && p === "/net/fetch") return netFetch(req, res);
   if (req.method === "POST" && p === "/log") return clientLog(req, res);
-  if (req.method === "POST" && p === "/jit/upload") return jitUpload(req, res, u);
+  if (req.method === "POST" && p === "/jit/upload") return jitUpload(req, res, url);
   if (p === "/") p = "/index.html";
   if (p === "/engine/opt/out.wasm.gzip") return serveFile(req, res, ENGINE);
   if (p === "/engine/opt/slim/out.wasm.gzip") return serveFile(req, res, ENGINE.replace(/out\.wasm\.gzip$/, "out-slim.wasm.gzip")); // no boot.iso; not for identity pages

@@ -126,6 +126,10 @@ if (MODE === "full") WebAssembly.instantiate = function (src, imports) {
         const jitCfg = Object.assign({}, cfg.jit, { record: recording });
         if (recording && cfg.jitRecordThreshold) jitCfg.threshold = cfg.jitRecordThreshold;
         const ok = cfg && cfg.jit ? NanoboxJit.install(inst, jitCfg) : false;
+        // the page drives the upload (this worker's event loop is inside the emulation loop), but it
+        // must only do so for a run that actually recorded — otherwise it exports an empty bundle and
+        // overwrites a good cache with it
+        if (recording) ev("jit-recording", { tag: autoTag, threshold: jitCfg.threshold });
         // host channel: guest -> host bytes go out on cfg.hostChan.port (to the runtime worker),
         // host -> guest bytes come in through the shared ring (drained by the engine's rx timer hook)
         if (cfg && cfg.hostChan && inst.exports.nanobox_hc_hook_slot) {
