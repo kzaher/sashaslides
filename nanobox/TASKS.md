@@ -488,3 +488,46 @@ and 4.7x as the defensible floor**.
 as the unit of translation.** Function boundaries are a solved input (321,958 `STT_FUNC` in codex's
 `.symtab`, 294,541 from `.eh_frame_hdr` even stripped; our kernel is our own build). AOT of the executed
 subset is the plan; section J's boundary work stays shelved.
+
+## L. Template work: the first measurable win (2026-08-17, integrated and gated)
+
+The hot opcodes are all memory operations (`MOV_EqGq` 77.0 M, `MOV_GqEq` 41.8 M, `PUSH_Eq` 33.8 M,
+`POP_Eq` 33.3 M), and the inlined DTLB probe's HIT path was four separate tests plus a write-stamp test
+— about 26 of the ~50 wasm ops a `MOV [mem],reg` costs. Folded into two i64 tags per probe-cache entry
+(`C_tagR`/`C_tagW`), each holding `la & LPF_MASK` only when the direction is permitted at the current
+CPL, `alignment_check_mask == 0` and (write tag) the page carries no iCache write stamps, else `-1`.
+A hit is then one `i64.ne` plus the span check; everything else falls through to the untouched full
+probe. `la & LPF_MASK` has 12 zero low bits, so the `-1` poison is unsatisfiable.
+
+Also: the write-stamp test moved to the fill arm (a tag hit proves the page is stamp-free); the
+duplicate `async_event` test after the last instruction of a trace removed (the very next thing was the
+same exit, testing the same state in the same order); a no-op `laLocal()` copy dropped for segments
+without a base; `alignment_check_mask` now loaded eagerly, which also fixes a latent bug where a
+compile-time `acmLoaded` flag could leave the local uninitialised on a path whose probe was compiled
+second; plus size-only encoding wins (`i64.const 0xffffffff; i64.and` -> `i32.wrap_i64;
+i64.extend_i32_u`, run-length-grouped local declarations).
+
+| measurement | result |
+|---|---|
+| hot loop, in-build A/B (6 interleaved pairs) | **+12.0 %** (spread +7.7…+15.2 %) |
+| hot loop, cross-build vs the engine it replaced (3 pairs, mine) | **+8.0 % median** (+6.6…+15.0 %), `ticks` identical every pair |
+| codex keystroke median (agent, 3 pairs) | −15.7 % |
+| codex keystroke median (mine, 3 pairs) | −4.4 % (better in 2 of 3; codex is coverage-limited at 46.7 %) |
+| emitted bytes per instruction | 242.0 -> 231.9 (encoding wins) / 235.8 (with the fold) |
+| `br_if` in dumped modules | **−40 %** (four hit-path branches became one) |
+| **gate** | **IDENTITY identical (codex + agy) AND BISECT no divergence** |
+
+Note the fold is 1.7 % BIGGER than the same tree without it and still wins — it moves ~19 ops off the
+executed hit path onto the rarely-executed fill path. So "smaller is always better" is not the rule;
+"fewer ops on the executed path" is, and code size is the tie-breaker.
+
+**Next item, already located: register-spill triples (`i32.const 0` / `local.get` / `i64.store`) are
+213 k stores ~ 1.9 MB = 35 % of all emitted bytes**, nearly all of it duplicated cold epilogue
+(`spillAll` at every trace exit, `syncBefore` on every memory slow path — about two copies per
+memory-access site). Collapsing them into one shared per-function exit epilogue is the next ~30 % of
+bytes; it needs the spill set to become a compile-time union with those registers force-loaded in the
+prologue and reloaded after handler steps.
+
+Rejected on correctness grounds (worth recording): merging the span check into the tag compare with a
+subtract/XOR range test would save ~7 more ops per access, but every single-compare "within 4 KB of X"
+form poisons one full guest page and no poison value is provably unreachable.

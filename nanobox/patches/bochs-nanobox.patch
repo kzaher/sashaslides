@@ -720,10 +720,10 @@ index 000000000..c5350a6af
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..8592b74d8
+index 000000000..1e9811a8f
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,2883 @@
+@@ -0,0 +1,2959 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -764,6 +764,10 @@ index 000000000..8592b74d8
 +#define INS_ILEN_OFF ((uint32_t)((uintptr_t)&nanobox_ins_layout_probe.metaInfo.ilen - (uintptr_t)&nanobox_ins_layout_probe))
 +
 +unsigned nanobox_jit_level = 0;
++// TLB fast-path folding (permission + alignment-check + write-stamp freedom folded into the probe
++// cache tag). 1 = new path, 0 = the original explicit tests. A/B'd inside one build through
++// nanobox_set_jit_merge(1) (harness env NANOBOX_JIT_MERGE=1) so both arms share a binary.
++unsigned nanobox_tlbfold = 1;
 +unsigned nanobox_jit_threshold = 32;
 +unsigned nanobox_jit_maxlen = 64;      // debug knob: only compile traces with at most this many instructions
 +Bit8u nanobox_single_step = 0;
@@ -962,7 +966,15 @@ index 000000000..8592b74d8
 +  // last successful DTLB probe (page cache): lpf, host page address, access bits, physical page
 +  // frame and "no icache stamp on this page" flag. Reset at trace entry and after handler steps.
 +  uint32_t C_lpf, C_host, C_bits, C_ppf, C_free;
-+  uint32_t D_lpf, D_host, D_bits, D_ppf, D_free;   // second probe-cache entry (the previously used page): loops that alternate between two pages (JSC's GC sweep: bitmap + cells) no longer take the full DTLB probe on every access
++  uint32_t D_lpf, D_host, D_bits, D_ppf, D_free;   // second probe-cache entry (the previously used page)
++  // folded tags (nanobox_tlbfold): C_tagR/C_tagW hold the page's LPF only when a read /
++  // write of the current CPL is permitted on it, no alignment check is pending (acm == 0)
++  // and — for the write tag — the page carries no iCache write stamps. Otherwise they hold
++  // -1, which `la & LPF_MASK` can never produce, so one compare replaces the tag +
++  // permission + alignment (+ stamp) tests.
++  uint32_t C_tagR, C_tagW, D_tagR, D_tagW;
++  uint32_t P_bits, P_off;   // probe scratch: accessBits >> user_pl, page offset of the access
++
 +
 +  int depth;             // structured-control nesting depth (blocks/ifs/loops currently open)
 +  int loopDepth;         // depth value just inside the trace loop (-1 = no loop emitted)
@@ -1066,7 +1078,7 @@ index 000000000..8592b74d8
 +  void regGet(unsigned r) { regEnsureLoaded(r); em->get(L_reg[r]); }
 +  void regSetFromStack(unsigned r) { usedReg[r] = true; em->set(L_reg[r]); cs.regLoaded[r] = true; cs.regDirty[r] = true; }
 +  // 32-bit result (i64 with garbage upper bits on stack) -> zero-extended register write
-+  void regSet32FromStack(unsigned r) { em->i64c(0xffffffffLL); em->op(I64_AND); regSetFromStack(r); }
++  void regSet32FromStack(unsigned r) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); regSetFromStack(r); }
 +  // emit stores of dirty state; `clear` says whether the compile-time dirty bits are cleared
 +  // (false inside conditional paths that rejoin the main flow)
 +  void spillAll(bool clear) {
@@ -1083,8 +1095,17 @@ index 000000000..8592b74d8
 +  void invalidateAll() {
 +    for (unsigned r = 0; r < 16; r++) cs.regLoaded[r] = cs.regDirty[r] = false;
 +    cs.lfLoaded = cs.lfDirty = false; cs.acmLoaded = false;
-+    // the probe cache lives in locals; a handler may have flushed the TLB
-+    if (em) { em->i64c(-1); em->set(C_lpf); em->i64c(-1); em->set(D_lpf); }
++    // alignment_check_mask is loaded EAGERLY here rather than at its first use. Lazily, the load
++    // is emitted inside whichever probe happens to be compiled first, which need not be the one
++    // that runs first (a skipped conditional access), and every later use would then read an
++    // uninitialised local = 0 = "no alignment check". Harmless while the guest keeps AC clear,
++    // but the folded tag now encodes acm, so make it unconditional: 3 ops per trace entry.
++    if (em) {
++      em->i32c(0); em->mem(I64_LOAD32_U, ADDR(BX_CPU_THIS_PTR alignment_check_mask), 2); em->set(L_acm);
++      cs.acmLoaded = true;
++      if (nanobox_tlbfold) { em->i64c(-1); em->set(C_tagR); em->i64c(-1); em->set(C_tagW); em->i64c(-1); em->set(D_tagR); em->i64c(-1); em->set(D_tagW); }
++      else { em->i64c(-1); em->set(C_lpf); em->i64c(-1); em->set(D_lpf); }
++    }
 +  }
 +  CacheState snapshot() { return cs; }
 +  void restore(const CacheState &s) { cs = s; }
@@ -1292,7 +1313,7 @@ index 000000000..8592b74d8
 +    else regGet(base);
 +    if (i->displ32s()) { em->i64c((Bit64s)(Bit32s) i->displ32s()); em->op(I64_ADD); }
 +    if (index != 4) { regGet(index); if (i->sibScale()) { em->i64c(i->sibScale()); em->op(I64_SHL); } em->op(I64_ADD); }
-+    if (!i->as64L()) { em->i64c(0xffffffffLL); em->op(I64_AND); } // BxResolve32: modulo 2^32
++    if (!i->as64L()) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); } // BxResolve32: modulo 2^32
 +  }
 +  // offset (i64 on stack) -> linear address (get_laddr64)
 +  void pushLaddrFromOffset(unsigned seg) {
@@ -1341,48 +1362,84 @@ index 000000000..8592b74d8
 +  // Emit the DTLB probe for the linear address in local `la` and access `bit` (1=read, 4=write).
 +  // On success leaves the TLB entry pointer in T32[0] and falls through; on failure branches to
 +  // `slowDepth`.
-+  void tlbProbe(uint32_t la, unsigned size, unsigned bit, uint32_t slowDepth) {
++  void tlbProbe(uint32_t la, unsigned size, unsigned bit, uint32_t slowDepth, unsigned stampSize = 0) {
++    const bool fold = (nanobox_tlbfold != 0);
++    const uint32_t tagC = (bit == 4) ? C_tagW : C_tagR;
++    const uint32_t tagD = (bit == 4) ? D_tagW : D_tagR;
 +    // Page cache: same page as the last successful probe, access fits the page, permission bit
 +    // present, and no alignment check pending -> reuse (skips the TLB entry lookup entirely).
 +    blk(); // O: ends after the full probe; a cache hit branches here directly
 +      blk(); // A: cache checks; any failure leaves A and runs the full probe
-+        em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(C_lpf); em->op(I64_NE); em->br_if(0);
-+        if (size > 1) {
-+          em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0);
-+          acmGet(); em->i64c(size - 1); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0);
++        if (fold) {
++          // one compare covers page identity + permission + acm (+ write-stamp freedom)
++          em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(tagC); em->op(I64_NE); em->br_if(0);
++          if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
++        } else {
++          em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(C_lpf); em->op(I64_NE); em->br_if(0);
++          if (size > 1) {
++            em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0);
++            acmGet(); em->i64c(size - 1); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0);
++          }
++          em->get(C_bits); em->i32c(bit); em->get(L_upl); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
 +        }
-+        em->get(C_bits); em->i32c(bit); em->get(L_upl); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
 +        em->br(1); // hit
 +      endb();
 +      if (nanobox_jit_probe2) {
 +        // second entry: same page + span + permission -> swap it to the front and count it as a hit
 +        blk();
-+          em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(D_lpf); em->op(I64_NE); em->br_if(0);
-+          if (size > 1) {
-+            em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0);
-+            acmGet(); em->i64c(size - 1); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0);
++          if (fold) {
++            em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(tagD); em->op(I64_NE); em->br_if(0);
++            if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
++          } else {
++            em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(D_lpf); em->op(I64_NE); em->br_if(0);
++            if (size > 1) {
++              em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0);
++              acmGet(); em->i64c(size - 1); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0);
++            }
++            em->get(D_bits); em->i32c(bit); em->get(L_upl); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
 +          }
-+          em->get(D_bits); em->i32c(bit); em->get(L_upl); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
 +          swapProbeEntries();
 +          em->br(1); // hit (entry 2 promoted)
 +        endb();
 +      }
 +      tlbProbeFull(la, size, bit, slowDepth + 1);
 +      // remember this page (the previous front entry becomes the second entry)
-+      if (nanobox_jit_probe2) { em->get(C_lpf); em->set(D_lpf); em->get(C_host); em->set(D_host); em->get(C_bits); em->set(D_bits); em->get(C_ppf); em->set(D_ppf); em->get(C_free); em->set(D_free); }
-+      em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->set(C_lpf);
++      if (nanobox_jit_probe2) {
++        em->get(C_host); em->set(D_host); em->get(C_ppf); em->set(D_ppf); em->get(C_free); em->set(D_free);
++        if (fold) { em->get(C_tagR); em->set(D_tagR); em->get(C_tagW); em->set(D_tagW); }
++        else { em->get(C_lpf); em->set(D_lpf); em->get(C_bits); em->set(D_bits); }
++      }
 +      em->get(T32[0]); em->mem(I32_LOAD, TLB_OFF(hostPageAddr), 2); em->set(C_host);
-+      em->get(T32[0]); em->mem(I32_LOAD, TLB_OFF(accessBits), 2); em->set(C_bits);
 +      em->get(T32[0]); em->mem(I64_LOAD, TLB_OFF(ppf), 3); em->set(C_ppf);
 +      em->get(C_ppf); em->op(I32_WRAP_I64); em->i32c(LPF_MASK_LO); em->op(I32_AND); em->i32c(10); em->op(I32_SHR_U);
 +      em->i32c((uint32_t)(uintptr_t) pageWriteStampTable.nanobox_fgm()); em->op(I32_ADD); em->mem(I32_LOAD, 0, 2); em->op(I32_EQZ); em->set(C_free);
++      if (!fold) {
++        em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->set(C_lpf);
++        em->get(T32[0]); em->mem(I32_LOAD, TLB_OFF(accessBits), 2); em->set(C_bits);
++      } else {
++        // tag = (alignment check pending) ? -1 : la & LPF_MASK, then poisoned per direction by the
++        // TLB permission bits (and, for writes, by the page carrying iCache write stamps)
++        em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND);
++        em->i64c(-1); acmGet(); em->op(I64_EQZ); em->op(SELECT); em->set(W);
++        em->get(T32[0]); em->mem(I32_LOAD, TLB_OFF(accessBits), 2); em->get(L_upl); em->op(I32_SHR_U); em->set(P_bits);
++        em->get(W); em->i64c(-1); em->get(P_bits); em->i32c(1); em->op(I32_AND); em->op(SELECT); em->set(C_tagR);
++        em->get(W); em->i64c(-1); em->get(C_free); em->op(SELECT);
++        em->i64c(-1); em->get(P_bits); em->i32c(4); em->op(I32_AND); em->op(SELECT); em->set(C_tagW);
++        if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->set(P_off); }
++        if (stampSize) emitWriteStamp(la, stampSize);   // hit path skipped it: C_tagW is poisoned for stamped pages
++      }
 +    endb();
 +  }
 +  void swapProbeEntries() {
 +    // C <-> D through the wasm stack (values pushed, then popped in reverse into the other set)
-+    em->get(C_lpf); em->get(D_lpf); em->set(C_lpf); em->set(D_lpf);
++    if (nanobox_tlbfold) {
++      em->get(C_tagR); em->get(D_tagR); em->set(C_tagR); em->set(D_tagR);
++      em->get(C_tagW); em->get(D_tagW); em->set(C_tagW); em->set(D_tagW);
++    } else {
++      em->get(C_lpf); em->get(D_lpf); em->set(C_lpf); em->set(D_lpf);
++      em->get(C_bits); em->get(D_bits); em->set(C_bits); em->set(D_bits);
++    }
 +    em->get(C_host); em->get(D_host); em->set(C_host); em->set(D_host);
-+    em->get(C_bits); em->get(D_bits); em->set(C_bits); em->set(D_bits);
 +    em->get(C_ppf); em->get(D_ppf); em->set(C_ppf); em->set(D_ppf);
 +    em->get(C_free); em->get(D_free); em->set(C_free); em->set(D_free);
 +  }
@@ -1415,8 +1472,9 @@ index 000000000..8592b74d8
 +    em->op(I32_EQZ); em->br_if(slowDepth);
 +  }
 +  // host address = entry->hostPageAddr + (la & 0xfff)  -> i32 on stack
-+  void pushHostAddr(uint32_t la) {
++  void pushHostAddr(uint32_t la, bool haveOff = false) {
 +    em->get(C_host);
++    if (haveOff) { em->get(P_off); em->op(I32_ADD); return; }
 +    em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->op(I32_ADD);
 +  }
 +  // pageWriteStampTable.decWriteStamp(entry->ppf | pageOffset, size) with the cheap test inlined
@@ -1438,20 +1496,27 @@ index 000000000..8592b74d8
 +    needAsyncCheck = true; // handleSMC sets BX_ASYNC_EVENT_STOP_TRACE
 +  }
 +
++  // linear address of an access whose offset is in `off_l`: for segments without a base the
++  // offset IS the linear address, so the copy into T[5] (2 ops on every memory access) is skipped
++  uint32_t laLocal(unsigned seg, uint32_t off_l) {
++    if (seg < SEG_FS) return off_l;
++    em->get(off_l); pushLaddrFromOffset(seg); em->set(T[5]);
++    return T[5];
++  }
 +  // Read `size` bytes for instruction k. Offset (i64) is in local `off_l`; kind selects the slow
 +  // path accessor. Result: i64 zero-extended value on the stack.
 +  void emitRead(unsigned k, MemKind kind, unsigned seg, unsigned size, uint32_t off_l) {
-+    em->get(off_l); pushLaddrFromOffset(seg); em->set(T[5]);
++    const uint32_t la = laLocal(seg, off_l);
 +    blk(I64);
 +      blk();
-+        tlbProbe(T[5], size, 1, 0);
-+        pushHostAddr(T[5]); em->mem(loadOp(size), 0, 0);
++        tlbProbe(la, size, 1, 0);
++        pushHostAddr(la, nanobox_tlbfold && size > 1); em->mem(loadOp(size), 0, 0);
 +        em->br(1);
 +      endb();
 +      syncBefore(k, false); profSlow();
 +      const char *sig; uint32_t f = accessorRead(kind, size, sig);
 +      em->i32c(seg);
-+      if (kind == MK_RD_LIN || kind == MK_RMW_LIN) em->get(T[5]); else em->get(off_l);
++      if (kind == MK_RD_LIN || kind == MK_RMW_LIN) em->get(la); else em->get(off_l);
 +      em->call(fn(f, sig));
 +      if (size != 8) em->op(I64_EXTEND_I32_U);
 +    endb();
@@ -1462,18 +1527,18 @@ index 000000000..8592b74d8
 +  }
 +  // Write value in local val_l (i64) with `size` bytes at offset off_l for instruction k.
 +  void emitWrite(unsigned k, MemKind kind, unsigned seg, unsigned size, uint32_t off_l, uint32_t val_l) {
-+    em->get(off_l); pushLaddrFromOffset(seg); em->set(T[5]);
++    const uint32_t la = laLocal(seg, off_l);
 +    blk();
 +      blk();
-+        tlbProbe(T[5], size, 4, 0);
-+        emitWriteStamp(T[5], size);
-+        pushHostAddr(T[5]); em->get(val_l); em->mem(storeOp(size), 0, 0);
++        tlbProbe(la, size, 4, 0, size);
++        if (!nanobox_tlbfold) emitWriteStamp(la, size); else needAsyncCheck = true;
++        pushHostAddr(la, nanobox_tlbfold && size > 1); em->get(val_l); em->mem(storeOp(size), 0, 0);
 +        em->br(1);
 +      endb();
 +      syncBefore(k, false); profSlow();
 +      const char *sig; uint32_t f = accessorWrite(kind, size, sig);
 +      em->i32c(seg);
-+      if (kind == MK_WR_LIN) em->get(T[5]); else em->get(off_l);
++      if (kind == MK_WR_LIN) em->get(la); else em->get(off_l);
 +      em->get(val_l); if (size != 8) em->op(I32_WRAP_I64);
 +      em->call(fn(f, sig));
 +    endb();
@@ -1481,11 +1546,10 @@ index 000000000..8592b74d8
 +  }
 +  // Stack read (stack_read_qword semantics): offset in off_l -> value (i64) on stack
 +  void emitStackRead(unsigned k, uint32_t off_l) {
-+    em->get(off_l); em->set(T[5]);
-+    blk(I64);
++        blk(I64);
 +      blk();
-+        tlbProbe(T[5], 8, 1, 0);
-+        pushHostAddr(T[5]); em->mem(I64_LOAD, 0, 0);
++        tlbProbe(off_l, 8, 1, 0);
++        pushHostAddr(off_l, nanobox_tlbfold != 0); em->mem(I64_LOAD, 0, 0);
 +        em->br(1);
 +      endb();
 +      syncBefore(k, false); profSlow();
@@ -1494,12 +1558,11 @@ index 000000000..8592b74d8
 +    needAsyncCheck = true;
 +  }
 +  void emitStackWrite(unsigned k, uint32_t off_l, uint32_t val_l) {
-+    em->get(off_l); em->set(T[5]);
-+    blk();
++        blk();
 +      blk();
-+        tlbProbe(T[5], 8, 4, 0);
-+        emitWriteStamp(T[5], 8);
-+        pushHostAddr(T[5]); em->get(val_l); em->mem(I64_STORE, 0, 0);
++        tlbProbe(off_l, 8, 4, 0, 8);
++        if (!nanobox_tlbfold) emitWriteStamp(off_l, 8); else needAsyncCheck = true;
++        pushHostAddr(off_l, nanobox_tlbfold != 0); em->get(val_l); em->mem(I64_STORE, 0, 0);
 +        em->br(1);
 +      endb();
 +      syncBefore(k, false); profSlow();
@@ -1509,19 +1572,19 @@ index 000000000..8592b74d8
 +  }
 +  // RMW read: value on stack (i64), host address (i32, 0 = slow path) left in T32[1]
 +  void emitRMWRead(unsigned k, MemKind kind, unsigned seg, unsigned size, uint32_t off_l) {
-+    em->get(off_l); pushLaddrFromOffset(seg); em->set(T[5]);
++    const uint32_t la = laLocal(seg, off_l);
 +    blk(I64);
 +      blk();
-+        tlbProbe(T[5], size, 4, 0);
-+        emitWriteStamp(T[5], size);
-+        pushHostAddr(T[5]); em->tee(T32[1]); em->mem(loadOp(size), 0, 0);
++        tlbProbe(la, size, 4, 0, size);
++        if (!nanobox_tlbfold) emitWriteStamp(la, size); else needAsyncCheck = true;
++        pushHostAddr(la, nanobox_tlbfold && size > 1); em->tee(T32[1]); em->mem(loadOp(size), 0, 0);
 +        em->br(1);
 +      endb();
 +      syncBefore(k, false); profSlow();
 +      em->i32c(0); em->set(T32[1]);
 +      const char *sig; uint32_t f = accessorRead(kind, size, sig);
 +      em->i32c(seg);
-+      if (kind == MK_RMW_LIN) em->get(T[5]); else em->get(off_l);
++      if (kind == MK_RMW_LIN) em->get(la); else em->get(off_l);
 +      em->call(fn(f, sig));
 +      if (size != 8) em->op(I64_EXTEND_I32_U);
 +    endb();
@@ -1575,7 +1638,7 @@ index 000000000..8592b74d8
 +      em->get(X[2]); em->get(X[2]); em->i64c(1); em->op(I64_SHR_U); em->op(I64_XOR); em->set(X[2]);
 +      em->get(X[1]); em->get(X[2]); em->op(I64_XOR);
 +    }
-+    em->i64c(0xffffffffLL); em->op(I64_AND);
++    em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U);
 +    em->set(L_lfa);
 +    lfMarkSet();
 +  }
@@ -1644,7 +1707,7 @@ index 000000000..8592b74d8
 +  }
 +  void pushReg16(unsigned r) { regGet(r); em->i64c(0xffff); em->op(I64_AND); }
 +  void writeReg16(unsigned r, uint32_t v) { regGet(r); em->i64c(~0xffffLL); em->op(I64_AND); em->get(v); em->i64c(0xffff); em->op(I64_AND); em->op(I64_OR); regSetFromStack(r); }
-+  void pushReg32(unsigned r) { regGet(r); em->i64c(0xffffffffLL); em->op(I64_AND); }
++  void pushReg32(unsigned r) { regGet(r); em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); }
 +  void pushRegSz(unsigned r, unsigned size, bool ext) {
 +    if (size == 8) regGet(r); else if (size == 4) pushReg32(r); else if (size == 2) pushReg16(r); else pushReg8(r, ext);
 +  }
@@ -2164,7 +2227,7 @@ index 000000000..8592b74d8
 +      pushRegSz(src, size, false); em->set(op2);
 +      if (R) { pushRegSz(dst, size, false); em->set(op1); }
 +      else { pushEA(k); em->set(ea); emitRMWRead(k, rmwKind, seg, size, ea); em->set(op1); }
-+      em->get(op1); em->get(op2); em->op(I64_ADD); if (size == 4) { em->i64c(0xffffffffLL); em->op(I64_AND); } em->set(sum);
++      em->get(op1); em->get(op2); em->op(I64_ADD); if (size == 4) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); } em->set(sum);
 +      if (R) { writeRegSz(src, size, false, op1); writeRegSz(dst, size, false, sum); } // dst last (src may be dst)
 +      else { emitRMWWrite(rmwKind, size, sum); writeRegSz(src, size, false, op1); }
 +      setFlagsArith(size, op1, op2, sum, false, false);
@@ -2179,7 +2242,7 @@ index 000000000..8592b74d8
 +      if (R) { pushRegSz(dst, size, false); em->set(op1); }
 +      else { pushEA(k); em->set(ea); emitRMWRead(k, rmwKind, seg, size, ea); em->set(op1); }
 +      pushRegSz(R_RAX, size, false); em->set(acc);
-+      em->get(acc); em->get(op1); em->op(I64_SUB); if (size == 4) { em->i64c(0xffffffffLL); em->op(I64_AND); } em->set(diff);
++      em->get(acc); em->get(op1); em->op(I64_SUB); if (size == 4) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); } em->set(diff);
 +      setFlagsArith(size, acc, op1, diff, true, false);
 +      // both outcomes write registers/memory: keep the compile-time cache state identical on both
 +      // paths by loading everything first and marking dirty for both
@@ -2210,7 +2273,7 @@ index 000000000..8592b74d8
 +      if (ia == BX_IA_BTS_EqIb || ia == BX_IA_BTS_EdIb) em->op(I64_OR);
 +      else if (ia == BX_IA_BTR_EqIb || ia == BX_IA_BTR_EdIb) { em->drop(); em->i64c(~(1LL << bit)); em->op(I64_AND); }
 +      else em->op(I64_XOR);
-+      if (size == 4) { em->i64c(0xffffffffLL); em->op(I64_AND); }
++      if (size == 4) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); }
 +      regSetFromStack(dst);
 +      pushOF(); em->set(T32[4]);
 +      setFlagsOxxxxC(T32[4], T32[3]);
@@ -2276,8 +2339,8 @@ index 000000000..8592b74d8
 +      blk();
 +        if (aligned) { em->get(T[5]); em->i64c(15); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0); }
 +        tlbProbe(T[5], 16, 1, 0);
-+        em->i32c(0); pushHostAddr(T[5]); em->mem(I64_LOAD, 0, 0); em->mem(I64_STORE, xaddr, 3);
-+        em->i32c(0); pushHostAddr(T[5]); em->mem(I64_LOAD, 8, 0); em->mem(I64_STORE, xaddr + 8, 3);
++        em->i32c(0); pushHostAddr(T[5], nanobox_tlbfold != 0); em->mem(I64_LOAD, 0, 0); em->mem(I64_STORE, xaddr, 3);
++        em->i32c(0); pushHostAddr(T[5], nanobox_tlbfold != 0); em->mem(I64_LOAD, 8, 0); em->mem(I64_STORE, xaddr + 8, 3);
 +        em->br(1);
 +      endb();
 +      syncBefore(k, false); profSlow();
@@ -2292,10 +2355,10 @@ index 000000000..8592b74d8
 +    blk();
 +      blk();
 +        if (aligned) { em->get(T[5]); em->i64c(15); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0); }
-+        tlbProbe(T[5], 16, 4, 0);
-+        emitWriteStamp(T[5], 16);
-+        pushHostAddr(T[5]); em->i32c(0); em->mem(I64_LOAD, xaddr, 3); em->mem(I64_STORE, 0, 0);
-+        pushHostAddr(T[5]); em->i32c(0); em->mem(I64_LOAD, xaddr + 8, 3); em->mem(I64_STORE, 8, 0);
++        tlbProbe(T[5], 16, 4, 0, 16);
++        if (!nanobox_tlbfold) emitWriteStamp(T[5], 16); else needAsyncCheck = true;
++        pushHostAddr(T[5], nanobox_tlbfold != 0); em->i32c(0); em->mem(I64_LOAD, xaddr, 3); em->mem(I64_STORE, 0, 0);
++        pushHostAddr(T[5], nanobox_tlbfold != 0); em->i32c(0); em->mem(I64_LOAD, xaddr + 8, 3); em->mem(I64_STORE, 8, 0);
 +        em->br(1);
 +      endb();
 +      syncBefore(k, false); profSlow();
@@ -2594,7 +2657,7 @@ index 000000000..8592b74d8
 +    else { pushEA(k); em->set(ea); emitRMWRead(k, rmwKind, seg, size, ea); em->set(op1); }
 +    if (inc || dec) {
 +      em->get(op1); em->i64c(1); em->op(inc ? I64_ADD : I64_SUB);
-+      if (size == 4) { em->i64c(0xffffffffLL); em->op(I64_AND); }
++      if (size == 4) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); }
 +      em->set(res);
 +      em->i64c(0); em->set(op2);
 +      if (R) { em->get(res); regSetFromStack(dst); } else emitRMWWrite(rmwKind, size, res);
@@ -2603,7 +2666,7 @@ index 000000000..8592b74d8
 +    } else if (neg) {
 +      // op1 = -(Bit64s)op1; write; SET_FLAGS_OSZAPC_SUB_n(0, orig, -orig)
 +      em->i64c(0); em->get(op1); em->op(I64_SUB);
-+      if (size == 4) { em->i64c(0xffffffffLL); em->op(I64_AND); }
++      if (size == 4) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); }
 +      em->set(res);
 +      if (R) { em->get(res); regSetFromStack(dst); } else emitRMWWrite(rmwKind, size, res);
 +      em->get(op1); em->set(op2);   // orig
@@ -2611,7 +2674,7 @@ index 000000000..8592b74d8
 +      setFlagsArith(size, op1, op2, res, true, false);
 +    } else { // NOT
 +      em->get(op1); em->i64c(-1); em->op(I64_XOR);
-+      if (size == 4) { em->i64c(0xffffffffLL); em->op(I64_AND); }
++      if (size == 4) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); }
 +      em->set(res);
 +      if (R) { em->get(res); regSetFromStack(dst); } else emitRMWWrite(rmwKind, size, res);
 +    }
@@ -2660,7 +2723,7 @@ index 000000000..8592b74d8
 +    em->set(op1);
 +    if (kind == 0) {
 +      // result = op1 << count; cf = (op1 >> (bits - count)) & 1; of = cf ^ (result >> (bits-1))
-+      em->get(op1); em->get(cnt); em->op(I64_SHL); if (size == 4) { em->i64c(0xffffffffLL); em->op(I64_AND); } em->set(res);
++      em->get(op1); em->get(cnt); em->op(I64_SHL); if (size == 4) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); } em->set(res);
 +      em->get(op1); em->i64c(size * 8); em->get(cnt); em->op(I64_SUB); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->i32c(1); em->op(I32_AND); em->set(cf);
 +      em->get(res); em->i64c(size * 8 - 1); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->get(cf); em->op(I32_XOR); em->set(of);
 +    } else if (kind == 1) {
@@ -2672,7 +2735,7 @@ index 000000000..8592b74d8
 +      em->set(of);
 +    } else {
 +      // result = (signed)op1 >> count; cf = (op1 >> (count-1)) & 1; of = 0
-+      em->get(op1); if (size == 4) em->op(I64_EXTEND32_S); em->get(cnt); em->op(I64_SHR_S); if (size == 4) { em->i64c(0xffffffffLL); em->op(I64_AND); } em->set(res);
++      em->get(op1); if (size == 4) em->op(I64_EXTEND32_S); em->get(cnt); em->op(I64_SHR_S); if (size == 4) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); } em->set(res);
 +      em->get(op1); em->get(cnt); em->i64c(1); em->op(I64_SUB); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->i32c(1); em->op(I32_AND); em->set(cf);
 +      em->i32c(0); em->set(of);
 +    }
@@ -2698,7 +2761,7 @@ index 000000000..8592b74d8
 +    if (size == 4) {
 +      // 32x32 -> 64 signed product
 +      em->get(a); em->op(I64_EXTEND32_S); em->get(b); em->op(I64_EXTEND32_S); em->op(I64_MUL); em->set(lo);
-+      em->get(lo); em->i64c(0xffffffffLL); em->op(I64_AND); em->set(a);
++      em->get(lo); em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); em->set(a);
 +      em->get(a); regSetFromStack(dst);
 +      setFlagsLogic(4, a);
 +      em->get(lo); em->get(lo); em->op(I64_EXTEND32_S); em->op(I64_NE);
@@ -2718,14 +2781,14 @@ index 000000000..8592b74d8
 +  // signed high 64 bits of a*b -> local out (uses X[] scratch)
 +  void emitMulhs(uint32_t a, uint32_t b, uint32_t out) {
 +    uint32_t a0 = X[0], a1 = X[1], b0 = X[2], b1 = X[3];
-+    em->get(a); em->i64c(0xffffffffLL); em->op(I64_AND); em->set(a0);
++    em->get(a); em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); em->set(a0);
 +    em->get(a); em->i64c(32); em->op(I64_SHR_U); em->set(a1);
-+    em->get(b); em->i64c(0xffffffffLL); em->op(I64_AND); em->set(b0);
++    em->get(b); em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); em->set(b0);
 +    em->get(b); em->i64c(32); em->op(I64_SHR_U); em->set(b1);
 +    // t = a0*b0; u = a1*b0 + (t>>32); v = a0*b1 + (u & 0xffffffff); hi = a1*b1 + (u>>32) + (v>>32)
 +    em->get(a0); em->get(b0); em->op(I64_MUL); em->i64c(32); em->op(I64_SHR_U);
 +    em->get(a1); em->get(b0); em->op(I64_MUL); em->op(I64_ADD); em->set(out); // u
-+    em->get(a0); em->get(b1); em->op(I64_MUL); em->get(out); em->i64c(0xffffffffLL); em->op(I64_AND); em->op(I64_ADD); em->set(a0); // v
++    em->get(a0); em->get(b1); em->op(I64_MUL); em->get(out); em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); em->op(I64_ADD); em->set(a0); // v
 +    em->get(a1); em->get(b1); em->op(I64_MUL); em->get(out); em->i64c(32); em->op(I64_SHR_U); em->op(I64_ADD);
 +    em->get(a0); em->i64c(32); em->op(I64_SHR_U); em->op(I64_ADD); em->set(out);
 +    // signed correction: hi -= (a<0 ? b : 0) + (b<0 ? a : 0)
@@ -2779,16 +2842,22 @@ index 000000000..8592b74d8
 +  }
 +  bool loopWanted;
 +  void declareLocals() {
++    // grouped by type so the local-declaration section is two runs instead of ~60 entries
 +    L_i = 0;
-+    L_base = em->addLocal(I64); L_ic0 = em->addLocal(I64); L_upl = em->addLocal(I32); L_acm = em->addLocal(I64);
++    L_base = em->addLocal(I64); L_ic0 = em->addLocal(I64); L_acm = em->addLocal(I64);
 +    for (unsigned r = 0; r < 16; r++) L_reg[r] = em->addLocal(I64);
 +    L_lfr = em->addLocal(I64); L_lfa = em->addLocal(I64);
 +    for (unsigned t = 0; t < 8; t++) T[t] = em->addLocal(I64);
 +    for (unsigned t = 0; t < 4; t++) X[t] = em->addLocal(I64);
 +    W = em->addLocal(I64);
++    C_lpf = em->addLocal(I64); C_ppf = em->addLocal(I64);
++    D_lpf = em->addLocal(I64); D_ppf = em->addLocal(I64);
++    C_tagR = em->addLocal(I64); C_tagW = em->addLocal(I64); D_tagR = em->addLocal(I64); D_tagW = em->addLocal(I64);
++    L_upl = em->addLocal(I32);
 +    for (unsigned t = 0; t < 6; t++) T32[t] = em->addLocal(I32);
-+    C_lpf = em->addLocal(I64); C_host = em->addLocal(I32); C_bits = em->addLocal(I32); C_ppf = em->addLocal(I64); C_free = em->addLocal(I32);
-+    D_lpf = em->addLocal(I64); D_host = em->addLocal(I32); D_bits = em->addLocal(I32); D_ppf = em->addLocal(I64); D_free = em->addLocal(I32);
++    C_host = em->addLocal(I32); C_bits = em->addLocal(I32); C_free = em->addLocal(I32);
++    D_host = em->addLocal(I32); D_bits = em->addLocal(I32); D_free = em->addLocal(I32);
++    P_bits = em->addLocal(I32); P_off = em->addLocal(I32);
 +    L_cur = em->addLocal(I32);
 +    L_regp = em->addLocal(I32);
 +  }
@@ -3026,9 +3095,12 @@ index 000000000..8592b74d8
 +        if (!done) m.code.n = mark; // template declined before emitting anything: drop the wrapper
 +        if (done) {
 +          nanobox_inline_count[ins[k].getIaOpcode()]++;
-+          if (needAsyncCheck) {
++          if (needAsyncCheck && !last) {
 +            // an instruction that may have raised an async event (MMIO, SMC, ...) ends the trace
-+            // after completing, exactly like BX_NEXT_INSTR's check
++            // after completing, exactly like BX_NEXT_INSTR's check.
++            // `last` is exempt: exitFallthroughOrTransition() below commits the very same state
++            // and then tests async_event itself (link epilogue / emitTransition), so the check
++            // here would be a duplicate of the next one on an identical state.
 +            em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2);
 +            CacheState s = snapshot();
 +            iff(); exitFallthrough(k); endb();
@@ -3509,7 +3581,11 @@ index 000000000..8592b74d8
 +unsigned nanobox_jit_probe2 = 1;   // two-entry probe cache in JIT'd traces (default on; nanobox_set_jit_probe2(0) for A/B)
 +NB_EXPORT(nanobox_set_jit_probe2) void nanobox_set_jit_probe2(unsigned on) { nanobox_jit_probe2 = on; }
 +unsigned nanobox_jit_merge = 0;    // merge runs of register pushes / pops into one probed span (experiment flag)
-+NB_EXPORT(nanobox_set_jit_merge) void nanobox_set_jit_merge(unsigned on) { nanobox_jit_merge = on; }
++// A/B switch inside one binary: the harness turns this on with NANOBOX_JIT_MERGE=1. In this tree
++// it selects the ORIGINAL TLB fast path (explicit permission / alignment-check / write-stamp
++// tests) instead of the folded-tag one, so both arms can be measured from the same build with the
++// same engine tag (and therefore the same .nbjb bundle keying).
++NB_EXPORT(nanobox_set_jit_merge) void nanobox_set_jit_merge(unsigned on) { nanobox_tlbfold = on ? 0 : 1; }
 +NB_EXPORT(nanobox_set_jit_eager) void nanobox_set_jit_eager(unsigned on) { nanobox_jit_eager = on; }
 +static Bit64u nb_swept[4096]; static unsigned nb_swept_n = 0; static Bit64u nanobox_eager_stats[2];
 +NB_EXPORT(nanobox_jit_eager_stat) double nanobox_jit_eager_stat(unsigned i) { return i < 2 ? (double) nanobox_eager_stats[i] : 0; }
@@ -3661,10 +3737,10 @@ index 000000000..881178f18
 +#endif
 diff --git a/bochs/nanobox_wasm.h b/bochs/nanobox_wasm.h
 new file mode 100644
-index 000000000..c6aebdb37
+index 000000000..1a0c2bde1
 --- /dev/null
 +++ b/bochs/nanobox_wasm.h
-@@ -0,0 +1,230 @@
+@@ -0,0 +1,241 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox: a tiny WebAssembly binary emitter used by the trace JIT.
 +//
@@ -3757,8 +3833,9 @@ index 000000000..c6aebdb37
 +  struct Import { uint32_t typeIdx; uint32_t key; } imports[MAX_IMPORTS]; uint32_t nimports;
 +  uint32_t importKeys[MAX_IMPORTS]; // e.g. Bochs function-table index of the imported function
 +  Buf code;                          // CURRENT function body (locals + expr), filled by the emitter
-+  Buf locals;                        // local declarations (count, type)*
++  Buf locals;                        // local declarations (count, type)*, run-length grouped
 +  uint32_t nlocalDecls;
++  int32_t lastRunPos; uint8_t lastRunType; uint32_t lastRunCount;   // open run in `locals`
 +  uint32_t nparams;                  // params of the exported function
 +  uint32_t funcTypeIdx;
 +  // finished functions (a module may hold many: batched traces): serialised bodies + their types
@@ -3766,10 +3843,10 @@ index 000000000..c6aebdb37
 +  Buf codeSec;                       // concatenated (size-prefixed) bodies
 +  uint32_t funcTypes[MAX_FUNCS]; uint32_t nfuncs;
 +
-+  Module() : ntypes(0), nimports(0), nlocalDecls(0), nparams(0), funcTypeIdx(0), nfuncs(0) {}
++  Module() : ntypes(0), nimports(0), nlocalDecls(0), lastRunPos(-1), lastRunType(0), lastRunCount(0), nparams(0), funcTypeIdx(0), nfuncs(0) {}
 +
 +  // start a new function body (the emitter writes into code/locals)
-+  void beginFunc() { code.clear(); locals.clear(); nlocalDecls = 0; }
++  void beginFunc() { code.clear(); locals.clear(); nlocalDecls = 0; lastRunPos = -1; lastRunCount = 0; }
 +  // seal the current body as local function #nfuncs (function index nimports + nfuncs); returns its local index
 +  uint32_t endFunc(uint32_t typeIdx) {
 +    Buf body; body.uleb(nlocalDecls); body.raw(locals.p, locals.n); body.raw(code.p, code.n); body.b8(END);
@@ -3858,7 +3935,17 @@ index 000000000..c6aebdb37
 +  uint32_t nlocals; // total locals incl. params
 +  Emit(Module &mod) : m(mod), c(mod.code), nlocals(mod.nparams) {}
 +
-+  uint32_t addLocal(ValType t) { m.locals.uleb(1); m.locals.b8(t); m.nlocalDecls++; return nlocals++; }
++  // wasm allows (count, type) runs: declaring 54 locals one at a time costs 108 bytes per
++  // function, grouping the consecutive same-type ones costs a handful
++  uint32_t addLocal(ValType t) {
++    if (m.lastRunPos >= 0 && m.lastRunType == (uint8_t) t && m.lastRunCount < 127) {
++      m.locals.p[m.lastRunPos] = (uint8_t) (++m.lastRunCount);
++    } else {
++      m.lastRunPos = (int32_t) m.locals.n; m.locals.uleb(1); m.locals.b8(t);
++      m.lastRunType = (uint8_t) t; m.lastRunCount = 1; m.nlocalDecls++;
++    }
++    return nlocals++;
++  }
 +
 +  void op(Op o) { c.b8(o); }
 +  void i32c(int32_t v) { c.b8(I32_CONST); c.sleb32(v); }
