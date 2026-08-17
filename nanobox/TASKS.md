@@ -219,3 +219,40 @@ Anything below ~5 % is unresolvable here, so every number under that is reported
   silently REFUSED by any other build, so passing `build/eh-nb/jit/*.nbjb` to a variant gives the
   baseline precompiled code and the variant none. Record per-engine bundles, or run both with none
   (costs ~0.3 s of boot, nothing in steady state).
+
+### J4 result (2026-08-17): the premise was wrong, and inlining calls regresses
+
+A census of **why** region formation stops (6408 attempts over a codex boot + typing) corrects what this
+section previously assumed:
+
+| reason a region stopped growing | count |
+|---|---|
+| block ended in a direct CALL | **2894** |
+| block ended in RET / indirect / syscall | **2088** |
+| successor not decoded yet | 1017 |
+| successor outside entry page +/-1 | 329 |
+| block budget (24) full | **0** |
+| instruction budget (320) full | **0** |
+
+So "only accepts a successor already decoded" was the wrong diagnosis by ~5:1 — calls and returns are
+what end regions — and **raising NB_REGION_MAX_BLOCKS / NB_REGION_MAX_INSTR is a no-op**: those budgets
+never bind. Measured effects:
+
+* decode-ahead alone: blocks/region 2.33 -> 2.52, external links −4.8 %;
+* inlining direct CALL targets + continuations: blocks/region -> 3.74; both together **4.65 (2.0x)**,
+  external links **−15.6 %** — the mechanism does exactly what it promises statically;
+* end to end it **regresses**: boot +17 %, keystroke +19 %, MIPS −8.8 %, every pair regressing and boot
+  outside the +/-8 % noise in all three. **Cause is code explosion, not hop count**: the same callee is
+  copied into every caller's region, installed wasm goes 24.9 -> 61.2 MB (2.5x), and the region cache
+  hit rate collapses (29,466 -> 17,789). The per-hop saving is ~25 ops on 15 % of hops, ~0.4 % of the
+  epilogue's ops — it cannot pay for 2.5x the code. Consistent with J1/J5: the machine is not
+  op-count-bound.
+* a RET guard (compare the popped return address against inlined continuations) converts 1.3-1.6 M
+  returns into in-region transitions but costs ~8 % MIPS: it is a linear chain of compares per RET.
+
+The binding constraint for any future superblock work is the region's **single-adjacent-page window**:
+11,056 successors rejected for landing outside entry page +/-1, versus 3,537 not-decoded and 53 budget.
+Multi-page regions need a per-block page frame, an ITLB check per cross-page edge, a per-page SMC/attach
+registry and a deopt when a frame moves — and callee SHARING rather than copying, which is a different
+design from a superblock. J4's code is behind runtime flags that default OFF (`NANOBOX_J4_AHEAD`,
+`_INCALL`, `_RETGUARD`, `_INSTR`), so the build with no env set is bit-for-bit the baseline.
