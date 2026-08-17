@@ -344,6 +344,38 @@ emulated: every guest memory access is linear→physical through Bochs' page wal
 JIT's inlined DTLB fast path) and then physical→host through the block table — two indirections;
 the profile also records pages whose physical backing changed during the run (123–224 per CLI).
 
+## Where the remaining performance is (2026-08-17, section J measured end to end)
+
+Six engine variants were built and measured against the same codex scenario; all of section J's
+results, counters and dead ends live in `TASKS.md` section J. The short version, because it redirects
+all future work:
+
+* **The trace boundary is 17.6 % of executed wasm ops** (link epilogue 13.6 %, exits 3.2 %, in-region
+  transitions 0.9 %, loopbacks 0.6 %) and the epilogue is **92 ops per hop**, not the ~35 previously
+  assumed. Four separate attacks on it (J1 timer state in tail-call params, J2 successor cache, J3
+  frozen pages, J5 skipping checks) each removed 0-3 % of executed work and all measured inside the
+  +/-4 % noise floor. J4 (decode-ahead + inlined direct calls) genuinely removed 15.6 % of boundaries
+  and still lost 8.8 % MIPS, because it produced 2.5x the compiled code.
+* **Instruction templates are 81.8 %** of executed ops — that is the only lever with headroom left.
+* **JIT'd code is only ~1.3x the Bochs interpreter** on a fully covered hot loop (161.4 vs 124.3 MIPS,
+  identical instruction counts). Bochs already dispatches pre-decoded instructions, so our win is just
+  its dispatch while the templates still reproduce every Bochs semantic per instruction (lazy flags,
+  a two-entry TLB probe per access, SMC stamps, icount/RIP bookkeeping). In a dumped module,
+  `i64.store` outnumbers `i64.load` six to one — most of those stores are our bookkeeping, not the
+  guest's.
+* **Coverage cannot be bought.** Lowering the hotness threshold 40x (2000 -> 50) raises JIT coverage
+  only from 46.7 % to 54.9 % while installed functions grow 5.6x and throughput falls a third; the
+  uncovered half is code that never repeats. Precompiling everything and loading it next run works
+  mechanically (runtime compilation 1,061 -> 80 traces) and still loses 27 % throughput, because what
+  costs is the volume of live compiled code, not the compiling.
+* Wasm forbids the obvious escape: linear memory is data only, there is no executable bit and nothing
+  jumps into it, so every translation must become module functions behind an indirect call table.
+
+Open directions, both under measurement: **template quality** (fewer wasm ops per guest instruction —
+hoisting the TLB probe across same-page runs, deferring bookkeeping stores to the points that can
+observe them, fusing compare+branch) and **function-granular AOT** (guest function boundaries are
+available: 321,958 from codex's `.symtab`, 294,541 from `.eh_frame_hdr` even when stripped).
+
 ## Research: WasmLinux / linux-wasm / wasm-native runtimes
 
 `docs/wasm-linux-research.md` — verdict: not worth it for this use case (both wasm kernels are
