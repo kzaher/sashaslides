@@ -326,3 +326,44 @@ half (83 % of steady-state time) and, as soon as you try to shrink that half by 
 volume of live compiled code.** The untried variant is selective caching — pick traces by the
 *interpreted cost they actually save* (executed-instruction weight), keeping the live code set small,
 rather than everything above a threshold.
+
+### What the JIT is actually worth, and why in-place code replacement is impossible
+
+Interleaved, identical scenario, `build/eh-nb`:
+
+| run | JIT on: boot / keystroke | JIT off (`--jit 0`): boot / keystroke |
+|---|---|---|
+| 1 | 7.25 s / **185 ms** | 7.16 s / **290 ms** |
+| 2 | 7.21 s / **171 ms** | 7.05 s / **281 ms** |
+
+**The JIT is a 1.6x win on the interactive path and neutral on boot.** (An earlier 123 MIPS reading for
+the interpreter came from a SHORTER scenario and is not comparable — do not repeat that mistake; MIPS
+over a wall-clock-driven scenario is dominated by boot.) Boot is cold one-shot code that never crosses
+any threshold, which is the same long tail that holds coverage at 46.7 %; typing re-executes hot redraw
+loops, which are compiled, hence the 1.6x.
+
+Coverage versus threshold, no bundles, level 3 (the tail is why no policy helps):
+
+| threshold | JIT coverage of trace executions | installed functions | MIPS |
+|---|---|---|---|
+| 2000 | **46.7 %** | 5,079 | 95.3 |
+| 500 | 51.1 % | 10,483 | 78.0 |
+| 200 | 53.0 % | 16,487 | 75.6 |
+| 50 | **54.9 %** | 28,323 | 64.3 |
+
+40x lower threshold buys 8 points of coverage for 5.6x the installed functions and a third of the
+throughput. The uncovered half is not "not yet hot", it is code that never repeats.
+
+**Why the translation cannot live in guest memory.** WebAssembly separates code from data absolutely:
+linear memory is data only, there is no executable bit to mark, no instruction jumps into linear
+memory, and a `WebAssembly.Module` is immutable once instantiated. Translated code therefore MUST
+become module functions reached through an indirect call table — the "separate cache" is not a design
+choice, it is the only shape wasm allows, and it is why more compiled code costs table growth,
+indirect-call target diversity and V8 compile time (measured: J4's 61 MB of generated code, −8.8 %
+MIPS; 28 k installed functions, −33 % MIPS).
+
+**The expressible version of the same idea, and the most promising direction left**: keep the
+translation in linear memory as DATA — a dense pre-decoded IR — and run one tight dispatch loop over
+it (threaded code). Contiguous, no module per trace, no compile cost, and it targets exactly the long
+tail the JIT can never reach, which is where ~half of all execution and most of the steady-state time
+sits.
