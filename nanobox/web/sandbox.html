@@ -337,7 +337,7 @@ async function bootVm() {
     // compiled. Measured: compiling at a low threshold at RUNTIME costs 2.4x the boot time (8.4 ->
     // 20.6 s at threshold 2), which is exactly why it is paid once, during recording, and cached.
     jitAutoDir: qs.get("autojit") === "0" ? null : "/engine/opt/jit/",
-    jitRecordThreshold: Number(qs.get("recthreshold") || 200),
+    jitRecordThreshold: Number(qs.get("recthreshold") || 0) || undefined,   // 0 = record at the normal threshold (no boot cost)
     jitUploadUrl: "/jit/upload", jitRecordUploadMs: Number(qs.get("recms") || 60000),
     jitRecord: qs.get("record") === "1",
     hostChan: onV8 ? { sab: toGuest.sab, inSab: fromGuest.sab } : undefined,

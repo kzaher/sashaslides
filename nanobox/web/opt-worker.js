@@ -119,10 +119,12 @@ if (MODE === "full") WebAssembly.instantiate = function (src, imports) {
         // the bundles must be compiled before the first lookup (usually long done: they load in
         // parallel with the engine fetch; in non-direct mode this is the only wait point)
         if (jitPreload) { try { await jitPreload; } catch (e) { ev("error", { message: "jit bundles: " + (e && e.message || e) }); } }
-        // Loading a cache is always on; RECORDING one is opt-in (?record=1) until the record ->
-        // upload -> replay cycle is verified end to end, because a recording run deliberately
-        // compiles at a low threshold and that costs boot time (harness: 8.4 -> 12.9 s at 200).
-        const recording = !!cfg.jitRecord;
+        // Loading a cache is always on. Recording one happens automatically when this engine build
+        // has no cache yet, at the NORMAL threshold — verified cycle: 2317 traces recorded and
+        // uploaded (10.1 MB), next visit compiles 40 traces instead of 2317. Recording at a low
+        // threshold would cover more but costs boot time (8.4 -> 12.9 s at 200), so that stays opt-in
+        // via ?recthreshold=N.
+        const recording = !!cfg.jitRecord || (!!cfg.jitAutoDir && !autoCached);
         const jitCfg = Object.assign({}, cfg.jit, { record: recording });
         if (recording && cfg.jitRecordThreshold) jitCfg.threshold = cfg.jitRecordThreshold;
         const ok = cfg && cfg.jit ? NanoboxJit.install(inst, jitCfg) : false;
