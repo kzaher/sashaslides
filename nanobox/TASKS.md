@@ -301,3 +301,28 @@ cost −8.8 % MIPS) warns that it runs into V8 compile/code-cache cost from the 
 
 **The next real lever is therefore the interpreted half, not the JIT'd half**: either the interpreter's
 per-instruction cost, or a way to raise coverage whose compile cost is genuinely zero at run time.
+
+### "Precompile everything at a low threshold and load it next time" — tested, and it loses
+
+Recorded a cache AT threshold 50 (so it contains the cold traces a low threshold wants): 128.5 MB,
+`--jit-bundle-out`. Then replayed it:
+
+| config | boot | keystroke | MIPS | compiled at runtime | codegen |
+|---|---|---|---|---|---|
+| threshold 2000 + normal cache (33 MB) | 7.83 s | 179 ms | 99.0 | 1,061 | 54 ms |
+| **threshold 50 + cache recorded at 50 (128 MB)** | **12.82 s** | 184 ms | **72.1** | **80** | **4 ms** |
+| threshold 2000 + the same 128 MB cache | 7.31 s | 201 ms | 100.8 | 31 | 3 ms |
+
+The mechanism works perfectly — runtime compilation collapses 1,061 -> 80 traces and codegen 54 -> 4 ms
+— and the run is still 5 s slower to boot at 27 % lower throughput. Row 3 isolates the cause: the same
+128 MB cache at the normal threshold is fine, so it is not the cache size or the load (488 ms vs 173 ms
+of load+instantiate, only 0.3 s of the 5 s gap). What differs is how many traces end up **installed and
+executing** as wasm functions: ~30 k instead of ~5 k. Execution itself gets slower (72 vs 100 MIPS) —
+thousands of distinct indirect-call targets, i-cache pressure, and V8 leaving rarely-run functions in
+the baseline tier. Same wall J4 hit from the other side (61 MB of generated code, −8.8 % MIPS).
+
+**Conclusion: the engine is neither compile-bound nor op-count-bound. It is bound by the interpreted
+half (83 % of steady-state time) and, as soon as you try to shrink that half by compiling more, by the
+volume of live compiled code.** The untried variant is selective caching — pick traces by the
+*interpreted cost they actually save* (executed-instruction weight), keeping the live code set small,
+rather than everything above a threshold.
