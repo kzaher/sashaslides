@@ -442,3 +442,49 @@ and the 28 k-installed-function cache (−33 %).
 
 (Method note: the stock harness does not plumb J4's knobs — a first attempt measured 2.31 blocks/region
 in both arms, i.e. nothing. Use `work/prof/j4-run.mjs`, which reads NANOBOX_J4_* and calls the setters.)
+
+## K. The AOT probe result: the floor is the TRACE, not Bochs' semantics (2026-08-17)
+
+One real guest function (`EVP_DecodeUpdate`, OpenSSL base64 decode — 28.8 M instructions, 72.7 % of the
+hottest user page; exact bounds from `.symtab`, hot region 41 guest instructions / 12 basic blocks) was
+translated as a SINGLE wasm function with internal control flow, registers in locals across the region,
+flags computed directly, per-site TLB page tags in locals, and boundary work only at the branches the
+interpreter also takes. Identical guest bytes on both arms (extracted into a driver), verified against a
+JS model (identical output, registers and icount), and the loop is >99.94 % JIT-linked so this is JIT'd
+code vs AOT code, not JIT vs interpreter.
+
+| | code bytes / guest instr | MIPS (3 runs) | vs current JIT |
+|---|---|---|---|
+| Bochs interpreter (`--jit 0`) | – | **172.7** | 0.42x |
+| current trace JIT | **341** | **414.6** | 1.00x |
+| **AOT, one function, strict** | **22** | **3734** | **9.0x** |
+| AOT + full register/RIP commit at every boundary | 36 | 1956 | **4.7x** |
+| AOT, checks only on the back edge | 19 | 3967 | 9.6x |
+
+Spreads 0.5-4 %, all far outside the +/-4 % floor. Ops per guest instruction: current JIT **144 static**
+(the boundary alone is 5 x 92 = 460 executed ops per iteration = **18.4 per guest instruction**); AOT
+**11 static, ~8.3 executed**, everything included.
+
+**It is faster AND 15.7x denser** — so it attacks the code-volume wall (J4, the 28 k-function cache, the
+no-idle loop test: ~12 % per 2.5x of code) from the good side. Where the win comes from:
+
+* **not** from skipping interrupt checks: strict vs back-edge-only is ~6 %, at the noise edge —
+  independently re-confirming J5 that the timer/async *decision* is nearly free and the trace-boundary
+  *mechanism* is what costs;
+* **~half is store bookkeeping**: committing 12 registers + RIP + icount at each of 5 boundaries is 70
+  stores per iteration and costs **1.9x** (3734 -> 1956). This is the measured price of the `i64.store`
+  6:1-over-loads anomaly in the emitted code;
+* the rest is direct condition computation instead of lazy-flag materialisation (~30 ops per `cmp`
+  consumed by the next branch), plus TLB page tags kept in locals across the function.
+
+**Payback list (what a real implementation owes):** precise exception state (a wasm-PC -> guest-instruction
+side table with deopt, or the commit-at-boundary scheme — the 4.7x row is the full-payback bound); an
+unfreeze/deopt path for SMC (J3's census supports the assumption: 5238 code pages, zero violating
+stores); TLB tag invalidation on CR3 writes / INVLPG; and one honest caveat — the AOT arm is a ~900-byte
+module in a fresh V8 while the engine arm lives inside a 130 MB module, so treat **9.0x as the ceiling
+and 4.7x as the defensible floor**.
+
+**Verdict: the 1.3x-over-interpreter ceiling is not Bochs' per-instruction semantics — it is the TRACE
+as the unit of translation.** Function boundaries are a solved input (321,958 `STT_FUNC` in codex's
+`.symtab`, 294,541 from `.eh_frame_hdr` even stripped; our kernel is our own build). AOT of the executed
+subset is the plan; section J's boundary work stays shelved.
