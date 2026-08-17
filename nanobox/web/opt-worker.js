@@ -119,7 +119,13 @@ if (MODE === "full") WebAssembly.instantiate = function (src, imports) {
         // the bundles must be compiled before the first lookup (usually long done: they load in
         // parallel with the engine fetch; in non-direct mode this is the only wait point)
         if (jitPreload) { try { await jitPreload; } catch (e) { ev("error", { message: "jit bundles: " + (e && e.message || e) }); } }
-        const ok = cfg && cfg.jit ? NanoboxJit.install(inst, Object.assign({}, cfg.jit, { record: !!cfg.jitRecord })) : false;
+        // Loading a cache is always on; RECORDING one is opt-in (?record=1) until the record ->
+        // upload -> replay cycle is verified end to end, because a recording run deliberately
+        // compiles at a low threshold and that costs boot time (harness: 8.4 -> 12.9 s at 200).
+        const recording = !!cfg.jitRecord;
+        const jitCfg = Object.assign({}, cfg.jit, { record: recording });
+        if (recording && cfg.jitRecordThreshold) jitCfg.threshold = cfg.jitRecordThreshold;
+        const ok = cfg && cfg.jit ? NanoboxJit.install(inst, jitCfg) : false;
         // host channel: guest -> host bytes go out on cfg.hostChan.port (to the runtime worker),
         // host -> guest bytes come in through the shared ring (drained by the engine's rx timer hook)
         if (cfg && cfg.hostChan && inst.exports.nanobox_hc_hook_slot) {
@@ -170,10 +176,39 @@ async function engineTagOf(bytes) {
 function startPreload() {
   // direct mode: the tag comes from the engine bytes we download ourselves; otherwise the page may
   // pass cfg.engineTag (serve.mjs publishes it in /engine/opt/jit/index.json), else the bundle is trusted
-  const tag = enginePromise ? enginePromise.then(engineTagOf) : (cfg.engineTag || null);
-  jitPreload = NanoboxJit.preload(cfg.jitBundles, tag)
-    .then((r) => { ev("jit-bundles", r); return r; })
+  const tag = enginePromise ? enginePromise.then(engineTagOf) : Promise.resolve(cfg.engineTag || null);
+  jitPreload = Promise.resolve(tag)
+    // Bundles are keyed by engine build. The harness-recorded ones (kernel.nbjb, <image>.nbjb) are
+    // made with the FULL engine, so a page loading the slim build matches none of them and used to
+    // boot with a cold JIT. auto-<tag>.nbjb is this browser's own cache for the build it loaded.
+    .then(async (t) => {
+      autoTag = t;
+      const urls = (cfg.jitBundles || []).slice();
+      if (t && cfg.jitAutoDir) {
+        const url = cfg.jitAutoDir + "auto-" + t + ".nbjb";
+        const head = await fetch(url, { method: "HEAD", credentials: "same-origin" }).catch(() => null);
+        if (head && head.ok) { urls.push(url); autoCached = true; }
+      }
+      return NanoboxJit.preload(urls, t);
+    })
+    .then((r) => { ev("jit-bundles", Object.assign({ autoCached, tag: autoTag }, r)); return r; })
     .catch((e) => { ev("error", { message: "jit bundles: " + (e && e.message || e) }); return null; });
+}
+let autoTag = null, autoCached = false, autoUploaded = false;
+
+// No cache for this engine build yet: record what we compile and upload it, so the next run starts
+// warm. Recording runs deliberately compile at a LOW threshold — measured in the harness, doing that
+// at runtime costs 2.4x the boot time (8.4 -> 20.6 s at threshold 2), which is precisely why the cost
+// is paid once here and then served from the cache.
+async function uploadAutoBundle() {
+  if (autoUploaded || autoCached || !autoTag || !cfg.jitAutoDir) return;
+  autoUploaded = true;
+  try {
+    const bytes = NanoboxJit.exportBundle(autoTag);
+    const r = await fetch((cfg.jitUploadUrl || "/jit/upload") + "?name=" + encodeURIComponent("auto-" + autoTag + ".nbjb"),
+      { method: "POST", body: bytes, credentials: "same-origin" });
+    ev("jit-cache-recorded", { tag: autoTag, bytes: bytes.byteLength, ok: r.ok });
+  } catch (e) { ev("error", { message: "jit cache upload: " + (e && e.message || e) }); }
 }
 async function buildBundle() {
   const t = performance.now();

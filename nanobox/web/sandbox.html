@@ -9,8 +9,6 @@
   body{display:flex;flex-direction:column}
   #term{flex:1;min-height:0;padding:4px 6px}
   .xterm{height:100%}
-  /* predicted echo: a ghost of what was typed, drawn over the terminal until the guest paints */
-  #echo{position:fixed;pointer-events:none;z-index:5;color:#e8e2da;opacity:.45;white-space:pre;font-family:monospace;display:none}
   footer{display:flex;align-items:baseline;gap:14px;padding:6px 10px;border-top:1px solid #241f1b;font-size:12.5px;color:#9c9187;flex-wrap:wrap}
   footer b{color:#e8e2da}
   #timer{font-family:ui-monospace,monospace;font-size:26px;color:#e0b23a;min-width:120px}
@@ -23,14 +21,12 @@
 </head>
 <body>
 <div id="term"></div>
-<div id="echo" aria-hidden="true"></div>
 <footer>
   <span id="engine">sandbox</span>
   <span id="timer">0.0 s</span>
   <span id="status">loading…</span>
   <span id="persist" title="the persistent tree (/usr/local, /root, /home, /var) lives in this browser's storage; 'saves' = journal writes of guest changes">state: …</span>
   <a id="newterm" href="#" title="open another terminal attached to this sandbox (a shell in the same guest, new tab)" style="color:#e0b23a;text-decoration:none">＋ terminal</a>
-  <span id="lag" title="median time from a keystroke to the first byte the guest paints back, over the last 20 keys">key→screen —</span>
   <span id="phases"></span>
   <span id="stats"></span>
 </footer>
@@ -142,7 +138,9 @@ addEventListener("resize", () => { try { fit.fit(); } catch {} });
 // — an OSC xterm swallows; this handler timestamps it (for claude the shim's HELLO says the same thing)
 try { xterm.parser.registerOscHandler(777, (data) => { if (/nb-booted/.test(data) && ph.bootMs == null) { ph.bootMs = now(); log("guest-booted", { ms: Math.round(ph.bootMs) }); el("status").textContent = "running " + cli; } return true; }); } catch (e) { console.warn("no OSC handler", e); }
 let worker = null, lastMissing = null, evalId = 0; const evals = new Map();
-// keystroke -> first painted byte, filled in by the pty hook in bootVm
+// keystroke -> first painted byte (?hud=1 shows it in the footer; window.nanobox.typing always has it)
+const hud = qs.get("hud") === "1" ? Object.assign(document.createElement("span"), { id: "lag", textContent: "key\u2192screen —" }) : null;
+if (hud) document.querySelector("footer").appendChild(hud);
 let pagesWaiter = null, jitExportWaiter = null, vmWorkerRef = null;
 const typing = { at: 0, first: 0, settleTimer: 0, firstSamples: [], settleSamples: [], median: 0, settle: 0, worst: 0 };
 window.nanobox = {
@@ -241,40 +239,9 @@ async function bootVm() {
   // keystroke -> first byte painted back: the number behind "typing feels laggy", measured where the
   // user actually feels it (browser input to browser output, everything in between included). Rolling
   // median of the last 20 keys in the footer; window.nanobox.typing keeps the samples.
-  // Predicted echo (mosh's trick): a keystroke costs the guest real work -- 0.45 M instructions in
-  // the composer, 40 M on a screen carrying a long link -- so at ~200 MIPS the character cannot come
-  // back for tens to hundreds of ms. Draw it immediately as a ghost at the cursor and let the guest's
-  // own frame replace it. NOTHING is written into xterm's buffer: the ghost is a positioned element
-  // that is cleared on the next paint, so a wrong guess (a menu key, a shortcut) cannot corrupt the
-  // screen -- it just blinks and disappears.
-  const echoEl = el("echo");
-  const predict = { text: "", show() {
-    if (!this.text) return this.hide();
-    const core = xterm._core, dims = core && core._renderService && core._renderService.dimensions;
-    const cell = dims && dims.css && dims.css.cell;
-    if (!cell) return this.hide();
-    const buf = xterm.buffer.active;
-    const box = el("term").getBoundingClientRect();
-    echoEl.textContent = this.text;
-    echoEl.style.font = getComputedStyle(core.element || el("term")).font;
-    echoEl.style.left = (box.left + buf.cursorX * cell.width) + "px";
-    echoEl.style.top = (box.top + (buf.cursorY) * cell.height) + "px";
-    echoEl.style.display = "block";
-  }, hide() { this.text = ""; clearTimeout(this.timer); echoEl.style.display = "none"; }, timer: 0 };
-  xterm.onData((data) => {
-    if (!typing.at) { typing.at = performance.now(); typing.first = 0; }
-    // only plain printable input is predictable; control keys change the screen in ways we cannot guess
-    if (/^[\x20-\x7e]+$/.test(data)) {
-      predict.text += data; predict.show();
-      clearTimeout(predict.timer);
-      predict.timer = setTimeout(() => predict.hide(), 1000);   // never leave a ghost behind
-    } else predict.hide();
-  });
+  xterm.onData(() => { if (!typing.at) { typing.at = performance.now(); typing.first = 0; } });
   const paint = xterm.write.bind(xterm);
   xterm.write = (data, done) => {
-    // an animating screen paints ~120 times a second, so a frame arriving right after the keystroke
-    // says nothing about our guess; keep the ghost until a paint that could plausibly BE the echo
-    if (!typing.at || performance.now() - typing.at > 40) predict.hide();
     if (typing.at) {
       const now = performance.now();
       if (!typing.first) typing.first = now;                 // first byte painted back
@@ -288,7 +255,7 @@ async function bootVm() {
         push(typing.settleSamples, Math.round((now - at) * 10) / 10);
         typing.median = median(typing.firstSamples); typing.settle = median(typing.settleSamples);
         typing.worst = Math.max(...typing.settleSamples);
-        el("lag").textContent = `key\u2192screen ${typing.median} ms \u00b7 settle ${typing.settle} ms`;
+        if (hud) hud.textContent = `key\u2192screen ${typing.median} ms \u00b7 settle ${typing.settle} ms`;
       }, 60);
     }
     return paint(data, done);
@@ -296,14 +263,11 @@ async function bootVm() {
   function push(list, value) { list.push(value); if (list.length > 20) list.shift(); }
   function median(list) { const s = [...list].sort((a, b) => a - b); return s[s.length >> 1]; }
   xterm.onResize(() => { try { slave.notifyResize?.(xterm.cols, xterm.rows); } catch {} });
-  // The FULL engine by default, even though the slim one (no embedded boot.iso, 33.6 vs 40.1 MB
-  // gzipped) would be a smaller download: JIT bundles are keyed by a fingerprint of the engine build,
-  // the recorded ones are made with the full engine, and the harness cannot boot the slim engine to
-  // record its own (no boot.iso). Loading slim therefore meant every bundle was rejected and the
-  // sandbox booted with a COLD JIT -- ~6000 traces compiled while the user waits, everything
-  // interpreted until it crossed the 2000-execution threshold. 6.5 MB, cached after the first visit,
-  // buys precompiled code on every boot. ?engine=slim opts back out.
-  const vmImage = new URL(qs.get("engine") === "slim" ? "/engine/opt/slim/out.wasm.gzip" : "/engine/opt/out.wasm.gzip", location.href).href;
+  // The slim engine (no embedded boot.iso, 33.6 vs 40.1 MB gzipped): the sandbox gets its image over
+  // 9p, so the iso is dead weight. Precomputed JIT code still applies, because the cache is recorded
+  // by the browser itself and keyed by the engine build it loaded (auto-<tag>.nbjb) -- ?engine=full
+  // switches to the full build, whose harness-recorded bundles also match.
+  const vmImage = new URL(qs.get("engine") === "full" ? "/engine/opt/out.wasm.gzip" : "/engine/opt/slim/out.wasm.gzip", location.href).href;
   const mounter = new URL("/engine/imagemounter.wasm.gzip", location.href).href;
   const stackWorker = new URL("/c2w/dist/stack-worker.js", location.href).href;
   const imageAddr = new URL("/c2w/images/" + image + "/", location.href).href;
@@ -327,6 +291,17 @@ async function bootVm() {
     const d = m.data; if (!d || typeof d !== "object") return;
     if (d.type === "nanobox-pages") { const res = pagesWaiter; pagesWaiter = null; res && res(d.rows); return; }
     if (d.type === "nanobox-jitexport") { const res = jitExportWaiter; jitExportWaiter = null; res && res(d); return; }
+    // No JIT cache exists for this engine build: this run is recording one (at a low threshold, so it
+    // covers far more than the steady-state 2000 would). Upload it once the workload has settled, so
+    // the next visit starts with the code already compiled. The worker cannot schedule this itself —
+    // its event loop is inside the emulation loop.
+    if (d.type === "nanobox-event" && d.event === "jit-bundles" && d.autoCached === false && d.tag) {
+      setTimeout(() => {
+        window.nanobox.exportJit("auto-" + d.tag + ".nbjb")
+          .then((r) => log("jit-cache-recorded", r || {}))
+          .catch((e) => log("jit-cache-failed", { message: String(e && e.message || e) }));
+      }, Number(qs.get("recms") || 60000));
+    }
     if (d.type === "nanobox-event") {
       log("vm:" + d.event, Object.assign({}, d, { type: undefined }));
       if ((d.event === "engine-fetched" || d.event === "engine-cached") && ph.engineMs == null) ph.engineMs = now();
@@ -357,7 +332,15 @@ async function bootVm() {
   vmWorker.postMessage({ type: "init", info, args, cfg: {
     jit, direct: true, imageAddr, specUrl: new URL("/images/" + image + "/" + specName, location.href).href,
     jitBundles, engineTag, noCache,
-    jitRecord: qs.get("record") === "1",   // keep the compiled modules so window.nanobox.exportJit() can write a bundle
+    // The JIT cache the browser keeps for itself: the worker looks for auto-<engine tag>.nbjb, and if
+    // there is none it records this run at a low threshold (compiling far more than the steady-state
+    // 2000 would) and uploads it, so the NEXT run of this engine build starts with the code already
+    // compiled. Measured: compiling at a low threshold at RUNTIME costs 2.4x the boot time (8.4 ->
+    // 20.6 s at threshold 2), which is exactly why it is paid once, during recording, and cached.
+    jitAutoDir: qs.get("autojit") === "0" ? null : "/engine/opt/jit/",
+    jitRecordThreshold: Number(qs.get("recthreshold") || 200),
+    jitUploadUrl: "/jit/upload", jitRecordUploadMs: Number(qs.get("recms") || 60000),
+    jitRecord: qs.get("record") === "1",
     hostChan: onV8 ? { sab: toGuest.sab, inSab: fromGuest.sab } : undefined,
     bundleFiles: onV8 ? [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }] : [],
     persistPort: vmChan.port2, fslog: qs.get("fslog") === "1",
