@@ -367,3 +367,56 @@ translation in linear memory as DATA — a dense pre-decoded IR — and run one 
 it (threaded code). Contiguous, no module per trace, no compile cost, and it targets exactly the long
 tail the JIT can never reach, which is where ~half of all execution and most of the steady-state time
 sits.
+
+### The counters (JC build, level 3, no bundle, 18.2 s codex run, 82.01 G executed wasm ops)
+
+Two corrections to this section first:
+
+* **The link epilogue is 92 wasm ops / 19 loads / 3 stores per hop, not the ~35 assumed above** (159
+  static; 25 ops are the timer+async check, 40 the iCache hash+lookup, and the fetch-window refill arm
+  adds 63 more on 34.2 M of the hops). So the trace boundary is a **17.6 %** target, not ~5 %.
+* **The stated reason J5's loose checking was slower is wrong.** `link_fail[0]` (countdown expiry ->
+  cpu_loop) goes DOWN, not up: 17.1 k per G icount (off) vs 15.7 k (N=8) vs 13.3 k (N=32), and
+  mechanically it must — `currCountdown` is decremented by the accumulated delta, so decrements are
+  conserved. The −6.3 % belongs to the hop-counter read-modify-write and cache effects.
+
+| bucket | executed wasm ops | share |
+|---|---|---|
+| instruction templates | 67.09 G | **81.8 %** |
+| link epilogue | 11.12 G | 13.6 % |
+| trace exits (commit + spill) | 2.60 G | 3.2 % |
+| in-region transitions | 0.72 G | 0.9 % |
+| in-trace loopbacks | 0.47 G | 0.6 % |
+| **boundary total** | **14.45 G** | **17.6 %** (stable 17.6/18.6/18.8 across runs) |
+
+Memory accesses in JIT'd code: 8.59 G total, of which the epilogue is 2.55 G (**29.7 %**).
+
+| item | what it removes | counter | share of executed work |
+|---|---|---|---|
+| J1 | 7 memory accesses + ~15 ops per boundary x 112.2 M | 785 M accesses / 1.68 G ops | **2.05 %** (9.2 % of memory traffic) |
+| J2 | iCache hash+lookup, 40 ops x 92.85 M hops | 3.71 G ops gross | 4.53 % gross, 3.60 % at the 79.5 % hit rate, **~2.7 % net** |
+| J3 | store-path bookkeeping | **100.41 M stores executed, 0** reached the arm it optimises | **0 %** |
+| J5 | timer+async check skipped 7 of 8, minus the hop counter | ~11 ops/hop | **1.24 %** |
+
+Each is at or below the ±4 % measurement floor — which is exactly what the latency runs showed.
+
+### Why the JIT itself is only worth 1.3x, and what that implies
+
+A fully hot guest loop (identical 3,319 M instructions in every arm):
+
+| | wall | MIPS | coverage |
+|---|---|---|---|
+| JIT on | 20.84 s | **161.4** | 80.2 % |
+| JIT off (`--jit 0`) | 26.97 s | **124.3** | 0 % |
+
+**JIT'd code is only ~1.3x the Bochs interpreter on code it fully covers.** Bochs' interpreter is
+already fast — it dispatches pre-decoded instructions from its iCache, so the JIT's win is limited to
+removing that dispatch, while the emitted templates still reproduce every Bochs semantic (lazy flags,
+per-access TLB probe + SMC stamp, icount bookkeeping). That is the ceiling behind every result in this
+section: with a 1.3x engine advantage, raising coverage (max +8 points) or trimming the 17.6 %
+boundary cannot produce a step change.
+
+**The lever is code QUALITY, not code quantity**: make the templates cheaper than the interpreter's
+handlers (flag liveness across instructions — partially there; hoisting TLB probes out of loops;
+dropping per-instruction icount/RIP bookkeeping where no exit can observe it), rather than compiling
+more traces or linking them faster.
