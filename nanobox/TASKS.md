@@ -420,3 +420,25 @@ boundary cannot produce a step change.
 handlers (flag liveness across instructions — partially there; hoisting TLB probes out of loops;
 dropping per-instruction icount/RIP bookkeeping where no exit can observe it), rather than compiling
 more traces or linking them faster.
+
+### J4 regresses even with no idle path — it is code volume, not wasted work
+
+Hypothesis tested: maybe joining functions only hurts because the guest has a hot idle/poll loop and
+bigger regions do wasteful work instead of jumping to useful work. Same j4 engine, runtime flags on
+vs off, on a tight guest loop (`while i < 200000`) where there is no idle, no polling and nothing to
+wait for:
+
+| run | flags off | ahead + inlined calls |
+|---|---|---|
+| 1 | 152.71 MIPS, 2.31 blocks/region, 6.3 MB | **133.03 MIPS**, 4.47 blocks/region, **15.9 MB** |
+| 2 | 149.12 MIPS, 2.31 blocks/region, 6.3 MB | **131.16 MIPS**, 4.47 blocks/region, 15.9 MB |
+
+Joining works (blocks/region nearly doubles) and still costs **~12 %** where every executed instruction
+is useful work. So the regression is **code volume**, not misdirected execution: 2.5x the compiled wasm
+for the same instructions. Third independent confirmation of the same wall, after J4 on codex (−8.8 %)
+and the 28 k-installed-function cache (−33 %).
+
+**Rule for anything proposed here: a change that adds emitted code starts ~12 % behind.**
+
+(Method note: the stock harness does not plumb J4's knobs — a first attempt measured 2.31 blocks/region
+in both arms, i.e. nothing. Use `work/prof/j4-run.mjs`, which reads NANOBOX_J4_* and calls the setters.)
