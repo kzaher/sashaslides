@@ -184,7 +184,33 @@ Anything below ~5 % is unresolvable here, so every number under that is reported
   real product: 5,238 code pages frozen at the prompt, ZERO violating stores across boot + typing.**
   Guest code is genuinely immutable after startup, which is what J4 needs. The permissive unfreeze path
   is untested precisely because nothing ever violated.
-- **J1 / J2** — see their reports; both are enablers rather than wins, per J5's ceiling.
+- **J2 (successor cache, `build/j2`) — no win, but it produced the number J4 needs.** Speed: slower in 6
+  of 7 paired runs by 4-10 %, i.e. no win and possibly a small regression (the 196 KB side table is
+  extra D-cache pressure, and validating the memo costs about what the ~9-op hash cost). **Successor
+  predictability: 79.5 % / 79.1 % hit rate over two runs (80.4 M hit / 20.7 M miss), and that is a
+  LOWER bound** — the site id was per compiled module, not per iCache entry, so ~46 % slot collisions
+  and ~6 entries per module all counted as misses. Trace successors are highly stable, which is what
+  makes J4's compile-time resolution plausible. Correctness note worth keeping: the cache memoises
+  `get_entry(pAddr, fetchModeMask)` (a pure function) and never caches `jitfn`/`jitarg`/`ilen` — they
+  are re-read from the live entry — which structurally excludes the stale-jitarg hazard that wedged
+  J5's oracle.
+- **Second measurement trap**: with `--jit-bundle` the shared link epilogue is itself served from the
+  bundle, recorded at level 2 where the profiling stores do not exist. A bundled level-3 run therefore
+  reads ~11 M links instead of 107 M. **All level-3 counter runs must be bundle-free on both sides.**
+- **J1 (timer accounting in tail-call parameters, `build/j1`) — correct, and the only item integrated
+  and gated end to end.** `delta`/`countdown` become wasm parameters mutated in place and passed on
+  through the tail call, written back only where the interpreter's values can be observed; the pair is
+  a cache of memory values at the last boundary, never a deferred decision, so `delta >= countdown` is
+  still tested at every boundary at the same instruction. Applied to the main tree it **passed the
+  identity gate: RESULT IDENTICAL for codex and agy**. Measured against the engine it replaced (3
+  interleaved pairs): keystroke 176 vs 179 ms, boot 7.88 vs 7.45 s, MIPS 95.7 vs 99.1 — better on
+  keystrokes, worse on boot, all inside noise. **Reverted from the tree** because the signature change
+  invalidates every recorded .nbjb bundle (they would be silently rejected and every user would boot
+  with a cold JIT) in exchange for no measurable win. The patch is kept at
+  `work/prof/j1-nanobox_jit{,_h}.diff`; re-apply it if J4 needs registers/counters living in locals.
+  Gotcha for whoever re-applies it: the Makefile has no header dependency tracking, so reverting
+  `nanobox_jit.h` leaves `cpu/cpu.o` referencing `nanobox_countdown_ptr` and the link fails — delete
+  the stale object first.
 - **Region formation is the bottleneck, not the epilogue.** `nanobox_form_region()` BFSes over direct
   branch targets only, and skips any successor not already decoded (`se->tlen == 0`) or off-page, so
   calls and returns always end a region: 2.3 blocks per region, and disabling regions costs only 9 %.
