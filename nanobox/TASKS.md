@@ -256,3 +256,48 @@ Multi-page regions need a per-block page frame, an ITLB check per cross-page edg
 registry and a deopt when a frame moves — and callee SHARING rather than copying, which is a different
 design from a superblock. J4's code is behind runtime flags that default OFF (`NANOBOX_J4_AHEAD`,
 `_INCALL`, `_RETGUARD`, `_INSTR`), so the build with no env set is bit-for-bit the baseline.
+
+### Why none of J1-J5 could have helped: the JIT is not where the time is
+
+CPU profile of a full codex boot + typing run (`node --cpu-prof`, 15.6 s, analysed with
+`harness/profwindow.mjs`):
+
+| window | engine (Bochs interpreter + dispatch) | JIT'd trace code | JS |
+|---|---|---|---|
+| whole run | **64.5 %** (10.06 s) | 31.0 % (4.84 s) | 4.0 % |
+| steady state (last 5 s, typing) | **83.4 %** (4.17 s) | **15.8 %** (0.79 s) | 0.7 % |
+
+A single engine function is **45.8 % of the whole run and 78.7 % of the steady state**. And the coverage
+counters explain it: a level-3 no-bundle run executes **238 M trace executions of which 112 M
+(47.1 %) run as JIT'd code** — the interpreted half costs ~5x more per instruction, so it eats ~83 % of
+the time.
+
+Every J item optimises the trace BOUNDARY, which lives inside the 16 % slice. J5 measured the ceiling
+of that slice directly (delete 30-40 % of the epilogue: −6 %…+3 %), and the profile says why that
+ceiling exists. So:
+
+* **J1** (6 memory accesses per hop removed, x107 M hops) — inside the 16 %; measured wash.
+* **J2** (79 % predictable successors, but the hash is ~9 of ~35 epilogue ops) — inside the 16 %.
+* **J3** (store-path bookkeeping) — its target path never executed at all: `link_fail[6] == 0`.
+* **J4** (fewer boundaries: −15.6 % external links) — inside the 16 %, and it pays 2.5x the compiled
+  code for it, which lands in the 64 % engine/compile side: net −8.8 % MIPS.
+* **J5** (skip the checks) — negative, and the guest executes identical work either way.
+
+**Raising coverage does not work either, and that is measured too.** Bundles do not raise coverage —
+they only make compilation free for traces that already cross the hotness threshold. Lowering the
+threshold raises coverage but costs more compile time than it saves, *even with a deep precomputed
+bundle* (kernel + codex-deep, 30,750 keys):
+
+| threshold (with the deep bundle) | boot | keystroke | MIPS | traces compiled at runtime |
+|---|---|---|---|---|
+| 2000 | 8.33 s | 204 ms | 92.8 | 5,095 |
+| 200 | 11.31 s | 213 ms | 77.7 | 16,533 |
+| 50 | 14.01 s | 197 ms | 67.6 | 28,394 |
+
+The bundle does not contain the traces a low threshold wants (they are cold code the recording never
+compiled), so they are generated from scratch. A cache recorded at the SAME low threshold is the only
+untested version of "JIT everything from cache" — and J4's code-size result (61 MB of generated wasm
+cost −8.8 % MIPS) warns that it runs into V8 compile/code-cache cost from the other side.
+
+**The next real lever is therefore the interpreted half, not the JIT'd half**: either the interpreter's
+per-instruction cost, or a way to raise coverage whose compile cost is genuinely zero at run time.
