@@ -572,7 +572,9 @@ on the browser's V8 through the runtime detection path; every other program is a
 kernel is a fixed image. That turns "translate everything once" from a hope into an invariant we check:
 
 * **Kernel config** (`work/c2w-src/config/bochs/linux_x86_config`, applied to the pack rebuild):
-  `JUMP_LABEL=n` (static keys patched NOP<->JMP at runtime), `BPF_SYSCALL=n` / `BPF_JIT=n`, `KPROBES=n`,
+  `JUMP_LABEL=n` (static keys patched NOP<->JMP at runtime), `BPF_JIT=n` (eBPF stays as the kernel's
+  INTERPRETER: `BPF_SYSCALL=y` is required by runc — `bpf_prog_query(BPF_CGROUP_DEVICE)` fails container
+  init without it, measured — but interpreted BPF is data, not machine code), `KPROBES=n`,
   `OPTPROBES=n`, `UPROBES=n`, `LIVEPATCH=n`, `FUNCTION_TRACER=n`, `DYNAMIC_FTRACE=n`, `RANDOMIZE_BASE=n`
   (fixed text addresses, so one AOT artifact fits every boot); `KALLSYMS=y` (symbols, not codegen);
   `STRICT_KERNEL_RWX=y` kept (kernel text mapped read-only: the guest itself faults on a stray write).

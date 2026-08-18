@@ -1,14 +1,5 @@
 --- work/c2w-src/config/bochs/linux_x86_config.orig	2026-08-18 00:28:44.625877138 +0000
-+++ work/c2w-src/config/bochs/linux_x86_config	2026-08-18 00:28:44.639846443 +0000
-@@ -102,7 +102,7 @@
- #
- # BPF subsystem
- #
--CONFIG_BPF_SYSCALL=y
-+# CONFIG_BPF_SYSCALL is not set
- CONFIG_BPF_UNPRIV_DEFAULT_OFF=y
- # CONFIG_BPF_PRELOAD is not set
- # end of BPF subsystem
++++ work/c2w-src/config/bochs/linux_x86_config	2026-08-18 01:13:41.416657608 +0000
 @@ -229,7 +229,7 @@
  CONFIG_IO_URING=y
  CONFIG_ADVISE_SYSCALLS=y
@@ -36,7 +27,7 @@
  # CONFIG_STATIC_KEYS_SELFTEST is not set
  # CONFIG_STATIC_CALL_SELFTEST is not set
  CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS=y
-@@ -3207,3 +3207,10 @@
+@@ -3207,3 +3207,11 @@
  #
  # end of Rust hacking
  # end of Kernel hacking
@@ -47,6 +38,7 @@
 +# CONFIG_LIVEPATCH is not set
 +# CONFIG_FUNCTION_TRACER is not set
 +# CONFIG_DYNAMIC_FTRACE is not set
++# CONFIG_BPF_JIT_ALWAYS_ON is not set
 --- work/c2w-src/config/bochs/grub.cfg.template.orig	2026-08-18 00:29:11.606016286 +0000
 +++ work/c2w-src/config/bochs/grub.cfg.template	2026-08-18 00:29:11.607456808 +0000
 @@ -2,5 +2,5 @@
