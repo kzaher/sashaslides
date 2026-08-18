@@ -531,3 +531,35 @@ prologue and reloaded after handler steps.
 Rejected on correctness grounds (worth recording): merging the span check into the tag compare with a
 subtract/XOR range test would save ~7 more ops per access, but every single-compare "within 4 KB of X"
 form poisons one full guest page and no poison value is provably unreachable.
+
+## M. AOT plan (2026-08-18): translate the platform, detect the runtimes
+
+Decision: AOT-translate the **kernel and native userland binaries** (codex: Rust/musl static; agy: Go
+PIE) — binary translation of the platform, the same category as QEMU/Rosetta, no program modified —
+and keep the existing runtime detection for **Bun and Node**, whose JS runs on the browser's V8 (the
+installer already detects a Bun standalone / node script; AOT skips those binaries).
+
+Inputs are all in hand: kernel function boundaries from our own build (`System.map`; boot with
+`nokaslr` so text addresses are fixed), codex `.symtab` (321,958 functions) or `.eh_frame_hdr`
+(294,541), agy `.eh_frame_hdr` (~17,400 functions; no `.symtab`).
+
+Phases, each gated by `test/gate.sh` and measured on the section-J scenario + the hot loop:
+- **Phase 0 — static function-scope regions inside the engine.** The region compiler already installs
+  one wasm function reachable from many entry points (`jitfn`/`jitarg` per iCache entry) with
+  invalidation on the SMC/eviction paths; feed the region former from a static CFG (decode forward
+  through direct branches, fall-through and call CONTINUATIONS — never callee inlining, J4 proved that
+  explodes code) instead of the runtime BFS that stops at every CALL/RET (2.33 blocks/region). Kernel
+  first (`regionKernel`: fixed mapping). Decides: do links and wall time follow blocks/region?
+- **Phase 1 — emitter quality (what the probe exploited).** One shared exit epilogue per function
+  instead of spill sequences duplicated at every exit and slow path (35 % of emitted bytes); spill only
+  dirty registers; then flags computed directly across blocks and TLB tags per site in locals.
+- **Phase 2 — the artifacts.** Kernel AOT module produced once at image build and shipped with the
+  image (Docker rebuild; keep `System.map`; `CONFIG_JUMP_LABEL=n`, `CONFIG_BPF_JIT=n`,
+  `CONFIG_KPROBES=n` so nothing patches text after boot); codex/agy translated at install time from
+  their unwind tables and cached like the JIT bundle; installer detects Bun/Node and skips them.
+- **Phase 3 — direct calls to known callees, guarded returns.**
+
+Expectations stated up front: the probe's 9.0x is a ceiling on hot, fully covered code and 4.7x the
+floor with precise state paid back; AOT's larger effect is COVERAGE — it reaches the cold half the JIT
+never can (46.7-54.9 %), which is 83 % of steady-state time. What is unknown until Phase 0/1 measure
+is how much survives inside the real engine (indirect control flow, precise exceptions).
