@@ -820,3 +820,13 @@ direct conditions (~29 ops per CMP, ~10 %) is second.**
   and P). The next real lever per the profile is the two indirect tail calls per hop.
 
 Adopt: bit 8 + bits 2|6; rebased adopt-set requested against current main; gate + bundle re-record here.
+
+### The hop as a direct `return_call` (2026-08-18): tested, no win
+
+The trace -> link-function hop was `return_call_indirect` to a CONSTANT table slot; imports resolve by
+table index, so it can be a direct `return_call` to an import (no table bounds/type check). Built behind
+`nanobox_set_jit_linkdirect` (harness env `NANOBOX_LINKDIRECT=1`), single binary, hot loop, 4 pairs, ticks
+and icount identical: **+16.5 / −9.8 / −11.2 / +1.3 %, median −4.7 %** — no win inside a noisy window
+(another agent building). Plausible null: a call to another instance's function still goes through V8's
+import wrapper (instance switch), which costs about what the table dispatch did. Switch kept, default off.
+The lever is therefore FEWER hops, not a cheaper hop — regions/AOT territory.

@@ -588,6 +588,7 @@ function installJitHost(inst) {
     const [lvl, thr] = opts.jit.split(":");
     ex.nanobox_set_jit(Number(lvl), Number(thr || 0));
     if (process.env.NANOBOX_JIT_EAGER && ex.nanobox_set_jit_eager) { ex.nanobox_set_jit_eager(1); console.error("[harness] JIT page-eager sweep on (recording mode)"); }
+    if (process.env.NANOBOX_LINKDIRECT && ex.nanobox_set_jit_linkdirect) { ex.nanobox_set_jit_linkdirect(1); console.error("[harness] JIT link hop: direct return_call to an import"); }
     if (process.env.NANOBOX_JIT_MERGE && ex.nanobox_set_jit_merge) { ex.nanobox_set_jit_merge(1); console.error("[harness] JIT merged push/pop runs on"); }
     if (process.env.NANOBOX_JIT_PROBE2 === "0" && ex.nanobox_set_jit_probe2) { ex.nanobox_set_jit_probe2(0); console.error("[harness] JIT two-entry probe cache OFF (A/B)"); }
     if (opts.jitMaxlen && ex.nanobox_set_jit_maxlen) ex.nanobox_set_jit_maxlen(Number(opts.jitMaxlen));

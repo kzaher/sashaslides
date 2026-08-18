@@ -763,10 +763,10 @@ index 000000000..c5350a6af
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..db2e137b0
+index 000000000..0fe5a9e91
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,3769 @@
+@@ -0,0 +1,3777 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -821,6 +821,12 @@ index 000000000..db2e137b0
 +// VMOVDQU/VMOVDQA, VMOVD, VPBROADCASTB and the SSE twins), bit 5 = REP STOS/MOVS single-chunk fast paths,
 +// bit 6 = misc ALU templates (LEAVE, MUL, BSF/BSR, DEC_Eb, BT/BTS memory forms). Default: all on.
 +unsigned nanobox_jit_spill = 3 | 8 | 16 | 32 | 64;
++// Experiment: the trace -> link-function hop as a DIRECT `return_call` to an import (the link function's
++// table slot is known when a trace is compiled) instead of `return_call_indirect` through the table with
++// its bounds + type check. Both profiles say the two indirect tail calls per hop are where the time is
++// (TASKS.md P/Q: the shared link function alone is 28.7 % of steady-state time). Runtime switch so it can
++// be A/B'd in one binary; note a module compiled with it imports one more function (the link slot).
++unsigned nanobox_jit_linkdirect = 0;
 +unsigned nanobox_jit_threshold = 32;
 +unsigned nanobox_jit_maxlen = 64;      // debug knob: only compile traces with at most this many instructions
 +Bit8u nanobox_single_step = 0;
@@ -877,6 +883,7 @@ index 000000000..db2e137b0
 +NB_EXPORT(nanobox_get_jit) unsigned nanobox_get_jit(void) { return nanobox_jit_level; }
 +NB_EXPORT(nanobox_set_jit_maxlen) void nanobox_set_jit_maxlen(unsigned n) { nanobox_jit_maxlen = n; }
 +NB_EXPORT(nanobox_set_jit_spill) void nanobox_set_jit_spill(unsigned mask) { nanobox_jit_spill = mask; }
++NB_EXPORT(nanobox_set_jit_linkdirect) void nanobox_set_jit_linkdirect(unsigned on) { nanobox_jit_linkdirect = on; }
 +static Bit64u nanobox_spill_stats[4];   // [0] chain exits, [1] inline-fallback exits, [2] chain positions, [3] bodies
 +NB_EXPORT(nanobox_jit_spill_stat) double nanobox_jit_spill_stat(unsigned i) { return i < 4 ? (double) nanobox_spill_stats[i] : 0; }
 +
@@ -3837,7 +3844,8 @@ index 000000000..db2e137b0
 +      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
 +      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
 +      em->i32c(0); em->get(L_ic0); em->get(L_xic); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
-+      if (linkOK) { em->i32c(0); em->i32c((int32_t) nanobox_link_fn); em->return_call_indirect(m.funcTypeIdx); }
++      if (linkOK && nanobox_jit_linkdirect && nanobox_link_fn) { em->i32c(0); em->return_call(fn(nanobox_link_fn, "i>v")); }
++      else if (linkOK) { em->i32c(0); em->i32c((int32_t) nanobox_link_fn); em->return_call_indirect(m.funcTypeIdx); }
 +      else em->ret();
 +    }
 +    return true;
@@ -4590,10 +4598,10 @@ index 000000000..881178f18
 +#endif
 diff --git a/bochs/nanobox_wasm.h b/bochs/nanobox_wasm.h
 new file mode 100644
-index 000000000..6d03ad765
+index 000000000..0d65b79a6
 --- /dev/null
 +++ b/bochs/nanobox_wasm.h
-@@ -0,0 +1,261 @@
+@@ -0,0 +1,262 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox: a tiny WebAssembly binary emitter used by the trace JIT.
 +//
@@ -4832,6 +4840,7 @@ index 000000000..6d03ad765
 +  void stabs_begin() { i32c(0); }                    // then push value, then stabs_end
 +  void stabs_end(Op o, uint32_t addr, uint32_t align) { mem(o, addr, align); }
 +  void call(uint32_t f) { c.b8(CALL); c.uleb(f); }
++  void return_call(uint32_t f) { c.b8(RETURN_CALL); c.uleb(f); }
 +  void call_indirect(uint32_t typeIdx) { c.b8(CALL_INDIRECT); c.uleb(typeIdx); c.uleb(0); }
 +  void return_call_indirect(uint32_t typeIdx) { c.b8(RETURN_CALL_INDIRECT); c.uleb(typeIdx); c.uleb(0); }
 +  void block(ValType t = VOID) { c.b8(BLOCK); c.b8(t); }
