@@ -657,3 +657,16 @@ off, KALLSYMS on, `nokaslr pti=off mitigations=off`, System.map with 13,947 text
 exported): **codex reaches its sign-in prompt in 6.07 s / 1.190 G instructions.** First attempt with
 `BPF_SYSCALL=n` failed container init (`runc`: `bpf_prog_query(BPF_CGROUP_DEVICE)` ENOSYS) — the eBPF
 INTERPRETER stays, the JIT is off.
+
+Fair A/B of the two images (same engine source, no bundles on either side — passing eh-nb's bundles to
+the other engine tag would give one side a cold JIT, the trap recorded in J):
+
+| pair | current image | no-codegen image (`nokaslr pti=off mitigations=off`, no jump labels) |
+|---|---|---|
+| 1 | 7.28 s, 230 ms, 97.3 MIPS | 7.31 s, 180 ms, 99.7 MIPS |
+| 2 | 6.80 s, 171 ms, 103.6 MIPS | 6.58 s, 191 ms, 107.9 MIPS |
+| 3 | 6.62 s, 177 ms, 105.1 MIPS | 6.15 s, 195 ms, 111.6 MIPS |
+
+**MIPS ahead in 3/3 (+2.4 / +4.2 / +6.2 %), boot in 2/3, instruction count essentially equal (1.190 vs
+1.186 G to the prompt).** The invariant costs nothing and already pays a little before any AOT — the
+kernel no longer double-switches CR3 on every syscall.
