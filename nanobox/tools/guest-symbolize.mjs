@@ -30,6 +30,8 @@
 // (legacy _ZN…17h<hash>E and v0 _R…), because rustfilt/llvm-cxxfilt are not in this devcontainer.
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const KERNEL_SPACE_START = 0xffff800000000000n;
 
@@ -509,5 +511,7 @@ function readV0Ident(state) {
   return punycode ? text.replace(/_/g, "-") : text;
 }
 
-// The module-level tables above are load-time values, so the entry point runs once the file is read.
-main();
+// The module-level tables above are load-time values, so the entry point runs once the file is read
+// (only when executed as a script: tools/aot-precompile.mjs imports the ELF/System.map readers).
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+export { loadImage, loadSystemMap, parseMaps };

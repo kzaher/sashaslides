@@ -955,3 +955,41 @@ To make it WIN it has to get compact: 8.4 MB of kernel text became 262 MB of was
 instruction). Section K's hand-translated probe was **15.7x denser** than the trace JIT at 4.7-9x the
 speed -- that density, not more coverage, is the remaining work, and it is a codegen project (registers
 in locals across the whole function, direct flags, no per-block prologue), not a former tuning knob.
+
+### R.3 Precompiling the programs, and the size wall (2026-08-18)
+
+The kernel was easy: its text is resident and its addresses are fixed. A user program is neither, and
+both problems now have a fix in tree:
+
+* **whose page tables** -- the AOT session runs between traces with whatever CR3 the guest left
+  installed, so the first attempt at codex reported **3000/3000 functions "not mapped"**. The engine
+  now takes an **offline byte source**: the driver writes the program's own ELF bytes into a buffer
+  (`nanobox_aot_srcbuf_addr` / `nanobox_aot_source`) and they are mapped at a synthetic physical base
+  (1 TiB, above any guest RAM) so decode, the iCache and the region former work exactly as they do on
+  resident memory. Result: **0 not mapped**, 3,000 codex functions -> 25,189 translations in 1.8 s.
+* **which address** -- in AOT mode the region key is now CONTENT ONLY (the entry pAddr is dropped from
+  the hash), so a translation made offline at whatever base the ELF was read at is found again in any
+  later boot at any other base. `tools/aot-user.mjs codex|agy` reads the guest's own `/proc/*/maps`
+  out of the live transcript to place the text, then walks `.eh_frame_hdr` / `.symtab`.
+
+**The wall is size.** Measured per function: kernel **7.1 KB** of wasm, codex **26.5 KB** (sweep on) /
+8.4 KB (sweep off). codex's `.eh_frame_hdr` carries **294,540 function boundaries** (a 190 MB Rust
+binary), so translating all of it projects to **7.8 GB** (2.5 GB without the linear sweep). The kernel
+-- 29,013 functions, 205 MB, 2.9 s -- is the only "everything" that actually fits.
+
+So "every function of every program, precompiled" is reachable for the platform (kernel) and not for a
+190 MB application binary at today's density. Three ways forward, in order of what they buy:
+1. **precompile what executes**: record a run under the flag and keep its translations (the artifact is
+   tens of MB and covers the code the program actually reaches). This is the practical AOT product and
+   it is what the sandbox's auto-cache already approximates.
+2. **density** (section K: the hand-translated probe was 15.7x denser at 4.7-9x the speed): at that
+   density the kernel is ~13 MB and codex's executed set is small enough to ship. This is the real
+   project and everything else is a workaround for not having done it.
+3. accept partial coverage per program (hot functions from a profile), which is (1) with extra steps.
+
+Also fixed while measuring: the artifact used to contain a recording of the boot that produced it --
+AOT mode forces threshold 1, so the boot compiled everything before the session ran (that is why the
+first kernel bundles were 580 MB for 205 MB of translations). `NANOBOX_THRESHOLD` now pins the
+threshold AFTER the mode is selected, and the harness compiles bundle modules on FIRST USE
+(`NANOBOX_BUNDLE_EAGER=1` restores eager compilation; measured neutral on codex, a win when few
+modules are touched).

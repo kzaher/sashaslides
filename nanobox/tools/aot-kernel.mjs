@@ -104,7 +104,7 @@ async function main() {
   console.error(`[aot-kernel] node ${harnessArgs.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(" ")}`);
   const t0 = Date.now();
   const res = await new Promise((resolve) => {
-    const child = spawn("node", harnessArgs, { cwd: path.join(ROOT, "harness"), env: Object.assign({}, process.env, { NANOBOX_AOT: "1" }), stdio: ["ignore", "inherit", "pipe"] });
+    const child = spawn("node", harnessArgs, { cwd: path.join(ROOT, "harness"), env: Object.assign({}, process.env, { NANOBOX_AOT: "1", NANOBOX_THRESHOLD: o.threshold || "1000000000" }), stdio: ["ignore", "inherit", "pipe"] });
     let tail = "", sum = null;
     child.stderr.on("data", (d) => { const s = d.toString(); process.stderr.write(s); tail = (tail + s).slice(-200000); const m = /\[harness\] SUMMARY (\{.*\})/.exec(tail); if (m) sum = m[1]; });
     child.on("close", (code) => { let js = null; try { js = sum ? JSON.parse(sum) : null; } catch {} resolve({ code, summary: js }); });

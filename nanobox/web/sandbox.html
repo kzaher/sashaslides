@@ -286,7 +286,10 @@ async function bootVm() {
         // ?aot=1 (TASKS.md R): the precompiled artifacts -- every function of the kernel and of the
         // native binaries translated ahead of time (tools/aot-kernel.mjs), so the guest runs compiled
         // code from the first instruction instead of compiling it on the way.
-        .concat(qs.get("aot") === "1" ? ["aot-kernel.nbjb", "aot-" + image + ".nbjb", "aot-" + cli + ".nbjb"] : []);
+        // ...both tags: the harness records against the full engine, the page loads the slim one by
+        // default (?engine=full for the other), and the worker drops whichever tag is not its build.
+        .concat(qs.get("aot") === "1" ? ["aot-kernel.nbjb", "aot-kernel-slim.nbjb", "aot-" + image + ".nbjb",
+          "aot-" + image + "-slim.nbjb", "aot-" + cli + ".nbjb", "aot-" + cli + "-slim.nbjb"] : []);
       jitBundles = names.filter((n) => have.has(n)).map((n) => new URL("/engine/opt/jit/" + n, location.href).href); if (!jitBundles.length) jitBundles = null; } } catch {}
   }
   const vmWorker = new Worker(new URL("/sandbox-worker.js", location.href).href);

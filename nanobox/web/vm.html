@@ -235,6 +235,7 @@ async function boot() {
     jit, noBeat: qs.get("beat") === "0", trace: qs.get("trace") === "1",
     direct, imageAddr, specUrl: new URL("/images/" + image + "/config.json", location.href).href,
     jitBundles, engineTag, noCache: qs.get("cache") === "0",
+    aot: qs.get("aot") === "1",   // AOT mode (TASKS.md R)
   } });
   el("status").textContent = "booting… (" + (qs.get("worker") === "stock" ? "stock worker" : direct ? "nanobox worker, direct rootfs" : "nanobox worker") + ")";
   new TtyServer(slave).start(worker, onWorkerMessage);

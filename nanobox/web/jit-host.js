@@ -240,6 +240,9 @@
     ex.nanobox_set_jit(level, threshold);
     if (cfg && cfg.maxlen && ex.nanobox_set_jit_maxlen) ex.nanobox_set_jit_maxlen(cfg.maxlen);
     if (cfg && cfg.region != null && ex.nanobox_set_jit_region) ex.nanobox_set_jit_region(cfg.region); // max blocks per region (0/1 = single traces only)
+    // AOT mode (TASKS.md R; page ?aot=1): function-scope regions, compile on first touch, relaxed
+    // boundaries -- not RAM-identical to the reference engine by design
+    if (cfg && cfg.aot && ex.nanobox_set_jit_aot) { ex.nanobox_set_jit_aot(1); console.warn("[nanobox-jit] AOT mode on"); }
     state.level = level; state.threshold = threshold; state.ok = true;
     return true;
   }

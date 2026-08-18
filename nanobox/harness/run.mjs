@@ -321,7 +321,10 @@ imp.poll_oneoff = (in_ptr, out_ptr, nsubs, nevents_ptr) => {
     // Bochs' timer handlers after a trace returned to cpu_loop), then the run ends: the modules the
     // engine installed during the session are in jitState.records for --jit-bundle-out
     aotDone = true;
-    try { aotResult = aotMod.session({ inst, exports: inst.exports, memory: mem, args: opts.aotArgs ? JSON.parse(opts.aotArgs) : {}, jitState, engineTag, log: (m) => console.error(m) }); }
+    // the guest's output so far is handed to the session directly: --transcript is only written when
+    // the run ends, and a session that needs to read what the guest printed (a user program's own
+    // /proc map, to learn where its text landed) runs while the run is still going
+    try { aotResult = aotMod.session({ inst, exports: inst.exports, memory: mem, args: opts.aotArgs ? JSON.parse(opts.aotArgs) : {}, jitState, engineTag, transcript: Buffer.concat(transcript).toString("latin1"), log: (m) => console.error(m) }); }
     catch (e) { console.error("[harness] AOT session failed:", e && e.stack || e); aotResult = { error: String(e && e.message || e) }; }
     finish(aotResult && aotResult.error ? 3 : 0);
   }
@@ -378,11 +381,13 @@ const jitState = { table: null, memory: null, fns: new Map(), free: [], installe
   bundleLink: null,       // { mod, keys, bytes, slot } from the bundle, pinned in installJitHost
   bundleFns: new Map(),   // content key string -> table index (instantiated bundle functions; permanent slots)
   bundleSlots: new Set(), // table indices owned by bundle functions (release/releaseAll leave them alone)
-  bundleHits: 0, bundleMisses: 0, bundleInst: 0, bundleModules: 0, bundleFiles: 0, bundleInstMs: 0, bundleLoadMs: 0 };
+  bundleHits: 0, bundleMisses: 0, bundleInst: 0, bundleModules: 0, bundleFiles: 0, bundleInstMs: 0, bundleLoadMs: 0, bundleCompiled: 0 };
 const engineTag = NanoboxJitBundle.engineTagFormat(wasmBytes.length, crypto.createHash("sha256").update(NanoboxJitBundle.engineTagInput(wasmBytes)).digest("hex"));
-// --jit-bundle: parse + compile every module before the VM starts (the browser does the same,
-// asynchronously, in parallel with the engine fetch). Modules are instantiated on the first lookup
-// of one of their keys. A bundle from another engine build is refused (its import keys / hook ABI
+// --jit-bundle: parse the index before the VM starts; a module is COMPILED and instantiated on the
+// first lookup of one of its keys. Compiling every module up front is what made an AOT artifact
+// unusable: the whole-kernel bundle is 2,329 batch modules / 580 MB, and a codex boot touches a few
+// hundred of them -- paying V8 for all of it before the guest runs cost more than the compiling it
+// was meant to save (TASKS.md R.2). With NANOBOX_BUNDLE_EAGER=1 the old behaviour is back for A/B. A bundle from another engine build is refused (its import keys / hook ABI
 // need not match): warn and ignore it.
 async function preloadBundles(files) {
   const t = performance.now();
@@ -393,17 +398,23 @@ async function preloadBundles(files) {
     if (b.tag !== engineTag) { console.error(`[harness] JIT bundle ${f}: engine tag ${b.tag} != ${engineTag} (different engine build), ignored`); continue; }
     if (b.linkSlot && jitState.bundleLink && jitState.bundleLink.slot !== b.linkSlot) { console.error(`[harness] JIT bundle ${f}: link slot ${b.linkSlot} != ${jitState.bundleLink.slot} of an earlier bundle, ignored`); continue; }
     jitState.bundleFiles++;
-    const mods = await Promise.all(b.modules.map((m) => WebAssembly.compile(m.bytes).catch((e) => { console.error(`[harness] JIT bundle ${f}: module rejected: ${e.message}`); return null; })));
+    const eager = process.env.NANOBOX_BUNDLE_EAGER === "1";
+    const mods = eager
+      ? await Promise.all(b.modules.map((m) => WebAssembly.compile(m.bytes).catch((e) => { console.error(`[harness] JIT bundle ${f}: module rejected: ${e.message}`); return null; })))
+      : b.modules.map(() => null);   // compiled on first use, in lookup()
     let dup = 0;
     for (let i = 0; i < b.modules.length; i++) {
-      if (!mods[i]) continue;
+      if (eager && !mods[i]) continue;
       const m = b.modules[i];
       if (m.funcKeys.length === 1 && NanoboxJitBundle.isLinkKey(...m.funcKeys[0])) {
         // the shared link function: same bytes in every bundle of this build; keep the first
-        if (!jitState.bundleLink) jitState.bundleLink = { mod: mods[i], keys: m.keys, bytes: m.bytes, slot: b.linkSlot };
+        // the link function is pinned at a fixed table slot before the engine starts, so its module
+        // is the one that must be compiled eagerly even in lazy mode
+        if (!jitState.bundleLink) { let lm = mods[i]; try { if (!lm) lm = new WebAssembly.Module(m.bytes); } catch (e) { console.error(`[harness] JIT bundle ${f}: link module rejected: ${e.message}`); lm = null; }
+          if (lm) jitState.bundleLink = { mod: lm, keys: m.keys, bytes: m.bytes, slot: b.linkSlot }; }
         continue;
       }
-      const entry = { mod: mods[i], keys: m.keys, funcKeys: m.funcKeys, inst: null, fail: false };
+      const entry = { mod: mods[i], bytes: m.bytes, keys: m.keys, funcKeys: m.funcKeys, inst: null, fail: false };
       let used = false;
       for (const [lo, hi] of m.funcKeys) {
         if (!lo && !hi) continue;
@@ -528,6 +539,7 @@ function installJitHost(inst) {
       if (entry && !entry.inst && !entry.fail) {
         const t = performance.now();
         try {
+          if (!entry.mod) { entry.mod = new WebAssembly.Module(entry.bytes); jitState.bundleCompiled++; }
           entry.inst = new WebAssembly.Instance(entry.mod, imports(entry.keys));
         } catch (err) {
           entry.fail = true; console.error("[harness] JIT bundle module failed to instantiate:", err.message);
@@ -613,6 +625,10 @@ function installJitHost(inst) {
     // NANOBOX_FLAGS=mask overrides nanobox_jit_flags afterwards (A/B of the direct-condition bits etc.)
     if (process.env.NANOBOX_AOT != null && ex.nanobox_set_jit_aot) { ex.nanobox_set_jit_aot(Number(process.env.NANOBOX_AOT)); console.error(`[harness] JIT AOT mode ${process.env.NANOBOX_AOT}`); }
     if (process.env.NANOBOX_FLAGS != null && ex.nanobox_set_jit_flags) { ex.nanobox_set_jit_flags(Number(process.env.NANOBOX_FLAGS)); console.error(`[harness] JIT flags mask ${process.env.NANOBOX_FLAGS}`); }
+    // AOT mode sets threshold 1 (compile at the first touch); the offline translators need the
+    // opposite -- the JIT on so the session can drive it, but the BOOT compiling nothing, or the
+    // artifact ends up holding a recording of that boot instead of the precompiled code.
+    if (process.env.NANOBOX_THRESHOLD != null && ex.nanobox_set_jit) { ex.nanobox_set_jit(lvl, Number(process.env.NANOBOX_THRESHOLD)); console.error(`[harness] JIT threshold ${process.env.NANOBOX_THRESHOLD} (after AOT mode)`); }
     // AOT-mode formation knobs (A/B of the region former: successors that join a region)
     for (const [env, fn, what] of [["NANOBOX_AOT_DEDUPE", "nanobox_set_jit_aot_dedupe", "successor already translated elsewhere is NOT copied in"],
                                    ["NANOBOX_AOT_MINHOT", "nanobox_set_jit_aot_minhot", "successor joins only above this execution count"],
