@@ -40,12 +40,12 @@
 +# CONFIG_DYNAMIC_FTRACE is not set
 +# CONFIG_BPF_JIT_ALWAYS_ON is not set
 --- work/c2w-src/config/bochs/grub.cfg.template.orig	2026-08-18 00:29:11.606016286 +0000
-+++ work/c2w-src/config/bochs/grub.cfg.template	2026-08-18 00:29:11.607456808 +0000
++++ work/c2w-src/config/bochs/grub.cfg.template	2026-08-18 18:20:37.235208664 +0000
 @@ -2,5 +2,5 @@
  set timeout=0
  
  menuentry 'linux' {
 -    linux /boot/grub/bzImage console=hvc0 root=/dev/sr0 rootwait ro virtio_net.napi_tx=false quiet loglevel=${LOGLEVEL} init=/sbin/tini -- /sbin/init
-+    linux /boot/grub/bzImage console=hvc0 root=/dev/sr0 rootwait ro nokaslr pti=off mitigations=off virtio_net.napi_tx=false quiet loglevel=${LOGLEVEL} init=/sbin/tini -- /sbin/init
++    linux /boot/grub/bzImage console=hvc0 root=/dev/sr0 rootwait ro nokaslr norandmaps pti=off mitigations=off virtio_net.napi_tx=false quiet loglevel=${LOGLEVEL} init=/sbin/tini -- /sbin/init
  }
 \ No newline at end of file

@@ -842,3 +842,28 @@ memory handoff stay in the code behind their bits, OFF. Full probes −37 % on t
 +2.6 % (4/4) and +5.0 % respectively in Q. **Gate: IDENTITY identical (codex + agy), BISECT no
 divergence**; bundles re-recorded (the signature change invalidated them). Ticks identical between the
 default mask and mask 0 in one binary.
+
+## R. AOT mode (2026-08-18, decided by the user): everything precompiled, no interpreter dispatch, identity NOT required — behind `NANOBOX_AOT=1`
+
+The user's direction, verbatim in effect: build the AOT engine as asked and put it behind a flag so it can
+be tested with **no interpreted code** and **without the identical-memory requirement**; **everything
+precompiled**. Under the flag the correctness bar is the guest working end to end (kernel boots, codex /
+agy / claude reach their screens, keystrokes echo, the E2E suite passes) — NOT RAM identity, which stays
+the bar for the default engine only.
+
+Design (assembled from measured pieces, all in tree):
+* function-scope static regions from the CFG (Phase 0 tree `work/j/aot0`: static walk over direct
+  targets / fall-through / call continuations, decode-ahead, multi-page kernel regions, per-page region
+  registry) with every block an entry point; compile on first touch (threshold 1) when a precompiled
+  entry is missing;
+* inside a region: registers and probe tags in locals across blocks (already), direct conditions instead
+  of lazy flags (Q's bits 1|2 — a loss in the trace model because of exit materialisation, which function
+  regions mostly remove), probe cache across links (shipped);
+* relaxed boundary discipline (identity waived): timer/async checks only at loop back-edges, region exits
+  and handler steps; icount per block; precise state committed only where a fault can occur (slow arms —
+  already how syncBefore works);
+* **precompile everything**: an offline translator that walks the function list — kernel from
+  `work/pack-out-nb/symbols/System.map` (fixed: `nokaslr`), codex/agy from their ELF `.eh_frame_hdr` /
+  `.symtab` at a fixed PIE base (`norandmaps` on the cmdline) — forms and compiles every function into an
+  `.nbjb` bundle the existing loader consumes; a level-3 counter reports entries NOT served by compiled
+  code (target: ~0; handler steps for untemplated instructions are the only remaining interpretation).
