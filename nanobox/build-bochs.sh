@@ -4,6 +4,7 @@
 # Docker) so an incremental rebuild takes ~1.5 minutes instead of the ~25 of the full pipeline.
 #
 #   ./build-bochs.sh [name] [--configure] [--no-wizer] [--pack DIR] [--legacy] [-- extra configure flags]
+#   (test/gate.sh's identity leg wants the cold-boot pair too: `eh-nowiz --no-wizer` and `ref-nowiz --legacy --no-wizer`)
 #
 #   name          output basename (default: dev) -> build/<name>/out.wasm (+ intermediates)
 #   --configure   re-run ./configure (needed after changing configure flags or the first time;

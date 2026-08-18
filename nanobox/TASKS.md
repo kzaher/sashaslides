@@ -670,3 +670,21 @@ the other engine tag would give one side a cold JIT, the trap recorded in J):
 **MIPS ahead in 3/3 (+2.4 / +4.2 / +6.2 %), boot in 2/3, instruction count essentially equal (1.190 vs
 1.186 G to the prompt).** The invariant costs nothing and already pays a little before any AOT — the
 kernel no longer double-switches CR3 on every syscall.
+
+### Adopting the image: the identity leg needed a methodology fix, not the engine
+
+Both engines rebuilt from the no-codegen pack; `test/gate.sh` reported **IDENTITY DIFFERENT, BISECT no
+divergence**. Diagnosis: each engine is perfectly deterministic run to run (same icount, same ticks), the
+JIT agrees with the interpreter inside the engine (bisect clean), but the two BUILDS' wizer pre-init
+snapshots land at different guest points on this kernel — ref icount 562,638,707 / ticks 2,182,091,484
+vs optimized 563,353,589 / 2,182,293,431 (on the old kernel they matched to the tick) — so everything
+downstream differs in interrupt phase and RAM cannot match. The two wizer versions (v3 for the legacy
+build, the EH fork for the optimized one) feed different host inputs during pre-init; the new kernel
+happens to be sensitive to it.
+
+Proof it is not the engine: the same two engines built with `--no-wizer` (cold boot, no snapshot, no
+host input phase) are **IDENTICAL for codex AND agy** (codex ticks 2,944,765,941 both, RAM SHA-256 equal,
+icount within 2). `test/gate.sh` now runs the identity leg on `build/{ref,eh}-nowiz` when they exist
+(`--no-wizer` builds of the same source) and keeps the bisect on the snapshot build. Open item: why the
+pre-init phase depends on the wizer version on this kernel (it did not on the old one) — worth fixing
+so the shipped snapshot is also build-independent, but it is not a correctness issue.

@@ -26,7 +26,16 @@ say "env: NANOBOX_JIT_MERGE=${NANOBOX_JIT_MERGE:-} NANOBOX_JIT_EAGER=${NANOBOX_J
 rc=0
 if [ $DO_I = 1 ]; then
   say ""; say "## identity (reference vs optimized+JIT)"
-  if OPT="$OPT" "$HERE/test/identity.sh" both --jit "$JIT" > "$OUT/identity.log" 2>&1; then say "IDENTITY: identical (codex + agy)"; else say "IDENTITY: **DIFFERENT** — see work/gate/identity.log"; rc=1; fi
+  # The identity leg compares the reference interpreter build against the optimized+JIT build. Both
+  # normally carry a wizer pre-init snapshot, and the two wizer versions (v3 for the legacy build, the
+  # EH fork for the optimized one) feed slightly different host inputs during that pre-init: on the
+  # no-codegen kernel image the snapshots landed 715 k instructions apart and everything downstream
+  # differed in interrupt phase — while the same two engines built WITHOUT the snapshot were IDENTICAL
+  # from a cold boot (2026-08-18). So when no-wizer builds exist, identity uses them; the bisect below
+  # (interpreter vs JIT inside the SAME snapshot build) is unaffected either way.
+  IREF="${IREF:-$HERE/build/ref-nowiz/out.wasm}"; IOPT="${IOPT:-$HERE/build/eh-nowiz/out.wasm}"
+  if [ -f "$IREF" ] && [ -f "$IOPT" ]; then say "identity engines: cold-boot builds (no wizer snapshot)"; else IREF="$HERE/build/ref-nb/out.wasm"; IOPT="$OPT"; fi
+  if REF="$IREF" OPT="$IOPT" "$HERE/test/identity.sh" both --jit "$JIT" > "$OUT/identity.log" 2>&1; then say "IDENTITY: identical (codex + agy)"; else say "IDENTITY: **DIFFERENT** — see work/gate/identity.log"; rc=1; fi
   grep -E '^===|IDENTICAL|DIFFER|"label":"expect"' "$OUT/identity.log" | sed 's/^/    /' | tee -a "$REP"
 fi
 if [ $DO_B = 1 ]; then
