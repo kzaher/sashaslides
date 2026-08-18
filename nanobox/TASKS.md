@@ -1114,3 +1114,22 @@ iterations. Removing the store outright was tried and **the guest hangs before p
 the kernel changes stacks constantly, so a shadow-stack entry stops matching and the address it needs
 was never written; `nanobox_jit_aot_nostack` keeps the experiment reproducible, default off. The store
 is the floor; the machinery around it is not, and that is the next piece of work.
+
+### S.2 What the density work bought, in wall clock (2026-08-18)
+
+Measured with in-guest markers around the loop (`@@NANOBOX-DUMP:pre@@` / `post`), so boot -- which
+varies by seconds under AOT -- is excluded. Differencing two whole runs, which is what the first
+attempt did, is useless here: AOT boot variance swamped a 200 M-iteration difference.
+
+| engine | ns per fib iteration |
+|---|---|
+| before the density work, AOT on | 2.89 |
+| before, AOT off (the trace JIT) | 2.22 |
+| **after, AOT on** | **2.08** |
+| after, AOT off | 2.30 |
+| native wasm from the same C source | 0.53 |
+
+**AOT went from 30 % slower than the trace JIT to 10 % faster**, and the distance to native fell from
+5.5x to 3.9x. Note the asymmetry: the instruction count dropped 4x (84 -> 21) but wall clock only 28 %.
+V8 was already folding much of the redundant local traffic, so instruction-count reduction pays less
+than it reads on paper -- worth knowing before spending more effort purely on counting.
