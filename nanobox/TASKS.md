@@ -787,3 +787,36 @@ What the user asked to remove, checked against the table:
 **Conclusion: carrying the two probe-cache entries across function entries removes ~30 % of executed
 ops in both workloads and unlocks the −20 % bytes of the outlined fill. That is the single item;
 direct conditions (~29 ops per CMP, ~10 %) is second.**
+
+## Q. Phase 1b measured: probe cache across traces, forward `br`, deferred flags (2026-08-18, `work/j/flags`)
+
+* **Crash root cause (worth remembering)**: `cmpl $1,0xc(%rsp)` then `adcl $-1,0xc(%rsp)` — the kernel's
+  `mmap_miss` saturating decrement. The deferred-flags ADC evaluated its operands into the pending-flag
+  locals BEFORE reading CF, so CF came from ADC's own operands; memory-only, invisible in register/RIP
+  fingerprints for 96 M traces, then `mov 0xc(%rsp),%ebx` read 1 instead of 0 and the guest looped
+  forever. Fixed (ADC/SBB materialise pending state and read CF before touching operand locals); a
+  self-check mode (bit 16) compares every direct condition against Bochs' `getB_*` — 0 mismatches.
+* **Probe cache carried across JIT->JIT links** (soundness: the only code between one trace's last access
+  and the next's first is the link epilogue — timer/async tests, inline prefetch, iCache lookup — none of
+  which touches a DTLB entry, stamps a page, or changes CPL/`alignment_check_mask`; handler steps still
+  poison; entry from cpu_loop gets poison; individual DTLB entry replacement never invalidates a cached
+  translation, INVLPG/CR3 are handler steps):
+
+  | variant | full probes / guest instr | hot loop, single binary |
+  |---|---|---|
+  | baseline | 0.160 | — |
+  | 4-param tail call, front entry only | **0.102 (−37 %)** | **+2.6 % median, 4/4 ahead** |
+  | 11-param tail call, both entries | 0.072 (−55 %) | **−5.6 %** (stack-passed params cost more than the probes) |
+  | memory handoff, front entry | 0.102 (−37 %) | +0.8 % (noise) |
+* **Forward in-region `br` instead of `L_cur` + `br_table`**: **+5.0 %** (390 sites; same target body,
+  `L_cur` unread after) — the one clear win, because it removes a dispatch per in-region edge.
+* **Deferred lazy flags**: 2004 of 2005 `Jcc`-after-ALU sites became direct compares (99.95 %); 573 M
+  pending states, 492 M direct conditions, 321 M still materialised (56 %: 270 M at exits with unknown
+  successor); ~10 G ops removed — and wall time **−4.7 %**: code +4 % (materialisation inlined at every
+  exit arm) and the exit path got longer. Kept behind its bit, OFF.
+* **Why −55 % full probes (~27 G of ~80 G ops) barely shows in wall time**: `node --cpu-prof` of the
+  steady state — **the shared link epilogue is 28.7 % of time by itself**, JIT bodies ~50 %, engine ~19 %.
+  The two `return_call_indirect` per hop dominate; the machine is not op-count-bound (consistent with J
+  and P). The next real lever per the profile is the two indirect tail calls per hop.
+
+Adopt: bit 8 + bits 2|6; rebased adopt-set requested against current main; gate + bundle re-record here.
