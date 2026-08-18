@@ -1193,3 +1193,41 @@ End to end after the density work, codex scenario:
 
 Keystroke is at parity; boot is still dominated by compiling ~500 MB at threshold 1, which is what the
 artifact is supposed to remove and cannot until the keys line up.
+
+### S.4 The loop, finished: 20 wasm instructions and 0.84 ns per iteration (2026-08-18)
+
+| step | wasm instructions on the executed path |
+|---|---|
+| where the day started | 84 |
+| statistics, dead-flag ALU form, periodic checks, operand aliasing (S) | 31 |
+| stack scheduling (`nbw::Module::stackify`: dead `block` removal, `local.set X … local.get X` -> `local.tee X`) | 30 |
+| flag operands staged only where a receiving block actually reads `P_op1/P_op2` | 26 |
+| the interrupt countdown fused into the back edge (`i32.eqz` + `if` + `br` -> one `br_if`) | 24 |
+| the guest clock charged per window, exits adding `(tick - L_tick)*(k+1)` themselves | **20** |
+| *native wasm compiled from the same C source* | *12* |
+
+The final loop: `get 10, tee 9, get 14, const 1, add, set 14, get 10, get 8, add, set 10, set 8,
+get 14, get 16, lt_u, if, get 49, const -1, add, tee 49, br_if`.
+
+**The 8 over native are accounted for and only one of them is translator overhead**: 7 do the
+mov/add/mov rotation, which is exactly what clang emits for the same rotation; 3 because the guest
+counts up and compares against `%r8` where clang counts down to zero and branches on the decrement;
+5 for the interrupt countdown, which native wasm has no equivalent of -- and 5 is also what clang pays
+for its own loop counter. Below 19 needs the two register copies GONE, which is renaming, i.e.
+unrolling to the length of the register rotation.
+
+Steady state (`work/fib/phase.sh`, n = 1e9, markers around the loop):
+
+| | ns per iteration | MIPS | icount |
+|---|---|---|---|
+| **AOT** | **0.84** | 7,113 | 6,007.2 M |
+| trace JIT (flag off) | 2.19 | 2,747 | 6,007.2 M |
+| native wasm | 0.53 | -- | -- |
+
+**AOT is 2.6x the trace JIT and 1.6x off native wasm**, with the guest clock EXACT -- the icount now
+matches the reference run digit for digit (main's earlier version overcounted by ~1 M because a
+sync-path exit added `k+1` on top of an already-advanced `L_ic0`).
+
+MEASUREMENT LESSON, again: every earlier fib number in this file taken at n = 1e8 (2.34 / 2.89 ns) was
+measuring **V8 warm-up**, not the loop. At n = 1e9 the same builds read 1.03 and 0.84. Warm-up is worth
+~1.5 ns/iteration here; a loop benchmark that does not outrun it measures the compiler, not the code.

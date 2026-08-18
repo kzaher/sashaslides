@@ -1393,10 +1393,10 @@ index 000000000..0c5787cb0
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..a36f3f18c
+index 000000000..9c8c24778
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,4806 @@
+@@ -0,0 +1,4866 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -1901,6 +1901,11 @@ index 000000000..a36f3f18c
 +  unsigned chainUsed[NB_REGION_MAX_BLOCKS + 1];   // positions a body needed in pass 1 (index = block, 0 for a plain trace)
 +  uint32_t L_xic;                                  // exit: icount delta (k + 1) for the common tail
 +  uint32_t L_tick;                                 // AOT: back-edge countdown (see emitLoopBack)
++  // AOT self-loop: the guest clock is charged for a whole countdown window at the sync instead of
++  // per iteration (4 wasm instructions off the fast path). The exits inside a window -- all cold --
++  // add the iterations completed since the sync themselves: (tick - L_tick) * loopIcPerIter.
++  // 0 = charge per iteration (the identity form, and any trace with more than one back edge).
++  unsigned loopIcPerIter, loopTickN;
 +  int aliasAt;                                     // instruction that left its operands in register locals (-1: none)
 +  bool spillChain() const { return (nanobox_jit_spill & 1) != 0; }
 +  bool spillLive() const { return (nanobox_jit_spill & 2) != 0; }
@@ -1911,13 +1916,22 @@ index 000000000..a36f3f18c
 +  bool templMisc() const { return (nanobox_jit_spill & 64) != 0; }       // LEAVE / MUL / BSF / ... (A/B bit)
 +
 +  TraceCompiler(bxICacheEntry_c *entry, Module &mod) : e(entry), ins(entry->i), n(0), m(mod), em(NULL), needAsyncCheck(false), depth(0), loopDepth(-1), bodyDepth(-1), linkOK(false), selfLoopOK(false),
-+    reg(NULL), curBlock(0), boff(0), dispatchDepth(-1), L_cur(0), regionPass2(false), regionKernel(false), conforming(false), coldExit(false), L_xic(0), L_tick(0), aliasAt(-1), passNo(1), nedges(0) {
++    reg(NULL), curBlock(0), boff(0), dispatchDepth(-1), L_cur(0), regionPass2(false), regionKernel(false), conforming(false), coldExit(false), L_xic(0), L_tick(0), loopIcPerIter(0), loopTickN(0), aliasAt(-1), passNo(1), nedges(0) {
 +    csReset();
 +    ch.active = false; ch.baseDepth = 0; ch.M = 0; ch.npos = 0;
 +    for (unsigned r = 0; r < 17; r++) { ch.pos[r] = -1; ch.at[r] = 0; }
 +    for (unsigned j = 0; j <= NB_REGION_MAX_BLOCKS; j++) chainUsed[j] = 0;
 +    for (unsigned r = 0; r < 16; r++) writtenReg[r] = headerWritten[r] = regionWritten[r] = false;
 +    writtenLf = headerWrittenLf = regionWrittenLf = false;
++  }
++  bool icDeferred() const { return loopIcPerIter != 0; }
++  // push the true "icount at the start of instruction 0 of this iteration"
++  void pushIcBase() {
++    em->get(L_ic0);
++    if (!icDeferred()) return;
++    em->i32c((int32_t) loopTickN); em->get(L_tick); em->op(I32_SUB); em->op(I64_EXTEND_I32_U);
++    if (loopIcPerIter != 1) { em->i64c((Bit64s) loopIcPerIter); em->op(I64_MUL); }
++    em->op(I64_ADD);
 +  }
 +  // instruction pointer of instruction k of the current block (what the handler gets)
 +  void pushInsPtr(unsigned k) {
@@ -1990,7 +2004,7 @@ index 000000000..a36f3f18c
 +    if (cs.pfOp != PF_NONE) {
 +      if (U) { pfMaterializeInline(); fsc(FS_EDGE_MAT); profCount(&nanobox_flags_stats[FD_EDGE_MAT]); }
 +      else if (E == FE_KILL) { fsc(FS_EDGE_DROP); profCount(&nanobox_flags_stats[FD_EDGE_DROP]); }
-+      else if (E == FE_SLOW) { em->i32c((int32_t) pfKind()); em->set(L_pfk); fsc(FS_EDGE_PASS); profCount(&nanobox_flags_stats[FD_EDGE_PASS]); }
++      else if (E == FE_SLOW) { pfStageAliases(); em->i32c((int32_t) pfKind()); em->set(L_pfk); fsc(FS_EDGE_PASS); profCount(&nanobox_flags_stats[FD_EDGE_PASS]); }
 +      else { pfMaterializeInline(); lfStore(); fsc(FS_EDGE_MAT); profCount(&nanobox_flags_stats[FD_EDGE_MAT]); }
 +      return;
 +    }
@@ -2134,7 +2148,7 @@ index 000000000..a36f3f18c
 +    spillAll(false);
 +    em->i32c(0); pushRegionVA(roff); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
 +    em->i32c(0); pushRegionVA(roff); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
-+    em->i32c(0); em->get(L_ic0); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++    em->i32c(0); pushIcBase(); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
 +  }
 +  // ... and leave the function: the state committed is what cpu_loop sees at a trace boundary. Goes
 +  // through the exit chain + common tail + link epilogue (whose countdown / async / window tests
@@ -2274,13 +2288,13 @@ index 000000000..a36f3f18c
 +  void syncBefore(unsigned k, bool clear) {
 +    spillAll(clear);
 +    if (spillSyncCall()) { // one call instead of three inline stores (size only: the slow path pays a call)
-+      pushVA(off[k + 1]); pushVA(off[k]); em->get(L_ic0); if (k) { em->i64c(k); em->op(I64_ADD); }
++      pushVA(off[k + 1]); pushVA(off[k]); pushIcBase(); if (k) { em->i64c(k); em->op(I64_ADD); }
 +      em->call(fn(FNIDX(&nanobox_helper_sync), "lll>v"));
 +      return;
 +    }
 +    em->i32c(0); pushVA(off[k + 1]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
 +    em->i32c(0); pushVA(off[k]);     em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
-+    em->i32c(0); em->get(L_ic0); if (k) { em->i64c(k); em->op(I64_ADD); } em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++    em->i32c(0); pushIcBase(); if (k) { em->i64c(k); em->op(I64_ADD); } em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
 +  }
 +  // Trace exit after instruction k executed with the new RIP (i64) on the wasm stack: commit
 +  // (prev_rip = RIP, icount++) + return. Does NOT change compile-time cache state (callers that
@@ -2291,7 +2305,7 @@ index 000000000..a36f3f18c
 +      spillAll(false);
 +      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
 +      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
-+      em->i32c(0); em->get(L_ic0); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++      em->i32c(0); pushIcBase(); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
 +      em->ret();
 +      return;
 +    }
@@ -2300,7 +2314,15 @@ index 000000000..a36f3f18c
 +  // Exit after instruction k with the new RIP in T[7]: registers through the exit chain (or the
 +  // inline spill), RIP + icount delta through T[7]/L_xic to the common tail after $body.
 +  void exitCommon(unsigned k) {
-+    em->i64c(k + 1); em->set(L_xic);
++    // L_xic carries the icount delta to the common tail (icount = L_ic0 + L_xic); under the deferred
++    // clock it also carries the iterations completed since the last sync
++    em->i64c(k + 1);
++    if (icDeferred()) {
++      em->i32c((int32_t) loopTickN); em->get(L_tick); em->op(I32_SUB); em->op(I64_EXTEND_I32_U);
++      if (loopIcPerIter != 1) { em->i64c((Bit64s) loopIcPerIter); em->op(I64_MUL); }
++      em->op(I64_ADD);
++    }
++    em->set(L_xic);
 +    if (spillChain() && ch.active) chainExit(); else { nanobox_spill_stats[1]++; spillAll(false); em->br(depth - bodyDepth); }
 +  }
 +  static unsigned regIdxLf() { return 16; }
@@ -2446,7 +2468,10 @@ index 000000000..a36f3f18c
 +  // prefetch-window check, bookkeeping) and then a jump to the dispatch loop instead of a return.
 +  // Non-rejoining: callers restore their compile-time cache snapshot afterwards.
 +  void emitTransition(unsigned k, unsigned s) {
-+    pfStageAliases();          // the receiving block expects the operands in P_op1/P_op2
++    // The pending flag operands are NOT staged into P_op1/P_op2 here: every consumer on the way out
++    // (spillAll / pfMaterialize*) reads them through pfO1()/pfO2(), which follows the alias, and the
++    // only convention that needs them in P_* is a FE_SLOW block entry -- conformFlagsTo() stages them
++    // there. Staging unconditionally cost 4 wasm instructions on every taken back edge.
 +    uint32_t now = X[0], delta = T32[5];
 +    Bit64s target = reg->b[s].boff;
 +    recordEdge(s);
@@ -3051,6 +3076,7 @@ index 000000000..a36f3f18c
 +      // Handlers may advance icount by more than one (repeat() counts each iteration), so
 +      // rebase our "icount at trace entry" so that ic0 + j stays exact for the instructions after.
 +      em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3); em->i64c(k + 1); em->op(I64_SUB); em->set(L_ic0);
++      if (icDeferred()) { em->i32c((int32_t) loopTickN); em->set(L_tick); }   // L_ic0 is absolute again: restart the window
 +      // probe cache + alignment_check_mask AFTER the call (a POPF that flips EFLAGS.AC changes the
 +      // mask and continues the trace; loading it before the call left L_acm stale), then the
 +      // registers the exit chain stores
@@ -3265,6 +3291,8 @@ index 000000000..a36f3f18c
 +    // ================= control transfer
 +    case BX_IA_JMP_Jq: case BX_IA_JMP_Jbq: {
 +      if (isSelfBranch(k)) { emitLoopBack(k); return true; }
++      { int sb = constInUnitTarget(k, (Bit64s)(Bit32s) i->Id());
++        if (sb >= 0) { emitTransition(k, (unsigned) sb); return true; } }
 +      pushVA(off[k + 1]); em->i64c((Bit64s)(Bit32s) i->Id()); em->op(I64_ADD); em->set(t0);
 +      pushIsCanonical(t0); em->op(I32_EQZ);
 +      iff(); emitDeoptAndReturn(k, last); endb();
@@ -3285,25 +3313,33 @@ index 000000000..a36f3f18c
 +      iff();
 +        if (isSelfBranch(k)) emitLoopBack(k);
 +        else {
-+          pushVA(off[k + 1]); em->i64c((Bit64s)(Bit32s) i->Id()); em->op(I64_ADD); em->set(t0);
-+          pushIsCanonical(t0); em->op(I32_EQZ);
-+          iff(); emitDeoptAndReturn(k, last); endb();
-+          exitToOffset(k, (Bit64s) boff + off[k + 1] + (Bit64s)(Bit32s) i->Id(), t0);
++          int sb = constInUnitTarget(k, (Bit64s)(Bit32s) i->Id());
++          if (sb >= 0) emitTransition(k, (unsigned) sb);
++          else {
++            pushVA(off[k + 1]); em->i64c((Bit64s)(Bit32s) i->Id()); em->op(I64_ADD); em->set(t0);
++            pushIsCanonical(t0); em->op(I32_EQZ);
++            iff(); emitDeoptAndReturn(k, last); endb();
++            exitToOffset(k, (Bit64s) boff + off[k + 1] + (Bit64s)(Bit32s) i->Id(), t0);
++          }
 +        }
 +      endb();
 +      restore(s);
 +      return true;
 +    }
 +    case BX_IA_CALL_Jq: {
-+      pushVA(off[k + 1]); em->i64c((Bit64s)(Bit32s) i->Id()); em->op(I64_ADD); em->set(t0);
-+      pushIsCanonical(t0); em->op(I32_EQZ);
-+      iff(); emitDeoptAndReturn(k, last); endb();
++      int sb = constInUnitTarget(k, (Bit64s)(Bit32s) i->Id());
++      if (sb < 0) {
++        pushVA(off[k + 1]); em->i64c((Bit64s)(Bit32s) i->Id()); em->op(I64_ADD); em->set(t0);
++        pushIsCanonical(t0); em->op(I32_EQZ);
++        iff(); emitDeoptAndReturn(k, last); endb();
++      }
 +      // push_64(RIP) -- or, under AOT nostack, record it on the host shadow stack instead
 +      pushVA(off[k + 1]); em->set(t1);
 +      regGet(R_RSP); em->i64c(8); em->op(I64_SUB); em->set(t2);
 +      if (aotNoStack()) emitShadowPush(t2, t1); else emitStackWrite(k, t2, t1);
 +      em->get(t2); regSetFromStack(R_RSP);
-+      exitToOffset(k, (Bit64s) boff + off[k + 1] + (Bit64s)(Bit32s) i->Id(), t0);
++      if (sb >= 0) emitTransition(k, (unsigned) sb);
++      else exitToOffset(k, (Bit64s) boff + off[k + 1] + (Bit64s)(Bit32s) i->Id(), t0);
 +      return true;
 +    }
 +    case BX_IA_RET_Op64: case BX_IA_RET_Op64_Iw: {
@@ -4408,15 +4444,23 @@ index 000000000..a36f3f18c
 +    // syncs. Identity mode keeps the per-iteration form.
 +    const unsigned tick = aotRelaxed() ? (nanobox_jit_aot_tick ? nanobox_jit_aot_tick : 1) : 1;
 +    if (tick > 1) {
-+      // icount is charged EVERY iteration: it is the guest's clock, and an exit in the middle of a
-+      // window would otherwise report a stale value. (Measured: with icount charged only at the sync,
-+      // codex dies during start-up with "sqlite pool timed out" -- the guest's timer interrupts come
-+      // late, its threads stop being preempted and a lock holder starves. Four instructions per
-+      // iteration buy an exact clock; what stays periodic is the expensive part below.)
-+      em->get(L_ic0); em->i64c((Bit64s)(k + 1)); em->op(I64_ADD); em->set(L_ic0);
-+      em->get(L_tick); em->i32c(1); em->op(I32_SUB); em->tee(L_tick); em->op(I32_EQZ);
-+      iff();
-+      em->get(L_ic0); em->set(now);
++      // The guest's clock must stay exact: charging icount only at the sync and leaving it stale in
++      // between kills codex at start-up ("sqlite pool timed out" -- timer interrupts come late and
++      // threads stop being preempted). It does NOT have to be charged by the fast path, though:
++      // icount is only ever READ at an exit, and every exit inside a countdown window can add the
++      // iterations completed since the last sync itself, (tick - L_tick) * (k+1) -- exits are cold,
++      // so the four instructions come off the fast path for free (pushIcBase/exitCommon).
++      // What is left on the back edge is the countdown, and it IS the branch: `get, const, add, tee,
++      // br_if` -- 5 instructions, with the loop header's conform hoisted above it so that both the
++      // fast edge and the post-sync edge run it exactly once.
++      if (!icDeferred()) { em->get(L_ic0); em->i64c((Bit64s)(k + 1)); em->op(I64_ADD); em->set(L_ic0); }
++      emitLoopHeaderConform();
++      em->get(L_tick); em->i32c(-1); em->op(I32_ADD); em->tee(L_tick); em->br_if(depth - loopDepth);
++      // the window expired (L_tick reached 0): charge the iterations it completed BEFORE this one
++      // (this one's k+1 is added by the exits below, as everywhere else), restart it, then sync
++      if (icDeferred() && tick > 1) { em->get(L_ic0); em->i64c((Bit64s)(k + 1) * (Bit64s)(tick - 1)); em->op(I64_ADD); em->set(L_ic0); }
++      em->i32c((int32_t) tick); em->set(L_tick);
++      em->get(L_ic0); if (icDeferred()) { em->i64c((Bit64s)(k + 1)); em->op(I64_ADD); } em->set(now);
 +    } else {
 +      em->get(L_ic0); em->i64c((Bit64s)(k + 1)); em->op(I64_ADD); em->set(now);
 +    }
@@ -4451,22 +4495,33 @@ index 000000000..a36f3f18c
 +      em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_stats.jit_loopbacks), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_stats.jit_loopbacks), 3);
 +    }
 +    em->get(now); em->set(L_ic0);
-+    if (tick > 1) { em->i32c((int32_t) tick); em->set(L_tick); endb(); }   // synced: start the next window
-+    pfStageAliases();          // the loop header expects the operands in P_op1/P_op2
-+    // The loop body was compiled assuming the header state (all header registers/flags live in
-+    // their locals): make it so before jumping back.
-+    { CacheState s = snapshot();
-+      for (unsigned r = 0; r < 16; r++) if (headerReg[r]) regEnsureLoaded(r);
-+      if (headerLf) lfLoad();
-+      else if (blockFlagEntry[0] == FE_KILL) { if (cs.pfOp != PF_NONE) { fsc(FS_EDGE_DROP); profCount(&nanobox_flags_stats[FD_EDGE_DROP]); } }
-+      else if (blockFlagEntry[0] == FE_SLOW) {
-+        if (cs.pfOp != PF_NONE) { em->i32c((int32_t) pfKind()); em->set(L_pfk); fsc(FS_EDGE_PASS); profCount(&nanobox_flags_stats[FD_EDGE_PASS]); }
-+        else if (cs.pfRuntime) { /* carries over */ }
-+        else { if (cs.lfDirty) lfStore(); em->i32c(0); em->set(L_pfk); }   // header state: memory current, nothing loaded
-+      }
-+      else { if (cs.pfOp != PF_NONE) { pfMaterializeInline(); lfStore(); } else if (cs.pfRuntime) pfRuntimeCheck(); else if (cs.lfDirty) lfStore(); }
-+      restore(s); }
++    if (tick <= 1) emitLoopHeaderConform();   // (tick > 1 ran it above the countdown)
 +    em->br(depth - loopDepth);
++  }
++  // The loop body was compiled assuming the header state (all header registers/flags live in
++  // their locals): make it so before jumping back.
++  void emitLoopHeaderConform() {
++    CacheState s = snapshot();
++    for (unsigned r = 0; r < 16; r++) if (headerReg[r]) regEnsureLoaded(r);
++    if (headerLf) lfLoad();
++    else if (blockFlagEntry[0] == FE_KILL) { if (cs.pfOp != PF_NONE) { fsc(FS_EDGE_DROP); profCount(&nanobox_flags_stats[FD_EDGE_DROP]); } }
++    else if (blockFlagEntry[0] == FE_SLOW) {
++      if (cs.pfOp != PF_NONE) { pfStageAliases(); em->i32c((int32_t) pfKind()); em->set(L_pfk); fsc(FS_EDGE_PASS); profCount(&nanobox_flags_stats[FD_EDGE_PASS]); }
++      else if (cs.pfRuntime) { /* carries over */ }
++      else { if (cs.lfDirty) lfStore(); em->i32c(0); em->set(L_pfk); }   // header state: memory current, nothing loaded
++    }
++    else { if (cs.pfOp != PF_NONE) { pfMaterializeInline(); lfStore(); } else if (cs.pfRuntime) pfRuntimeCheck(); else if (cs.lfDirty) lfStore(); }
++    restore(s);
++  }
++  // A direct branch whose target is a block of THIS unit: the target is L_base + a compile-time
++  // constant and L_base is canonical (we are executing there, and the target's bytes were decoded at
++  // translate time), so IsCanonical(target) is a compile-time true -- the 7-instruction test, its
++  // eqz, the `if` and the address materialisation the transition never uses are all dead code.
++  // AOT only: the default engine keeps the guard so a pathological entry still deopts exactly like
++  // the interpreter.
++  int constInUnitTarget(unsigned k, Bit64s disp) {
++    if (!aotRelaxed()) return -1;
++    return regionBlockAt((Bit64s) boff + off[k + 1] + disp);
 +  }
 +  bool isSelfBranch(unsigned k) {
 +    return loopDepth >= 0 && (Bit64s)(Bit32s) ins[k].Id() + (Bit64s) off[k + 1] == 0;
@@ -4935,7 +4990,7 @@ index 000000000..a36f3f18c
 +    // Does the trace branch back to its own start? Then compile it as a loop (see emitLoopBack).
 +    // (regions: back-edges are ordinary in-region transitions through the dispatch loop)
 +    selfLoopOK = useTemplates && !reg;
-+    bool hasSelfBranch = false;
++    bool hasSelfBranch = false; unsigned nSelf = 0, selfK = 0;
 +    if (selfLoopOK) {
 +      for (unsigned k = 0; k < n; k++) {
 +        unsigned ia = ins[k].getIaOpcode();
@@ -4949,9 +5004,13 @@ index 000000000..a36f3f18c
 +          case BX_IA_JBE_Jbq: case BX_IA_JNBE_Jbq: case BX_IA_JS_Jbq: case BX_IA_JNS_Jbq: case BX_IA_JP_Jbq: case BX_IA_JNP_Jbq:
 +          case BX_IA_JL_Jbq: case BX_IA_JNL_Jbq: case BX_IA_JLE_Jbq: case BX_IA_JNLE_Jbq: isJ = true; break;
 +        }
-+        if (isJ && (Bit64s)(Bit32s) ins[k].Id() + (Bit64s) off[k + 1] == 0) hasSelfBranch = true;
++        if (isJ && (Bit64s)(Bit32s) ins[k].Id() + (Bit64s) off[k + 1] == 0) { nSelf++; selfK = k; hasSelfBranch = true; }
 +      }
 +    }
++    // exactly one back edge: its iterations all retire selfK+1 instructions, so an exit can correct
++    // the clock from the countdown and the fast path need not charge it (see emitLoopBack)
++    loopIcPerIter = 0; loopTickN = aotRelaxed() ? (nanobox_jit_aot_tick ? nanobox_jit_aot_tick : 1) : 1;
++    if (aotRelaxed() && loopTickN > 1 && nSelf == 1) loopIcPerIter = selfK + 1;
 +    linkOK = useTemplates && !nanobox_dbg_mode;
 +    // $body: every exit ends up here (through its body's exit chain); the common tail after it
 +    // commits RIP/prev_rip/icount from T[7]/L_xic and links (returns in dbg mode)
@@ -5276,6 +5335,7 @@ index 000000000..a36f3f18c
 +// nothing precompiled exists, timer/async tests only at loop back-edges / region exits / handler
 +// steps, direct conditions (nanobox_jit_flags bits 0|1) on. Identity with the interpreter's trace
 +// boundaries is NOT kept in this mode by design; guest RAM may differ from the reference engine's.
++unsigned nanobox_jit_stackify = 1;   // density: stack scheduling over the emitted stream (nbw::Module::stackify)
 +unsigned nanobox_jit_aot = 0;
 +unsigned nanobox_jit_aot_ahead = 1;   // AOT: decode successors that are not in the iCache yet (0: only decoded ones join, as before)
 +unsigned nanobox_jit_aot_minhot = 0;  // AOT: a decoded successor joins only if its slot has executed at least this often (0: any)
@@ -6263,10 +6323,10 @@ index 000000000..0b1871ee2
 +#endif
 diff --git a/bochs/nanobox_wasm.h b/bochs/nanobox_wasm.h
 new file mode 100644
-index 000000000..65560d175
+index 000000000..d4c1f7f76
 --- /dev/null
 +++ b/bochs/nanobox_wasm.h
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,509 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox: a tiny WebAssembly binary emitter used by the trace JIT.
 +//
@@ -6284,6 +6344,8 @@ index 000000000..65560d175
 +#include <stdint.h>
 +#include <string.h>
 +#include <stdlib.h>
++
++extern unsigned nanobox_jit_stackify;   // density: stack scheduling of the emitted stream (0 disables; defined in nanobox_jit.cc)
 +
 +namespace nbw {
 +
@@ -6345,6 +6407,7 @@ index 000000000..65560d175
 +  void u32_fixed5(uint32_t v) { for (int i = 0; i < 5; i++) { uint8_t b = v & 0x7f; v >>= 7; if (i < 4) b |= 0x80; b8(b); } }
 +  void patch_u32_fixed5(uint32_t at, uint32_t v) { for (int i = 0; i < 5; i++) { uint8_t b = v & 0x7f; v >>= 7; if (i < 4) b |= 0x80; p[at + i] = b; } }
 +  void clear() { n = 0; }
++  void swap(Buf &o) { uint8_t *tp = p; uint32_t tn = n, tc = cap; p = o.p; n = o.n; cap = o.cap; o.p = tp; o.n = tn; o.cap = tc; }
 +};
 +
 +// -- function types ---------------------------------------------------------------------------------
@@ -6359,6 +6422,26 @@ index 000000000..65560d175
 +    return true;
 +  }
 +};
++
++
++// -- stack scheduling ("RegStackify") ---------------------------------------------------------
++// The templates write every intermediate through a local (`local.get a; local.get b; i64.add;
++// local.set c` ... `local.get c`). When the produced value is consumed later in the SAME
++// straight-line region, the value can simply stay on the operand stack instead:
++//
++//     local.set X ; C ; local.get X      ->      local.tee X ; C
++//
++// is valid whenever C is stack-neutral at its top level, never dips below the value, writes
++// neither X nor a label outside C, and the consuming `local.get X` sits at C's top level. The
++// `local.set` becomes a `local.tee`, so X is still written and no liveness analysis is needed:
++// the rewrite is a pure win of one instruction per pair and is semantics-preserving.
++
++struct Ins {
++  uint32_t at, len, a, a2;
++  uint8_t op, cls;      // cls: see CL_* below
++  int16_t pops, pushes;
++};
++enum { CL_PLAIN = 0, CL_BLOCK, CL_IF, CL_ELSE, CL_END, CL_BR, CL_BRIF, CL_BRTAB, CL_TERM, CL_GET, CL_SET, CL_TEE, CL_BARRIER };
 +
 +// -- module builder -------------------------------------------------------------------------------
 +class Module {
@@ -6384,6 +6467,7 @@ index 000000000..65560d175
 +  void beginFunc() { code.clear(); locals.clear(); nlocalDecls = 0; lastRunPos = -1; lastRunCount = 0; }
 +  // seal the current body as local function #nfuncs (function index nimports + nfuncs); returns its local index
 +  uint32_t endFunc(uint32_t typeIdx) {
++    stackify();
 +    Buf body; body.uleb(nlocalDecls); body.raw(locals.p, locals.n); body.raw(code.p, code.n); body.b8(END);
 +    codeSec.uleb(body.n); codeSec.raw(body.p, body.n);
 +    funcTypes[nfuncs] = typeIdx;
@@ -6411,6 +6495,228 @@ index 000000000..65560d175
 +  bool importsFull() const { return nimports >= MAX_IMPORTS - 2; }
 +  uint32_t localFuncIndex() const { return nimports; }
 +
++  // ---- stack scheduling (see the note above Ins) ----------------------------------------------
++  enum { STK_MAX_INS = 65536, STK_WINDOW = 48 };
++  static uint32_t rdU(const uint8_t *p, uint32_t &i) { uint32_t v = 0, sh = 0; for (;;) { uint8_t b = p[i++]; v |= (uint32_t)(b & 0x7f) << sh; if (!(b & 0x80)) break; sh += 7; } return v; }
++  static void skS(const uint8_t *p, uint32_t &i) { while (p[i++] & 0x80) {} }
++  // decode the current body; false = an opcode this decoder does not model (pass skipped)
++  bool decodeBody(Ins *out, uint32_t maxN, uint32_t &nOut) {
++    const uint8_t *p = code.p; uint32_t i = 0; nOut = 0;
++    while (i < code.n) {
++      if (nOut >= maxN) return false;
++      Ins &s = out[nOut]; s.at = i; s.a = s.a2 = 0; s.cls = CL_PLAIN; s.pops = 0; s.pushes = 0;
++      uint8_t op = p[i++]; s.op = op;
++      switch (op) {
++        case NOP: break;
++        case UNREACHABLE: s.cls = CL_TERM; break;
++        case BLOCK: case LOOP: { uint8_t bt = p[i++]; s.cls = CL_BLOCK; s.a = (bt == VOID) ? 0 : 1; break; }
++        case IF: { uint8_t bt = p[i++]; s.cls = CL_IF; s.a = (bt == VOID) ? 0 : 1; s.pops = 1; break; }
++        case ELSE: s.cls = CL_ELSE; break;
++        case END: s.cls = CL_END; break;
++        case BR: s.a = rdU(p, i); s.cls = CL_BR; break;
++        case BR_IF: s.a = rdU(p, i); s.cls = CL_BRIF; s.pops = 1; break;
++        case BR_TABLE: { uint32_t n = rdU(p, i); uint32_t mx = 0; for (uint32_t k = 0; k <= n; k++) { uint32_t t = rdU(p, i); if (t > mx) mx = t; } s.a = mx; s.cls = CL_BRTAB; s.pops = 1; break; }
++        case RETURN: s.cls = CL_TERM; break;
++        case CALL: { uint32_t f = rdU(p, i); if (f >= nimports) return false; const FuncType &t = types[imports[f].typeIdx]; s.pops = t.nparams; s.pushes = t.nresults; break; }
++        case CALL_INDIRECT: { uint32_t ti = rdU(p, i); rdU(p, i); if (ti >= ntypes) return false; const FuncType &t = types[ti]; s.pops = (int16_t)(t.nparams + 1); s.pushes = t.nresults; break; }
++        case RETURN_CALL: { rdU(p, i); s.cls = CL_TERM; break; }
++        case RETURN_CALL_INDIRECT: { rdU(p, i); rdU(p, i); s.cls = CL_TERM; break; }
++        case TRY_TABLE: { i++; uint32_t n = rdU(p, i); for (uint32_t k = 0; k < n; k++) { i++; rdU(p, i); } s.cls = CL_BARRIER; break; }
++        case THROW: { rdU(p, i); s.cls = CL_BARRIER; break; }
++        case RETHROW: { rdU(p, i); s.cls = CL_BARRIER; break; }
++        case THROW_REF: s.cls = CL_BARRIER; break;
++        case DROP: s.pops = 1; break;
++        case SELECT: s.pops = 3; s.pushes = 1; break;
++        case LOCAL_GET: s.a = rdU(p, i); s.cls = CL_GET; s.pushes = 1; break;
++        case LOCAL_SET: s.a = rdU(p, i); s.cls = CL_SET; s.pops = 1; break;
++        case LOCAL_TEE: s.a = rdU(p, i); s.cls = CL_TEE; s.pops = 1; s.pushes = 1; break;
++        case GLOBAL_GET: rdU(p, i); s.pushes = 1; break;
++        case GLOBAL_SET: rdU(p, i); s.pops = 1; break;
++        case I32_CONST: skS(p, i); s.pushes = 1; break;
++        case I64_CONST: skS(p, i); s.pushes = 1; break;
++        case F32_CONST: i += 4; s.pushes = 1; break;
++        case F64_CONST: i += 8; s.pushes = 1; break;
++        case 0xfc: { uint32_t sub = rdU(p, i);
++          if (sub == 0x0a) { i += 2; s.pops = 3; }           // memory.copy
++          else if (sub == 0x0b) { i += 1; s.pops = 3; }      // memory.fill
++          else return false;
++          break; }
++        case 0xfd: { uint32_t sub = rdU(p, i);
++          switch (sub) {
++            case V128_LOAD: case V128_LOAD8_SPLAT: rdU(p, i); rdU(p, i); s.pops = 1; s.pushes = 1; break;
++            case V128_STORE: rdU(p, i); rdU(p, i); s.pops = 2; break;
++            case V128_CONST: i += 16; s.pushes = 1; break;
++            case I8X16_SPLAT: case I16X8_SPLAT: case I32X4_SPLAT: case I64X2_SPLAT:
++            case V128_NOT: case V128_ANY_TRUE: case I8X16_ALL_TRUE: case I8X16_BITMASK: case I16X8_BITMASK:
++              s.pops = 1; s.pushes = 1; break;
++            case I8X16_EXTRACT_LANE_U: case I32X4_EXTRACT_LANE: case I64X2_EXTRACT_LANE: i += 1; s.pops = 1; s.pushes = 1; break;
++            case I64X2_REPLACE_LANE: i += 1; s.pops = 2; s.pushes = 1; break;
++            case I8X16_SWIZZLE: case I8X16_EQ: case I8X16_LT_S: case I16X8_EQ: case I32X4_EQ:
++            case V128_AND: case V128_ANDNOT: case V128_OR: case V128_XOR: case I8X16_SHR_U:
++              s.pops = 2; s.pushes = 1; break;
++            case V128_BITSELECT: s.pops = 3; s.pushes = 1; break;
++            default: return false;
++          }
++          break; }
++        default: {
++          if (op >= I32_LOAD && op <= I64_LOAD32_U) { rdU(p, i); rdU(p, i); s.pops = 1; s.pushes = 1; break; }        // 0x28..0x35
++          if (op >= I32_STORE && op <= I64_STORE32) { rdU(p, i); rdU(p, i); s.pops = 2; break; }                      // 0x36..0x3e
++          if (op == I32_EQZ || op == I64_EQZ || (op >= 0x67 && op <= 0x69) || (op >= 0x79 && op <= 0x7b) ||
++              (op >= 0x8b && op <= 0x91) || (op >= 0x99 && op <= 0x9f) || (op >= 0xa7 && op <= 0xc4)) { s.pops = 1; s.pushes = 1; break; }
++          if ((op >= 0x46 && op <= 0x4f) || (op >= 0x51 && op <= 0x66) || (op >= 0x6a && op <= 0x78) ||
++              (op >= 0x7c && op <= 0x8a) || (op >= 0x92 && op <= 0x98) || (op >= 0xa0 && op <= 0xa6)) { s.pops = 2; s.pushes = 1; break; }
++          return false;
++        }
++      }
++      s.len = i - s.at; nOut++;
++    }
++    return i == code.n;
++  }
++  // Every template is emitted inside its own `block` so it can `br` out of itself; almost none do,
++  // and the wrapper is what stops a value from staying on the operand stack across two guest
++  // instructions. Delete every `block` no branch targets, renumbering the labels that escape it.
++  // (`loop`/`if` frames are real control flow and are left alone.) The decoded stream is compacted
++  // in place so the pairing pass below does not have to decode the body a second time.
++  bool dropDeadBlocks(Ins *ins, uint32_t &n) {
++    static uint8_t drop[STK_MAX_INS];
++    static uint8_t targeted[STK_MAX_INS];
++    static int32_t stk[256];
++    static int32_t surviving[256];
++    for (uint32_t k = 0; k < n; k++) { drop[k] = 0; if (ins[k].cls == CL_BARRIER) return false; }
++    unsigned d = 0, ndel = 0;
++    for (uint32_t k = 0; k < n; k++) {          // pass A: which frames are branch targets
++      const Ins &q = ins[k];
++      if (q.cls == CL_BLOCK || q.cls == CL_IF) { if (d >= 256) return false; targeted[k] = 0; stk[d++] = (int32_t) k; continue; }
++      if (q.cls == CL_END) { if (!d) return false; d--; continue; }
++      if (q.cls == CL_BR || q.cls == CL_BRIF) { if (q.a > 200) return false; if (q.a < d) targeted[stk[d - 1 - q.a]] = 1; continue; }
++      if (q.cls == CL_BRTAB) {
++        if (q.a > 200) return false;
++        uint32_t i = q.at + 1; uint32_t cnt = rdU(code.p, i);
++        for (uint32_t t = 0; t <= cnt; t++) { uint32_t lb = rdU(code.p, i); if (lb < d) targeted[stk[d - 1 - lb]] = 1; }
++        continue;
++      }
++    }
++    if (d != 0) return false;
++    d = 0;
++    for (uint32_t k = 0; k < n; k++) {          // pass B: mark the deletable frames and their `end`
++      const Ins &q = ins[k];
++      if (q.cls == CL_BLOCK || q.cls == CL_IF) {
++        stk[d++] = (int32_t) k;
++        if (q.op == BLOCK && q.a == 0 && !targeted[k]) { drop[k] = 1; ndel++; }
++        continue;
++      }
++      if (q.cls == CL_END) { d--; if (drop[stk[d]]) drop[k] = 1; continue; }
++    }
++    if (!ndel) return true;
++    static Buf out; out.clear();                // pass C: rebuild, renumbering escaping branches
++    d = 0; uint32_t w = 0;
++    for (uint32_t k = 0; k < n; k++) {
++      Ins q = ins[k];
++      if (q.cls == CL_BLOCK || q.cls == CL_IF) {
++        surviving[d] = (d ? surviving[d - 1] : 0) + (drop[k] ? 0 : 1);
++        stk[d++] = (int32_t) k;
++        if (drop[k]) continue;
++      } else if (q.cls == CL_END) {
++        d--;
++        if (drop[k]) continue;
++      } else if (q.cls == CL_BR || q.cls == CL_BRIF || q.cls == CL_BRTAB) {
++        int32_t sv = d ? surviving[d - 1] : 0;
++        uint32_t at = out.n;
++        if (q.cls == CL_BRTAB) {
++          uint32_t i = q.at + 1; uint32_t cnt = rdU(code.p, i);
++          out.b8(q.op); out.uleb(cnt); uint32_t mx = 0;
++          for (uint32_t t = 0; t <= cnt; t++) { uint32_t lb = rdU(code.p, i);
++            uint32_t nb = (uint32_t)(sv - (lb < d ? surviving[d - 1 - lb] : 0)); if (nb > mx) mx = nb; out.uleb(nb); }
++          q.a = mx;
++        } else {
++          uint32_t nb = (uint32_t)(sv - (q.a < d ? surviving[d - 1 - q.a] : 0));
++          out.b8(q.op); out.uleb(nb); q.a = nb;
++        }
++        q.at = at; q.len = out.n - at; ins[w++] = q;
++        continue;
++      }
++      q.at = out.n; out.raw(code.p + ins[k].at, q.len); ins[w++] = q;
++    }
++    code.swap(out);   // O(1): the old body buffer becomes next translation's scratch
++    n = w;
++    return true;
++  }
++  // The pairing pass:  local.set X ; C ; local.get X  ->  local.tee X ; C
++  void pairLocals(Ins *ins, uint32_t n) {
++    enum { MAXLOC = 1024 };
++    static uint32_t nxtUse[STK_MAX_INS], nxtDef[STK_MAX_INS];
++    static uint32_t lastUse[MAXLOC], lastDef[MAXLOC];
++    for (uint32_t x = 0; x < MAXLOC; x++) { lastUse[x] = n; lastDef[x] = n; }
++    for (uint32_t k = n; k-- > 0;) {
++      const Ins &q = ins[k];
++      if (q.cls == CL_GET || q.cls == CL_SET || q.cls == CL_TEE) {
++        if (q.a >= MAXLOC) return;
++        nxtUse[k] = lastUse[q.a]; nxtDef[k] = lastDef[q.a];
++        if (q.cls == CL_GET) lastUse[q.a] = k; else lastDef[q.a] = k;
++      }
++    }
++    uint32_t openEnd[64]; unsigned nopen = 0, nrew = 0;
++    static uint8_t del[STK_MAX_INS];
++    for (uint32_t k = 0; k < n; k++) del[k] = 0;
++    for (uint32_t d = 0; d < n; d++) {
++      while (nopen && openEnd[nopen - 1] < d) nopen--;
++      if (ins[d].cls != CL_SET) continue;
++      const uint32_t X = ins[d].a, g = nxtUse[d];
++      if (g >= n || g > nxtDef[d] || g - d > STK_WINDOW) continue;   // redefined first / too far: nothing to check
++      int depth = 0, net = 0, pendArity = 0; bool ok = false, fail = false;
++      for (uint32_t j = d + 1; j <= g && !fail; j++) {
++        const Ins &q = ins[j];
++        switch (q.cls) {
++          case CL_END:
++            if (depth == 0) { fail = true; break; }
++            depth--; if (depth == 0) net += pendArity;
++            break;
++          case CL_ELSE: if (depth == 0) fail = true; break;
++          case CL_BLOCK: if (depth == 0) pendArity = (int) q.a; depth++; break;
++          case CL_IF:
++            if (depth == 0) { net -= 1; if (net < 0) { fail = true; break; } pendArity = (int) q.a; }
++            depth++; break;
++          case CL_BR: case CL_BRIF: case CL_BRTAB:
++            if ((int) q.a >= depth) { fail = true; break; }
++            if (depth == 0) { net -= q.pops; if (net < 0) fail = true; }
++            break;
++          case CL_TERM: case CL_BARRIER: fail = true; break;
++          case CL_SET: case CL_TEE:
++            if (q.a == X) { fail = true; break; }
++            if (depth == 0) { net += q.pushes - q.pops; if (net < 0) fail = true; }
++            break;
++          case CL_GET:
++            if (q.a == X) { if (depth == 0 && net == 0) ok = true; fail = true; break; }
++            if (depth == 0) net += 1;
++            break;
++          default:
++            if (depth == 0) { net += q.pushes - q.pops; if (net < 0) fail = true; }
++            break;
++        }
++      }
++      if (!ok) continue;
++      if (nopen && g >= openEnd[nopen - 1]) continue;   // would interleave with an open pair
++      if (nopen >= 64) continue;
++      code.p[ins[d].at] = LOCAL_TEE;
++      del[g] = 1; openEnd[nopen++] = g; nrew++;
++    }
++    if (!nrew) return;
++    uint32_t w = 0;
++    for (uint32_t k = 0; k < n; k++) {
++      if (del[k]) continue;
++      if (w != ins[k].at) memmove(code.p + w, code.p + ins[k].at, ins[k].len);
++      w += ins[k].len;
++    }
++    code.n = w;
++  }
++  void stackify() {
++    if (!nanobox_jit_stackify || code.n < 4) return;
++    static Ins ins[STK_MAX_INS];
++    uint32_t n = 0;
++    if (!decodeBody(ins, STK_MAX_INS, n) || n == 0) return;
++    if (!dropDeadBlocks(ins, n)) return;
++    pairLocals(ins, n);
++  }
 +  // Serialise the whole module into `out`.
 +  void finish(Buf &out) {
 +    out.clear();
@@ -6437,6 +6743,7 @@ index 000000000..65560d175
 +    section(out, 2, s);
 +    // functions: either the sealed ones (batch) or, if none was sealed, the current body as "r"
 +    if (nfuncs == 0) {
++      stackify();
 +      s.clear(); s.uleb(1); s.uleb(funcTypeIdx); section(out, 3, s);
 +      s.clear(); s.uleb(1); s.uleb(1); s.b8('r'); s.b8(0x00); s.uleb(localFuncIndex()); section(out, 7, s);
 +      s.clear(); s.uleb(1);
