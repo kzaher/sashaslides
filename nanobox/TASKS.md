@@ -830,3 +830,15 @@ and icount identical: **+16.5 / −9.8 / −11.2 / +1.3 %, median −4.7 %** —
 (another agent building). Plausible null: a call to another instance's function still goes through V8's
 import wrapper (instance switch), which costs about what the table dispatch did. Switch kept, default off.
 The lever is therefore FEWER hops, not a cheaper hop — regions/AOT territory.
+
+### Shipped from Q (2026-08-18, gate green): probe cache across links + forward `br`
+
+Rebased onto main and integrated (`patches/bochs-nanobox.patch`): `nanobox_jit_flags = 4|8|64` — the DTLB
+probe-cache front entry (`C_tagR`, `C_tagW`, `C_host`) travels along JIT->JIT links as tail-call
+parameters (every JIT function is now `(i32 arg, i64, i64, i32)`; `nanobox_jit_call` passes poison, so
+entry from cpu_loop and handler steps behave exactly as before), and forward in-region edges are a direct
+`br` to the body label instead of `L_cur` + `br_table`. Deferred flags, entry classes, self-check and the
+memory handoff stay in the code behind their bits, OFF. Full probes −37 % on the hot loop; measured
++2.6 % (4/4) and +5.0 % respectively in Q. **Gate: IDENTITY identical (codex + agy), BISECT no
+divergence**; bundles re-recorded (the signature change invalidated them). Ticks identical between the
+default mask and mask 0 in one binary.
