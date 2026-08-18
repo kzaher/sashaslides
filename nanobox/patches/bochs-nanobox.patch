@@ -1393,10 +1393,10 @@ index 000000000..0c5787cb0
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..39e507cad
+index 000000000..a5cd1be25
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,4714 @@
+@@ -0,0 +1,4722 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -4404,10 +4404,18 @@ index 000000000..39e507cad
 +    // syncs. Identity mode keeps the per-iteration form.
 +    const unsigned tick = aotRelaxed() ? (nanobox_jit_aot_tick ? nanobox_jit_aot_tick : 1) : 1;
 +    if (tick > 1) {
++      // icount is charged EVERY iteration: it is the guest's clock, and an exit in the middle of a
++      // window would otherwise report a stale value. (Measured: with icount charged only at the sync,
++      // codex dies during start-up with "sqlite pool timed out" -- the guest's timer interrupts come
++      // late, its threads stop being preempted and a lock holder starves. Four instructions per
++      // iteration buy an exact clock; what stays periodic is the expensive part below.)
++      em->get(L_ic0); em->i64c((Bit64s)(k + 1)); em->op(I64_ADD); em->set(L_ic0);
 +      em->get(L_tick); em->i32c(1); em->op(I32_SUB); em->tee(L_tick); em->op(I32_EQZ);
 +      iff();
++      em->get(L_ic0); em->set(now);
++    } else {
++      em->get(L_ic0); em->i64c((Bit64s)(k + 1)); em->op(I64_ADD); em->set(now);
 +    }
-+    em->get(L_ic0); em->i64c((Bit64s)(k + 1) * (Bit64s) tick); em->op(I64_ADD); em->set(now);
 +    em->get(now); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount_last_sync), 3); em->op(I64_SUB); em->op(I32_WRAP_I64); em->set(delta);
 +    // if (delta >= currCountdown) -> exit (cpu_loop runs the timers)
 +    em->get(delta); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->op(I32_GE_U);

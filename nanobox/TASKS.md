@@ -1121,15 +1121,25 @@ Measured with in-guest markers around the loop (`@@NANOBOX-DUMP:pre@@` / `post`)
 varies by seconds under AOT -- is excluded. Differencing two whole runs, which is what the first
 attempt did, is useless here: AOT boot variance swamped a 200 M-iteration difference.
 
-| engine | ns per fib iteration |
-|---|---|
-| before the density work, AOT on | 2.89 |
-| before, AOT off (the trace JIT) | 2.22 |
-| **after, AOT on** | **2.08** |
-| after, AOT off | 2.30 |
-| native wasm from the same C source | 0.53 |
+| engine | ns per fib iteration | icount for the loop |
+|---|---|---|
+| before the density work, AOT on | 2.89 | 601.6 M |
+| before, AOT off (the trace JIT) | 2.22 | 601.6 M |
+| **after, AOT on** | **2.34** | 601.7 M |
+| after, AOT off | 2.32 | 601.6 M |
+| native wasm from the same C source | 0.53 | -- |
 
-**AOT went from 30 % slower than the trace JIT to 10 % faster**, and the distance to native fell from
-5.5x to 3.9x. Note the asymmetry: the instruction count dropped 4x (84 -> 21) but wall clock only 28 %.
-V8 was already folding much of the redundant local traffic, so instruction-count reduction pays less
-than it reads on paper -- worth knowing before spending more effort purely on counting.
+**AOT went from 30 % slower than the trace JIT to parity**, 19 % faster than where it started, and the
+distance to native fell from 5.5x to 4.4x. The instruction count dropped from 84 to 26 amortised while
+wall clock moved 19 %: V8 was already folding much of the redundant local traffic, so instruction-count
+reduction pays less than it reads on paper -- worth knowing before spending more effort on counting.
+
+**A first version of this measured 2.08 ns and "10 % faster than the trace JIT", and both were wrong.**
+The periodic back-edge sync charged `icount` only at the sync, so a loop exiting mid-window reported a
+stale clock. The guest noticed before any benchmark did: **codex died during start-up with
+"failed to initialize sqlite local db ... pool timed out while waiting for an open connection"** --
+timer interrupts arrived late, threads stopped being preempted, and a lock holder starved. The fix
+charges icount every iteration (4 instructions) and keeps only the expensive checks periodic; the
+matching icounts in the table above (601.7 M vs 601.6 M) are the signal that the clock is exact again.
+LESSON: when an optimisation touches the guest clock, an icount that no longer matches the reference
+run is the tell -- and a speed number taken while the clock is short is not a speed number.
