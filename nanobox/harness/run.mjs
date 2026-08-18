@@ -884,6 +884,16 @@ function finish(code) {
       console.error("[harness] top executed opcodes (inline/fallback): " + dyn.slice(0, 50).map(([n, i, f]) => `${n.replace("BX_IA_", "")}:${i}/${f}`).join(" "));
       const dfbTop = dyn.filter((d) => d[2] > 0).sort((a, b) => b[2] - a[2]);
       console.error("[harness] top DYNAMIC fallbacks (handler steps): " + dfbTop.slice(0, 40).map(([n, i, f]) => `${n.replace("BX_IA_", "")}:${f}`).join(" "));
+      // per-opcode COST: static template bytes per compiled instance x executions = executed template
+      // bytes; ranks where the emitted code's cost actually is (bytes track wasm ops closely)
+      const cost = [];
+      for (let ia = 0; ia < nops; ia++) {
+        const inst = ex.nanobox_jit_opstat(ia, 1), bytes = ex.nanobox_jit_opstat(ia, 4), execs = ex.nanobox_jit_opstat(ia, 3);
+        if (inst && execs) cost.push([nameOf(ia).replace("BX_IA_", ""), inst, bytes / inst, execs, execs * bytes / inst]);
+      }
+      const total = cost.reduce((s, c) => s + c[4], 0);
+      cost.sort((a, b) => b[4] - a[4]);
+      console.error(`[harness] template COST (executed template bytes ${(total / 1e9).toFixed(2)} G): ` + cost.slice(0, 30).map(([n, inst, bpi, ex, tot]) => `${n}:${bpi.toFixed(0)}B/inst x${(ex / 1e6).toFixed(1)}M=${(100 * tot / total).toFixed(1)}%`).join(" "));
     }
   }
   if (opts.transcript) fs.writeFileSync(opts.transcript, Buffer.concat(transcript));

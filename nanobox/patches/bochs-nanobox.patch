@@ -720,10 +720,10 @@ index 000000000..c5350a6af
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..22656af0b
+index 000000000..364e1d81f
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,3179 @@
+@@ -0,0 +1,3185 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -862,6 +862,9 @@ index 000000000..22656af0b
 +// dynamic (execution) counts, only maintained when nanobox_jit_level >= 3 (profiling mode)
 +static Bit64u nanobox_dyn_inline[BX_IA_LAST];
 +static Bit64u nanobox_dyn_fallback[BX_IA_LAST];
++// static bytes of wasm emitted by the template of each opcode, summed over its compiled instances
++// (bytes track wasm ops closely enough to rank templates by cost: bytes/instance x executions)
++static Bit64u nanobox_tpl_bytes[BX_IA_LAST];
 +NB_EXPORT(nanobox_jit_opstat) double nanobox_jit_opstat(unsigned ia, unsigned which)
 +{
 +  if (ia >= BX_IA_LAST) return 0;
@@ -869,6 +872,7 @@ index 000000000..22656af0b
 +    case 0: return nanobox_fallback_count[ia];
 +    case 1: return nanobox_inline_count[ia];
 +    case 2: return (double) nanobox_dyn_fallback[ia];
++    case 4: return (double) nanobox_tpl_bytes[ia];
 +    default: return (double) nanobox_dyn_inline[ia];
 +  }
 +}
@@ -3309,12 +3313,14 @@ index 000000000..22656af0b
 +        }
 +        // each template runs inside its own block so it can `br` out of itself
 +        // (used by the CL-count shifts when count == 0)
++        uint32_t markTpl = m.code.n;   // after the profiling counter: the template's own bytes
 +        blk();
 +        done = emitTemplate(k, last);
 +        endb();
 +        if (!done) m.code.n = mark; // template declined before emitting anything: drop the wrapper
 +        if (done) {
 +          nanobox_inline_count[ins[k].getIaOpcode()]++;
++          nanobox_tpl_bytes[ins[k].getIaOpcode()] += m.code.n - markTpl;
 +          if (needAsyncCheck && !last) {
 +            // an instruction that may have raised an async event (MMIO, SMC, ...) ends the trace
 +            // after completing, exactly like BX_NEXT_INSTR's check.
