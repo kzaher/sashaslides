@@ -1056,3 +1056,61 @@ Keystroke latency, the thing the user actually feels, is NOT worse under AOT: 13
 (against 167 ms for the shipping engine, with a far tighter spread: 136-146 ms vs 141-173 ms) and a
 302 ms outlier in the other. That is where AOT should be expected to win — steady-state code that is
 already hot — and it is the measurement to repeat once entries get cheaper.
+
+## S. Density: making the emitted code as small as the work it does (2026-08-18)
+
+The measurement kernel is an iterative Fibonacci compiled twice from ONE C source (`work/fib/fib.c`):
+to wasm (12 instructions per loop iteration, clang) and to x86-64 (6 instructions per iteration). The
+guest runs the x86 one and the engine translates it back to wasm, so the native 12 is the ceiling a
+perfect translator would reach -- as the user put it, converting 6 x86 instructions into 12 wasm ones
+is what the same compiler already did.
+
+| step (all AOT-only unless noted) | wasm instructions per iteration |
+|---|---|
+| where the round started | 84 |
+| the two statistics counters on a self-loop back edge were emitted unconditionally | 72 |
+| ALU emits `get, get, op, set` when the flag liveness analysis already proved the flags dead (global; identity-safe, gate green) | 60 |
+| the inter-trace sync (guest clock, `async_event`, fetch window) made periodic -- once per `nanobox_jit_aot_tick` (64) iterations instead of every one | 26 |
+| a compare leaves its operands in their register locals instead of copying them into the deferred-flag locals | **22** (fast path 21) |
+| *native wasm from the same source* | *12* |
+
+What the remaining 21 are: **12** for the guest's four register ops (`mov` 2 each, `add` 4 each -- minimal),
+**3** for the compare, **6** for the branch and the interrupt countdown. The guest work (15) is already
+within a quarter of native's 12 for the same computation; what is left on top is the interrupt check.
+
+**A regression I introduced, and how it was found.** The operand aliasing hung call-heavy guest code:
+a 1M-call benchmark that takes 1.2 s with the flag off ran past a 250 s timeout. **The identity gate
+could not see it** -- AOT mode turns deferred flags ON (`nanobox_jit_flags |= 1|2`) and the gate runs
+with them OFF, so the affected path is never exercised there. Two runtime bisect knobs
+(`NANOBOX_FLAGS` bit 128 = no direct ALU, bit 256 = no aliasing) pinned it in a single build: aliasing
+off -> 8.5 s and correct, direct-ALU off -> still hung. The cause: an alias claims "this operand is
+still in its register local", and a cold path may reload that local from memory, after which the flags
+materialise from a stale value -- a wrong branch condition, hence the infinite loop. The alias now
+lives for exactly ONE instruction (the consumer immediately after the compare), which is the case that
+pays. RULE: an AOT-only change needs an AOT-only test; the gate proves the default engine and nothing
+about the flag-on path.
+
+### S.1 Where the cost actually is (per-opcode, executed, real codex run)
+
+`template COST` over 10,461.9 G executed template bytes:
+
+| opcode | bytes/site | executions | share |
+|---|---|---|---|
+| MOV_GqEq | 473 | 1,982 M | 9.0 % |
+| **PUSH_Eq** | 561 | 1,428 M | **7.7 %** |
+| **CALL_Jq** | 825 | 895 M | **7.1 %** |
+| **POP_Eq** | 484 | 1,508 M | **7.0 %** |
+| **RET_Op64** | 756 | 898 M | **6.5 %** |
+| MOV_EqGq | 175 | 3,675 M | 6.2 % |
+
+**Stack traffic (push/call/pop/ret) is 28.3 % of everything executed** -- the largest single category.
+And calls outnumber interrupts by ~4 orders of magnitude (~895 M calls against ~3.9 k longjmps per
+1.5 G instructions), so flushing deferred state at interrupts would indeed be free.
+
+But the cost of a call is not the return-address store: it is that **a CALL leaves the translated
+unit** (exit epilogue -> shared link -> find the callee -> enter, and the reverse on RET). Measured:
+one non-inlinable call per iteration costs **1.9 ns natively** and the VM needs a ~9 s run for 200 k
+iterations. Removing the store outright was tried and **the guest hangs before printing anything** --
+the kernel changes stacks constantly, so a shadow-stack entry stops matching and the address it needs
+was never written; `nanobox_jit_aot_nostack` keeps the experiment reproducible, default off. The store
+is the floor; the machinery around it is not, and that is the next piece of work.

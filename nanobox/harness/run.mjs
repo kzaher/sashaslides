@@ -632,7 +632,9 @@ function installJitHost(inst) {
     // AOT-mode formation knobs (A/B of the region former: successors that join a region)
     for (const [env, fn, what] of [["NANOBOX_AOT_DEDUPE", "nanobox_set_jit_aot_dedupe", "successor already translated elsewhere is NOT copied in"],
                                    ["NANOBOX_AOT_MINHOT", "nanobox_set_jit_aot_minhot", "successor joins only above this execution count"],
-                                   ["NANOBOX_AOT_AHEAD", "nanobox_set_jit_aot_ahead", "decode successors that are not in the iCache yet"]]) {
+                                   ["NANOBOX_AOT_AHEAD", "nanobox_set_jit_aot_ahead", "decode successors that are not in the iCache yet"],
+                                   ["NANOBOX_AOT_TICK", "nanobox_set_jit_aot_tick", "iterations between full syncs on a self-loop back edge"],
+                                   ["NANOBOX_AOT_NOSTACK", "nanobox_set_jit_aot_nostack", "CALL/RET keep the return address on a host shadow stack, nothing is written to the emulated stack"]]) {
       if (process.env[env] != null && ex[fn]) { ex[fn](Number(process.env[env])); console.error(`[harness] AOT former: ${env}=${process.env[env]} (${what})`); }
     }
     if (opts.jitDump) fs.mkdirSync(opts.jitDump, { recursive: true });
@@ -894,7 +896,7 @@ function finish(code) {
     // final counters, so a window can be isolated by subtracting the ones recorded at a marker/--expect
     if (ex.nanobox_stat) summary.statsEnd = { traces: ex.nanobox_stat(2), jitTraces: ex.nanobox_stat(3), jitCompiled: ex.nanobox_stat(4), loopbacks: ex.nanobox_stat(5), links: ex.nanobox_stat(6), slow: ex.nanobox_stat(7), linkFail: [8,9,10,11,12,13,14,15].map((i) => ex.nanobox_stat(i)), cache: ex.nanobox_jit_cache_stat ? [ex.nanobox_jit_cache_stat(0), ex.nanobox_jit_cache_stat(1), ex.nanobox_jit_cache_stat(2)] : null };
     // AOT-mode census (engines with the extended stats): in-region transitions, interpreted dispatch, region former counters
-    if (ex.nanobox_stat && ex.nanobox_stat(16) >= 0) summary.aot = { intrans: ex.nanobox_stat(16), interpTraces: ex.nanobox_stat(17), interpIcount: ex.nanobox_stat(18), census: ex.nanobox_aot_stat ? Array.from({ length: 16 }, (_, i) => ex.nanobox_aot_stat(i)) : null };
+    if (ex.nanobox_stat && ex.nanobox_stat(16) >= 0) summary.aot = { intrans: ex.nanobox_stat(16), interpTraces: ex.nanobox_stat(17), interpIcount: ex.nanobox_stat(18), shadowMiss: ex.nanobox_stat(19), census: ex.nanobox_aot_stat ? Array.from({ length: 16 }, (_, i) => ex.nanobox_aot_stat(i)) : null };
     if (ex.nanobox_jit_region_stat && ex.nanobox_jit_region_stat(16) > 0) summary.regionStats = Array.from({ length: 32 }, (_, i) => ex.nanobox_jit_region_stat(i));
     if (ex.nanobox_jit_member_stat) summary.memberMap = { put: ex.nanobox_jit_member_stat(0), hit: ex.nanobox_jit_member_stat(1), miss: ex.nanobox_jit_member_stat(2), resets: ex.nanobox_jit_member_stat(3), used: ex.nanobox_jit_member_stat(4) };
   }
