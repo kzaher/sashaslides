@@ -746,3 +746,44 @@ is coverage-limited). Remaining handler steps: `DIV_EAXEd` 796 k, `BLSMSK` 198 k
 so a CROSS-build hot-loop A/B reads `ticks DIFFER` and its MIPS delta is not apples-to-apples (measured:
 "+0.4 %" cross-build for a change the single-binary A/B shows at +6.2 %). Use single-binary runtime
 switches for A/B (as L, N, O did), and cross-build only for boot/keystroke on the codex scenario.
+
+## P. Where executed wasm ops go — the per-path accounting (2026-08-18, `work/j/hlo`, level 3 only)
+
+Every straight-line path the emitter produces gets a slot {opcode, kind, per-category static ops};
+nested paths (a taken Jcc arm, a probe fill, a slow arm, an exit) are their own slots subtracted from
+their ancestors, so a body slot holds exactly its own ops. Sanity: the link hop measures 92.0 ops, exactly
+section J's counter; MOV_Op64_GdEd read by hand from `wasm-objdump` matches its slot to the op. Tooling:
+`work/prof/hlo-run.mjs --hlo-out F.json` + `hlo-report.mjs F [--forms|--kinds]`, `NANOBOX_HLO=<mask>`.
+
+| executed ops by kind | hot loop (212 G ops, 63.7/guest instr, 78/JIT'd instr) | codex boot+typing (57.6 G, 37.3/guest, 69.8/JIT'd) |
+|---|---|---|
+| template bodies | 31.7 % | 33.7 % |
+| **full DTLB probe + tag fill (92 ops)** | **23.5 %** | **22.6 %** |
+| front-entry miss test + swap (35 ops) | 9.2 % | 9.3 % |
+| link hop (92/hop) | 14.8 % | 15.0 % |
+| prologue (28/entry) | 6.4 % | 5.3 % |
+| exit (chain + tail, ~30) | 5.1 % | 5.3 % |
+| link-fail / trans / handler / jcc-taken / loop / slow | 3.1 / 2.6 / 1.7 / 1.7 / 0.1 / 0.0 | 4.5 / 1.4 / 0.4 / 1.5 / 0.8 / 0.0 |
+| by category: op / **mem** / rip / flags / regs / **exit** / async | 11.7 / **44.9** / 5.3 / 9.6 / 3.6 / **20.5** / 3.1 % | 13.4 / **43.5** / 4.8 / 9.7 / 3.2 / **21.9** / 2.8 % |
+| function entries; templates per entry | 343 M; **7.7** | 100 M; **8.2** |
+| memory accesses; front-entry miss; **full DTLB probe** | 1.09 G; 55 %; **49 %** | 277 M; 59 %; **49 %** |
+
+**~1/3 body, ~1/3 probe refills, ~1/3 boundary.** Half of all memory accesses run the full 92-op probe
+because the probe cache is poisoned at every function entry and a function runs ~8 templates (MOV_GqEq
+loads refill 72 % of the time, stack ops 21-41 %). Per instance: MOV_GqEq 127 ops (94 fill), CALL 136
+(54), RET 125 (53), PUSH 74 (36), POP 63 (28); CMP_EbIb 115 of which **29 lazy-flag ops**; INC_Eq 44 of
+which 33 flags; a taken `cmp; jne` pays ~370 ops all in (43 + 32 + 92 link + 28 prologue + ~2 refills).
+
+What the user asked to remove, checked against the table:
+* RIP / prev_rip / icount per instruction: **already zero** in bodies (5.3 % of ops, all at observers).
+* dead register writebacks: **none in bodies** (stores only in exit chains, handler steps, cold arms).
+* redundant local copies: found and removed (PUSH 8->6, POP 9->5, RET 17->15, MOV store 3.6->2.7 ops):
+  −1.8 % executed ops, hot loop −0.8 % median = noise, ticks/icount identical — kept behind mask bits 2|4.
+* `i32.const 0` bases: 7 % of executed ops, but V8 folds base 0 + offset; wasm has no memarg without a base.
+* outlined fill (one shared `fill(la, size|bit)` function): **−15…−20 % bytes** but **−9 % hot-loop MIPS**
+  while 49 % of accesses still refill (an indirect call per fill); a wash on codex. Becomes free profit
+  once tags survive across entries. Kept behind mask bits 8|16.
+
+**Conclusion: carrying the two probe-cache entries across function entries removes ~30 % of executed
+ops in both workloads and unlocks the −20 % bytes of the outlined fill. That is the single item;
+direct conditions (~29 ops per CMP, ~10 %) is second.**
