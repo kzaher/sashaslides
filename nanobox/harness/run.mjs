@@ -84,6 +84,9 @@ for (let i = 1; i < argv.length; i++) {
   else if (a === "--checkpoint-at") opts.checkpointAt = v();   // marker label ("@@NANOBOX-DUMP:LABEL@@") or "expect" (when --expect fires)
   else if (a === "--checkpoint-gz") opts.checkpointGz = true;  // gzip the memory image (32 MiB chunks, level 1); default is a raw write (fastest to load)
   else if (a === "--checkpoint") opts.checkpoint = v();        // resume from a checkpoint file (same engine build, same image/spec/cmd)
+  else if (a === "--aot-script") opts.aotScript = v();         // AOT precompilation (tools/aot-precompile.mjs): ESM file whose session({...}) runs INSIDE the engine's poll hook (between traces) once the guest printed the --aot-at marker; the run finishes right after it (bundle written by --jit-bundle-out)
+  else if (a === "--aot-args") opts.aotArgs = v();             // JSON passed to session()
+  else if (a === "--aot-at") opts.aotAt = v();                 // marker label that arms the session (default "aot": the guest prints @@NANOBOX-DUMP:aot@@)
   else { console.error("unknown option " + a); process.exit(2); }
 }
 if (opts.checkpointOut && !opts.checkpointAt) { console.error("--checkpoint-out needs --checkpoint-at LABEL"); process.exit(2); }
@@ -96,6 +99,8 @@ const t0 = performance.now();
 const FIXED_EPOCH_NS = 1_700_000_000n * 1_000_000_000n; // 2023-11-14T22:13:20Z, same as bochsrc time0
 const wasmBytes = fs.readFileSync(opts.wasm);
 await import("../web/jit-bundle.js"); // NanoboxJitBundle: bundle file format + engine tag (shared with the browser host)
+const aotMod = opts.aotScript ? await import((await import("node:url")).pathToFileURL(path.resolve(opts.aotScript)).href) : null; // --aot-script
+let aotArmed = false, aotDone = false, aotResult = null;
 await import("../web/native/hostchan.js"); // NanoboxHostChan: /dev/hvc1 <-> JS byte stream
 await import("../web/native/proto.js"); await import("../web/native/hcring.js"); await import("../web/native/guest.js"); // system-node RPC client
 import { Worker } from "worker_threads";
@@ -202,6 +207,7 @@ function takeDump(label) {
   dumps.push(rec);
   console.error(`\n[harness] DUMP ${JSON.stringify(rec)}`);
   if (opts.checkpointOut && label === opts.checkpointAt) armCheckpoint(label);
+  if (aotMod && label === (opts.aotAt || "aot")) { aotArmed = true; console.error(`[harness] AOT session armed at marker ${label} (runs at the next poll, between traces)`); }
 }
 // SHA-256 of all guest RAM in guest-physical order (unallocated blocks hash as zeros), optionally
 // written to `file`; also the block map's own hash. Shared by markers and checkpoint verification.
@@ -310,6 +316,15 @@ imp.poll_oneoff = (in_ptr, out_ptr, nsubs, nevents_ptr) => {
   view.setUint32(nevents_ptr, events.length, true);
   if (opts.stats) { const now = performance.now(); if (now - lastStat > 5000) { lastStat = now; progress(); } }
   if (opts.watch != null) watchCheck();
+  if (aotArmed && !aotDone) {
+    // --aot-script: the precompile session runs here, between traces (poll_oneoff is reached from
+    // Bochs' timer handlers after a trace returned to cpu_loop), then the run ends: the modules the
+    // engine installed during the session are in jitState.records for --jit-bundle-out
+    aotDone = true;
+    try { aotResult = aotMod.session({ inst, exports: inst.exports, memory: mem, args: opts.aotArgs ? JSON.parse(opts.aotArgs) : {}, jitState, engineTag, log: (m) => console.error(m) }); }
+    catch (e) { console.error("[harness] AOT session failed:", e && e.stack || e); aotResult = { error: String(e && e.message || e) }; }
+    finish(aotResult && aotResult.error ? 3 : 0);
+  }
   // --timeout: the VM loop never yields, so a JS timer cannot fire; check the clock here instead
   if (opts.timeout && performance.now() - t0 > opts.timeout * 1000) { console.error("[harness] timeout"); finish(124); }
   return 0;
@@ -593,6 +608,17 @@ function installJitHost(inst) {
     if (process.env.NANOBOX_JIT_PROBE2 === "0" && ex.nanobox_set_jit_probe2) { ex.nanobox_set_jit_probe2(0); console.error("[harness] JIT two-entry probe cache OFF (A/B)"); }
     if (opts.jitMaxlen && ex.nanobox_set_jit_maxlen) ex.nanobox_set_jit_maxlen(Number(opts.jitMaxlen));
     if (opts.jitRegion != null && ex.nanobox_set_jit_region) ex.nanobox_set_jit_region(Number(opts.jitRegion));
+    // AOT mode (TASKS.md R): NANOBOX_AOT=1 -> function-scope static regions, compile on first touch, relaxed
+    // boundaries, direct conditions; identity with the reference engine is NOT expected in this mode.
+    // NANOBOX_FLAGS=mask overrides nanobox_jit_flags afterwards (A/B of the direct-condition bits etc.)
+    if (process.env.NANOBOX_AOT != null && ex.nanobox_set_jit_aot) { ex.nanobox_set_jit_aot(Number(process.env.NANOBOX_AOT)); console.error(`[harness] JIT AOT mode ${process.env.NANOBOX_AOT}`); }
+    if (process.env.NANOBOX_FLAGS != null && ex.nanobox_set_jit_flags) { ex.nanobox_set_jit_flags(Number(process.env.NANOBOX_FLAGS)); console.error(`[harness] JIT flags mask ${process.env.NANOBOX_FLAGS}`); }
+    // AOT-mode formation knobs (A/B of the region former: successors that join a region)
+    for (const [env, fn, what] of [["NANOBOX_AOT_DEDUPE", "nanobox_set_jit_aot_dedupe", "successor already translated elsewhere is NOT copied in"],
+                                   ["NANOBOX_AOT_MINHOT", "nanobox_set_jit_aot_minhot", "successor joins only above this execution count"],
+                                   ["NANOBOX_AOT_AHEAD", "nanobox_set_jit_aot_ahead", "decode successors that are not in the iCache yet"]]) {
+      if (process.env[env] != null && ex[fn]) { ex[fn](Number(process.env[env])); console.error(`[harness] AOT former: ${env}=${process.env[env]} (${what})`); }
+    }
     if (opts.jitDump) fs.mkdirSync(opts.jitDump, { recursive: true });
     console.error(`[harness] JIT enabled: level=${lvl} threshold=${thr || "default"}`);
   }
@@ -851,6 +877,10 @@ function finish(code) {
     summary.ticks = u64(ex.nanobox_ticks_lo(), ex.nanobox_ticks_hi()).toString();
     // final counters, so a window can be isolated by subtracting the ones recorded at a marker/--expect
     if (ex.nanobox_stat) summary.statsEnd = { traces: ex.nanobox_stat(2), jitTraces: ex.nanobox_stat(3), jitCompiled: ex.nanobox_stat(4), loopbacks: ex.nanobox_stat(5), links: ex.nanobox_stat(6), slow: ex.nanobox_stat(7), linkFail: [8,9,10,11,12,13,14,15].map((i) => ex.nanobox_stat(i)), cache: ex.nanobox_jit_cache_stat ? [ex.nanobox_jit_cache_stat(0), ex.nanobox_jit_cache_stat(1), ex.nanobox_jit_cache_stat(2)] : null };
+    // AOT-mode census (engines with the extended stats): in-region transitions, interpreted dispatch, region former counters
+    if (ex.nanobox_stat && ex.nanobox_stat(16) >= 0) summary.aot = { intrans: ex.nanobox_stat(16), interpTraces: ex.nanobox_stat(17), interpIcount: ex.nanobox_stat(18), census: ex.nanobox_aot_stat ? Array.from({ length: 16 }, (_, i) => ex.nanobox_aot_stat(i)) : null };
+    if (ex.nanobox_jit_region_stat && ex.nanobox_jit_region_stat(16) > 0) summary.regionStats = Array.from({ length: 32 }, (_, i) => ex.nanobox_jit_region_stat(i));
+    if (ex.nanobox_jit_member_stat) summary.memberMap = { put: ex.nanobox_jit_member_stat(0), hit: ex.nanobox_jit_member_stat(1), miss: ex.nanobox_jit_member_stat(2), resets: ex.nanobox_jit_member_stat(3), used: ex.nanobox_jit_member_stat(4) };
   }
   if (jitState.table) {
     summary.jit = { installed: jitState.installed, batches: jitState.batches, released: jitState.released, live: jitState.fns.size, bytes: jitState.bytes, compileMs: +jitState.compileMs.toFixed(1), tableMs: +jitState.tableMs.toFixed(1) };
@@ -897,6 +927,7 @@ function finish(code) {
       console.error(`[harness] template COST (executed template bytes ${(total / 1e9).toFixed(2)} G): ` + cost.slice(0, 30).map(([n, inst, bpi, ex, tot]) => `${n}:${bpi.toFixed(0)}B/inst x${(ex / 1e6).toFixed(1)}M=${(100 * tot / total).toFixed(1)}%`).join(" "));
     }
   }
+  if (aotResult) summary.aotSession = aotResult;
   if (opts.transcript) fs.writeFileSync(opts.transcript, Buffer.concat(transcript));
   console.error("\n[harness] SUMMARY " + JSON.stringify(summary));
   process.exit(code === 0 ? 0 : (code || 0));

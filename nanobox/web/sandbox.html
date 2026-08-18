@@ -282,7 +282,11 @@ async function bootVm() {
       // engine this page loads; the harness-recorded ones carry the full engine's tag and the worker
       // drops them. Ask for both and let the tag check decide.
       const names = ["kernel.nbjb", image + ".nbjb", image + "-slim.nbjb", cli + "-slim.nbjb"]
-        .concat(qs.get("clibundle") === "1" ? [cli + ".nbjb"] : []);
+        .concat(qs.get("clibundle") === "1" ? [cli + ".nbjb"] : [])
+        // ?aot=1 (TASKS.md R): the precompiled artifacts -- every function of the kernel and of the
+        // native binaries translated ahead of time (tools/aot-kernel.mjs), so the guest runs compiled
+        // code from the first instruction instead of compiling it on the way.
+        .concat(qs.get("aot") === "1" ? ["aot-kernel.nbjb", "aot-" + image + ".nbjb", "aot-" + cli + ".nbjb"] : []);
       jitBundles = names.filter((n) => have.has(n)).map((n) => new URL("/engine/opt/jit/" + n, location.href).href); if (!jitBundles.length) jitBundles = null; } } catch {}
   }
   const vmWorker = new Worker(new URL("/sandbox-worker.js", location.href).href);
@@ -331,6 +335,7 @@ async function bootVm() {
   vmWorker.postMessage({ type: "init", info, args, cfg: {
     jit, direct: true, imageAddr, specUrl: new URL("/images/" + image + "/" + specName, location.href).href,
     jitBundles, engineTag, noCache,
+    aot: qs.get("aot") === "1",   // AOT mode (TASKS.md R): function-scope regions, everything compiled on first touch
     // The JIT cache the browser keeps for itself: the worker looks for auto-<engine tag>.nbjb, and if
     // there is none it records this run at a low threshold (compiling far more than the steady-state
     // 2000 would) and uploads it, so the NEXT run of this engine build starts with the code already

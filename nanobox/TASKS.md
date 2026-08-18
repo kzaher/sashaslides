@@ -867,3 +867,91 @@ Design (assembled from measured pieces, all in tree):
   `.symtab` at a fixed PIE base (`norandmaps` on the cmdline) — forms and compiles every function into an
   `.nbjb` bundle the existing loader consumes; a level-3 counter reports entries NOT served by compiled
   code (target: ~0; handler steps for untemplated instructions are the only remaining interpretation).
+
+### R.1 First measurements of AOT mode (2026-08-18, `build/aot`, one binary, `NANOBOX_AOT=0/1`, bundle-free, interleaved)
+
+Hot loop (busybox `while`, 3.32 G instr, whole run incl. boot):
+
+| variant | MIPS | wall | wasm compiled | modules |
+|---|---|---|---|---|
+| AOT off (= the shipping engine) | 221.7 / 222.9 | 15.2 / 15.2 s | 4.3 MB | 1,260 |
+| AOT on | 132.9 / 131.1 | 25.3 / 25.6 s | 320 MB | 26,394 |
+| AOT on + dedupe | 142.2 | 23.7 s | 234 MB | 28,577 |
+| AOT on + minhot | 147.3 | 22.8 s | 141 MB | 49,138 |
+| AOT on + dedupe + minhot | 182.0 | 18.5 s | 126 MB | 48,901 |
+
+Ten times the loop (16.6 G instr) — the one-time compile amortised: off **183.2**, on **141.2**, on+both
+**162.0** MIPS. So the loss is NOT only compile time: the region code itself is slower here, which is
+expected — a tight self-loop is the trace JIT's best case (single-trace loop, registers in locals across
+iterations), while in a region the same loop is a member block reached through the region's dispatch.
+
+codex scenario (boot to the sign-in prompt, then keystrokes a–d):
+
+| variant | boot | keystroke median | wasm compiled | modules | regions |
+|---|---|---|---|---|---|
+| AOT off | 6.5 / 7.3 s | 157 / 207 ms | 16.7 MB | 5,194 | 1,397 |
+| AOT on | 28.6 / 30.0 s | 215 / 205 ms | **652 MB** | 65,714 | 214,151 |
+| AOT on + dedupe + minhot | 18.2 s | 173 ms | 304 MB | 101,937 | 1,488 |
+
+**The finding: compiling everything AT RUNTIME is the wrong shape.** 652 MB of wasm for a codex boot is
+39× the baseline's 16.7 MB, and the counters say why: `call` 791 k / `cont` 773 k (every direct CALL pulls
+its continuation into the region), 214 k regions at 6.1 blocks each with 171 k region-key cache hits —
+the same blocks translated over and over, most of them never executed. Interpretation only fell from
+720 M to 565 M instructions for that price, and the residual 564.7 M is identical in every AOT run and
+in every workload: it is the boot phase before the JIT can act, which no runtime threshold reaches.
+
+This is the argument FOR the user's instruction ("everything needs to be precompiled") and against
+compiling at first touch: the translation has to exist before the run, and it has to be compact — the
+next step is the offline artifact (`tools/aot-kernel.mjs`) and the size it produces.
+
+### R.2 The precompiled artifact, and what AOT mode actually delivers (2026-08-18)
+
+`tools/aot-kernel.mjs` — the offline translator. It hands itself to `harness/run.mjs` as `--aot-script`,
+so it runs INSIDE the engine between traces, walks every text symbol of `System.map` and calls the
+engine's own `nanobox_aot_compile_function(...)` per function; every module lands under the content key
+a later boot computes, and `--jit-bundle-out` writes a normal `.nbjb`. The boot that carries it runs at
+threshold 1e9 — the JIT is on (the session needs level 2) but nothing compiles until the session drives
+it, so the artifact holds precompiled translations and not a recording of a boot.
+
+**The whole kernel precompiles in 4.2 s**: 29,013 functions -> 121,753 translations, 30,500 functions in
+2,329 batch modules, 262 MB of wasm, 0 functions unmapped (nokaslr: lin - 0xffffffff80000000 = phys,
+verified). With `NANOBOX_AOT_DEDUPE=1`: 126,068 translations, 207 MB, 2.9 s. Loading it into a run
+works — 24,857 bundle hits on a codex boot, and the hot loop then compiles **16 MB at runtime instead
+of 320 MB**.
+
+**Interpreted code, the user's actual requirement.** The wizer snapshot itself carries icount
+563,103,540 / 95,543,412 traces — everything before the engine starts this run (real-mode boot,
+protected mode, early kernel; the JIT only translates long mode). Subtracting it gives the interpretation
+that happens IN THE RUN:
+
+| | interpreted instructions in-run | traces |
+|---|---|---|
+| shipping engine (AOT off) | 157.2 M | 21.8 M |
+| **AOT mode** | **1.60 M** | 0.21 M |
+| AOT mode + precompiled kernel | **1.30 M** | 0.16 M |
+
+So AOT mode does what was asked: **99 % of interpreter dispatch is gone.** What it costs today:
+
+| codex scenario | boot | keystroke | wasm |
+|---|---|---|---|
+| shipping engine | 6.5 / 7.3 s | 157 / 207 ms | 16.7 MB |
+| AOT mode | 28.6 / 30.0 s | 215 / 205 ms | 652 MB |
+| AOT + dedupe + minhot | 18.2 s | 173 ms | 304 MB |
+| AOT + precompiled kernel bundle | 33.1 s | 208 ms | 348 MB (+580 MB bundle to instantiate) |
+| AOT + deduped kernel bundle | 23.0 s | 167 ms | 326 MB (+439 MB bundle) |
+
+**Why it is slower, in one number: volume, not density.** Per compiled instruction the region path emits
+157 bytes against the trace path's 129 (the offline translator: 71) — same order. But AOT mode translates
+**4.15 M instructions for a codex boot against the baseline's 129 k, i.e. 32x more**: `call` 803 k /
+`cont` 784 k (every direct CALL drags its continuation in), 216 k regions at 6.1 blocks, 193 k of which
+are content-key duplicates of code already translated. Almost all of it never executes. That is the
+whole regression -- with the kernel bundle serving the compiles, the hot loop still runs at 123 MIPS
+against 222, and the 10x-longer loop measures 141 vs 183 steady state, so the emitted region code is
+also ~20 % slower than the trace JIT on a tight self-loop (its best case: single-trace loop with
+registers in locals across iterations, which a region reaches through its dispatch instead).
+
+**What this says about "everything precompiled".** It works mechanically and it removes the interpreter.
+To make it WIN it has to get compact: 8.4 MB of kernel text became 262 MB of wasm (71 bytes per guest
+instruction). Section K's hand-translated probe was **15.7x denser** than the trace JIT at 4.7-9x the
+speed -- that density, not more coverage, is the remaining work, and it is a codegen project (registers
+in locals across the whole function, direct flags, no per-block prologue), not a former tuning knob.
