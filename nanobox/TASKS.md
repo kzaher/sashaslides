@@ -993,3 +993,66 @@ first kernel bundles were 580 MB for 205 MB of translations). `NANOBOX_THRESHOLD
 threshold AFTER the mode is selected, and the harness compiles bundle modules on FIRST USE
 (`NANOBOX_BUNDLE_EAGER=1` restores eager compilation; measured neutral on codex, a win when few
 modules are touched).
+
+### R.4 The AOT product, merged and gated (2026-08-18)
+
+AOT mode now lives in the shipping engine (`bochs/bochs`), off by default. **With the flag off the gate
+is green — `IDENTITY: identical (codex + agy)`, `BISECT: no divergence`** — and the default path costs
+nothing for carrying it: codex boot 6.47 / 7.34 / 7.16 s and keystroke 168-177 ms on the merged engine,
+the same as before it. `NANOBOX_AOT=1` (harness) or `?aot=1` (sandbox, which now also asks for
+`aot-*.nbjb` under both engine tags) selects it.
+
+The artifacts, produced against the shipping engine (`build/eh-nb/jit/`):
+
+| artifact | shipping JIT (recorded, executed code only) | AOT (every function) |
+|---|---|---|
+| kernel | 9.4 MB | **274.8 MB** (29,013 functions, 149,658 translations, 3.5 s) |
+| codex | 14.8 MB | 502 MB (recorded under the flag) |
+
+Loading both AOT artifacts, the flag on: **83.6 % of translations come from the artifact**
+(61,320 hits / 12,024 misses), the run compiles **54 MB instead of 652 MB**, and interpretation falls to
+**404,840 instructions** — against 157.2 M for the shipping engine, i.e. **99.7 % of interpreter
+dispatch removed**, which is what was asked for. Boot is still 22.7-26.7 s against 7.2 s, and the
+remaining cost is now visible in the counters: 38,746 regions are still FORMED at runtime (a region has
+to be formed before its content key can be looked up), 3,199 modules are compiled+instantiated (2.4 s),
+and the region code itself runs slower than the trace JIT's.
+
+**The lean end of the dial is the interesting one.** `NANOBOX_AOT=1 NANOBOX_AOT_AHEAD=0` -- threshold 1
+(nothing interpreted) but no speculative growth (only code that executed joins a region) -- gives boot
+17.4 s with **keystroke 162 ms, the best of every AOT configuration measured and no worse than the
+shipping engine's 168-201 ms**, with 6,349 regions instead of 38,746. That says the speculation, not
+the AOT idea, is what costs: translating what runs is affordable, translating everything reachable is
+not (R.3's size wall).
+
+### R.5 Why "no interpreted code" costs time — the cold-code entry price (2026-08-18)
+
+The lean configuration with its own artifact is the cleanest experiment of the round: AOT on, no
+speculative growth, one previously recorded run replayed.
+
+| | boot | keystroke median | compiled at runtime | interpreted instructions |
+|---|---|---|---|---|
+| shipping engine + its bundles | 6.13 / 6.45 s | 167 / 154 ms | 4.5 MB | 157 M (22.3 M traces) |
+| **AOT, lean, + its artifact** | 16.6 / 17.0 s | 139 / 302 ms | **4.1 MB** | **97,493** |
+
+**98.4 % of translations came from the artifact** (99,336 hits / 1,595 misses), the artifact cost
+1.5 s in total (191 ms to load, 1.32 s to compile+instantiate the 3,334 modules the run touched), and
+our own compiler ran for 50 ms. So of the +10.5 s, only 1.5 s is the artifact. The remaining ~9 s is
+the price of running compiled code instead of interpreting it — and the counter says exactly how it
+divides: the shipping engine interprets **22.3 M trace executions** during that boot, and the AOT run
+enters a compiled function for every one of them instead. 9 s / 22.3 M = **~400 ns per entry**, which
+is what a wasm indirect call plus the prologue, the probe-cache setup and the exit epilogue cost.
+
+That is the honest answer to "why not compile everything": **for code that runs once, the interpreter
+is cheaper than any compiled entry**, and a boot is mostly code that runs once. The trace JIT's
+threshold is not a limitation to be removed — it is the mechanism that keeps one-shot code out of the
+compiler. "No interpreted code" is therefore a correctness/uniformity property (and a prerequisite for
+a guest that may not generate code), not a performance one, unless the entry price comes down:
+* cheaper entries (a region entered once through a direct call with no probe/spill ceremony — the same
+  work as section K's density project), and/or
+* fewer entries (bigger regions so one entry covers more guest code — which is what the speculative
+  former was for, and it costs the size wall of R.3).
+
+Keystroke latency, the thing the user actually feels, is NOT worse under AOT: 139 ms in one pair
+(against 167 ms for the shipping engine, with a far tighter spread: 136-146 ms vs 141-173 ms) and a
+302 ms outlier in the other. That is where AOT should be expected to win — steady-state code that is
+already hot — and it is the measurement to repeat once entries get cheaper.
