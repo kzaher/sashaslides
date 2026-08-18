@@ -1153,10 +1153,26 @@ tag matches (a mismatch is refused outright and reports 0 modules -- which is wh
 kernel.nbjb / codex.nbjb now do, because they were recorded against an older build and every engine
 rebuild changes the tag; they need `test/record-bundles.sh all` again).
 
-So the artifact is accepted and simply does not describe what the runtime forms. That is the
-context-dependent region key of R.2 showing up again, and it is the thing to fix before the artifact
-can pay: the runtime has to be able to ASK for a precompiled translation by site (address + code
-bytes) instead of only recognising one after it has re-formed the identical region itself.
+So the artifact is accepted and simply does not describe what the runtime forms. Two hypotheses were
+tested and one holds:
+
+* **dedupe** (a successor already carrying a translation is not copied in -- a runtime-only condition,
+  so the offline former would build bigger regions): rebuilt the artifact and measured with dedupe off
+  on both sides -> 3,450 / 101,282, i.e. **3.3 % against 2.4 %. Rejected.**
+* **the earlier 24 % was not the artifact matching.** Before `NANOBOX_THRESHOLD` existed, the boot that
+  produced the artifact ran at threshold 1, so the file also contained ~38 k modules the RUNTIME had
+  formed during that boot -- those match a later boot by construction. Once the artifact holds only
+  offline-formed regions, the true match rate shows: **2-3 %**.
+
+The reason is structural, and it is the same one R.2 named: the runtime forms a region rooted at
+whatever block the guest happens to enter first (a loop head, the landing site of a return), while the
+offline driver walks from function starts. Different entry -> different block offsets -> different
+content key. **The fix is the unit the user has been asking for all along: make the FUNCTION the unit
+at runtime too.** The artifact should carry the address->function-entry map it already knows
+(System.map for the kernel, `.eh_frame_hdr` for a program), and on first touch of any address the
+runtime should form/attach the region of the function CONTAINING it, entering at that block, instead
+of rooting a fresh region there. Then the offline and runtime regions are the same object by
+construction and the artifact hits by design rather than by luck.
 
 End to end after the density work, codex scenario:
 
