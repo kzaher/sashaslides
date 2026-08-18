@@ -587,3 +587,35 @@ kernel is a fixed image. That turns "translate everything once" from a hope into
   written after being executed, is a **policy violation** — J3's strict mode (reports pAddr/RIP, stops)
   becomes the shipping policy instead of the permissive unfreeze. codex (Rust) and agy (Go) do not JIT;
   the JS runtimes are detected and never run in the guest.
+
+### Phase 0 result: function-shaped regions are bit-identical and do not pay — boundaries are worth ≤ 2 %
+
+Built (`work/j/aot0`, patches `work/prof/aot0-*.diff`): the region former as a static CFG walk (direct
+targets, fall-through, the CONTINUATION after a direct CALL — never the callee), decode-ahead of undecoded
+successors with the pool/page guards, kernel regions spanning arbitrary pages (per-page descriptor,
+`ppf[page]` check for user regions), and a per-(page -> region) attach registry so any write into a
+member page drops the whole region (`pending[j]` + `nanobox_region_first` keep a running region from
+entering a not-yet-run block of a dead region). The non-obvious identity piece — decoding ahead marks
+pages earlier than the reference interpreter would, and `handleSMC` stops the trace on any marked-chunk
+write, which would move interrupt boundaries — is solved with a second table `refMapping` holding exactly
+the marks the reference would hold; ahead decodes mark only the private map until their first execution.
+**identity: codex IDENTICAL, agy IDENTICAL; hot-loop ticks identical in every variant.**
+
+| variant | blocks/region | ext links / 1000 instr | code | MIPS |
+|---|---|---|---|---|
+| legacy former (same build) | 2.29 | 62.1-62.8 | 24 MB | 98-104 |
+| **static function-scope regions** | **4.32** | **54.4 (−12.8 %)** | **56 MB (2.3x)** | **86-93** |
+| no decode-ahead | 3.37 | 59.7 (−4 %) | 45 MB | 92-96 |
+| min-hotness 200 | 3.00 | 58 (−7 %) | 36.5 MB | 97-100 |
+| dedupe translated successors | 3.96 | 59 (−4 %) | 46.6 MB | 78-95 |
+
+Hot loop: external links −7.7 %, code 6.2 -> 15.3 MB, wall **−6…−13 % in 4/4 pairs**; the shared
+mechanism (registry, pending checks, refMapping) costs nothing measurable — the regression is the former.
+Census: budgets never bind (block 15, instr 2, page 0 of ~7000 attempts); the remaining ~54 hops/1000
+instructions are RET/indirect/syscall and hops into not-hot code; kernel multi-page regions remove only
+~6 % of cross-page refills. Regions dropped by writes: 3 per run (the kernel's post-boot SMC events).
+
+**Verdict:** ~13 % of links = ~0.7 executed ops per guest instruction = ~2 % of executed work, against
+2.3x the code. Section K's 4.7-9x came from registers-in-locals / direct flags / TLB tags INSIDE one
+function, not from fewer boundaries. **Phase 1 (codegen inside the region) carries the whole load; the
+Phase 0 mechanism is kept as substrate (it is what lets a region span a function safely) but not adopted.**
