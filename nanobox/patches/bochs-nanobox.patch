@@ -361,6 +361,49 @@ index 17c59f2d9..c6eeb03eb 100644
  }
  
  #if BX_CPU_LEVEL >= 4
+diff --git a/bochs/cpu/sse_string.cc b/bochs/cpu/sse_string.cc
+index 88d181657..aa22525b6 100644
+--- a/bochs/cpu/sse_string.cc
++++ b/bochs/cpu/sse_string.cc
+@@ -474,4 +474,38 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPISTRI_VdqWdqIbR(bxInstruction_c *i)
+   BX_NEXT_INSTR(i);
+ }
+ 
++
++// nanobox: PCMPISTRI's data path as a plain function for the trace JIT (the JIT applies RCX and
++// the flags itself). Same compare_strings/find_eos/aggregate as PCMPISTRI_VdqWdqIbR above.
++// Result: bits 0..4 = index for ECX, bit 8 = CF, bit 9 = ZF, bit 10 = SF, bit 11 = OF.
++Bit32u bx_nanobox_pcmpistri(const BxPackedXmmRegister *op1p, const BxPackedXmmRegister *op2p, Bit8u imm8)
++{
++  const BxPackedXmmRegister &op1 = *op1p, &op2 = *op2p;
++  Bit8u BoolRes[16][16];
++  compare_strings(BoolRes, op1, op2, imm8);
++  unsigned num_elements = (imm8 & 0x1) ? 8 : 16;
++  int index;
++
++  unsigned len1 = find_eos(op1, imm8);
++  unsigned len2 = find_eos(op2, imm8);
++  Bit16u result2 = aggregate(BoolRes, len1, len2, imm8);
++
++  if (imm8 & 0x40) {
++     for (index=num_elements-1; index>=0; index--)
++       if (result2 & (1<<index)) break;
++     if (index < 0) index = num_elements;
++  }
++  else {
++     for (index=0; index<(int)num_elements; index++)
++       if (result2 & (1<<index)) break;
++  }
++
++  Bit32u r = (Bit32u) index;
++  if (result2 != 0) r |= (1 << 8);
++  if (len2 < num_elements) r |= (1 << 9);
++  if (len1 < num_elements) r |= (1 << 10);
++  if (result2 & 0x1) r |= (1 << 11);
++  return r;
++}
++
+ #endif // BX_CPU_LEVEL >= 6
 diff --git a/bochs/gui/siminterface.h b/bochs/gui/siminterface.h
 index 2103999ab..142f913b8 100644
 --- a/bochs/gui/siminterface.h
@@ -720,10 +763,10 @@ index 000000000..c5350a6af
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..364e1d81f
+index 000000000..db2e137b0
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,3185 @@
+@@ -0,0 +1,3769 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -774,7 +817,10 @@ index 000000000..364e1d81f
 +// syncBefore() RIP/prev_rip/icount stores as one out-of-line call (size only, default OFF), bit 3 =
 +// templates for the XCHG short forms (90+r). A/B inside one build through nanobox_set_jit_spill(mask)
 +// (work/prof/spill-run.mjs: NANOBOX_SPILL=mask). Default: chain + live + xchg.
-+unsigned nanobox_jit_spill = 3 | 8;
++// bit 4 = SIMD/AVX templates (VZEROUPPER, VPXOR/VPOR/VPAND/VPANDN, VPCMPEQB, VPMOVMSKB, VPSHUFB, PCMPISTRI,
++// VMOVDQU/VMOVDQA, VMOVD, VPBROADCASTB and the SSE twins), bit 5 = REP STOS/MOVS single-chunk fast paths,
++// bit 6 = misc ALU templates (LEAVE, MUL, BSF/BSR, DEC_Eb, BT/BTS memory forms). Default: all on.
++unsigned nanobox_jit_spill = 3 | 8 | 16 | 32 | 64;
 +unsigned nanobox_jit_threshold = 32;
 +unsigned nanobox_jit_maxlen = 64;      // debug knob: only compile traces with at most this many instructions
 +Bit8u nanobox_single_step = 0;
@@ -855,6 +901,19 @@ index 000000000..364e1d81f
 +  BX_CPU_THIS_PTR icount = ic;
 +}
 +}
++
++// PCMPISTRI data path (cpu/sse_string.cc): index + flag bits, the JIT applies RCX and the lazy flags
++Bit32u bx_nanobox_pcmpistri(const BxPackedXmmRegister *op1, const BxPackedXmmRegister *op2, Bit8u imm8);
++static Bit64u nanobox_simd_stats[8];      // [0..] counters for the harness (level 3): 0 = pcmpistri helper calls, 1 = rep fast paths, 2 = rep deopts
++static Bit64u nanobox_pcmpistri_imm[256]; // level 3: PCMPISTRI imm8 histogram
++extern "C" {
++static unsigned nanobox_helper_pcmpistri(unsigned op1, unsigned op2, unsigned imm8)
++{
++  if (nanobox_jit_level >= 3) { nanobox_simd_stats[0]++; nanobox_pcmpistri_imm[imm8 & 0xff]++; }
++  return bx_nanobox_pcmpistri((const BxPackedXmmRegister *)(uintptr_t) op1, (const BxPackedXmmRegister *)(uintptr_t) op2, (Bit8u) imm8);
++}
++}
++NB_EXPORT(nanobox_jit_simd_stat) double nanobox_jit_simd_stat(unsigned i) { return i < 8 ? (double) nanobox_simd_stats[i] : (i >= 256 && i < 512) ? (double) nanobox_pcmpistri_imm[i - 256] : 0; }
 +
 +// per-opcode template statistics (which opcodes fall back), for the harness
 +static Bit32u nanobox_fallback_count[BX_IA_LAST];
@@ -988,6 +1047,8 @@ index 000000000..364e1d81f
 +  uint32_t X[4];    // i64 scratch for flag computations
 +  uint32_t W;       // i64 scratch for write-stamp pAddr
 +  uint32_t T32[6];  // i32 temps
++  uint32_t V[2];    // v128 temps (SIMD templates), declared on first use so modules without SIMD templates stay SIMD-free
++  uint32_t vloc(unsigned t) { if (V[t] == 0xffffffffu) V[t] = em->addLocal(V128); return V[t]; }
 +  // last successful DTLB probe (page cache): lpf, host page address, access bits, physical page
 +  // frame and "no icache stamp on this page" flag. Reset at trace entry and after handler steps.
 +  uint32_t C_lpf, C_host, C_bits, C_ppf, C_free;
@@ -1049,6 +1110,9 @@ index 000000000..364e1d81f
 +  bool spillLive() const { return (nanobox_jit_spill & 2) != 0; }
 +  bool spillSyncCall() const { return (nanobox_jit_spill & 4) != 0; }
 +  bool templXchgShort() const { return (nanobox_jit_spill & 8) != 0; }   // XCHG_RRXRAX / XCHG_ERXEAX templates (A/B bit)
++  bool templSimd() const { return (nanobox_jit_spill & 16) != 0; }       // SSE/AVX templates (A/B bit)
++  bool templRep() const { return (nanobox_jit_spill & 32) != 0; }        // REP STOS/MOVS fast paths (A/B bit)
++  bool templMisc() const { return (nanobox_jit_spill & 64) != 0; }       // LEAVE / MUL / BSF / ... (A/B bit)
 +
 +  TraceCompiler(bxICacheEntry_c *entry, Module &mod) : e(entry), ins(entry->i), n(0), m(mod), em(NULL), needAsyncCheck(false), depth(0), loopDepth(-1), bodyDepth(-1), linkOK(false), selfLoopOK(false),
 +    reg(NULL), curBlock(0), boff(0), dispatchDepth(-1), L_cur(0), regionPass2(false), regionKernel(false), conforming(false), L_xic(0), passNo(1), nedges(0) {
@@ -2071,7 +2135,7 @@ index 000000000..364e1d81f
 +
 +    // ================= BT (register forms)
 +    case BX_IA_BT_EdIb: case BX_IA_BT_EqIb: case BX_IA_BT_EdGd: case BX_IA_BT_EqGq: {
-+      if (!R) return false;
++      if (!R) return (templMisc() && (ia == BX_IA_BT_EdIb || ia == BX_IA_BT_EqIb)) ? emitTemplateMisc(k, i, ia, R, last) : false;
 +      unsigned size = (ia == BX_IA_BT_EqIb || ia == BX_IA_BT_EqGq) ? 8 : 4;
 +      lfLoad();
 +      if (size == 8) regGet(dst); else pushReg32(dst);
@@ -2446,7 +2510,7 @@ index 000000000..364e1d81f
 +
 +    // ---- BTS/BTR/BTC by immediate, register destination
 +    case BX_IA_BTS_EqIb: case BX_IA_BTS_EdIb: case BX_IA_BTR_EqIb: case BX_IA_BTR_EdIb: case BX_IA_BTC_EqIb: case BX_IA_BTC_EdIb: {
-+      if (!R) return false;
++      if (!R) return (templMisc() && ia != BX_IA_BTC_EqIb && ia != BX_IA_BTC_EdIb) ? emitTemplateMisc(k, i, ia, R, last) : false;
 +      unsigned size = (ia == BX_IA_BTS_EqIb || ia == BX_IA_BTR_EqIb || ia == BX_IA_BTC_EqIb) ? 8 : 4;
 +      unsigned bit = i->Ib() & (size * 8 - 1);
 +      lfLoad();
@@ -2496,6 +2560,7 @@ index 000000000..364e1d81f
 +      return true;
 +    }
 +    case BX_IA_XORPS_VpsWps: case BX_IA_XORPD_VpdWpd: case BX_IA_PXOR_VdqWdq: {
++      if (templSimd()) return emitTemplateSimd(k, i, last);   // handler-based SIMD templates (reg + memory forms)
 +      if (!R) return false;
 +      BxExecutePtr_tR h = (ia == BX_IA_XORPS_VpsWps) ? &BX_CPU_C::XORPS_VpsWpsR : &BX_CPU_C::XORPS_VpsWpsR;
 +      if (!realHandler(k, h)) return false;
@@ -2511,6 +2576,9 @@ index 000000000..364e1d81f
 +      return true;
 +    }
 +    default:
++      if (templSimd() && emitTemplateSimd(k, i, last)) return true;
++      if (templRep() && emitTemplateRep(k, i, ia, last)) return true;
++      if (templMisc() && emitTemplateMisc(k, i, ia, R, last)) return true;
 +      return false;
 +    }
 +  }
@@ -2551,6 +2619,559 @@ index 000000000..364e1d81f
 +    endb();
 +    needAsyncCheck = true;
 +  }
++
++  // ================================================================ SIMD templates (SSE / AVX)
++  // Dispatch is by HANDLER, not by opcode: an instruction's semantics is its handler applied to its
++  // decoded fields (dst/src1/src2/VL/Ib), so matching execute1 (and, for the LOAD_* memory-form
++  // prefixes, execute2) reproduces exactly what the interpreter would run — including the
++  // BxNoSSE/BxNoAVX substitution when the entry was decoded with SSE/AVX unavailable (no match).
++  // XMM/YMM registers live in BX_CPU_THIS_PTR vmm[] (32 bytes each, lane 1 = the YMM upper half);
++  // the memory forms first load into vmm[BX_VECTOR_TMP_REGISTER] exactly like LOAD_Wdq/LOADU_Wdq/
++  // LOAD_Vector/LOAD_Wb do, then run the register form on it.
++  enum SimdLoad { SL_NONE = 0, SL_WDQ_A, SL_WDQ_U, SL_VEC, SL_WB };
++  enum SimdKind { SK_NONE = 0, SK_VZEROUPPER, SK_AVX2OP, SK_VPSHUFB, SK_VPMOVMSKB, SK_PMOVMSKB, SK_SSE2OP, SK_PSHUFB, SK_PCMPISTRI,
++                  SK_VMOV_R, SK_VMOV_LD, SK_VMOV_ST, SK_MOVD_R, SK_MOVD_LD, SK_MOVD_ST, SK_MOVQ_EqVq, SK_VPBROADCASTB };
++  enum { VOP_XOR = 0, VOP_OR, VOP_AND, VOP_ANDN, VOP_CMPEQB };
++  struct SimdDesc { SimdKind kind; SimdLoad ld; int op; bool aligned; };
++  static bool isSimdLoad(BxExecutePtr_tR h, SimdLoad &ld) {
++    if (h == &BX_CPU_C::LOAD_Wdq) { ld = SL_WDQ_A; return true; }
++    if (h == &BX_CPU_C::LOADU_Wdq) { ld = SL_WDQ_U; return true; }
++    if (h == &BX_CPU_C::LOAD_Vector) { ld = SL_VEC; return true; }
++    if (h == &BX_CPU_C::LOAD_Wb) { ld = SL_WB; return true; }
++    return false;
++  }
++  SimdDesc simdClassify(unsigned k) {
++    SimdDesc d; d.kind = SK_NONE; d.ld = SL_NONE; d.op = 0; d.aligned = false;
++    bxInstruction_c *i = &ins[k];
++    BxExecutePtr_tR h = i->execute1;
++    if (isSimdLoad(h, d.ld)) h = i->execute2();
++    unsigned vl = i->getVL();
++    if (h == &BX_CPU_C::VZEROUPPER) { if (d.ld == SL_NONE) d.kind = SK_VZEROUPPER; return d; }
++    // VEX two-source: dst = op(src1, src2) per lane, VL128 clears the upper lane
++    if (h == &BX_CPU_C::VXORPS_VpsHpsWpsR) d.op = VOP_XOR;
++    else if (h == &BX_CPU_C::VORPS_VpsHpsWpsR) d.op = VOP_OR;
++    else if (h == &BX_CPU_C::VANDPS_VpsHpsWpsR) d.op = VOP_AND;
++    else if (h == &BX_CPU_C::VANDNPS_VpsHpsWpsR) d.op = VOP_ANDN;
++    else if (h == &BX_CPU_C::VPCMPEQB_VdqHdqWdqR) d.op = VOP_CMPEQB;
++    else d.op = -1;
++    if (d.op >= 0) {
++      if ((vl == BX_VL128 || vl == BX_VL256) && (d.ld == SL_NONE || d.ld == SL_WDQ_U || d.ld == SL_VEC)) d.kind = SK_AVX2OP;
++      return d;
++    }
++    if (h == &BX_CPU_C::VPSHUFB_VdqHdqWdqR) { if ((vl == BX_VL128 || vl == BX_VL256) && (d.ld == SL_NONE || d.ld == SL_WDQ_U || d.ld == SL_VEC)) d.kind = SK_VPSHUFB; return d; }
++    if (h == &BX_CPU_C::VPMOVMSKB_GdUdq) { if ((vl == BX_VL128 || vl == BX_VL256) && d.ld == SL_NONE) d.kind = SK_VPMOVMSKB; return d; }
++    if (h == &BX_CPU_C::PMOVMSKB_GdUdq) { if (d.ld == SL_NONE) d.kind = SK_PMOVMSKB; return d; }
++    // SSE two-operand: dst.lane0 = op(dst.lane0, src.lane0), upper lane untouched
++    if (h == &BX_CPU_C::XORPS_VpsWpsR) d.op = VOP_XOR;
++    else if (h == &BX_CPU_C::ORPS_VpsWpsR) d.op = VOP_OR;
++    else if (h == &BX_CPU_C::ANDPS_VpsWpsR) d.op = VOP_AND;
++    else if (h == &BX_CPU_C::ANDNPS_VpsWpsR) d.op = VOP_ANDN;
++    else if (h == &BX_CPU_C::PCMPEQB_VdqWdqR) d.op = VOP_CMPEQB;
++    else d.op = -1;
++    if (d.op >= 0) { if (d.ld == SL_NONE || d.ld == SL_WDQ_A || d.ld == SL_WDQ_U) d.kind = SK_SSE2OP; return d; }
++    if (h == &BX_CPU_C::PSHUFB_VdqWdqR) { if (d.ld == SL_NONE || d.ld == SL_WDQ_A || d.ld == SL_WDQ_U) d.kind = SK_PSHUFB; return d; }
++    if (h == &BX_CPU_C::PCMPISTRI_VdqWdqIbR) { if (d.ld == SL_NONE || d.ld == SL_WDQ_A || d.ld == SL_WDQ_U) d.kind = SK_PCMPISTRI; return d; }
++    if (d.ld != SL_NONE) return d;
++    // AVX moves
++    if (h == &BX_CPU_C::VMOVAPS_VpsWpsR) { if (vl == BX_VL128 || vl == BX_VL256) d.kind = SK_VMOV_R; return d; }
++    if (h == &BX_CPU_C::VMOVUPS_VpsWpsM || h == &BX_CPU_C::VMOVAPS_VpsWpsM) { if (vl == BX_VL128 || vl == BX_VL256) { d.kind = SK_VMOV_LD; d.aligned = (h == &BX_CPU_C::VMOVAPS_VpsWpsM); } return d; }
++    if (h == &BX_CPU_C::VMOVUPS_WpsVpsM || h == &BX_CPU_C::VMOVAPS_WpsVpsM) { if (vl == BX_VL128 || vl == BX_VL256) { d.kind = SK_VMOV_ST; d.aligned = (h == &BX_CPU_C::VMOVAPS_WpsVpsM); } return d; }
++    if (h == &BX_CPU_C::MOVUPS_WpsVpsM || h == &BX_CPU_C::MOVAPS_WpsVpsM) { d.kind = SK_VMOV_ST; d.op = 1 /* 16 bytes regardless of VL */; d.aligned = (h == &BX_CPU_C::MOVAPS_WpsVpsM); return d; }
++    // MOVD / MOVQ between GPR and XMM
++    if (h == &BX_CPU_C::MOVD_VdqEdR) { d.kind = SK_MOVD_R; return d; }
++    if (h == &BX_CPU_C::MOVSS_VssWssM) { d.kind = SK_MOVD_LD; return d; }
++    if (h == &BX_CPU_C::MOVD_EdVdR) { d.kind = SK_MOVD_ST; d.op = 0; return d; }
++    if (h == &BX_CPU_C::MOVSS_WssVssM) { d.kind = SK_MOVD_ST; d.op = 1; return d; }
++    if (h == &BX_CPU_C::MOVQ_EqVqR) { d.kind = SK_MOVQ_EqVq; return d; }
++    if (h == &BX_CPU_C::VPBROADCASTB_VdqWbR) { if (vl == BX_VL128 || vl == BX_VL256) d.kind = SK_VPBROADCASTB; return d; }
++    return d;
++  }
++  // classification with the LOAD prefixes allowed for the broadcast (LOAD_Wb) form
++  SimdDesc simdClassifyAll(unsigned k) {
++    SimdDesc d = simdClassify(k);
++    if (d.kind == SK_NONE) {
++      bxInstruction_c *i = &ins[k];
++      SimdLoad ld;
++      if (isSimdLoad(i->execute1, ld) && ld == SL_WB && i->execute2() == &BX_CPU_C::VPBROADCASTB_VdqWbR && (i->getVL() == BX_VL128 || i->getVL() == BX_VL256)) { d.kind = SK_VPBROADCASTB; d.ld = SL_WB; }
++    }
++    return d;
++  }
++  static uint32_t xmmAddr(unsigned r, unsigned lane = 0) { return ADDR(BX_CPU_THIS_PTR vmm[r]) + 16 * lane; }
++  void pushXmm(unsigned r, unsigned lane = 0) { em->i32c(0); em->v128_load(xmmAddr(r, lane), 4); }
++  // vector load into the CPU struct at dstAddr (16*chunks bytes): TLB fast path (no page split; the
++  // aligned forms additionally require the natural alignment so the accessor's #GP check cannot
++  // fire), else the Bochs accessor. alignMode: 0 = unaligned accessor, 1 = aligned accessor,
++  // 2 = LOAD_Wdq (aligned accessor unless MXCSR.MM, decided at run time on the slow path)
++  void emitReadVec(unsigned k, unsigned seg, uint32_t off_l, uint32_t dstAddr, unsigned size, int alignMode) {
++    em->get(off_l); pushLaddrFromOffset(seg); em->set(T[5]);
++    blk();
++      blk();
++        if (alignMode) { em->get(T[5]); em->i64c(size - 1); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0); }
++        tlbProbe(T[5], size, 1, 0);
++        for (unsigned c = 0; c < size / 16; c++) { em->i32c(0); pushHostAddr(T[5], nanobox_tlbfold != 0); em->v128_load(16 * c, 0); em->v128_store(dstAddr + 16 * c, 4); }
++        em->br(1);
++      endb();
++      syncBefore(k, false); profSlow();
++      uint32_t fu = (size == 32) ? FNIDX(&BX_CPU_C::read_virtual_ymmword) : FNIDX(&BX_CPU_C::read_virtual_xmmword);
++      uint32_t fa = (size == 32) ? FNIDX(&BX_CPU_C::read_virtual_ymmword_aligned) : FNIDX(&BX_CPU_C::read_virtual_xmmword_aligned);
++      if (alignMode == 2) {
++        em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR mxcsr.mxcsr), 2); em->i32c((int32_t) MXCSR_MISALIGNED_EXCEPTION_MASK); em->op(I32_AND);
++        iff(); em->i32c(seg); em->get(off_l); em->i32c(dstAddr); em->call(fn(fu, "ili>v"));
++        els(); em->i32c(seg); em->get(off_l); em->i32c(dstAddr); em->call(fn(fa, "ili>v"));
++        endb();
++      } else {
++        em->i32c(seg); em->get(off_l); em->i32c(dstAddr); em->call(fn(alignMode ? fa : fu, "ili>v"));
++      }
++    endb();
++    needAsyncCheck = true;
++  }
++  void emitWriteVec(unsigned k, unsigned seg, uint32_t off_l, uint32_t srcAddr, unsigned size, bool aligned) {
++    em->get(off_l); pushLaddrFromOffset(seg); em->set(T[5]);
++    blk();
++      blk();
++        if (aligned) { em->get(T[5]); em->i64c(size - 1); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0); }
++        tlbProbe(T[5], size, 4, 0, size);
++        if (!nanobox_tlbfold) emitWriteStamp(T[5], size); else needAsyncCheck = true;
++        for (unsigned c = 0; c < size / 16; c++) { pushHostAddr(T[5], nanobox_tlbfold != 0); em->i32c(0); em->v128_load(srcAddr + 16 * c, 4); em->v128_store(16 * c, 0); }
++        em->br(1);
++      endb();
++      syncBefore(k, false); profSlow();
++      uint32_t f = (size == 32) ? (aligned ? FNIDX(&BX_CPU_C::write_virtual_ymmword_aligned) : FNIDX(&BX_CPU_C::write_virtual_ymmword))
++                                : (aligned ? FNIDX(&BX_CPU_C::write_virtual_xmmword_aligned) : FNIDX(&BX_CPU_C::write_virtual_xmmword));
++      em->i32c(seg); em->get(off_l); em->i32c(srcAddr); em->call(fn(f, "ili>v"));
++    endb();
++    needAsyncCheck = true;
++  }
++  // memory-form prefix: load the W operand into the TMP vector register exactly like LOAD_* does;
++  // returns the register index holding the second source
++  unsigned emitSimdLoadPrefix(unsigned k, const SimdDesc &d, unsigned vl, unsigned regIfNone) {
++    if (d.ld == SL_NONE) return regIfNone;
++    unsigned seg = ins[k].seg();
++    pushEA(k); em->set(T[3]);
++    switch (d.ld) {
++      case SL_WDQ_A: emitReadVec(k, seg, T[3], xmmAddr(BX_VECTOR_TMP_REGISTER), 16, 2); break;
++      case SL_WDQ_U: emitReadVec(k, seg, T[3], xmmAddr(BX_VECTOR_TMP_REGISTER), 16, 0); break;
++      case SL_VEC:   emitReadVec(k, seg, T[3], xmmAddr(BX_VECTOR_TMP_REGISTER), vl == BX_VL256 ? 32 : 16, 0); break;
++      case SL_WB:    emitRead(k, MK_RD_VIRT, seg, 1, T[3]); em->set(T[2]); em->i32c(0); em->get(T[2]); em->mem(I64_STORE8, xmmAddr(BX_VECTOR_TMP_REGISTER), 0); break;
++      default: break;
++    }
++    return BX_VECTOR_TMP_REGISTER;
++  }
++  void emitVop(int op) {   // two v128 on the stack -> result
++    switch (op) {
++      case VOP_XOR: em->simd(V128_XOR); break;
++      case VOP_OR: em->simd(V128_OR); break;
++      case VOP_AND: em->simd(V128_AND); break;
++      case VOP_ANDN: em->simd(V128_ANDNOT); break;   // pushed as (op2, op1): op2 & ~op1 = xmm_andnps
++      default: em->simd(I8X16_EQ); break;
++    }
++  }
++  bool emitTemplateSimd(unsigned k, bxInstruction_c *i, bool last) {
++    (void) last;
++    SimdDesc d = simdClassifyAll(k);
++    if (d.kind == SK_NONE) return false;
++    unsigned dst = i->dst(), src1 = i->src1(), seg = i->seg(), vl = i->getVL();
++    switch (d.kind) {
++    case SK_VZEROUPPER:
++      // long64_mode(): all 16 upper lanes (templates only compile 64-bit traces)
++      em->v128_zero(); em->set(vloc(1));
++      for (unsigned r = 0; r < 16; r++) { em->i32c(0); em->get(V[1]); em->v128_store(xmmAddr(r, 1), 4); }
++      return true;
++    case SK_AVX2OP: {
++      unsigned s2 = emitSimdLoadPrefix(k, d, vl, i->src2());
++      for (unsigned n = 0; n < 2; n++) {
++        em->i32c(0);
++        if (n < vl) {
++          if (d.op == VOP_ANDN) { pushXmm(s2, n); pushXmm(src1, n); } else { pushXmm(src1, n); pushXmm(s2, n); }
++          emitVop(d.op);
++        } else em->v128_zero();
++        em->v128_store(xmmAddr(dst, n), 4);
++      }
++      return true;
++    }
++    case SK_VPSHUFB: {
++      unsigned s2 = emitSimdLoadPrefix(k, d, vl, i->src2());
++      static const uint8_t m8f[16] = { 0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f };
++      for (unsigned n = 0; n < 2; n++) {
++        em->i32c(0);
++        if (n < vl) { pushXmm(src1, n); pushXmm(s2, n); em->v128_const(m8f); em->simd(V128_AND); em->simd(I8X16_SWIZZLE); }
++        else em->v128_zero();
++        em->v128_store(xmmAddr(dst, n), 4);
++      }
++      return true;
++    }
++    case SK_VPMOVMSKB: case SK_PMOVMSKB: {
++      unsigned src = i->src();
++      pushXmm(src, 0); em->simd(I8X16_BITMASK);
++      if (d.kind == SK_VPMOVMSKB && vl == BX_VL256) { pushXmm(src, 1); em->simd(I8X16_BITMASK); em->i32c(16); em->op(I32_SHL); em->op(I32_OR); }
++      em->op(I64_EXTEND_I32_U); regSetFromStack(dst);   // BX_WRITE_32BIT_REGZ
++      return true;
++    }
++    case SK_SSE2OP: {
++      unsigned s2 = emitSimdLoadPrefix(k, d, vl, i->src());
++      em->i32c(0);
++      if (d.op == VOP_ANDN) { pushXmm(s2, 0); pushXmm(dst, 0); } else { pushXmm(dst, 0); pushXmm(s2, 0); }
++      emitVop(d.op);
++      em->v128_store(xmmAddr(dst, 0), 4);
++      return true;
++    }
++    case SK_PSHUFB: {
++      unsigned s2 = emitSimdLoadPrefix(k, d, vl, i->src());
++      static const uint8_t m8f[16] = { 0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f,0x8f };
++      em->i32c(0); pushXmm(dst, 0); pushXmm(s2, 0); em->v128_const(m8f); em->simd(V128_AND); em->simd(I8X16_SWIZZLE);
++      em->v128_store(xmmAddr(dst, 0), 4);
++      return true;
++    }
++    case SK_PCMPISTRI: {
++      unsigned s2 = emitSimdLoadPrefix(k, d, vl, i->src());
++      em->i32c(xmmAddr(dst)); em->i32c(xmmAddr(s2)); em->i32c(i->Ib());
++      em->call(fn(FNIDX(&nanobox_helper_pcmpistri), "iii>i")); em->set(T32[3]);
++      em->get(T32[3]); em->i32c(31); em->op(I32_AND); em->op(I64_EXTEND_I32_U); regSetFromStack(R_RCX);   // RCX = index
++      if (flagsLive) emitSetEFlagsOSZAPCFromBits(T32[3]);
++      return true;
++    }
++    case SK_VMOV_R: // VMOVAPS_VpsWpsR: BX_WRITE_AVX_REGZ(dst, vmm[src], VL)
++      for (unsigned n = 0; n < 2; n++) { em->i32c(0); if (n < vl) pushXmm(i->src(), n); else em->v128_zero(); em->v128_store(xmmAddr(dst, n), 4); }
++      return true;
++    case SK_VMOV_LD:
++      pushEA(k); em->set(T[3]);
++      emitReadVec(k, seg, T[3], xmmAddr(dst), vl == BX_VL256 ? 32 : 16, d.aligned ? 1 : 0);
++      if (vl == BX_VL128) { em->i32c(0); em->v128_zero(); em->v128_store(xmmAddr(dst, 1), 4); }
++      return true;
++    case SK_VMOV_ST:
++      pushEA(k); em->set(T[3]);
++      emitWriteVec(k, seg, T[3], xmmAddr(i->src()), (d.op == 1 || vl != BX_VL256) ? 16 : 32, d.aligned);
++      return true;
++    case SK_MOVD_R: case SK_MOVD_LD: {
++      // op.lo = zero-extended dword, op.hi = 0; BX_WRITE_XMM_REGZ(dst, op, VL): VL != 0 clears the upper lane
++      if (d.kind == SK_MOVD_R) pushReg32(i->src()); else { pushEA(k); em->set(T[3]); emitRead(k, MK_RD_VIRT, seg, 4, T[3]); }
++      em->set(T[2]);
++      em->i32c(0); em->get(T[2]); em->mem(I64_STORE, xmmAddr(dst), 3);
++      em->i32c(0); em->i64c(0); em->mem(I64_STORE, xmmAddr(dst) + 8, 3);
++      if (vl) { em->i32c(0); em->v128_zero(); em->v128_store(xmmAddr(dst, 1), 4); }
++      return true;
++    }
++    case SK_MOVD_ST:
++      if (d.op == 0) { em->i32c(0); em->mem(I64_LOAD32_U, xmmAddr(i->src()), 2); regSetFromStack(dst); return true; }   // BX_WRITE_32BIT_REGZ
++      pushEA(k); em->set(T[3]); em->i32c(0); em->mem(I64_LOAD32_U, xmmAddr(i->src()), 2); em->set(T[2]);
++      emitWrite(k, MK_WR_VIRT, seg, 4, T[3], T[2]);
++      return true;
++    case SK_MOVQ_EqVq:
++      em->i32c(0); em->mem(I64_LOAD, xmmAddr(i->src()), 3); regSetFromStack(dst);
++      return true;
++    case SK_VPBROADCASTB: {
++      unsigned s = i->src();
++      if (d.ld == SL_WB) s = emitSimdLoadPrefix(k, d, vl, s);
++      em->i32c(0); em->v128_load8_splat(xmmAddr(s)); em->set(vloc(0));
++      for (unsigned n = 0; n < 2; n++) { em->i32c(0); if (n < vl) em->get(V[0]); else em->v128_zero(); em->v128_store(xmmAddr(dst, n), 4); }
++      return true;
++    }
++    default:
++      return false;
++    }
++  }
++  // setEFlagsOSZAPC(flags32) applied to the lazy state EXACTLY as the interpreter's sequence of
++  // set_OF / set_SF / set_ZF / set_AF(0) / set_PF(0) / set_CF does (each step reads the state the
++  // previous one left, so the resulting representation depends on the prior one; mirrored bit for bit).
++  // bits: local `b` (i32) with CF at bit 8, ZF at 9, SF at 10, OF at 11.
++  void emitSetEFlagsOSZAPCFromBits(uint32_t b) {
++    lfLoad();
++    uint32_t of = T32[4], t = X[0];
++    // set_OF(of): temp_cf = getB_CF(); set_flags_OxxxxC(of, temp_cf)
++    em->get(b); em->i32c(11); em->op(I32_SHR_U); em->i32c(1); em->op(I32_AND); em->set(of);
++    em->get(L_lfa); em->i64c(31); em->op(I64_SHR_U); em->i64c(1); em->op(I64_AND); em->set(t);          // temp_cf
++    em->get(L_lfa); em->i64c(0x3fffffffLL); em->op(I64_AND);
++    em->get(of); em->op(I64_EXTEND_I32_U); em->get(t); em->op(I64_XOR); em->i64c(30); em->op(I64_SHL); em->op(I64_OR);
++    em->get(t); em->i64c(31); em->op(I64_SHL); em->op(I64_OR); em->set(L_lfa);
++    // set_SF(sf): temp_sf = ((result >> 63) ^ aux) & 1; aux ^= temp_sf ^ sf
++    em->get(L_lfr); em->i64c(63); em->op(I64_SHR_U); em->get(L_lfa); em->op(I64_XOR); em->i64c(1); em->op(I64_AND);
++    em->get(b); em->i32c(10); em->op(I32_SHR_U); em->i32c(1); em->op(I32_AND); em->op(I64_EXTEND_I32_U); em->op(I64_XOR);
++    em->get(L_lfa); em->op(I64_XOR); em->set(L_lfa);
++    // set_ZF(zf): zf ? assert_ZF() : clear_ZF()
++    em->get(b); em->i32c(9); em->op(I32_SHR_U); em->i32c(1); em->op(I32_AND);
++    iff();
++      em->get(L_lfa); em->get(L_lfr); em->i64c(63); em->op(I64_SHR_U); em->i64c(1); em->op(I64_AND); em->op(I64_XOR);
++      em->get(L_lfr); em->i64c(255); em->op(I64_AND); em->i64c(8); em->op(I64_SHL); em->op(I64_XOR); em->set(L_lfa);
++      em->i64c(0); em->set(L_lfr);
++    els();
++      em->get(L_lfr); em->i64c(0x100); em->op(I64_OR); em->set(L_lfr);
++    endb();
++    // set_AF(0): auxbits &= ~LF_MASK_AF (32-bit mask)
++    em->get(L_lfa); em->i64c(0xfffffff7LL); em->op(I64_AND); em->set(L_lfa);
++    // set_PF(0): temp_pdb = (255 & result) ^ 1; aux = (aux & ~LF_MASK_PDB) | (temp_pdb << 8)
++    em->get(L_lfa); em->i64c(0xffff00ffLL); em->op(I64_AND);
++    em->get(L_lfr); em->i64c(255); em->op(I64_AND); em->i64c(1); em->op(I64_XOR); em->i64c(8); em->op(I64_SHL); em->op(I64_OR); em->set(L_lfa);
++    // set_CF(cf): temp_of = getB_OF(); set_flags_OxxxxC(temp_of, cf)
++    em->get(L_lfa); em->i64c(0x40000000LL); em->op(I64_ADD); em->i64c(31); em->op(I64_SHR_U); em->i64c(1); em->op(I64_AND); em->set(t);   // temp_of
++    em->get(b); em->i32c(8); em->op(I32_SHR_U); em->i32c(1); em->op(I32_AND); em->set(of);                                                // cf
++    em->get(L_lfa); em->i64c(0x3fffffffLL); em->op(I64_AND);
++    em->get(t); em->get(of); em->op(I64_EXTEND_I32_U); em->op(I64_XOR); em->i64c(30); em->op(I64_SHL); em->op(I64_OR);
++    em->get(of); em->op(I64_EXTEND_I32_U); em->i64c(31); em->op(I64_SHL); em->op(I64_OR); em->set(L_lfa);
++    lfMarkSet();
++  }
++  // ================================================================ REP STOS / MOVS single-chunk fast paths
++  // The interpreter runs a REP through repeat(): per iteration STOSB64/MOVSB64/MOVSD64/MOVSQ64 first
++  // try FastRepSTOSB/FastRepMOVSB, which transfers count = min(ECX*g, bytes left in the source
++  // page, bytes left in the destination page, currCountdown) bytes through host addresses when
++  // both v2h probes hit (TLB hit + permission; the destination page's iCache stamps are dropped
++  // wholesale), ticks currCountdown by iterations-1 and advances RCX/RSI/RDI; repeat() then
++  // decrements RCX once more and returns when it hits zero. This template handles exactly the case
++  // where that first chunk is the WHOLE count (so repeat() never loops, never touches icount, never
++  // re-checks async_event) and the destination page carries no code marks; anything else deopts
++  // to the handler BEFORE any side effect, which then does the same computation the interpreter would.
++  bool emitTemplateRep(unsigned k, bxInstruction_c *i, unsigned ia, bool last) {
++    unsigned g; bool movs; BxExecutePtr_tR h;
++    switch (ia) {
++      case BX_IA_REP_STOSB_YbAL: g = 1; movs = false; h = &BX_CPU_C::REP_STOSB_YbAL; break;
++      case BX_IA_REP_MOVSB_YbXb: g = 1; movs = true; h = &BX_CPU_C::REP_MOVSB_YbXb; break;
++      case BX_IA_REP_MOVSD_YdXd: g = 4; movs = true; h = &BX_CPU_C::REP_MOVSD_YdXd; break;
++      case BX_IA_REP_MOVSQ_YqXq: g = 8; movs = true; h = &BX_CPU_C::REP_MOVSQ_YqXq; break;
++      default: return false;
++    }
++    if (!i->as64L() || !i->repUsedL() || !realHandler(k, h)) return false;
++    unsigned seg = i->seg();
++    uint32_t cnt = T[0], la = T[1], sla = T[2];
++    uint32_t hd = T32[2], hs = T32[3];
++    regEnsureLoaded(R_RCX); regEnsureLoaded(R_RDI); if (movs) regEnsureLoaded(R_RSI); else regEnsureLoaded(R_RAX);
++    CacheState s0 = snapshot();   // state on entry to both paths (all loads above, no writes yet)
++    blk();  // D: done
++     blk(); // F: any failed condition -> deopt to the handler
++      // repeat(): RCX == 0 does nothing (left to the handler: rare); the fast functions take ECX, so
++      // RCX must fit 32 bits for one chunk to be the whole count
++      regGet(R_RCX); em->i64c(32); em->op(I64_SHR_U); em->i64c(0); em->op(I64_NE); em->br_if(0);
++      regGet(R_RCX); em->op(I64_EQZ); em->br_if(0);
++      // !get_DF() && !async_event
++      em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR eflags), 2); em->i32c(0x400); em->op(I32_AND); em->br_if(0);
++      em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2); em->br_if(0);
++      // byte count = ECX * g (a Bit32u in the interpreter: must not wrap)
++      regGet(R_RCX); if (g > 1) { em->i64c(g); em->op(I64_MUL); } em->set(cnt);
++      if (g > 1) { em->get(cnt); em->i64c(32); em->op(I64_SHR_U); em->i64c(0); em->op(I64_NE); em->br_if(0); }
++      // whole count fits the rest of the destination page and the countdown
++      regGet(R_RDI); em->set(la);
++      em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->op(I64_EXTEND_I32_U); em->get(cnt); em->op(I64_ADD); em->i64c(0x1000); em->op(I64_GT_U); em->br_if(0);
++      em->get(cnt); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GT_U); em->br_if(0);
++      // v2h_write_byte(rdi): DTLB hit with write permission; the page must be free of code marks
++      // (the interpreter would decWriteStamp the whole page and go on: leave that to it)
++      tlbProbe(la, 1, 4, 0);
++      em->get(C_free); em->op(I32_EQZ); em->br_if(0);
++      pushHostAddr(la); em->set(hd);
++      if (movs) {
++        regGet(R_RSI); pushLaddrFromOffset(seg); em->set(sla);
++        em->get(sla); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->op(I64_EXTEND_I32_U); em->get(cnt); em->op(I64_ADD); em->i64c(0x1000); em->op(I64_GT_U); em->br_if(0);
++        tlbProbe(sla, 1, 1, 0);
++        pushHostAddr(sla); em->set(hs);
++        // the interpreter copies byte by byte, forward: with the destination inside the source span
++        // (host addresses: aliasing pages count too) that replicates rather than moves -> handler
++        em->get(hd); em->get(hs); em->op(I32_SUB); em->get(cnt); em->op(I32_WRAP_I64); em->op(I32_LT_U); em->br_if(0);
++        em->get(hd); em->get(hs); em->get(cnt); em->op(I32_WRAP_I64); em->memory_copy();
++      } else {
++        em->get(hd); regGet(R_RAX); em->op(I32_WRAP_I64); em->i32c(0xff); em->op(I32_AND); em->get(cnt); em->op(I32_WRAP_I64); em->memory_fill();
++      }
++      // BX_TICKN(iterations - 1): iterations - 1 < currCountdown here, so tickn() is a plain decrement
++      em->i32c(0); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2);
++      regGet(R_RCX); em->op(I32_WRAP_I64); em->i32c(1); em->op(I32_SUB); em->op(I32_SUB); em->mem(I32_STORE, nanobox_pc_system_access::countdownAddr(), 2);
++      // RCX -= iterations-1, then repeat()'s RCX-- -> 0; RDI (RSI) += bytes
++      em->i64c(0); regSetFromStack(R_RCX);
++      em->get(la); em->get(cnt); em->op(I64_ADD); regSetFromStack(R_RDI);
++      if (movs) { regGet(R_RSI); em->get(cnt); em->op(I64_ADD); regSetFromStack(R_RSI); }
++      profCount(&nanobox_simd_stats[1]);
++      em->br(1);
++     endb();  // F
++     // Deopt: run the handler for this ONE instruction and REJOIN the trace, exactly like an untemplated
++     // instruction does (emitHandlerStep with cont): repeat() that completes returns into BX_NEXT_INSTR
++     // and the interpreter goes on to the next instruction of the trace, so the trace must not end
++     // here (an extra boundary would be an extra async_event/timer check point = a divergence); a
++     // repeat() interrupted mid-count restores RIP and sets STOP_TRACE, which the step's
++     // trace_end/async_event test turns into the same return the interpreter does. The runtime
++     // locals on this path are those of s0 (no fast-path write executed), so compile with s0; the
++     // step spills/invalidates, then everything the fast path holds in locals is reloaded (the
++     // handler committed the truth to memory) so both paths meet in the fast path's state.
++     CacheState sFast = snapshot();
++     restore(s0);
++     profCount(&nanobox_simd_stats[2]);
++     emitHandlerStep(k, false, true);
++     for (unsigned r = 0; r < 16; r++) if (sFast.regLoaded[r] && !cs.regLoaded[r]) { em->i32c(0); em->mem(I64_LOAD, regAddr(r), 3); em->set(L_reg[r]); cs.regLoaded[r] = true; }
++     if (sFast.lfLoaded && !cs.lfLoaded) lfLoad();
++     bool acmBoth = sFast.acmLoaded && cs.acmLoaded, clearedBoth = sFast.cleared && cs.cleared;
++     restore(sFast);   // dirty set: the fast path's (a superset is safe here: locals == memory on the handler path)
++     cs.acmLoaded = acmBoth; cs.cleared = clearedBoth;
++    endb();   // D
++    needAsyncCheck = true;
++    return true;
++  }
++
++  // ================================================================ misc ALU templates
++  bool emitTemplateMisc(unsigned k, bxInstruction_c *i, unsigned ia, bool R, bool last) {
++    (void) last;
++    unsigned dst = i->dst(), src = i->src(), seg = i->seg();
++    uint32_t t0 = T[0], t1 = T[1], t2 = T[2], t3 = T[3];
++    switch (ia) {
++    // ---- LEAVE (64-bit): temp = stack_read_qword(RBP); RSP = RBP + 8; RBP = temp
++    case BX_IA_LEAVE_Op64:
++      if (!realHandler(k, &BX_CPU_C::LEAVE64)) return false;
++      regGet(R_RBP); em->set(t0);
++      emitStackRead(k, t0); em->set(t1);
++      em->get(t0); em->i64c(8); em->op(I64_ADD); regSetFromStack(R_RSP);
++      em->get(t1); regSetFromStack(R_RBP);
++      return true;
++    // ---- MUL r/m64: RDX:RAX = RAX * op; SET_FLAGS_OSZAPC_LOGIC_64(lo); hi != 0 -> assert_flags_OxxxxC
++    case BX_IA_MUL_RAXEq: {
++      if (!realHandler(k, R ? &BX_CPU_C::MUL_RAXEqR : &BX_CPU_C::LOAD_Eq)) return false;
++      if (!R && i->execute2() != &BX_CPU_C::MUL_RAXEqR) return false;
++      uint32_t a = t0, b = t1, lo = t2, hi = t3;
++      if (R) regGet(src); else { pushEA(k); em->set(T[4]); emitRead(k, MK_RD_LIN, seg, 8, T[4]); }
++      em->set(b);
++      regGet(R_RAX); em->set(a);
++      em->get(a); em->get(b); em->op(I64_MUL); em->set(lo);
++      emitMulhu(a, b, hi);
++      em->get(lo); regSetFromStack(R_RAX);
++      em->get(hi); regSetFromStack(R_RDX);
++      setFlagsLogic(8, lo);
++      em->get(hi); em->i64c(0); em->op(I64_NE);
++      iff(); assertFlagsOxxxxC(); endb();
++      return true;
++    }
++    // ---- BSF / BSR (32/64, register or LOAD_E* memory source)
++    case BX_IA_BSF_GqEq: case BX_IA_BSF_GdEd: case BX_IA_BSR_GqEq: case BX_IA_BSR_GdEd: {
++      unsigned size = (ia == BX_IA_BSF_GqEq || ia == BX_IA_BSR_GqEq) ? 8 : 4;
++      bool fwd = (ia == BX_IA_BSF_GqEq || ia == BX_IA_BSF_GdEd);
++      BxExecutePtr_tR hr = (ia == BX_IA_BSF_GqEq) ? &BX_CPU_C::BSF_GqEqR : (ia == BX_IA_BSF_GdEd) ? &BX_CPU_C::BSF_GdEdR :
++                           (ia == BX_IA_BSR_GqEq) ? &BX_CPU_C::BSR_GqEqR : &BX_CPU_C::BSR_GdEdR;
++      if (R) { if (!realHandler(k, hr)) return false; }
++      else { if (!realHandler(k, size == 8 ? &BX_CPU_C::LOAD_Eq : &BX_CPU_C::LOAD_Ed) || i->execute2() != hr) return false; }
++      uint32_t op2 = t0, res = t1;
++      if (R) { if (size == 8) regGet(src); else pushReg32(src); }
++      else { pushEA(k); em->set(t3); emitRead(k, size == 8 ? MK_RD_LIN : MK_RD_VIRT, seg, size, t3); }
++      em->set(op2);
++      // both outcomes touch the flags (assert_ZF reads the prior state), only one writes dst
++      lfLoad(); regEnsureLoaded(dst);
++      em->get(op2); em->op(I64_EQZ);
++      iff();
++        // assert_ZF(): aux ^= ((result >> 63) & 1) << SD; aux ^= (result & 255) << PDB; result = 0
++        em->get(L_lfa); em->get(L_lfr); em->i64c(63); em->op(I64_SHR_U); em->i64c(1); em->op(I64_AND); em->op(I64_XOR);
++        em->get(L_lfr); em->i64c(255); em->op(I64_AND); em->i64c(8); em->op(I64_SHL); em->op(I64_XOR); em->set(L_lfa);
++        em->i64c(0); em->set(L_lfr);
++      els();
++        if (size == 8) { em->get(op2); em->op(fwd ? I64_CTZ : I64_CLZ); }
++        else { em->get(op2); em->op(I32_WRAP_I64); em->op(fwd ? I32_CTZ : I32_CLZ); em->op(I64_EXTEND_I32_U); }
++        em->set(res);
++        if (!fwd) { em->i64c(size * 8 - 1); em->get(res); em->op(I64_SUB); em->set(res); }   // BSR: index of the highest set bit = bits-1-clz
++        // SET_FLAGS_OSZAPC_LOGIC(res) then clear_ZF(): result |= 0x100
++        em->get(res); if (size == 4) em->op(I64_EXTEND32_S); em->i64c(0x100); em->op(I64_OR); em->set(L_lfr);
++        em->i64c(0); em->set(L_lfa);
++        em->get(res); regSetFromStack(dst);   // 32-bit: BX_WRITE_32BIT_REGZ (res < 32 -> already zero-extended)
++      endb();
++      lfMarkSet(); cs.regDirty[dst] = true;
++      return true;
++    }
++    // ---- INC/DEC r/m8: SET_FLAGS_OSZAP_{ADD,SUB}_8(op1 -/+ 1, 0, op1)
++    case BX_IA_INC_Eb: case BX_IA_DEC_Eb: {
++      bool dec = (ia == BX_IA_DEC_Eb);
++      if (!realHandler(k, dec ? (R ? &BX_CPU_C::DEC_EbR : &BX_CPU_C::DEC_EbM) : (R ? &BX_CPU_C::INC_EbR : &BX_CPU_C::INC_EbM))) return false;
++      bool ext = i->extend8bitL();
++      uint32_t op1 = t0, op2 = t1, res = t2, ea = t3;
++      if (R) { pushReg8(dst, ext); em->set(op1); }
++      else { pushEA(k); em->set(ea); emitRMWRead(k, MK_RMW_VIRT, seg, 1, ea); em->set(op1); }
++      em->get(op1); em->i64c(1); em->op(dec ? I64_SUB : I64_ADD); em->i64c(0xff); em->op(I64_AND); em->set(res);
++      em->i64c(0); em->set(op2);
++      if (R) writeReg8(dst, ext, res); else emitRMWWrite(MK_RMW_VIRT, 1, res);
++      setFlagsArith(1, op1, op2, res, dec, true);
++      return true;
++    }
++    // ---- NEG / NOT r/m8: NEG: op = -(Bit8s)op; SET_FLAGS_OSZAPC_SUB_8(0, orig, -orig); NOT: no flags
++    case BX_IA_NEG_Eb: case BX_IA_NOT_Eb: {
++      bool neg = (ia == BX_IA_NEG_Eb);
++      if (!realHandler(k, neg ? (R ? &BX_CPU_C::NEG_EbR : &BX_CPU_C::NEG_EbM) : (R ? &BX_CPU_C::NOT_EbR : &BX_CPU_C::NOT_EbM))) return false;
++      bool ext = i->extend8bitL();
++      uint32_t op1 = t0, op2 = t1, res = t2, ea = t3;
++      if (R) { pushReg8(dst, ext); em->set(op1); }
++      else { pushEA(k); em->set(ea); emitRMWRead(k, MK_RMW_VIRT, seg, 1, ea); em->set(op1); }
++      if (neg) { em->i64c(0); em->get(op1); em->op(I64_SUB); } else { em->get(op1); em->i64c(-1); em->op(I64_XOR); }
++      em->i64c(0xff); em->op(I64_AND); em->set(res);
++      if (R) writeReg8(dst, ext, res); else emitRMWWrite(MK_RMW_VIRT, 1, res);
++      if (neg) { em->get(op1); em->set(op2); em->i64c(0); em->set(op1); setFlagsArith(1, op1, op2, res, true, false); }
++      return true;
++    }
++    // ---- SHLD / SHRD r/m64, r64, CL|imm8 (register destination): count & 0x3f == 0 -> nothing
++    case BX_IA_SHLD_EqGq: case BX_IA_SHLD_EqGqIb: case BX_IA_SHRD_EqGq: case BX_IA_SHRD_EqGqIb: {
++      if (!R) return false;
++      bool left = (ia == BX_IA_SHLD_EqGq || ia == BX_IA_SHLD_EqGqIb);
++      bool useCL = (ia == BX_IA_SHLD_EqGq || ia == BX_IA_SHRD_EqGq);
++      if (!realHandler(k, left ? &BX_CPU_C::SHLD_EqGqR : &BX_CPU_C::SHRD_EqGqR)) return false;
++      uint32_t op1 = t0, op2 = t1, res = t2, cnt = t3; uint32_t cf = T32[3], of = T32[4];
++      if (useCL) { regGet(R_RCX); em->i64c(0x3f); em->op(I64_AND); em->set(cnt); }
++      else { unsigned c = i->Ib() & 0x3f; if (c == 0) return true; em->i64c(c); em->set(cnt); }
++      // count == 0 keeps everything: the update is runtime-conditional, so every local the branch
++      // reads or writes must hold its value on the not-taken path too (loaded before the `if`)
++      if (useCL) { lfLoad(); regEnsureLoaded(dst); regEnsureLoaded(src); em->get(cnt); em->i64c(0); em->op(I64_NE); iff(); }
++      regGet(dst); em->set(op1); regGet(src); em->set(op2);
++      if (left) { // result = (op1 << count) | (op2 >> (64 - count)); cf = (op1 >> (64 - count)) & 1; of = cf ^ (result >> 63)
++        em->get(op1); em->get(cnt); em->op(I64_SHL); em->get(op2); em->i64c(64); em->get(cnt); em->op(I64_SUB); em->op(I64_SHR_U); em->op(I64_OR); em->set(res);
++        em->get(op1); em->i64c(64); em->get(cnt); em->op(I64_SUB); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->i32c(1); em->op(I32_AND); em->set(cf);
++        em->get(res); em->i64c(63); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->get(cf); em->op(I32_XOR); em->set(of);
++      } else {    // result = (op2 << (64 - count)) | (op1 >> count); cf = (op1 >> (count - 1)) & 1; of = ((result << 1) ^ result) >> 63
++        em->get(op2); em->i64c(64); em->get(cnt); em->op(I64_SUB); em->op(I64_SHL); em->get(op1); em->get(cnt); em->op(I64_SHR_U); em->op(I64_OR); em->set(res);
++        em->get(op1); em->get(cnt); em->i64c(1); em->op(I64_SUB); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->i32c(1); em->op(I32_AND); em->set(cf);
++        em->get(res); em->i64c(1); em->op(I64_SHL); em->get(res); em->op(I64_XOR); em->i64c(63); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->set(of);
++      }
++      em->get(res); regSetFromStack(dst);
++      setFlagsLogic(8, res);
++      setFlagsOxxxxC(of, cf);
++      if (useCL) endb();
++      return true;
++    }
++    // ---- BT r/m32/64, imm8 -- memory form (the register form has a template above): CF = bit
++    case BX_IA_BT_EdIb: case BX_IA_BT_EqIb: {
++      if (R) return false;
++      unsigned size = (ia == BX_IA_BT_EqIb) ? 8 : 4;
++      if (!realHandler(k, size == 8 ? &BX_CPU_C::BT_EqIbM : &BX_CPU_C::BT_EdIbM)) return false;
++      pushEA(k); em->set(t3); emitRead(k, size == 8 ? MK_RD_LIN : MK_RD_VIRT, seg, size, t3); em->set(t0);
++      lfLoad();
++      em->get(t0); em->i64c(i->Ib() & (size * 8 - 1)); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->i32c(1); em->op(I32_AND); em->set(T32[3]);
++      pushOF(); em->set(T32[4]);
++      setFlagsOxxxxC(T32[4], T32[3]);
++      return true;
++    }
++    // ---- BTS/BTR r/m32/64, imm8 -- memory form (RMW): CF = old bit; bit set/cleared
++    case BX_IA_BTS_EqIb: case BX_IA_BTS_EdIb: case BX_IA_BTR_EqIb: case BX_IA_BTR_EdIb: {
++      if (R) return false;
++      unsigned size = (ia == BX_IA_BTS_EqIb || ia == BX_IA_BTR_EqIb) ? 8 : 4;
++      bool bts = (ia == BX_IA_BTS_EqIb || ia == BX_IA_BTS_EdIb);
++      BxExecutePtr_tR hm = (ia == BX_IA_BTS_EqIb) ? &BX_CPU_C::BTS_EqIbM : (ia == BX_IA_BTS_EdIb) ? &BX_CPU_C::BTS_EdIbM :
++                           (ia == BX_IA_BTR_EqIb) ? &BX_CPU_C::BTR_EqIbM : &BX_CPU_C::BTR_EdIbM;
++      if (!realHandler(k, hm)) return false;
++      unsigned bit = i->Ib() & (size * 8 - 1);
++      MemKind rmwKind = (size == 8) ? MK_RMW_LIN : MK_RMW_VIRT;
++      pushEA(k); em->set(t3); emitRMWRead(k, rmwKind, seg, size, t3); em->set(t0);
++      lfLoad();
++      em->get(t0); em->i64c(bit); em->op(I64_SHR_U); em->op(I32_WRAP_I64); em->i32c(1); em->op(I32_AND); em->set(T32[3]);
++      em->get(t0); if (bts) { em->i64c(1LL << bit); em->op(I64_OR); } else { em->i64c(~(1LL << bit)); em->op(I64_AND); }
++      if (size == 4) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); }
++      em->set(t1);
++      emitRMWWrite(rmwKind, size, t1);
++      pushOF(); em->set(T32[4]);
++      setFlagsOxxxxC(T32[4], T32[3]);
++      return true;
++    }
++    default:
++      return false;
++    }
++  }
++  // unsigned high 64 bits of a*b -> local out (uses X[] scratch)
++  void emitMulhu(uint32_t a, uint32_t b, uint32_t out) {
++    uint32_t a0 = X[0], a1 = X[1], b0 = X[2], b1 = X[3];
++    em->get(a); em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); em->set(a0);
++    em->get(a); em->i64c(32); em->op(I64_SHR_U); em->set(a1);
++    em->get(b); em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); em->set(b0);
++    em->get(b); em->i64c(32); em->op(I64_SHR_U); em->set(b1);
++    // t = a0*b0; u = a1*b0 + (t>>32); v = a0*b1 + (u & 0xffffffff); hi = a1*b1 + (u>>32) + (v>>32)
++    em->get(a0); em->get(b0); em->op(I64_MUL); em->i64c(32); em->op(I64_SHR_U);
++    em->get(a1); em->get(b0); em->op(I64_MUL); em->op(I64_ADD); em->set(out); // u
++    em->get(a0); em->get(b1); em->op(I64_MUL); em->get(out); em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); em->op(I64_ADD); em->set(a0); // v
++    em->get(a1); em->get(b1); em->op(I64_MUL); em->get(out); em->i64c(32); em->op(I64_SHR_U); em->op(I64_ADD);
++    em->get(a0); em->i64c(32); em->op(I64_SHR_U); em->op(I64_ADD); em->set(out);
++  }
++
 +
 +  static unsigned jccCond(unsigned ia) {
 +    switch (ia) {
@@ -2605,6 +3226,11 @@ index 000000000..364e1d81f
 +    unsigned ia = i->getIaOpcode();
 +    bool R = i->modC0();
 +    reads = false; writesAll = false; mayExit = !R; // memory forms may fault
++    if (templSimd()) {
++      SimdDesc d = simdClassifyAll(k);
++      if (d.kind == SK_PCMPISTRI) { reads = true; writesAll = true; mayExit = (d.ld != SL_NONE); return; } // setEFlagsOSZAPC reads the prior lazy state
++      if (d.kind != SK_NONE) { mayExit = (d.ld != SL_NONE || d.kind == SK_VMOV_LD || d.kind == SK_VMOV_ST || d.kind == SK_MOVD_LD || (d.kind == SK_MOVD_ST && d.op == 1)); return; }
++    }
 +    switch (ia) {
 +      case BX_IA_NOP: case BX_IA_LEA_GqM: case BX_IA_LEA_GdM: case BX_IA_CDQE: case BX_IA_CQO: case BX_IA_CWDE: case BX_IA_CDQ:
 +        mayExit = false; break;
@@ -3064,6 +3690,7 @@ index 000000000..364e1d81f
 +    P_bits = em->addLocal(I32); P_off = em->addLocal(I32);
 +    L_cur = em->addLocal(I32);
 +    L_regp = em->addLocal(I32);
++    V[0] = V[1] = 0xffffffffu;   // v128 temps: allocated by vloc() when a SIMD template needs one
 +  }
 +  // The trace-linking epilogue as a function of its own (shared by every trace: it is ~600 bytes
 +  // of code that used to be duplicated per trace, dominating module size and compile time). Traces
@@ -3963,10 +4590,10 @@ index 000000000..881178f18
 +#endif
 diff --git a/bochs/nanobox_wasm.h b/bochs/nanobox_wasm.h
 new file mode 100644
-index 000000000..1a0c2bde1
+index 000000000..6d03ad765
 --- /dev/null
 +++ b/bochs/nanobox_wasm.h
-@@ -0,0 +1,241 @@
+@@ -0,0 +1,261 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox: a tiny WebAssembly binary emitter used by the trace JIT.
 +//
@@ -3987,7 +4614,7 @@ index 000000000..1a0c2bde1
 +
 +namespace nbw {
 +
-+enum ValType : uint8_t { I32 = 0x7f, I64 = 0x7e, F32 = 0x7d, F64 = 0x7c, EXNREF = 0x69, VOID = 0x40 };
++enum ValType : uint8_t { I32 = 0x7f, I64 = 0x7e, F32 = 0x7d, F64 = 0x7c, V128 = 0x7b, EXNREF = 0x69, VOID = 0x40 };
 +
 +// -- opcodes -----------------------------------------------------------------------------------
 +enum Op : uint8_t {
@@ -4014,6 +4641,15 @@ index 000000000..1a0c2bde1
 +  I64_SHL = 0x86, I64_SHR_S = 0x87, I64_SHR_U = 0x88, I64_ROTL = 0x89, I64_ROTR = 0x8a,
 +  I32_WRAP_I64 = 0xa7, I64_EXTEND_I32_S = 0xac, I64_EXTEND_I32_U = 0xad,
 +  I32_EXTEND8_S = 0xc0, I32_EXTEND16_S = 0xc1, I64_EXTEND8_S = 0xc2, I64_EXTEND16_S = 0xc3, I64_EXTEND32_S = 0xc4,
++};
++// SIMD (128-bit) sub-opcodes, all behind the 0xfd prefix (Emit::simd / v128_load / v128_store)
++enum SimdOp : uint32_t {
++  V128_LOAD = 0x00, V128_LOAD8_SPLAT = 0x07, V128_STORE = 0x0b, V128_CONST = 0x0c,
++  I8X16_SWIZZLE = 0x0e, I8X16_SPLAT = 0x0f, I16X8_SPLAT = 0x10, I32X4_SPLAT = 0x11, I64X2_SPLAT = 0x12,
++  I8X16_EXTRACT_LANE_U = 0x16, I32X4_EXTRACT_LANE = 0x1b, I64X2_EXTRACT_LANE = 0x1d, I64X2_REPLACE_LANE = 0x1e,
++  I8X16_EQ = 0x23, I8X16_LT_S = 0x25, I16X8_EQ = 0x2d, I32X4_EQ = 0x37,
++  V128_NOT = 0x4d, V128_AND = 0x4e, V128_ANDNOT = 0x4f, V128_OR = 0x50, V128_XOR = 0x51, V128_BITSELECT = 0x52, V128_ANY_TRUE = 0x53,
++  I8X16_ALL_TRUE = 0x63, I8X16_BITMASK = 0x64, I8X16_SHR_U = 0x6d, I16X8_BITMASK = 0x84,
 +};
 +
 +// -- growable byte buffer ---------------------------------------------------------------------------
@@ -4180,6 +4816,17 @@ index 000000000..1a0c2bde1
 +  void set(uint32_t l) { c.b8(LOCAL_SET); c.uleb(l); }
 +  void tee(uint32_t l) { c.b8(LOCAL_TEE); c.uleb(l); }
 +  void mem(Op o, uint32_t offset, uint32_t align) { c.b8(o); c.uleb(align); c.uleb(offset); }
++  // SIMD: 0xfd prefix + LEB sub-opcode (+ memarg / lane index / 16 immediate bytes)
++  void simd(SimdOp o) { c.b8(0xfd); c.uleb((uint32_t) o); }
++  void v128_load(uint32_t offset, uint32_t align) { simd(V128_LOAD); c.uleb(align); c.uleb(offset); }
++  void v128_store(uint32_t offset, uint32_t align) { simd(V128_STORE); c.uleb(align); c.uleb(offset); }
++  void v128_load8_splat(uint32_t offset) { simd(V128_LOAD8_SPLAT); c.uleb(0); c.uleb(offset); }
++  void v128_const(const uint8_t *bytes16) { simd(V128_CONST); c.raw(bytes16, 16); }
++  void v128_zero() { static const uint8_t z[16] = { 0 }; v128_const(z); }
++  void lane(SimdOp o, uint32_t l) { simd(o); c.b8((uint8_t) l); }
++  // bulk memory: memory.fill (dst, val, len) / memory.copy (dst, src, len), memory 0
++  void memory_fill() { c.b8(0xfc); c.uleb(0x0b); c.b8(0x00); }
++  void memory_copy() { c.b8(0xfc); c.uleb(0x0a); c.b8(0x00); c.b8(0x00); }
 +  // absolute-address load/store helpers: push i32.const 0 as base, offset = address
 +  void ldabs(Op o, uint32_t addr, uint32_t align) { i32c(0); mem(o, addr, align); }
 +  void stabs_begin() { i32c(0); }                    // then push value, then stabs_end

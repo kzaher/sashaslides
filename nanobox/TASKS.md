@@ -705,3 +705,44 @@ All three are unverified partial work in gitignored trees; their diffs against t
 
 Each needs: finish, single-binary A/B on the hot loop, ticks identical per pair, then the full gate here.
 The per-opcode cost table (hlo's first deliverable) is the one to produce first — it ranks the rest.
+
+## O. SIMD/AVX, REP and ALU templates shipped (2026-08-18, gate green)
+
+Level-3 counters showed 64 M interpreter handler steps per hot loop, dominated by the SSE/AVX string
+kernels every guest string function goes through. Shipped (`patches/bochs-nanobox.patch`), all behind
+runtime bits of `nanobox_jit_spill` (16 SIMD/AVX, 32 REP, 64 ALU; default all on):
+* wasm `v128` in the emitter (`nanobox_wasm.h`: V128 type, `0xfd`-prefixed ops, `memory.fill/copy`;
+  v128 locals declared lazily so modules without SIMD stay SIMD-free); templates dispatched by Bochs
+  HANDLER: `VZEROUPPER`, VEX 2-source `VPXOR/VXORPS/VPOR/VPAND/VPANDN/VPCMPEQB` (VL128 zeroes the upper
+  lane, VL256 both lanes, register + memory forms), `VPSHUFB`/`PSHUFB` (`i8x16.swizzle` on `mask & 0x8f`),
+  `VPMOVMSKB`/`PMOVMSKB`, SSE `PCMPEQB/PXOR/PAND/PANDN/POR/XORPS/ANDPS/ORPS/ANDNPS`, `PCMPISTRI` (helper
+  `bx_nanobox_pcmpistri()` in `cpu/sse_string.cc` sharing the handler's static code; the JIT replays
+  `setEFlagsOSZAPC`'s exact lazy-flag sequence), `VMOVDQU/VMOVDQA`, `VMOVD`, `MOVD`, `MOVQ`, `VPBROADCASTB`;
+* `REP STOSB/MOVSB/MOVSD/MOVSQ` single-chunk fast paths (exactly the case where the FIRST fast chunk is
+  the whole count: DF clear, span inside one page, `bytes <= currCountdown`, no code marks, no host
+  aliasing; `memory.fill/copy`; everything else deopts BEFORE any side effect). **The gate's bisector
+  caught the first version**: its deopt was handler step + `ret`, ending the trace after the REP where the
+  interpreter's `repeat()` continues into the next instruction — an extra boundary (kernel loop at
+  `0xffffffff81121a60`, `REP STOSB` count 3). Fixed: the deopt is an ordinary rejoining handler step;
+  bisector `no divergence: 935 blocks x 100000 traces`, and the earlier "+8/+17 icount" drift vanished
+  with it (it was that boundary, not chunk accounting);
+* ALU: `LEAVE`, `MUL_RAXEq`, `BSF/BSR` 32/64, `INC/DEC/NEG/NOT_Eb`, `BT/BTS/BTR` immediate memory forms,
+  `SHLD/SHRD` register forms (a v4 bug — `src` loaded inside the count!=0 branch — was caught by the
+  RAM-hash identity check and fixed).
+
+| | off | on |
+|---|---|---|
+| handler steps, hot loop (3.32 G instr) | 64,184,135 | **1,320,699 (−97.9 %)** |
+| handler steps, codex boot to prompt | 2,471,169 | 1,665,491 (−32.6 %) |
+| hot loop MIPS, single binary (agent, 4 pairs) | 211.0 | **224.0 (+6.2 % median, every pair ahead)** |
+| bytes / compiled instruction | 158.5 | 158.9 |
+| **gate** | | **IDENTITY identical (codex + agy), BISECT no divergence** |
+
+Codex keystroke/boot/MIPS: inside noise (its remaining steps are boot/privileged/32-bit-mode work, and it
+is coverage-limited). Remaining handler steps: `DIV_EAXEd` 796 k, `BLSMSK` 198 k, `PUNPCKLQDQ` 198 k, then
+< 30 k each; codex boot: `REP_MOVSB` in 32-bit mode 510 k, `CLI/STI` 466 k, `CMPXCHG16B` 51 k.
+
+**Measurement note that now matters**: on the no-codegen image the two builds' snapshot phases differ,
+so a CROSS-build hot-loop A/B reads `ticks DIFFER` and its MIPS delta is not apples-to-apples (measured:
+"+0.4 %" cross-build for a change the single-binary A/B shows at +6.2 %). Use single-binary runtime
+switches for A/B (as L, N, O did), and cross-build only for boot/keystroke on the codex scenario.
