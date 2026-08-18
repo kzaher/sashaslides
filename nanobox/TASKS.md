@@ -621,3 +621,39 @@ instructions are RET/indirect/syscall and hops into not-hot code; kernel multi-p
 2.3x the code. Section K's 4.7-9x came from registers-in-locals / direct flags / TLB tags INSIDE one
 function, not from fewer boundaries. **Phase 1 (codegen inside the region) carries the whole load; the
 Phase 0 mechanism is kept as substrate (it is what lets a region span a function safely) but not adopted.**
+
+## N. Phase 1 shipped: shared exit epilogue, live-only spills, XCHG templates (2026-08-18, gate green)
+
+What landed (`patches/bochs-nanobox.patch`): every trace exit used to emit `spillAll` + RIP/prev_rip/icount
+stores + `br`; the body is now wrapped in a chain of nested blocks, registers get a chain position the
+first time they are dirty at an exit, an exit sets RIP/icount and does one `br` to its position, and a
+common tail stores RIP/prev_rip/icount and tail-calls the link function — each exit executes exactly the
+stores of its own dirty set. Loop headers and region block entries spill only registers the code WRITES
+(fixpoint over pass-1 transitions instead of "everything the block touches"). Two missing templates found
+by the counters (`XCHG_RRXRAX` 51 M + `XCHG_ERXEAX` 9 M handler steps on the hot loop) added — handler
+steps 124 M -> 64 M. A latent bug fixed on the way: `emitHandlerStep` loaded `alignment_check_mask` and
+poisoned the probe tags BEFORE the handler call, so a POPF flipping EFLAGS.AC left it stale.
+
+| | before | after |
+|---|---|---|
+| bytes / guest instruction | 235.8 | **187.0 (−20.7 %)** |
+| spill triples | 158,998 | **62,133 (−61 %)** |
+| `i64.store` : `i64.load` | 6.05 : 1 | **3.13 : 1** (stores −52 %) |
+| codex installed wasm at boot | 17.1 MB | 13.4 MB |
+| hot loop, quiet machine, cross-build (4 pairs) | | **+5.4 % median** (2.7 / 5.8 / −9.9 / 17.0), ticks identical |
+| codex keystroke / boot / MIPS (3 pairs) | 226 ms / 8.74 s / 89.9 | 219 ms / 8.53 s / 91.2 (inside noise, all three ahead) |
+| **gate** | | **IDENTITY identical (codex + agy), BISECT no divergence**; every runtime mode IDENTICAL |
+
+Why `syncBefore`'s pre-call spill must stay (recorded so nobody retries it): `exception()` reads
+RIP/prev_rip/RSP from the CPU struct BEFORE it longjmps, so the commit cannot move into a catch handler.
+
+Remaining handler steps on the hot loop are the next hot-path item: AVX/SSE string ops (`VPCMPEQB`
+8.1 M, `PCMPISTRI` 6.4 M, `PSHUFB` 5.8 M, `VPMOVMSKB` 4.8 M, `VPXOR`/`VZEROUPPER` 4.6 M each), `REP
+STOSB/MOVSB` 1.6 M each, `LEAVE` 1.2 M.
+
+### The no-codegen kernel image boots the real workload
+Engine built from `work/pack-out-aot/pack` (JUMP_LABEL/BPF_JIT/kprobes/uprobes/ftrace/livepatch/KASLR
+off, KALLSYMS on, `nokaslr pti=off mitigations=off`, System.map with 13,947 text symbols + vmlinux
+exported): **codex reaches its sign-in prompt in 6.07 s / 1.190 G instructions.** First attempt with
+`BPF_SYSCALL=n` failed container init (`runc`: `bpf_prog_query(BPF_CGROUP_DEVICE)` ENOSYS) — the eBPF
+INTERPRETER stays, the JIT is off.

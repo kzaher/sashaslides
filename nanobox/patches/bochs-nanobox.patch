@@ -720,10 +720,10 @@ index 000000000..c5350a6af
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..1e9811a8f
+index 000000000..22656af0b
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,2959 @@
+@@ -0,0 +1,3179 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -768,6 +768,13 @@ index 000000000..1e9811a8f
 +// cache tag). 1 = new path, 0 = the original explicit tests. A/B'd inside one build through
 +// nanobox_set_jit_merge(1) (harness env NANOBOX_JIT_MERGE=1) so both arms share a binary.
 +unsigned nanobox_tlbfold = 1;
++// Register-spill work (work/j/spill): bit 0 = shared per-body exit chain (one spill tail per block
++// body, exits jump into it), bit 1 = live-only dirtiness (a loop header / region block entry marks
++// only registers the loop / region WRITES as dirty; read-only ones are never stored), bit 2 = the
++// syncBefore() RIP/prev_rip/icount stores as one out-of-line call (size only, default OFF), bit 3 =
++// templates for the XCHG short forms (90+r). A/B inside one build through nanobox_set_jit_spill(mask)
++// (work/prof/spill-run.mjs: NANOBOX_SPILL=mask). Default: chain + live + xchg.
++unsigned nanobox_jit_spill = 3 | 8;
 +unsigned nanobox_jit_threshold = 32;
 +unsigned nanobox_jit_maxlen = 64;      // debug knob: only compile traces with at most this many instructions
 +Bit8u nanobox_single_step = 0;
@@ -823,6 +830,9 @@ index 000000000..1e9811a8f
 +}
 +NB_EXPORT(nanobox_get_jit) unsigned nanobox_get_jit(void) { return nanobox_jit_level; }
 +NB_EXPORT(nanobox_set_jit_maxlen) void nanobox_set_jit_maxlen(unsigned n) { nanobox_jit_maxlen = n; }
++NB_EXPORT(nanobox_set_jit_spill) void nanobox_set_jit_spill(unsigned mask) { nanobox_jit_spill = mask; }
++static Bit64u nanobox_spill_stats[4];   // [0] chain exits, [1] inline-fallback exits, [2] chain positions, [3] bodies
++NB_EXPORT(nanobox_jit_spill_stat) double nanobox_jit_spill_stat(unsigned i) { return i < 4 ? (double) nanobox_spill_stats[i] : 0; }
 +
 +// C++ helpers callable from JIT'd code (plain functions -> stable table indices)
 +extern "C" {
@@ -833,6 +843,16 @@ index 000000000..1e9811a8f
 +static void nanobox_helper_dbg_loop(unsigned entry)
 +{
 +  nanobox_dbg_trace((bxICacheEntry_c *) (uintptr_t) entry, true);
++}
++// syncBefore() out of line (nanobox_jit_spill bit 2): RIP = end of the executing instruction,
++// prev_rip = its start, icount = instructions completed before it — the state a fault raised by
++// the accessor called next must see (exception() reads RIP/prev_rip/RSP from the CPU struct
++// BEFORE it longjmps, which is why the spill cannot move into a catch handler)
++static void nanobox_helper_sync(Bit64u rip, Bit64u prev, Bit64u ic)
++{
++  BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx = rip;
++  BX_CPU_THIS_PTR prev_rip = prev;
++  BX_CPU_THIS_PTR icount = ic;
 +}
 +}
 +
@@ -899,6 +919,7 @@ index 000000000..1e9811a8f
 +struct CacheState {
 +  bool regLoaded[16], regDirty[16];
 +  bool lfLoaded, lfDirty, acmLoaded;
++  bool cleared;   // a full spill with clear (handler step / PUSHF) happened on this path since the block entry: the entry dirty set is in memory
 +};
 +
 +// ---------------------------------------------------------------- regions
@@ -1002,9 +1023,38 @@ index 000000000..1e9811a8f
 +  bool regionKernel;     // region compiled for CPL0 code: kernel text mapping is fixed after boot (measured: 3 SMC events after boot), skip the frame check on cross-page transitions
 +  bool blockUsedReg[NB_REGION_MAX_BLOCKS][16], blockUsedLf[NB_REGION_MAX_BLOCKS];
 +  bool conforming;       // loads emitted by conformTo() must not count as "used by this block"
++  // ---- register-spill work (nanobox_jit_spill)
++  bool writtenReg[16], writtenLf;         // registers / flags WRITTEN anywhere in the function (pass 1 result; usedReg is read-or-written)
++  bool headerWritten[16], headerWrittenLf; // loop pass 2: header registers the loop writes -> dirty at the header; read-only header registers stay clean
++  bool regionWritten[16], regionWrittenLf; // region pass 2: written by any block -> a block entry state marks only these dirty
++  // Exit chain: every exit of a block body needs "store the dirty registers, then RIP/prev_rip/icount,
++  // then link". The dirty set only grows along a body (conditional paths are compiled with the same
++  // loaded set on both sides), so the stores are emitted ONCE per body as a chain of segments
++  //   block B0 { block B1 { ... block B(M-1) { body } stores(pos M-1) } ... stores(pos 1) } stores(pos 0)
++  // and an exit whose newest dirty register sits at position p does `br B_p`: it executes the stores
++  // of positions p, p-1, ..., 0 = exactly its dirty set (plus registers that were dirtied earlier in
++  // emission order and are clean but LOADED here: storing a loaded clean register is a no-op). An
++  // exit that would store a register that is not loaded on its path falls back to the inline spill.
++  // Positions are assigned lazily at exits; M comes from pass 1 (+1 for the loop-header / region-
++  // entry set that pass 2 adds). RIP and the icount delta travel in T[7] / L_xic to the common tail
++  // after the $body block, which stores them and tail-calls the link function.
++  struct Chain { bool active; int baseDepth; unsigned M, npos; int pos[17]; uint32_t at[17]; } ch;
++  unsigned chainUsed[NB_REGION_MAX_BLOCKS + 1];   // positions a body needed in pass 1 (index = block, 0 for a plain trace)
++  uint32_t L_xic;                                  // exit: icount delta (k + 1) for the common tail
++  bool spillChain() const { return (nanobox_jit_spill & 1) != 0; }
++  bool spillLive() const { return (nanobox_jit_spill & 2) != 0; }
++  bool spillSyncCall() const { return (nanobox_jit_spill & 4) != 0; }
++  bool templXchgShort() const { return (nanobox_jit_spill & 8) != 0; }   // XCHG_RRXRAX / XCHG_ERXEAX templates (A/B bit)
 +
 +  TraceCompiler(bxICacheEntry_c *entry, Module &mod) : e(entry), ins(entry->i), n(0), m(mod), em(NULL), needAsyncCheck(false), depth(0), loopDepth(-1), bodyDepth(-1), linkOK(false), selfLoopOK(false),
-+    reg(NULL), curBlock(0), boff(0), dispatchDepth(-1), L_cur(0), regionPass2(false), regionKernel(false), conforming(false) {}
++    reg(NULL), curBlock(0), boff(0), dispatchDepth(-1), L_cur(0), regionPass2(false), regionKernel(false), conforming(false), L_xic(0), passNo(1), nedges(0) {
++    csReset();
++    ch.active = false; ch.baseDepth = 0; ch.M = 0; ch.npos = 0;
++    for (unsigned r = 0; r < 17; r++) { ch.pos[r] = -1; ch.at[r] = 0; }
++    for (unsigned j = 0; j <= NB_REGION_MAX_BLOCKS; j++) chainUsed[j] = 0;
++    for (unsigned r = 0; r < 16; r++) writtenReg[r] = headerWritten[r] = regionWritten[r] = false;
++    writtenLf = headerWrittenLf = regionWrittenLf = false;
++  }
 +  // instruction pointer of instruction k of the current block (what the handler gets)
 +  void pushInsPtr(unsigned k) {
 +    if (reg) { em->get(L_regp); em->mem(I32_LOAD, REGION_OFF(insptr[curBlock]), 2); if (k) { em->i32c((int32_t)(k * sizeof(bxInstruction_c))); em->op(I32_ADD); } return; }
@@ -1016,11 +1066,43 @@ index 000000000..1e9811a8f
 +    for (unsigned j = 0; j < reg->nblocks; j++) if ((Bit64s) reg->b[j].boff == roff) return (int) j;
 +    return -1;
 +  }
-+  void csReset() { for (unsigned r = 0; r < 16; r++) cs.regLoaded[r] = cs.regDirty[r] = false; cs.lfLoaded = cs.lfDirty = false; cs.acmLoaded = false; }
++  void csReset() { for (unsigned r = 0; r < 16; r++) cs.regLoaded[r] = cs.regDirty[r] = false; cs.lfLoaded = cs.lfDirty = false; cs.acmLoaded = false; cs.cleared = false; }
 +  // compile-time state at the entry of block j (pass 2): D_j loaded and possibly stale in memory
++  // (spillLive: only registers some block of the region WRITES can be stale in memory; a register
++  //  the whole region only reads is never dirty, so it is loaded but clean here and never stored)
++  //  Precisely: entryDirty[j] = the fixpoint over the recorded pass-1 transitions i -> j of
++  //  ((entryDirty[i] unless a full spill preceded the transition) | dirty at the transition) & D_j,
++  //  which is exactly the set conformTo() can leave dirty in locals on entry to j (entries from
++  //  cpu_loop load everything: nothing dirty).
 +  void csSetEntry(unsigned j) {
-+    for (unsigned r = 0; r < 16; r++) cs.regLoaded[r] = cs.regDirty[r] = blockUsedReg[j][r];
-+    cs.lfLoaded = cs.lfDirty = blockUsedLf[j]; cs.acmLoaded = false;
++    for (unsigned r = 0; r < 16; r++) { cs.regLoaded[r] = blockUsedReg[j][r]; cs.regDirty[r] = blockUsedReg[j][r] && (!spillLive() || ((entryDirty[j] >> r) & 1)); }
++    cs.lfLoaded = blockUsedLf[j]; cs.lfDirty = blockUsedLf[j] && (!spillLive() || ((entryDirty[j] >> 16) & 1)); cs.acmLoaded = false;
++    cs.cleared = false;
++  }
++  uint32_t dirtyMask() const { uint32_t m = 0; for (unsigned r = 0; r < 16; r++) if (cs.regDirty[r]) m |= 1u << r; if (cs.lfDirty) m |= 1u << 16; return m; }
++  // pass 1 records every in-region transition: (from, to, dirty mask, cleared-since-entry)
++  enum { NB_MAX_EDGES = 1024 };
++  struct Edge { Bit8u from, to, cleared; uint32_t mask; } edges[NB_MAX_EDGES]; unsigned nedges;
++  uint32_t entryDirty[NB_REGION_MAX_BLOCKS];
++  void recordEdge(unsigned s) {
++    if (regionPass2 || nedges >= NB_MAX_EDGES) return;
++    edges[nedges].from = (Bit8u) curBlock; edges[nedges].to = (Bit8u) s; edges[nedges].cleared = cs.cleared ? 1 : 0; edges[nedges].mask = dirtyMask(); nedges++;
++  }
++  void computeEntryDirty() {
++    uint32_t D[NB_REGION_MAX_BLOCKS];
++    for (unsigned j = 0; j < reg->nblocks; j++) { D[j] = 0; for (unsigned r = 0; r < 16; r++) if (blockUsedReg[j][r]) D[j] |= 1u << r; if (blockUsedLf[j]) D[j] |= 1u << 16; entryDirty[j] = 0; }
++    if (nedges >= NB_MAX_EDGES) { // overflow: fall back to the coarse "used and written anywhere" set
++      uint32_t W = 0; for (unsigned r = 0; r < 16; r++) if (regionWritten[r]) W |= 1u << r; if (regionWrittenLf) W |= 1u << 16;
++      for (unsigned j = 0; j < reg->nblocks; j++) entryDirty[j] = D[j] & W;
++      return;
++    }
++    for (bool changed = true; changed;) {
++      changed = false;
++      for (unsigned e = 0; e < nedges; e++) {
++        uint32_t m = ((edges[e].cleared ? 0 : entryDirty[edges[e].from]) | edges[e].mask) & D[edges[e].to];
++        if ((entryDirty[edges[e].to] | m) != entryDirty[edges[e].to]) { entryDirty[edges[e].to] |= m; changed = true; }
++      }
++    }
 +  }
 +  // make the runtime state match D_j from the current compile-time state (pass 2); pass 1: spill all
 +  void conformTo(unsigned j) {
@@ -1043,11 +1125,21 @@ index 000000000..1e9811a8f
 +  }
 +  // commit RIP/prev_rip/icount after instruction k with the next RIP = region offset roff, and spill
 +  // everything: used on the rare paths that leave the region from inside a transition
-+  void commitAndSpill(unsigned k, Bit64s roff) {
++  void commitAndSpillInline(unsigned k, Bit64s roff) {
 +    spillAll(false);
 +    em->i32c(0); pushRegionVA(roff); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
 +    em->i32c(0); pushRegionVA(roff); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
 +    em->i32c(0); em->get(L_ic0); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++  }
++  // ... and leave the function: the state committed is what cpu_loop sees at a trace boundary. Goes
++  // through the exit chain + common tail + link epilogue (whose countdown / async / window tests
++  // repeat the ones that brought us here on the very same state, so it returns to cpu_loop exactly
++  // like the `ret` it replaces; when they pass, cpu_loop would have run getICacheEntry on this state
++  // and started the next trace, which is what the epilogue does).
++  void commitAndExit(unsigned k, Bit64s roff) {
++    if (bodyDepth < 0) { commitAndSpillInline(k, roff); em->ret(); return; }
++    pushRegionVA(roff); em->set(T[7]);
++    exitCommon(k);
 +  }
 +
 +  void blk(ValType t = VOID) { em->block(t); depth++; }
@@ -1076,12 +1168,13 @@ index 000000000..1e9811a8f
 +    if (!cs.regLoaded[r]) { em->i32c(0); em->mem(I64_LOAD, regAddr(r), 3); em->set(L_reg[r]); cs.regLoaded[r] = true; }
 +  }
 +  void regGet(unsigned r) { regEnsureLoaded(r); em->get(L_reg[r]); }
-+  void regSetFromStack(unsigned r) { usedReg[r] = true; em->set(L_reg[r]); cs.regLoaded[r] = true; cs.regDirty[r] = true; }
++  void regSetFromStack(unsigned r) { usedReg[r] = true; writtenReg[r] = true; em->set(L_reg[r]); cs.regLoaded[r] = true; cs.regDirty[r] = true; }
 +  // 32-bit result (i64 with garbage upper bits on stack) -> zero-extended register write
 +  void regSet32FromStack(unsigned r) { em->op(I32_WRAP_I64); em->op(I64_EXTEND_I32_U); regSetFromStack(r); }
 +  // emit stores of dirty state; `clear` says whether the compile-time dirty bits are cleared
 +  // (false inside conditional paths that rejoin the main flow)
 +  void spillAll(bool clear) {
++    if (clear) cs.cleared = true;
 +    for (unsigned r = 0; r < 16; r++) if (cs.regDirty[r]) {
 +      em->i32c(0); em->get(L_reg[r]); em->mem(I64_STORE, regAddr(r), 3);
 +      if (clear) cs.regDirty[r] = false;
@@ -1092,9 +1185,12 @@ index 000000000..1e9811a8f
 +      if (clear) cs.lfDirty = false;
 +    }
 +  }
-+  void invalidateAll() {
++  void invalidateAll() { csInvalidate(); emitInvalidate(); }
++  void csInvalidate() {
 +    for (unsigned r = 0; r < 16; r++) cs.regLoaded[r] = cs.regDirty[r] = false;
 +    cs.lfLoaded = cs.lfDirty = false; cs.acmLoaded = false;
++  }
++  void emitInvalidate() {
 +    // alignment_check_mask is loaded EAGERLY here rather than at its first use. Lazily, the load
 +    // is emitted inside whichever probe happens to be compiled first, which need not be the one
 +    // that runs first (a skipped conditional access), and every later use would then read an
@@ -1117,7 +1213,7 @@ index 000000000..1e9811a8f
 +    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR oszapc.auxbits), 3); em->set(L_lfa);
 +    cs.lfLoaded = true;
 +  }
-+  void lfMarkSet() { usedLf = true; cs.lfLoaded = true; cs.lfDirty = true; }
++  void lfMarkSet() { usedLf = true; writtenLf = true; cs.lfLoaded = true; cs.lfDirty = true; }
 +
 +  void acmGet() {
 +    if (!cs.acmLoaded) { em->i32c(0); em->mem(I64_LOAD32_U, ADDR(BX_CPU_THIS_PTR alignment_check_mask), 2); em->set(L_acm); cs.acmLoaded = true; }
@@ -1133,6 +1229,11 @@ index 000000000..1e9811a8f
 +  // icount = icount0 + k. `clear` as in spillAll.
 +  void syncBefore(unsigned k, bool clear) {
 +    spillAll(clear);
++    if (spillSyncCall()) { // one call instead of three inline stores (size only: the slow path pays a call)
++      pushVA(off[k + 1]); pushVA(off[k]); em->get(L_ic0); if (k) { em->i64c(k); em->op(I64_ADD); }
++      em->call(fn(FNIDX(&nanobox_helper_sync), "lll>v"));
++      return;
++    }
 +    em->i32c(0); pushVA(off[k + 1]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
 +    em->i32c(0); pushVA(off[k]);     em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
 +    em->i32c(0); em->get(L_ic0); if (k) { em->i64c(k); em->op(I64_ADD); } em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
@@ -1142,11 +1243,75 @@ index 000000000..1e9811a8f
 +  // emit this on a non-rejoining path restore their snapshot).
 +  void exitWithRipOnStack(unsigned k) {
 +    em->set(T[7]);
-+    spillAll(false);
-+    em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
-+    em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
-+    em->i32c(0); em->get(L_ic0); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
-+    if (bodyDepth >= 0) em->br(depth - bodyDepth); else em->ret();
++    if (bodyDepth < 0) {
++      spillAll(false);
++      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
++      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
++      em->i32c(0); em->get(L_ic0); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++      em->ret();
++      return;
++    }
++    exitCommon(k);
++  }
++  // Exit after instruction k with the new RIP in T[7]: registers through the exit chain (or the
++  // inline spill), RIP + icount delta through T[7]/L_xic to the common tail after $body.
++  void exitCommon(unsigned k) {
++    em->i64c(k + 1); em->set(L_xic);
++    if (spillChain() && ch.active) chainExit(); else { nanobox_spill_stats[1]++; spillAll(false); em->br(depth - bodyDepth); }
++  }
++  static unsigned regIdxLf() { return 16; }
++  void chainOpen(unsigned M) {
++    ch.active = true; ch.M = M; ch.npos = 0;
++    for (unsigned r = 0; r < 17; r++) { ch.pos[r] = -1; ch.at[r] = 0; }
++    for (unsigned p = 0; p < M; p++) { blk(); if (p == 0) ch.baseDepth = depth; }
++    if (M == 0) ch.baseDepth = depth + 1; // no positions can be assigned (every exit falls back)
++    nanobox_spill_stats[3]++;
++  }
++  // close the chain blocks, emitting each position's stores after its block end
++  void chainClose() {
++    for (int p = (int) ch.M - 1; p >= 0; p--) {
++      endb();
++      if ((unsigned) p < ch.npos) {
++        for (unsigned r = 0; r < 16; r++) if (ch.at[p] & (1u << r)) { em->i32c(0); em->get(L_reg[r]); em->mem(I64_STORE, regAddr(r), 3); }
++        if (ch.at[p] & (1u << 16)) {
++          em->i32c(0); em->get(L_lfr); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR oszapc.result), 3);
++          em->i32c(0); em->get(L_lfa); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR oszapc.auxbits), 3);
++        }
++      }
++    }
++    nanobox_spill_stats[2] += ch.npos;
++    ch.active = false;
++  }
++  // exit through the chain: give the dirty registers without a position the next one, then branch
++  // to the newest position among the dirty set (falls back to the inline spill when a register that
++  // would be stored is not loaded on this path, or when the positions run out)
++  void chainExit() {
++    uint32_t dirty = 0, need = 0;
++    for (unsigned r = 0; r < 16; r++) if (cs.regDirty[r]) { dirty |= 1u << r; if (ch.pos[r] < 0) need |= 1u << r; }
++    if (cs.lfDirty) { dirty |= 1u << 16; if (ch.pos[16] < 0) need |= 1u << 16; }
++    bool ok = true;
++    if (need) {
++      if (ch.npos >= ch.M) ok = false;
++      else { unsigned p = ch.npos++; ch.at[p] = need; for (unsigned r = 0; r < 17; r++) if (need & (1u << r)) ch.pos[r] = (int) p; }
++    }
++    int pmax = -1;
++    if (ok) {
++      for (unsigned r = 0; r < 17; r++) if ((dirty & (1u << r)) && ch.pos[r] > pmax) pmax = ch.pos[r];
++      // everything the tail from pmax down will store must hold a valid value here
++      for (unsigned r = 0; r < 16; r++) if (ch.pos[r] >= 0 && ch.pos[r] <= pmax && !cs.regLoaded[r]) ok = false;
++      if (ch.pos[16] >= 0 && ch.pos[16] <= pmax && !cs.lfLoaded) ok = false;
++    }
++    if (!ok) { nanobox_spill_stats[1]++; spillAll(false); em->br(depth - bodyDepth); return; }
++    nanobox_spill_stats[0]++;
++    if (pmax < 0) em->br(depth - bodyDepth); else em->br(depth - (ch.baseDepth + pmax));
++  }
++  // after a handler step: the locals are stale; registers the chain already stores (positions
++  // assigned so far) are reloaded so later exits can keep using it (a load per chain register on
++  // the handler-step path, which already pays for a call into the interpreter)
++  void chainReloadAfterHandler() {
++    if (!(spillChain() && ch.active)) return;
++    for (unsigned r = 0; r < 16; r++) if (ch.pos[r] >= 0 && !cs.regLoaded[r]) { em->i32c(0); em->mem(I64_LOAD, regAddr(r), 3); em->set(L_reg[r]); cs.regLoaded[r] = true; }
++    if (ch.pos[16] >= 0 && !cs.lfLoaded) { bool c = conforming; conforming = true; lfLoad(); conforming = c; }
 +  }
 +  // Epilogue reached (via `br` to the body block) after a trace exit with the whole state in
 +  // memory: do what cpu_loop does between two traces and, if the next trace is compiled, jump
@@ -1232,17 +1397,18 @@ index 000000000..1e9811a8f
 +  void emitTransition(unsigned k, unsigned s) {
 +    uint32_t now = X[0], delta = T32[5];
 +    Bit64s target = reg->b[s].boff;
++    recordEdge(s);
 +    // fast path keeps registers/flags in locals; every path that LEAVES the region from here first
 +    // commits RIP/prev_rip/icount and spills, so cpu_loop sees a consistent trace boundary
 +    em->get(L_ic0); em->i64c(k + 1); em->op(I64_ADD); em->set(now);
 +    // BX_SYNC_TIME fast path: delta >= currCountdown -> cpu_loop runs the timers
 +    em->get(now); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount_last_sync), 3); em->op(I64_SUB); em->op(I32_WRAP_I64); em->set(delta);
 +    em->get(delta); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->op(I32_GE_U);
-+    { CacheState s0 = snapshot(); iff(); commitAndSpill(k, target); profCount(&nanobox_stats.link_fail[0]); em->ret(); endb(); restore(s0); }
++    { CacheState s0 = snapshot(); iff(); commitAndExit(k, target); endb(); restore(s0); }
 +    em->i32c(0); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->get(delta); em->op(I32_SUB); em->mem(I32_STORE, nanobox_pc_system_access::countdownAddr(), 2);
 +    em->i32c(0); em->get(now); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount_last_sync), 3);
 +    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2);
-+    { CacheState s0 = snapshot(); iff(); commitAndSpill(k, target); profCount(&nanobox_stats.link_fail[1]); em->ret(); endb(); restore(s0); }
++    { CacheState s0 = snapshot(); iff(); commitAndExit(k, target); endb(); restore(s0); }
 +    if (blockPage(s) != blockPage(curBlock)) {
 +      // the target lies in the region's other page: do what prefetch() does for the common case
 +      // (ITLB hit with execute permission -> new fetch window) and additionally require that the
@@ -1270,16 +1436,15 @@ index 000000000..1e9811a8f
 +        em->i32c(0); em->get(T32[3]); em->mem(I32_LOAD, TLB_OFF(hostPageAddr), 2); em->mem(I32_STORE, ADDR(BX_CPU_THIS_PTR eipFetchPtr), 2);
 +        em->br(1);
 +       endb();
-+       { CacheState s0 = snapshot(); commitAndSpill(k, target); restore(s0); }
-+       profCount(&nanobox_stats.link_fail[2]); em->ret();
++       { CacheState s0 = snapshot(); commitAndExit(k, target); restore(s0); }
 +      endb();
 +    }
 +    // getICacheEntry() would re-prefetch if the target is outside the fetch window: let cpu_loop do it
 +    pushRegionVA(target); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR eipPageBias), 3); em->op(I64_ADD);
 +    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR eipPageWindowSize), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GE_U);
-+    { CacheState s0 = snapshot(); iff(); commitAndSpill(k, target); profCount(&nanobox_stats.link_fail[2]); em->ret(); endb(); restore(s0); }
++    { CacheState s0 = snapshot(); iff(); commitAndExit(k, target); endb(); restore(s0); }
 +    if (nanobox_dbg_mode) { // divergence finder: the fingerprint reads memory -> present a committed state; remember which block runs next
-+      commitAndSpill(k, target);
++      commitAndSpillInline(k, target);
 +      em->get(L_regp); em->mem(I32_LOAD, REGION_OFF(entptr[curBlock]), 2); em->call(fn(FNIDX(&nanobox_helper_dbg_loop), "i>v"));
 +      em->i32c(0); em->get(L_regp); em->mem(I32_LOAD, REGION_OFF(entptr[s]), 2); em->mem(I32_STORE, ADDR(nanobox_dbg_cur_entry), 2);
 +    }
@@ -1726,10 +1891,12 @@ index 000000000..1e9811a8f
 +
 +  // Run instruction k through its Bochs handler in single-step mode, then apply the
 +  // BX_NEXT_INSTR/BX_NEXT_TRACE continuation semantics. Leaves all caches invalidated.
-+  void emitHandlerStep(unsigned k, bool last) {
++  // `cont`: the trace continues after this step (false: the caller returns right after it, so no
++  // reloads / rebasing are emitted).
++  void emitHandlerStep(unsigned k, bool last, bool cont = true) {
 +    profCount(&nanobox_stats.link_fail[7]);
 +    syncBefore(k, true);
-+    invalidateAll();
++    csInvalidate();
 +    em->i32c(0); em->i32c(0); em->mem(I32_STORE8, ADDR(nanobox_trace_end), 0);
 +    pushInsPtr(k);
 +    em->call(fn(FNIDX(ins[k].execute1), "i>v"));
@@ -1738,19 +1905,24 @@ index 000000000..1e9811a8f
 +    em->i32c(0); em->mem(I32_LOAD8_U, ADDR(nanobox_trace_end), 0);
 +    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2);
 +    em->op(I32_OR);
-+    if (last) { em->drop(); profCount(&nanobox_stats.link_fail[5]); }
++    if (last || !cont) { em->drop(); profCount(&nanobox_stats.link_fail[5]); }
 +    else {
 +      iff(); profCount(&nanobox_stats.link_fail[5]); em->ret(); endb();
 +      // Handlers may advance icount by more than one (repeat() counts each iteration), so
 +      // rebase our "icount at trace entry" so that ic0 + j stays exact for the instructions after.
 +      em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3); em->i64c(k + 1); em->op(I64_SUB); em->set(L_ic0);
++      // probe cache + alignment_check_mask AFTER the call (a POPF that flips EFLAGS.AC changes the
++      // mask and continues the trace; loading it before the call left L_acm stale), then the
++      // registers the exit chain stores
++      emitInvalidate();
++      chainReloadAfterHandler();
 +    }
 +  }
 +  // "deopt" on a non-rejoining path: run the handler and return; compile-time cache state is
 +  // restored afterwards by the caller via snapshot/restore
 +  void emitDeoptAndReturn(unsigned k, bool last) {
 +    CacheState s = snapshot();
-+    emitHandlerStep(k, last);
++    emitHandlerStep(k, last, false);
 +    em->ret();
 +    restore(s);
 +  }
@@ -2033,13 +2205,21 @@ index 000000000..1e9811a8f
 +      return true;
 +    }
 +
-+    // ================= XCHG (register form)
++    // ================= XCHG (register form; the 90+r short forms XCHG_RRXRAX / XCHG_ERXEAX run the
++    // very same handlers XCHG_EqGqR / XCHG_EdGdR with dst = the encoded register, src = RAX/EAX —
++    // measured 51 M + 9 M handler steps in the hot-loop run, 1.8 % of its instructions)
++    case BX_IA_XCHG_RRXRAX:
++      if (!templXchgShort()) return false;
++      /* fall through */
 +    case BX_IA_XCHG_EqGq:
-+      if (!R) return false;
++      if (ia == BX_IA_XCHG_EqGq && !R) return false;
 +      regGet(dst); em->set(t0); regGet(src); regSetFromStack(dst); em->get(t0); regSetFromStack(src);
 +      return true;
++    case BX_IA_XCHG_ERXEAX:
++      if (!templXchgShort()) return false;
++      /* fall through */
 +    case BX_IA_XCHG_EdGd:
-+      if (!R) return false;
++      if (ia == BX_IA_XCHG_EdGd && !R) return false;
 +      pushReg32(dst); em->set(t0); pushReg32(src); regSetFromStack(dst); em->get(t0); regSetFromStack(src);
 +      return true;
 +
@@ -2429,6 +2609,9 @@ index 000000000..1e9811a8f
 +      case BX_IA_MOVZX_GdEb: case BX_IA_MOVZX_GqEb: case BX_IA_MOVZX_GdEw: case BX_IA_MOVZX_GqEw: case BX_IA_MOVSX_GdEb: case BX_IA_MOVSX_GqEb:
 +      case BX_IA_MOVSX_GdEw: case BX_IA_MOVSX_GqEw: case BX_IA_MOVSXD_GqEd: case BX_IA_XCHG_EqGq: case BX_IA_XCHG_EdGd: case BX_IA_NOT_Eq: case BX_IA_NOT_Ed:
 +        break;
++      case BX_IA_XCHG_RRXRAX: case BX_IA_XCHG_ERXEAX:
++        if (templXchgShort()) break;
++        reads = true; mayExit = true; break;   // handler step (as any untemplated opcode)
 +      case BX_IA_XOR_GqEq_ZERO_IDIOM: case BX_IA_SUB_GqEq_ZERO_IDIOM: case BX_IA_XOR_EqGq_ZERO_IDIOM: case BX_IA_SUB_EqGq_ZERO_IDIOM:
 +      case BX_IA_XOR_GdEd_ZERO_IDIOM: case BX_IA_SUB_GdEd_ZERO_IDIOM: case BX_IA_XOR_EdGd_ZERO_IDIOM: case BX_IA_SUB_EdGd_ZERO_IDIOM:
 +        writesAll = true; mayExit = false; break;
@@ -2817,12 +3000,18 @@ index 000000000..1e9811a8f
 +    }
 +    if (n == 0 || n > nanobox_jit_maxlen) return false;
 +    mode64 = (BX_CPU_THIS_PTR cpu_mode == BX_MODE_LONG_64);
-+    for (unsigned r = 0; r < 16; r++) usedReg[r] = headerReg[r] = false;
-+    usedLf = headerLf = false;
-+    // pass 1: discover which registers/flags the trace touches (needed to build a loop header)
++    for (unsigned r = 0; r < 16; r++) usedReg[r] = headerReg[r] = writtenReg[r] = headerWritten[r] = regionWritten[r] = false;
++    usedLf = headerLf = writtenLf = headerWrittenLf = regionWrittenLf = false;
++    // pass 1: discover which registers/flags the trace touches (loop header set, region block entry
++    // states) and how many exit-chain positions each body needs
++    passNo = 1; nedges = 0;
 +    if (!compilePass()) return false;
++    passNo = 2;
 +    if (reg) {
 +      // pass 2 for regions: block entry states D_j are known now; transitions keep them in locals
++      for (unsigned r = 0; r < 16; r++) regionWritten[r] = writtenReg[r];
++      regionWrittenLf = writtenLf;
++      computeEntryDirty();
 +      m.beginFunc();
 +      depth = 0; loopDepth = -1; bodyDepth = -1; dispatchDepth = -1;
 +      regionPass2 = true;
@@ -2832,8 +3021,11 @@ index 000000000..1e9811a8f
 +    }
 +    if (loopWanted) {
 +      // pass 2: recompile with the loop header keeping those in locals across iterations
-+      for (unsigned r = 0; r < 16; r++) headerReg[r] = usedReg[r];
-+      headerLf = usedLf;
++      for (unsigned r = 0; r < 16; r++) { headerReg[r] = usedReg[r]; headerWritten[r] = writtenReg[r]; }
++      headerLf = usedLf; headerWrittenLf = writtenLf;
++    }
++    if (loopWanted || spillChain()) {
++      // pass 2 (a plain trace re-emits identically; only the exit chain sizes come from pass 1)
 +      m.beginFunc();
 +      depth = 0; loopDepth = -1; bodyDepth = -1;
 +      if (!compilePass()) return false;
@@ -2841,10 +3033,18 @@ index 000000000..1e9811a8f
 +    return true;
 +  }
 +  bool loopWanted;
++  int passNo;
++  // exit-chain size for body j in this pass: pass 1 gets room for every possible position, pass 2
++  // what pass 1 used (+1: the loop header / region entry set can add one dirtying event up front)
++  unsigned chainM(unsigned j) {
++    if (passNo == 1) return 17;
++    unsigned M = chainUsed[j] + ((reg || loopWanted) ? 1 : 0);
++    return M > 17 ? 17 : M;
++  }
 +  void declareLocals() {
 +    // grouped by type so the local-declaration section is two runs instead of ~60 entries
 +    L_i = 0;
-+    L_base = em->addLocal(I64); L_ic0 = em->addLocal(I64); L_acm = em->addLocal(I64);
++    L_base = em->addLocal(I64); L_ic0 = em->addLocal(I64); L_acm = em->addLocal(I64); L_xic = em->addLocal(I64);
 +    for (unsigned r = 0; r < 16; r++) L_reg[r] = em->addLocal(I64);
 +    L_lfr = em->addLocal(I64); L_lfa = em->addLocal(I64);
 +    for (unsigned t = 0; t < 8; t++) T[t] = em->addLocal(I64);
@@ -2917,7 +3117,9 @@ index 000000000..1e9811a8f
 +      }
 +    }
 +    linkOK = useTemplates && !nanobox_dbg_mode;
-+    if (linkOK) { blk(); bodyDepth = depth; }
++    // $body: every exit ends up here (through its body's exit chain); the common tail after it
++    // commits RIP/prev_rip/icount from T[7]/L_xic and links (returns in dbg mode)
++    if (useTemplates) { blk(); bodyDepth = depth; }
 +    if (useTemplates) {
 +      // BX_NEXT_INSTR checks async_event after *every* instruction, so a trace entered with a
 +      // pending async event (e.g. right after STI) executes exactly one instruction. Templates
@@ -2934,23 +3136,22 @@ index 000000000..1e9811a8f
 +        for (unsigned j = 0; j < reg->nblocks; j++) {
 +          endb();
 +          setBlock(j); csReset();
-+          emitHandlerStep(0, n == 1); em->ret();
++          emitHandlerStep(0, n == 1, false); em->ret();
 +        }
 +        setBlock(0); csReset();
 +      } else {
-+        emitHandlerStep(0, n == 1); em->ret();
++        emitHandlerStep(0, n == 1, false); em->ret();
 +      }
 +      endb();
 +      restore(s0);
 +    }
 +    if (hasSelfBranch) {
 +      loopWanted = true;
-+      // loop header: header registers/flags are loaded here and considered dirty
-+      bool anyHeader = false;
-+      for (unsigned r = 0; r < 16; r++) if (headerReg[r]) { regEnsureLoaded(r); cs.regDirty[r] = true; anyHeader = true; }
-+      if (headerLf) { lfLoad(); cs.lfDirty = true; }
-+      (void) anyHeader;
-+      lp(); loopDepth = depth;
++      // loop header: header registers/flags are loaded here and considered dirty (spillLive: only
++      // the ones the loop WRITES — a register the loop only reads is never stale in memory, so it
++      // is loaded but clean and no exit stores it). The loop itself opens inside the exit chain.
++      for (unsigned r = 0; r < 16; r++) if (headerReg[r]) { regEnsureLoaded(r); cs.regDirty[r] = spillLive() ? headerWritten[r] : true; }
++      if (headerLf) { lfLoad(); cs.lfDirty = spillLive() ? headerWrittenLf : true; }
 +    }
 +    if (reg) {
 +      if (nanobox_dbg_mode) { em->i32c(0); em->get(L_regp); em->get(L_cur); em->i32c(4); em->op(I32_MUL); em->op(I32_ADD); em->mem(I32_LOAD, REGION_OFF(entptr[0]), 2); em->mem(I32_STORE, ADDR(nanobox_dbg_cur_entry), 2); }
@@ -2977,18 +3178,37 @@ index 000000000..1e9811a8f
 +        endb();               // closes label j: block j's body follows
 +        setBlock(j); needAsyncCheck = false;
 +        if (regionPass2) csSetEntry(j); else { csReset(); for (unsigned r = 0; r < 16; r++) usedReg[r] = false; usedLf = false; }
++        if (useTemplates && spillChain()) chainOpen(chainM(j));
 +        computeFlagLiveness();
 +        if (!compileBlockBody(useTemplates)) return false;
 +        if (!regionPass2) { for (unsigned r = 0; r < 16; r++) blockUsedReg[j][r] = usedReg[r]; blockUsedLf[j] = usedLf; }
 +        em->ret();            // a body always ends with an exit/transition; this only closes the type
++        if (ch.active) {
++          unsigned M = ch.M;
++          chainClose(); if (passNo == 1) chainUsed[j] = ch.npos;
++          if (M) em->br(depth - bodyDepth);   // chain stores done -> common tail
++        }
 +      }
 +      endb(); dispatchDepth = -1;    // the loop
 +    } else {
++      if (useTemplates && spillChain()) chainOpen(chainM(0));
++      if (hasSelfBranch) { lp(); loopDepth = depth; }
 +      computeFlagLiveness();
 +      if (!compileBlockBody(useTemplates)) return false;
++      if (hasSelfBranch) { em->ret(); endb(); loopDepth = -1; }
++      else em->ret();       // fall-through end of a body without exits (handler steps): the state is committed
++      if (ch.active) { chainClose(); if (passNo == 1) chainUsed[0] = ch.npos; }
++      // (falls into the end of $body: the chain's stores lead straight into the common tail)
 +    }
-+    if (hasSelfBranch) { em->ret(); endb(); loopDepth = -1; }
-+    if (linkOK) { em->ret(); endb(); bodyDepth = -1; em->i32c(0); em->i32c((int32_t) nanobox_link_fn); em->return_call_indirect(m.funcTypeIdx); }
++    if (useTemplates) {
++      endb(); bodyDepth = -1;   // $body
++      // common tail: RIP/prev_rip/icount from the exit, then link (dbg mode: back to cpu_loop)
++      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
++      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
++      em->i32c(0); em->get(L_ic0); em->get(L_xic); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++      if (linkOK) { em->i32c(0); em->i32c((int32_t) nanobox_link_fn); em->return_call_indirect(m.funcTypeIdx); }
++      else em->ret();
++    }
 +    return true;
 +  }
 +  // ---- merged stack runs (experiment, nanobox_jit_merge): N consecutive register pushes (or pops)
