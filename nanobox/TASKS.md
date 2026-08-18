@@ -1143,3 +1143,28 @@ charges icount every iteration (4 instructions) and keeps only the expensive che
 matching icounts in the table above (601.7 M vs 601.6 M) are the signal that the clock is exact again.
 LESSON: when an optimisation touches the guest clock, an icount that no longer matches the reference
 run is the tell -- and a speed number taken while the clock is short is not a speed number.
+
+### S.3 Open: the precompiled kernel artifact hits rarely (2026-08-18)
+
+After the density work, regenerating the whole-kernel artifact against the current engine (29,013
+functions -> 149,471 translations, 274 MB, 3.3 s) and loading it into a codex boot gives **2,541 bundle
+hits against 101,846 misses**, where the same shape earlier in the day gave 22,365 / 68,789. The engine
+tag matches (a mismatch is refused outright and reports 0 modules -- which is what the SHIPPED
+kernel.nbjb / codex.nbjb now do, because they were recorded against an older build and every engine
+rebuild changes the tag; they need `test/record-bundles.sh all` again).
+
+So the artifact is accepted and simply does not describe what the runtime forms. That is the
+context-dependent region key of R.2 showing up again, and it is the thing to fix before the artifact
+can pay: the runtime has to be able to ASK for a precompiled translation by site (address + code
+bytes) instead of only recognising one after it has re-formed the identical region itself.
+
+End to end after the density work, codex scenario:
+
+| | boot | keystroke |
+|---|---|---|
+| AOT + kernel artifact | 24.0 s | 162 ms |
+| AOT, no artifact | 24.1 s | 153 ms |
+| trace JIT (flag off) | 5.7 s | 153 ms |
+
+Keystroke is at parity; boot is still dominated by compiling ~500 MB at threshold 1, which is what the
+artifact is supposed to remove and cannot until the keys line up.
