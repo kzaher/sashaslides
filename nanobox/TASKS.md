@@ -688,3 +688,20 @@ icount within 2). `test/gate.sh` now runs the identity leg on `build/{ref,eh}-no
 (`--no-wizer` builds of the same source) and keeps the bisect on the snapshot build. Open item: why the
 pre-init phase depends on the wizer version on this kernel (it did not on the old one) — worth fixing
 so the shipped snapshot is also build-independent, but it is not a correctness issue.
+
+### Interrupted (2026-08-18): three codegen trees, cut off by the account's spend limit — resume, do not restart
+
+All three are unverified partial work in gitignored trees; their diffs against the shipping
+`nanobox_jit.cc` are snapshotted as `work/prof/{flags,simd,hlo}-partial-nanobox_jit.diff`:
+
+- **`work/j/flags`** (Phase 1b: `CMP/TEST+Jcc` -> direct compare + `br_if`, no writeback, no flag
+  materialisation; TLB tags across a region). Engine builds; **mode 3 crashes the engine** (run ends after
+  the snapshot with no SUMMARY) and the agent was bisecting it (`work/prof/flags-bisect{0,1}.log`,
+  `flags-bisect.mjs`) when cut off. Baseline level-3 hot loop recorded at 170.3 MIPS. Not safe to apply.
+- **`work/j/simd`** (templates for `VPCMPEQB`/`PCMPISTRI`/`PSHUFB`/`VPMOVMSKB`/`VPXOR`/`VZEROUPPER`, `REP
+  STOS/MOVS` fast paths, `LEAVE`/`BSR`/`BT*`/`SHRD`): 650 diff lines, engine builds, no measurements taken.
+- **`work/j/hlo`** (per-opcode cost table + RIP/icount bookkeeping, dead writebacks, redundant local
+  copies, constant bases): 829 diff lines, engine builds, the table was not yet produced.
+
+Each needs: finish, single-binary A/B on the hot loop, ticks identical per pair, then the full gate here.
+The per-opcode cost table (hlo's first deliverable) is the one to produce first — it ranks the rest.
