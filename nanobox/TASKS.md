@@ -1164,11 +1164,20 @@ tested and one holds:
   formed during that boot -- those match a later boot by construction. Once the artifact holds only
   offline-formed regions, the true match rate shows: **2-3 %**.
 
-The reason is structural, and it is the same one R.2 named: the runtime forms a region rooted at
-whatever block the guest happens to enter first (a loop head, the landing site of a return), while the
-offline driver walks from function starts. Different entry -> different block offsets -> different
-content key. **The fix is the unit the user has been asking for all along: make the FUNCTION the unit
-at runtime too.** The artifact should carry the address->function-entry map it already knows
+The first diagnosis -- that the runtime roots regions at the block it enters while the translator walks
+from function starts -- was tested and is NOT the main factor. The engine now takes a function map
+(`--aot-fnmap System.map`, `nanobox_aot_fnmap_add`) and roots a region at the containing function under
+AOT; combined with order-independent forming (dedupe off) the hit rate moved 2.4 % -> 3.3 %, and the
+retarget fired only 336 times in 241,006 formations.
+
+**The measurement that settles it: within a run, 199,962 of 241,006 formations hit the in-process cache
+by content key.** Keys are stable; the artifact simply does not contain what is being asked for. A
+kernel artifact covers the kernel, and a codex boot is dominated by CODEX's own code -- of ~41 k
+distinct regions compiled at runtime, only ~3.4 k are kernel regions the artifact holds. So this is a
+COVERAGE problem, and R.3's size wall is exactly why the coverage is missing: the same 294,540-function
+binary that projects to 7.8 GB. The function-rooted former is kept (it is the right structure once user
+function maps exist, and it costs nothing), but the thing that would make the artifact pay is
+precompiling the code the program actually executes. The artifact should carry the address->function-entry map it already knows
 (System.map for the kernel, `.eh_frame_hdr` for a program), and on first touch of any address the
 runtime should form/attach the region of the function CONTAINING it, entering at that block, instead
 of rooting a fresh region there. Then the offline and runtime regions are the same object by

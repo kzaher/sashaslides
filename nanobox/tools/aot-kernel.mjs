@@ -98,6 +98,7 @@ async function main() {
     "--oci", `http://localhost:8093/c2w/images/${image}/`, "--spec", path.join(ROOT, `web/images/${image}/config.json`),
     "--oci-cache", path.join(ROOT, "work/oci-cache"), "--quiet", "--no-hash",
     "--jit", o.jit || "2:1000000000", "--jit-bundle-out", out,
+    ...(o.keys ? ["--aot-keys", path.resolve(o.keys)] : []),
     "--cmd", `/bin/sh -c "echo @@NANOBOX-DUMP:aot@@; sleep 600"`,
     "--aot-script", fileURLToPath(import.meta.url), "--aot-args", JSON.stringify(args), "--aot-at", "aot",
     "--timeout", String(o.timeout || 3600)];

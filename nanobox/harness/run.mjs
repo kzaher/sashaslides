@@ -86,7 +86,9 @@ for (let i = 1; i < argv.length; i++) {
   else if (a === "--checkpoint") opts.checkpoint = v();        // resume from a checkpoint file (same engine build, same image/spec/cmd)
   else if (a === "--aot-script") opts.aotScript = v();         // AOT precompilation (tools/aot-precompile.mjs): ESM file whose session({...}) runs INSIDE the engine's poll hook (between traces) once the guest printed the --aot-at marker; the run finishes right after it (bundle written by --jit-bundle-out)
   else if (a === "--aot-args") opts.aotArgs = v();             // JSON passed to session()
-  else if (a === "--aot-at") opts.aotAt = v();                 // marker label that arms the session (default "aot": the guest prints @@NANOBOX-DUMP:aot@@)
+  else if (a === "--aot-at") opts.aotAt = v();
+  else if (a === "--aot-fnmap") opts.aotFnmap = v();
+  else if (a === "--aot-keys") opts.aotKeys = v();             // dump (entry address, content key, blocks) for every region formed — diff offline vs runtime (TASKS.md S.3)           // System.map: function boundaries for the AOT former (region = the containing function)                 // marker label that arms the session (default "aot": the guest prints @@NANOBOX-DUMP:aot@@)
   else { console.error("unknown option " + a); process.exit(2); }
 }
 if (opts.checkpointOut && !opts.checkpointAt) { console.error("--checkpoint-out needs --checkpoint-at LABEL"); process.exit(2); }
@@ -628,6 +630,28 @@ function installJitHost(inst) {
     // AOT mode sets threshold 1 (compile at the first touch); the offline translators need the
     // opposite -- the JIT on so the session can drive it, but the BOOT compiling nothing, or the
     // artifact ends up holding a recording of that boot instead of the precompiled code.
+    // --aot-fnmap: guest function boundaries (System.map). Under AOT the engine roots a region at the
+    // containing function instead of at the block the guest entered, so the regions it forms are the
+    // ones the offline translator built and a precompiled artifact can actually match (TASKS.md S.3).
+    if (opts.aotFnmap && ex.nanobox_aot_fnmap_add) {
+      const text = fs.readFileSync(opts.aotFnmap, "utf8");
+      const at = (n) => { const m = new RegExp("^([0-9a-f]{16}) [A-Za-z] " + n + "$", "m").exec(text); return m ? BigInt("0x" + m[1]) : null; };
+      const stext = at("_stext") || at("_text"), etext = at("_etext");
+      const addrs = [];
+      for (const line of text.split("\n")) {
+        const m = /^([0-9a-f]{16}) [tTwW] /.exec(line);
+        if (!m) continue;
+        const a = BigInt("0x" + m[1]);
+        if (stext && (a < stext || a >= etext)) continue;
+        addrs.push(a);
+      }
+      addrs.sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+      ex.nanobox_aot_fnmap_reset();
+      let prev = -1n;
+      for (const a of addrs) { if (a === prev) continue; prev = a; ex.nanobox_aot_fnmap_add(Number(a & 0xffffffffn) >>> 0, Number(a >> 32n) >>> 0); }
+      console.error(`[harness] AOT function map: ${ex.nanobox_aot_fnmap_count()} functions from ${path.basename(opts.aotFnmap)}`);
+    }
+    if (opts.aotKeys && ex.nanobox_keylog_enable) ex.nanobox_keylog_enable(1);
     if (process.env.NANOBOX_THRESHOLD != null && ex.nanobox_set_jit) { ex.nanobox_set_jit(lvl, Number(process.env.NANOBOX_THRESHOLD)); console.error(`[harness] JIT threshold ${process.env.NANOBOX_THRESHOLD} (after AOT mode)`); }
     // AOT-mode formation knobs (A/B of the region former: successors that join a region)
     for (const [env, fn, what] of [["NANOBOX_AOT_DEDUPE", "nanobox_set_jit_aot_dedupe", "successor already translated elsewhere is NOT copied in"],
@@ -946,6 +970,12 @@ function finish(code) {
     }
   }
   if (aotResult) summary.aotSession = aotResult;
+  if (opts.aotKeys && inst && inst.exports.nanobox_keylog_count) {
+    const ex = inst.exports, n = ex.nanobox_keylog_count(), out = [];
+    for (let i = 0; i < n; i++) out.push(`${ex.nanobox_keylog_at(i, 0)} ${ex.nanobox_keylog_at(i, 1)} ${ex.nanobox_keylog_at(i, 2)}`);
+    fs.writeFileSync(opts.aotKeys, out.join("\n"));
+    console.error(`[harness] region keys: ${n} written to ${opts.aotKeys}`);
+  }
   if (opts.transcript) fs.writeFileSync(opts.transcript, Buffer.concat(transcript));
   console.error("\n[harness] SUMMARY " + JSON.stringify(summary));
   process.exit(code === 0 ? 0 : (code || 0));

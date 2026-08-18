@@ -1393,10 +1393,10 @@ index 000000000..0c5787cb0
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..a5cd1be25
+index 000000000..a36f3f18c
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,4722 @@
+@@ -0,0 +1,4806 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -1677,6 +1677,10 @@ index 000000000..a5cd1be25
 +extern unsigned nanobox_jit_probe2;
 +extern unsigned nanobox_jit_aot;
 +extern unsigned nanobox_jit_aot_tick;
++static bx_address nb_lookup_lin = 0;     // guest linear address of the translation being looked up
++#define NB_KEYLOG 200000
++static Bit64u nb_keylog[NB_KEYLOG][3];
++static unsigned nb_keylog_n = 0, nb_keylog_on = 0;
 +extern unsigned nanobox_jit_aot_nostack;
 +#define NB_SHADOW_MAX 4096
 +struct NbShadowEnt { Bit64u rsp, rip; };
@@ -5593,6 +5597,9 @@ index 000000000..a5cd1be25
 +    }
 +  }
 +  r->key = h ? h : 1;
++  // key log (TASKS.md S.3): (entry address, content key, blocks) for the last NB_KEYLOG regions, so a
++  // run's keys can be diffed against the ones the offline translator produced for the same addresses
++  if (nb_keylog_on && nb_keylog_n < NB_KEYLOG) { nb_keylog[nb_keylog_n][0] = (Bit64u) entryLin; nb_keylog[nb_keylog_n][1] = r->key; nb_keylog[nb_keylog_n][2] = nb; nb_keylog_n++; }
 +  nanobox_region_stats[0]++; nanobox_region_stats[1] += nb;
 +  return r;
 +}
@@ -5829,6 +5836,11 @@ index 000000000..a5cd1be25
 +  // pre-computed translation (bundle)? modules are position independent (the region descriptor
 +  // travels in the call argument), so a bundle hit is attached exactly like a fresh compile
 +  unsigned pre = hook_lookup((unsigned)(key & 0xffffffffu), (unsigned)(key >> 32));
++  // split the answer by address space: a precompiled artifact holds every function of the KERNEL, so
++  // a kernel miss means the keys do not line up, while a user miss just means the artifact does not
++  // cover that program (TASKS.md S.3). 28/29 = kernel hit/miss, 30/31 = user hit/miss.
++  { bool kern = (Bit64u) nb_lookup_lin >= 0xffff800000000000ull;
++    nanobox_region_stats[(pre ? 28 : 29) + (kern ? 0 : 2)]++; }
 +  if (pre) {
 +    nanobox_jit_attach(e, pre, reg);
 +    nanobox_jit_cache_put(key, pre, 0, reg);
@@ -5956,6 +5968,45 @@ index 000000000..a5cd1be25
 +  nanobox_jit_maybe_compile_inner(e);
 +  if (nanobox_jit_eager && !nanobox_dbg_mode) nanobox_eager_sweep(e);
 +}
++// ---- function boundaries (AOT, TASKS.md S.3) ---------------------------------------------------
++// The offline translator walks from FUNCTION STARTS; the runtime used to root a region at whatever
++// block the guest entered first (a loop head, the landing site of a return). Different entry means
++// different block offsets means a different content key, so a precompiled artifact matched 2-3 % of
++// what the runtime asked for. Given the function boundaries -- which the artifact's producer already
++// has (System.map for the kernel, .eh_frame_hdr for a program) -- the runtime roots the region at the
++// containing function instead, and the two formers describe the same object by construction. Every
++// block of a region is wired to its own entry descriptor by nanobox_region_attach, so entering in the
++// middle costs nothing.
++static Bit64u *nb_fnmap = NULL;          // sorted function start addresses
++static unsigned nb_fnmap_n = 0, nb_fnmap_cap = 0;
++static Bit64u nb_fnmap_lo = 0, nb_fnmap_hi = 0;
++NB_EXPORT(nanobox_aot_fnmap_reset) void nanobox_aot_fnmap_reset(void) { nb_fnmap_n = 0; nb_fnmap_lo = nb_fnmap_hi = 0; }
++NB_EXPORT(nanobox_aot_fnmap_add) void nanobox_aot_fnmap_add(unsigned linLo, unsigned linHi)
++{
++  Bit64u a = ((Bit64u) linHi << 32) | (Bit64u) linLo;
++  if (nb_fnmap_n && a <= nb_fnmap[nb_fnmap_n - 1]) return;   // host must add in ascending order
++  if (nb_fnmap_n == nb_fnmap_cap) {
++    unsigned cap = nb_fnmap_cap ? nb_fnmap_cap * 2 : 4096;
++    Bit64u *p = (Bit64u *) realloc(nb_fnmap, cap * sizeof(Bit64u));
++    if (!p) return;
++    nb_fnmap = p; nb_fnmap_cap = cap;
++  }
++  if (!nb_fnmap_n) nb_fnmap_lo = a;
++  nb_fnmap[nb_fnmap_n++] = a; nb_fnmap_hi = a;
++}
++NB_EXPORT(nanobox_aot_fnmap_count) unsigned nanobox_aot_fnmap_count(void) { return nb_fnmap_n; }
++NB_EXPORT(nanobox_keylog_count) unsigned nanobox_keylog_count(void) { return nb_keylog_n; }
++NB_EXPORT(nanobox_keylog_reset) void nanobox_keylog_reset(void) { nb_keylog_n = 0; }
++NB_EXPORT(nanobox_keylog_enable) void nanobox_keylog_enable(unsigned on) { nb_keylog_on = on; nb_keylog_n = 0; }
++NB_EXPORT(nanobox_keylog_at) double nanobox_keylog_at(unsigned i, unsigned which) { return i < nb_keylog_n && which < 3 ? (double) nb_keylog[i][which] : 0; }
++// the start of the function containing `lin`, or 0
++static Bit64u nb_fn_start(bx_address lin)
++{
++  if (!nb_fnmap_n || lin < nb_fnmap_lo || lin > nb_fnmap_hi) return 0;
++  unsigned lo = 0, hi = nb_fnmap_n;                 // greatest start <= lin
++  while (lo + 1 < hi) { unsigned mid = (lo + hi) / 2; if (nb_fnmap[mid] <= (Bit64u) lin) lo = mid; else hi = mid; }
++  return nb_fnmap[lo];
++}
 +static void nanobox_jit_maybe_compile_at(bxICacheEntry_c *e, bx_address entryLin, Region **formed);
 +static void nanobox_jit_maybe_compile_inner(bxICacheEntry_c *e)
 +{
@@ -5978,10 +6029,37 @@ index 000000000..a5cd1be25
 +  }
 +  // 1. region (entry + reachable traces in this page), unless the entry loops on itself (the
 +  //    single-trace loop compile keeps registers in locals across iterations)
++  // AOT: root the region at the containing FUNCTION, not at the block the guest happened to enter,
++  // so the region is the same object the offline translator built (TASKS.md S.3). If the function's
++  // region turns out not to cover this block (a budget cut short of it), fall back to forming here.
++  bxICacheEntry_c *origE = e; bx_address origLin = entryLin;
++  if (nanobox_jit_aot && nb_fnmap_n) {
++    Bit64u fstart = nb_fn_start(entryLin);
++    if (fstart && fstart != (Bit64u) entryLin) {
++      bx_phy_address fpa = 0;
++      if (nanobox_aot_xlate((bx_address) fstart, &fpa)) {
++        const Bit8u *fhost = nanobox_host_page(fpa & ~(bx_phy_address) 0xfff);
++        if (fhost) {
++          bxICacheEntry_c *fe = BX_CPU_THIS_PTR iCache.get_entry(fpa, BX_CPU_THIS_PTR fetchModeMask);
++          if (fe->pAddr != fpa || fe->tlen == 0) fe = nanobox_decode_ahead(fpa, fhost, NULL, 0);
++          if (fe && nanobox_real_len(fe) && !fe->jitfn && !nanobox_jit_pending(fe)) {
++            nanobox_region_stats[26]++;
++            e = fe; entryLin = (bx_address) fstart;
++          }
++        }
++      }
++    }
++  }
++  nb_lookup_lin = entryLin;
 +  Region *reg = nanobox_form_region(e, entryLin);
++  if (e != origE && !reg) { e = origE; entryLin = origLin; reg = nanobox_form_region(e, entryLin); }   // no function region: form here
 +  if (reg && formed) { Region *c = new Region(); c->nblocks = reg->nblocks; for (unsigned j = 0; j < reg->nblocks; j++) { c->b[j].boff = reg->b[j].boff; c->b[j].n = reg->b[j].n; c->b[j].ins = new bxInstruction_c[reg->b[j].ent.tlen]; memcpy(c->b[j].ins, reg->b[j].ins, reg->b[j].ent.tlen * sizeof(bxInstruction_c)); c->b[j].ent = reg->b[j].ent; c->b[j].ent.i = c->b[j].ins; } *formed = c; }
 +  if (reg) {
-+    if (nanobox_jit_try_cached(e, reg, reg->key)) { nanobox_aot_stats[8]++; return; }
++    if (nanobox_jit_try_cached(e, reg, reg->key)) {
++      nanobox_aot_stats[8]++;
++      if (e != origE && !origE->jitfn && !nanobox_jit_pending(origE)) { nanobox_region_stats[27]++; nanobox_jit_maybe_compile_at(origE, origLin, NULL); }
++      return;
++    }
 +    // region keys depend on which neighbours the iCache happens to hold; a pre-computed bundle
 +    // recorded under other timing may still have the plain trace: prefer that over compiling
 +    // (not in AOT mode: there the region IS the unit -- a missing precompiled region is compiled)
@@ -5990,10 +6068,16 @@ index 000000000..a5cd1be25
 +      unsigned pre = hook_lookup((unsigned)(tkey & 0xffffffffu), (unsigned)(tkey >> 32));
 +      if (pre) { delete reg; nanobox_jit_attach(e, pre, NULL); nanobox_jit_cache_put(tkey, pre, 0, NULL); if (jitcache_count == 0) { e->jitfn = 0; hook_release(pre); } return; }
 +    }
-+    if (nanobox_jit_compile_one(e, reg, reg->key)) { nanobox_aot_stats[9]++; return; }
++    if (nanobox_jit_compile_one(e, reg, reg->key)) {
++      nanobox_aot_stats[9]++;
++      // the guest is at origE: if the function's region did not reach that block, translate it too
++      if (e != origE && !origE->jitfn && !nanobox_jit_pending(origE)) { nanobox_region_stats[27]++; nanobox_jit_maybe_compile_at(origE, origLin, NULL); }
++      return;
++    }
 +    nanobox_aot_stats[13]++;
 +  }
-+  // 2. plain trace
++  // 2. plain trace -- of the site the guest is actually at, not of the function entry we retargeted to
++  if (e != origE) { e = origE; entryLin = origLin; if (e->jitfn) return; }
 +  nanobox_aot_stats[10]++;
 +  unsigned nreal = 0;
 +  Bit64u key = nanobox_jit_hash(e, nreal);
