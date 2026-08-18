@@ -16,3 +16,8 @@ Apply with `git apply` in the respective checkouts (see build-bochs.sh / work/bu
 - `c2w-imagemounter-notbefore.patch` — container2wasm v0.8.4 `extras/imagemounter` + `extras/c2w-net-proxy`:
   the in-browser TLS MITM proxy's CA and per-host certificates get a `NotBefore` (upstream leaves Go's
   zero time = year 1, which webpki/rustls clients such as codex reject). Built by `build-imagemounter.sh`.
+- `c2w-linux-x86-no-codegen.patch` — the guest kernel config + cmdline for the AOT invariant (TASKS.md M):
+  no runtime code generation (`JUMP_LABEL`, BPF, kprobes, ftrace, livepatch, KASLR all off; `KALLSYMS`
+  on; `nokaslr pti=off mitigations=off`). Applies to `config/bochs/linux_x86_config` + `grub.cfg.template`.
+- `c2w-keep-kernel-symbols.patch` — `c2w.patched.Dockerfile`: keep `System.map` + `vmlinux` from the
+  kernel build and export them next to `/pack` for the AOT translator and `guest-symbolize`.

@@ -1,0 +1,59 @@
+--- work/c2w-src/config/bochs/linux_x86_config.orig	2026-08-18 00:28:44.625877138 +0000
++++ work/c2w-src/config/bochs/linux_x86_config	2026-08-18 00:28:44.639846443 +0000
+@@ -102,7 +102,7 @@
+ #
+ # BPF subsystem
+ #
+-CONFIG_BPF_SYSCALL=y
++# CONFIG_BPF_SYSCALL is not set
+ CONFIG_BPF_UNPRIV_DEFAULT_OFF=y
+ # CONFIG_BPF_PRELOAD is not set
+ # end of BPF subsystem
+@@ -229,7 +229,7 @@
+ CONFIG_IO_URING=y
+ CONFIG_ADVISE_SYSCALLS=y
+ CONFIG_MEMBARRIER=y
+-# CONFIG_KALLSYMS is not set
++CONFIG_KALLSYMS=y
+ CONFIG_ARCH_HAS_MEMBARRIER_SYNC_CORE=y
+ # CONFIG_KCMP is not set
+ CONFIG_RSEQ=y
+@@ -382,7 +382,7 @@
+ # CONFIG_CRASH_DUMP is not set
+ CONFIG_PHYSICAL_START=0x1000000
+ CONFIG_RELOCATABLE=y
+-CONFIG_RANDOMIZE_BASE=y
++# CONFIG_RANDOMIZE_BASE is not set
+ CONFIG_X86_NEED_RELOCS=y
+ CONFIG_PHYSICAL_ALIGN=0x200000
+ CONFIG_DYNAMIC_MEMORY_LAYOUT=y
+@@ -516,7 +516,7 @@
+ # General architecture-dependent options
+ #
+ CONFIG_GENERIC_ENTRY=y
+-CONFIG_JUMP_LABEL=y
++# CONFIG_JUMP_LABEL is not set
+ # CONFIG_STATIC_KEYS_SELFTEST is not set
+ # CONFIG_STATIC_CALL_SELFTEST is not set
+ CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS=y
+@@ -3207,3 +3207,10 @@
+ #
+ # end of Rust hacking
+ # end of Kernel hacking
++# CONFIG_BPF_JIT is not set
++# CONFIG_KPROBES is not set
++# CONFIG_OPTPROBES is not set
++# CONFIG_UPROBES is not set
++# CONFIG_LIVEPATCH is not set
++# CONFIG_FUNCTION_TRACER is not set
++# CONFIG_DYNAMIC_FTRACE is not set
+--- work/c2w-src/config/bochs/grub.cfg.template.orig	2026-08-18 00:29:11.606016286 +0000
++++ work/c2w-src/config/bochs/grub.cfg.template	2026-08-18 00:29:11.607456808 +0000
+@@ -2,5 +2,5 @@
+ set timeout=0
+ 
+ menuentry 'linux' {
+-    linux /boot/grub/bzImage console=hvc0 root=/dev/sr0 rootwait ro virtio_net.napi_tx=false quiet loglevel=${LOGLEVEL} init=/sbin/tini -- /sbin/init
++    linux /boot/grub/bzImage console=hvc0 root=/dev/sr0 rootwait ro nokaslr pti=off mitigations=off virtio_net.napi_tx=false quiet loglevel=${LOGLEVEL} init=/sbin/tini -- /sbin/init
+ }
+\ No newline at end of file

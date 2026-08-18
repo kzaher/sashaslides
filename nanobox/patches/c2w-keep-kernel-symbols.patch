@@ -1,0 +1,24 @@
+--- work/c2w.patched.Dockerfile.orig	2026-08-18 00:28:55.351412470 +0000
++++ work/c2w.patched.Dockerfile	2026-08-18 00:29:03.356827066 +0000
+@@ -491,7 +491,10 @@
+ RUN make ARCH=x86 CROSS_COMPILE=x86_64-linux-gnu- -j$(nproc) all && \
+     mkdir /out && \
+     mv /work-buildlinux/linux/arch/x86/boot/bzImage /out/bzImage && \
++    cp /work-buildlinux/linux/System.map /out/System.map && \
++    cp /work-buildlinux/linux/vmlinux /out/vmlinux && \
+     make clean
++# nanobox: System.map + vmlinux are kept: the kernel is AOT-translated from them at image build (TASKS.md M)
+ 
+ FROM linux-amd64-dev-common AS linux-amd64-config-dev
+ WORKDIR /work-buildlinux/linux
+@@ -595,6 +598,10 @@
+ 
+ FROM scratch AS vm-amd64-dev
+ COPY --link --from=grub-amd64-dev /out/boot.iso /pack/
++# nanobox: kernel symbols beside the image (NOT packed into the engine: build-bochs.sh's minpack/slimpack
++# only take what the guest needs) — the AOT translator and guest-symbolize read them from here
++COPY --link --from=linux-amd64-dev /out/System.map /symbols/
++COPY --link --from=linux-amd64-dev /out/vmlinux /symbols/
+ COPY --link --from=bios-amd64-dev /out/ /pack/
+ COPY --link --from=rootfs-amd64-dev /out/rootfs.bin /pack/
+ COPY --link --from=bochs-config-dev /out/bochsrc /pack/

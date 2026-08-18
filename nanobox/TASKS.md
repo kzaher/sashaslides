@@ -563,3 +563,27 @@ Expectations stated up front: the probe's 9.0x is a ceiling on hot, fully covere
 floor with precise state paid back; AOT's larger effect is COVERAGE — it reaches the cold half the JIT
 never can (46.7-54.9 %), which is 83 % of steady-state time. What is unknown until Phase 0/1 measure
 is how much survives inside the real engine (indirect control flow, precise exceptions).
+
+### The invariant (2026-08-18): the guest generates no code — the only code generators run in the browser
+
+Decision: **everything in the guest is AOT-translated, and nothing in the guest may generate code.** The
+only code-generating engines in the picture are Node and Bun (V8 / JavaScriptCore), and those already run
+on the browser's V8 through the runtime detection path; every other program is a fixed binary and the
+kernel is a fixed image. That turns "translate everything once" from a hope into an invariant we check:
+
+* **Kernel config** (`work/c2w-src/config/bochs/linux_x86_config`, applied to the pack rebuild):
+  `JUMP_LABEL=n` (static keys patched NOP<->JMP at runtime), `BPF_SYSCALL=n` / `BPF_JIT=n`, `KPROBES=n`,
+  `OPTPROBES=n`, `UPROBES=n`, `LIVEPATCH=n`, `FUNCTION_TRACER=n`, `DYNAMIC_FTRACE=n`, `RANDOMIZE_BASE=n`
+  (fixed text addresses, so one AOT artifact fits every boot); `KALLSYMS=y` (symbols, not codegen);
+  `STRICT_KERNEL_RWX=y` kept (kernel text mapped read-only: the guest itself faults on a stray write).
+  `MODULES` and `FTRACE` were already off. Alternatives/retpoline patching runs once at boot, before any
+  freeze point.
+* **Kernel cmdline** (`grub.cfg.template`): `nokaslr pti=off mitigations=off` — no relocation, and no
+  CR3 double-switch per syscall (each `mov cr3` is a JIT fallback and a TLB flush; measured 87 k handler
+  steps per window).
+* **Image build keeps `System.map` + `vmlinux`** (exported next to `/pack`, not packed into the engine),
+  which is what the AOT translator and `guest-symbolize` read.
+* **Userland policy is enforced by the engine, not the kernel**: a page executed after being written, or
+  written after being executed, is a **policy violation** — J3's strict mode (reports pAddr/RIP, stops)
+  becomes the shipping policy instead of the permissive unfreeze. codex (Rust) and agy (Go) do not JIT;
+  the JS runtimes are detected and never run in the guest.
