@@ -632,6 +632,7 @@ function installJitHost(inst) {
     if (process.env.NANOBOX_LINKDIRECT && ex.nanobox_set_jit_linkdirect) { ex.nanobox_set_jit_linkdirect(1); console.error("[harness] JIT link hop: direct return_call to an import"); }
     if (process.env.NANOBOX_JIT_MERGE && ex.nanobox_set_jit_merge) { ex.nanobox_set_jit_merge(1); console.error("[harness] JIT merged push/pop runs on"); }
     if (process.env.NANOBOX_JIT_PROBE2 === "0" && ex.nanobox_set_jit_probe2) { ex.nanobox_set_jit_probe2(0); console.error("[harness] JIT two-entry probe cache OFF (A/B)"); }
+    if (process.env.NANOBOX_OUTLINE != null && ex.nanobox_set_jit_outline) { ex.nanobox_set_jit_outline(Number(process.env.NANOBOX_OUTLINE)); console.error(`[harness] JIT outline mask ${process.env.NANOBOX_OUTLINE}`); }
     if (opts.jitMaxlen && ex.nanobox_set_jit_maxlen) ex.nanobox_set_jit_maxlen(Number(opts.jitMaxlen));
     if (opts.jitRegion != null && ex.nanobox_set_jit_region) ex.nanobox_set_jit_region(Number(opts.jitRegion));
     // AOT mode (TASKS.md R): NANOBOX_AOT=1 -> function-scope static regions, compile on first touch, relaxed
@@ -667,6 +668,13 @@ function installJitHost(inst) {
     }
     if (opts.aotKeys && ex.nanobox_keylog_enable) ex.nanobox_keylog_enable(1);
     if (process.env.NANOBOX_THRESHOLD != null && ex.nanobox_set_jit) { ex.nanobox_set_jit(lvl, Number(process.env.NANOBOX_THRESHOLD)); console.error(`[harness] JIT threshold ${process.env.NANOBOX_THRESHOLD} (after AOT mode)`); }
+    // AOT-from-boot: NANOBOX_AOT_THRESHOLD is the AOT-mode threshold (the deferred switch applies the
+    // same variable at the switch, leaving the trace-JIT boot on the ordinary one)
+    if (!opts.aotModeAt && Number(process.env.NANOBOX_AOT || 0) && process.env.NANOBOX_AOT_THRESHOLD != null) {
+      if (ex.nanobox_set_jit_aot_threshold) ex.nanobox_set_jit_aot_threshold(Number(process.env.NANOBOX_AOT_THRESHOLD));
+      else ex.nanobox_set_jit(lvl, Number(process.env.NANOBOX_AOT_THRESHOLD));
+      console.error(`[harness] AOT threshold ${process.env.NANOBOX_AOT_THRESHOLD}`);
+    }
     // AOT-mode formation knobs (A/B of the region former: successors that join a region)
     for (const [env, fn, what] of [["NANOBOX_AOT_DETFORM", "nanobox_set_jit_aot_detform", "deterministic formation: the region depends on the code bytes only"],
                                    ["NANOBOX_AOT_SWEEP", "nanobox_set_jit_aot_sweep", "detform: build the whole containing function at a first touch"],
@@ -695,7 +703,14 @@ function applyAotMode(on) {
   const t = performance.now();
   ex.nanobox_set_jit_aot(on);
   if (process.env.NANOBOX_FLAGS != null && ex.nanobox_set_jit_flags) ex.nanobox_set_jit_flags(Number(process.env.NANOBOX_FLAGS));
-  if (process.env.NANOBOX_THRESHOLD != null && ex.nanobox_set_jit) ex.nanobox_set_jit(Number((opts.jit || "2:0").split(":")[0]), Number(process.env.NANOBOX_THRESHOLD));
+  // NANOBOX_AOT_THRESHOLD applies ONLY from the switch on (NANOBOX_THRESHOLD is the whole run's, and
+  // setting that also changes the trace-JIT boot). AOT sets threshold 1 = compile at the first touch,
+  // which is what puts a synchronous region compile in front of every newly reached code path.
+  const aotThr = process.env.NANOBOX_AOT_THRESHOLD != null ? process.env.NANOBOX_AOT_THRESHOLD : process.env.NANOBOX_THRESHOLD;
+  if (on && aotThr != null) {
+    if (ex.nanobox_set_jit_aot_threshold) ex.nanobox_set_jit_aot_threshold(Number(aotThr));
+    else if (ex.nanobox_set_jit) ex.nanobox_set_jit(Number((opts.jit || "2:0").split(":")[0]), Number(aotThr));
+  }
   for (const [env, fn] of [["NANOBOX_AOT_DETFORM", "nanobox_set_jit_aot_detform"], ["NANOBOX_AOT_SWEEP", "nanobox_set_jit_aot_sweep"],
                            ["NANOBOX_AOT_DEDUPE", "nanobox_set_jit_aot_dedupe"], ["NANOBOX_AOT_MINHOT", "nanobox_set_jit_aot_minhot"],
                            ["NANOBOX_AOT_AHEAD", "nanobox_set_jit_aot_ahead"], ["NANOBOX_AOT_TICK", "nanobox_set_jit_aot_tick"],

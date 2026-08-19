@@ -1402,3 +1402,49 @@ entirely and matches the shipping engine (18 ms). So the interactive stalls and 
 policy -- compile-everything-on-first-touch -- and the fix is either to raise the threshold (giving up
 "no interpreted code") or to make a precompiled artifact ATTACHABLE rather than recompilable, which is
 the deterministic-former work.
+
+### S.11 The artifact now matches: 10.1 % -> 68.6 % of kernel lookups served (2026-08-19)
+
+**First, a correction to S.3: my own diagnosis tool was the first bug.** `--aot-keys` read the key log
+through an export returning a `double`, and the ulp at 2^63 is 2048 -- so every 64-bit address and key
+was quantised into 2 KB buckets. "The offline translator formed regions at only 214 distinct addresses
+out of 4,000 functions" was exactly the 436 KB those functions span divided by 2048. With 32-bit halves
+the same artifact shows 7,303 regions at 7,303 distinct addresses. LESSON: a `double` cannot carry a
+64-bit address; when a measurement lands on a suspiciously round structure, suspect the instrument.
+
+With real keys, seven distinct causes of offline/runtime divergence, each measured:
+1. dedupe / minhot / the ITLB fast path consult runtime state -- ignored under the deterministic former.
+2. **The walk crossed function boundaries** (fall-through and CALL continuations run into the next
+   function), so whoever walked first swallowed the neighbour's entry and the neighbour never got a
+   region: the artifact held a region at only **2,887 of 29,013 kernel function starts**. Fixed with a
+   function range from the `--aot-fnmap` System.map.
+3. A block already belonging to a live region re-rooted its own -- added a member search over the
+   attach registry.
+4. **Region comparison used a full-length `memcmp`** while the end-of-trace marker's pool slot still
+   holds an earlier decode's bytes, so two decodes of the SAME address compared unequal. Comparing only
+   the real instructions took "bytes differ" from **88,945 to 18** and runtime formations from 186,595
+   to 47,385.
+5. `nanobox_jit_after_decode` handed a fresh entry a translation compiled for a different address with
+   the same bytes (content-only plain-trace key), keeping the site out of `maybe_compile` entirely.
+6. The runtime rooted where the guest entered, the translator where its queue went -- both now run the
+   same whole-function sweep.
+7. **The offline sweep ran out of iCache instruction pool**: decode-ahead refuses to let the miss
+   handler flush it and offline nothing else decodes, so after half the kernel every successor decode
+   failed and functions collapsed to plain traces.
+
+| codex boot, same build | baseline | deterministic former |
+|---|---|---|
+| kernel served / missed | 2,487 / 22,124 = 10.1 % | **13,584 / 6,210 = 68.6 %** |
+| user served / missed | 15 / 77,802 | 19 / 75,460 |
+| keys agreeing where both rooted | 70.4 % | **99.8 %** |
+| runtime kernel addresses in the artifact | 26 % | **85 %** |
+| boot | 24.4 s | 27.8 s |
+
+Kernel-side runtime compilation is largely gone. **Boot did not improve because user space is 92 % of
+the remaining misses** (75,460 vs 6,210) and the artifact does not cover it -- `tools/aot-user.mjs`
+needs the same function-scoped sweep off the ELF's own boundaries. Dedupe also has to stay off
+(dedupe=1 drops key agreement to 83 %), which costs code size while size is the top complaint.
+
+Trap: the Bochs makefile has no header dependency tracking, and an incremental rebuild produced a mixed
+binary that parked the guest at `native_safe_halt` for six consecutive runs -- indistinguishable from a
+correctness bug. Deleting every `.o` and rebuilding fixed it with zero source change.

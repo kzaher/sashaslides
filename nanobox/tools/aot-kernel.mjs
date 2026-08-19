@@ -98,6 +98,9 @@ async function main() {
     "--oci", `http://localhost:8093/c2w/images/${image}/`, "--spec", path.join(ROOT, `web/images/${image}/config.json`),
     "--oci-cache", path.join(ROOT, "work/oci-cache"), "--quiet", "--no-hash",
     "--jit", o.jit || "2:1000000000", "--jit-bundle-out", out,
+    // the function map the RUNTIME gets, so both sides run the same retarget path: a site inside an
+    // already-translated function must behave here exactly as it does in a boot (TASKS.md S.4)
+    ...(o.fnmap === "off" ? [] : ["--aot-fnmap", path.resolve(o.fnmap || args.sysmap || path.join(ROOT, "work/pack-out-nb/symbols/System.map"))]),
     ...(o.keys ? ["--aot-keys", path.resolve(o.keys)] : []),
     "--cmd", `/bin/sh -c "echo @@NANOBOX-DUMP:aot@@; sleep 600"`,
     "--aot-script", fileURLToPath(import.meta.url), "--aot-args", JSON.stringify(args), "--aot-at", "aot",
