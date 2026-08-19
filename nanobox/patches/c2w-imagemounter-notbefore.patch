@@ -19,10 +19,18 @@ index bf0a53e..94742d8 100644
  		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
  		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 diff --git a/extras/imagemounter/main.go b/extras/imagemounter/main.go
-index 09c160a..37ac107 100644
+index 09c160a..ba96c6c 100644
 --- a/extras/imagemounter/main.go
 +++ b/extras/imagemounter/main.go
-@@ -124,6 +124,7 @@ func generateCert(host string) (*tls.Certificate, error) {
+@@ -25,6 +25,7 @@ import (
+ 	"net/http"
+ 	"os"
+ 	"path/filepath"
++	"runtime"
+ 	"sort"
+ 	"strconv"
+ 	"strings"
+@@ -124,6 +125,7 @@ func generateCert(host string) (*tls.Certificate, error) {
  		Subject: pkix.Name{
  			CommonName: host,
  		},
@@ -30,7 +38,87 @@ index 09c160a..37ac107 100644
  		NotAfter:    time.Now().Add(365 * 24 * time.Hour),
  		KeyUsage:    x509.KeyUsageDigitalSignature,
  		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-@@ -467,6 +468,7 @@ func main() {
+@@ -361,6 +363,19 @@ func doHttpRoundTrip(req *http.Request) (*http.Response, error) {
+ 	pr, pw := io.Pipe()
+ 	go func() {
+ 		var bodysize uint32
++		// nanobox: the page now hands the body over CHUNK BY CHUNK (public/c2w/dist/runcontainer.js,
++		// the http_writebody case) instead of only once the whole body has downloaded. That is what
++		// makes a streamed response possible at all, but it also means this loop is no longer a short
++		// drain of an already-complete buffer: on a long-lived stream (SSE -- the shape of MCP's
++		// server->client channel) it sits here for the life of the session while http_readbody keeps
++		// returning bodysize == 0, isEOF == 0 because the peer is simply quiet. Spinning on that with
++		// no yield starves everything else: Go on wasip1 runs on ONE thread, so the gvisor netstack
++		// carrying the guest's other connections never gets scheduled -- measured, a plain HTTPS GET
++		// issued while an SSE stream was open never left the guest (net-smoke `relay` went to 0).
++		// So back off, but in stages: yield first, so a fast bulk download (the browser feeding 64 KB
++		// at a time, with brief gaps) is never slowed by a sleep it does not need, and only start
++		// sleeping once the stream is genuinely idle, where 10 ms costs nothing.
++		idle := 0
+ 		for {
+ 			res := http_readbody(
+ 				id,
+@@ -374,6 +389,7 @@ func doHttpRoundTrip(req *http.Request) (*http.Response, error) {
+ 				return
+ 			}
+ 			if bodysize > 0 {
++				idle = 0
+ 				if _, err := pw.Write(buf[:int(bodysize)]); err != nil {
+ 					pw.CloseWithError(err)
+ 					return
+@@ -382,6 +398,17 @@ func doHttpRoundTrip(req *http.Request) (*http.Response, error) {
+ 			if isEOF == 1 {
+ 				break
+ 			}
++			if bodysize == 0 {
++				idle++
++				switch {
++				case idle <= 16:
++					runtime.Gosched() // a gap mid-transfer: just let the netstack run
++				case idle <= 128:
++					time.Sleep(time.Millisecond)
++				default:
++					time.Sleep(10 * time.Millisecond) // idle long-lived stream: poll cheaply
++				}
++			}
+ 		}
+ 		buf = nil
+ 		pw.Close()
+@@ -401,7 +428,32 @@ func handleHTTP(w http.ResponseWriter, req *http.Request) {
+ 	defer resp.Body.Close()
+ 	copyHeader(w.Header(), resp.Header)
+ 	w.WriteHeader(resp.StatusCode)
+-	io.Copy(w, resp.Body)
++	// nanobox: was `io.Copy(w, resp.Body)`. net/http holds handler writes in a bufio of
++	// bufferBeforeChunkingSize = 2048 and only lets them out when it fills or when the handler
++	// RETURNS. SSE frames are tens of bytes, so a stream of them reached the guest only when the
++	// whole response ended -- and for a channel that stays open for the session, never (a 22-byte
++	// event would have waited ~93 s just to fill the buffer). Flush the status line before a single
++	// body byte exists, so the client sees the response open, then flush after every chunk so each
++	// event lands as it arrives. Same 32 KB buffer io.Copy would have used; only the Flush is new.
++	flusher, _ := w.(http.Flusher)
++	if flusher != nil {
++		flusher.Flush()
++	}
++	buf := make([]byte, 32*1024)
++	for {
++		n, rerr := resp.Body.Read(buf)
++		if n > 0 {
++			if _, werr := w.Write(buf[:n]); werr != nil {
++				return // the guest hung up
++			}
++			if flusher != nil {
++				flusher.Flush()
++			}
++		}
++		if rerr != nil {
++			return // io.EOF, or the pipe closed with an error
++		}
++	}
+ }
+ 
+ func copyHeader(dst, src http.Header) {
+@@ -467,6 +519,7 @@ func main() {
  			Organization:       []string{"proxy"},
  			Country:            []string{"US"},
  		},

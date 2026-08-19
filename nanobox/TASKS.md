@@ -1714,3 +1714,44 @@ does not fix MCP alone and starves the netstack; the real fix needs `./build-ima
 Note for anyone repeating this: for ~30 minutes no freshly opened page booted at all, and it was NOT
 either change -- pristine `HEAD` stalled identically. Two agents were rewriting `web/opt-worker.js` in
 one tree at the same time. Concurrent edits to a served file are indistinguishable from a product bug.
+
+### U.6 Emitted operations, second pass: -29 % per compiled instruction (2026-08-19)
+
+On the user's instruction that the numbers were unacceptable. Same binary, same codex session
+(`NANOBOX_OUTLINE=203` = previous default vs 511947 = new):
+
+| | total | instances | bytes/instance |
+|---|---|---|---|
+| before | 15.3 MB | 127,454 | 120.0 |
+| **after** | **10.7 MB** | 125,606 | **85.2 (-29.0 %)** |
+
+Per site: `MOV_GqEq` 175 -> **120**, `CALL_Jq` 297 -> **205**, `POP_Eq` 193 -> **128**, `PUSH_Eq`
+175 -> **133**, `RET_Op64` 302 -> **190**, `MOV_EqGq` 72 -> **50**, `JMP_Jbq` 241 -> **114**,
+`CALL_Eq` 435 -> **287**. The targets set (MOV < 100, RET < 150, CALL < 150, session < 10 MB) are
+approached, not reached.
+
+**Per-phase byte accounting in the emitter changed the plan**: the "per-site fault/exit arm" I had
+ranked first is mostly the REGISTER SPILL (16.6 % of all emitted bytes) rather than the sync+accessor
+(5.7 %), and an item that was not on the list at all -- the in-region transition -- was **255 bytes for
+a two-byte `JMP rel8`**. Shipped, each behind a bit so any of it can be A/B'd in one binary: cold-path
+spill outlined (**-10.8 %**, the single biggest), probe miss arm slimmed (-4.5 %), probe candidates
+flattened to one `if` (-3.8 %), handler step/deopt as one call (-3.4 %), memory slow arm as one call
+(-3.3 %), in-region transition outlined (-2.8 %, non-AOT only), CPU struct through a base local
+(-1.0 %), template wrapper block elided (-0.8 %).
+
+Nothing regressed: AOT fib loop 0.60 -> 0.59 ns/iteration with icount exactly 6007.2 M, call+ret
+17.7/19.4 -> 18.2/18.1 ns, codex boot and sustained keystrokes flat on both engines, guest exact.
+Gate: `IDENTITY: identical (codex + agy)`, `BISECT: no divergence`.
+
+**Three findings worth more than the bytes:**
+* **Outlining pays only where the inline form is long.** Outlining the in-region transition cost
+  **+35 % on the AOT call+ret benchmark** and pushed the worst AOT keystroke to 389 ms, because AOT's
+  relaxed boundary had already shrunk that edge to three ops. It is now gated to the non-AOT engine.
+* **A bisect "divergence" that was the instrument again**: the first gate flagged a trace whose state
+  was byte-identical on both sides -- only the trace INDEX differed, because `nanobox_stats.traces` is
+  the divergence finder's own index and the edit had moved its bump in front of the fingerprint hook.
+  The A/B that proved it: with every new bit OFF the same trace still diverged with the same chain
+  hashes, so the culprit had to be the one edit not behind a bit.
+* **Rejected as a silent miscompile**: refilling only the probed direction's tag. `C_tagR`, `C_tagW`
+  and `C_host` are ONE cache entry; refilling one tag leaves the other hitting with the wrong host, and
+  the codex boot simply stopped making progress.

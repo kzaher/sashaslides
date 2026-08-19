@@ -1747,10 +1747,10 @@ index 000000000..0c5787cb0
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..862847f72
+index 000000000..8162d194c
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,5693 @@
+@@ -0,0 +1,6138 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -1978,6 +1978,43 @@ index 000000000..862847f72
 +    fprintf(stderr, "[nanobox-flags] MISMATCH what=%u kind=%u cc=%u op1=%llx op2=%llx res=%llx got=%llx want=%llx rip=%llx\n", what, kind, cc,
 +            (unsigned long long) op1, (unsigned long long) op2, (unsigned long long) res, (unsigned long long) got, (unsigned long long) want, (unsigned long long) BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx);
 +}
++// Cold-path register spill out of line (nanobox_jit_outline bit 11). Every slow arm, deopt and
++// handler step stores its dirty guest registers one by one -- 9 wasm bytes each, the same sequence
++// at every site. The values are in wasm locals, so they travel as arguments; `mask` says which
++// registers they are (bit r = gen_reg[r], 16 = oszapc.result, 17 = oszapc.auxbits) and they arrive
++// in ascending bit order, exactly the order the inline stores ran in.
++static BX_CPP_INLINE void nanobox_spill_apply(Bit32u mask, const Bit64u *v)
++{
++  unsigned j = 0;
++  for (unsigned r = 0; r < 16; r++) if (mask & (1u << r)) BX_CPU_THIS_PTR gen_reg[r].rrx = v[j++];
++  if (mask & 0x10000) BX_CPU_THIS_PTR oszapc.result = v[j++];
++  if (mask & 0x20000) BX_CPU_THIS_PTR oszapc.auxbits = v[j++];
++}
++static void nanobox_spill3(Bit32u m, Bit64u a, Bit64u b, Bit64u c)
++{ const Bit64u v[3] = { a, b, c }; nanobox_spill_apply(m, v); }
++static void nanobox_spill4(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d)
++{ const Bit64u v[4] = { a, b, c, d }; nanobox_spill_apply(m, v); }
++static void nanobox_spill5(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e)
++{ const Bit64u v[5] = { a, b, c, d, e }; nanobox_spill_apply(m, v); }
++static void nanobox_spill6(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f)
++{ const Bit64u v[6] = { a, b, c, d, e, f }; nanobox_spill_apply(m, v); }
++static void nanobox_spill7(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g)
++{ const Bit64u v[7] = { a, b, c, d, e, f, g }; nanobox_spill_apply(m, v); }
++static void nanobox_spill8(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h)
++{ const Bit64u v[8] = { a, b, c, d, e, f, g, h }; nanobox_spill_apply(m, v); }
++static void nanobox_spill9(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h, Bit64u i)
++{ const Bit64u v[9] = { a, b, c, d, e, f, g, h, i }; nanobox_spill_apply(m, v); }
++static void nanobox_spill10(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h, Bit64u i, Bit64u j)
++{ const Bit64u v[10] = { a, b, c, d, e, f, g, h, i, j }; nanobox_spill_apply(m, v); }
++static unsigned nanobox_spill_fnidx(unsigned n)
++{
++  switch (n) {
++    case 3: return (unsigned)(uintptr_t) nanobox_spill3;  case 4: return (unsigned)(uintptr_t) nanobox_spill4;
++    case 5: return (unsigned)(uintptr_t) nanobox_spill5;  case 6: return (unsigned)(uintptr_t) nanobox_spill6;
++    case 7: return (unsigned)(uintptr_t) nanobox_spill7;  case 8: return (unsigned)(uintptr_t) nanobox_spill8;
++    case 9: return (unsigned)(uintptr_t) nanobox_spill9;  default: return (unsigned)(uintptr_t) nanobox_spill10;
++  }
++}
 +static void nanobox_helper_lf(unsigned kind, Bit64u op1, Bit64u op2, Bit64u res)
 +{
 +  nanobox_flags_stats[FD_HELPER]++;
@@ -2009,7 +2046,17 @@ index 000000000..862847f72
 +//   returns 0 = probe succeeded (nanobox_probe_out filled), 1 = take the slow path
 +struct NbProbeOut { Bit64u tagR, tagW, tagRo, tagWo; Bit32u host, freeb; };
 +NbProbeOut nanobox_probe_out;
-+unsigned nanobox_jit_outline = 1 | 2 | 8 | 64 | 128;   // bit 0 outlined DTLB probe + refill, 1 out-of-line syncBefore,
++unsigned nanobox_jit_outline = 1 | 2 | 8 | 64 | 128 | 256 | 512 | 1024 | 2048 | 16384 | 32768 | 65536 | 131072 | 262144;
++// bit 0 outlined DTLB probe + refill, 1 out-of-line syncBefore,
++// 8  = in-region transition boundary out of line (nanobox_trans_check): one call + ONE exit arm
++//      instead of BX_SYNC_TIME + async + first-execution + fetch-window inline with four exit arms,
++// 9  = trim the entry prologue to what pass 1 proved the unit uses (alignment mask, user_pl, the
++//      second probe-cache pair),
++// 10 = slim the probe miss arm (page offset hoisted in front of the candidates, nanobox_probe_out
++//      addressed through a base local),
++// 11 = cold-path register spill out of line (mask + values, one call),
++// 12 = with bit 6: a site with a private tag does not refresh the function-wide pair on a refill,
++// 13 = with bit 11: also outline the spill of a cold EXIT arm
 +// 2 outlined direct-call site check (OFF: 3.6 % of the emitted bytes but +20 % on the AOT call+ret benchmark),
 +// 3 outlined handler-step prologue/epilogue, 4 (off) AOT: keep self-looping successors inside a region,
 +// 5 (off) keep a slimmed second probe candidate inline (measured: 3 % of the misses, not worth 13 points of size)
@@ -2118,6 +2165,28 @@ index 000000000..862847f72
 +// static bytes of wasm emitted by the template of each opcode, summed over its compiled instances
 +// (bytes track wasm ops closely enough to rank templates by cost: bytes/instance x executions)
 +static Bit64u nanobox_tpl_bytes[BX_IA_LAST];
++// ---- emitted-byte accounting by PHASE (work/j/ops): which part of a site the bytes are in.
++// Phases nest (a probe inside a template inside a body); phPush/phPop attribute the bytes to the
++// innermost phase active when they were emitted, so the columns sum to the module's code size.
++enum { PH_OTHER = 0, PH_PROLOGUE, PH_PROBE_FAST, PH_PROBE_MISS, PH_SLOW, PH_SPILL, PH_EXIT,
++       PH_HANDLER, PH_DCALL, PH_ASYNC, PH_STAMP, PH_LINK, PH_ACCESS, PH_EA, PH_PROF,
++       PH_TRANS, PH_SPILL_COLD, PH_TAIL, PH_REG, PH_FLAGS, PH_CONFORM, PH_WRAP, PH_N };
++static Bit64u nanobox_phase_bytes[PH_N];
++static Bit64u nanobox_phase_pass[PH_N];   // this pass only: added to the total when the pass is the final one
++static const char *nanobox_phase_name(unsigned i) {
++  static const char *nm[PH_N] = { "other", "prologue", "probe-fast", "probe-miss", "slow-arm", "spill",
++                                  "exit", "handler-step", "direct-call", "async-check", "write-stamp",
++                                  "link-epilogue", "access", "eff-addr", "profile-ctr",
++                                  "transition", "spill-cold", "common-tail",
++                                  "reg-load", "lazy-flags", "conform", "tpl-wrapper" };
++  return i < PH_N ? nm[i] : "?";
++}
++static void nanobox_phase_flush(bool keep) {
++  for (unsigned i = 0; i < PH_N; i++) { if (keep) nanobox_phase_bytes[i] += nanobox_phase_pass[i]; nanobox_phase_pass[i] = 0; }
++}
++NB_EXPORT(nanobox_jit_phase_stat) double nanobox_jit_phase_stat(unsigned i) { return i < PH_N ? (double) nanobox_phase_bytes[i] : 0; }
++NB_EXPORT(nanobox_jit_phase_name) const char *nanobox_jit_phase_name(unsigned i) { return nanobox_phase_name(i); }
++NB_EXPORT(nanobox_jit_phase_n) unsigned nanobox_jit_phase_n(void) { return PH_N; }
 +NB_EXPORT(nanobox_jit_opstat) double nanobox_jit_opstat(unsigned ia, unsigned which)
 +{
 +  if (ia >= BX_IA_LAST) return 0;
@@ -2191,6 +2260,7 @@ index 000000000..862847f72
 +using namespace nbw;
 +
 +#define ADDR(x) ((uint32_t)(uintptr_t)&(x))
++#define OFF_PROBE(f) ((uint32_t)((uintptr_t)&nanobox_probe_out.f - (uintptr_t)&nanobox_probe_out))
 +#define FNIDX(f) ((uint32_t)(uintptr_t)(f))
 +
 +const uint32_t LPF_MASK_LO = 0xfffff000u;
@@ -2307,6 +2377,120 @@ index 000000000..862847f72
 +}
 +#define REGION_OFF(field) ((uint32_t)((uintptr_t)&nanobox_region_layout_probe.field - (uintptr_t)&nanobox_region_layout_probe))
 +
++// ---------------------------------------------------------------------------------------------
++// In-region transition boundary, out of line (nanobox_jit_outline bit 8).
++//
++// Every in-region edge used to inline the whole cpu_loop-between-traces sequence -- BX_SYNC_TIME,
++// async_event, the block's first-execution mark, the cross-page fetch-window refill and the fetch
++// window test -- each with its own commit-and-leave arm. That is ~200 wasm bytes at every edge and
++// it is the same program everywhere (a plain `JMP rel8` compiled to 255 bytes). It moves here.
++//
++// The sequence, its side effects and their ORDER are reproduced exactly, so the change is
++// identity-preserving: a caller that returns 1 takes the SAME single exit the inline arms took,
++// with the same state already committed to memory by whichever steps ran before the exit.
++//   flags: s | doSync<<8 | crossPage<<9 | needPpf<<10 | doWindow<<11 | ppfIdx<<12 | countTraces<<16
++//   returns 1 = leave the region (the caller commits and exits), 0 = continue into block s
++extern "C" {
++static unsigned nanobox_trans_check(Bit32u regp, Bit32u flags, Bit64u now, Bit64u targetVA, Bit32u upl)
++{
++  const unsigned s = flags & 0xff;
++  if (flags & 0x100) {
++    // BX_SYNC_TIME fast path (the timers run in cpu_loop when the budget is spent)
++    Bit32u *countdown = (Bit32u *)(uintptr_t) nanobox_pc_system_access::countdownAddr();
++    const Bit32u delta = (Bit32u)(now - BX_CPU_THIS_PTR icount_last_sync);
++    if (delta >= *countdown) return 1;
++    *countdown -= delta;
++    BX_CPU_THIS_PTR icount_last_sync = now;
++    if (BX_CPU_THIS_PTR async_event) return 1;
++  }
++  Region *r = (Region *)(uintptr_t) regp;
++  if (r->pending[s]) { if (!nanobox_region_first(regp, s)) return 1; }
++  if (flags & 0x200) {
++    // target in the region's other page: prefetch()'s common case (ITLB hit, execute permission,
++    // and -- outside kernel text -- still the physical frame the region was formed on)
++    bx_TLB_entry *e = &BX_CPU_THIS_PTR ITLB.entry[(((Bit32u) targetVA) & ((BX_ITLB_SIZE - 1) << 12)) >> 12];
++    if (e->lpf != (targetVA & LPF_MASK)) return 1;
++    if (!(e->accessBits & (1u << upl))) return 1;
++    if (flags & 0x400) { if ((((Bit64u) e->ppf) >> 12) != r->ppf[(flags >> 12) & 0xf]) return 1; }
++    BX_CPU_THIS_PTR eipPageBias = (bx_address)((targetVA & 0xfff) - targetVA);
++    BX_CPU_THIS_PTR eipPageWindowSize = 4096;
++    BX_CPU_THIS_PTR eflags &= ~0x10000u;                       // clear_RF
++    BX_CPU_THIS_PTR pAddrFetchPage = e->ppf;
++    BX_CPU_THIS_PTR eipFetchPtr = (const Bit8u *)(uintptr_t) e->hostPageAddr;
++  }
++  if (flags & 0x800) {
++    if ((Bit64u)(targetVA + (Bit64u) BX_CPU_THIS_PTR eipPageBias) >= (Bit64u) BX_CPU_THIS_PTR eipPageWindowSize) return 1;
++  }
++  if (flags & 0x10000) nanobox_stats.traces++;
++  return 0;
++}
++}
++
++// ---------------------------------------------------------------------------------------------
++// Whole cold arms out of line (nanobox_jit_outline bits 17|18).
++//
++// A handler step and a memory slow arm both begin with the same three stores -- RIP = end of the
++// executing instruction, prev_rip = its start, icount = the instructions retired before it -- and
++// each of those was three wasm ops built from L_base / L_ic0 plus a constant. Passing the two
++// locals and the constants PACKED lets one call replace the sync, the instruction-pointer
++// arithmetic and the accessor / handler call behind it.
++//   p1 = the instruction's end offset from L_base (signed)
++//   p2 = ilen | k<<4 | (step: block<<9 | isRegion<<14) | (mem: seg<<9 | sizecode<<12 | kind<<14)
++extern "C" {
++static BX_CPP_INLINE void nanobox_cold_sync(Bit64u base, Bit64u ic0, Bit32s p1, Bit32u p2)
++{
++  const Bit64u ripEnd = base + (Bit64u)(Bit64s) p1;
++  BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx = ripEnd;
++  BX_CPU_THIS_PTR prev_rip = ripEnd - (p2 & 0xf);
++  BX_CPU_THIS_PTR icount = ic0 + ((p2 >> 4) & 0x1f);
++}
++static unsigned nanobox_helper_step_all(Bit32u ptr, Bit64u base, Bit64u ic0, Bit32s p1, Bit32u p2)
++{
++  nanobox_cold_sync(base, ic0, p1, p2);
++  nanobox_trace_end = 0;
++  const unsigned k = (p2 >> 4) & 0x1f;
++  bxInstruction_c *i = (p2 & 0x4000) ? (((Region *)(uintptr_t) ptr)->insptr[(p2 >> 9) & 0x1f] + k)
++                                     : ((bxInstruction_c *)(uintptr_t) ptr + k);
++  BX_CPU_CALL_METHOD(i->execute1, (i));
++  return (unsigned) nanobox_trace_end | (unsigned) BX_CPU_THIS_PTR async_event;
++}
++enum { NB_SLOW_RD_LIN = 0, NB_SLOW_RD_VIRT, NB_SLOW_WR_LIN, NB_SLOW_WR_VIRT, NB_SLOW_STACK_RD, NB_SLOW_STACK_WR };
++static Bit64u nanobox_slow_rd(Bit64u la, Bit64u base, Bit64u ic0, Bit32s p1, Bit32u p2)
++{
++  nanobox_cold_sync(base, ic0, p1, p2);
++  if (nanobox_jit_level >= 3) nanobox_stats.jit_slow++;
++  const unsigned seg = (p2 >> 9) & 7, size = 1u << ((p2 >> 12) & 3), kind = (p2 >> 14) & 7;
++  if (kind == NB_SLOW_STACK_RD) return BX_CPU_THIS_PTR stack_read_qword(la);
++  if (kind == NB_SLOW_RD_LIN)
++    return size == 8 ? BX_CPU_THIS_PTR read_linear_qword(seg, la) :
++           size == 4 ? (Bit64u) BX_CPU_THIS_PTR read_linear_dword(seg, la) :
++           size == 2 ? (Bit64u) BX_CPU_THIS_PTR read_linear_word(seg, la) :
++                       (Bit64u) BX_CPU_THIS_PTR read_linear_byte(seg, la);
++  return size == 8 ? BX_CPU_THIS_PTR read_virtual_qword(seg, la) :
++         size == 4 ? (Bit64u) BX_CPU_THIS_PTR read_virtual_dword(seg, la) :
++         size == 2 ? (Bit64u) BX_CPU_THIS_PTR read_virtual_word(seg, la) :
++                     (Bit64u) BX_CPU_THIS_PTR read_virtual_byte(seg, la);
++}
++static void nanobox_slow_wr(Bit64u la, Bit64u val, Bit64u base, Bit64u ic0, Bit32s p1, Bit32u p2)
++{
++  nanobox_cold_sync(base, ic0, p1, p2);
++  if (nanobox_jit_level >= 3) nanobox_stats.jit_slow++;
++  const unsigned seg = (p2 >> 9) & 7, size = 1u << ((p2 >> 12) & 3), kind = (p2 >> 14) & 7;
++  if (kind == NB_SLOW_STACK_WR) { BX_CPU_THIS_PTR stack_write_qword(la, val); return; }
++  if (kind == NB_SLOW_WR_LIN) {
++    if (size == 8) BX_CPU_THIS_PTR write_linear_qword(seg, la, val);
++    else if (size == 4) BX_CPU_THIS_PTR write_linear_dword(seg, la, (Bit32u) val);
++    else if (size == 2) BX_CPU_THIS_PTR write_linear_word(seg, la, (Bit16u) val);
++    else BX_CPU_THIS_PTR write_linear_byte(seg, la, (Bit8u) val);
++    return;
++  }
++  if (size == 8) BX_CPU_THIS_PTR write_virtual_qword(seg, la, val);
++  else if (size == 4) BX_CPU_THIS_PTR write_virtual_dword(seg, la, (Bit32u) val);
++  else if (size == 2) BX_CPU_THIS_PTR write_virtual_word(seg, la, (Bit16u) val);
++  else BX_CPU_THIS_PTR write_virtual_byte(seg, la, (Bit8u) val);
++}
++}
++
 +// linear -> physical for a call target, without touching any guest-visible state: the ITLB first
 +// (the same lookup the link epilogue inlines), then the page walk the debugger interface uses.
 +static bool nanobox_dcall_xlate(bx_address lin, bx_phy_address *pa)
@@ -2378,7 +2562,7 @@ index 000000000..862847f72
 +  bool needAsyncCheck;   // current instruction had a path that may raise async_event
 +
 +  // locals
-+  uint32_t L_i, L_base, L_ic0, L_upl, L_acm;
++  uint32_t L_i, L_base, L_ic0, L_upl, L_acm, L_pob, L_cpu;
 +  uint32_t L_reg[16];
 +  uint32_t L_lfr, L_lfa;
 +  CacheState cs;
@@ -2412,6 +2596,14 @@ index 000000000..862847f72
 +  unsigned nElig;        // eligible sites pass 1 found (= how many pairs pass 2 declared)
 +  unsigned ninval, ninvalTotal;   // mid-function probe-cache invalidations
 +  bool siteTags;         // per-site tags active in this pass
++  // prologue trimming (nanobox_jit_outline bit 9): what pass 1 found the unit ACTUALLY uses, so
++  // pass 2 can leave the unused entry loads out. Each piece is only skipped when pass 1 proved no
++  // emitter asked for it, and the asking sites are the only readers.
++  bool usedAcm, usedUpl, usedInlineProbe, usedAcmTotal, usedUplTotal, usedInlineProbeTotal;
++  bool trimPrologue() const { return (nanobox_jit_outline & 512) != 0 && passNo == 2; }
++  bool needAcm() const { return !trimPrologue() || usedAcmTotal; }
++  bool needUpl() const { return !trimPrologue() || usedUplTotal; }
++  bool needSecondPair() const { return !trimPrologue() || usedInlineProbeTotal; }
 +  uint32_t curHost;      // local holding the host page address left by the probe just emitted
 +  // A private tag pays only where the site RUNS AGAIN before anything invalidates it: a site whose
 +  // every re-execution crosses a handler step or a returning direct call sees the poison every time
@@ -2422,6 +2614,7 @@ index 000000000..862847f72
 +  Bit8u blockInval[NB_REGION_MAX_BLOCKS + 1];
 +  Bit8u blockElig[NB_REGION_MAX_BLOCKS + 1];
 +  Bit8u siteBlock[256];
++  Bit8u tplWrap[BX_MAX_TRACE_LENGTH + 1];   // pass 1: instruction k's template branched out of its wrapper
 +  uint32_t P_bits, P_off;   // probe scratch: accessBits >> user_pl, page offset of the access
 +  uint32_t P_op1, P_op2, P_res;   // deferred lazy flags: operands / result of the pending ALU op
 +  uint32_t L_pfk;                 // run-time pending kind at a SLOW block entry (0 = none)
@@ -2431,6 +2624,29 @@ index 000000000..862847f72
 +  Bit8u blockFlagEntry[NB_REGION_MAX_BLOCKS + 1];   // per region block; [0] for a plain trace
 +  bool coldExit;   // the exit being emitted is a rarely-taken arm (async / countdown / window): materialise pending flags out of line
 +  void fsc(unsigned i) { if (passNo == 2) nanobox_flags_stats[i]++; }   // static site counters: final pass only
++  // phase accounting (see nanobox_phase_bytes): only the FINAL pass counts, so a re-emitted
++  // pass-1 body is not double counted.
++  unsigned phSt[12]; uint32_t phAt[12]; int phTop;
++  void phInit() { phTop = 0; phSt[0] = PH_OTHER; phAt[0] = m.code.n; nanobox_phase_flush(false); }
++  unsigned phCur() const { return phTop >= 0 ? phSt[phTop] : PH_OTHER; }
++  // a spill emitted under a cold parent is a cold spill (that is where an outlined form can pay)
++  unsigned phSpillKind() const {
++    unsigned c = phCur();
++    return (c == PH_SLOW || c == PH_HANDLER || c == PH_TRANS || c == PH_DCALL || c == PH_ASYNC) ? PH_SPILL_COLD : PH_SPILL;
++  }
++  void phPush(unsigned p) {
++    if (phTop < 0) return;
++    if (m.code.n > phAt[phTop]) nanobox_phase_pass[phSt[phTop]] += m.code.n - phAt[phTop];
++    if (phTop < 11) { phTop++; phSt[phTop] = p; phAt[phTop] = m.code.n; }
++    else { phAt[phTop] = m.code.n; }
++  }
++  void phPop() {
++    if (phTop <= 0) return;
++    if (m.code.n > phAt[phTop]) nanobox_phase_pass[phSt[phTop]] += m.code.n - phAt[phTop];
++    phTop--; phAt[phTop] = m.code.n;
++  }
++  void phFinish() { while (phTop > 0) phPop(); if (phTop == 0 && m.code.n > phAt[0]) { nanobox_phase_pass[phSt[0]] += m.code.n - phAt[0]; phAt[0] = m.code.n; } }
++  struct PhScope { TraceCompiler *c; PhScope(TraceCompiler *cc, unsigned p) : c(cc) { c->phPush(p); } ~PhScope() { c->phPop(); } };
 +  bool flagsPending() const { return (nanobox_jit_flags & 1) != 0; }
 +  bool flagsFwdBr() const { return (nanobox_jit_flags & 8) != 0; }       // forward in-region edges as a direct br to the body label
 +  bool flagsProbeLink() const { return (nanobox_jit_flags & 4) != 0; }   // probe cache passed through the link tail call
@@ -2521,7 +2737,7 @@ index 000000000..862847f72
 +  bool templMisc() const { return (nanobox_jit_spill & 64) != 0; }       // LEAVE / MUL / BSF / ... (A/B bit)
 +
 +  TraceCompiler(bxICacheEntry_c *entry, Module &mod) : e(entry), ins(entry->i), n(0), m(mod), em(NULL), needAsyncCheck(false), depth(0), loopDepth(-1), bodyDepth(-1), linkOK(false), selfLoopOK(false),
-+    reg(NULL), curBlock(0), boff(0), dispatchDepth(-1), L_cur(0), regionPass2(false), regionKernel(false), conforming(false), coldExit(false), L_xic(0), L_tick(0), loopIcPerIter(0), loopTickN(0), aliasAt(-1), passNo(1), nedges(0) {
++    reg(NULL), curBlock(0), boff(0), dispatchDepth(-1), L_cur(0), regionPass2(false), regionKernel(false), conforming(false), coldExit(false), coldArm(0), L_xic(0), L_tick(0), loopIcPerIter(0), loopTickN(0), aliasAt(-1), passNo(1), nedges(0) {
 +    S_tagBase = S_hostBase = 0; nsite = nsiteTotal = nsiteElig = nElig = ninval = ninvalTotal = 0; siteTags = false; curHost = 0;
 +    for (unsigned j = 0; j <= NB_REGION_MAX_BLOCKS; j++) blockInval[j] = blockElig[j] = 0;
 +    for (unsigned i = 0; i < 256; i++) siteBlock[i] = 0;
@@ -2593,11 +2809,12 @@ index 000000000..862847f72
 +  }
 +  // make the runtime state match D_j from the current compile-time state (pass 2); pass 1: spill all
 +  void conformTo(unsigned j, bool fresh = false) {
++    PhScope _ph(this, PH_CONFORM);
 +    if (!regionPass2) { spillAll(false); return; }
 +    conforming = true;
 +    for (unsigned r = 0; r < 16; r++) {
-+      if (cs.regDirty[r] && !blockUsedReg[j][r]) { em->i32c(0); em->get(L_reg[r]); em->mem(I64_STORE, regAddr(r), 3); }
-+      if (blockUsedReg[j][r] && !cs.regLoaded[r]) { em->i32c(0); em->mem(I64_LOAD, regAddr(r), 3); em->set(L_reg[r]); }
++      if (cs.regDirty[r] && !blockUsedReg[j][r]) { zaddr(regAddr(r)); em->get(L_reg[r]); em->mem(I64_STORE, zoff(regAddr(r)), 3); }
++      if (blockUsedReg[j][r] && !cs.regLoaded[r]) { zaddr(regAddr(r)); em->mem(I64_LOAD, zoff(regAddr(r)), 3); em->set(L_reg[r]); }
 +    }
 +    conformFlagsTo(j, fresh);
 +    conforming = false;
@@ -2608,6 +2825,7 @@ index 000000000..862847f72
 +  // (FE_KILL: dropped) or observable only through slow paths / exits (FE_SLOW: the pending kind
 +  // travels in L_pfk, the operands stay in P_*; the block's slow paths call the helper)
 +  void conformFlagsTo(unsigned j, bool fresh) {
++    PhScope _ph(this, PH_FLAGS);
 +    const bool U = blockUsedLf[j]; const unsigned E = blockFlagEntry[j];
 +    if (cs.pfOp != PF_NONE) {
 +      if (U) { pfMaterializeInline(); fsc(FS_EDGE_MAT); profCount(&nanobox_flags_stats[FD_EDGE_MAT]); }
@@ -2628,12 +2846,13 @@ index 000000000..862847f72
 +    if (E == FE_SLOW && !fresh) { em->i32c(0); em->set(L_pfk); }   // memory current: tell the block (function entry: locals start at 0)
 +  }
 +  void lfStore() {
-+    em->i32c(0); em->get(L_lfr); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR oszapc.result), 3);
-+    em->i32c(0); em->get(L_lfa); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR oszapc.auxbits), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR oszapc.result)); em->get(L_lfr); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR oszapc.result)), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR oszapc.auxbits)); em->get(L_lfa); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR oszapc.auxbits)), 3);
 +  }
 +  void lfLoadFromMem() {
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR oszapc.result), 3); em->set(L_lfr);
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR oszapc.auxbits), 3); em->set(L_lfa);
++    PhScope _ph(this, PH_FLAGS);
++    zaddr(ADDR(BX_CPU_THIS_PTR oszapc.result)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR oszapc.result)), 3); em->set(L_lfr);
++    zaddr(ADDR(BX_CPU_THIS_PTR oszapc.auxbits)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR oszapc.auxbits)), 3); em->set(L_lfa);
 +  }
 +  // pending kind as passed to the helper / kept in L_pfk
 +  uint32_t pfO1() const { return cs.pfL1 ? cs.pfL1 : P_op1; }
@@ -2653,6 +2872,7 @@ index 000000000..862847f72
 +  uint32_t pfKind() const { unsigned sc = cs.pfSize == 8 ? 3 : cs.pfSize == 4 ? 2 : cs.pfSize == 2 ? 1 : 0; return (uint32_t) cs.pfOp | (sc << 2) | (cs.pfRes ? 16u : 0u); }
 +  // run-time pending state (FE_SLOW entry): if L_pfk != 0 materialise it into memory through the helper
 +  void pfRuntimeCheck() {
++    PhScope _ph(this, PH_FLAGS);
 +    fsc(FS_RT_CHECK);
 +    em->get(L_pfk);
 +    iff();
@@ -2662,11 +2882,13 @@ index 000000000..862847f72
 +  }
 +  // compile-time pending state -> memory through the helper (cold paths); compile-time state unchanged
 +  void pfMaterializeHelper() {
++    PhScope _ph(this, PH_FLAGS);
 +    fsc(FS_MAT_HELPER);
 +    em->i32c((int32_t) pfKind()); em->get(pfO1()); em->get(pfO2()); em->get(P_res); em->call(fn(FNIDX(&nanobox_helper_lf), "illl>v"));
 +  }
 +  // compile-time pending state -> L_lfr/L_lfa (loaded + dirty), pending cleared
 +  void pfMaterializeInline() {
++    PhScope _ph(this, PH_FLAGS);
 +    fsc(FS_MAT_INLINE); profCount(&nanobox_flags_stats[FD_MAT_INLINE]);
 +    unsigned size = cs.pfSize; uint32_t res = P_res;
 +    if (!cs.pfRes) { // CMP / TEST never computed the result: do it now (X[3] is free)
@@ -2679,8 +2901,8 @@ index 000000000..862847f72
 +    cs.pfOp = PF_NONE; cs.pfSize = 0; cs.pfRes = false;   // before the emit: emitArithFlags/emitLogicFlags end with lfMarkSet
 +    if (op == PF_LOGIC) emitLogicFlags(size, res); else emitArithFlags(size, pfO1(), pfO2(), res, op == PF_SUB, false);
 +    if (nanobox_jit_flags & 16) {
-+      em->get(L_lfr); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR oszapc.result), 3); em->op(I64_NE);
-+      em->get(L_lfa); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR oszapc.auxbits), 3); em->op(I64_NE); em->op(I32_OR);
++      em->get(L_lfr); zaddr(ADDR(BX_CPU_THIS_PTR oszapc.result)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR oszapc.result)), 3); em->op(I64_NE);
++      em->get(L_lfa); zaddr(ADDR(BX_CPU_THIS_PTR oszapc.auxbits)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR oszapc.auxbits)), 3); em->op(I64_NE); em->op(I32_OR);
 +      iff(); em->i32c(1); em->i32c((int32_t) kind); em->i32c(0); em->get(pfO1()); em->get(pfO2()); em->get(res); em->get(L_lfr); em->get(L_lfa); em->call(fn(FNIDX(&nanobox_helper_flagbug), "iiillllll>v")); endb();
 +    }
 +  }
@@ -2754,9 +2976,9 @@ index 000000000..862847f72
 +  // everything: used on the rare paths that leave the region from inside a transition
 +  void commitAndSpillInline(unsigned k, Bit64s roff) {
 +    spillAll(false);
-+    em->i32c(0); pushRegionVA(roff); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
-+    em->i32c(0); pushRegionVA(roff); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
-+    em->i32c(0); pushIcBase(); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); pushRegionVA(roff); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR prev_rip)); pushRegionVA(roff); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR prev_rip)), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR icount)); pushIcBase(); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3);
 +  }
 +  // ... and leave the function: the state committed is what cpu_loop sees at a trace boundary. Goes
 +  // through the exit chain + common tail + link epilogue (whose countdown / async / window tests
@@ -2791,8 +3013,9 @@ index 000000000..862847f72
 +  // ---------------------------------------------------------------- state cache
 +  uint32_t regAddr(unsigned r) { return ADDR(BX_CPU_THIS_PTR gen_reg[r].rrx); }
 +  void regEnsureLoaded(unsigned r) {
++    PhScope _ph(this, PH_REG);
 +    if (!conforming) usedReg[r] = true;
-+    if (!cs.regLoaded[r]) { em->i32c(0); em->mem(I64_LOAD, regAddr(r), 3); em->set(L_reg[r]); cs.regLoaded[r] = true; }
++    if (!cs.regLoaded[r]) { zaddr(regAddr(r)); em->mem(I64_LOAD, zoff(regAddr(r)), 3); em->set(L_reg[r]); cs.regLoaded[r] = true; }
 +  }
 +  void regGet(unsigned r) { regEnsureLoaded(r); em->get(L_reg[r]); }
 +  void regSetFromStack(unsigned r) { pfStageIfAliases(r); usedReg[r] = true; writtenReg[r] = true; em->set(L_reg[r]); cs.regLoaded[r] = true; cs.regDirty[r] = true; }
@@ -2801,6 +3024,7 @@ index 000000000..862847f72
 +  // emit stores of dirty state; `clear` says whether the compile-time dirty bits are cleared
 +  // (false inside conditional paths that rejoin the main flow)
 +  void spillAll(bool clear) {
++    PhScope _ph(this, phSpillKind());
 +    if (clear) cs.cleared = true;
 +    // deferred flags: memory must be current afterwards. Cold paths (clear == false) go through the
 +    // helper and keep the compile-time state (the fast path around them did nothing); a full spill
@@ -2815,16 +3039,37 @@ index 000000000..862847f72
 +      pfRuntimeCheck();
 +      if (clear) pfEndRuntime();
 +    }
++    // out of line where the path already pays a call (bit 11): mask + the values, one call, instead
++    // of 9 bytes of store per register
++    unsigned nsp = 0; uint32_t smask = 0;
++    for (unsigned r = 0; r < 16; r++) if (cs.regDirty[r]) { smask |= 1u << r; nsp++; }
++    if (cs.lfDirty) { smask |= 0x30000u; nsp += 2; }
++    if (outlineSpill() && nsp >= 3 && nsp <= 10) {
++      char sig[16]; unsigned q = 0; sig[q++] = 'i';
++      for (unsigned j = 0; j < nsp; j++) sig[q++] = 'l';
++      sig[q++] = '>'; sig[q++] = 'v'; sig[q] = 0;
++      em->i32c((int32_t) smask);
++      for (unsigned r = 0; r < 16; r++) if (cs.regDirty[r]) em->get(L_reg[r]);
++      if (cs.lfDirty) { em->get(L_lfr); em->get(L_lfa); }
++      em->call(fn(nanobox_spill_fnidx(nsp), sig));
++      if (clear) { for (unsigned r = 0; r < 16; r++) cs.regDirty[r] = false; cs.lfDirty = false; }
++      return;
++    }
 +    for (unsigned r = 0; r < 16; r++) if (cs.regDirty[r]) {
-+      em->i32c(0); em->get(L_reg[r]); em->mem(I64_STORE, regAddr(r), 3);
++      zaddr(regAddr(r)); em->get(L_reg[r]); em->mem(I64_STORE, zoff(regAddr(r)), 3);
 +      if (clear) cs.regDirty[r] = false;
 +    }
 +    if (cs.lfDirty) {
-+      em->i32c(0); em->get(L_lfr); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR oszapc.result), 3);
-+      em->i32c(0); em->get(L_lfa); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR oszapc.auxbits), 3);
++      zaddr(ADDR(BX_CPU_THIS_PTR oszapc.result)); em->get(L_lfr); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR oszapc.result)), 3);
++      zaddr(ADDR(BX_CPU_THIS_PTR oszapc.auxbits)); em->get(L_lfa); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR oszapc.auxbits)), 3);
 +      if (clear) cs.lfDirty = false;
 +    }
 +  }
++  // "this spill is on a path that already calls out": slow memory arms, handler steps, deopts and
++  // direct calls. Anything else keeps the inline stores (a call there costs more than it saves).
++  int coldArm;
++  struct ColdArm { TraceCompiler *c; ColdArm(TraceCompiler *cc) : c(cc) { c->coldArm++; } ~ColdArm() { c->coldArm--; } };
++  bool outlineSpill() const { return (nanobox_jit_outline & 2048) != 0 && (coldArm > 0 || ((nanobox_jit_outline & 8192) && coldExit)); }
 +  void invalidateAll() { csInvalidate(); emitInvalidate(true); }
 +  void csInvalidate() {
 +    for (unsigned r = 0; r < 16; r++) cs.regLoaded[r] = cs.regDirty[r] = false;
@@ -2838,20 +3083,20 @@ index 000000000..862847f72
 +    // uninitialised local = 0 = "no alignment check". Harmless while the guest keeps AC clear,
 +    // but the folded tag now encodes acm, so make it unconditional: 3 ops per trace entry.
 +    if (em) {
-+      em->i32c(0); em->mem(I64_LOAD32_U, ADDR(BX_CPU_THIS_PTR alignment_check_mask), 2); em->set(L_acm);
-+      cs.acmLoaded = true;
++      if (needAcm()) { zaddr(ADDR(BX_CPU_THIS_PTR alignment_check_mask)); em->mem(I64_LOAD32_U, zoff(ADDR(BX_CPU_THIS_PTR alignment_check_mask)), 2); em->set(L_acm); cs.acmLoaded = true; }
++      else cs.acmLoaded = false;   // nothing asked for it in pass 1; a straggler loads it itself
 +      if (entry && flagsProbeLink() && nanobox_tlbfold) { // the cache arrived in the parameters
-+        if (shortSig()) { em->i64c(-1); em->set(D_tagR); em->i64c(-1); em->set(D_tagW); }
++        if (shortSig() && needSecondPair()) { em->i64c(-1); em->set(D_tagR); em->i64c(-1); em->set(D_tagW); }
 +        if (nanobox_jit_level >= 3) { profCount(&nanobox_flags_stats[FD_FN_ENTRY]); em->get(C_tagR); em->i64c(-1); em->op(I64_NE); iff(); profCount(&nanobox_flags_stats[FD_LINK_TAGS]); endb(); }
 +      }
 +      else if (entry && flagsProbeMem() && nanobox_tlbfold) { // the previous trace left its front entry in memory (cpu_loop poisons it before calling us)
-+        em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_probe_mem[0]), 3); em->set(C_tagR);
-+        em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_probe_mem[1]), 3); em->set(C_tagW);
-+        em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_probe_mem[2]), 2); em->set(C_host);
++        zaddr(ADDR(nanobox_probe_mem[0])); em->mem(I64_LOAD, zoff(ADDR(nanobox_probe_mem[0])), 3); em->set(C_tagR);
++        zaddr(ADDR(nanobox_probe_mem[1])); em->mem(I64_LOAD, zoff(ADDR(nanobox_probe_mem[1])), 3); em->set(C_tagW);
++        zaddr(ADDR(nanobox_probe_mem[2])); em->mem(I32_LOAD, zoff(ADDR(nanobox_probe_mem[2])), 2); em->set(C_host);
 +        em->i64c(-1); em->set(D_tagR); em->i64c(-1); em->set(D_tagW);
 +        if (nanobox_jit_level >= 3) { profCount(&nanobox_flags_stats[FD_FN_ENTRY]); em->get(C_tagR); em->i64c(-1); em->op(I64_NE); iff(); profCount(&nanobox_flags_stats[FD_LINK_TAGS]); endb(); }
 +      }
-+      else if (nanobox_tlbfold) { em->i64c(-1); em->set(C_tagR); em->i64c(-1); em->set(C_tagW); em->i64c(-1); em->set(D_tagR); em->i64c(-1); em->set(D_tagW); }
++      else if (nanobox_tlbfold) { em->i64c(-1); em->set(C_tagR); em->i64c(-1); em->set(C_tagW); if (needSecondPair()) { em->i64c(-1); em->set(D_tagR); em->i64c(-1); em->set(D_tagW); } }
 +      else { em->i64c(-1); em->set(C_lpf); em->i64c(-1); em->set(D_lpf); }
 +      // per-site tags: a function ENTRY needs nothing (a fresh local is already the zero poison),
 +      // but a handler step or a returning direct call may have changed the TLB, the CPL or the
@@ -2890,9 +3135,13 @@ index 000000000..862847f72
 +  void lfMarkSet() { pfEndRuntime(); cs.pfOp = PF_NONE; cs.pfSize = 0; cs.pfRes = false; usedLf = true; writtenLf = true; cs.lfLoaded = true; cs.lfDirty = true; }
 +
 +  void acmGet() {
-+    if (!cs.acmLoaded) { em->i32c(0); em->mem(I64_LOAD32_U, ADDR(BX_CPU_THIS_PTR alignment_check_mask), 2); em->set(L_acm); cs.acmLoaded = true; }
++    usedAcm = true;
++    if (!cs.acmLoaded) { zaddr(ADDR(BX_CPU_THIS_PTR alignment_check_mask)); em->mem(I64_LOAD32_U, zoff(ADDR(BX_CPU_THIS_PTR alignment_check_mask)), 2); em->set(L_acm); cs.acmLoaded = true; }
 +    em->get(L_acm);
 +  }
++  // user_pl is loaded once in the prologue; a unit that never probes memory and never transitions
++  // does not need it at all (nanobox_jit_outline bit 9)
++  void uplGet() { usedUpl = true; em->get(L_upl); }
 +
 +  // RIP-related constants
 +  void pushVA(Bit32u traceOffset) { em->get(L_base); Bit64s o = (Bit64s) boff + traceOffset; if (o) { em->i64c(o); em->op(I64_ADD); } }
@@ -2902,26 +3151,28 @@ index 000000000..862847f72
 +  // while instruction k is executing (not yet committed): RIP = end(k), prev_rip = start(k),
 +  // icount = icount0 + k. `clear` as in spillAll.
 +  void syncBefore(unsigned k, bool clear) {
++    ColdArm _ca(this);   // every caller is about to call a handler or an accessor
 +    spillAll(clear);
 +    if (spillSyncCall() || outlineSlow()) { // one call instead of three inline stores (the slow path pays a call, every site saves ~7 ops)
 +      pushVA(off[k + 1]); pushVA(off[k]); pushIcBase(); if (k) { em->i64c(k); em->op(I64_ADD); }
 +      em->call(fn(FNIDX(&nanobox_helper_sync), "lll>v"));
 +      return;
 +    }
-+    em->i32c(0); pushVA(off[k + 1]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
-+    em->i32c(0); pushVA(off[k]);     em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
-+    em->i32c(0); pushIcBase(); if (k) { em->i64c(k); em->op(I64_ADD); } em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); pushVA(off[k + 1]); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR prev_rip)); pushVA(off[k]);     em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR prev_rip)), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR icount)); pushIcBase(); if (k) { em->i64c(k); em->op(I64_ADD); } em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3);
 +  }
 +  // Trace exit after instruction k executed with the new RIP (i64) on the wasm stack: commit
 +  // (prev_rip = RIP, icount++) + return. Does NOT change compile-time cache state (callers that
 +  // emit this on a non-rejoining path restore their snapshot).
 +  void exitWithRipOnStack(unsigned k) {
++    PhScope _p(this, PH_EXIT);
 +    em->set(T[7]);
 +    if (bodyDepth < 0) {
 +      spillAll(false);
-+      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
-+      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
-+      em->i32c(0); pushIcBase(); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++      zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); em->get(T[7]); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
++      zaddr(ADDR(BX_CPU_THIS_PTR prev_rip)); em->get(T[7]); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR prev_rip)), 3);
++      zaddr(ADDR(BX_CPU_THIS_PTR icount)); pushIcBase(); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3);
 +      em->ret();
 +      return;
 +    }
@@ -2951,13 +3202,14 @@ index 000000000..862847f72
 +  }
 +  // close the chain blocks, emitting each position's stores after its block end
 +  void chainClose() {
++    PhScope _ph(this, PH_EXIT);
 +    for (int p = (int) ch.M - 1; p >= 0; p--) {
 +      endb();
 +      if ((unsigned) p < ch.npos) {
-+        for (unsigned r = 0; r < 16; r++) if (ch.at[p] & (1u << r)) { em->i32c(0); em->get(L_reg[r]); em->mem(I64_STORE, regAddr(r), 3); }
++        for (unsigned r = 0; r < 16; r++) if (ch.at[p] & (1u << r)) { zaddr(regAddr(r)); em->get(L_reg[r]); em->mem(I64_STORE, zoff(regAddr(r)), 3); }
 +        if (ch.at[p] & (1u << 16)) {
-+          em->i32c(0); em->get(L_lfr); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR oszapc.result), 3);
-+          em->i32c(0); em->get(L_lfa); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR oszapc.auxbits), 3);
++          zaddr(ADDR(BX_CPU_THIS_PTR oszapc.result)); em->get(L_lfr); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR oszapc.result)), 3);
++          zaddr(ADDR(BX_CPU_THIS_PTR oszapc.auxbits)); em->get(L_lfa); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR oszapc.auxbits)), 3);
 +        }
 +      }
 +    }
@@ -2999,39 +3251,40 @@ index 000000000..862847f72
 +  // the handler-step path, which already pays for a call into the interpreter)
 +  void chainReloadAfterHandler() {
 +    if (!(spillChain() && ch.active)) return;
-+    for (unsigned r = 0; r < 16; r++) if (ch.pos[r] >= 0 && !cs.regLoaded[r]) { em->i32c(0); em->mem(I64_LOAD, regAddr(r), 3); em->set(L_reg[r]); cs.regLoaded[r] = true; }
++    for (unsigned r = 0; r < 16; r++) if (ch.pos[r] >= 0 && !cs.regLoaded[r]) { zaddr(regAddr(r)); em->mem(I64_LOAD, zoff(regAddr(r)), 3); em->set(L_reg[r]); cs.regLoaded[r] = true; }
 +    if (ch.pos[16] >= 0 && !cs.lfLoaded) { bool c = conforming; conforming = true; lfLoad(); conforming = c; }
 +  }
 +  // Epilogue reached (via `br` to the body block) after a trace exit with the whole state in
 +  // memory: do what cpu_loop does between two traces and, if the next trace is compiled, jump
 +  // straight into it (tail call) instead of returning.
 +  void profCount(Bit64u *ctr) {
-+    if (nanobox_jit_level >= 3) { em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(*ctr), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(*ctr), 3); }
++    if (nanobox_jit_level >= 3) { PhScope _p(this, PH_PROF); zaddr(ADDR(*ctr)); zaddr(ADDR(*ctr)); em->mem(I64_LOAD, zoff(ADDR(*ctr)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(*ctr)), 3); }
 +  }
 +  void emitLinkEpilogue() {
++    PhScope _p(this, PH_LINK);
 +    uint32_t delta = T32[5];
 +    // BX_SYNC_TIME fast path
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3);
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount_last_sync), 3); em->op(I64_SUB); em->op(I32_WRAP_I64); em->set(delta);
-+    em->get(delta); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->op(I32_GE_U);
++    zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR icount_last_sync)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount_last_sync)), 3); em->op(I64_SUB); em->op(I32_WRAP_I64); em->set(delta);
++    em->get(delta); zaddr(nanobox_pc_system_access::countdownAddr()); em->mem(I32_LOAD, zoff(nanobox_pc_system_access::countdownAddr()), 2); em->op(I32_GE_U);
 +    iff(); profCount(&nanobox_stats.link_fail[0]); em->ret(); endb();
-+    em->i32c(0); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->get(delta); em->op(I32_SUB); em->mem(I32_STORE, nanobox_pc_system_access::countdownAddr(), 2);
-+    em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount_last_sync), 3);
++    zaddr(nanobox_pc_system_access::countdownAddr()); zaddr(nanobox_pc_system_access::countdownAddr()); em->mem(I32_LOAD, zoff(nanobox_pc_system_access::countdownAddr()), 2); em->get(delta); em->op(I32_SUB); em->mem(I32_STORE, zoff(nanobox_pc_system_access::countdownAddr()), 2);
++    zaddr(ADDR(BX_CPU_THIS_PTR icount_last_sync)); zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR icount_last_sync)), 3);
 +    // async_event -> back to cpu_loop
-+    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2);
++    zaddr(ADDR(BX_CPU_THIS_PTR async_event)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR async_event)), 2);
 +    iff(); profCount(&nanobox_stats.link_fail[1]); em->ret(); endb();
 +    // getICacheEntry(): eipBiased = RIP + eipPageBias; outside the fetch window -> prefetch()
 +    // (exactly what getICacheEntry does; it may raise #PF/#GP, which is fine here: the whole
 +    // state is committed to memory and prev_rip == RIP as in cpu_loop)
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR eipPageBias), 3); em->op(I64_ADD); em->set(T[0]); // eipBiased
-+    em->get(T[0]); em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR eipPageWindowSize), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GE_U);
++    zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR eipPageBias)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eipPageBias)), 3); em->op(I64_ADD); em->set(T[0]); // eipBiased
++    em->get(T[0]); zaddr(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GE_U);
 +    iff();
 +      profCount(&nanobox_stats.link_fail[2]);
 +      // inline prefetch() for the common case (64-bit mode, canonical RIP, ITLB hit with execute
 +      // permission): pAddrFetchPage/eipFetchPtr/eipPageBias/eipPageWindowSize + clear_RF; anything
 +      // else goes through the real prefetch() (which may fault)
-+      em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3); em->set(T[2]); // RIP
++      zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3); em->set(T[2]); // RIP
 +      blk();
 +        pushIsCanonical(T[2]); em->op(I32_EQZ); em->br_if(0);
 +        // ITLB entry = &ITLB.entry[(lo32(RIP) & mask) >> 12]
@@ -3040,25 +3293,25 @@ index 000000000..862847f72
 +          if (sh < 12) { em->i32c(12 - sh); em->op(I32_SHR_U); } else if (sh > 12) { em->i32c(sh - 12); em->op(I32_SHL); } }
 +        em->i32c(ADDR(BX_CPU_THIS_PTR ITLB.entry[0])); em->op(I32_ADD); em->set(T32[3]);
 +        em->get(T32[3]); em->mem(I64_LOAD, TLB_OFF(lpf), 3); em->get(T[2]); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->op(I64_NE); em->br_if(0);
-+        em->get(T32[3]); em->mem(I32_LOAD, TLB_OFF(accessBits), 2); em->i32c(1); em->i32c(0); em->mem(I32_LOAD8_U, ADDR(BX_CPU_THIS_PTR user_pl), 0); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
++        em->get(T32[3]); em->mem(I32_LOAD, TLB_OFF(accessBits), 2); em->i32c(1); zaddr(ADDR(BX_CPU_THIS_PTR user_pl)); em->mem(I32_LOAD8_U, zoff(ADDR(BX_CPU_THIS_PTR user_pl)), 0); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
 +        // hit: fill the fetch window
-+        em->i32c(0); em->get(T[2]); em->i64c(0xfff); em->op(I64_AND); em->get(T[2]); em->op(I64_SUB); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR eipPageBias), 3);
-+        em->i32c(0); em->i32c(4096); em->mem(I32_STORE, ADDR(BX_CPU_THIS_PTR eipPageWindowSize), 2);
-+        em->i32c(0); em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR eflags), 2); em->i32c(~0x10000); em->op(I32_AND); em->mem(I32_STORE, ADDR(BX_CPU_THIS_PTR eflags), 2); // clear_RF
-+        em->i32c(0); em->get(T32[3]); em->mem(I64_LOAD, TLB_OFF(ppf), 3); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR pAddrFetchPage), 3);
-+        em->i32c(0); em->get(T32[3]); em->mem(I32_LOAD, TLB_OFF(hostPageAddr), 2); em->mem(I32_STORE, ADDR(BX_CPU_THIS_PTR eipFetchPtr), 2);
++        zaddr(ADDR(BX_CPU_THIS_PTR eipPageBias)); em->get(T[2]); em->i64c(0xfff); em->op(I64_AND); em->get(T[2]); em->op(I64_SUB); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR eipPageBias)), 3);
++        zaddr(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)); em->i32c(4096); em->mem(I32_STORE, zoff(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)), 2);
++        zaddr(ADDR(BX_CPU_THIS_PTR eflags)); zaddr(ADDR(BX_CPU_THIS_PTR eflags)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eflags)), 2); em->i32c(~0x10000); em->op(I32_AND); em->mem(I32_STORE, zoff(ADDR(BX_CPU_THIS_PTR eflags)), 2); // clear_RF
++        zaddr(ADDR(BX_CPU_THIS_PTR pAddrFetchPage)); em->get(T32[3]); em->mem(I64_LOAD, TLB_OFF(ppf), 3); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR pAddrFetchPage)), 3);
++        zaddr(ADDR(BX_CPU_THIS_PTR eipFetchPtr)); em->get(T32[3]); em->mem(I32_LOAD, TLB_OFF(hostPageAddr), 2); em->mem(I32_STORE, zoff(ADDR(BX_CPU_THIS_PTR eipFetchPtr)), 2);
 +        em->br(1);
 +      endb();
 +      em->call(fn(FNIDX(&BX_CPU_C::prefetch), "v>v"));
 +    endb();
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR eipPageBias), 3); em->op(I64_ADD); em->set(T[0]);
++    zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR eipPageBias)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eipPageBias)), 3); em->op(I64_ADD); em->set(T[0]);
 +    // pAddr = pAddrFetchPage + eipBiased; entry = &iCache.entry[bxICache_c::hash(pAddr, fetchModeMask)]
 +    //   = ((pAddr ^ ((pAddr >> 18) & ~0xfff)) & (entries-1)) ^ fetchModeMask   (keep in sync with cpu/icache.h)
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR pAddrFetchPage), 3); em->get(T[0]); em->op(I64_ADD); em->set(T[1]); // pAddr
++    zaddr(ADDR(BX_CPU_THIS_PTR pAddrFetchPage)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR pAddrFetchPage)), 3); em->get(T[0]); em->op(I64_ADD); em->set(T[1]); // pAddr
 +    em->get(T[1]); em->get(T[1]); em->i64c(18); em->op(I64_SHR_U); em->i64c(~0xfffLL); em->op(I64_AND); em->op(I64_XOR);
 +    em->op(I32_WRAP_I64); em->i32c(BxICacheEntries - 1); em->op(I32_AND);
-+    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR fetchModeMask), 2); em->op(I32_XOR);
++    zaddr(ADDR(BX_CPU_THIS_PTR fetchModeMask)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR fetchModeMask)), 2); em->op(I32_XOR);
 +    em->i32c(sizeof(bxICacheEntry_c)); em->op(I32_MUL); em->i32c(ADDR(BX_CPU_THIS_PTR iCache.entry[0])); em->op(I32_ADD); em->set(T32[0]); // entry
 +    em->get(T32[0]); em->mem(I64_LOAD, ICE_OFF(pAddr), 3); em->get(T[1]); em->op(I64_NE);
 +    iff(); profCount(&nanobox_stats.link_fail[3]); em->ret(); endb();
@@ -3068,12 +3321,12 @@ index 000000000..862847f72
 +    // RIP += ilen(first instruction); stats; tail-call the next trace with its argument (i, or the region descriptor)
 +    em->get(T32[0]); em->mem(I32_LOAD, ICE_OFF(i), 2); em->set(T32[2]); // i
 +    em->i32c(0);
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
 +    em->get(T32[2]); em->mem(I32_LOAD8_U, INS_ILEN_OFF, 0); em->op(I64_EXTEND_I32_U); em->op(I64_ADD);
 +    em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
 +    if (nanobox_jit_level >= 3) {
-+      em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_stats.traces), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_stats.traces), 3);
-+      em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_stats.jit_links), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_stats.jit_links), 3);
++      zaddr(ADDR(nanobox_stats.traces)); zaddr(ADDR(nanobox_stats.traces)); em->mem(I64_LOAD, zoff(ADDR(nanobox_stats.traces)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(nanobox_stats.traces)), 3);
++      zaddr(ADDR(nanobox_stats.jit_links)); zaddr(ADDR(nanobox_stats.jit_links)); em->mem(I64_LOAD, zoff(ADDR(nanobox_stats.jit_links)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(nanobox_stats.jit_links)), 3);
 +    }
 +    em->get(T32[0]); em->mem(I32_LOAD, ICE_OFF(jitarg), 2); pushProbeArgs(); pushEntryStateFromMem(); em->get(T32[1]); em->return_call_indirect(m.funcTypeIdx);
 +  }
@@ -3095,6 +3348,7 @@ index 000000000..862847f72
 +  // whoever called us and finally to cpu_loop -- which is also what happens when the callee did not
 +  // return at all but tail-linked away and the chain later unwound into our frame.
 +  void emitDirectCall(unsigned k, uint32_t t0) {
++    PhScope _p(this, PH_DCALL);
 +    dcallLocals();
 +    const uint32_t sp = L_dcs, fnl = L_dcf, t1 = T[1];
 +    CacheState s0 = snapshot();
@@ -3107,7 +3361,7 @@ index 000000000..862847f72
 +    } else {
 +    // stale site? (first execution, another address space, translations released since)
 +    em->get(sp); em->mem(I64_LOAD, DC_OFF(va), 3); em->get(t0); em->op(I64_NE);
-+    em->get(sp); em->mem(I64_LOAD, DC_OFF(cr3), 3); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR cr3), 3); em->op(I64_NE); em->op(I32_OR);
++    em->get(sp); em->mem(I64_LOAD, DC_OFF(cr3), 3); zaddr(ADDR(BX_CPU_THIS_PTR cr3)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR cr3)), 3); em->op(I64_NE); em->op(I32_OR);
 +    // the callee's iCache entry must still hold the same code with the same translation. This is
 +    // what a global "generation" used to approximate -- and it approximated it far too coarsely:
 +    // bumping on every iCache eviction re-resolved EVERY site (9.3 M lookups on a codex boot).
@@ -3127,16 +3381,16 @@ index 000000000..862847f72
 +    endb();
 +    // callee translated, and room on the host stack? (guest recursion must not blow it)
 +    em->get(sp); em->mem(I32_LOAD, DC_OFF(fn), 2); em->tee(fnl); em->op(I32_EQZ);
-+    em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_depth), 2); em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_max), 2); em->op(I32_GE_U); em->op(I32_OR);
++    zaddr(ADDR(nanobox_dcall_depth)); em->mem(I32_LOAD, zoff(ADDR(nanobox_dcall_depth)), 2); zaddr(ADDR(nanobox_dcall_max)); em->mem(I32_LOAD, zoff(ADDR(nanobox_dcall_max)), 2); em->op(I32_GE_U); em->op(I32_OR);
 +    em->op(I32_EQZ);
 +    iff();
 +    }
 +      spillAll(true);
 +      // RIP and icount go in the call, not through the CPU struct; prev_rip stays because the callee
 +      // may fault before its first syncBefore is reached (exception() reads it out of memory).
-+      em->i32c(0); em->get(t0); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
-+      em->i32c(0); em->i64c(0); em->mem(I64_STORE, ADDR(nanobox_dcall_ret), 3);
-+      em->i32c(0); em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_depth), 2); em->i32c(1); em->op(I32_ADD); em->mem(I32_STORE, ADDR(nanobox_dcall_depth), 2);
++      zaddr(ADDR(BX_CPU_THIS_PTR prev_rip)); em->get(t0); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR prev_rip)), 3);
++      zaddr(ADDR(nanobox_dcall_ret)); em->i64c(0); em->mem(I64_STORE, zoff(ADDR(nanobox_dcall_ret)), 3);
++      zaddr(ADDR(nanobox_dcall_depth)); zaddr(ADDR(nanobox_dcall_depth)); em->mem(I32_LOAD, zoff(ADDR(nanobox_dcall_depth)), 2); em->i32c(1); em->op(I32_ADD); em->mem(I32_STORE, zoff(ADDR(nanobox_dcall_depth)), 2);
 +      profCount(&nanobox_region_stats[29]);
 +      em->get(sp); em->mem(I32_LOAD, DC_OFF(arg), 2); em->i32c(1); em->op(I32_OR);   // "you were called directly"
 +      pushProbeArgs();
@@ -3145,15 +3399,15 @@ index 000000000..862847f72
 +      em->get(fnl); em->call_indirect(m.funcTypeIdx);
 +      if (outlineDcall()) { em->call(fn(FNIDX(&nanobox_dcall_after), ">l")); em->set(t1); }
 +      else {
-+        em->i32c(0); em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_depth), 2); em->i32c(-1); em->op(I32_ADD); em->mem(I32_STORE, ADDR(nanobox_dcall_depth), 2);
-+        em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_dcall_ret), 3); em->set(t1);
++        zaddr(ADDR(nanobox_dcall_depth)); zaddr(ADDR(nanobox_dcall_depth)); em->mem(I32_LOAD, zoff(ADDR(nanobox_dcall_depth)), 2); em->i32c(-1); em->op(I32_ADD); em->mem(I32_STORE, zoff(ADDR(nanobox_dcall_depth)), 2);
++        zaddr(ADDR(nanobox_dcall_ret)); em->mem(I64_LOAD, zoff(ADDR(nanobox_dcall_ret)), 3); em->set(t1);
 +      }
 +      em->get(t1); pushVA(off[k + 1]); em->op(I64_NE);
 +      iff(); profCount(&nanobox_region_stats[31]); em->ret(); endb();
-+      em->i32c(0); em->i64c(0); em->mem(I64_STORE, ADDR(nanobox_dcall_ret), 3);
++      zaddr(ADDR(nanobox_dcall_ret)); em->i64c(0); em->mem(I64_STORE, zoff(ADDR(nanobox_dcall_ret)), 3);
 +      // resumed at our continuation: the callee committed everything, our locals / probe cache are
 +      // stale, and the guest clock is absolute again (same rebase as a handler step)
-+      em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3); em->i64c(k + 1); em->op(I64_SUB); em->set(L_ic0);
++      zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3); em->i64c(k + 1); em->op(I64_SUB); em->set(L_ic0);
 +      if (icDeferred()) { em->i32c((int32_t) loopTickN); em->set(L_tick); }
 +      csInvalidate(); emitInvalidate(); chainReloadAfterHandler();
 +      exitFallthroughOrTransition(k);
@@ -3166,6 +3420,7 @@ index 000000000..862847f72
 +  // prefetch-window check, bookkeeping) and then a jump to the dispatch loop instead of a return.
 +  // Non-rejoining: callers restore their compile-time cache snapshot afterwards.
 +  void emitTransition(unsigned k, unsigned s) {
++    PhScope _ph(this, PH_TRANS);
 +    // The pending flag operands are NOT staged into P_op1/P_op2 here: every consumer on the way out
 +    // (spillAll / pfMaterialize*) reads them through pfO1()/pfO2(), which follows the alias, and the
 +    // only convention that needs them in P_* is a FE_SLOW block entry -- conformFlagsTo() stages them
@@ -3181,14 +3436,28 @@ index 000000000..862847f72
 +    // handler steps; forward edges are plain jumps. The default mode keeps every in-region edge a
 +    // full trace boundary (that is what makes it bit-identical to the interpreter).
 +    bool aotFwd = aotRelaxed() && reg != NULL && s > curBlock;
++    const bool crossPage = (blockPage(s) != blockPage(curBlock));
++    const bool doWindow = (!aotRelaxed() || reg == NULL || crossPage);
++    const bool outlined = outlineTrans() && !nanobox_dbg_mode;
++    if (outlined) {
++      // the whole boundary out of line (see nanobox_trans_check): one call and ONE exit arm
++      Bit32u tf = (Bit32u) s;
++      if (!aotFwd) tf |= 0x100;
++      if (crossPage) { tf |= 0x200; if (!regionKernel) tf |= 0x400; tf |= ((Bit32u) reg->b[s].page & 0xf) << 12; }
++      if (doWindow) tf |= 0x800;
++      if (!aotRelaxed() || nanobox_jit_level >= 3) tf |= 0x10000;
++      em->get(L_regp); em->i32c((int32_t) tf); em->get(now); pushRegionVA(target); uplGet();
++      em->call(fn(FNIDX(&nanobox_trans_check), "iilli>i"));
++      { CacheState s0 = snapshot(); iff(); coldExit = true; commitAndExit(k, target); coldExit = false; endb(); restore(s0); }
++    } else {
 +    if (!aotFwd) {
 +    // BX_SYNC_TIME fast path: delta >= currCountdown -> cpu_loop runs the timers
-+    em->get(now); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount_last_sync), 3); em->op(I64_SUB); em->op(I32_WRAP_I64); em->set(delta);
-+    em->get(delta); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->op(I32_GE_U);
++    em->get(now); zaddr(ADDR(BX_CPU_THIS_PTR icount_last_sync)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount_last_sync)), 3); em->op(I64_SUB); em->op(I32_WRAP_I64); em->set(delta);
++    em->get(delta); zaddr(nanobox_pc_system_access::countdownAddr()); em->mem(I32_LOAD, zoff(nanobox_pc_system_access::countdownAddr()), 2); em->op(I32_GE_U);
 +    { CacheState s0 = snapshot(); iff(); coldExit = true; commitAndExit(k, target); coldExit = false; endb(); restore(s0); }
-+    em->i32c(0); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->get(delta); em->op(I32_SUB); em->mem(I32_STORE, nanobox_pc_system_access::countdownAddr(), 2);
-+    em->i32c(0); em->get(now); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount_last_sync), 3);
-+    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2);
++    zaddr(nanobox_pc_system_access::countdownAddr()); zaddr(nanobox_pc_system_access::countdownAddr()); em->mem(I32_LOAD, zoff(nanobox_pc_system_access::countdownAddr()), 2); em->get(delta); em->op(I32_SUB); em->mem(I32_STORE, zoff(nanobox_pc_system_access::countdownAddr()), 2);
++    zaddr(ADDR(BX_CPU_THIS_PTR icount_last_sync)); em->get(now); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR icount_last_sync)), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR async_event)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR async_event)), 2);
 +    { CacheState s0 = snapshot(); iff(); coldExit = true; commitAndExit(k, target); coldExit = false; endb(); restore(s0); }
 +    }
 +    // first execution of block s since the attach: mark the reference write stamps as the interpreter's
@@ -3212,17 +3481,17 @@ index 000000000..862847f72
 +          if (sh < 12) { em->i32c(12 - sh); em->op(I32_SHR_U); } else if (sh > 12) { em->i32c(sh - 12); em->op(I32_SHL); } }
 +        em->i32c(ADDR(BX_CPU_THIS_PTR ITLB.entry[0])); em->op(I32_ADD); em->set(T32[3]);
 +        em->get(T32[3]); em->mem(I64_LOAD, TLB_OFF(lpf), 3); em->get(T[2]); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->op(I64_NE); em->br_if(0);
-+        em->get(T32[3]); em->mem(I32_LOAD, TLB_OFF(accessBits), 2); em->i32c(1); em->get(L_upl); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
++        em->get(T32[3]); em->mem(I32_LOAD, TLB_OFF(accessBits), 2); em->i32c(1); uplGet(); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
 +        if (!regionKernel) { // physical page must be the one the region was formed on (per-attach value in the descriptor)
 +          em->get(T32[3]); em->mem(I64_LOAD, TLB_OFF(ppf), 3); em->i64c(12); em->op(I64_SHR_U);
 +          em->get(L_regp); em->mem(I64_LOAD, REGION_OFF(ppf[reg->b[s].page]), 3); em->op(I64_NE); em->br_if(0);
 +        }
 +        // hit: fill the fetch window (as the inline prefetch in the link epilogue)
-+        em->i32c(0); em->get(T[2]); em->i64c(0xfff); em->op(I64_AND); em->get(T[2]); em->op(I64_SUB); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR eipPageBias), 3);
-+        em->i32c(0); em->i32c(4096); em->mem(I32_STORE, ADDR(BX_CPU_THIS_PTR eipPageWindowSize), 2);
-+        em->i32c(0); em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR eflags), 2); em->i32c(~0x10000); em->op(I32_AND); em->mem(I32_STORE, ADDR(BX_CPU_THIS_PTR eflags), 2); // clear_RF
-+        em->i32c(0); em->get(T32[3]); em->mem(I64_LOAD, TLB_OFF(ppf), 3); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR pAddrFetchPage), 3);
-+        em->i32c(0); em->get(T32[3]); em->mem(I32_LOAD, TLB_OFF(hostPageAddr), 2); em->mem(I32_STORE, ADDR(BX_CPU_THIS_PTR eipFetchPtr), 2);
++        zaddr(ADDR(BX_CPU_THIS_PTR eipPageBias)); em->get(T[2]); em->i64c(0xfff); em->op(I64_AND); em->get(T[2]); em->op(I64_SUB); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR eipPageBias)), 3);
++        zaddr(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)); em->i32c(4096); em->mem(I32_STORE, zoff(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)), 2);
++        zaddr(ADDR(BX_CPU_THIS_PTR eflags)); zaddr(ADDR(BX_CPU_THIS_PTR eflags)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eflags)), 2); em->i32c(~0x10000); em->op(I32_AND); em->mem(I32_STORE, zoff(ADDR(BX_CPU_THIS_PTR eflags)), 2); // clear_RF
++        zaddr(ADDR(BX_CPU_THIS_PTR pAddrFetchPage)); em->get(T32[3]); em->mem(I64_LOAD, TLB_OFF(ppf), 3); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR pAddrFetchPage)), 3);
++        zaddr(ADDR(BX_CPU_THIS_PTR eipFetchPtr)); em->get(T32[3]); em->mem(I32_LOAD, TLB_OFF(hostPageAddr), 2); em->mem(I32_STORE, zoff(ADDR(BX_CPU_THIS_PTR eipFetchPtr)), 2);
 +        em->br(1);
 +       endb();
 +       { CacheState s0 = snapshot(); coldExit = true; commitAndExit(k, target); coldExit = false; restore(s0); }
@@ -3232,20 +3501,25 @@ index 000000000..862847f72
 +    // (AOT: a same-page target of a 64-bit region is always inside the page window the region entered
 +    //  with -- the compiled region never reads code bytes through it, so the check only mattered for
 +    //  matching the interpreter's boundaries; cross-page edges refilled the window above)
-+    if (!aotRelaxed() || reg == NULL || blockPage(s) != blockPage(curBlock)) {
-+    pushRegionVA(target); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR eipPageBias), 3); em->op(I64_ADD);
-+    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR eipPageWindowSize), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GE_U);
++    if (doWindow) {
++    pushRegionVA(target); zaddr(ADDR(BX_CPU_THIS_PTR eipPageBias)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eipPageBias)), 3); em->op(I64_ADD);
++    zaddr(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GE_U);
 +    { CacheState s0 = snapshot(); iff(); coldExit = true; commitAndExit(k, target); coldExit = false; endb(); restore(s0); }
++    }
 +    }
 +    if (nanobox_dbg_mode) { // divergence finder: the fingerprint reads memory -> present a committed state; remember which block runs next
 +      commitAndSpillInline(k, target);
 +      em->get(L_regp); em->mem(I32_LOAD, REGION_OFF(entptr[curBlock]), 2); em->call(fn(FNIDX(&nanobox_helper_dbg_loop), "i>v"));
-+      em->i32c(0); em->get(L_regp); em->mem(I32_LOAD, REGION_OFF(entptr[s]), 2); em->mem(I32_STORE, ADDR(nanobox_dbg_cur_entry), 2);
++      zaddr(ADDR(nanobox_dbg_cur_entry)); em->get(L_regp); em->mem(I32_LOAD, REGION_OFF(entptr[s]), 2); em->mem(I32_STORE, zoff(ADDR(nanobox_dbg_cur_entry)), 2);
 +    }
-+    if (!aotRelaxed() || nanobox_jit_level >= 3) { em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_stats.traces), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_stats.traces), 3); }
++    // the divergence finder's per-trace INDEX is this counter, and its fingerprint hook above reads
++    // it -- so the bump has to stay exactly where it always was, behind the hook. Moving it in front
++    // put B one trace ahead of A on identical state and read as a divergence (gate, 2026-08-19).
++    // The outlined arm, which dbg mode never uses, bumps it inside nanobox_trans_check.
++    if (!outlined && (!aotRelaxed() || nanobox_jit_level >= 3)) { zaddr(ADDR(nanobox_stats.traces)); zaddr(ADDR(nanobox_stats.traces)); em->mem(I64_LOAD, zoff(ADDR(nanobox_stats.traces)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(nanobox_stats.traces)), 3); }
 +    if (nanobox_jit_level >= 3) {
-+      em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_stats.jit_links), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_stats.jit_links), 3);
-+      em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_stats.jit_intrans), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_stats.jit_intrans), 3);
++      zaddr(ADDR(nanobox_stats.jit_links)); zaddr(ADDR(nanobox_stats.jit_links)); em->mem(I64_LOAD, zoff(ADDR(nanobox_stats.jit_links)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(nanobox_stats.jit_links)), 3);
++      zaddr(ADDR(nanobox_stats.jit_intrans)); zaddr(ADDR(nanobox_stats.jit_intrans)); em->mem(I64_LOAD, zoff(ADDR(nanobox_stats.jit_intrans)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(nanobox_stats.jit_intrans)), 3);
 +    }
 +    em->get(now); em->set(L_ic0);
 +    conformTo(s);   // registers/flags: keep what block s tracks in locals, store the rest, load what it lacks
@@ -3271,6 +3545,7 @@ index 000000000..862847f72
 +  // ---------------------------------------------------------------- effective addresses
 +  // push the effective address (i64) of instruction k's memory operand
 +  void pushEA(unsigned k) {
++    PhScope _p(this, PH_EA);
 +    bxInstruction_c *i = &ins[k];
 +    unsigned base = i->sibBase(), index = i->sibIndex();
 +    if (base == BX_64BIT_REG_RIP) pushVA(off[k + 1]);
@@ -3282,7 +3557,7 @@ index 000000000..862847f72
 +  }
 +  // offset (i64 on stack) -> linear address (get_laddr64)
 +  void pushLaddrFromOffset(unsigned seg) {
-+    if (seg >= SEG_FS) { em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR sregs[seg].cache.u.segment.base), 3); em->op(I64_ADD); }
++    if (seg >= SEG_FS) { zaddr(ADDR(BX_CPU_THIS_PTR sregs[seg].cache.u.segment.base)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR sregs[seg].cache.u.segment.base)), 3); em->op(I64_ADD); }
 +  }
 +
 +  // ---------------------------------------------------------------- memory access
@@ -3321,6 +3596,7 @@ index 000000000..862847f72
 +      default: sig = ""; return 0;
 +    }
 +  }
++  static unsigned sizeCode(unsigned size) { return size == 8 ? 3 : size == 4 ? 2 : size == 2 ? 1 : 0; }
 +  static Op loadOp(unsigned size) { return size == 8 ? I64_LOAD : size == 4 ? I64_LOAD32_U : size == 2 ? I64_LOAD16_U : I64_LOAD8_U; }
 +  static Op storeOp(unsigned size) { return size == 8 ? I64_STORE : size == 4 ? I64_STORE32 : size == 2 ? I64_STORE16 : I64_STORE8; }
 +
@@ -3333,11 +3609,50 @@ index 000000000..862847f72
 +  bool outlineStep() const { return (nanobox_jit_outline & 8) != 0; }
 +  bool outlineProbe2() const { return (nanobox_jit_outline & 32) != 0 && nanobox_jit_probe2 != 0; }   // keep the (slimmed) second probe candidate inline
 +  bool siteCand2() const { return (nanobox_jit_outline & 128) != 0; }   // per-site tags: the function-global pair is candidate 2
++  // bit 8: in-region transition boundary out of line. NOT in AOT mode: there the relaxed boundary
++  // already strips a forward edge down to the block's first-execution test (three ops), so replacing
++  // it with a cross-module call is pure loss -- measured +35 % on the AOT call+ret benchmark
++  // (18.5 -> 25.0 ns) with every other bit neutral (19.0 ns).
++  bool outlineTrans() const { return (nanobox_jit_outline & 256) != 0 && !aotRelaxed(); }
++  // bit 10: slim the probe MISS arm -- the page offset is computed once in front of the candidates
++  // instead of again in the refill, and nanobox_probe_out is addressed through a base local (its
++  // absolute address needs a 4-byte LEB in every memarg; from a base local the offsets are 1 byte).
++  bool slimMiss() const { return (nanobox_jit_outline & 1024) != 0; }
++  bool useProbeBase() const { return slimMiss() && (passNo == 1 || nsiteTotal >= 2); }
++  // bit 12: a site with its own tag does not refresh the function-wide pair on a refill. The pair
++  // stays valid (only an invalidation may poison it, never a foreign page) -- it just goes staler.
++  bool siteSkipShared() const { return (nanobox_jit_outline & 4096) != 0; }
++  // bit 14: address the CPU struct through a base local. Every guest-state access is
++  // `i32.const 0` + a 3-byte memarg offset; from a base local at gen_reg[0] the sixteen registers
++  // are 1-byte offsets and everything else in the struct 2 bytes, for 6 bytes once per function.
++  bool cpuBase() const { return (nanobox_jit_outline & 16384) != 0; }
++  static uint32_t nbCpuBase() { return ADDR(BX_CPU_THIS_PTR gen_reg[0].rrx); }
++  bool zb(uint32_t a) const { return cpuBase() && a >= nbCpuBase(); }
++  void zaddr(uint32_t a) { if (zb(a)) em->get(L_cpu); else em->i32c(0); }
++  uint32_t zoff(uint32_t a) const { return zb(a) ? a - nbCpuBase() : a; }
++  void zload(Op op, uint32_t a, unsigned align) { zaddr(a); em->mem(op, zoff(a), align); }
++  // bit 15: the per-instruction template wrapper block only where a template branches out of it
++  bool wrapElide() const { return (nanobox_jit_outline & 32768) != 0; }
++  // bit 16: the probe candidates as values under one `if` instead of two labels and two br_ifs
++  bool flatProbe() const { return (nanobox_jit_outline & 65536) != 0; }
++  bool mergeStep() const { return (nanobox_jit_outline & 131072) != 0 && outlineStep(); }   // bit 17
++  bool mergeSlow() const { return (nanobox_jit_outline & 262144) != 0; }                    // bit 18
++  bool oneTag() const { return (nanobox_jit_outline & 524288) != 0; }                       // bit 19
++  // the packed constants the merged cold arms take (see nanobox_cold_sync)
++  Bit32s coldP1(unsigned k) const { return (Bit32s)((Bit64s) boff + (Bit64s) off[k + 1]); }
++  Bit32u coldP2(unsigned k) const { return (Bit32u)((off[k + 1] - off[k]) & 0xf) | ((Bit32u) k << 4); }
++  bool coldFits(unsigned k) const { return k < 32 && (off[k + 1] - off[k]) < 16 &&
++                                    (Bit64s)(Bit32s)((Bit64s) boff + (Bit64s) off[k + 1]) == (Bit64s) boff + (Bit64s) off[k + 1]; }
++  void coldArgs(unsigned k, Bit32u extra) { em->get(L_base); pushIcBase(); em->i32c(coldP1(k)); em->i32c((int32_t)(coldP2(k) | extra)); }
++  void pob(unsigned off, Op op, unsigned align) {   // load a nanobox_probe_out field
++    if (useProbeBase()) { em->get(L_pob); em->mem(op, off, align); }
++    else { zaddr(ADDR(nanobox_probe_out) + off); em->mem(op, zoff(ADDR(nanobox_probe_out) + off), align); }
++  }
 +  uint32_t sTag(unsigned i) const { return S_tagBase + i; }
 +  uint32_t sHost(unsigned i) const { return S_hostBase + i; }
 +  enum { NB_MAX_SITES = 256, NB_SITE_BUDGET = 768 };
 +  // poison stores an invalidation may cost, A/B-able through the top half of the outline mask
-+  static unsigned siteBudget() { unsigned b = nanobox_jit_outline >> 16; return b ? b : (unsigned) NB_SITE_BUDGET; }
++  static unsigned siteBudget() { unsigned b = nanobox_jit_outline >> 20; return b ? b : (unsigned) NB_SITE_BUDGET; }
 +  // which blocks lie on an invalidation-free cycle (transitive closure over pass 1's edge list;
 +  // <= 24 blocks, so the cubic closure is a few thousand operations per region). A plain trace has
 +  // one block, and it is a cycle only when it compiled as a self-loop.
@@ -3366,6 +3681,43 @@ index 000000000..862847f72
 +  // Outlined form (nanobox_jit_outline bit 0): candidate 1 stays inline, everything behind it — the
 +  // second candidate, the DTLB lookup, the refill and the write-stamp dance — is one call into
 +  // nanobox_probe_* plus the three loads of the state the probe cache keeps in locals.
++  // the refill: the outlined DTLB lookup plus the loads of what the probe cache keeps in locals.
++  // `extra` = labels between here and `slowDepth` as the CALLER of tlbProbe counts them.
++  void probeRefill(uint32_t la, unsigned size, unsigned bit, unsigned stampSize, uint32_t slowDepth,
++                   unsigned extra, bool site, unsigned si, bool needFree, bool hoistOff)
++  {
++    em->get(la); acmGet(); uplGet(); em->call(fn(nanobox_probe_fnidx(size, bit, stampSize ? 1 : 0), "lli>i"));
++    em->br_if(slowDepth + extra);
++    if (!site && outlineProbe2()) { em->get(C_tagR); em->set(D_tagR); em->get(C_tagW); em->set(D_tagW); em->get(C_host); em->set(D_host); }   // the page we are replacing becomes the second entry
++    const bool skipShared = site && siteSkipShared();
++    if (!skipShared) {
++      // bit 19: only the direction this site probes. The helper computed both tags, but reloading
++      // the other one is 7 bytes at every site to keep a page cached for an access that may not
++      // exist; a site that does need it takes one more refill.
++      // C_tagR, C_tagW and C_host are ONE entry: both tags describe the page C_host points at.
++      // Refilling a single tag and leaving the other pointing at the previous page makes the next
++      // access of that direction hit with the WRONG host -- a silent miscompile (measured: the codex
++      // boot stopped making progress). So bit 19 poisons the direction it does not refill; that
++      // saves 3 bytes and costs a refill, which is why it is off.
++      if (!oneTag() || bit != 4) { pob(OFF_PROBE(tagR), I64_LOAD, 3); em->set(C_tagR); }
++      else { em->i64c(-1); em->set(C_tagR); }
++      if (!oneTag() || bit == 4) { pob(OFF_PROBE(tagW), I64_LOAD, 3); em->set(C_tagW); }
++      else { em->i64c(-1); em->set(C_tagW); }
++    }
++    pob(OFF_PROBE(host), I32_LOAD, 2);
++    if (site) { if (skipShared) em->set(sHost(si)); else { em->tee(C_host); em->set(sHost(si)); } } else em->set(C_host);
++    if (site) { pob(bit == 4 ? OFF_PROBE(tagWo) : OFF_PROBE(tagRo), I64_LOAD, 3); em->set(sTag(si)); }
++    if (needFree) { pob(OFF_PROBE(freeb), I32_LOAD, 2); em->set(C_free); }
++    if (size > 1 && !hoistOff) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->set(P_off); }
++  }
++  // "did candidate `tagl` miss?" as a VALUE (bit 16's flat form): tag mismatch OR the access runs
++  // past the end of the page. Two br_ifs and the two labels they need cost 8 bytes more than one
++  // i32.or and one `if`, at every memory site.
++  void probeMissFlag(uint32_t la, unsigned size, uint32_t tagl, bool orForm) {
++    if (orForm) { em->get(la); em->i64c((Bit64s)(Bit64u) ~LPF_MASK); em->op(I64_OR); em->get(tagl); em->op(I64_NE); }
++    else { em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(tagl); em->op(I64_NE); }
++    if (size > 1) { em->get(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->op(I32_OR); }
++  }
 +  void tlbProbeOutlined(uint32_t la, unsigned size, unsigned bit, uint32_t slowDepth, unsigned stampSize, bool needFree) {
 +    const uint32_t tagC = (bit == 4) ? C_tagW : C_tagR;
 +    const uint32_t tagD = (bit == 4) ? D_tagW : D_tagR;
@@ -3379,11 +3731,42 @@ index 000000000..862847f72
 +    const bool site = siteTags && blockElig[curBlock] && nsiteElig < nElig && (!needFree || bit == 4);
 +    const unsigned si = site ? nsiteElig++ : 0;
 +    curHost = site ? sHost(si) : C_host;
++    phPush(PH_PROBE_FAST);
++    // the page offset is the same expression on every arm (candidate 1, candidate 2, the refill):
++    // compute it once in front of them all instead of three times (nanobox_jit_outline bit 10)
++    const bool flat = flatProbe() && !needFree && nanobox_jit_level < 3 && !(!site && outlineProbe2());
++    const bool hoistOff = (slimMiss() || flat) && size > 1;
++    if (hoistOff) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->set(P_off); }
++    if (flat) {
++      // flat form: candidate tests as values, one `if` per candidate, no labels
++      probeMissFlag(la, size, site ? sTag(si) : tagC, site);
++      iff();
++        if (site && siteCand2()) {
++          probeMissFlag(la, size, tagC, false);
++          iff();
++            phPop(); phPush(PH_PROBE_MISS);
++            probeRefill(la, size, bit, stampSize, slowDepth, 2, site, si, needFree, hoistOff);
++            phPop(); phPush(PH_PROBE_FAST);
++          els();
++            em->get(la); em->i64c((Bit64s)(Bit64u) ~LPF_MASK); em->op(I64_OR); em->set(sTag(si));
++            em->get(C_host); em->set(sHost(si));
++          endb();
++        } else {
++          phPop(); phPush(PH_PROBE_MISS);
++          probeRefill(la, size, bit, stampSize, slowDepth, 1, site, si, needFree, hoistOff);
++          phPop(); phPush(PH_PROBE_FAST);
++        }
++      endb();
++      phPop();
++      if (stampSize) needAsyncCheck = true;
++      return;
++    }
 +    blk();   // O: ends after the probe; a cache hit branches here directly
 +      blk(); // A: candidate 1 (this site's page, or the function's if it has no tag of its own)
 +        if (site) { em->get(la); em->i64c((Bit64s)(Bit64u) ~LPF_MASK); em->op(I64_OR); em->get(sTag(si)); em->op(I64_NE); em->br_if(0); }
 +        else { em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(tagC); em->op(I64_NE); em->br_if(0); }
-+        if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
++        if (hoistOff) { em->get(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
++        else if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
 +        profCount(&nanobox_flags_stats[FD_PROBE_C]);
 +        // a write tag can only hold a page that carried no iCache write stamps when it was filled,
 +        // and stamps are only added by serveICacheMiss -- which cannot run without an invalidation
@@ -3397,7 +3780,8 @@ index 000000000..862847f72
 +        // the page) -- the case a private tag can never win.
 +        blk();
 +          em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(tagC); em->op(I64_NE); em->br_if(0);
-+          if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
++          if (hoistOff) { em->get(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
++          else if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
 +          em->get(la); em->i64c((Bit64s)(Bit64u) ~LPF_MASK); em->op(I64_OR); em->set(sTag(si));
 +          em->get(C_host); em->set(sHost(si));
 +          if (needFree) { em->i32c(1); em->set(C_free); }
@@ -3406,13 +3790,15 @@ index 000000000..862847f72
 +        endb();
 +      }
 +      if (!site && outlineProbe2()) {
++        usedInlineProbe = true;
 +        // second candidate, still inline but slimmed: with the refill outlined the entry is only
 +        // (tagR, tagW, host) -- ppf and the stamp-free bit live in the helper now, so promoting it
 +        // is three swaps instead of five. It exists because a site that alternates between two
 +        // pages would otherwise pay the helper call on every access.
 +        blk();
 +          em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(tagD); em->op(I64_NE); em->br_if(0);
-+          if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
++          if (hoistOff) { em->get(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
++          else if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
 +          em->get(C_tagR); em->get(D_tagR); em->set(C_tagR); em->set(D_tagR);
 +          em->get(C_tagW); em->get(D_tagW); em->set(C_tagW); em->set(D_tagW);
 +          em->get(C_host); em->get(D_host); em->set(C_host); em->set(D_host);
@@ -3420,24 +3806,19 @@ index 000000000..862847f72
 +          em->br(1);
 +        endb();
 +      }
-+      em->get(la); acmGet(); em->get(L_upl); em->call(fn(nanobox_probe_fnidx(size, bit, stampSize ? 1 : 0), "lli>i"));
-+      em->br_if(slowDepth + 1);
-+      if (!site && outlineProbe2()) { em->get(C_tagR); em->set(D_tagR); em->get(C_tagW); em->set(D_tagW); em->get(C_host); em->set(D_host); }   // the page we are replacing becomes the second entry
-+      em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_probe_out.tagR), 3); em->set(C_tagR);
-+      em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_probe_out.tagW), 3); em->set(C_tagW);
-+      em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_probe_out.host), 2);
-+      if (site) { em->tee(C_host); em->set(sHost(si)); } else em->set(C_host);
-+      if (site) { em->i32c(0); em->mem(I64_LOAD, bit == 4 ? ADDR(nanobox_probe_out.tagWo) : ADDR(nanobox_probe_out.tagRo), 3); em->set(sTag(si)); }
-+      if (needFree) { em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_probe_out.freeb), 2); em->set(C_free); }
-+      if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->set(P_off); }
++      phPop(); phPush(PH_PROBE_MISS);
++      probeRefill(la, size, bit, stampSize, slowDepth, 1, site, si, needFree, hoistOff);
 +    endb();
++    phPop();
 +    if (stampSize) needAsyncCheck = true;   // decWriteStamp -> handleSMC sets BX_ASYNC_EVENT_STOP_TRACE
 +  }
 +  void tlbProbe(uint32_t la, unsigned size, unsigned bit, uint32_t slowDepth, unsigned stampSize = 0, bool needFree = false) {
 +    const bool fold = (nanobox_tlbfold != 0);
 +    const uint32_t tagC = (bit == 4) ? C_tagW : C_tagR;
 +    if (outlineProbe() && nanobox_probe_size_idx(size) >= 0) { tlbProbeOutlined(la, size, bit, slowDepth, stampSize, needFree); return; }
++    usedInlineProbe = true;   // this path reads the second (D_*) probe-cache entry
 +    curHost = C_host;   // the inline path keeps the shared probe cache
++    PhScope _ph(this, PH_PROBE_FAST);
 +    const uint32_t tagD = (bit == 4) ? D_tagW : D_tagR;
 +    // Page cache: same page as the last successful probe, access fits the page, permission bit
 +    // present, and no alignment check pending -> reuse (skips the TLB entry lookup entirely).
@@ -3453,7 +3834,7 @@ index 000000000..862847f72
 +            em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0);
 +            acmGet(); em->i64c(size - 1); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0);
 +          }
-+          em->get(C_bits); em->i32c(bit); em->get(L_upl); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
++          em->get(C_bits); em->i32c(bit); uplGet(); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
 +        }
 +        profCount(&nanobox_flags_stats[FD_PROBE_C]);
 +        em->br(1); // hit
@@ -3470,7 +3851,7 @@ index 000000000..862847f72
 +              em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0);
 +              acmGet(); em->i64c(size - 1); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0);
 +            }
-+            em->get(D_bits); em->i32c(bit); em->get(L_upl); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
++            em->get(D_bits); em->i32c(bit); uplGet(); em->op(I32_SHL); em->op(I32_AND); em->op(I32_EQZ); em->br_if(0);
 +          }
 +          swapProbeEntries();
 +          profCount(&nanobox_flags_stats[FD_PROBE_D]);
@@ -3497,7 +3878,7 @@ index 000000000..862847f72
 +        // TLB permission bits (and, for writes, by the page carrying iCache write stamps)
 +        em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND);
 +        em->i64c(-1); acmGet(); em->op(I64_EQZ); em->op(SELECT); em->set(W);
-+        em->get(T32[0]); em->mem(I32_LOAD, TLB_OFF(accessBits), 2); em->get(L_upl); em->op(I32_SHR_U); em->set(P_bits);
++        em->get(T32[0]); em->mem(I32_LOAD, TLB_OFF(accessBits), 2); uplGet(); em->op(I32_SHR_U); em->set(P_bits);
 +        em->get(W); em->i64c(-1); em->get(P_bits); em->i32c(1); em->op(I32_AND); em->op(SELECT); em->set(C_tagR);
 +        em->get(W); em->i64c(-1); em->get(C_free); em->op(SELECT);
 +        em->i64c(-1); em->get(P_bits); em->i32c(4); em->op(I32_AND); em->op(SELECT); em->set(C_tagW);
@@ -3544,7 +3925,7 @@ index 000000000..862847f72
 +    em->op(I64_NE); em->br_if(slowDepth);
 +    // access bits: entry->accessBits & (bit << user_pl)
 +    em->get(T32[0]); em->mem(I32_LOAD, TLB_OFF(accessBits), 2);
-+    em->i32c(bit); em->get(L_upl); em->op(I32_SHL); em->op(I32_AND);
++    em->i32c(bit); uplGet(); em->op(I32_SHL); em->op(I32_AND);
 +    em->op(I32_EQZ); em->br_if(slowDepth);
 +  }
 +  // host address = entry->hostPageAddr + (la & 0xfff)  -> i32 on stack
@@ -3555,6 +3936,7 @@ index 000000000..862847f72
 +  }
 +  // pageWriteStampTable.decWriteStamp(entry->ppf | pageOffset, size) with the cheap test inlined
 +  void emitWriteStamp(uint32_t la, unsigned size) {
++    PhScope _p(this, PH_STAMP);
 +    // page known to carry no iCache stamps (checked when it was probed; stamps are only added by
 +    // serveICacheMiss, which cannot run during this trace) -> nothing to do
 +    em->get(C_free); em->op(I32_EQZ);
@@ -3586,20 +3968,30 @@ index 000000000..862847f72
 +    blk(I64);
 +      blk();
 +        tlbProbe(la, size, 1, 0);
-+        pushHostAddr(la, nanobox_tlbfold && size > 1); em->mem(loadOp(size), 0, 0);
-+        em->br(1);
++        { PhScope _pa(this, PH_ACCESS); pushHostAddr(la, nanobox_tlbfold && size > 1); em->mem(loadOp(size), 0, 0);
++        em->br(1); }
 +      endb();
++      { PhScope _ps(this, PH_SLOW);
++      const bool merge = mergeSlow() && coldFits(k) && size <= 8 && seg < 8 &&
++                         (kind == MK_RD_LIN || (kind == MK_RD_VIRT && la == off_l));
++      if (merge) {
++        { ColdArm _ca(this); spillAll(false); }
++        em->get(la);
++        coldArgs(k, ((Bit32u) seg << 9) | ((Bit32u) sizeCode(size) << 12) |
++                    ((Bit32u)(kind == MK_RD_LIN ? NB_SLOW_RD_LIN : NB_SLOW_RD_VIRT) << 14));
++        em->call(fn(FNIDX(&nanobox_slow_rd), "lllii>l"));
++      } else {
 +      syncBefore(k, false); profSlow();
 +      const char *sig; uint32_t f = accessorRead(kind, size, sig);
 +      em->i32c(seg);
 +      if (kind == MK_RD_LIN || kind == MK_RMW_LIN) em->get(la); else em->get(off_l);
 +      em->call(fn(f, sig));
-+      if (size != 8) em->op(I64_EXTEND_I32_U);
++      if (size != 8) em->op(I64_EXTEND_I32_U); } }
 +    endb();
 +    needAsyncCheck = true;
 +  }
 +  void profSlow() {
-+    if (nanobox_jit_level >= 3) { em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_stats.jit_slow), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_stats.jit_slow), 3); }
++    if (nanobox_jit_level >= 3) { PhScope _p(this, PH_PROF); zaddr(ADDR(nanobox_stats.jit_slow)); zaddr(ADDR(nanobox_stats.jit_slow)); em->mem(I64_LOAD, zoff(ADDR(nanobox_stats.jit_slow)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(nanobox_stats.jit_slow)), 3); }
 +  }
 +  // Write value in local val_l (i64) with `size` bytes at offset off_l for instruction k.
 +  void emitWrite(unsigned k, MemKind kind, unsigned seg, unsigned size, uint32_t off_l, uint32_t val_l) {
@@ -3608,15 +4000,25 @@ index 000000000..862847f72
 +      blk();
 +        tlbProbe(la, size, 4, 0, size);
 +        if (!nanobox_tlbfold) emitWriteStamp(la, size); else needAsyncCheck = true;
-+        pushHostAddr(la, nanobox_tlbfold && size > 1); em->get(val_l); em->mem(storeOp(size), 0, 0);
-+        em->br(1);
++        { PhScope _pa(this, PH_ACCESS); pushHostAddr(la, nanobox_tlbfold && size > 1); em->get(val_l); em->mem(storeOp(size), 0, 0);
++        em->br(1); }
 +      endb();
++      { PhScope _ps(this, PH_SLOW);
++      const bool merge = mergeSlow() && coldFits(k) && size <= 8 && seg < 8 &&
++                         (kind == MK_WR_LIN || (kind == MK_WR_VIRT && la == off_l));
++      if (merge) {
++        { ColdArm _ca(this); spillAll(false); }
++        em->get(la); em->get(val_l);
++        coldArgs(k, ((Bit32u) seg << 9) | ((Bit32u) sizeCode(size) << 12) |
++                    ((Bit32u)(kind == MK_WR_LIN ? NB_SLOW_WR_LIN : NB_SLOW_WR_VIRT) << 14));
++        em->call(fn(FNIDX(&nanobox_slow_wr), "llllii>v"));
++      } else {
 +      syncBefore(k, false); profSlow();
 +      const char *sig; uint32_t f = accessorWrite(kind, size, sig);
 +      em->i32c(seg);
 +      if (kind == MK_WR_LIN) em->get(la); else em->get(off_l);
 +      em->get(val_l); if (size != 8) em->op(I32_WRAP_I64);
-+      em->call(fn(f, sig));
++      em->call(fn(f, sig)); } }
 +    endb();
 +    needAsyncCheck = true;
 +  }
@@ -3626,13 +4028,13 @@ index 000000000..862847f72
 +  // probe, no write stamp, and nothing written into emulated RAM.
 +  void emitShadowPush(uint32_t rsp_l, uint32_t rip_l) {
 +    uint32_t idx = T32[3];
-+    em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_shadow_n), 2); em->set(idx);
++    zaddr(ADDR(nanobox_shadow_n)); em->mem(I32_LOAD, zoff(ADDR(nanobox_shadow_n)), 2); em->set(idx);
 +    em->get(idx); em->i32c(NB_SHADOW_MAX - 1); em->op(I32_LT_U);
 +    iff();
 +      em->get(idx); em->i32c(4); em->op(I32_SHL); em->i32c(ADDR(nanobox_shadow[0])); em->op(I32_ADD); em->set(idx);
 +      em->get(idx); em->get(rsp_l); em->mem(I64_STORE, 0, 3);
 +      em->get(idx); em->get(rip_l); em->mem(I64_STORE, 8, 3);
-+      em->i32c(0); em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_shadow_n), 2); em->i32c(1); em->op(I32_ADD); em->mem(I32_STORE, ADDR(nanobox_shadow_n), 2);
++      zaddr(ADDR(nanobox_shadow_n)); zaddr(ADDR(nanobox_shadow_n)); em->mem(I32_LOAD, zoff(ADDR(nanobox_shadow_n)), 2); em->i32c(1); em->op(I32_ADD); em->mem(I32_STORE, zoff(ADDR(nanobox_shadow_n)), 2);
 +    endb();
 +  }
 +  // RET: take the top entry when the guest's rsp is the one the matching CALL left behind. A
@@ -3642,17 +4044,17 @@ index 000000000..862847f72
 +  void emitShadowPop(unsigned k, uint32_t rsp_l, uint32_t out_l) {
 +    uint32_t idx = T32[3];
 +    em->i64c(0); em->set(out_l);
-+    em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_shadow_n), 2); em->set(idx);
++    zaddr(ADDR(nanobox_shadow_n)); em->mem(I32_LOAD, zoff(ADDR(nanobox_shadow_n)), 2); em->set(idx);
 +    em->get(idx);
 +    iff();
 +      em->get(idx); em->i32c(1); em->op(I32_SUB); em->set(idx);
-+      em->i32c(0); em->get(idx); em->mem(I32_STORE, ADDR(nanobox_shadow_n), 2);
++      zaddr(ADDR(nanobox_shadow_n)); em->get(idx); em->mem(I32_STORE, zoff(ADDR(nanobox_shadow_n)), 2);
 +      em->get(idx); em->i32c(4); em->op(I32_SHL); em->i32c(ADDR(nanobox_shadow[0])); em->op(I32_ADD); em->set(idx);
 +      em->get(idx); em->mem(I64_LOAD, 0, 3); em->get(rsp_l); em->op(I64_EQ);
 +      iff();
 +        em->get(idx); em->mem(I64_LOAD, 8, 3); em->set(out_l);
 +      els();
-+        em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_shadow_miss), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_shadow_miss), 3);
++        zaddr(ADDR(nanobox_shadow_miss)); zaddr(ADDR(nanobox_shadow_miss)); em->mem(I64_LOAD, zoff(ADDR(nanobox_shadow_miss)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(nanobox_shadow_miss)), 3);
 +      endb();
 +    endb();
 +    // no shadow entry (or a mismatch): the guest's own stack is the only source left
@@ -3663,11 +4065,15 @@ index 000000000..862847f72
 +        blk(I64);
 +      blk();
 +        tlbProbe(off_l, 8, 1, 0);
-+        pushHostAddr(off_l, nanobox_tlbfold != 0); em->mem(I64_LOAD, 0, 0);
-+        em->br(1);
++        { PhScope _pa(this, PH_ACCESS); pushHostAddr(off_l, nanobox_tlbfold != 0); em->mem(I64_LOAD, 0, 0);
++        em->br(1); }
 +      endb();
-+      syncBefore(k, false); profSlow();
-+      em->get(off_l); em->call(fn(FNIDX(&BX_CPU_C::stack_read_qword), "l>l"));
++      { PhScope _ps(this, PH_SLOW);
++      if (mergeSlow() && coldFits(k)) {
++        { ColdArm _ca(this); spillAll(false); }
++        em->get(off_l); coldArgs(k, (Bit32u) NB_SLOW_STACK_RD << 14);
++        em->call(fn(FNIDX(&nanobox_slow_rd), "lllii>l"));
++      } else { syncBefore(k, false); profSlow(); em->get(off_l); em->call(fn(FNIDX(&BX_CPU_C::stack_read_qword), "l>l")); } }
 +    endb();
 +    needAsyncCheck = true;
 +  }
@@ -3676,11 +4082,15 @@ index 000000000..862847f72
 +      blk();
 +        tlbProbe(off_l, 8, 4, 0, 8);
 +        if (!nanobox_tlbfold) emitWriteStamp(off_l, 8); else needAsyncCheck = true;
-+        pushHostAddr(off_l, nanobox_tlbfold != 0); em->get(val_l); em->mem(I64_STORE, 0, 0);
-+        em->br(1);
++        { PhScope _pa(this, PH_ACCESS); pushHostAddr(off_l, nanobox_tlbfold != 0); em->get(val_l); em->mem(I64_STORE, 0, 0);
++        em->br(1); }
 +      endb();
-+      syncBefore(k, false); profSlow();
-+      em->get(off_l); em->get(val_l); em->call(fn(FNIDX(&BX_CPU_C::stack_write_qword), "ll>v"));
++      { PhScope _ps(this, PH_SLOW);
++      if (mergeSlow() && coldFits(k)) {
++        { ColdArm _ca(this); spillAll(false); }
++        em->get(off_l); em->get(val_l); coldArgs(k, (Bit32u) NB_SLOW_STACK_WR << 14);
++        em->call(fn(FNIDX(&nanobox_slow_wr), "llllii>v"));
++      } else { syncBefore(k, false); profSlow(); em->get(off_l); em->get(val_l); em->call(fn(FNIDX(&BX_CPU_C::stack_write_qword), "ll>v")); } }
 +    endb();
 +    needAsyncCheck = true;
 +  }
@@ -3787,6 +4197,7 @@ index 000000000..862847f72
 +  }
 +  // condition code -> i32 (0/1) on stack
 +  void pushCond(unsigned cc) {
++    PhScope _ph(this, PH_FLAGS);
 +    fsc(FS_COND_TOTAL);
 +    if (cs.pfOp != PF_NONE) {
 +      fsc(FS_COND_PENDING);
@@ -3865,9 +4276,18 @@ index 000000000..862847f72
 +  // `cont`: the trace continues after this step (false: the caller returns right after it, so no
 +  // reloads / rebasing are emitted).
 +  void emitHandlerStep(unsigned k, bool last, bool cont = true) {
++    PhScope _p(this, PH_HANDLER);
 +    profCount(&nanobox_stats.link_fail[7]);
-+    if (outlineStep()) {
-+      spillAll(true);
++    if (mergeStep() && coldFits(k) && (!reg || curBlock < 32)) {
++      // sync + the handler + the "did it end the trace" test as ONE call: the emitted form is the
++      // instruction pointer, L_base, the icount base and two packed constants
++      { ColdArm _ca(this); spillAll(true); }
++      csInvalidate();
++      if (reg) em->get(L_regp); else em->get(L_i);
++      coldArgs(k, reg ? (((Bit32u) curBlock << 9) | 0x4000u) : 0u);
++      em->call(fn(FNIDX(&nanobox_helper_step_all), "illii>i"));
++    } else if (outlineStep()) {
++      { ColdArm _ca(this); spillAll(true); }
 +      pushVA(off[k + 1]); pushVA(off[k]); pushIcBase(); if (k) { em->i64c(k); em->op(I64_ADD); }
 +      em->call(fn(FNIDX(&nanobox_helper_step_pre), "lll>v"));
 +      csInvalidate();
@@ -3882,8 +4302,8 @@ index 000000000..862847f72
 +    em->call(fn(FNIDX(ins[k].execute1), "i>v"));
 +    // the handler committed (prev_rip/icount). If it ended the trace or raised an async event,
 +    // the chain would have returned to cpu_loop: so do we.
-+    em->i32c(0); em->mem(I32_LOAD8_U, ADDR(nanobox_trace_end), 0);
-+    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2);
++    zaddr(ADDR(nanobox_trace_end)); em->mem(I32_LOAD8_U, zoff(ADDR(nanobox_trace_end)), 0);
++    zaddr(ADDR(BX_CPU_THIS_PTR async_event)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR async_event)), 2);
 +    em->op(I32_OR);
 +    }
 +    if (last || !cont) { em->drop(); profCount(&nanobox_stats.link_fail[5]); }
@@ -3891,7 +4311,7 @@ index 000000000..862847f72
 +      iff(); profCount(&nanobox_stats.link_fail[5]); em->ret(); endb();
 +      // Handlers may advance icount by more than one (repeat() counts each iteration), so
 +      // rebase our "icount at trace entry" so that ic0 + j stays exact for the instructions after.
-+      em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3); em->i64c(k + 1); em->op(I64_SUB); em->set(L_ic0);
++      zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3); em->i64c(k + 1); em->op(I64_SUB); em->set(L_ic0);
 +      if (icDeferred()) { em->i32c((int32_t) loopTickN); em->set(L_tick); }   // L_ic0 is absolute again: restart the window
 +      // probe cache + alignment_check_mask AFTER the call (a POPF that flips EFLAGS.AC changes the
 +      // mask and continues the trace; loading it before the call left L_acm stale), then the
@@ -4175,10 +4595,10 @@ index 000000000..862847f72
 +        em->get(L_direct);
 +        iff();
 +          spillAll(true);
-+          em->i32c(0); em->get(t0); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
-+          em->i32c(0); em->get(t0); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
-+          em->i32c(0); pushIcBase(); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
-+          em->i32c(0); em->get(t0); em->mem(I64_STORE, ADDR(nanobox_dcall_ret), 3);
++          zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); em->get(t0); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
++          zaddr(ADDR(BX_CPU_THIS_PTR prev_rip)); em->get(t0); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR prev_rip)), 3);
++          zaddr(ADDR(BX_CPU_THIS_PTR icount)); pushIcBase(); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3);
++          zaddr(ADDR(nanobox_dcall_ret)); em->get(t0); em->mem(I64_STORE, zoff(ADDR(nanobox_dcall_ret)), 3);
 +          profCount(&nanobox_region_stats[30]);
 +          em->ret();
 +        endb();
@@ -4661,7 +5081,7 @@ index 000000000..862847f72
 +      uint32_t fu = (size == 32) ? FNIDX(&BX_CPU_C::read_virtual_ymmword) : FNIDX(&BX_CPU_C::read_virtual_xmmword);
 +      uint32_t fa = (size == 32) ? FNIDX(&BX_CPU_C::read_virtual_ymmword_aligned) : FNIDX(&BX_CPU_C::read_virtual_xmmword_aligned);
 +      if (alignMode == 2) {
-+        em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR mxcsr.mxcsr), 2); em->i32c((int32_t) MXCSR_MISALIGNED_EXCEPTION_MASK); em->op(I32_AND);
++        zaddr(ADDR(BX_CPU_THIS_PTR mxcsr.mxcsr)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR mxcsr.mxcsr)), 2); em->i32c((int32_t) MXCSR_MISALIGNED_EXCEPTION_MASK); em->op(I32_AND);
 +        iff(); em->i32c(seg); em->get(off_l); em->i32c(dstAddr); em->call(fn(fu, "ili>v"));
 +        els(); em->i32c(seg); em->get(off_l); em->i32c(dstAddr); em->call(fn(fa, "ili>v"));
 +        endb();
@@ -4887,15 +5307,15 @@ index 000000000..862847f72
 +      regGet(R_RCX); em->i64c(32); em->op(I64_SHR_U); em->i64c(0); em->op(I64_NE); em->br_if(0);
 +      regGet(R_RCX); em->op(I64_EQZ); em->br_if(0);
 +      // !get_DF() && !async_event
-+      em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR eflags), 2); em->i32c(0x400); em->op(I32_AND); em->br_if(0);
-+      em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2); em->br_if(0);
++      zaddr(ADDR(BX_CPU_THIS_PTR eflags)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eflags)), 2); em->i32c(0x400); em->op(I32_AND); em->br_if(0);
++      zaddr(ADDR(BX_CPU_THIS_PTR async_event)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR async_event)), 2); em->br_if(0);
 +      // byte count = ECX * g (a Bit32u in the interpreter: must not wrap)
 +      regGet(R_RCX); if (g > 1) { em->i64c(g); em->op(I64_MUL); } em->set(cnt);
 +      if (g > 1) { em->get(cnt); em->i64c(32); em->op(I64_SHR_U); em->i64c(0); em->op(I64_NE); em->br_if(0); }
 +      // whole count fits the rest of the destination page and the countdown
 +      regGet(R_RDI); em->set(la);
 +      em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->op(I64_EXTEND_I32_U); em->get(cnt); em->op(I64_ADD); em->i64c(0x1000); em->op(I64_GT_U); em->br_if(0);
-+      em->get(cnt); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GT_U); em->br_if(0);
++      em->get(cnt); zaddr(nanobox_pc_system_access::countdownAddr()); em->mem(I32_LOAD, zoff(nanobox_pc_system_access::countdownAddr()), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GT_U); em->br_if(0);
 +      // v2h_write_byte(rdi): DTLB hit with write permission; the page must be free of code marks
 +      // (the interpreter would decWriteStamp the whole page and go on: leave that to it)
 +      tlbProbe(la, 1, 4, 0, 0, true);
@@ -4936,7 +5356,7 @@ index 000000000..862847f72
 +     restore(s0);
 +     profCount(&nanobox_simd_stats[2]);
 +     emitHandlerStep(k, false, true);
-+     for (unsigned r = 0; r < 16; r++) if (sFast.regLoaded[r] && !cs.regLoaded[r]) { em->i32c(0); em->mem(I64_LOAD, regAddr(r), 3); em->set(L_reg[r]); cs.regLoaded[r] = true; }
++     for (unsigned r = 0; r < 16; r++) if (sFast.regLoaded[r] && !cs.regLoaded[r]) { zaddr(regAddr(r)); em->mem(I64_LOAD, zoff(regAddr(r)), 3); em->set(L_reg[r]); cs.regLoaded[r] = true; }
 +     if (sFast.lfLoaded && !cs.lfLoaded) lfLoad();
 +     bool acmBoth = sFast.acmLoaded && cs.acmLoaded, clearedBoth = sFast.cleared && cs.cleared;
 +     restore(sFast);   // dirty set: the fast path's (a superset is safe here: locals == memory on the handler path)
@@ -5300,26 +5720,26 @@ index 000000000..862847f72
 +    } else {
 +      em->get(L_ic0); em->i64c((Bit64s)(k + 1)); em->op(I64_ADD); em->set(now);
 +    }
-+    em->get(now); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount_last_sync), 3); em->op(I64_SUB); em->op(I32_WRAP_I64); em->set(delta);
++    em->get(now); zaddr(ADDR(BX_CPU_THIS_PTR icount_last_sync)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount_last_sync)), 3); em->op(I64_SUB); em->op(I32_WRAP_I64); em->set(delta);
 +    // if (delta >= currCountdown) -> exit (cpu_loop runs the timers)
-+    em->get(delta); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->op(I32_GE_U);
++    em->get(delta); zaddr(nanobox_pc_system_access::countdownAddr()); em->mem(I32_LOAD, zoff(nanobox_pc_system_access::countdownAddr()), 2); em->op(I32_GE_U);
 +    { CacheState s = snapshot(); iff(); coldExit = true; pushVA(0); exitWithRipOnStack(k); coldExit = false; endb(); restore(s); }
 +    // currCountdown -= delta; icount_last_sync = now
-+    em->i32c(0); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->get(delta); em->op(I32_SUB); em->mem(I32_STORE, nanobox_pc_system_access::countdownAddr(), 2);
-+    em->i32c(0); em->get(now); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount_last_sync), 3);
++    zaddr(nanobox_pc_system_access::countdownAddr()); zaddr(nanobox_pc_system_access::countdownAddr()); em->mem(I32_LOAD, zoff(nanobox_pc_system_access::countdownAddr()), 2); em->get(delta); em->op(I32_SUB); em->mem(I32_STORE, zoff(nanobox_pc_system_access::countdownAddr()), 2);
++    zaddr(ADDR(BX_CPU_THIS_PTR icount_last_sync)); em->get(now); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR icount_last_sync)), 3);
 +    // if (async_event) -> exit
-+    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2);
++    zaddr(ADDR(BX_CPU_THIS_PTR async_event)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR async_event)), 2);
 +    { CacheState s = snapshot(); iff(); coldExit = true; pushVA(0); exitWithRipOnStack(k); coldExit = false; endb(); restore(s); }
 +    // if (RIP + eipPageBias >= eipPageWindowSize) -> exit (cpu_loop re-prefetches)
-+    em->get(L_base); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR eipPageBias), 3); em->op(I64_ADD);
-+    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR eipPageWindowSize), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GE_U);
++    em->get(L_base); zaddr(ADDR(BX_CPU_THIS_PTR eipPageBias)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eipPageBias)), 3); em->op(I64_ADD);
++    zaddr(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GE_U);
 +    { CacheState s = snapshot(); iff(); coldExit = true; pushVA(0); exitWithRipOnStack(k); coldExit = false; endb(); restore(s); }
 +    if (nanobox_dbg_mode) {
 +      // divergence finder: present the same state the interpreter has at a (post-sync) trace boundary
 +      spillAll(false);
-+      em->i32c(0); pushVA(0); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
-+      em->i32c(0); pushVA(0); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
-+      em->i32c(0); em->get(now); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++      zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); pushVA(0); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
++      zaddr(ADDR(BX_CPU_THIS_PTR prev_rip)); pushVA(0); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR prev_rip)), 3);
++      zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->get(now); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3);
 +      em->i32c((int32_t)(uintptr_t) e); em->call(fn(FNIDX(&nanobox_helper_dbg_loop), "i>v"));
 +    }
 +    // bookkeeping cpu_loop would have done at the top of its loop
@@ -5327,8 +5747,8 @@ index 000000000..862847f72
 +    // wasm instructions the fib loop executes per iteration. Keep them for the default engine (whose
 +    // trace count the batch heuristics and the gate read) and at level 3, drop them otherwise.
 +    if (!aotRelaxed() || nanobox_jit_level >= 3) {
-+      em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_stats.traces), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_stats.traces), 3);
-+      em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_stats.jit_loopbacks), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_stats.jit_loopbacks), 3);
++      zaddr(ADDR(nanobox_stats.traces)); zaddr(ADDR(nanobox_stats.traces)); em->mem(I64_LOAD, zoff(ADDR(nanobox_stats.traces)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(nanobox_stats.traces)), 3);
++      zaddr(ADDR(nanobox_stats.jit_loopbacks)); zaddr(ADDR(nanobox_stats.jit_loopbacks)); em->mem(I64_LOAD, zoff(ADDR(nanobox_stats.jit_loopbacks)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(nanobox_stats.jit_loopbacks)), 3);
 +    }
 +    em->get(now); em->set(L_ic0);
 +    if (tick <= 1) emitLoopHeaderConform();   // (tick > 1 ran it above the countdown)
@@ -5692,12 +6112,16 @@ index 000000000..862847f72
 +    // pass 1: discover which registers/flags the trace touches (loop header set, region block entry
 +    // states) and how many exit-chain positions each body needs
 +    passNo = 1; nedges = 0;
++    for (unsigned j = 0; j <= (unsigned) BX_MAX_TRACE_LENGTH; j++) tplWrap[j] = 0;
++    usedAcm = usedUpl = usedInlineProbe = false;
++    usedAcmTotal = usedUplTotal = usedInlineProbeTotal = true;   // pass 1 emits everything
 +    siteTags = false; nsiteTotal = 0; ninvalTotal = 0; nElig = 0;
 +    for (unsigned j = 0; j <= NB_REGION_MAX_BLOCKS; j++) blockInval[j] = blockElig[j] = 0;
 +    if (!compilePass()) return false;
 +    // pass 1 counted the memory sites and the mid-function invalidations and recorded the CFG:
 +    // pass 2 declares one (tag, host) pair per ELIGIBLE site and poisons exactly those.
 +    nsiteTotal = nsite; ninvalTotal = ninval;
++    usedAcmTotal = usedAcm; usedUplTotal = usedUpl; usedInlineProbeTotal = usedInlineProbe;
 +    computeEligibleBlocks();
 +    passNo = 2;
 +    siteTags = siteWanted();
@@ -5711,6 +6135,7 @@ index 000000000..862847f72
 +      regionPass2 = true;
 +      setBlock(0);           // the prologue derives L_base from block 0's first instruction
 +      if (!compilePass()) return false;
++      nanobox_phase_flush(true);
 +      return true;
 +    }
 +    if (loopWanted) {
@@ -5724,6 +6149,7 @@ index 000000000..862847f72
 +      depth = 0; loopDepth = -1; bodyDepth = -1;
 +      if (!compilePass()) return false;
 +    }
++    nanobox_phase_flush(true);
 +    return true;
 +  }
 +  bool loopWanted;
@@ -5753,6 +6179,8 @@ index 000000000..862847f72
 +    S_tagBase = S_hostBase = 0;
 +    if (siteTags) { S_tagBase = em->addLocal(I64); for (unsigned i = 1; i < nElig; i++) em->addLocal(I64); }
 +    L_upl = em->addLocal(I32);
++    L_pob = em->addLocal(I32);
++    L_cpu = em->addLocal(I32);
 +    L_tick = em->addLocal(I32);   // AOT: iterations left before the next full back-edge sync
 +    L_direct = L_dcs = L_dcf = 0xffffffffu;   // direct calls: declared on first use (see unitHasRet / dcallLocals)
 +    for (unsigned t = 0; t < 6; t++) T32[t] = em->addLocal(I32);
@@ -5797,8 +6225,8 @@ index 000000000..862847f72
 +  // what a tail call / cpu_loop hands over: the committed RIP and icount out of the CPU struct
 +  void pushEntryStateFromMem() {
 +    if (!dcallSig()) return;
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
++    zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3);
 +  }
 +  // push the probe-cache arguments of a tail call (locals when the cache travels, else the poison)
 +  void pushProbeArgs() {
@@ -5818,16 +6246,22 @@ index 000000000..862847f72
 +  void emitLinkFn() {
 +    m.funcTypeIdx = jitFuncType(m);
 +    Emit emit(m); em = &emit;
++    phInit();
 +    declareLocals();
++    if (cpuBase()) { em->i32c((int32_t) nbCpuBase()); em->set(L_cpu); }
 +    emitLinkEpilogue();
 +    em->ret();
++    phFinish(); nanobox_phase_flush(true);
 +  }
 +  bool compilePass() {
 +    loopWanted = false;
 +    nsite = 0; ninval = 0; nsiteElig = 0;
 +    m.funcTypeIdx = jitFuncType(m);
 +    Emit emit(m); em = &emit;
++    phInit();
 +    declareLocals();
++    phPush(PH_PROLOGUE);
++    if (cpuBase()) { em->i32c((int32_t) nbCpuBase()); em->set(L_cpu); }
 +    invalidateAll();
 +    // direct calls: bit 0 of the argument says "a translated caller called you and is waiting on the
 +    // host stack" -- only then may a RET in this function compile to a wasm `return`
@@ -5840,7 +6274,7 @@ index 000000000..862847f72
 +    // prologue: base = RIP - ilen(0); ic0 = icount; upl = user_pl
 +    // (region: the call argument is an entry descriptor {region, block, delta}: base = RIP - delta,
 +    //  the dispatch starts at `block`)
-+    if (dcallSig()) em->get(P_rip()); else { em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3); }
++    if (dcallSig()) em->get(P_rip()); else { zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3); }
 +    if (reg) {
 +      em->get(L_i); em->mem(I32_LOAD, 0, 2); em->set(L_regp);
 +      em->get(L_i); em->mem(I32_LOAD, 4, 2); em->set(L_cur);
@@ -5848,8 +6282,9 @@ index 000000000..862847f72
 +    } else {
 +      em->i64c(ins[0].ilen()); em->op(I64_SUB); em->set(L_base);
 +    }
-+    if (dcallSig()) em->get(P_ic0()); else { em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3); } em->set(L_ic0);
-+    em->i32c(0); em->mem(I32_LOAD8_U, ADDR(BX_CPU_THIS_PTR user_pl), 0); em->set(L_upl);
++    if (dcallSig()) em->get(P_ic0()); else { zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3); } em->set(L_ic0);
++    if (needUpl()) { zaddr(ADDR(BX_CPU_THIS_PTR user_pl)); em->mem(I32_LOAD8_U, zoff(ADDR(BX_CPU_THIS_PTR user_pl)), 0); em->set(L_upl); }
++    if (useProbeBase()) { em->i32c((int32_t) ADDR(nanobox_probe_out)); em->set(L_pob); }   // 6 bytes once; 3 saved at every refill
 +    if (aotRelaxed()) { em->i32c((int32_t) nanobox_jit_aot_tick); em->set(L_tick); }   // two instructions once, per function entry
 +    if (reg) {
 +      // first execution of the entry block since the attach: mark the reference write stamps as the
@@ -5890,7 +6325,7 @@ index 000000000..862847f72
 +      // pending async event (e.g. right after STI) executes exactly one instruction. Templates
 +      // only check after instructions that can raise events, so handle that case up front by
 +      // running the first instruction through its handler (which returns after one step).
-+      em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2);
++      zaddr(ADDR(BX_CPU_THIS_PTR async_event)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR async_event)), 2);
 +      CacheState s0 = snapshot();
 +      iff();
 +      if (reg) {
@@ -5910,6 +6345,7 @@ index 000000000..862847f72
 +      endb();
 +      restore(s0);
 +    }
++    phPop();
 +    if (hasSelfBranch) {
 +      loopWanted = true;
 +      // loop header: header registers/flags are loaded here and considered dirty (spillLive: only
@@ -5920,7 +6356,7 @@ index 000000000..862847f72
 +      else cs.pfRuntime = (blockFlagEntry[0] == FE_SLOW);   // the back edge may leave a pending kind in L_pfk (0 on the first iteration: locals start at 0)
 +    }
 +    if (reg) {
-+      if (nanobox_dbg_mode) { em->i32c(0); em->get(L_regp); em->get(L_cur); em->i32c(4); em->op(I32_MUL); em->op(I32_ADD); em->mem(I32_LOAD, REGION_OFF(entptr[0]), 2); em->mem(I32_STORE, ADDR(nanobox_dbg_cur_entry), 2); }
++      if (nanobox_dbg_mode) { zaddr(ADDR(nanobox_dbg_cur_entry)); em->get(L_regp); em->get(L_cur); em->i32c(4); em->op(I32_MUL); em->op(I32_ADD); em->mem(I32_LOAD, REGION_OFF(entptr[0]), 2); em->mem(I32_STORE, zoff(ADDR(nanobox_dbg_cur_entry)), 2); }
 +      if (regionPass2) {
 +        // region entry: the entry block expects its D_j in locals; entry block is dynamic -> one
 +        // conform stub per block (each ends by falling into the dispatch loop with L_cur set)
@@ -5968,15 +6404,16 @@ index 000000000..862847f72
 +    }
 +    if (useTemplates) {
 +      endb(); bodyDepth = -1;   // $body
++      PhScope _pt(this, PH_TAIL);
 +      // common tail: RIP/prev_rip/icount from the exit, then link (dbg mode: back to cpu_loop)
-+      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
-+      em->i32c(0); em->get(T[7]); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
-+      em->i32c(0); em->get(L_ic0); em->get(L_xic); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++      zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); em->get(T[7]); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
++      zaddr(ADDR(BX_CPU_THIS_PTR prev_rip)); em->get(T[7]); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR prev_rip)), 3);
++      zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->get(L_ic0); em->get(L_xic); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3);
 +      if (linkOK) {
 +        if (flagsProbeMem() && nanobox_tlbfold) {
-+          em->i32c(0); em->get(C_tagR); em->mem(I64_STORE, ADDR(nanobox_probe_mem[0]), 3);
-+          em->i32c(0); em->get(C_tagW); em->mem(I64_STORE, ADDR(nanobox_probe_mem[1]), 3);
-+          em->i32c(0); em->get(C_host); em->mem(I32_STORE, ADDR(nanobox_probe_mem[2]), 2);
++          zaddr(ADDR(nanobox_probe_mem[0])); em->get(C_tagR); em->mem(I64_STORE, zoff(ADDR(nanobox_probe_mem[0])), 3);
++          zaddr(ADDR(nanobox_probe_mem[1])); em->get(C_tagW); em->mem(I64_STORE, zoff(ADDR(nanobox_probe_mem[1])), 3);
++          zaddr(ADDR(nanobox_probe_mem[2])); em->get(C_host); em->mem(I32_STORE, zoff(ADDR(nanobox_probe_mem[2])), 2);
 +        }
 +        em->i32c(0); pushProbeArgs(); pushEntryStateFromMem();
 +        if (nanobox_jit_linkdirect && nanobox_link_fn && !dcallSig()) em->return_call(fn(nanobox_link_fn, shortSig() ? "illi>v" : "illlllliiii>v"));   // direct tail call to the imported link function (same type as ours)
@@ -5984,6 +6421,7 @@ index 000000000..862847f72
 +      }
 +      else em->ret();
 +    }
++    phFinish();
 +    return true;
 +  }
 +  // ---- merged stack runs (experiment, nanobox_jit_merge): N consecutive register pushes (or pops)
@@ -6086,14 +6524,20 @@ index 000000000..862847f72
 +        uint32_t mark = m.code.n;
 +        if (nanobox_jit_level >= 3) { // profiling mode: count executed inline instructions per opcode
 +          Bit64u *ctr = &nanobox_dyn_inline[ins[k].getIaOpcode()];
-+          em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(*ctr), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(*ctr), 3);
++          zaddr(ADDR(*ctr)); zaddr(ADDR(*ctr)); em->mem(I64_LOAD, zoff(ADDR(*ctr)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(*ctr)), 3);
 +        }
 +        // each template runs inside its own block so it can `br` out of itself
 +        // (used by the CL-count shifts when count == 0)
 +        uint32_t markTpl = m.code.n;   // after the profiling counter: the template's own bytes
-+        blk();
++        // the wrapper block exists so a template can `br` out of itself; almost none do, and 3
++        // bytes at every guest instruction is 4 % of everything emitted (nanobox_jit_outline bit 15).
++        // Pass 1 watches whether anything branched to it (or past it) and pass 2 leaves it out where
++        // nothing did -- relative branch depths inside are all computed from `depth`, so they follow.
++        const unsigned wk = (k < BX_MAX_TRACE_LENGTH) ? k : (unsigned) BX_MAX_TRACE_LENGTH;
++        const bool wrap = !wrapElide() || passNo == 1 || tplWrap[wk];
++        if (wrap) { PhScope _pw(this, PH_WRAP); blk(); em->watchOpen(); }
 +        done = emitTemplate(k, last);
-+        endb();
++        if (wrap) { PhScope _pw(this, PH_WRAP); if (em->watchClose() && passNo == 1) tplWrap[wk] = 1; endb(); }
 +        if (!done) m.code.n = mark; // template declined before emitting anything: drop the wrapper
 +        if (done) {
 +          nanobox_inline_count[ins[k].getIaOpcode()]++;
@@ -6104,7 +6548,8 @@ index 000000000..862847f72
 +            // `last` is exempt: exitFallthroughOrTransition() below commits the very same state
 +            // and then tests async_event itself (link epilogue / emitTransition), so the check
 +            // here would be a duplicate of the next one on an identical state.
-+            em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2);
++            PhScope _pa(this, PH_ASYNC);
++            zaddr(ADDR(BX_CPU_THIS_PTR async_event)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR async_event)), 2);
 +            CacheState s = snapshot();
 +            iff(); coldExit = true; exitFallthrough(k); coldExit = false; endb();
 +            restore(s);
@@ -6114,7 +6559,7 @@ index 000000000..862847f72
 +      if (!done) {
 +        if (nanobox_jit_level >= 3) {
 +          Bit64u *ctr = &nanobox_dyn_fallback[ins[k].getIaOpcode()];
-+          em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(*ctr), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(*ctr), 3);
++          zaddr(ADDR(*ctr)); zaddr(ADDR(*ctr)); em->mem(I64_LOAD, zoff(ADDR(*ctr)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(*ctr)), 3);
 +        }
 +        emitHandlerStep(k, last);
 +        nanobox_fallback_count[ins[k].getIaOpcode()]++;
@@ -7514,10 +7959,10 @@ index 000000000..2428a997b
 +#endif
 diff --git a/bochs/nanobox_wasm.h b/bochs/nanobox_wasm.h
 new file mode 100644
-index 000000000..e695d4ffb
+index 000000000..159f6d17a
 --- /dev/null
 +++ b/bochs/nanobox_wasm.h
-@@ -0,0 +1,511 @@
+@@ -0,0 +1,520 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox: a tiny WebAssembly binary emitter used by the trace JIT.
 +//
@@ -7968,7 +8413,7 @@ index 000000000..e695d4ffb
 +public:
 +  Module &m; Buf &c;
 +  uint32_t nlocals; // total locals incl. params
-+  Emit(Module &mod) : m(mod), c(mod.code), nlocals(mod.nparams) {}
++  Emit(Module &mod) : m(mod), c(mod.code), nlocals(mod.nparams), nest(0), watch(-1), watchHit(false) {}
 +
 +  // wasm allows (count, type) runs: declaring 54 locals one at a time costs 108 bytes per
 +  // function, grouping the consecutive same-type ones costs a handful
@@ -8008,13 +8453,22 @@ index 000000000..e695d4ffb
 +  void return_call(uint32_t f) { c.b8(RETURN_CALL); c.uleb(f); }
 +  void call_indirect(uint32_t typeIdx) { c.b8(CALL_INDIRECT); c.uleb(typeIdx); c.uleb(0); }
 +  void return_call_indirect(uint32_t typeIdx) { c.b8(RETURN_CALL_INDIRECT); c.uleb(typeIdx); c.uleb(0); }
-+  void block(ValType t = VOID) { c.b8(BLOCK); c.b8(t); }
-+  void loop(ValType t = VOID) { c.b8(LOOP); c.b8(t); }
-+  void if_(ValType t = VOID) { c.b8(IF); c.b8(t); }
++  // label-depth bookkeeping so a caller can ask "did anything branch OUT of the label I opened
++  // here?" (the per-instruction template wrapper is only needed when something does)
++  int nest;                 // labels open at this point
++  int watch;               // -1 = off, else the nest level of the watched label
++  bool watchHit;
++  void watchOpen() { watch = nest; watchHit = false; }
++  bool watchClose() { bool h = watchHit; watch = -1; return h; }
++  // conservative: a branch to the watched label OR to anything enclosing it keeps the label
++  void noteBr(uint32_t d) { if (watch >= 0 && nest - (int) d <= watch) watchHit = true; }
++  void block(ValType t = VOID) { c.b8(BLOCK); c.b8(t); nest++; }
++  void loop(ValType t = VOID) { c.b8(LOOP); c.b8(t); nest++; }
++  void if_(ValType t = VOID) { c.b8(IF); c.b8(t); nest++; }
 +  void else_() { c.b8(ELSE); }
-+  void end() { c.b8(END); }
-+  void br(uint32_t d) { c.b8(BR); c.uleb(d); }
-+  void br_if(uint32_t d) { c.b8(BR_IF); c.uleb(d); }
++  void end() { c.b8(END); nest--; }
++  void br(uint32_t d) { noteBr(d); c.b8(BR); c.uleb(d); }
++  void br_if(uint32_t d) { noteBr(d); c.b8(BR_IF); c.uleb(d); }
 +  void ret() { c.b8(RETURN); }
 +  void unreachable() { c.b8(UNREACHABLE); }
 +  void drop() { c.b8(DROP); }
@@ -8023,7 +8477,7 @@ index 000000000..e695d4ffb
 +  void try_table_catch_all_ref(uint32_t labelDepth) { c.b8(TRY_TABLE); c.b8(VOID); c.uleb(1); c.b8(0x03); c.uleb(labelDepth); }
 +  void throw_ref() { c.b8(THROW_REF); }
 +  // br_table: n targets + default
-+  void br_table(const uint32_t *targets, uint32_t n, uint32_t def) { c.b8(BR_TABLE); c.uleb(n); for (uint32_t i = 0; i < n; i++) c.uleb(targets[i]); c.uleb(def); }
++  void br_table(const uint32_t *targets, uint32_t n, uint32_t def) { for (uint32_t i = 0; i < n; i++) noteBr(targets[i]); noteBr(def); c.b8(BR_TABLE); c.uleb(n); for (uint32_t i = 0; i < n; i++) c.uleb(targets[i]); c.uleb(def); }
 +};
 +
 +} // namespace nbw
