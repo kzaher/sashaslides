@@ -1340,3 +1340,65 @@ That also makes the sustained-typing test the right iteration signal for the sta
 ~40 s and it separates policies far better than boot time, and a fix that lowers boot while keeping
 the stalls is not a fix. The bar for "usable once running" is what the shipping engine already does:
 no keystroke over ~60 ms.
+
+### S.8 What the 600 MB is made of, and why density work did not shrink it (2026-08-19)
+
+Static bytes per opcode over a codex session (`--tpl-bytes`, 925.3 MB emitted over 3,378,158 compiled
+instances -- more than the 600 MB live at any moment because code is released and re-emitted):
+
+| instruction | total | share | instances | bytes/site |
+|---|---|---|---|---|
+| `CALL_Jq` | 171.1 MB | **18.5 %** | 161,458 | **1,060** |
+| `MOV_GqEq` (load) | 139.2 MB | 15.0 % | 358,800 | 388 |
+| `MOV_EqGq` (store) | 106.0 MB | 11.5 % | 472,618 | 224 |
+| `POP_Eq` | 56.5 MB | 6.1 % | 139,324 | 405 |
+| `PUSH_Eq` | 40.0 MB | 4.3 % | 92,038 | 435 |
+| `CALL_Eq` (indirect) | 38.6 MB | 4.2 % | 40,962 | 942 |
+| `RET_Op64` | 32.9 MB | 3.6 % | 42,838 | 769 |
+| `JZ/JNZ/JMP` | ~63 MB | 6.8 % | ~348 k | 127-226 |
+| SSE moves | ~49 MB | 5.3 % | ~112 k | 407-460 |
+
+**Call/stack machinery 36.7 %, memory-access MOVs ~30 %: two thirds of all emitted code.** The density
+work (S, S.4) attacked arithmetic and loop overhead, which is a small share of the bytes -- that is why
+the fib loop shrank 4x and the kernel artifact only 7 %. `CALL_Jq` also GREW with direct calls
+(825 -> 1,060 B/site): the inline cache, resolver and fallback are inlined at all 161 k sites.
+
+Each of these is hundreds of bytes for one guest instruction because every memory-touching site inlines
+BOTH paths: the TLB probe + access fast path, and the full slow path (spill everything, call the C++
+helper, reload).
+
+### S.9 Instruction count is a poor proxy for time (measured, 2026-08-19)
+
+Passing `direct`/`user_pl`/`alignment_check_mask` and the six ABI registers as wasm PARAMETERS
+(flags bits 11|12, default off) cut the callee from **46 to 28 executed instructions (-39 %)** and the
+three units of a call+ret from 180 to 128 -- and **wall clock did not move**: 21.9/21.1 ns against
+22.6/20.5, inside the machine's own spread (the same shipped config measured 0.93, 1.13 and 1.30
+ns/iteration on three consecutive rounds of the fib loop). A control settles it: a 13-parameter
+signature with NO entry ABI measures the same as the 6- and 15-parameter builds, so neither parameter
+count nor deleted prologue work is worth anything here. Those instructions are register moves and
+L1-resident field loads that predict perfectly; ten of them cost less than one mispredict.
+
+**Consequence: stop optimising for executed instruction count.** What is left to attack is real memory
+work -- the guest stack access in CALL/RET (a full TLB probe plus write-stamp check each), the caller's
+register spill, and the indirect call -- measured in wall clock at n = 1e9.
+
+Bug found on the way, worth remembering: `nbw::FuncType::params` was `ValType[12]`; a 15-parameter
+signature overflowed it silently, the type section came out malformed, V8 rejected EVERY module with
+`invalid value type 0x0 @+27`, the JIT fell back to the interpreter, and the run presented as a HANG
+rather than a compile error.
+
+### S.10 The typing stalls are synchronous compilation, not interrupt latency (2026-08-19)
+
+Two hypotheses, one run each, artifact loaded in all three (`work/prof/spike.sh`):
+
+| | median | p90 | max | keys > 100 ms |
+|---|---|---|---|---|
+| AOT, default (async check every 64 iterations) | 26 ms | 421 ms | 1504 ms | 4 |
+| interrupts checked EVERY iteration (`NANOBOX_AOT_TICK=1`) | 34 ms | 235 ms | **1404 ms** | 3 |
+| **compile only code that repeats (`NANOBOX_THRESHOLD=2000`)** | **19 ms** | **45 ms** | **68 ms** | **0** |
+
+Checking interrupts 64x more often changes nothing; compiling only repeated code removes the stalls
+entirely and matches the shipping engine (18 ms). So the interactive stalls and the 33 s boot are one
+policy -- compile-everything-on-first-touch -- and the fix is either to raise the threshold (giving up
+"no interpreted code") or to make a precompiled artifact ATTACHABLE rather than recompilable, which is
+the deterministic-former work.

@@ -87,8 +87,10 @@ for (let i = 1; i < argv.length; i++) {
   else if (a === "--aot-script") opts.aotScript = v();         // AOT precompilation (tools/aot-precompile.mjs): ESM file whose session({...}) runs INSIDE the engine's poll hook (between traces) once the guest printed the --aot-at marker; the run finishes right after it (bundle written by --jit-bundle-out)
   else if (a === "--aot-args") opts.aotArgs = v();             // JSON passed to session()
   else if (a === "--aot-at") opts.aotAt = v();
+  else if (a === "--aot-mode-at") opts.aotModeAt = v();        // switch INTO AOT mode partway through the run: marker label ("@@NANOBOX-DUMP:LABEL@@") or "expect" (when --expect fires). Boot on the trace JIT (one-shot code is cheaper interpreted, TASKS.md R.5), run the session compiled. The switch releases every translation compiled before it (the two modes use different wasm signatures for a compiled function, so they cannot coexist in one table).
   else if (a === "--aot-fnmap") opts.aotFnmap = v();
-  else if (a === "--aot-keys") opts.aotKeys = v();             // dump (entry address, content key, blocks) for every region formed — diff offline vs runtime (TASKS.md S.3)           // System.map: function boundaries for the AOT former (region = the containing function)                 // marker label that arms the session (default "aot": the guest prints @@NANOBOX-DUMP:aot@@)
+  else if (a === "--aot-keys") opts.aotKeys = v();
+  else if (a === "--tpl-bytes") opts.tplBytes = v();           // where the emitted bytes are: total template bytes per opcode (static, no execution counts needed)             // dump (entry address, content key, blocks) for every region formed — diff offline vs runtime (TASKS.md S.3)           // System.map: function boundaries for the AOT former (region = the containing function)                 // marker label that arms the session (default "aot": the guest prints @@NANOBOX-DUMP:aot@@)
   else { console.error("unknown option " + a); process.exit(2); }
 }
 if (opts.checkpointOut && !opts.checkpointAt) { console.error("--checkpoint-out needs --checkpoint-at LABEL"); process.exit(2); }
@@ -103,6 +105,7 @@ const wasmBytes = fs.readFileSync(opts.wasm);
 await import("../web/jit-bundle.js"); // NanoboxJitBundle: bundle file format + engine tag (shared with the browser host)
 const aotMod = opts.aotScript ? await import((await import("node:url")).pathToFileURL(path.resolve(opts.aotScript)).href) : null; // --aot-script
 let aotArmed = false, aotDone = false, aotResult = null;
+let aotModeArmed = false, aotModeDone = false, aotModeMs = 0, aotModeAtMs = 0;
 await import("../web/native/hostchan.js"); // NanoboxHostChan: /dev/hvc1 <-> JS byte stream
 await import("../web/native/proto.js"); await import("../web/native/hcring.js"); await import("../web/native/guest.js"); // system-node RPC client
 import { Worker } from "worker_threads";
@@ -204,12 +207,17 @@ function takeDump(label) {
     if (ex.nanobox_jit_region_stat) rec.regions = { formed: ex.nanobox_jit_region_stat(0), blocks: ex.nanobox_jit_region_stat(1), compiled: ex.nanobox_jit_region_stat(2), cacheHits: ex.nanobox_jit_region_stat(3) };
     if (ex.nanobox_stat) rec.stats = { loops: ex.nanobox_stat(0), longjmps: ex.nanobox_stat(1), traces: ex.nanobox_stat(2), jitTraces: ex.nanobox_stat(3), jitCompiled: ex.nanobox_stat(4), loopbacks: ex.nanobox_stat(5), links: ex.nanobox_stat(6), slow: ex.nanobox_stat(7), linkFail: [8,9,10,11,12,13,14,15].map((i) => ex.nanobox_stat(i)), cache: ex.nanobox_jit_cache_stat ? [ex.nanobox_jit_cache_stat(0), ex.nanobox_jit_cache_stat(1), ex.nanobox_jit_cache_stat(2)] : null };
   }
+  // compile volume so far: splits "what the boot cost" from "what the session cost" (the AOT startup
+  // work needs both -- a policy that moves the compiles from the boot into the interactive path is
+  // not a fix, TASKS.md T)
+  rec.jit = { fns: jitState.installed, mb: +(jitState.bytes / 1e6).toFixed(1), compileMs: +jitState.compileMs.toFixed(0) };
   if (ex.nanobox_mem_block_ptr && !opts.noHash) Object.assign(rec, hashGuestRam(opts.dumpDir ? path.join(opts.dumpDir, `${String(markerCount).padStart(3, "0")}-${label}.ram`) : null));
   markerCount++;
   dumps.push(rec);
   console.error(`\n[harness] DUMP ${JSON.stringify(rec)}`);
   if (opts.checkpointOut && label === opts.checkpointAt) armCheckpoint(label);
   if (aotMod && label === (opts.aotAt || "aot")) { aotArmed = true; console.error(`[harness] AOT session armed at marker ${label} (runs at the next poll, between traces)`); }
+  if (opts.aotModeAt && !aotModeDone && label === opts.aotModeAt) { aotModeArmed = true; console.error(`[harness] AOT mode armed at marker ${label} (switches at the next poll, between traces)`); }
 }
 // SHA-256 of all guest RAM in guest-physical order (unallocated blocks hash as zeros), optionally
 // written to `file`; also the block map's own hash. Shared by markers and checkpoint verification.
@@ -318,6 +326,10 @@ imp.poll_oneoff = (in_ptr, out_ptr, nsubs, nevents_ptr) => {
   view.setUint32(nevents_ptr, events.length, true);
   if (opts.stats) { const now = performance.now(); if (now - lastStat > 5000) { lastStat = now; progress(); } }
   if (opts.watch != null) watchCheck();
+  // --aot-mode-at: the switch releases compiled code, so it must run with no JIT frame on the stack.
+  // poll_oneoff is reached from Bochs' timer handlers after a trace returned to cpu_loop, which is
+  // the same "between traces" point --aot-script uses.
+  if (aotModeArmed && !aotModeDone) { aotModeDone = true; aotModeArmed = false; applyAotMode(1); }
   if (aotArmed && !aotDone) {
     // --aot-script: the precompile session runs here, between traces (poll_oneoff is reached from
     // Bochs' timer handlers after a trace returned to cpu_loop), then the run ends: the modules the
@@ -625,7 +637,9 @@ function installJitHost(inst) {
     // AOT mode (TASKS.md R): NANOBOX_AOT=1 -> function-scope static regions, compile on first touch, relaxed
     // boundaries, direct conditions; identity with the reference engine is NOT expected in this mode.
     // NANOBOX_FLAGS=mask overrides nanobox_jit_flags afterwards (A/B of the direct-condition bits etc.)
-    if (process.env.NANOBOX_AOT != null && ex.nanobox_set_jit_aot) { ex.nanobox_set_jit_aot(Number(process.env.NANOBOX_AOT)); console.error(`[harness] JIT AOT mode ${process.env.NANOBOX_AOT}`); }
+    // --aot-mode-at: boot on the trace JIT and switch into AOT mode at a marker (see applyAotMode)
+    if (opts.aotModeAt) console.error(`[harness] AOT mode DEFERRED to marker ${opts.aotModeAt} (booting on the trace JIT)`);
+    else if (process.env.NANOBOX_AOT != null && ex.nanobox_set_jit_aot) { ex.nanobox_set_jit_aot(Number(process.env.NANOBOX_AOT)); console.error(`[harness] JIT AOT mode ${process.env.NANOBOX_AOT}`); }
     if (process.env.NANOBOX_FLAGS != null && ex.nanobox_set_jit_flags) { ex.nanobox_set_jit_flags(Number(process.env.NANOBOX_FLAGS)); console.error(`[harness] JIT flags mask ${process.env.NANOBOX_FLAGS}`); }
     // AOT mode sets threshold 1 (compile at the first touch); the offline translators need the
     // opposite -- the JIT on so the session can drive it, but the BOOT compiling nothing, or the
@@ -654,7 +668,10 @@ function installJitHost(inst) {
     if (opts.aotKeys && ex.nanobox_keylog_enable) ex.nanobox_keylog_enable(1);
     if (process.env.NANOBOX_THRESHOLD != null && ex.nanobox_set_jit) { ex.nanobox_set_jit(lvl, Number(process.env.NANOBOX_THRESHOLD)); console.error(`[harness] JIT threshold ${process.env.NANOBOX_THRESHOLD} (after AOT mode)`); }
     // AOT-mode formation knobs (A/B of the region former: successors that join a region)
-    for (const [env, fn, what] of [["NANOBOX_AOT_DEDUPE", "nanobox_set_jit_aot_dedupe", "successor already translated elsewhere is NOT copied in"],
+    for (const [env, fn, what] of [["NANOBOX_AOT_DETFORM", "nanobox_set_jit_aot_detform", "deterministic formation: the region depends on the code bytes only"],
+                                   ["NANOBOX_AOT_SWEEP", "nanobox_set_jit_aot_sweep", "detform: build the whole containing function at a first touch"],
+                                   ["NANOBOX_AOT_POOLRESET", "nanobox_set_jit_aot_poolreset", "offline sweeps: reset the iCache instruction pool between functions"],
+                                   ["NANOBOX_AOT_DEDUPE", "nanobox_set_jit_aot_dedupe", "successor already translated elsewhere is NOT copied in"],
                                    ["NANOBOX_AOT_MINHOT", "nanobox_set_jit_aot_minhot", "successor joins only above this execution count"],
                                    ["NANOBOX_AOT_AHEAD", "nanobox_set_jit_aot_ahead", "decode successors that are not in the iCache yet"],
                                    ["NANOBOX_AOT_TICK", "nanobox_set_jit_aot_tick", "iterations between full syncs on a self-loop back edge"],
@@ -665,6 +682,30 @@ function installJitHost(inst) {
     console.error(`[harness] JIT enabled: level=${lvl} threshold=${thr || "default"}`);
   }
 }
+// --aot-mode-at: turn AOT mode on partway through a run (harness `--aot-mode-at expect|LABEL`).
+// TASKS.md R.5: a boot is millions of ONE-SHOT trace entries and a compiled entry costs ~400 ns more
+// than interpreting one, so the trace JIT's threshold is what makes a boot fast; AOT's win is the
+// steady state. Booting on the trace JIT and switching afterwards keeps both. The engine releases
+// everything compiled before the switch (nanobox_set_jit_aot -> nanobox_jit_cache_clear on a mode
+// change): a compiled function's wasm signature differs between the modes (bit 9 passes rip/ic0 as
+// parameters), so pre-switch and post-switch code cannot share one function table.
+function applyAotMode(on) {
+  const ex = inst.exports;
+  if (!ex.nanobox_set_jit_aot) { console.error("[harness] AOT mode: engine has no nanobox_set_jit_aot"); return; }
+  const t = performance.now();
+  ex.nanobox_set_jit_aot(on);
+  if (process.env.NANOBOX_FLAGS != null && ex.nanobox_set_jit_flags) ex.nanobox_set_jit_flags(Number(process.env.NANOBOX_FLAGS));
+  if (process.env.NANOBOX_THRESHOLD != null && ex.nanobox_set_jit) ex.nanobox_set_jit(Number((opts.jit || "2:0").split(":")[0]), Number(process.env.NANOBOX_THRESHOLD));
+  for (const [env, fn] of [["NANOBOX_AOT_DETFORM", "nanobox_set_jit_aot_detform"], ["NANOBOX_AOT_SWEEP", "nanobox_set_jit_aot_sweep"],
+                           ["NANOBOX_AOT_DEDUPE", "nanobox_set_jit_aot_dedupe"], ["NANOBOX_AOT_MINHOT", "nanobox_set_jit_aot_minhot"],
+                           ["NANOBOX_AOT_AHEAD", "nanobox_set_jit_aot_ahead"], ["NANOBOX_AOT_TICK", "nanobox_set_jit_aot_tick"],
+                           ["NANOBOX_AOT_NOSTACK", "nanobox_set_jit_aot_nostack"]])
+    if (process.env[env] != null && ex[fn]) ex[fn](Number(process.env[env]));
+  aotModeMs = performance.now() - t;
+  aotModeAtMs = performance.now() - t0;
+  console.error(`[harness] AOT MODE ON at ${aotModeAtMs.toFixed(0)} ms (switch itself ${aotModeMs.toFixed(1)} ms; translations released and recompiled from here)`);
+}
+
 // --jit-bundle-out: every module the engine installed this run whose content key(s) were noted
 // (released ones included: the slot was recycled, the record was not), plus the link module.
 function writeBundle(file) {
@@ -921,7 +962,7 @@ function finish(code) {
     if (ex.nanobox_stat) summary.statsEnd = { traces: ex.nanobox_stat(2), jitTraces: ex.nanobox_stat(3), jitCompiled: ex.nanobox_stat(4), loopbacks: ex.nanobox_stat(5), links: ex.nanobox_stat(6), slow: ex.nanobox_stat(7), linkFail: [8,9,10,11,12,13,14,15].map((i) => ex.nanobox_stat(i)), cache: ex.nanobox_jit_cache_stat ? [ex.nanobox_jit_cache_stat(0), ex.nanobox_jit_cache_stat(1), ex.nanobox_jit_cache_stat(2)] : null };
     // AOT-mode census (engines with the extended stats): in-region transitions, interpreted dispatch, region former counters
     if (ex.nanobox_stat && ex.nanobox_stat(16) >= 0) summary.aot = { intrans: ex.nanobox_stat(16), interpTraces: ex.nanobox_stat(17), interpIcount: ex.nanobox_stat(18), shadowMiss: ex.nanobox_stat(19), census: ex.nanobox_aot_stat ? Array.from({ length: 16 }, (_, i) => ex.nanobox_aot_stat(i)) : null };
-    if (ex.nanobox_jit_region_stat && ex.nanobox_jit_region_stat(16) > 0) summary.regionStats = Array.from({ length: 32 }, (_, i) => ex.nanobox_jit_region_stat(i));
+    if (ex.nanobox_jit_region_stat && ex.nanobox_jit_region_stat(16) > 0) summary.regionStats = Array.from({ length: 48 }, (_, i) => ex.nanobox_jit_region_stat(i));
     if (ex.nanobox_jit_member_stat) summary.memberMap = { put: ex.nanobox_jit_member_stat(0), hit: ex.nanobox_jit_member_stat(1), miss: ex.nanobox_jit_member_stat(2), resets: ex.nanobox_jit_member_stat(3), used: ex.nanobox_jit_member_stat(4) };
   }
   if (jitState.table) {
@@ -970,9 +1011,35 @@ function finish(code) {
     }
   }
   if (aotResult) summary.aotSession = aotResult;
+  if (opts.aotModeAt) summary.aotMode = { at: opts.aotModeAt, done: aotModeDone, atMs: +aotModeAtMs.toFixed(1), switchMs: +aotModeMs.toFixed(2) };
+  if (opts.tplBytes && inst && inst.exports.nanobox_jit_opstat) {
+    // where the emitted BYTES are, statically: total template bytes per opcode and bytes per compiled
+    // instance. Needs no execution counts, so it works on an offline translation run too.
+    const ex = inst.exports, rows = [];
+    const hp = new Uint8Array(ex.memory ? ex.memory.buffer : mem().buffer);
+    const nameOf = (ia) => { const p = ex.nanobox_jit_opname(ia); let e = p; while (hp[e]) e++; return Buffer.from(hp.subarray(p, e)).toString(); };
+    for (let ia = 0; ia < 2000; ia++) {
+      const n = ex.nanobox_jit_opstat(ia, 1), b = ex.nanobox_jit_opstat(ia, 4);
+      if (n && b) rows.push([nameOf(ia).replace("BX_IA_", ""), n, b, b / n]);
+    }
+    const tot = rows.reduce((s, r) => s + r[2], 0);
+    rows.sort((a, b) => b[2] - a[2]);
+    const out = [`total emitted template bytes: ${(tot / 1e6).toFixed(1)} MB over ${rows.reduce((s, r) => s + r[1], 0)} compiled instances`]
+      .concat(rows.slice(0, 40).map(([n, i, b, per]) => `${n}: ${(b / 1e6).toFixed(1)} MB = ${(100 * b / tot).toFixed(1)}% (${i} instances x ${per.toFixed(0)} B)`));
+    fs.writeFileSync(opts.tplBytes, out.join("\n"));
+    console.error(`[harness] template bytes written to ${opts.tplBytes}`);
+  }
   if (opts.aotKeys && inst && inst.exports.nanobox_keylog_count) {
     const ex = inst.exports, n = ex.nanobox_keylog_count(), out = [];
-    for (let i = 0; i < n; i++) out.push(`${ex.nanobox_keylog_at(i, 0)} ${ex.nanobox_keylog_at(i, 1)} ${ex.nanobox_keylog_at(i, 2)}`);
+    // 64-bit values: read them as two 32-bit halves. A double cannot hold a kernel address or a
+    // content key (ulp is 2048 at 2^63), so nanobox_keylog_at() quantises both — use it only as a
+    // fallback for engines built before nanobox_keylog_word existed.
+    const w = ex.nanobox_keylog_word;
+    const u64 = (i, f) => (BigInt(w(i, 2 * f + 1) >>> 0) << 32n) | BigInt(w(i, 2 * f) >>> 0);
+    for (let i = 0; i < n; i++) {
+      if (w) out.push(`0x${u64(i, 0).toString(16)} 0x${u64(i, 1).toString(16)} ${w(i, 4)}`);
+      else out.push(`${ex.nanobox_keylog_at(i, 0)} ${ex.nanobox_keylog_at(i, 1)} ${ex.nanobox_keylog_at(i, 2)}`);
+    }
     fs.writeFileSync(opts.aotKeys, out.join("\n"));
     console.error(`[harness] region keys: ${n} written to ${opts.aotKeys}`);
   }
