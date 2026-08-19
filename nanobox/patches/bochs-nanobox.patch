@@ -187,7 +187,7 @@ index 23a27c6b1..a180f5e15 100644
    BX_EXECUTE_INSTRUCTION(i);                           \
  }
 diff --git a/bochs/cpu/icache.cc b/bochs/cpu/icache.cc
-index e0f65950f..4bafbe327 100644
+index e0f65950f..880b03bf1 100644
 --- a/bochs/cpu/icache.cc
 +++ b/bochs/cpu/icache.cc
 @@ -29,10 +29,12 @@
@@ -224,7 +224,13 @@ index e0f65950f..4bafbe327 100644
      BX_CPU(i)->iCache.handleSMC(pAddr, mask);
    }
  }
-@@ -80,12 +89,13 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAdd
+@@ -76,16 +85,19 @@ void genDummyICacheEntry(bxInstruction_c *i)
+ 
+ #endif
+ 
++extern unsigned nanobox_jit_aot;
++extern unsigned nanobox_jit_aot_detform;
+ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAddr)
  {
    bxICacheEntry_c *entry = BX_CPU_THIS_PTR iCache.get_entry(pAddr, BX_CPU_THIS_PTR fetchModeMask);
  
@@ -239,7 +245,7 @@ index e0f65950f..4bafbe327 100644
  
    unsigned remainingInPage = BX_CPU_THIS_PTR eipPageWindowSize - eipBiased;
    const Bit8u *fetchPtr = BX_CPU_THIS_PTR eipFetchPtr + eipBiased;
-@@ -110,6 +120,10 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAdd
+@@ -110,6 +122,10 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAdd
  
    for (unsigned n=0;n < quantum;n++)
    {
@@ -250,7 +256,7 @@ index e0f65950f..4bafbe327 100644
  #if BX_SUPPORT_X86_64
      if (BX_CPU_THIS_PTR cpu_mode == BX_MODE_LONG_64)
        ret = fetchDecode64(fetchPtr, i, remainingInPage);
-@@ -143,6 +157,7 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAdd
+@@ -143,6 +159,7 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAdd
  #endif
  
        BX_CPU_THIS_PTR iCache.commit_page_split_trace(BX_CPU_THIS_PTR pAddrFetchPage, entry);
@@ -258,7 +264,18 @@ index e0f65950f..4bafbe327 100644
        return entry;
      }
  
-@@ -176,6 +191,7 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAdd
+@@ -171,11 +188,17 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAdd
+     fetchPtr += iLen;
+ 
+     // try to find a trace starting from current pAddr and merge
+-    if (remainingInPage >= 15) { // avoid merging with page split trace
++    // nanobox AOT (deterministic formation, bit 8): merging splices in whatever trace the iCache happens
++    // to hold at the next address, and when the two together reach BX_MAX_TRACE_LENGTH the result is a
++    // SHORTER trace than a fresh decode of the same bytes -- so the decoded trace at an address becomes
++    // a function of the cache's history. The default engine is untouched (identity depends on these
++    // boundaries).
++    if (remainingInPage >= 15 && !(nanobox_jit_aot && (nanobox_jit_aot_detform & 8))) { // avoid merging with page split trace
+       if (mergeTraces(entry, i, pAddr)) {
            entry->traceMask |= traceMask;
            pageWriteStampTable.markICacheMask(pAddr, entry->traceMask);
            BX_CPU_THIS_PTR iCache.commit_trace(entry->tlen);
@@ -266,7 +283,7 @@ index e0f65950f..4bafbe327 100644
            return entry;
        }
      }
-@@ -194,6 +210,7 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAdd
+@@ -194,6 +217,7 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAdd
  
    BX_CPU_THIS_PTR iCache.commit_trace(entry->tlen);
  
@@ -274,7 +291,7 @@ index e0f65950f..4bafbe327 100644
    return entry;
  }
  
-@@ -264,6 +281,7 @@ void BX_CPU_C::boundaryFetch(const Bit8u *fetchPtr, unsigned remainingInPage, bx
+@@ -264,6 +288,7 @@ void BX_CPU_C::boundaryFetch(const Bit8u *fetchPtr, unsigned remainingInPage, bx
      fetchBuffer[j] = *fetchPtr++;
    }
  
@@ -1177,6 +1194,333 @@ index 1952f42da..97e53f9dc 100644
  private:
    char *plugin_name;
    int timer_id;
+diff --git a/bochs/icache.cc b/bochs/icache.cc
+new file mode 100644
+index 000000000..880b03bf1
+--- /dev/null
++++ b/bochs/icache.cc
+@@ -0,0 +1,321 @@
++/////////////////////////////////////////////////////////////////////////
++// $Id$
++/////////////////////////////////////////////////////////////////////////
++//
++//   Copyright (c) 2007-2015 Stanislav Shwartsman
++//          Written by Stanislav Shwartsman [sshwarts at sourceforge net]
++//
++//  This library is free software; you can redistribute it and/or
++//  modify it under the terms of the GNU Lesser General Public
++//  License as published by the Free Software Foundation; either
++//  version 2 of the License, or (at your option) any later version.
++//
++//  This library is distributed in the hope that it will be useful,
++//  but WITHOUT ANY WARRANTY; without even the implied warranty of
++//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++//  Lesser General Public License for more details.
++//
++//  You should have received a copy of the GNU Lesser General Public
++//  License along with this library; if not, write to the Free Software
++//  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA B 02110-1301 USA
++//
++/////////////////////////////////////////////////////////////////////////
++
++#define NEED_CPU_REG_SHORTCUTS 1
++#include "bochs.h"
++#include "cpu.h"
++#define LOG_THIS BX_CPU_THIS_PTR
++
++#include "gui/siminterface.h"
++#include "param_names.h"
++#include "cpustats.h"
++#include "../nanobox_jit.h"
++
++#include "decoder/ia_opcodes.h"
++
++bxPageWriteStampTable pageWriteStampTable;
++bool nanobox_marks_private = false;
++
++extern int fetchDecode32(const Bit8u *fetchPtr, bool is_32, bxInstruction_c *i, unsigned remainingInPage);
++#if BX_SUPPORT_X86_64
++extern int fetchDecode64(const Bit8u *fetchPtr, bxInstruction_c *i, unsigned remainingInPage);
++#endif
++extern int assignHandler(bxInstruction_c *i, Bit32u fetchModeMask);
++
++void flushICaches(void)
++{
++  for (unsigned i=0; i<BX_SMP_PROCESSORS; i++) {
++    BX_CPU(i)->iCache.flushICacheEntries();
++    BX_CPU(i)->async_event |= BX_ASYNC_EVENT_STOP_TRACE;
++  }
++
++  pageWriteStampTable.resetWriteStamps();
++}
++
++extern "C" void nanobox_smc_account(Bit64u pAddr, Bit32u mask);
++void nanobox_jit_page_written(bx_phy_address pAddr, Bit32u mask);
++void handleSMC(bx_phy_address pAddr, Bit32u mask)
++{
++  INC_SMC_STAT(smc);
++  nanobox_smc_account(pAddr, mask); // nanobox: SMC profile
++  nanobox_jit_page_written(pAddr, mask); // nanobox: two-page regions attached to this page
++
++  // nanobox AOT: the trace stops only where the reference interpreter's would (its own marks); code
++  // decoded ahead by the JIT is invalidated below all the same
++  bool refHit = (pageWriteStampTable.getRefMapping(pAddr) & mask) != 0;
++  for (unsigned i=0; i<BX_SMP_PROCESSORS; i++) {
++    if (refHit) BX_CPU(i)->async_event |= BX_ASYNC_EVENT_STOP_TRACE;
++    BX_CPU(i)->iCache.handleSMC(pAddr, mask);
++  }
++}
++
++#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
++
++void BX_CPU_C::BxEndTrace(bxInstruction_c *i)
++{
++  // do nothing, return to main cpu_loop
++}
++
++void genDummyICacheEntry(bxInstruction_c *i)
++{
++  i->setILen(0);
++  i->setIaOpcode(BX_INSERTED_OPCODE);
++  i->execute1 = &BX_CPU_C::BxEndTrace;
++}
++
++#endif
++
++extern unsigned nanobox_jit_aot;
++extern unsigned nanobox_jit_aot_detform;
++bxICacheEntry_c* BX_CPU_C::serveICacheMiss(Bit32u eipBiased, bx_phy_address pAddr)
++{
++  bxICacheEntry_c *entry = BX_CPU_THIS_PTR iCache.get_entry(pAddr, BX_CPU_THIS_PTR fetchModeMask);
++
++  BX_CPU_THIS_PTR iCache.alloc_trace(entry, pAddr);
++
++  // Cache miss. We weren't so lucky, but let's be optimistic - try to build
++  // trace from incoming instruction bytes stream !
++  entry->pAddr = pAddr;
++  entry->traceMask = 0;
++  entry->nbahead = nanobox_marks_private ? 1 : 0;   // nanobox AOT: decoded ahead of execution?
++
++  unsigned remainingInPage = BX_CPU_THIS_PTR eipPageWindowSize - eipBiased;
++  const Bit8u *fetchPtr = BX_CPU_THIS_PTR eipFetchPtr + eipBiased;
++  int ret;
++
++  bxInstruction_c *i = entry->i;
++
++  Bit32u pageOffset = PAGE_OFFSET((Bit32u) pAddr);
++  Bit32u traceMask = 0;
++
++#if BX_SUPPORT_SMP == 0
++  if (PPFOf(pAddr) == BX_CPU_THIS_PTR pAddrStackPage)
++    invalidate_stack_cache();
++#endif
++
++  // Don't allow traces longer than cpu_loop can execute
++  static unsigned quantum =
++#if BX_SUPPORT_SMP
++    (BX_SMP_PROCESSORS > 1) ? SIM->get_param_num(BXPN_SMP_QUANTUM)->get() :
++#endif
++    BX_MAX_TRACE_LENGTH;
++
++  for (unsigned n=0;n < quantum;n++)
++  {
++    // nanobox: the decoder only writes the fields an instruction needs; the rest of the pool slot
++    // keeps stale bytes from earlier decodes, which made the JIT's content keys (a hash of the
++    // decoded instruction) depend on execution history. Start from a clean slot.
++    memset((void *) i, 0, sizeof(bxInstruction_c));
++#if BX_SUPPORT_X86_64
++    if (BX_CPU_THIS_PTR cpu_mode == BX_MODE_LONG_64)
++      ret = fetchDecode64(fetchPtr, i, remainingInPage);
++    else
++#endif
++      ret = fetchDecode32(fetchPtr, BX_CPU_THIS_PTR sregs[BX_SEG_REG_CS].cache.u.segment.d_b, i, remainingInPage);
++
++    if (ret < 0) {
++      // Fetching instruction on segment/page boundary
++      if (n > 0) {
++         // The trace is already valid, it has several instructions inside,
++         // in this case just drop the boundary instruction and stop
++         // tracing.
++         break;
++      }
++      // First instruction is boundary fetch, leave the trace cache entry
++      // invalid for now because boundaryFetch() can fault
++      entry->pAddr = ~entry->pAddr;
++      entry->tlen = 1;
++      boundaryFetch(fetchPtr, remainingInPage, i);
++
++      // Add the instruction to trace cache
++      entry->pAddr = ~entry->pAddr;
++      entry->traceMask = 0x80000000; /* last line in page */
++      pageWriteStampTable.markICacheMask(entry->pAddr, entry->traceMask);
++      pageWriteStampTable.markICacheMask(BX_CPU_THIS_PTR pAddrFetchPage, 0x1);
++
++#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
++      entry->tlen++; /* Add the inserted end of trace opcode */
++      genDummyICacheEntry(++i);
++#endif
++
++      BX_CPU_THIS_PTR iCache.commit_page_split_trace(BX_CPU_THIS_PTR pAddrFetchPage, entry);
++      nanobox_jit_after_decode(entry);
++      return entry;
++    }
++
++    ret = assignHandler(i, BX_CPU_THIS_PTR fetchModeMask);
++
++    // add instruction to the trace
++    unsigned iLen = i->ilen();
++    entry->tlen++;
++
++#ifdef BX_INSTR_STORE_OPCODE_BYTES
++    i->set_opcode_bytes(fetchPtr);
++#endif
++    BX_INSTR_OPCODE(BX_CPU_ID, i, fetchPtr, iLen,
++       BX_CPU_THIS_PTR sregs[BX_SEG_REG_CS].cache.u.segment.d_b, long64_mode());
++
++    i++;
++
++    traceMask |= 1 <<  (pageOffset >> 7);
++    traceMask |= 1 << ((pageOffset + iLen - 1) >> 7);
++
++    // continue to the next instruction
++    remainingInPage -= iLen;
++    if (ret != 0 /* stop trace indication */ || remainingInPage == 0) break;
++    pAddr += iLen;
++    pageOffset += iLen;
++    fetchPtr += iLen;
++
++    // try to find a trace starting from current pAddr and merge
++    // nanobox AOT (deterministic formation, bit 8): merging splices in whatever trace the iCache happens
++    // to hold at the next address, and when the two together reach BX_MAX_TRACE_LENGTH the result is a
++    // SHORTER trace than a fresh decode of the same bytes -- so the decoded trace at an address becomes
++    // a function of the cache's history. The default engine is untouched (identity depends on these
++    // boundaries).
++    if (remainingInPage >= 15 && !(nanobox_jit_aot && (nanobox_jit_aot_detform & 8))) { // avoid merging with page split trace
++      if (mergeTraces(entry, i, pAddr)) {
++          entry->traceMask |= traceMask;
++          pageWriteStampTable.markICacheMask(pAddr, entry->traceMask);
++          BX_CPU_THIS_PTR iCache.commit_trace(entry->tlen);
++          nanobox_jit_after_decode(entry);
++          return entry;
++      }
++    }
++  }
++
++//BX_INFO(("commit trace %08x len=%d mask %08x", (Bit32u) entry->pAddr, entry->tlen, pageWriteStampTable.getFineGranularityMapping(entry->pAddr)));
++
++  entry->traceMask |= traceMask;
++
++  pageWriteStampTable.markICacheMask(pAddr, entry->traceMask);
++
++#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
++  entry->tlen++; /* Add the inserted end of trace opcode */
++  genDummyICacheEntry(i);
++#endif
++
++  BX_CPU_THIS_PTR iCache.commit_trace(entry->tlen);
++
++  nanobox_jit_after_decode(entry);
++  return entry;
++}
++
++bool BX_CPU_C::mergeTraces(bxICacheEntry_c *entry, bxInstruction_c *i, bx_phy_address pAddr)
++{
++  bxICacheEntry_c *e = BX_CPU_THIS_PTR iCache.find_entry(pAddr, BX_CPU_THIS_PTR fetchModeMask);
++
++  if (e != NULL)
++  {
++    // determine max amount of instruction to take from another entry
++    unsigned max_length = e->tlen;
++
++#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
++    if (max_length + entry->tlen > BX_MAX_TRACE_LENGTH)
++        return 0;
++#else
++    if (max_length + entry->tlen > BX_MAX_TRACE_LENGTH)
++        max_length = BX_MAX_TRACE_LENGTH - entry->tlen;
++    if(max_length == 0) return 0;
++#endif
++
++    memcpy(i, e->i, sizeof(bxInstruction_c)*max_length);
++    entry->tlen += max_length;
++    BX_ASSERT(entry->tlen <= BX_MAX_TRACE_LENGTH);
++
++    entry->traceMask |= e->traceMask;
++
++    return 1;
++  }
++
++  return 0;
++}
++
++void BX_CPU_C::boundaryFetch(const Bit8u *fetchPtr, unsigned remainingInPage, bxInstruction_c *i)
++{
++  unsigned j, k;
++  Bit8u fetchBuffer[32];
++  int ret;
++
++  if (remainingInPage >= 15) {
++    BX_ERROR(("boundaryFetch #GP(0): too many instruction prefixes"));
++    exception(BX_GP_EXCEPTION, 0);
++  }
++
++  // Read all leftover bytes in current page up to boundary.
++  for (j=0; j<remainingInPage; j++) {
++    fetchBuffer[j] = *fetchPtr++;
++  }
++
++  // The 2nd chunk of the instruction is on the next page.
++  // Set RIP to the 0th byte of the 2nd page, and force a
++  // prefetch so direct access of that physical page is possible, and
++  // all the associated info is updated.
++  RIP += remainingInPage;
++  prefetch();
++
++  unsigned fetchBufferLimit = 15;
++  if (BX_CPU_THIS_PTR eipPageWindowSize < 15) {
++    BX_DEBUG(("boundaryFetch: small window size after prefetch=%d bytes, remainingInPage=%d bytes", BX_CPU_THIS_PTR eipPageWindowSize, remainingInPage));
++    fetchBufferLimit = BX_CPU_THIS_PTR eipPageWindowSize;
++  }
++
++  // We can fetch straight from the 0th byte, which is eipFetchPtr;
++  fetchPtr = BX_CPU_THIS_PTR eipFetchPtr;
++
++  // read leftover bytes in next page
++  for (k=0; k<fetchBufferLimit; k++, j++) {
++    fetchBuffer[j] = *fetchPtr++;
++  }
++
++  memset((void *) i, 0, sizeof(bxInstruction_c)); // nanobox: see above
++#if BX_SUPPORT_X86_64
++  if (BX_CPU_THIS_PTR cpu_mode == BX_MODE_LONG_64)
++    ret = fetchDecode64(fetchBuffer, i, remainingInPage+fetchBufferLimit);
++  else
++#endif
++    ret = fetchDecode32(fetchBuffer, BX_CPU_THIS_PTR sregs[BX_SEG_REG_CS].cache.u.segment.d_b, i, remainingInPage+fetchBufferLimit);
++
++  if (ret < 0) {
++    BX_INFO(("boundaryFetch #GP(0): failed to complete instruction decoding"));
++    exception(BX_GP_EXCEPTION, 0);
++  }
++
++  ret = assignHandler(i, BX_CPU_THIS_PTR fetchModeMask);
++
++  // Restore EIP since we fudged it to start at the 2nd page boundary.
++  RIP = BX_CPU_THIS_PTR prev_rip;
++
++  // Since we cross an instruction boundary, note that we need a prefetch()
++  // again on the next instruction.  Perhaps we can optimize this to
++  // eliminate the extra prefetch() since we do it above, but have to
++  // think about repeated instructions, etc.
++  // invalidate_prefetch_q();
++
++#ifdef BX_INSTR_STORE_OPCODE_BYTES
++  i->set_opcode_bytes(fetchBuffer);
++#endif
++
++  BX_INSTR_OPCODE(BX_CPU_ID, i, fetchBuffer, i->ilen(),
++      BX_CPU_THIS_PTR sregs[BX_SEG_REG_CS].cache.u.segment.d_b, long64_mode());
++}
 diff --git a/bochs/nanobox.cc b/bochs/nanobox.cc
 new file mode 100644
 index 000000000..0c5787cb0
@@ -1403,10 +1747,10 @@ index 000000000..0c5787cb0
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..1e7376ce5
+index 000000000..9bdcf9e17
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,5310 @@
+@@ -0,0 +1,5571 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -1647,7 +1991,7 @@ index 000000000..1e7376ce5
 +  }
 +}
 +}
-+static Bit64u nanobox_region_stats[32];   // region formation census (see nanobox_jit_region_stat)
++static Bit64u nanobox_region_stats[56];   // region formation census (see nanobox_jit_region_stat)
 +
 +/////////////////////////////////////////////////////////////////////////
 +// Outlined DTLB probe (work/j/outline).
@@ -1795,7 +2139,7 @@ index 000000000..1e7376ce5
 +extern unsigned nanobox_jit_aot;
 +extern unsigned nanobox_jit_aot_tick;
 +static bx_address nb_lookup_lin = 0;     // guest linear address of the translation being looked up
-+#define NB_KEYLOG 200000
++#define NB_KEYLOG 400000
 +static Bit64u nb_keylog[NB_KEYLOG][3];
 +static unsigned nb_keylog_n = 0, nb_keylog_on = 0;
 +extern unsigned nanobox_jit_aot_nostack;
@@ -1920,11 +2264,16 @@ index 000000000..1e7376ce5
 +  Bit8u pending[NB_REGION_MAX_BLOCKS];
 +  // direct-call site cache, one per block (a block ends at its CALL, so a block has at most one)
 +  NbDcallSite dcall[NB_REGION_MAX_BLOCKS];
++  Bit64u lin0;              // guest LINEAR address the region was formed from: block j lives at
++                            // lin0 + b[j].boff. A physical page can be mapped at different linear
++                            // addresses in different processes, and the block offsets and page deltas
++                            // in this descriptor are LINEAR -- so a member may only be attached where
++                            // the linear placement matches, not merely where the bytes do.
 +  Bit8u dead;               // a member's bytes were written after the attach (registry) -> members' jitfn cleared, pending blocks must not run
 +  Bit8u ahead;              // any block was decoded ahead of execution
 +  Bit32u regEpoch;          // == nb_attach_epoch iff the region has attach-registry records (the registry is reset with the JIT cache)
 +  unsigned fn;              // installed function (set at attach)
-+  Region() : nblocks(0), mask(0), key(0), npages(1), dead(0), ahead(0), regEpoch(0), fn(0) {
++  Region() : nblocks(0), mask(0), key(0), npages(1), lin0(0), dead(0), ahead(0), regEpoch(0), fn(0) {
 +    for (unsigned j = 0; j < NB_REGION_MAX_BLOCKS; j++) { insptr[j] = NULL; entptr[j] = NULL; srcEntry[j] = NULL; srcI[j] = NULL; entry[j].reg = NULL; entry[j].block = 0; entry[j].delta = 0; pending[j] = 0; }
 +    for (unsigned p = 0; p < NB_REGION_MAX_PAGES; p++) { pdelta[p] = 0; ppf[p] = 0; pmask[p] = 0; }
 +    memset(dcall, 0, sizeof(dcall));
@@ -1963,10 +2312,16 @@ index 000000000..1e7376ce5
 +  NbDcallSite *s = (NbDcallSite *)(uintptr_t) sitep;
 +  s->va = 0; s->fn = 0; s->arg = 0; s->ilen = 0; s->ent = 0; s->pa = 0; s->miss = 16;   // no answer: stay stale, ask again in 16
 +  nanobox_aot_stats[15]++;
++  // 48 attempts, 49 gave up, 50 of those because the callee is not decoded, 51 because it is decoded
++  // but carries no translation. This is how the detform x direct-call interaction is measured: a
++  // callee whose translation is its FUNCTION's region should be resolvable far more often than one
++  // rooted wherever the guest happened to enter it.
++  nanobox_region_stats[48]++;
 +  bx_phy_address pa = 0;
-+  if (!nanobox_dcall_xlate((bx_address) va, &pa)) return;
++  if (!nanobox_dcall_xlate((bx_address) va, &pa)) { nanobox_region_stats[49]++; nanobox_region_stats[50]++; return; }
 +  bxICacheEntry_c *e = BX_CPU_THIS_PTR iCache.get_entry(pa, BX_CPU_THIS_PTR fetchModeMask);
-+  if (!e || e->pAddr != pa || e->tlen == 0 || !e->jitfn) return;
++  if (!e || e->pAddr != pa || e->tlen == 0) { nanobox_region_stats[49]++; nanobox_region_stats[50]++; return; }
++  if (!e->jitfn) { nanobox_region_stats[49]++; nanobox_region_stats[51]++; return; }
 +  s->va = va; s->cr3 = (Bit64u) BX_CPU_THIS_PTR cr3;
 +  s->ent = (Bit32u)(uintptr_t) e; s->pa = (Bit64u) pa;
 +  s->fn = e->jitfn; s->arg = e->jitarg; s->ilen = e->i[0].ilen(); s->miss = 0;
@@ -5720,6 +6075,9 @@ index 000000000..1e7376ce5
 +// write-stamp marks (STOP_TRACE placement), which the reference mapping keeps exact (icache.h).
 +/////////////////////////////////////////////////////////////////////////
 +extern Bit64u nanobox_aot_stats[16];
++// guest function boundaries (--aot-fnmap System.map), defined with the AOT precompile API below
++static Bit64u nb_fn_start(bx_address lin);
++static bool nb_fn_range(bx_address lin, Bit64u *lo, Bit64u *hi);
 +unsigned nanobox_jit_region_max = NB_REGION_MAX_BLOCKS;   // regions on by default (--jit-region 1 turns them off) (nanobox_set_jit_region / --jit-region N / page ?region=N)
 +// AOT mode (TASKS.md R; harness NANOBOX_AOT=1, page ?aot=1, cfg.aot): 0 = the shipping engine (trace
 +// regions from decoded successors on the entry page +/-1, threshold as configured, every in-region
@@ -5743,6 +6101,45 @@ index 000000000..1e7376ce5
 +unsigned nanobox_jit_aot_ahead = 0;
 +unsigned nanobox_jit_aot_minhot = 0;  // AOT: a decoded successor joins only if its slot has executed at least this often (0: any)
 +unsigned nanobox_jit_aot_dedupe = 0;  // AOT: a successor that already carries a translation (member of another region / plain trace) is not copied in again (its edge stays an external link)
++// AOT (TASKS.md S.4/S.11): DETERMINISTIC FORMATION, as a bitmask so each piece can be A/B'd without a
++// rebuild. A region has to be a function of (entry address, guest code bytes) alone, or the offline
++// translator and the runtime build different regions at the same address and a precompiled artifact is
++// never found (measured: 90 % of kernel lookups missed).
++//   1  state independence: the walk consults neither dedupe (does the successor already carry a
++//      translation) nor minhot (how often its slot ran) nor the ITLB (cross-page frames come from the
++//      page tables), and nanobox_jit_after_decode stops handing an entry a translation compiled for a
++//      DIFFERENT address that decoded to the same bytes;
++//   2  the walk stops at the containing function's boundary (nb_fn_range), and the first touch of any
++//      address in a function builds the WHOLE function with the same sweep the offline driver runs;
++//   4  a block that is already a member of a live region attaches to it instead of rooting a second,
++//      overlapping region of its own;
++//   8  no mergeTraces: a decoded trace stops depending on what the iCache holds after it;
++//  16  extend 4 to user space (off: a user physical page can be mapped by several processes and
++//      recycled underneath, so equal bytes at equal physical address is not the same code object).
++// 0 = the state-dependent former (shipped default); 15 = everything the kernel artifact needs.
++unsigned nanobox_jit_aot_detform = 0;
++// detform bit 2: build the whole containing function at the first touch of any of its addresses.
++unsigned nanobox_jit_aot_sweep = 1;
++// detform, OFFLINE sweeps only: reset the iCache instruction pool between functions (see
++// nb_aot_sweep_function). The kernel artifact is generated with it on.
++unsigned nanobox_jit_aot_poolreset = 0;
++// DETERMINISTIC DEDUPE (detform bit 32). The old dedupe asked `se->jitfn` -- "does this successor
++// already carry a translation" -- which is a property of whatever the engine happens to have compiled,
++// so the two sides disagreed and key agreement fell 98.7 % -> 83.1 %. The rule that does the same job
++// without consulting engine state: a successor already claimed by an EARLIER REGION OF THE SAME SWEEP
++// does not join. The sweep visits a function's sites in a fixed order from its first byte, so the claim
++// map is a function of (function bytes, sweep order) only -- identical offline and at runtime.
++static Bit8u *nb_claim = NULL;          // one byte per address of the function being swept
++static bx_address nb_claim_lin = 0;
++static unsigned nb_claim_len = 0;
++static bool nb_claimed(bx_address lin)
++{
++  return nb_claim && lin >= nb_claim_lin && lin < nb_claim_lin + nb_claim_len && nb_claim[lin - nb_claim_lin];
++}
++static void nb_claim_mark(bx_address lin)
++{
++  if (nb_claim && lin >= nb_claim_lin && lin < nb_claim_lin + nb_claim_len) nb_claim[lin - nb_claim_lin] = 1;
++}
 +// AOT: how many times a self-loop may take its back edge before it runs the full inter-trace sync
 +// (guest timer, async_event, fetch window). Identity is waived under the flag, so the interrupt is
 +// seen up to this many iterations late -- at 64 iterations of a 6-instruction loop that is <400 guest
@@ -5831,6 +6228,10 @@ index 000000000..1e7376ce5
 +NB_EXPORT(nanobox_set_jit_aot_ahead) void nanobox_set_jit_aot_ahead(unsigned on) { nanobox_jit_aot_ahead = on; }
 +NB_EXPORT(nanobox_set_jit_aot_minhot) void nanobox_set_jit_aot_minhot(unsigned n) { nanobox_jit_aot_minhot = n; }
 +NB_EXPORT(nanobox_set_jit_aot_dedupe) void nanobox_set_jit_aot_dedupe(unsigned on) { nanobox_jit_aot_dedupe = on; }
++NB_EXPORT(nanobox_set_jit_aot_detform) void nanobox_set_jit_aot_detform(unsigned on) { nanobox_jit_aot_detform = on; }
++NB_EXPORT(nanobox_set_jit_aot_sweep) void nanobox_set_jit_aot_sweep(unsigned on) { nanobox_jit_aot_sweep = on; }
++NB_EXPORT(nanobox_set_jit_aot_poolreset) void nanobox_set_jit_aot_poolreset(unsigned on) { nanobox_jit_aot_poolreset = on; }
++NB_EXPORT(nanobox_set_jit_stackify) void nanobox_set_jit_stackify(unsigned on) { nanobox_jit_stackify = on; }
 +NB_EXPORT(nanobox_set_jit_aot_tick) void nanobox_set_jit_aot_tick(unsigned n) { nanobox_jit_aot_tick = n ? n : 1; }
 +NB_EXPORT(nanobox_set_jit_aot_nostack) void nanobox_set_jit_aot_nostack(unsigned on) { nanobox_jit_aot_nostack = on; nanobox_shadow_n = 0; nanobox_shadow_miss = 0; }
 +// 0 formed, 1 blocks, 2 compiled, 3 cache hits,
@@ -5843,10 +6244,20 @@ index 000000000..1e7376ce5
 +// 18 page budget full, 19 regions with >1 page, 20 pages total, 21 regions dropped by a write
 +// (registry), 22 dead-region exits taken at a first execution, 23 first-execution marks,
 +// 24 successors rejected as too cold (nanobox_jit_aot_minhot), 25 rejected as already translated (dedupe)
++// 26 region rooted at the containing function instead of the entered block, 27 the entered block was
++// translated separately after the function's region, 28/29 kernel bundle lookup hit/miss, 30/31 the
++// user-space pair, 32/33 kernel member-attach hit/miss, 34 re-attaching the function's region wired
++// this block, 35 successors dropped because they leave the containing function, 36 whole-function
++// sweeps run at a first touch, 37 of which covered the block, 38 did not, kernel 39/40/41 and user
++// 42/43/44: the member search found no live region on the page / a region but no block at this
++// address / a block whose bytes differ, 45/46 user member-attach hit/miss, 47 a block at this address
++// with a different trace LENGTH, 52 successors skipped by the deterministic dedupe (detform bit 32),
++// 48/49/50/51 direct-call site resolutions: attempts / gave up / of
++// those the callee was not decoded / was decoded but carried no translation
 +// Direct calls (nanobox_jit_flags bit 9, level 3): 28 direct-CALL sites executed, 29 taken as a wasm
 +// call, 30 direct returns, 31 returns that did not match their call site (propagated up).
 +// The site resolutions are counted in nanobox_aot_stats[15] (always live, C++ side).
-+NB_EXPORT(nanobox_jit_region_stat) double nanobox_jit_region_stat(unsigned i) { return i < 32 ? (double) nanobox_region_stats[i] : 0; }
++NB_EXPORT(nanobox_jit_region_stat) double nanobox_jit_region_stat(unsigned i) { return i < 56 ? (double) nanobox_region_stats[i] : 0; }
 +
 +static unsigned nanobox_real_len(const bxICacheEntry_c *e)
 +{
@@ -5897,12 +6308,17 @@ index 000000000..1e7376ce5
 +//    the entry is tagged nbahead: its first execution marks the reference mapping (icache.h).
 +// serveICacheMiss() fetches through the CPU's fetch window; it is pointed at `host` for the call and
 +// restored afterwards (the window is guest-invisible cache state and only read by fetches).
++static bxICacheEntry_c *nb_protect_entry = NULL;   // the iCache slot cpu_loop is executing from
 +static bxICacheEntry_c *nanobox_decode_ahead(bx_phy_address pa, const Bit8u *host, bxICacheEntry_c **avoid, unsigned navoid)
 +{
 +  unsigned off = (unsigned)(pa & 0xfff);
 +  if (off > 4096 - 16) { nanobox_region_stats[5]++; return NULL; }
 +  if (BX_CPU_THIS_PTR iCache.mpindex + BX_MAX_TRACE_LENGTH + 1 > BxICacheMemPool) { nanobox_region_stats[5]++; return NULL; }
 +  bxICacheEntry_c *slot = BX_CPU_THIS_PTR iCache.get_entry(pa, BX_CPU_THIS_PTR fetchModeMask);
++  // cpu_loop captured `i = entry->i` BEFORE calling the compiler and interprets from it afterwards: a
++  // decode that reuses that slot rewrites the instructions under the running trace. Refusing is
++  // deterministic (the slot is a hash of the physical address), so it adds no state dependence.
++  if (nb_protect_entry == slot) { nanobox_region_stats[5]++; return NULL; }
 +  for (unsigned q = 0; q < navoid; q++) if (avoid[q] == slot) { nanobox_region_stats[5]++; return NULL; }
 +  const Bit8u *savePtr = BX_CPU_THIS_PTR eipFetchPtr; Bit32u saveWin = BX_CPU_THIS_PTR eipPageWindowSize;
 +  bx_phy_address savePage = BX_CPU_THIS_PTR pAddrFetchPage;
@@ -5961,12 +6377,16 @@ index 000000000..1e7376ce5
 +  Bit32u entryOff = (Bit32u)(e->pAddr & 0xfff);
 +  bool kernel = (BX_CPU_THIS_PTR user_pl == 0);
 +  Region *r = new Region();
++  r->lin0 = (Bit64u) entryLin;
 +  r->npages = 1; r->pdelta[0] = 0; r->ppf[0] = e->pAddr >> 12; r->pmask[0] = 0;
 +  const Bit8u *hostOf[NB_REGION_MAX_PAGES]; hostOf[0] = NULL;
 +  unsigned totalInstr = 0;
 +  // the entry's linear address (cpu_loop calls us right after RIP += ilen(first)): needed to find
 +  // the physical page behind another linear page through the ITLB / page walk
 +  bx_address entryPageLin = entryLin & ~(bx_address) 0xfff;
++  // one region per FUNCTION: a successor outside the containing function does not join (nb_fn_range)
++  Bit64u fnLo = 0, fnHi = 0;
++  bool fnBound = (nanobox_jit_aot && (nanobox_jit_aot_detform & 2)) && nb_fn_range(entryLin, &fnLo, &fnHi);
 +  // BFS. Decode-ahead can evict a slot the walk already collected, so remember what each entry must
 +  // still be (physical address + trace length) and revalidate before copying the bytes out.
 +  bxICacheEntry_c *src[NB_REGION_MAX_BLOCKS]; Bit32s boffs[NB_REGION_MAX_BLOCKS]; unsigned bpage[NB_REGION_MAX_BLOCKS];
@@ -5988,6 +6408,7 @@ index 000000000..1e7376ce5
 +      if (dup) continue;
 +      // which page does the target lie in?
 +      bx_address lin = entryLin + (bx_address) roff;
++      if (fnBound && ((Bit64u) lin < fnLo || (Bit64u) lin >= fnHi)) { nanobox_region_stats[35]++; continue; }   // leaves the function
 +      Bit64s pd = (Bit64s)((lin & ~(bx_address) 0xfff) - entryPageLin) >> 12;
 +      unsigned p = 0; bool found = false;
 +      for (; p < r->npages; p++) if ((Bit64s) r->pdelta[p] == pd) { found = true; break; }
@@ -6000,7 +6421,10 @@ index 000000000..1e7376ce5
 +        bx_address lin2 = lin & ~(bx_address) 0xfff;
 +        bx_TLB_entry *tl = BX_ITLB_ENTRY_OF(lin2);
 +        Bit64u frame = 0; const Bit8u *host = NULL;
-+        if (!nanobox_aot_src_covers(lin2) && tl->lpf == LPFOf(lin2) && (tl->accessBits & (1u << BX_CPU_THIS_PTR user_pl))) { frame = tl->ppf >> 12; host = (const Bit8u *) tl->hostPageAddr; }
++        // the ITLB is runtime state (the offline translator's is empty), so under detform the frame
++        // always comes from the page tables / the offline source window
++        bool useTlb = !(nanobox_jit_aot && (nanobox_jit_aot_detform & 1));
++        if (useTlb && !nanobox_aot_src_covers(lin2) && tl->lpf == LPFOf(lin2) && (tl->accessBits & (1u << BX_CPU_THIS_PTR user_pl))) { frame = tl->ppf >> 12; host = (const Bit8u *) tl->hostPageAddr; }
 +        else if (nanobox_jit_aot) {
 +          // (AOT mode: user pages too -- keeps the walk independent of the ITLB's state, so the offline
 +          //  driver and the runtime form the same region; the transition still checks the ITLB + frame)
@@ -6026,7 +6450,8 @@ index 000000000..1e7376ce5
 +      }
 +      unsigned sn = nanobox_real_len(se);
 +      if (sn == 0 || sn > nanobox_jit_maxlen) continue;
-+      if (nanobox_jit_aot_minhot && *BX_CPU_THIS_PTR iCache.hotOf(se) < nanobox_jit_aot_minhot) { nanobox_region_stats[24]++; continue; } // cold successor: not worth the code
++      if (!(nanobox_jit_aot && (nanobox_jit_aot_detform & 1)) && nanobox_jit_aot_minhot && *BX_CPU_THIS_PTR iCache.hotOf(se) < nanobox_jit_aot_minhot) { nanobox_region_stats[24]++; continue; } // cold successor: not worth the code
++      if ((nanobox_jit_aot_detform & 32) && nb_claimed(lin)) { nanobox_region_stats[52]++; continue; }   // a block of an earlier region of this sweep
 +      if (nanobox_jit_aot_dedupe && se->jitfn) { nanobox_region_stats[25]++; continue; }   // already compiled elsewhere: do not copy it into this region too
 +      if (totalInstr + sn > NB_REGION_MAX_INSTR) { nanobox_region_stats[14]++; continue; }
 +      // a trace that branches back to its own start is better off as a single-trace loop (registers
@@ -6107,6 +6532,8 @@ index 000000000..1e7376ce5
 +    }
 +  }
 +  r->key = h ? h : 1;
++  if (nanobox_jit_aot_detform & 32)
++    for (unsigned j = 0; j < nb; j++) nb_claim_mark(entryLin + (bx_address)(Bit64s) r->b[j].boff);
 +  // key log (TASKS.md S.3): (entry address, content key, blocks) for the last NB_KEYLOG regions, so a
 +  // run's keys can be diffed against the ones the offline translator produced for the same addresses
 +  if (nb_keylog_on && nb_keylog_n < NB_KEYLOG) { nb_keylog[nb_keylog_n][0] = (Bit64u) entryLin; nb_keylog[nb_keylog_n][1] = r->key; nb_keylog[nb_keylog_n][2] = nb; nb_keylog_n++; }
@@ -6120,6 +6547,24 @@ index 000000000..1e7376ce5
 +// widened any more, so the fine granularity mapping stays a superset of the reference mapping only by
 +// the ahead-decoded chunks. Records are removed when the region is dropped; the pool is swept when
 +// full, and if still full the JIT cache is cleared (which resets the registry).
++// Functions already swept: the first touch of a guest function builds the WHOLE function the way the
++// offline translator did, once. Reset with the attach registry (i.e. whenever the JIT cache is cleared
++// and every translation is gone).
++enum { NB_FNSWEPT = 1 << 16 };
++static Bit64u *nb_fnswept = NULL;
++static void nb_fnswept_reset(void) { if (nb_fnswept) memset(nb_fnswept, 0, NB_FNSWEPT * sizeof(Bit64u)); }
++static bool nb_fnswept_mark(Bit64u a)          // true = not seen before (and now recorded)
++{
++  if (!a) return false;
++  if (!nb_fnswept) { nb_fnswept = (Bit64u *) calloc(NB_FNSWEPT, sizeof(Bit64u)); if (!nb_fnswept) return false; }
++  unsigned i = (unsigned)((a * 0x9E3779B97F4A7C15ull) >> 40) & (NB_FNSWEPT - 1);
++  for (unsigned p = 0; p < 128; p++) {
++    Bit64u *slot = &nb_fnswept[(i + p) & (NB_FNSWEPT - 1)];
++    if (*slot == a) return false;
++    if (*slot == 0) { *slot = a; return true; }
++  }
++  return false;                                 // table crowded: never sweep this one again
++}
 +struct AttachRec { Bit64u ppage; Region *r; Bit32u mask; int next; };
 +enum { NB_ATTACH_POOL = 131072, NB_ATTACH_BUCKETS = 8192 };
 +static AttachRec *nb_attach = NULL; static int nb_attach_head[NB_ATTACH_BUCKETS]; static int nb_attach_free = -1; static bool nb_attach_init = false; static unsigned nb_attach_used = 0;
@@ -6131,6 +6576,7 @@ index 000000000..1e7376ce5
 +  nb_attach_free = 0; nb_attach_used = 0;
 +  for (int b = 0; b < NB_ATTACH_BUCKETS; b++) nb_attach_head[b] = -1;
 +  nb_attach_init = true;
++  nb_fnswept_reset();
 +  if (++nb_attach_epoch == 0) nb_attach_epoch = 1;
 +}
 +static bool nanobox_attach_registered(const Region *r) { return nb_attach_init && r->regEpoch != 0 && r->regEpoch == nb_attach_epoch; }
@@ -6227,10 +6673,57 @@ index 000000000..1e7376ce5
 +    bxICacheEntry_c *se = (r->srcEntry[j] == e || (j == 0 && e->pAddr == pa)) ? e : BX_CPU_THIS_PTR iCache.get_entry(pa, BX_CPU_THIS_PTR fetchModeMask);
 +    r->srcEntry[j] = se; r->pending[j] = 1;
 +    if (se->pAddr != pa || se->tlen != r->b[j].ent.tlen) continue;
-+    if (se != e && memcmp(se->i, r->b[j].ins, se->tlen * sizeof(bxInstruction_c)) != 0) continue; // a different trace lives there now
++    // REAL instructions only: serveICacheMiss appends the end-of-trace marker with
++    // genDummyICacheEntry(), which writes three fields and leaves the rest of that pool slot holding
++    // whatever an earlier decode left there. A full-length compare therefore rejects blocks that are
++    // in fact identical -- 88,945 such refusals in one boot, against 18 once this was fixed.
++    if (se != e && memcmp(se->i, r->b[j].ins, (size_t) nanobox_real_len(se) * sizeof(bxInstruction_c)) != 0) continue;
 +    if (se->jitfn && se != e) continue; // already has its own translation
 +    se->jitfn = fn; se->jitarg = (Bit32u)(uintptr_t) &r->entry[j];
 +  }
++}
++
++// Is `e` already a MEMBER block of a live, attached region? A region wires every member block's iCache
++// entry at attach time, but only the entries that exist then, and an entry loses its wiring whenever
++// its slot is reused. When the guest later reaches such a block, maybe_compile used to root a SECOND
++// region there -- one the offline translator never built, so its key is absent from the artifact.
++// Every block is an entry point (entry[j] carries its own delta), so the answer is to attach to the
++// region that already covers this address.
++static Region *nanobox_region_find_member(bxICacheEntry_c *e, bx_address eLin, unsigned *blockOut, bool kern)
++{
++  if (!nb_attach_init || nb_attach_used == 0) return NULL;
++  Bit64u pp = (Bit64u) e->pAddr >> 12;
++  unsigned onPage = 0, sameAddr = 0;
++  for (int idx = nb_attach_head[nanobox_attach_bucket(pp)]; idx >= 0; idx = nb_attach[idx].next) {
++    AttachRec &a = nb_attach[idx];
++    if (a.ppage != pp) continue;
++    Region *r = a.r;
++    if (!r || r->dead || !r->fn || !nanobox_attach_registered(r)) continue;
++    onPage++;
++    for (unsigned j = 0; j < r->nblocks; j++) {
++      if (r->b[j].ent.pAddr != e->pAddr) continue;
++      if ((Bit64u)(r->lin0 + (Bit64u)(Bit64s) r->b[j].boff) != (Bit64u) eLin) continue;   // same bytes, other linear placement
++      sameAddr++;
++      if (r->b[j].ent.tlen != e->tlen) { nanobox_region_stats[47]++; continue; }
++      if (memcmp(e->i, r->b[j].ins, (size_t) nanobox_real_len(e) * sizeof(bxInstruction_c)) != 0) continue;
++      *blockOut = j;
++      return r;
++    }
++  }
++  { unsigned base = kern ? 39 : 42;
++    if (!onPage) nanobox_region_stats[base]++; else if (!sameAddr) nanobox_region_stats[base + 1]++; else nanobox_region_stats[base + 2]++; }
++  return NULL;
++}
++// Attach e as a member of r. This goes through the ordinary attach rather than hand-wiring the one
++// entry, and that is not cosmetic: nanobox_region_attach re-REGISTERS the region, which re-marks the
++// write stamps for every page it covers, so a later write to the code still reaches handleSMC and
++// drops the region. Hand-wiring skipped that; the region then survived writes to its own bytes and was
++// called forever through the direct-call inline caches, which the guest showed as an endless spin in
++// delay_tsc. (Bisected with the NANOBOX_AOT_DETFORM bitmask: masks 1 and 3 boot, mask 7 did not.)
++static void nanobox_region_attach_member(bxICacheEntry_c *e, Region *r, unsigned j)
++{
++  (void) j;
++  nanobox_region_attach(e, r->fn, r->mask, r);
 +}
 +
 +// called by serveICacheMiss() once a trace has been decoded into `e`
@@ -6239,6 +6732,12 @@ index 000000000..1e7376ce5
 +  // (the slot's hotness counter is deliberately kept: a re-decoded trace inherits it)
 +  if (!nanobox_jit_level || nanobox_dbg_mode) return;
 +  if (nanobox_marks_private) return;   // decoded ahead: no translation before its first execution has been seen (reference marks)
++  // Deterministic formation: this hands a freshly decoded entry a translation compiled for a DIFFERENT
++  // address that happened to decode to the same bytes (the plain-trace key is content only). Whether
++  // it lands depends on what the cache holds, and it then keeps the entry out of maybe_compile
++  // entirely -- so the site never joins the region its function was translated as, and the two sides
++  // disagree about which addresses carry a region at all.
++  if (nanobox_jit_aot && (nanobox_jit_aot_detform & 1)) return;
 +  unsigned nreal;
 +  Bit64u key = nanobox_jit_hash(e, nreal);
 +  JitCacheEntry *c = nanobox_jit_cache_slot(key);
@@ -6490,6 +6989,11 @@ index 000000000..1e7376ce5
 +// block of a region is wired to its own entry descriptor by nanobox_region_attach, so entering in the
 +// middle costs nothing.
 +static Bit64u *nb_fnmap = NULL;          // sorted function start addresses
++// ...interleaved with END sentinels. One map now holds several text regions -- the kernel plus every
++// user program whose boundaries were loaded -- and the space between them belongs to no function, so
++// an address there must not be given the range [last function of region N, first of region N+1).
++// nb_fnmap_gap[i] = 1 marks entry i as "this is where a text region ENDS".
++static Bit8u *nb_fnmap_gap = NULL;
 +static unsigned nb_fnmap_n = 0, nb_fnmap_cap = 0;
 +static Bit64u nb_fnmap_lo = 0, nb_fnmap_hi = 0;
 +NB_EXPORT(nanobox_aot_fnmap_reset) void nanobox_aot_fnmap_reset(void) { nb_fnmap_n = 0; nb_fnmap_lo = nb_fnmap_hi = 0; }
@@ -6501,25 +7005,68 @@ index 000000000..1e7376ce5
 +    unsigned cap = nb_fnmap_cap ? nb_fnmap_cap * 2 : 4096;
 +    Bit64u *p = (Bit64u *) realloc(nb_fnmap, cap * sizeof(Bit64u));
 +    if (!p) return;
-+    nb_fnmap = p; nb_fnmap_cap = cap;
++    Bit8u *g = (Bit8u *) realloc(nb_fnmap_gap, cap);
++    if (!g) return;
++    nb_fnmap = p; nb_fnmap_gap = g; nb_fnmap_cap = cap;
 +  }
++  nb_fnmap_gap[nb_fnmap_n] = 0;
 +  if (!nb_fnmap_n) nb_fnmap_lo = a;
 +  nb_fnmap[nb_fnmap_n++] = a; nb_fnmap_hi = a;
++}
++// mark the end of a text region: addresses from here to the next entry are inside no function
++NB_EXPORT(nanobox_aot_fnmap_gap) void nanobox_aot_fnmap_gap(unsigned linLo, unsigned linHi)
++{
++  nanobox_aot_fnmap_add(linLo, linHi);
++  if (nb_fnmap_n) nb_fnmap_gap[nb_fnmap_n - 1] = 1;
 +}
 +NB_EXPORT(nanobox_aot_fnmap_count) unsigned nanobox_aot_fnmap_count(void) { return nb_fnmap_n; }
 +NB_EXPORT(nanobox_keylog_count) unsigned nanobox_keylog_count(void) { return nb_keylog_n; }
 +NB_EXPORT(nanobox_keylog_reset) void nanobox_keylog_reset(void) { nb_keylog_n = 0; }
 +NB_EXPORT(nanobox_keylog_enable) void nanobox_keylog_enable(unsigned on) { nb_keylog_on = on; nb_keylog_n = 0; }
 +NB_EXPORT(nanobox_keylog_at) double nanobox_keylog_at(unsigned i, unsigned which) { return i < nb_keylog_n && which < 3 ? (double) nb_keylog[i][which] : 0; }
++// 64-bit safe reader: a double cannot hold a 64-bit address or content key (its ulp is 2048 up there),
++// and reading the key log through one quantised every address into a 2 KB bucket -- which is how the
++// first diff concluded "214 distinct addresses out of 4000 functions" when there were thousands.
++// which = 2*field + half (field 0 addr, 1 key, 2 blocks; half 0 = low 32 bits).
++NB_EXPORT(nanobox_keylog_word) unsigned nanobox_keylog_word(unsigned i, unsigned which)
++{
++  if (i >= nb_keylog_n || which >= 6) return 0;
++  Bit64u v = nb_keylog[i][which >> 1];
++  return (which & 1) ? (unsigned)(v >> 32) : (unsigned)(v & 0xffffffffu);
++}
 +// the start of the function containing `lin`, or 0
 +static Bit64u nb_fn_start(bx_address lin)
 +{
 +  if (!nb_fnmap_n || lin < nb_fnmap_lo || lin > nb_fnmap_hi) return 0;
 +  unsigned lo = 0, hi = nb_fnmap_n;                 // greatest start <= lin
 +  while (lo + 1 < hi) { unsigned mid = (lo + hi) / 2; if (nb_fnmap[mid] <= (Bit64u) lin) lo = mid; else hi = mid; }
++  if (nb_fnmap_gap && nb_fnmap_gap[lo]) return 0;   // past the end of that text region
 +  return nb_fnmap[lo];
 +}
++// [start, end) of the function containing `lin` (end = the next function's start; false when `lin` is
++// outside the map). The former uses it to keep a region inside ONE function: the static walk follows
++// fall-through and CALL continuations, which at the tail of a function run straight into the next one,
++// so without a boundary a region rooted in F swallows the entry of F+1 -- and F+1 then never gets a
++// region of its own. Which functions get swallowed depends on the ORDER the walks run in, so the
++// offline translator (ascending addresses) and the runtime (execution order) produced different
++// regions at the same address. Measured before this bound: the artifact held a region at only 2,887 of
++// 29,013 kernel function starts.
++static bool nb_fn_range(bx_address lin, Bit64u *lo, Bit64u *hi)
++{
++  if (!nb_fnmap_n || lin < nb_fnmap_lo || lin > nb_fnmap_hi) return false;
++  unsigned a = 0, b = nb_fnmap_n;
++  while (a + 1 < b) { unsigned mid = (a + b) / 2; if (nb_fnmap[mid] <= (Bit64u) lin) a = mid; else b = mid; }
++  if (nb_fnmap_gap && nb_fnmap_gap[a]) return false;   // between two text regions: no function here
++  *lo = nb_fnmap[a];
++  *hi = (a + 1 < nb_fnmap_n) ? nb_fnmap[a + 1] : (Bit64u) -1;
++  return true;
++}
 +static void nanobox_jit_maybe_compile_at(bxICacheEntry_c *e, bx_address entryLin, Region **formed);
++// depth of the "the function's region did not reach the block the guest is at" recursion: the retarget
++// is tried once per call site, never again inside the fallback
++static unsigned nb_retarget_depth = 0;
++static unsigned nb_sweeping = 0;              // inside a whole-function sweep (no nested sweeps)
++static int nb_aot_sweep_function(bx_address lin, unsigned len, unsigned flags);
 +static void nanobox_jit_maybe_compile_inner(bxICacheEntry_c *e)
 +{
 +  nanobox_jit_maybe_compile_at(e, RIP - e->i[0].ilen(), NULL);
@@ -6539,13 +7086,44 @@ index 000000000..1e7376ce5
 +                        (nanobox_jit_aot && nanobox_stats.interp_traces - nb_batch_since_interp > 256))) nanobox_jit_batch_flush();
 +    if (nanobox_jit_pending(e)) { nanobox_aot_stats[6]++; return; }
 +  }
++  // If this block already belongs to a LIVE region -- formed at the containing function, its members
++  // wired at the attach -- attach to that region instead of rooting a second one here.
++  if (nanobox_jit_aot && (nanobox_jit_aot_detform & 4)) {
++    unsigned mj = 0;
++    bool kern = (Bit64u) entryLin >= 0xffff800000000000ull;
++    if (kern || (nanobox_jit_aot_detform & 16)) {
++      Region *mr = nanobox_region_find_member(e, entryLin, &mj, kern);
++      if (mr) { nanobox_region_attach_member(e, mr, mj); nanobox_region_stats[kern ? 32 : 45]++; return; }
++      nanobox_region_stats[kern ? 33 : 46]++;
++    }
++  }
 +  // 1. region (entry + reachable traces in this page), unless the entry loops on itself (the
 +  //    single-trace loop compile keeps registers in locals across iterations)
 +  // AOT: root the region at the containing FUNCTION, not at the block the guest happened to enter,
 +  // so the region is the same object the offline translator built (TASKS.md S.3). If the function's
 +  // region turns out not to cover this block (a budget cut short of it), fall back to forming here.
 +  bxICacheEntry_c *origE = e; bx_address origLin = entryLin;
-+  if (nanobox_jit_aot && nb_fnmap_n) {
++  // The guest has touched an address in a function nothing covers yet -> build the WHOLE function
++  // exactly the way the offline translator builds it (the same queue from the function's first byte,
++  // the same gap sweep, the same budgets). The regions that come out carry the artifact's keys and are
++  // FOUND instead of compiled. Rooting a region at whatever block the guest happened to enter is what
++  // made the two disagree. It also gives the direct-call inline caches a stable callee: a CALL resolves
++  // by address, and the callee's translation is now its FUNCTION's region.
++  if (nanobox_jit_aot && (nanobox_jit_aot_detform & 2) && nanobox_jit_aot_sweep && nb_fnmap_n && !nb_sweeping && nb_retarget_depth == 0) {
++    Bit64u flo = 0, fhi = 0;
++    if (nb_fn_range(entryLin, &flo, &fhi) && fhi > flo && nb_fnswept_mark(flo)) {
++      Bit64u flen = fhi - flo; if (flen > (1u << 20)) flen = 1u << 20;
++      nanobox_region_stats[36]++;
++      nb_protect_entry = origE;
++      nb_sweeping++;
++      nb_aot_sweep_function((bx_address) flo, (unsigned) flen, 1);
++      nb_sweeping--;
++      nb_protect_entry = NULL;
++      if (e->jitfn) { nanobox_region_stats[37]++; return; }
++      nanobox_region_stats[38]++;
++    }
++  }
++  if (nanobox_jit_aot && nb_fnmap_n && nb_retarget_depth == 0 && !(nanobox_jit_aot_detform & 2)) {
 +    Bit64u fstart = nb_fn_start(entryLin);
 +    if (fstart && fstart != (Bit64u) entryLin) {
 +      bx_phy_address fpa = 0;
@@ -6553,7 +7131,8 @@ index 000000000..1e7376ce5
 +        const Bit8u *fhost = nanobox_host_page(fpa & ~(bx_phy_address) 0xfff);
 +        if (fhost) {
 +          bxICacheEntry_c *fe = BX_CPU_THIS_PTR iCache.get_entry(fpa, BX_CPU_THIS_PTR fetchModeMask);
-+          if (fe->pAddr != fpa || fe->tlen == 0) fe = nanobox_decode_ahead(fpa, fhost, NULL, 0);
++          bxICacheEntry_c *avoid1[1] = { origE };   // never reuse the slot cpu_loop is running out of
++          if (fe->pAddr != fpa || fe->tlen == 0) fe = nanobox_decode_ahead(fpa, fhost, avoid1, 1);
 +          if (fe && nanobox_real_len(fe) && !fe->jitfn && !nanobox_jit_pending(fe)) {
 +            nanobox_region_stats[26]++;
 +            e = fe; entryLin = (bx_address) fstart;
@@ -6569,7 +7148,7 @@ index 000000000..1e7376ce5
 +  if (reg) {
 +    if (nanobox_jit_try_cached(e, reg, reg->key)) {
 +      nanobox_aot_stats[8]++;
-+      if (e != origE && !origE->jitfn && !nanobox_jit_pending(origE)) { nanobox_region_stats[27]++; nanobox_jit_maybe_compile_at(origE, origLin, NULL); }
++      if (e != origE && !origE->jitfn && !nanobox_jit_pending(origE)) { nanobox_region_stats[27]++; nb_retarget_depth++; nanobox_jit_maybe_compile_at(origE, origLin, NULL); nb_retarget_depth--; }
 +      return;
 +    }
 +    // region keys depend on which neighbours the iCache happens to hold; a pre-computed bundle
@@ -6583,7 +7162,7 @@ index 000000000..1e7376ce5
 +    if (nanobox_jit_compile_one(e, reg, reg->key)) {
 +      nanobox_aot_stats[9]++;
 +      // the guest is at origE: if the function's region did not reach that block, translate it too
-+      if (e != origE && !origE->jitfn && !nanobox_jit_pending(origE)) { nanobox_region_stats[27]++; nanobox_jit_maybe_compile_at(origE, origLin, NULL); }
++      if (e != origE && !origE->jitfn && !nanobox_jit_pending(origE)) { nanobox_region_stats[27]++; nb_retarget_depth++; nanobox_jit_maybe_compile_at(origE, origLin, NULL); nb_retarget_depth--; }
 +      return;
 +    }
 +    nanobox_aot_stats[13]++;
@@ -6635,16 +7214,25 @@ index 000000000..1e7376ce5
 +  // window cannot be read through a stale iCache entry
 +  BX_CPU_THIS_PTR iCache.flushICacheEntries();
 +}
-+NB_EXPORT(nanobox_aot_compile_function) int nanobox_aot_compile_function(unsigned linLo, unsigned linHi, unsigned len, unsigned cpl, unsigned flags)
++// The sweep itself, shared by the offline driver's export and by the runtime's first touch of a
++// function: running the SAME walk from the SAME start is what makes the two produce the same regions at
++// the same addresses, and therefore the same keys.
++static int nb_aot_sweep_function(bx_address lin, unsigned len, unsigned flags)
 +{
-+  if (!nanobox_jit_aot || nanobox_jit_level < 2 || nanobox_dbg_mode) return -1;
-+  if (BX_CPU_THIS_PTR cpu_mode != BX_MODE_LONG_64) return -3;
-+  bx_address lin = ((bx_address) linHi << 32) | (bx_address) linLo;
-+  if (len == 0) len = 1;
-+  { bx_phy_address phy = 0; if (!nanobox_aot_xlate(lin, &phy)) { nanobox_aot_stats[3]++; return -2; } }
-+  nanobox_aot_stats[0]++;
-+  Bit8u saveUpl = BX_CPU_THIS_PTR user_pl; BX_CPU_THIS_PTR user_pl = (cpl == 3) ? 1 : 0;
-+  unsigned saveAhead = nanobox_jit_aot_ahead; nanobox_jit_aot_ahead = 1;   // offline: the code being translated has never executed
++  // Decode ahead for the duration: a sweep translates code that has not executed yet, which is exactly
++  // what nanobox_jit_aot_ahead gates (it is off by default at runtime).
++  unsigned saveAhead = nanobox_jit_aot_ahead; nanobox_jit_aot_ahead = 1;
++  // The iCache instruction pool never empties by itself in an OFFLINE sweep: nanobox_decode_ahead
++  // refuses to let serveICacheMiss flush it (the caller holds entries) and nothing else decodes. Once
++  // it fills, every successor decode fails, regions collapse to a single block and whole functions come
++  // out as plain traces -- measured on the full kernel: 15,968 refusals, and mas_alloc_nodes, which
++  // yields five regions translated on its own, yielded NONE inside the 29,013-function run. Between
++  // functions nothing is held, so reset it there. Host driven only (nb_protect_entry == NULL): with the
++  // guest running, cpu_loop is interpreting out of that pool and a flush would rewrite it underneath.
++  if (nanobox_jit_aot_poolreset && !nb_protect_entry && BX_CPU_THIS_PTR iCache.mpindex > BxICacheMemPool / 2)
++    BX_CPU_THIS_PTR iCache.flushICacheEntries();
++  Bit8u *saveClaim = nb_claim; bx_address saveClaimLin = nb_claim_lin; unsigned saveClaimLen = nb_claim_len;
++  if (nanobox_jit_aot_detform & 32) { nb_claim = (Bit8u *) calloc(len, 1); nb_claim_lin = lin; nb_claim_len = nb_claim ? len : 0; }
 +  Bit8u *covered = (Bit8u *) calloc(len, 1);   // byte coverage of [lin, lin+len)
 +  enum { QMAX = 8192 };
 +  Bit32u *queue = (Bit32u *) malloc(QMAX * sizeof(Bit32u)); unsigned qh = 0, qt = 0;
@@ -6699,8 +7287,25 @@ index 000000000..1e7376ce5
 +    if (qh >= qt) break;   // could not be queued (started / queue full)
 +  }
 +  free(covered); free(queue); free(started);
-+  BX_CPU_THIS_PTR user_pl = saveUpl;
++  if (nb_claim) free(nb_claim);
++  nb_claim = saveClaim; nb_claim_lin = saveClaimLin; nb_claim_len = saveClaimLen;
 +  nanobox_jit_aot_ahead = saveAhead;
++  return done;
++}
++NB_EXPORT(nanobox_aot_compile_function) int nanobox_aot_compile_function(unsigned linLo, unsigned linHi, unsigned len, unsigned cpl, unsigned flags)
++{
++  if (!nanobox_jit_aot || nanobox_jit_level < 2 || nanobox_dbg_mode) return -1;
++  if (BX_CPU_THIS_PTR cpu_mode != BX_MODE_LONG_64) return -3;
++  bx_address lin = ((bx_address) linHi << 32) | (bx_address) linLo;
++  if (len == 0) len = 1;
++  { bx_phy_address phy = 0; if (!nanobox_aot_xlate(lin, &phy)) { nanobox_aot_stats[3]++; return -2; } }
++  nanobox_aot_stats[0]++;
++  Bit8u saveUpl = BX_CPU_THIS_PTR user_pl; BX_CPU_THIS_PTR user_pl = (cpl == 3) ? 1 : 0;
++  nb_sweeping++;                                  // the sites inside must not start sweeps of their own
++  nb_fnswept_mark((Bit64u) lin);
++  int done = nb_aot_sweep_function(lin, len, flags);
++  nb_sweeping--;
++  BX_CPU_THIS_PTR user_pl = saveUpl;
 +  return done;
 +}
 +

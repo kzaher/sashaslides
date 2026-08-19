@@ -1575,3 +1575,36 @@ region OF THE SAME SWEEP does not join", tracked in the sweep's own claim map. A
 
 Outlining (T.1) also pays inside this work exactly as predicted: row C's compiled volume went
 349 MB -> 203 MB (-42 %) and its boot 26.3 s -> 21.9 s with no other change.
+
+### T.5 The answer: "nothing interpreted" is reachable, stable, and costs a boot (2026-08-19)
+
+With `norandmaps` adopted, codex's text base is `0x7fffe905b000` under the trace JIT, under AOT, under
+AOT+threshold-1+detform+dedupe, and in the offline driver's own recording run -- the same base every
+time, where before the adoption the same comparison moved 51 GB. Everything below is on that image.
+
+**The function set converges in two iterations**: 1,609 -> 5,572 -> **0 new**. The runtime touches 5,523
+codex functions and every one is in the artifact, so coverage is SOLVED; what remained was key
+divergence inside covered functions, fixed by the user-space member attach (safe now that a user page
+cannot move: the member search requires equal physical address, trace length, real instructions AND
+linear placement). That took regions 176,693 -> 90,634, wasm 228 -> 187 MB, user serve 62.5 -> 68.0 %,
+worst keystroke 515 -> 172 ms.
+
+| | boot | keys med/max | wasm | kernel served | user served | regions | interpreted |
+|---|---|---|---|---|---|---|---|
+| **A** shipped (threshold 2000) | **7.4 s** | 10/45 ms | **18 MB** | -- | -- | 2,658 | 203.9 M |
+| **C** everything precompiled (threshold 1, detform 63, both artifacts) | 26.7 s | 17/172 ms | 187 MB | 66.8 % | 68.0 % | 90,634 | **1.3 M** |
+
+**99.4 % of interpretation eliminated, for ~19 s of boot and ~430 MB of artifact.** Keys are no longer
+the problem (99.9 % agreement) and neither is coverage. The problem is SWEEP SCOPE: threshold 1 with
+function-scoped sweeps translates every path in every function the guest enters, and the guest runs a
+fraction of them -- 90,634 region descriptors and 187 MB against row A's 2,658 and 18 MB.
+
+So the conclusion the measurements support: **the interpreter earns its place on run-once code, and
+AOT's win is the 3.7x on everything that repeats.** "Nothing interpreted" ships as an available mode
+with a known price, not as the default. The next lever, if it is ever wanted, is not matching or
+coverage but translating the paths a function actually RUNS -- per-function profile data in the
+artifact, a different project.
+
+Merged with `nanobox_jit_aot_detform` defaulting to 0. Gate on both guests, new image:
+`IDENTITY: identical (codex + agy)`, `BISECT: no divergence`; guest verified; fib loop 0.62 ns/iteration;
+icount 643,129,628 vs 643,129,730 AOT+detform vs AOT off -- 102 instructions in 643 M (1.6e-7).
