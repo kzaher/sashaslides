@@ -34,7 +34,7 @@ import { WASI, wasi as wasitype, PreopenDirectory, File, Directory } from "@bjor
 
 const argv = process.argv.slice(2);
 if (argv.length === 0) { console.error("usage: run.mjs <out.wasm> [options]"); process.exit(2); }
-const opts = { wasm: argv[0], cmd: null, stdinFile: null, type: [], afterExpect: [], ioLog: null, pagesMark: null, dumpDir: null, timeout: 0, quiet: false, clock: "frozen", stats: false, transcript: null, noStdin: false, mounts: [], jit: null, jitDump: null, replies: [], savePhys: [], jitBundle: [], jitBundleOut: null, bundleFiles: [] };
+const opts = { wasm: argv[0], cmd: null, stdinFile: null, type: [], afterExpect: [], ioLog: null, pagesMark: null, dumpDir: null, timeout: 0, quiet: false, clock: "frozen", stats: false, transcript: null, noStdin: false, mounts: [], jit: null, jitDump: null, replies: [], savePhys: [], jitBundle: [], jitBundleOut: null, bundleFiles: [], pageHash: null, stackMap: null, stackSpan: null, sysTrace: null, sysSnip: 0 };
 for (let i = 1; i < argv.length; i++) {
   const a = argv[i], v = () => argv[++i];
   if (a === "--cmd") opts.cmd = v();
@@ -64,6 +64,13 @@ for (let i = 1; i < argv.length; i++) {
   else if (a === "--dbg") opts.dbg = v();               // MODE:EVERY[:FROM:TO] trace fingerprint log (see nanobox.cc)
   else if (a === "--dbg-out") opts.dbgOut = v();        // file for the fingerprint log
   else if (a === "--no-hash") opts.noHash = true;       // skip RAM hashing at markers (timing runs)
+  // ---- heap+syscalls oracle (test/identity.sh --criteria heap+syscalls); all three are no-ops on an
+  // engine without the oracle exports, and cost nothing when the flags are absent.
+  else if (a === "--page-hash") opts.pageHash = v();            // per-4KiB-guest-physical-page 64-bit hash at every marker (lets a mask be applied offline)
+  else if (a === "--stack-map") opts.stackMap = v();
+  else if (a === "--stack-span") opts.stackSpan = Number(v());  // bytes above RSP an SS access may land in and still mark the page as stack (0 = no proximity test)            // guest-physical pages the CPU used as a CALL STACK, with the sequence of the last use
+  else if (a === "--syscall-trace") opts.sysTrace = v();        // ordered guest syscall trace (number, args, return, write payloads)
+  else if (a === "--syscall-snip") opts.sysSnip = Number(v());  // verbatim payload bytes kept per write-like buffer (default 48; the whole buffer is always hashed)
   else if (a === "--save-phys") { const r = v(); const c = r.lastIndexOf(":"); opts.savePhys.push({ addr: Number(r.slice(0, c)), file: r.slice(c + 1) }); } // ADDR:FILE — write the 4 KiB guest-physical page at exit
   else if (a === "--focus") opts.focus = v();           // with --pages: LPAGE_HEX:FILE — per-offset histogram of trace starts inside that linear page
   else if (a === "--dump-start") opts.dumpStart = true;
@@ -212,6 +219,7 @@ function takeDump(label) {
   // work needs both -- a policy that moves the compiles from the boot into the interactive path is
   // not a fix; work/prof/boot.md)
   rec.jit = { fns: jitState.installed, mb: +(jitState.bytes / 1e6).toFixed(1), compileMs: +jitState.compileMs.toFixed(0) };
+  if (opts.pageHash && ex.nanobox_mem_block_ptr) rec.pageHash = writePageHashes(label, rec);
   if (ex.nanobox_mem_block_ptr && !opts.noHash) Object.assign(rec, hashGuestRam(opts.dumpDir ? path.join(opts.dumpDir, `${String(markerCount).padStart(3, "0")}-${label}.ram`) : null));
   markerCount++;
   dumps.push(rec);
@@ -241,6 +249,64 @@ function hashGuestRam(file) {
   }
   if (out) fs.closeSync(out);
   return { sha256: hash.digest("hex"), blocks: { allocated, total: nblocks, blockSize: bs, mapSha: crypto.createHash("sha256").update(Buffer.from(map)).digest("hex").slice(0, 16) } };
+}
+
+// ---- heap-only oracle: per-page hashes + the stack-page map ------------------------------------
+// One 64-bit hash per guest-PHYSICAL 4 KiB page (0 for a page inside a block Bochs never allocated,
+// i.e. all zero). Hashing per page instead of over all of RAM is what lets an exclusion mask -- the
+// stack pages -- be applied AFTER the run, offline, without re-reading a gigabyte of memory: the
+// heap-only digest is just the combination of the hashes of the pages the mask keeps.
+function pageHashes() {
+  const ex = inst.exports;
+  const len = ex.nanobox_mem_len(), bs = ex.nanobox_mem_block_size();
+  const nblocks = Math.floor(len / bs), perBlock = Math.floor(bs / 4096), npages = Math.floor(len / 4096);
+  const u32 = new Uint32Array(mem());
+  const out = new Uint32Array(npages * 2);
+  let allocated = 0;
+  for (let b = 0; b < nblocks; b++) {
+    const p = ex.nanobox_mem_block_ptr(b);
+    if (!p || (p & 3)) { if (p) console.error(`[harness] page-hash: block ${b} pointer ${p} is not 4-byte aligned`); continue; }
+    allocated++;
+    for (let q = 0; q < perBlock; q++) {
+      const w0 = (p >> 2) + q * 1024, page = b * perBlock + q;
+      let h1 = 0x811c9dc5 | 0, h2 = 0x9e3779b9 | 0;
+      for (let k = 0; k < 1024; k++) {
+        const v = u32[w0 + k];
+        h1 = Math.imul(h1 ^ v, 0x01000193); h1 = (h1 << 15) | (h1 >>> 17);
+        h2 = Math.imul(h2 + v, 0x85ebca6b); h2 = (h2 << 13) | (h2 >>> 19);
+      }
+      out[page * 2] = h1 >>> 0; out[page * 2 + 1] = h2 >>> 0;
+    }
+  }
+  return { npages, blockSize: bs, perBlock, allocatedBlocks: allocated, words: out };
+}
+function writePageHashes(label, rec) {
+  const t = performance.now();
+  const h = pageHashes();
+  const hdr = { label, icount: rec.icount, ticks: rec.ticks, rip: rec.rip, npages: h.npages, blockSize: h.blockSize, allocatedBlocks: h.allocatedBlocks };
+  fs.appendFileSync(opts.pageHash, JSON.stringify(hdr) + "\n" + Buffer.from(h.words.buffer).toString("base64") + "\n");
+  return { file: opts.pageHash, npages: h.npages, ms: +(performance.now() - t).toFixed(0) };
+}
+// The stack-page map: every guest-physical page the CPU resolved its stack window to, with the
+// sequence number of the last time it did (so a page freed and recycled as heap can be dropped
+// from the mask by asking for a window instead of the sticky set).
+function writeStackMap(file) {
+  const ex = inst.exports;
+  if (!ex.nanobox_stackmap_ptr) return null;
+  const ptr = ex.nanobox_stackmap_ptr(), n = ex.nanobox_stackmap_n();
+  const seq = ex.nanobox_stackmap_seq(), marked = ex.nanobox_stackmap_marked(), events = ex.nanobox_stackmap_events();
+  const lines = [`# nanobox stack-page map: pages=${n} marked=${marked} events=${events} seq=${seq}`];
+  if (ptr) {
+    const a = new Uint32Array(mem(), ptr, n);
+    // optional diagnostic engine (work/j/oracle-diag): the linear address and RSP of the last
+    // access that marked each page, so a surprising page can be attributed instead of guessed at.
+    const lp = ex.nanobox_stackmap_la_ptr ? ex.nanobox_stackmap_la_ptr() : 0;
+    const rp = lp && ex.nanobox_stackmap_rsp_ptr ? ex.nanobox_stackmap_rsp_ptr() : 0;
+    const la = lp ? new BigUint64Array(mem(), lp, n) : null, rs = rp ? new BigUint64Array(mem(), rp, n) : null;
+    for (let i = 0; i < n; i++) if (a[i]) lines.push(`${i} ${a[i]}` + (la ? ` la=${la[i].toString(16)} rsp=${rs[i].toString(16)}` : ""));
+  }
+  fs.writeFileSync(file, lines.join("\n") + "\n");
+  return { file, pages: n, marked, events, seq };
 }
 
 // ---- WASI hooks: deterministic host --------------------------------------------------------------
@@ -396,7 +462,12 @@ const jitState = { table: null, memory: null, fns: new Map(), free: [], installe
   bundleLink: null,       // { mod, keys, bytes, slot } from the bundle, pinned in installJitHost
   bundleFns: new Map(),   // content key string -> table index (instantiated bundle functions; permanent slots)
   bundleSlots: new Set(), // table indices owned by bundle functions (release/releaseAll leave them alone)
-  bundleHits: 0, bundleMisses: 0, bundleInst: 0, bundleModules: 0, bundleFiles: 0, bundleInstMs: 0, bundleLoadMs: 0, bundleCompiled: 0 };
+  bundleHits: 0, bundleMisses: 0, bundleInst: 0, bundleModules: 0, bundleFiles: 0, bundleInstMs: 0, bundleLoadMs: 0, bundleCompiled: 0,
+  // NANOBOX_CACHEPROF=1: fine-grained attribution of the .nbjb load path (summary.jit.cacheProf).
+  // Off by default because it costs a performance.now() pair per lookup on the VM's critical path.
+  prof: { on: process.env.NANOBOX_CACHEPROF === "1", readMs: 0, decodeMs: 0, keymapMs: 0, eagerMs: 0, modMs: 0, importsMs: 0, instMs: 0, exportsMs: 0, slotMs: 0, lookupMs: 0, lookupN: 0, importsN: 0 } };
+const PROF = process.env.NANOBOX_CACHEPROF === "1";
+const now = () => (PROF ? performance.now() : 0);
 const engineTag = NanoboxJitBundle.engineTagFormat(wasmBytes.length, crypto.createHash("sha256").update(NanoboxJitBundle.engineTagInput(wasmBytes)).digest("hex"));
 // --jit-bundle: parse the index before the VM starts; a module is COMPILED and instantiated on the
 // first lookup of one of its keys. Compiling every module up front is what made an AOT artifact
@@ -408,16 +479,32 @@ async function preloadBundles(files) {
   const t = performance.now();
   for (const f of files) {
     let b;
-    try { b = NanoboxJitBundle.decode(fs.readFileSync(f)); }
+    try { const tr = now(); const raw = fs.readFileSync(f); const td = now(); b = NanoboxJitBundle.decode(raw); if (PROF) { jitState.prof.readMs += td - tr; jitState.prof.decodeMs += now() - td; } }
     catch (e) { console.error(`[harness] JIT bundle ${f}: unreadable (${e.message}), ignored`); continue; }
     if (b.tag !== engineTag) { console.error(`[harness] JIT bundle ${f}: engine tag ${b.tag} != ${engineTag} (different engine build), ignored`); continue; }
     if (b.linkSlot && jitState.bundleLink && jitState.bundleLink.slot !== b.linkSlot) { console.error(`[harness] JIT bundle ${f}: link slot ${b.linkSlot} != ${jitState.bundleLink.slot} of an earlier bundle, ignored`); continue; }
     jitState.bundleFiles++;
-    const eager = process.env.NANOBOX_BUNDLE_EAGER === "1";
+    // NANOBOX_BUNDLE_EAGER: "1" = compile every module up front (the original behaviour), "auto" =
+    // do it only when the bundle is small enough to be worth it, anything else = compile on first use.
+    // Why "auto" exists: lazy compilation happens on the VM thread, one SYNCHRONOUS `new
+    // WebAssembly.Module` per touched module -- measured on a self-recorded codex bundle (773 modules,
+    // 5.4 MB) that is 129-141 ms of the 213 ms the whole cache load costs. The same modules compiled
+    // up front with the ASYNC WebAssembly.compile take 19 ms of wall (V8 compiles them on background
+    // threads, all at once) and none of it lands on the VM thread. Eager is only a loss for the huge
+    // AOT artifacts (a whole-kernel bundle is 2,329 modules / 580 MB and a boot touches a few hundred),
+    // hence the byte budget: NANOBOX_BUNDLE_EAGER_MB (default 64).
+    const eagerMode = process.env.NANOBOX_BUNDLE_EAGER || "";
+    let wasmBytes = 0; for (const m of b.modules) wasmBytes += m.bytes.length;
+    const eagerBudget = Number(process.env.NANOBOX_BUNDLE_EAGER_MB || 64) * 1e6;
+    const eager = eagerMode === "1" || (eagerMode === "auto" && wasmBytes <= eagerBudget);
+    const tEager = performance.now();
     const mods = eager
       ? await Promise.all(b.modules.map((m) => WebAssembly.compile(m.bytes).catch((e) => { console.error(`[harness] JIT bundle ${f}: module rejected: ${e.message}`); return null; })))
       : b.modules.map(() => null);   // compiled on first use, in lookup()
+    const eagerMs = eager ? performance.now() - tEager : 0;
+    if (eager) { jitState.prof.eagerMs += eagerMs; jitState.bundleCompiled += b.modules.length; }
     let dup = 0;
+    const tkm = now();
     for (let i = 0; i < b.modules.length; i++) {
       if (eager && !mods[i]) continue;
       const m = b.modules[i];
@@ -439,7 +526,8 @@ async function preloadBundles(files) {
       }
       if (used) jitState.bundleModules++;
     }
-    console.error(`[harness] JIT bundle ${f}: ${b.modules.length} modules, ${jitState.bundle.size} keys${dup ? ` (${dup} duplicate keys skipped)` : ""}${b.linkSlot ? `, link fn @${b.linkSlot}` : ""}`);
+    if (PROF) jitState.prof.keymapMs += now() - tkm;
+    console.error(`[harness] JIT bundle ${f}: ${b.modules.length} modules${eager ? ` (compiled up front in ${eagerMs.toFixed(0)} ms)` : ""}, ${jitState.bundle.size} keys${dup ? ` (${dup} duplicate keys skipped)` : ""}${b.linkSlot ? `, link fn @${b.linkSlot}` : ""}`);
   }
   jitState.bundleLoadMs = performance.now() - t;
 }
@@ -454,7 +542,9 @@ function installJitHost(inst) {
     return jitState.free.pop();
   };
   const imports = (keys) => {
+    const t = now();
     const h = {}; for (let i = 0; i < keys.length; i++) h[String(i)] = table.get(keys[i]);
+    if (PROF) { jitState.prof.importsMs += now() - t; jitState.prof.importsN += keys.length; }
     return { e: { m: memory, t: table }, h };
   };
   // The engine's shared link function (every trace tail-calls it through a table index baked into
@@ -545,7 +635,7 @@ function installJitHost(inst) {
   // lookup(keyLo, keyHi): pre-computed translation? Instantiating a bundle module binds ALL its
   // exports (a batch module holds many regions) and registers every key, so later lookups of its
   // siblings are plain map hits.
-  const lookup = (lo, hi) => {
+  const lookup0 = (lo, hi) => {
     if (NanoboxJitBundle.isLinkKey(lo, hi)) return jitState.link ? jitState.link.slot : 0;
     const ks = NanoboxJitBundle.keyString(lo, hi);
     let idx = jitState.bundleFns.get(ks);
@@ -554,13 +644,18 @@ function installJitHost(inst) {
       if (entry && !entry.inst && !entry.fail) {
         const t = performance.now();
         try {
-          if (!entry.mod) { entry.mod = new WebAssembly.Module(entry.bytes); jitState.bundleCompiled++; }
-          entry.inst = new WebAssembly.Instance(entry.mod, imports(entry.keys));
+          if (!entry.mod) { const tm = now(); entry.mod = new WebAssembly.Module(entry.bytes); if (PROF) jitState.prof.modMs += now() - tm; jitState.bundleCompiled++; }
+          const ti = now(); const imp = imports(entry.keys); const ti2 = now();
+          entry.inst = new WebAssembly.Instance(entry.mod, imp);
+          if (PROF) jitState.prof.instMs += now() - ti2;
         } catch (err) {
           entry.fail = true; console.error("[harness] JIT bundle module failed to instantiate:", err.message);
         }
         if (entry.inst) {
+          const te = now();
           const names = WebAssembly.Module.exports(entry.mod).filter((e) => e.kind === "function").map((e) => e.name);
+          if (PROF) jitState.prof.exportsMs += now() - te;
+          const tsl = now();
           for (let i = 0; i < names.length && i < entry.funcKeys.length; i++) {
             const [flo, fhi] = entry.funcKeys[i];
             if (!flo && !fhi) continue;
@@ -570,6 +665,7 @@ function installJitHost(inst) {
             table.set(s, entry.inst.exports[names[i]]);
             jitState.bundleSlots.add(s); jitState.bundleFns.set(fks, s);
           }
+          if (PROF) jitState.prof.slotMs += now() - tsl;
           jitState.bundleInst++;
         }
         jitState.bundleInstMs += performance.now() - t;
@@ -580,6 +676,7 @@ function installJitHost(inst) {
     jitState.bundleHits++;
     return idx;
   };
+  const lookup = PROF ? ((lo, hi) => { const t = performance.now(); const r = lookup0(lo, hi); jitState.prof.lookupMs += performance.now() - t; jitState.prof.lookupN++; return r; }) : lookup0;
   if (ex.nanobox_dbg_hook_slot && opts.checkpointOut) {
     // checkpoint capture point: the hook runs between traces (see "checkpoints" below); armed by takeDump
     table.set(ex.nanobox_dbg_hook_slot(), trampoline([0x7f, 0x7f], [], () => { if (ckpt.armed) writeCheckpoint(); }));
@@ -595,6 +692,18 @@ function installJitHost(inst) {
     const [mode, every, from, to] = opts.dbg.split(":").map(Number);
     ex.nanobox_dbg_set(mode, every || 100000, from || 0, to || 0);
     console.error(`[harness] dbg mode ${mode} every=${every || 100000} range=[${from || 0},${to || 0})`);
+  }
+  if (opts.sysTrace) {
+    if (!ex.nanobox_sys_hook_slot) { console.error("[harness] engine has no syscall trace (nanobox_sys_hook_slot); rebuild with the oracle instrumentation"); process.exit(2); }
+    const out = fs.openSync(opts.sysTrace, "w");
+    const chunks = []; let pending = 0;
+    const flush = () => { if (chunks.length) { fs.writeSync(out, Buffer.concat(chunks)); chunks.length = 0; pending = 0; } };
+    table.set(ex.nanobox_sys_hook_slot(), trampoline([0x7f, 0x7f], [], (p, len) => {
+      chunks.push(Buffer.from(new Uint8Array(memory.buffer, p, len))); pending += len; if (pending > 1 << 22) flush();
+    }));
+    process.on("exit", flush);
+    ex.nanobox_sys_set(3, opts.sysSnip || 0);   // bit0 calls+returns, bit1 write-like payloads
+    console.error(`[harness] syscall trace -> ${opts.sysTrace} (payloads on, snippet ${opts.sysSnip || 48} B)`);
   }
   table.set(ex.nanobox_hook_slot(0), trampoline([0x7f, 0x7f, 0x7f, 0x7f], [0x7f], install));
   table.set(ex.nanobox_hook_slot(1), trampoline([0x7f], [], release));
@@ -634,6 +743,12 @@ function installJitHost(inst) {
     if (process.env.NANOBOX_JIT_MERGE && ex.nanobox_set_jit_merge) { ex.nanobox_set_jit_merge(1); console.error("[harness] JIT merged push/pop runs on"); }
     if (process.env.NANOBOX_JIT_PROBE2 === "0" && ex.nanobox_set_jit_probe2) { ex.nanobox_set_jit_probe2(0); console.error("[harness] JIT two-entry probe cache OFF (A/B)"); }
     if (process.env.NANOBOX_OUTLINE != null && ex.nanobox_set_jit_outline) { ex.nanobox_set_jit_outline(Number(process.env.NANOBOX_OUTLINE)); console.error(`[harness] JIT outline mask ${process.env.NANOBOX_OUTLINE}`); }
+    // two-tier emission (work/prof/tier.md): NANOBOX_JIT_TIER=<mask>[:<tier-1 threshold>]
+    if (process.env.NANOBOX_JIT_TIER != null && ex.nanobox_set_jit_tier) {
+      const [tm, tt] = String(process.env.NANOBOX_JIT_TIER).split(":");
+      ex.nanobox_set_jit_tier(Number(tm), Number(tt || 0));
+      console.error(`[harness] JIT tier mask ${tm} promote-at ${tt || 0}`);
+    }
     if (opts.jitMaxlen && ex.nanobox_set_jit_maxlen) ex.nanobox_set_jit_maxlen(Number(opts.jitMaxlen));
     if (opts.jitRegion != null && ex.nanobox_set_jit_region) ex.nanobox_set_jit_region(Number(opts.jitRegion));
     // AOT mode (TASKS.md R): NANOBOX_AOT=1 -> function-scope static regions, compile on first touch, relaxed
@@ -951,6 +1066,7 @@ if (opts.checkpoint) restoreCheckpoint(opts.checkpoint); // before anything writ
 if (opts.jitBundle.length) await preloadBundles(opts.jitBundle);
 installJitHost(inst);
 if (opts.dumpStart) takeDump("start"); // the wizer snapshot state, before the first runtime instruction
+if (opts.stackMap) { if (!inst.exports.nanobox_stackmap_set) { console.error("[harness] engine has no stack-page map (nanobox_stackmap_set); rebuild with the oracle instrumentation"); process.exit(2); } inst.exports.nanobox_stackmap_set(1); if (opts.stackSpan !== null && inst.exports.nanobox_stackmap_span_set) inst.exports.nanobox_stackmap_span_set(opts.stackSpan); }
 if (opts.pages) { if (!inst.exports.nanobox_pages_set) { console.error("[harness] engine has no page profiler"); process.exit(2); } inst.exports.nanobox_pages_set(1); }
 if (opts.focus) { const c = opts.focus.indexOf(":"); inst.exports.nanobox_focus_set(Number(BigInt(opts.focus.slice(0, c)) >> 12n)); }
 if (inst.exports.nanobox_icount_lo) {
@@ -990,6 +1106,8 @@ function finish(code) {
     summary.pages = { used: ex.nanobox_pages_used(), dropped: ex.nanobox_pages_dropped(), file: opts.pages };
     if (opts.pagesMark) summary.pagesMarks = keyMarks;
   }
+  if (opts.stackMap && ex) { const sm = writeStackMap(opts.stackMap); if (sm) { summary.stackMap = sm; console.error(`[harness] stack-page map -> ${sm.file}: ${sm.marked} of ${sm.pages} guest-physical pages were used as a call stack (${sm.events} window resolutions)`); } }
+  if (opts.sysTrace && ex && ex.nanobox_sys_count) summary.syscalls = { file: opts.sysTrace, calls: ex.nanobox_sys_count(), payloadBytes: ex.nanobox_sys_payload_bytes() };
   if (opts.ioLog) { fs.writeFileSync(opts.ioLog, ioEvents.map((e) => JSON.stringify(e)).join("\n") + "\n"); summary.ioLog = { file: opts.ioLog, events: ioEvents.length }; }
   if (netStub) summary.net = netStub.stats;
   if (ckpt.written) summary.checkpoint = { file: ckpt.written.file, label: ckpt.label, writeMs: +ckpt.written.ms.toFixed(1) };
@@ -1009,7 +1127,8 @@ function finish(code) {
   if (jitState.table) {
     summary.jit = { installed: jitState.installed, batches: jitState.batches, released: jitState.released, live: jitState.fns.size, bytes: jitState.bytes, compileMs: +jitState.compileMs.toFixed(1), tableMs: +jitState.tableMs.toFixed(1) };
     if (jitState.link) summary.jit.linkSlot = jitState.link.slot, summary.jit.linkReuse = jitState.linkReuse;
-    if (opts.jitBundle.length) Object.assign(summary.jit, { bundleHits: jitState.bundleHits, bundleMisses: jitState.bundleMisses, bundleInst: jitState.bundleInst, bundleModules: jitState.bundleModules, bundleFiles: jitState.bundleFiles, bundleLoadMs: +jitState.bundleLoadMs.toFixed(1), bundleInstMs: +jitState.bundleInstMs.toFixed(1) });
+    if (opts.jitBundle.length) Object.assign(summary.jit, { bundleHits: jitState.bundleHits, bundleMisses: jitState.bundleMisses, bundleInst: jitState.bundleInst, bundleModules: jitState.bundleModules, bundleFiles: jitState.bundleFiles, bundleLoadMs: +jitState.bundleLoadMs.toFixed(1), bundleInstMs: +jitState.bundleInstMs.toFixed(1), bundleCompiled: jitState.bundleCompiled });
+    if (PROF) { const p = jitState.prof; summary.jit.cacheProf = Object.fromEntries(Object.entries(p).filter(([k]) => k !== "on").map(([k, v]) => [k, k.endsWith("Ms") ? +v.toFixed(1) : v])); }
     if (opts.jitBundleOut) { try { summary.jit.bundleOut = writeBundle(opts.jitBundleOut); } catch (e) { console.error("[harness] JIT bundle write failed:", e.message); } }
   }
   if (ex && ex.nanobox_jit_nops && opts.jit) {
@@ -1057,6 +1176,10 @@ function finish(code) {
     // level-3 probe census: 24 FD_PROBE_FULL, 25 FD_PROBE_C (candidate 1 hit), 26 FD_PROBE_D (candidate 2 hit)
     const f = Array.from({ length: 32 }, (_, i) => inst.exports.nanobox_jit_flags_stat(i));
     console.error(`[harness] probe census: full=${f[23]} cand1=${f[24]} cand2=${f[25]} (all: ${f.join(",")})`);
+  }
+  if (inst && inst.exports.nanobox_jit_tier_stat) {
+    const t = [0, 1, 2, 3].map((i) => inst.exports.nanobox_jit_tier_stat(i));
+    if (t[0] || t[3]) console.error(`[harness] tier: tier-0 compiles=${t[0]} promotions=${t[1]}/${t[2]} attempts, tier-0 trace executions=${t[3]}`);
   }
   if (opts.tplBytes && inst && inst.exports.nanobox_jit_opstat) {
     // where the emitted BYTES are, statically: total template bytes per opcode and bytes per compiled

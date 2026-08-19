@@ -148,6 +148,48 @@ This is a genuine relaxation, and it makes several things legal that were not:
   go.
 * **Stack layout may differ**: padding, red-zone use, the order of pushes in a prologue.
 
+### 5.1 The new oracle, as built and proved
+
+`./test/gate.sh --criteria heap+syscalls` (shipped, flag-gated; the default gate is untouched).
+
+**"Stack" is defined by the CPU, not by an address range**: a guest-physical page is a stack page iff
+`BX_CPU_C::stackPrefetch()` resolved the stack window to it. Bochs funnels PUSH/POP/CALL/RET/ENTER/
+LEAVE, interrupt and exception frames, IRET, task switches *and* the decoder's SS-segment MOV forms
+(plain `mov …(%rsp)/(%rbp)` frame slots) through that path, so the definition follows the architecture
+rather than a heuristic. Measured on codex: **398 pages masked = 1.6 MiB of 226 MiB (0.69 %)**;
+261,746 of 262,144 pages are still compared. Attribution: 319 user stacks, 67 vmalloc/VMAP_STACK kernel
+stacks including the IRQ stack, 10 boot stacks, `init_thread_union`, `cpu_entry_area`.
+
+Two guards, both with numbers: an `[RSP-4096, RSP+128 KiB)` proximity test (`--stack-span`) so an
+RBP-as-data-pointer cannot mask a rodata page (it removes 1 page of 399 here), and a per-page
+"last used as stack" sequence so pages freed and recycled as heap come back into the comparison. **The
+mask is taken from the REFERENCE side only** — the engine under test cannot excuse a page by calling
+it a stack.
+
+The syscall trace hooks `SYSCALL`/`SYSRET` (never inlined by the JIT — they are trace-terminating, so
+the same handler runs interpreted, JIT'd or AOT'd): `S seq nr a0..a5 rip`, `R seq rax`, plus a `W` line
+with length, FNV-1a and the first 48 bytes for `write`/`pwrite64`/`sendto`/`writev`. codex: 18,053
+calls, 1,246 payloads. Stated gap: 159 syscalls return via IRET and have no `R` line.
+
+**Proof it is not weaker where it matters.** T.1's real miscompile was reintroduced deliberately
+(32-byte AVX probes folded onto the 16-byte helper):
+
+| guest | pair | RAM oracle | heap+syscalls |
+|---|---|---|---|
+| codex | ref vs current | identical | identical |
+| codex | ref vs **broken** | identical | identical |
+| agy | ref vs current | identical | identical |
+| agy | ref vs **broken** | **DIFFERENT** | **DIFFERENT** |
+
+On broken agy it reports 38,697 NON-stack pages differing (so the mask is not carrying the verdict) and
+pinpoints the divergence in the syscall stream: after `nanosleep` the reference takes the return while
+the broken engine issues `sched_getcpu` from a different RIP. On a correct engine 0 masked pages differ
+— the mask is dormant. Cost: **1m15.7 s against the RAM oracle's 1m15.6 s**, i.e. free.
+
+**Caveat that will matter soon**: for an AOT engine whose tick count legitimately differs from the
+reference, the heap half will fail for non-bug reasons (timer-derived kernel state), and **the syscall
+trace becomes the load-bearing half**.
+
 The risk it introduces is equally real: **the old oracle is what caught a silent miscompile today** (a
 32-byte AVX probe using the 16-byte helper — codex identical, agy DIFFERENT). The new oracle must be
 demonstrably at least as sharp on everything that is not stack bytes, which is why the implementation
@@ -157,7 +199,7 @@ brief requires proving it *fails* on a deliberately broken engine before it is t
 
 | # | item | expected effect | flag | state |
 |---|---|---|---|---|
-| 1 | New oracle: heap + syscall-trace comparison, both guests | unblocks everything below | `--criteria heap+syscalls` | in flight |
+| 1 | New oracle: heap + syscall-trace comparison, both guests | unblocks everything below | `--criteria heap+syscalls` | **DONE, see 5.1** |
 | 2 | Two-tier emission, tier 0 for cold sites | **85 -> ~10 B/instance** | `nanobox_set_jit_tier` | in flight |
 | 3 | Cache load profile and fixes | ~1.5 s off a cold boot | query param / env | in flight |
 | 4 | Attach precompiled translations at decode time | interpretation 1.5 M -> ~the handler floor | AOT-only bit | next |
