@@ -39,6 +39,8 @@
 //   SPAWN    40  u32 cid, list argv(str), list env(str "K=V"), str cwd, i32 flags (bit0: pipe stdio, bit1: pty) -> reply: i32 pid
 //   CHILD_STDIN 41 u32 cid, bin data            (empty bin = close the child's stdin)
 //   KILL     42  u32 cid, i32 signal
+//   CHILD_RESIZE 45 u32 cid, i32 cols, i32 rows      (TIOCSWINSZ on that child's pty master; also PINS the
+//                                                    size, so the shim's own SIGWINCH stops overwriting it)
 //   GETPID   43                                 -> reply: i32 pid
 //   HRTIME   44                                 -> reply: i64 monotonic ns  (rarely used; host clock is fine)
 //   Replies carry: u8 op=REPLY(100), u32 id, i32 errno (0 = ok, else Linux errno; payload absent), payload as listed.
@@ -57,7 +59,7 @@
 (function (global) {
   const OP = { OPEN: 1, CLOSE: 2, READ: 3, WRITE: 4, STAT: 5, LSTAT: 6, FSTAT: 7, READDIR: 8, READLINK: 9, MKDIR: 10, UNLINK: 11, RMDIR: 12,
     RENAME: 13, ACCESS: 14, CHMOD: 15, REALPATH: 16, UTIMES: 17, TRUNCATE: 18, FTRUNCATE: 19, SYMLINK: 20, LINK: 21, FSYNC: 22, CHOWN: 23, FCHMOD: 24,
-    STDOUT: 30, STDERR: 31, EXIT: 32, TTY_RAW: 33, TTY_SIZE: 34, SPAWN: 40, CHILD_STDIN: 41, KILL: 42, GETPID: 43, HRTIME: 44,
+    STDOUT: 30, STDERR: 31, EXIT: 32, TTY_RAW: 33, TTY_SIZE: 34, SPAWN: 40, CHILD_STDIN: 41, KILL: 42, GETPID: 43, HRTIME: 44, CHILD_RESIZE: 45,
     HELLO: 0, REPLY: 100, STDIN: 101, RESIZE: 102, CHILD_OUT: 103, CHILD_EXIT: 104, SIGNAL: 105, LOG: 106 };
   const enc = new TextEncoder(), dec = new TextDecoder();
   // writer: collects parts, then frame(op, id) returns the framed Uint8Array

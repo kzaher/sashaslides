@@ -1,7 +1,7 @@
 {
  "cli": "claude",
  "ok": true,
- "signinMs": 4261.875,
+ "signinMs": 4263.590000033379,
  "checks": {
   "signin": true,
   "tui": true,
@@ -14,7 +14,7 @@
  },
  "failures": [],
  "missing": [
-  "net.Server.listen(43877)"
+  "net.Server.listen(40386)"
  ],
  "spawns": [
   "which",
@@ -31,5 +31,5 @@
   "/bin/sh",
   "xdg-open"
  ],
- "at": "2026-08-16T22:24:57.461Z"
+ "at": "2026-08-19T10:23:52.424Z"
 }

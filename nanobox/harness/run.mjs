@@ -1072,6 +1072,16 @@ function finish(code) {
     rows.sort((a, b) => b[2] - a[2]);
     const out = [`total emitted template bytes: ${(tot / 1e6).toFixed(1)} MB over ${rows.reduce((s, r) => s + r[1], 0)} compiled instances`]
       .concat(rows.slice(0, 40).map(([n, i, b, per]) => `${n}: ${(b / 1e6).toFixed(1)} MB = ${(100 * b / tot).toFixed(1)}% (${i} instances x ${per.toFixed(0)} B)`));
+    if (ex.nanobox_jit_phase_stat) {
+      // where the bytes are by PHASE of a site (work/j/ops instrumentation), not by opcode
+      const np = ex.nanobox_jit_phase_n ? ex.nanobox_jit_phase_n() : 0, ph = [];
+      const nm = (i) => { const p = ex.nanobox_jit_phase_name(i); let e = p; while (hp[e]) e++; return Buffer.from(hp.subarray(p, e)).toString(); };
+      let ptot = 0;
+      for (let i = 0; i < np; i++) { const v = ex.nanobox_jit_phase_stat(i); ptot += v; ph.push([nm(i), v]); }
+      ph.sort((x, y) => y[1] - x[1]);
+      out.push("", `emitted bytes by phase: ${(ptot / 1e6).toFixed(1)} MB`);
+      for (const [n, v] of ph) if (v) out.push(`  ${n}: ${(v / 1e6).toFixed(2)} MB = ${(100 * v / ptot).toFixed(1)}%`);
+    }
     fs.writeFileSync(opts.tplBytes, out.join("\n"));
     console.error(`[harness] template bytes written to ${opts.tplBytes}`);
   }

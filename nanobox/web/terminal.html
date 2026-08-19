@@ -17,10 +17,13 @@ const xterm = new Terminal({ cursorBlink: true, convertEol: false, fontSize: 14,
 const fit = new FitAddon.FitAddon(); xterm.loadAddon(fit); xterm.open(document.getElementById("term")); fit.fit();
 const enc = new TextEncoder();
 xterm.onData((s) => { const b = enc.encode(s); chan.postMessage({ type: "term-in", id, data: b.buffer }); });
+// this tab's own geometry, not the sandbox console's: the shim pins the pty to what we send here
+// (CHILD_RESIZE), so a TUI started in this shell wraps at THIS window's width
+xterm.onResize(({ cols, rows }) => chan.postMessage({ type: "term-resize", id, cols, rows }));
 window.addEventListener("resize", () => fit.fit());
 chan.onmessage = (m) => { const d = m.data; if (!d || d.id !== id) return;
   if (d.type === "term-out") xterm.write(new Uint8Array(d.data));
-  if (d.type === "term-opened") document.getElementById("status").textContent = "shell in the sandbox guest (/bin/sh -l) — same VM as the sandbox page";
+  if (d.type === "term-opened") { document.getElementById("status").textContent = `shell in the sandbox guest (/bin/sh -l, ${xterm.cols}\u00d7${xterm.rows}) — same VM as the sandbox page`; chan.postMessage({ type: "term-resize", id, cols: xterm.cols, rows: xterm.rows }); }
   if (d.type === "term-exit") { document.getElementById("status").textContent = "shell exited (code " + d.code + ")"; xterm.write("\r\n[exited]\r\n"); } };
 chan.postMessage({ type: "term-open", id, cols: xterm.cols, rows: xterm.rows });
 window.addEventListener("pagehide", () => chan.postMessage({ type: "term-close", id }));

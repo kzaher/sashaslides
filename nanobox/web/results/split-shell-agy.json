@@ -1,0 +1,40 @@
+{
+  "cli": "agy",
+  "url": "http://localhost:8093/sandbox.html?cli=agy&shell=1",
+  "ok": true,
+  "checks": {
+    "cli-pane-reaches-its-screen": true,
+    "shell-pane-starts": true,
+    "shell-is-a-real-guest-shell": true,
+    "pty-size-matches-the-pane": true,
+    "pty-follows-the-divider": true,
+    "ps-sees-the-guest-processes": true,
+    "shell-writes-into-the-guest-fs": true,
+    "shell-survives-a-busy-cli": true
+  },
+  "failures": [],
+  "cliScreen": [
+    "nanobox SANDBOX — image linux-base (Linux only: no node, no CLI)",
+    " boots in the emulated VM while the first-run installer fetches ",
+    "node + agy from the vendors into the persistent /usr/local; then",
+    " runs agy in the guest"
+  ],
+  "shellScreen": [
+    "~ # echo NB4-$(ps -o args= 2>/dev/null | grep -c .)",
+    "NB4-6",
+    "~ # ps -o pid,args 2>/dev/null | head -20; echo NB5-END",
+    "PID   COMMAND",
+    "    1 /usr/local/bin/agy",
+    "    6 /bundle/nb/node",
+    "    7 /bin/sh -l",
+    "   18 {ps} /bin/sh -l",
+    "   19 {head} /bin/sh -l",
+    "NB5-END",
+    "~ # echo split-view-was-here > /tmp/nb-split && cat /tmp/nb-split && echo NB6-OK",
+    "split-view-was-here",
+    "NB6-OK",
+    "~ # echo NB7-$(date +%s)",
+    "NB7-1787135133",
+    "~ # "
+  ]
+}

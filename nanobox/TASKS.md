@@ -1645,3 +1645,72 @@ miscompile of the same shape as the AVX-probe bug the gate caught in T.1.
 
 Merged; gate on both guests: `IDENTITY: identical (codex + agy)`, `BISECT: no divergence`; guest
 verified; fib loop 0.63 ns/iteration.
+
+## U. The live browser sandbox: two real defects, a split shell, and the MCP root cause (2026-08-19)
+
+### U.1 `?cli=codex` was dead for a fresh visitor -- caused by suggesting `?aot=1`
+
+The plain URL froze at "booting the guest..." at 0 % CPU with `RuntimeError: function signature
+mismatch` inside `_start`. The browser records its own JIT cache as `auto-<engineTag>.nbjb`, and the
+engine tag is computed from the WASM BYTES -- which are identical in AOT and trace-JIT mode. AOT
+changes the SHAPE of a translation, so a cache recorded by an `?aot=1` session poisoned the plain URL
+for everyone. Fixed by putting the mode in the name (`auto-aot-<tag>.nbjb`); both URLs boot again.
+LESSON: a cache key must cover every input that changes the artifact's shape, not just the binary.
+
+### U.2 The >1 s typing stalls: the emulator was running behind the page's main thread
+
+xterm-pty makes every guest `poll_oneoff` / `fd_read` / `fd_write` a BLOCKING round trip to the page
+(`postMessage` + `Atomics.wait`), and the engine polls stdin ~1500x/s, almost always finding nothing:
+
+| main thread | guest | blocked in poll | blocked in write |
+|---|---|---|---|
+| idle | 108 MIPS | 6.1 % | 1.5 % |
+| 50 % busy | 67 MIPS | 33.7 % | 9.5 % |
+| 86 % busy | **21 MIPS** | **78.2 %** | 8.0 % |
+
+A composer keystroke costs codex ~40 M guest instructions, so at 31 MIPS that is **1.3 s per key**, and
+characters typed meanwhile queue in the pty until the guest reaches a poll the page answers -- the
+"stall then flush" the user saw. It never reproduced in the harness because there the guest writes to a
+pipe with no main thread in the path.
+
+Fix (`web/ttysignal.js` + `web/opt-worker.js` + `web/sandbox.html`, `?ttyfast=0` reverts): a shared-memory
+flag lets the worker answer empty non-blocking polls itself; output goes through the existing ring with
+a non-blocking post. Key->paint under an 86 %-busy main thread: **69.3 ms -> 13.2 ms median**, and the
+guest holds **124 MIPS instead of 31**. Fixing only the input half left writes blocking 71.8 % of wall.
+
+### U.3 A shell beside the CLI, on the same guest (`?shell=1`)
+
+CLI left, interactive `/bin/sh -l` right, same guest, draggable divider; the separate-tab path still
+works. Opt-in because for codex/agy it changes the guest boot path (adds `/dev/hvc1` and a second
+process) -- the exact path every measurement and the identity gate walk; with the flag off the page
+emits a byte-identical spec. The pane's bytes never touch the VM worker's event loop, which is why the
+shell answers while the CLI is busy (asserted as a test).
+
+**Fixed a real pre-existing bug on the way**: `nbnode` sized every pty child from THE SHIM'S OWN TTY and
+re-broadcast that on `SIGWINCH`, so the existing "+ terminal" tab always got a mis-sized pty. Added a
+per-child resize op and a pinned-size flag. Verified three ways: 74/74 shim unit tests,
+`test/split-shell-guest.sh` (no browser), and `test/e2e-split-shell.mjs` 8/8 across codex/claude/agy/sh.
+
+### U.4 Syscalls and networking are unchanged by today's engine work
+
+**`test/guest-smoke.sh`: 34/34 on all three engines** -- current `eh-nb` against two pre-change
+baselines that predate the direct-call, density, deterministic-former, outlining and probe work -- with
+**zero verdict differences**. Covers files (2 MiB round trip, permissions, symlink, rename), processes
+(pipelines, exit codes, background + wait, `ps`), pty (`stty size`, termios, Ctrl-C interrupting a
+sleep), time (frozen and real clocks) and the network syscall layer. The only cross-engine delta
+anywhere is the hundredths of `/proc/uptime`.
+
+### U.5 MCP `codex_apps`: root-caused to two buffering hops
+
+`test/net-smoke.mjs` (browser, real egress): dns PASS, https PASS, bulk PASS (2,000,000 B), relay PASS,
+**sse FAIL** (first event at +5,069 ms of a 5,000 ms stream) and **open FAIL** (0 bytes in 8 s). So the
+guest CAN issue a streaming GET and it does reach the page's fetch layer -- but nothing is delivered
+until end-of-body, which is exactly why MCP's `POST 200` / `POST 204` pair succeeds and the session then
+dies. Two hops located by A/B: `public/c2w/dist/runcontainer.js`'s `http_writebody` (`resp.arrayBuffer()`
+gates the status+headers the guest blocks on) and the imagemounter's `handleHTTP` (`io.Copy` with no
+`Flusher.Flush()`, plus a busy-spin when `bodysize == 0`). The prototype hop-1 patch was reverted -- it
+does not fix MCP alone and starves the netstack; the real fix needs `./build-imagemounter.sh`.
+
+Note for anyone repeating this: for ~30 minutes no freshly opened page booted at all, and it was NOT
+either change -- pristine `HEAD` stalled identically. Two agents were rewriting `web/opt-worker.js` in
+one tree at the same time. Concurrent edits to a served file are indistinguishable from a product bug.

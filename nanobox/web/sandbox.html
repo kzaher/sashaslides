@@ -7,8 +7,18 @@
 <style>
   html,body{height:100%;margin:0;background:#0d0b0a;color:#e8e2da;font-family:ui-sans-serif,system-ui,sans-serif}
   body{display:flex;flex-direction:column}
-  #term{flex:1;min-height:0;padding:4px 6px}
+  #panes{flex:1;min-height:0;display:flex;flex-direction:row}
+  #term{flex:1 1 50%;min-width:0;min-height:0;padding:4px 6px}
   .xterm{height:100%}
+  /* ?shell=1 — the split: CLI on the left, a shell on the SAME guest on the right */
+  #split{display:none;flex:0 0 7px;cursor:col-resize;background:#241f1b;border-left:1px solid #3a322c;border-right:1px solid #3a322c}
+  #split:hover,#split.dragging{background:#4a3d33}
+  #shellpane{display:none;flex:1 1 50%;min-width:0;min-height:0;flex-direction:column;border-left:0}
+  body.split #split,body.split #shellpane{display:flex}
+  #shellhdr{display:flex;gap:12px;align-items:baseline;padding:4px 8px;background:#151210;border-bottom:1px solid #241f1b;font-family:ui-monospace,monospace;font-size:11.5px;color:#9c9187}
+  #shellhdr b{color:#e0b23a;font-weight:600}
+  #shellsize{margin-left:auto;color:#6f665e}
+  #shellterm{flex:1;min-height:0;padding:4px 6px}
   footer{display:flex;align-items:baseline;gap:14px;padding:6px 10px;border-top:1px solid #241f1b;font-size:12.5px;color:#9c9187;flex-wrap:wrap}
   footer b{color:#e8e2da}
   #timer{font-family:ui-monospace,monospace;font-size:26px;color:#e0b23a;min-width:120px}
@@ -20,7 +30,14 @@
 </style>
 </head>
 <body>
-<div id="term"></div>
+<div id="panes">
+  <div id="term"></div>
+  <div id="split" title="drag to resize both panes"></div>
+  <div id="shellpane">
+    <div id="shellhdr"><b>shell</b><span id="shellstatus">starting /bin/sh -l in the same guest…</span><span id="shellsize">—</span></div>
+    <div id="shellterm"></div>
+  </div>
+</div>
 <footer>
   <span id="engine">sandbox</span>
   <span id="timer">0.0 s</span>
@@ -67,6 +84,7 @@ window.nanoboxNet = { requests: [], routes: {}, extension: null };
 <script src="/c2w/vendor/xterm-pty.js"></script>
 <script src="/c2w/dist/runcontainer.js"></script>
 <script src="/native/hcring.js"></script>
+<script src="/ttysignal.js"></script>
 <script>
 // The sandbox: the smallest Linux (image linux-base: busybox + glibc + libstdc++, no node, no CLI)
 // boots in the emulated VM while the FIRST-RUN INSTALLER (web/native/installer.js — the persist
@@ -92,6 +110,13 @@ window.nanoboxNet = { requests: [], routes: {}, extension: null };
 //   reset=1  wipe the persistent tree first (a true first run)   engine=slim|full (default slim)
 //   sharp=1  also install claude's optional @img/sharp-linux-x64 + libvips   auto=0  no prompt auto-answer
 //   env=K=V,K=V  extra environment for the CLI
+//   shell=1                    SPLIT VIEW: the CLI on the left, an interactive /bin/sh -l on the SAME
+//                              guest on the right (draggable divider). Off by default — it adds
+//                              /dev/hvc1 + a background shim process to the codex/agy guest, which
+//                              would perturb the plain boot path every measurement and e2e test uses.
+//                              For claude/claude-native the shell rides the runtime worker that is
+//                              already there; for codex/agy the page starts the shim as a background
+//                              service (spec config-persist-hvc.json) plus a shell-only runtime worker.
 const qs = new URLSearchParams(location.search);
 const image = qs.get("image") || "linux-base";
 const cli = qs.get("cli") || "claude";
@@ -99,6 +124,9 @@ const installList = (qs.get("install") || (cli === "sh" ? "" : cli)).split(",").
 if (cli !== "sh" && !installList.includes(cli)) installList.push(cli);
 // claude and claude-native both run on this browser's V8 through the guest-side node shim
 const onV8 = cli === "claude" || cli === "claude-native";
+// the split view's shell pane; for a non-V8 CLI it needs the shim running beside the CLI in the guest
+const SPLIT = qs.get("shell") === "1";
+const shimBeside = SPLIT && !onV8;
 const auto = qs.get("auto") !== "0";
 const noCache = qs.get("cache") === "0";
 const el = (id) => document.getElementById(id);
@@ -234,6 +262,10 @@ async function bootVm() {
   let jit = null; if (jitSpec !== "0") { const [l, t] = jitSpec.split(":"); jit = { level: Number(l), threshold: Number(t || 0) }; }
   const toGuest = NanoboxHcRing.create(1 << 20), fromGuest = NanoboxHcRing.create(4 << 20);
   const { master, slave } = openpty();
+  // one bit of shared memory: "the page is holding tty bytes for the guest" — takes the emulator's
+  // ~1500 empty polls/s off the page's main thread (web/ttysignal.js)
+  const ttyFast = qs.get("ttyfast") !== "0";
+  const ttySignal = NanoboxTtySignal.create(slave);
   { const t = slave.ioctl("TCGETS"); t.iflag &= ~(ISTRIP | INLCR | IGNCR | ICRNL | IXON); t.oflag &= ~OPOST; t.lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN); slave.ioctl("TCSETS", new Termios(t.iflag, t.oflag, t.cflag, t.lflag, t.cc)); }
   xterm.loadAddon(master);
   // keystroke -> first byte painted back: the number behind "typing feels laggy", measured where the
@@ -296,12 +328,14 @@ async function bootVm() {
   vmWorkerRef = vmWorker;   // window.nanobox.pages() reaches the engine through it
   const onVmMessage = (m) => {
     const d = m.data; if (!d || typeof d !== "object") return;
+    ttySignal.drain();   // the guest's console output arrives in a shared ring, not in the message
+    if (d.type === "nanobox-tty-out") return;
     if (d.type === "nanobox-pages") { const res = pagesWaiter; pagesWaiter = null; res && res(d.rows); return; }
     if (d.type === "nanobox-jitexport") {
       // unsolicited (auto): the worker exported its JIT cache from inside the emulation loop and this
       // page has the live event loop, so the upload happens here
       if (d.auto) {
-        if (d.bytes && d.tag) fetch("/jit/upload?name=" + encodeURIComponent("auto-" + d.tag + ".nbjb"), { method: "POST", body: d.bytes })
+        if (d.bytes && d.tag) fetch("/jit/upload?name=" + encodeURIComponent(d.name || ("auto-" + d.tag + ".nbjb")), { method: "POST", body: d.bytes })
           .then(async (r) => log("jit-cache-recorded", { tag: d.tag, bytes: d.bytes.byteLength, exportMs: d.ms, saved: r.ok ? await r.text() : "HTTP " + r.status }))
           .catch((e) => log("jit-cache-failed", { message: String(e && e.message || e) }));
         return;
@@ -332,9 +366,14 @@ async function bootVm() {
   const c = CMD[cli] || { argv: [cli], env: {} };
   const env = Object.assign({}, c.env); for (const kv of (qs.get("env") || "").split(",").filter(Boolean)) { const i = kv.indexOf("="); env[kv.slice(0, i)] = kv.slice(i + 1); }
   const envArgs = Object.keys(env).length ? ["/bin/env", ...Object.entries(env).map(([k, v]) => k + "=" + v)] : [];
-  const args = ["/bin/sh", "-c", "printf '\\033]777;nb-booted\\007'; exec \"$0\" \"$@\"", ...envArgs, ...c.argv, ...(qs.get("args") || "").split(" ").filter(Boolean)];
-  // claude: config-vm.json (hvc1 + PATH=/bundle/nb:… + persist mounts); codex/agy: config-persist.json (persist mounts only)
-  const specName = c.spec || (onV8 ? "config-vm.json" : "config-persist.json");
+  // ?shell=1 with a native CLI: start the shim (/bundle/nb/node) as a BACKGROUND service before exec'ing
+  // the CLI, so the shell pane has a syscall arm inside this guest. It must not compete for the console's
+  // stdin (NBNODE_NO_STDIN=1, </dev/null) and must not print onto the CLI's screen (>/dev/null).
+  const prelude = "printf '\\033]777;nb-booted\\007'; " + (shimBeside ? "NBNODE_NO_STDIN=1 /bundle/nb/node </dev/null >/dev/null & " : "") + "exec \"$0\" \"$@\"";
+  const args = ["/bin/sh", "-c", prelude, ...envArgs, ...c.argv, ...(qs.get("args") || "").split(" ").filter(Boolean)];
+  // claude: config-vm.json (hvc1 + PATH=/bundle/nb:… + persist mounts); codex/agy: config-persist.json
+  // (persist mounts only) — or config-persist-hvc.json, the same file plus /dev/hvc1, under ?shell=1
+  const specName = shimBeside ? "config-persist-hvc.json" : (c.spec || (onV8 ? "config-vm.json" : "config-persist.json"));
   vmWorker.postMessage({ type: "init", info, args, cfg: {
     jit, direct: true, imageAddr, specUrl: new URL("/images/" + image + "/" + specName, location.href).href,
     jitBundles, engineTag, noCache,
@@ -349,11 +388,13 @@ async function bootVm() {
     jitRecordThreshold: Number(qs.get("recthreshold") || 0) || undefined,   // 0 = record at the normal threshold (no boot cost)
     jitUploadUrl: "/jit/upload", jitRecordUploadMs: Number(qs.get("recms") || 60000),
     jitRecord: qs.get("record") === "1",
-    hostChan: onV8 ? { sab: toGuest.sab, inSab: fromGuest.sab } : undefined,
-    bundleFiles: onV8 ? [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }] : [],
+    hostChan: (onV8 || shimBeside) ? { sab: toGuest.sab, inSab: fromGuest.sab } : undefined,
+    bundleFiles: (onV8 || shimBeside) ? [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }] : [],
     persistPort: vmChan.port2, fslog: qs.get("fslog") === "1",
+    // ?ttyfast=0 puts the tty back on xterm-pty's blocking round trips (the A/B of work/prof/uilat.md)
+    ttySignal: ttyFast ? ttySignal.sab : undefined, ttyOutRing: ttyFast ? ttySignal.outSab : undefined,
   } }, [vmChan.port2]);
-  new TtyServer(slave).start(vmWorker, onVmMessage);
+  ttySignal.attach(new TtyServer(slave)).start(vmWorker, onVmMessage);
   el("status").textContent = "engine + image + install…";
   if (onV8) {
     // the runtime worker: connects to the rings, waits for the shim's HELLO, then runs cli.js (read from
@@ -368,6 +409,15 @@ async function bootVm() {
       cliPath: cli === "claude-native" ? "/usr/local/lib/claude-native/cli.js" : "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js",   // fallback only: argv[1] from HELLO wins
       persistPort: rtChan.port2, cols: xterm.cols, rows: xterm.rows, env: {}, noCache, skipNodeLayer: true, proxyExtension: !!window.nanoboxNet.extension,
     } }, [rtChan.port2]);
+  } else if (shimBeside) {
+    // ?shell=1 with codex/agy: the same runtime worker, but shellOnly — it runs no JavaScript program
+    // and downloads no image; it exists to spawn /bin/sh on a pty through the shim and relay its bytes.
+    // Its own worker + its own SAB rings, so the shell keeps answering while the CLI pegs the guest.
+    worker = new Worker(new URL("/native/runtime.js", location.href).href);
+    NanoboxProxy.bridgeWorker(worker);
+    worker.onmessage = onRuntimeMessage;
+    worker.onerror = (e) => log("shell-worker-error", { message: e.message });
+    worker.postMessage({ type: "init", cfg: { backend: "vm", shellOnly: true, toGuest: toGuest.sab, fromGuest: fromGuest.sab, proxyExtension: !!window.nanoboxNet.extension } });
   }
 }
 // ---- extra terminals: terminal.html?sb=<id> tabs talk to this page over a BroadcastChannel; this page
@@ -376,15 +426,94 @@ const persist = { kind: "?", writes: 0, bytes: 0, errors: 0, last: 0 };
 function updatePersistFooter() { const e = el("persist"); if (!e) return; e.textContent = `state: ${persist.kind}${persist.kind === "opfs" ? "" : persist.kind === "cache" ? " (Cache API fallback)" : ""} · ${persist.writes} saves${persist.errors ? " · " + persist.errors + " FAILED" : ""}`; e.style.color = persist.errors ? "#e5484d" : "#9c9187"; }
 const SB_ID = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
 const termChan = new BroadcastChannel("nanobox-term-" + SB_ID);
-termChan.onmessage = (m) => { const d = m.data; if (!d || !worker) return; if (d.type === "term-open" || d.type === "term-in" || d.type === "term-close") worker.postMessage(d); };
-el("newterm").onclick = (e) => { e.preventDefault(); if (!worker) { el("status").textContent = "extra terminals need the claude / claude-native sandbox (runtime worker) — not yet for codex/agy"; return; } window.open("/terminal.html?sb=" + SB_ID, "_blank"); };
+const TERM_REQ = ["term-open", "term-in", "term-resize", "term-close"];
+termChan.onmessage = (m) => { const d = m.data; if (!d || !worker) return; if (TERM_REQ.includes(d.type)) worker.postMessage(d); };
+el("newterm").onclick = (e) => { e.preventDefault(); if (!worker) { el("status").textContent = "extra terminals need ?shell=1 (codex/agy) or the claude / claude-native sandbox"; return; } window.open("/terminal.html?sb=" + SB_ID, "_blank"); };
+
+// ---- the SPLIT view (?shell=1): a second xterm in this page, on a pty in the SAME guest ----
+// It talks to the same worker the extra-terminal tabs talk to, just without the BroadcastChannel hop.
+// Why it survives a busy CLI: the bytes never touch the VM worker's event loop (which never turns
+// while the engine runs) — the shell pane -> this page -> the runtime/shell worker -> SAB rings ->
+// the shim process inside the guest, which the guest kernel schedules like any other process.
+const SHELL_ID = "pane-" + SB_ID;
+let shellTerm = null, shellFit = null, shellLive = false, shellDead = false, shellPending = false;
+function shellSay(t) { const e = el("shellstatus"); if (e) e.textContent = t; }
+function initShellPane() {
+  if (!SPLIT || shellTerm) return;
+  document.body.classList.add("split");
+  shellTerm = new Terminal({ fontSize: 12, convertEol: false, scrollback: 5000, cursorBlink: true, theme: { background: "#0d0b0a", foreground: "#e8e2da" }, allowProposedApi: true });
+  shellFit = new FitAddon.FitAddon(); shellTerm.loadAddon(shellFit);
+  shellTerm.open(el("shellterm")); shellFit.fit();
+  shellTerm.onData((str) => {
+    if (shellDead) { if (/[\r\n]/.test(str)) { shellDead = false; shellTerm.write("\r\n"); openShell(); } return; }
+    if (!shellLive) return;
+    const b = new TextEncoder().encode(str);
+    worker.postMessage({ type: "term-in", id: SHELL_ID, data: b.buffer }, [b.buffer]);
+  });
+  // the pty must get THIS pane's geometry, not the CLI console's (a mis-sized pty is what makes a TUI
+  // wrap at the wrong column); CHILD_RESIZE in the shim pins it against the console's own SIGWINCH
+  shellTerm.onResize(({ cols, rows }) => { el("shellsize").textContent = cols + "\u00d7" + rows; if (shellLive) worker.postMessage({ type: "term-resize", id: SHELL_ID, cols, rows }); });
+  el("shellsize").textContent = shellTerm.cols + "\u00d7" + shellTerm.rows;
+  installSplitter();
+  // the CLI pane just lost half its width: refit it too, BEFORE bootVm() reads xterm.cols/rows for the
+  // container console (a console sized for the full page would wrap the CLI's TUI at the wrong column)
+  refitPanes();
+  el("shellsize").textContent = shellTerm.cols + "\u00d7" + shellTerm.rows;
+  shellSay("waiting for the guest…");
+}
+function openShell() {
+  if (!shellTerm || !worker || shellLive || shellPending) return;
+  shellPending = true;
+  shellSay("starting /bin/sh -l …");
+  worker.postMessage({ type: "term-open", id: SHELL_ID, cols: shellTerm.cols, rows: shellTerm.rows });
+}
+// the divider: drag to any ratio, both panes refit (and both ptys are told their new size)
+function refitPanes() {
+  try { fit.fit(); } catch (e) {}
+  if (shellFit) { try { shellFit.fit(); } catch (e) {} }
+}
+let refitPending = false;
+function refitSoon() { if (refitPending) return; refitPending = true; requestAnimationFrame(() => { refitPending = false; refitPanes(); }); }
+function installSplitter() {
+  const bar = el("split"), panes = el("panes"), left = el("term"), right = el("shellpane");
+  let dragging = false;
+  bar.addEventListener("pointerdown", (e) => { dragging = true; bar.classList.add("dragging"); bar.setPointerCapture(e.pointerId); e.preventDefault(); });
+  bar.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const r = panes.getBoundingClientRect();
+    const w = Math.max(160, Math.min(r.width - 160, e.clientX - r.left));
+    left.style.flex = "0 0 " + Math.round(w) + "px"; right.style.flex = "1 1 auto";
+    refitSoon();
+  });
+  const end = (e) => { if (!dragging) return; dragging = false; bar.classList.remove("dragging"); try { bar.releasePointerCapture(e.pointerId); } catch (x) {} refitPanes(); };
+  bar.addEventListener("pointerup", end); bar.addEventListener("pointercancel", end);
+  bar.addEventListener("dblclick", () => { left.style.flex = "1 1 50%"; right.style.flex = "1 1 50%"; refitPanes(); });   // back to 50/50
+  addEventListener("resize", refitSoon);
+}
+window.nanoboxShell = {   // the CDP/e2e handle for the pane
+  get live() { return shellLive; },
+  get size() { return shellTerm ? { cols: shellTerm.cols, rows: shellTerm.rows } : null; },
+  send(str) { const b = new TextEncoder().encode(str); worker.postMessage({ type: "term-in", id: SHELL_ID, data: b.buffer }, [b.buffer]); },
+  screen() { if (!shellTerm) return ""; const b = shellTerm.buffer.active, out = []; for (let i = 0; i < b.length; i++) out.push(b.getLine(i).translateToString(true)); return out.join("\n"); },
+};
+
 function onRuntimeMessage(m) {
   const d = m.data; if (!d) return;
-  if (d.type === "term-out" || d.type === "term-opened" || d.type === "term-exit") { termChan.postMessage(d); return; }
+  if (d.type === "term-out" || d.type === "term-opened" || d.type === "term-exit") {
+    if (d.id === SHELL_ID) {
+      if (d.type === "term-out" && shellTerm) shellTerm.write(new Uint8Array(d.data));
+      if (d.type === "term-opened") { shellLive = true; shellPending = false; shellSay("/bin/sh -l on a pty in the guest"); }
+      if (d.type === "term-exit") { shellLive = false; shellPending = false; shellDead = true; shellSay("exited (code " + d.code + ") — press Enter for a new shell"); if (shellTerm) shellTerm.write("\r\n[exited " + d.code + "]\r\n"); }
+      return;
+    }
+    termChan.postMessage(d); return;
+  }
   if (d.type === "event") {
     const { type, ...rest } = d;
     log("worker:" + d.event, rest);
     if (d.event === "hello") { ph.helloMs = now(); if (ph.bootMs == null) el("status").textContent = "guest shim connected"; }
+    // the worker installed its message handler only now (before that, posts to it are dropped)
+    if (d.event === "runtime-ready" || d.event === "shell-ready") openShell();
     if (d.event === "bundle-transformed") ph.transformMs = d.ms;
     if (d.event === "bundle-loaded") { ph.bundleMs = d.ms; ph.runStartMs = now(); el("status").textContent = "running " + cli; }
     if (d.event === "missing") missing.push(rest);
@@ -407,6 +536,7 @@ function buildLabel() {
 function updateEngineFooter() { el("engine").textContent = `sandbox: ${image} in the VM + first-run installer (${installList.join(", ")}) → ${cli}${buildLabel()}`; }
 async function boot() {
   updateEngineFooter();
+  initShellPane();
   say(`\x1b[38;5;173mnanobox\x1b[0m SANDBOX — image \x1b[1m${image}\x1b[0m (Linux only: no node, no CLI) boots in the emulated VM while the first-run installer fetches node + \x1b[1m${installList.join(", ")}\x1b[0m from the vendors into the persistent /usr/local; then runs \x1b[1m${cli}\x1b[0m${onV8 ? " on this browser's V8 (guest-side node shim)" : " in the guest"}${cli === "claude-native" ? ", the CURRENT release extracted from the vendor's Bun standalone binary" : cli === "claude" ? ", the npm build 2.1.112" : ""}\n\n`);
   if (qs.get("reset") === "1") { try { await caches.delete("nanobox-v1"); log("cache-reset"); } catch {} }   // the persist worker wipes its own store
   window.nanoboxNet.extension = await NanoboxProxy.detect();

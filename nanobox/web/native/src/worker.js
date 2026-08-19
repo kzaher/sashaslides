@@ -2,6 +2,8 @@
 // Built by build.mjs into ../runtime.js (classic worker script). Page protocol: see ../../claude-native.html.
 //
 //   page -> worker: {type:"init", cfg}  {type:"stdin", data}  {type:"resize", cols, rows}  {type:"dump"}
+//                    {type:"term-open"|"term-in"|"term-resize"|"term-close", id, ...}  (extra shells in the guest)
+//   cfg.shellOnly: serve ONLY the term-* messages (the sandbox page's shell pane next to a non-JS CLI)
 //   worker -> page: {type:"event", event, ...}  {type:"stdout", fd, data}  {type:"exit", code}  {type:"missing", ...}
 import { Buffer } from "./buffer-first.js";      // patched polyfill; MUST stay the first import (see buffer-first.js)
 import { setBufferThrowHook } from "./buffer-fix.js";
@@ -132,7 +134,10 @@ async function main(cfg) {
     helloP = new Promise((res) => { guest.onHello = (h) => { ev("hello", { argv: h.argv, cwd: h.cwd, pid: h.pid, cols: h.cols, rows: h.rows, isatty: h.isatty }); res(h); }; });
     guest.onLog = (t) => ev("nbnode-log", { text: t });
   }
-  const img = await loadRootfs(cfg);
+  // ?shell=1 with a non-JS CLI (codex/agy): this worker is only the SHELL SERVER for the sandbox
+  // page's second pane — it spawns /bin/sh on a pty through the shim and relays its bytes. It runs no
+  // JavaScript program, so there is no reason to download and unpack the image a second time.
+  const img = cfg.shellOnly ? { root: self.NanoboxFs.dir(), config: {}, manifest: { layers: [] } } : await loadRootfs(cfg);
   let env, cwd, cliPath, argv, B;
   if (vm) {
     ev("waiting-hello");
@@ -158,8 +163,8 @@ async function main(cfg) {
     try { B.mkdir(cwd, true, 0o755); } catch {}
   }
   // extra terminals (page id -> guest child id); their pty output arrives as "proc" events of the backend
-  const terms = new Map(); const env0 = env;
-  if (vm) B.on("proc", (evt) => { for (const [id, cid] of terms) if (evt.pid === cid) { if (evt.stream) { const copy = evt.data.slice(); post({ type: "term-out", id, data: copy }, [copy.buffer]); } else if (evt.exit != null || evt.signal) { post({ type: "term-exit", id, code: evt.exit }); terms.delete(id); } } });
+  const terms = new Map(), termSize = new Map(); const env0 = env;
+  if (vm) B.on("proc", (evt) => { for (const [id, cid] of terms) if (evt.pid === cid) { if (evt.stream) { const copy = evt.data.slice(); post({ type: "term-out", id, data: copy }, [copy.buffer]); } else if (evt.exit != null || evt.signal) { post({ type: "term-exit", id, code: evt.exit }); terms.delete(id); termSize.delete(id); } } });
   self.onmessage = (m) => {
     const d = m.data; if (!d) return;
     if (d.type === "stdin" && !vm) B.ttyInput(new Uint8Array(d.data));
@@ -167,16 +172,26 @@ async function main(cfg) {
     else if (d.type === "dump") post({ type: "missing", ...dumpMissing(), spawns: child_process._spawnLog, net: netlog, netBytes, backendOps: B.stats.ops, backendStats: vm ? { guest: B.stats.guest, image: B.stats.image, dirty: [...B.dirty], channel: guest.stats } : null, required: Object.fromEntries(required) });
     else if (d.type === "term-open" && vm) { // extra terminal: a login shell in the guest on a pty, I/O relayed to the page
       const cid = B.cid++; terms.set(d.id, cid);
-      const env = Object.entries(env0).map(([k, v]) => k + "=" + v).concat([`COLUMNS=${d.cols || 80}`, `LINES=${d.rows || 24}`, "TERM=xterm-256color"]);
-      try { B.g.spawn(cid, ["/bin/sh", "-l"], env, cwd, 2).then(() => post({ type: "term-opened", id: d.id }), (e) => post({ type: "term-out", id: d.id, data: enc.encode(`\r\n[shell failed: ${e.message}]\r\n`) })); }
+      const cols = d.cols || 80, rows = d.rows || 24;
+      const env = Object.entries(env0).map(([k, v]) => k + "=" + v).concat([`COLUMNS=${cols}`, `LINES=${rows}`, "TERM=xterm-256color"]);
+      // The shim inherits the CONTAINER CONSOLE's geometry, which is the CLI pane — a shell pane of a
+      // different width would then render every TUI wrapped at the wrong column. CHILD_RESIZE gives
+      // this pty the size of ITS pane and pins it against the shim's own SIGWINCH propagation.
+      termSize.set(d.id, [cols, rows]);
+      const size = () => { const wh = termSize.get(d.id) || [cols, rows]; B.g.childResize(cid, wh[0], wh[1]).then(() => ev("term-resized", { id: d.id, cid, cols: wh[0], rows: wh[1], initial: true }), (e) => ev("term-resize-failed", { id: d.id, cid, initial: true, message: String(e && e.message || e) })); };
+      try { B.g.spawn(cid, ["/bin/sh", "-l"], env, cwd, 2).then(() => { size(); post({ type: "term-opened", id: d.id, cols, rows }); }, (e) => post({ type: "term-out", id: d.id, data: enc.encode(`\r\n[shell failed: ${e.message}]\r\n`) })); }
       catch (e) { post({ type: "term-out", id: d.id, data: enc.encode(`\r\n[shell failed: ${e.message}]\r\n`) }); }
     }
     else if (d.type === "term-in" && vm) { const cid = terms.get(d.id); if (cid) B.g.childStdin(cid, new Uint8Array(d.data)); }
-    else if (d.type === "term-close" && vm) { const cid = terms.get(d.id); if (cid) { B.g.kill(cid, 9); terms.delete(d.id); } }
+    else if (d.type === "term-resize" && vm) { const cid = terms.get(d.id); termSize.set(d.id, [d.cols | 0, d.rows | 0]);
+      if (cid) B.g.childResize(cid, d.cols | 0, d.rows | 0).then(() => ev("term-resized", { id: d.id, cid, cols: d.cols, rows: d.rows }), (e) => ev("term-resize-failed", { id: d.id, cid, message: String(e && e.message || e) }));
+      else ev("term-resize-nocid", { id: d.id }); }
+    else if (d.type === "term-close" && vm) { const cid = terms.get(d.id); termSize.delete(d.id); if (cid) { B.g.kill(cid, 9); terms.delete(d.id); } }
     else if (d.type === "eval") { // debugging aid: window.nanobox.eval("code") runs in the worker scope
       Promise.resolve().then(() => (0, eval)(d.code)).then((v) => post({ type: "eval", id: d.id, value: typeof v === "string" ? v : JSON.stringify(v, null, 1) }), (e) => post({ type: "eval", id: d.id, error: String(e && e.stack || e) }));
     }
   };
+  if (cfg.shellOnly) { ev("shell-ready", { cwd }); return; }   // no JS program: the terms handlers above are the whole job
   setOnFirst((r) => { ev("missing", { key: r.key, kind: r.kind, stack: r.stack }); report("missing-api", { key: r.key, kind: r.kind, stack: r.stack }); });
 
   // ---- Node globals ----

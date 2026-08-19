@@ -1,0 +1,48 @@
+{
+  "cli": "claude",
+  "url": "http://localhost:8093/sandbox.html?cli=claude&shell=1",
+  "ok": true,
+  "checks": {
+    "cli-pane-reaches-its-screen": true,
+    "shell-pane-starts": true,
+    "shell-is-a-real-guest-shell": true,
+    "pty-size-matches-the-pane": true,
+    "pty-follows-the-divider": true,
+    "ps-sees-the-guest-processes": true,
+    "shell-writes-into-the-guest-fs": true,
+    "shell-survives-a-busy-cli": true
+  },
+  "failures": [],
+  "cliScreen": [
+    "            ░░░░░░                        ███▓░",
+    "    ░░░   ░░░░░░░░░░                      ███▓░",
+    "   ░░░░░░░░░░░░░░░░░░░    *                ██▓░░      ▓",
+    "                                             ░▓▓███▓▓░",
+    " *                                 ░░░░",
+    "                                 ░░░░░░░░",
+    "                               ░░░░░░░░░░░░░░░░",
+    "       █████████                                        *",
+    "      ██▄█████▄██                        *",
+    "       █████████      *",
+    "…………………█ █   █ █………………………………………………………………………………………………………………",
+    " ✶ Opening browser to sign in…"
+  ],
+  "shellScreen": [
+    "NB3-60 149",
+    "~ # echo NB4-$(ps -o args= 2>/dev/null | grep -c .)",
+    "NB4-5",
+    "~ # ps -o pid,args 2>/dev/null | head -20; echo NB5-END",
+    "PID   COMMAND",
+    "    1 node /usr/local/bin/claude",
+    "   17 /bin/sh -l",
+    "   25 {ps} /bin/sh -l",
+    "   26 {head} /bin/sh -l",
+    "NB5-END",
+    "~ # echo split-view-was-here > /tmp/nb-split && cat /tmp/nb-split && echo NB6-OK",
+    "split-view-was-here",
+    "NB6-OK",
+    "~ # echo NB7-$(date +%s)",
+    "NB7-1787135122",
+    "~ # "
+  ]
+}

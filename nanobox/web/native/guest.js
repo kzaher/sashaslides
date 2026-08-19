@@ -12,7 +12,8 @@
 //   g.stat/lstat(path) -> {dev,ino,mode,...} (BigInt fields); g.fstat(fd); g.readdir(path) -> [{name, type}]
 //   g.readlink, mkdir, unlink, rmdir, rename, access, chmod, realpath, utimes, truncate, ftruncate, symlink,
 //   link, fsync, chown, fchmod, stdout(u8), stderr(u8), exit(code), ttyRaw(on), ttySize() -> {cols, rows},
-//   spawn(cid, argv, env, cwd, flags) -> pid, childStdin(cid, u8), kill(cid, sig), getpid(), hrtime()
+//   spawn(cid, argv, env, cwd, flags) -> pid, childStdin(cid, u8), kill(cid, sig), childResize(cid, cols, rows),
+//   getpid(), hrtime()
 //   Errors reject with an Error carrying .errno (Linux number) and .code ("ENOENT" ...).
 // Requires proto.js and hcring.js (importScripts before this file).
 (function (global) {
@@ -119,6 +120,8 @@
     g.spawn = (cid, argv, env, cwd, flags) => call(OP.SPAWN, (w) => w.u32(cid).list(argv, (x, a) => x.str(a)).list(env, (x, e) => x.str(e)).str(cwd || "/").i32(flags | 0), (r) => r.i32());
     g.childStdin = (cid, u8) => fire(OP.CHILD_STDIN, (w) => w.u32(cid).bin(u8 || new Uint8Array(0)));
     g.kill = (cid, sig) => fire(OP.KILL, (w) => w.u32(cid).i32(sig | 0));
+    // a pty child gets the geometry of ITS pane, not of the container console the shim is attached to
+    g.childResize = (cid, cols, rows) => call(OP.CHILD_RESIZE, (w) => w.u32(cid).i32(cols | 0).i32(rows | 0));
     g.getpid = () => call(OP.GETPID, null, (r) => r.i32());
     g.hrtime = () => call(OP.HRTIME, null, (r) => r.i64());
     // synchronous twins of every request (backend #2 of the Node-compat layer calls these)

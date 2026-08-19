@@ -11,6 +11,7 @@
  * Build: ./build.sh            (static musl x86-64 via docker alpine  -> ./nbnode)
  *        ./build.sh host       (native gcc, for the socketpair unit test -> ./nbnode-host)
  * Env:   NBNODE_DEV=/dev/hvc1  channel device;  NBNODE_FD=N  use an already-open fd as the channel
+ *        NBNODE_NO_STDIN=1  never read fd 0 (background service beside a foreground CLI)
  *        NBNODE_DEBUG=1 trace to the host as LOG frames, =2 trace to stderr, =0 off
  *        (compiling with -DNBNODE_DEBUG turns stderr tracing on by default).
  */
@@ -39,7 +40,7 @@ enum {
   OP_CHMOD = 15, OP_REALPATH = 16, OP_UTIMES = 17, OP_TRUNCATE = 18, OP_FTRUNCATE = 19, OP_SYMLINK = 20,
   OP_LINK = 21, OP_FSYNC = 22, OP_CHOWN = 23, OP_FCHMOD = 24,
   OP_STDOUT = 30, OP_STDERR = 31, OP_EXIT = 32, OP_TTY_RAW = 33, OP_TTY_SIZE = 34,
-  OP_SPAWN = 40, OP_CHILD_STDIN = 41, OP_KILL = 42, OP_GETPID = 43, OP_HRTIME = 44,
+  OP_SPAWN = 40, OP_CHILD_STDIN = 41, OP_KILL = 42, OP_GETPID = 43, OP_HRTIME = 44, OP_CHILD_RESIZE = 45,
   OP_REPLY = 100, OP_STDIN = 101, OP_RESIZE = 102, OP_CHILD_OUT = 103, OP_CHILD_EXIT = 104,
   OP_SIGNAL = 105, OP_LOG = 106,
 };
@@ -160,7 +161,7 @@ static const char *opname(int op) {
   if (op >= 0 && op <= 24) return n[op];
   switch (op) {
     case OP_STDOUT: return "STDOUT"; case OP_STDERR: return "STDERR"; case OP_EXIT: return "EXIT"; case OP_TTY_RAW: return "TTY_RAW";
-    case OP_TTY_SIZE: return "TTY_SIZE"; case OP_SPAWN: return "SPAWN"; case OP_CHILD_STDIN: return "CHILD_STDIN"; case OP_KILL: return "KILL";
+    case OP_TTY_SIZE: return "TTY_SIZE"; case OP_SPAWN: return "SPAWN"; case OP_CHILD_STDIN: return "CHILD_STDIN"; case OP_KILL: return "KILL"; case OP_CHILD_RESIZE: return "CHILD_RESIZE";
     case OP_GETPID: return "GETPID"; case OP_HRTIME: return "HRTIME"; default: return "?";
   }
 }
@@ -198,6 +199,7 @@ typedef struct {
   int used; uint32_t cid; pid_t pid;
   int in, out, err;      /* our ends (-1 = none/closed); pty: out = master, in = dup(master) */
   int reaped, inherit, pty, close_in;
+  int winsz_pinned;      /* the host set this pty's size explicitly (CHILD_RESIZE): our own SIGWINCH must not overwrite it */
   buf_t inq; size_t inq_off; /* pending CHILD_STDIN bytes */
 } child_t;
 static child_t kids[MAX_CHILDREN];
@@ -410,6 +412,13 @@ static void dispatch(uint8_t op, uint32_t id, const uint8_t *pl, size_t n) {
       if (c->in < 0) { reply_err(id, EPIPE); break; }
       if (len == 0) c->close_in = 1; else b_put(&c->inq, d, len);
       kid_flush_in(c); reply_err(id, 0); break; }
+    case OP_CHILD_RESIZE: { uint32_t cid = r_u32(r); int32_t cols = r_i32(r), rows = r_i32(r); if (r->bad) goto bad;
+      child_t *c = kid_find(cid); if (!c) { reply_err(id, ESRCH); break; }
+      if (!c->pty || c->out < 0) { reply_err(id, ENOTTY); break; }
+      struct winsize ws; memset(&ws, 0, sizeof ws);
+      ws.ws_col = (unsigned short) (cols > 0 ? cols : 80); ws.ws_row = (unsigned short) (rows > 0 ? rows : 24);
+      c->winsz_pinned = 1;
+      reply_rc(id, ioctl(c->out, TIOCSWINSZ, &ws)); break; }
     case OP_KILL: { uint32_t cid = r_u32(r); int32_t sig = r_i32(r); if (r->bad) goto bad;
       child_t *c = kid_find(cid); if (!c || c->reaped) { reply_err(id, ESRCH); break; }
       reply_rc(id, kill(c->pid, sig)); break; }
@@ -461,7 +470,7 @@ static void send_resize(void) {
   int cols, rows; get_winsz(&cols, &rows);
   struct winsize ws; memset(&ws, 0, sizeof ws); ws.ws_col = (unsigned short) cols; ws.ws_row = (unsigned short) rows;
   for (int i = 0; i < MAX_CHILDREN; i++) /* propagate to pty children */
-    if (kids[i].used && kids[i].pty && kids[i].out >= 0) ioctl(kids[i].out, TIOCSWINSZ, &ws);
+    if (kids[i].used && kids[i].pty && kids[i].out >= 0 && !kids[i].winsz_pinned) ioctl(kids[i].out, TIOCSWINSZ, &ws);
   frame_begin(&eb, OP_RESIZE, 0); b_i32(&eb, cols); b_i32(&eb, rows); frame_send(&eb);
 }
 static void handle_signals(void) {
@@ -518,6 +527,10 @@ int main(int argc, char **argv) {
   }
   set_nonblock(chan_fd);
   { struct stat st; if (fstat(0, &st) < 0) stdin_on = 0; }
+  /* NBNODE_NO_STDIN=1: never read fd 0. Used when the shim runs as a BACKGROUND service next to
+     another foreground program (codex/agy own the container console) — it must not compete for the
+     tty's input, and its /dev/null stdin must not produce a spurious EOF frame either. */
+  { const char *ns = getenv("NBNODE_NO_STDIN"); if (ns && *ns && *ns != '0') stdin_on = 0; }
 
   sigset_t m; sigemptyset(&m);
   sigaddset(&m, SIGINT); sigaddset(&m, SIGTERM); sigaddset(&m, SIGHUP); sigaddset(&m, SIGWINCH); sigaddset(&m, SIGCHLD);

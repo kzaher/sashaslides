@@ -8,7 +8,7 @@ function exportAutoBundleSync() {
   try {
     const t0 = performance.now();
     const bytes = NanoboxJit.exportBundle(autoTag);
-    postMessage({ type: "nanobox-jitexport", tag: autoTag, bytes, auto: true, ms: Math.round(performance.now() - t0) }, [bytes.buffer]);
+    postMessage({ type: "nanobox-jitexport", tag: autoTag, name: autoName, bytes, auto: true, ms: Math.round(performance.now() - t0) }, [bytes.buffer]);
   } catch (e) { ev("error", { message: "jit cache export: " + (e && e.message || e) }); }
 }
 
@@ -43,7 +43,7 @@ let info = null, args = null, cfg = null;
 let engineInst = null;
 let engineMemory = () => engineInst.exports.memory;
 let lastBeat = 0;
-const io = { pollN: 0, pollMs: 0, clockN: 0, clockMs: 0, sendN: 0, sendMs: 0, recvN: 0, recvMs: 0, readN: 0, readMs: 0, writeN: 0, writeMs: 0 };
+const io = { pollN: 0, pollMs: 0, pollSkipN: 0, writeRingN: 0, clockN: 0, clockMs: 0, sendN: 0, sendMs: 0, recvN: 0, recvMs: 0, readN: 0, readMs: 0, writeN: 0, writeMs: 0 };
 const t0 = performance.now();
 let bundleFs = null;     // NanoboxFs.attach() result in direct mode (its .stats go into the heartbeat)
 let jitPreload = null;   // NanoboxJit.preload() promise when cfg.jitBundles is set (awaited before the engine starts)
@@ -216,9 +216,14 @@ function startPreload() {
     // boot with a cold JIT. auto-<tag>.nbjb is this browser's own cache for the build it loaded.
     .then(async (t) => {
       autoTag = t;
+      // The cache name carries the JIT MODE as well as the engine build. AOT mode changes the shape of
+      // the translations, not just when they are made, so an AOT-recorded bundle handed to a trace-JIT
+      // page is a `RuntimeError: function signature mismatch` inside _start -- the engine dies before
+      // the guest runs an instruction. The engine tag alone cannot see that (same wasm either way).
+      autoName = "auto-" + (cfg.aot ? "aot-" : "") + t + ".nbjb";
       const urls = (cfg.jitBundles || []).slice();
       if (t && cfg.jitAutoDir) {
-        const url = cfg.jitAutoDir + "auto-" + t + ".nbjb";
+        const url = cfg.jitAutoDir + autoName;
         const head = await fetch(url, { method: "HEAD", credentials: "same-origin" }).catch(() => null);
         if (head && head.ok) { urls.push(url); autoCached = true; }
       }
@@ -227,7 +232,7 @@ function startPreload() {
     .then((r) => { ev("jit-bundles", Object.assign({ autoCached, tag: autoTag }, r)); return r; })
     .catch((e) => { ev("error", { message: "jit bundles: " + (e && e.message || e) }); return null; });
 }
-let autoTag = null, autoCached = false, autoUploaded = false;
+let autoTag = null, autoName = null, autoCached = false, autoUploaded = false;
 
 // No cache for this engine build yet: record what we compile and upload it, so the next run starts
 // warm. Recording runs deliberately compile at a LOW threshold — measured in the harness, doing that
@@ -238,7 +243,7 @@ async function uploadAutoBundle() {
   autoUploaded = true;
   try {
     const bytes = NanoboxJit.exportBundle(autoTag);
-    const r = await fetch((cfg.jitUploadUrl || "/jit/upload") + "?name=" + encodeURIComponent("auto-" + autoTag + ".nbjb"),
+    const r = await fetch((cfg.jitUploadUrl || "/jit/upload") + "?name=" + encodeURIComponent(autoName),
       { method: "POST", body: bytes, credentials: "same-origin" });
     ev("jit-cache-recorded", { tag: autoTag, bytes: bytes.byteLength, ok: r.ok });
   } catch (e) { ev("error", { message: "jit cache upload: " + (e && e.message || e) }); }
@@ -308,6 +313,27 @@ onmessage = (msg) => {
   }
   if (MODE !== "plain") ev("start");
   const tty = new TtyClient(req);
+  // The tty protocol blocks this worker on the PAGE'S main thread for every poll/read/write
+  // (TtyClient.req = postMessage + Atomics.wait). The engine polls stdin ~1500 times a second and
+  // almost always has nothing to collect, so with cfg.ttySignal (web/ttysignal.js) the page keeps a
+  // shared flag saying whether it is holding bytes for us, and an empty non-blocking poll is answered
+  // here. Costs the guest nothing in input latency (the flag goes up the moment a key is queued) and
+  // takes the emulator off the main thread's critical path: measured 65 % -> 0.6 % of wall parked in
+  // poll_oneoff when the page is busy. Blocking polls (a clock subscription with a real timeout) are
+  // still the page's job -- that is the guest asking to sleep.
+  if (cfg && cfg.ttySignal) {
+    const sig = new Int32Array(cfg.ttySignal);
+    const wait = tty.onWaitForReadable.bind(tty);
+    tty.onWaitForReadable = (timeout) => { if (timeout > 0 || Atomics.load(sig, 0)) return wait(timeout); io.pollSkipN++; return false; };
+  }
+  // Same story on the way out: the guest's console writes (~100/s) each parked the emulator until the
+  // page answered -- 5.8 ms apiece with a busy main thread, 16 % of wall. cfg.ttyOutRing takes them off
+  // that path: append to a shared ring, post a plain (non-blocking) message, let the page drain it into
+  // the pty. The only wait left is a genuinely full ring, i.e. real backpressure.
+  if (cfg && cfg.ttyOutRing) {
+    const ring = NanoboxHcRing.writer(cfg.ttyOutRing);
+    tty.onWrite = (buf) => { ring.write(buf instanceof Uint8Array ? buf : Uint8Array.from(buf)); io.writeRingN++; postMessage({ type: "nanobox-tty-out" }); };
+  }
   if (cfg && cfg.direct) startDirect(tty).catch((e) => ev("error", { message: "direct start: " + (e && e.message || e) }));
   else RunContainer.startContainer(info, args, tty);
 };

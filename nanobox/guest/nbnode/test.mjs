@@ -185,6 +185,22 @@ try {
   const ex5 = await waitEvent((e) => e.op === OP.CHILD_EXIT && (() => { const c = e.r.u32(); e.r.o = 0; return c === 5; })(), "pty CHILD_EXIT");
   { const r = ex5.r; r.u32(); eq(r.i32(), 0, "pty child exit 0"); }
 
+  // ---- CHILD_RESIZE: the HOST sets this pty's geometry (the sandbox page's shell pane has its own
+  // width, which is not the console the shim is attached to)
+  eq((await call(OP.CHILD_RESIZE, (w) => w.u32(99).i32(80).i32(24))).err, ESRCH, "CHILD_RESIZE unknown cid -> ESRCH");
+  await okCall(OP.SPAWN, (w) => w.u32(6).list(["sh", "-c", "sleep 0.3; stty size; sleep 0.6; stty size"], (w, s) => w.str(s)).list([], () => {}).str("").i32(2));
+  eq((await call(OP.CHILD_RESIZE, (w) => w.u32(6).i32(123).i32(45))).err, 0, "CHILD_RESIZE on a pty child");
+  setTimeout(() => call(OP.CHILD_RESIZE, (w) => w.u32(6).i32(61).i32(17)), 500);   // a SECOND resize (the divider drag)
+  let szOut = "";
+  for (;;) {
+    const e = await waitEvent((e) => e.op === OP.CHILD_OUT && (() => { const c = e.r.u32(); e.r.o = 0; return c === 6; })(), "resize CHILD_OUT");
+    e.r.u32(); e.r.i32(); const d = e.r.bin(); if (d.length === 0) break; szOut += dec.decode(d);
+  }
+  const sz = szOut.trim().split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  eq(sz[0], "45 123", "the pty child sees the size the host set (stty size = rows cols)");
+  eq(sz[1], "17 61", "a SECOND CHILD_RESIZE reaches the same pty (the split view's divider drag)");
+  await waitEvent((e) => e.op === OP.CHILD_EXIT && (() => { const c = e.r.u32(); e.r.o = 0; return c === 6; })(), "resize child CHILD_EXIT");
+
   // ---- signals forwarded, not fatal
   process.kill(child.pid, "SIGINT");
   const sg = await waitEvent((e) => e.op === OP.SIGNAL, "SIGNAL");
