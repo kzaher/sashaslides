@@ -209,8 +209,15 @@ async function engineTagOf(bytes) {
 function startPreload() {
   // direct mode: the tag comes from the engine bytes we download ourselves; otherwise the page may
   // pass cfg.engineTag (serve.mjs publishes it in /engine/opt/jit/index.json), else the bundle is trusted
-  const tag = enginePromise ? enginePromise.then(engineTagOf) : Promise.resolve(cfg.engineTag || null);
-  jitPreload = Promise.resolve(tag)
+  const tagP = enginePromise ? enginePromise.then(engineTagOf) : Promise.resolve(cfg.engineTag || null);
+  jitPreload = (cfg.jitFast && enginePromise ? fastPreload(tagP) : slowPreload(tagP))
+    .then((r) => { ev("jit-bundles", Object.assign({ autoCached, tag: autoTag, fast: !!cfg.jitFast }, r)); return r; })
+    .catch((e) => { ev("error", { message: "jit bundles: " + (e && e.message || e) }); return null; });
+}
+// The sequential path (default): the cache's file name contains the engine tag, the tag needs the
+// engine bytes, so nothing can be fetched until the engine download has finished.
+function slowPreload(tag) {
+  return Promise.resolve(tag)
     // Bundles are keyed by engine build. The harness-recorded ones (kernel.nbjb, <image>.nbjb) are
     // made with the FULL engine, so a page loading the slim build matches none of them and used to
     // boot with a cold JIT. auto-<tag>.nbjb is this browser's own cache for the build it loaded.
@@ -228,9 +235,37 @@ function startPreload() {
         if (head && head.ok) { urls.push(url); autoCached = true; }
       }
       return NanoboxJit.preload(urls, t);
-    })
-    .then((r) => { ev("jit-bundles", Object.assign({ autoCached, tag: autoTag }, r)); return r; })
-    .catch((e) => { ev("error", { message: "jit bundles: " + (e && e.message || e) }); return null; });
+    });
+}
+// ?jitfast=1: overlap the cache load with the engine download instead of queueing behind it.
+// Measured on the sequential path (codex, warm cache, 7.6 MB / 1101 modules): fetch 28-48 ms +
+// decode 6-7 + compile 46 + key map 4 = 83-105 ms that all lands AFTER the engine is here, i.e.
+// squarely on the path to "VM starts". The only reason it has to wait is the file NAME (it carries
+// the engine tag). So: memoize, per engine URL + ETag, the tag the engine with those bytes hashed to
+// last time, use it to guess the name, and start fetch/decode/compile at once. The tag check itself
+// is unchanged -- NanoboxJit.preload still refuses to adopt anything whose recorded tag differs from
+// the one computed from the engine bytes actually downloaded, so a stale or absent memo can only
+// cost a 404 plus the fallback to the sequential path, never a wrong-engine bundle.
+async function fastPreload(tagP) {
+  const memoKey = (etag) => "enginetag:" + info.vmImage + ":" + etag;
+  let etag = null, guess = null;
+  try {
+    const head = await fetch(info.vmImage, { method: "HEAD", credentials: "same-origin" });
+    etag = head.ok ? head.headers.get("etag") : null;
+    if (etag && typeof NanoboxCache !== "undefined") { const b = await NanoboxCache.getBytes(memoKey(etag)); if (b) guess = new TextDecoder().decode(b); }
+  } catch (e) { /* no ETag / no Cache API: sequential */ }
+  tagP.then((t) => { if (t && etag && typeof NanoboxCache !== "undefined") NanoboxCache.putBytes(memoKey(etag), new TextEncoder().encode(t)); }, () => {});
+  tagP.then((t) => { autoTag = t; autoName = "auto-" + (cfg.aot ? "aot-" : "") + t + ".nbjb"; }, () => {});
+  if (!guess || !cfg.jitAutoDir) { ev("jit-tag-memo", { hit: false }); return slowPreload(tagP); }
+  ev("jit-tag-memo", { hit: true, tag: guess });
+  const urls = [cfg.jitAutoDir + "auto-" + (cfg.aot ? "aot-" : "") + guess + ".nbjb"];
+  // the harness-recorded bundles carry the FULL engine's tag (serve.mjs publishes it as cfg.engineTag);
+  // when this page runs another build (the sandbox's slim engine) they can only be fetched to be
+  // refused -- 1.85 MB of transfer + a decode for nothing on every single load
+  if (!cfg.engineTag || guess === cfg.engineTag) urls.push(...(cfg.jitBundles || []));
+  const r = await NanoboxJit.preload(urls, tagP, { speculative: true });
+  if (r.adopted && r.adopted.length) { autoCached = true; return r; }
+  return slowPreload(tagP);   // wrong guess / the file is gone: ask for the real name
 }
 let autoTag = null, autoName = null, autoCached = false, autoUploaded = false;
 

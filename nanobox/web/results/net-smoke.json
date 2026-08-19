@@ -1,9 +1,9 @@
 {
- "at": "2026-08-19T10:06:28.962Z",
+ "at": "2026-08-19T11:05:47.116Z",
  "page": "vm",
  "url": "http://localhost:8093/vm.html?engine=opt&image=linux-base&jit=2:2000&auto=0&netlog=1&cmd=%2Fbin%2Fsh%20-c%20'wget%20-q%20-O%20%2Ftmp%2Fp%20http%3A%2F%2F172.17.0.2%3A8099%2Fprobe.sh%3B%20echo%20NBBOOT%20rc%3D%24%3F%3B%20sh%20%2Ftmp%2Fp'",
  "base": "http://172.17.0.2:8099",
- "ranMs": 20019,
+ "ranMs": 22016,
  "results": [
   {
    "name": "bootstrap",
@@ -34,103 +34,120 @@
   },
   {
    "name": "sse",
-   "ok": false,
-   "detail": "BUFFERED: the first event only showed up after 5069 ms (budget 2000 ms) — first event +74s (server clock 5069 ms), last +74s (server clock 5159 ms), 6 events spread over 5000 ms by the endpoint",
-   "first": 74,
-   "last": 74,
+   "ok": true,
+   "detail": "first event +0s (server clock 64 ms), last +85s (server clock 5071 ms), 6 events spread over 5000 ms by the endpoint",
+   "first": 0,
+   "last": 85,
    "events": 6,
-   "srvFirst": 5069,
-   "srvEnd": 5159,
+   "srvFirst": 64,
+   "srvEnd": 5071,
    "span": 5000
   },
   {
    "name": "big",
-   "ok": false,
-   "detail": "BUFFERED: 8 KB events: first +null ms, last +5494 ms, 6 events over 5000 ms",
+   "ok": true,
+   "detail": "8 KB events: first +191 ms, last +5157 ms, 6 events over 5000 ms",
    "events": 6,
-   "first": null,
-   "last": 5494
+   "first": 191,
+   "last": 5157
   },
   {
    "name": "open",
-   "ok": false,
-   "detail": "BUFFERED: 0 events / 0 bytes off a never-ending stream in 8s — a stream that never closes hands the guest nothing (this is the MCP server->client channel)",
-   "events": 0,
-   "bytes": 0,
-   "waited": 8
+   "ok": true,
+   "detail": "8 events / 128 bytes off a never-ending stream, first at +65 ms, stream held open 7857 ms (wanted ~8000 ms; the guest's own timeout was 137 of ITS fast seconds)",
+   "events": 8,
+   "bytes": 128,
+   "waited": 137,
+   "srvFirst": 65,
+   "srvWindow": 7857
   },
   {
    "name": "relay",
-   "ok": false,
-   "detail": "relayed GET -> \"status_lines=0\""
+   "ok": true,
+   "detail": "GET https://api.anthropic.com/api/hello came back with 1 status line(s) — see work/prof/j2-serve.log"
   }
  ],
  "hits": [
   {
-   "t": 2263,
+   "t": 2123,
    "method": "GET",
    "path": "/probe.sh"
   },
   {
-   "t": 2380,
+   "t": 2221,
    "method": "GET",
    "path": "/echo"
   },
   {
-   "t": 2512,
+   "t": 2550,
    "method": "GET",
    "path": "/bulk?bytes=2000000"
   },
   {
-   "t": 3118,
+   "t": 3111,
    "method": "GET",
    "path": "/mark?t=sse-begin"
   },
   {
-   "t": 3163,
+   "t": 3149,
    "method": "GET",
    "path": "/sse?n=6&ms=1000"
   },
   {
-   "t": 8187,
+   "t": 3175,
    "method": "GET",
    "path": "/mark?t=sse-first"
   },
   {
-   "t": 8277,
+   "t": 8182,
    "method": "GET",
    "path": "/mark?t=sse-end"
   },
   {
-   "t": 8391,
+   "t": 8276,
    "method": "GET",
    "path": "/mark?t=big-begin"
   },
   {
-   "t": 8429,
+   "t": 8307,
    "method": "GET",
    "path": "/sse?n=6&ms=1000&pad=8192"
   },
   {
-   "t": 13885,
+   "t": 8467,
+   "method": "GET",
+   "path": "/mark?t=big-first"
+  },
+  {
+   "t": 13433,
    "method": "GET",
    "path": "/mark?t=big-end"
   },
   {
-   "t": 13939,
+   "t": 13482,
    "method": "GET",
    "path": "/mark?t=open-begin"
   },
   {
-   "t": 13994,
+   "t": 13523,
    "method": "GET",
    "path": "/sse?n=0&ms=1000"
+  },
+  {
+   "t": 13547,
+   "method": "GET",
+   "path": "/mark?t=open-first"
+  },
+  {
+   "t": 21339,
+   "method": "GET",
+   "path": "/mark?t=open-end"
   }
  ],
  "routes": {
   "extension": 0,
-  "relay": 0,
-  "direct": 13,
+  "relay": 1,
+  "direct": 16,
   "blocked": 0,
   "log": [
    {
@@ -186,6 +203,11 @@
    {
     "route": "direct",
     "method": "GET",
+    "url": "http://172.17.0.2:8099/mark?t=big-first"
+   },
+   {
+    "route": "direct",
+    "method": "GET",
     "url": "http://172.17.0.2:8099/mark?t=big-end"
    },
    {
@@ -197,6 +219,21 @@
     "route": "direct",
     "method": "GET",
     "url": "http://172.17.0.2:8099/sse?n=0&ms=1000"
+   },
+   {
+    "route": "direct",
+    "method": "GET",
+    "url": "http://172.17.0.2:8099/mark?t=open-first"
+   },
+   {
+    "route": "direct",
+    "method": "GET",
+    "url": "http://172.17.0.2:8099/mark?t=open-end"
+   },
+   {
+    "route": "relay",
+    "method": "GET",
+    "url": "https://api.anthropic.com/api/hello"
    }
   ]
  },
@@ -208,10 +245,12 @@
   "NB get body=nanobox-echo-ok",
   "NB https bytes=2567",
   "NB bulk bytes=2000000",
-  "NB sse first=74 last=74 total=74 events=6",
+  "NB sse first=0 last=85 total=86 events=6",
+  "NB clock guestsec=86 wallsec=5 opentimeout=137",
   "NB big events=6",
-  "NB open events=0 bytes=0 waited=8",
-  "NB relay status_lines=0",
+  "Terminated",
+  "NB open events=8 bytes=128 waited=137",
+  "NB relay status_lines=1",
   "NBDONE"
  ]
 }

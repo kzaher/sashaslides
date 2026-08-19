@@ -56,29 +56,60 @@
     bundleFns: new Map(),   // content key string -> table index (instantiated; permanent slots)
     bundleSlots: new Set(),
     bundleHits: 0, bundleMisses: 0, bundleInst: 0, bundleModules: 0, bundleFiles: 0, bundleLoadMs: 0, bundleInstMs: 0, bundleTag: null,
+    // attribution of the cache-load path (page ?cacheprof=1 prints it; always collected — every counter
+    // below is a performance.now() pair per FILE or per module INSTANTIATION, never per lookup)
+    prof: { fetchMs: 0, decodeMs: 0, compileMs: 0, keymapMs: 0, importsMs: 0, instMs: 0, exportsMs: 0, slotMs: 0, bytes: 0, wasmBytes: 0, modsCompiled: 0, codeCacheHits: 0, codeCacheMs: 0, codeCachePutMs: 0 },
     // optional recording of what the engine installs (cfg.record): [{bytes, keys, funcKeys}] -> exportBundle()
     record: false, records: [], recordMax: 3000, fnRecord: new Map() };
 
   // Fetch + compile bundle files. `engineTag` is the tag of the engine that will run (string, or a
   // promise of one — the worker computes it from the engine bytes while they download); a bundle
-  // whose tag differs is refused (warn + ignore). Resolves to { files, modules, keys, ms } once
-  // every module is compiled; install() then answers lookup from state.bundle.
-  async function preload(urls, engineTag) {
+  // whose tag differs is refused (warn + ignore). Resolves to { files, modules, keys, ms, adopted }
+  // once every module is compiled; install() then answers lookup from state.bundle.
+  //
+  // opts.speculative (page ?jitfast=1): fetch, decode and COMPILE every file before the engine tag is
+  // known, so the whole cache load overlaps the engine download instead of queueing behind it (it is
+  // the tag that normally forces the wait: the cache's file name contains it). Correctness is
+  // unchanged — nothing is adopted into state.bundle/bundleLink until the tag computed from the REAL
+  // engine bytes matches, exactly as in the sequential path. A wrong guess only wastes background work.
+  async function preload(urls, engineTag, opts) {
     const t = performance.now();
-    const tag = await Promise.resolve(engineTag);
+    const spec = !!(opts && opts.speculative);
     const get = (u) => (global.NanoboxCache ? global.NanoboxCache.fetchValidated(u) : fetch(u, { credentials: "same-origin" }).then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); }));
-    const files = await Promise.all((urls || []).map((u) => get(u)
-      .then((buf) => ({ u, buf }))
-      .catch((e) => { console.warn(`[nanobox-jit] bundle ${u}: ${e.message}, ignored`); return null; })));
-    for (const f of files) {
-      if (!f) continue;
-      let b;
-      try { b = B().decode(f.buf); } catch (e) { console.warn(`[nanobox-jit] bundle ${f.u}: ${e.message}, ignored`); continue; }
+    const tf = performance.now();
+    const jobs = (urls || []).map((u) => get(u)
+      .then((buf) => { state.prof.bytes += buf.byteLength; return { u, buf }; })
+      .catch((e) => { console.warn(`[nanobox-jit] bundle ${u}: ${e.message}, ignored`); return null; }));
+    Promise.all(jobs).then(() => { state.prof.fetchMs = performance.now() - tf; }, () => {});
+    const decode = (f) => {
+      if (!f) return null;
+      const td = performance.now();
+      try { const b = B().decode(f.buf); state.prof.decodeMs += performance.now() - td; return { f, b }; }
+      catch (e) { console.warn(`[nanobox-jit] bundle ${f.u}: ${e.message}, ignored`); return null; }
+    };
+    const compileAll = async (u, b) => {
+      const tc = performance.now();
+      const mods = await Promise.all(b.modules.map((m) => WebAssembly.compile(m.bytes).catch((e) => { console.warn(`[nanobox-jit] bundle ${u}: module rejected: ${e.message}`); return null; })));
+      state.prof.compileMs += performance.now() - tc;
+      state.prof.modsCompiled += b.modules.length;
+      for (const m of b.modules) state.prof.wasmBytes += m.bytes.length;
+      return mods;
+    };
+    // speculative: run decode + compile off the back of each fetch, without waiting for the tag
+    const early = spec ? jobs.map((j) => j.then(decode).then(async (r) => (r ? (r.mods = await compileAll(r.f.u, r.b), r) : null)).catch(() => null)) : null;
+    const tag = await Promise.resolve(engineTag);
+    const adopted = [];
+    for (let i = 0; i < jobs.length; i++) {
+      const r = early ? await early[i] : decode(await jobs[i]);
+      if (!r) continue;
+      const f = r.f, b = r.b;
       if (tag && b.tag !== tag) { console.warn(`[nanobox-jit] bundle ${f.u}: engine tag ${b.tag} != ${tag} (different engine build), ignored`); continue; }
       if (b.linkSlot && state.bundleLink && state.bundleLink.slot !== b.linkSlot) { console.warn(`[nanobox-jit] bundle ${f.u}: link slot ${b.linkSlot} != ${state.bundleLink.slot} of an earlier bundle, ignored`); continue; }
       if (!tag) console.warn(`[nanobox-jit] bundle ${f.u}: no engine tag to check against, trusting it (tag ${b.tag})`);
       state.bundleFiles++; state.bundleTag = b.tag;
-      const mods = await Promise.all(b.modules.map((m) => WebAssembly.compile(m.bytes).catch((e) => { console.warn(`[nanobox-jit] bundle ${f.u}: module rejected: ${e.message}`); return null; })));
+      const mods = r.mods || await compileAll(f.u, b);
+      adopted.push(f.u);
+      const tk = performance.now();
       let dup = 0;
       for (let i = 0; i < b.modules.length; i++) {
         if (!mods[i]) continue;
@@ -97,10 +128,13 @@
         }
         if (used) state.bundleModules++;
       }
+      state.prof.keymapMs += performance.now() - tk;
       console.log(`[nanobox-jit] bundle ${f.u}: ${b.modules.length} modules, ${state.bundle.size} keys total${dup ? ` (${dup} duplicates skipped)` : ""}${b.linkSlot ? `, link fn @${b.linkSlot}` : ""}`);
     }
     state.bundleLoadMs = performance.now() - t;
-    return { files: state.bundleFiles, modules: state.bundleModules, keys: state.bundle.size, ms: Math.round(state.bundleLoadMs) };
+    const p = state.prof;
+    return { files: state.bundleFiles, modules: state.bundleModules, keys: state.bundle.size, ms: Math.round(state.bundleLoadMs), adopted,
+             prof: { bytes: p.bytes, wasmBytes: p.wasmBytes, mods: p.modsCompiled, fetchMs: Math.round(p.fetchMs), decodeMs: Math.round(p.decodeMs), compileMs: Math.round(p.compileMs), keymapMs: Math.round(p.keymapMs), codeCacheHits: p.codeCacheHits, codeCacheMs: Math.round(p.codeCacheMs) } };
   }
 
   // Install the hooks. `inst` is the engine instance; `cfg` = { level, threshold, maxlen?, region?, record? }.
@@ -117,7 +151,9 @@
       return state.free.pop();
     };
     const imports = (keys) => {
+      const t = performance.now();
       const h = {}; for (let i = 0; i < keys.length; i++) h[String(i)] = table.get(keys[i]);
+      state.prof.importsMs += performance.now() - t;
       return { e: { m: memory, t: table }, h };
     };
     // pin the link function at `want` (0 = wherever the first free slot is); it is never released
@@ -205,10 +241,15 @@
         const entry = state.bundle.get(ks);
         if (entry && !entry.inst && !entry.fail) {
           const t = performance.now();
-          try { entry.inst = new WebAssembly.Instance(entry.mod, imports(entry.keys)); }
+          const imp = imports(entry.keys); const ti = performance.now();
+          try { entry.inst = new WebAssembly.Instance(entry.mod, imp); }
           catch (err) { entry.fail = true; console.error("[nanobox-jit] bundle module failed to instantiate:", err.message); }
+          state.prof.instMs += performance.now() - ti;
           if (entry.inst) {
-            const names = WebAssembly.Module.exports(entry.mod).filter((e) => e.kind === "function").map((e) => e.name);
+            const te = performance.now();
+            const names = entry.names || (entry.names = WebAssembly.Module.exports(entry.mod).filter((e) => e.kind === "function").map((e) => e.name));
+            state.prof.exportsMs += performance.now() - te;
+            const tsl = performance.now();
             for (let i = 0; i < names.length && i < entry.funcKeys.length; i++) {
               const [flo, fhi] = entry.funcKeys[i];
               if (!flo && !fhi) continue;
@@ -218,6 +259,7 @@
               table.set(s, entry.inst.exports[names[i]]);
               state.bundleSlots.add(s); state.bundleFns.set(fks, s);
             }
+            state.prof.slotMs += performance.now() - tsl;
             state.bundleInst++;
           }
           state.bundleInstMs += performance.now() - t;
@@ -271,7 +313,7 @@
     const u64 = (lo, hi) => (BigInt(hi >>> 0) << 32n) | BigInt(lo >>> 0);
     const out = { installed: state.installed, batches: state.batches, released: state.released, live: state.fns.size, bytes: state.bytes, compileMs: Math.round(state.compileMs), level: state.level, threshold: state.threshold };
     if (state.link) out.linkSlot = state.link.slot, out.linkReuse = state.linkReuse;
-    if (state.bundleFiles || state.bundle.size) Object.assign(out, { bundleHits: state.bundleHits, bundleMisses: state.bundleMisses, bundleInst: state.bundleInst, bundleModules: state.bundleModules, bundleFiles: state.bundleFiles, bundleLoadMs: Math.round(state.bundleLoadMs), bundleInstMs: Math.round(state.bundleInstMs) });
+    if (state.bundleFiles || state.bundle.size) Object.assign(out, { bundleHits: state.bundleHits, bundleMisses: state.bundleMisses, bundleInst: state.bundleInst, bundleModules: state.bundleModules, bundleFiles: state.bundleFiles, bundleLoadMs: Math.round(state.bundleLoadMs), bundleInstMs: Math.round(state.bundleInstMs), cacheProf: Object.fromEntries(Object.entries(state.prof).map(([k, v]) => [k, k.endsWith("Ms") ? Math.round(v * 10) / 10 : v])) });
     if (ex.nanobox_icount_lo) {
       out.icount = u64(ex.nanobox_icount_lo(), ex.nanobox_icount_hi()).toString();
       out.ticks = u64(ex.nanobox_ticks_lo(), ex.nanobox_ticks_hi()).toString();

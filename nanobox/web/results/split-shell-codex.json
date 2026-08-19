@@ -14,17 +14,10 @@
   },
   "failures": [],
   "cliScreen": [
-    "  Welcome to Codex, OpenAI's command-line coding agent",
-    "  Sign in with ChatGPT to use Codex as part of your paid plan",
-    "  or connect an API key for usage-based billing",
-    "> 1. Sign in with ChatGPT",
-    "     Usage included with Plus, Pro, Business, and Enterprise pla",
-    "ns",
-    "  2. Sign in with Device Code",
-    "     Sign in from another device with a one-time code",
-    "  3. Provide your own API key",
-    "     Pay for what you use",
-    "  Press enter to continue"
+    "nanobox SANDBOX — image linux-base (Linux only: no node, no CLI)",
+    " boots in the emulated VM while the first-run installer fetches ",
+    "node + codex from the vendors into the persistent /usr/local; th",
+    "en runs codex in the guest"
   ],
   "shellScreen": [
     "~ # echo NB4-$(ps -o args= 2>/dev/null | grep -c .)",
@@ -34,14 +27,14 @@
     "    1 /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
     "    6 /bundle/nb/node",
     "    7 /bin/sh -l",
-    "   28 {ps} /bin/sh -l",
-    "   29 {head} /bin/sh -l",
+    "   25 {ps} /bin/sh -l",
+    "   26 /bin/sh -l",
     "NB5-END",
     "~ # echo split-view-was-here > /tmp/nb-split && cat /tmp/nb-split && echo NB6-OK",
     "split-view-was-here",
     "NB6-OK",
     "~ # echo NB7-$(date +%s)",
-    "NB7-1787135253",
+    "NB7-1787136813",
     "~ # "
   ]
 }

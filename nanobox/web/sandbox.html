@@ -107,6 +107,7 @@ window.nanoboxNet = { requests: [], routes: {}, extension: null };
 //   install=claude,codex,agy   what to install/mount (default: the cli; node + npm always)
 //   verifyfull=1               claude-native: download the WHOLE 324 MB binary and check its sha256
 //   image=linux-base   jit=L:T   cache=0 (bypass the engine/image caches; re-download the packages too)
+//   jitfast=1  load the JIT cache in parallel with the engine download (memoized engine tag)
 //   reset=1  wipe the persistent tree first (a true first run)   engine=slim|full (default slim)
 //   sharp=1  also install claude's optional @img/sharp-linux-x64 + libvips   auto=0  no prompt auto-answer
 //   env=K=V,K=V  extra environment for the CLI
@@ -385,6 +386,12 @@ async function bootVm() {
     // compiled. Measured: compiling at a low threshold at RUNTIME costs 2.4x the boot time (8.4 ->
     // 20.6 s at threshold 2), which is exactly why it is paid once, during recording, and cached.
     jitAutoDir: qs.get("autojit") === "0" ? null : "/engine/opt/jit/",
+    // ?jitfast=1: load the JIT cache in PARALLEL with the engine download instead of after it (the
+    // cache file's name carries the engine tag, which needs the engine bytes -- so the sequential
+    // path cannot start fetching until the 33 MB engine is here). The tag of the engine served under
+    // the current ETag is memoized in the Cache API and used to guess the name; what is loaded is
+    // still only accepted after the tag computed from the real engine bytes matches.
+    jitFast: qs.get("jitfast") === "1",
     jitRecordThreshold: Number(qs.get("recthreshold") || 0) || undefined,   // 0 = record at the normal threshold (no boot cost)
     jitUploadUrl: "/jit/upload", jitRecordUploadMs: Number(qs.get("recms") || 60000),
     jitRecord: qs.get("record") === "1",

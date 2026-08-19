@@ -126,12 +126,35 @@ against 203.9 M at the default threshold. The headroom is:
    shuffles — go to a C++ handler *every* time they execute. This is the permanent floor unless they
    get templates.
 
-### 4.4 Cache loading (profile in flight)
+### 4.4 Cache loading -- measured, and the premise had gone stale
 
-Artifact load is ~200 ms of index parse plus ~1.3 s to compile and instantiate the modules a boot
-touches, on a ~6.4-7.4 s boot. Levers: module granularity (batches of ~13 functions mean touching one
-function compiles ~250 KB), `compileStreaming` in the browser, caching compiled modules in IndexedDB/
-OPFS so a second visit skips compilation, and a leaner index.
+**The 1.5 s figure this section was briefed with no longer exists.** Today's size work shrank a
+self-recorded codex artifact to **5.5 MB / 773 modules** (harness) and 7.6 MB / 1,101 modules (browser),
+mean module **6.8-7.0 KB with ~4.5-4.9 functions**; the ~250 KB batch modules come from eager-sweep AOT
+recordings, not from what a normal run records or replays. Real cost: **~180 ms in the harness, ~110 ms
+in the browser**.
+
+Attribution (harness, default lazy): read 1.6-1.9 ms, index parse 3-6 ms, key map 3.5-8.6 ms -- all
+before the VM starts -- then on the **VM thread**: `new WebAssembly.Module` x771 **101-125 ms**,
+`Instance` x771 31-38 ms, imports 4.5-7.1 ms, exports 3.4-4.8 ms, slots 7.6-9.2 ms. **65 % is one
+synchronous compile per touched module while the guest waits.**
+
+Shipped, flag-gated: `NANOBOX_BUNDLE_EAGER=auto` compiles the whole artifact up front when it is under
+`NANOBOX_BUNDLE_EAGER_MB` (64) -- **19-21 ms in parallel instead of 101-125 ms serialized on the VM
+thread** -- and `NANOBOX_CACHEPROF=1` prints the attribution. Harness codex boot: 5,783 -> **5,704 ms**,
+cache load **-45 %**. In the browser, `?jitfast=1` memoizes the engine tag per engine-URL+ETag and runs
+fetch/decode/compile speculatively (adoption still gated on the tag computed from the real engine
+bytes): a wash on localhost, but it removes 84-87 ms of serialized work and **1.85 MB of transfer**
+(`kernel.nbjb` is fetched and refused on every load because the harness records full-engine bundles
+while the sandbox runs slim) -- ~1.5 s at 10 Mbit/s.
+
+Rejected by the profile, each with a number: `compileStreaming` (N modules, not one stream), dedupe
+(8 duplicates of 1,101), a leaner index (3-7 ms total), an IndexedDB compiled-module cache (buys <=45 ms
+that is already hideable), granularity re-tuning (the whole artifact compiles in 19-28 ms in parallel).
+
+**Operational finding worth keeping**: closing the sandbox tab at the sign-in screen leaves codex's
+sqlite damaged, so the NEXT codex run dies in "state db backfill". That is the intermittent boot
+failure seen all day; loops that run codex repeatedly should wipe `/root/.codex` first.
 
 ## 5. The new identity criteria, and what they unlock
 
@@ -201,7 +224,7 @@ brief requires proving it *fails* on a deliberately broken engine before it is t
 |---|---|---|---|---|
 | 1 | New oracle: heap + syscall-trace comparison, both guests | unblocks everything below | `--criteria heap+syscalls` | **DONE, see 5.1** |
 | 2 | Two-tier emission, tier 0 for cold sites | **85 -> ~10 B/instance** | `nanobox_set_jit_tier` | in flight |
-| 3 | Cache load profile and fixes | ~1.5 s off a cold boot | query param / env | in flight |
+| 3 | Cache load profile and fixes | measured at 180 ms, not 1.5 s; -45 % of it | `NANOBOX_BUNDLE_EAGER=auto`, `?jitfast=1` | **DONE, see 4.4** |
 | 4 | Attach precompiled translations at decode time | interpretation 1.5 M -> ~the handler floor | AOT-only bit | next |
 | 5 | Outline the per-site fault/exit arm | another large slice of memory-site bytes | `nanobox_jit_outline` bit | next |
 | 6 | Dedicated stack-page tag for push/pop/call/ret | collapses 4 of the 6 costliest opcodes | outline bit | next |

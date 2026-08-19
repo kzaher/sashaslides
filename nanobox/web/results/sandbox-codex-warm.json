@@ -3,27 +3,27 @@
   "cold": false,
   "url": "http://localhost:8093/sandbox.html?cli=codex",
   "verdict": {
-    "signinMs": 5759,
-    "loadMs": 1100,
-    "bootMs": 1013,
-    "runMs": 3646,
-    "engineMs": 654,
-    "imageMs": 633,
-    "installMs": 744,
-    "persistMs": 917,
+    "signinMs": 6511,
+    "loadMs": 1165,
+    "bootMs": 1057,
+    "runMs": 4289,
+    "engineMs": 699,
+    "imageMs": 683,
+    "installMs": 869,
+    "persistMs": 974,
     "helloMs": null,
     "bundleMs": null,
     "transformMs": null,
-    "icount": "934855799"
+    "icount": "898617869"
   },
-  "date": "2026-08-19T10:27:29.913Z",
+  "date": "2026-08-19T10:53:22.871Z",
   "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
   "install": {
-    "ms": 419,
+    "ms": 540,
     "store": "opfs",
     "usage": {
-      "usage": 3581311948,
-      "quota": 14318730188
+      "usage": 3580894080,
+      "quota": 14318312320
     },
     "packages": 4,
     "fromCache": 4,
@@ -44,7 +44,7 @@
           "url": null,
           "bytes": 0,
           "fromCache": true,
-          "ms": 214
+          "ms": 305
         }
       },
       {
@@ -59,7 +59,7 @@
           "url": null,
           "bytes": 0,
           "fromCache": true,
-          "ms": 24
+          "ms": 21
         }
       },
       {
@@ -74,7 +74,7 @@
           "url": null,
           "bytes": 0,
           "fromCache": true,
-          "ms": 3
+          "ms": 5
         }
       },
       {
@@ -89,13 +89,13 @@
           "url": null,
           "bytes": 0,
           "fromCache": true,
-          "ms": 403
+          "ms": 526
         }
       }
     ],
     "journals": {
-      "count": 4,
-      "bytes": 418304
+      "count": 1,
+      "bytes": 1024
     }
   },
   "accounting": {
@@ -121,9 +121,9 @@
     },
     "vendorDirectTotal": 584,
     "vendorRelay": {
-      "chatgpt.com": 207
+      "chatgpt.com": 232
     },
-    "vendorRelayTotal": 207,
+    "vendorRelayTotal": 232,
     "routes": {
       "page": {
         "direct": 4,
@@ -141,30 +141,30 @@
       "noCache": false,
       "proxyExtension": false,
       "event": "boot",
-      "t": 309
+      "t": 311
     },
     {
       "clis": [
         "codex"
       ],
       "event": "install-start",
-      "t": 310
+      "t": 311
     },
     {
-      "t": 329,
+      "t": 333,
       "stage": "store",
       "kind": "opfs",
       "event": "install:store"
     },
     {
-      "t": 334,
+      "t": 339,
       "stage": "cached",
       "key": "pkg-@openai~codex@0.147.0",
       "bytes": 15360,
       "event": "install:cached"
     },
     {
-      "t": 335,
+      "t": 340,
       "stage": "package",
       "key": "pkg-@openai~codex@0.147.0",
       "files": 4,
@@ -173,14 +173,14 @@
       "event": "install:package"
     },
     {
-      "t": 355,
+      "t": 356,
       "stage": "cached",
       "key": "pkg-npm@10.9.8",
       "bytes": 13265920,
       "event": "install:cached"
     },
     {
-      "t": 365,
+      "t": 368,
       "stage": "package",
       "key": "pkg-npm@10.9.8",
       "files": 2011,
@@ -189,14 +189,26 @@
       "event": "install:package"
     },
     {
-      "t": 544,
+      "event": "vm-runtime-ready",
+      "t": 581
+    },
+    {
+      "event": "vm:init",
+      "t": 639
+    },
+    {
+      "event": "vm:start",
+      "t": 639
+    },
+    {
+      "t": 639,
       "stage": "cached",
       "key": "pkg-node-linux-x64@22.23.2",
       "bytes": 186952704,
       "event": "install:cached"
     },
     {
-      "t": 565,
+      "t": 654,
       "stage": "package",
       "key": "pkg-node-linux-x64@22.23.2",
       "files": 2729,
@@ -205,23 +217,11 @@
       "event": "install:package"
     },
     {
-      "event": "vm-runtime-ready",
-      "t": 570
-    },
-    {
-      "event": "vm:init",
-      "t": 607
-    },
-    {
-      "event": "vm:start",
-      "t": 607
-    },
-    {
       "event": "vm:image-loaded",
-      "t": 633,
+      "t": 683,
       "files": 314,
       "compressedBytes": 0,
-      "ms": 26,
+      "ms": 44,
       "cache": {
         "hits": 2,
         "misses": 0,
@@ -230,24 +230,24 @@
     },
     {
       "event": "vm:engine-cached",
-      "t": 654,
+      "t": 698,
       "bytes": 33343458
     },
     {
       "event": "vm:engine-fetched",
-      "t": 654,
+      "t": 699,
       "bytes": 33343458,
-      "ms": 48
+      "ms": 60
     },
     {
-      "t": 733,
+      "t": 861,
       "stage": "cached",
       "key": "pkg-@openai~codex@0.147.0-linux-x64",
       "bytes": 314808320,
       "event": "install:cached"
     },
     {
-      "t": 734,
+      "t": 861,
       "stage": "package",
       "key": "pkg-@openai~codex@0.147.0-linux-x64",
       "files": 8,
@@ -256,26 +256,26 @@
       "event": "install:package"
     },
     {
-      "ms": 419,
+      "ms": 540,
       "store": "opfs",
       "packages": 4,
       "fromCache": 4,
       "downloadBytes": 0,
       "journals": {
-        "count": 4,
-        "bytes": 418304
+        "count": 1,
+        "bytes": 1024
       },
       "event": "installed",
-      "t": 744
+      "t": 869
     },
     {
       "event": "vm:persist-applied",
-      "t": 917,
+      "t": 974,
       "packages": 4,
-      "journals": 4,
-      "files": 4857,
-      "waitMs": 267,
-      "applyMs": 16,
+      "journals": 1,
+      "files": 4752,
+      "waitMs": 273,
+      "applyMs": 19,
       "keys": [
         "pkg-node-linux-x64@22.23.2",
         "pkg-npm@10.9.8",
@@ -285,10 +285,10 @@
     },
     {
       "event": "vm:bundle-ready",
-      "t": 917,
+      "t": 974,
       "files": 314,
       "compressedBytes": 0,
-      "ms": 310,
+      "ms": 336,
       "cache": {
         "hits": 2,
         "misses": 0,
@@ -297,38 +297,38 @@
     },
     {
       "event": "vm:jit-bundles",
-      "t": 1100,
+      "t": 1165,
       "autoCached": true,
       "tag": "123376996-b215171d136c838136fa5c53b9107f75",
       "files": 1,
       "modules": 1611,
       "keys": 7068,
-      "ms": 122
+      "ms": 126
     },
     {
       "event": "vm:start-direct",
-      "t": 1100
+      "t": 1165
     },
     {
-      "ms": 1100,
+      "ms": 1165,
       "event": "vm-start",
-      "t": 1100
+      "t": 1165
     },
     {
       "event": "vm:persist-attach",
-      "t": 1100,
+      "t": 1166,
       "persist": true,
       "share": "bundle",
       "fd": 6
     },
     {
       "event": "vm:instantiated",
-      "t": 1197,
-      "compileMs": 97
+      "t": 1264,
+      "compileMs": 98
     },
     {
       "event": "vm:engine",
-      "t": 1202,
+      "t": 1269,
       "optimized": true,
       "jit": {
         "level": 2,
@@ -337,16 +337,16 @@
       "bundles": 1611
     },
     {
-      "ms": 2112,
+      "ms": 2222,
       "event": "guest-booted",
-      "t": 2112
+      "t": 2222
     },
     {
-      "t": 3924,
+      "t": 4045,
       "stage": "journal",
-      "name": "journal/01787135247506-0-mv0i.tar",
-      "bytes": 23040,
-      "records": 6,
+      "name": "journal/01787136799800-0-7a8z.tar",
+      "bytes": 19968,
+      "records": 13,
       "entries": [
         {
           "path": "root/",
@@ -369,7 +369,7 @@
           "type": "5"
         },
         {
-          "path": "root/.codex/tmp/arg0/codex-arg0UuswpJ/",
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/",
           "size": 0,
           "type": "5"
         },
@@ -379,7 +379,7 @@
           "type": "K"
         },
         {
-          "path": "root/.codex/tmp/arg0/codex-arg0UuswpJ/apply_patch",
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/apply_patch",
           "size": 0,
           "type": "2"
         },
@@ -389,7 +389,7 @@
           "type": "K"
         },
         {
-          "path": "root/.codex/tmp/arg0/codex-arg0UuswpJ/applypatch",
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/applypatch",
           "size": 0,
           "type": "2"
         },
@@ -399,7 +399,7 @@
           "type": "K"
         },
         {
-          "path": "root/.codex/tmp/arg0/codex-arg0UuswpJ/codex-linux-sandbox",
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/codex-linux-sandbox",
           "size": 0,
           "type": "2"
         },
@@ -409,34 +409,174 @@
           "type": "K"
         },
         {
-          "path": "root/.codex/tmp/arg0/codex-arg0UuswpJ/codex-execve-wrapper",
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/codex-execve-wrapper",
           "size": 0,
           "type": "2"
+        },
+        {
+          "path": "root/.codex/.wh.state_5.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite",
+          "size": 4096,
+          "type": "0"
         },
         {
           "path": "root/.codex/state_5.sqlite-wal",
-          "size": 12392,
+          "size": 4152,
           "type": "0"
         }
       ],
       "event": "install:journal"
     },
     {
-      "ms": 5759,
-      "loadMs": 1100,
-      "bootMs": 1013,
-      "runMs": 3646,
+      "t": 6301,
+      "stage": "journal",
+      "name": "journal/01787136802056-1-1b7x.tar",
+      "bytes": 399360,
+      "records": 116,
+      "entries": [
+        {
+          "path": "root/.codex/.wh.logs_2.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.goals_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.memories_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.queue_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/logs_2.sqlite",
+          "size": 49152,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/skills/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/skills/.system/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/agents/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/assets/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/references/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/scripts/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/openai-docs/",
+          "size": 0,
+          "type": "5"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "ms": 6511,
+      "loadMs": 1165,
+      "bootMs": 1057,
+      "runMs": 4289,
       "event": "signin",
-      "t": 5759
+      "t": 6511
     }
   ],
   "persistLog": [
     {
-      "t": 3599,
+      "t": 3716,
       "stage": "journal",
-      "name": "journal/01787135247506-0-mv0i.tar",
-      "bytes": 23040,
-      "records": 6,
+      "name": "journal/01787136799800-0-7a8z.tar",
+      "bytes": 19968,
+      "records": 13,
       "entries": [
         {
           "path": "root/",
@@ -459,7 +599,7 @@
           "type": "5"
         },
         {
-          "path": "root/.codex/tmp/arg0/codex-arg0UuswpJ/",
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/",
           "size": 0,
           "type": "5"
         },
@@ -469,7 +609,7 @@
           "type": "K"
         },
         {
-          "path": "root/.codex/tmp/arg0/codex-arg0UuswpJ/apply_patch",
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/apply_patch",
           "size": 0,
           "type": "2"
         },
@@ -479,7 +619,7 @@
           "type": "K"
         },
         {
-          "path": "root/.codex/tmp/arg0/codex-arg0UuswpJ/applypatch",
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/applypatch",
           "size": 0,
           "type": "2"
         },
@@ -489,7 +629,7 @@
           "type": "K"
         },
         {
-          "path": "root/.codex/tmp/arg0/codex-arg0UuswpJ/codex-linux-sandbox",
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/codex-linux-sandbox",
           "size": 0,
           "type": "2"
         },
@@ -499,14 +639,153 @@
           "type": "K"
         },
         {
-          "path": "root/.codex/tmp/arg0/codex-arg0UuswpJ/codex-execve-wrapper",
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/codex-execve-wrapper",
           "size": 0,
           "type": "2"
+        },
+        {
+          "path": "root/.codex/.wh.state_5.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite",
+          "size": 4096,
+          "type": "0"
         },
         {
           "path": "root/.codex/state_5.sqlite-wal",
-          "size": 12392,
+          "size": 4152,
           "type": "0"
+        }
+      ]
+    },
+    {
+      "t": 5971,
+      "stage": "journal",
+      "name": "journal/01787136802056-1-1b7x.tar",
+      "bytes": 399360,
+      "records": 116,
+      "entries": [
+        {
+          "path": "root/.codex/.wh.logs_2.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.goals_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.memories_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.queue_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/logs_2.sqlite",
+          "size": 49152,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/skills/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/skills/.system/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/agents/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/assets/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/references/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/scripts/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/openai-docs/",
+          "size": 0,
+          "type": "5"
         }
       ]
     }
