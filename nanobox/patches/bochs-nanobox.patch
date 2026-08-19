@@ -22,7 +22,7 @@ index 234779104..1c4441e30 100644
   logio.h misc/bswap.h plugin.h extplugin.h param_names.h pc_system.h \
   bx_debug/debug.h config.h osdep.h memory/memory-bochs.h \
 diff --git a/bochs/cpu/cpu.cc b/bochs/cpu/cpu.cc
-index e6ea3661e..616547646 100644
+index e6ea3661e..432558acb 100644
 --- a/bochs/cpu/cpu.cc
 +++ b/bochs/cpu/cpu.cc
 @@ -30,6 +30,7 @@
@@ -54,7 +54,17 @@ index e6ea3661e..616547646 100644
      BX_CPU_THIS_PTR icount++;
      BX_SYNC_TIME_IF_SINGLE_PROCESSOR(0);
  #if BX_DEBUGGER || BX_GDBSTUB
-@@ -114,15 +120,43 @@ int BX_CPU_C::cpu_loop(void)
+@@ -88,6 +94,9 @@ int BX_CPU_C::cpu_loop(void)
+   // mirrors similar code below, after the interrupt() call.
+   BX_CPU_THIS_PTR prev_rip = RIP; // commit new EIP
+   BX_CPU_THIS_PTR speculative_rsp = false;
++  // nanobox direct calls: no compiled frame is live here -- and a longjmp out of an exception threw
++  // however many were, without their decrements (see nanobox_jit.cc, nanobox_jit_flags bit 9)
++  { extern unsigned nanobox_dcall_depth; nanobox_dcall_depth = 0; }
+ 
+   while (1) {
+ 
+@@ -114,15 +123,43 @@ int BX_CPU_C::cpu_loop(void)
      for(;;) {
        // want to allow changing of the instruction inside instrumentation callback
        BX_INSTR_BEFORE_EXECUTION(BX_CPU_ID, i);
@@ -1393,10 +1403,10 @@ index 000000000..0c5787cb0
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..9c8c24778
+index 000000000..a67703a09
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,4866 @@
+@@ -0,0 +1,5062 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -1687,6 +1697,24 @@ index 000000000..9c8c24778
 +extern NbShadowEnt nanobox_shadow[NB_SHADOW_MAX];
 +extern unsigned nanobox_shadow_n;
 +extern Bit64u nanobox_shadow_miss;
++// ---- direct calls between translated functions (nanobox_jit_flags bit 9, AOT only)
++// A guest `CALL rel32` whose callee lives in ANOTHER unit and already carries a translation becomes a
++// wasm `call_indirect` into it, and the callee's `RET` a wasm `return`: the pair never leaves compiled
++// code, so neither side pays the exit epilogue, the shared link function or its iCache lookup. (A call
++// whose target is a block of the SAME unit is already an in-region transition -- constInUnitTarget.)
++// The return address is still written to the emulated stack: guest unwinders walk it, call/pop idioms
++// read it, and removing it hangs the guest.
++// The resolution is cached PER CALL SITE IN THE CALLER'S REGION DESCRIPTOR -- not in the module, which
++// is content-keyed and shared by every region with the same bytes. Validity: the target linear address,
++// the address space it was resolved in (CR3) and the generation of the translation cache.
++struct NbDcallSite { Bit64u va; Bit64u cr3; Bit64u pa; Bit32u ent; Bit32u fn; Bit32u arg; Bit32u ilen; Bit32u miss; Bit32u pad; };
++extern unsigned nanobox_dcall_depth;   // direct-call frames on the host wasm stack right now
++extern unsigned nanobox_dcall_max;     // ... past this many a CALL takes the ordinary exit path
++extern Bit64u nanobox_dcall_ret;       // a direct RET publishes the address it returned to (0 = none)
++extern unsigned nanobox_dcall_warmup;  // executions a site takes the ordinary exit path before it resolves
++extern Bit64u nanobox_aot_stats[16];   // [15] counts direct-call site resolutions (file scope: the resolver lives in the anonymous namespace below)
++static NbDcallSite nanobox_dcall_layout_probe;
++#define DC_OFF(field) ((uint32_t)((uintptr_t)&nanobox_dcall_layout_probe.field - (uintptr_t)&nanobox_dcall_layout_probe))
 +static unsigned nanobox_link_fn = 0;   // table index of the shared trace-linking epilogue function (0 = not built)
 +bxICacheEntry_c *nanobox_dbg_cur_entry = NULL; // dbg mode: the region block that ran last (cpu_loop only knows the region entry)
 +
@@ -1778,6 +1806,8 @@ index 000000000..9c8c24778
 +  // interpreter would have decoded the trace (see icache.h refMapping) and refuses to run a block of
 +  // a region whose bytes were written since the attach (dead) -> leave to cpu_loop, which re-decodes.
 +  Bit8u pending[NB_REGION_MAX_BLOCKS];
++  // direct-call site cache, one per block (a block ends at its CALL, so a block has at most one)
++  NbDcallSite dcall[NB_REGION_MAX_BLOCKS];
 +  Bit8u dead;               // a member's bytes were written after the attach (registry) -> members' jitfn cleared, pending blocks must not run
 +  Bit8u ahead;              // any block was decoded ahead of execution
 +  Bit32u regEpoch;          // == nb_attach_epoch iff the region has attach-registry records (the registry is reset with the JIT cache)
@@ -1785,6 +1815,8 @@ index 000000000..9c8c24778
 +  Region() : nblocks(0), mask(0), key(0), npages(1), dead(0), ahead(0), regEpoch(0), fn(0) {
 +    for (unsigned j = 0; j < NB_REGION_MAX_BLOCKS; j++) { insptr[j] = NULL; entptr[j] = NULL; srcEntry[j] = NULL; srcI[j] = NULL; entry[j].reg = NULL; entry[j].block = 0; entry[j].delta = 0; pending[j] = 0; }
 +    for (unsigned p = 0; p < NB_REGION_MAX_PAGES; p++) { pdelta[p] = 0; ppf[p] = 0; pmask[p] = 0; }
++    memset(dcall, 0, sizeof(dcall));
++    for (unsigned j = 0; j < NB_REGION_MAX_BLOCKS; j++) dcall[j].miss = nanobox_dcall_warmup;
 +  }
 +  ~Region() { for (unsigned j = 0; j < nblocks; j++) delete[] b[j].ins; }
 +};
@@ -1801,6 +1833,32 @@ index 000000000..9c8c24778
 +  return 1;
 +}
 +#define REGION_OFF(field) ((uint32_t)((uintptr_t)&nanobox_region_layout_probe.field - (uintptr_t)&nanobox_region_layout_probe))
++
++// linear -> physical for a call target, without touching any guest-visible state: the ITLB first
++// (the same lookup the link epilogue inlines), then the page walk the debugger interface uses.
++static bool nanobox_dcall_xlate(bx_address lin, bx_phy_address *pa)
++{
++  bx_TLB_entry *te = &BX_CPU_THIS_PTR ITLB.entry[(((Bit32u) lin & ((BX_ITLB_SIZE - 1) << 12)) >> 12)];
++  if (te->lpf == (lin & LPF_MASK) && (te->accessBits & (1 << BX_CPU_THIS_PTR user_pl))) { *pa = te->ppf + (bx_phy_address)(lin & 0xfff); return true; }
++  return BX_CPU_THIS_PTR dbg_xlate_linear2phy(lin, pa);
++}
++// Fill a direct-call site: which translation, entered with which argument, is the code at `va`?
++// Read-only with respect to the guest. fn == 0 afterwards = "no translation": the caller takes the
++// ordinary exit path and the negative answer is remembered for 64 executions (an untranslatable
++// callee must not pay a page walk per call).
++static void nanobox_dcall_resolve(unsigned sitep, Bit64u va)
++{
++  NbDcallSite *s = (NbDcallSite *)(uintptr_t) sitep;
++  s->va = 0; s->fn = 0; s->arg = 0; s->ilen = 0; s->ent = 0; s->pa = 0; s->miss = 16;   // no answer: stay stale, ask again in 16
++  nanobox_aot_stats[15]++;
++  bx_phy_address pa = 0;
++  if (!nanobox_dcall_xlate((bx_address) va, &pa)) return;
++  bxICacheEntry_c *e = BX_CPU_THIS_PTR iCache.get_entry(pa, BX_CPU_THIS_PTR fetchModeMask);
++  if (!e || e->pAddr != pa || e->tlen == 0 || !e->jitfn) return;
++  s->va = va; s->cr3 = (Bit64u) BX_CPU_THIS_PTR cr3;
++  s->ent = (Bit32u)(uintptr_t) e; s->pa = (Bit64u) pa;
++  s->fn = e->jitfn; s->arg = e->jitarg; s->ilen = e->i[0].ilen(); s->miss = 0;
++}
 +
 +struct TraceCompiler {
 +  bxICacheEntry_c *e;
@@ -1901,12 +1959,28 @@ index 000000000..9c8c24778
 +  unsigned chainUsed[NB_REGION_MAX_BLOCKS + 1];   // positions a body needed in pass 1 (index = block, 0 for a plain trace)
 +  uint32_t L_xic;                                  // exit: icount delta (k + 1) for the common tail
 +  uint32_t L_tick;                                 // AOT: back-edge countdown (see emitLoopBack)
++  uint32_t L_direct;                               // direct calls: entered by one (arg bit 0) -> RET may compile to `return`
++  uint32_t L_dcs, L_dcf;                           // direct calls: site pointer / callee table slot (own locals: they must survive a spill)
 +  // AOT self-loop: the guest clock is charged for a whole countdown window at the sync instead of
 +  // per iteration (4 wasm instructions off the fast path). The exits inside a window -- all cold --
 +  // add the iterations completed since the sync themselves: (tick - L_tick) * loopIcPerIter.
 +  // 0 = charge per iteration (the identity form, and any trace with more than one back edge).
 +  unsigned loopIcPerIter, loopTickN;
 +  int aliasAt;                                     // instruction that left its operands in register locals (-1: none)
++  // direct calls (bit 9); bit 10 suppresses the direct RET (bisect: call in, ordinary exit out)
++  bool dcallOn() const { return (nanobox_jit_flags & 512) != 0 && nanobox_jit_aot != 0 && !nanobox_dbg_mode; }
++  bool dcallRet() const { return dcallOn() && !(nanobox_jit_flags & 1024); }
++  // does this unit contain a RET? only then does it need to know it was entered by a direct call
++  bool unitHasRet() const {
++    if (reg) {
++      for (unsigned j = 0; j < reg->nblocks; j++)
++        for (unsigned q = 0; q < reg->b[j].n; q++) { unsigned a = reg->b[j].ins[q].getIaOpcode(); if (a == BX_IA_RET_Op64 || a == BX_IA_RET_Op64_Iw) return true; }
++      return false;
++    }
++    for (unsigned q = 0; q < n; q++) { unsigned a = ins[q].getIaOpcode(); if (a == BX_IA_RET_Op64 || a == BX_IA_RET_Op64_Iw) return true; }
++    return false;
++  }
++  void dcallLocals() { if (L_dcs == 0xffffffffu) { L_dcs = em->addLocal(I32); L_dcf = em->addLocal(I32); } }
 +  bool spillChain() const { return (nanobox_jit_spill & 1) != 0; }
 +  bool spillLive() const { return (nanobox_jit_spill & 2) != 0; }
 +  bool spillSyncCall() const { return (nanobox_jit_spill & 4) != 0; }
@@ -2459,9 +2533,82 @@ index 000000000..9c8c24778
 +      em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_stats.traces), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_stats.traces), 3);
 +      em->i32c(0); em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_stats.jit_links), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(nanobox_stats.jit_links), 3);
 +    }
-+    em->get(T32[0]); em->mem(I32_LOAD, ICE_OFF(jitarg), 2); pushProbeArgs(); em->get(T32[1]); em->return_call_indirect(m.funcTypeIdx);
++    em->get(T32[0]); em->mem(I32_LOAD, ICE_OFF(jitarg), 2); pushProbeArgs(); pushEntryStateFromMem(); em->get(T32[1]); em->return_call_indirect(m.funcTypeIdx);
 +  }
 +  void exitFallthrough(unsigned k) { pushVA(off[k + 1]); exitWithRipOnStack(k); }
++
++  // ---------------------------------------------------------------- direct calls (nanobox_jit_flags bit 9)
++  // Emitted for a direct guest CALL whose target is NOT a block of this unit, after the return address
++  // has been pushed and RSP updated, with the target linear address in `t0`. If the callee carries a
++  // translation and the host stack has room, this ENTERS it (wasm call_indirect) and, when the guest
++  // returns to our continuation, resumes here; every other case falls through to the ordinary exit
++  // path the caller emits next.
++  //
++  // What is committed before the call is exactly what a trace boundary at the callee's first
++  // instruction looks like (cpu_loop's convention: RIP already past that instruction, prev_rip = its
++  // start), so the callee's prologue is the one it has, whoever entered it.
++  //
++  // Coming back: `nanobox_dcall_ret` is the address a direct RET returned to, and the guest state is
++  // committed. If it is our continuation we go on; otherwise we return, handing the same decision to
++  // whoever called us and finally to cpu_loop -- which is also what happens when the callee did not
++  // return at all but tail-linked away and the chain later unwound into our frame.
++  void emitDirectCall(unsigned k, uint32_t t0) {
++    dcallLocals();
++    const uint32_t sp = L_dcs, fnl = L_dcf, t1 = T[1];
++    CacheState s0 = snapshot();
++    profCount(&nanobox_region_stats[28]);
++    em->get(L_regp); em->i32c((int32_t)(REGION_OFF(dcall[0]) + curBlock * sizeof(NbDcallSite))); em->op(I32_ADD); em->set(sp);
++    // stale site? (first execution, another address space, translations released since)
++    em->get(sp); em->mem(I64_LOAD, DC_OFF(va), 3); em->get(t0); em->op(I64_NE);
++    em->get(sp); em->mem(I64_LOAD, DC_OFF(cr3), 3); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR cr3), 3); em->op(I64_NE); em->op(I32_OR);
++    // the callee's iCache entry must still hold the same code with the same translation. This is
++    // what a global "generation" used to approximate -- and it approximated it far too coarsely:
++    // bumping on every iCache eviction re-resolved EVERY site (9.3 M lookups on a codex boot).
++    em->get(sp); em->mem(I32_LOAD, DC_OFF(ent), 2); em->mem(I64_LOAD, ICE_OFF(pAddr), 3); em->get(sp); em->mem(I64_LOAD, DC_OFF(pa), 3); em->op(I64_NE); em->op(I32_OR);
++    em->get(sp); em->mem(I32_LOAD, DC_OFF(ent), 2); em->mem(I32_LOAD, ICE_OFF(jitfn), 2); em->get(sp); em->mem(I32_LOAD, DC_OFF(fn), 2); em->op(I32_NE); em->op(I32_OR);
++    iff();   // cold arm: a site only resolves once it has executed nanobox_dcall_warmup times, and a
++             // site that found no translation waits 64 more. A codex boot is mostly code that runs
++             // ONCE -- resolving every one of its call sites cost 9.3 M page-table/iCache lookups and
++             // ~3 s of boot; with the countdown one-shot sites never resolve at all.
++      em->get(sp); em->mem(I32_LOAD, DC_OFF(miss), 2); em->tee(fnl); em->op(I32_EQZ);
++      iff();
++        em->get(sp); em->get(t0); em->call(fn(FNIDX(&nanobox_dcall_resolve), "il>v"));
++      els();
++        em->get(sp); em->get(fnl); em->i32c(-1); em->op(I32_ADD); em->mem(I32_STORE, DC_OFF(miss), 2);
++        em->get(sp); em->i32c(0); em->mem(I32_STORE, DC_OFF(fn), 2);   // stale: its slot must not be used
++      endb();
++    endb();
++    // callee translated, and room on the host stack? (guest recursion must not blow it)
++    em->get(sp); em->mem(I32_LOAD, DC_OFF(fn), 2); em->tee(fnl); em->op(I32_EQZ);
++    em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_depth), 2); em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_max), 2); em->op(I32_GE_U); em->op(I32_OR);
++    em->op(I32_EQZ);
++    iff();
++      spillAll(true);
++      // RIP and icount go in the call, not through the CPU struct; prev_rip stays because the callee
++      // may fault before its first syncBefore is reached (exception() reads it out of memory).
++      em->i32c(0); em->get(t0); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
++      em->i32c(0); em->i64c(0); em->mem(I64_STORE, ADDR(nanobox_dcall_ret), 3);
++      em->i32c(0); em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_depth), 2); em->i32c(1); em->op(I32_ADD); em->mem(I32_STORE, ADDR(nanobox_dcall_depth), 2);
++      profCount(&nanobox_region_stats[29]);
++      em->get(sp); em->mem(I32_LOAD, DC_OFF(arg), 2); em->i32c(1); em->op(I32_OR);   // "you were called directly"
++      pushProbeArgs();
++      em->get(t0); em->get(sp); em->mem(I32_LOAD, DC_OFF(ilen), 2); em->op(I64_EXTEND_I32_U); em->op(I64_ADD);   // RIP: past the callee's first instruction
++      pushIcBase(); em->i64c(k + 1); em->op(I64_ADD);                                                            // icount base
++      em->get(fnl); em->call_indirect(m.funcTypeIdx);
++      em->i32c(0); em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_depth), 2); em->i32c(-1); em->op(I32_ADD); em->mem(I32_STORE, ADDR(nanobox_dcall_depth), 2);
++      em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_dcall_ret), 3); em->set(t1);
++      em->get(t1); pushVA(off[k + 1]); em->op(I64_NE);
++      iff(); profCount(&nanobox_region_stats[31]); em->ret(); endb();
++      em->i32c(0); em->i64c(0); em->mem(I64_STORE, ADDR(nanobox_dcall_ret), 3);
++      // resumed at our continuation: the callee committed everything, our locals / probe cache are
++      // stale, and the guest clock is absolute again (same rebase as a handler step)
++      em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3); em->i64c(k + 1); em->op(I64_SUB); em->set(L_ic0);
++      if (icDeferred()) { em->i32c((int32_t) loopTickN); em->set(L_tick); }
++      csInvalidate(); emitInvalidate(); chainReloadAfterHandler();
++      exitFallthroughOrTransition(k);
++    endb();
++    restore(s0);
++  }
 +
 +  // In-region transition after instruction k of the current block to block s: exactly what
 +  // cpu_loop does between two traces (commit, BX_SYNC_TIME fast path, async_event check,
@@ -3339,7 +3486,11 @@ index 000000000..9c8c24778
 +      if (aotNoStack()) emitShadowPush(t2, t1); else emitStackWrite(k, t2, t1);
 +      em->get(t2); regSetFromStack(R_RSP);
 +      if (sb >= 0) emitTransition(k, (unsigned) sb);
-+      else exitToOffset(k, (Bit64s) boff + off[k + 1] + (Bit64s)(Bit32s) i->Id(), t0);
++      else {
++        // the callee's own translation, entered directly (falls through to the exit path if there is none)
++        if (dcallOn() && reg != NULL && curBlock < NB_REGION_MAX_BLOCKS) emitDirectCall(k, t0);
++        exitToOffset(k, (Bit64s) boff + off[k + 1] + (Bit64s)(Bit32s) i->Id(), t0);
++      }
 +      return true;
 +    }
 +    case BX_IA_RET_Op64: case BX_IA_RET_Op64_Iw: {
@@ -3348,6 +3499,22 @@ index 000000000..9c8c24778
 +      pushIsCanonical(t0); em->op(I32_EQZ);
 +      iff(); emitDeoptAndReturn(k, last); endb();
 +      em->get(t2); em->i64c(8 + (Bit64s) i->Iw()); em->op(I64_ADD); regSetFromStack(R_RSP);
++      // entered by a direct call? then the return IS a wasm return: commit the boundary, publish the
++      // address we returned to and leave the frame (the caller checks it against its continuation)
++      if (dcallRet() && L_direct != 0xffffffffu) {
++        CacheState s = snapshot();
++        em->get(L_direct);
++        iff();
++          spillAll(true);
++          em->i32c(0); em->get(t0); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
++          em->i32c(0); em->get(t0); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR prev_rip), 3);
++          em->i32c(0); pushIcBase(); em->i64c(k + 1); em->op(I64_ADD); em->mem(I64_STORE, ADDR(BX_CPU_THIS_PTR icount), 3);
++          em->i32c(0); em->get(t0); em->mem(I64_STORE, ADDR(nanobox_dcall_ret), 3);
++          profCount(&nanobox_region_stats[30]);
++          em->ret();
++        endb();
++        restore(s);
++      }
 +      em->get(t0); exitWithRipOnStack(k);
 +      return true;
 +    }
@@ -4909,6 +5076,7 @@ index 000000000..9c8c24778
 +    else { C_ppf = em->addLocal(I64); D_ppf = em->addLocal(I64); C_tagR = em->addLocal(I64); C_tagW = em->addLocal(I64); D_tagR = em->addLocal(I64); D_tagW = em->addLocal(I64); }
 +    L_upl = em->addLocal(I32);
 +    L_tick = em->addLocal(I32);   // AOT: iterations left before the next full back-edge sync
++    L_direct = L_dcs = L_dcf = 0xffffffffu;   // direct calls: declared on first use (see unitHasRet / dcallLocals)
 +    for (unsigned t = 0; t < 6; t++) T32[t] = em->addLocal(I32);
 +    C_bits = em->addLocal(I32); D_bits = em->addLocal(I32);
 +    if (flagsProbeLink() && nanobox_tlbfold && shortSig()) { C_host = 3; C_free = em->addLocal(I32); D_host = em->addLocal(I32); D_free = em->addLocal(I32); }
@@ -4931,11 +5099,26 @@ index 000000000..9c8c24778
 +  // the second entry starts poisoned in every function (C_ppf/C_free are only read in the fill arm
 +  // of the probe that computes them, so they need not travel)
 +  static bool shortSig() { return (nanobox_jit_flags & 64) != 0; }
++  // does the shared signature carry the entry state? (must match nanobox_jit_call in nanobox_jit.h)
++  static bool dcallSig() { return (nanobox_jit_flags & 512) != 0 && nanobox_jit_aot != 0 && !nanobox_dbg_mode; }
 +  static uint32_t jitFuncType(Module &mod) {
-+    if (shortSig()) { ValType p[4] = { I32, I64, I64, I32 }; mod.nparams = 4; return mod.addType(Module::ft(4, p, 0, NULL)); }
-+    ValType p[11] = { I32, I64, I64, I64, I64, I64, I64, I32, I32, I32, I32 };
-+    mod.nparams = 11;
-+    return mod.addType(Module::ft(11, p, 0, NULL));
++    if (shortSig()) {
++      ValType p[6] = { I32, I64, I64, I32, I64, I64 };
++      unsigned np = dcallSig() ? 6 : 4; mod.nparams = np;
++      return mod.addType(Module::ft(np, p, 0, NULL));
++    }
++    ValType p[13] = { I32, I64, I64, I64, I64, I64, I64, I32, I32, I32, I32, I64, I64 };
++    unsigned np = dcallSig() ? 13 : 11; mod.nparams = np;
++    return mod.addType(Module::ft(np, p, 0, NULL));
++  }
++  // RIP and the icount base of the entry: parameters under dcallSig(), memory otherwise
++  uint32_t P_rip() const { return shortSig() ? 4 : 11; }
++  uint32_t P_ic0() const { return shortSig() ? 5 : 12; }
++  // what a tail call / cpu_loop hands over: the committed RIP and icount out of the CPU struct
++  void pushEntryStateFromMem() {
++    if (!dcallSig()) return;
++    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
++    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3);
 +  }
 +  // push the probe-cache arguments of a tail call (locals when the cache travels, else the poison)
 +  void pushProbeArgs() {
@@ -4965,12 +5148,18 @@ index 000000000..9c8c24778
 +    Emit emit(m); em = &emit;
 +    declareLocals();
 +    invalidateAll();
++    // direct calls: bit 0 of the argument says "a translated caller called you and is waiting on the
++    // host stack" -- only then may a RET in this function compile to a wasm `return`
++    if (dcallOn()) {
++      if (dcallRet() && unitHasRet()) { L_direct = em->addLocal(I32); em->get(L_i); em->i32c(1); em->op(I32_AND); em->set(L_direct); }
++      em->get(L_i); em->i32c(-2); em->op(I32_AND); em->set(L_i);   // every unit: the bit must not reach a pointer use
++    }
 +
 +    bool useTemplates = (nanobox_jit_level >= 2) && mode64;
 +    // prologue: base = RIP - ilen(0); ic0 = icount; upl = user_pl
 +    // (region: the call argument is an entry descriptor {region, block, delta}: base = RIP - delta,
 +    //  the dispatch starts at `block`)
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3);
++    if (dcallSig()) em->get(P_rip()); else { em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx), 3); }
 +    if (reg) {
 +      em->get(L_i); em->mem(I32_LOAD, 0, 2); em->set(L_regp);
 +      em->get(L_i); em->mem(I32_LOAD, 4, 2); em->set(L_cur);
@@ -4978,7 +5167,7 @@ index 000000000..9c8c24778
 +    } else {
 +      em->i64c(ins[0].ilen()); em->op(I64_SUB); em->set(L_base);
 +    }
-+    em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3); em->set(L_ic0);
++    if (dcallSig()) em->get(P_ic0()); else { em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR icount), 3); } em->set(L_ic0);
 +    em->i32c(0); em->mem(I32_LOAD8_U, ADDR(BX_CPU_THIS_PTR user_pl), 0); em->set(L_upl);
 +    if (aotRelaxed()) { em->i32c((int32_t) nanobox_jit_aot_tick); em->set(L_tick); }   // two instructions once, per function entry
 +    if (reg) {
@@ -5108,8 +5297,8 @@ index 000000000..9c8c24778
 +          em->i32c(0); em->get(C_tagW); em->mem(I64_STORE, ADDR(nanobox_probe_mem[1]), 3);
 +          em->i32c(0); em->get(C_host); em->mem(I32_STORE, ADDR(nanobox_probe_mem[2]), 2);
 +        }
-+        em->i32c(0); pushProbeArgs();
-+        if (nanobox_jit_linkdirect && nanobox_link_fn) em->return_call(fn(nanobox_link_fn, shortSig() ? "illi>v" : "illlllliiii>v"));   // direct tail call to the imported link function (same type as ours)
++        em->i32c(0); pushProbeArgs(); pushEntryStateFromMem();
++        if (nanobox_jit_linkdirect && nanobox_link_fn && !dcallSig()) em->return_call(fn(nanobox_link_fn, shortSig() ? "illi>v" : "illlllliiii>v"));   // direct tail call to the imported link function (same type as ours)
 +        else { em->i32c((int32_t) nanobox_link_fn); em->return_call_indirect(m.funcTypeIdx); }
 +      }
 +      else em->ret();
@@ -5363,6 +5552,13 @@ index 000000000..9c8c24778
 +// address is the floor; what can go is everything AROUND the store (see emitStackWrite under AOT).
 +// Kept as a knob for experiments only; default OFF.
 +unsigned nanobox_jit_aot_nostack = 0;
++// direct calls between translated functions (nanobox_jit_flags bit 9)
++unsigned nanobox_dcall_depth = 0;
++unsigned nanobox_dcall_max = 200;
++Bit64u nanobox_dcall_ret = 0;
++unsigned nanobox_dcall_warmup = 0;
++NB_EXPORT(nanobox_set_jit_dcall_max) void nanobox_set_jit_dcall_max(unsigned n) { nanobox_dcall_max = n; }
++NB_EXPORT(nanobox_set_jit_dcall_warmup) void nanobox_set_jit_dcall_warmup(unsigned n) { nanobox_dcall_warmup = n; }
 +NbShadowEnt nanobox_shadow[NB_SHADOW_MAX];
 +unsigned nanobox_shadow_n = 0;
 +Bit64u nanobox_shadow_miss = 0;
@@ -5378,7 +5574,12 @@ index 000000000..9c8c24778
 +  // 652 -> 304 MB and boot 28.6 -> 23.0 s with nothing else changed (TASKS.md R.2); the offline
 +  // artifact holds one translation per block, which is what the runtime should attach to.
 +  // NANOBOX_AOT_DEDUPE=0 restores the copying former for an A/B.
-+  if (on) { nanobox_jit_threshold = 1; nanobox_jit_flags |= 1 | 2; nanobox_jit_aot_dedupe = 1; }
++  // bit 9 = direct calls between translated functions (a guest CALL becomes a wasm call, the matching
++  // RET a wasm return). Measured: a call+ret pair goes 36-42 ns -> 15.8-18.7 ns (2.2x), 99.59 % of
++  // direct-CALL sites take it, the call-free loop is slightly FASTER (0.96 vs 1.03 ns/iteration), and
++  // the guest clock stays exact. Boot costs ~5 %, inside this scenario's round-to-round spread.
++  // nanobox_set_jit_dcall_max(0) forces every CALL back down the old exit path without a rebuild.
++  if (on) { nanobox_jit_threshold = 1; nanobox_jit_flags |= 1 | 2 | 512; nanobox_jit_aot_dedupe = 1; }
 +  // the census counters live in the wizer snapshot too (the pre-init boot ran ~95 M interpreted traces
 +  // with the JIT off): start them from zero for this run
 +  nanobox_stats.interp_traces = 0; nanobox_stats.interp_icount = 0; nanobox_stats.jit_intrans = 0;
@@ -5399,6 +5600,9 @@ index 000000000..9c8c24778
 +// 18 page budget full, 19 regions with >1 page, 20 pages total, 21 regions dropped by a write
 +// (registry), 22 dead-region exits taken at a first execution, 23 first-execution marks,
 +// 24 successors rejected as too cold (nanobox_jit_aot_minhot), 25 rejected as already translated (dedupe)
++// Direct calls (nanobox_jit_flags bit 9, level 3): 28 direct-CALL sites executed, 29 taken as a wasm
++// call, 30 direct returns, 31 returns that did not match their call site (propagated up).
++// The site resolutions are counted in nanobox_aot_stats[15] (always live, C++ side).
 +NB_EXPORT(nanobox_jit_region_stat) double nanobox_jit_region_stat(unsigned i) { return i < 32 ? (double) nanobox_region_stats[i] : 0; }
 +
 +static unsigned nanobox_real_len(const bxICacheEntry_c *e)
@@ -5769,6 +5973,8 @@ index 000000000..9c8c24778
 +  (void) mask;
 +  if (nanobox_attach_registered(r) && r->fn != fn) nanobox_attach_unlink_region(r);
 +  r->fn = fn; r->dead = 0;
++  memset(r->dcall, 0, sizeof(r->dcall));   // a re-attached region may sit at another linear base
++  for (unsigned j = 0; j < NB_REGION_MAX_BLOCKS; j++) r->dcall[j].miss = nanobox_dcall_warmup;
 +  if (!nanobox_attach_register(r)) { nanobox_jit_cache_clear(); return; }   // (clears everything incl. e->jitfn)
 +  for (unsigned j = 0; j < r->nblocks; j++) {
 +    bx_phy_address pa = r->b[j].ent.pAddr;
@@ -5807,7 +6013,7 @@ index 000000000..9c8c24778
 +static unsigned nb_npending = 0;
 +static Bit64u nb_batch_since = 0;
 +static Bit64u nb_batch_since_interp = 0;   // AOT mode: interpreted cpu_loop traces when the batch was opened (bounded wait, see maybe_compile)
-+Bit64u nanobox_aot_stats[16];   // 0 functions (precompile API), 1 regions/traces compiled, 2 starts, 3 not mapped, 4 gap starts, 5 already compiled, 6 maybe_compile: still pending in the batch, 7 maybe_compile: compile failed, 8 region cache/bundle hit, 9 region compiled (queued), 10 plain trace path, 11 cpu_loop: interpreted with hot < threshold, 12 cpu_loop: interpreted right after maybe_compile, 13 region compile_one false, 14 plain compile_one true
++Bit64u nanobox_aot_stats[16];   // 0 functions (precompile API), 1 regions/traces compiled, 2 starts, 3 not mapped, 4 gap starts, 5 already compiled, 6 maybe_compile: still pending in the batch, 7 maybe_compile: compile failed, 8 region cache/bundle hit, 9 region compiled (queued), 10 plain trace path, 11 cpu_loop: interpreted with hot < threshold, 12 cpu_loop: interpreted right after maybe_compile, 13 region compile_one false, 14 plain compile_one true, 15 direct-call site resolutions
 +static Bit64u nanobox_batch_stats[3]; // batches flushed, functions, stale entries at flush
 +
 +// does the host implement install_batch? (probe once: len 0 / nfuncs 0 -> a host answers 1, the placeholder 0)
@@ -6265,10 +6471,10 @@ index 000000000..9c8c24778
 +}
 diff --git a/bochs/nanobox_jit.h b/bochs/nanobox_jit.h
 new file mode 100644
-index 000000000..0b1871ee2
+index 000000000..2428a997b
 --- /dev/null
 +++ b/bochs/nanobox_jit.h
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,62 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT — public interface used by the CPU loop and the iCache.
 +//
@@ -6296,7 +6502,12 @@ index 000000000..0b1871ee2
 +// (arg, probe cache: 6 x i64 tags/frames + 4 x i32 host/free — see TraceCompiler::jitFuncType)
 +typedef void (*nanobox_jitfn_t)(bxInstruction_c *trace, Bit64u, Bit64u, Bit64u, Bit64u, Bit64u, Bit64u, unsigned, unsigned, unsigned, unsigned);
 +typedef void (*nanobox_jitfn4_t)(bxInstruction_c *trace, Bit64u, Bit64u, unsigned);   // short signature (nanobox_jit_flags bit 6)
++// direct calls (bit 9): the signature also carries the entry state (RIP past the first instruction,
++// icount at entry) so a call between two translations hands it over in registers instead of memory
++typedef void (*nanobox_jitfn6_t)(bxInstruction_c *trace, Bit64u, Bit64u, unsigned, Bit64u, Bit64u);
++typedef void (*nanobox_jitfn13_t)(bxInstruction_c *trace, Bit64u, Bit64u, Bit64u, Bit64u, Bit64u, Bit64u, unsigned, unsigned, unsigned, unsigned, Bit64u, Bit64u);
 +extern unsigned nanobox_jit_flags;
++extern unsigned nanobox_jit_aot;
 +
 +void nanobox_jit_maybe_compile(bxICacheEntry_c *e);   // compile e (called by cpu_loop when e got hot)
 +void nanobox_jit_entry_invalidate(bxICacheEntry_c *e); // e is being reused/invalidated: drop its code
@@ -6315,7 +6526,12 @@ index 000000000..0b1871ee2
 +  nanobox_stats.jit_traces++;
 +  nanobox_probe_mem[0] = nanobox_probe_mem[1] = (Bit64u) -1;   // memory-resident probe cache (flags bit 5): only a linking trace may hand one over
 +  nanobox_single_step = 1;
-+  if (nanobox_jit_flags & 64) ((nanobox_jitfn4_t)(uintptr_t) e->jitfn)((bxInstruction_c *)(uintptr_t) e->jitarg, (Bit64u) -1, (Bit64u) -1, 0);
++  const bool dc = (nanobox_jit_flags & 512) && nanobox_jit_aot && !nanobox_dbg_mode;
++  if (nanobox_jit_flags & 64) {
++    if (dc) ((nanobox_jitfn6_t)(uintptr_t) e->jitfn)((bxInstruction_c *)(uintptr_t) e->jitarg, (Bit64u) -1, (Bit64u) -1, 0, BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx, BX_CPU_THIS_PTR icount);
++    else ((nanobox_jitfn4_t)(uintptr_t) e->jitfn)((bxInstruction_c *)(uintptr_t) e->jitarg, (Bit64u) -1, (Bit64u) -1, 0);
++  }
++  else if (dc) ((nanobox_jitfn13_t)(uintptr_t) e->jitfn)((bxInstruction_c *)(uintptr_t) e->jitarg, (Bit64u) -1, (Bit64u) -1, 0, (Bit64u) -1, (Bit64u) -1, 0, 0, 0, 0, 0, BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx, BX_CPU_THIS_PTR icount);
 +  else ((nanobox_jitfn_t)(uintptr_t) e->jitfn)((bxInstruction_c *)(uintptr_t) e->jitarg, (Bit64u) -1, (Bit64u) -1, 0, (Bit64u) -1, (Bit64u) -1, 0, 0, 0, 0, 0);
 +  nanobox_single_step = 0;
 +}

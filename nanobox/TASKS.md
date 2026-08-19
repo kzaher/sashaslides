@@ -1266,3 +1266,52 @@ Direct calls (bit 9) already removed the link/dispatch half of a call: 37.6 -> 1
 2.2x, with 99.59 % of direct-CALL sites taking the wasm call. What remains is passing RIP, the icount
 base, the probe-cache tags and the hot registers through wasm PARAMETERS and RESULTS instead of
 through the CPU struct -- expressible only now that a call is a real wasm call.
+
+### S.6 Direct calls between translated functions, shipped in AOT mode (2026-08-19)
+
+A guest `CALL rel32` becomes a wasm `call_indirect` into the callee's translation and the matching
+`RET` a wasm `return`, so the pair never leaves compiled code. Per call site a one-entry inline cache
+`{va, cr3, fn, arg, ilen, gen}` lives in the CALLER'S REGION DESCRIPTOR, not in the module (modules are
+content-keyed and shared, so a module-resident cache thrashes). `jitarg|1` tells the callee it was
+entered by a direct call -- only then may its RET compile to `return`. The return address is still
+written to the emulated stack. A direct RET publishes where it returned to; if that is not the caller's
+continuation the caller simply returns, which covers "returned elsewhere", tail-links, async events and
+uncompiled successors in one branch (1.35 % of calls). Depth capped at 200.
+
+| call+ret (`work/fib/call.x86`, 10.2 guest instructions per iteration) | ns |
+|---|---|
+| shipping engine (flag off) | 30.2 |
+| AOT without direct calls | 36.0-42.6 |
+| direct call only, ordinary RET | 39.6-39.8 -- **worse** |
+| **AOT with direct calls (bit 9, now the default)** | **15.8-18.7** |
+| native wasm from the same C source | 1.9 |
+
+**99.59 %** of direct-CALL sites take the wasm call (103.96 M of 104.39 M). Fallbacks: indirect/far
+calls, CALLs outside a region, untranslated or unmappable targets, the depth limit, dbg mode, non-AOT.
+`nanobox_set_jit_dcall_max(0)` forces every CALL back down the exit path without a rebuild.
+
+**Two findings worth more than the speedup.**
+1. **Closing half the pair is worse than doing nothing** -- a direct call whose RET still goes through
+   the exit/link machinery is slower than the old path.
+2. **An inline cache must be invalidated when code is RELEASED, not when it is installed.** The first
+   version bumped a global generation on every batch flush and the A/B read NEUTRAL; the second
+   validated against a global eviction generation and re-resolved 9,338,037 sites per codex boot. A
+   precise per-site check (`entry->pAddr == site.pa && entry->jitfn == site.fn`, plus VA and CR3)
+   gives **169,008 -- 55x fewer** -- and halves the boot cost. A null result was a bug in the
+   experiment, twice.
+
+Step 1 of the entry ABI also landed: the compiled function's signature under bit 9 carries
+`rip` and `ic0` as PARAMETERS, so a direct call passes them from its own locals instead of storing and
+reloading them. The call-free fib loop got faster too (0.96 vs 1.03 ns/iteration in that round) -- the
+first configuration where bit 9 beats baseline on code with no calls at all.
+
+Merged with the gate green (`IDENTITY: identical`, `BISECT: no divergence`), guest results verified
+against the host (`call(200000) = 15034622464419917381`, `fib(2000000) = 17141820111795327685`,
+`fib(10) = 55`), loop icount exact at 6,007.2 M, fib loop 0.92 ns/iteration.
+
+**Step 2 is blocked on the wasm C ABI**: cpu_loop calls a compiled function from C++ through a plain
+pointer, so its results must fit clang's wasm C ABI and multi-value is unavailable despite the feature
+being enabled. The unblock is one pinned trampoline (installed like `nanobox_link_fn`) that keeps a
+C-callable type and `call_indirect`s the multi-value target; the link function keeps the multi-value
+type so its tail call forwards results. Then the probe tags, the icount and RAX can be returned, and
+the hot registers passed IN (which needs no results and is independently landable).
