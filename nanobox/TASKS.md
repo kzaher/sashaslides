@@ -1231,3 +1231,38 @@ sync-path exit added `k+1` on top of an already-advanced `L_ic0`).
 MEASUREMENT LESSON, again: every earlier fib number in this file taken at n = 1e8 (2.34 / 2.89 ns) was
 measuring **V8 warm-up**, not the loop. At n = 1e9 the same builds read 1.03 and 0.84. Warm-up is worth
 ~1.5 ns/iteration here; a loop benchmark that does not outrun it measures the compiler, not the code.
+
+### S.5 Precompiling everything the workload executes does NOT get the boot under 10 s (2026-08-19)
+
+Record one AOT codex boot's translations into an artifact, then replay it (`work/prof/selfrec.sh`):
+
+| | boot | artifact | compiled at runtime |
+|---|---|---|---|
+| AOT, recording | 40.1 s | writes 500 MB | ~500 MB |
+| **AOT, replaying it** | **25.6 s** | 60,136 hits / 13,736 misses (81 %) | **57 MB** |
+| trace JIT (flag off) | 9.2 s | -- | -- |
+
+Runtime compilation falls **9x** and the boot is still **2.8x** the trace JIT's. So the artifact is not
+what stands between AOT and a fast boot, and neither is coverage: it is the per-entry price of running
+compiled code for blocks that execute once. Measured directly on the call benchmark
+(`work/fib/minpath.py` over dumped translations):
+
+| | executed wasm instructions per call+ret iteration |
+|---|---|
+| native wasm (12 loop + 3 callee) | **15** |
+| ours: caller up to the call | 33 |
+| ours: the callee (`endbr64; lea; ret`) | 31 |
+| ours: caller after the call | 35 |
+| **ours** | **99** |
+
+~10 guest instructions, 15 wasm if compiled like clang does it, **99 as we translate it** -- and the
+extra is paid THREE times per iteration because one guest call/ret crosses three translated wasm
+functions, each re-materialising state from memory. The callee's prologue for three x86 instructions:
+load the fetch-mode word, poison both probe-cache tags, unpack the direct-call bit, load RIP and the
+tick base, load `user_pl`, seed the countdown, test `async_event` -- with a matching epilogue.
+
+**Therefore the entry/exit ABI is the critical path for the boot target, not more precompilation.**
+Direct calls (bit 9) already removed the link/dispatch half of a call: 37.6 -> 16.6 ns per call+ret,
+2.2x, with 99.59 % of direct-CALL sites taking the wasm call. What remains is passing RIP, the icount
+base, the probe-cache tags and the hot registers through wasm PARAMETERS and RESULTS instead of
+through the CPU struct -- expressible only now that a call is a real wasm call.
