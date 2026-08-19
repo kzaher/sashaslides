@@ -89,6 +89,7 @@ for (let i = 1; i < argv.length; i++) {
   else if (a === "--aot-at") opts.aotAt = v();
   else if (a === "--aot-mode-at") opts.aotModeAt = v();        // switch INTO AOT mode partway through the run: marker label ("@@NANOBOX-DUMP:LABEL@@") or "expect" (when --expect fires). Boot on the trace JIT (one-shot code is cheaper interpreted, TASKS.md R.5), run the session compiled. The switch releases every translation compiled before it (the two modes use different wasm signatures for a compiled function, so they cannot coexist in one table).
   else if (a === "--aot-fnmap") opts.aotFnmap = v();
+  else if (a === "--aot-fnmap-user") (opts.aotFnmapUser = opts.aotFnmapUser || []).push(v());   // {base,functions:[off],end} written by tools/aot-user.mjs
   else if (a === "--aot-keys") opts.aotKeys = v();
   else if (a === "--tpl-bytes") opts.tplBytes = v();           // where the emitted bytes are: total template bytes per opcode (static, no execution counts needed)             // dump (entry address, content key, blocks) for every region formed — diff offline vs runtime (TASKS.md S.3)           // System.map: function boundaries for the AOT former (region = the containing function)                 // marker label that arms the session (default "aot": the guest prints @@NANOBOX-DUMP:aot@@)
   else { console.error("unknown option " + a); process.exit(2); }
@@ -648,6 +649,26 @@ function installJitHost(inst) {
     // --aot-fnmap: guest function boundaries (System.map). Under AOT the engine roots a region at the
     // containing function instead of at the block the guest entered, so the regions it forms are the
     // ones the offline translator built and a precompiled artifact can actually match (TASKS.md S.3).
+    // --aot-fnmap-user: a program's own function boundaries. The map is absolute, at the base the
+    // recording boot saw; the guest boot is deterministic (that is what the identity gate asserts), so
+    // the same scenario puts the program at the same base again — verified by booting twice and
+    // comparing /proc/*/maps. The base is carried in the file so a mismatch is at least visible.
+    // Loaded BEFORE the kernel map: nanobox_aot_fnmap_add takes entries in ascending order and user
+    // text lies far below the kernel.
+    if (opts.aotFnmapUser && ex.nanobox_aot_fnmap_add) {
+      ex.nanobox_aot_fnmap_reset();
+      let n = 0;
+      for (const f of opts.aotFnmapUser) {
+        const m = JSON.parse(fs.readFileSync(f, "utf8"));
+        const base = BigInt(m.base);
+        const offs = [...new Set(m.functions.map(Number))].sort((x, y) => x - y);
+        for (const o of offs) { const a = base + BigInt(o); ex.nanobox_aot_fnmap_add(Number(a & 0xffffffffn) >>> 0, Number(a >> 32n) >>> 0); n++; }
+        const end = base + BigInt(m.end);
+        if (ex.nanobox_aot_fnmap_gap) ex.nanobox_aot_fnmap_gap(Number(end & 0xffffffffn) >>> 0, Number(end >> 32n) >>> 0);
+        console.error(`[harness] AOT user function map: ${offs.length} functions of ${m.name || path.basename(f)} at base ${m.base}`);
+      }
+      opts.aotFnmapUserLoaded = n;
+    }
     if (opts.aotFnmap && ex.nanobox_aot_fnmap_add) {
       const text = fs.readFileSync(opts.aotFnmap, "utf8");
       const at = (n) => { const m = new RegExp("^([0-9a-f]{16}) [A-Za-z] " + n + "$", "m").exec(text); return m ? BigInt("0x" + m[1]) : null; };
@@ -661,10 +682,11 @@ function installJitHost(inst) {
         addrs.push(a);
       }
       addrs.sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
-      ex.nanobox_aot_fnmap_reset();
+      if (!opts.aotFnmapUserLoaded) ex.nanobox_aot_fnmap_reset();
       let prev = -1n;
       for (const a of addrs) { if (a === prev) continue; prev = a; ex.nanobox_aot_fnmap_add(Number(a & 0xffffffffn) >>> 0, Number(a >> 32n) >>> 0); }
-      console.error(`[harness] AOT function map: ${ex.nanobox_aot_fnmap_count()} functions from ${path.basename(opts.aotFnmap)}`);
+      if (etext && ex.nanobox_aot_fnmap_gap) ex.nanobox_aot_fnmap_gap(Number(etext & 0xffffffffn) >>> 0, Number(etext >> 32n) >>> 0);
+      console.error(`[harness] AOT function map: ${ex.nanobox_aot_fnmap_count()} entries from ${path.basename(opts.aotFnmap)}${opts.aotFnmapUserLoaded ? ` (+${opts.aotFnmapUserLoaded} user)` : ""}`);
     }
     if (opts.aotKeys && ex.nanobox_keylog_enable) ex.nanobox_keylog_enable(1);
     if (process.env.NANOBOX_THRESHOLD != null && ex.nanobox_set_jit) { ex.nanobox_set_jit(lvl, Number(process.env.NANOBOX_THRESHOLD)); console.error(`[harness] JIT threshold ${process.env.NANOBOX_THRESHOLD} (after AOT mode)`); }

@@ -51,10 +51,42 @@ export function session(ctx) {
   const image = loadImage({ elfPath: args.elf });
   const fns = image.functions.filter((f) => f.size > 0 || f.end).map((f) => ({ addr: f.addr, len: Number((f.end || f.addr + BigInt(f.size || 1)) - f.addr), name: f.name }));
   fns.sort((a, b) => (a.addr < b.addr ? -1 : a.addr > b.addr ? 1 : 0));
-  const list = (args.limit ? fns.slice(args.first || 0, (args.first || 0) + args.limit) : fns.slice(args.first || 0));
+  // --fnlist F: translate only the functions named in F (one offset-from-base per line, hex or
+  //   decimal). codex has 294,540 functions and translating all of them projects to ~4 GB; the ones a
+  //   scenario actually executes are a few thousand. The offsets come from a run's own region key log,
+  //   so this is "precompile everything this program runs", still translated by the static sweep and
+  //   still keyed by content.
+  let list = (args.limit ? fns.slice(args.first || 0, (args.first || 0) + args.limit) : fns.slice(args.first || 0));
+  if (args.fnlist) {
+    const want = new Set();
+    for (const line of fs.readFileSync(args.fnlist, "utf8").split("\n")) {
+      const t = line.trim(); if (!t || t.startsWith("#")) continue;
+      want.add(BigInt(t.startsWith("0x") ? t : "0x" + t).toString());
+    }
+    list = fns.filter((f) => want.has(f.addr.toString()));
+    log(`[aot] ${args.kind}: --fnlist ${path.basename(args.fnlist)} selects ${list.length} of ${fns.length} functions (${want.size} wanted)`);
+  }
   log(`[aot] ${args.kind}: ${list.length} of ${fns.length} functions from ${path.basename(args.elf)} (${image.source})`);
 
-  const stats = { kind: args.kind, bin, elf: args.elf, base: hex(base), functions: list.length, source: image.source,
+  // The function map the region former needs: without it a walk inside this program runs straight past
+  // the end of a function into the next one, which is exactly what made the offline and runtime regions
+  // disagree for the kernel (only 2,887 of 29,013 kernel function starts kept a region of their own).
+  // Loaded absolute, at the base this boot used; written out base-relative so a later boot can load it
+  // with --aot-fnmap-user.
+  let fnmapN = 0;
+  if (typeof ex.nanobox_aot_fnmap_add === "function") {
+    ex.nanobox_aot_fnmap_reset();
+    const offs = [...new Set(fns.map((f) => Number(f.addr)))].sort((a, b) => a - b);
+    for (const o of offs) { const a = base + BigInt(o); ex.nanobox_aot_fnmap_add(Number(a & 0xffffffffn) >>> 0, Number(a >> 32n) >>> 0); fnmapN++; }
+    const endOff = fns.length ? Number(fns[fns.length - 1].addr) + Math.max(1, fns[fns.length - 1].len) : 0;
+    const end = base + BigInt(endOff);
+    if (ex.nanobox_aot_fnmap_gap) ex.nanobox_aot_fnmap_gap(Number(end & 0xffffffffn) >>> 0, Number(end >> 32n) >>> 0);
+    if (args.fnmapOut) {
+      try { fs.writeFileSync(args.fnmapOut, JSON.stringify({ name: args.kind, bin, base: hex(base), end: endOff, functions: offs })); } catch (e) { log(`[aot] fnmap write failed: ${e.message}`); }
+    }
+    log(`[aot] ${args.kind}: function map ${fnmapN} entries at base ${hex(base)}, text end +${endOff.toString(16)}`);
+  }
+  const stats = { kind: args.kind, bin, elf: args.elf, base: hex(base), functions: list.length, source: image.source, fnmap: fnmapN, fnmapOut: args.fnmapOut,
     compiled: 0, notMapped: 0, notLong: 0, off: 0, noBytes: 0, windows: 0, wasmBytes0: jitState.bytes, installed0: jitState.installed };
 
   // 3. the bytes: read from the program's ELF and handed to the engine (its page tables are not the
@@ -138,8 +170,10 @@ async function main() {
   const transcript = path.resolve(o.transcript || path.join(ROOT, `work/prof/aot-data/maps-${what}.txt`));
   fs.mkdirSync(path.dirname(out), { recursive: true }); fs.mkdirSync(path.dirname(transcript), { recursive: true });
   const p = PROGRAMS[what];
-  const args = { kind: what, bin: p.bin, elf: path.resolve(o.elf || path.join(ROOT, p.elf)), transcript,
-    limit: o.limit ? Number(o.limit) : 0, first: o.first ? Number(o.first) : 0, sweep: o.sweep !== false };
+  const fnmapOut = path.resolve(o["fnmap-out"] || out.replace(/\.nbjb$/, "") + ".fnmap.json");
+  const args = { kind: what, bin: p.bin, elf: path.resolve(o.elf || path.join(ROOT, p.elf)), transcript, fnmapOut,
+    limit: o.limit ? Number(o.limit) : 0, first: o.first ? Number(o.first) : 0, sweep: o.sweep !== false,
+    fnlist: o.fnlist ? path.resolve(o.fnlist) : null };
   const at = Number(o.at || 25);
   // start the program, let it reach its steady state, then print its map and arm the session
   const cmd = `/bin/sh -c "(sleep ${at}; cat /proc/*/maps 2>/dev/null | grep -F ${p.bin}; echo @@NANOBOX-DUMP:aot@@) & exec ${p.bin}"`;
@@ -158,7 +192,7 @@ async function main() {
     child.on("close", (code) => { let js = null; try { js = sum ? JSON.parse(sum) : null; } catch {} resolve({ code, summary: js }); });
   });
   const bytes = fs.existsSync(out) ? fs.statSync(out).size : 0;
-  const result = { program: what, exit: res.code, bundle: out, bundleBytes: bytes, wallSec: +((Date.now() - t0) / 1000).toFixed(1), session: res.summary && res.summary.aotSession };
+  const result = { program: what, exit: res.code, bundle: out, fnmap: fnmapOut, bundleBytes: bytes, wallSec: +((Date.now() - t0) / 1000).toFixed(1), session: res.summary && res.summary.aotSession };
   console.error(`[aot-user] ${what}: exit ${res.code}, bundle ${out} (${(bytes / 1e6).toFixed(1)} MB), ${result.wallSec} s`);
   if (o.report) fs.writeFileSync(path.resolve(o.report), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));

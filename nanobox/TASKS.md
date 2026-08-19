@@ -1548,3 +1548,30 @@ collapses to 17.4 % serve without recovering boot, so the sweep is what makes th
 So: ship row A, keep detform off, and the sequence that would make C shippable is user-space artifact
 coverage first (removes the 82,070 lookups and most of the 349 MB), then a deterministic dedupe (which
 also collapses detform's 118,244 regions back toward 6,500).
+
+### T.4 User-space artifacts: the mechanism works, ASLR blocked it, the image fixes it (2026-08-19)
+
+Applying the function-scoped sweep to a user binary was built end to end and each piece verified:
+codex's `.eh_frame_hdr` yields **294,540** function boundaries with no symbols; a `--fnlist` option
+translates only the ones a scenario executes (all 294,540 project to ~4 GB, a scenario runs ~1,600);
+`nanobox_aot_fnmap_gap` was needed because one sorted map now holds several text regions and without an
+end sentinel an address in a gap got a 100 TB "function". Result: **1,612 codex functions -> 80,373
+translations, 198.8 MB**, and in a boot with it the user artifact **served 36,337 lookups** where the
+kernel-only artifact served 74. The chain -- ELF boundaries -> engine fnmap -> function-scoped sweep ->
+content-keyed translations replaying at another base -- is proven.
+
+**The blocker was the load base**: codex's text moved 51 GB between runs whenever anything changed guest
+timing (`0x7f9406e9b000` vs `0x7f643e97f000`), because the guest runs `randomize_va_space=1`. Recording
+the base and replaying it is self-defeating -- the pass that uses the map is not the pass that recorded
+it. **Fixed by adopting the image built earlier with `norandmaps` on the kernel cmdline** (the same
+class as the existing `nokaslr`, applied before any program maps; `work/pack-out-aot` -> the default
+pack, previous pack kept at `work/pack-out-nb.pre-norand`). Re-verified after the swap: AOT boot 7.1 s,
+keystroke median 11 ms / max 29 ms; trace JIT 6.4 s / 12 ms / 30 ms -- unchanged.
+
+**Deterministic dedupe (detform bit 32) is a clean win**: "a successor already claimed by an earlier
+region OF THE SAME SWEEP does not join", tracked in the sweep's own claim map. Artifact **375.1 MB ->
+280.9 MB (-25 %) with MORE translations in it** (290,851 -> 294,634) and key agreement going
+99.8 % -> 99.9 %. The old `se->jitfn` dedupe cost 98.7 % -> 83.1 % agreement; this costs nothing.
+
+Outlining (T.1) also pays inside this work exactly as predicted: row C's compiled volume went
+349 MB -> 203 MB (-42 %) and its boot 26.3 s -> 21.9 s with no other change.
