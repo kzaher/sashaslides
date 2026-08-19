@@ -1747,10 +1747,10 @@ index 000000000..0c5787cb0
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..9bdcf9e17
+index 000000000..862847f72
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,5571 @@
+@@ -0,0 +1,5693 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -2007,12 +2007,17 @@ index 000000000..9bdcf9e17
 +// identity-preserving: same DTLB index, same tag/permission tests, same folded tags, same
 +// write-stamp decrement (and the same fine-granularity test in front of it).
 +//   returns 0 = probe succeeded (nanobox_probe_out filled), 1 = take the slow path
-+struct NbProbeOut { Bit64u tagR, tagW; Bit32u host, freeb; };
++struct NbProbeOut { Bit64u tagR, tagW, tagRo, tagWo; Bit32u host, freeb; };
 +NbProbeOut nanobox_probe_out;
-+unsigned nanobox_jit_outline = 1 | 2 | 8;   // bit 0 outlined DTLB probe + refill, 1 out-of-line syncBefore,
++unsigned nanobox_jit_outline = 1 | 2 | 8 | 64 | 128;   // bit 0 outlined DTLB probe + refill, 1 out-of-line syncBefore,
 +// 2 outlined direct-call site check (OFF: 3.6 % of the emitted bytes but +20 % on the AOT call+ret benchmark),
 +// 3 outlined handler-step prologue/epilogue, 4 (off) AOT: keep self-looping successors inside a region,
 +// 5 (off) keep a slimmed second probe candidate inline (measured: 3 % of the misses, not worth 13 points of size)
++// 6 = PER-SITE probe tags: every memory site keeps its own (tag, host) pair in fresh locals instead of
++//     sharing one pair per function (the level-3 census found 48 % of all accesses missing the shared
++//     pair -- two sites in one loop evict each other's page every iteration),
++// 7 = with bit 6: the function-global pair stays as the SECOND candidate, so a site that has not run
++//     yet in this activation still finds the page the caller handed over through the link parameters
 +
 +template <unsigned SIZE, unsigned BIT, bool STAMP>
 +static BX_CPP_INLINE unsigned nanobox_probe_impl(Bit64u la, Bit64u acm, unsigned upl)
@@ -2033,6 +2038,13 @@ index 000000000..9bdcf9e17
 +  const Bit32u pb = e->accessBits >> upl;
 +  nanobox_probe_out.tagR = (pb & 1) ? W : (Bit64u) -1;
 +  nanobox_probe_out.tagW = (pb & 4) ? (freeb ? W : (Bit64u) -1) : (Bit64u) -1;
++  // OR-form twins for the per-site tags (nanobox_jit_outline bit 6): the tag is (la | ~LPF_MASK)
++  // instead of (la & LPF_MASK), so every valid tag is >= 0xfff and ZERO is the poison. That is what
++  // wasm gives a fresh local for free -- a per-site cache would otherwise need an explicit poison
++  // store per site at every function entry.
++  const Bit64u Wo = (acm == 0) ? (la | (Bit64u) ~LPF_MASK) : (Bit64u) 0;
++  nanobox_probe_out.tagRo = (pb & 1) ? Wo : (Bit64u) 0;
++  nanobox_probe_out.tagWo = (pb & 4) ? (freeb ? Wo : (Bit64u) 0) : (Bit64u) 0;
 +  nanobox_probe_out.host = host;
 +  nanobox_probe_out.freeb = freeb;
 +  if (STAMP && !freeb) {                      // page carries iCache write stamps: the SMC dance
@@ -2386,6 +2398,30 @@ index 000000000..9bdcf9e17
 +  // -1, which `la & LPF_MASK` can never produce, so one compare replaces the tag +
 +  // permission + alignment (+ stamp) tests.
 +  uint32_t C_tagR, C_tagW, D_tagR, D_tagW;
++  // per-site probe tags (nanobox_jit_outline bit 6). The pair above is per FUNCTION: two memory
++  // sites in one loop that touch different pages evict each other every iteration, which the
++  // level-3 census measured as 48 % of all accesses taking the full DTLB lookup. Each site gets
++  // its own (tag, host) locals instead, numbered in emission order and allocated as two contiguous
++  // runs once pass 1 has counted them. The tags are the OR form (la | ~LPF_MASK), whose poison is
++  // ZERO -- what a fresh wasm local already holds -- so a function entry costs nothing; only the
++  // mid-function invalidations (handler step, return from a direct call) have to store the poison.
++  uint32_t S_tagBase, S_hostBase;
++  unsigned nsite;        // sites emitted so far in this pass
++  unsigned nsiteTotal;   // sites pass 1 found
++  unsigned nsiteElig;    // ELIGIBLE sites emitted so far in this pass (= the local index)
++  unsigned nElig;        // eligible sites pass 1 found (= how many pairs pass 2 declared)
++  unsigned ninval, ninvalTotal;   // mid-function probe-cache invalidations
++  bool siteTags;         // per-site tags active in this pass
++  uint32_t curHost;      // local holding the host page address left by the probe just emitted
++  // A private tag pays only where the site RUNS AGAIN before anything invalidates it: a site whose
++  // every re-execution crosses a handler step or a returning direct call sees the poison every time
++  // and buys one more failed compare per access. (Measured: giving every site a tag cost +15 % on
++  // the AOT call+ret benchmark -- its two stack accesses are exactly that shape.) So pass 1 records
++  // which block each site is in and which blocks invalidate, and eligibility is "the block lies on
++  // a cycle of the region's CFG none of whose blocks invalidates".
++  Bit8u blockInval[NB_REGION_MAX_BLOCKS + 1];
++  Bit8u blockElig[NB_REGION_MAX_BLOCKS + 1];
++  Bit8u siteBlock[256];
 +  uint32_t P_bits, P_off;   // probe scratch: accessBits >> user_pl, page offset of the access
 +  uint32_t P_op1, P_op2, P_res;   // deferred lazy flags: operands / result of the pending ALU op
 +  uint32_t L_pfk;                 // run-time pending kind at a SLOW block entry (0 = none)
@@ -2486,6 +2522,9 @@ index 000000000..9bdcf9e17
 +
 +  TraceCompiler(bxICacheEntry_c *entry, Module &mod) : e(entry), ins(entry->i), n(0), m(mod), em(NULL), needAsyncCheck(false), depth(0), loopDepth(-1), bodyDepth(-1), linkOK(false), selfLoopOK(false),
 +    reg(NULL), curBlock(0), boff(0), dispatchDepth(-1), L_cur(0), regionPass2(false), regionKernel(false), conforming(false), coldExit(false), L_xic(0), L_tick(0), loopIcPerIter(0), loopTickN(0), aliasAt(-1), passNo(1), nedges(0) {
++    S_tagBase = S_hostBase = 0; nsite = nsiteTotal = nsiteElig = nElig = ninval = ninvalTotal = 0; siteTags = false; curHost = 0;
++    for (unsigned j = 0; j <= NB_REGION_MAX_BLOCKS; j++) blockInval[j] = blockElig[j] = 0;
++    for (unsigned i = 0; i < 256; i++) siteBlock[i] = 0;
 +    csReset();
 +    ch.active = false; ch.baseDepth = 0; ch.M = 0; ch.npos = 0;
 +    for (unsigned r = 0; r < 17; r++) { ch.pos[r] = -1; ch.at[r] = 0; }
@@ -2814,6 +2853,14 @@ index 000000000..9bdcf9e17
 +      }
 +      else if (nanobox_tlbfold) { em->i64c(-1); em->set(C_tagR); em->i64c(-1); em->set(C_tagW); em->i64c(-1); em->set(D_tagR); em->i64c(-1); em->set(D_tagW); }
 +      else { em->i64c(-1); em->set(C_lpf); em->i64c(-1); em->set(D_lpf); }
++      // per-site tags: a function ENTRY needs nothing (a fresh local is already the zero poison),
++      // but a handler step or a returning direct call may have changed the TLB, the CPL or the
++      // page's write stamps under every site at once, so each private tag goes back to poison.
++      if (!entry) {
++        ninval++;
++        if (curBlock <= NB_REGION_MAX_BLOCKS) blockInval[curBlock] = 1;
++        if (siteTags) for (unsigned i = 0; i < nElig; i++) { em->i64c(0); em->set(sTag(i)); }
++      }
 +    }
 +  }
 +  CacheState snapshot() { return cs; }
@@ -3285,20 +3332,80 @@ index 000000000..9bdcf9e17
 +  bool outlineDcall() const { return (nanobox_jit_outline & 4) != 0; }
 +  bool outlineStep() const { return (nanobox_jit_outline & 8) != 0; }
 +  bool outlineProbe2() const { return (nanobox_jit_outline & 32) != 0 && nanobox_jit_probe2 != 0; }   // keep the (slimmed) second probe candidate inline
++  bool siteCand2() const { return (nanobox_jit_outline & 128) != 0; }   // per-site tags: the function-global pair is candidate 2
++  uint32_t sTag(unsigned i) const { return S_tagBase + i; }
++  uint32_t sHost(unsigned i) const { return S_hostBase + i; }
++  enum { NB_MAX_SITES = 256, NB_SITE_BUDGET = 768 };
++  // poison stores an invalidation may cost, A/B-able through the top half of the outline mask
++  static unsigned siteBudget() { unsigned b = nanobox_jit_outline >> 16; return b ? b : (unsigned) NB_SITE_BUDGET; }
++  // which blocks lie on an invalidation-free cycle (transitive closure over pass 1's edge list;
++  // <= 24 blocks, so the cubic closure is a few thousand operations per region). A plain trace has
++  // one block, and it is a cycle only when it compiled as a self-loop.
++  void computeEligibleBlocks() {
++    for (unsigned j = 0; j <= NB_REGION_MAX_BLOCKS; j++) blockElig[j] = 0;
++    if (!(nanobox_jit_outline & 64) || !outlineProbe() || !nanobox_tlbfold) { nElig = 0; return; }
++    if (!reg) { blockElig[0] = (loopWanted && ninvalTotal == 0) ? 1 : 0; }
++    else if (nedges < NB_MAX_EDGES) {
++      const unsigned nb = reg->nblocks;
++      bool R[NB_REGION_MAX_BLOCKS][NB_REGION_MAX_BLOCKS];
++      for (unsigned a = 0; a < nb; a++) for (unsigned b = 0; b < nb; b++) R[a][b] = false;
++      for (unsigned e = 0; e < nedges; e++) {
++        const unsigned f = edges[e].from, t = edges[e].to;
++        if (f < nb && t < nb && !blockInval[f] && !blockInval[t]) R[f][t] = true;
++      }
++      for (unsigned k = 0; k < nb; k++) for (unsigned a = 0; a < nb; a++) if (R[a][k])
++        for (unsigned b = 0; b < nb; b++) if (R[k][b]) R[a][b] = true;
++      for (unsigned j = 0; j < nb; j++) blockElig[j] = (!blockInval[j] && R[j][j]) ? 1 : 0;
++    }
++    nElig = 0;
++    for (unsigned i = 0; i < nsiteTotal && i < (unsigned) NB_MAX_SITES; i++) if (blockElig[siteBlock[i]]) nElig++;
++    if (nsiteTotal > (unsigned) NB_MAX_SITES) nElig = 0;
++    if (nElig * ninvalTotal > siteBudget()) nElig = 0;
++  }
++  bool siteWanted() const { return nElig > 0; }
 +  // Outlined form (nanobox_jit_outline bit 0): candidate 1 stays inline, everything behind it — the
 +  // second candidate, the DTLB lookup, the refill and the write-stamp dance — is one call into
 +  // nanobox_probe_* plus the three loads of the state the probe cache keeps in locals.
 +  void tlbProbeOutlined(uint32_t la, unsigned size, unsigned bit, uint32_t slowDepth, unsigned stampSize, bool needFree) {
 +    const uint32_t tagC = (bit == 4) ? C_tagW : C_tagR;
 +    const uint32_t tagD = (bit == 4) ? D_tagW : D_tagR;
++    const unsigned si0 = nsite++;
++    if (si0 < (unsigned) NB_MAX_SITES) siteBlock[si0] = (Bit8u) curBlock;
++    // this site's own tag pair (bit 6). Sites past what pass 1 counted -- which should not happen --
++    // silently fall back to the shared pair, whose poison the invalidations do emit, so the fallback
++    // is correct rather than merely unlikely.
++    // (needFree is only asked for by write sites, whose tag already implies the page carried no
++    //  write stamps; a read site asking for it would need its own free bit, so it keeps the shared pair)
++    const bool site = siteTags && blockElig[curBlock] && nsiteElig < nElig && (!needFree || bit == 4);
++    const unsigned si = site ? nsiteElig++ : 0;
++    curHost = site ? sHost(si) : C_host;
 +    blk();   // O: ends after the probe; a cache hit branches here directly
-+      blk(); // A: candidate 1
-+        em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(tagC); em->op(I64_NE); em->br_if(0);
++      blk(); // A: candidate 1 (this site's page, or the function's if it has no tag of its own)
++        if (site) { em->get(la); em->i64c((Bit64s)(Bit64u) ~LPF_MASK); em->op(I64_OR); em->get(sTag(si)); em->op(I64_NE); em->br_if(0); }
++        else { em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(tagC); em->op(I64_NE); em->br_if(0); }
 +        if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
 +        profCount(&nanobox_flags_stats[FD_PROBE_C]);
++        // a write tag can only hold a page that carried no iCache write stamps when it was filled,
++        // and stamps are only added by serveICacheMiss -- which cannot run without an invalidation
++        // in between. So the free bit the REP / PUSH fast paths test is known here.
++        if (site && needFree) { em->i32c(1); em->set(C_free); }
 +        em->br(1);
 +      endb();
-+      if (outlineProbe2()) {
++      if (site && siteCand2()) {
++        // candidate 2: the pair the whole function shares, which is also what the link tail call
++        // handed in. It catches a site's FIRST access in this activation (the caller just probed
++        // the page) -- the case a private tag can never win.
++        blk();
++          em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(tagC); em->op(I64_NE); em->br_if(0);
++          if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
++          em->get(la); em->i64c((Bit64s)(Bit64u) ~LPF_MASK); em->op(I64_OR); em->set(sTag(si));
++          em->get(C_host); em->set(sHost(si));
++          if (needFree) { em->i32c(1); em->set(C_free); }
++          profCount(&nanobox_flags_stats[FD_PROBE_D]);
++          em->br(1);
++        endb();
++      }
++      if (!site && outlineProbe2()) {
 +        // second candidate, still inline but slimmed: with the refill outlined the entry is only
 +        // (tagR, tagW, host) -- ppf and the stamp-free bit live in the helper now, so promoting it
 +        // is three swaps instead of five. It exists because a site that alternates between two
@@ -3315,10 +3422,12 @@ index 000000000..9bdcf9e17
 +      }
 +      em->get(la); acmGet(); em->get(L_upl); em->call(fn(nanobox_probe_fnidx(size, bit, stampSize ? 1 : 0), "lli>i"));
 +      em->br_if(slowDepth + 1);
-+      if (outlineProbe2()) { em->get(C_tagR); em->set(D_tagR); em->get(C_tagW); em->set(D_tagW); em->get(C_host); em->set(D_host); }   // the page we are replacing becomes the second entry
++      if (!site && outlineProbe2()) { em->get(C_tagR); em->set(D_tagR); em->get(C_tagW); em->set(D_tagW); em->get(C_host); em->set(D_host); }   // the page we are replacing becomes the second entry
 +      em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_probe_out.tagR), 3); em->set(C_tagR);
 +      em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_probe_out.tagW), 3); em->set(C_tagW);
-+      em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_probe_out.host), 2); em->set(C_host);
++      em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_probe_out.host), 2);
++      if (site) { em->tee(C_host); em->set(sHost(si)); } else em->set(C_host);
++      if (site) { em->i32c(0); em->mem(I64_LOAD, bit == 4 ? ADDR(nanobox_probe_out.tagWo) : ADDR(nanobox_probe_out.tagRo), 3); em->set(sTag(si)); }
 +      if (needFree) { em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_probe_out.freeb), 2); em->set(C_free); }
 +      if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->set(P_off); }
 +    endb();
@@ -3328,6 +3437,7 @@ index 000000000..9bdcf9e17
 +    const bool fold = (nanobox_tlbfold != 0);
 +    const uint32_t tagC = (bit == 4) ? C_tagW : C_tagR;
 +    if (outlineProbe() && nanobox_probe_size_idx(size) >= 0) { tlbProbeOutlined(la, size, bit, slowDepth, stampSize, needFree); return; }
++    curHost = C_host;   // the inline path keeps the shared probe cache
 +    const uint32_t tagD = (bit == 4) ? D_tagW : D_tagR;
 +    // Page cache: same page as the last successful probe, access fits the page, permission bit
 +    // present, and no alignment check pending -> reuse (skips the TLB entry lookup entirely).
@@ -3439,7 +3549,7 @@ index 000000000..9bdcf9e17
 +  }
 +  // host address = entry->hostPageAddr + (la & 0xfff)  -> i32 on stack
 +  void pushHostAddr(uint32_t la, bool haveOff = false) {
-+    em->get(C_host);
++    em->get(curHost);
 +    if (haveOff) { em->get(P_off); em->op(I32_ADD); return; }
 +    em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->op(I32_ADD);
 +  }
@@ -5582,8 +5692,15 @@ index 000000000..9bdcf9e17
 +    // pass 1: discover which registers/flags the trace touches (loop header set, region block entry
 +    // states) and how many exit-chain positions each body needs
 +    passNo = 1; nedges = 0;
++    siteTags = false; nsiteTotal = 0; ninvalTotal = 0; nElig = 0;
++    for (unsigned j = 0; j <= NB_REGION_MAX_BLOCKS; j++) blockInval[j] = blockElig[j] = 0;
 +    if (!compilePass()) return false;
++    // pass 1 counted the memory sites and the mid-function invalidations and recorded the CFG:
++    // pass 2 declares one (tag, host) pair per ELIGIBLE site and poisons exactly those.
++    nsiteTotal = nsite; ninvalTotal = ninval;
++    computeEligibleBlocks();
 +    passNo = 2;
++    siteTags = siteWanted();
 +    if (reg) {
 +      // pass 2 for regions: block entry states D_j are known now; transitions keep them in locals
 +      for (unsigned r = 0; r < 16; r++) regionWritten[r] = writtenReg[r];
@@ -5601,7 +5718,7 @@ index 000000000..9bdcf9e17
 +      for (unsigned r = 0; r < 16; r++) { headerReg[r] = usedReg[r]; headerWritten[r] = writtenReg[r]; }
 +      headerLf = usedLf && blockFlagEntry[0] == FE_OTHER; headerWrittenLf = writtenLf;
 +    }
-+    if (loopWanted || spillChain()) {
++    if (loopWanted || spillChain() || siteTags) {
 +      // pass 2 (a plain trace re-emits identically; only the exit chain sizes come from pass 1)
 +      m.beginFunc();
 +      depth = 0; loopDepth = -1; bodyDepth = -1;
@@ -5633,6 +5750,8 @@ index 000000000..9bdcf9e17
 +    if (flagsProbeLink() && nanobox_tlbfold && shortSig()) { C_tagR = 1; C_tagW = 2; C_ppf = em->addLocal(I64); D_ppf = em->addLocal(I64); D_tagR = em->addLocal(I64); D_tagW = em->addLocal(I64); }
 +    else if (flagsProbeLink() && nanobox_tlbfold) { C_tagR = 1; C_tagW = 2; C_ppf = 3; D_tagR = 4; D_tagW = 5; D_ppf = 6; }
 +    else { C_ppf = em->addLocal(I64); D_ppf = em->addLocal(I64); C_tagR = em->addLocal(I64); C_tagW = em->addLocal(I64); D_tagR = em->addLocal(I64); D_tagW = em->addLocal(I64); }
++    S_tagBase = S_hostBase = 0;
++    if (siteTags) { S_tagBase = em->addLocal(I64); for (unsigned i = 1; i < nElig; i++) em->addLocal(I64); }
 +    L_upl = em->addLocal(I32);
 +    L_tick = em->addLocal(I32);   // AOT: iterations left before the next full back-edge sync
 +    L_direct = L_dcs = L_dcf = 0xffffffffu;   // direct calls: declared on first use (see unitHasRet / dcallLocals)
@@ -5641,11 +5760,13 @@ index 000000000..9bdcf9e17
 +    if (flagsProbeLink() && nanobox_tlbfold && shortSig()) { C_host = 3; C_free = em->addLocal(I32); D_host = em->addLocal(I32); D_free = em->addLocal(I32); }
 +    else if (flagsProbeLink() && nanobox_tlbfold) { C_host = 7; C_free = 8; D_host = 9; D_free = 10; }
 +    else { C_host = em->addLocal(I32); C_free = em->addLocal(I32); D_host = em->addLocal(I32); D_free = em->addLocal(I32); }
++    if (siteTags) { S_hostBase = em->addLocal(I32); for (unsigned i = 1; i < nElig; i++) em->addLocal(I32); }
 +    P_bits = em->addLocal(I32); P_off = em->addLocal(I32);
 +    L_pfk = em->addLocal(I32);
 +    L_cur = em->addLocal(I32);
 +    L_regp = em->addLocal(I32);
 +    V[0] = V[1] = 0xffffffffu;   // v128 temps: allocated by vloc() when a SIMD template needs one
++    curHost = C_host;
 +  }
 +  // The trace-linking epilogue as a function of its own (shared by every trace: it is ~600 bytes
 +  // of code that used to be duplicated per trace, dominating module size and compile time). Traces
@@ -5703,6 +5824,7 @@ index 000000000..9bdcf9e17
 +  }
 +  bool compilePass() {
 +    loopWanted = false;
++    nsite = 0; ninval = 0; nsiteElig = 0;
 +    m.funcTypeIdx = jitFuncType(m);
 +    Emit emit(m); em = &emit;
 +    declareLocals();

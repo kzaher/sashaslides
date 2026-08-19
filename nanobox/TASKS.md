@@ -1608,3 +1608,40 @@ artifact, a different project.
 Merged with `nanobox_jit_aot_detform` defaulting to 0. Gate on both guests, new image:
 `IDENTITY: identical (codex + agy)`, `BISECT: no divergence`; guest verified; fib loop 0.62 ns/iteration;
 icount 643,129,628 vs 643,129,730 AOT+detform vs AOT off -- 102 instructions in 643 M (1.6e-7).
+
+### T.6 Per-site probe tags: eligibility was the whole ballgame (2026-08-19)
+
+Each memory SITE now gets its own `(tag, host)` pair in fresh wasm locals, with the old function-wide
+pair kept behind it as candidate 2 (`NANOBOX_OUTLINE` bits 6|7, on by default).
+
+| codex session, level 3 | cand 1 | cand 2 | full lookups | miss rate |
+|---|---|---|---|---|
+| before | 345,639,465 | 0 | 208,033,045 | 37.6 % |
+| **after** | 380,572,544 | 11,870,561 | **182,205,180** | **31.7 %** (-12.4 % full lookups) |
+| per-site only (no cand 2) | 358,930,680 | 0 | 184,124,204 | 33.9 % -- so keeping the shared pair earns its place |
+
+Speed: AOT call+ret 17.86/17.72 -> **17.51/17.24 ns**, fib loop 0.58 -> 0.57 ns/iteration with icount
+**identical**, codex boot and keystrokes flat. Size **+0.35 %** (default engine) and +0.65 % (AOT).
+
+**The lesson: giving EVERY site a private tag was a 15 % regression on call+ret for exactly the same
+census gain** (+3.2 %/+4.6 % of bytes too). A returning direct call poisons the whole probe cache, so
+those sites see poison every iteration and buy only a failed compare. A site is eligible only if its
+block lies on a cycle of the region CFG none of whose blocks invalidates -- and then the regression and
+nearly all the size cost vanish while the census gain stays. The sites that thrash and the sites a
+private tag can help are almost the same set.
+
+Design details worth keeping: site tags store `la | ~LPF_MASK` rather than `la & LPF_MASK`, so every
+valid tag is >= 0xfff and **zero is the poison** -- which is what wasm zero-initialises a local to, so
+function entry costs nothing. Invalidations must poison sites not yet emitted, so pass 1 counts sites
+and records the CFG and pass 2 declares the locals.
+
+**The next lever, and it is the last big one on this path**: a returning direct call and a handler step
+both poison the entire probe cache unconditionally -- on `call.x86` that is one poison per iteration
+against two accesses, which is the residual ~49 % miss rate there. The callee's probe result is still
+valid when it returns and could be handed back instead of discarded. It is separate work because it
+requires enumerating everything that can invalidate a folded tag while a frame is suspended (including
+`serveICacheMiss` adding write stamps during a nested direct-call resolve), and missing one is a silent
+miscompile of the same shape as the AVX-probe bug the gate caught in T.1.
+
+Merged; gate on both guests: `IDENTITY: identical (codex + agy)`, `BISECT: no divergence`; guest
+verified; fib loop 0.63 ns/iteration.
