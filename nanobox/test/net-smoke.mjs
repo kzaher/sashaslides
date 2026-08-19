@@ -61,7 +61,8 @@ const OUT = opt("--out", join(HERE, "../web/results"));
 const VENDOR = !argv.includes("--no-vendor");
 const BULK = Number(opt("--bulk", 2_000_000));
 const SSE_N = Number(opt("--sse-events", 6)), SSE_GAP = Number(opt("--sse-gap", 1000));
-const OPEN_S = Number(opt("--open-seconds", 8));
+const OPEN_S = Number(opt("--open-seconds", 8));   // WALL seconds; converted to the guest's fast seconds in the probe
+const OPEN_GAP = Number(opt("--open-gap", 1000));
 const IMAGE = opt("--image", "linux-base");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 mkdirSync(OUT, { recursive: true });
@@ -128,6 +129,16 @@ const script = [
   `T1=$(date +%s)`,
   `F=$(head -1 /tmp/s | cut -d" " -f1); E=$(tail -1 /tmp/s | cut -d" " -f1); C=$(grep -c . /tmp/s)`,
   `echo "NB sse first=$((F-T0)) last=$((E-T0)) total=$((T1-T0)) events=$C"`,
+  // The guest clock runs FAST (measured ~15x: 8 guest-seconds elapsed in 549 ms of wall time), so a
+  // literal `timeout 8` below would hold the never-ending stream open for about half a second and
+  // could not observe more than the one event the endpoint emits immediately -- which is exactly how
+  // a working stream got mis-graded BUFFERED. The sse stage above just measured a window the SERVER
+  // knows the true length of (SPAN ms), so use it to convert wall-seconds into guest-seconds.
+  `GS=$((T1-T0)); SPS=$((${SPAN} / 1000))`,
+  `[ "$SPS" -lt 1 ] && SPS=1`,
+  `[ "$GS" -lt 1 ] && GS=$SPS`,
+  `OT=$((GS * ${OPEN_S} / SPS)); [ "$OT" -lt ${OPEN_S} ] && OT=${OPEN_S}`,
+  `echo "NB clock guestsec=$GS wallsec=$SPS opentimeout=$OT"`,
   // same again with 8 KB events: any hop that only buffers small writes (a bufio that is never
   // flushed) is forced to hand them on, so a pass here + a fail above pins the buffering to a
   // small-write buffer rather than to a whole-body buffer.
@@ -137,13 +148,11 @@ const script = [
   `wget -q -O /dev/null "$B/mark?t=big-end" 2>/dev/null`,
   `echo "NB big events=$(grep -c . /tmp/sb)"`,
   // never-ending SSE: the MCP shape
-  `rm -f /tmp/o`,
+  `rm -f /tmp/o /tmp/ofirst`,
   `wget -q -O /dev/null "$B/mark?t=open-begin" 2>/dev/null`,
-  `T0=$(date +%s)`,
-  `timeout ${OPEN_S} wget -q -O - "$B/sse?n=0&ms=1000" > /tmp/o 2>/dev/null`,
-  `T1=$(date +%s)`,
+  `timeout $OT wget -q -O - "$B/sse?n=0&ms=${OPEN_GAP}" 2>/dev/null | while IFS= read -r L; do case "$L" in data:*) if [ ! -f /tmp/ofirst ]; then : > /tmp/ofirst; wget -q -O /dev/null "$B/mark?t=open-first" 2>/dev/null; fi; echo "$L" >> /tmp/o;; esac; done`,
   `wget -q -O /dev/null "$B/mark?t=open-end" 2>/dev/null`,
-  `echo "NB open events=$(grep -c data: /tmp/o) bytes=$(wc -c < /tmp/o) waited=$((T1-T0))"`,
+  `echo "NB open events=$(grep -c data: /tmp/o) bytes=$(wc -c < /tmp/o) waited=$OT"`,
   ...(VENDOR ? [
     `R=$(wget -S -O /dev/null https://api.anthropic.com/api/hello 2>&1 | grep -c "HTTP/")`,
     `echo "NB relay status_lines=$R"`,
@@ -230,10 +239,21 @@ if (VENDOR) { const v = kv(line("https")); Number(v.bytes) > 500 ? pass("https",
   else pass("big", detail, { events, first: f, last: e });
 }
 {
+  // Everything here is on the SERVER's clock; the guest's runs ~15x fast and is only used to size
+  // its own `timeout` (see the calibration in the probe). A buffering hop scores 0 events, because a
+  // response that never ends never reaches the point where a whole-body buffer would be handed on.
   const v = kv(line("open")), events = Number(v.events), bytes = Number(v.bytes), waited = Number(v.waited);
-  const detail = `${events} events / ${bytes} bytes off a never-ending stream in ${waited}s`;
-  events >= 2 ? pass("open", detail, { events, bytes, waited })
-              : fail("open", `BUFFERED: ${detail} — a stream that never closes hands the guest nothing (this is the MCP server->client channel)`, { events, bytes, waited });
+  const first = markT("open-first") != null && markT("open-begin") != null ? markT("open-first") - markT("open-begin") : null;
+  const win = markT("open-end") != null && markT("open-begin") != null ? markT("open-end") - markT("open-begin") : null;
+  const detail = `${events} events / ${bytes} bytes off a never-ending stream, first at +${first} ms, stream held open ${win} ms (wanted ~${OPEN_S * 1000} ms; the guest's own timeout was ${waited} of ITS fast seconds)`;
+  const extra = { events, bytes, waited, srvFirst: first, srvWindow: win };
+  if (win != null && win < OPEN_S * 1000 * 0.5)
+    fail("open", `INCONCLUSIVE: the guest only held the stream open ${win} ms of the intended ${OPEN_S * 1000} ms, so too few events could arrive to judge — its clock calibration is off, not the transport. ${detail}`, extra);
+  else if (events < 2)
+    fail("open", `BUFFERED: ${detail} — a stream that never closes hands the guest nothing (this is the MCP server->client channel)`, extra);
+  else if (first != null && first > Math.max(2000, OPEN_GAP * 2))
+    fail("open", `BUFFERED: the first event off the never-ending stream only showed up after ${first} ms — ${detail}`, extra);
+  else pass("open", detail, extra);
 }
 if (VENDOR) { const v = kv(line("relay")); Number(v.status_lines) >= 1 ? pass("relay", `GET https://api.anthropic.com/api/hello came back with ${v.status_lines} status line(s) — see work/prof/j2-serve.log`) : fail("relay", `relayed GET -> ${JSON.stringify(line("relay"))}`); }
 

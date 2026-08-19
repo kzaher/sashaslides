@@ -1755,3 +1755,44 @@ Gate: `IDENTITY: identical (codex + agy)`, `BISECT: no divergence`.
 * **Rejected as a silent miscompile**: refilling only the probed direction's tag. `C_tagR`, `C_tagW`
   and `C_host` are ONE cache entry; refilling one tag leaves the other hitting with the wrong host, and
   the codex boot simply stopped making progress.
+
+### U.7 MCP fixed: a streaming response now reaches the guest as it arrives (2026-08-19)
+
+Both buffering hops of U.5 fixed, and a third defect found in the measurement itself.
+
+* **Hop A, `public/c2w/dist/runcontainer.js` `http_writebody`**: headers go out the moment the fetch
+  resolves and the body streams through a reader, instead of the guest blocking on a status line that
+  `resp.arrayBuffer()` gated. **Dropping `content-length` is load-bearing, not cosmetic**: measured in
+  this Chrome, `api.github.com/zen` reports `content-length: 51` and decodes to **37 bytes**, with
+  `content-encoding` hidden because it is not CORS-safelisted -- forwarding it truncates bodies. The
+  consequence is that `http.Response.ContentLength` is 0 for proxied responses; nothing on nanobox's
+  path reads it, a containerd registry pull would.
+* **Hop B, imagemounter `handleHTTP`**: flush the status line before any body byte and after every
+  chunk (replacing an unflushed `io.Copy`), and back the body goroutine off in stages --
+  `runtime.Gosched()` for 16 empty reads, then 1 ms, then 10 ms -- instead of busy-spinning. The
+  staging is what keeps bulk at full speed while not starving the single-threaded wasip1 netstack,
+  which is what killed the earlier prototype.
+* **The probe was wrong too.** With both hops in, `open` still failed at 1 event / 17 bytes -- but the
+  server's own marks showed the window was **549 ms of wall clock, not 8 s**: the guest's clock runs
+  ~15x fast and the probe used the guest's `timeout 8`. The check now calibrates from a stage whose
+  true length the server knows, times the first event on the server's clock, and distinguishes
+  INCONCLUSIVE from BUFFERED. The old form would have passed a hop that delivered everything at the end.
+
+`test/net-smoke.mjs` **9/9**: first SSE event **5,066 ms -> 69 ms**; a never-ending stream goes from
+**0 events to 8**, arriving 1/s while held open 7.2 s; `bulk` byte-exact and scaling linearly (2 MB in
+633 ms, **20 MB in 6,390 ms** -- 10x bytes for 10.09x time). A real MCP streamable-HTTP handshake run
+from inside the guest (`work/prof/mcp-session.mjs`) reacts to a server push while the GET is still
+open: **before, `tools/list` never returned; after, 58 ms**. The before-leg transcript reproduces the
+user's log exactly -- two POST results then silence.
+
+Regressions all green: `guest-smoke.sh` 34/34, `e2e-sandbox.mjs --cli codex`, `e2e.mjs codex`,
+`e2e-split-shell.mjs` 8/8.
+
+**Not confirmed against the user's banner, because the account is signed out**: `/root/.codex/auth.json`
+no longer exists -- one of our own `?reset=1` e2e runs wipes the persistent tree. The credentials were
+present earlier today (`work/prof/j2-serve.log`). After signing in, `work/prof/mcp-check.mjs --tag
+signedin` watches for the banner and reports every `/ps/mcp` request.
+
+DURABILITY: hop B is captured by `tools/export-patches.sh` into
+`patches/c2w-imagemounter-notbefore.patch`. Hop A lives in a built webpack bundle under a gitignored
+path, so it must be captured as a patch too or the next c2w rebuild silently reverts it.
