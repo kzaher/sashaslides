@@ -243,6 +243,10 @@
     // AOT mode (TASKS.md R; page ?aot=1): function-scope regions, compile on first touch, relaxed
     // boundaries -- not RAM-identical to the reference engine by design
     if (cfg && cfg.aot && ex.nanobox_set_jit_aot) { ex.nanobox_set_jit_aot(1); console.warn("[nanobox-jit] AOT mode on"); }
+    // AOT compile policy (?aotthreshold=N): AOT mode changes the codegen, not when code is compiled.
+    // 1 = the original "translate at the first touch" (nothing interpreted, 35 s to a codex prompt and
+    // second-long stalls whenever the session reaches new code); the default is cfg.threshold.
+    if (cfg && cfg.aot && cfg.aotThreshold && ex.nanobox_set_jit_aot_threshold) { ex.nanobox_set_jit_aot_threshold(cfg.aotThreshold); console.warn("[nanobox-jit] AOT threshold " + cfg.aotThreshold); }
     state.level = level; state.threshold = threshold; state.ok = true;
     return true;
   }

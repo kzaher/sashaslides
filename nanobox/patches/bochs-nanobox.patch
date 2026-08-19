@@ -1403,10 +1403,10 @@ index 000000000..0c5787cb0
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..a67703a09
+index 000000000..67797d143
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,5062 @@
+@@ -0,0 +1,5108 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -1716,6 +1716,11 @@ index 000000000..a67703a09
 +static NbDcallSite nanobox_dcall_layout_probe;
 +#define DC_OFF(field) ((uint32_t)((uintptr_t)&nanobox_dcall_layout_probe.field - (uintptr_t)&nanobox_dcall_layout_probe))
 +static unsigned nanobox_link_fn = 0;   // table index of the shared trace-linking epilogue function (0 = not built)
++// set by a mid-run AOT mode change: the host pins the link function permanently under LINK_KEY and
++// answers hook_lookup with it even after a release_all, but its wasm TYPE belongs to the mode it was
++// built in (bit 9 adds rip/ic0 parameters) -- reusing it across a switch traps every module compiled
++// after with "function signature mismatch". Build a fresh one instead and let the host re-pin it.
++static unsigned nb_link_fresh = 0;
 +bxICacheEntry_c *nanobox_dbg_cur_entry = NULL; // dbg mode: the region block that ran last (cpu_loop only knows the region entry)
 +
 +namespace {
@@ -5526,7 +5531,17 @@ index 000000000..a67703a09
 +// boundaries is NOT kept in this mode by design; guest RAM may differ from the reference engine's.
 +unsigned nanobox_jit_stackify = 1;   // density: stack scheduling over the emitted stream (nbw::Module::stackify)
 +unsigned nanobox_jit_aot = 0;
-+unsigned nanobox_jit_aot_ahead = 1;   // AOT: decode successors that are not in the iCache yet (0: only decoded ones join, as before)
++// AOT: decode successors that are not in the iCache YET and pull them into the region. Default 0
++// since 2026-08-19 (work/prof/boot.md): speculative growth is what the R.3 size wall and the boot cost are
++// made of, and it also costs the hot loop -- a loop whose exit block has never run stays a
++// single-block region (a single-trace loop, registers in locals across iterations, periodic timer
++// check), while decode-ahead makes it a 2-block region whose back edge goes through the region's
++// dispatch and pays the full inter-trace sync EVERY iteration. Measured on work/fib at n = 1e9,
++// AOT: 1.78 ns/iteration with decode-ahead, 0.59 ns without (3x), with the codex boot and the
++// keystroke medians unchanged and 30 MB translated instead of 39 MB.
++// nanobox_aot_compile_function turns it back on for its own sweep: an offline translator has to
++// decode ahead by definition -- it translates code that has never executed.
++unsigned nanobox_jit_aot_ahead = 0;
 +unsigned nanobox_jit_aot_minhot = 0;  // AOT: a decoded successor joins only if its slot has executed at least this often (0: any)
 +unsigned nanobox_jit_aot_dedupe = 0;  // AOT: a successor that already carries a translation (member of another region / plain trace) is not copied in again (its edge stays an external link)
 +// AOT: how many times a self-loop may take its back edge before it runs the full inter-trace sync
@@ -5567,6 +5582,18 @@ index 000000000..a67703a09
 +// bits go on (nanobox_set_jit_flags / NANOBOX_FLAGS afterwards can still override the mask)
 +NB_EXPORT(nanobox_set_jit_aot) void nanobox_set_jit_aot(unsigned on)
 +{
++  // A MID-RUN mode change (harness --aot-mode-at: boot on the trace JIT, run the session compiled --
++  // TASKS.md R.5 says a boot is millions of one-shot entries and each costs ~400 ns more compiled
++  // than interpreted) must release everything compiled so far. The two modes give a compiled function
++  // DIFFERENT wasm signatures -- bit 9 passes rip/ic0 as parameters -- and both the shared link
++  // function's tail call and a direct-call site reach a translation through the function table by
++  // type, so a table holding both shapes traps on the first cross-mode call. Clearing is also the
++  // only way the region former's rules apply uniformly: a region formed under the trace rules keeps
++  // its trace boundaries forever.
++  // ...and only when there is something to release. At start-up the mode is selected before anything
++  // is compiled, and clearing there would also release the modules a preloaded --jit-bundle just
++  // instantiated (hook_release_all does not distinguish them).
++  if ((on != 0) != (nanobox_jit_aot != 0) && nanobox_jit_level >= 2 && (jitcache_count || nanobox_link_fn)) { nanobox_jit_cache_clear(); nb_link_fresh = 1; }
 +  nanobox_jit_aot = on;
 +  // dedupe is ON in AOT mode: with every block an entry point, a successor that already carries a
 +  // translation was being copied into each region that reaches it -- 652 MB of wasm for one codex
@@ -5579,12 +5606,29 @@ index 000000000..a67703a09
 +  // direct-CALL sites take it, the call-free loop is slightly FASTER (0.96 vs 1.03 ns/iteration), and
 +  // the guest clock stays exact. Boot costs ~5 %, inside this scenario's round-to-round spread.
 +  // nanobox_set_jit_dcall_max(0) forces every CALL back down the old exit path without a rebuild.
-+  if (on) { nanobox_jit_threshold = 1; nanobox_jit_flags |= 1 | 2 | 512; nanobox_jit_aot_dedupe = 1; }
++  // THRESHOLD: AOT mode used to force 1 ("everything precompiled, no interpreter dispatch"). Measured
++  // 2026-08-19 (work/prof/boot.md) on the codex scenario, one round each:
++  //   threshold |  boot  | keystroke median / median of the last half / max | wasm translated
++  //         1   | 35.4 s |  25 / 54 /  399 ms                              | 600 MB
++  //        16   | 21.6 s |  22 / 23 / 1059 ms                              | 235 MB
++  //        64   | 19.5 s |  17 / 15 /  195 ms                              | 154 MB
++  //      2000   |  8.6 s |  12 / 16 /   39 ms                              |  36 MB
++  //   trace JIT |  7.1 s |  12 / 15 /   32 ms                              |  23 MB
++  // Threshold 1 does not just cost boot time: it puts a synchronous region translation in FRONT of
++  // every newly reached code path, which is what the second-long keystroke stalls are. Our own
++  // translator is the cost, not V8 -- of the 248 MB a threshold-1 session emits, V8 compiles it in
++  // 1.0 s while the engine spends ~15 s producing it. So AOT mode now changes the CODEGEN only and
++  // leaves the compile policy to nanobox_set_jit(); nanobox_set_jit_aot_threshold(1) (harness
++  // NANOBOX_AOT_THRESHOLD=1, page ?aotthreshold=1) restores "compile at the first touch".
++  if (on) { nanobox_jit_flags |= 1 | 2 | 512; nanobox_jit_aot_dedupe = 1; }
 +  // the census counters live in the wizer snapshot too (the pre-init boot ran ~95 M interpreted traces
 +  // with the JIT off): start them from zero for this run
 +  nanobox_stats.interp_traces = 0; nanobox_stats.interp_icount = 0; nanobox_stats.jit_intrans = 0;
 +  memset(nanobox_aot_stats, 0, sizeof(nanobox_aot_stats));
 +}
++// AOT compile policy: the hot-count a block must reach before it is formed + translated. 1 = the
++// original AOT behaviour (translate at the first touch, nothing interpreted, 35 s to a codex prompt).
++NB_EXPORT(nanobox_set_jit_aot_threshold) void nanobox_set_jit_aot_threshold(unsigned n) { nanobox_jit_threshold = n ? n : 1; }
 +NB_EXPORT(nanobox_set_jit_aot_ahead) void nanobox_set_jit_aot_ahead(unsigned on) { nanobox_jit_aot_ahead = on; }
 +NB_EXPORT(nanobox_set_jit_aot_minhot) void nanobox_set_jit_aot_minhot(unsigned n) { nanobox_jit_aot_minhot = n; }
 +NB_EXPORT(nanobox_set_jit_aot_dedupe) void nanobox_set_jit_aot_dedupe(unsigned on) { nanobox_jit_aot_dedupe = on; }
@@ -6031,8 +6075,8 @@ index 000000000..a67703a09
 +static bool nanobox_ensure_link_fn(void)
 +{
 +  if (nanobox_link_fn || nanobox_dbg_mode) return true;
-+  unsigned pre = hook_lookup(0xffffffffu, 0xffffffffu);
-+  if (pre) { nanobox_link_fn = pre; return true; }
++  if (nb_link_fresh) nb_link_fresh = 0;   // after a mode change: never adopt the previous mode's link function
++  else { unsigned pre = hook_lookup(0xffffffffu, 0xffffffffu); if (pre) { nanobox_link_fn = pre; return true; } }
 +  Module lm;
 +  static bxICacheEntry_c dummy;
 +  TraceCompiler tc(&dummy, lm);
@@ -6398,6 +6442,7 @@ index 000000000..a67703a09
 +  { bx_phy_address phy = 0; if (!nanobox_aot_xlate(lin, &phy)) { nanobox_aot_stats[3]++; return -2; } }
 +  nanobox_aot_stats[0]++;
 +  Bit8u saveUpl = BX_CPU_THIS_PTR user_pl; BX_CPU_THIS_PTR user_pl = (cpl == 3) ? 1 : 0;
++  unsigned saveAhead = nanobox_jit_aot_ahead; nanobox_jit_aot_ahead = 1;   // offline: the code being translated has never executed
 +  Bit8u *covered = (Bit8u *) calloc(len, 1);   // byte coverage of [lin, lin+len)
 +  enum { QMAX = 8192 };
 +  Bit32u *queue = (Bit32u *) malloc(QMAX * sizeof(Bit32u)); unsigned qh = 0, qt = 0;
@@ -6453,6 +6498,7 @@ index 000000000..a67703a09
 +  }
 +  free(covered); free(queue); free(started);
 +  BX_CPU_THIS_PTR user_pl = saveUpl;
++  nanobox_jit_aot_ahead = saveAhead;
 +  return done;
 +}
 +
@@ -6539,10 +6585,10 @@ index 000000000..2428a997b
 +#endif
 diff --git a/bochs/nanobox_wasm.h b/bochs/nanobox_wasm.h
 new file mode 100644
-index 000000000..d4c1f7f76
+index 000000000..8ff99ac99
 --- /dev/null
 +++ b/bochs/nanobox_wasm.h
-@@ -0,0 +1,509 @@
+@@ -0,0 +1,511 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox: a tiny WebAssembly binary emitter used by the trace JIT.
 +//
@@ -6629,7 +6675,9 @@ index 000000000..d4c1f7f76
 +// -- function types ---------------------------------------------------------------------------------
 +struct FuncType {
 +  uint8_t nparams, nresults;
-+  ValType params[12];
++  ValType params[24];   // 12 overflowed silently on a 15-parameter signature: the type section came
++                        // out malformed, V8 rejected EVERY module ("invalid value type 0x0"), the JIT
++                        // fell back to the interpreter and the run presented as a HANG, not an error.
 +  ValType results[2];
 +  bool operator==(const FuncType &o) const {
 +    if (nparams != o.nparams || nresults != o.nresults) return false;

@@ -209,7 +209,7 @@ function takeDump(label) {
   }
   // compile volume so far: splits "what the boot cost" from "what the session cost" (the AOT startup
   // work needs both -- a policy that moves the compiles from the boot into the interactive path is
-  // not a fix, TASKS.md T)
+  // not a fix; work/prof/boot.md)
   rec.jit = { fns: jitState.installed, mb: +(jitState.bytes / 1e6).toFixed(1), compileMs: +jitState.compileMs.toFixed(0) };
   if (ex.nanobox_mem_block_ptr && !opts.noHash) Object.assign(rec, hashGuestRam(opts.dumpDir ? path.join(opts.dumpDir, `${String(markerCount).padStart(3, "0")}-${label}.ram`) : null));
   markerCount++;
@@ -679,6 +679,8 @@ function installJitHost(inst) {
     for (const [env, fn, what] of [["NANOBOX_AOT_DETFORM", "nanobox_set_jit_aot_detform", "deterministic formation: the region depends on the code bytes only"],
                                    ["NANOBOX_AOT_SWEEP", "nanobox_set_jit_aot_sweep", "detform: build the whole containing function at a first touch"],
                                    ["NANOBOX_AOT_POOLRESET", "nanobox_set_jit_aot_poolreset", "offline sweeps: reset the iCache instruction pool between functions"],
+                                   ["NANOBOX_DCALL_MAX", "nanobox_set_jit_dcall_max", "direct calls between translated functions (0 = off)"],
+                                   ["NANOBOX_STACKIFY", "nanobox_set_jit_stackify", "stack scheduling of the emitted byte stream (0 = off)"],
                                    ["NANOBOX_AOT_DEDUPE", "nanobox_set_jit_aot_dedupe", "successor already translated elsewhere is NOT copied in"],
                                    ["NANOBOX_AOT_MINHOT", "nanobox_set_jit_aot_minhot", "successor joins only above this execution count"],
                                    ["NANOBOX_AOT_AHEAD", "nanobox_set_jit_aot_ahead", "decode successors that are not in the iCache yet"],
@@ -712,6 +714,8 @@ function applyAotMode(on) {
     else if (ex.nanobox_set_jit) ex.nanobox_set_jit(Number((opts.jit || "2:0").split(":")[0]), Number(aotThr));
   }
   for (const [env, fn] of [["NANOBOX_AOT_DETFORM", "nanobox_set_jit_aot_detform"], ["NANOBOX_AOT_SWEEP", "nanobox_set_jit_aot_sweep"],
+                           ["NANOBOX_AOT_POOLRESET", "nanobox_set_jit_aot_poolreset"], ["NANOBOX_DCALL_MAX", "nanobox_set_jit_dcall_max"],
+                           ["NANOBOX_STACKIFY", "nanobox_set_jit_stackify"],
                            ["NANOBOX_AOT_DEDUPE", "nanobox_set_jit_aot_dedupe"], ["NANOBOX_AOT_MINHOT", "nanobox_set_jit_aot_minhot"],
                            ["NANOBOX_AOT_AHEAD", "nanobox_set_jit_aot_ahead"], ["NANOBOX_AOT_TICK", "nanobox_set_jit_aot_tick"],
                            ["NANOBOX_AOT_NOSTACK", "nanobox_set_jit_aot_nostack"]])

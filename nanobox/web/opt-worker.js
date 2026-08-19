@@ -149,7 +149,7 @@ if (MODE === "full") WebAssembly.instantiate = function (src, imports) {
         // threshold would cover more but costs boot time (8.4 -> 12.9 s at 200), so that stays opt-in
         // via ?recthreshold=N.
         const recording = !!cfg.jitRecord || (!!cfg.jitAutoDir && !autoCached);
-        const jitCfg = Object.assign({}, cfg.jit, { record: recording, recordMax: cfg.jitRecordMax || 3000, aot: !!cfg.aot });
+        const jitCfg = Object.assign({}, cfg.jit, { record: recording, recordMax: cfg.jitRecordMax || 3000, aot: !!cfg.aot, aotThreshold: cfg.aotThreshold });
         if (recording && cfg.jitRecordThreshold) jitCfg.threshold = cfg.jitRecordThreshold;
         const ok = cfg && cfg.jit ? NanoboxJit.install(inst, jitCfg) : false;
         // the page drives the upload (this worker's event loop is inside the emulation loop), but it

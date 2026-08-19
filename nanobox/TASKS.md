@@ -1448,3 +1448,41 @@ needs the same function-scoped sweep off the ELF's own boundaries. Dedupe also h
 Trap: the Bochs makefile has no header dependency tracking, and an incremental rebuild produced a mixed
 binary that parked the guest at `native_safe_halt` for six consecutive runs -- indistinguishable from a
 correctness bug. Deleting every `.o` and rebuilding fixed it with zero source change.
+
+## T. AOT mode is now a win everywhere (2026-08-19)
+
+**`threshold = 1` was the entire startup cost, and it was never part of what AOT means.** "Everything
+compiled" was implemented as a *when-to-compile* policy that put a synchronous region formation and
+translation in front of every block the guest reached even once -- and a boot plus a session executes
+millions of blocks exactly once. AOT mode now changes the CODEGEN only and leaves scheduling to the
+ordinary threshold; `nanobox_set_jit_aot_threshold(1)` (`NANOBOX_AOT_THRESHOLD=1`, `?aotthreshold=N`)
+restores the old behaviour exactly, and re-measures at 31.3 s and 600 MB.
+
+Merged and verified on the shipping engine (codex boot to the sign-in prompt, then 20 keystrokes
+1.2 s apart, then the fib loop at n = 1e9):
+
+| | boot | keystroke median | worst keystroke | keys > 100 ms | fib loop | compiled per session |
+|---|---|---|---|---|---|---|
+| **AOT** | **7.2 s** | **10 ms** | **38 ms** | **0** | **0.58 ns/iter (10,375 MIPS)** | **29 MB** |
+| trace JIT (flag off) | 6.4 s | 11 ms | 41 ms | 0 | 2.14 ns/iter (2,808 MIPS) | 20 MB |
+
+**Boot at parity, typing slightly better, compute 3.7x** -- where the same engine yesterday booted in
+33 s, stalled 1.5-2 s per keystroke, and emitted 600 MB. Guest verified
+(`fib(2000000) = 17141820111795327685`, `fib(10) = 55`, `call(200000) = 15034622464419917381`), gate
+green on freshly built cold-boot engines (`IDENTITY: identical (codex + agy)`, `BISECT: no divergence`).
+
+Two supporting findings:
+* **It is our translator that is slow, not V8.** V8 compiles the 600 MB in 1.8-2.1 s; the engine spends
+  ~25 s emitting it.
+* **Runtime decode-ahead off by default** (`nanobox_jit_aot_ahead = 0`; the offline sweep re-enables it)
+  gave an unexpected **3x on the hot loop**: with decode-ahead the loop's never-executed exit block
+  joins the region, so the back edge goes through the region dispatch and pays the full inter-trace
+  sync every iteration (1.78 ns) instead of staying a single-trace loop with the periodic check (0.59).
+
+The "boot on the trace JIT, switch to AOT after" lever works (the switch costs 2.4-3.6 ms) but only
+MOVES the cost -- with a sane threshold the boot is already fast without it. It is kept as a knob
+because it is the only way to run the session at a LOWER threshold than the boot: `--aot-mode-at expect`
+with `NANOBOX_AOT_THRESHOLD=256` gives boot 6.7 s, median 15 ms, max 138 ms and only 14.5 M interpreted
+instructions in the session -- 93 % below the trace JIT's 202 M. If you keep it, the switch must
+release every pre-switch translation (the modes give a compiled function different wasm signatures)
+AND force a fresh link function, or the first post-switch call traps on a signature mismatch.
