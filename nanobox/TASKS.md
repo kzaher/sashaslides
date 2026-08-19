@@ -1315,3 +1315,28 @@ being enabled. The unblock is one pinned trampoline (installed like `nanobox_lin
 C-callable type and `call_indirect`s the multi-value target; the link function keeps the multi-value
 type so its tail call forwards results. Then the probe tags, the icount and RAX can be returned, and
 the hot registers passed IN (which needs no results and is independently landable).
+
+### S.7 Is AOT usable once it is running? Parity when quiet, two-second stalls when not (2026-08-19)
+
+The 4-keystroke scenario was measuring the wrong thing: those keys land immediately after the sign-in
+screen while codex is still initialising, which is why every earlier keystroke number in this file is
+150-250 ms. Typing 20 keys 1.2 s apart (`work/prof/sustained.sh`) and taking the median of the last
+half gives the steady state:
+
+| | median (all) | median (last half) | max |
+|---|---|---|---|
+| AOT, run 1 | 21 ms | 19 ms | **741 ms** |
+| AOT, run 2 | 36 ms | **250 ms** | **2129 ms** |
+| shipping engine, run 1 | 15 ms | 18 ms | 35 ms |
+| shipping engine, run 2 | 16 ms | 18 ms | 63 ms |
+
+**AOT is at parity while nothing new compiles and stalls for up to two seconds when something does.**
+The counters from the same runs say why: AOT compiled **600 MB in 79,931 modules** during the session
+against the shipping engine's **20 MB in 6,704** -- compile-everything-on-first-touch, synchronously,
+on the interactive path. It is the same policy that makes the boot 33 s against 8 s (S.5), so startup
+cost and interactive stalls are one problem, not two.
+
+That also makes the sustained-typing test the right iteration signal for the startup work: a run is
+~40 s and it separates policies far better than boot time, and a fix that lowers boot while keeping
+the stalls is not a fix. The bar for "usable once running" is what the shipping engine already does:
+no keystroke over ~60 ms.
