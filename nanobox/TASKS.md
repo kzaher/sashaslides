@@ -1793,6 +1793,17 @@ no longer exists -- one of our own `?reset=1` e2e runs wipes the persistent tree
 present earlier today (`work/prof/j2-serve.log`). After signing in, `work/prof/mcp-check.mjs --tag
 signedin` watches for the banner and reports every `/ps/mcp` request.
 
-DURABILITY: hop B is captured by `tools/export-patches.sh` into
-`patches/c2w-imagemounter-notbefore.patch`. Hop A lives in a built webpack bundle under a gitignored
-path, so it must be captured as a patch too or the next c2w rebuild silently reverts it.
+DURABILITY (closed): hop B is captured by `tools/export-patches.sh` into
+`patches/c2w-imagemounter-notbefore.patch`. Hop A turned out to have a real upstream source --
+`work/c2w-src/extras/runcontainerjs/src/web/runcontainer.js`, which `vm-build/build.sh` already builds
+with webpack and copies into `public/c2w/dist/` -- so it is now `patches/c2w-runcontainer-stream.patch`,
+wired into `tools/export-patches.sh` and `tools/bootstrap.sh` like every other out-of-tree change, and
+the deployed artifact is the BUILD OUTPUT rather than a hand-injected bundle. Proven rather than
+assumed: revert the source to pristine, apply the patch, `npx webpack` -> byte-identical to the
+deployed bundle (and `stack-worker.js` / `worker-util.js` came out byte-identical too, which says this
+toolchain matches the one the shipped bundles were built with). Both gates re-run against the build
+output: net-smoke 9/9, MCP session reacting in 41 ms.
+
+The `content-length` measurement now lives in the SOURCE COMMENT, so it travels inside the patch and
+cannot be tidied away without reading it.
+

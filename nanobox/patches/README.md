@@ -19,5 +19,14 @@ Apply with `git apply` in the respective checkouts (see build-bochs.sh / work/bu
 - `c2w-linux-x86-no-codegen.patch` — the guest kernel config + cmdline for the AOT invariant (TASKS.md M):
   no runtime code generation (`JUMP_LABEL`, BPF, kprobes, ftrace, livepatch, KASLR all off; `KALLSYMS`
   on; `nokaslr pti=off mitigations=off`). Applies to `config/bochs/linux_x86_config` + `grub.cfg.template`.
+- `c2w-runcontainer-stream.patch` — container2wasm v0.8.4 `extras/runcontainerjs/src/web/runcontainer.js`:
+  the page-side `http_writebody` handler STREAMS the response instead of `await resp.arrayBuffer()`.
+  Upstream sets `connObj.response` (the status + headers the guest-side proxy blocks on) only once the
+  whole body has downloaded, so a response that never ends — an SSE channel, which is what MCP's
+  streamable-HTTP transport keeps open for the life of a session — delivered nothing at all and codex
+  reported `MCP startup incomplete (failed: codex_apps)`. Also drops `content-length` with
+  `content-encoding` (see the patch header: keeping it truncates bodies) and streams non-2xx bodies,
+  which upstream left blank. Webpacked into `public/c2w/dist/runcontainer.js` by `vm-build/build.sh`;
+  pairs with the guest-side half in `c2w-imagemounter-notbefore.patch`. See `work/prof/mcpfix.md`.
 - `c2w-keep-kernel-symbols.patch` — `c2w.patched.Dockerfile`: keep `System.map` + `vmlinux` from the
   kernel build and export them next to `/pack` for the AOT translator and `guest-symbolize`.

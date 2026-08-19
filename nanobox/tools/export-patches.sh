@@ -11,6 +11,7 @@ fi
 if [ -d work/c2w-src/.git ]; then
   (cd work/c2w-src && git diff -- cmd/init/main.go) > patches/c2w-init-virtio-bundle.patch
   (cd work/c2w-src && git diff -- extras/imagemounter/main.go extras/c2w-net-proxy/main.go) > patches/c2w-imagemounter-notbefore.patch
+  (cd work/c2w-src && git diff -- extras/runcontainerjs/src/web/runcontainer.js) > patches/c2w-runcontainer-stream.patch
   (cd work/c2w-src && { git diff -- extras/imagemounter/genspec; git ls-files --others --exclude-standard extras/imagemounter/genspec | while read f; do git diff --no-index /dev/null "$f" || true; done; }) > patches/c2w-imagemounter-genspec.patch 2>/dev/null
   echo "c2w patches regenerated"
 fi

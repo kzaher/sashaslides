@@ -32,7 +32,7 @@ if ! have bochs/bochs/nanobox_jit.cc; then
 fi
 if ! have work/c2w-src/extras/imagemounter/genspec/main.go; then
   [ -d work/c2w-src/.git ] || { log "clone container2wasm v0.8.4"; git clone -q --branch v0.8.4 --depth 1 https://github.com/container2wasm/container2wasm work/c2w-src; }
-  (cd work/c2w-src && for p in c2w-init-virtio-bundle c2w-imagemounter-genspec c2w-imagemounter-notbefore; do git apply "$HERE/patches/$p.patch" || true; done) && log "c2w patched"
+  (cd work/c2w-src && for p in c2w-init-virtio-bundle c2w-imagemounter-genspec c2w-imagemounter-notbefore c2w-runcontainer-stream; do git apply "$HERE/patches/$p.patch" || true; done) && log "c2w patched"
 fi
 
 # ---- prebuilt toolchains -------------------------------------------------------------------------
