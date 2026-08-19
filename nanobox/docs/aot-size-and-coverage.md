@@ -81,7 +81,51 @@ whole point: *almost everything we emit never runs at the site where it was emit
 
 ## 4. Proposals
 
-### 4.1 Two-tier emission — the 10x size lever (prototype in flight, `work/j/tier`)
+### 4.1 Two-tier emission — 10x on bytes, MEASURED, and it does not buy speed
+
+**Result: 84.9 -> 9.8 bytes per compiled guest instruction (8.7x); installed wasm for a codex session
+7.23 MB -> 0.59 MB (12.2x).** Behind `NANOBOX_JIT_TIER=<mask>[:<promotion threshold>]`; unset, the
+engine emits exactly what shipped. Gate green on both guests for tier-0-everywhere AND for two-tier
+with promotion exercised.
+
+Tier 0 emits, per guest instruction: `local.get 0` / `i32.const p` / `call $nanobox_t0_step` /
+`br_if 0` = 9-10 bytes, uniform across every opcode (`MOV_GqEq` 120 -> 10, `CALL_Jq` 205 -> 9,
+`RET_Op64` 189 -> 9, `PUSH_Eq` 133 -> 10, `MOV_EqGq` 49 -> 10). It has **no prologue at all** because it
+keeps nothing in wasm locals -- no registers, flags, probe cache, RIP or icount base. Neither RIP nor
+icount needs to travel: on entry to instruction k, icount is already "retired before k" and RIP is
+already the start of k, so the step is `prev_rip = RIP; RIP += ilen`.
+
+**And it is slower than not compiling at all:**
+
+| fib loop, n = 1e9, trace JIT | ns/iteration |
+|---|---|
+| tier 1 (what ships) | 2.14 / 2.15 |
+| two-tier, promote at 2000 | 2.21 / 2.26 -- within 3 % |
+| **pure interpreter (`--jit 0`)** | **34.27** |
+| **tier 0** | **42.98 / 43.67** |
+
+Tier 0 is 20x slower than tier 1 and **25 % slower than the interpreter**, because Bochs' chained
+interpreter runs a whole trace on one dispatch while tier 0 pays a cross-module call per instruction.
+A floor variant (one call per TRACE, 0.35 B/instruction, 45x smaller) converges on being the
+interpreter and is still slightly worse than it. **The premise this section was written on -- "slower
+per execution, but it only executes once" -- is false**: the compact call form is dominated by simply
+leaving the code interpreted.
+
+**The finding that matters more than the bytes.** Two configurations holding coverage and function
+count constant (576.0 vs 574.3 M interpreted icount; 39,108 vs 40,271 installed functions) while
+varying emitted bytes **6.8x** (56.43 -> 8.35 MB) show **no speed difference**: 79.9 vs 78.9 MIPS,
+10.90 vs 10.89 s boot. TASKS.md J4 attributed its regression to "code explosion, 24.9 -> 61.2 MB".
+**Byte volume is measurably not the mechanism.** What remains as the candidate is the number of
+distinct compiled functions being dispatched.
+
+So: keep tier 0 as a lever where BYTES are the constraint -- the browser `.nbjb`, the 191.6 MB kernel
+artifact, memory footprint -- and do not enable it as a coverage policy, because the shipped
+configuration is still the fastest thing measured. **10x per instruction WITH tier-1 speed is not
+reachable in this emission model**: the hybrid middle (sharing only probe-miss, spill, exit and async)
+is bounded by the phase table at ~1.6x, and the shape that reaches both is a dense pre-decoded IR in
+linear memory.
+
+### 4.1b The original proposal, for the record
 
 Emit **tier 0** by default: a compact *call form* per guest instruction — push immediates, `call` a
 shared parameterised helper that performs the whole instruction including addressing, probing, access
@@ -223,7 +267,7 @@ brief requires proving it *fails* on a deliberately broken engine before it is t
 | # | item | expected effect | flag | state |
 |---|---|---|---|---|
 | 1 | New oracle: heap + syscall-trace comparison, both guests | unblocks everything below | `--criteria heap+syscalls` | **DONE, see 5.1** |
-| 2 | Two-tier emission, tier 0 for cold sites | **85 -> ~10 B/instance** | `nanobox_set_jit_tier` | in flight |
+| 2 | Two-tier emission, tier 0 for cold sites | **85 -> 9.8 B/instance achieved**; costs 20x speed where used | `NANOBOX_JIT_TIER` | **DONE, see 4.1** |
 | 3 | Cache load profile and fixes | measured at 180 ms, not 1.5 s; -45 % of it | `NANOBOX_BUNDLE_EAGER=auto`, `?jitfast=1` | **DONE, see 4.4** |
 | 4 | Attach precompiled translations at decode time | interpretation 1.5 M -> ~the handler floor | AOT-only bit | next |
 | 5 | Outline the per-site fault/exit arm | another large slice of memory-site bytes | `nanobox_jit_outline` bit | next |

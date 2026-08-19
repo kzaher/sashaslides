@@ -22,7 +22,7 @@ index 234779104..1c4441e30 100644
   logio.h misc/bswap.h plugin.h extplugin.h param_names.h pc_system.h \
   bx_debug/debug.h config.h osdep.h memory/memory-bochs.h \
 diff --git a/bochs/cpu/cpu.cc b/bochs/cpu/cpu.cc
-index e6ea3661e..432558acb 100644
+index e6ea3661e..286a89557 100644
 --- a/bochs/cpu/cpu.cc
 +++ b/bochs/cpu/cpu.cc
 @@ -30,6 +30,7 @@
@@ -64,7 +64,7 @@ index e6ea3661e..432558acb 100644
  
    while (1) {
  
-@@ -114,15 +123,43 @@ int BX_CPU_C::cpu_loop(void)
+@@ -114,15 +123,51 @@ int BX_CPU_C::cpu_loop(void)
      for(;;) {
        // want to allow changing of the instruction inside instrumentation callback
        BX_INSTR_BEFORE_EXECUTION(BX_CPU_ID, i);
@@ -78,7 +78,15 @@ index e6ea3661e..432558acb 100644
 +      // Bochs' chained handlers (this single call executes the entire trace either way)
 +      bool jitted = false;
 +      if (entry->jitfn) {
++        // two-tier emission: a tier-0 translation that got hot is recompiled at tier 1 HERE, the
++        // same point (and the same RIP/icount state) at which a first compile happens
++        if (nanobox_t0_promote == entry) { nanobox_t0_promote = NULL; nanobox_tier_stats[2]++; nanobox_jit_promote(entry); i = entry->i; }
 +        nanobox_jit_call(entry); jitted = true;
++        if (nanobox_t0_running) {   // a tier-0 function ran: count this execution, and queue a promotion when it is hot
++          bxICacheEntry_c *t0 = nanobox_t0_running; nanobox_t0_running = NULL;
++          nanobox_tier_stats[3]++;
++          if (++*BX_CPU_THIS_PTR iCache.hotOf(t0) >= nanobox_jit_tier1_thr) nanobox_t0_promote = t0;
++        }
 +      }
 +      else {
 +        if (entry->nbahead) nanobox_jit_ahead_first(entry); // nanobox AOT: decoded ahead, first execution -> the reference would decode it now
@@ -2003,10 +2011,10 @@ index 000000000..846714579
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..8162d194c
+index 000000000..7d22a2054
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,6138 @@
+@@ -0,0 +1,6284 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -2164,6 +2172,16 @@ index 000000000..8162d194c
 +NB_EXPORT(nanobox_set_jit_linkdirect) void nanobox_set_jit_linkdirect(unsigned on) { nanobox_jit_linkdirect = on; }
 +extern unsigned nanobox_jit_outline;
 +NB_EXPORT(nanobox_set_jit_outline) void nanobox_set_jit_outline(unsigned mask) { nanobox_jit_outline = mask; }
++// ---- two-tier emission (work/prof/tier.md) -----------------------------------------------------
++// Tier 0 is the COMPACT call form: a guest instruction is performed by a shared helper in the
++// engine, so a site costs a handful of wasm bytes instead of a full inline template with its own
++// address computation, probe cache, fault arm, spill and exits. Tier 1 is what ships today.
++extern unsigned nanobox_jit_tier;       // bitmask, see the definition below
++extern unsigned nanobox_jit_tier1_thr;  // executions after which a tier-0 translation is recompiled at tier 1 (0 = never)
++NB_EXPORT(nanobox_set_jit_tier) void nanobox_set_jit_tier(unsigned mask, unsigned promote)
++{ nanobox_jit_tier = mask; nanobox_jit_tier1_thr = promote; }
++extern Bit64u nanobox_tier_stats[4];
++NB_EXPORT(nanobox_jit_tier_stat) double nanobox_jit_tier_stat(unsigned i) { return i < 4 ? (double) nanobox_tier_stats[i] : 0; }
 +// flags-work counters: static (compile-time sites) 0..15, dynamic (level 3) 16..31
 +enum { FS_PENDING = 0, FS_DIRECT, FS_MAT_INLINE, FS_MAT_HELPER, FS_RT_CHECK, FS_EDGE_DROP, FS_EDGE_PASS, FS_EDGE_MAT, FS_COND_TOTAL, FS_COND_PENDING, FS_JCC_ALU, FS_JCC_ALU_DIRECT, FS_MAT_EXIT, FS_MAT_READ, FS_MAT_EDGE_RT, FS_BLOCKS_SLOW, FS_FWD_BR = 31,
 +       FD_DIRECT = 16, FD_MAT_INLINE, FD_HELPER, FD_PENDING, FD_EDGE_DROP, FD_EDGE_PASS, FD_EDGE_MAT, FD_PROBE_FULL, FD_PROBE_C, FD_PROBE_D, FD_MAT_EXIT, FD_MAT_READ, FD_RT_CHECK, FD_FN_ENTRY, FD_LINK_TAGS, FD_31 };
@@ -2303,6 +2321,15 @@ index 000000000..8162d194c
 +struct NbProbeOut { Bit64u tagR, tagW, tagRo, tagWo; Bit32u host, freeb; };
 +NbProbeOut nanobox_probe_out;
 +unsigned nanobox_jit_outline = 1 | 2 | 8 | 64 | 128 | 256 | 512 | 1024 | 2048 | 16384 | 32768 | 65536 | 131072 | 262144;
++// Two-tier emission. Default 0 = tier 1 only (today's engine, bit for bit).
++//   bit 0  tier-0 codegen exists at all
++//   bit 1  ... and is used for a translation whose entry has not yet reached nanobox_jit_tier1_thr
++//   bit 2  tier-0 traces keep the inline templates for register-only instructions (hybrid form)
++unsigned nanobox_jit_tier = 0;
++unsigned nanobox_jit_tier1_thr = 0;
++Bit64u nanobox_tier_stats[4];   // 0 tier-0 compiles, 1 promotions to tier 1, 2 promotion attempts, 3 tier-0 executions
++// set by the compile driver around a compilation: "emit this one at tier 0"
++static bool nb_tier0_now = false;
 +// bit 0 outlined DTLB probe + refill, 1 out-of-line syncBefore,
 +// 8  = in-region transition boundary out of line (nanobox_trans_check): one call + ONE exit arm
 +//      instead of BX_SYNC_TIME + async + first-execution + fetch-window inline with four exit arms,
@@ -2700,6 +2727,53 @@ index 000000000..8162d194c
 +  BX_CPU_THIS_PTR prev_rip = ripEnd - (p2 & 0xf);
 +  BX_CPU_THIS_PTR icount = ic0 + ((p2 >> 4) & 0x1f);
 +}
++// ---- tier 0: the compact call form (work/prof/tier.md) ----------------------------------------
++// One call performs a whole guest instruction. Everything the inline template carries per site --
++// the effective address, the probe cache, the fault arm, the register spill, the exit -- lives in
++// the engine instead, so the emitted site is `local.get 0; i32.const p; call; br_if`.
++//
++// Neither RIP nor icount travels in a parameter, which is what makes it four bytes smaller than the
++// cold arms above:
++//   * icount is ALREADY "instructions retired before this one" on entry -- BX_COMMIT_INSTRUCTION
++//     bumps it inside the handler that ran last, and cpu_loop has not bumped it for instruction 0 --
++//     so nanobox_cold_sync's `ic0 + k` would recompute exactly the value in memory. Skip it.
++//   * RIP is likewise already the END of the previous instruction, i.e. the START of this one, so
++//     the step is `prev_rip = RIP; RIP += ilen`. Instruction 0 is the exception: cpu_loop advanced
++//     RIP past it before entering, so it must not advance again (bit 15 of p says which).
++// A tier-0 body is straight-line -- any instruction that branches, faults or ends the trace returns
++// to cpu_loop -- so "the previous instruction left RIP at my start" holds at every site.
++//   p = ilen | k<<4 | 1<<15 (advance RIP)
++static unsigned nanobox_t0_step(Bit32u ptr, Bit32u p)
++{
++  const Bit64u ilen = p & 0xf;
++  if (p & 0x8000) {
++    BX_CPU_THIS_PTR prev_rip = BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx;
++    BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx += ilen;
++  } else {
++    BX_CPU_THIS_PTR prev_rip = BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx - ilen;
++  }
++  nanobox_trace_end = 0;
++  bxInstruction_c *i = ((bxICacheEntry_c *)(uintptr_t) ptr)->i + ((p >> 4) & 0x1f);
++  BX_CPU_CALL_METHOD(i->execute1, (i));
++  return (unsigned) nanobox_trace_end | (unsigned) BX_CPU_THIS_PTR async_event;
++}
++// Promotion (nanobox_jit_tier bit 1): a tier-0 function announces which entry is running so
++// cpu_loop can count it and recompile it at tier 1 once it is hot. It cannot happen here -- a
++// tier-1 compile decodes ahead and may recycle the trace-pool slots this function is executing out
++// of -- so the decision is deferred to the trace boundary, where every other compile happens.
++static void nanobox_t0_enter(Bit32u ptr) { nanobox_t0_running = (bxICacheEntry_c *)(uintptr_t) ptr; }
++// The FLOOR of the compact form (nanobox_jit_tier bit 2). Tier 0 observes nothing between guest
++// instructions, so it does not need one call per instruction at all: clearing nanobox_single_step
++// lets BX_NEXT_INSTR chain handler to handler exactly as cpu_loop's uncompiled path does, and the
++// whole trace becomes ONE call. This is the limit any "call a shared helper per site" design tends
++// to -- and it is, definitionally, the interpreter.
++static void nanobox_t0_trace(Bit32u ptr)
++{
++  bxInstruction_c *i = ((bxICacheEntry_c *)(uintptr_t) ptr)->i;
++  nanobox_single_step = 0;
++  BX_CPU_CALL_METHOD(i->execute1, (i));   // cpu_loop already did RIP += i->ilen()
++  nanobox_single_step = 1;
++}
 +static unsigned nanobox_helper_step_all(Bit32u ptr, Bit64u base, Bit64u ic0, Bit32s p1, Bit32u p2)
 +{
 +  nanobox_cold_sync(base, ic0, p1, p2);
@@ -2819,6 +2893,7 @@ index 000000000..8162d194c
 +
 +  // locals
 +  uint32_t L_i, L_base, L_ic0, L_upl, L_acm, L_pob, L_cpu;
++  bool tier0;                              // compact call form (nanobox_jit_tier)
 +  uint32_t L_reg[16];
 +  uint32_t L_lfr, L_lfa;
 +  CacheState cs;
@@ -2993,7 +3068,7 @@ index 000000000..8162d194c
 +  bool templMisc() const { return (nanobox_jit_spill & 64) != 0; }       // LEAVE / MUL / BSF / ... (A/B bit)
 +
 +  TraceCompiler(bxICacheEntry_c *entry, Module &mod) : e(entry), ins(entry->i), n(0), m(mod), em(NULL), needAsyncCheck(false), depth(0), loopDepth(-1), bodyDepth(-1), linkOK(false), selfLoopOK(false),
-+    reg(NULL), curBlock(0), boff(0), dispatchDepth(-1), L_cur(0), regionPass2(false), regionKernel(false), conforming(false), coldExit(false), coldArm(0), L_xic(0), L_tick(0), loopIcPerIter(0), loopTickN(0), aliasAt(-1), passNo(1), nedges(0) {
++    tier0(nb_tier0_now), reg(NULL), curBlock(0), boff(0), dispatchDepth(-1), L_cur(0), regionPass2(false), regionKernel(false), conforming(false), coldExit(false), coldArm(0), L_xic(0), L_tick(0), loopIcPerIter(0), loopTickN(0), aliasAt(-1), passNo(1), nedges(0) {
 +    S_tagBase = S_hostBase = 0; nsite = nsiteTotal = nsiteElig = nElig = ninval = ninvalTotal = 0; siteTags = false; curHost = 0;
 +    for (unsigned j = 0; j <= NB_REGION_MAX_BLOCKS; j++) blockInval[j] = blockElig[j] = 0;
 +    for (unsigned i = 0; i < 256; i++) siteBlock[i] = 0;
@@ -6517,6 +6592,14 @@ index 000000000..8162d194c
 +    phInit();
 +    declareLocals();
 +    phPush(PH_PROLOGUE);
++    // tier 0 keeps NOTHING in locals -- no registers, no flags, no probe cache, no RIP base and no
++    // icount base -- so the entire prologue (the CPU-struct base, the probe poison, the alignment
++    // mask, base/ic0) is dead code there. That is most of what makes the form small: the per-site
++    // saving would be given straight back by a per-function preamble.
++    if (tier0) {
++      if (nanobox_jit_tier & 2) { em->get(L_i); em->call(fn(FNIDX(&nanobox_t0_enter), "i>v")); }
++      phPop(); if (!compileBlockBody(false)) return false; em->ret(); phFinish(); return true;
++    }
 +    if (cpuBase()) { em->i32c((int32_t) nbCpuBase()); em->set(L_cpu); }
 +    invalidateAll();
 +    // direct calls: bit 0 of the argument says "a translated caller called you and is waiting on the
@@ -6526,7 +6609,7 @@ index 000000000..8162d194c
 +      em->get(L_i); em->i32c(-2); em->op(I32_AND); em->set(L_i);   // every unit: the bit must not reach a pointer use
 +    }
 +
-+    bool useTemplates = (nanobox_jit_level >= 2) && mode64;
++    bool useTemplates = (nanobox_jit_level >= 2) && mode64 && !tier0;
 +    // prologue: base = RIP - ilen(0); ic0 = icount; upl = user_pl
 +    // (region: the call argument is an entry descriptor {region, block, delta}: base = RIP - delta,
 +    //  the dispatch starts at `block`)
@@ -6754,6 +6837,35 @@ index 000000000..8162d194c
 +    return true;
 +  }
 +  bool compileBlockBody(bool useTemplates) {
++    if (tier0) {
++      // One shared exit label for the whole body: an instruction that ended the trace, raised an
++      // async event or branched leaves through `br_if` (2 bytes) instead of its own `if/return/end`
++      // (4). Nothing is committed on the way out -- the helper already left RIP, prev_rip and icount
++      // exactly where cpu_loop expects them.
++      if (n > BX_MAX_TRACE_LENGTH) return false;
++      PhScope _p(this, PH_HANDLER);
++      if (nanobox_jit_tier & 4) {   // whole-trace form: one call, handlers chain
++        const uint32_t mark0 = m.code.n;
++        em->get(L_i); em->call(fn(FNIDX(&nanobox_t0_trace), "i>v"));
++        for (unsigned k = 0; k < n; k++) nanobox_inline_count[ins[k].getIaOpcode()]++;
++        nanobox_tpl_bytes[ins[0].getIaOpcode()] += m.code.n - mark0;
++        return true;
++      }
++      blk();
++      for (unsigned k = 0; k < n; k++) {
++        const unsigned ilen = off[k + 1] - off[k];
++        if (ilen > 15) return false;
++        const uint32_t mark = m.code.n;
++        em->get(L_i);
++        em->i32c((int32_t)(ilen | (k << 4) | (k ? 0x8000u : 0u)));
++        em->call(fn(FNIDX(&nanobox_t0_step), "ii>i"));
++        if (k + 1 == n) em->drop(); else em->br_if(0);
++        nanobox_inline_count[ins[k].getIaOpcode()]++;
++        nanobox_tpl_bytes[ins[k].getIaOpcode()] += m.code.n - mark;
++      }
++      endb();
++      return true;
++    }
 +    for (unsigned k = 0; k < n; k++) {
 +      if (m.importsFull()) return false;
 +      bool last = (k + 1 == n);
@@ -6817,8 +6929,12 @@ index 000000000..8162d194c
 +          Bit64u *ctr = &nanobox_dyn_fallback[ins[k].getIaOpcode()];
 +          zaddr(ADDR(*ctr)); zaddr(ADDR(*ctr)); em->mem(I64_LOAD, zoff(ADDR(*ctr)), 3); em->i64c(1); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(*ctr)), 3);
 +        }
++        const uint32_t markH = m.code.n;
 +        emitHandlerStep(k, last);
 +        nanobox_fallback_count[ins[k].getIaOpcode()]++;
++        // a handler step is emitted code like any other: count it, so --tpl-bytes reports bytes per
++        // GUEST INSTRUCTION rather than bytes per templated instruction (nanobox_jit_tier bit 8)
++        if (nanobox_jit_tier & 256) { nanobox_inline_count[ins[k].getIaOpcode()]++; nanobox_tpl_bytes[ins[k].getIaOpcode()] += m.code.n - markH; }
 +      } else if (last) {
 +        exitFallthroughOrTransition(k);
 +      }
@@ -6855,7 +6971,11 @@ index 000000000..8162d194c
 +    for (unsigned w = 0; w < sizeof(bxInstruction_c) / 8; w++) { h ^= p[w]; h *= 0x100000001b3ull; h ^= h >> 29; }
 +  }
 +  h ^= nreal;
-+  return h ? h : 1;
++  h = h ? h : 1;
++  // Bit 0 of the content key IS the tier. A translation is only ever handed to an entry that asks
++  // for the same tier, and every attach can read the tier back out of the key it was found under --
++  // which is what lets the two forms share the cache, the bundle and the batch with no side table.
++  return (h & ~1ull) | (nb_tier0_now ? 1ull : 0ull);
 +}
 +static JitCacheEntry *nanobox_jit_cache_slot(Bit64u key)
 +{
@@ -7549,9 +7669,33 @@ index 000000000..8162d194c
 +  nanobox_region_attach(e, r->fn, r->mask, r);
 +}
 +
++// Which tier should this entry be compiled at? Tier 0 is a plain-trace form only: it forms no
++// region, resolves no direct call and does not link, which is also what makes cpu_loop see every
++// one of its executions and so able to promote it.
++static bool nb_tier0_pick(bxICacheEntry_c *e)
++{
++  if (!(nanobox_jit_tier & 1) || nanobox_jit_aot) return false;
++  if (!(nanobox_jit_tier & 2)) return true;                       // single-tier: everything compact
++  return *BX_CPU_THIS_PTR iCache.hotOf(e) < nanobox_jit_tier1_thr;
++}
++// the entry cpu_loop must recompile at tier 1 the next time it dispatches it
++bxICacheEntry_c *nanobox_t0_running = NULL;
++bxICacheEntry_c *nanobox_t0_promote = NULL;
++// Recompile e at tier 1. Called from cpu_loop at exactly the point the ordinary compile happens
++// (RIP already past the first instruction), because the tier-1 path derives the region entry from
++// RIP and decodes ahead.
++void nanobox_jit_promote(bxICacheEntry_c *e)
++{
++  Bit32u oldfn = e->jitfn, oldarg = e->jitarg;
++  e->jitfn = 0;
++  nanobox_jit_maybe_compile(e);
++  if (!e->jitfn) { e->jitfn = oldfn; e->jitarg = oldarg; }   // queued in a batch, or declined: stay at tier 0
++  else nanobox_tier_stats[1]++;
++}
 +// called by serveICacheMiss() once a trace has been decoded into `e`
 +void nanobox_jit_after_decode(bxICacheEntry_c *e)
 +{
++  nb_tier0_now = nb_tier0_pick(e);
 +  // (the slot's hotness counter is deliberately kept: a re-decoded trace inherits it)
 +  if (!nanobox_jit_level || nanobox_dbg_mode) return;
 +  if (nanobox_marks_private) return;   // decoded ahead: no translation before its first execution has been seen (reference marks)
@@ -7564,7 +7708,7 @@ index 000000000..8162d194c
 +  unsigned nreal;
 +  Bit64u key = nanobox_jit_hash(e, nreal);
 +  JitCacheEntry *c = nanobox_jit_cache_slot(key);
-+  if (c && c->key == key && !c->region) { e->jitfn = c->fn; e->jitarg = (Bit32u)(uintptr_t) e->i; jitcache_hits++; }
++  if (c && c->key == key && !c->region) { e->jitfn = c->fn; e->jitarg = (Bit32u)(uintptr_t)((key & 1) ? (void *) e : (void *) e->i); jitcache_hits++; }
 +}
 +
 +
@@ -7612,9 +7756,10 @@ index 000000000..8162d194c
 +}
 +
 +// give (or cache) a translation to entry e
-+static void nanobox_jit_attach(bxICacheEntry_c *e, unsigned fn, Region *reg)
++static void nanobox_jit_attach(bxICacheEntry_c *e, unsigned fn, Region *reg, Bit64u key)
 +{
-+  if (reg) nanobox_region_attach(e, fn, reg->mask, reg); else { e->jitfn = fn; e->jitarg = (Bit32u)(uintptr_t) e->i; }
++  if (reg) nanobox_region_attach(e, fn, reg->mask, reg);
++  else { e->jitfn = fn; e->jitarg = (Bit32u)(uintptr_t)((key & 1) ? (void *) e : (void *) e->i); }
 +}
 +static void nanobox_jit_cache_put(Bit64u key, unsigned fn, unsigned len, Region *reg)
 +{
@@ -7644,7 +7789,7 @@ index 000000000..8162d194c
 +    nanobox_stats.jit_compiled++; nanobox_batch_stats[1]++;
 +    if (pd.reg) nanobox_region_stats[2]++;
 +    // the entry may have been evicted/re-decoded/flushed while the batch was open
-+    if (pd.e->pAddr == pd.pAddr && pd.e->i == pd.i && pd.e->jitfn == 0) nanobox_jit_attach(pd.e, fn, pd.reg);
++    if (pd.e->pAddr == pd.pAddr && pd.e->i == pd.i && pd.e->jitfn == 0) nanobox_jit_attach(pd.e, fn, pd.reg, pd.key);
 +    else nanobox_batch_stats[2]++;
 +    // (a cache clear inside put releases everything installed so far, including fn: fine)
 +    nanobox_jit_cache_put(pd.key, fn, 0, pd.reg);
@@ -7663,7 +7808,7 @@ index 000000000..8162d194c
 +  JitCacheEntry *c = nanobox_jit_cache_slot(key);
 +  if (c && c->key == key) {
 +    if (c->region && reg && (c->region->npages != reg->npages || memcmp(c->region->ppf, reg->ppf, sizeof(reg->ppf)) != 0)) return false; // same code, other page frames: needs its own descriptor -> compile
-+    if (c->region) nanobox_region_attach(e, c->fn, c->mask, c->region); else { e->jitfn = c->fn; e->jitarg = (Bit32u)(uintptr_t) e->i; }
++    if (c->region) nanobox_region_attach(e, c->fn, c->mask, c->region); else { e->jitfn = c->fn; e->jitarg = (Bit32u)(uintptr_t)((key & 1) ? (void *) e : (void *) e->i); }
 +    jitcache_hits++; if (reg) { nanobox_region_stats[3]++; delete reg; }
 +    return true;
 +  }
@@ -7676,7 +7821,7 @@ index 000000000..8162d194c
 +  { bool kern = (Bit64u) nb_lookup_lin >= 0xffff800000000000ull;
 +    nanobox_region_stats[(pre ? 28 : 29) + (kern ? 0 : 2)]++; }
 +  if (pre) {
-+    nanobox_jit_attach(e, pre, reg);
++    nanobox_jit_attach(e, pre, reg, key);
 +    nanobox_jit_cache_put(key, pre, 0, reg);
 +    if (jitcache_count == 0) { e->jitfn = 0; hook_release(pre); if (reg) delete reg; return true; }
 +    if (reg) nanobox_region_stats[3]++;
@@ -7715,7 +7860,7 @@ index 000000000..8162d194c
 +    hook_note(fn, (unsigned)(key & 0xffffffffu), (unsigned)(key >> 32));
 +    nanobox_stats.jit_compiled++;
 +    if (reg) nanobox_region_stats[2]++;
-+    nanobox_jit_attach(e, fn, reg);
++    nanobox_jit_attach(e, fn, reg, key);
 +    if (nanobox_dbg_mode) { nanobox_dbg_compiled(e, fn, bytes.n); return true; }  // dbg mode: no cache (region objects are leaked on purpose)
 +    nanobox_jit_cache_put(key, fn, bytes.n, reg);
 +    if (jitcache_count == 0) { e->jitfn = 0; }
@@ -7909,6 +8054,15 @@ index 000000000..8162d194c
 +                        (nanobox_jit_aot && nanobox_stats.interp_traces - nb_batch_since_interp > 256))) nanobox_jit_batch_flush();
 +    if (nanobox_jit_pending(e)) { nanobox_aot_stats[6]++; return; }
 +  }
++  nb_tier0_now = nb_tier0_pick(e);
++  if (nb_tier0_now) {
++    // tier 0: the compact call form, plain traces only
++    unsigned nreal0 = 0;
++    Bit64u k0 = nanobox_jit_hash(e, nreal0);
++    if (!nanobox_jit_compile_one(e, NULL, k0)) { *BX_CPU_THIS_PTR iCache.hotOf(e) = 0; nanobox_aot_stats[7]++; }
++    else nanobox_tier_stats[0]++;
++    return;
++  }
 +  // If this block already belongs to a LIVE region -- formed at the containing function, its members
 +  // wired at the attach -- attach to that region instead of rooting a second one here.
 +  if (nanobox_jit_aot && (nanobox_jit_aot_detform & 4)) {
@@ -7980,7 +8134,7 @@ index 000000000..8162d194c
 +    if (!nanobox_dbg_mode && !nanobox_jit_aot) {
 +      unsigned nreal0 = 0; Bit64u tkey = nanobox_jit_hash(e, nreal0);
 +      unsigned pre = hook_lookup((unsigned)(tkey & 0xffffffffu), (unsigned)(tkey >> 32));
-+      if (pre) { delete reg; nanobox_jit_attach(e, pre, NULL); nanobox_jit_cache_put(tkey, pre, 0, NULL); if (jitcache_count == 0) { e->jitfn = 0; hook_release(pre); } return; }
++      if (pre) { delete reg; nanobox_jit_attach(e, pre, NULL, tkey); nanobox_jit_cache_put(tkey, pre, 0, NULL); if (jitcache_count == 0) { e->jitfn = 0; hook_release(pre); } return; }
 +    }
 +    if (nanobox_jit_compile_one(e, reg, reg->key)) {
 +      nanobox_aot_stats[9]++;
@@ -8147,10 +8301,10 @@ index 000000000..8162d194c
 +}
 diff --git a/bochs/nanobox_jit.h b/bochs/nanobox_jit.h
 new file mode 100644
-index 000000000..2428a997b
+index 000000000..768c89608
 --- /dev/null
 +++ b/bochs/nanobox_jit.h
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,69 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT — public interface used by the CPU loop and the iCache.
 +//
@@ -8186,6 +8340,13 @@ index 000000000..2428a997b
 +extern unsigned nanobox_jit_aot;
 +
 +void nanobox_jit_maybe_compile(bxICacheEntry_c *e);   // compile e (called by cpu_loop when e got hot)
++// two-tier emission (work/prof/tier.md): tier 0 is the compact call form
++extern unsigned nanobox_jit_tier;          // bit 0 tier-0 codegen, bit 1 promote to tier 1 when hot
++extern unsigned nanobox_jit_tier1_thr;
++extern Bit64u nanobox_tier_stats[4];
++extern bxICacheEntry_c *nanobox_t0_running;   // set by a tier-0 function's prologue: which entry is executing
++extern bxICacheEntry_c *nanobox_t0_promote;   // cpu_loop: recompile this entry at tier 1 next time it dispatches it
++void nanobox_jit_promote(bxICacheEntry_c *e);
 +void nanobox_jit_entry_invalidate(bxICacheEntry_c *e); // e is being reused/invalidated: drop its code
 +void nanobox_jit_flush_all(void);                      // iCache flushed: drop everything
 +void nanobox_jit_after_decode(bxICacheEntry_c *e);     // trace freshly decoded: attach cached code
