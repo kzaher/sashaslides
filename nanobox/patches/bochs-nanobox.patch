@@ -1403,10 +1403,10 @@ index 000000000..0c5787cb0
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..67797d143
+index 000000000..1e7376ce5
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,5108 @@
+@@ -0,0 +1,5310 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -1562,6 +1562,8 @@ index 000000000..67797d143
 +NB_EXPORT(nanobox_set_jit_spill) void nanobox_set_jit_spill(unsigned mask) { nanobox_jit_spill = mask; }
 +NB_EXPORT(nanobox_set_jit_flags) void nanobox_set_jit_flags(unsigned mask) { nanobox_jit_flags = mask; }
 +NB_EXPORT(nanobox_set_jit_linkdirect) void nanobox_set_jit_linkdirect(unsigned on) { nanobox_jit_linkdirect = on; }
++extern unsigned nanobox_jit_outline;
++NB_EXPORT(nanobox_set_jit_outline) void nanobox_set_jit_outline(unsigned mask) { nanobox_jit_outline = mask; }
 +// flags-work counters: static (compile-time sites) 0..15, dynamic (level 3) 16..31
 +enum { FS_PENDING = 0, FS_DIRECT, FS_MAT_INLINE, FS_MAT_HELPER, FS_RT_CHECK, FS_EDGE_DROP, FS_EDGE_PASS, FS_EDGE_MAT, FS_COND_TOTAL, FS_COND_PENDING, FS_JCC_ALU, FS_JCC_ALU_DIRECT, FS_MAT_EXIT, FS_MAT_READ, FS_MAT_EDGE_RT, FS_BLOCKS_SLOW, FS_FWD_BR = 31,
 +       FD_DIRECT = 16, FD_MAT_INLINE, FD_HELPER, FD_PENDING, FD_EDGE_DROP, FD_EDGE_PASS, FD_EDGE_MAT, FD_PROBE_FULL, FD_PROBE_C, FD_PROBE_D, FD_MAT_EXIT, FD_MAT_READ, FD_RT_CHECK, FD_FN_ENTRY, FD_LINK_TAGS, FD_31 };
@@ -1590,6 +1592,20 @@ index 000000000..67797d143
 +  BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx = rip;
 +  BX_CPU_THIS_PTR prev_rip = prev;
 +  BX_CPU_THIS_PTR icount = ic;
++}
++// Handler-step prologue/epilogue out of line (nanobox_jit_outline bit 3): the sync above plus the
++// nanobox_trace_end clear in front of a Bochs handler, and the "did the trace end / did an async
++// event arrive" test behind it. Every non-templated instruction and every deopt arm inlined both.
++static void nanobox_helper_step_pre(Bit64u rip, Bit64u prev, Bit64u ic)
++{
++  BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx = rip;
++  BX_CPU_THIS_PTR prev_rip = prev;
++  BX_CPU_THIS_PTR icount = ic;
++  nanobox_trace_end = 0;
++}
++static unsigned nanobox_helper_step_post(void)
++{
++  return (unsigned) nanobox_trace_end | (unsigned) BX_CPU_THIS_PTR async_event;
 +}
 +// Deferred lazy flags (nanobox_jit_flags bit 0): materialise the pending state {kind, op1, op2,
 +// res} straight into oszapc with Bochs' own macros (bit-identical to the handlers by
@@ -1632,6 +1648,97 @@ index 000000000..67797d143
 +}
 +}
 +static Bit64u nanobox_region_stats[32];   // region formation census (see nanobox_jit_region_stat)
++
++/////////////////////////////////////////////////////////////////////////
++// Outlined DTLB probe (work/j/outline).
++//
++// Every memory site used to inline its whole miss path: the second probe-cache candidate, the DTLB
++// lookup and the refill that recomputes the folded tags — ~90 wasm ops that only ever run when the
++// first candidate missed, repeated at ~830 k sites. It is the same code everywhere, so it moves
++// here, into one C++ helper per (size, permission, write-stamp) shape. A site keeps candidate 1
++// inline (the hot case: same page as its last access) and, on a miss, emits a call plus the three
++// loads of the values the probe cache has to keep in wasm locals.
++//
++// The helper reproduces the emitted sequence exactly, in the same order, so the change is
++// identity-preserving: same DTLB index, same tag/permission tests, same folded tags, same
++// write-stamp decrement (and the same fine-granularity test in front of it).
++//   returns 0 = probe succeeded (nanobox_probe_out filled), 1 = take the slow path
++struct NbProbeOut { Bit64u tagR, tagW; Bit32u host, freeb; };
++NbProbeOut nanobox_probe_out;
++unsigned nanobox_jit_outline = 1 | 2 | 8;   // bit 0 outlined DTLB probe + refill, 1 out-of-line syncBefore,
++// 2 outlined direct-call site check (OFF: 3.6 % of the emitted bytes but +20 % on the AOT call+ret benchmark),
++// 3 outlined handler-step prologue/epilogue, 4 (off) AOT: keep self-looping successors inside a region,
++// 5 (off) keep a slimmed second probe candidate inline (measured: 3 % of the misses, not worth 13 points of size)
++
++template <unsigned SIZE, unsigned BIT, bool STAMP>
++static BX_CPP_INLINE unsigned nanobox_probe_impl(Bit64u la, Bit64u acm, unsigned upl)
++{
++  // acm / upl come from the caller's locals, NOT from the CPU struct: the emitted probe read them
++  // once at trace entry (L_acm / L_upl) and a helper reading them fresh would be a different
++  // program wherever they changed under a trace that kept running (agy diverged on exactly that).
++  if (nanobox_jit_level >= 3) nanobox_flags_stats[FD_PROBE_FULL]++;
++  bx_TLB_entry *e = &BX_CPU_THIS_PTR DTLB.entry[(((Bit32u) la + (SIZE - 1)) & ((BX_DTLB_SIZE - 1) << 12)) >> 12];
++  const Bit64u want = SIZE > 1 ? (la & (LPF_MASK | (acm & (SIZE - 1)))) : (la & LPF_MASK);
++  if (e->lpf != want) return 1;
++  if (!(e->accessBits & (BIT << upl))) return 1;
++  const Bit32u host = (Bit32u) e->hostPageAddr;
++  const Bit64u ppf = (Bit64u) e->ppf;
++  const Bit32u *fgm = pageWriteStampTable.nanobox_fgm();
++  const unsigned freeb = fgm[((Bit32u) ppf) >> 12] == 0;
++  const Bit64u W = (acm == 0) ? (la & LPF_MASK) : (Bit64u) -1;
++  const Bit32u pb = e->accessBits >> upl;
++  nanobox_probe_out.tagR = (pb & 1) ? W : (Bit64u) -1;
++  nanobox_probe_out.tagW = (pb & 4) ? (freeb ? W : (Bit64u) -1) : (Bit64u) -1;
++  nanobox_probe_out.host = host;
++  nanobox_probe_out.freeb = freeb;
++  if (STAMP && !freeb) {                      // page carries iCache write stamps: the SMC dance
++    const Bit64u pA = ppf | (la & 0xfff);
++    if (fgm[((Bit32u) pA) >> 12]) {
++      if (nanobox_jit_level >= 3) nanobox_stats.link_fail[6]++;
++      pageWriteStampTable.decWriteStamp((bx_phy_address) pA, SIZE);
++    }
++  }
++  return 0;
++}
++extern "C" {
++#define NB_PROBE_FN(name, SIZE, BIT, STAMP) \
++  static unsigned name(Bit64u la, Bit64u acm, unsigned upl) { return nanobox_probe_impl<SIZE, BIT, STAMP>(la, acm, upl); }
++NB_PROBE_FN(nanobox_probe_r1,   1, 1, false)
++NB_PROBE_FN(nanobox_probe_r2,   2, 1, false)
++NB_PROBE_FN(nanobox_probe_r4,   4, 1, false)
++NB_PROBE_FN(nanobox_probe_r8,   8, 1, false)
++NB_PROBE_FN(nanobox_probe_r16, 16, 1, false)
++NB_PROBE_FN(nanobox_probe_r32, 32, 1, false)
++NB_PROBE_FN(nanobox_probe_w1,   1, 4, false)
++NB_PROBE_FN(nanobox_probe_w2,   2, 4, false)
++NB_PROBE_FN(nanobox_probe_w4,   4, 4, false)
++NB_PROBE_FN(nanobox_probe_w8,   8, 4, false)
++NB_PROBE_FN(nanobox_probe_w16, 16, 4, false)
++NB_PROBE_FN(nanobox_probe_w32, 32, 4, false)
++NB_PROBE_FN(nanobox_probe_s1,   1, 4, true)
++NB_PROBE_FN(nanobox_probe_s2,   2, 4, true)
++NB_PROBE_FN(nanobox_probe_s4,   4, 4, true)
++NB_PROBE_FN(nanobox_probe_s8,   8, 4, true)
++NB_PROBE_FN(nanobox_probe_s16, 16, 4, true)
++NB_PROBE_FN(nanobox_probe_s32, 32, 4, true)
++#undef NB_PROBE_FN
++}
++// index of `size` in the helper tables, or -1 = no helper (the site keeps the inline probe).
++// The AVX 256-bit accessors probe with size 32; mapping them onto the 16-byte helper is exactly the
++// bug that made agy diverge while codex stayed identical, so unknown sizes must NOT be folded in.
++static int nanobox_probe_size_idx(unsigned size)
++{
++  switch (size) { case 1: return 0; case 2: return 1; case 4: return 2; case 8: return 3; case 16: return 4; case 32: return 5; default: return -1; }
++}
++static unsigned nanobox_probe_fnidx(unsigned size, unsigned bit, unsigned stamp)
++{
++  const int s = nanobox_probe_size_idx(size);
++  if (s < 0) return 0;
++  if (bit == 1) { static unsigned f[6] = { (unsigned)(uintptr_t) nanobox_probe_r1, (unsigned)(uintptr_t) nanobox_probe_r2, (unsigned)(uintptr_t) nanobox_probe_r4, (unsigned)(uintptr_t) nanobox_probe_r8, (unsigned)(uintptr_t) nanobox_probe_r16, (unsigned)(uintptr_t) nanobox_probe_r32 }; return f[s]; }
++  if (!stamp)   { static unsigned f[6] = { (unsigned)(uintptr_t) nanobox_probe_w1, (unsigned)(uintptr_t) nanobox_probe_w2, (unsigned)(uintptr_t) nanobox_probe_w4, (unsigned)(uintptr_t) nanobox_probe_w8, (unsigned)(uintptr_t) nanobox_probe_w16, (unsigned)(uintptr_t) nanobox_probe_w32 }; return f[s]; }
++  static unsigned f[6] = { (unsigned)(uintptr_t) nanobox_probe_s1, (unsigned)(uintptr_t) nanobox_probe_s2, (unsigned)(uintptr_t) nanobox_probe_s4, (unsigned)(uintptr_t) nanobox_probe_s8, (unsigned)(uintptr_t) nanobox_probe_s16, (unsigned)(uintptr_t) nanobox_probe_s32 };
++  return f[s];
++}
 +
 +// PCMPISTRI data path (cpu/sse_string.cc): index + flag bits, the JIT applies RCX and the lazy flags
 +Bit32u bx_nanobox_pcmpistri(const BxPackedXmmRegister *op1, const BxPackedXmmRegister *op2, Bit8u imm8);
@@ -1863,6 +1970,34 @@ index 000000000..67797d143
 +  s->va = va; s->cr3 = (Bit64u) BX_CPU_THIS_PTR cr3;
 +  s->ent = (Bit32u)(uintptr_t) e; s->pa = (Bit64u) pa;
 +  s->fn = e->jitfn; s->arg = e->jitarg; s->ilen = e->i[0].ilen(); s->miss = 0;
++}
++
++// Outlined direct-call site check (nanobox_jit_outline bit 2). Every CALL_Jq inlined the same
++// ~40-op validity test (site address, address space, the callee's iCache entry and its translation)
++// plus the cold arm that resolves or counts down. It is the same code at every call site, so it
++// lives here: the site emits `local.get site; local.get target; call` and gets the callee's
++// function index (0 = take the ordinary exit path). Byte for byte the emitted test, including its
++// unconditional (non-short-circuiting) loads through a possibly-zero entry pointer -- hence the
++// volatile integer-to-pointer reads rather than a bxICacheEntry_c *.
++static unsigned nanobox_dcall_check(unsigned sitep, Bit64u va)
++{
++  NbDcallSite *s = (NbDcallSite *)(uintptr_t) sitep;
++  const Bit64u epa = *(volatile Bit64u *)(uintptr_t)(s->ent + ICE_OFF(pAddr));
++  const Bit32u ejf = *(volatile Bit32u *)(uintptr_t)(s->ent + ICE_OFF(jitfn));
++  const unsigned stale = (unsigned)(s->va != va) | (unsigned)(s->cr3 != (Bit64u) BX_CPU_THIS_PTR cr3)
++                       | (unsigned)(epa != s->pa) | (unsigned)(ejf != s->fn);
++  if (stale) {
++    if (s->miss == 0) nanobox_dcall_resolve(sitep, va);
++    else { s->miss--; s->fn = 0; }   // stale: its slot must not be used
++  }
++  // ... and the host-stack depth guard, which was two more inline loads at every call site
++  return nanobox_dcall_depth < nanobox_dcall_max ? s->fn : 0;
++}
++// ... and the return side: leave the direct-call frame and read the address the callee returned to.
++static Bit64u nanobox_dcall_after(void)
++{
++  nanobox_dcall_depth--;
++  return nanobox_dcall_ret;
 +}
 +
 +struct TraceCompiler {
@@ -2366,7 +2501,7 @@ index 000000000..67797d143
 +  // icount = icount0 + k. `clear` as in spillAll.
 +  void syncBefore(unsigned k, bool clear) {
 +    spillAll(clear);
-+    if (spillSyncCall()) { // one call instead of three inline stores (size only: the slow path pays a call)
++    if (spillSyncCall() || outlineSlow()) { // one call instead of three inline stores (the slow path pays a call, every site saves ~7 ops)
 +      pushVA(off[k + 1]); pushVA(off[k]); pushIcBase(); if (k) { em->i64c(k); em->op(I64_ADD); }
 +      em->call(fn(FNIDX(&nanobox_helper_sync), "lll>v"));
 +      return;
@@ -2563,6 +2698,11 @@ index 000000000..67797d143
 +    CacheState s0 = snapshot();
 +    profCount(&nanobox_region_stats[28]);
 +    em->get(L_regp); em->i32c((int32_t)(REGION_OFF(dcall[0]) + curBlock * sizeof(NbDcallSite))); em->op(I32_ADD); em->set(sp);
++    if (outlineDcall()) {
++      // the whole validity test + cold arm out of line (nanobox_dcall_check)
++      em->get(sp); em->get(t0); em->call(fn(FNIDX(&nanobox_dcall_check), "il>i")); em->tee(fnl);
++      iff();   // fn != 0: translated, resolved and there is room on the host stack
++    } else {
 +    // stale site? (first execution, another address space, translations released since)
 +    em->get(sp); em->mem(I64_LOAD, DC_OFF(va), 3); em->get(t0); em->op(I64_NE);
 +    em->get(sp); em->mem(I64_LOAD, DC_OFF(cr3), 3); em->i32c(0); em->mem(I64_LOAD, ADDR(BX_CPU_THIS_PTR cr3), 3); em->op(I64_NE); em->op(I32_OR);
@@ -2588,6 +2728,7 @@ index 000000000..67797d143
 +    em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_depth), 2); em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_max), 2); em->op(I32_GE_U); em->op(I32_OR);
 +    em->op(I32_EQZ);
 +    iff();
++    }
 +      spillAll(true);
 +      // RIP and icount go in the call, not through the CPU struct; prev_rip stays because the callee
 +      // may fault before its first syncBefore is reached (exception() reads it out of memory).
@@ -2600,8 +2741,11 @@ index 000000000..67797d143
 +      em->get(t0); em->get(sp); em->mem(I32_LOAD, DC_OFF(ilen), 2); em->op(I64_EXTEND_I32_U); em->op(I64_ADD);   // RIP: past the callee's first instruction
 +      pushIcBase(); em->i64c(k + 1); em->op(I64_ADD);                                                            // icount base
 +      em->get(fnl); em->call_indirect(m.funcTypeIdx);
-+      em->i32c(0); em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_depth), 2); em->i32c(-1); em->op(I32_ADD); em->mem(I32_STORE, ADDR(nanobox_dcall_depth), 2);
-+      em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_dcall_ret), 3); em->set(t1);
++      if (outlineDcall()) { em->call(fn(FNIDX(&nanobox_dcall_after), ">l")); em->set(t1); }
++      else {
++        em->i32c(0); em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_dcall_depth), 2); em->i32c(-1); em->op(I32_ADD); em->mem(I32_STORE, ADDR(nanobox_dcall_depth), 2);
++        em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_dcall_ret), 3); em->set(t1);
++      }
 +      em->get(t1); pushVA(off[k + 1]); em->op(I64_NE);
 +      iff(); profCount(&nanobox_region_stats[31]); em->ret(); endb();
 +      em->i32c(0); em->i64c(0); em->mem(I64_STORE, ADDR(nanobox_dcall_ret), 3);
@@ -2781,9 +2925,54 @@ index 000000000..67797d143
 +  // Emit the DTLB probe for the linear address in local `la` and access `bit` (1=read, 4=write).
 +  // On success leaves the TLB entry pointer in T32[0] and falls through; on failure branches to
 +  // `slowDepth`.
-+  void tlbProbe(uint32_t la, unsigned size, unsigned bit, uint32_t slowDepth, unsigned stampSize = 0) {
++  bool outlineProbe() const { return (nanobox_jit_outline & 1) != 0 && nanobox_tlbfold != 0; }
++  bool outlineSlow() const { return (nanobox_jit_outline & 2) != 0; }
++  bool outlineDcall() const { return (nanobox_jit_outline & 4) != 0; }
++  bool outlineStep() const { return (nanobox_jit_outline & 8) != 0; }
++  bool outlineProbe2() const { return (nanobox_jit_outline & 32) != 0 && nanobox_jit_probe2 != 0; }   // keep the (slimmed) second probe candidate inline
++  // Outlined form (nanobox_jit_outline bit 0): candidate 1 stays inline, everything behind it — the
++  // second candidate, the DTLB lookup, the refill and the write-stamp dance — is one call into
++  // nanobox_probe_* plus the three loads of the state the probe cache keeps in locals.
++  void tlbProbeOutlined(uint32_t la, unsigned size, unsigned bit, uint32_t slowDepth, unsigned stampSize, bool needFree) {
++    const uint32_t tagC = (bit == 4) ? C_tagW : C_tagR;
++    const uint32_t tagD = (bit == 4) ? D_tagW : D_tagR;
++    blk();   // O: ends after the probe; a cache hit branches here directly
++      blk(); // A: candidate 1
++        em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(tagC); em->op(I64_NE); em->br_if(0);
++        if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
++        profCount(&nanobox_flags_stats[FD_PROBE_C]);
++        em->br(1);
++      endb();
++      if (outlineProbe2()) {
++        // second candidate, still inline but slimmed: with the refill outlined the entry is only
++        // (tagR, tagW, host) -- ppf and the stamp-free bit live in the helper now, so promoting it
++        // is three swaps instead of five. It exists because a site that alternates between two
++        // pages would otherwise pay the helper call on every access.
++        blk();
++          em->get(la); em->i64c((Bit64s)(Bit64u) LPF_MASK); em->op(I64_AND); em->get(tagD); em->op(I64_NE); em->br_if(0);
++          if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->tee(P_off); em->i32c(0x1000 - size); em->op(I32_GT_U); em->br_if(0); }
++          em->get(C_tagR); em->get(D_tagR); em->set(C_tagR); em->set(D_tagR);
++          em->get(C_tagW); em->get(D_tagW); em->set(C_tagW); em->set(D_tagW);
++          em->get(C_host); em->get(D_host); em->set(C_host); em->set(D_host);
++          profCount(&nanobox_flags_stats[FD_PROBE_D]);
++          em->br(1);
++        endb();
++      }
++      em->get(la); acmGet(); em->get(L_upl); em->call(fn(nanobox_probe_fnidx(size, bit, stampSize ? 1 : 0), "lli>i"));
++      em->br_if(slowDepth + 1);
++      if (outlineProbe2()) { em->get(C_tagR); em->set(D_tagR); em->get(C_tagW); em->set(D_tagW); em->get(C_host); em->set(D_host); }   // the page we are replacing becomes the second entry
++      em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_probe_out.tagR), 3); em->set(C_tagR);
++      em->i32c(0); em->mem(I64_LOAD, ADDR(nanobox_probe_out.tagW), 3); em->set(C_tagW);
++      em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_probe_out.host), 2); em->set(C_host);
++      if (needFree) { em->i32c(0); em->mem(I32_LOAD, ADDR(nanobox_probe_out.freeb), 2); em->set(C_free); }
++      if (size > 1) { em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->set(P_off); }
++    endb();
++    if (stampSize) needAsyncCheck = true;   // decWriteStamp -> handleSMC sets BX_ASYNC_EVENT_STOP_TRACE
++  }
++  void tlbProbe(uint32_t la, unsigned size, unsigned bit, uint32_t slowDepth, unsigned stampSize = 0, bool needFree = false) {
 +    const bool fold = (nanobox_tlbfold != 0);
 +    const uint32_t tagC = (bit == 4) ? C_tagW : C_tagR;
++    if (outlineProbe() && nanobox_probe_size_idx(size) >= 0) { tlbProbeOutlined(la, size, bit, slowDepth, stampSize, needFree); return; }
 +    const uint32_t tagD = (bit == 4) ? D_tagW : D_tagR;
 +    // Page cache: same page as the last successful probe, access fits the page, permission bit
 +    // present, and no alignment check pending -> reuse (skips the TLB entry lookup entirely).
@@ -3212,6 +3401,15 @@ index 000000000..67797d143
 +  // reloads / rebasing are emitted).
 +  void emitHandlerStep(unsigned k, bool last, bool cont = true) {
 +    profCount(&nanobox_stats.link_fail[7]);
++    if (outlineStep()) {
++      spillAll(true);
++      pushVA(off[k + 1]); pushVA(off[k]); pushIcBase(); if (k) { em->i64c(k); em->op(I64_ADD); }
++      em->call(fn(FNIDX(&nanobox_helper_step_pre), "lll>v"));
++      csInvalidate();
++      pushInsPtr(k);
++      em->call(fn(FNIDX(ins[k].execute1), "i>v"));
++      em->call(fn(FNIDX(&nanobox_helper_step_post), ">i"));
++    } else {
 +    syncBefore(k, true);
 +    csInvalidate();
 +    em->i32c(0); em->i32c(0); em->mem(I32_STORE8, ADDR(nanobox_trace_end), 0);
@@ -3222,6 +3420,7 @@ index 000000000..67797d143
 +    em->i32c(0); em->mem(I32_LOAD8_U, ADDR(nanobox_trace_end), 0);
 +    em->i32c(0); em->mem(I32_LOAD, ADDR(BX_CPU_THIS_PTR async_event), 2);
 +    em->op(I32_OR);
++    }
 +    if (last || !cont) { em->drop(); profCount(&nanobox_stats.link_fail[5]); }
 +    else {
 +      iff(); profCount(&nanobox_stats.link_fail[5]); em->ret(); endb();
@@ -4234,7 +4433,7 @@ index 000000000..67797d143
 +      em->get(cnt); em->i32c(0); em->mem(I32_LOAD, nanobox_pc_system_access::countdownAddr(), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GT_U); em->br_if(0);
 +      // v2h_write_byte(rdi): DTLB hit with write permission; the page must be free of code marks
 +      // (the interpreter would decWriteStamp the whole page and go on: leave that to it)
-+      tlbProbe(la, 1, 4, 0);
++      tlbProbe(la, 1, 4, 0, 0, true);
 +      em->get(C_free); em->op(I32_EQZ); em->br_if(0);
 +      pushHostAddr(la); em->set(hd);
 +      if (movs) {
@@ -5338,7 +5537,7 @@ index 000000000..67797d143
 +      // whole span inside one page; qword aligned as far as the alignment-check mask cares
 +      em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->i32c(0x1000 - span); em->op(I32_GT_U); em->br_if(0);
 +      acmGet(); em->get(la); em->i64c(7); em->op(I64_AND); em->op(I64_AND); em->i64c(0); em->op(I64_NE); em->br_if(0);
-+      tlbProbe(la, 8, push ? 4 : 1, 0);
++      tlbProbe(la, 8, push ? 4 : 1, 0, 0, push);
 +      if (push) { em->get(C_free); em->op(I32_EQZ); em->br_if(0); } // stack page carries code marks: per-instruction path does the SMC dance
 +      for (unsigned i = 0; i < cnt; i++) {
 +        unsigned kk = k + i;
@@ -5832,6 +6031,9 @@ index 000000000..67797d143
 +      if (totalInstr + sn > NB_REGION_MAX_INSTR) { nanobox_region_stats[14]++; continue; }
 +      // a trace that branches back to its own start is better off as a single-trace loop (registers
 +      // stay in locals across iterations); inside a region it would go through the dispatch loop
++      // (nanobox_jit_outline bit 4, AOT only: keep them -- with relaxed in-region boundaries the
++      // dispatch loop is FASTER than the standalone self-looping trace, see work/prof/outline.md)
++      if (!((nanobox_jit_outline & 16) && nanobox_jit_aot))
 +      { Bit64s st[4]; unsigned snt; nanobox_direct_targets(se, sn, 0, st, snt); bool self = false; for (unsigned q2 = 0; q2 < snt; q2++) if (st[q2] == 0) self = true; if (self) { nanobox_region_stats[15]++; continue; } }
 +      totalInstr += sn;
 +      src[nb] = se; boffs[nb] = (Bit32s) roff; bpage[nb] = p; pas[nb] = pa; lens[nb] = se->tlen; nb++;
@@ -6585,7 +6787,7 @@ index 000000000..2428a997b
 +#endif
 diff --git a/bochs/nanobox_wasm.h b/bochs/nanobox_wasm.h
 new file mode 100644
-index 000000000..8ff99ac99
+index 000000000..e695d4ffb
 --- /dev/null
 +++ b/bochs/nanobox_wasm.h
 @@ -0,0 +1,511 @@
@@ -6710,7 +6912,7 @@ index 000000000..8ff99ac99
 +// -- module builder -------------------------------------------------------------------------------
 +class Module {
 +public:
-+  enum { MAX_TYPES = 32, MAX_IMPORTS = 512 };
++  enum { MAX_TYPES = 64, MAX_IMPORTS = 512 };   // outline: the shared helpers add signatures; addType() has no bounds check, so keep headroom
 +  FuncType types[MAX_TYPES]; uint32_t ntypes;
 +  struct Import { uint32_t typeIdx; uint32_t key; } imports[MAX_IMPORTS]; uint32_t nimports;
 +  uint32_t importKeys[MAX_IMPORTS]; // e.g. Bochs function-table index of the imported function

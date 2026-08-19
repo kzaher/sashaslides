@@ -1486,3 +1486,65 @@ with `NANOBOX_AOT_THRESHOLD=256` gives boot 6.7 s, median 15 ms, max 138 ms and 
 instructions in the session -- 93 % below the trace JIT's 202 M. If you keep it, the switch must
 release every pre-switch translation (the modes give a compiled function different wasm signatures)
 AND force a fresh link function, or the first post-switch call traps on a signature mismatch.
+
+### T.1 Cold paths outlined: emitted code down 43-46 % (2026-08-19)
+
+The 510-emitted / 30-executed problem: every memory site carried its own private copy of the DTLB miss
+path, the write-stamp dance, the spill and the handler-step prologue. Those are now **shared C++
+helpers in the engine**, imported by every JIT module through the existing import-by-table-index path
+(`NANOBOX_OUTLINE=<mask>` / `nanobox_set_jit_outline`, default 1|2|8): bit 0 the whole DTLB miss path
+(only probe candidate 1 stays inline; a miss is `call` + `br_if` + 3 loads), bit 1 `syncBefore`'s
+stores, bit 3 the handler-step prologue/epilogue. Bit 2 (the direct-call site check) is implemented and
+left OFF: +2.8 ns per call+ret for 3.6 % of the bytes.
+
+| | before | after |
+|---|---|---|
+| default engine, emitted template bytes | 28.0 MB | **15.1 MB (-46.1 %)** |
+| AOT mode | 33.0 MB | **18.7 MB (-43.3 %)** |
+| whole-kernel artifact | 291.2 MB / 9.0 s | **191.6 MB (-34.2 %) / 6.8 s** |
+
+Per site: `MOV_GqEq` 387 -> 172 B, `MOV_EqGq` 157 -> 64, `PUSH_Eq` 440 -> 178, `POP_Eq` 407 -> 190,
+`CALL_Jq` 599 -> 296, `RET_Op64` 559 -> 478. Speed is flat everywhere except **+15 % on call+ret and
++5.8 % on default-engine boot**, and that cost is entirely explained below. Gate green on the merged
+tree (`IDENTITY: identical (codex + agy)`, `BISECT: no divergence`), guest verified, fib loop unchanged
+at 0.58 ns/iteration.
+
+**The identity gate caught a real miscompile in this work**: the first run came back codex identical,
+**agy DIFFERENT**. AVX-256 accessors probe with `size == 32`; the new helper table stopped at 16, so
+32-byte probes silently used the 16-byte helper -- wrong DTLB index, wrong alignment mask, wrong
+write-stamp length. Fixed with 32-byte helpers plus a size lookup that returns -1 for unknown sizes so
+they keep the inline probe. **codex alone never finds this**; two guests in the gate is what did.
+
+### T.2 48 % of memory accesses miss the probe cache (2026-08-19)
+
+Level-3 census over a codex session (`NANOBOX_PROBE_STAT=1`): candidate 1 hits **118.4 M**, candidate 2
+hits **3.7 M**, full DTLB lookups **112.1 M** -- **48 % of all memory accesses miss**. The probe cache is
+one tag pair per COMPILED FUNCTION, so two memory sites in the same loop evict each other. That is why
+outlining the miss path costs anything at all: the outlined path is not cold, it is taken half the
+time, at one cross-module call (~1.7 ns) each.
+
+Adding a second global candidate does not help (it catches 3 % of misses and costs 11 points of size --
+measured and rejected). **Per-SITE tag pairs are the fix**, and they are affordable now that locals are
+cheap in emitted bytes: a `local.get` is 2 bytes where the inline miss path was ~45 instructions.
+
+### T.3 Is "everything precompiled, nothing interpreted" reachable? (2026-08-19)
+
+One build, back to back (`thr` = JIT threshold, `interp` = in-run interpreted instructions):
+
+| | thr | detform | artifact | boot | keys med/max | wasm | kernel served | user served | interpreted |
+|---|---|---|---|---|---|---|---|---|---|
+| **A** (shipped) | 2000 | off | none | **7.0 s** | 11/42 ms | 30 MB | -- | -- | 193.8 M |
+| **B** | 1 | off | none | 22.7 s | 18/158 ms | 349 MB | 0 / 34,461 | 0 / 82,070 | **1.7 M** |
+| **C** | 1 | on | kernel | 26.3 s | 17/157 ms | 349 MB | 14,413 / 6,840 = **67.8 %** | 73 / 91,949 | 1.6 M |
+| **D** | 2000 | on | kernel | 7.7 s | 14/51 ms | **22 MB** | 2,535 / 729 = 77.7 % | 11 / 4,711 | 277.6 M |
+
+**The property is reachable**: threshold 1 removes **99.1 %** of the interpreter's work (193.8 M ->
+1.7 M). It costs 15.7 s of boot and 319 MB. **The deterministic former makes matching work** (a control
+row with the same artifact and detform off serves 11.6 %; with it, 67.8 %; key agreement 99.8 %) **but
+cannot buy the boot back, because the kernel is not where the lookups are**: 34,461 kernel against
+82,070 user-space, and the artifact is kernel-only. A second control (function bound, no eager sweep)
+collapses to 17.4 % serve without recovering boot, so the sweep is what makes the keys line up.
+
+So: ship row A, keep detform off, and the sequence that would make C shippable is user-space artifact
+coverage first (removes the 82,070 lookups and most of the 349 MB), then a deterministic dedupe (which
+also collapses detform's 118,244 regions back toward 6,500).
