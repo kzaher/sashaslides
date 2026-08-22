@@ -1,0 +1,15 @@
+{
+  "name": "Sashaslides CI",
+  "build": {
+    "dockerfile": "../claude-code/Dockerfile",
+    "context": "../..",
+    "options": ["--platform=linux/amd64"]
+  },
+  "remoteUser": "node",
+  "runArgs": [
+    "--shm-size=2g",
+    "--platform=linux/amd64",
+    "--cap-add=SYS_ADMIN",
+    "--security-opt=apparmor=unconfined"
+  ]
+}
