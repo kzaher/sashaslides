@@ -163,7 +163,11 @@ async function netFetch(req, res) {
     if (isMcp && !responseType.toLowerCase().startsWith("text/event-stream")) {
       const finite = r.body ? Buffer.from(await r.arrayBuffer()) : Buffer.alloc(0);
       out["content-length"] = String(finite.byteLength);
-      res.writeHead(r.status, out); res.end(finite);
+      // A 204 response cannot carry Content-Length. The guest HTTP adapter consequently treats the
+      // successful initialized notification as EOF and rmcp closes before tools/list. A framed empty
+      // 200 has the same success semantics for the MCP client and keeps its reusable transport alive.
+      const downstreamStatus = r.status === 204 ? 200 : r.status;
+      res.writeHead(downstreamStatus, out); res.end(finite);
       let shape = "";
       if (finite.byteLength) try { const j = JSON.parse(finite); shape = ` result=${j.result ? Object.keys(j.result).join(",") : "-"} error=${j.error ? j.error.code : "-"}`; } catch {}
       console.log(`[mcp] ${mcpCall || "?"} finite response after ${Date.now() - streamStarted} ms; ${finite.byteLength} bytes${shape}`);
