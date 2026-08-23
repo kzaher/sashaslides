@@ -41,7 +41,10 @@
       // feedToWorker (which acks), so recomputing at those two points cannot miss a keystroke — and
       // a stale 1 only costs one ordinary round trip.
       attach(server) {
-        const set = () => Atomics.store(flag, 0, server.toWorkerBuf.length || slave.readable ? 1 : 0);
+        const set = () => {
+          Atomics.store(flag, 0, server.toWorkerBuf.length || slave.readable ? 1 : 0);
+          Atomics.notify(flag, 0);
+        };
         slave.onReadable(set);   // registered after the server's own handler, so toWorkerBuf is already filled
         const ack = server.ack.bind(server);
         server.ack = function () { set(); return ack(); };

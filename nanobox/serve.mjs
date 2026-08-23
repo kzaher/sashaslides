@@ -195,7 +195,11 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && p === "/net/fetch") return netFetch(req, res);
   if (req.method === "POST" && p === "/log") return clientLog(req, res);
   if (req.method === "POST" && p === "/jit/upload") return jitUpload(req, res, url);
-  if (p === "/") p = "/index.html";
+  if (p === "/") {
+    res.writeHead(302, { Location: "/sandbox.html?cli=codex&shell=1&aot=1&jit=2%3A2000&bundle=1&cache=1&jitfast=1" });
+    res.end();
+    return;
+  }
   if (p === "/engine/opt/out.wasm.gzip") return serveFile(req, res, ENGINE);
   if (p === "/engine/opt/slim/out.wasm.gzip") return serveFile(req, res, ENGINE.replace(/out\.wasm\.gzip$/, "out-slim.wasm.gzip")); // no boot.iso; not for identity pages
   // network stack + 9p image server (imagemounter.wasm) with nanobox's fix (build-imagemounter.sh:

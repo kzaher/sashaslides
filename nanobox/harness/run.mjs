@@ -31,6 +31,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import zlib from "node:zlib";
 import { WASI, wasi as wasitype, PreopenDirectory, File, Directory } from "@bjorn3/browser_wasi_shim";
+// work/j/addropts: the level-3 address census report, loaded only when the census is switched on
+// (top-level await; the module lives outside harness/ because it is measurement scaffolding).
+const addrCensusReport = process.env.NANOBOX_ADDRCENSUS ? (await import("../work/j/addropts/addrcensus-report.mjs")).addrCensusReport : null;
 
 const argv = process.argv.slice(2);
 if (argv.length === 0) { console.error("usage: run.mjs <out.wasm> [options]"); process.exit(2); }
@@ -63,6 +66,9 @@ for (let i = 1; i < argv.length; i++) {
   else if (a === "--jit-region") opts.jitRegion = v(); // max blocks per region (nanobox_set_jit_region; 0/1 = single traces only)
   else if (a === "--dbg") opts.dbg = v();               // MODE:EVERY[:FROM:TO] trace fingerprint log (see nanobox.cc)
   else if (a === "--dbg-out") opts.dbgOut = v();        // file for the fingerprint log
+  else if (a === "--coldout") opts.coldout = v();          // NANOBOX_COLDOUT mask for THIS side (bisect A/B)
+  else if (a === "--asyncsink") opts.asyncsink = v();      // NANOBOX_ASYNCSINK mask for THIS side (bisect A/B)
+  else if (a === "--newops") opts.newops = v();            // NANOBOX_NEWOPS mask for THIS side (bisect A/B)
   else if (a === "--no-hash") opts.noHash = true;       // skip RAM hashing at markers (timing runs)
   // ---- heap+syscalls oracle (test/identity.sh --criteria heap+syscalls); all three are no-ops on an
   // engine without the oracle exports, and cost nothing when the flags are absent.
@@ -98,6 +104,7 @@ for (let i = 1; i < argv.length; i++) {
   else if (a === "--aot-fnmap") opts.aotFnmap = v();
   else if (a === "--aot-fnmap-user") (opts.aotFnmapUser = opts.aotFnmapUser || []).push(v());   // {base,functions:[off],end} written by tools/aot-user.mjs
   else if (a === "--aot-keys") opts.aotKeys = v();
+  else if (a === "--op-census") opts.opCensus = v();     // per-opcode fast-path vs slow-path census (level 3) -> CSV
   else if (a === "--tpl-bytes") opts.tplBytes = v();           // where the emitted bytes are: total template bytes per opcode (static, no execution counts needed)             // dump (entry address, content key, blocks) for every region formed — diff offline vs runtime (TASKS.md S.3)           // System.map: function boundaries for the AOT former (region = the containing function)                 // marker label that arms the session (default "aot": the guest prints @@NANOBOX-DUMP:aot@@)
   else { console.error("unknown option " + a); process.exit(2); }
 }
@@ -213,7 +220,7 @@ function takeDump(label) {
     rec.ticks = u64(ex.nanobox_ticks_lo(), ex.nanobox_ticks_hi()).toString();
     rec.rip = "0x" + u64(ex.nanobox_rip_lo(), ex.nanobox_rip_hi()).toString(16);
     if (ex.nanobox_jit_region_stat) rec.regions = { formed: ex.nanobox_jit_region_stat(0), blocks: ex.nanobox_jit_region_stat(1), compiled: ex.nanobox_jit_region_stat(2), cacheHits: ex.nanobox_jit_region_stat(3) };
-    if (ex.nanobox_stat) rec.stats = { loops: ex.nanobox_stat(0), longjmps: ex.nanobox_stat(1), traces: ex.nanobox_stat(2), jitTraces: ex.nanobox_stat(3), jitCompiled: ex.nanobox_stat(4), loopbacks: ex.nanobox_stat(5), links: ex.nanobox_stat(6), slow: ex.nanobox_stat(7), linkFail: [8,9,10,11,12,13,14,15].map((i) => ex.nanobox_stat(i)), cache: ex.nanobox_jit_cache_stat ? [ex.nanobox_jit_cache_stat(0), ex.nanobox_jit_cache_stat(1), ex.nanobox_jit_cache_stat(2)] : null };
+    if (ex.nanobox_stat) rec.stats = { loops: ex.nanobox_stat(0), longjmps: ex.nanobox_stat(1), traces: ex.nanobox_stat(2), jitTraces: ex.nanobox_stat(3), jitCompiled: ex.nanobox_stat(4), loopbacks: ex.nanobox_stat(5), links: ex.nanobox_stat(6), slow: ex.nanobox_stat(7), linkFail: [8,9,10,11,12,13,14,15].map((i) => ex.nanobox_stat(i)), cache: ex.nanobox_jit_cache_stat ? [0,1,2,3,4,5,6,7,8,9,10,11].map((i) => ex.nanobox_jit_cache_stat(i)) : null };
   }
   // compile volume so far: splits "what the boot cost" from "what the session cost" (the AOT startup
   // work needs both -- a policy that moves the compiles from the boot into the interactive path is
@@ -738,11 +745,34 @@ function installJitHost(inst) {
   if (opts.jit) {
     const [lvl, thr] = opts.jit.split(":");
     ex.nanobox_set_jit(Number(lvl), Number(thr || 0));
-    if (process.env.NANOBOX_JIT_EAGER && ex.nanobox_set_jit_eager) { ex.nanobox_set_jit_eager(1); console.error("[harness] JIT page-eager sweep on (recording mode)"); }
+    // "0" is a non-empty string, so a bare truthiness test turned NANOBOX_JIT_EAGER=0 ON -- which is
+    // exactly the mistake that made the first attempt at an eager-free recording look like a stall.
+    if (process.env.NANOBOX_JIT_EAGER != null && process.env.NANOBOX_JIT_EAGER !== "0" && ex.nanobox_set_jit_eager) { ex.nanobox_set_jit_eager(1); console.error("[harness] JIT page-eager sweep on (recording mode)"); }
+    // the cold arm completes the instruction and leaves (TASKS.md V.24): bit 0 loads, bit 1 stores
+    if (process.env.NANOBOX_COLDCALL != null && ex.nanobox_set_jit_coldcall) { ex.nanobox_set_jit_coldcall(+process.env.NANOBOX_COLDCALL); console.error(`[harness] JIT cold arm completes and exits, mask ${process.env.NANOBOX_COLDCALL}`); }
+    // async check off the fast path (TASKS.md V.22): bit 0 reads, bit 1 writes, bit 2 stack
+    // templates for instructions that had none (TASKS.md V.23): bit 0 PAUSE, 1 CLD/STD, 2 CLI/STI, 3 SWAPGS
+    if (opts.newops != null && ex.nanobox_set_jit_newops) { ex.nanobox_set_jit_newops(Number(opts.newops)); console.error(`[harness] JIT new templates mask ${opts.newops} (flag)`); }
+    else if (process.env.NANOBOX_NEWOPS != null && ex.nanobox_set_jit_newops) { ex.nanobox_set_jit_newops(Number(process.env.NANOBOX_NEWOPS)); console.error(`[harness] JIT new templates mask ${process.env.NANOBOX_NEWOPS}`); }
+    if (opts.asyncsink != null && ex.nanobox_set_jit_asyncsink) { ex.nanobox_set_jit_asyncsink(Number(opts.asyncsink)); console.error(`[harness] JIT async-check sunk into the cold arms, mask ${opts.asyncsink} (flag)`); }
+    else if (process.env.NANOBOX_ASYNCSINK != null && ex.nanobox_set_jit_asyncsink) { ex.nanobox_set_jit_asyncsink(Number(process.env.NANOBOX_ASYNCSINK)); console.error(`[harness] JIT async-check sunk into the cold arms, mask ${process.env.NANOBOX_ASYNCSINK}`); }
     if (process.env.NANOBOX_LINKDIRECT && ex.nanobox_set_jit_linkdirect) { ex.nanobox_set_jit_linkdirect(1); console.error("[harness] JIT link hop: direct return_call to an import"); }
-    if (process.env.NANOBOX_JIT_MERGE && ex.nanobox_set_jit_merge) { ex.nanobox_set_jit_merge(1); console.error("[harness] JIT merged push/pop runs on"); }
-    if (process.env.NANOBOX_JIT_PROBE2 === "0" && ex.nanobox_set_jit_probe2) { ex.nanobox_set_jit_probe2(0); console.error("[harness] JIT two-entry probe cache OFF (A/B)"); }
     if (process.env.NANOBOX_OUTLINE != null && ex.nanobox_set_jit_outline) { ex.nanobox_set_jit_outline(Number(process.env.NANOBOX_OUTLINE)); console.error(`[harness] JIT outline mask ${process.env.NANOBOX_OUTLINE}`); }
+    // dedicated stack window for PUSH/POP/CALL/RET (docs/aot-size-and-coverage.md item 6); default off
+    if (process.env.NANOBOX_FAULTARM != null && ex.nanobox_set_jit_faultarm) { ex.nanobox_set_jit_faultarm(Number(process.env.NANOBOX_FAULTARM)); console.error(`[harness] JIT fault/exit-arm mask ${process.env.NANOBOX_FAULTARM}`); }
+    if (opts.coldout != null && ex.nanobox_set_jit_coldout) { ex.nanobox_set_jit_coldout(Number(opts.coldout)); console.error(`[harness] JIT cold-arm/exit descriptor mask ${opts.coldout} (flag)`); }
+    else if (process.env.NANOBOX_COLDOUT != null && ex.nanobox_set_jit_coldout) { ex.nanobox_set_jit_coldout(Number(process.env.NANOBOX_COLDOUT)); console.error(`[harness] JIT cold-arm/exit descriptor mask ${process.env.NANOBOX_COLDOUT}`); }
+    // work/j/addropts: direct-map window (NANOBOX_DMAP). bit 0 = identity host-block placement,
+    // bit 1 = emit the window arm. Must be set before the guest boots; the engine returns the mask
+    // it actually accepted (bit 1 is refused when a block is already compacted).
+    if (process.env.NANOBOX_DMAP != null && ex.nanobox_set_jit_dmap) { const got = ex.nanobox_set_jit_dmap(Number(process.env.NANOBOX_DMAP)); console.error(`[harness] JIT direct-map window mask ${process.env.NANOBOX_DMAP} -> accepted ${got}`); }
+    // work/j/addropts: level-3 address census in front of every compiled access (measurement only)
+    if (process.env.NANOBOX_ADDRCENSUS != null && ex.nanobox_set_addrcensus) { ex.nanobox_set_addrcensus(Number(process.env.NANOBOX_ADDRCENSUS)); console.error(`[harness] JIT address census ${process.env.NANOBOX_ADDRCENSUS}`); }
+    if (process.env.NANOBOX_STACKTAG != null && ex.nanobox_set_jit_stacktag) { ex.nanobox_set_jit_stacktag(Number(process.env.NANOBOX_STACKTAG)); console.error(`[harness] JIT stack-window mask ${process.env.NANOBOX_STACKTAG}`); }
+    if (process.env.NANOBOX_FNDUP != null && ex.nanobox_set_jit_fndup) { ex.nanobox_set_jit_fndup(Number(process.env.NANOBOX_FNDUP)); console.error(`[harness] JIT function-copy limit ${process.env.NANOBOX_FNDUP} (0 = share one function per content key)`); }
+    // cache-clear safety (docs plan item 11): 1 = fixed (default), 0 = the pre-fix behaviour, for A/B
+    if (process.env.NANOBOX_JITCLEARFIX != null && ex.nanobox_set_jit_clearfix) { ex.nanobox_set_jit_clearfix(Number(process.env.NANOBOX_JITCLEARFIX)); console.error(`[harness] JIT cache-clear fix ${process.env.NANOBOX_JITCLEARFIX}`); }
+    if (process.env.NANOBOX_JITCACHE_LIMIT != null && ex.nanobox_set_jit_cache_limit) { ex.nanobox_set_jit_cache_limit(Number(process.env.NANOBOX_JITCACHE_LIMIT)); console.error(`[harness] JIT content-cache clear limit ${process.env.NANOBOX_JITCACHE_LIMIT} (debug)`); }
     // two-tier emission (work/prof/tier.md): NANOBOX_JIT_TIER=<mask>[:<tier-1 threshold>]
     if (process.env.NANOBOX_JIT_TIER != null && ex.nanobox_set_jit_tier) {
       const [tm, tt] = String(process.env.NANOBOX_JIT_TIER).split(":");
@@ -758,6 +788,9 @@ function installJitHost(inst) {
     if (opts.aotModeAt) console.error(`[harness] AOT mode DEFERRED to marker ${opts.aotModeAt} (booting on the trace JIT)`);
     else if (process.env.NANOBOX_AOT != null && ex.nanobox_set_jit_aot) { ex.nanobox_set_jit_aot(Number(process.env.NANOBOX_AOT)); console.error(`[harness] JIT AOT mode ${process.env.NANOBOX_AOT}`); }
     if (process.env.NANOBOX_FLAGS != null && ex.nanobox_set_jit_flags) { ex.nanobox_set_jit_flags(Number(process.env.NANOBOX_FLAGS)); console.error(`[harness] JIT flags mask ${process.env.NANOBOX_FLAGS}`); }
+    // AOT tick-exactness (docs/aot-size-and-coverage.md item 12): restore the trace boundaries AOT relaxed,
+    // so the AOT run takes its interrupts where the reference does. Mask, default 0 = unchanged AOT.
+    if (process.env.NANOBOX_TICKEXACT != null && ex.nanobox_set_jit_tickexact) { ex.nanobox_set_jit_tickexact(Number(process.env.NANOBOX_TICKEXACT)); console.error(`[harness] JIT AOT tick-exact mask ${process.env.NANOBOX_TICKEXACT}`); }
     // AOT mode sets threshold 1 (compile at the first touch); the offline translators need the
     // opposite -- the JIT on so the session can drive it, but the BOOT compiling nothing, or the
     // artifact ends up holding a recording of that boot instead of the precompiled code.
@@ -822,7 +855,8 @@ function installJitHost(inst) {
                                    ["NANOBOX_AOT_MINHOT", "nanobox_set_jit_aot_minhot", "successor joins only above this execution count"],
                                    ["NANOBOX_AOT_AHEAD", "nanobox_set_jit_aot_ahead", "decode successors that are not in the iCache yet"],
                                    ["NANOBOX_AOT_TICK", "nanobox_set_jit_aot_tick", "iterations between full syncs on a self-loop back edge"],
-                                   ["NANOBOX_AOT_NOSTACK", "nanobox_set_jit_aot_nostack", "CALL/RET keep the return address on a host shadow stack, nothing is written to the emulated stack"]]) {
+                                   ["NANOBOX_AOT_NOSTACK", "nanobox_set_jit_aot_nostack", "CALL/RET keep the return address on a host shadow stack, nothing is written to the emulated stack"],
+                                   ["NANOBOX_ATTACH", "nanobox_set_jit_attach", "decode-time attach: give a freshly decoded block a translation that already exists (bitmask, docs plan item 4)"]]) {
       if (process.env[env] != null && ex[fn]) { ex[fn](Number(process.env[env])); console.error(`[harness] AOT former: ${env}=${process.env[env]} (${what})`); }
     }
     if (opts.jitDump) fs.mkdirSync(opts.jitDump, { recursive: true });
@@ -855,7 +889,7 @@ function applyAotMode(on) {
                            ["NANOBOX_STACKIFY", "nanobox_set_jit_stackify"],
                            ["NANOBOX_AOT_DEDUPE", "nanobox_set_jit_aot_dedupe"], ["NANOBOX_AOT_MINHOT", "nanobox_set_jit_aot_minhot"],
                            ["NANOBOX_AOT_AHEAD", "nanobox_set_jit_aot_ahead"], ["NANOBOX_AOT_TICK", "nanobox_set_jit_aot_tick"],
-                           ["NANOBOX_AOT_NOSTACK", "nanobox_set_jit_aot_nostack"]])
+                           ["NANOBOX_AOT_NOSTACK", "nanobox_set_jit_aot_nostack"], ["NANOBOX_ATTACH", "nanobox_set_jit_attach"]])
     if (process.env[env] != null && ex[fn]) ex[fn](Number(process.env[env]));
   aotModeMs = performance.now() - t;
   aotModeAtMs = performance.now() - t0;
@@ -1118,10 +1152,13 @@ function finish(code) {
     summary.icount = ic.toString(); summary.mips = +(Number(ic) / 1e6 / (wall / 1000)).toFixed(2);
     summary.ticks = u64(ex.nanobox_ticks_lo(), ex.nanobox_ticks_hi()).toString();
     // final counters, so a window can be isolated by subtracting the ones recorded at a marker/--expect
-    if (ex.nanobox_stat) summary.statsEnd = { traces: ex.nanobox_stat(2), jitTraces: ex.nanobox_stat(3), jitCompiled: ex.nanobox_stat(4), loopbacks: ex.nanobox_stat(5), links: ex.nanobox_stat(6), slow: ex.nanobox_stat(7), linkFail: [8,9,10,11,12,13,14,15].map((i) => ex.nanobox_stat(i)), cache: ex.nanobox_jit_cache_stat ? [ex.nanobox_jit_cache_stat(0), ex.nanobox_jit_cache_stat(1), ex.nanobox_jit_cache_stat(2)] : null };
+    if (ex.nanobox_stat) summary.statsEnd = { traces: ex.nanobox_stat(2), jitTraces: ex.nanobox_stat(3), jitCompiled: ex.nanobox_stat(4), loopbacks: ex.nanobox_stat(5), links: ex.nanobox_stat(6), slow: ex.nanobox_stat(7), linkFail: [8,9,10,11,12,13,14,15].map((i) => ex.nanobox_stat(i)), cache: ex.nanobox_jit_cache_stat ? [0,1,2,3,4,5,6,7,8,9,10,11].map((i) => ex.nanobox_jit_cache_stat(i)) : null };
     // AOT-mode census (engines with the extended stats): in-region transitions, interpreted dispatch, region former counters
     if (ex.nanobox_stat && ex.nanobox_stat(16) >= 0) summary.aot = { intrans: ex.nanobox_stat(16), interpTraces: ex.nanobox_stat(17), interpIcount: ex.nanobox_stat(18), shadowMiss: ex.nanobox_stat(19), census: ex.nanobox_aot_stat ? Array.from({ length: 16 }, (_, i) => ex.nanobox_aot_stat(i)) : null };
+    if (ex.nanobox_jit_attach_stat && ex.nanobox_jit_attach_stat(0) > 0) summary.attachStats = Array.from({ length: 8 }, (_, i) => ex.nanobox_jit_attach_stat(i));
     if (ex.nanobox_jit_region_stat && ex.nanobox_jit_region_stat(16) > 0) summary.regionStats = Array.from({ length: 56 }, (_, i) => ex.nanobox_jit_region_stat(i));
+  if (ex.nanobox_jit_fndup_stat) summary.fndup = Array.from({ length: 4 }, (_, i) => ex.nanobox_jit_fndup_stat(i));
+    if (ex.nanobox_ra_stat && ex.nanobox_ra_stat(0) + ex.nanobox_ra_stat(4) > 0) summary.raStats = Array.from({ length: 24 }, (_, i) => ex.nanobox_ra_stat(i));
     if (ex.nanobox_jit_member_stat) summary.memberMap = { put: ex.nanobox_jit_member_stat(0), hit: ex.nanobox_jit_member_stat(1), miss: ex.nanobox_jit_member_stat(2), resets: ex.nanobox_jit_member_stat(3), used: ex.nanobox_jit_member_stat(4) };
   }
   if (jitState.table) {
@@ -1168,18 +1205,93 @@ function finish(code) {
       const total = cost.reduce((s, c) => s + c[4], 0);
       cost.sort((a, b) => b[4] - a[4]);
       console.error(`[harness] template COST (executed template bytes ${(total / 1e9).toFixed(2)} G): ` + cost.slice(0, 30).map(([n, inst, bpi, ex, tot]) => `${n}:${bpi.toFixed(0)}B/inst x${(ex / 1e6).toFixed(1)}M=${(100 * tot / total).toFixed(1)}%`).join(" "));
+      // per-opcode FAST vs SLOW census (level 3, engines with nanobox_jit_opcensus): which opcodes
+      // leave the fast path. Ranked by the absolute number of slow-path executions, which is what a
+      // redesign would remove.
+      if (ex.nanobox_jit_opcensus) {
+        const S = { DTLB: 0, STK: 1, STKMISS: 2, SLOW: 3, EXIT: 4, TRANS: 5 };
+        const N = 6;
+        const rows = [], sum = new Array(N).fill(0);
+        for (let ia = 0; ia <= nops; ia++) {
+          const c = Array.from({ length: N }, (_, i) => ex.nanobox_jit_opcensus(ia, i));
+          for (let i = 0; i < N; i++) sum[i] += c[i];
+          if (c[S.DTLB] + c[S.STK] + c[S.SLOW] + c[S.EXIT] + c[S.TRANS] === 0) continue;
+          rows.push({ name: ia === nops ? "(no opcode)" : nameOf(ia).replace("BX_IA_", ""),
+                      execs: ia === nops ? 0 : ex.nanobox_jit_opstat(ia, 3), c });
+        }
+        const acc = (r) => r.c[S.DTLB] + r.c[S.SLOW];
+        const pct = (a, b) => (b > 0 ? (100 * a / b).toFixed(1) + "%" : "-");
+        rows.sort((a, b) => (b.c[S.SLOW] + b.c[S.STKMISS]) - (a.c[S.SLOW] + a.c[S.STKMISS]));
+        const accAll = sum[S.DTLB] + sum[S.SLOW];
+        const out = [
+          `[harness] per-opcode fast/slow census (level 3). accesses=${accAll} (dtlb=${sum[S.DTLB]}, slow ${pct(sum[S.SLOW], accAll)}) ` +
+          `stack-window=${sum[S.STK]} (refills ${sum[S.STKMISS]}, ${pct(sum[S.STKMISS], sum[S.STK])}) slow-arm=${sum[S.SLOW]} exits=${sum[S.EXIT]} in-region=${sum[S.TRANS]}`,
+          "  opcode".padEnd(26) + ["executed", "accesses", "dtlb", "slow%", "stkwin", "stkmiss", "slow", "exits", "in-reg"].map((h) => h.padStart(12)).join(""),
+        ];
+        for (const r of rows.slice(0, 40)) {
+          out.push("  " + r.name.padEnd(24) +
+            [r.execs, acc(r), r.c[S.DTLB], pct(r.c[S.SLOW], acc(r)),
+             r.c[S.STK], r.c[S.STKMISS], r.c[S.SLOW], r.c[S.EXIT], r.c[S.TRANS]]
+              .map((v) => String(typeof v === "number" ? Math.round(v) : v).padStart(12)).join(""));
+        }
+        console.error(out.join("\n"));
+        // WHY an access left the fast path (engines with nanobox_jit_opreason). lpf+acm+perm+nohost
+        // is the slow-arm breakdown; stamp counts fast-path accesses on a page carrying iCache
+        // write stamps, which is not a slow-arm reason.
+        if (ex.nanobox_jit_opreason) {
+          const RN = ["lpf", "perm", "nohost", "acm", "stamp"];
+          const rr = [], rsum = RN.map(() => 0);
+          for (let ia = 0; ia <= nops; ia++) {
+            const r = RN.map((_, i) => ex.nanobox_jit_opreason(ia, i));
+            for (let i = 0; i < RN.length; i++) rsum[i] += r[i];
+            const slow = ex.nanobox_jit_opcensus(ia, S.SLOW);
+            if (slow === 0 && r.every((v) => v === 0)) continue;
+            rr.push({ name: ia === nops ? "(no opcode)" : nameOf(ia).replace("BX_IA_", ""), slow, r });
+          }
+          rr.sort((a, b) => b.slow - a.slow);
+          const tot = rr.reduce((a, x) => a + x.slow, 0);
+          const reasonSum = rsum[0] + rsum[1] + rsum[2] + rsum[3];
+          const o2 = [`[harness] per-opcode SLOW-ARM REASONS (level 3). slow-arm entries=${tot}; reasons sum to ${reasonSum} (${tot === reasonSum ? "reconciles" : `delta ${reasonSum - tot}`}); write-stamped accesses=${rsum[4]}`,
+            `[harness] slow-arm by reason: lpf=${rsum[0]} acm=${rsum[3]} perm=${rsum[1]} nohost=${rsum[2]}`,
+            "  opcode".padEnd(24) + ["slow-arm"].concat(RN).map((h) => h.padStart(11)).join(""),
+          ];
+          const pctRow = (r, slow) => RN.map((_, i) => (slow ? (100 * r[i] / slow).toFixed(1) + "%" : "-").padStart(11)).join("");
+          for (const x of rr.slice(0, 24)) {
+            o2.push("  " + x.name.padEnd(22) + [x.slow].concat(x.r).map((v) => String(Math.round(v)).padStart(11)).join(""));
+            o2.push("  " + "".padEnd(22) + "".padStart(11) + pctRow(x.r, x.slow));
+          }
+          console.error(o2.join("\n"));
+          if (opts.opCensus) {
+            const csv2 = ["opcode,slowArm," + RN.join(",")];
+            for (const x of rr) csv2.push([x.name, x.slow].concat(x.r.map((v) => Math.round(v))).join(","));
+            fs.writeFileSync(opts.opCensus.replace(/(\.csv)?$/, "") + "-reasons.csv", csv2.join("\n") + "\n");
+            console.error(`[harness] slow-arm reasons written to ${opts.opCensus.replace(/(\.csv)?$/, "")}-reasons.csv`);
+          }
+        }
+        if (opts.opCensus) {
+          const csv = ["opcode,executed,accesses,dtlb,slowPct,stkwin,stkmiss,slow,exits,inregion"];
+          for (const r of rows) csv.push([r.name, r.execs, acc(r), r.c[S.DTLB],
+            acc(r) ? (100 * r.c[S.SLOW] / acc(r)).toFixed(2) : "", r.c[S.STK], r.c[S.STKMISS], r.c[S.SLOW], r.c[S.EXIT], r.c[S.TRANS]].join(","));
+          fs.writeFileSync(opts.opCensus, csv.join("\n") + "\n");
+          console.error(`[harness] per-opcode census written to ${opts.opCensus}`);
+        }
+      }
     }
   }
   if (aotResult) summary.aotSession = aotResult;
   if (opts.aotModeAt) summary.aotMode = { at: opts.aotModeAt, done: aotModeDone, atMs: +aotModeAtMs.toFixed(1), switchMs: +aotModeMs.toFixed(2) };
-  if (process.env.NANOBOX_PROBE_STAT && inst && inst.exports.nanobox_jit_flags_stat) {
-    // level-3 probe census: 24 FD_PROBE_FULL, 25 FD_PROBE_C (candidate 1 hit), 26 FD_PROBE_D (candidate 2 hit)
-    const f = Array.from({ length: 32 }, (_, i) => inst.exports.nanobox_jit_flags_stat(i));
-    console.error(`[harness] probe census: full=${f[23]} cand1=${f[24]} cand2=${f[25]} (all: ${f.join(",")})`);
-  }
   if (inst && inst.exports.nanobox_jit_tier_stat) {
     const t = [0, 1, 2, 3].map((i) => inst.exports.nanobox_jit_tier_stat(i));
     if (t[0] || t[3]) console.error(`[harness] tier: tier-0 compiles=${t[0]} promotions=${t[1]}/${t[2]} attempts, tier-0 trace executions=${t[3]}`);
+  }
+  if (inst && inst.exports.nanobox_jit_spill_stat) {
+    const sp = [0, 1, 2, 3].map((i) => inst.exports.nanobox_jit_spill_stat(i));
+    if (sp[0] || sp[1]) console.error(`[harness] cold spill: chained=${sp[0]} inline-fallback=${sp[1]} (${(100 * sp[0] / (sp[0] + sp[1])).toFixed(1)}% chained) positions=${sp[2]} bodies=${sp[3]}`);
+  }
+  if (addrCensusReport && inst && inst.exports.nanobox_jit_addrstat) console.error(addrCensusReport(inst.exports));
+  if (inst && inst.exports.nanobox_jit_dmap_stat) {
+    const h = inst.exports.nanobox_jit_dmap_stat(0), m = inst.exports.nanobox_jit_dmap_stat(1);
+    if (h + m) console.error(`[harness] direct-map window: ${h} hits / ${h + m} probed accesses (${(100 * h / (h + m)).toFixed(2)}%)`);
   }
   if (opts.tplBytes && inst && inst.exports.nanobox_jit_opstat) {
     // where the emitted BYTES are, statically: total template bytes per opcode and bytes per compiled
@@ -1204,6 +1316,34 @@ function finish(code) {
       ph.sort((x, y) => y[1] - x[1]);
       out.push("", `emitted bytes by phase: ${(ptot / 1e6).toFixed(1)} MB`);
       for (const [n, v] of ph) if (v) out.push(`  ${n}: ${(v / 1e6).toFixed(2)} MB = ${(100 * v / ptot).toFixed(1)}%`);
+      // per-OPCODE x phase: which part of a SITE the bytes are in, for the opcodes that dominate.
+      // Needs nanobox_jit_phase_op (work/j/faultarm); older engines simply skip this block.
+      // NOTE the denominator: phase bytes and this instance count are FINAL-PASS only, so the
+      // B/site here is smaller than --tpl-bytes' (which sums pass 1 and pass 2) and is the number
+      // that matches the installed module.
+      if (ex.nanobox_jit_phase_op) {
+        const names = []; for (let i = 0; i < np; i++) names.push(nm(i));
+        const NONE = ex.nanobox_jit_nops ? ex.nanobox_jit_nops() : 0;
+        const idByName = {};
+        for (let ia = 0; ia < 2000; ia++) { const n2 = nameOf(ia).replace("BX_IA_", ""); if (n2) idByName[n2] = ia; }
+        const cell = (ia, i) => ex.nanobox_jit_phase_op(ia, i);
+        const top = rows.slice(0, 14).map(([n2]) => [n2, idByName[n2]]).filter(([, ia]) => ia !== undefined);
+        const colSum = names.map((_, i) => top.reduce((a, [, ia]) => a + cell(ia, i), 0));
+        const order = names.map((_, i) => i).filter((i) => colSum[i] > 0).sort((a, b) => colSum[b] - colSum[a]);
+        out.push("", "bytes per SITE by phase, FINAL PASS only (B per compiled guest instruction; the phase columns sum to B/site)");
+        out.push(["opcode".padEnd(16), "inst".padStart(8), "B/site".padStart(7)].concat(order.map((i) => names[i].padStart(12))).join(" "));
+        for (const [n2, ia] of top) {
+          const inst = cell(ia, np) || 1;
+          const tot2 = names.reduce((a, _, i) => a + cell(ia, i), 0);
+          out.push([n2.padEnd(16), String(cell(ia, np)).padStart(8), (tot2 / inst).toFixed(1).padStart(7)]
+            .concat(order.map((i) => (cell(ia, i) / inst).toFixed(1).padStart(12))).join(" "));
+        }
+        let allInst = 0; for (let ia = 0; ia < 2000; ia++) allInst += cell(ia, np);
+        out.push(`(all opcodes: ${allInst} compiled guest instructions on the final pass = ${(ptot / allInst).toFixed(1)} B each; --tpl-bytes' own B/site above is a pass-1+pass-2 sum and reads ~1.7x low on instances)`);
+        out.push(["(outside a guest instruction: prologue/tail/region glue, MB)".padEnd(16)]
+          .concat(order.map((i) => (cell(NONE, i) / 1e6).toFixed(3).padStart(12))).join(" "));
+        if (ex.nanobox_jit_phase_drop) { const d = ex.nanobox_jit_phase_drop(); if (d) out.push(`  WARNING: ${d} bytes dropped (phase record buffer overflow)`); }
+      }
     }
     fs.writeFileSync(opts.tplBytes, out.join("\n"));
     console.error(`[harness] template bytes written to ${opts.tplBytes}`);

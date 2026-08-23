@@ -271,26 +271,17 @@ drops that field from the fingerprint (engine dbg mode bit 4) and then finds no 
 identity (codex + agy, reference vs optimized+JIT) and the bisector on codex (interpreter vs
 `--jit 2:200`, chained fingerprints every 100 K traces, per-trace detail on the first differing
 block) and writes `work/gate/latest.md` (+ raw logs) ending in `GATE-DONE rc=…`. Launch it detached
-after every engine build (env flags such as `NANOBOX_JIT_MERGE=1` are inherited by every run) and
+after every engine build (env flags such as `NANOBOX_JIT_EAGER=1` are inherited by every run) and
 read the report. `test/record-bundles.sh [all|"kernel codex"]` is the matching unattended
 re-recording of the pre-computed bundles (kernel / codex / agy / claude, page-eager) that every
 engine rebuild needs (bundles are engine-tag keyed) — `work/prof/record-bundles.log`, ends with
-`RECORD-DONE`. The gate caught the first version of the merged push/pop runs (below): the fast-path
-failure deopted to the interpreter mid-trace, which is memory-identical but inserts an extra trace
-boundary → the bisector reported the trace at 0x589009 (`PUSH PUSH LEA PUSH …`) with `ic +1, rsp −8`
-on the JIT side; the fix keeps the slow path inside the trace.
+`RECORD-DONE`. The gate earns its keep on bugs nothing else sees: an early stack-access experiment
+deopted to the interpreter mid-trace on its slow path, which is memory-identical but inserts an extra
+trace boundary → the bisector reported the trace at 0x589009 (`PUSH PUSH LEA PUSH …`) with `ic +1,
+rsp −8` on the JIT side. The rule it left behind: a slow path stays inside the trace.
 
-## Stack peepholes / register file experiments (2026-08-16, third round)
+## Register file experiments (2026-08-16, third round)
 
-* **Merged stack runs** (`NANOBOX_JIT_MERGE=1` → `nanobox_set_jit_merge(1)`; off by default): a run of
-  2–8 register/immediate PUSHes (or POPs not into RSP) becomes ONE span-in-page + alignment check,
-  ONE TLB probe (write or read permission on the page holding the whole span), one "page carries no
-  code marks" check, N plain `i64.store`/`i64.load` at fixed offsets from the probed host address and
-  a single RSP update; when any condition fails the run executes instruction by instruction through
-  Bochs' `stack_write_qword`/`stack_read_qword` with RIP/icount committed before each one (exact
-  #PF/#SS/SMC semantics), still inside the trace. Both paths leave the same compile-time register
-  cache state (checked at compile time). Identity holds (codex `ad36511e3f31`, agy `9526e94cefe9`,
-  ticks equal), gate clean.
 * **Register file in wasm globals** — tried (sub-agent, `-DNANOBOX_JIT_GLOBALS`), correct, +4 %
   slower, removed. The JIT already keeps registers in wasm locals inside a trace/region; imported
   mutable globals only made the JIT↔C++ boundaries copy all 18 registers in and out.
@@ -300,17 +291,15 @@ on the JIT side; the fix keeps the slow path inside the trace.
   | engine | runs (s) | vs baseline |
   |---|---|---|
   | eh-nb (baseline) | 7.46 / 7.30 / 7.12 | — |
-  | eh-nb + `NANOBOX_JIT_MERGE=1` | 7.32 / 6.99 / 7.13 | ≈ −2 % (noise-level; agy unchanged) |
   | registers in wasm globals (removed) | 7.56 / 7.49 / 7.69 | ≈ +4 % (net loss) |
 
-  `docs/jit-examples.md` shows the SAME guest trace compiled with and without the peephole, annotated
-  (`tools/jit-diff-example.mjs` pulls a trace by content key out of two recorded bundles;
+  `docs/jit-examples.md` shows what a real trace compiles to, annotated
+  (`tools/jit-diff-example.mjs` pulls a trace by content key out of a recorded bundle;
   `tools/wasm2wat.mjs` disassembles a dumped module).
-  Neither moves the needle: register traffic between traces is already dirty-only at constant
+  It does not move the needle: register traffic between traces is already dirty-only at constant
   addresses, and V8 reaches imported mutable globals through an indirection, so the globals build
-  only adds the 18-element sync at every cpu_loop/handler boundary; merged stack runs save a probe
-  per extra push/pop but pushes are ~5 % of executed instructions. Both stay behind their flags
-  (details in TASKS.md H1/H2). The counters point at the real remaining lever: 10 M returns to
+  only adds the 18-element sync at every cpu_loop/handler boundary (details in TASKS.md H2). The
+  counters point at the real remaining lever: 10 M returns to
   cpu_loop per boot because the NEXT trace is not compiled (`linkFail[4]`) and 21.9 M fetch-window
   refills (`linkFail[2]`).
 
@@ -360,7 +349,7 @@ all future work:
 * **JIT'd code is only ~1.3x the Bochs interpreter** on a fully covered hot loop (161.4 vs 124.3 MIPS,
   identical instruction counts). Bochs already dispatches pre-decoded instructions, so our win is just
   its dispatch while the templates still reproduce every Bochs semantic per instruction (lazy flags,
-  a two-entry TLB probe per access, SMC stamps, icount/RIP bookkeeping). In a dumped module,
+  an inline DTLB entry test per access, SMC stamps, icount/RIP bookkeeping). In a dumped module,
   `i64.store` outnumbers `i64.load` six to one — most of those stores are our bookkeeping, not the
   guest's.
 * **Coverage cannot be bought.** Lowering the hotness threshold 40x (2000 -> 50) raises JIT coverage
@@ -372,7 +361,7 @@ all future work:
   jumps into it, so every translation must become module functions behind an indirect call table.
 
 Open directions, both under measurement: **template quality** (fewer wasm ops per guest instruction —
-hoisting the TLB probe across same-page runs, deferring bookkeeping stores to the points that can
+hoisting the DTLB entry test across a run of accesses proved to be on one page, deferring bookkeeping stores to the points that can
 observe them, fusing compare+branch) and **function-granular AOT** (guest function boundaries are
 available: 321,958 from codex's `.symtab`, 294,541 from `.eh_frame_hdr` even when stripped).
 
@@ -469,9 +458,8 @@ work/                 toolchains, c2w sources, packs, profiles (gitignored)
   sign-in 84.4 s / 7.84 G instructions vs Bun 49–53 s / 17.9 G) and the native-V8 page (`claude-native.html`,
   sign-in in ~1.0–1.3 s with the in-memory backend, 4.0–4.3 s with `?backend=vm` = files/tty/processes in
   the emulated guest through the nbnode shim) — `docs/claude-native.md`.
-- 2026-08-16 (third round): two register/stack experiments behind flags, run serially (see "Stack
-  peepholes / register file experiments"): merged push/pop runs (`NANOBOX_JIT_MERGE=1`) ≈ −2 %, in
-  the noise; registers in wasm globals ≈ +4 %, a negative result — removed again (the JIT already keeps
-  registers in wasm locals inside a trace). Both were gate-clean. New `test/gate.sh`: identity + bisect end-to-end without interaction, report in
-  `work/gate/latest.md`; it caught the first (deopting) version of the merge peephole through the
-  extra trace boundary it introduced.
+- 2026-08-16 (third round): a register-file experiment behind a flag (see "Register file
+  experiments"): registers in wasm globals ≈ +4 %, a negative result — removed again (the JIT already
+  keeps registers in wasm locals inside a trace). It was gate-clean. New `test/gate.sh`: identity +
+  bisect end-to-end without interaction, report in `work/gate/latest.md`; it earned its keep the same
+  week by catching a deopt that was memory-identical and only showed up as an extra trace boundary.

@@ -78,6 +78,13 @@ if (shellUp != null) {
   const uname = await sh("echo NB1-$(uname -s)-$(id -u)", "NB1-Linux-0");
   check("shell-is-a-real-guest-shell", /NB1-Linux-0/.test(uname), (uname.match(/NB1[^\s]*/) || ["no output"])[0]);
 
+  // The shim is launched as a background job, where POSIX shells set SIGINT/SIGQUIT to SIG_IGN.
+  // Its PTY children must reset those inherited dispositions or ^C is only echoed and `grep` lives.
+  await ev(`window.nanoboxShell.send(${JSON.stringify("grep NBINT\r")})`); await sleep(300);
+  await ev(`window.nanoboxShell.send(String.fromCharCode(3))`); await sleep(300);
+  const interrupted = await sh("echo NBINT-OK", "NBINT-OK", 8);
+  check("ctrl-c-interrupts-and-shell-survives", /\^C[\s\S]*NBINT-OK/.test(interrupted), "foreground grep interrupted; prompt accepted the next command");
+
   // --- 3. the pty carries the PANE's geometry ---------------------------------------------------
   const size = await ev("JSON.stringify(window.nanoboxShell.size)");
   const paneSize = JSON.parse(size);

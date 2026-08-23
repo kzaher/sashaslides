@@ -81,7 +81,14 @@
     codex: {
       packages: [
         { name: "@openai/codex", version: "0.147.0" },
-        { name: "@openai/codex", version: "0.147.0-linux-x64", alias: "@openai/codex-linux-x64", into: NM + "@openai/codex/node_modules/@openai/codex-linux-x64", bins: "none" },
+        {
+          name: "@openai/codex", version: "0.147.0-linux-x64", alias: "@openai/codex-linux-x64",
+          into: NM + "@openai/codex/node_modules/@openai/codex-linux-x64", bins: "none",
+          links: {
+            "codex-code-mode-host": "../lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
+            bwrap: "../lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
+          },
+        },
       ],
     },
     agy: { tarball: { name: "agy", manifest: AGY_MANIFEST, place: [{ from: "antigravity", to: "usr/local/bin/agy", mode: 0o755 }] } },
@@ -125,7 +132,7 @@
 
   // ---- one npm package -------------------------------------------------------------------------
   function npmMeta(spec) {
-    return { kind: "npm", name: spec.name, version: spec.version, alias: spec.alias || null, into: spec.into || NM + spec.name, prune: spec.prune ? spec.prune.source : null, bins: spec.bins || "auto" };
+    return { kind: "npm", name: spec.name, version: spec.version, alias: spec.alias || null, into: spec.into || NM + spec.name, prune: spec.prune ? spec.prune.source : null, bins: spec.bins || "auto", links: spec.links || null };
   }
   async function npmPackage(spec, cli, ctx) {
     const key = keyOf(spec.name, spec.version), meta = npmMeta(spec);
@@ -312,6 +319,9 @@
         const t = Fs.lookup(top, rel); if (t && t.t === "f") t.mode = ((t.mode != null ? t.mode : 0o644) | 0o111) & 0o7777;
         Fs.add(root, "usr/local/bin/" + bin, { symlink: "../lib/node_modules/" + meta.name + "/" + rel }); files++;
       }
+      for (const [bin, target] of Object.entries(meta.links || {})) {
+        Fs.add(root, "usr/local/bin/" + bin, { symlink: target }); files++;
+      }
     } else if (meta.kind === "tarball") {
       for (const pl of meta.place) {
         const n = Fs.lookup(tmp, pl.from);
@@ -324,6 +334,15 @@
   }
 
   // ---- what the guest runs -----------------------------------------------------------------------
+  const CODEX_HTTPS_PROVIDER_ARGS = [
+    "-c", "model_provider=\"nanobox-https\"",
+    "-c", "model_providers.nanobox-https.name=\"OpenAI\"",
+    "-c", "model_providers.nanobox-https.base_url=\"https://chatgpt.com/backend-api\"",
+    "-c", "model_providers.nanobox-https.wire_api=\"responses\"",
+    "-c", "model_providers.nanobox-https.requires_openai_auth=true",
+    // The guest HTTP proxy cannot carry an Upgrade stream. HTTPS Responses is fully supported.
+    "-c", "model_providers.nanobox-https.supports_websockets=false",
+  ];
   // claude: /usr/local/bin/claude -> cli.js, `#!/usr/bin/env node` -> with PATH=/bundle/nb:... (config-vm.json)
   //         the system-node shim -> the JS runs on the browser's V8 (docs/system-node.md);
   // codex:  the platform package's native binary directly (what bin/codex.js would spawn, with the env it
@@ -336,7 +355,7 @@
     // extracted Bun entry (/usr/local/lib/claude-native/cli.js) through the shim — argv[1] in the shim's
     // HELLO is what the runtime worker loads, so nothing else has to know about the layout
     if (cli === "claude-native") return { argv: ["/usr/local/bin/claude"], env: {}, spec: "config-vm.json", shim: true };
-    if (cli === "codex") return { argv: ["/" + NM + "@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"], env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: "/" + NM + "@openai/codex" }, spec: "config-persist.json", shim: false };
+    if (cli === "codex") return { argv: ["/" + NM + "@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex", ...CODEX_HTTPS_PROVIDER_ARGS], env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: "/" + NM + "@openai/codex" }, spec: "config-persist.json", shim: false };
     if (cli === "agy") return { argv: ["/usr/local/bin/agy"], env: {}, spec: "config-persist.json", shim: false };
     throw new Error("unknown cli " + cli);
   }

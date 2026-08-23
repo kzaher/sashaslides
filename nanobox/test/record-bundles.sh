@@ -4,10 +4,13 @@
 #   kernel.nbjb  — the boot up to a trivial /bin/true (shared by every image: same kernel)
 #   <image>.nbjb — codex, agy, claude to their sign-in screens
 # All recordings use the page-eager sweep (NANOBOX_JIT_EAGER=1: compile every trace reachable in a
-# page once one trace in it is hot) so the bundle covers whole pages. Sequential (each run pins one
-# core; claude ≈ 60 s), meant to be launched detached:
-#   setsid ./test/record-bundles.sh [all|"kernel codex"] > work/prof/record-bundles.log 2>&1 &
-# Progress/report: work/prof/record-bundles.log ends with RECORD-DONE.
+# page once one trace in it is hot) so the bundle covers whole pages. `EAGER=0` turns it off.
+# The sweep handed the region former the CPU's current RIP as the linear base of every swept entry,
+# so successors resolved to the wrong offsets of the page and the guest ran code that was never at
+# those addresses -- every recording between Aug 18 18:00 and Aug 19 15:30 was a partial written at
+# the timeout (TASKS.md V.14/V.15). Fixed; a kernel recording is 1.1 s again. Note the sweep buys
+# very little measured coverage (+1.2 % cross-workload hits for +17 % bytes), so EAGER=0 remains a
+# reasonable policy.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE/harness"
@@ -20,7 +23,7 @@ CLAUDE_REPLIES=(--reply "do you trust|trust the files=\r" --reply "choose the te
 rec() { # name image jit args...
   local name=$1 img=$2 jit=$3; shift 3
   echo "=== $name ($img, --jit $jit eager) $(date -u +%T)"
-  NANOBOX_JIT_EAGER=1 timeout 300 node run.mjs "$ENGINE" --oci "$BASE/$img/" --spec "../web/images/$img/config.json" "${COMMON[@]}" \
+  NANOBOX_JIT_EAGER=${EAGER:-1} timeout 300 node run.mjs "$ENGINE" --oci "$BASE/$img/" --spec "../web/images/$img/config.json" "${COMMON[@]}" \
       --jit "$jit" --jit-bundle-out "$JITDIR/$name.nbjb" "$@" 2>&1 | grep -E "bundle written|\"label\":\"expect\"|SUMMARY|error|Error" | cut -c1-300
 }
 ONLY="${1:-all}"

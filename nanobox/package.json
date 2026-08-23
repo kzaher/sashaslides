@@ -33,7 +33,8 @@
     "postinstall": "npm run -s build:vendor || true",
     "build:vendor": "./build-all.sh vendor",
     "test:e2e-claude-tui": "node test/e2e-claude-tui.mjs --cli both",
-    "test:e2e-typing": "node test/e2e-typing-latency.mjs"
+    "test:e2e-typing": "node test/e2e-typing-latency.mjs",
+    "analyze": "node tools/analyze.mjs"
   },
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "^0.2.17",

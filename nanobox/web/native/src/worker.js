@@ -179,7 +179,9 @@ async function main(cfg) {
       // this pty the size of ITS pane and pins it against the shim's own SIGWINCH propagation.
       termSize.set(d.id, [cols, rows]);
       const size = () => { const wh = termSize.get(d.id) || [cols, rows]; B.g.childResize(cid, wh[0], wh[1]).then(() => ev("term-resized", { id: d.id, cid, cols: wh[0], rows: wh[1], initial: true }), (e) => ev("term-resize-failed", { id: d.id, cid, initial: true, message: String(e && e.message || e) })); };
-      try { B.g.spawn(cid, ["/bin/sh", "-l"], env, cwd, 2).then(() => { size(); post({ type: "term-opened", id: d.id, cols, rows }); }, (e) => post({ type: "term-out", id: d.id, data: enc.encode(`\r\n[shell failed: ${e.message}]\r\n`) })); }
+      // `-i` is explicit: BusyBox ash invoked as only `sh -l` can keep the default SIGINT action,
+      // so ^C kills the shell together with its foreground command and leaves a dead-looking pane.
+      try { B.g.spawn(cid, ["/bin/sh", "-il"], env, cwd, 2).then(() => { size(); post({ type: "term-opened", id: d.id, cols, rows }); }, (e) => post({ type: "term-out", id: d.id, data: enc.encode(`\r\n[shell failed: ${e.message}]\r\n`) })); }
       catch (e) { post({ type: "term-out", id: d.id, data: enc.encode(`\r\n[shell failed: ${e.message}]\r\n`) }); }
     }
     else if (d.type === "term-in" && vm) { const cid = terms.get(d.id); if (cid) B.g.childStdin(cid, new Uint8Array(d.data)); }

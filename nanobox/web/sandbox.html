@@ -103,7 +103,7 @@ window.nanoboxNet = { requests: [], routes: {}, extension: null };
 //     claude-native = the CURRENT release, extracted from the vendor's Bun standalone binary
 //                     (downloads.claude.ai, range-fetched tail; docs/sandbox.md)
 // Query string:
-//   cli=claude|claude-native|codex|agy   what to start (default claude)
+//   cli=claude|claude-native|codex|agy   what to start (default codex)
 //   install=claude,codex,agy   what to install/mount (default: the cli; node + npm always)
 //   verifyfull=1               claude-native: download the WHOLE 324 MB binary and check its sha256
 //   image=linux-base   jit=L:T   cache=0 (bypass the engine/image caches; re-download the packages too)
@@ -111,8 +111,8 @@ window.nanoboxNet = { requests: [], routes: {}, extension: null };
 //   reset=1  wipe the persistent tree first (a true first run)   engine=slim|full (default slim)
 //   sharp=1  also install claude's optional @img/sharp-linux-x64 + libvips   auto=0  no prompt auto-answer
 //   env=K=V,K=V  extra environment for the CLI
-//   shell=1                    SPLIT VIEW: the CLI on the left, an interactive /bin/sh -l on the SAME
-//                              guest on the right (draggable divider). Off by default — it adds
+//   shell=0                    disable the default SPLIT VIEW: CLI on the left, interactive /bin/sh -l
+//                              in the SAME guest on the right (draggable divider). The split adds
 //                              /dev/hvc1 + a background shim process to the codex/agy guest, which
 //                              would perturb the plain boot path every measurement and e2e test uses.
 //                              For claude/claude-native the shell rides the runtime worker that is
@@ -120,13 +120,14 @@ window.nanoboxNet = { requests: [], routes: {}, extension: null };
 //                              service (spec config-persist-hvc.json) plus a shell-only runtime worker.
 const qs = new URLSearchParams(location.search);
 const image = qs.get("image") || "linux-base";
-const cli = qs.get("cli") || "claude";
+const cli = qs.get("cli") || "codex";
 const installList = (qs.get("install") || (cli === "sh" ? "" : cli)).split(",").filter(Boolean);
 if (cli !== "sh" && !installList.includes(cli)) installList.push(cli);
 // claude and claude-native both run on this browser's V8 through the guest-side node shim
 const onV8 = cli === "claude" || cli === "claude-native";
 // the split view's shell pane; for a non-V8 CLI it needs the shim running beside the CLI in the guest
-const SPLIT = qs.get("shell") === "1";
+const SPLIT = qs.get("shell") !== "0";
+const AOT = qs.get("aot") !== "0";
 const shimBeside = SPLIT && !onV8;
 const auto = qs.get("auto") !== "0";
 const noCache = qs.get("cache") === "0";
@@ -321,7 +322,7 @@ async function bootVm() {
         // code from the first instruction instead of compiling it on the way.
         // ...both tags: the harness records against the full engine, the page loads the slim one by
         // default (?engine=full for the other), and the worker drops whichever tag is not its build.
-        .concat(qs.get("aot") === "1" ? ["aot-kernel.nbjb", "aot-kernel-slim.nbjb", "aot-" + image + ".nbjb",
+        .concat(AOT ? ["aot-kernel.nbjb", "aot-kernel-slim.nbjb", "aot-" + image + ".nbjb",
           "aot-" + image + "-slim.nbjb", "aot-" + cli + ".nbjb", "aot-" + cli + "-slim.nbjb"] : []);
       jitBundles = names.filter((n) => have.has(n)).map((n) => new URL("/engine/opt/jit/" + n, location.href).href); if (!jitBundles.length) jitBundles = null; } } catch {}
   }
@@ -355,9 +356,18 @@ async function bootVm() {
   };
   vmWorker.onerror = (e) => fail("vm worker error: " + e.message);
   // what the guest runs (NanoboxInstaller.command, mirrored here so the page needs no installer code):
+  const codexHttpsProviderArgs = [
+    "-c", "model_provider=\"nanobox-https\"",
+    "-c", "model_providers.nanobox-https.name=\"OpenAI\"",
+    "-c", "model_providers.nanobox-https.base_url=\"https://chatgpt.com/backend-api\"",
+    "-c", "model_providers.nanobox-https.wire_api=\"responses\"",
+    "-c", "model_providers.nanobox-https.requires_openai_auth=true",
+    // The guest HTTP proxy cannot carry an Upgrade stream. HTTPS Responses is fully supported.
+    "-c", "model_providers.nanobox-https.supports_websockets=false",
+  ];
   const CMD = {
     claude: { argv: ["/usr/local/bin/claude"], env: {}, spec: "config-vm.json" },
-    codex: { argv: ["/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"], env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: "/usr/local/lib/node_modules/@openai/codex" }, spec: "config-persist.json" },
+    codex: { argv: ["/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex", ...codexHttpsProviderArgs], env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: "/usr/local/lib/node_modules/@openai/codex" }, spec: "config-persist.json" },
     agy: { argv: ["/usr/local/bin/agy"], env: {}, spec: "config-persist.json" },
     // claude-native: /usr/local/bin/claude is the launcher the installer wrote (`exec /bundle/nb/node
     // /usr/local/lib/claude-native/cli.js "$@"`) — the runtime worker learns the script from the shim's HELLO
@@ -378,7 +388,7 @@ async function bootVm() {
   vmWorker.postMessage({ type: "init", info, args, cfg: {
     jit, direct: true, imageAddr, specUrl: new URL("/images/" + image + "/" + specName, location.href).href,
     jitBundles, engineTag, noCache,
-    aot: qs.get("aot") === "1",   // AOT mode (TASKS.md R): function-scope regions, direct calls, relaxed boundaries
+    aot: AOT,   // AOT mode (TASKS.md R): function-scope regions, direct calls, relaxed boundaries
     aotThreshold: Number(qs.get("aotthreshold") || 0) || undefined,   // 1 = translate at the first touch (the original AOT policy: nothing interpreted, 35 s to a prompt); default = the ?jit threshold
     // The JIT cache the browser keeps for itself: the worker looks for auto-<engine tag>.nbjb, and if
     // there is none it records this run at a low threshold (compiling far more than the steady-state
@@ -391,7 +401,7 @@ async function bootVm() {
     // path cannot start fetching until the 33 MB engine is here). The tag of the engine served under
     // the current ETag is memoized in the Cache API and used to guess the name; what is loaded is
     // still only accepted after the tag computed from the real engine bytes matches.
-    jitFast: qs.get("jitfast") === "1",
+    jitFast: qs.get("jitfast") !== "0",
     jitRecordThreshold: Number(qs.get("recthreshold") || 0) || undefined,   // 0 = record at the normal threshold (no boot cost)
     jitUploadUrl: "/jit/upload", jitRecordUploadMs: Number(qs.get("recms") || 60000),
     jitRecord: qs.get("record") === "1",

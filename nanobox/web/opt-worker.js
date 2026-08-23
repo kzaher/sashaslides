@@ -359,7 +359,17 @@ onmessage = (msg) => {
   if (cfg && cfg.ttySignal) {
     const sig = new Int32Array(cfg.ttySignal);
     const wait = tty.onWaitForReadable.bind(tty);
-    tty.onWaitForReadable = (timeout) => { if (timeout > 0 || Atomics.load(sig, 0)) return wait(timeout); io.pollSkipN++; return false; };
+    tty.onWaitForReadable = (timeout) => {
+      if (timeout > 0 || Atomics.load(sig, 0)) return wait(timeout);
+      io.pollSkipN++;
+      // A halted single-CPU Bochs fast-forwards to its next guest timer in a tight loop. Park on the
+      // existing input word between those timer ticks: input wakes us immediately, while the bound
+      // lets network/device events be polled without needing every producer to share this signal.
+      if (engineInst && engineInst.exports.nanobox_cpu_idle && engineInst.exports.nanobox_cpu_idle()) {
+        Atomics.wait(sig, 0, 0, 10);
+      }
+      return false;
+    };
   }
   // Same story on the way out: the guest's console writes (~100/s) each parked the emulator until the
   // page answered -- 5.8 ms apiece with a busy main thread, 16 % of wall. cfg.ttyOutRing takes them off

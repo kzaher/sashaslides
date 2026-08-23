@@ -1,0 +1,46 @@
+{
+  "cli": "sh",
+  "url": "http://localhost:8093/sandbox.html?cli=sh&shell=1",
+  "ok": true,
+  "checks": {
+    "cli-pane-reaches-its-screen": true,
+    "shell-pane-starts": true,
+    "shell-is-a-real-guest-shell": true,
+    "ctrl-c-interrupts-and-shell-survives": true,
+    "pty-size-matches-the-pane": true,
+    "pty-follows-the-divider": true,
+    "ps-sees-the-guest-processes": true,
+    "shell-writes-into-the-guest-fs": true,
+    "shell-survives-a-busy-cli": true
+  },
+  "failures": [],
+  "cliScreen": [
+    "nanobox SANDBOX — image linux-base (Linux only: no node, no CLI)",
+    " boots in the emulated VM while the first-run installer fetches ",
+    "node +  from the vendors into the persistent /usr/local; then ru",
+    "ns sh in the guest",
+    "BusyBox v1.36.1 (Ubuntu 1:1.36.1-6ubuntu3.1) built-in shell (ash",
+    ")",
+    "Enter 'help' for a list of built-in commands.",
+    "~ # ",
+    "~ # "
+  ],
+  "shellScreen": [
+    "~ # echo NB4-$(ps -o args= 2>/dev/null | grep -c .)",
+    "NB4-6",
+    "~ # ps -o pid,args 2>/dev/null | head -20; echo NB5-END",
+    "PID   COMMAND",
+    "    1 /bin/sh",
+    "    6 /bundle/nb/node",
+    "    7 /bin/sh -il",
+    "   16 {ps} /bin/sh -il",
+    "   17 {head} /bin/sh -il",
+    "NB5-END",
+    "~ # echo split-view-was-here > /tmp/nb-split && cat /tmp/nb-split && echo NB6-OK",
+    "split-view-was-here",
+    "NB6-OK",
+    "~ # echo NB7-$(date +%s)",
+    "NB7-1787473534",
+    "~ # "
+  ]
+}

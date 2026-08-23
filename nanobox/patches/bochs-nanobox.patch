@@ -576,20 +576,21 @@ index 88d181657..aa22525b6 100644
 +
  #endif // BX_CPU_LEVEL >= 6
 diff --git a/bochs/cpu/stack.cc b/bochs/cpu/stack.cc
-index 80600ae8b..b63156e0e 100644
+index 80600ae8b..dc0f386b6 100644
 --- a/bochs/cpu/stack.cc
 +++ b/bochs/cpu/stack.cc
-@@ -24,6 +24,9 @@
+@@ -24,6 +24,10 @@
  #define NEED_CPU_REG_SHORTCUTS 1
  #include "bochs.h"
  #include "cpu.h"
 +
 +extern unsigned nanobox_stackmap_on;          // nanobox oracle: stack-page map (nanobox.cc)
++extern unsigned nanobox_jit_stacktag;         // nanobox: dedicated stack window in the JIT (nanobox_jit.cc)
 +extern "C" void nanobox_stack_account_at(Bit64u ppf, Bit64u laddr);
  #define LOG_THIS BX_CPU_THIS_PTR
  
  #include "cpustats.h"
-@@ -115,6 +118,11 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::stackPrefetch(bx_address offset, unsigned
+@@ -115,6 +119,11 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::stackPrefetch(bx_address offset, unsigned
      if (isWriteOK(tlbEntry, USER_PL)) {
        BX_CPU_THIS_PTR espPageBias = (bx_address) pageOffset - offset;
        BX_CPU_THIS_PTR pAddrStackPage = tlbEntry->ppf;
@@ -601,6 +602,32 @@ index 80600ae8b..b63156e0e 100644
        BX_CPU_THIS_PTR espHostPtr = (Bit8u*) tlbEntry->hostPageAddr;
  #if BX_SUPPORT_MEMTYPE
        BX_CPU_THIS_PTR espPageMemtype = tlbEntry->get_memtype();
+@@ -129,6 +138,25 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::stackPrefetch(bx_address offset, unsigned
+     BX_CPU_THIS_PTR espPageWindowSize = 0;
+   else
+     BX_CPU_THIS_PTR espPageWindowSize -= 7;
++
++  // nanobox (NANOBOX_STACKTAG): the JIT's stack sites read THIS window directly and perform neither
++  // the #AC test nor the write-stamp decrement that stack_{read,write}_qword do below. So a page
++  // that needs either must not be visible through the window at all. Closing it here costs the
++  // interpreter one extra (cheap, non-faulting) prefetch per access on such a page -- espHostPtr is
++  // still set, so its own fast path is unaffected -- and makes the JIT fall back to the ordinary
++  // accessor, which does both. Off unless the flag is on, so the shipping engine is untouched.
++  if (nanobox_jit_stacktag) {
++    bool unsafe = false;
++#if BX_SUPPORT_ALIGNMENT_CHECK && BX_CPU_LEVEL >= 4
++    if (BX_CPU_THIS_PTR alignment_check()) unsafe = true;
++#endif
++#if BX_SUPPORT_SMP == 0
++    if (BX_CPU_THIS_PTR espPageFineGranularityMapping) unsafe = true;
++#else
++    unsafe = true;   // no per-page stamp map: every write would need decWriteStamp
++#endif
++    if (unsafe) BX_CPU_THIS_PTR espPageWindowSize = 0;
++  }
+ }
+
+ void BX_CPP_AttrRegparmN(2) BX_CPU_C::stack_write_byte(bx_address offset, Bit8u data)
 diff --git a/bochs/gui/siminterface.h b/bochs/gui/siminterface.h
 index 2103999ab..142f913b8 100644
 --- a/bochs/gui/siminterface.h
@@ -1591,7 +1618,7 @@ new file mode 100644
 index 000000000..846714579
 --- /dev/null
 +++ b/bochs/nanobox.cc
-@@ -0,0 +1,417 @@
+@@ -0,0 +1,421 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox instrumentation exports.
 +//
@@ -1630,6 +1657,10 @@ index 000000000..846714579
 +NB_EXPORT(nanobox_ticks_hi) unsigned nanobox_ticks_hi(void) { return (unsigned)(bx_pc_system.time_ticks() >> 32); }
 +NB_EXPORT(nanobox_rip_lo) unsigned nanobox_rip_lo(void) { return (unsigned)(BX_CPU(0)->get_instruction_pointer() & 0xffffffff); }
 +NB_EXPORT(nanobox_rip_hi) unsigned nanobox_rip_hi(void) { return (unsigned)(BX_CPU(0)->get_instruction_pointer() >> 32); }
++NB_EXPORT(nanobox_cpu_idle) unsigned nanobox_cpu_idle(void)
++{
++  return BX_CPU(0)->activity_state != BX_CPU_C::BX_ACTIVITY_STATE_ACTIVE;
++}
 +
 +NB_EXPORT(nanobox_stat) double nanobox_stat(unsigned idx)
 +{
@@ -2011,10 +2042,10 @@ index 000000000..846714579
 +}
 diff --git a/bochs/nanobox_jit.cc b/bochs/nanobox_jit.cc
 new file mode 100644
-index 000000000..7d22a2054
+index 000000000..ff7ac5ad9
 --- /dev/null
 +++ b/bochs/nanobox_jit.cc
-@@ -0,0 +1,6284 @@
+@@ -0,0 +1,6640 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT: x86-64 iCache traces -> WebAssembly functions.
 +//
@@ -2172,6 +2203,17 @@ index 000000000..7d22a2054
 +NB_EXPORT(nanobox_set_jit_linkdirect) void nanobox_set_jit_linkdirect(unsigned on) { nanobox_jit_linkdirect = on; }
 +extern unsigned nanobox_jit_outline;
 +NB_EXPORT(nanobox_set_jit_outline) void nanobox_set_jit_outline(unsigned mask) { nanobox_jit_outline = mask; }
++extern unsigned nanobox_jit_faultarm;
++NB_EXPORT(nanobox_set_jit_faultarm) void nanobox_set_jit_faultarm(unsigned mask) { nanobox_jit_faultarm = mask; }
++// ---- dedicated stack window (docs/aot-size-and-coverage.md plan item 6) -------------------------
++// PUSH/POP/CALL/RET pay the whole general memory-access machinery -- per-site probe tag, the
++// function-wide pair behind it, the outlined DTLB refill -- for a slot on the one page in the
++// machine whose identity the CPU already knows. NANOBOX_STACKTAG makes those sites read the CPU's
++// OWN stack window instead. Default 0 = the engine emits exactly what it emits today.
++//   bit 0  PUSH / POP / CALL / RET / ENTER / LEAVE (everything through emitStack{Read,Write})
++//   bit 1  ... and 8-byte SS-segment memory operands (`mov ...(%rsp)/(%rbp)` frame slots)
++extern unsigned nanobox_jit_stacktag;
++NB_EXPORT(nanobox_set_jit_stacktag) void nanobox_set_jit_stacktag(unsigned mask) { nanobox_jit_stacktag = mask; }
 +// ---- two-tier emission (work/prof/tier.md) -----------------------------------------------------
 +// Tier 0 is the COMPACT call form: a guest instruction is performed by a shared helper in the
 +// engine, so a site costs a handful of wasm bytes instead of a full inline template with its own
@@ -2264,6 +2306,8 @@ index 000000000..7d22a2054
 +  if (mask & 0x10000) BX_CPU_THIS_PTR oszapc.result = v[j++];
 +  if (mask & 0x20000) BX_CPU_THIS_PTR oszapc.auxbits = v[j++];
 +}
++static void nanobox_spill2(Bit32u m, Bit64u a, Bit64u b)
++{ const Bit64u v[2] = { a, b }; nanobox_spill_apply(m, v); }
 +static void nanobox_spill3(Bit32u m, Bit64u a, Bit64u b, Bit64u c)
 +{ const Bit64u v[3] = { a, b, c }; nanobox_spill_apply(m, v); }
 +static void nanobox_spill4(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d)
@@ -2280,13 +2324,37 @@ index 000000000..7d22a2054
 +{ const Bit64u v[9] = { a, b, c, d, e, f, g, h, i }; nanobox_spill_apply(m, v); }
 +static void nanobox_spill10(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h, Bit64u i, Bit64u j)
 +{ const Bit64u v[10] = { a, b, c, d, e, f, g, h, i, j }; nanobox_spill_apply(m, v); }
++// NANOBOX_FAULTARM bit 0 widens the outlined range: 2 registers (12 emitted bytes against 18
++// inline) and 11-18 (the whole file plus the lazy-flag pair, which a deopt after a long template
++// reaches). The old range 3-10 was not a measured optimum, it was the set of helpers that existed.
++static void nanobox_spill11(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h, Bit64u i, Bit64u j, Bit64u k)
++{ const Bit64u v[11] = { a, b, c, d, e, f, g, h, i, j, k }; nanobox_spill_apply(m, v); }
++static void nanobox_spill12(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h, Bit64u i, Bit64u j, Bit64u k, Bit64u l)
++{ const Bit64u v[12] = { a, b, c, d, e, f, g, h, i, j, k, l }; nanobox_spill_apply(m, v); }
++static void nanobox_spill13(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h, Bit64u i, Bit64u j, Bit64u k, Bit64u l, Bit64u n)
++{ const Bit64u v[13] = { a, b, c, d, e, f, g, h, i, j, k, l, n }; nanobox_spill_apply(m, v); }
++static void nanobox_spill14(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h, Bit64u i, Bit64u j, Bit64u k, Bit64u l, Bit64u n, Bit64u o)
++{ const Bit64u v[14] = { a, b, c, d, e, f, g, h, i, j, k, l, n, o }; nanobox_spill_apply(m, v); }
++static void nanobox_spill15(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h, Bit64u i, Bit64u j, Bit64u k, Bit64u l, Bit64u n, Bit64u o, Bit64u q)
++{ const Bit64u v[15] = { a, b, c, d, e, f, g, h, i, j, k, l, n, o, q }; nanobox_spill_apply(m, v); }
++static void nanobox_spill16(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h, Bit64u i, Bit64u j, Bit64u k, Bit64u l, Bit64u n, Bit64u o, Bit64u q, Bit64u r)
++{ const Bit64u v[16] = { a, b, c, d, e, f, g, h, i, j, k, l, n, o, q, r }; nanobox_spill_apply(m, v); }
++static void nanobox_spill17(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h, Bit64u i, Bit64u j, Bit64u k, Bit64u l, Bit64u n, Bit64u o, Bit64u q, Bit64u r, Bit64u t)
++{ const Bit64u v[17] = { a, b, c, d, e, f, g, h, i, j, k, l, n, o, q, r, t }; nanobox_spill_apply(m, v); }
++static void nanobox_spill18(Bit32u m, Bit64u a, Bit64u b, Bit64u c, Bit64u d, Bit64u e, Bit64u f, Bit64u g, Bit64u h, Bit64u i, Bit64u j, Bit64u k, Bit64u l, Bit64u n, Bit64u o, Bit64u q, Bit64u r, Bit64u t, Bit64u u)
++{ const Bit64u v[18] = { a, b, c, d, e, f, g, h, i, j, k, l, n, o, q, r, t, u }; nanobox_spill_apply(m, v); }
 +static unsigned nanobox_spill_fnidx(unsigned n)
 +{
 +  switch (n) {
++    case 2: return (unsigned)(uintptr_t) nanobox_spill2;
 +    case 3: return (unsigned)(uintptr_t) nanobox_spill3;  case 4: return (unsigned)(uintptr_t) nanobox_spill4;
 +    case 5: return (unsigned)(uintptr_t) nanobox_spill5;  case 6: return (unsigned)(uintptr_t) nanobox_spill6;
 +    case 7: return (unsigned)(uintptr_t) nanobox_spill7;  case 8: return (unsigned)(uintptr_t) nanobox_spill8;
-+    case 9: return (unsigned)(uintptr_t) nanobox_spill9;  default: return (unsigned)(uintptr_t) nanobox_spill10;
++    case 9: return (unsigned)(uintptr_t) nanobox_spill9;  case 10: return (unsigned)(uintptr_t) nanobox_spill10;
++    case 11: return (unsigned)(uintptr_t) nanobox_spill11; case 12: return (unsigned)(uintptr_t) nanobox_spill12;
++    case 13: return (unsigned)(uintptr_t) nanobox_spill13; case 14: return (unsigned)(uintptr_t) nanobox_spill14;
++    case 15: return (unsigned)(uintptr_t) nanobox_spill15; case 16: return (unsigned)(uintptr_t) nanobox_spill16;
++    case 17: return (unsigned)(uintptr_t) nanobox_spill17; default: return (unsigned)(uintptr_t) nanobox_spill18;
 +  }
 +}
 +static void nanobox_helper_lf(unsigned kind, Bit64u op1, Bit64u op2, Bit64u res)
@@ -2321,6 +2389,22 @@ index 000000000..7d22a2054
 +struct NbProbeOut { Bit64u tagR, tagW, tagRo, tagWo; Bit32u host, freeb; };
 +NbProbeOut nanobox_probe_out;
 +unsigned nanobox_jit_outline = 1 | 2 | 8 | 64 | 128 | 256 | 512 | 1024 | 2048 | 16384 | 32768 | 65536 | 131072 | 262144;
++// Default 5 (bits 0|2) since the gate-green merge: -33 % on AOT call+ret, -21 % full DTLB lookups,
++// -2.9 % session wasm (TASKS.md V.6). NANOBOX_STACKTAG=0 restores the pre-merge emission exactly;
++// bit 1 (the 8-byte SS-segment operands) is left off because it is not anchored in stackPrefetch.
++unsigned nanobox_jit_stacktag = 1 | 4;
++// ---- NANOBOX_FAULTARM (docs/aot-size-and-coverage.md item 5): the per-site fault/exit arm.
++// nanobox_jit_outline has no free bit (19 is oneTag, 20-31 are siteBudget()), so this is its own
++// word, exactly as NANOBOX_STACKTAG had to be. 0 = today's engine, bit for bit.
++//   bit 0  widen the outlined cold-path spill from 3-10 registers to 2-18
++//   bit 1  outline the cold-path spill of a cold EXIT arm as well as of a slow/handler arm
++//          (nanobox_jit_outline bit 13 does this for the 3-10 range only, and ships OFF)
++//   bit 2  the exit descriptor carries the RIP as an OFFSET from L_base instead of the absolute
++//          VA, so a constant-RIP exit is `i64.const off; local.set T7` instead of
++//          `local.get L_base; i64.const off; i64.add; local.set T7`. The common tail adds L_base
++//          back, once per unit. The three exits whose RIP is computed at run time (indirect JMP /
++//          CALL, RET) pay one `local.get L_base; i64.sub` each.
++unsigned nanobox_jit_faultarm = 0;
 +// Two-tier emission. Default 0 = tier 1 only (today's engine, bit for bit).
 +//   bit 0  tier-0 codegen exists at all
 +//   bit 1  ... and is used for a translation whose entry has not yet reached nanobox_jit_tier1_thr
@@ -2426,6 +2510,38 @@ index 000000000..7d22a2054
 +  return f[s];
 +}
 +
++/////////////////////////////////////////////////////////////////////////
++// The dedicated stack window (NANOBOX_STACKTAG).
++//
++// x86 truth, not a heuristic: a page is a stack page iff BX_CPU_C::stackPrefetch() resolved the
++// stack window to it, and Bochs funnels PUSH/POP/CALL/RET/ENTER/LEAVE, interrupt and exception
++// frames, IRET and task switches through that one path. So the emitted fast path reads the CPU's
++// OWN window -- espPageBias / espPageWindowSize / espHostPtr, the three fields stack_read_qword
++// and stack_write_qword themselves use -- straight out of the CPU struct.
++//
++// That is also the whole invalidation story: the window is invalidated by invalidate_stack_cache(),
++// which paging.cc (TLB flush / CR3 / paging enable), proc_ctrl.cc (CR0/CR4), segment_ctrl_pro.cc
++// (SS loads), tasking.cc (task switch), vm8086.cc and -- for the write-stamp case --
++// serveICacheMiss() already call. There is NO new invalidation to invent and nothing to poison at
++// a handler step or a returning direct call, which is exactly what a per-site probe tag has to do.
++//
++// The two things the emitted form does NOT do are the #AC test and the write-stamp decrement;
++// stackPrefetch closes the window when either is live (see cpu/stack.cc), so such a page simply
++// never reaches the fast path and falls back to the ordinary stack accessor.
++//
++// Returns the page offset of the access (what the interpreter calls espBiased), or (Bit64u)-1 =
++// "this one needs the slow accessor".
++static Bit64u nanobox_stack_fill(Bit64u offset)
++{
++  // stackPrefetch raises #SS in its 16/32-bit segmented branch. Emitted code calls this without a
++  // sync in front of it, so only the flat branch -- which cannot fault -- may be entered here.
++  if (!(BX_CPU_THIS_PTR long64_mode() ||
++        (BX_CPU_THIS_PTR sregs[BX_SEG_REG_SS].cache.valid & SegAccessWOK4G))) return (Bit64u) -1;
++  BX_CPU_THIS_PTR stackPrefetch(offset, 8);
++  const Bit64u biased = offset + BX_CPU_THIS_PTR espPageBias;
++  return (biased < (Bit64u) BX_CPU_THIS_PTR espPageWindowSize) ? biased : (Bit64u) -1;
++}
++
 +// PCMPISTRI data path (cpu/sse_string.cc): index + flag bits, the JIT applies RCX and the lazy flags
 +Bit32u bx_nanobox_pcmpistri(const BxPackedXmmRegister *op1, const BxPackedXmmRegister *op2, Bit8u imm8);
 +static Bit64u nanobox_simd_stats[8];      // [0..] counters for the harness (level 3): 0 = pcmpistri helper calls, 1 = rep fast paths, 2 = rep deopts
@@ -2453,23 +2569,57 @@ index 000000000..7d22a2054
 +// innermost phase active when they were emitted, so the columns sum to the module's code size.
 +enum { PH_OTHER = 0, PH_PROLOGUE, PH_PROBE_FAST, PH_PROBE_MISS, PH_SLOW, PH_SPILL, PH_EXIT,
 +       PH_HANDLER, PH_DCALL, PH_ASYNC, PH_STAMP, PH_LINK, PH_ACCESS, PH_EA, PH_PROF,
-+       PH_TRANS, PH_SPILL_COLD, PH_TAIL, PH_REG, PH_FLAGS, PH_CONFORM, PH_WRAP, PH_N };
++       PH_TRANS, PH_SPILL_COLD, PH_TAIL, PH_REG, PH_FLAGS, PH_CONFORM, PH_WRAP,
++       PH_SPILL_ASYNC, PH_N };
 +static Bit64u nanobox_phase_bytes[PH_N];
 +static Bit64u nanobox_phase_pass[PH_N];   // this pass only: added to the total when the pass is the final one
++// ---- the same phases, split by the GUEST OPCODE whose template emitted them (work/j/faultarm).
++// This is what answers "how many of MOV_GqEq's 120 bytes are the fault arm and how many are the
++// access?": the flat table above is a whole-module average and cannot. Pure accounting -- it emits
++// nothing, and every emitted byte is bit-identical with it compiled in.
++// Only the FINAL pass counts, exactly as above, so the pass is buffered as (opcode, phase, bytes)
++// records and replayed on a keeping flush rather than clearing a BX_IA_LAST x PH_N array per pass.
++#define NB_PHOP_NONE BX_IA_LAST
++static Bit64u nanobox_phase_op_bytes[BX_IA_LAST + 1][PH_N + 1];   // [.][PH_N] = instances counted on the FINAL pass only
++static unsigned nanobox_ph_ia = NB_PHOP_NONE;   // the opcode currently being emitted
++struct NbPhRec { Bit16u ia; Bit8u ph; Bit32u b; };
++#define NB_PHREC_MAX (1u << 16)
++static NbPhRec nanobox_ph_rec[NB_PHREC_MAX];
++static unsigned nanobox_ph_rec_n = 0;
++static Bit64u nanobox_ph_rec_drop = 0;
++static BX_CPP_INLINE void nanobox_phase_add(unsigned ph, Bit32u b)
++{
++  nanobox_phase_pass[ph] += b;
++  if (nanobox_ph_rec_n < NB_PHREC_MAX) { NbPhRec &r = nanobox_ph_rec[nanobox_ph_rec_n++]; r.ia = (Bit16u) nanobox_ph_ia; r.ph = (Bit8u) ph; r.b = b; }
++  else nanobox_ph_rec_drop += b;
++}
++// one guest instruction of `ia` emitted on this pass. --tpl-bytes' instance count is bumped on
++// EVERY pass, so bytes/site from it is a pass-1+pass-2 sum (10.9 MB against the 7.3 MB installed);
++// the phase table needs a final-pass-only denominator to be comparable with itself.
++static BX_CPP_INLINE void nanobox_phase_inst(unsigned ia)
++{
++  if (nanobox_ph_rec_n < NB_PHREC_MAX) { NbPhRec &r = nanobox_ph_rec[nanobox_ph_rec_n++]; r.ia = (Bit16u) ia; r.ph = (Bit8u) PH_N; r.b = 1; }
++}
 +static const char *nanobox_phase_name(unsigned i) {
 +  static const char *nm[PH_N] = { "other", "prologue", "probe-fast", "probe-miss", "slow-arm", "spill",
 +                                  "exit", "handler-step", "direct-call", "async-check", "write-stamp",
 +                                  "link-epilogue", "access", "eff-addr", "profile-ctr",
-+                                  "transition", "spill-cold", "common-tail",
-+                                  "reg-load", "lazy-flags", "conform", "tpl-wrapper" };
++                                  "transition", "spill-fault", "common-tail",
++                                  "reg-load", "lazy-flags", "conform", "tpl-wrapper",
++                                  "spill-async" };
 +  return i < PH_N ? nm[i] : "?";
 +}
 +static void nanobox_phase_flush(bool keep) {
 +  for (unsigned i = 0; i < PH_N; i++) { if (keep) nanobox_phase_bytes[i] += nanobox_phase_pass[i]; nanobox_phase_pass[i] = 0; }
++  if (keep) for (unsigned j = 0; j < nanobox_ph_rec_n; j++) nanobox_phase_op_bytes[nanobox_ph_rec[j].ia][nanobox_ph_rec[j].ph] += nanobox_ph_rec[j].b;
++  nanobox_ph_rec_n = 0;
 +}
 +NB_EXPORT(nanobox_jit_phase_stat) double nanobox_jit_phase_stat(unsigned i) { return i < PH_N ? (double) nanobox_phase_bytes[i] : 0; }
 +NB_EXPORT(nanobox_jit_phase_name) const char *nanobox_jit_phase_name(unsigned i) { return nanobox_phase_name(i); }
 +NB_EXPORT(nanobox_jit_phase_n) unsigned nanobox_jit_phase_n(void) { return PH_N; }
++NB_EXPORT(nanobox_jit_phase_op) double nanobox_jit_phase_op(unsigned ia, unsigned ph)
++{ return (ia <= NB_PHOP_NONE && ph <= PH_N) ? (double) nanobox_phase_op_bytes[ia][ph] : 0; }
++NB_EXPORT(nanobox_jit_phase_drop) double nanobox_jit_phase_drop(void) { return (double) nanobox_ph_rec_drop; }
 +NB_EXPORT(nanobox_jit_opstat) double nanobox_jit_opstat(unsigned ia, unsigned which)
 +{
 +  if (ia >= BX_IA_LAST) return 0;
@@ -2502,6 +2652,23 @@ index 000000000..7d22a2054
 +extern unsigned nanobox_jit_probe2;
 +extern unsigned nanobox_jit_aot;
 +extern unsigned nanobox_jit_aot_tick;
++// AOT tick-exactness (docs/aot-size-and-coverage.md item 12, NANOBOX_TICKEXACT, default 0).
++// AOT mode moves or removes the trace boundaries at which cpu_loop decides whether a timer is
++// due and whether an async event is pending, so the guest takes its interrupts at DIFFERENT
++// instruction boundaries than the reference -- which is why its tick count diverges. Each bit
++// restores one of those decision points; 0 (the default) is bit-for-bit today's AOT engine.
++//   1  self-loop back edge syncs every iteration (instead of every nanobox_jit_aot_tick)
++//   2  forward in-region edges take the full boundary (sync + async_event) like a back edge
++//   4  the fetch-window check is emitted on every in-region edge
++//   8  direct calls off (a guest CALL is a trace boundary in the interpreter; the dcall path
++//      enters the callee without one). Changes the shared wasm signature -- set before compiling.
++//  16  direct calls KEPT, with the boundary test folded into the site's validity chain: a site whose
++//      timer is due / async event is pending falls through to the ordinary exit. Same exactness as
++//      bit 8, ~5 wasm instructions per site instead of losing the 2.2x call+ret.
++//  32  self-loop window sized from the countdown instead of fixed at nanobox_jit_aot_tick: the sync
++//      still happens on the iteration the interpreter would have taken it, but the fast path keeps
++//      its 5-instruction countdown (bit 1's alternative, and much cheaper).
++extern unsigned nanobox_jit_tickexact;
 +static bx_address nb_lookup_lin = 0;     // guest linear address of the translation being looked up
 +#define NB_KEYLOG 400000
 +static Bit64u nb_keylog[NB_KEYLOG][3];
@@ -2893,6 +3060,7 @@ index 000000000..7d22a2054
 +
 +  // locals
 +  uint32_t L_i, L_base, L_ic0, L_upl, L_acm, L_pob, L_cpu;
++  uint32_t L_stkb;   // NANOBOX_STACKTAG bit 2: base pointer to the CPU's stack-window fields
 +  bool tier0;                              // compact call form (nanobox_jit_tier)
 +  uint32_t L_reg[16];
 +  uint32_t L_lfr, L_lfa;
@@ -2900,6 +3068,7 @@ index 000000000..7d22a2054
 +  uint32_t T[8];    // i64 temps for templates
 +  uint32_t X[4];    // i64 scratch for flag computations
 +  uint32_t W;       // i64 scratch for write-stamp pAddr
++  uint32_t K_stk;   // NANOBOX_STACKTAG: page offset of the stack access being emitted
 +  uint32_t T32[6];  // i32 temps
 +  uint32_t V[2];    // v128 temps (SIMD templates), declared on first use so modules without SIMD templates stay SIMD-free
 +  uint32_t vloc(unsigned t) { if (V[t] == 0xffffffffu) V[t] = em->addLocal(V128); return V[t]; }
@@ -2931,6 +3100,7 @@ index 000000000..7d22a2054
 +  // pass 2 can leave the unused entry loads out. Each piece is only skipped when pass 1 proved no
 +  // emitter asked for it, and the asking sites are the only readers.
 +  bool usedAcm, usedUpl, usedInlineProbe, usedAcmTotal, usedUplTotal, usedInlineProbeTotal;
++  bool usedStk, usedStkTotal;   // NANOBOX_STACKTAG: does this unit have a stack site at all?
 +  bool trimPrologue() const { return (nanobox_jit_outline & 512) != 0 && passNo == 2; }
 +  bool needAcm() const { return !trimPrologue() || usedAcmTotal; }
 +  bool needUpl() const { return !trimPrologue() || usedUplTotal; }
@@ -2958,25 +3128,32 @@ index 000000000..7d22a2054
 +  // phase accounting (see nanobox_phase_bytes): only the FINAL pass counts, so a re-emitted
 +  // pass-1 body is not double counted.
 +  unsigned phSt[12]; uint32_t phAt[12]; int phTop;
-+  void phInit() { phTop = 0; phSt[0] = PH_OTHER; phAt[0] = m.code.n; nanobox_phase_flush(false); }
++  void phInit() { phTop = 0; phSt[0] = PH_OTHER; phAt[0] = m.code.n; nanobox_ph_ia = NB_PHOP_NONE; nanobox_phase_flush(false); }
 +  unsigned phCur() const { return phTop >= 0 ? phSt[phTop] : PH_OTHER; }
 +  // a spill emitted under a cold parent is a cold spill (that is where an outlined form can pay)
 +  unsigned phSpillKind() const {
 +    unsigned c = phCur();
-+    return (c == PH_SLOW || c == PH_HANDLER || c == PH_TRANS || c == PH_DCALL || c == PH_ASYNC) ? PH_SPILL_COLD : PH_SPILL;
++    if (c == PH_ASYNC) return PH_SPILL_ASYNC;   // the async-event exit arm's spill, not the fault arm's
++    return (c == PH_SLOW || c == PH_HANDLER || c == PH_TRANS || c == PH_DCALL) ? PH_SPILL_COLD : PH_SPILL;
 +  }
 +  void phPush(unsigned p) {
 +    if (phTop < 0) return;
-+    if (m.code.n > phAt[phTop]) nanobox_phase_pass[phSt[phTop]] += m.code.n - phAt[phTop];
++    if (m.code.n > phAt[phTop]) nanobox_phase_add(phSt[phTop], m.code.n - phAt[phTop]);
 +    if (phTop < 11) { phTop++; phSt[phTop] = p; phAt[phTop] = m.code.n; }
 +    else { phAt[phTop] = m.code.n; }
 +  }
 +  void phPop() {
 +    if (phTop <= 0) return;
-+    if (m.code.n > phAt[phTop]) nanobox_phase_pass[phSt[phTop]] += m.code.n - phAt[phTop];
++    if (m.code.n > phAt[phTop]) nanobox_phase_add(phSt[phTop], m.code.n - phAt[phTop]);
 +    phTop--; phAt[phTop] = m.code.n;
 +  }
-+  void phFinish() { while (phTop > 0) phPop(); if (phTop == 0 && m.code.n > phAt[0]) { nanobox_phase_pass[phSt[0]] += m.code.n - phAt[0]; phAt[0] = m.code.n; } }
++  void phFinish() { while (phTop > 0) phPop(); if (phTop == 0 && m.code.n > phAt[0]) { nanobox_phase_add(phSt[0], m.code.n - phAt[0]); phAt[0] = m.code.n; } }
++  // the opcode the phase records are attributed to; NB_PHOP_NONE outside a guest instruction
++  // (prologue, common tail, region glue). phFlushIa closes the open span so bytes never migrate.
++  void phIa(unsigned ia) {
++    if (phTop >= 0 && m.code.n > phAt[phTop]) { nanobox_phase_add(phSt[phTop], m.code.n - phAt[phTop]); phAt[phTop] = m.code.n; }
++    nanobox_ph_ia = ia;
++  }
 +  struct PhScope { TraceCompiler *c; PhScope(TraceCompiler *cc, unsigned p) : c(cc) { c->phPush(p); } ~PhScope() { c->phPop(); } };
 +  bool flagsPending() const { return (nanobox_jit_flags & 1) != 0; }
 +  bool flagsFwdBr() const { return (nanobox_jit_flags & 8) != 0; }       // forward in-region edges as a direct br to the body label
@@ -2990,6 +3167,11 @@ index 000000000..7d22a2054
 +  // in locals across iterations) is a trace, and it was still paying the identity-mode bookkeeping.
 +  // The uses that need a region guard it themselves with `reg`.
 +  bool aotRelaxed() const { return nanobox_jit_aot != 0; }
++  static bool tickExact(unsigned bit) { return (nanobox_jit_tickexact & bit) != 0; }
++  // bit 32: keep the multi-iteration self-loop window but SIZE it so that it always expires at
++  // or before the iteration at which the guest's timer is due -- exact, and the fast path keeps
++  // its 5-instruction countdown. (bit 1, the per-iteration sync, wins if both are set.)
++  bool tickWindowDyn() const { return aotRelaxed() && tickExact(32) && !tickExact(1); }
 +
 +
 +  int depth;             // structured-control nesting depth (blocks/ifs/loops currently open)
@@ -3046,7 +3228,7 @@ index 000000000..7d22a2054
 +  unsigned loopIcPerIter, loopTickN;
 +  int aliasAt;                                     // instruction that left its operands in register locals (-1: none)
 +  // direct calls (bit 9); bit 10 suppresses the direct RET (bisect: call in, ordinary exit out)
-+  bool dcallOn() const { return (nanobox_jit_flags & 512) != 0 && nanobox_jit_aot != 0 && !nanobox_dbg_mode; }
++  bool dcallOn() const { return (nanobox_jit_flags & 512) != 0 && nanobox_jit_aot != 0 && !nanobox_dbg_mode && !tickExact(8); }
 +  bool dcallRet() const { return dcallOn() && !(nanobox_jit_flags & 1024); }
 +  // does this unit contain a RET? only then does it need to know it was entered by a direct call
 +  bool unitHasRet() const {
@@ -3318,7 +3500,7 @@ index 000000000..7d22a2054
 +  // and started the next trace, which is what the epilogue does).
 +  void commitAndExit(unsigned k, Bit64s roff) {
 +    if (bodyDepth < 0) { commitAndSpillInline(k, roff); em->ret(); return; }
-+    pushRegionVA(roff); em->set(T[7]);
++    pushExitRip(roff); em->set(T[7]);
 +    exitCommon(k);
 +  }
 +
@@ -3375,8 +3557,9 @@ index 000000000..7d22a2054
 +    unsigned nsp = 0; uint32_t smask = 0;
 +    for (unsigned r = 0; r < 16; r++) if (cs.regDirty[r]) { smask |= 1u << r; nsp++; }
 +    if (cs.lfDirty) { smask |= 0x30000u; nsp += 2; }
-+    if (outlineSpill() && nsp >= 3 && nsp <= 10) {
-+      char sig[16]; unsigned q = 0; sig[q++] = 'i';
++    const unsigned spLo = faWideSpill() ? 2 : 3, spHi = faWideSpill() ? 18 : 10;
++    if (outlineSpill() && nsp >= spLo && nsp <= spHi) {
++      char sig[24]; unsigned q = 0; sig[q++] = 'i';
 +      for (unsigned j = 0; j < nsp; j++) sig[q++] = 'l';
 +      sig[q++] = '>'; sig[q++] = 'v'; sig[q] = 0;
 +      em->i32c((int32_t) smask);
@@ -3400,7 +3583,14 @@ index 000000000..7d22a2054
 +  // direct calls. Anything else keeps the inline stores (a call there costs more than it saves).
 +  int coldArm;
 +  struct ColdArm { TraceCompiler *c; ColdArm(TraceCompiler *cc) : c(cc) { c->coldArm++; } ~ColdArm() { c->coldArm--; } };
-+  bool outlineSpill() const { return (nanobox_jit_outline & 2048) != 0 && (coldArm > 0 || ((nanobox_jit_outline & 8192) && coldExit)); }
++  bool faWideSpill() const { return (nanobox_jit_faultarm & 1) != 0; }   // 2-18 registers, not 3-10
++  bool faExitSpill() const { return (nanobox_jit_faultarm & 2) != 0; }   // ... on cold EXIT arms too
++  bool faRipOffset() const { return (nanobox_jit_faultarm & 4) != 0; }   // exit RIP as an offset from L_base
++  // the value an exit leaves in T[7]: an offset from L_base with bit 2, the absolute VA without
++  void pushExitRip(Bit64s roff) { if (faRipOffset()) em->i64c(roff); else pushRegionVA(roff); }
++  // ... for an exit whose RIP was computed into a local as an absolute address
++  void pushExitRipFrom(uint32_t t) { em->get(t); if (faRipOffset()) { em->get(L_base); em->op(I64_SUB); } }
++  bool outlineSpill() const { return (nanobox_jit_outline & 2048) != 0 && (coldArm > 0 || (((nanobox_jit_outline & 8192) || faExitSpill()) && coldExit)); }
 +  void invalidateAll() { csInvalidate(); emitInvalidate(true); }
 +  void csInvalidate() {
 +    for (unsigned r = 0; r < 16; r++) cs.regLoaded[r] = cs.regDirty[r] = false;
@@ -3500,6 +3690,7 @@ index 000000000..7d22a2054
 +    PhScope _p(this, PH_EXIT);
 +    em->set(T[7]);
 +    if (bodyDepth < 0) {
++      if (faRipOffset()) { em->get(L_base); em->get(T[7]); em->op(I64_ADD); em->set(T[7]); }   // no common tail here: materialise the VA
 +      spillAll(false);
 +      zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); em->get(T[7]); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
 +      zaddr(ADDR(BX_CPU_THIS_PTR prev_rip)); em->get(T[7]); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR prev_rip)), 3);
@@ -3661,7 +3852,7 @@ index 000000000..7d22a2054
 +    }
 +    em->get(T32[0]); em->mem(I32_LOAD, ICE_OFF(jitarg), 2); pushProbeArgs(); pushEntryStateFromMem(); em->get(T32[1]); em->return_call_indirect(m.funcTypeIdx);
 +  }
-+  void exitFallthrough(unsigned k) { pushVA(off[k + 1]); exitWithRipOnStack(k); }
++  void exitFallthrough(unsigned k) { pushExitRip((Bit64s) boff + (Bit64s) off[k + 1]); exitWithRipOnStack(k); }
 +
 +  // ---------------------------------------------------------------- direct calls (nanobox_jit_flags bit 9)
 +  // Emitted for a direct guest CALL whose target is NOT a block of this unit, after the return address
@@ -3713,6 +3904,19 @@ index 000000000..7d22a2054
 +    // callee translated, and room on the host stack? (guest recursion must not blow it)
 +    em->get(sp); em->mem(I32_LOAD, DC_OFF(fn), 2); em->tee(fnl); em->op(I32_EQZ);
 +    zaddr(ADDR(nanobox_dcall_depth)); em->mem(I32_LOAD, zoff(ADDR(nanobox_dcall_depth)), 2); zaddr(ADDR(nanobox_dcall_max)); em->mem(I32_LOAD, zoff(ADDR(nanobox_dcall_max)), 2); em->op(I32_GE_U); em->op(I32_OR);
++    if (tickExact(16)) {
++      // tick-exactness (item 12): the interpreter ends its trace at a CALL and cpu_loop then decides,
++      // at the callee's first instruction, whether a timer is due and whether an async event is
++      // pending. Entering the callee directly skips that decision, so the guest takes its interrupts
++      // late and its tick stream drifts. Testing it here and falling through to the ordinary exit path
++      // (which commits and returns to cpu_loop) puts the decision back exactly where it was. Only the
++      // TEST is needed, not cpu_loop's update: `icount - icount_last_sync >= currCountdown` is
++      // invariant under `currCountdown -= delta; icount_last_sync = now`.
++      em->get(L_ic0); em->i64c((Bit64s)(k + 1)); em->op(I64_ADD);
++      zaddr(ADDR(BX_CPU_THIS_PTR icount_last_sync)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount_last_sync)), 3); em->op(I64_SUB); em->op(I32_WRAP_I64);
++      zaddr(nanobox_pc_system_access::countdownAddr()); em->mem(I32_LOAD, zoff(nanobox_pc_system_access::countdownAddr()), 2); em->op(I32_GE_U); em->op(I32_OR);
++      zaddr(ADDR(BX_CPU_THIS_PTR async_event)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR async_event)), 2); em->op(I32_OR);
++    }
 +    em->op(I32_EQZ);
 +    iff();
 +    }
@@ -3739,7 +3943,7 @@ index 000000000..7d22a2054
 +      // resumed at our continuation: the callee committed everything, our locals / probe cache are
 +      // stale, and the guest clock is absolute again (same rebase as a handler step)
 +      zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3); em->i64c(k + 1); em->op(I64_SUB); em->set(L_ic0);
-+      if (icDeferred()) { em->i32c((int32_t) loopTickN); em->set(L_tick); }
++      if (icDeferred()) { em->i32c((int32_t) loopTickN); em->set(L_tick); } else if (tickWindowDyn()) { em->i32c(1); em->set(L_tick); }
 +      csInvalidate(); emitInvalidate(); chainReloadAfterHandler();
 +      exitFallthroughOrTransition(k);
 +    endb();
@@ -3766,9 +3970,9 @@ index 000000000..7d22a2054
 +    // back-edges (target block emitted before this one -- every cycle contains one), region exits and
 +    // handler steps; forward edges are plain jumps. The default mode keeps every in-region edge a
 +    // full trace boundary (that is what makes it bit-identical to the interpreter).
-+    bool aotFwd = aotRelaxed() && reg != NULL && s > curBlock;
++    bool aotFwd = aotRelaxed() && !tickExact(2) && reg != NULL && s > curBlock;
 +    const bool crossPage = (blockPage(s) != blockPage(curBlock));
-+    const bool doWindow = (!aotRelaxed() || reg == NULL || crossPage);
++    const bool doWindow = (!aotRelaxed() || tickExact(4) || reg == NULL || crossPage);
 +    const bool outlined = outlineTrans() && !nanobox_dbg_mode;
 +    if (outlined) {
 +      // the whole boundary out of line (see nanobox_trans_check): one call and ONE exit arm
@@ -3865,7 +4069,7 @@ index 000000000..7d22a2054
 +  void exitToOffset(unsigned k, Bit64s roff, uint32_t t) {
 +    int sblk = regionBlockAt(roff);
 +    if (sblk >= 0) emitTransition(k, (unsigned) sblk);
-+    else { em->get(t); exitWithRipOnStack(k); }
++    else { pushExitRipFrom(t); exitWithRipOnStack(k); }
 +  }
 +  void exitFallthroughOrTransition(unsigned k) {
 +    int sblk = regionBlockAt((Bit64s) boff + off[k + 1]);
@@ -3936,7 +4140,7 @@ index 000000000..7d22a2054
 +  // `slowDepth`.
 +  bool outlineProbe() const { return (nanobox_jit_outline & 1) != 0 && nanobox_tlbfold != 0; }
 +  bool outlineSlow() const { return (nanobox_jit_outline & 2) != 0; }
-+  bool outlineDcall() const { return (nanobox_jit_outline & 4) != 0; }
++  bool outlineDcall() const { return (nanobox_jit_outline & 4) != 0 && !tickExact(16); }   // bit 16 adds the boundary test to the inline validity chain
 +  bool outlineStep() const { return (nanobox_jit_outline & 8) != 0; }
 +  bool outlineProbe2() const { return (nanobox_jit_outline & 32) != 0 && nanobox_jit_probe2 != 0; }   // keep the (slimmed) second probe candidate inline
 +  bool siteCand2() const { return (nanobox_jit_outline & 128) != 0; }   // per-site tags: the function-global pair is candidate 2
@@ -3969,6 +4173,18 @@ index 000000000..7d22a2054
 +  bool mergeStep() const { return (nanobox_jit_outline & 131072) != 0 && outlineStep(); }   // bit 17
 +  bool mergeSlow() const { return (nanobox_jit_outline & 262144) != 0; }                    // bit 18
 +  bool oneTag() const { return (nanobox_jit_outline & 524288) != 0; }                       // bit 19
++  // NANOBOX_STACKTAG bit 0: PUSH/POP/CALL/RET take the CPU's own stack window instead of the
++  // general probe machinery. bit 1 extends it to 8-byte SS-segment operands (frame slots).
++  bool stackTag() const { return (nanobox_jit_stacktag & 1) != 0; }
++  bool stackTagSS() const { return (nanobox_jit_stacktag & 2) != 0; }
++  // bit 2: the three window fields are adjacent in the CPU struct, so one base local turns their
++  // memarg offsets into single LEB bytes -- 8 bytes once per unit against 3 saved at every site.
++  bool stkBase() const { return (nanobox_jit_stacktag & 4) != 0; }
++  static uint32_t stkBaseAddr() { return ADDR(BX_CPU_THIS_PTR espPageBias); }
++  void stkload(Op op, uint32_t a, unsigned align) {
++    usedStk = true;
++    if (stkBase()) { em->get(L_stkb); em->mem(op, a - stkBaseAddr(), align); } else zload(op, a, align);
++  }
 +  // the packed constants the merged cold arms take (see nanobox_cold_sync)
 +  Bit32s coldP1(unsigned k) const { return (Bit32s)((Bit64s) boff + (Bit64s) off[k + 1]); }
 +  Bit32u coldP2(unsigned k) const { return (Bit32u)((off[k + 1] - off[k]) & 0xf) | ((Bit32u) k << 4); }
@@ -4294,12 +4510,22 @@ index 000000000..7d22a2054
 +  }
 +  // Read `size` bytes for instruction k. Offset (i64) is in local `off_l`; kind selects the slow
 +  // path accessor. Result: i64 zero-extended value on the stack.
++  // NANOBOX_STACKTAG bit 1: an 8-byte SS-segment operand (`mov ...(%rsp)/(%rbp)`) is a stack slot
++  // in the same sense PUSH/POP are, so it can share the window. Kept separate because a frame slot
++  // is NOT always on the RSP page, and the CPU has exactly one window: a site that alternates pages
++  // evicts the one PUSH/POP want.
++  bool ssWindow(unsigned seg, unsigned size, uint32_t la, uint32_t off_l) const {
++    return stackTagSS() && seg == SEG_SS && size == 8 && la == off_l;
++  }
 +  void emitRead(unsigned k, MemKind kind, unsigned seg, unsigned size, uint32_t off_l) {
 +    const uint32_t la = laLocal(seg, off_l);
++    const bool sw = ssWindow(seg, size, la, off_l);
 +    blk(I64);
 +      blk();
-+        tlbProbe(la, size, 1, 0);
-+        { PhScope _pa(this, PH_ACCESS); pushHostAddr(la, nanobox_tlbfold && size > 1); em->mem(loadOp(size), 0, 0);
++        if (sw) stackWindow(off_l, 0); else tlbProbe(la, size, 1, 0);
++        { PhScope _pa(this, PH_ACCESS);
++        if (sw) pushStackAddr(); else pushHostAddr(la, nanobox_tlbfold && size > 1);
++        em->mem(loadOp(size), 0, 0);
 +        em->br(1); }
 +      endb();
 +      { PhScope _ps(this, PH_SLOW);
@@ -4329,9 +4555,14 @@ index 000000000..7d22a2054
 +    const uint32_t la = laLocal(seg, off_l);
 +    blk();
 +      blk();
-+        tlbProbe(la, size, 4, 0, size);
-+        if (!nanobox_tlbfold) emitWriteStamp(la, size); else needAsyncCheck = true;
-+        { PhScope _pa(this, PH_ACCESS); pushHostAddr(la, nanobox_tlbfold && size > 1); em->get(val_l); em->mem(storeOp(size), 0, 0);
++        if (ssWindow(seg, size, la, off_l)) { stackWindow(off_l, 0); needAsyncCheck = true; }
++        else {
++          tlbProbe(la, size, 4, 0, size);
++          if (!nanobox_tlbfold) emitWriteStamp(la, size); else needAsyncCheck = true;
++        }
++        { PhScope _pa(this, PH_ACCESS);
++        if (ssWindow(seg, size, la, off_l)) pushStackAddr(); else pushHostAddr(la, nanobox_tlbfold && size > 1);
++        em->get(val_l); em->mem(storeOp(size), 0, 0);
 +        em->br(1); }
 +      endb();
 +      { PhScope _ps(this, PH_SLOW);
@@ -4392,11 +4623,34 @@ index 000000000..7d22a2054
 +    em->get(out_l); em->op(I64_EQZ);
 +    iff(); emitStackRead(k, rsp_l); em->set(out_l); endb();
 +  }
++  // NANOBOX_STACKTAG. The CPU's own stack window as the whole probe: `biased = off + espPageBias`,
++  // valid iff `biased < espPageWindowSize` (the window is already 4096-7, so it covers the page-fit
++  // test for an 8-byte access too -- there is no separate offset compare, and no tag to poison).
++  // A miss re-runs stackPrefetch through nanobox_stack_fill; if that cannot serve it either, we
++  // branch to `slowDepth` and the ordinary stack accessor does the work.
++  // Leaves the page offset in K_stk.
++  void stackWindow(uint32_t off_l, uint32_t slowDepth) {
++    phPush(PH_PROBE_FAST);
++    em->get(off_l); stkload(I64_LOAD, ADDR(BX_CPU_THIS_PTR espPageBias), 3); em->op(I64_ADD); em->tee(K_stk);
++    stkload(I64_LOAD32_U, ADDR(BX_CPU_THIS_PTR espPageWindowSize), 2); em->op(I64_GE_U);
++    iff();
++      phPop(); phPush(PH_PROBE_MISS);
++      em->get(off_l); em->call(fn(FNIDX(&nanobox_stack_fill), "l>l")); em->tee(K_stk);
++      em->i64c(-1); em->op(I64_EQ); em->br_if(slowDepth + 1);
++      phPop(); phPush(PH_PROBE_FAST);
++    endb();
++    phPop();
++  }
++  void pushStackAddr() {
++    stkload(I32_LOAD, ADDR(BX_CPU_THIS_PTR espHostPtr), 2); em->get(K_stk); em->op(I32_WRAP_I64); em->op(I32_ADD);
++  }
 +  void emitStackRead(unsigned k, uint32_t off_l) {
 +        blk(I64);
 +      blk();
-+        tlbProbe(off_l, 8, 1, 0);
-+        { PhScope _pa(this, PH_ACCESS); pushHostAddr(off_l, nanobox_tlbfold != 0); em->mem(I64_LOAD, 0, 0);
++        if (stackTag()) stackWindow(off_l, 0); else tlbProbe(off_l, 8, 1, 0);
++        { PhScope _pa(this, PH_ACCESS);
++        if (stackTag()) pushStackAddr(); else pushHostAddr(off_l, nanobox_tlbfold != 0);
++        em->mem(I64_LOAD, 0, 0);
 +        em->br(1); }
 +      endb();
 +      { PhScope _ps(this, PH_SLOW);
@@ -4411,9 +4665,16 @@ index 000000000..7d22a2054
 +  void emitStackWrite(unsigned k, uint32_t off_l, uint32_t val_l) {
 +        blk();
 +      blk();
-+        tlbProbe(off_l, 8, 4, 0, 8);
-+        if (!nanobox_tlbfold) emitWriteStamp(off_l, 8); else needAsyncCheck = true;
-+        { PhScope _pa(this, PH_ACCESS); pushHostAddr(off_l, nanobox_tlbfold != 0); em->get(val_l); em->mem(I64_STORE, 0, 0);
++        // the write stamp: stackPrefetch closes the window on a page that carries iCache stamps,
++        // so a page reached through it never needs decWriteStamp (cpu/stack.cc).
++        if (stackTag()) { stackWindow(off_l, 0); needAsyncCheck = true; }
++        else {
++          tlbProbe(off_l, 8, 4, 0, 8);
++          if (!nanobox_tlbfold) emitWriteStamp(off_l, 8); else needAsyncCheck = true;
++        }
++        { PhScope _pa(this, PH_ACCESS);
++        if (stackTag()) pushStackAddr(); else pushHostAddr(off_l, nanobox_tlbfold != 0);
++        em->get(val_l); em->mem(I64_STORE, 0, 0);
 +        em->br(1); }
 +      endb();
 +      { PhScope _ps(this, PH_SLOW);
@@ -4643,7 +4904,7 @@ index 000000000..7d22a2054
 +      // Handlers may advance icount by more than one (repeat() counts each iteration), so
 +      // rebase our "icount at trace entry" so that ic0 + j stays exact for the instructions after.
 +      zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3); em->i64c(k + 1); em->op(I64_SUB); em->set(L_ic0);
-+      if (icDeferred()) { em->i32c((int32_t) loopTickN); em->set(L_tick); }   // L_ic0 is absolute again: restart the window
++      if (icDeferred()) { em->i32c((int32_t) loopTickN); em->set(L_tick); } else if (tickWindowDyn()) { em->i32c(1); em->set(L_tick); }   // L_ic0 is absolute again: restart the window
 +      // probe cache + alignment_check_mask AFTER the call (a POPF that flips EFLAGS.AC changes the
 +      // mask and continues the trace; loading it before the call left L_acm stale), then the
 +      // registers the exit chain stores
@@ -4935,7 +5196,7 @@ index 000000000..7d22a2054
 +        endb();
 +        restore(s);
 +      }
-+      em->get(t0); exitWithRipOnStack(k);
++      pushExitRipFrom(t0); exitWithRipOnStack(k);
 +      return true;
 +    }
 +
@@ -5139,7 +5400,7 @@ index 000000000..7d22a2054
 +        emitStackWrite(k, t2, t1);
 +        em->get(t2); regSetFromStack(R_RSP);
 +      }
-+      em->get(t0); exitWithRipOnStack(k);
++      pushExitRipFrom(t0); exitWithRipOnStack(k);
 +      return true;
 +    }
 +
@@ -6029,7 +6290,7 @@ index 000000000..7d22a2054
 +    // The cost of being late: an interrupt is taken up to tick-1 iterations after it was raised, and
 +    // icount (our own clock bookkeeping, not guest-visible state) lags by the same amount between
 +    // syncs. Identity mode keeps the per-iteration form.
-+    const unsigned tick = aotRelaxed() ? (nanobox_jit_aot_tick ? nanobox_jit_aot_tick : 1) : 1;
++    const unsigned tick = (aotRelaxed() && !tickExact(1)) ? (nanobox_jit_aot_tick ? nanobox_jit_aot_tick : 1) : 1;
 +    if (tick > 1) {
 +      // The guest's clock must stay exact: charging icount only at the sync and leaving it stale in
 +      // between kills codex at start-up ("sqlite pool timed out" -- timer interrupts come late and
@@ -6040,13 +6301,20 @@ index 000000000..7d22a2054
 +      // What is left on the back edge is the countdown, and it IS the branch: `get, const, add, tee,
 +      // br_if` -- 5 instructions, with the loop header's conform hoisted above it so that both the
 +      // fast edge and the post-sync edge run it exactly once.
++      // dyn (bit 32): sizing the window from the countdown puts the TIMER decision back where the
++      // interpreter took it, but cpu_loop also tests async_event at every boundary and that one is
++      // not a function of the countdown -- so it stays per-iteration (3 wasm instructions).
++      if (tickWindowDyn()) {
++        zaddr(ADDR(BX_CPU_THIS_PTR async_event)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR async_event)), 2);
++        { CacheState s = snapshot(); iff(); coldExit = true; pushExitRip((Bit64s) boff); exitWithRipOnStack(k); coldExit = false; endb(); restore(s); }
++      }
 +      if (!icDeferred()) { em->get(L_ic0); em->i64c((Bit64s)(k + 1)); em->op(I64_ADD); em->set(L_ic0); }
 +      emitLoopHeaderConform();
 +      em->get(L_tick); em->i32c(-1); em->op(I32_ADD); em->tee(L_tick); em->br_if(depth - loopDepth);
 +      // the window expired (L_tick reached 0): charge the iterations it completed BEFORE this one
 +      // (this one's k+1 is added by the exits below, as everywhere else), restart it, then sync
 +      if (icDeferred() && tick > 1) { em->get(L_ic0); em->i64c((Bit64s)(k + 1) * (Bit64s)(tick - 1)); em->op(I64_ADD); em->set(L_ic0); }
-+      em->i32c((int32_t) tick); em->set(L_tick);
++      if (!tickWindowDyn()) { em->i32c((int32_t) tick); em->set(L_tick); }   // (dyn: set from the countdown, below, once it has been updated)
 +      em->get(L_ic0); if (icDeferred()) { em->i64c((Bit64s)(k + 1)); em->op(I64_ADD); } em->set(now);
 +    } else {
 +      em->get(L_ic0); em->i64c((Bit64s)(k + 1)); em->op(I64_ADD); em->set(now);
@@ -6054,17 +6322,24 @@ index 000000000..7d22a2054
 +    em->get(now); zaddr(ADDR(BX_CPU_THIS_PTR icount_last_sync)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount_last_sync)), 3); em->op(I64_SUB); em->op(I32_WRAP_I64); em->set(delta);
 +    // if (delta >= currCountdown) -> exit (cpu_loop runs the timers)
 +    em->get(delta); zaddr(nanobox_pc_system_access::countdownAddr()); em->mem(I32_LOAD, zoff(nanobox_pc_system_access::countdownAddr()), 2); em->op(I32_GE_U);
-+    { CacheState s = snapshot(); iff(); coldExit = true; pushVA(0); exitWithRipOnStack(k); coldExit = false; endb(); restore(s); }
++    { CacheState s = snapshot(); iff(); coldExit = true; pushExitRip((Bit64s) boff); exitWithRipOnStack(k); coldExit = false; endb(); restore(s); }
 +    // currCountdown -= delta; icount_last_sync = now
 +    zaddr(nanobox_pc_system_access::countdownAddr()); zaddr(nanobox_pc_system_access::countdownAddr()); em->mem(I32_LOAD, zoff(nanobox_pc_system_access::countdownAddr()), 2); em->get(delta); em->op(I32_SUB); em->mem(I32_STORE, zoff(nanobox_pc_system_access::countdownAddr()), 2);
 +    zaddr(ADDR(BX_CPU_THIS_PTR icount_last_sync)); em->get(now); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR icount_last_sync)), 3);
++    // dynamic window (bit 32): the next sync must happen no later than the iteration at which
++    // delta reaches currCountdown, i.e. after ceil(currCountdown / (k+1)) more iterations. The
++    // countdown is >= 1 here (we exited above when it was reached), so the quotient is >= 1.
++    if (tickWindowDyn() && tick > 1) {
++      zaddr(nanobox_pc_system_access::countdownAddr()); em->mem(I32_LOAD, zoff(nanobox_pc_system_access::countdownAddr()), 2);
++      em->i32c((int32_t) k); em->op(I32_ADD); em->i32c((int32_t)(k + 1)); em->op(I32_DIV_U); em->set(L_tick);
++    }
 +    // if (async_event) -> exit
 +    zaddr(ADDR(BX_CPU_THIS_PTR async_event)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR async_event)), 2);
-+    { CacheState s = snapshot(); iff(); coldExit = true; pushVA(0); exitWithRipOnStack(k); coldExit = false; endb(); restore(s); }
++    { CacheState s = snapshot(); iff(); coldExit = true; pushExitRip((Bit64s) boff); exitWithRipOnStack(k); coldExit = false; endb(); restore(s); }
 +    // if (RIP + eipPageBias >= eipPageWindowSize) -> exit (cpu_loop re-prefetches)
 +    em->get(L_base); zaddr(ADDR(BX_CPU_THIS_PTR eipPageBias)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eipPageBias)), 3); em->op(I64_ADD);
 +    zaddr(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)); em->mem(I32_LOAD, zoff(ADDR(BX_CPU_THIS_PTR eipPageWindowSize)), 2); em->op(I64_EXTEND_I32_U); em->op(I64_GE_U);
-+    { CacheState s = snapshot(); iff(); coldExit = true; pushVA(0); exitWithRipOnStack(k); coldExit = false; endb(); restore(s); }
++    { CacheState s = snapshot(); iff(); coldExit = true; pushExitRip((Bit64s) boff); exitWithRipOnStack(k); coldExit = false; endb(); restore(s); }
 +    if (nanobox_dbg_mode) {
 +      // divergence finder: present the same state the interpreter has at a (post-sync) trace boundary
 +      spillAll(false);
@@ -6444,15 +6719,15 @@ index 000000000..7d22a2054
 +    // states) and how many exit-chain positions each body needs
 +    passNo = 1; nedges = 0;
 +    for (unsigned j = 0; j <= (unsigned) BX_MAX_TRACE_LENGTH; j++) tplWrap[j] = 0;
-+    usedAcm = usedUpl = usedInlineProbe = false;
-+    usedAcmTotal = usedUplTotal = usedInlineProbeTotal = true;   // pass 1 emits everything
++    usedAcm = usedUpl = usedInlineProbe = usedStk = false;
++    usedAcmTotal = usedUplTotal = usedInlineProbeTotal = usedStkTotal = true;   // pass 1 emits everything
 +    siteTags = false; nsiteTotal = 0; ninvalTotal = 0; nElig = 0;
 +    for (unsigned j = 0; j <= NB_REGION_MAX_BLOCKS; j++) blockInval[j] = blockElig[j] = 0;
 +    if (!compilePass()) return false;
 +    // pass 1 counted the memory sites and the mid-function invalidations and recorded the CFG:
 +    // pass 2 declares one (tag, host) pair per ELIGIBLE site and poisons exactly those.
 +    nsiteTotal = nsite; ninvalTotal = ninval;
-+    usedAcmTotal = usedAcm; usedUplTotal = usedUpl; usedInlineProbeTotal = usedInlineProbe;
++    usedAcmTotal = usedAcm; usedUplTotal = usedUpl; usedInlineProbeTotal = usedInlineProbe; usedStkTotal = usedStk;
 +    computeEligibleBlocks();
 +    passNo = 2;
 +    siteTags = siteWanted();
@@ -6502,6 +6777,7 @@ index 000000000..7d22a2054
 +    for (unsigned t = 0; t < 4; t++) X[t] = em->addLocal(I64);
 +    P_op1 = em->addLocal(I64); P_op2 = em->addLocal(I64); P_res = em->addLocal(I64);
 +    W = em->addLocal(I64);
++    K_stk = (nanobox_jit_stacktag != 0) ? em->addLocal(I64) : 0;
 +    C_lpf = em->addLocal(I64);
 +    D_lpf = em->addLocal(I64);
 +    if (flagsProbeLink() && nanobox_tlbfold && shortSig()) { C_tagR = 1; C_tagW = 2; C_ppf = em->addLocal(I64); D_ppf = em->addLocal(I64); D_tagR = em->addLocal(I64); D_tagW = em->addLocal(I64); }
@@ -6511,6 +6787,7 @@ index 000000000..7d22a2054
 +    if (siteTags) { S_tagBase = em->addLocal(I64); for (unsigned i = 1; i < nElig; i++) em->addLocal(I64); }
 +    L_upl = em->addLocal(I32);
 +    L_pob = em->addLocal(I32);
++    L_stkb = (nanobox_jit_stacktag & 4) ? em->addLocal(I32) : 0;
 +    L_cpu = em->addLocal(I32);
 +    L_tick = em->addLocal(I32);   // AOT: iterations left before the next full back-edge sync
 +    L_direct = L_dcs = L_dcf = 0xffffffffu;   // direct calls: declared on first use (see unitHasRet / dcallLocals)
@@ -6539,7 +6816,7 @@ index 000000000..7d22a2054
 +  // of the probe that computes them, so they need not travel)
 +  static bool shortSig() { return (nanobox_jit_flags & 64) != 0; }
 +  // does the shared signature carry the entry state? (must match nanobox_jit_call in nanobox_jit.h)
-+  static bool dcallSig() { return (nanobox_jit_flags & 512) != 0 && nanobox_jit_aot != 0 && !nanobox_dbg_mode; }
++  static bool dcallSig() { return (nanobox_jit_flags & 512) != 0 && nanobox_jit_aot != 0 && !nanobox_dbg_mode && (nanobox_jit_tickexact & 8) == 0; }
 +  static uint32_t jitFuncType(Module &mod) {
 +    if (shortSig()) {
 +      ValType p[6] = { I32, I64, I64, I32, I64, I64 };
@@ -6624,7 +6901,8 @@ index 000000000..7d22a2054
 +    if (dcallSig()) em->get(P_ic0()); else { zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->mem(I64_LOAD, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3); } em->set(L_ic0);
 +    if (needUpl()) { zaddr(ADDR(BX_CPU_THIS_PTR user_pl)); em->mem(I32_LOAD8_U, zoff(ADDR(BX_CPU_THIS_PTR user_pl)), 0); em->set(L_upl); }
 +    if (useProbeBase()) { em->i32c((int32_t) ADDR(nanobox_probe_out)); em->set(L_pob); }   // 6 bytes once; 3 saved at every refill
-+    if (aotRelaxed()) { em->i32c((int32_t) nanobox_jit_aot_tick); em->set(L_tick); }   // two instructions once, per function entry
++    if (stkBase() && (passNo == 1 || usedStkTotal)) { em->i32c((int32_t) stkBaseAddr()); em->set(L_stkb); }
++    if (aotRelaxed()) { em->i32c(tickWindowDyn() ? 1 : (int32_t) nanobox_jit_aot_tick); em->set(L_tick); }   // two instructions once, per function entry (dyn: the first back edge sizes it)
 +    if (reg) {
 +      // first execution of the entry block since the attach: mark the reference write stamps as the
 +      // interpreter's decode would (a dead region cannot be entered: the registry cleared its members' jitfn)
@@ -6653,8 +6931,8 @@ index 000000000..7d22a2054
 +    }
 +    // exactly one back edge: its iterations all retire selfK+1 instructions, so an exit can correct
 +    // the clock from the countdown and the fast path need not charge it (see emitLoopBack)
-+    loopIcPerIter = 0; loopTickN = aotRelaxed() ? (nanobox_jit_aot_tick ? nanobox_jit_aot_tick : 1) : 1;
-+    if (aotRelaxed() && loopTickN > 1 && nSelf == 1) loopIcPerIter = selfK + 1;
++    loopIcPerIter = 0; loopTickN = (aotRelaxed() && !tickExact(1)) ? (nanobox_jit_aot_tick ? nanobox_jit_aot_tick : 1) : 1;
++    if (aotRelaxed() && loopTickN > 1 && nSelf == 1 && !tickWindowDyn()) loopIcPerIter = selfK + 1;   // (dyn: (tick - L_tick) is not a compile-time count)
 +    linkOK = useTemplates && !nanobox_dbg_mode;
 +    // $body: every exit ends up here (through its body's exit chain); the common tail after it
 +    // commits RIP/prev_rip/icount from T[7]/L_xic and links (returns in dbg mode)
@@ -6745,6 +7023,7 @@ index 000000000..7d22a2054
 +      endb(); bodyDepth = -1;   // $body
 +      PhScope _pt(this, PH_TAIL);
 +      // common tail: RIP/prev_rip/icount from the exit, then link (dbg mode: back to cpu_loop)
++      if (faRipOffset()) { em->get(L_base); em->get(T[7]); em->op(I64_ADD); em->set(T[7]); }   // exits leave an offset
 +      zaddr(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)); em->get(T[7]); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)), 3);
 +      zaddr(ADDR(BX_CPU_THIS_PTR prev_rip)); em->get(T[7]); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR prev_rip)), 3);
 +      zaddr(ADDR(BX_CPU_THIS_PTR icount)); em->get(L_ic0); em->get(L_xic); em->op(I64_ADD); em->mem(I64_STORE, zoff(ADDR(BX_CPU_THIS_PTR icount)), 3);
@@ -6871,6 +7150,7 @@ index 000000000..7d22a2054
 +      bool last = (k + 1 == n);
 +      bool done = false;
 +      needAsyncCheck = false;
++      phIa(ins[k].getIaOpcode()); nanobox_phase_inst(ins[k].getIaOpcode());
 +      flagsLive = !flagsDead[k];
 +      // An aliased pending operand (a compare whose operands were left in their register locals) is
 +      // only valid while those locals still hold them. Rather than track every path that can reload
@@ -6882,6 +7162,7 @@ index 000000000..7d22a2054
 +        unsigned run = stackRunLen(k);
 +        if (run) {
 +          bool runLast = (k + run == n);
++          for (unsigned i = 1; i < run; i++) nanobox_phase_inst(ins[k + i].getIaOpcode());
 +          if (!emitStackRun(k, run)) return false;
 +          k += run - 1;
 +          if (runLast) exitFallthroughOrTransition(k);
@@ -6939,6 +7220,7 @@ index 000000000..7d22a2054
 +        exitFallthroughOrTransition(k);
 +      }
 +    }
++    phIa(NB_PHOP_NONE);
 +    return true;
 +  }
 +};
@@ -6958,6 +7240,43 @@ index 000000000..7d22a2054
 +static JitCacheEntry jitcache[JITCACHE_SIZE];
 +static unsigned jitcache_count = 0;
 +static Bit64u jitcache_hits = 0, jitcache_clears = 0;
++
++// ---- cache-clear safety (docs/aot-size-and-coverage.md plan item 11, TASKS.md V.8) --------------
++// nanobox_jit_cache_clear() frees EVERY Region in the jitcache, frees every Region still listed in
++// nb_pending (through nanobox_jit_batch_drop) and, through hook_release_all(), invalidates every
++// function-table index the engine installed. It is reachable from two places that sit INSIDE a
++// producer which is half way through publishing a translation:
++//   * nanobox_jit_cache_put   -- the content cache reached JITCACHE_LIMIT
++//   * nanobox_region_attach   -- the attach-registry pool is full and a sweep did not free enough
++// and the batch flush calls BOTH, once per queued entry. Three faults follow, all fixed below and
++// all restored bit for bit by nanobox_jit_clearfix = 0 (A/B inside one binary):
++//   1 DOUBLE FREE. nanobox_jit_batch_flush hands nb_pending[i].reg to the jitcache as it walks the
++//     batch, but leaves the pointer in nb_pending. A clear at entry i therefore frees entries
++//     0..i-1 twice: once through nanobox_jit_batch_drop, once through the jitcache sweep.
++//   2 A RELEASED FUNCTION INDEX PUBLISHED INTO THE FRESH CACHE. Both the flush and the non-batched
++//     compile call nanobox_jit_attach BEFORE nanobox_jit_cache_put. A clear inside the attach
++//     releases `fn` with everything else, and the put then re-publishes that dead index under its
++//     content key in the now-empty cache. The next entry that looks the key up gets
++//     e->jitfn = <released slot> and its call_indirect traps -- "null function or function
++//     signature mismatch" if the slot is still null, silent wrong code if it has been recycled.
++//   3 A DANGLING Region PUBLISHED. The same put also stores pd.reg, already freed by (1).
++unsigned nanobox_jit_clearfix = 1;
++// Diagnostic only (docs plan item 11): the number of live content-cache entries at which
++// nanobox_jit_cache_put clears the cache. Default JITCACHE_LIMIT = the shipping value; a small value
++// reproduces in seconds what a long session reaches on its own. Never set outside a debug run.
++unsigned nanobox_jit_cache_lim = JITCACHE_LIMIT;
++NB_EXPORT(nanobox_set_jit_cache_limit) void nanobox_set_jit_cache_limit(unsigned n) { nanobox_jit_cache_lim = n ? n : JITCACHE_LIMIT; }
++NB_EXPORT(nanobox_set_jit_clearfix) void nanobox_set_jit_clearfix(unsigned on) { nanobox_jit_clearfix = on; }
++// [0] clears from nanobox_jit_cache_put (cache full)  [1] clears from nanobox_region_attach (pool full)
++// [2] clears reached while a batch flush was on the stack
++// [3] regions that flush had already handed to the jitcache when such a clear happened (= double frees)
++// [4] released fn indices NOT published because the attach cleared under the producer
++// [5] batch flushes abandoned after a clear           [6] clears from anywhere else (AOT mode switch)
++static Bit64u nb_clear_diag[8];
++static unsigned nb_clear_why = 6;        // set by the caller immediately before it calls the clear
++static unsigned nb_in_flush = 0;         // nanobox_jit_batch_flush is on the stack
++static unsigned nb_flush_published = 0;  // regions of the current flush already stored in the jitcache
++static bool nb_put_stored = false;       // did the last nanobox_jit_cache_put actually store its region?
 +
 +static Bit64u nanobox_jit_hash(bxICacheEntry_c *e, unsigned &nreal)
 +{
@@ -6991,6 +7310,9 @@ index 000000000..7d22a2054
 +static void nanobox_attach_pool_reset(void);
 +static void nanobox_jit_cache_clear(void)
 +{
++  nb_clear_diag[nb_clear_why < 8 ? nb_clear_why : 6]++;
++  if (nb_in_flush) { nb_clear_diag[2]++; nb_clear_diag[3] += nb_flush_published; }
++  nb_clear_why = 6;
 +  nanobox_jit_batch_drop();
 +  hook_release_all();
 +  nanobox_link_fn = 0;
@@ -7004,7 +7326,8 @@ index 000000000..7d22a2054
 +}
 +NB_EXPORT(nanobox_jit_cache_stat) double nanobox_jit_cache_stat(unsigned which)
 +{
-+  switch (which) { case 0: return jitcache_count; case 1: return (double) jitcache_hits; case 2: return (double) jitcache_clears; default: return 0; }
++  switch (which) { case 0: return jitcache_count; case 1: return (double) jitcache_hits; case 2: return (double) jitcache_clears;
++                   default: return which >= 3 && which < 11 ? (double) nb_clear_diag[which - 3] : 0; }
 +}
 +
 +/////////////////////////////////////////////////////////////////////////
@@ -7088,6 +7411,7 @@ index 000000000..7d22a2054
 +// seen up to this many iterations late -- at 64 iterations of a 6-instruction loop that is <400 guest
 +// instructions, well under a microsecond of guest time. 1 = the identity behaviour (check every time).
 +unsigned nanobox_jit_aot_tick = 64;
++unsigned nanobox_jit_tickexact = 0;   // AOT tick-exactness mask, default 0 = today's AOT engine
 +// AOT, on the user's instruction: a guest CALL need not write its return address into emulated RAM
 +// and a guest RET need not read it back -- both are a TLB probe plus a memory access (~20 and ~15
 +// wasm instructions) for a value the engine already knows. With this on, the pair is kept on a HOST
@@ -7176,6 +7500,9 @@ index 000000000..7d22a2054
 +NB_EXPORT(nanobox_set_jit_aot_poolreset) void nanobox_set_jit_aot_poolreset(unsigned on) { nanobox_jit_aot_poolreset = on; }
 +NB_EXPORT(nanobox_set_jit_stackify) void nanobox_set_jit_stackify(unsigned on) { nanobox_jit_stackify = on; }
 +NB_EXPORT(nanobox_set_jit_aot_tick) void nanobox_set_jit_aot_tick(unsigned n) { nanobox_jit_aot_tick = n ? n : 1; }
++// Set BEFORE anything is compiled: bit 8 changes the wasm signature a translated function has
++// (dcallSig), and the two shapes cannot coexist in one table.
++NB_EXPORT(nanobox_set_jit_tickexact) void nanobox_set_jit_tickexact(unsigned mask) { nanobox_jit_tickexact = mask; }
 +NB_EXPORT(nanobox_set_jit_aot_nostack) void nanobox_set_jit_aot_nostack(unsigned on) { nanobox_jit_aot_nostack = on; nanobox_shadow_n = 0; nanobox_shadow_miss = 0; }
 +// 0 formed, 1 blocks, 2 compiled, 3 cache hits,
 +// 4 traces decoded ahead, 5 decode-ahead skipped (iCache pool would flush / slot in use / no host page),
@@ -7610,7 +7937,7 @@ index 000000000..7d22a2054
 +  r->fn = fn; r->dead = 0;
 +  memset(r->dcall, 0, sizeof(r->dcall));   // a re-attached region may sit at another linear base
 +  for (unsigned j = 0; j < NB_REGION_MAX_BLOCKS; j++) r->dcall[j].miss = nanobox_dcall_warmup;
-+  if (!nanobox_attach_register(r)) { nanobox_jit_cache_clear(); return; }   // (clears everything incl. e->jitfn)
++  if (!nanobox_attach_register(r)) { nb_clear_why = 1; nanobox_jit_cache_clear(); return; }   // (clears everything incl. e->jitfn)
 +  for (unsigned j = 0; j < r->nblocks; j++) {
 +    bx_phy_address pa = r->b[j].ent.pAddr;
 +    bxICacheEntry_c *se = (r->srcEntry[j] == e || (j == 0 && e->pAddr == pa)) ? e : BX_CPU_THIS_PTR iCache.get_entry(pa, BX_CPU_THIS_PTR fetchModeMask);
@@ -7687,8 +8014,12 @@ index 000000000..7d22a2054
 +void nanobox_jit_promote(bxICacheEntry_c *e)
 +{
 +  Bit32u oldfn = e->jitfn, oldarg = e->jitarg;
++  const Bit64u gen = jitcache_clears;
 +  e->jitfn = 0;
 +  nanobox_jit_maybe_compile(e);
++  // ... unless the compile cleared the cache under us: hook_release_all() released oldfn too, and
++  // putting it back would leave the entry pointing at a dead (or recycled) table slot.
++  if (nanobox_jit_clearfix && jitcache_clears != gen) return;
 +  if (!e->jitfn) { e->jitfn = oldfn; e->jitarg = oldarg; }   // queued in a batch, or declined: stay at tier 0
 +  else nanobox_tier_stats[1]++;
 +}
@@ -7764,12 +8095,24 @@ index 000000000..7d22a2054
 +static void nanobox_jit_cache_put(Bit64u key, unsigned fn, unsigned len, Region *reg)
 +{
 +  JitCacheEntry *c = nanobox_jit_cache_slot(key);
-+  if (jitcache_count >= JITCACHE_LIMIT || c == NULL) { nanobox_jit_cache_clear(); return; }  // (the fn was released with everything else)
++  nb_put_stored = false;
++  if (jitcache_count >= nanobox_jit_cache_lim || c == NULL) { nb_clear_why = 0; nanobox_jit_cache_clear(); return; }  // (the fn was released with everything else)
 +  if (c->key == key) return;
 +  c->key = key; c->fn = fn; c->len = len; c->mask = reg ? reg->mask : 0; c->region = reg; jitcache_count++;
++  nb_put_stored = true;
 +}
 +static void nanobox_jit_batch_drop(void)
 +{
++  // Diagnostic (runs only here, i.e. only on a cache clear / mode switch): a queued region that the
++  // in-progress nanobox_jit_batch_flush has ALREADY handed to the content cache is owned twice --
++  // this delete is its first free and the clear's own jitcache sweep is its second. Counting it here
++  // is the direct measurement of fault 1; with nanobox_jit_clearfix on it can never fire, because the
++  // flush empties nb_pending before it publishes anything.
++  for (unsigned i = 0; i < nb_npending; i++) {
++    if (!nb_pending[i].reg) continue;
++    JitCacheEntry *c = nanobox_jit_cache_slot(nb_pending[i].key);
++    if (c && c->key == nb_pending[i].key && c->region == nb_pending[i].reg) nb_clear_diag[7]++;
++  }
 +  for (unsigned i = 0; i < nb_npending; i++) if (nb_pending[i].reg) delete nb_pending[i].reg;
 +  nb_npending = 0;
 +  if (nb_batch) { delete nb_batch; nb_batch = NULL; }
@@ -7779,9 +8122,18 @@ index 000000000..7d22a2054
 +  if (!nb_batch || nb_npending == 0) return;
 +  Buf bytes; nb_batch->finish(bytes);
 +  unsigned out[NB_BATCH];
-+  unsigned ok = hook_install_batch(bytes.p, bytes.n, nb_batch->importKeys, nb_batch->nimports, nb_npending, out);
++  const unsigned n = nb_npending;
++  Module *mod = nb_batch;
++  // Take the batch OUT of the globals before anything below can re-enter nanobox_jit_cache_clear():
++  // its nanobox_jit_batch_drop() would free exactly the regions this loop is handing to the jitcache
++  // (which then frees them a second time). With the batch detached, the regions below are owned by
++  // this frame alone and every exit path disposes of them once.
++  if (nanobox_jit_clearfix) { nb_npending = 0; nb_batch = NULL; }
++  unsigned ok = hook_install_batch(bytes.p, bytes.n, mod->importKeys, mod->nimports, n, out);
 +  nanobox_batch_stats[0]++;
-+  for (unsigned i = 0; i < nb_npending; i++) {
++  const Bit64u gen = jitcache_clears;
++  nb_in_flush++; nb_flush_published = 0;
++  for (unsigned i = 0; i < (nanobox_jit_clearfix ? n : nb_npending); i++) {
 +    Pending &pd = nb_pending[i];
 +    if (!ok || out[i] == 0) { if (pd.reg) delete pd.reg; if (pd.e->pAddr == pd.pAddr) *BX_CPU_THIS_PTR iCache.hotOf(pd.e) = 0; continue; }
 +    unsigned fn = out[i];
@@ -7791,10 +8143,31 @@ index 000000000..7d22a2054
 +    // the entry may have been evicted/re-decoded/flushed while the batch was open
 +    if (pd.e->pAddr == pd.pAddr && pd.e->i == pd.i && pd.e->jitfn == 0) nanobox_jit_attach(pd.e, fn, pd.reg, pd.key);
 +    else nanobox_batch_stats[2]++;
-+    // (a cache clear inside put releases everything installed so far, including fn: fine)
++    if (nanobox_jit_clearfix && jitcache_clears != gen) {
++      // the ATTACH cleared (attach-registry pool full). hook_release_all() took `fn` -- and every
++      // other out[] of this batch -- with it, so nothing here may be published; the entry's jitfn
++      // was zeroed by the clear too. pd.reg is still ours (the batch is detached).
++      nb_clear_diag[4]++; nb_clear_diag[5]++;
++      if (pd.reg) delete pd.reg;
++      for (unsigned j = i + 1; j < n; j++) if (nb_pending[j].reg) delete nb_pending[j].reg;
++      nb_in_flush--; delete mod; return;
++    }
 +    nanobox_jit_cache_put(pd.key, fn, 0, pd.reg);
++    if (nanobox_jit_clearfix) {
++      if (jitcache_clears != gen) {   // the PUT cleared: it stored nothing, so pd.reg is orphaned
++        nb_clear_diag[5]++;
++        if (pd.reg) delete pd.reg;
++        for (unsigned j = i + 1; j < n; j++) if (nb_pending[j].reg) delete nb_pending[j].reg;
++        nb_in_flush--; delete mod; return;
++      }
++      if (pd.reg && nb_put_stored) nb_flush_published++;
++      continue;
++    }
++    if (pd.reg && nb_put_stored) nb_flush_published++;
 +    if (jitcache_count == 0) { for (unsigned j = i + 1; j < nb_npending; j++) if (nb_pending[j].reg) delete nb_pending[j].reg; break; }
 +  }
++  nb_in_flush--;
++  if (nanobox_jit_clearfix) { delete mod; return; }
 +  nb_npending = 0;
 +  delete nb_batch; nb_batch = NULL;
 +}
@@ -7860,10 +8233,15 @@ index 000000000..7d22a2054
 +    hook_note(fn, (unsigned)(key & 0xffffffffu), (unsigned)(key >> 32));
 +    nanobox_stats.jit_compiled++;
 +    if (reg) nanobox_region_stats[2]++;
++    const Bit64u gen = jitcache_clears;
 +    nanobox_jit_attach(e, fn, reg, key);
 +    if (nanobox_dbg_mode) { nanobox_dbg_compiled(e, fn, bytes.n); return true; }  // dbg mode: no cache (region objects are leaked on purpose)
++    if (nanobox_jit_clearfix && jitcache_clears != gen) {
++      // the attach cleared: `fn` was released with everything else, so it must NOT be published
++      nb_clear_diag[4]++; e->jitfn = 0; if (reg) delete reg; return true;
++    }
 +    nanobox_jit_cache_put(key, fn, bytes.n, reg);
-+    if (jitcache_count == 0) { e->jitfn = 0; }
++    if (jitcache_count == 0) { e->jitfn = 0; if (nanobox_jit_clearfix && reg) delete reg; }
 +    return true;
 +  }
 +  // batched: compile into the open module, attach at flush time
@@ -7903,6 +8281,7 @@ index 000000000..7d22a2054
 +  return false;
 +}
 +static void nanobox_jit_maybe_compile_inner(bxICacheEntry_c *e);
++static void nanobox_jit_maybe_compile_at(bxICacheEntry_c *e, bx_address entryLin, Region **formed);
 +static void nanobox_eager_sweep(bxICacheEntry_c *e)
 +{
 +  bx_phy_address page = e->pAddr & ~(bx_phy_address) 0xfff;
@@ -7926,7 +8305,15 @@ index 000000000..7d22a2054
 +    }
 +    unsigned n = nanobox_real_len(se);
 +    if (n == 0) continue;
-+    if (!se->jitfn) { nanobox_jit_maybe_compile_inner(se); nanobox_eager_stats[1]++; }
++    // The entry's LINEAR address, not the CPU's current RIP. nanobox_jit_maybe_compile_inner()
++    // derives it from RIP (correct only for the trace cpu_loop is executing); the sweep hands the
++    // compiler a foreign entry, so the region former was told the wrong linear base and resolved
++    // every successor as entryLin + offset -> blocks pulled from the WRONG offsets of the page (and,
++    // when the bogus base straddled a page, from a wrong frame). The region attached to `se` then ran
++    // code that was never at those addresses: with regions on, the eager kernel recording stalled the
++    // boot for good (the guest spun in the tsc.c page, ~3e9 instructions, never opening a file);
++    // with `--jit-region 1` the very same eager run reproduced the interpreter's icount exactly.
++    if (!se->jitfn) { nanobox_jit_maybe_compile_at(se, pageLin + off, NULL); nanobox_eager_stats[1]++; }
 +    // successors inside the page: direct targets + callee entry + continuation after a call
 +    Bit64s t[3]; unsigned nt = 0;
 +    nanobox_direct_targets(se, n, 0, t, nt);
@@ -8301,10 +8688,10 @@ index 000000000..7d22a2054
 +}
 diff --git a/bochs/nanobox_jit.h b/bochs/nanobox_jit.h
 new file mode 100644
-index 000000000..768c89608
+index 000000000..eb044a300
 --- /dev/null
 +++ b/bochs/nanobox_jit.h
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,70 @@
 +/////////////////////////////////////////////////////////////////////////
 +// nanobox trace JIT — public interface used by the CPU loop and the iCache.
 +//
@@ -8338,6 +8725,7 @@ index 000000000..768c89608
 +typedef void (*nanobox_jitfn13_t)(bxInstruction_c *trace, Bit64u, Bit64u, Bit64u, Bit64u, Bit64u, Bit64u, unsigned, unsigned, unsigned, unsigned, Bit64u, Bit64u);
 +extern unsigned nanobox_jit_flags;
 +extern unsigned nanobox_jit_aot;
++extern unsigned nanobox_jit_tickexact;   // AOT tick-exactness mask (bit 8 turns direct calls off, changing the shared signature)
 +
 +void nanobox_jit_maybe_compile(bxICacheEntry_c *e);   // compile e (called by cpu_loop when e got hot)
 +// two-tier emission (work/prof/tier.md): tier 0 is the compact call form
@@ -8363,7 +8751,7 @@ index 000000000..768c89608
 +  nanobox_stats.jit_traces++;
 +  nanobox_probe_mem[0] = nanobox_probe_mem[1] = (Bit64u) -1;   // memory-resident probe cache (flags bit 5): only a linking trace may hand one over
 +  nanobox_single_step = 1;
-+  const bool dc = (nanobox_jit_flags & 512) && nanobox_jit_aot && !nanobox_dbg_mode;
++  const bool dc = (nanobox_jit_flags & 512) && nanobox_jit_aot && !nanobox_dbg_mode && !(nanobox_jit_tickexact & 8);
 +  if (nanobox_jit_flags & 64) {
 +    if (dc) ((nanobox_jitfn6_t)(uintptr_t) e->jitfn)((bxInstruction_c *)(uintptr_t) e->jitarg, (Bit64u) -1, (Bit64u) -1, 0, BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx, BX_CPU_THIS_PTR icount);
 +    else ((nanobox_jitfn4_t)(uintptr_t) e->jitfn)((bxInstruction_c *)(uintptr_t) e->jitarg, (Bit64u) -1, (Bit64u) -1, 0);

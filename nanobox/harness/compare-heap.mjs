@@ -3,6 +3,7 @@
 //
 //   node compare-heap.mjs --a <prefixA> --b <prefixB> [--mask a|union|b|none] [--window F]
 //                         [--no-syscalls] [--max-list N] [--json OUT]
+//                         [--normalise-addresses [delta|bij]] [--no-arity]
 //
 // where <prefix>.ph / <prefix>.smap / <prefix>.sys are what `run.mjs --page-hash / --stack-map /
 // --syscall-trace` wrote for that engine.
@@ -12,8 +13,10 @@
 //  * HEAP: every guest-physical 4 KiB page that is NOT a call-stack page must have the same content
 //    on both engines, at the same marker. "Call-stack page" is not an address range -- it is the set
 //    of physical pages the CPU itself resolved its stack window to during the run (Bochs'
-//    stackPrefetch: push/pop/call/ret/enter/leave, interrupt and exception frames, iret, task
-//    switches, and the decoder's SS-segment MOV forms, i.e. `mov ...(%rsp)/(%rbp)` frame slots), so
+//    stackPrefetch: push/pop/call/ret/enter/leave, interrupt and exception frames, iret and task
+//    switches -- NOT the decoder's SS-segment MOV forms, which this comment used to claim: only
+//    BX_IA_MOV_Op32_{GdEd,EdGd} are redirected there, and the 64-bit MOV64S_* handlers are dead code
+//    no opcode assigns, so `mov ...(%rsp)` in 64-bit code takes the ordinary path), so
 //    it covers kernel per-task stacks, IRQ/exception stacks and every user thread stack uniformly,
 //    without knowing a single guest address.
 //    The default mask is side A's -- the REFERENCE engine's -- set, never the union: a mask taken
@@ -27,9 +30,19 @@
 //    differ: a wrong register, a wrong branch or a wrong memory read shows up in an argument, a
 //    return value or a payload long before the guest's heap settles.
 //
+//  * --normalise-addresses (OFF by default, nothing that gates today changes) replaces the literal
+//    syscall comparison with a comparison up to a CONSISTENT RENAMING of the addresses the guest
+//    derived from its own clock -- an mmap hint, an ASLR base, a brk result -- so that an AOT-mode
+//    engine, whose tick count legitimately differs, can be compared at all. Structure (kind, order,
+//    sequence, syscall number, payload length and hash) stays literal; a differing value is a
+//    violation unless a region established at an mmap/brk/mremap/shmat result explains it. On a pair
+//    of engines with the same tick stream no region is ever created and the comparison is exactly
+//    the literal one. See harness/sysnorm.mjs for the full rules and TASKS.md V.9 for the proof.
+//
 // Exit code 0 = both identical, 1 = a difference (also printed).
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { compareSysNormalised } from "./sysnorm.mjs";
 
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
@@ -37,6 +50,10 @@ const A = opt("--a"), B = opt("--b");
 if (!A || !B) { console.error("usage: compare-heap.mjs --a <prefixA> --b <prefixB> [--mask a|union|b|none] [--window F] [--no-syscalls]"); process.exit(2); }
 const MASK = opt("--mask", "a"), WINDOW = Number(opt("--window", 1)), MAXLIST = Number(opt("--max-list", 12));
 const DO_SYS = !argv.includes("--no-syscalls");
+// --normalise-addresses [delta|bij]: tick-insensitive syscall comparison (default OFF = literal).
+const NORM = argv.includes("--normalise-addresses");
+const NORM_MODE = (() => { const i = argv.indexOf("--normalise-addresses"); const v = i >= 0 ? argv[i + 1] : null; return v === "bij" || v === "delta" ? v : "delta"; })();
+const NORM_ARITY = !argv.includes("--no-arity");
 
 // ---- page hashes -------------------------------------------------------------------------------
 // A .ph file is a sequence of (header JSON line, base64 of a Uint32Array[2*npages]) pairs, one pair
@@ -122,6 +139,24 @@ if (DO_SYS && fs.existsSync(A + ".sys") && fs.existsSync(B + ".sys")) {
   const ta = fs.readFileSync(A + ".sys", "utf8").split("\n"), tb = fs.readFileSync(B + ".sys", "utf8").split("\n");
   const count = (t, c) => t.reduce((n, l) => n + (l.startsWith(c) ? 1 : 0), 0);
   console.log(`syscalls: A ${count(ta, "S ")} calls / ${count(ta, "W ")} payloads / ${count(ta, "R ")} returns, B ${count(tb, "S ")} / ${count(tb, "W ")} / ${count(tb, "R ")}`);
+  if (NORM) {
+    const r = compareSysNormalised(ta, tb, { mode: NORM_MODE, arity: NORM_ARITY });
+    const st = r.stats;
+    const how = `normalised (${NORM_MODE}${NORM_ARITY ? "" : ", args beyond arity still compared"}): ` +
+      `${st.regions} renamed region(s), ${st.byDelta} value(s) explained by a region offset` +
+      (NORM_MODE === "bij" ? `, ${st.byBijection} by the within-region bijection (${st.bijBound} bound)` : "") +
+      `, ${st.beyondArity} register(s) past the call's arity ignored, ${st.payloadPtr} payload(s) holding a renamed pointer`;
+    console.log(`  ${how}`);
+    for (const g of r.regions.slice(0, MAXLIST)) console.log(`    region ${g.a.toString(16)} <-> ${g.b.toString(16)} len ${g.len.toString(16)} (${g.origin})`);
+    if (r.identical) { console.log(`SYSCALLS: IDENTICAL UP TO RENAMING (${r.lines} trace lines)`); report.syscalls = { identical: true, normalised: NORM_MODE, lines: r.lines, stats: st }; }
+    else {
+      ok = false;
+      console.log(`SYSCALLS: **DIFFER** at trace line ${r.line} (${r.why})` + (r.line > 1 ? `\n  last identical: ${ta[r.line - 2]}` : ""));
+      console.log(`  A: ${r.a === undefined ? "(end of trace)" : r.a.slice(0, 300)}`);
+      console.log(`  B: ${r.b === undefined ? "(end of trace)" : r.b.slice(0, 300)}`);
+      report.syscalls = { identical: false, normalised: NORM_MODE, line: r.line, why: r.why, a: r.a, b: r.b, stats: st };
+    }
+  } else {
   let d = -1;
   for (let i = 0; i < Math.min(ta.length, tb.length); i++) if (ta[i] !== tb[i]) { d = i; break; }
   if (d < 0 && ta.length !== tb.length) d = Math.min(ta.length, tb.length);
@@ -132,6 +167,7 @@ if (DO_SYS && fs.existsSync(A + ".sys") && fs.existsSync(B + ".sys")) {
     console.log(`  A: ${ta[d] === undefined ? "(end of trace)" : ta[d].slice(0, 300)}`);
     console.log(`  B: ${tb[d] === undefined ? "(end of trace)" : tb[d].slice(0, 300)}`);
     report.syscalls = { identical: false, line: d + 1, a: ta[d], b: tb[d] };
+  }
   }
 } else if (DO_SYS) console.log("syscalls: no trace files (pass --syscall-trace to both runs)");
 

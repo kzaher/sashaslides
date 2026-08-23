@@ -290,7 +290,13 @@ static void do_spawn(uint32_t id, rd_t *r) {
   if (pid < 0) { err = errno; goto out; }
   if (pid == 0) { /* ---- child */
     sigset_t e; sigemptyset(&e); sigprocmask(SIG_SETMASK, &e, NULL);
-    signal(SIGPIPE, SIG_DFL);
+    /* The shim is commonly started as a background job beside Codex.  POSIX shells launch such
+       jobs with interactive signals ignored, and SIG_IGN survives exec.  Never leak those inherited
+       dispositions into PTY children: otherwise their foreground commands visibly echo ^C but
+       ignore SIGINT forever. */
+    signal(SIGHUP, SIG_DFL); signal(SIGINT, SIG_DFL); signal(SIGQUIT, SIG_DFL);
+    signal(SIGPIPE, SIG_DFL); signal(SIGTERM, SIG_DFL); signal(SIGCHLD, SIG_DFL);
+    signal(SIGWINCH, SIG_DFL);
     if (use_pty) {
       setsid();
       int s = open(sname, O_RDWR);
