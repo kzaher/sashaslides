@@ -42,6 +42,10 @@ venv/
 data/
 *.db
 
+# Presentation-analysis render/copy outputs (regenerate with the analysis pipeline)
+/analysis/scripts/slide_*.png
+/analysis/eval/results/*/extraction/slide_*.png
+
 # Docker
 .docker/
 .claude/worktrees/*

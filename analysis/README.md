@@ -49,6 +49,11 @@ npm run screenshot
 npm run score
 ```
 
+The `extraction/slide_*.png` files are generated copies of the canonical images under
+`presentations/<id>/` and are intentionally not tracked. Ad-hoc `scripts/slide_*.png` renders are
+also temporary; write diagnostics to a directory under `/tmp` when they do not belong to a named
+presentation.
+
 ### Options
 
 ```bash
