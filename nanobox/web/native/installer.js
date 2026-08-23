@@ -335,6 +335,9 @@
 
   // ---- what the guest runs -----------------------------------------------------------------------
   const CODEX_HTTPS_PROVIDER_ARGS = [
+    // A browser VM has no durable OS keyring. Force the file backend so ~/.codex/auth.json is
+    // captured by the persistent /root journal instead of living only in the emulated kernel.
+    "-c", "cli_auth_credentials_store=\"file\"",
     "-c", "model_provider=\"nanobox-https\"",
     "-c", "model_providers.nanobox-https.name=\"OpenAI\"",
     "-c", "model_providers.nanobox-https.base_url=\"https://chatgpt.com/backend-api/codex\"",

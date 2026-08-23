@@ -142,15 +142,33 @@ async function netFetch(req, res) {
   const chunks = []; for await (const c of req) chunks.push(c);
   const body = chunks.length ? Buffer.concat(chunks) : undefined;
   const h = {}; for (const [k, v] of Object.entries(spec.headers || {})) if (!HOP.has(k.toLowerCase())) h[k] = v;
+  const targetPath = new URL(spec.url).pathname;
+  const isMcp = targetPath.endsWith("/ps/mcp"), isCodexStream = targetPath.endsWith("/codex/responses");
+  const streamStarted = (isMcp || isCodexStream) ? Date.now() : 0;
+  let mcpCall = null;
+  if (isMcp && body) try { const j = JSON.parse(body); mcpCall = `${j.method || "response"}#${j.id ?? "notification"}`; } catch {}
   try {
     const r = await fetch(spec.url, { method: spec.method || "GET", headers: h, body: ["GET", "HEAD"].includes(spec.method) ? undefined : body, redirect: "manual" });
     console.log(`[net] ${spec.method} ${spec.url} -> ${r.status}`);
-    // node's fetch already decoded gzip/br bodies; forwarding the upstream content-encoding made the
-    // browser try to decode again (ERR_CONTENT_DECODING_FAILED -> empty body -> codex "EOF while parsing")
+    if (isMcp) console.log(`[mcp] ${mcpCall || "?"} accept=${h.accept || h.Accept || "-"} content-type=${h["content-type"] || h["Content-Type"] || "-"} session=${h["mcp-session-id"] || h["Mcp-Session-Id"] || "-"}; response content-type=${r.headers.get("content-type") || "-"} session=${r.headers.get("mcp-session-id") || "-"}`);
+    if (isCodexStream) console.log(`[responses] opened content-type=${r.headers.get("content-type") || "-"}`);
     // node's fetch already decoded gzip/br bodies, so content-encoding AND content-length would both
     // describe the wire form, not what we forward (a kept content-encoding made the browser decode
     // twice -> ERR_CONTENT_DECODING_FAILED -> empty body -> codex "EOF while parsing")
     const out = {}; r.headers.forEach((v, k) => { if (!HOP.has(k) && k !== "content-encoding" && k !== "content-length") out[k] = v; });
+    // codex_apps currently returns finite stateless JSON, not SSE. Without an explicit decoded
+    // length the guest sees an EOF-delimited response and rmcp closes its transport after initialize.
+    // Preserve the streaming path if the endpoint negotiates a real event stream in the future.
+    const responseType = r.headers.get("content-type") || "";
+    if (isMcp && !responseType.toLowerCase().startsWith("text/event-stream")) {
+      const finite = r.body ? Buffer.from(await r.arrayBuffer()) : Buffer.alloc(0);
+      out["content-length"] = String(finite.byteLength);
+      res.writeHead(r.status, out); res.end(finite);
+      let shape = "";
+      if (finite.byteLength) try { const j = JSON.parse(finite); shape = ` result=${j.result ? Object.keys(j.result).join(",") : "-"} error=${j.error ? j.error.code : "-"}`; } catch {}
+      console.log(`[mcp] ${mcpCall || "?"} finite response after ${Date.now() - streamStarted} ms; ${finite.byteLength} bytes${shape}`);
+      return;
+    }
     res.writeHead(r.status, out);
     // STREAM the body through instead of buffering it: MCP's "streamable HTTP" transport keeps the
     // response open (SSE), so `await r.arrayBuffer()` never resolves and the guest's client gives up
@@ -158,12 +176,21 @@ async function netFetch(req, res) {
     if (!r.body) { res.end(); return; }
     const reader = r.body.getReader();
     res.on("close", () => { try { reader.cancel(); } catch {} });
+    let streamed = 0, streamChunks = 0, smallBody = isMcp ? [] : null;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      streamed += value.byteLength; streamChunks++;
+      if (smallBody && streamed <= 4096) smallBody.push(Buffer.from(value)); else smallBody = null;
       if (!res.write(Buffer.from(value))) await new Promise((resolve) => res.once("drain", resolve));
       if (typeof res.flush === "function") res.flush();
     }
+    if (isMcp) {
+      let shape = "";
+      if (smallBody) try { const j = JSON.parse(Buffer.concat(smallBody)); shape = ` result=${j.result ? Object.keys(j.result).join(",") : "-"} error=${j.error ? j.error.code : "-"}`; } catch {}
+      console.log(`[mcp] ${mcpCall || "?"} upstream ended after ${Date.now() - streamStarted} ms; ${streamed} bytes in ${streamChunks} chunks${shape}`);
+    }
+    if (isCodexStream) console.log(`[responses] upstream ended after ${Date.now() - streamStarted} ms; ${streamed} bytes in ${streamChunks} chunks`);
     res.end();
   } catch (e) { console.log(`[net] ${spec.method} ${spec.url} -> error ${e.message}`); res.writeHead(502); res.end(String(e.message)); }
 }

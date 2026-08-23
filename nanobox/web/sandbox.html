@@ -357,6 +357,7 @@ async function bootVm() {
   vmWorker.onerror = (e) => fail("vm worker error: " + e.message);
   // what the guest runs (NanoboxInstaller.command, mirrored here so the page needs no installer code):
   const codexHttpsProviderArgs = [
+    "-c", "cli_auth_credentials_store=\"file\"",
     "-c", "model_provider=\"nanobox-https\"",
     "-c", "model_providers.nanobox-https.name=\"OpenAI\"",
     "-c", "model_providers.nanobox-https.base_url=\"https://chatgpt.com/backend-api/codex\"",

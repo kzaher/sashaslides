@@ -1,9 +1,9 @@
 {
- "at": "2026-08-19T11:05:47.116Z",
+ "at": "2026-08-23T21:23:45.662Z",
  "page": "vm",
  "url": "http://localhost:8093/vm.html?engine=opt&image=linux-base&jit=2:2000&auto=0&netlog=1&cmd=%2Fbin%2Fsh%20-c%20'wget%20-q%20-O%20%2Ftmp%2Fp%20http%3A%2F%2F172.17.0.2%3A8099%2Fprobe.sh%3B%20echo%20NBBOOT%20rc%3D%24%3F%3B%20sh%20%2Ftmp%2Fp'",
  "base": "http://172.17.0.2:8099",
- "ranMs": 22016,
+ "ranMs": 22024,
  "results": [
   {
    "name": "bootstrap",
@@ -35,31 +35,31 @@
   {
    "name": "sse",
    "ok": true,
-   "detail": "first event +0s (server clock 64 ms), last +85s (server clock 5071 ms), 6 events spread over 5000 ms by the endpoint",
-   "first": 0,
-   "last": 85,
+   "detail": "first event +1s (server clock 77 ms), last +88s (server clock 5091 ms), 6 events spread over 5000 ms by the endpoint",
+   "first": 1,
+   "last": 88,
    "events": 6,
-   "srvFirst": 64,
-   "srvEnd": 5071,
+   "srvFirst": 77,
+   "srvEnd": 5091,
    "span": 5000
   },
   {
    "name": "big",
    "ok": true,
-   "detail": "8 KB events: first +191 ms, last +5157 ms, 6 events over 5000 ms",
+   "detail": "8 KB events: first +201 ms, last +5168 ms, 6 events over 5000 ms",
    "events": 6,
-   "first": 191,
-   "last": 5157
+   "first": 201,
+   "last": 5168
   },
   {
    "name": "open",
    "ok": true,
-   "detail": "8 events / 128 bytes off a never-ending stream, first at +65 ms, stream held open 7857 ms (wanted ~8000 ms; the guest's own timeout was 137 of ITS fast seconds)",
+   "detail": "8 events / 128 bytes off a never-ending stream, first at +75 ms, stream held open 7873 ms (wanted ~8000 ms; the guest's own timeout was 142 of ITS fast seconds)",
    "events": 8,
    "bytes": 128,
-   "waited": 137,
-   "srvFirst": 65,
-   "srvWindow": 7857
+   "waited": 142,
+   "srvFirst": 75,
+   "srvWindow": 7873
   },
   {
    "name": "relay",
@@ -69,77 +69,77 @@
  ],
  "hits": [
   {
-   "t": 2123,
+   "t": 2297,
    "method": "GET",
    "path": "/probe.sh"
   },
   {
-   "t": 2221,
+   "t": 2408,
    "method": "GET",
    "path": "/echo"
   },
   {
-   "t": 2550,
+   "t": 2771,
    "method": "GET",
    "path": "/bulk?bytes=2000000"
   },
   {
-   "t": 3111,
+   "t": 3444,
    "method": "GET",
    "path": "/mark?t=sse-begin"
   },
   {
-   "t": 3149,
+   "t": 3490,
    "method": "GET",
    "path": "/sse?n=6&ms=1000"
   },
   {
-   "t": 3175,
+   "t": 3521,
    "method": "GET",
    "path": "/mark?t=sse-first"
   },
   {
-   "t": 8182,
+   "t": 8535,
    "method": "GET",
    "path": "/mark?t=sse-end"
   },
   {
-   "t": 8276,
+   "t": 8645,
    "method": "GET",
    "path": "/mark?t=big-begin"
   },
   {
-   "t": 8307,
+   "t": 8683,
    "method": "GET",
    "path": "/sse?n=6&ms=1000&pad=8192"
   },
   {
-   "t": 8467,
+   "t": 8846,
    "method": "GET",
    "path": "/mark?t=big-first"
   },
   {
-   "t": 13433,
+   "t": 13813,
    "method": "GET",
    "path": "/mark?t=big-end"
   },
   {
-   "t": 13482,
+   "t": 13869,
    "method": "GET",
    "path": "/mark?t=open-begin"
   },
   {
-   "t": 13523,
+   "t": 13917,
    "method": "GET",
    "path": "/sse?n=0&ms=1000"
   },
   {
-   "t": 13547,
+   "t": 13944,
    "method": "GET",
    "path": "/mark?t=open-first"
   },
   {
-   "t": 21339,
+   "t": 21742,
    "method": "GET",
    "path": "/mark?t=open-end"
   }
@@ -245,11 +245,11 @@
   "NB get body=nanobox-echo-ok",
   "NB https bytes=2567",
   "NB bulk bytes=2000000",
-  "NB sse first=0 last=85 total=86 events=6",
-  "NB clock guestsec=86 wallsec=5 opentimeout=137",
+  "NB sse first=1 last=88 total=89 events=6",
+  "NB clock guestsec=89 wallsec=5 opentimeout=142",
   "NB big events=6",
   "Terminated",
-  "NB open events=8 bytes=128 waited=137",
+  "NB open events=8 bytes=128 waited=142",
   "NB relay status_lines=1",
   "NBDONE"
  ]
