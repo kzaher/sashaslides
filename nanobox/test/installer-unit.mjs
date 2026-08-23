@@ -14,7 +14,7 @@ const mem = new Map(); const have = async (k) => mem.get(k) || null, keep = asyn
 const log = (p) => console.log("  " + JSON.stringify(p).slice(0, 200));
 const codexCommand = I.command("codex");
 const codexArgs = codexCommand.argv.join("\n");
-if (!codexArgs.includes('model_provider="nanobox-https"') || !codexArgs.includes("model_providers.nanobox-https.supports_websockets=false") || !codexArgs.includes('model_providers.nanobox-https.wire_api="responses"')) throw new Error("Codex must use the HTTPS-only Responses provider");
+if (!codexArgs.includes('model_provider="nanobox-https"') || !codexArgs.includes('model_providers.nanobox-https.base_url="https://chatgpt.com/backend-api/codex"') || !codexArgs.includes("model_providers.nanobox-https.supports_websockets=false") || !codexArgs.includes('model_providers.nanobox-https.wire_api="responses"')) throw new Error("Codex must use the authenticated HTTPS-only Codex Responses provider");
 let t = performance.now();
 const r1 = await I.install(clis, { have, keep, relay: (u) => fetch(u), onProgress: log, sharp });
 console.log(`install #1: ${Math.round(performance.now() - t)} ms; direct ${(r1.stats.direct / 1e6).toFixed(1)} MB, relayed ${(r1.stats.relayed / 1e6).toFixed(1)} MB, ${r1.stats.packages} packages`);

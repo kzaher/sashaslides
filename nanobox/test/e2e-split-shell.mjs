@@ -1,7 +1,7 @@
 // Drive the sandbox page's SPLIT VIEW (?shell=1) and prove both panes are live at the same time:
 // the CLI on the left in the guest, an interactive /bin/sh -l on a pty in the SAME guest on the right.
 //
-//   node test/e2e-split-shell.mjs [--cli sh|codex|agy|claude|claude-native] [--timeout 240] [--out web/results]
+//   node test/e2e-split-shell.mjs [--cli sh|codex|agy|claude|claude-native] [--timeout 240] [--out DIR]
 //
 // Asserts, in order:
 //   1. the page reaches its CLI screen with ?shell=1 on (the split must not break the normal path);
@@ -15,6 +15,7 @@
 import CDP from "chrome-remote-interface";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -24,7 +25,7 @@ const PORT = Number(opt("--port", 8093)), CDP_PORT = Number(opt("--cdp", 9222));
 const CLI = opt("--cli", "sh");
 const PAGE = opt("--page", "sandbox.html");   // --page sandbox-split.html: a scratch copy on a pristine VM worker
 const TIMEOUT_S = Number(opt("--timeout", 240));
-const OUT = opt("--out", join(HERE, "../web/results"));
+const OUT = opt("--out", join(tmpdir(), "nanobox-results"));
 const KEEP = argv.includes("--keep");
 mkdirSync(OUT, { recursive: true });
 

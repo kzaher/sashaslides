@@ -366,6 +366,10 @@ onmessage = (msg) => {
       // existing input word between those timer ticks: input wakes us immediately, while the bound
       // lets network/device events be polled without needing every producer to share this signal.
       if (engineInst && engineInst.exports.nanobox_cpu_idle && engineInst.exports.nanobox_cpu_idle()) {
+        // poll_oneoff normally pumps the writable 9p journal, but an idle CPU can remain in this tty
+        // poll indefinitely. Keep the same 400 ms quiet-file rule here so auth/config writes reach
+        // OPFS even when the guest halts immediately after closing them.
+        try { if (bundleFs && bundleFs.dirty) bundleFs.flushDirty(400); } catch {}
         Atomics.wait(sig, 0, 0, 10);
       }
       return false;

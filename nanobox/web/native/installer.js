@@ -337,7 +337,7 @@
   const CODEX_HTTPS_PROVIDER_ARGS = [
     "-c", "model_provider=\"nanobox-https\"",
     "-c", "model_providers.nanobox-https.name=\"OpenAI\"",
-    "-c", "model_providers.nanobox-https.base_url=\"https://chatgpt.com/backend-api\"",
+    "-c", "model_providers.nanobox-https.base_url=\"https://chatgpt.com/backend-api/codex\"",
     "-c", "model_providers.nanobox-https.wire_api=\"responses\"",
     "-c", "model_providers.nanobox-https.requires_openai_auth=true",
     // The guest HTTP proxy cannot carry an Upgrade stream. HTTPS Responses is fully supported.
