@@ -163,10 +163,9 @@ async function netFetch(req, res) {
     if (isMcp && !responseType.toLowerCase().startsWith("text/event-stream")) {
       const finite = r.body ? Buffer.from(await r.arrayBuffer()) : Buffer.alloc(0);
       out["content-length"] = String(finite.byteLength);
-      // A 204 response cannot carry Content-Length. The guest HTTP adapter consequently treats the
-      // successful initialized notification as EOF and rmcp closes before tools/list. A framed empty
-      // 200 has the same success semantics for the MCP client and keeps its reusable transport alive.
-      const downstreamStatus = r.status === 204 ? 200 : r.status;
+      // MCP Streamable HTTP requires 202 for an accepted notification. The upstream currently sends
+      // 204, which the guest adapter treats as EOF; 200 is also wrong because rmcp expects a JSON body.
+      const downstreamStatus = r.status === 204 ? 202 : r.status;
       res.writeHead(downstreamStatus, out); res.end(finite);
       let shape = "";
       if (finite.byteLength) try { const j = JSON.parse(finite); shape = ` result=${j.result ? Object.keys(j.result).join(",") : "-"} error=${j.error ? j.error.code : "-"}`; } catch {}
