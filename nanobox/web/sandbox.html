@@ -97,13 +97,17 @@ window.nanoboxNet = { requests: [], routes: {}, extension: null };
 // journaled back and survives reloads.
 //   claude and claude-native run as JavaScript on this browser's V8 (the runtime worker behind the
 //   guest-side node shim, backend #2 of docs/claude-native.md, spec config-vm.json: PATH=/bundle/nb
-//   first); codex and agy are x86-64 Linux binaries and run in the guest (spec config-persist.json:
-//   the real node in PATH).
+//   first); claude-bin, codex and agy are x86-64 Linux binaries and run in the guest (codex/agy with
+//   spec config-persist.json, claude-bin with config-vm.json; ?shell=1, the default, replaces both
+//   with config-persist-hvc.json so the shell pane has its own console).
 //     claude        = the npm build @anthropic-ai/claude-code@2.1.112 (the last one that runs on node)
 //     claude-native = the CURRENT release, extracted from the vendor's Bun standalone binary
 //                     (downloads.claude.ai, range-fetched tail; docs/sandbox.md)
+//     claude-bin    = the CURRENT release as the vendor ships it: the whole linux-x64 Bun standalone
+//                     executable (~246 MB, sha256-verified), exec'd IN THE GUEST like codex/agy —
+//                     no node, no V8 shim
 // Query string:
-//   cli=claude|claude-native|codex|agy   what to start (default codex)
+//   cli=claude|claude-native|claude-bin|codex|agy   what to start (default codex)
 //   install=claude,codex,agy   what to install/mount (default: the cli; node + npm always)
 //   verifyfull=1               claude-native: download the WHOLE 324 MB binary and check its sha256
 //   image=linux-base   jit=L:T   cache=0 (bypass the engine/image caches; re-download the packages too)
@@ -137,6 +141,7 @@ const now = () => performance.now() - T0;
 const SIGNIN = {
   claude: /sign in|log in|claude\.ai\/oauth|authenticate|subscription|api key|browser didn't open/i,
   "claude-native": /sign in|log in|claude\.ai\/oauth|authenticate|subscription|api key|browser didn't open/i,
+  "claude-bin": /sign in|log in|claude\.ai\/oauth|authenticate|subscription|api key|browser didn't open/i,
   codex:  /sign in|log in|chatgpt|api key|authenticate|auth\.openai/i,
   agy:    /sign in|log in|google|authenticate|antigravity\.google|paste.*code/i,
   sh:     /~ #|# $/,
@@ -174,7 +179,7 @@ if (hud) document.querySelector("footer").appendChild(hud);
 let pagesWaiter = null, jitExportWaiter = null, vmWorkerRef = null;
 const typing = { at: 0, first: 0, settleTimer: 0, firstSamples: [], settleSamples: [], median: 0, settle: 0, worst: 0 };
 window.nanobox = {
-  xterm, engine: "sandbox", image, cli, install: installList, events, missing, phases: ph, perf,
+  xterm, engine: "sandbox", image, cli, install: installList, events, missing, phases: ph, perf, typing,
   get signinMs() { return ph.signinMs; }, get failed() { return failed; }, get runStartMs() { return ph.runStartMs; }, get exitCode() { return exitCode; }, get installInfo() { return install; },
   screen() { const b = xterm.buffer.active, out = []; for (let i = 0; i < b.length; i++) out.push(b.getLine(i).translateToString(true)); return out.join("\n"); },
   send(data) { xterm._core.coreService.triggerDataEvent(data, true); },   // into the VM's tty, like a user typing
@@ -212,7 +217,9 @@ const answered = new Set();
 setInterval(() => {
   if (ph.signinMs != null || failed) return;
   const s = window.nanobox.screen();
-  if (auto && onV8) for (const p of PROMPTS) if (!answered.has(p.name) && p.when.test(s)) { answered.add(p.name); log("prompt", { name: p.name }); window.nanobox.send(p.send); return; }
+  // PROMPTS are Claude Code's own first-run questions (theme, trust), so they are gated on the CLI
+  // FAMILY, not on the backend: claude-bin shows exactly the same TUI, it just runs in the guest.
+  if (auto && cli.startsWith("claude")) for (const p of PROMPTS) if (!answered.has(p.name) && p.when.test(s)) { answered.add(p.name); log("prompt", { name: p.name }); window.nanobox.send(p.send); return; }
   if (SIGNIN[cli] && SIGNIN[cli].test(s)) {
     ph.signinMs = now();
     const boot = ph.bootMs != null ? ph.bootMs : ph.helloMs;
@@ -352,7 +359,7 @@ async function bootVm() {
       if (d.event === "start-direct" && ph.vmStartMs == null) { ph.vmStartMs = now(); el("status").textContent = "booting the guest…"; log("vm-start", { ms: Math.round(ph.vmStartMs) }); }
       if (d.event === "error") { fail("vm error: " + d.message); if (window.NanoboxReport) NanoboxReport.event("vm-worker-error", { message: d.message }); }
     } else if (d.type === "nanobox-perf") { perf.vm = { requests: d.requests, resources: d.resources, cache: d.cache }; }
-    else if (d.type === "nanobox-stats") { window.nanobox.stats = d; if (d.io) { const s = window.nanobox.samples; s.push({ t: Math.round(d.t), icount: d.icount, io: d.io, jit: d.installed }); if (s.length > 2000) s.shift(); } el("stats").textContent = d.icount ? `icount ${(Number(d.icount) / 1e9).toFixed(2)}G` + (onV8 ? ` · missing APIs ${missing.length}` : "") : ""; }
+    else if (d.type === "nanobox-stats") { window.nanobox.stats = d; if (d.io) { const s = window.nanobox.samples; s.push({ t: Math.round(d.t), icount: d.icount, io: d.io, jit: d.installed, rel: d.released, liveFns: d.live, cache: d.cache }); if (s.length > 2000) s.shift(); } el("stats").textContent = d.icount ? `icount ${(Number(d.icount) / 1e9).toFixed(2)}G` + (onV8 ? ` · missing APIs ${missing.length}` : "") : ""; }
   };
   vmWorker.onerror = (e) => fail("vm worker error: " + e.message);
   // what the guest runs (NanoboxInstaller.command, mirrored here so the page needs no installer code):
@@ -363,7 +370,14 @@ async function bootVm() {
     "-c", "model_providers.nanobox-https.base_url=\"https://chatgpt.com/backend-api/codex\"",
     "-c", "model_providers.nanobox-https.wire_api=\"responses\"",
     "-c", "model_providers.nanobox-https.requires_openai_auth=true",
-    // The guest HTTP proxy cannot carry an Upgrade stream. HTTPS Responses is fully supported.
+    // STILL false, and not because of the browser's CORS: codex is an x86-64 binary running INSIDE
+    // the emulated guest, so its egress crosses container2wasm's in-wasm HTTP proxy
+    // (http_proxy=192.168.127.253:80, see web/src/nb-worker-util.js), which re-issues every request
+    // as a page fetch() — and fetch cannot express an HTTP Upgrade. The nanobox proxy extension CAN
+    // now tunnel a real WebSocket (extension/offscreen.js), but only for code that runs on the
+    // page's V8 and can call it (web/native/src/worker.js installs it as self.WebSocket); the guest
+    // never reaches that API. Flipping this to true needs Upgrade support in the in-wasm proxy.
+    // HTTPS Responses is fully supported.
     "-c", "model_providers.nanobox-https.supports_websockets=false",
   ];
   const CMD = {
@@ -373,6 +387,9 @@ async function bootVm() {
     // claude-native: /usr/local/bin/claude is the launcher the installer wrote (`exec /bundle/nb/node
     // /usr/local/lib/claude-native/cli.js "$@"`) — the runtime worker learns the script from the shim's HELLO
     "claude-native": { argv: ["/usr/local/bin/claude"], env: {}, spec: "config-vm.json" },
+    // claude-bin: the vendor's own linux-x64 executable at the same path, exec'd by the GUEST (not on
+    // V8) — the installer placed the whole Bun standalone there, 755, instead of a launcher script
+    "claude-bin": { argv: ["/usr/local/bin/claude"], env: {}, spec: "config-vm.json" },
     sh: { argv: ["/bin/sh"], env: {}, spec: "config-persist.json" },   // cli=sh: a shell in the guest (probing the persistent tree)
   };
   const c = CMD[cli] || { argv: [cli], env: {} };
@@ -406,6 +423,11 @@ async function bootVm() {
     jitRecordThreshold: Number(qs.get("recthreshold") || 0) || undefined,   // 0 = record at the normal threshold (no boot cost)
     jitUploadUrl: "/jit/upload", jitRecordUploadMs: Number(qs.get("recms") || 60000),
     jitRecord: qs.get("record") === "1",
+    // How many translations one recording may hold. The default 3000 (web/opt-worker.js) was sized
+    // for codex; claude-bin is a 246 MB Bun executable that installs ~11.5 k modules before its
+    // first prompt, so the cap truncates the bundle to ~24 % of the run and the next visit misses
+    // 85 % of its lookups. ?recmax=N records the whole working set.
+    jitRecordMax: Number(qs.get("recmax") || 0) || undefined,
     hostChan: (onV8 || shimBeside) ? { sab: toGuest.sab, inSab: fromGuest.sab } : undefined,
     bundleFiles: (onV8 || shimBeside) ? [{ name: "nb/node", url: new URL("/native/nbnode", location.href).href, mode: 0o755 }] : [],
     persistPort: vmChan.port2, fslog: qs.get("fslog") === "1",
@@ -415,6 +437,13 @@ async function bootVm() {
   ttySignal.attach(new TtyServer(slave)).start(vmWorker, onVmMessage);
   el("status").textContent = "engine + image + install…";
   if (onV8) {
+    // claude-native (2.1.288+) is a code-split ES-module graph whose specifiers are the literal
+    // /$bunfs/root/… paths Bun would have read out of its own filesystem, and a Worker has no import
+    // map. web/bunfs-sw.js serves that prefix from this origin so the browser's module loader
+    // resolves them — including the import cycles, which is why blob: URLs per chunk cannot do it
+    // (see web/native/src/bun-link.js). The bytes still come from the runtime worker's own rootfs
+    // copy; nothing is fetched from our server.
+    const bunfsPort = cli === "claude-native" ? await startBunfsResolver() : undefined;
     // the runtime worker: connects to the rings, waits for the shim's HELLO, then runs cli.js (read from
     // the installed package in its rootfs copy, transformed in the worker — nothing from our server)
     worker = new Worker(new URL("/native/runtime.js", location.href).href);
@@ -425,8 +454,8 @@ async function bootVm() {
       backend: "vm", toGuest: toGuest.sab, fromGuest: fromGuest.sab,
       imageUrl: imageAddr, specUrl: new URL("/images/" + image + "/config.json", location.href).href,
       cliPath: cli === "claude-native" ? "/usr/local/lib/claude-native/cli.js" : "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js",   // fallback only: argv[1] from HELLO wins
-      persistPort: rtChan.port2, cols: xterm.cols, rows: xterm.rows, env: {}, noCache, skipNodeLayer: true, proxyExtension: !!window.nanoboxNet.extension,
-    } }, [rtChan.port2]);
+      persistPort: rtChan.port2, bunfsPort, cols: xterm.cols, rows: xterm.rows, env: {}, noCache, skipNodeLayer: true, proxyExtension: !!window.nanoboxNet.extension,
+    } }, bunfsPort ? [rtChan.port2, bunfsPort] : [rtChan.port2]);
   } else if (shimBeside) {
     // ?shell=1 with codex/agy: the same runtime worker, but shellOnly — it runs no JavaScript program
     // and downloads no image; it exists to spawn /bin/sh on a pty through the shim and relay its bytes.
@@ -438,6 +467,33 @@ async function bootVm() {
     worker.postMessage({ type: "init", cfg: { backend: "vm", shellOnly: true, toGuest: toGuest.sab, fromGuest: fromGuest.sab, proxyExtension: !!window.nanoboxNet.extension } });
   }
 }
+// web/bunfs-sw.js, the module resolver for claude-native's /$bunfs/* graph. It is registered at scope
+// "/" because that prefix is at the root, and it passes everything that is NOT a /$bunfs/ path
+// straight through, so the other sandbox pages behave as if it were not installed. The page is the
+// only party that can register a ServiceWorker (there is no navigator.serviceWorker in a Worker), so
+// it also owns the MessagePort pairing: one end to the SW, the other to the runtime worker that
+// holds the extracted tree. A ServiceWorker is killed when idle and loses its port, so it asks for a
+// fresh pair, which is relayed to the runtime worker as a "bunfs-port" message.
+async function startBunfsResolver() {
+  if (!navigator.serviceWorker) throw new Error("claude-native needs a ServiceWorker to resolve its /$bunfs module graph, and this context has none");
+  await navigator.serviceWorker.register(new URL("/bunfs-sw.js", location.href).href, { scope: "/" });
+  await navigator.serviceWorker.ready;
+  if (!navigator.serviceWorker.controller) await new Promise((res) => navigator.serviceWorker.addEventListener("controllerchange", res, { once: true }));
+  navigator.serviceWorker.addEventListener("message", (m) => {
+    if (!m.data || m.data.type !== "bunfs-port-request" || !worker) return;
+    const again = pairBunfsPort();
+    log("bunfs-port-reissued");
+    worker.postMessage({ type: "bunfs-port", port: again }, [again]);
+  });
+  log("bunfs-resolver", { scope: navigator.serviceWorker.controller.scriptURL });
+  return pairBunfsPort();
+}
+function pairBunfsPort() {
+  const chan = new MessageChannel();
+  navigator.serviceWorker.controller.postMessage({ type: "bunfs-port", port: chan.port1 }, [chan.port1]);
+  return chan.port2;
+}
+
 // ---- extra terminals: terminal.html?sb=<id> tabs talk to this page over a BroadcastChannel; this page
 // relays to the runtime worker, which spawns a login shell on a pty in the same guest (claude sandbox) ----
 const persist = { kind: "?", writes: 0, bytes: 0, errors: 0, last: 0 };
@@ -546,16 +602,17 @@ function onRuntimeMessage(m) {
 // ?cli=claude-native look identical on screen: the npm build is pinned at 2.1.112 (the last release
 // whose bin is cli.js), the native one is whatever downloads.claude.ai/…/latest resolved to.
 function buildLabel() {
-  if (!onV8) return "";
+  if (!onV8 && cli !== "claude-bin") return "";
   const p = install && install.list && install.list.find((x) => x.cli === cli);
   const version = p ? p.version : cli === "claude" ? "2.1.112" : "…";
-  return cli === "claude-native" ? ` · native build ${version} (from the Bun standalone binary)` : ` · npm build ${version}`;
+  if (cli === "claude-bin") return ` · native BINARY ${version} (the vendor's linux-x64 executable, in the guest)`;
+  return cli === "claude-native" ? ` · native build ${version} (JS extracted from the Bun standalone binary, on this V8)` : ` · npm build ${version} (on this V8)`;
 }
 function updateEngineFooter() { el("engine").textContent = `sandbox: ${image} in the VM + first-run installer (${installList.join(", ")}) → ${cli}${buildLabel()}`; }
 async function boot() {
   updateEngineFooter();
   initShellPane();
-  say(`\x1b[38;5;173mnanobox\x1b[0m SANDBOX — image \x1b[1m${image}\x1b[0m (Linux only: no node, no CLI) boots in the emulated VM while the first-run installer fetches node + \x1b[1m${installList.join(", ")}\x1b[0m from the vendors into the persistent /usr/local; then runs \x1b[1m${cli}\x1b[0m${onV8 ? " on this browser's V8 (guest-side node shim)" : " in the guest"}${cli === "claude-native" ? ", the CURRENT release extracted from the vendor's Bun standalone binary" : cli === "claude" ? ", the npm build 2.1.112" : ""}\n\n`);
+  say(`\x1b[38;5;173mnanobox\x1b[0m SANDBOX — image \x1b[1m${image}\x1b[0m (Linux only: no node, no CLI) boots in the emulated VM while the first-run installer fetches node + \x1b[1m${installList.join(", ")}\x1b[0m from the vendors into the persistent /usr/local; then runs \x1b[1m${cli}\x1b[0m${onV8 ? " on this browser's V8 (guest-side node shim)" : " in the guest"}${cli === "claude-native" ? ", the CURRENT release extracted from the vendor's Bun standalone binary" : cli === "claude" ? ", the npm build 2.1.112" : cli === "claude-bin" ? ", the CURRENT release as the vendor's own linux-x64 executable (no node, no V8)" : ""}\n\n`);
   if (qs.get("reset") === "1") { try { await caches.delete("nanobox-v1"); log("cache-reset"); } catch {} }   // the persist worker wipes its own store
   window.nanoboxNet.extension = await NanoboxProxy.detect();
   log("boot", { cli, install: installList, noCache, proxyExtension: window.nanoboxNet.extension });

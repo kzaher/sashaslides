@@ -26,6 +26,10 @@ const HERE = resolve(new URL(".", import.meta.url).pathname);
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : def; };
 const PORT = Number(opt("--port", process.env.PORT || 8093));
+// Bind IPv4 explicitly. listen(port) alone binds `::`, and although dual-stack still answers
+// 127.0.0.1, VS Code's port detector reads /proc/net/tcp (IPv4 only) -- an IPv6-only listener never
+// appears there, so a forwarded port is added and then silently dropped from the Ports panel.
+const HOST = opt("--host", process.env.HOST || "0.0.0.0");
 const ENGINE = resolve(HERE, opt("--engine", "build/eh-nb/out.wasm.gzip"));
 const JITDIR = resolve(HERE, opt("--jit-dir", "build/eh-nb/jit"));
 const MOUNTER = resolve(HERE, opt("--mounter", "build/imagemounter-nb.wasm.gzip"));
@@ -249,10 +253,10 @@ server.on("error", (e) => {
     retried = true;
     const n = killPreviousServer();
     console.log(`port ${PORT} busy: ${n ? "replaced the previous serve.mjs (" + n + " process)" : "held by another process, retrying once"}`);
-    setTimeout(() => server.listen(PORT), 700);
+    setTimeout(() => server.listen(PORT, HOST), 700);
     return;
   }
   console.error(String(e && e.message || e)); process.exit(1);
 });
 server.once("listening", announce);
-server.listen(PORT);
+server.listen(PORT, HOST);

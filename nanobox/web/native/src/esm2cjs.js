@@ -41,5 +41,18 @@ export function esmToCjs(src, opts) {
   let dynN = 0;
   code = code.replace(/(^|[^\w$.])import\(/g, (m, pre) => { dynN++; return pre + "__nbImport("; });
   const prelude = `var __nbEsm=(m)=>{if(m&&typeof m==="object"&&"default"in m)return m;var o=Object.create(null);if(m&&(typeof m==="object"||typeof m==="function"))for(var k of Object.getOwnPropertyNames(m))if(k!=="default")Object.defineProperty(o,k,{get:((mm,kk)=>()=>mm[kk])(m,k),enumerable:true});o.default=m;return o;};var __nbImport=(s)=>Promise.resolve().then(()=>__nbEsm(require(s)));`;
-  return { code: prelude + hoisted.join("") + "\n" + code, imports: n, metaUrl: metaN, dynamicImports: dynN };
+  return { code: prelude + hoisted.join("") + "\n" + code, imports: n, metaUrl: metaN, dynamicImports: dynN, residual: residue(code) };
+}
+
+// Statement-level `import` / `export` still in the output. A classic script cannot contain any, so a
+// nonzero count means the transform did not understand this bundle — which is what 2.1.288's
+// code-split `import{F}from"/$bunfs/root/chunk-….js"` entry did, silently, until importScripts() threw
+// `SyntaxError: Invalid or unexpected token`. Anchored at a statement boundary because the bundle's
+// own documentation strings contain the words; it is a DIAGNOSTIC, not a verdict, for that reason.
+const RESIDUAL_ESM = /(?:^|[\n;}])[ \t]*(import\s*(?:[{*"']|[\w$]+\s*(?:,|from))|export\s*(?:[{*]|default\b|(?:const|let|var|function|class|async)\b))/g;
+function residue(code) {
+  RESIDUAL_ESM.lastIndex = 0;
+  let count = 0; const samples = []; let m;
+  while ((m = RESIDUAL_ESM.exec(code))) { count++; if (samples.length < 5) samples.push(code.slice(m.index, m.index + 72).replace(/\n/g, "\\n")); }
+  return { count, samples };
 }

@@ -2,7 +2,11 @@
 // Drive web/sandbox.html in headless Chrome (CDP :9222): the linux-base image boots in the VM while the
 // first-run installer fetches node + the CLI from the vendors into the persistent tree; wait for the
 // CLI's sign-in screen; report the phase timings and the byte accounting (our origin vs vendors).
-//   node test/e2e-sandbox.mjs --cli claude|claude-native|codex|agy [--cold] [--timeout 180] [--q "extra=query"] [--out web/results]
+//   node test/e2e-sandbox.mjs --cli claude|claude-native|claude-bin|codex|agy|sh [--cold] [--timeout 180] [--q "extra=query"] [--out web/results]
+//   --cli claude-bin   the CURRENT release as the vendor ships it (the whole linux-x64 Bun standalone,
+//            exec'd by the guest). It is NOT on the browser V8, so ON_V8 is false and there is no
+//            runtime dump() — install/boot timings and the byte accounting are all still reported.
+//            web/results/sandbox-claude-bin-{cold,warm}.json were recorded with it.
 //   --until bundle   stop at "the runtime loaded the CLI's bundle" instead of at the sign-in screen
 //            (claude-native while the runtime's Bun globals are still being built: the install and the
 //            26.6 MB bundle load are measurable long before the CLI can reach its sign-in screen)

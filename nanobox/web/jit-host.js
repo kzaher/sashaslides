@@ -319,6 +319,14 @@
       out.ticks = u64(ex.nanobox_ticks_lo(), ex.nanobox_ticks_hi()).toString();
     }
     if (ex.nanobox_stat) out.traces = ex.nanobox_stat(2), out.jitTraces = ex.nanobox_stat(3), out.compiled = ex.nanobox_stat(4);
+    // The engine's CONTENT cache (nanobox_jit.cc jitcache[]): live entries, hits, and how many times
+    // the whole cache was thrown away. `clears` is the thrash signal — every clear releases every
+    // installed function index, so the code that was already translated has to be translated again.
+    // which: 0 live, 1 hits, 2 clears, 3.. nb_clear_diag[0..] (0 = cache full, 1 = attach pool full).
+    if (ex.nanobox_jit_cache_stat) out.cache = {
+      live: ex.nanobox_jit_cache_stat(0), hits: ex.nanobox_jit_cache_stat(1), clears: ex.nanobox_jit_cache_stat(2),
+      clearFull: ex.nanobox_jit_cache_stat(3), clearPool: ex.nanobox_jit_cache_stat(4), clearInFlush: ex.nanobox_jit_cache_stat(5),
+    };
     const fb = fallbacks(inst);
     if (fb) out.fallbacks = fb;
     return out;

@@ -207,6 +207,52 @@ Headless Chrome 151 (`test/e2e-native.mjs`, `web/results/claude-native.json`), p
 | emulated claude-npm (same cli.js, node 22 in the VM) | 84.4 s | 2.2 s | 82.1 s |
 | emulated claude (Bun 2.1.233) | 49.3–52.6 s | ~2 s | ~48 s |
 
+### BROKEN since Claude Code 2.1.288: the vendor code-split the CLI into ES-module chunks
+
+Every number above was measured against a vendor binary whose embedded JavaScript was ONE module,
+already wrapped for Bun's own CommonJS loader. That is no longer what ships. Two shapes exist:
+
+| | Claude Code ≤ 2.1.233 | Claude Code 2.1.288 |
+|---|---|---|
+| binary (linux-x64) | 324 MB | 246 MB (sha256 `0298068b…7640c`) |
+| embedded files | 11 | 2396 records / 2167 JS chunks |
+| entry `/$bunfs/root/cli` | 26.6 MB | **23,466 bytes** |
+| banner | `// @bun @bytecode @bun-cjs` | `// @bun @bytecode` |
+| format | `(function(exports, require, module, __filename, __dirname){…})` | ES module: 6 static + 141 dynamic `import`s of `/$bunfs/root/chunk-*.js`, top-level `await` |
+| `.bun` section layout | `\0<name>\0<contents>\0` records, scanned | an index: separate contents / sourcemap / bytecode / name regions + one 52-byte record per module (see the header of `web/native/bunfs.js`) |
+
+Both consequences were live bugs:
+
+1. **Extraction.** `bunfs.js` scanned for the `\0<name>\0<contents>\0` adjacency, which 2.1.288 does
+   not have. It found one 5-byte asset, `entry()`'s "biggest `@bun`-wrapped module" fallback accepted
+   it, and the installer wrote *that* as `cli.js`. Fixed: `NanoboxBunFs.graph()` reads the index and
+   honours its `entry_point_id`, and a module whose contents fall before the fetched range is now an
+   error in the installer instead of an empty file (`web/native/installer.js`).
+2. **Loading.** `web/native/src/worker.js` branched on a regexp for the CJS wrapper and, when it did
+   not match, ran `esm2cjs.js` — which rewrites imports of **Node builtins only**. Every
+   `/$bunfs/root/chunk-….js` specifier and the top-level `await` survived into the blob, so
+   `importScripts()` threw a bare `SyntaxError: Invalid or unexpected token` at
+   `native/runtime.js:…` with nothing naming the cause. The loader now classifies the entry
+   (`web/native/src/bun-entry.js`) and refuses the `bun-esm` shape with that sentence spelled out.
+
+**Running 2.1.288 on this page is unfinished work, and it is not a detector change.** A classic worker
+script cannot hold an ES-module graph at all. The options, none of them small:
+
+* register a `ServiceWorker` that serves `/$bunfs/root/*` out of the installed tree and
+  `await import("/$bunfs/root/cli")` from the worker — the browser's own loader then handles the 2167
+  chunks, the cycles, the live bindings and the top-level await. Bare builtin specifiers (`"fs"`) still
+  have to be rewritten as the chunks are served, because workers have no import maps;
+* topologically link the chunk graph into `blob:` URLs and dynamic-`import()` the entry (same builtin
+  problem, plus it assumes the chunk graph is acyclic);
+* bundle the extracted `/$bunfs/root/*` tree back into one CommonJS file with esbuild and serve it as
+  `cfg.cliUrl` — the offline path `web/claude-native.html` already supports.
+
+Until one of those lands, `?cli=claude-native` reports the shape and stops; `?cli=claude-bin` (the
+vendor's executable in the emulated guest) and `?cli=claude` (the npm build, cli.js 2.1.112 on the
+browser V8) are unaffected. Measured after the extraction fix, cold: engine 868 ms, image 755 ms,
+install 2660 ms (2397 files extracted from a 67.1 MB range request), hello 3752 ms, bundle 1 ms →
+refused.
+
 Backend #2's run phase (1.6 s vs 0.7 s) is the price of ~225 synchronous round trips into the guest
 (0.85 ms each in the harness, more in the browser while the guest is also drawing) plus the guest's
 own work (`which`, `rg` children, `~/.claude.json` writes, tty output through hvc → tty → xterm-pty);

@@ -1,119 +1,355 @@
+// GENERATED FILE — do not edit. Compiled from extension/src/content.ts by build-proxy-extension.sh
+// (tsc -p extension/tsconfig.json). Change the TypeScript source and rebuild; 'npm run typecheck' is the gate.
 // nanobox proxy — content script (MIT License, see README.md)
 //
-// Bridge between the page (window.postMessage) and the background service worker (a Port).
-// Page -> content:  {type:"nanobox-proxy-ping"}
-//                   {type:"nanobox-proxy-fetch", id, spec:{url, method, headers:[[k,v]...]|{k:v}, body?:ArrayBuffer}}
-//                   {type:"nanobox-proxy-abort", id}
-// Content -> page:  {type:"nanobox-proxy-hello", version}   (on load and in reply to every ping)
-//                   {type:"nanobox-proxy-result", id, status, statusText, headers:[[k,v]...], body:ArrayBuffer}
-//                   {type:"nanobox-proxy-result", id, error:"..."}
-// Only messages posted by this very window (ev.source === window) are honoured, and the manifest's
-// content_scripts.matches decides which page origins get the bridge at all.
+// Bridge between the page (window.postMessage, structured clone, ArrayBuffers travel verbatim) and
+// the extension (one chrome.runtime.Port, JSON only, bodies base64). It is a pure relay: it owns no
+// request state beyond "which ids is the page still waiting for", so that the response body can be
+// forwarded chunk by chunk as it arrives instead of being buffered until the stream ends.
+//
+// The two vocabularies are PageLegRequest / PageLegReply upstream and PortLegUpstream /
+// NumberedDownstream downstream — all four in src/protocol.d.ts, with the page's half of each pair
+// implemented by web/src/proxyext.ts.
+// The upstream and downstream names differ ON PURPOSE: window.postMessage reaches every listener on
+// the window, this one included, so a shared "nanobox-proxy-ws-open" made this script answer its own
+// reply as a second open request. Requests are -ws-open/-ws-send/-ws-close, replies -ws-opened/
+// -ws-message/-ws-closed, and neither side has a case for the other's vocabulary.
+// Only messages posted by this very window (event.source === window) are honoured, and the
+// manifest's content_scripts.matches decides which page origins get the bridge at all.
+//
+// RESUMPTION. If Chrome terminates the service worker mid-stream the port dies. Everything is still
+// alive in the offscreen document, so this script reconnects with the SAME session id and the
+// highest sequence number it has delivered; the offscreen document replays the gap. Nothing above
+// this layer notices.
 "use strict";
-
-const PROTOCOL_VERSION = 1;
-const CHUNK_BYTES = 8 * 1024 * 1024;
-const KEEPALIVE_MS = 20000;   // < the 30 s idle timeout of an MV3 service worker
-
-/** @type {Map<string, {headers:[string,string][], status:number, statusText:string, chunks:string[]}|{pending:true}>} */
-const pending = new Map();
-let port = null;
-let keepaliveTimer = null;
-
-window.addEventListener("message", (event) => {
-  if (event.source !== window || !event.data || typeof event.data !== "object") return;
-  switch (event.data.type) {
-    case "nanobox-proxy-ping": announce(); return;
-    case "nanobox-proxy-fetch": startFetch(event.data); return;
-    case "nanobox-proxy-abort": abortFetch(String(event.data.id)); return;
-    default: return;
-  }
-});
-announce();
-
-function announce() { window.postMessage({ type: "nanobox-proxy-hello", version: PROTOCOL_VERSION }, location.origin); }
-
-function startFetch(message) {
-  const id = String(message.id);
-  const spec = message.spec || {};
-  const headers = Array.isArray(spec.headers) ? spec.headers : Object.entries(spec.headers || {});
-  const body = spec.body instanceof ArrayBuffer ? new Uint8Array(spec.body) : ArrayBuffer.isView(spec.body) ? new Uint8Array(spec.body.buffer, spec.body.byteOffset, spec.body.byteLength) : null;
-  let bridge;
-  try { bridge = ensurePort(); } catch (error) { replyError(id, "extension unavailable: " + (error && error.message || error)); return; }
-  pending.set(id, { pending: true });
-  bridge.postMessage({ type: "fetch-begin", id, url: String(spec.url), method: String(spec.method || "GET").toUpperCase(), headers });
-  for (let offset = 0; body && offset < body.byteLength; offset += CHUNK_BYTES) bridge.postMessage({ type: "fetch-body", id, b64: bytesToBase64(body.subarray(offset, offset + CHUNK_BYTES)) });
-  bridge.postMessage({ type: "fetch-end", id });
-  scheduleKeepalive();
-}
-
-function abortFetch(id) {
-  if (!pending.delete(id)) return;
-  if (port) port.postMessage({ type: "abort", id });
-  replyError(id, "aborted");
-}
-
-function ensurePort() {
-  if (port) return port;
-  port = chrome.runtime.connect({ name: "nanobox-proxy" });
-  port.onMessage.addListener(onPortMessage);
-  port.onDisconnect.addListener(() => {
-    port = null;
-    const lost = [...pending.keys()];
-    pending.clear();
-    for (const id of lost) replyError(id, "extension service worker disconnected (" + (chrome.runtime.lastError && chrome.runtime.lastError.message || "no reason") + ")");
-  });
-  return port;
-}
-
-function onPortMessage(message) {
-  if (!message || typeof message !== "object") return;
-  const id = String(message.id);
-  const entry = pending.get(id);
-  if (!entry) return;
-  switch (message.type) {
-    case "result-begin": pending.set(id, { status: message.status, statusText: String(message.statusText || ""), headers: Array.isArray(message.headers) ? message.headers : [], chunks: [] }); return;
-    case "result-body": if (!entry.pending) entry.chunks.push(String(message.b64)); return;
-    case "result-end": {
-      pending.delete(id);
-      if (entry.pending) { replyError(id, "protocol error: result-end without result-begin"); return; }
-      const body = concatBase64Chunks(entry.chunks);
-      window.postMessage({ type: "nanobox-proxy-result", id, status: entry.status, statusText: entry.statusText, headers: entry.headers, body: body.buffer }, location.origin, [body.buffer]);
-      scheduleKeepalive();
-      return;
+(function () {
+    const wire = NanoboxProxyWire;
+    // Acknowledge in batches — one ack per chunk would double the port traffic for nothing. BOTH
+    // triggers are needed: the offscreen document stops reading a body once HIGH_WATER_BYTES (8 MiB)
+    // are unacked, so a message-count-only trigger DEADLOCKS on big chunks — two 4 MiB chunks fill that
+    // window long before eight messages have arrived.
+    const ACK_EVERY = 8;
+    const ACK_BYTES = 1024 * 1024;
+    const RECONNECT_ATTEMPTS = 5;
+    const RECONNECT_DELAY_MS = 100;
+    const sessionId = newSessionId();
+    // ids the page is still expecting answers for (fetches and sockets); drives the keepalive
+    const live = new Set();
+    let port = null;
+    let deliveredSeq = 0;
+    let unacknowledged = 0;
+    let unacknowledgedBytes = 0;
+    let reconnectsLeft = RECONNECT_ATTEMPTS;
+    let keepaliveTimer = null;
+    window.addEventListener("message", (event) => {
+        if (event.source !== window)
+            return;
+        const request = parsePageRequest(event.data);
+        if (request === null)
+            return;
+        switch (request.type) {
+            case "nanobox-proxy-ping":
+                announce();
+                return;
+            case "nanobox-proxy-fetch":
+                startFetch(request);
+                return;
+            case "nanobox-proxy-abort":
+                send(request.id, { type: "abort", id: request.id }, { closes: true });
+                return;
+            case "nanobox-proxy-ws-open":
+                openSocket(request);
+                return;
+            case "nanobox-proxy-ws-send":
+                sendSocket(request);
+                return;
+            case "nanobox-proxy-ws-close":
+                send(request.id, { type: "ws-close", id: request.id, code: request.code, reason: request.reason });
+                return;
+            default: wire.assertNever(request);
+        }
+    });
+    announce();
+    function announce() {
+        toPage({ type: "nanobox-proxy-hello", version: wire.PROTOCOL_VERSION, features: ["stream", "websocket", "resume"] });
     }
-    case "result-error": pending.delete(id); replyError(id, String(message.message)); scheduleKeepalive(); return;
-    default: return;
-  }
-}
-
-function replyError(id, error) { window.postMessage({ type: "nanobox-proxy-result", id, error }, location.origin); }
-
-// while requests are in flight, poke the service worker so its idle timer never expires mid-fetch
-function scheduleKeepalive() {
-  if (pending.size === 0) { if (keepaliveTimer) clearInterval(keepaliveTimer); keepaliveTimer = null; return; }
-  if (keepaliveTimer) return;
-  keepaliveTimer = setInterval(() => { if (port && pending.size > 0) port.postMessage({ type: "keepalive" }); else scheduleKeepalive(); }, KEEPALIVE_MS);
-}
-
-function concatBase64Chunks(chunks) {
-  const parts = chunks.map(base64ToBytes);
-  const total = parts.reduce((sum, part) => sum + part.byteLength, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const part of parts) { out.set(part, offset); offset += part.byteLength; }
-  return out;
-}
-
-function bytesToBase64(bytes) {
-  let binary = "";
-  for (let offset = 0; offset < bytes.byteLength; offset += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + 0x8000));
-  return btoa(binary);
-}
-
-function base64ToBytes(b64) {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
-  return bytes;
-}
+    function startFetch(request) {
+        const id = request.id;
+        live.add(id);
+        if (!send(id, { type: "fetch-begin", id, url: request.url, method: request.method, headers: request.headers }))
+            return;
+        if (request.body)
+            for (const b64 of wire.base64Chunks(request.body))
+                send(id, { type: "fetch-body", id, b64 });
+        send(id, { type: "fetch-end", id });
+    }
+    function openSocket(request) {
+        live.add(request.id);
+        send(request.id, { type: "ws-open", id: request.id, url: request.url, protocols: request.protocols });
+    }
+    function sendSocket(request) {
+        if (request.text !== null) {
+            send(request.id, { type: "ws-send", id: request.id, text: request.text });
+            return;
+        }
+        send(request.id, { type: "ws-send", id: request.id, b64: request.bytes ? wire.bytesToBase64(request.bytes) : "" });
+    }
+    // Pushes one upstream message, reporting failure to the page as an error for `id`. `closes` marks a
+    // message after which the page expects nothing more, so the id leaves the live set.
+    function send(id, message, options) {
+        if (options?.closes)
+            live.delete(id);
+        let bridge;
+        try {
+            bridge = ensurePort();
+        }
+        catch (error) {
+            finish(id, "extension unavailable: " + describe(error));
+            return false;
+        }
+        try {
+            bridge.postMessage(message);
+        }
+        catch (error) {
+            finish(id, "extension port closed: " + describe(error));
+            return false;
+        }
+        scheduleKeepalive();
+        return true;
+    }
+    function ensurePort() {
+        if (port)
+            return port;
+        const opened = chrome.runtime.connect({ name: wire.PAGE_PORT_PREFIX + sessionId });
+        opened.onMessage.addListener(onPortMessage);
+        opened.onDisconnect.addListener(onPortLost);
+        port = opened;
+        // first message on every connect AND reconnect: "I have everything up to deliveredSeq"
+        opened.postMessage({ type: "hello", ack: deliveredSeq });
+        return opened;
+    }
+    function onPortMessage(raw) {
+        const parsed = parseFromBroker(raw);
+        if (parsed === null)
+            return;
+        switch (parsed.kind) {
+            case "fatal":
+                failEverything(parsed.message);
+                return;
+            case "downstream":
+                deliver(parsed.message);
+                return;
+            default: wire.assertNever(parsed);
+        }
+    }
+    function deliver(message) {
+        // a replayed message the page already has (reconnect overlap): dropping it is the point of `seq`
+        if (message.seq <= deliveredSeq)
+            return;
+        deliveredSeq = message.seq;
+        reconnectsLeft = RECONNECT_ATTEMPTS;
+        unacknowledged++;
+        unacknowledgedBytes += payloadBytesOf(message);
+        if (unacknowledged >= ACK_EVERY || unacknowledgedBytes >= ACK_BYTES)
+            acknowledge();
+        const id = message.id;
+        switch (message.type) {
+            case "head":
+                toPage({ type: "nanobox-proxy-head", id, status: message.status, statusText: message.statusText, headers: message.headers, dropped: message.dropped });
+                return;
+            case "chunk": {
+                const bytes = wire.base64ToBytes(message.b64);
+                toPage({ type: "nanobox-proxy-chunk", id, body: bytes.buffer }, [bytes.buffer]);
+                return;
+            }
+            case "end":
+                live.delete(id);
+                acknowledge();
+                toPage({ type: "nanobox-proxy-done", id });
+                scheduleKeepalive();
+                return;
+            case "error":
+                finish(id, message.message);
+                return;
+            case "ws-opened":
+                toPage({ type: "nanobox-proxy-ws-opened", id, protocol: message.protocol, extensions: message.extensions });
+                return;
+            case "ws-text":
+                toPage({ type: "nanobox-proxy-ws-message", id, text: message.text });
+                return;
+            case "ws-binary": {
+                const bytes = wire.base64ToBytes(message.b64);
+                toPage({ type: "nanobox-proxy-ws-message", id, body: bytes.buffer }, [bytes.buffer]);
+                return;
+            }
+            case "ws-closed":
+                live.delete(id);
+                acknowledge();
+                toPage({ type: "nanobox-proxy-ws-closed", id, code: message.code, reason: message.reason, wasClean: message.wasClean });
+                scheduleKeepalive();
+                return;
+            default: wire.assertNever(message);
+        }
+    }
+    // The port is gone. With nothing in flight that is just the idle service worker being collected;
+    // with work outstanding it is a mid-stream termination, and the offscreen document still holds the
+    // fetches and sockets — so reconnect and let it replay from deliveredSeq.
+    function onPortLost() {
+        const reason = chrome.runtime.lastError?.message ?? "no reason given";
+        port = null;
+        if (live.size === 0) {
+            scheduleKeepalive();
+            return;
+        }
+        if (reconnectsLeft-- <= 0) {
+            failEverything("extension disconnected and could not be reached again (" + reason + ")");
+            return;
+        }
+        setTimeout(() => { if (live.size === 0)
+            return; try {
+            ensurePort();
+        }
+        catch (error) {
+            failEverything("extension unavailable: " + describe(error));
+        } }, RECONNECT_DELAY_MS);
+    }
+    function acknowledge() {
+        if (unacknowledged === 0 || !port)
+            return;
+        unacknowledged = 0;
+        unacknowledgedBytes = 0;
+        try {
+            port.postMessage({ type: "ack", seq: deliveredSeq });
+        }
+        catch { /* the reconnect will re-ack */ }
+    }
+    function finish(id, error) {
+        live.delete(id);
+        acknowledge();
+        toPage({ type: "nanobox-proxy-result", id, error });
+        scheduleKeepalive();
+    }
+    function failEverything(error) {
+        for (const id of [...live])
+            finish(id, error);
+    }
+    function toPage(message, transfer) {
+        window.postMessage(message, location.origin, transfer === undefined ? [] : [...transfer]);
+    }
+    // While anything is in flight, poke the service worker so its 30 s idle timer never expires
+    // mid-stream ("Receiving an event or calling an extension API resets this timer"). An open but idle
+    // port is NOT a keep-alive: "Opening a port no longer resets the timers" (Chrome 114).
+    function scheduleKeepalive() {
+        if (live.size === 0) {
+            if (keepaliveTimer !== null)
+                clearInterval(keepaliveTimer);
+            keepaliveTimer = null;
+            return;
+        }
+        if (keepaliveTimer !== null)
+            return;
+        keepaliveTimer = setInterval(() => {
+            if (live.size === 0) {
+                scheduleKeepalive();
+                return;
+            }
+            if (!port)
+                return;
+            try {
+                port.postMessage({ type: "keepalive" });
+            }
+            catch { /* onPortLost will reconnect */ }
+        }, wire.KEEPALIVE_MS);
+    }
+    // What this message cost the offscreen document's backpressure window: the DECODED payload size,
+    // which is what it charged when it queued the message. Exhaustive, so a new numbered message type
+    // cannot quietly travel as free.
+    function payloadBytesOf(message) {
+        switch (message.type) {
+            case "chunk":
+            case "ws-binary": return Math.floor((message.b64.length * 3) / 4);
+            case "ws-text": return message.text.length;
+            case "head":
+            case "end":
+            case "error":
+            case "ws-opened":
+            case "ws-closed": return 0;
+            default: return wire.assertNever(message);
+        }
+    }
+    // --- the parse boundary: the only two functions here that look at a raw message
+    function parsePageRequest(raw) {
+        const message = wire.asWireMessage(raw);
+        if (message === null)
+            return null;
+        const id = String(message["id"]);
+        // A page can post any string type; this is a guard over untrusted input, not a branch on a
+        // closed union, which is why it ends in `null` instead of an assertNever.
+        switch (message.type) {
+            case "nanobox-proxy-ping": return { type: "nanobox-proxy-ping" };
+            case "nanobox-proxy-fetch": {
+                const spec = wire.asRecord(message["spec"]) ?? {};
+                return {
+                    type: "nanobox-proxy-fetch", id,
+                    url: String(spec["url"]),
+                    method: String(spec["method"] || "GET").toUpperCase(),
+                    headers: toHeaderList(spec["headers"]),
+                    body: asBytes(spec["body"]),
+                };
+            }
+            case "nanobox-proxy-abort": return { type: "nanobox-proxy-abort", id };
+            case "nanobox-proxy-ws-open": return { type: "nanobox-proxy-ws-open", id, url: String(message["url"]), protocols: wire.toStringArray(message["protocols"]) };
+            case "nanobox-proxy-ws-send": {
+                const text = message["text"];
+                return { type: "nanobox-proxy-ws-send", id, text: typeof text === "string" ? text : null, bytes: asBytes(message["body"]) };
+            }
+            case "nanobox-proxy-ws-close": return { type: "nanobox-proxy-ws-close", id, code: Number(message["code"]) || 1000, reason: String(message["reason"] || "") };
+            default: return null;
+        }
+    }
+    function parseFromBroker(raw) {
+        const message = wire.asWireMessage(raw);
+        if (message === null)
+            return null;
+        if (message["fatal"])
+            return { kind: "fatal", message: String(message["message"] || "extension error") };
+        const seq = Number(message["seq"]) || 0;
+        const id = String(message["id"]);
+        switch (message.type) {
+            case "head": return { kind: "downstream", message: { seq, type: "head", id, status: Number(message["status"]), statusText: String(message["statusText"] || ""), headers: wire.toHeaderPairs(message["headers"]), dropped: wire.toStringArray(message["dropped"]) } };
+            case "chunk": return { kind: "downstream", message: { seq, type: "chunk", id, b64: String(message["b64"]) } };
+            case "end": return { kind: "downstream", message: { seq, type: "end", id } };
+            case "error": return { kind: "downstream", message: { seq, type: "error", id, message: String(message["message"]) } };
+            case "ws-opened": return { kind: "downstream", message: { seq, type: "ws-opened", id, protocol: String(message["protocol"] || ""), extensions: String(message["extensions"] || "") } };
+            case "ws-text": return { kind: "downstream", message: { seq, type: "ws-text", id, text: String(message["text"]) } };
+            case "ws-binary": return { kind: "downstream", message: { seq, type: "ws-binary", id, b64: String(message["b64"]) } };
+            case "ws-closed": return { kind: "downstream", message: { seq, type: "ws-closed", id, code: Number(message["code"]) || 1005, reason: String(message["reason"] || ""), wasClean: Boolean(message["wasClean"]) } };
+            default: return null;
+        }
+    }
+    // The page may state request headers as a pair list or as a plain object; both reach the port as
+    // a pair list.
+    function toHeaderList(value) {
+        if (Array.isArray(value))
+            return wire.toHeaderPairs(value);
+        const record = wire.asRecord(value);
+        if (record === null)
+            return [];
+        return Object.entries(record).map(([name, headerValue]) => [name, String(headerValue)]);
+    }
+    function asBytes(body) {
+        if (body instanceof ArrayBuffer)
+            return new Uint8Array(body);
+        if (ArrayBuffer.isView(body))
+            return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+        return null;
+    }
+    function describe(error) {
+        return error instanceof Error ? error.message : String(error);
+    }
+    function newSessionId() {
+        if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+            return crypto.randomUUID();
+        return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+    }
+})();

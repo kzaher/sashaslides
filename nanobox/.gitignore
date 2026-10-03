@@ -46,3 +46,9 @@ public/vm/vendor/xterm.css
 public/vm/vendor/addon-fit.js
 # dev-only: locally extracted Bun bundle (tools/bun-extract.mjs), served at /native/local/
 web/native/local/
+
+# NOT ignored, deliberately: extension/*.js and web/proxyext.js are COMPILED from
+# extension/src/*.ts and web/src/proxyext.ts (build-proxy-extension.sh) and are checked in anyway.
+# Chrome loads extension/ unpacked straight out of this repo and serve.mjs serves web/ statically,
+# so a fresh clone — and `node dist/serve.mjs` after tools/pack.mjs — has to work with no tsc
+# present. They carry a generated-file header; `npm run typecheck` is what keeps them honest.

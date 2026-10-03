@@ -33,7 +33,7 @@ rmSync(OUT, { recursive: true, force: true }); mkdirSync(OUT, { recursive: true 
 // server
 copy(join(HERE, "serve.mjs"), join(OUT, "serve.mjs"));
 // pages + workers + native runtime + shim (skip node_modules, sources of the runtime, maps, big vendor JS we don't serve)
-copy(join(HERE, "web"), join(OUT, "web"), (p) => !/\/(node_modules|src)(\/|$)|\.map$|\/claude-cli\.js$|package(-lock)?\.json$|build\.mjs$/.test(p));
+copy(join(HERE, "web"), join(OUT, "web"), (p) => !/\/(node_modules|src)(\/|$)|\.map$|\/claude-cli\.js$|package(-lock)?\.json$|tsconfig\.json$|build\.mjs$/.test(p));
 need(join(HERE, "web/native/runtime.js"), "native runtime (npm run build:runtime)");
 need(join(HERE, "web/native/nbnode"), "guest node shim (npm run build:shim)");
 // engines
@@ -48,7 +48,8 @@ const c2w = join(HERE, "public/c2w");
 for (const f of ["dist", "vendor", "wasi", "index.html", "wasi-worker.js", "imagemounter.wasm.gzip"]) if (need(join(c2w, f), "container2wasm runtime (vm-build)")) copy(join(c2w, f), join(OUT, "public/c2w", f));
 for (const img of IMAGES) if (need(join(c2w, "images", img), `image ${img} (npm run build:images / vm-build)`)) copy(join(c2w, "images", img), join(OUT, "public/c2w/images", img));
 // extension
-copy(join(HERE, "extension"), join(OUT, "extension"));
+// the emitted .js only: src/*.ts and tsconfig.json are build inputs, and dist/ ships no build tools
+copy(join(HERE, "extension"), join(OUT, "extension"), (p) => !/\/src(\/|$)|tsconfig\.json$/.test(p));
 // serve.mjs in dist resolves everything relative to itself: engine dir + c2w dir + web dir
 // (the repo layout is build/eh-nb/... and public/c2w; the packed layout is engine/... and public/c2w)
 let srv = (await import("node:fs")).readFileSync(join(OUT, "serve.mjs"), "utf8");

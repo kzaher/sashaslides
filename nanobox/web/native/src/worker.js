@@ -29,14 +29,17 @@ import { record, noteMissing, dump as dumpMissing, setOnFirst } from "./record.j
 import { initReport, report, reportError, installGlobalHandlers } from "./report.js";
 initReport({}); installGlobalHandlers(); setBufferThrowHook((e, where) => reportError("buffer-throw", e, { fn: where }));
 import { esmToCjs } from "./esm2cjs.js";
+import { bunEntryShape, bunEntryShapeSummary, BUNFS_PREFIX } from "./bun-entry.js";
+import { createBunfsModuleServer } from "./bun-link.js";
 import { makeBun, BUN_VERSION, BUN_REVISION } from "./bun-globals.js";
 
 const post = (m, transfer) => self.postMessage(m, transfer || []);
 const T0 = performance.now();
 const ev = (event, extra) => post(Object.assign({ type: "event", event, t: Math.round(performance.now() - T0) }, extra || {}));
 const enc = new TextEncoder();
-// Bun standalone entries: `// @bun …` banner + the CJS wrapper Bun's own loader calls (bunfs.js)
-const BUN_CJS_ENTRY = /^\/\/ @bun[^\n]*\n\(function\s*\(\s*exports\s*,\s*require\s*,\s*module\s*,\s*__filename\s*,\s*__dirname\s*\)/;
+// What shape the entry module is in (`// @bun` banner + CJS wrapper, code-split ESM, plain ESM, CJS)
+// lives in ./bun-entry.js, shared with bunfs.js' callers and the tests. It used to be a lone regexp
+// here, and when 2.1.288 stopped matching it the else-branch fed invalid JS to importScripts().
 
 // the runtime's own helper scripts (shared with the VM pages)
 importScripts(new URL("/wasifs.js", location.href).href, new URL("/oci.js", location.href).href, new URL("/cachefetch.js", location.href).href);
@@ -125,6 +128,14 @@ async function loadRootfs(cfg) {
 async function main(cfg) {
   ev("worker-start", { backend: cfg.backend || "mem", proxyExtension: !!cfg.proxyExtension });
   proxyExtension = !!cfg.proxyExtension;
+  // A cross-origin WebSocket opened from here is not blocked by CORS, but its handshake carries THIS
+  // page's Origin and gets no cookies for the destination, which the vendors reject. With the
+  // extension installed the socket is opened by its offscreen document instead (a real WebSocket
+  // whose frames are piped over a port), so the `ws` / `undici.WebSocket` shims in
+  // native/src/misc.js — which capture globalThis.WebSocket when makeMisc() runs, i.e. after this —
+  // hand the CLI the tunnelled one. Install it ONLY with the extension present: it has no native
+  // fallback. Nothing in this worker opens a same-origin socket, which this would also tunnel.
+  if (proxyExtension) self.WebSocket = self.NanoboxProxy.WebSocket;
   const vm = cfg.backend === "vm";
   let guest = null, helloP = null;
   if (vm) {
@@ -164,12 +175,29 @@ async function main(cfg) {
   }
   // extra terminals (page id -> guest child id); their pty output arrives as "proc" events of the backend
   const terms = new Map(), termSize = new Map(); const env0 = env;
+  let bunEsm = null;              // the /$bunfs module server, once the bundle turns out to be a Bun ESM graph
+  // Answer web/bunfs-sw.js' reads. A ServiceWorker is killed when it goes idle and comes back with a
+  // fresh MessagePort, which the page re-delivers as a "bunfs-port" message, so this is re-bindable.
+  const serveBunfs = (port) => {
+    port.onmessage = (message) => {
+      const ask = message.data || {};
+      if (ask.type !== "bunfs-read" || !bunEsm) return;
+      try { port.postMessage({ type: "bunfs-read", id: ask.id, body: bunEsm.read(ask.path) }); }
+      catch (error) {
+        const message2 = String(error && error.message || error);
+        bunEsm.noteFailure(ask.path, message2);
+        ev("bunfs-read-failed", { path: ask.path, message: message2 });
+        port.postMessage({ type: "bunfs-read", id: ask.id, error: message2 });
+      }
+    };
+  };
   if (vm) B.on("proc", (evt) => { for (const [id, cid] of terms) if (evt.pid === cid) { if (evt.stream) { const copy = evt.data.slice(); post({ type: "term-out", id, data: copy }, [copy.buffer]); } else if (evt.exit != null || evt.signal) { post({ type: "term-exit", id, code: evt.exit }); terms.delete(id); termSize.delete(id); } } });
   self.onmessage = (m) => {
     const d = m.data; if (!d) return;
-    if (d.type === "stdin" && !vm) B.ttyInput(new Uint8Array(d.data));
+    if (d.type === "bunfs-port") serveBunfs(d.port);
+    else if (d.type === "stdin" && !vm) B.ttyInput(new Uint8Array(d.data));
     else if (d.type === "resize" && !vm) B.ttyResize(d.cols, d.rows);
-    else if (d.type === "dump") post({ type: "missing", ...dumpMissing(), spawns: child_process._spawnLog, net: netlog, netBytes, backendOps: B.stats.ops, backendStats: vm ? { guest: B.stats.guest, image: B.stats.image, dirty: [...B.dirty], channel: guest.stats } : null, required: Object.fromEntries(required) });
+    else if (d.type === "dump") post({ type: "missing", ...dumpMissing(), bunEsm: bunEsm ? bunEsm.stats() : null, spawns: child_process._spawnLog, net: netlog, netBytes, backendOps: B.stats.ops, backendStats: vm ? { guest: B.stats.guest, image: B.stats.image, dirty: [...B.dirty], channel: guest.stats } : null, required: Object.fromEntries(required) });
     else if (d.type === "term-open" && vm) { // extra terminal: a login shell in the guest on a pty, I/O relayed to the page
       const cid = B.cid++; terms.set(d.id, cid);
       const cols = d.cols || 80, rows = d.rows || 24;
@@ -267,13 +295,14 @@ async function main(cfg) {
   const tl = performance.now();
   ev("bundle-load-start");
   try {
-    let url = cfg.cliUrl;
+    let url = cfg.cliUrl, shape = null, esmGraph = false;
     if (!url) {
       const tt = performance.now();
       const bytes = B.call("readFile", cliPath);
       const text = new TextDecoder().decode(bytes);
-      const bunCjs = BUN_CJS_ENTRY.exec(text);
-      if (bunCjs) {
+      shape = bunEntryShape(text);
+      ev("bundle-shape", { kind: shape.kind, bytes: shape.bytes, banner: shape.banner, bunfsStatic: shape.bunfsStatic, bunfsDynamic: shape.bunfsDynamic, staticEsm: shape.staticEsm });
+      if (shape.kind === "bun-cjs" || shape.kind === "bun-esm") {
         // a Bun program (Claude Code's native build, its JS extracted by web/native/bunfs.js at
         // install time): give it the `Bun` global it calls unconditionally. Only then — the npm
         // build branches on `typeof Bun` and its Node path is the one we support.
@@ -282,6 +311,32 @@ async function main(cfg) {
         // a standalone Bun program IS its executable, and the CLI relaunches itself through
         // process.execPath — point it at the launcher the installer wrote, not at our shim
         if (cliPath.includes("/claude-native/")) proc.execPath = "/usr/local/bin/claude";
+      }
+      if (shape.kind === "bun-esm") {
+        // 2.1.288 code-split the CLI: a 23 KB entry that statically imports 6 and dynamically
+        // imports 141 /$bunfs/root/chunk-*.js ES MODULES, 2,170 of them in all, with top-level
+        // await. A classic worker CAN `await import()` such a graph (measured, Chrome 154); what it
+        // cannot do is RESOLVE "/$bunfs/root/…" or a bare "node:fs", since a worker has no import
+        // map. web/bunfs-sw.js — a ServiceWorker the page registers and whose port arrives here as
+        // cfg.bunfsPort — serves /$bunfs/* from this origin, and src/bun-link.js rewrites each
+        // module on the way out (bare specifiers to `require`, import.meta to the standalone's own
+        // paths). Stable URLs are the point: the chunk graph HAS CYCLES through
+        // `import.meta.require`, which only the browser's own module loader can resolve.
+        if (!cfg.bunfsPort) throw new Error(`${bunEntryShapeSummary(shape, cliPath)} The page did not register web/bunfs-sw.js, so there is nothing to resolve /$bunfs/* with.`);
+        const server = createBunfsModuleServer({
+          readFile: (file) => B.call("readFile", file),
+          rootDir: BUNFS_PREFIX + "root",
+          entryPath: cliPath,
+          requireNode: require,
+          canRequire: (id) => mods[String(id).replace(/^node:/, "")] !== undefined,
+        });
+        bunEsm = server;
+        Object.assign(self, server.globals);   // __nbImport / __nbMetaRequire
+        serveBunfs(cfg.bunfsPort);
+        url = new URL(server.entryName, location.href).href;
+        esmGraph = true;
+        ev("bundle-bun-esm", { entryBytes: shape.bytes, url, ms: Math.round(performance.now() - tt) });
+      } else if (shape.kind === "bun-cjs") {
         // Bun's standalone build stores the entry already wrapped as
         // `(function(exports, require, module, __filename, __dirname){…})` — call it with our module
         // context instead of running the ESM->CJS transform (nothing to rewrite, 26 MB not touched)
@@ -291,10 +346,23 @@ async function main(cfg) {
       } else {
         const r = esmToCjs(text, { fileUrl: "file://" + cliPath });
         url = URL.createObjectURL(new Blob([r.code], { type: "text/javascript" }));
-        ev("bundle-transformed", { bytes: bytes.length, imports: r.imports, dynamicImports: r.dynamicImports, ms: Math.round(performance.now() - tt) });
+        // residual: statement-level import/export the transform did NOT rewrite. Reported, not
+        // enforced — the bundle's own doc strings talk about `import fs from "fs"`, so a nonzero
+        // count is not proof of breakage. It is the breadcrumb for the next vendor format change.
+        ev("bundle-transformed", { bytes: bytes.length, imports: r.imports, dynamicImports: r.dynamicImports, residual: r.residual.count, residualAt: r.residual.samples, ms: Math.round(performance.now() - tt) });
       }
     }
-    importScripts(url);
+    try {
+      // an ES-module graph is loaded by the module loader; everything else is a classic script, which
+      // importScripts() runs in THIS global scope (and gets V8's code cache on a repeat load)
+      if (esmGraph) await import(url);
+      else importScripts(url);
+    } catch (e) {
+      // the CLI exits through here (ProcessExit) and that must pass straight on; a SyntaxError means
+      // the text we built was not loadable JavaScript, and the entry's shape is the diagnosis.
+      if (e instanceof SyntaxError && shape) throw new Error(`${e.message} — ${bunEntryShapeSummary(shape, cliPath)}`);
+      throw e;
+    }
   } catch (e) {
     if (!(e && e.isProcessExit)) { ev("bundle-error", { message: String(e && e.stack || e).slice(0, 4000) }); uncaught(e, "uncaughtException"); }
   }

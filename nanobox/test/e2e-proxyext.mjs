@@ -7,6 +7,10 @@
 //            --cdp 9222 (Chrome WITHOUT it, e2e.mjs style)  --timeout 150 (per page, s)  --out /tmp/nanobox-claude-e2e/proxyext
 //            --chrome <binary> (default: the google-chrome-stable / chromium found in /usr/bin)
 //
+// The Chrome-with-the-extension launcher and the evidence-driven waitFor live in
+// test/chrome-extension-harness.mjs, shared with test/e2e-proxyext-claude-bin.mjs (the same bridge
+// carrying the 245.7 MB claude-bin install) so there is one launch recipe, not two that can drift.
+//
 // The extension is loaded through CDP `Extensions.loadUnpacked` over --remote-debugging-pipe (Google
 // Chrome >= 137 ignores --load-extension; the pipe must stay open, so that Chrome lives exactly as long
 // as this process). The optimized engine needs the new wasm-EH (Chrome >= 137) — Chrome for Testing 131
@@ -19,9 +23,9 @@
 // fallback half: the same page in the plain Chrome on :9222: detect() false, route() says relay for the
 // netpolicy vendors and direct for auth.openai.com, and the sign-in still works via relay/direct.
 import CDP from "chrome-remote-interface";
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { chromeUp, chromeWithExtension, defaultChrome, waitFor } from "./chrome-extension-harness.mjs";
 
 const argv = process.argv.slice(2);
 const opt = (name, fallback) => { const index = argv.indexOf(name); return index >= 0 ? argv[index + 1] : fallback; };
@@ -127,75 +131,6 @@ async function runPage({ cdpPort, tag, expectExtension }) {
     try { await CDP.Close({ id: tab.id, port: cdpPort }); } catch {}
   }
   return { failures, relayHits: relayHits.length };
-}
-
-// Poll `read` until `done(state)`; a state that stops changing for stallMs aborts early with evidence.
-async function waitFor({ what, read, done, deadlineMs, stallMs, pollMs }) {
-  const start = Date.now();
-  let last = null, lastChangeAt = start;
-  for (;;) {
-    let state = null;
-    try { state = await read(); } catch (error) { state = "read error: " + (error && error.message || error); }
-    if (done(state)) return { ok: true, state, ms: Date.now() - start };
-    const serialized = JSON.stringify(state);
-    if (serialized !== last) { last = serialized; lastChangeAt = Date.now(); }
-    const now = Date.now();
-    if (now - start >= deadlineMs) return { ok: false, state, reason: `${what}: deadline ${deadlineMs / 1000}s passed, last state ${String(serialized).slice(0, 160)}` };
-    if (now - lastChangeAt >= stallMs) return { ok: false, state, reason: `${what}: no progress for ${stallMs / 1000}s (waited ${Math.round((now - start) / 1000)}s), last state ${String(serialized).slice(0, 160)}` };
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
-  }
-}
-
-function defaultChrome() {
-  const binary = ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"].find(existsSync);
-  if (!binary) throw new Error("no chrome binary found");
-  return binary;
-}
-
-// A fresh Chrome that owns the extension: fds 3/4 carry the CDP pipe (Extensions.loadUnpacked needs it,
-// and Chrome exits when it closes), the port serves chrome-remote-interface as usual.
-async function chromeWithExtension({ cdpPort, userDataDir, extension, binary }) {
-  const args = ["--headless=new", "--remote-debugging-pipe", `--remote-debugging-port=${cdpPort}`, "--enable-unsafe-extension-debugging", "--remote-allow-origins=*",
-    "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", `--user-data-dir=${userDataDir}`, "--window-size=1280,900", "about:blank"];
-  console.log(`starting ${binary} on :${cdpPort} (pipe) and loading ${extension}`);
-  const child = spawn(binary, args, { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] });
-  const pipeOut = child.stdio[3], pipeIn = child.stdio[4];
-  const replies = new Map();
-  let buffered = "";
-  pipeIn.on("data", (chunk) => {
-    buffered += chunk.toString();
-    for (let end = buffered.indexOf("\0"); end >= 0; end = buffered.indexOf("\0")) {
-      const message = JSON.parse(buffered.slice(0, end)); buffered = buffered.slice(end + 1);
-      const waiter = replies.get(message.id); if (waiter) { replies.delete(message.id); waiter(message); }
-    }
-  });
-  let nextId = 0;
-  const call = (method, params) => new Promise((resolve, reject) => {
-    const id = ++nextId; replies.set(id, (message) => message.error ? reject(new Error(`${method}: ${message.error.message}`)) : resolve(message.result));
-    pipeOut.write(JSON.stringify({ id, method, params }) + "\0");
-    setTimeout(() => { if (replies.delete(id)) reject(new Error(`${method}: no reply in 10s`)); }, 10000);
-  });
-  const close = () => { try { pipeOut.end(); } catch {} try { child.kill(); } catch {} };
-  try {
-    const loaded = await call("Extensions.loadUnpacked", { path: extension });
-    console.log(`  extension id ${loaded.id}`);
-    const alive = async () => { try { return (await fetch(`http://127.0.0.1:${cdpPort}/json/version`)).ok; } catch { return false; } };
-    const up = await waitFor({ what: `chrome on :${cdpPort}`, deadlineMs: 30000, stallMs: 30000, pollMs: 250, read: alive, done: (ok) => ok === true });
-    if (!up.ok) throw new Error(up.reason);
-  } catch (error) { close(); throw error; }
-  return { close };
-}
-
-// The plain Chrome (no extension), started exactly like test/e2e.mjs does; reused when already up.
-async function chromeUp({ cdpPort, userDataDir, binary }) {
-  const alive = async () => { try { return (await fetch(`http://127.0.0.1:${cdpPort}/json/version`)).ok; } catch { return false; } };
-  if (await alive()) { console.log(`Chrome already listening on :${cdpPort} (reusing it)`); return; }
-  const args = ["--headless=new", `--remote-debugging-port=${cdpPort}`, "--remote-allow-origins=*", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", `--user-data-dir=${userDataDir}`, "--window-size=1280,900", "about:blank"];
-  console.log(`starting ${binary} on :${cdpPort}`);
-  const child = spawn(binary, args, { stdio: "ignore", detached: true });
-  child.unref();
-  const up = await waitFor({ what: `chrome on :${cdpPort}`, deadlineMs: 30000, stallMs: 30000, pollMs: 250, read: alive, done: (ok) => ok === true });
-  if (!up.ok) throw new Error(up.reason);
 }
 
 main().catch((error) => { console.error(error); process.exit(1); });

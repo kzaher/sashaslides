@@ -1,6 +1,6 @@
 # The sandbox: a Linux-only image + first-run installer + a persistent tree (2026-08-16)
 
-`web/sandbox.html?cli=claude|claude-native|codex|agy` — the user's direction for the system-node track: **ship only a
+`web/sandbox.html?cli=claude|claude-native|claude-bin|codex|agy` — the user's direction for the system-node track: **ship only a
 small Linux, no node and no bots in the image; at first run an installer (JavaScript in our runtime, on
 the browser's V8) fetches node and the CLIs from the vendors' servers, verifies them, lays them out like
 `npm install -g` in ONE host-side writable tree that persists in the browser (OPFS) and is shared by
@@ -18,6 +18,7 @@ web/native/src/esm2cjs.js                          the in-browser ESM→classic-
 web/native/bunfs.js, tools/bun-extract.mjs         reading the files out of a Bun standalone executable (claude-native)
 test/e2e-sandbox.mjs, test/sandbox-matrix.sh, tools/sandbox-report.mjs, test/sandbox-probe.mjs, test/installer-unit.mjs
 test/claude-native-unit.mjs                        claude-native's resolve/Range/extract/layout logic against a local binary (no network)
+test/nativebin-unit.mjs                            claude-bin's resolve/verify/place/cache chain + the checksum refusals (stubbed vendor, no network)
 web/results/sandbox-<cli>-{cold,warm}.{json,png}, web/results/sandbox-<cli>.json
 ```
 
@@ -28,7 +29,8 @@ web/results/sandbox-<cli>-{cold,warm}.{json,png}, web/results/sandbox-<cli>.json
    (3.9 MB); the **persist worker** (`installer.js` as a `Worker`) opens the OPFS directory
    `nanobox-persist/`, lists `packages/`, and installs whatever the requested CLIs need that is not there
    yet; for `cli=claude` and `cli=claude-native` the runtime worker (`native/runtime.js`) starts and waits
-   for the guest shim.
+   for the guest shim. `cli=claude-bin` needs none of that: like `codex`/`agy` it is a native binary the
+   guest execs.
 2. **The installer** (`NanoboxInstaller.install`) resolves + downloads + verifies, all in parallel:
 
    | CLI | packages (vendor server) | gz | unpacked | integrity | route |
@@ -37,6 +39,7 @@ web/results/sandbox-<cli>-{cold,warm}.{json,png}, web/results/sandbox-<cli>.json
    | (always) npm | `npm@10.9.8` (the npm that ships with node 22.23.2 — `node-linux-x64` carries none) → `/usr/local/lib/node_modules/npm`, `bin/npm`, `bin/npx` | 3.0 MB | 11.7 MB | sha512 | direct |
    | claude | `@anthropic-ai/claude-code@2.1.112` (last release whose `bin` is `cli.js` — later ones download the Bun binary) → `/usr/local/lib/node_modules/@anthropic-ai/claude-code`, `bin/claude → cli.js`; other platforms' `vendor/{ripgrep,audio-capture,seccomp}` pruned in memory | 18.7 MB | 21.6 MB (49.3 unpruned) | sha512 | direct |
    | claude-native | the CURRENT release, out of the vendor's **Bun standalone executable**: `downloads.claude.ai/claude-code-releases/latest` → `<v>/manifest.json` → the last 64 MiB of `<v>/linux-x64/claude` (a `Range` request; the whole binary is 324.6 MB) → 11 embedded modules → `/usr/local/lib/claude-native/cli.js` (the 26.6 MB entry, verbatim), `/$bunfs/root/*` (its assets), `/usr/local/bin/claude` (a `sh` launcher) | 67.1 MB range-fetched | 33.3 MB (12 files, tar 33.4 MB in the store) | sha256 of the extracted **entry** recorded; the vendor's whole-file sha256 only with `?verifyfull=1` | **relay** (no CORS on `downloads.claude.ai`) |
+   | claude-bin | the CURRENT release as the vendor's **executable**: the same `latest` → `manifest.json` resolve, then the WHOLE `<v>/linux-x64/claude` (245.7 MB for 2.1.288) → `/usr/local/bin/claude` 755, one file. No `bunfs` parsing, no node, no V8 shim — the guest execs it like `codex`/`agy`. | — | 245.7 MB (1 file) | the vendor's **whole-file sha256** from `manifest.json`, always, before anything is stored (a mismatch, a missing checksum, or a short download all throw) | **relay** (no CORS on `downloads.claude.ai`) |
    | claude `?sharp=1` | `@img/sharp-linux-x64@0.34.2` + `@img/sharp-libvips-linux-x64@1.1.0` under `claude-code/node_modules/@img/` | 0.4 + 16.7 | | sha512 | direct (off by default: a `.node` addon cannot load on the browser V8 anyway) |
    | codex | `@openai/codex@0.147.0` (`bin/codex.js`) + `@openai/codex@0.147.0-linux-x64` as the alias `@openai/codex-linux-x64` under `@openai/codex/node_modules/` (what npm does with `npm:` aliases; the Rust binary 258 MB + `codex-code-mode-host` 50 MB + rg + zsh + bwrap) | 0.004 + 122.0 MB | 314.8 MB | sha512 | direct |
    | agy | manifest `antigravity-cli-auto-updater-….run.app/manifests/linux_amd64.json` → `{version 1.1.13, url, sha512}` → `storage.googleapis.com/antigravity-public/…/cli_linux_x64.tar.gz` (one file `antigravity`) → `/usr/local/bin/agy` 755 | 55.6 MB | 206.2 MB | manifest sha512 | **relay** (`POST /net/fetch`, neither host answers CORS; `web/netpolicy.js` allow-list) — or the proxy extension when the page has it |

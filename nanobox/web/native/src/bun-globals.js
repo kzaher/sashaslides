@@ -16,6 +16,8 @@
 // page's missing-API list and in the server log instead of silently reading as `undefined`.
 import { parseAllDocuments as parseYamlDocuments, stringify as stringifyYaml } from "yaml";
 import { parse as parseToml } from "smol-toml";
+import { decompress as zstdDecompress } from "fzstd";
+import { Buffer } from "./buffer-first.js";
 import { noteMissing, record } from "./record.js";
 import { stringWidth, wrapAnsi, stripANSI } from "./bun-text.js";
 import { bunHash } from "./bun-hash.js";
@@ -59,6 +61,23 @@ export function makeBun(ctx) {
       setDumpable: () => true,      // nothing to disable: a worker has no ptrace attach and no core dump
       getPeerUid: refuses("Bun.ant.getPeerUid"),
       getPeerPid: refuses("Bun.ant.getPeerPid"),
+    }),
+
+    // 132 of the standalone's embedded assets (the skills, the HTML templates) are zstd-compressed
+    // and read back through `Bun.zstdDecompress[Sync]` — on the startup path, so this is not
+    // optional. Chrome 154 has no `DecompressionStream("zstd")` ("Unsupported compression format"),
+    // and the caller does `.toString("utf8")` on the result, so it must be a Buffer, not a
+    // Uint8Array (whose toString ignores its argument and prints the bytes as decimals).
+    zstdDecompressSync: (data) => Buffer.from(zstdDecompress(toBytes(data))),
+    zstdDecompress: (data) => Promise.resolve(Buffer.from(zstdDecompress(toBytes(data)))),
+
+    // `Bun.unsafe.setJITPolicy(1)` is called 10 s after start and again from several TUI mounts: a
+    // JavaScriptCore tuning knob with no V8 equivalent. Every call site guards with `?.`, so only
+    // the NAMESPACE has to exist — which it must, or `Bun.unsafe.setJITPolicy?.(1)` throws on the
+    // property read of `undefined` and takes the message loop down with it.
+    unsafe: record("Bun.unsafe", {
+      setJITPolicy: () => {},
+      arrayBufferToString: (buffer) => new TextDecoder().decode(buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer),
     }),
 
     // Feature-gated, off the startup path, and backed by kernel facilities the backend does not
@@ -182,4 +201,11 @@ function refuses(name) {
   const fn = function () { noteMissing(name, "call"); throw new Error(name + " is not available in nanobox's Bun shim (no kernel facility behind it)"); };
   Object.defineProperty(fn, "name", { value: name.split(".").pop() });
   return fn;
+}
+
+function toBytes(data) {
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  return new TextEncoder().encode(String(data));
 }

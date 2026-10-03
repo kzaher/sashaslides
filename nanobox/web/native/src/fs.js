@@ -374,6 +374,10 @@ export function makeFs(B) {
       try { const r = f.apply(this, a); if (r && typeof r.then === "function") return r.then(undefined, (e) => { if (!isErrno(e)) reportError("fs-throw", e, { fn: label + name }); throw e; }); return r; }
       catch (e) { if (!isErrno(e)) reportError("fs-throw", e, { fn: label + name }); throw e; }
     };
+    // an fs entry point can carry properties of its own — `realpath.native`, `realpathSync.native`.
+    // The wrapper is a fresh function and has none of them, which is how `promisify(realpath.native)`
+    // came out as `The "original" argument must be of type Function` three frames into the CLI.
+    for (const key of Object.keys(f)) obj[name][key] = f[key];
   };
   for (const k of Object.keys(fs)) if (k !== "promises" && k !== "constants" && typeof fs[k] === "function" && !/^[A-Z]/.test(k)) wrapReport(fs, k, "fs.");
   for (const k of Object.keys(promises)) if (typeof promises[k] === "function" && !/^[A-Z]/.test(k)) wrapReport(promises, k, "fs.promises.");

@@ -25,6 +25,11 @@
 //           /usr/local/lib/claude-native/cli.js (Bun's own CJS wrapper — the runtime evaluates it as is),
 //           every other module at the literal path the bundle opens it by (/$bunfs/root/…), and
 //           /usr/local/bin/claude as a launcher for the guest-side node shim.   -> relay (no CORS)
+//   claude-bin  the SAME current release, but run the way codex/agy are: the vendor's own linux-x64
+//           executable (the whole ~246 MB Bun standalone, sha256-verified against the manifest's
+//           checksum — which covers the whole file and so cannot be checked on a range request)
+//           placed at /usr/local/bin/claude 755 and exec'd by the emulated guest. No bunfs parsing,
+//           no node, no V8 shim.                                                 -> relay (no CORS)
 //
 // A "package" is { key, name, version, tar, meta }: `tar` = the vendor's tarball gunzipped and otherwise
 // UNTOUCHED (integrity: sha512 from the registry's dist.integrity / the agy manifest, checked before
@@ -98,6 +103,14 @@
       lib: "usr/local/lib/claude-native",       // the entry module lands here as cli.js
       bin: "usr/local/bin/claude",              // a launcher: the guest-side node shim runs cli.js
       shim: "/bundle/nb/node",                  // where the page mounts the shim (config-vm.json PATH)
+    } },
+    // the same release as claude-native, installed as the vendor's executable instead of as its
+    // extracted JavaScript. `bin` collides with the npm build's usr/local/bin/claude symlink on
+    // purpose: both ARE `claude`, so installing claude and claude-bin together is not meaningful
+    // (whichever package is applied last wins) — ?install= picks one.
+    "claude-bin": { nativebin: {
+      name: "claude-bin", releases: CLAUDE_RELEASES, platform: "linux-x64",
+      bin: "usr/local/bin/claude",
     } },
   };
   const CLIS = Object.keys(CATALOG).filter((c) => c !== "node");
@@ -184,7 +197,7 @@
     return finish(pkg, ctx);
   }
   // ---- a Bun standalone executable (claude-native) -------------------------------------------------
-  // The vendor ships ONE binary (324 MB) whose JavaScript is plain text inside it (web/native/bunfs.js):
+  // The vendor ships ONE binary (246 MB on 2.1.288) whose JavaScript is plain text inside it (web/native/bunfs.js):
   // we fetch only the tail that holds the sources (NanoboxBunFs.SEARCH_TAIL_BYTES = 64 MB; they occupy
   // the last ~36 MB) with a Range request, extract the modules and PACK THEM AS A TAR — from there on
   // the package is like any other: stored under packages/<key>.tar, applied into the tree by
@@ -211,6 +224,10 @@
     }
     const { mods, main, range, checksum } = await bunSlice(spec, manifest, key, ctx);
     if (!main) throw new Error(`claude-native ${manifest.version}: no entry module in ${range.bytes} bytes of the binary's tail`);
+    // A module whose contents start before the fetched range reads as zero bytes. Installing that is
+    // how a SyntaxError gets deferred to the page, so it is an error here, where the range is known.
+    const short = mods.filter((m) => m.truncated);
+    if (short.length) throw new Error(`claude-native ${manifest.version}: ${short.length} of ${mods.length} modules (${short.slice(0, 3).map((m) => m.name).join(", ")}…) lie before the fetched range ${range.start}-${range.end} of ${range.of} bytes — raise NanoboxBunFs.SEARCH_TAIL_BYTES`);
     const entryPath = spec.lib + "/cli.js";
     const entries = [{ path: entryPath, type: "f", data: main.bytes(), mode: 0o644 }];
     // every OTHER module at the path the bundle opens it by (/$bunfs/root/…): the runtime worker holds
@@ -246,12 +263,11 @@
   // the WHOLE binary (checked against the vendor's sha256) when opts.verifyFull asked for it
   async function bunSlice(spec, manifest, key, ctx) {
     if (ctx.verifyFull) {
-      ctx.progress({ stage: "range", key, url: manifest.url, range: "whole file", of: manifest.size });
-      const bytes = await getBytes(manifest.url, ctx, "relay");
-      const got = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
-      if (manifest.checksum && got !== manifest.checksum.toLowerCase()) throw new Error(`claude-native ${manifest.version}: sha256 mismatch (manifest ${manifest.checksum.slice(0, 16)}… vs downloaded ${got.slice(0, 16)}…)`);
+      // historically this path tolerated a manifest without a checksum, so it stays non-strict here;
+      // `nativebin`, which INSTALLS these bytes as an executable, requires the checksum
+      const { bytes, checksum } = await wholeBinary({ manifest, key, ctx, requireChecksum: false });
       const mods = bunFs().modules(bytes);
-      return { mods, main: entryOf(spec, mods), range: { start: 0, end: bytes.length - 1, bytes: bytes.length, of: manifest.size, whole: true }, checksum: got };
+      return { mods, main: entryOf(spec, mods), range: { start: 0, end: bytes.length - 1, bytes: bytes.length, of: manifest.size, whole: true }, checksum };
     }
     let last = null;
     for (const want of [bunFs().SEARCH_TAIL_BYTES, bunFs().SEARCH_TAIL_BYTES * 4]) {
@@ -263,7 +279,8 @@
       const from = start != null ? start : Math.max(0, (manifest.size || bytes.length) - bytes.length);
       const mods = bunFs().modules(bytes);
       last = { mods, main: spec.entry ? named(spec, mods) : entryOf(spec, mods), range: { start: from, end: from + bytes.length - 1, bytes: bytes.length, of: manifest.size, whole: bytes.length >= (manifest.size || Infinity) }, checksum: null };
-      if (last.main) return last;
+      // a bigger tail is worth one more request when the entry is there but its bytes are not
+      if (last.main && !last.mods.some((m) => m.truncated)) return last;
       if (last.range.whole) break;
     }
     // the vendor renamed the entry (or this is not the binary we think it is): fall back to bunfs.js'
@@ -275,6 +292,56 @@
   // "biggest wrapped module" heuristic would happily accept a 2 KB one and install that as the CLI)
   const named = (spec, mods) => (spec.entry ? mods.find((m) => m.name === spec.entry) || null : null);
   const entryOf = (spec, mods) => named(spec, mods) || bunFs().entry(mods);
+
+  // ---- the vendor's native executable, installed as one file (claude-bin) --------------------------
+  // The same release claude-native extracts JavaScript out of, but installed as what the vendor ships:
+  // an x86-64 ELF the EMULATED GUEST execs, exactly like codex and agy. The whole file is downloaded
+  // (no Range: the manifest's sha256 covers the whole binary, so a slice could not be verified at all)
+  // and checked against that checksum BEFORE anything is stored — unverified bytes are never installed.
+  // From there it is an ordinary package: a one-entry tar in packages/<key>.tar, laid out by
+  // applyPackage, and the second visit downloads nothing.
+  async function nativebinPackage(spec, cli, ctx) {
+    const t0 = performance.now();
+    const manKey = KEYV + spec.name + "-manifest";
+    const manifest = await bunManifest(spec, ctx, manKey);
+    const key = keyOf(spec.name, manifest.version);
+    // the tar holds the executable under the vendor's own file name; `place` moves it to spec.bin 755
+    const place = [{ from: manifest.binary, to: spec.bin, mode: 0o755 }];
+    const pkg = { cli, key, name: spec.name, version: manifest.version, meta: { kind: "nativebin", name: spec.name, version: manifest.version, place, source: manifest }, tar: null, download: null };
+    const have = await ctx.have(key);
+    if (have) {
+      pkg.tar = have;
+      const stored = await ctx.haveMeta(key);   // the provenance recorded on the cold run (verified sha256)
+      if (stored) pkg.meta = stored;
+      pkg.download = { url: null, bytes: 0, fromCache: true, ms: Math.round(performance.now() - t0) };
+      ctx.progress({ stage: "cached", key, bytes: have.length });
+      return finish(pkg, ctx);
+    }
+    const { bytes, checksum } = await wholeBinary({ manifest, key, ctx, requireChecksum: true });
+    pkg.meta = { kind: "nativebin", name: spec.name, version: manifest.version, place,
+      source: { url: manifest.url, fileBytes: bytes.length, fileSha256: checksum, fileSha256Verified: true, at: new Date().toISOString() } };
+    pkg.tar = tarPack([{ path: manifest.binary, type: "f", data: bytes, mode: 0o755 }]);
+    pkg.download = { url: manifest.url, bytes: bytes.length, fromCache: false, ms: Math.round(performance.now() - t0), integrity: "sha256 (whole binary)" };
+    await ctx.keep(key, pkg);
+    await ctx.keep(manKey, { tar: enc.encode(JSON.stringify(manifest)), meta: { kind: "manifest" } });
+    return finish(pkg, ctx);
+  }
+  // the WHOLE vendor binary, hashed and compared with the manifest's sha256 (which covers the whole
+  // file, so it is only checkable on a full download). `requireChecksum` refuses a manifest that
+  // carries none — true wherever the bytes become an executable on disk.
+  async function wholeBinary({ manifest, key, ctx, requireChecksum }) {
+    ctx.progress({ stage: "range", key, url: manifest.url, range: "whole file", of: manifest.size });
+    const bytes = await getBytes(manifest.url, ctx, "relay");
+    if (manifest.size && bytes.length !== manifest.size) throw new Error(`${key}: manifest says ${manifest.size} bytes, downloaded ${bytes.length}`);
+    const checksum = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+    if (!manifest.checksum) {
+      if (requireChecksum) throw new Error(`${key}: the manifest carries no checksum for ${manifest.platform} — refusing to install unverified bytes`);
+      return { bytes, checksum };
+    }
+    if (checksum !== manifest.checksum.toLowerCase()) throw new Error(`${key}: sha256 mismatch (manifest ${manifest.checksum.slice(0, 16)}… vs downloaded ${checksum.slice(0, 16)}…)`);
+    ctx.progress({ stage: "verified", key, integrity: "sha256 (whole binary)", sha256: checksum });
+    return { bytes, checksum };
+  }
 
   // dry-run apply into a scratch tree: file count + unpacked size (validates the tar early)
   function finish(pkg, ctx) {
@@ -322,7 +389,8 @@
       for (const [bin, target] of Object.entries(meta.links || {})) {
         Fs.add(root, "usr/local/bin/" + bin, { symlink: target }); files++;
       }
-    } else if (meta.kind === "tarball") {
+    } else if (meta.kind === "tarball" || meta.kind === "nativebin") {
+      // "nativebin" (claude-bin) is a one-entry tarball: the vendor's executable -> meta.place[0].to 755
       for (const pl of meta.place) {
         const n = Fs.lookup(tmp, pl.from);
         if (!n) throw new Error(`tarball ${pkg.key}: no entry ${pl.from}`);
@@ -343,7 +411,14 @@
     "-c", "model_providers.nanobox-https.base_url=\"https://chatgpt.com/backend-api/codex\"",
     "-c", "model_providers.nanobox-https.wire_api=\"responses\"",
     "-c", "model_providers.nanobox-https.requires_openai_auth=true",
-    // The guest HTTP proxy cannot carry an Upgrade stream. HTTPS Responses is fully supported.
+    // STILL false, and not because of the browser's CORS: codex is an x86-64 binary running INSIDE
+    // the emulated guest, so its egress crosses container2wasm's in-wasm HTTP proxy
+    // (http_proxy=192.168.127.253:80, see web/src/nb-worker-util.js), which re-issues every request
+    // as a page fetch() — and fetch cannot express an HTTP Upgrade. The nanobox proxy extension CAN
+    // now tunnel a real WebSocket (extension/offscreen.js), but only for code that runs on the
+    // page's V8 and can call it (web/native/src/worker.js installs it as self.WebSocket); the guest
+    // never reaches that API. Flipping this to true needs Upgrade support in the in-wasm proxy.
+    // HTTPS Responses is fully supported.
     "-c", "model_providers.nanobox-https.supports_websockets=false",
   ];
   // claude: /usr/local/bin/claude -> cli.js, `#!/usr/bin/env node` -> with PATH=/bundle/nb:... (config-vm.json)
@@ -360,6 +435,10 @@
     if (cli === "claude-native") return { argv: ["/usr/local/bin/claude"], env: {}, spec: "config-vm.json", shim: true };
     if (cli === "codex") return { argv: ["/" + NM + "@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex", ...CODEX_HTTPS_PROVIDER_ARGS], env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: "/" + NM + "@openai/codex" }, spec: "config-persist.json", shim: false };
     if (cli === "agy") return { argv: ["/usr/local/bin/agy"], env: {}, spec: "config-persist.json", shim: false };
+    // claude-bin: the vendor's own linux-x64 executable, exec'd BY THE GUEST (no shim, no V8) — the
+    // same shape as codex/agy, and like them it needs nothing in the environment beyond the spec's
+    // PATH/HOME/TERM. Its auth and config land in ~/.claude, captured by the persistent /root journal.
+    if (cli === "claude-bin") return { argv: ["/usr/local/bin/claude"], env: {}, spec: "config-vm.json", shim: false };
     throw new Error("unknown cli " + cli);
   }
   // the package specs a set of CLIs needs (node first)
@@ -374,6 +453,7 @@
       if (c.optional) for (const [flag, list2] of Object.entries(c.optional)) if (opts && opts[flag]) for (const p of list2) out.push({ cli, npm: p });
       if (c.tarball) out.push({ cli, tarball: c.tarball });
       if (c.bun) out.push({ cli, bun: c.bun });
+      if (c.nativebin) out.push({ cli, nativebin: c.nativebin });
     }
     return out;
   }
@@ -394,7 +474,7 @@
       downloads: [],
     };
     const t0 = performance.now();
-    const packages = await Promise.all(packagesFor(clis, opts).map((j) => (j.npm ? npmPackage(j.npm, j.cli, ctx) : j.bun ? bunPackage(j.bun, j.cli, ctx) : tarballPackage(j.tarball, j.cli, ctx))));
+    const packages = await Promise.all(packagesFor(clis, opts).map((j) => (j.npm ? npmPackage(j.npm, j.cli, ctx) : j.bun ? bunPackage(j.bun, j.cli, ctx) : j.nativebin ? nativebinPackage(j.nativebin, j.cli, ctx) : tarballPackage(j.tarball, j.cli, ctx))));
     const stats = { ms: Math.round(performance.now() - t0), downloads: ctx.downloads, direct: ctx.downloads.filter((d) => d.via === "direct").reduce((s, d) => s + d.bytes, 0), relayed: ctx.downloads.filter((d) => d.via === "relay").reduce((s, d) => s + d.bytes, 0), fromCache: packages.filter((p) => p.download && p.download.fromCache).length, packages: packages.length };
     return { packages, stats };
   }
