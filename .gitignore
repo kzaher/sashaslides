@@ -83,3 +83,8 @@ renderer/html2slides/e2e/.ratings-backup/
 .fork-*/
 renderer/html2slides/addon-server/public/convert-bundle.js
 renderer/html2slides/addon-server/public/pptxgen.bundle.js
+
+# git worktrees used by bug_solving / parallel experiments (exp1, exp2, review)
+.worktrees/
+# core dumps — a 5 GB core.8162 from Oct 1 was sitting at the repo root
+core.*
