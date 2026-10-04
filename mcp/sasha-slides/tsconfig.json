@@ -1,0 +1,40 @@
+// The server-side TypeScript: the MCP server itself, the Drive protocol, the feedback
+// channel and the unit tests that inject fakes into them. These run on Node, so unlike
+// `addon/` and `extension/` this project does take @types/node.
+//
+// THIS file is the gate. `tsx` (which is how every entry point here is actually run) only
+// strips types, so nothing is checked unless this runs:
+//
+//   npx tsc -p mcp/sasha-slides
+//
+// `http/**` and `converter/**` are reached through imports and so are checked transitively;
+// they also keep their own projects. The root tsconfig's `include` does not cover `mcp/**`.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "types": ["node"],
+
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+
+    // --- the gate. `strict` alone leaves the bug classes below legal, so they are named.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["*.ts", "feedback/*.ts", "test/*.ts"]
+}

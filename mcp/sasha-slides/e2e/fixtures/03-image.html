@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture 3 — embedded raster image</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    background: #10131a; color: #eef1f6;
+    display: grid; grid-template-columns: 1fr 1fr; align-items: center;
+    gap: 64px; padding: 72px;
+  }
+  h1 { font-size: 44px; font-weight: 600; line-height: 1.12; margin-bottom: 20px; }
+  p { font-size: 19px; line-height: 1.6; color: #a6b0c3; margin-bottom: 14px; }
+  code { font-family: "SF Mono", Menlo, monospace; font-size: 17px; color: #7ee3c0; }
+  figure { position: relative; }
+  /* object-fit on a cropped frame is a thing Slides approximates rather than honours. */
+  img {
+    width: 100%; height: 340px; display: block;
+    object-fit: cover; object-position: 30% 50%;
+    border-radius: 18px; border: 2px solid #2b3446;
+  }
+  figcaption { margin-top: 14px; font-size: 14px; color: #7a8599; letter-spacing: 0.08em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+  <div>
+    <h1>The HTML is authoritative</h1>
+    <p>
+      The rendered slide is a lossy projection. The user toggles between them and
+      files anomalies against whichever one lies.
+    </p>
+    <p>A raster embedded as a <code>data:</code> URI keeps the slide self-contained &mdash;
+      no network fetch at convert time.</p>
+  </div>
+  <figure>
+    <img alt="Concentric interference bands" src="data:image/png;base64,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">
+    <figcaption>240&times;150 png &middot; cropped to 340px tall</figcaption>
+  </figure>
+</body>
+</html>

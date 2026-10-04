@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sasha-slides visual editor harness</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.4 "Google Sans", Roboto, Arial, sans-serif; color: #202124; background: #f1f3f4; }
+  header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: #fff; border-bottom: 1px solid #dadce0; }
+  header button { font: inherit; padding: 4px 10px; border: 1px solid #dadce0; border-radius: 4px; background: #fff; cursor: pointer; }
+  header button[aria-pressed="true"] { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; }
+  main { display: grid; grid-template-columns: 1fr 360px; gap: 14px; padding: 14px; align-items: start; }
+  /* A deliberately odd scale: the editor's geometry is fractional, so nothing may depend on it. */
+  .stage { position: relative; width: 896px; height: 504px; overflow: hidden; background: #fff; border: 1px solid #dadce0; }
+  .stage iframe { position: absolute; inset: 0; width: 1280px; height: 720px; border: 0; transform-origin: top left; transform: scale(0.7); }
+  .verify { width: 448px; height: 252px; overflow: hidden; background: #fff; border: 1px solid #dadce0; }
+  .verify iframe { width: 1280px; height: 720px; border: 0; transform-origin: top left; transform: scale(0.35); }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #5f6368; margin: 14px 0 6px; }
+  pre { margin: 0; padding: 8px; background: #fff; border: 1px solid #dadce0; border-radius: 4px; max-height: 280px; overflow: auto; font: 11px/1.45 "Roboto Mono", Menlo, monospace; }
+  #warnings:empty::after { content: "none"; color: #5f6368; }
+  #warnings li { color: #b3261e; }
+  #report li.ok { color: #137333; }
+  #report li.bad { color: #b3261e; font-weight: 600; }
+  ul { margin: 0; padding-left: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>visual editor harness</strong>
+  <span id="fixtures"></span>
+  <button id="undo" type="button">undo</button>
+  <button id="roundtrip" type="button">round-trip check</button>
+  <span id="status">no candidate loaded</span>
+</header>
+<main>
+  <div>
+    <div class="stage"><iframe id="slide" title="candidate" sandbox="allow-same-origin" referrerpolicy="no-referrer"></iframe></div>
+    <h2>html() re-rendered</h2>
+    <div class="verify"><iframe id="verify" title="round trip" sandbox="allow-same-origin" referrerpolicy="no-referrer"></iframe></div>
+  </div>
+  <div>
+    <h2>edits()</h2>
+    <pre id="edits">[]</pre>
+    <h2>warnings</h2>
+    <ul id="warnings"></ul>
+    <h2>round-trip report</h2>
+    <ul id="report"></ul>
+  </div>
+</main>
+<script src="harness.js"></script>
+</body>
+</html>

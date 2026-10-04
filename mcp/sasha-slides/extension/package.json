@@ -1,0 +1,23 @@
+{
+  "name": "sasha-slides-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MV3 Chrome extension: watches Drive for sasha-slides READY markers, shows the candidate-slide picker inside Google Slides, writes PICK.",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "build": "./build-extension.sh",
+    "test": "npm run -s typecheck && node --test --import tsx \"src/*.test.ts\"",
+    "smoke": "node --import tsx src/smoke.e2e.ts"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.4",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  }
+}

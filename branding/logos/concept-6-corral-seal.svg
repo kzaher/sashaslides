@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="c6t">
+<title id="c6t">Sasha Slides - Corral Seal (favicon-first round emblem)</title>
+<desc>Two paints only: currentColor (foreground) plus the CSS custom property --sasha-accent. Holes are true negative space, so they always equal the page background. Light wrapper: color:#1E1B3A; --sasha-accent:#6C4BF4; on paper #FFF8F0. Dark wrapper: color:#FFF8F0; --sasha-accent:#19D3C5; on night #0D0F1C.</desc>
+<g fill="currentColor">
+  <path d="M54 62C40 26 60 4 86 14c18 8 20 32 12 52Z"/>
+  <path d="M202 62c14-36-6-58-32-48-18 8-20 32-12 52Z"/>
+  <path fill-rule="evenodd" d="M128 16a112 112 0 1 1 0 224 112 112 0 0 1 0-224Zm-73 62a15 15 0 0 0-15 15v52a15 15 0 0 0 15 15h146a15 15 0 0 0 15-15V93a15 15 0 0 0-15-15Z"/>
+  <path fill-rule="evenodd" d="M82 100h92a19 19 0 0 1 0 38H82a19 19 0 0 1 0-38Zm25 19a10 10 0 1 0-20 0 10 10 0 0 0 20 0Zm62 0a10 10 0 1 0-20 0 10 10 0 0 0 20 0Z"/>
+</g>
+<rect x="84" y="186" width="88" height="16" rx="8" fill="var(--sasha-accent,#6C4BF4)"/>
+</svg>

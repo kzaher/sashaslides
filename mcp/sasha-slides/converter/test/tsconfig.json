@@ -1,0 +1,12 @@
+{
+  // The tests are Node scripts (they drive Chrome over CDP and read fixtures
+  // from disk), so unlike the converter itself they get the Node types.
+  //
+  // Run: npx tsc -p mcp/sasha-slides/converter/test
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["*.ts", "../*.ts", "../../../../types/**/*.d.ts"]
+}

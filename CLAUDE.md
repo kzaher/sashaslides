@@ -33,6 +33,50 @@ Important:
 * **`Ctrl+A` in the main edit area selects objects on the current slide, not all slides.** To select all slides, click in the filmstrip first. `Ctrl+A` inside a Picker dialog selects page text, not dialog items — use per-thumbnail `.click()` or a native "Select all" button via PointerEvent.
 * **Filename-like menu items include keyboard shortcut hints.** `File > Import slides` appears in the DOM as textContent `"Import slides(Z)"` — match with `startsWith('Import slides')`, not `=== 'Import slides'`.
 
+## Apps Script add-ons (sasha-slides) — measured, not guessed
+
+* **Two different Cloud projects gate an add-on, and the error names the wrong one first.** Your OAuth client lives in
+  one project (`982862611156` here); a container-bound Apps Script project gets its OWN auto-created project
+  (`342987503423`). `ScriptApp.getOAuthToken()` mints tokens for the SCRIPT's project, so a `UrlFetchApp` call to
+  `slides.googleapis.com` from `Code.gs` 403s against a project you did not know existed.
+* **Use ADVANCED SERVICES, never `UrlFetchApp` to a Google REST API, from inside Apps Script.**
+  `Slides.Presentations.batchUpdate(body, presentationId)` and `Slides.Presentations.Pages.getThumbnail(...)` are
+  proxied by Apps Script under its own project — no Cloud console, no API enablement. That is what
+  `appsscript.json`'s `enabledAdvancedServices` is for. Enable one in the editor: "Add a service" → the row → "Add".
+* **The Cloud console may be completely unreachable.** Since 2025-05-13 Google enforces 2SV for Cloud; without it every
+  console URL redirects to `console.cloud.google.com/enable-mfa` and NOTHING in the console can be done. Check this
+  BEFORE planning any "just enable the API" step. The `service.management` scope does not substitute: Service Usage
+  rejects it (`ACCESS_TOKEN_SCOPE_INSUFFICIENT`), and `:enable` needs `serviceusage.services.enable`.
+* **Deploying with the Apps Script API disabled:** Slides → Extensions → Apps Script creates a bound project needing no
+  API. The editor exposes `window.monaco`, so set file contents with
+  `monaco.editor.getModels().find(m => String(m.uri).endsWith('.html')).setValue(text)` — a 424 KB bundle cannot be
+  typed through key events. **Select the model by uri suffix, never "the last model"**, or a reordering silently writes
+  the sidebar over `Code.gs`. Ship the text in ~48 KB chunks into a `window` array first. See
+  `mcp/sasha-slides/addon/deploy-via-ide.ts`.
+* **"Saving project..." is a permanently-present hidden aria-live node** in the Apps Script editor — it is NOT a save
+  indicator. Use the `aria-label="Save project to Drive"` button's `disabled` state, and confirm persistence by
+  reloading the page and re-reading the model length.
+* **A consent popup only opens for a TRUSTED gesture.** The JS `PointerEvent` sequence that Slides' own React/Closure
+  widgets require is NOT trusted, so `window.open` is silently blocked and no consent window ever appears. Press
+  "Review permissions" with `Input.dispatchMouseEvent` at real coordinates. Conversely the Slides **menubar** needs the
+  JS sequence — the two surfaces want opposite techniques.
+* **A successful OAuth grant closes the popup**, which tears down the CDP websocket mid-command
+  (`WebSocket is not open: readyState 3`). That is the SUCCESS path — catch it, do not throw.
+* **`Input.dispatchMouseEvent` at a y past `innerHeight` is silently dropped.** The window here is 1599x878, so a row in
+  a long dialog must be `scrollIntoView({block:'center'})`'d and RE-measured before clicking.
+* **Docs/Slides ignore input when `document.hasFocus()` is false** — call `Page.bringToFront()` before driving menus.
+* **An add-on's custom menu is a Closure `menu-button` DIV inside `#docs-menubar`, not `[role=menuitem]`.** Scope the
+  search to the menubar: the string also appears as the sidebar's own title, and clicking that does nothing.
+* **HtmlService nests your page ONE IFRAME BELOW `userCodeAppPanel`.** The outer frame is a ~900 byte shell; the bundle
+  is in `document.querySelector('iframe').contentDocument`. A 424 KB inlined bundle is served intact (measured) — the
+  corruption folklore did not reproduce.
+* **Re-opening a sidebar leaves STALE `userCodeAppPanel` targets** that still have buttons and still render old state,
+  so clicking one looks like it worked and changes nothing. Find the live panel by content, and collapse duplicate deck
+  tabs before driving the UI.
+* **A bound add-on fails for a NON-DEFAULT Google account, and the only symptom is "a server error occurred while reading from storage. Error code PERMISSION_DENIED".** The bound script belongs to the document's owner, so a browser signed into several Google accounts can serve the sidebar as the wrong one and Apps Script then refuses to load the script. **The account slot is readable from the sandbox's own host**: HtmlService serves the panel from `n-<opaque>-<slot>lu-script.googleusercontent.com`, so `-0lu-` is the browser default and `-1lu-` is the second account. `mcp/sasha-slides/addon/src/diagnostics.ts` parses it and the error panel prints it; do that rather than theorising about someone else's browser. Fix with `…/edit?authuser=<owner address>`. Confirmed in practice after three wrong guesses. Ruled out by measurement: third-party cookie blocking does NOT cause it (the add-on works with them blocked), so Incognito is not a diagnostic.
+* **`SlidesApp.getActivePresentation().getUrl()` returns the LEGACY Drive form** `https://docs.google.com/open?id=<id>`,
+  NOT `/presentation/d/<id>/edit`. Any regex that only accepts the editor URL parses it to null.
+
 ## Whiteboard / visual style
 
 * **Google Fonts "Caveat" and "Patrick Hand"** render natively in Google Slides (no font upload needed). Good for handwriting / whiteboard looks.

@@ -1,0 +1,32 @@
+// The shim's own gate. It is BROWSER TypeScript -- it ships into the served Sidebar.html -- so it
+// deliberately has no @types/node: letting node's globals in would make `fetch`, `Blob` and
+// `TextDecoder` resolve to undici/node shapes and the gate would stop catching a browser/node
+// mix-up. product-host.ts runs this before it emits the bundle, because esbuild strips types
+// without checking them.
+//
+// Run: npx tsc -p mcp/sasha-slides/e2e/product-shim
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["*.ts"]
+}

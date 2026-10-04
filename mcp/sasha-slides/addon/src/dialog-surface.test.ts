@@ -1,0 +1,511 @@
+// THE DIALOG'S TWO AXES: the VIEW (grid or one slide) and the TOOL (edit or annotate), which are
+// independent, and the four combinations of them.
+//
+// Same shape as picker-state.test.ts -- the reducer is pure and the tree is rendered with
+// react-dom/server, so every combination is asserted in milliseconds with no browser and no Apps
+// Script host. The order of the tests follows the order of the code: the reducer's transitions,
+// then the selectors the dialog's feedback loops are gated on, then the markup.
+//
+// WHAT THESE TESTS PIN. The window used to hold ONE `surface` enum, so clicking a cell entered a
+// screen where annotation became possible and leaving it took the gesture away. The tests below
+// state the replacement as four properties: edit is the default, a zoom never moves the tool, a
+// tool never moves the zoom, and both tools render at both zoom levels.
+
+import assert from "node:assert/strict";
+import test from "node:test";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
+import { stubConvertHtmlToSlideRequests } from "./converter-contract.ts";
+import { slideHtml } from "./fake-drive.ts";
+import { INERT_PICKER_ACTIONS } from "./inert-actions.ts";
+import type { Proposal } from "./observer.ts";
+import { Picker } from "./Picker.tsx";
+import {
+  INITIAL_PICKER_STATE,
+  drawsRegions,
+  editorIsLive,
+  editorReachOf,
+  editsSlides,
+  nextHtmlToLoad,
+  nextToConvert,
+  offerOf,
+  reducePicker,
+  selectedFrame,
+  type PickerEvent,
+  type PickerState,
+} from "./picker-state.ts";
+import { UNMEASURED_SCALE } from "./scaled-frame.tsx";
+import { describeSlideEdit, nullSlideEditor, slideEditRecord, type SlideEdit } from "./slide-editor.ts";
+
+const proposal: Proposal = {
+  proposalId: "p_1",
+  folderId: "folder_p_1",
+  presentationId: "deck_1",
+  count: 4,
+  slides: [1, 2, 3, 4].map((index) => ({
+    index,
+    fileId: `html_${index}`,
+    name: `${String(index).padStart(2, "0")}.html`,
+    label: `option ${index}`,
+  })),
+};
+
+// --- the view and the tool, which are independent -------------------------
+
+test("an offer opens on the GRID, because comparing the candidates is the point of the window", () => {
+  const offer = offerOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
+  assert.ok(offer !== null);
+  assert.equal(offer.view, "grid");
+  assert.equal(offer.tool, "edit", "and in the EDIT tool: editing is the default, not a destination");
+  assert.equal(offer.selectedIndex, 1, "and option 1 is pre-selected, so Insert always has a target");
+});
+
+test("ZOOMING IN ON A CANDIDATE CHANGES THE VIEW AND NOTHING ELSE -- not the tool", () => {
+  const offer = offerOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "tool-chosen", tool: "annotate" },
+      { kind: "candidate-zoomed", index: 3 },
+    ]),
+  );
+  assert.equal(offer?.view, "single");
+  assert.equal(offer?.selectedIndex, 3);
+  assert.equal(offer?.tool, "annotate", "the tool the user picked survives the zoom");
+});
+
+test("AND CHOOSING A TOOL CHANGES THE TOOL AND NOTHING ELSE -- not the view", () => {
+  const offer = offerOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "candidate-zoomed", index: 2 },
+      { kind: "tool-chosen", tool: "annotate" },
+      { kind: "tool-chosen", tool: "edit" },
+    ]),
+  );
+  assert.equal(offer?.view, "single", "two tool changes left the zoom level alone");
+  assert.equal(offer?.tool, "edit");
+  assert.equal(offer?.selectedIndex, 2);
+});
+
+test("every one of the four view/tool combinations is reachable", () => {
+  for (const view of ["grid", "single"] as const) {
+    for (const tool of ["edit", "annotate"] as const) {
+      const offer = offerOf(
+        play([
+          { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+          { kind: "view-chosen", view },
+          { kind: "tool-chosen", tool },
+        ]),
+      );
+      assert.equal(offer?.view, view, `${view}/${tool}`);
+      assert.equal(offer?.tool, tool, `${view}/${tool}`);
+    }
+  }
+});
+
+test("a zoom is clamped like every other selection -- there is no option 9", () => {
+  const offer = offerOf(
+    play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }, { kind: "candidate-zoomed", index: 9 }]),
+  );
+  assert.equal(offer?.selectedIndex, 4);
+});
+
+test("going back to the grid keeps the selection, the tool and the notes", () => {
+  const offer = offerOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "tool-chosen", tool: "annotate" },
+      { kind: "candidate-zoomed", index: 2 },
+      { kind: "anomaly-drawn", index: 2, anomalyId: "user_1", region: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } },
+      { kind: "view-chosen", view: "grid" },
+    ]),
+  );
+  assert.equal(offer?.view, "grid");
+  assert.equal(offer?.tool, "annotate");
+  assert.equal(offer?.selectedIndex, 2);
+  assert.equal(offer?.slides[1]?.anomalies.length, 1);
+});
+
+test("the window is read-only while a submit is in flight -- view and tool both freeze", () => {
+  const state = play([
+    { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+    { kind: "submit-started", picked: 1, stage: "inserting" },
+    { kind: "candidate-zoomed", index: 3 },
+    { kind: "tool-chosen", tool: "annotate" },
+  ]);
+  assert.equal(state.status, "submitting");
+  assert.equal(offerOf(state)?.view, "grid", "zooming mid-insert changes nothing");
+  assert.equal(offerOf(state)?.tool, "edit");
+  assert.equal(offerOf(state)?.selectedIndex, 1);
+});
+
+test("the tool predicates are the only decision site, and they disagree about the pointer", () => {
+  assert.equal(drawsRegions("annotate"), true);
+  assert.equal(drawsRegions("edit"), false);
+  assert.equal(editsSlides("edit"), true);
+  assert.equal(editsSlides("annotate"), false);
+});
+
+test("THE EDITOR'S REACH IS A UNION WITH A REASON, never a silently empty slot", () => {
+  const offer = offerOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
+  assert.ok(offer !== null);
+  const loading = selectedFrame(offer);
+  assert.equal(editorReachOf({ rendering: "html", frame: loading }).kind, "unloaded");
+  // The converted pane is a PROJECTION; the invariants say an edit edits the HTML, never the
+  // conversion, so the editor refuses it by name rather than appearing to work.
+  assert.equal(editorReachOf({ rendering: "rendered", frame: loading }).kind, "projection");
+  assert.equal(editorReachOf({ rendering: "html", frame: null }).kind, "no-candidate");
+  const arrived = offerOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-arrived", index: 1, html: slideHtml({ index: 1, proposalId: "p_1" }) },
+    ]),
+  );
+  assert.ok(arrived !== null);
+  const reach = editorReachOf({ rendering: "html", frame: selectedFrame(arrived) });
+  assert.equal(reach.kind, "reachable");
+  assert.equal(editorIsLive(reach), true);
+  for (const kind of ["projection", "unloaded", "no-candidate"] as const) {
+    assert.equal(editorIsLive(kind === "unloaded" ? { kind, message: "x" } : { kind }), false);
+  }
+});
+
+test("the visual editor's list is recorded on the candidate it belongs to", () => {
+  const edits: readonly SlideEdit[] = [{ kind: "removed", target: ".badge" }];
+  const offer = offerOf(
+    play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }, { kind: "edits-changed", index: 2, edits }]),
+  );
+  assert.deepEqual(offer?.slides[1]?.edits, edits);
+  assert.deepEqual(offer?.slides[0]?.edits, [], "and nowhere else");
+});
+
+// --- what the dialog's loops fetch ----------------------------------------
+
+test("the grid wants EVERY candidate's HTML, one at a time, in order", () => {
+  let state = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
+  const asked: number[] = [];
+  for (let step = 0; step < proposal.count; step++) {
+    const next = nextHtmlToLoad(offerOf(state) ?? neverOffer());
+    assert.ok(next !== null, `step ${step} had nothing to load`);
+    asked.push(next.index);
+    state = reducePicker(state, { kind: "html-requested", index: next.index });
+    state = reducePicker(state, { kind: "html-arrived", index: next.index, html: "<html></html>" });
+  }
+  assert.deepEqual(asked, [1, 2, 3, 4]);
+  assert.equal(nextHtmlToLoad(offerOf(state) ?? neverOffer()), null, "and then it stops asking");
+});
+
+test("a candidate whose HTML failed is not asked for again, and the others still load", () => {
+  const state = play([
+    { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+    { kind: "html-requested", index: 1 },
+    { kind: "html-failed", index: 1, message: "Drive said 404" },
+  ]);
+  assert.equal(nextHtmlToLoad(offerOf(state) ?? neverOffer())?.index, 2);
+});
+
+test("conversion follows the HTML, and only for candidates that have it", () => {
+  const state = play([
+    { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+    { kind: "html-arrived", index: 2, html: "<html></html>" },
+  ]);
+  assert.equal(nextToConvert(offerOf(state) ?? neverOffer())?.index, 2, "1 has no HTML yet, so 2 is next");
+});
+
+// --- the grid's markup ----------------------------------------------------
+
+test("the grid draws one cell per candidate, numbered 1..N", () => {
+  const markup = markupOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
+  assert.equal(countOf(markup, /class="sasha-cell[ "]/g), 4, "four cells for four candidates");
+  for (const index of [1, 2, 3, 4]) {
+    assert.match(markup, new RegExp(`sasha-chip-number">${index}<`), `cell ${index} carries its own number`);
+  }
+  assert.match(markup, /class="sasha-grid"/);
+  // THE CELL IS NOT A BUTTON ANY MORE. Its picture belongs to the current tool, so the two controls
+  // are named: the chip picks which candidate you are working on, and "Show large" is the zoom.
+  assert.match(markup, /work on candidate 3/);
+  assert.match(markup, /show candidate 3 large/);
+  assert.doesNotMatch(markup, /to mark it up/, "clicking a cell no longer enters a mark-up screen");
+});
+
+test("a grid cell renders the candidate's own HTML in a scaled sandboxed iframe, never a picture", () => {
+  const html = slideHtml({ index: 1, proposalId: "p_1" });
+  const markup = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-arrived", index: 1, html },
+      { kind: "html-arrived", index: 2, html },
+    ]),
+  );
+  assert.equal(countOf(markup, /<iframe/g), 2, "one iframe per loaded candidate");
+  // ONE EDITABLE FRAME AT A TIME. The selected candidate's is `allow-same-origin` so the visual
+  // editor can reach its document; every other cell keeps the strictest box. `allow-scripts` is
+  // granted nowhere, under either sandbox, so no candidate ever executes anything.
+  assert.equal(countOf(markup, /sandbox=""/g), 1, "the candidate that is not being edited");
+  assert.equal(countOf(markup, /sandbox="allow-same-origin"/g), 1, "the one the editor is on");
+  assert.doesNotMatch(markup, /allow-scripts/);
+  assert.match(markup, new RegExp(`transform:scale\\(${UNMEASURED_SCALE}\\)`));
+  assert.doesNotMatch(markup, /<img/, "a thumbnail would lie; the HTML is authoritative");
+});
+
+test("a cell that could not be loaded says so on the cell", () => {
+  const markup = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-requested", index: 2 },
+      { kind: "html-failed", index: 2, message: "Drive said 404" },
+    ]),
+  );
+  assert.match(markup, /Drive said 404/);
+  assert.match(markup, /could not be loaded/, "and the cell's own caption repeats it");
+});
+
+test("in the EDIT tool a cell shows the boxes already reported, with no drag surface over them", () => {
+  const markup = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "anomaly-drawn", index: 2, anomalyId: "user_1", region: { x: 0.1, y: 0.2, w: 0.3, h: 0.2 } },
+    ]),
+  );
+  assert.match(markup, /class="sasha-mark sasha-mark-user"/);
+  // The editor draws its chrome over the frame, so a transparent drag overlay above it would
+  // swallow every one of its pointer events. `RegionMarks` has no handlers at all.
+  assert.doesNotMatch(markup, /class="sasha-overlay"/, "the edit tool does not take the pointer for dragging");
+  // "not sent" because a box is art direction Sasha cannot see until it is a comment on the
+  // candidate -- that is what the Send on the mark-up row does (UI-CONTRACT.md).
+  assert.match(markup, /1 marked, not sent/);
+  // The comments have not been read, so the badge says "?" -- never a zero it cannot vouch for.
+  assert.match(markup, /class="sasha-cell-unresolved sasha-unresolved-unknown"/);
+});
+
+test("the cell's unresolved badge is the conversation's number, and never a silent zero", () => {
+  const read = play([
+    { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+    {
+      kind: "comments-arrived",
+      comments: {
+        kind: "loaded",
+        readAt: "2026-10-04T12:00:00.000Z",
+        slides: [
+          {
+            proposalId: proposal.proposalId,
+            slideIndex: 1,
+            threads: {
+              kind: "read",
+              threads: [
+                {
+                  commentId: "cc_1",
+                  author: "Krunoslav",
+                  text: "gridlines gone",
+                  at: "2026-10-04T12:01:00.000Z",
+                  resolved: false,
+                  region: null,
+                  replies: [],
+                },
+              ],
+            },
+          },
+          { proposalId: proposal.proposalId, slideIndex: 2, threads: { kind: "unreadable", message: "HTTP 404" } },
+        ],
+      },
+    },
+  ]);
+  const markup = markupOf(read);
+  assert.match(markup, /class="sasha-cell-unresolved sasha-unresolved-known" title="1 open comment"/);
+  assert.match(markup, /class="sasha-cell-unresolved sasha-unresolved-unreachable"/);
+  assert.match(markup, /open comments could not be read: HTTP 404/);
+});
+
+// --- the markup, at both zoom levels, with both tools ---------------------
+
+test("THE ANNOTATE TOOL PUTS THE DRAG SURFACE ON EVERY CELL OF THE GRID", () => {
+  const markup = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-arrived", index: 1, html: slideHtml({ index: 1, proposalId: "p_1" }) },
+      { kind: "tool-chosen", tool: "annotate" },
+    ]),
+  );
+  assert.match(markup, /class="sasha-grid"/, "still the grid: a tool is not a zoom level");
+  // Four cells, four drag surfaces: this is the whole of "annotate in the grid or individual view".
+  assert.equal(countOf(markup, /class="sasha-overlay"/g), proposal.count);
+});
+
+test("zooming shows one candidate big, with the current tool on it and a way back", () => {
+  const annotating = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-arrived", index: 2, html: slideHtml({ index: 2, proposalId: "p_1" }) },
+      { kind: "tool-chosen", tool: "annotate" },
+      { kind: "candidate-zoomed", index: 2 },
+    ]),
+  );
+  assert.doesNotMatch(annotating, /class="sasha-grid"/, "the grid is not rendered at the same time");
+  assert.match(annotating, /Back to all candidates/);
+  assert.equal(countOf(annotating, /class="sasha-overlay"/g), 1, "one candidate, one drag surface");
+  assert.equal(countOf(annotating, /<iframe/g), 1, "one candidate, not four");
+  assert.match(annotating, /class="sasha-pane sasha-pane-big"/);
+
+  // THE SAME ZOOM LEVEL WITH THE EDIT TOOL: one big slide, no drag surface, the editor's panel.
+  const editing = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-arrived", index: 2, html: slideHtml({ index: 2, proposalId: "p_1" }) },
+      { kind: "candidate-zoomed", index: 2 },
+    ]),
+  );
+  assert.match(editing, /class="sasha-pane sasha-pane-big"/);
+  assert.doesNotMatch(editing, /class="sasha-overlay"/);
+  assert.match(editing, /Visual edits/);
+});
+
+test("the mark-up list names the slide each box is on, so a box drawn in the grid is findable", () => {
+  const markup = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "tool-chosen", tool: "annotate" },
+      { kind: "anomaly-drawn", index: 2, anomalyId: "user_1", region: { x: 0.1, y: 0.2, w: 0.3, h: 0.25 } },
+      { kind: "anomaly-noted", index: 2, anomalyId: "user_1", note: "gridlines gone" },
+    ]),
+  );
+  // A textarea carries its value as its CHILD, not as a value attribute -- which is also the
+  // proof that the composer is multiline now.
+  assert.match(markup, /<textarea[^>]*class="sasha-note"[^>]*>gridlines gone<\/textarea>/);
+  assert.match(markup, /slide 2 -- 10%,20% 30%x25%/, "the slide number AND the readable region");
+});
+
+test("the visual editor's slot says what it is for, and lists the edits once there are some", () => {
+  const empty = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-arrived", index: 1, html: slideHtml({ index: 1, proposalId: "p_1" }) },
+      { kind: "candidate-zoomed", index: 1 },
+    ]),
+  );
+  assert.match(empty, /Visual edits/);
+  assert.match(empty, /no edits yet|waiting for the candidate to render/);
+  // ONE ROW when there is nothing to list. The panel is always on screen (edit is the default), so
+  // its empty state is part of the grid's vertical budget -- the sentence is the header's caption
+  // rather than a paragraph under it, and the Undo button only exists once there is something to
+  // undo. The browser smoke test measures the budget and fails if this grows back.
+  assert.match(empty, /travels to Sasha as the change itself, never as the slide&#x27;s markup/);
+  assert.doesNotMatch(empty, />Undo</, "nothing to undo yet, so no button taking a row's worth of height");
+
+  const edited = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-arrived", index: 1, html: slideHtml({ index: 1, proposalId: "p_1" }) },
+      { kind: "candidate-zoomed", index: 1 },
+      {
+        kind: "edits-changed",
+        index: 1,
+        edits: [
+          { kind: "moved", target: "h1.title", from: { x: 0.08, y: 0.1 }, to: { x: 0.08, y: 0.16 } },
+          { kind: "retext", target: "h1.title", to: "Q3 infrastructure spend" },
+        ],
+      },
+    ]),
+  );
+  assert.match(edited, /2 edits/);
+  assert.match(edited, />Undo</, "and the button appears once there is something to undo");
+  // The sentences are the EDITOR's own (`describeEdit`), re-exported through slide-editor.ts rather
+  // than reworded here -- the editor is the authority on what one of its edits means.
+  assert.match(edited, /moved h1\.title to 8%,16%/);
+  // `retext` quotes the new words, and only `retext` does: UI-CONTRACT.md makes it the one place
+  // slide text legitimately crosses, because the user typed it. Nothing else here is slide content.
+  assert.match(edited, /retext h1\.title to &quot;Q3 infrastructure spend&quot;/);
+});
+
+test("the converted view replaces the documents in every cell, not just the open one", () => {
+  const converted = stubConvertHtmlToSlideRequests()({
+    html: slideHtml({ index: 1, proposalId: "p_1" }),
+    presentationId: "deck_1",
+    pageObjectId: "sasha_page",
+  });
+  const markup = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-arrived", index: 1, html: slideHtml({ index: 1, proposalId: "p_1" }) },
+      { kind: "converted", index: 1, result: converted },
+      { kind: "rendering-chosen", rendering: "rendered" },
+    ]),
+  );
+  assert.doesNotMatch(markup, /<iframe/, "the HTML pane is not rendered at the same time");
+  assert.match(markup, /sasha-el sasha-el-shape/);
+  assert.match(markup, /converting\.\.\./, "the cells with no conversion yet say so rather than sitting blank");
+  // And the editor says WHY it is not live, rather than leaving an unexplained empty panel.
+  assert.match(markup, /switch the rendering back to HTML/);
+});
+
+test("an offer whose selected candidate is missing from the manifest says so instead of blanking", () => {
+  // `clampIndex` makes this unreachable through the reducer, so the state is built directly: the
+  // render path still has to answer for it, which is the whole reason the branch exists.
+  const offer = offerOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
+  assert.ok(offer !== null);
+  const broken: PickerState = {
+    status: "picking",
+    offer: { ...offer, view: "single", selectedIndex: 9 },
+  };
+  assert.equal(selectedFrame({ ...offer, selectedIndex: 9 }), null);
+  assert.match(markupOf(broken), /option 9 is missing from the manifest/);
+});
+
+// --- the editor seam ------------------------------------------------------
+
+test("the null editor satisfies the interface: no edits, HTML unchanged, nothing to undo", () => {
+  const editor = nullSlideEditor({ html: "<html>kept</html>" });
+  assert.deepEqual(editor.edits(), []);
+  assert.equal(editor.html(), "<html>kept</html>");
+  assert.equal(editor.undo(), false);
+});
+
+test("the edit record carries the candidate's 1-based number and the edits, and no markup", () => {
+  const record = slideEditRecord({
+    candidateIndex: 2,
+    protocolVersion: 1,
+    edits: [{ kind: "recoloured", target: ".accent", property: "color", from: "#2b3a8f", to: "#111111" }],
+  });
+  assert.deepEqual(record, {
+    protocolVersion: 1,
+    candidateIndex: 2,
+    edits: [{ kind: "recoloured", target: ".accent", property: "color", from: "#2b3a8f", to: "#111111" }],
+  });
+});
+
+test("every edit kind has a sentence, so none can render as an object", () => {
+  const every: readonly SlideEdit[] = [
+    { kind: "moved", target: "a", from: { x: 0, y: 0 }, to: { x: 0.5, y: 0.25 } },
+    { kind: "resized", target: "b", from: { w: 0.4, h: 0.3 }, to: { w: 0.52, h: 0.3 } },
+    { kind: "recoloured", target: "c", property: "color", from: "#000", to: "#fff" },
+    { kind: "retext", target: "d", to: "whatever" },
+    { kind: "removed", target: "e" },
+  ];
+  for (const edit of every) {
+    const sentence = describeSlideEdit(edit);
+    assert.notEqual(sentence, "");
+    assert.doesNotMatch(sentence, /\[object/);
+  }
+  assert.equal(describeSlideEdit(every[1] ?? neverEdit()), "resized b to 52%x30%");
+});
+
+function play(events: readonly PickerEvent[]): PickerState {
+  let state = INITIAL_PICKER_STATE;
+  for (const event of events) state = reducePicker(state, event);
+  return state;
+}
+
+function markupOf(state: PickerState): string {
+  return renderToStaticMarkup(createElement(Picker, { state, actions: INERT_PICKER_ACTIONS }));
+}
+
+function countOf(markup: string, pattern: RegExp): number {
+  return markup.match(pattern)?.length ?? 0;
+}
+
+function neverOffer(): never {
+  throw new Error("expected an offer");
+}
+
+function neverEdit(): never {
+  throw new Error("expected an edit");
+}
