@@ -25,6 +25,13 @@
 
 import { type JSX, type ReactNode } from "react";
 import { ScaledHtmlFrame } from "./scaled-frame.tsx";
+import { SlideThumb } from "./slide-thumb.tsx";
+import {
+  describeThreadSlide,
+  previewOf,
+  threadSlideContextOf,
+  type SlidePreviews,
+} from "./slide-previews.ts";
 
 // NO AUTO-SCROLL HERE ANY MORE. The log sits inside a collapsed <details>, so there is no
 // scroller to keep at the bottom; the comments panel above it is what the reader is following.
@@ -128,9 +135,12 @@ export type ConversationActions = Readonly<{
 
 export function ConversationPanel({
   conversation,
+  previews,
   actions,
 }: {
   conversation: Conversation;
+  /** The candidates' thumbnails (slide-previews.ts), held beside the conversation by sidebar.tsx. */
+  previews: SlidePreviews;
   actions: ConversationActions;
 }): JSX.Element {
   return (
@@ -145,7 +155,7 @@ export function ConversationPanel({
             <span className="sasha-opening-ring" aria-hidden="true" />
           </p>
         ) : (
-          <ConversationBody conversation={conversation} actions={actions} />
+          <ConversationBody conversation={conversation} previews={previews} actions={actions} />
         )}
       </section>
     </ConversationShell>
@@ -155,9 +165,11 @@ export function ConversationPanel({
 /** The panel once it has something to say. Split out so the opening state is one clear branch. */
 function ConversationBody({
   conversation,
+  previews,
   actions,
 }: {
   conversation: Conversation;
+  previews: SlidePreviews;
   actions: ConversationActions;
 }): JSX.Element {
   return (
@@ -183,7 +195,7 @@ function ConversationBody({
           shows comments; what HAPPENED is visible in the comments themselves, because Sasha
           answers inside the thread it is answering.
         */}
-        <CommentPanel conversation={conversation} actions={actions} />
+        <CommentPanel conversation={conversation} previews={previews} actions={actions} />
         {/*
           THE SESSION LOG, FOLDED AWAY.
           
@@ -439,11 +451,13 @@ function ThreadRow({
   thread,
   deliveries,
   conversation,
+  previews,
   actions,
 }: {
   thread: ConversationThread;
   deliveries: Deliveries;
   conversation: Conversation;
+  previews: SlidePreviews;
   actions: ConversationActions;
 }): JSX.Element {
   const state = threadActionOf({ conversation, commentId: thread.commentId });
@@ -513,6 +527,12 @@ function ThreadRow({
           OPEN that slide from the bottom of the thread, which is where the reader is once they
           have read it.
         */}
+        {/* WHICH SLIDE, AND WHICH VERSION OF IT. The comment's words alone ("the middle row is
+            1px thicker") do not say which of the candidates they are about; the picture and
+            the number do. Only on OPEN threads: a done one is history and its iframe is cost. */}
+        {thread.resolved ? null : (
+          <ThreadSlideContext thread={thread} conversation={conversation} previews={previews} actions={actions} />
+        )}
         <div className="sasha-c-foot">
           {thread.slideIndex !== null && followedSet(conversation) !== null ? (
             <button
@@ -539,6 +559,54 @@ function ThreadRow({
       </CommentCard>
     </li>
   );
+}
+
+/**
+ * THE CANDIDATE A THREAD IS ABOUT: its thumbnail, its number and its revision. The thumbnail is a
+ * button too, because a picture of a slide is the first thing anyone clicks to see it bigger.
+ */
+function ThreadSlideContext({
+  thread,
+  conversation,
+  previews,
+  actions,
+}: {
+  thread: ConversationThread;
+  conversation: Conversation;
+  previews: SlidePreviews;
+  actions: ConversationActions;
+}): JSX.Element | null {
+  const context = threadSlideContextOf({ conversation, thread });
+  switch (context.kind) {
+    case "deck":
+      return null;
+    case "candidate": {
+      const followed = followedSet(conversation);
+      const label = describeThreadSlide(context);
+      return (
+        <div className="sasha-c-context">
+          <button
+            type="button"
+            className="sasha-c-thumb"
+            aria-label={`Open slide ${context.slideIndex}`}
+            disabled={followed === null}
+            onClick={() => {
+              if (followed === null) return;
+              actions.openArtifact({ proposalId: followed.proposalId, slideIndex: context.slideIndex });
+            }}
+          >
+            <SlideThumb
+              preview={previewOf({ conversation, previews, slideIndex: context.slideIndex })}
+              title={`candidate ${context.slideIndex}`}
+            />
+          </button>
+          <span className="sasha-c-context-label">{label}</span>
+        </div>
+      );
+    }
+    default:
+      return assertNever(context);
+  }
 }
 
 /**
@@ -677,9 +745,11 @@ function avatarToneOfPost(post: ConversationPost): AvatarTone {
  */
 function CommentPanel({
   conversation,
+  previews,
   actions,
 }: {
   conversation: Conversation;
+  previews: SlidePreviews;
   actions: ConversationActions;
 }): JSX.Element | null {
   const threads = loadedThreads(conversation.thread);
@@ -724,6 +794,10 @@ function CommentPanel({
             {followed.slides.map((slide) => (
               <li className="sasha-stack-slide" key={slide.slideIndex}>
                 <span className="sasha-stack-number mono">{slide.slideIndex}</span>
+                <SlideThumb
+                  preview={previewOf({ conversation, previews, slideIndex: slide.slideIndex })}
+                  title={`candidate ${slide.slideIndex}`}
+                />
                 <span className="sasha-stack-label">{slide.label === "" ? slide.name : slide.label}</span>
                 <button
                   type="button"
@@ -776,6 +850,7 @@ function CommentPanel({
                   thread={thread}
                   deliveries={deliveries}
                   conversation={conversation}
+                  previews={previews}
                   actions={actions}
                 />
                 {/* The way into the slide is at the END of the thread now (ThreadRow's foot),

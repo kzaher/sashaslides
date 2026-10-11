@@ -120,8 +120,12 @@ export type WaitingWhat =
  * an act says strictly more than a read.
  */
 export type SashaPresence =
-  /** Sasha has acted in this session. `agoMs` is since the most recent thing it did. */
-  | Readonly<{ kind: "acted"; at: string; agoMs: number | null }>
+  /**
+   * Sasha has acted in this session. `agoMs` is since the most recent thing it did; `heardAgoMs`
+   * is since the newest evidence of ANY kind, act or receipt -- a receipt newer than the last act
+   * still proves something was here more recently, and only that decides `presenceIsSilent`.
+   */
+  | Readonly<{ kind: "acted"; at: string; agoMs: number | null; heardAgoMs: number | null }>
   /**
    * A client READ the user's comments, `agoMs` ago, and has done nothing else. Evidence that
    * something was there; evidence of nothing further.
@@ -251,10 +255,41 @@ export function nothingListeningOn({
    * back, and none of them did. That is exactly "no bot is connected", and it is knowable
    * immediately. `unknown` deliberately does NOT trigger it -- a read that has not finished is
    * not evidence of absence, and claiming it would be the mistake this file exists to avoid.
+   * Evidence older than the threshold counts as none (`presenceIsSilent`): without that, the
+   * server's own `slides-staged` made `never-acted` unreachable once any candidate existed.
    */
-  if (presence?.kind === "never-acted") return nothingListeningNotice();
   const stuck = waiting.some((item) => waitIsUnheard(item.state));
-  return stuck ? nothingListeningNotice() : null;
+  if (stuck) return nothingListeningNotice();
+  if (presence === undefined) return null;
+  return presenceIsSilent(presence) ? nothingListeningNotice() : null;
+}
+
+/**
+ * WHETHER PRESENCE SAYS NOTHING IS LISTENING NOW: no evidence ever, or only evidence older than
+ * the delivery threshold.
+ *
+ * STALE EVIDENCE IS NO EVIDENCE (user report, 2026-10-11: "it disappears even when there is no bot
+ * connected"). Every followed set's log opens with the server's own `slides-staged`, so once any
+ * candidate exists presence is `acted` for ever -- however long ago the session that staged them
+ * went away. `never-acted` was then unreachable in practice, and the notice hung on a single stuck
+ * wait: whatever ended that wait without a listener (the user replying under their own message,
+ * resolving their own comment) ended the notice too. A connected session reads a comment well
+ * inside one threshold (feedback-delivery.ts), so evidence older than that proves only that
+ * something WAS here. Without a clock nothing is accused, exactly as in `waitStateOf`.
+ */
+export function presenceIsSilent(presence: SashaPresence): boolean {
+  switch (presence.kind) {
+    case "never-acted":
+      return true;
+    case "unknown":
+      return false;
+    case "acted":
+      return isStaleEvidence(presence.heardAgoMs);
+    case "delivered":
+      return isStaleEvidence(presence.agoMs);
+    default:
+      return assertNever(presence);
+  }
 }
 
 /**
@@ -298,11 +333,19 @@ export function sashaPresenceOf({
   nowMs: number | null;
 }): SashaPresence {
   const latest = latestSashaActivity({ events, threads, comments });
-  if (latest !== null) return { kind: "acted", at: latest, agoMs: elapsedMsOf({ since: latest, nowMs }) };
+  const read = newestDelivery(deliveriesOf({ events }));
+  if (latest !== null) {
+    const heard = read !== null && read > latest ? read : latest;
+    return {
+      kind: "acted",
+      at: latest,
+      agoMs: elapsedMsOf({ since: latest, nowMs }),
+      heardAgoMs: elapsedMsOf({ since: heard, nowMs }),
+    };
+  }
   // SECOND, not first: an act proves a read happened too, so the stronger claim wins even when the
   // receipt is the newer file. Reporting "it read your comments" over "it answered them" would be
   // technically true and strictly less informative.
-  const read = newestDelivery(deliveriesOf({ events }));
   if (read !== null) return { kind: "delivered", at: read, agoMs: elapsedMsOf({ since: read, nowMs }) };
   if (reads.incomplete !== null) return { kind: "unknown", message: reads.incomplete };
   return { kind: "never-acted" };
@@ -440,7 +483,11 @@ export function waitIsUnheard(state: WaitState): boolean {
  * way.
  */
 function messageIsWaiting(thread: FeedbackThread): boolean {
-  return !thread.resolved && thread.replies.length === 0;
+  // SASHA'S reply, not any reply. The pill under every thread lets the user reply too, and the
+  // connector posts as the user's own Google account, so only `authoredByAgent` can tell the two
+  // apart. Counting the user's own "hello?" as the answer ended the wait -- and with it the
+  // nothing-listening notice -- with no session attached at all (user report, 2026-10-11).
+  return !thread.resolved && !thread.replies.some((reply) => reply.authoredByAgent);
 }
 
 function commentWait({
@@ -530,13 +577,20 @@ function latestSashaActivity({
 }): string | null {
   const stamps: string[] = [];
   for (const event of events) if (isSashaVoice(event)) stamps.push(event.at);
-  for (const thread of threads) for (const reply of thread.replies) stamps.push(reply.createdAt);
+  // Only the AGENT'S replies: a reply the user typed under their own thread proves nothing about
+  // whether anything is attached, and the same account posts both (see `messageIsWaiting`).
+  for (const thread of threads) stamps.push(...agentReplyStamps(thread.replies));
   for (const slide of loadedSlideComments(comments)) {
-    for (const thread of readThreadsOf(slide)) for (const reply of thread.replies) stamps.push(reply.createdAt);
+    for (const thread of readThreadsOf(slide)) stamps.push(...agentReplyStamps(thread.replies));
   }
   const usable = stamps.filter((stamp) => stamp !== "" && Number.isFinite(Date.parse(stamp)));
   if (usable.length === 0) return null;
   return usable.reduce((newest, stamp) => (stamp > newest ? stamp : newest));
+}
+
+/** When Sasha replied, for each reply it wrote. The user's own replies are not evidence. */
+function agentReplyStamps(replies: readonly FeedbackReply[]): readonly string[] {
+  return replies.filter((reply) => reply.authoredByAgent).map((reply) => reply.createdAt);
 }
 
 /**
@@ -572,6 +626,11 @@ function isSashaVoice(event: SessionEvent): boolean {
     default:
       return assertNever(voice);
   }
+}
+
+/** Evidence this old says something WAS here, not that it is. Null (no clock) accuses nobody. */
+function isStaleEvidence(agoMs: number | null): boolean {
+  return agoMs !== null && agoMs >= FEEDBACK_DELIVERY_THRESHOLD_MS;
 }
 
 /** Shared, because an empty map is a value and allocating one per render is pointless churn. */

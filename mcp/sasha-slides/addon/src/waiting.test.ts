@@ -381,7 +381,7 @@ test("NO SENTENCE ANYWHERE PROMISES AN ANSWER -- delivery is knowable, an answer
   for (const sentence of [
     describeSashaPresence({ kind: "never-acted" }),
     describeSashaPresence({ kind: "unknown", message: "x" }),
-    describeSashaPresence({ kind: "acted", at: AT, agoMs: 1_000 }),
+    describeSashaPresence({ kind: "acted", at: AT, agoMs: 1_000, heardAgoMs: 1_000 }),
     describeSashaPresence({ kind: "delivered", at: AT, agoMs: 1_000 }),
     describeWaitState({ kind: "delivered", at: AT, agoMs: 1_000 }),
     describeWaitState({ kind: "waiting", forMs: 1_000 }),
@@ -509,11 +509,47 @@ test("but an UNFINISHED read never claims it: absence of evidence is not evidenc
 
 test("and a session that HAS acted is not told how to connect", () => {
   assert.equal(
-    nothingListeningOn({ waiting: [], presence: { kind: "acted", at: "2026-10-06T10:25:00.000Z", agoMs: 1000 } }),
+    nothingListeningOn({ waiting: [], presence: { kind: "acted", at: "2026-10-06T10:25:00.000Z", agoMs: 1000, heardAgoMs: 1000 } }),
     null,
   );
   assert.equal(
     nothingListeningOn({ waiting: [], presence: { kind: "delivered", at: "2026-10-06T10:25:00.000Z", agoMs: 1000 } }),
     null,
   );
+});
+
+/*
+ * NO BOT CONNECTED, AND THE NOTICE WENT AWAY (user report, 2026-10-11). Stale evidence is no
+ * evidence, and the user's own reply is not Sasha's.
+ */
+test("STALE EVIDENCE IS NO LISTENER: an act or a receipt older than the threshold brings the notice back", () => {
+  const old = FEEDBACK_DELIVERY_THRESHOLD_MS;
+  assert.notEqual(
+    nothingListeningOn({ waiting: [], presence: { kind: "acted", at: AT, agoMs: old, heardAgoMs: old } }),
+    null,
+  );
+  assert.notEqual(nothingListeningOn({ waiting: [], presence: { kind: "delivered", at: AT, agoMs: old } }), null);
+  // A receipt NEWER than the last act is the evidence that counts.
+  assert.equal(
+    nothingListeningOn({ waiting: [], presence: { kind: "acted", at: AT, agoMs: old * 3, heardAgoMs: 1_000 } }),
+    null,
+  );
+  // Without a clock nobody is accused.
+  assert.equal(
+    nothingListeningOn({ waiting: [], presence: { kind: "acted", at: AT, agoMs: null, heardAgoMs: null } }),
+    null,
+  );
+});
+
+test("THE USER'S OWN REPLY is neither the answer to a deck message nor evidence that Sasha is here", () => {
+  const selfReplied: FeedbackThread = {
+    ...message(),
+    replies: [{ replyId: "r_me", author: "Krunoslav", createdAt: "2026-10-04T12:13:00.000Z", text: "hello?", authoredByAgent: false }],
+  };
+  const waiting = waitingOn({ deliveries: NONE, threads: [selfReplied], comments: { kind: "unrequested" }, nowMs: NOW });
+  assert.equal(waiting.length, 1, "still waiting on Sasha");
+  assert.equal(waiting[0]?.state.kind, "nobody-listening");
+  const presence = sashaPresenceOf({ events: [], threads: [selfReplied], comments: commentsWith([]), reads: ALL_READ, nowMs: NOW });
+  assert.equal(presence.kind, "never-acted");
+  assert.notEqual(nothingListeningOn({ waiting, presence }), null);
 });

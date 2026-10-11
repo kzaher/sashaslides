@@ -61,6 +61,14 @@ import type { CandidateCommentsApi, DriveApi, FeedbackApi, PickerWindowApi, Sess
 import { feedbackCommentsFor, feedbackThreadsOf, sendOutcomeOf } from "./feedback.ts";
 import { candidateCommentsFrom, sessionEventsOf } from "./session-log.ts";
 import { PROTOCOL_VERSION, assertNever, parseManifest, parseReadyMarker } from "./protocol.ts";
+import {
+  NO_PREVIEWS,
+  nextPreviewToLoad,
+  reducePreviews,
+  type PreviewEvent,
+  type PreviewRequest,
+  type SlidePreviews,
+} from "./slide-previews.ts";
 
 const ROOT_ELEMENT_ID = "sasha-slides-root";
 /** One read of the deck's comment pane. A deck with more threads than this is not the common case. */
@@ -97,6 +105,12 @@ const NOT_CONNECTED =
   "the add-on is not connected to Google Slides. Reload the presentation and reopen Ask Sasha.";
 
 let state: Conversation = INITIAL_CONVERSATION;
+/**
+ * THE THUMBNAILS' BYTES, beside the conversation rather than in it (slide-previews.ts). Module-level
+ * for the life of the sidebar, so a poll re-render never re-downloads a picture; keyed by file AND
+ * revision, so a revision is a miss without anything having to invalidate it.
+ */
+let previews: SlidePreviews = NO_PREVIEWS;
 let root: Root | null = null;
 let services: Services | null = null;
 
@@ -177,6 +191,13 @@ function scheduleClock(): void {
   clockHandle = setInterval(() => dispatch({ kind: "clock-ticked", nowMs: Date.now() }), CLOCK_TICK_MS);
 }
 
+/** The thumbnails' own loop: same shape as `dispatch`, a separate store. */
+function dispatchPreview(event: PreviewEvent): void {
+  previews = reducePreviews(previews, event);
+  render();
+  pump();
+}
+
 function dispatch(event: ConversationEvent): void {
   const next = reduceConversation(state, event);
   if (next === state) return;
@@ -219,6 +240,13 @@ function pump(): void {
   if (revised !== null) {
     dispatch({ kind: "slide-requested", slideIndex: revised.slideIndex });
     void loadRevisedSlide({ slideIndex: revised.slideIndex, fileId: revised.fileId });
+  }
+  // LAST, and one at a time (nextPreviewToLoad): pictures must never queue ahead of the reads the
+  // user is waiting on.
+  const preview = nextPreviewToLoad({ conversation: state, previews });
+  if (preview !== null) {
+    dispatchPreview({ kind: "preview-requested", key: preview.key });
+    void loadPreview(preview);
   }
   const autoOpen = proposalToAutoOpen(state);
   if (autoOpen !== null) {
@@ -385,6 +413,21 @@ async function loadRevisedSlide({ slideIndex, fileId }: { slideIndex: number; fi
     return;
   }
   dispatch({ kind: "slide-arrived", slideIndex, html: downloaded.value });
+}
+
+/** One candidate's HTML for its thumbnail. A failure is shown on the thumbnail, never retried in a loop. */
+async function loadPreview({ key, fileId }: PreviewRequest): Promise<void> {
+  const running = services;
+  if (running === null) {
+    dispatchPreview({ kind: "preview-failed", key, message: NOT_CONNECTED });
+    return;
+  }
+  const downloaded = await running.drive.downloadText(fileId);
+  if (downloaded.kind !== "ok") {
+    dispatchPreview({ kind: "preview-failed", key, message: downloaded.message });
+    return;
+  }
+  dispatchPreview({ kind: "preview-arrived", key, html: downloaded.value });
 }
 
 /**
@@ -678,7 +721,7 @@ function render(): void {
     if (existing === null) document.body.append(host);
     root = createRoot(host);
   }
-  root.render(createElement(ConversationPanel, { conversation: state, actions }));
+  root.render(createElement(ConversationPanel, { conversation: state, previews, actions }));
 }
 
 /**

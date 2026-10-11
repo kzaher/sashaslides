@@ -48,6 +48,7 @@ import {
   type SlideCommentsLoad,
 } from "./session-log.ts";
 import { INERT_CONVERSATION_ACTIONS } from "./inert-actions.ts";
+import { NO_PREVIEWS } from "./slide-previews.ts";
 import type { Manifest } from "./protocol.ts";
 
 const AT = "2026-10-04T12:00:00.000Z";
@@ -612,8 +613,15 @@ test("HOW TO CONNECT SHOWS WHEN NOTHING IS ATTACHED, not five minutes after the 
 });
 
 test("but a HALF-DONE read never claims it: absence of evidence is not evidence of absence", () => {
-  const everyRead = reduceConversation(withComments(), { kind: "thread-arrived", threads: [], readAt: AT });
-  const broken = reduceConversation(everyRead, { kind: "log-failed", message: "events HTTP 500" });
+  // The log's FIRST read failed, so nothing has ever said what is in it. (A failed RE-read keeps
+  // what the last completed one proved -- see "NO BOT CONNECTED: the 8 s poll ..." below.)
+  const broken = replay([
+    { kind: "staged-arrived", marks: [stagedMark], readAt: AT },
+    { kind: "manifest-arrived", manifest },
+    { kind: "log-failed", message: "events HTTP 500" },
+    { kind: "comments-arrived", comments: withResolvedToo() },
+    { kind: "thread-arrived", threads: [], readAt: AT },
+  ]);
   assert.equal(sashaPresence(broken).kind, "unknown");
   assert.doesNotMatch(markupOf(broken), /claude mcp add sasha-slides/);
   assert.equal(sashaPresence(withComments()).kind, "unknown", "a read in flight, same refusal");
@@ -634,6 +642,56 @@ test("and once a session HAS acted, with nothing stale, the instructions go away
   ]);
   assert.equal(sashaPresence(acted).kind, "acted");
   assert.doesNotMatch(markupOf(acted), /claude mcp add sasha-slides/);
+});
+
+/*
+ * NO BOT CONNECTED, AND THE NOTICE WENT AWAY ANYWAY (user report, 2026-10-11).
+ *
+ * The realistic state is NOT "nothing has ever acted": every followed set's log opens with the
+ * server's own `slides-staged`, so the moment candidates exist presence is `acted` -- for ever,
+ * however long ago the session that staged them died. With that, the notice hung on a single
+ * stuck wait, and anything that ended the wait without a listener ended the notice: the user's own
+ * reply under their message, or a poll putting the reads back in flight.
+ */
+test("NO BOT CONNECTED: the user's OWN reply under a stuck message does not dismiss the notice", () => {
+  const stuck = replay([...stagedLongAgo(), { kind: "thread-arrived", threads: [userMessage([])], readAt: AT }]);
+  assert.match(markupOf(stuck), /claude mcp add sasha-slides/, "a message unread for 14 min");
+
+  const selfReplied = replay(
+    [
+      {
+        kind: "thread-arrived",
+        threads: [
+          userMessage([
+            { replyId: "r_me", author: "Krunoslav", createdAt: "2026-10-04T12:15:00.000Z", text: "hello?", authoredByAgent: false },
+          ]),
+        ],
+        readAt: AT,
+      },
+      { kind: "clock-ticked", nowMs: Date.parse("2026-10-04T12:16:00.000Z") },
+    ],
+    stuck,
+  );
+  assert.equal(waitingFor(selfReplied).length, 1, "a reply from the user is not Sasha's answer");
+  const presence = sashaPresence(selfReplied);
+  assert.notEqual(presence.kind === "acted" ? presence.at : null, "2026-10-04T12:15:00.000Z", "nor is it Sasha acting");
+  assert.match(markupOf(selfReplied), /claude mcp add sasha-slides/);
+});
+
+test("NO BOT CONNECTED: candidates staged 15 minutes ago are not a listener, even with nothing waiting", () => {
+  const idle = replay([...stagedLongAgo(), { kind: "thread-arrived", threads: [], readAt: AT }]);
+  assert.deepEqual(waitingFor(idle), []);
+  assert.equal(sashaPresence(idle).kind, "acted", "the server's slides-staged, from a session long gone");
+  assert.match(markupOf(idle), /claude mcp add sasha-slides/);
+});
+
+test("NO BOT CONNECTED: the 8 s poll putting every read back in flight does not hide the notice", () => {
+  const idle = replay([...stagedLongAgo(), { kind: "thread-arrived", threads: [], readAt: AT }]);
+  const polling = replay([{ kind: "log-requested" }, { kind: "thread-requested" }, { kind: "comments-requested" }], idle);
+  assert.match(markupOf(polling), /claude mcp add sasha-slides/);
+  // A re-read that FAILS keeps what the last good one proved, too.
+  const failed = reduceConversation(polling, { kind: "log-failed", message: "events HTTP 500" });
+  assert.match(markupOf(failed), /claude mcp add sasha-slides/);
 });
 
 test("A RECEIPT IS STILL A READ IN THE LOG, never a reply from Sasha", () => {
@@ -795,7 +853,7 @@ function replay(events: readonly ConversationEvent[], from: Conversation = OPENE
 
 function markupOf(conversation: Conversation): string {
   return renderToStaticMarkup(
-    createElement(ConversationPanel, { conversation, actions: INERT_CONVERSATION_ACTIONS }),
+    createElement(ConversationPanel, { conversation, previews: NO_PREVIEWS, actions: INERT_CONVERSATION_ACTIONS }),
   );
 }
 
@@ -925,6 +983,38 @@ function withResolvedToo(): SlideCommentsLoad {
             },
           },
     ],
+  };
+}
+
+/**
+ * Candidates staged at 11:59 by a session that has since gone away, no comment open on any of
+ * them, every read in, and the clock at 12:14 -- fifteen minutes after the last thing Sasha did.
+ */
+function stagedLongAgo(): readonly ConversationEvent[] {
+  return [
+    { kind: "staged-arrived", marks: [stagedMark], readAt: AT },
+    { kind: "manifest-arrived", manifest },
+    { kind: "log-arrived", events: eventsOf([staged(2)]), readAt: AT },
+    {
+      kind: "comments-arrived",
+      comments: {
+        kind: "loaded",
+        readAt: AT,
+        slides: [{ proposalId: PROPOSAL, slideIndex: 1, threads: { kind: "read", threads: [] } }],
+      },
+    },
+    { kind: "clock-ticked", nowMs: Date.parse("2026-10-04T12:14:00.000Z") },
+  ];
+}
+
+/** A message the user typed at 12:00, with whatever replies are given. */
+function userMessage(replies: FeedbackThread["replies"]): FeedbackThread {
+  return {
+    commentId: "c_me",
+    note: { noteId: "chat_me", pageObjectId: null, region: null, text: "make slide 2 bluer" },
+    createdAt: AT,
+    resolved: false,
+    replies,
   };
 }
 
@@ -1901,6 +1991,7 @@ test("and the open request names the proposal and the slide, so the window knows
   const markup = renderToStaticMarkup(
     createElement(ConversationPanel, {
       conversation: withComments(),
+      previews: NO_PREVIEWS,
       actions: { ...INERT_CONVERSATION_ACTIONS, openArtifact: (target) => asked.push(target) },
     }),
   );

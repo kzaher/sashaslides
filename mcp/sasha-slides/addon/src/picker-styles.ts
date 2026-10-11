@@ -251,6 +251,17 @@ html, body { margin: 0; padding: 0; background: #fff; }
 /* The two things a thread ends with, as words: the tick in the corner is Google's convention
    but it is a 22px target nobody finds. */
 .sasha-c-foot { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #f1f3f4; }
+/* --- THUMBNAILS (slide-thumb.tsx): the candidate's own HTML at 64x36, in the set card and under
+   every open comment, so the reader knows WHICH candidate without opening anything. Fixed width;
+   the 16:9 height comes from .sasha-stage's aspect-ratio and ScaledHtmlFrame measures the width. */
+.sasha-thumb { display: block; flex: none; width: 64px; border-radius: 3px; background: #fff; }
+.sasha-thumb-wait { background: #f1f3f4; }
+.sasha-thumb-none { background: repeating-linear-gradient(135deg, #f1f3f4 0 4px, #e8eaed 4px 8px); }
+.sasha-c-context { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
+.sasha-c-thumb { flex: none; cursor: pointer; border: 0; padding: 0; background: transparent; border-radius: 3px; }
+.sasha-c-thumb:hover:enabled .sasha-thumb, .sasha-c-thumb:focus-visible .sasha-thumb { border-color: #1a73e8; }
+.sasha-c-thumb:disabled { cursor: default; }
+.sasha-c-context-label { min-width: 0; font-size: 11px; line-height: 1.35; color: #5f6368; }
 .sasha-c-open, .sasha-c-markdone { cursor: pointer; border: 0; background: transparent; padding: 2px 0; font: inherit; font-size: 12px; color: #1a73e8; }
 .sasha-c-open:hover:enabled, .sasha-c-markdone:hover:enabled { text-decoration: underline; }
 .sasha-c-markdone { margin-left: auto; }

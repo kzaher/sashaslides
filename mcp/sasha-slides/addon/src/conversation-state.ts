@@ -110,6 +110,17 @@ export type Conversation = Readonly<{
    * very request it causes can start exactly one read per action, whatever `pump` does.
    */
   rereadWanted: Readonly<{ thread: boolean; comments: boolean }>;
+  /**
+   * WHICH OF THE THREE PRESENCE READS HAS COME BACK AT LEAST ONCE -- for the followed set, in the
+   * case of the log and the comments, so a new set starts over.
+   *
+   * The loads alone cannot say it: the 8 s poll puts every one of them back in `loading` (keeping
+   * what it had), and a `loading` that is a RE-read looks exactly like the first one. Presence used
+   * to read both as "unfinished", flip to `unknown` on every poll, and drop the nothing-listening
+   * notice for the length of each round trip (user report, 2026-10-11). A re-read in flight, or one
+   * that failed, does not take back what the last completed read proved.
+   */
+  readOnce: Readonly<{ thread: boolean; log: boolean; comments: boolean }>;
   /** A failure that is about the whole conversation rather than one load. Null when there is none. */
   trouble: string | null;
   /**
@@ -315,6 +326,7 @@ export const INITIAL_CONVERSATION: Conversation = {
   report: { kind: "idle" },
   threadActions: {},
   rereadWanted: { thread: false, comments: false },
+  readOnce: { thread: false, log: false, comments: false },
   trouble: null,
   nowMs: null,
 };
@@ -357,7 +369,11 @@ export function reduceConversation(conversation: Conversation, event: Conversati
       };
 
     case "thread-arrived":
-      return { ...conversation, thread: { kind: "loaded", threads: event.threads, readAt: event.readAt } };
+      return {
+        ...conversation,
+        thread: { kind: "loaded", threads: event.threads, readAt: event.readAt },
+        readOnce: { ...conversation.readOnce, thread: true },
+      };
 
     case "thread-failed":
       return {
@@ -422,7 +438,11 @@ export function reduceConversation(conversation: Conversation, event: Conversati
       return { ...conversation, log: { kind: "loading", events: loadedEvents(conversation.log) } };
 
     case "log-arrived":
-      return { ...conversation, log: { kind: "loaded", events: event.events, readAt: event.readAt } };
+      return {
+        ...conversation,
+        log: { kind: "loaded", events: event.events, readAt: event.readAt },
+        readOnce: { ...conversation.readOnce, log: true },
+      };
 
     case "log-failed":
       return {
@@ -438,7 +458,14 @@ export function reduceConversation(conversation: Conversation, event: Conversati
       };
 
     case "comments-arrived":
-      return { ...conversation, comments: event.comments };
+      return {
+        ...conversation,
+        comments: event.comments,
+        readOnce: {
+          ...conversation.readOnce,
+          comments: conversation.readOnce.comments || reasonOfCommentRead(event.comments) === null,
+        },
+      };
 
     case "comments-failed":
       return {
@@ -884,10 +911,11 @@ export function sashaPresence(conversation: Conversation): SashaPresence {
  * already makes for the counts, applied to presence.
  */
 export function presenceReadsOf(conversation: Conversation): PresenceReads {
+  const { readOnce } = conversation;
   const reasons = [
-    reasonOfLogRead(conversation.log),
-    reasonOfThreadRead(conversation.thread),
-    reasonOfCommentRead(conversation.comments),
+    readOnce.log ? null : reasonOfLogRead(conversation.log),
+    readOnce.thread ? null : reasonOfThreadRead(conversation.thread),
+    readOnce.comments ? null : reasonOfCommentRead(conversation.comments),
   ].flatMap((reason) => (reason === null ? [] : [reason]));
   return { incomplete: reasons[0] ?? null };
 }
@@ -1417,6 +1445,8 @@ function followOn({
     },
     log: { kind: "unrequested" },
     comments: { kind: "unrequested" },
+    // A NEW set's log and comments have not been read; the old set's reads say nothing about them.
+    readOnce: { ...conversation.readOnce, log: false, comments: false },
   };
 }
 
