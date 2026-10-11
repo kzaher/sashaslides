@@ -16,6 +16,8 @@ import type { Proposal } from "./observer.ts";
 import {
   INITIAL_PICKER_STATE,
   anomaliesOf,
+  htmlToLoad,
+  nextToConvert,
   offerOf,
   reducePicker,
   selectedFrame,
@@ -475,4 +477,54 @@ test("the two panes are named for what they actually are", () => {
   assert.match(markup, /Preview/, "the HTML pane");
   assert.match(markup, /Converted/, "and the wireframe of what Slides will receive");
   assert.doesNotMatch(markup, />Original</, "nothing is called Original any more");
+});
+
+// --- the expensive work is done BEFORE the user asks for it ---------------------------------
+
+/**
+ * THE REPRO for "When I go to Converted it just waits for the conversion". `nextToConvert`
+ * deliberately converted nothing until the converted view was chosen, so the click itself
+ * started N serial iframe conversions. It now converts in the BACKGROUND (when the browser is
+ * idle) while the preview is showing, and NOW once somebody is looking at the converted view.
+ */
+test("THE PREVIEW CONVERTS IN THE BACKGROUND, so Converted is ready before it is clicked", () => {
+  const previewing = play([
+    { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+    { kind: "html-arrived", index: 1, html: "<html></html>" },
+  ]);
+  const due = nextToConvert(offerOf(previewing) ?? neverOffer());
+  assert.equal(due?.frame.index, 1, "the loaded candidate is converted without being asked");
+  assert.equal(due?.urgency, "idle", "but only when the browser has nothing better to do");
+
+  const looking = reducePicker(previewing, { kind: "rendering-chosen", rendering: "rendered" });
+  assert.equal(nextToConvert(offerOf(looking) ?? neverOffer())?.urgency, "now", "somebody is waiting for it");
+});
+
+test("a candidate converted already -- e.g. from the browser's cache -- is not converted again", () => {
+  const convert = stubConvertHtmlToSlideRequests();
+  const state = play([
+    { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+    { kind: "html-arrived", index: 1, html: "<html></html>" },
+    {
+      kind: "converted",
+      index: 1,
+      result: convert({ html: "<html></html>", presentationId: "deck_1", pageObjectId: "sashaprev_1_p_1" }),
+    },
+  ]);
+  assert.equal(nextToConvert(offerOf(state) ?? neverOffer()), null);
+});
+
+/** Every document is asked for at once: `google.script.run` calls run concurrently. */
+test("every candidate's HTML is requested AT ONCE, not one round trip after another", () => {
+  let state = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
+  assert.deepEqual(
+    htmlToLoad(offerOf(state) ?? neverOffer()).map((frame) => frame.index),
+    [1, 2, 3],
+  );
+  state = reducePicker(state, { kind: "html-requested", index: 2 });
+  assert.deepEqual(
+    htmlToLoad(offerOf(state) ?? neverOffer()).map((frame) => frame.index),
+    [1, 3],
+    "and one already in flight is not asked for twice",
+  );
 });

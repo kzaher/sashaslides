@@ -41,7 +41,7 @@ import {
   helloFromServer,
 } from "./bridge-client.ts";
 import { presentationIdOf, type RenderRequest } from "./bridge.ts";
-import { browserSlideConverter, type ConvertSlideHtml } from "./converter-contract.ts";
+import { browserSlideConverter, type ConversionResult, type ConvertSlideHtml } from "./converter-contract.ts";
 import {
   createdObjectIdsOf,
   type CandidateCommentsApi,
@@ -58,13 +58,16 @@ import { checkSlideHtml, domSlideDocumentParser } from "./html-check.ts";
 import { Picker, type PickerActions } from "./Picker.tsx";
 import { createObserver, type Announcer, type Observer, type PollTimer } from "./observer-runtime.ts";
 import { createReportWindow } from "./report-window.ts";
+import { cachedConversion, conversionKeyOf, rememberConversion } from "./conversion-cache.ts";
 import { cachedRender, rememberRender, renderKeyOf } from "./render-cache.ts";
 import {
   INITIAL_PICKER_STATE,
   anomaliesOf,
   anomalyIn,
+  htmlToLoad,
   needsComments,
-  nextHtmlToLoad,
+  needsConversion,
+  needsHtml,
   nextToConvert,
   slidesToRender,
   type SlideFrame,
@@ -84,7 +87,7 @@ import {
   serializeSessionEvent,
   type SessionEventBody,
 } from "./session-log.ts";
-import { insertRequests, newPageObjectId } from "./slide-insert.ts";
+import { insertRequests, newPageObjectId, previewConversionSpec } from "./slide-insert.ts";
 
 const ROOT_ELEMENT_ID = "sasha-slides-root";
 /** One read of a candidate's comment threads -- a candidate with more than this is not the case. */
@@ -117,8 +120,19 @@ const editorWarnings: string[] = [];
  */
 const CONVERT_DEADLINE_MS = 15_000;
 
-/** One conversion per candidate at a time: `pump` runs after every state change. */
+/**
+ * One conversion at a time, across the set: `pump` runs after every state change. An index is in
+ * here from the moment its conversion is SCHEDULED (an idle one may not have started yet) until
+ * it settles, so a re-run of the pump never schedules the same candidate twice.
+ */
 const converting = new Set<number>();
+/** The background conversion waiting for an idle browser, so a user who starts waiting can promote it. */
+let idleConversion: Readonly<{ index: number; cancel: () => void }> | null = null;
+/**
+ * Which loaded candidates have already been looked up in the conversion cache, as
+ * `proposalId:index`. The lookup hashes the whole document, and the pump runs on every dispatch.
+ */
+const conversionCacheChecked = new Set<string>();
 /** One render call for the whole set at a time; `pump` runs again when it lands. */
 let rendering = false;
 /** Candidate HTML is immutable within one revision, so one fetch per fileId serves every toggle. */
@@ -212,6 +226,10 @@ async function main(): Promise<void> {
   // Learned once, here, so pressing "Report a defect" can open the window synchronously inside
   // the click -- which is the only way a browser lets a popup through.
   void reportWindow.learn();
+  // ASKED NOW, IN PARALLEL with the inbox scan, not after the proposal lands: it is a round trip of
+  // its own, and waiting for the proposal first put it in series with every other startup call --
+  // one more second between "Open slide 2" and slide 2.
+  pickerTarget = services.window.takePickerTarget();
 
   await observer.start();
   document.addEventListener("visibilitychange", () => {
@@ -220,11 +238,16 @@ async function main(): Promise<void> {
   await announceViewers(observer);
 }
 
+/**
+ * The sidebar's "open on this candidate" request, taken ONCE per window as soon as the host has
+ * answered (see `main`). Reading clears it server-side, so one read is all there is to have.
+ */
+let pickerTarget: ReturnType<PickerWindowApi["takePickerTarget"]> | null = null;
+
 /** Collect the sidebar's "open on this candidate" request, if there is one for this proposal. */
 async function openAtTarget(proposalId: string): Promise<void> {
-  const running = services;
-  if (running === null) return;
-  const replied = await running.window.takePickerTarget();
+  if (pickerTarget === null) return;
+  const replied = await pickerTarget;
   if (replied.kind !== "ok") return;
   const { proposalId: wanted, slideIndex } = replied.value;
   if (wanted !== proposalId || slideIndex === null) return;
@@ -269,17 +292,44 @@ function pump(): void {
   // returning, so a captured `Offer` would be one event out of date and start the same fetch twice.
   const forHtml = offerOf(state);
   if (forHtml === null) return;
-  const toLoad = nextHtmlToLoad(forHtml);
-  if (toLoad !== null) {
-    dispatch({ kind: "html-requested", index: toLoad.index });
-    void loadSlideHtml({ proposalId: forHtml.proposal.proposalId, index: toLoad.index });
+  // EVERY missing document AT ONCE: each `google.script.run` call is its own server execution and
+  // they run concurrently. The live frame is re-checked because the nested pump inside `dispatch`
+  // may already have asked for the ones after it.
+  const toLoad = htmlToLoad(forHtml);
+  if (toLoad.length > 0) {
+    for (const frame of toLoad) {
+      const live = offerOf(state)?.slides[frame.index - 1];
+      if (live === undefined || !needsHtml(live)) continue;
+      dispatch({ kind: "html-requested", index: frame.index });
+      void loadSlideHtml({ proposalId: forHtml.proposal.proposalId, index: frame.index });
+    }
     return;
   }
-  const toConvert = nextToConvert(forHtml);
-  if (toConvert !== null) {
-    if (converting.has(toConvert.index) || toConvert.html.kind !== "loaded") return;
-    void convert({ proposalId: forHtml.proposal.proposalId, index: toConvert.index, html: toConvert.html.html });
-    return;
+  if (applyCachedConversions()) return;
+  const forConversion = offerOf(state);
+  if (forConversion === null) return;
+  const due = nextToConvert(forConversion);
+  if (due !== null) {
+    if (due.frame.html.kind !== "loaded") return;
+    const spec = { proposalId: forConversion.proposal.proposalId, index: due.frame.index, html: due.frame.html.html };
+    switch (due.urgency) {
+      case "now":
+        // Somebody is waiting: a background conversion still queued for idle time is promoted.
+        if (idleConversion !== null) {
+          idleConversion.cancel();
+          converting.delete(idleConversion.index);
+          idleConversion = null;
+        }
+        if (converting.size > 0) return;
+        void convert(spec);
+        return;
+      case "idle":
+        if (converting.size > 0) return;
+        scheduleIdleConversion(spec);
+        return;
+      default:
+        return assertNever(due.urgency);
+    }
   }
   // EVERYTHING IS CONVERTED: if the user is looking at the converted rendering, go and get the
   // real pictures. One call for the whole set -- the server builds ONE throwaway deck for all of
@@ -291,10 +341,9 @@ function pump(): void {
 
 /**
  * EVERY candidate, not just the selected one: the grid shows all N at once, so all N documents and
- * all N conversions are wanted. They are fetched ONE AT A TIME -- each arrival dispatches, which
- * re-runs the pump, which picks the next -- because `google.script.run` is a round trip to Google
- * per call and the converter stages a real offscreen iframe per slide. The selectors are in
- * picker-state.ts so "what is next" is a tested decision rather than a loop written here.
+ * all N conversions are wanted. The documents are fetched concurrently (see `pump`); the
+ * conversions run one at a time, because the converter stages a real offscreen iframe per slide.
+ * The selectors are in picker-state.ts so "what is next" is a tested decision, not a loop here.
  */
 async function loadSlideHtml({ proposalId, index }: { proposalId: string; index: number }): Promise<void> {
   const running = services;
@@ -338,6 +387,7 @@ async function convert({
   const running = services;
   if (running === null) return;
   converting.add(index);
+  const asked = previewConversionSpec({ proposalId, index, html, presentationId: running.presentationId ?? "" });
   try {
     /*
      * A DEADLINE, BECAUSE A SPINNER THAT NEVER STOPS IS THE WORST FAILURE THIS SURFACE HAS.
@@ -353,12 +403,7 @@ async function convert({
      * not slow -- and the honest thing to show is the failure, which the cell already renders.
      */
     const converted = await Promise.race([
-      running.convert({
-        html,
-        presentationId: running.presentationId ?? "",
-        pageObjectId: newPageObjectId({ random: Math.random }),
-        objectIdPrefix: previewPrefix({ proposalId, index }),
-      }),
+      running.convert(asked),
       new Promise<never>((_resolve, reject) =>
         setTimeout(
           () => reject(new Error(`the converter did not answer within ${String(CONVERT_DEADLINE_MS / 1000)}s`)),
@@ -366,12 +411,96 @@ async function convert({
         ),
       ),
     ]);
-    dispatch({ kind: "converted", index, result: converted });
+    rememberConversion(conversionKeyOf({ build: buildStamp(), ...asked }), converted);
+    acceptConversion({ index, result: converted });
   } catch (cause) {
     dispatch({ kind: "conversion-failed", index, message: cause instanceof Error ? cause.message : String(cause) });
   } finally {
     converting.delete(index);
   }
+}
+
+/**
+ * A conversion is in -- from the converter or from the browser's cache -- and if Google's picture
+ * of exactly these requests is remembered too, that is in as well, in any view, for free.
+ */
+function acceptConversion({ index, result }: { index: number; result: ConversionResult }): void {
+  dispatch({ kind: "converted", index, result });
+  const remembered = cachedRender(renderKeyOf(result.requests));
+  if (remembered !== null) dispatch({ kind: "rendered", index, dataUri: remembered });
+}
+
+/**
+ * Every loaded candidate whose conversion this browser has done before is converted NOW, from
+ * localStorage (conversion-cache.ts) -- the reason reopening the window does not convert again.
+ * Each candidate is looked up once per proposal. True when anything was applied, because the
+ * dispatch has already re-run the pump.
+ */
+function applyCachedConversions(): boolean {
+  const running = services;
+  const offer = offerOf(state);
+  if (running === null || offer === null) return false;
+  let applied = false;
+  for (const frame of offer.slides) {
+    if (frame.html.kind !== "loaded" || !needsConversion(frame)) continue;
+    const checked = `${offer.proposal.proposalId}:${String(frame.index)}`;
+    if (conversionCacheChecked.has(checked)) continue;
+    conversionCacheChecked.add(checked);
+    const asked = previewConversionSpec({
+      proposalId: offer.proposal.proposalId,
+      index: frame.index,
+      html: frame.html.html,
+      presentationId: running.presentationId ?? "",
+    });
+    const remembered = cachedConversion(conversionKeyOf({ build: buildStamp(), ...asked }));
+    if (remembered === null) continue;
+    applied = true;
+    acceptConversion({ index: frame.index, result: remembered });
+  }
+  return applied;
+}
+
+/**
+ * A background conversion, run when the browser is idle so it never competes with a click. The
+ * timeout bounds how long "idle" may take: a page that is never idle still converts.
+ */
+function scheduleIdleConversion(spec: { proposalId: string; index: number; html: string }): void {
+  converting.add(spec.index);
+  const run = (): void => {
+    idleConversion = null;
+    converting.delete(spec.index);
+    const frame = offerOf(state)?.slides[spec.index - 1];
+    // Still wanted? The proposal may have moved on, or the cache answered meanwhile.
+    if (offerOf(state)?.proposal.proposalId !== spec.proposalId || frame === undefined || !needsConversion(frame)) {
+      pump();
+      return;
+    }
+    void convert(spec);
+  };
+  if (typeof requestIdleCallback === "function") {
+    const handle = requestIdleCallback(run, { timeout: IDLE_CONVERSION_TIMEOUT_MS });
+    idleConversion = { index: spec.index, cancel: () => cancelIdleCallback(handle) };
+    return;
+  }
+  const handle = setTimeout(run, IDLE_CONVERSION_FALLBACK_MS);
+  idleConversion = { index: spec.index, cancel: () => clearTimeout(handle) };
+}
+
+/** The longest a background conversion waits for an idle moment before running anyway. */
+const IDLE_CONVERSION_TIMEOUT_MS = 2_000;
+/** Where `requestIdleCallback` is missing, a short delay lets the first paint and clicks go first. */
+const IDLE_CONVERSION_FALLBACK_MS = 300;
+
+/**
+ * Which build converted, for the conversion cache's key. The converter is compiled into this
+ * bundle, so a new deploy may convert differently; the loader in build-addon.ts `surfaceHtml`
+ * publishes a hash of the bundle as `window.sashaBuild`. Absent (a dev harness), every build is
+ * "dev", which only means such a harness may see an older converter's cached output.
+ */
+function buildStamp(): string {
+  // The loader assigns a string or nothing; the read is narrowed below rather than trusted.
+  const published = (window as unknown as { sashaBuild?: unknown }).sashaBuild;
+  return typeof published === "string" && published !== "" ? published : "dev";
 }
 
 /**
@@ -980,11 +1109,6 @@ function singlePollTimer(): PollTimer {
       handle = null;
     },
   };
-}
-
-/** Unique per candidate within the presentation, which is what the converter's allocator needs. */
-function previewPrefix({ proposalId, index }: { proposalId: string; index: number }): string {
-  return `${proposalId.replace(/[^A-Za-z0-9_-]/g, "")}_${index}`;
 }
 
 function render(): void {

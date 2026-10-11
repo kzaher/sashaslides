@@ -43,6 +43,7 @@
  */
 import { build, transformSync } from "esbuild";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1066,11 +1067,21 @@ function surfaceHtml({ from, script }: { from: string; script: string }): string
 ${script}
 </script>
 <script>
-(function () { var bundle = document.getElementById("${BUNDLE_ELEMENT_ID}"); var run = document.createElement("script"); run.text = bundle.textContent; bundle.remove(); document.body.appendChild(run); })();
+(function () { window.sashaBuild = "${buildStampOf(script)}"; var bundle = document.getElementById("${BUNDLE_ELEMENT_ID}"); var run = document.createElement("script"); run.text = bundle.textContent; bundle.remove(); document.body.appendChild(run); })();
 </script>
 </body>
 </html>
 `;
+}
+
+/**
+ * A short hash of one bundle, published by the loader as `window.sashaBuild`. The converter is
+ * compiled INTO the bundle, so dialog.tsx keys its localStorage conversion cache by this: a new
+ * deploy misses rather than serving what an older converter produced. Hex, so the loader stays
+ * free of `/` (see surfaceHtml).
+ */
+function buildStampOf(script: string): string {
+  return createHash("sha256").update(script).digest("hex").slice(0, 16);
 }
 
 /** The id of the inert container each page's bundle travels in. See surfaceHtml. */

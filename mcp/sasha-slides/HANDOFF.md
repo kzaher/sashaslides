@@ -27,28 +27,35 @@ idle, because an idle session leaves no trace.
   stays "unknown".
 - Check the thumbnails in a real sidebar with 8 candidates and several open comments: each one is an iframe.
 
-## Not committed: in progress
+## Committed: conversion caching
 
-**Converted view waits for conversion every time, and "Open slide N" is slow.**
+**Converted view waited for conversion every time.** Root causes:
 
-Root cause, from reading the code:
+1. `addon/src/dialog.tsx` `convert()` used `newPageObjectId({ random: Math.random })`, so every conversion contained a
+   random page id. `addon/src/render-cache.ts` keys pictures by a hash of the requests, so it never hit. Fixed by
+   `previewConversionSpec()` in `addon/src/slide-insert.ts`: a fixed page id from proposal id + slide number. Insert
+   still uses a fresh random id.
+2. The HTML-to-requests conversion was not cached. New `addon/src/conversion-cache.ts`: localStorage, keyed by build
+   hash (`window.sashaBuild`, set by `build-addon.ts`) + deck + page id + HTML, max 24 entries, skips entries over 512
+   KB.
+3. `nextToConvert` (`addon/src/picker-state.ts`) converted nothing until Converted was clicked. Preview now converts in
+   the background when idle; Converted converts immediately.
 
-- `addon/src/render-cache.ts` keys Google's rendered picture by a hash of the converted requests.
-- `addon/src/dialog.tsx` `convert()` passes `newPageObjectId({ random: Math.random })`, so every conversion contains a
-  random page id. The key changes on every open, and the cache never hits.
-- The HTML-to-requests conversion itself is not cached, and `nextToConvert` (`addon/src/picker-state.ts`) converts
-  nothing until the user opens the Converted view.
+Not verified in a real browser or deployed.
 
-Planned fix:
+### "Open slide N" is slow: not fixed
 
-1. Use a deterministic preview page id (from proposalId + index). `sashaRenderPreviews` in `build-addon.ts` retargets
-   to its own page anyway. Insert keeps a fresh random id.
-2. Add a localStorage conversion cache keyed by an HTML hash (new `addon/src/conversion-cache.ts`).
-3. Convert in the background after the HTML arrives.
-4. Measure the dialog bundle that is re-sent on every open, and consider caching it by build hash.
-
-That work was still running in this checkout when this was written. It is uncommitted and does not typecheck yet
-(`dialog.tsx`), so do not rely on it.
+- Every page ships its whole bundle inline, so nothing is cached between opens: Dialog 496,321 bytes (154 KB gzip),
+  Report 488,873, Sidebar 348,885. About 205 KB of each is react-dom. Dialog has about 15 KB headroom under the
+  512,000-byte limit.
+- Opening is a chain of Google round trips in series: `sashaOpenPicker` → page load → `sashaHello` → inbox scan → HTML
+  downloads. Not measured live.
+- Recommended next: switch to preact/compat (about 190 KB less per page), then measure the round-trip chain in a real
+  browser. Caching the bundle in localStorage needs a new server function and a deploy-script change.
+- HTML is not cached across opens: a revised slide overwrites the same Drive file and the proposal has no
+  `modifiedTime`, so a fileId-keyed cache would show stale slides. Adding `modifiedTime` to the proposal would unblock
+  it.
+- The first Converted view for a new proposal still needs one server render (it creates and trashes a temporary deck).
 
 ## Verify
 

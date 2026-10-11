@@ -33,19 +33,27 @@ export const RENDER_CACHE_LIMIT = 24;
  * slides per session that is far rarer than the network failing, which this already tolerates.
  */
 export function renderKeyOf(requests: readonly unknown[]): string {
-  const text = JSON.stringify(requests);
+  return `${PREFIX}${textHashOf(JSON.stringify(requests))}`;
+}
+
+/**
+ * FNV-1a over a string, plus its length -- the hash every browser-side cache in this add-on keys
+ * by (conversion-cache.ts too). The length rides along so two texts that collide in 32 bits still
+ * have to agree on their size as well.
+ */
+export function textHashOf(text: string): string {
   let hash = 0x811c9dc5;
   for (let at = 0; at < text.length; at += 1) {
     hash ^= text.charCodeAt(at);
     // The FNV prime, as shifts, so the whole thing stays in 32 bits under Math.imul.
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
-  return `${PREFIX}${hash.toString(36)}_${String(text.length)}`;
+  return `${hash.toString(36)}_${String(text.length)}`;
 }
 
 /** The picture for these requests, or null. Never throws: a miss is always a legal answer. */
 export function cachedRender(key: string, store?: Storage): string | null {
-  const shelf = storeOf(store);
+  const shelf = browserShelf(store);
   if (shelf === null) return null;
   try {
     const raw = shelf.getItem(key);
@@ -65,33 +73,46 @@ export function cachedRender(key: string, store?: Storage): string | null {
  * the next open being fast, so every path here swallows.
  */
 export function rememberRender(key: string, dataUri: string, store?: Storage): void {
-  const shelf = storeOf(store);
+  const shelf = browserShelf(store);
   if (shelf === null) return;
   try {
-    evictTo(shelf, RENDER_CACHE_LIMIT - 1);
+    evictOldest({ shelf, prefix: PREFIX, keep: RENDER_CACHE_LIMIT - 1 });
     const entry: CachedRender = { dataUri, at: Date.now() };
     shelf.setItem(key, JSON.stringify(entry));
   } catch {
     // A full quota is the common one. Drop everything we own and leave the next open to re-fill.
     try {
-      evictTo(shelf, 0);
+      evictOldest({ shelf, prefix: PREFIX, keep: 0 });
     } catch {
       // Nothing further to try; the render still happened.
     }
   }
 }
 
-/** Keep at most `keep` of our own entries, oldest out first. */
-function evictTo(shelf: Storage, keep: number): void {
+/**
+ * Keep at most `keep` of the entries under `prefix`, oldest out first. Every entry is a JSON
+ * object with a numeric `at`; one that is not sorts as oldest. May throw: callers own the guard.
+ */
+export function evictOldest({ shelf, prefix, keep }: { shelf: Storage; prefix: string; keep: number }): void {
   const ours: { key: string; at: number }[] = [];
   for (let at = 0; at < shelf.length; at += 1) {
     const key = shelf.key(at);
-    if (key === null || !key.startsWith(PREFIX)) continue;
+    if (key === null || !key.startsWith(prefix)) continue;
     ours.push({ key, at: stampOf(shelf, key) });
   }
   if (ours.length <= keep) return;
   ours.sort((left, right) => left.at - right.at);
   for (const victim of ours.slice(0, ours.length - keep)) shelf.removeItem(victim.key);
+}
+
+/** `localStorage` can throw on ACCESS, not only on use, so even reaching it is guarded. */
+export function browserShelf(store?: Storage): Storage | null {
+  if (store !== undefined) return store;
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
 }
 
 function stampOf(shelf: Storage, key: string): number {
@@ -102,15 +123,5 @@ function stampOf(shelf: Storage, key: string): number {
     return typeof at === "number" ? at : 0;
   } catch {
     return 0;
-  }
-}
-
-/** `localStorage` can throw on ACCESS, not only on use, so even reaching it is guarded. */
-function storeOf(store?: Storage): Storage | null {
-  if (store !== undefined) return store;
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    return null;
   }
 }

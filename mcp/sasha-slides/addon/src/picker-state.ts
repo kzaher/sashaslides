@@ -627,7 +627,15 @@ export function nextHtmlToLoad(offer: Offer): SlideFrame | null {
   return null;
 }
 
-/** The next candidate that has its HTML and no conversion yet. Same one-at-a-time chain. */
+/**
+ * EVERY candidate whose HTML has not been asked for, so the window can ask for all of them AT
+ * ONCE. Each `google.script.run` call is its own server execution and they run concurrently, so
+ * N documents fetched one round trip after another was N times the wait for the last cell.
+ */
+export function htmlToLoad(offer: Offer): readonly SlideFrame[] {
+  return offer.slides.filter(needsHtml);
+}
+
 /**
  * The candidates that are converted but not yet photographed, or null when there is nothing to
  * ask for. ALL OF THEM IN ONE GO, deliberately: the server builds one throwaway deck for the whole
@@ -648,25 +656,34 @@ export function slidesToRender(offer: Offer): readonly SlideFrame[] | null {
 }
 
 /**
- * The next candidate to convert, or null when nothing should be converted YET.
+ * The next candidate to convert and how urgently, or null when every loaded one is done.
  *
- * NOTHING IS CONVERTED UNTIL SOMEBODY IS LOOKING AT A CONVERSION.
+ * CONVERTED BEFORE ANYBODY ASKS, but never in the user's way. The converter stages a real
+ * offscreen iframe per slide and waits for its fonts and images on the main thread, so it used to
+ * wait for the converted view to be chosen -- which made that click start N serial conversions,
+ * and "When I go to Converted it just waits for the conversion" was the result. Now:
  *
- * Converting every candidate the moment its HTML arrived was work nobody had asked for, and it
- * is not cheap: the converter stages a real offscreen iframe per slide and waits for its fonts
- * and images, on the main thread. With a set of candidates that is seconds of a busy UI while
- * the user is trying to click one -- which is what "opening the popup is so slow" and "why is
- * rendering taking so long" both were.
+ *   * `idle` while the PREVIEW is showing: the composition root runs it when the browser is idle
+ *     (dialog.tsx), so by the time Converted is clicked the work is done -- and remembered across
+ *     opens (conversion-cache.ts), so it is usually done before the window even opened.
+ *   * `now` once somebody is looking at the converted view and waiting for it.
  *
- * It is needed in exactly two places, and neither is the preview: the CONVERTED rendering asks
- * for it here, and INSERT converts afresh anyway, because the page id has to be the one Slides
- * actually created (dialog.tsx).
+ * One at a time either way: each arrival re-runs the pump, which picks the next. INSERT still
+ * converts afresh, because the page id has to be the one Slides actually created (dialog.tsx).
  */
-export function nextToConvert(offer: Offer): SlideFrame | null {
-  if (offer.rendering !== "rendered") return null;
-  for (const frame of offer.slides) if (frame.html.kind === "loaded" && needsConversion(frame)) return frame;
+export function nextToConvert(offer: Offer): ConversionDue | null {
+  for (const frame of offer.slides) {
+    if (frame.html.kind !== "loaded" || !needsConversion(frame)) continue;
+    return { frame, urgency: conversionUrgencyOf(offer.rendering) };
+  }
   return null;
 }
+
+/** A candidate due for conversion, and whether somebody is waiting on it. */
+export type ConversionDue = Readonly<{ frame: SlideFrame; urgency: ConversionUrgency }>;
+
+/** `now` when the user is waiting on the conversion, `idle` when it is being done ahead of them. */
+export type ConversionUrgency = "now" | "idle";
 
 /**
  * Whether a frame's HTML wants fetching. A predicate over the union rather than a bare
@@ -911,3 +928,15 @@ function clampIndex({ offer, index }: { offer: Offer; index: number }): number {
 }
 
 export { WHOLE_SLIDE };
+
+/** Who is waiting on a conversion, per rendering. A switch, so a third rendering must say. */
+function conversionUrgencyOf(rendering: SlideRendering): ConversionUrgency {
+  switch (rendering) {
+    case "rendered":
+      return "now";
+    case "html":
+      return "idle";
+    default:
+      return assertNever(rendering);
+  }
+}

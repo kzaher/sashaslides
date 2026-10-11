@@ -216,25 +216,27 @@ test("a candidate whose HTML failed is not asked for again, and the others still
   assert.equal(nextHtmlToLoad(offerOf(state) ?? neverOffer())?.index, 2);
 });
 
-test("NOTHING IS CONVERTED WHILE THE PREVIEW IS SHOWING -- it is work nobody asked for", () => {
+test("WHILE THE PREVIEW IS SHOWING, conversion waits for an idle browser -- never the user's click", () => {
   // The converter stages a real offscreen iframe per slide and waits for its fonts and images,
-  // on the main thread. Doing that for every candidate the moment its HTML landed is seconds of
-  // a busy UI while the user is trying to click one.
+  // on the main thread. Doing it the moment the HTML lands would be a busy UI while the user is
+  // trying to click a candidate; doing it only when Converted is clicked made that click wait.
   const previewing = play([
     { kind: "proposal-offered", proposal, presentationId: "deck_1" },
     { kind: "html-arrived", index: 2, html: "<html></html>" },
   ]);
   assert.equal(offerOf(previewing)?.rendering, "html", "the preview is what opens");
-  assert.equal(nextToConvert(offerOf(previewing) ?? neverOffer()), null, "so nothing converts");
+  assert.equal(nextToConvert(offerOf(previewing) ?? neverOffer())?.urgency, "idle", "so it converts in the background");
 });
 
-test("and it follows the HTML once somebody asks for the conversion", () => {
+test("and it follows the HTML, urgently, once somebody asks for the conversion", () => {
   const state = play([
     { kind: "proposal-offered", proposal, presentationId: "deck_1" },
     { kind: "html-arrived", index: 2, html: "<html></html>" },
     { kind: "rendering-chosen", rendering: "rendered" },
   ]);
-  assert.equal(nextToConvert(offerOf(state) ?? neverOffer())?.index, 2, "1 has no HTML yet, so 2 is next");
+  const due = nextToConvert(offerOf(state) ?? neverOffer());
+  assert.equal(due?.frame.index, 2, "1 has no HTML yet, so 2 is next");
+  assert.equal(due?.urgency, "now");
 });
 
 // --- the grid's markup ----------------------------------------------------
