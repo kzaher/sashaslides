@@ -1,12 +1,12 @@
 {
   "scripts": {
     "reauth": "npx tsx .auth/generate-token.ts",
-    "sudo_claude": "specula-host -- claude --dangerously-skip-permissions --settings .claude/sudo-claude.settings.json",
+    "sudo_claude": "specula-host -- claude --dangerously-skip-permissions",
     "sudo_codex": "specula-host -- codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
-    "avemachina_sudo_claude": "specula-host --plugin ~/.avemachina/bot-plugin.mjs -- claude --dangerously-skip-permissions --settings .claude/sudo-claude.settings.json",
+    "avemachina_sudo_claude": "specula-host --plugin ~/.avemachina/bot-plugin.mjs -- claude --dangerously-skip-permissions",
     "avemachina_sudo_codex": "specula-host --plugin ~/.avemachina/bot-plugin.mjs -- codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
-    "sudo_claude_fork": "claude --dangerously-skip-permissions --settings .claude/sudo-claude.settings.json --continue --fork-session",
-    "sudo_claude_resume": "claude --dangerously-skip-permissions --settings .claude/sudo-claude.settings.json --continue",
+    "sudo_claude_fork": "claude --dangerously-skip-permissions --continue --fork-session",
+    "sudo_claude_resume": "claude --dangerously-skip-permissions --continue",
     "reinstall": "rm -rf node_modules renderer/node_modules && npm install && npm install --prefix renderer",
     "typecheck": "tsc --noEmit",
     "cow-workspace:test": "npx tsx cow-workspace/cow-workspace.e2e.test.ts && npx tsx cow-workspace/workspace-jail.e2e.test.ts",
