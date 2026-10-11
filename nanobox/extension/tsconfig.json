@@ -1,0 +1,20 @@
+// The unpacked MV3 extension. src/*.ts compiles to ../extension/*.js — the SAME filenames
+// manifest.json, background.js's importScripts("wire.js"), offscreen.html's two <script src> and
+// offscreen.js's new Worker("offscreen-codec.js") already reference, so the artifact Chrome loads
+// is unchanged by the move to TypeScript.
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "."
+  },
+  "files": [
+    "src/protocol.d.ts",
+    "src/wire-globals.d.ts",
+    "src/wire.ts",
+    "src/background.ts",
+    "src/content.ts",
+    "src/offscreen.ts",
+    "src/offscreen-codec.ts"
+  ]
+}

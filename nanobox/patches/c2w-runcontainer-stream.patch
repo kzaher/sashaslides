@@ -1,0 +1,140 @@
+diff --git a/extras/runcontainerjs/src/web/runcontainer.js b/extras/runcontainerjs/src/web/runcontainer.js
+index b82fec9..146113a 100644
+--- a/extras/runcontainerjs/src/web/runcontainer.js
++++ b/extras/runcontainerjs/src/web/runcontainer.js
+@@ -533,70 +533,77 @@ function connect(name, shared, toNet, certbuf, log) {
+                         if ((connObj.request.method != "HEAD") && (connObj.request.method != "GET")) {
+                             connObj.request.body = connObj.reqBodybuf;
+                         }
++                        // ---- nanobox: STREAM the response body instead of buffering it ----------
++                        // Was: `resp.arrayBuffer().then(...)`, which set connObj.response (the status
++                        // + headers the guest-side proxy blocks on in http_isreadable) only after the
++                        // WHOLE body had been downloaded. The guest therefore saw nothing at all --
++                        // not even the status line -- until the upstream stream ended, and for a
++                        // response that never ends (an SSE channel: MCP streamable-HTTP keeps a GET
++                        // open for the life of the session) that meant never. Measured before the fix
++                        // with test/net-smoke.mjs: a 6-event stream spread over 5 s delivered all 6
++                        // events at +5.1 s, and a stream that never closes delivered 0 bytes in 8 s.
++                        // Now: headers go out as soon as they arrive and the body is appended chunk by
++                        // chunk (the same reader idiom the decompress_read case already uses), so
++                        // http_readbody hands the guest each chunk as it lands. `done` flips only at
++                        // the real end of the stream, which is what http_readbody reports as EOF.
+                         fetch(connObj.address, connObj.request).then((resp) => {
+                             connObj.done = false;
+                             connObj.respBodybuf = new Uint8Array(0);
+-                            if (resp.ok) {
+-                                resp.arrayBuffer().then((data) => {
+-                                    var headers = {};
+-                                    for (const key of resp.headers.keys()) {
+-                                        if (data.byteLength > 0) {
+-                                            if (key == "content-encoding") {
+-                                                continue;
+-                                            }
+-                                            if (key == "content-length") {
+-                                                headers[key] = data.byteLength.toString();
+-                                                continue;
+-                                            }
+-                                        }
+-                                        headers[key] = resp.headers.get(key);
+-                                    }
+-                                    connObj.response = new TextEncoder().encode(JSON.stringify({
+-                                        bodyUsed: resp.bodyUsed,
+-                                        headers: headers,
+-                                        redirected: resp.redirected,
+-                                        status: resp.status,
+-                                        statusText: resp.statusText,
+-                                        type: resp.type,
+-                                        url: resp.url
+-                                    }));
+-                                    connObj.respBodybuf = new Uint8Array(data);
+-                                    connObj.done = true;
+-                                }).catch((error) => {
+-                                    var headers = {};
+-                                    for (const key of resp.headers.keys()) {
+-                                        headers[key] = resp.headers.get(key);
+-                                    }
+-                                    connObj.response = new TextEncoder().encode(JSON.stringify({
+-                                        bodyUsed: resp.bodyUsed,
+-                                        headers: headers,
+-                                        redirected: resp.redirected,
+-                                        status: resp.status,
+-                                        statusText: resp.statusText,
+-                                        type: resp.type,
+-                                        url: resp.url
+-                                    }));
+-                                    connObj.respBodybuf = new Uint8Array(0);
+-                                    connObj.respBodyError = error;
+-                                    connObj.done = true;
+-                                    console.log("failed to fetch body: " + error);
+-                                });
+-                            } else {
+-                                var headers = {};
+-                                for (const key of resp.headers.keys()) {
+-                                    headers[key] = resp.headers.get(key);
++                            var headers = {};
++                            for (const key of resp.headers.keys()) {
++                                // DO NOT "tidy" THIS BACK: dropping content-length is load-bearing,
++                                // not cosmetic. Both headers describe the WIRE form -- fetch has
++                                // already decoded content-encoding, and while the body streams its
++                                // decoded length is unknown, so the guest-side proxy frames it chunked
++                                // instead. Keeping content-length TRUNCATES BODIES, because fetch
++                                // hides content-encoding on cross-origin responses (it is not on the
++                                // CORS safelist) while content-length IS safelisted and reports the
++                                // COMPRESSED length. Measured in Chrome 151:
++                                //     GET https://api.github.com/zen
++                                //       content-length: 51   content-encoding: null (hidden)
++                                //       bytes after decode: 37       <- forwarding 51 loses 14 bytes
++                                // The old code got away with rewriting content-length to the decoded
++                                // length only because it had already buffered the whole body.
++                                // Consequence: fetchResponseToHTTPResponse() in imagemounter derives
++                                // http.Response.ContentLength from this header, so it is now 0 on
++                                // proxied responses. Nothing on nanobox's path reads it (images come
++                                // from the local image address via layer_request, untouched); a
++                                // containerd REGISTRY pull is the one path that would care.
++                                if ((key == "content-encoding") || (key == "content-length")) {
++                                    continue;
+                                 }
+-                                connObj.response = new TextEncoder().encode(JSON.stringify({
+-                                    bodyUsed: resp.bodyUsed,
+-                                    headers: headers,
+-                                    redirected: resp.redirected,
+-                                    status: resp.status,
+-                                    statusText: resp.statusText,
+-                                    type: resp.type,
+-                                    url: resp.url
+-                                }));
++                                headers[key] = resp.headers.get(key);
++                            }
++                            connObj.response = new TextEncoder().encode(JSON.stringify({
++                                bodyUsed: resp.bodyUsed,
++                                headers: headers,
++                                redirected: resp.redirected,
++                                status: resp.status,
++                                statusText: resp.statusText,
++                                type: resp.type,
++                                url: resp.url
++                            }));
++                            if (!resp.body) {
+                                 connObj.done = true;
++                                return;
+                             }
++                            // NOTE: error responses now stream their body too. The old code read the
++                            // body only when resp.ok, so the guest got an EMPTY body on every non-2xx
++                            // -- a vendor 4xx whose JSON explains the failure reached the guest blank.
++                            var reader = resp.body.getReader();
++                            var pump = () => reader.read().then((o) => {
++                                if (o.done) {
++                                    connObj.done = true;
++                                    return;
++                                }
++                                connObj.respBodybuf = appendData(connObj.respBodybuf, o.value);
++                                pump();
++                            }).catch((error) => {
++                                connObj.respBodyError = error;
++                                connObj.done = true;
++                                console.log("failed to read response body: " + error);
++                            });
++                            pump();
+                         }).catch((error) => {
+                             connObj.response = new TextEncoder().encode(JSON.stringify({
+                                 status: 503,

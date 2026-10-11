@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="c4t">
+<title id="c4t">Sasha Slides - Tailmark (S monogram: ear, tail, slide)</title>
+<desc>Two paints only: currentColor (foreground) plus the CSS custom property --sasha-accent. Holes are true negative space, so they always equal the page background. Light wrapper: color:#1E1B3A; --sasha-accent:#6C4BF4; on paper #FFF8F0. Dark wrapper: color:#FFF8F0; --sasha-accent:#19D3C5; on night #0D0F1C.</desc>
+<rect x="34" y="75" width="188" height="106" rx="18" fill="none" stroke="var(--sasha-accent,#6C4BF4)" stroke-width="13"/>
+<g fill="currentColor">
+  <path d="M180 88c-16-34 0-60 24-54 22 6 22 42-2 62Z"/>
+  <path d="M102 204c-26 14-54 6-64-18 16 10 42 14 58 4Z"/>
+</g>
+<path d="M186 86c-6-28-40-42-72-32-38 12-44 48-12 64 34 16 74 18 76 48 2 32-40 48-78 34"
+      fill="none" stroke="currentColor" stroke-width="34" stroke-linecap="round"/>
+</svg>

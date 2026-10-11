@@ -1,8 +1,8 @@
 {
   "scripts": {
     "reauth": "npx tsx .auth/generate-token.ts",
-    "sudo_claude": "claude --dangerously-skip-permissions",
-    "sudo_codex": "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
+    "sudo_claude": "specula-host -- claude --dangerously-skip-permissions",
+    "sudo_codex": "specula-host -- codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
     "sudo_claude_fork": "claude --dangerously-skip-permissions --continue --fork-session",
     "sudo_claude_resume": "claude --dangerously-skip-permissions --continue",
     "reinstall": "rm -rf node_modules renderer/node_modules && npm install && npm install --prefix renderer",
@@ -26,9 +26,11 @@
     "renderer:rate:complex": "lsof -ti:3457 | xargs -r kill; npx tsx renderer/html2slides/rating-server.ts /tmp/sxs-complex --port 3457",
     "renderer:rate": "lsof -ti:3456,3457 | xargs -r kill; npm run renderer:rate:basics & npm run renderer:rate:complex",
     "push_all": "./.agent/skills/push_all_submodules.sh",
-    "pull_all": "./.agent/skills/pull_all_submodules.sh"
+    "pull_all": "./.agent/skills/pull_all_submodules.sh",
+    "bot": "../codepit/.codepit/private/bot"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "chrome-remote-interface": "^0.34.0",
     "esbuild": "^0.28.0",
     "googleapis": "^171.4.0",
@@ -36,7 +38,8 @@
     "pixelmatch": "^7.1.0",
     "pngjs": "^7.0.0",
     "postcss-value-parser": "^4.2.0",
-    "pptxgenjs": "^4.0.1"
+    "pptxgenjs": "^4.0.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/pngjs": "^6.0.5",

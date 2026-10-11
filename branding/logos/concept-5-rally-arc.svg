@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="c5t">
+<title id="c5t">Sasha Slides - Rally (herding arc gathering three strays)</title>
+<desc>Two paints only: currentColor (foreground) plus the CSS custom property --sasha-accent. Holes are true negative space, so they always equal the page background. Light wrapper: color:#1E1B3A; --sasha-accent:#6C4BF4; on paper #FFF8F0. Dark wrapper: color:#FFF8F0; --sasha-accent:#19D3C5; on night #0D0F1C.</desc>
+<path d="M192.3 182A84 84 0 1 1 204.1 92.5" fill="none" stroke="currentColor" stroke-width="34" stroke-linecap="round"/>
+<path d="M195.8 73 157.5 71.8 181.7 37.4Z" fill="currentColor"/>
+<g fill="var(--sasha-accent,#6C4BF4)">
+  <rect x="86" y="90" width="44" height="44" rx="13"/>
+  <rect x="134" y="90" width="44" height="44" rx="13"/>
+  <rect x="110" y="142" width="44" height="44" rx="13"/>
+</g>
+</svg>

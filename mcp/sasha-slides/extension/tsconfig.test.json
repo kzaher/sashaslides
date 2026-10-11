@@ -1,0 +1,11 @@
+// The unit tests and the fake Drive they inject. Separate from tsconfig.json because these DO run
+// on node (node:test, node:assert) while everything they import ships to a browser -- so this is
+// the only project allowed to see @types/node.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["chrome", "node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": []
+}

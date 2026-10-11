@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture 4 — gradients, shadows, blend modes</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    color: #ffffff;
+    /* A conic gradient over a radial one: Slides has linear and radial fills only. */
+    background:
+      conic-gradient(from 210deg at 70% 30%, #ff5f6d 0deg, #ffc371 120deg, #4facfe 240deg, #ff5f6d 360deg),
+      radial-gradient(circle at 20% 80%, #00f2fe 0%, #4facfe 55%, #0b1026 100%);
+    background-blend-mode: overlay;
+    padding: 64px 80px;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  h1 {
+    font-size: 62px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.02;
+    /* Gradient-clipped text: there is no Slides primitive for this at all. */
+    background: linear-gradient(92deg, #ffffff 0%, #ffe9b0 48%, #ffffff 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 6px 28px rgba(0, 0, 0, 0.45);
+  }
+  .cards { display: flex; gap: 28px; }
+  .card {
+    flex: 1; padding: 30px 28px; border-radius: 22px;
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.38);
+    /* Layered inner + outer shadow and a blur: all three are unexpressible. */
+    box-shadow:
+      0 26px 60px rgba(4, 8, 28, 0.52),
+      inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(14px) saturate(160%);
+  }
+  .card h2 { font-size: 23px; font-weight: 700; margin-bottom: 10px; }
+  .card p { font-size: 16px; line-height: 1.55; color: rgba(255, 255, 255, 0.86); }
+  .badge {
+    align-self: flex-start; padding: 9px 18px; border-radius: 999px;
+    font-size: 14px; letter-spacing: 0.16em; text-transform: uppercase;
+    background: rgba(11, 16, 38, 0.6); mix-blend-mode: screen;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+  }
+</style>
+</head>
+<body>
+  <div>
+    <span class="badge">anomaly bait</span>
+    <h1>Everything Slides<br>cannot express</h1>
+  </div>
+  <div class="cards">
+    <div class="card">
+      <h2>Conic fill</h2>
+      <p>Four stops around 360&deg;, blended over a radial. Expect one flat or linear approximation.</p>
+    </div>
+    <div class="card">
+      <h2>Clipped text</h2>
+      <p>A gradient painted through the glyphs. Expect solid white, or a rasterised fallback.</p>
+    </div>
+    <div class="card">
+      <h2>Glass</h2>
+      <p>Inset highlight, 60px outer shadow, 14px backdrop blur, screen blend. Expect none of it.</p>
+    </div>
+  </div>
+</body>
+</html>

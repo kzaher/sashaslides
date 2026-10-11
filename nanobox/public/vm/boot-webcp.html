@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" style="height:100%">
+<head><meta charset="utf-8"><title>nanobox — webdevice cp test</title>
+<style>html,body{height:100%;margin:0;background:#0b0a09;color:#e8e2da;font-family:ui-monospace,monospace}
+#status{padding:8px 12px;color:#D97757;font-size:13px}#console{height:calc(100% - 40px);margin:0;padding:8px 12px;font-size:12.5px;white-space:pre-wrap;overflow:auto}</style></head>
+<body>
+<div id="status">loading…</div><pre id="console"></pre>
+<script type="module">
+const status = document.getElementById("status"), consoleEl = document.getElementById("console");
+const SCRIPT = [
+  "echo ===T===",
+  "echo 'cp node18bin from WebDevice to ext2 /root ...'",
+  "S=$(date +%s); cp /app/node18bin /root/node; echo cp_t=$(( $(date +%s) - S ))s; chmod +x /root/node",
+  "echo 'node18 --version FROM EXT2 (120s cap):'",
+  "S=$(date +%s); timeout 120 /root/node --version 2>&1; echo node_exit=$? t=$(( $(date +%s) - S ))s",
+  "echo ===DONE==="
+].join("\n");
+try {
+  const CheerpX = await import("https://cxrtnc.leaningtech.com/1.2.8/cx.esm.js");
+  const cloud = await CheerpX.CloudDevice.create("wss://disks.webvm.io/debian_large_20230522_5044875331.ext2");
+  const idb = await CheerpX.IDBDevice.create("nanobox-blocks");
+  const overlay = await CheerpX.OverlayDevice.create(cloud, idb);
+  const web = await CheerpX.WebDevice.create("payload");
+  status.textContent = "booting…";
+  const cx = await CheerpX.Linux.create({ mounts: [
+    { type: "ext2", path: "/", dev: overlay },
+    { type: "dir", path: "/app", dev: web },
+    { type: "devs", path: "/dev" }, { type: "proc", path: "/proc" } ] });
+  cx.setConsole(consoleEl); window.__cx = cx;
+  status.textContent = "cp + node test…";
+  const code = await cx.run("/bin/bash", ["-c", SCRIPT], {
+    env: ["HOME=/root", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"],
+    cwd: "/root", uid: 0, gid: 0 });
+  status.textContent = "done exit " + code;
+  window.__vmprobe = { code, text: consoleEl.textContent };
+} catch (e) { status.textContent = "ERROR: " + (e && e.message || e); window.__vmerror = String(e && e.stack || e); }
+</script>
+</body></html>

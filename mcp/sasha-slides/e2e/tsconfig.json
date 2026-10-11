@@ -1,0 +1,33 @@
+{
+  "// why": [
+    "The root tsconfig's `include` does not cover mcp/**, and that file belongs to no",
+    "stream, so the harness carries its own compiler gate. Run it with:",
+    "  npx tsc -p mcp/sasha-slides/e2e",
+    "tsx only strips types, so this is the only thing that type-checks the harness."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "lib": ["ES2022"]
+  },
+  // ../../../types/**/*.d.ts is where this repo declares the third-party modules that ship no
+  // .d.ts (chrome-remote-interface) plus the hand-written CDP shapes product-browser.ts narrows it
+  // through — the same arrangement addon/tsconfig.test.json and converter/test/tsconfig.json use.
+  // product-shim/ is deliberately NOT here: it is browser TypeScript with its own gate
+  // (npx tsc -p mcp/sasha-slides/e2e/product-shim), and "*.ts" does not recurse into it.
+  "include": ["*.ts", "../google-auth.ts", "../../../types/**/*.d.ts"]
+}

@@ -1,0 +1,27 @@
+{
+  // The converter's own gate. These flags are the contract: this code is
+  // bundled into a browser content script, so there is deliberately NO
+  // `"types": ["node"]` here — adding it would let a `node:fs` import compile
+  // and then fail at runtime in the extension. The tests live under
+  // `test/tsconfig.json`, which does take the Node types.
+  //
+  // Run: npx tsc -p mcp/sasha-slides/converter
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "noEmit": true
+  },
+  "include": ["*.ts"]
+}

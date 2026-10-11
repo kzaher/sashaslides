@@ -1,0 +1,811 @@
+{
+  "cli": "codex",
+  "cold": false,
+  "url": "http://localhost:8093/sandbox.html?cli=codex",
+  "verdict": {
+    "signinMs": 6511,
+    "loadMs": 1165,
+    "bootMs": 1057,
+    "runMs": 4289,
+    "engineMs": 699,
+    "imageMs": 683,
+    "installMs": 869,
+    "persistMs": 974,
+    "helloMs": null,
+    "bundleMs": null,
+    "transformMs": null,
+    "icount": "898617869"
+  },
+  "date": "2026-08-19T10:53:22.871Z",
+  "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+  "install": {
+    "ms": 540,
+    "store": "opfs",
+    "usage": {
+      "usage": 3580894080,
+      "quota": 14318312320
+    },
+    "packages": 4,
+    "fromCache": 4,
+    "downloadBytes": 0,
+    "direct": 0,
+    "relayed": 0,
+    "downloads": [],
+    "list": [
+      {
+        "cli": "node",
+        "key": "pkg-node-linux-x64@22.23.2",
+        "name": "node-linux-x64",
+        "version": "22.23.2",
+        "files": 2729,
+        "unpackedBytes": 183774506,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 305
+        }
+      },
+      {
+        "cli": "node",
+        "key": "pkg-npm@10.9.8",
+        "name": "npm",
+        "version": "10.9.8",
+        "files": 2011,
+        "unpackedBytes": 11682638,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 21
+        }
+      },
+      {
+        "cli": "codex",
+        "key": "pkg-@openai~codex@0.147.0",
+        "name": "@openai/codex",
+        "version": "0.147.0",
+        "files": 4,
+        "unpackedBytes": 11652,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 5
+        }
+      },
+      {
+        "cli": "codex",
+        "key": "pkg-@openai~codex@0.147.0-linux-x64",
+        "name": "@openai/codex",
+        "version": "0.147.0-linux-x64",
+        "files": 8,
+        "unpackedBytes": 314801778,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 526
+        }
+      }
+    ],
+    "journals": {
+      "count": 1,
+      "bytes": 1024
+    }
+  },
+  "accounting": {
+    "ours": {
+      "runtime/pages": 7200,
+      "jit-bundles": 1683,
+      "other": 300,
+      "image": 1935,
+      "spec": 2659,
+      "engine": 300
+    },
+    "oursTotal": 14077,
+    "oursCached": {
+      "engine (Cache API)": 33343458,
+      "image layers (Cache API, decompressed)": 8803328,
+      "bundles/shim (Cache API)": 15825631
+    },
+    "oursCachedTotal": 57972417,
+    "vendorDirect": {
+      "api.github.com": 0,
+      "raw.githubusercontent.com": 584,
+      "files.openai.com": 0
+    },
+    "vendorDirectTotal": 584,
+    "vendorRelay": {
+      "chatgpt.com": 232
+    },
+    "vendorRelayTotal": 232,
+    "routes": {
+      "page": {
+        "direct": 4,
+        "relay": 2
+      },
+      "runtime": null
+    }
+  },
+  "events": [
+    {
+      "cli": "codex",
+      "install": [
+        "codex"
+      ],
+      "noCache": false,
+      "proxyExtension": false,
+      "event": "boot",
+      "t": 311
+    },
+    {
+      "clis": [
+        "codex"
+      ],
+      "event": "install-start",
+      "t": 311
+    },
+    {
+      "t": 333,
+      "stage": "store",
+      "kind": "opfs",
+      "event": "install:store"
+    },
+    {
+      "t": 339,
+      "stage": "cached",
+      "key": "pkg-@openai~codex@0.147.0",
+      "bytes": 15360,
+      "event": "install:cached"
+    },
+    {
+      "t": 340,
+      "stage": "package",
+      "key": "pkg-@openai~codex@0.147.0",
+      "files": 4,
+      "unpackedBytes": 11652,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "t": 356,
+      "stage": "cached",
+      "key": "pkg-npm@10.9.8",
+      "bytes": 13265920,
+      "event": "install:cached"
+    },
+    {
+      "t": 368,
+      "stage": "package",
+      "key": "pkg-npm@10.9.8",
+      "files": 2011,
+      "unpackedBytes": 11682638,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "event": "vm-runtime-ready",
+      "t": 581
+    },
+    {
+      "event": "vm:init",
+      "t": 639
+    },
+    {
+      "event": "vm:start",
+      "t": 639
+    },
+    {
+      "t": 639,
+      "stage": "cached",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "bytes": 186952704,
+      "event": "install:cached"
+    },
+    {
+      "t": 654,
+      "stage": "package",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "files": 2729,
+      "unpackedBytes": 183774506,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "event": "vm:image-loaded",
+      "t": 683,
+      "files": 314,
+      "compressedBytes": 0,
+      "ms": 44,
+      "cache": {
+        "hits": 2,
+        "misses": 0,
+        "bytes": 8803328
+      }
+    },
+    {
+      "event": "vm:engine-cached",
+      "t": 698,
+      "bytes": 33343458
+    },
+    {
+      "event": "vm:engine-fetched",
+      "t": 699,
+      "bytes": 33343458,
+      "ms": 60
+    },
+    {
+      "t": 861,
+      "stage": "cached",
+      "key": "pkg-@openai~codex@0.147.0-linux-x64",
+      "bytes": 314808320,
+      "event": "install:cached"
+    },
+    {
+      "t": 861,
+      "stage": "package",
+      "key": "pkg-@openai~codex@0.147.0-linux-x64",
+      "files": 8,
+      "unpackedBytes": 314801778,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "ms": 540,
+      "store": "opfs",
+      "packages": 4,
+      "fromCache": 4,
+      "downloadBytes": 0,
+      "journals": {
+        "count": 1,
+        "bytes": 1024
+      },
+      "event": "installed",
+      "t": 869
+    },
+    {
+      "event": "vm:persist-applied",
+      "t": 974,
+      "packages": 4,
+      "journals": 1,
+      "files": 4752,
+      "waitMs": 273,
+      "applyMs": 19,
+      "keys": [
+        "pkg-node-linux-x64@22.23.2",
+        "pkg-npm@10.9.8",
+        "pkg-@openai~codex@0.147.0",
+        "pkg-@openai~codex@0.147.0-linux-x64"
+      ]
+    },
+    {
+      "event": "vm:bundle-ready",
+      "t": 974,
+      "files": 314,
+      "compressedBytes": 0,
+      "ms": 336,
+      "cache": {
+        "hits": 2,
+        "misses": 0,
+        "bytes": 8803328
+      }
+    },
+    {
+      "event": "vm:jit-bundles",
+      "t": 1165,
+      "autoCached": true,
+      "tag": "123376996-b215171d136c838136fa5c53b9107f75",
+      "files": 1,
+      "modules": 1611,
+      "keys": 7068,
+      "ms": 126
+    },
+    {
+      "event": "vm:start-direct",
+      "t": 1165
+    },
+    {
+      "ms": 1165,
+      "event": "vm-start",
+      "t": 1165
+    },
+    {
+      "event": "vm:persist-attach",
+      "t": 1166,
+      "persist": true,
+      "share": "bundle",
+      "fd": 6
+    },
+    {
+      "event": "vm:instantiated",
+      "t": 1264,
+      "compileMs": 98
+    },
+    {
+      "event": "vm:engine",
+      "t": 1269,
+      "optimized": true,
+      "jit": {
+        "level": 2,
+        "threshold": 2000
+      },
+      "bundles": 1611
+    },
+    {
+      "ms": 2222,
+      "event": "guest-booted",
+      "t": 2222
+    },
+    {
+      "t": 4045,
+      "stage": "journal",
+      "name": "journal/01787136799800-0-7a8z.tar",
+      "bytes": 19968,
+      "records": 13,
+      "entries": [
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/apply_patch",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/applypatch",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/codex-linux-sandbox",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/codex-execve-wrapper",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "root/.codex/.wh.state_5.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite-wal",
+          "size": 4152,
+          "type": "0"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "t": 6301,
+      "stage": "journal",
+      "name": "journal/01787136802056-1-1b7x.tar",
+      "bytes": 399360,
+      "records": 116,
+      "entries": [
+        {
+          "path": "root/.codex/.wh.logs_2.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.goals_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.memories_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.queue_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/logs_2.sqlite",
+          "size": 49152,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/skills/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/skills/.system/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/agents/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/assets/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/references/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/scripts/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/openai-docs/",
+          "size": 0,
+          "type": "5"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "ms": 6511,
+      "loadMs": 1165,
+      "bootMs": 1057,
+      "runMs": 4289,
+      "event": "signin",
+      "t": 6511
+    }
+  ],
+  "persistLog": [
+    {
+      "t": 3716,
+      "stage": "journal",
+      "name": "journal/01787136799800-0-7a8z.tar",
+      "bytes": 19968,
+      "records": 13,
+      "entries": [
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/apply_patch",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/applypatch",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/codex-linux-sandbox",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0K98Dks/codex-execve-wrapper",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "root/.codex/.wh.state_5.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite-wal",
+          "size": 4152,
+          "type": "0"
+        }
+      ]
+    },
+    {
+      "t": 5971,
+      "stage": "journal",
+      "name": "journal/01787136802056-1-1b7x.tar",
+      "bytes": 399360,
+      "records": 116,
+      "entries": [
+        {
+          "path": "root/.codex/.wh.logs_2.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.goals_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.memories_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.queue_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/logs_2.sqlite",
+          "size": 49152,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/skills/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/skills/.system/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/agents/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/assets/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/references/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/scripts/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/openai-docs/",
+          "size": 0,
+          "type": "5"
+        }
+      ]
+    }
+  ],
+  "missing": null,
+  "spawns": null,
+  "net": null,
+  "netBytes": null,
+  "backendOps": null,
+  "backendStats": null,
+  "screenTail": [
+    "Welcome to Codex, OpenAI's command-line coding agent",
+    "  Sign in with ChatGPT to use Codex as part of your paid plan",
+    "  or connect an API key for usage-based billing",
+    "> 1. Sign in with ChatGPT",
+    "     Usage included with Plus, Pro, Business, and Enterprise plans",
+    "  2. Sign in with Device Code",
+    "     Sign in from another device with a one-time code",
+    "  3. Provide your own API key",
+    "     Pay for what you use",
+    "  Press enter to continue"
+  ]
+}

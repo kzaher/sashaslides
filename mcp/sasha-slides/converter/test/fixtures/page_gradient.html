@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  A page whose background is a conic gradient over a radial one -- the shape Slides cannot hold.
+
+  THE BUG THIS PINS DOWN. The page's solid fallback was the FIRST hex in the background-image
+  string, which for a conic is whatever stop happens to be written first: here #ff5f6d, so a
+  blue-and-purple slide converted to a flat saturated coral. "The gradient background looks
+  quite horrible when converted" was exactly this. A flat approximation is unavoidable -- Slides
+  has no conic fill -- but it should be the gradient's MEAN, not one of its extremes.
+-->
+<style>
+  html, body { margin: 0; }
+  body {
+    width: 1280px; height: 720px; color: #ffffff;
+    background:
+      conic-gradient(from 210deg at 70% 30%, #ff5f6d 0deg, #ffc371 120deg, #4facfe 240deg, #ff5f6d 360deg),
+      radial-gradient(circle at 20% 80%, #00f2fe 0%, #4facfe 55%, #0b1026 100%);
+  }
+  h1 { margin: 0; padding: 80px; font-family: Arial, sans-serif; font-size: 48px; }
+</style>
+</head>
+<body><h1>Everything Slides cannot express</h1></body>
+</html>

@@ -1,0 +1,68 @@
+diff --git a/extras/imagemounter/genspec/main.go b/extras/imagemounter/genspec/main.go
+new file mode 100644
+index 0000000..ccc68d1
+--- /dev/null
++++ b/extras/imagemounter/genspec/main.go
+@@ -0,0 +1,62 @@
++// genspec: print the OCI runtime spec container2wasm's imagemounter serves as config/config.json for
++// an image config (same code path as imagemounter's generateSpec, images without a User field).
++package main
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"os"
++
++	ctdcontainers "github.com/containerd/containerd/containers"
++	ctdnamespaces "github.com/containerd/containerd/namespaces"
++	ctdoci "github.com/containerd/containerd/oci"
++	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
++	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
++)
++
++func main() {
++	d, err := os.ReadFile(os.Args[1])
++	if err != nil {
++		panic(err)
++	}
++	var config imagespec.Image
++	if err := json.Unmarshal(d, &config); err != nil {
++		panic(err)
++	}
++	ic := config.Config
++	ctdCtx := ctdnamespaces.WithNamespace(context.TODO(), "default")
++	p := "linux/riscv64"
++	if config.Architecture == "amd64" {
++		p = "linux/amd64"
++	}
++	s, err := ctdoci.GenerateSpecWithPlatform(ctdCtx, nil, p, &ctdcontainers.Container{},
++		ctdoci.WithHostNamespace(runtimespec.NetworkNamespace),
++		ctdoci.WithoutRunMount,
++		ctdoci.WithEnv(ic.Env),
++		ctdoci.WithTTY,
++	)
++	if err != nil {
++		panic(err)
++	}
++	if ic.User != "" {
++		panic("images with a User are not handled by genspec")
++	}
++	args := ic.Entrypoint
++	if len(ic.Cmd) > 0 {
++		args = append(args, ic.Cmd...)
++	}
++	if len(args) > 0 {
++		s.Process.Args = args
++	}
++	if ic.WorkingDir != "" {
++		s.Process.Cwd = ic.WorkingDir
++	}
++	s.Linux.Seccomp = nil
++	s.Root = &runtimespec.Root{Path: "/run/rootfs"}
++	out, err := json.Marshal(s)
++	if err != nil {
++		panic(err)
++	}
++	fmt.Println(string(out))
++}

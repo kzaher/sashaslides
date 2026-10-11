@@ -1,0 +1,25 @@
+{
+ "cli": "claude-native",
+ "ok": true,
+ "signinMs": 4010.994999974966,
+ "checks": {
+  "signin": true,
+  "tui": true,
+  "file": true,
+  "spawn": true,
+  "bun": true,
+  "pty": true,
+  "auth": true,
+  "render": true,
+  "state": true,
+  "apis": true
+ },
+ "failures": [],
+ "missing": [
+  "net.Server.listen(42981)"
+ ],
+ "spawns": [
+  "/bin/sh"
+ ],
+ "at": "2026-08-16T22:25:08.477Z"
+}

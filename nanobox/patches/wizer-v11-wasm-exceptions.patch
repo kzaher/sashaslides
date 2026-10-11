@@ -1,0 +1,13 @@
+diff --git a/src/bin/wizer.rs b/src/bin/wizer.rs
+index 86ec11a..e239b52 100644
+--- a/src/bin/wizer.rs
++++ b/src/bin/wizer.rs
+@@ -235,6 +235,8 @@ async fn main() -> Result<()> {
+         options.wasm_reference_types,
+         true,
+     ));
++    // nanobox: the Bochs engine uses wasm exception handling (setjmp/longjmp via -wasm-enable-sjlj)
++    config.wasm_exceptions(true);
+ 
+     let engine = wasmtime::Engine::new(&config)?;
+     let mut store = wasmtime::Store::new(&engine, wasi.build_p1());

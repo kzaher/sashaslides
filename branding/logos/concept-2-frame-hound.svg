@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="c2t">
+<title id="c2t">Sasha Slides - Frame Hound (dog + 16:9 slide as one glyph)</title>
+<desc>Two paints only: currentColor (foreground) plus the CSS custom property --sasha-accent. Holes are true negative space, so they always equal the page background. Light wrapper: color:#1E1B3A; --sasha-accent:#6C4BF4; on paper #FFF8F0. Dark wrapper: color:#FFF8F0; --sasha-accent:#19D3C5; on night #0D0F1C.</desc>
+<g fill="currentColor">
+  <path d="M38 98C26 60 46 34 74 42c20 6 26 30 24 56Z"/>
+  <path d="M218 98c12-38-8-64-36-56-20 6-26 30-24 56Z"/>
+  <path fill-rule="evenodd" d="M24 108a22 22 0 0 1 22-22h164a22 22 0 0 1 22 22v83a22 22 0 0 1-22 22H46a22 22 0 0 1-22-22Zm51 12a17 17 0 0 0 0 34h106a17 17 0 0 0 0-34Z"/>
+  <circle cx="90" cy="137" r="10"/>
+  <circle cx="166" cy="137" r="10"/>
+</g>
+<g fill="var(--sasha-accent,#6C4BF4)">
+  <rect x="60" y="172" width="136" height="13" rx="6.5"/>
+  <rect x="60" y="192" width="88" height="13" rx="6.5"/>
+</g>
+</svg>

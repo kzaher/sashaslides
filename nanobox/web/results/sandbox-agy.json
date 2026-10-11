@@ -1,0 +1,226 @@
+{
+  "cli": "agy",
+  "cold": {
+    "date": "2026-08-16T18:15:15.658Z",
+    "verdict": {
+      "signinMs": 22516,
+      "loadMs": 4503,
+      "bootMs": 1353,
+      "runMs": 16660,
+      "engineMs": 879,
+      "imageMs": 805,
+      "installMs": 4483,
+      "persistMs": 4503,
+      "helloMs": null,
+      "bundleMs": null,
+      "transformMs": null,
+      "icount": "2055439608"
+    },
+    "accounting": {
+      "ours": {
+        "runtime/pages": 513774,
+        "jit-bundles": 12750747,
+        "image": 3926237,
+        "spec": 2550,
+        "engine": 29794763
+      },
+      "oursTotal": 46988071,
+      "oursCached": {},
+      "oursCachedTotal": 0,
+      "vendorDirect": {
+        "registry.npmjs.org": 54614905,
+        "antigravity-unleash.goog": 368863,
+        "playwright.azureedge.net": 0,
+        "playwright-akamai.azureedge.net": 0,
+        "playwright-verizon.azureedge.net": 0
+      },
+      "vendorDirectTotal": 54983768,
+      "vendorRelay": {
+        "antigravity-cli-auto-updater-974169037036.us-central1.run.app": 303,
+        "storage.googleapis.com": 55586032,
+        "play.googleapis.com": 420
+      },
+      "vendorRelayTotal": 55586755,
+      "routes": {
+        "page": {
+          "direct": 5,
+          "relay": 5
+        },
+        "runtime": null
+      }
+    },
+    "install": {
+      "ms": 4149,
+      "packages": 3,
+      "fromCache": 0,
+      "downloadBytes": 110201240,
+      "store": "opfs",
+      "list": [
+        {
+          "cli": "node",
+          "key": "pkg-node-linux-x64@22.23.2",
+          "name": "node-linux-x64",
+          "version": "22.23.2",
+          "files": 2729,
+          "unpackedBytes": 183774506,
+          "tarBytes": 0,
+          "download": {
+            "url": "https://registry.npmjs.org/node-linux-x64/-/node-linux-x64-22.23.2.tgz",
+            "bytes": 51576724,
+            "fromCache": false,
+            "ms": 915,
+            "gunzipMs": 618,
+            "integrity": "sha512-lfi+07N7Y+NCz+WrWIu+VmHkXuTLuDv6JLpCAH5n+MvZeG4x9SoSGVJ+h8lUJwJKXGwZUJCdDXo6zZoLw16RGA=="
+          }
+        },
+        {
+          "cli": "node",
+          "key": "pkg-npm@10.9.8",
+          "name": "npm",
+          "version": "10.9.8",
+          "files": 2011,
+          "unpackedBytes": 11682638,
+          "tarBytes": 0,
+          "download": {
+            "url": "https://registry.npmjs.org/npm/-/npm-10.9.8.tgz",
+            "bytes": 2973275,
+            "fromCache": false,
+            "ms": 88,
+            "gunzipMs": 63,
+            "integrity": "sha512-fYwb6ODSmHkqrJQQaCxY3M2lPf/mpgC7ik0HSzzIwG5CGtabRp4bNqikatvCoT42b5INQSqudVH0R7yVmC9hVg=="
+          }
+        },
+        {
+          "cli": "agy",
+          "key": "pkg-agy@1.1.13",
+          "name": "agy",
+          "version": "1.1.13",
+          "files": 1,
+          "unpackedBytes": 206160344,
+          "tarBytes": 0,
+          "download": {
+            "url": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.13-6057583128215552/linux-x64/cli_linux_x64.tar.gz",
+            "bytes": 55586032,
+            "fromCache": false,
+            "ms": 3538,
+            "gunzipMs": 548,
+            "integrity": "sha512-hex"
+          }
+        }
+      ],
+      "journals": {
+        "count": 0,
+        "bytes": 0
+      }
+    }
+  },
+  "warm": {
+    "date": "2026-08-16T18:15:39.758Z",
+    "verdict": {
+      "signinMs": 20261,
+      "loadMs": 1127,
+      "bootMs": 1361,
+      "runMs": 17773,
+      "engineMs": 757,
+      "imageMs": 709,
+      "installMs": 734,
+      "persistMs": 756,
+      "helloMs": null,
+      "bundleMs": null,
+      "transformMs": null,
+      "icount": "2007772137"
+    },
+    "accounting": {
+      "ours": {
+        "runtime/pages": 6300,
+        "jit-bundles": 1039,
+        "image": 1935,
+        "spec": 2550,
+        "engine": 300
+      },
+      "oursTotal": 12124,
+      "oursCached": {
+        "engine (Cache API)": 29794463,
+        "image layers (Cache API, decompressed)": 8803328,
+        "bundles/shim (Cache API)": 12749708
+      },
+      "oursCachedTotal": 51347499,
+      "vendorDirect": {
+        "antigravity-unleash.goog": 368863,
+        "playwright.azureedge.net": 0,
+        "playwright-akamai.azureedge.net": 0,
+        "playwright-verizon.azureedge.net": 0
+      },
+      "vendorDirectTotal": 368863,
+      "vendorRelay": {
+        "play.googleapis.com": 252
+      },
+      "vendorRelayTotal": 252,
+      "routes": {
+        "page": {
+          "direct": 5,
+          "relay": 3
+        },
+        "runtime": null
+      }
+    },
+    "install": {
+      "ms": 407,
+      "packages": 3,
+      "fromCache": 3,
+      "downloadBytes": 0,
+      "store": "opfs",
+      "list": [
+        {
+          "cli": "node",
+          "key": "pkg-node-linux-x64@22.23.2",
+          "name": "node-linux-x64",
+          "version": "22.23.2",
+          "files": 2729,
+          "unpackedBytes": 183774506,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 313
+          }
+        },
+        {
+          "cli": "node",
+          "key": "pkg-npm@10.9.8",
+          "name": "npm",
+          "version": "10.9.8",
+          "files": 2011,
+          "unpackedBytes": 11682638,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 25
+          }
+        },
+        {
+          "cli": "agy",
+          "key": "pkg-agy@1.1.13",
+          "name": "agy",
+          "version": "1.1.13",
+          "files": 1,
+          "unpackedBytes": 206160344,
+          "tarBytes": 0,
+          "download": {
+            "url": null,
+            "bytes": 0,
+            "fromCache": true,
+            "ms": 388
+          }
+        }
+      ],
+      "journals": {
+        "count": 4,
+        "bytes": 80384
+      }
+    }
+  }
+}

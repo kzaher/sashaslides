@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture 2 — table with varied borders</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    background: #ffffff; color: #1b1b1f;
+    padding: 56px 72px;
+  }
+  h1 { font-size: 40px; font-weight: 600; margin-bottom: 8px; }
+  .sub { font-size: 17px; color: #6d6d78; margin-bottom: 34px; }
+  table { border-collapse: collapse; width: 100%; font-size: 18px; }
+  caption { caption-side: bottom; text-align: left; font-size: 14px; color: #8a8a96; padding-top: 14px; }
+  thead th {
+    background: #1b1b1f; color: #fff; text-align: left;
+    padding: 14px 18px; font-weight: 600; letter-spacing: 0.03em;
+    border-right: 1px solid #3a3a42;
+  }
+  thead th:last-child { border-right: none; }
+  tbody td { padding: 13px 18px; border-bottom: 1px solid #e2e2e8; }
+  tbody tr:nth-child(even) { background: #f6f6f9; }
+  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  /* Deliberately uneven borders: Slides draws one uniform grid per table. */
+  tbody td.flag { border-left: 4px solid #d9480f; font-weight: 600; color: #d9480f; }
+  tbody tr.total td { border-top: 3px double #1b1b1f; border-bottom: none; font-weight: 700; background: #fff; }
+  tbody td.spanned { background: #fff4e6; text-align: center; font-style: italic; color: #7a4a12; }
+</style>
+</head>
+<body>
+  <h1>Proposal write order</h1>
+  <div class="sub">READY is written last; everything above it must already exist.</div>
+  <table>
+    <caption>Each row is one Drive write. Uneven cell borders are the conversion hazard.</caption>
+    <thead>
+      <tr><th>#</th><th>Drive name</th><th>appProperties.sashaSlides</th><th class="num">Bytes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>01.html</td><td>slide</td><td class="num">1,842</td></tr>
+      <tr><td>2</td><td>02.html</td><td>slide</td><td class="num">2,301</td></tr>
+      <tr><td>3</td><td colspan="2" class="spanned">&hellip; one write per candidate &hellip;</td><td class="num">&mdash;</td></tr>
+      <tr><td>4</td><td>manifest.json</td><td>manifest</td><td class="num">412</td></tr>
+      <tr><td>5</td><td class="flag">READY</td><td class="flag">ready</td><td class="num">118</td></tr>
+      <tr class="total"><td></td><td>5 writes</td><td>1 proposal folder</td><td class="num">4,673</td></tr>
+    </tbody>
+  </table>
+</body>
+</html>

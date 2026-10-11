@@ -1,0 +1,44 @@
+// The add-on's shipped sources. src/*.ts(x) is bundled by build-addon.ts (esbuild) into the
+// Sidebar.html the Apps Script project serves. THIS file is the gate, not the bundler: a
+// transpiler strips types without checking them, so `tsc --noEmit` runs as its own failing step
+// before anything is emitted.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Deliberately NOT @types/node: these sources ship into a browser (the HtmlService sidebar
+    // iframe), and letting node's globals in would make `fetch`, `setTimeout` and `Blob` resolve to
+    // undici/node shapes, so the gate would stop catching a browser/node mix-up. There is also no
+    // @types/chrome any more -- there is no extension API in a sidebar. The tests get node types
+    // from tsconfig.test.json.
+    "types": [],
+    "jsx": "react-jsx",
+
+    // esbuild is the emitter; tsc only ever checks. `allowImportingTsExtensions` is what lets the
+    // sources import "./x.ts" by its real name, which is also what esbuild resolves.
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+
+    // --- the gate. `strict` alone leaves the bug classes below legal, so they are named.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "forceConsistentCasingInFileNames": true,
+    // `mcp/sasha-slides/converter/` is reached through converter-contract.ts and has its own gate
+    // (`npx tsc -p mcp/sasha-slides/converter`), which it is kept green under. skipLibCheck keeps
+    // this project from re-litigating @types/react's own declarations as well.
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.e2e.ts", "src/fake-drive.ts", "src/inert-actions.ts"]
+}

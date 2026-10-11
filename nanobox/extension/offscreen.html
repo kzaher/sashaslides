@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>nanobox proxy — connection owner</title>
+</head>
+<body>
+<!-- Never visible. It exists only because an offscreen document has no lifetime limit while an
+     extension service worker is terminated after 30 s idle / 5 min per request / a 30 s wait for a
+     fetch response — see the comment at the top of offscreen.js. -->
+<script src="wire.js"></script>
+<script src="offscreen.js"></script>
+</body>
+</html>

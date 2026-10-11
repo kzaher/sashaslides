@@ -1,0 +1,9 @@
+{
+  "url": "http://localhost:8093/agy.html",
+  "verdict": {
+    "orig": 77062.1100000143,
+    "opt": 13818.490000009537,
+    "speedup": 5.576738847729464
+  },
+  "elapsedS": 77.917
+}

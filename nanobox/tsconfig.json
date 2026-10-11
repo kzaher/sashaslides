@@ -1,0 +1,49 @@
+// nanobox — the TypeScript settings every source in this repo is compiled and checked with.
+// `files: []` so this file is never a program of its own: the real programs are
+// extension/tsconfig.json (the unpacked MV3 extension) and web/tsconfig.json (the page-side
+// client), both of which extend this one and differ only in which sources they own.
+//
+// WHY ONE `lib` FOR ALL FOUR CONTEXTS. The bridge spans a service worker (background.js), an
+// offscreen document (offscreen.js), a dedicated worker (offscreen-codec.js), a content script
+// (content.js) and the page (proxyext.js). The textbook answer is one project per context with
+// lib "WebWorker" for the two worker scopes — but @types/chrome does NOT compile against
+// lib.webworker: it names HTMLElement, ShadowRoot and MediaStream in its dom/tabCapture surface
+// (3 × TS2304 "Cannot find name", measured on @types/chrome 0.1.28 + TypeScript 6.0.3), and the
+// extension APIs are exactly what the service worker is made of. So everything is checked against
+// lib.dom, and "a worker scope has no window/document" is enforced instead by the grep gate in
+// build-all.sh over the files that ship into a worker. Stated rather than hidden: that gate is a
+// compensating control, not a type.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    // Classic scripts: no file here has a top-level import/export, so nothing is emitted as a
+    // module and the shipped .js stays loadable by <script src>, importScripts() and new Worker().
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["chrome"],
+
+    // --- the gate. `strict` alone leaves the three bug classes below legal, so they are named.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,     // arr[i] is T | undefined — it always was
+    "exactOptionalPropertyTypes": true,   // `{ a?: string }` is not `{ a: string | undefined }`
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,   // every arm of the protocol switches must end itself
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,               // zero tolerance for warnings: they are errors here
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "forceConsistentCasingInFileNames": true,
+    // @types/chrome is checked, not trusted: skipping lib checks is how the lib.webworker finding
+    // above would have gone unnoticed.
+    "skipLibCheck": false,
+
+    // --- emit
+    "declaration": false,
+    "sourceMap": false,
+    "removeComments": false,              // the comments ARE the documentation of this protocol
+    "newLine": "lf"
+  },
+  "files": []
+}

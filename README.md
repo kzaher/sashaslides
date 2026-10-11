@@ -1,5 +1,7 @@
 # SashaSlides 🐻
 
+[![CI](https://github.com/kzaher/sashaslides/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kzaher/sashaslides/actions/workflows/ci.yml)
+
 > AI-powered presentashun slide generator — like Midjourney, but for slides, da!
 
 SashaSlides is a chatbot that generates presentation slides through a conversational interface. Share a Google Slides link, describe the slide you want (or pick one to improve), and Sasha generates 4 suggestions. Pick your favourite and it's imported straight into your presentation.

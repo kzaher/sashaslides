@@ -1,0 +1,953 @@
+{
+  "cli": "codex",
+  "cold": false,
+  "url": "http://localhost:8093/sandbox.html?cli=codex&clibundle=1",
+  "verdict": {
+    "signinMs": 9761,
+    "loadMs": 3131,
+    "bootMs": 1357,
+    "runMs": 5273,
+    "engineMs": 722,
+    "imageMs": 739,
+    "installMs": 3113,
+    "persistMs": 3131,
+    "helloMs": null,
+    "bundleMs": null,
+    "transformMs": null,
+    "icount": "832256299"
+  },
+  "date": "2026-08-16T18:17:19.957Z",
+  "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+  "install": {
+    "ms": 2785,
+    "store": "opfs",
+    "usage": {
+      "usage": 826705420,
+      "quota": 11564123660
+    },
+    "packages": 4,
+    "fromCache": 2,
+    "downloadBytes": 122031859,
+    "direct": 122031859,
+    "relayed": 0,
+    "downloads": [
+      {
+        "url": "https://registry.npmjs.org/@openai/codex/0.147.0",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 3470,
+        "ms": 218
+      },
+      {
+        "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.147.0.tgz",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 4495,
+        "ms": 2
+      },
+      {
+        "url": "https://registry.npmjs.org/@openai/codex/0.147.0-linux-x64",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 3320,
+        "ms": 223
+      },
+      {
+        "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.147.0-linux-x64.tgz",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 122020574,
+        "ms": 385
+      }
+    ],
+    "list": [
+      {
+        "cli": "node",
+        "key": "pkg-node-linux-x64@22.23.2",
+        "name": "node-linux-x64",
+        "version": "22.23.2",
+        "files": 2729,
+        "unpackedBytes": 183774506,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 358
+        }
+      },
+      {
+        "cli": "node",
+        "key": "pkg-npm@10.9.8",
+        "name": "npm",
+        "version": "10.9.8",
+        "files": 2011,
+        "unpackedBytes": 11682638,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 21
+        }
+      },
+      {
+        "cli": "codex",
+        "key": "pkg-@openai~codex@0.147.0",
+        "name": "@openai/codex",
+        "version": "0.147.0",
+        "files": 4,
+        "unpackedBytes": 11652,
+        "tarBytes": 0,
+        "download": {
+          "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.147.0.tgz",
+          "bytes": 4495,
+          "fromCache": false,
+          "ms": 223,
+          "gunzipMs": 2,
+          "integrity": "sha512-EQLEXecAG2ptxI7UpBMo2TR/ga5596/c/OsYF/0LoUDh5JANZ7IoGqlzBEWbuEVQ76JePIbtTW/ihCkp1a7Z3w=="
+        }
+      },
+      {
+        "cli": "codex",
+        "key": "pkg-@openai~codex@0.147.0-linux-x64",
+        "name": "@openai/codex",
+        "version": "0.147.0-linux-x64",
+        "files": 8,
+        "unpackedBytes": 314801778,
+        "tarBytes": 0,
+        "download": {
+          "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.147.0-linux-x64.tgz",
+          "bytes": 122020574,
+          "fromCache": false,
+          "ms": 1883,
+          "gunzipMs": 1072,
+          "integrity": "sha512-0W9MBxPpWW0cSkNqrTDN2jR7rzzT7oNMhQY5446lT2Lw5cz5yhDTck4Va9rjkQEm+HlFzP/dmEMSZbXfJsINmw=="
+        }
+      }
+    ],
+    "journals": {
+      "count": 4,
+      "bytes": 55296
+    }
+  },
+  "accounting": {
+    "ours": {
+      "runtime/pages": 6300,
+      "jit-bundles": 19780705,
+      "image": 1935,
+      "spec": 2550,
+      "engine": 300
+    },
+    "oursTotal": 19791790,
+    "oursCached": {
+      "engine (Cache API)": 29794463,
+      "image layers (Cache API, decompressed)": 8803328,
+      "bundles/shim (Cache API)": 12749708
+    },
+    "oursCachedTotal": 51347499,
+    "vendorDirect": {
+      "registry.npmjs.org": 122031859,
+      "api.github.com": 0
+    },
+    "vendorDirectTotal": 122031859,
+    "vendorRelay": {
+      "chatgpt.com": 207
+    },
+    "vendorRelayTotal": 207,
+    "routes": {
+      "page": {
+        "direct": 2,
+        "relay": 2
+      },
+      "runtime": null
+    }
+  },
+  "events": [
+    {
+      "cli": "codex",
+      "install": [
+        "codex"
+      ],
+      "noCache": false,
+      "proxyExtension": false,
+      "event": "boot",
+      "t": 311
+    },
+    {
+      "clis": [
+        "codex"
+      ],
+      "event": "install-start",
+      "t": 312
+    },
+    {
+      "t": 332,
+      "stage": "store",
+      "kind": "opfs",
+      "event": "install:store"
+    },
+    {
+      "t": 334,
+      "stage": "resolve",
+      "key": "pkg-@openai~codex@0.147.0",
+      "url": "https://registry.npmjs.org/@openai/codex/0.147.0",
+      "event": "install:resolve"
+    },
+    {
+      "t": 335,
+      "stage": "resolve",
+      "key": "pkg-@openai~codex@0.147.0-linux-x64",
+      "url": "https://registry.npmjs.org/@openai/codex/0.147.0-linux-x64",
+      "event": "install:resolve"
+    },
+    {
+      "t": 355,
+      "stage": "cached",
+      "key": "pkg-npm@10.9.8",
+      "bytes": 13265920,
+      "event": "install:cached"
+    },
+    {
+      "t": 369,
+      "stage": "package",
+      "key": "pkg-npm@10.9.8",
+      "files": 2011,
+      "unpackedBytes": 11682638,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "t": 552,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/@openai/codex/0.147.0",
+      "via": "direct",
+      "bytes": 3470,
+      "ms": 218,
+      "event": "install:fetched"
+    },
+    {
+      "t": 556,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.147.0.tgz",
+      "via": "direct",
+      "bytes": 4495,
+      "ms": 2,
+      "event": "install:fetched"
+    },
+    {
+      "t": 556,
+      "stage": "verified",
+      "key": "pkg-@openai~codex@0.147.0",
+      "integrity": "sha512",
+      "event": "install:verified"
+    },
+    {
+      "t": 561,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/@openai/codex/0.147.0-linux-x64",
+      "via": "direct",
+      "bytes": 3320,
+      "ms": 223,
+      "event": "install:fetched"
+    },
+    {
+      "t": 587,
+      "stage": "package",
+      "key": "pkg-@openai~codex@0.147.0",
+      "files": 4,
+      "unpackedBytes": 11652,
+      "fromCache": false,
+      "event": "install:package"
+    },
+    {
+      "event": "vm-runtime-ready",
+      "t": 616
+    },
+    {
+      "event": "vm:init",
+      "t": 672
+    },
+    {
+      "event": "vm:start",
+      "t": 672
+    },
+    {
+      "t": 692,
+      "stage": "cached",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "bytes": 186952704,
+      "event": "install:cached"
+    },
+    {
+      "t": 706,
+      "stage": "package",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "files": 2729,
+      "unpackedBytes": 183774506,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "event": "vm:engine-cached",
+      "t": 721,
+      "bytes": 29794463
+    },
+    {
+      "event": "vm:engine-fetched",
+      "t": 722,
+      "bytes": 29794463,
+      "ms": 50
+    },
+    {
+      "event": "vm:image-loaded",
+      "t": 739,
+      "files": 314,
+      "compressedBytes": 0,
+      "ms": 67,
+      "cache": {
+        "hits": 2,
+        "misses": 0,
+        "bytes": 8803328
+      }
+    },
+    {
+      "t": 942,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.147.0-linux-x64.tgz",
+      "via": "direct",
+      "bytes": 122020574,
+      "ms": 385,
+      "event": "install:fetched"
+    },
+    {
+      "t": 1145,
+      "stage": "verified",
+      "key": "pkg-@openai~codex@0.147.0-linux-x64",
+      "integrity": "sha512",
+      "event": "install:verified"
+    },
+    {
+      "event": "vm:jit-bundles",
+      "t": 1240,
+      "files": 0,
+      "modules": 0,
+      "keys": 0,
+      "ms": 567
+    },
+    {
+      "t": 3102,
+      "stage": "package",
+      "key": "pkg-@openai~codex@0.147.0-linux-x64",
+      "files": 8,
+      "unpackedBytes": 314801778,
+      "fromCache": false,
+      "event": "install:package"
+    },
+    {
+      "ms": 2785,
+      "store": "opfs",
+      "packages": 4,
+      "fromCache": 2,
+      "downloadBytes": 122031859,
+      "journals": {
+        "count": 4,
+        "bytes": 55296
+      },
+      "event": "installed",
+      "t": 3113
+    },
+    {
+      "event": "vm:persist-applied",
+      "t": 3131,
+      "packages": 4,
+      "journals": 4,
+      "files": 4773,
+      "waitMs": 2373,
+      "applyMs": 19,
+      "keys": [
+        "pkg-node-linux-x64@22.23.2",
+        "pkg-npm@10.9.8",
+        "pkg-@openai~codex@0.147.0",
+        "pkg-@openai~codex@0.147.0-linux-x64"
+      ]
+    },
+    {
+      "event": "vm:bundle-ready",
+      "t": 3131,
+      "files": 314,
+      "compressedBytes": 0,
+      "ms": 2459,
+      "cache": {
+        "hits": 2,
+        "misses": 0,
+        "bytes": 8803328
+      }
+    },
+    {
+      "event": "vm:start-direct",
+      "t": 3131
+    },
+    {
+      "ms": 3131,
+      "event": "vm-start",
+      "t": 3131
+    },
+    {
+      "event": "vm:persist-attach",
+      "t": 3132,
+      "persist": true,
+      "share": "bundle",
+      "fd": 6
+    },
+    {
+      "event": "vm:instantiated",
+      "t": 3245,
+      "compileMs": 113
+    },
+    {
+      "event": "vm:engine",
+      "t": 3246,
+      "optimized": true,
+      "jit": {
+        "level": 2,
+        "threshold": 2000
+      },
+      "bundles": 0
+    },
+    {
+      "ms": 4488,
+      "event": "guest-booted",
+      "t": 4488
+    },
+    {
+      "t": 6387,
+      "stage": "journal",
+      "name": "journal/01786904235938-0-g9xa.tar",
+      "bytes": 10240,
+      "records": 10,
+      "entries": [
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0EaMXwC/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0EaMXwC/apply_patch",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0EaMXwC/applypatch",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0EaMXwC/codex-linux-sandbox",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0EaMXwC/codex-execve-wrapper",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "root/.codex/.wh.state_5.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "t": 7934,
+      "stage": "journal",
+      "name": "journal/01786904237485-1-gd8b.tar",
+      "bytes": 12800,
+      "records": 5,
+      "entries": [
+        {
+          "path": "root/.codex/state_5.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/.wh.state_5.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite-wal",
+          "size": 4152,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.logs_2.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "t": 9522,
+      "stage": "journal",
+      "name": "journal/01786904239073-2-k0j4.tar",
+      "bytes": 393216,
+      "records": 95,
+      "entries": [
+        {
+          "path": "root/.codex/.wh.goals_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.memories_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/logs_2.sqlite",
+          "size": 49152,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.logs_2.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/logs_2.sqlite-wal",
+          "size": 119512,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.queue_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/logs_2.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/skills/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/agents/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/assets/",
+          "size": 0,
+          "type": "5"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "ms": 9761,
+      "loadMs": 3131,
+      "bootMs": 1357,
+      "runMs": 5273,
+      "event": "signin",
+      "t": 9761
+    }
+  ],
+  "persistLog": [
+    {
+      "t": 6058,
+      "stage": "journal",
+      "name": "journal/01786904235938-0-g9xa.tar",
+      "bytes": 10240,
+      "records": 10,
+      "entries": [
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0EaMXwC/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0EaMXwC/apply_patch",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0EaMXwC/applypatch",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0EaMXwC/codex-linux-sandbox",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "././@LongLink",
+          "size": 122,
+          "type": "K"
+        },
+        {
+          "path": "root/.codex/tmp/arg0/codex-arg0EaMXwC/codex-execve-wrapper",
+          "size": 0,
+          "type": "2"
+        },
+        {
+          "path": "root/.codex/.wh.state_5.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        }
+      ]
+    },
+    {
+      "t": 7605,
+      "stage": "journal",
+      "name": "journal/01786904237485-1-gd8b.tar",
+      "bytes": 12800,
+      "records": 5,
+      "entries": [
+        {
+          "path": "root/.codex/state_5.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/.wh.state_5.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite-wal",
+          "size": 4152,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.logs_2.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        }
+      ]
+    },
+    {
+      "t": 9194,
+      "stage": "journal",
+      "name": "journal/01786904239073-2-k0j4.tar",
+      "bytes": 393216,
+      "records": 95,
+      "entries": [
+        {
+          "path": "root/.codex/.wh.goals_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.memories_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/state_5.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/logs_2.sqlite",
+          "size": 49152,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.logs_2.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/logs_2.sqlite-wal",
+          "size": 119512,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/.wh.queue_1.sqlite-journal",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/goals_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/memories_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite",
+          "size": 4096,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite-wal",
+          "size": 32,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/logs_2.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/queue_1.sqlite-shm",
+          "size": 32768,
+          "type": "0"
+        },
+        {
+          "path": "root/.codex/skills/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/agents/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.codex/skills/.system/imagegen/assets/",
+          "size": 0,
+          "type": "5"
+        }
+      ]
+    }
+  ],
+  "missing": null,
+  "spawns": null,
+  "net": null,
+  "netBytes": null,
+  "backendOps": null,
+  "backendStats": null,
+  "screenTail": [
+    "Welcome to Codex, OpenAI's command-line coding agent",
+    "  Sign in with ChatGPT to use Codex as part of your paid plan",
+    "  or connect an API key for usage-based billing",
+    "> 1. Sign in with ChatGPT",
+    "     Usage included with Plus, Pro, Business, and Enterprise plans",
+    "  2. Sign in with Device Code",
+    "     Sign in from another device with a one-time code",
+    "  3. Provide your own API key",
+    "     Pay for what you use",
+    "  Press enter to continue"
+  ]
+}

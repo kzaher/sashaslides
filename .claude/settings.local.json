@@ -7,5 +7,6 @@
       "Bash(cat)",
       "Bash(chmod +x /workspaces/sashaslides/.claude/skills/html2slides-cli.sh)"
     ]
-  }
+  },
+  "crossSessionInbound": "accept"
 }

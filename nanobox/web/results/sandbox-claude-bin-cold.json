@@ -1,0 +1,710 @@
+{
+  "cli": "claude-bin",
+  "cold": true,
+  "url": "http://localhost:3500/sandbox.html?cli=claude-bin&reset=1",
+  "verdict": null,
+  "date": "2026-10-03T00:12:10.094Z",
+  "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+  "install": {
+    "ms": 7542,
+    "store": "opfs",
+    "usage": {
+      "usage": 502441948,
+      "quota": 11239860188
+    },
+    "packages": 3,
+    "fromCache": 0,
+    "downloadBytes": 300351623,
+    "direct": 54614905,
+    "relayed": 245736718,
+    "downloads": [
+      {
+        "url": "https://registry.npmjs.org/node-linux-x64/22.23.2",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 1531,
+        "ms": 1,
+        "status": 200
+      },
+      {
+        "url": "https://registry.npmjs.org/npm/10.9.8",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 63375,
+        "ms": 2,
+        "status": 200
+      },
+      {
+        "url": "https://registry.npmjs.org/npm/-/npm-10.9.8.tgz",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 2973275,
+        "ms": 19,
+        "status": 200
+      },
+      {
+        "url": "https://registry.npmjs.org/node-linux-x64/-/node-linux-x64-22.23.2.tgz",
+        "via": "direct",
+        "route": "direct",
+        "host": "registry.npmjs.org",
+        "bytes": 51576724,
+        "ms": 194,
+        "status": 200
+      },
+      {
+        "url": "https://downloads.claude.ai/claude-code-releases/latest",
+        "via": "relay",
+        "route": "relay",
+        "host": "downloads.claude.ai",
+        "bytes": 7,
+        "ms": 321,
+        "status": 200
+      },
+      {
+        "url": "https://downloads.claude.ai/claude-code-releases/2.1.288/manifest.json",
+        "via": "relay",
+        "route": "relay",
+        "host": "downloads.claude.ai",
+        "bytes": 2127,
+        "ms": 12,
+        "status": 200
+      },
+      {
+        "url": "https://downloads.claude.ai/claude-code-releases/2.1.288/linux-x64/claude",
+        "via": "relay",
+        "route": "relay",
+        "host": "downloads.claude.ai",
+        "bytes": 245734584,
+        "ms": 6193,
+        "status": 200
+      }
+    ],
+    "list": [
+      {
+        "cli": "node",
+        "key": "pkg-node-linux-x64@22.23.2",
+        "name": "node-linux-x64",
+        "version": "22.23.2",
+        "files": 2729,
+        "unpackedBytes": 183774506,
+        "tarBytes": 0,
+        "download": {
+          "url": "https://registry.npmjs.org/node-linux-x64/-/node-linux-x64-22.23.2.tgz",
+          "bytes": 51576724,
+          "fromCache": false,
+          "ms": 889,
+          "gunzipMs": 596,
+          "integrity": "sha512-lfi+07N7Y+NCz+WrWIu+VmHkXuTLuDv6JLpCAH5n+MvZeG4x9SoSGVJ+h8lUJwJKXGwZUJCdDXo6zZoLw16RGA=="
+        }
+      },
+      {
+        "cli": "node",
+        "key": "pkg-npm@10.9.8",
+        "name": "npm",
+        "version": "10.9.8",
+        "files": 2011,
+        "unpackedBytes": 11682638,
+        "tarBytes": 0,
+        "download": {
+          "url": "https://registry.npmjs.org/npm/-/npm-10.9.8.tgz",
+          "bytes": 2973275,
+          "fromCache": false,
+          "ms": 91,
+          "gunzipMs": 64,
+          "integrity": "sha512-fYwb6ODSmHkqrJQQaCxY3M2lPf/mpgC7ik0HSzzIwG5CGtabRp4bNqikatvCoT42b5INQSqudVH0R7yVmC9hVg=="
+        }
+      },
+      {
+        "cli": "claude-bin",
+        "key": "pkg-claude-bin@2.1.288",
+        "name": "claude-bin",
+        "version": "2.1.288",
+        "files": 1,
+        "unpackedBytes": 245734584,
+        "tarBytes": 0,
+        "download": {
+          "url": "https://downloads.claude.ai/claude-code-releases/2.1.288/linux-x64/claude",
+          "bytes": 245734584,
+          "fromCache": false,
+          "ms": 6851,
+          "integrity": "sha256 (whole binary)"
+        }
+      }
+    ],
+    "journals": {
+      "count": 0,
+      "bytes": 0
+    }
+  },
+  "accounting": {
+    "ours": {
+      "runtime/pages": 3013519,
+      "jit-bundles": 14280247,
+      "other": 10228662,
+      "image": 3926237,
+      "spec": 2819,
+      "engine": 33397447,
+      "shim": 856860
+    },
+    "oursTotal": 65705791,
+    "oursCached": {},
+    "oursCachedTotal": 0,
+    "vendorDirect": {
+      "registry.npmjs.org": 54614905
+    },
+    "vendorDirectTotal": 54614905,
+    "vendorRelay": {
+      "downloads.claude.ai": 245736718
+    },
+    "vendorRelayTotal": 245736718,
+    "routes": {
+      "page": {},
+      "runtime": null
+    }
+  },
+  "events": [
+    {
+      "event": "cache-reset",
+      "t": 32
+    },
+    {
+      "cli": "claude-bin",
+      "install": [
+        "claude-bin"
+      ],
+      "noCache": false,
+      "proxyExtension": false,
+      "event": "boot",
+      "t": 333
+    },
+    {
+      "clis": [
+        "claude-bin"
+      ],
+      "event": "install-start",
+      "t": 333
+    },
+    {
+      "t": 385,
+      "stage": "reset",
+      "event": "install:reset"
+    },
+    {
+      "t": 385,
+      "stage": "store",
+      "kind": "opfs",
+      "event": "install:store"
+    },
+    {
+      "t": 386,
+      "stage": "resolve",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "url": "https://registry.npmjs.org/node-linux-x64/22.23.2",
+      "event": "install:resolve"
+    },
+    {
+      "t": 386,
+      "stage": "resolve",
+      "key": "pkg-npm@10.9.8",
+      "url": "https://registry.npmjs.org/npm/10.9.8",
+      "event": "install:resolve"
+    },
+    {
+      "t": 387,
+      "stage": "resolve",
+      "key": "pkg-claude-bin",
+      "url": "https://downloads.claude.ai/claude-code-releases/latest",
+      "via": "relay",
+      "event": "install:resolve"
+    },
+    {
+      "t": 387,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/node-linux-x64/22.23.2",
+      "via": "direct",
+      "bytes": 1531,
+      "ms": 1,
+      "status": 200,
+      "event": "install:fetched"
+    },
+    {
+      "t": 389,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/npm/10.9.8",
+      "via": "direct",
+      "bytes": 63375,
+      "ms": 2,
+      "status": 200,
+      "event": "install:fetched"
+    },
+    {
+      "t": 408,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/npm/-/npm-10.9.8.tgz",
+      "via": "direct",
+      "bytes": 2973275,
+      "ms": 19,
+      "status": 200,
+      "event": "install:fetched"
+    },
+    {
+      "t": 413,
+      "stage": "verified",
+      "key": "pkg-npm@10.9.8",
+      "integrity": "sha512",
+      "event": "install:verified"
+    },
+    {
+      "t": 547,
+      "stage": "package",
+      "key": "pkg-npm@10.9.8",
+      "files": 2011,
+      "unpackedBytes": 11682638,
+      "fromCache": false,
+      "event": "install:package"
+    },
+    {
+      "t": 582,
+      "stage": "fetched",
+      "url": "https://registry.npmjs.org/node-linux-x64/-/node-linux-x64-22.23.2.tgz",
+      "via": "direct",
+      "bytes": 51576724,
+      "ms": 194,
+      "status": 200,
+      "event": "install:fetched"
+    },
+    {
+      "event": "vm-runtime-ready",
+      "t": 640
+    },
+    {
+      "t": 678,
+      "stage": "verified",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "integrity": "sha512",
+      "event": "install:verified"
+    },
+    {
+      "event": "vm:init",
+      "t": 683
+    },
+    {
+      "event": "vm:start",
+      "t": 684
+    },
+    {
+      "event": "vm:jit-tag-memo",
+      "t": 686,
+      "hit": false
+    },
+    {
+      "t": 708,
+      "stage": "fetched",
+      "url": "https://downloads.claude.ai/claude-code-releases/latest",
+      "via": "relay",
+      "bytes": 7,
+      "ms": 321,
+      "status": 200,
+      "event": "install:fetched"
+    },
+    {
+      "t": 719,
+      "stage": "fetched",
+      "url": "https://downloads.claude.ai/claude-code-releases/2.1.288/manifest.json",
+      "via": "relay",
+      "bytes": 2127,
+      "ms": 12,
+      "status": 200,
+      "event": "install:fetched"
+    },
+    {
+      "t": 719,
+      "stage": "range",
+      "key": "pkg-claude-bin@2.1.288",
+      "url": "https://downloads.claude.ai/claude-code-releases/2.1.288/linux-x64/claude",
+      "range": "whole file",
+      "of": 245734584,
+      "event": "install:range"
+    },
+    {
+      "event": "worker:worker-start",
+      "t": 756,
+      "backend": "vm",
+      "proxyExtension": false
+    },
+    {
+      "event": "worker:waiting-hello",
+      "t": 764
+    },
+    {
+      "event": "vm:image-loaded",
+      "t": 817,
+      "files": 314,
+      "compressedBytes": 3924031,
+      "ms": 134,
+      "cache": {
+        "hits": 0,
+        "misses": 2,
+        "bytes": 0
+      }
+    },
+    {
+      "event": "vm:engine-fetched",
+      "t": 929,
+      "bytes": 33397147,
+      "ms": 247
+    },
+    {
+      "event": "vm:jit-bundles",
+      "t": 1527,
+      "autoCached": true,
+      "tag": "123370275-9fac826b730fbf4039c2b1f2455727d2",
+      "fast": true,
+      "files": 1,
+      "modules": 2782,
+      "keys": 4763,
+      "ms": 200,
+      "adopted": [
+        "/engine/opt/jit/auto-aot-123370275-9fac826b730fbf4039c2b1f2455727d2.nbjb"
+      ],
+      "prof": {
+        "bytes": 14279170,
+        "wasmBytes": 10058676,
+        "mods": 2783,
+        "fetchMs": 144,
+        "decodeMs": 15,
+        "compileMs": 123,
+        "keymapMs": 6,
+        "codeCacheHits": 0,
+        "codeCacheMs": 0
+      }
+    },
+    {
+      "t": 1946,
+      "stage": "package",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "files": 2729,
+      "unpackedBytes": 183774506,
+      "fromCache": false,
+      "event": "install:package"
+    },
+    {
+      "t": 6913,
+      "stage": "fetched",
+      "url": "https://downloads.claude.ai/claude-code-releases/2.1.288/linux-x64/claude",
+      "via": "relay",
+      "bytes": 245734584,
+      "ms": 6193,
+      "status": 200,
+      "event": "install:fetched"
+    },
+    {
+      "t": 7115,
+      "stage": "verified",
+      "key": "pkg-claude-bin@2.1.288",
+      "integrity": "sha256 (whole binary)",
+      "sha256": "0298068b686e7fdbaf9402a7a587bb7f49c0b0e084de09f69145a0719207640c",
+      "event": "install:verified"
+    },
+    {
+      "t": 7888,
+      "stage": "package",
+      "key": "pkg-claude-bin@2.1.288",
+      "files": 1,
+      "unpackedBytes": 245734584,
+      "fromCache": false,
+      "event": "install:package"
+    },
+    {
+      "ms": 7542,
+      "store": "opfs",
+      "packages": 3,
+      "fromCache": 0,
+      "downloadBytes": 300351623,
+      "journals": {
+        "count": 0,
+        "bytes": 0
+      },
+      "event": "installed",
+      "t": 7890
+    },
+    {
+      "event": "vm:persist-applied",
+      "t": 7909,
+      "packages": 3,
+      "journals": 0,
+      "files": 4741,
+      "waitMs": 7073,
+      "applyMs": 19,
+      "keys": [
+        "pkg-node-linux-x64@22.23.2",
+        "pkg-npm@10.9.8",
+        "pkg-claude-bin@2.1.288"
+      ]
+    },
+    {
+      "event": "vm:bundle-ready",
+      "t": 7917,
+      "files": 314,
+      "compressedBytes": 3924031,
+      "ms": 7234,
+      "cache": {
+        "hits": 0,
+        "misses": 2,
+        "bytes": 0
+      }
+    },
+    {
+      "event": "vm:start-direct",
+      "t": 7917
+    },
+    {
+      "ms": 7917,
+      "event": "vm-start",
+      "t": 7917
+    },
+    {
+      "event": "vm:persist-attach",
+      "t": 7918,
+      "persist": true,
+      "share": "bundle",
+      "fd": 6
+    },
+    {
+      "event": "vm:instantiated",
+      "t": 8018,
+      "compileMs": 100
+    },
+    {
+      "event": "vm:hostchan",
+      "t": 8025,
+      "on": true
+    },
+    {
+      "event": "vm:engine",
+      "t": 8025,
+      "optimized": true,
+      "jit": {
+        "level": 2,
+        "threshold": 2000
+      },
+      "bundles": 2782
+    },
+    {
+      "ms": 8996,
+      "event": "guest-booted",
+      "t": 8996
+    },
+    {
+      "event": "worker:hello",
+      "t": 9044,
+      "argv": [
+        "/bundle/nb/node"
+      ],
+      "cwd": "/root",
+      "pid": 6,
+      "cols": 80,
+      "rows": 25,
+      "isatty": 4
+    },
+    {
+      "event": "worker:shell-ready",
+      "t": 9050,
+      "cwd": "/root"
+    },
+    {
+      "event": "worker:term-resized",
+      "t": 9079,
+      "id": "pane-635394b5-c402-4acc-86cf-5e1fd8e9d953",
+      "cid": 1,
+      "cols": 83,
+      "rows": 56,
+      "initial": true
+    },
+    {
+      "t": 18261,
+      "stage": "journal",
+      "name": "journal/01790986327652-0-es8c.tar",
+      "bytes": 8192,
+      "records": 23,
+      "entries": [
+        {
+          "path": "root/.claude.json",
+          "size": 317,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.d1efd2e5bb81",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.claude.json.lock/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.claude/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.claude/backups/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.83760f90a635",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.3f78f5eeb62e",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.c1aeb61a041b",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.12e22cc5d738",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.claude/backups/.claude.json.backup.1790986321139",
+          "size": 84,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.829d5f2263a2",
+          "size": 0,
+          "type": "0"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "t": 19998,
+      "stage": "journal",
+      "name": "journal/01790986329391-1-a6q5.tar",
+      "bytes": 2048,
+      "records": 1,
+      "entries": [
+        {
+          "path": "root/.claude.json",
+          "size": 317,
+          "type": "0"
+        }
+      ],
+      "event": "install:journal"
+    }
+  ],
+  "persistLog": [
+    {
+      "t": 17913,
+      "stage": "journal",
+      "name": "journal/01790986327652-0-es8c.tar",
+      "bytes": 8192,
+      "records": 23,
+      "entries": [
+        {
+          "path": "root/.claude.json",
+          "size": 317,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.d1efd2e5bb81",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.claude.json.lock/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.claude/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.claude/backups/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.83760f90a635",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.3f78f5eeb62e",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.c1aeb61a041b",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.12e22cc5d738",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.claude/backups/.claude.json.backup.1790986321139",
+          "size": 84,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.829d5f2263a2",
+          "size": 0,
+          "type": "0"
+        }
+      ]
+    },
+    {
+      "t": 19651,
+      "stage": "journal",
+      "name": "journal/01790986329391-1-a6q5.tar",
+      "bytes": 2048,
+      "records": 1,
+      "entries": [
+        {
+          "path": "root/.claude.json",
+          "size": 317,
+          "type": "0"
+        }
+      ]
+    }
+  ],
+  "missing": null,
+  "spawns": null,
+  "net": null,
+  "netBytes": null,
+  "backendOps": null,
+  "backendStats": null,
+  "screenTail": [
+    "nanobox SANDBOX — image linux-base (Linux only: no node, no CLI) boots in the emulate",
+    "d VM while the first-run installer fetches node + claude-bin from the vendors into th",
+    "e persistent /usr/local; then runs claude-bin in the guest, the CURRENT release as th",
+    "e vendor's own linux-x64 executable (no node, no V8)"
+  ]
+}

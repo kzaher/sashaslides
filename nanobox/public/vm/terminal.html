@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nanobox — claude &amp; codex live</title>
+<link rel="stylesheet" href="./vendor/xterm.css">
+<script src="./vendor/xterm.js"></script>
+<script src="./vendor/addon-fit.js"></script>
+<style>
+  html,body{height:100%;margin:0;background:#0d0b0a;color:#e8e2da;font-family:ui-sans-serif,system-ui,sans-serif}
+  body{display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid #241f1b}
+  header b{color:#D97757}.sub{color:#9c9187;font-size:12.5px}
+  .spacer{margin-left:auto;display:flex;gap:8px}
+  button{background:#D97757;color:#180f0b;border:0;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px}
+  button.ghost{background:#1c1815;color:#d8cfc4;border:1px solid #362e28}
+  button:disabled{opacity:.5;cursor:default}
+  #status{font-family:ui-monospace,monospace;font-size:12px;color:#9c9187;padding:6px 16px;border-bottom:1px solid #1a1613}
+  #term{flex:1;padding:8px 10px;min-height:0}
+  .dot{width:8px;height:8px;border-radius:50%;background:#6f665e;display:inline-block;margin-right:6px}
+  .dot.up{background:#57c06a;box-shadow:0 0 8px #57c06a}
+</style>
+</head>
+<body>
+  <header>
+    <svg viewBox="0 0 120 120" width="26" height="26" aria-label="claude"><g fill="#D97757">
+      <rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(0 60 60)"/><rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(45 60 60)"/><rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(90 60 60)"/><rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(135 60 60)"/><rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(180 60 60)"/><rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(225 60 60)"/><rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(270 60 60)"/><rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(315 60 60)"/>
+    </g></svg>
+    <div><b>nanobox</b> — live agent terminal <span class="sub">· real claude / codex, streamed to your browser</span></div>
+    <div class="spacer">
+      <button id="btn-claude">Log in to Claude</button>
+      <button id="btn-codex" class="ghost">Log in to Codex</button>
+    </div>
+  </header>
+  <div id="status"><span class="dot" id="dot"></span> pick an agent to launch its sign-in screen</div>
+  <div id="term"></div>
+
+  <script>
+    const term = new Terminal({ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13, cursorBlink: true,
+      theme: { background: "#0d0b0a", foreground: "#e8e2da", cursor: "#D97757" } });
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(document.getElementById("term"));
+    fit.fit();
+    window.addEventListener("resize", () => fit.fit());
+    const statusEl = document.getElementById("status"), dot = document.getElementById("dot");
+    const setStatus = (t, up) => { statusEl.innerHTML = `<span class="dot ${up ? "up" : ""}"></span> ${t}`; };
+    let ws = null;
+
+    function connect(tool) {
+      if (ws) { try { ws.close(); } catch {} }
+      term.reset();
+      setStatus(`launching real ${tool} (fresh session → sign-in screen)…`);
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${location.host}/pty?tool=${tool}`);
+      ws.binaryType = "arraybuffer";
+      ws.onopen = () => { setStatus(`${tool}: connected — real CLI, log in below`, true); window.__ptyOpen = tool; term.focus(); };
+      window.__ptySend = (s) => { if (ws && ws.readyState === 1) ws.send(s); };
+      window.__screen = () => { let o = ""; const b = term.buffer.active; for (let i = 0; i < b.length; i++) { const ln = b.getLine(i); if (ln) o += ln.translateToString(true) + "\n"; } return o; };
+      ws.onmessage = (e) => { term.write(typeof e.data === "string" ? e.data : new Uint8Array(e.data)); window.__ptyBytes = (window.__ptyBytes || 0) + (e.data.byteLength || e.data.length || 0); };
+      ws.onclose = () => setStatus(`${tool}: session closed`, false);
+      ws.onerror = () => setStatus(`${tool}: connection error`, false);
+      term.onData((d) => { if (ws && ws.readyState === 1) ws.send(d); });
+    }
+    document.getElementById("btn-claude").onclick = () => connect("claude");
+    document.getElementById("btn-codex").onclick = () => connect("codex");
+  </script>
+</body>
+</html>

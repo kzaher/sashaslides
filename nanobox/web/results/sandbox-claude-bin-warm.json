@@ -1,0 +1,535 @@
+{
+  "cli": "claude-bin",
+  "cold": false,
+  "url": "http://localhost:3500/sandbox.html?cli=claude-bin",
+  "verdict": null,
+  "date": "2026-10-03T00:08:17.386Z",
+  "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+  "install": {
+    "ms": 393,
+    "store": "opfs",
+    "usage": {
+      "usage": 503307424,
+      "quota": 11240725664
+    },
+    "packages": 3,
+    "fromCache": 3,
+    "downloadBytes": 0,
+    "direct": 0,
+    "relayed": 0,
+    "downloads": [],
+    "list": [
+      {
+        "cli": "node",
+        "key": "pkg-node-linux-x64@22.23.2",
+        "name": "node-linux-x64",
+        "version": "22.23.2",
+        "files": 2729,
+        "unpackedBytes": 183774506,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 269
+        }
+      },
+      {
+        "cli": "node",
+        "key": "pkg-npm@10.9.8",
+        "name": "npm",
+        "version": "10.9.8",
+        "files": 2011,
+        "unpackedBytes": 11682638,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 22
+        }
+      },
+      {
+        "cli": "claude-bin",
+        "key": "pkg-claude-bin@2.1.288",
+        "name": "claude-bin",
+        "version": "2.1.288",
+        "files": 1,
+        "unpackedBytes": 245734584,
+        "tarBytes": 0,
+        "download": {
+          "url": null,
+          "bytes": 0,
+          "fromCache": true,
+          "ms": 382
+        }
+      }
+    ],
+    "journals": {
+      "count": 1,
+      "bytes": 8192
+    }
+  },
+  "accounting": {
+    "ours": {
+      "runtime/pages": 7500,
+      "jit-bundles": 1077,
+      "other": 300,
+      "image": 1935,
+      "spec": 2819,
+      "engine": 300,
+      "shim": 300
+    },
+    "oursTotal": 14231,
+    "oursCached": {
+      "engine (Cache API)": 33397147,
+      "image layers (Cache API, decompressed)": 8803328,
+      "bundles/shim (Cache API)": 11084964
+    },
+    "oursCachedTotal": 53285439,
+    "vendorDirect": {
+      "raw.githubusercontent.com": 302653
+    },
+    "vendorDirectTotal": 302653,
+    "vendorRelay": {
+      "platform.claude.com": 19,
+      "api.anthropic.com": 20
+    },
+    "vendorRelayTotal": 39,
+    "routes": {
+      "page": {
+        "relay": 2,
+        "direct": 1
+      },
+      "runtime": null
+    }
+  },
+  "events": [
+    {
+      "cli": "claude-bin",
+      "install": [
+        "claude-bin"
+      ],
+      "noCache": false,
+      "proxyExtension": false,
+      "event": "boot",
+      "t": 318
+    },
+    {
+      "clis": [
+        "claude-bin"
+      ],
+      "event": "install-start",
+      "t": 319
+    },
+    {
+      "t": 338,
+      "stage": "store",
+      "kind": "opfs",
+      "event": "install:store"
+    },
+    {
+      "t": 361,
+      "stage": "cached",
+      "key": "pkg-npm@10.9.8",
+      "bytes": 13265920,
+      "event": "install:cached"
+    },
+    {
+      "t": 370,
+      "stage": "package",
+      "key": "pkg-npm@10.9.8",
+      "files": 2011,
+      "unpackedBytes": 11682638,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "event": "vm-runtime-ready",
+      "t": 590
+    },
+    {
+      "t": 608,
+      "stage": "cached",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "bytes": 186952704,
+      "event": "install:cached"
+    },
+    {
+      "t": 623,
+      "stage": "package",
+      "key": "pkg-node-linux-x64@22.23.2",
+      "files": 2729,
+      "unpackedBytes": 183774506,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "event": "vm:init",
+      "t": 631
+    },
+    {
+      "event": "vm:start",
+      "t": 631
+    },
+    {
+      "event": "vm:jit-tag-memo",
+      "t": 636,
+      "hit": true,
+      "tag": "123370275-9fac826b730fbf4039c2b1f2455727d2"
+    },
+    {
+      "event": "vm:image-loaded",
+      "t": 662,
+      "files": 314,
+      "compressedBytes": 0,
+      "ms": 31,
+      "cache": {
+        "hits": 2,
+        "misses": 0,
+        "bytes": 8803328
+      }
+    },
+    {
+      "event": "worker:worker-start",
+      "t": 707,
+      "backend": "vm",
+      "proxyExtension": false
+    },
+    {
+      "event": "worker:waiting-hello",
+      "t": 714
+    },
+    {
+      "t": 721,
+      "stage": "cached",
+      "key": "pkg-claude-bin@2.1.288",
+      "bytes": 245736448,
+      "event": "install:cached"
+    },
+    {
+      "t": 722,
+      "stage": "package",
+      "key": "pkg-claude-bin@2.1.288",
+      "files": 1,
+      "unpackedBytes": 245734584,
+      "fromCache": true,
+      "event": "install:package"
+    },
+    {
+      "ms": 393,
+      "store": "opfs",
+      "packages": 3,
+      "fromCache": 3,
+      "downloadBytes": 0,
+      "journals": {
+        "count": 1,
+        "bytes": 8192
+      },
+      "event": "installed",
+      "t": 725
+    },
+    {
+      "event": "vm:persist-applied",
+      "t": 796,
+      "packages": 3,
+      "journals": 1,
+      "files": 4747,
+      "waitMs": 105,
+      "applyMs": 29,
+      "keys": [
+        "pkg-node-linux-x64@22.23.2",
+        "pkg-npm@10.9.8",
+        "pkg-claude-bin@2.1.288"
+      ]
+    },
+    {
+      "event": "vm:bundle-ready",
+      "t": 836,
+      "files": 314,
+      "compressedBytes": 0,
+      "ms": 205,
+      "cache": {
+        "hits": 2,
+        "misses": 0,
+        "bytes": 8803328
+      }
+    },
+    {
+      "event": "vm:engine-cached",
+      "t": 836,
+      "bytes": 33397147
+    },
+    {
+      "event": "vm:engine-fetched",
+      "t": 836,
+      "bytes": 33397147,
+      "ms": 206
+    },
+    {
+      "event": "vm:jit-bundles",
+      "t": 1155,
+      "autoCached": true,
+      "tag": "123370275-9fac826b730fbf4039c2b1f2455727d2",
+      "fast": true,
+      "files": 1,
+      "modules": 2782,
+      "keys": 4763,
+      "ms": 520,
+      "adopted": [
+        "/engine/opt/jit/auto-aot-123370275-9fac826b730fbf4039c2b1f2455727d2.nbjb"
+      ],
+      "prof": {
+        "bytes": 10228362,
+        "wasmBytes": 10058676,
+        "mods": 2783,
+        "fetchMs": 42,
+        "decodeMs": 9,
+        "compileMs": 138,
+        "keymapMs": 4,
+        "codeCacheHits": 0,
+        "codeCacheMs": 0
+      }
+    },
+    {
+      "event": "vm:start-direct",
+      "t": 1155
+    },
+    {
+      "ms": 1155,
+      "event": "vm-start",
+      "t": 1155
+    },
+    {
+      "event": "vm:persist-attach",
+      "t": 1156,
+      "persist": true,
+      "share": "bundle",
+      "fd": 6
+    },
+    {
+      "event": "vm:instantiated",
+      "t": 1270,
+      "compileMs": 113
+    },
+    {
+      "event": "vm:hostchan",
+      "t": 1276,
+      "on": true
+    },
+    {
+      "event": "vm:engine",
+      "t": 1276,
+      "optimized": true,
+      "jit": {
+        "level": 2,
+        "threshold": 2000
+      },
+      "bundles": 2782
+    },
+    {
+      "ms": 2202,
+      "event": "guest-booted",
+      "t": 2202
+    },
+    {
+      "event": "worker:hello",
+      "t": 2249,
+      "argv": [
+        "/bundle/nb/node"
+      ],
+      "cwd": "/root",
+      "pid": 6,
+      "cols": 80,
+      "rows": 25,
+      "isatty": 4
+    },
+    {
+      "event": "worker:shell-ready",
+      "t": 2256,
+      "cwd": "/root"
+    },
+    {
+      "event": "worker:term-resized",
+      "t": 2289,
+      "id": "pane-1a746928-9761-4bd2-baed-da6c2bfdb330",
+      "cid": 1,
+      "cols": 83,
+      "rows": 56,
+      "initial": true
+    },
+    {
+      "t": 10722,
+      "stage": "journal",
+      "name": "journal/01790986085416-0-fx9z.tar",
+      "bytes": 3584,
+      "records": 7,
+      "entries": [
+        {
+          "path": "root/.wh..claude.json.lock",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.claude.json",
+          "size": 343,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.a06ce219892f",
+          "size": 0,
+          "type": "0"
+        }
+      ],
+      "event": "install:journal"
+    },
+    {
+      "t": 17841,
+      "stage": "journal",
+      "name": "journal/01790986092535-1-nf9x.tar",
+      "bytes": 7168,
+      "records": 7,
+      "entries": [
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.wh..claude.json.lock",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.claude/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.claude/sessions/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.claude.json",
+          "size": 423,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.f06456ae3b7f",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.claude/sessions/1.5cbe1e8c8b4d26c6177292c0d3d46a6ffcc437db3d174f3f36c971521f33a547.key",
+          "size": 104,
+          "type": "0"
+        },
+        {
+          "path": "root/.claude/sessions/.wh.1.5cbe1e8c8b4d26c6177292c0d3d46a6ffcc437db3d174f3f36c971521f33a547.key.tmp.2f1bbb92",
+          "size": 0,
+          "type": "0"
+        }
+      ],
+      "event": "install:journal"
+    }
+  ],
+  "persistLog": [
+    {
+      "t": 10390,
+      "stage": "journal",
+      "name": "journal/01790986085416-0-fx9z.tar",
+      "bytes": 3584,
+      "records": 7,
+      "entries": [
+        {
+          "path": "root/.wh..claude.json.lock",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.claude.json",
+          "size": 343,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.a06ce219892f",
+          "size": 0,
+          "type": "0"
+        }
+      ]
+    },
+    {
+      "t": 17509,
+      "stage": "journal",
+      "name": "journal/01790986092535-1-nf9x.tar",
+      "bytes": 7168,
+      "records": 7,
+      "entries": [
+        {
+          "path": "root/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.wh..claude.json.lock",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.claude/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.claude/sessions/",
+          "size": 0,
+          "type": "5"
+        },
+        {
+          "path": "root/.claude.json",
+          "size": 423,
+          "type": "0"
+        },
+        {
+          "path": "root/.wh..claude.json.tmp.1.f06456ae3b7f",
+          "size": 0,
+          "type": "0"
+        },
+        {
+          "path": "root/.claude/sessions/1.5cbe1e8c8b4d26c6177292c0d3d46a6ffcc437db3d174f3f36c971521f33a547.key",
+          "size": 104,
+          "type": "0"
+        },
+        {
+          "path": "root/.claude/sessions/.wh.1.5cbe1e8c8b4d26c6177292c0d3d46a6ffcc437db3d174f3f36c971521f33a547.key.tmp.2f1bbb92",
+          "size": 0,
+          "type": "0"
+        }
+      ]
+    }
+  ],
+  "missing": null,
+  "spawns": null,
+  "net": null,
+  "netBytes": null,
+  "backendOps": null,
+  "backendStats": null,
+  "screenTail": [
+    "nanobox SANDBOX — image linux-base (Linux only: no node, no CLI) boots in the emulate",
+    "d VM while the first-run installer fetches node + claude-bin from the vendors into th",
+    "e persistent /usr/local; then runs claude-bin in the guest, the CURRENT release as th",
+    "e vendor's own linux-x64 executable (no node, no V8)",
+    "Welcome to Claude Code v2.1.288"
+  ]
+}

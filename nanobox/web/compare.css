@@ -1,0 +1,14 @@
+html,body{height:100%;margin:0;background:#0d0b0a;color:#e8e2da;font-family:ui-sans-serif,system-ui,sans-serif}
+body{display:flex;flex-direction:column}
+header{display:flex;align-items:baseline;gap:14px;padding:8px 14px;border-bottom:1px solid #241f1b;font-size:13px;color:#9c9187;flex-wrap:wrap}
+header b{color:#D97757;font-size:15px}
+header a{color:#D97757;text-decoration:none;border-bottom:1px dotted #5a4438}
+#verdict{margin-left:auto;font-family:ui-monospace,monospace;color:#e0b23a}
+main{flex:1;display:grid;grid-template-rows:1fr 1fr;min-height:0}
+section{display:flex;flex-direction:column;min-height:0;border-bottom:1px solid #241f1b}
+section h2{margin:0;padding:4px 12px;font-size:12.5px;font-weight:600;color:#9c9187;display:flex;gap:12px;align-items:baseline}
+section h2 span.t{font-family:ui-monospace,monospace;font-size:20px;color:#e0b23a;margin-left:auto}
+section h2 span.t.done{color:#57c06a}
+section h2 span.t.err{color:#e05a4a}
+iframe{flex:1;border:0;width:100%;min-height:0;background:#0d0b0a}
+.recorded{flex:1;display:flex;align-items:center;justify-content:center;padding:20px;color:#9c9187;font-size:14px;background:#0d0b0a;border:1px dashed #362e28;border-radius:8px;margin:6px}

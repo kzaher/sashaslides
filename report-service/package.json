@@ -1,0 +1,19 @@
+{
+  "name": "sasha-slides-report-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Internet-facing intake for anonymised Sasha Slides defect reports. Zero runtime dependencies.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

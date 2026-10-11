@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>nanobox — Claude &amp; Codex preinstalled</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #2a2420 0%, #141210 55%, #0d0b0a 100%);
+    color: #e8e2da; min-height: 100vh;
+  }
+  header { text-align: center; padding: 34px 16px 10px; }
+  .mark { display: flex; align-items: center; justify-content: center; gap: 18px; }
+  .mark svg { filter: drop-shadow(0 4px 18px rgba(217,119,87,.45)); }
+  h1 { font-size: 30px; margin: 6px 0 2px; letter-spacing: -.5px; }
+  h1 .accent { color: #D97757; }
+  .sub { color: #a99e92; font-size: 14px; margin: 2px 0 0; }
+  .badges { display: flex; gap: 10px; justify-content: center; margin: 16px 0 4px; flex-wrap: wrap; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 13px; border-radius: 999px;
+    background: #1e1a17; border: 1px solid #3a322c; font-size: 13px; color: #d8cfc4;
+  }
+  .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: #57c06a; box-shadow: 0 0 8px #57c06a; }
+  .badge b { color: #fff; font-weight: 600; }
+  main { max-width: 900px; margin: 18px auto 60px; padding: 0 16px; }
+  .term {
+    background: #0b0a09; border: 1px solid #2c2621; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 18px 60px rgba(0,0,0,.5);
+  }
+  .term .bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #16130f; border-bottom: 1px solid #2c2621; }
+  .term .bar i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .term .bar .r { background: #e05c4a; } .term .bar .y { background: #e0b23a; } .term .bar .g { background: #57c06a; }
+  .term .bar span { margin-left: 8px; color: #8a8078; font-size: 12px; }
+  #screen {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13.5px; line-height: 1.55;
+    padding: 16px; height: 60vh; min-height: 340px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+  }
+  #screen .u { color: #77b5ff; } #screen .o { color: #d8cfc4; } #screen .e { color: #e08a7a; }
+  #screen .accent { color: #D97757; }
+  .inputline { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid #2c2621; background: #100e0c; }
+  .inputline .ps1 { color: #57c06a; font-family: ui-monospace, monospace; font-size: 13.5px; }
+  #cmd { flex: 1; background: transparent; border: 0; color: #e8e2da; font-family: ui-monospace, monospace; font-size: 13.5px; outline: none; }
+  .actions { display: flex; gap: 10px; margin: 14px 2px; flex-wrap: wrap; }
+  button {
+    background: #D97757; color: #180f0b; border: 0; padding: 9px 15px; border-radius: 9px; font-weight: 600;
+    font-size: 13px; cursor: pointer;
+  }
+  button.ghost { background: #1e1a17; color: #d8cfc4; border: 1px solid #3a322c; }
+  .note { color: #8a8078; font-size: 12.5px; margin-top: 18px; line-height: 1.6; }
+  a { color: #D97757; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="mark">
+      <svg viewBox="0 0 120 120" width="76" height="76" aria-label="Claude">
+        <g fill="#D97757">
+          <rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(0 60 60)"/>
+          <rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(30 60 60)"/>
+          <rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(60 60 60)"/>
+          <rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(90 60 60)"/>
+          <rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(120 60 60)"/>
+          <rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(150 60 60)"/>
+          <rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(180 60 60)"/>
+          <rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(210 60 60)"/>
+          <rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(240 60 60)"/>
+          <rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(270 60 60)"/>
+          <rect x="56.5" y="6" width="7" height="38" rx="3.5" transform="rotate(300 60 60)"/>
+          <rect x="57.5" y="16" width="5" height="26" rx="2.5" transform="rotate(330 60 60)"/>
+        </g>
+      </svg>
+      <div style="text-align:left">
+        <h1><span class="accent">Claude</span> &amp; Codex <span style="color:#8a8078;font-weight:400">in nanobox</span></h1>
+        <p class="sub">Linux in the browser · your folder is home · agents preinstalled</p>
+      </div>
+    </div>
+    <div class="badges">
+      <span class="badge"><span class="dot"></span><b>claude</b> · real CLI</span>
+      <span class="badge"><span class="dot"></span><b>codex</b> · real CLI</span>
+      <span class="badge" id="vmbadge"><span class="dot"></span>VM: <b>booting…</b></span>
+    </div>
+  </header>
+
+  <main>
+    <div class="term">
+      <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>root@nanobox: ~</span></div>
+      <div id="screen"></div>
+      <div class="inputline">
+        <span class="ps1">root@nanobox:~$</span>
+        <input id="cmd" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="try: claude  ·  codex  ·  ls  ·  cat README.md" />
+      </div>
+    </div>
+    <div class="actions">
+      <button id="run-claude">Run <b>claude</b></button>
+      <button id="run-codex" class="ghost">Run codex</button>
+      <button id="connect" class="ghost">Connect a local folder as home…</button>
+    </div>
+    <p class="note">
+      The filesystem runs in-memory (<b>FakeVm</b>) so <code>ls</code>/<code>cat</code>/<code>echo</code> work
+      in any Chromium tab. <b><code>claude</code> and <code>codex</code> are the REAL CLIs</b> — the terminal
+      proxies them to the backend (<code>POST /api/agent</code>), which runs the actual
+      <code>claude&nbsp;-p</code> / <code>codex&nbsp;exec</code> and returns genuine model output.
+      “Connect a local folder as home” makes a real directory the VM’s <code>/root</code> via the File
+      System Access API, synced through the unit-tested 3-way engine.
+    </p>
+  </main>
+
+  <script type="module" src="./demo.js"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+// The unpacked MV3 extension. src/*.ts(x) is bundled by build-extension.sh (esbuild) into the three
+// .js files manifest.json and offscreen.html reference. THIS file is the gate, not the bundler: a
+// transpiler strips types without checking them, so `tsc --noEmit` runs as its own failing step
+// before anything is emitted.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Deliberately NOT @types/node: these sources ship into a browser, and letting node's globals
+    // in would make `fetch`, `setTimeout` and `Blob` resolve to undici/node shapes, so the gate
+    // would stop catching a browser/node mix-up. The tests get node types from tsconfig.test.json.
+    "types": ["chrome"],
+    "jsx": "react-jsx",
+
+    // esbuild is the emitter; tsc only ever checks. `allowImportingTsExtensions` is what lets the
+    // sources import "./x.ts" by its real name, which is also what esbuild resolves.
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+
+    // --- the gate. `strict` alone leaves the bug classes below legal, so they are named.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.e2e.ts", "src/fake-drive.ts"]
+}

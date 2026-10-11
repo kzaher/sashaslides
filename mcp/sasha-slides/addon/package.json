@@ -1,0 +1,22 @@
+{
+  "name": "sasha-slides-addon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Google Slides Apps Script add-on: a sidebar that watches Drive for sasha-slides READY markers, shows the candidate-slide picker, converts the chosen HTML to native slides, and writes PICK.",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "build": "npx tsx build-addon.ts",
+    "test": "npm run -s typecheck && node --test --import tsx \"src/**/*.test.ts\"",
+    "smoke": "node --import tsx src/smoke.e2e.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  }
+}

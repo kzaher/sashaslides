@@ -1,0 +1,13 @@
+{
+  // The calibration scripts are Node programs that talk to the live Slides API,
+  // so unlike the converter they get the Node types. They are NOT part of the
+  // browser bundle — nothing under `converter/*.ts` imports them.
+  //
+  // Run: npx tsc -p mcp/sasha-slides/converter/calibration
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["*.ts", "../*.ts", "../../../../types/**/*.d.ts"]
+}

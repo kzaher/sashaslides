@@ -1,0 +1,13 @@
+// The node-side tools. src/*.ts compiles to ../tools/*.js (package.json has "type": "module", so
+// the emitted .js is ESM and a test/*.mjs harness can import it directly). Kept as its own program
+// because these sources are pure logic with no DOM and no chrome APIs — the shared gate in
+// ../tsconfig.json still applies. Not part of `npm run typecheck` (which owns the two shipped
+// artifacts); check it with: npx tsc --noEmit -p tools/tsconfig.json
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "."
+  },
+  "files": ["src/jit-cas.ts"]
+}

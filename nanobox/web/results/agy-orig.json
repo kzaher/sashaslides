@@ -1,0 +1,9 @@
+{
+  "image": "agy",
+  "signinMs": 77062,
+  "date": "2026-08-16",
+  "browser": "headless Chrome 151 (compare page, both engines in parallel, 8-core devcontainer)",
+  "engineBytes": 36928378,
+  "cmd": null,
+  "source": "/tmp/nanobox-claude-e2e/agy-compare4/result.json"
+}

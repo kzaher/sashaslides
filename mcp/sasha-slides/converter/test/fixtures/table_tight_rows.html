@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; background: #fff; font-family: Arial, sans-serif; }
+table { position: absolute; left: 100px; top: 100px; width: 1080px; border-collapse: collapse; }
+td { border: 1px solid #ccc; padding: 0; }
+</style></head><body>
+<!-- A big font crammed into a short row: the measured row-height law says
+     Slides will render these TALLER than Chrome did, which is an anomaly the
+     API cannot prevent. -->
+<table>
+  <tr><td style="height:24px;font-size:40px;line-height:24px">Oversized A</td><td style="height:24px;font-size:40px;line-height:24px">Oversized B</td></tr>
+  <tr><td style="height:60px;font-size:14px">Roomy A</td><td style="height:60px;font-size:14px">Roomy B</td></tr>
+</table>
+</body></html>

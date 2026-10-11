@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="c1t">
+<title id="c1t">Sasha Slides - Pilot (sheepdog head)</title>
+<desc>Two paints only: currentColor (foreground) plus the CSS custom property --sasha-accent. Holes are true negative space, so they always equal the page background. Light wrapper: color:#1E1B3A; --sasha-accent:#6C4BF4; on paper #FFF8F0. Dark wrapper: color:#FFF8F0; --sasha-accent:#19D3C5; on night #0D0F1C.</desc>
+<g fill="currentColor">
+  <path d="M90 64C62 62 44 92 46 128c2 36 22 56 42 42-12-32-10-74 2-106Z"/>
+  <path d="M166 64c28-2 46 28 44 64-2 36-22 56-42 42 12-32 10-74-2-106Z"/>
+</g>
+<g fill="var(--sasha-accent,#6C4BF4)">
+  <path d="M90 90c-16 0-26 18-25 40 1 18 10 28 19 20-4-20-2-44 6-60Z"/>
+  <path d="M166 90c16 0 26 18 25 40-1 18-10 28-19 20 4-20 2-44-6-60Z"/>
+</g>
+<g fill="currentColor">
+  <path fill-rule="evenodd" d="M80 92c0-33 19-50 48-50s48 17 48 50v58c0 38-19 56-48 56s-48-18-48-56Zm6 14a22 22 0 0 0 0 44h84a22 22 0 0 0 0-44Z"/>
+  <circle cx="104" cy="128" r="10"/>
+  <circle cx="152" cy="128" r="10"/>
+  <ellipse cx="128" cy="174" rx="14" ry="10"/>
+</g>
+<g fill="var(--sasha-accent,#6C4BF4)">
+  <path d="M176 88v-4c-2-28-20-42-48-42S82 56 80 84v4c8-8 16 8 24 0s16 8 24 0 16 8 24 0 16 8 24 0Z"/>
+  <rect x="98" y="190" width="60" height="13" rx="6.5"/>
+</g>
+</svg>

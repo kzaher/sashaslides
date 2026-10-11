@@ -1,0 +1,44 @@
+diff --git a/cmd/init/main.go b/cmd/init/main.go
+index 2d2e57c..1a60602 100644
+--- a/cmd/init/main.go
++++ b/cmd/init/main.go
+@@ -85,7 +85,9 @@ func doInit() error {
+ 				return err
+ 			}
+ 			log.Printf("mounting %q to %q\n", tag, dst)
+-			if err := syscall.Mount(tag, dst, "9p", 0, "trans=virtio,version=9p2000.L,msize=8192"); err != nil {
++			// nanobox: bigger requests + page cache for the host-served directories (the container
++			// bundle can be served through here, see --external-bundle=9p=virtio:NAME below)
++			if err := syscall.Mount(tag, dst, "9p", 0, "trans=virtio,version=9p2000.L,msize=524288,cache=loose"); err != nil {
+ 				log.Printf("failed mounting %q: %v\n", tag, err)
+ 				break
+ 			}
+@@ -234,16 +236,21 @@ func doInit() error {
+ 		}
+ 
+ 		bundle9pPath := "/run/9pbundle"
++		if name, isVirtio := strings.CutPrefix(addr, "virtio:"); isVirtio {
++			// nanobox: the bundle is a directory the host preopened for the VM, already reachable
++			// through the built-in virtio-9p root device (no network round trips)
++			bundle9pPath = filepath.Join("/mnt", rootFSTag, name)
++		} else {
++			if err := os.MkdirAll(bundle9pPath, os.FileMode(0755)); err != nil {
++				return fmt.Errorf("failed to create %q: %w", bundle9pPath, err)
++			}
++			if err := syscall.Mount(addr, bundle9pPath, "9p", 0, "trans=tcp,version=9p2000.L,msize=5000000,port=80,cache=loose,ro"); err != nil {
++				return fmt.Errorf("failed mounting oci %v", err)
++			}
++		}
+ 		bundle9pSpecPath := filepath.Join(bundle9pPath, "config", "config.json")
+ 		bundle9pImageConfigPath := filepath.Join(bundle9pPath, "config", "imageconfig.json")
+ 
+-		if err := os.MkdirAll(bundle9pPath, os.FileMode(0755)); err != nil {
+-			return fmt.Errorf("failed to create %q: %w", bundle9pPath, err)
+-		}
+-		if err := syscall.Mount(addr, bundle9pPath, "9p", 0, "trans=tcp,version=9p2000.L,msize=5000000,port=80,cache=loose,ro"); err != nil {
+-			return fmt.Errorf("failed mounting oci %v", err)
+-		}
+-
+ 		// make bundle usable
+ 		// TODO: ovrelay mount /run/bundle/rootfs directly to /run/rootfs
+ 		if cfg.Container.ImageRootfsPath == "" {

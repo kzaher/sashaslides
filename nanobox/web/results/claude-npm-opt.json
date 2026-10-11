@@ -1,0 +1,189 @@
+{
+  "image": "claude-npm",
+  "engine": "opt",
+  "jit": "2:2000",
+  "cmd": "/bin/env NODE_EXTRA_CA_CERTS=/.wasmenv/proxy.crt /usr/local/bin/claude",
+  "url": "http://localhost:8093/vm.html?engine=opt&image=claude-npm&auto=0&cmd=%2Fbin%2Fenv+NODE_EXTRA_CA_CERTS%3D%2F.wasmenv%2Fproxy.crt+%2Fusr%2Flocal%2Fbin%2Fclaude&jit=2%3A2000",
+  "verdict": {
+    "signinMs": 84361,
+    "loadMs": 2236,
+    "runMs": 82125,
+    "icount": "7838623002"
+  },
+  "date": "2026-08-16T16:08:57.097Z",
+  "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+  "events": [
+    {
+      "event": "boot",
+      "t": 13
+    },
+    {
+      "event": "runtime-ready",
+      "t": 294
+    },
+    {
+      "event": "jit-bundles",
+      "t": 529,
+      "files": [
+        "kernel.nbjb"
+      ]
+    },
+    {
+      "event": "init",
+      "t": 0.3050000071525574
+    },
+    {
+      "event": "start",
+      "t": 1.0250000059604645
+    },
+    {
+      "event": "image",
+      "t": 48.95000001788139,
+      "stage": "fetched",
+      "layer": 0,
+      "size": 3924066
+    },
+    {
+      "event": "image",
+      "t": 117.27500000596046,
+      "stage": "unpacked",
+      "layer": 0,
+      "size": 8802304
+    },
+    {
+      "event": "image",
+      "t": 155.42500001192093,
+      "stage": "applied",
+      "layer": 0,
+      "files": 314
+    },
+    {
+      "event": "engine-fetched",
+      "t": 284.71000000834465,
+      "bytes": 40164041,
+      "ms": 284
+    },
+    {
+      "event": "image",
+      "t": 578.3650000095367,
+      "stage": "fetched",
+      "layer": 1,
+      "size": 45011463
+    },
+    {
+      "event": "image",
+      "t": 1063.6400000154972,
+      "stage": "unpacked",
+      "layer": 1,
+      "size": 124839936
+    },
+    {
+      "event": "image",
+      "t": 1397.2450000047684,
+      "stage": "applied",
+      "layer": 1,
+      "files": 318
+    },
+    {
+      "event": "image",
+      "t": 1397.300000011921,
+      "stage": "fetched",
+      "layer": 2,
+      "size": 16350942
+    },
+    {
+      "event": "image",
+      "t": 1550.030000001192,
+      "stage": "unpacked",
+      "layer": 2,
+      "size": 41635840
+    },
+    {
+      "event": "image",
+      "t": 1679.7150000035763,
+      "stage": "applied",
+      "layer": 2,
+      "files": 369
+    },
+    {
+      "event": "image",
+      "t": 1680.4400000274181,
+      "stage": "cached",
+      "layer": 3,
+      "size": 1024
+    },
+    {
+      "event": "image",
+      "t": 1680.5950000286102,
+      "stage": "applied",
+      "layer": 3,
+      "files": 369
+    },
+    {
+      "event": "bundle-ready",
+      "t": 1681.2300000190735,
+      "files": 369,
+      "compressedBytes": 65286471,
+      "ms": 1681,
+      "cache": {
+        "hits": 1,
+        "misses": 3,
+        "bytes": 1024
+      }
+    },
+    {
+      "event": "jit-bundles",
+      "t": 1685.8500000238419,
+      "files": 1,
+      "modules": 223,
+      "keys": 2952,
+      "ms": 1685
+    },
+    {
+      "event": "start-direct",
+      "t": 1685.8600000143051
+    },
+    {
+      "event": "run-start",
+      "t": 2236,
+      "loadMs": 2236
+    },
+    {
+      "event": "instantiated",
+      "t": 1800.6950000226498,
+      "compileMs": 114
+    },
+    {
+      "event": "engine",
+      "t": 1806.4650000035763,
+      "optimized": true,
+      "jit": {
+        "level": 2,
+        "threshold": 2000
+      },
+      "bundles": 223
+    }
+  ],
+  "screenTail": [
+    "…………………………………………………………………………………………………………………………………………………………",
+    "     *                                       █████▓▓░",
+    "                                 *         ███▓░     ░░",
+    "            ░░░░░░                        ███▓░",
+    "    ░░░   ░░░░░░░░░░                      ███▓░",
+    "   ░░░░░░░░░░░░░░░░░░░    *                ██▓░░      ▓",
+    "                                             ░▓▓███▓▓░",
+    " *                                 ░░░░",
+    "                                 ░░░░░░░░",
+    "                               ░░░░░░░░░░░░░░░░",
+    "       █████████                                        *",
+    "      ██▄█████▄██                        *",
+    "       █████████      *",
+    "…………………█ █   █ █………………………………………………………………………………………………………………",
+    " Claude Code can be used with your Claude subscription or billed based on API ",
+    " usage through your Console account.                     ",
+    " Select login method:",
+    " ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise",
+    "   2. Anthropic Console account · API usage billing",
+    "   3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, or Vertex AI"
+  ]
+}

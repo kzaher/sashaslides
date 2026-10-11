@@ -1,0 +1,14 @@
+// The unit tests and the fakes they inject. Separate from tsconfig.json because these DO run on
+// node (node:test, node:assert) while everything they import ships to a browser -- so this is the
+// only project allowed to see @types/node.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  // ../../../types/ambient.d.ts is where this repo declares the third-party modules that ship no
+  // .d.ts (chrome-remote-interface, ws). The smoke test narrows it through types/cdp-types.ts, the
+  // same way converter/test/tsconfig.json does.
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "../../../types/**/*.d.ts"],
+  "exclude": []
+}

@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; background: #fff; font-family: Arial, sans-serif; }
+</style></head><body>
+<!-- An SVG data: URI. MEASURED: createImage answers "The URL is invalid" for every SVG form,
+     percent-encoded or base64, and refuses an SVG served from Drive too, so there is no route
+     for it and it stays a reported loss. This is also the shape the anonymiser's placeholder
+     takes, which is why a defect report never carries real image bytes.
+     The raster cases are img_data_uri_png.html (staged) and img_data_uri_icon.html (inline). -->
+<img style="position:absolute;left:100px;top:100px;width:200px;height:200px"
+  src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iIzFlODhlNSIvPjwvc3ZnPg==">
+</body></html>

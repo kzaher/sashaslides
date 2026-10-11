@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sasha-slides — Drive observer</title>
+</head>
+<body>
+<!-- Never visible. It exists because an offscreen document has no lifetime limit while an extension
+     service worker is terminated after 30 s idle / 5 min per request / a 30 s wait for a fetch
+     response, and since Chrome 114 an idle port is not a keep-alive either. The 5 s Drive poll, the
+     cached access token and the set of connected Slides tabs all live here. See src/wire.ts. -->
+<script src="offscreen.js"></script>
+</body>
+</html>

@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sasha Slides &mdash; Six Logo Concepts</title>
+<style>
+  :root{
+    --ink:#1E1B3A; --paper:#FFF8F0; --night:#0D0F1C;
+    --violet:#6C4BF4; --mint:#19D3C5; --amber:#FFB020;
+    --page:#F3EFE9; --rule:#D9D2C8;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:32px 28px 72px;
+    background:var(--page); color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  h1{margin:0 0 6px; font-size:28px; letter-spacing:-.02em}
+  .sub{margin:0 0 26px; max-width:76ch; color:#5B5570}
+
+  /* The two documented wrappers. Every mark below is the SAME markup; only these differ. */
+  .light{ color:var(--ink);   --sasha-accent:var(--violet); background:var(--paper); }
+  .dark { color:var(--paper); --sasha-accent:var(--mint);   background:var(--night); }
+
+  .palette{display:flex; flex-wrap:wrap; gap:10px; margin:0 0 30px; padding:0; list-style:none}
+  .palette li{display:flex; align-items:center; gap:9px; background:#fff; border:1px solid var(--rule);
+    border-radius:9px; padding:7px 12px 7px 8px; font-size:12.5px}
+  .chip{width:26px; height:26px; border-radius:6px; border:1px solid rgba(0,0,0,.18); flex:0 0 auto}
+  .palette b{font-weight:650} .palette span{color:#6B6580}
+
+  .note{margin:0 0 34px; padding:13px 16px; background:#fff; border:1px solid var(--rule);
+    border-left:4px solid var(--violet); border-radius:8px; font-size:13px; max-width:92ch}
+  .note code{background:#F1EDF8; padding:1px 5px; border-radius:4px; font-size:12px}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(520px,1fr)); gap:22px}
+  .card{background:#fff; border:1px solid var(--rule); border-radius:14px; padding:18px 18px 20px}
+  .card-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px}
+  .num{display:grid; place-items:center; width:24px; height:24px; border-radius:50%;
+    background:var(--violet); color:#fff; font-size:13px; font-weight:700; flex:0 0 auto}
+  .card-head h2{margin:0; font-size:18px; letter-spacing:-.01em}
+  .file{margin-left:auto; font-size:11.5px; color:#8A849B; font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .rationale{margin:0 0 15px; font-size:13.5px; color:#4A4560; min-height:3.2em}
+
+  .verdict{margin:-6px 0 14px; font-size:12px; padding:6px 10px; border-radius:7px; line-height:1.45}
+  .verdict b{font-weight:700}
+  .v-pass{background:#E8F7F1; color:#14624A; border:1px solid #BFE6D6}
+  .v-warn{background:#FFF4E0; color:#7A5410; border:1px solid #F3DCAE}
+  .v-fail{background:#FDEBEC; color:#8A2630; border:1px solid #F3C9CD}
+  .panels{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  .panel{border-radius:11px; padding:12px 12px 10px; border:1px solid var(--rule); overflow:hidden}
+  .panel.dark{border-color:#2A2C42}
+  .panel-tag{font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; opacity:.55; margin-bottom:10px}
+  .stack{display:flex; align-items:flex-end; justify-content:center; gap:14px}
+  .slot{margin:0; display:flex; flex-direction:column; align-items:center; gap:7px}
+  .slot figcaption{font-size:10px; opacity:.5; font-variant-numeric:tabular-nums}
+  .s256 .mark{width:120px; height:120px}   /* 256 artwork shown at 120px to fit the grid */
+  .mark{display:block}
+
+  .favband{margin-top:34px; background:#fff; border:1px solid var(--rule); border-radius:14px; padding:18px}
+  .favband h2{margin:0 0 4px; font-size:18px}
+  .favband .method{font-size:12.5px; color:#5B5570; max-width:100ch; background:#FAF8F4;
+    border:1px solid var(--rule); border-radius:8px; padding:12px 15px; margin:10px 0 18px; max-width:none}
+  .favband p{margin:0 0 14px; font-size:13px; color:#4A4560}
+  .favrows{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  .favstrip{display:flex; gap:30px; align-items:center; justify-content:center; padding:10px 0 4px}
+  .favslot{margin:0; display:flex; flex-direction:column; align-items:center; gap:8px}
+  .favslot figcaption{font-size:10px; opacity:.5}
+
+  .lockband{margin-top:22px; background:#fff; border:1px solid var(--rule); border-radius:14px; padding:18px}
+  .lockband h2{margin:0 0 14px; font-size:18px}
+  .lockups{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px}
+  .lockup{display:flex; align-items:center; gap:11px; padding:12px 14px; border-radius:10px}
+  .lockups > .lockup:nth-child(odd){background:var(--paper); color:var(--ink); --sasha-accent:var(--violet)}
+  .lockups > .lockup:nth-child(even){background:var(--night); color:var(--paper); --sasha-accent:var(--mint)}
+  .wordmark{font:600 19px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    letter-spacing:-.025em}
+  .wordmark strong{font-weight:400; opacity:.72}
+</style>
+</head>
+<body>
+
+<h1>Sasha Slides &mdash; six logo concepts</h1>
+<p class="sub">Each mark is one hand-authored SVG on a <code>0 0 256 256</code> viewBox, no fonts inside the mark, no raster
+tracing. Every mark uses exactly <b>two paints</b> &mdash; <code>currentColor</code> and <code>--sasha-accent</code> &mdash; and every
+hole is <b>true negative space</b>, so it can never lose contrast against the background it sits on.</p>
+
+<ul class="palette">
+  <li><span class="chip" style="background:#1E1B3A"></span><b>Ink</b> <code>#1E1B3A</code> <span>Light-mode foreground</span></li>
+  <li><span class="chip" style="background:#FFF8F0"></span><b>Paper</b> <code>#FFF8F0</code> <span>Light background</span></li>
+  <li><span class="chip" style="background:#0D0F1C"></span><b>Night</b> <code>#0D0F1C</code> <span>Dark background</span></li>
+  <li><span class="chip" style="background:#6C4BF4"></span><b>Violet</b> <code>#6C4BF4</code> <span>Light-mode accent</span></li>
+  <li><span class="chip" style="background:#19D3C5"></span><b>Mint</b> <code>#19D3C5</code> <span>Dark-mode accent</span></li>
+  <li><span class="chip" style="background:#FFB020"></span><b>Amber</b> <code>#FFB020</code> <span>Tertiary: UI and lockup only, never inside a mark</span></li>
+</ul>
+
+<div class="note">
+<b>The documented wrapper.</b> One file per concept serves both backgrounds. Put the mark inside an element that sets
+two properties &mdash; light: <code>color:#1E1B3A; --sasha-accent:#6C4BF4</code> on <code>#FFF8F0</code>; dark:
+<code>color:#FFF8F0; --sasha-accent:#19D3C5</code> on <code>#0D0F1C</code>. The accent flips violet&rarr;mint on purpose:
+mint only reaches usable contrast on the night background, violet only on paper. Amber is deliberately kept out of the
+marks for the same reason. Note that <code>currentColor</code> requires the SVG to be inlined or
+<code>&lt;use&gt;</code>d &mdash; referenced through <code>&lt;img src&gt;</code> it falls back to black, which is still
+a valid light-mode rendering. None of these hues sit near Google's brand blues (#4285F4 / #1A73E8 / #174EA6).
+</div>
+
+<div class="grid">
+
+      <article class="card">
+        <header class="card-head">
+          <span class="num">1</span>
+          <h2>Pilot</h2>
+          <code class="file">concept-1-pilot-head.svg &middot; 1374 B</code>
+        </header>
+        <p class="rationale">A cute geometric sheepdog head, mark only: shaggy forelock, drop ears with a lighter inner ear, and a visor knocked clean out of the silhouette so the eyes are the brightest thing in the mark.</p>
+        <p class="verdict v-warn"><b>16px: degraded</b> &mdash; anchor 4.0px · one mass · keeps its shape, loses its species</p>
+        <div class="panels">
+        <div class="panel light">
+          <div class="panel-tag">Paper #FFF8F0</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark1"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark1"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark1"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        <div class="panel dark">
+          <div class="panel-tag">Night #0D0F1C</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark1"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark1"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark1"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <span class="num">2</span>
+          <h2>Frame Hound</h2>
+          <code class="file">concept-2-frame-hound.svg &middot; 1073 B</code>
+        </header>
+        <p class="rationale">The 16:9 slide frame IS the dog's head — two folded ears on the top corners, a visor window where the content would be, and two bullet lines for the deck.</p>
+        <p class="verdict v-pass"><b>Survives 16px</b> &mdash; anchor 4.0px · ink dominance 0.98 · ears, eye slit and mouth all still read</p>
+        <div class="panels">
+        <div class="panel light">
+          <div class="panel-tag">Paper #FFF8F0</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark2"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark2"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark2"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        <div class="panel dark">
+          <div class="panel-tag">Night #0D0F1C</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark2"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark2"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark2"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <span class="num">3</span>
+          <h2>Flock Pen</h2>
+          <code class="file">concept-3-flock-pen.svg &middot; 1533 B</code>
+        </header>
+        <p class="rationale">The literal pun: each sheep IS a slide — a 16:9 body under a fleece of bumps — trotting right out of the scattered margin and into an open corral, motion dashes trailing behind.</p>
+        <p class="verdict v-fail"><b>Fails at 16px</b> &mdash; anchor 5.7px but ink dominance 0.81 across 4 separated masses — reads as noise</p>
+        <div class="panels">
+        <div class="panel light">
+          <div class="panel-tag">Paper #FFF8F0</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark3"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark3"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark3"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        <div class="panel dark">
+          <div class="panel-tag">Night #0D0F1C</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark3"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark3"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark3"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <span class="num">4</span>
+          <h2>Tailmark</h2>
+          <code class="file">concept-4-tailmark.svg &middot; 963 B</code>
+        </header>
+        <p class="rationale">An abstract S monogram whose top terminal flares into an ear and whose bottom flicks into a tail, drawn straight through a 16:9 slide frame.</p>
+        <p class="verdict v-pass"><b>Survives 16px</b> &mdash; S stroke 3.4px · single ink mass (dominance 1.00) · letterform holds</p>
+        <div class="panels">
+        <div class="panel light">
+          <div class="panel-tag">Paper #FFF8F0</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark4"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark4"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark4"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        <div class="panel dark">
+          <div class="panel-tag">Night #0D0F1C</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark4"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark4"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark4"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <span class="num">5</span>
+          <h2>Rally</h2>
+          <code class="file">concept-5-rally-arc.svg &middot; 925 B</code>
+        </header>
+        <p class="rationale">Pure herding motion with no animal in it: a fat arc sweeps almost the full circle to gather three strays, and a detached arrowhead closes the gate.</p>
+        <p class="verdict v-warn"><b>16px: degraded</b> &mdash; anchor 3.1px · nothing under 1.3px · ring holds, the three strays merge into one blob</p>
+        <div class="panels">
+        <div class="panel light">
+          <div class="panel-tag">Paper #FFF8F0</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark5"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark5"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark5"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        <div class="panel dark">
+          <div class="panel-tag">Night #0D0F1C</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark5"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark5"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark5"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <span class="num">6</span>
+          <h2>Corral Seal</h2>
+          <code class="file">concept-6-corral-seal.svg &middot; 1092 B</code>
+        </header>
+        <p class="rationale">Favicon-first emblem: one solid disc with two ear bumps breaking the top edge and a single bright 16:9 window punched clean through the middle. Round on purpose, so it never collides with concept 2 in a tab strip.</p>
+        <p class="verdict v-pass"><b>Survives 16px</b> &mdash; anchor 5.0px · only 2.3% of mass in sub-1.3px detail · simplest silhouette of the six</p>
+        <div class="panels">
+        <div class="panel light">
+          <div class="panel-tag">Paper #FFF8F0</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark6"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark6"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark6"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        <div class="panel dark">
+          <div class="panel-tag">Night #0D0F1C</div>
+          <div class="stack">
+            <figure class="slot s256"><svg class="mark" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark6"/></svg><figcaption>256px</figcaption></figure>
+            <figure class="slot s64"><svg class="mark" width="64" height="64" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark6"/></svg><figcaption>64px</figcaption></figure>
+            <figure class="slot s16"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark6"/></svg><figcaption>16px</figcaption></figure>
+          </div>
+        </div>
+        </div>
+      </article>
+</div>
+
+<section class="favband">
+  <h2>Favicon honesty check</h2>
+  <p>All six at <b>exactly 16&times;16 device pixels</b>, nothing scaled up. This row is the real test.</p>
+  <p class="method">Tested by rendering each mark alone into a 16&times;16 cell in headless Chrome at
+  <code>deviceScaleFactor: 1</code>, then measuring the raster. Two numbers decide it: the <b>anchor feature</b>
+  (max inscribed diameter of the mark's largest shape, in device pixels at 16&times;16) and <b>ink dominance</b>
+  (largest connected ink mass &divide; total ink). Every one of the six is structurally fat &mdash; 93&ndash;100% of each
+  mark's mass sits in features wider than 1.3px &mdash; so thinness is not what separates them. <b>Fragmentation is.</b>
+  Concept 3 has the fattest single feature of all six (5.7px, the corral rail) and still fails, because its ink
+  scatters into four separated masses with no figure to lock onto. Concept 6 is split too, but its split is the one
+  intentional window, so it stays one object.</p>
+  <div class="favrows">
+        <div class="panel light favrow">
+          <div class="panel-tag">Paper &middot; rendered at exactly 16&times;16, no scaling</div>
+          <div class="favstrip">
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark1"/></svg><figcaption>1</figcaption></figure>
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark2"/></svg><figcaption>2</figcaption></figure>
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark3"/></svg><figcaption>3</figcaption></figure>
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark4"/></svg><figcaption>4</figcaption></figure>
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark5"/></svg><figcaption>5</figcaption></figure>
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark6"/></svg><figcaption>6</figcaption></figure>
+          </div>
+        </div>
+        <div class="panel dark favrow">
+          <div class="panel-tag">Night &middot; rendered at exactly 16&times;16, no scaling</div>
+          <div class="favstrip">
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark1"/></svg><figcaption>1</figcaption></figure>
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark2"/></svg><figcaption>2</figcaption></figure>
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark3"/></svg><figcaption>3</figcaption></figure>
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark4"/></svg><figcaption>4</figcaption></figure>
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark5"/></svg><figcaption>5</figcaption></figure>
+            <figure class="favslot"><svg class="mark" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark6"/></svg><figcaption>6</figcaption></figure>
+          </div>
+        </div>
+  </div>
+</section>
+
+<section class="lockband">
+  <h2>Lockups</h2>
+  <div class="lockups">
+          <div class="lockup"><svg class="mark" width="40" height="40" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark1"/></svg><span class="wordmark">Sasha<strong>Slides</strong></span></div>
+          <div class="lockup"><svg class="mark" width="40" height="40" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark2"/></svg><span class="wordmark">Sasha<strong>Slides</strong></span></div>
+          <div class="lockup"><svg class="mark" width="40" height="40" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark3"/></svg><span class="wordmark">Sasha<strong>Slides</strong></span></div>
+          <div class="lockup"><svg class="mark" width="40" height="40" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark4"/></svg><span class="wordmark">Sasha<strong>Slides</strong></span></div>
+          <div class="lockup"><svg class="mark" width="40" height="40" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark5"/></svg><span class="wordmark">Sasha<strong>Slides</strong></span></div>
+          <div class="lockup"><svg class="mark" width="40" height="40" viewBox="0 0 256 256" aria-hidden="true"><use href="#mark6"/></svg><span class="wordmark">Sasha<strong>Slides</strong></span></div>
+  </div>
+</section>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="mark1" viewBox="0 0 256 256"><title id="c1t">Sasha Slides - Pilot (sheepdog head)</title>
+<desc>Two paints only: currentColor (foreground) plus the CSS custom property --sasha-accent. Holes are true negative space, so they always equal the page background. Light wrapper: color:#1E1B3A; --sasha-accent:#6C4BF4; on paper #FFF8F0. Dark wrapper: color:#FFF8F0; --sasha-accent:#19D3C5; on night #0D0F1C.</desc>
+<g fill="currentColor">
+  <path d="M90 64C62 62 44 92 46 128c2 36 22 56 42 42-12-32-10-74 2-106Z"/>
+  <path d="M166 64c28-2 46 28 44 64-2 36-22 56-42 42 12-32 10-74-2-106Z"/>
+</g>
+<g fill="var(--sasha-accent,#6C4BF4)">
+  <path d="M90 90c-16 0-26 18-25 40 1 18 10 28 19 20-4-20-2-44 6-60Z"/>
+  <path d="M166 90c16 0 26 18 25 40-1 18-10 28-19 20 4-20 2-44-6-60Z"/>
+</g>
+<g fill="currentColor">
+  <path fill-rule="evenodd" d="M80 92c0-33 19-50 48-50s48 17 48 50v58c0 38-19 56-48 56s-48-18-48-56Zm6 14a22 22 0 0 0 0 44h84a22 22 0 0 0 0-44Z"/>
+  <circle cx="104" cy="128" r="10"/>
+  <circle cx="152" cy="128" r="10"/>
+  <ellipse cx="128" cy="174" rx="14" ry="10"/>
+</g>
+<g fill="var(--sasha-accent,#6C4BF4)">
+  <path d="M176 88v-4c-2-28-20-42-48-42S82 56 80 84v4c8-8 16 8 24 0s16 8 24 0 16 8 24 0 16 8 24 0Z"/>
+  <rect x="98" y="190" width="60" height="13" rx="6.5"/>
+</g></symbol>
+<symbol id="mark2" viewBox="0 0 256 256"><title id="c2t">Sasha Slides - Frame Hound (dog + 16:9 slide as one glyph)</title>
+<desc>Two paints only: currentColor (foreground) plus the CSS custom property --sasha-accent. Holes are true negative space, so they always equal the page background. Light wrapper: color:#1E1B3A; --sasha-accent:#6C4BF4; on paper #FFF8F0. Dark wrapper: color:#FFF8F0; --sasha-accent:#19D3C5; on night #0D0F1C.</desc>
+<g fill="currentColor">
+  <path d="M38 98C26 60 46 34 74 42c20 6 26 30 24 56Z"/>
+  <path d="M218 98c12-38-8-64-36-56-20 6-26 30-24 56Z"/>
+  <path fill-rule="evenodd" d="M24 108a22 22 0 0 1 22-22h164a22 22 0 0 1 22 22v83a22 22 0 0 1-22 22H46a22 22 0 0 1-22-22Zm51 12a17 17 0 0 0 0 34h106a17 17 0 0 0 0-34Z"/>
+  <circle cx="90" cy="137" r="10"/>
+  <circle cx="166" cy="137" r="10"/>
+</g>
+<g fill="var(--sasha-accent,#6C4BF4)">
+  <rect x="60" y="172" width="136" height="13" rx="6.5"/>
+  <rect x="60" y="192" width="88" height="13" rx="6.5"/>
+</g></symbol>
+<symbol id="mark3" viewBox="0 0 256 256"><title id="c3t">Sasha Slides - Flock Pen (slides as sheep herded into a corral)</title>
+<desc>Two paints only: currentColor (foreground) plus the CSS custom property --sasha-accent. Holes are true negative space, so they always equal the page background. Light wrapper: color:#1E1B3A; --sasha-accent:#6C4BF4; on paper #FFF8F0. Dark wrapper: color:#FFF8F0; --sasha-accent:#19D3C5; on night #0D0F1C.</desc>
+<defs>
+  <g id="sheep">
+    <circle cx="24" cy="22" r="16" fill="var(--sasha-accent,#6C4BF4)"/>
+    <circle cx="52" cy="14" r="17" fill="var(--sasha-accent,#6C4BF4)"/>
+    <circle cx="80" cy="22" r="16" fill="var(--sasha-accent,#6C4BF4)"/>
+    <rect x="0" y="20" width="100" height="44" rx="11" fill="var(--sasha-accent,#6C4BF4)"/>
+    <rect x="16" y="60" width="14" height="20" rx="7" fill="currentColor"/>
+    <rect x="64" y="60" width="14" height="20" rx="7" fill="currentColor"/>
+    <path d="M92 24c6-14 22-14 28-2 12 2 18 14 14 26-4 14-20 20-32 12-10-8-16-24-10-36Z" fill="currentColor"/>
+  </g>
+</defs>
+<path d="M126 44h116v168H126" fill="none" stroke="currentColor" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="2" y="104" width="40" height="14" rx="7" fill="currentColor"/>
+<use href="#sheep" transform="translate(130 94) scale(0.78)"/>
+<use href="#sheep" transform="translate(34 128) scale(0.6)"/>
+<use href="#sheep" transform="translate(2 176) scale(0.42)"/></symbol>
+<symbol id="mark4" viewBox="0 0 256 256"><title id="c4t">Sasha Slides - Tailmark (S monogram: ear, tail, slide)</title>
+<desc>Two paints only: currentColor (foreground) plus the CSS custom property --sasha-accent. Holes are true negative space, so they always equal the page background. Light wrapper: color:#1E1B3A; --sasha-accent:#6C4BF4; on paper #FFF8F0. Dark wrapper: color:#FFF8F0; --sasha-accent:#19D3C5; on night #0D0F1C.</desc>
+<rect x="34" y="75" width="188" height="106" rx="18" fill="none" stroke="var(--sasha-accent,#6C4BF4)" stroke-width="13"/>
+<g fill="currentColor">
+  <path d="M180 88c-16-34 0-60 24-54 22 6 22 42-2 62Z"/>
+  <path d="M102 204c-26 14-54 6-64-18 16 10 42 14 58 4Z"/>
+</g>
+<path d="M186 86c-6-28-40-42-72-32-38 12-44 48-12 64 34 16 74 18 76 48 2 32-40 48-78 34"
+      fill="none" stroke="currentColor" stroke-width="34" stroke-linecap="round"/></symbol>
+<symbol id="mark5" viewBox="0 0 256 256"><title id="c5t">Sasha Slides - Rally (herding arc gathering three strays)</title>
+<desc>Two paints only: currentColor (foreground) plus the CSS custom property --sasha-accent. Holes are true negative space, so they always equal the page background. Light wrapper: color:#1E1B3A; --sasha-accent:#6C4BF4; on paper #FFF8F0. Dark wrapper: color:#FFF8F0; --sasha-accent:#19D3C5; on night #0D0F1C.</desc>
+<path d="M192.3 182A84 84 0 1 1 204.1 92.5" fill="none" stroke="currentColor" stroke-width="34" stroke-linecap="round"/>
+<path d="M195.8 73 157.5 71.8 181.7 37.4Z" fill="currentColor"/>
+<g fill="var(--sasha-accent,#6C4BF4)">
+  <rect x="86" y="90" width="44" height="44" rx="13"/>
+  <rect x="134" y="90" width="44" height="44" rx="13"/>
+  <rect x="110" y="142" width="44" height="44" rx="13"/>
+</g></symbol>
+<symbol id="mark6" viewBox="0 0 256 256"><title id="c6t">Sasha Slides - Corral Seal (favicon-first round emblem)</title>
+<desc>Two paints only: currentColor (foreground) plus the CSS custom property --sasha-accent. Holes are true negative space, so they always equal the page background. Light wrapper: color:#1E1B3A; --sasha-accent:#6C4BF4; on paper #FFF8F0. Dark wrapper: color:#FFF8F0; --sasha-accent:#19D3C5; on night #0D0F1C.</desc>
+<g fill="currentColor">
+  <path d="M54 62C40 26 60 4 86 14c18 8 20 32 12 52Z"/>
+  <path d="M202 62c14-36-6-58-32-48-18 8-20 32-12 52Z"/>
+  <path fill-rule="evenodd" d="M128 16a112 112 0 1 1 0 224 112 112 0 0 1 0-224Zm-73 62a15 15 0 0 0-15 15v52a15 15 0 0 0 15 15h146a15 15 0 0 0 15-15V93a15 15 0 0 0-15-15Z"/>
+  <path fill-rule="evenodd" d="M82 100h92a19 19 0 0 1 0 38H82a19 19 0 0 1 0-38Zm25 19a10 10 0 1 0-20 0 10 10 0 0 0 20 0Zm62 0a10 10 0 1 0-20 0 10 10 0 0 0 20 0Z"/>
+</g>
+<rect x="84" y="186" width="88" height="16" rx="8" fill="var(--sasha-accent,#6C4BF4)"/></symbol>
+</defs></svg>
+
+</body>
+</html>

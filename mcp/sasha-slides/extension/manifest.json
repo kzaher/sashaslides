@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "sasha-slides picker",
+  "version": "0.1.0",
+  "description": "Watches Drive for sasha-slides candidate-slide proposals, shows them inside Google Slides as a numbered picker with an HTML/converted toggle, inserts the chosen one and reports the choice plus any conversion anomalies back to Claude.",
+  "minimum_chrome_version": "116",
+  "background": { "service_worker": "background.js" },
+  "permissions": ["offscreen", "storage", "identity"],
+  "host_permissions": [
+    "https://www.googleapis.com/*",
+    "https://slides.googleapis.com/*",
+    "https://*.googleusercontent.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://docs.google.com/presentation/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

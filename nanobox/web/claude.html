@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nanobox · claude</title>
+<link rel="stylesheet" href="compare.css">
+</head>
+<body data-image="claude">
+<header>
+  <b>nanobox</b>
+  <span>Claude Code — original engine (top) vs optimized engine (bottom), booted in parallel; each timer stops at the sign-in screen</span>
+  <a href="index.html">← index</a>
+  <span id="verdict"></span>
+</header>
+<main>
+  <section>
+    <h2>ORIGINAL — container2wasm WASI engine (Bochs) as shipped in nanobox/public/c2w/wasi <span class="t" id="t-orig">0.0 s</span></h2>
+    <iframe id="f-orig" title="original engine"></iframe>
+  </section>
+  <section>
+    <h2>OPTIMIZED — nanobox engine (Bochs + native wasm exception handling + trace JIT) <span class="t" id="t-opt">0.0 s</span></h2>
+    <iframe id="f-opt" title="optimized engine"></iframe>
+  </section>
+</main>
+<script src="compare.js"></script>
+</body>
+</html>

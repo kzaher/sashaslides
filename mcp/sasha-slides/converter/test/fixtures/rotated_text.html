@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; background: #fff; font-family: Arial, sans-serif; }
+</style></head><body>
+<!-- Rotation IS expressible in the Slides affine transform, so this must
+     emit a rotated element and report nothing. -->
+<div style="position:absolute;left:200px;top:200px;width:400px;height:100px;background:#1e88e5;transform:rotate(15deg)"></div>
+<div style="position:absolute;left:200px;top:400px;width:400px;height:60px;font-size:36px;color:#333;transform:rotate(-8deg)">Tilted label</div>
+</body></html>

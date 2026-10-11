@@ -1,0 +1,18 @@
+// The page-side client. src/proxyext.ts compiles to ../web/proxyext.js — the same path web/vm.html
+// and web/sandbox.html already load with <script src>, and the emitted file is still a classic
+// script that publishes the `NanoboxProxy` global, not a module.
+//
+// ../extension/src/protocol.d.ts is in the program on purpose: the page leg's message types are
+// shared with the extension's own sources, so the two halves of the bridge cannot drift apart.
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "."
+  },
+  "files": [
+    "../extension/src/protocol.d.ts",
+    "src/page-globals.d.ts",
+    "src/proxyext.ts"
+  ]
+}

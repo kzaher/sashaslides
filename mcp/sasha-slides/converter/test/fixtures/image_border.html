@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  A picture with a border and rounded corners.
+
+  THE BUG THIS PINS DOWN. The extractor pushed an image's bounds and src and NOTHING else, so
+  (a) a CSS `border` on the picture was dropped -- on a dark slide the image bled into the
+  background -- and (b) `border-radius` never reached the converter at all, which is why the
+  rounded-corner LOSS was never even reported. The border is expressible as a Slides image
+  outline. The radius is not, and must say so rather than vanish quietly.
+-->
+<style>
+  body { width: 1280px; height: 720px; margin: 0; background: #10131a; }
+  img { position: absolute; left: 160px; top: 120px; width: 480px; height: 300px;
+        border: 2px solid #2b3446; border-radius: 18px; object-fit: cover; }
+</style>
+</head>
+<body>
+  <img alt="a tiny red square" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAG0lEQVR42mP8z8BQz0AEYBxVSF+FjIO+lAEAhB8F+1xJjkIAAAAASUVORK5CYII=">
+</body>
+</html>

@@ -1,0 +1,465 @@
+--- a/bochs/nanobox_jit.cc	2026-08-22 23:07:32.113629455 +0000
++++ b/bochs/nanobox_jit.cc	2026-08-23 00:01:13.220222957 +0000
+@@ -541,6 +541,258 @@
+ { return (ia <= BX_IA_LAST && r < R_N) ? (double) nanobox_op_reason[ia][r] : 0; }
+ NB_EXPORT(nanobox_jit_opreason_n) unsigned nanobox_jit_opreason_n(void) { return R_N; }
+ 
++// ---- ADDRESS census (work/j/addropts, level 3 + NANOBOX_ADDRCENSUS=1) --------------------------
++// Every compiled data access already knows its linear address before it knows anything else --
++// dtlbLookup indexes the guest's own DTLB by it, the stack window biases it -- so a call in front
++// of those two sites sees EVERY access a compiled site makes, classified by where in the guest's
++// address space it lands. The question this answers: what share of the accesses lives in ONE
++// contiguous kernel window whose mapping is affine, because there "host = base + (la - lo)" is a
++// range check and an add and the 56 bytes of table probe are dead.
++// Nothing is emitted unless BOTH level >= 3 and the census is switched on, so the shipped engine is
++// byte-identical.
++unsigned nanobox_jit_addrcensus = 0;
++
++// ---- direct-map window (work/j/addropts, NANOBOX_DMAP, default 0) ------------------------------
++// bit 0 = identity host-block placement (memory/misc_mem.cc), bit 1 = the JIT emits the window arm.
++// Linux maps ALL of physical memory contiguously at PAGE_OFFSET, so inside that window a linear
++// address is `PAGE_OFFSET + phys` and, once the host arena is identity-placed, the host address is
++// `vector + phys` -- a range check and an add, with no DTLB entry, no lpf compare and no permission
++// test (the census measured 0 direct-map accesses at CPL 3, so the permission bits are uniform).
++// PAGE_OFFSET is a constant of the guest's layout (it boots nokaslr norandmaps) and was MEASURED,
++// not assumed: the address census' PGD histogram puts every kernel data access outside vmalloc /
++// vmemmap / kernel text in PGD 273 = 0xffff888000000000 and nowhere else in [273, 400].
++// It is 4 GB aligned, which is what lets the window test compare the top 32 bits of the address
++// and read the guest-physical address straight out of the low 32.
++#define NB_DMAP_BASE 0xffff888000000000ULL
++#define NB_DMAP_LOW  0x00100000u   // the window starts above the legacy 1 MB hole
++extern unsigned nanobox_mem_identity;
++unsigned nanobox_jit_dmap = 0;
++Bit64u nanobox_dmap_hits = 0, nanobox_dmap_miss = 0;
++NB_EXPORT(nanobox_jit_dmap_stat) double nanobox_jit_dmap_stat(unsigned i)
++{ return i == 0 ? (double) nanobox_dmap_hits : i == 1 ? (double) nanobox_dmap_miss : 0; }
++Bit64u nanobox_ac_unit_seq = 0;     // bumped inline by every compiled unit's prologue
++
++// Classes are STRUCTURAL (a PGD index range), not a guess at one base: the pgd histograms below
++// report the raw distribution so the boundaries can be checked against the run that used them.
++// The x86_64 4-level layout with nokaslr: direct map at PGD 273 (0xffff888000000000, 64 TB),
++// vmalloc at 402 (0xffffc90000000000, 32 TB), vmemmap at 468 (0xffffea0000000000, 1 TB), kernel
++// text/modules/fixmap in the top 2 GB of PGD 511.
++enum { AC_USER = 0, AC_DIRECT, AC_VMALLOC, AC_VMEMMAP, AC_KTEXT, AC_KMODULE, AC_KFIX, AC_KOTHER, AC_NONCANON, AC_CLASSES };
++enum { AC_RD = 0, AC_WR, AC_STK, AC_KINDS };
++
++static Bit64u nanobox_ac_cls[AC_CLASSES][AC_KINDS];
++static Bit64u nanobox_ac_pg4[AC_CLASSES];     // distinct 4 KB pages
++static Bit64u nanobox_ac_pg2m[AC_CLASSES];    // distinct 2 MB regions
++static Bit64u nanobox_ac_lo[AC_CLASSES], nanobox_ac_hi[AC_CLASSES];
++static Bit64u nanobox_ac_pgd_k[512], nanobox_ac_pgd_u[512];
++static Bit64u nanobox_ac_top[512];            // 4 MB buckets over 0xffffffff80000000 + 2 GB
++static Bit64u nanobox_ac_misc[16];
++enum { ACM_TOTAL = 0, ACM_FIRST, ACM_SAMEPREV, ACM_REVISIT, ACM_NEWPAGE, ACM_PEAK2M, ACM_CR3N,
++       ACM_CR3OVF, ACM_H4FILL, ACM_H2FILL, ACM_H4FULL, ACM_UNITS, ACM_WINDOWS,
++       // the same four locality buckets over the accesses that actually pay the table probe
++       // (kind != AC_STK), which is the population a hoisted entry pointer could serve
++       ACM_PFIRST, ACM_PSAMEPREV, ACM_PREVISIT, ACM_PNEWPAGE,
++       ACM_ROOTN, ACM_ROOTOVF, ACM_KERN_CPL3, ACM_DIRECT_CPL3, ACM_N };
++
++// Distinct-page sets: open addressing, key = page number + 1 (0 = empty). Sized for the boot's
++// working set (a codex boot touches O(100k) 4 KB pages), so the load factor stays under 1/8.
++#define AC_H4_BITS 20
++#define AC_H2_BITS 14
++#define AC_W2_BITS 12
++static Bit64u nanobox_ac_h4[1u << AC_H4_BITS];
++static Bit64u nanobox_ac_h2[1u << AC_H2_BITS];
++// peak live 2 MB regions: a generation-stamped set, re-generated every AC_WINDOW accesses
++#define AC_WINDOW (1u << 20)
++static Bit64u nanobox_ac_w2[1u << AC_W2_BITS];
++static Bit32u nanobox_ac_w2gen[1u << AC_W2_BITS];
++static Bit32u nanobox_ac_gen = 1;
++static Bit32u nanobox_ac_wlive = 0;
++
++// CR3 census: open-addressed so the count is real rather than capped. Linux with PCID puts the
++// PCID in the low 12 bits, so the full CR3 and the page-table ROOT (CR3>>12) are counted separately.
++#define AC_CR3_N 4096
++static Bit64u nanobox_ac_cr3[AC_CR3_N], nanobox_ac_cr3_n[AC_CR3_N];
++static Bit64u nanobox_ac_root[AC_CR3_N], nanobox_ac_root_n[AC_CR3_N];
++
++// locality within one compiled-unit invocation (nanobox_ac_unit_seq changes at every entry)
++static Bit64u nanobox_ac_seq_seen = 0, nanobox_ac_prev_page = 0;
++static Bit64u nanobox_ac_last4 = ~(Bit64u)0, nanobox_ac_last2 = ~(Bit64u)0;   // last key each set saw
++static unsigned nanobox_ac_cr3_last = 0;
++static Bit64u nanobox_ac_probe_pages[16], nanobox_ac_prev_probe = 0;
++static unsigned nanobox_ac_pnp = 0;
++static Bit64u nanobox_ac_unit_pages[16];
++static unsigned nanobox_ac_unit_np = 0;
++
++static unsigned nanobox_ac_classify(Bit64u la)
++{
++  if (la < 0x0000800000000000ULL) return AC_USER;
++  if (la < 0xffff800000000000ULL) return AC_NONCANON;
++  unsigned pgd = (unsigned)((la >> 39) & 0x1ff);
++  if (pgd >= 273 && pgd <= 400) return AC_DIRECT;
++  if (pgd >= 402 && pgd <= 465) return AC_VMALLOC;
++  if (pgd >= 468 && pgd <= 469) return AC_VMEMMAP;
++  if (la >= 0xffffffff80000000ULL) {
++    if (la >= 0xfffffffffe000000ULL) return AC_KFIX;        // fixmap / cpu_entry_area / vsyscall
++    if (la >= 0xffffffffa0000000ULL) return AC_KMODULE;
++    return AC_KTEXT;
++  }
++  return AC_KOTHER;
++}
++static Bit64u nanobox_ac_mix(Bit64u k) { k *= 0x9e3779b97f4a7c15ULL; return k ^ (k >> 29); }
++// Bump `key`'s slot in an open-addressed (keys, counts) pair; a key is stored as key+1 so 0 is empty.
++static unsigned nanobox_ac_bump(Bit64u *keys, Bit64u *counts, Bit64u key, Bit64u *distinct, Bit64u *overflow)
++{
++  Bit64u k = key + 1, i = nanobox_ac_mix(k) & (AC_CR3_N - 1);
++  for (unsigned probe = 0; probe < 64; probe++, i = (i + 1) & (AC_CR3_N - 1)) {
++    if (keys[i] == k) { counts[i]++; return (unsigned) i; }
++    if (keys[i] == 0) { keys[i] = k; counts[i] = 1; (*distinct)++; return (unsigned) i; }
++  }
++  (*overflow)++; return 0;
++}
++
++extern "C" {
++// One call in front of the address resolution of every compiled data access. `kind` is AC_RD /
++// AC_WR / AC_STK; `la` is the linear address the site is about to resolve.
++static void nanobox_helper_addr_census(Bit64u la, unsigned kind)
++{
++  unsigned cls = nanobox_ac_classify(la);
++  nanobox_ac_misc[ACM_TOTAL]++;
++  nanobox_ac_cls[cls][kind < AC_KINDS ? kind : AC_RD]++;
++  if (!nanobox_ac_lo[cls] || la < nanobox_ac_lo[cls]) nanobox_ac_lo[cls] = la;
++  if (la > nanobox_ac_hi[cls]) nanobox_ac_hi[cls] = la;
++  if (cls == AC_USER) nanobox_ac_pgd_u[(la >> 39) & 0x1ff]++;
++  else if (cls != AC_NONCANON) nanobox_ac_pgd_k[(la >> 39) & 0x1ff]++;
++  if (la >= 0xffffffff80000000ULL) nanobox_ac_top[(unsigned)((la - 0xffffffff80000000ULL) >> 22) & 0x1ff]++;
++
++  // The three sets below are the expensive part, so each is guarded by a one-word cache of the last
++  // key: consecutive accesses overwhelmingly repeat their page, and a repeat can add nothing.
++  Bit64u page = la >> 12;
++  if (page != nanobox_ac_last4) {
++    nanobox_ac_last4 = page;
++    Bit64u key = page + 1, i = nanobox_ac_mix(key) & ((1u << AC_H4_BITS) - 1);
++    for (unsigned probe = 0; probe < 64; probe++, i = (i + 1) & ((1u << AC_H4_BITS) - 1)) {
++      if (nanobox_ac_h4[i] == key) break;
++      if (nanobox_ac_h4[i] == 0) { nanobox_ac_h4[i] = key; nanobox_ac_pg4[cls]++; nanobox_ac_misc[ACM_H4FILL]++; break; }
++      if (probe == 63) nanobox_ac_misc[ACM_H4FULL]++;
++    }
++    Bit64u reg2m = la >> 21;
++    if (reg2m != nanobox_ac_last2) {
++      nanobox_ac_last2 = reg2m;
++      Bit64u k2 = reg2m + 1, i2 = nanobox_ac_mix(k2) & ((1u << AC_H2_BITS) - 1);
++      for (unsigned probe = 0; probe < 64; probe++, i2 = (i2 + 1) & ((1u << AC_H2_BITS) - 1)) {
++        if (nanobox_ac_h2[i2] == k2) break;
++        if (nanobox_ac_h2[i2] == 0) { nanobox_ac_h2[i2] = k2; nanobox_ac_pg2m[cls]++; nanobox_ac_misc[ACM_H2FILL]++; break; }
++      }
++      // peak distinct 2 MB regions live inside one window of AC_WINDOW accesses
++      Bit64u i3 = nanobox_ac_mix(k2) & ((1u << AC_W2_BITS) - 1);
++      for (unsigned probe = 0; probe < 32; probe++, i3 = (i3 + 1) & ((1u << AC_W2_BITS) - 1)) {
++        if (nanobox_ac_w2gen[i3] == nanobox_ac_gen && nanobox_ac_w2[i3] == k2) break;
++        if (nanobox_ac_w2gen[i3] != nanobox_ac_gen) { nanobox_ac_w2gen[i3] = nanobox_ac_gen; nanobox_ac_w2[i3] = k2; nanobox_ac_wlive++; break; }
++      }
++    }
++  }
++  if ((nanobox_ac_misc[ACM_TOTAL] & (AC_WINDOW - 1)) == 0) {
++    if (nanobox_ac_wlive > nanobox_ac_misc[ACM_PEAK2M]) nanobox_ac_misc[ACM_PEAK2M] = nanobox_ac_wlive;
++    nanobox_ac_wlive = 0; nanobox_ac_gen++; nanobox_ac_last2 = ~(Bit64u)0; nanobox_ac_misc[ACM_WINDOWS]++;
++  }
++
++  // A kernel address reached at CPL 3 would mean a window fast path cannot skip the permission
++  // test. (user_pl is 1 at CPL 3, which is exactly what the emitted accessBits test shifts by.)
++  if (cls != AC_USER && BX_CPU_THIS_PTR user_pl) {
++    nanobox_ac_misc[ACM_KERN_CPL3]++;
++    if (cls == AC_DIRECT) nanobox_ac_misc[ACM_DIRECT_CPL3]++;
++  }
++
++  // same-page locality inside one compiled-unit invocation. Counted twice: over every access, and
++  // over the table-probed accesses alone -- the stack window resolves its own address, so only the
++  // second population could reuse a hoisted DTLB entry pointer.
++  unsigned probed = (kind != AC_STK);
++  if (nanobox_ac_unit_seq != nanobox_ac_seq_seen) {
++    nanobox_ac_seq_seen = nanobox_ac_unit_seq; nanobox_ac_unit_np = 0; nanobox_ac_pnp = 0;
++    nanobox_ac_misc[ACM_FIRST]++;
++    nanobox_ac_unit_pages[nanobox_ac_unit_np++] = page;
++    if (probed) { nanobox_ac_misc[ACM_PFIRST]++; nanobox_ac_probe_pages[nanobox_ac_pnp++] = page; nanobox_ac_prev_probe = page; }
++  } else {
++    if (page == nanobox_ac_prev_page) nanobox_ac_misc[ACM_SAMEPREV]++;
++    else {
++      unsigned seen = 0;
++      for (unsigned j = 0; j < nanobox_ac_unit_np; j++) if (nanobox_ac_unit_pages[j] == page) { seen = 1; break; }
++      nanobox_ac_misc[seen ? ACM_REVISIT : ACM_NEWPAGE]++;
++      if (!seen && nanobox_ac_unit_np < 16) nanobox_ac_unit_pages[nanobox_ac_unit_np++] = page;
++    }
++    if (probed) {
++      if (!nanobox_ac_pnp) { nanobox_ac_misc[ACM_PFIRST]++; nanobox_ac_probe_pages[nanobox_ac_pnp++] = page; }
++      else if (page == nanobox_ac_prev_probe) nanobox_ac_misc[ACM_PSAMEPREV]++;
++      else {
++        unsigned seen = 0;
++        for (unsigned j = 0; j < nanobox_ac_pnp; j++) if (nanobox_ac_probe_pages[j] == page) { seen = 1; break; }
++        nanobox_ac_misc[seen ? ACM_PREVISIT : ACM_PNEWPAGE]++;
++        if (!seen && nanobox_ac_pnp < 16) nanobox_ac_probe_pages[nanobox_ac_pnp++] = page;
++      }
++      nanobox_ac_prev_probe = page;
++    }
++  }
++  nanobox_ac_prev_page = page;
++
++  { Bit64u cr3 = BX_CPU_THIS_PTR cr3;
++    if (nanobox_ac_cr3[nanobox_ac_cr3_last] == cr3 && nanobox_ac_cr3_n[nanobox_ac_cr3_last]) nanobox_ac_cr3_n[nanobox_ac_cr3_last]++;
++    else {
++      nanobox_ac_cr3_last = nanobox_ac_bump(nanobox_ac_cr3, nanobox_ac_cr3_n, cr3, &nanobox_ac_misc[ACM_CR3N], &nanobox_ac_misc[ACM_CR3OVF]);
++      nanobox_ac_bump(nanobox_ac_root, nanobox_ac_root_n, cr3 >> 12, &nanobox_ac_misc[ACM_ROOTN], &nanobox_ac_misc[ACM_ROOTOVF]);
++    } }
++}
++}
++
++NB_EXPORT(nanobox_set_addrcensus) void nanobox_set_addrcensus(unsigned on) { nanobox_jit_addrcensus = on; }
++// NANOBOX_DMAP. Bit 0 must be set BEFORE the guest boots (it decides where each block lands the
++// first time it is touched); bit 1 is refused if any block is already placed compactly, because the
++// window's `vector + phys` would then name a different block than the one the guest wrote.
++NB_EXPORT(nanobox_set_jit_dmap) unsigned nanobox_set_jit_dmap(unsigned mask)
++{
++  Bit32u bs = BX_MEM(0)->nanobox_block_size();
++  Bit8u *vec = BX_MEM(0)->nanobox_vector();
++  Bit64u nblocks = bs ? BX_MEM(0)->nanobox_ram_len() / bs : 0;
++  // Refuse outright if ANY block is already placed compactly. Mixing the two placements is not a
++  // slow path, it is corruption: the compact allocator hands out `vector + used_blocks*block_size`
++  // while the identity one takes `vector + block*block_size`, and the two collide. That is exactly
++  // what happens on a Wizer-snapshotted engine, whose blocks were allocated before this call.
++  for (Bit64u i = 0; i < nblocks; i++) {
++    Bit8u *b = BX_MEM(0)->nanobox_block_ptr((Bit32u) i);
++    if (!b || b == vec + i * bs) continue;
++    nanobox_mem_identity = 0; nanobox_jit_dmap = 0;
++    return 0;
++  }
++  nanobox_mem_identity = (mask & 1) ? 1 : 0;
++  nanobox_jit_dmap = (mask & 1) ? mask : (mask & ~2u);
++  return nanobox_jit_dmap;
++}
++// sel: 0..2 accesses per class by kind (rd/wr/stk), 3 distinct 4 KB pages, 4 distinct 2 MB regions,
++// 5..8 the observed low/high address per class as (lo32, hi32) pairs, 9 kernel PGD histogram,
++// 10 user PGD histogram, 11 the 4 MB histogram of the top 2 GB, 12 the ACM_* scalars,
++// 13..15 the CR3 table (value lo32, value hi32, access count).
++NB_EXPORT(nanobox_jit_addrstat) double nanobox_jit_addrstat(unsigned sel, unsigned i)
++{
++  switch (sel) {
++    case 0: case 1: case 2: return i < AC_CLASSES ? (double) nanobox_ac_cls[i][sel] : 0;
++    case 3: return i < AC_CLASSES ? (double) nanobox_ac_pg4[i] : 0;
++    case 4: return i < AC_CLASSES ? (double) nanobox_ac_pg2m[i] : 0;
++    case 5: return i < AC_CLASSES ? (double) (Bit32u) nanobox_ac_lo[i] : 0;
++    case 6: return i < AC_CLASSES ? (double) (Bit32u) (nanobox_ac_lo[i] >> 32) : 0;
++    case 7: return i < AC_CLASSES ? (double) (Bit32u) nanobox_ac_hi[i] : 0;
++    case 8: return i < AC_CLASSES ? (double) (Bit32u) (nanobox_ac_hi[i] >> 32) : 0;
++    case 9: return i < 512 ? (double) nanobox_ac_pgd_k[i] : 0;
++    case 10: return i < 512 ? (double) nanobox_ac_pgd_u[i] : 0;
++    case 11: return i < 512 ? (double) nanobox_ac_top[i] : 0;
++    case 12: return i == ACM_UNITS ? (double) nanobox_ac_unit_seq : i < ACM_N ? (double) nanobox_ac_misc[i] : 0;
++    case 13: return i < AC_CR3_N && nanobox_ac_cr3[i] ? (double) (Bit32u) (nanobox_ac_cr3[i] - 1) : 0;
++    case 14: return i < AC_CR3_N && nanobox_ac_cr3[i] ? (double) (Bit32u) ((nanobox_ac_cr3[i] - 1) >> 32) : 0;
++    case 15: return i < AC_CR3_N ? (double) nanobox_ac_cr3_n[i] : 0;
++    default: return 0;
++  }
++}
++NB_EXPORT(nanobox_jit_addrstat_n) unsigned nanobox_jit_addrstat_n(unsigned sel)
++{ return sel <= 8 ? AC_CLASSES : sel <= 11 ? 512 : sel == 12 ? ACM_N : AC_CR3_N; }
++
+ /////////////////////////////////////////////////////////////////////////
+ // Trace compiler
+ /////////////////////////////////////////////////////////////////////////
+@@ -2042,6 +2294,22 @@
+   // NANOBOX_STACKTAG bit 0: PUSH/POP/CALL/RET take the CPU's own stack window instead of the
+   // general address-resolution machinery. bit 1 extends it to 8-byte SS-segment operands (frame slots).
+   bool stackTag() const { return (nanobox_jit_stacktag & 1) != 0; }
++  // work/j/addropts: the address census (level 3 + NANOBOX_ADDRCENSUS) puts one call in front of
++  // every compiled access's address resolution. Measurement only; off in every shipped configuration.
++  bool addrCensus() const { return nanobox_jit_addrcensus != 0 && nanobox_jit_level >= 3; }
++  // NANOBOX_DMAP bit 1: emit the direct-map window arm in front of the DTLB probe. Needs bit 0
++  // (identity host-block placement), because upstream Bochs compacts the host arena in first-touch
++  // order and `vector + phys` would otherwise name the wrong block.
++  bool dmapWindow() const { return (nanobox_jit_dmap & 2) != 0 && nanobox_mem_identity != 0; }
++  // bit 2: reads only. A write through the window skips the dirty-bit maintenance the DTLB fill
++  // does, which is guest-visible state (the page tables are guest RAM); this isolates that.
++  bool dmapReads() const { return (nanobox_jit_dmap & 4) != 0; }
++  static uint32_t dmapVec() { return (uint32_t)(uintptr_t) BX_MEM(0)->nanobox_vector(); }
++  static uint32_t dmapLen() { return (uint32_t) BX_MEM(0)->nanobox_ram_len(); }
++  void emitAddrCensus(uint32_t la, unsigned kind) {
++    if (!addrCensus()) return;
++    em->get(la); em->i32c((int32_t) kind); em->call(fn(FNIDX(&nanobox_helper_addr_census), "li>v"));
++  }
+   bool stackTagSS() const { return (nanobox_jit_stacktag & 2) != 0; }
+   // bit 2: the three window fields are adjacent in the CPU struct, so one base local turns their
+   // memarg offsets into single LEB bytes -- 8 bytes once per unit against 3 saved at every site.
+@@ -2085,6 +2353,39 @@
+   // `needFree`: the caller wants "this page carries no write stamps" in L_stampFree (the REP and
+   //             merged-push fast paths refuse the page rather than doing the dance per byte).
+   void tlbProbe(uint32_t la, unsigned size, unsigned bit, uint32_t slowDepth, unsigned stampSize = 0, bool needFree = false) {
++    if (addrCensus()) { PhScope _c(this, PH_ADDR); emitAddrCensus(la, bit == 4 ? 1 : 0); }
++    if (!dmapWindow() || (dmapReads() && (bit != 1 || stampSize || needFree)))
++      { tlbProbeTable(la, size, bit, slowDepth, stampSize, needFree); tlbProbeOffset(la); return; }
++    { PhScope _ph(this, PH_ADDR);
++      // Two tests, both on the linear address alone: its top 32 bits name the direct map, and its
++      // low 32 -- which ARE the guest-physical address, PAGE_OFFSET being 4 GB aligned -- are inside
++      // guest RAM. Everything the DTLB probe would have established (present, permitted, mapped to a
++      // host page) is a property of the window, not of this address.
++      em->get(la); em->i64c(32); em->op(I64_SHR_U); em->op(I32_WRAP_I64);
++      em->i32c((int32_t)(uint32_t)(NB_DMAP_BASE >> 32)); em->op(I32_EQ);
++      // ... and outside the legacy hole below 1 MB, whose physical addresses Bochs does NOT serve
++      // from the RAM arena (VGA aperture, shadowed option/BIOS ROM, memory handlers). The direct map
++      // aliases them like any other physical address, so `vector + phys` would hand back RAM where
++      // the guest must see ROM or a device.
++      em->get(la); em->op(I32_WRAP_I64); em->i32c((int32_t) NB_DMAP_LOW); em->op(I32_SUB);
++      em->i32c((int32_t) (dmapLen() - NB_DMAP_LOW)); em->op(I32_LT_U);
++      em->op(I32_AND);
++      iff();
++        profCount(&nanobox_dmap_hits);
++        // the write-stamp dance still runs: the kernel patches code through this very alias, and the
++        // stamp table is indexed by the physical address the window just handed us.
++        if (stampSize || needFree) { em->get(la); em->i64c((Bit64s) 0xfffff000ULL); em->op(I64_AND); em->set(W); emitStampDance(la, stampSize, needFree); }
++        em->get(la); em->op(I32_WRAP_I64); em->i32c(-4096); em->op(I32_AND); em->i32c((int32_t) dmapVec()); em->op(I32_ADD); em->set(L_host);
++      els();
++        profCount(&nanobox_dmap_miss);
++        tlbProbeTable(la, size, bit, slowDepth + 1, stampSize, needFree);   // +1: the `if` is a block
++      endb();
++    }
++    tlbProbeOffset(la);
++  }
++  // The DTLB path: index the guest's own 2048-entry data TLB, test the page frame and the access
++  // bits, then take the entry's host page pointer. Leaves the page base in L_host.
++  void tlbProbeTable(uint32_t la, unsigned size, unsigned bit, uint32_t slowDepth, unsigned stampSize, bool needFree) {
+     { PhScope _ph(this, PH_ADDR);
+       dtlbLookup(la, size, bit, slowDepth);   // leaves the entry pointer in T32[0]
+       profCountOp(OC_DTLB);                   // level 3: every access the guest's own DTLB served
+@@ -2092,22 +2393,29 @@
+     if (stampSize || needFree) {
+       PhScope _s(this, PH_STAMP);
+       em->get(T32[0]); em->mem(I64_LOAD, TLB_OFF(ppf), 3); em->set(W);
+-      em->get(W); em->op(I32_WRAP_I64); em->i32c(LPF_MASK_LO); em->op(I32_AND); em->i32c(10); em->op(I32_SHR_U);
+-      em->i32c((uint32_t)(uintptr_t) pageWriteStampTable.nanobox_fgm()); em->op(I32_ADD);
+-      em->mem(I32_LOAD, 0, 2);
+-      if (needFree) { em->op(I32_EQZ); em->tee(L_stampFree); em->op(I32_EQZ); }
+-      if (stampSize) {
+-        iff();
+-          profCount(&nanobox_stats.link_fail[6]); profReason(R_STAMP);
+-          em->get(W); em->get(la); em->i64c(0xfff); em->op(I64_AND); em->op(I64_OR);
+-          em->i32c(stampSize); em->call(fn(FNIDX(&nanobox_helper_dec_write_stamp), "li>v"));
+-        endb();
+-        needAsyncCheck = true;   // handleSMC sets BX_ASYNC_EVENT_STOP_TRACE
+-      } else em->drop();
++      emitStampDance(la, stampSize, needFree);
+     }
+     { PhScope _pa(this, PH_ADDR);
+-      em->get(T32[0]); em->mem(I32_LOAD, TLB_OFF(hostPageAddr), 2); em->set(L_host);
+-      em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->set(P_off); }
++      em->get(T32[0]); em->mem(I32_LOAD, TLB_OFF(hostPageAddr), 2); em->set(L_host); }
++  }
++  // The iCache write-stamp test for a write, given the physical page frame already in W.
++  void emitStampDance(uint32_t la, unsigned stampSize, bool needFree) {
++    em->get(W); em->op(I32_WRAP_I64); em->i32c(LPF_MASK_LO); em->op(I32_AND); em->i32c(10); em->op(I32_SHR_U);
++    em->i32c((uint32_t)(uintptr_t) pageWriteStampTable.nanobox_fgm()); em->op(I32_ADD);
++    em->mem(I32_LOAD, 0, 2);
++    if (needFree) { em->op(I32_EQZ); em->tee(L_stampFree); em->op(I32_EQZ); }
++    if (stampSize) {
++      iff();
++        profCount(&nanobox_stats.link_fail[6]); profReason(R_STAMP);
++        em->get(W); em->get(la); em->i64c(0xfff); em->op(I64_AND); em->op(I64_OR);
++        em->i32c(stampSize); em->call(fn(FNIDX(&nanobox_helper_dec_write_stamp), "li>v"));
++      endb();
++      needAsyncCheck = true;   // handleSMC sets BX_ASYNC_EVENT_STOP_TRACE
++    } else em->drop();
++  }
++  void tlbProbeOffset(uint32_t la) {
++    PhScope _pa(this, PH_ADDR);
++    em->get(la); em->op(I32_WRAP_I64); em->i32c(0xfff); em->op(I32_AND); em->set(P_off);
+   }
+   // entry = &DTLB.entry[((lo32(la) + size-1) & tlb_mask) >> 12], then the two tests above. The
+   // entry pointer is left in T32[0] for the loads that follow.
+@@ -2301,6 +2609,7 @@
+     // the window has no per-candidate structure to count, so the census records every access here
+     // and the refills below it; hits are the difference (stk - stkmiss).
+     profCountOp(OC_STK);
++    emitAddrCensus(off_l, 2);   // SS has no base in 64-bit mode: the offset IS the linear address
+     em->get(off_l); stkload(I64_LOAD, ADDR(BX_CPU_THIS_PTR espPageBias), 3); em->op(I64_ADD); em->tee(K_stk);
+     stkload(I64_LOAD32_U, ADDR(BX_CPU_THIS_PTR espPageWindowSize), 2); em->op(I64_GE_U);
+     iff();
+@@ -4512,6 +4821,7 @@
+     }
+     if (cpuBase()) { em->i32c((int32_t) nbCpuBase()); em->set(L_cpu); }
+     invalidateAll();
++    if (addrCensus()) profCount(&nanobox_ac_unit_seq);   // one bump per unit entry; the census reads it to bound a unit invocation
+     // direct calls: bit 0 of the argument says "a translated caller called you and is waiting on the
+     // host stack" -- only then may a RET in this function compile to a wasm `return`
+     if (dcallOn()) {
+--- a/bochs/memory/misc_mem.cc	2026-08-16 11:14:27.216528006 +0000
++++ b/bochs/memory/misc_mem.cc	2026-08-22 23:58:58.357749684 +0000
+@@ -69,6 +69,8 @@
+ #endif
+ }
+ 
++extern unsigned nanobox_mem_identity;   // NANOBOX_DMAP bit 0, defined next to allocate_block
++
+ Bit8u* BX_MEM_C::alloc_vector_aligned(Bit64u bytes, Bit64u alignment)
+ {
+   Bit64u test_mask = alignment - 1;
+@@ -135,12 +137,18 @@
+   BX_INFO(("%.2fMB", (float)(BX_MEM_THIS len / (1024.0*1024.0))));
+   BX_INFO(("mem block size = 0x%08x, blocks=%u", BX_MEM_THIS block_size, num_blocks));
+   BX_MEM_THIS blocks = new Bit8u* [num_blocks];
+-  if (0) {
+-    // all guest memory is allocated, just map it
++  // nanobox (NANOBOX_DMAP bit 0, work/j/addropts): map every block up front at its own offset.
++  // The JIT's direct-map window resolves `PAGE_OFFSET + phys` to `vector + phys` WITHOUT consulting
++  // blocks[], so a page must not be able to be un-backed at the moment the window hands out its
++  // address: lazy first-touch allocation would let the window read the arena before allocate_block
++  // had zeroed it, and let a write land in bytes a later allocate_block would then zero away.
++  // The arena is already allocated at full size above, so this costs one memset, not one allocation.
++  if (nanobox_mem_identity && host >= guest) {
+     for (idx = 0; idx < num_blocks; idx++) {
+-      BX_MEM_THIS blocks[idx] = BX_MEM_THIS vector + (idx * BX_MEM_THIS block_size);
++      BX_MEM_THIS blocks[idx] = BX_MEM_THIS vector + ((Bit64u) idx * BX_MEM_THIS block_size);
+     }
+     BX_MEM_THIS used_blocks = num_blocks;
++    memset(BX_MEM_THIS vector, 0, (size_t) BX_MEM_THIS len);
+   }
+   else {
+     // host cannot allocate all requested guest memory
+@@ -203,9 +211,26 @@
+ }
+ #endif
+ 
++// nanobox (NANOBOX_DMAP bit 0, work/j/addropts): place guest-physical block N at
++// `vector + N*block_size` instead of at the next free host slot. Upstream Bochs COMPACTS the host
++// arena in first-touch order, which is why guest-physical -> host is not affine and a linear
++// address in Linux's direct map cannot be resolved by an add. Identity placement restores the
++// affinity at no allocation cost -- `vector` is already allocated at full size in init_memory, and
++// blocks stay lazily zeroed on first touch -- but it gives up the BX_LARGE_RAMFILE overcommit
++// (host RAM smaller than guest RAM), so it is refused unless host covers guest.
++unsigned nanobox_mem_identity = 0;
++
+ void BX_MEM_C::allocate_block(Bit32u block)
+ {
+   const Bit32u max_blocks = (Bit32u)(BX_MEM_THIS allocated / BX_MEM_THIS block_size);
++  if (nanobox_mem_identity && BX_MEM_THIS allocated >= BX_MEM_THIS len) {
++    BX_MEM_THIS blocks[block] = BX_MEM_THIS vector + (Bit64u) block * BX_MEM_THIS block_size;
++    BX_MEM_THIS used_blocks++;
++#ifdef NANOBOX_DETERMINISTIC
++    memset(BX_MEM_THIS blocks[block], 0, BX_MEM_THIS block_size);
++#endif
++    return;
++  }
+ 
+ #if BX_LARGE_RAMFILE
+   /*
+@@ -1159,6 +1184,9 @@
+ 
+ // nanobox: raw block-table access for the harness' RAM dumps (see ../nanobox.cc)
+ Bit32u BX_MEM_C::nanobox_block_size(void) { return BX_MEM_THIS block_size; }
++// nanobox: the host arena and the guest RAM length, for the JIT's direct-map window (NANOBOX_DMAP)
++Bit8u *BX_MEM_C::nanobox_vector(void) { return BX_MEM_THIS vector; }
++Bit64u BX_MEM_C::nanobox_ram_len(void) { return BX_MEM_THIS len; }
+ Bit8u *BX_MEM_C::nanobox_block_ptr(Bit32u idx)
+ {
+   if (idx >= (BX_MEM_THIS len / BX_MEM_THIS block_size)) return NULL;
+--- a/bochs/memory/memory-bochs.h	2026-08-15 12:29:48.224432130 +0000
++++ b/bochs/memory/memory-bochs.h	2026-08-22 23:52:57.006418102 +0000
+@@ -168,6 +168,8 @@
+   BX_MEM_SMF Bit64u  get_memory_len(void);
+   // nanobox: raw block-table access for the harness' RAM dumps (see ../nanobox.cc)
+   BX_MEM_SMF Bit32u  nanobox_block_size(void);
++  BX_MEM_SMF Bit8u*  nanobox_vector(void);
++  BX_MEM_SMF Bit64u  nanobox_ram_len(void);
+   BX_MEM_SMF Bit8u  *nanobox_block_ptr(Bit32u idx);
+   BX_MEM_SMF void allocate_block(Bit32u index);
+   BX_MEM_SMF Bit8u* alloc_vector_aligned(Bit64u bytes, Bit64u alignment);
