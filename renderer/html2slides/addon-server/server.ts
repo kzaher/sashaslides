@@ -12,7 +12,9 @@
  *
  * Routes (│ = filled by a parallel feature workstream):
  *   GET  /healthz                 — liveness (Caddy upstream check)
- *   GET  /                        — the full option-rich UI (public/app.html)
+ *   GET  /                        — the product home page (public/home.html)
+ *   GET  /dev                     — the full option-rich developer UI (public/app.html)
+ *   GET  /privacy, /terms         — the legal pages the Google OAuth consent screen links to
  *   GET  /shell.html              — small shell Code.gs fetches → HtmlService
  *   GET  /static/*                — public/ assets (app.js, app.css)
  *   GET  /drawio/*                — self-hosted drawio webapp (deps/drawio)        │ D
@@ -27,6 +29,7 @@ import { existsSync, statSync, createReadStream, readFileSync } from "fs";
 import { join, normalize, extname, dirname } from "path";
 import { fileURLToPath } from "url";
 import { apiHandlers } from "./registry.js";
+import { pageFor } from "./pages.js";
 // Feature modules register their routes (via ./registry) at import time. Static
 // imports so tsx resolves the .js→.ts mapping; each is a no-op stub until its
 // workstream lands. Adding a workstream = new file under api/ + one import here.
@@ -186,7 +189,8 @@ const server = createServer(async (req, res) => {
     }
 
     // UI shell + app + static
-    if (p === "/" ) { if (serveStatic(res, PUBLIC_DIR, "app.html")) return; }
+    const page = pageFor(p);
+    if (page !== null) { if (serveStatic(res, PUBLIC_DIR, page)) return; }
     if (p === "/shell.html") { if (serveStatic(res, PUBLIC_DIR, "shell.html")) return; }
     if (p.startsWith("/static/")) { if (serveStatic(res, PUBLIC_DIR, p.slice("/static/".length))) return; }
     if (serveStatic(res, PUBLIC_DIR, p.slice(1))) return;

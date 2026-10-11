@@ -50,6 +50,7 @@ RUN npm install --omit=dev --no-audit --no-fund \
   && npm install tsx @types/node @types/pngjs --no-audit --no-fund
 COPY --from=builder /src/renderer/html2slides/addon-server/server.ts ./
 COPY --from=builder /src/renderer/html2slides/addon-server/registry.ts ./
+COPY --from=builder /src/renderer/html2slides/addon-server/pages.ts ./
 COPY --from=builder /src/renderer/html2slides/addon-server/api ./api
 COPY --from=builder /src/renderer/html2slides/addon-server/public ./public
 # Self-hosted drawio editor. server.ts resolves DRAWIO_DIR as
