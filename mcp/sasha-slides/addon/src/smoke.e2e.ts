@@ -14,7 +14,7 @@
 // a ~420 KB inline bundle actually parses, whether React mounts, or whether the converter's staging
 // iframe and its inline-<script> extractor path survive -- which now also proves the MINIFIED
 // extractor still works, since it reaches the page through the same base64 route. This loads the
-// files Apps Script would serve, answers the twelve server functions from a canned proposal with a
+// files Apps Script would serve, answers every server function from a canned proposal with a
 // canned event log and canned candidate comments, and reports what rendered: the conversation's
 // LOG first (it is the one surface the menu opens), then the slides grid and its mark-up view,
 // then the report window.
@@ -46,6 +46,7 @@ import { fileURLToPath } from "node:url";
 import CDPraw from "chrome-remote-interface";
 import type { CdpClient, CdpModule } from "../../../../types/cdp-types.ts";
 import { slideHtml } from "./fake-drive.ts";
+import { AGENT_REPLY_MARKER } from "../../agent-marker.ts";
 
 // SAFETY: types/ambient.d.ts declares the module's default export as `unknown` because the package
 // ships no .d.ts; types/cdp-types.ts is the project's hand-written shape for it, and this is the
@@ -70,9 +71,11 @@ const GRID_SHOT = join(tmpdir(), "sasha-grid-smoke.png");
  * without this there is no picture of the thing this rework exists for: the drag gesture on every
  * cell at once, with the grid still the grid.
  */
-const GRID_ANNOTATE_SHOT = join(tmpdir(), "sasha-grid-annotate-smoke.png");
+const COMPOSER_SHOT = join(tmpdir(), "sasha-spot-smoke.png");
 const MARKUP_SHOT = join(tmpdir(), "sasha-markup-smoke.png");
 const CHAT_SHOT = join(tmpdir(), "sasha-conversation-smoke.png");
+/** The same column with the log's scroller uncapped, so every card can be read in one image. */
+const LOG_SHOT = join(tmpdir(), "sasha-conversation-log-smoke.png");
 const REPORT_SHOT = join(tmpdir(), "sasha-defect-report-smoke.png");
 /** The dialog's own size, as Code.gs asks for it -- so the grid is measured at the real width. */
 const DIALOG_WIDTH = 1000;
@@ -275,11 +278,10 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
       detail: scale,
     });
 
-    // --- THE TOOLBAR IS THREE INDEPENDENT CHOICES, NOT ONE MODE ----------------------------
-    // The window used to hold ONE `surface` enum, so a user had to click a cell to ENTER a screen
-    // before annotation became possible. View, tool and showing are now separate fields, and the
-    // first thing to prove is that all three are offered side by side rather than as one four-way
-    // mode (Picker.tsx).
+    // --- THE GRID IS A CHOOSER, AND ITS CHROME IS ONE TOGGLE -------------------------------
+    // It used to carry three groups -- view, tool and showing -- over four thumbnails. Two of
+    // those are decisions about ONE candidate, and they moved into the editor window that opens
+    // when a candidate is picked. What is left is the one question the grid asks.
     const groups = await evaluateString({
       client,
       expression:
@@ -289,186 +291,171 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
     });
     check({
       failures,
-      what: "the toolbar offers view, tool and showing as three independent choices",
-      ok:
-        groups ===
-        JSON.stringify([
-          ["view", ["All candidates", "One slide"]],
-          ["tool", ["Edit", "Annotate"]],
-          ["showing", ["HTML (authoritative)", "Converted slide"]],
-        ]),
+      what: "the grid's chrome is ONE toggle -- which rendering you are comparing",
+      ok: groups === JSON.stringify([["showing", ["Preview", "Converted"]]]),
       detail: groups,
     });
 
     const chosen = await choicesOf({ client });
     check({
       failures,
-      what: "and the first paint is the grid, with the EDIT tool live and the HTML pane showing",
-      ok: chosen === "All candidates/Edit/HTML (authoritative)",
+      what: "and the first paint is the preview, because that is the slide the user wrote",
+      ok: chosen === "Preview",
       detail: chosen,
     });
 
-    // --- EXACTLY ONE FRAME IS REACHABLE ----------------------------------------------------
-    // `sandbox="allow-same-origin"` goes to the selected candidate's frame and to nothing else,
-    // while the edit tool is live and the HTML pane shows (slide-stage.tsx). Staged HTML of unknown
-    // provenance is rendered inside the user's logged-in Google session, so this is the one
-    // security-relevant attribute on the surface -- and counting it needs real elements.
+    // THE GRID SAYS WHAT THE PICTURES ARE FOR, and not dimly: without it a slide reads as a
+    // thumbnail, and nobody clicks a thumbnail (picker-styles.ts `.sasha-toolbar-say`).
+    const callToAction = await evaluateString({
+      client,
+      expression: "(document.querySelector('.sasha-toolbar-say')||{}).textContent||''",
+    });
+    const sayWeight = await evaluateString({
+      client,
+      expression:
+        "(function(){var e=document.querySelector('.sasha-toolbar-say');" +
+        "return e===null?'':getComputedStyle(e).fontWeight;})()",
+    });
+    check({
+      failures,
+      what: "the grid tells the user the pictures are the control, prominently",
+      ok: /click on it/.test(callToAction) && Number(sayWeight) >= 600,
+      detail: `${JSON.stringify(callToAction)} weight ${sayWeight}`,
+    });
+
+    // --- NOTHING IS REACHABLE IN THE GRID --------------------------------------------------
+    // `sandbox="allow-same-origin"` is the one security-relevant attribute on this surface, and
+    // the grid grants it to nothing at all: the live editor lives in the editor WINDOW, so the
+    // only candidate that can ever be reached into is the one the user opened on purpose.
     const sandboxes = await evaluateString({
       client,
       expression: "JSON.stringify([...document.querySelectorAll('iframe.sasha-frame')].map(f=>f.getAttribute('sandbox')))",
     });
     check({
       failures,
-      what: "the edited candidate's frame is reachable and the other cells keep the strictest sandbox",
-      ok: occurrences({ haystack: sandboxes, needle: "allow-same-origin" }) === 1,
+      what: "no cell in the grid is reachable -- every candidate keeps the strictest sandbox",
+      ok: occurrences({ haystack: sandboxes, needle: "allow-same-origin" }) === 0,
       detail: sandboxes,
     });
 
-    // AND IT FOLLOWS THE SELECTION. The cell's chip selects; the frames are keyed, so React has to
-    // remount both of them on the switch. Without the key the grant and the host's frame reference
-    // both went stale -- a grid where the editor drew its chrome over one slide and wrote to
-    // another, which no reducer test can see.
-    await click({ client, selector: '[aria-label="work on candidate 2"]' });
-    const followed = await pollFor({
+    const gridOverlays = await evaluateNumber({
+      client,
+      expression: "document.querySelectorAll('.sasha-grid .sasha-overlay').length",
+    });
+    check({
+      failures,
+      what: "and no cell takes the pointer: the grid chooses, the editor works",
+      ok: gridOverlays === 0,
+      detail: `saw ${gridOverlays}`,
+    });
+
+    // --- WHAT IS UNDER A CELL, AND WHAT IS NOT ---------------------------------------------
+    // The cell used to carry a name chip, a "Show large" button and a line of status. The index
+    // is on the PICTURE now, clicking the picture is the zoom, and the status was a sentence
+    // nobody could act on -- so what is left is the two decisions a candidate can receive.
+    const cellFoot = await evaluateString({
       client,
       expression:
-        "(function(){var cells=[...document.querySelectorAll('.sasha-cell')];" +
-        "var reachable=cells.map(function(cell){var f=cell.querySelector('iframe.sasha-frame');" +
-        "return f !== null && (f.getAttribute('sandbox')||'').indexOf('allow-same-origin') >= 0;});" +
-        "return reachable.filter(Boolean).length === 1 && reachable[1] === true;})()",
+        "JSON.stringify([...document.querySelectorAll('.sasha-cell:first-child .sasha-cell-foot button')]" +
+        ".map(function(b){return [b.textContent, b.className];}))",
     });
-    const reachable = await evaluateString({
+    check({
+      failures,
+      what: "under every slide: Report defect, then Insert last and accented",
+      ok: cellFoot === JSON.stringify([["Report defect", "sasha-secondary sasha-small"], ["Insert", "sasha-primary sasha-small"]]),
+      detail: cellFoot,
+    });
+
+    const goneFromCells = await evaluateNumber({
+      client,
+      expression: "document.querySelectorAll('.sasha-cell-hint, .sasha-cell-foot .sasha-chip, .sasha-zoom').length",
+    });
+    check({
+      failures,
+      what: "and nothing else -- no caption, no name chip, no Show large",
+      ok: goneFromCells === 0,
+      detail: `saw ${goneFromCells} leftovers`,
+    });
+
+    // THE NUMBER IS ON THE PICTURE. It is what the user says out loud ("option 3"), so it belongs
+    // to the slide rather than to a caption that no longer exists.
+    const numbers = await evaluateString({
       client,
       expression:
-        "JSON.stringify([...document.querySelectorAll('.sasha-cell iframe.sasha-frame')].map(f=>f.getAttribute('sandbox')))",
+        "JSON.stringify([...document.querySelectorAll('.sasha-cell .sasha-cell-number')].map(e=>e.textContent))",
     });
     check({
       failures,
-      what: "and it FOLLOWS the selection -- still exactly one, now candidate 2's",
-      ok: followed,
-      detail: reachable,
+      what: "every candidate wears its own number, 1..N",
+      ok: numbers === JSON.stringify(Array.from({ length: COUNT }, (_unused, at) => String(at + 1))),
+      detail: numbers,
     });
 
-    // --- THE EDIT TOOL'S OWN PANEL ---------------------------------------------------------
-    const slot = await pollFor({ client, expression: "!!document.querySelector('.sasha-editor')" });
-    check({ failures, what: "the visual editor's slot is there, from the first paint", ok: slot });
-
-    const slotHead = await evaluateString({
+    // AND THE WHOLE PICTURE IS THE TARGET, with a pointer cursor over all of it: the slide is an
+    // IFRAME, which swallows the pointer, so a handler on the stage would never fire.
+    const openCursor = await evaluateString({
       client,
-      expression: "(document.querySelector('.sasha-editor strong')||{}).textContent||''",
+      expression:
+        "(function(){var b=document.querySelector('.sasha-cell .sasha-cell-open');" +
+        "if(b===null)return 'no button';var box=b.getBoundingClientRect();" +
+        "var stage=b.parentElement.getBoundingClientRect();" +
+        // Within the stage's 2px border: `inset:0` is the padding box, the rect includes the border.
+        "return getComputedStyle(b).cursor + ' ' + (stage.width - box.width <= 6 &&" +
+        " stage.height - box.height <= 6);})()",
     });
     check({
       failures,
-      what: "and the panel below the slides is the editor's, because the edit tool is the live one",
-      ok: slotHead === "Visual edits",
-      detail: slotHead,
+      what: "the slide itself is clickable, and looks it",
+      ok: openCursor === "pointer true",
+      detail: openCursor,
     });
 
-    // AN ATTACHED EDITOR SAYS NOTHING ABOUT WHY IT IS NOT ATTACHED. `describeEditorReach` is for the
-    // arms where clicking the slide does nothing; printing it over a live editor put two sentences
-    // of instruction on top of the thing the user is looking at (editor-slot.tsx).
-    const liveComplaint = await evaluateString({
+    // --- THE HEADER AND THE FOOTER SAY ONLY WHAT IS ACTIONABLE ------------------------------
+    // "4 candidate slides p_1791145806407_yig6ws" stood over the grid: the count is the number of
+    // pictures below it and the id names a file nobody opens. The footer's tally of mark-ups and
+    // its two "option N" buttons went the same way -- those act on ONE candidate, so they are
+    // under the candidate they act on.
+    const headerText = await evaluateString({
       client,
-      expression: "(document.querySelector('.sasha-editor .sasha-trouble')||{}).textContent||''",
+      expression: "(document.querySelector('.sasha-dialog > .sasha-header')||{}).textContent||''",
     });
     check({
       failures,
-      what: "and it does not explain itself while it is live",
-      ok: liveComplaint === "",
-      detail: liveComplaint.slice(0, 120),
+      what: "the header does not count what the reader can see, nor name the proposal's folder",
+      ok: headerText === "" && !headerText.includes(PROPOSAL_ID),
+      detail: JSON.stringify(headerText),
     });
+
+    // THERE IS NO FOOTER BAR. It held one button, under a title bar that already has an X, and
+    // two ways out stacked ten pixels apart read as the same control twice.
+    const footerBars = await evaluateNumber({ client, expression: "document.querySelectorAll('.sasha-actions').length" });
+    check({
+      failures,
+      what: "there is no second bar at the bottom of the window",
+      ok: footerBars === 0,
+      detail: `saw ${footerBars}`,
+    });
+
+    // BUT THE ANSWER IT CARRIED SURVIVES, on the chrome row. The window's X is Apps Script's own
+    // `showModelessDialog` chrome: it closes the window and writes nothing, while this writes
+    // `PICK {picked: null}` -- the only thing that answers a waiting `await_pick` with "none of
+    // these" (dialog.tsx `submit`). Losing it would leave the agent waiting for its timeout.
+    const noneOfThese = await evaluateString({
+      client,
+      expression: "(document.querySelector('.sasha-toolbar .sasha-none')||{}).textContent||''",
+    });
+    check({
+      failures,
+      what: "and the answer it carried is on the chrome row, worded as an answer",
+      ok: noneOfThese === "None of these",
+      detail: JSON.stringify(noneOfThese),
+    });
+
 
     await client.Page.captureScreenshot({ format: "png" }).then((shot) =>
       writeFileSync(GRID_SHOT, Buffer.from(shot.data, "base64")),
     );
     process.stdout.write(`      grid screenshot: ${GRID_SHOT}\n`);
-
-    // --- THE ANNOTATE TOOL ARRIVES IN THE GRID, WITH NO SCREEN TO ENTER --------------------
-    // This is the whole correction, and it is only visible in a browser: choosing the tool has to
-    // put the drag surface on EVERY cell while `.sasha-grid` is still the thing on screen. The old
-    // shape -- click a cell, land in `.sasha-annotate`, get one overlay -- would satisfy every
-    // reducer test and fail here.
-    await chooseIn({ client, group: "tool", label: "Annotate" });
-    const allDraggable = await pollFor({
-      client,
-      expression: `document.querySelectorAll('.sasha-grid .sasha-cell-stage .sasha-overlay').length === ${COUNT}`,
-    });
-    const overlays = await evaluateNumber({ client, expression: "document.querySelectorAll('.sasha-overlay').length" });
-    check({
-      failures,
-      what: `choosing the annotate tool puts a drag surface on all ${COUNT} cells`,
-      ok: allDraggable,
-      detail: `saw ${overlays}`,
-    });
-
-    const stillGrid = await choicesOf({ client });
-    check({
-      failures,
-      what: "and it changed nothing else -- the grid is still the grid, the pane still the HTML",
-      ok: stillGrid === "All candidates/Annotate/HTML (authoritative)",
-      detail: stillGrid,
-    });
-
-    // THE TWO TOOLS CANNOT BOTH HAVE THE POINTER. `.sasha-marks` is the edit tool's inert copy of
-    // the same boxes, and a transparent overlay above the editor's chrome would swallow every one
-    // of its gestures -- so exactly one of the two is on the stages at a time (slide-stage.tsx).
-    const inertMarks = await evaluateNumber({ client, expression: "document.querySelectorAll('.sasha-marks').length" });
-    check({
-      failures,
-      what: "the edit tool's inert marks gave the pointer up to the gesture",
-      ok: inertMarks === 0,
-      detail: `saw ${inertMarks}`,
-    });
-
-    const stillReachable = await evaluateNumber({
-      client,
-      expression:
-        "[...document.querySelectorAll('iframe.sasha-frame')]" +
-        ".filter(f=>(f.getAttribute('sandbox')||'').indexOf('allow-same-origin')>=0).length",
-    });
-    check({
-      failures,
-      what: "and no frame stays reachable once the editor is not the tool",
-      ok: stillReachable === 0,
-      detail: `saw ${stillReachable}`,
-    });
-
-    const anomalyPanel = await pollFor({ client, expression: "!!document.querySelector('.sasha-anomalies')" });
-    check({ failures, what: "the tool panel is the mark-up list now, not the editor's", ok: anomalyPanel });
-
-    await client.Page.captureScreenshot({ format: "png" }).then((shot) =>
-      writeFileSync(GRID_ANNOTATE_SHOT, Buffer.from(shot.data, "base64")),
-    );
-    process.stdout.write(`      annotated grid screenshot: ${GRID_ANNOTATE_SHOT}\n`);
-
-    // --- AND THE GESTURE REALLY WORKS AT GRID ZOOM ------------------------------------------
-    // WAIT FOR THE CELL TO HAVE ITS REAL HEIGHT before dragging. While the candidate's HTML is
-    // still being fetched the stage holds a one-line placeholder, so the overlay is a few pixels
-    // tall and a 20%-to-70% drag collapses to a box `regionOfDrag` refuses as too small -- which
-    // reads as "dragging does not work" and is really "there was nothing to drag on yet".
-    const cellDragReady = await pollFor({
-      client,
-      expression:
-        "(function(){var o=document.querySelector('.sasha-cell-stage .sasha-overlay');" +
-        "return !!o && o.getBoundingClientRect().height > 100;})()",
-    });
-    check({ failures, what: "a cell has its real height before the gesture", ok: cellDragReady });
-
-    await drag({
-      client,
-      selector: ".sasha-cell-stage .sasha-overlay",
-      until: "document.querySelectorAll('.sasha-mark-user').length > 0",
-    });
-    const marked = await pollFor({ client, expression: "document.querySelectorAll('.sasha-mark-user').length > 0" });
-    check({ failures, what: "dragging on a candidate IN THE GRID reported an anomaly", ok: marked });
-
-    const stayedInGrid = await evaluateNumber({ client, expression: "document.querySelectorAll('.sasha-grid').length" });
-    check({
-      failures,
-      what: "and the gesture did not navigate anywhere to do it",
-      ok: stayedInGrid === 1,
-      detail: `saw ${stayedInGrid} grids`,
-    });
 
     // --- THE UNRESOLVED COUNTS, ON THE CELLS -----------------------------------------------
     // The grid and the conversation read the SAME candidate comments. Slide 2 has one open thread
@@ -478,11 +465,6 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
       client,
       expression: "document.querySelectorAll('.sasha-cell-unresolved').length >= 2",
     });
-    const hints = await evaluateString({
-      client,
-      expression: "JSON.stringify([...document.querySelectorAll('.sasha-cell-hint')].map(e=>e.textContent))",
-    });
-    process.stdout.write(`      cell hints: ${hints}\n`);
     check({ failures, what: "the cells carry their unresolved comment counts", ok: badges });
 
     const readBadges = await evaluateString({
@@ -497,35 +479,324 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
       detail: readBadges,
     });
 
-    // THE CELL SAYS WHAT IT IS WAITING FOR. A box just dragged on cell 1 is not sent yet, which
-    // outranks its load state on the one line the cell has (candidate-grid.tsx `hintFor`).
-    const firstHint = await evaluateString({
+    // --- PICKING A CANDIDATE OPENS THE EDITOR OVER THE GRID ---------------------------------
+    const openedAt = Date.now();
+    await click({ client, selector: '[aria-label="Open option 1 to request changes"]' });
+    const opened = await pollFor({ client, expression: "!!document.querySelector('.sasha-editor-scrim .sasha-editor')" });
+    const scrimMs = Date.now() - openedAt;
+    await pollFor({
       client,
-      expression: "(document.querySelector('.sasha-cell .sasha-cell-hint')||{}).textContent||''",
+      expression:
+        "(function(){var f=document.querySelector('.sasha-editor-stage iframe.sasha-frame');" +
+        "return !!f && !!f.contentDocument && f.contentDocument.body && f.contentDocument.body.childNodes.length>0;})()",
     });
+    const frameMs = Date.now() - openedAt;
+    process.stdout.write(`      open timing: scrim ${String(scrimMs)}ms, frame ready ${String(frameMs)}ms\n`);
+    check({ failures, what: "clicking a slide opens the editor on that candidate", ok: opened });
     check({
       failures,
-      what: "and the marked cell says its mark-up has not been sent",
-      ok: /marked, not sent/.test(firstHint),
-      detail: firstHint,
+      what: "and it is on screen in well under a second -- opening is a zoom, not a load",
+      ok: frameMs < 1000,
+      detail: `scrim ${String(scrimMs)}ms, frame ${String(frameMs)}ms`,
     });
 
-    // --- REVIEW IS PRE-INSERT: A MARK-UP GOES TO THE CANDIDATE -------------------------------
-    const blockedSend = await evaluateNumber({
+    const gridStillThere = await evaluateNumber({ client, expression: "document.querySelectorAll('.sasha-grid').length" });
+    check({
+      failures,
+      what: "and the grid stays mounted underneath, so closing comes back where the user was",
+      ok: gridStillThere === 1,
+      detail: `saw ${gridStillThere} grids`,
+    });
+
+    // THE TOOLBAR IS DOWN THE LEFT EDGE of the editor, and it is the ONLY place a tool is chosen.
+    const rail = await evaluateString({
       client,
-      expression: "document.querySelectorAll('.sasha-send-anomaly[disabled]').length",
+      expression:
+        "JSON.stringify([...document.querySelectorAll('.sasha-toolrail .sasha-toolbtn-name')].map(e=>e.textContent))",
     });
     check({
       failures,
-      what: "a mark-up with no words cannot be sent -- an empty comment says nothing",
+      what: "the editor's tools are a rail down its left edge: Select, then Annotate",
+      ok: rail === JSON.stringify(["Select", "Annotate"]),
+      detail: rail,
+    });
+
+    // AND THE THREADS ARE DOWN THE RIGHT EDGE, reading the same comments the conversation shows.
+    const threads = await pollFor({ client, expression: "!!document.querySelector('.sasha-threads')" });
+    check({ failures, what: "and the comment threads are a rail down its right edge", ok: threads });
+
+    // EXACTLY ONE FRAME IS REACHABLE, and it is the candidate the user opened on purpose.
+    const editorReach = await pollFor({
+      client,
+      expression:
+        "[...document.querySelectorAll('iframe.sasha-frame')]" +
+        ".filter(f=>(f.getAttribute('sandbox')||'').indexOf('allow-same-origin')>=0).length === 1",
+    });
+    const reachDetail = await evaluateString({
+      client,
+      expression: "JSON.stringify([...document.querySelectorAll('iframe.sasha-frame')].map(f=>f.getAttribute('sandbox')))",
+    });
+    check({
+      failures,
+      what: "the open candidate's frame is reachable and nothing else is",
+      ok: editorReach,
+      detail: reachDetail,
+    });
+
+    // --- THE SELECT TOOL ACTUALLY SELECTS ---------------------------------------------------
+    // GRANTING THE FRAME IS NOT THE SAME AS EDITING IT. The sandbox check above proves the editor
+    // CAN reach the candidate's document; it proves nothing about whether a click on a paragraph
+    // selects that paragraph, and "I can't select anything and move it" is a complaint no
+    // attribute assertion can catch. `slide-editor.ts` `attach` refuses with a reason when it
+    // cannot reach in, so a failure here is either that refusal or a dead pointer handler.
+    const attachWarning = await evaluateString({
+      client,
+      expression: "JSON.stringify(window.__SASHA_EDITOR_WARNINGS__ || [])",
+    });
+    check({
+      failures,
+      what: "the visual editor attached to the open candidate without refusing",
+      ok: !/cannot attach/.test(attachWarning),
+      detail: attachWarning.slice(0, 220),
+    });
+
+    // CLICK A REAL ELEMENT INSIDE THE STAGED DOCUMENT. The editor listens on the candidate's own
+    // document, so the gesture has to be dispatched there, at the element's own coordinates.
+    const picked = await evaluateString({
+      client,
+      expression:
+        "(function(){" +
+        "var f=document.querySelector('.sasha-editor-stage iframe.sasha-frame');" +
+        "if(!f||!f.contentDocument)return 'no reachable frame';" +
+        "var el=f.contentDocument.querySelector('h1,h2,p,div');" +
+        "if(!el)return 'nothing to select';" +
+        "var box=el.getBoundingClientRect();" +
+        "var opts={bubbles:true,cancelable:true,composed:true,clientX:box.left+box.width/2," +
+        "clientY:box.top+box.height/2,pointerType:'mouse',button:0,pointerId:1,isPrimary:true};" +
+        "el.dispatchEvent(new PointerEvent('pointerdown',opts));" +
+        "el.dispatchEvent(new PointerEvent('pointerup',opts));" +
+        "el.dispatchEvent(new PointerEvent('pointermove',opts));" +
+        "return el.tagName;})()",
+    });
+
+    // The selection box is the editor's OWN chrome, drawn in the HOST document over the frame
+    // (slide-editor.ts `mountChrome`), class `sasha-ed-select`.
+    const selectionShown = await pollFor({
+      client,
+      expression:
+        "(function(){var box=document.querySelector('.sasha-ed-select');" +
+        "return !!box && box.style.display !== 'none';})()",
+    });
+    const selectionState = await evaluateString({
+      client,
+      expression:
+        "(function(){var box=document.querySelector('.sasha-ed-select');" +
+        "if(!box)return 'no .sasha-ed-select in the host document';" +
+        "return 'display=' + (box.style.display||'<unset>') + ' rect=' + JSON.stringify(box.getBoundingClientRect());})()",
+    });
+    check({
+      failures,
+      what: "clicking an element on the candidate selects it",
+      ok: selectionShown,
+      detail: `clicked ${picked}; ${selectionState}`,
+    });
+
+    // AND THE SELECTION IS DRAGGABLE, which is the half the user actually asked for: the chrome
+    // appearing proves the listener fires, not that the thing can be moved. A drag on the
+    // selection box records a `moved` edit, which is what travels to Sasha.
+    const dragged = await evaluateString({
+      client,
+      expression:
+        "(function(){" +
+        "var box=document.querySelector('.sasha-ed-select');" +
+        "if(!box)return 'nothing selected';" +
+        "var r=box.getBoundingClientRect();" +
+        "var at=function(x,y){return {bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y," +
+        "pointerType:'mouse',button:0,pointerId:7,isPrimary:true};};" +
+        "box.dispatchEvent(new PointerEvent('pointerdown',at(r.left+r.width/2,r.top+r.height/2)));" +
+        "document.dispatchEvent(new PointerEvent('pointermove',at(r.left+r.width/2+40,r.top+r.height/2+25)));" +
+        "document.dispatchEvent(new PointerEvent('pointerup',at(r.left+r.width/2+40,r.top+r.height/2+25)));" +
+        "return 'dragged from ' + Math.round(r.left) + ',' + Math.round(r.top);})()",
+    });
+    const movedRecorded = await pollFor({
+      client,
+      expression: "document.querySelectorAll('.sasha-edits li, .sasha-edit').length > 0",
+    });
+    const editsListed = await evaluateString({
+      client,
+      expression:
+        "JSON.stringify([...document.querySelectorAll('.sasha-edits li, .sasha-edit')].map(e=>e.textContent).slice(0,3))",
+    });
+    check({
+      failures,
+      what: "and dragging the selection records a visual edit",
+      ok: movedRecorded,
+      detail: `${dragged}; edits ${editsListed}`,
+    });
+
+    // --- THE ANNOTATE TOOL POINTS AT ELEMENTS -----------------------------------------------
+    // It used to be a rectangle dragged over the slide, with the note typed into a row in a list
+    // somewhere below. It now behaves like Claude's own artifact comments: the same hover and
+    // click the select tool uses, and a composer that opens ON the thing that was clicked.
+    await click({ client, selector: ".sasha-toolrail button:nth-of-type(2)" });
+    const noDragSurface = await pollFor({
+      client,
+      expression: "document.querySelectorAll('.sasha-editor-stage .sasha-overlay').length === 0",
+    });
+    check({
+      failures,
+      what: "annotate does NOT put a drag surface over a live document",
+      ok: noDragSurface,
+      detail: "a transparent overlay would swallow every click the selection needs",
+    });
+
+    // CLICK A REAL ELEMENT and the composer opens on it.
+    const annotated = await evaluateString({
+      client,
+      expression:
+        "(function(){" +
+        "var f=document.querySelector('.sasha-editor-stage iframe.sasha-frame');" +
+        "if(!f||!f.contentDocument)return 'no reachable frame';" +
+        "var el=f.contentDocument.querySelector('h1,h2,p,div');" +
+        "if(!el)return 'nothing to select';" +
+        "var box=el.getBoundingClientRect();" +
+        "var opts={bubbles:true,cancelable:true,composed:true,clientX:box.left+box.width/2," +
+        "clientY:box.top+box.height/2,pointerType:'mouse',button:0,pointerId:1,isPrimary:true};" +
+        "el.dispatchEvent(new PointerEvent('pointerdown',opts));" +
+        "el.dispatchEvent(new PointerEvent('pointerup',opts));" +
+        "return el.tagName;})()",
+    });
+    const composerOpen = await pollFor({ client, expression: "!!document.querySelector('.sasha-spot')" });
+    const composerWhere = await evaluateString({
+      client,
+      expression:
+        "(function(){var c=document.querySelector('.sasha-spot');" +
+        "if(!c)return 'no composer';var stage=c.parentElement.getBoundingClientRect();" +
+        "var box=c.getBoundingClientRect();" +
+        "return 'side=' + c.dataset.side + ' insideStage=' + (box.left >= stage.left - 1 &&" +
+        " box.right <= stage.right + 1 && box.top >= stage.top - 1 && box.bottom <= stage.bottom + 1);})()",
+    });
+    check({
+      failures,
+      what: "clicking an element with annotate opens a composer anchored to it",
+      ok: composerOpen && /insideStage=true/.test(composerWhere),
+      detail: `clicked ${annotated}; ${composerWhere}`,
+    });
+
+    // AND THE EDIT CHROME IS NOT THERE. Comment mode selects, it does not resize or recolour.
+    // NOT IN THE DOCUMENT, not merely `hidden`: `.sasha-ed-bar` sets `display: flex`, which beats
+    // the user agent's `[hidden] { display: none }` -- measured, with the bar plainly on screen
+    // while reporting `hidden === true`.
+    const editChrome = await evaluateNumber({
+      client,
+      expression:
+        "document.querySelectorAll('.sasha-ed-handle').length" +
+        " + document.querySelectorAll('.sasha-ed-bar').length",
+    });
+    check({
+      failures,
+      what: "and comment mode puts no resize handles or edit bar in the document",
+      ok: editChrome === 0,
+      detail: `${editChrome} edit controls still in the tree`,
+    });
+
+    // --- REVIEW IS PRE-INSERT: A COMMENT GOES TO THE CANDIDATE -------------------------------
+    const blockedSend = await evaluateNumber({
+      client,
+      expression: "document.querySelectorAll('.sasha-spot-acts .sasha-primary[disabled]').length",
+    });
+    check({
+      failures,
+      what: "a comment with no words cannot be sent -- an empty comment says nothing",
       ok: blockedSend > 0,
       detail: `${blockedSend} disabled`,
     });
 
-    await typeInto({ client, selector: ".sasha-anomaly .sasha-note", text: "the gridlines are gone" });
-    await click({ client, selector: ".sasha-send-anomaly" });
+    // ESCAPE GIVES THE SLIDE BACK, which is the other half of a composer that opens on a click.
+    await typeInto({ client, selector: ".sasha-spot-note", text: "x" });
+    await client.Runtime.evaluate({
+      expression:
+        "document.querySelector('.sasha-spot-note')" +
+        ".dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))",
+      returnByValue: true,
+      awaitPromise: false,
+    });
+    const escaped = await pollFor({ client, expression: "!document.querySelector('.sasha-spot')" });
+    check({ failures, what: "Escape dismisses the composer without commenting", ok: escaped });
+    const nothingSent = await evaluateNumber({
+      client,
+      expression: "Object.keys(window.__SASHA_FILE_COMMENTS__||{}).length",
+    });
+    check({
+      failures,
+      what: "and a dismissed composer writes nothing",
+      ok: nothingSent === 0,
+      detail: `${nothingSent} comment targets`,
+    });
+
+    const chromeState = await evaluateString({
+      client,
+      expression:
+        "JSON.stringify({roots: document.querySelectorAll('.sasha-ed-root').length," +
+        " bars: [...document.querySelectorAll('.sasha-ed-bar')].map(b=>b.hidden)," +
+        " handles: [...document.querySelectorAll('.sasha-ed-handle')].map(h=>h.hidden)})",
+    });
+    process.stdout.write(`      editor chrome: ${chromeState}\n`);
+
+    // SELECT AGAIN AND ACTUALLY COMMENT.
+    await evaluateString({
+      client,
+      expression:
+        "(function(){" +
+        "var f=document.querySelector('.sasha-editor-stage iframe.sasha-frame');" +
+        "var el=f.contentDocument.querySelector('h1,h2,p,div');" +
+        "var box=el.getBoundingClientRect();" +
+        "var opts={bubbles:true,cancelable:true,composed:true,clientX:box.left+box.width/2," +
+        "clientY:box.top+box.height/2,pointerType:'mouse',button:0,pointerId:1,isPrimary:true};" +
+        "el.dispatchEvent(new PointerEvent('pointerdown',opts));" +
+        "el.dispatchEvent(new PointerEvent('pointerup',opts));" +
+        "return el.tagName;})()",
+    });
+    const reselect = await evaluateString({
+      client,
+      expression:
+        "(function(){var c=document.querySelector('.sasha-spot');" +
+        "var sel=document.querySelector('.sasha-ed-select');" +
+        "var hint=document.querySelector('.sasha-editor-say');" +
+        "return JSON.stringify({composer: !!c," +
+        " selBox: sel? sel.style.display : 'none in dom'," +
+        " hint: hint? (hint.textContent||'').slice(0,46) : '-'});})()",
+    });
+    process.stdout.write(`      after re-click: ${reselect}\n`);
+    await pollFor({ client, expression: "!!document.querySelector('.sasha-spot')" });
+    await typeInto({ client, selector: ".sasha-spot-note", text: "the gridlines are gone" });
+    await client.Page.captureScreenshot({ format: "png" }).then((shot) =>
+      writeFileSync(COMPOSER_SHOT, Buffer.from(shot.data, "base64")),
+    );
+    process.stdout.write(`      composer screenshot: ${COMPOSER_SHOT}\n`);
+    const beforeComment = await evaluateString({
+      client,
+      expression:
+        "(function(){var n=document.querySelector('.sasha-spot-note');" +
+        "var b=[...document.querySelectorAll('.sasha-spot-acts button')].map(x=>x.textContent+':'+(x.disabled?'off':'on'));" +
+        "return JSON.stringify({note:n?n.value:'<none>', buttons:b});})()",
+    });
+    process.stdout.write(`      composer before Comment: ${beforeComment}\n`);
+    await clickLabelled({ client, within: ".sasha-spot-acts", startsWith: "Comment" });
+    const afterComment = await evaluateString({
+      client,
+      expression:
+        "JSON.stringify({targets:Object.keys(window.__SASHA_FILE_COMMENTS__||{})," +
+        " rows:[...document.querySelectorAll('.sasha-anomaly')].map(r=>(r.textContent||'').slice(0,90))," +
+        " trouble:[...document.querySelectorAll('.sasha-trouble')].map(t=>(t.textContent||'').slice(0,90))})",
+    });
+    process.stdout.write(`      after Comment: ${afterComment}\n`);
     const onCandidate = await pollFor({ client, expression: "!!(window.__SASHA_FILE_COMMENTS__||{}).html_1" });
-    check({ failures, what: "Send to Sasha posted the comment on the CANDIDATE, not on the deck", ok: onCandidate });
+    check({ failures, what: "Comment posted it on the CANDIDATE, not on the deck", ok: onCandidate });
+
+    // COMMENTING CLOSES THE COMPOSER: the thought is finished and the slide comes back.
+    const closedAfter = await pollFor({ client, expression: "!document.querySelector('.sasha-spot')" });
+    check({ failures, what: "and the composer closes once the comment is away", ok: closedAfter });
 
     // The comment's BODY, not a JSON wrapper around it: stringifying the record escapes every
     // quote, so `"region":{"x"` would not appear in it and the assertion would be vacuous.
@@ -535,8 +806,8 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
     });
     check({
       failures,
-      what: "and it carries the words and the 0-1 region",
-      ok: /the gridlines are gone/.test(candidateComment) && /"region":\{"x":0\./.test(candidateComment),
+      what: "and it carries the words and the clicked element own 0-1 region",
+      ok: /the gridlines are gone/.test(candidateComment) && /"region":\{"x":/.test(candidateComment),
       detail: candidateComment.slice(0, 220),
     });
 
@@ -566,53 +837,6 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
       detail: movedTo,
     });
 
-    // --- ONE SLIDE, LARGE: A ZOOM LEVEL AND NOT A SCREEN ------------------------------------
-    // The cell's picture hosts the gesture now, so it cannot also be a navigation target: "Show
-    // large" is a NAMED control in the footer (candidate-grid.tsx). It must change the zoom level
-    // and nothing else -- in particular not the tool it was holding.
-    await click({ client, selector: ".sasha-cell .sasha-zoom" });
-    const zoomed = await pollFor({
-      client,
-      expression: "!!document.querySelector('.sasha-single .sasha-pane.sasha-pane-big')",
-    });
-    check({ failures, what: '"Show large" zooms to one slide', ok: zoomed });
-
-    const afterZoom = await choicesOf({ client });
-    check({
-      failures,
-      what: "and the tool it was holding is untouched -- a zoom level is not a mode",
-      ok: afterZoom === "One slide/Annotate/HTML (authoritative)",
-      detail: afterZoom,
-    });
-
-    const bigOverlay = await evaluateNumber({
-      client,
-      expression: "document.querySelectorAll('.sasha-pane-big .sasha-overlay').length",
-    });
-    const anyOverlay = await evaluateNumber({ client, expression: "document.querySelectorAll('.sasha-overlay').length" });
-    check({
-      failures,
-      what: "the shared drag surface is on the big pane",
-      ok: bigOverlay === 1 && anyOverlay === 1,
-      detail: `${bigOverlay} on the pane, ${anyOverlay} in the window`,
-    });
-
-    const paneDragReady = await pollFor({
-      client,
-      expression:
-        "(function(){var o=document.querySelector('.sasha-pane-big .sasha-overlay');" +
-        "return !!o && o.getBoundingClientRect().height > 100;})()",
-    });
-    check({ failures, what: "the mark-up pane has its real height before the gesture", ok: paneDragReady });
-
-    await drag({
-      client,
-      selector: ".sasha-pane-big .sasha-overlay",
-      until: "document.querySelectorAll('.sasha-anomaly').length > 1",
-    });
-    const markedTwice = await pollFor({ client, expression: "document.querySelectorAll('.sasha-anomaly').length > 1" });
-    check({ failures, what: "and the same gesture works on it, at the other zoom level", ok: markedTwice });
-
     // THE LAST ROW IS FULLY INSIDE ITS SCROLLER. A mark-up row is two lines, and the list's
     // max-height was sized for one -- which sliced the second row's coordinates through the middle
     // of the glyphs with only two mark-ups on screen (seen in the browser smoke screenshot).
@@ -628,7 +852,7 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
     check({
       failures,
       what: "every mark-up row fits inside its list without being sliced",
-      ok: rowsFit > 1,
+      ok: rowsFit > 0,
       detail: `${rowsFit} rows`,
     });
 
@@ -637,9 +861,10 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
     );
     process.stdout.write(`      mark-up screenshot: ${MARKUP_SHOT}\n`);
 
-    await click({ client, selector: ".sasha-backbar .sasha-secondary" });
-    const back = await pollFor({ client, expression: "!!document.querySelector('.sasha-grid')" });
-    check({ failures, what: "and there is a way back to the grid", ok: back });
+    // A SENT MARK-UP IS NOT UNSENT WORK, so closing over it asks nothing.
+    await click({ client, selector: ".sasha-editor-close" });
+    const back = await pollFor({ client, expression: "!document.querySelector('.sasha-editor-scrim')" });
+    check({ failures, what: "and a sent mark-up closes the editor without a question", ok: back });
 
     // --- THE CONVERTED PANE -----------------------------------------------------------------
     // The rendered pane only exists once the REAL converter has run in the page: choose it in the
@@ -648,7 +873,7 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
     //
     // The group matters. "One slide" and "Converted slide" both say "slide", so the old
     // text-matching click took the view button and silently never converted anything.
-    await chooseIn({ client, group: "showing", label: "Converted slide" });
+    await chooseIn({ client, group: "showing", label: "Converted" });
     const converted = await pollFor({
       client,
       expression: "document.querySelectorAll('.sasha-rendered .sasha-el').length > 0",
@@ -662,9 +887,13 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
     // EVERY CELL IS THE SAME KIND OF THING. The showing choice belongs to the WINDOW, not to a
     // stage: comparing one candidate's HTML against another's conversion would compare two
     // different kinds of thing (slide-stage.tsx), so all N must have switched together.
+    // EITHER SHAPE COUNTS: Google's picture, or the labelled projection for one it refused. What
+    // must NOT be left is an HTML iframe -- the choice belongs to the window, so all N switch
+    // together or the user is comparing two different kinds of thing (slide-stage.tsx).
     const allConverted = await evaluateNumber({
       client,
-      expression: "document.querySelectorAll('.sasha-cell-stage .sasha-rendered').length",
+      expression:
+        "document.querySelectorAll('.sasha-cell-stage img.sasha-render, .sasha-cell-stage .sasha-rendered').length",
     });
     const leftoverFrames = await evaluateNumber({ client, expression: "document.querySelectorAll('iframe.sasha-frame').length" });
     check({
@@ -674,22 +903,66 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
       detail: `${allConverted} converted, ${leftoverFrames} frames left`,
     });
 
-    // --- THE FOURTH COMBINATION: THE EDIT TOOL OVER THE CONVERTED PANE ----------------------
-    // All four tool/showing pairs are legal and reachable, which is the point of two independent
-    // choosers -- and this is the one where the editor CANNOT work: an edit edits the HTML, never
-    // the conversion. So the slot has to say so rather than sit there as a grey box.
-    await chooseIn({ client, group: "tool", label: "Edit" });
-    const refusedReach = await pollFor({
+    // --- AND "CONVERTED" IS A PICTURE, NOT A DIAGRAM ----------------------------------------
+    // The pane used to draw labelled rectangles -- the geometry the converter ASKED for -- and
+    // call that "Converted". It was read as "the converter is broken" because a diagram of boxes
+    // is not a rendering. It now shows Google's own PNG of a throwaway deck.
+    const rendered = await pollFor({
       client,
-      expression: "!!document.querySelector('.sasha-editor .sasha-trouble')",
+      expression: "document.querySelectorAll('.sasha-cell-stage img.sasha-render').length > 0",
     });
-    const reachSaid = await evaluateString({
+    const renderCalls = await evaluateNumber({ client, expression: "window.__SASHA_RENDER_CALLS__ || 0" });
+    const renderedIndices = await evaluateString({
       client,
-      expression: "(document.querySelector('.sasha-editor .sasha-trouble')||{}).textContent||''",
+      expression: "JSON.stringify(window.__SASHA_RENDERED__ || [])",
     });
     check({
       failures,
-      what: "the editor over the CONVERTED pane says why it cannot work, instead of sitting empty",
+      what: "the converted pane shows Google's own picture of the candidate",
+      ok: rendered,
+      detail: `${renderCalls} call(s), asked for ${renderedIndices}`,
+    });
+
+    // ONE CALL FOR THE WHOLE SET. The server builds one throwaway deck for all the candidates, so
+    // a call per candidate would be N decks, N deletes and N round trips for the same pictures.
+    check({
+      failures,
+      what: "and it asked once, for every candidate at once",
+      ok: renderCalls === 1 && renderedIndices === JSON.stringify([1, 2, 3]),
+      detail: `${renderCalls} call(s), asked for ${renderedIndices}`,
+    });
+
+    // A CANDIDATE GOOGLE REFUSED falls back to the projection WITH THE REASON ON IT, never to an
+    // empty box and never to a diagram the user could mistake for the rendering.
+    const refusedNote = await evaluateString({
+      client,
+      expression:
+        "((document.querySelectorAll('.sasha-cell')[1]||{}).querySelector? " +
+        "(document.querySelectorAll('.sasha-cell')[1].querySelector('.sasha-projection-note')||{}).textContent||'' : '')",
+    });
+    check({
+      failures,
+      what: "a candidate Google refused says so, over the geometry projection",
+      ok: /Slides refused this one/.test(refusedNote),
+      detail: JSON.stringify(refusedNote.slice(0, 160)),
+    });
+
+    // --- THE EDITOR OVER THE CONVERTED RENDERING -------------------------------------------
+    // The rendering is the WINDOW's choice and the editor opens on top of it, so this pair is
+    // reachable -- and it is the one where the editor CANNOT work: an edit edits the HTML, never
+    // the conversion. The slot has to say so rather than sit there as a grey box.
+    await click({ client, selector: '[aria-label="Open option 1 to request changes"]' });
+    const refusedReach = await pollFor({
+      client,
+      expression: "!!document.querySelector('.sasha-editslot .sasha-trouble')",
+    });
+    const reachSaid = await evaluateString({
+      client,
+      expression: "(document.querySelector('.sasha-editslot .sasha-trouble')||{}).textContent||''",
+    });
+    check({
+      failures,
+      what: "the editor over the CONVERTED rendering says why it cannot work, instead of sitting empty",
       ok: refusedReach && /HTML/.test(reachSaid),
       detail: reachSaid.slice(0, 140),
     });
@@ -707,31 +980,62 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
       detail: `saw ${noneReachable}`,
     });
 
-    await chooseIn({ client, group: "showing", label: "HTML (authoritative)" });
-    await pollFor({ client, expression: `document.querySelectorAll('iframe.sasha-frame').length === ${COUNT}` });
-
-    // --- THE DEFECT REPORT IS A WINDOW OF ITS OWN -------------------------------------------
-    // THE ENTRY LIVES IN THE FOOTER ROW, and it is the ONLY route to the defect window from this
-    // surface -- so it must not be possible to lose it silently. It used to be a `.sasha-reportbar`
-    // of its own, which cost a 22px row plus its gap out of the grid's budget; the sentence it
-    // carried is on the button's `title` now (Picker.tsx `ReportButton`).
-    //
-    // BY TEXT AND NOT BY CLASS: `.sasha-actions` holds three `.sasha-secondary`-ish buttons
-    // (report, Dismiss, Insert), so a class selector here would press whichever came first.
-    const reportEntry = await evaluateNumber({
+    // --- AND THE RECTANGLE IS STILL THERE WHERE THERE IS NOTHING TO CLICK -------------------
+    // The converted rendering is a picture, so "this part" can only be said with a box. Annotate
+    // falls back to the drag surface there, and it must still produce a real mark-up.
+    await click({ client, selector: ".sasha-toolrail button:nth-of-type(2)" });
+    const fallbackSurface = await pollFor({
       client,
-      expression:
-        "[...document.querySelectorAll('.sasha-actions button')]" +
-        ".filter(b=>(b.textContent||'').indexOf('Report a defect in option') === 0).length",
+      expression: "document.querySelectorAll('.sasha-editor-stage .sasha-overlay').length === 1",
     });
     check({
       failures,
-      what: "the footer row carries the one route to the defect window, at either zoom level",
-      ok: reportEntry === 1,
-      detail: `${reportEntry} report buttons in the footer`,
+      what: "over a picture, annotate falls back to the drag rectangle",
+      ok: fallbackSurface,
+      detail: "nothing to point at, so a box is the only way to say 'this part'",
+    });
+    const fallbackReady = await pollFor({
+      client,
+      expression:
+        "(function(){var o=document.querySelector('.sasha-editor-stage .sasha-overlay');" +
+        "return !!o && o.getBoundingClientRect().height > 100;})()",
+    });
+    check({ failures, what: "and the stage has its real height before the gesture", ok: fallbackReady });
+    await drag({
+      client,
+      selector: ".sasha-editor-stage .sasha-overlay",
+      until: "document.querySelectorAll('.sasha-mark-user').length > 0",
+    });
+    const fallbackMarked = await pollFor({
+      client,
+      expression: "document.querySelectorAll('.sasha-mark-user').length > 0",
+    });
+    check({ failures, what: "dragging over the picture still records a mark-up", ok: fallbackMarked });
+    await click({ client, selector: ".sasha-toolrail button:nth-of-type(1)" });
+
+    await click({ client, selector: ".sasha-editor-close" });
+    await pollFor({ client, expression: "!document.querySelector('.sasha-editor-scrim')" });
+    await chooseIn({ client, group: "showing", label: "Preview" });
+    await pollFor({ client, expression: `document.querySelectorAll('iframe.sasha-frame').length === ${COUNT}` });
+
+    // --- THE DEFECT REPORT IS A WINDOW OF ITS OWN -------------------------------------------
+    // THE ENTRY IS UNDER EVERY SLIDE, which is what removed the last "option N" button from the
+    // window's footer: a defect is reported about ONE candidate, and the one being pointed at is
+    // the one under the cursor. It must not be possible to lose the route silently.
+    const reportEntries = await evaluateNumber({
+      client,
+      expression:
+        "[...document.querySelectorAll('.sasha-cell-foot button')]" +
+        ".filter(b=>(b.textContent||'') === 'Report defect').length",
+    });
+    check({
+      failures,
+      what: `every candidate carries its own route to the defect window (${COUNT} of them)`,
+      ok: reportEntries === COUNT,
+      detail: `${reportEntries} report buttons`,
     });
 
-    await clickLabelled({ client, within: ".sasha-actions", startsWith: "Report a defect in option" });
+    await clickLabelled({ client, within: ".sasha-cell:first-child .sasha-cell-foot", startsWith: "Report defect" });
     const askedForReport = await pollFor({ client, expression: "!!window.__SASHA_REPORT_TARGET__" });
     check({ failures, what: "it asks the HOST for the report window, naming the candidate", ok: askedForReport });
 
@@ -759,6 +1063,34 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
       ok: noReportHere === 0,
       detail: `saw ${noReportHere} report surfaces`,
     });
+
+    // --- "NONE OF THESE" REALLY ANSWERS THE SERVER ------------------------------------------
+    // LAST, because it SETTLES the picker: the grid is replaced by the settled panel, so every
+    // check above has to have run already. Rendering the button proves nothing -- what matters is
+    // that it writes `PICK {picked: null}`, which is the value a waiting `await_pick` is blocked
+    // on (dialog.tsx `submit`, pick-writer.ts).
+    await click({ client, selector: ".sasha-toolbar .sasha-none" });
+    // THE STUB RECORDS THE FILE SPEC, not the decision: `picked` lives inside the JSON `body`
+    // string that pick-writer.ts composed, which is the thing the server actually reads.
+    const dismissed = await pollFor({
+      client,
+      expression:
+        "(function(){var spec=window.__SASHA_PICK__;if(!spec||typeof spec.body!=='string')return false;" +
+        "try{return JSON.parse(spec.body).picked === null;}catch(_){return false;}})()",
+    });
+    const pickWritten = await evaluateString({
+      client,
+      expression: "((window.__SASHA_PICK__||{}).body)||'<nothing written>'",
+    });
+    check({
+      failures,
+      what: "\"None of these\" writes PICK with picked: null, so the agent is not left waiting",
+      ok: dismissed,
+      detail: pickWritten.slice(0, 200),
+    });
+
+    const settled = await pollFor({ client, expression: "!document.querySelector('.sasha-grid')" });
+    check({ failures, what: "and the window says what Sasha was told", ok: settled });
 
     for (const error of errors) failures.push(`dialog uncaught: ${error}`);
   } finally {
@@ -817,15 +1149,32 @@ async function driveSidebar({ failures }: { failures: string[] }): Promise<void>
       detail: `asked ${openedOnce} times`,
     });
 
+    // THE WAY BACK IS THE CANDIDATES CARD, not a header button: it names what it will show, and
+    // the header is the title and nothing else now.
     const button = await pollFor({
       client,
       expression:
-        "[...document.querySelectorAll('button')].some(e=>/See the slides/.test(e.textContent||'')&&!e.disabled)",
+        "[...document.querySelectorAll('button')].some(e=>(e.textContent||'')==='Open artifacts'&&!e.disabled)",
     });
-    check({ failures, what: "and the button to reopen them stays live -- the only way back", ok: button });
+    check({ failures, what: "and the way back to the slides stays live -- the candidates card", ok: button });
+    const noHeaderButtons = await evaluateNumber({
+      client,
+      expression: "document.querySelectorAll('.sasha-header button').length",
+    });
+    check({
+      failures,
+      what: "the header carries no buttons, so the spinner cannot push one to a second row",
+      ok: noHeaderButtons === 0,
+      detail: `${noHeaderButtons} buttons in the header`,
+    });
 
     // --- THE LOG ---------------------------------------------------------------------------
-    const log = await pollFor({ client, expression: "document.querySelectorAll('.sasha-msgs .sasha-msg').length >= 6" });
+    // FIVE CARDS: staged, the revision, the insertion, the opaque event -- and ONE card for the
+    // slide-2 thread, which now carries the comment and Sasha's answer that used to be two rows
+    // (and whose `comment-opened` / `comment-answered` receipts stand down for it).
+    // FOUR, NOT FIVE: the threads moved out of the scrolling log into the comments panel, so
+    // what is left here is the events -- which is what a log is.
+    const log = await pollFor({ client, expression: "document.querySelectorAll('.sasha-msgs .sasha-msg').length >= 4" });
     check({ failures, what: "the session log rendered, in order", ok: log });
 
     // THE HEADER AND THE "See the slides" BOX ARE STILL THERE. The inline slide is an absolutely
@@ -861,9 +1210,76 @@ async function driveSidebar({ failures }: { failures: string[] }): Promise<void>
     });
     check({
       failures,
-      what: "a comment you opened is part of YOUR turn, Sasha's answer is hers, the deck's is its own",
-      ok: /sasha-msg-user/.test(lines) && /sasha-msg-sasha/.test(lines) && /sasha-msg-deck/.test(lines),
+      what: "Sasha's events are in her voice, the deck's in its own, and threads are NOT in the log",
+      ok: /sasha-msg-sasha/.test(lines) && /sasha-msg-deck/.test(lines) && !/sasha-msg-thread/.test(lines),
       detail: lines,
+    });
+
+    // AND THE THREAD IS IN THE PANEL INSTEAD. One comment, one place.
+    const threadsInPanel = await evaluateNumber({
+      client,
+      expression: "document.querySelectorAll('.sasha-comments .sasha-c-thread').length",
+    });
+    check({
+      failures,
+      what: "a comment you opened is a thread card in the comments panel",
+      ok: threadsInPanel > 0,
+      detail: `saw ${threadsInPanel}`,
+    });
+
+    // --- ONE CARD PER THREAD, THE WAY GOOGLE DRAWS IT ---------------------------------------
+    // The user's reference: the root, the blue tick and the vertical three dots at its top right,
+    // the replies nested in the same card on a grey strip, and a pill to reply at the foot. All of
+    // it measured in the real cascade, because an icon that renders 0 px wide passes any markup test.
+    const threadShape = await evaluateString({
+      client,
+      expression:
+        "(function(){var card=[].slice.call(document.querySelectorAll('.sasha-comments .sasha-c-thread'))" +
+        ".filter(function(c){return /the gridlines are gone/.test(c.textContent);})[0];if(!card)return 'no card';" +
+        "function px(sel){var e=card.querySelector(sel);return e?Math.round(e.getBoundingClientRect().width):0;}" +
+        "var reply=card.querySelector('.sasha-c-reply');" +
+        "return JSON.stringify({" +
+        "replyNested:!!reply&&/redrawn with the gridlines back/.test(reply.textContent)," +
+        "replyBy:reply?(reply.querySelector('.sasha-c-name')||{}).textContent:''," +
+        "agentAvatar:!!(reply&&reply.querySelector('.sasha-c-avatar-agent'))," +
+        "strip:reply?getComputedStyle(reply.querySelector('.sasha-c-body-reply')).backgroundColor:''," +
+        "tick:px('.sasha-c-resolve svg'),tickPath:!!card.querySelector('.sasha-c-resolve path[d^=\"M9 16.17\"]')," +
+        "tickColor:getComputedStyle(card.querySelector('.sasha-c-resolve')).color," +
+        "more:card.querySelectorAll('.sasha-c-more-button path[d^=\"M12 8c1.1\"]').length," +
+        "pill:(card.querySelector('.sasha-c-pill')||{}).placeholder||''," +
+        "pillRadius:card.querySelector('.sasha-c-pill')?getComputedStyle(card.querySelector('.sasha-c-pill')).borderTopLeftRadius:''," +
+        "avatar:px('.sasha-c-avatar'),radius:getComputedStyle(card).borderTopLeftRadius});})()",
+    });
+    const shape = JSON.parse(threadShape.startsWith("{") ? threadShape : "{}") as Record<string, unknown>;
+    check({
+      failures,
+      what: "the thread is ONE card: Sasha's answer nested in it, signed Sasha, on the grey strip",
+      ok:
+        shape["replyNested"] === true &&
+        shape["replyBy"] === "Sasha" &&
+        shape["agentAvatar"] === true &&
+        shape["strip"] === "rgb(241, 243, 244)",
+      detail: threadShape,
+    });
+    check({
+      failures,
+      what: "its root carries the blue resolve tick and a three-dot menu on the root AND the reply, as icons",
+      ok:
+        shape["tickPath"] === true &&
+        Number(shape["tick"]) >= 16 &&
+        shape["tickColor"] === "rgb(11, 87, 208)" &&
+        shape["more"] === 2,
+      detail: threadShape,
+    });
+    check({
+      failures,
+      what: "an open thread ends in the reply pill, and the card is Google's shape",
+      ok:
+        shape["pill"] === "Reply or add others with @" &&
+        shape["pillRadius"] === "20px" &&
+        shape["avatar"] === 32 &&
+        shape["radius"] === "12px",
+      detail: threadShape,
     });
 
     const opaque = await evaluateString({
@@ -903,114 +1319,123 @@ async function driveSidebar({ failures }: { failures: string[] }): Promise<void>
     });
     check({ failures, what: "and a count it cannot reach says so, never zero", ok: cannotCount });
 
-    const unreachable = await pollFor({ client, expression: "!!document.querySelector('.sasha-open-comments')" });
-    check({ failures, what: "open comments are PINNED out of the scrolling log", ok: unreachable });
+    // --- THE COMMENTS PANEL: open ones first, a filter, and no yellow summary --------------
+    // This replaced a pinned block that restated every waiting comment in prose above the
+    // comments themselves. The panel is the comments (comment-panel.ts).
+    const panel = await pollFor({ client, expression: "!!document.querySelector('.sasha-comments')" });
+    check({ failures, what: "the comments have their own panel, as a document's pane does", ok: panel });
 
-    const pinned = await evaluateString({
+    const gone = await evaluateNumber({
       client,
-      expression: "(document.querySelector('.sasha-open-comments')||{}).textContent||''",
+      expression: "document.querySelectorAll('.sasha-open-comments, .sasha-pulse').length",
     });
     check({
       failures,
-      what: "and each one names its slide and quotes what was said",
-      ok: /slide 2/.test(pinned) && /the gridlines are gone/.test(pinned),
-      detail: pinned.slice(0, 200),
+      what: "and the yellow waiting summary is gone with it",
+      ok: gone === 0,
+      detail: `saw ${gone} leftovers`,
     });
 
-    // --- THE WAIT IS LIVE, AND HONEST ABOUT WHAT IT CANNOT KNOW ----------------------------
-    // The pinned section is no longer a static list: it is the waiting panel (waiting.ts). Three
-    // of its four parts can only be seen in a browser -- a CSS animation that keeps running when a
-    // poll stalls, an elapsed time computed against a real clock, and the whole sentence being on
-    // screen rather than clipped.
-    const pulse = await evaluateNumber({
+    const panelText = await evaluateString({
       client,
-      expression: "document.querySelectorAll('.sasha-open-comments .sasha-pulse:not(.sasha-pulse-off)').length",
+      expression: "(document.querySelector('.sasha-comments')||{}).textContent||''",
     });
     check({
       failures,
-      what: "the wait carries a LIVE indicator, not a static line",
-      ok: pulse === 1,
-      detail: `saw ${pulse}`,
+      what: "the panel quotes what was said",
+      ok: /the gridlines are gone/.test(panelText),
+      detail: panelText.slice(0, 200),
     });
 
-    // A CSS ANIMATION AND NOT A CHARACTER THAT CHANGES. A spinner built out of re-renders stops the
-    // moment a poll stalls -- exactly when the user most needs to see the wait is still running --
-    // so the keyframes running in the real cascade is the thing worth asserting.
-    const breathing = await evaluateString({
+    // THE FILTER, WITH COUNTS, opening on the comments that are not done -- the way a document's
+    // comment pane opens.
+    const filters = await evaluateString({
       client,
       expression:
-        "(function(){var p=document.querySelector('.sasha-pulse');return p?getComputedStyle(p).animationName:'';})()",
+        "JSON.stringify([...document.querySelectorAll('.sasha-filter button')]" +
+        ".map(b=>[b.textContent, b.getAttribute('aria-pressed')]))",
     });
     check({
       failures,
-      what: "and it breathes from the stylesheet, so a stalled poll cannot stop it",
-      ok: breathing === "sasha-breathe",
-      detail: breathing,
+      what: "the filter offers Not done / Marked as done / All, and opens on Not done",
+      ok: /Not done/.test(filters) && /Marked as done/.test(filters) && /All/.test(filters)
+        && /\["Not done[^"]*","true"\]/.test(filters),
+      detail: filters.slice(0, 220),
     });
 
-    const headline = await evaluateString({
+    // SWITCHING IT IS NOT LOST TO THE NEXT POLL: the filter lives in the state tree, and this
+    // sidebar re-reads Drive every few seconds.
+    await clickLabelled({ client, within: ".sasha-filter", startsWith: "All" });
+    const switched = await pollFor({
       client,
-      expression: "(document.querySelector('.sasha-waiting-head')||{}).textContent||''",
+      expression:
+        "(function(){var b=[...document.querySelectorAll('.sasha-filter button')]" +
+        ".find(x=>(x.textContent||'').indexOf('All')===0);" +
+        "return !!b && b.getAttribute('aria-pressed')==='true';})()",
     });
+    check({ failures, what: "and switching it sticks", ok: switched });
+    await clickLabelled({ client, within: ".sasha-filter", startsWith: "Not done" });
+
+
+    // --- THE SET, AND OPENING WHAT A COMMENT IS ABOUT ---------------------------------------
+    const artifact = await pollFor({ client, expression: "!!document.querySelector('.sasha-artifact')" });
+    check({ failures, what: "the candidate set has a card of its own above its comments", ok: artifact });
+
+    const stacked = await evaluateString({
+      client,
+      expression:
+        "JSON.stringify([...document.querySelectorAll('.sasha-stack-slide')]" +
+        ".map(function(li){var b=li.getBoundingClientRect();return [Math.round(b.top), Math.round(b.left)];}))",
+    });
+    const rows = JSON.parse(stacked) as readonly (readonly number[])[];
     check({
       failures,
-      what: "the headline counts what is waiting and how long the oldest has been",
-      ok: /waiting for Sasha/.test(headline) && /the oldest for /.test(headline),
-      detail: headline,
+      what: "and the candidates are stacked VERTICALLY, one under the other",
+      ok:
+        rows.length > 1 &&
+        rows.every((row, at) => at === 0 || (row[0] ?? 0) > (rows[at - 1]?.[0] ?? 0)) &&
+        new Set(rows.map((row) => row[1])).size === 1,
+      detail: stacked,
     });
 
-    const clocks = await evaluateString({
+    const openAll = await evaluateNumber({
       client,
-      expression: "JSON.stringify([...document.querySelectorAll('.sasha-wait-clock')].map(e=>e.textContent))",
+      expression:
+        "[...document.querySelectorAll('.sasha-artifact button')]" +
+        ".filter(function(b){return (b.textContent||'')==='Open artifacts';}).length",
     });
     check({
       failures,
-      what: "and every row carries its own elapsed clock",
-      ok: /waiting \d/.test(clocks),
-      detail: clocks,
+      what: "with one button that opens the whole set",
+      ok: openAll === 1,
+      detail: `${openAll} buttons`,
     });
 
-    // THE PRECONDITION, IN FULL AND NOT CLIPPED. The panel's whole reason for existing: Sasha
-    // answers only while a session is attached, this add-on cannot see whether one is, and a user
-    // with none attached is waiting on nobody.
-    const precondition = await evaluateString({
+    // A COMMENT ABOUT A SLIDE OPENS THAT SLIDE, and the request names both.
+    // BY CLASS, not by text: "Open artifacts" on the set card also starts with "Open artifact",
+    // and pressing that one would open the whole set rather than the slide under the comment.
+    // AT THE FOOT OF THE THREAD, where the reader is once they have read it.
+    await click({ client, selector: ".sasha-c-open" });
+    const target = await pollFor({
       client,
-      expression: "(document.querySelector('.sasha-precondition')||{}).textContent||''",
+      expression:
+        "!!window.__SASHA_PICKER_TARGET__ && window.__SASHA_PICKER_TARGET__.slideIndex === 2",
+    });
+    const targetSaid = await evaluateString({
+      client,
+      expression: "JSON.stringify(window.__SASHA_PICKER_TARGET__ || null)",
     });
     check({
       failures,
-      what: "the precondition is stated, because an unattached session means no answer is coming",
-      ok: precondition.startsWith(
-        "Sasha answers only while a Claude session has the sasha-slides connector attached",
-      ),
-      detail: precondition.slice(0, 110),
-    });
-
-    const presence = await evaluateNumber({
-      client,
-      expression: "/Sasha last did something here |Sasha has never answered/.test(document.body.textContent||'')?1:0",
-    });
-    check({
-      failures,
-      what: "and so is the last moment Sasha provably did anything",
-      ok: presence === 1,
-    });
-
-    // THE OLD LIE, GONE. "no answer yet" implies one is on its way; for a user with no session
-    // attached, none ever is. It must not exist anywhere on this surface.
-    const promised = await evaluateNumber({
-      client,
-      expression: "/no answer yet/.test(document.body.textContent||'')?1:0",
-    });
-    check({
-      failures,
-      what: 'nothing says "no answer yet" -- no answer may ever come',
-      ok: promised === 0,
+      what: "opening from a comment names the proposal AND the slide it is about",
+      ok: target,
+      detail: targetSaid,
     });
 
     // --- THE COMPOSER ----------------------------------------------------------------------
-    await typeInto({ client, selector: ".sasha-comment-text", text: "make the agenda slide bluer" });
-    await click({ client, selector: ".sasha-composer .sasha-primary" });
+    // THE COMPOSER IS A NEW COMMENT now: the same card, pill and Cancel/Send pair as a thread.
+    await typeInto({ client, selector: ".sasha-ask .sasha-c-pill", text: "make the agenda slide bluer" });
+    await click({ client, selector: ".sasha-ask .sasha-c-send" });
     const sent = await pollFor({ client, expression: "!!window.__SASHA_FEEDBACK__" });
     check({ failures, what: "Send posted the message as a comment on the DECK", ok: sent });
 
@@ -1027,6 +1452,127 @@ async function driveSidebar({ failures }: { failures: string[] }): Promise<void>
 
     const answered = await pollFor({ client, expression: "/redrawing/.test(document.body.textContent||'')" });
     check({ failures, what: "the reply came back as Sasha's turn in the same log", ok: answered });
+
+    // --- ANSWERING A THREAD FROM ITS CARD ------------------------------------------------
+    // Typed into the slide-2 thread's pill, posted with Enter -- Google's key -- onto the
+    // CANDIDATE's own file, and brought back into the SAME card by the one re-read the success
+    // asks for.
+    const inThread = (body: string): string =>
+      "(function(){var card=[].slice.call(document.querySelectorAll('.sasha-comments .sasha-c-thread'))" +
+      ".filter(function(c){return /the gridlines are gone/.test(c.querySelector('.sasha-c-body').textContent);})[0];" +
+      `if(!card)return null;${body}})()`;
+    await client.Runtime.evaluate({
+      expression: inThread(
+        "var pill=card.querySelector('.sasha-c-pill');if(!pill)return false;" +
+        "Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(pill,'the top line is still missing');" +
+        "pill.dispatchEvent(new Event('input',{bubbles:true}));return true;",
+      ),
+      returnByValue: true,
+    });
+    const replyButton = await pollFor({
+      client,
+      expression: inThread("var b=card.querySelector('.sasha-c-reply-send');return !!b&&b.textContent==='Reply';"),
+    });
+    check({ failures, what: "typing into the pill brings up its Reply button", ok: replyButton });
+
+    await client.Runtime.evaluate({
+      expression: inThread(
+        "var pill=card.querySelector('.sasha-c-pill');" +
+        "pill.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));return true;",
+      ),
+      returnByValue: true,
+    });
+    const repliedOnCandidate = await pollFor({
+      client,
+      expression:
+        "(window.__SASHA_REPLY_CALLS__||[]).some(function(c){return c.fileId==='html_2'&&c.commentId==='cc_open'" +
+        "&&c.action===null&&c.content==='the top line is still missing';})",
+    });
+    check({
+      failures,
+      what: "Enter posted the reply on the CANDIDATE's file, under that comment, in the user's own words",
+      ok: repliedOnCandidate,
+      detail: JSON.stringify(await evaluateString({ client, expression: "JSON.stringify(window.__SASHA_REPLY_CALLS__||[])" })),
+    });
+    const replyBack = await pollFor({
+      client,
+      expression: inThread(
+        "return [].slice.call(card.querySelectorAll('.sasha-c-reply')).some(function(r){" +
+        "return /the top line is still missing/.test(r.textContent);})&&card.querySelector('.sasha-c-pill').value==='';",
+      ),
+    });
+    check({ failures, what: "and it came back nested in the same card, with the pill emptied", ok: replyBack });
+
+    // THE THREE DOTS open a menu of REAL actions only, and Escape closes it.
+    await client.Runtime.evaluate({
+      expression: inThread("card.querySelector('.sasha-c-head .sasha-c-more-button').click();return true;"),
+      returnByValue: true,
+    });
+    const menuItems = await evaluateString({
+      client,
+      expression: inThread(
+        "return JSON.stringify([].slice.call(card.querySelectorAll('.sasha-c-menu [role=menuitem]')).map(function(i){return i.textContent;}));",
+      ),
+    });
+    check({
+      failures,
+      what: "the root's three-dot menu offers Copy text and Resolve, and nothing that does nothing",
+      ok: menuItems === JSON.stringify(["Copy text", "Resolve"]),
+      detail: menuItems,
+    });
+    await client.Runtime.evaluate({
+      expression: "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));true",
+      returnByValue: true,
+    });
+    const menuClosed = await pollFor({ client, expression: "!document.querySelector('.sasha-c-menu')" });
+    check({ failures, what: "and Escape closes it", ok: menuClosed });
+
+    // THE TICK resolves the thread on its own file; the card then collapses to "Resolved".
+    await client.Runtime.evaluate({
+      expression: inThread("card.querySelector('.sasha-c-resolve').click();return true;"),
+      returnByValue: true,
+    });
+    const resolvedOnCandidate = await pollFor({
+      client,
+      expression:
+        "(window.__SASHA_REPLY_CALLS__||[]).some(function(c){return c.fileId==='html_2'&&c.commentId==='cc_open'&&c.action==='resolve';})",
+    });
+    check({ failures, what: "the blue tick resolved the thread on the candidate's file", ok: resolvedOnCandidate });
+    // A RESOLVED THREAD LEAVES THE OPEN FILTER, which is the point of the filter -- so ask for
+    // All before looking at how a resolved card is drawn.
+    await clickLabelled({ client, within: ".sasha-filter", startsWith: "All" });
+    const collapsed = await pollFor({
+      client,
+      expression: inThread(
+        "return /Resolved/.test((card.querySelector('.sasha-c-resolved-label')||{}).textContent||'')" +
+        "&&!card.querySelector('.sasha-c-pill')&&!card.querySelector('.sasha-c-resolve');",
+      ),
+    });
+    check({ failures, what: "and the card says Resolved where the tick was, with no reply pill", ok: collapsed });
+
+    // THE LOG, UNSCROLLED, for a human to read: the scroller is capped at 52vh, so the column
+    // shot below shows only its first screen of cards.
+    await client.Runtime.evaluate({
+      expression: "(function(){var l=document.querySelector('.sasha-msgs');if(l)l.style.maxHeight='none';return true;})()",
+      returnByValue: true,
+    });
+    const logTall = await evaluateNumber({
+      client,
+      expression: "Math.min(6000, Math.ceil(document.documentElement.scrollHeight + 20))",
+    });
+    await client.Emulation.setDeviceMetricsOverride({
+      width: SIDEBAR_WIDTH,
+      height: Math.max(1000, logTall),
+      deviceScaleFactor: 2,
+      mobile: false,
+    });
+    const logShot = await client.Page.captureScreenshot({ format: "png", captureBeyondViewport: true });
+    writeFileSync(LOG_SHOT, Buffer.from(logShot.data, "base64"));
+    process.stdout.write(`      unscrolled log screenshot: ${LOG_SHOT} (${logTall}px tall)\n`);
+    await client.Runtime.evaluate({
+      expression: "(function(){var l=document.querySelector('.sasha-msgs');if(l)l.style.maxHeight='';return true;})()",
+      returnByValue: true,
+    });
 
     // THE WHOLE COLUMN, not the first viewport of it: the log, the pinned comments, the composer
     // and the report entry are all below one another in a 300 px column.
@@ -1452,7 +1998,7 @@ function stubbed(file: string): string {
 }
 
 /**
- * The stub. It is injected ahead of each bundle and defines exactly the twelve functions Code.gs
+ * The stub. It is injected ahead of each bundle and defines exactly the functions Code.gs
  * exposes, answering from one staged proposal with a canned event log and canned candidate
  * comments. The manifest, READY and event bodies are the real protocol bytes, so src/protocol.ts's
  * and src/session-log.ts's parsers are exercised rather than bypassed.
@@ -1465,10 +2011,19 @@ const STUB_SCRIPT = `<script>
   // mounting the moment the review half started by dismissing. The run must start from empty.
   try { localStorage.clear(); } catch (storageError) { /* private window: nothing to clear */ }
   var PROPOSAL = ${JSON.stringify(PROPOSAL_ID)};
+  // THE SEEDED COMMENT IS A MINUTE OLD, NOT A FIXED DATE. The waiting panel's live indicator goes
+  // OFF once a comment has gone unread past FEEDBACK_DELIVERY_THRESHOLD_MS (waiting.ts) -- correct
+  // behaviour -- so a fixed 12:06 made the "the wait carries a LIVE indicator" check pass in the
+  // morning and fail every evening. The product was right; the fixture was a clock.
+  var SEEDED_AT = new Date(Date.now() - 60000).toISOString();
+  // How the connector signs its posts (agent-marker.ts), so Sasha's answers render as Sasha's.
+  var AGENT = ${JSON.stringify(AGENT_REPLY_MARKER)};
   var DECK = 'deck_smoke_0123456789';
   var COUNT = ${COUNT};
   // THE CANNED SESSION LOG. Real file names (<millis>-<6 base36>-<kind>.json), real bodies, and a
   // final event whose kind this build has never heard of -- which must render as an opaque line.
+  // A 1x1 transparent PNG: a real picture, so the stage renders an <img> rather than a broken one.
+  var SMOKE_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
   var EVENTS = [
     event(1791115140000, 'aaaaaa', 'slides-staged', { count: COUNT }),
     event(1791115560000, 'bbbbbb', 'comment-opened', {
@@ -1524,6 +2079,21 @@ const STUB_SCRIPT = `<script>
       return { text: text };
     },
     sashaInsert: function () { return { batchResponse: { replies: [{ createSlide: { objectId: 'sasha_smoke' } }] }, renderArtifact: null }; },
+    // THE THROWAWAY-DECK RENDER, stubbed. A real one creates a presentation, photographs each
+    // page and deletes it; what this surface has to prove is that the picture REACHES the stage
+    // and replaces the geometry projection. Candidate 2 answers with a reason instead of a
+    // picture, so the fallback path is exercised in the same run.
+    sashaRenderPreviews: function (spec) {
+      window.__SASHA_RENDER_CALLS__ = (window.__SASHA_RENDER_CALLS__ || 0) + 1;
+      window.__SASHA_RENDERED__ = spec.slides.map(function (slide) { return slide.index; });
+      return {
+        previews: spec.slides.map(function (slide) {
+          return slide.index === 2
+            ? { index: slide.index, dataUri: null, message: 'Slides refused this one' }
+            : { index: slide.index, dataUri: SMOKE_PNG, message: null };
+        }),
+      };
+    },
     sashaWritePick: function (spec) { window.__SASHA_PICK__ = spec; return { fileId: 'pick_1' }; },
     // THE SESSION LOG. One file per event, the real name grammar, and one kind this build has never
     // heard of -- which must render as an opaque line rather than vanish.
@@ -1572,15 +2142,23 @@ const STUB_SCRIPT = `<script>
     sashaReadFeedback: function () {
       return { comments: sentThreads(window.__SASHA_SENT__ || []) };
     },
+    // ANSWERING A THREAD FROM ITS CARD. Both are a reply on whichever file the thread lives on,
+    // recorded per file and comment so the next read brings the post back into the same card --
+    // which is what proves the conversation re-read after the action rather than guessing.
+    sashaReplyComment: function (spec) { return postReply(spec, null); },
+    sashaResolveComment: function (spec) { return postReply(spec, 'resolve'); },
     // The surface split's three. In production these call showModelessDialog; here they only have
     // to answer the way Code.gs does, because what is under test is that the caller READS the
     // answer rather than assuming the window appeared -- and that the report target is RECORDED,
     // which is the only channel between two documents that share nothing.
-    sashaOpenPicker: function () {
+    sashaOpenPicker: function (spec) {
       window.__SASHA_OPENED__ = true;
       window.__SASHA_OPEN_COUNT__ = (window.__SASHA_OPEN_COUNT__ || 0) + 1;
+      // What the sidebar asked the window to come up on, which is the whole point of the target.
+      window.__SASHA_PICKER_TARGET__ = spec || null;
       return { opened: true };
     },
+    sashaTakePickerTarget: function () { return { proposalId: null, slideIndex: null }; },
     sashaOpenDefectReport: function (spec) {
       window.__SASHA_REPORT_TARGET__ = { proposalId: spec.proposalId, slideIndex: spec.slideIndex };
       return { opened: true };
@@ -1595,27 +2173,55 @@ const STUB_SCRIPT = `<script>
     }
   };
 
+  /** One post into an existing thread, as Drive would keep it. A resolve is a reply too. */
+  function postReply(spec, action) {
+    var key = spec.fileId + '/' + spec.commentId;
+    var store = window.__SASHA_REPLIES__ = window.__SASHA_REPLIES__ || {};
+    var list = store[key] = store[key] || [];
+    var reply = {
+      id: 'ur_' + list.length + '_' + spec.commentId,
+      content: action === 'resolve' && !spec.content ? 'Resolved.' : spec.content,
+      createdTime: new Date().toISOString(),
+      author: { displayName: 'Krunoslav' }
+    };
+    list.push(reply);
+    window.__SASHA_REPLY_CALLS__ = (window.__SASHA_REPLY_CALLS__ || [])
+      .concat([{ fileId: spec.fileId, commentId: spec.commentId, content: spec.content, action: action }]);
+    if (action === 'resolve') {
+      window.__SASHA_RESOLVED__ = window.__SASHA_RESOLVED__ || {};
+      window.__SASHA_RESOLVED__[key] = true;
+    }
+    return { replyId: reply.id };
+  }
+  function repliesOn(fileId, commentId) { return (window.__SASHA_REPLIES__ || {})[fileId + '/' + commentId] || []; }
+  function isResolved(fileId, commentId) { return !!(window.__SASHA_RESOLVED__ || {})[fileId + '/' + commentId]; }
+
   /** The comments already on a candidate, plus whatever this page has posted onto it. */
   function threadsOn(fileId) {
     var seeded = fileId === 'html_2' ? [{
       id: 'cc_open',
       content: 'the gridlines are gone\\n\\nsasha-slides-feedback=' + JSON.stringify({
         protocolVersion: 1, noteId: 'box_seed', pageObjectId: null,
-        region: { x: 0.12, y: 0.4, w: 0.5, h: 0.3 }, createdAt: '2026-10-04T12:06:00.000Z'
+        region: { x: 0.12, y: 0.4, w: 0.5, h: 0.3 }, createdAt: SEEDED_AT
       }),
-      createdTime: '2026-10-04T12:06:00.000Z',
-      resolved: false,
+      createdTime: SEEDED_AT,
+      resolved: isResolved(fileId, 'cc_open'),
       author: { displayName: 'Krunoslav' },
-      replies: []
+      // Sasha has answered but not resolved, so the thread is open WITH a nested reply -- the
+      // shape of the user's reference card.
+      replies: [{
+        id: 'cc_open_r1', content: 'redrawn with the gridlines back\\n\\n' + AGENT,
+        createdTime: SEEDED_AT, author: { displayName: 'Krunoslav' }
+      }].concat(repliesOn(fileId, 'cc_open'))
     }] : [];
     var posted = ((window.__SASHA_FILE_COMMENTS__ || {})[fileId] || []).map(function (comment, at) {
       return {
         id: 'cc_' + fileId + '_' + at,
         content: comment.content,
         createdTime: '2026-10-04T12:20:0' + at + 'Z',
-        resolved: false,
+        resolved: isResolved(fileId, 'cc_' + fileId + '_' + at),
         author: { displayName: 'Krunoslav' },
-        replies: []
+        replies: repliesOn(fileId, 'cc_' + fileId + '_' + at)
       };
     });
     return seeded.concat(posted);
@@ -1635,9 +2241,12 @@ const STUB_SCRIPT = `<script>
         id: 'c_' + at,
         content: comment.content,
         createdTime: '2026-10-04T12:00:0' + at + 'Z',
-        resolved: false,
+        resolved: isResolved(DECK, 'c_' + at),
         author: { displayName: 'Krunoslav' },
-        replies: [{ id: 'r_' + at, content: answerFor(comment.content), createdTime: '2026-10-04T12:01:00Z', author: { displayName: 'Claude' } }]
+        // Signed with the agent marker, as the connector signs it: the same Google account posts
+        // both halves, so the marker is the only thing that makes this Sasha's.
+        replies: [{ id: 'r_' + at, content: answerFor(comment.content) + '\\n\\n' + AGENT, createdTime: '2026-10-04T12:01:00Z', author: { displayName: 'Krunoslav' } }]
+          .concat(repliesOn(DECK, 'c_' + at))
       };
     });
   }
@@ -1801,8 +2410,8 @@ async function click({ client, selector }: { client: CdpClient; selector: string
 /**
  * Press the button inside `within` whose text STARTS WITH `startsWith`.
  *
- * By text, because the row it is in holds several buttons of the same class: `.sasha-actions` has
- * the report entry, Dismiss and Insert, and a class selector there would press whichever came
+ * By text, because the row it is in holds several buttons of the same class: a cell's footer has
+ * Report defect and Insert, and a class selector there would press whichever came
  * first. The report button's own label carries the candidate number, so it is a prefix match.
  */
 async function clickLabelled({
@@ -1846,6 +2455,7 @@ async function clickLabelled({
  * box landed, and the gesture is repeated against it rather than against a sleep -- which is also
  * why this cannot pass by accident: an overlay that never takes a drag fails every attempt.
  */
+
 async function drag({
   client,
   selector,

@@ -95,3 +95,6 @@ mcp/sasha-slides/extension/content.js
 mcp/sasha-slides/extension/offscreen.js
 # OAuth token backups
 .auth/tokens.json.bak-*
+
+# SxS output of mcp/sasha-slides/converter/calibration/sxs-candidates.ts (regenerated, never reviewed in git).
+.sxs-candidates/

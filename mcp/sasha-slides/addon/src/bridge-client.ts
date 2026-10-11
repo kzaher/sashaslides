@@ -13,12 +13,17 @@ import {
   outcomeOf,
   parseCandidateCommentsReply,
   parseInsertReply,
+  parseRenderPreviewsReply,
   parseOpenPickerReply,
+  parsePickerTargetReply,
   parseReportWindowUrl,
   parseReadEventsReply,
   parseReadFeedbackReply,
   parseReadTextReply,
+  parseCommentReply,
+  parseReplyCommentReply,
   parseReportTargetReply,
+  parseResolveCommentReply,
   parseScanReply,
   parseSendFeedbackReply,
   parseWriteEventReply,
@@ -27,17 +32,22 @@ import {
   type CandidateCommentsReply,
   type HelloReply,
   type InsertReply,
+  type PickerTargetReply,
+  type RenderPreviewsReply,
   type InsertRequestSpec,
   type OpenPickerReply,
   type ProposalMark,
   type ReadEventsReply,
   type ReadFeedbackReply,
+  type CommentReplyReply,
+  type ReplyCommentReply,
   type ReportTargetReply,
   type SendFeedbackReply,
   type WriteEventReply, explainHostFailure } from "./bridge.ts";
 import { parseHelloReply } from "./bridge.ts";
 import type {
   CandidateCommentsApi,
+  CommentThreadApi,
   DriveApi,
   FeedbackApi,
   PickApi,
@@ -176,6 +186,18 @@ export function appsScriptSlidesApi({ call }: { call: ServerCall }): SlidesApi {
       if (replied.kind !== "ok") return replied;
       return outcomeOf({ parsed: parseInsertReply(replied.value), what: "sashaInsert" }) satisfies CallOutcome<InsertReply>;
     },
+
+    async renderPreviews(spec) {
+      const replied = await call<unknown>({
+        invoke: (runner) => runner.sashaRenderPreviews(spec),
+        what: "sashaRenderPreviews",
+      });
+      if (replied.kind !== "ok") return replied;
+      return outcomeOf({
+        parsed: parseRenderPreviewsReply(replied.value),
+        what: "sashaRenderPreviews",
+      }) satisfies CallOutcome<RenderPreviewsReply>;
+    },
   };
 }
 
@@ -267,14 +289,77 @@ export function appsScriptFeedbackApi({ call }: { call: ServerCall }): FeedbackA
         what: "sashaReadFeedback",
       }) satisfies CallOutcome<ReadFeedbackReply>;
     },
+
+    // Both go through the same rate-limited `call` as every poll, so a reply cannot be the one
+    // path that escapes call-budget.ts. They are user-initiated -- one call per press -- and the
+    // read that brings the reply back is a single flagged re-read, never a loop.
+    async reply(spec) {
+      const replied = await call<unknown>({
+        invoke: (runner) => runner.sashaReplyComment(spec),
+        what: "sashaReplyComment",
+      });
+      if (replied.kind !== "ok") return replied;
+      return outcomeOf({
+        parsed: parseReplyCommentReply(replied.value),
+        what: "sashaReplyComment",
+      }) satisfies CallOutcome<ReplyCommentReply>;
+    },
+
+    async resolve(spec) {
+      const replied = await call<unknown>({
+        invoke: (runner) => runner.sashaResolveComment(spec),
+        what: "sashaResolveComment",
+      });
+      if (replied.kind !== "ok") return replied;
+      return outcomeOf({
+        parsed: parseResolveCommentReply(replied.value),
+        what: "sashaResolveComment",
+      }) satisfies CallOutcome<ReplyCommentReply>;
+    },
+  };
+}
+
+/**
+ * THE THREAD RAIL'S TWO BUTTONS, over the same rate-limited `call` as every poll -- a reply must
+ * not be the one path that escapes call-budget.ts. Both are user-initiated, one call per press.
+ *
+ * `sashaResolveComment` is shared with `appsScriptFeedbackApi` above: Code.gs reads either spec
+ * field, so the two surfaces post the same resolve through the same server function while the
+ * sidebar is still on `content`. `sashaReplyToComment` is the `text` half of that pair.
+ */
+export function appsScriptCommentThreadApi({ call }: { call: ServerCall }): CommentThreadApi {
+  return {
+    async reply(spec) {
+      const replied = await call<unknown>({
+        invoke: (runner) => runner.sashaReplyToComment(spec),
+        what: "sashaReplyToComment",
+      });
+      if (replied.kind !== "ok") return replied;
+      return outcomeOf({
+        parsed: parseCommentReply(replied.value),
+        what: "sashaReplyToComment",
+      }) satisfies CallOutcome<CommentReplyReply>;
+    },
+
+    async resolve(spec) {
+      const replied = await call<unknown>({
+        invoke: (runner) => runner.sashaResolveComment(spec),
+        what: "sashaResolveComment",
+      });
+      if (replied.kind !== "ok") return replied;
+      return outcomeOf({
+        parsed: parseCommentReply(replied.value),
+        what: "sashaResolveComment",
+      }) satisfies CallOutcome<CommentReplyReply>;
+    },
   };
 }
 
 export function appsScriptPickerWindowApi({ call }: { call: ServerCall }): PickerWindowApi {
   return {
-    async openPicker() {
+    async openPicker(target) {
       const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaOpenPicker(),
+        invoke: (runner) => runner.sashaOpenPicker(target),
         what: "sashaOpenPicker",
       });
       if (replied.kind !== "ok") return replied;
@@ -282,6 +367,18 @@ export function appsScriptPickerWindowApi({ call }: { call: ServerCall }): Picke
         parsed: parseOpenPickerReply(replied.value),
         what: "sashaOpenPicker",
       }) satisfies CallOutcome<OpenPickerReply>;
+    },
+
+    async takePickerTarget() {
+      const replied = await call<unknown>({
+        invoke: (runner) => runner.sashaTakePickerTarget(),
+        what: "sashaTakePickerTarget",
+      });
+      if (replied.kind !== "ok") return replied;
+      return outcomeOf({
+        parsed: parsePickerTargetReply(replied.value),
+        what: "sashaTakePickerTarget",
+      }) satisfies CallOutcome<PickerTargetReply>;
     },
 
     async openDefectReport(spec) {

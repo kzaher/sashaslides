@@ -48,11 +48,14 @@ import {
   needsThread,
   nextRevisedSlideToLoad,
   outgoingMessage,
+  outgoingReply,
   proposalToAutoOpen,
   reduceConversation,
   slidesOf,
   type Conversation,
   type ConversationEvent,
+  type ConversationThread,
+  type ThreadActionKind,
 } from "./conversation-state.ts";
 import type { CandidateCommentsApi, DriveApi, FeedbackApi, PickerWindowApi, SessionLogApi } from "./drive-api.ts";
 import { feedbackCommentsFor, feedbackThreadsOf, sendOutcomeOf } from "./feedback.ts";
@@ -432,18 +435,98 @@ async function sendMessage(): Promise<void> {
 }
 
 /**
+ * ANSWER OR RESOLVE ONE THREAD, from its card, on the Drive file the thread lives on.
+ *
+ * One server call per press, through the same rate-limited `call` as every poll. The read that
+ * brings the result back is NOT started here: `thread-action-succeeded` raises a one-shot flag and
+ * `pump` -- the single gate -- starts exactly one read for it (see `rereadWanted`). Calling a
+ * loader from here as well would be the second path to a fetch that the quota incident came from.
+ */
+async function actOnThread({
+  thread,
+  action,
+}: {
+  thread: ConversationThread;
+  action: ThreadActionKind;
+}): Promise<void> {
+  const running = services;
+  const commentId = thread.commentId;
+  if (running === null) {
+    dispatch({ kind: "thread-action-failed", commentId, action, message: NOT_CONNECTED });
+    return;
+  }
+  if (thread.fileId === null) {
+    dispatch({
+      kind: "thread-action-failed",
+      commentId,
+      action,
+      message: "this comment's file is not known yet -- wait for the candidates to be read",
+    });
+    return;
+  }
+  const content = replyContentFor({ commentId, action });
+  if (content === null) return;
+  dispatch({ kind: "thread-action-started", commentId, action });
+  const spec = { fileId: thread.fileId, commentId, content };
+  const replied = await postFor({ feedback: running.feedback, action, spec });
+  if (replied.kind !== "ok") {
+    dispatch({ kind: "thread-action-failed", commentId, action, message: replied.message });
+    return;
+  }
+  dispatch({ kind: "thread-action-succeeded", commentId, action, source: thread.source });
+}
+
+/**
+ * What the post says. A reply is the pill's words, or nothing at all -- an empty reply is never
+ * sent. A resolve sends no words of its own; Code.gs supplies the "Resolved." Drive insists on.
+ */
+function replyContentFor({ commentId, action }: { commentId: string; action: ThreadActionKind }): string | null {
+  switch (action) {
+    case "reply":
+      return outgoingReply({ conversation: state, commentId });
+    case "resolve":
+      return "";
+    default:
+      return assertNever(action);
+  }
+}
+
+function postFor({
+  feedback,
+  action,
+  spec,
+}: {
+  feedback: FeedbackApi;
+  action: ThreadActionKind;
+  spec: Readonly<{ fileId: string; commentId: string; content: string }>;
+}): ReturnType<FeedbackApi["reply"]> {
+  switch (action) {
+    case "reply":
+      return feedback.reply(spec);
+    case "resolve":
+      return feedback.resolve(spec);
+    default:
+      return assertNever(action);
+  }
+}
+
+/**
  * Ask the HOST to show the slides window. `opened` is read back rather than assumed, so a refusal
  * (an older Code.gs, a host that declined) becomes a line on screen instead of a button that
  * appears to do nothing -- and this button is the only way back to the candidates.
  */
-async function showSlides(): Promise<void> {
+async function showSlides(target?: Readonly<{ proposalId: string; slideIndex: number | null }>): Promise<void> {
   const running = services;
   if (running === null) {
     dispatch({ kind: "open-failed", message: NOT_CONNECTED });
     return;
   }
   dispatch({ kind: "open-requested" });
-  const replied = await running.window.openPicker();
+  // WITH A TARGET the window comes up ON that candidate. The two documents share nothing, so it
+  // is recorded server-side first and collected by the window (build-addon.ts).
+  const replied = await running.window.openPicker(
+    target === undefined ? undefined : { proposalId: target.proposalId, slideIndex: target.slideIndex },
+  );
   if (replied.kind !== "ok") {
     dispatch({ kind: "open-failed", message: replied.message });
     return;
@@ -496,6 +579,21 @@ const actions: ConversationActions = {
   },
   reportDefect() {
     void reportDefect();
+  },
+  typeReply({ commentId, text }) {
+    dispatch({ kind: "reply-typed", commentId, text });
+  },
+  reply(thread) {
+    void actOnThread({ thread, action: "reply" });
+  },
+  chooseCommentFilter(filter) {
+    dispatch({ kind: "comment-filter-chosen", filter });
+  },
+  openArtifact(target) {
+    void showSlides(target);
+  },
+  resolve(thread) {
+    void actOnThread({ thread, action: "resolve" });
   },
 };
 

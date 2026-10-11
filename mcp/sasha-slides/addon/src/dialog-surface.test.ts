@@ -23,6 +23,7 @@ import { Picker } from "./Picker.tsx";
 import {
   INITIAL_PICKER_STATE,
   drawsRegions,
+  selectsElements,
   editorIsLive,
   editorReachOf,
   editsSlides,
@@ -56,7 +57,7 @@ test("an offer opens on the GRID, because comparing the candidates is the point 
   const offer = offerOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
   assert.ok(offer !== null);
   assert.equal(offer.view, "grid");
-  assert.equal(offer.tool, "edit", "and in the EDIT tool: editing is the default, not a destination");
+  assert.equal(offer.tool, "select", "and in the EDIT tool: editing is the default, not a destination");
   assert.equal(offer.selectedIndex, 1, "and option 1 is pre-selected, so Insert always has a target");
 });
 
@@ -79,17 +80,17 @@ test("AND CHOOSING A TOOL CHANGES THE TOOL AND NOTHING ELSE -- not the view", ()
       { kind: "proposal-offered", proposal, presentationId: "deck_1" },
       { kind: "candidate-zoomed", index: 2 },
       { kind: "tool-chosen", tool: "annotate" },
-      { kind: "tool-chosen", tool: "edit" },
+      { kind: "tool-chosen", tool: "select" },
     ]),
   );
   assert.equal(offer?.view, "single", "two tool changes left the zoom level alone");
-  assert.equal(offer?.tool, "edit");
+  assert.equal(offer?.tool, "select");
   assert.equal(offer?.selectedIndex, 2);
 });
 
 test("every one of the four view/tool combinations is reachable", () => {
   for (const view of ["grid", "single"] as const) {
-    for (const tool of ["edit", "annotate"] as const) {
+    for (const tool of ["select", "annotate"] as const) {
       const offer = offerOf(
         play([
           { kind: "proposal-offered", proposal, presentationId: "deck_1" },
@@ -135,15 +136,26 @@ test("the window is read-only while a submit is in flight -- view and tool both 
   ]);
   assert.equal(state.status, "submitting");
   assert.equal(offerOf(state)?.view, "grid", "zooming mid-insert changes nothing");
-  assert.equal(offerOf(state)?.tool, "edit");
+  assert.equal(offerOf(state)?.tool, "select");
   assert.equal(offerOf(state)?.selectedIndex, 1);
 });
 
-test("the tool predicates are the only decision site, and they disagree about the pointer", () => {
-  assert.equal(drawsRegions("annotate"), true);
-  assert.equal(drawsRegions("edit"), false);
-  assert.equal(editsSlides("edit"), true);
+test("the tool predicates are the only decision site, and they answer three different questions", () => {
+  // BOTH TOOLS POINT AT ELEMENTS. That is what let annotate stop dragging rectangles and start
+  // behaving like Claude's own artifact comments: hover, click, click again for the parent.
+  assert.equal(selectsElements("select"), true);
+  assert.equal(selectsElements("annotate"), true);
+  // Only one of them may CHANGE what it selected.
+  assert.equal(editsSlides("select"), true);
   assert.equal(editsSlides("annotate"), false);
+  // And the rectangle is the FALLBACK, for a stage with no reachable elements to click.
+  assert.equal(drawsRegions({ tool: "annotate", elementsReachable: false }), true);
+  assert.equal(
+    drawsRegions({ tool: "annotate", elementsReachable: true }),
+    false,
+    "a drag surface over a live document would swallow every click the selection needs",
+  );
+  assert.equal(drawsRegions({ tool: "select", elementsReachable: false }), false);
 });
 
 test("THE EDITOR'S REACH IS A UNION WITH A REASON, never a silently empty slot", () => {
@@ -204,10 +216,23 @@ test("a candidate whose HTML failed is not asked for again, and the others still
   assert.equal(nextHtmlToLoad(offerOf(state) ?? neverOffer())?.index, 2);
 });
 
-test("conversion follows the HTML, and only for candidates that have it", () => {
+test("NOTHING IS CONVERTED WHILE THE PREVIEW IS SHOWING -- it is work nobody asked for", () => {
+  // The converter stages a real offscreen iframe per slide and waits for its fonts and images,
+  // on the main thread. Doing that for every candidate the moment its HTML landed is seconds of
+  // a busy UI while the user is trying to click one.
+  const previewing = play([
+    { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+    { kind: "html-arrived", index: 2, html: "<html></html>" },
+  ]);
+  assert.equal(offerOf(previewing)?.rendering, "html", "the preview is what opens");
+  assert.equal(nextToConvert(offerOf(previewing) ?? neverOffer()), null, "so nothing converts");
+});
+
+test("and it follows the HTML once somebody asks for the conversion", () => {
   const state = play([
     { kind: "proposal-offered", proposal, presentationId: "deck_1" },
     { kind: "html-arrived", index: 2, html: "<html></html>" },
+    { kind: "rendering-chosen", rendering: "rendered" },
   ]);
   assert.equal(nextToConvert(offerOf(state) ?? neverOffer())?.index, 2, "1 has no HTML yet, so 2 is next");
 });
@@ -218,14 +243,19 @@ test("the grid draws one cell per candidate, numbered 1..N", () => {
   const markup = markupOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
   assert.equal(countOf(markup, /class="sasha-cell[ "]/g), 4, "four cells for four candidates");
   for (const index of [1, 2, 3, 4]) {
-    assert.match(markup, new RegExp(`sasha-chip-number">${index}<`), `cell ${index} carries its own number`);
+    assert.match(markup, new RegExp(`sasha-cell-number" aria-hidden="true">${index}<`), `cell ${index} carries its own number`);
   }
   assert.match(markup, /class="sasha-grid"/);
-  // THE CELL IS NOT A BUTTON ANY MORE. Its picture belongs to the current tool, so the two controls
-  // are named: the chip picks which candidate you are working on, and "Show large" is the zoom.
-  assert.match(markup, /work on candidate 3/);
-  assert.match(markup, /show candidate 3 large/);
+  // THE PICTURE IS THE CONTROL. A transparent button over the stage opens the editor on that
+  // candidate -- the cell carries no name chip, no "Show large" and no caption, because the
+  // index is on the picture and everything else was a sentence nobody could act on.
+  assert.match(markup, /Open option 3 to request changes/);
+  assert.doesNotMatch(markup, /show candidate 3 large/, "clicking the slide IS the zoom");
+  assert.doesNotMatch(markup, /work on candidate 3/, "the name chip is gone");
   assert.doesNotMatch(markup, /to mark it up/, "clicking a cell no longer enters a mark-up screen");
+  // The only two things a cell can receive, Insert last and accented.
+  assert.equal(countOf(markup, />Report defect</g), 4, "one per candidate");
+  assert.equal(countOf(markup, /class="sasha-primary sasha-small"[^>]*>Insert</g), 4, "one per candidate");
 });
 
 test("a grid cell renders the candidate's own HTML in a scaled sandboxed iframe, never a picture", () => {
@@ -241,8 +271,10 @@ test("a grid cell renders the candidate's own HTML in a scaled sandboxed iframe,
   // ONE EDITABLE FRAME AT A TIME. The selected candidate's is `allow-same-origin` so the visual
   // editor can reach its document; every other cell keeps the strictest box. `allow-scripts` is
   // granted nowhere, under either sandbox, so no candidate ever executes anything.
-  assert.equal(countOf(markup, /sandbox=""/g), 1, "the candidate that is not being edited");
-  assert.equal(countOf(markup, /sandbox="allow-same-origin"/g), 1, "the one the editor is on");
+  // EVERY grid cell is inert. The live editor lives in the editor window, which is the only
+  // place a candidate gets `allow-same-origin` -- so the grid cannot be reached into at all.
+  assert.equal(countOf(markup, /sandbox=""/g), 2, "both cells inert in the grid");
+  assert.equal(countOf(markup, /sandbox="allow-same-origin"/g), 0, "the grid never hosts the editor");
   assert.doesNotMatch(markup, /allow-scripts/);
   assert.match(markup, new RegExp(`transform:scale\\(${UNMEASURED_SCALE}\\)`));
   assert.doesNotMatch(markup, /<img/, "a thumbnail would lie; the HTML is authoritative");
@@ -256,8 +288,7 @@ test("a cell that could not be loaded says so on the cell", () => {
       { kind: "html-failed", index: 2, message: "Drive said 404" },
     ]),
   );
-  assert.match(markup, /Drive said 404/);
-  assert.match(markup, /could not be loaded/, "and the cell's own caption repeats it");
+  assert.match(markup, /Drive said 404/, "the stage itself carries the failure");
 });
 
 test("in the EDIT tool a cell shows the boxes already reported, with no drag surface over them", () => {
@@ -271,9 +302,6 @@ test("in the EDIT tool a cell shows the boxes already reported, with no drag sur
   // The editor draws its chrome over the frame, so a transparent drag overlay above it would
   // swallow every one of its pointer events. `RegionMarks` has no handlers at all.
   assert.doesNotMatch(markup, /class="sasha-overlay"/, "the edit tool does not take the pointer for dragging");
-  // "not sent" because a box is art direction Sasha cannot see until it is a comment on the
-  // candidate -- that is what the Send on the mark-up row does (UI-CONTRACT.md).
-  assert.match(markup, /1 marked, not sent/);
   // The comments have not been read, so the badge says "?" -- never a zero it cannot vouch for.
   assert.match(markup, /class="sasha-cell-unresolved sasha-unresolved-unknown"/);
 });
@@ -318,7 +346,15 @@ test("the cell's unresolved badge is the conversation's number, and never a sile
 
 // --- the markup, at both zoom levels, with both tools ---------------------
 
-test("THE ANNOTATE TOOL PUTS THE DRAG SURFACE ON EVERY CELL OF THE GRID", () => {
+/**
+ * THE GRID NEVER TAKES THE POINTER, and that is the change that made this window legible.
+ *
+ * It used to put a drag surface on all four cells whenever the annotate tool was on, so the
+ * grid was simultaneously a chooser and a work surface and carried the chrome for both. The
+ * grid is now only a chooser: one toggle, four slides, and picking one opens the editor. The
+ * cells still DRAW the marks already on a slide; they just do not accept the gesture.
+ */
+test("the grid is a chooser: no drag surface on any cell, whatever the tool says", () => {
   const markup = markupOf(
     play([
       { kind: "proposal-offered", proposal, presentationId: "deck_1" },
@@ -326,43 +362,82 @@ test("THE ANNOTATE TOOL PUTS THE DRAG SURFACE ON EVERY CELL OF THE GRID", () => 
       { kind: "tool-chosen", tool: "annotate" },
     ]),
   );
-  assert.match(markup, /class="sasha-grid"/, "still the grid: a tool is not a zoom level");
-  // Four cells, four drag surfaces: this is the whole of "annotate in the grid or individual view".
-  assert.equal(countOf(markup, /class="sasha-overlay"/g), proposal.count);
+  assert.match(markup, /class="sasha-grid"/);
+  assert.equal(countOf(markup, /class="sasha-overlay"/g), 0, "the grid chooses; the editor works");
+  // And the chrome above it is ONE toggle -- no VIEW group, no TOOL group.
+  assert.match(markup, /Preview/);
+  assert.match(markup, /Converted/);
+  assert.doesNotMatch(markup, /All candidates|One slide/, "the view switch is gone with the single pane");
 });
 
-test("zooming shows one candidate big, with the current tool on it and a way back", () => {
+/**
+ * PICKING A CANDIDATE OPENS THE EDITOR ON TOP, and the grid stays mounted underneath.
+ *
+ * It used to REPLACE the grid with a single large pane, which is why this test once asserted the
+ * grid was gone. An overlay is what makes closing come back to exactly where the user was --
+ * same scroll position, same choice -- so the grid being rendered at the same time is now the
+ * point rather than a bug.
+ */
+test("picking a candidate opens the editor over the grid, with the current tool on it", () => {
   const annotating = markupOf(
     play([
       { kind: "proposal-offered", proposal, presentationId: "deck_1" },
       { kind: "html-arrived", index: 2, html: slideHtml({ index: 2, proposalId: "p_1" }) },
+      { kind: "editor-opened", index: 2 },
       { kind: "tool-chosen", tool: "annotate" },
-      { kind: "candidate-zoomed", index: 2 },
     ]),
   );
-  assert.doesNotMatch(annotating, /class="sasha-grid"/, "the grid is not rendered at the same time");
-  assert.match(annotating, /Back to all candidates/);
-  assert.equal(countOf(annotating, /class="sasha-overlay"/g), 1, "one candidate, one drag surface");
-  assert.equal(countOf(annotating, /<iframe/g), 1, "one candidate, not four");
-  assert.match(annotating, /class="sasha-pane sasha-pane-big"/);
+  assert.match(annotating, /class="sasha-editor-scrim"/, "the editor is a window on top");
+  assert.match(annotating, /class="sasha-grid"/, "and the grid is still underneath, where it was");
+  assert.match(annotating, /Close the editor/, "with a way out");
+  assert.match(annotating, /class="sasha-toolrail"/, "and the toolbar down its left edge");
+  /*
+   * NO DRAG SURFACE AT ALL on a candidate whose document is reachable. Annotate points at
+   * elements now -- hover, click, click again for the parent -- the way Claude's own artifact
+   * comments do, and a transparent overlay above the frame would swallow every one of those
+   * clicks. The rectangle is the fallback, and the converted rendering below is where it lives.
+   */
+  assert.equal(
+    countOf(annotating, /class="sasha-overlay"/g),
+    0,
+    "a live document is clicked, not dragged over",
+  );
+  assert.match(annotating, /Click a thing on the slide to comment on it/, "and the tool says so");
 
-  // THE SAME ZOOM LEVEL WITH THE EDIT TOOL: one big slide, no drag surface, the editor's panel.
-  const editing = markupOf(
+  // THE RECTANGLE COMES BACK where there are no elements to click: the converted rendering is a
+  // picture, so "this part" can only be said with a box.
+  const overPicture = markupOf(
     play([
       { kind: "proposal-offered", proposal, presentationId: "deck_1" },
       { kind: "html-arrived", index: 2, html: slideHtml({ index: 2, proposalId: "p_1" }) },
-      { kind: "candidate-zoomed", index: 2 },
+      { kind: "editor-opened", index: 2 },
+      { kind: "tool-chosen", tool: "annotate" },
+      { kind: "rendering-chosen", rendering: "rendered" },
     ]),
   );
-  assert.match(editing, /class="sasha-pane sasha-pane-big"/);
-  assert.doesNotMatch(editing, /class="sasha-overlay"/);
-  assert.match(editing, /Visual edits/);
+  assert.equal(
+    countOf(overPicture, /class="sasha-overlay"/g),
+    1,
+    "nothing to point at, so the drag surface returns",
+  );
+
+  // THE SAME WINDOW WITH THE SELECT TOOL: no drag surface, the visual editor's panel instead.
+  const selecting = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-arrived", index: 2, html: slideHtml({ index: 2, proposalId: "p_1" }) },
+      { kind: "editor-opened", index: 2 },
+    ]),
+  );
+  assert.doesNotMatch(selecting, /class="sasha-overlay"/);
+  assert.match(selecting, /Visual edits/);
 });
 
 test("the mark-up list names the slide each box is on, so a box drawn in the grid is findable", () => {
   const markup = markupOf(
     play([
       { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "editor-opened", index: 2 },
       { kind: "tool-chosen", tool: "annotate" },
       { kind: "anomaly-drawn", index: 2, anomalyId: "user_1", region: { x: 0.1, y: 0.2, w: 0.3, h: 0.25 } },
       { kind: "anomaly-noted", index: 2, anomalyId: "user_1", note: "gridlines gone" },
@@ -379,7 +454,7 @@ test("the visual editor's slot says what it is for, and lists the edits once the
     play([
       { kind: "proposal-offered", proposal, presentationId: "deck_1" },
       { kind: "html-arrived", index: 1, html: slideHtml({ index: 1, proposalId: "p_1" }) },
-      { kind: "candidate-zoomed", index: 1 },
+      { kind: "editor-opened", index: 1 },
     ]),
   );
   assert.match(empty, /Visual edits/);
@@ -395,7 +470,7 @@ test("the visual editor's slot says what it is for, and lists the edits once the
     play([
       { kind: "proposal-offered", proposal, presentationId: "deck_1" },
       { kind: "html-arrived", index: 1, html: slideHtml({ index: 1, proposalId: "p_1" }) },
-      { kind: "candidate-zoomed", index: 1 },
+      { kind: "editor-opened", index: 1 },
       {
         kind: "edits-changed",
         index: 1,
@@ -428,6 +503,7 @@ test("the converted view replaces the documents in every cell, not just the open
       { kind: "html-arrived", index: 1, html: slideHtml({ index: 1, proposalId: "p_1" }) },
       { kind: "converted", index: 1, result: converted },
       { kind: "rendering-chosen", rendering: "rendered" },
+      { kind: "editor-opened", index: 1 },
     ]),
   );
   assert.doesNotMatch(markup, /<iframe/, "the HTML pane is not rendered at the same time");
@@ -444,7 +520,7 @@ test("an offer whose selected candidate is missing from the manifest says so ins
   assert.ok(offer !== null);
   const broken: PickerState = {
     status: "picking",
-    offer: { ...offer, view: "single", selectedIndex: 9 },
+    offer: { ...offer, rendering: "html", editing: 9, selectedIndex: 9 },
   };
   assert.equal(selectedFrame({ ...offer, selectedIndex: 9 }), null);
   assert.match(markupOf(broken), /option 9 is missing from the manifest/);
@@ -509,3 +585,71 @@ function neverOffer(): never {
 function neverEdit(): never {
   throw new Error("expected an edit");
 }
+
+/**
+ * WAITING IS A LOADER, NOT AN ESSAY.
+ *
+ * The dormant window used to explain itself in two paragraphs -- what would appear here, what
+ * you could do with it, and that you could close it. The user's verdict: "This is also a
+ * confusing loading screen, just use a loader." Nothing there was actionable: the window is
+ * waiting, and the only honest thing to show is that it is waiting.
+ */
+test("the dormant window is a loader and nothing else", () => {
+  const markup = markupOf(INITIAL_PICKER_STATE);
+  assert.match(markup, /class="sasha-loader"/, "a loader");
+  assert.doesNotMatch(markup, /Ask Sasha for a slide and the candidates appear/);
+  assert.doesNotMatch(markup, /This window is watching your Drive/);
+  assert.doesNotMatch(markup, /Waiting for slides/);
+});
+
+/**
+ * THE COMPOSER OPENS ON WHAT WAS CLICKED -- the whole point of the annotate rework.
+ *
+ * The old flow put the note field in a list under the slide, so a comment about a heading was
+ * typed somewhere the heading was not. Claude's own artifact comments anchor the box to the
+ * thing, and this now does the same: the composer is inside the stage, positioned from the
+ * selection's own region, headed with what was selected.
+ */
+test("selecting an element with the annotate tool opens a composer anchored to it", () => {
+  const selected = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-arrived", index: 2, html: slideHtml({ index: 2, proposalId: "p_1" }) },
+      { kind: "editor-opened", index: 2 },
+      { kind: "tool-chosen", tool: "annotate" },
+      {
+        kind: "selection-changed",
+        selection: {
+          target: "div > section > h1",
+          html: "<h1>Paths in</h1>",
+          region: { x: 0.1, y: 0.12, w: 0.5, h: 0.14 },
+        },
+      },
+    ]),
+  );
+  assert.match(selected, /class="sasha-spot"/, "the composer is open");
+  // Headed by the thing, not the selector chain.
+  assert.match(selected, /Comment on h1/);
+  assert.match(selected, /What is wrong with this\?/, "with the cursor's prompt");
+  assert.match(selected, />Comment</, "and a button that says what it does");
+  // Placed from the region: 0.12 + 0.14 + the gap, as composerPlacementFor computes it.
+  assert.match(selected, /data-side="below"/);
+  assert.match(selected, /left:\s*10%/, "aligned with the selection's left edge");
+  // The hint it replaces is gone while something is selected.
+  assert.match(selected, /Comment on h1/, "the composer is what speaks while something is selected");
+});
+
+test("and the SELECT tool does not open one -- it inspects instead", () => {
+  const selected = markupOf(
+    play([
+      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      { kind: "html-arrived", index: 2, html: slideHtml({ index: 2, proposalId: "p_1" }) },
+      { kind: "editor-opened", index: 2 },
+      {
+        kind: "selection-changed",
+        selection: { target: "h1", html: "<h1>Paths in</h1>", region: { x: 0.1, y: 0.1, w: 0.3, h: 0.1 } },
+      },
+    ]),
+  );
+  assert.doesNotMatch(selected, /class="sasha-spot"/, "select edits; annotate comments");
+});

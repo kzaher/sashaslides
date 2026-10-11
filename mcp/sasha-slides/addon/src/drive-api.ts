@@ -24,8 +24,15 @@ import type {
   ProposalMark,
   ReadEventsReply,
   ReadEventsSpec,
+  PickerTargetReply,
+  PickerTargetSpec,
   ReadFeedbackReply,
   ReadFeedbackSpec,
+  RenderPreviewsReply,
+  CommentReplyReply,
+  CommentReplySpec,
+  ReplyCommentReply,
+  ReplyCommentSpec,
   ReportTargetReply,
   ReportTargetSpec,
   SendFeedbackReply,
@@ -33,6 +40,7 @@ import type {
   WriteEventSpec,
 } from "./bridge.ts";
 import type { SendFeedbackSpec } from "./feedback.ts";
+import type { SlidesApiRequest } from "./converter-contract.ts";
 
 export type DriveApi = Readonly<{
   /**
@@ -76,6 +84,16 @@ export type SlidesApi = Readonly<{
    * artifact in the same round trip (see render-artifact.ts for why they are not separable).
    */
   insert(spec: InsertRequestSpec): Promise<CallOutcome<InsertReply>>;
+  /**
+   * The candidates as GOOGLE renders them. A throwaway deck, one page per candidate, photographed
+   * and then deleted -- the only way to see the real thing before anything is in the user's deck.
+   */
+  renderPreviews(spec: RenderPreviewsSpec): Promise<CallOutcome<RenderPreviewsReply>>;
+}>;
+
+/** What to photograph: each candidate's 1-based index and the requests the converter emitted. */
+export type RenderPreviewsSpec = Readonly<{
+  slides: readonly Readonly<{ index: number; requests: readonly SlidesApiRequest[] }>[];
 }>;
 
 /**
@@ -86,6 +104,30 @@ export type SlidesApi = Readonly<{
 export type FeedbackApi = Readonly<{
   send(spec: SendFeedbackSpec): Promise<CallOutcome<SendFeedbackReply>>;
   read(spec: ReadFeedbackSpec): Promise<CallOutcome<ReadFeedbackReply>>;
+  /** Answer an existing thread, in the user's own words, on the file the thread lives on. */
+  reply(spec: ReplyCommentSpec): Promise<CallOutcome<ReplyCommentReply>>;
+  /** Close a thread -- Google's "Mark as resolved and hide discussion". */
+  resolve(spec: ReplyCommentSpec): Promise<CallOutcome<ReplyCommentReply>>;
+}>;
+
+/**
+ * ANSWERING AND CLOSING A THREAD THAT ALREADY EXISTS -- the thread rail's two buttons.
+ *
+ * Its own capability, and not two more methods on `FeedbackApi`, because the surfaces need
+ * different halves: the slides window drives threads on a CANDIDATE and never sends a new deck
+ * comment, so handing it `send`/`read` would be handing it reach it has no business having. Both
+ * methods take the file the thread lives on, like every other call in the comment channel --
+ * nothing here knows whether that is the presentation or a candidate's own NN.html.
+ *
+ * A reply and a resolve are ONE Drive endpoint (a resolve is a reply carrying `action: "resolve"`),
+ * so they share a reply shape; they are two methods so a caller cannot close a thread by passing
+ * the wrong flag. `resolved` comes back from Drive rather than from which method was called.
+ */
+export type CommentThreadApi = Readonly<{
+  /** Post the user's words into the thread. Leaves it open. */
+  reply(spec: CommentReplySpec): Promise<CallOutcome<CommentReplyReply>>;
+  /** Close the thread. Drive refuses a reply with no content, so a note always goes with it. */
+  resolve(spec: CommentReplySpec): Promise<CallOutcome<CommentReplyReply>>;
 }>;
 
 /**
@@ -97,7 +139,13 @@ export type FeedbackApi = Readonly<{
  * HtmlService documents share nothing (UI-CONTRACT.md).
  */
 export type PickerWindowApi = Readonly<{
-  openPicker(): Promise<CallOutcome<OpenPickerReply>>;
+  /**
+   * Show the slides window. With a target it comes up ON that candidate -- the sidebar's
+   * "Open" on a comment about slide 3 should land on slide 3, not on wherever the window was.
+   */
+  openPicker(target?: PickerTargetSpec): Promise<CallOutcome<OpenPickerReply>>;
+  /** What the window was asked to open on. Reading CLEARS it, so a later open is unaffected. */
+  takePickerTarget(): Promise<CallOutcome<PickerTargetReply>>;
   /**
    * Show the DEFECT-REPORT window -- a third HtmlService document of its own, not a mode of the
    * slides window. Its own method rather than an argument to `openPicker`, so a caller cannot pass

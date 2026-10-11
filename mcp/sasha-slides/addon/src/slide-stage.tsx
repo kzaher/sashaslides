@@ -37,6 +37,7 @@ export function SlideStage({
   frame,
   rendering,
   tool,
+  showFindings,
   disabled,
   onEditFrame,
   onDraw,
@@ -44,6 +45,8 @@ export function SlideStage({
   frame: SlideFrame;
   rendering: SlideRendering;
   tool: SlideTool;
+  /** Whether the converter's own findings are painted over the slide. Off by default. */
+  showFindings: boolean;
   disabled: boolean;
   /**
    * The iframe element, for the visual editor to attach to -- null for every stage that is not the
@@ -55,7 +58,16 @@ export function SlideStage({
   return (
     <>
       <StageBody frame={frame} rendering={rendering} onEditFrame={onEditFrame} />
-      <StageTool frame={frame} tool={tool} disabled={disabled} onDraw={onDraw} />
+      {/* `onEditFrame` is non-null for exactly the stage the editor is attached to, which is the
+          same thing as "clicking here selects a real element". */}
+      <StageTool
+        frame={frame}
+        tool={tool}
+        elementsReachable={onEditFrame !== null}
+        showFindings={showFindings}
+        disabled={disabled}
+        onDraw={onDraw}
+      />
     </>
   );
 }
@@ -72,16 +84,31 @@ export function marksOf({
   index,
   anomalies,
   conversion,
+  showFindings,
 }: {
   index: number;
   anomalies: readonly DraftAnomaly[];
   conversion: SlideFrame["conversion"];
+  /** Whether to paint what the CONVERTER flagged. Off unless the user asked to see it. */
+  showFindings: boolean;
 }): readonly RegionMark[] {
-  const fromConverter = converterFindingsOf({ index, conversion }).map((finding) => ({
-    markId: finding.findingId,
-    region: finding.region,
-    tone: "converter" as const,
-  }));
+  /*
+   * THE CONVERTER'S OWN FINDINGS ARE NOT DRAWN BY DEFAULT.
+   *
+   * Every lossy thing on a slide -- a letter-spacing it cannot carry, a gradient it has to
+   * flatten -- was outlined in orange the moment the candidate appeared. On a slide with any
+   * character that is most of the slide: the user saw dashed boxes over the title, the body,
+   * the footer and every card, before they had said anything, and read them as THEIR marks.
+   * They are still collected and still travel with PICK (`converterFindingsOf`); they are just
+   * not painted over the picture unless asked for.
+   */
+  const fromConverter = showFindings
+    ? converterFindingsOf({ index, conversion }).map((finding) => ({
+        markId: finding.findingId,
+        region: finding.region,
+        tone: "converter" as const,
+      }))
+    : [];
   const fromUser = anomalies.map((anomaly) => ({
     markId: anomaly.anomalyId,
     region: anomaly.region,
@@ -155,8 +182,47 @@ function StageHtml({
   }
 }
 
-/** The lossy projection: the geometry the converter asked Slides for. See rendered-preview.ts. */
+/**
+ * THE CANDIDATE AS GOOGLE DRAWS IT.
+ *
+ * This used to be the only thing the "Converted" pane could show: a projection of the REQUESTS --
+ * labelled rectangles where the elements would go -- on the grounds that a real thumbnail needs
+ * the slide to exist and photographing it would mutate the user's deck. The second half was
+ * wrong: it does not have to be the USER's deck. `sashaRenderPreviews` builds a throwaway one,
+ * photographs it and deletes it, so the pane can show the truth (build-addon.ts).
+ *
+ * The projection is still here, as the FALLBACK, and it is labelled as one. When Google will not
+ * answer -- offline, a refused batch, a quota -- a diagram of the geometry is far better than an
+ * empty box, but the user must never mistake it for the rendering.
+ */
 function StageRendered({ frame }: { frame: SlideFrame }): JSX.Element {
+  switch (frame.render.kind) {
+    case "rendered":
+      return (
+        <img
+          className="sasha-render"
+          src={frame.render.dataUri}
+          alt={`candidate ${frame.index} as Google Slides renders it`}
+        />
+      );
+    case "rendering":
+      return <span className="sasha-dim sasha-placeholder">rendering in Google Slides...</span>;
+    case "unrendered":
+    case "failed":
+      return <StageProjection frame={frame} render={frame.render} />;
+    default:
+      return assertNever(frame.render);
+  }
+}
+
+/** The geometry the converter ASKED for -- a diagram, never the rendering. */
+function StageProjection({
+  frame,
+  render,
+}: {
+  frame: SlideFrame;
+  render: Extract<SlideFrame["render"], { kind: "unrendered" | "failed" }>;
+}): JSX.Element {
   switch (frame.conversion.kind) {
     case "unconverted":
       return <span className="sasha-dim sasha-placeholder">converting...</span>;
@@ -168,6 +234,13 @@ function StageRendered({ frame }: { frame: SlideFrame }): JSX.Element {
           {previewElementsOf(frame.conversion.requests).map((element, position) => (
             <StagePreviewBox key={`${element.objectId}_${position}`} element={element} />
           ))}
+          {/* SAY WHAT THIS IS. A diagram of boxes that the user believes is the rendering is worse
+              than no pane at all -- it was read as "the converter is broken" (it was not). */}
+          <span className="sasha-projection-note">
+            {render.kind === "failed"
+              ? `Google could not render this one: ${render.message}. Showing where the elements would go.`
+              : "Where the elements would go -- not the rendering."}
+          </span>
         </span>
       );
     default:
@@ -184,23 +257,32 @@ function StagePreviewBox({ element }: { element: PreviewElement }): JSX.Element 
 }
 
 /**
- * WHAT THE TOOL PUTS OVER THE PICTURE, and the one place the two tools differ visually. The drag
- * surface is granted ONLY to `annotate`: the editor draws its own chrome over the frame and a
- * transparent overlay above it would swallow every one of its pointer events.
+ * WHAT THE TOOL PUTS OVER THE PICTURE.
+ *
+ * The drag surface is the FALLBACK, not the gesture. Where the candidate's own document is
+ * reachable the annotate tool points at elements -- hover, click, click again for the parent --
+ * and a transparent overlay above the frame would swallow every one of those clicks. A rectangle
+ * is for the converted rendering and for a candidate that could not be reached, where there is
+ * nothing to point at but a picture.
  */
 function StageTool({
   frame,
   tool,
+  elementsReachable,
+  showFindings,
   disabled,
   onDraw,
 }: {
   frame: SlideFrame;
   tool: SlideTool;
+  /** True when the editor is attached to this stage, so clicking selects a real element. */
+  elementsReachable: boolean;
+  showFindings: boolean;
   disabled: boolean;
   onDraw: (spec: Readonly<{ index: number; region: Region }>) => void;
 }): JSX.Element {
-  const marks = marksOf({ index: frame.index, anomalies: frame.anomalies, conversion: frame.conversion });
-  if (!drawsRegions(tool)) return <RegionMarks marks={marks} />;
+  const marks = marksOf({ index: frame.index, anomalies: frame.anomalies, conversion: frame.conversion, showFindings });
+  if (!drawsRegions({ tool, elementsReachable })) return <RegionMarks marks={marks} />;
   return (
     <RegionOverlay
       marks={marks}

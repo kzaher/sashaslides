@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   appsScriptCall,
+  appsScriptCommentThreadApi,
+  appsScriptFeedbackApi,
   appsScriptDriveApi,
   appsScriptPickApi,
   helloFromServer,
@@ -23,10 +25,13 @@ import {
   parseReadTextReply,
   parseScanReply,
   parseWritePickReply,
+  parseCommentReply,
+  parseReplyCommentReply,
+  parseResolveCommentReply,
 } from "./bridge.ts";
 import { SEEN_LIMIT, parseSeen, seenStore, serializeSeen, type KeyValueStorage } from "./seen-store.ts";
 
-test("there are exactly thirteen server functions, and they are the ones Code.gs declares", () => {
+test("there are exactly nineteen server functions, and they are the ones Code.gs declares", () => {
   assert.deepEqual(SERVER_FUNCTION_NAMES, [
     // The picker's five.
     "sashaHello",
@@ -36,16 +41,30 @@ test("there are exactly thirteen server functions, and they are the ones Code.gs
     "sashaWriteEvent",
     "sashaCandidateComments",
     "sashaInsert",
+    // The candidates as GOOGLE renders them: a throwaway deck, photographed and deleted. It is
+    // separate from sashaInsert because it must never touch the user's own presentation.
+    "sashaRenderPreviews",
     "sashaWritePick",
     // The comment channel's two. Both take a FILE ID, which is what lets the same pair carry a
     // message about the deck and a mark-up on a candidate's own NN.html (PROTOCOL.md).
     "sashaSendFeedback",
     "sashaReadFeedback",
+    // Answering and resolving an EXISTING thread, from its card in Ask Sasha or its row in the
+    // slides window's thread rail. ALL THREE ARE ONE DRIVE CALL -- a resolve is a reply carrying
+    // `action: "resolve"` -- so they are a pair by construction and a Code.gs that has one and not
+    // the others cannot exist. `sashaReplyToComment` is the same post as `sashaReplyComment` for a
+    // caller that names the field `text`; it is here only until sidebar.tsx moves over, and then
+    // the older name goes and this list is sixteen again (src/bridge.ts, CommentReplySpec).
+    "sashaReplyComment",
+    "sashaReplyToComment",
+    "sashaResolveComment",
     // The SURFACE SPLIT's three: asking the host to show another document, and reading back which
     // candidate the report window was opened on. They are server calls and not client JavaScript
     // because `showModelessDialog` is `SlidesApp.getUi()`, and the three HtmlService documents
     // share nothing (UI-CONTRACT.md).
     "sashaOpenPicker",
+    // Which candidate the slides window should come up on; reading it clears it.
+    "sashaTakePickerTarget",
     "sashaOpenDefectReport",
     // The WEB-APP URL. Slides hosts exactly one modeless dialog, so showing the report evicted
     // the Candidate slides window; a web-app window is the only separate browser window Apps
@@ -224,10 +243,15 @@ function silentRunner(): AppsScriptRunner {
     sashaCandidateComments: () => undefined,
     sashaSendFeedback: () => undefined,
     sashaReadFeedback: () => undefined,
+    sashaReplyComment: () => undefined,
+    sashaReplyToComment: () => undefined,
+    sashaResolveComment: () => undefined,
     sashaOpenPicker: () => undefined,
     sashaOpenDefectReport: () => undefined,
     sashaReportWindowUrl: () => undefined,
     sashaTakeReportTarget: () => undefined,
+    sashaRenderPreviews: () => undefined,
+    sashaTakePickerTarget: () => undefined,
   };
   return runner;
 }
@@ -250,10 +274,15 @@ function failingRunner(error: unknown): AppsScriptRunner {
     sashaCandidateComments: () => onFailure?.(error),
     sashaSendFeedback: () => onFailure?.(error),
     sashaReadFeedback: () => onFailure?.(error),
+    sashaReplyComment: () => onFailure?.(error),
+    sashaReplyToComment: () => onFailure?.(error),
+    sashaResolveComment: () => onFailure?.(error),
     sashaOpenPicker: () => onFailure?.(error),
     sashaOpenDefectReport: () => onFailure?.(error),
     sashaReportWindowUrl: () => onFailure?.(error),
     sashaTakeReportTarget: () => onFailure?.(error),
+    sashaRenderPreviews: () => undefined,
+    sashaTakePickerTarget: () => undefined,
   };
   return runner;
 }
@@ -275,10 +304,15 @@ function throwingRunner(): AppsScriptRunner {
     sashaCandidateComments: () => undefined,
     sashaSendFeedback: () => undefined,
     sashaReadFeedback: () => undefined,
+    sashaReplyComment: () => undefined,
+    sashaReplyToComment: () => undefined,
+    sashaResolveComment: () => undefined,
     sashaOpenPicker: () => undefined,
     sashaOpenDefectReport: () => undefined,
     sashaReportWindowUrl: () => undefined,
     sashaTakeReportTarget: () => undefined,
+    sashaRenderPreviews: () => undefined,
+    sashaTakePickerTarget: () => undefined,
   };
   return runner;
 }
@@ -297,12 +331,17 @@ function stubCall(replies: Readonly<Record<string, unknown>>) {
     sashaScanInbox: answer("sashaScanInbox"),
     sashaReadText: answer("sashaReadText"),
     sashaInsert: answer("sashaInsert"),
+    sashaRenderPreviews: answer("sashaRenderPreviews"),
+    sashaTakePickerTarget: answer("sashaTakePickerTarget"),
     sashaWritePick: answer("sashaWritePick"),
     sashaReadEvents: answer("sashaReadEvents"),
     sashaWriteEvent: answer("sashaWriteEvent"),
     sashaCandidateComments: answer("sashaCandidateComments"),
     sashaSendFeedback: answer("sashaSendFeedback"),
     sashaReadFeedback: answer("sashaReadFeedback"),
+    sashaReplyComment: answer("sashaReplyComment"),
+    sashaReplyToComment: answer("sashaReplyToComment"),
+    sashaResolveComment: answer("sashaResolveComment"),
     sashaOpenPicker: answer("sashaOpenPicker"),
     sashaOpenDefectReport: answer("sashaOpenDefectReport"),
     sashaReportWindowUrl: answer("sashaReportWindowUrl"),
@@ -342,4 +381,128 @@ test("a reply the user typed in Drive is not the agent's, and keeps every word",
   });
   assert.equal(parsed?.authoredByAgent, false);
   assert.equal(parsed?.text, "still looks wrong to me");
+});
+
+// --- answering a thread from its card ----------------------------------------
+
+test("a posted reply must come back with Drive's id -- an empty one is not a success", () => {
+  assert.deepEqual(parseReplyCommentReply({ replyId: "AAAB", resolved: false }), {
+    kind: "ok",
+    value: { replyId: "AAAB", resolved: false },
+  });
+  assert.equal(parseReplyCommentReply({ replyId: "" }).kind, "invalid");
+  assert.equal(parseReplyCommentReply({}).kind, "invalid");
+  assert.equal(parseReplyCommentReply(null).kind, "invalid");
+  assert.deepEqual(parseResolveCommentReply({ replyId: "AAAC", resolved: true }), {
+    kind: "ok",
+    value: { replyId: "AAAC", resolved: true },
+  });
+  assert.deepEqual(
+    parseResolveCommentReply("nope"),
+    { kind: "invalid", reason: "sashaResolveComment returned no object" },
+    "the refusal names which function answered badly",
+  );
+});
+
+// An unknown resolve state must not throw away a post that LANDED. A Code.gs deployed before
+// `resolved` existed answers with the id alone, and a card that refused that reply would tell the
+// user their words were not sent when Drive has them -- so absent, null and a non-boolean all read
+// as "still open", which is both the safe answer and what an un-resolved thread actually is.
+test("a reply's resolve state is read as a boolean and defaults to open, never to a failure", () => {
+  assert.deepEqual(parseReplyCommentReply({ replyId: "AAAB" }), {
+    kind: "ok",
+    value: { replyId: "AAAB", resolved: false },
+  });
+  assert.deepEqual(parseReplyCommentReply({ replyId: "AAAB", resolved: null }), {
+    kind: "ok",
+    value: { replyId: "AAAB", resolved: false },
+  });
+  assert.deepEqual(
+    parseReplyCommentReply({ replyId: "AAAB", resolved: "true" }),
+    { kind: "ok", value: { replyId: "AAAB", resolved: false } },
+    "the STRING \"true\" is not Drive saying it resolved the thread",
+  );
+});
+
+test("a reply and a resolve go to the server functions of those names, and come back parsed", async () => {
+  const api = appsScriptFeedbackApi({
+    call: stubCall({
+      sashaReplyComment: { replyId: "r_new", resolved: false },
+      sashaResolveComment: { replyId: "r_res", resolved: true },
+    }),
+  });
+  assert.deepEqual(await api.reply({ fileId: "html_2", commentId: "c_1", content: "still uneven" }), {
+    kind: "ok",
+    value: { replyId: "r_new", resolved: false },
+  });
+  assert.deepEqual(await api.resolve({ fileId: "html_2", commentId: "c_1", content: "" }), {
+    kind: "ok",
+    value: { replyId: "r_res", resolved: true },
+  });
+});
+
+// --- the thread rail's reply and resolve -------------------------------------
+
+test("a comment reply needs Drive's id, and reads its resolve state as a boolean", () => {
+  assert.deepEqual(parseCommentReply({ replyId: "AAAD", resolved: true }), {
+    kind: "ok",
+    value: { replyId: "AAAD", resolved: true },
+  });
+  assert.deepEqual(
+    parseCommentReply({ replyId: "AAAD" }),
+    { kind: "ok", value: { replyId: "AAAD", resolved: false } },
+    "an absent resolve state is an OPEN thread, not a failed post",
+  );
+  assert.deepEqual(
+    parseCommentReply({ replyId: "AAAD", resolved: "yes" }),
+    { kind: "ok", value: { replyId: "AAAD", resolved: false } },
+    "only a real boolean closes a thread",
+  );
+  assert.equal(parseCommentReply({ replyId: "" }).kind, "invalid", "an unacknowledged post is not a success");
+  assert.equal(parseCommentReply({}).kind, "invalid");
+  assert.equal(parseCommentReply(null).kind, "invalid");
+  assert.equal(parseCommentReply([]).kind, "invalid", "an array is not a reply");
+  assert.equal(parseCommentReply("AAAD").kind, "invalid");
+});
+
+test("the thread rail's reply and resolve reach the server functions of those names", async () => {
+  const api = appsScriptCommentThreadApi({
+    call: stubCall({
+      sashaReplyToComment: { replyId: "t_new", resolved: false },
+      sashaResolveComment: { replyId: "t_res", resolved: true },
+    }),
+  });
+  assert.deepEqual(await api.reply({ fileId: "html_3", commentId: "c_9", text: "still cropped" }), {
+    kind: "ok",
+    value: { replyId: "t_new", resolved: false },
+  });
+  assert.deepEqual(await api.resolve({ fileId: "html_3", commentId: "c_9", text: "Resolved." }), {
+    kind: "ok",
+    value: { replyId: "t_res", resolved: true },
+  });
+});
+
+// The rail must not report a thread CLOSED because the button said resolve. Drive is the only
+// authority on that, and Code.gs reports the `action` Drive echoed -- so a resolve Drive declined
+// to apply comes back as a successful reply on a thread that is still open.
+test("a resolve Drive did not apply is an open thread, not a closed one", async () => {
+  const api = appsScriptCommentThreadApi({
+    call: stubCall({ sashaResolveComment: { replyId: "t_res", resolved: false } }),
+  });
+  assert.deepEqual(await api.resolve({ fileId: "html_3", commentId: "c_9", text: "Resolved." }), {
+    kind: "ok",
+    value: { replyId: "t_res", resolved: false },
+  });
+});
+
+test("a malformed reply from either thread function is a failure naming the function", async () => {
+  const api = appsScriptCommentThreadApi({
+    call: stubCall({ sashaReplyToComment: { replyId: "" }, sashaResolveComment: "nope" }),
+  });
+  const replied = await api.reply({ fileId: "html_3", commentId: "c_9", text: "again" });
+  assert.equal(replied.kind, "failed");
+  assert.match(replied.kind === "failed" ? replied.message : "", /sashaReplyToComment/);
+  const resolved = await api.resolve({ fileId: "html_3", commentId: "c_9", text: "Resolved." });
+  assert.equal(resolved.kind, "failed");
+  assert.match(resolved.kind === "failed" ? resolved.message : "", /sashaResolveComment/);
 });

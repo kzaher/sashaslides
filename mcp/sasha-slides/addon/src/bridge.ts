@@ -88,6 +88,48 @@ export type ReadFeedbackReply = Readonly<{ comments: readonly FeedbackCommentRec
 export type ReadFeedbackSpec = Readonly<{ fileId: string; pageSize: number }>;
 
 /**
+ * `sashaReplyComment()` / `sashaResolveComment()`: ONE POST INTO AN EXISTING THREAD, on whichever
+ * file the thread lives on -- the presentation for a deck message, the candidate's `NN.html` for a
+ * mark-up. Drive models "resolve" as a reply carrying `action: "resolve"`, so both are the same
+ * endpoint and the same reply; they are two functions only so a caller cannot resolve a thread by
+ * passing the wrong flag.
+ *
+ * `content` is the USER'S OWN WORDS in a thread that already exists: no sentinel line, unlike a new
+ * mark-up comment, because nothing has to parse a region back out of a reply. Empty is allowed for
+ * a resolve -- Code.gs substitutes "Resolved.", since Drive refuses a reply with no content.
+ */
+export type ReplyCommentSpec = Readonly<{ fileId: string; commentId: string; content: string }>;
+
+/**
+ * THE SAME POST, with the field named the way the thread rail names it: `text`.
+ *
+ * Two specs for one endpoint is a MIGRATION, not a design. `ReplyCommentSpec` above is what the
+ * sidebar's conversation still passes (`content`), and this is what the slides window's thread rail
+ * passes; they go to the same Drive endpoint through the same Code.gs helper, which reads whichever
+ * field is present. Collapse them onto this one once sidebar.tsx has moved over -- and do it by
+ * deleting the older name, never by letting a second SHAPE grow, which is the drift this file's
+ * header warns about.
+ */
+export type CommentReplySpec = Readonly<{ fileId: string; commentId: string; text: string }>;
+
+/**
+ * The id Drive gave the new reply, and whether the thread is CLOSED as a result.
+ *
+ * `resolved` is not "which function was called": Code.gs asks Drive for the `action` it actually
+ * applied and reports that, so a resolve Drive declined comes back `false`. It is absent on every
+ * reply posted by a Code.gs older than that field, which is why the parser reads it as a boolean
+ * defaulting to false rather than refusing the reply -- an unknown resolve state is "still open",
+ * the safe answer, and never a failed post.
+ */
+export type CommentReplyReply = Readonly<{ replyId: string; resolved: boolean }>;
+
+/**
+ * The older name for the reply above, kept while the sidebar still imports it. It is an ALIAS and
+ * not a second declaration on purpose: one shape cannot drift from itself.
+ */
+export type ReplyCommentReply = CommentReplyReply;
+
+/**
  * `sashaOpenPicker()`. The sidebar asking Apps Script to SHOW THE CANDIDATES DIALOG.
  *
  * This is the only call whose point is a side effect on the host rather than data, and it exists
@@ -118,10 +160,15 @@ export type ServerFunctionName =
   | "sashaWriteEvent"
   | "sashaCandidateComments"
   | "sashaInsert"
+  | "sashaRenderPreviews"
   | "sashaWritePick"
   | "sashaSendFeedback"
   | "sashaReadFeedback"
+  | "sashaReplyComment"
+  | "sashaReplyToComment"
+  | "sashaResolveComment"
   | "sashaOpenPicker"
+  | "sashaTakePickerTarget"
   | "sashaOpenDefectReport"
   | "sashaReportWindowUrl"
   | "sashaTakeReportTarget";
@@ -134,10 +181,15 @@ export const SERVER_FUNCTION_NAMES: readonly ServerFunctionName[] = [
   "sashaWriteEvent",
   "sashaCandidateComments",
   "sashaInsert",
+  "sashaRenderPreviews",
   "sashaWritePick",
   "sashaSendFeedback",
   "sashaReadFeedback",
+  "sashaReplyComment",
+  "sashaReplyToComment",
+  "sashaResolveComment",
   "sashaOpenPicker",
+  "sashaTakePickerTarget",
   "sashaOpenDefectReport",
   "sashaReportWindowUrl",
   "sashaTakeReportTarget",
@@ -179,6 +231,29 @@ export function parseReportWindowUrl(value: unknown): Parsed<string | null> {
 export type ReportTargetReply = Readonly<{ proposalId: string | null; slideIndex: number | null }>;
 
 /** What `sashaOpenDefectReport` is told to record. Null when the caller has no slide in mind. */
+/**
+ * Which candidate to open the SLIDES window on, or nulls for "the whole set".
+ *
+ * The sidebar and the slides window share nothing but the server, so this is left there for the
+ * window to collect -- the same handoff `ReportTargetSpec` uses, for the same reason.
+ */
+export type PickerTargetSpec = Readonly<{ proposalId: string | null; slideIndex: number | null }>;
+export type PickerTargetReply = PickerTargetSpec;
+
+export function parsePickerTargetReply(value: unknown): Parsed<PickerTargetReply> {
+  const record = asRecord(value);
+  if (record === null) return { kind: "invalid", reason: "sashaTakePickerTarget returned no object" };
+  const slideIndex = record["slideIndex"];
+  return {
+    kind: "ok",
+    value: {
+      proposalId: stringAt({ record, key: "proposalId" }),
+      // A target with a proposal but no slide is legal: it means "open on this set".
+      slideIndex: typeof slideIndex === "number" && Number.isInteger(slideIndex) && slideIndex > 0 ? slideIndex : null,
+    },
+  };
+}
+
 export type ReportTargetSpec = Readonly<{
   proposalId: string | null;
   slideIndex: number | null;
@@ -360,6 +435,45 @@ export function parseReadTextReply(value: unknown): Parsed<ReadTextReply> {
     : { kind: "ok", value: { text } };
 }
 
+/**
+ * One candidate as GOOGLE actually draws it: a PNG data URI, or a reason there is none.
+ *
+ * WHY A PICTURE AND NOT A PROJECTION. The "Converted" pane used to draw the geometry the converter
+ * ASKED Slides for -- boxes with labels in them -- because a thumbnail needs the slide to exist
+ * and nobody wanted to mutate the user's deck to photograph it. The answer is that it does not
+ * have to be the USER's deck: `sashaRenderPreviews` builds a throwaway presentation, applies the
+ * requests, photographs each page and deletes the whole thing. What comes back is the truth, which
+ * is the only thing worth comparing the HTML against.
+ */
+export type RenderedPreview = Readonly<{ index: number; dataUri: string | null; message: string | null }>;
+export type RenderPreviewsReply = Readonly<{ previews: readonly RenderedPreview[] }>;
+
+export function parseRenderPreviewsReply(value: unknown): Parsed<RenderPreviewsReply> {
+  const record = asRecord(value);
+  if (record === null) return { kind: "invalid", reason: "sashaRenderPreviews returned no object" };
+  const listed = record["previews"];
+  if (!Array.isArray(listed)) return { kind: "invalid", reason: "sashaRenderPreviews returned no previews array" };
+  const previews: RenderedPreview[] = [];
+  for (const entry of listed) {
+    const row = asRecord(entry);
+    if (row === null) return { kind: "invalid", reason: "sashaRenderPreviews returned a non-object preview" };
+    const index = row["index"];
+    if (typeof index !== "number" || !Number.isInteger(index) || index < 1) {
+      return { kind: "invalid", reason: "a preview has no 1-based index" };
+    }
+    // A MISSING PICTURE IS A REASON, never an empty box: one page can fail to render while the
+    // others are fine, and a cell that silently showed nothing is the failure this project has
+    // already shipped once.
+    const dataUri = stringAt({ record: row, key: "dataUri" });
+    const message = stringAt({ record: row, key: "message" });
+    if (dataUri === null && message === null) {
+      return { kind: "invalid", reason: `preview ${String(index)} has neither a picture nor a reason` };
+    }
+    previews.push({ index, dataUri, message });
+  }
+  return { kind: "ok", value: { previews } };
+}
+
 export function parseInsertReply(value: unknown): Parsed<InsertReply> {
   const record = asRecord(value);
   if (record === null) return { kind: "invalid", reason: "sashaInsert returned no object" };
@@ -491,6 +605,27 @@ export function parseReadFeedbackReply(value: unknown): Parsed<ReadFeedbackReply
   return { kind: "ok", value: { comments } };
 }
 
+/** `sashaReplyComment`'s answer: the new reply's id, or a reason it is unusable. */
+export function parseReplyCommentReply(value: unknown): Parsed<ReplyCommentReply> {
+  return parsePostedReply({ value, what: "sashaReplyComment" });
+}
+
+/** `sashaResolveComment`'s answer. The same shape: a resolve IS a reply, to Drive. */
+export function parseResolveCommentReply(value: unknown): Parsed<ReplyCommentReply> {
+  return parsePostedReply({ value, what: "sashaResolveComment" });
+}
+
+/**
+ * ONE PARSER FOR BOTH POSTS, for the thread rail's `CommentThreadApi`.
+ *
+ * A reply and a resolve are the same Drive call and the same answer, so they get one parser and
+ * the SUBJECT stays neutral: which function answered badly is prefixed by `outcomeOf` at the call
+ * site, which already knows the name it invoked, so naming it twice would only let the two drift.
+ */
+export function parseCommentReply(value: unknown): Parsed<CommentReplyReply> {
+  return parsePostedReply({ value, what: "a comment reply" });
+}
+
 export function parseFeedbackCommentRecord(value: unknown): FeedbackCommentRecord | null {
   const record = asRecord(value);
   if (record === null) return null;
@@ -590,6 +725,23 @@ function authorNameOf(field: unknown): string {
   const record = asRecord(field);
   const name = record === null ? null : stringAt({ record, key: "displayName" });
   return name === null || name === "" ? "someone" : name;
+}
+
+/**
+ * A posted reply's id. An empty or missing id is INVALID, not a success: the card would otherwise
+ * say "Reply posted" over a post Drive never acknowledged.
+ *
+ * `resolved` is the one field here that is ALLOWED to be absent. The id is the proof the post
+ * happened and nothing can substitute for it; the resolve state is a fact about the thread
+ * afterwards, and "we do not know" is usefully the same as "still open" to every caller -- so a
+ * missing or non-boolean one reads as false instead of throwing away a reply that did land.
+ */
+function parsePostedReply({ value, what }: { value: unknown; what: string }): Parsed<ReplyCommentReply> {
+  const record = asRecord(value);
+  if (record === null) return { kind: "invalid", reason: `${what} returned no object` };
+  const replyId = stringAt({ record, key: "replyId" });
+  if (replyId === null || replyId === "") return { kind: "invalid", reason: `${what} returned no replyId` };
+  return { kind: "ok", value: { replyId, resolved: record["resolved"] === true } };
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {

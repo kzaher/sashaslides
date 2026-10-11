@@ -275,9 +275,25 @@ export function lineSpacingPercent(
   return Math.min(400, Math.max(20, Math.round(percent * 10) / 10));
 }
 
-/** CSS px to points, which is the unit Slides wants for font sizes. */
-export function pxToPoints(valuePx: number): number {
-  return Math.round(valuePx * 0.75 * 100) / 100;
+/**
+ * CSS px to points, which is the unit Slides wants for font sizes.
+ *
+ * THE SCALE IS THE PAGE'S SCALE, NOT CSS'S. This used to be `valuePx * 0.75` -- the CSS absolute
+ * conversion, 96 dpi to 72 pt/in -- which is correct only when 1 CSS px is 1/96 in on the page.
+ * It is not. A 1280 px document maps onto Google's 10 in page at 7143.75 EMU/px, i.e. 0.5625 pt/px,
+ * so 0.75 described a 1280 x 0.75 / 72 = 13.333 in page: PowerPoint's 16:9, not Google's.
+ *
+ * Every font was therefore emitted 0.75 / 0.5625 = 4/3 too large. Geometry was right, so Slides
+ * re-wrapped text that Chrome had already laid out into boxes sized for the smaller type: every
+ * text box overflowed and consecutive elements printed on top of each other. That was visible on
+ * all four picker candidates at once -- see `calibration/sxs-candidates.ts`.
+ *
+ * Taking the `PageScale` rather than a constant is the point: the page size is an OPTION
+ * (`EmitOptions.pageSizeEmu`, and `calibration/measure-text-inset.ts` passes a non-default one),
+ * so a hard-coded pt/px would be wrong again the moment anyone used it.
+ */
+export function pxToPoints(valuePx: number, scale: PageScale): number {
+  return Math.round(((valuePx * scale.emuPerPx) / EMU_PER_POINT) * 100) / 100;
 }
 
 /** The 0–1 box PROTOCOL.md's anomaly `region` wants. */

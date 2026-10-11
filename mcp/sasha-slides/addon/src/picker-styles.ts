@@ -28,7 +28,17 @@ html, body { margin: 0; padding: 0; background: #fff; }
   padding: 10px 12px 16px;
   font-size: 13px;
 }
-.sasha-dialog { display: flex; flex-direction: column; gap: 10px; }
+/* position:relative is LOAD-BEARING: the editor window is a scrim with inset:0, and without a
+   positioned ancestor it would resolve against the initial containing block and escape the
+   dialog entirely. */
+/* A LOADER: the only honest thing a window that is waiting can show. */
+.sasha-loader { display: flex; align-items: center; justify-content: center; padding: 56px 0; margin: 0; }
+.sasha-loader-ring { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #dadce0; border-top-color: #1a73e8; animation: sashaSpin .8s linear infinite; }
+/* The header's own small one, beside the title, for a read already in flight. */
+.sasha-header-spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid #dadce0; border-top-color: #1a73e8; animation: sashaSpin .8s linear infinite; flex: none; }
+.sasha-header-gap { flex: 1 1 auto; }
+@media (prefers-reduced-motion: reduce){ .sasha-loader-ring, .sasha-header-spin { animation: none; border-top-color: #dadce0; } }
+.sasha-dialog { position: relative; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
 .sasha-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; font-size: 13px; }
 .sasha-dim { color: #5f6368; font-size: 12px; }
 .sasha-busy { color: #1a73e8; font-size: 12px; }
@@ -57,6 +67,11 @@ html, body { margin: 0; padding: 0; background: #fff; }
 .sasha-pane { width: 100%; }
 /* 16:9, so the 1280x720 document and the 720x405pt page are the same box on screen. */
 .sasha-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #f1f3f4; border: 1px solid #dadce0; overflow: hidden; }
+/* Google's own PNG of the candidate, filling the 16:9 stage exactly as the HTML frame does. */
+.sasha-render { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; background: #fff; }
+/* The fallback projection says what it is, across the bottom, so a diagram is never mistaken for
+   the rendering -- that mistake was read as "the converter is broken" when it had not run. */
+.sasha-projection-note { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4; padding: 3px 6px; font-size: 10px; line-height: 1.3; color: #5f6368; background: rgba(255,255,255,.92); border-top: 1px solid #e8eaed; }
 /* The HTML pane is a real 1280x720 document, so it is SCALED into the stage, not clipped. The
    SCALE IS AN INLINE STYLE, not a constant here: a dialog's width is a request the browser window
    clamps and the grid reflows between two columns and one, so scaled-frame.tsx measures the box and
@@ -98,17 +113,55 @@ html, body { margin: 0; padding: 0; background: #fff; }
 
    The avatar is 28 px rather than Google's 40: this renders in a 300 px sidebar, where a 40 px
    bubble plus its gap takes a sixth of the line. */
-.sasha-c-card { background: #fff; border: 1px solid #e8eaed; border-radius: 12px; box-shadow: 0 1px 3px rgba(60,64,67,.15); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
-.sasha-c-agent { background: #f8fbff; border-color: #d2e3fc; }
-.sasha-c-flagged { background: #fffbf2; border-color: #f6d08a; }
-.sasha-c-head { display: flex; align-items: flex-start; gap: 8px; }
-.sasha-c-avatar { flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%; background: #1e7b3c; color: #fff; font-size: 13px; font-weight: 500; line-height: 28px; text-align: center; user-select: none; }
-.sasha-c-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-.sasha-c-name { font-size: 13px; font-weight: 500; color: #202124; overflow-wrap: anywhere; }
-.sasha-c-when { font-size: 11px; color: #5f6368; }
+.sasha-c-card { background: #fff; border: 0; border-radius: 12px; box-shadow: 0 1px 2px rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15); padding: 12px 12px 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.sasha-c-agent { background: #f8fbff; }
+.sasha-c-flagged { background: #fffbf2; }
+/* AN EVENT THIS BUILD CANNOT READ, in the card shape but visibly different and never hidden: a
+   reader on an older build must be able to see that something happened it cannot describe. */
+.sasha-c-opaque { background: #fffbf2; box-shadow: none; border: 1px dashed #e8b931; }
+/* A RESOLVED thread, collapsed and dimmed -- what Google does once a discussion is hidden. */
+.sasha-c-resolved { background: #f8f9fa; box-shadow: 0 1px 2px rgba(60,64,67,.2); }
+.sasha-c-resolved .sasha-c-body, .sasha-c-resolved .sasha-c-name { color: #5f6368; }
+.sasha-c-resolved-label { font-size: 12px; font-weight: 500; color: #5f6368; padding: 0 4px; line-height: 28px; }
+.sasha-c-collapsed { font-size: 12px; color: #5f6368; }
+.sasha-c-head { display: flex; align-items: flex-start; gap: 10px; }
+/* 32 px, Google's comment-pane size at this density; one white initial on the author's colour. */
+.sasha-c-avatar { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 50%; background: #1e7b3c; color: #fff; font-size: 14px; font-weight: 500; line-height: 32px; text-align: center; user-select: none; }
+/* SASHA NEVER SHARES THE USER'S COLOUR: the connector posts as the user's own account. */
+.sasha-c-avatar-agent { background: #8430ce; }
+.sasha-c-avatar-deck { background: #5f6368; }
+.sasha-c-avatar-delivery { background: #9aa0a6; }
+.sasha-c-avatar-opaque { background: #e37400; }
+.sasha-c-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; padding-top: 1px; }
+.sasha-c-name { font-size: 15px; font-weight: 500; line-height: 20px; color: #1f1f1f; overflow-wrap: anywhere; }
+.sasha-c-when { font-size: 12px; line-height: 16px; color: #5f6368; }
 .sasha-c-where { color: #5f6368; }
-.sasha-c-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
-.sasha-c-body { margin: 0; font-size: 13px; line-height: 1.45; color: #202124; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sasha-c-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 0; margin: -2px -6px 0 0; }
+.sasha-c-body { margin: 0; font-size: 14px; line-height: 20px; color: #1f1f1f; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A reply's words sit on Google's light grey strip, which is what tells it from the root. */
+.sasha-c-body-reply { background: #f1f3f4; border-radius: 8px; padding: 8px 10px; }
+.sasha-c-reply { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
+/* THE ICON BUTTONS: Material paths in a round 32 px hit area, the tick in Google blue. */
+.sasha-c-icon { cursor: pointer; border: 0; background: transparent; color: #444746; width: 32px; height: 32px; border-radius: 50%; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.sasha-c-icon:hover:enabled { background: rgba(68,71,70,.08); }
+.sasha-c-icon:disabled { cursor: default; opacity: .38; }
+.sasha-c-svg { width: 20px; height: 20px; display: block; }
+.sasha-c-resolve { color: #0b57d0; }
+.sasha-c-resolve:hover:enabled { background: rgba(11,87,208,.08); }
+/* THE THREE-DOT MENU: absolutely positioned under its button, over whatever is below. */
+.sasha-c-more { position: relative; display: inline-flex; }
+.sasha-c-menu { position: absolute; top: 100%; right: 0; z-index: 20; display: flex; flex-direction: column; min-width: 150px; padding: 6px 0; background: #fff; border-radius: 4px; box-shadow: 0 2px 6px 2px rgba(60,64,67,.15), 0 1px 2px rgba(60,64,67,.3); }
+.sasha-c-menu-item { cursor: pointer; border: 0; background: transparent; text-align: left; padding: 8px 16px; font-size: 14px; color: #1f1f1f; white-space: nowrap; }
+.sasha-c-menu-item:hover { background: #f1f3f4; }
+.sasha-c-menu-note { display: block; padding: 6px 16px; max-width: 220px; line-height: 1.4; }
+/* THE REPLY PILL at the foot of an open thread. field-sizing grows it as a reply wraps; Enter posts. */
+.sasha-c-pill-row { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding-top: 2px; }
+.sasha-c-pill { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; line-height: 20px; color: #1f1f1f; padding: 9px 16px; border: 1px solid #c4c7c5; border-radius: 20px; resize: none; min-height: 40px; field-sizing: content; background: #fff; }
+.sasha-c-pill::placeholder { color: #5f6368; }
+.sasha-c-pill:focus { outline: none; border-color: #0b57d0; box-shadow: 0 0 0 1px #0b57d0; }
+.sasha-c-pill:disabled { background: #f8f9fa; }
+.sasha-c-reply-send { cursor: pointer; border: 0; border-radius: 18px; background: #0b57d0; color: #fff; padding: 8px 18px; font-size: 14px; font-weight: 500; }
+.sasha-c-reply-send:disabled { cursor: default; opacity: .38; }
 .sasha-c-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 
 /* THE COMPOSER IS A TEXTAREA, because a comment about a slide is often two sentences and the
@@ -154,19 +207,84 @@ html, body { margin: 0; padding: 0; background: #fff; }
 .sasha-cell-stage { display: block; border: 2px solid #dadce0; border-radius: 8px; }
 .sasha-cell-on > .sasha-cell-stage { border-color: #1a73e8; }
 .sasha-cell-edited > .sasha-cell-stage { border-color: #188038; box-shadow: 0 0 0 2px rgba(24,128,56,.25); }
-/* Compact on purpose: every pixel here is a pixel the second row of cells does not get. */
-.sasha-cell-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.sasha-cell-foot .sasha-chip { padding: 2px 8px; font-size: 11px; }
-.sasha-cell-foot .sasha-zoom { padding: 2px 8px; font-size: 11px; }
-.sasha-cell-hint { margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* THE WHOLE PICTURE IS CLICKABLE, so it has to LOOK clickable: a pointer everywhere over the
+   stage, and the stage lifts on hover. The button is transparent and fills the stage -- it sits
+   over the iframe, which would otherwise swallow the click (candidate-grid.tsx). */
+.sasha-cell-open { position: absolute; inset: 0; z-index: 3; border: 0; background: transparent; padding: 0; cursor: pointer; }
+.sasha-cell-open:disabled { cursor: default; }
+.sasha-cell-open:focus-visible { outline: 3px solid #1a73e8; outline-offset: -3px; }
+.sasha-cell:hover > .sasha-cell-stage { border-color: #1a73e8; }
+/* The option number, on the picture rather than in a row under it: it is what the user says out
+   loud ("option 3") and it belongs to the slide, not to a caption. */
+.sasha-cell-number { position: absolute; top: 6px; left: 6px; z-index: 2; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; background: rgba(32,33,36,.72); }
+/* Two buttons, right-aligned, Insert last and accented. Compact on purpose: every pixel here is a
+   pixel the second row of cells does not get. */
+.sasha-cell-foot { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
 
 /* --- the toolbar: VIEW and TOOL side by side, because they are independent ------------------
    Three labelled groups on one wrapping row (Picker.tsx). They are deliberately NOT one row of
    four buttons: grid / single / edit / annotate as a single group reads as a four-way mode, which
    is exactly the confusion two independent fields exist to remove. */
+/* --- THE SET ITSELF, above its comments -------------------------------------------------
+   A thread is about one slide; the candidates are a GROUP, and nothing on this surface stood
+   for the group. The slides are stacked vertically because that is what they are: a pile of
+   candidates, in order. */
+.sasha-artifact { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 10px; border: 1px solid #e8eaed; border-radius: 10px; background: #fff; box-shadow: 0 1px 4px rgba(60,64,67,.12); }
+.sasha-artifact-head { margin: 0; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #5f6368; }
+.sasha-stack { list-style: none; margin: 0; padding: 0; width: 100%; display: flex; flex-direction: column; gap: 4px; }
+.sasha-stack-slide { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 6px; border: 1px solid #e8eaed; border-radius: 6px; background: #f8f9fa; }
+.sasha-stack-number { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; border-radius: 9px; background: #202124; color: #fff; font-size: 10px; font-weight: 700; flex: none; }
+.sasha-stack-label { flex: 1 1 auto; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* On a comment, not in a bar: it belongs to the thread above it. */
+.sasha-open-artifact { cursor: pointer; margin: 4px 0 0 34px; border: 0; background: transparent; padding: 2px 0; font: inherit; font-size: 11px; color: #1a73e8; text-decoration: underline; text-underline-offset: 2px; }
+.sasha-open-artifact:hover { color: #174ea6; }
+
+/* --- THE COMMENTS PANEL: the sidebar's own, modelled on a document's comment pane ---------
+   Open comments by default, a filter with counts, and the open ones split so the threads Sasha
+   has answered lead. Replaces a yellow summary that restated the same comments in prose. */
+.sasha-comments { display: flex; flex-direction: column; gap: 10px; }
+/* THE CONTROLS STAY PUT. The set card and the filter govern everything under them, so a long
+   thread must not scroll them away. Two sticky bands, the filter under the card. */
+.sasha-artifact { position: sticky; top: 0; z-index: 3; }
+.sasha-filter { position: sticky; top: 0; z-index: 2; background: var(--sasha-ground, #fff); padding: 6px 0; }
+.sasha-filter { display: flex; gap: 4px; flex-wrap: wrap; }
+/* The two things a thread ends with, as words: the tick in the corner is Google's convention
+   but it is a 22px target nobody finds. */
+.sasha-c-foot { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #f1f3f4; }
+.sasha-c-open, .sasha-c-markdone { cursor: pointer; border: 0; background: transparent; padding: 2px 0; font: inherit; font-size: 12px; color: #1a73e8; }
+.sasha-c-open:hover:enabled, .sasha-c-markdone:hover:enabled { text-decoration: underline; }
+.sasha-c-markdone { margin-left: auto; }
+.sasha-c-markdone:disabled { color: #9aa0a6; cursor: default; }
+.sasha-c-done { margin-left: auto; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #1e7b3c; }
+/* The composer, drawn as a new comment. */
+.sasha-c-acts { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.sasha-c-cancel { cursor: pointer; border: 0; background: transparent; padding: 4px 8px; font: inherit; font-size: 13px; color: #1a73e8; border-radius: 6px; margin-left: auto; }
+.sasha-c-cancel:hover:enabled { background: #e8f0fe; }
+.sasha-c-send { cursor: pointer; border: 0; border-radius: 16px; background: #1a73e8; color: #fff; padding: 6px 16px; font: inherit; font-size: 13px; font-weight: 500; }
+.sasha-c-send:disabled { background: #e8eaed; color: #9aa0a6; cursor: default; }
+/* The spinner may not change the header's height (it used to push Refresh to a second row). */
+.sasha-header { position: relative; }
+.sasha-header-spin { position: absolute; right: 0; top: 50%; margin-top: -6px; }
+.sasha-filter .sasha-tab { display: inline-flex; align-items: center; gap: 5px; }
+.sasha-filter-count { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #e8eaed; color: #5f6368; font-size: 10px; font-weight: 600; }
+.sasha-tab-on .sasha-filter-count { background: #1a73e8; color: #fff; }
+.sasha-comment-section { display: flex; flex-direction: column; gap: 6px; }
+/* The heading earns its place by naming a STATE, not by decorating: "Addressed" means Sasha has
+   replied and there is something new to read; "Not addressed" is still waiting. */
+.sasha-section-head { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #5f6368; }
+.sasha-section-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
 .sasha-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 .sasha-toggle-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #5f6368; align-self: center; margin-right: 2px; }
-.sasha-toolbar-say { flex: 1 1 200px; min-width: 0; }
+/* THE ONE INSTRUCTION THE GRID GIVES, and it is not dim. It tells the user that the pictures are
+   the control -- without it a slide looks like a thumbnail, and nobody clicks a thumbnail. */
+.sasha-toolbar-say { flex: 1 1 200px; min-width: 0; font-size: 13px; font-weight: 600; color: #202124; }
+/* "None of these" -- the answer, not a close button. Quiet and text-only, because the row it
+   shares is an instruction and a toggle, and a bordered button here would read as a third
+   control competing with Insert. It is the last thing on the row, away from the slides. */
+.sasha-none { cursor: pointer; border: 0; background: transparent; padding: 4px 2px; font: inherit; font-size: 12px; color: #5f6368; text-decoration: underline; text-underline-offset: 2px; }
+.sasha-none:hover:enabled { color: #202124; }
+.sasha-none:disabled { opacity: .5; cursor: default; }
 
 /* --- one candidate, large: the other zoom level, same tool ---------------------------- */
 .sasha-single { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px; }
@@ -175,8 +293,12 @@ html, body { margin: 0; padding: 0; background: #fff; }
    dialog whose height the window may have clamped. */
 .sasha-pane-big { max-width: 920px; }
 .sasha-pane-big .sasha-stage { max-height: 44vh; }
-.sasha-editor { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid #dadce0; padding-top: 8px; }
-.sasha-editor p { margin: 0; line-height: 1.5; }
+/* THE VISUAL EDITOR'S SLOT -- .sasha-editslot, not .sasha-editor. It used to share the name
+   with the editor WINDOW below, so the window's card rules (white, rounded, shadowed, overflow
+   hidden, flex:1) landed on this little panel too: it rendered as a floating card in the middle
+   of the editor's column and swallowed the hint under it. Two different things, two names. */
+.sasha-editslot { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid #dadce0; padding-top: 8px; }
+.sasha-editslot p { margin: 0; line-height: 1.5; }
 /* BOUNDED, because the tool panel is a FIXED-HEIGHT sibling of the workspace now: the dialog hides
    its overflow and only the workspace scrolls, so an unbounded edit list would push the
    report bar and the Insert button out of the clipped shell (overflow is hidden there, so what does
@@ -185,6 +307,78 @@ html, body { margin: 0; padding: 0; background: #fff; }
    risk disclosure, see .sasha-annots. */
 .sasha-edits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; max-height: 24vh; overflow-y: auto; }
 .sasha-edit { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #202124; }
+
+/* ======== THE EDITOR: one candidate, on top of the grid ========================
+   Three columns, in the order of the work: the toolbar (what the pointer is), the slide with
+   its inspector under it, and the threads. The toolbar is down the LEFT EDGE because it is the
+   only chrome that persists while the user works -- a row of mode buttons above the slide is
+   what made the old window read as a cockpit. */
+.sasha-editor-scrim { position: absolute; inset: 0; z-index: 30; display: flex; padding: 10px; background: rgba(32,33,36,.38); }
+.sasha-editor { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; background: #fff; border-radius: 12px; box-shadow: 0 8px 28px rgba(60,64,67,.32); overflow: hidden; }
+.sasha-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid #e8eaed; }
+.sasha-editor-title { margin: 0; font-size: 14px; }
+.sasha-editor-title b { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; margin-right: 6px; border-radius: 10px; background: #202124; color: #fff; font-size: 11px; }
+.sasha-editor-close { cursor: pointer; border: 0; background: transparent; color: #5f6368; font-size: 15px; width: 28px; height: 28px; border-radius: 50%; }
+.sasha-editor-close:hover { background: #f1f3f4; }
+.sasha-editor-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: auto minmax(0,1fr) minmax(0,310px); gap: 12px; padding: 12px; }
+.sasha-editor-main { min-width: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+/* ScaledHtmlFrame renders an inset:0 absolutely positioned box, so this wrapper MUST be a
+   positioned, 16:9-sized ancestor -- exactly as .sasha-stage is. Without it the frame resolves
+   against the initial containing block, escapes, and covers the editor's own header, toolbar
+   and thread rail; the slide then looks full-bleed and the chrome looks missing. */
+.sasha-editor-stage { position: relative; min-width: 0; width: 100%; max-width: 980px; aspect-ratio: 16 / 9; max-height: 46vh; margin: 0 auto; overflow: hidden; }
+.sasha-editor-say { font-size: 12px; }
+
+/* THE COMMENT COMPOSER, anchored on the stage to the element it is about (selection-composer.tsx).
+
+   IT IS sasha-spot, NOT sasha-composer. The Ask Sasha sidebar's own message box has owned
+   .sasha-composer since before this existed (Conversation.tsx), and the SIDEBAR SHIPS THIS
+   STYLESHEET too -- so naming this one the same turned that message box into a floating card
+   with a tail, hovering over the log. Second time a class name has collided across the two
+   surfaces (.sasha-editor was the first); see the disjointness test in dialog-surface.test.ts.
+   Absolute inside .sasha-editor-stage, which is the 16:9 box, so its 0-1 placement is slide
+   coordinates. z-index clears the editor's own selection chrome, which draws over the frame. */
+.sasha-spot { position: absolute; z-index: 12; min-width: 220px; display: flex; flex-direction: column; gap: 6px; padding: 8px 9px; background: #fff; border: 1px solid #dadce0; border-radius: 10px; box-shadow: 0 6px 20px rgba(60,64,67,.28); }
+/* A tail toward the subject, so the link to the outlined element is visual and not inferred. */
+.sasha-spot::before { content: ""; position: absolute; left: 16px; width: 10px; height: 10px; background: #fff; border-left: 1px solid #dadce0; border-top: 1px solid #dadce0; transform: rotate(45deg); }
+.sasha-spot[data-side="below"]::before { top: -6px; }
+.sasha-spot[data-side="above"]::before { bottom: -6px; transform: rotate(225deg); }
+.sasha-spot-head { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 11px; color: #5f6368; }
+.sasha-spot-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sasha-spot-x { margin-left: auto; cursor: pointer; border: 0; background: transparent; color: #5f6368; font-size: 12px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
+.sasha-spot-x:hover { background: #f1f3f4; }
+.sasha-spot-note { width: 100%; resize: vertical; font: inherit; font-size: 13px; padding: 6px 7px; border: 1px solid #dadce0; border-radius: 6px; }
+.sasha-spot-acts { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* THE TOOLBAR. One button per tool, a glyph over its name, so the column stays narrow. */
+.sasha-toolrail { display: flex; flex-direction: column; gap: 6px; padding-right: 10px; border-right: 1px solid #e8eaed; }
+.sasha-toolbtn { cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 60px; padding: 8px 4px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #202124; font: inherit; font-size: 11px; }
+.sasha-toolbtn:hover:enabled { background: #f1f3f4; }
+.sasha-toolbtn-on { border-color: #1a73e8; background: #e8f0fe; color: #1a73e8; font-weight: 600; }
+.sasha-toolbtn-glyph { font-size: 17px; line-height: 1; }
+.sasha-toolbtn:disabled { color: #9aa0a6; cursor: default; }
+
+/* THE THREADS, down the right edge: the same cards the sidebar draws, from the same read. */
+.sasha-threads { min-width: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding-left: 12px; border-left: 1px solid #e8eaed; }
+.sasha-threads-head { margin: 0; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #5f6368; }
+.sasha-thread-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.sasha-thread-reply { margin-left: 10px; padding-left: 10px; border-left: 2px solid #e8eaed; display: flex; flex-direction: column; gap: 4px; }
+.sasha-thread-compose { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.sasha-thread-resolve { cursor: pointer; border: 1px solid #dadce0; background: #fff; color: #1a73e8; border-radius: 50%; width: 22px; height: 22px; font-size: 12px; line-height: 1; }
+.sasha-thread-resolve:hover:enabled { background: #e8f0fe; }
+.sasha-thread-done { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #1e7b3c; }
+
+/* LEAVING WITH WORDS UNSENT IS A QUESTION. It sits across the top of the editor, over the work,
+   because it is about to throw that work away. */
+.sasha-leave { margin: 10px 12px 0; padding: 10px 12px; border: 1px solid #f6d08a; background: #fffbf2; border-radius: 10px; display: flex; flex-direction: column; gap: 6px; }
+.sasha-leave-head { margin: 0; font-size: 13px; font-weight: 600; }
+.sasha-leave-say { margin: 0; font-size: 12px; line-height: 1.45; color: #5f6368; }
+.sasha-leave-acts { display: flex; gap: 8px; justify-content: flex-end; }
+
+@media (max-width: 900px){
+  .sasha-editor-body { grid-template-columns: auto minmax(0,1fr); }
+  .sasha-threads { grid-column: 1 / -1; border-left: 0; padding-left: 0; border-top: 1px solid #e8eaed; padding-top: 10px; }
+}
 
 /* --- ASK SASHA: the conversation, which is the event log ---------------------------------
    ONE COLUMN, ONE LIST. Every entry -- an event or a message -- is a .sasha-msg, tinted by WHOSE
@@ -195,29 +389,18 @@ html, body { margin: 0; padding: 0; background: #fff; }
    .sasha-open-comments sits below it, outside that box -- which is the whole of "open comments
    stay listed until resolved, they do not scroll away into history". */
 .sasha-chat { display: flex; flex-direction: column; gap: 10px; }
-.sasha-msgs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 52vh; overflow-y: auto; }
-/* A MESSAGE is a comment card and carries no tint of its own; an EVENT is a quiet system line.
-   The tints below therefore apply to events only -- a card that was also tinted read as a
-   highlighted row rather than as something a person wrote. */
-.sasha-msg { display: flex; flex-direction: column; gap: 2px; font-size: 12px; border-radius: 6px; }
-/* Only an EVENT row takes the padding and the voice tint; a message row is just a wrapper
-   around the card, which brings its own. The class is on the element rather than a :has()
-   selector so the distinction is visible in the rendered markup the tests read. */
-.sasha-msg-event { padding: 6px 8px; }
-.sasha-msg-who { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #5f6368; }
-.sasha-msg-text { margin: 0; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-/* What the user actually said, quoted under the line that says they said it. */
-.sasha-msg-quote { margin: 2px 0 0; padding: 4px 8px; border-left: 3px solid #1a73e8; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; background: rgba(255,255,255,.65); }
-.sasha-msg-user { background: #e8f0fe; }
-.sasha-msg-sasha { background: #f1f3f4; }
-/* The DECK's own voice -- an insertion is neither the user's turn nor Sasha's. */
-.sasha-msg-deck { background: #e6f4ea; }
-/* AN EVENT THIS BUILD CANNOT READ. Visibly different from both voices and never hidden: a reader
-   on an older build must be able to see that something happened it cannot describe. */
-.sasha-msg-opaque { background: #fef7e0; border: 1px dashed #e8b931; }
-/* A DELIVERY RECEIPT. Its own tone, quieter than Sasha's: it says a session read something, which
-   is weaker than a session having said something, and it must not look like an answer. */
-.sasha-msg-delivery { background: #f8f9fa; border-left: 3px solid #80868b; }
+/* THE OPENING STATE: one spinner, centred, and nothing else on screen. */
+.sasha-opening { display: flex; align-items: center; justify-content: center; padding: 34px 0; margin: 0; }
+.sasha-opening-ring { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #dadce0; border-top-color: #1a73e8; animation: sashaSpin .8s linear infinite; }
+@keyframes sashaSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce){ .sasha-opening-ring { animation: none; border-top-color: #dadce0; } }
+/* Padded so the cards' shadows are not clipped by the scroller's edge. */
+.sasha-msgs { list-style: none; margin: 0; padding: 3px 4px 4px 3px; display: flex; flex-direction: column; gap: 12px; max-height: 52vh; overflow-y: auto; }
+/* EVERY ENTRY IS A CARD NOW -- a thread or an event, in Google's comment-card language -- so the
+   row is only a wrapper. The voice classes stay on it (sasha-msg-user, -sasha, -deck, -delivery,
+   -opaque) because they say WHOSE turn a row is in the markup the tests and the smoke read; the
+   colour of that turn is the avatar's, inside the card. */
+.sasha-msg { display: flex; flex-direction: column; font-size: 12px; }
 .sasha-msg-where { font-size: 11px; color: #5f6368; }
 /* The revised slide, INLINE in the log: the candidate's own HTML at the cell's measured scale. */
 .sasha-inline-slide { margin: 6px 0 0; display: flex; flex-direction: column; gap: 4px; max-width: 100%; }
@@ -225,8 +408,12 @@ html, body { margin: 0; padding: 0; background: #fff; }
    full-column image that pushes the rest of the conversation off the screen. */
 .sasha-inline-stage { display: block; max-width: 260px; }
 .sasha-inline-slide figcaption { line-height: 1.4; }
-.sasha-composer { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid #dadce0; padding-top: 8px; }
-.sasha-staged { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; border: 1px solid #1a73e8; background: #e8f0fe; border-radius: 8px; padding: 10px; }
+.sasha-spot { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid #dadce0; padding-top: 8px; }
+/* THE SAME CARD AS EVERYTHING ELSE. It used to be a blue-bordered, blue-filled panel, which in
+   a column of white comment cards reads as an alert or a selected row -- the user asked why the
+   blue was there, and there was no answer. The colour belongs on the BUTTON inside it, which is
+   the only thing here that does something. */
+.sasha-staged { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; border: 1px solid #e8eaed; background: #fff; border-radius: 12px; padding: 10px 12px; box-shadow: 0 1px 3px rgba(60,64,67,.15); }
 .sasha-staged strong { font-size: 13px; }
 
 /* --- the open comments, pinned ----------------------------------------------------------- */

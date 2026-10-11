@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  Per-side cell borders, which is how table borders are actually written.
+
+  THE BUG THIS PINS DOWN. Every border went out as `borderPosition: "ALL"`, which draws all four
+  edges. So `border-bottom` alone became a box, and a table designed with horizontal hairlines and
+  no vertical rules rendered as a full dark grid; a `border-top: 3px double` row became a 3px box;
+  and a `border-left: 4px` flag cell became a 4px rectangle. None of it was in the HTML.
+-->
+<style>
+  body { width: 1280px; height: 720px; margin: 0; font-family: Arial, sans-serif; background: #ffffff; }
+  table { border-collapse: collapse; position: absolute; left: 60px; top: 60px; width: 700px; font-size: 16px; }
+  th, td { padding: 10px 14px; text-align: left; }
+  thead th { background: #1b1b1f; color: #ffffff; border-right: 1px solid #3a3a42; }
+  thead th:last-child { border-right: none; }
+  /* ONE hairline under each body cell, and no vertical rules anywhere. */
+  tbody td { border-bottom: 1px solid #e2e2e8; }
+  /* One cell with only a LEFT edge. */
+  tbody td.flag { border-left: 4px solid #d9480f; color: #d9480f; font-weight: 600; }
+  /* One row with only a TOP edge, and no bottom. */
+  tbody tr.total td { border-top: 3px solid #1b1b1f; border-bottom: none; font-weight: 700; }
+</style>
+</head>
+<body>
+  <table>
+    <thead><tr><th>Name</th><th>Kind</th><th>Bytes</th></tr></thead>
+    <tbody>
+      <tr><td>01.html</td><td>slide</td><td>1,842</td></tr>
+      <tr><td class="flag">READY</td><td>ready</td><td>118</td></tr>
+      <tr class="total"><td>2 writes</td><td>1 folder</td><td>1,960</td></tr>
+    </tbody>
+  </table>
+</body>
+</html>

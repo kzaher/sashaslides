@@ -94,7 +94,12 @@ async function pick(): Promise<Surface | null> {
   const deadline = Date.now() + 4_000;
   for (;;) {
     const all = await liveSurfaces();
-    const wanted = SURFACE === "" ? all[0] : all.find((s) => s.text.toLowerCase().includes(SURFACE.toLowerCase()));
+    // THE LAST MATCH, NEVER THE FIRST. Re-opening a sidebar or dialog leaves STALE
+    // `userCodeAppPanel` targets behind that still hold buttons and still answer clicks, so
+    // driving the first match presses a corpse and nothing on screen changes. The newest target
+    // is the live one -- this cost an hour of "the click worked but the editor never opened".
+    const matches = SURFACE === "" ? all : all.filter((s) => s.text.toLowerCase().includes(SURFACE.toLowerCase()));
+    const wanted = matches[matches.length - 1];
     for (const surface of all) if (surface !== wanted) await surface.client.close();
     if (wanted !== undefined) return wanted;
     if (Date.now() >= deadline) return null;

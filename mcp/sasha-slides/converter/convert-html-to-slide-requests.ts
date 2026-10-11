@@ -144,6 +144,14 @@ const DEFAULT_SETTLE_BUDGET_MS = 1200;
 
 const SETTLE_POLL_MS = 25;
 
+/**
+ * How long to wait for the single post-layout frame. It is a FLUSH, not a load: one frame is
+ * ~16ms, so this is generous, and it is deliberately far below the settle budget. A frame the
+ * browser never paints must cost a blink, not a second -- with four candidates converting one at
+ * a time, the settle budget here would have added ~5s to the grid for nothing.
+ */
+const FRAME_FLUSH_BUDGET_MS = 150;
+
 function onceLoaded(iframe: HTMLIFrameElement, budgetMs: number): Promise<void> {
   return new Promise<void>((resolve) => {
     let settled = false;
@@ -174,7 +182,7 @@ async function settle(options: Readonly<{ iframe: HTMLIFrameElement; budgetMs: n
     await delay(SETTLE_POLL_MS);
   }
   // One frame so the final style recalculation has flushed before measuring.
-  await nextFrame(iframe);
+  await nextFrame(iframe, FRAME_FLUSH_BUDGET_MS);
 }
 
 function isSettled(iframe: HTMLIFrameElement): boolean {
@@ -190,11 +198,42 @@ function isSettled(iframe: HTMLIFrameElement): boolean {
   return images.every((image) => image.complete);
 }
 
-function nextFrame(iframe: HTMLIFrameElement): Promise<void> {
+function nextFrame(iframe: HTMLIFrameElement, budgetMs: number): Promise<void> {
   const view = iframe.contentWindow;
   if (view === null) return Promise.resolve();
+  return afterNextFrame({ view, budgetMs });
+}
+
+/**
+ * One painted frame, OR the budget -- whichever comes first.
+ *
+ * THE BUG THIS EXISTS FOR. Every other wait in this path is bounded: `onceLoaded` has a timer,
+ * `settle` has a deadline, `delay` is a timeout. This one awaited `requestAnimationFrame` with
+ * nothing racing it, and a browser does not service rAF for a frame it is not rendering -- a
+ * backgrounded tab, an occluded or throttled frame, or the nested sandbox an Apps Script
+ * `showModelessDialog` puts this code in. When that happened the promise NEVER settled: no
+ * throw, no rejection, so the picker showed "converting..." on every candidate forever and the
+ * one-at-a-time pump never advanced past the first slide, because a conversion in flight blocks
+ * the next (dialog.tsx `pump`).
+ *
+ * A frame that never paints is not an error -- the layout is already final, since `settle` has
+ * confirmed `readyState: complete`, fonts loaded and images complete. The frame is only a flush,
+ * so timing out and measuring is strictly better than hanging.
+ */
+export function afterNextFrame(
+  options: Readonly<{ view: Readonly<{ requestAnimationFrame: (callback: () => void) => unknown }>; budgetMs: number }>,
+): Promise<void> {
+  const { view, budgetMs } = options;
   return new Promise<void>((resolve) => {
-    view.requestAnimationFrame(() => resolve());
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, budgetMs);
+    view.requestAnimationFrame(finish);
   });
 }
 

@@ -229,9 +229,30 @@ export function noDeliveries(): Deliveries {
  */
 export function nothingListeningOn({
   waiting,
+  presence,
 }: {
   waiting: readonly WaitingItem[];
+  /**
+   * Whether anything has EVER acted in this session. Optional so the older call sites that only
+   * know about waits keep working; without it the notice is wait-driven exactly as before.
+   */
+  presence?: SashaPresence;
 }): NothingListeningNotice | null {
+  /*
+   * HOW TO CONNECT IS NEEDED BEFORE ANYTHING IS STUCK.
+   *
+   * This used to fire only when a wait had crossed the delivery threshold -- five minutes --
+   * AND only when something was waiting at all. So a user who had just opened the add-on with no
+   * session attached saw no instructions whatsoever: nothing was waiting yet, so there was
+   * nothing to be unheard, and the one place that says how to attach a Claude session never
+   * rendered. They have to type a message, wait five minutes, and only then be told what to do.
+   *
+   * `never-acted` is the honest signal: every read that could prove a session was here has come
+   * back, and none of them did. That is exactly "no bot is connected", and it is knowable
+   * immediately. `unknown` deliberately does NOT trigger it -- a read that has not finished is
+   * not evidence of absence, and claiming it would be the mistake this file exists to avoid.
+   */
+  if (presence?.kind === "never-acted") return nothingListeningNotice();
   const stuck = waiting.some((item) => waitIsUnheard(item.state));
   return stuck ? nothingListeningNotice() : null;
 }

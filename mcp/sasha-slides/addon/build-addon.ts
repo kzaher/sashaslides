@@ -5,7 +5,7 @@
  *   src/sidebar.tsx  ->  Sidebar.html   (Ask Sasha: the conversation, which is the event log)
  *   src/dialog.tsx   ->  Dialog.html    (the slides: the grid + the mark-up view)
  *   src/report.tsx   ->  Report.html    (the defect report: anonymise, review, send)
- *   CODE_GS below     ->  Code.gs       (the twelve google.script.run functions + the ONE menu item)
+ *   CODE_GS below     ->  Code.gs       (every google.script.run function + the ONE menu item)
  *   APPSSCRIPT_JSON   ->  appsscript.json
  *
  * THREE BUNDLES, BECAUSE THERE ARE THREE DOCUMENTS, and the third one exists FOR THE SIZE.
@@ -46,6 +46,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SERVER_FUNCTION_NAMES } from "./src/bridge.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -124,6 +125,8 @@ var SASHA_DEFAULT_PAGE_SIZE = 100;
 // the page is one big inlined <script> and running it through HtmlService's templating engine
 // would put a scriptlet scanner over 400 KB of minified JavaScript for no gain.
 var SASHA_REPORT_TARGET_KEY = 'sashaReportTarget';
+/** Which candidate the slides window should come up on, when the sidebar asked for a specific one. */
+var SASHA_PICKER_TARGET_KEY = 'sashaPickerTarget';
 // The \`events/\` subfolder of a proposal folder (PROTOCOL.md). One file per event, created never
 // appended: Drive has no append, so a read-modify-write from two writers loses one of them.
 var SASHA_EVENTS_FOLDER_NAME = 'events';
@@ -188,7 +191,7 @@ function showReport() {
 }
 
 // ---------------------------------------------------------------------------
-// 1/8 — sashaHello: which deck is this, and what protocol does the server speak.
+// 1/16 — sashaHello: which deck is this, and what protocol does the server speak.
 // The URL rather than the id, so the only parse stays in TypeScript (presentationIdOf).
 // ---------------------------------------------------------------------------
 function sashaHello() {
@@ -199,7 +202,7 @@ function sashaHello() {
 }
 
 // ---------------------------------------------------------------------------
-// 2/8 — sashaScanInbox: the NAME walk.
+// 2/16 — sashaScanInbox: the NAME walk.
 //   "Sasha Slides Inbox" (under My Drive) -> every child folder (named for its proposal)
 //   -> is there a READY in it, is there a PICK in it
 // DriveApp rather than the REST API because the walk is exactly what DriveApp expresses: a
@@ -233,7 +236,7 @@ function sashaChildFileId_(folder, name) {
 }
 
 // ---------------------------------------------------------------------------
-// 3/8 — sashaReadText: one primitive, three callers (READY, manifest.json, NN.html).
+// 3/16 — sashaReadText: one primitive, three callers (READY, manifest.json, NN.html).
 // Raw text out; every parser and every protocolVersion check is in src/protocol.ts.
 // ---------------------------------------------------------------------------
 function sashaReadText(spec) {
@@ -241,7 +244,7 @@ function sashaReadText(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 4/8 — sashaInsert: the image bytes, then the converter's batchUpdate, then the best-effort
+// 4/16 — sashaInsert: the image bytes, then the converter's batchUpdate, then the best-effort
 // render artifact.
 //
 // The RAW reply is returned so createdObjectIdsOf (src/drive-api.ts) can read the created ids in
@@ -292,7 +295,108 @@ function sashaInsert(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 13/13 -- sashaStageImages_: an image's BYTES, somewhere Google's fetcher can reach them.
+// sashaRenderPreviews: what GOOGLE makes of the converter's requests, as pictures.
+//
+// WHY IT EXISTS. The "Converted" pane used to draw the geometry the converter ASKED for -- labelled
+// rectangles -- on the stated grounds that a real thumbnail needs the slide to exist and
+// photographing it would mutate the user's deck. The second half is the part that was wrong: it
+// does not have to be the USER's deck. This builds a THROWAWAY presentation, applies each
+// candidate's requests to its own page, photographs every page and then deletes the whole file.
+// What the user compares against their HTML is then the truth rather than a diagram of it.
+//
+// ONE DECK FOR ALL N, not one per candidate: a presentations.create plus a delete per slide is N
+// times the latency and N times the litter for the same pictures.
+//
+// IT IS BEST EFFORT, PER PAGE. A single candidate whose batch Slides refuses must not cost the
+// other three their preview, so every page is tried on its own and a failure comes back as a
+// REASON on that index. The deck is deleted in a finally, so a throw mid-way cannot leave it in
+// Drive -- the one side effect this function promises not to have.
+// ---------------------------------------------------------------------------
+function sashaRenderPreviews(spec) {
+  var slides = spec && spec.slides ? spec.slides : [];
+  if (slides.length === 0) return { previews: [] };
+
+  var created = Slides.Presentations.create({ title: 'sasha-slides preview (temporary)' });
+  var presentationId = created.presentationId;
+  var previews = [];
+  try {
+    for (var at = 0; at < slides.length; at++) {
+      var slide = slides[at];
+      var pageObjectId = 'sashaprev' + at;
+      var staged = [];
+      try {
+        Slides.Presentations.batchUpdate(
+          { requests: [{ createSlide: { objectId: pageObjectId, slideLayoutReference: { predefinedLayout: 'BLANK' } } }] },
+          presentationId
+        );
+        // The same staging the real insert does: createImage takes a URL GOOGLE fetches, so a
+        // candidate's own data: URI has to become a fetchable file first (sashaStageImages_).
+        var staging = { requests: slide.requests, render: null };
+        sashaStageImages_(staging, staged);
+        for (var r = 0; r < staging.requests.length; r++) {
+          sashaRetargetToPage_(staging.requests[r], pageObjectId);
+        }
+        Slides.Presentations.batchUpdate({ requests: staging.requests }, presentationId);
+
+        var thumb = Slides.Presentations.Pages.getThumbnail(presentationId, pageObjectId, {
+          'thumbnailProperties.mimeType': 'PNG',
+          'thumbnailProperties.thumbnailSize': 'MEDIUM'
+        });
+        // The contentUrl is a short-lived Google URL. Fetching the bytes HERE and returning a
+        // data: URI keeps the picture working inside the HtmlService sandbox, which cannot be
+        // relied on to carry the right cookies to googleusercontent.
+        var png = UrlFetchApp.fetch(thumb.contentUrl).getBlob().getBytes();
+        previews.push({
+          index: slide.index,
+          dataUri: 'data:image/png;base64,' + Utilities.base64Encode(png),
+          message: null
+        });
+      } catch (pageError) {
+        previews.push({ index: slide.index, dataUri: null, message: String(pageError).slice(0, 300) });
+      } finally {
+        for (var released = 0; released < staged.length; released++) {
+          try {
+            sashaFetchJson_(SASHA_DRIVE_FILES + '/' + encodeURIComponent(staged[released]), { method: 'delete' });
+          } catch (unstageError) {
+            console.warn('sasha-slides: could not delete the staged image ' + staged[released] + ': ' + unstageError);
+          }
+        }
+      }
+    }
+    return { previews: previews };
+  } finally {
+    try {
+      DriveApp.getFileById(presentationId).setTrashed(true);
+    } catch (dropError) {
+      console.warn('sasha-slides: could not remove the preview deck ' + presentationId + ': ' + dropError);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// sashaRetargetToPage_: the converter named a page id of its own, this deck has another.
+//
+// Every request the converter emits carries the pageObjectId it was told to use. The preview deck
+// makes its own pages, so each request has to be pointed at the page it is actually being applied
+// to -- otherwise the batch is refused for naming an object that does not exist.
+// ---------------------------------------------------------------------------
+function sashaRetargetToPage_(request, pageObjectId) {
+  var createShape = request.createShape;
+  if (createShape && createShape.elementProperties) createShape.elementProperties.pageObjectId = pageObjectId;
+  var createTable = request.createTable;
+  if (createTable && createTable.elementProperties) createTable.elementProperties.pageObjectId = pageObjectId;
+  var createImage = request.createImage;
+  if (createImage && createImage.elementProperties) createImage.elementProperties.pageObjectId = pageObjectId;
+  var createLine = request.createLine;
+  if (createLine && createLine.elementProperties) createLine.elementProperties.pageObjectId = pageObjectId;
+  var createVideo = request.createVideo;
+  if (createVideo && createVideo.elementProperties) createVideo.elementProperties.pageObjectId = pageObjectId;
+  var createSheetsChart = request.createSheetsChart;
+  if (createSheetsChart && createSheetsChart.elementProperties) createSheetsChart.elementProperties.pageObjectId = pageObjectId;
+}
+
+// ---------------------------------------------------------------------------
+// 16/16 -- sashaStageImages_: an image's BYTES, somewhere Google's fetcher can reach them.
 //
 // createImage takes a URL and GOOGLE fetches it, from Google's own servers, WITHOUT the signed-in
 // user's credentials. A candidate slide is self-contained (PROTOCOL.md), so its pictures are data:
@@ -359,7 +463,7 @@ function sashaWriteRender_(presentationId, render) {
 }
 
 // ---------------------------------------------------------------------------
-// 5/8 — sashaWritePick: the one file the picker is allowed to create.
+// 5/16 — sashaWritePick: the one file the picker is allowed to create.
 // The BODY arrives already serialized and already validated (serializePick, src/protocol.ts).
 // ---------------------------------------------------------------------------
 function sashaWritePick(spec) {
@@ -370,7 +474,7 @@ function sashaWritePick(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 6/12 — sashaReadEvents: ONE PROPOSAL'S WHOLE SESSION LOG, raw.
+// 6/16 — sashaReadEvents: ONE PROPOSAL'S WHOLE SESSION LOG, raw.
 //
 // \`<proposalId>/events/\` holds one JSON file per event, named \`<millis>-<6 base36>-<kind>.json\`
 // (PROTOCOL.md). Every file's NAME and BYTES come back; the ordering, the name grammar and the
@@ -401,7 +505,7 @@ function sashaReadEvents(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 7/12 — sashaWriteEvent: ONE event file, CREATED.
+// 7/16 — sashaWriteEvent: ONE event file, CREATED.
 //
 // There is no update path and there is no append, by design: Drive has no append, so a single
 // events.jsonl would mean read-modify-write from two writers that cannot see each other — the MCP
@@ -420,7 +524,7 @@ function sashaWriteEvent(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 8/12 — sashaCandidateComments: the comment threads on each CANDIDATE file.
+// 8/16 — sashaCandidateComments: the comment threads on each CANDIDATE file.
 //
 // Comments live on \`NN.html\`, not on the presentation, because the point is to mark a slide up
 // BEFORE it is inserted (PROTOCOL.md). This is the ONE source both surfaces read for the
@@ -437,13 +541,7 @@ function sashaCandidateComments(spec) {
   for (var at = 0; at < spec.fileIds.length; at++) {
     var fileId = spec.fileIds[at];
     try {
-      var listed = sashaFetchJson_(
-        SASHA_DRIVE_FILES + '/' + encodeURIComponent(fileId) + '/comments' +
-          '?pageSize=' + encodeURIComponent(pageSize) +
-          '&fields=' + encodeURIComponent(SASHA_COMMENT_FIELDS),
-        { method: 'get' }
-      );
-      files.push({ fileId: fileId, comments: listed.comments ? listed.comments : [], error: null });
+      files.push({ fileId: fileId, comments: sashaListComments_(fileId, pageSize), error: null });
     } catch (commentError) {
       files.push({ fileId: fileId, comments: [], error: String(commentError) });
     }
@@ -452,7 +550,7 @@ function sashaCandidateComments(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 9/12 — sashaSendFeedback: the user's words, as NATIVE GOOGLE DRIVE COMMENTS.
+// 9/16 — sashaSendFeedback: the user's words, as NATIVE GOOGLE DRIVE COMMENTS.
 //
 // TWO JOBS, ONE FUNCTION, and the difference is only which FILE is passed: a conversation message
 // is a comment on the PRESENTATION, and a mark-up is a comment on the CANDIDATE's own NN.html.
@@ -478,14 +576,7 @@ function sashaSendFeedback(spec) {
   var results = [];
   for (var at = 0; at < spec.comments.length; at++) {
     try {
-      var created = sashaFetchJson_(
-        SASHA_DRIVE_FILES + '/' + encodeURIComponent(spec.fileId) + '/comments?fields=id',
-        {
-          method: 'post',
-          contentType: 'application/json',
-          payload: JSON.stringify({ content: spec.comments[at].content })
-        }
-      );
+      var created = Drive.Comments.create({ content: spec.comments[at].content }, spec.fileId, { fields: 'id' });
       results.push({ commentId: created.id ? created.id : null, error: null });
     } catch (commentError) {
       results.push({ commentId: null, error: String(commentError) });
@@ -495,7 +586,7 @@ function sashaSendFeedback(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 10/12 — sashaReadFeedback: the deck's comment threads, raw.
+// 10/16 — sashaReadFeedback: the deck's comment threads, raw.
 //
 // EVERY comment on the presentation comes back, not just ours: telling them apart is reading the
 // sentinel, which is feedbackThreadsOf's job (src/feedback.ts) — a comment with no sentinel is a
@@ -503,15 +594,86 @@ function sashaSendFeedback(spec) {
 // of our own threads, which is why \`fields\` names them.
 // ---------------------------------------------------------------------------
 function sashaReadFeedback(spec) {
-  var url = SASHA_DRIVE_FILES + '/' + encodeURIComponent(spec.fileId) + '/comments' +
-    '?pageSize=' + encodeURIComponent(spec.pageSize) +
-    '&fields=' + encodeURIComponent(SASHA_COMMENT_FIELDS);
-  var listed = sashaFetchJson_(url, { method: 'get' });
-  return { comments: listed.comments ? listed.comments : [] };
+  return { comments: sashaListComments_(spec.fileId, spec.pageSize) };
+}
+
+// COMMENTS GO THROUGH THE ADVANCED DRIVE SERVICE, never UrlFetchApp. MEASURED 2026-10-04: the
+// sidebar's polling spent the script's DAILY UrlFetch quota ("Service invoked too many times for
+// one day: urlfetch"), after which every comment read failed until Google's daily reset and no
+// thread card could render. An advanced service call is billed to the Drive API's own quota, not
+// to UrlFetch, so a busy conversation cannot lock the user out of their own comments for a day.
+/** One page of a file's comment threads, with the replies named in SASHA_COMMENT_FIELDS. */
+function sashaListComments_(fileId, pageSize) {
+  var listed = Drive.Comments.list(fileId, { pageSize: pageSize, fields: SASHA_COMMENT_FIELDS });
+  return listed.comments ? listed.comments : [];
 }
 
 // ---------------------------------------------------------------------------
-// 11/12 — sashaOpenPicker: the CONVERSATION asking the host to show the slides window.
+// 11/16 — sashaReplyComment: the user's words, as a REPLY in a thread that already exists.
+//
+// The card in Ask Sasha answers a thread where it lives: a deck message on the presentation, a
+// mark-up on the candidate's own NN.html — the caller passes that file, as with sashaSendFeedback.
+// The content is the user's own words and nothing else: no sentinel line, because nothing has to
+// parse a region back out of a reply (src/bridge.ts, ReplyCommentSpec).
+//
+// THROWS on a Drive refusal rather than returning an error field: it is ONE post, so there is no
+// partial result to keep, and the failure handler is what turns it into a visible line on the card.
+// ---------------------------------------------------------------------------
+function sashaReplyComment(spec) {
+  return sashaPostReply_(spec.fileId, spec.commentId, { content: sashaReplyText_(spec) });
+}
+
+// ---------------------------------------------------------------------------
+// 12/16 — sashaReplyToComment: the SAME post, for a caller that names the field \`text\`.
+//
+// Two names for one Drive call is a MIGRATION and not a design: the sidebar's conversation still
+// calls sashaReplyComment with \`content\`, the slides window's thread rail calls this with \`text\`,
+// and both land on sashaPostReply_. Delete the older one once sidebar.tsx has moved over -- keeping
+// both is only safe because neither has any behaviour of its own (src/bridge.ts, CommentReplySpec).
+// ---------------------------------------------------------------------------
+function sashaReplyToComment(spec) {
+  return sashaPostReply_(spec.fileId, spec.commentId, { content: sashaReplyText_(spec) });
+}
+
+// ---------------------------------------------------------------------------
+// 13/16 — sashaResolveComment: Google's "Mark as resolved and hide discussion".
+//
+// Drive has no resolve endpoint: a resolve IS a reply carrying action "resolve", which is also how
+// Google's own pane does it. Drive refuses a reply with no content, so an empty one becomes
+// "Resolved." here — the one default in this file, because it is a fact about Drive's API rather
+// than a decision about the product.
+//
+// ONE function for both surfaces, unlike the reply above, because the name did not have to change:
+// sashaReplyText_ reads whichever field the caller named.
+// ---------------------------------------------------------------------------
+function sashaResolveComment(spec) {
+  var content = sashaReplyText_(spec) ? sashaReplyText_(spec) : 'Resolved.';
+  return sashaPostReply_(spec.fileId, spec.commentId, { content: content, action: 'resolve' });
+}
+
+/** The note to post, under whichever name the calling surface gave it (src/bridge.ts). */
+function sashaReplyText_(spec) {
+  if (spec.text) return spec.text;
+  return spec.content ? spec.content : '';
+}
+
+/**
+ * One POST to a comment's replies; answers with the new reply's id and whether the thread is now
+ * closed (parsePostedReply, src/bridge.ts).
+ *
+ * \`resolved\` IS READ BACK FROM DRIVE, never assumed from which function called this. Drive echoes
+ * the \`action\` it actually applied on the created reply, so asking for that field costs nothing and
+ * is the honest answer -- the same discipline as the server's own path (feedback/feedback.ts, which
+ * re-reads the thread because \`Comment.resolved\` is output-only). A resolve Drive declined to apply
+ * therefore reports \`resolved: false\` instead of a card that says "resolved" over an open thread.
+ */
+function sashaPostReply_(fileId, commentId, body) {
+  var created = Drive.Replies.create(body, fileId, commentId, { fields: 'id,action' });
+  return { replyId: created.id ? created.id : '', resolved: created.action === 'resolve' };
+}
+
+// ---------------------------------------------------------------------------
+// 14/16 — sashaOpenPicker: the CONVERSATION asking the host to show the slides window.
 //
 // This is the only function whose point is a side effect on the Slides UI rather than data, and it
 // exists because the two surfaces cannot talk to each other: showModelessDialog is a server-side
@@ -524,13 +686,49 @@ function sashaReadFeedback(spec) {
 // a host that declined becomes a line on the sidebar's screen instead of a button that silently
 // does nothing. The dialog's size is decided here, next to the call that uses it.
 // ---------------------------------------------------------------------------
-function sashaOpenPicker() {
+function sashaOpenPicker(spec) {
+  /*
+   * AN OPTIONAL TARGET, recorded the same way the report's is.
+   *
+   * The sidebar and the slides window are separate HtmlService documents that share nothing but
+   * the server, so "open the slides ON this candidate" cannot be an argument to the window --
+   * it is left on the server for the window to collect (sashaTakePickerTarget). Without it the
+   * window opens where it last was, which for a comment about slide 3 means hunting for slide 3.
+   */
+  var properties = PropertiesService.getUserProperties();
+  if (spec && spec.proposalId) {
+    properties.setProperty(
+      SASHA_PICKER_TARGET_KEY,
+      JSON.stringify({ proposalId: spec.proposalId, slideIndex: spec.slideIndex || null })
+    );
+  } else {
+    // ASKED FOR THE WHOLE SET: clear any older target, or the window would come up on one slide.
+    properties.deleteProperty(SASHA_PICKER_TARGET_KEY);
+  }
   showPicker();
   return { opened: true };
 }
 
+/**
+ * Which candidate the slides window was asked to open on, and READING CLEARS IT -- so reopening
+ * the window later comes up on the grid rather than on a slide the user finished with.
+ */
+function sashaTakePickerTarget() {
+  var properties = PropertiesService.getUserProperties();
+  var raw = properties.getProperty(SASHA_PICKER_TARGET_KEY);
+  properties.deleteProperty(SASHA_PICKER_TARGET_KEY);
+  if (!raw) return { proposalId: null, slideIndex: null };
+  try {
+    var parsed = JSON.parse(raw);
+    return { proposalId: parsed.proposalId || null, slideIndex: parsed.slideIndex || null };
+  } catch (targetError) {
+    console.warn('sasha-slides: could not read the picker target: ' + targetError);
+    return { proposalId: null, slideIndex: null };
+  }
+}
+
 // ---------------------------------------------------------------------------
-// 12/12 — sashaOpenDefectReport + sashaTakeReportTarget: the REPORT WINDOW, and which slide.
+// 15/16 — sashaOpenDefectReport + sashaTakeReportTarget: the REPORT WINDOW, and which slide.
 //
 // A THIRD DOCUMENT, not a mode of the slides window — see src/report-state.ts for why (the
 // anonymiser is the heaviest code in the product and Dialog.html has a hard size ceiling).
@@ -669,6 +867,9 @@ const APPSSCRIPT_JSON = `${JSON.stringify(
         // Declared so Apps Script auto-enables the Slides API in the script's GCP project; without
         // it a fresh deploy 403s on the UrlFetchApp calls to slides.googleapis.com.
         { userSymbol: "Slides", serviceId: "slides", version: "v1" },
+        // Drive comments (list, create, reply, resolve) go through this rather than UrlFetchApp,
+        // so they draw on the Drive API's quota instead of the script's daily UrlFetch quota.
+        { userSymbol: "Drive", serviceId: "drive", version: "v3" },
       ],
     },
   },
@@ -753,7 +954,30 @@ async function main(): Promise<void> {
   writeFileSync(join(OUT, "Report.html"), reportHtml);
   process.stdout.write(`\nwrote the Apps Script project to ${OUT}\n`);
   process.stdout.write(`    appsscript.json  (4 scopes)\n`);
-  process.stdout.write(`    Code.gs          (${CODE_GS.length.toLocaleString()} bytes, 12 server functions)\n`);
+  /*
+   * CODE.GS IS PARSED BEFORE IT IS EMITTED.
+   *
+   * It is a template literal in this file, so TypeScript never looks inside it: a stray bracket
+   * or a bad `var` shipped happily and only surfaced as a broken add-on after a deploy, with no
+   * line number. esbuild parses it here for the price of nothing. V8 is the Apps Script runtime,
+   * so plain-script syntax is exactly the right dialect to check against.
+   */
+  try {
+    transformSync(CODE_GS, { loader: "js", format: "iife", target: "es2017" });
+  } catch (cause: unknown) {
+    throw new Error(`Code.gs does not parse: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+
+  const declared = serverFunctionsMissingFrom(CODE_GS);
+  if (declared.length > 0) {
+    // A name the client can call but Code.gs does not define is the "Script function not found"
+    // that explainHostFailure (src/bridge.ts) exists to diagnose at RUNTIME, in a deployed add-on.
+    // It is cheaper to refuse to emit.
+    throw new Error(`Code.gs does not declare ${declared.join(", ")} -- SERVER_FUNCTION_NAMES lists them as callable`);
+  }
+  process.stdout.write(
+    `    Code.gs          (${CODE_GS.length.toLocaleString()} bytes, ${SERVER_FUNCTION_NAMES.length} server functions)\n`,
+  );
   process.stdout.write(`    Sidebar.html     (${kb(sidebarHtml)} KB, Ask Sasha -- the conversation)\n`);
   process.stdout.write(`    Dialog.html      (${kb(dialogHtml)} KB, the slides + converter)\n`);
   process.stdout.write(`    Report.html      (${kb(reportHtml)} KB, the defect report + anonymiser)\n`);
@@ -807,8 +1031,28 @@ async function bundleSurface({
   return text;
 }
 
-/** The HtmlService page around one bundle. Identical for both surfaces; only the script differs. */
+/**
+ * The HtmlService page around one bundle. Identical for every surface; only the script differs.
+ *
+ * THE BUNDLE IS NOT AN EXECUTABLE <script>. MEASURED 2026-10-04 on the Report web app: HtmlService
+ * runs a JavaScript COMMENT STRIPPER over every inline executable script before serving it. It
+ * deleted `/* ... *\/` CSS comments inside template strings (harmless) and, having lost track of
+ * string state once, deleted `//staged.sasha-slides.invalid/image";...` up to the next newline:
+ * 9,803 bytes of code, served as "Uncaught SyntaxError: Invalid or unexpected token". That is the
+ * "corruption" the size ceiling below was written against -- it depends on what the bundle
+ * contains, not on how big it is, which is why it hit a 453 KB page under the budget.
+ *
+ * So the bundle travels in a `type="text/plain"` container, which the HTML parser keeps as raw
+ * text and nothing treats as JavaScript, and a loader with no comments and no `/` copies it into a
+ * real <script> element. Injecting a script element is not eval, so the sandbox's CSP (no
+ * `unsafe-eval`) allows it -- the converter's extractor already relies on that path. The loader
+ * runs where the inline script used to, at the end of <body>, so the bundle still sees a parsed
+ * document.
+ */
 function surfaceHtml({ from, script }: { from: string; script: string }): string {
+  if (/<\/script/i.test(script)) {
+    throw new Error(`${from}: the bundle contains "</script", which would end its container early`);
+  }
   return `<!DOCTYPE html>
 <!-- GENERATED FILE - do not edit. Emitted by ${GENERATED_BY} from ${from}.
      Change the TypeScript source and rebuild; this file is overwritten wholesale. -->
@@ -818,12 +1062,29 @@ function surfaceHtml({ from, script }: { from: string; script: string }): string
 <meta charset="utf-8">
 </head>
 <body>
-<script>
+<script type="text/plain" id="${BUNDLE_ELEMENT_ID}">
 ${script}
+</script>
+<script>
+(function () { var bundle = document.getElementById("${BUNDLE_ELEMENT_ID}"); var run = document.createElement("script"); run.text = bundle.textContent; bundle.remove(); document.body.appendChild(run); })();
 </script>
 </body>
 </html>
 `;
+}
+
+/** The id of the inert container each page's bundle travels in. See surfaceHtml. */
+const BUNDLE_ELEMENT_ID = "sasha-bundle";
+
+/**
+ * The callable names SERVER_FUNCTION_NAMES promises that the emitted Code.gs does not define.
+ *
+ * The list and the generated string are edited in different places, and nothing else compares
+ * them: TypeScript cannot see inside a template literal, so a name added to one and not the other
+ * builds, deploys, and fails only when a user presses the button. This is that comparison.
+ */
+function serverFunctionsMissingFrom(code: string): readonly string[] {
+  return SERVER_FUNCTION_NAMES.filter((name) => !new RegExp(`^function ${name}\\(`, "m").test(code));
 }
 
 function kb(text: string): string {

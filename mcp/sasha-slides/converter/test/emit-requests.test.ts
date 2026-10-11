@@ -11,10 +11,15 @@
  * 1280x720 document maps onto Google's 10in x 5.625in page at.
  */
 import {
+  afterNextFrame,
+  DEFAULT_PAGE_SIZE_EMU,
   DEFAULT_TEXT_INSET_EMU,
+  EMU_PER_POINT,
   emitSlideRequests,
   parseExtraction,
+  pageScaleFor,
   predictGoogleRowHeightPx,
+  pxToPoints,
   specForColumnWidthPx,
   describeUnsupportedFeature,
 } from "../index.js";
@@ -345,7 +350,8 @@ function reportedKinds(unsupported: readonly UnsupportedFeature[]): readonly str
     | Readonly<{ fontFamily: string; fontSize: { magnitude: number; unit: string }; bold: boolean }>
     | undefined;
   test.equal("sans-serif resolves to Arial", style?.fontFamily, "Arial");
-  test.near("48px -> 36pt", style?.fontSize.magnitude ?? -1, 36, 0.01);
+  // 48 CSS px on a 1280px document that maps onto a 10in page is 48 x 0.5625 = 27pt.
+  test.near("48px -> 27pt", style?.fontSize.magnitude ?? -1, 27, 0.01);
   test.equal("font size is in points", style?.fontSize.unit, "PT");
   test.equal("bold survives", style?.bold, true);
   test.equal("whole-range style uses ALL", (textStyle?.["textRange"] as Readonly<{ type: string }>).type, "ALL");
@@ -711,10 +717,23 @@ function reportedKinds(unsupported: readonly UnsupportedFeature[]): readonly str
   test.equal("nesting is carried by leading tabs", insert?.["text"], "First\n\tNested\nSecond");
 
   const requestKinds = kinds(requests);
+  /*
+   * BULLETS COME AFTER THE TEXT STYLING AND BEFORE THE INDENTS.
+   *
+   * This used to assert they were LAST, which encoded the bug: `createParagraphBullets` rewrites
+   * a paragraph's indents to Slides' own bullet defaults, so anything the emitter said about
+   * indentation beforehand was discarded and the list rendered ~38px right of the browser. The
+   * tab-shifting text styling must still precede them; the indents must now follow them.
+   */
   test.equal(
-    "bullets are created LAST, after the tab-shifting styling",
-    requestKinds[requestKinds.length - 1],
-    "createParagraphBullets",
+    "bullets come after the tab-shifting text styling",
+    requestKinds.indexOf("createParagraphBullets") > requestKinds.lastIndexOf("updateTextStyle"),
+    true,
+  );
+  test.equal(
+    "and the indents come after the bullets, which would otherwise overwrite them",
+    requestKinds.lastIndexOf("updateParagraphStyle") > requestKinds.indexOf("createParagraphBullets"),
+    true,
   );
   const [bullets] = requestsOfKind(asRecords(requests), "createParagraphBullets");
   test.equal("an unordered list gets the disc preset", bullets?.["bulletPreset"], "BULLET_DISC_CIRCLE_SQUARE");
@@ -1030,4 +1049,122 @@ function reportedKinds(unsupported: readonly UnsupportedFeature[]): readonly str
   test.near("fonts <= 10px hit the ~13px absolute minimum", tiny.renderedPx, 13, 0.01);
 }
 
-test.finish();
+/* ------------------------------------- 14. the font scale is the PAGE's scale
+ *
+ * THE BUG THIS PINS DOWN. `pxToPoints` used the CSS ABSOLUTE conversion, 0.75 pt/px at 96 dpi --
+ * which is right for a 13.333in PowerPoint page and wrong for Google's 10in one. Every font was
+ * emitted 0.75 / 0.5625 = 4/3 too large, so Slides re-wrapped text that Chrome had laid out, every
+ * box overflowed, and consecutive elements printed on top of each other. It was visible on all
+ * four picker candidates at once (`calibration/sxs-candidates.ts`), which is what "the previews
+ * are completely broken" was.
+ *
+ * It is asserted as an INVARIANT and not as a constant: the font scale and the geometry scale are
+ * the same mapping seen twice, so text as wide as the document must be text as wide as the page.
+ * A future change to either one that forgets the other fails here.
+ */
+{
+  const slideWidthPx = 1280;
+  const scale = pageScaleFor({ viewportPx: { w: slideWidthPx, h: 720 }, pageSizeEmu: DEFAULT_PAGE_SIZE_EMU });
+  const widthFromFontScale = pxToPoints(slideWidthPx, scale) * EMU_PER_POINT;
+  test.near(
+    "a run as wide as the document is as wide as the page",
+    widthFromFontScale,
+    DEFAULT_PAGE_SIZE_EMU.widthEmu,
+    1,
+  );
+  // Rounded to 2dp, which is the quantum a font size is emitted at.
+  test.near("so one CSS px is 0.5625 pt, not the 0.75 pt of a 13.33in page", pxToPoints(1, scale), 0.5625, 0.005);
+  test.near("a 58px heading is 32.63pt", pxToPoints(58, scale), 32.63, 0.01);
+
+  // AND IT FOLLOWS A NON-DEFAULT PAGE, which is why it takes the scale rather than a constant:
+  // calibration/measure-text-inset.ts converts against a page of its own.
+  const wide = pageScaleFor({
+    viewportPx: { w: slideWidthPx, h: 720 },
+    pageSizeEmu: { widthEmu: DEFAULT_PAGE_SIZE_EMU.widthEmu * 2, heightEmu: DEFAULT_PAGE_SIZE_EMU.heightEmu * 2 },
+  });
+  test.near("a page twice as wide doubles the type", pxToPoints(48, wide), 54, 0.01);
+}
+
+/* ------------------------------- 15. a frame that never paints is not a hang
+ *
+ * THE BUG THIS PINS DOWN. `nextFrame` awaited `requestAnimationFrame` with nothing racing it.
+ * A browser does not service rAF for a frame it is not rendering -- a backgrounded tab, a
+ * throttled or occluded frame, or the nested sandbox Apps Script's `showModelessDialog` puts the
+ * picker in -- and the promise then never settled. No throw, no rejection: every candidate sat on
+ * "converting..." forever, and because a conversion in flight blocks the next (dialog.tsx `pump`)
+ * one stuck slide stopped all of them.
+ *
+ * `await` is the assertion. If the budget is not honoured this test does not fail, it HANGS --
+ * which is exactly the production symptom, and the runner's own timeout reports it.
+ */
+
+/* ------------------ 16. bullets are created BEFORE the indents that correct them
+ *
+ * THE BUG THIS PINS DOWN. `createParagraphBullets` REWRITES a paragraph's indents to Slides' own
+ * bullet defaults -- half an inch of `indentStart`. The emitter sent each item's paragraph style
+ * first and created the bullets afterwards, so every indent it asked for was silently discarded
+ * and Slides' default won. A numbered list therefore sat ~38px right of where Chrome drew it,
+ * and no amount of changing the indent VALUE could move it, because the request was being
+ * thrown away rather than ignored. Measured after the reorder: x=111/109/108 against Chrome's
+ * 106/105/105 (calibration/sxs-candidates.ts).
+ *
+ * The ORDER is the contract, so the order is what is asserted.
+ */
+{
+  const { requests } = convert([
+    {
+      type: "list",
+      bounds: { x: 100, y: 100, w: 400, h: 120 },
+      ordered: true,
+      items: [
+        { text: "First", level: 0, fontSize: 20, fontFamily: "Arial", color: "#000000" },
+        { text: "Second", level: 0, fontSize: 20, fontFamily: "Arial", color: "#000000" },
+      ],
+      style: { fontFamily: "Arial", fontSize: 20 },
+    },
+  ]);
+  const kinds = asRecords(requests).map((request) => kindOf(request as never));
+  const bulletsAt = kinds.indexOf("createParagraphBullets");
+  const indentAt = asRecords(requests).findIndex((request) => {
+    const update = request["updateParagraphStyle"];
+    if (typeof update !== "object" || update === null) return false;
+    return typeof (update as Readonly<{ fields?: string }>).fields === "string"
+      && (update as Readonly<{ fields: string }>).fields.includes("indentStart");
+  });
+  test.check("the list creates its bullets", bulletsAt >= 0, kinds.join(","));
+  test.check("and states its indents", indentAt >= 0, kinds.join(","));
+  test.check(
+    "the indents are applied AFTER the bullets, or createParagraphBullets overwrites them",
+    bulletsAt >= 0 && indentAt > bulletsAt,
+    `bullets at ${String(bulletsAt)}, indent at ${String(indentAt)}`,
+  );
+}
+
+async function checkFramePacing(): Promise<void> {
+  const startedNever = Date.now();
+  await afterNextFrame({ view: { requestAnimationFrame: () => undefined }, budgetMs: 30 });
+  const waitedNever = Date.now() - startedNever;
+  test.check(
+    "a view whose rAF never fires resolves at the budget instead of hanging",
+    waitedNever >= 25 && waitedNever < 2000,
+    `waited ${waitedNever}ms`,
+  );
+
+  // AND IT STILL TAKES THE FRAME when there is one: the timeout is a floor on failure, never a
+  // delay on the normal path, because every conversion pays this wait.
+  const startedPaints = Date.now();
+  await afterNextFrame({
+    view: { requestAnimationFrame: (callback: () => void) => setTimeout(callback, 0) },
+    budgetMs: 5000,
+  });
+  const waitedPaints = Date.now() - startedPaints;
+  test.check(
+    "a view that does paint resolves on the frame, not on the budget",
+    waitedPaints < 1000,
+    `waited ${waitedPaints}ms`,
+  );
+}
+
+// Top-level await is not available (the runner transforms to CJS), so the one async check runs
+// in a function and `finish` is chained after it.
+void checkFramePacing().then(() => test.finish());

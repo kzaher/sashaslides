@@ -119,6 +119,81 @@ async function main(): Promise<void> {
       checkFixture({ name: fixture.name, report });
     }
 
+    checkExpectedRequestShapes(
+      await Promise.all(
+        EXPECTED_REQUEST_SHAPES.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
+          async (expectation) => ({
+            expectation,
+            report: await convertInPage(client, {
+              html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
+              extractorScript,
+              name: expectation.fixture,
+            }),
+          }),
+        ),
+      ),
+    );
+
+    checkExpectedFontSizes(
+      await Promise.all(
+        EXPECTED_FONT_SIZES.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
+          async (expectation) => ({
+            expectation,
+            report: await convertInPage(client, {
+              html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
+              extractorScript,
+              name: expectation.fixture,
+            }),
+          }),
+        ),
+      ),
+    );
+
+    checkExpectedBorders(
+      await Promise.all(
+        EXPECTED_BORDERS.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
+          async (expectation) => ({
+            expectation,
+            report: await convertInPage(client, {
+              html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
+              extractorScript,
+              name: expectation.fixture,
+            }),
+          }),
+        ),
+      ),
+    );
+
+    checkExpectedCellFills(
+      await Promise.all(
+        EXPECTED_CELL_FILLS.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
+          async (expectation) => ({
+            expectation,
+            report: await convertInPage(client, {
+              html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
+              extractorScript,
+              name: expectation.fixture,
+            }),
+          }),
+        ),
+      ),
+    );
+
+    checkExpectedText(
+      await Promise.all(
+        EXPECTED_TEXT.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
+          async (expectation) => ({
+            expectation,
+            report: await convertInPage(client, {
+              html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
+              extractorScript,
+              name: expectation.fixture,
+            }),
+          }),
+        ),
+      ),
+    );
+
     checkExpectedAnomalies(
       await Promise.all(
         EXPECTED_ANOMALIES.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
@@ -455,7 +530,163 @@ const EXPECTED_ANOMALIES: readonly Readonly<{
   // Rotation IS expressible in the affine transform, so it is not a loss.
   { fixture: "rotated_text.html", mustReport: [], mustNotReport: ["unsupported-transform"] },
   { fixture: "img_http.html", mustReport: [], mustNotReport: ["image-source-not-fetchable"] },
+  // text-transform is applied to the TEXT, not reported as a loss -- see EXPECTED_TEXT.
+  { fixture: "text_transform.html", mustReport: [], mustNotReport: ["font-unavailable"] },
+  // A caption is ordinary text placed by its own bounds; nothing about it is a loss.
+  { fixture: "table_caption.html", mustReport: [], mustNotReport: ["font-unavailable"] },
+  // A row-level fill is expressible per cell; nothing about it is a loss either.
+  { fixture: "table_row_fill.html", mustReport: [], mustNotReport: ["font-unavailable"] },
+  // Per-side borders are expressible one side at a time; no side of this is a loss.
+  { fixture: "table_side_borders.html", mustReport: [], mustNotReport: ["non-uniform-border"] },
+  // A block child's own font size is fully expressible; only its letter-spacing is a loss.
+  { fixture: "block_child_typography.html", mustReport: ["letter-spacing"], mustNotReport: ["font-unavailable"] },
+  // An image's BORDER crosses as an outline; its RADIUS cannot, and must be admitted.
+  { fixture: "image_border.html", mustReport: ["image-corner-radius"], mustNotReport: ["image-source-not-fetchable"] },
+  // A conic is genuinely beyond the API, and it says so.
+  { fixture: "page_gradient.html", mustReport: ["rasterised-visual"] },
 ];
+
+/**
+ * REQUESTS THAT MUST BE THERE AT ALL. The other checks measure values; this one catches a whole
+ * request going missing, which is how an image's border was lost -- nothing was wrong with what
+ * was emitted, there simply was no `updateImageProperties` in it.
+ */
+const EXPECTED_REQUEST_SHAPES: readonly Readonly<{
+  fixture: string;
+  kind: string;
+  mustContain: readonly string[];
+  why: string;
+}>[] = [
+  {
+    fixture: "page_gradient.html",
+    kind: "updateShapeProperties",
+    // The MEAN of every stop in both layers, not the first one written. #ff5f6d is the first,
+    // and a flat saturated coral is what shipped; the mean is a muted slate.
+    mustContain: ['"red":0.52', '"green":0.55', '"blue":0.63'],
+    why: "a conic the API cannot hold flattens to its mean, not to one of its extremes",
+  },
+  {
+    fixture: "image_border.html",
+    kind: "updateImageProperties",
+    // 43,52,70 is #2b3446; the weight is 2 CSS px at 9525 EMU each.
+    mustContain: ['"outline"', '"weight":{"magnitude":19050', '"red":0.16862745098039217'],
+    why: "the picture's 2px #2b3446 border crosses as an image outline",
+  },
+];
+
+function checkExpectedRequestShapes(
+  results: readonly Readonly<{ expectation: (typeof EXPECTED_REQUEST_SHAPES)[number]; report: ConversionReport }>[],
+): void {
+  for (const { expectation, report } of results) {
+    const matching = report.requests
+      .filter((request) => request[expectation.kind] !== undefined)
+      .map((request) => JSON.stringify(request));
+    test.check(
+      `${expectation.fixture}: emits a ${expectation.kind} -- ${expectation.why}`,
+      matching.length > 0,
+      `saw ${String(matching.length)}`,
+    );
+    for (const needle of expectation.mustContain) {
+      test.check(
+        `${expectation.fixture}: its ${expectation.kind} carries ${needle}`,
+        matching.some((body) => body.includes(needle)),
+        matching[0]?.slice(0, 220) ?? "<no such request>",
+      );
+    }
+  }
+}
+
+/**
+ * THE FONT SIZES THAT ACTUALLY REACHED THE SLIDE, in points.
+ *
+ * A run with no style of its own inherits the ELEMENT's, so a block child whose runs lost their
+ * style silently rendered at the wrapper's size. Nothing reports that as a loss -- the converter
+ * believes it emitted the text correctly -- so the only way to catch it is to read the sizes back.
+ * Points, because that is what crosses: 62 CSS px on a 1280px document mapped onto Google's 10in
+ * page is 62 x 0.5625 = 34.88pt.
+ */
+const EXPECTED_FONT_SIZES: readonly Readonly<{ fixture: string; mustInclude: readonly number[]; why: string }>[] = [
+  {
+    fixture: "block_child_typography.html",
+    mustInclude: [7.88, 34.88, 11.25],
+    why: "the 14px badge, the 62px heading and the 20px paragraph each keep their own size",
+  },
+];
+
+function checkExpectedFontSizes(
+  results: readonly Readonly<{ expectation: (typeof EXPECTED_FONT_SIZES)[number]; report: ConversionReport }>[],
+): void {
+  for (const { expectation, report } of results) {
+    const sizes = new Set<number>();
+    for (const request of report.requests) {
+      const update = request["updateTextStyle"];
+      if (typeof update !== "object" || update === null) continue;
+      const style = (update as Readonly<{ style?: Readonly<{ fontSize?: Readonly<{ magnitude?: number }> }> }>).style;
+      const magnitude = style?.fontSize?.magnitude;
+      if (typeof magnitude === "number") sizes.add(Math.round(magnitude * 100) / 100);
+    }
+    for (const wanted of expectation.mustInclude) {
+      test.check(
+        `${expectation.fixture}: emits ${String(wanted)}pt -- ${expectation.why}`,
+        [...sizes].some((size) => Math.abs(size - wanted) < 0.05),
+        `saw ${[...sizes].sort((a, b) => a - b).join(", ")}`,
+      );
+    }
+  }
+}
+
+/**
+ * WHICH EDGES A TABLE ACTUALLY DRAWS. Slides addresses sides individually, and the emitter used
+ * to send everything as `borderPosition: "ALL"` -- so one `border-bottom` became a box and the
+ * table rendered as a dark grid the design never asked for. Asserted as the exact multiset of
+ * (position, width in px, colour), because that IS the design.
+ */
+/**
+ * WHAT THE TEXT ITSELF MUST SAY. The anomaly expectations check what the converter ADMITS it
+ * cannot do; this checks what it actually emitted, which is the only way to catch a
+ * transformation that was silently skipped -- no anomaly is reported for `text-transform`,
+ * because applying it is not a loss.
+ */
+const EXPECTED_TEXT: readonly Readonly<{
+  fixture: string;
+  mustContain: readonly string[];
+  mustNotContain?: readonly string[];
+}>[] = [
+  {
+    // A caption above the table and a caption below it: `caption-side` moves the box, and
+    // neither position may cost the text.
+    fixture: "table_caption.html",
+    mustContain: ["A caption above its table", "A caption below its table"],
+  },
+  {
+    fixture: "text_transform.html",
+    mustContain: ["LEAF ONLY TEXT", "MIXED BOLD TEXT", "lower only text", "Capitalize Only Text", "Left Alone"],
+    // The half-transformed shape the bug produced: only the inline child was uppercased.
+    mustNotContain: ["mixed BOLD text", "leaf only text", "LOWER ONLY TEXT", "capitalize only text"],
+  },
+];
+
+function checkExpectedText(
+  results: readonly Readonly<{ expectation: (typeof EXPECTED_TEXT)[number]; report: ConversionReport }>[],
+): void {
+  for (const { expectation, report } of results) {
+    const inserted = report.requests
+      .map((request) => request["insertText"])
+      .filter((payload): payload is Readonly<{ text: string }> => typeof payload === "object" && payload !== null)
+      .map((payload) => payload.text)
+      .join("\n");
+    for (const required of expectation.mustContain) {
+      test.check(`${expectation.fixture}: emits ${JSON.stringify(required)}`, inserted.includes(required), inserted.slice(0, 200));
+    }
+    for (const forbidden of expectation.mustNotContain ?? []) {
+      test.check(
+        `${expectation.fixture}: does NOT emit ${JSON.stringify(forbidden)}`,
+        !inserted.includes(forbidden),
+        inserted.slice(0, 200),
+      );
+    }
+  }
+}
 
 function checkExpectedAnomalies(
   results: readonly Readonly<{
@@ -477,6 +708,131 @@ function checkExpectedAnomalies(
         `${expectation.fixture}: does NOT report ${forbidden}`,
         !kinds.has(forbidden),
         `reported: ${[...kinds].join(", ")}`,
+      );
+    }
+  }
+}
+
+function sortedCounts(counts: Readonly<Record<string, number>>): Readonly<Record<string, number>> {
+  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+const EXPECTED_BORDERS: readonly Readonly<{ fixture: string; edges: Readonly<Record<string, number>> }>[] = [
+  {
+    fixture: "table_side_borders.html",
+    edges: {
+      // `tbody td { border-bottom: 1px solid #e2e2e8 }` -- on SIX cells, not nine: the total
+      // row cancels it with `border-bottom: none`, which is the whole point of per-side output.
+      "BOTTOM|1|#e2e2e8": 6,
+      // `thead th { border-right: 1px solid #3a3a42 }`, minus the :last-child that cancels it.
+      "RIGHT|1|#3a3a42": 2,
+      // `tbody td.flag { border-left: 4px solid #d9480f }` on exactly one cell.
+      "LEFT|4|#d9480f": 1,
+      // `tbody tr.total td { border-top: 3px solid #1b1b1f }` across the three cells of one row.
+      "TOP|3|#1b1b1f": 3,
+    },
+  },
+];
+
+function checkExpectedBorders(
+  results: readonly Readonly<{ expectation: (typeof EXPECTED_BORDERS)[number]; report: ConversionReport }>[],
+): void {
+  for (const { expectation, report } of results) {
+    const drawn: Record<string, number> = {};
+    let cleared = 0;
+    let opaqueWithoutColour = 0;
+    for (const request of report.requests) {
+      const update = request["updateTableBorderProperties"];
+      if (typeof update !== "object" || update === null) continue;
+      const payload = update as Readonly<Record<string, unknown>>;
+      const properties = payload["tableBorderProperties"] as
+        | Readonly<{
+            weight?: Readonly<{ magnitude?: number }>;
+            tableBorderFill?: Readonly<{ solidFill?: Readonly<{ alpha?: number; color?: Readonly<{ rgbColor?: Readonly<Record<string, number>> }> }> }>;
+          }>
+        | undefined;
+      const fill = properties?.tableBorderFill?.solidFill;
+      // A TRANSPARENT BORDER IS A CLEARED ONE, not a white one. Weight zero is refused by the
+      // API, so "no line" is expressed as alpha 0 and must be counted as absence.
+      if ((fill?.alpha ?? 1) === 0) {
+        cleared += 1;
+        continue;
+      }
+      const rgb = fill?.color?.rgbColor;
+      if (rgb === undefined) {
+        opaqueWithoutColour += 1;
+        continue;
+      }
+      const channel = (name: string): string =>
+        Math.round((rgb[name] ?? 0) * 255).toString(16).padStart(2, "0");
+      const widthPx = Math.round((properties?.weight?.magnitude ?? 0) / 9525);
+      const key = `${String(payload["borderPosition"])}|${String(widthPx)}|#${channel("red")}${channel("green")}${channel("blue")}`;
+      drawn[key] = (drawn[key] ?? 0) + 1;
+    }
+    // SORTED ON BOTH SIDES: `test.equal` compares JSON strings, so key order would otherwise
+    // decide the result -- a difference that says nothing about the slide.
+    test.equal(
+      `${expectation.fixture}: draws exactly the VISIBLE edges the CSS asks for`,
+      sortedCounts(drawn),
+      sortedCounts(expectation.edges),
+    );
+    // Every other side is explicitly cleared. It cannot be left alone: `createTable` hands back
+    // cells that already carry Slides' own grey border on all four edges.
+    test.check(
+      `${expectation.fixture}: every other side is explicitly cleared`,
+      cleared > 0 && opaqueWithoutColour === 0,
+      `${String(cleared)} cleared, ${String(opaqueWithoutColour)} opaque with no colour`,
+    );
+  }
+}
+
+/**
+ * WHAT COLOUR A CELL ENDED UP. CSS paints table backgrounds in layers -- cell over row over row
+ * group over table -- and the extractor used to read a cell's OWN background only, so a zebra
+ * written on the `<tr>` came out white. Asserted as emitted `rgbColor`s, because that is what
+ * crosses to Google; `0.965` is `#f6` and so on.
+ */
+const EXPECTED_CELL_FILLS: readonly Readonly<{
+  fixture: string;
+  cells: readonly Readonly<{ row: number; column: number; rgb: readonly [number, number, number]; why: string }>[];
+}>[] = [
+  {
+    fixture: "table_row_fill.html",
+    cells: [
+      { row: 0, column: 0, rgb: [0.106, 0.106, 0.122], why: "the thead row group's #1b1b1f" },
+      { row: 2, column: 0, rgb: [0.965, 0.965, 0.976], why: "the row's own zebra #f6f6f9" },
+      { row: 2, column: 1, rgb: [1, 0.878, 0.698], why: "a cell that overrides its row still wins" },
+    ],
+  },
+];
+
+function checkExpectedCellFills(
+  results: readonly Readonly<{ expectation: (typeof EXPECTED_CELL_FILLS)[number]; report: ConversionReport }>[],
+): void {
+  for (const { expectation, report } of results) {
+    const painted = new Map<string, readonly number[]>();
+    for (const request of report.requests) {
+      const update = request["updateTableCellProperties"];
+      if (typeof update !== "object" || update === null) continue;
+      const payload = update as Readonly<Record<string, unknown>>;
+      const range = payload["tableRange"] as Readonly<{ location?: Readonly<{ rowIndex?: number; columnIndex?: number }> }> | undefined;
+      const colour = (
+        payload["tableCellProperties"] as
+          | Readonly<{ tableCellBackgroundFill?: Readonly<{ solidFill?: Readonly<{ color?: Readonly<{ rgbColor?: Readonly<Record<string, number>> }> }> }> }>
+          | undefined
+      )?.tableCellBackgroundFill?.solidFill?.color?.rgbColor;
+      if (range?.location === undefined || colour === undefined) continue;
+      const key = `${String(range.location.rowIndex ?? 0)},${String(range.location.columnIndex ?? 0)}`;
+      painted.set(key, [colour["red"] ?? 0, colour["green"] ?? 0, colour["blue"] ?? 0]);
+    }
+    for (const cell of expectation.cells) {
+      const got = painted.get(`${String(cell.row)},${String(cell.column)}`);
+      const close =
+        got !== undefined && cell.rgb.every((channel, at) => Math.abs(channel - (got[at] ?? -1)) < 0.01);
+      test.check(
+        `${expectation.fixture}: cell ${String(cell.row)},${String(cell.column)} takes ${cell.why}`,
+        close,
+        got === undefined ? "nothing painted it" : JSON.stringify(got.map((v) => Math.round(v * 1000) / 1000)),
       );
     }
   }

@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  Zebra striping written on the ROW, which is how anyone writes it.
+
+  THE BUG THIS PINS DOWN. The extractor read a cell's OWN `background-color` only. CSS paints
+  table backgrounds in layers -- cell over row over row group over table -- so `background` on a
+  `<tr>` shows through a cell that sets none. Every stripe written the usual way came out white.
+  The existing fixtures all write it on the `td` (`tr:nth-child(even) td`), which is exactly why
+  no test ever caught it.
+-->
+<style>
+  body { width: 1280px; height: 720px; margin: 0; font-family: Arial, sans-serif; background: #ffffff; }
+  table { border-collapse: collapse; position: absolute; left: 60px; top: 60px; width: 600px; }
+  th, td { border: 1px solid #cccccc; padding: 8px 12px; font-size: 15px; text-align: left; }
+  thead { background: #1b1b1f; }
+  thead th { color: #ffffff; }
+  /* On the ROW, not on the cell. */
+  tbody tr:nth-child(even) { background: #f6f6f9; }
+  /* And a cell that overrides its row still wins. */
+  tbody tr:nth-child(even) td.override { background: #ffe0b2; }
+</style>
+</head>
+<body>
+  <table>
+    <thead><tr><th>Name</th><th>Kind</th><th>Bytes</th></tr></thead>
+    <tbody>
+      <tr><td>01.html</td><td>slide</td><td>1,842</td></tr>
+      <tr><td>02.html</td><td class="override">slide</td><td>2,301</td></tr>
+      <tr><td>manifest.json</td><td>manifest</td><td>412</td></tr>
+      <tr><td>READY</td><td>ready</td><td>118</td></tr>
+    </tbody>
+  </table>
+</body>
+</html>

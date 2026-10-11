@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  A container holding an inline badge AND a block heading, which is an ordinary title layout.
+
+  THE BUG THIS PINS DOWN. A run's `style: null` means "whatever the element this run belongs to
+  is set in". When `getTextRuns` recursed into a BLOCK child it passed the child's style down as
+  the parent style, so inside the call a bare run meant the child's style -- but the run came back
+  onto the OUTER element, where bare means the OUTER style. The block child's typography was
+  dropped: this heading rendered at the wrapper's inherited 16px instead of 62px bold, about a
+  quarter of its intended size, and the slide lost its visual hierarchy entirely.
+-->
+<style>
+  body { width: 1280px; height: 720px; margin: 0; font-family: Arial, sans-serif; background: #101522; color: #ffffff; font-size: 16px; }
+  .wrap { position: absolute; left: 80px; top: 80px; width: 1000px; }
+  .badge { font-size: 14px; letter-spacing: 0.16em; color: #9ad7ff; }
+  h1 { font-size: 62px; font-weight: 800; line-height: 1.05; margin: 10px 0 0; color: #ffffff; }
+  p { font-size: 20px; color: #c7d2e5; margin: 18px 0 0; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <span class="badge">anomaly bait</span>
+    <h1>Everything Slides<br>cannot express</h1>
+    <p>A paragraph after the heading, at its own size.</p>
+  </div>
+</body>
+</html>

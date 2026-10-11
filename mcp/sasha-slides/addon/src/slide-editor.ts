@@ -64,6 +64,14 @@ export function nullSlideEditor({ html }: { html: string }): SlideEditor {
     undo() {
       return false;
     },
+    /** It never selects anything, so there is never anything for the inspector to show. */
+    selection() {
+      return null;
+    },
+    /** With nothing selected there is nothing to replace, which is this editor's whole point. */
+    replaceSelected() {
+      return false;
+    },
     detach() {
       /* nothing was attached */
     },

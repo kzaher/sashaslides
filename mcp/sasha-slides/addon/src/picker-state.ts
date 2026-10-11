@@ -45,6 +45,25 @@ export type Offer = Readonly<{
   /** 1-based, so "option 3" is 3 here and on the chip the user clicked. */
   selectedIndex: number;
   /**
+   * WHICH CANDIDATE THE EDITOR IS OPEN ON, or null for the grid alone.
+   *
+   * The grid is where four candidates are still being compared, so it carries exactly one
+   * choice -- preview or original -- and nothing that is about a single slide. Everything that
+   * is about ONE candidate (the tools, the element selection, the comment threads) lives in the
+   * editor, which opens on top when a candidate is picked.
+   */
+  editing: EditorTarget;
+  /**
+   * WHAT THE VISUAL EDITOR HAS SELECTED, as the inspector under the slide shows it. Null when
+   * nothing is selected -- which is also the state the editor closes into, because the selector
+   * named an element in a frame that no longer exists.
+   */
+  /**
+   * What the user has clicked on the open candidate, with its own box. The ANNOTATE tool anchors
+   * its comment composer to `region`; the SELECT tool shows `html` in the inspector.
+   */
+  selection: Readonly<{ target: string; html: string; region: Region }> | null;
+  /**
    * THE ZOOM LEVEL -- every candidate at once, or one of them large. UI-CONTRACT.md, "The popup IS
    * the editor": this is a view and nothing more, so changing it never changes what the user may
    * do to a slide.
@@ -63,6 +82,14 @@ export type Offer = Readonly<{
   tool: SlideTool;
   /** Which rendering of the candidate is on screen. The HTML is authoritative, so it is first. */
   rendering: SlideRendering;
+  /**
+   * Whether the CONVERTER's own findings are painted over the open candidate.
+   *
+   * Off by default, and that is the point: every lossy thing on a slide used to be outlined in
+   * orange the moment the candidate appeared, so a slide with any character came up covered in
+   * dashed boxes the user had not drawn and read as their own.
+   */
+  showFindings: boolean;
   slides: readonly SlideFrame[];
   /**
    * THE CANDIDATES' COMMENT THREADS -- the unresolved counts' one source, and the SAME shape the
@@ -91,14 +118,27 @@ export type OpenPhase =
  */
 export type SlideView = "grid" | "single";
 
-/**
- * THE TOOL: what dragging on a slide does. `edit` is the default and `annotate` is the other
- * choice, picked from the toolbar -- NOT a screen you enter. It is orthogonal to `SlideView`, which
- * is the whole point: annotating the grid and editing one slide large are both legal.
- */
-export type SlideTool = "edit" | "annotate";
+/** Which candidate the editor is open on, or null when the grid is all there is. */
+export type EditorTarget = number | null;
 
-/** The HTML is authoritative and is shown FIRST; the rendered pane is the lossy projection. */
+/**
+ * THE TOOL, and it lives in the EDITOR -- never in the grid.
+ *
+ * `select` is the arrow: click a thing on the slide, drag it, resize it, walk up to its parent.
+ * `annotate` draws a box and asks a question about it. Named for what the pointer IS, the way a
+ * drawing program names it; it used to be called `edit`, which named a mode and read as the
+ * opposite of annotating -- but marking a slide up is editing it too.
+ */
+export type SlideTool = "select" | "annotate";
+
+/**
+ * WHAT THE GRID IS COMPARING, and the grid's only choice.
+ *
+ * `html` is the PREVIEW and the default: the candidate is a self-contained document, so its own
+ * HTML is the slide, exactly. `rendered` is NOT a rendering -- see rendered-preview.ts -- it is a
+ * wireframe of the requests the converter will send Slides, which is the right thing to look at
+ * when checking what will actually land, and the wrong thing to open on.
+ */
 export type SlideRendering = "html" | "rendered";
 
 export type SlideFrame = Readonly<{
@@ -107,6 +147,12 @@ export type SlideFrame = Readonly<{
   name: string;
   html: HtmlLoad;
   conversion: ConversionLoad;
+  /**
+   * The candidate as GOOGLE draws it -- a PNG from a throwaway deck, not a projection of the
+   * requests. It is a SEPARATE load from `conversion` because it costs a round trip and a Drive
+   * file: it is only asked for once the user chooses the converted rendering.
+   */
+  render: RenderLoad;
   anomalies: readonly DraftAnomaly[];
   /**
    * What the VISUAL EDITOR has done to this candidate, in the order it was done. It lives in the
@@ -121,6 +167,12 @@ export type HtmlLoad =
   | Readonly<{ kind: "unrequested" }>
   | Readonly<{ kind: "loading" }>
   | Readonly<{ kind: "loaded"; html: string }>
+  | Readonly<{ kind: "failed"; message: string }>;
+
+export type RenderLoad =
+  | Readonly<{ kind: "unrendered" }>
+  | Readonly<{ kind: "rendering" }>
+  | Readonly<{ kind: "rendered"; dataUri: string }>
   | Readonly<{ kind: "failed"; message: string }>;
 
 export type ConversionLoad =
@@ -156,16 +208,27 @@ export type PickerEvent =
   | Readonly<{ kind: "proposal-offered"; proposal: Proposal; presentationId: string | null }>
   | Readonly<{ kind: "trouble"; message: string }>
   | Readonly<{ kind: "slide-selected"; index: number }>
+  /** Open the editor on one candidate. The grid stays underneath, remembering the choice. */
+  | Readonly<{ kind: "editor-opened"; index: number }>
+  /** Close it. The grid keeps `selectedIndex`, so it comes back where the user was. */
+  | Readonly<{ kind: "editor-closed" }>
+  /** What the visual editor has selected, so the inspector under the slide can show its markup. */
+  | Readonly<{ kind: "selection-changed"; selection: Readonly<{ target: string; html: string; region: Region }> | null }>
   /** The ZOOM LEVEL changed. It never touches `tool`: a view is not a permission. */
   | Readonly<{ kind: "view-chosen"; view: SlideView }>
   /** The TOOL changed. It never touches `view`: a tool is not a zoom level. */
   | Readonly<{ kind: "tool-chosen"; tool: SlideTool }>
   | Readonly<{ kind: "rendering-chosen"; rendering: SlideRendering }>
+  | Readonly<{ kind: "findings-toggled" }>
   | Readonly<{ kind: "html-requested"; index: number }>
   | Readonly<{ kind: "html-arrived"; index: number; html: string }>
   | Readonly<{ kind: "html-failed"; index: number; message: string }>
   | Readonly<{ kind: "converted"; index: number; result: ConversionResult }>
   | Readonly<{ kind: "conversion-failed"; index: number; message: string }>
+  /** The picture of ONE candidate as Google drew it, or why there is none (bridge.ts). */
+  | Readonly<{ kind: "render-requested"; indices: readonly number[] }>
+  | Readonly<{ kind: "rendered"; index: number; dataUri: string }>
+  | Readonly<{ kind: "render-failed"; index: number; message: string }>
   | Readonly<{ kind: "anomaly-drawn"; index: number; anomalyId: string; region: Region }>
   | Readonly<{ kind: "anomaly-noted"; index: number; anomalyId: string; note: string }>
   | Readonly<{ kind: "anomaly-removed"; index: number; anomalyId: string }>
@@ -213,11 +276,30 @@ export function reducePicker(state: PickerState, event: PickerEvent): PickerStat
     case "slide-selected":
       return mapOffer(state, (offer) => ({ ...offer, selectedIndex: clampIndex({ offer, index: event.index }) }));
 
+    case "editor-opened":
+      // The index is clamped by the same rule the grid uses, so the editor can never be open on
+      // a candidate the proposal does not have.
+      return mapOffer(state, (offer) => {
+        const index = clampIndex({ offer, index: event.index });
+        return { ...offer, selectedIndex: index, editing: index, tool: "select" };
+      });
+
+    case "editor-closed":
+      // `selectedIndex` is deliberately left alone: the grid comes back where the user was.
+      // The selection goes, though -- it named an element in a frame that is about to be gone.
+      return mapOffer(state, (offer) => ({ ...offer, editing: null, selection: null }));
+
+    case "selection-changed":
+      return mapOffer(state, (offer) => ({ ...offer, selection: event.selection }));
+
     case "view-chosen":
       return mapOffer(state, (offer) => ({ ...offer, view: event.view }));
 
     case "tool-chosen":
       return mapOffer(state, (offer) => ({ ...offer, tool: event.tool }));
+
+    case "findings-toggled":
+      return mapOffer(state, (offer) => ({ ...offer, showFindings: !offer.showFindings }));
 
     case "rendering-chosen":
       return mapOffer(state, (offer) => ({ ...offer, rendering: event.rendering }));
@@ -233,6 +315,26 @@ export function reducePicker(state: PickerState, event: PickerEvent): PickerStat
 
     case "converted":
       return mapFrame(state, event.index, (frame) => withConversion({ frame, result: event.result }));
+
+    case "render-requested":
+      return mapOffer(state, (offer) => ({
+        ...offer,
+        slides: offer.slides.map((frame) =>
+          event.indices.includes(frame.index) ? { ...frame, render: { kind: "rendering" as const } } : frame,
+        ),
+      }));
+
+    case "rendered":
+      return mapFrame(state, event.index, (frame) => ({
+        ...frame,
+        render: { kind: "rendered", dataUri: event.dataUri },
+      }));
+
+    case "render-failed":
+      return mapFrame(state, event.index, (frame) => ({
+        ...frame,
+        render: { kind: "failed", message: event.message },
+      }));
 
     case "conversion-failed":
       return mapFrame(state, event.index, (frame) => ({
@@ -348,6 +450,23 @@ export function anomaliesOf(offer: Offer): readonly Anomaly[] {
   return anomalies;
 }
 
+/**
+ * MARK-UPS THAT WERE TYPED AND NEVER SENT -- the reason closing the editor is a question.
+ *
+ * A box with no words is not a loss: it is a rectangle the user drew and thought better of. A
+ * box with words in it that never reached Drive is work about to be thrown away silently, which
+ * is the one thing a review surface may not do.
+ */
+export function unsentMarkUps(offer: Offer): readonly DraftAnomaly[] {
+  const unsent: DraftAnomaly[] = [];
+  for (const frame of offer.slides) {
+    for (const anomaly of frame.anomalies) {
+      if (anomaly.note.trim() !== "" && anomaly.sent.kind === "draft") unsent.push(anomaly);
+    }
+  }
+  return unsent;
+}
+
 export function selectedFrame(offer: Offer): SlideFrame | null {
   return offer.slides[offer.selectedIndex - 1] ?? null;
 }
@@ -357,24 +476,53 @@ export function selectedFrame(offer: Offer): SlideFrame | null {
  * `tool === "annotate"` at each call site, so a third tool is a compile error HERE instead of a
  * surface that silently stops offering the gesture (typescript skill, exhaustiveness).
  */
-export function drawsRegions(tool: SlideTool): boolean {
-  switch (tool) {
+/**
+ * Whether to put the DRAG-A-RECTANGLE surface over the slide.
+ *
+ * Only where there are no elements to point at. On the preview the candidate's own DOM is right
+ * there, so annotate selects elements; on the CONVERTED rendering there is nothing but a picture,
+ * and on a candidate the editor cannot reach there is nothing to click -- a rectangle is the only
+ * way to say "this part", so it stays for exactly those cases. A transparent drag surface over a
+ * live document would also swallow every click the selection needs.
+ */
+export function drawsRegions(options: Readonly<{ tool: SlideTool; elementsReachable: boolean }>): boolean {
+  switch (options.tool) {
     case "annotate":
-      return true;
-    case "edit":
+      return !options.elementsReachable;
+    case "select":
       return false;
     default:
-      return assertNever(tool);
+      return assertNever(options.tool);
   }
 }
 
 /** Whether the visual editor wants the pointer. Same contract as `drawsRegions`, same reason. */
 export function editsSlides(tool: SlideTool): boolean {
   switch (tool) {
-    case "edit":
+    case "select":
       return true;
     case "annotate":
       return false;
+    default:
+      return assertNever(tool);
+  }
+}
+
+/**
+ * Whether this tool POINTS AT ELEMENTS -- hover to highlight, click to select, click again for
+ * the parent. Both of them do.
+ *
+ * `editsSlides` asks a different question: whether the selection may be changed. Annotate
+ * selects exactly as select does and then comments on what it got, which is how Claude's own
+ * artifact comments behave and what this tool was asked to match. They were one predicate when
+ * selecting and editing were the same act; separating them is what let annotate stop being a
+ * rectangle-dragging mode.
+ */
+export function selectsElements(tool: SlideTool): boolean {
+  switch (tool) {
+    case "select":
+    case "annotate":
+      return true;
     default:
       return assertNever(tool);
   }
@@ -480,7 +628,42 @@ export function nextHtmlToLoad(offer: Offer): SlideFrame | null {
 }
 
 /** The next candidate that has its HTML and no conversion yet. Same one-at-a-time chain. */
+/**
+ * The candidates that are converted but not yet photographed, or null when there is nothing to
+ * ask for. ALL OF THEM IN ONE GO, deliberately: the server builds one throwaway deck for the whole
+ * set, so asking per candidate would be N decks, N deletes and N round trips for the same pictures.
+ *
+ * It answers null while ANY candidate is still converting, so the single call covers the set
+ * rather than firing once per arrival.
+ */
+export function slidesToRender(offer: Offer): readonly SlideFrame[] | null {
+  if (offer.rendering !== "rendered") return null;
+  const wanted: SlideFrame[] = [];
+  for (const frame of offer.slides) {
+    if (frame.render.kind === "rendering" || frame.render.kind === "rendered" || frame.render.kind === "failed") continue;
+    if (frame.conversion.kind === "unconverted") return null;
+    if (frame.conversion.kind === "converted") wanted.push(frame);
+  }
+  return wanted.length === 0 ? null : wanted;
+}
+
+/**
+ * The next candidate to convert, or null when nothing should be converted YET.
+ *
+ * NOTHING IS CONVERTED UNTIL SOMEBODY IS LOOKING AT A CONVERSION.
+ *
+ * Converting every candidate the moment its HTML arrived was work nobody had asked for, and it
+ * is not cheap: the converter stages a real offscreen iframe per slide and waits for its fonts
+ * and images, on the main thread. With a set of candidates that is seconds of a busy UI while
+ * the user is trying to click one -- which is what "opening the popup is so slow" and "why is
+ * rendering taking so long" both were.
+ *
+ * It is needed in exactly two places, and neither is the preview: the CONVERTED rendering asks
+ * for it here, and INSERT converts afresh anyway, because the page id has to be the one Slides
+ * actually created (dialog.tsx).
+ */
 export function nextToConvert(offer: Offer): SlideFrame | null {
+  if (offer.rendering !== "rendered") return null;
   for (const frame of offer.slides) if (frame.html.kind === "loaded" && needsConversion(frame)) return frame;
   return null;
 }
@@ -612,17 +795,21 @@ function freshOffer({
     // The GRID first: comparing the candidates against each other is the whole reason this window
     // exists, so nobody has to click to see what they were offered.
     view: "grid",
+    editing: null,
+    selection: null,
     // EDIT FROM THE FIRST PAINT. UI-CONTRACT.md: "Editing is the default state, not a thing you
     // navigate to." Nothing anywhere promotes a tool on the user's behalf.
-    tool: "edit",
+    tool: "select",
     // The HTML is authoritative, so it is what the user sees first.
     rendering: "html",
+    showFindings: false,
     slides: proposal.slides.map((slide) => ({
       index: slide.index,
       label: slide.label,
       name: slide.name,
       html: { kind: "unrequested" },
       conversion: { kind: "unconverted" },
+      render: { kind: "unrendered" },
       anomalies: [],
       edits: [],
     })),

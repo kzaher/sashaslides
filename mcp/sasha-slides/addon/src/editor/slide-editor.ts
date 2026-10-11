@@ -74,22 +74,123 @@ export type SlideEditor = Readonly<{
   html(): string;
   /** Undo the last edit; returns false when there is nothing to undo. */
   undo(): boolean;
+  /**
+   * WHAT IS SELECTED, for a host that wants to show it -- the element inspector under the slide.
+   * Null when nothing is. The markup is the element's own `outerHTML` at the moment of the call,
+   * so it already carries whatever the user has dragged, resized or retyped.
+   */
+  selection(): Selection | null;
+  /**
+   * REPLACE THE SELECTED ELEMENT'S MARKUP with what the inspector holds.
+   *
+   * It writes into the LIVE document, which is what `html()` serializes -- so the change does
+   * travel with the candidate. It does NOT become a `SlideEdit`: that list describes moves,
+   * resizes, recolours and retypes in terms Sasha can read back, and arbitrary markup is not one
+   * of those. The surface says so rather than implying the change was described.
+   *
+   * False when nothing is selected or the markup did not parse to exactly one element.
+   */
+  replaceSelected(options: Readonly<{ html: string }>): boolean;
   detach(): void;
 }>;
 
+/** The selected element as a host can render it: its stable selector and its current markup. */
+/**
+ * What the host is told about the current selection.
+ *
+ * `region` is the element's own box as a 0-1 fraction of the 1280x720 slide -- the same
+ * `Region` the rest of the product uses. It is here so a host can COMMENT on what was clicked
+ * without re-measuring anything: the annotate tool anchors its composer to this box and sends it
+ * as the comment's region, which is how "click the thing you mean" replaced "drag a rectangle".
+ */
+export type Selection = Readonly<{
+  target: string;
+  html: string;
+  region: Readonly<{ x: number; y: number; w: number; h: number }>;
+}>;
+
 export type SlideEditorOptions = Readonly<{
+  /**
+   * Called whenever the selection changes, including when it is cleared. A host that draws the
+   * markup needs to know WHEN to re-read it; polling an iframe every frame is the alternative.
+   */
+  onSelect?: (selection: Selection | null) => void;
   /**
    * Where a refused gesture goes. The contract says an edit that is not one of the five kinds is
    * dropped WITH A WARNING -- this is the warning, and it defaults to `console.warn` so a host that
    * does not care still leaves a trail in the browser console.
    */
   onWarning?: (message: string) => void;
+  /**
+   * What a selection is FOR.
+   *
+   * `edit` is the full visual editor: resize handles, a colour pair, retext and delete.
+   * `comment` is the annotate tool, where the selection exists only so the user can say
+   * something about it -- the host draws the composer. The hover highlight, the outline and the
+   * click-again-to-select-the-parent walk are identical in both, which is the point: there is
+   * ONE way to point at a thing on a slide, and the tool decides what happens next.
+   */
+  mode?: "edit" | "comment";
 }>;
 
 /** A resize handle. `n`/`w` edges move the element's origin as well as its size. */
 export type Edge = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
 const EDGES: readonly Edge[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+
+/**
+ * CLICKING THE SAME PLACE AGAIN SELECTS THE PARENT.
+ *
+ * The topmost element under the pointer is almost never the one the user means -- it is the span
+ * inside the cell inside the row inside the table. Every drawing program answers this the same
+ * way: the first click takes the leaf, and clicking again in the same place walks out one ring at
+ * a time. There is a Parent button too, but reaching for it breaks the rhythm of pointing.
+ *
+ * It walks only while the hit is INSIDE what is already selected. A click somewhere else is a new
+ * selection, not a continuation, so moving to another part of the slide never surprises the user
+ * by jumping to an ancestor.
+ *
+ * The walk is a CYCLE: once there is nowhere further out to go, the next click starts over at
+ * the leaf that was hit. Holding at the top instead left the user stuck on the outermost box,
+ * with no way back down short of clicking somewhere else first.
+ */
+export function walkUpOnRepeatClick<TNode extends NestingNode<TNode>>(
+  options: Readonly<{ hit: TNode; selected: Readonly<{ element: TNode }> | null }>,
+): TNode {
+  const { hit, selected } = options;
+  if (selected === null) return hit;
+  if (!selected.element.contains(hit)) return hit;
+  const parent = selected.element.parentElement;
+  /*
+   * THE FLOOR IS THE SLIDE. Walking into <body> makes the whole page "the selected element",
+   * and nothing useful follows: moving it moves the canvas, resizing it resizes the 1280x720
+   * page, and commenting on it says only "this slide" -- which the comment already records.
+   * So reaching the page -- or being on it already, via the Parent button -- wraps to the leaf.
+   */
+  if (parent === null || isSlideItself(parent) || isSlideItself(selected.element)) return hit;
+  return parent;
+}
+
+/** `<body>` and `<html>` are the page, not elements on it. */
+function isSlideItself<TNode extends NestingNode<TNode>>(node: TNode): boolean {
+  const tag = node.tagName;
+  if (typeof tag !== "string") return false;
+  const upper = tag.toUpperCase();
+  return upper === "BODY" || upper === "HTML";
+}
+
+/**
+ * JUST WHAT THE WALK NEEDS: something that can say whether it contains another and name its
+ * parent. `Element` satisfies it, and so does a plain object in a test -- which is the point, so
+ * the rule is asserted without a DOM.
+ */
+export type NestingNode<TNode> = Readonly<{
+  /** Optional so a test node can leave it out; `Element` always has it. */
+  tagName?: string;
+  parentElement: TNode | null;
+  contains: (other: TNode) => boolean;
+}>;
+
 
 /** Smaller than this and the element cannot be grabbed again. 8 slide px. */
 const MIN_FRACTION_W = 8 / SLIDE_WIDTH_PX;
@@ -203,6 +304,7 @@ export function createSlideEditor(options?: SlideEditorOptions): SlideEditor {
     });
   };
 
+
   const selectElement = (element: Element): void => {
     const current = live();
     if (current === null) return;
@@ -222,6 +324,32 @@ export function createSlideEditor(options?: SlideEditorOptions): SlideEditor {
     baselineFor(target, resolved);
     describeSelection(selected);
     syncChrome();
+    announceSelection();
+  };
+
+  /** One place that tells the host, so every path that changes the selection reports it. */
+  const announceSelection = (): void => {
+    const notify = options?.onSelect;
+    if (notify === undefined) return;
+    notify(readSelection());
+  };
+
+  const readSelection = (): Selection | null => {
+    const current = live();
+    const selected = current?.selected ?? null;
+    if (current === null || selected === null) return null;
+    // `measureOf` already answers in slide fractions, so the selection IS a Region.
+    const measured = measureOf({ element: selected.element, view: current.dom.view });
+    return {
+      target: selected.target,
+      html: selected.element.outerHTML,
+      region: {
+        x: measured.position.x,
+        y: measured.position.y,
+        w: measured.size.w,
+        h: measured.size.h,
+      },
+    };
   };
 
   const clearSelection = (): void => {
@@ -229,6 +357,7 @@ export function createSlideEditor(options?: SlideEditorOptions): SlideEditor {
     if (current === null) return;
     current.selected = null;
     syncChrome();
+    announceSelection();
   };
 
   const fractionAt = (event: Readonly<{ clientX: number; clientY: number }>): Readonly<{ fx: number; fy: number }> => {
@@ -380,7 +509,7 @@ export function createSlideEditor(options?: SlideEditorOptions): SlideEditor {
       const dom = reached.dom;
       const hostDocument = frame.ownerDocument;
       const listeners = new AbortController();
-      const chrome = mountChrome({ hostDocument });
+      const chrome = mountChrome({ hostDocument, mode: options?.mode ?? "edit" });
       const fresh: Session = {
         frame,
         dom,
@@ -406,7 +535,7 @@ export function createSlideEditor(options?: SlideEditorOptions): SlideEditor {
           if (target === null) return;
           if (fresh.textEdit !== null && fresh.textEdit.element.contains(target)) return;
           if (fresh.textEdit !== null) finishTextEdit({ keep: true });
-          selectElement(target);
+          selectElement(walkUpOnRepeatClick({ hit: target, selected: fresh.selected }));
         },
         { signal },
       );
@@ -539,6 +668,28 @@ export function createSlideEditor(options?: SlideEditorOptions): SlideEditor {
      * same-kind gestures on the same element is ONE record (see `appendEdit`), so this steps back
      * the whole run -- "put the title back where it was", not "give me back 4 of the 60 pixels".
      */
+    selection(): Selection | null {
+      return readSelection();
+    },
+    replaceSelected({ html }): boolean {
+      const current = live();
+      const selected = current?.selected ?? null;
+      if (current === null || selected === null) return false;
+      const host = current.dom.document.createElement("div");
+      // `innerHTML` on a DETACHED element of the candidate's own inert document: the frame is
+      // sandboxed without `allow-scripts`, so nothing in it can run, and this node is never put
+      // in the tree -- only the one element parsed out of it is.
+      host.innerHTML = html;
+      const replacement = host.firstElementChild;
+      if (replacement === null || host.children.length !== 1) {
+        warn("that markup is not exactly one element, so nothing was replaced");
+        return false;
+      }
+      selected.element.replaceWith(replacement);
+      clearSelection();
+      selectElement(replacement);
+      return true;
+    },
     undo(): boolean {
       if (records.length === 0) return false;
       const current = live();
@@ -770,7 +921,7 @@ function capturePointer({
   }
 }
 
-function mountChrome({ hostDocument }: { hostDocument: Document }): Chrome {
+function mountChrome({ hostDocument, mode }: { hostDocument: Document; mode: "edit" | "comment" }): Chrome {
   // ONE STYLESHEET PER DOCUMENT, however many editors are attached to it. Two instances are live at
   // once whenever a host shows two slides side by side (the defect report), and appending a second
   // element with the same `id` is invalid markup for no gain.
@@ -809,7 +960,26 @@ function mountChrome({ hostDocument }: { hostDocument: Document }): Chrome {
   const deleteButton = button({ hostDocument, label: "✕", title: "remove this element" });
   bar.append(targetLabel, parentButton, textColour, backColour, textButton, deleteButton);
 
-  root.append(hover, select, bar);
+
+  /*
+   * IN COMMENT MODE THE SELECTION IS A SUBJECT, NOT A THING BEING EDITED.
+   *
+   * The bar and the resize handles offer edits the annotate tool does not perform, so they are
+   * NOT PUT IN THE TREE. Setting `hidden` on them is not enough and was measured not to work:
+   * `.sasha-ed-bar` sets `display: flex`, and a class rule beats the user-agent's
+   * `[hidden] { display: none }`, so the bar stayed on screen while reporting `hidden === true`.
+   * Leaving them out also keeps them off the keyboard's tab order, which `hidden` would have
+   * handled and `display` alone would not.
+   *
+   * The elements are still constructed, so every handler below binds exactly as it does in edit
+   * mode and `Chrome` keeps one shape.
+   */
+  if (mode === "comment") {
+    for (const handle of handles) handle.remove();
+    root.append(hover, select);
+  } else {
+    root.append(hover, select, bar);
+  }
   hostDocument.body.append(root);
   return { style, ownsStyle, root, hover, select, handles, bar, targetLabel, parentButton, textColour, backColour, textButton, deleteButton };
 }

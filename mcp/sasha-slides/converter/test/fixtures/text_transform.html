@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  text-transform, in the four shapes the extractor has to handle.
+
+  THE BUG THIS PINS DOWN. `text-transform` was applied to the text of INLINE CHILDREN and to
+  nothing else, through one of the two extraction paths. So:
+    * an element whose text is a direct text node lost the transform entirely (.leaf, .lower);
+    * an element with a mix came out half-transformed -- "mixed BOLD text" (.mixed);
+    * `capitalize` was not implemented at all (.cap).
+  It is inherited CSS, so the element's OWN computed value governs its own text nodes.
+-->
+<style>
+  body { width: 1280px; height: 720px; margin: 0; font-family: Arial, sans-serif; background: #fff; }
+  div { position: absolute; left: 40px; font-size: 20px; color: #202124; }
+  .leaf  { top: 40px;  text-transform: uppercase; }
+  .mixed { top: 120px; text-transform: uppercase; }
+  .lower { top: 200px; text-transform: lowercase; }
+  .cap   { top: 280px; text-transform: capitalize; }
+  .none  { top: 360px; }
+</style>
+</head>
+<body>
+  <div class="leaf">leaf only text</div>
+  <div class="mixed">mixed <b>bold</b> text</div>
+  <div class="lower">LOWER ONLY TEXT</div>
+  <div class="cap">capitalize only text</div>
+  <div class="none">Left Alone</div>
+</body>
+</html>

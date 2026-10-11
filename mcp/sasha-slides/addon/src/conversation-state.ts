@@ -30,6 +30,7 @@
 
 import type { NothingListeningNotice } from "../../feedback-delivery.ts";
 import type { ProposalMark } from "./bridge.ts";
+import type { CommentFilter } from "./comment-panel.ts";
 import type { FeedbackReply, FeedbackThread, ReviewNote } from "./feedback.ts";
 import { assertNever, type Manifest, type Region, type SlideEntry } from "./protocol.ts";
 import {
@@ -50,6 +51,7 @@ import {
   slideIndexOf,
   type SessionEvent,
   type SessionEventBody,
+  type CandidateFile,
   type SessionEventVoice,
   type SlideCommentsLoad,
 } from "./session-log.ts";
@@ -87,6 +89,27 @@ export type Conversation = Readonly<{
    * different refusals and a user who pressed one must not be shown the other's verdict.
    */
   report: OpenPhase;
+  /**
+   * Which comments the side panel is showing. In the TREE, not in the component: the panel is
+   * re-rendered by every poll, and a filter held in component state would snap back to the
+   * default every few seconds.
+   */
+  commentFilter: CommentFilter;
+  /**
+   * EACH THREAD'S REPLY PILL AND WHAT ITS LAST REPLY OR RESOLVE DID, keyed by the thread's root
+   * comment id. In the tree for the same reason `draft` is: a poll lands every few seconds and a
+   * reply the user is half-way through typing must survive the re-render it causes.
+   */
+  threadActions: Readonly<Record<string, ThreadActionState>>;
+  /**
+   * ONE MORE READ, ASKED FOR BY AN ACTION. A reply or a resolve has to show up in its card, so a
+   * success raises the flag for the source it changed and that read's own `*-requested` lowers it.
+   *
+   * A FLAG AND NOT A CLOCK, on purpose: "read again" wired into `pump` once re-armed itself on
+   * every state change and spent the day's UrlFetch quota (call-budget.ts). A flag cleared by the
+   * very request it causes can start exactly one read per action, whatever `pump` does.
+   */
+  rereadWanted: Readonly<{ thread: boolean; comments: boolean }>;
   /** A failure that is about the whole conversation rather than one load. Null when there is none. */
   trouble: string | null;
   /**
@@ -101,6 +124,24 @@ export type Conversation = Readonly<{
    */
   nowMs: number | null;
 }>;
+
+/** One thread's pill and its last action. Absent from the record means "nothing typed, nothing done". */
+export type ThreadActionState = Readonly<{ draft: string; phase: ThreadActionPhase }>;
+
+/** The two things a card can do to its thread. Both are a POST to Drive's replies endpoint. */
+export type ThreadActionKind = "reply" | "resolve";
+
+export type ThreadActionPhase =
+  | Readonly<{ kind: "idle" }>
+  | Readonly<{ kind: "sending"; action: ThreadActionKind }>
+  | Readonly<{ kind: "done"; action: ThreadActionKind }>
+  | Readonly<{ kind: "failed"; action: ThreadActionKind; message: string }>;
+
+/**
+ * WHICH TRANSPORT A THREAD CAME FROM, and so which read has to happen after it changes: a deck
+ * message is in `thread` (the presentation's comment pane), a candidate's mark-up in `comments`.
+ */
+export type ThreadSource = "deck" | "candidate";
 
 export type SendPhase =
   | Readonly<{ kind: "idle" }>
@@ -129,7 +170,16 @@ export type SessionLogLoad =
 
 export type StagedLoad =
   | Readonly<{ kind: "unrequested" }>
-  | Readonly<{ kind: "loading" }>
+  /**
+   * A scan is in flight. `had` is what the LAST one found, or null when there has never been one.
+   *
+   * It carries the previous result because this load is re-read every SCAN_FRESH_MS for the life
+   * of the session: a bare `loading` made `conversationIsOpening` true on every poll, so the
+   * whole conversation was replaced by a spinner every few seconds -- and every other reader
+   * (the report entry, the slides button) forgot what it knew for the length of the round trip.
+   * A refresh must never take away what is already on screen.
+   */
+  | Readonly<{ kind: "loading"; had: Readonly<{ proposals: readonly StagedProposal[]; readAt: string }> | null }>
   /** `readAt` is what makes a finished read go stale instead of re-firing at once. */
   | Readonly<{ kind: "loaded"; proposals: readonly StagedProposal[]; readAt: string }>
   | Readonly<{ kind: "failed"; message: string }>;
@@ -243,7 +293,12 @@ export type ConversationEvent =
   | Readonly<{ kind: "report-succeeded" }>
   | Readonly<{ kind: "report-failed"; message: string }>
   /** The clock moved. Its own event because it changes NOTHING else -- see `nowMs`. */
-  | Readonly<{ kind: "clock-ticked"; nowMs: number }>;
+  | Readonly<{ kind: "clock-ticked"; nowMs: number }>
+  | Readonly<{ kind: "comment-filter-chosen"; filter: CommentFilter }>
+  | Readonly<{ kind: "reply-typed"; commentId: string; text: string }>
+  | Readonly<{ kind: "thread-action-started"; commentId: string; action: ThreadActionKind }>
+  | Readonly<{ kind: "thread-action-succeeded"; commentId: string; action: ThreadActionKind; source: ThreadSource }>
+  | Readonly<{ kind: "thread-action-failed"; commentId: string; action: ThreadActionKind; message: string }>;
 
 export const INITIAL_CONVERSATION: Conversation = {
   presentationId: null,
@@ -256,7 +311,10 @@ export const INITIAL_CONVERSATION: Conversation = {
   comments: { kind: "unrequested" },
   open: { kind: "idle" },
   autoOpened: [],
+  commentFilter: "open",
   report: { kind: "idle" },
+  threadActions: {},
+  rereadWanted: { thread: false, comments: false },
   trouble: null,
   nowMs: null,
 };
@@ -292,7 +350,11 @@ export function reduceConversation(conversation: Conversation, event: Conversati
       return { ...conversation, send: { kind: "failed", message: event.message } };
 
     case "thread-requested":
-      return { ...conversation, thread: { kind: "loading", threads: loadedThreads(conversation.thread) } };
+      return {
+        ...conversation,
+        thread: { kind: "loading", threads: loadedThreads(conversation.thread) },
+        rereadWanted: { ...conversation.rereadWanted, thread: false },
+      };
 
     case "thread-arrived":
       return { ...conversation, thread: { kind: "loaded", threads: event.threads, readAt: event.readAt } };
@@ -303,8 +365,19 @@ export function reduceConversation(conversation: Conversation, event: Conversati
         thread: { kind: "failed", message: event.message, threads: loadedThreads(conversation.thread) },
       };
 
+    case "comment-filter-chosen":
+      return { ...conversation, commentFilter: event.filter };
+
     case "staged-requested":
-      return { ...conversation, staged: { kind: "loading" } };
+      return {
+        ...conversation,
+        staged: {
+          kind: "loading",
+          had: conversation.staged.kind === "loaded"
+            ? { proposals: conversation.staged.proposals, readAt: conversation.staged.readAt }
+            : stagedResultOf(conversation.staged),
+        },
+      };
 
     case "staged-arrived": {
       const proposals = stagedProposalsOf({ marks: event.marks });
@@ -358,7 +431,11 @@ export function reduceConversation(conversation: Conversation, event: Conversati
       };
 
     case "comments-requested":
-      return { ...conversation, comments: { kind: "loading", slides: loadedSlideComments(conversation.comments) } };
+      return {
+        ...conversation,
+        comments: { kind: "loading", slides: loadedSlideComments(conversation.comments) },
+        rereadWanted: { ...conversation.rereadWanted, comments: false },
+      };
 
     case "comments-arrived":
       return { ...conversation, comments: event.comments };
@@ -415,27 +492,70 @@ export function reduceConversation(conversation: Conversation, event: Conversati
     case "report-failed":
       return { ...conversation, report: { kind: "failed", message: event.message } };
 
+    case "reply-typed": {
+      // Typing makes the last verdict stale, as in the composer; a post IN FLIGHT stays shown.
+      const current = threadActionOf({ conversation, commentId: event.commentId });
+      return withThreadAction(conversation, event.commentId, {
+        draft: event.text,
+        phase: current.phase.kind === "sending" ? current.phase : { kind: "idle" },
+      });
+    }
+
+    case "thread-action-started": {
+      const current = threadActionOf({ conversation, commentId: event.commentId });
+      return withThreadAction(conversation, event.commentId, {
+        ...current,
+        phase: { kind: "sending", action: event.action },
+      });
+    }
+
+    case "thread-action-succeeded": {
+      const current = threadActionOf({ conversation, commentId: event.commentId });
+      return {
+        ...withThreadAction(conversation, event.commentId, {
+          // A posted reply empties the pill; a resolve leaves whatever was typed alone.
+          draft: event.action === "reply" ? "" : current.draft,
+          phase: { kind: "done", action: event.action },
+        }),
+        rereadWanted: rereadAfter({ wanted: conversation.rereadWanted, source: event.source }),
+      };
+    }
+
+    case "thread-action-failed": {
+      // The words are KEPT. A reply the user typed must never be destroyed by a failed post.
+      const current = threadActionOf({ conversation, commentId: event.commentId });
+      return withThreadAction(conversation, event.commentId, {
+        ...current,
+        phase: { kind: "failed", action: event.action, message: event.message },
+      });
+    }
+
     default:
       return assertNever(event);
   }
 }
 
 /**
- * THE CONVERSATION, as one ordered list: the session log and the deck-comment exchange merged.
+ * THE CONVERSATION, as one ordered list: the session log and the comment threads merged.
  *
  * The EVENTS' own order is preserved exactly -- `sessionEventsOf` already ordered them by the file
  * name's millisecond prefix, and this sort uses that same number as the key, so the event
- * subsequence of the result is the log's order whatever the messages do. Messages are interleaved
- * by when Drive accepted them.
+ * subsequence of the result is the log's order whatever the threads do.
+ *
+ * ONE ENTRY PER THREAD, placed by when its ROOT was posted, with the replies nested inside it in
+ * their own order. It used to be one entry per post, so a question and the answer to it were two
+ * cards with the log in between -- nothing like Google's comment pane, which the user reads beside
+ * this one and where a thread is a single card (the user's reference screenshot, 2026-10-04).
  *
  * A COMMENT IS PART OF THE USER'S TURN, not a separate stream (UI-CONTRACT.md). That is why there
- * is one list and not two panes: `comment-opened` carries `voice: "user"` and renders in the same
- * column as what the user typed.
+ * is one list and not two panes: a thread carries `voice: "user"` and renders in the same column
+ * as what the user typed.
  */
 export function conversationEntriesOf({
   events,
   threads,
   comments,
+  files,
 }: {
   events: readonly SessionEvent[];
   threads: readonly FeedbackThread[];
@@ -449,6 +569,13 @@ export function conversationEntriesOf({
    * client the entire time -- it simply was not rendered.
    */
   comments: SlideCommentsLoad;
+  /**
+   * WHICH DRIVE FILE EACH THREAD LIVES ON, so its card can reply to it and resolve it: the deck's
+   * own threads are on the presentation, a candidate's on its `NN.html`. `SlideComments` knows
+   * only the slide index, so the manifest's join is handed in rather than re-read here. A file
+   * that is not known yet is `null` on the thread -- the card then says why it cannot answer.
+   */
+  files: ThreadFiles;
 }): readonly ConversationEntry[] {
   const entries: Keyed[] = [];
   // The connector appends `comment-opened` / `comment-answered` for the very posts the
@@ -480,79 +607,45 @@ export function conversationEntriesOf({
     entries.push({
       at: millisOf(thread.createdAt),
       position: (position += 1),
-      entry: {
-        kind: "message",
-        entryId: `msg_${thread.commentId}`,
-        at: thread.createdAt,
-        voice: "user",
-        message: {
-          kind: "from-user",
-          messageId: thread.commentId,
-          text: thread.note.text,
-          at: thread.createdAt,
-          author: "You",
-          about: aboutOf(thread.note),
-          slideIndex: null,
-          answered: thread.replies.length > 0,
-          resolved: thread.resolved,
-        },
-      },
+      entry: threadEntryOf({
+        commentId: thread.commentId,
+        source: "deck",
+        fileId: files.deck,
+        slideIndex: null,
+        about: aboutOf(thread.note),
+        resolved: thread.resolved,
+        // The deck channel's note carries no author: it is always what was typed in this panel.
+        root: { postId: thread.commentId, author: "You", text: thread.note.text, at: thread.createdAt, voice: "user" },
+        replies: thread.replies.map((reply) => postOfReply({ reply, fallbackAt: thread.createdAt })),
+      }),
     });
-    for (const reply of thread.replies) {
-      entries.push({
-        at: millisOf(reply.createdAt === "" ? thread.createdAt : reply.createdAt),
-        position: (position += 1),
-        entry: {
-          kind: "message",
-          entryId: `msg_${reply.replyId}`,
-          at: reply.createdAt,
-          // Who wrote it, not where it sits: the user can reply in Drive's own pane, and
-          // both halves post as the same Google account, so only the marker can say.
-          voice: reply.authoredByAgent ? "sasha" : "user",
-          message: fromSasha(reply),
-        },
-      });
-    }
   }
   // A candidate a poll could not read contributes nothing: `loadedSlideComments` keeps the last
   // good slides and `unreadable` is skipped, so a bad poll never deletes conversation history.
   for (const slide of loadedSlideComments(comments)) {
     if (slide.threads.kind === "unreadable") continue;
+    const fileId = files.candidates.find((candidate) => candidate.slideIndex === slide.slideIndex)?.fileId ?? null;
     for (const thread of slide.threads.threads) {
       entries.push({
         at: millisOf(thread.at),
         position: (position += 1),
-        entry: {
-          kind: "message",
-          entryId: `msg_${thread.commentId}`,
-          at: thread.at,
-          voice: "user",
-          message: {
-            kind: "from-user",
-            messageId: thread.commentId,
+        entry: threadEntryOf({
+          commentId: thread.commentId,
+          source: "candidate",
+          fileId,
+          slideIndex: slide.slideIndex,
+          about: aboutCandidate({ slideIndex: slide.slideIndex, region: thread.region }),
+          resolved: thread.resolved,
+          root: {
+            postId: thread.commentId,
+            author: thread.author === "" ? "You" : thread.author,
             text: thread.text,
             at: thread.at,
-            author: thread.author === "" ? "You" : thread.author,
-            about: aboutCandidate({ slideIndex: slide.slideIndex, region: thread.region }),
-            slideIndex: slide.slideIndex,
-            answered: thread.replies.length > 0,
-            resolved: thread.resolved,
+            voice: "user",
           },
-        },
+          replies: thread.replies.map((reply) => postOfReply({ reply, fallbackAt: thread.at })),
+        }),
       });
-      for (const reply of thread.replies) {
-        entries.push({
-          at: millisOf(reply.createdAt === "" ? thread.at : reply.createdAt),
-          position: (position += 1),
-          entry: {
-            kind: "message",
-            entryId: `msg_${reply.replyId}`,
-            at: reply.createdAt,
-            voice: reply.authoredByAgent ? "sasha" : "user",
-            message: fromSasha(reply),
-          },
-        });
-      }
     }
   }
   return entries
@@ -560,6 +653,16 @@ export function conversationEntriesOf({
     .map((keyed) => keyed.entry);
 }
 
+/** The files the threads live on. See `conversationEntriesOf`'s `files`. */
+export type ThreadFiles = Readonly<{ deck: string | null; candidates: readonly CandidateFile[] }>;
+
+/** The files of THIS conversation: its presentation, and the followed set's candidates. */
+export function threadFilesOf(conversation: Conversation): ThreadFiles {
+  return {
+    deck: conversation.presentationId,
+    candidates: slidesOf(conversation).map((slide) => ({ slideIndex: slide.slideIndex, fileId: slide.fileId })),
+  };
+}
 
 /**
  * The comment ids the candidates' threads already render, so the log's receipts for them can
@@ -594,40 +697,91 @@ function commentIdOfEvent(body: SessionEventBody): string | null {
   }
 }
 
-/** One line of the conversation. An event or a message -- the log does not distinguish further. */
+/** One card of the conversation: a log event, or a whole comment thread. */
 export type ConversationEntry =
   | Readonly<{ kind: "event"; entryId: string; at: string; voice: SessionEventVoice; event: SessionEvent }>
-  | Readonly<{
-      kind: "message";
-      entryId: string;
-      at: string;
-      voice: SessionEventVoice;
-      message: ConversationMessage;
-    }>;
+  | Readonly<{ kind: "thread"; entryId: string; at: string; voice: SessionEventVoice; thread: ConversationThread }>;
 
-export type ConversationMessage =
-  | Readonly<{
-      kind: "from-user";
-      messageId: string;
-      text: string;
-      at: string;
-      /** Who wrote it, as Drive reports it. "You" when the transport does not say. */
-      author: string;
-      /** "the deck" for a general message, or which slide and box it was about. */
-      about: string;
-      /**
-       * The candidate this is a comment on, or null for a message about the deck.
-       *
-       * It is here so the unresolved badge can ride on the MESSAGE. It used to ride on the
-       * log's `comment-opened` receipt, which is now suppressed when the thread itself is on
-       * screen -- and the badge has to follow the row that survived, or a slide with open
-       * comments stops saying so.
-       */
-      slideIndex: number | null;
-      answered: boolean;
-      resolved: boolean;
-    }>
-  | Readonly<{ kind: "from-sasha"; messageId: string; author: string; text: string; at: string }>;
+/**
+ * ONE COMMENT THREAD, the way Google's pane draws it: the root and its replies, in one card.
+ *
+ * It carries everything the card needs to ACT on the thread as well as draw it -- the file it lives
+ * on and which transport it came from -- because a reply is a POST to that file's comment, and the
+ * read that brings the reply back is the one its source names.
+ */
+export type ConversationThread = Readonly<{
+  commentId: string;
+  source: ThreadSource;
+  /** The Drive file the comment is on, or null when that file is not known yet. */
+  fileId: string | null;
+  /**
+   * The candidate this is a comment on, or null for a message about the deck.
+   *
+   * It is here so the unresolved badge can ride on the THREAD. It used to ride on the log's
+   * `comment-opened` receipt, which is suppressed when the thread itself is on screen -- and the
+   * badge has to follow the card that survived, or a slide with open comments stops saying so.
+   */
+  slideIndex: number | null;
+  /** "the deck" for a general message, or which slide and box it was about. */
+  about: string;
+  resolved: boolean;
+  root: ConversationPost;
+  /** In the order Drive lists them, which is the order they were posted. */
+  replies: readonly ConversationPost[];
+}>;
+
+/**
+ * One post in a thread. `author` is already the name to SHOW: the agent's posts are always
+ * "Sasha", never Drive's author -- the connector posts as the user's own Google account, so that
+ * field carries the user's name on Sasha's words, and signing them with it is the one thing the
+ * card must not do.
+ */
+export type ConversationPost = Readonly<{ postId: string; author: string; text: string; at: string; voice: PostVoice }>;
+
+/** Who wrote a post. Only two: a thread is the user's conversation with Sasha. */
+export type PostVoice = "user" | "sasha";
+
+/**
+ * THE PILL AND THE LAST ACTION OF ONE THREAD, with "nothing typed, nothing done" for a thread
+ * that has never been touched -- typed absence in the record rather than an entry per thread.
+ */
+export function threadActionOf({
+  conversation,
+  commentId,
+}: {
+  conversation: Conversation;
+  commentId: string;
+}): ThreadActionState {
+  return conversation.threadActions[commentId] ?? NO_THREAD_ACTION;
+}
+
+/** What a thread's pill would post, or null when there is nothing to post. Never an empty reply. */
+export function outgoingReply({
+  conversation,
+  commentId,
+}: {
+  conversation: Conversation;
+  commentId: string;
+}): string | null {
+  const text = threadActionOf({ conversation, commentId }).draft.trim();
+  return text === "" ? null : text;
+}
+
+/** Whether a reply or resolve on this thread is in flight, so the card can go read-only. */
+export function isThreadBusy(state: ThreadActionState): boolean {
+  switch (state.phase.kind) {
+    case "sending":
+      return true;
+    case "idle":
+    case "done":
+    case "failed":
+      return false;
+    default:
+      return assertNever(state.phase);
+  }
+}
+
+const NO_THREAD_ACTION: ThreadActionState = { draft: "", phase: { kind: "idle" } };
 
 /**
  * THE SLIDE A `slide-revised` ENTRY SHOULD RENDER, or why it cannot.
@@ -703,7 +857,9 @@ export function deliveriesFor(conversation: Conversation): Deliveries {
  * should never have to find and copy a `p_…` out of this panel.
  */
 export function nothingListeningFor(conversation: Conversation): NothingListeningNotice | null {
-  return nothingListeningOn({ waiting: waitingFor(conversation) });
+  // Presence as well as the waits: how to attach a session is needed the moment there isn't one,
+  // not five minutes after the first message goes unanswered (waiting.ts).
+  return nothingListeningOn({ waiting: waitingFor(conversation), presence: sashaPresence(conversation) });
 }
 
 /**
@@ -813,19 +969,12 @@ export function proposalToAutoOpen(conversation: Conversation): string | null {
   if (reachable.kind !== "reachable") return null;
   if (conversation.set.kind !== "following" || conversation.set.manifest.kind !== "loaded") return null;
   if (conversation.set.manifest.count === 0) return null;
-  switch (conversation.staged.kind) {
-    case "unrequested":
-    case "loading":
-    case "failed":
-      return null;
-    case "loaded": {
-      const newest = conversation.staged.proposals[conversation.staged.proposals.length - 1];
-      if (newest === undefined || newest.proposalId !== reachable.proposalId) return null;
-      return conversation.autoOpened.includes(newest.proposalId) ? null : newest.proposalId;
-    }
-    default:
-      return assertNever(conversation.staged);
-  }
+  // THROUGH `stagedResultOf`, so a refresh in flight still knows what the last scan found.
+  const held = stagedResultOf(conversation.staged);
+  if (held === null) return null;
+  const newest = held.proposals[held.proposals.length - 1];
+  if (newest === undefined || newest.proposalId !== reachable.proposalId) return null;
+  return conversation.autoOpened.includes(newest.proposalId) ? null : newest.proposalId;
 }
 
 /**
@@ -869,6 +1018,10 @@ export type SlidesReachability =
  * needs one of Sasha's staged candidates to report on -- the conversation has no slide of its own.
  */
 export function defectReportReadiness(conversation: Conversation): DefectReportReadiness {
+  // A refresh keeps the previous answer: the report entry must not forget there is something to
+  // report on for the length of every poll.
+  const held = stagedResultOf(conversation.staged);
+  if (held !== null) return held.proposals.length === 0 ? { kind: "nothing-staged" } : { kind: "ready" };
   switch (conversation.staged.kind) {
     case "unrequested":
     case "loading":
@@ -960,6 +1113,7 @@ export function needsThread(conversation: Conversation): boolean {
     case "failed":
       return true;
     case "loaded":
+      if (conversation.rereadWanted.thread) return true;
       return isStale({ readAt: conversation.thread.readAt, nowMs: conversation.nowMs, freshMs: SCAN_FRESH_MS });
     case "loading":
       return false;
@@ -1012,6 +1166,53 @@ function isStale(options: Readonly<{ readAt: string; nowMs: number | null; fresh
 }
 
 /** Same contract as `needsThread`, for the inbox scan. */
+/**
+ * WHETHER THE PANEL IS STILL OPENING -- before the first inbox scan has said anything.
+ *
+ * In that state there is nothing to report and nothing to offer, so the panel renders ONE
+ * spinner. It used to announce that it was loading in three places at once ("loading" beside
+ * the title, "checking your Drive..." in a panel, "checking which slides there are to report
+ * on..." under a disabled button) around a paragraph explaining what would appear later. The
+ * user called it confusing and unnecessary, and they were right: none of it was information.
+ *
+ * A FAILED first scan is NOT opening. It has an answer -- a bad one -- and this project's own
+ * rule is that there is no spinner that cannot end, so the failure is said out loud instead.
+ */
+/**
+ * What a scan still holds when another one starts: the previous result, through however many
+ * refreshes. A failed scan keeps the last GOOD one too -- one bad round trip is not a reason to
+ * blank a conversation that was fine a moment ago.
+ */
+export function stagedResultOf(staged: StagedLoad): Readonly<{ proposals: readonly StagedProposal[]; readAt: string }> | null {
+  switch (staged.kind) {
+    case "loaded":
+      return { proposals: staged.proposals, readAt: staged.readAt };
+    case "loading":
+      return staged.had;
+    case "unrequested":
+    case "failed":
+      return null;
+    default:
+      return assertNever(staged);
+  }
+}
+
+export function conversationIsOpening(conversation: Conversation): boolean {
+  switch (conversation.staged.kind) {
+    case "unrequested":
+      return true;
+    // ONLY THE FIRST ONE. A scan that already has a previous result is a refresh, and a refresh
+    // keeps the conversation on screen (see `StagedLoad`).
+    case "loading":
+      return conversation.staged.had === null;
+    case "loaded":
+    case "failed":
+      return false;
+    default:
+      return assertNever(conversation.staged);
+  }
+}
+
 export function needsStaged(conversation: Conversation): boolean {
   switch (conversation.staged.kind) {
     case "unrequested":
@@ -1070,6 +1271,8 @@ export function needsLog(conversation: Conversation): boolean {
 export function needsComments(conversation: Conversation): boolean {
   if (slidesOf(conversation).length === 0) return false;
   if (!needsSlideComments(conversation.comments)) return false;
+  // An action asked for one more read; `comments-requested` lowers the flag, so this is one read.
+  if (conversation.rereadWanted.comments) return true;
   return commentsAreStale({ comments: conversation.comments, nowMs: conversation.nowMs });
 }
 
@@ -1298,6 +1501,9 @@ function wantsFetch({
 }
 
 function unstagedReachability(staged: StagedLoad): SlidesReachability {
+  // A refresh keeps the last answer: "unknown" for the length of every poll would make the
+  // slides button flicker between states for the life of the session.
+  if (stagedResultOf(staged) !== null) return { kind: "nothing-staged" };
   switch (staged.kind) {
     case "unrequested":
     case "loading":
@@ -1311,14 +1517,42 @@ function unstagedReachability(staged: StagedLoad): SlidesReachability {
   }
 }
 
-function fromSasha(reply: FeedbackReply): ConversationMessage {
-  return {
-    kind: "from-sasha",
-    messageId: reply.replyId,
-    author: reply.author,
-    text: reply.text,
-    at: reply.createdAt,
-  };
+/**
+ * One reply as a post. Who wrote it, not where it sits: the user can reply in Drive's own pane,
+ * and both halves post as the same Google account, so only the marker (`authoredByAgent`) can say.
+ */
+function postOfReply({ reply, fallbackAt }: { reply: FeedbackReply; fallbackAt: string }): ConversationPost {
+  if (reply.authoredByAgent) {
+    return { postId: reply.replyId, author: "Sasha", text: reply.text, at: reply.createdAt === "" ? fallbackAt : reply.createdAt, voice: "sasha" };
+  }
+  return { postId: reply.replyId, author: reply.author === "" ? "You" : reply.author, text: reply.text, at: reply.createdAt === "" ? fallbackAt : reply.createdAt, voice: "user" };
+}
+
+/** A thread as a log entry. Keyed by the ROOT's id: the thread is the unit, not the post. */
+function threadEntryOf(thread: ConversationThread): ConversationEntry {
+  return { kind: "thread", entryId: `thread_${thread.commentId}`, at: thread.root.at, voice: "user", thread };
+}
+
+function withThreadAction(conversation: Conversation, commentId: string, state: ThreadActionState): Conversation {
+  return { ...conversation, threadActions: { ...conversation.threadActions, [commentId]: state } };
+}
+
+/** Which read a changed thread wants. Exhaustive, so a third transport must say which it is. */
+function rereadAfter({
+  wanted,
+  source,
+}: {
+  wanted: Conversation["rereadWanted"];
+  source: ThreadSource;
+}): Conversation["rereadWanted"] {
+  switch (source) {
+    case "deck":
+      return { ...wanted, thread: true };
+    case "candidate":
+      return { ...wanted, comments: true };
+    default:
+      return assertNever(source);
+  }
 }
 
 /**

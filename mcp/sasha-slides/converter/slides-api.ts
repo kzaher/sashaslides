@@ -42,6 +42,7 @@ export type SlidesApiRequest =
   | Readonly<{ createTable: CreateTableRequest }>
   | Readonly<{ insertText: InsertTextRequest }>
   | Readonly<{ updateShapeProperties: UpdateShapePropertiesRequest }>
+  | Readonly<{ updateImageProperties: UpdateImagePropertiesRequest }>
   | Readonly<{ updateLineProperties: UpdateLinePropertiesRequest }>
   | Readonly<{ updateTextStyle: UpdateTextStyleRequest }>
   | Readonly<{ updateParagraphStyle: UpdateParagraphStyleRequest }>
@@ -143,6 +144,18 @@ export type ShapeProperties = Readonly<{
 export type UpdateShapePropertiesRequest = Readonly<{
   objectId: string;
   shapeProperties: ShapeProperties;
+  /** Comma-separated field mask; `*` is legal but destroys unlisted fields. */
+  fields: string;
+}>;
+
+/**
+ * An image's own properties. Only the OUTLINE is used: it is how a picture's CSS `border`
+ * crosses, and `ImageProperties` has no corner radius, so a `border-radius` on an `<img>` stays
+ * a reported loss rather than something this can carry.
+ */
+export type UpdateImagePropertiesRequest = Readonly<{
+  objectId: string;
+  imageProperties: Readonly<{ outline?: Outline }>;
   /** Comma-separated field mask; `*` is legal but destroys unlisted fields. */
   fields: string;
 }>;

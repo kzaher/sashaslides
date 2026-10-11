@@ -10,11 +10,21 @@
 // three-step descent PROTOCOL.md specifies. A `READY` in the wrong place is therefore invisible to
 // the tests exactly as it would be to Drive.
 
-import type { CallOutcome, InsertReply, InsertRequestSpec, ProposalMark } from "./bridge.ts";
+import type {
+  CallOutcome,
+  InsertReply,
+  InsertRequestSpec,
+  ProposalMark,
+  RenderPreviewsReply,
+} from "./bridge.ts";
 import type { DriveApi, PickApi, SlidesApi } from "./drive-api.ts";
 
 export const ROOT_FOLDER_ID = "root";
 export const INBOX_FOLDER_NAME = "Sasha Slides Inbox";
+/** A 1x1 transparent PNG: enough for an `<img>` to be a picture rather than a broken link. */
+const FAKE_PNG_DATA_URI =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
 export const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 
 export type FakeFile = Readonly<{
@@ -55,6 +65,8 @@ export type FakeDrive = Readonly<{
   failNext(count: number, message?: string): void;
   batches(): readonly Readonly<{ presentationId: string; requests: readonly object[] }>[];
   thumbnails(): readonly Readonly<{ presentationId: string; pageObjectId: string }>[];
+  /** What `renderPreviews` was asked to photograph, in call order -- one entry per candidate. */
+  renderedPreviews: readonly Readonly<{ index: number; requestCount: number }>[];
 }>;
 
 export function fakeDrive(): FakeDrive {
@@ -133,6 +145,9 @@ export function fakeDrive(): FakeDrive {
     },
   };
 
+  /** Every preview render asked for, so a test can assert the ONE call covered the whole set. */
+  const rendered: { index: number; requestCount: number }[] = [];
+
   const slides: SlidesApi = {
     async insert(spec: InsertRequestSpec) {
       const failed = failIfAsked<InsertReply>();
@@ -171,6 +186,28 @@ export function fakeDrive(): FakeDrive {
         },
       };
     },
+
+    /**
+     * The throwaway-deck render, faked. A 1x1 PNG per candidate is enough: every caller only
+     * cares THAT a picture arrived for an index, and the real bytes are Google's.
+     */
+    async renderPreviews(spec) {
+      const failed = failIfAsked<RenderPreviewsReply>();
+      if (failed !== null) return failed;
+      for (const slide of spec.slides) {
+        rendered.push({ index: slide.index, requestCount: slide.requests.length });
+      }
+      return {
+        kind: "ok",
+        value: {
+          previews: spec.slides.map((slide) => ({
+            index: slide.index,
+            dataUri: `${FAKE_PNG_DATA_URI}#candidate${String(slide.index)}`,
+            message: null,
+          })),
+        },
+      };
+    },
   };
 
   const pick: PickApi = {
@@ -201,6 +238,8 @@ export function fakeDrive(): FakeDrive {
     api,
     slides,
     pick,
+    /** What `renderPreviews` was asked to photograph, in call order. */
+    renderedPreviews: rendered,
     put(file) {
       stored.push(file);
     },
