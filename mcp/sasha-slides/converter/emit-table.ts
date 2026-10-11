@@ -18,7 +18,7 @@
  * writing into a cell that a later merge absorbs is an error, and a merged
  * region is addressed by its upper-left cell.
  */
-import type { Border, SizePx, TableCellModel, TableElement, TypeStyle } from "./extraction.js";
+import type { Border, BorderSideName, SizePx, TableCellModel, TableElement, TypeStyle } from "./extraction.js";
 import {
   emuDimension,
   predictGoogleRowHeightPx,
@@ -26,7 +26,7 @@ import {
   specForRowHeightPx,
 } from "./geometry.js";
 import { placeBox } from "./geometry.js";
-import type { SlidesApiRequest, TableRange } from "./slides-api.js";
+import type { BorderPosition, SlidesApiRequest, TableRange } from "./slides-api.js";
 import { dashStyleFromCss, solidFillFromPaint } from "./slides-paint.js";
 import type { ElementEmission, EmitContext } from "./emit-context.js";
 import { contentAlignmentFor, featureSite } from "./emit-context.js";
@@ -89,7 +89,7 @@ export function emitTable(
     if (composed.text.length === 0) continue;
     requests.push({ insertText: { objectId, text: composed.text, insertionIndex: 0, cellLocation } });
     requests.push(
-      ...styleRequestsFor({ objectId, composed, baseStyle: cell.style, cellLocation }),
+      ...styleRequestsFor({ objectId, composed, baseStyle: cell.style, scale: context.scale, cellLocation }),
     );
   }
 
@@ -100,6 +100,7 @@ export function emitTable(
     unsupported: [
       ...rowHeights.anomalies.map((anomaly) => tableRowAnomaly({ anomaly, element, viewportPx })),
       ...reportTextLosses({
+        scale: context.scale,
         bounds: element.bounds,
         viewportPx,
         elementType: "table",
@@ -307,50 +308,221 @@ function cellPropertiesFor(
 }
 
 /**
- * Borders. When every cell asks for the same border, one `ALL` request covers
- * the table; otherwise each cell gets its own 1x1 range, which is the finest
- * granularity the API offers and is enough for the per-cell borders in
- * `fixtures-basic/slide_15_table_borders.html`.
+ * Borders, SIDE BY SIDE.
+ *
+ * THE BUG THIS REPLACES. Every request went out as `borderPosition: "ALL"`, which draws all four
+ * edges of the range. CSS borders are per side, so `tbody td { border-bottom: 1px solid #e2e2e8 }`
+ * -- one faint hairline under each row -- became a box around every cell, i.e. a full dark grid
+ * where the design had no vertical rules at all. Measured on a real candidate: 16 cells boxed at
+ * 1px #1b1b1f, the total row's `border-top: 3px double` boxed on all four sides at 3px, and two
+ * cells whose only border is `border-left: 4px solid #d9480f` wrapped in a 4px orange rectangle.
+ * It was the loudest thing on the slide and none of it was in the HTML.
+ *
+ * Slides addresses sides individually (TOP / BOTTOM / LEFT / RIGHT), so each side is emitted with
+ * its OWN width, colour and dash, and a side with no border is not emitted at all. `ALL` is kept
+ * for the genuinely uniform case: it is one request instead of four and says the same thing.
  */
 function borderRequests(
   options: Readonly<{ objectId: string; grid: Grid; element: TableElement }>,
 ): readonly SlidesApiRequest[] {
   const { objectId, grid } = options;
   const bordered = grid.placements.filter((placement) => placement.cell.border !== null);
-  if (bordered.length === 0) return [];
+
+  /*
+   * CLEAR GOOGLE'S DEFAULT GRID FIRST.
+   *
+   * `createTable` does not make a borderless table: every cell arrives with Slides' own 1pt grey
+   * border on all four edges. Our requests only ADD borders, so a design with horizontal
+   * hairlines and no vertical rules still rendered with a full grey grid through the body and a
+   * box around the whole table -- measured after the per-side fix, when the emitted requests
+   * provably contained no vertical border at all and the rules were still on the slide.
+   *
+   * Requests apply in order, so this goes FIRST and whatever the CSS does ask for is painted
+   * over it. A table with NO borders at all needs this request and nothing else, which is why
+   * the early return for "no bordered cells" is below it rather than above.
+   */
+  const clearDefault: SlidesApiRequest = {
+    updateTableBorderProperties: {
+      objectId,
+      tableRange: {
+        location: { rowIndex: 0, columnIndex: 0 },
+        rowSpan: grid.rowCount,
+        columnSpan: grid.columnCount,
+      },
+      borderPosition: "ALL",
+      /*
+       * CLEARED BY A TRANSPARENT FILL. Two other ways were tried against the live API and both
+       * failed:
+       *   * `weight: 0` is REFUSED -- "The border weight 0.0 should not be less than or equal to
+       *     zero" -- and a rejected request takes the whole atomic batch with it;
+       *   * naming `tableBorderFill` in the mask with no value (the protobuf way to reset a
+       *     field) is ACCEPTED and does nothing: the grey default grid was still on the
+       *     rendered slide.
+       * An alpha-0 fill is a real value rather than a reset, and a border that paints nothing is
+       * indistinguishable from one that is not there. The weight is kept above zero because the
+       * API insists on it; at alpha 0 it makes no mark.
+       */
+      tableBorderProperties: {
+        tableBorderFill: { solidFill: solidFillFromPaint({ hex: "#ffffff", alpha: 0 }) },
+        weight: { magnitude: 9525, unit: "EMU" },
+      },
+      fields: "tableBorderFill,weight",
+    },
+  };
+
+  // NOTHING IS BORDERED: the blanket clear is the whole answer, and with no per-side request
+  // after it there is no ordering to get wrong.
+  if (bordered.length === 0) return [clearDefault];
 
   const signatures = new Set(bordered.map((placement) => borderSignature(placement.cell.border)));
   if (signatures.size === 1 && bordered.length === grid.placements.length) {
     // SAFETY: bordered is non-empty and every entry has a non-null border.
     const border = bordered[0]!.cell.border!;
-    return [
-      {
-        updateTableBorderProperties: {
-          objectId,
-          tableRange: {
-            location: { rowIndex: 0, columnIndex: 0 },
-            rowSpan: grid.rowCount,
-            columnSpan: grid.columnCount,
+    if (border.uniform) {
+      // NO CLEAR NEEDED, AND NONE WANTED. This single `ALL` covers every segment of the table,
+      // so Google's default is replaced rather than hidden -- and a blanket clear has been
+      // measured to WIN over requests that follow it, so adding one here could erase the very
+      // border this branch exists to draw.
+      return [
+        {
+          updateTableBorderProperties: {
+            objectId,
+            tableRange: {
+              location: { rowIndex: 0, columnIndex: 0 },
+              rowSpan: grid.rowCount,
+              columnSpan: grid.columnCount,
+            },
+            borderPosition: "ALL",
+            tableBorderProperties: borderPropertiesFor(border),
+            fields: borderFieldsFor(border),
           },
-          borderPosition: "ALL",
-          tableBorderProperties: borderPropertiesFor(border),
-          fields: borderFieldsFor(border),
         },
-      },
-    ];
+      ];
+    }
   }
 
-  return bordered.map((placement) => ({
-    updateTableBorderProperties: {
+  /*
+   * NO BLANKET CLEAR HERE, AND THAT IS THE WHOLE POINT.
+   *
+   * Sending one alpha-0 `ALL` over the table and then painting the real sides on top LOOKS like
+   * it should work -- requests apply in order -- and it does not: measured on the live API, the
+   * blanket clear won and the per-side borders that followed it vanished (the #e2e2e8 hairlines
+   * and the 4px #d9480f flag bars were in the requests and absent from the render).
+   *
+   * So every cell states ALL FOUR of its sides outright: the CSS value where there is one, a
+   * transparent border where there is not. One request per side, one final value each, no
+   * ordering to depend on. It costs more requests than a clear-then-paint would, and it is the
+   * only shape that has been seen to render correctly.
+   */
+  const facing = facingBordersOf(grid);
+  return grid.placements.flatMap((placement) =>
+    sideRequestsFor({
       objectId,
-      tableRange: rangeOf(placement),
-      borderPosition: "ALL" as const,
-      // SAFETY: `bordered` only contains placements whose border is non-null.
-      tableBorderProperties: borderPropertiesFor(placement.cell.border!),
-      fields: borderFieldsFor(placement.cell.border!),
-    },
-  }));
+      range: rangeOf(placement),
+      border: placement.cell.border,
+      neighbourDraws: facing.get(keyOfPlacement(placement)) ?? NO_NEIGHBOUR_DRAWS,
+    }),
+  );
 }
+
+type SideFlags = Readonly<Record<BorderSideName, boolean>>;
+const NO_NEIGHBOUR_DRAWS: SideFlags = { top: false, right: false, bottom: false, left: false };
+
+function keyOfPlacement(placement: CellPlacement): string {
+  return `${String(placement.rowIndex)},${String(placement.columnIndex)}`;
+}
+
+/**
+ * For each cell, which of its sides the NEIGHBOUR on that side wants drawn.
+ *
+ * ADJACENT CELLS SHARE ONE SEGMENT. A cell's bottom edge IS the next row's top edge, and Slides
+ * keeps one border for it -- so whichever request lands last decides. Having every cell state all
+ * four of its own sides therefore erased the thing the neighbour had just drawn: the #e2e2e8
+ * hairline under each row is also the TOP of the row below, every row below said "no top", and
+ * the hairlines disappeared from the render while sitting plainly in the requests.
+ *
+ * So a cell only clears a side when the neighbour across it agrees there is nothing there.
+ */
+function facingBordersOf(grid: Grid): ReadonlyMap<string, SideFlags> {
+  const byCell = new Map<string, CellPlacement>();
+  for (const placement of grid.placements) {
+    for (let row = placement.rowIndex; row < placement.rowIndex + placement.rowSpan; row += 1) {
+      for (let column = placement.columnIndex; column < placement.columnIndex + placement.columnSpan; column += 1) {
+        byCell.set(`${String(row)},${String(column)}`, placement);
+      }
+    }
+  }
+  const draws = (row: number, column: number, side: BorderSideName): boolean => {
+    const neighbour = byCell.get(`${String(row)},${String(column)}`);
+    const border = neighbour?.cell.border;
+    return border !== undefined && border !== null && border.sides[side].widthPx > 0;
+  };
+  const facing = new Map<string, SideFlags>();
+  for (const placement of grid.placements) {
+    const { rowIndex: row, columnIndex: column } = placement;
+    facing.set(keyOfPlacement(placement), {
+      top: draws(row - 1, column, "bottom"),
+      bottom: draws(row + placement.rowSpan, column, "top"),
+      left: draws(row, column - 1, "right"),
+      right: draws(row, column + placement.columnSpan, "left"),
+    });
+  }
+  return facing;
+}
+
+/** CSS side -> the `borderPosition` that addresses that edge of a 1x1 range. */
+const SIDE_POSITIONS: readonly Readonly<{ side: BorderSideName; position: BorderPosition }>[] = [
+  { side: "top", position: "TOP" },
+  { side: "right", position: "RIGHT" },
+  { side: "bottom", position: "BOTTOM" },
+  { side: "left", position: "LEFT" },
+];
+
+/**
+ * One request per side that is actually drawn. A uniform border still collapses to a single
+ * `ALL`, because four requests saying the same thing is three round trips of nothing.
+ */
+function sideRequestsFor(
+  options: Readonly<{
+    objectId: string;
+    range: ReturnType<typeof rangeOf>;
+    border: Border | null;
+    neighbourDraws: SideFlags;
+  }>,
+): readonly SlidesApiRequest[] {
+  const { objectId, range, border, neighbourDraws } = options;
+  const requests: SlidesApiRequest[] = [];
+  for (const { side, position } of SIDE_POSITIONS) {
+    const edge = border === null ? null : border.sides[side];
+    const drawn = edge !== null && edge.widthPx > 0;
+    // LEAVE THE NEIGHBOUR'S LINE ALONE. The segment is shared, so clearing a side this cell does
+    // not draw would erase the one the cell across it does.
+    if (!drawn && neighbourDraws[side]) continue;
+    requests.push({
+      updateTableBorderProperties: {
+        objectId,
+        tableRange: range,
+        borderPosition: position,
+        tableBorderProperties: drawn
+          ? borderPropertiesFor({ widthPx: edge.widthPx, hex: edge.hex, style: edge.style, uniform: true, sides: border!.sides })
+          : INVISIBLE_BORDER,
+        fields: "tableBorderFill.solidFill,weight,dashStyle",
+      },
+    });
+  }
+  return requests;
+}
+
+/**
+ * A border that is there as far as the API is concerned and paints nothing. Weight zero is
+ * REFUSED -- "The border weight 0.0 should not be less than or equal to zero" -- so the weight
+ * stays at 1px and the fill is fully transparent instead.
+ */
+const INVISIBLE_BORDER = {
+  tableBorderFill: { solidFill: solidFillFromPaint({ hex: "#ffffff", alpha: 0 }) },
+  weight: { magnitude: 9525, unit: "EMU" as const },
+  dashStyle: dashStyleFromCss("solid"),
+};
 
 function borderPropertiesFor(border: Border): Readonly<{
   tableBorderFill?: Readonly<{ solidFill: ReturnType<typeof solidFillFromPaint> }>;

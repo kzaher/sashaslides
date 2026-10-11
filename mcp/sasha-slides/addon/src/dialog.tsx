@@ -31,6 +31,7 @@ import { createElement } from "react";
 import {
   appsScriptCall,
   appsScriptCandidateCommentsApi,
+  appsScriptCommentThreadApi,
   appsScriptDriveApi,
   appsScriptFeedbackApi,
   appsScriptPickApi,
@@ -44,6 +45,7 @@ import { browserSlideConverter, type ConvertSlideHtml } from "./converter-contra
 import {
   createdObjectIdsOf,
   type CandidateCommentsApi,
+  type CommentThreadApi,
   type DriveApi,
   type FeedbackApi,
   type PickApi,
@@ -56,6 +58,7 @@ import { checkSlideHtml, domSlideDocumentParser } from "./html-check.ts";
 import { Picker, type PickerActions } from "./Picker.tsx";
 import { createObserver, type Announcer, type Observer, type PollTimer } from "./observer-runtime.ts";
 import { createReportWindow } from "./report-window.ts";
+import { cachedRender, rememberRender, renderKeyOf } from "./render-cache.ts";
 import {
   INITIAL_PICKER_STATE,
   anomaliesOf,
@@ -63,6 +66,8 @@ import {
   needsComments,
   nextHtmlToLoad,
   nextToConvert,
+  slidesToRender,
+  type SlideFrame,
   offerOf,
   reducePicker,
   type PickerEvent,
@@ -93,8 +98,29 @@ let state: PickerState = INITIAL_PICKER_STATE;
 let root: Root | null = null;
 /** The composed services, or null until `sashaHello` has answered. */
 let services: Services | null = null;
+
+/** The live visual editor, so `applyMarkup` reaches the one the user actually selected in. */
+let editorRef: ReturnType<typeof createSlideEditor> | null = null;
+/**
+ * Everything the editor could not do, in order. Read by the browser smoke test off
+ * `window.__SASHA_EDITOR_WARNINGS__`; a refused attach is otherwise invisible.
+ */
+const editorWarnings: string[] = [];
+// Published on the window so the browser smoke test can read them; the array is the same object,
+// so a warning recorded after the test looked is still there the next time it looks.
+(window as unknown as { __SASHA_EDITOR_WARNINGS__?: readonly string[] }).__SASHA_EDITOR_WARNINGS__ =
+  editorWarnings;
+/**
+ * How long one candidate's conversion may take before it is called stuck. The converter's own
+ * waits are budgeted at ~1.2s each and it stages one offscreen iframe, so a slide that has not
+ * converted in this long is never going to.
+ */
+const CONVERT_DEADLINE_MS = 15_000;
+
 /** One conversion per candidate at a time: `pump` runs after every state change. */
 const converting = new Set<number>();
+/** One render call for the whole set at a time; `pump` runs again when it lands. */
+let rendering = false;
 /** Candidate HTML is immutable within one revision, so one fetch per fileId serves every toggle. */
 const htmlByFileId = new Map<string, string>();
 const parseSlideDocument = domSlideDocumentParser();
@@ -105,6 +131,8 @@ type Services = Readonly<{
   pick: PickApi;
   feedback: FeedbackApi;
   candidateComments: CandidateCommentsApi;
+  /** Answering and closing the user's own threads, from the editor's rail. */
+  threads: CommentThreadApi;
   log: SessionLogApi;
   window: PickerWindowApi;
   observer: Observer;
@@ -143,6 +171,16 @@ async function main(): Promise<void> {
   const announcer: Announcer = {
     proposal(proposal) {
       dispatch({ kind: "proposal-offered", proposal, presentationId });
+      /*
+       * OPEN ON THE CANDIDATE THE SIDEBAR ASKED FOR.
+       *
+       * The two documents share nothing, so "open the slides on slide 3" was left on the server
+       * (build-addon.ts `sashaOpenPicker`) and is collected here, once, as the proposal lands.
+       * Reading CLEARS it, so reopening the window later comes up on the grid rather than on a
+       * slide the user finished with. A target for a DIFFERENT proposal is ignored: the window
+       * follows the newest set, and jumping to an old one would be a surprise.
+       */
+      void openAtTarget(proposal.proposalId);
     },
     trouble(message) {
       dispatch({ kind: "trouble", message });
@@ -163,6 +201,7 @@ async function main(): Promise<void> {
     pick: appsScriptPickApi({ call }),
     feedback: appsScriptFeedbackApi({ call }),
     candidateComments: appsScriptCandidateCommentsApi({ call }),
+    threads: appsScriptCommentThreadApi({ call }),
     log: appsScriptSessionLogApi({ call }),
     window: appsScriptPickerWindowApi({ call }),
     observer,
@@ -179,6 +218,17 @@ async function main(): Promise<void> {
     void announceViewers(observer);
   });
   await announceViewers(observer);
+}
+
+/** Collect the sidebar's "open on this candidate" request, if there is one for this proposal. */
+async function openAtTarget(proposalId: string): Promise<void> {
+  const running = services;
+  if (running === null) return;
+  const replied = await running.window.takePickerTarget();
+  if (replied.kind !== "ok") return;
+  const { proposalId: wanted, slideIndex } = replied.value;
+  if (wanted !== proposalId || slideIndex === null) return;
+  dispatch({ kind: "editor-opened", index: slideIndex });
 }
 
 /**
@@ -226,8 +276,17 @@ function pump(): void {
     return;
   }
   const toConvert = nextToConvert(forHtml);
-  if (toConvert === null || converting.has(toConvert.index) || toConvert.html.kind !== "loaded") return;
-  void convert({ proposalId: forHtml.proposal.proposalId, index: toConvert.index, html: toConvert.html.html });
+  if (toConvert !== null) {
+    if (converting.has(toConvert.index) || toConvert.html.kind !== "loaded") return;
+    void convert({ proposalId: forHtml.proposal.proposalId, index: toConvert.index, html: toConvert.html.html });
+    return;
+  }
+  // EVERYTHING IS CONVERTED: if the user is looking at the converted rendering, go and get the
+  // real pictures. One call for the whole set -- the server builds ONE throwaway deck for all of
+  // them (build-addon.ts `sashaRenderPreviews`), so asking per candidate would be N decks.
+  const toRender = slidesToRender(forHtml);
+  if (toRender === null || rendering) return;
+  void renderPreviews({ slides: toRender });
 }
 
 /**
@@ -280,12 +339,33 @@ async function convert({
   if (running === null) return;
   converting.add(index);
   try {
-    const converted = await running.convert({
-      html,
-      presentationId: running.presentationId ?? "",
-      pageObjectId: newPageObjectId({ random: Math.random }),
-      objectIdPrefix: previewPrefix({ proposalId, index }),
-    });
+    /*
+     * A DEADLINE, BECAUSE A SPINNER THAT NEVER STOPS IS THE WORST FAILURE THIS SURFACE HAS.
+     *
+     * The conversion is one-at-a-time -- the pump will not start the next candidate while one is
+     * in flight (see `pump`) -- so a single conversion that never settles leaves EVERY cell on
+     * "converting..." with no error, which is precisely what shipped: `nextFrame` awaited
+     * `requestAnimationFrame` unbounded, and a frame the browser is not rendering never fires it.
+     * That specific hang is fixed in the converter, where it belongs, and it is tested there.
+     *
+     * This is the backstop for the next one. Every await inside the converter is budgeted in the
+     * low hundreds of ms, so a conversion that has not finished in CONVERT_DEADLINE_MS is stuck,
+     * not slow -- and the honest thing to show is the failure, which the cell already renders.
+     */
+    const converted = await Promise.race([
+      running.convert({
+        html,
+        presentationId: running.presentationId ?? "",
+        pageObjectId: newPageObjectId({ random: Math.random }),
+        objectIdPrefix: previewPrefix({ proposalId, index }),
+      }),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error(`the converter did not answer within ${String(CONVERT_DEADLINE_MS / 1000)}s`)),
+          CONVERT_DEADLINE_MS,
+        ),
+      ),
+    ]);
     dispatch({ kind: "converted", index, result: converted });
   } catch (cause) {
     dispatch({ kind: "conversion-failed", index, message: cause instanceof Error ? cause.message : String(cause) });
@@ -353,6 +433,65 @@ async function loadCandidateComments(): Promise<void> {
  * comments, not only the log -- so a failed event write is a warning, never a reason to tell the
  * user their mark-up did not land.
  */
+/**
+ * ANSWER ONE OF THE USER'S OWN THREADS, from the editor's rail.
+ *
+ * The comment lives on the CANDIDATE's `NN.html`, so the file is the proposal's slide file --
+ * the same address `sendAnomaly` writes to. A failure becomes a line on screen rather than a
+ * silent no-op, which is the rule every call in this file follows.
+ */
+async function replyToThread({
+  index,
+  commentId,
+  text,
+}: {
+  index: number;
+  commentId: string;
+  text: string;
+}): Promise<void> {
+  const running = services;
+  const offer = offerOf(state);
+  if (offer === null) return;
+  const slide = offer.proposal.slides[index - 1];
+  if (running === null || slide === undefined) {
+    dispatch({ kind: "trouble", message: running === null ? NOT_CONNECTED : `option ${String(index)} is no longer available` });
+    return;
+  }
+  const replied = await running.threads.reply({ fileId: slide.fileId, commentId, text });
+  if (replied.kind !== "ok") {
+    dispatch({ kind: "trouble", message: replied.message });
+    return;
+  }
+  await reloadCandidateComments();
+}
+
+/**
+ * CLOSE A THREAD. Google implements resolving as a reply carrying a resolve action, so a short
+ * note is always posted with it -- that is Drive's shape, not a decision made here.
+ */
+async function resolveThread({ index, commentId }: { index: number; commentId: string }): Promise<void> {
+  const running = services;
+  const offer = offerOf(state);
+  if (offer === null) return;
+  const slide = offer.proposal.slides[index - 1];
+  if (running === null || slide === undefined) {
+    dispatch({ kind: "trouble", message: running === null ? NOT_CONNECTED : `option ${String(index)} is no longer available` });
+    return;
+  }
+  const replied = await running.threads.resolve({ fileId: slide.fileId, commentId, text: "Resolved." });
+  if (replied.kind !== "ok") {
+    dispatch({ kind: "trouble", message: replied.message });
+    return;
+  }
+  await reloadCandidateComments();
+}
+
+/** Re-read the threads so the rail shows what Drive now holds, not what it held a moment ago. */
+async function reloadCandidateComments(): Promise<void> {
+  dispatch({ kind: "comments-requested" });
+  await loadCandidateComments();
+}
+
 async function sendAnomaly({ index, anomalyId }: { index: number; anomalyId: string }): Promise<void> {
   const running = services;
   const offer = offerOf(state);
@@ -481,8 +620,29 @@ const actions: PickerActions = {
   chooseRendering(rendering) {
     dispatch({ kind: "rendering-chosen", rendering });
   },
+  toggleFindings() {
+    dispatch({ kind: "findings-toggled" });
+  },
   drawAnomaly({ index, region }) {
     dispatch({ kind: "anomaly-drawn", index, anomalyId: `user_${index}_${Date.now().toString(36)}`, region });
+  },
+  /*
+   * POINT, SAY IT, SENT -- one act, so one action.
+   *
+   * The pieces already existed as three (`drawAnomaly`, `noteAnomaly`, `sendAnomaly`) because
+   * the old flow really was three steps: draw a rectangle, find its row, press Send. Clicking an
+   * element and typing into the composer that opens on it is ONE step, and splitting it across
+   * three dispatches would leave half-made anomalies in the tree whenever the user hit Escape.
+   */
+  commentOnSelection({ index, region, note }) {
+    const anomalyId = `user_${index}_${Date.now().toString(36)}`;
+    dispatch({ kind: "anomaly-drawn", index, anomalyId, region });
+    dispatch({ kind: "anomaly-noted", index, anomalyId, note });
+    dispatch({ kind: "selection-changed", selection: null });
+    void sendAnomaly({ index, anomalyId });
+  },
+  clearSelection() {
+    dispatch({ kind: "selection-changed", selection: null });
   },
   noteAnomaly({ index, anomalyId, note }) {
     dispatch({ kind: "anomaly-noted", index, anomalyId, note });
@@ -495,6 +655,25 @@ const actions: PickerActions = {
   },
   zoomCandidate(index) {
     dispatch({ kind: "candidate-zoomed", index });
+  },
+  openEditor(index) {
+    dispatch({ kind: "editor-opened", index });
+  },
+  closeEditor() {
+    dispatch({ kind: "editor-closed" });
+  },
+  applyMarkup({ index, html }) {
+    // The editor writes into the live document, which `editor.html()` serializes -- so the
+    // change travels with the candidate even though it is not one of the five described edits.
+    const applied = editorRef?.replaceSelected({ html }) ?? false;
+    if (!applied) dispatch({ kind: "trouble", message: "that markup could not be applied to the selected element" });
+    else dispatch({ kind: "edits-changed", index, edits: editorRef?.edits() ?? [] });
+  },
+  replyToThread({ index, commentId, text }) {
+    void replyToThread({ index, commentId, text });
+  },
+  resolveThread({ index, commentId }) {
+    void resolveThread({ index, commentId });
   },
   changeEdits({ index, edits }) {
     dispatch({ kind: "edits-changed", index, edits });
@@ -513,10 +692,101 @@ const actions: PickerActions = {
    * may know which implementation the slot got. It serializes the live document rather than a
    * string handed in, so it needs no `html` (editor/index.ts).
    */
-  createEditor() {
-    return createSlideEditor({});
+  createEditor({ mode }) {
+    // The inspector under the slide shows whatever is selected, so the editor reports it here.
+    // The instance is kept because `applyMarkup` has to reach the SAME editor the user selected in.
+    editorRef = createSlideEditor({
+      mode,
+      onSelect: (selection) => dispatch({ kind: "selection-changed", selection }),
+      /*
+       * A REFUSED ATTACH MUST NOT BE SILENT. `slide-editor.ts` `attach` gives a reason when it
+       * cannot reach into the candidate's document, but the default sink is `console.warn` -- so
+       * to a user the editor simply did nothing when they clicked, which is indistinguishable
+       * from a dead pointer handler. Keep them where both a person and the browser smoke test
+       * can read them.
+       */
+      onWarning: (message) => {
+        editorWarnings.push(message);
+        console.warn(`[sasha-slides editor] ${message}`);
+      },
+    });
+    return editorRef;
   },
+
 };
+
+/**
+ * THE CANDIDATES AS GOOGLE DRAWS THEM, for the converted rendering.
+ *
+ * The server does the whole set in one throwaway deck and deletes it again, so this is one round
+ * trip however many candidates there are. Each picture is reported on its own index, and a
+ * candidate Google refused comes back as a REASON rather than silently missing -- the stage then
+ * falls back to the geometry projection with that reason printed on it (slide-stage.tsx).
+ */
+async function renderPreviews({ slides: asked }: { slides: readonly SlideFrame[] }): Promise<void> {
+  const running = services;
+  if (running === null) return;
+  rendering = true;
+  let slides: readonly SlideFrame[] = asked;
+  /*
+   * ANYTHING ALREADY DRAWN IS ANSWERED FROM THE BROWSER, not from Google.
+   *
+   * A rendered preview costs a throwaway deck, a batchUpdate, a thumbnail fetch and a delete --
+   * per candidate, every time this window opens. The picture cannot change while the requests
+   * do not, so the cache is keyed by the requests themselves (render-cache.ts) and a revision
+   * misses it without anything having to invalidate.
+   */
+  const wanted: SlideFrame[] = [];
+  for (const frame of slides) {
+    const requests = frame.conversion.kind === "converted" ? frame.conversion.requests : [];
+    const remembered = cachedRender(renderKeyOf(requests));
+    if (remembered === null) {
+      wanted.push(frame);
+      continue;
+    }
+    dispatch({ kind: "rendered", index: frame.index, dataUri: remembered });
+  }
+  if (wanted.length === 0) {
+    rendering = false;
+    return;
+  }
+  slides = wanted;
+  const indices = slides.map((frame) => frame.index);
+  dispatch({ kind: "render-requested", indices });
+  try {
+    const replied = await running.slides.renderPreviews({
+      slides: slides.map((frame) => ({
+        index: frame.index,
+        requests: frame.conversion.kind === "converted" ? frame.conversion.requests : [],
+      })),
+    });
+    if (replied.kind !== "ok") {
+      for (const index of indices) dispatch({ kind: "render-failed", index, message: replied.message });
+      return;
+    }
+    const answered = new Set<number>();
+    for (const preview of replied.value.previews) {
+      answered.add(preview.index);
+      if (preview.dataUri === null) {
+        dispatch({ kind: "render-failed", index: preview.index, message: preview.message ?? "no picture came back" });
+        continue;
+      }
+      dispatch({ kind: "rendered", index: preview.index, dataUri: preview.dataUri });
+      // Remembered under the requests that drew it, so the next open is instant.
+      const drawn = slides.find((frame) => frame.index === preview.index);
+      const requests = drawn?.conversion.kind === "converted" ? drawn.conversion.requests : [];
+      rememberRender(renderKeyOf(requests), preview.dataUri);
+    }
+    // A CANDIDATE THE REPLY FORGOT must not sit on "rendering..." for ever.
+    for (const index of indices) {
+      if (!answered.has(index)) {
+        dispatch({ kind: "render-failed", index, message: "the renderer did not answer for this candidate" });
+      }
+    }
+  } finally {
+    rendering = false;
+  }
+}
 
 /**
  * Convert -> insert -> write PICK -> append `slide-inserted`, in that order, because PROTOCOL.md
@@ -737,7 +1007,18 @@ function stageElement(): HTMLElement {
   if (existing !== null) return existing;
   const stage = document.createElement("div");
   stage.id = STAGE_ELEMENT_ID;
-  stage.style.cssText = "position:fixed;left:-99999px;top:0;width:0;height:0;overflow:hidden";
+  /*
+   * IT HAS TO BE A REAL SIZE, not 0x0 with overflow hidden.
+   *
+   * The staged iframe is 1280x720, but a 0x0 `overflow:hidden` parent CLIPS IT AWAY ENTIRELY, and
+   * a browser does not paint -- or service `requestAnimationFrame` for -- a frame with no
+   * rendered area. The converter waits one frame after layout settles, so a frame that never
+   * paints used to hang the conversion outright (fixed in convert-html-to-slide-requests.ts) and
+   * now costs the whole frame budget on every candidate instead. Giving the stage the slide's own
+   * size lets the normal path run at normal speed. It stays off-screen and inert.
+   */
+  stage.style.cssText =
+    "position:fixed;left:-99999px;top:0;width:1280px;height:720px;overflow:hidden;pointer-events:none";
   document.body.append(stage);
   return stage;
 }

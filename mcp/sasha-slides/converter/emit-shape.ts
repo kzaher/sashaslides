@@ -152,6 +152,7 @@ export function emitImage(
               elementProperties: placeElement({ element, context }),
             },
           },
+          ...imageOutlineRequests({ objectId, border: element.border }),
         ],
         unsupported: cornerRadiusReport({ element, site }),
       };
@@ -166,6 +167,7 @@ export function emitImage(
             },
             [STAGED_IMAGE_FIELD]: source.upload,
           },
+          ...imageOutlineRequests({ objectId, border: element.border }),
         ],
         unsupported: cornerRadiusReport({ element, site }),
       };
@@ -598,3 +600,41 @@ function assertNeverImageSource(source: never): never {
 
 /** Re-exported so the orchestrator can skip elements with nothing to emit. */
 export { EMPTY_EMISSION };
+
+/**
+ * An image's CSS border, as a Slides image OUTLINE.
+ *
+ * `ImageProperties.outline` is the same shape a shape's outline is, so a plain border carries
+ * across exactly. It was not emitted at all: the picture arrived with no edge, which on a dark
+ * slide reads as the image bleeding into the background.
+ *
+ * ONLY A UNIFORM BORDER. An outline is one stroke around the whole picture, so per-side widths
+ * or colours cannot be expressed; a non-uniform border is left to `cornerRadiusReport`'s
+ * neighbour, `nonUniformBorderReport`, rather than silently rendered as the wrong thing.
+ */
+function imageOutlineRequests(
+  options: Readonly<{ objectId: string; border: Border | null }>,
+): readonly SlidesApiRequest[] {
+  const { objectId, border } = options;
+  if (border === null || border.widthPx <= 0 || !border.uniform) return [];
+  return [
+    {
+      updateImageProperties: {
+        objectId,
+        imageProperties: {
+          outline: {
+            ...(border.hex === null
+              ? {}
+              : { outlineFill: { solidFill: solidFillFromPaint({ hex: border.hex, alpha: 1 }) } }),
+            weight: { magnitude: Math.max(1, Math.round(border.widthPx * 9525)), unit: "EMU" as const },
+            dashStyle: dashStyleFromCss(border.style),
+          },
+        },
+        fields:
+          border.hex === null
+            ? "outline.weight,outline.dashStyle"
+            : "outline.outlineFill.solidFill.color,outline.weight,outline.dashStyle",
+      },
+    },
+  ];
+}

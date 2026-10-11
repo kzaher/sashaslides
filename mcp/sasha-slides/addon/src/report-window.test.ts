@@ -11,7 +11,8 @@ import type { PickerWindowApi } from "./drive-api.ts";
 
 function apiReturning(url: string | null): PickerWindowApi {
   return {
-    openPicker: async () => ({ kind: "ok", value: { opened: true } }),
+    takePickerTarget: async () => ({ kind: "ok" as const, value: { proposalId: null, slideIndex: null } }),
+  openPicker: async () => ({ kind: "ok", value: { opened: true } }),
     openDefectReport: async () => ({ kind: "ok", value: { opened: true } }),
     reportWindowUrl: async () => ({ kind: "ok", value: url }),
   };

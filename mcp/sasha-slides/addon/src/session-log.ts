@@ -561,6 +561,36 @@ export function unreadableSlidesOf({ comments }: { comments: SlideCommentsLoad }
   );
 }
 
+/**
+ * ONE CANDIDATE'S THREADS, or why they are not known.
+ *
+ * The same join `unresolvedCountFor` makes, handed over whole rather than counted -- the editor's
+ * thread rail needs the threads themselves, and reading them through a second path is how two
+ * surfaces start disagreeing about what was asked.
+ *
+ * A slide the read says nothing about is `unreadable`, never an empty list: "we could not look"
+ * and "there is nothing" are different answers and the interface must not confuse them.
+ */
+export function threadsForSlide(
+  options: Readonly<{ comments: SlideCommentsLoad; proposalId: string; slideIndex: number }>,
+): SlideThreadsRead {
+  const { comments, proposalId, slideIndex } = options;
+  for (const slide of loadedSlideComments(comments)) {
+    if (slide.proposalId === proposalId && slide.slideIndex === slideIndex) return slide.threads;
+  }
+  switch (comments.kind) {
+    case "unrequested":
+    case "loading":
+      return { kind: "read", threads: [] };
+    case "loaded":
+      return { kind: "read", threads: [] };
+    case "failed":
+      return { kind: "unreadable", message: comments.message };
+    default:
+      return assertNever(comments);
+  }
+}
+
 /** The comments to render: whatever was last read, even mid-poll and even after a failed one. */
 export function loadedSlideComments(comments: SlideCommentsLoad): readonly SlideComments[] {
   switch (comments.kind) {

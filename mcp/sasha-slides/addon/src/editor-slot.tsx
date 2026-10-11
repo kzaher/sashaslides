@@ -22,6 +22,32 @@ import { useEffect, type JSX } from "react";
 import { describeEditorReach, editorIsLive, type EditorReach } from "./picker-state.ts";
 import { describeSlideEdit, type SlideEdit, type SlideEditor } from "./slide-editor.ts";
 
+/**
+ * ATTACH THE EDITOR TO ONE CANDIDATE, and nothing else.
+ *
+ * This used to live inside `EditorSlot`, the SELECT tool's panel -- so the editor was attached
+ * only while that panel happened to be rendered. The moment annotate also needed to point at
+ * elements, switching to it unmounted the panel, detached the editor, and clicking the slide
+ * selected nothing. Attachment is about the CANDIDATE, not about which panel is on screen, so
+ * it is its own component with no UI: mount it wherever the frame is live.
+ */
+export function EditorAttachment({
+  editor,
+  frame,
+  onChange,
+}: {
+  editor: SlideEditor;
+  frame: HTMLIFrameElement | null;
+  onChange: (edits: readonly SlideEdit[]) => void;
+}): null {
+  useEffect(() => {
+    if (frame === null) return;
+    editor.attach({ frame, onChange });
+    return () => editor.detach();
+  }, [editor, frame, onChange]);
+  return null;
+}
+
 export function EditorSlot({
   editor,
   frame,
@@ -43,14 +69,8 @@ export function EditorSlot({
   disabled: boolean;
   onChange: (edits: readonly SlideEdit[]) => void;
 }): JSX.Element {
-  useEffect(() => {
-    if (frame === null) return;
-    editor.attach({ frame, onChange });
-    return () => editor.detach();
-  }, [editor, frame, onChange]);
-
   return (
-    <section className="sasha-editor" aria-label="visual editor">
+    <section className="sasha-editslot" aria-label="visual editor">
       {/*
         ONE ROW WHEN THERE IS NOTHING TO LIST, and that is a measurement, not a taste.
         This panel is ALWAYS on screen now -- it is the edit tool's panel, and edit is the default --

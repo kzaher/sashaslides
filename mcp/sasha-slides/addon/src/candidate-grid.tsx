@@ -21,7 +21,7 @@
 
 import type { JSX } from "react";
 import { SlideStage } from "./slide-stage.tsx";
-import { assertNever, type Region } from "./protocol.ts";
+import type { Region } from "./protocol.ts";
 import {
   describeUnresolvedCount,
   unresolvedBadgeOf,
@@ -36,7 +36,10 @@ export function CandidateGrid({
   editedIndex,
   onEditFrame,
   onZoom,
-  onSelect,
+  onInsert,
+  onReport,
+  insertable,
+  reportOpening,
   onDraw,
 }: {
   offer: Offer;
@@ -48,7 +51,14 @@ export function CandidateGrid({
   editedIndex: number | null;
   onEditFrame: (element: HTMLIFrameElement | null) => void;
   onZoom: (index: number) => void;
-  onSelect: (index: number) => void;
+  /** Put THIS candidate in the deck. One button per cell -- see `CandidateCell`. */
+  onInsert: (index: number) => void;
+  /** Report a defect in THIS candidate, same reason. */
+  onReport: (spec: Readonly<{ index: number }>) => void;
+  /** Whether inserting is possible at all (a tab that is not an editable presentation). */
+  insertable: boolean;
+  /** The report window is already being opened; a second press would open a second one. */
+  reportOpening: boolean;
   onDraw: (spec: Readonly<{ index: number; region: Region }>) => void;
 }): JSX.Element {
   return (
@@ -58,7 +68,11 @@ export function CandidateGrid({
           key={frame.index}
           frame={frame}
           rendering={offer.rendering}
-          tool={offer.tool}
+          /* THE GRID NEVER TAKES THE POINTER. It is where four candidates are compared, not
+             where one is worked on -- marking up and selecting both happen in the editor, which
+             opens on the candidate you pick. The cells still DRAW the marks already on a slide
+             (slide-stage.tsx), they just do not accept the gesture. */
+          tool="select"
           chosen={frame.index === offer.selectedIndex}
           unresolved={unresolvedCountFor({
             comments: offer.comments,
@@ -68,7 +82,10 @@ export function CandidateGrid({
           disabled={disabled}
           onEditFrame={frame.index === editedIndex ? onEditFrame : null}
           onZoom={onZoom}
-          onSelect={onSelect}
+          onInsert={onInsert}
+          onReport={onReport}
+          insertable={insertable}
+          reportOpening={reportOpening}
           onDraw={onDraw}
         />
       ))}
@@ -85,7 +102,10 @@ function CandidateCell({
   disabled,
   onEditFrame,
   onZoom,
-  onSelect,
+  onInsert,
+  onReport,
+  insertable,
+  reportOpening,
   onDraw,
 }: {
   frame: SlideFrame;
@@ -96,7 +116,10 @@ function CandidateCell({
   disabled: boolean;
   onEditFrame: ((element: HTMLIFrameElement | null) => void) | null;
   onZoom: (index: number) => void;
-  onSelect: (index: number) => void;
+  onInsert: (index: number) => void;
+  onReport: (spec: Readonly<{ index: number }>) => void;
+  insertable: boolean;
+  reportOpening: boolean;
   onDraw: (spec: Readonly<{ index: number; region: Region }>) => void;
 }): JSX.Element {
   return (
@@ -106,34 +129,58 @@ function CandidateCell({
           frame={frame}
           rendering={rendering}
           tool={tool}
+          // THE GRID NEVER PAINTS THE CONVERTER'S FINDINGS. It is where four candidates are
+          // compared, and outlining every lossy element on all of them is noise over the
+          // comparison -- which is exactly what the user reported seeing.
+          showFindings={false}
           disabled={disabled}
           onEditFrame={onEditFrame}
           onDraw={onDraw}
         />
+        <span className="sasha-cell-number" aria-hidden="true">
+          {frame.index}
+        </span>
         <CellUnresolved count={unresolved} />
+        {/* THE WHOLE PICTURE IS THE TARGET, and it is a transparent button over the stage rather
+            than a handler on it: the slide is an IFRAME, which swallows the pointer, so a click
+            on the thing the user is actually looking at would otherwise never arrive. It is last
+            in the stage so it sits above the marks, and it carries the pointer cursor. */}
+        <button
+          type="button"
+          className="sasha-cell-open"
+          disabled={disabled}
+          title={`Request changes for option ${String(frame.index)}`}
+          aria-label={`Open option ${String(frame.index)} to request changes`}
+          onClick={() => onZoom(frame.index)}
+        />
       </span>
+      {/* TWO BUTTONS, AND NOTHING ELSE. The cell used to carry a name chip, a "Show large" button
+          and a line of status -- the index is on the picture, "large" is what clicking it does,
+          and the status was a sentence nobody could act on. What is left is the two decisions a
+          candidate can receive: put it in the deck, or say it is broken. */}
       <footer className="sasha-cell-foot">
         <button
           type="button"
-          className={chosen ? "sasha-chip sasha-chip-on" : "sasha-chip"}
-          disabled={disabled}
-          aria-pressed={chosen}
-          aria-label={`work on candidate ${frame.index}`}
-          onClick={() => onSelect(frame.index)}
+          className="sasha-secondary sasha-small"
+          disabled={disabled || reportOpening}
+          title={REPORT_EXPLANATION}
+          onClick={() => onReport({ index: frame.index })}
         >
-          <span className="sasha-chip-number">{frame.index}</span>
-          <span className="sasha-chip-label">{frame.label === "" ? frame.name : frame.label}</span>
+          Report defect
         </button>
         <button
           type="button"
-          className="sasha-secondary sasha-small sasha-zoom"
-          disabled={disabled}
-          aria-label={`show candidate ${frame.index} large`}
-          onClick={() => onZoom(frame.index)}
+          className="sasha-primary sasha-small"
+          disabled={disabled || !insertable}
+          title={
+            insertable
+              ? `Put option ${String(frame.index)} in the deck`
+              : "this tab is not an editable presentation"
+          }
+          onClick={() => onInsert(frame.index)}
         >
-          Show large
+          Insert
         </button>
-        <span className="sasha-dim sasha-cell-hint">{hintFor({ frame, unresolved, edited: onEditFrame !== null })}</span>
       </footer>
     </div>
   );
@@ -169,44 +216,6 @@ function cellClass({ chosen, edited }: { chosen: boolean; edited: boolean }): st
   return classes.join(" ");
 }
 
-/**
- * The one line under a cell: whether the editor is on it, what its open comments are, or -- when
- * there is nothing else to report -- its LOAD STATE in words, so a candidate that never arrived
- * says so on the cell rather than leaving an empty grey box (UI-CONTRACT.md: "A surface that cannot
- * reach the server says so"). A FAILED load outranks everything: a comment opened before the
- * document failed is not the thing to say first.
- */
-function hintFor({
-  frame,
-  unresolved,
-  edited,
-}: {
-  frame: SlideFrame;
-  unresolved: UnresolvedCount;
-  edited: boolean;
-}): string {
-  if (frame.html.kind === "failed") return "could not be loaded";
-  if (edited) return "the editor is on this one";
-  // AN OPEN COMMENT OUTRANKS A LOCAL MARK-UP: one is waiting for Sasha, the other is waiting for
-  // the user to press Send. A mark-up not yet sent outranks the comment count's OWN state, because
-  // the badge already carries that ("?" / "!") and repeating it on every cell before the first read
-  // would bury the one thing the user can act on.
-  if (unresolved.kind === "known" && unresolved.count > 0) return describeUnresolvedCount(unresolved);
-  if (frame.anomalies.length > 0) return `${frame.anomalies.length} marked, not sent`;
-  if (unresolved.kind !== "known") return describeUnresolvedCount(unresolved);
-  return loadHint(frame);
-}
-
-function loadHint(frame: SlideFrame): string {
-  switch (frame.html.kind) {
-    case "unrequested":
-    case "loading":
-      return "loading";
-    case "failed":
-      return "could not be loaded";
-    case "loaded":
-      return "pick it to work on it";
-    default:
-      return assertNever(frame.html);
-  }
-}
+/** Why you would press Report defect. On the button, because the cell's row has no words to spare. */
+const REPORT_EXPLANATION =
+  "Opens the same editor on two slides -- this one as it is, and as it would be sent -- and sends only what you approve.";

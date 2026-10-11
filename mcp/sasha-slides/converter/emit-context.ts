@@ -15,6 +15,7 @@ import { resolveFontFamily } from "./slides-font.js";
 import type {
   Alignment,
   ContentAlignment,
+  Dimension,
   SlidesApiRequest,
   TextStyle,
 } from "./slides-api.js";
@@ -93,6 +94,7 @@ export function featureSite(
  */
 export function textStyleFor(
   style: TypeStyle,
+  scale: PageScale,
 ): Readonly<{ style: TextStyle; fields: string; fontSubstitutedFrom: string | null }> {
   const font = resolveFontFamily(style.fontFamily);
   const fields = [
@@ -106,7 +108,7 @@ export function textStyleFor(
   ];
   const base = {
     fontFamily: font.family,
-    fontSize: { magnitude: pxToPoints(style.fontSizePx), unit: "PT" as const },
+    fontSize: { magnitude: pxToPoints(style.fontSizePx, scale), unit: "PT" as const },
     bold: style.bold,
     italic: style.italic,
     underline: style.decoration.underline,
@@ -138,21 +140,36 @@ export function textStyleFor(
  * CSS `start`/`end` are direction-relative and map onto Slides' own
  * direction-relative `START`/`END`, so no left/right assumption is baked in.
  */
+/** A list's indents, in EMU. `LIST_INDENT` is the only caller; plain paragraphs pass nothing. */
+export type ParagraphIndent = Readonly<{ startEmu: number; firstLineEmu: number }>;
+
 export function paragraphStyleFor(
   style: TypeStyle,
+  indent?: ParagraphIndent,
 ): Readonly<{
-  style: Readonly<{ alignment: Alignment; lineSpacing: number }>;
+  style: Readonly<{
+    alignment: Alignment;
+    lineSpacing: number;
+    indentStart?: Dimension;
+    indentFirstLine?: Dimension;
+  }>;
   fields: string;
 }> {
+  const base = {
+    alignment: alignmentFromCss(style.textAlign),
+    lineSpacing: lineSpacingPercent({
+      lineHeightPx: style.lineHeightPx,
+      fontSizePx: style.fontSizePx,
+    }),
+  };
+  if (indent === undefined) return { style: base, fields: "alignment,lineSpacing" };
   return {
     style: {
-      alignment: alignmentFromCss(style.textAlign),
-      lineSpacing: lineSpacingPercent({
-        lineHeightPx: style.lineHeightPx,
-        fontSizePx: style.fontSizePx,
-      }),
+      ...base,
+      indentStart: { magnitude: indent.startEmu, unit: "EMU" },
+      indentFirstLine: { magnitude: indent.firstLineEmu, unit: "EMU" },
     },
-    fields: "alignment,lineSpacing",
+    fields: "alignment,lineSpacing,indentStart,indentFirstLine",
   };
 }
 

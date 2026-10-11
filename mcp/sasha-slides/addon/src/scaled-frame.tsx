@@ -52,6 +52,7 @@ export function ScaledHtmlFrame({
   editable?: boolean;
 }): JSX.Element {
   const box = useRef<HTMLDivElement | null>(null);
+  const frame = useRef<HTMLIFrameElement | null>(null);
   const [scale, setScale] = useState<number>(UNMEASURED_SCALE);
 
   const measure = useCallback(() => {
@@ -74,6 +75,55 @@ export function ScaledHtmlFrame({
     observer.observe(element);
     return () => observer.disconnect();
   }, [measure]);
+
+  /*
+   * THE FRAME IS HANDED OVER ONLY ONCE ITS OWN DOCUMENT EXISTS.
+   *
+   * A `ref` callback fires when React mounts the element -- BEFORE `srcdoc` has navigated it. At
+   * that instant `contentDocument` is the throwaway `about:blank` every iframe starts with, and
+   * handing THAT to the visual editor is silent poison: the editor attaches to it happily (it is
+   * same-origin and complete), mounts its chrome, binds `pointerdown` to it -- and then the
+   * srcdoc navigation REPLACES the document underneath. The listeners stay on a document nobody
+   * can click any more, so clicking the slide selected nothing, hovering highlighted nothing, and
+   * no warning was ever produced because nothing had actually failed. Measured: a capture listener
+   * added to the live `contentDocument` saw the pointerdown while the editor's own listener on the
+   * same document did not (smoke.e2e.ts, "clicking an element on the candidate selects it").
+   *
+   * `about:blank` is `readyState: "complete"` with a body, so readiness cannot tell the two apart.
+   * A body with CHILDREN can: a staged candidate always has content, `about:blank` never does.
+   */
+  useEffect(() => {
+    const announce = onFrame;
+    if (announce === undefined) return;
+    const element = frame.current;
+    if (element === null) {
+      announce(null);
+      return;
+    }
+    let delivered = false;
+    const deliverIfReal = (): boolean => {
+      if (delivered) return true;
+      const document_ = contentDocumentOf(element);
+      if (document_ === null || document_.readyState !== "complete") return false;
+      if (document_.body === null || document_.body.childNodes.length === 0) return false;
+      delivered = true;
+      announce(element);
+      return true;
+    };
+    // The navigation is asynchronous, so `load` is the normal path. The poll is the backstop for
+    // the case the event has already fired -- it does not fire twice, and a missed one would hang
+    // the editor for ever (CLAUDE.md).
+    element.addEventListener("load", deliverIfReal);
+    const timer = setInterval(() => {
+      if (deliverIfReal()) clearInterval(timer);
+    }, FRAME_READY_POLL_MS);
+    return () => {
+      clearInterval(timer);
+      element.removeEventListener("load", deliverIfReal);
+      // The editor must release the document it is about to lose, on every path.
+      announce(null);
+    };
+  }, [onFrame, html]);
 
   return (
     <div className="sasha-scaled" ref={box}>
@@ -100,9 +150,10 @@ export function ScaledHtmlFrame({
         scrolling="no"
         style={frameStyle(scale)}
         ref={(element) => {
-          // A block body on purpose: React 19 treats a value RETURNED from a ref callback as the
-          // cleanup function, and `onFrame`'s own return value is not one.
-          if (onFrame !== undefined) onFrame(element);
+          // ONLY RECORDED HERE, never announced: the effect above decides WHEN the host may have
+          // it, which is after the srcdoc document exists. A block body on purpose -- React 19
+          // treats a value returned from a ref callback as the cleanup function.
+          frame.current = element;
         }}
       />
     </div>
@@ -120,4 +171,16 @@ export function frameStyle(scale: number): Readonly<{
     height: `${SLIDE_HEIGHT_PX}px`,
     transform: `scale(${scale})`,
   };
+}
+
+/** How often to re-check for the staged document when the `load` event was missed. */
+const FRAME_READY_POLL_MS = 25;
+
+/** Same-origin only; a frame in the strict sandbox throws rather than answering. */
+function contentDocumentOf(frame: HTMLIFrameElement): Document | null {
+  try {
+    return frame.contentDocument;
+  } catch {
+    return null;
+  }
 }

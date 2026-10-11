@@ -11,6 +11,7 @@ import { INERT_PICKER_ACTIONS } from "./inert-actions.ts";
 import { stubConvertHtmlToSlideRequests } from "./converter-contract.ts";
 import { slideHtml } from "./fake-drive.ts";
 import { marksOf } from "./slide-stage.tsx";
+import { unsentMarkUps } from "./picker-state.ts";
 import type { Proposal } from "./observer.ts";
 import {
   INITIAL_PICKER_STATE,
@@ -37,19 +38,20 @@ const proposal: Proposal = {
   })),
 };
 
-test("an offer starts on slide 1 showing the HTML, because the HTML is authoritative", () => {
+/**
+ * The grid opens on the PREVIEW. It used to open on the markup, on the reasoning that the HTML
+ * is authoritative -- true, and still the reason Original is one press away, but the grid is
+ * where four candidates are being CHOSEN BETWEEN and the thing being chosen is what the
+ * audience will see.
+ */
+test("an offer starts on slide 1 showing the preview, which is the candidate's own HTML", () => {
   const state = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
   const offer = offerOf(state);
   assert.ok(offer !== null);
   assert.equal(offer.selectedIndex, 1);
   assert.equal(offer.rendering, "html");
   assert.equal(offer.slides.length, 3);
-});
-
-test("AND IT STARTS IN THE EDIT TOOL: editing is the default state, not a thing you navigate to", () => {
-  const offer = offerOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
-  assert.equal(offer?.tool, "edit");
-  assert.equal(offer?.view, "grid", "and at the grid zoom level, so all the candidates are comparable");
+  assert.equal(offer.editing, null, "and the grid alone -- the editor opens when a candidate is picked");
 });
 
 test("the rendering toggle switches between the HTML and the converted slide and back", () => {
@@ -135,19 +137,25 @@ test("a dormant sidebar says what it is waiting for instead of rendering blank",
   // sidebar owns its own column, so it explains itself.
   const markup = markupOf(INITIAL_PICKER_STATE);
   assert.notEqual(markup, "");
-  assert.match(markup, /Waiting for slides/);
-  assert.match(markup, /candidates appear here/i);
+  // A LOADER, not an essay: the window is waiting, and that is the whole of what it can say.
+  assert.match(markup, /class="sasha-loader"/);
+  assert.doesNotMatch(markup, /candidates appear here/i);
   // It must still not claim a proposal exists.
-  assert.doesNotMatch(markup, /candidate slides<|Insert option/);
+  assert.doesNotMatch(markup, /candidate slides<|>Insert</);
 });
 
 test("the dialog numbers the candidates 1..N so the user can say 'option 3'", () => {
   const markup = markupOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
-  assert.match(markup, /3 candidate slides/);
+  // The number is ON THE PICTURE now, not in a caption under it, and "4 candidate slides p_..."
+  // is gone from the header: the count is the number of slides the reader is looking at.
   for (const index of [1, 2, 3]) {
-    assert.match(markup, new RegExp(`sasha-chip-number">${index}<`), `chip ${index}`);
+    assert.match(markup, new RegExp(`sasha-cell-number" aria-hidden="true">${index}<`), `badge ${index}`);
   }
-  assert.match(markup, /Insert option 1</);
+  // The count survives only as the grid's `aria-label`, which is what a screen reader needs; it
+  // is no longer a heading over the pictures.
+  assert.doesNotMatch(markup, /<strong>\s*3 candidate slide/, "the header no longer counts what is on screen");
+  assert.doesNotMatch(markup, new RegExp(proposal.proposalId), "and it no longer names a file nobody opens");
+  assert.match(markup, /Open option 1 to request changes/);
 });
 
 test("the HTML view renders the document in a sandboxed iframe that never runs its scripts", () => {
@@ -155,10 +163,14 @@ test("the HTML view renders the document in a sandboxed iframe that never runs i
   const markup = markupOf(
     play([
       { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+      // The grid opens on the preview, so the markup pane is one press away -- and the live
+      // editor lives in the EDITOR WINDOW now, which is what gets the reachable frame.
+      { kind: "rendering-chosen", rendering: "html" },
+      { kind: "editor-opened", index: 1 },
       { kind: "html-arrived", index: 1, html },
     ]),
   );
-  // The selected candidate is the one the editor is attached to, so it gets `allow-same-origin` --
+  // The candidate the editor is attached to gets `allow-same-origin` --
   // and NEVER `allow-scripts`, which is the combination that keeps a staged document inert while
   // still letting the host reach into it (scaled-frame.tsx, editor/slide-editor.ts).
   assert.match(markup, /<iframe[^>]*sandbox="allow-same-origin"/);
@@ -187,13 +199,20 @@ test("the converted view renders one box per element the converter asked Slides 
   );
   assert.match(markup, /sasha-el sasha-el-shape/);
   assert.doesNotMatch(markup, /<iframe/, "the HTML pane is not rendered at the same time");
-  assert.match(markup, /sasha-mark-converter/, "the unsupported region is drawn on the preview");
+  // NOT the converter's findings: those are off until asked for, so a candidate does not come
+  // up covered in dashed boxes nobody drew.
+  assert.doesNotMatch(markup, /sasha-mark-converter/, "findings are off by default");
 });
 
 test("a tab with no presentation says so and disables insert", () => {
   const markup = markupOf(play([{ kind: "proposal-offered", proposal, presentationId: null }]));
   assert.match(markup, /not an editable presentation/);
-  assert.match(markup, /class="sasha-primary" disabled/);
+  // Insert is per candidate now, so EVERY one of them is disabled.
+  assert.equal(
+    (markup.match(/class="sasha-primary sasha-small" disabled=""/g) ?? []).length,
+    3,
+    "no candidate can be inserted into a tab that is not a presentation",
+  );
 });
 
 test("A CLEARED SET IS NOT AN EMPTY GRID -- READY survives a clear, so this window can land on one", () => {
@@ -285,8 +304,12 @@ test("...but it still travels with the PICK, and it is still drawn on the slide"
 
   const frame = selectedFrame(offer);
   assert.ok(frame !== null);
-  const tones = marksOf({ index: frame.index, anomalies: frame.anomalies, conversion: frame.conversion }).map((mark) => mark.tone);
-  assert.deepEqual(tones, ["converter"], "it is still visible as a box on the slide");
+  // NOT PAINTED BY DEFAULT. The finding still travels with PICK (`anomaliesOf` above), but a
+  // candidate does not come up covered in boxes the user did not draw.
+  const quiet = marksOf({ index: frame.index, anomalies: frame.anomalies, conversion: frame.conversion, showFindings: false });
+  assert.deepEqual(quiet, [], "nothing is drawn until the user asks to see it");
+  const shown = marksOf({ index: frame.index, anomalies: frame.anomalies, conversion: frame.conversion, showFindings: true }).map((mark) => mark.tone);
+  assert.deepEqual(shown, ["converter"], "and it is there when asked for");
 });
 
 test("the user's own boxes and the converter's findings are both drawn, user ones last", () => {
@@ -307,8 +330,13 @@ test("the user's own boxes and the converter's findings are both drawn, user one
   assert.equal(frame.anomalies[0]?.source, "user");
   // The user's box is painted OVER the converter's, so their own mark is never hidden by one.
   assert.deepEqual(
-    marksOf({ index: frame.index, anomalies: frame.anomalies, conversion: frame.conversion }).map((mark) => mark.tone),
+    marksOf({ index: frame.index, anomalies: frame.anomalies, conversion: frame.conversion, showFindings: true }).map((mark) => mark.tone),
     ["converter", "user"],
+  );
+  // With the findings off, the user's own box is the only thing on the slide.
+  assert.deepEqual(
+    marksOf({ index: frame.index, anomalies: frame.anomalies, conversion: frame.conversion, showFindings: false }).map((mark) => mark.tone),
+    ["user"],
   );
 });
 
@@ -322,6 +350,7 @@ test("the user's own boxes and the converter's findings are both drawn, user one
 test("the mark-up composer is multiline and keeps the newlines the user typed", () => {
   const state = play([
     { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+    { kind: "editor-opened", index: 2 },
     { kind: "tool-chosen", tool: "annotate" },
     { kind: "anomaly-drawn", index: 2, anomalyId: "user_1", region: WHOLE_SLIDE },
     { kind: "anomaly-noted", index: 2, anomalyId: "user_1", note: "line one\nline two" },
@@ -341,6 +370,7 @@ test("the mark-up composer is multiline and keeps the newlines the user typed", 
 test("a mark-up is drawn as a comment card: avatar, author, where", () => {
   const state = play([
     { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+    { kind: "editor-opened", index: 2 },
     { kind: "tool-chosen", tool: "annotate" },
     { kind: "anomaly-drawn", index: 2, anomalyId: "user_1", region: { x: 0.1, y: 0.2, w: 0.3, h: 0.2 } },
   ]);
@@ -352,4 +382,97 @@ test("a mark-up is drawn as a comment card: avatar, author, where", () => {
   assert.match(markup, /slide 2/, "which candidate it is about");
   // The uppercase source label is gone with the converter rows: every row here is the user's.
   assert.doesNotMatch(markup, /class="sasha-source/);
+});
+
+// --- the grid is slides and one toggle; the editor is a popup on top -------
+
+/**
+ * THE GRID IS SLIDES AND ONE TOGGLE, NOTHING ELSE.
+ *
+ * It used to carry three groups of chrome at once -- VIEW (all candidates / one slide), TOOL
+ * (edit / annotate) and SHOWING (HTML / converted) -- plus a line of hint text, above four
+ * thumbnails. Three of those are decisions about ONE candidate, and the grid is where you are
+ * still choosing between four. They move into the editor, which now opens on top when a
+ * candidate is picked.
+ *
+ * What survives in the grid is the one choice that is about all four at once: which rendering
+ * you are comparing. PREVIEW is the default, because the preview is what the audience sees.
+ */
+test("the grid opens on the preview and on the grid alone", () => {
+  const state = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
+  const offer = offerOf(state);
+  assert.ok(offer !== null);
+  assert.equal(offer.rendering, "html", "the candidate itself, not a wireframe of the API call");
+  assert.equal(offer.editing, null, "and no editor open over it");
+});
+
+test("picking a candidate opens the editor on it; closing comes back to the grid", () => {
+  let state = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
+  state = reducePicker(state, { kind: "editor-opened", index: 3 });
+  assert.equal(offerOf(state)?.editing, 3);
+  assert.equal(offerOf(state)?.selectedIndex, 3, "the editor is open on what it says it is");
+
+  state = reducePicker(state, { kind: "editor-closed" });
+  assert.equal(offerOf(state)?.editing, null);
+  assert.equal(offerOf(state)?.selectedIndex, 3, "and the grid remembers which one you were on");
+});
+
+test("the editor cannot be opened on a candidate that is not in the proposal", () => {
+  let state = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
+  state = reducePicker(state, { kind: "editor-opened", index: 9 });
+  assert.equal(offerOf(state)?.editing, 3, "clamped to the last candidate, never out of range");
+});
+
+/**
+ * THE TOOL IS THE EDITOR'S, and it is named for what the pointer IS: a select arrow, the way
+ * every drawing program names it. It was called "edit", which named the mode rather than the
+ * pointer and read as the opposite of "annotate" -- but annotating is editing too.
+ */
+test("the editor opens with the select arrow, not the annotate tool", () => {
+  let state = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
+  state = reducePicker(state, { kind: "editor-opened", index: 1 });
+  assert.equal(offerOf(state)?.tool, "select");
+  state = reducePicker(state, { kind: "tool-chosen", tool: "annotate" });
+  assert.equal(offerOf(state)?.tool, "annotate");
+});
+
+/** Leaving with something typed but unsent must be refused, not silently dropped. */
+test("an unsent mark-up is what makes closing the editor a question", () => {
+  let state = play([
+    { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+    { kind: "editor-opened", index: 2 },
+  ]);
+  assert.equal(unsentMarkUps(offerOf(state) ?? neverOffer()).length, 0, "nothing typed, nothing to lose");
+
+  state = reducePicker(state, { kind: "anomaly-drawn", index: 2, anomalyId: "user_1", region: WHOLE_SLIDE });
+  assert.equal(unsentMarkUps(offerOf(state) ?? neverOffer()).length, 0, "an empty box is not words");
+
+  state = reducePicker(state, { kind: "anomaly-noted", index: 2, anomalyId: "user_1", note: "the title is cut off" });
+  const unsent = unsentMarkUps(offerOf(state) ?? neverOffer());
+  assert.equal(unsent.length, 1, "typed and not sent: closing has to ask");
+  assert.equal(unsent[0]?.note, "the title is cut off");
+});
+
+/**
+ * "PREVIEW" MUST BE THE SLIDE, NOT A WIREFRAME OF THE API CALL.
+ *
+ * The grid's toggle read Preview | Original, and Preview showed the `rendered` pane. But that
+ * pane is NOT a rendering: `rendered-preview.ts` says so in its own first line -- it is a
+ * projection of the requests the converter will send Slides, drawn as boxes and loose text,
+ * because the real thing cannot exist until the slide is in a deck.
+ *
+ * So the default view of every candidate was a debugging wireframe labelled "Preview", which is
+ * why a table showed up as one run-on blob of its cells' text. The candidate's own HTML is the
+ * true visual preview -- it is a self-contained document that renders exactly.
+ */
+test("the grid opens on the candidate's own HTML, which is the thing a preview shows", () => {
+  const offer = offerOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
+  assert.equal(offer?.rendering, "html", "the slide itself, not a projection of the API call");
+});
+
+test("the two panes are named for what they actually are", () => {
+  const markup = markupOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
+  assert.match(markup, /Preview/, "the HTML pane");
+  assert.match(markup, /Converted/, "and the wireframe of what Slides will receive");
+  assert.doesNotMatch(markup, />Original</, "nothing is called Original any more");
 });

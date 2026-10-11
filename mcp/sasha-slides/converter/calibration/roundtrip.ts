@@ -44,6 +44,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../../..");
 const BASIC_FIXTURES = join(REPO_ROOT, "renderer/html2slides/e2e/fixtures-basic");
 const OWN_FIXTURES = join(HERE, "../test/fixtures");
+/** The four documents the PICKER stages -- the ones a user actually sees (sxs-candidates.ts). */
+const CANDIDATE_FIXTURES = join(HERE, "../../e2e/fixtures");
 const HOST_PAGE = join(OWN_FIXTURES, "host.html");
 
 /** 2 CSS px at 7143.75 EMU/px — the tolerance CLAUDE.md's measurements justify. */
@@ -170,11 +172,24 @@ function fixtureList(): readonly Readonly<{ dir: string; name: string }>[] {
       .sort()
       .map((name) => ({ dir: OWN_FIXTURES, name }));
   }
+  if (spec === "all-candidates") {
+    return readdirSync(CANDIDATE_FIXTURES)
+      .filter((name) => name.endsWith(".html"))
+      .sort()
+      .map((name) => ({ dir: CANDIDATE_FIXTURES, name }));
+  }
+  // THREE SEARCH DIRS, named so the error says which ones were looked in: a fixture that is not
+  // found used to resolve to OWN_FIXTURES and fail on a path the caller never asked for.
+  const dirs = [BASIC_FIXTURES, OWN_FIXTURES, CANDIDATE_FIXTURES];
   return spec
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0)
-    .map((name) => ({ dir: existsSync(join(BASIC_FIXTURES, name)) ? BASIC_FIXTURES : OWN_FIXTURES, name }));
+    .map((name) => {
+      const dir = dirs.find((candidate) => existsSync(join(candidate, name)));
+      if (dir === undefined) throw new Error(`fixture ${name} is in none of: ${dirs.join(", ")}`);
+      return { dir, name };
+    });
 }
 
 /**

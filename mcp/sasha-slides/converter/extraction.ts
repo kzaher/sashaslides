@@ -194,7 +194,14 @@ export type TableElement = ElementCommon &
   }>;
 
 export type ImageElement = ElementCommon &
-  Readonly<{ kind: "image"; src: string; tag: string; cornerRadiusPx: number }>;
+  Readonly<{
+    kind: "image";
+    src: string;
+    tag: string;
+    cornerRadiusPx: number;
+    /** The picture's own CSS border. Slides expresses it as an image outline. */
+    border: Border | null;
+  }>;
 
 /** `<svg>`, `<canvas>`, conic gradients, clip-path hosts — bitmap-only content. */
 export type VisualElement = ElementCommon & Readonly<{ kind: "visual"; tag: string }>;
@@ -315,6 +322,7 @@ function parseElement(candidate: unknown, paintIndex: number): SlideElement | nu
         src: stringOr(candidate["src"], ""),
         tag: stringOr(candidate["tag"], "img"),
         cornerRadiusPx: numberOr(candidate["cornerRadius"], 0),
+        border: parseBorder(candidate, candidate),
       };
     case "visual":
       return { ...common, kind: "visual", tag: stringOr(candidate["tag"], "unknown") };

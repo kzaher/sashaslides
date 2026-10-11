@@ -22,15 +22,17 @@
 // answer it, resolve it and revise the slide. The old post-insert "review this deck" mode is gone
 // (see picker-state.ts), and so is the defect-report mode: that is a third document now.
 
-import { useMemo, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { PICKER_CSS } from "./picker-styles.ts";
+import { ELEMENT_INSPECTOR_CSS } from "./element-inspector.tsx";
+import { SlideEditorWindow } from "./slide-editor-window.tsx";
 import { CommentCard, CommentHead } from "./comment-card.tsx";
 import { CandidateGrid } from "./candidate-grid.tsx";
 import { collectDiagnostics, describeDiagnostics } from "./diagnostics.ts";
 import { EditorSlot } from "./editor-slot.tsx";
 import { assertNever, type Region } from "./protocol.ts";
 import { describeRegion } from "./region-overlay.tsx";
-import { SlideStage } from "./slide-stage.tsx";
+export { SlideStage } from "./slide-stage.tsx";
 import {
   describeUnresolvedCount,
   unresolvedBadgeOf,
@@ -39,11 +41,11 @@ import {
 } from "./session-log.ts";
 import type { SlideEdit, SlideEditor } from "./slide-editor.ts";
 import {
-  anomaliesOf,
   editorIsLive,
   editorReachOf,
   editsSlides,
   isSendableAnomaly,
+  selectsElements,
   loadedHtmlOf,
   selectedFrame,
   type AnomalySendPhase,
@@ -62,12 +64,35 @@ import {
 /** Everything the UI is allowed to cause. Injected, so the tree renders in a test with no ports. */
 export type PickerActions = Readonly<{
   selectSlide(index: number): void;
+  /** Open the editor on one candidate. The grid stays underneath, remembering the choice. */
+  openEditor(index: number): void;
+  /** Replace the selected element's markup with what the inspector's textarea now holds. */
+  applyMarkup(spec: Readonly<{ index: number; html: string }>): void;
+  /** Answer one of the user's own comment threads on a candidate, from the editor's rail. */
+  replyToThread(spec: Readonly<{ index: number; commentId: string; text: string }>): void;
+  /** Close a thread. Google implements this as a reply carrying a resolve action. */
+  resolveThread(spec: Readonly<{ index: number; commentId: string }>): void;
+  /**
+   * Close it. The HOST decides whether to ask first: `unsentMarkUps` says what would be lost,
+   * and a surface that threw away typed words without a question would be the one unforgivable
+   * thing a review window can do.
+   */
+  closeEditor(): void;
   /** Change the ZOOM LEVEL. It may never change the tool -- that is the contract this window broke. */
   chooseView(view: SlideView): void;
   /** Change the TOOL. It may never change the zoom level, for the same reason. */
   chooseTool(tool: SlideTool): void;
   chooseRendering(rendering: SlideRendering): void;
+  /** Paint what the converter could not carry, or stop painting it. Off by default. */
+  toggleFindings(): void;
   drawAnomaly(spec: Readonly<{ index: number; region: Region }>): void;
+  /**
+   * COMMENT ON THE SELECTED ELEMENT: record the box, the words, and send it, as one act. This is
+   * what the annotate tool does now -- see selection-composer.tsx for why it is not three.
+   */
+  commentOnSelection(spec: Readonly<{ index: number; region: Region; note: string }>): void;
+  /** Put the slide back: Escape, Cancel, or the composer's dismiss. */
+  clearSelection(): void;
   noteAnomaly(spec: Readonly<{ index: number; anomalyId: string; note: string }>): void;
   removeAnomaly(spec: Readonly<{ index: number; anomalyId: string }>): void;
   /**
@@ -93,28 +118,20 @@ export type PickerActions = Readonly<{
    * because the editor is a dependency the composition root chooses (dialog.tsx picks the real
    * module or `nullSlideEditor`) and this tree must not know which it got. See slide-editor.ts.
    */
-  createEditor(spec: Readonly<{ html: string }>): SlideEditor;
+  createEditor(spec: Readonly<{ html: string; mode: "edit" | "comment" }>): SlideEditor;
 }>;
 
 export function Picker({ state, actions }: { state: PickerState; actions: PickerActions }): JSX.Element | null {
   switch (state.status) {
     case "dormant":
-      // An empty window reads as broken, because something deliberately opened it. So it says what
-      // it is waiting for, and points back at the conversation -- the surface that is always there.
+      // A LOADER, AND NOTHING ELSE. This used to explain in two paragraphs what would appear
+      // here, what could be done with it and that the window could be closed. None of it was
+      // actionable -- the window is waiting, and the honest thing to show is that it is waiting.
       return (
         <Shell>
-          <section className="sasha-idle" aria-label="sasha-slides is waiting">
-            <strong>Waiting for slides</strong>
-            <p className="sasha-dim">
-              Ask Sasha for a slide and the candidates appear here as soon as they are staged. You
-              pick one, edit it or mark anything that is wrong -- which Sasha answers and revises --
-              and it lands in this deck as editable objects.
-            </p>
-            <p className="sasha-dim">
-              This window is watching your Drive. You can close it: Ask Sasha keeps the whole log,
-              and &quot;See the slides&quot; brings this window back.
-            </p>
-          </section>
+          <p className="sasha-loader" role="status" aria-label="Loading">
+            <span className="sasha-loader-ring" aria-hidden="true" />
+          </p>
         </Shell>
       );
     case "cleared":
@@ -193,9 +210,16 @@ export function PickerDialog({
   const [element, setElement] = useState<HTMLIFrameElement | null>(null);
   const frame = selectedFrame(offer);
   const reach = editorReachOf({ rendering: offer.rendering, frame });
-  const editing = editsSlides(offer.tool) && editorIsLive(reach);
+  /*
+   * BOTH TOOLS POINT AT ELEMENTS, so both attach the editor; only what happens NEXT differs.
+   * `selectsElements` is the attach question and `editsSlides` is the "may it be changed"
+   * question -- they used to be one predicate, which is why annotate had to fall back to
+   * dragging a rectangle (picker-state.ts).
+   */
+  const pointing = selectsElements(offer.tool) && editorIsLive(reach);
   const html = loadedHtmlOf(frame) ?? "";
-  const editor = useMemo(() => actions.createEditor({ html }), [actions, html]);
+  const mode = editsSlides(offer.tool) ? ("edit" as const) : ("comment" as const);
+  const editor = useMemo(() => actions.createEditor({ html, mode }), [actions, html, mode]);
   // Keyed on the NUMBER, not on the frame object: the frame is replaced on every recorded edit, and
   // a callback that changed identity with it would detach and re-attach the editor mid-gesture.
   const index = offer.selectedIndex;
@@ -206,63 +230,51 @@ export function PickerDialog({
   return (
     <section className="sasha-dialog" role="dialog" aria-label="sasha-slides candidate slides">
       <DialogHeader offer={offer} stage={stage} />
-      <Toolbar offer={offer} disabled={busy} actions={actions} />
-      <Workspace
-        offer={offer}
-        busy={busy}
-        editedIndex={editing && frame !== null ? frame.index : null}
-        onEditFrame={setElement}
-        actions={actions}
-      />
-      <ToolPanel
-        offer={offer}
-        reach={reach}
-        editor={editor}
-        element={editing ? element : null}
-        busy={busy}
-        onChange={onChange}
-        actions={actions}
-      />
-      <DialogActions offer={offer} stage={stage} actions={actions} />
+      <GridChrome offer={offer} stage={stage} disabled={busy} actions={actions} />
+      <CandidateGridBody offer={offer} busy={busy} actions={actions} />
+      {/* THE EDITOR IS A WINDOW ON TOP, not a mode this one switches into. The grid underneath
+          keeps its scroll position and its choice, so closing comes back to exactly where the
+          user was -- which is the whole reason it is an overlay and not a replacement. */}
+      {offer.editing === null ? null : (
+        <SlideEditorWindow
+          offer={offer}
+          reach={reach}
+          editor={editor}
+          element={pointing ? element : null}
+          onEditFrame={pointing ? setElement : null}
+          busy={busy}
+          onChange={onChange}
+          actions={actions}
+        />
+      )}
     </section>
   );
 }
 
 /**
- * THE TOOLBAR: three independent choices, each its own group, each a total lookup table over its
- * union so adding a value is a compile error rather than a button nobody rendered.
+ * THE GRID'S CHROME: one toggle, and nothing else.
  *
- * View and tool sit side by side BECAUSE they are independent. A single row of four buttons --
- * grid, single, annotate, edit -- would read as one four-way mode, which is the very confusion this
- * change removes.
+ * It used to carry three groups at once -- VIEW (all candidates / one slide), TOOL (edit /
+ * annotate) and SHOWING -- above four thumbnails, plus a line of hint text. Three of those are
+ * decisions about ONE candidate, and the grid is where four are still being compared; a row of
+ * seven buttons over a choice between four slides is what made the window feel like a cockpit.
+ *
+ * They moved into the editor, which opens on a candidate when you pick one. What is left here
+ * is the single question the grid is actually asking: which rendering are you comparing?
  */
-function Toolbar({
+function GridChrome({
   offer,
+  stage,
   disabled,
   actions,
 }: {
   offer: Offer;
+  stage: SubmitStage | null;
   disabled: boolean;
   actions: PickerActions;
 }): JSX.Element {
   return (
     <div className="sasha-toolbar">
-      <Chooser
-        label="view"
-        order={VIEW_ORDER}
-        current={offer.view}
-        labels={VIEW_LABEL}
-        disabled={disabled}
-        onChoose={actions.chooseView}
-      />
-      <Chooser
-        label="tool"
-        order={TOOL_ORDER}
-        current={offer.tool}
-        labels={TOOL_LABEL}
-        disabled={disabled}
-        onChoose={actions.chooseTool}
-      />
       <Chooser
         label="showing"
         order={RENDERING_ORDER}
@@ -271,7 +283,23 @@ function Toolbar({
         disabled={disabled}
         onChoose={actions.chooseRendering}
       />
-      <span className="sasha-dim sasha-toolbar-say">{TOOL_HINT[offer.tool]}</span>
+      <span className="sasha-toolbar-say">To request changes for a candidate, click on it</span>
+      <ReportStatus report={offer.report} />
+      {offer.presentationId === null ? (
+        <span className="sasha-trouble">this tab is not an editable presentation -- insert is unavailable</span>
+      ) : null}
+      {/*
+        THE ONLY DECISION ABOUT THE SET, and the reason it is still here at all.
+        The window's own title bar has an X, and a "Dismiss" button in a footer bar under it read
+        as a second close -- so the bar is gone. But the X is Apps Script's `showModelessDialog`
+        chrome: it closes the window and WRITES NOTHING, while this writes `PICK {picked: null}`,
+        which is the only thing that unblocks a waiting `await_pick` with "none of these"
+        (dialog.tsx `submit`). Dropping it would leave the agent waiting for its timeout.
+        So: one row, no second bar, and worded as the answer it sends rather than as "close".
+      */}
+      <button type="button" className="sasha-none" disabled={stage !== null} onClick={actions.dismiss}>
+        None of these
+      </button>
     </div>
   );
 }
@@ -315,109 +343,47 @@ function Chooser<Choice extends string>({
   );
 }
 
-/** The zoom level. Exhaustive, so a third one is a compile error rather than a blank workspace. */
-function Workspace({
-  offer,
-  busy,
-  editedIndex,
-  onEditFrame,
-  actions,
-}: {
-  offer: Offer;
-  busy: boolean;
-  editedIndex: number | null;
-  onEditFrame: (element: HTMLIFrameElement | null) => void;
-  actions: PickerActions;
-}): JSX.Element {
-  switch (offer.view) {
-    case "grid":
-      return (
-        <CandidateGrid
-          offer={offer}
-          disabled={busy}
-          editedIndex={editedIndex}
-          onEditFrame={onEditFrame}
-          onZoom={actions.zoomCandidate}
-          onSelect={actions.selectSlide}
-          onDraw={actions.drawAnomaly}
-        />
-      );
-    case "single":
-      return (
-        <SinglePane
-          offer={offer}
-          busy={busy}
-          editedIndex={editedIndex}
-          onEditFrame={onEditFrame}
-          actions={actions}
-        />
-      );
-    default:
-      return assertNever(offer.view);
-  }
-}
-
 /**
- * ONE CANDIDATE, LARGE. The same `SlideStage` the grid's cells use, so the tool behaves identically
- * at both zoom levels -- which is the whole claim of "the popup IS the editor".
+ * THE GRID, and only the grid.
+ *
+ * It used to switch between a grid and a single large pane on a `view` union. "One candidate,
+ * large" is what the EDITOR is for now, so this is one shape rather than a choice: four
+ * thumbnails, and picking one opens the editor on it.
  */
-function SinglePane({
+function CandidateGridBody({
   offer,
   busy,
-  editedIndex,
-  onEditFrame,
   actions,
 }: {
   offer: Offer;
   busy: boolean;
-  editedIndex: number | null;
-  onEditFrame: (element: HTMLIFrameElement | null) => void;
   actions: PickerActions;
 }): JSX.Element {
-  const frame = selectedFrame(offer);
-  if (frame === null) {
-    return (
-      <div className="sasha-single">
-        <SlideChips offer={offer} disabled={busy} onSelect={actions.selectSlide} />
-        <p className="sasha-trouble">option {offer.selectedIndex} is missing from the manifest</p>
-      </div>
-    );
-  }
   return (
-    <div className="sasha-single">
-      <div className="sasha-backbar">
-        <button
-          type="button"
-          className="sasha-secondary sasha-small"
-          disabled={busy}
-          onClick={() => actions.chooseView("grid")}
-        >
-          Back to all candidates
-        </button>
-        <SlideChips offer={offer} disabled={busy} onSelect={actions.selectSlide} />
-      </div>
-      <div className="sasha-pane sasha-pane-big">
-        <div className="sasha-stage">
-          <SlideStage
-            frame={frame}
-            rendering={offer.rendering}
-            tool={offer.tool}
-            disabled={busy}
-            onEditFrame={frame.index === editedIndex ? onEditFrame : null}
-            onDraw={actions.drawAnomaly}
-          />
-        </div>
-      </div>
-    </div>
+    <CandidateGrid
+      offer={offer}
+      disabled={busy}
+      editedIndex={null}
+      onEditFrame={noFrame}
+      onZoom={actions.openEditor}
+      onInsert={actions.insertPicked}
+      onReport={actions.openReport}
+      insertable={offer.presentationId !== null}
+      reportOpening={offer.report.kind === "opening"}
+      onDraw={actions.drawAnomaly}
+    />
   );
 }
+
+/** The grid never hosts the live editor -- that is the editor window's job. */
+function noFrame(): void {}
 
 /**
  * WHAT THE CURRENT TOOL NEEDS BELOW THE SLIDES, and nothing about the zoom level. The annotate tool
  * needs the boxes' notes and their Send; the edit tool needs the editor's own list. Exhaustive, so
  * a third tool cannot ship with no panel.
  */
-function ToolPanel({
+export function ToolPanel({
   offer,
   reach,
   editor,
@@ -437,7 +403,7 @@ function ToolPanel({
   switch (offer.tool) {
     case "annotate":
       return <AnomalyList offer={offer} disabled={busy} actions={actions} />;
-    case "edit":
+    case "select":
       return (
         <EditorSlot
           editor={editor}
@@ -451,40 +417,6 @@ function ToolPanel({
     default:
       return assertNever(offer.tool);
   }
-}
-
-/**
- * "Report a defect" on the candidate the user is working on. It is IN THE FOOTER ROW, beside
- * Dismiss and Insert, and reachable at both zoom levels: a defect is noticed whenever it is
- * noticed, and burying the entry inside one view is what made it feel like a mode.
- *
- * It is a BUTTON IN AN EXISTING ROW rather than a row of its own, and that is a measurement. The
- * edit tool's panel is always on screen now, so the chrome above the grid grew; a 22 px row plus its
- * gap here was enough to push a three-candidate proposal's last cell below the fold, which breaks
- * the grid's promise that two rows are comparable in one glance. The sentence it used to carry is
- * on the button's own `title`, and `ReportStatus` renders nothing at all until there is something
- * to say -- so the default state costs no height.
- */
-function ReportButton({
-  offer,
-  disabled,
-  onReport,
-}: {
-  offer: Offer;
-  disabled: boolean;
-  onReport: (spec: Readonly<{ index: number }>) => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      className="sasha-secondary sasha-small"
-      disabled={disabled || offer.report.kind === "opening"}
-      title={REPORT_EXPLANATION}
-      onClick={() => onReport({ index: offer.selectedIndex })}
-    >
-      {offer.report.kind === "opening" ? "opening..." : `Report a defect in option ${offer.selectedIndex}`}
-    </button>
-  );
 }
 
 /** Whether the report window appeared. Read back, never assumed -- a host can decline. */
@@ -502,27 +434,24 @@ function ReportStatus({ report }: { report: OpenPhase }): JSX.Element | null {
   }
 }
 
-function DialogHeader({ offer, stage }: { offer: Offer; stage: SubmitStage | null }): JSX.Element {
+function DialogHeader({ offer, stage }: { offer: Offer; stage: SubmitStage | null }): JSX.Element | null {
+  // "4 candidate slides p_1791145806407_yig6ws" used to stand above the grid. The count is the
+  // number of pictures below it and the id names a file nobody opens, so the row said nothing a
+  // reader could not already see. What is left is only what has gone WRONG or what is in flight --
+  // and when neither has, this renders nothing and costs no height.
+  const trouble = offer.comments.kind === "failed" ? offer.comments.message : null;
+  if (trouble === null && stage === null && offer.lastFailure === null) return null;
   return (
     <header className="sasha-header">
-      <strong>
-        {offer.proposal.count} candidate slide{offer.proposal.count === 1 ? "" : "s"}
-      </strong>
-      <span className="sasha-dim">{offer.proposal.proposalId}</span>
-      {offer.comments.kind === "failed" ? (
-        <span className="sasha-trouble">open comments could not be read: {offer.comments.message}</span>
-      ) : null}
+      {trouble === null ? null : <span className="sasha-trouble">open comments could not be read: {trouble}</span>}
       {stage === null ? null : <span className="sasha-busy">{STAGE_LABEL[stage]}</span>}
       {offer.lastFailure === null ? null : <span className="sasha-trouble">{offer.lastFailure}</span>}
-      {offer.presentationId === null ? (
-        <span className="sasha-trouble">this tab is not an editable presentation -- insert is unavailable</span>
-      ) : null}
     </header>
   );
 }
 
 /** 1-based chips. The number on the chip is the number in PICK and the number the user says out loud. */
-function SlideChips({
+export function SlideChips({
   offer,
   disabled,
   onSelect,
@@ -573,7 +502,7 @@ function ChipUnresolved({ count }: { count: UnresolvedCount }): JSX.Element | nu
  * one on purpose: the annotate tool works at either zoom level, so a box dragged on cell 3 while
  * cell 1 is selected must still be visible and sendable without the user hunting for it.
  */
-function AnomalyList({
+export function AnomalyList({
   offer,
   disabled,
   actions,
@@ -583,12 +512,26 @@ function AnomalyList({
   actions: PickerActions;
 }): JSX.Element {
   const rows = offer.slides.flatMap((frame) => frame.anomalies.map((anomaly) => ({ frame, anomaly })));
+  // THE NEWEST MARK-UP IS SCROLLED INTO VIEW. A row is a whole comment card -- head, textarea,
+  // Send -- and the list is a bounded scroller, so the box the user just drew landed below its
+  // fold, sliced through the middle, with its note field out of reach (the browser smoke's
+  // "every mark-up row fits inside its list" check). Only when the count GROWS: a list that
+  // jumped to the bottom on every keystroke would yank the row being typed in away from the user.
+  const list = useRef<HTMLUListElement | null>(null);
+  const seenRows = useRef(rows.length);
+  useEffect(() => {
+    const grew = rows.length > seenRows.current;
+    seenRows.current = rows.length;
+    const element = list.current;
+    if (!grew || element === null) return;
+    element.scrollTop = element.scrollHeight;
+  }, [rows.length]);
   return (
-    <ul className="sasha-anomalies" aria-label="mark-ups">
+    <ul className="sasha-anomalies" aria-label="mark-ups" ref={list}>
       {rows.length === 0 ? (
         <li className="sasha-dim">
-          Drag a box on any candidate -- in the grid or on one slide -- then type what is wrong and
-          send it. Sasha answers it as a comment on that candidate.
+          Nothing marked up yet. Click anything on the open candidate and say what is wrong with
+          it; Sasha answers as a comment on that candidate.
         </li>
       ) : null}
       {rows.map(({ frame, anomaly }) => (
@@ -615,7 +558,7 @@ function AnomalyList({
  * neither wrap nor hold a newline. Enter inserts one; Ctrl (or Command) + Enter sends, which is
  * the same pair of keys Google's own comment box uses.
  */
-function AnomalyRow({
+export function AnomalyRow({
   frame,
   anomaly,
   disabled,
@@ -707,38 +650,6 @@ function AnomalySent({ sent }: { sent: AnomalySendPhase }): JSX.Element | null {
   }
 }
 
-function DialogActions({
-  offer,
-  stage,
-  actions,
-}: {
-  offer: Offer;
-  stage: SubmitStage | null;
-  actions: PickerActions;
-}): JSX.Element {
-  const reported = anomaliesOf(offer).length;
-  return (
-    <footer className="sasha-actions">
-      <span className="sasha-dim">
-        {reported === 0 ? "nothing marked up" : `${reported} mark-up${reported === 1 ? "" : "s"} will travel with PICK`}
-      </span>
-      <ReportStatus report={offer.report} />
-      <ReportButton offer={offer} disabled={stage !== null} onReport={actions.openReport} />
-      <button type="button" className="sasha-secondary" disabled={stage !== null} onClick={actions.dismiss}>
-        Dismiss
-      </button>
-      <button
-        type="button"
-        className="sasha-primary"
-        disabled={stage !== null || offer.presentationId === null}
-        onClick={() => actions.insertPicked(offer.selectedIndex)}
-      >
-        Insert option {offer.selectedIndex}
-      </button>
-    </footer>
-  );
-}
-
 /**
  * The browser half of `collectDiagnostics`. Every read is wrapped, because the whole point is
  * to describe a BROKEN session, and a diagnostic that throws in one is worthless.
@@ -783,34 +694,44 @@ function readDiagnostics(): ReturnType<typeof collectDiagnostics> {
 function Shell({ children }: { children: ReactNode }): JSX.Element {
   return (
     <>
-      <style>{PICKER_CSS}</style>
+      {/* The inspector ships its own rules with the component rather than having them live in a
+          stylesheet it does not own; one more string in the same tag costs nothing. */}
+      <style>
+        {PICKER_CSS}
+        {ELEMENT_INSPECTOR_CSS}
+      </style>
       <div className="sasha-shell sasha-shell-wide">{children}</div>
     </>
   );
 }
 
-const VIEW_ORDER: readonly SlideView[] = ["grid", "single"];
-const VIEW_LABEL: Readonly<Record<SlideView, string>> = {
-  grid: "All candidates",
-  single: "One slide",
-};
-const TOOL_ORDER: readonly SlideTool[] = ["edit", "annotate"];
-const TOOL_LABEL: Readonly<Record<SlideTool, string>> = {
-  edit: "Edit",
+/* THE EDITOR'S TOOLBAR, down its left edge. Two tools, named for what the pointer is. */
+export const TOOL_ORDER: readonly SlideTool[] = ["select", "annotate"];
+export const TOOL_LABEL: Readonly<Record<SlideTool, string>> = {
+  select: "Select",
   annotate: "Annotate",
 };
-const TOOL_HINT: Readonly<Record<SlideTool, string>> = {
-  edit: "Editing the selected candidate. Both tools work in either view -- pick whichever you need.",
-  annotate: "Drag a box on any candidate, in either view, and say what is wrong with it.",
+export const TOOL_GLYPH: Readonly<Record<SlideTool, string>> = {
+  select: "\u2196",
+  annotate: "\u25A2",
 };
+export const TOOL_HINT: Readonly<Record<SlideTool, string>> = {
+  select: "Click a thing on the slide to select it, then drag or resize it. Click again to select its parent.",
+  annotate: "Click a thing on the slide to comment on it. Click again to take in its container.",
+};
+/* THE GRID'S ONLY CHOICE, and the names are the ones that are TRUE.
+
+   `html` is the candidate itself -- a self-contained document that renders exactly -- so that is
+   the PREVIEW, and it is the default. `rendered` is NOT a rendering: rendered-preview.ts says so
+   in its own first line, it is a projection of the requests the converter will send Slides,
+   drawn as boxes and loose text. Calling that "Preview" and defaulting to it is why a table
+   looked like one run-on blob of its cells' text. It is useful -- it shows what Slides will
+   actually receive -- so it stays, under a name that says what it is. */
 const RENDERING_ORDER: readonly SlideRendering[] = ["html", "rendered"];
 const RENDERING_LABEL: Readonly<Record<SlideRendering, string>> = {
-  html: "HTML (authoritative)",
-  rendered: "Converted slide",
+  html: "Preview",
+  rendered: "Converted",
 };
-/** Why you would press Report a defect. On the button, because the footer row has no words to spare. */
-const REPORT_EXPLANATION =
-  "Opens the same editor on two slides -- this one as it is, and as it would be sent -- and sends only what you approve.";
 const STAGE_LABEL: Readonly<Record<SubmitStage, string>> = {
   converting: "converting...",
   inserting: "inserting into the deck...",

@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  A table with a <caption>.
+
+  THE BUG THIS PINS DOWN. `extractTable` walks rows and cells; a caption is neither, and the
+  walker's TABLE branch returned immediately after emitting the table, so the caption's subtree
+  was never visited at all. The sentence under the table was silently dropped from the slide.
+  Both caption-side values are here: the default (top) and the `bottom` a real candidate used.
+-->
+<style>
+  body { width: 1280px; height: 720px; margin: 0; font-family: Arial, sans-serif; background: #fff; }
+  table { border-collapse: collapse; position: absolute; left: 60px; width: 520px; }
+  #over { top: 60px; }
+  #under { top: 360px; }
+  #under caption { caption-side: bottom; }
+  caption { text-align: left; font-size: 14px; color: #8a8a96; padding: 10px 0; }
+  th, td { border: 1px solid #cccccc; padding: 8px 12px; font-size: 15px; text-align: left; }
+</style>
+</head>
+<body>
+  <table id="over">
+    <caption>A caption above its table</caption>
+    <tr><th>Name</th><th>Bytes</th></tr>
+    <tr><td>01.html</td><td>1,842</td></tr>
+  </table>
+  <table id="under">
+    <caption>A caption below its table</caption>
+    <tr><th>Name</th><th>Bytes</th></tr>
+    <tr><td>02.html</td><td>2,301</td></tr>
+  </table>
+</body>
+</html>

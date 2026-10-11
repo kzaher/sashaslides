@@ -485,3 +485,35 @@ function slideRevised(): Readonly<{ name: string; text: string }> {
     }),
   };
 }
+
+/*
+ * HOW TO CONNECT, BEFORE ANYTHING IS STUCK.
+ *
+ * The notice used to need a wait that had crossed the five-minute delivery threshold, so a user
+ * who opened the add-on with no session attached saw no instructions at all: nothing was waiting,
+ * so nothing could be unheard. They had to send a message and wait five minutes to be told how
+ * to attach the session that would have answered it.
+ */
+test("NOTHING ATTACHED YET: the connect instructions show with nothing waiting at all", () => {
+  const notice = nothingListeningOn({ waiting: [], presence: { kind: "never-acted" } });
+  assert.notEqual(notice, null, "no session has ever acted, so say how to start one");
+  assert.match(notice?.prompt ?? "", /sasha-slides/);
+});
+
+test("but an UNFINISHED read never claims it: absence of evidence is not evidence of absence", () => {
+  assert.equal(
+    nothingListeningOn({ waiting: [], presence: { kind: "unknown", message: "the log could not be read" } }),
+    null,
+  );
+});
+
+test("and a session that HAS acted is not told how to connect", () => {
+  assert.equal(
+    nothingListeningOn({ waiting: [], presence: { kind: "acted", at: "2026-10-06T10:25:00.000Z", agoMs: 1000 } }),
+    null,
+  );
+  assert.equal(
+    nothingListeningOn({ waiting: [], presence: { kind: "delivered", at: "2026-10-06T10:25:00.000Z", agoMs: 1000 } }),
+    null,
+  );
+});

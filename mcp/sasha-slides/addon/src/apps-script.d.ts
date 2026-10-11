@@ -2,7 +2,7 @@
 //
 // `google.script.run` is injected into an HtmlService page by Apps Script itself -- there is no
 // package to install and `@types/google-apps-script` only types the SERVER side (SlidesApp,
-// UrlFetchApp, ...), not this client shim. It is declared with the twelve real function signatures
+// UrlFetchApp, ...), not this client shim. It is declared with the real function signatures
 // instead of an index signature so a typo in a function name is a compile error and not a silent
 // "script function not found" at runtime.
 //
@@ -16,6 +16,8 @@ import type {
   InsertRequestSpec,
   ReadEventsSpec,
   ReadFeedbackSpec,
+  CommentReplySpec,
+  ReplyCommentSpec,
   ReportTargetSpec,
   WriteEventSpec,
   WritePickSpec,
@@ -48,11 +50,25 @@ declare global {
     /** The comment threads on each candidate's own NN.html -- the unresolved counts' one source. */
     sashaCandidateComments(spec: CandidateCommentsSpec): void;
     sashaInsert(spec: InsertRequestSpec): void;
+    /**
+     * Photograph each candidate as Google draws it, in a THROWAWAY deck that is deleted again.
+     * This is what the "Converted" pane shows; see bridge.ts `parseRenderPreviewsReply`.
+     */
+    sashaRenderPreviews(spec: RenderPreviewsSpec): void;
     sashaWritePick(spec: WritePickSpec): void;
     sashaSendFeedback(spec: SendFeedbackSpec): void;
     sashaReadFeedback(spec: ReadFeedbackSpec): void;
+    /** One reply on an existing thread, on whichever file the thread lives on. */
+    sashaReplyComment(spec: ReplyCommentSpec): void;
+    /** The same reply, with the field named `text` -- the thread rail's half of the migration. */
+    sashaReplyToComment(spec: CommentReplySpec): void;
+    /** Resolve a thread: Drive's reply with `action: "resolve"`. Either spec field carries the note. */
+    sashaResolveComment(spec: ReplyCommentSpec | CommentReplySpec): void;
     /** Takes nothing: the slides window is the same for every caller, and its size is Code.gs's. */
-    sashaOpenPicker(): void;
+    /** Open the slides window, optionally ON one candidate (bridge.ts `PickerTargetSpec`). */
+    sashaOpenPicker(spec?: PickerTargetSpec): void;
+    /** Which candidate it was asked to open on. Reading CLEARS it. */
+    sashaTakePickerTarget(): void;
     /** Show the DEFECT-REPORT window. Records which candidate, then shows that third document. */
     sashaOpenDefectReport(spec: ReportTargetSpec): void;
     /** The web-app URL for the report window, or null when the script is not deployed as one. */

@@ -834,6 +834,40 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     return true;
   }
 
+  /**
+   * A CELL'S BACKGROUND IS NOT ONLY ITS OWN.
+   *
+   * CSS paints table backgrounds in layers -- cell over row over row group over column over
+   * table -- so `background` on a `<tr>` shows THROUGH a cell that sets none. The extractor read
+   * only `getComputedStyle(td).backgroundColor`, which is transparent in that case, so a zebra
+   * written the usual way (`tbody tr:nth-child(even) { background: … }`) came out white. The
+   * fixtures all happen to write it on the `td` (`tr:nth-child(even) td`), which is why no test
+   * saw it; a real candidate wrote it on the row and lost the stripes.
+   *
+   * Column backgrounds are not walked: `<col>` is not an ancestor, and nothing in this product
+   * has ever emitted one. Cell over row over row group is the layering that occurs in practice.
+   */
+  function cellBackgroundOf(td: Element): { bgColor: string; bgAlpha: number } {
+    let node: Element | null = td;
+    while (node !== null) {
+      const cs = getComputedStyle(node);
+      const hex = rgb2hex(cs.backgroundColor);
+      const alpha = rgbAlpha(cs.backgroundColor);
+      if (hex && alpha > 0) return { bgColor: hex, bgAlpha: alpha };
+      const tag = (node.tagName || "").toUpperCase();
+      if (tag === "TABLE") break;
+      node = node.parentElement;
+      if (node !== null) {
+        const parentTag = (node.tagName || "").toUpperCase();
+        if (parentTag !== "TR" && parentTag !== "THEAD" && parentTag !== "TBODY"
+            && parentTag !== "TFOOT" && parentTag !== "TABLE") {
+          break;
+        }
+      }
+    }
+    return { bgColor: "", bgAlpha: 0 };
+  }
+
   // --- TABLE EXTRACTION ---
   function extractTable(table: HTMLTableElement): ExtractedElement {
     let bounds = getBounds(table);
@@ -920,8 +954,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
             fontWeight: cs.fontWeight,
             fontStyle: cs.fontStyle,
             color: cs.color,
-            bgColor: cs.bgColor,
-            bgAlpha: cs.bgAlpha,
+            ...cellBackgroundOf(td),
             textAlign: cs.textAlign,
             borderColor: cs.borderColor,
             borderWidth: cs.borderWidth,
@@ -1174,14 +1207,29 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
   function applyTextTransform(text: string, transform: string): string {
     if (transform === "uppercase") return text.toUpperCase();
     if (transform === "lowercase") return text.toLowerCase();
+    // `capitalize` uppercases the first letter of each WORD. It was simply missing, so a
+    // capitalized caption came out all-lowercase.
+    if (transform === "capitalize") {
+      return text.replace(/(^|[\s\u00a0(\[{"'\u2018\u201c])(\p{L})/gu, (_all, lead: string, letter: string) =>
+        lead + letter.toUpperCase());
+    }
     return text;
   }
 
   function getDirectText(el: Element): string {
     const parts: { type: string; value?: string }[] = [];
+    // THE SECOND PATH THAT HAD TO LEARN text-transform. An element with no inline children -- a
+    // caption, a footer, a label -- never reaches the run walk above; it comes through here, and
+    // here the transform was dropped on the floor. `text-transform: uppercase` on such an element
+    // simply did not happen, which is why "FIXTURE 01 · TEXT ONLY" rendered as "fixture 01 · text
+    // only" on a real candidate (mcp/sasha-slides/converter/calibration/sxs-candidates.ts).
+    const ownTransform = getComputedStyle(el).textTransform;
     for (const node of el.childNodes) {
       if (node.nodeType === 3) {
-        parts.push({ type: "text", value: node.textContent!.replace(/[ \t\n\r\f]+/g, " ") });
+        parts.push({
+          type: "text",
+          value: applyTextTransform(node.textContent!.replace(/[ \t\n\r\f]+/g, " "), ownTransform),
+        });
       } else if (node.nodeType === 1) {
         const tag = ((node as Element).tagName || "").toUpperCase();
         if (tag === "BR") {
@@ -1197,7 +1245,12 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
           // text doesn't already start with whitespace — prevents double
           // spaces while still fixing slide_18's "April2026" collision.
           const ml = parseFloat(childCs.marginLeft) || 0;
-          const text = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
+          // The CHILD's own computed transform, which it usually inherits from `el` but may
+          // override -- the same rule the run walk follows.
+          const text = applyTextTransform(
+            node.textContent!.replace(/[ \t\n\r\f]+/g, " "),
+            childCs.textTransform,
+          );
           if (ml > 2 && parts.length > 0) {
             const prev = parts[parts.length - 1];
             const prevVal = prev.type === "text" ? (prev.value || "") : "";
@@ -1241,7 +1294,17 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     let inlineFlowChildCount = 0;
     for (const node of el.childNodes) {
       if (node.nodeType === 3) {
-        const t = node.textContent!.replace(/[ \t\n\r\f]+/g, " ");
+        // THE TRANSFORM BELONGS TO THE ELEMENT, not to the inline children that happen to be
+        // inside it. This branch used to push the raw text while the INLINE branch below applied
+        // `applyTextTransform` -- so `<div style="text-transform:uppercase">mixed <b>bold</b>
+        // text</div>` came out as "mixed BOLD text": only the nested run was transformed, and an
+        // element with no inline children at all (a caption, a footer) lost the transform
+        // entirely. `text-transform` is INHERITED, so the parent's computed value is the right
+        // one for its own text nodes.
+        const t = applyTextTransform(
+          node.textContent!.replace(/[ \t\n\r\f]+/g, " "),
+          parentCs.textTransform,
+        );
         if (t) runs.push({ text: t, style: null });
       } else if (node.nodeType === 1) {
         const tag = ((node as Element).tagName || "").toUpperCase();
@@ -1356,7 +1419,33 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
           if (runs.length > 0) runs.push({ text: "\n", style: null });
           const childStyle = getStyle(node as Element);
           const childRuns = getTextRuns(node as Element, childStyle);
-          runs.push(...childRuns);
+          /*
+           * STAMP THE BLOCK CHILD'S OWN STYLE ONTO ITS BARE RUNS.
+           *
+           * `style: null` means "whatever the element this run belongs to is set in". The
+           * recursion passes the CHILD's style down as `parentStyle`, so inside the call a bare
+           * run means the child's style -- but the run ends up on the OUTER element, where bare
+           * means the OUTER style. The child's typography was therefore dropped on the floor:
+           * `<div><span class="badge">…</span><h1>…</h1></div>` emitted the h1's text at the
+           * div's inherited 16px, so a 62px/800 title rendered as body text about a quarter of
+           * its size (measured on a real candidate, slide 4).
+           *
+           * Only when the two actually differ: stamping unconditionally would turn every bare
+           * run into an explicit one and bloat the style requests for no change in appearance.
+           */
+          const childDiffers =
+            childStyle.fontSize !== parentStyle.fontSize ||
+            childStyle.fontWeight !== parentStyle.fontWeight ||
+            childStyle.fontStyle !== parentStyle.fontStyle ||
+            childStyle.fontFamily !== parentStyle.fontFamily ||
+            childStyle.color !== parentStyle.color ||
+            childStyle.letterSpacing !== parentStyle.letterSpacing ||
+            childStyle.textDecoration !== parentStyle.textDecoration;
+          runs.push(
+            ...(childDiffers
+              ? childRuns.map(run => (run.style === null ? { ...run, style: childStyle } : run))
+              : childRuns),
+          );
         }
       }
     }
@@ -2300,6 +2389,20 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       seen.add(el);
       el.querySelectorAll("tr, td, th, thead, tbody, tfoot").forEach(c => seen.add(c));
       elements.push(extractTable(el as HTMLTableElement));
+      /*
+       * THE <caption> IS NOT PART OF THE GRID, AND IT WAS BEING THROWN AWAY.
+       *
+       * `extractTable` walks rows and cells; a caption is neither, and this branch RETURNS, so
+       * the caption's subtree was never visited by the walker either. The sentence under the
+       * table simply vanished from the slide -- measured on a real candidate, where "Each row is
+       * one Drive write..." was in the HTML and absent from the conversion.
+       *
+       * It is walked as an ordinary element rather than taught to `extractTable`: a caption is a
+       * block of text that happens to sit above or below a table (`caption-side`), and the text
+       * extractor already knows how to place a block of text by its own bounds. No basic or
+       * complex fixture uses one, so no golden moves.
+       */
+      el.querySelectorAll(":scope > caption").forEach(caption => walk(caption));
       // After the table, emit inline "pill" spans (span with bg/border/radius)
       // as rect + centered text overlays. The table's cell-text already
       // contains the same string, but it sits below the pill. We re-draw the
@@ -2328,7 +2431,24 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     // IMG
     if (tag === "IMG") {
       seen.add(el);
-      elements.push({ type: "image", bounds, src: (el as HTMLImageElement).src || (el as HTMLImageElement).currentSrc || "" });
+      /*
+       * AN IMAGE'S OWN BOX TRAVELS WITH IT. This used to push bounds and src and nothing else,
+       * so a picture's `border` was dropped silently and its `border-radius` never even reached
+       * the converter -- `cornerRadius` is read on the other side and was always absent, which
+       * is why the rounded-corner LOSS was never reported either. The border is expressible as a
+       * Slides image outline; the radius is not, and now at least says so.
+       */
+      const imgStyle = getStyle(el);
+      elements.push({
+        type: "image",
+        bounds,
+        src: (el as HTMLImageElement).src || (el as HTMLImageElement).currentSrc || "",
+        cornerRadius: imgStyle.borderRadius,
+        borderWidth: imgStyle.borderWidth,
+        borderColor: imgStyle.borderColor,
+        borderStyle: imgStyle.borderStyle,
+        borderSides: imgStyle.borderSides,
+      });
       return;
     }
 
@@ -3339,13 +3459,42 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
   // Detect gradient backgrounds on body/html
   const bodyCs = getComputedStyle(document.body);
   const htmlCs = getComputedStyle(document.documentElement);
+  /*
+   * THE PAGE'S FLAT FALLBACK IS THE GRADIENT'S MEAN, not the first colour written.
+   *
+   * Slides has no conic fill, so a page painted with one must flatten to something. This used
+   * to take the FIRST hex in the background-image string, which is whichever stop the author
+   * happened to write first -- for `conic-gradient(from 210deg, #ff5f6d 0deg, …)` over a blue
+   * radial, that is a saturated coral, and a blue-and-purple slide converted to flat coral.
+   * "The gradient background looks quite horrible when converted" was exactly this.
+   *
+   * EVERY stop of EVERY layer is averaged, because the layers are composited and the eye reads
+   * the result, not the first declaration. The flattening is still a loss and is still reported
+   * as one (`rasterised-visual`); this only decides which flat colour is the least wrong.
+   */
   function extractGradientColor(bgImg: string): string | null {
     if (!bgImg || bgImg === "none") return null;
-    const hexMatch = bgImg.match(/#([0-9a-fA-F]{3,8})/);
-    if (hexMatch) return "#" + hexMatch[1];
-    const rgbMatch = bgImg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-    if (rgbMatch) return "#" + [rgbMatch[1], rgbMatch[2], rgbMatch[3]].map(x => parseInt(x).toString(16).padStart(2, "0")).join("");
-    return null;
+    const channels: [number, number, number][] = [];
+    for (const match of bgImg.matchAll(/#([0-9a-fA-F]{3,8})/g)) {
+      const parsed = hexChannels(match[1]);
+      if (parsed) channels.push(parsed);
+    }
+    for (const match of bgImg.matchAll(/rgba?\((\d+),\s*(\d+),\s*(\d+)/g)) {
+      channels.push([parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)]);
+    }
+    if (channels.length === 0) return null;
+    const mean = (at: number): number =>
+      Math.round(channels.reduce((sum, rgb) => sum + rgb[at], 0) / channels.length);
+    return "#" + [mean(0), mean(1), mean(2)].map(v => v.toString(16).padStart(2, "0")).join("");
+  }
+
+  /** `#rgb`, `#rrggbb` and `#rrggbbaa` to channels. Anything else is not a colour we can mean. */
+  function hexChannels(body: string): [number, number, number] | null {
+    const text = body.length === 3 ? body.split("").map(c => c + c).join("") : body;
+    if (text.length !== 6 && text.length !== 8) return null;
+    const at = (from: number): number => parseInt(text.slice(from, from + 2), 16);
+    const rgb: [number, number, number] = [at(0), at(2), at(4)];
+    return rgb.every(v => Number.isFinite(v)) ? rgb : null;
   }
   const bodyBg = rgb2hex(bodyCs.backgroundColor);
   const bodyGrad = parseLinearGradient(bodyCs.backgroundImage) || parseLinearGradient(htmlCs.backgroundImage);
@@ -3357,7 +3506,8 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     elements.unshift({
       type: "rect",
       bounds: { x: 0, y: 0, w: W, h: H },
-      fill: bodyGrad ? bodyGrad.stops[0].color : bodyGradColor,
+      // The MEAN here too: `stops[0]` is an extreme, and this is the flat fallback.
+      fill: bodyGradColor ?? (bodyGrad ? bodyGrad.stops[0].color : null),
       gradient: bodyGrad,
       borderWidth: 0,
       borderRadius: 0,

@@ -65,11 +65,28 @@ Important:
 * **`Input.dispatchMouseEvent` at a y past `innerHeight` is silently dropped.** The window here is 1599x878, so a row in
   a long dialog must be `scrollIntoView({block:'center'})`'d and RE-measured before clicking.
 * **Docs/Slides ignore input when `document.hasFocus()` is false** — call `Page.bringToFront()` before driving menus.
+* **`await Page.loadEventFired()` after `CDP.New({url})` NEVER resolves, and the script hangs until its timeout.**
+  The tab has already finished loading by the time you subscribe, and the event does not fire twice. Measured twice
+  independently on 2026-10-07 — two separate agents each lost a run to it. Subscribe BEFORE navigating and await the
+  promise afterwards: `const loaded = Page.loadEventFired(); await Page.navigate({url}); await loaded;` — probes
+  rewritten this way returned in under a second. Race it against a short timeout if the page may already be up.
+* **A stale sandbox target answers clicks and changes nothing, so drive the LAST match, never the first.** Re-opening a
+  sidebar or dialog leaves old `userCodeAppPanel` targets that still hold buttons and still report `CLICKED`. The newest
+  target is the live one (`mcp/sasha-slides/e2e/sasha-ui.ts`'s `pick()`); taking the first match costs an hour of "the
+  click worked but nothing opened".
 * **An add-on's custom menu is a Closure `menu-button` DIV inside `#docs-menubar`, not `[role=menuitem]`.** Scope the
   search to the menubar: the string also appears as the sidebar's own title, and clicking that does nothing.
 * **HtmlService nests your page ONE IFRAME BELOW `userCodeAppPanel`.** The outer frame is a ~900 byte shell; the bundle
-  is in `document.querySelector('iframe').contentDocument`. A 424 KB inlined bundle is served intact (measured) — the
-  corruption folklore did not reproduce.
+  is in `document.querySelector('iframe').contentDocument`.
+* **HtmlService runs a JavaScript COMMENT STRIPPER over every inline executable `<script>`, and it mangles minified
+  bundles.** Measured 2026-10-04 on Report.html (453 KB, under budget): it deleted `/* … */` inside template strings
+  and, after losing string state, cut `"https://staged…` from `//` to the next newline (9,803 bytes) →
+  "Uncaught SyntaxError: Invalid or unexpected token", blank page. It depends on CONTENT, not size. Fix in
+  `build-addon.ts` `surfaceHtml`: the bundle ships in `<script type="text/plain">` and a tiny loader copies it into a
+  real script element (not eval, so the no-`unsafe-eval` CSP allows it). Diagnose by diffing the served frame's script
+  against `dist/` — never trust "the editor holds the right length".
+* **A web-app deployment serves a FROZEN version**, not the editor's current code. After pushing files, Deploy →
+  Manage deployments → Edit → Version: New version, or the `/exec` window keeps running the old bundle.
 * **Re-opening a sidebar leaves STALE `userCodeAppPanel` targets** that still have buttons and still render old state,
   so clicking one looks like it worked and changes nothing. Find the live panel by content, and collapse duplicate deck
   tabs before driving the UI.

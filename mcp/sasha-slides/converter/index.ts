@@ -7,7 +7,7 @@
  *   - `emitSlideRequests` — a parsed extraction in, batchUpdate body out. Pure
  *     and synchronous; this is the half worth unit-testing densely.
  */
-export { convertHtmlToSlideRequests, extractSlideLayout } from "./convert-html-to-slide-requests.js";
+export { afterNextFrame, convertHtmlToSlideRequests, extractSlideLayout } from "./convert-html-to-slide-requests.js";
 export type { ConvertHtmlOptions, HtmlConversionResult } from "./convert-html-to-slide-requests.js";
 
 export { emitSlideRequests } from "./emit-requests.js";
@@ -39,7 +39,10 @@ export type { SlideImageSource, SlideImageUpload, StagedImageMediaType } from ".
 export {
   DEFAULT_PAGE_SIZE_EMU,
   DEFAULT_TEXT_INSET_EMU,
+  EMU_PER_POINT,
+  pageScaleFor,
   predictGoogleRowHeightPx,
+  pxToPoints,
   specForColumnWidthPx,
   specForRowHeightPx,
 } from "./geometry.js";

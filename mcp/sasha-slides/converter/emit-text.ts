@@ -30,6 +30,7 @@ import type {
   TypeStyle,
 } from "./extraction.js";
 import { outsetForTextInset, placeBox } from "./geometry.js";
+import type { PageScale } from "./geometry.js";
 import type { BulletGlyphPreset, SlidesApiRequest } from "./slides-api.js";
 import type { ElementEmission, EmitContext } from "./emit-context.js";
 import {
@@ -95,13 +96,14 @@ export function emitText(
   });
   if (shape !== null) requests.push(shape);
   requests.push({ insertText: { objectId, text: composed.text, insertionIndex: 0 } });
-  requests.push(...styleRequestsFor({ objectId, composed, baseStyle: element.style }));
+  requests.push(...styleRequestsFor({ objectId, composed, baseStyle: element.style, scale: context.scale }));
 
   return {
     requests,
     unsupported: [
       ...decorationReports,
       ...reportTextLosses({
+        scale: context.scale,
         bounds: element.bounds,
         viewportPx,
         elementType: "text",
@@ -173,6 +175,13 @@ export function emitList(
     );
   }
 
+  /*
+   * THE LIST'S OWN BOX IS THE INDENT. The text box is already placed where the `<ol>` sits, so
+   * the half-inch Slides adds for a bullet is indent on top of indent. Zero puts the marker at
+   * the box's left edge, which is where the browser draws it for a list whose padding the page
+   * has reset -- the common case, and the one every candidate uses.
+   */
+  const paragraphRequests: SlidesApiRequest[] = [];
   const objectId = context.ids.next("list");
   const textBounds = textBoxBounds({
     bounds: element.bounds,
@@ -217,7 +226,7 @@ export function emitList(
     styles.push(item.style);
     if (end <= start) continue;
 
-    const text = textStyleFor(item.style);
+    const text = textStyleFor(item.style, context.scale);
     requests.push({
       updateTextStyle: {
         objectId,
@@ -226,8 +235,12 @@ export function emitList(
         fields: text.fields,
       },
     });
-    const paragraphStyle = paragraphStyleFor(item.style);
-    requests.push({
+    const paragraphStyle = paragraphStyleFor(item.style, LIST_INDENT);
+    // HELD BACK UNTIL AFTER THE BULLETS. `createParagraphBullets` REWRITES a paragraph's indents
+    // to Slides' own bullet defaults -- half an inch of indentStart -- so a paragraph style sent
+    // before it is simply overwritten. That is why the numbered list sat ~38px right of where
+    // Chrome drew it however the indent was set: the request was being discarded, not ignored.
+    paragraphRequests.push({
       updateParagraphStyle: {
         objectId,
         textRange: { type: "FIXED_RANGE", startIndex: start, endIndex: end },
@@ -241,6 +254,7 @@ export function emitList(
   requests.push({
     createParagraphBullets: { objectId, textRange: { type: "ALL" }, bulletPreset: preset },
   });
+  requests.push(...paragraphRequests);
 
   const site = featureSite({
     bounds: element.bounds,
@@ -260,6 +274,7 @@ export function emitList(
   }
   unsupported.push(
     ...reportTextLosses({
+        scale: context.scale,
       bounds: element.bounds,
       viewportPx,
       elementType: "list",
@@ -284,9 +299,10 @@ export function reportTextLosses(
     elementType: string;
     domIndex: number | null;
     styles: readonly TypeStyle[];
+    scale: PageScale;
   }>,
 ): readonly UnsupportedFeature[] {
-  const { bounds, viewportPx, elementType, domIndex, styles } = options;
+  const { bounds, viewportPx, elementType, domIndex, styles, scale } = options;
   const site = featureSite({ bounds, viewportPx, elementType, domIndex });
   const reports: UnsupportedFeature[] = [];
   const seenFonts = new Set<string>();
@@ -294,7 +310,7 @@ export function reportTextLosses(
   let writingMode: string | null = null;
 
   for (const style of styles) {
-    const resolved = textStyleFor(style);
+    const resolved = textStyleFor(style, scale);
     if (resolved.fontSubstitutedFrom !== null && !seenFonts.has(resolved.fontSubstitutedFrom)) {
       seenFonts.add(resolved.fontSubstitutedFrom);
       reports.push({
@@ -380,12 +396,14 @@ export function styleRequestsFor(
     objectId: string;
     composed: ComposedText;
     baseStyle: TypeStyle;
+    /** The document-to-page mapping: a font size is a magnitude ON THE PAGE (geometry.ts). */
+    scale: PageScale;
     cellLocation?: Readonly<{ rowIndex: number; columnIndex: number }>;
   }>,
 ): readonly SlidesApiRequest[] {
-  const { objectId, composed, baseStyle } = options;
+  const { objectId, composed, baseStyle, scale } = options;
   const cell = options.cellLocation === undefined ? {} : { cellLocation: options.cellLocation };
-  const base = textStyleFor(baseStyle);
+  const base = textStyleFor(baseStyle, scale);
   const paragraph = paragraphStyleFor(baseStyle);
   const requests: SlidesApiRequest[] = [
     {
@@ -408,7 +426,7 @@ export function styleRequestsFor(
     },
   ];
   for (const span of composed.spans) {
-    const run = textStyleFor(span.style);
+    const run = textStyleFor(span.style, scale);
     requests.push({
       updateTextStyle: {
         objectId,
@@ -517,3 +535,6 @@ const EMPTY_DECORATION = {
   backgroundImage: null,
   clipPath: null,
 } as const;
+
+/** No indent at all: the list's own box already sits where the browser put the list. */
+const LIST_INDENT = { startEmu: 0, firstLineEmu: 0 } as const;
