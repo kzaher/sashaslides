@@ -1,0 +1,43 @@
+# The Sasha Slides remote MCP connector (mcp/sasha-slides/server.ts --http).
+#
+# Built ON THE SERVER by deploy/publish.sh from a context that holds exactly the files
+# context-files.ts lists (the server's import graph + the workflow skill + this
+# directory), laid out at their repo-relative paths:
+#
+#   /app/mcp/sasha-slides/...                     the server, run by tsx
+#   /app/.claude/skills/sasha-slides/SKILL.md     the client instructions it serves
+#
+# Secrets and state are never baked in; docker-compose.yml mounts them.
+
+FROM node:24-slim
+WORKDIR /app
+
+# Runtime dependencies, pinned by the lockfile in this directory.
+COPY mcp/sasha-slides/deploy/package.json mcp/sasha-slides/deploy/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+
+COPY .claude/skills/sasha-slides/SKILL.md .claude/skills/sasha-slides/SKILL.md
+COPY mcp/sasha-slides mcp/sasha-slides
+
+# Fail the build, not the first request, when the context is short of a file: --help
+# loads the whole import graph. (Not --selftest: that gates protocol behaviour, which the
+# unit tests own, and a red check there must not block shipping a fix.)
+RUN node_modules/.bin/tsx mcp/sasha-slides/server.ts --help > /dev/null
+
+# A dedicated unprivileged user. Not the image's `node` (uid 1000): on the server uid 1000
+# is a login user, who would then own the secrets. The passwd entry matters: tsx calls
+# os.userInfo(), which throws for a uid without one. publish.sh chowns data/ and the
+# secret files to this uid (CONNECTOR_UID).
+RUN groupadd -g 10100 sasha && useradd -u 10100 -g 10100 -M -d /nonexistent -s /usr/sbin/nologin sasha
+USER sasha
+ENV NODE_ENV=production
+EXPOSE 8787
+HEALTHCHECK --interval=30s --timeout=4s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+# --host 0.0.0.0 is inside the container only; compose publishes it on 127.0.0.1.
+ENTRYPOINT ["node_modules/.bin/tsx", "mcp/sasha-slides/server.ts", "--http", "--host", "0.0.0.0", "--port", "8787"]
+CMD ["--public-url", "https://sashaslides.com", \
+     "--store", "/data/oauth-store.json", "--key-store", "/data/account-keys.json", \
+     "--google-client", "/run/secrets/google_oauth_web.json", \
+     "--identity-providers", "/run/secrets/identity-providers.json"]

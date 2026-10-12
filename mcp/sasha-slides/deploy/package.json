@@ -1,0 +1,11 @@
+{
+  "name": "sasha-connector-runtime",
+  "private": true,
+  "description": "Runtime dependencies of mcp/sasha-slides/server.ts inside the connector image. Versions pinned to the repo root's installed node_modules. No \"type\" field on purpose: tsx then emits CommonJS, which workflow-instructions.ts relies on for __dirname.",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "googleapis": "171.4.0",
+    "tsx": "4.22.4",
+    "zod": "4.6.5"
+  }
+}

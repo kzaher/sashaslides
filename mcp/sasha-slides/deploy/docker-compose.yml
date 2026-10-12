@@ -1,0 +1,47 @@
+# The Sasha Slides remote MCP connector on the holosweat server.
+#
+# Its own compose project (`sasha-connector`) and directory (/root/sasha-connector), next
+# to the website's `sashaslides` project; nginx (host) proxies the connector's paths to
+# 127.0.0.1:6100 (renderer/html2slides/addon-server/deploy/nginx-sashaslides.conf).
+#
+#   /root/sasha-connector/
+#     src/       build context, replaced on every deploy by deploy/publish.sh
+#     data/      oauth-store.json + account-keys.json   (owned by uid 10100, the container user)
+#     secrets/   0700: connector.env (SASHA_MASTER_KEY, SASHA_SESSION_SECRET),
+#                google_oauth_web.json, identity-providers.json (0600, owned by uid 10100)
+#
+# SASHA_MASTER_KEY wraps every account key in data/account-keys.json: losing it, or
+# overwriting it, makes every user's stored grant unreadable. Back it up OFF this server.
+
+name: sasha-connector
+
+services:
+  connector:
+    image: sasha-connector:latest
+    build:
+      context: ../../..
+      dockerfile: mcp/sasha-slides/deploy/Dockerfile
+    restart: unless-stopped
+    init: true
+    user: "10100:10100"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - ${SASHA_CONNECTOR_HOME:-/root/sasha-connector}/secrets/connector.env
+    ports:
+      - "127.0.0.1:${SASHA_CONNECTOR_PORT:-6100}:8787"
+    volumes:
+      - ${SASHA_CONNECTOR_HOME:-/root/sasha-connector}/data:/data
+      - ${SASHA_CONNECTOR_HOME:-/root/sasha-connector}/secrets/google_oauth_web.json:/run/secrets/google_oauth_web.json:ro
+      - ${SASHA_CONNECTOR_HOME:-/root/sasha-connector}/secrets/identity-providers.json:/run/secrets/identity-providers.json:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 4s
+      start_period: 20s
+      retries: 3

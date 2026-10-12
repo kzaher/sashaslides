@@ -2261,6 +2261,25 @@
     if (cs.display === "none" || cs.visibility === "hidden" || parseFloat(cs.opacity) === 0) return false;
     return true;
   }
+  function cellBackgroundOf(td) {
+    let node = td;
+    while (node !== null) {
+      const cs = getComputedStyle(node);
+      const hex = rgb2hex(cs.backgroundColor);
+      const alpha = rgbAlpha(cs.backgroundColor);
+      if (hex && alpha > 0) return { bgColor: hex, bgAlpha: alpha };
+      const tag = (node.tagName || "").toUpperCase();
+      if (tag === "TABLE") break;
+      node = node.parentElement;
+      if (node !== null) {
+        const parentTag = (node.tagName || "").toUpperCase();
+        if (parentTag !== "TR" && parentTag !== "THEAD" && parentTag !== "TBODY" && parentTag !== "TFOOT" && parentTag !== "TABLE") {
+          break;
+        }
+      }
+    }
+    return { bgColor: "", bgAlpha: 0 };
+  }
   function extractTable(table) {
     let bounds = getBounds(table);
     const style = getStyle(table);
@@ -2331,8 +2350,7 @@
             fontWeight: cs.fontWeight,
             fontStyle: cs.fontStyle,
             color: cs.color,
-            bgColor: cs.bgColor,
-            bgAlpha: cs.bgAlpha,
+            ...cellBackgroundOf(td),
             textAlign: cs.textAlign,
             borderColor: cs.borderColor,
             borderWidth: cs.borderWidth,
@@ -2544,13 +2562,20 @@
   function applyTextTransform(text, transform) {
     if (transform === "uppercase") return text.toUpperCase();
     if (transform === "lowercase") return text.toLowerCase();
+    if (transform === "capitalize") {
+      return text.replace(/(^|[\\s\\u00a0(\\[{"'\\u2018\\u201c])(\\p{L})/gu, (_all, lead, letter) => lead + letter.toUpperCase());
+    }
     return text;
   }
   function getDirectText(el) {
     const parts = [];
+    const ownTransform = getComputedStyle(el).textTransform;
     for (const node of el.childNodes) {
       if (node.nodeType === 3) {
-        parts.push({ type: "text", value: node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " ") });
+        parts.push({
+          type: "text",
+          value: applyTextTransform(node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " "), ownTransform)
+        });
       } else if (node.nodeType === 1) {
         const tag = (node.tagName || "").toUpperCase();
         if (tag === "BR") {
@@ -2559,7 +2584,10 @@
           const childCs = getComputedStyle(node);
           if (childCs.position === "absolute" || childCs.position === "fixed") continue;
           const ml = parseFloat(childCs.marginLeft) || 0;
-          const text2 = node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " ");
+          const text2 = applyTextTransform(
+            node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " "),
+            childCs.textTransform
+          );
           if (ml > 2 && parts.length > 0) {
             const prev = parts[parts.length - 1];
             const prevVal = prev.type === "text" ? prev.value || "" : "";
@@ -2587,7 +2615,10 @@
     let inlineFlowChildCount = 0;
     for (const node of el.childNodes) {
       if (node.nodeType === 3) {
-        const t = node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " ");
+        const t = applyTextTransform(
+          node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " "),
+          parentCs.textTransform
+        );
         if (t) runs.push({ text: t, style: null });
       } else if (node.nodeType === 1) {
         const tag = (node.tagName || "").toUpperCase();
@@ -2666,7 +2697,10 @@
           if (runs.length > 0) runs.push({ text: "\\n", style: null });
           const childStyle = getStyle(node);
           const childRuns = getTextRuns(node, childStyle);
-          runs.push(...childRuns);
+          const childDiffers = childStyle.fontSize !== parentStyle.fontSize || childStyle.fontWeight !== parentStyle.fontWeight || childStyle.fontStyle !== parentStyle.fontStyle || childStyle.fontFamily !== parentStyle.fontFamily || childStyle.color !== parentStyle.color || childStyle.letterSpacing !== parentStyle.letterSpacing || childStyle.textDecoration !== parentStyle.textDecoration;
+          runs.push(
+            ...childDiffers ? childRuns.map((run) => run.style === null ? { ...run, style: childStyle } : run) : childRuns
+          );
         }
       }
     }
@@ -3376,6 +3410,7 @@
       seen.add(el);
       el.querySelectorAll("tr, td, th, thead, tbody, tfoot").forEach((c) => seen.add(c));
       elements.push(extractTable(el));
+      el.querySelectorAll(":scope > caption").forEach((caption) => walk(caption));
       el.querySelectorAll("td span, th span").forEach((sp) => emitPillSpan(sp));
       return;
     }
@@ -3391,7 +3426,17 @@
     }
     if (tag === "IMG") {
       seen.add(el);
-      elements.push({ type: "image", bounds, src: el.src || el.currentSrc || "" });
+      const imgStyle = getStyle(el);
+      elements.push({
+        type: "image",
+        bounds,
+        src: el.src || el.currentSrc || "",
+        cornerRadius: imgStyle.borderRadius,
+        borderWidth: imgStyle.borderWidth,
+        borderColor: imgStyle.borderColor,
+        borderStyle: imgStyle.borderStyle,
+        borderSides: imgStyle.borderSides
+      });
       return;
     }
     if (tag === "SVG" || tag === "CANVAS") {
@@ -3994,11 +4039,24 @@
   const htmlCs = getComputedStyle(document.documentElement);
   function extractGradientColor(bgImg) {
     if (!bgImg || bgImg === "none") return null;
-    const hexMatch = bgImg.match(/#([0-9a-fA-F]{3,8})/);
-    if (hexMatch) return "#" + hexMatch[1];
-    const rgbMatch = bgImg.match(/rgb\\((\\d+),\\s*(\\d+),\\s*(\\d+)\\)/);
-    if (rgbMatch) return "#" + [rgbMatch[1], rgbMatch[2], rgbMatch[3]].map((x) => parseInt(x).toString(16).padStart(2, "0")).join("");
-    return null;
+    const channels = [];
+    for (const match of bgImg.matchAll(/#([0-9a-fA-F]{3,8})/g)) {
+      const parsed = hexChannels(match[1]);
+      if (parsed) channels.push(parsed);
+    }
+    for (const match of bgImg.matchAll(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/g)) {
+      channels.push([parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)]);
+    }
+    if (channels.length === 0) return null;
+    const mean = (at) => Math.round(channels.reduce((sum, rgb) => sum + rgb[at], 0) / channels.length);
+    return "#" + [mean(0), mean(1), mean(2)].map((v) => v.toString(16).padStart(2, "0")).join("");
+  }
+  function hexChannels(body) {
+    const text = body.length === 3 ? body.split("").map((c) => c + c).join("") : body;
+    if (text.length !== 6 && text.length !== 8) return null;
+    const at = (from) => parseInt(text.slice(from, from + 2), 16);
+    const rgb = [at(0), at(2), at(4)];
+    return rgb.every((v) => Number.isFinite(v)) ? rgb : null;
   }
   const bodyBg = rgb2hex(bodyCs.backgroundColor);
   const bodyGrad = parseLinearGradient(bodyCs.backgroundImage) || parseLinearGradient(htmlCs.backgroundImage);
@@ -4007,7 +4065,8 @@
     elements.unshift({
       type: "rect",
       bounds: { x: 0, y: 0, w: W, h: H },
-      fill: bodyGrad ? bodyGrad.stops[0].color : bodyGradColor,
+      // The MEAN here too: \`stops[0]\` is an extreme, and this is the flat fallback.
+      fill: bodyGradColor ?? (bodyGrad ? bodyGrad.stops[0].color : null),
       gradient: bodyGrad,
       borderWidth: 0,
       borderRadius: 0
@@ -4381,6 +4440,25 @@
     if (cs.display === "none" || cs.visibility === "hidden" || parseFloat(cs.opacity) === 0) return false;
     return true;
   }
+  function cellBackgroundOf(td) {
+    let node = td;
+    while (node !== null) {
+      const cs = getComputedStyle(node);
+      const hex = rgb2hex(cs.backgroundColor);
+      const alpha = rgbAlpha(cs.backgroundColor);
+      if (hex && alpha > 0) return { bgColor: hex, bgAlpha: alpha };
+      const tag = (node.tagName || "").toUpperCase();
+      if (tag === "TABLE") break;
+      node = node.parentElement;
+      if (node !== null) {
+        const parentTag = (node.tagName || "").toUpperCase();
+        if (parentTag !== "TR" && parentTag !== "THEAD" && parentTag !== "TBODY" && parentTag !== "TFOOT" && parentTag !== "TABLE") {
+          break;
+        }
+      }
+    }
+    return { bgColor: "", bgAlpha: 0 };
+  }
   function extractTable(table) {
     let bounds = getBounds(table);
     const style = getStyle(table);
@@ -4451,8 +4529,7 @@
             fontWeight: cs.fontWeight,
             fontStyle: cs.fontStyle,
             color: cs.color,
-            bgColor: cs.bgColor,
-            bgAlpha: cs.bgAlpha,
+            ...cellBackgroundOf(td),
             textAlign: cs.textAlign,
             borderColor: cs.borderColor,
             borderWidth: cs.borderWidth,
@@ -4664,13 +4741,20 @@
   function applyTextTransform(text, transform) {
     if (transform === "uppercase") return text.toUpperCase();
     if (transform === "lowercase") return text.toLowerCase();
+    if (transform === "capitalize") {
+      return text.replace(/(^|[\\s\\u00a0(\\[{"'\\u2018\\u201c])(\\p{L})/gu, (_all, lead, letter) => lead + letter.toUpperCase());
+    }
     return text;
   }
   function getDirectText(el) {
     const parts = [];
+    const ownTransform = getComputedStyle(el).textTransform;
     for (const node of el.childNodes) {
       if (node.nodeType === 3) {
-        parts.push({ type: "text", value: node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " ") });
+        parts.push({
+          type: "text",
+          value: applyTextTransform(node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " "), ownTransform)
+        });
       } else if (node.nodeType === 1) {
         const tag = (node.tagName || "").toUpperCase();
         if (tag === "BR") {
@@ -4679,7 +4763,10 @@
           const childCs = getComputedStyle(node);
           if (childCs.position === "absolute" || childCs.position === "fixed") continue;
           const ml = parseFloat(childCs.marginLeft) || 0;
-          const text2 = node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " ");
+          const text2 = applyTextTransform(
+            node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " "),
+            childCs.textTransform
+          );
           if (ml > 2 && parts.length > 0) {
             const prev = parts[parts.length - 1];
             const prevVal = prev.type === "text" ? prev.value || "" : "";
@@ -4707,7 +4794,10 @@
     let inlineFlowChildCount = 0;
     for (const node of el.childNodes) {
       if (node.nodeType === 3) {
-        const t = node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " ");
+        const t = applyTextTransform(
+          node.textContent.replace(/[ \\t\\n\\r\\f]+/g, " "),
+          parentCs.textTransform
+        );
         if (t) runs.push({ text: t, style: null });
       } else if (node.nodeType === 1) {
         const tag = (node.tagName || "").toUpperCase();
@@ -4786,7 +4876,10 @@
           if (runs.length > 0) runs.push({ text: "\\n", style: null });
           const childStyle = getStyle(node);
           const childRuns = getTextRuns(node, childStyle);
-          runs.push(...childRuns);
+          const childDiffers = childStyle.fontSize !== parentStyle.fontSize || childStyle.fontWeight !== parentStyle.fontWeight || childStyle.fontStyle !== parentStyle.fontStyle || childStyle.fontFamily !== parentStyle.fontFamily || childStyle.color !== parentStyle.color || childStyle.letterSpacing !== parentStyle.letterSpacing || childStyle.textDecoration !== parentStyle.textDecoration;
+          runs.push(
+            ...childDiffers ? childRuns.map((run) => run.style === null ? { ...run, style: childStyle } : run) : childRuns
+          );
         }
       }
     }
@@ -5496,6 +5589,7 @@
       seen.add(el);
       el.querySelectorAll("tr, td, th, thead, tbody, tfoot").forEach((c) => seen.add(c));
       elements.push(extractTable(el));
+      el.querySelectorAll(":scope > caption").forEach((caption) => walk(caption));
       el.querySelectorAll("td span, th span").forEach((sp) => emitPillSpan(sp));
       return;
     }
@@ -5511,7 +5605,17 @@
     }
     if (tag === "IMG") {
       seen.add(el);
-      elements.push({ type: "image", bounds, src: el.src || el.currentSrc || "" });
+      const imgStyle = getStyle(el);
+      elements.push({
+        type: "image",
+        bounds,
+        src: el.src || el.currentSrc || "",
+        cornerRadius: imgStyle.borderRadius,
+        borderWidth: imgStyle.borderWidth,
+        borderColor: imgStyle.borderColor,
+        borderStyle: imgStyle.borderStyle,
+        borderSides: imgStyle.borderSides
+      });
       return;
     }
     if (tag === "SVG" || tag === "CANVAS") {
@@ -6114,11 +6218,24 @@
   const htmlCs = getComputedStyle(document.documentElement);
   function extractGradientColor(bgImg) {
     if (!bgImg || bgImg === "none") return null;
-    const hexMatch = bgImg.match(/#([0-9a-fA-F]{3,8})/);
-    if (hexMatch) return "#" + hexMatch[1];
-    const rgbMatch = bgImg.match(/rgb\\((\\d+),\\s*(\\d+),\\s*(\\d+)\\)/);
-    if (rgbMatch) return "#" + [rgbMatch[1], rgbMatch[2], rgbMatch[3]].map((x) => parseInt(x).toString(16).padStart(2, "0")).join("");
-    return null;
+    const channels = [];
+    for (const match of bgImg.matchAll(/#([0-9a-fA-F]{3,8})/g)) {
+      const parsed = hexChannels(match[1]);
+      if (parsed) channels.push(parsed);
+    }
+    for (const match of bgImg.matchAll(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/g)) {
+      channels.push([parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)]);
+    }
+    if (channels.length === 0) return null;
+    const mean = (at) => Math.round(channels.reduce((sum, rgb) => sum + rgb[at], 0) / channels.length);
+    return "#" + [mean(0), mean(1), mean(2)].map((v) => v.toString(16).padStart(2, "0")).join("");
+  }
+  function hexChannels(body) {
+    const text = body.length === 3 ? body.split("").map((c) => c + c).join("") : body;
+    if (text.length !== 6 && text.length !== 8) return null;
+    const at = (from) => parseInt(text.slice(from, from + 2), 16);
+    const rgb = [at(0), at(2), at(4)];
+    return rgb.every((v) => Number.isFinite(v)) ? rgb : null;
   }
   const bodyBg = rgb2hex(bodyCs.backgroundColor);
   const bodyGrad = parseLinearGradient(bodyCs.backgroundImage) || parseLinearGradient(htmlCs.backgroundImage);
@@ -6127,7 +6244,8 @@
     elements.unshift({
       type: "rect",
       bounds: { x: 0, y: 0, w: W, h: H },
-      fill: bodyGrad ? bodyGrad.stops[0].color : bodyGradColor,
+      // The MEAN here too: \`stops[0]\` is an extreme, and this is the flat fallback.
+      fill: bodyGradColor ?? (bodyGrad ? bodyGrad.stops[0].color : null),
       gradient: bodyGrad,
       borderWidth: 0,
       borderRadius: 0

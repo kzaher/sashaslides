@@ -19,7 +19,7 @@ set -euo pipefail
 
 # ── config ───────────────────────────────────────────────────────────────────
 SERVER_USER="root"
-SERVER="server.holosweat.com"
+SERVER="78.46.91.218"            # server.holosweat.com; the name does not resolve from every machine
 DOMAIN="sashaslides.com"          # <-- the subdomain (A-record → server IP)
 ACME_EMAIL="krunoslav.zaher@gmail.com"         # <-- certbot registration email
 HOST_PORT="6000"                       # localhost port nginx proxies to (free one)
