@@ -36,7 +36,11 @@ CONNECTOR_HOME="/root/sasha-connector"
 # The connector's container user (mcp/sasha-slides/deploy/Dockerfile). Not 1000: on the
 # server uid 1000 is a login user, who would then own the secrets.
 CONNECTOR_UID="10100"
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=10 -o ServerAliveCountMax=3)
+# The server's host keys are pinned in the repo, so a rebuilt container (empty ~/.ssh) deploys
+# without a prompt and still refuses an impostor. Refresh with: ssh-keyscan 78.46.91.218 > deploy/known_hosts
+KNOWN_HOSTS="$(cd "$(dirname "$0")" && pwd)/known_hosts"
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=10 -o ServerAliveCountMax=3
+          -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS")
 [ -z "$KEY" ] || SSH_OPTS+=(-i "$KEY" -o IdentitiesOnly=yes)
 
 # Wall-clock budgets (seconds). Each remote step is killed past its budget, and the ssh

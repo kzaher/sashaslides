@@ -27,9 +27,15 @@ test("every mapped page exists in public/", () => {
   for (const file of new Set(Object.values(PAGES))) assert.ok(existsSync(join(PUBLIC_DIR, file)), file);
 });
 
-test("the home page links both legal pages and the developer tools", () => {
+test("the public pages link both legal pages and never advertise the developer tools", () => {
   const home = read("home.html");
-  for (const href of ['href="/privacy"', 'href="/terms"', 'href="/dev"']) assert.ok(home.includes(href), href);
+  for (const href of ['href="/privacy"', 'href="/terms"']) assert.ok(home.includes(href), href);
+  for (const file of ["home.html", "privacy.html", "terms.html"]) {
+    const page = read(file);
+    assert.doesNotMatch(page, /href="\/dev"/, `${file}: no link to /dev`);
+    assert.doesNotMatch(page, />Developers</, `${file}: no Developers entry`);
+  }
+  assert.equal(pageFor("/dev"), "app.html", "the developer UI is still served, just not linked");
 });
 
 test("the privacy policy carries what Google's verification checks for", () => {
