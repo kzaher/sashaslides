@@ -29,8 +29,8 @@ import { FEEDBACK_DELIVERED_EVENT_KIND } from "./feedback-delivery";
 import { assertNever } from "./google-auth";
 
 /**
- * One line of the conversation. The first seven variants are PROTOCOL.md's `kind` values;
- * `opaque` is the eighth on purpose — see the file header. Every variant carries `at` (when
+ * One line of the conversation. Every variant but the last is one of PROTOCOL.md's `kind` values;
+ * `opaque` is the last on purpose — see the file header. Every variant carries `at` (when
  * its writer says it happened) and the `protocolVersion` it was written under.
  */
 export type SessionEvent =
@@ -42,6 +42,8 @@ export type SessionEvent =
   | SlidesClearedEvent
   | SlideInsertedEvent
   | FeedbackDeliveredEvent
+  | SlideArchivedEvent
+  | SlideRestoredEvent
   | OpaqueEvent;
 
 /** Sasha staged N candidates. Written by the server, at the end of `createProposal`. */
@@ -168,6 +170,27 @@ export type FeedbackDeliveredEvent = Readonly<{
 export type FeedbackDeliveryTool = "read_feedback" | "await_feedback";
 
 /**
+ * The user set a candidate aside in the sidebar. Written by the add-on, read by Sasha through
+ * `session_events`. It deletes nothing: the candidate's `NN.html` and its threads stay, and a
+ * later `slide-restored` brings it back. The NEWEST of the two per `slideIndex` is the state.
+ */
+export type SlideArchivedEvent = Readonly<{
+  kind: "slide-archived";
+  protocolVersion: number;
+  at: string;
+  /** 1-based, matching "slides are 1-based everywhere". */
+  slideIndex: number;
+}>;
+
+/** The user brought an archived candidate back. Written by the add-on, read by Sasha. */
+export type SlideRestoredEvent = Readonly<{
+  kind: "slide-restored";
+  protocolVersion: number;
+  at: string;
+  slideIndex: number;
+}>;
+
+/**
  * An event this build does not understand, preserved rather than dropped.
  *
  * `rawKind` is whatever the writer called it (from the body, else from the file name, which
@@ -193,6 +216,8 @@ export const SESSION_EVENT_KINDS: readonly string[] = [
   "slides-cleared",
   "slide-inserted",
   FEEDBACK_DELIVERED_EVENT_KIND,
+  "slide-archived",
+  "slide-restored",
 ];
 
 /** The folder events live in, found by NAME under the proposal folder. */
@@ -523,6 +548,15 @@ export function parseSessionEvent(
         commentIds,
       };
     }
+    case "slide-archived":
+    case "slide-restored": {
+      const slideIndex = asNumber(body["slideIndex"]);
+      // An archive that names no slide is opaque rather than an archive of slide 0.
+      if (slideIndex === null) return opaque(`${rawKind} needs slideIndex`);
+      return rawKind === "slide-archived"
+        ? { kind: "slide-archived", protocolVersion: version, at, slideIndex }
+        : { kind: "slide-restored", protocolVersion: version, at, slideIndex };
+    }
     default:
       // THE unknown-kind rule. A writer newer than this reader is expected, not exceptional.
       return opaque(`unknown event kind "${rawKind}"`);
@@ -560,6 +594,10 @@ export function describeSessionEvent(event: SessionEvent): string {
         `a Claude session read ${String(event.commentIds.length)} comment(s) ` +
         `through ${event.tool}`
       );
+    case "slide-archived":
+      return `the user archived candidate ${String(event.slideIndex)} (set aside, not deleted)`;
+    case "slide-restored":
+      return `the user restored candidate ${String(event.slideIndex)} from the archive`;
     case "opaque":
       return `something happened (${event.rawKind}), written by a newer build: ${event.reason}`;
     default:
@@ -580,6 +618,8 @@ export function sessionEventBody(event: SessionEvent): Readonly<Record<string, u
     case "slides-cleared":
     case "slide-inserted":
     case "feedback-delivered":
+    case "slide-archived":
+    case "slide-restored":
       return { ...event };
     default:
       return assertNever(event);

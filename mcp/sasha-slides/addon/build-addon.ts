@@ -176,10 +176,16 @@ function showSidebar() {
  * Modeless also leaves the sidebar usable while this is open — they are separate documents with
  * separate lifetimes, so the conversation keeps running (UI-CONTRACT.md).
  */
-function showPicker() {
+function showPicker(boot) {
   var page = HtmlService.createHtmlOutputFromFile('Dialog')
     .setWidth(SASHA_DIALOG_WIDTH)
     .setHeight(SASHA_DIALOG_HEIGHT);
+  // THE SEED (src/picker-seed.ts): what the sidebar already read, plus sashaHello's answer, so the
+  // window draws without six round trips. Inert text/plain, like the bundle, so HtmlService's
+  // script rewriting never touches it; every '<' is escaped so the JSON cannot end the element.
+  if (boot) {
+    page.append('<script type="text/plain" id="sasha-seed">' + JSON.stringify(boot).replace(/</g, '\\\\u003c') + '</script>');
+  }
   SlidesApp.getUi().showModelessDialog(page, 'Candidate slides');
 }
 
@@ -212,6 +218,15 @@ function sashaHello() {
 // ---------------------------------------------------------------------------
 function sashaScanInbox(spec) {
   var pageSize = (spec && spec.pageSize) || SASHA_DEFAULT_PAGE_SIZE;
+  // THE REST WALK FIRST: measured 2026-10-11 in one execution, 662 ms for three Drive queries
+  // against 1,945 ms for the DriveApp walk below (one call per folder and per marker). It also
+  // names each folder's manifest.json, so READY and the manifest can be read in ONE round trip.
+  // Any failure falls back to the DriveApp walk, which is the behaviour every caller was built on.
+  try {
+    return sashaScanInboxRest_(pageSize);
+  } catch (restError) {
+    console.warn('sasha-slides: REST inbox scan failed, walking with DriveApp: ' + restError);
+  }
   var inboxes = DriveApp.getRootFolder().getFoldersByName(SASHA_INBOX_FOLDER_NAME);
   if (!inboxes.hasNext()) return { marks: [] };
   var folders = inboxes.next().getFolders();
@@ -231,6 +246,53 @@ function sashaScanInbox(spec) {
   return { marks: marks };
 }
 
+function sashaScanInboxRest_(pageSize) {
+  var folderMime = 'application/vnd.google-apps.folder';
+  var inboxes = sashaDriveList_(
+    "name = '" + SASHA_INBOX_FOLDER_NAME + "' and 'root' in parents and mimeType = '" + folderMime + "' and trashed = false",
+    'files(id)', 1
+  );
+  if (inboxes.length === 0) return { marks: [] };
+  var folders = sashaDriveList_(
+    "'" + inboxes[0].id + "' in parents and mimeType = '" + folderMime + "' and trashed = false",
+    'files(id,name,createdTime)', pageSize
+  );
+  var byFolder = {};
+  // A Drive query has a length limit, so the parents are asked about in chunks.
+  for (var start = 0; start < folders.length; start += 40) {
+    var parents = folders.slice(start, start + 40).map(function (folder) { return "'" + folder.id + "' in parents"; }).join(' or ');
+    sashaDriveList_(
+      "(name = 'READY' or name = 'PICK' or name = 'manifest.json') and trashed = false and (" + parents + ")",
+      'files(id,name,parents)', 1000
+    ).forEach(function (file) {
+      (file.parents || []).forEach(function (parent) {
+        var found = byFolder[parent] || (byFolder[parent] = {});
+        if (!found[file.name]) found[file.name] = file.id;
+      });
+    });
+  }
+  var marks = folders.map(function (folder) {
+    var found = byFolder[folder.id] || {};
+    return {
+      proposalId: folder.name,
+      folderId: folder.id,
+      readyFileId: found['READY'] || null,
+      pickFileId: found['PICK'] || null,
+      manifestFileId: found['manifest.json'] || null,
+      createdTime: folder.createdTime
+    };
+  });
+  marks.sort(function (left, right) { return left.createdTime < right.createdTime ? -1 : left.createdTime > right.createdTime ? 1 : 0; });
+  return { marks: marks };
+}
+
+/** One Drive files.list page. Inbox-sized results only, so a single page is the whole answer. */
+function sashaDriveList_(query, fields, pageSize) {
+  var url = SASHA_DRIVE_FILES + '?pageSize=' + pageSize + '&fields=' + encodeURIComponent(fields) +
+    '&q=' + encodeURIComponent(query);
+  return sashaFetchJson_(url, { method: 'get' }).files || [];
+}
+
 function sashaChildFileId_(folder, name) {
   var found = folder.getFilesByName(name);
   return found.hasNext() ? found.next().getId() : null;
@@ -242,6 +304,31 @@ function sashaChildFileId_(folder, name) {
 // ---------------------------------------------------------------------------
 function sashaReadText(spec) {
   return { text: DriveApp.getFileById(spec.fileId).getBlob().getDataAsString('UTF-8') };
+}
+
+/**
+ * SEVERAL TEXTS IN ONE ROUND TRIP, fetched in parallel. Measured 2026-10-11: five files took
+ * 2,723 ms read one after another with DriveApp and 580 ms with UrlFetchApp.fetchAll. A file that
+ * fails is reported on its own; it never fails the batch.
+ */
+function sashaReadTexts(spec) {
+  var fileIds = (spec && spec.fileIds) || [];
+  var token = ScriptApp.getOAuthToken();
+  var responses = UrlFetchApp.fetchAll(fileIds.map(function (fileId) {
+    return {
+      url: SASHA_DRIVE_FILES + '/' + encodeURIComponent(fileId) + '?alt=media',
+      headers: { Authorization: 'Bearer ' + token },
+      muteHttpExceptions: true
+    };
+  }));
+  return {
+    texts: responses.map(function (response, at) {
+      var status = response.getResponseCode();
+      return status >= 200 && status <= 299
+        ? { fileId: fileIds[at], text: response.getContentText('UTF-8') }
+        : { fileId: fileIds[at], error: 'HTTP ' + status };
+    })
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -696,6 +783,12 @@ function sashaOpenPicker(spec) {
    * it is left on the server for the window to collect (sashaTakePickerTarget). Without it the
    * window opens where it last was, which for a comment about slide 3 means hunting for slide 3.
    */
+  // A SEEDED window carries its target in the page (src/picker-seed.ts), so the property round
+  // trip is skipped -- measured 30-112 ms of a ~330 ms server execution on 2026-10-11.
+  if (spec && spec.seed) {
+    showPicker({ hello: sashaHello(), seed: spec.seed });
+    return { opened: true };
+  }
   var properties = PropertiesService.getUserProperties();
   if (spec && spec.proposalId) {
     properties.setProperty(
@@ -706,7 +799,7 @@ function sashaOpenPicker(spec) {
     // ASKED FOR THE WHOLE SET: clear any older target, or the window would come up on one slide.
     properties.deleteProperty(SASHA_PICKER_TARGET_KEY);
   }
-  showPicker();
+  showPicker(null);
   return { opened: true };
 }
 
@@ -931,10 +1024,20 @@ async function main(): Promise<void> {
       __SASHA_EXTRACTOR_JS_B64__: JSON.stringify(extractorBase64),
     },
   });
+  //    The SIDEBAR gets the two facts its "nothing is listening" setup panel prints: this
+  //    checkout's absolute path (the Dev tab's exact command) and the hosted connector's address
+  //    (the Setup tab), or `null` when SASHA_CONNECTOR_URL is unset -- the panel then says it is
+  //    not configured rather than printing a placeholder someone would paste.
+  const connectorUrl = connectorUrlOf(process.env.SASHA_CONNECTOR_URL);
   const sidebarJs = await bundleSurface({
     entry: join(HERE, "src", "sidebar.tsx"),
-    define: { "process.env.NODE_ENV": '"production"' },
+    define: {
+      "process.env.NODE_ENV": '"production"',
+      __SASHA_REPO_ROOT__: JSON.stringify(REPO_ROOT),
+      __SASHA_CONNECTOR_URL__: JSON.stringify(connectorUrl),
+    },
   });
+  process.stdout.write(`connector  ${connectorUrl ?? "not configured (set SASHA_CONNECTOR_URL)"}\n`);
 
   // 4. The three pages. No `eval` anywhere and no external <script src>: the Slides editor serves
   //    an HtmlService document from a sandboxed googleusercontent iframe whose CSP forbids
@@ -1001,6 +1104,24 @@ async function main(): Promise<void> {
     );
   }
   process.stdout.write(`\nclasp:  cd ${OUT} && clasp push\n`);
+}
+
+/**
+ * The hosted connector address from the environment, or null when unset. Claude will not connect a
+ * remote connector over plain HTTP (CONNECT.md section B), so anything but an https URL fails the
+ * build instead of shipping an address that cannot work.
+ */
+function connectorUrlOf(raw: string | undefined): string | null {
+  const trimmed = raw?.trim() ?? "";
+  if (trimmed === "") return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`SASHA_CONNECTOR_URL is not a URL: ${trimmed}`);
+  }
+  if (parsed.protocol !== "https:") throw new Error(`SASHA_CONNECTOR_URL must be https: ${trimmed}`);
+  return parsed.href;
 }
 
 /** One surface's inlined IIFE bundle. */

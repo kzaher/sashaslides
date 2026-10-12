@@ -521,7 +521,8 @@ duplicate names in a folder, so a comparator returning 0 there leaves the order 
 listing — which differs per reader. The file id is the third key and makes the order total.
 
 `kind` is one of `slides-staged`, `comment-opened`, `comment-answered`, `slide-revised`,
-`comment-resolved`, `slides-cleared`, `slide-inserted`, `feedback-delivered`. Every event carries
+`comment-resolved`, `slides-cleared`, `slide-inserted`, `feedback-delivered`, `slide-archived`,
+`slide-restored`. Every event carries
 `{ protocolVersion, at, kind, … }` and whatever that kind needs. **An unknown `kind` is rendered
 as an opaque "something happened" line, never dropped** — a reader on an older build must not
 silently show an incomplete history.
@@ -617,6 +618,24 @@ It is also the one event that is purely observational: it changes no candidate, 
 single slide, and is written **only** by the server. An add-on that minted one would be telling
 itself that somebody is listening, which is exactly the claim the receipt exists to ground in
 evidence. See the final section for how the interface reads it.
+
+`slide-archived` / `slide-restored` · **written by the add-on** (the sidebar's candidate card),
+read by Sasha through `session_events`
+```json
+{ "protocolVersion": 1, "at": "…", "kind": "slide-archived", "slideIndex": 3 }
+{ "protocolVersion": 1, "at": "…", "kind": "slide-restored", "slideIndex": 3 }
+```
+The user set candidate `slideIndex` aside, or brought it back. **Nothing is deleted** — `NN.html`,
+its comment threads and the manifest are untouched, and `changesCandidateSet` is false for both, so
+neither bumps `revision` or makes a reader re-read the manifest. The state of a slide is the
+**newest** of the two kinds naming it, in log order (the add-on's `candidate-archive.ts`
+`archivedSlidesOf`); the archive time is that event's `<epochMillis>`. A slide with neither is
+working. An event missing `slideIndex` is **opaque**, never an archive of slide 0. Sasha should read
+an archived candidate as "not this one, for now" — it is not a `dismissed` pick and not a reason to
+clear the set; offer something else, but do not revise or re-propose it unprompted.
+
+The add-on's card applies the click before the write lands and undoes it, with the reason shown, if
+the create fails; the click is then kept on screen until a log read contains the created file id.
 
 ### Reading the log is a folder listing, not a manifest poll
 

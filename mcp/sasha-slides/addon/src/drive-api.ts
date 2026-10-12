@@ -25,7 +25,7 @@ import type {
   ReadEventsReply,
   ReadEventsSpec,
   PickerTargetReply,
-  PickerTargetSpec,
+  OpenPickerSpec,
   ReadFeedbackReply,
   ReadFeedbackSpec,
   RenderPreviewsReply,
@@ -38,6 +38,7 @@ import type {
   SendFeedbackReply,
   WriteEventReply,
   WriteEventSpec,
+  ReadTextsReply,
 } from "./bridge.ts";
 import type { SendFeedbackSpec } from "./feedback.ts";
 import type { SlidesApiRequest } from "./converter-contract.ts";
@@ -51,6 +52,14 @@ export type DriveApi = Readonly<{
   scanInbox(spec: Readonly<{ pageSize: number }>): Promise<CallOutcome<readonly ProposalMark[]>>;
   /** READY, manifest.json and NN.html are all just text read by file id. */
   downloadText(fileId: string): Promise<CallOutcome<string>>;
+}>;
+
+/**
+ * SEVERAL FILES' TEXT IN ONE ROUND TRIP (`sashaReadTexts`), each succeeding or failing on its own.
+ * Its own capability so only the surface that batches needs it; `DriveApi` stays one file per call.
+ */
+export type BatchReadApi = Readonly<{
+  downloadTexts(fileIds: readonly string[]): Promise<CallOutcome<ReadTextsReply>>;
 }>;
 
 /**
@@ -143,7 +152,7 @@ export type PickerWindowApi = Readonly<{
    * Show the slides window. With a target it comes up ON that candidate -- the sidebar's
    * "Open" on a comment about slide 3 should land on slide 3, not on wherever the window was.
    */
-  openPicker(target?: PickerTargetSpec): Promise<CallOutcome<OpenPickerReply>>;
+  openPicker(target?: OpenPickerSpec): Promise<CallOutcome<OpenPickerReply>>;
   /** What the window was asked to open on. Reading CLEARS it, so a later open is unaffected. */
   takePickerTarget(): Promise<CallOutcome<PickerTargetReply>>;
   /**

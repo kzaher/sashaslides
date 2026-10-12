@@ -163,7 +163,6 @@ test("THE 1 h 47 min BUG: no receipt past the threshold is an INSTRUCTION, never
   // sentence written for a person is homework.
   assert.doesNotMatch(notice?.prompt ?? "", new RegExp(PROPOSAL));
   assert.match(notice?.prompt ?? "", /call open_work/);
-  assert.match(notice?.connect ?? "", /^claude mcp add sasha-slides /);
   // And the headline over it says what 1 h 47 min MEANS, not just what it is.
   assert.equal(describeWaiting(waiting), "1 thing waiting for Sasha -- nothing has read the oldest for 1 h 47 min");
 });

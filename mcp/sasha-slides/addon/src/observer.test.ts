@@ -112,7 +112,11 @@ test("a READY whose body names another proposal is rejected against its FOLDER n
   assert.match(loaded.kind === "rejected" ? loaded.reason : "", /its folder p_claimed/);
 });
 
-test("nextCandidate skips partial and answered folders and takes the oldest of the rest", () => {
+// THE NEWEST, because that is the set the sidebar follows (conversation-state.ts adopts the newest
+// staged proposal) and the set its seed hands this window (picker-seed.ts). Measured 2026-10-11:
+// with an older set still unanswered, the oldest-first rule made a seeded window draw the new set
+// and then swap to the old one when its own first poll landed.
+test("nextCandidate skips partial and answered folders and takes the NEWEST of the rest", () => {
   const marks = [
     { proposalId: "p_partial", folderId: "f1", readyFileId: null, pickFileId: null, createdTime: "1" },
     { proposalId: "p_done", folderId: "f2", readyFileId: "r2", pickFileId: "k2", createdTime: "2" },
@@ -121,10 +125,15 @@ test("nextCandidate skips partial and answered folders and takes the oldest of t
     { proposalId: "p_later", folderId: "f5", readyFileId: "r5", pickFileId: null, createdTime: "5" },
   ] as const satisfies readonly ProposalMark[];
   assert.deepEqual(nextCandidate({ marks, seenProposalIds: ["p_seen"] }), {
-    proposalId: "p_next",
-    readyFileId: "r4",
-    folderId: "f4",
+    proposalId: "p_later",
+    readyFileId: "r5",
+    folderId: "f5",
   });
+  assert.equal(
+    nextCandidate({ marks, seenProposalIds: ["p_later"] })?.proposalId,
+    "p_next",
+    "an answered newest set falls back to the newest one still open",
+  );
   assert.equal(nextCandidate({ marks: [], seenProposalIds: [] }), null);
   assert.equal(
     nextCandidate({ marks, seenProposalIds: ["p_seen", "p_next", "p_later"] }),

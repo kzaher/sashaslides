@@ -79,6 +79,13 @@ export type SessionEventBody =
    */
   | Readonly<{ kind: "feedback-delivered"; commentIds: readonly string[]; tool: string | null }>
   /**
+   * THE USER SET A CANDIDATE ASIDE, or brought one back. Written by this add-on (the sidebar's
+   * Archive / Restore), read by Sasha through `session_events`. Nothing is deleted: the newest of the
+   * two per slide is the state, and candidate-archive.ts derives it.
+   */
+  | Readonly<{ kind: "slide-archived"; slideIndex: number }>
+  | Readonly<{ kind: "slide-restored"; slideIndex: number }>
+  /**
    * AN EVENT THIS BUILD CANNOT READ, kept so the history stays complete. `rawKind` is whatever the
    * file name or the body said, and `reason` is why it could not be read -- an unknown kind, an
    * unparseable body, or a protocolVersion from the future.
@@ -95,6 +102,8 @@ export const SESSION_EVENT_KINDS = [
   "slides-cleared",
   "slide-inserted",
   FEEDBACK_DELIVERED_EVENT_KIND,
+  "slide-archived",
+  "slide-restored",
 ] as const;
 
 export type KnownSessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
@@ -208,9 +217,10 @@ export function sessionEventFileName({
 }
 
 /**
- * The bytes of an event the ADD-ON appends. It writes exactly two kinds -- `comment-opened` when
- * the user marks a candidate up, and `slide-inserted` when a candidate goes into the deck -- and
- * both are refused rather than written malformed, the same rule `serializePick` follows.
+ * The bytes of an event the ADD-ON appends. It writes the kinds the USER causes -- `comment-opened`
+ * when the user marks a candidate up, `slide-inserted` when a candidate goes into the deck, and
+ * `slide-archived` / `slide-restored` from the sidebar's candidate card -- and every one is refused
+ * rather than written malformed, the same rule `serializePick` follows.
  */
 export function serializeSessionEvent({ body, at }: { body: SessionEventBody; at: string }): Parsed<string> {
   if (at.trim() === "") return { kind: "invalid", reason: "an event is stamped with when it happened" };
@@ -233,6 +243,8 @@ export function slideIndexOf(body: SessionEventBody): number | null {
     case "slide-revised":
     case "comment-resolved":
     case "slide-inserted":
+    case "slide-archived":
+    case "slide-restored":
       return body.slideIndex;
     case "slides-staged":
     case "slides-cleared":
@@ -265,6 +277,9 @@ export function changesCandidateSet(body: SessionEventBody): boolean {
     case "comment-answered":
     case "comment-resolved":
     case "slide-inserted":
+    // Archiving hides a candidate in the sidebar; the set itself (manifest.json) is untouched.
+    case "slide-archived":
+    case "slide-restored":
     // Reading changes nothing. A receipt is the one event that is purely observational.
     case "feedback-delivered":
       return false;
@@ -288,6 +303,8 @@ export function newestSetChangeIn(events: readonly SessionEvent[]): string | nul
 export function sessionEventVoiceOf(body: SessionEventBody): SessionEventVoice {
   switch (body.kind) {
     case "comment-opened":
+    case "slide-archived":
+    case "slide-restored":
       return "user";
     case "slides-staged":
     case "comment-answered":
@@ -332,6 +349,10 @@ export function describeSessionEvent(body: SessionEventBody): string {
         : `Sasha discarded the candidates that were not inserted: ${body.reason}`;
     case "slide-inserted":
       return `slide ${body.slideIndex} went into the deck`;
+    case "slide-archived":
+      return `you archived slide ${body.slideIndex}`;
+    case "slide-restored":
+      return `you restored slide ${body.slideIndex}`;
     case "feedback-delivered":
       // "read", never "answered". The log line may not imply more than the receipt proves.
       return body.commentIds.length === 1
@@ -678,6 +699,9 @@ function writableFieldsOf(body: SessionEventBody): Readonly<Record<string, unkno
       };
     case "slide-inserted":
       return { slideIndex: body.slideIndex, pageObjectId: body.pageObjectId };
+    case "slide-archived":
+    case "slide-restored":
+      return { slideIndex: body.slideIndex };
     // Sasha's own events. The add-on reads them and never writes them: a `slides-cleared` the
     // add-on invented would say the server discarded something it still has.
     case "slides-staged":
@@ -753,6 +777,13 @@ function bodyOf({ rawKind, record }: { rawKind: string; record: Readonly<Record<
         slideIndex: integerAt({ record, key: "slideIndex" }) ?? 0,
         pageObjectId: stringAt({ record, key: "pageObjectId" }),
       };
+    case "slide-archived":
+    case "slide-restored": {
+      const slideIndex = integerAt({ record, key: "slideIndex" });
+      // An archive that names no slide is opaque, never an archive of a slide 0 that does not exist.
+      if (slideIndex === null) return { kind: "opaque", rawKind, reason: "it is an archive event that names no slide" };
+      return rawKind === "slide-archived" ? { kind: "slide-archived", slideIndex } : { kind: "slide-restored", slideIndex };
+    }
     case FEEDBACK_DELIVERED_EVENT_KIND: {
       const commentIds = stringsAt({ record, key: "commentIds" });
       // A receipt naming no comment cannot say WHICH comment reached anybody, so it may not read as
@@ -785,6 +816,8 @@ const KNOWN_KIND_IS_PARSED: Readonly<Record<KnownSessionEventKind, true>> = {
   "slides-cleared": true,
   "slide-inserted": true,
   "feedback-delivered": true,
+  "slide-archived": true,
+  "slide-restored": true,
 };
 
 /** Whether `bodyOf` has a case for a kind. The one reader of the table above. */

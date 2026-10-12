@@ -20,6 +20,7 @@ import {
   parseReadEventsReply,
   parseReadFeedbackReply,
   parseReadTextReply,
+  parseReadTextsReply,
   parseCommentReply,
   parseReplyCommentReply,
   parseReportTargetReply,
@@ -46,6 +47,7 @@ import {
   type WriteEventReply, explainHostFailure } from "./bridge.ts";
 import { parseHelloReply } from "./bridge.ts";
 import type {
+  BatchReadApi,
   CandidateCommentsApi,
   CommentThreadApi,
   DriveApi,
@@ -172,6 +174,19 @@ export function appsScriptDriveApi({ call }: { call: ServerCall }): DriveApi {
       if (replied.kind !== "ok") return replied;
       const parsed = outcomeOf({ parsed: parseReadTextReply(replied.value), what: "sashaReadText" });
       return parsed.kind === "ok" ? { kind: "ok", value: parsed.value.text } : parsed;
+    },
+  };
+}
+
+export function appsScriptBatchReadApi({ call }: { call: ServerCall }): BatchReadApi {
+  return {
+    async downloadTexts(fileIds) {
+      const replied = await call<unknown>({
+        invoke: (runner) => runner.sashaReadTexts({ fileIds }),
+        what: "sashaReadTexts",
+      });
+      if (replied.kind !== "ok") return replied;
+      return outcomeOf({ parsed: parseReadTextsReply(replied.value), what: "sashaReadTexts" });
     },
   };
 }

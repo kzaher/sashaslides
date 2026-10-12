@@ -250,6 +250,8 @@ describe("parseSessionEvent", () => {
       { kind: "slides-cleared", revision: 3, clearedSlideIndices: [1], keptSlideIndices: [2] },
       { kind: "slide-inserted", slideIndex: 2, insertedObjectIds: ["g1"] },
       { kind: "feedback-delivered", tool: "await_feedback", commentIds: ["c1"] },
+      { kind: "slide-archived", slideIndex: 2 },
+      { kind: "slide-restored", slideIndex: 2 },
     ];
     for (const body of bodies) {
       const event = parseSessionEvent({
@@ -320,6 +322,31 @@ describe("parseSessionEvent", () => {
     });
     assert.equal(event.kind, "opaque");
     assert.match(event.kind === "opaque" ? event.reason : "", /slide-revised needs/);
+  });
+
+  test("an archive event without a slideIndex is opaque, never an archive of no slide", () => {
+    for (const kind of ["slide-archived", "slide-restored"]) {
+      const event = parseSessionEvent({
+        body: { protocolVersion: SESSION_LOG_PROTOCOL_VERSION, at: AT, kind },
+        fileNameKind: kind,
+      });
+      assert.equal(event.kind, "opaque");
+      assert.match(event.kind === "opaque" ? event.reason : "", new RegExp(`${kind} needs slideIndex`));
+    }
+  });
+
+  test("an archive and a restore read back with their slide and describe it for Sasha", () => {
+    const archived = parseSessionEvent({
+      body: { protocolVersion: SESSION_LOG_PROTOCOL_VERSION, at: AT, kind: "slide-archived", slideIndex: 3 },
+      fileNameKind: "slide-archived",
+    });
+    assert.deepEqual(archived, { kind: "slide-archived", protocolVersion: 1, at: AT, slideIndex: 3 });
+    assert.match(describeSessionEvent(archived), /archived candidate 3/);
+    const restored = parseSessionEvent({
+      body: { protocolVersion: SESSION_LOG_PROTOCOL_VERSION, at: AT, kind: "slide-restored", slideIndex: 3 },
+      fileNameKind: "slide-restored",
+    });
+    assert.match(describeSessionEvent(restored), /restored candidate 3/);
   });
 
   test("a region whose numbers are not fractional is dropped, not pointed at the wrong place", () => {

@@ -36,6 +36,7 @@ import {
 // NO AUTO-SCROLL HERE ANY MORE. The log sits inside a collapsed <details>, so there is no
 // scroller to keep at the bottom; the comments panel above it is what the reader is following.
 import { PICKER_CSS } from "./picker-styles.ts";
+import { SetupGuide, type SetupEnvironment } from "./setup-guide.tsx";
 import {
   COMMENT_FILTERS,
   COMMENT_FILTER_LABEL,
@@ -58,6 +59,13 @@ import {
 } from "./comment-card.tsx";
 import { assertNever } from "./protocol.ts";
 import {
+  CANDIDATE_TABS,
+  CANDIDATE_TAB_LABEL,
+  type CandidateLists,
+  type CandidateTab,
+} from "./candidate-archive.ts";
+import {
+  candidateListsOf,
   conversationEntriesOf,
   conversationIsOpening,
   followedSet,
@@ -72,6 +80,7 @@ import {
   threadFilesOf,
   type Conversation,
   type ConversationPost,
+  type ConversationSlide,
   revisedSlideFor,
   type ConversationEntry,
   type RevisedSlideRender,
@@ -131,16 +140,26 @@ export type ConversationActions = Readonly<{
    * target is recorded server-side and collected by the window.
    */
   openArtifact(target: Readonly<{ proposalId: string; slideIndex: number | null }>): void;
+  /**
+   * ARCHIVE OR RESTORE ONE CANDIDATE. Takes effect on the click and is then recorded in the
+   * proposal's session log, so it survives a reopen and Sasha can read it; a failed write undoes it.
+   */
+  setCandidateArchived(target: Readonly<{ proposalId: string; slideIndex: number; archived: boolean }>): void;
+  /** Which of the set card's lists is shown. In the tree, so a poll cannot reset it. */
+  chooseCandidateTab(tab: CandidateTab): void;
 }>;
 
 export function ConversationPanel({
   conversation,
   previews,
+  setup,
   actions,
 }: {
   conversation: Conversation;
   /** The candidates' thumbnails (slide-previews.ts), held beside the conversation by sidebar.tsx. */
   previews: SlidePreviews;
+  /** Build-time connection facts and the viewer's remembered tab, for the nothing-listening panel. */
+  setup: SetupEnvironment;
   actions: ConversationActions;
 }): JSX.Element {
   return (
@@ -155,7 +174,7 @@ export function ConversationPanel({
             <span className="sasha-opening-ring" aria-hidden="true" />
           </p>
         ) : (
-          <ConversationBody conversation={conversation} previews={previews} actions={actions} />
+          <ConversationBody conversation={conversation} previews={previews} setup={setup} actions={actions} />
         )}
       </section>
     </ConversationShell>
@@ -166,10 +185,12 @@ export function ConversationPanel({
 function ConversationBody({
   conversation,
   previews,
+  setup,
   actions,
 }: {
   conversation: Conversation;
   previews: SlidePreviews;
+  setup: SetupEnvironment;
   actions: ConversationActions;
 }): JSX.Element {
   return (
@@ -185,7 +206,7 @@ function ConversationBody({
             panel BELOW the log, the headline and the waiting list, which in a 300 px sidebar
             put it under the fold: the user saw "4 things waiting for Sasha -- nothing has read
             the oldest for 4 h 39 min" and reported no remedy on screen at all. */}
-        <NothingListeningNote notice={nothingListeningFor(conversation)} />
+        <NothingListeningNote notice={nothingListeningFor(conversation)} setup={setup} />
         {/*
           THE COMMENTS, AND ONLY THE COMMENTS.
           
@@ -222,8 +243,12 @@ function ConversationBody({
 /**
  * WHETHER ANYTHING IS BEING READ RIGHT NOW. Four polls share one indicator, because the reader
  * does not care WHICH read is in flight -- only whether the panel is still catching up.
+ *
+ * NOT WHILE NOTHING IS LISTENING: the 8 s poll is always in flight somewhere, and a spinner beside
+ * the instructions reads as "Sasha is working" when nothing is attached (waiting.ts).
  */
 function anythingInFlight(conversation: Conversation): boolean {
+  if (nothingListeningFor(conversation) !== null) return false;
   return (
     conversation.log.kind === "loading" ||
     conversation.thread.kind === "loading" ||
@@ -769,11 +794,9 @@ function CommentPanel({
       ? [{ slideIndex: entry.thread.slideIndex, thread: { ...entry.thread, at: entry.thread.root.at } }]
       : [],
   );
-  if (all.length === 0) return null;
+  // No comments yet: the candidates still have their card, there is just nothing under it.
+  if (all.length === 0) return <CandidateCard conversation={conversation} previews={previews} actions={actions} />;
 
-  const set = conversation.set;
-  const followed = set.kind === "following" ? set : null;
-  const manifest = followed !== null && followed.manifest.kind === "loaded" ? followed.manifest : null;
   const counts = commentCounts(all);
   const sections = commentSections({ threads: all, filter: conversation.commentFilter });
   const deliveries = deliveriesFor(conversation);
@@ -785,41 +808,7 @@ function CommentPanel({
           GROUP, and until now nothing on this surface stood for the group -- so there was no
           way to say "show me all of them" without hunting for the header button. The slides are
           stacked vertically because that is what they are: a pile of candidates, in order. */}
-      {followed !== null && manifest !== null ? (
-        <div className="sasha-artifact">
-          <p className="sasha-artifact-head mono">
-            {manifest.count} candidate{manifest.count === 1 ? "" : "s"}
-          </p>
-          <ol className="sasha-stack" aria-label="the candidates in this set">
-            {followed.slides.map((slide) => (
-              <li className="sasha-stack-slide" key={slide.slideIndex}>
-                <span className="sasha-stack-number mono">{slide.slideIndex}</span>
-                <SlideThumb
-                  preview={previewOf({ conversation, previews, slideIndex: slide.slideIndex })}
-                  title={`candidate ${slide.slideIndex}`}
-                />
-                <span className="sasha-stack-label">{slide.label === "" ? slide.name : slide.label}</span>
-                <button
-                  type="button"
-                  className="sasha-secondary sasha-small"
-                  onClick={() =>
-                    actions.openArtifact({ proposalId: followed.proposalId, slideIndex: slide.slideIndex })
-                  }
-                >
-                  Open
-                </button>
-              </li>
-            ))}
-          </ol>
-          <button
-            type="button"
-            className="sasha-primary sasha-small"
-            onClick={() => actions.openArtifact({ proposalId: followed.proposalId, slideIndex: null })}
-          >
-            Open artifacts
-          </button>
-        </div>
-      ) : null}
+      <CandidateCard conversation={conversation} previews={previews} actions={actions} />
       <div className="sasha-filter" role="group" aria-label="Show">
         {COMMENT_FILTERS.map((filter) => (
           <button
@@ -866,23 +855,235 @@ function CommentPanel({
 
 
 /**
- * WHAT TO DO WHEN NOTHING IS LISTENING -- the one place in this product that tells the user to go
- * and start something, because it is the one situation where waiting longer cannot help.
+ * THE SET ITSELF: the candidates, in two lists. A thread is about one slide; the candidates are a
+ * GROUP, stacked vertically because that is what they are -- a pile of candidates, in order.
  *
- * The two commands are `<code>` blocks and nothing else, so they can be selected and copied
- * verbatim; the sidebar has no clipboard permission, so "copyable" means "not wrapped in prose".
- * The wording and the threshold come from `feedback-delivery.ts`, shared with the server.
+ * WORKING AND ARCHIVED. The user sets a candidate aside with Archive; it moves to the Archived tab
+ * and never disappears, so Restore always brings it back. The working tab keeps the last archived
+ * one in view, so a candidate archived by mistake is one click away without switching tabs.
+ *
+ * Rendered whenever the set has candidates, comments or not: the card is how the user reaches and
+ * sorts the candidates, and that does not wait for the first comment.
  */
-function NothingListeningNote({ notice }: { notice: NothingListeningNotice | null }): JSX.Element | null {
-  if (notice === null) return null;
+function CandidateCard({
+  conversation,
+  previews,
+  actions,
+}: {
+  conversation: Conversation;
+  previews: SlidePreviews;
+  actions: ConversationActions;
+}): JSX.Element | null {
+  const set = conversation.set;
+  const followed = set.kind === "following" ? set : null;
+  const manifest = followed !== null && followed.manifest.kind === "loaded" ? followed.manifest : null;
+  // A cleared set has no candidates, and nothing offers a window onto nothing.
+  if (followed === null || manifest === null || followed.slides.length === 0) return null;
+  const lists = candidateListsOf(conversation);
+  const counts: Readonly<Record<CandidateTab, number>> = {
+    working: lists.working.length,
+    archived: lists.archived.length,
+  };
+  const proposalId = followed.proposalId;
+  const lastArchived = lists.archived[0];
   return (
-    <div className="sasha-nobody-listening">
-      <p className="sasha-nobody-head">{notice.headline}</p>
-      <code className="sasha-copyable">{notice.prompt}</code>
-      <p className="sasha-dim">{notice.connectHeadline}</p>
-      <code className="sasha-copyable">{notice.connect}</code>
+    <div className="sasha-artifact">
+      <p className="sasha-artifact-head mono">
+        {manifest.count} candidate{manifest.count === 1 ? "" : "s"}
+      </p>
+      <div className="sasha-candidate-tabs" role="group" aria-label="Candidates">
+        {CANDIDATE_TABS.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            className={tab === conversation.candidateTab ? "sasha-tab sasha-tab-on" : "sasha-tab"}
+            aria-pressed={tab === conversation.candidateTab}
+            onClick={() => actions.chooseCandidateTab(tab)}
+          >
+            {CANDIDATE_TAB_LABEL[tab]}
+            <span className="sasha-filter-count">{counts[tab]}</span>
+          </button>
+        ))}
+      </div>
+      <CandidateTabBody
+        conversation={conversation}
+        previews={previews}
+        actions={actions}
+        proposalId={proposalId}
+        lists={lists}
+      />
+      {conversation.candidateTab === "working" && lastArchived !== undefined ? (
+        <p className="sasha-last-archived">
+          <span className="sasha-last-archived-text">
+            Last archived: <span className="mono">{`${lastArchived.slide.slideIndex} · ${slideLabelOf(lastArchived.slide)}`}</span>
+          </span>
+          <button
+            type="button"
+            className="sasha-secondary sasha-small"
+            onClick={() =>
+              actions.setCandidateArchived({ proposalId, slideIndex: lastArchived.slide.slideIndex, archived: false })
+            }
+          >
+            Restore
+          </button>
+        </p>
+      ) : null}
+      {conversation.archiveTrouble === null ? null : (
+        <p className="sasha-trouble" role="alert">
+          {conversation.archiveTrouble}
+        </p>
+      )}
+      <button
+        type="button"
+        className="sasha-primary sasha-small"
+        onClick={() => actions.openArtifact({ proposalId, slideIndex: null })}
+      >
+        Open artifacts
+      </button>
     </div>
   );
+}
+
+/** The list the chosen tab shows, or what to do when it is empty. */
+function CandidateTabBody({
+  conversation,
+  previews,
+  actions,
+  proposalId,
+  lists,
+}: {
+  conversation: Conversation;
+  previews: SlidePreviews;
+  actions: ConversationActions;
+  proposalId: string;
+  lists: CandidateLists<ConversationSlide>;
+}): JSX.Element {
+  const row = (slide: ConversationSlide, archived: boolean): JSX.Element => (
+    <CandidateRow
+      key={slide.slideIndex}
+      conversation={conversation}
+      previews={previews}
+      actions={actions}
+      proposalId={proposalId}
+      slide={slide}
+      archived={archived}
+    />
+  );
+  switch (conversation.candidateTab) {
+    case "working":
+      if (lists.working.length === 0) {
+        return (
+          <p className="sasha-dim sasha-candidates-empty">
+            {lists.archived.length === 1
+              ? "The only candidate is archived."
+              : `All ${lists.archived.length} candidates are archived.`}{" "}
+            <button type="button" className="sasha-stack-archive" onClick={() => actions.chooseCandidateTab("archived")}>
+              Show archived
+            </button>
+          </p>
+        );
+      }
+      return (
+        <ol className="sasha-stack" aria-label="the candidates in this set">
+          {lists.working.map((slide) => row(slide, false))}
+        </ol>
+      );
+    case "archived":
+      if (lists.archived.length === 0) {
+        return (
+          <p className="sasha-dim sasha-candidates-empty">
+            Nothing archived. Archive sets a candidate aside here, and Restore brings it back.
+          </p>
+        );
+      }
+      return (
+        <ol className="sasha-stack sasha-stack-archived" aria-label="the archived candidates, most recent first">
+          {lists.archived.map((entry) => row(entry.slide, true))}
+        </ol>
+      );
+    default:
+      return assertNever(conversation.candidateTab);
+  }
+}
+
+/** One candidate: number, thumbnail, label, Archive or Restore, and Open. */
+function CandidateRow({
+  conversation,
+  previews,
+  actions,
+  proposalId,
+  slide,
+  archived,
+}: {
+  conversation: Conversation;
+  previews: SlidePreviews;
+  actions: ConversationActions;
+  proposalId: string;
+  slide: ConversationSlide;
+  archived: boolean;
+}): JSX.Element {
+  return (
+    <li className="sasha-stack-slide">
+      <span className="sasha-stack-number mono">{slide.slideIndex}</span>
+      {/* The picture opens the candidate too: it is the biggest target in the row. */}
+      <button
+        type="button"
+        className="sasha-stack-thumb"
+        aria-label={`Open candidate ${slide.slideIndex}`}
+        onClick={() => actions.openArtifact({ proposalId, slideIndex: slide.slideIndex })}
+      >
+        <SlideThumb
+          preview={previewOf({ conversation, previews, slideIndex: slide.slideIndex })}
+          title={`candidate ${slide.slideIndex}`}
+        />
+      </button>
+      {/* The label gets the row's whole width and the buttons go under it: side by side, two
+          buttons left a ~300 px sidebar about 20 px of label ("I...", seen live 2026-10-11). */}
+      <span className="sasha-stack-body">
+        <span className="sasha-stack-label" title={slideLabelOf(slide)}>
+          {slideLabelOf(slide)}
+        </span>
+        <span className="sasha-stack-actions">
+          <button
+            type="button"
+            className="sasha-secondary sasha-small"
+            onClick={() => actions.openArtifact({ proposalId, slideIndex: slide.slideIndex })}
+          >
+            Open
+          </button>
+          <button
+            type="button"
+            className="sasha-secondary sasha-small"
+            title={archived ? "Bring this candidate back to the working list" : "Set this candidate aside; it can be restored"}
+            onClick={() => actions.setCandidateArchived({ proposalId, slideIndex: slide.slideIndex, archived: !archived })}
+          >
+            {archived ? "Restore" : "Archive"}
+          </button>
+        </span>
+      </span>
+    </li>
+  );
+}
+
+/** A candidate's caption, or its file name when Sasha gave none. */
+function slideLabelOf(slide: ConversationSlide): string {
+  return slide.label === "" ? slide.name : slide.label;
+}
+
+/**
+ * WHAT TO DO WHEN NOTHING IS LISTENING -- the one place in this product that tells the user to go
+ * and start something, because it is the one situation where waiting longer cannot help. WHEN it
+ * shows is waiting.ts's decision; what it says is setup-guide.tsx's.
+ */
+function NothingListeningNote({
+  notice,
+  setup,
+}: {
+  notice: NothingListeningNotice | null;
+  setup: SetupEnvironment;
+}): JSX.Element | null {
+  if (notice === null) return null;
+  return <SetupGuide notice={notice} environment={setup} />;
 }
 
 

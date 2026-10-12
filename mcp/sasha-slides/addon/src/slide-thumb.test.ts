@@ -13,7 +13,7 @@ import {
   type Conversation,
   type ConversationEvent,
 } from "./conversation-state.ts";
-import { INERT_CONVERSATION_ACTIONS } from "./inert-actions.ts";
+import { INERT_CONVERSATION_ACTIONS, UNCONFIGURED_SETUP } from "./inert-actions.ts";
 import type { Manifest } from "./protocol.ts";
 import {
   sessionEventsOf,
@@ -95,7 +95,7 @@ test("an open comment ends with the thumbnail and the number of the candidate it
 
 function markupOf({ conversation, previews }: { conversation: Conversation; previews: SlidePreviews }): string {
   return renderToStaticMarkup(
-    createElement(ConversationPanel, { conversation, previews, actions: INERT_CONVERSATION_ACTIONS }),
+    createElement(ConversationPanel, { conversation, previews, setup: UNCONFIGURED_SETUP, actions: INERT_CONVERSATION_ACTIONS }),
   );
 }
 

@@ -181,6 +181,9 @@ test("every kind has a voice and says whether it is about one slide", () => {
       // NOT `sasha` -- "something read this" and "Sasha did this" are different claims, and
       // waiting.ts ranks them differently.
       ["feedback-delivered", "delivery", null],
+      // The user's own decisions about one candidate.
+      ["slide-archived", "user", 2],
+      ["slide-restored", "user", 2],
     ],
   );
 });
@@ -222,6 +225,33 @@ test("the add-on writes the two kinds it causes, and REFUSES the ones that are S
     "invalid",
     "an event with no stamp cannot be ordered",
   );
+});
+
+test("the add-on writes slide-archived and slide-restored, and they round-trip with the slide index", () => {
+  for (const kind of ["slide-archived", "slide-restored"] as const) {
+    const serialized = serializeSessionEvent({ body: { kind, slideIndex: 3 }, at: AT });
+    assert.equal(serialized.kind, "ok");
+    if (serialized.kind !== "ok") return;
+    assert.deepEqual(JSON.parse(serialized.value), { protocolVersion: 1, at: AT, kind, slideIndex: 3 });
+    const read = parseSessionEventFile({
+      proposalId: PROPOSAL,
+      fileId: "drive_1",
+      name: `1791115140000-a1b2c3-${kind}.json`,
+      text: serialized.value,
+    });
+    assert.deepEqual(read.body, { kind, slideIndex: 3 });
+    assert.match(describeSessionEvent(read.body), /slide 3/);
+  }
+});
+
+test("an archive event that names no slide is opaque, never an archive of slide 0", () => {
+  const read = parseSessionEventFile({
+    proposalId: PROPOSAL,
+    fileId: "drive_1",
+    name: "1791115140000-a1b2c3-slide-archived.json",
+    text: JSON.stringify({ protocolVersion: 1, at: AT, kind: "slide-archived" }),
+  });
+  assert.equal(read.body.kind, "opaque");
 });
 
 test("a written comment-opened round-trips back through the parse", () => {

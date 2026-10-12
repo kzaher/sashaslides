@@ -42,9 +42,9 @@ export const FEEDBACK_DELIVERED_EVENT_KIND = "feedback-delivered";
 export const FEEDBACK_DELIVERY_THRESHOLD_LABEL = describeThresholdMinutes(FEEDBACK_DELIVERY_THRESHOLD_MS);
 
 /**
- * WHAT TO PRINT WHEN NOTHING IS LISTENING: an instruction, not a diagnosis. Three strings rather
- * than one paragraph because two of them are meant to be COPIED VERBATIM, so the surface has to be
- * able to draw them as code and offer them for selection -- a sentence with a command buried in it
+ * WHAT TO PRINT WHEN NOTHING IS LISTENING: an instruction, not a diagnosis. Two strings rather
+ * than one paragraph because the prompt is meant to be COPIED VERBATIM, so the surface has to be
+ * able to draw it as code and offer it for selection -- a sentence with a command buried in it
  * is not copyable.
  *
  * NO IDENTIFIER APPEARS IN IT. It used to name the `proposalId`, on the reasoning that a session
@@ -56,31 +56,21 @@ export const FEEDBACK_DELIVERY_THRESHOLD_LABEL = describeThresholdMinutes(FEEDBA
  */
 export function nothingListeningNotice(): NothingListeningNotice {
   return {
-    headline:
-      `Nothing has picked this up in ${FEEDBACK_DELIVERY_THRESHOLD_LABEL}. Sasha runs inside a ` +
-      "Claude session -- start one and paste:",
+    headline: `Nothing has picked this up in ${FEEDBACK_DELIVERY_THRESHOLD_LABEL}.`,
     prompt: "Use the sasha-slides connector: call open_work, then answer my open comments.",
-    connectHeadline: "If the connector is not attached yet:",
-    connect: `claude mcp add sasha-slides -- npx tsx ${REPO_PLACEHOLDER}/mcp/sasha-slides/server.ts --stdio`,
   };
 }
 
-/** The four lines of the notice, kept apart so the two copyable ones can be drawn as code. */
+/**
+ * The heading and the one line to paste once a session is connected. HOW to connect is not here:
+ * it depends on which assistant the reader uses and on build-time facts (the hosted connector's
+ * address, the repository path), so the add-on's setup-guide.tsx owns it.
+ */
 export type NothingListeningNotice = Readonly<{
   headline: string;
-  /** Copyable verbatim: what to paste into a fresh Claude session. */
+  /** Copyable verbatim: what to paste into a connected Claude session. */
   prompt: string;
-  connectHeadline: string;
-  /** Copyable verbatim: how to attach the connector in the first place. */
-  connect: string;
 }>;
-
-/**
- * The add-on runs inside an HtmlService iframe and has no idea where the repository is checked out,
- * so the command carries a placeholder the user substitutes. A wrong absolute path would be worse
- * than an obvious blank.
- */
-const REPO_PLACEHOLDER = "<repo>";
 
 function describeThresholdMinutes(thresholdMs: number): string {
   const minutes = Math.round(thresholdMs / 60_000);

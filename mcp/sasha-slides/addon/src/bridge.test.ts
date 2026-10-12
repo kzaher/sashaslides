@@ -23,6 +23,7 @@ import {
   parseInsertReply,
   parseProposalMark,
   parseReadTextReply,
+  parseReadTextsReply,
   parseScanReply,
   parseWritePickReply,
   parseCommentReply,
@@ -31,12 +32,14 @@ import {
 } from "./bridge.ts";
 import { SEEN_LIMIT, parseSeen, seenStore, serializeSeen, type KeyValueStorage } from "./seen-store.ts";
 
-test("there are exactly nineteen server functions, and they are the ones Code.gs declares", () => {
+test("there are exactly twenty server functions, and they are the ones Code.gs declares", () => {
   assert.deepEqual(SERVER_FUNCTION_NAMES, [
     // The picker's five.
     "sashaHello",
     "sashaScanInbox",
     "sashaReadText",
+    // Several texts in one round trip: the sidebar's READY + manifest, and every thumbnail at once.
+    "sashaReadTexts",
     "sashaReadEvents",
     "sashaWriteEvent",
     "sashaCandidateComments",
@@ -236,6 +239,7 @@ function silentRunner(): AppsScriptRunner {
     sashaHello: () => undefined,
     sashaScanInbox: () => undefined,
     sashaReadText: () => undefined,
+    sashaReadTexts: () => undefined,
     sashaInsert: () => undefined,
     sashaWritePick: () => undefined,
     sashaReadEvents: () => undefined,
@@ -267,6 +271,7 @@ function failingRunner(error: unknown): AppsScriptRunner {
     sashaHello: () => onFailure?.(error),
     sashaScanInbox: () => onFailure?.(error),
     sashaReadText: () => onFailure?.(error),
+    sashaReadTexts: () => onFailure?.(error),
     sashaInsert: () => onFailure?.(error),
     sashaWritePick: () => onFailure?.(error),
     sashaReadEvents: () => onFailure?.(error),
@@ -297,6 +302,7 @@ function throwingRunner(): AppsScriptRunner {
     },
     sashaScanInbox: () => undefined,
     sashaReadText: () => undefined,
+    sashaReadTexts: () => undefined,
     sashaInsert: () => undefined,
     sashaWritePick: () => undefined,
     sashaReadEvents: () => undefined,
@@ -330,6 +336,7 @@ function stubCall(replies: Readonly<Record<string, unknown>>) {
     sashaHello: answer("sashaHello"),
     sashaScanInbox: answer("sashaScanInbox"),
     sashaReadText: answer("sashaReadText"),
+    sashaReadTexts: answer("sashaReadTexts"),
     sashaInsert: answer("sashaInsert"),
     sashaRenderPreviews: answer("sashaRenderPreviews"),
     sashaTakePickerTarget: answer("sashaTakePickerTarget"),
@@ -505,4 +512,27 @@ test("a malformed reply from either thread function is a failure naming the func
   const resolved = await api.resolve({ fileId: "html_3", commentId: "c_9", text: "Resolved." });
   assert.equal(resolved.kind, "failed");
   assert.match(resolved.kind === "failed" ? resolved.message : "", /sashaResolveComment/);
+});
+
+// THE BATCH READ AND THE MANIFEST'S ID: what lets the sidebar read READY + manifest in one round
+// trip and every thumbnail in one more (build-addon.ts `sashaScanInboxRest_`, `sashaReadTexts`).
+test("a mark keeps the manifest's id when the scan names it, and is unchanged when it does not", () => {
+  const base = { proposalId: "p_1", folderId: "f", readyFileId: "r", pickFileId: null, createdTime: "t" };
+  assert.deepEqual(parseProposalMark({ ...base, manifestFileId: "m" }), { ...base, manifestFileId: "m" });
+  assert.deepEqual(parseProposalMark(base), base);
+});
+
+test("sashaReadTexts answers per file: a failed file is its own outcome, never the batch's", () => {
+  assert.deepEqual(
+    parseReadTextsReply({ texts: [{ fileId: "a", text: "<p>a</p>" }, { fileId: "b", error: "HTTP 404" }] }),
+    {
+      kind: "ok",
+      value: new Map([
+        ["a", { kind: "ok", value: "<p>a</p>" }],
+        ["b", { kind: "failed", message: "HTTP 404" }],
+      ]),
+    },
+  );
+  assert.equal(parseReadTextsReply({}).kind, "invalid");
+  assert.equal(parseReadTextsReply({ texts: [{ text: "no id" }] }).kind, "invalid");
 });

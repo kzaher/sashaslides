@@ -16,6 +16,8 @@ import {
   NO_PREVIEWS,
   describeThreadSlide,
   nextPreviewToLoad,
+  previewsSettled,
+  previewsToLoad,
   previewOf,
   reducePreviews,
   threadSlideContextOf,
@@ -233,3 +235,25 @@ function revised({ slideIndex, revision }: { slideIndex: number; revision: numbe
     }),
   };
 }
+
+// EVERY THUMBNAIL IN ONE BATCH. Measured live 2026-10-11: one at a time, eight thumbnails took
+// 9 s (one ~1.1 s round trip each); `sashaReadTexts` reads them all in one call.
+test("every candidate still missing a thumbnail is asked for at once, and nothing while a batch is in flight", () => {
+  const conversation = following();
+  const all = previewsToLoad({ conversation, previews: NO_PREVIEWS });
+  assert.deepEqual(all.map((request) => request.fileId), ["html_1", "html_2"]);
+  const inFlight = all.reduce((previews, request) => reducePreviews(previews, { kind: "preview-requested", key: request.key }), NO_PREVIEWS);
+  assert.deepEqual(previewsToLoad({ conversation, previews: inFlight }), []);
+});
+
+test("thumbnails are settled only when none is missing or in flight -- a failed one counts as settled", () => {
+  const conversation = following();
+  assert.equal(previewsSettled({ conversation, previews: NO_PREVIEWS }), false, "nothing fetched yet");
+  const requested = previewsToLoad({ conversation, previews: NO_PREVIEWS }).reduce(
+    (previews, request) => reducePreviews(previews, { kind: "preview-requested", key: request.key }),
+    NO_PREVIEWS,
+  );
+  assert.equal(previewsSettled({ conversation, previews: requested }), false, "a batch is in flight");
+  const failed = loadAll({ conversation, outcome: () => ({ kind: "failed", message: "HTTP 404" }) });
+  assert.equal(previewsSettled({ conversation, previews: failed }), true);
+});

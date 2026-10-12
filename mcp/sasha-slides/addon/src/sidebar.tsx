@@ -30,6 +30,7 @@ import { createElement } from "react";
 import {
   appsScriptCall,
   appsScriptCandidateCommentsApi,
+  appsScriptBatchReadApi,
   appsScriptDriveApi,
   appsScriptFeedbackApi,
   appsScriptPickerWindowApi,
@@ -38,6 +39,7 @@ import {
 } from "./bridge-client.ts";
 import { presentationIdOf } from "./bridge.ts";
 import { ConversationPanel, type ConversationActions } from "./Conversation.tsx";
+import { storedSetupChoiceStore, type SetupEnvironment } from "./setup-guide.tsx";
 import {
   INITIAL_CONVERSATION,
   followedSet,
@@ -57,18 +59,33 @@ import {
   type ConversationThread,
   type ThreadActionKind,
 } from "./conversation-state.ts";
-import type { CandidateCommentsApi, DriveApi, FeedbackApi, PickerWindowApi, SessionLogApi } from "./drive-api.ts";
+import type {
+  BatchReadApi,
+  CandidateCommentsApi,
+  DriveApi,
+  FeedbackApi,
+  PickerWindowApi,
+  SessionLogApi,
+} from "./drive-api.ts";
 import { feedbackCommentsFor, feedbackThreadsOf, sendOutcomeOf } from "./feedback.ts";
-import { candidateCommentsFrom, sessionEventsOf } from "./session-log.ts";
+import {
+  candidateCommentsFrom,
+  serializeSessionEvent,
+  sessionEventFileName,
+  sessionEventsOf,
+} from "./session-log.ts";
+import { archiveEventBodyOf } from "./candidate-archive.ts";
 import { PROTOCOL_VERSION, assertNever, parseManifest, parseReadyMarker } from "./protocol.ts";
 import {
   NO_PREVIEWS,
-  nextPreviewToLoad,
+  previewsSettled,
+  previewsToLoad,
   reducePreviews,
   type PreviewEvent,
   type PreviewRequest,
   type SlidePreviews,
 } from "./slide-previews.ts";
+import { pickerSeedOf } from "./picker-seed.ts";
 
 const ROOT_ELEMENT_ID = "sasha-slides-root";
 /** One read of the deck's comment pane. A deck with more threads than this is not the common case. */
@@ -77,6 +94,8 @@ const THREAD_PAGE_SIZE = 100;
 const SCAN_PAGE_SIZE = 100;
 /** One read of a proposal's `events/` folder. A session with more events than this is not one. */
 const EVENT_PAGE_SIZE = 500;
+/** What an event file is uploaded as. The same type the slides window writes. */
+const EVENT_MIME_TYPE = "application/json";
 /** One read of a candidate's comment threads. */
 const CANDIDATE_COMMENT_PAGE_SIZE = 100;
 /**
@@ -106,6 +125,16 @@ const NOT_CONNECTED =
 
 let state: Conversation = INITIAL_CONVERSATION;
 /**
+ * WHAT THE NOTHING-LISTENING PANEL NEEDS TO SAY HOW TO CONNECT: two constants build-addon.ts bakes
+ * in, and this viewer's remembered tab. `window.localStorage` is read lazily inside the store's
+ * try, because the HtmlService sandbox may throw on the mere read.
+ */
+const SETUP: SetupEnvironment = {
+  repoRoot: __SASHA_REPO_ROOT__,
+  connectorUrl: __SASHA_CONNECTOR_URL__,
+  store: storedSetupChoiceStore(() => window.localStorage),
+};
+/**
  * THE THUMBNAILS' BYTES, beside the conversation rather than in it (slide-previews.ts). Module-level
  * for the life of the sidebar, so a poll re-render never re-downloads a picture; keyed by file AND
  * revision, so a revision is a miss without anything having to invalidate it.
@@ -113,6 +142,13 @@ let state: Conversation = INITIAL_CONVERSATION;
 let previews: SlidePreviews = NO_PREVIEWS;
 let root: Root | null = null;
 let services: Services | null = null;
+/** The scan started before `sashaHello` answered, consumed once by the first `loadStaged`. */
+let earlyScan: ReturnType<DriveApi["scanInbox"]> | null = null;
+/**
+ * Each proposal's `manifest.json` id, as the scan named it (build-addon.ts `sashaScanInboxRest_`),
+ * so `loadManifest` can read READY and the manifest in ONE round trip instead of two in series.
+ */
+const manifestFileIds = new Map<string, string>();
 
 /** The shared opener. `services` is read lazily because it is null until the host connects. */
 const reportWindow = createReportWindow({ api: () => services?.window ?? null, opener: window });
@@ -122,6 +158,7 @@ let clockHandle: ReturnType<typeof setInterval> | null = null;
 
 type Services = Readonly<{
   drive: DriveApi;
+  batch: BatchReadApi;
   log: SessionLogApi;
   candidateComments: CandidateCommentsApi;
   feedback: FeedbackApi;
@@ -132,6 +169,11 @@ type Services = Readonly<{
 async function main(): Promise<void> {
   render();
   const call = appsScriptCall({ run: google.script.run });
+  // THE INBOX SCAN STARTS NOW, IN PARALLEL with `sashaHello`: it needs nothing the hello answers,
+  // and waiting for it put two round trips in series (measured live 2026-10-11: 0.86 s + 2.55 s).
+  // The first `loadStaged` consumes it instead of asking again.
+  const drive = appsScriptDriveApi({ call });
+  earlyScan = drive.scanInbox({ pageSize: SCAN_PAGE_SIZE });
 
   // `sashaHello` first, because the sidebar cannot know its own deck: it is served from
   // googleusercontent.com, so there is no `location.href` to parse. Apps Script hands over the
@@ -152,7 +194,8 @@ async function main(): Promise<void> {
 
   const presentationId = presentationIdOf(hello.value.presentationUrl);
   services = {
-    drive: appsScriptDriveApi({ call }),
+    drive,
+    batch: appsScriptBatchReadApi({ call }),
     log: appsScriptSessionLogApi({ call }),
     candidateComments: appsScriptCandidateCommentsApi({ call }),
     feedback: appsScriptFeedbackApi({ call }),
@@ -241,14 +284,17 @@ function pump(): void {
     dispatch({ kind: "slide-requested", slideIndex: revised.slideIndex });
     void loadRevisedSlide({ slideIndex: revised.slideIndex, fileId: revised.fileId });
   }
-  // LAST, and one at a time (nextPreviewToLoad): pictures must never queue ahead of the reads the
-  // user is waiting on.
-  const preview = nextPreviewToLoad({ conversation: state, previews });
-  if (preview !== null) {
-    dispatchPreview({ kind: "preview-requested", key: preview.key });
-    void loadPreview(preview);
+  // LAST, and as ONE batch (previewsToLoad): one round trip for every thumbnail, after the reads
+  // the user is waiting on have been asked for.
+  const toPreview = previewsToLoad({ conversation: state, previews });
+  if (toPreview.length > 0) {
+    for (const request of toPreview) dispatchPreview({ kind: "preview-requested", key: request.key });
+    void loadPreviews(toPreview);
   }
-  const autoOpen = proposalToAutoOpen(state);
+  // THE AUTO-OPEN WAITS FOR THE THUMBNAILS (one batch, ~1 s), so the window is seeded with every
+  // candidate's HTML (picker-seed.ts) and downloads none of it itself. Opening first made it fetch
+  // all eight again in parallel with this batch (measured live 2026-10-11).
+  const autoOpen = previewsSettled({ conversation: state, previews }) ? proposalToAutoOpen(state) : null;
   if (autoOpen !== null) {
     // Recorded FIRST, so a refusal cannot make the next poll try again for ever. The contract is
     // "it opens by itself when slides arrive", once -- not "it keeps trying".
@@ -286,10 +332,15 @@ async function loadStaged(): Promise<void> {
     dispatch({ kind: "staged-failed", message: NOT_CONNECTED });
     return;
   }
-  const replied = await running.drive.scanInbox({ pageSize: SCAN_PAGE_SIZE });
+  const pending = earlyScan;
+  earlyScan = null;
+  const replied = await (pending ?? running.drive.scanInbox({ pageSize: SCAN_PAGE_SIZE }));
   if (replied.kind !== "ok") {
     dispatch({ kind: "staged-failed", message: replied.message });
     return;
+  }
+  for (const mark of replied.value) {
+    if (mark.manifestFileId !== undefined) manifestFileIds.set(mark.proposalId, mark.manifestFileId);
   }
   dispatch({ kind: "staged-arrived", marks: replied.value, readAt: new Date().toISOString() });
 }
@@ -313,7 +364,15 @@ async function loadManifest(): Promise<void> {
     dispatch({ kind: "manifest-failed", message: NOT_CONNECTED });
     return;
   }
-  const readyText = await running.drive.downloadText(followed.readyFileId);
+  // BOTH IN ONE ROUND TRIP when the scan named the manifest. READY still decides: if it names a
+  // different manifest than the one read alongside it, that one is read instead.
+  const knownManifest = manifestFileIds.get(followed.proposalId);
+  const together =
+    knownManifest === undefined ? null : await running.batch.downloadTexts([followed.readyFileId, knownManifest]);
+  const readyText =
+    together?.kind === "ok"
+      ? together.value.get(followed.readyFileId) ?? { kind: "failed" as const, message: "READY missing from the batch" }
+      : await running.drive.downloadText(followed.readyFileId);
   if (readyText.kind !== "ok") {
     dispatch({ kind: "manifest-failed", message: readyText.message });
     return;
@@ -323,7 +382,8 @@ async function loadManifest(): Promise<void> {
     dispatch({ kind: "manifest-failed", message: describeParsed({ parsed: ready, what: "READY" }) });
     return;
   }
-  const manifestText = await running.drive.downloadText(ready.value.manifestFileId);
+  const readAlongside = together?.kind === "ok" ? together.value.get(ready.value.manifestFileId) : undefined;
+  const manifestText = readAlongside ?? (await running.drive.downloadText(ready.value.manifestFileId));
   if (manifestText.kind !== "ok") {
     dispatch({ kind: "manifest-failed", message: manifestText.message });
     return;
@@ -415,19 +475,21 @@ async function loadRevisedSlide({ slideIndex, fileId }: { slideIndex: number; fi
   dispatch({ kind: "slide-arrived", slideIndex, html: downloaded.value });
 }
 
-/** One candidate's HTML for its thumbnail. A failure is shown on the thumbnail, never retried in a loop. */
-async function loadPreview({ key, fileId }: PreviewRequest): Promise<void> {
+/** Every missing thumbnail's HTML in one round trip. A failure is shown on its thumbnail, never retried in a loop. */
+async function loadPreviews(requests: readonly PreviewRequest[]): Promise<void> {
   const running = services;
-  if (running === null) {
-    dispatchPreview({ kind: "preview-failed", key, message: NOT_CONNECTED });
-    return;
+  const replied =
+    running === null
+      ? { kind: "failed" as const, message: NOT_CONNECTED }
+      : await running.batch.downloadTexts(requests.map((request) => request.fileId));
+  for (const { key, fileId } of requests) {
+    const read = replied.kind === "ok" ? replied.value.get(fileId) : replied;
+    if (read === undefined || read.kind !== "ok") {
+      dispatchPreview({ kind: "preview-failed", key, message: read?.message ?? "not in the batch reply" });
+    } else {
+      dispatchPreview({ kind: "preview-arrived", key, html: read.value });
+    }
   }
-  const downloaded = await running.drive.downloadText(fileId);
-  if (downloaded.kind !== "ok") {
-    dispatchPreview({ kind: "preview-failed", key, message: downloaded.message });
-    return;
-  }
-  dispatchPreview({ kind: "preview-arrived", key, html: downloaded.value });
 }
 
 /**
@@ -554,6 +616,70 @@ function postFor({
 }
 
 /**
+ * ARCHIVE OR RESTORE ONE CANDIDATE, from the set card.
+ *
+ * OPTIMISTIC: `archive-requested` moves the candidate on screen before anything is written. Then
+ * ONE event file is CREATED in the proposal's `events/` folder -- never an update, so this writer
+ * cannot clobber the server's events -- and that file is what makes the choice survive a reopen and
+ * reach Sasha. A write that fails dispatches `archive-failed`, which undoes the click and says why.
+ * `atMillis` names the event file AND identifies the request, so a late outcome for a click the user
+ * has already changed their mind about cannot undo the newer one.
+ */
+async function setCandidateArchived({
+  proposalId,
+  slideIndex,
+  archived,
+}: {
+  proposalId: string;
+  slideIndex: number;
+  archived: boolean;
+}): Promise<void> {
+  const atMillis = Date.now();
+  dispatch({ kind: "archive-requested", proposalId, slideIndex, archived, atMillis });
+  const fail = (message: string): void =>
+    dispatch({ kind: "archive-failed", proposalId, slideIndex, atMillis, message });
+  const running = services;
+  if (running === null) {
+    fail(NOT_CONNECTED);
+    return;
+  }
+  const followed = followedSet(state);
+  if (followed === null || followed.proposalId !== proposalId) {
+    fail("that set of candidates is no longer the one on screen");
+    return;
+  }
+  const body = archiveEventBodyOf({ slideIndex, archived });
+  const name = sessionEventFileName({ atMillis, suffix: freshEventSuffix(), kind: body.kind });
+  if (name.kind !== "ok") {
+    fail(describeParsed({ parsed: name, what: "the event name" }));
+    return;
+  }
+  const serialized = serializeSessionEvent({ body, at: new Date(atMillis).toISOString() });
+  if (serialized.kind !== "ok") {
+    fail(describeParsed({ parsed: serialized, what: "the event" }));
+    return;
+  }
+  const written = await running.log.appendEvent({
+    folderId: followed.folderId,
+    name: name.value,
+    mimeType: EVENT_MIME_TYPE,
+    body: serialized.value,
+  });
+  if (written.kind !== "ok") {
+    fail(written.message);
+    return;
+  }
+  dispatch({ kind: "archive-written", proposalId, slideIndex, atMillis, fileId: written.value.fileId });
+}
+
+/** Six base36 characters: the event name's tie-break, so two writers in one millisecond do not collide. */
+function freshEventSuffix(): string {
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((byte) => (byte % 36).toString(36)).join("");
+}
+
+/**
  * Ask the HOST to show the slides window. `opened` is read back rather than assumed, so a refusal
  * (an older Code.gs, a host that declined) becomes a line on screen instead of a button that
  * appears to do nothing -- and this button is the only way back to the candidates.
@@ -566,10 +692,14 @@ async function showSlides(target?: Readonly<{ proposalId: string; slideIndex: nu
   }
   dispatch({ kind: "open-requested" });
   // WITH A TARGET the window comes up ON that candidate. The two documents share nothing, so it
-  // is recorded server-side first and collected by the window (build-addon.ts).
-  const replied = await running.window.openPicker(
-    target === undefined ? undefined : { proposalId: target.proposalId, slideIndex: target.slideIndex },
-  );
+  // is recorded server-side first and collected by the window (build-addon.ts). The SEED hands the
+  // window what this sidebar already read, so it draws without six round trips (picker-seed.ts).
+  const slideIndex = target?.slideIndex ?? null;
+  const replied = await running.window.openPicker({
+    proposalId: target?.proposalId ?? null,
+    slideIndex,
+    seed: pickerSeedOf({ conversation: state, previews, slideIndex }),
+  });
   if (replied.kind !== "ok") {
     dispatch({ kind: "open-failed", message: replied.message });
     return;
@@ -637,6 +767,12 @@ const actions: ConversationActions = {
   },
   resolve(thread) {
     void actOnThread({ thread, action: "resolve" });
+  },
+  setCandidateArchived(target) {
+    void setCandidateArchived(target);
+  },
+  chooseCandidateTab(tab) {
+    dispatch({ kind: "candidate-tab-chosen", tab });
   },
 };
 
@@ -721,7 +857,7 @@ function render(): void {
     if (existing === null) document.body.append(host);
     root = createRoot(host);
   }
-  root.render(createElement(ConversationPanel, { conversation: state, previews, actions }));
+  root.render(createElement(ConversationPanel, { conversation: state, previews, setup: SETUP, actions }));
 }
 
 /**

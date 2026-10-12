@@ -183,8 +183,9 @@ export function pollDelayMs({
 /**
  * The one proposal a poll result should open next, or null. A folder is a candidate only when it
  * holds a `READY` (written LAST, so its absence means the proposal is still partial), has not been
- * answered in a previous session, and has no sibling `PICK`. The scan is ordered by createdTime, so
- * the oldest unanswered proposal wins and a backlog drains in the order Claude produced it.
+ * answered in a previous session, and has no sibling `PICK`. The scan is ordered by createdTime, and
+ * the NEWEST unanswered proposal wins: that is the set the sidebar follows and seeds this window
+ * with (picker-seed.ts), and an older unanswered set must not replace it on the first poll.
  */
 export function nextCandidate({
   marks,
@@ -197,7 +198,7 @@ export function nextCandidate({
   for (const mark of marks) {
     if (mark.pickFileId !== null) answered.add(mark.proposalId);
   }
-  for (const mark of marks) {
+  for (const mark of [...marks].reverse()) {
     const readyFileId = mark.readyFileId;
     if (readyFileId === null) continue;
     if (mark.proposalId === "" || mark.folderId === "") continue;

@@ -167,7 +167,7 @@ export function assertNever(value: never): never {
   throw new Error(`Unhandled case: ${String(value)}`);
 }
 
-function parseSlides(field: unknown): Parsed<readonly SlideEntry[]> {
+export function parseSlides(field: unknown): Parsed<readonly SlideEntry[]> {
   if (!Array.isArray(field)) return { kind: "invalid", reason: "manifest slides is not an array" };
   const entries: SlideEntry[] = [];
   for (const candidate of field) {

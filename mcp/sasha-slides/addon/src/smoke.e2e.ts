@@ -173,6 +173,20 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
     const cells = await evaluateNumber({ client, expression: "document.querySelectorAll('.sasha-cell').length" });
     check({ failures, what: `${COUNT} cells, one per candidate`, ok: cells === COUNT, detail: `saw ${cells}` });
 
+    // THE BACKGROUND CONVERSION FINISHES BY ITSELF. Measured live 2026-10-11: each conversion
+    // dispatched its result while its index was still marked in flight, so the pump that dispatch
+    // ran declined to start the next one and nothing re-ran it -- the chain stalled after one
+    // candidate until some unrelated event happened along, and "Converted" waited on it. No input
+    // is given here on purpose: every conversion lands in the conversion cache on its own.
+    const conversionsStored = "Object.keys(localStorage).filter(k => k.startsWith('sashaSlides.conversion.')).length";
+    const allConvertedUnprompted = await pollFor({ client, expression: `${conversionsStored} >= ${COUNT}`, budgetMs: 5_000 });
+    check({
+      failures,
+      what: `all ${COUNT} candidates convert in the background with no input`,
+      ok: allConvertedUnprompted,
+      detail: `${await evaluateNumber({ client, expression: conversionsStored })} stored`,
+    });
+
     // EXACTLY ONE SCROLLBAR IN THE WINDOW, and it belongs to the grid. The shell growing past
     // 100vh put a second one outside it and pushed the last row's caption below the fold.
     const bodyOverflow = await evaluateNumber({
@@ -2071,12 +2085,20 @@ const STUB_SCRIPT = `<script>
     },
     sashaScanInbox: function () {
       return { marks: [{ proposalId: PROPOSAL, folderId: 'folder_1', readyFileId: 'ready',
-                         pickFileId: null, createdTime: '2026-10-03T12:00:00.000Z' }] };
+                         pickFileId: null, manifestFileId: 'manifest', createdTime: '2026-10-03T12:00:00.000Z' }] };
     },
     sashaReadText: function (spec) {
       var text = spec.fileId === 'ready' ? texts.ready : spec.fileId === 'manifest' ? texts.manifest : html[spec.fileId];
       if (text === undefined) throw new Error('no such file ' + spec.fileId);
       return { text: text };
+    },
+    // The batch: each file answers on its own, exactly as Code.gs's fetchAll does.
+    sashaReadTexts: function (spec) {
+      window.__SASHA_BATCH_READS__ = (window.__SASHA_BATCH_READS__ || 0) + 1;
+      return { texts: spec.fileIds.map(function (fileId) {
+        var text = fileId === 'ready' ? texts.ready : fileId === 'manifest' ? texts.manifest : html[fileId];
+        return text === undefined ? { fileId: fileId, error: 'HTTP 404' } : { fileId: fileId, text: text };
+      }) };
     },
     sashaInsert: function () { return { batchResponse: { replies: [{ createSlide: { objectId: 'sasha_smoke' } }] }, renderArtifact: null }; },
     // THE THROWAWAY-DECK RENDER, stubbed. A real one creates a presentation, photographs each

@@ -332,7 +332,7 @@ Browser: noVNC `http://localhost:6080/vnc.html?autoconnect=true&resize=scale`, C
    | RFC 9728 protected-resource metadata | serves `resource`, `authorization_servers`, scopes |
    | RFC 8414 AS metadata | `S256` only, DCR endpoint, `token_endpoint_auth_method: none` |
    | unauthenticated `POST /mcp` | **401** with `WWW-Authenticate: Bearer resource_metadata=...` |
-   | RFC 7591 dynamic registration | issues a `client_id`, auto-adds `https://claude.ai/api/mcp/auth_callback` |
+   | RFC 7591 dynamic registration | issues a `client_id`, auto-adds `https://claude.ai/api/mcp/auth_callback` and `https://chatgpt.com/connector_platform_oauth_redirect` |
    | `/authorize` | **302** to `accounts.google.com/o/oauth2/v2/auth`, `access_type=offline`, `prompt=consent`, its OWN `state` (not the client's) |
    | `code_challenge_method=plain` | rejected -> `error=invalid_request` redirect |
    | missing `code_challenge` | rejected -> "PKCE is mandatory" |

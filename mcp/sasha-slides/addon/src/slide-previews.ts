@@ -81,24 +81,26 @@ export function reducePreviews(previews: SlidePreviews, event: PreviewEvent): Sl
 }
 
 /**
- * THE NEXT PREVIEW TO FETCH, or null.
+ * EVERY PREVIEW STILL TO FETCH, as ONE batch, or nothing while a batch is in flight.
  *
- * ONE AT A TIME. Every `google.script.run` call shares the same per-user concurrency with the
- * comment, log and thread polls; firing eight downloads at once would delay the reads the user is
- * actually waiting on. Thumbnails fill in one after the other instead, top to bottom.
+ * ONE CALL, NOT ONE PER THUMBNAIL. They used to be fetched one at a time so eight downloads would
+ * not crowd out the comment and log polls -- which made eight thumbnails take 9 s (measured live
+ * 2026-10-11, ~1.1 s per round trip). `sashaReadTexts` reads the whole batch in one round trip
+ * (fetched in parallel server-side), so it costs the polls one slot, not eight.
  *
  * A failure is final for that key -- the thumbnail says why -- and the next revision is a new key,
  * which is the only retry that is not a loop.
  */
-export function nextPreviewToLoad({
+export function previewsToLoad({
   conversation,
   previews,
 }: {
   conversation: Conversation;
   previews: SlidePreviews;
-}): PreviewRequest | null {
-  for (const load of previews.values()) if (load.kind === "loading") return null;
+}): readonly PreviewRequest[] {
+  for (const load of previews.values()) if (load.kind === "loading") return [];
   const events = loadedEvents(conversation.log);
+  const wanted: PreviewRequest[] = [];
   for (const slide of slidesOf(conversation)) {
     const latest = latestRevisionOf({ events, slideIndex: slide.slideIndex });
     // A revised slide's bytes are the conversation's own revised-slide loader's job.
@@ -106,9 +108,32 @@ export function nextPreviewToLoad({
     if (hasOwnBytes(slide)) continue;
     const key = previewKeyOf({ fileId: slide.fileId, revisionEventId: null });
     if (previews.has(key)) continue;
-    return { key, slideIndex: slide.slideIndex, fileId: slide.fileId };
+    wanted.push({ key, slideIndex: slide.slideIndex, fileId: slide.fileId });
   }
-  return null;
+  return wanted;
+}
+
+/** Whether every thumbnail is in -- or failed -- so nothing is left to fetch or waiting on a reply. */
+export function previewsSettled({
+  conversation,
+  previews,
+}: {
+  conversation: Conversation;
+  previews: SlidePreviews;
+}): boolean {
+  for (const load of previews.values()) if (load.kind === "loading") return false;
+  return previewsToLoad({ conversation, previews }).length === 0;
+}
+
+/** The first of `previewsToLoad`, for callers that fetch one at a time. */
+export function nextPreviewToLoad({
+  conversation,
+  previews,
+}: {
+  conversation: Conversation;
+  previews: SlidePreviews;
+}): PreviewRequest | null {
+  return previewsToLoad({ conversation, previews })[0] ?? null;
 }
 
 /** What the thumbnail of one candidate shows right now. */

@@ -58,6 +58,7 @@ import { checkSlideHtml, domSlideDocumentParser } from "./html-check.ts";
 import { Picker, type PickerActions } from "./Picker.tsx";
 import { createObserver, type Announcer, type Observer, type PollTimer } from "./observer-runtime.ts";
 import { createReportWindow } from "./report-window.ts";
+import { SEED_ELEMENT_ID, parseBootSeed, type BootSeed } from "./picker-seed.ts";
 import { cachedConversion, conversionKeyOf, rememberConversion } from "./conversion-cache.ts";
 import { cachedRender, rememberRender, renderKeyOf } from "./render-cache.ts";
 import {
@@ -162,7 +163,10 @@ async function main(): Promise<void> {
   // googleusercontent.com, so there is no `location.href` to parse. Apps Script hands over the
   // presentation's URL and `presentationIdOf` extracts the id, which keeps the only parse in
   // tested TypeScript instead of in Code.gs.
-  const hello = await helloFromServer({ call });
+  // UNLESS THE SIDEBAR SEEDED THIS WINDOW (picker-seed.ts): then Code.gs already put the answer
+  // in the page, next to the proposal and its HTML, and the round trip is skipped.
+  const boot = await bootSeedFromPage();
+  const hello = boot !== null ? { kind: "ok" as const, value: boot.hello } : await helloFromServer({ call });
   if (hello.kind !== "ok") {
     dispatch({ kind: "trouble", message: hello.message });
     return;
@@ -229,13 +233,50 @@ async function main(): Promise<void> {
   // ASKED NOW, IN PARALLEL with the inbox scan, not after the proposal lands: it is a round trip of
   // its own, and waiting for the proposal first put it in series with every other startup call --
   // one more second between "Open slide 2" and slide 2.
-  pickerTarget = services.window.takePickerTarget();
+  // A SEEDED window was told its target with the seed, so there is nothing to collect.
+  if (boot === null) pickerTarget = services.window.takePickerTarget();
+  else {
+    dispatch({
+      kind: "proposal-seeded",
+      proposal: boot.seed.proposal,
+      presentationId,
+      html: boot.seed.html,
+      slideIndex: boot.seed.slideIndex,
+    });
+  }
 
   await observer.start();
   document.addEventListener("visibilitychange", () => {
     void announceViewers(observer);
   });
   await announceViewers(observer);
+}
+
+/**
+ * The seed Code.gs appended to this page, or null. Appended content is parsed AFTER the bundle's
+ * loader has run, so it is only there once the document has finished parsing. A malformed seed is
+ * dropped with a warning: the window then boots exactly as an unseeded one does.
+ */
+async function bootSeedFromPage(): Promise<BootSeed | null> {
+  if (document.readyState === "loading") {
+    await new Promise<void>((resolve) => document.addEventListener("DOMContentLoaded", () => resolve(), { once: true }));
+  }
+  const element = document.getElementById(SEED_ELEMENT_ID);
+  if (element === null) return null;
+  const parsed = parseBootSeed(element.textContent ?? "");
+  element.remove();
+  switch (parsed.kind) {
+    case "ok":
+      return parsed.value;
+    case "invalid":
+      console.warn(`[sasha-slides] ignoring the slides seed: ${parsed.reason}`);
+      return null;
+    case "unsupported-version":
+      console.warn(`[sasha-slides] ignoring the slides seed: protocolVersion ${parsed.protocolVersion}`);
+      return null;
+    default:
+      return assertNever(parsed);
+  }
 }
 
 /**
@@ -331,8 +372,8 @@ function pump(): void {
         return assertNever(due.urgency);
     }
   }
-  // EVERYTHING IS CONVERTED: if the user is looking at the converted rendering, go and get the
-  // real pictures. One call for the whole set -- the server builds ONE throwaway deck for all of
+  // EVERYTHING IS CONVERTED: go and get the real pictures, in the background, whatever the view (see
+  // `slidesToRender`). One call for the whole set -- the server builds ONE throwaway deck for all of
   // them (build-addon.ts `sashaRenderPreviews`), so asking per candidate would be N decks.
   const toRender = slidesToRender(forHtml);
   if (toRender === null || rendering) return;
@@ -417,6 +458,11 @@ async function convert({
     dispatch({ kind: "conversion-failed", index, message: cause instanceof Error ? cause.message : String(cause) });
   } finally {
     converting.delete(index);
+    // AND PUMP AGAIN. The result was dispatched above while this index was still in flight, so the
+    // pump that dispatch ran declined to start the next conversion. Without this the chain stalled
+    // after every candidate until some unrelated event came along (measured live 2026-10-11:
+    // eleven seconds between two conversions that each took ~20 ms, and "Converted" waited on it).
+    pump();
   }
 }
 
@@ -1039,13 +1085,18 @@ function refusalOf(refused: readonly Readonly<{ noteId: string; reason: string }
   return first === undefined ? "there is nothing to send yet" : `nothing was sent: ${first.reason}`;
 }
 
-/** Which of the two writable kinds a body is. A switch, so a third one has to be named here. */
-function eventKindOf(body: SessionEventBody): "comment-opened" | "slide-inserted" {
+/** Which of the writable kinds a body is. A switch, so a new one has to be named here. */
+function eventKindOf(body: SessionEventBody): "comment-opened" | "slide-inserted" | "slide-archived" | "slide-restored" {
   switch (body.kind) {
     case "comment-opened":
       return "comment-opened";
     case "slide-inserted":
       return "slide-inserted";
+    // Written by the sidebar's candidate card, never by this window; named so the switch stays total.
+    case "slide-archived":
+      return "slide-archived";
+    case "slide-restored":
+      return "slide-restored";
     case "slides-staged":
     case "comment-answered":
     case "slide-revised":

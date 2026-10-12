@@ -9,6 +9,7 @@
 import type { ConversationActions } from "./Conversation.tsx";
 import type { DefectActions } from "./Defect.tsx";
 import type { PickerActions } from "./Picker.tsx";
+import type { SetupEnvironment } from "./setup-guide.tsx";
 import { nullSlideEditor } from "./slide-editor.ts";
 
 export const INERT_DEFECT_ACTIONS: DefectActions = {
@@ -74,4 +75,13 @@ export const INERT_CONVERSATION_ACTIONS: ConversationActions = {
   resolve() {},
   chooseCommentFilter() {},
   openArtifact() {},
+  setCandidateArchived() {},
+  chooseCandidateTab() {},
+};
+
+/** A build with no hosted connector address, and a viewer whose storage remembers nothing. */
+export const UNCONFIGURED_SETUP: SetupEnvironment = {
+  repoRoot: "/workspaces/sashaslides",
+  connectorUrl: null,
+  store: { load: () => null, save() {} },
 };

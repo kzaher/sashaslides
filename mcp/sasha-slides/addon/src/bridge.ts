@@ -34,6 +34,7 @@ import type { FeedbackCommentRecord, FeedbackReply, SendFeedbackResult } from ".
 // once (UI-CONTRACT.md on `SlideEditor`); session-log.ts owns the session-log shapes, so the
 // parser imports the type it fills in rather than inventing a twin.
 import type { CandidateCommentsEntry } from "./session-log.ts";
+import type { PickerSeed } from "./picker-seed.ts";
 import { assertNever, type Parsed } from "./protocol.ts";
 
 /**
@@ -50,12 +51,17 @@ export type ProposalMark = Readonly<{
   readyFileId: string | null;
   pickFileId: string | null;
   createdTime: string;
+  /** The folder's `manifest.json`, when the scan names it, so READY and manifest can be read together. */
+  manifestFileId?: string;
 }>;
 
 /** `sashaHello()`. The URL, not the id, so the one parse lives in `presentationIdOf` below. */
 export type HelloReply = Readonly<{ protocolVersion: number; presentationUrl: string }>;
 
 export type ScanReply = Readonly<{ marks: readonly ProposalMark[] }>;
+
+/** `sashaReadTexts()`, keyed by file id: each file's text, or why that one file could not be read. */
+export type ReadTextsReply = ReadonlyMap<string, CallOutcome<string>>;
 
 export type ReadTextReply = Readonly<{ text: string }>;
 
@@ -156,6 +162,7 @@ export type ServerFunctionName =
   | "sashaHello"
   | "sashaScanInbox"
   | "sashaReadText"
+  | "sashaReadTexts"
   | "sashaReadEvents"
   | "sashaWriteEvent"
   | "sashaCandidateComments"
@@ -177,6 +184,7 @@ export const SERVER_FUNCTION_NAMES: readonly ServerFunctionName[] = [
   "sashaHello",
   "sashaScanInbox",
   "sashaReadText",
+  "sashaReadTexts",
   "sashaReadEvents",
   "sashaWriteEvent",
   "sashaCandidateComments",
@@ -239,6 +247,8 @@ export type ReportTargetReply = Readonly<{ proposalId: string | null; slideIndex
  */
 export type PickerTargetSpec = Readonly<{ proposalId: string | null; slideIndex: number | null }>;
 export type PickerTargetReply = PickerTargetSpec;
+/** `sashaOpenPicker`'s request: the target, plus what the sidebar already knows (picker-seed.ts), or null. */
+export type OpenPickerSpec = PickerTargetSpec & Readonly<{ seed: PickerSeed | null }>;
 
 export function parsePickerTargetReply(value: unknown): Parsed<PickerTargetReply> {
   const record = asRecord(value);
@@ -423,7 +433,31 @@ export function parseProposalMark(value: unknown): ProposalMark | null {
     readyFileId: stringAt({ record, key: "readyFileId" }),
     pickFileId: stringAt({ record, key: "pickFileId" }),
     createdTime: stringAt({ record, key: "createdTime" }) ?? "",
+    ...manifestOf(record),
   };
+}
+
+function manifestOf(record: Readonly<Record<string, unknown>>): Readonly<{ manifestFileId?: string }> {
+  const manifestFileId = stringAt({ record, key: "manifestFileId" });
+  return manifestFileId === null || manifestFileId === "" ? {} : { manifestFileId };
+}
+
+export function parseReadTextsReply(value: unknown): Parsed<ReadTextsReply> {
+  const record = asRecord(value);
+  const texts = record?.["texts"];
+  if (!Array.isArray(texts)) return { kind: "invalid", reason: "sashaReadTexts returned no texts" };
+  const reads = new Map<string, CallOutcome<string>>();
+  for (const entry of texts) {
+    const read = asRecord(entry);
+    const fileId = read === null ? null : stringAt({ record: read, key: "fileId" });
+    if (read === null || fileId === null) return { kind: "invalid", reason: "sashaReadTexts returned an entry with no fileId" };
+    const text = stringAt({ record: read, key: "text" });
+    reads.set(
+      fileId,
+      text === null ? { kind: "failed", message: stringAt({ record: read, key: "error" }) ?? "unreadable" } : { kind: "ok", value: text },
+    );
+  }
+  return { kind: "ok", value: reads };
 }
 
 export function parseReadTextReply(value: unknown): Parsed<ReadTextReply> {

@@ -235,6 +235,13 @@ html, body { margin: 0; padding: 0; background: #fff; }
 .sasha-stack-slide { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 6px; border: 1px solid #e8eaed; border-radius: 6px; background: #f8f9fa; }
 .sasha-stack-number { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; border-radius: 9px; background: #202124; color: #fff; font-size: 10px; font-weight: 700; flex: none; }
 .sasha-stack-label { flex: 1 1 auto; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Label above, actions below, beside the thumbnail -- so the label is never squeezed by buttons. */
+.sasha-stack-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sasha-stack-body .sasha-stack-label { flex: none; }
+.sasha-stack-actions { display: flex; align-items: center; gap: 6px; }
+/* The thumbnail is a button that opens the candidate: no button chrome, just a pointer and a ring. */
+.sasha-stack-thumb { flex: none; display: flex; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 4px; }
+.sasha-stack-thumb:hover, .sasha-stack-thumb:focus-visible { outline: 2px solid #1a73e8; outline-offset: 1px; }
 /* On a comment, not in a bar: it belongs to the thread above it. */
 .sasha-open-artifact { cursor: pointer; margin: 4px 0 0 34px; border: 0; background: transparent; padding: 2px 0; font: inherit; font-size: 11px; color: #1a73e8; text-decoration: underline; text-underline-offset: 2px; }
 .sasha-open-artifact:hover { color: #174ea6; }
@@ -246,6 +253,22 @@ html, body { margin: 0; padding: 0; background: #fff; }
 /* THE CONTROLS STAY PUT. The set card and the filter govern everything under them, so a long
    thread must not scroll them away. Two sticky bands, the filter under the card. */
 .sasha-artifact { position: sticky; top: 0; z-index: 3; }
+/* BOUNDED, because it is sticky: measured 2026-10-11, eight candidates made the pinned card ~450 px
+   of a ~560 px sidebar, so the comments scrolled underneath it out of sight. The list scrolls. */
+.sasha-artifact .sasha-stack { max-height: 40vh; overflow-y: auto; }
+/* WORKING / ARCHIVED: the comment filter's tabs and counts, but not sticky -- the card already is. */
+.sasha-candidate-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.sasha-candidate-tabs .sasha-tab { display: inline-flex; align-items: center; gap: 5px; }
+/* "Show archived", inside a sentence: a quiet link. Archive / Restore are buttons styled like Open. */
+.sasha-stack-archive { flex: none; cursor: pointer; border: 0; background: transparent; padding: 2px 4px; font: inherit; font-size: 11px; color: #5f6368; border-radius: 4px; }
+.sasha-stack-archive:hover, .sasha-stack-archive:focus-visible { color: #1a73e8; text-decoration: underline; }
+/* Archived rows read as set aside: dimmer, never hidden. */
+.sasha-stack-archived .sasha-stack-slide { background: #fff; border-style: dashed; }
+.sasha-stack-archived .sasha-thumb, .sasha-stack-archived .sasha-stack-label { opacity: .65; }
+.sasha-candidates-empty { margin: 0; }
+/* The last archived candidate stays in view on the working tab, with its way back. */
+.sasha-last-archived { display: flex; align-items: center; gap: 6px; width: 100%; margin: 0; font-size: 11px; color: #5f6368; min-width: 0; }
+.sasha-last-archived-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sasha-filter { position: sticky; top: 0; z-index: 2; background: var(--sasha-ground, #fff); padding: 6px 0; }
 .sasha-filter { display: flex; gap: 4px; flex-wrap: wrap; }
 /* The two things a thread ends with, as words: the tick in the corner is Google's convention
@@ -462,8 +485,19 @@ html, body { margin: 0; padding: 0; background: #fff; }
    The two commands are <code> blocks on their own lines: the sidebar has no clipboard permission,
    so "copyable verbatim" can only mean "selectable without picking words out of a sentence", and
    user-select:all makes one click select a whole command. */
-.sasha-nobody-listening { display: flex; flex-direction: column; gap: 6px; width: 100%; border: 1px solid #c5221f; background: #fce8e6; border-radius: 6px; padding: 8px; }
-.sasha-nobody-head { font-size: 12px; font-weight: 600; color: #c5221f; }
+.sasha-nobody-listening { display: flex; flex-direction: column; gap: 6px; width: 100%; border: 1px solid #dadce0; border-left: 3px solid #f9ab00; background: #f8f9fa; border-radius: 6px; padding: 8px; }
+.sasha-nobody-head { margin: 0; font-size: 12px; font-weight: 600; color: #3c4043; }
+/* The setup panel's tabs reuse the comment filter's look, minus its sticky header behaviour. */
+.sasha-nobody-listening .sasha-filter { position: static; background: transparent; padding: 0; }
+.sasha-setup-bots { display: flex; gap: 4px; flex-wrap: wrap; }
+.sasha-setup-panel { display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 1.5; color: #3c4043; }
+.sasha-setup-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.sasha-setup-missing { margin: 0; line-height: 1.5; }
+.sasha-setup-inline { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.sasha-copy-row { display: flex; align-items: flex-start; gap: 4px; margin-top: 4px; }
+.sasha-copy-row .sasha-copyable { flex: 1; min-width: 0; }
+.sasha-copy-button { flex: none; cursor: pointer; border: 1px solid #dadce0; border-radius: 4px; background: #fff; color: #1a73e8; padding: 5px 8px; font: inherit; font-size: 11px; }
+.sasha-copy-button:hover { background: #e8f0fe; }
 .sasha-copyable { display: block; user-select: all; font-family: ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.5; background: #fff; border: 1px solid #dadce0; border-radius: 4px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Not clamped and not behind a disclosure: it is the sentence that stops the panel being a lie. */

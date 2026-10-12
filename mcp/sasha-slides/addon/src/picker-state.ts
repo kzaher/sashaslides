@@ -206,6 +206,18 @@ export type AnomalySendPhase =
 
 export type PickerEvent =
   | Readonly<{ kind: "proposal-offered"; proposal: Proposal; presentationId: string | null }>
+  /**
+   * The proposal as the SIDEBAR already had it, with whatever candidate HTML it had fetched and
+   * the candidate to open on (picker-seed.ts). One event, so the offer is born with its HTML and
+   * `pump` never asks the server for documents the window was just handed.
+   */
+  | Readonly<{
+      kind: "proposal-seeded";
+      proposal: Proposal;
+      presentationId: string | null;
+      html: readonly Readonly<{ index: number; html: string }>[];
+      slideIndex: number | null;
+    }>
   | Readonly<{ kind: "trouble"; message: string }>
   | Readonly<{ kind: "slide-selected"; index: number }>
   /** Open the editor on one candidate. The grid stays underneath, remembering the choice. */
@@ -267,6 +279,21 @@ export function reducePicker(state: PickerState, event: PickerEvent): PickerStat
       // `count === 0` is a CLEARED set, not a malformed one: `clear_slides` leaves `READY` behind.
       if (event.proposal.count === 0) return { status: "cleared", proposalId: event.proposal.proposalId };
       return { status: "picking", offer: freshOffer(event) };
+
+    case "proposal-seeded": {
+      if (offerOf(state)?.proposal.proposalId === event.proposal.proposalId) return state;
+      if (event.proposal.count === 0) return { status: "cleared", proposalId: event.proposal.proposalId };
+      const fresh = freshOffer(event);
+      const slides = fresh.slides.map((frame) => {
+        const seeded = event.html.find((entry) => entry.index === frame.index);
+        return seeded === undefined ? frame : { ...frame, html: { kind: "loaded" as const, html: seeded.html } };
+      });
+      const editing = event.slideIndex === null ? null : clampIndex({ offer: fresh, index: event.slideIndex });
+      return {
+        status: "picking",
+        offer: { ...fresh, slides, selectedIndex: editing ?? fresh.selectedIndex, editing },
+      };
+    }
 
     case "trouble":
       // A picker on screen outranks a background Drive hiccup: the user is mid-decision, and a
@@ -643,9 +670,13 @@ export function htmlToLoad(offer: Offer): readonly SlideFrame[] {
  *
  * It answers null while ANY candidate is still converting, so the single call covers the set
  * rather than firing once per arrival.
+ *
+ * WHATEVER VIEW IS SHOWING. The call took 17.7 s for eight candidates (measured 2026-10-11), and it
+ * used to start only when Converted was chosen, so all of it was spent waiting. Asking as soon as
+ * the conversions are in means the pictures are usually there before the click, and remembered
+ * across opens (render-cache.ts). The price is one throwaway deck per new set even if nobody looks.
  */
 export function slidesToRender(offer: Offer): readonly SlideFrame[] | null {
-  if (offer.rendering !== "rendered") return null;
   const wanted: SlideFrame[] = [];
   for (const frame of offer.slides) {
     if (frame.render.kind === "rendering" || frame.render.kind === "rendered" || frame.render.kind === "failed") continue;

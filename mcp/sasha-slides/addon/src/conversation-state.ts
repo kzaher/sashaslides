@@ -55,8 +55,25 @@ import {
   type SessionEventVoice,
   type SlideCommentsLoad,
 } from "./session-log.ts";
+import {
+  archivedSlidesOf,
+  pendingAfterLog,
+  splitCandidates,
+  type CandidateLists,
+  type CandidateTab,
+  type PendingArchive,
+} from "./candidate-archive.ts";
 
 export type Conversation = Readonly<{
+  /** Which list the set card shows. In the tree, so a poll cannot snap it back. */
+  candidateTab: CandidateTab;
+  /**
+   * ARCHIVE / RESTORE CLICKS THE LOG DOES NOT SHOW YET, laid over it so a click takes effect at
+   * once (candidate-archive.ts). At most one per slide: a newer click replaces the older one.
+   */
+  archivePending: readonly PendingArchive[];
+  /** Why the last archive or restore could not be written, after it was undone. */
+  archiveTrouble: string | null;
   /** Null until `sashaHello` has answered, and the reason every send has a "not connected" path. */
   presentationId: string | null;
   /** The composer's contents. In the tree, so a poll-driven re-render cannot swallow a half-typed message. */
@@ -232,7 +249,14 @@ export type FollowedSet =
 export type ManifestLoad =
   | Readonly<{ kind: "unrequested" }>
   | Readonly<{ kind: "loading" }>
-  | Readonly<{ kind: "loaded"; count: number; revision: number | null; forEventId: string | null }>
+  | Readonly<{
+      kind: "loaded";
+      count: number;
+      revision: number | null;
+      forEventId: string | null;
+      /** The manifest's target deck, kept so the slides window can be seeded without re-reading it. */
+      presentationId: string | null;
+    }>
   | Readonly<{ kind: "failed"; message: string; forEventId: string | null }>;
 
 /**
@@ -306,12 +330,20 @@ export type ConversationEvent =
   /** The clock moved. Its own event because it changes NOTHING else -- see `nowMs`. */
   | Readonly<{ kind: "clock-ticked"; nowMs: number }>
   | Readonly<{ kind: "comment-filter-chosen"; filter: CommentFilter }>
+  | Readonly<{ kind: "candidate-tab-chosen"; tab: CandidateTab }>
+  /** The click, before the write: it takes effect now. `atMillis` names the event and the request. */
+  | Readonly<{ kind: "archive-requested"; proposalId: string; slideIndex: number; archived: boolean; atMillis: number }>
+  | Readonly<{ kind: "archive-written"; proposalId: string; slideIndex: number; atMillis: number; fileId: string }>
+  | Readonly<{ kind: "archive-failed"; proposalId: string; slideIndex: number; atMillis: number; message: string }>
   | Readonly<{ kind: "reply-typed"; commentId: string; text: string }>
   | Readonly<{ kind: "thread-action-started"; commentId: string; action: ThreadActionKind }>
   | Readonly<{ kind: "thread-action-succeeded"; commentId: string; action: ThreadActionKind; source: ThreadSource }>
   | Readonly<{ kind: "thread-action-failed"; commentId: string; action: ThreadActionKind; message: string }>;
 
 export const INITIAL_CONVERSATION: Conversation = {
+  candidateTab: "working",
+  archivePending: [],
+  archiveTrouble: null,
   presentationId: null,
   draft: "",
   send: { kind: "idle" },
@@ -384,6 +416,50 @@ export function reduceConversation(conversation: Conversation, event: Conversati
     case "comment-filter-chosen":
       return { ...conversation, commentFilter: event.filter };
 
+    case "candidate-tab-chosen":
+      return { ...conversation, candidateTab: event.tab };
+
+    case "archive-requested": {
+      if (followedSet(conversation)?.proposalId !== event.proposalId) return conversation;
+      const click: PendingArchive = {
+        proposalId: event.proposalId,
+        slideIndex: event.slideIndex,
+        archived: event.archived,
+        atMillis: event.atMillis,
+        fileId: null,
+      };
+      return {
+        ...conversation,
+        archivePending: [
+          ...conversation.archivePending.filter((pending) => pending.slideIndex !== event.slideIndex),
+          click,
+        ],
+        archiveTrouble: null,
+      };
+    }
+
+    case "archive-written":
+      return {
+        ...conversation,
+        archivePending: conversation.archivePending.map((pending) =>
+          isArchiveRequest({ pending, request: event }) ? { ...pending, fileId: event.fileId } : pending,
+        ),
+      };
+
+    case "archive-failed": {
+      const failed = conversation.archivePending.find((pending) => isArchiveRequest({ pending, request: event }));
+      // A failure for a click a NEWER click already replaced changes nothing on screen: the newer
+      // click is what the user wants now, and it reports its own outcome.
+      if (failed === undefined) return conversation;
+      return {
+        ...conversation,
+        archivePending: conversation.archivePending.filter((pending) => pending !== failed),
+        archiveTrouble:
+          `could not ${failed.archived ? "archive" : "restore"} candidate ${String(event.slideIndex)}: ` +
+          event.message,
+      };
+    }
+
     case "staged-requested":
       return {
         ...conversation,
@@ -418,6 +494,7 @@ export function reduceConversation(conversation: Conversation, event: Conversati
           count: event.manifest.count,
           revision: event.manifest.revision,
           forEventId: newestSetChangeIn(loadedEvents(conversation.log)),
+          presentationId: event.manifest.presentationId,
         },
         slides: event.manifest.slides.map((slide) => slideOf({ slide, slides: set.slides })),
       }));
@@ -441,6 +518,8 @@ export function reduceConversation(conversation: Conversation, event: Conversati
       return {
         ...conversation,
         log: { kind: "loaded", events: event.events, readAt: event.readAt },
+        // A written click whose event is now in the log is handed over to the log.
+        archivePending: pendingAfterLog({ pending: conversation.archivePending, events: event.events }),
         readOnce: { ...conversation.readOnce, log: true },
       };
 
@@ -717,6 +796,8 @@ function commentIdOfEvent(body: SessionEventBody): string | null {
     case "slides-cleared":
     case "slide-inserted":
     case "feedback-delivered":
+    case "slide-archived":
+    case "slide-restored":
     case "opaque":
       return null;
     default:
@@ -913,11 +994,50 @@ export function sashaPresence(conversation: Conversation): SashaPresence {
 export function presenceReadsOf(conversation: Conversation): PresenceReads {
   const { readOnce } = conversation;
   const reasons = [
-    readOnce.log ? null : reasonOfLogRead(conversation.log),
+    ...followedSetReasons(conversation),
     readOnce.thread ? null : reasonOfThreadRead(conversation.thread),
-    readOnce.comments ? null : reasonOfCommentRead(conversation.comments),
   ].flatMap((reason) => (reason === null ? [] : [reason]));
   return { incomplete: reasons[0] ?? null };
+}
+
+/**
+ * WHY THE FOLLOWED SET'S TWO READS -- its event log and its candidates' comments -- CANNOT YET
+ * SUPPORT A CLAIM, or nulls when they can.
+ *
+ * WITH NO SET THERE IS NOTHING TO READ, and waiting for those reads kept presence `unknown` for
+ * ever: with no candidates staged the notice never showed. Once the staged scan has
+ * come back empty, the deck's comment pane is the only evidence there is. Before that scan lands,
+ * a set may yet appear, so its outcome is the reason instead.
+ */
+function followedSetReasons(conversation: Conversation): readonly (string | null)[] {
+  const { readOnce } = conversation;
+  switch (conversation.set.kind) {
+    case "none":
+      return [reasonOfStagedScan(conversation.staged)];
+    case "following":
+      return [
+        readOnce.log ? null : reasonOfLogRead(conversation.log),
+        readOnce.comments ? null : reasonOfCommentRead(conversation.comments),
+      ];
+    default:
+      return assertNever(conversation.set);
+  }
+}
+
+/** Whether the staged scan has come back at least once. A re-scan in flight keeps what it had. */
+function reasonOfStagedScan(staged: StagedLoad): string | null {
+  switch (staged.kind) {
+    case "loaded":
+      return null;
+    case "loading":
+      return staged.had === null ? "the candidate slides are still being looked for" : null;
+    case "unrequested":
+      return "the candidate slides are still being looked for";
+    case "failed":
+      return staged.message;
+    default:
+      return assertNever(staged);
+  }
 }
 
 /** Whether the event log can yet support a claim about presence. A switch, so every arm answers. */
@@ -1090,6 +1210,28 @@ export function stagedProposalsOf({ marks }: { marks: readonly ProposalMark[] })
 }
 
 /** The followed set, or null. Every loop below is gated on it rather than on `set.kind` inline. */
+/**
+ * THE SET CARD'S TWO LISTS: Working in the manifest's order, Archived most recently archived
+ * first. The log (this set's events only) plus the clicks it has not caught up with.
+ */
+export function candidateListsOf(conversation: Conversation): CandidateLists<ConversationSlide> {
+  const set = conversation.set;
+  switch (set.kind) {
+    case "none":
+      return { working: [], archived: [] };
+    case "following":
+      return splitCandidates({
+        slides: set.slides,
+        archived: archivedSlidesOf({
+          events: loadedEvents(conversation.log).filter((event) => event.proposalId === set.proposalId),
+          pending: conversation.archivePending.filter((pending) => pending.proposalId === set.proposalId),
+        }),
+      });
+    default:
+      return assertNever(set);
+  }
+}
+
 export function followedSet(conversation: Conversation): FollowedProposal | null {
   switch (conversation.set.kind) {
     case "following":
@@ -1445,6 +1587,10 @@ function followOn({
     },
     log: { kind: "unrequested" },
     comments: { kind: "unrequested" },
+    // A NEW set starts on its working list, with nothing of the old set's clicks.
+    candidateTab: "working",
+    archivePending: [],
+    archiveTrouble: null,
     // A NEW set's log and comments have not been read; the old set's reads say nothing about them.
     readOnce: { ...conversation.readOnce, log: false, comments: false },
   };
@@ -1622,3 +1768,18 @@ function millisOf(at: string): number {
 
 /** One entry with its sort key. A record, not a tuple, so the sort reads as what it compares. */
 type Keyed = Readonly<{ at: number; position: number; entry: ConversationEntry }>;
+
+/** Whether a pending click is the one an outcome is about: same set, same slide, same millisecond. */
+function isArchiveRequest({
+  pending,
+  request,
+}: {
+  pending: PendingArchive;
+  request: Readonly<{ proposalId: string; slideIndex: number; atMillis: number }>;
+}): boolean {
+  return (
+    pending.proposalId === request.proposalId &&
+    pending.slideIndex === request.slideIndex &&
+    pending.atMillis === request.atMillis
+  );
+}

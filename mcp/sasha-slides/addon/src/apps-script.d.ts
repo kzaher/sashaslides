@@ -14,6 +14,7 @@
 import type {
   CandidateCommentsSpec,
   InsertRequestSpec,
+  OpenPickerSpec,
   ReadEventsSpec,
   ReadFeedbackSpec,
   CommentReplySpec,
@@ -34,6 +35,19 @@ declare global {
   const __SASHA_EXTRACTOR_JS_B64__: string;
 
   /**
+   * The absolute path of the checkout the add-on was built from, inlined by build-addon.ts so the
+   * sidebar's Dev tab can print the exact `claude mcp add` command instead of a placeholder.
+   * Defined for the sidebar bundle only.
+   */
+  const __SASHA_REPO_ROOT__: string;
+
+  /**
+   * The hosted connector's `https://<host>/mcp` address, from `SASHA_CONNECTOR_URL` at build time,
+   * or null when the build was given none. Defined for the sidebar bundle only.
+   */
+  const __SASHA_CONNECTOR_URL__: string | null;
+
+  /**
    * One pending `google.script.run` call. Each `withSuccessHandler` / `withFailureHandler` returns
    * a new runner, and the call itself returns void -- the result arrives through the handlers.
    */
@@ -43,6 +57,8 @@ declare global {
     sashaHello(): void;
     sashaScanInbox(spec: Readonly<{ pageSize: number }>): void;
     sashaReadText(spec: Readonly<{ fileId: string }>): void;
+    /** Several files' text in one round trip, each file succeeding or failing on its own. */
+    sashaReadTexts(spec: Readonly<{ fileIds: readonly string[] }>): void;
     /** One proposal's whole `events/` folder, name and bytes per file. See session-log.ts. */
     sashaReadEvents(spec: ReadEventsSpec): void;
     /** CREATE one event file under `<proposal>/events/`. Drive has no append (PROTOCOL.md). */
@@ -65,8 +81,8 @@ declare global {
     /** Resolve a thread: Drive's reply with `action: "resolve"`. Either spec field carries the note. */
     sashaResolveComment(spec: ReplyCommentSpec | CommentReplySpec): void;
     /** Takes nothing: the slides window is the same for every caller, and its size is Code.gs's. */
-    /** Open the slides window, optionally ON one candidate (bridge.ts `PickerTargetSpec`). */
-    sashaOpenPicker(spec?: PickerTargetSpec): void;
+    /** Open the slides window, optionally ON one candidate, seeded with what the sidebar knows (bridge.ts `OpenPickerSpec`). */
+    sashaOpenPicker(spec?: OpenPickerSpec): void;
     /** Which candidate it was asked to open on. Reading CLEARS it. */
     sashaTakePickerTarget(): void;
     /** Show the DEFECT-REPORT window. Records which candidate, then shows that third document. */

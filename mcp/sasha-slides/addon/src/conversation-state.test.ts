@@ -12,6 +12,7 @@ import type { ProposalMark } from "./bridge.ts";
 import { parseOpenPickerReply } from "./bridge.ts";
 import { ConversationPanel } from "./Conversation.tsx";
 import {
+  candidateListsOf,
   conversationEntriesOf,
   conversationIsOpening,
   defectReportReadiness,
@@ -47,7 +48,7 @@ import {
   NO_SLIDE_COMMENTS,
   type SlideCommentsLoad,
 } from "./session-log.ts";
-import { INERT_CONVERSATION_ACTIONS } from "./inert-actions.ts";
+import { INERT_CONVERSATION_ACTIONS, UNCONFIGURED_SETUP } from "./inert-actions.ts";
 import { NO_PREVIEWS } from "./slide-previews.ts";
 import type { Manifest } from "./protocol.ts";
 
@@ -608,7 +609,7 @@ test("HOW TO CONNECT SHOWS WHEN NOTHING IS ATTACHED, not five minutes after the 
   assert.equal(sashaPresence(everyRead).kind, "never-acted");
   const markup = markupOf(everyRead);
   assert.match(markup, /call open_work, then answer my open comments/);
-  assert.match(markup, /claude mcp add sasha-slides/);
+  assert.match(markup, /Nothing has picked this up/);
   assert.match(markup, /class="sasha-copyable"/, "the commands are selectable blocks, not prose");
 });
 
@@ -623,7 +624,7 @@ test("but a HALF-DONE read never claims it: absence of evidence is not evidence 
     { kind: "thread-arrived", threads: [], readAt: AT },
   ]);
   assert.equal(sashaPresence(broken).kind, "unknown");
-  assert.doesNotMatch(markupOf(broken), /claude mcp add sasha-slides/);
+  assert.doesNotMatch(markupOf(broken), /Nothing has picked this up/);
   assert.equal(sashaPresence(withComments()).kind, "unknown", "a read in flight, same refusal");
 });
 
@@ -641,7 +642,7 @@ test("and once a session HAS acted, with nothing stale, the instructions go away
     { kind: "clock-ticked", nowMs: Date.parse("2026-10-04T12:07:00.000Z") },
   ]);
   assert.equal(sashaPresence(acted).kind, "acted");
-  assert.doesNotMatch(markupOf(acted), /claude mcp add sasha-slides/);
+  assert.doesNotMatch(markupOf(acted), /Nothing has picked this up/);
 });
 
 /*
@@ -655,7 +656,7 @@ test("and once a session HAS acted, with nothing stale, the instructions go away
  */
 test("NO BOT CONNECTED: the user's OWN reply under a stuck message does not dismiss the notice", () => {
   const stuck = replay([...stagedLongAgo(), { kind: "thread-arrived", threads: [userMessage([])], readAt: AT }]);
-  assert.match(markupOf(stuck), /claude mcp add sasha-slides/, "a message unread for 14 min");
+  assert.match(markupOf(stuck), /Nothing has picked this up/, "a message unread for 14 min");
 
   const selfReplied = replay(
     [
@@ -675,23 +676,64 @@ test("NO BOT CONNECTED: the user's OWN reply under a stuck message does not dism
   assert.equal(waitingFor(selfReplied).length, 1, "a reply from the user is not Sasha's answer");
   const presence = sashaPresence(selfReplied);
   assert.notEqual(presence.kind === "acted" ? presence.at : null, "2026-10-04T12:15:00.000Z", "nor is it Sasha acting");
-  assert.match(markupOf(selfReplied), /claude mcp add sasha-slides/);
+  assert.match(markupOf(selfReplied), /Nothing has picked this up/);
 });
 
 test("NO BOT CONNECTED: candidates staged 15 minutes ago are not a listener, even with nothing waiting", () => {
   const idle = replay([...stagedLongAgo(), { kind: "thread-arrived", threads: [], readAt: AT }]);
   assert.deepEqual(waitingFor(idle), []);
   assert.equal(sashaPresence(idle).kind, "acted", "the server's slides-staged, from a session long gone");
-  assert.match(markupOf(idle), /claude mcp add sasha-slides/);
+  assert.match(markupOf(idle), /Nothing has picked this up/);
 });
 
 test("NO BOT CONNECTED: the 8 s poll putting every read back in flight does not hide the notice", () => {
   const idle = replay([...stagedLongAgo(), { kind: "thread-arrived", threads: [], readAt: AT }]);
   const polling = replay([{ kind: "log-requested" }, { kind: "thread-requested" }, { kind: "comments-requested" }], idle);
-  assert.match(markupOf(polling), /claude mcp add sasha-slides/);
+  assert.match(markupOf(polling), /Nothing has picked this up/);
   // A re-read that FAILS keeps what the last good one proved, too.
   const failed = reduceConversation(polling, { kind: "log-failed", message: "events HTTP 500" });
-  assert.match(markupOf(failed), /claude mcp add sasha-slides/);
+  assert.match(markupOf(failed), /Nothing has picked this up/);
+});
+
+/*
+ * NO CANDIDATES STAGED, AND THE NOTICE NEVER SHOWED.
+ *
+ * With no proposal there is no folder, so the event log and the candidates' comments are never
+ * read -- and presence waited on them for ever as "unknown". Once the staged scan has come back
+ * empty those two reads have nothing to say: the deck's comment pane is the only evidence left.
+ */
+test("NO CANDIDATES STAGED: with the deck read and no reply from Sasha, nothing is attached", () => {
+  const empty = replay([{ kind: "thread-arrived", threads: [], readAt: AT }]);
+  assert.equal(sashaPresence(empty).kind, "never-acted");
+  assert.match(markupOf(empty), /Nothing has picked this up/);
+
+  const askedOnly = replay([
+    { kind: "thread-arrived", threads: [userMessage([])], readAt: AT },
+    { kind: "clock-ticked", nowMs: Date.parse("2026-10-04T12:01:00.000Z") },
+  ]);
+  assert.equal(sashaPresence(askedOnly).kind, "never-acted", "the user's own message is not evidence");
+  assert.match(markupOf(askedOnly), /Nothing has picked this up/);
+});
+
+test("NO CANDIDATES STAGED: Sasha's reply is evidence, and stale after the threshold", () => {
+  const answered = userMessage([
+    { replyId: "r_s", author: "Sasha", createdAt: "2026-10-04T12:01:00.000Z", text: "on it", authoredByAgent: true },
+  ]);
+  const fresh = replay([
+    { kind: "thread-arrived", threads: [answered], readAt: AT },
+    { kind: "clock-ticked", nowMs: Date.parse("2026-10-04T12:02:00.000Z") },
+  ]);
+  assert.equal(sashaPresence(fresh).kind, "acted");
+  assert.doesNotMatch(markupOf(fresh), /Nothing has picked this up/);
+  const stale = reduceConversation(fresh, { kind: "clock-ticked", nowMs: Date.parse("2026-10-04T12:07:00.000Z") });
+  assert.match(markupOf(stale), /Nothing has picked this up/);
+});
+
+test("NO CANDIDATES STAGED: before the staged scan is in, absence is still not claimed", () => {
+  const unscanned = reduceConversation(INITIAL_CONVERSATION, { kind: "thread-arrived", threads: [], readAt: AT });
+  assert.equal(sashaPresence(unscanned).kind, "unknown");
+  const scanFailed = reduceConversation(unscanned, { kind: "staged-failed", message: "Drive HTTP 500" });
+  assert.equal(sashaPresence(scanFailed).kind, "unknown");
 });
 
 test("A RECEIPT IS STILL A READ IN THE LOG, never a reply from Sasha", () => {
@@ -853,7 +895,12 @@ function replay(events: readonly ConversationEvent[], from: Conversation = OPENE
 
 function markupOf(conversation: Conversation): string {
   return renderToStaticMarkup(
-    createElement(ConversationPanel, { conversation, previews: NO_PREVIEWS, actions: INERT_CONVERSATION_ACTIONS }),
+    createElement(ConversationPanel, {
+      conversation,
+      previews: NO_PREVIEWS,
+      setup: UNCONFIGURED_SETUP,
+      actions: INERT_CONVERSATION_ACTIONS,
+    }),
   );
 }
 
@@ -1893,6 +1940,15 @@ test("with nothing in flight there is no spinner at all", () => {
   assert.doesNotMatch(markupOf(withComments()), /class="sasha-header-spin"/);
 });
 
+/** The 8 s poll is not Sasha working: with nothing listening, a spinner would claim activity. */
+test("with nothing listening a poll in flight shows no spinner", () => {
+  const idle = replay([...stagedLongAgo(), { kind: "thread-arrived", threads: [], readAt: AT }]);
+  const polling = replay([{ kind: "log-requested" }, { kind: "thread-requested" }, { kind: "comments-requested" }], idle);
+  const markup = markupOf(polling);
+  assert.match(markup, /Nothing has picked this up/, "the notice is up");
+  assert.doesNotMatch(markup, /class="sasha-header-spin"/);
+});
+
 /**
  * NOTHING LISTENING PUTS THE INSTRUCTIONS ON TOP -- above the log, where they cannot be
  * scrolled past. This is the one situation where waiting longer cannot help.
@@ -1992,10 +2048,196 @@ test("and the open request names the proposal and the slide, so the window knows
     createElement(ConversationPanel, {
       conversation: withComments(),
       previews: NO_PREVIEWS,
+      setup: UNCONFIGURED_SETUP,
       actions: { ...INERT_CONVERSATION_ACTIONS, openArtifact: (target) => asked.push(target) },
     }),
   );
   assert.match(markup, /Open artifacts</);
   // The handler is wired; the server half is covered by bridge.test.ts's function list.
   assert.equal(asked.length, 0, "nothing fires on render");
+});
+
+/*
+ * ARCHIVING A CANDIDATE. The user sets a candidate aside without it ever disappearing: the set
+ * card has a Working and an Archived tab, archiving is optimistic (it moves on the click, before
+ * Drive answers), a failed write puts it back and says why, and the log -- where the archive is
+ * recorded -- is what brings it back on the next open.
+ */
+const ARCHIVE_AT_MS = 1791115700000;
+
+function archiveRequested(slideIndex: number, archived = true, atMillis = ARCHIVE_AT_MS): ConversationEvent {
+  return { kind: "archive-requested", proposalId: PROPOSAL, slideIndex, archived, atMillis };
+}
+
+function archivedEventFile(slideIndex: number, atMillis = ARCHIVE_AT_MS): SessionEventFileLike {
+  return {
+    name: `${atMillis}-cccccc-slide-archived.json`,
+    text: JSON.stringify({ protocolVersion: 1, at: AT, kind: "slide-archived", slideIndex }),
+  };
+}
+
+/** The staged set with its manifest read and NO comments at all. */
+function withCandidatesOnly(): Conversation {
+  return replay([
+    { kind: "staged-arrived", marks: [stagedMark], readAt: AT },
+    { kind: "manifest-arrived", manifest },
+    { kind: "log-arrived", events: eventsOf([staged(2)]), readAt: AT },
+  ]);
+}
+
+/** The slice of the markup that is the set card, so the comments below cannot satisfy a match. */
+function cardOf(markup: string): string {
+  const start = markup.indexOf('class="sasha-artifact"');
+  return start < 0 ? "" : markup.slice(start, markup.indexOf("Open artifacts", start));
+}
+
+test("the set card has Working and Archived tabs, styled like the comment filter, with counts", () => {
+  const card = cardOf(markupOf(withComments()));
+  assert.match(card, /class="sasha-candidate-tabs"/);
+  assert.match(card, /class="sasha-tab sasha-tab-on"[^>]*>Working<span class="sasha-filter-count">2</);
+  assert.match(card, /class="sasha-tab"[^>]*>Archived<span class="sasha-filter-count">0</);
+});
+
+test("every working candidate offers Archive next to Open", () => {
+  const card = cardOf(markupOf(withComments()));
+  assert.equal((card.match(/>Archive</g) ?? []).length, 2);
+  assert.equal((card.match(/>Open</g) ?? []).length, 2);
+  assert.doesNotMatch(card, />Restore</);
+});
+
+test("the set card is there even before anyone has commented", () => {
+  const card = cardOf(markupOf(withCandidatesOnly()));
+  assert.match(card, /class="sasha-stack-number mono">1</);
+  assert.match(card, />Archive</);
+});
+
+test("archiving is OPTIMISTIC: the candidate leaves Working on the click and the last one stays visible", () => {
+  const archived = reduceConversation(withComments(), archiveRequested(1));
+  const lists = candidateListsOf(archived);
+  assert.deepEqual(
+    lists.working.map((slide) => slide.slideIndex),
+    [2],
+  );
+  assert.deepEqual(
+    lists.archived.map((entry) => entry.slide.slideIndex),
+    [1],
+  );
+  const card = cardOf(markupOf(archived));
+  assert.doesNotMatch(card, /class="sasha-stack-number mono">1</, "not in the working list");
+  assert.match(card, /Archived<span class="sasha-filter-count">1</);
+  // NEVER GONE: the working tab names the last archived one, with a way back.
+  assert.match(card, /class="sasha-last-archived"[^]*Last archived[^]*1 · option 1[^]*>Restore</);
+});
+
+test("the Archived tab lists the most recently archived FIRST, each with Restore and Open", () => {
+  const conversation = replay(
+    [
+      archiveRequested(2, true, ARCHIVE_AT_MS),
+      archiveRequested(1, true, ARCHIVE_AT_MS + 1000),
+      { kind: "candidate-tab-chosen", tab: "archived" },
+    ],
+    withComments(),
+  );
+  const card = cardOf(markupOf(conversation));
+  assert.match(card, /class="sasha-tab sasha-tab-on"[^>]*>Archived<span class="sasha-filter-count">2</);
+  const numbers = [...card.matchAll(/class="sasha-stack-number mono">(\d+)</g)].map((match) => match[1]);
+  assert.deepEqual(numbers, ["1", "2"], "newest archive first");
+  assert.equal((card.match(/>Restore</g) ?? []).length, 2);
+  assert.equal((card.match(/>Open</g) ?? []).length, 2);
+  assert.doesNotMatch(card, />Archive</);
+});
+
+test("with every candidate archived, Working says so and offers the way to Archived", () => {
+  const conversation = replay([archiveRequested(1), archiveRequested(2, true, ARCHIVE_AT_MS + 1)], withComments());
+  const card = cardOf(markupOf(conversation));
+  assert.match(card, /All 2 candidates are archived/);
+  assert.match(card, />Show archived</);
+});
+
+test("restoring puts it back in Working, in the manifest's order", () => {
+  const conversation = replay(
+    [archiveRequested(1), archiveRequested(1, false, ARCHIVE_AT_MS + 1000)],
+    withComments(),
+  );
+  assert.deepEqual(
+    candidateListsOf(conversation).working.map((slide) => slide.slideIndex),
+    [1, 2],
+  );
+  assert.equal(candidateListsOf(conversation).archived.length, 0);
+});
+
+test("a FAILED write reverts the archive and says why", () => {
+  const conversation = replay(
+    [
+      archiveRequested(1),
+      { kind: "archive-failed", proposalId: PROPOSAL, slideIndex: 1, atMillis: ARCHIVE_AT_MS, message: "Drive HTTP 500" },
+    ],
+    withComments(),
+  );
+  assert.deepEqual(
+    candidateListsOf(conversation).working.map((slide) => slide.slideIndex),
+    [1, 2],
+  );
+  assert.match(markupOf(conversation), /could not archive candidate 1: Drive HTTP 500/);
+});
+
+test("a failure for a SUPERSEDED request does not undo the newer one", () => {
+  const conversation = replay(
+    [
+      archiveRequested(1, true, ARCHIVE_AT_MS),
+      archiveRequested(1, false, ARCHIVE_AT_MS + 1000),
+      archiveRequested(1, true, ARCHIVE_AT_MS + 2000),
+      { kind: "archive-failed", proposalId: PROPOSAL, slideIndex: 1, atMillis: ARCHIVE_AT_MS, message: "late" },
+    ],
+    withComments(),
+  );
+  assert.deepEqual(
+    candidateListsOf(conversation).archived.map((entry) => entry.slide.slideIndex),
+    [1],
+  );
+});
+
+test("the archive survives a reopen: a fresh conversation reads it back from the log", () => {
+  const reopened = replay([
+    { kind: "staged-arrived", marks: [stagedMark], readAt: AT },
+    { kind: "manifest-arrived", manifest },
+    { kind: "log-arrived", events: eventsOf([staged(2), archivedEventFile(2)]), readAt: AT },
+  ]);
+  assert.deepEqual(
+    candidateListsOf(reopened).archived.map((entry) => [entry.slide.slideIndex, entry.archivedAtMillis]),
+    [[2, ARCHIVE_AT_MS]],
+  );
+});
+
+test("a written archive is handed over to the log once the log holds its file", () => {
+  const written = replay(
+    [
+      archiveRequested(2),
+      { kind: "archive-written", proposalId: PROPOSAL, slideIndex: 2, atMillis: ARCHIVE_AT_MS, fileId: `drive_${ARCHIVE_AT_MS}-cccccc-slide-archived.json` },
+    ],
+    withCandidatesOnly(),
+  );
+  assert.equal(written.archivePending.length, 1, "kept until the log has caught up");
+  const caughtUp = reduceConversation(written, {
+    kind: "log-arrived",
+    events: eventsOf([staged(2), archivedEventFile(2)]),
+    readAt: AT,
+  });
+  assert.equal(caughtUp.archivePending.length, 0, "the log is the record now");
+  assert.deepEqual(
+    candidateListsOf(caughtUp).archived.map((entry) => entry.slide.slideIndex),
+    [2],
+  );
+});
+
+// ONE BUTTON STYLE, AND THE THUMBNAIL OPENS TOO. The user asked for Archive and Open to look the
+// same, and for a click on a candidate's picture to open it like Open does.
+test("each candidate row's Archive and Open share one style, and its thumbnail is a button that opens it", () => {
+  const card = cardOf(markupOf(withComments()));
+  const archive = card.match(/<button[^>]*>Archive<\/button>/g) ?? [];
+  const open = card.match(/<button[^>]*>Open<\/button>/g) ?? [];
+  assert.ok(archive.length > 0 && open.length === archive.length, `${archive.length} Archive, ${open.length} Open`);
+  const classOf = (button: string): string => /class="([^"]*)"/.exec(button)?.[1] ?? "";
+  for (const button of archive) assert.equal(classOf(button), classOf(open[0] ?? ""), button);
+  assert.match(card, /<button[^>]*aria-label="Open candidate 1"[^>]*>[^]*?sasha-thumb/);
 });

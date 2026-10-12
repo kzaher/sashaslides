@@ -21,6 +21,7 @@ import {
   offerOf,
   reducePicker,
   selectedFrame,
+  slidesToRender,
   type PickerEvent,
   type PickerState,
 } from "./picker-state.ts";
@@ -527,4 +528,25 @@ test("every candidate's HTML is requested AT ONCE, not one round trip after anot
     [1, 3],
     "and one already in flight is not asked for twice",
   );
+});
+
+/**
+ * GOOGLE'S PICTURES ARE ASKED FOR IN THE BACKGROUND, not when Converted is chosen. Measured live
+ * 2026-10-11: the one render call for eight candidates took 17.7 s, all of it spent after the click.
+ * Once every candidate is converted the set is rendered whatever view is showing, so the click
+ * finds the pictures already there (render-cache.ts keeps them across opens).
+ */
+test("every converted candidate is rendered even while the preview is showing, but only once all are converted", () => {
+  const events: PickerEvent[] = [{ kind: "proposal-offered", proposal, presentationId: "deck_1" }];
+  for (const index of [1, 2, 3]) {
+    const html = slideHtml({ index, proposalId: "p_1" });
+    events.push({ kind: "html-arrived", index, html });
+    const result = stubConvertHtmlToSlideRequests()({ html, presentationId: "deck_1", pageObjectId: `sasha_page_${index}` });
+    events.push({ kind: "converted", index, result });
+  }
+  const partly = offerOf(play(events.slice(0, 5))) ?? neverOffer();
+  assert.equal(partly.rendering, "html", "the preview is what is showing");
+  assert.equal(slidesToRender(partly), null, "one call covers the set, so it waits for the last conversion");
+  const all = offerOf(play(events)) ?? neverOffer();
+  assert.deepEqual(slidesToRender(all)?.map((frame) => frame.index), [1, 2, 3]);
 });
