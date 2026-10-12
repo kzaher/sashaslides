@@ -35,6 +35,7 @@ venv/
 
 # Auth tokens / OAuth credentials (never commit)
 .auth/*.json
+.auth/deploy_ed25519*
 .auth/tokens.json
 .auth/google_oauth.json
 

@@ -24,7 +24,9 @@
 set -euo pipefail
 
 HOST="${DEPLOY_HOST:-root@78.46.91.218}"
-KEY="${DEPLOY_KEY:-}"
+# The dedicated deploy key in .auth/ (git-ignored, survives container rebuilds) when present, so a
+# deploy does not depend on an SSH agent forwarded by an editor; DEPLOY_KEY overrides, "" forces the agent.
+KEY="${DEPLOY_KEY-$( [ -f "$(dirname "$0")/../.auth/deploy_ed25519" ] && echo "$(cd "$(dirname "$0")/.." && pwd)/.auth/deploy_ed25519" )}"
 DOMAIN="${DEPLOY_DOMAIN:-sashaslides.com}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITE_DIR="renderer/html2slides/addon-server"
