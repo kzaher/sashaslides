@@ -3,6 +3,10 @@
 //   npx tsx mcp/sasha-slides/docs/connect/recording/record.ts start  <flow>          # begin screen capture of DISPLAY
 //   npx tsx mcp/sasha-slides/docs/connect/recording/record.ts step   <flow> <n>      # caption step n of <flow>.steps.txt, now
 //   npx tsx mcp/sasha-slides/docs/connect/recording/record.ts finish <flow> --url <connector> --redact <word,word,...>
+//   npx tsx mcp/sasha-slides/docs/connect/recording/record.ts reredact <flow> --url <connector> --redact <...>
+//                                                                   # re-run redaction on the redacted video
+//   npx tsx mcp/sasha-slides/docs/connect/recording/record.ts recaption <flow> --url <connector>  # after editing a mistaken
+//                                                                   # line out of recordings/.<flow>/steps.log
 //
 // <flow> is `claude-ai` or `chatgpt`. You perform each step in the browser yourself (or drive it over CDP) and call
 // `step` just before doing it. `finish` stops the capture, builds captions and a timed step table, removes personal
@@ -13,7 +17,9 @@
 //     for the whole video;
 //   - every word OCR finds matching --redact (your email, name, username), 2 s either side of each sighting, because
 //     1 frame-per-second OCR misses fade-ins;
-//   - ChatGPT's personalised suggestions, whenever its "How can I help, <name>?" home greeting is on screen.
+//   - ChatGPT's personalised suggestions under its "Ask ChatGPT" home box (and under the "How can I help,
+//     <name>?" greeting);
+//   - the name in claude.ai's "Good evening, <name>" greeting.
 // It then re-runs OCR on the result and refuses to finish if any --redact word is still readable.
 //
 // Needs ffmpeg and tesseract on PATH (`sudo apt-get install -y ffmpeg tesseract-ocr`); `start` checks.
@@ -33,6 +39,8 @@ const SIDEBAR: Box = { x: 0, y: 400, w: 296, h: 440 };
 const BADGE: Box = { x: 0, y: 836, w: 200, h: 62 };
 const SUGGESTIONS: Box = { x: 560, y: 500, w: 840, h: 170 };
 const HOME_GREETING = /\bHow\b.{0,20}\bhelp,/;
+// claude.ai greets by name ("Good evening, K"): the word after the time of day is the name.
+const TIME_OF_DAY = /^(morning|afternoon|evening|night),?$/i;
 const FRAME = { w: 1600, h: 900 };
 
 const work = (flow: Flow): string => join(OUT, `.${flow}`);
@@ -155,6 +163,17 @@ function redactionFilter(bySecond: Map<number, Word[]>, redact: readonly RegExp[
       note({ x: word.box.x - 12, y: word.box.y - 8, w: word.box.w + 24, h: word.box.h + 16 }, second);
     }
     if (HOME_GREETING.test(words.map((w) => w.text).join(" "))) note(SUGGESTIONS, second);
+    // ChatGPT's home suggestions sit just under the "Ask ChatGPT" box, whatever the greeting says.
+    words.forEach((word, i) => {
+      const next = words[i + 1];
+      if (word.text === "Ask" && next !== undefined && /^ChatGPT/.test(next.text)) {
+        note({ x: word.box.x - 60, y: word.box.y + 20, w: 900, h: 150 }, second);
+      }
+    });
+    words.forEach((word, i) => {
+      const name = words[i + 1];
+      if (TIME_OF_DAY.test(word.text) && name !== undefined) note({ x: name.box.x - 12, y: name.box.y - 10, w: name.box.w + 60, h: name.box.h + 20 }, second);
+    });
   }
   const spans: string[] = [];
   const delogo = (box: Box, from: number, to: number): string => {
@@ -177,31 +196,54 @@ function redactionFilter(bySecond: Map<number, Word[]>, redact: readonly RegExp[
   return `[0:v]${spans.join(",\n")}[clean]`;
 }
 
-function finish(flow: Flow, url: string, redact: readonly RegExp[]): void {
-  requireTools();
+/** Captions go on AFTER redaction so the wipes never cut into them; finish then checks the caption text too. */
+function burnCaptions(flow: Flow): string {
   const dir = work(flow);
-  const pid = Number(readFileSync(join(dir, "ffmpeg.pid"), "utf8"));
-  try {
-    process.kill(pid, "SIGINT"); // lets ffmpeg write the mp4 index
-  } catch {
-    // already stopped
-  }
-  execFileSync("sh", ["-c", `for i in $(seq 50); do kill -0 ${String(pid)} 2>/dev/null || exit 0; sleep 0.1; done; exit 1`]);
-  captions(flow, url);
-  const raw = join(dir, "raw.mp4");
-  const bySecond = ocr(raw, join(dir, "ocr"));
-  writeFileSync(join(dir, "redact.filter"), redactionFilter(bySecond, redact, bySecond.size));
   const out = join(OUT, `${flow}.mp4`);
   const style = "FontSize=9,Alignment=2,BorderStyle=3,Outline=1,Shadow=0,BackColour=&H90000000,MarginV=8";
-  execFileSync("ffmpeg", [
-    "-nostdin", "-loglevel", "error", "-y", "-i", raw, "-/filter_complex", join(dir, "redact.filter"),
-    "-map", "[clean]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", join(dir, "clean.mp4"),
-  ]);
-  // Captions go on AFTER redaction so the wipes never cut into them; the caption text itself is checked below.
   execFileSync("ffmpeg", [
     "-nostdin", "-loglevel", "error", "-y", "-i", join(dir, "clean.mp4"), "-vf", `subtitles=${join(dir, "steps.srt")}:force_style='${style}'`,
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out,
   ]);
+  return out;
+}
+
+/** After fixing recordings/.<flow>/steps.log by hand (a mistaken step): rebuild captions on the redacted video. */
+function recaption(flow: Flow, url: string): void {
+  captions(flow, url);
+  console.log(`wrote ${burnCaptions(flow)} with the corrected captions`);
+}
+
+/** Re-runs redaction (with today's rules) on the already-redacted video, e.g. after a rule was added. */
+function reredact(flow: Flow, url: string, redact: readonly RegExp[]): void {
+  requireTools();
+  const dir = work(flow);
+  execFileSync("cp", [join(dir, "clean.mp4"), join(dir, "raw.mp4")]);
+  writeFileSync(join(dir, "ffmpeg.pid"), "0");
+  finish(flow, url, redact);
+}
+
+function finish(flow: Flow, url: string, redact: readonly RegExp[]): void {
+  requireTools();
+  const dir = work(flow);
+  const pid = Number(readFileSync(join(dir, "ffmpeg.pid"), "utf8"));
+  if (pid > 0) {
+    try {
+      process.kill(pid, "SIGINT"); // lets ffmpeg write the mp4 index
+    } catch {
+      // already stopped
+    }
+    execFileSync("sh", ["-c", `for i in $(seq 50); do kill -0 ${String(pid)} 2>/dev/null || exit 0; sleep 0.1; done; exit 1`]);
+  }
+  captions(flow, url);
+  const raw = join(dir, "raw.mp4");
+  const bySecond = ocr(raw, join(dir, "ocr"));
+  writeFileSync(join(dir, "redact.filter"), redactionFilter(bySecond, redact, bySecond.size));
+  execFileSync("ffmpeg", [
+    "-nostdin", "-loglevel", "error", "-y", "-i", raw, "-/filter_complex", join(dir, "redact.filter"),
+    "-map", "[clean]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", join(dir, "clean.mp4"),
+  ]);
+  const out = burnCaptions(flow);
   const leftover = [...ocr(out, join(dir, "check")).entries()].flatMap(([s, words]) =>
     words.filter((w) => matches(w.text, redact)).map((w) => `${String(s)}s "${w.text}"`));
   if (leftover.length > 0) {
@@ -219,13 +261,14 @@ function main(args: readonly string[]): void {
   const flow = parseFlow(flowName);
   if (command === "start") return start(flow);
   if (command === "step") return step(flow, Number(third));
-  if (command === "finish") {
+  if (command === "recaption") return recaption(flow, option(args, "--url") ?? fail("recaption needs --url <connector address>"));
+  if (command === "finish" || command === "reredact") {
     const url = option(args, "--url") ?? fail("finish needs --url <connector address>");
     const words = (option(args, "--redact") ?? fail("finish needs --redact <email,name,username,...>")).split(",").filter(Boolean);
     const escape = (w: string): string => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     // Each word, plus its run-together form (OCR often drops the dot in "first.last").
     const patterns = words.flatMap((w) => [new RegExp(escape(w), "i"), new RegExp(escape(w.replace(/[.@_-]/g, "")), "i")]);
-    return finish(flow, url, patterns);
+    return command === "finish" ? finish(flow, url, patterns) : reredact(flow, url, patterns);
   }
   fail("usage: record.ts start|step|finish <claude-ai|chatgpt> …  (see the header of this file)");
 }

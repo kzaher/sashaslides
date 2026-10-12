@@ -11,9 +11,11 @@ START: chatgpt.com home page, signed in (ChatGPT Plus)
 9. ChatGPT shows 'Connect Sasha Slides': click Continue to Sasha Slides. The same tab goes to the Sasha Slides sign-in, which hands you to Google.
 9a. Google asks you to choose an account: click your account.
 9b. Google warns 'Google hasn't verified this app' (the Sasha Slides app is in testing): click Continue.
-9c. Google shows 'Sign in to Sasha Slides' with your account: click Continue.
+9c. Google shows the sign-in to sashaslides.com with your account: click Continue.
+9d. On 'sashaslides.com wants additional access to your Google Account' (Google Slides access), click the round down-arrow button to scroll to the end; Continue becomes active.
+9e. Click Continue. Google returns you to Sasha Slides, which returns you to ChatGPT.
 10. Signed in: Sasha Slides now appears under Installed on the Plugins page.
 11. In the left sidebar click New chat.
 12. Click the message box and type @Sasha; pick Sasha Slides from the list that appears.
 13. After the Sasha Slides chip, type: call open_work and tell me what is waiting for me. — then press Enter.
-14. ChatGPT calls Sasha Slides open_work and answers from your own Drive: five proposals, 24 candidates, 6 unresolved comments.
+14. ChatGPT calls Sasha Slides open_work and answers from your own Drive: the proposals waiting for you, or that there are none yet.

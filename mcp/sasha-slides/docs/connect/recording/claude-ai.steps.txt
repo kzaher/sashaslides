@@ -12,11 +12,11 @@ START: claude.ai home page (claude.ai/new), already signed in
 10. Click Connect. The same tab goes to the Sasha Slides sign-in, which hands you to Google.
 10a. Google asks you to choose an account: click your account.
 10b. Google warns 'Google hasn't verified this app' (the Sasha Slides app is in testing): click Continue.
-10c. Google shows 'Sign in to Sasha Slides' with your account: click Continue.
-10d. On 'Sasha Slides wants additional access to your Google Account' (Google Slides access), click the round down-arrow button to scroll to the end; Continue becomes active.
+10c. Google shows the sign-in to sashaslides.com with your account: click Continue.
+10d. On 'sashaslides.com wants additional access to your Google Account' (Google Slides access), click the round down-arrow button to scroll to the end; Continue becomes active.
 10e. Click Continue. Google returns you to Sasha Slides, which returns you to Claude.
 11. Connected: the page now shows Disconnect and the 12 Sasha Slides tools (each 'Needs approval' by default).
 12. In the left sidebar click New to start a chat.
 13. Click the message box, type: Use the sasha-slides connector: call open_work and tell me what is waiting for me.  — then press Enter.
 14. Claude asks to use 'What is waiting for me' from Sasha Slides: click Allow once (or Always allow).
-15. Claude calls the tool and answers from your own Drive: five proposals, the newest with 8 candidates and 3 unresolved comments.
+15. Claude calls the tool and answers from your own Drive: the proposals waiting for you, or that there are none yet.
