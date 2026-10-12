@@ -37,6 +37,11 @@ export type FakeDrive = Readonly<{
     }>,
   ) => FakeDriveFile;
   downloads: () => readonly Readonly<{ fileId: string; destinationPath: string }>[];
+  /**
+   * Another app (the Google Slides add-on, under its own credentials) renames a file and replaces
+   * its body. Not recorded as a call: this server did not make it.
+   */
+  editAsAnotherApp: (options: Readonly<{ fileId: string; name: string; text: string }>) => void;
 }>;
 
 export type RecordedCall = Readonly<{ op: RecordedOperation; name: string }>;
@@ -160,6 +165,12 @@ export function createFakeDrive(): FakeDrive {
     putForeignFile: ({ name, parentId, mimeType, text, appProperties }) =>
       add({ name, parentId, mimeType, appProperties, text, sourcePath: null }),
     downloads: () => [...downloads],
+    editAsAnotherApp: ({ fileId, name, text }) => {
+      const at = files.findIndex((file) => file.id === fileId);
+      const existing = files[at];
+      if (existing === undefined) throw new Error(`no fake file ${fileId}`);
+      files[at] = { ...existing, name, text };
+    },
   };
 }
 

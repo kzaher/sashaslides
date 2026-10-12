@@ -723,7 +723,7 @@ describe("the protected resource", () => {
           .calls()
           .filter((call) => call.op === "createFile")
           .map((call) => call.name),
-        ["01.html", "1791028800000-aaa111-slides-staged.json", "manifest.json", "READY"],
+        ["01.html", "1791028800000-aaa111-slides-staged.json", "manifest.json", "PICK.slot", "READY"],
       );
       // ...and Bob's Drive was never touched.
       assert.deepEqual(harness.driveFor({ subject: "user-b" }).calls(), []);

@@ -554,9 +554,21 @@ function sashaWriteRender_(presentationId, render) {
 // 5/16 — sashaWritePick: the one file the picker is allowed to create.
 // The BODY arrives already serialized and already validated (serializePick, src/protocol.ts).
 // ---------------------------------------------------------------------------
+//
+// A remote connector holds only drive.file, so it can read only files IT created: it stages an empty
+// PICK.slot for this. Write into that and rename it PICK; create PICK only for an older proposal
+// without a slot. (Measured 2026-10-12: a PICK created here was invisible to sashaslides.com.)
 function sashaWritePick(spec) {
-  var blob = Utilities.newBlob(spec.body, spec.mimeType, spec.name);
-  var file = DriveApp.getFolderById(spec.folderId).createFile(blob);
+  var folder = DriveApp.getFolderById(spec.folderId);
+  var slots = folder.getFilesByName('PICK.slot');
+  var file;
+  if (slots.hasNext()) {
+    file = slots.next();
+    file.setContent(spec.body);
+    file.setName(spec.name);
+  } else {
+    file = folder.createFile(Utilities.newBlob(spec.body, spec.mimeType, spec.name));
+  }
   sashaTag_(file.getId(), spec.appProperties);
   return { fileId: file.getId() };
 }

@@ -109,6 +109,12 @@ export type SashaRole =
   | "manifest"
   | "ready"
   | "pick"
+  /**
+   * An empty file the CONNECTOR creates at staging for the add-on to write the pick into (it then
+   * renames it PICK). Under drive.file the connector can only see files it created, so a PICK the
+   * add-on creates itself is invisible to a remote connector.
+   */
+  | "pick-slot"
   /** The `events/` folder of one proposal. */
   | "events"
   /** One session-log event file inside it — one file per event, never an appended log. */

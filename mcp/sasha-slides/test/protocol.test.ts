@@ -55,6 +55,8 @@ describe("createProposal", () => {
         "createFolder:events",
         "createFile:1759492800000-aaa111-slides-staged.json",
         "createFile:manifest.json",
+        // The empty slot the add-on writes the pick into (pick-slot.test.ts), before READY.
+        "createFile:PICK.slot",
         "createFile:READY",
       ],
     );

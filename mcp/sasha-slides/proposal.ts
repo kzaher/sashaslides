@@ -205,6 +205,16 @@ export async function createProposal(
       appProperties: { sashaSlides: "manifest", proposalId },
     });
 
+    // The slot the add-on writes the pick into: see `findDecidedPick`. Before READY, so a picker
+    // that sees READY always finds it.
+    await env.drive.createFile({
+      name: PICK_SLOT_NAME,
+      parentId: folder.id,
+      mimeType: "application/json",
+      media: { kind: "text", text: "" },
+      appProperties: { sashaSlides: "pick-slot", proposalId },
+    });
+
     await env.drive.createFile({
       name: "READY",
       parentId: folder.id,
@@ -267,7 +277,7 @@ export async function awaitPick(
   let polls = 0;
   for (;;) {
     polls += 1;
-    const pickFile = await findOne({ env, role: "pick", proposalId });
+    const pickFile = await findDecidedPick({ env, proposalId });
     // Reported BEFORE any early return, so a poll that finds the pick still counts as one.
     onPoll?.({ polls, elapsedMs: env.now().getTime() - startedAtMs });
     if (pickFile !== null) {
@@ -334,7 +344,8 @@ export async function readProposalState(
     proposalId,
     found: (byRole.get("proposal")?.length ?? 0) > 0,
     ready: (byRole.get("ready")?.length ?? 0) > 0,
-    picked: (byRole.get("pick")?.length ?? 0) > 0,
+    picked:
+      (byRole.get("pick")?.length ?? 0) > 0 || (byRole.get("pick-slot") ?? []).some((file) => file.name === "PICK"),
     slideFileCount: byRole.get("slide")?.length ?? 0,
     manifest:
       manifestFile === null ? { kind: "absent" } : await readManifest({ env, fileId: manifestFile.id }),
@@ -859,6 +870,22 @@ async function findOne(
   return files[0] ?? null;
 }
 
+export const PICK_SLOT_NAME = "PICK.slot";
+
+/**
+ * The PICK for a proposal, or null while undecided. Either a PICK tagged by this server's own
+ * credentials (the add-on and the connector share them), or the slot this server created, once the
+ * add-on has written the pick into it and renamed it PICK. A slot still named PICK.slot is undecided.
+ */
+async function findDecidedPick(
+  options: Readonly<{ env: ProposalEnvironment; proposalId: string }>,
+): Promise<DriveFile | null> {
+  const tagged = await findOne({ env: options.env, role: "pick", proposalId: options.proposalId });
+  if (tagged !== null) return tagged;
+  const slot = await findOne({ env: options.env, role: "pick-slot", proposalId: options.proposalId });
+  return slot !== null && slot.name === "PICK" ? slot : null;
+}
+
 type PickRead =
   | Readonly<{ kind: "ok"; pick: PickRecord }>
   | Readonly<{ kind: "unreadable"; reason: string }>
@@ -1148,7 +1175,7 @@ async function insertedSlideIndices(
       return assertNever(log);
   }
 
-  const pickFile = await findOne({ env, role: "pick", proposalId });
+  const pickFile = await findDecidedPick({ env, proposalId });
   if (pickFile === null) return [...indices];
   const read = await readPick({ env, fileId: pickFile.id });
   switch (read.kind) {
@@ -1235,6 +1262,7 @@ function asSashaRole(value: string | undefined): SashaRole | null {
     case "manifest":
     case "ready":
     case "pick":
+    case "pick-slot":
     case "events":
     case "event":
       return value;
