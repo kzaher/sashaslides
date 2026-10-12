@@ -108,6 +108,10 @@ async function sendBuffer(client: CdpClient, text: string): Promise<void> {
 
 async function save(client: CdpClient): Promise<void> {
   // Ctrl+S is what the editor binds; the toolbar button is an aria-label lookup away if it regresses.
+  // The keys only reach the editor when it has focus. Measured 2026-10-12: without this the Dialog
+  // and Report saves were silently dropped (fresh tab showed the old lengths, "save idle" reported).
+  await client.Page.bringToFront();
+  await ev(client, `(() => { const e = window.monaco.editor.getEditors()[0]; if (e) e.focus(); return 'ok'; })()`);
   await client.Input.dispatchKeyEvent({ type: "keyDown", modifiers: 2, key: "s", code: "KeyS", windowsVirtualKeyCode: 83, nativeVirtualKeyCode: 83 });
   await client.Input.dispatchKeyEvent({ type: "keyUp", modifiers: 2, key: "s", code: "KeyS", windowsVirtualKeyCode: 83, nativeVirtualKeyCode: 83 });
   // The page keeps a hidden aria-live node reading "Saving project...", so body text is NOT a

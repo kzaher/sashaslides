@@ -3,10 +3,10 @@
 Every step and click below was checked live on 2026-10-11 against the real connector server, with
 real Google sign-in. The production connector address is `https://sashaslides.com/mcp`.
 
-| Client | Step script | How to record a walkthrough video |
+| Client | Watch | Step script |
 | --- | --- | --- |
-| claude.ai (also Claude Desktop) | [recording/claude-ai.steps.txt](recording/claude-ai.steps.txt) | [Recording walkthroughs](#recording-walkthroughs) |
-| ChatGPT (Plus is enough) | [recording/chatgpt.steps.txt](recording/chatgpt.steps.txt) | [Recording walkthroughs](#recording-walkthroughs) |
+| claude.ai (also Claude Desktop) | [sashaslides.com/videos/claude-ai.mp4](https://sashaslides.com/videos/claude-ai.mp4) | [recording/claude-ai.steps.txt](recording/claude-ai.steps.txt) |
+| ChatGPT (Plus is enough) | [sashaslides.com/videos/chatgpt.mp4](https://sashaslides.com/videos/chatgpt.mp4) | [recording/chatgpt.steps.txt](recording/chatgpt.steps.txt) |
 | Claude Code | (terminal; steps below) | — |
 
 Walkthrough videos are not kept in the repository: they show a real account (email, chat history),
@@ -85,6 +85,22 @@ with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 which only accepts loopback redirects, so Google's leg came back over `127.0.0.1`. That only works
 for a browser on the server's own machine. A real deployment needs a **Web** OAuth client with
 `https://<host>/oauth/google/callback` registered, and then no `--google-callback-url`.
+
+## After "Reset my key and delete my data"
+
+Deleting your data at sashaslides.com/account revokes Sasha Slides' Google access, so every
+assistant has to sign in again (measured 2026-10-12):
+
+- **claude.ai:** the next tool call says the connector needs you to sign in again; press Connect (in
+  the chat or under Customize → Connectors) and sign in.
+- **ChatGPT:** its Reconnect button does nothing. Open Plugins → Sasha Slides → Manage, press
+  **Connect another account**, sign in, then open the old account's ⋯ menu and choose
+  **Disconnect**, so only the new account is left.
+- On Google's permissions page tick **Select all**. Leaving the boxes unticked now stops at a Sasha
+  Slides page asking you to try again, instead of connecting without access to your slides.
+
+The videos are published with `deploy/publish.sh videos`, which uploads `recording/recordings/*.mp4`
+to the server; nginx serves them at `/videos/`.
 
 ## Recording walkthroughs
 

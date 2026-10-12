@@ -237,18 +237,22 @@ function BotSteps({
       return (
         <ol className="sasha-setup-steps">
           <li>
-            In claude.ai or Claude Desktop open Settings → Connectors → Add custom connector. (On a
-            Team or Enterprise plan an owner adds it under Admin settings → Connectors.)
+            In claude.ai or Claude Desktop open Customize → Connectors, press + Add, then Add custom
+            connector. (On a Team or Enterprise plan an owner adds it under Admin settings → Connectors.)
           </li>
           <li>
             Name it Sasha Slides and give it this address:
             <CopyBlock text={connectorUrl} />
           </li>
-          <li>Press Connect and sign in with the Google account that owns this deck.</li>
+          <li>
+            Press Connect and sign in with the Google account that owns this deck. On Google's
+            permissions page tick Select all.
+          </li>
           <li>
             In a new chat, paste:
             <CopyBlock text={prompt} />
           </li>
+          <WalkthroughLink connectorUrl={connectorUrl} file="claude-ai.mp4" />
         </ol>
       );
     case "claude-code":
@@ -274,10 +278,10 @@ function BotSteps({
       return (
         <>
           <p className="sasha-dim">
-            Needs ChatGPT on the web. Checked on a Plus account: adding the server, signing in and a
-            read-only call all worked. OpenAI lists full MCP with write tools, which Sasha needs to
-            stage slides, for Business, Enterprise and Edu, and read-only tools on Pro. In a workspace
-            an admin may first have to allow custom MCP servers.
+            Needs ChatGPT on the web. Checked on a Plus account: adding the server, signing in,
+            staging slides and receiving your pick all worked. OpenAI lists full MCP with write tools
+            for Business, Enterprise and Edu, and read-only tools on Pro. In a workspace an admin may
+            first have to allow custom MCP servers.
           </p>
           <ol className="sasha-setup-steps">
             <li>
@@ -303,12 +307,32 @@ function BotSteps({
               <CopyBlock text={prompt} />
               ChatGPT asks you to confirm each Sasha action that writes to your Drive; approve them.
             </li>
+            <WalkthroughLink connectorUrl={connectorUrl} file="chatgpt.mp4" />
           </ol>
         </>
       );
     default:
       return assertNever(bot);
   }
+}
+
+/**
+ * The recorded walkthrough for this assistant, served next to the connector (`/videos/<file>` on its
+ * host, uploaded by deploy/publish.sh videos). Nothing when the address does not parse.
+ */
+function WalkthroughLink({ connectorUrl, file }: { connectorUrl: string; file: string }): JSX.Element | null {
+  let origin: string;
+  try {
+    origin = new URL(connectorUrl).origin;
+  } catch {
+    return null;
+  }
+  const href = `${origin}/videos/${file}`;
+  return (
+    <li>
+      Prefer to watch? <a href={href} target="_blank" rel="noreferrer">Every click, recorded</a>.
+    </li>
+  );
 }
 
 /** A link out of the sidebar. The HtmlService frame cannot navigate itself, so it opens a new tab. */

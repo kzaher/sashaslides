@@ -95,3 +95,9 @@ test("every public page declares the Sasha Slides favicon, and the files exist",
   }
   for (const file of ["favicon.ico", "sasha-slides-icon.svg", "apple-touch-icon.png"]) assert.ok(existsSync(join(PUBLIC_DIR, file)), file);
 });
+
+test("the home page links the walkthrough video for each assistant", () => {
+  const home = read("home.html");
+  for (const href of ['href="/videos/claude-ai.mp4"', 'href="/videos/chatgpt.mp4"']) assert.ok(home.includes(href), href);
+  assert.match(home, /https:\/\/sashaslides\.com\/mcp/, "and the connector address to paste");
+});

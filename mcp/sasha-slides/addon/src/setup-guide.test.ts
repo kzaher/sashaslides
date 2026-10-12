@@ -143,3 +143,26 @@ test("storage that throws is survived: nothing is remembered, nothing crashes", 
   working.save({ tab: "dev", bot: "claude-code" });
   assert.deepEqual(working.load(), { tab: "dev", bot: "claude-code" });
 });
+
+test("the Claude app and ChatGPT steps link their walkthrough video on the connector's host", () => {
+  const rows: readonly { bot: SetupChoice["bot"]; video: string | null }[] = [
+    { bot: "claude-app", video: "https://sasha.example.com/videos/claude-ai.mp4" },
+    { bot: "chatgpt", video: "https://sasha.example.com/videos/chatgpt.mp4" },
+    { bot: "claude-code", video: null },
+  ];
+  for (const row of rows) {
+    const markup = textOf(markupOf({ connectorUrl: HOSTED, choice: { tab: "setup", bot: row.bot } }));
+    if (row.video === null) assert.doesNotMatch(markup, /\/videos\//, row.bot);
+    else assert.ok(markup.includes(`href="${row.video}"`), `${row.bot} links ${row.video}`);
+  }
+  for (const bot of ["claude-app", "chatgpt"] as const) {
+    assert.doesNotMatch(textOf(markupOf({ connectorUrl: null, choice: { tab: "setup", bot } })), /\/videos\//, "no link without a host");
+  }
+});
+
+test("the Claude app steps follow claude.ai's current menus, and ChatGPT's note reports what Plus did", () => {
+  const claude = textOf(markupOf({ connectorUrl: HOSTED, choice: { tab: "setup", bot: "claude-app" } }));
+  assert.match(claude, /Customize → Connectors/, "measured 2026-10-12: Settings → Connectors moved");
+  const chatgpt = textOf(markupOf({ connectorUrl: HOSTED, choice: { tab: "setup", bot: "chatgpt" } }));
+  assert.match(chatgpt, /staging slides and receiving your pick/, "measured on Plus 2026-10-12");
+});

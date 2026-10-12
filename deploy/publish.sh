@@ -3,7 +3,7 @@
 # holosweat server, building the images ON THE SERVER. Needs only ssh, scp, tar, gzip, dd
 # and node on this machine: no Docker, no rsync, no registry tunnel.
 #
-#   deploy/publish.sh [--dry-run] site|connector|all
+#   deploy/publish.sh [--dry-run] site|connector|all|videos
 #   deploy/publish.sh [--dry-run] rollback site|connector
 #
 # See deploy/DEPLOY.md for one-time setup, secrets and rollback. --dry-run builds the
@@ -76,6 +76,7 @@ main() {
     site) publish_site; install_nginx; verify site ;;
     connector) publish_connector; install_nginx; verify connector ;;
     all) publish_site; publish_connector; install_nginx; verify all ;;
+    videos) publish_videos; install_nginx; verify videos ;;
     rollback) rollback "${args[1]:-}" ;;
     *) usage; exit 2 ;;
   esac
@@ -299,6 +300,13 @@ verify() {
     check "/healthz" 200 "" || failures=$((failures + 1))
     check "/privacy" 200 "" || failures=$((failures + 1))
   fi
+  if [ "$target" = videos ]; then
+    for file in "$VIDEO_DIR"/*.mp4; do
+      [ -f "$file" ] && { check "/videos/$(basename "$file")" 200 "" || failures=$((failures + 1)); }
+    done
+    [ "$failures" = 0 ] || die "$failures check(s) failed"
+    return 0
+  fi
   if [ "$target" != site ]; then
     check "/connector/healthz" 200 '"status"' || failures=$((failures + 1))
     check "/account" 200 "" || failures=$((failures + 1))
@@ -321,6 +329,28 @@ check() {
   fi
   echo "  FAIL $status $path (want $want${needle:+ with $needle})"
   return 1
+}
+
+# ── walkthrough videos ───────────────────────────────────────────────────────
+
+# The redacted walkthroughs from docs/connect/recording/record.ts. They are git-ignored, so they go
+# straight to disk on the server (nginx serves /videos/ from there), never into an image.
+VIDEO_DIR="mcp/sasha-slides/docs/connect/recording/recordings"
+VIDEO_HOME="/var/www/sashaslides-videos"
+
+publish_videos() {
+  step "videos: uploading $VIDEO_DIR/*.mp4 to $VIDEO_HOME"
+  local found=0 file
+  for file in "$VIDEO_DIR"/*.mp4; do
+    [ -f "$file" ] || continue
+    found=1
+    info "$(basename "$file"): $(bytes "$file") bytes"
+    run timeout "$BUDGET_SHORT" ssh "${SSH_OPTS[@]}" "$HOST" "mkdir -p $VIDEO_HOME"
+    run timeout 120 scp -q "${SSH_OPTS[@]}" "$file" "$HOST:$VIDEO_HOME/$(basename "$file").new"
+    run timeout "$BUDGET_SHORT" ssh "${SSH_OPTS[@]}" "$HOST" \
+      "chmod 644 $VIDEO_HOME/$(basename "$file").new && mv $VIDEO_HOME/$(basename "$file").new $VIDEO_HOME/$(basename "$file")"
+  done
+  [ "$found" = 1 ] || die "no videos in $VIDEO_DIR — record them first (docs/connect/README.md)"
 }
 
 # ── rollback ─────────────────────────────────────────────────────────────────

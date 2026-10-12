@@ -109,6 +109,16 @@ test("connector locations stream, forward the client's identity, and are never c
   }
 });
 
+test("walkthrough videos are served from disk on the server, never from git or the site image", () => {
+  // They show a real account even after redaction review, so they are uploaded by publish.sh videos
+  // into /var/www/sashaslides-videos and never committed (docs/connect/recording/record.ts).
+  const location = selectLocation({ server: httpsServer(), path: "/videos/connect-claude-ai.mp4" });
+  assert.equal(location.modifier, "prefix");
+  assert.match(location.body, /alias\s+\/var\/www\/sashaslides-videos\/;/);
+  assert.doesNotMatch(location.body, /proxy_pass/, "not proxied to the site or the connector");
+  assert.equal(proxyTarget(selectLocation({ server: httpsServer(), path: "/videosx" })), SITE, "near-miss stays on the site");
+});
+
 test("port 80 still answers the ACME challenge from disk and redirects everything else", () => {
   const plain = servers().find((server) => server.listens.some((listen) => /^80\b/.test(listen)));
   assert.ok(plain !== undefined, "no port-80 server block");

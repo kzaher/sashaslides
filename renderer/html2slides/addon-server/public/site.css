@@ -59,3 +59,4 @@ a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-ra
 .foot-inner nav { display: flex; gap: 20px; }
 .foot-inner a { color: var(--muted); }
 .legal address { font-style: normal; line-height: 1.6; color: var(--fg); }
+.section code { font-size: 15px; background: var(--panel); padding: 1px 6px; border-radius: 5px; }
