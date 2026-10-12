@@ -1,17 +1,16 @@
 # Connecting Claude and ChatGPT to Sasha Slides
 
-Recorded live on 2026-10-11 against the real connector server, with real Google sign-in. Every
-step and click is listed below and burned into each video as a caption.
+Every step and click below was checked live on 2026-10-11 against the real connector server, with
+real Google sign-in. The production connector address is `https://sashaslides.com/mcp`.
 
-The connector address in the recordings, `https://isbn-nail-pam-arab.trycloudflare.com/mcp`, was a
-**temporary test tunnel**. Use the address of your own deployment wherever it appears
-(`https://<host>/mcp`).
-
-| Client | Video | Step list |
+| Client | Step script | How to record a walkthrough video |
 | --- | --- | --- |
-| claude.ai (also Claude Desktop) | [connect-claude-ai.mp4](connect-claude-ai.mp4) | [connect-claude-ai-steps.md](connect-claude-ai-steps.md) |
-| ChatGPT (Plus is enough) | [connect-chatgpt.mp4](connect-chatgpt.mp4) | [connect-chatgpt-steps.md](connect-chatgpt-steps.md) |
-| Claude Code | (terminal; steps below) | below |
+| claude.ai (also Claude Desktop) | [recording/claude-ai.steps.txt](recording/claude-ai.steps.txt) | [Recording walkthroughs](#recording-walkthroughs) |
+| ChatGPT (Plus is enough) | [recording/chatgpt.steps.txt](recording/chatgpt.steps.txt) | [Recording walkthroughs](#recording-walkthroughs) |
+| Claude Code | (terminal; steps below) | — |
+
+Walkthrough videos are not kept in the repository: they show a real account (email, chat history),
+so they are recorded on demand with the script below and shared outside git.
 
 ## What goes where
 
@@ -86,3 +85,40 @@ with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 which only accepts loopback redirects, so Google's leg came back over `127.0.0.1`. That only works
 for a browser on the server's own machine. A real deployment needs a **Web** OAuth client with
 `https://<host>/oauth/google/callback` registered, and then no `--google-callback-url`.
+
+## Recording walkthroughs
+
+`recording/record.ts` captures the screen, captions each step from the step script, removes personal
+details, and refuses to finish if any of them is still readable. Output goes to
+`recording/recordings/`, which git ignores.
+
+**Before you start**
+
+1. Install the tools once: `sudo apt-get install -y ffmpeg tesseract-ocr`.
+2. Start the recording display, VNC and Chrome: `bash mcp/sasha-slides/docs/connect/recording/display.sh`
+   (1600x900 on `:99`; the wipe areas assume that size). Open `http://localhost:6080/vnc.html` and sign
+   in to claude.ai or ChatGPT there.
+3. Remove any existing Sasha Slides connector in that app, so the flow starts from scratch.
+
+**Record**
+
+```bash
+R="npx tsx mcp/sasha-slides/docs/connect/recording/record.ts"
+DISPLAY=:99 $R start claude-ai          # or: chatgpt
+$R step claude-ai 0                     # caption step 0, then do it in the browser
+$R step claude-ai 1                     # caption step 1, then do it … and so on, in order
+$R finish claude-ai --url https://sashaslides.com/mcp \
+   --redact "you@gmail.com,Your Name,yourusername"
+```
+
+- Run `step <n>` just before you perform step *n*; the caption stays until the next step.
+- `--redact` lists every way the account appears on screen: the email, the display name, the
+  ChatGPT username. Matching is case-insensitive and also catches the email without its dots.
+- `finish` writes `recordings/<flow>.mp4` and `recordings/<flow>-steps.md` (the step script with
+  times). It always wipes the left sidebar (chat history) and the account badge for the whole video,
+  and ChatGPT's personalised suggestions on its home screen.
+- If text recognition can still read any `--redact` word afterwards, `finish` deletes the video and
+  names the second where it was seen. The unredacted capture is deleted after a successful finish.
+
+**Check before sharing:** open the video and look at the Google sign-in pages yourself. Faint text
+(light grey, mid-fade) is the case text recognition is most likely to miss.

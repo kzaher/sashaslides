@@ -1,6 +1,6 @@
 # Connecting Claude or ChatGPT to Sasha Slides
 
-**Recorded walkthroughs** (claude.ai, ChatGPT, Claude Code), with every click: [docs/connect/](docs/connect/README.md).
+**Walkthroughs** (claude.ai, ChatGPT, Claude Code), with every click, and how to record them as videos: [docs/connect/](docs/connect/README.md).
 
 Two halves have to be connected, and they are independent:
 
@@ -81,7 +81,7 @@ on Business, Enterprise or Edu. In a workspace, the admin may first have to allo
 servers (developer mode) under the workspace settings. Free and Plus are not listed. That page
 refuses automated fetches, so this paragraph comes from its search-indexed text, not a fresh read.
 **Measured 2026-10-11 on a Plus account:** Plugins → Add → Add custom MCP server was available, the
-OAuth sign-in completed and a read-only call (`open_work`) worked (video: `docs/connect/`). Write
+OAuth sign-in completed and a read-only call (`open_work`) worked (steps: `docs/connect/`). Write
 tools on Plus were not tried.
 
 Steps, every click (from OpenAI's "Add custom MCP server" guide,

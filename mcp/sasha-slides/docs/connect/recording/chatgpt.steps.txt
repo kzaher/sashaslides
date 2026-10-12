@@ -1,0 +1,19 @@
+# One step per line, in order. `record.ts step <n>` captions step n; {URL} is the connector address.
+START: chatgpt.com home page, signed in (ChatGPT Plus)
+1. In the left sidebar, click Plugins.
+2. Top right, click Add.
+3. In the menu, click Add custom MCP server.
+4. Name: type Sasha Slides
+5. Description (optional): type Candidate slides for Google Slides
+6. Connection: keep Server URL selected and type the connector address: {URL}
+7. Leave Authentication on OAuth (ChatGPT registers itself; no client ID or secret needed). Tick 'I understand and want to continue'.
+8. Click Create as a plugin.
+9. ChatGPT shows 'Connect Sasha Slides': click Continue to Sasha Slides. The same tab goes to the Sasha Slides sign-in, which hands you to Google.
+9a. Google asks you to choose an account: click your account.
+9b. Google warns 'Google hasn't verified this app' (the Sasha Slides app is in testing): click Continue.
+9c. Google shows 'Sign in to Sasha Slides' with your account: click Continue.
+10. Signed in: Sasha Slides now appears under Installed on the Plugins page.
+11. In the left sidebar click New chat.
+12. Click the message box and type @Sasha; pick Sasha Slides from the list that appears.
+13. After the Sasha Slides chip, type: call open_work and tell me what is waiting for me. — then press Enter.
+14. ChatGPT calls Sasha Slides open_work and answers from your own Drive: five proposals, 24 candidates, 6 unresolved comments.
