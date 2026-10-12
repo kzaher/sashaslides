@@ -156,6 +156,41 @@ export type ToolOutcome<TPayload> =
   | Readonly<{ kind: "payload"; payload: TPayload }>
   | Readonly<{ kind: "error"; message: string }>;
 
+type SlideArgument = Readonly<{ path?: string | undefined; html?: string | undefined; label?: string | undefined }>;
+
+/**
+ * The propose_slides / revise_slide argument boundary: each slide carries exactly one of `path`
+ * or `html`, and a remote connector refuses `path` without echoing it back.
+ */
+export function slideSourcesFrom(
+  options: Readonly<{ slides: readonly SlideArgument[]; remote: boolean }>,
+): Readonly<{ kind: "ok"; sources: readonly SlideSource[] }> | Readonly<{ kind: "error"; message: string }> {
+  const sources: SlideSource[] = [];
+  for (const [position, slide] of options.slides.entries()) {
+    const which = `slide ${String(position + 1)}`;
+    const label = slide.label ?? null;
+    if (slide.path !== undefined && slide.html !== undefined) {
+      return { kind: "error", message: `${which}: give path or html, not both` };
+    }
+    if (slide.html !== undefined) {
+      sources.push({ html: slide.html, label });
+    } else if (slide.path !== undefined) {
+      if (options.remote) {
+        return {
+          kind: "error",
+          message:
+            `${which}: this connector runs remotely and cannot read files from your machine. ` +
+            "Send each slide's complete HTML document in `html` instead of `path`.",
+        };
+      }
+      sources.push({ path: slide.path, label });
+    } else {
+      return { kind: "error", message: `${which}: give the slide as path or html` };
+    }
+  }
+  return { kind: "ok", sources };
+}
+
 export function createSashaSlidesServer(
   options: Readonly<{
     resolveEnvironment: ResolveEnvironment;
@@ -166,6 +201,12 @@ export function createSashaSlidesServer(
      * `workflowInstructionsFromDisk` so this function stays free of the filesystem.
      */
      instructions: string;
+    /**
+     * True for the public HTTPS connector. A remote caller has no files on this machine, so slides
+     * must arrive as `html`, and `path` is refused: on a shared server it would let any signed-in
+     * caller upload any file here (the OAuth store, the key store) into their own Drive.
+     */
+    remote: boolean;
   }>,
 ): McpServer {
   // The connector's own onboarding: the spec lets a server describe how it is meant to be
@@ -175,7 +216,7 @@ export function createSashaSlidesServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
     { instructions: options.instructions },
   );
-  const { resolveEnvironment, resolveFeedbackEnvironment } = options;
+  const { resolveEnvironment, resolveFeedbackEnvironment, remote } = options;
 
   // Declares the `prompts` capability and so makes `/mcp__sasha-slides__<name>` appear in the
   // user's slash-command list. Registered first because it is what the user reaches for before
@@ -187,16 +228,26 @@ export function createSashaSlidesServer(
     {
       title: "Propose candidate slides",
       description:
-        "Stage N candidate slides, given as local HTML file paths, in a new Drive proposal " +
-        "folder for the user to pick from inside Google Slides. The HTML is streamed to " +
-        "Drive and is never read into this conversation - pass paths, get ids back. Each " +
-        "file must be a self-contained 1280x720 document. Writes the READY marker last, so " +
-        "the picker only ever sees a complete proposal. Follow with await_pick.",
+        "Stage N candidate slides in a new Drive proposal folder for the user to pick from " +
+        "inside Google Slides. Give each slide as `path` (a self-contained 1280x720 HTML file " +
+        "on the machine running this connector; streamed to Drive, never read into the " +
+        "conversation) or, when the connector is remote (claude.ai, ChatGPT, any https URL), as " +
+        "`html`, the complete document itself. Writes the READY marker last, so the picker only " +
+        "ever sees a complete proposal. Follow with await_pick.",
       inputSchema: {
         slides: z
           .array(
             z.object({
-              path: z.string().min(1).describe("Absolute path to a self-contained 1280x720 HTML slide."),
+              path: z
+                .string()
+                .min(1)
+                .optional()
+                .describe("Local connector only: absolute path to a self-contained 1280x720 HTML slide."),
+              html: z
+                .string()
+                .min(1)
+                .optional()
+                .describe("Remote connector: the complete self-contained 1280x720 HTML document. Give path or html, not both."),
               label: z
                 .string()
                 .optional()
@@ -214,13 +265,11 @@ export function createSashaSlidesServer(
     async ({ slides, presentationId }, extra) => {
       const loaded = await resolveEnvironment({ authInfo: extra.authInfo });
       if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const sources: readonly SlideSource[] = slides.map((slide) => ({
-        path: slide.path,
-        label: slide.label ?? null,
-      }));
+      const parsed = slideSourcesFrom({ slides, remote });
+      if (parsed.kind === "error") return errorResult(parsed.message);
       const outcome = await createProposal({
         env: loaded.env,
-        slides: sources,
+        slides: parsed.sources,
         presentationId: presentationId ?? null,
       });
       return toCallToolResult(proposeSlidesPayload(outcome));
@@ -557,8 +606,8 @@ export function createSashaSlidesServer(
     {
       title: "Replace a candidate in place",
       description:
-        "Overwrite one candidate's HTML with a new version, given as a local FILE PATH - " +
-        "never as markup in this argument, the same rule as propose_slides. The Drive file " +
+        "Overwrite one candidate's HTML with a new version, given as `path` or `html` exactly as " +
+        "for propose_slides (`html` when the connector is remote). The Drive file " +
         "id does not change, so the user's comment threads stay attached to the slide they " +
         "are about; that is why this exists instead of staging a second proposal. Appends " +
         "slide-revised naming the comment ids it answers, then bumps manifest.revision last, " +
@@ -571,7 +620,13 @@ export function createSashaSlidesServer(
         path: z
           .string()
           .min(1)
-          .describe("Absolute path to the new self-contained 1280x720 HTML slide. A PATH, never markup."),
+          .optional()
+          .describe("Local connector only: absolute path to the new self-contained 1280x720 HTML slide."),
+        html: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Remote connector: the complete new 1280x720 HTML document. Give path or html, not both."),
         label: z
           .string()
           .optional()
@@ -582,14 +637,18 @@ export function createSashaSlidesServer(
           .describe("The comment ids this revision answers, from read_feedback. Omit if it answers none."),
       },
     },
-    async ({ proposalId, slideIndex, path, label, answeredCommentIds }, extra) => {
+    async ({ proposalId, slideIndex, path, html, label, answeredCommentIds }, extra) => {
+      const parsed = slideSourcesFrom({ slides: [{ path, html, label }], remote });
+      if (parsed.kind === "error") return errorResult(parsed.message);
       const loaded = await resolveEnvironment({ authInfo: extra.authInfo });
       if (loaded.kind === "auth-failed") return errorResult(loaded.message);
+      const [source] = parsed.sources;
+      if (source === undefined) return errorResult("give the slide as path or html");
       const outcome = await reviseSlide({
         env: loaded.env,
         proposalId,
         slideIndex,
-        htmlPath: path,
+        ...("path" in source ? { htmlPath: source.path } : { html: source.html }),
         label: label ?? null,
         answeredCommentIds: answeredCommentIds ?? [],
       });
@@ -1893,6 +1952,7 @@ async function serveStdio(
     resolveEnvironment: singleTokenEnvironmentResolver(),
     resolveFeedbackEnvironment: singleTokenFeedbackEnvironmentResolver(),
     instructions: instructions.text,
+    remote: false,
   });
   await server.connect(
     instrumentedTransport({
@@ -1988,6 +2048,7 @@ function serveHttp(
         resolveEnvironment,
         resolveFeedbackEnvironment: brokeredFeedbackEnvironmentResolver({ userDrive: stack.userDrive }),
         instructions: instructions.text,
+        remote: true,
       }),
     instrumentTransport: (inner) =>
       instrumentedTransport({
@@ -2114,6 +2175,7 @@ async function runSelfTest(): Promise<boolean> {
     resolveEnvironment: () => Promise.resolve({ kind: "ok", env }),
     resolveFeedbackEnvironment: () => Promise.resolve({ kind: "ok", env: feedbackEnv }),
     instructions: instructions.text,
+    remote: false,
   });
   check("all eleven tools register", true);
   check(`client instructions resolve to the workflow skill (${instructions.detail})`, instructions.source === "skill-file");

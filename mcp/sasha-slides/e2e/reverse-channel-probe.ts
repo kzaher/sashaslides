@@ -406,6 +406,7 @@ function probeSashaSlidesServer(): McpServer {
     resolveFeedbackEnvironment: () =>
       Promise.resolve({ kind: "auth-failed", message: "probe: no comment channel is wired to this server" }),
     // This probe is about capability negotiation; the real instructions are measured in
+    remote: false,
     // `connector-guidance-probe.ts`.
     instructions: "probe: instructions are measured by connector-guidance-probe.ts",
   });

@@ -96,7 +96,7 @@ describe("the instructions are the skill file, and cannot drift from it", () => 
       "Slide HTML travels by FILE PATH and is never read into context",
       "Four candidates must cost the same context as one",
       "Four is a good default; one is not a choice and six",
-      "Candidate 1 is the first path you passed",
+      "Candidate 1 is the first slide you passed",
       "Never stage a second proposal while the first is unanswered",
     ]) {
       assert.ok(served.includes(line), `served instructions contain: ${line}`);
@@ -498,6 +498,7 @@ function openConnection(): Readonly<{
         resolveEnvironment: () => Promise.resolve({ kind: "auth-failed", message: "test: no Drive" }),
         resolveFeedbackEnvironment: () => Promise.resolve({ kind: "auth-failed", message: "test: no comments" }),
         instructions: TEST_INSTRUCTIONS,
+        remote: false,
       });
       const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
       await server.connect(serverSide);

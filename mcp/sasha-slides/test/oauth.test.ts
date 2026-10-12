@@ -664,7 +664,7 @@ describe("the protected resource", () => {
           harness,
           accessToken: alice.tokens.access_token,
           name: "propose_slides",
-          toolArguments: { slides: [{ path: "/slides/candidate-1.html", label: "option 1" }] },
+          toolArguments: { slides: [{ html: "<!doctype html><h1>option 1</h1>", label: "option 1" }] },
         }),
       );
       const proposalId = asString(staged["proposalId"]);
@@ -832,6 +832,7 @@ async function startHarness(): Promise<Harness> {
         // resolver yet, so it declines exactly as the HTTP composition root does.
         resolveFeedbackEnvironment: brokeredFeedbackEnvironmentResolver({ userDrive }),
         instructions: "test: the client instructions are asserted in workflow-guidance.test.ts",
+        remote: true,
       }),
     instrumentTransport: (inner) => inner,
     warn: () => undefined,

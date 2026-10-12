@@ -13,10 +13,10 @@ Use for any "make me a slide / a deck / options" request. The user chooses.
 
 **Slide HTML travels by FILE PATH and is never read into context — going in or coming back.**
 
-Write each candidate to its own temp file and pass the **path**. Never paste markup into a
-tool argument and never read a candidate back.
-Four candidates must cost the same context as one — that is the whole design. The only slide
-text that crosses is the `label`, a six-word caption for the picker.
+Write each candidate to a temp file and pass its **path**; never paste markup or read one
+back. Four candidates must cost the same context as one — that is
+the whole design. Only the `label`, a six-word caption, crosses.
+Remote (https) connector: send each document as `html`, not `path`.
 
 ## The loop
 
@@ -51,7 +51,7 @@ text that crosses is the `label`, a six-word caption for the picker.
 
 ## Slides are 1-based
 
-Candidate 1 is the first path you passed; the picker, `await_pick` and the user agree.
+Candidate 1 is the first slide you passed; the picker, `await_pick` and the user agree.
 "Option 3" is `slides[2]`. Never re-index silently.
 
 ## Candidates should differ in a nameable way

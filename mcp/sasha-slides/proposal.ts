@@ -89,7 +89,33 @@ export type ProposalEnvironment = Readonly<{
 export const PROTOCOL_VERSION = 1;
 export const INBOX_FOLDER_NAME = "Sasha Slides Inbox";
 
-export type SlideSource = Readonly<{ path: string; label: string | null }>;
+/**
+ * Where a candidate's HTML comes from. `path` is a file on THIS machine, streamed without being
+ * read: the local connector's paths-in-ids-out rule. `html` is the markup itself, for remote
+ * clients (claude.ai, ChatGPT) that reach the connector over HTTPS and have no way to put a file
+ * on its disk.
+ */
+export type SlideSource =
+  | Readonly<{ path: string; label: string | null }>
+  | Readonly<{ html: string; label: string | null }>;
+
+/** A 1280x720 slide with inline images stays well under this; the cap stops a runaway argument. */
+export const MAX_INLINE_HTML_BYTES = 2_000_000;
+
+/** Why a slide source cannot be staged, or null when it can. Never reads a path's contents. */
+function sourceProblem(options: Readonly<{ env: ProposalEnvironment; source: SlideSource }>): string | null {
+  const { env, source } = options;
+  if ("path" in source) return env.statFile(source.path) === null ? `not a readable file: ${source.path}` : null;
+  if (source.html.trim() === "") return "a slide's html is empty";
+  const bytes = Buffer.byteLength(source.html, "utf8");
+  return bytes > MAX_INLINE_HTML_BYTES
+    ? `a slide's html is too large: ${String(bytes)} bytes, the limit is ${String(MAX_INLINE_HTML_BYTES)}`
+    : null;
+}
+
+function slideMedia(source: SlideSource): DriveMedia {
+  return "path" in source ? { kind: "local-file", path: source.path } : { kind: "text", text: source.html };
+}
 
 export type CreateProposalOutcome =
   | Readonly<{
@@ -123,10 +149,8 @@ export async function createProposal(
 ): Promise<CreateProposalOutcome> {
   const { env, slides, presentationId } = options;
   if (slides.length === 0) return { kind: "invalid-input", reason: "slides is empty" };
-  const missing = slides.filter((slide) => env.statFile(slide.path) === null).map((slide) => slide.path);
-  if (missing.length > 0) {
-    return { kind: "invalid-input", reason: `not a readable file: ${missing.join(", ")}` };
-  }
+  const problems = slides.map((source) => sourceProblem({ env, source })).filter((problem) => problem !== null);
+  if (problems.length > 0) return { kind: "invalid-input", reason: problems.join("; ") };
 
   const proposalId = newProposalId({ env });
   const folderAndSlides = await uploadCandidates({ env, proposalId, slides });
@@ -392,7 +416,8 @@ export type ReviseStage = "locate" | "upload" | "event" | "manifest";
 /**
  * Replaces one candidate's HTML **in place** and records it.
  *
- * `htmlPath` is a PATH, never markup: the paths-in-ids-out rule is the product, and a tool
+ * `htmlPath` is a PATH on this machine (the local connector), or `html` is the markup itself for a
+ * remote client that cannot put files on this server. Locally the paths-in-ids-out rule holds: a tool
  * argument carrying a slide's HTML would put the whole candidate in the model's context on
  * every round trip.
  *
@@ -411,18 +436,18 @@ export async function reviseSlide(
     env: ProposalEnvironment;
     proposalId: string;
     slideIndex: number;
-    htmlPath: string;
     label: string | null;
     answeredCommentIds: readonly string[];
-  }>,
+  }> &
+    (Readonly<{ htmlPath: string }> | Readonly<{ html: string }>),
 ): Promise<ReviseSlideOutcome> {
-  const { env, proposalId, slideIndex, htmlPath, label, answeredCommentIds } = options;
+  const { env, proposalId, slideIndex, label, answeredCommentIds } = options;
+  const source: SlideSource = "htmlPath" in options ? { path: options.htmlPath, label } : { html: options.html, label };
   if (!Number.isSafeInteger(slideIndex) || slideIndex < 1) {
     return { kind: "invalid-input", reason: `slideIndex must be a 1-based integer, got ${String(slideIndex)}` };
   }
-  if (env.statFile(htmlPath) === null) {
-    return { kind: "invalid-input", reason: `not a readable file: ${htmlPath}` };
-  }
+  const problem = sourceProblem({ env, source });
+  if (problem !== null) return { kind: "invalid-input", reason: problem };
 
   const located = await locateProposal({ env, proposalId });
   switch (located.kind) {
@@ -449,7 +474,7 @@ export async function reviseSlide(
     await env.drive.updateFileContent({
       fileId: candidate.fileId,
       mimeType: "text/html",
-      media: { kind: "local-file", path: htmlPath },
+      media: slideMedia(source),
     });
   } catch (cause) {
     return { kind: "drive-failed", stage: "upload", reason: describeCause(cause) };
@@ -783,7 +808,7 @@ async function uploadCandidates(
         name,
         parentId: folder.id,
         mimeType: "text/html",
-        media: { kind: "local-file", path: slide.path },
+        media: slideMedia(slide),
         appProperties: { sashaSlides: "slide", proposalId, index: String(index) },
       });
       uploaded.push({ index, fileId: file.id, name: file.name, label: slide.label });
