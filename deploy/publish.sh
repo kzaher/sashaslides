@@ -43,7 +43,9 @@ CONNECTOR_UID="10100"
 KNOWN_HOSTS="$(cd "$(dirname "$0")" && pwd)/known_hosts"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=10 -o ServerAliveCountMax=3
           -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS")
-[ -z "$KEY" ] || SSH_OPTS+=(-i "$KEY" -o IdentitiesOnly=yes)
+# With a key, ignore any forwarded agent: a hung editor agent socket makes ssh wait forever even
+# with -i (measured 2026-10-12).
+if [ -n "$KEY" ]; then SSH_OPTS+=(-i "$KEY" -o IdentitiesOnly=yes); export SSH_AUTH_SOCK=; fi
 
 # Wall-clock budgets (seconds). Each remote step is killed past its budget, and the ssh
 # keepalive above kills a dead connection within ~30 s, so no step can hang silently.
