@@ -3,7 +3,7 @@
  * it: in-memory (tests, and the default for a single-process deployment) and file-backed
  * (dev, so a restart does not force every user through Google consent again).
  *
- * The shape is six keyed collections behind one uniform `RecordStore`, so the
+ * The shape is eight keyed collections behind one uniform `RecordStore`, so the
  * authorization server never learns which backing it got. `take` is the single-use read:
  * a `state`, an authorization code and a refresh token are each valid exactly once, which
  * is what makes replay of any of them a dead request rather than a second grant.
@@ -13,13 +13,16 @@
  * Claude are opaque strings of our own (`accessTokens` / `refreshTokens`) that carry only
  * a `googleSubject` pointer. There is no shared `.auth/tokens.json` anywhere on this path.
  *
- * ENCRYPT AT REST (out of scope, deliberately): `GoogleIdentity.refreshToken` is the only
- * long-lived secret here and it is written in clear text by `fileBackedAuthStore`. The
- * place to wrap it is `googleIdentityCodec` below — encode/decode is already the one
- * chokepoint every persisted identity passes through, so an AEAD there (key from the
- * environment, nonce per record) would cover the file without touching any caller. The
- * tokens we issue are stored only as SHA-256 hashes, so the store file cannot be replayed
- * as a bearer credential even unencrypted.
+ * ENCRYPTED AT REST, PER ACCOUNT: this file stores what it is given. The brokered stack
+ * hands the authorization server a `googleIdentities` wrapped by `sealedGoogleIdentities`
+ * (`accounts.ts`), which seals `accessToken`, `refreshToken` and `email` with the owning
+ * account's own data key (`account-keys.ts`) before they reach this store, and opens them
+ * on the way out. The data keys live in a separate key store, wrapped under the
+ * `SASHA_MASTER_KEY` master key, so this file alone (or a backup of it) holds no readable
+ * Google credential; destroying an account's data key makes every copy of its sealed
+ * values unreadable. `AccountLink.sealedEmail` is sealed the same way. The tokens we issue
+ * are stored only as SHA-256 hashes, so the store file cannot be replayed as a bearer
+ * credential either.
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -38,6 +41,10 @@ export type AuthStore = Readonly<{
   accessTokens: RecordStore<IssuedAccessToken>;
   /** Refresh tokens we issued, keyed by `sha256(token)`. Single use (rotated). */
   refreshTokens: RecordStore<IssuedRefreshToken>;
+  /** Sign-in identities, keyed by `<provider>:<subject>` (see `accountLinkKey` in `accounts.ts`). */
+  accountLinks: RecordStore<AccountLink>;
+  /** Our accounts, keyed by `AccountId`. */
+  accounts: RecordStore<Account>;
 }>;
 
 export type RecordStore<TValue> = Readonly<{
@@ -46,6 +53,8 @@ export type RecordStore<TValue> = Readonly<{
   /** Reads and removes in one step, so a replayed key finds nothing. */
   take(options: Readonly<{ key: string }>): Promise<TValue | null>;
   remove(options: Readonly<{ key: string }>): Promise<void>;
+  /** Every key currently held. A scan, used only by account erasure, which is rare. */
+  keys(): Promise<readonly string[]>;
 }>;
 
 /**
@@ -115,6 +124,29 @@ export type IssuedRefreshToken = Readonly<{
   resource: string | null;
 }>;
 
+/**
+ * One way of signing in to an account: a provider ("google", "microsoft", "github", or a
+ * configured OIDC name) and that provider's stable subject for the user.
+ */
+export type AccountLink = Readonly<{
+  accountId: string;
+  provider: string;
+  subject: string;
+  /** The email the provider reported, sealed with the account's data key. Null when none. */
+  sealedEmail: string | null;
+  linkedAtMs: number;
+}>;
+
+export type Account = Readonly<{
+  /** Our own random id (`AccountId` in `account-vault.ts`), and this record's key. */
+  accountId: string;
+  createdAtMs: number;
+  /** The `accountLinks` keys that sign in to this account. */
+  linkKeys: readonly string[];
+  /** The Google `sub` whose grant is this account's Google Slides connection. Null when none. */
+  googleSubject: string | null;
+}>;
+
 export function inMemoryAuthStore(): AuthStore {
   return {
     clients: inMemoryRecordStore<RegisteredClient>(),
@@ -123,12 +155,15 @@ export function inMemoryAuthStore(): AuthStore {
     googleIdentities: inMemoryRecordStore<GoogleIdentity>(),
     accessTokens: inMemoryRecordStore<IssuedAccessToken>(),
     refreshTokens: inMemoryRecordStore<IssuedRefreshToken>(),
+    accountLinks: inMemoryRecordStore<AccountLink>(),
+    accounts: inMemoryRecordStore<Account>(),
   };
 }
 
 /**
- * Dev backing: the four collections worth surviving a restart go to one JSON file, the two
- * that live for seconds stay in memory. Losing a `state` or an authorization code across a
+ * Dev backing: the six collections worth surviving a restart go to one JSON file, the two
+ * that live for seconds stay in memory. A file written before accounts existed simply has
+ * no `accountLinks` / `accounts` entries yet; both start empty. Losing a `state` or an authorization code across a
  * restart costs the user one click; losing a Google refresh token costs them a consent
  * screen, and losing the client registration costs a re-registration round trip.
  */
@@ -143,6 +178,8 @@ export function fileBackedAuthStore(
     googleIdentities: file.collection({ name: "googleIdentities", codec: googleIdentityCodec }),
     accessTokens: file.collection({ name: "accessTokens", codec: issuedAccessTokenCodec }),
     refreshTokens: file.collection({ name: "refreshTokens", codec: issuedRefreshTokenCodec }),
+    accountLinks: file.collection({ name: "accountLinks", codec: accountLinkCodec }),
+    accounts: file.collection({ name: "accounts", codec: accountCodec }),
   };
 }
 
@@ -163,13 +200,14 @@ export function inMemoryRecordStore<TValue>(): RecordStore<TValue> {
       entries.delete(key);
       return Promise.resolve();
     },
+    keys: () => Promise.resolve([...entries.keys()]),
   };
 }
 
 /**
- * The parse boundary for one persisted value type. Encode is where encrypt-at-rest would
- * go (see this file's header); decode is where a hand-edited or stale file is rejected
- * instead of being trusted as a typed value.
+ * The parse boundary for one persisted value type. Decode is where a hand-edited or stale
+ * file is rejected instead of being trusted as a typed value. Sealing happens above this
+ * layer (see this file's header), so the codecs only ever see sealed text for secrets.
  */
 export type JsonCodec<TValue> = Readonly<{
   encode(value: TValue): unknown;
@@ -191,8 +229,8 @@ function openJsonFile(options: Readonly<{ path: string; warn: (message: string) 
     const document: Record<string, Record<string, unknown>> = {};
     for (const [name, entries] of collections) document[name] = Object.fromEntries(entries);
     mkdirSync(dirname(path), { recursive: true });
-    // 0o600: the file holds every user's Google refresh token in clear text until
-    // encrypt-at-rest lands (see this file's header).
+    // 0o600: the Google secrets in it are sealed (see this file's header), but it still
+    // maps every user to their account and lists their grants.
     writeFileSync(path, `${JSON.stringify({ version: 1, collections: document }, null, 2)}\n`, {
       encoding: "utf-8",
       mode: 0o600,
@@ -237,6 +275,7 @@ function openJsonFile(options: Readonly<{ path: string; warn: (message: string) 
           persist();
           return Promise.resolve();
         },
+        keys: () => Promise.resolve([...entries.keys()]),
       };
       return store;
     },
@@ -333,5 +372,32 @@ const issuedRefreshTokenCodec: JsonCodec<IssuedRefreshToken> = {
     const scopes = asStringArray(record["scopes"]);
     if (clientId === null || googleSubject === null || scopes === null) return null;
     return { clientId, googleSubject, scopes, resource: asString(record["resource"]) };
+  },
+};
+
+const accountLinkCodec: JsonCodec<AccountLink> = {
+  encode: (value) => value,
+  decode: (value) => {
+    const record = asRecord(value);
+    if (record === null) return null;
+    const accountId = asString(record["accountId"]);
+    const provider = asString(record["provider"]);
+    const subject = asString(record["subject"]);
+    const linkedAtMs = asNumber(record["linkedAtMs"]);
+    if (accountId === null || provider === null || subject === null || linkedAtMs === null) return null;
+    return { accountId, provider, subject, sealedEmail: asString(record["sealedEmail"]), linkedAtMs };
+  },
+};
+
+const accountCodec: JsonCodec<Account> = {
+  encode: (value) => value,
+  decode: (value) => {
+    const record = asRecord(value);
+    if (record === null) return null;
+    const accountId = asString(record["accountId"]);
+    const createdAtMs = asNumber(record["createdAtMs"]);
+    const linkKeys = asStringArray(record["linkKeys"]);
+    if (accountId === null || createdAtMs === null || linkKeys === null) return null;
+    return { accountId, createdAtMs, linkKeys, googleSubject: asString(record["googleSubject"]) };
   },
 };

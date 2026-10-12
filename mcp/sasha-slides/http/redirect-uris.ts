@@ -1,10 +1,16 @@
 /**
  * Which `redirect_uri` an OAuth client may be sent back to.
  *
- * Two surfaces have to work, and they need different matching rules:
+ * Three surfaces have to work, and they need different matching rules:
  *
  *  - **Claude's hosted surfaces** come back to one fixed HTTPS URI,
  *    `https://claude.ai/api/mcp/auth_callback`. Exact string match.
+ *  - **ChatGPT** comes back to `https://chatgpt.com/connector_platform_oauth_redirect` when
+ *    the authorization server advertises RFC 9207 issuer identification (we do), and to a
+ *    per-connection `https://chatgpt.com/connector/oauth/{callback_id}` otherwise. Both
+ *    arrive in the DCR body, so both are exact matches; the stable one is also accepted
+ *    for every client (see `HOSTED_REDIRECT_URIS`). Source:
+ *    https://developers.openai.com/apps-sdk/build/auth ("Redirect URL").
  *  - **Claude Code** runs a loopback listener on an ephemeral port, so the port it
  *    registers with and the port it actually asks for will differ. RFC 8252 section 7.3
  *    ("Loopback Interface Redirection") says exactly this: the authorization server MUST
@@ -19,6 +25,17 @@
 
 /** Claude's hosted callback. Accepted for every registered client; see `oauth-store.ts`. */
 export const CLAUDE_HOSTED_REDIRECT_URI = "https://claude.ai/api/mcp/auth_callback";
+
+/** ChatGPT's stable callback, used once the server advertises RFC 9207 `iss`. */
+export const CHATGPT_STABLE_REDIRECT_URI = "https://chatgpt.com/connector_platform_oauth_redirect";
+
+/**
+ * Fixed callbacks added to every registration. Claude's because its hosted surfaces return
+ * there even when the client registered only a loopback URI. ChatGPT's because a connection
+ * that registered its per-connection URI keeps reusing that client, and ChatGPT moves to the
+ * stable URI once it sees our `iss` support.
+ */
+export const HOSTED_REDIRECT_URIS: readonly string[] = [CLAUDE_HOSTED_REDIRECT_URI, CHATGPT_STABLE_REDIRECT_URI];
 
 export type RedirectUriMatch =
   | Readonly<{ kind: "allowed"; registered: string }>

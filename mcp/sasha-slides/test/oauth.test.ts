@@ -29,7 +29,11 @@ import {
   PROTECTED_RESOURCE_METADATA_PATH,
 } from "../http/oauth-metadata";
 import { inMemoryAuthStore, type AuthStore } from "../http/oauth-store";
-import { CLAUDE_HOSTED_REDIRECT_URI, matchRedirectUri } from "../http/redirect-uris";
+import {
+  CHATGPT_STABLE_REDIRECT_URI,
+  CLAUDE_HOSTED_REDIRECT_URI,
+  matchRedirectUri,
+} from "../http/redirect-uris";
 import type { UserDriveFactory } from "../http/user-drive";
 import {
   brokeredEnvironmentResolver,
@@ -43,6 +47,8 @@ import { createFakeGoogle, fakeGoogleIdentity, FAKE_GOOGLE_AUTHORIZE_URL, type F
 /** Configured, not derived from the Host header: `resource` must match it exactly. */
 const PUBLIC_URL = "https://slides.example.test";
 const MCP_URL = `${PUBLIC_URL}/mcp`;
+/** The shape of the redirect ChatGPT uses when the server lacks RFC 9207 issuer identification. */
+const CHATGPT_CALLBACK_SPECIFIC_REDIRECT_URI = "https://chatgpt.com/connector/oauth/cb_1234";
 
 describe("matchRedirectUri", () => {
   test("ignores the port for a loopback redirect, and treats localhost as 127.0.0.1", () => {
@@ -96,6 +102,39 @@ describe("matchRedirectUri", () => {
       }).kind,
       "rejected",
     );
+  });
+
+  test("matches ChatGPT's stable and callback-specific redirects exactly", () => {
+    const rows = [
+      {
+        registered: CHATGPT_STABLE_REDIRECT_URI,
+        requested: CHATGPT_STABLE_REDIRECT_URI,
+        expected: "allowed",
+      },
+      {
+        registered: CHATGPT_CALLBACK_SPECIFIC_REDIRECT_URI,
+        requested: CHATGPT_CALLBACK_SPECIFIC_REDIRECT_URI,
+        expected: "allowed",
+      },
+      // Another connection's callback id is another client's redirect: never a prefix match.
+      {
+        registered: CHATGPT_CALLBACK_SPECIFIC_REDIRECT_URI,
+        requested: "https://chatgpt.com/connector/oauth/cb_other",
+        expected: "rejected",
+      },
+      {
+        registered: CHATGPT_STABLE_REDIRECT_URI,
+        requested: "https://chatgpt.com.evil.example.com/connector_platform_oauth_redirect",
+        expected: "rejected",
+      },
+    ] as const;
+    for (const row of rows) {
+      assert.equal(
+        matchRedirectUri({ registered: [row.registered], requested: row.requested }).kind,
+        row.expected,
+        `${row.requested} against ${row.registered}`,
+      );
+    }
   });
 });
 
@@ -179,6 +218,31 @@ describe("discovery", () => {
   });
 });
 
+describe("ChatGPT discovery", () => {
+  test("authorization server metadata promises RFC 9207 iss, so ChatGPT uses its stable redirect", async () => {
+    const harness = await startHarness();
+    try {
+      const document = requireRecord(
+        await (await fetch(`${harness.baseUrl}${AUTHORIZATION_SERVER_METADATA_PATH}`)).json(),
+      );
+      // Without this ChatGPT falls back to a per-connection callback URI; with it, ChatGPT
+      // requires `iss` on every authorization response (see the "iss" tests below).
+      assert.equal(document["authorization_response_iss_parameter_supported"], true);
+      const resource = requireRecord(
+        await (await fetch(`${harness.baseUrl}${PROTECTED_RESOURCE_METADATA_PATH}/mcp`)).json(),
+      );
+      // ChatGPT compares exactly: no trailing-slash or case normalisation.
+      assert.deepEqual(resource["authorization_servers"], [document["issuer"]]);
+      const scopes = document["scopes_supported"];
+      assert.ok(Array.isArray(scopes), "scopes_supported must be an array");
+      assert.ok(scopes.includes("offline_access"), "ChatGPT looks for offline_access before expecting refresh");
+      for (const scope of BROKERED_SCOPES) assert.ok(scopes.includes(scope), `${scope} must stay advertised`);
+    } finally {
+      await harness.dispose();
+    }
+  });
+});
+
 describe("registration", () => {
   test("registers a public client over JSON and always accepts Claude's hosted callback", async () => {
     const harness = await startHarness();
@@ -200,8 +264,38 @@ describe("registration", () => {
       assert.deepEqual(document["redirect_uris"], [
         "http://127.0.0.1:1/oauth/callback",
         CLAUDE_HOSTED_REDIRECT_URI,
+        CHATGPT_STABLE_REDIRECT_URI,
       ]);
       assert.equal(document["client_name"], "Claude");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  test("accepts ChatGPT's dynamic registration and keeps its stable redirect acceptable", async () => {
+    const harness = await startHarness();
+    try {
+      const response = await fetch(`${harness.baseUrl}/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          client_name: "ChatGPT",
+          redirect_uris: [CHATGPT_CALLBACK_SPECIFIC_REDIRECT_URI],
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+          scope: "openid email offline_access",
+        }),
+      });
+      assert.equal(response.status, 201, await response.clone().text());
+      const document = requireRecord(await response.json());
+      // A connection registered before the server advertised `iss` keeps its client when
+      // ChatGPT switches to the stable URI, so the stable one must already be on it.
+      assert.deepEqual(document["redirect_uris"], [
+        CHATGPT_CALLBACK_SPECIFIC_REDIRECT_URI,
+        CLAUDE_HOSTED_REDIRECT_URI,
+        CHATGPT_STABLE_REDIRECT_URI,
+      ]);
     } finally {
       await harness.dispose();
     }
@@ -379,6 +473,68 @@ describe("authorize", () => {
       const replay = await callback({ harness, code: "google-code-1", state: started.brokerState });
       assert.equal(replay.status, 400);
       assert.match(asString(requireRecord(await replay.json())["error_description"]) ?? "", /already-used state/);
+    } finally {
+      await harness.dispose();
+    }
+  });
+});
+
+describe("iss on every authorization response (RFC 9207)", () => {
+  const rows = [
+    { name: "a successful sign-in", outcome: "success" },
+    { name: "an error reported after the redirect is trusted", outcome: "authorize-error" },
+    { name: "Google refusing consent", outcome: "google-denied" },
+  ] as const;
+  for (const row of rows) {
+    test(`${row.name} returns iss equal to the metadata issuer`, async () => {
+      const harness = await startHarness();
+      try {
+        const redirectUri = CHATGPT_STABLE_REDIRECT_URI;
+        const clientId = await registerClient({ harness, redirectUris: [redirectUri] });
+        const back = new URL(await clientRedirectFor({ harness, clientId, redirectUri, outcome: row.outcome }));
+        assert.equal(`${back.origin}${back.pathname}`, redirectUri);
+        assert.equal(back.searchParams.get("iss"), PUBLIC_URL, `no exact iss on ${back.toString()}`);
+      } finally {
+        await harness.dispose();
+      }
+    });
+  }
+});
+
+describe("ChatGPT sign-in", () => {
+  test("completes through the stable redirect, with resource on /token, and the token works", async () => {
+    const harness = await startHarness();
+    try {
+      const redirectUri = CHATGPT_STABLE_REDIRECT_URI;
+      const clientId = await registerClient({ harness, redirectUris: [redirectUri] });
+      const pkce = newPkce();
+      const code = await completeGoogleLeg({ harness, clientId, redirectUri, challenge: pkce.challenge, user: userA() });
+      const response = await postForm({
+        harness,
+        path: "/token",
+        fields: {
+          grant_type: "authorization_code",
+          code,
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          code_verifier: pkce.verifier,
+          // ChatGPT appends resource to the token request as well as to /authorize.
+          resource: MCP_URL,
+        },
+      });
+      const body = await response.text();
+      assert.equal(response.status, 200, `token exchange failed: ${body}`);
+      const tokens = asTokenResponse(JSON.parse(body) as unknown);
+      const listed = await fetch(`${harness.baseUrl}/mcp`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${tokens.access_token}`,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      assert.equal(listed.status, 200, await listed.text());
     } finally {
       await harness.dispose();
     }
@@ -814,6 +970,70 @@ async function beginSignIn(
   return { brokerState };
 }
 
+/** Drives one authorization to the redirect it finally sends back to the client. */
+async function clientRedirectFor(
+  options: Readonly<{
+    harness: Harness;
+    clientId: string;
+    redirectUri: string;
+    outcome: "success" | "authorize-error" | "google-denied";
+  }>,
+): Promise<string> {
+  const { harness, clientId, redirectUri } = options;
+  switch (options.outcome) {
+    case "authorize-error": {
+      const response = await authorize({
+        harness,
+        parameters: { response_type: "code", client_id: clientId, redirect_uri: redirectUri },
+      });
+      assert.equal(response.status, 302);
+      return requireHeader({ response, name: "location" });
+    }
+    case "google-denied": {
+      const started = await beginSignIn({
+        harness,
+        clientId,
+        redirectUri,
+        challenge: newPkce().challenge,
+        clientState: "s",
+      });
+      const url = new URL(`${harness.baseUrl}/oauth/google/callback`);
+      url.searchParams.set("error", "access_denied");
+      url.searchParams.set("state", started.brokerState);
+      const response = await fetch(url, { redirect: "manual" });
+      assert.equal(response.status, 302);
+      const location = requireHeader({ response, name: "location" });
+      assert.equal(new URL(location).searchParams.get("error"), "access_denied");
+      return location;
+    }
+    case "success": {
+      const started = await beginSignIn({
+        harness,
+        clientId,
+        redirectUri,
+        challenge: newPkce().challenge,
+        clientState: "s",
+      });
+      const user = userA();
+      harness.google.stageConsent({
+        code: user.googleCode,
+        identity: fakeGoogleIdentity({ subject: user.subject, email: user.email, refreshToken: user.refreshToken }),
+      });
+      const response = await callback({ harness, code: user.googleCode, state: started.brokerState });
+      assert.equal(response.status, 302);
+      const location = requireHeader({ response, name: "location" });
+      assert.ok(new URL(location).searchParams.get("code") !== null);
+      return location;
+    }
+    default:
+      return assertNeverOutcome(options.outcome);
+  }
+}
+
+function assertNeverOutcome(value: never): never {
+  throw new Error(`unhandled outcome: ${String(value)}`);
+}
+
 async function registerClient(
   options: Readonly<{ harness: Harness; redirectUris: readonly string[] }>,
 ): Promise<string> {
@@ -942,3 +1162,17 @@ function requireRecord(value: unknown): Readonly<Record<string, unknown>> {
 function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
+
+// THE GOOGLE CALLBACK CAN BE KEPT ON LOOPBACK while the public URL is a tunnel. A Desktop OAuth
+// client only accepts http://127.0.0.1 redirects, so a browser on the server's own machine can
+// finish Google's leg there while claude.ai and ChatGPT reach every other endpoint over HTTPS.
+test("endpointsFor keeps the Google callback on the public URL unless told otherwise", () => {
+  const derived = endpointsFor({ publicUrl: "https://tunnel.example" });
+  assert.equal(derived.googleCallbackUrl, "https://tunnel.example/oauth/google/callback");
+  const loopback = endpointsFor({
+    publicUrl: "https://tunnel.example",
+    googleCallbackUrl: "http://127.0.0.1:7778/oauth/google/callback",
+  });
+  assert.equal(loopback.googleCallbackUrl, "http://127.0.0.1:7778/oauth/google/callback");
+  assert.equal(loopback.authorizeUrl, "https://tunnel.example/authorize", "only the Google leg moves");
+});

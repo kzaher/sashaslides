@@ -59,8 +59,11 @@ const FIND = (patterns: readonly string[]): string => `((pats) => {
     for (const n of nodes) {
       const s = (n.innerText || n.value || n.getAttribute('aria-label') || '').trim();
       if (!s || s.length > 120 || !re.test(s)) continue;
-      const r = n.getBoundingClientRect();
-      if (r.width < 8 || r.height < 8 || r.bottom < 0 || r.top > innerHeight) continue;
+      let r = n.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8) continue;
+      // A press below the viewport is silently dropped (CLAUDE.md), and Google's granular consent
+      // puts Continue at the very bottom: bring it into view and measure again.
+      if (r.bottom > innerHeight || r.top < 0) { n.scrollIntoView({ block: 'center' }); r = n.getBoundingClientRect(); }
       return JSON.stringify({ x: Math.round(r.left+r.width/2), y: Math.round(r.top+r.height/2), label: s.replace(/\\s+/g,' ').slice(0,50) });
     } }
   return null;
@@ -120,8 +123,11 @@ async function main(): Promise<void> {
   await c.Page.navigate({ url: toGoogle });
   await bringToFront(c, tab.id);
 
-  for (let step = 0; step < 14; step++) {
-    await new Promise((r) => setTimeout(r, 1500));
+  // POLLED, NOT SLEPT: every step is a page Google renders in well under a second, and the whole
+  // run has to fit a 30 s command budget.
+  const consentDeadline = Date.now() + 18_000;
+  while (Date.now() < consentDeadline) {
+    await new Promise((r) => setTimeout(r, 400));
     const raw = await evaluateText(c, `JSON.stringify({ url: location.href, text: (document.body?document.body.innerText:'').replace(/\\s+/g,' ').slice(0,200) })`);
     if (raw === "CLOSED" || !raw.startsWith("{")) continue;
     const state = JSON.parse(raw) as { url: string; text: string };
@@ -132,13 +138,17 @@ async function main(): Promise<void> {
       const proceed = await findHit(c, ["^go to .*unsafe", "^go to "]);
       if (proceed !== null) { await realClick(c, proceed); continue; }
     }
+    // GRANULAR CONSENT (seen 2026-10-11): each scope is an unticked checkbox, and Continue with
+    // none ticked grants nothing. "Select all" is the first box; it is pressed for real.
+    const box = await evaluateText(c, `(() => { const b = document.querySelector('input[type=checkbox]:not(:checked)'); if (!b) return 'none'; b.scrollIntoView({ block: 'center' }); const r = b.getBoundingClientRect(); return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), label: 'checkbox' }); })()`);
+    if (box.startsWith("{")) { await realClick(c, JSON.parse(box) as Point); continue; }
     const hit = await findHit(c, ["^(continue|allow|accept)$", EMAIL.replace(/\./g, "\\."), "^next$"]);
     if (hit !== null) await realClick(c, hit);
   }
 
   const code = await Promise.race([
     pendingCode,
-    new Promise<string>((_, reject) => setTimeout(() => reject(new Error("no authorization code within 30s")), 30000)),
+    new Promise<string>((_, reject) => setTimeout(() => reject(new Error("no authorization code within 5s of the consent loop")), 5000)),
   ]).catch((cause: unknown) => { console.error(`FAIL  ${cause instanceof Error ? cause.message : String(cause)}`); return null; });
   await c.close();
   server.close();
@@ -181,6 +191,25 @@ async function main(): Promise<void> {
     return;
   }
   console.log(`ok    authenticated as the signed-in user; tools: ${names.join(", ")}`);
+
+  // 6. DRIVE something as that user: open_work reads THEIR Drive inbox through the broker's grant.
+  const work = await fetch(`${BASE}/mcp`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      Authorization: `Bearer ${access}`,
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "open_work", arguments: {} } }),
+  });
+  const workBody = await work.text();
+  const proposals = [...new Set([...workBody.matchAll(/p_\d{13}_[a-z0-9]{6}/g)].map((m) => m[0]))];
+  if (work.status !== 200 || /isError\\?"\s*:\s*true/.test(workBody)) {
+    console.error(`FAIL  open_work as the user -> ${work.status}: ${workBody.slice(0, 300)}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`ok    open_work read the user's own Drive: ${proposals.length} proposal(s) ${proposals.slice(0, 3).join(", ")}`);
   console.log("\nPASS  brokered per-user sign-in works end to end");
 }
 void main();

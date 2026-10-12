@@ -93,6 +93,39 @@ Important:
 * **A bound add-on fails for a NON-DEFAULT Google account, and the only symptom is "a server error occurred while reading from storage. Error code PERMISSION_DENIED".** The bound script belongs to the document's owner, so a browser signed into several Google accounts can serve the sidebar as the wrong one and Apps Script then refuses to load the script. **The account slot is readable from the sandbox's own host**: HtmlService serves the panel from `n-<opaque>-<slot>lu-script.googleusercontent.com`, so `-0lu-` is the browser default and `-1lu-` is the second account. `mcp/sasha-slides/addon/src/diagnostics.ts` parses it and the error panel prints it; do that rather than theorising about someone else's browser. Fix with `…/edit?authuser=<owner address>`. Confirmed in practice after three wrong guesses. Ruled out by measurement: third-party cookie blocking does NOT cause it (the add-on works with them blocked), so Incognito is not a diagnostic.
 * **`SlidesApp.getActivePresentation().getUrl()` returns the LEGACY Drive form** `https://docs.google.com/open?id=<id>`,
   NOT `/presentation/d/<id>/edit`. Any regex that only accepts the editor URL parses it to null.
+* **Every `google.script.run` call costs ~0.65–0.85 s of fixed overhead** on top of the function's own time (measured
+  2026-10-11: `sashaHello` 0.84 s round trip for ~0.12 s of work; Apps Script's own `di` field reported 835 ms for 322 ms
+  of measured `Code.gs` time). So a chain of calls in SERIES is what makes a surface slow, not bundle size: the slides
+  window took 9.8 s through six serial calls, against 196 ms of total renderer main-thread time. Hand a surface what
+  the caller already knows instead (`addon/src/picker-seed.ts`: the sidebar's data is appended to the dialog page by
+  `sashaOpenPicker`, 9.8 s → 1.8–1.9 s). Measure with `mcp/sasha-slides/e2e/open-latency.ts`.
+* **An open deck keeps serving the PREVIOUS HtmlService build after a save.** Measured 2026-10-11: with the editor
+  holding the new `Dialog.html` (length verified after reload), dialogs opened from an already-open deck still ran the
+  old bundle (`window.sashaBuild` showed the old hash). Reload the deck tab after every deploy, and check
+  `sashaBuild` in the served frame before trusting a live result.
+* **`CDP.New({ url })` truncates the address at the first `&`** (chrome-remote-interface sends it to `/json/new`
+  unencoded). Measured 2026-10-11: an OAuth `/authorize?response_type=code&client_id=…` opened as
+  `/authorize?response_type=code`, and the server correctly answered `unknown client_id` — which read as a server bug
+  for two runs. Open a blank tab and `Page.navigate({ url })` instead.
+* **Run the remote connector with `--store <path>`.** Without it client registrations live in memory, and Claude Code
+  caches its registered `client_id` per server URL, so after any restart its next sign-in fails with
+  `unknown client_id` and it does not re-register by itself. Since per-account encryption landed, `--store` must come with `--key-store <path>` and
+  `SASHA_MASTER_KEY` (64 hex chars; the server prints the generator command), and the `/account` portal needs
+  `SASHA_SESSION_SECRET`. Losing the master key or the key-store file makes every stored grant unreadable.
+* **Testing the remote connector from claude.ai / ChatGPT without a Web OAuth client** (measured 2026-10-11): run
+  `cloudflared tunnel --url http://127.0.0.1:<port>` and the server with `--public-url <tunnel> --google-callback-url
+  http://127.0.0.1:<port>/oauth/google/callback --store <file>`; the Desktop client accepts the loopback redirect, so
+  sign-in completes for a browser on THIS machine (the container Chrome). Both apps sign in in the SAME tab (no popup).
+  claude.ai moved connectors to Customize → Connectors → + Add; ChatGPT (Plus works) uses Plugins → Add → Add custom MCP
+  server and returns to `https://chatgpt.com/connector_platform_oauth_redirect`. Google's re-consent page keeps
+  Continue disabled until scrolled (round down-arrow button). Walkthroughs: `mcp/sasha-slides/docs/connect/`.
+* **All `google.script.run` traffic appears on the DECK PAGE's network session**, not the sandbox frame that made the
+  call, so requests cannot be attributed to a frame by CDP session. Count calls by function name (it is in the POST
+  body) and reason from totals.
+* **`.auth/tokens.json`'s refresh token expires after 7 days** (`refresh_token_expires_in: 604799`; the OAuth client is
+  in Testing mode), which surfaces as `invalid_grant` from the sasha-slides server. Re-run `npx tsx
+  .auth/generate-token.ts`; the consent screen can be completed in the container's Chrome on :9223 (tick "Select all"
+  on the granular-consent page, and scroll Continue into view before clicking).
 
 ## Whiteboard / visual style
 

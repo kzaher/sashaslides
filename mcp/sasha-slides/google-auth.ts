@@ -105,23 +105,24 @@ export type ClientCredentialsLoad =
  * client acting on behalf of whichever user is signing in, so `.auth/tokens.json` — one
  * developer's personal grant — must never be on that path.
  */
-export function loadClientCredentials(): ClientCredentialsLoad {
-  if (!existsSync(CLIENT_PATH)) {
+export function loadClientCredentials(options: Readonly<{ path?: string }> = {}): ClientCredentialsLoad {
+  const path = options.path ?? CLIENT_PATH;
+  if (!existsSync(path)) {
     return {
       kind: "missing-file",
-      path: CLIENT_PATH,
+      path: path,
       remedy:
         'Google Cloud console -> APIs & Services -> Credentials -> Create OAuth client ID -> "Desktop app", ' +
         "download the JSON to this path. Enable the Google Slides API and Google Drive API on the project first.",
     };
   }
-  const clientFile = readJsonObject(CLIENT_PATH);
-  if ("error" in clientFile) return { kind: "malformed-file", path: CLIENT_PATH, reason: clientFile.error };
+  const clientFile = readJsonObject(path);
+  if ("error" in clientFile) return { kind: "malformed-file", path: path, reason: clientFile.error };
   const credentials = narrowClient(clientFile.json);
   if (credentials === null) {
     return {
       kind: "malformed-file",
-      path: CLIENT_PATH,
+      path: path,
       reason: 'no "installed" or "web" section with client_id + client_secret',
     };
   }

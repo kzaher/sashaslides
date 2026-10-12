@@ -16,6 +16,17 @@
  *    `token_endpoint_auth_methods_supported`. We need `"none"` (our clients are public and
  *    prove themselves with PKCE), so CIMD is advertised as explicitly `false` to push
  *    Claude onto the DCR path we actually implement.
+ *
+ * ChatGPT reads the same documents (https://developers.openai.com/apps-sdk/build/auth) and
+ * adds two things we satisfy here:
+ *
+ *  - `authorization_response_iss_parameter_supported: true` (RFC 9207) lets ChatGPT use its
+ *    stable redirect URI, and obliges us to put `iss` on every authorization response,
+ *    which `authorization-server.ts`'s `redirectWith` does unconditionally.
+ *  - `offline_access` in the authorization server's `scopes_supported`, which ChatGPT's help
+ *    centre says to advertise so the connection expects a refresh token. We always issue
+ *    one; the scope is a signal, not something we pass on to Google (Google's equivalent is
+ *    `access_type=offline`, set in `google-broker.ts`).
  */
 
 export const MCP_PATH = "/mcp";
@@ -57,7 +68,17 @@ export type Endpoints = Readonly<{
   authorizationServerMetadataUrl: string;
 }>;
 
-export function endpointsFor(options: Readonly<{ publicUrl: string }>): Endpoints {
+export function endpointsFor(
+  options: Readonly<{
+    publicUrl: string;
+    /**
+     * Where Google sends the user back, when it must differ from the public URL: a Desktop OAuth
+     * client accepts only loopback redirects, so a test deployment behind a tunnel keeps Google's
+     * leg on http://127.0.0.1 for a browser on the server's own machine.
+     */
+    googleCallbackUrl?: string;
+  }>,
+): Endpoints {
   const publicUrl = options.publicUrl.replace(/\/+$/, "");
   return {
     publicUrl,
@@ -65,7 +86,7 @@ export function endpointsFor(options: Readonly<{ publicUrl: string }>): Endpoint
     authorizeUrl: `${publicUrl}${AUTHORIZE_PATH}`,
     tokenUrl: `${publicUrl}${TOKEN_PATH}`,
     registerUrl: `${publicUrl}${REGISTER_PATH}`,
-    googleCallbackUrl: `${publicUrl}${GOOGLE_CALLBACK_PATH}`,
+    googleCallbackUrl: options.googleCallbackUrl ?? `${publicUrl}${GOOGLE_CALLBACK_PATH}`,
     // RFC 9728 section 3.1: the resource's path is appended to the well-known path, so a
     // resource at /mcp advertises /.well-known/oauth-protected-resource/mcp.
     protectedResourceMetadataUrl: `${publicUrl}${PROTECTED_RESOURCE_METADATA_PATH}${MCP_PATH}`,
@@ -107,7 +128,12 @@ export type AuthorizationServerMetadata = Readonly<{
   scopes_supported: readonly string[];
   /** Explicitly false: we implement DCR, not CIMD. See this file's header. */
   client_id_metadata_document_supported: boolean;
+  /** RFC 9207: every authorization response carries `iss`. See this file's header. */
+  authorization_response_iss_parameter_supported: boolean;
 }>;
+
+/** Advertised by the authorization server only; it never reaches Google's scope list. */
+export const OFFLINE_ACCESS_SCOPE = "offline_access";
 
 export function authorizationServerMetadata(
   options: Readonly<{ endpoints: Endpoints }>,
@@ -122,8 +148,9 @@ export function authorizationServerMetadata(
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-    scopes_supported: [...BROKERED_SCOPES],
+    scopes_supported: [...BROKERED_SCOPES, OFFLINE_ACCESS_SCOPE],
     client_id_metadata_document_supported: false,
+    authorization_response_iss_parameter_supported: true,
   };
 }
 

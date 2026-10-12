@@ -1,8 +1,10 @@
-# Connecting Claude to Sasha Slides
+# Connecting Claude or ChatGPT to Sasha Slides
+
+**Recorded walkthroughs** (claude.ai, ChatGPT, Claude Code), with every click: [docs/connect/](docs/connect/README.md).
 
 Two halves have to be connected, and they are independent:
 
-1. **The connector** — Claude talks to the Sasha Slides server, which stages candidate slides
+1. **The connector** — Claude (or ChatGPT) talks to the Sasha Slides server, which stages candidate slides
    into your Google Drive.
 2. **The picker** — an add-on inside Google Slides that shows you those candidates and puts the
    one you choose into your deck.
@@ -64,6 +66,71 @@ Requirements, measured not assumed:
 - A production deployment should use a **Web** OAuth client rather than the Desktop one, since
   the redirect will be an HTTPS address rather than loopback. The credential loader already
   accepts either shape, so it is a file swap.
+
+## B2. Connect ChatGPT (same remote server, same URL)
+
+ChatGPT uses the very same remote server and the very same address as claude.ai:
+`https://<your-public-host>/mcp`. Nothing extra has to run. Inside the add-on, the Setup tab's
+**ChatGPT** choice prints these steps with the real address filled in.
+
+**Plans, stated honestly.** OpenAI's help centre (article "Developer mode and MCP apps in
+ChatGPT", <https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt>)
+says full MCP, including write actions, is for **Business, Enterprise and Edu**, and that Pro can
+connect MCP servers with read/fetch permissions only. Sasha's tools write to your Drive, so plan
+on Business, Enterprise or Edu. In a workspace, the admin may first have to allow custom MCP
+servers (developer mode) under the workspace settings. Free and Plus are not listed. That page
+refuses automated fetches, so this paragraph comes from its search-indexed text, not a fresh read.
+**Measured 2026-10-11 on a Plus account:** Plugins → Add → Add custom MCP server was available, the
+OAuth sign-in completed and a read-only call (`open_work`) worked (video: `docs/connect/`). Write
+tools on Plus were not tried.
+
+Steps, every click (from OpenAI's "Add custom MCP server" guide,
+<https://developers.openai.com/api/docs/guides/custom-mcp-server>, and "Connect and test your
+plugin", <https://developers.openai.com/plugins/deploy/connect-chatgpt>):
+
+1. Open ChatGPT **on the web** at <https://chatgpt.com/plugins>.
+2. Press the **+** button, then **Add custom MCP server**.
+3. **Name**: `Sasha Slides`. **Description**: optional.
+4. Under **Connection**, leave it on the URL option (not **Tunnel**) and paste the **Server URL**:
+   `https://<your-public-host>/mcp` — the `/mcp` path included, exactly what claude.ai gets.
+5. Under **Authentication** choose **OAuth**. Leave any client ID and client secret fields empty:
+   Sasha does not advertise Client ID Metadata Documents, so ChatGPT falls back to dynamic client
+   registration and registers itself. If the form asks how ChatGPT should register, pick
+   dynamic client registration (DCR); OpenAI's wording is "ChatGPT can also use DCR when
+   configured".
+6. Read the risk warning and press **I understand and want to continue**.
+7. Press **Create as a plugin**. When ChatGPT sends you to Google, sign in with the Google account
+   that owns the deck, then wait while ChatGPT lists the tools.
+8. Open your personal plugins at <https://chatgpt.com/plugins?view=personal>, open **Sasha
+   Slides**, and press **+** to install it.
+9. Start a new chat (OpenAI's quickstart uses the **Work** tab at the top of the homepage when it
+   is there), type `@`, choose **Sasha Slides**, and say what you want, for example
+   "call open_work, then answer my open comments".
+10. ChatGPT asks you to confirm every tool that is not marked read-only. Approve the Sasha
+    actions; "remember for this conversation" saves repeating it.
+
+After a server upgrade, refresh the tool list: <https://chatgpt.com/plugins> → open Sasha Slides
+→ **Refresh**.
+
+What the server does for ChatGPT, measured by `test/oauth.test.ts` (no live ChatGPT run has been
+made from this repository):
+
+- **Redirect URIs.** ChatGPT returns to `https://chatgpt.com/connector_platform_oauth_redirect`
+  when the authorization server supports RFC 9207 issuer identification, and to a per-connection
+  `https://chatgpt.com/connector/oauth/{callback_id}` otherwise
+  (<https://developers.openai.com/apps-sdk/build/auth>, "Redirect URL"). Both arrive in ChatGPT's
+  registration request and match exactly. The stable one is also added to every registration,
+  next to Claude's `https://claude.ai/api/mcp/auth_callback`, so a connection that registered
+  its per-connection URI keeps working when ChatGPT switches.
+- **Issuer identification.** The metadata advertises
+  `authorization_response_iss_parameter_supported: true`, and every redirect back to the client
+  (code or error) carries `iss` equal to the metadata `issuer`. ChatGPT rejects a response with a
+  missing or different `iss`.
+- **PKCE S256, `resource`, refresh.** S256 is the only method; ChatGPT's `resource` parameter on
+  `/authorize` and `/token` must equal the `/mcp` URL; `offline_access` is advertised in the
+  authorization server's `scopes_supported` and a rotating refresh token is always issued.
+- **No `search`/`fetch` tools needed.** OpenAI: "Custom MCP servers do not require
+  `search`/`fetch` tools."
 
 ## C. What to say to Claude once it is connected
 

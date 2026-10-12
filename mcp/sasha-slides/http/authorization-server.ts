@@ -52,7 +52,7 @@ import {
   type Endpoints,
   type ProtectedResourceMetadata,
 } from "./oauth-metadata";
-import { CLAUDE_HOSTED_REDIRECT_URI, matchRedirectUri } from "./redirect-uris";
+import { HOSTED_REDIRECT_URIS, matchRedirectUri } from "./redirect-uris";
 import type { AuthStore, GoogleIdentity, RegisteredClient } from "./oauth-store";
 import type { GoogleBroker } from "./google-broker";
 
@@ -192,9 +192,9 @@ export function createAuthorizationServer(
       const client: RegisteredClient = {
         clientId: `sasha_${randomToken()}`,
         clientName: request.clientName,
-        // Claude's hosted surfaces always come back to the one fixed callback, so it is
-        // accepted for every registration even when the client lists only a loopback URI.
-        redirectUris: withClaudeHostedRedirect(request.redirectUris),
+        // Claude's and ChatGPT's hosted callbacks are accepted for every registration;
+        // see `HOSTED_REDIRECT_URIS` for why each one is there.
+        redirectUris: withHostedRedirects(request.redirectUris),
         tokenEndpointAuthMethod: "none",
         issuedAtSeconds,
       };
@@ -233,6 +233,7 @@ export function createAuthorizationServer(
         kind: "redirect",
         location: redirectWith({
           base: requestedRedirect,
+          issuer: endpoints.publicUrl,
           parameters: { error, error_description: description, state: clientState },
         }),
       });
@@ -299,6 +300,7 @@ export function createAuthorizationServer(
         kind: "redirect",
         location: redirectWith({
           base: pending.clientRedirectUri,
+          issuer: endpoints.publicUrl,
           parameters: { error, error_description: description, state: pending.clientState },
         }),
       });
@@ -341,6 +343,7 @@ export function createAuthorizationServer(
         kind: "redirect",
         location: redirectWith({
           base: pending.clientRedirectUri,
+          issuer: endpoints.publicUrl,
           parameters: { code, state: pending.clientState },
         }),
       };
@@ -620,23 +623,26 @@ function challengeFor(verifier: string): string {
   return createHash("sha256").update(verifier, "ascii").digest("base64url");
 }
 
-function withClaudeHostedRedirect(redirectUris: readonly string[]): readonly string[] {
-  return redirectUris.includes(CLAUDE_HOSTED_REDIRECT_URI)
-    ? redirectUris
-    : [...redirectUris, CLAUDE_HOSTED_REDIRECT_URI];
+function withHostedRedirects(redirectUris: readonly string[]): readonly string[] {
+  return [...redirectUris, ...HOSTED_REDIRECT_URIS.filter((hosted) => !redirectUris.includes(hosted))];
 }
 
 /**
  * Appends OAuth response parameters to a redirect target, preserving any query the client
  * registered. Null values are omitted, which is how an absent `state` stays absent.
+ *
+ * `issuer` is required, not optional, because every authorization response must carry it:
+ * the metadata advertises `authorization_response_iss_parameter_supported`, and ChatGPT
+ * rejects a success or error response whose `iss` is missing or differs (RFC 9207).
  */
 function redirectWith(
-  options: Readonly<{ base: string; parameters: Readonly<Record<string, string | null>> }>,
+  options: Readonly<{ base: string; issuer: string; parameters: Readonly<Record<string, string | null>> }>,
 ): string {
   const url = new URL(options.base);
   for (const [name, value] of Object.entries(options.parameters)) {
     if (value !== null) url.searchParams.append(name, value);
   }
+  url.searchParams.append("iss", options.issuer);
   return url.toString();
 }
 

@@ -35,6 +35,7 @@ import {
 } from "./oauth-metadata";
 import { assertNever } from "../google-auth";
 import type { AuthorizationServer, OAuthErrorCode } from "./authorization-server";
+import type { AccountPortal } from "./account-portal";
 
 export type RequestListener = (request: IncomingMessage, response: ServerResponse) => void;
 
@@ -45,6 +46,8 @@ export function createSashaSlidesHttpServer(
     /** Wraps the per-request transport; the identity function in a plain deployment. */
     instrumentTransport: (inner: Transport) => Transport;
     warn: (message: string) => void;
+    /** Absent: no `/account` routes. Present: it answers every path under `/account`. */
+    accountPortal?: AccountPortal;
   }>,
 ): Server {
   return createServer(sashaSlidesRequestListener(options));
@@ -57,9 +60,11 @@ export function sashaSlidesRequestListener(
     /** Wraps the per-request transport; the identity function in a plain deployment. */
     instrumentTransport: (inner: Transport) => Transport;
     warn: (message: string) => void;
+    /** Absent: no `/account` routes. Present: it answers every path under `/account`. */
+    accountPortal?: AccountPortal;
   }>,
 ): RequestListener {
-  const { authorizationServer, createMcpServer, instrumentTransport, warn } = options;
+  const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal } = options;
   const { endpoints } = authorizationServer;
 
   async function route(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -68,6 +73,10 @@ export function sashaSlidesRequestListener(
     // configured, because `resource` has to equal the MCP URL Claude was given, exactly.
     const url = new URL(request.url ?? "/", "http://host.invalid");
     const path = url.pathname.replace(/\/+$/, "") === "" ? "/" : url.pathname.replace(/\/+$/, "");
+
+    // The account portal (`account-portal.ts`) goes first: its HTML pages are for a browser
+    // on this origin only, so they get no CORS headers, and it claims only `/account/...`.
+    if (accountPortal !== undefined && (await accountPortal.handleRequest({ request, response, url }))) return;
 
     if (method === "OPTIONS") {
       response.writeHead(204, corsHeaders({ methods: "GET, POST, DELETE, OPTIONS" })).end();

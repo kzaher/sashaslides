@@ -67,10 +67,11 @@ import { googleFeedbackChannel, type FeedbackChannel } from "./feedback/feedback
 import { FEEDBACK_DELIVERY_THRESHOLD_MS } from "./feedback-delivery";
 import { pollProgressReporter } from "./long-poll-progress.ts";
 import { describeCommentAnchor } from "./feedback/comment-anchor";
-import { assertNever, describeAuthFailure, loadOAuthClient } from "./google-auth";
+import { CLIENT_PATH, assertNever, describeAuthFailure, loadOAuthClient } from "./google-auth";
 import { googleSubjectOf } from "./http/authorization-server";
 import { loadBrokeredStack } from "./http/brokered-stack";
 import { createSashaSlidesHttpServer } from "./http/http-server";
+import { loadAccountPortal } from "./http/account-portal-stack";
 import type { Endpoints } from "./http/oauth-metadata";
 import type { UserDriveFactory } from "./http/user-drive";
 import {
@@ -1428,6 +1429,14 @@ export type ServerMode =
       port: number;
       /** Null keeps grants in memory; a path persists them for dev. */
       storePath: string | null;
+      /** The per-account data keys, in a file of their own. Given exactly when `storePath` is. */
+      keyStorePath: string | null;
+      /** Null derives Google's redirect from publicUrl; a URL keeps it elsewhere (e.g. loopback). */
+      googleCallbackUrl: string | null;
+      /** The Google OAuth client file: a Web client in production, the Desktop one by default. */
+      googleClientPath: string;
+      /** Null offers the /account portal's sign-in with Google alone; a path lists the providers. */
+      identityProvidersPath: string | null;
       /** Null disables handshake recording; a path appends one JSON line per `initialize`. */
       handshakeLogPath: string | null;
       /** Null disables frame recording; a path appends one JSON line per JSON-RPC frame. */
@@ -1483,12 +1492,24 @@ export function parseServerMode(args: readonly string[]): ServerMode {
   }
   const port = parsePort(values.get("--port"));
   if (port === null) return { kind: "usage", reason: "--port must be an integer between 1 and 65535" };
+  const storePath = values.get("--store") ?? null;
+  const keyStorePath = values.get("--key-store") ?? null;
+  if ((storePath === null) !== (keyStorePath === null)) {
+    return {
+      kind: "usage",
+      reason: "--store and --key-store go together: sealed grants in one file are useless without the keys in the other",
+    };
+  }
   return {
     kind: "http",
     publicUrl,
     host: values.get("--host") ?? DEFAULT_HTTP_HOST,
     port,
-    storePath: values.get("--store") ?? null,
+    storePath,
+    keyStorePath,
+    googleCallbackUrl: values.get("--google-callback-url") ?? null,
+    googleClientPath: values.get("--google-client") ?? CLIENT_PATH,
+    identityProvidersPath: values.get("--identity-providers") ?? null,
     handshakeLogPath,
     frameLogPath,
     skillFilePath,
@@ -1498,7 +1519,7 @@ export function parseServerMode(args: readonly string[]): ServerMode {
 
 export const USAGE = `sasha-slides MCP server
 
-  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path>]
+  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--google-client <path>]
   npx tsx mcp/sasha-slides/server.ts --stdio
   npx tsx mcp/sasha-slides/server.ts --selftest
 
@@ -1509,6 +1530,27 @@ export const USAGE = `sasha-slides MCP server
                  for any non-loopback deployment.
   --store        File to persist client registrations and per-user Google grants in.
                  Omit to keep them in memory (a restart then forces re-consent).
+                 Each user's Google tokens and email are sealed in it with that
+                 user's own account key.
+  --key-store    File to persist the per-account data keys in, wrapped under the
+                 master key from the SASHA_MASTER_KEY environment variable (64 hex
+                 characters). Required together with --store, and the server refuses
+                 to start without SASHA_MASTER_KEY then. Generate a master key with
+                   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+                 Keep it, and this file, out of the --store file's backups: destroying
+                 an account's key here is what makes its data unreadable everywhere.
+  --identity-providers  JSON file of the sign-in providers offered at <public-url>/account,
+                 where people delete their data: {"providers": [{"name": "microsoft",
+                 "clientId": "...", "clientSecret": "..."}, ...]}. Presets: google,
+                 microsoft, github; any other name needs "displayName" and an OpenID Connect
+                 "issuer". google may omit credentials to reuse the connector's client.
+                 Without this flag the portal offers Google alone. The portal signs its
+                 session cookie with SASHA_SESSION_SECRET (32+ characters), which this flag
+                 requires; with neither, /account is off.
+  --google-callback-url  TESTING. Where Google returns the user, instead of
+                 <public-url>/oauth/google/callback. A Desktop OAuth client only accepts
+                 http://127.0.0.1 redirects, so behind a tunnel this keeps Google's leg on
+                 loopback -- which only works for a browser on the server's own machine.
   --stdio        DEV ONLY. Serves over stdio using the single token in
                  .auth/tokens.json. No per-user identity exists on this transport.
   --selftest     Run the whole tool surface against an in-memory Drive and exit.
@@ -1788,6 +1830,10 @@ const VALUE_FLAGS: readonly string[] = [
   "--port",
   "--host",
   "--store",
+  "--key-store",
+  "--google-callback-url",
+  "--identity-providers",
+  "--google-client",
   "--handshake-log",
   "--frame-log",
 ];
@@ -1898,6 +1944,10 @@ function serveHttp(
   const loaded = loadBrokeredStack({
     publicUrl: mode.publicUrl,
     storePath: mode.storePath,
+    keyStorePath: mode.keyStorePath,
+    env: process.env,
+    googleCallbackUrl: mode.googleCallbackUrl,
+    googleClientPath: mode.googleClientPath,
     warn,
   });
   if (loaded.kind === "failed") {
@@ -1906,6 +1956,21 @@ function serveHttp(
     return Promise.resolve();
   }
   const { stack } = loaded;
+  const portal = loadAccountPortal({
+    publicUrl: mode.publicUrl,
+    identityProvidersPath: mode.identityProvidersPath,
+    googleClientPath: mode.googleClientPath,
+    sessionSecret: process.env.SASHA_SESSION_SECRET,
+    store: stack.store,
+    vault: stack.vault,
+    eraser: stack.eraser,
+    warn,
+  });
+  if (portal.kind === "failed") {
+    process.stderr.write(`[${SERVER_NAME}] cannot start: ${portal.message}\n`);
+    process.exitCode = 1;
+    return Promise.resolve();
+  }
   const instructions = workflowInstructionsFromDisk({
     cwd: process.cwd(),
     override: mode.skillFilePath,
@@ -1931,6 +1996,7 @@ function serveHttp(
         frameLogPath: mode.frameLogPath,
       }),
     warn,
+    ...(portal.kind === "ok" ? { accountPortal: portal.portal } : {}),
   });
   return new Promise<void>((resolve) => {
     httpServer.listen(mode.port, mode.host, () => {
@@ -1938,10 +2004,12 @@ function serveHttp(
         endpoints: stack.endpoints,
         mode,
         store: stack.storeDescription,
+        keyStore: stack.keyStoreDescription,
         instructions,
       })) {
         process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
       }
+      for (const line of portal.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
       resolve();
     });
   });
@@ -1952,10 +2020,11 @@ function startupBanner(
     endpoints: Endpoints;
     mode: Readonly<{ host: string; port: number }>;
     store: string;
+    keyStore: string;
     instructions: WorkflowInstructions;
   }>,
 ): readonly string[] {
-  const { endpoints, mode, store, instructions } = options;
+  const { endpoints, mode, store, keyStore, instructions } = options;
   const lines = [
     describeInstructions(instructions),
     `listening on http://${mode.host}:${String(mode.port)}`,
@@ -1963,6 +2032,7 @@ function startupBanner(
     `protected resource metadata: ${endpoints.protectedResourceMetadataUrl}`,
     `register this Google redirect URI: ${endpoints.googleCallbackUrl}`,
     `per-user Google grants: ${store}`,
+    `per-account data keys: ${keyStore}`,
   ];
   if (!endpoints.publicUrl.startsWith("https://")) {
     lines.push(
