@@ -253,9 +253,33 @@ async function handleGoogleCallback(
         description: outcome.description,
       });
       return;
+    case "consent-incomplete":
+      sendConsentIncompletePage({ response: options.response, retryUrl: outcome.retryUrl });
+      return;
     default:
       assertNever(outcome);
   }
+}
+
+/** Shown when Google signed the person in without the Slides/Drive permissions. */
+function sendConsentIncompletePage(options: Readonly<{ response: ServerResponse; retryUrl: string }>): void {
+  const href = options.retryUrl.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One more step · Sasha Slides</title>
+<style>body{font:17px/1.55 "Helvetica Neue",Helvetica,Arial,sans-serif;max-width:560px;margin:64px auto;padding:0 20px;color:#1d1d1f}
+h1{font-size:28px;letter-spacing:-.02em;margin:0 0 12px}a.button{display:inline-block;margin-top:20px;padding:12px 22px;border-radius:12px;background:#1d1d1f;color:#fff;text-decoration:none}
+@media (prefers-color-scheme:dark){body{background:#000;color:#f5f5f7}a.button{background:#f5f5f7;color:#000}}</style></head><body>
+<h1>Sasha Slides needs both permissions</h1>
+<p>Google signed you in, but without access to your Google Slides presentations and to the files Sasha Slides creates in your Drive. Without them the connector cannot stage or insert slides.</p>
+<p>On Google's screen, tick <strong>Select all</strong> (or both boxes), then click Continue.</p>
+<a class="button" href="${href}">Try again</a>
+</body></html>`;
+  options.response.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+  });
+  options.response.end(html);
 }
 
 async function handleToken(

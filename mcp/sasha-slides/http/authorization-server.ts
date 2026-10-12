@@ -41,6 +41,7 @@
  *    second authorize.
  */
 import { createHash, randomBytes } from "node:crypto";
+import { missingGoogleGrant } from "./user-drive";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { assertNever } from "../google-auth";
 import { asRecord, asString, asStringArray } from "./json-values";
@@ -112,6 +113,12 @@ export type AuthorizeOutcome =
 
 export type GoogleCallbackOutcome =
   | Readonly<{ kind: "redirect"; location: string }>
+  /**
+   * Google signed the person in but without the Slides/Drive permissions (they left the consent
+   * checkboxes unticked). Nothing is stored and no code goes to the client; the person gets a page
+   * with `retryUrl`, a fresh Google request for the same pending authorization.
+   */
+  | Readonly<{ kind: "consent-incomplete"; retryUrl: string; missing: string }>
   | Readonly<{ kind: "invalid"; error: OAuthErrorCode; description: string }>;
 
 export type TokenOutcome =
@@ -318,6 +325,25 @@ export function createAuthorizationServer(
       if (exchanged.kind === "failed") {
         warn(`google code exchange failed: ${exchanged.reason}`);
         return bounce("access_denied", "Google did not grant access");
+      }
+
+      const missing = missingGoogleGrant({ grantedScopes: exchanged.identity.grantedScopes });
+      if (missing !== null) {
+        // Keep the client's request alive under a NEW state: the old one stays used.
+        const retryState = randomToken();
+        await store.pendingAuthorizations.put({
+          key: retryState,
+          value: { ...pending, brokerState: retryState, createdAtMs: now().getTime() },
+        });
+        return {
+          kind: "consent-incomplete",
+          missing,
+          retryUrl: google.authorizationUrl({
+            brokerState: retryState,
+            redirectUri: endpoints.googleCallbackUrl,
+            scopes: BROKERED_SCOPES,
+          }),
+        };
       }
 
       await rememberIdentity({ store, identity: exchanged.identity });

@@ -103,13 +103,22 @@ export function googleUserDriveFactory(
 }
 
 function missingScopes(identity: GoogleIdentity): string | null {
+  return missingGoogleGrant({ grantedScopes: identity.grantedScopes });
+}
+
+/**
+ * The scope a Google grant still lacks for the tools to work, or null when it has enough. Shared by
+ * the per-call check and the sign-in callback, which refuses a partial grant up front.
+ */
+export function missingGoogleGrant(options: Readonly<{ grantedScopes: readonly string[] }>): string | null {
+  const { grantedScopes } = options;
   // An empty scope list means Google told us nothing, not that nothing was granted; the
   // API call itself will then be the authority.
-  if (identity.grantedScopes.length === 0) return null;
+  if (grantedScopes.length === 0) return null;
   // The same two requirements `google-auth.ts` checks for the stdio token, so the two
   // modes cannot drift on what "sufficiently granted" means.
-  if (!identity.grantedScopes.includes(SLIDES_SCOPE)) return SLIDES_SCOPE;
-  if (!DRIVE_SCOPES.some((scope) => identity.grantedScopes.includes(scope))) {
+  if (!grantedScopes.includes(SLIDES_SCOPE)) return SLIDES_SCOPE;
+  if (!DRIVE_SCOPES.some((scope) => grantedScopes.includes(scope))) {
     return DRIVE_SCOPES.join(" or ");
   }
   return null;

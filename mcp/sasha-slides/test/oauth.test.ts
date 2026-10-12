@@ -479,6 +479,51 @@ describe("authorize", () => {
   });
 });
 
+describe("a Google consent without the Slides permissions", () => {
+  // Measured 2026-10-12 on sashaslides.com: after a revocation Google shows one checkbox per
+  // permission, unticked. Continue without ticking granted only openid + email, claude.ai showed
+  // the connector as Connected, and every tool then failed with "missing permission to edit Google
+  // Slides". The sign-in has to stop there instead, and say what to tick.
+  test("shows a try-again page, sends no code to the client, and the retry with both permissions succeeds", async () => {
+    const harness = await startHarness();
+    try {
+      const redirectUri = "http://127.0.0.1:1/cb";
+      const clientId = await registerClient({ harness, redirectUris: [redirectUri] });
+      const pkce = newPkce();
+      const started = await beginSignIn({ harness, clientId, redirectUri, challenge: pkce.challenge, clientState: "s" });
+      harness.google.stageConsent({
+        code: "partial",
+        identity: {
+          ...fakeGoogleIdentity({ subject: "user-a", email: "a@example.test", refreshToken: "ga" }),
+          grantedScopes: ["openid", "https://www.googleapis.com/auth/userinfo.email"],
+        },
+      });
+      const partial = await callback({ harness, code: "partial", state: started.brokerState });
+      assert.equal(partial.status, 200, "a page for the person, not a redirect to the client");
+      const page = await partial.text();
+      assert.match(page, /Google Slides/);
+      assert.match(page, /Select all|tick/i, "says what to do on Google's screen");
+      const retry = page.match(/href="([^"]+)"/)?.[1]?.replaceAll("&amp;", "&");
+      assert.ok(retry !== undefined && retry.startsWith(FAKE_GOOGLE_AUTHORIZE_URL), `retry link goes to Google: ${String(retry)}`);
+      assert.equal(await harness.store.googleIdentities.get({ key: "user-a" }), null, "the partial grant is not stored");
+
+      const retryState = new URL(retry).searchParams.get("state") ?? "";
+      assert.notEqual(retryState, started.brokerState, "a fresh state, so the old one stays single use");
+      harness.google.stageConsent({
+        code: "full",
+        identity: fakeGoogleIdentity({ subject: "user-a", email: "a@example.test", refreshToken: "ga" }),
+      });
+      const full = await callback({ harness, code: "full", state: retryState });
+      assert.equal(full.status, 302);
+      const back = new URL(requireHeader({ response: full, name: "location" }));
+      assert.equal(back.searchParams.get("state"), "s", "the client's original request completes");
+      assert.ok(back.searchParams.get("code") !== null);
+    } finally {
+      await harness.dispose();
+    }
+  });
+});
+
 describe("iss on every authorization response (RFC 9207)", () => {
   const rows = [
     { name: "a successful sign-in", outcome: "success" },
