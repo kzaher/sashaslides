@@ -9,7 +9,7 @@
  * come from; `--from` must be that account's address or one of its Gmail "Send mail as"
  * aliases, or Gmail rewrites the From header to the account's own address.
  *
- *   npx tsx mcp/sasha-slides/e2e/gmail-sender-token.ts <output.json> --from "Sasha Slides <sasha.slides@exponent.company>" [--port 8080]
+ *   npx tsx mcp/sasha-slides/e2e/gmail-sender-token.ts <output.json> --from "Sasha Slides <sasha.slides@exponent.company>" [--port 8080] [--client <oauth-client.json>]
  *
  * Then open the printed URL in a browser, consent, and Google redirects to
  * http://localhost:<port>, where this script is listening (bound to 0.0.0.0 so a port
@@ -35,16 +35,21 @@ const AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 /** The consent screen is a person's pace, not a machine's: ten minutes, then give up. */
 const CONSENT_TIMEOUT_MS = 10 * 60 * 1000;
 
-type Arguments = Readonly<{ outputPath: string; from: string; port: number }>;
+/** `clientPath` is the Desktop OAuth client to consent with; an Internal client of the sending Workspace issues refresh tokens that do not expire after 7 days. */
+type Arguments = Readonly<{ outputPath: string; from: string; port: number; clientPath: string }>;
 
 function parseArguments(argv: readonly string[]): Arguments | string {
   const positional: string[] = [];
   let from: string | null = null;
   let port = 8080;
+  let clientPath = CLIENT_PATH;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--from") {
       from = argv[index + 1] ?? null;
+      index += 1;
+    } else if (argument === "--client") {
+      clientPath = argv[index + 1] ?? "";
       index += 1;
     } else if (argument === "--port") {
       port = Number(argv[index + 1]);
@@ -57,17 +62,18 @@ function parseArguments(argv: readonly string[]): Arguments | string {
   if (outputPath === undefined || positional.length !== 1) return "give exactly one output path";
   if (from === null) return `give --from "Name <address>": the account (or its send-as alias) the mail comes from`;
   if (!Number.isInteger(port) || port < 1 || port > 65535) return "--port must be an integer between 1 and 65535";
-  return { outputPath, from, port };
+  if (clientPath === "") return "--client needs the path of a Desktop OAuth client JSON file";
+  return { outputPath, from, port, clientPath };
 }
 
 async function main(): Promise<number> {
   const parsedArguments = parseArguments(process.argv.slice(2));
   if (typeof parsedArguments === "string") {
-    process.stderr.write(`${parsedArguments}\n\nusage: npx tsx mcp/sasha-slides/e2e/gmail-sender-token.ts <output.json> --from "Name <address>" [--port 8080]\n`);
+    process.stderr.write(`${parsedArguments}\n\nusage: npx tsx mcp/sasha-slides/e2e/gmail-sender-token.ts <output.json> --from "Name <address>" [--port 8080] [--client <oauth-client.json>]\n`);
     return 2;
   }
-  const { outputPath, from, port } = parsedArguments;
-  const credentials = loadClientCredentials({ path: CLIENT_PATH });
+  const { outputPath, from, port, clientPath } = parsedArguments;
+  const credentials = loadClientCredentials({ path: clientPath });
   if (credentials.kind !== "ok") {
     process.stderr.write(`${describeAuthFailure(credentials)}\n`);
     return 1;
