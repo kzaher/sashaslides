@@ -350,7 +350,7 @@ describe("sign up", () => {
   });
 
   const refusals: readonly Readonly<{ name: string; email: string; password: string; says: RegExp }>[] = [
-    { name: "a password of 11 characters", email: "ada@example.com", password: "elevenchars", says: /at least 12/ },
+    { name: "a password of 7 characters", email: "ada@example.com", password: "sevench", says: /at least 8/ },
     { name: "a password of 257 characters", email: "ada@example.com", password: "x".repeat(257), says: /at most 256/ },
     { name: "an address without @", email: "ada.example.com", password: PASSWORD, says: /email address/ },
     { name: "an address with a line break", email: "ada@example.com\r\nBcc: x@example.com", password: PASSWORD, says: /email address/ },
@@ -365,9 +365,19 @@ describe("sign up", () => {
     });
   }
 
-  test("a 12-character password of any characters is enough: no composition rules", async () => {
+  // 8, the length people expect (asked for 2026-10-13); guessing is slowed by scrypt and the
+  // per-client and per-account sign-in limits rather than by a longer minimum.
+  test("an 8-character password of any characters is enough: no composition rules", async () => {
     const portal = await startPortal();
-    assert.equal((await signUp(portal, { email: "ada@example.com", password: "aaaaaaaaaaaa" })).status, 200);
+    assert.equal((await signUp(portal, { email: "ada@example.com", password: "aaaaaaaa" })).status, 200);
+  });
+
+  test("a 7-character password is refused, and the form says the minimum is 8", async () => {
+    const portal = await startPortal();
+    const refused = await signUp(portal, { email: "ada@example.com", password: "aaaaaaa" });
+    assert.equal(refused.status, 400);
+    assert.match(refused.body, /at least 8 characters/);
+    assert.match(refused.body, /minlength="8"/);
   });
 
   test("an unconfirmed sign-up cannot sign in; the right password resends the link, a wrong one reads as any failure", async () => {
@@ -490,7 +500,7 @@ describe("password reset", () => {
     const link = linkIn(mailAt(await portal.mailbox(), -1), `${PUBLIC_URL}/account/email/reset?token=`);
     const short = await followLink(portal, { link, fields: { password: "short" } });
     assert.equal(short.status, 400);
-    assert.match(short.body, /at least 12/);
+    assert.match(short.body, /at least 8/);
     sessionOf(await followLink(portal, { link, fields: { password: "long enough this time" } }));
   });
 });

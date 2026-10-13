@@ -59,7 +59,7 @@ export const EMAIL_PROVIDER = "email";
 export const EMAIL_PROVIDER_DISPLAY_NAME = "Email and password";
 export const EMAIL_LINK_LIFETIME_MS = 30 * 60 * 1000;
 export const UNCONFIRMED_SIGNUP_LIFETIME_MS = 24 * 60 * 60 * 1000;
-export const MIN_PASSWORD_LENGTH = 12;
+export const MIN_PASSWORD_LENGTH = 8;
 export const MAX_PASSWORD_LENGTH = 256;
 
 export type PasswordLimits = Readonly<{

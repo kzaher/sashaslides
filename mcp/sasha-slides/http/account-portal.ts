@@ -1526,7 +1526,7 @@ ${errorLine(state.error)}<form method="post" action="${ACCOUNT_PATH}/email/signu
 ${formField(state.token)}
 ${emailInput({ value: state.email, autocomplete: "username" })}
 ${passwordInput({ autocomplete: "new-password" })}
-<p class="muted">At least ${String(MIN_PASSWORD_LENGTH)} characters. A few unrelated words make a strong one.</p>
+<p class="muted">At least ${String(MIN_PASSWORD_LENGTH)} characters.</p>
 <button type="submit">Create account</button>
 </form>
 <p class="alternatives"><a href="${ACCOUNT_PATH}">I already have an account</a></p>`,
