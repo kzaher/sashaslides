@@ -419,6 +419,7 @@ describe("downloadSlideImages", () => {
       proposalId: staged.proposalId,
       indices: null,
       outDir: "/out",
+      remote: false,
     });
     assert.equal(outcome.kind, "unavailable");
     const payload = slideImagesPayload(outcome);
@@ -448,6 +449,7 @@ describe("downloadSlideImages", () => {
       proposalId: staged.proposalId,
       indices: null,
       outDir: "/out/",
+      remote: false,
     });
     assert.deepEqual(all, {
       kind: "ok",
@@ -466,6 +468,7 @@ describe("downloadSlideImages", () => {
       proposalId: staged.proposalId,
       indices: [2],
       outDir: "/out",
+      remote: false,
     });
     assert.deepEqual(second, { kind: "ok", files: [{ index: 2, path: "/out/02.png" }] });
   });

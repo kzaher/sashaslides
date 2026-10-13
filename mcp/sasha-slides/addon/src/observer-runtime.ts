@@ -226,6 +226,7 @@ export async function fetchProposal({
       presentationId: manifest.presentationId,
       count: manifest.count,
       slides: manifest.slides,
+      revision: manifest.revision,
     },
   };
 }

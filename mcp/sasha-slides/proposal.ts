@@ -371,9 +371,19 @@ export async function downloadSlideImages(
     proposalId: string;
     indices: readonly number[] | null;
     outDir: string;
+    /** A remote connector's disk is the server's, not the caller's: it never writes there. */
+    remote: boolean;
   }>,
 ): Promise<SlideImagesOutcome> {
   const { env, proposalId, indices, outDir } = options;
+  if (options.remote) {
+    return {
+      kind: "unavailable",
+      reason:
+        "this connector runs remotely, so it cannot write images to your machine; the slide HTML " +
+        "you sent is the authoritative form.",
+    };
+  }
   const files = await env.drive.listFiles({
     query: { name: null, parentId: null, sashaSlides: null, proposalId, trashed: false },
   });

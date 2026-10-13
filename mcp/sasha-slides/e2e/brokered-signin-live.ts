@@ -10,7 +10,7 @@
  * Run the server first:
  *   npx tsx mcp/sasha-slides/server.ts --http --public-url http://127.0.0.1:7777 --port 7777
  * then:
- *   npx tsx mcp/sasha-slides/e2e/brokered-signin-live.ts
+ *   npx tsx mcp/sasha-slides/e2e/brokered-signin-live.ts [--base https://sashaslides.com] [--token-out <file>]
  *
  * Two things this encodes, both learned the hard way:
  *
@@ -23,6 +23,7 @@
  */
 import CDPraw from "chrome-remote-interface";
 import { createHash, randomBytes } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { CdpClient, CdpModule } from "../../../types/cdp-types.ts";
 import { evaluateText, realClick, bringToFront } from "./cdp-page.ts";
@@ -39,6 +40,8 @@ const BASE = option("--base") ?? "http://127.0.0.1:7777";
 const CLIENT_PORT = Number(option("--client-port") ?? 60123);
 const BROWSER_PORT = Number(option("--browser-port") ?? 9223);
 const EMAIL = option("--email") ?? "ante.materija@gmail.com";
+// Saves the bearer token (mode 600) so remote-tools-live.ts can drive every tool as the same user.
+const TOKEN_OUT = option("--token-out");
 
 type Point = Readonly<{ x: number; y: number; label: string }>;
 
@@ -172,6 +175,7 @@ async function main(): Promise<void> {
     return;
   }
   console.log(`ok    bearer token issued (${access.slice(0, 10)}...)`);
+  if (TOKEN_OUT !== undefined) writeFileSync(TOKEN_OUT, access, { mode: 0o600 });
 
   // 5. use it on the protected endpoint
   const called = await fetch(`${BASE}/mcp`, {

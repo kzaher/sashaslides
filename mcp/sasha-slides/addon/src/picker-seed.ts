@@ -61,6 +61,7 @@ export function pickerSeedOf({
     presentationId: manifest.presentationId,
     count: manifest.count,
     slides: slides.map((slide) => ({ index: slide.slideIndex, fileId: slide.fileId, name: slide.name, label: slide.label })),
+    revision: manifest.revision,
   };
   const order = [...slides].sort((left, right) => rank(left.slideIndex) - rank(right.slideIndex));
   function rank(index: number): number {
@@ -131,7 +132,19 @@ function parseProposal(field: unknown): Parsed<Proposal> {
   if (slides.value.length !== count || slides.value.some((slide, position) => slide.index !== position + 1)) {
     return { kind: "invalid", reason: `the seed proposal's slides are not 1..${count} in order` };
   }
-  return { kind: "ok", value: { proposalId, folderId, presentationId, count, slides: slides.value } };
+  // Absent from a seed written before the field existed; null then means "compare nothing".
+  const revision = record["revision"];
+  return {
+    kind: "ok",
+    value: {
+      proposalId,
+      folderId,
+      presentationId,
+      count,
+      slides: slides.value,
+      revision: typeof revision === "number" && Number.isInteger(revision) ? revision : null,
+    },
+  };
 }
 
 function parseSeedHtml({ field, count }: { field: unknown; count: number }): Parsed<readonly SeedHtml[]> {

@@ -4,7 +4,7 @@
 
 import type { ConversionResult, SlidesApiRequest, UnsupportedFeature } from "./converter-contract.ts";
 import type { Proposal } from "./observer.ts";
-import { WHOLE_SLIDE, assertNever, type Anomaly, type Region } from "./protocol.ts";
+import { WHOLE_SLIDE, assertNever, type Anomaly, type Region, type SlideEntry } from "./protocol.ts";
 import { loadedSlideComments, type SlideCommentsLoad } from "./session-log.ts";
 import type { SlideEdit } from "./slide-editor.ts";
 
@@ -275,7 +275,16 @@ export function reducePicker(state: PickerState, event: PickerEvent): PickerStat
       // selection, their notes, or the HTML already fetched -- the observer re-announces it
       // whenever a viewer appears.
       //
-      if (offerOf(state)?.proposal.proposalId === event.proposal.proposalId) return state;
+      // A NEWER REVISION of it, though, must replace the candidates: measured 2026-10-13, ignoring
+      // it kept revision 1 on screen while Sasha had already sent revision 3.
+      {
+        const current = offerOf(state);
+        if (current !== null && current.proposal.proposalId === event.proposal.proposalId) {
+          if (!isNewerRevision({ shown: current.proposal.revision, offered: event.proposal.revision })) return state;
+          if (event.proposal.count === 0) return { status: "cleared", proposalId: event.proposal.proposalId };
+          return mapOffer(state, (offer) => revisedOffer({ offer, proposal: event.proposal }));
+        }
+      }
       // `count === 0` is a CLEARED set, not a malformed one: `clear_slides` leaves `READY` behind.
       if (event.proposal.count === 0) return { status: "cleared", proposalId: event.proposal.proposalId };
       return { status: "picking", offer: freshOffer(event) };
@@ -851,19 +860,48 @@ function freshOffer({
     // The HTML is authoritative, so it is what the user sees first.
     rendering: "html",
     showFindings: false,
-    slides: proposal.slides.map((slide) => ({
-      index: slide.index,
-      label: slide.label,
-      name: slide.name,
-      html: { kind: "unrequested" },
-      conversion: { kind: "unconverted" },
-      render: { kind: "unrendered" },
-      anomalies: [],
-      edits: [],
-    })),
+    slides: proposal.slides.map(freshFrame),
     comments: { kind: "unrequested" },
     report: { kind: "idle" },
     lastFailure: null,
+  };
+}
+
+function freshFrame(slide: SlideEntry): SlideFrame {
+  return {
+    index: slide.index,
+    label: slide.label,
+    name: slide.name,
+    html: { kind: "unrequested" },
+    conversion: { kind: "unconverted" },
+    render: { kind: "unrendered" },
+    anomalies: [],
+    edits: [],
+  };
+}
+
+/** Null on either side means a manifest from before `revision` existed: nothing to compare, so not newer. */
+function isNewerRevision({ shown, offered }: { shown: number | null; offered: number | null }): boolean {
+  return shown !== null && offered !== null && offered > shown;
+}
+
+/**
+ * THE SAME PROPOSAL, REVISED. Every candidate's document is fetched again -- a revision keeps the
+ * Drive file id, so nothing about a frame says which one changed -- while the user's place and
+ * their unsent work stay: the open candidate, the selection, and the mark-ups and edits they have
+ * not sent yet. What was selected INSIDE a document is dropped, because that document is gone.
+ */
+function revisedOffer({ offer, proposal }: { offer: Offer; proposal: Proposal }): Offer {
+  const slides = proposal.slides.map((slide) => {
+    const before = offer.slides.find((frame) => frame.index === slide.index);
+    return { ...freshFrame(slide), anomalies: before?.anomalies ?? [], edits: before?.edits ?? [] };
+  });
+  const revised: Offer = { ...offer, proposal, slides, selection: null, comments: { kind: "unrequested" } };
+  const stillThere = (index: number | null): boolean => index !== null && slides.some((frame) => frame.index === index);
+  return {
+    ...revised,
+    selectedIndex: clampIndex({ offer: revised, index: offer.selectedIndex }),
+    editing: stillThere(offer.editing) ? offer.editing : null,
   };
 }
 

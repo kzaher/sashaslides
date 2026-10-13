@@ -58,6 +58,34 @@ test("every placement lands inside the stage, for a sweep of selections", () => 
   }
 });
 
+test("THE MEASURED COMPOSER STAYS ON A SHORT STAGE, Comment button included", () => {
+  // Measured live 2026-10-13: the stage was 294 px tall (top 81, bottom 375) and the rendered card
+  // about 113 px, so 0.38 of the stage rather than the assumed 0.3. Placed at 1 - 0.3, the card's
+  // Cancel and Comment buttons sat at 368-390 and only 7 of their 22 px could be clicked.
+  const size = { width: COMPOSER_WIDTH, height: 113 / 294 };
+  const cases = [box(0, 0, 1, 1), box(0.1, 0.8, 0.5, 0.15), box(0.1, 0.55, 0.5, 0.2)];
+  for (const region of cases) {
+    const placed = composerPlacementFor(region, size);
+    const where = `${JSON.stringify(region)} -> ${JSON.stringify(placed)}`;
+    assert.ok(placed.top >= -1e-9, `top on stage: ${where}`);
+    assert.ok(placed.top + size.height <= 1 + 1e-9, `bottom on stage: ${where}`);
+  }
+});
+
+test("with no room below a selection low on the slide, the measured composer flips above it", () => {
+  const size = { width: COMPOSER_WIDTH, height: 0.38 };
+  const placed = composerPlacementFor(box(0.1, 0.55, 0.5, 0.2), size);
+  assert.equal(placed.side, "above");
+  assert.ok(placed.top + size.height <= 0.55 + 1e-9, "and it clears the selection it is about");
+});
+
+test("a measured composer wider than the default is still pulled back onto the stage", () => {
+  // The card has a 220 px minimum width, which on a narrow stage is more than 0.42 of it.
+  const size = { width: 0.6, height: 0.38 };
+  const placed = composerPlacementFor(box(0.7, 0.1, 0.2, 0.1), size);
+  assert.ok(placed.left + size.width <= 1 + 1e-9, `right edge ${String(placed.left + size.width)}`);
+});
+
 test("the composer's heading names the thing, not the whole selector chain", () => {
   assert.equal(describeSelected("div > section:nth-of-type(2) > h1"), "h1");
   assert.equal(describeSelected("h1"), "h1");

@@ -69,7 +69,7 @@ export type SessionEventBody =
   | Readonly<{ kind: "comment-answered"; commentId: string; slideIndex: number; text: string }>
   | Readonly<{ kind: "slide-revised"; slideIndex: number; answers: readonly string[]; revision: number | null }>
   | Readonly<{ kind: "comment-resolved"; commentId: string; slideIndex: number }>
-  | Readonly<{ kind: "slides-cleared"; count: number | null; reason: string | null }>
+  | Readonly<{ kind: "slides-cleared"; count: number | null; reason: string | null; revision: number | null }>
   | Readonly<{ kind: "slide-inserted"; slideIndex: number; pageObjectId: string | null }>
   /**
    * A CONNECTED CLIENT READ THESE COMMENTS. Written by the server when `read_feedback` or
@@ -293,6 +293,32 @@ export function changesCandidateSet(body: SessionEventBody): boolean {
 }
 
 /** The newest event that changed the set, or null. The manifest read is keyed on this. */
+/**
+ * THE NEWEST REVISION OF THE CANDIDATE SET the log knows of, or null when no set-changing event
+ * names one. The slides window compares it with the revision it shows and re-reads the manifest
+ * when this is newer: it must not treat `revision` as a clock of its own (it never writes the
+ * manifest), but reading the number the server wrote is exactly what the field is for.
+ */
+export function candidateSetRevisionIn(events: readonly SessionEvent[]): number | null {
+  let newest: number | null = null;
+  for (const { body } of events) {
+    const revision = setRevisionOf(body);
+    if (revision !== null && (newest === null || revision > newest)) newest = revision;
+  }
+  return newest;
+}
+
+function setRevisionOf(body: SessionEventBody): number | null {
+  switch (body.kind) {
+    case "slides-staged":
+    case "slide-revised":
+    case "slides-cleared":
+      return body.revision;
+    default:
+      return null;
+  }
+}
+
 export function newestSetChangeIn(events: readonly SessionEvent[]): string | null {
   let newest: string | null = null;
   for (const event of events) if (changesCandidateSet(event.body)) newest = event.eventId;
@@ -770,6 +796,7 @@ function bodyOf({ rawKind, record }: { rawKind: string; record: Readonly<Record<
         kind: "slides-cleared",
         count: integerAt({ record, key: "count" }),
         reason: stringAt({ record, key: "reason" }),
+        revision: integerAt({ record, key: "revision" }),
       };
     case "slide-inserted":
       return {

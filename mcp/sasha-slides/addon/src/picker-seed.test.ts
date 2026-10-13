@@ -53,6 +53,7 @@ test("the seed carries the proposal exactly as the window's observer would have 
       presentationId: "deck_0123456789",
       count: 3,
       slides: manifest.slides,
+      revision: manifest.revision,
     },
     slideIndex: 2,
     html: [],
@@ -97,7 +98,7 @@ test("a seed survives Code.gs's escaping and parses back unchanged", () => {
 
 test("a malformed seed is rejected, so the window falls back instead of breaking", () => {
   const valid: PickerSeed = {
-    proposal: { proposalId: PROPOSAL, folderId: "folder_1", presentationId: null, count: 1, slides: [manifest.slides[0]!] },
+    proposal: { proposalId: PROPOSAL, folderId: "folder_1", presentationId: null, count: 1, slides: [manifest.slides[0]!], revision: null },
     slideIndex: null,
     html: [],
   };
@@ -112,7 +113,7 @@ test("a malformed seed is rejected, so the window falls back instead of breaking
 
 test("a target outside the proposal opens the grid rather than failing", () => {
   const seed: PickerSeed = {
-    proposal: { proposalId: PROPOSAL, folderId: "folder_1", presentationId: null, count: 1, slides: [manifest.slides[0]!] },
+    proposal: { proposalId: PROPOSAL, folderId: "folder_1", presentationId: null, count: 1, slides: [manifest.slides[0]!], revision: null },
     slideIndex: 7,
     html: [],
   };

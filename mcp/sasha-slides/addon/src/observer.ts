@@ -38,6 +38,8 @@ export type Proposal = Readonly<{
   presentationId: string | null;
   count: number;
   slides: readonly SlideEntry[];
+  /** The manifest's `revision` (protocol.ts): how the slides window tells a revised set from the one it shows. */
+  revision: number | null;
 }>;
 
 /**

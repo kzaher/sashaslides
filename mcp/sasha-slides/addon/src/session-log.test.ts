@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   candidateCommentsFrom,
+  candidateSetRevisionIn,
   describeSessionEvent,
   describeUnresolvedCount,
   isParsedSessionEventKind,
@@ -216,7 +217,7 @@ test("the add-on writes the two kinds it causes, and REFUSES the ones that are S
     region: null,
   });
   assert.equal(
-    serializeSessionEvent({ body: { kind: "slides-cleared", count: 3, reason: null }, at: AT }).kind,
+    serializeSessionEvent({ body: { kind: "slides-cleared", count: 3, reason: null, revision: 2 }, at: AT }).kind,
     "invalid",
     "a clear the add-on invented would say the server discarded something it still has",
   );
@@ -491,3 +492,21 @@ function record({
 }): FeedbackCommentRecord {
   return { commentId: id, content: "a comment", createdAt: at, resolved, author: "Krunoslav", replies: [] };
 }
+
+// THE SLIDES WINDOW FOLLOWS REVISIONS. Measured 2026-10-13 on sashaslides.com: revise_slide made
+// revision 3 of a candidate, the conversation showed it, and the open slides window kept showing
+// revision 1 for minutes -- it read the manifest once. It now reads the log it already polls and
+// re-reads the manifest when a set-changing event names a newer revision than the one it shows.
+test("the candidate set's revision is the highest a set-changing event names", () => {
+  const event = (kind: string, revision: number, at: number): SessionEventFile => ({
+    proposalId: PROPOSAL,
+    fileId: `drive_${String(at)}`,
+    name: `${String(1791115140000 + at * 60_000)}-abcdef-${kind}.json`,
+    text: JSON.stringify({ protocolVersion: 1, at: AT, kind, count: 2, slideIndex: 1, answers: [], revision, commentId: "cc_1" }),
+  });
+  assert.equal(candidateSetRevisionIn(sessionEventsOf({ files: [] })), null);
+  const events = sessionEventsOf({
+    files: [event("slides-staged", 1, 0), event("slide-revised", 3, 2), event("comment-answered", 9, 3), event("slide-revised", 2, 1)],
+  });
+  assert.equal(candidateSetRevisionIn(events), 3, "a comment is not a set change, whatever it carries");
+});

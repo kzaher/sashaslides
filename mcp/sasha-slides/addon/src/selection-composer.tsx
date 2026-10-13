@@ -13,8 +13,14 @@
 // the thread rail; nothing here promises Sasha is listening, because this document cannot see
 // whether a session is attached (UI-CONTRACT.md).
 
-import { useEffect, useRef, useState, type JSX } from "react";
-import { composerPlacementFor, describeSelected, regionOnSlide } from "./selection-comment.ts";
+import { useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
+import {
+  composerPlacementFor,
+  DEFAULT_COMPOSER_SIZE,
+  describeSelected,
+  regionOnSlide,
+  type ComposerSize,
+} from "./selection-comment.ts";
 import type { Region } from "./protocol.ts";
 
 export function SelectionComposer({
@@ -34,6 +40,8 @@ export function SelectionComposer({
 }): JSX.Element {
   const [note, setNote] = useState("");
   const field = useRef<HTMLTextAreaElement | null>(null);
+  const card = useRef<HTMLDivElement | null>(null);
+  const size = useMeasuredSize(card);
 
   /*
    * THE CURSOR IS ALREADY IN IT. The user clicked a thing in order to say something about it;
@@ -47,7 +55,7 @@ export function SelectionComposer({
   // TRIMMED ONCE, AND BOTH USES SHARE IT. A measured element can run past the slide edge, and
   // the comment channel refuses a box that is not 0-1 (selection-comment.ts).
   const onSlide = regionOnSlide(region);
-  const placement = composerPlacementFor(onSlide);
+  const placement = composerPlacementFor(onSlide, size);
   const send = (): void => {
     const said = note.trim();
     if (disabled || said === "") return;
@@ -57,6 +65,7 @@ export function SelectionComposer({
 
   return (
     <div
+      ref={card}
       className="sasha-spot"
       data-side={placement.side}
       style={{
@@ -116,4 +125,44 @@ export function SelectionComposer({
       </div>
     </div>
   );
+}
+
+/**
+ * THE CARD'S SIZE AS A FRACTION OF THE STAGE, re-read whenever either one changes size.
+ *
+ * Placement needs it because the card is sized in pixels by its content while the stage scales
+ * with the dialog (selection-comment.ts). Measured in a layout effect so the corrected placement
+ * lands before the first paint, and observed because the text field can be resized by hand.
+ */
+function useMeasuredSize(card: Readonly<{ current: HTMLDivElement | null }>): ComposerSize {
+  const [size, setSize] = useState<ComposerSize>(DEFAULT_COMPOSER_SIZE);
+
+  useLayoutEffect(() => {
+    const element = card.current;
+    const stage = element?.offsetParent;
+    if (element === null || element === undefined || !(stage instanceof HTMLElement)) return;
+    const measure = (): void => {
+      // A stage with no size yet (hidden, or mid-reflow) must not latch a fraction of infinity.
+      if (stage.clientWidth <= 0 || stage.clientHeight <= 0) return;
+      const next = {
+        width: element.offsetWidth / stage.clientWidth,
+        height: element.offsetHeight / stage.clientHeight,
+      };
+      // The width is set FROM this measurement, so an unchanged size must not re-render.
+      setSize((last) => (sameSize(last, next) ? last : next));
+    };
+    measure();
+    // Read defensively, as scaled-frame.tsx does: without it the size measured on mount stands.
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [card]);
+
+  return size;
+}
+
+function sameSize(a: ComposerSize, b: ComposerSize): boolean {
+  return Math.abs(a.width - b.width) < 0.002 && Math.abs(a.height - b.height) < 0.002;
 }

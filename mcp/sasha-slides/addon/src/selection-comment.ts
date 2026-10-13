@@ -64,45 +64,57 @@ export type ComposerPlacement = Readonly<{
 }>;
 
 /**
+ * The composer's rendered size, as fractions of the stage.
+ *
+ * MEASURED, NOT ASSUMED, wherever the caller can. The card is sized by its content in pixels (a
+ * heading, a two-row text field, a row of buttons, a 220 px minimum width) while the stage shrinks
+ * with the dialog, so the fraction it takes up changes with the window. Measured live: a 294 px
+ * stage and a 113 px card, 0.38 of the stage against the 0.3 assumed. The defaults are only the
+ * first guess, before the card has been laid out once.
+ */
+export type ComposerSize = Readonly<{ width: number; height: number }>;
+
+export const DEFAULT_COMPOSER_SIZE: ComposerSize = { width: COMPOSER_WIDTH, height: COMPOSER_HEIGHT };
+
+/**
  * Place the composer under the selection, or over it when there is no room underneath.
  *
  * BELOW IS THE DEFAULT because a comment reads as a consequence of the thing above it, and
  * because the selection stays visible while typing. It flips rather than shrinks: a composer
  * squeezed into 40 px of leftover space is worse than one that covers a little of the slide.
+ *
+ * WHEN NEITHER SIDE FITS it is clamped onto the stage, over the selection. The stage clips with
+ * `overflow: hidden`, so a card hanging past its edge loses its Comment button: measured live on
+ * a whole-slide selection, where only 7 of the button's 22 px could still be clicked.
  */
-export function composerPlacementFor(region: Region): ComposerPlacement {
+export function composerPlacementFor(
+  region: Region,
+  size: ComposerSize = DEFAULT_COMPOSER_SIZE,
+): ComposerPlacement {
   const roomBelow = 1 - (region.y + region.h);
   const roomAbove = region.y;
-  const needed = COMPOSER_HEIGHT + COMPOSER_GAP;
+  const needed = size.height + COMPOSER_GAP;
   // Below unless it genuinely will not fit AND above fits better. A selection that fills the
   // slide has room nowhere, and then below is still the better answer: it covers the bottom,
   // which is where the least of a slide's meaning usually is.
   const side: "below" | "above" = roomBelow >= needed || roomBelow >= roomAbove ? "below" : "above";
   const top =
-    side === "below"
-      ? Math.min(region.y + region.h + COMPOSER_GAP, 1 - COMPOSER_HEIGHT)
-      : Math.max(region.y - COMPOSER_GAP - COMPOSER_HEIGHT, 0);
+    side === "below" ? region.y + region.h + COMPOSER_GAP : region.y - COMPOSER_GAP - size.height;
   return {
-    left: clamp01(region.x, COMPOSER_WIDTH),
-    top: clampTop(top),
-    width: COMPOSER_WIDTH,
+    left: clampOnStage(region.x, size.width),
+    top: clampOnStage(top, size.height),
+    width: size.width,
     side,
   };
 }
 
 /**
- * The composer's left edge: aligned with the selection, pulled back so its right edge stays on
- * the stage. A composer that runs off the right of the slide is clipped by the stage's
- * `overflow: hidden` and the Comment button goes with it.
+ * One edge of the composer, pulled back so its far edge stays on the stage as well. A composer
+ * that runs off the slide is clipped by the stage's `overflow: hidden` and the Comment button goes
+ * with it. A card larger than the stage keeps its near edge at 0, so its text field stays visible.
  */
-function clamp01(left: number, width: number): number {
-  if (left + width > 1) return Math.max(0, 1 - width);
-  return Math.max(0, left);
-}
-
-function clampTop(top: number): number {
-  if (top + COMPOSER_HEIGHT > 1) return Math.max(0, 1 - COMPOSER_HEIGHT);
-  return Math.max(0, top);
+function clampOnStage(start: number, extent: number): number {
+  return Math.max(0, Math.min(start, 1 - extent));
 }
 
 /**

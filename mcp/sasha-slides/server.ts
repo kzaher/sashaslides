@@ -345,6 +345,7 @@ export function createSashaSlidesServer(
         proposalId,
         indices: indices ?? null,
         outDir,
+        remote,
       });
       return toCallToolResult(slideImagesPayload(outcome));
     },
@@ -2260,7 +2261,7 @@ async function runSelfTest(): Promise<boolean> {
   );
 
   const images = slideImagesPayload(
-    await downloadSlideImages({ env, proposalId: created.proposalId, indices: null, outDir: "/tmp/out" }),
+    await downloadSlideImages({ env, proposalId: created.proposalId, indices: null, outDir: "/tmp/out", remote: false }),
   );
   check("slide_images reports previews unavailable", images.kind === "payload" && images.payload.status === "unavailable");
 

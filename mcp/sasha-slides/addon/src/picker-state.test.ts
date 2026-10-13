@@ -33,6 +33,7 @@ const proposal: Proposal = {
   folderId: "folder_p_1",
   presentationId: "deck_1",
   count: 3,
+  revision: 1,
   slides: [1, 2, 3].map((index) => ({
     index,
     fileId: `html_${index}`,
@@ -549,4 +550,46 @@ test("every converted candidate is rendered even while the preview is showing, b
   assert.equal(slidesToRender(partly), null, "one call covers the set, so it waits for the last conversion");
   const all = offerOf(play(events)) ?? neverOffer();
   assert.deepEqual(slidesToRender(all)?.map((frame) => frame.index), [1, 2, 3]);
+});
+
+// --- the window follows the server's revisions ---
+
+/**
+ * Measured 2026-10-13 on sashaslides.com: revise_slide made revision 3 of candidate 1, and the open
+ * slides window kept showing revision 1, because a re-announced proposal with the same id was
+ * ignored outright. Inserting from that window would have inserted the slide the user had already
+ * asked Sasha to change.
+ */
+test("a newer revision of the same proposal reloads the candidates and keeps where the user was", () => {
+  let state = play([
+    { kind: "proposal-offered", proposal, presentationId: "deck_1" },
+    { kind: "html-arrived", index: 1, html: slideHtml({ index: 1, proposalId: "p_1" }) },
+    { kind: "html-arrived", index: 2, html: slideHtml({ index: 2, proposalId: "p_1" }) },
+    { kind: "editor-opened", index: 2 },
+    { kind: "anomaly-drawn", index: 2, anomalyId: "a_1", region: WHOLE_SLIDE },
+  ]);
+  const revised: Proposal = {
+    ...proposal,
+    revision: 3,
+    slides: proposal.slides.map((slide) => (slide.index === 1 ? { ...slide, label: "option 1, gold" } : slide)),
+  };
+  state = reducePicker(state, { kind: "proposal-offered", proposal: revised, presentationId: "deck_1" });
+  const offer = offerOf(state) ?? neverOffer();
+  assert.equal(offer.proposal.revision, 3);
+  assert.equal(offer.slides[0]?.label, "option 1, gold");
+  assert.deepEqual(offer.slides.map((slide) => slide.html.kind), ["unrequested", "unrequested", "unrequested"]);
+  assert.equal(offer.editing, 2, "the open candidate stays open");
+  assert.equal(offer.selectedIndex, 2);
+  assert.equal(offer.slides[1]?.anomalies.length, 1, "the user's unsent mark-up survives");
+});
+
+test("the same revision again changes nothing, and a cleared set closes the offer", () => {
+  const offered = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
+  assert.equal(reducePicker(offered, { kind: "proposal-offered", proposal, presentationId: "deck_1" }), offered);
+  const cleared = reducePicker(offered, {
+    kind: "proposal-offered",
+    proposal: { ...proposal, revision: 2, count: 0, slides: [] },
+    presentationId: "deck_1",
+  });
+  assert.equal(cleared.status, "cleared");
 });

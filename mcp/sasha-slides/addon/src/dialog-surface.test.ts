@@ -43,6 +43,7 @@ const proposal: Proposal = {
   folderId: "folder_p_1",
   presentationId: "deck_1",
   count: 4,
+  revision: 1,
   slides: [1, 2, 3, 4].map((index) => ({
     index,
     fileId: `html_${index}`,

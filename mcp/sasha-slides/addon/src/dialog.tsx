@@ -56,7 +56,8 @@ import {
 import { feedbackCommentsFor, sendOutcomeOf, type ReviewNote } from "./feedback.ts";
 import { checkSlideHtml, domSlideDocumentParser } from "./html-check.ts";
 import { Picker, type PickerActions } from "./Picker.tsx";
-import { createObserver, type Announcer, type Observer, type PollTimer } from "./observer-runtime.ts";
+import { createObserver, fetchProposal, type Announcer, type Observer, type PollTimer } from "./observer-runtime.ts";
+import { POLL_PAGE_SIZE } from "./observer.ts";
 import { createReportWindow } from "./report-window.ts";
 import { SEED_ELEMENT_ID, parseBootSeed, type BootSeed } from "./picker-seed.ts";
 import { cachedConversion, conversionKeyOf, rememberConversion } from "./conversion-cache.ts";
@@ -84,6 +85,8 @@ import { PROTOCOL_VERSION, assertNever, type Parsed } from "./protocol.ts";
 import { browserKeyValueStorage, seenStore } from "./seen-store.ts";
 import {
   candidateCommentsFrom,
+  candidateSetRevisionIn,
+  sessionEventsOf,
   sessionEventFileName,
   serializeSessionEvent,
   type SessionEventBody,
@@ -250,6 +253,67 @@ async function main(): Promise<void> {
     void announceViewers(observer);
   });
   await announceViewers(observer);
+  followRevisions();
+}
+
+/** How often an open window checks the log for a revised set: quickly on screen, rarely behind another tab. */
+const REVISION_POLL_VISIBLE_MS = 5_000;
+const REVISION_POLL_HIDDEN_MS = 30_000;
+/** The same page the conversation reads the log with. */
+const EVENT_PAGE_SIZE = 500;
+
+/**
+ * FOLLOW THE SET THIS WINDOW SHOWS. The observer only announces proposals it has not seen, so on
+ * its own an open window kept the candidates it opened with: measured 2026-10-13 on sashaslides.com,
+ * revise_slide made revision 3 and the window still showed revision 1 minutes later, ready to be
+ * inserted. One log read per tick; the manifest is read again only when the log names a newer
+ * revision than the one on screen (session-log.ts `candidateSetRevisionIn`).
+ */
+function followRevisions(): void {
+  const tick = async (): Promise<void> => {
+    try {
+      await checkForRevision();
+    } finally {
+      const delay = document.visibilityState === "visible" ? REVISION_POLL_VISIBLE_MS : REVISION_POLL_HIDDEN_MS;
+      setTimeout(() => void tick(), delay);
+    }
+  };
+  setTimeout(() => void tick(), REVISION_POLL_VISIBLE_MS);
+}
+
+async function checkForRevision(): Promise<void> {
+  const offer = offerOf(state);
+  if (services === null || offer === null || state.status !== "picking") return;
+  const { proposal } = offer;
+  const replied = await services.log.readEvents({ folderId: proposal.folderId, pageSize: EVENT_PAGE_SIZE });
+  if (replied.kind !== "ok") return;
+  const events = sessionEventsOf({
+    files: replied.value.events.map((file) => ({ proposalId: proposal.proposalId, ...file })),
+  });
+  const newest = candidateSetRevisionIn(events);
+  if (newest === null || (proposal.revision !== null && newest <= proposal.revision)) return;
+  // A CLEAR leaves READY in place with the old count, which `fetchProposal` rightly rejects as
+  // inconsistent -- so the log's own word is taken for it.
+  const cleared = events.some((event) => event.body.kind === "slides-cleared" && event.body.revision === newest);
+  if (cleared) {
+    dispatch({ kind: "proposal-offered", proposal: { ...proposal, count: 0, slides: [], revision: newest }, presentationId: offer.presentationId });
+    return;
+  }
+  const marks = await services.drive.scanInbox({ pageSize: POLL_PAGE_SIZE });
+  if (marks.kind !== "ok") return;
+  const mark = marks.value.find((candidate) => candidate.proposalId === proposal.proposalId);
+  if (mark === undefined || mark.readyFileId === null) return;
+  const loaded = await fetchProposal({
+    drive: services.drive,
+    proposalId: proposal.proposalId,
+    readyFileId: mark.readyFileId,
+    folderId: mark.folderId,
+  });
+  if (loaded.kind !== "ok") return;
+  // A revision keeps each candidate's Drive file id, so the per-file caches must forget them.
+  for (const slide of proposal.slides) htmlByFileId.delete(slide.fileId);
+  for (const key of [...conversionCacheChecked]) if (key.startsWith(`${proposal.proposalId}:`)) conversionCacheChecked.delete(key);
+  dispatch({ kind: "proposal-offered", proposal: loaded.value, presentationId: offer.presentationId });
 }
 
 /**
