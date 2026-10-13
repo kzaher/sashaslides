@@ -127,6 +127,16 @@ Important:
 * **All `google.script.run` traffic appears on the DECK PAGE's network session**, not the sandbox frame that made the
   call, so requests cannot be attributed to a frame by CDP session. Count calls by function name (it is in the POST
   body) and reason from totals.
+* **Every claude.ai and Claude Code connection to `/mcp` opens with one HTTP 400 — that is normal.** Measured
+  2026-10-13 in the server's nginx `access.log`: each session starts `POST /mcp 400 198`, then `initialize` 200 a
+  second later. 198 bytes is exactly the SDK's `Unsupported protocol version: <date> (supported versions: …)`: the
+  clients first offer a protocol version newer than SDK 1.32.1 (the latest release) knows, then fall back. Not a bug;
+  look past it when reading production logs. Server access: `ssh -i .auth/deploy_ed25519 -o IdentitiesOnly=yes
+  -o UserKnownHostsFile=deploy/known_hosts root@78.46.91.218`.
+* **A slides window behind another tab looks stalled and is not.** Measured 2026-10-13: with claude.ai in front, every
+  add-on frame reports `visibilityState: "hidden"`, polls at the 30 s cadence, and a 45 s soak budget reports STALL.
+  `Page.bringToFront()` the deck before timing (`.rec/front.mts`): visible loads take 12–27 s, and a window brought
+  forward after staging shows the set 18 s later.
 * **`.auth/tokens.json`'s refresh token expires after 7 days** (`refresh_token_expires_in: 604799`; the OAuth client is
   in Testing mode), which surfaces as `invalid_grant` from the sasha-slides server. Re-run `npx tsx
   .auth/generate-token.ts`; the consent screen can be completed in the container's Chrome on :9223 (tick "Select all"
