@@ -10,7 +10,7 @@
  * Slides -> Extensions -> Apps Script needs neither the API nor the console, so the editor
  * UI is the only unblocked path.
  *
- * The editor exposes `window.monaco`, so file contents are set with `model.setValue()`
+ * The editor exposes `window.monaco`, so file contents are set with `editor.executeEdits()`
  * rather than typed — a 424 KB sidebar bundle cannot be sent through key events. The value
  * is shipped to the page in chunks because a single Runtime.evaluate expression carrying the
  * whole bundle is large enough to be worth not relying on.
@@ -173,9 +173,13 @@ async function setActiveModel(client: CdpClient, text: string): Promise<void> {
   const set = await ev(client, `(() => {
     const editors = window.monaco.editor.getEditors();
     if (editors.length === 0) return 'NO EDITOR';
-    const model = editors[0].getModel();
+    const editor = editors[0];
+    const model = editor.getModel();
     if (!model) return 'NO ACTIVE MODEL';
-    model.setValue(window.__sasha.join(''));
+    // AN EDIT, NOT setValue. Measured 2026-10-13: setValue's "flush" change left the editor's Save
+    // button disabled, Ctrl+S saved nothing and a fresh tab still had the previous build, three
+    // deploys in a row. A replace through executeEdits is an ordinary change and marks the file dirty.
+    editor.executeEdits('deploy-via-ide', [{ range: model.getFullModelRange(), text: window.__sasha.join('') }]);
     return String(model.getValue().length);
   })()`);
   if (!/^\d+$/.test(set)) throw new Error(set);

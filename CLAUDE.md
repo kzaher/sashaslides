@@ -49,10 +49,12 @@ Important:
   rejects it (`ACCESS_TOKEN_SCOPE_INSUFFICIENT`), and `:enable` needs `serviceusage.services.enable`.
 * **Deploying with the Apps Script API disabled:** Slides → Extensions → Apps Script creates a bound project needing no
   API. The editor exposes `window.monaco`, so set file contents with
-  `monaco.editor.getModels().find(m => String(m.uri).endsWith('.html')).setValue(text)` — a 424 KB bundle cannot be
-  typed through key events. **Select the model by uri suffix, never "the last model"**, or a reordering silently writes
-  the sidebar over `Code.gs`. Ship the text in ~48 KB chunks into a `window` array first. See
-  `mcp/sasha-slides/addon/deploy-via-ide.ts`.
+  `editor.executeEdits('deploy', [{ range: model.getFullModelRange(), text }])` — a 424 KB bundle cannot be typed
+  through key events. **Never `model.setValue()`**: measured 2026-10-13, its "flush" change leaves the Save button
+  disabled, Ctrl+S saves nothing, and a fresh tab still holds the previous build (three deploys lost in a row).
+  **Open the file by its name in the file list**, never "the last model" or a uri suffix (uris carry no names), or a
+  reordering silently writes the sidebar over `Code.gs`. Ship the text in ~48 KB chunks into a `window` array first.
+  Confirm every deploy by re-reading lengths in a FRESH editor tab. See `mcp/sasha-slides/addon/deploy-via-ide.ts`.
 * **"Saving project..." is a permanently-present hidden aria-live node** in the Apps Script editor — it is NOT a save
   indicator. Use the `aria-label="Save project to Drive"` button's `disabled` state, and confirm persistence by
   reloading the page and re-reading the model length.

@@ -272,6 +272,11 @@ const EVENT_PAGE_SIZE = 500;
 function followRevisions(): void {
   const tick = async (): Promise<void> => {
     try {
+      // ALSO A SAFETY NET FOR THE LOADS. Measured 2026-10-13 on sashaslides.com: a window opened for
+      // Claude Code's candidates sat on "loading 01.html..." for minutes with no call in flight,
+      // and one click (one dispatch, so one pump) loaded both at once. `pump` only starts what is
+      // missing, so running it on this clock bounds any such stall to one tick.
+      pump();
       await checkForRevision();
     } finally {
       const delay = document.visibilityState === "visible" ? REVISION_POLL_VISIBLE_MS : REVISION_POLL_HIDDEN_MS;
