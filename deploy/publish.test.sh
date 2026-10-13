@@ -34,6 +34,8 @@ for target in site connector all; do
     expect "$target: master key only generated when absent" "grep -q '\^SASHA_MASTER_KEY=' " "$output"
     expect "$target: refuses a new key over existing account keys" 'A new key cannot unwrap' "$output"
     expect "$target: checks the protected-resource document" 'oauth-protected-resource/mcp' "$output"
+    # Secrets are read at startup: an unchanged image must still restart on new secrets (2026-10-13).
+    expect "$target: connector restarts even when its image is unchanged" 'docker compose -p sasha-connector up -d --force-recreate' "$output"
   fi
   expect "$target: nginx -t before reload" 'if ! nginx -t; then' "$output"
   expect "$target: reload after the test" 'systemctl reload nginx' "$output"

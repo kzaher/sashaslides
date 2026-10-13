@@ -1,17 +1,25 @@
 /**
  * Fake sign-in providers for the account portal tests: an OpenID Connect issuer that signs
- * real RS256 ID tokens and serves discovery and JWKS, and a fake GitHub. Both answer through
- * one injected `fetch`, so nothing leaves the process.
+ * real RS256 ID tokens and serves discovery and JWKS, a fake Sign in with Apple, and a fake
+ * GitHub. All answer through one injected `fetch`, so nothing leaves the process.
  *
  * The browser leg is simulated by `authorize`: it reads the authorization URL the code under
  * test produced, remembers its PKCE challenge, nonce and redirect URI, and returns the
- * callback parameters a real provider would redirect with. The token endpoint then refuses a
- * verifier that does not match, so a round trip proves PKCE instead of assuming it.
+ * callback parameters a real provider would redirect (or, for Apple, POST) with. The token
+ * endpoint then refuses a verifier that does not match, so a round trip proves PKCE instead
+ * of assuming it.
+ *
+ * The fake Apple's token endpoint authenticates the client the way Apple does: the
+ * `client_secret` must be an ES256 JWT whose signature verifies against the public half of
+ * the test's .p8 key, with the right `kid`, `iss` (team), `sub` (Services ID), `aud` and an
+ * unexpired `exp` at most six months after `iat`. Its authorize step refuses a request for
+ * the `name` or `email` scope that does not ask for `response_mode=form_post`, as Apple does.
  */
-import { createHash, createHmac, generateKeyPairSync, randomBytes, sign, type KeyObject } from "node:crypto";
+import { createHash, createHmac, generateKeyPairSync, randomBytes, sign, verify, type KeyObject } from "node:crypto";
 import { assertNever } from "../google-auth";
 import type { HttpFetch, HttpFetchInit, HttpFetchResponse } from "../http/identity-providers";
-import { GITHUB_AUTHORIZE_URL, GITHUB_EMAILS_URL, GITHUB_TOKEN_URL, GITHUB_USER_URL } from "../http/identity-providers";
+import { APPLE_ISSUER, GITHUB_AUTHORIZE_URL, GITHUB_EMAILS_URL, GITHUB_TOKEN_URL, GITHUB_USER_URL } from "../http/identity-providers";
+import { asRecord, parseJson } from "../http/json-values";
 
 /** Answers a request it owns, or returns null so the next route can try. */
 export type FakeRoute = (url: URL, init: HttpFetchInit) => HttpFetchResponse | null;
@@ -44,6 +52,9 @@ export type IdTokenTamper = Readonly<{
   signing?: "valid" | "foreign-key" | "alg-none" | "hs256";
 }>;
 
+/** Apple sends `email_verified` as a string; other issuers send a boolean. */
+export type FakeEmailVerified = boolean | "true" | "false";
+
 export type FakeOidcIssuer = Readonly<{
   route: FakeRoute;
   authorize(
@@ -51,7 +62,7 @@ export type FakeOidcIssuer = Readonly<{
       authorizationUrl: string;
       subject: string;
       email: string | null;
-      emailVerified: boolean;
+      emailVerified: FakeEmailVerified;
       tamper: IdTokenTamper;
     }>,
   ): CallbackParameters;
@@ -68,89 +79,77 @@ export function createFakeOidcIssuer(
     clientId: string;
     clientSecret: string;
     now: () => Date;
-    /** Claims every honest token carries in addition, e.g. Microsoft's `tid`. */
+    /** Claims every honest token carries in addition. */
     extraClaims: Readonly<Record<string, unknown>>;
   }>,
 ): FakeOidcIssuer {
-  const { discoveryBase, clientId, clientSecret } = options;
-  const signingKey = generateKeyPairSync("rsa", { modulusLength: 2048 });
-  const foreignKey = generateKeyPairSync("rsa", { modulusLength: 2048 });
-  const kid = "fake-key-1";
-  const endpoints = {
-    authorization: `${discoveryBase}/fake-authorize`,
-    token: `${discoveryBase}/fake-token`,
-    jwks: `${discoveryBase}/fake-jwks`,
-  };
-  const grants = new Map<string, Readonly<{ challenge: string; redirectUri: string; idToken: string }>>();
+  const { clientId, clientSecret } = options;
+  return fakeIssuer({
+    ...options,
+    authMethods: ["client_secret_basic", "client_secret_post"],
+    authenticateClient: ({ init, form }) => clientAuthenticated({ init, form, clientId, clientSecret }),
+  });
+}
 
-  const route: FakeRoute = (url, init) => {
-    const address = `${url.origin}${url.pathname}`;
-    if (address === `${discoveryBase}/.well-known/openid-configuration`) {
-      return jsonResponse({
-        status: 200,
-        body: {
-          issuer: options.advertisedIssuer,
-          authorization_endpoint: endpoints.authorization,
-          token_endpoint: endpoints.token,
-          jwks_uri: endpoints.jwks,
-          response_types_supported: ["code"],
-          id_token_signing_alg_values_supported: ["RS256"],
-          token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
-        },
-      });
-    }
-    if (address === endpoints.jwks) {
-      const publicJwk = signingKey.publicKey.export({ format: "jwk" });
-      return jsonResponse({ status: 200, body: { keys: [{ ...publicJwk, kid, use: "sig", alg: "RS256" }] } });
-    }
-    if (address !== endpoints.token) return null;
-    const form = new URLSearchParams(init.body ?? "");
-    if (!clientAuthenticated({ init, form, clientId, clientSecret })) {
-      return jsonResponse({ status: 401, body: { error: "invalid_client" } });
-    }
-    const code = form.get("code") ?? "";
-    const grant = grants.get(code);
-    grants.delete(code);
-    if (grant === undefined || form.get("grant_type") !== "authorization_code") {
-      return jsonResponse({ status: 400, body: { error: "invalid_grant" } });
-    }
-    if (form.get("redirect_uri") !== grant.redirectUri) {
-      return jsonResponse({ status: 400, body: { error: "invalid_grant", error_description: "redirect_uri" } });
-    }
-    if (s256(form.get("code_verifier") ?? "") !== grant.challenge) {
-      return jsonResponse({ status: 400, body: { error: "invalid_grant", error_description: "pkce" } });
-    }
-    return jsonResponse({
-      status: 200,
-      body: { access_token: "fake-access", token_type: "Bearer", expires_in: 3600, id_token: grant.idToken },
-    });
-  };
+/** Apple's callback is a form POST, which carries `user` (JSON with the name) on first consent. */
+export type AppleCallbackParameters = CallbackParameters & Readonly<{ user: string }>;
 
+export type FakeApple = Readonly<{
+  route: FakeRoute;
+  authorize(
+    options: Readonly<{
+      authorizationUrl: string;
+      subject: string;
+      email: string | null;
+      emailVerified: FakeEmailVerified;
+      tamper: IdTokenTamper;
+    }>,
+  ): AppleCallbackParameters;
+}>;
+
+export function createFakeApple(
+  options: Readonly<{
+    /** The Services ID. */
+    clientId: string;
+    teamId: string;
+    keyId: string;
+    /** The public half of the .p8 key the code under test signs its client secret with. */
+    clientPublicKey: KeyObject;
+    now: () => Date;
+  }>,
+): FakeApple {
+  const issuer = fakeIssuer({
+    discoveryBase: APPLE_ISSUER,
+    advertisedIssuer: APPLE_ISSUER,
+    tokenIssuer: APPLE_ISSUER,
+    clientId: options.clientId,
+    now: options.now,
+    extraClaims: { nonce_supported: true, auth_time: Math.floor(options.now().getTime() / 1000) },
+    // What Apple's real discovery document advertises.
+    authMethods: ["client_secret_post"],
+    authenticateClient: ({ form }) =>
+      form.get("client_id") === options.clientId &&
+      appleClientSecretValid({
+        secret: form.get("client_secret") ?? "",
+        clientId: options.clientId,
+        teamId: options.teamId,
+        keyId: options.keyId,
+        publicKey: options.clientPublicKey,
+        nowMs: options.now().getTime(),
+      }),
+  });
   return {
-    route,
-    authorize: ({ authorizationUrl, subject, email, emailVerified, tamper }) => {
-      const query = new URL(authorizationUrl).searchParams;
-      const nowSeconds = Math.floor(options.now().getTime() / 1000);
-      const honest: Record<string, unknown> = {
-        iss: options.tokenIssuer,
-        aud: clientId,
-        sub: subject,
-        iat: nowSeconds,
-        exp: nowSeconds + 3600,
-        nonce: query.get("nonce"),
-        ...(email === null ? {} : { email, email_verified: emailVerified }),
-        ...options.extraClaims,
-      };
-      const claims = Object.fromEntries(
-        Object.entries({ ...honest, ...(tamper.claims ?? {}) }).filter(([, value]) => value !== undefined),
-      );
-      const code = randomBytes(12).toString("base64url");
-      grants.set(code, {
-        challenge: query.get("code_challenge") ?? "",
-        redirectUri: query.get("redirect_uri") ?? "",
-        idToken: mintIdToken({ claims, kid, signing: tamper.signing ?? "valid", signingKey: signingKey.privateKey, foreignKey: foreignKey.privateKey }),
-      });
-      return { code, state: query.get("state") ?? "" };
+    route: issuer.route,
+    authorize: (authorization) => {
+      const query = new URL(authorization.authorizationUrl).searchParams;
+      const scopes = (query.get("scope") ?? "").split(" ");
+      // Apple: "if you requested any scopes, you must use form_post".
+      if ((scopes.includes("name") || scopes.includes("email")) && query.get("response_mode") !== "form_post") {
+        throw new Error("fake Apple: invalid_request, name or email scope without response_mode=form_post");
+      }
+      if (query.get("client_id") !== options.clientId) throw new Error("fake Apple: invalid_client");
+      const callback = issuer.authorize(authorization);
+      return { ...callback, user: JSON.stringify({ name: { firstName: "Ada", lastName: "Lovelace" }, email: authorization.email }) };
     },
   };
 }
@@ -220,8 +219,117 @@ export function createFakeGitHub(
   };
 }
 
+/** A fresh EC P-256 key pair, as Apple issues for Sign in with Apple, with the private half as .p8 PEM. */
+export function generateAppleKey(): Readonly<{ privateKeyPem: string; privateKey: KeyObject; publicKey: KeyObject }> {
+  const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  return {
+    privateKeyPem: pair.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+    privateKey: pair.privateKey,
+    publicKey: pair.publicKey,
+  };
+}
+
 export function jsonResponse(options: Readonly<{ status: number; body: unknown }>): HttpFetchResponse {
   return { status: options.status, json: () => Promise.resolve(options.body) };
+}
+
+// ---------------------------------------------------------------- shared issuer
+
+type ClientCheck = (request: Readonly<{ init: HttpFetchInit; form: URLSearchParams }>) => boolean;
+
+function fakeIssuer(
+  options: Readonly<{
+    discoveryBase: string;
+    advertisedIssuer: string;
+    tokenIssuer: string;
+    clientId: string;
+    now: () => Date;
+    extraClaims: Readonly<Record<string, unknown>>;
+    authMethods: readonly string[];
+    authenticateClient: ClientCheck;
+  }>,
+): FakeOidcIssuer {
+  const { discoveryBase, clientId } = options;
+  const signingKey = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const foreignKey = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const kid = "fake-key-1";
+  const endpoints = {
+    authorization: `${discoveryBase}/fake-authorize`,
+    token: `${discoveryBase}/fake-token`,
+    jwks: `${discoveryBase}/fake-jwks`,
+  };
+  const grants = new Map<string, Readonly<{ challenge: string; redirectUri: string; idToken: string }>>();
+
+  const route: FakeRoute = (url, init) => {
+    const address = `${url.origin}${url.pathname}`;
+    if (address === `${discoveryBase}/.well-known/openid-configuration`) {
+      return jsonResponse({
+        status: 200,
+        body: {
+          issuer: options.advertisedIssuer,
+          authorization_endpoint: endpoints.authorization,
+          token_endpoint: endpoints.token,
+          jwks_uri: endpoints.jwks,
+          response_types_supported: ["code"],
+          id_token_signing_alg_values_supported: ["RS256"],
+          token_endpoint_auth_methods_supported: options.authMethods,
+        },
+      });
+    }
+    if (address === endpoints.jwks) {
+      const publicJwk = signingKey.publicKey.export({ format: "jwk" });
+      return jsonResponse({ status: 200, body: { keys: [{ ...publicJwk, kid, use: "sig", alg: "RS256" }] } });
+    }
+    if (address !== endpoints.token) return null;
+    const form = new URLSearchParams(init.body ?? "");
+    if (!options.authenticateClient({ init, form })) {
+      return jsonResponse({ status: 401, body: { error: "invalid_client" } });
+    }
+    const code = form.get("code") ?? "";
+    const grant = grants.get(code);
+    grants.delete(code);
+    if (grant === undefined || form.get("grant_type") !== "authorization_code") {
+      return jsonResponse({ status: 400, body: { error: "invalid_grant" } });
+    }
+    if (form.get("redirect_uri") !== grant.redirectUri) {
+      return jsonResponse({ status: 400, body: { error: "invalid_grant", error_description: "redirect_uri" } });
+    }
+    if (s256(form.get("code_verifier") ?? "") !== grant.challenge) {
+      return jsonResponse({ status: 400, body: { error: "invalid_grant", error_description: "pkce" } });
+    }
+    return jsonResponse({
+      status: 200,
+      body: { access_token: "fake-access", token_type: "Bearer", expires_in: 3600, id_token: grant.idToken },
+    });
+  };
+
+  return {
+    route,
+    authorize: ({ authorizationUrl, subject, email, emailVerified, tamper }) => {
+      const query = new URL(authorizationUrl).searchParams;
+      const nowSeconds = Math.floor(options.now().getTime() / 1000);
+      const honest: Record<string, unknown> = {
+        iss: options.tokenIssuer,
+        aud: clientId,
+        sub: subject,
+        iat: nowSeconds,
+        exp: nowSeconds + 3600,
+        nonce: query.get("nonce"),
+        ...(email === null ? {} : { email, email_verified: emailVerified }),
+        ...options.extraClaims,
+      };
+      const claims = Object.fromEntries(
+        Object.entries({ ...honest, ...(tamper.claims ?? {}) }).filter(([, value]) => value !== undefined),
+      );
+      const code = randomBytes(12).toString("base64url");
+      grants.set(code, {
+        challenge: query.get("code_challenge") ?? "",
+        redirectUri: query.get("redirect_uri") ?? "",
+        idToken: mintIdToken({ claims, kid, signing: tamper.signing ?? "valid", signingKey: signingKey.privateKey, foreignKey: foreignKey.privateKey }),
+      });
+      return { code, state: query.get("state") ?? "" };
+    },
+  };
 }
 
 function textResponse(options: Readonly<{ status: number; text: string }>): HttpFetchResponse {
@@ -237,6 +345,34 @@ function clientAuthenticated(
     return id === options.clientId && secret === options.clientSecret;
   }
   return options.form.get("client_id") === options.clientId && options.form.get("client_secret") === options.clientSecret;
+}
+
+/** Apple's own limit on a client secret's lifetime: 15777000 seconds, six months. */
+const APPLE_MAX_CLIENT_SECRET_SECONDS = 15_777_000;
+
+function appleClientSecretValid(
+  options: Readonly<{ secret: string; clientId: string; teamId: string; keyId: string; publicKey: KeyObject; nowMs: number }>,
+): boolean {
+  const [encodedHeader, encodedClaims, encodedSignature, extra] = options.secret.split(".");
+  if (encodedHeader === undefined || encodedClaims === undefined || encodedSignature === undefined || extra !== undefined) return false;
+  const header = decodeSegment(encodedHeader);
+  const claims = decodeSegment(encodedClaims);
+  if (header === null || claims === null) return false;
+  if (header.alg !== "ES256" || header.kid !== options.keyId) return false;
+  // A raw 64-byte r||s signature; a DER one (what node:crypto emits by default) is refused.
+  const signature = Buffer.from(encodedSignature, "base64url");
+  if (signature.length !== 64) return false;
+  const signedInput = Buffer.from(`${encodedHeader}.${encodedClaims}`, "utf-8");
+  if (!verify("sha256", signedInput, { key: options.publicKey, dsaEncoding: "ieee-p1363" }, signature)) return false;
+  const { iss, sub, aud, iat, exp } = claims;
+  if (iss !== options.teamId || sub !== options.clientId || aud !== APPLE_ISSUER) return false;
+  if (typeof iat !== "number" || typeof exp !== "number") return false;
+  return exp * 1000 > options.nowMs && exp - iat <= APPLE_MAX_CLIENT_SECRET_SECONDS;
+}
+
+function decodeSegment(segment: string): Readonly<Record<string, unknown>> | null {
+  const parsed = parseJson(Buffer.from(segment, "base64url").toString("utf-8"));
+  return parsed.kind === "ok" ? asRecord(parsed.value) : null;
 }
 
 function mintIdToken(

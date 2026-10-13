@@ -36,8 +36,15 @@ HEALTHCHECK --interval=30s --timeout=4s --start-period=20s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
 # --host 0.0.0.0 is inside the container only; compose publishes it on 127.0.0.1.
+# --trusted-proxy: Docker's port proxy makes nginx's connections arrive from the network gateway
+# (172.30.0.1 on sasha-connector_default, measured 2026-10-13), so X-Real-IP is believed from it
+# alone. If the network is recreated with another gateway, the server warns once and counts every
+# visitor as one client: stricter limits, never a bypass.
+# An empty mail-sender.json (the deploy's placeholder) leaves email sign-in off.
 ENTRYPOINT ["node_modules/.bin/tsx", "mcp/sasha-slides/server.ts", "--http", "--host", "0.0.0.0", "--port", "8787"]
 CMD ["--public-url", "https://sashaslides.com", \
      "--store", "/data/oauth-store.json", "--key-store", "/data/account-keys.json", \
      "--google-client", "/run/secrets/google_oauth_web.json", \
-     "--identity-providers", "/run/secrets/identity-providers.json"]
+     "--identity-providers", "/run/secrets/identity-providers.json", \
+     "--mail-sender", "/run/secrets/mail-sender.json", \
+     "--trusted-proxy", "172.30.0.1"]

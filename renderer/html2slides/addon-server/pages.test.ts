@@ -83,7 +83,9 @@ test("the privacy policy covers improvement use, the paid-plan exception and key
   assert.match(privacy, /generali[sz]ed AI/i, "Google data never trains general models");
   assert.match(privacy, /href="https:\/\/sashaslides\.com\/account"/, "links the deletion page");
   assert.match(privacy, /reset[^.]*key/i, "deletion resets the account key");
-  assert.match(privacy, /Microsoft[^.]*GitHub/, "names the sign-in providers");
+  assert.match(privacy, /Google, Apple, GitHub, an email address and password, or a passkey/, "names the sign-in options");
+  assert.doesNotMatch(privacy, /Microsoft/, "Microsoft is no longer a sign-in option");
+  assert.match(privacy, /one-way hash of your password/, "says passwords are stored only as hashes");
 });
 
 test("every public page declares the Sasha Slides favicon, and the files exist", () => {

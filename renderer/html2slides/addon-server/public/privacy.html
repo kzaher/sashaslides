@@ -19,13 +19,13 @@
 
 <main class="wrap legal">
   <h1>Privacy Policy</h1>
-  <p class="date">Effective 11 October 2026</p>
+  <p class="date">Effective 13 October 2026</p>
 
   <p>Sasha Slides is operated by Exponent GmbH, Switzerland ("Exponent", "we", "us"). Exponent is the controller of the personal data described here. This policy explains what we access, stores and shares when you use the website at sashaslides.com, the Sasha Slides connector for AI assistants, and the Sasha Slides add-on for Google Slides (together, the "Service").</p>
 
   <h2>Summary</h2>
   <ul>
-    <li>You can sign in with Google, Microsoft, GitHub or another supported account. Google is needed to work with your Google Slides.</li>
+    <li>You can sign in with Google, Apple, GitHub, an email address and password, or a passkey. Google is needed to work with your Google Slides.</li>
     <li>Your slides and presentations stay in your own Google Drive.</li>
     <li>On the free plan, we may use data about how you use the Service to improve it. On a paid plan, we do not use your data for that.</li>
     <li>We do not sell your data, show ads, or use data from Google to train generalised AI models.</li>
@@ -47,12 +47,18 @@
   <p>The Google Slides add-on runs inside Google's Apps Script under your own account. It asks Google for access to your presentations and Drive so it can find the candidate slides in your Sasha Slides Inbox folder, show them in a sidebar and insert the one you pick. The add-on talks to Google's services directly and does not send your presentation content to our servers.</p>
 
   <h2>Signing in</h2>
-  <p>You can sign in to your Sasha Slides account with Google, Microsoft, GitHub, or another sign-in provider we support. From that provider we receive only your account identifier and email address. Whichever one you use, connecting your Google account is still required to read and change your Google Slides.</p>
+  <p>You can sign in to your Sasha Slides account with Google, Apple, GitHub, or another sign-in provider we support, with an email address and password, or with a passkey. Whichever one you use, connecting your Google account is still required to read and change your Google Slides.</p>
+  <ul>
+    <li><strong>Google, Apple, GitHub and other providers.</strong> From the provider we receive only your account identifier and email address. If you sign in with Apple and choose to hide your email, we receive Apple's private relay address instead.</li>
+    <li><strong>Email address and password.</strong> We store your email address and a one-way hash of your password, never the password itself. We send you emails to confirm your address and to reset your password, through Google's Gmail service.</li>
+    <li><strong>Passkey.</strong> Your passkey's private key stays on your device or in your password manager. We store only its public key and a counter that helps detect a copied passkey.</li>
+  </ul>
+  <p>To protect accounts from password guessing and our email from abuse, we count recent sign-in attempts and emails per internet address. These counts are kept in memory for at most a day and are not stored.</p>
 
   <h2>What we store</h2>
   <p>Our server stores:</p>
   <ul>
-    <li>The identifier and email address of each account you sign in with.</li>
+    <li>The identifier and email address of each account you sign in with, the one-way hash of your password if you set one, and the public keys of your passkeys.</li>
     <li>The access and refresh tokens Google issues for the permissions above.</li>
     <li>A record of each AI assistant you connect (for example Claude or ChatGPT), and the sign-in tokens we issue to it. Tokens we issue are stored only as one-way hashes.</li>
     <li>On the free plan, data about how you use the Service, as described under "Improving the Service".</li>
@@ -75,7 +81,7 @@
     <li>We use Google user data to provide the features you request (designing candidate slides, showing them to you, and inserting the slide you choose) and, on the free plan, to improve those features as described above.</li>
     <li>We do not sell Google user data, and we do not use or transfer it for advertising, credit decisions, or to train or improve general AI or machine learning models.</li>
     <li>We do not allow people to read your data, except with your explicit permission, when needed for security (for example, investigating abuse), to comply with the law, or when the data has been aggregated and anonymised for internal operations.</li>
-    <li>We share data with service providers only as needed to run the Service, such as the company that hosts our server, and with authorities when the law requires it.</li>
+    <li>We share data with service providers only as needed to run the Service, such as the company that hosts our server and Google, which delivers the emails we send you, and with authorities when the law requires it.</li>
   </ul>
 
   <div class="note">

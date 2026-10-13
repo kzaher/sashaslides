@@ -1,0 +1,28 @@
+// The passkey script's own gate: it runs in the browser, so it gets the DOM library and NOT
+// @types/node (the connector's tsconfig is the reverse), and a browser/node mix-up is a type
+// error. esbuild (`build.ts`) emits; this only checks:
+//
+//   npx tsc -p mcp/sasha-slides/http/passkey-browser
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "noEmit": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["passkey.ts"]
+}

@@ -1,6 +1,7 @@
 /**
  * "Delete my data": revoke the account's grant at Google, remove every record the auth
- * store holds for it, then destroy its data key.
+ * store holds for it (an email sign-in's password included: it is keyed by the same
+ * `email:<subject>` as its link), then destroy its data key.
  *
  * The key is destroyed last and unconditionally (try/finally). Revocation can fail (Google
  * down, token already dead) and a removal can throw (disk full); neither may leave the key
@@ -43,6 +44,7 @@ export function createAccountEraser(
     let recordsRemoved = 0;
     for (const linkKey of account.linkKeys) {
       recordsRemoved += await removeIfPresent({ collection: store.accountLinks, key: linkKey });
+      recordsRemoved += await removeIfPresent({ collection: store.passwordCredentials, key: linkKey });
     }
     if (subject !== null) {
       recordsRemoved += await removeIfPresent({ collection: store.googleIdentities, key: subject });

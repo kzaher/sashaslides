@@ -1497,6 +1497,10 @@ export type ServerMode =
       googleClientPath: string;
       /** Null offers the /account portal's sign-in with Google alone; a path lists the providers. */
       identityProvidersPath: string | null;
+      /** Null leaves email and password sign-in off; a path is the Gmail API sender's JSON file. */
+      mailSenderPath: string | null;
+      /** Comma-separated proxy addresses or subnets whose X-Real-IP is believed; null is loopback alone. */
+      trustedProxies: string | null;
       /** Null disables handshake recording; a path appends one JSON line per `initialize`. */
       handshakeLogPath: string | null;
       /** Null disables frame recording; a path appends one JSON line per JSON-RPC frame. */
@@ -1570,6 +1574,8 @@ export function parseServerMode(args: readonly string[]): ServerMode {
     googleCallbackUrl: values.get("--google-callback-url") ?? null,
     googleClientPath: values.get("--google-client") ?? CLIENT_PATH,
     identityProvidersPath: values.get("--identity-providers") ?? null,
+    mailSenderPath: values.get("--mail-sender") ?? null,
+    trustedProxies: values.get("--trusted-proxy") ?? null,
     handshakeLogPath,
     frameLogPath,
     skillFilePath,
@@ -1579,7 +1585,7 @@ export function parseServerMode(args: readonly string[]): ServerMode {
 
 export const USAGE = `sasha-slides MCP server
 
-  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--google-client <path>]
+  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--mail-sender <path> [--trusted-proxy <subnets>]] [--google-client <path>]
   npx tsx mcp/sasha-slides/server.ts --stdio
   npx tsx mcp/sasha-slides/server.ts --selftest
 
@@ -1600,13 +1606,25 @@ export const USAGE = `sasha-slides MCP server
                  Keep it, and this file, out of the --store file's backups: destroying
                  an account's key here is what makes its data unreadable everywhere.
   --identity-providers  JSON file of the sign-in providers offered at <public-url>/account,
-                 where people delete their data: {"providers": [{"name": "microsoft",
+                 where people delete their data: {"providers": [{"name": "github",
                  "clientId": "...", "clientSecret": "..."}, ...]}. Presets: google,
-                 microsoft, github; any other name needs "displayName" and an OpenID Connect
+                 github, apple; any other name needs "displayName" and an OpenID Connect
                  "issuer". google may omit credentials to reuse the connector's client.
+                 apple takes "clientId" (the Services ID), "teamId", "keyId" and
+                 "privateKeyPath" (the .p8 key, relative to this file) instead of a secret.
                  Without this flag the portal offers Google alone. The portal signs its
                  session cookie with SASHA_SESSION_SECRET (32+ characters), which this flag
                  requires; with neither, /account is off.
+  --mail-sender  JSON file that turns on email and password sign-in at <public-url>/account,
+                 mailing confirmation and reset links through the Gmail API as one Google
+                 account: {"clientId": "...", "clientSecret": "...", "refreshToken": "...",
+                 "from": "Sasha Slides <address>"}. Mint it with
+                   npx tsx mcp/sasha-slides/e2e/gmail-sender-token.ts <file>
+                 (scope gmail.send only). Needs SASHA_SESSION_SECRET, like the flag above.
+  --trusted-proxy  Comma-separated addresses or CIDR subnets of the reverse proxy, whose
+                 X-Real-IP header is believed when limiting sign-in attempts and mail per
+                 client. Loopback is always trusted. Behind Docker's published port the
+                 connection comes from the bridge gateway, e.g. --trusted-proxy 172.16.0.0/12.
   --google-callback-url  TESTING. Where Google returns the user, instead of
                  <public-url>/oauth/google/callback. A Desktop OAuth client only accepts
                  http://127.0.0.1 redirects, so behind a tunnel this keeps Google's leg on
@@ -1893,6 +1911,8 @@ const VALUE_FLAGS: readonly string[] = [
   "--key-store",
   "--google-callback-url",
   "--identity-providers",
+  "--mail-sender",
+  "--trusted-proxy",
   "--google-client",
   "--handshake-log",
   "--frame-log",
@@ -2020,6 +2040,8 @@ function serveHttp(
   const portal = loadAccountPortal({
     publicUrl: mode.publicUrl,
     identityProvidersPath: mode.identityProvidersPath,
+    mailSenderPath: mode.mailSenderPath,
+    trustedProxies: mode.trustedProxies,
     googleClientPath: mode.googleClientPath,
     sessionSecret: process.env.SASHA_SESSION_SECRET,
     store: stack.store,

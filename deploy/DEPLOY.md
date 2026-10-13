@@ -97,6 +97,8 @@ replaces it. The previous nginx file is at `/root/sashaslides/nginx-sashaslides.
 | `/root/sasha-connector/secrets/connector.env` | `SASHA_MASTER_KEY`, `SASHA_SESSION_SECRET` | master key: **every user's stored grant becomes unreadable**; session secret: people sign in to `/account` again |
 | `/root/sasha-connector/secrets/google_oauth_web.json` | Google Web OAuth client | re-copy from `.auth/` |
 | `/root/sasha-connector/secrets/identity-providers.json` | `/account` sign-in providers | re-copy from `.auth/` |
+| `/root/sasha-connector/secrets/apple-signin.p8` | Sign in with Apple key, named by `privateKeyPath` in the providers file; empty until provided | re-copy from `.auth/`, or make a new key at Apple |
+| `/root/sasha-connector/secrets/mail-sender.json` | Gmail sender for email sign-in (`mcp/sasha-slides/e2e/gmail-sender-token.ts`); empty leaves email sign-in off | re-mint; while the OAuth client is in Testing mode its refresh token expires after 7 days |
 | `/root/sasha-connector/data/oauth-store.json` | client registrations, sealed per-user Google grants | users reconnect |
 | `/root/sasha-connector/data/account-keys.json` | per-account data keys, wrapped under the master key | users reconnect |
 

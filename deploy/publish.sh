@@ -38,6 +38,10 @@ CONNECTOR_HOME="/root/sasha-connector"
 # The connector's container user (mcp/sasha-slides/deploy/Dockerfile). Not 1000: on the
 # server uid 1000 is a login user, who would then own the secrets.
 CONNECTOR_UID="10100"
+# Secrets copied from .auth/ when present and mounted into the connector by the same names
+# (mcp/sasha-slides/deploy/docker-compose.yml). apple-signin.p8 is the Sign in with Apple key;
+# mail-sender.json is the Gmail sender for email sign-in (mcp/sasha-slides/e2e/gmail-sender-token.ts).
+SECRET_FILES="google_oauth_web.json identity-providers.json apple-signin.p8 mail-sender.json"
 # The server's host keys are pinned in the repo, so a rebuilt container (empty ~/.ssh) deploys
 # without a prompt and still refuses an impostor. Refresh with: ssh-keyscan 78.46.91.218 > deploy/known_hosts
 KNOWN_HOSTS="$(cd "$(dirname "$0")" && pwd)/known_hosts"
@@ -206,7 +210,7 @@ REMOTE
 
   step "connector: OAuth client and identity providers"
   local name
-  for name in google_oauth_web.json identity-providers.json; do
+  for name in $SECRET_FILES; do
     if [ -f ".auth/$name" ]; then
       info "sending .auth/$name"
       run timeout "$BUDGET_SHORT" scp -q "${SSH_OPTS[@]}" ".auth/$name" "$HOST:$CONNECTOR_HOME/secrets/$name.new"
@@ -214,14 +218,20 @@ REMOTE
       info ".auth/$name not on this machine — keeping the server's copy"
     fi
   done
-  remote_script "$BUDGET_SHORT" "$CONNECTOR_HOME" "$CONNECTOR_UID" <<'REMOTE'
+  remote_script "$BUDGET_SHORT" "$CONNECTOR_HOME" "$CONNECTOR_UID" "$SECRET_FILES" <<'REMOTE'
 set -euo pipefail
-home="$1"; uid="$2"
+home="$1"; uid="$2"; names="$3"
 cd "$home/secrets"
-for name in google_oauth_web.json identity-providers.json; do
-  [ -f "$name.new" ] || continue
-  install -m 0600 -o "$uid" -g "$uid" "$name.new" "$name" && rm -f "$name.new"
-  echo "  -> installed $name (0600, uid $uid)"
+for name in $names; do
+  if [ -f "$name.new" ]; then
+    install -m 0600 -o "$uid" -g "$uid" "$name.new" "$name" && rm -f "$name.new"
+    echo "  -> installed $name (0600, uid $uid)"
+  elif [ ! -e "$name" ]; then
+    # Every secret is bind-mounted by name, and Docker turns a missing source into a DIRECTORY.
+    # An empty file is harmless: it is only read when the providers file names it.
+    install -m 0600 -o "$uid" -g "$uid" /dev/null "$name"
+    echo "  -> created an empty placeholder $name"
+  fi
 done
 if [ ! -f identity-providers.json ]; then
   echo '{"providers":[{"name":"google"}]}' > identity-providers.json
@@ -246,7 +256,9 @@ if docker image inspect sasha-connector:latest > /dev/null 2>&1; then
 fi
 export SASHA_CONNECTOR_HOME="$home" BUILDKIT_PROGRESS=plain
 docker compose -p sasha-connector build
-docker compose -p sasha-connector up -d
+# Always restart: the secrets (identity providers, OAuth client) are read once at startup, so an
+# unchanged image left running kept the old sign-in providers (measured 2026-10-13).
+docker compose -p sasha-connector up -d --force-recreate
 # Poll the container's own port (observable state) with a 90 s deadline, one line per try.
 for attempt in $(seq 1 45); do
   if curl -fsS -m 3 http://127.0.0.1:6100/healthz > /dev/null 2>&1; then

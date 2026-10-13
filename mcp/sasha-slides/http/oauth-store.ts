@@ -3,7 +3,7 @@
  * it: in-memory (tests, and the default for a single-process deployment) and file-backed
  * (dev, so a restart does not force every user through Google consent again).
  *
- * The shape is eight keyed collections behind one uniform `RecordStore`, so the
+ * The shape is nine keyed collections behind one uniform `RecordStore`, so the
  * authorization server never learns which backing it got. `take` is the single-use read:
  * a `state`, an authorization code and a refresh token are each valid exactly once, which
  * is what makes replay of any of them a dead request rather than a second grant.
@@ -27,6 +27,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { asNumber, asRecord, asString, asStringArray, parseJson } from "./json-values";
+import { PASSKEY_ALGORITHMS, type PasskeyAlgorithm } from "./webauthn";
 
 export type AuthStore = Readonly<{
   /** DCR-registered MCP clients (Claude), keyed by the `client_id` we minted. */
@@ -45,6 +46,11 @@ export type AuthStore = Readonly<{
   accountLinks: RecordStore<AccountLink>;
   /** Our accounts, keyed by `AccountId`. */
   accounts: RecordStore<Account>;
+  /**
+   * Email sign-in passwords of confirmed addresses, keyed by the same `email:<subject>` as the
+   * account link (see `password-sign-in.ts`), so erasing the account's links reaches them.
+   */
+  passwordCredentials: RecordStore<PasswordCredential>;
 }>;
 
 export type RecordStore<TValue> = Readonly<{
@@ -125,7 +131,7 @@ export type IssuedRefreshToken = Readonly<{
 }>;
 
 /**
- * One way of signing in to an account: a provider ("google", "microsoft", "github", or a
+ * One way of signing in to an account: a provider ("google", "apple", "github", or a
  * configured OIDC name) and that provider's stable subject for the user.
  */
 export type AccountLink = Readonly<{
@@ -135,6 +141,26 @@ export type AccountLink = Readonly<{
   /** The email the provider reported, sealed with the account's data key. Null when none. */
   sealedEmail: string | null;
   linkedAtMs: number;
+  /** Present exactly when `provider` is `passkey`: what verifies its sign-ins. */
+  passkey?: StoredPasskey;
+}>;
+
+/**
+ * A passkey's verification material, kept on its link (`passkey:<credential id>`) so erasing
+ * the account removes it with the other links. The public key is sealed with the account's
+ * data key like the email: it is not a secret, but sealed it dies with the key, so a store
+ * backup restored after "delete my data" cannot sign anyone back in. The counter, the
+ * algorithm and the user handle stay readable; none of them identifies a person.
+ */
+export type StoredPasskey = Readonly<{
+  /** SPKI DER, base64url, sealed. */
+  sealedPublicKey: string;
+  algorithm: PasskeyAlgorithm;
+  /** The highest signature counter seen; see `verifyAuthentication` in `webauthn.ts`. */
+  signCount: number;
+  /** The random WebAuthn user handle registered with the credential, base64url. */
+  userHandle: string;
+  createdAtMs: number;
 }>;
 
 export type Account = Readonly<{
@@ -147,6 +173,15 @@ export type Account = Readonly<{
   googleSubject: string | null;
 }>;
 
+/** A confirmed email sign-in's password. The address is not here: only its hash, as `subject`. */
+export type PasswordCredential = Readonly<{
+  /** SHA-256 (hex) of the normalised address; the record's key is `email:<subject>`. */
+  subject: string;
+  /** `$scrypt$ln=…,r=…,p=…$<salt>$<key>` (see `password-hashing.ts`). */
+  passwordHash: string;
+  updatedAtMs: number;
+}>;
+
 export function inMemoryAuthStore(): AuthStore {
   return {
     clients: inMemoryRecordStore<RegisteredClient>(),
@@ -157,11 +192,12 @@ export function inMemoryAuthStore(): AuthStore {
     refreshTokens: inMemoryRecordStore<IssuedRefreshToken>(),
     accountLinks: inMemoryRecordStore<AccountLink>(),
     accounts: inMemoryRecordStore<Account>(),
+    passwordCredentials: inMemoryRecordStore<PasswordCredential>(),
   };
 }
 
 /**
- * Dev backing: the six collections worth surviving a restart go to one JSON file, the two
+ * Dev backing: the seven collections worth surviving a restart go to one JSON file, the two
  * that live for seconds stay in memory. A file written before accounts existed simply has
  * no `accountLinks` / `accounts` entries yet; both start empty. Losing a `state` or an authorization code across a
  * restart costs the user one click; losing a Google refresh token costs them a consent
@@ -180,6 +216,7 @@ export function fileBackedAuthStore(
     refreshTokens: file.collection({ name: "refreshTokens", codec: issuedRefreshTokenCodec }),
     accountLinks: file.collection({ name: "accountLinks", codec: accountLinkCodec }),
     accounts: file.collection({ name: "accounts", codec: accountCodec }),
+    passwordCredentials: file.collection({ name: "passwordCredentials", codec: passwordCredentialCodec }),
   };
 }
 
@@ -385,9 +422,24 @@ const accountLinkCodec: JsonCodec<AccountLink> = {
     const subject = asString(record["subject"]);
     const linkedAtMs = asNumber(record["linkedAtMs"]);
     if (accountId === null || provider === null || subject === null || linkedAtMs === null) return null;
-    return { accountId, provider, subject, sealedEmail: asString(record["sealedEmail"]), linkedAtMs };
+    const link = { accountId, provider, subject, sealedEmail: asString(record["sealedEmail"]), linkedAtMs };
+    if (record["passkey"] === undefined) return link;
+    const passkey = decodeStoredPasskey(record["passkey"]);
+    return passkey === null ? null : { ...link, passkey };
   },
 };
+
+function decodeStoredPasskey(value: unknown): StoredPasskey | null {
+  const record = asRecord(value);
+  if (record === null) return null;
+  const sealedPublicKey = asString(record["sealedPublicKey"]);
+  const algorithm = PASSKEY_ALGORITHMS.find((candidate) => candidate === record["algorithm"]) ?? null;
+  const signCount = asNumber(record["signCount"]);
+  const userHandle = asString(record["userHandle"]);
+  const createdAtMs = asNumber(record["createdAtMs"]);
+  if (sealedPublicKey === null || algorithm === null || signCount === null || userHandle === null || createdAtMs === null) return null;
+  return { sealedPublicKey, algorithm, signCount, userHandle, createdAtMs };
+}
 
 const accountCodec: JsonCodec<Account> = {
   encode: (value) => value,
@@ -399,5 +451,18 @@ const accountCodec: JsonCodec<Account> = {
     const linkKeys = asStringArray(record["linkKeys"]);
     if (accountId === null || createdAtMs === null || linkKeys === null) return null;
     return { accountId, createdAtMs, linkKeys, googleSubject: asString(record["googleSubject"]) };
+  },
+};
+
+const passwordCredentialCodec: JsonCodec<PasswordCredential> = {
+  encode: (value) => value,
+  decode: (value) => {
+    const record = asRecord(value);
+    if (record === null) return null;
+    const subject = asString(record["subject"]);
+    const passwordHash = asString(record["passwordHash"]);
+    const updatedAtMs = asNumber(record["updatedAtMs"]);
+    if (subject === null || passwordHash === null || updatedAtMs === null) return null;
+    return { subject, passwordHash, updatedAtMs };
   },
 };

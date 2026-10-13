@@ -5,7 +5,8 @@
  *   cd mcp/sasha-slides && npx tsx --test test/account-portal.test.ts
  *
  * Ordered like a visit: the signed-out page, the sign-in round trip and its replay and
- * cross-browser defences, the session cookie, then erase and sign-out, then escaping.
+ * cross-browser defences, Sign in with Apple's form POST callback, the session cookie, then
+ * erase and sign-out, then escaping.
  */
 import { strict as assert } from "node:assert";
 import { createServer } from "node:http";
@@ -15,14 +16,27 @@ import { inMemoryAccountDirectory, type AccountDirectory } from "../http/account
 import { createAccountPortal } from "../http/account-portal";
 import type { AccountId, EraseReport } from "../http/account-vault";
 import { createIdentityProvider, type IdentityProviderSpec } from "../http/identity-providers";
-import { createFakeGitHub, createFakeOidcIssuer, fakeFetch, type FakeGitHub, type FakeOidcIssuer } from "./fake-identity-providers";
+import {
+  createFakeApple,
+  createFakeGitHub,
+  createFakeOidcIssuer,
+  fakeFetch,
+  generateAppleKey,
+  type FakeApple,
+  type FakeGitHub,
+  type FakeOidcIssuer,
+  type IdTokenTamper,
+} from "./fake-identity-providers";
 
 const PUBLIC_URL = "https://slides.example.test";
 const SESSION_SECRET = "a-session-secret-that-is-at-least-thirty-two-bytes-long";
 const SESSION_COOKIE = "sasha_account";
 const SIGNIN_COOKIE = "sasha_signin";
 
-type ProviderName = "google" | "microsoft" | "okta" | "github";
+type ProviderName = "google" | "apple" | "okta" | "github";
+
+const APPLE_KEY = generateAppleKey();
+const APPLE_SUBJECT = "001234.abcdef.0987";
 
 const SPECS: Readonly<Record<ProviderName, IdentityProviderSpec>> = {
   google: {
@@ -30,27 +44,27 @@ const SPECS: Readonly<Record<ProviderName, IdentityProviderSpec>> = {
     name: "google",
     displayName: "Google",
     issuer: "https://accounts.google.com",
-    issuerRule: { kind: "exact", issuers: ["https://accounts.google.com", "accounts.google.com"] },
+    issuers: ["https://accounts.google.com", "accounts.google.com"],
     clientId: "google-client",
     clientSecret: "google-secret",
     scopes: ["openid", "email"],
   },
-  microsoft: {
-    protocol: "oidc",
-    name: "microsoft",
-    displayName: "Microsoft",
-    issuer: "https://login.microsoftonline.com/common/v2.0",
-    issuerRule: { kind: "exact", issuers: ["https://login.microsoftonline.com/common/v2.0"] },
-    clientId: "ms-client",
-    clientSecret: "ms-secret",
-    scopes: ["openid", "email"],
+  apple: {
+    protocol: "apple",
+    name: "apple",
+    displayName: "Apple",
+    clientId: "com.sashaslides.signin",
+    teamId: "TEAM123456",
+    keyId: "ABC123DEFG",
+    privateKey: APPLE_KEY.privateKey,
+    scopes: ["name", "email"],
   },
   okta: {
     protocol: "oidc",
     name: "okta",
     displayName: "Okta",
     issuer: "https://acme.okta.example",
-    issuerRule: { kind: "exact", issuers: ["https://acme.okta.example"] },
+    issuers: ["https://acme.okta.example"],
     clientId: "okta-client",
     clientSecret: "okta-secret",
     scopes: ["openid", "email"],
@@ -69,6 +83,7 @@ type Portal = Readonly<{
   baseUrl: string;
   okta: FakeOidcIssuer;
   github: FakeGitHub;
+  apple: FakeApple;
   directory: AccountDirectory;
   eraseCalls: AccountId[];
   advanceClock: (milliseconds: number) => void;
@@ -108,7 +123,8 @@ async function startPortal(
     userId: 7,
     emails: [{ email: "octo@example.com", primary: true, verified: true }],
   });
-  const network = fakeFetch({ routes: [okta.route, google.route, github.route] });
+  const apple = createFakeApple({ clientId: "com.sashaslides.signin", teamId: "TEAM123456", keyId: "ABC123DEFG", clientPublicKey: APPLE_KEY.publicKey, now });
+  const network = fakeFetch({ routes: [okta.route, google.route, github.route, apple.route] });
   let counter = 0;
   const randomToken = (): string => `random-${String((counter += 1))}-${"x".repeat(32)}`;
   const directory = inMemoryAccountDirectory({ randomToken });
@@ -143,6 +159,7 @@ async function startPortal(
     baseUrl: `http://127.0.0.1:${String(port)}`,
     okta,
     github,
+    apple,
     directory,
     eraseCalls,
     advanceClock: (milliseconds) => {
@@ -246,12 +263,12 @@ describe("signed-out page", () => {
   });
 
   test("every page carries the Sasha Slides icon, and each button its provider's own mark", async () => {
-    const portal = await startPortal({ providers: ["google", "microsoft", "github", "okta"], eraseReport: REVOKED });
+    const portal = await startPortal({ providers: ["google", "apple", "github", "okta"], eraseReport: REVOKED });
     const page = await visit({ url: `${portal.baseUrl}/account`, cookies: {} });
     assert.match(page.body, /<a class="brand"[^>]*><svg[^>]*aria-hidden="true"/, "the header has the icon");
     const marks: readonly { provider: string; mark: RegExp }[] = [
       { provider: "Google", mark: /fill="#4285F4"/ },
-      { provider: "Microsoft", mark: /fill="#F25022"/ },
+      { provider: "Apple", mark: /data-mark="apple"/ },
       { provider: "GitHub", mark: /data-mark="github"/ },
     ];
     for (const row of marks) {
@@ -259,6 +276,8 @@ describe("signed-out page", () => {
       assert.ok(button, `${row.provider} button`);
       assert.match(button[0], row.mark, `${row.provider} mark inside its button`);
     }
+    const appleButton = page.body.match(/<a class="([^"]*)"[^>]*>(?:(?!<\/a>).)*Continue with Apple<\/a>/s);
+    assert.match(appleButton?.[1] ?? "", /\bbutton-apple\b/, "Apple's button is Apple's black style");
     const okta = page.body.match(/<a class="button[^"]*"[^>]*>(?:(?!<\/a>).)*Continue with Okta<\/a>/s);
     assert.ok(okta, "a configured OIDC provider still gets a button");
     assert.doesNotMatch(okta[0], /<svg/, "with no invented logo");
@@ -325,6 +344,144 @@ describe("sign-in round trip", () => {
       cookies: { [SIGNIN_COOKIE]: signinCookie },
     });
     assert.equal(crossed.status, 400);
+  });
+});
+
+describe("Sign in with Apple's form POST callback", () => {
+  type AppleStart = Readonly<{ portal: Portal; signinCookie: string; signinCookieLine: string; location: string }>;
+
+  async function startAppleSignIn(): Promise<AppleStart> {
+    const portal = await startPortal({ providers: ["okta", "apple"], eraseReport: REVOKED });
+    const login = await visit({ url: `${portal.baseUrl}/account/login/apple`, cookies: {} });
+    assert.equal(login.status, 302, login.body);
+    return {
+      portal,
+      signinCookie: cookieValue(login.setCookies, SIGNIN_COOKIE) ?? "",
+      signinCookieLine: cookieLine(login.setCookies, SIGNIN_COOKIE),
+      location: login.location ?? "",
+    };
+  }
+
+  /** What Apple's page POSTs back: code, state and, on first consent, `user`. */
+  function appleForm(start: AppleStart, tamper: IdTokenTamper): Record<string, string> {
+    return {
+      ...start.portal.apple.authorize({
+        authorizationUrl: start.location,
+        subject: APPLE_SUBJECT,
+        email: "x7k2q9@privaterelay.appleid.com",
+        emailVerified: "true",
+        tamper,
+      }),
+    };
+  }
+
+  test("login sends the browser to Apple asking for a form POST, with nonce and PKCE", async () => {
+    const { location } = await startAppleSignIn();
+    const query = new URL(location).searchParams;
+    assert.equal(query.get("response_mode"), "form_post");
+    assert.equal(query.get("scope"), "name email");
+    assert.equal(query.get("redirect_uri"), `${PUBLIC_URL}/account/callback/apple`);
+    assert.equal(query.get("code_challenge_method"), "S256");
+    assert.ok((query.get("nonce") ?? "") !== "", "a nonce");
+  });
+
+  // Apple's POST is cross-site, so a SameSite=Lax cookie would not come back with it.
+  const cookieRows: readonly Readonly<{ provider: "okta" | "apple"; attributes: readonly string[] }>[] = [
+    { provider: "okta", attributes: ["HttpOnly", "Secure", "SameSite=Lax", "Path=/account/callback", "Max-Age=600"] },
+    { provider: "apple", attributes: ["HttpOnly", "Secure", "SameSite=None", "Path=/account/callback/apple", "Max-Age=600"] },
+  ];
+  for (const row of cookieRows) {
+    test(`the pending sign-in cookie for ${row.provider} is ${row.attributes.join("; ")}`, async () => {
+      const portal = await startPortal({ providers: ["okta", "apple"], eraseReport: REVOKED });
+      const login = await visit({ url: `${portal.baseUrl}/account/login/${row.provider}`, cookies: {} });
+      const line = cookieLine(login.setCookies, SIGNIN_COOKIE);
+      assert.deepEqual(line.split("; ").slice(1).sort(), [...row.attributes].sort(), line);
+    });
+  }
+
+  test("a form POST with the bound state signs in as apple + Apple's subject, never by email", async () => {
+    const start = await startAppleSignIn();
+    const { portal } = start;
+    const landed = await visit({
+      url: `${portal.baseUrl}/account/callback/apple`,
+      cookies: { [SIGNIN_COOKIE]: start.signinCookie },
+      form: appleForm(start, {}),
+    });
+    assert.equal(landed.status, 303, landed.body);
+    assert.equal(landed.location, "/account");
+    const session = cookieValue(landed.setCookies, SESSION_COOKIE) ?? "";
+    assert.ok(session !== "", "a session cookie is set");
+    assert.match(cookieLine(landed.setCookies, SESSION_COOKIE), /SameSite=Lax/, "the session cookie stays Lax");
+    const cleared = landed.setCookies.find((line) => line.startsWith(`${SIGNIN_COOKIE}=;`)) ?? "";
+    assert.match(cleared, /Path=\/account\/callback\/apple/, "the Apple cookie is cleared on its own path");
+
+    const page = await visit({ url: `${portal.baseUrl}/account`, cookies: { [SESSION_COOKIE]: session } });
+    assert.ok(page.body.includes("Apple"), page.body);
+    assert.ok(page.body.includes("@privaterelay.appleid.com"), "the relay address as the hint");
+    const csrf = csrfOf(page.body);
+    await visit({ url: `${portal.baseUrl}/account/erase`, cookies: { [SESSION_COOKIE]: session }, form: { csrf, confirm: "yes" } });
+    const keyed = await portal.directory.findOrCreateByIdentity({ provider: "apple", subject: APPLE_SUBJECT, email: null });
+    assert.equal(portal.eraseCalls[0], keyed);
+  });
+
+  const nowSeconds = Math.floor(Date.parse("2026-10-11T12:00:00Z") / 1000);
+  const rows: readonly Readonly<{
+    name: string;
+    cookie: "bound" | "none" | "another sign-in's";
+    form: (start: AppleStart) => Record<string, string>;
+    status: number;
+    says: RegExp;
+  }>[] = [
+    { name: "control: bound cookie, honest token", cookie: "bound", form: (start) => appleForm(start, {}), status: 303, says: /^$/ },
+    { name: "no pending sign-in cookie", cookie: "none", form: (start) => appleForm(start, {}), status: 400, says: /Please sign in again/ },
+    { name: "another sign-in's cookie", cookie: "another sign-in's", form: (start) => appleForm(start, {}), status: 400, says: /Please sign in again/ },
+    { name: "a nonce from another sign-in", cookie: "bound", form: (start) => appleForm(start, { claims: { nonce: "stolen" } }), status: 400, says: /Sign-in did not complete/ },
+    { name: "a token for another Services ID", cookie: "bound", form: (start) => appleForm(start, { claims: { aud: "com.example.other" } }), status: 400, says: /Sign-in did not complete/ },
+    { name: "an expired token", cookie: "bound", form: (start) => appleForm(start, { claims: { exp: nowSeconds - 3600 } }), status: 400, says: /Sign-in did not complete/ },
+    {
+      name: "the user cancelling at Apple",
+      cookie: "bound",
+      form: (start) => ({ error: "user_cancelled_authorize", state: new URL(start.location).searchParams.get("state") ?? "" }),
+      status: 400,
+      says: /Sign-in did not complete/,
+    },
+  ];
+  for (const row of rows) {
+    test(`a callback POST with ${row.name} → ${String(row.status)}`, async () => {
+      const start = await startAppleSignIn();
+      const cookies: Record<string, string> =
+        row.cookie === "bound" ? { [SIGNIN_COOKIE]: start.signinCookie } : row.cookie === "none" ? {} : { [SIGNIN_COOKIE]: "random-999-forged-state" };
+      const answer = await visit({ url: `${start.portal.baseUrl}/account/callback/apple`, cookies, form: row.form(start) });
+      assert.equal(answer.status, row.status, answer.body);
+      assert.match(answer.body, row.says);
+      assert.equal(cookieValue(answer.setCookies, SESSION_COOKIE) !== null, row.status === 303, "a session only on success");
+    });
+  }
+
+  test("a replayed form POST is rejected: the state is single use", async () => {
+    const start = await startAppleSignIn();
+    const form = appleForm(start, {});
+    const url = `${start.portal.baseUrl}/account/callback/apple`;
+    assert.equal((await visit({ url, cookies: { [SIGNIN_COOKIE]: start.signinCookie }, form })).status, 303);
+    const replay = await visit({ url, cookies: { [SIGNIN_COOKIE]: start.signinCookie }, form });
+    assert.equal(replay.status, 400);
+    assert.equal(cookieValue(replay.setCookies, SESSION_COOKIE), null);
+  });
+
+  test("Apple's callback takes only a form POST; the other providers' callbacks only a GET", async () => {
+    const start = await startAppleSignIn();
+    const { baseUrl } = start.portal;
+    const asGet = await visit({ url: `${baseUrl}/account/callback/apple?${new URLSearchParams(appleForm(start, {})).toString()}`, cookies: { [SIGNIN_COOKIE]: start.signinCookie } });
+    assert.equal(asGet.status, 405);
+    const json = await fetch(`${baseUrl}/account/callback/apple`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/json", cookie: `${SIGNIN_COOKIE}=${start.signinCookie}` },
+      body: JSON.stringify(appleForm(start, {})),
+    });
+    assert.equal(json.status, 415);
+    const oktaPost = await visit({ url: `${baseUrl}/account/callback/okta`, cookies: {}, form: { code: "x", state: "y" } });
+    assert.equal(oktaPost.status, 405);
   });
 });
 
@@ -459,13 +616,15 @@ describe("escaping", () => {
     assert.ok(page.body.includes("&quot;"), "quotes escaped");
   });
 
-  test("pages forbid scripts and framing", async () => {
+  test("pages forbid framing and every script but the passkey script", async () => {
     const portal = await startPortal({ providers: ["okta"], eraseReport: REVOKED });
     const response = await fetch(`${portal.baseUrl}/account`);
     const policy = response.headers.get("content-security-policy") ?? "";
     assert.match(policy, /default-src 'none'/);
     assert.match(policy, /frame-ancestors 'none'/);
+    assert.ok(policy.split("; ").includes(`script-src ${PUBLIC_URL}/account/passkey.js`), policy);
     assert.equal(response.headers.get("cache-control"), "no-store");
-    assert.ok(!(await response.text()).includes("<script"));
+    const scripts = (await response.text()).match(/<script[^>]*>/g) ?? [];
+    assert.deepEqual(scripts, [`<script src="${PUBLIC_URL}/account/passkey.js" defer>`], "no inline script");
   });
 });
