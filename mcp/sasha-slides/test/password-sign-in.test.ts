@@ -72,7 +72,10 @@ async function startPortal(
     credentials,
     directory,
     mailSender: createGmailSender({
-      config: { clientId: "mail-client", clientSecret: "mail-secret", refreshToken: "mail-refresh", from: { address: "noreply@slides.example.test", displayName: "Sasha Slides" } },
+      config: {
+        credentials: { kind: "refresh-token", clientId: "mail-client", clientSecret: "mail-secret", refreshToken: "mail-refresh" },
+        from: { address: "noreply@slides.example.test", displayName: "Sasha Slides" },
+      },
       fetch: network.fetch,
       now,
       randomToken,

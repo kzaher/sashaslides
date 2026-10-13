@@ -123,7 +123,13 @@ async function main(): Promise<number> {
   }
   const document = `${JSON.stringify({ clientId, clientSecret, refreshToken, from }, null, 2)}\n`;
   // Checked with the server's own parser, so a file that is written is a file that loads.
-  const check = parseMailSenderConfig({ text: document });
+  const check = parseMailSenderConfig({
+    text: document,
+    // A refresh-token document names no key file, so a read would be a bug.
+    readKeyFile: () => {
+      throw new Error("a refresh-token mail sender has no key file");
+    },
+  });
   if (check.kind === "error") {
     process.stderr.write(`not writing ${outputPath}: ${check.message}\n`);
     return 1;

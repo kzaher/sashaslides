@@ -17,7 +17,7 @@
  */
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { describeAuthFailure, loadClientCredentials } from "../google-auth";
+import { assertNever, describeAuthFailure, loadClientCredentials } from "../google-auth";
 import { storeAccountDirectory } from "./account-directory";
 import { accountCallbackUrl, createAccountPortal, parseSessionSecret, ACCOUNT_PATH, type AccountPortal } from "./account-portal";
 import type { AccountEraser, AccountVault } from "./account-vault";
@@ -162,7 +162,7 @@ function loadPasswordSignIn(
     kind: "ok",
     passwordSignIn: { service, trustedProxies: proxies.proxies },
     banner: [
-      `email sign-in: on, mailing as ${emailHint(config.config.from.address)} through the Gmail API`,
+      `email sign-in: on, mailing as ${emailHint(config.config.from.address)} through the Gmail API (${describeMailCredentials(config.config)})`,
       `email sign-in: client addresses from X-Real-IP are believed from ${proxies.proxies.description}`,
     ],
   };
@@ -180,9 +180,24 @@ function loadMailSenderConfig(
   } catch (cause) {
     return { kind: "failed", message: `cannot read --mail-sender ${path}: ${cause instanceof Error ? cause.message : String(cause)}` };
   }
-  const parsed = parseMailSenderConfig({ text });
+  // A relative service account key path is read from beside the mail-sender file, not the cwd.
+  const configDirectory = dirname(path);
+  const parsed = parseMailSenderConfig({ text, readKeyFile: (keyPath) => readFileSync(resolve(configDirectory, keyPath), "utf-8") });
   if (parsed.kind === "error") return { kind: "failed", message: `--mail-sender ${path}: ${parsed.message}` };
   return { kind: "ok", config: parsed.config };
+}
+
+/** The banner's account of how mail is authorised, with addresses masked like the From. */
+function describeMailCredentials(config: MailSenderConfig): string {
+  const { credentials } = config;
+  switch (credentials.kind) {
+    case "refresh-token":
+      return "refresh token";
+    case "service-account":
+      return `service account, acting as ${emailHint(credentials.impersonate)}`;
+    default:
+      return assertNever(credentials);
+  }
 }
 
 function loadSpecs(

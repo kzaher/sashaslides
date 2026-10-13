@@ -8,7 +8,7 @@
 #     src/       build context, replaced on every deploy by deploy/publish.sh
 #     data/      oauth-store.json + account-keys.json   (owned by uid 10100, the container user)
 #     secrets/   0700: connector.env (SASHA_MASTER_KEY, SASHA_SESSION_SECRET),
-#                google_oauth_web.json, identity-providers.json, apple-signin.p8, mail-sender.json (0600, owned by uid 10100)
+#                google_oauth_web.json, identity-providers.json, apple-signin.p8, mail-sender.json, gmail-service-account.json (0600, owned by uid 10100)
 #
 # SASHA_MASTER_KEY wraps every account key in data/account-keys.json: losing it, or
 # overwriting it, makes every user's stored grant unreadable. Back it up OFF this server.
@@ -41,6 +41,7 @@ services:
       - ${SASHA_CONNECTOR_HOME:-/root/sasha-connector}/secrets/identity-providers.json:/run/secrets/identity-providers.json:ro
       - ${SASHA_CONNECTOR_HOME:-/root/sasha-connector}/secrets/apple-signin.p8:/run/secrets/apple-signin.p8:ro
       - ${SASHA_CONNECTOR_HOME:-/root/sasha-connector}/secrets/mail-sender.json:/run/secrets/mail-sender.json:ro
+      - ${SASHA_CONNECTOR_HOME:-/root/sasha-connector}/secrets/gmail-service-account.json:/run/secrets/gmail-service-account.json:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s

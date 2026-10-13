@@ -40,8 +40,9 @@ CONNECTOR_HOME="/root/sasha-connector"
 CONNECTOR_UID="10100"
 # Secrets copied from .auth/ when present and mounted into the connector by the same names
 # (mcp/sasha-slides/deploy/docker-compose.yml). apple-signin.p8 is the Sign in with Apple key;
-# mail-sender.json is the Gmail sender for email sign-in (mcp/sasha-slides/e2e/gmail-sender-token.ts).
-SECRET_FILES="google_oauth_web.json identity-providers.json apple-signin.p8 mail-sender.json"
+# mail-sender.json is the Gmail sender for email sign-in; with a service account it names
+# gmail-service-account.json, the domain-wide-delegation key it signs with.
+SECRET_FILES="google_oauth_web.json identity-providers.json apple-signin.p8 mail-sender.json gmail-service-account.json"
 # The server's host keys are pinned in the repo, so a rebuilt container (empty ~/.ssh) deploys
 # without a prompt and still refuses an impostor. Refresh with: ssh-keyscan 78.46.91.218 > deploy/known_hosts
 KNOWN_HOSTS="$(cd "$(dirname "$0")" && pwd)/known_hosts"
