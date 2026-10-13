@@ -54,7 +54,10 @@ Important:
   disabled, Ctrl+S saves nothing, and a fresh tab still holds the previous build (three deploys lost in a row).
   **Open the file by its name in the file list**, never "the last model" or a uri suffix (uris carry no names), or a
   reordering silently writes the sidebar over `Code.gs`. Ship the text in ~48 KB chunks into a `window` array first.
-  Confirm every deploy by re-reading lengths in a FRESH editor tab. See `mcp/sasha-slides/addon/deploy-via-ide.ts`.
+  Confirm every deploy by re-reading lengths in a SECOND editor tab while the first stays open: the Save button is
+  also disabled while a save is IN FLIGHT, and closing the tab then discards it (four deploys lost that way on
+  2026-10-13, each reported "saved"). `deploy-via-ide.ts` now does this itself. See
+  `mcp/sasha-slides/addon/deploy-via-ide.ts`.
 * **"Saving project..." is a permanently-present hidden aria-live node** in the Apps Script editor — it is NOT a save
   indicator. Use the `aria-label="Save project to Drive"` button's `disabled` state, and confirm persistence by
   reloading the page and re-reading the model length.

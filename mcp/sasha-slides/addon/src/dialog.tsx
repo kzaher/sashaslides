@@ -276,6 +276,7 @@ function followRevisions(): void {
       // Claude Code's candidates sat on "loading 01.html..." for minutes with no call in flight,
       // and one click (one dispatch, so one pump) loaded both at once. `pump` only starts what is
       // missing, so running it on this clock bounds any such stall to one tick.
+      reportStalledLoads();
       pump();
       await checkForRevision();
     } finally {
@@ -284,6 +285,22 @@ function followRevisions(): void {
     }
   };
   setTimeout(() => void tick(), REVISION_POLL_VISIBLE_MS);
+}
+
+/**
+ * A candidate still unrequested at a tick means the dispatch that offered it never started its load
+ * -- the stall measured 2026-10-13, whose cause is not known. Say so with the events that led
+ * here, so the next occurrence explains itself in the console instead of needing a witness.
+ */
+function reportStalledLoads(): void {
+  const offer = offerOf(state);
+  if (offer === null) return;
+  const stalled = htmlToLoad(offer).map((frame) => frame.index);
+  if (stalled.length === 0) return;
+  console.warn(
+    `[sasha-slides] recovered a stalled load: candidates ${stalled.join(", ")} of ${offer.proposal.proposalId} ` +
+      `were never requested (status ${state.status}). Recent events:\n${recentEvents.join("\n")}`,
+  );
 }
 
 async function checkForRevision(): Promise<void> {
@@ -378,7 +395,13 @@ async function announceViewers(observer: Observer): Promise<void> {
   await observer.settled();
 }
 
+/** The last events, newest last, so a recovered stall can say what led to it (`reportStalledLoads`). */
+const recentEvents: string[] = [];
+const RECENT_EVENT_LIMIT = 40;
+
 function dispatch(event: PickerEvent): void {
+  recentEvents.push(`${new Date().toISOString().slice(11, 23)} ${event.kind}${"index" in event ? ` ${String(event.index)}` : ""}`);
+  if (recentEvents.length > RECENT_EVENT_LIMIT) recentEvents.shift();
   const next = reducePicker(state, event);
   if (next === state) return;
   state = next;

@@ -107,28 +107,29 @@ async function sendBuffer(client: CdpClient, text: string): Promise<void> {
 
 
 async function save(client: CdpClient): Promise<void> {
-  // Ctrl+S is what the editor binds; the toolbar button is an aria-label lookup away if it regresses.
-  // The keys only reach the editor when it has focus. Measured 2026-10-12: without this the Dialog
-  // and Report saves were silently dropped (fresh tab showed the old lengths, "save idle" reported).
+  // THE SAVE BUTTON IS THE ONLY HONEST SIGNAL, in both directions. Measured 2026-10-13: waiting only
+  // for it to be disabled passed instantly when the editor had not yet marked the file dirty, so
+  // "save idle" was printed and nothing was saved (a fresh tab held the previous build, twice). So
+  // first wait for it to ENABLE (the edit registered), then press it with a trusted click, then wait
+  // for it to disable again. Ctrl+S with the editor focused is the fallback if the click misses.
+  const button = `[...document.querySelectorAll('button,[role=button]')].find(x => (x.getAttribute('aria-label')||'').trim().startsWith('Save project'))`;
+  const disabled = `(() => { const b = ${button}; return b ? String(b.disabled === true || b.getAttribute('aria-disabled') === 'true') : 'false'; })()`;
   await client.Page.bringToFront();
-  await ev(client, `(() => { const e = window.monaco.editor.getEditors()[0]; if (e) e.focus(); return 'ok'; })()`);
-  await client.Input.dispatchKeyEvent({ type: "keyDown", modifiers: 2, key: "s", code: "KeyS", windowsVirtualKeyCode: 83, nativeVirtualKeyCode: 83 });
-  await client.Input.dispatchKeyEvent({ type: "keyUp", modifiers: 2, key: "s", code: "KeyS", windowsVirtualKeyCode: 83, nativeVirtualKeyCode: 83 });
-  // The page keeps a hidden aria-live node reading "Saving project...", so body text is NOT a
-  // save indicator. The toolbar button's disabled state is: the editor disables it when there
-  // is nothing pending. Persistence is still confirmed by reloading and re-reading the model.
-  const quiet = await until({
-    client,
-    budgetMs: 15000,
-    label: "the Save button to go idle",
-    expression: `(() => {
-      const b = [...document.querySelectorAll('button,[role=button]')]
-        .find(x => (x.getAttribute('aria-label')||'').trim().startsWith('Save project'));
-      if (!b) return 'false';
-      return String(b.disabled === true || b.getAttribute('aria-disabled') === 'true');
-    })()`,
-  });
-  console.log(`  save ${quiet ? "idle (nothing pending)" : "still pending after 15s"}`);
+  const dirty = await until({ client, budgetMs: 8000, label: "the Save button to enable (edit registered)", expression: `String(${disabled} === 'false')` });
+  if (!dirty) throw new Error("the editor never marked the file unsaved; nothing would be saved");
+  const at = JSON.parse(await ev(client, `(() => { const r = (${button}).getBoundingClientRect(); return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 }); })()`)) as { x: number; y: number };
+  for (const type of ["mouseMoved", "mousePressed", "mouseReleased"] as const) {
+    await client.Input.dispatchMouseEvent({ type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+  }
+  let saved = await until({ client, budgetMs: 15000, label: "the Save button to go idle after the click", expression: disabled });
+  if (!saved) {
+    await ev(client, `(() => { const e = window.monaco.editor.getEditors()[0]; if (e) e.focus(); return 'ok'; })()`);
+    await client.Input.dispatchKeyEvent({ type: "keyDown", modifiers: 2, key: "s", code: "KeyS", windowsVirtualKeyCode: 83, nativeVirtualKeyCode: 83 });
+    await client.Input.dispatchKeyEvent({ type: "keyUp", modifiers: 2, key: "s", code: "KeyS", windowsVirtualKeyCode: 83, nativeVirtualKeyCode: 83 });
+    saved = await until({ client, budgetMs: 15000, label: "the Save button to go idle after Ctrl+S", expression: disabled });
+  }
+  if (!saved) throw new Error("the save never completed");
+  console.log("  saved (Save button went enabled -> idle)");
 }
 
 
@@ -167,8 +168,8 @@ async function selectFile(client: CdpClient, name: string): Promise<boolean> {
   return true;
 }
 
-/** Write `text` into whichever model the editor is currently showing. */
-async function setActiveModel(client: CdpClient, text: string): Promise<void> {
+/** Write `text` into the active model; false when it was already there (nothing to save). */
+async function setActiveModel(client: CdpClient, text: string): Promise<boolean> {
   await sendBuffer(client, text);
   const set = await ev(client, `(() => {
     const editors = window.monaco.editor.getEditors();
@@ -179,11 +180,20 @@ async function setActiveModel(client: CdpClient, text: string): Promise<void> {
     // AN EDIT, NOT setValue. Measured 2026-10-13: setValue's "flush" change left the editor's Save
     // button disabled, Ctrl+S saved nothing and a fresh tab still had the previous build, three
     // deploys in a row. A replace through executeEdits is an ordinary change and marks the file dirty.
-    editor.executeEdits('deploy-via-ide', [{ range: model.getFullModelRange(), text: window.__sasha.join('') }]);
+    const text = window.__sasha.join('');
+    // Identical text is no edit at all, so the editor has nothing to save: say so instead of waiting.
+    if (model.getValue() === text) return 'same:' + text.length;
+    editor.executeEdits('deploy-via-ide', [{ range: model.getFullModelRange(), text }]);
     return String(model.getValue().length);
   })()`);
+  written.push(text.length);
+  if (set.startsWith("same:")) {
+    console.log(`  unchanged (${text.length} chars already in the editor)`);
+    return false;
+  }
   if (!/^\d+$/.test(set)) throw new Error(set);
   console.log(`  active model now holds ${set} chars (disk ${text.length})`);
+  return true;
 }
 
 
@@ -276,10 +286,45 @@ async function pushEverything(client: CdpClient): Promise<boolean> {
     console.log(`${surface.file}:`);
     if (surface.kind === "html" && !(await createFile(client, { name: surface.file, kind: "html" }))) return false;
     if (!(await selectFile(client, surface.file))) return false;
-    await setActiveModel(client, readFileSync(`${DIST}/${surface.file}`, "utf-8"));
-    await save(client);
+    if (await setActiveModel(client, readFileSync(`${DIST}/${surface.file}`, "utf-8"))) await save(client);
   }
   return true;
+}
+
+/** The length of every file this run wrote, for `confirmPersisted`. */
+const written: number[] = [];
+
+/**
+ * READ IT BACK FROM A SECOND TAB, WITH THE FIRST STILL OPEN. Measured 2026-10-13: the Save button is
+ * disabled while a save is still IN FLIGHT, so "idle" does not mean "stored", and closing the editor
+ * tab at that moment discarded the save -- four deploys were lost that way, each reported as saved.
+ * A second tab loads what Google stored; only that proves the deploy.
+ */
+async function confirmPersisted(): Promise<boolean> {
+  if (written.length === 0) return true;
+  const tab = await CDP.New({ port: PORT });
+  const second: CdpClient = await CDP({ port: PORT, target: tab.id });
+  try {
+    await second.Page.enable();
+    await second.Page.navigate({ url: `https://script.google.com/home/projects/${SCRIPT_ID}/edit` });
+    const deadline = Date.now() + 30_000;
+    let stored: number[] = [];
+    while (Date.now() < deadline) {
+      const lengths = await ev(second, `(() => window.monaco && monaco.editor.getModels().length > 0 ? JSON.stringify(monaco.editor.getModels().map(m => m.getValue().length)) : '[]')()`);
+      stored = JSON.parse(lengths) as number[];
+      if (stored.length > 0 && written.every((length) => stored.includes(length))) {
+        console.log(`  confirmed from a second tab: ${written.join(", ")} chars stored`);
+        return true;
+      }
+      if (stored.length > 0) await second.Page.reload({});
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    console.error(`  NOT STORED: wrote ${written.join(", ")}, a second tab sees ${stored.join(", ")}`);
+    return false;
+  } finally {
+    await second.close();
+    await CDP.Close({ port: PORT, id: tab.id });
+  }
 }
 
 async function main(): Promise<void> {
@@ -290,14 +335,12 @@ async function main(): Promise<void> {
   switch (step) {
     case "code": {
       if (!(await selectFile(client, "Code.gs"))) { process.exitCode = 1; break; }
-      await setActiveModel(client, readFileSync(`${DIST}/Code.gs`, "utf-8"));
-      await save(client);
+      if (await setActiveModel(client, readFileSync(`${DIST}/Code.gs`, "utf-8"))) await save(client);
       break;
     }
     case "sidebar": {
       if (!(await selectFile(client, "Sidebar.html"))) { process.exitCode = 1; break; }
-      await setActiveModel(client, readFileSync(`${DIST}/Sidebar.html`, "utf-8"));
-      await save(client);
+      if (await setActiveModel(client, readFileSync(`${DIST}/Sidebar.html`, "utf-8"))) await save(client);
       break;
     }
     case "dialog": {
@@ -306,8 +349,7 @@ async function main(): Promise<void> {
         process.exitCode = 1;
         break;
       }
-      await setActiveModel(client, readFileSync(`${DIST}/Dialog.html`, "utf-8"));
-      await save(client);
+      if (await setActiveModel(client, readFileSync(`${DIST}/Dialog.html`, "utf-8"))) await save(client);
       break;
     }
     case "report": {
@@ -316,15 +358,13 @@ async function main(): Promise<void> {
         process.exitCode = 1;
         break;
       }
-      await setActiveModel(client, readFileSync(`${DIST}/Report.html`, "utf-8"));
-      await save(client);
+      if (await setActiveModel(client, readFileSync(`${DIST}/Report.html`, "utf-8"))) await save(client);
       break;
     }
     case "manifest": {
       if (!(await selectFile(client, "appsscript.json"))) { process.exitCode = 1; break; }
       const manifest = readFileSync(`${DIST}/appsscript.json`, "utf-8");
-      await setActiveModel(client, manifest);
-      await save(client);
+      if (await setActiveModel(client, manifest)) await save(client);
       break;
     }
     case "create": {
@@ -350,6 +390,8 @@ async function main(): Promise<void> {
     default:
       return assertNever(step);
   }
+  // Before closing the editor tab, which would abort a save still in flight.
+  if (!(await confirmPersisted())) process.exitCode = 1;
   await client.close();
 }
 void main();
