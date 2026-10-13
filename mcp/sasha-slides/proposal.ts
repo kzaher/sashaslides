@@ -1336,42 +1336,74 @@ export async function listOpenWork(
     return { kind: "drive-failed", reason: describeCause(cause) };
   }
 
-  const items: OpenWorkItem[] = [];
-  for (const folder of folders) {
+  const proposalIds = folders.flatMap((folder) => {
     const proposalId = folder.appProperties["proposalId"];
-    if (proposalId === undefined || proposalId === "") continue;
-    const listed = await listCandidates({ env, proposalId });
-    if (listed.kind !== "ok") {
-      // One unreadable proposal must not hide the others, and it must not be silently dropped
-      // either: a session told "nothing is waiting" would stop, which is the worst answer.
-      items.push({
-        proposalId,
-        candidateCount: 0,
-        unresolved: 0,
-        unreadableReason: listed.kind === "drive-failed" ? listed.reason : "the proposal could not be read",
-      });
-      continue;
-    }
-    const counts = await countUnresolvedThreads({
-      env: feedback,
-      targets: listed.candidates.map((candidate) => ({
-        kind: "candidate" as const,
-        proposalId,
-        slideIndex: candidate.index,
-        fileId: candidate.fileId,
-      })),
-    });
-    items.push({
-      proposalId,
-      candidateCount: listed.candidates.length,
-      // A candidate whose count Drive would not give is counted as zero rather than guessed at.
-      // `unreadableReason` is where "we could not tell" is said; the number never carries it.
-      unresolved: counts.reduce((total, count) => total + (count.unresolved ?? 0), 0),
-      unreadableReason: null,
-    });
-  }
+    return proposalId === undefined || proposalId === "" ? [] : [proposalId];
+  });
+  // OVERLAPPED, NOT ONE BY ONE: an account with 28 proposals waited 36 s for this in series
+  // (measured 2026-10-13 on sashaslides.com). Each proposal's own calls stay in order, so at most
+  // OPEN_WORK_CONCURRENCY Drive calls are in flight -- enough to hide the latency, few enough
+  // not to trip Drive's per-user rate limit.
+  const items = await mapWithConcurrency(proposalIds, OPEN_WORK_CONCURRENCY, (proposalId) =>
+    openWorkItem({ env, feedback, proposalId }),
+  );
 
   return { kind: "ok", items: [...items].sort(byWhatNeedsAnsweringFirst) };
+}
+
+const OPEN_WORK_CONCURRENCY = 8;
+
+async function openWorkItem(
+  options: Readonly<{ env: ProposalEnvironment; feedback: FeedbackEnvironment; proposalId: string }>,
+): Promise<OpenWorkItem> {
+  const { env, feedback, proposalId } = options;
+  const listed = await listCandidates({ env, proposalId });
+  if (listed.kind !== "ok") {
+    // One unreadable proposal must not hide the others, and it must not be silently dropped
+    // either: a session told "nothing is waiting" would stop, which is the worst answer.
+    return {
+      proposalId,
+      candidateCount: 0,
+      unresolved: 0,
+      unreadableReason: listed.kind === "drive-failed" ? listed.reason : "the proposal could not be read",
+    };
+  }
+  const counts = await countUnresolvedThreads({
+    env: feedback,
+    targets: listed.candidates.map((candidate) => ({
+      kind: "candidate" as const,
+      proposalId,
+      slideIndex: candidate.index,
+      fileId: candidate.fileId,
+    })),
+  });
+  return {
+    proposalId,
+    candidateCount: listed.candidates.length,
+    // A candidate whose count Drive would not give is counted as zero rather than guessed at.
+    // `unreadableReason` is where "we could not tell" is said; the number never carries it.
+    unresolved: counts.reduce((total, count) => total + (count.unresolved ?? 0), 0),
+    unreadableReason: null,
+  };
+}
+
+/** `work` over every item, at most `limit` at a time; results keep the input order. */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const at = next;
+      next += 1;
+      results[at] = await work(items[at] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 /** An open comment outranks being newer; ties go to the newer proposal (ids sort by time). */

@@ -121,3 +121,40 @@ test("an unanswered comment outranks being newer", async () => {
   assert.equal(work.items[0]?.unresolved, 1);
   assert.equal(work.items[1]?.unresolved, 0);
 });
+
+/**
+ * OPEN_WORK MUST NOT WALK THE PROPOSALS ONE BY ONE. Measured 2026-10-13 on sashaslides.com: an
+ * account with 28 proposals waited 36 s for `open_work`, because every proposal's listing,
+ * manifest and comment counts were awaited in series (~74 Drive round trips). The walk now
+ * overlaps them, up to a cap so a large account does not trip Drive's rate limit.
+ */
+test("open_work overlaps its Drive calls, within a cap", async () => {
+  const built = harness();
+  for (let index = 0; index < 12; index += 1) await stage({ built, label: `p${String(index)}` });
+
+  let inFlight = 0;
+  let peak = 0;
+  // Each call takes a turn of the event loop, the way a network call would.
+  const slowed = <A extends unknown[], R>(call: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        return await call(...args);
+      } finally {
+        inFlight -= 1;
+      }
+    };
+  const drive = built.proposal.drive;
+  const comments = built.feedback.channel;
+  const work = await listOpenWork({
+    env: { ...built.proposal, drive: { ...drive, listFiles: slowed(drive.listFiles), readTextFile: slowed(drive.readTextFile) } },
+    feedback: { ...built.feedback, channel: { ...comments, listComments: slowed(comments.listComments) } },
+  });
+
+  assert.equal(work.kind, "ok");
+  assert.equal(work.kind === "ok" ? work.items.length : 0, 12);
+  assert.ok(peak > 1, `calls never overlapped (peak ${String(peak)})`);
+  assert.ok(peak <= 8, `more than 8 calls at once (peak ${String(peak)})`);
+});
