@@ -294,7 +294,7 @@ export function createSashaSlidesServer(
         "SLIDE instead of adding a new one, pass `merge` (the slide; read it first with " +
         "slide_structure) and give each candidate only the NEW parts plus `remove`, the object ids " +
         "it replaces. Each new element's CSS z-index on its top-level box places it: negative goes " +
-        "behind the slide's kept content, anything else in front.",
+        "behind the slide's kept content (still in front of a full-page background), anything else in front.",
       inputSchema: {
         slides: z
           .array(

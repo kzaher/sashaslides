@@ -219,3 +219,54 @@ test("nothing to remove and nothing to add is refused rather than sent as an emp
     refusal: { kind: "empty" },
   });
 });
+
+test("a negative goes IN FRONT of the slide's full-page backdrop and behind its content (live bug 2026-10-14)", () => {
+  const before = ["background", "accent_bar", "title"];
+  const plan = planned(
+    planMerge({
+      pageObjectId: PAGE,
+      existingObjectIds: before,
+      fullPageObjectIds: ["background"],
+      remove: [],
+      newElements: [element({ objectId: "panel", zIndex: -1 }), element({ objectId: "badge", zIndex: 1 })],
+    }),
+  );
+  assert.deepEqual(applied({ before, requests: plan.requests }), ["background", "panel", "accent_bar", "title", "badge"]);
+});
+
+test("a backdrop of several full-page layers keeps its order; a full-page overlay further forward is content", () => {
+  const before = ["paper", "texture", "photo", "scrim", "title"];
+  const plan = planned(
+    planMerge({
+      pageObjectId: PAGE,
+      existingObjectIds: before,
+      fullPageObjectIds: ["paper", "texture", "scrim"],
+      remove: [],
+      newElements: [element({ objectId: "wash", zIndex: -3 }), element({ objectId: "shade", zIndex: -1 })],
+    }),
+  );
+  assert.deepEqual(applied({ before, requests: plan.requests }), ["paper", "texture", "wash", "shade", "photo", "scrim", "title"]);
+});
+
+test("a removed backdrop is not moved, and with no negatives the backdrop is left alone", () => {
+  const removedBackdrop = planned(
+    planMerge({
+      pageObjectId: PAGE,
+      existingObjectIds: ["background", "title"],
+      fullPageObjectIds: ["background"],
+      remove: ["background"],
+      newElements: [element({ objectId: "panel", zIndex: -1 })],
+    }),
+  );
+  assert.deepEqual(applied({ before: ["background", "title"], requests: removedBackdrop.requests }), ["panel", "title"]);
+  const onlyInFront = planned(
+    planMerge({
+      pageObjectId: PAGE,
+      existingObjectIds: ["background", "title"],
+      fullPageObjectIds: ["background"],
+      remove: [],
+      newElements: [element({ objectId: "badge", zIndex: 1 })],
+    }),
+  );
+  assert.equal(onlyInFront.requests.filter((request) => "updatePageElementsZOrder" in request).length, 0);
+});

@@ -18,6 +18,11 @@
 //     the lowest z-index ends up rearmost. One request per element, rather than one request naming
 //     them all, because a single SEND_TO_BACK's treatment of several ids' relative order is not
 //     something this code has measured.
+//   * "behind" means behind the kept CONTENT, not behind the slide's BACKDROP. Measured live on
+//     2026-10-14: a z-index -1 panel sent to the back landed under the deck's full-bleed
+//     background rectangle and vanished. So the rearmost run of kept elements that cover the whole
+//     page (`backdropObjectIds`, from sashaPageElements) is sent to the back AFTER the negatives,
+//     rearmost last, which leaves it in its own order behind them.
 //
 // EVERYTHING IS ONE batchUpdate, which Slides applies atomically: either the slide is redesigned
 // or it is untouched. And a `remove` id that is not on the slide NOW is refused before anything is
@@ -55,11 +60,14 @@ export type MergePlan =
 export function planMerge({
   pageObjectId,
   existingObjectIds,
+  fullPageObjectIds = [],
   remove,
   newElements,
 }: {
   pageObjectId: string;
   existingObjectIds: readonly string[];
+  /** The existing elements whose box covers the whole page; the rearmost run of them is the backdrop. */
+  fullPageObjectIds?: readonly string[];
   remove: readonly string[];
   newElements: readonly StackedElement[];
 }): MergePlan {
@@ -107,9 +115,39 @@ export function planMerge({
     updatePageElementsZOrder: { pageElementObjectIds: [objectId], operation: "SEND_TO_BACK" },
   }));
 
-  const requests = [...deletes, ...creates, ...sendToBack];
+  // Only when something went behind: otherwise the backdrop is already rearmost and moving it is noise.
+  const backdrop = createdBehind.length === 0 ? [] : backdropOf({ existingObjectIds, fullPageObjectIds, removed: removedSet });
+  const backdropToBack: SlidesApiRequest[] = [...backdrop].reverse().map((objectId) => ({
+    updatePageElementsZOrder: { pageElementObjectIds: [objectId], operation: "SEND_TO_BACK" },
+  }));
+
+  const requests = [...deletes, ...creates, ...sendToBack, ...backdropToBack];
   if (requests.length === 0) return { kind: "refused", refusal: { kind: "empty" } };
   return { kind: "planned", requests, createdObjectIds };
+}
+
+/**
+ * The slide's backdrop: the kept elements, rearmost first, up to the first one that does not cover
+ * the whole page. A full-page element further forward (a translucent overlay over a photo) is
+ * content, and stays in front of the negatives.
+ */
+export function backdropOf({
+  existingObjectIds,
+  fullPageObjectIds,
+  removed,
+}: {
+  existingObjectIds: readonly string[];
+  fullPageObjectIds: readonly string[];
+  removed: ReadonlySet<string>;
+}): readonly string[] {
+  const fullPage = new Set(fullPageObjectIds);
+  const backdrop: string[] = [];
+  for (const objectId of existingObjectIds) {
+    if (removed.has(objectId)) continue;
+    if (!fullPage.has(objectId)) break;
+    backdrop.push(objectId);
+  }
+  return backdrop;
 }
 
 /** The sentence the slides window shows for a refusal. */

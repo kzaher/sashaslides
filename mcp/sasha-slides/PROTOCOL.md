@@ -805,7 +805,9 @@ CSS `z-index` of its TOP-LEVEL box — the outermost box around it that sets one
 the root stacking context; a nested child's z-index only orders things inside its box. The kept
 existing elements are ONE layer at z-index 0:
 
-- negative → behind every kept element; among themselves the lowest is rearmost;
+- negative → behind every kept element of the CONTENT, but in front of the slide's BACKDROP (the
+  rearmost run of kept elements whose box covers the whole page, e.g. a full-bleed background
+  rectangle); among themselves the lowest is rearmost;
 - `auto` / 0 / positive → in front of every kept element, the highest frontmost;
 - ties keep document order.
 
@@ -824,7 +826,10 @@ The add-on (addon/src/merge-apply.ts, addon/src/slide-merge.ts) does, in order:
    a silent skip, and never a `deleteObject` that would find the id on another slide;
 5. sends ONE `batchUpdate` (atomic): `deleteObject` per `remove` id, the new elements' creates in
    (z-index, document order), then one `updatePageElementsZOrder` `SEND_TO_BACK` per negative-z
-   element, frontmost first. Creation already puts the others on top in order, so they need no move.
+   element, frontmost first, then one `SEND_TO_BACK` per backdrop element (only when something went
+   behind), so the backdrop ends rearmost in its own order. Creation already puts the others on top
+   in order, so they need no move. Without the backdrop step a z-index −1 panel lands under a
+   full-bleed background shape and is invisible (measured live, 2026-10-14).
 
 `PICK` is unchanged: `insertedObjectIds` lists the elements created; the `slide-inserted` event's
 `pageObjectId` is the target slide. No `createSlide` is ever sent for a merge.

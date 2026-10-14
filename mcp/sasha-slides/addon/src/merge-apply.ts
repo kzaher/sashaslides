@@ -77,6 +77,7 @@ export async function applyMergeCandidate({
   const plan = planMerge({
     pageObjectId: merge.slideObjectId,
     existingObjectIds: page.value.objectIds,
+    fullPageObjectIds: page.value.fullPageObjectIds,
     remove: removalFor({ merge, index }),
     newElements: converted.stackedElements,
   });

@@ -396,10 +396,35 @@ function sashaPageElements(spec) {
   var page = Slides.Presentations.Pages.get(spec.presentationId, spec.pageObjectId);
   var elements = (page && page.pageElements) || [];
   var objectIds = [];
+  var fullPageObjectIds = [];
+  // The page size is the presentation's; a partial-response read keeps it to one small field.
+  var pageSize = Slides.Presentations.get(spec.presentationId, { fields: "pageSize" }).pageSize;
+  var pageWidth = emuOf(pageSize && pageSize.width);
+  var pageHeight = emuOf(pageSize && pageSize.height);
   for (var at = 0; at < elements.length; at++) {
-    if (elements[at] && elements[at].objectId) objectIds.push(elements[at].objectId);
+    var element = elements[at];
+    if (!element || !element.objectId) continue;
+    objectIds.push(element.objectId);
+    // Covers the page: unrotated, and within 1% of every edge (pptx imports round by an EMU or two).
+    var t = element.transform || {};
+    var w = emuOf(element.size && element.size.width) * (t.scaleX === undefined ? 1 : t.scaleX);
+    var h = emuOf(element.size && element.size.height) * (t.scaleY === undefined ? 1 : t.scaleY);
+    var x = t.translateX || 0;
+    var y = t.translateY || 0;
+    var slackX = pageWidth * 0.01;
+    var slackY = pageHeight * 0.01;
+    if (pageWidth > 0 && pageHeight > 0 && !t.shearX && !t.shearY &&
+        x <= slackX && y <= slackY && x + w >= pageWidth - slackX && y + h >= pageHeight - slackY) {
+      fullPageObjectIds.push(element.objectId);
+    }
   }
-  return { objectIds: objectIds };
+  return { objectIds: objectIds, fullPageObjectIds: fullPageObjectIds };
+}
+
+// A Slides Dimension in EMU (the API answers in EMU or PT); 0 when absent.
+function emuOf(dimension) {
+  if (!dimension || typeof dimension.magnitude !== "number") return 0;
+  return dimension.unit === "PT" ? dimension.magnitude * 12700 : dimension.magnitude;
 }
 
 // ---------------------------------------------------------------------------

@@ -81,7 +81,12 @@ export type WritePickReply = Readonly<{ fileId: string }>;
  */
 export type PageElementsSpec = Readonly<{ presentationId: string; pageObjectId: string }>;
 
-export type PageElementsReply = Readonly<{ objectIds: readonly string[] }>;
+/**
+ * `fullPageObjectIds` are the elements whose unrotated box covers the whole page (Code.gs measures
+ * them, since it holds the geometry): the candidates for the slide's backdrop, which a z-index < 0
+ * element is stacked in FRONT of. An older Code.gs sends none, which means "no backdrop".
+ */
+export type PageElementsReply = Readonly<{ objectIds: readonly string[]; fullPageObjectIds: readonly string[] }>;
 
 // ---------------------------------------------------------------------------
 // THE COMMENT CHANNEL -- the two functions that carry a comment and read it back. Same discipline
@@ -543,7 +548,11 @@ export function parsePageElementsReply(value: unknown): Parsed<PageElementsReply
     }
     objectIds.push(objectId);
   }
-  return { kind: "ok", value: { objectIds } };
+  const rawFullPage = record["fullPageObjectIds"];
+  const fullPageObjectIds = Array.isArray(rawFullPage)
+    ? rawFullPage.filter((objectId): objectId is string => typeof objectId === "string" && objectIds.includes(objectId))
+    : [];
+  return { kind: "ok", value: { objectIds, fullPageObjectIds } };
 }
 
 export function parseWritePickReply(value: unknown): Parsed<WritePickReply> {

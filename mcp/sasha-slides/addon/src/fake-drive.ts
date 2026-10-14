@@ -58,8 +58,10 @@ export type FakeDrive = Readonly<{
   ): void;
   /** The proposal folder `stageProposal` made, so a test can name it without guessing. */
   proposalFolderId(proposalId: string): string;
-  /** Put a slide in the deck, as its top-level element ids back to front, for `pageElements` to read. */
-  putPage(spec: Readonly<{ presentationId: string; pageObjectId: string; objectIds: readonly string[] }>): void;
+  /** Put a slide in the deck, as its top-level element ids back to front (and which of them cover the page), for `pageElements` to read. */
+  putPage(
+    spec: Readonly<{ presentationId: string; pageObjectId: string; objectIds: readonly string[]; fullPageObjectIds?: readonly string[] }>,
+  ): void;
   files(): readonly FakeFile[];
   /** Files the picker created. The assertion target for "it writes only PICK and render/NN.png". */
   written(): readonly FakeFile[];
@@ -77,7 +79,7 @@ export function fakeDrive(): FakeDrive {
   const written: FakeFile[] = [];
   const batches: Readonly<{ presentationId: string; requests: readonly object[] }>[] = [];
   const thumbnails: Readonly<{ presentationId: string; pageObjectId: string }>[] = [];
-  const pages = new Map<string, readonly string[]>();
+  const pages = new Map<string, PageElementsReply>();
   let failures = 0;
   let failureMessage = "fake transport failure";
   let nextId = 1;
@@ -156,10 +158,10 @@ export function fakeDrive(): FakeDrive {
     async pageElements({ presentationId, pageObjectId }) {
       const failed = failIfAsked<PageElementsReply>();
       if (failed !== null) return failed;
-      const objectIds = pages.get(`${presentationId}/${pageObjectId}`);
-      return objectIds === undefined
+      const page = pages.get(`${presentationId}/${pageObjectId}`);
+      return page === undefined
         ? { kind: "failed", message: `no page ${pageObjectId} in ${presentationId}` }
-        : { kind: "ok", value: { objectIds } };
+        : { kind: "ok", value: page };
     },
 
     async insert(spec: InsertRequestSpec) {
@@ -256,8 +258,8 @@ export function fakeDrive(): FakeDrive {
     put(file) {
       stored.push(file);
     },
-    putPage({ presentationId, pageObjectId, objectIds }) {
-      pages.set(`${presentationId}/${pageObjectId}`, objectIds);
+    putPage({ presentationId, pageObjectId, objectIds, fullPageObjectIds = [] }) {
+      pages.set(`${presentationId}/${pageObjectId}`, { objectIds, fullPageObjectIds });
     },
     stageProposal({
       proposalId,

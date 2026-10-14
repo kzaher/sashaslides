@@ -548,9 +548,14 @@ test("sashaReadTexts answers per file: a failed file is its own outcome, never t
 test("sashaPageElements: the slide's ids in order, and a reply with a nameless element is refused", () => {
   assert.deepEqual(parsePageElementsReply({ objectIds: ["g_bg", "g_title"] }), {
     kind: "ok",
-    value: { objectIds: ["g_bg", "g_title"] },
+    value: { objectIds: ["g_bg", "g_title"], fullPageObjectIds: [] },
   });
-  assert.deepEqual(parsePageElementsReply({ objectIds: [] }), { kind: "ok", value: { objectIds: [] } });
+  assert.deepEqual(parsePageElementsReply({ objectIds: [] }), { kind: "ok", value: { objectIds: [], fullPageObjectIds: [] } });
+  // Full-page ids are kept only when they are elements of the slide.
+  assert.deepEqual(parsePageElementsReply({ objectIds: ["g_bg", "g_title"], fullPageObjectIds: ["g_bg", "elsewhere", 7] }), {
+    kind: "ok",
+    value: { objectIds: ["g_bg", "g_title"], fullPageObjectIds: ["g_bg"] },
+  });
   assert.equal(parsePageElementsReply({ objectIds: ["g_bg", ""] }).kind, "invalid");
   assert.equal(parsePageElementsReply({}).kind, "invalid");
   assert.equal(parsePageElementsReply(null).kind, "invalid");

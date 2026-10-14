@@ -124,3 +124,14 @@ test("a slide that cannot be read (deleted since capture) fails with the reason,
   if (outcome.kind === "failed") assert.match(outcome.message, /could not read slide g_slide_7/);
   assert.equal(drive.batches().length, 0);
 });
+
+test("the slide's full-page backdrop, as sashaPageElements reports it, stays rearmost behind the negative", async () => {
+  const drive = fakeDrive();
+  drive.putPage({ presentationId: DECK, pageObjectId: SLIDE, objectIds: ["g_bg", "g_old_chart"], fullPageObjectIds: ["g_bg"] });
+  await apply({ drive });
+  const requests = drive.batches()[0]?.requests ?? [];
+  assert.deepEqual(requests.slice(-2), [
+    { updatePageElementsZOrder: { pageElementObjectIds: ["sasha_m1_back"], operation: "SEND_TO_BACK" } },
+    { updatePageElementsZOrder: { pageElementObjectIds: ["g_bg"], operation: "SEND_TO_BACK" } },
+  ]);
+});
