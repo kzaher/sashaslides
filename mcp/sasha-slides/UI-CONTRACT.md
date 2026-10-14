@@ -298,6 +298,15 @@ staged HTML of unknown provenance inside the user's logged-in Google session. An
 to reach into that document needs `allow-same-origin`; widening the sandbox is the editor module's
 call to argue for, and the host does not grant it pre-emptively.
 
+## An insert goes before or after the slide the user has selected
+
+Each candidate offers **Insert before** and **Insert after**, relative to the slide selected in the
+deck at the moment the button is pressed (not when the window opened: the user may click another
+slide while it is open). Code.gs reads that selection just before its batchUpdate and sets
+`createSlide.insertionIndex` (before = the selected slide's index, after = index + 1). With no slide
+selected the slide is appended at the end, and the window says so. "Inserted" is shown as soon as
+the batchUpdate succeeds; PICK, the `slide-inserted` event and the render artifact follow it.
+
 ## A merge candidate is applied to its slide, not inserted
 
 A merge proposal (PROTOCOL.md "Merge proposals") redesigns part of an existing slide. Picking one

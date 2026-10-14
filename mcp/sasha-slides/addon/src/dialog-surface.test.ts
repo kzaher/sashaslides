@@ -257,9 +257,11 @@ test("the grid draws one cell per candidate, numbered 1..N", () => {
   assert.doesNotMatch(markup, /show candidate 3 large/, "clicking the slide IS the zoom");
   assert.doesNotMatch(markup, /work on candidate 3/, "the name chip is gone");
   assert.doesNotMatch(markup, /to mark it up/, "clicking a cell no longer enters a mark-up screen");
-  // The only two things a cell can receive, Insert last and accented.
+  // What a cell can receive: Report defect, and Insert before / after the selected slide, the
+  // usual direction (after) last and accented.
   assert.equal(countOf(markup, />Report defect</g), 4, "one per candidate");
-  assert.equal(countOf(markup, /class="sasha-primary sasha-small"[^>]*>Insert</g), 4, "one per candidate");
+  assert.equal(countOf(markup, /class="sasha-secondary sasha-small"[^>]*>Insert before</g), 4, "one per candidate");
+  assert.equal(countOf(markup, /class="sasha-primary sasha-small"[^>]*>Insert after</g), 4, "one per candidate");
 });
 
 test("a grid cell renders the candidate's own HTML in a scaled sandboxed iframe, never a picture", () => {

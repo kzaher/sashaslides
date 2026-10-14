@@ -49,6 +49,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SERVER_FUNCTION_NAMES } from "./src/bridge.ts";
 import { connectorUrlOf } from "./src/connector-url.ts";
+import { insertionIndexFor } from "./src/slide-insert.ts";
 import { PICKER_CSS } from "./src/picker-styles.ts";
 import { TIDEPOOL_CALM_CSS } from "./src/tidepool-calm-styles.ts";
 import { TIDEPOOL_CSS } from "./src/tidepool-styles.ts";
@@ -337,13 +338,18 @@ function sashaReadTexts(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 4/14 — sashaInsert: the image bytes, then the converter's batchUpdate, then the best-effort
-// render artifact.
+// 4/14 — sashaInsert: the image bytes, the new slide's position, then the converter's batchUpdate.
+// NOTHING ELSE: the user is waiting on this call, so the render artifact is its own function
+// (sashaWriteRender below), called after the window has already said "Inserted".
+//
+// THE POSITION IS READ HERE, NOW, from the user's own selection: the slide window may have been
+// open a while and the user may have clicked another slide since. spec.position is "before",
+// "after" or null (a merge, which creates no slide); the index rule is slide-insert.ts
+// insertionIndexFor, embedded verbatim below. It sets createSlide.insertionIndex on the FIRST
+// request, which insertRequests (src/slide-insert.ts) guarantees is the createSlide.
 //
 // The RAW reply is returned so createdObjectIdsOf (src/drive-api.ts) can read the created ids in
-// tested TypeScript. The render artifact is wrapped in try/catch and reported as null on any
-// failure, NEVER as a failed insert: by the time it runs the slide is already in the user's deck
-// and the user must not be invited to insert it twice.
+// tested TypeScript, with insertionIndex (null = appended) so the window can say where it went.
 // ---------------------------------------------------------------------------
 function sashaInsert(spec) {
   // Images first: createImage takes a URL that GOOGLE fetches, so a candidate's own bytes have to
@@ -360,16 +366,9 @@ function sashaInsert(spec) {
     // under its own project, so it needs no Cloud console, which matters because the console is
     // unreachable for accounts without 2-step verification. Declared in appsscript.json as
     // enabledAdvancedServices[].userSymbol = "Slides".
+    var insertionIndex = spec.position ? sashaPlaceNewSlide_(spec) : null;
     var batch = Slides.Presentations.batchUpdate({ requests: spec.requests }, spec.presentationId);
-    var renderArtifact = null;
-    if (spec.render) {
-      try {
-        renderArtifact = sashaWriteRender_(spec.presentationId, spec.render);
-      } catch (renderError) {
-        console.warn('sasha-slides: no render artifact: ' + renderError);
-      }
-    }
-    return { batchResponse: batch, renderArtifact: renderArtifact };
+    return { batchResponse: batch, insertionIndex: insertionIndex };
   } finally {
     // UNSTAGE, ON EVERY PATH. Slides COPIES an image's bytes during the batchUpdate, so by the time
     // control reaches here nothing in the deck still points at the Drive file -- verified by
@@ -385,6 +384,49 @@ function sashaInsert(spec) {
       }
     }
   }
+}
+
+// Where the new slide goes, or null to append. Best effort by design: a selection that cannot be
+// read (no slide selected, a layout or master page, another deck) appends exactly as before, and
+// the window tells the user that is what happened.
+function sashaPlaceNewSlide_(spec) {
+  var selected = null;
+  var slideCount = 0;
+  try {
+    var presentation = SlidesApp.getActivePresentation();
+    if (presentation && presentation.getId() === spec.presentationId) {
+      var slides = presentation.getSlides();
+      slideCount = slides.length;
+      var page = presentation.getSelection().getCurrentPage();
+      var pageId = page ? page.getObjectId() : null;
+      for (var at = 0; pageId !== null && at < slides.length; at++) {
+        if (slides[at].getObjectId() === pageId) selected = at;
+      }
+    }
+  } catch (selectionError) {
+    console.warn('sasha-slides: could not read the selected slide: ' + selectionError);
+  }
+  var insertionIndex = sashaInsertionIndexFor_({ position: spec.position, selectedSlideIndex: selected, slideCount: slideCount });
+  var first = spec.requests[0];
+  if (insertionIndex === null || !first || !first.createSlide) return null;
+  first.createSlide.insertionIndex = insertionIndex;
+  return insertionIndex;
+}
+
+// slide-insert.ts insertionIndexFor, VERBATIM (its .toString()), so the rule the unit tests check
+// is the rule that runs here. slide-insert.test.ts proves it needs nothing else in scope.
+var sashaInsertionIndexFor_ = ${insertionIndexFor.toString()};
+
+// ---------------------------------------------------------------------------
+// sashaWriteRender: the inserted page as <proposal>/render/NN.png (PROTOCOL.md "Render artifacts").
+//
+// ITS OWN CALL, after the window has already said "Inserted". It used to run inside sashaInsert,
+// which made the user wait for a thumbnail (0.8-1.2 s measured), its download (0.25-0.3 s) and three
+// Drive writes after the slide already existed. Every name and tag arrives computed
+// (src/render-artifact.ts). A throw reaches the window as a skipped artifact, never a failed insert.
+// ---------------------------------------------------------------------------
+function sashaWriteRender(spec) {
+  return { renderArtifact: sashaWriteRender_(spec.presentationId, spec.render) };
 }
 
 // ---------------------------------------------------------------------------

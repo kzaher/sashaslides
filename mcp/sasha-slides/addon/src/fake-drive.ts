@@ -17,8 +17,11 @@ import type {
   PageElementsReply,
   ProposalMark,
   RenderPreviewsReply,
+  WriteRenderReply,
+  WriteRenderSpec,
 } from "./bridge.ts";
 import type { DriveApi, PickApi, SlidesApi } from "./drive-api.ts";
+import { insertionIndexFor } from "./slide-insert.ts";
 
 export const ROOT_FOLDER_ID = "root";
 export const INBOX_FOLDER_NAME = "Sasha Slides Inbox";
@@ -62,6 +65,16 @@ export type FakeDrive = Readonly<{
   putPage(
     spec: Readonly<{ presentationId: string; pageObjectId: string; objectIds: readonly string[]; fullPageObjectIds?: readonly string[] }>,
   ): void;
+  /**
+   * THE DECK AS THE USER SEES IT: its slides in filmstrip order, and which one is selected (null
+   * for none). `insert` places a `createSlide` the way Slides does -- at its `insertionIndex`, or
+   * at the END when it has none -- so a test can ask where a new slide actually landed.
+   */
+  putDeck(
+    spec: Readonly<{ presentationId: string; slideObjectIds: readonly string[]; selectedSlideIndex: number | null }>,
+  ): void;
+  /** The deck's slide ids in filmstrip order, after whatever was inserted. */
+  deck(presentationId: string): readonly string[];
   files(): readonly FakeFile[];
   /** Files the picker created. The assertion target for "it writes only PICK and render/NN.png". */
   written(): readonly FakeFile[];
@@ -70,6 +83,11 @@ export type FakeDrive = Readonly<{
   failNext(count: number, message?: string): void;
   batches(): readonly Readonly<{ presentationId: string; requests: readonly object[] }>[];
   thumbnails(): readonly Readonly<{ presentationId: string; pageObjectId: string }>[];
+  /**
+   * Every Slides and PICK host call, by its Code.gs name, in the order it was STARTED. The insert
+   * path's latency is the number of these in series, so its tests assert this list.
+   */
+  hostCalls(): readonly string[];
   /** What `renderPreviews` was asked to photograph, in call order -- one entry per candidate. */
   renderedPreviews: readonly Readonly<{ index: number; requestCount: number }>[];
 }>;
@@ -80,6 +98,8 @@ export function fakeDrive(): FakeDrive {
   const batches: Readonly<{ presentationId: string; requests: readonly object[] }>[] = [];
   const thumbnails: Readonly<{ presentationId: string; pageObjectId: string }>[] = [];
   const pages = new Map<string, PageElementsReply>();
+  const decks = new Map<string, FakeDeck>();
+  const hostCalls: string[] = [];
   let failures = 0;
   let failureMessage = "fake transport failure";
   let nextId = 1;
@@ -156,6 +176,7 @@ export function fakeDrive(): FakeDrive {
 
   const slides: SlidesApi = {
     async pageElements({ presentationId, pageObjectId }) {
+      hostCalls.push("sashaPageElements");
       const failed = failIfAsked<PageElementsReply>();
       if (failed !== null) return failed;
       const page = pages.get(`${presentationId}/${pageObjectId}`);
@@ -165,41 +186,58 @@ export function fakeDrive(): FakeDrive {
     },
 
     async insert(spec: InsertRequestSpec) {
+      hostCalls.push("sashaInsert");
       const failed = failIfAsked<InsertReply>();
       if (failed !== null) return failed;
-      batches.push({ presentationId: spec.presentationId, requests: spec.requests });
-      const objectIds = requestedObjectIdsOf(spec.requests);
-      // Code.gs's own order: batchUpdate first, then the render artifact, best effort.
-      let renderArtifact: string | null = null;
-      const render = spec.render;
-      if (render !== null) {
-        thumbnails.push({ presentationId: spec.presentationId, pageObjectId: render.pageObjectId });
-        const existing = childNamed({ folderId: render.folderId, name: render.folderName });
-        const renderFolder =
-          existing ??
-          create({
-            name: render.folderName,
-            parentFolderId: render.folderId,
-            mimeType: FOLDER_MIME_TYPE,
-            appProperties: render.folderAppProperties,
-            body: "",
-          });
-        create({
-          name: render.fileName,
-          parentFolderId: renderFolder.id,
-          mimeType: render.mimeType,
-          appProperties: render.fileAppProperties,
-          body: "<4 bytes of image/png>",
-        });
-        renderArtifact = render.fileName;
-      }
+      // CODE.GS'S OWN STEPS: read the selection now, place the createSlide with the same
+      // `insertionIndexFor` it embeds, then the batchUpdate. A copy, because Code.gs mutates the
+      // spec it was sent and the caller's object must not change underneath it here either.
+      const deck = decks.get(spec.presentationId);
+      const insertionIndex =
+        spec.position === null
+          ? null
+          : insertionIndexFor({
+              position: spec.position,
+              selectedSlideIndex: deck?.selectedSlideIndex ?? null,
+              slideCount: deck?.slideObjectIds.length ?? 0,
+            });
+      const requests = withInsertionIndex({ requests: spec.requests, insertionIndex });
+      batches.push({ presentationId: spec.presentationId, requests });
+      placeCreatedSlides({ deck, requests });
+      const objectIds = requestedObjectIdsOf(requests);
       return {
         kind: "ok",
         value: {
           batchResponse: { replies: objectIds.map((objectId) => ({ createShape: { objectId } })) },
-          renderArtifact,
+          insertionIndex,
         },
       };
+    },
+
+    /** The render artifact, Code.gs's `sashaWriteRender`: the thumbnail, then the Drive writes. */
+    async writeRender({ presentationId, render }: WriteRenderSpec) {
+      hostCalls.push("sashaWriteRender");
+      const failed = failIfAsked<WriteRenderReply>();
+      if (failed !== null) return failed;
+      thumbnails.push({ presentationId, pageObjectId: render.pageObjectId });
+      const existing = childNamed({ folderId: render.folderId, name: render.folderName });
+      const renderFolder =
+        existing ??
+        create({
+          name: render.folderName,
+          parentFolderId: render.folderId,
+          mimeType: FOLDER_MIME_TYPE,
+          appProperties: render.folderAppProperties,
+          body: "",
+        });
+      create({
+        name: render.fileName,
+        parentFolderId: renderFolder.id,
+        mimeType: render.mimeType,
+        appProperties: render.fileAppProperties,
+        body: "<4 bytes of image/png>",
+      });
+      return { kind: "ok", value: { renderArtifact: render.fileName } };
     },
 
     /**
@@ -207,6 +245,7 @@ export function fakeDrive(): FakeDrive {
      * cares THAT a picture arrived for an index, and the real bytes are Google's.
      */
     async renderPreviews(spec) {
+      hostCalls.push("sashaRenderPreviews");
       const failed = failIfAsked<RenderPreviewsReply>();
       if (failed !== null) return failed;
       for (const slide of spec.slides) {
@@ -227,6 +266,7 @@ export function fakeDrive(): FakeDrive {
 
   const pick: PickApi = {
     async createPick({ folderId, name, mimeType, body, appProperties }) {
+      hostCalls.push("sashaWritePick");
       const failed = failIfAsked<Readonly<{ fileId: string }>>();
       if (failed !== null) return failed;
       const file = create({ name, parentFolderId: folderId, mimeType, appProperties, body });
@@ -257,6 +297,15 @@ export function fakeDrive(): FakeDrive {
     renderedPreviews: rendered,
     put(file) {
       stored.push(file);
+    },
+    putDeck({ presentationId, slideObjectIds, selectedSlideIndex }) {
+      decks.set(presentationId, { slideObjectIds: [...slideObjectIds], selectedSlideIndex });
+    },
+    hostCalls() {
+      return [...hostCalls];
+    },
+    deck(presentationId) {
+      return [...(decks.get(presentationId)?.slideObjectIds ?? [])];
     },
     putPage({ presentationId, pageObjectId, objectIds, fullPageObjectIds = [] }) {
       pages.set(`${presentationId}/${pageObjectId}`, { objectIds, fullPageObjectIds });
@@ -383,3 +432,41 @@ const CREATE_REPLY_KINDS: ReadonlySet<string> = new Set([
   "createImage",
   "createTable",
 ]);
+
+/** One fake deck. Mutable on purpose: it is the fake's own state, never handed out. */
+type FakeDeck = { slideObjectIds: string[]; selectedSlideIndex: number | null };
+
+/** Slides' own rule for `createSlide`: at `insertionIndex` when it is given, otherwise at the END. */
+function placeCreatedSlides({
+  deck,
+  requests,
+}: {
+  deck: FakeDeck | undefined;
+  requests: readonly Readonly<Record<string, unknown>>[];
+}): void {
+  if (deck === undefined) return;
+  for (const request of requests) {
+    const created = request["createSlide"];
+    if (typeof created !== "object" || created === null) continue;
+    const objectId = "objectId" in created && typeof created.objectId === "string" ? created.objectId : "";
+    const at =
+      "insertionIndex" in created && typeof created.insertionIndex === "number"
+        ? created.insertionIndex
+        : deck.slideObjectIds.length;
+    deck.slideObjectIds.splice(at, 0, objectId);
+  }
+}
+
+/** The batch as Code.gs sends it: the first request's `createSlide` placed, nothing else touched. */
+function withInsertionIndex({
+  requests,
+  insertionIndex,
+}: {
+  requests: readonly Readonly<Record<string, unknown>>[];
+  insertionIndex: number | null;
+}): readonly Readonly<Record<string, unknown>>[] {
+  const [first, ...rest] = requests;
+  const created = first?.["createSlide"];
+  if (insertionIndex === null || first === undefined || typeof created !== "object" || created === null) return requests;
+  return [{ ...first, createSlide: { ...created, insertionIndex } }, ...rest];
+}

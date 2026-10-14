@@ -41,6 +41,7 @@ import {
   type UnresolvedCount,
 } from "./session-log.ts";
 import type { SlideEdit, SlideEditor } from "./slide-editor.ts";
+import { describeInsertedWhere, type InsertPosition } from "./slide-insert.ts";
 import {
   editorIsLive,
   editorReachOf,
@@ -60,6 +61,7 @@ import {
   type SlideTool,
   type SlideView,
   type SubmitStage,
+  type Telling,
 } from "./picker-state.ts";
 
 /** Everything the UI is allowed to cause. Injected, so the tree renders in a test with no ports. */
@@ -106,7 +108,12 @@ export type PickerActions = Readonly<{
   zoomCandidate(index: number): void;
   /** The visual editor's list, after it changed. The editor is the authority; this records it. */
   changeEdits(spec: Readonly<{ index: number; edits: readonly SlideEdit[] }>): void;
-  insertPicked(index: number): void;
+  /**
+   * Put candidate `index` in the deck, BEFORE or AFTER the slide the user has selected there. The
+   * selection is read by the server at that moment, not here (slide-insert.ts). A merge candidate
+   * ignores `position`: it redesigns its own slide.
+   */
+  insertPicked(spec: Readonly<{ index: number; position: InsertPosition }>): void;
   dismiss(): void;
   /**
    * ANONYMISE AND REPORT A DEFECT on one candidate. It opens a THIRD HtmlService document, not a
@@ -160,11 +167,7 @@ export function Picker({ state, actions }: { state: PickerState; actions: Picker
     case "settled":
       return (
         <Shell>
-          <p className="sasha-settled">
-            {state.picked === null
-              ? `Dismissed ${state.proposalId}. Sasha has been told nothing was chosen.`
-              : `Inserted option ${state.picked}. Sasha has been told.`}
-          </p>
+          <p className="sasha-settled">{settledMessage(state)}</p>
         </Shell>
       );
     case "picking":
@@ -739,3 +742,29 @@ const STAGE_LABEL: Readonly<Record<SubmitStage, string>> = {
   inserting: "inserting into the deck...",
   "writing-pick": "telling Sasha...",
 };
+
+/**
+ * The settled line: what happened to the deck, then whether Sasha knows yet. The two halves are
+ * separate because an insert is reported the moment the slide exists, and PICK follows.
+ */
+function settledMessage(state: Extract<PickerState, Readonly<{ status: "settled" }>>): string {
+  if (state.picked === null) return `Dismissed ${state.proposalId}. Sasha has been told nothing was chosen.`;
+  const happened =
+    state.where === null
+      ? `Inserted option ${String(state.picked)}.`
+      : describeInsertedWhere({ picked: state.picked, where: state.where });
+  return `${happened} ${tellingMessage(state.telling)}`;
+}
+
+function tellingMessage(telling: Telling): string {
+  switch (telling.kind) {
+    case "telling":
+      return "Telling Sasha...";
+    case "told":
+      return "Sasha has been told.";
+    case "failed":
+      return `Sasha could not be told: ${telling.message}`;
+    default:
+      return assertNever(telling);
+  }
+}

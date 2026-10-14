@@ -20,6 +20,8 @@ import type {
   CandidateCommentsSpec,
   InsertReply,
   InsertRequestSpec,
+  WriteRenderReply,
+  WriteRenderSpec,
   OpenPickerReply,
   PageElementsReply,
   PageElementsSpec,
@@ -87,10 +89,16 @@ export type CandidateCommentsApi = Readonly<{
 
 export type SlidesApi = Readonly<{
   /**
-   * The batchUpdate that puts the picked candidate in the deck, plus the best-effort render
-   * artifact in the same round trip (see render-artifact.ts for why they are not separable).
+   * The batchUpdate that puts the picked candidate in the deck, placed against the slide the user
+   * has selected at that moment. Nothing else rides in this round trip: the user waits on it.
    */
   insert(spec: InsertRequestSpec): Promise<CallOutcome<InsertReply>>;
+  /**
+   * The render artifact, in a call of its own made AFTER the window has said "Inserted". It used
+   * to ride inside `insert` and cost the user a thumbnail, a download and three Drive writes
+   * (~1.5-2.5 s) after the slide already existed. See render-artifact.ts.
+   */
+  writeRender(spec: WriteRenderSpec): Promise<CallOutcome<WriteRenderReply>>;
   /** One slide's top-level element ids as they stand NOW, back to front (slide-merge.ts). */
   pageElements(spec: PageElementsSpec): Promise<CallOutcome<PageElementsReply>>;
   /**

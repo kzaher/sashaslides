@@ -27,6 +27,7 @@ import {
   parseSendFeedbackReply,
   parseWriteEventReply,
   parseWritePickReply,
+  parseWriteRenderReply,
   type CallOutcome,
   type CandidateCommentsReply,
   type HelloReply,
@@ -41,7 +42,9 @@ import {
   type CommentReplyReply,
   type ReportTargetReply,
   type SendFeedbackReply,
-  type WriteEventReply, explainHostFailure } from "./bridge.ts";
+  type WriteEventReply,
+  type WriteRenderReply,
+  type WriteRenderSpec, explainHostFailure } from "./bridge.ts";
 import { parseHelloReply } from "./bridge.ts";
 import type {
   BatchReadApi,
@@ -197,6 +200,18 @@ export function appsScriptSlidesApi({ call }: { call: ServerCall }): SlidesApi {
       });
       if (replied.kind !== "ok") return replied;
       return outcomeOf({ parsed: parseInsertReply(replied.value), what: "sashaInsert" }) satisfies CallOutcome<InsertReply>;
+    },
+
+    async writeRender(spec: WriteRenderSpec) {
+      const replied = await call<unknown>({
+        invoke: (runner) => runner.sashaWriteRender(spec),
+        what: "sashaWriteRender",
+      });
+      if (replied.kind !== "ok") return replied;
+      return outcomeOf({
+        parsed: parseWriteRenderReply(replied.value),
+        what: "sashaWriteRender",
+      }) satisfies CallOutcome<WriteRenderReply>;
     },
 
     async pageElements(spec) {

@@ -4,9 +4,9 @@
 // WHY ONLY THE INSERTED SLIDE GETS ONE. A true rasterisation of a converted slide can only come
 // from `presentations.pages.getThumbnail`, which needs the page to exist in a real deck. There is
 // no way to render N candidates without first putting N slides into the user's presentation, so the
-// render artifact is produced for the slide the user actually picked, immediately after it is
-// inserted and before PICK is written. A dismissal produces no render, and `slide_images` is
-// already specified to answer "unavailable" in that case.
+// render artifact is produced for the slide the user actually picked, after it is inserted --
+// alongside PICK, not before it (insert-flow.ts). A dismissal produces no render, and `slide_images`
+// is already specified to answer "unavailable" while there is none.
 //
 // IT IS BEST-EFFORT, DELIBERATELY. By the time it runs the slide is already in the user's deck; a
 // failed upload must never be reported as a failed insert, or the user would be invited to insert
@@ -16,10 +16,11 @@
 // ADAPTED FROM THE EXTENSION'S COPY. There this file made the three calls itself -- getThumbnail,
 // ensureChildFolder, createBinaryFile -- because the offscreen document held a bearer token and a
 // `Blob`. A sidebar has neither: the thumbnail's `contentUrl` is a cross-origin googleusercontent
-// link it cannot fetch, so the bytes never exist client-side. The three calls therefore run inside
-// `sashaInsert`, in the same round trip as the batchUpdate, and what stays here is every NAME and
-// TAG the protocol specifies -- computed in TypeScript, unit-tested, and handed to Code.gs as a
-// value it executes without deciding anything.
+// link it cannot fetch, so the bytes never exist client-side. The three calls therefore run in
+// Code.gs's `sashaWriteRender` -- its OWN round trip, made after the window has said "Inserted";
+// it used to ride inside `sashaInsert` and made the user wait ~1.5-2.5 s for bookkeeping. What
+// stays here is every NAME and TAG the protocol specifies -- computed in TypeScript, unit-tested,
+// and handed to Code.gs as a value it executes without deciding anything.
 
 import type { RenderRequest } from "./bridge.ts";
 

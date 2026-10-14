@@ -36,6 +36,7 @@ import type { FeedbackCommentRecord, FeedbackReply, SendFeedbackResult } from ".
 import type { CandidateCommentsEntry } from "./session-log.ts";
 import type { PickerSeed } from "./picker-seed.ts";
 import { assertNever, type Parsed } from "./protocol.ts";
+import type { InsertPosition } from "./slide-insert.ts";
 
 /**
  * One proposal folder as the inbox name walk found it -- the replacement for the extension's
@@ -68,9 +69,17 @@ export type ReadTextReply = Readonly<{ text: string }>;
 /**
  * `sashaInsert()`. The RAW batchUpdate response comes back rather than a list of ids, so
  * `createdObjectIdsOf` (drive-api.ts) stays the one place that knows how Slides reports what it
- * created -- and stays testable. `renderArtifact` is best-effort: null is normal, never an error.
+ * created -- and stays testable. `insertionIndex` is where Code.gs put the new slide (0-based), or
+ * null when it was appended: no position was asked for, or no slide was selected.
  */
-export type InsertReply = Readonly<{ batchResponse: unknown; renderArtifact: string | null }>;
+export type InsertReply = Readonly<{ batchResponse: unknown; insertionIndex: number | null }>;
+
+/**
+ * `sashaWriteRender()`: the render artifact's file name, once it is in Drive. Its OWN call, made
+ * after the window has already said "Inserted" -- see render-artifact.ts for why it must never
+ * delay or fail the insert.
+ */
+export type WriteRenderReply = Readonly<{ renderArtifact: string }>;
 
 export type WritePickReply = Readonly<{ fileId: string }>;
 
@@ -156,6 +165,7 @@ export type ServerFunctionName =
   | "sashaWriteEvent"
   | "sashaCandidateComments"
   | "sashaInsert"
+  | "sashaWriteRender"
   | "sashaPageElements"
   | "sashaRenderPreviews"
   | "sashaWritePick"
@@ -177,6 +187,7 @@ export const SERVER_FUNCTION_NAMES: readonly ServerFunctionName[] = [
   "sashaWriteEvent",
   "sashaCandidateComments",
   "sashaInsert",
+  "sashaWriteRender",
   "sashaPageElements",
   "sashaRenderPreviews",
   "sashaWritePick",
@@ -311,9 +322,16 @@ export type RenderRequest = Readonly<{
 export type InsertRequestSpec = Readonly<{
   presentationId: string;
   requests: readonly Readonly<Record<string, unknown>>[];
-  /** null for a deck with no proposal folder to write into; the insert still happens. */
-  render: RenderRequest | null;
+  /**
+   * Where the new slide goes relative to the slide the user has selected, read by Code.gs at the
+   * moment of the batchUpdate (slide-insert.ts `insertionIndexFor`). null sends the requests as
+   * they are: a merge creates no slide, so there is nothing to place.
+   */
+  position: InsertPosition | null;
 }>;
+
+/** What `sashaWriteRender` photographs and where it puts the PNG. */
+export type WriteRenderSpec = Readonly<{ presentationId: string; render: RenderRequest }>;
 
 export type WritePickSpec = Readonly<{
   folderId: string;
@@ -500,10 +518,27 @@ export function parseInsertReply(value: unknown): Parsed<InsertReply> {
   if (record === null) return { kind: "invalid", reason: "sashaInsert returned no object" };
   // `batchResponse` stays `unknown` on purpose: createdObjectIdsOf is the only reader and it
   // already sweeps an arbitrary reply shape.
+  // A missing or malformed index is the append fallback, which is also what an older Code.gs that
+  // knows nothing about positions did -- never a reason to call a successful insert a failure.
+  const insertionIndex = record["insertionIndex"];
   return {
     kind: "ok",
-    value: { batchResponse: record["batchResponse"], renderArtifact: stringAt({ record, key: "renderArtifact" }) },
+    value: {
+      batchResponse: record["batchResponse"],
+      insertionIndex:
+        typeof insertionIndex === "number" && Number.isInteger(insertionIndex) && insertionIndex >= 0
+          ? insertionIndex
+          : null,
+    },
   };
+}
+
+export function parseWriteRenderReply(value: unknown): Parsed<WriteRenderReply> {
+  const record = asRecord(value);
+  if (record === null) return { kind: "invalid", reason: "sashaWriteRender returned no object" };
+  const renderArtifact = stringAt({ record, key: "renderArtifact" });
+  if (renderArtifact === null) return { kind: "invalid", reason: "sashaWriteRender named no file" };
+  return { kind: "ok", value: { renderArtifact } };
 }
 
 /** Every id must be a non-empty string: a slide whose element list is half unreadable is not one to merge into. */

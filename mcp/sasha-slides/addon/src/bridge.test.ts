@@ -20,6 +20,7 @@ import {
   parseFeedbackReply as parseFeedbackReplyForTest,
   parseHelloReply,
   parseInsertReply,
+  parseWriteRenderReply,
   parsePageElementsReply,
   parseProposalMark,
   parseReadTextReply,
@@ -42,6 +43,9 @@ test("there are exactly twenty server functions, and they are the ones Code.gs d
     "sashaWriteEvent",
     "sashaCandidateComments",
     "sashaInsert",
+    // The render artifact, split OUT of sashaInsert so the user is told "Inserted" the moment the
+    // batchUpdate succeeds instead of after a thumbnail and three Drive writes.
+    "sashaWriteRender",
     // One slide's element ids, read just before a MERGE's batchUpdate so a stale `remove` id is
     // refused instead of deleted from wherever it now lives (slide-merge.ts).
     "sashaPageElements",
@@ -114,12 +118,17 @@ test("read-text, insert and write-pick replies are each checked for the field th
   assert.deepEqual(parseReadTextReply({ text: "" }), { kind: "ok", value: { text: "" } });
   assert.equal(parseReadTextReply({}).kind, "invalid");
 
-  const inserted = parseInsertReply({ batchResponse: { replies: [] }, renderArtifact: "03.png" });
+  const inserted = parseInsertReply({ batchResponse: { replies: [] }, insertionIndex: 4 });
   assert.equal(inserted.kind, "ok");
-  assert.equal(inserted.kind === "ok" ? inserted.value.renderArtifact : "", "03.png");
-  // A missing renderArtifact is the NORMAL best-effort outcome, so it must parse, not fail.
-  const noRender = parseInsertReply({ batchResponse: {} });
-  assert.equal(noRender.kind === "ok" ? noRender.value.renderArtifact : "unset", null);
+  assert.equal(inserted.kind === "ok" ? inserted.value.insertionIndex : "", 4);
+  // No index is the APPEND fallback -- and what an older Code.gs sends -- so it parses, never fails.
+  for (const insertionIndex of [undefined, null, -1, 2.5, "4"]) {
+    const appended = parseInsertReply({ batchResponse: {}, insertionIndex });
+    assert.equal(appended.kind === "ok" ? appended.value.insertionIndex : "unset", null);
+  }
+
+  assert.deepEqual(parseWriteRenderReply({ renderArtifact: "03.png" }), { kind: "ok", value: { renderArtifact: "03.png" } });
+  assert.equal(parseWriteRenderReply({}).kind, "invalid");
 
   assert.deepEqual(parseWritePickReply({ fileId: "1abc" }), { kind: "ok", value: { fileId: "1abc" } });
   assert.equal(parseWritePickReply({}).kind, "invalid");
@@ -236,6 +245,7 @@ function silentRunner(): AppsScriptRunner {
     sashaReadText: () => undefined,
     sashaReadTexts: () => undefined,
     sashaInsert: () => undefined,
+    sashaWriteRender: () => undefined,
     sashaPageElements: () => undefined,
     sashaWritePick: () => undefined,
     sashaReadEvents: () => undefined,
@@ -267,6 +277,7 @@ function failingRunner(error: unknown): AppsScriptRunner {
     sashaReadText: () => onFailure?.(error),
     sashaReadTexts: () => onFailure?.(error),
     sashaInsert: () => onFailure?.(error),
+    sashaWriteRender: () => onFailure?.(error),
     sashaPageElements: () => onFailure?.(error),
     sashaWritePick: () => onFailure?.(error),
     sashaReadEvents: () => onFailure?.(error),
@@ -297,6 +308,7 @@ function throwingRunner(): AppsScriptRunner {
     sashaReadText: () => undefined,
     sashaReadTexts: () => undefined,
     sashaInsert: () => undefined,
+    sashaWriteRender: () => undefined,
     sashaPageElements: () => undefined,
     sashaWritePick: () => undefined,
     sashaReadEvents: () => undefined,
@@ -330,6 +342,7 @@ function stubCall(replies: Readonly<Record<string, unknown>>) {
     sashaReadText: answer("sashaReadText"),
     sashaReadTexts: answer("sashaReadTexts"),
     sashaInsert: answer("sashaInsert"),
+    sashaWriteRender: answer("sashaWriteRender"),
     sashaPageElements: answer("sashaPageElements"),
     sashaRenderPreviews: answer("sashaRenderPreviews"),
     sashaTakePickerTarget: answer("sashaTakePickerTarget"),

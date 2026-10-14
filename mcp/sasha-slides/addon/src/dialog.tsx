@@ -43,7 +43,6 @@ import {
 import { presentationIdOf, type RenderRequest } from "./bridge.ts";
 import { browserSlideConverter, type ConversionResult, type ConvertSlideHtml } from "./converter-contract.ts";
 import {
-  createdObjectIdsOf,
   type CandidateCommentsApi,
   type CommentThreadApi,
   type DriveApi,
@@ -77,10 +76,11 @@ import {
   reducePicker,
   type PickerEvent,
   type PickerState,
+  type Telling,
 } from "./picker-state.ts";
 import { createSlideEditor } from "./editor/index.ts";
-import { writePick } from "./pick-writer.ts";
-import { renderArtifactOf, renderRequestFor } from "./render-artifact.ts";
+import { writePick, type PickOutcome } from "./pick-writer.ts";
+import { renderRequestFor } from "./render-artifact.ts";
 import { PROTOCOL_VERSION, assertNever, type Parsed } from "./protocol.ts";
 import { browserKeyValueStorage, seenStore } from "./seen-store.ts";
 import {
@@ -92,7 +92,8 @@ import {
   type SessionEventBody,
 } from "./session-log.ts";
 import { applyMergeCandidate } from "./merge-apply.ts";
-import { insertRequests, newPageObjectId, previewConversionSpec } from "./slide-insert.ts";
+import { newPageObjectId, previewConversionSpec, type InsertPosition } from "./slide-insert.ts";
+import { conversionForInsert, insertNewSlide, recordInsert, type Inserted } from "./insert-flow.ts";
 
 const ROOT_ELEMENT_ID = "sasha-slides-root";
 /** One read of a candidate's comment threads -- a candidate with more than this is not the case. */
@@ -138,6 +139,12 @@ let idleConversion: Readonly<{ index: number; cancel: () => void }> | null = nul
  * `proposalId:index`. The lookup hashes the whole document, and the pump runs on every dispatch.
  */
 const conversionCacheChecked = new Set<string>();
+/**
+ * Every preview conversion this window finished, by its conversion-cache key, so an insert reuses
+ * it (insert-flow.ts `conversionForInsert`) even when localStorage refused to keep it -- a private
+ * window, a full quota, or a candidate too big for the shelf.
+ */
+const previewConversions = new Map<string, ConversionResult>();
 /** One render call for the whole set at a time; `pump` runs again when it lands. */
 let rendering = false;
 /** Candidate HTML is immutable within one revision, so one fetch per fileId serves every toggle. */
@@ -545,7 +552,9 @@ async function convert({
         ),
       ),
     ]);
-    rememberConversion(conversionKeyOf({ build: buildStamp(), ...asked }), converted);
+    const key = conversionKeyOf({ build: buildStamp(), ...asked });
+    rememberConversion(key, converted);
+    previewConversions.set(key, converted);
     acceptConversion({ index, result: converted });
   } catch (cause) {
     dispatch({ kind: "conversion-failed", index, message: cause instanceof Error ? cause.message : String(cause) });
@@ -946,11 +955,11 @@ const actions: PickerActions = {
   changeEdits({ index, edits }) {
     dispatch({ kind: "edits-changed", index, edits });
   },
-  insertPicked(index) {
-    void submit({ picked: index });
+  insertPicked({ index, position }) {
+    void submitInsert({ picked: index, position });
   },
   dismiss() {
-    void submit({ picked: null });
+    void submitDismissal();
   },
   openReport({ index }) {
     void openReportWindow({ index });
@@ -1057,46 +1066,80 @@ async function renderPreviews({ slides: asked }: { slides: readonly SlideFrame[]
 }
 
 /**
- * Convert -> insert -> write PICK -> append `slide-inserted`, in that order, because PROTOCOL.md
- * wants the render artifact in place before the server is told the decision, and the log entry
- * records something that has already happened. A dismissal skips straight to PICK with
- * `picked: null`, which is what the server is blocked on.
+ * Insert -> show "Inserted" -> PICK, the `slide-inserted` event and the render artifact together.
+ *
+ * THE USER'S ANSWER COMES FIRST. The slide is in the deck the moment the batchUpdate succeeds, and
+ * everything after it is bookkeeping the user used to sit through: the render artifact (a thumbnail,
+ * its download and three Drive writes, ~1.5-2.5 s) inside the insert call, then PICK, then the event,
+ * one ~0.7 s google.script.run after another. PROTOCOL.md needs none of them before the user is
+ * told: `slide_images` answers "unavailable" until the render lands, and PICK carries
+ * `insertedObjectIds`, which `clear_slides` honours even before the event does. See insert-flow.ts.
  */
-async function submit({ picked }: { picked: number | null }): Promise<void> {
+async function submitInsert({ picked, position }: { picked: number; position: InsertPosition }): Promise<void> {
   const running = services;
   const offer = offerOf(state);
   if (running === null || offer === null) return;
   const proposal = offer.proposal;
-  dispatch({ kind: "submit-started", picked, stage: picked === null ? "writing-pick" : "converting" });
+  dispatch({ kind: "submit-started", picked, stage: "converting" });
 
-  const inserted = picked === null ? NOTHING_INSERTED : await insertPicked({ running, picked });
-  if (inserted === null) return;
-  const insertedObjectIds = inserted.objectIds;
-
-  dispatch({ kind: "submit-stage", stage: "writing-pick" });
+  const placed = await insertPicked({ running, picked, position });
+  if (placed === null) return;
+  // Read BEFORE settling: the settled state no longer holds the offer the mark-ups live on.
   const decided = offerOf(state);
+  const anomalies = decided === null ? [] : anomaliesOf(decided);
+
+  dispatch({
+    kind: "settled",
+    proposalId: proposal.proposalId,
+    picked,
+    where: placed.inserted.where,
+    telling: { kind: "telling" },
+  });
+  // RESOLVED NOW, not once PICK lands: a poll in between would find READY without PICK and offer
+  // this proposal again -- inviting a second insert of a slide that is already in the deck.
+  running.observer.dispatch({ kind: "resolved", proposalId: proposal.proposalId, nowMs: Date.now() });
+
+  const written = await recordInsert({
+    slides: running.slides,
+    presentationId: placed.presentationId,
+    render: placed.render,
+    writePick: () =>
+      writePick({
+        pick: running.pick,
+        proposal,
+        decision: { picked, insertedObjectIds: placed.inserted.objectIds, anomalies },
+        decidedAt: new Date().toISOString(),
+      }),
+    appendEvent: () =>
+      appendEvent({
+        folderId: proposal.folderId,
+        body: { kind: "slide-inserted", slideIndex: picked, pageObjectId: placed.inserted.pageObjectId },
+      }),
+    warn: (message) => console.warn(`[sasha-slides] option ${String(picked)}: ${message}`),
+  });
+  dispatch({ kind: "told", proposalId: proposal.proposalId, telling: tellingOf(written) });
+}
+
+/**
+ * A dismissal is PICK with `picked: null`, which is what the server is blocked on. Nothing is in the
+ * deck, so a failure here goes back to the grid and the user may simply dismiss again.
+ */
+async function submitDismissal(): Promise<void> {
+  const running = services;
+  const offer = offerOf(state);
+  if (running === null || offer === null) return;
+  const proposal = offer.proposal;
+  dispatch({ kind: "submit-started", picked: null, stage: "writing-pick" });
   const written = await writePick({
     pick: running.pick,
     proposal,
-    decision: {
-      picked,
-      insertedObjectIds,
-      anomalies: decided === null ? [] : anomaliesOf(decided),
-    },
+    decision: { picked: null, insertedObjectIds: [], anomalies: anomaliesOf(offer) },
     decidedAt: new Date().toISOString(),
   });
   switch (written.kind) {
     case "written":
       running.observer.dispatch({ kind: "resolved", proposalId: proposal.proposalId, nowMs: Date.now() });
-      dispatch({ kind: "settled", proposalId: proposal.proposalId, picked });
-      // The log entry LAST and best effort: the slide is in the deck and PICK is written, so a
-      // failed event write must not be reported as a failed insert.
-      if (picked !== null) {
-        await appendEvent({
-          folderId: proposal.folderId,
-          body: { kind: "slide-inserted", slideIndex: picked, pageObjectId: inserted.pageObjectId },
-        });
-      }
+      dispatch({ kind: "settled", proposalId: proposal.proposalId, picked: null, where: null, telling: { kind: "told" } });
       return;
     case "refused":
       dispatch({ kind: "submit-failed", message: written.reason });
@@ -1109,23 +1152,37 @@ async function submit({ picked }: { picked: number | null }): Promise<void> {
   }
 }
 
-/** What a pick put in the deck: the object ids Slides created, and the page they are on. */
-type Inserted = Readonly<{ objectIds: readonly string[]; pageObjectId: string | null }>;
+/** PICK's outcome as the settled line reports it. */
+function tellingOf(written: PickOutcome): Telling {
+  switch (written.kind) {
+    case "written":
+      return { kind: "told" };
+    case "refused":
+      return { kind: "failed", message: written.reason };
+    case "failed":
+      return { kind: "failed", message: written.message };
+    default:
+      return assertNever(written);
+  }
+}
 
-const NOTHING_INSERTED: Inserted = { objectIds: [], pageObjectId: null };
+/** What a pick put in the deck, and what the bookkeeping after it needs to know. */
+type Placed = Readonly<{ inserted: Inserted; presentationId: string; render: RenderRequest | null }>;
 
 /**
  * Put the picked candidate in the deck, or return null when that failed (the reducer has been
- * told). An ordinary proposal INSERTS a new slide; a merge proposal redesigns its target slide in
- * place (merge-apply.ts) and never creates a page.
+ * told). An ordinary proposal INSERTS a new slide, placed against the selected one; a merge proposal
+ * redesigns its target slide in place (merge-apply.ts) and never creates a page.
  */
 async function insertPicked({
   running,
   picked,
+  position,
 }: {
   running: Services;
   picked: number;
-}): Promise<Inserted | null> {
+  position: InsertPosition;
+}): Promise<Placed | null> {
   const offer = offerOf(state);
   const frame = offer?.slides[picked - 1];
   if (offer === null || frame === undefined) {
@@ -1141,6 +1198,9 @@ async function insertPicked({
     dispatch({ kind: "submit-failed", message: `option ${picked}'s HTML has not loaded yet` });
     return null;
   }
+  const html = frame.html.html;
+  const renderAt = (pageObjectId: string): RenderRequest | null =>
+    renderRequestFor({ proposalId: offer.proposal.proposalId, folderId: offer.proposal.folderId, index: picked, pageObjectId });
   const merge = offer.proposal.merge;
   if (merge !== null) {
     const merged = await applyMergeCandidate({
@@ -1149,20 +1209,18 @@ async function insertPicked({
       merge,
       openPresentationId: presentationId,
       index: picked,
-      html: frame.html.html,
+      html,
       // A fresh prefix per apply: the new elements must not share ids with what is on the slide.
       objectIdPrefix: newPageObjectId({ random: Math.random }),
-      render: renderRequestFor({
-        proposalId: offer.proposal.proposalId,
-        folderId: offer.proposal.folderId,
-        index: picked,
-        pageObjectId: merge.slideObjectId,
-      }),
       onSending: () => dispatch({ kind: "submit-stage", stage: "inserting" }),
     });
     switch (merged.kind) {
       case "applied":
-        return { objectIds: merged.createdObjectIds, pageObjectId: merged.pageObjectId };
+        return {
+          inserted: { objectIds: merged.createdObjectIds, pageObjectId: merged.pageObjectId, where: null },
+          presentationId,
+          render: renderAt(merge.slideObjectId),
+        };
       case "refused":
       case "failed":
         dispatch({ kind: "submit-failed", message: merged.message });
@@ -1171,16 +1229,23 @@ async function insertPicked({
         return assertNever(merged);
     }
   }
-  // Converted again here rather than reused: the page id has to be the one actually created, and
-  // the cached conversion was made against a preview id.
+  // THE PREVIEW'S CONVERSION, REUSED: the grid converted this exact HTML already, so it is only
+  // renamed onto the new page id (slide-insert.ts `retargetConversion`). Converted afresh only when
+  // the preview never finished or its result was evicted.
   const pageObjectId = newPageObjectId({ random: Math.random });
-  let converted;
+  const previewSpec = previewConversionSpec({
+    proposalId: offer.proposal.proposalId,
+    index: picked,
+    html,
+    presentationId: running.presentationId ?? "",
+  });
+  let conversion;
   try {
-    converted = await running.convert({
-      html: frame.html.html,
-      presentationId,
+    conversion = await conversionForInsert({
+      preview: previewConversionOf(previewSpec),
+      previewPageObjectId: previewSpec.pageObjectId,
       pageObjectId,
-      objectIdPrefix: pageObjectId,
+      convert: () => running.convert({ html, presentationId, pageObjectId, objectIdPrefix: pageObjectId }),
     });
   } catch (cause) {
     dispatch({ kind: "submit-failed", message: cause instanceof Error ? cause.message : String(cause) });
@@ -1188,29 +1253,31 @@ async function insertPicked({
   }
 
   dispatch({ kind: "submit-stage", stage: "inserting" });
-  const render: RenderRequest | null = renderRequestFor({
-    proposalId: offer.proposal.proposalId,
-    folderId: offer.proposal.folderId,
-    index: picked,
-    pageObjectId,
-  });
-  const inserted = await running.slides.insert({
+  const attempt = await insertNewSlide({
+    slides: running.slides,
     presentationId,
-    requests: insertRequests({ pageObjectId, converted: converted.requests }),
-    render,
+    pageObjectId,
+    converted: conversion.requests,
+    position,
   });
-  if (inserted.kind !== "ok") {
-    dispatch({ kind: "submit-failed", message: inserted.message });
-    return null;
+  switch (attempt.kind) {
+    case "inserted":
+      return { inserted: attempt.inserted, presentationId, render: renderAt(pageObjectId) };
+    case "failed":
+      dispatch({ kind: "submit-failed", message: attempt.message });
+      return null;
+    default:
+      return assertNever(attempt);
   }
-  // From here on the slide IS in the user's deck, so nothing below may be reported as a failure --
-  // the user must not be invited to insert it twice. See render-artifact.ts.
-  const artifact = renderArtifactOf({ renderArtifact: inserted.value.renderArtifact, requested: render });
-  if (artifact.kind === "skipped") {
-    console.warn(`[sasha-slides] no render artifact for option ${picked}: ${artifact.reason}`);
-  }
-  const objectIds = createdObjectIdsOf(inserted.value.batchResponse);
-  return { objectIds, pageObjectId: objectIds[0] ?? null };
+}
+
+/**
+ * The preview's conversion of exactly this HTML, from this window's memory first and the browser's
+ * conversion cache second -- the same key the preview wrote it under.
+ */
+function previewConversionOf(spec: ReturnType<typeof previewConversionSpec>): ConversionResult | null {
+  const key = conversionKeyOf({ build: buildStamp(), ...spec });
+  return previewConversions.get(key) ?? cachedConversion(key);
 }
 
 /** Why nothing was sent, when the mark-up was refused. The reasons come from `feedbackCommentsFor`. */

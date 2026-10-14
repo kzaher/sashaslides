@@ -1,9 +1,9 @@
 // `PICK` and `render/NN.png` -- the only two files the picker writes. Against a fake Drive, so the
 // exact bytes, the exact folder and the exact appProperties are all asserted with no network.
 //
-// The render artifact is now produced INSIDE the insert round trip (see render-artifact.ts), so
-// the same facts are asserted through `slides.insert` plus the pure `renderRequestFor` spec it is
-// driven by, rather than through a client-side writeRenderArtifact.
+// The render artifact is produced by its own host call, `slides.writeRender`, made after the window
+// has said "Inserted" (insert-flow.ts), so the same facts are asserted through it plus the pure
+// `renderRequestFor` spec it is driven by.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -154,11 +154,7 @@ test("a render artifact is NN.png inside the proposal's render folder", async ()
     pageObjectId: "sasha_abc",
   });
   assert.ok(render !== null);
-  const outcome = await drive.slides.insert({
-    presentationId: "deck_1",
-    requests: [{ createSlide: { objectId: "sasha_abc" } }],
-    render,
-  });
+  const outcome = await drive.slides.writeRender({ presentationId: "deck_1", render });
   assert.equal(outcome.kind, "ok");
   assert.deepEqual(
     renderArtifactOf({

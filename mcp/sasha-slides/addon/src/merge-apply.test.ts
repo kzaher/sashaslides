@@ -56,7 +56,6 @@ async function apply({
     index,
     html: "<html><body></body></html>",
     objectIdPrefix: "sasha_m1",
-    render: null,
     onSending: () => undefined,
   });
 }
@@ -94,7 +93,6 @@ test("the candidate is converted onto the TARGET slide's page id, not a fresh on
     index: 1,
     html: "<html></html>",
     objectIdPrefix: "sasha_m2",
-    render: null,
     onSending: () => undefined,
   });
   assert.deepEqual(asked, [SLIDE]);

@@ -29,6 +29,7 @@ import {
   type UnresolvedCount,
 } from "./session-log.ts";
 import type { Offer, SlideFrame, SlideRendering, SlideTool } from "./picker-state.ts";
+import type { InsertPosition } from "./slide-insert.ts";
 
 export function CandidateGrid({
   offer,
@@ -51,8 +52,8 @@ export function CandidateGrid({
   editedIndex: number | null;
   onEditFrame: (element: HTMLIFrameElement | null) => void;
   onZoom: (index: number) => void;
-  /** Put THIS candidate in the deck. One button per cell -- see `CandidateCell`. */
-  onInsert: (index: number) => void;
+  /** Put THIS candidate in the deck, before or after the selected slide -- see `CandidateCell`. */
+  onInsert: (spec: Readonly<{ index: number; position: InsertPosition }>) => void;
   /** Report a defect in THIS candidate, same reason. */
   onReport: (spec: Readonly<{ index: number }>) => void;
   /** Whether inserting is possible at all (a tab that is not an editable presentation). */
@@ -83,6 +84,7 @@ export function CandidateGrid({
           onEditFrame={frame.index === editedIndex ? onEditFrame : null}
           onZoom={onZoom}
           onInsert={onInsert}
+          merging={offer.proposal.merge !== null}
           onReport={onReport}
           insertable={insertable}
           reportOpening={reportOpening}
@@ -103,6 +105,7 @@ function CandidateCell({
   onEditFrame,
   onZoom,
   onInsert,
+  merging,
   onReport,
   insertable,
   reportOpening,
@@ -116,12 +119,15 @@ function CandidateCell({
   disabled: boolean;
   onEditFrame: ((element: HTMLIFrameElement | null) => void) | null;
   onZoom: (index: number) => void;
-  onInsert: (index: number) => void;
+  onInsert: (spec: Readonly<{ index: number; position: InsertPosition }>) => void;
+  /** A merge redesigns its own slide, so it has nothing to place before or after. */
+  merging: boolean;
   onReport: (spec: Readonly<{ index: number }>) => void;
   insertable: boolean;
   reportOpening: boolean;
   onDraw: (spec: Readonly<{ index: number; region: Region }>) => void;
 }): JSX.Element {
+  const option = String(frame.index);
   return (
     <div className={cellClass({ chosen, edited: onEditFrame !== null })} role="listitem">
       <span className="sasha-stage sasha-cell-stage">
@@ -154,10 +160,12 @@ function CandidateCell({
           onClick={() => onZoom(frame.index)}
         />
       </span>
-      {/* TWO BUTTONS, AND NOTHING ELSE. The cell used to carry a name chip, a "Show large" button
+      {/* THE DECISIONS, AND NOTHING ELSE. The cell used to carry a name chip, a "Show large" button
           and a line of status -- the index is on the picture, "large" is what clicking it does,
-          and the status was a sentence nobody could act on. What is left is the two decisions a
-          candidate can receive: put it in the deck, or say it is broken. */}
+          and the status was a sentence nobody could act on. What is left is what a candidate can
+          receive: put it in the deck -- BEFORE or AFTER the slide selected there, because the user
+          reported "it ignored my selected slide" when it could only append -- or say it is
+          broken. A merge keeps its one button: it redesigns a slide that is already placed. */}
       <footer className="sasha-cell-foot">
         <button
           type="button"
@@ -168,19 +176,38 @@ function CandidateCell({
         >
           Report defect
         </button>
-        <button
-          type="button"
-          className="sasha-primary sasha-small"
-          disabled={disabled || !insertable}
-          title={
-            insertable
-              ? `Put option ${String(frame.index)} in the deck`
-              : "this tab is not an editable presentation"
-          }
-          onClick={() => onInsert(frame.index)}
-        >
-          Insert
-        </button>
+        {merging ? (
+          <button
+            type="button"
+            className="sasha-primary sasha-small"
+            disabled={disabled || !insertable}
+            title={insertable ? `Apply option ${option} to its slide` : NOT_INSERTABLE}
+            onClick={() => onInsert({ index: frame.index, position: "after" })}
+          >
+            Insert
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="sasha-secondary sasha-small"
+              disabled={disabled || !insertable}
+              title={insertable ? `Put option ${option} in the deck ${PLACEMENT_NOTE.before}` : NOT_INSERTABLE}
+              onClick={() => onInsert({ index: frame.index, position: "before" })}
+            >
+              Insert before
+            </button>
+            <button
+              type="button"
+              className="sasha-primary sasha-small"
+              disabled={disabled || !insertable}
+              title={insertable ? `Put option ${option} in the deck ${PLACEMENT_NOTE.after}` : NOT_INSERTABLE}
+              onClick={() => onInsert({ index: frame.index, position: "after" })}
+            >
+              Insert after
+            </button>
+          </>
+        )}
       </footer>
     </div>
   );
@@ -219,3 +246,14 @@ function cellClass({ chosen, edited }: { chosen: boolean; edited: boolean }): st
 /** Why you would press Report defect. On the button, because the cell's row has no words to spare. */
 const REPORT_EXPLANATION =
   "Opens the same editor on two slides -- this one as it is, and as it would be sent -- and sends only what you approve.";
+
+const NOT_INSERTABLE = "this tab is not an editable presentation";
+/**
+ * The buttons' explanation. The selected slide is read when the button is pressed, not when the
+ * window opened, so the label cannot name a slide number -- it names the rule instead.
+ */
+const PLACEMENT_NOTE: Readonly<Record<InsertPosition, string>> = {
+  before: "before the slide you have selected (at the end if none is)",
+  after: "after the slide you have selected (at the end if none is)",
+};
+

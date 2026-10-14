@@ -136,7 +136,8 @@ substitutions the vehicle forces. Request and reply shapes are declared and pars
 | `sashaHello` | `hello` | — | `{ protocolVersion, presentationUrl }` |
 | `sashaScanInbox` | the observer's Drive poll (`listByRoles`) | `{ pageSize }` | `{ marks: ProposalMark[] }` |
 | `sashaReadText` | `request-slide-html` | `{ fileId }` | `{ text }` |
-| `sashaInsert` | `insert` | `{ presentationId, requests, render }` | `{ batchResponse, renderArtifact }` |
+| `sashaInsert` | `insert` | `{ presentationId, requests, position }` | `{ batchResponse, insertionIndex }` |
+| `sashaWriteRender` | (was inside `insert`) | `{ presentationId, render }` | `{ renderArtifact }` |
 | `sashaWritePick` | `decide` | `{ folderId, name, mimeType, body, appProperties }` | `{ fileId }` |
 
 Review mode's three:

@@ -14,6 +14,7 @@
 import type {
   CandidateCommentsSpec,
   InsertRequestSpec,
+  WriteRenderSpec,
   OpenPickerSpec,
   PageElementsSpec,
   ReadEventsSpec,
@@ -65,6 +66,8 @@ declare global {
     /** The comment threads on each candidate's own NN.html -- the unresolved counts' one source. */
     sashaCandidateComments(spec: CandidateCommentsSpec): void;
     sashaInsert(spec: InsertRequestSpec): void;
+    /** Photograph the inserted page into `<proposal>/render/NN.png`. Best effort, after the insert. */
+    sashaWriteRender(spec: WriteRenderSpec): void;
     /** One slide's top-level element ids, back to front: what a merge validates `remove` against. */
     sashaPageElements(spec: PageElementsSpec): void;
     /**

@@ -10,7 +10,6 @@
 // accepted, and what is sent is one batchUpdate, which Slides applies atomically. So every outcome
 // other than `applied` leaves the user's slide exactly as it was.
 
-import type { RenderRequest } from "./bridge.ts";
 import type { ConvertSlideHtml } from "./converter-contract.ts";
 import { createdObjectIdsOf, type SlidesApi } from "./drive-api.ts";
 import { removalFor, type MergeSpec } from "./protocol.ts";
@@ -18,7 +17,7 @@ import { describeMergeRefusal, planMerge } from "./slide-merge.ts";
 
 export type MergeApplyOutcome =
   /** The slide is redesigned. `createdObjectIds` is what the batch reply says Slides made. */
-  | Readonly<{ kind: "applied"; pageObjectId: string; createdObjectIds: readonly string[]; renderArtifact: string | null }>
+  | Readonly<{ kind: "applied"; pageObjectId: string; createdObjectIds: readonly string[] }>
   /** Nothing was sent: the merge could not be planned safely. `message` is for the user. */
   | Readonly<{ kind: "refused"; message: string }>
   /** A host call or the conversion failed; nothing changed (the batch is atomic). */
@@ -32,7 +31,6 @@ export async function applyMergeCandidate({
   index,
   html,
   objectIdPrefix,
-  render,
   onSending,
 }: {
   slides: SlidesApi;
@@ -45,7 +43,6 @@ export async function applyMergeCandidate({
   html: string;
   /** Unique per apply, so the new elements' ids cannot clash with the slide's. */
   objectIdPrefix: string;
-  render: RenderRequest | null;
   /** Called once the plan is accepted and the batchUpdate is about to go, for the stage indicator. */
   onSending: () => void;
 }): Promise<MergeApplyOutcome> {
@@ -84,12 +81,13 @@ export async function applyMergeCandidate({
   if (plan.kind === "refused") return { kind: "refused", message: describeMergeRefusal(plan.refusal) };
 
   onSending();
-  const sent = await slides.insert({ presentationId: merge.presentationId, requests: plan.requests, render });
+  // No position: a merge creates no slide. The render artifact is the caller's, after "applied"
+  // is on screen (insert-flow.ts `recordInsert`), exactly as for an ordinary insert.
+  const sent = await slides.insert({ presentationId: merge.presentationId, requests: plan.requests, position: null });
   if (sent.kind !== "ok") return { kind: "failed", message: sent.message };
   return {
     kind: "applied",
     pageObjectId: merge.slideObjectId,
     createdObjectIds: createdObjectIdsOf(sent.value.batchResponse),
-    renderArtifact: sent.value.renderArtifact,
   };
 }

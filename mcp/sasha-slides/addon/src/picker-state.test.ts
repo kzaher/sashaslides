@@ -233,8 +233,40 @@ test("A CLEARED SET IS NOT AN EMPTY GRID -- READY survives a clear, so this wind
 });
 
 test("the settled state tells the user what Sasha was told", () => {
-  assert.match(markupOf({ status: "settled", proposalId: "p_1", picked: 2 }), /Inserted option 2/);
-  assert.match(markupOf({ status: "settled", proposalId: "p_1", picked: null }), /Dismissed p_1/);
+  const told = { kind: "told" } as const;
+  assert.match(
+    markupOf({ status: "settled", proposalId: "p_1", picked: 2, where: { kind: "at", slideNumber: 5 }, telling: told }),
+    /Inserted option 2 as slide 5\. Sasha has been told\./,
+  );
+  assert.match(markupOf({ status: "settled", proposalId: "p_1", picked: null, where: null, telling: told }), /Dismissed p_1/);
+});
+
+test("INSERTED IS SHOWN BEFORE PICK IS WRITTEN, and where it went is said, including the append fallback", () => {
+  const telling = play([
+    { kind: "settled", proposalId: "p_1", picked: 2, where: { kind: "end" }, telling: { kind: "telling" } },
+  ]);
+  const markup = markupOf(telling);
+  assert.match(markup, /at the end of the deck, because no slide was selected/);
+  assert.match(markup, /Telling Sasha/);
+  const failed = reducePicker(telling, { kind: "told", proposalId: "p_1", telling: { kind: "failed", message: "Drive said no" } });
+  assert.match(markupOf(failed), /could not be told: Drive said no/);
+  assert.doesNotMatch(markupOf(failed), /Insert (before|after)/, "a failed PICK never offers the insert again");
+});
+
+test("an insert offers BEFORE and AFTER the selected slide; a merge keeps its single button", () => {
+  const offered = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
+  const markup = markupOf(offered);
+  assert.match(markup, /Insert before/);
+  assert.match(markup, /Insert after/);
+  assert.match(markup, /the slide you have selected/);
+  const merged = play([
+    {
+      kind: "proposal-offered",
+      proposal: { ...proposal, merge: { presentationId: "deck_1", slideObjectId: "g_1", removals: [] } },
+      presentationId: "deck_1",
+    },
+  ]);
+  assert.doesNotMatch(markupOf(merged), /Insert (before|after)/);
 });
 
 /**

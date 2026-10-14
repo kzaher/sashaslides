@@ -7,6 +7,7 @@ import type { Proposal } from "./observer.ts";
 import { WHOLE_SLIDE, assertNever, type Anomaly, type Region, type SlideEntry } from "./protocol.ts";
 import { loadedSlideComments, type SlideCommentsLoad } from "./session-log.ts";
 import type { SlideEdit } from "./slide-editor.ts";
+import type { InsertedWhere } from "./slide-insert.ts";
 
 export type PickerState =
   /**
@@ -34,7 +35,19 @@ export type PickerState =
   | Readonly<{ status: "trouble"; message: string }>
   | Readonly<{ status: "picking"; offer: Offer }>
   | Readonly<{ status: "submitting"; offer: Offer; picked: number | null; stage: SubmitStage }>
-  | Readonly<{ status: "settled"; proposalId: string; picked: number | null }>;
+  /**
+   * DONE, as far as the user is concerned. For an insert this is entered the moment the batchUpdate
+   * succeeds -- the slide is in the deck -- and `telling` then follows PICK, which is written
+   * AFTER, so "Inserted" never waits on bookkeeping (insert-flow.ts). `where` is null for a
+   * dismissal and for a merge, which have no new slide to place.
+   */
+  | Readonly<{ status: "settled"; proposalId: string; picked: number | null; where: InsertedWhere | null; telling: Telling }>;
+
+/** Whether Sasha has been told (PICK written). A failure here is reported, never a failed insert. */
+export type Telling =
+  | Readonly<{ kind: "telling" }>
+  | Readonly<{ kind: "told" }>
+  | Readonly<{ kind: "failed"; message: string }>;
 
 export type SubmitStage = "converting" | "inserting" | "writing-pick";
 
@@ -254,7 +267,9 @@ export type PickerEvent =
   | Readonly<{ kind: "submit-started"; picked: number | null; stage: SubmitStage }>
   | Readonly<{ kind: "submit-stage"; stage: SubmitStage }>
   | Readonly<{ kind: "submit-failed"; message: string }>
-  | Readonly<{ kind: "settled"; proposalId: string; picked: number | null }>
+  | Readonly<{ kind: "settled"; proposalId: string; picked: number | null; where: InsertedWhere | null; telling: Telling }>
+  /** PICK's outcome, arriving after `settled` for an insert. Ignored unless that proposal is settled. */
+  | Readonly<{ kind: "told"; proposalId: string; telling: Telling }>
   | Readonly<{ kind: "comments-requested" }>
   | Readonly<{ kind: "comments-arrived"; comments: SlideCommentsLoad }>
   | Readonly<{ kind: "comments-failed"; message: string }>
@@ -430,7 +445,16 @@ export function reducePicker(state: PickerState, event: PickerEvent): PickerStat
     }
 
     case "settled":
-      return { status: "settled", proposalId: event.proposalId, picked: event.picked };
+      return {
+        status: "settled",
+        proposalId: event.proposalId,
+        picked: event.picked,
+        where: event.where,
+        telling: event.telling,
+      };
+
+    case "told":
+      return state.status === "settled" && state.proposalId === event.proposalId ? { ...state, telling: event.telling } : state;
 
     case "comments-requested":
       return mapAnyOffer(state, (offer) => ({

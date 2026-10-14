@@ -370,8 +370,14 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
     });
     check({
       failures,
-      what: "under every slide: Report defect, then Insert last and accented",
-      ok: cellFoot === JSON.stringify([["Report defect", "sasha-secondary sasha-small"], ["Insert", "sasha-primary sasha-small"]]),
+      what: "under every slide: Report defect, Insert before, then Insert after last and accented",
+      ok:
+        cellFoot ===
+        JSON.stringify([
+          ["Report defect", "sasha-secondary sasha-small"],
+          ["Insert before", "sasha-secondary sasha-small"],
+          ["Insert after", "sasha-primary sasha-small"],
+        ]),
       detail: cellFoot,
     });
 
@@ -1780,7 +1786,8 @@ const STUB_SCRIPT = `<script>
         return text === undefined ? { fileId: fileId, error: 'HTTP 404' } : { fileId: fileId, text: text };
       }) };
     },
-    sashaInsert: function () { return { batchResponse: { replies: [{ createSlide: { objectId: 'sasha_smoke' } }] }, renderArtifact: null }; },
+    sashaInsert: function () { return { batchResponse: { replies: [{ createSlide: { objectId: 'sasha_smoke' } }] }, insertionIndex: null }; },
+    sashaWriteRender: function (spec) { return { renderArtifact: spec.render.fileName }; },
     // THE THROWAWAY-DECK RENDER, stubbed. A real one creates a presentation, photographs each
     // page and deletes it; what this surface has to prove is that the picture REACHES the stage
     // and replaces the geometry projection. Candidate 2 answers with a reason instead of a
@@ -2081,7 +2088,7 @@ async function click({ client, selector }: { client: CdpClient; selector: string
  * Press the button inside `within` whose text STARTS WITH `startsWith`.
  *
  * By text, because the row it is in holds several buttons of the same class: a cell's footer has
- * Report defect and Insert, and a class selector there would press whichever came
+ * Report defect, Insert before and Insert after, and a class selector there would press whichever came
  * first. The report button's own label carries the candidate number, so it is a prefix match.
  */
 async function clickLabelled({
