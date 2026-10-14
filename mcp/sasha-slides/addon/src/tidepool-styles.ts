@@ -16,22 +16,35 @@ html, body { background: #eef1f6; }
 .sasha-tide { position: relative; isolation: isolate; min-height: 100vh; background: transparent; color: #1c2333; }
 .sasha-tide, .sasha-tide * { font-family: Manrope, Roboto, Arial, sans-serif; }
 
-/* The living background: fixed, behind everything, never in the way of a click. */
+/* The living background: fixed, behind everything, never in the way of a click.
+   ALIVE, NOT BUSY. Measured 2026-10-14 on the first version: shapes of ~300 px drifting +-40 px
+   over 30-44 s and rotating read as a still picture -- a blurred round blob that turns looks
+   identical, and the glass hid the rest. So the shapes now cross most of the panel (vw/vh, which
+   in the sidebar's frame are the panel's own size), swell and shrink, and their colours swing in
+   tens of seconds instead of minutes; each still moves at a walking pace for the eye. */
 .sasha-tide-ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-.sasha-tide-ambient span { position: absolute; filter: blur(20px); opacity: .8; }
-.sasha-tide-ambient span:nth-child(1) { left: -70px; top: 40px; width: 280px; height: 280px; background: linear-gradient(140deg, #a5f3fc, #c7d2fe); animation: sashaTideMorphA 30s ease-in-out infinite, sashaTideHue 120s ease-in-out infinite alternate; }
-.sasha-tide-ambient span:nth-child(2) { right: -90px; top: 330px; width: 300px; height: 300px; background: linear-gradient(160deg, #fbcfe8, #ddd6fe); animation: sashaTideMorphB 36s ease-in-out infinite, sashaTideHue 140s ease-in-out -40s infinite alternate; }
-.sasha-tide-ambient span:nth-child(3) { left: 20px; bottom: -110px; width: 260px; height: 240px; background: linear-gradient(120deg, #bbf7d0, #bae6fd); animation: sashaTideMorphA 44s ease-in-out infinite reverse, sashaTideHue 160s ease-in-out -80s infinite alternate; }
-@keyframes sashaTideMorphA {
-  0%, 100% { border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%; transform: translate(0, 0) rotate(0deg); }
-  33% { border-radius: 61% 39% 45% 55% / 55% 61% 39% 45%; transform: translate(30px, 40px) rotate(40deg); }
-  66% { border-radius: 38% 62% 56% 44% / 63% 37% 63% 37%; transform: translate(-25px, 15px) rotate(-30deg); }
+.sasha-tide-ambient span { position: absolute; width: 80vw; height: 80vw; filter: blur(26px); opacity: .85; will-change: transform; }
+.sasha-tide-ambient span:nth-child(1) { left: -30vw; top: -10vh; background: radial-gradient(circle at 40% 40%, #67e8f9, #a5b4fc 70%); animation: sashaTideDriftA 14s ease-in-out infinite alternate, sashaTideHue 24s ease-in-out infinite alternate; }
+.sasha-tide-ambient span:nth-child(2) { right: -35vw; top: 25vh; background: radial-gradient(circle at 50% 50%, #f9a8d4, #c4b5fd 70%); animation: sashaTideDriftB 17s ease-in-out infinite alternate, sashaTideHue 30s ease-in-out -8s infinite alternate; }
+.sasha-tide-ambient span:nth-child(3) { left: -20vw; bottom: -25vh; background: radial-gradient(circle at 50% 50%, #86efac, #7dd3fc 70%); animation: sashaTideDriftC 20s ease-in-out infinite alternate, sashaTideHue 27s ease-in-out -15s infinite alternate; }
+.sasha-tide-ambient span:nth-child(4) { right: -25vw; top: -15vh; width: 60vw; height: 60vw; background: radial-gradient(circle at 50% 50%, #fde68a, #fdba74 70%); opacity: .6; animation: sashaTideDriftC 19s ease-in-out -6s infinite alternate-reverse, sashaTideHue 33s ease-in-out -20s infinite alternate; }
+.sasha-tide-ambient span:nth-child(5) { left: 10vw; top: 55vh; width: 55vw; height: 55vw; background: radial-gradient(circle at 50% 50%, #a5b4fc, #67e8f9 70%); opacity: .7; animation: sashaTideDriftA 16s ease-in-out -9s infinite alternate-reverse, sashaTideHue 21s ease-in-out -4s infinite alternate; }
+@keyframes sashaTideDriftA {
+  0% { border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%; transform: translate(0, 0) scale(.85); }
+  50% { border-radius: 61% 39% 45% 55% / 55% 61% 39% 45%; transform: translate(45vw, 30vh) scale(1.25); }
+  100% { border-radius: 38% 62% 56% 44% / 63% 37% 63% 37%; transform: translate(15vw, 55vh) scale(.95); }
 }
-@keyframes sashaTideMorphB {
-  0%, 100% { border-radius: 55% 45% 38% 62% / 47% 60% 40% 53%; transform: translate(0, 0) rotate(0deg); }
-  50% { border-radius: 40% 60% 60% 40% / 60% 40% 60% 40%; transform: translate(-40px, -50px) rotate(-50deg); }
+@keyframes sashaTideDriftB {
+  0% { border-radius: 55% 45% 38% 62% / 47% 60% 40% 53%; transform: translate(0, 0) scale(1.15); }
+  50% { border-radius: 40% 60% 60% 40% / 60% 40% 60% 40%; transform: translate(-50vw, -20vh) scale(.8); }
+  100% { border-radius: 63% 37% 45% 55% / 40% 58% 42% 60%; transform: translate(-25vw, 30vh) scale(1.2); }
 }
-@keyframes sashaTideHue { 0% { filter: blur(20px) hue-rotate(0deg); } 100% { filter: blur(20px) hue-rotate(40deg); } }
+@keyframes sashaTideDriftC {
+  0% { border-radius: 48% 52% 60% 40% / 52% 40% 60% 48%; transform: translate(0, 0) scale(1); }
+  50% { border-radius: 60% 40% 40% 60% / 40% 60% 40% 60%; transform: translate(40vw, -35vh) scale(1.3); }
+  100% { border-radius: 40% 60% 55% 45% / 60% 45% 55% 40%; transform: translate(10vw, -60vh) scale(.85); }
+}
+@keyframes sashaTideHue { 0% { filter: blur(26px) hue-rotate(0deg); } 100% { filter: blur(26px) hue-rotate(90deg); } }
 @keyframes sashaTideShine { 0% { transform: translateX(-120%); } 60%, 100% { transform: translateX(260%); } }
 @keyframes sashaTideBreathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.6); opacity: .35; } }
 
@@ -45,11 +58,11 @@ html, body { background: #eef1f6; }
 .sasha-tide .sasha-connection, .sasha-tide .sasha-artifact, .sasha-tide .sasha-nobody-listening {
   position: relative; overflow: hidden;
   border-radius: 22px; padding: 14px 16px;
-  background: rgba(255, 255, 255, .42);
-  border: 1px solid rgba(255, 255, 255, .85);
+  background: rgba(255, 255, 255, .26);
+  border: 1px solid rgba(255, 255, 255, .8);
   box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, .95), inset 0 -1px 0 rgba(120, 130, 170, .18), 0 12px 32px rgba(80, 90, 140, .14);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(170%);
+  backdrop-filter: blur(12px) saturate(170%);
 }
 .sasha-tide .sasha-connection::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 45%; pointer-events: none; background: linear-gradient(100deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, .55), rgba(255, 255, 255, 0)); transform: translateX(-120%); animation: sashaTideShine 9s ease-in-out infinite; }
 .sasha-tide .sasha-chat { gap: 12px; }
@@ -69,7 +82,7 @@ html, body { background: #eef1f6; }
 .sasha-tide .sasha-filter-count { background: rgba(28, 35, 51, .08); color: #3d4659; }
 .sasha-tide .sasha-tab-on .sasha-filter-count { background: #1c2333; color: #fff; }
 .sasha-tide .sasha-stack { gap: 8px; }
-.sasha-tide .sasha-stack-slide { border-radius: 18px; padding: 8px; background: rgba(255, 255, 255, .55); border: 1px solid rgba(255, 255, 255, .9); }
+.sasha-tide .sasha-stack-slide { border-radius: 18px; padding: 8px; background: rgba(255, 255, 255, .5); border: 1px solid rgba(255, 255, 255, .9); }
 .sasha-tide .sasha-stack-archived .sasha-stack-slide { border-style: dashed; border-color: rgba(28, 35, 51, .18); background: rgba(255, 255, 255, .3); }
 .sasha-tide .sasha-stack-label { font-size: 13px; font-weight: 600; }
 .sasha-tide .sasha-stack-number { background: #1c2333; }

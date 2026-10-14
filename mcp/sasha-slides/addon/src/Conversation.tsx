@@ -482,6 +482,8 @@ function ConversationShell({ children }: { children: ReactNode }): JSX.Element {
           <span />
           <span />
           <span />
+          <span />
+          <span />
         </div>
         {children}
       </div>
