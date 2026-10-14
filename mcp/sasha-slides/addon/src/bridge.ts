@@ -93,42 +93,23 @@ export type PageElementsReply = Readonly<{ objectIds: readonly string[]; fullPag
 // as the first five: Code.gs relays, this file parses, and every decision about what a reply MEANS
 // is in feedback.ts / session-log.ts under `node --test`.
 //
-// `sashaSendFeedback` / `sashaReadFeedback` take any Drive FILE ID, which is what lets the same
-// pair serve two jobs: a message about the deck is a comment on the presentation, and a mark-up on
-// a CANDIDATE is a comment on that candidate's own `NN.html` (PROTOCOL.md -- "Comments live on the
-// CANDIDATE, not the deck"). Nothing here knows which; the caller passes the file.
+// `sashaSendFeedback` takes any Drive FILE ID, which is what lets it carry a mark-up on a
+// CANDIDATE as a comment on that candidate's own `NN.html` (PROTOCOL.md -- "Comments live on the
+// CANDIDATE, not the deck"). Nothing here knows which file it is; the caller passes it.
 // ---------------------------------------------------------------------------
 
 /** `sashaSendFeedback()`. One result per requested comment, in the order they were requested. */
 export type SendFeedbackReply = Readonly<{ results: readonly SendFeedbackResult[] }>;
 
-/** `sashaReadFeedback()`. Every comment on the presentation -- ours and other people's. */
-export type ReadFeedbackReply = Readonly<{ comments: readonly FeedbackCommentRecord[] }>;
-
-export type ReadFeedbackSpec = Readonly<{ fileId: string; pageSize: number }>;
-
 /**
- * `sashaReplyComment()` / `sashaResolveComment()`: ONE POST INTO AN EXISTING THREAD, on whichever
- * file the thread lives on -- the presentation for a deck message, the candidate's `NN.html` for a
- * mark-up. Drive models "resolve" as a reply carrying `action: "resolve"`, so both are the same
- * endpoint and the same reply; they are two functions only so a caller cannot resolve a thread by
- * passing the wrong flag.
+ * `sashaReplyToComment()` / `sashaResolveComment()`: ONE POST INTO AN EXISTING THREAD, on the file
+ * the thread lives on -- a candidate's `NN.html`, from the slides window's thread rail. Drive models
+ * "resolve" as a reply carrying `action: "resolve"`, so both are the same endpoint and the same
+ * reply; they are two functions only so a caller cannot resolve a thread by passing the wrong flag.
  *
- * `content` is the USER'S OWN WORDS in a thread that already exists: no sentinel line, unlike a new
+ * `text` is the USER'S OWN WORDS in a thread that already exists: no sentinel line, unlike a new
  * mark-up comment, because nothing has to parse a region back out of a reply. Empty is allowed for
  * a resolve -- Code.gs substitutes "Resolved.", since Drive refuses a reply with no content.
- */
-export type ReplyCommentSpec = Readonly<{ fileId: string; commentId: string; content: string }>;
-
-/**
- * THE SAME POST, with the field named the way the thread rail names it: `text`.
- *
- * Two specs for one endpoint is a MIGRATION, not a design. `ReplyCommentSpec` above is what the
- * sidebar's conversation still passes (`content`), and this is what the slides window's thread rail
- * passes; they go to the same Drive endpoint through the same Code.gs helper, which reads whichever
- * field is present. Collapse them onto this one once sidebar.tsx has moved over -- and do it by
- * deleting the older name, never by letting a second SHAPE grow, which is the drift this file's
- * header warns about.
  */
 export type CommentReplySpec = Readonly<{ fileId: string; commentId: string; text: string }>;
 
@@ -142,12 +123,6 @@ export type CommentReplySpec = Readonly<{ fileId: string; commentId: string; tex
  * the safe answer, and never a failed post.
  */
 export type CommentReplyReply = Readonly<{ replyId: string; resolved: boolean }>;
-
-/**
- * The older name for the reply above, kept while the sidebar still imports it. It is an ALIAS and
- * not a second declaration on purpose: one shape cannot drift from itself.
- */
-export type ReplyCommentReply = CommentReplyReply;
 
 /**
  * `sashaOpenPicker()`. The sidebar asking Apps Script to SHOW THE CANDIDATES DIALOG.
@@ -185,8 +160,6 @@ export type ServerFunctionName =
   | "sashaRenderPreviews"
   | "sashaWritePick"
   | "sashaSendFeedback"
-  | "sashaReadFeedback"
-  | "sashaReplyComment"
   | "sashaReplyToComment"
   | "sashaResolveComment"
   | "sashaOpenPicker"
@@ -208,8 +181,6 @@ export const SERVER_FUNCTION_NAMES: readonly ServerFunctionName[] = [
   "sashaRenderPreviews",
   "sashaWritePick",
   "sashaSendFeedback",
-  "sashaReadFeedback",
-  "sashaReplyComment",
   "sashaReplyToComment",
   "sashaResolveComment",
   "sashaOpenPicker",
@@ -658,34 +629,6 @@ export function parseSendFeedbackReply(value: unknown): Parsed<SendFeedbackReply
 }
 
 /**
- * The comment list. A comment the walk cannot make sense of is DROPPED rather than failing the
- * whole read, for the same reason `parseScanReply` drops an unreadable folder: one odd row in a
- * pane the add-on does not own must not blind the user to the answers they are waiting for.
- */
-export function parseReadFeedbackReply(value: unknown): Parsed<ReadFeedbackReply> {
-  const record = asRecord(value);
-  if (record === null) return { kind: "invalid", reason: "sashaReadFeedback returned no object" };
-  const raw = record["comments"];
-  if (!Array.isArray(raw)) return { kind: "invalid", reason: "sashaReadFeedback returned no comments array" };
-  const comments: FeedbackCommentRecord[] = [];
-  for (const candidate of raw) {
-    const comment = parseFeedbackCommentRecord(candidate);
-    if (comment !== null) comments.push(comment);
-  }
-  return { kind: "ok", value: { comments } };
-}
-
-/** `sashaReplyComment`'s answer: the new reply's id, or a reason it is unusable. */
-export function parseReplyCommentReply(value: unknown): Parsed<ReplyCommentReply> {
-  return parsePostedReply({ value, what: "sashaReplyComment" });
-}
-
-/** `sashaResolveComment`'s answer. The same shape: a resolve IS a reply, to Drive. */
-export function parseResolveCommentReply(value: unknown): Parsed<ReplyCommentReply> {
-  return parsePostedReply({ value, what: "sashaResolveComment" });
-}
-
-/**
  * ONE PARSER FOR BOTH POSTS, for the thread rail's `CommentThreadApi`.
  *
  * A reply and a resolve are the same Drive call and the same answer, so they get one parser and
@@ -806,7 +749,7 @@ function authorNameOf(field: unknown): string {
  * afterwards, and "we do not know" is usefully the same as "still open" to every caller -- so a
  * missing or non-boolean one reads as false instead of throwing away a reply that did land.
  */
-function parsePostedReply({ value, what }: { value: unknown; what: string }): Parsed<ReplyCommentReply> {
+function parsePostedReply({ value, what }: { value: unknown; what: string }): Parsed<CommentReplyReply> {
   const record = asRecord(value);
   if (record === null) return { kind: "invalid", reason: `${what} returned no object` };
   const replyId = stringAt({ record, key: "replyId" });

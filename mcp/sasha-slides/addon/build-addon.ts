@@ -2,7 +2,7 @@
 /**
  * build-addon.ts — emits the ready-to-push Apps Script project for sasha-slides.
  *
- *   src/sidebar.tsx  ->  Sidebar.html   (Ask Sasha: the conversation, which is the event log)
+ *   src/sidebar.tsx  ->  Sidebar.html   (Ask Sasha: the assistant connection + the assets)
  *   src/dialog.tsx   ->  Dialog.html    (the slides: the grid + the mark-up view)
  *   src/report.tsx   ->  Report.html    (the defect report: anonymise, review, send)
  *   CODE_GS below     ->  Code.gs       (every google.script.run function + the ONE menu item)
@@ -15,7 +15,7 @@
  * decision, not a tidiness one:
  *
  *   * the CONVERTER and the base64 extractor blob are reachable from dialog.tsx and report.tsx,
- *     never from sidebar.tsx, which is why the conversation is a fraction of the size;
+ *     never from sidebar.tsx, which is why Ask Sasha is a fraction of the size;
  *   * the ANONYMISER (src/anonymise/, ~47 KB bundled) plus Defect.tsx plus report-endpoint.ts are
  *     reachable only from report.tsx. Moving them out of Dialog.html is what brought it back under
  *     500 KB -- the same reasoning that took Sidebar.html from 439 KB to 256 KB when the surfaces
@@ -50,6 +50,7 @@ import { fileURLToPath } from "node:url";
 import { SERVER_FUNCTION_NAMES } from "./src/bridge.ts";
 import { connectorUrlOf } from "./src/connector-url.ts";
 import { PICKER_CSS } from "./src/picker-styles.ts";
+import { TIDEPOOL_CSS } from "./src/tidepool-styles.ts";
 import { WALKTHROUGH_CSS } from "./src/walkthrough-styles.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -201,7 +202,7 @@ function showReport() {
 }
 
 // ---------------------------------------------------------------------------
-// 1/16 — sashaHello: which deck is this, and what protocol does the server speak.
+// 1/14 — sashaHello: which deck is this, and what protocol does the server speak.
 // The URL rather than the id, so the only parse stays in TypeScript (presentationIdOf).
 // ---------------------------------------------------------------------------
 function sashaHello() {
@@ -212,7 +213,7 @@ function sashaHello() {
 }
 
 // ---------------------------------------------------------------------------
-// 2/16 — sashaScanInbox: the NAME walk.
+// 2/14 — sashaScanInbox: the NAME walk.
 //   "Sasha Slides Inbox" (under My Drive) -> every child folder (named for its proposal)
 //   -> is there a READY in it, is there a PICK in it
 // DriveApp rather than the REST API because the walk is exactly what DriveApp expresses: a
@@ -302,7 +303,7 @@ function sashaChildFileId_(folder, name) {
 }
 
 // ---------------------------------------------------------------------------
-// 3/16 — sashaReadText: one primitive, three callers (READY, manifest.json, NN.html).
+// 3/14 — sashaReadText: one primitive, three callers (READY, manifest.json, NN.html).
 // Raw text out; every parser and every protocolVersion check is in src/protocol.ts.
 // ---------------------------------------------------------------------------
 function sashaReadText(spec) {
@@ -335,7 +336,7 @@ function sashaReadTexts(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 4/16 — sashaInsert: the image bytes, then the converter's batchUpdate, then the best-effort
+// 4/14 — sashaInsert: the image bytes, then the converter's batchUpdate, then the best-effort
 // render artifact.
 //
 // The RAW reply is returned so createdObjectIdsOf (src/drive-api.ts) can read the created ids in
@@ -530,7 +531,7 @@ function sashaRetargetToPage_(request, pageObjectId) {
 }
 
 // ---------------------------------------------------------------------------
-// 16/16 -- sashaStageImages_: an image's BYTES, somewhere Google's fetcher can reach them.
+// 14/14 -- sashaStageImages_: an image's BYTES, somewhere Google's fetcher can reach them.
 //
 // createImage takes a URL and GOOGLE fetches it, from Google's own servers, WITHOUT the signed-in
 // user's credentials. A candidate slide is self-contained (PROTOCOL.md), so its pictures are data:
@@ -597,7 +598,7 @@ function sashaWriteRender_(presentationId, render) {
 }
 
 // ---------------------------------------------------------------------------
-// 5/16 — sashaWritePick: the one file the picker is allowed to create.
+// 5/14 — sashaWritePick: the one file the picker is allowed to create.
 // The BODY arrives already serialized and already validated (serializePick, src/protocol.ts).
 // ---------------------------------------------------------------------------
 //
@@ -620,7 +621,7 @@ function sashaWritePick(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 6/16 — sashaReadEvents: ONE PROPOSAL'S WHOLE SESSION LOG, raw.
+// 6/14 — sashaReadEvents: ONE PROPOSAL'S WHOLE SESSION LOG, raw.
 //
 // \`<proposalId>/events/\` holds one JSON file per event, named \`<millis>-<6 base36>-<kind>.json\`
 // (PROTOCOL.md). Every file's NAME and BYTES come back; the ordering, the name grammar and the
@@ -651,7 +652,7 @@ function sashaReadEvents(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 7/16 — sashaWriteEvent: ONE event file, CREATED.
+// 7/14 — sashaWriteEvent: ONE event file, CREATED.
 //
 // There is no update path and there is no append, by design: Drive has no append, so a single
 // events.jsonl would mean read-modify-write from two writers that cannot see each other — the MCP
@@ -670,7 +671,7 @@ function sashaWriteEvent(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 8/16 — sashaCandidateComments: the comment threads on each CANDIDATE file.
+// 8/14 — sashaCandidateComments: the comment threads on each CANDIDATE file.
 //
 // Comments live on \`NN.html\`, not on the presentation, because the point is to mark a slide up
 // BEFORE it is inserted (PROTOCOL.md). This is the ONE source both surfaces read for the
@@ -696,11 +697,10 @@ function sashaCandidateComments(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 9/16 — sashaSendFeedback: the user's words, as NATIVE GOOGLE DRIVE COMMENTS.
+// 9/14 — sashaSendFeedback: the user's words, as NATIVE GOOGLE DRIVE COMMENTS.
 //
-// TWO JOBS, ONE FUNCTION, and the difference is only which FILE is passed: a conversation message
-// is a comment on the PRESENTATION, and a mark-up is a comment on the CANDIDATE's own NN.html.
-// Nothing here knows which; the caller decides, which is what keeps "review happens before
+// The caller passes the FILE: a mark-up from the slides window is a comment on the CANDIDATE's own
+// NN.html. Nothing here knows which file it is, which is what keeps "review happens before
 // inserting, on the candidates" a decision in TypeScript.
 //
 // One Drive comment per note. The BODY arrives already rendered and already validated
@@ -731,18 +731,6 @@ function sashaSendFeedback(spec) {
   return { results: results };
 }
 
-// ---------------------------------------------------------------------------
-// 10/16 — sashaReadFeedback: the deck's comment threads, raw.
-//
-// EVERY comment on the presentation comes back, not just ours: telling them apart is reading the
-// sentinel, which is feedbackThreadsOf's job (src/feedback.ts) — a comment with no sentinel is a
-// human's own and is skipped there, silently and on purpose. The agent's answers are the \`replies\`
-// of our own threads, which is why \`fields\` names them.
-// ---------------------------------------------------------------------------
-function sashaReadFeedback(spec) {
-  return { comments: sashaListComments_(spec.fileId, spec.pageSize) };
-}
-
 // COMMENTS GO THROUGH THE ADVANCED DRIVE SERVICE, never UrlFetchApp. MEASURED 2026-10-04: the
 // sidebar's polling spent the script's DAILY UrlFetch quota ("Service invoked too many times for
 // one day: urlfetch"), after which every comment read failed until Google's daily reset and no
@@ -755,52 +743,31 @@ function sashaListComments_(fileId, pageSize) {
 }
 
 // ---------------------------------------------------------------------------
-// 11/16 — sashaReplyComment: the user's words, as a REPLY in a thread that already exists.
+// 10/14 — sashaReplyToComment: the user's words, as a REPLY in a thread that already exists.
 //
-// The card in Ask Sasha answers a thread where it lives: a deck message on the presentation, a
-// mark-up on the candidate's own NN.html — the caller passes that file, as with sashaSendFeedback.
-// The content is the user's own words and nothing else: no sentinel line, because nothing has to
-// parse a region back out of a reply (src/bridge.ts, ReplyCommentSpec).
+// The slides window's thread rail answers a thread where it lives: the candidate's own NN.html,
+// passed by the caller as with sashaSendFeedback. The text is the user's own words and nothing
+// else: no sentinel line, because nothing has to parse a region back out of a reply
+// (src/bridge.ts, CommentReplySpec).
 //
 // THROWS on a Drive refusal rather than returning an error field: it is ONE post, so there is no
-// partial result to keep, and the failure handler is what turns it into a visible line on the card.
-// ---------------------------------------------------------------------------
-function sashaReplyComment(spec) {
-  return sashaPostReply_(spec.fileId, spec.commentId, { content: sashaReplyText_(spec) });
-}
-
-// ---------------------------------------------------------------------------
-// 12/16 — sashaReplyToComment: the SAME post, for a caller that names the field \`text\`.
-//
-// Two names for one Drive call is a MIGRATION and not a design: the sidebar's conversation still
-// calls sashaReplyComment with \`content\`, the slides window's thread rail calls this with \`text\`,
-// and both land on sashaPostReply_. Delete the older one once sidebar.tsx has moved over -- keeping
-// both is only safe because neither has any behaviour of its own (src/bridge.ts, CommentReplySpec).
+// partial result to keep, and the failure handler is what turns it into a visible line.
 // ---------------------------------------------------------------------------
 function sashaReplyToComment(spec) {
-  return sashaPostReply_(spec.fileId, spec.commentId, { content: sashaReplyText_(spec) });
+  return sashaPostReply_(spec.fileId, spec.commentId, { content: spec.text ? spec.text : '' });
 }
 
 // ---------------------------------------------------------------------------
-// 13/16 — sashaResolveComment: Google's "Mark as resolved and hide discussion".
+// 11/14 — sashaResolveComment: Google's "Mark as resolved and hide discussion".
 //
 // Drive has no resolve endpoint: a resolve IS a reply carrying action "resolve", which is also how
 // Google's own pane does it. Drive refuses a reply with no content, so an empty one becomes
 // "Resolved." here — the one default in this file, because it is a fact about Drive's API rather
 // than a decision about the product.
-//
-// ONE function for both surfaces, unlike the reply above, because the name did not have to change:
-// sashaReplyText_ reads whichever field the caller named.
 // ---------------------------------------------------------------------------
 function sashaResolveComment(spec) {
-  var content = sashaReplyText_(spec) ? sashaReplyText_(spec) : 'Resolved.';
+  var content = spec.text ? spec.text : 'Resolved.';
   return sashaPostReply_(spec.fileId, spec.commentId, { content: content, action: 'resolve' });
-}
-
-/** The note to post, under whichever name the calling surface gave it (src/bridge.ts). */
-function sashaReplyText_(spec) {
-  if (spec.text) return spec.text;
-  return spec.content ? spec.content : '';
 }
 
 /**
@@ -819,7 +786,7 @@ function sashaPostReply_(fileId, commentId, body) {
 }
 
 // ---------------------------------------------------------------------------
-// 14/16 — sashaOpenPicker: the CONVERSATION asking the host to show the slides window.
+// 12/14 — sashaOpenPicker: Ask Sasha asking the host to show the slides window.
 //
 // This is the only function whose point is a side effect on the Slides UI rather than data, and it
 // exists because the two surfaces cannot talk to each other: showModelessDialog is a server-side
@@ -880,7 +847,7 @@ function sashaTakePickerTarget() {
 }
 
 // ---------------------------------------------------------------------------
-// 15/16 — sashaOpenDefectReport + sashaTakeReportTarget: the REPORT WINDOW, and which slide.
+// 13/14 — sashaOpenDefectReport + sashaTakeReportTarget: the REPORT WINDOW, and which slide.
 //
 // A THIRD DOCUMENT, not a mode of the slides window — see src/report-state.ts for why (the
 // anonymiser is the heaviest code in the product and Dialog.html has a hard size ceiling).
@@ -1140,7 +1107,7 @@ async function main(): Promise<void> {
   process.stdout.write(
     `    Code.gs          (${CODE_GS.length.toLocaleString()} bytes, ${SERVER_FUNCTION_NAMES.length} server functions)\n`,
   );
-  process.stdout.write(`    Sidebar.html     (${kb(sidebarHtml)} KB, Ask Sasha -- the conversation)\n`);
+  process.stdout.write(`    Sidebar.html     (${kb(sidebarHtml)} KB, Ask Sasha -- connection + assets)\n`);
   process.stdout.write(`    Dialog.html      (${kb(dialogHtml)} KB, the slides + converter)\n`);
   process.stdout.write(`    Report.html      (${kb(reportHtml)} KB, the defect report + anonymiser)\n`);
 
@@ -1183,6 +1150,11 @@ const MINIFIED_STYLESHEET: Plugin = {
     // The setup walkthrough's own stylesheet (src/walkthrough-player.tsx renders it), the same way.
     builder.onLoad({ filter: /[\\/]walkthrough-styles\.ts$/ }, () => ({
       contents: `export const WALKTHROUGH_CSS = ${JSON.stringify(transformSync(WALKTHROUGH_CSS, { loader: "css", minify: true }).code)};`,
+      loader: "ts",
+    }));
+    // The sidebar's Tidepool look (src/tidepool-styles.ts), the same way.
+    builder.onLoad({ filter: /[\\/]tidepool-styles\.ts$/ }, () => ({
+      contents: `export const TIDEPOOL_CSS = ${JSON.stringify(transformSync(TIDEPOOL_CSS, { loader: "css", minify: true }).code)};`,
       loader: "ts",
     }));
   },

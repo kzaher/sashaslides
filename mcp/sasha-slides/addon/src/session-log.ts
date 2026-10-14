@@ -354,44 +354,6 @@ export function sessionEventVoiceOf(body: SessionEventBody): SessionEventVoice {
 
 export type SessionEventVoice = "user" | "sasha" | "deck" | "delivery" | "opaque";
 
-/** One line of prose per event, for the screen. The opaque arm is the "something happened" line. */
-export function describeSessionEvent(body: SessionEventBody): string {
-  switch (body.kind) {
-    case "slides-staged":
-      return body.count === 1 ? "Sasha staged 1 candidate slide" : `Sasha staged ${body.count} candidate slides`;
-    case "comment-opened":
-      return body.region === null
-        ? `you commented on slide ${body.slideIndex}`
-        : `you marked a box on slide ${body.slideIndex}`;
-    case "comment-answered":
-      return `Sasha answered your comment on slide ${body.slideIndex}`;
-    case "slide-revised":
-      return `Sasha revised slide ${body.slideIndex}`;
-    case "comment-resolved":
-      return `that comment on slide ${body.slideIndex} is resolved`;
-    case "slides-cleared":
-      return body.reason === null
-        ? "Sasha discarded the candidates that were not inserted"
-        : `Sasha discarded the candidates that were not inserted: ${body.reason}`;
-    case "slide-inserted":
-      return `slide ${body.slideIndex} went into the deck`;
-    case "slide-archived":
-      return `you archived slide ${body.slideIndex}`;
-    case "slide-restored":
-      return `you restored slide ${body.slideIndex}`;
-    case "feedback-delivered":
-      // "read", never "answered". The log line may not imply more than the receipt proves.
-      return body.commentIds.length === 1
-        ? "a Claude session read 1 of your comments"
-        : `a Claude session read ${body.commentIds.length} of your comments`;
-    case "opaque":
-      // NEVER "nothing happened". The history is complete; this build just cannot read this line.
-      return `something happened that this add-on cannot read (${body.rawKind === "" ? "no kind" : body.rawKind}) -- ${body.reason}`;
-    default:
-      return assertNever(body);
-  }
-}
-
 // ---------------------------------------------------------------------------
 // THE UNRESOLVED COUNTS. One source (the candidate's own Drive comments), one derivation, two
 // views -- which is the only way UI-CONTRACT.md's "must never disagree" is more than a hope.
@@ -580,27 +542,6 @@ export function unresolvedBadgeOf(count: UnresolvedCount): string | null {
   }
 }
 
-/**
- * EVERY OPEN THREAD, oldest first, across every candidate. UI-CONTRACT.md: "Open comments stay
- * listed until resolved. They do not scroll away into history" -- so the conversation pins this
- * list rather than relying on the user scrolling back to the event that opened each one.
- */
-export function openThreadsOf({ comments }: { comments: SlideCommentsLoad }): readonly OpenThread[] {
-  const open: OpenThread[] = [];
-  for (const slide of loadedSlideComments(comments)) {
-    if (slide.threads.kind === "unreadable") continue;
-    for (const thread of slide.threads.threads) {
-      if (thread.resolved) continue;
-      open.push({ proposalId: slide.proposalId, slideIndex: slide.slideIndex, thread });
-    }
-  }
-  return [...open].sort((left, right) =>
-    left.thread.at < right.thread.at ? -1 : left.thread.at > right.thread.at ? 1 : 0,
-  );
-}
-
-export type OpenThread = Readonly<{ proposalId: string; slideIndex: number; thread: SlideThread }>;
-
 /** Which candidates could not be read, so a surface can say so once instead of per cell. */
 export function unreadableSlidesOf({ comments }: { comments: SlideCommentsLoad }): readonly string[] {
   return loadedSlideComments(comments).flatMap((slide) =>
@@ -647,26 +588,6 @@ export function loadedSlideComments(comments: SlideCommentsLoad): readonly Slide
       return comments.slides;
     case "unrequested":
       return [];
-    default:
-      return assertNever(comments);
-  }
-}
-
-/**
- * Whether the comment read should run. A predicate over the union rather than a bare
- * `kind === "unrequested"`, so adding a variant is a compile error here instead of a silently
- * skipped fetch.
- */
-export function needsSlideComments(comments: SlideCommentsLoad): boolean {
-  switch (comments.kind) {
-    // A finished read wants another one: the counts and the threads are what a Claude session
-    // is changing while the panel is open. Only a read already in flight answers "no".
-    case "unrequested":
-    case "loaded":
-    case "failed":
-      return true;
-    case "loading":
-      return false;
     default:
       return assertNever(comments);
   }

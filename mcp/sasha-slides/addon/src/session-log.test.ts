@@ -16,12 +16,9 @@ import test from "node:test";
 import {
   candidateCommentsFrom,
   candidateSetRevisionIn,
-  describeSessionEvent,
   describeUnresolvedCount,
   isParsedSessionEventKind,
   loadedSlideComments,
-  needsSlideComments,
-  openThreadsOf,
   parseSessionEventFile,
   parseSessionEventName,
   SESSION_EVENT_KINDS,
@@ -121,7 +118,6 @@ test("AN UNKNOWN KIND is an opaque line carrying the kind it saw", () => {
     rawKind: "teleported-slide",
     reason: "this build does not know that kind of event",
   });
-  assert.match(describeSessionEvent(event.body), /something happened that this add-on cannot read/);
 });
 
 test("A BODY THAT IS NOT JSON is an opaque line too, not an absence", () => {
@@ -241,7 +237,6 @@ test("the add-on writes slide-archived and slide-restored, and they round-trip w
       text: serialized.value,
     });
     assert.deepEqual(read.body, { kind, slideIndex: 3 });
-    assert.match(describeSessionEvent(read.body), /slide 3/);
   }
 });
 
@@ -393,41 +388,6 @@ test("a comment that DOES carry our sentinel keeps its region and its prose", ()
     w: 0.3,
     h: 0.2,
   });
-});
-
-test("the open threads are every unresolved one, oldest first, across every candidate", () => {
-  const comments = loaded([
-    { slideIndex: 1, records: [record({ id: "late", resolved: false, at: "2026-10-04T12:09:00.000Z" })] },
-    {
-      slideIndex: 2,
-      records: [
-        record({ id: "early", resolved: false, at: "2026-10-04T12:01:00.000Z" }),
-        record({ id: "done", resolved: true, at: "2026-10-04T12:02:00.000Z" }),
-      ],
-    },
-  ]);
-  assert.deepEqual(
-    openThreadsOf({ comments }).map((open) => [open.slideIndex, open.thread.commentId]),
-    [
-      [2, "early"],
-      [1, "late"],
-    ],
-  );
-});
-
-/**
- * ONE read in flight at a time, and a NEW read on every poll.
- *
- * This used to assert the opposite -- that a finished read wants no other -- which is what
- * froze the conversation after its first load (see conversation-state.test.ts). The counts
- * and threads here are what a Claude session changes while the panel is open, so "loaded" is
- * a reason to read again, not a reason to stop.
- */
-test("one comment read at a time, and a fresh one on every poll", () => {
-  assert.equal(needsSlideComments({ kind: "unrequested" }), true);
-  assert.equal(needsSlideComments({ kind: "loading", slides: [] }), false);
-  assert.equal(needsSlideComments({ kind: "loaded", slides: [], readAt: AT }), true);
-  assert.equal(needsSlideComments({ kind: "failed", message: "x", slides: [] }), true);
 });
 
 function file({ name, kind, fileId }: { name: string; kind: string; fileId?: string }): SessionEventFile {

@@ -28,13 +28,9 @@ import type {
   ReadEventsSpec,
   PickerTargetReply,
   OpenPickerSpec,
-  ReadFeedbackReply,
-  ReadFeedbackSpec,
   RenderPreviewsReply,
   CommentReplyReply,
   CommentReplySpec,
-  ReplyCommentReply,
-  ReplyCommentSpec,
   ReportTargetReply,
   ReportTargetSpec,
   SendFeedbackReply,
@@ -81,9 +77,9 @@ export type SessionLogApi = Readonly<{
 
 /**
  * THE UNRESOLVED COUNTS' one read: the comment threads on each candidate's own `NN.html`. Its own
- * capability rather than another method on `FeedbackApi` because `FeedbackApi` is the DECK's
- * comment pane (the conversation's transport) and this is the candidates' -- and because this one
- * is a batch: both surfaces need every candidate's count at once to render a grid or a log.
+ * capability rather than another method on `FeedbackApi` because that one WRITES a new comment and
+ * this one reads the candidates' threads -- and because this one is a batch: the slides window needs
+ * every candidate's count at once to render its grid.
  */
 export type CandidateCommentsApi = Readonly<{
   read(spec: CandidateCommentsSpec): Promise<CallOutcome<CandidateCommentsReply>>;
@@ -110,25 +106,20 @@ export type RenderPreviewsSpec = Readonly<{
 }>;
 
 /**
- * THE CONVERSATION's transport: the user's messages, as native Google Slides comments on the
- * presentation, and whatever has been said back under them. The server half of the product reads
- * the same comments and answers by replying to the thread -- see feedback.ts for the wire text.
+ * A NEW MARK-UP, as a native Google Drive comment on the file it is about. The server half of the
+ * product reads the same comments and answers by replying to the thread -- see feedback.ts for the
+ * wire text.
  */
 export type FeedbackApi = Readonly<{
   send(spec: SendFeedbackSpec): Promise<CallOutcome<SendFeedbackReply>>;
-  read(spec: ReadFeedbackSpec): Promise<CallOutcome<ReadFeedbackReply>>;
-  /** Answer an existing thread, in the user's own words, on the file the thread lives on. */
-  reply(spec: ReplyCommentSpec): Promise<CallOutcome<ReplyCommentReply>>;
-  /** Close a thread -- Google's "Mark as resolved and hide discussion". */
-  resolve(spec: ReplyCommentSpec): Promise<CallOutcome<ReplyCommentReply>>;
 }>;
 
 /**
  * ANSWERING AND CLOSING A THREAD THAT ALREADY EXISTS -- the thread rail's two buttons.
  *
  * Its own capability, and not two more methods on `FeedbackApi`, because the surfaces need
- * different halves: the slides window drives threads on a CANDIDATE and never sends a new deck
- * comment, so handing it `send`/`read` would be handing it reach it has no business having. Both
+ * different halves: answering a thread is not creating one, so a caller that only answers is not
+ * handed `send`. Both
  * methods take the file the thread lives on, like every other call in the comment channel --
  * nothing here knows whether that is the presentation or a candidate's own NN.html.
  *

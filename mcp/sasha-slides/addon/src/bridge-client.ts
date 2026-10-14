@@ -19,13 +19,10 @@ import {
   parsePickerTargetReply,
   parseReportWindowUrl,
   parseReadEventsReply,
-  parseReadFeedbackReply,
   parseReadTextReply,
   parseReadTextsReply,
   parseCommentReply,
-  parseReplyCommentReply,
   parseReportTargetReply,
-  parseResolveCommentReply,
   parseScanReply,
   parseSendFeedbackReply,
   parseWriteEventReply,
@@ -41,9 +38,7 @@ import {
   type PageElementsReply,
   type ProposalMark,
   type ReadEventsReply,
-  type ReadFeedbackReply,
   type CommentReplyReply,
-  type ReplyCommentReply,
   type ReportTargetReply,
   type SendFeedbackReply,
   type WriteEventReply, explainHostFailure } from "./bridge.ts";
@@ -306,45 +301,6 @@ export function appsScriptFeedbackApi({ call }: { call: ServerCall }): FeedbackA
         what: "sashaSendFeedback",
       }) satisfies CallOutcome<SendFeedbackReply>;
     },
-
-    async read(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaReadFeedback(spec),
-        what: "sashaReadFeedback",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseReadFeedbackReply(replied.value),
-        what: "sashaReadFeedback",
-      }) satisfies CallOutcome<ReadFeedbackReply>;
-    },
-
-    // Both go through the same rate-limited `call` as every poll, so a reply cannot be the one
-    // path that escapes call-budget.ts. They are user-initiated -- one call per press -- and the
-    // read that brings the reply back is a single flagged re-read, never a loop.
-    async reply(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaReplyComment(spec),
-        what: "sashaReplyComment",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseReplyCommentReply(replied.value),
-        what: "sashaReplyComment",
-      }) satisfies CallOutcome<ReplyCommentReply>;
-    },
-
-    async resolve(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaResolveComment(spec),
-        what: "sashaResolveComment",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseResolveCommentReply(replied.value),
-        what: "sashaResolveComment",
-      }) satisfies CallOutcome<ReplyCommentReply>;
-    },
   };
 }
 
@@ -352,9 +308,7 @@ export function appsScriptFeedbackApi({ call }: { call: ServerCall }): FeedbackA
  * THE THREAD RAIL'S TWO BUTTONS, over the same rate-limited `call` as every poll -- a reply must
  * not be the one path that escapes call-budget.ts. Both are user-initiated, one call per press.
  *
- * `sashaResolveComment` is shared with `appsScriptFeedbackApi` above: Code.gs reads either spec
- * field, so the two surfaces post the same resolve through the same server function while the
- * sidebar is still on `content`. `sashaReplyToComment` is the `text` half of that pair.
+ * `sashaReplyToComment` posts the user's words; `sashaResolveComment` closes the thread.
  */
 export function appsScriptCommentThreadApi({ call }: { call: ServerCall }): CommentThreadApi {
   return {

@@ -65,15 +65,6 @@ export const INERT_PICKER_ACTIONS: PickerActions = {
 };
 
 export const INERT_CONVERSATION_ACTIONS: ConversationActions = {
-  typeMessage() {},
-  send() {},
-  refresh() {},
-  showSlides() {},
-  reportDefect() {},
-  typeReply() {},
-  reply() {},
-  resolve() {},
-  chooseCommentFilter() {},
   openArtifact() {},
   setCandidateArchived() {},
   chooseCandidateTab() {},

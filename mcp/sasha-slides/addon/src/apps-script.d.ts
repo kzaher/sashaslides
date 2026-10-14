@@ -17,9 +17,7 @@ import type {
   OpenPickerSpec,
   PageElementsSpec,
   ReadEventsSpec,
-  ReadFeedbackSpec,
   CommentReplySpec,
-  ReplyCommentSpec,
   ReportTargetSpec,
   WriteEventSpec,
   WritePickSpec,
@@ -76,13 +74,11 @@ declare global {
     sashaRenderPreviews(spec: RenderPreviewsSpec): void;
     sashaWritePick(spec: WritePickSpec): void;
     sashaSendFeedback(spec: SendFeedbackSpec): void;
-    sashaReadFeedback(spec: ReadFeedbackSpec): void;
     /** One reply on an existing thread, on whichever file the thread lives on. */
-    sashaReplyComment(spec: ReplyCommentSpec): void;
     /** The same reply, with the field named `text` -- the thread rail's half of the migration. */
     sashaReplyToComment(spec: CommentReplySpec): void;
     /** Resolve a thread: Drive's reply with `action: "resolve"`. Either spec field carries the note. */
-    sashaResolveComment(spec: ReplyCommentSpec | CommentReplySpec): void;
+    sashaResolveComment(spec: CommentReplySpec): void;
     /** Takes nothing: the slides window is the same for every caller, and its size is Code.gs's. */
     /** Open the slides window, optionally ON one candidate, seeded with what the sidebar knows (bridge.ts `OpenPickerSpec`). */
     sashaOpenPicker(spec?: OpenPickerSpec): void;

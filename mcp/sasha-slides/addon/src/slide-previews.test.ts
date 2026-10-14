@@ -1,5 +1,5 @@
-// SLIDE PREVIEWS: which candidate HTML the sidebar fetches for its thumbnails, what each thumbnail
-// shows, and what a comment card says about the slide it is on. Order follows slide-previews.ts.
+// SLIDE PREVIEWS: which candidate HTML the sidebar fetches for its thumbnails, and what each
+// thumbnail shows. Order follows slide-previews.ts.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -14,13 +14,11 @@ import type { Manifest } from "./protocol.ts";
 import { sessionEventsOf, type SessionEventFile } from "./session-log.ts";
 import {
   NO_PREVIEWS,
-  describeThreadSlide,
   nextPreviewToLoad,
   previewsSettled,
   previewsToLoad,
   previewOf,
   reducePreviews,
-  threadSlideContextOf,
   type SlidePreviews,
 } from "./slide-previews.ts";
 
@@ -112,63 +110,6 @@ test("a NEW revision of an unrevised slide invalidates the preview: the file is 
 test("a slide that is not in the manifest is unavailable, not loading for ever", () => {
   const preview = previewOf({ conversation: following(), previews: NO_PREVIEWS, slideIndex: 9 });
   assert.equal(preview.kind, "unavailable");
-});
-
-// --- threadSlideContextOf / describeThreadSlide ------------------------------------
-
-test("a deck message has no candidate context", () => {
-  const context = threadSlideContextOf({
-    conversation: following(),
-    thread: { slideIndex: null, root: { at: AT } },
-  });
-  assert.deepEqual(context, { kind: "deck" });
-});
-
-test("a comment on an unrevised candidate names it, with its label", () => {
-  const context = threadSlideContextOf({
-    conversation: following(),
-    thread: { slideIndex: 1, root: { at: AT } },
-  });
-  assert.deepEqual(context, {
-    kind: "candidate",
-    slideIndex: 1,
-    label: "option 1",
-    revision: null,
-    revised: false,
-    revisedSinceComment: false,
-  });
-  assert.equal(describeThreadSlide(context), "Candidate 1 · option 1");
-});
-
-test("a comment on a revised candidate carries the revision, and says when the slide moved on since", () => {
-  const conversation = following({ events: [revised({ slideIndex: 2, revision: 3 })] });
-  const before = threadSlideContextOf({
-    conversation,
-    thread: { slideIndex: 2, root: { at: "2026-10-04T12:06:00.000Z" } },
-  });
-  assert.deepEqual(before, {
-    kind: "candidate",
-    slideIndex: 2,
-    label: "02.html",
-    revision: 3,
-    revised: true,
-    revisedSinceComment: true,
-  });
-  assert.equal(describeThreadSlide(before), "Candidate 2 · revision 3 · changed since this comment");
-  const after = threadSlideContextOf({
-    conversation,
-    thread: { slideIndex: 2, root: { at: "2026-10-04T12:30:00.000Z" } },
-  });
-  assert.equal(describeThreadSlide(after), "Candidate 2 · revision 3");
-});
-
-test("a revision with no number is still said to be a revision", () => {
-  const conversation = following({ events: [revised({ slideIndex: 2, revision: null })] });
-  const context = threadSlideContextOf({
-    conversation,
-    thread: { slideIndex: 2, root: { at: "2026-10-04T12:30:00.000Z" } },
-  });
-  assert.equal(describeThreadSlide(context), "Candidate 2 · revised");
 });
 
 // --- helpers --------------------------------------------------------------------

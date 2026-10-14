@@ -15,9 +15,9 @@
 // iframe and its inline-<script> extractor path survive -- which now also proves the MINIFIED
 // extractor still works, since it reaches the page through the same base64 route. This loads the
 // files Apps Script would serve, answers every server function from a canned proposal with a
-// canned event log and canned candidate comments, and reports what rendered: the conversation's
-// LOG first (it is the one surface the menu opens), then the slides grid and its mark-up view,
-// then the report window.
+// canned event log and canned candidate comments, and reports what rendered: Ask Sasha first (it
+// is the one surface the menu opens), then the slides grid and its mark-up view, then the report
+// window.
 //
 // AND THE THINGS ONLY A BROWSER CAN SEE AT ALL, which is why some checks here look like style
 // assertions and are not:
@@ -31,9 +31,6 @@
 //   * THAT BOTH SLIDES OF THE DEFECT PAIR RENDER. Two `EditorPane`s mean two live iframes with two
 //     different documents, and "the right-hand one is an anonymisation, not a copy" is a statement
 //     about bytes that reached a real `srcdoc`.
-//   * THAT THE WAIT IS LIVE. The pinned waiting panel's pulse is a CSS animation precisely so it
-//     keeps running when a poll stalls, and the elapsed clock is computed against a real clock.
-//
 // It serves over http rather than file:// on purpose: the converter reaches into its staging
 // iframe's `contentWindow`, and a srcdoc iframe inside a file:// page gets an opaque origin, which
 // would fail for a reason the sidebar will never hit in production.
@@ -73,9 +70,7 @@ const GRID_SHOT = join(tmpdir(), "sasha-grid-smoke.png");
  */
 const COMPOSER_SHOT = join(tmpdir(), "sasha-spot-smoke.png");
 const MARKUP_SHOT = join(tmpdir(), "sasha-markup-smoke.png");
-const CHAT_SHOT = join(tmpdir(), "sasha-conversation-smoke.png");
-/** The same column with the log's scroller uncapped, so every card can be read in one image. */
-const LOG_SHOT = join(tmpdir(), "sasha-conversation-log-smoke.png");
+const SIDEBAR_SHOT = join(tmpdir(), "sasha-ask-sasha-smoke.png");
 const REPORT_SHOT = join(tmpdir(), "sasha-defect-report-smoke.png");
 /** The dialog's own size, as Code.gs asks for it -- so the grid is measured at the real width. */
 const DIALOG_WIDTH = 1000;
@@ -116,7 +111,7 @@ async function main(): Promise<void> {
   });
   const failures: string[] = [];
   try {
-    // THE CONVERSATION FIRST, because it is the one thing the menu opens.
+    // ASK SASHA FIRST, because it is the one thing the menu opens.
     await driveSidebar({ failures });
     await driveDialog({ failures });
     await driveReport({ failures });
@@ -1182,218 +1177,51 @@ async function driveSidebar({ failures }: { failures: string[] }): Promise<void>
       detail: `${noHeaderButtons} buttons in the header`,
     });
 
-    // --- THE LOG ---------------------------------------------------------------------------
-    // FIVE CARDS: staged, the revision, the insertion, the opaque event -- and ONE card for the
-    // slide-2 thread, which now carries the comment and Sasha's answer that used to be two rows
-    // (and whose `comment-opened` / `comment-answered` receipts stand down for it).
-    // FOUR, NOT FIVE: the threads moved out of the scrolling log into the comments panel, so
-    // what is left here is the events -- which is what a log is.
-    const log = await pollFor({ client, expression: "document.querySelectorAll('.sasha-msgs .sasha-msg').length >= 4" });
-    check({ failures, what: "the session log rendered, in order", ok: log });
-
-    // THE HEADER AND THE "See the slides" BOX ARE STILL THERE. The inline slide is an absolutely
-    // positioned 1280x720 frame, and without its 16:9 stage it escapes to the top of the document
-    // and covers them -- which is exactly what the first smoke screenshot showed.
+    // --- ONLY THE CONNECTION AND THE ASSETS ---------------------------------------------------
+    // The conversation moved to the deck's own comments, which the comment bot answers. The side
+    // panel is the header, the connection with the assistant, and the candidates -- and none of
+    // the old conversation UI may come back in the real cascade either.
     const header = await evaluateString({
       client,
       expression: "(document.querySelector('.sasha-chat .sasha-header')||{}).textContent||''",
     });
-    check({
-      failures,
-      what: "the header survives the inline slide (which is absolutely positioned)",
-      ok: /Ask Sasha/.test(header),
-      detail: header.slice(0, 80),
-    });
-    const inlineContained = await evaluateNumber({
+    check({ failures, what: "the header is Ask Sasha", ok: /Ask Sasha/.test(header), detail: header.slice(0, 80) });
+
+    // The canned log is dated 2026-10-04, so its evidence is stale and the setup guide shows; a
+    // fresher fixture would show the status line instead. Exactly one of the two, never both.
+    const connection = await evaluateString({
       client,
       expression:
-        "(function(){var f=document.querySelector('.sasha-inline-slide iframe');var s=document.querySelector('.sasha-chat');" +
-        "if(!f||!s)return -1;var a=f.getBoundingClientRect(),b=s.getBoundingClientRect();" +
-        "return (a.top >= b.top - 1 && a.left >= b.left - 1) ? 1 : 0;})()",
+        "JSON.stringify({guide:!!document.querySelector('.sasha-nobody-listening')," +
+        "line:!!document.querySelector('.sasha-connection')})",
     });
     check({
       failures,
-      what: "and the inline slide stays inside the conversation rather than escaping to the page",
-      ok: inlineContained === 1,
-      detail: `${inlineContained}`,
+      what: "the connection is ONE thing: the setup guide or the status line",
+      ok: connection === JSON.stringify({ guide: true, line: false }) || connection === JSON.stringify({ guide: false, line: true }),
+      detail: connection,
     });
 
-    const lines = await evaluateString({
-      client,
-      expression: "JSON.stringify([...document.querySelectorAll('.sasha-msgs .sasha-msg')].map(e=>e.className))",
-    });
-    check({
-      failures,
-      what: "Sasha's events are in her voice, the deck's in its own, and threads are NOT in the log",
-      ok: /sasha-msg-sasha/.test(lines) && /sasha-msg-deck/.test(lines) && !/sasha-msg-thread/.test(lines),
-      detail: lines,
-    });
-
-    // AND THE THREAD IS IN THE PANEL INSTEAD. One comment, one place.
-    const threadsInPanel = await evaluateNumber({
-      client,
-      expression: "document.querySelectorAll('.sasha-comments .sasha-c-thread').length",
-    });
-    check({
-      failures,
-      what: "a comment you opened is a thread card in the comments panel",
-      ok: threadsInPanel > 0,
-      detail: `saw ${threadsInPanel}`,
-    });
-
-    // --- ONE CARD PER THREAD, THE WAY GOOGLE DRAWS IT ---------------------------------------
-    // The user's reference: the root, the blue tick and the vertical three dots at its top right,
-    // the replies nested in the same card on a grey strip, and a pill to reply at the foot. All of
-    // it measured in the real cascade, because an icon that renders 0 px wide passes any markup test.
-    const threadShape = await evaluateString({
+    const leftovers = await evaluateString({
       client,
       expression:
-        "(function(){var card=[].slice.call(document.querySelectorAll('.sasha-comments .sasha-c-thread'))" +
-        ".filter(function(c){return /the gridlines are gone/.test(c.textContent);})[0];if(!card)return 'no card';" +
-        "function px(sel){var e=card.querySelector(sel);return e?Math.round(e.getBoundingClientRect().width):0;}" +
-        "var reply=card.querySelector('.sasha-c-reply');" +
-        "return JSON.stringify({" +
-        "replyNested:!!reply&&/redrawn with the gridlines back/.test(reply.textContent)," +
-        "replyBy:reply?(reply.querySelector('.sasha-c-name')||{}).textContent:''," +
-        "agentAvatar:!!(reply&&reply.querySelector('.sasha-c-avatar-agent'))," +
-        "strip:reply?getComputedStyle(reply.querySelector('.sasha-c-body-reply')).backgroundColor:''," +
-        "tick:px('.sasha-c-resolve svg'),tickPath:!!card.querySelector('.sasha-c-resolve path[d^=\"M9 16.17\"]')," +
-        "tickColor:getComputedStyle(card.querySelector('.sasha-c-resolve')).color," +
-        "more:card.querySelectorAll('.sasha-c-more-button path[d^=\"M12 8c1.1\"]').length," +
-        "pill:(card.querySelector('.sasha-c-pill')||{}).placeholder||''," +
-        "pillRadius:card.querySelector('.sasha-c-pill')?getComputedStyle(card.querySelector('.sasha-c-pill')).borderTopLeftRadius:''," +
-        "avatar:px('.sasha-c-avatar'),radius:getComputedStyle(card).borderTopLeftRadius});})()",
-    });
-    const shape = JSON.parse(threadShape.startsWith("{") ? threadShape : "{}") as Record<string, unknown>;
-    check({
-      failures,
-      what: "the thread is ONE card: Sasha's answer nested in it, signed Sasha, on the grey strip",
-      ok:
-        shape["replyNested"] === true &&
-        shape["replyBy"] === "Sasha" &&
-        shape["agentAvatar"] === true &&
-        shape["strip"] === "rgb(241, 243, 244)",
-      detail: threadShape,
+        "JSON.stringify({containers:document.querySelectorAll('.sasha-comments, .sasha-msgs, .sasha-ask, .sasha-activity, .sasha-reportentry, textarea').length," +
+        "words:['Activity','Report a defect','Not done','Marked as done'].filter(function(w){" +
+        // THE PANEL'S text, not the body's: the bundle ships in a script element, and React's own
+        // source says 'Activity'.
+        "return ((document.getElementById('sasha-slides-root')||{}).textContent||'').indexOf(w)>=0;})," +
+        "send:[...document.querySelectorAll('button')].some(function(b){return (b.textContent||'')==='Send';})})",
     });
     check({
       failures,
-      what: "its root carries the blue resolve tick and a three-dot menu on the root AND the reply, as icons",
-      ok:
-        shape["tickPath"] === true &&
-        Number(shape["tick"]) >= 16 &&
-        shape["tickColor"] === "rgb(11, 87, 208)" &&
-        shape["more"] === 2,
-      detail: threadShape,
-    });
-    check({
-      failures,
-      what: "an open thread ends in the reply pill, and the card is Google's shape",
-      ok:
-        shape["pill"] === "Reply or add others with @" &&
-        shape["pillRadius"] === "20px" &&
-        shape["avatar"] === 32 &&
-        shape["radius"] === "12px",
-      detail: threadShape,
+      what: "no comments panel, activity log, composer or defect-report entry",
+      ok: leftovers === JSON.stringify({ containers: 0, words: [], send: false }),
+      detail: leftovers,
     });
 
-    const opaque = await evaluateString({
-      client,
-      expression: "(document.querySelector('.sasha-msg-opaque')||{}).textContent||''",
-    });
-    check({
-      failures,
-      what: "AN UNKNOWN EVENT KIND IS AN OPAQUE LINE, never a dropped one",
-      ok: /cannot read/.test(opaque) && /teleported-slide/.test(opaque),
-      detail: opaque.slice(0, 160),
-    });
-
-    // --- THE REVISED SLIDE, INLINE ---------------------------------------------------------
-    const inline = await pollFor({ client, expression: "!!document.querySelector('.sasha-inline-slide iframe')" });
-    check({ failures, what: "a revised slide renders INLINE at the point in the log where it happened", ok: inline });
-
-    const inlineCaption = await evaluateString({
-      client,
-      expression: "(document.querySelector('.sasha-inline-slide figcaption')||{}).textContent||''",
-    });
-    check({
-      failures,
-      what: "and it says which slide it is, as it is NOW",
-      ok: /slide 2 as it is now/.test(inlineCaption),
-      detail: inlineCaption,
-    });
-
-    // --- THE UNRESOLVED COUNTS, AND THE PINNED OPEN COMMENTS -------------------------------
-    const counted = await pollFor({ client, expression: "!!document.querySelector('.sasha-unresolved-known')" });
-    check({ failures, what: "the unresolved count is beside the slide's events", ok: counted });
-
-    // Slide 3's own comments are the ones Drive refuses, so its line must say so rather than 0.
-    const cannotCount = await pollFor({
-      client,
-      expression: "/open comments could not be read/.test(document.body.textContent||'')",
-    });
-    check({ failures, what: "and a count it cannot reach says so, never zero", ok: cannotCount });
-
-    // --- THE COMMENTS PANEL: open ones first, a filter, and no yellow summary --------------
-    // This replaced a pinned block that restated every waiting comment in prose above the
-    // comments themselves. The panel is the comments (comment-panel.ts).
-    const panel = await pollFor({ client, expression: "!!document.querySelector('.sasha-comments')" });
-    check({ failures, what: "the comments have their own panel, as a document's pane does", ok: panel });
-
-    const gone = await evaluateNumber({
-      client,
-      expression: "document.querySelectorAll('.sasha-open-comments, .sasha-pulse').length",
-    });
-    check({
-      failures,
-      what: "and the yellow waiting summary is gone with it",
-      ok: gone === 0,
-      detail: `saw ${gone} leftovers`,
-    });
-
-    const panelText = await evaluateString({
-      client,
-      expression: "(document.querySelector('.sasha-comments')||{}).textContent||''",
-    });
-    check({
-      failures,
-      what: "the panel quotes what was said",
-      ok: /the gridlines are gone/.test(panelText),
-      detail: panelText.slice(0, 200),
-    });
-
-    // THE FILTER, WITH COUNTS, opening on the comments that are not done -- the way a document's
-    // comment pane opens.
-    const filters = await evaluateString({
-      client,
-      expression:
-        "JSON.stringify([...document.querySelectorAll('.sasha-filter button')]" +
-        ".map(b=>[b.textContent, b.getAttribute('aria-pressed')]))",
-    });
-    check({
-      failures,
-      what: "the filter offers Not done / Marked as done / All, and opens on Not done",
-      ok: /Not done/.test(filters) && /Marked as done/.test(filters) && /All/.test(filters)
-        && /\["Not done[^"]*","true"\]/.test(filters),
-      detail: filters.slice(0, 220),
-    });
-
-    // SWITCHING IT IS NOT LOST TO THE NEXT POLL: the filter lives in the state tree, and this
-    // sidebar re-reads Drive every few seconds.
-    await clickLabelled({ client, within: ".sasha-filter", startsWith: "All" });
-    const switched = await pollFor({
-      client,
-      expression:
-        "(function(){var b=[...document.querySelectorAll('.sasha-filter button')]" +
-        ".find(x=>(x.textContent||'').indexOf('All')===0);" +
-        "return !!b && b.getAttribute('aria-pressed')==='true';})()",
-    });
-    check({ failures, what: "and switching it sticks", ok: switched });
-    await clickLabelled({ client, within: ".sasha-filter", startsWith: "Not done" });
-
-
-    // --- THE SET, AND OPENING WHAT A COMMENT IS ABOUT ---------------------------------------
+    // --- THE SET ----------------------------------------------------------------------------
     const artifact = await pollFor({ client, expression: "!!document.querySelector('.sasha-artifact')" });
-    check({ failures, what: "the candidate set has a card of its own above its comments", ok: artifact });
+    check({ failures, what: "the candidate set has a card of its own", ok: artifact });
 
     const stacked = await evaluateString({
       client,
@@ -1425,11 +1253,8 @@ async function driveSidebar({ failures }: { failures: string[] }): Promise<void>
       detail: `${openAll} buttons`,
     });
 
-    // A COMMENT ABOUT A SLIDE OPENS THAT SLIDE, and the request names both.
-    // BY CLASS, not by text: "Open artifacts" on the set card also starts with "Open artifact",
-    // and pressing that one would open the whole set rather than the slide under the comment.
-    // AT THE FOOT OF THE THREAD, where the reader is once they have read it.
-    await click({ client, selector: ".sasha-c-open" });
+    // A CANDIDATE'S OWN OPEN names the proposal AND the slide, so the window lands on it.
+    await click({ client, selector: ".sasha-stack-slide:nth-child(2) .sasha-stack-actions button" });
     const target = await pollFor({
       client,
       expression:
@@ -1441,155 +1266,12 @@ async function driveSidebar({ failures }: { failures: string[] }): Promise<void>
     });
     check({
       failures,
-      what: "opening from a comment names the proposal AND the slide it is about",
+      what: "opening a candidate names the proposal AND the slide",
       ok: target,
       detail: targetSaid,
     });
 
-    // --- THE COMPOSER ----------------------------------------------------------------------
-    // THE COMPOSER IS A NEW COMMENT now: the same card, pill and Cancel/Send pair as a thread.
-    await typeInto({ client, selector: ".sasha-ask .sasha-c-pill", text: "make the agenda slide bluer" });
-    await click({ client, selector: ".sasha-ask .sasha-c-send" });
-    const sent = await pollFor({ client, expression: "!!window.__SASHA_FEEDBACK__" });
-    check({ failures, what: "Send posted the message as a comment on the DECK", ok: sent });
-
-    const comment = await evaluateString({
-      client,
-      expression: "((window.__SASHA_FEEDBACK__||{}).comments||[{}])[0].content||''",
-    });
-    check({
-      failures,
-      what: "the comment carries the message and says it is about no one slide",
-      ok: /make the agenda slide bluer/.test(comment) && /"pageObjectId":null/.test(comment),
-      detail: JSON.stringify(comment).slice(0, 220),
-    });
-
-    const answered = await pollFor({ client, expression: "/redrawing/.test(document.body.textContent||'')" });
-    check({ failures, what: "the reply came back as Sasha's turn in the same log", ok: answered });
-
-    // --- ANSWERING A THREAD FROM ITS CARD ------------------------------------------------
-    // Typed into the slide-2 thread's pill, posted with Enter -- Google's key -- onto the
-    // CANDIDATE's own file, and brought back into the SAME card by the one re-read the success
-    // asks for.
-    const inThread = (body: string): string =>
-      "(function(){var card=[].slice.call(document.querySelectorAll('.sasha-comments .sasha-c-thread'))" +
-      ".filter(function(c){return /the gridlines are gone/.test(c.querySelector('.sasha-c-body').textContent);})[0];" +
-      `if(!card)return null;${body}})()`;
-    await client.Runtime.evaluate({
-      expression: inThread(
-        "var pill=card.querySelector('.sasha-c-pill');if(!pill)return false;" +
-        "Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(pill,'the top line is still missing');" +
-        "pill.dispatchEvent(new Event('input',{bubbles:true}));return true;",
-      ),
-      returnByValue: true,
-    });
-    const replyButton = await pollFor({
-      client,
-      expression: inThread("var b=card.querySelector('.sasha-c-reply-send');return !!b&&b.textContent==='Reply';"),
-    });
-    check({ failures, what: "typing into the pill brings up its Reply button", ok: replyButton });
-
-    await client.Runtime.evaluate({
-      expression: inThread(
-        "var pill=card.querySelector('.sasha-c-pill');" +
-        "pill.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));return true;",
-      ),
-      returnByValue: true,
-    });
-    const repliedOnCandidate = await pollFor({
-      client,
-      expression:
-        "(window.__SASHA_REPLY_CALLS__||[]).some(function(c){return c.fileId==='html_2'&&c.commentId==='cc_open'" +
-        "&&c.action===null&&c.content==='the top line is still missing';})",
-    });
-    check({
-      failures,
-      what: "Enter posted the reply on the CANDIDATE's file, under that comment, in the user's own words",
-      ok: repliedOnCandidate,
-      detail: JSON.stringify(await evaluateString({ client, expression: "JSON.stringify(window.__SASHA_REPLY_CALLS__||[])" })),
-    });
-    const replyBack = await pollFor({
-      client,
-      expression: inThread(
-        "return [].slice.call(card.querySelectorAll('.sasha-c-reply')).some(function(r){" +
-        "return /the top line is still missing/.test(r.textContent);})&&card.querySelector('.sasha-c-pill').value==='';",
-      ),
-    });
-    check({ failures, what: "and it came back nested in the same card, with the pill emptied", ok: replyBack });
-
-    // THE THREE DOTS open a menu of REAL actions only, and Escape closes it.
-    await client.Runtime.evaluate({
-      expression: inThread("card.querySelector('.sasha-c-head .sasha-c-more-button').click();return true;"),
-      returnByValue: true,
-    });
-    const menuItems = await evaluateString({
-      client,
-      expression: inThread(
-        "return JSON.stringify([].slice.call(card.querySelectorAll('.sasha-c-menu [role=menuitem]')).map(function(i){return i.textContent;}));",
-      ),
-    });
-    check({
-      failures,
-      what: "the root's three-dot menu offers Copy text and Resolve, and nothing that does nothing",
-      ok: menuItems === JSON.stringify(["Copy text", "Resolve"]),
-      detail: menuItems,
-    });
-    await client.Runtime.evaluate({
-      expression: "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));true",
-      returnByValue: true,
-    });
-    const menuClosed = await pollFor({ client, expression: "!document.querySelector('.sasha-c-menu')" });
-    check({ failures, what: "and Escape closes it", ok: menuClosed });
-
-    // THE TICK resolves the thread on its own file; the card then collapses to "Resolved".
-    await client.Runtime.evaluate({
-      expression: inThread("card.querySelector('.sasha-c-resolve').click();return true;"),
-      returnByValue: true,
-    });
-    const resolvedOnCandidate = await pollFor({
-      client,
-      expression:
-        "(window.__SASHA_REPLY_CALLS__||[]).some(function(c){return c.fileId==='html_2'&&c.commentId==='cc_open'&&c.action==='resolve';})",
-    });
-    check({ failures, what: "the blue tick resolved the thread on the candidate's file", ok: resolvedOnCandidate });
-    // A RESOLVED THREAD LEAVES THE OPEN FILTER, which is the point of the filter -- so ask for
-    // All before looking at how a resolved card is drawn.
-    await clickLabelled({ client, within: ".sasha-filter", startsWith: "All" });
-    const collapsed = await pollFor({
-      client,
-      expression: inThread(
-        "return /Resolved/.test((card.querySelector('.sasha-c-resolved-label')||{}).textContent||'')" +
-        "&&!card.querySelector('.sasha-c-pill')&&!card.querySelector('.sasha-c-resolve');",
-      ),
-    });
-    check({ failures, what: "and the card says Resolved where the tick was, with no reply pill", ok: collapsed });
-
-    // THE LOG, UNSCROLLED, for a human to read: the scroller is capped at 52vh, so the column
-    // shot below shows only its first screen of cards.
-    await client.Runtime.evaluate({
-      expression: "(function(){var l=document.querySelector('.sasha-msgs');if(l)l.style.maxHeight='none';return true;})()",
-      returnByValue: true,
-    });
-    const logTall = await evaluateNumber({
-      client,
-      expression: "Math.min(6000, Math.ceil(document.documentElement.scrollHeight + 20))",
-    });
-    await client.Emulation.setDeviceMetricsOverride({
-      width: SIDEBAR_WIDTH,
-      height: Math.max(1000, logTall),
-      deviceScaleFactor: 2,
-      mobile: false,
-    });
-    const logShot = await client.Page.captureScreenshot({ format: "png", captureBeyondViewport: true });
-    writeFileSync(LOG_SHOT, Buffer.from(logShot.data, "base64"));
-    process.stdout.write(`      unscrolled log screenshot: ${LOG_SHOT} (${logTall}px tall)\n`);
-    await client.Runtime.evaluate({
-      expression: "(function(){var l=document.querySelector('.sasha-msgs');if(l)l.style.maxHeight='';return true;})()",
-      returnByValue: true,
-    });
-
-    // THE WHOLE COLUMN, not the first viewport of it: the log, the pinned comments, the composer
-    // and the report entry are all below one another in a 300 px column.
+    // THE WHOLE COLUMN, not the first viewport of it.
     const tall = await evaluateNumber({
       client,
       expression: "Math.min(4000, Math.ceil(document.documentElement.scrollHeight + 20))",
@@ -1600,9 +1282,9 @@ async function driveSidebar({ failures }: { failures: string[] }): Promise<void>
       deviceScaleFactor: 2,
       mobile: false,
     });
-    const chatShot = await client.Page.captureScreenshot({ format: "png", captureBeyondViewport: true });
-    writeFileSync(CHAT_SHOT, Buffer.from(chatShot.data, "base64"));
-    process.stdout.write(`      conversation screenshot: ${CHAT_SHOT} (${tall}px tall)\n`);
+    const sidebarShot = await client.Page.captureScreenshot({ format: "png", captureBeyondViewport: true });
+    writeFileSync(SIDEBAR_SHOT, Buffer.from(sidebarShot.data, "base64"));
+    process.stdout.write(`      Ask Sasha screenshot: ${SIDEBAR_SHOT} (${tall}px tall)\n`);
 
     for (const error of errors) failures.push(`sidebar uncaught: ${error}`);
   } finally {
@@ -2025,10 +1707,8 @@ const STUB_SCRIPT = `<script>
   // mounting the moment the review half started by dismissing. The run must start from empty.
   try { localStorage.clear(); } catch (storageError) { /* private window: nothing to clear */ }
   var PROPOSAL = ${JSON.stringify(PROPOSAL_ID)};
-  // THE SEEDED COMMENT IS A MINUTE OLD, NOT A FIXED DATE. The waiting panel's live indicator goes
-  // OFF once a comment has gone unread past FEEDBACK_DELIVERY_THRESHOLD_MS (waiting.ts) -- correct
-  // behaviour -- so a fixed 12:06 made the "the wait carries a LIVE indicator" check pass in the
-  // morning and fail every evening. The product was right; the fixture was a clock.
+  // THE SEEDED COMMENT IS A MINUTE OLD, NOT A FIXED DATE: anything judged against the delivery
+  // threshold (waiting.ts) must not pass in the morning and fail every evening.
   var SEEDED_AT = new Date(Date.now() - 60000).toISOString();
   // How the connector signs its posts (agent-marker.ts), so Sasha's answers render as Sasha's.
   var AGENT = ${JSON.stringify(AGENT_REPLY_MARKER)};
@@ -2142,13 +1822,12 @@ const STUB_SCRIPT = `<script>
       return { files: files };
     },
     // TWO KINDS OF COMMENT GO THROUGH HERE and they are kept apart on purpose: a review note is
-    // what __SASHA_FEEDBACK__ means to the checks below, and the anonymiser's REWRITE REQUEST is
-    // also a comment on this deck. Stashing both in one global made the review assertion read the
-    // rewrite prompt. __SASHA_SENT__ accumulates everything, which is what a real comment pane
-    // does -- sashaReadFeedback lists them all, so both long polls find their own thread.
+    // what __SASHA_FEEDBACK__ means to the checks below, and the anonymiser's REWRITE REQUEST would
+    // also be a comment on this deck. Stashing both in one global made the review assertion read
+    // the rewrite prompt. __SASHA_SENT__ accumulates everything a real comment pane would hold.
     sashaSendFeedback: function (spec) {
-      // PER FILE, because that is the whole point: a conversation message goes on the DECK and a
-      // mark-up goes on the CANDIDATE, through this one function, told apart only by the file id.
+      // PER FILE, because that is the whole point: a mark-up goes on the CANDIDATE, through this
+      // one function, told apart from anything else only by the file id.
       var byFile = window.__SASHA_FILE_COMMENTS__ || {};
       byFile[spec.fileId] = (byFile[spec.fileId] || []).concat(spec.comments);
       window.__SASHA_FILE_COMMENTS__ = byFile;
@@ -2161,13 +1840,9 @@ const STUB_SCRIPT = `<script>
       for (var at = 0; at < spec.comments.length; at++) results.push({ commentId: 'c_' + spec.fileId + '_' + at, error: null });
       return { results: results };
     },
-    sashaReadFeedback: function () {
-      return { comments: sentThreads(window.__SASHA_SENT__ || []) };
-    },
-    // ANSWERING A THREAD FROM ITS CARD. Both are a reply on whichever file the thread lives on,
-    // recorded per file and comment so the next read brings the post back into the same card --
-    // which is what proves the conversation re-read after the action rather than guessing.
-    sashaReplyComment: function (spec) { return postReply(spec, null); },
+    // ANSWERING A THREAD FROM THE THREAD RAIL. Both are a reply on whichever file the thread lives
+    // on, recorded per file and comment so the next read brings the post back into the same card.
+    sashaReplyToComment: function (spec) { return postReply(spec, null); },
     sashaResolveComment: function (spec) { return postReply(spec, 'resolve'); },
     // The surface split's three. In production these call showModelessDialog; here they only have
     // to answer the way Code.gs does, because what is under test is that the caller READS the
@@ -2202,13 +1877,13 @@ const STUB_SCRIPT = `<script>
     var list = store[key] = store[key] || [];
     var reply = {
       id: 'ur_' + list.length + '_' + spec.commentId,
-      content: action === 'resolve' && !spec.content ? 'Resolved.' : spec.content,
+      content: action === 'resolve' && !spec.text ? 'Resolved.' : spec.text,
       createdTime: new Date().toISOString(),
       author: { displayName: 'Krunoslav' }
     };
     list.push(reply);
     window.__SASHA_REPLY_CALLS__ = (window.__SASHA_REPLY_CALLS__ || [])
-      .concat([{ fileId: spec.fileId, commentId: spec.commentId, content: spec.content, action: action }]);
+      .concat([{ fileId: spec.fileId, commentId: spec.commentId, text: spec.text, action: action }]);
     if (action === 'resolve') {
       window.__SASHA_RESOLVED__ = window.__SASHA_RESOLVED__ || {};
       window.__SASHA_RESOLVED__[key] = true;
@@ -2256,38 +1931,11 @@ const STUB_SCRIPT = `<script>
     return false;
   }
 
-  /** The comments the stub "created", echoed back with one canned answer, as Drive would list them. */
-  function sentThreads(comments) {
-    return comments.map(function (comment, at) {
-      return {
-        id: 'c_' + at,
-        content: comment.content,
-        createdTime: '2026-10-04T12:00:0' + at + 'Z',
-        resolved: isResolved(DECK, 'c_' + at),
-        author: { displayName: 'Krunoslav' },
-        // Signed with the agent marker, as the connector signs it: the same Google account posts
-        // both halves, so the marker is the only thing that makes this Sasha's.
-        replies: [{ id: 'r_' + at, content: answerFor(comment.content) + '\\n\\n' + AGENT, createdTime: '2026-10-04T12:01:00Z', author: { displayName: 'Krunoslav' } }]
-          .concat(repliesOn(DECK, 'c_' + at))
-      };
-    });
-  }
-
-  /**
-   * What "Claude" replies to a REVIEW note. There is only one kind of reply left: the anonymiser's
-   * model-assisted mode is withdrawn, so nothing asks this stub to rewrite a slide's text any more.
-   *
-   * The rewrite branch is deliberately NOT restored as a no-op -- isRewriteRequest above is kept
-   * as a TRIPWIRE instead. If the report window ever sends the slide's own words down the comment
-   * channel again, __SASHA_REWRITE__ is set and the report surface's "nothing here goes to a
-   * model" check fails, which is the only way a test can hold a privacy claim to account.
-   * (No backticks anywhere below this line: the whole stub IS a template literal, and one closes
-   * it mid-comment -- which is three parse errors in a file that was otherwise finished.)
-   */
-  function answerFor(content) {
-    if (isRewriteRequest([{ content: content }])) return 'nothing here asks a model to rewrite anything';
-    return 'looked at it, redrawing';
-  }
+  // isRewriteRequest above is a TRIPWIRE: the anonymiser's model-assisted mode is withdrawn, so if
+  // the report window ever sends the slide's own words down the comment channel again,
+  // __SASHA_REWRITE__ is set and the report surface's "nothing here goes to a model" check fails --
+  // the only way a test can hold a privacy claim to account. (No backticks anywhere in this stub:
+  // the whole stub IS a template literal, and one closes it mid-comment.)
   // COPY-ON-WRITE, like the real google.script.run: withSuccessHandler returns a NEW runner with
   // that handler set, it does not mutate the one it was called on. The earlier stub mutated shared
   // state, so two calls in flight at once (review mode fetches the page and the comment threads

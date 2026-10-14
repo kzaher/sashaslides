@@ -6,13 +6,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   FEEDBACK_SENTINEL,
-  answeredThreadCount,
   feedbackCommentContent,
   feedbackCommentsFor,
-  feedbackThreadsOf,
   readFeedbackComment,
   sendOutcomeOf,
-  type FeedbackCommentRecord,
   type ReviewNote,
 } from "./feedback.ts";
 import { PROTOCOL_VERSION } from "./protocol.ts";
@@ -149,37 +146,6 @@ test("the LAST sentinel wins, so an appended or quoted body still reads correctl
   assert.equal(read.note.text.split("\n").slice(-1)[0], "the real note");
 });
 
-test("the thread walk keeps our threads newest-first and skips the deck's own comments", () => {
-  const ours = feedbackCommentContent({ note: boxNote, createdAt: AT });
-  const alsoOurs = feedbackCommentContent({ note: slideNote, createdAt: AT });
-  const records: readonly FeedbackCommentRecord[] = [
-    record({ commentId: "c_old", content: ours.kind === "ok" ? ours.value : "", createdAt: "2026-10-04T10:00:00Z" }),
-    record({ commentId: "c_human", content: "nice deck", createdAt: "2026-10-04T11:00:00Z" }),
-    record({
-      commentId: "c_new",
-      content: alsoOurs.kind === "ok" ? alsoOurs.value : "",
-      createdAt: "2026-10-04T12:00:00Z",
-      replies: [{ replyId: "r_1", author: "Claude", createdAt: "2026-10-04T12:01:00Z", text: "trimmed it", authoredByAgent: true }],
-    }),
-    record({ commentId: "c_broken", content: `x\n\n${FEEDBACK_SENTINEL}{`, createdAt: "2026-10-04T09:00:00Z" }),
-  ];
-  const walked = feedbackThreadsOf({ records });
-  assert.deepEqual(
-    walked.threads.map((thread) => thread.commentId),
-    ["c_new", "c_old"],
-    "newest first, and the human's comment is not ours to show",
-  );
-  assert.equal(walked.unreadable.length, 1);
-  assert.match(walked.unreadable[0] ?? "", /^c_broken: /);
-  assert.equal(answeredThreadCount(walked.threads), 1);
-  assert.equal(walked.threads[0]?.replies[0]?.text, "trimmed it");
-  assert.equal(
-    walked.threads[0]?.createdAt,
-    "2026-10-04T12:00:00Z",
-    "Drive's own timestamp outranks the sentinel's",
-  );
-});
-
 test("a send is only 'sent' when every comment came back with an id", () => {
   assert.deepEqual(sendOutcomeOf({ results: [{ commentId: "c1", error: null }], requested: 1 }), {
     kind: "sent",
@@ -200,17 +166,3 @@ test("a send is only 'sent' when every comment came back with an id", () => {
   assert.equal(short.kind, "failed");
   assert.match(short.kind === "failed" ? short.message : "", /1 of 3 comments/);
 });
-
-function record({
-  commentId,
-  content,
-  createdAt,
-  replies = [],
-}: {
-  commentId: string;
-  content: string;
-  createdAt: string;
-  replies?: FeedbackCommentRecord["replies"];
-}): FeedbackCommentRecord {
-  return { commentId, content, createdAt, resolved: false, author: "Krunoslav", replies };
-}

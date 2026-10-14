@@ -1,5 +1,4 @@
-// THE THUMBNAILS ON SCREEN: in the candidates card, and at the foot of every comment about a
-// candidate. Rendered with react-dom/server, so every arm is asserted without a browser.
+// THE THUMBNAILS ON SCREEN: in the candidates card. Rendered with react-dom/server, so every arm is asserted without a browser.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -18,7 +17,6 @@ import type { Manifest } from "./protocol.ts";
 import {
   sessionEventsOf,
   type SessionEventFile,
-  type SlideCommentsLoad,
 } from "./session-log.ts";
 import { NO_PREVIEWS, nextPreviewToLoad, reducePreviews, type SlidePreviews } from "./slide-previews.ts";
 import { SlideThumb } from "./slide-thumb.tsx";
@@ -76,20 +74,11 @@ test("an unavailable thumbnail says why on hover, rather than spinning for ever"
 // --- in the panel --------------------------------------------------------------
 
 test("every candidate in the set card carries its thumbnail", () => {
-  const conversation = withComments();
+  const conversation = withCandidates();
   const markup = markupOf({ conversation, previews: loadedPreviews(conversation) });
   const stack = markup.slice(markup.indexOf('class="sasha-stack"'), markup.indexOf("Open artifacts"));
   assert.equal((stack.match(/class="sasha-stage sasha-thumb"/g) ?? []).length, 2, "one per candidate");
   assert.match(stack, /srcDoc="&lt;p&gt;slide 1&lt;\/p&gt;"|srcdoc="&lt;p&gt;slide 1&lt;\/p&gt;"/i);
-});
-
-test("an open comment ends with the thumbnail and the number of the candidate it is about", () => {
-  const conversation = withComments();
-  const markup = markupOf({ conversation, previews: loadedPreviews(conversation) });
-  const foot = markup.slice(markup.indexOf('class="sasha-c-context"'));
-  assert.match(foot, /class="sasha-c-thumb"/, "the thumbnail opens the slide too");
-  assert.match(foot, /srcDoc="&lt;p&gt;slide 2&lt;\/p&gt;"|srcdoc="&lt;p&gt;slide 2&lt;\/p&gt;"/i);
-  assert.match(foot, /Candidate 2 · option 2/);
 });
 
 // --- helpers --------------------------------------------------------------------
@@ -106,12 +95,11 @@ function replay(events: readonly ConversationEvent[]): Conversation {
   return conversation;
 }
 
-function withComments(): Conversation {
+function withCandidates(): Conversation {
   return replay([
     { kind: "staged-arrived", marks: [stagedMark], readAt: AT },
     { kind: "manifest-arrived", manifest },
     { kind: "log-arrived", events: eventsOf([commentOpened(2)]), readAt: AT },
-    { kind: "comments-arrived", comments: openOnSlideTwo() },
   ]);
 }
 
@@ -128,33 +116,6 @@ function loadedPreviews(conversation: Conversation): SlidePreviews {
     });
   }
   return previews;
-}
-
-function openOnSlideTwo(): SlideCommentsLoad {
-  return {
-    kind: "loaded",
-    readAt: AT,
-    slides: [
-      {
-        proposalId: PROPOSAL,
-        slideIndex: 2,
-        threads: {
-          kind: "read",
-          threads: [
-            {
-              commentId: "cc_open",
-              text: "the gridlines are gone",
-              author: "Ante M",
-              at: "2026-10-04T12:06:00.000Z",
-              resolved: false,
-              region: null,
-              replies: [],
-            },
-          ],
-        },
-      },
-    ],
-  };
 }
 
 function eventsOf(files: readonly Readonly<{ name: string; text: string }>[]) {

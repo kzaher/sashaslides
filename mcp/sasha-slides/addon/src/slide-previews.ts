@@ -1,5 +1,4 @@
-// THE SIDEBAR'S THUMBNAILS: which candidate HTML to fetch, what each thumbnail shows, and what a
-// comment card says about the candidate it is on.
+// THE SIDEBAR'S THUMBNAILS: which candidate HTML to fetch, and what each thumbnail shows.
 //
 // THE SOURCE IS THE CANDIDATE'S OWN HTML, rendered by `ScaledHtmlFrame` -- the same picture the
 // slides window's grid draws (UI-CONTRACT.md: "the HTML is authoritative and a thumbnail would
@@ -7,8 +6,8 @@
 // converter's batchUpdate requests, which only exist after a conversion the sidebar never runs, so
 // the sidebar cannot even compute the key without doing the expensive work it is meant to avoid.
 //
-// ITS OWN STORE, NEXT TO THE CONVERSATION RATHER than inside it. `Conversation.set.slides` fetches
-// bytes only for REVISED slides (the inline "slide as it is now" in the log). Every other
+// ITS OWN STORE, NEXT TO THE PANEL'S STATE RATHER than inside it. `Conversation.set.slides` fetches
+// bytes only for REVISED slides (conversation-state.ts `nextRevisedSlideToLoad`). Every other
 // candidate's bytes live here, keyed by file id AND the newest revision event, because a revision
 // overwrites `NN.html` in place: the file id alone would serve the pre-revision picture for ever.
 // A revised slide is left to the conversation's own loader, so no file is downloaded twice.
@@ -45,23 +44,6 @@ export type SlidePreview =
 
 /** The next candidate whose HTML the thumbnails want, addressed by the key its answer is filed under. */
 export type PreviewRequest = Readonly<{ key: string; slideIndex: number; fileId: string }>;
-
-/** Which candidate a comment thread is about, so its card can say so. */
-export type ThreadSlideContext =
-  | Readonly<{ kind: "deck" }>
-  | Readonly<{
-      kind: "candidate";
-      slideIndex: number;
-      label: string;
-      /** The newest `slide-revised` event's revision number, when it carried one. */
-      revision: number | null;
-      revised: boolean;
-      /** The slide was revised AFTER this comment was opened, so the thumbnail is newer than the comment. */
-      revisedSinceComment: boolean;
-    }>;
-
-/** The minimum of a thread this module reads, so it can be tested without building whole threads. */
-export type ThreadAnchor = Readonly<{ slideIndex: number | null; root: Readonly<{ at: string }> }>;
 
 export function reducePreviews(previews: SlidePreviews, event: PreviewEvent): SlidePreviews {
   const next = new Map(previews);
@@ -162,47 +144,6 @@ export function previewOf({
       return { kind: "unavailable", message: load.message };
     default:
       return assertNever(load);
-  }
-}
-
-/** Which candidate a thread is on, its revision, and whether it changed after the comment. */
-export function threadSlideContextOf({
-  conversation,
-  thread,
-}: {
-  conversation: Conversation;
-  thread: ThreadAnchor;
-}): ThreadSlideContext {
-  if (thread.slideIndex === null) return { kind: "deck" };
-  const slideIndex = thread.slideIndex;
-  const slide = slidesOf(conversation).find((candidate) => candidate.slideIndex === slideIndex);
-  const latest = latestRevisionOf({ events: loadedEvents(conversation.log), slideIndex });
-  const commentedAt = Date.parse(thread.root.at);
-  return {
-    kind: "candidate",
-    slideIndex,
-    label: slide === undefined ? "" : slide.label === "" ? slide.name : slide.label,
-    revision: latest === null ? null : latest.revision,
-    revised: latest !== null,
-    revisedSinceComment: latest !== null && Number.isFinite(commentedAt) && latest.atMillis > commentedAt,
-  };
-}
-
-/** The one line under a comment's thumbnail: "Candidate 2 · revision 3 · changed since this comment". */
-export function describeThreadSlide(context: ThreadSlideContext): string {
-  switch (context.kind) {
-    case "deck":
-      return "the deck";
-    case "candidate": {
-      const parts = [`Candidate ${context.slideIndex}`];
-      if (context.revision !== null) parts.push(`revision ${context.revision}`);
-      else if (context.revised) parts.push("revised");
-      else if (context.label !== "") parts.push(context.label);
-      if (context.revisedSinceComment) parts.push("changed since this comment");
-      return parts.join(" · ");
-    }
-    default:
-      return assertNever(context);
   }
 }
 

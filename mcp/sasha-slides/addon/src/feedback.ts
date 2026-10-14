@@ -68,15 +68,6 @@ export type FeedbackCommentRead =
   /** Ours by the sentinel, but the sentinel does not parse. Surfaced, never guessed at. */
   | Readonly<{ kind: "unreadable"; reason: string }>;
 
-/** One of our comments plus whatever has been said under it. The replies view renders these. */
-export type FeedbackThread = Readonly<{
-  commentId: string;
-  note: ReviewNote;
-  createdAt: string;
-  resolved: boolean;
-  replies: readonly FeedbackReply[];
-}>;
-
 export type FeedbackReply = Readonly<{
   replyId: string;
   author: string;
@@ -91,8 +82,8 @@ export type FeedbackReply = Readonly<{
 }>;
 
 /**
- * One comment exactly as `sashaReadFeedback` relayed it from the Drive comments API. Parsed in
- * bridge.ts; interpreted here.
+ * One comment exactly as `sashaCandidateComments` relayed it from the Drive comments API. Parsed in
+ * bridge.ts; interpreted in session-log.ts.
  */
 export type FeedbackCommentRecord = Readonly<{
   commentId: string;
@@ -225,51 +216,6 @@ export function readFeedbackComment(content: string): FeedbackCommentRead {
     default:
       return assertNever(parsed);
   }
-}
-
-/**
- * Our threads, newest first, out of every comment on the deck. Foreign comments are skipped and an
- * unreadable one of ours is reported in place, so the replies view can say "I wrote this and can no
- * longer read it" rather than quietly showing one fewer row.
- */
-export function feedbackThreadsOf({
-  records,
-}: {
-  records: readonly FeedbackCommentRecord[];
-}): Readonly<{ threads: readonly FeedbackThread[]; unreadable: readonly string[] }> {
-  const threads: FeedbackThread[] = [];
-  const unreadable: string[] = [];
-  for (const record of records) {
-    const read = readFeedbackComment(record.content);
-    switch (read.kind) {
-      case "foreign":
-        break;
-      case "unreadable":
-        unreadable.push(`${record.commentId}: ${read.reason}`);
-        break;
-      case "note":
-        threads.push({
-          commentId: record.commentId,
-          note: read.note,
-          // The Drive record's own timestamp outranks the sentinel's: the sentinel says when the
-          // sidebar built the body, the record says when Google accepted it.
-          createdAt: record.createdAt === "" ? read.createdAt : record.createdAt,
-          resolved: record.resolved,
-          replies: record.replies,
-        });
-        break;
-      default:
-        return assertNever(read);
-    }
-  }
-  // Newest first: an answer the user is waiting for is about the thing they just sent.
-  const ordered = [...threads].sort((left, right) => (left.createdAt < right.createdAt ? 1 : left.createdAt > right.createdAt ? -1 : 0));
-  return { threads: ordered, unreadable };
-}
-
-/** How many of our threads have an answer in them -- the number the replies tab shows as a badge. */
-export function answeredThreadCount(threads: readonly FeedbackThread[]): number {
-  return threads.filter((thread) => thread.replies.length > 0).length;
 }
 
 /**
