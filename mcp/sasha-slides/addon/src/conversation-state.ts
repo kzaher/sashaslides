@@ -32,7 +32,7 @@ import type { NothingListeningNotice } from "../../feedback-delivery.ts";
 import type { ProposalMark } from "./bridge.ts";
 import type { CommentFilter } from "./comment-panel.ts";
 import type { FeedbackReply, FeedbackThread, ReviewNote } from "./feedback.ts";
-import { assertNever, type Manifest, type Region, type SlideEntry } from "./protocol.ts";
+import { assertNever, type Manifest, type MergeSpec, type Region, type SlideEntry } from "./protocol.ts";
 import {
   deliveriesOf,
   nothingListeningOn,
@@ -256,6 +256,12 @@ export type ManifestLoad =
       forEventId: string | null;
       /** The manifest's target deck, kept so the slides window can be seeded without re-reading it. */
       presentationId: string | null;
+      /**
+       * The merge target and removals, kept for the same reason: a seed without them would offer a
+       * merge proposal as an INSERT, and the slides window's own read could not correct it (a
+       * re-offered proposal is a no-op). Null for an ordinary proposal.
+       */
+      merge: MergeSpec | null;
     }>
   | Readonly<{ kind: "failed"; message: string; forEventId: string | null }>;
 
@@ -495,6 +501,7 @@ export function reduceConversation(conversation: Conversation, event: Conversati
           revision: event.manifest.revision,
           forEventId: newestSetChangeIn(loadedEvents(conversation.log)),
           presentationId: event.manifest.presentationId,
+          merge: event.manifest.merge,
         },
         slides: event.manifest.slides.map((slide) => slideOf({ slide, slides: set.slides })),
       }));

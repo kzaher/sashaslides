@@ -13,6 +13,7 @@ import {
   outcomeOf,
   parseCandidateCommentsReply,
   parseInsertReply,
+  parsePageElementsReply,
   parseRenderPreviewsReply,
   parseOpenPickerReply,
   parsePickerTargetReply,
@@ -37,6 +38,7 @@ import {
   type RenderPreviewsReply,
   type InsertRequestSpec,
   type OpenPickerReply,
+  type PageElementsReply,
   type ProposalMark,
   type ReadEventsReply,
   type ReadFeedbackReply,
@@ -200,6 +202,18 @@ export function appsScriptSlidesApi({ call }: { call: ServerCall }): SlidesApi {
       });
       if (replied.kind !== "ok") return replied;
       return outcomeOf({ parsed: parseInsertReply(replied.value), what: "sashaInsert" }) satisfies CallOutcome<InsertReply>;
+    },
+
+    async pageElements(spec) {
+      const replied = await call<unknown>({
+        invoke: (runner) => runner.sashaPageElements(spec),
+        what: "sashaPageElements",
+      });
+      if (replied.kind !== "ok") return replied;
+      return outcomeOf({
+        parsed: parsePageElementsReply(replied.value),
+        what: "sashaPageElements",
+      }) satisfies CallOutcome<PageElementsReply>;
     },
 
     async renderPreviews(spec) {

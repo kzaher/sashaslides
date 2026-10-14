@@ -21,6 +21,8 @@ import type {
   InsertReply,
   InsertRequestSpec,
   OpenPickerReply,
+  PageElementsReply,
+  PageElementsSpec,
   ProposalMark,
   ReadEventsReply,
   ReadEventsSpec,
@@ -93,6 +95,8 @@ export type SlidesApi = Readonly<{
    * artifact in the same round trip (see render-artifact.ts for why they are not separable).
    */
   insert(spec: InsertRequestSpec): Promise<CallOutcome<InsertReply>>;
+  /** One slide's top-level element ids as they stand NOW, back to front (slide-merge.ts). */
+  pageElements(spec: PageElementsSpec): Promise<CallOutcome<PageElementsReply>>;
   /**
    * The candidates as GOOGLE renders them. A throwaway deck, one page per candidate, photographed
    * and then deleted -- the only way to see the real thing before anything is in the user's deck.

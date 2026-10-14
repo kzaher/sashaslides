@@ -16,11 +16,13 @@
  *    a fake that ignored `fileId` would report every candidate's threads on every candidate
  *    and would let a reply addressed to the wrong `slideIndex` succeed.
  */
-import type {
-  CommentReply,
-  CommentThread,
-  DeckPages,
-  FeedbackChannel,
+import {
+  describeSlide,
+  type CommentReply,
+  type CommentThread,
+  type DeckPages,
+  type FeedbackChannel,
+  type SlideRead,
 } from "../feedback/feedback-channel";
 
 export type FakeComments = Readonly<{
@@ -45,6 +47,8 @@ export type FakeComments = Readonly<{
   /** Simulates the user answering the agent in their own thread. */
   putUserReply: (options: Readonly<{ commentId: string; text: string; author?: string }>) => CommentReply;
   setDeckPages: (options: Readonly<{ pages: DeckPages }>) => void;
+  /** What `readSlide` answers next. Unset, it answers `unavailable`, like a deck nobody shared. */
+  setSlideRead: (options: Readonly<{ read: SlideRead }>) => void;
 }>;
 
 export type RecordedCall = Readonly<{ op: RecordedOperation; detail: string }>;
@@ -55,7 +59,8 @@ export type RecordedOperation =
   | "createComment"
   | "createReply"
   | "deleteComment"
-  | "listSlidePages";
+  | "listSlidePages"
+  | "readSlide";
 
 export const FAKE_OWNER = "Ante M";
 
@@ -76,6 +81,7 @@ export function createFakeComments(
   const calls: RecordedCall[] = [];
   let nextId = 1;
   let deckPages: DeckPages = { kind: "ok", pageObjectIds: options.pageObjectIds };
+  let slideRead: SlideRead = { kind: "unavailable", reason: "fake Slides: no slide was set" };
 
   const stamp = (): string => options.now().toISOString();
   const mintId = (prefix: string): string => {
@@ -169,6 +175,11 @@ export function createFakeComments(
         calls.push({ op: "listSlidePages", detail: presentationId });
         return Promise.resolve(deckPages);
       },
+
+      readSlide: ({ presentationId, slide }) => {
+        calls.push({ op: "readSlide", detail: `${presentationId}/${describeSlide(slide)}` });
+        return Promise.resolve(slideRead);
+      },
     },
 
     calls: () => [...calls],
@@ -223,6 +234,9 @@ export function createFakeComments(
 
     setDeckPages: ({ pages }) => {
       deckPages = pages;
+    },
+    setSlideRead: ({ read }) => {
+      slideRead = read;
     },
   };
 }

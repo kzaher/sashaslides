@@ -54,13 +54,28 @@ export type ConversionResult = Readonly<{
 }>;
 
 /**
+ * One converted element and the z-index its top-level box stacks at (the converter's own
+ * `StackedElement`, with the picker's looser request type). What a MERGE orders new elements by
+ * against the slide's existing content; see slide-merge.ts.
+ */
+export type StackedElement = Readonly<{ zIndex: number; requests: readonly SlidesApiRequest[] }>;
+
+/**
+ * A conversion as the real converter hands it back: the requests, plus the same requests grouped
+ * per element with their z-index. A separate type rather than a new field on `ConversionResult`
+ * because the conversion cache stores only `requests` and `unsupported`, and what is read back
+ * from it must not claim a grouping it never stored -- the merge path always converts afresh.
+ */
+export type StackedConversion = ConversionResult & Readonly<{ stackedElements: readonly StackedElement[] }>;
+
+/**
  * What the picker's composition root is given. Async, because the real converter is; the extra
  * machinery the converter needs (the extractor blob, the staging container) is closed over by
  * `browserSlideConverter` so nothing above this file has to know about it.
  */
 export type ConvertSlideHtml = (
   spec: Readonly<{ html: string; presentationId: string; pageObjectId: string; objectIdPrefix: string }>,
-) => Promise<ConversionResult>;
+) => Promise<StackedConversion>;
 
 /**
  * The real converter, bound to one extractor blob and one staging container.
@@ -87,7 +102,11 @@ export function browserSlideConverter({
       extractorScript,
       container,
     });
-    return { requests: converted.requests, unsupported: normalizeUnsupported(converted.unsupported) };
+    return {
+      requests: converted.requests,
+      unsupported: normalizeUnsupported(converted.unsupported),
+      stackedElements: converted.stackedElements,
+    };
   };
 }
 

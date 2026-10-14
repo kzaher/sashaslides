@@ -32,6 +32,23 @@ export type SlideEntry = Readonly<{
   label: string;
 }>;
 
+/**
+ * A MERGE proposal's target: the existing slide its candidates redesign part of (PROTOCOL.md
+ * "Merge proposals"). Absent from the manifest of an ordinary proposal, whose pick is inserted as a
+ * new slide.
+ */
+export type MergeTarget = Readonly<{ presentationId: string; slideObjectId: string }>;
+
+/** What one candidate deletes from the target slide: `pageElements` object ids, as Claude captured them. */
+export type CandidateRemoval = Readonly<{ index: number; remove: readonly string[] }>;
+
+/**
+ * The target plus every candidate's `remove` list, gathered in one value so a proposal is either a
+ * merge with all of it or an insert with none of it. On the wire `remove` sits on each
+ * `slides[]` entry; here it is keyed by the candidate's 1-based index, one entry per candidate.
+ */
+export type MergeSpec = MergeTarget & Readonly<{ removals: readonly CandidateRemoval[] }>;
+
 export type Manifest = Readonly<{
   protocolVersion: number;
   proposalId: string;
@@ -40,6 +57,8 @@ export type Manifest = Readonly<{
   presentationId: string | null;
   count: number;
   slides: readonly SlideEntry[];
+  /** Null for an ordinary proposal (insert the pick as a new slide); see `MergeSpec`. */
+  merge: MergeSpec | null;
   /**
    * HOW MANY TIMES THE CANDIDATE SET HAS CHANGED, bumped by every revision and every clear. Null
    * on a manifest written before the field existed.
@@ -125,6 +144,8 @@ export function parseManifest(body: string): Parsed<Manifest> {
       return { kind: "invalid", reason: `manifest slides are not 1..${count} in order` };
     }
   }
+  const merge = parseManifestMerge({ record: json.value, presentationId: presentationField });
+  if (merge.kind !== "ok") return merge;
   return {
     kind: "ok",
     value: {
@@ -135,8 +156,38 @@ export function parseManifest(body: string): Parsed<Manifest> {
       count,
       slides: slides.value,
       revision: integerAt({ record: json.value, key: "revision" }),
+      merge: merge.value,
     },
   };
+}
+
+/** The candidate's `remove` list, or none for a candidate of an ordinary proposal. */
+export function removalFor({ merge, index }: { merge: MergeSpec; index: number }): readonly string[] {
+  return merge.removals.find((removal) => removal.index === index)?.remove ?? [];
+}
+
+/**
+ * A `MergeSpec` in the add-on's OWN form (`removals` by index), for the slides window's seed, which
+ * carries a parsed proposal from the sidebar. `null` is a proposal that is not a merge.
+ */
+export function parseMergeSpec(field: unknown): Parsed<MergeSpec | null> {
+  if (field === null || field === undefined) return { kind: "ok", value: null };
+  const record = asRecord(field);
+  if (record === null) return { kind: "invalid", reason: "merge is not an object" };
+  const target = mergeTargetOf(record);
+  if (target.kind !== "ok") return target;
+  const rawRemovals = record["removals"];
+  if (!Array.isArray(rawRemovals)) return { kind: "invalid", reason: "merge has no removals array" };
+  const removals: CandidateRemoval[] = [];
+  for (const candidate of rawRemovals) {
+    const entry = asRecord(candidate);
+    const index = entry === null ? null : integerAt({ record: entry, key: "index" });
+    if (entry === null || index === null || index < 1) return { kind: "invalid", reason: "a merge removal has no 1-based index" };
+    const remove = objectIdsOf({ field: entry["remove"], what: `candidate ${String(index)}'s remove` });
+    if (remove.kind !== "ok") return remove;
+    removals.push({ index, remove: remove.value });
+  }
+  return { kind: "ok", value: { ...target.value, removals } };
 }
 
 /**
@@ -183,6 +234,64 @@ export function parseSlides(field: unknown): Parsed<readonly SlideEntry[]> {
     entries.push({ index, fileId, name, label: label ?? "" });
   }
   return { kind: "ok", value: entries };
+}
+
+/**
+ * The manifest's `merge` target and every `slides[].remove`, together. Strict on purpose: a merge
+ * that fails to parse must never degrade into an INSERT of a candidate that only holds the new
+ * parts of a slide, so anything malformed makes the whole manifest invalid -- including a `remove`
+ * on a proposal with no target, which would otherwise be silently ignored.
+ */
+function parseManifestMerge({
+  record,
+  presentationId,
+}: {
+  record: Readonly<Record<string, unknown>>;
+  presentationId: string | null;
+}): Parsed<MergeSpec | null> {
+  const slides = Array.isArray(record["slides"]) ? record["slides"] : [];
+  const field = record["merge"];
+  if (field === undefined || field === null) {
+    const stray = slides.some((slide) => asRecord(slide)?.["remove"] !== undefined);
+    return stray
+      ? { kind: "invalid", reason: "a manifest slide has `remove` but the manifest names no merge target" }
+      : { kind: "ok", value: null };
+  }
+  const mergeRecord = asRecord(field);
+  if (mergeRecord === null) return { kind: "invalid", reason: "manifest merge is not an object" };
+  const target = mergeTargetOf(mergeRecord);
+  if (target.kind !== "ok") return target;
+  if (presentationId !== null && presentationId !== target.value.presentationId) {
+    return { kind: "invalid", reason: "manifest merge names a different deck than presentationId" };
+  }
+  const removals: CandidateRemoval[] = [];
+  for (const [position, slide] of slides.entries()) {
+    const index = position + 1;
+    const raw = asRecord(slide)?.["remove"];
+    const remove = raw === undefined ? ({ kind: "ok", value: [] } as const) : objectIdsOf({ field: raw, what: `slide ${String(index)}'s remove` });
+    if (remove.kind !== "ok") return remove;
+    removals.push({ index, remove: remove.value });
+  }
+  return { kind: "ok", value: { ...target.value, removals } };
+}
+
+function mergeTargetOf(record: Readonly<Record<string, unknown>>): Parsed<MergeTarget> {
+  const presentationId = stringAt({ record, key: "presentationId" });
+  const slideObjectId = stringAt({ record, key: "slideObjectId" });
+  if (presentationId === null || presentationId === "") return { kind: "invalid", reason: "merge has no presentationId" };
+  if (slideObjectId === null || slideObjectId === "") return { kind: "invalid", reason: "merge has no slideObjectId" };
+  return { kind: "ok", value: { presentationId, slideObjectId } };
+}
+
+/** A list of non-empty object ids. Empty is legal: a candidate that only adds. */
+function objectIdsOf({ field, what }: { field: unknown; what: string }): Parsed<readonly string[]> {
+  if (!Array.isArray(field)) return { kind: "invalid", reason: `${what} is not an array` };
+  const ids: string[] = [];
+  for (const entry of field) {
+    if (typeof entry !== "string" || entry === "") return { kind: "invalid", reason: `${what} holds a non-string or empty id` };
+    ids.push(entry);
+  }
+  return { kind: "ok", value: ids };
 }
 
 function versionOf(record: Readonly<Record<string, unknown>>): Parsed<number> {

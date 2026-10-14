@@ -765,6 +765,82 @@ fallback so an add-on built against the older section does not get its inserted 
 deleted out from under it.
 
 
+
+# Merge proposals: redesigning part of an existing slide
+
+An ordinary proposal's pick is INSERTED as a new slide. A **merge** proposal's pick redesigns part
+of a slide that is already in the deck: it deletes the existing elements the candidate names and
+adds the candidate's new elements to the same page, stacked against what is kept. Same
+`protocolVersion` (1): both fields are additive and an ordinary manifest is byte-for-byte unchanged.
+
+## The manifest
+
+```json
+{
+  "protocolVersion": 1,
+  "proposalId": "p_…",
+  "presentationId": "1AbC…",
+  "merge": { "presentationId": "1AbC…", "slideObjectId": "g2f1c9a0_0_12" },
+  "count": 2,
+  "slides": [
+    { "index": 1, "fileId": "1Xyz…", "name": "01.html", "label": "Chart as a bar race", "remove": ["g2f1c9a0_0_15", "g2f1c9a0_0_16"] },
+    { "index": 2, "fileId": "1Uvw…", "name": "02.html", "label": "Callout over the photo", "remove": [] }
+  ]
+}
+```
+
+- `merge` — present only on a merge proposal: the deck and the slide's page object id. When
+  `presentationId` is also set it must name the same deck (the server fills it from `merge`).
+- `slides[].remove` — on every slide of a merge proposal and on none of an ordinary one: the
+  object ids of that slide's TOP-LEVEL `pageElements` the candidate deletes. `[]` only adds.
+- A `remove` without `merge`, a malformed `merge`, or a `merge` naming another deck makes the
+  manifest **invalid** to the add-on. A merge must never degrade into inserting a candidate that
+  holds only the new parts of a slide.
+
+## The candidate HTML
+
+Still a full self-contained 1280×720 document, holding **only the new parts**, on a transparent
+page (no body background: anything painted is a new element). Each new element's stacking is the
+CSS `z-index` of its TOP-LEVEL box — the outermost box around it that sets one, i.e. its place in
+the root stacking context; a nested child's z-index only orders things inside its box. The kept
+existing elements are ONE layer at z-index 0:
+
+- negative → behind every kept element; among themselves the lowest is rearmost;
+- `auto` / 0 / positive → in front of every kept element, the highest frontmost;
+- ties keep document order.
+
+The extractor stamps this as `stackZ` on each element (renderer/html2slides/extract-dom.ts), and the
+converter returns it as `stackedElements[].zIndex` (converter/emit-requests.ts).
+
+## Applying a pick
+
+The add-on (addon/src/merge-apply.ts, addon/src/slide-merge.ts) does, in order:
+
+1. refuses if the open deck is not `merge.presentationId`;
+2. reads the slide's `pageElements` NOW (`sashaPageElements`) — the slide may have changed since
+   Claude captured it;
+3. converts the candidate onto the target slide's own page id;
+4. **refuses** if any `remove` id is not a top-level element of that slide now, naming the ids. Never
+   a silent skip, and never a `deleteObject` that would find the id on another slide;
+5. sends ONE `batchUpdate` (atomic): `deleteObject` per `remove` id, the new elements' creates in
+   (z-index, document order), then one `updatePageElementsZOrder` `SEND_TO_BACK` per negative-z
+   element, frontmost first. Creation already puts the others on top in order, so they need no move.
+
+`PICK` is unchanged: `insertedObjectIds` lists the elements created; the `slide-inserted` event's
+`pageObjectId` is the target slide. No `createSlide` is ever sent for a merge.
+
+**An add-on older than this section ignores `merge` and `remove`** and inserts the picked candidate
+as a new slide — only the new parts, deleting nothing. Wrong, but never destructive.
+
+## Reading the slide first: `slide_structure`
+
+`slide_structure { presentationId, slideObjectId | slideNumber }` lists each top-level element's
+`objectId`, `kind`, a text excerpt, its `box` in px on the 1280-wide frame (rotation and groups
+resolved), its `zOrder` (0 = rearmost) and its placeholder type. It reads with the caller's own
+grant, which includes the `presentations` scope, so any deck the user can open is readable —
+`drive.file` alone would only see files this app created.
+
+
 # `feedback-delivered`: proof that something is listening
 
 Appended by the server the moment `read_feedback` or `await_feedback` **hands a comment to a

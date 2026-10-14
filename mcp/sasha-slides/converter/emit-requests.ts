@@ -40,6 +40,23 @@ export type ConversionResult = Readonly<{
   unsupported: readonly UnsupportedFeature[];
   /** Elements the extractor produced, including ones that emitted nothing. */
   elementCount: number;
+  /**
+   * The same `requests`, grouped by the extracted element that emitted them, in paint order, each
+   * with its stacking z-index. Concatenating every group's requests gives `requests` exactly.
+   * Elements that emitted nothing are left out.
+   *
+   * What a MERGE needs and an insert does not: a merge adds new elements to an EXISTING slide,
+   * and each new element goes behind or in front of what is already there by its top-level box's
+   * CSS z-index (mcp/sasha-slides PROTOCOL.md "Merge proposals").
+   */
+  stackedElements: readonly StackedElement[];
+}>;
+
+/** One extracted element's requests and the z-index it stacks at in the root stacking context. */
+export type StackedElement = Readonly<{
+  /** The top-level box's computed z-index; `auto` (null in the extraction) is 0. */
+  zIndex: number;
+  requests: readonly SlidesApiRequest[];
 }>;
 
 export function emitSlideRequests(options: EmitOptions): ConversionResult {
@@ -53,14 +70,20 @@ export function emitSlideRequests(options: EmitOptions): ConversionResult {
   };
 
   const parts: ElementEmission[] = [];
+  const stackedElements: StackedElement[] = [];
   for (const element of extraction.elements) {
-    parts.push(emitElement({ element, context, viewportPx: extraction.viewportPx }));
+    const emission = emitElement({ element, context, viewportPx: extraction.viewportPx });
+    parts.push(emission);
+    if (emission.requests.length > 0) {
+      stackedElements.push({ zIndex: element.stackZ ?? 0, requests: emission.requests });
+    }
   }
   const merged = mergeEmissions(parts);
   return {
     requests: merged.requests,
     unsupported: merged.unsupported,
     elementCount: extraction.elements.length,
+    stackedElements,
   };
 }
 

@@ -349,6 +349,14 @@ interface ExtractedElement {
   _domIdx?: number;
   _wasEmojiText?: boolean;
   zIndex?: number | null;
+  /**
+   * The z-index of the OUTERMOST box this element sits inside that sets one, i.e. its stacking
+   * position in the ROOT stacking context; null when no ancestor-or-self sets one (`auto`). A
+   * merge candidate (mcp/sasha-slides PROTOCOL.md "Merge proposals") orders its new elements
+   * against the slide's existing content by this number, so it is the top-level box's z-index and
+   * never a nested child's, which only orders things inside that box.
+   */
+  stackZ?: number | null;
   position?: string;
   rotate?: number;
   naturalWidth?: number;
@@ -461,15 +469,46 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
   // shifting of existing shape indices). Used for decorative overlays like the
   // slide_33 `.road::before` centerline.
   const _deferredEls: ExtractedElement[] = [];
+  // The root-stacking-context z-index of the element being walked; see `stackZ` and
+  // `rootStackZOf`. Ambient like `_currentClipMask`, set by `walk` around each element.
+  let _currentStackZ: number | null = null;
   const _origPush = elements.push.bind(elements);
   elements.push = (...items: ExtractedElement[]) => {
     for (const it of items) {
       if (!it) continue;
       if (it._domIdx === undefined) it._domIdx = _domCounter++;
       if (it.clipMask === undefined) it.clipMask = _currentClipMask;
+      if (it.stackZ === undefined) it.stackZ = _currentStackZ;
     }
     return _origPush(...items);
   };
+  // A deferred element is stamped when it is DEFERRED, while the walk still knows whose it is;
+  // the flush after the walk would otherwise stamp every one of them with the body's null.
+  const _origDeferredPush = _deferredEls.push.bind(_deferredEls);
+  _deferredEls.push = (...items: ExtractedElement[]) => {
+    for (const it of items) {
+      if (it && it.stackZ === undefined) it.stackZ = _currentStackZ;
+    }
+    return _origDeferredPush(...items);
+  };
+
+  /**
+   * The z-index of the outermost ancestor-or-self of `el` (below body) that sets one, or null.
+   * z-index only applies to a positioned box or a flex/grid item, so a stray `z-index` on a static
+   * block is ignored here exactly as the browser ignores it when painting.
+   */
+  function rootStackZOf(el: Element): number | null {
+    let found: number | null = null;
+    for (let node: Element | null = el; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+      const nodeCs = getComputedStyle(node);
+      if (nodeCs.zIndex === "auto") continue;
+      const parentDisplay = node.parentElement ? getComputedStyle(node.parentElement).display : "";
+      const applies = nodeCs.position !== "static" || /flex|grid/.test(parentDisplay);
+      const z = parseInt(nodeCs.zIndex, 10);
+      if (applies && Number.isFinite(z)) found = z;
+    }
+    return found;
+  }
 
   /** True when (a, b) overlap with epsilon tolerance. */
   function rectsIntersect(a: Bounds, b: Bounds, eps = 0.5): boolean {
@@ -2348,7 +2387,15 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
   }
 
   // --- MAIN WALK ---
+  /** `walkElement` with the ambient `_currentStackZ` set for this element and restored after. */
   function walk(el: Element): void {
+    const _outerStackZ = _currentStackZ;
+    _currentStackZ = rootStackZOf(el);
+    try { walkElement(el); }
+    finally { _currentStackZ = _outerStackZ; }
+  }
+
+  function walkElement(el: Element): void {
     if (seen.has(el)) return;
 
     const tag = (el.tagName || "").toUpperCase();
@@ -3453,7 +3500,11 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
   // Flush deferred pill chips + decorative overlays at the very end so they
   // paint on top of the content they augment and don't disturb existing shape
   // indices (keeps the structural diff clean — they show as pure ADDED shapes).
-  for (const sp of _deferredChipSpans) emitPillSpan(sp);
+  for (const sp of _deferredChipSpans) {
+    _currentStackZ = rootStackZOf(sp);
+    emitPillSpan(sp);
+  }
+  _currentStackZ = null;
   for (const de of _deferredEls) elements.push(de);
 
   // Detect gradient backgrounds on body/html

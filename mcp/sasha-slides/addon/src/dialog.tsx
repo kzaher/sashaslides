@@ -91,6 +91,7 @@ import {
   serializeSessionEvent,
   type SessionEventBody,
 } from "./session-log.ts";
+import { applyMergeCandidate } from "./merge-apply.ts";
 import { insertRequests, newPageObjectId, previewConversionSpec } from "./slide-insert.ts";
 
 const ROOT_ELEMENT_ID = "sasha-slides-root";
@@ -1068,8 +1069,9 @@ async function submit({ picked }: { picked: number | null }): Promise<void> {
   const proposal = offer.proposal;
   dispatch({ kind: "submit-started", picked, stage: picked === null ? "writing-pick" : "converting" });
 
-  const insertedObjectIds = picked === null ? [] : await insertPicked({ running, picked });
-  if (insertedObjectIds === null) return;
+  const inserted = picked === null ? NOTHING_INSERTED : await insertPicked({ running, picked });
+  if (inserted === null) return;
+  const insertedObjectIds = inserted.objectIds;
 
   dispatch({ kind: "submit-stage", stage: "writing-pick" });
   const decided = offerOf(state);
@@ -1092,7 +1094,7 @@ async function submit({ picked }: { picked: number | null }): Promise<void> {
       if (picked !== null) {
         await appendEvent({
           folderId: proposal.folderId,
-          body: { kind: "slide-inserted", slideIndex: picked, pageObjectId: insertedObjectIds[0] ?? null },
+          body: { kind: "slide-inserted", slideIndex: picked, pageObjectId: inserted.pageObjectId },
         });
       }
       return;
@@ -1107,14 +1109,23 @@ async function submit({ picked }: { picked: number | null }): Promise<void> {
   }
 }
 
-/** The object ids Slides created, or null when the insert failed (the reducer has been told). */
+/** What a pick put in the deck: the object ids Slides created, and the page they are on. */
+type Inserted = Readonly<{ objectIds: readonly string[]; pageObjectId: string | null }>;
+
+const NOTHING_INSERTED: Inserted = { objectIds: [], pageObjectId: null };
+
+/**
+ * Put the picked candidate in the deck, or return null when that failed (the reducer has been
+ * told). An ordinary proposal INSERTS a new slide; a merge proposal redesigns its target slide in
+ * place (merge-apply.ts) and never creates a page.
+ */
 async function insertPicked({
   running,
   picked,
 }: {
   running: Services;
   picked: number;
-}): Promise<readonly string[] | null> {
+}): Promise<Inserted | null> {
   const offer = offerOf(state);
   const frame = offer?.slides[picked - 1];
   if (offer === null || frame === undefined) {
@@ -1129,6 +1140,36 @@ async function insertPicked({
   if (frame.html.kind !== "loaded") {
     dispatch({ kind: "submit-failed", message: `option ${picked}'s HTML has not loaded yet` });
     return null;
+  }
+  const merge = offer.proposal.merge;
+  if (merge !== null) {
+    const merged = await applyMergeCandidate({
+      slides: running.slides,
+      convert: running.convert,
+      merge,
+      openPresentationId: presentationId,
+      index: picked,
+      html: frame.html.html,
+      // A fresh prefix per apply: the new elements must not share ids with what is on the slide.
+      objectIdPrefix: newPageObjectId({ random: Math.random }),
+      render: renderRequestFor({
+        proposalId: offer.proposal.proposalId,
+        folderId: offer.proposal.folderId,
+        index: picked,
+        pageObjectId: merge.slideObjectId,
+      }),
+      onSending: () => dispatch({ kind: "submit-stage", stage: "inserting" }),
+    });
+    switch (merged.kind) {
+      case "applied":
+        return { objectIds: merged.createdObjectIds, pageObjectId: merged.pageObjectId };
+      case "refused":
+      case "failed":
+        dispatch({ kind: "submit-failed", message: merged.message });
+        return null;
+      default:
+        return assertNever(merged);
+    }
   }
   // Converted again here rather than reused: the page id has to be the one actually created, and
   // the cached conversion was made against a preview id.
@@ -1168,7 +1209,8 @@ async function insertPicked({
   if (artifact.kind === "skipped") {
     console.warn(`[sasha-slides] no render artifact for option ${picked}: ${artifact.reason}`);
   }
-  return createdObjectIdsOf(inserted.value.batchResponse);
+  const objectIds = createdObjectIdsOf(inserted.value.batchResponse);
+  return { objectIds, pageObjectId: objectIds[0] ?? null };
 }
 
 /** Why nothing was sent, when the mark-up was refused. The reasons come from `feedbackCommentsFor`. */

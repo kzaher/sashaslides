@@ -101,6 +101,7 @@ import {
   type PickOutcome,
   type ProposalEnvironment,
   type ProposalLogOutcome,
+  type ProposalMerge,
   type ProposalState,
   type ReviseSlideOutcome,
   type ReviseStage,
@@ -110,6 +111,8 @@ import {
   type ListOpenWorkOutcome,
   type OpenWorkItem,
 } from "./proposal";
+import { slideStructureOf, type SlideStructure } from "./slide-structure";
+import type { SlideRead, SlideSelector } from "./feedback/feedback-channel";
 import {
   describeSessionEvent,
   sessionEventBody,
@@ -160,7 +163,54 @@ export type ToolOutcome<TPayload> =
   | Readonly<{ kind: "payload"; payload: TPayload }>
   | Readonly<{ kind: "error"; message: string }>;
 
-type SlideArgument = Readonly<{ path?: string | undefined; html?: string | undefined; label?: string | undefined }>;
+type SlideArgument = Readonly<{
+  path?: string | undefined;
+  html?: string | undefined;
+  label?: string | undefined;
+  remove?: readonly string[] | undefined;
+}>;
+
+type MergeArgument = Readonly<{ presentationId: string; slideObjectId: string }>;
+
+/**
+ * The propose_slides MERGE boundary (PROTOCOL.md "Merge proposals"): the optional target and each
+ * slide's optional `remove` list, checked together. `null` is an ordinary proposal. Whether the ids
+ * are really on the slide is NOT checked here -- the deck can change before the user picks, so the
+ * add-on checks them against the slide as it is when the pick is applied, and refuses stale ones.
+ */
+export function mergeRequestFrom(
+  options: Readonly<{
+    slides: readonly SlideArgument[];
+    merge: MergeArgument | undefined;
+    presentationId: string | undefined;
+  }>,
+): Readonly<{ kind: "ok"; merge: ProposalMerge | null }> | Readonly<{ kind: "error"; message: string }> {
+  const { slides, merge, presentationId } = options;
+  if (merge === undefined) {
+    const stray = slides.findIndex((slide) => slide.remove !== undefined);
+    return stray === -1
+      ? { kind: "ok", merge: null }
+      : {
+          kind: "error",
+          message:
+            `slide ${String(stray + 1)}: \`remove\` deletes elements of an existing slide, so it needs ` +
+            "`merge: { presentationId, slideObjectId }` naming that slide",
+        };
+  }
+  if (presentationId !== undefined && presentationId !== merge.presentationId) {
+    return { kind: "error", message: "merge.presentationId names a different deck than presentationId" };
+  }
+  const removePerSlide: (readonly string[])[] = [];
+  for (const [position, slide] of slides.entries()) {
+    const remove = slide.remove ?? [];
+    const repeated = remove.find((objectId, at) => remove.indexOf(objectId) !== at);
+    if (repeated !== undefined) {
+      return { kind: "error", message: `slide ${String(position + 1)}: \`remove\` names ${repeated} twice` };
+    }
+    removePerSlide.push(remove);
+  }
+  return { kind: "ok", merge: { target: { presentationId: merge.presentationId, slideObjectId: merge.slideObjectId }, removePerSlide } };
+}
 
 /**
  * The propose_slides / revise_slide argument boundary: each slide carries exactly one of `path`
@@ -240,7 +290,11 @@ export function createSashaSlidesServer(
         "on the machine running this connector; streamed to Drive, never read into the " +
         "conversation) or, when the connector is remote (claude.ai, ChatGPT, any https URL), as " +
         "`html`, the complete document itself. Writes the READY marker last, so the picker only " +
-        "ever sees a complete proposal. Follow with await_pick.",
+        "ever sees a complete proposal. Follow with await_pick. To REDESIGN PART OF AN EXISTING " +
+        "SLIDE instead of adding a new one, pass `merge` (the slide; read it first with " +
+        "slide_structure) and give each candidate only the NEW parts plus `remove`, the object ids " +
+        "it replaces. Each new element's CSS z-index on its top-level box places it: negative goes " +
+        "behind the slide's kept content, anything else in front.",
       inputSchema: {
         slides: z
           .array(
@@ -259,6 +313,13 @@ export function createSashaSlidesServer(
                 .string()
                 .optional()
                 .describe("Short caption for the picker (e.g. 'Timeline, 3 phases'). Not a transcription."),
+              remove: z
+                .array(z.string().min(1))
+                .optional()
+                .describe(
+                  "Merge only: object ids (from slide_structure) of the existing elements this candidate " +
+                    "deletes. Omit or [] when it only adds.",
+                ),
             }),
           )
           .min(1)
@@ -267,17 +328,30 @@ export function createSashaSlidesServer(
           .string()
           .optional()
           .describe("Target deck id, when known, so the extension can insert into it."),
+        merge: z
+          .object({
+            presentationId: z.string().min(1).describe("The deck holding the slide."),
+            slideObjectId: z.string().min(1).describe("The slide's page object id, as slide_structure reports it."),
+          })
+          .optional()
+          .describe(
+            "Redesign part of THIS existing slide instead of inserting a new one. The picked candidate's " +
+              "new elements are added to it and its `remove` ids deleted, in one atomic update.",
+          ),
       },
     },
-    async ({ slides, presentationId }, extra) => {
+    async ({ slides, presentationId, merge }, extra) => {
       const loaded = await resolveEnvironment({ authInfo: extra.authInfo });
       if (loaded.kind === "auth-failed") return errorResult(loaded.message);
       const parsed = slideSourcesFrom({ slides, remote });
       if (parsed.kind === "error") return errorResult(parsed.message);
+      const merged = mergeRequestFrom({ slides, merge, presentationId });
+      if (merged.kind === "error") return errorResult(`propose_slides: ${merged.message}`);
       const outcome = await createProposal({
         env: loaded.env,
         slides: parsed.sources,
         presentationId: presentationId ?? null,
+        ...(merged.merge === null ? {} : { merge: merged.merge }),
       });
       return toCallToolResult(proposeSlidesPayload(outcome));
     },
@@ -715,7 +789,75 @@ export function createSashaSlidesServer(
     },
   );
 
+  server.registerTool(
+    "slide_structure",
+    {
+      title: "Read an existing slide's elements",
+      description:
+        "List every element on ONE existing slide -- object id, kind, a text excerpt, its box in px " +
+        "on the 1280x720 frame candidate HTML is drawn on, and its z-order (0 is rearmost). Read this " +
+        "before a merge proposal (propose_slides with `merge`): the ids are what `remove` names, and " +
+        "the boxes are where the kept content sits. Give the slide as slideObjectId or slideNumber.",
+      inputSchema: {
+        presentationId: z.string().min(1).describe("The deck id (from its URL)."),
+        slideObjectId: z.string().min(1).optional().describe("The slide's page object id."),
+        slideNumber: z.number().int().min(1).optional().describe("Or its 1-based position in the filmstrip."),
+      },
+    },
+    async ({ presentationId, slideObjectId, slideNumber }, extra) => {
+      const slide = slideSelectorFrom({ slideObjectId, slideNumber });
+      if (slide.kind === "error") return errorResult(slide.message);
+      const loaded = await resolveFeedbackEnvironment({ authInfo: extra.authInfo });
+      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
+      const read = await loaded.env.channel.readSlide({ presentationId, slide: slide.selector });
+      return toCallToolResult(slideStructurePayload({ presentationId, read }));
+    },
+  );
+
   return server;
+}
+
+/** Exactly one of the two ways to name a slide. */
+export function slideSelectorFrom(
+  options: Readonly<{ slideObjectId: string | undefined; slideNumber: number | undefined }>,
+): Readonly<{ kind: "ok"; selector: SlideSelector }> | Readonly<{ kind: "error"; message: string }> {
+  const { slideObjectId, slideNumber } = options;
+  if (slideObjectId !== undefined && slideNumber !== undefined) {
+    return { kind: "error", message: "slide_structure: give slideObjectId or slideNumber, not both" };
+  }
+  if (slideObjectId !== undefined) return { kind: "ok", selector: { kind: "object-id", objectId: slideObjectId } };
+  if (slideNumber !== undefined) return { kind: "ok", selector: { kind: "number", number: slideNumber } };
+  return { kind: "error", message: "slide_structure: give the slide as slideObjectId or slideNumber" };
+}
+
+export function slideStructurePayload(
+  options: Readonly<{ presentationId: string; read: SlideRead }>,
+): ToolOutcome<SlideStructure> {
+  const { presentationId, read } = options;
+  switch (read.kind) {
+    case "ok":
+      return {
+        kind: "payload",
+        payload: slideStructureOf({
+          presentationId,
+          slideObjectId: read.slideObjectId,
+          slideNumber: read.slideNumber,
+          pageSize: read.pageSize,
+          page: read.page,
+        }),
+      };
+    case "not-found":
+      return { kind: "error", message: `slide_structure: ${read.reason}` };
+    case "unavailable":
+      return {
+        kind: "error",
+        message:
+          `slide_structure: Google Slides would not return that slide: ${read.reason}. The connector ` +
+          "reads decks with your own grant, so check the deck id and that your account can open it.",
+      };
+    default:
+      return assertNever(read);
+  }
 }
 
 export const DEFAULT_PICK_TIMEOUT_SECONDS = 300;

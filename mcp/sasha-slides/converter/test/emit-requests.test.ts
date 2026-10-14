@@ -1140,6 +1140,44 @@ function reportedKinds(unsupported: readonly UnsupportedFeature[]): readonly str
   );
 }
 
+/* --------------------------------------- stacking z-index, for a merge */
+
+{
+  // Three elements: a background panel the author sent behind the slide's existing content, an
+  // unstyled heading (`auto`), and a badge raised in front. `stackZ` is extract-dom.ts's
+  // root-stacking-context z-index; a `<br>` emits nothing and must not appear as an empty group.
+  const extraction = parseExtraction({
+    viewport: { w: 1280, h: 720 },
+    elementCount: 4,
+    elements: [
+      { type: "rect", bounds: { x: 0, y: 0, w: 1280, h: 720 }, fill: "#eeeeee", fillAlpha: 1, stackZ: -1 },
+      { type: "br", bounds: { x: 0, y: 0, w: 1, h: 1 } },
+      { type: "rect", bounds: { x: 100, y: 100, w: 200, h: 50 }, fill: "#1e88e5", fillAlpha: 1 },
+      { type: "rect", bounds: { x: 900, y: 40, w: 80, h: 80 }, fill: "#e53935", fillAlpha: 1, stackZ: 5 },
+    ],
+  });
+  const result = emitSlideRequests({ extraction, pageObjectId: "p1", objectIdPrefix: "merge" });
+  test.equal(
+    "every element that emitted something is one stacked group, carrying its z-index (auto is 0)",
+    result.stackedElements.map((element) => element.zIndex),
+    [-1, 0, 5],
+  );
+  test.equal(
+    "the groups concatenate to exactly the flat request list, in the same order",
+    result.stackedElements.flatMap((element) => element.requests),
+    result.requests,
+  );
+  test.equal(
+    "a fractional or missing stackZ parses as auto (null)",
+    parseExtraction({
+      viewport: { w: 1280, h: 720 },
+      elementCount: 1,
+      elements: [{ type: "rect", bounds: { x: 0, y: 0, w: 10, h: 10 }, fill: "#000000", stackZ: 1.5 }],
+    }).elements.map((element) => element.stackZ),
+    [null],
+  );
+}
+
 async function checkFramePacing(): Promise<void> {
   const startedNever = Date.now();
   await afterNextFrame({ view: { requestAnimationFrame: () => undefined }, budgetMs: 30 });

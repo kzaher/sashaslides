@@ -15,6 +15,7 @@ import type {
   CandidateCommentsSpec,
   InsertRequestSpec,
   OpenPickerSpec,
+  PageElementsSpec,
   ReadEventsSpec,
   ReadFeedbackSpec,
   CommentReplySpec,
@@ -66,6 +67,8 @@ declare global {
     /** The comment threads on each candidate's own NN.html -- the unresolved counts' one source. */
     sashaCandidateComments(spec: CandidateCommentsSpec): void;
     sashaInsert(spec: InsertRequestSpec): void;
+    /** One slide's top-level element ids, back to front: what a merge validates `remove` against. */
+    sashaPageElements(spec: PageElementsSpec): void;
     /**
      * Photograph each candidate as Google draws it, in a THROWAWAY deck that is deleted again.
      * This is what the "Converted" pane shows; see bridge.ts `parseRenderPreviewsReply`.

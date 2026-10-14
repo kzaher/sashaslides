@@ -87,6 +87,17 @@ One proposal at a time. Streaming a fast wave and a deeper wave into the *same* 
 a protocol change that does not exist yet, so today the latency win comes from drafting fast,
 not from staging twice.
 
+## Redesigning part of an existing slide
+
+When the user wants to change part of a slide that is already in the deck, propose a MERGE
+instead of a new slide. `slide_structure` `{ presentationId, slideNumber }` lists the slide's
+elements: object id, kind, text excerpt, box on the 1280x720 frame, z-order. Each candidate's
+HTML then holds ONLY the new parts, on a transparent page, and `remove` names the object ids it
+replaces. A new element's CSS `z-index` on its top-level box places it: negative goes behind the
+slide's kept content, anything else in front. `propose_slides` `{ slides: [{ path, label,
+remove }], merge: { presentationId, slideObjectId } }`. If the slide changed before the pick, the
+add-on refuses the stale ids and changes nothing; read it again and re-propose.
+
 ## Anomalies and what cannot convert
 
 An anomaly is a complaint about the conversion of that region. Fixable in HTML → write a

@@ -42,6 +42,12 @@ export type ProposalManifest = Readonly<{
    */
   revision: number;
   slides: readonly ManifestSlide[];
+  /**
+   * Present only on a MERGE proposal (PROTOCOL.md "Merge proposals"): the existing slide whose
+   * parts the candidates redesign. Absent, not null, so an ordinary manifest is byte-for-byte what
+   * it was before merges existed.
+   */
+  merge?: MergeTarget;
 }>;
 
 export type ManifestSlide = Readonly<{
@@ -50,7 +56,21 @@ export type ManifestSlide = Readonly<{
   name: string;
   /** A short human caption for the picker — never a transcription of the slide. */
   label: string | null;
+  /**
+   * A merge candidate's existing elements to delete, by `pageElements` object id; empty when it
+   * only adds. Present on every slide of a merge proposal and on none of an ordinary one.
+   */
+  remove?: readonly string[];
 }>;
+
+/** The slide a merge proposal redesigns part of. */
+export type MergeTarget = Readonly<{ presentationId: string; slideObjectId: string }>;
+
+/**
+ * A merge as `createProposal` takes it: the target plus one `remove` list per slide, in the same
+ * order as `slides`. Built and validated at the tool boundary (server.ts `mergeRequestFrom`).
+ */
+export type ProposalMerge = Readonly<{ target: MergeTarget; removePerSlide: readonly (readonly string[])[] }>;
 
 /** `PICK`, written by the extension. `picked` is null when the user dismissed the picker. */
 export type PickRecord = Readonly<{
@@ -145,10 +165,19 @@ export async function createProposal(
     env: ProposalEnvironment;
     slides: readonly SlideSource[];
     presentationId: string | null;
+    /** Absent for an ordinary proposal, whose pick is inserted as a new slide. */
+    merge?: ProposalMerge;
   }>,
 ): Promise<CreateProposalOutcome> {
-  const { env, slides, presentationId } = options;
+  const { env, slides, merge } = options;
   if (slides.length === 0) return { kind: "invalid-input", reason: "slides is empty" };
+  if (merge !== undefined && merge.removePerSlide.length !== slides.length) {
+    return { kind: "invalid-input", reason: "a merge needs exactly one remove list per slide" };
+  }
+  if (merge !== undefined && options.presentationId !== null && options.presentationId !== merge.target.presentationId) {
+    return { kind: "invalid-input", reason: "merge.presentationId names a different deck than presentationId" };
+  }
+  const presentationId = options.presentationId ?? merge?.target.presentationId ?? null;
   const problems = slides.map((source) => sourceProblem({ env, source })).filter((problem) => problem !== null);
   if (problems.length > 0) return { kind: "invalid-input", reason: problems.join("; ") };
 
@@ -193,7 +222,11 @@ export async function createProposal(
     presentationId,
     count: uploaded.length,
     revision: FIRST_REVISION,
-    slides: uploaded,
+    slides:
+      merge === undefined
+        ? uploaded
+        : uploaded.map((slide, position) => ({ ...slide, remove: merge.removePerSlide[position] ?? [] })),
+    ...(merge === undefined ? {} : { merge: merge.target }),
   };
   let manifestFile: DriveFile;
   try {
@@ -997,8 +1030,19 @@ async function readManifest(
         const slide = parseManifestSlide(entry);
         return slide === null ? [] : [slide];
       }),
+      // Carried through so a revision or a clear, which rewrite the manifest from this read,
+      // never turn a merge proposal back into an insert.
+      ...mergeTargetField(json.json["merge"]),
     },
   };
+}
+
+function mergeTargetField(value: unknown): Readonly<{ merge?: MergeTarget }> {
+  const record = asRecord(value);
+  if (record === null) return {};
+  const presentationId = asString(record["presentationId"]);
+  const slideObjectId = asString(record["slideObjectId"]);
+  return presentationId === null || slideObjectId === null ? {} : { merge: { presentationId, slideObjectId } };
 }
 
 function parseManifestSlide(value: unknown): ManifestSlide | null {
@@ -1008,7 +1052,9 @@ function parseManifestSlide(value: unknown): ManifestSlide | null {
   const fileId = asString(record["fileId"]);
   const name = asString(record["name"]);
   if (index === null || fileId === null || name === null) return null;
-  return { index, fileId, name, label: asString(record["label"]) };
+  const remove = record["remove"];
+  const removeIds = Array.isArray(remove) ? remove.filter((objectId): objectId is string => typeof objectId === "string") : null;
+  return { index, fileId, name, label: asString(record["label"]), ...(removeIds === null ? {} : { remove: removeIds }) };
 }
 
 /** The proposal folder, its manifest and the candidates still in it — one listing. */

@@ -28,7 +28,7 @@
 // READY/PICK children) is cheap enough to run every few seconds from a sidebar.
 
 import type { ProposalMark } from "./bridge.ts";
-import { assertNever, type SlideEntry } from "./protocol.ts";
+import { assertNever, type MergeSpec, type SlideEntry } from "./protocol.ts";
 
 /** What the picker is offered: a complete, READY proposal plus where to write its PICK. */
 export type Proposal = Readonly<{
@@ -40,6 +40,11 @@ export type Proposal = Readonly<{
   slides: readonly SlideEntry[];
   /** The manifest's `revision` (protocol.ts): how the slides window tells a revised set from the one it shows. */
   revision: number | null;
+  /**
+   * Non-null for a MERGE proposal: the pick redesigns part of an existing slide instead of being
+   * inserted as a new one (protocol.ts `MergeSpec`, PROTOCOL.md "Merge proposals").
+   */
+  merge: MergeSpec | null;
 }>;
 
 /**

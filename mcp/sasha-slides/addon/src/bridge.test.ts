@@ -21,6 +21,7 @@ import {
   parseFeedbackReply as parseFeedbackReplyForTest,
   parseHelloReply,
   parseInsertReply,
+  parsePageElementsReply,
   parseProposalMark,
   parseReadTextReply,
   parseReadTextsReply,
@@ -44,6 +45,9 @@ test("there are exactly twenty server functions, and they are the ones Code.gs d
     "sashaWriteEvent",
     "sashaCandidateComments",
     "sashaInsert",
+    // One slide's element ids, read just before a MERGE's batchUpdate so a stale `remove` id is
+    // refused instead of deleted from wherever it now lives (slide-merge.ts).
+    "sashaPageElements",
     // The candidates as GOOGLE renders them: a throwaway deck, photographed and deleted. It is
     // separate from sashaInsert because it must never touch the user's own presentation.
     "sashaRenderPreviews",
@@ -241,6 +245,7 @@ function silentRunner(): AppsScriptRunner {
     sashaReadText: () => undefined,
     sashaReadTexts: () => undefined,
     sashaInsert: () => undefined,
+    sashaPageElements: () => undefined,
     sashaWritePick: () => undefined,
     sashaReadEvents: () => undefined,
     sashaWriteEvent: () => undefined,
@@ -273,6 +278,7 @@ function failingRunner(error: unknown): AppsScriptRunner {
     sashaReadText: () => onFailure?.(error),
     sashaReadTexts: () => onFailure?.(error),
     sashaInsert: () => onFailure?.(error),
+    sashaPageElements: () => onFailure?.(error),
     sashaWritePick: () => onFailure?.(error),
     sashaReadEvents: () => onFailure?.(error),
     sashaWriteEvent: () => onFailure?.(error),
@@ -304,6 +310,7 @@ function throwingRunner(): AppsScriptRunner {
     sashaReadText: () => undefined,
     sashaReadTexts: () => undefined,
     sashaInsert: () => undefined,
+    sashaPageElements: () => undefined,
     sashaWritePick: () => undefined,
     sashaReadEvents: () => undefined,
     sashaWriteEvent: () => undefined,
@@ -338,6 +345,7 @@ function stubCall(replies: Readonly<Record<string, unknown>>) {
     sashaReadText: answer("sashaReadText"),
     sashaReadTexts: answer("sashaReadTexts"),
     sashaInsert: answer("sashaInsert"),
+    sashaPageElements: answer("sashaPageElements"),
     sashaRenderPreviews: answer("sashaRenderPreviews"),
     sashaTakePickerTarget: answer("sashaTakePickerTarget"),
     sashaWritePick: answer("sashaWritePick"),
@@ -535,4 +543,15 @@ test("sashaReadTexts answers per file: a failed file is its own outcome, never t
   );
   assert.equal(parseReadTextsReply({}).kind, "invalid");
   assert.equal(parseReadTextsReply({ texts: [{ text: "no id" }] }).kind, "invalid");
+});
+
+test("sashaPageElements: the slide's ids in order, and a reply with a nameless element is refused", () => {
+  assert.deepEqual(parsePageElementsReply({ objectIds: ["g_bg", "g_title"] }), {
+    kind: "ok",
+    value: { objectIds: ["g_bg", "g_title"] },
+  });
+  assert.deepEqual(parsePageElementsReply({ objectIds: [] }), { kind: "ok", value: { objectIds: [] } });
+  assert.equal(parsePageElementsReply({ objectIds: ["g_bg", ""] }).kind, "invalid");
+  assert.equal(parsePageElementsReply({}).kind, "invalid");
+  assert.equal(parsePageElementsReply(null).kind, "invalid");
 });

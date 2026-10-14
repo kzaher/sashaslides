@@ -14,6 +14,7 @@ import type {
   CallOutcome,
   InsertReply,
   InsertRequestSpec,
+  PageElementsReply,
   ProposalMark,
   RenderPreviewsReply,
 } from "./bridge.ts";
@@ -57,6 +58,8 @@ export type FakeDrive = Readonly<{
   ): void;
   /** The proposal folder `stageProposal` made, so a test can name it without guessing. */
   proposalFolderId(proposalId: string): string;
+  /** Put a slide in the deck, as its top-level element ids back to front, for `pageElements` to read. */
+  putPage(spec: Readonly<{ presentationId: string; pageObjectId: string; objectIds: readonly string[] }>): void;
   files(): readonly FakeFile[];
   /** Files the picker created. The assertion target for "it writes only PICK and render/NN.png". */
   written(): readonly FakeFile[];
@@ -74,6 +77,7 @@ export function fakeDrive(): FakeDrive {
   const written: FakeFile[] = [];
   const batches: Readonly<{ presentationId: string; requests: readonly object[] }>[] = [];
   const thumbnails: Readonly<{ presentationId: string; pageObjectId: string }>[] = [];
+  const pages = new Map<string, readonly string[]>();
   let failures = 0;
   let failureMessage = "fake transport failure";
   let nextId = 1;
@@ -149,6 +153,15 @@ export function fakeDrive(): FakeDrive {
   const rendered: { index: number; requestCount: number }[] = [];
 
   const slides: SlidesApi = {
+    async pageElements({ presentationId, pageObjectId }) {
+      const failed = failIfAsked<PageElementsReply>();
+      if (failed !== null) return failed;
+      const objectIds = pages.get(`${presentationId}/${pageObjectId}`);
+      return objectIds === undefined
+        ? { kind: "failed", message: `no page ${pageObjectId} in ${presentationId}` }
+        : { kind: "ok", value: { objectIds } };
+    },
+
     async insert(spec: InsertRequestSpec) {
       const failed = failIfAsked<InsertReply>();
       if (failed !== null) return failed;
@@ -242,6 +255,9 @@ export function fakeDrive(): FakeDrive {
     renderedPreviews: rendered,
     put(file) {
       stored.push(file);
+    },
+    putPage({ presentationId, pageObjectId, objectIds }) {
+      pages.set(`${presentationId}/${pageObjectId}`, objectIds);
     },
     stageProposal({
       proposalId,
@@ -340,10 +356,16 @@ export function slideHtml({ index, proposalId }: { index: number; proposalId: st
 }
 
 /** Every objectId the REQUESTS asked Slides to create, which is what a real reply would echo. */
+/**
+ * The ids Slides reports CREATING: only a create* request answers with an object id. A deleteObject
+ * or a z-order move answers with an empty reply, and createParagraphBullets names an existing shape,
+ * so counting them would invent objects a merge never made.
+ */
 function requestedObjectIdsOf(requests: readonly object[]): readonly string[] {
   const ids: string[] = [];
   for (const request of requests) {
-    for (const payload of Object.values(request as Record<string, unknown>)) {
+    for (const [kind, payload] of Object.entries(request as Record<string, unknown>)) {
+      if (!CREATE_REPLY_KINDS.has(kind)) continue;
       if (typeof payload !== "object" || payload === null) continue;
       const objectId = (payload as Record<string, unknown>)["objectId"];
       if (typeof objectId === "string") ids.push(objectId);
@@ -351,3 +373,11 @@ function requestedObjectIdsOf(requests: readonly object[]): readonly string[] {
   }
   return ids;
 }
+
+const CREATE_REPLY_KINDS: ReadonlySet<string> = new Set([
+  "createSlide",
+  "createShape",
+  "createLine",
+  "createImage",
+  "createTable",
+]);

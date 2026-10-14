@@ -19,7 +19,7 @@
 import { parseHelloReply, type HelloReply } from "./bridge.ts";
 import type { Conversation } from "./conversation-state.ts";
 import type { Proposal } from "./observer.ts";
-import { parseSlides, type Parsed } from "./protocol.ts";
+import { parseMergeSpec, parseSlides, type Parsed } from "./protocol.ts";
 import { previewOf, type SlidePreviews } from "./slide-previews.ts";
 
 export type SeedHtml = Readonly<{ index: number; html: string }>;
@@ -62,6 +62,7 @@ export function pickerSeedOf({
     count: manifest.count,
     slides: slides.map((slide) => ({ index: slide.slideIndex, fileId: slide.fileId, name: slide.name, label: slide.label })),
     revision: manifest.revision,
+    merge: manifest.merge,
   };
   const order = [...slides].sort((left, right) => rank(left.slideIndex) - rank(right.slideIndex));
   function rank(index: number): number {
@@ -132,6 +133,10 @@ function parseProposal(field: unknown): Parsed<Proposal> {
   if (slides.value.length !== count || slides.value.some((slide, position) => slide.index !== position + 1)) {
     return { kind: "invalid", reason: `the seed proposal's slides are not 1..${count} in order` };
   }
+  // A MALFORMED merge refuses the whole seed rather than seeding the proposal as an insert: the
+  // window then boots the old way and reads the manifest itself.
+  const merge = parseMergeSpec(record["merge"]);
+  if (merge.kind !== "ok") return merge;
   // Absent from a seed written before the field existed; null then means "compare nothing".
   const revision = record["revision"];
   return {
@@ -143,6 +148,7 @@ function parseProposal(field: unknown): Parsed<Proposal> {
       count,
       slides: slides.value,
       revision: typeof revision === "number" && Number.isInteger(revision) ? revision : null,
+      merge: merge.value,
     },
   };
 }

@@ -298,6 +298,18 @@ staged HTML of unknown provenance inside the user's logged-in Google session. An
 to reach into that document needs `allow-same-origin`; widening the sandbox is the editor module's
 call to argue for, and the host does not grant it pre-emptively.
 
+## A merge candidate is applied to its slide, not inserted
+
+A merge proposal (PROTOCOL.md "Merge proposals") redesigns part of an existing slide. Picking one
+deletes the elements it names and adds its new parts to that slide in one atomic update; nothing is
+inserted. When the slide changed after Claude read it, the pick is refused with the stale ids named
+and the slide is left untouched -- the user is told to ask Sasha for a fresh set.
+
+Not built yet, and owed: the preview still shows a merge candidate's new parts alone (on the
+throwaway preview deck), and nothing outlines which existing elements it removes. Both belong on
+the slide stage: the existing slide's thumbnail under the candidate, and an outline on every
+element in `remove`, labelled by its object id.
+
 ## Invariants
 
 - **Numbering is 1-based** on every surface, matching `PROTOCOL.md`.

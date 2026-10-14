@@ -227,6 +227,7 @@ export async function fetchProposal({
       count: manifest.count,
       slides: manifest.slides,
       revision: manifest.revision,
+      merge: manifest.merge,
     },
   };
 }

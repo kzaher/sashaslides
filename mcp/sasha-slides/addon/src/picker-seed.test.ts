@@ -7,7 +7,7 @@ import type { ProposalMark } from "./bridge.ts";
 import { INITIAL_CONVERSATION, reduceConversation, type Conversation, type ConversationEvent } from "./conversation-state.ts";
 import { SEED_HTML_BUDGET, parseBootSeed, pickerSeedOf, type BootSeed, type PickerSeed } from "./picker-seed.ts";
 import { htmlToLoad, offerOf, reducePicker, type PickerState } from "./picker-state.ts";
-import type { Manifest } from "./protocol.ts";
+import type { Manifest, MergeSpec } from "./protocol.ts";
 import { NO_PREVIEWS, nextPreviewToLoad, reducePreviews, type SlidePreviews } from "./slide-previews.ts";
 
 const AT = "2026-10-11T12:00:00.000Z";
@@ -25,6 +25,7 @@ const manifest: Manifest = {
     { index: 3, fileId: "html_3", name: "03.html", label: "" },
   ],
   revision: 1,
+  merge: null,
 };
 
 const stagedMark: ProposalMark = {
@@ -54,6 +55,7 @@ test("the seed carries the proposal exactly as the window's observer would have 
       count: 3,
       slides: manifest.slides,
       revision: manifest.revision,
+      merge: manifest.merge,
     },
     slideIndex: 2,
     html: [],
@@ -98,7 +100,7 @@ test("a seed survives Code.gs's escaping and parses back unchanged", () => {
 
 test("a malformed seed is rejected, so the window falls back instead of breaking", () => {
   const valid: PickerSeed = {
-    proposal: { proposalId: PROPOSAL, folderId: "folder_1", presentationId: null, count: 1, slides: [manifest.slides[0]!], revision: null },
+    proposal: { proposalId: PROPOSAL, folderId: "folder_1", presentationId: null, count: 1, slides: [manifest.slides[0]!], revision: null, merge: null },
     slideIndex: null,
     html: [],
   };
@@ -111,9 +113,33 @@ test("a malformed seed is rejected, so the window falls back instead of breaking
   for (const { why, text } of cases) assert.equal(parseBootSeed(text).kind, "invalid", why);
 });
 
+test("A MERGE PROPOSAL SURVIVES THE SEED: the window must not offer it as an insert", () => {
+  const merge: MergeSpec = {
+    presentationId: "deck_1",
+    slideObjectId: "g_slide_7",
+    removals: [{ index: 1, remove: ["g_title", "g_chart"] }],
+  };
+  const seed: PickerSeed = {
+    proposal: { proposalId: PROPOSAL, folderId: "folder_1", presentationId: "deck_1", count: 1, slides: [manifest.slides[0]!], revision: 1, merge },
+    slideIndex: null,
+    html: [],
+  };
+  const parsed = parseBootSeed(JSON.stringify({ hello: HELLO, seed }));
+  assert.deepEqual(parsed.kind === "ok" ? parsed.value.seed.proposal.merge : parsed, merge);
+});
+
+test("a seed whose merge is malformed is rejected whole, never seeded as an insert", () => {
+  const seed = {
+    proposal: { proposalId: PROPOSAL, folderId: "folder_1", presentationId: "deck_1", count: 1, slides: [manifest.slides[0]!], revision: 1, merge: { presentationId: "deck_1" } },
+    slideIndex: null,
+    html: [],
+  };
+  assert.equal(parseBootSeed(JSON.stringify({ hello: HELLO, seed })).kind, "invalid");
+});
+
 test("a target outside the proposal opens the grid rather than failing", () => {
   const seed: PickerSeed = {
-    proposal: { proposalId: PROPOSAL, folderId: "folder_1", presentationId: null, count: 1, slides: [manifest.slides[0]!], revision: null },
+    proposal: { proposalId: PROPOSAL, folderId: "folder_1", presentationId: null, count: 1, slides: [manifest.slides[0]!], revision: null, merge: null },
     slideIndex: 7,
     html: [],
   };

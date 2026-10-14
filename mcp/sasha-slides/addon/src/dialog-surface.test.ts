@@ -39,6 +39,7 @@ import { UNMEASURED_SCALE } from "./scaled-frame.tsx";
 import { describeSlideEdit, nullSlideEditor, slideEditRecord, type SlideEdit } from "./slide-editor.ts";
 
 const proposal: Proposal = {
+  merge: null,
   proposalId: "p_1",
   folderId: "folder_p_1",
   presentationId: "deck_1",

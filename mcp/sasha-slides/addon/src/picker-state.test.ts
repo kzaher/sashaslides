@@ -29,6 +29,7 @@ import { WHOLE_SLIDE } from "./protocol.ts";
 import { previewElementsOf } from "./rendered-preview.ts";
 
 const proposal: Proposal = {
+  merge: null,
   proposalId: "p_1",
   folderId: "folder_p_1",
   presentationId: "deck_1",

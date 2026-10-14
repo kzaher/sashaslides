@@ -120,6 +120,12 @@ type ElementCommon = Readonly<{
   opacity: number;
   /** CSS paint order index — Slides stacks page elements by creation order. */
   paintIndex: number;
+  /**
+   * The z-index of the outermost box this element sits in that sets one (extract-dom.ts
+   * `stackZ`), or null for `auto` all the way up. A merge candidate stacks its new elements
+   * against the slide's existing content by it: negative goes behind, the rest in front.
+   */
+  stackZ: number | null;
 }>;
 
 /** Fill/border/shadow fields that `extract-dom.ts` shares between rect and text. */
@@ -302,6 +308,7 @@ function parseElement(candidate: unknown, paintIndex: number): SlideElement | nu
     naturalSizePx: parseNaturalSize(candidate, style),
     opacity: clamp01(numberOr(style["opacity"], 1)),
     paintIndex,
+    stackZ: optionalInteger(candidate["stackZ"]),
   };
 
   switch (stringOr(candidate["type"], "")) {
@@ -744,6 +751,11 @@ function stringOr(raw: unknown, fallback: string): string {
 
 function numberOr(raw: unknown, fallback: number): number {
   return isFinite2(raw) ? raw : fallback;
+}
+
+/** An integer z-index, or null: a fractional or non-finite one is not a z-index the browser would accept. */
+function optionalInteger(raw: unknown): number | null {
+  return typeof raw === "number" && Number.isInteger(raw) ? raw : null;
 }
 
 function optionalNumber(raw: unknown): number | null {

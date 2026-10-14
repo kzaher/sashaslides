@@ -57,6 +57,8 @@ type ConversionReport = Readonly<{
   elementCount: number;
   malformedCount: number;
   elapsedMs: number;
+  /** `stackedElements[].zIndex`, in paint order: what a merge stacks the new elements by. */
+  stackedZ: readonly number[];
 }>;
 
 async function main(): Promise<void> {
@@ -197,6 +199,21 @@ async function main(): Promise<void> {
     checkExpectedAnomalies(
       await Promise.all(
         EXPECTED_ANOMALIES.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
+          async (expectation) => ({
+            expectation,
+            report: await convertInPage(client, {
+              html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
+              extractorScript,
+              name: expectation.fixture,
+            }),
+          }),
+        ),
+      ),
+    );
+
+    checkExpectedStacking(
+      await Promise.all(
+        EXPECTED_STACKING.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
           async (expectation) => ({
             expectation,
             report: await convertInPage(client, {
@@ -688,6 +705,27 @@ function checkExpectedText(
   }
 }
 
+/**
+ * THE Z-INDEX A MERGE STACKS BY, measured by Chrome's own `getComputedStyle`. Each entry is the
+ * expected `stackedElements[].zIndex` list in paint order. merge_stacking.html's nested `z-index:-7`
+ * sits inside a `z-index:3` box, so it must stack at 3: only the top-level box's z-index places an
+ * element against the slide's existing content.
+ */
+const EXPECTED_STACKING: readonly Readonly<{ fixture: string; zIndices: readonly number[] }>[] = [
+  { fixture: "merge_stacking.html", zIndices: [-1, 0, 3, 3] },
+];
+
+function checkExpectedStacking(
+  results: readonly Readonly<{
+    expectation: (typeof EXPECTED_STACKING)[number];
+    report: ConversionReport;
+  }>[],
+): void {
+  for (const { expectation, report } of results) {
+    test.equal(`${expectation.fixture}: stacking z-indices in paint order`, report.stackedZ, expectation.zIndices);
+  }
+}
+
 function checkExpectedAnomalies(
   results: readonly Readonly<{
     expectation: (typeof EXPECTED_ANOMALIES)[number];
@@ -867,6 +905,7 @@ async function convertInPage(
       elementCount: result.elementCount,
       malformedCount: result.malformedCount,
       elapsedMs: performance.now() - started,
+      stackedZ: result.stackedElements.map((element) => element.zIndex),
     });
   })()`;
 

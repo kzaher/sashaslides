@@ -74,6 +74,15 @@ export type InsertReply = Readonly<{ batchResponse: unknown; renderArtifact: str
 
 export type WritePickReply = Readonly<{ fileId: string }>;
 
+/**
+ * `sashaPageElements()`: ONE slide's top-level `pageElements`, back to front, by object id. A merge
+ * (slide-merge.ts) checks its `remove` list against this immediately before its batchUpdate, because
+ * the slide may have changed since Claude captured it.
+ */
+export type PageElementsSpec = Readonly<{ presentationId: string; pageObjectId: string }>;
+
+export type PageElementsReply = Readonly<{ objectIds: readonly string[] }>;
+
 // ---------------------------------------------------------------------------
 // THE COMMENT CHANNEL -- the two functions that carry a comment and read it back. Same discipline
 // as the first five: Code.gs relays, this file parses, and every decision about what a reply MEANS
@@ -167,6 +176,7 @@ export type ServerFunctionName =
   | "sashaWriteEvent"
   | "sashaCandidateComments"
   | "sashaInsert"
+  | "sashaPageElements"
   | "sashaRenderPreviews"
   | "sashaWritePick"
   | "sashaSendFeedback"
@@ -189,6 +199,7 @@ export const SERVER_FUNCTION_NAMES: readonly ServerFunctionName[] = [
   "sashaWriteEvent",
   "sashaCandidateComments",
   "sashaInsert",
+  "sashaPageElements",
   "sashaRenderPreviews",
   "sashaWritePick",
   "sashaSendFeedback",
@@ -517,6 +528,22 @@ export function parseInsertReply(value: unknown): Parsed<InsertReply> {
     kind: "ok",
     value: { batchResponse: record["batchResponse"], renderArtifact: stringAt({ record, key: "renderArtifact" }) },
   };
+}
+
+/** Every id must be a non-empty string: a slide whose element list is half unreadable is not one to merge into. */
+export function parsePageElementsReply(value: unknown): Parsed<PageElementsReply> {
+  const record = asRecord(value);
+  if (record === null) return { kind: "invalid", reason: "sashaPageElements returned no object" };
+  const raw = record["objectIds"];
+  if (!Array.isArray(raw)) return { kind: "invalid", reason: "sashaPageElements returned no objectIds array" };
+  const objectIds: string[] = [];
+  for (const objectId of raw) {
+    if (typeof objectId !== "string" || objectId === "") {
+      return { kind: "invalid", reason: "sashaPageElements returned an element with no object id" };
+    }
+    objectIds.push(objectId);
+  }
+  return { kind: "ok", value: { objectIds } };
 }
 
 export function parseWritePickReply(value: unknown): Parsed<WritePickReply> {

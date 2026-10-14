@@ -16,6 +16,7 @@ import { renderArtifactOf, renderRequestFor } from "./render-artifact.ts";
 import { insertRequests, newPageObjectId } from "./slide-insert.ts";
 
 const proposal: Proposal = {
+  merge: null,
   proposalId: "p_1733219000000_a1b2c3",
   folderId: "folder_p_1",
   presentationId: "deck_1",

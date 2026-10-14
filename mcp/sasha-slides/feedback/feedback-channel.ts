@@ -17,7 +17,7 @@
  *    them (only `includeDeleted` and `startModifiedTime`), so the channel reports `resolved`
  *    per thread and the filtering is the caller's.
  */
-import { google, type drive_v3 } from "googleapis";
+import { google, type drive_v3, type slides_v1 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 
 export type FeedbackChannel = Readonly<{
@@ -44,7 +44,31 @@ export type FeedbackChannel = Readonly<{
 
   /** The deck's page object ids in filmstrip order, so a page id becomes "slide 3". */
   listSlidePages(options: Readonly<{ presentationId: string }>): Promise<DeckPages>;
+
+  /**
+   * ONE slide as the Slides API holds it, plus the deck's page size: what `slide_structure`
+   * (slide-structure.ts) lists for a merge proposal. Lives on this channel because it is the
+   * connector's one Slides-reading capability with the CALLER's own grant, in both modes.
+   */
+  readSlide(options: Readonly<{ presentationId: string; slide: SlideSelector }>): Promise<SlideRead>;
 }>;
+
+/** Which slide: by its page object id, or by its 1-based filmstrip position. */
+export type SlideSelector = Readonly<{ kind: "object-id"; objectId: string }> | Readonly<{ kind: "number"; number: number }>;
+
+export type SlideRead =
+  | Readonly<{
+      kind: "ok";
+      slideObjectId: string;
+      /** 1-based filmstrip position. */
+      slideNumber: number;
+      pageSize: slides_v1.Schema$Size | null;
+      page: slides_v1.Schema$Page;
+    }>
+  /** The deck was read and has no such slide: a wrong id or number, not a failure. */
+  | Readonly<{ kind: "not-found"; reason: string }>
+  /** Google refused or failed: no access to the deck, a bad id, the network. Its message, verbatim. */
+  | Readonly<{ kind: "unavailable"; reason: string }>;
 
 /** One comment and every reply under it: a Slides comment thread. */
 export type CommentThread = Readonly<{
@@ -175,7 +199,48 @@ export function googleFeedbackChannel(options: Readonly<{ auth: OAuth2Client }>)
         return { kind: "unavailable", reason: cause instanceof Error ? cause.message : String(cause) };
       }
     },
+
+    readSlide: async ({ presentationId, slide }) => {
+      try {
+        const deck = await slides.presentations.get({ presentationId, fields: "pageSize,slides(objectId)" });
+        const pageObjectIds = (deck.data.slides ?? []).flatMap((page) =>
+          typeof page.objectId === "string" ? [page.objectId] : [],
+        );
+        const slideObjectId = slideObjectIdOf({ slide, pageObjectIds });
+        const position = slideObjectId === null ? -1 : pageObjectIds.indexOf(slideObjectId);
+        if (slideObjectId === null || position === -1) {
+          return { kind: "not-found", reason: `${describeSlide(slide)} is not in this deck of ${String(pageObjectIds.length)} slides` };
+        }
+        const page = await slides.presentations.pages.get({ presentationId, pageObjectId: slideObjectId });
+        return { kind: "ok", slideObjectId, slideNumber: position + 1, pageSize: deck.data.pageSize ?? null, page: page.data };
+      } catch (cause) {
+        return { kind: "unavailable", reason: cause instanceof Error ? cause.message : String(cause) };
+      }
+    },
   };
+}
+
+function slideObjectIdOf(options: Readonly<{ slide: SlideSelector; pageObjectIds: readonly string[] }>): string | null {
+  const { slide, pageObjectIds } = options;
+  switch (slide.kind) {
+    case "object-id":
+      return slide.objectId;
+    case "number":
+      return pageObjectIds[slide.number - 1] ?? null;
+    default:
+      return assertNever(slide);
+  }
+}
+
+export function describeSlide(slide: SlideSelector): string {
+  switch (slide.kind) {
+    case "object-id":
+      return `slide ${slide.objectId}`;
+    case "number":
+      return `slide number ${String(slide.number)}`;
+    default:
+      return assertNever(slide);
+  }
 }
 
 /**
@@ -288,4 +353,8 @@ function narrowQuoted(
   // Slides sets this to "" for a whole-page anchor and to the marked run for a text anchor,
   // so empty is "nothing quoted", not "quoted the empty string".
   return typeof value === "string" && value !== "" ? value : null;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

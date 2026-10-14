@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { checkSlideHtml, type ParsedSlideDocument } from "./html-check.ts";
-import { parseManifest, parseReadyMarker } from "./protocol.ts";
+import { parseManifest, parseMergeSpec, parseReadyMarker, removalFor } from "./protocol.ts";
 import { presentationIdOf, explainHostFailure } from "./bridge.ts";
 
 test("a well-formed READY parses", () => {
@@ -43,6 +43,83 @@ test("a manifest whose count disagrees with its slides is invalid", () => {
 test("presentationId may be null but not a number", () => {
   assert.equal(parseManifest(manifestJson([1], 1, "null")).kind, "ok");
   assert.equal(parseManifest(manifestJson([1], 1, "7")).kind, "invalid");
+});
+
+// --- merge proposals (PROTOCOL.md "Merge proposals") ------------------------
+
+/** A two-candidate manifest, with `extra` merged into the top level and `slideExtras[i]` into slide i+1. */
+function mergeManifestJson({
+  extra,
+  slideExtras = [{}, {}],
+}: {
+  extra: Readonly<Record<string, unknown>>;
+  slideExtras?: readonly Readonly<Record<string, unknown>>[];
+}): string {
+  return JSON.stringify({
+    protocolVersion: 1,
+    proposalId: "p_1",
+    createdAt: "2026-10-14T12:00:00.000Z",
+    presentationId: "deck_1",
+    count: 2,
+    slides: slideExtras.map((slideExtra, position) => ({
+      index: position + 1,
+      fileId: `f${position + 1}`,
+      name: `0${position + 1}.html`,
+      label: "",
+      ...slideExtra,
+    })),
+    ...extra,
+  });
+}
+
+const TARGET = { presentationId: "deck_1", slideObjectId: "g_slide_7" };
+
+test("an ordinary manifest -- no merge field at all -- parses exactly as before, with merge null", () => {
+  const parsed = parseManifest(manifestJson([1, 2]));
+  assert.equal(parsed.kind === "ok" ? parsed.value.merge : parsed.kind, null);
+});
+
+test("a merge manifest carries the target and each candidate's remove list, keyed by index", () => {
+  const parsed = parseManifest(
+    mergeManifestJson({ extra: { merge: TARGET }, slideExtras: [{ remove: ["g_title", "g_chart"] }, {}] }),
+  );
+  assert.deepEqual(parsed.kind === "ok" ? parsed.value.merge : parsed, {
+    ...TARGET,
+    removals: [
+      { index: 1, remove: ["g_title", "g_chart"] },
+      // A candidate with no `remove` only adds.
+      { index: 2, remove: [] },
+    ],
+  });
+  if (parsed.kind === "ok" && parsed.value.merge !== null) {
+    assert.deepEqual(removalFor({ merge: parsed.value.merge, index: 1 }), ["g_title", "g_chart"]);
+    assert.deepEqual(removalFor({ merge: parsed.value.merge, index: 2 }), []);
+  }
+});
+
+test("a MALFORMED merge invalidates the manifest rather than degrading into an insert", () => {
+  const cases: readonly Readonly<{ why: string; body: string }>[] = [
+    { why: "merge is a string", body: mergeManifestJson({ extra: { merge: "g_slide_7" } }) },
+    { why: "no slideObjectId", body: mergeManifestJson({ extra: { merge: { presentationId: "deck_1" } } }) },
+    { why: "empty slideObjectId", body: mergeManifestJson({ extra: { merge: { ...TARGET, slideObjectId: "" } } }) },
+    { why: "a different deck than presentationId", body: mergeManifestJson({ extra: { merge: { ...TARGET, presentationId: "deck_2" } } }) },
+    { why: "remove is not an array", body: mergeManifestJson({ extra: { merge: TARGET }, slideExtras: [{ remove: "g_title" }, {}] }) },
+    { why: "remove holds an empty id", body: mergeManifestJson({ extra: { merge: TARGET }, slideExtras: [{ remove: [""] }, {}] }) },
+    { why: "remove with no merge target", body: mergeManifestJson({ extra: {}, slideExtras: [{ remove: ["g_title"] }, {}] }) },
+  ];
+  for (const { why, body } of cases) assert.equal(parseManifest(body).kind, "invalid", why);
+});
+
+test("a merge on a manifest whose presentationId is null takes the merge's deck", () => {
+  const parsed = parseManifest(mergeManifestJson({ extra: { presentationId: null, merge: TARGET } }));
+  assert.equal(parsed.kind === "ok" ? parsed.value.merge?.slideObjectId : parsed.kind, "g_slide_7");
+});
+
+test("parseMergeSpec reads the add-on's own form back, and null is 'not a merge'", () => {
+  const spec = { ...TARGET, removals: [{ index: 1, remove: ["a"] }] };
+  assert.deepEqual(parseMergeSpec(JSON.parse(JSON.stringify(spec))), { kind: "ok", value: spec });
+  assert.deepEqual(parseMergeSpec(null), { kind: "ok", value: null });
+  assert.equal(parseMergeSpec({ ...TARGET, removals: [{ index: 0, remove: [] }] }).kind, "invalid");
 });
 
 test("presentationIdOf accepts only the Slides editor URL", () => {

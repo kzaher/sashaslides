@@ -11,7 +11,7 @@ export { afterNextFrame, convertHtmlToSlideRequests, extractSlideLayout } from "
 export type { ConvertHtmlOptions, HtmlConversionResult } from "./convert-html-to-slide-requests.js";
 
 export { emitSlideRequests } from "./emit-requests.js";
-export type { ConversionResult, EmitOptions } from "./emit-requests.js";
+export type { ConversionResult, EmitOptions, StackedElement } from "./emit-requests.js";
 
 export { parseExtraction } from "./extraction.js";
 export type { ParsedExtraction, SlideElement } from "./extraction.js";

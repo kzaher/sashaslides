@@ -38,6 +38,7 @@ const manifest: Manifest = {
     { index: 2, fileId: "html_2", name: "02.html", label: "" },
   ],
   revision: 1,
+  merge: null,
 };
 
 const stagedMark: ProposalMark = {
