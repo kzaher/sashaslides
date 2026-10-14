@@ -644,7 +644,7 @@ function AnomalySent({ sent }: { sent: AnomalySendPhase }): JSX.Element | null {
     case "sent":
       return (
         <span className="sasha-dim">
-          sent -- Ask Sasha shows how long it has been waiting, and whether anything is listening
+          sent -- your assistant answers in the deck's comments; Ask Sasha shows whether it is connected
         </span>
       );
     case "failed":

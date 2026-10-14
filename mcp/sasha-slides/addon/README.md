@@ -9,7 +9,7 @@ one thing. Everything else is opened *by* the conversation.
 
 | surface | opened by | file | what it is for |
 | --- | --- | --- | --- |
-| **Ask Sasha** (sidebar) | the one menu item, `showSidebar` | `Sidebar.html` ← `src/sidebar.tsx` | the **spine**: the session as a serialized event log — slides staged, a comment you opened, Sasha's answer, a **revised slide rendered inline**, a resolution, a clear, an insertion — plus the composer. It is the only surface that is always there. |
+| **Ask Sasha** (sidebar) | the one menu item, `showSidebar` | `Sidebar.html` ← `src/sidebar.tsx` | whether an assistant is connected (or the setup guide with the animated walkthrough), and the **assets**: the candidates (Working/Archived, Open, Archive) and the artifacts folder. Conversation happens in the deck's own comments, answered by the comment bot. |
 | **the slides** | a button in Ask Sasha, and **automatically when slides arrive** | `Dialog.html` ← `src/dialog.tsx` | **the editor.** Two independent axes: a **view** (*all candidates* in a two-column grid, or *one slide* large) and a **tool** (*edit*, the default, or *annotate*). All four combinations are legal — annotate from the grid, edit one slide large — because a view is a zoom level and a tool is a choice, and neither is a screen. Each cell carries its **unresolved comment count**; a note sent from the annotate tool becomes a Drive comment on that candidate. |
 | **the defect report** | a button in either of the others | `Report.html` ← `src/report.tsx` | **the same editor, showing two slides**: the candidate as it is and as it will be sent, both rendered, with the anonymiser's verdicts as numbered annotations pinned to the slide they are about. Edit the title, edit either slide, send. **Its own document, for the size** — see Known limits. |
 
@@ -101,7 +101,7 @@ addon/
     slide-editor.ts     the HOST's side of the editor seam: editor/ types re-exported + the stub
     editor/             NOT THIS COMPONENT'S: the visual editor module, consumed via its index.ts
     conversation-state.ts  ASK SASHA's state tree and pure reducer: the merged, ordered log
-    Conversation.tsx    Ask Sasha's React tree: the log, the live waiting panel, the composer
+    Conversation.tsx    Ask Sasha's React tree: the connection status (or setup guide) and the assets
     waiting.ts          what is waiting for Sasha, for how long, and the LAST PROOF anything listened
     session-log.ts      THE ONE BOUNDARY against the server's session log + the unresolved counts
     report-state.ts     the REPORT window's three statuses around `Defect`, and target selection
@@ -148,11 +148,9 @@ Review mode's three:
 | `sashaWriteEvent` | `{ folderId, name, mimeType, body }` | `{ fileId }` |
 | `sashaCandidateComments` | `{ fileIds, pageSize }` | `{ files: [{ fileId, comments, error }] }` |
 | `sashaSendFeedback` | `{ fileId, comments: [{ content }] }` | `{ results: [{ commentId, error }] }` |
-| `sashaReadFeedback` | `{ fileId, pageSize }` | `{ comments: [Drive comment with replies] }` |
 
-`sashaSendFeedback` / `sashaReadFeedback` take any Drive **file id**, which is what lets one pair
-serve two jobs: a conversation message is a comment on the PRESENTATION and a mark-up is a comment
-on the CANDIDATE's own `NN.html`. Nothing in `Code.gs` knows which; the caller decides.
+`sashaSendFeedback` takes any Drive **file id**; the slides window uses it for mark-ups, which are
+comments on the CANDIDATE's own `NN.html`.
 
 `sashaReadEvents` returns each file's **id** as well as its name because the event sort's last
 tie-break is Drive's file id — the millisecond prefix and the six-character suffix are not a total

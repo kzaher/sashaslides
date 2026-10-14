@@ -10,14 +10,14 @@ its own turns. Not "the model", not "Claude", not "the add-on".
 
 ## One way in: Ask Sasha
 
-The Slides menu has exactly **one** item: **Ask Sasha**, which opens the conversation. There is
+The Slides menu has exactly **one** item: **Ask Sasha**, which opens the sidebar. There is
 no "open the conversation" and no "candidate slides" item — a menu that lists surfaces makes the
 user assemble the product themselves.
 
 | surface | opened by | what it is |
 |---|---|---|
-| **Conversation** (sidebar) | the Ask Sasha menu item | the spine: every event, in order, for ever |
-| **Slides** (modeless dialog) | a button in the conversation, and automatically when slides arrive | the candidates, in a grid; mark them up here |
+| **Ask Sasha** (sidebar) | the Ask Sasha menu item | whether an assistant is connected (or how to connect one), and the assets: the candidates, Working/Archived, Open, Archive, the artifacts folder. Since 2026-10-14 there is no conversation here: talking to Sasha happens in the deck's own comments, which the comment bot answers. |
+| **Slides** (modeless dialog) | Open in the sidebar, and automatically when slides arrive | the candidates, in a grid; mark them up here |
 | **Defect report** (modeless dialog) | a button in either of the others | anonymise one candidate and send a converter defect |
 
 The defect report is a SURFACE OF ITS OWN and not a mode of the Slides window, which is a size
@@ -481,12 +481,11 @@ nowhere to go on it, so they are shown to the user and not sent.
 
 ## Comments look like Google's comments
 
-Both conversations — the Ask Sasha log and the slides window's mark-ups — are comments on a
+The slides window's mark-ups are comments on a
 slide, and the user reads them beside Google's own comment pane. So they have Google's shape,
 read off a real Slides comment card: a round avatar with one initial, the author's name in
 medium weight, the time under it as "12:08 AM Today", and the body at the card's own left edge
-rather than indented under the avatar. One component (`comment-card.tsx`), both surfaces, so
-they cannot drift apart.
+rather than indented under the avatar. One component (`comment-card.tsx`) draws them.
 
 A **message** is a card. An **event** ("Sasha staged 4 candidate slides") is not: it is a quiet
 system line in the voice that caused it. Tinting a card as well made it read as a highlighted
