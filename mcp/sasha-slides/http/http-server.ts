@@ -48,6 +48,8 @@ export function createSashaSlidesHttpServer(
     warn: (message: string) => void;
     /** Absent: no `/account` routes. Present: it answers every path under `/account`. */
     accountPortal?: AccountPortal;
+    /** Absent: no comment bot. Present: Drive's push notifications at `/hooks/drive` go to it. */
+    driveHook?: DriveHook;
   }>,
 ): Server {
   return createServer(sashaSlidesRequestListener(options));
@@ -62,9 +64,11 @@ export function sashaSlidesRequestListener(
     warn: (message: string) => void;
     /** Absent: no `/account` routes. Present: it answers every path under `/account`. */
     accountPortal?: AccountPortal;
+    /** Absent: no comment bot. Present: Drive's push notifications at `/hooks/drive` go to it. */
+    driveHook?: DriveHook;
   }>,
 ): RequestListener {
-  const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal } = options;
+  const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal, driveHook } = options;
   const { endpoints } = authorizationServer;
 
   async function route(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -77,6 +81,12 @@ export function sashaSlidesRequestListener(
     // The account portal (`account-portal.ts`) goes first: its HTML pages are for a browser
     // on this origin only, so they get no CORS headers, and it claims only `/account/...`.
     if (accountPortal !== undefined && (await accountPortal.handleRequest({ request, response, url }))) return;
+
+    // Server-to-server from Google, so no CORS. Checked before anything else reads a body.
+    if (driveHook !== undefined && path === DRIVE_HOOK_PATH) {
+      await handleDriveHook({ request, response, driveHook });
+      return;
+    }
 
     if (method === "OPTIONS") {
       response.writeHead(204, corsHeaders({ methods: "GET, POST, DELETE, OPTIONS" })).end();
@@ -147,6 +157,14 @@ export function sashaSlidesRequestListener(
 
 export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 
+/**
+ * Receives one Drive push notification: everything it carries is in the `X-Goog-*` headers
+ * (a changes channel sends no body). Answers the HTTP status; the hook verifies the channel.
+ */
+export type DriveHook = (options: Readonly<{ headers: IncomingMessage["headers"] }>) => Promise<number>;
+
+export const DRIVE_HOOK_PATH = "/hooks/drive";
+
 /** RFC 6749 section 5.2 / RFC 6750: which status an error code is reported with. */
 export function statusForOAuthError(error: OAuthErrorCode): number {
   switch (error) {
@@ -167,6 +185,20 @@ export function statusForOAuthError(error: OAuthErrorCode): number {
     default:
       return assertNever(error);
   }
+}
+
+async function handleDriveHook(
+  options: Readonly<{ request: IncomingMessage; response: ServerResponse; driveHook: DriveHook }>,
+): Promise<void> {
+  const { request, response, driveHook } = options;
+  if ((request.method ?? "GET") !== "POST") {
+    response.writeHead(405, { allow: "POST" }).end();
+    return;
+  }
+  // Drained, never parsed: nothing in a push body is trusted or needed.
+  await readBody({ request });
+  const status = await driveHook({ headers: request.headers });
+  response.writeHead(status, { "cache-control": "no-store" }).end();
 }
 
 async function handleRegister(

@@ -36,6 +36,8 @@ const CONNECTOR_PATHS: readonly string[] = [
   "/account/callback/microsoft",
   "/account/erase",
   "/account/logout",
+  // Drive push notifications for the comment bot (mcp/sasha-slides/comment-bot).
+  "/hooks/drive",
 ];
 
 /** The website's routes (addon-server/server.ts, pages.ts), plus near-misses of connector paths. */
@@ -60,6 +62,8 @@ const SITE_PATHS: readonly string[] = [
   "/tokens",
   "/registered",
   "/.well-known/security.txt",
+  "/hooks",
+  "/hooks/drivex",
 ];
 
 type Modifier = "exact" | "prefix" | "prefix-no-regex" | "regex";

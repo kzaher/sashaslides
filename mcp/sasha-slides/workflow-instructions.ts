@@ -184,6 +184,9 @@ export const SECTION_PRIORITY: readonly string[] = [
   // has commented, and by then the agent has `read_feedback`'s own description in front of
   // it. The budget is better spent on the rules that stop the first call going wrong.
   "## Revise in place, clear loudly",
+  // Reached only when the user asks for their own deck's comments to be answered, and each
+  // comment tool's description carries the same loop.
+  "## Comments in the user's own deck",
   "## Before the first call",
   "## Connecting the connector",
   "## Harness",

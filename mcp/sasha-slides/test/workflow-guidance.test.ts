@@ -252,7 +252,7 @@ describe("a real server.ts --stdio subprocess", () => {
     try {
       assert.equal(connected.client.getInstructions(), FALLBACK_WORKFLOW_INSTRUCTIONS);
       const tools = await connected.client.listTools();
-      assert.equal(tools.tools.length, 12, "the whole tool surface is still served");
+      assert.equal(tools.tools.length, 17, "the whole tool surface is still served");
       const prompts = await connected.client.listPrompts();
       assert.deepEqual(prompts.prompts.map((prompt) => prompt.name), [...WORKFLOW_PROMPT_NAMES]);
     } finally {

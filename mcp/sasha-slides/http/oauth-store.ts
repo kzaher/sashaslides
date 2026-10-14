@@ -28,6 +28,16 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { asNumber, asRecord, asString, asStringArray, parseJson } from "./json-values";
 import { PASSKEY_ALGORITHMS, type PasskeyAlgorithm } from "./webauthn";
+import {
+  botChannelCodec,
+  commentTaskCodec,
+  commentWatchCodec,
+  fileCursorCodec,
+  type BotChannel,
+  type CommentTask,
+  type CommentWatch,
+  type FileCursor,
+} from "../comment-bot/comment-records";
 
 export type AuthStore = Readonly<{
   /** DCR-registered MCP clients (Claude), keyed by the `client_id` we minted. */
@@ -51,6 +61,14 @@ export type AuthStore = Readonly<{
    * account link (see `password-sign-in.ts`), so erasing the account's links reaches them.
    */
   passwordCredentials: RecordStore<PasswordCredential>;
+  /** The comment bot's one Drive changes channel and page token (`comment-bot/comment-records.ts`). */
+  commentBotChannel: RecordStore<BotChannel>;
+  /** Active `watch_comments` watches, keyed by watch id. */
+  commentWatches: RecordStore<CommentWatch>;
+  /** Per watched deck, the newest comment time already scanned, keyed by Drive file id. */
+  commentFileCursors: RecordStore<FileCursor>;
+  /** Comment tasks for the watch owners' sessions, keyed by task id. */
+  commentTasks: RecordStore<CommentTask>;
 }>;
 
 export type RecordStore<TValue> = Readonly<{
@@ -193,6 +211,10 @@ export function inMemoryAuthStore(): AuthStore {
     accountLinks: inMemoryRecordStore<AccountLink>(),
     accounts: inMemoryRecordStore<Account>(),
     passwordCredentials: inMemoryRecordStore<PasswordCredential>(),
+    commentBotChannel: inMemoryRecordStore<BotChannel>(),
+    commentWatches: inMemoryRecordStore<CommentWatch>(),
+    commentFileCursors: inMemoryRecordStore<FileCursor>(),
+    commentTasks: inMemoryRecordStore<CommentTask>(),
   };
 }
 
@@ -217,6 +239,12 @@ export function fileBackedAuthStore(
     accountLinks: file.collection({ name: "accountLinks", codec: accountLinkCodec }),
     accounts: file.collection({ name: "accounts", codec: accountCodec }),
     passwordCredentials: file.collection({ name: "passwordCredentials", codec: passwordCredentialCodec }),
+    // The comment bot's state survives a restart too: the channel must be stopped by id, the
+    // cursors and task keys are what stop a restart from answering a comment twice.
+    commentBotChannel: file.collection({ name: "commentBotChannel", codec: botChannelCodec }),
+    commentWatches: file.collection({ name: "commentWatches", codec: commentWatchCodec }),
+    commentFileCursors: file.collection({ name: "commentFileCursors", codec: fileCursorCodec }),
+    commentTasks: file.collection({ name: "commentTasks", codec: commentTaskCodec }),
   };
 }
 

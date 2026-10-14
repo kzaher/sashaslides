@@ -36,6 +36,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, statSync } from "node:fs";
+import type { IncomingHttpHeaders } from "node:http";
 import { z } from "zod";
 import { appendClientHandshake, handshakeRecordingTransport } from "./client-handshake.ts";
 import { formatFrameLine } from "./jsonrpc-recording-transport.ts";
@@ -71,6 +72,9 @@ import { CLIENT_PATH, assertNever, describeAuthFailure, loadOAuthClient } from "
 import { googleSubjectOf } from "./http/authorization-server";
 import { loadBrokeredStack } from "./http/brokered-stack";
 import { createSashaSlidesHttpServer } from "./http/http-server";
+import type { CommentBot } from "./comment-bot/comment-bot";
+import { loadCommentBot } from "./comment-bot/comment-bot-stack";
+import { openCommentTasks, registerCommentTools, type CommentTaskPayload } from "./comment-bot/comment-tools";
 import { loadAccountPortal } from "./http/account-portal-stack";
 import type { Endpoints } from "./http/oauth-metadata";
 import type { UserDriveFactory } from "./http/user-drive";
@@ -207,6 +211,8 @@ export function createSashaSlidesServer(
      * caller upload any file here (the OAuth store, the key store) into their own Drive.
      */
     remote: boolean;
+    /** Absent (stdio, or no `--comment-bot`): the comment tools answer that the bot is off. */
+    commentBot?: CommentBot;
   }>,
 ): McpServer {
   // The connector's own onboarding: the spec lets a server describe how it is meant to be
@@ -217,6 +223,7 @@ export function createSashaSlidesServer(
     { instructions: options.instructions },
   );
   const { resolveEnvironment, resolveFeedbackEnvironment, remote } = options;
+  const commentBot = options.commentBot ?? null;
 
   // Declares the `prompts` capability and so makes `/mcp__sasha-slides__<name>` appear in the
   // user's slash-command list. Registered first because it is what the user reaches for before
@@ -393,9 +400,12 @@ export function createSashaSlidesServer(
       });
       if (loaded.kind === "auth-failed") return errorResult(loaded.message);
       const work = await listOpenWork({ env: loaded.env.proposal, feedback: loaded.env.feedback });
-      return toCallToolResult(openWorkPayload(work));
+      const commentTasks = await openCommentTasks({ commentBot, authInfo: extra.authInfo });
+      return toCallToolResult(withCommentTasks({ outcome: openWorkPayload(work), commentTasks }));
     },
   );
+
+  registerCommentTools({ server, commentBot });
 
   server.registerTool(
     "read_feedback",
@@ -891,7 +901,25 @@ export type OpenWorkPayload = Readonly<{
   count: number;
   items: readonly OpenWorkItem[];
   note: string;
+  /** Comments on the decks this account watches (`watch_comments`) that wait for an answer. */
+  commentTasks?: readonly CommentTaskPayload[];
 }>;
+
+/** open_work with the caller's comment tasks attached; unchanged when there are none. */
+export function withCommentTasks(
+  options: Readonly<{ outcome: ToolOutcome<OpenWorkPayload>; commentTasks: readonly CommentTaskPayload[] }>,
+): ToolOutcome<OpenWorkPayload> {
+  const { outcome, commentTasks } = options;
+  if (outcome.kind === "error" || commentTasks.length === 0) return outcome;
+  return {
+    kind: "payload",
+    payload: {
+      ...outcome.payload,
+      commentTasks,
+      note: `${String(commentTasks.length)} comment task(s) wait on watched decks: answer them with reply_comment_task. ${outcome.payload.note}`,
+    },
+  };
+}
 
 export function proposalStatePayload(state: ProposalState): ToolOutcome<ProposalStatePayload> {
   const common = {
@@ -1499,6 +1527,8 @@ export type ServerMode =
       identityProvidersPath: string | null;
       /** Null leaves email and password sign-in off; a path is the Gmail API sender's JSON file. */
       mailSenderPath: string | null;
+      /** Null leaves the comment bot off; a path is the bot account's refresh-token JSON file. */
+      commentBotPath: string | null;
       /** Comma-separated proxy addresses or subnets whose X-Real-IP is believed; null is loopback alone. */
       trustedProxies: string | null;
       /** Null disables handshake recording; a path appends one JSON line per `initialize`. */
@@ -1575,6 +1605,7 @@ export function parseServerMode(args: readonly string[]): ServerMode {
     googleClientPath: values.get("--google-client") ?? CLIENT_PATH,
     identityProvidersPath: values.get("--identity-providers") ?? null,
     mailSenderPath: values.get("--mail-sender") ?? null,
+    commentBotPath: values.get("--comment-bot") ?? null,
     trustedProxies: values.get("--trusted-proxy") ?? null,
     handshakeLogPath,
     frameLogPath,
@@ -1585,7 +1616,7 @@ export function parseServerMode(args: readonly string[]): ServerMode {
 
 export const USAGE = `sasha-slides MCP server
 
-  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--mail-sender <path> [--trusted-proxy <subnets>]] [--google-client <path>]
+  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--mail-sender <path> [--trusted-proxy <subnets>]] [--comment-bot <path>] [--google-client <path>]
   npx tsx mcp/sasha-slides/server.ts --stdio
   npx tsx mcp/sasha-slides/server.ts --selftest
 
@@ -1621,6 +1652,12 @@ export const USAGE = `sasha-slides MCP server
                  "from": "Sasha Slides <address>"}. Mint it with
                    npx tsx mcp/sasha-slides/e2e/gmail-sender-token.ts <file>
                  (scope gmail.send only). Needs SASHA_SESSION_SECRET, like the flag above.
+  --comment-bot  JSON file that turns on the comment bot (watch_comments and the other comment
+                 tools): {"clientId": "...", "clientSecret": "...", "refreshToken": "...",
+                 "address": "sasha@sashaslides.com"}, a refresh token for the bot account
+                 with scope https://www.googleapis.com/auth/drive. Google pushes Drive changes
+                 to <public-url>/hooks/drive, so that path must reach this server over HTTPS.
+                 Needs --store to keep watches across restarts.
   --trusted-proxy  Comma-separated addresses or CIDR subnets of the reverse proxy, whose
                  X-Real-IP header is believed when limiting sign-in attempts and mail per
                  client. Loopback is always trusted. Behind Docker's published port the
@@ -1912,6 +1949,7 @@ const VALUE_FLAGS: readonly string[] = [
   "--google-callback-url",
   "--identity-providers",
   "--mail-sender",
+  "--comment-bot",
   "--trusted-proxy",
   "--google-client",
   "--handshake-log",
@@ -2054,6 +2092,13 @@ function serveHttp(
     process.exitCode = 1;
     return Promise.resolve();
   }
+  const commentBot = loadCommentBot({ path: mode.commentBotPath, publicUrl: mode.publicUrl, store: stack.store, warn });
+  if (commentBot.kind === "failed") {
+    process.stderr.write(`[${SERVER_NAME}] cannot start: ${commentBot.message}\n`);
+    process.exitCode = 1;
+    return Promise.resolve();
+  }
+  const bot = commentBot.kind === "ok" ? commentBot.bot : null;
   const instructions = workflowInstructionsFromDisk({
     cwd: process.cwd(),
     override: mode.skillFilePath,
@@ -2072,6 +2117,7 @@ function serveHttp(
         resolveFeedbackEnvironment: brokeredFeedbackEnvironmentResolver({ userDrive: stack.userDrive }),
         instructions: instructions.text,
         remote: true,
+        ...(bot === null ? {} : { commentBot: bot }),
       }),
     instrumentTransport: (inner) =>
       instrumentedTransport({
@@ -2081,6 +2127,7 @@ function serveHttp(
       }),
     warn,
     ...(portal.kind === "ok" ? { accountPortal: portal.portal } : {}),
+    ...(bot === null ? {} : { driveHook: driveHookFor(bot) }),
   });
   return new Promise<void>((resolve) => {
     httpServer.listen(mode.port, mode.host, () => {
@@ -2094,9 +2141,27 @@ function serveHttp(
         process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
       }
       for (const line of portal.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
+      for (const line of commentBot.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
+      if (bot !== null) void bot.start().catch((cause: unknown) => warn(`comment bot: start failed: ${String(cause)}`));
       resolve();
     });
   });
+}
+
+/** Drive push → HTTP status: 200 for our channel, 403 for anything that is not. */
+function driveHookFor(bot: CommentBot): (options: Readonly<{ headers: IncomingHttpHeaders }>) => Promise<number> {
+  return async ({ headers }) => {
+    const outcome = await bot.handlePush({ headers });
+    switch (outcome.kind) {
+      case "accepted":
+      case "sync-message":
+        return 200;
+      case "ignored":
+        return 403;
+      default:
+        return assertNever(outcome);
+    }
+  };
 }
 
 function startupBanner(
