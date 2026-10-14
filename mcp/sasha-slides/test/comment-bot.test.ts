@@ -8,6 +8,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { googleBotDrive, parseCommentBotConfig, type CommentBotConfig } from "../comment-bot/bot-drive.ts";
 import {
+  ACKNOWLEDGEMENT_TEXTS,
+  acknowledgementText,
   CHANNEL_LIFETIME_MS,
   CLOCK_SKEW_MS,
   createCommentBot,
@@ -387,6 +389,124 @@ describe("tasks and replies", () => {
     await second.push();
     await second.advance(PUSH_DEBOUNCE_MS);
     assert.deepEqual((await second.bot.openTasks({ ownerSubject: ALICE })).map((open) => open.text), ["second"]);
+  });
+});
+
+describe("acknowledgements", () => {
+  test("the first pickUpTasks posts one acknowledgement per new task, in its thread; a second posts nothing", async () => {
+    const h = harness();
+    await watching(h);
+    const first = h.google.addComment({ fileId: DECK, author: "Ada", content: "tighten slide 2" });
+    const second = h.google.addComment({ fileId: DECK, author: "Grace", content: "fix the chart" });
+    await h.push();
+    await h.advance(PUSH_DEBOUNCE_MS);
+
+    h.google.resetCounts();
+    assert.equal((await h.bot.openTasks({ ownerSubject: ALICE })).length, 2);
+    assert.equal(h.google.counts()["replies.create"], 0, "listing (open_work) is not picking up: no acknowledgement");
+
+    const picked = await h.bot.pickUpTasks({ ownerSubject: ALICE });
+    assert.equal(picked.length, 2);
+    assert.equal(h.google.counts()["replies.create"], 2, "one acknowledgement per task");
+    for (const commentId of [first, second]) {
+      const replies = h.google.thread({ commentId })?.replies ?? [];
+      assert.deepEqual(replies.map((reply) => ({ content: reply.content, bot: reply.author.me })), [
+        { content: acknowledgementText(commentId), bot: true },
+      ]);
+      assert.ok(replies[0]?.content.includes("⏳"));
+    }
+    assert.deepEqual(new Set(ACKNOWLEDGEMENT_TEXTS.map((variant) => variant.endsWith("⏳"))), new Set([true]));
+
+    h.google.resetCounts();
+    assert.equal((await h.bot.pickUpTasks({ ownerSubject: ALICE })).length, 2, "still open until answered");
+    await h.push();
+    await h.advance(PUSH_DEBOUNCE_MS);
+    assert.equal(h.google.counts()["replies.create"], 0, "a second pickUpTasks posts nothing");
+    assert.equal((await h.bot.openTasks({ ownerSubject: ALICE })).length, 2, "the acknowledgements are not work");
+  });
+
+  test("the answer replaces the acknowledgement: same reply, new content, no second reply", async () => {
+    const h = harness();
+    await watching(h);
+    const commentId = h.google.addComment({ fileId: DECK, author: "Ada", content: "tighten slide 2" });
+    await h.push();
+    await h.advance(PUSH_DEBOUNCE_MS);
+    const [task] = await h.bot.pickUpTasks({ ownerSubject: ALICE });
+    assert.ok(task !== undefined);
+    const acknowledgementId = h.google.thread({ commentId })?.replies[0]?.id;
+
+    h.google.resetCounts();
+    const replied = await h.bot.reply({ ownerSubject: ALICE, taskId: task.taskId, text: "Tightened: three bullets now." });
+    assert.equal(replied.kind, "replied");
+    assert.deepEqual({ create: h.google.counts()["replies.create"], update: h.google.counts()["replies.update"] }, { create: 0, update: 1 });
+    assert.deepEqual(h.google.thread({ commentId })?.replies.map((reply) => ({ id: reply.id, content: reply.content })), [
+      { id: acknowledgementId, content: "Tightened: three bullets now." },
+    ]);
+    assert.ok(replied.kind === "replied" && replied.task.botReplyId === acknowledgementId);
+    assert.deepEqual(await h.bot.pickUpTasks({ ownerSubject: ALICE }), []);
+  });
+
+  test("when the acknowledgement is gone, the answer is posted as a new reply", async () => {
+    const h = harness();
+    await watching(h);
+    const commentId = h.google.addComment({ fileId: DECK, author: "Ada", content: "tighten slide 2" });
+    await h.push();
+    await h.advance(PUSH_DEBOUNCE_MS);
+    const [task] = await h.bot.pickUpTasks({ ownerSubject: ALICE });
+    assert.ok(task !== undefined);
+    const acknowledgementId = h.google.thread({ commentId })?.replies[0]?.id ?? "";
+    h.google.deleteReply({ commentId, replyId: acknowledgementId });
+
+    h.google.resetCounts();
+    const replied = await h.bot.reply({ ownerSubject: ALICE, taskId: task.taskId, text: "Tightened." });
+    assert.equal(replied.kind, "replied");
+    assert.deepEqual({ create: h.google.counts()["replies.create"], update: h.google.counts()["replies.update"] }, { create: 1, update: 1 });
+    const live = h.google.thread({ commentId })?.replies.filter((reply) => !reply.deleted) ?? [];
+    assert.deepEqual(live.map((reply) => reply.content), ["Tightened."]);
+    assert.ok(replied.kind === "replied" && replied.task.botReplyId === live[0]?.id);
+  });
+
+  test("a restart over the persisted store does not acknowledge again", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "sasha-comment-ack-")), "store.json");
+    const first = harness({ store: fileBackedAuthStore({ path, warn: () => undefined }) });
+    await watching(first);
+    const commentId = first.google.addComment({ fileId: DECK, author: "Ada", content: "first" });
+    await first.push();
+    await first.advance(PUSH_DEBOUNCE_MS);
+    await first.bot.pickUpTasks({ ownerSubject: ALICE });
+
+    const second = harness({ store: fileBackedAuthStore({ path, warn: () => undefined }), google: first.google });
+    first.bot.close();
+    await second.bot.start();
+    await second.advance(0);
+    second.google.resetCounts();
+    const [task] = await second.bot.pickUpTasks({ ownerSubject: ALICE });
+    assert.ok(task !== undefined);
+    assert.equal(second.google.counts()["replies.create"], 0);
+    await second.bot.reply({ ownerSubject: ALICE, taskId: task.taskId, text: "answered after the restart" });
+    assert.equal(second.google.counts()["replies.update"], 1);
+    assert.deepEqual(second.google.thread({ commentId })?.replies.map((reply) => reply.content), ["answered after the restart"]);
+  });
+
+  test("comment_tasks acknowledges once and reply_comment_task replaces it", async () => {
+    const h = harness();
+    await watching(h, ALICE);
+    const commentId = h.google.addComment({ fileId: DECK, author: "Ada", content: "swap the order" });
+    await h.push();
+    await h.advance(PUSH_DEBOUNCE_MS);
+    const alice = await connect({ bot: h.bot, subject: ALICE });
+    try {
+      h.google.resetCounts();
+      const listed = JSON.parse(await text(alice.callTool({ name: "comment_tasks", arguments: {} }))) as { tasks: { taskId: string }[] };
+      await text(alice.callTool({ name: "comment_tasks", arguments: {} }));
+      assert.equal(h.google.counts()["replies.create"], 1);
+      const taskId = listed.tasks[0]?.taskId ?? "";
+      await text(alice.callTool({ name: "reply_comment_task", arguments: { taskId, text: "Swapped." } }));
+      assert.deepEqual({ create: h.google.counts()["replies.create"], update: h.google.counts()["replies.update"] }, { create: 1, update: 1 });
+      assert.deepEqual(h.google.thread({ commentId })?.replies.map((reply) => reply.content), ["Swapped."]);
+    } finally {
+      await alice.close();
+    }
   });
 });
 

@@ -23,6 +23,19 @@
  *     task keyed by hash(watchId, commentId, replyId); a key already held is skipped, which
  *     makes duplicate pushes, overlapping sweeps and restarts harmless.
  *
+ * ACKNOWLEDGEMENT. When the session first picks a task up (`pickUpTasks`, behind
+ * `comment_tasks`), the bot at once posts a short "On it ⏳" reply in the thread, so the
+ * commenter sees that Sasha has started. The answer (`reply`) then REWRITES that reply
+ * (`replies.update`, allowed to the reply's author) instead of adding a second one, so the
+ * thread reads as the question and then Sasha's answer. That is one Drive call per task and
+ * no polling; if the acknowledgement is gone (someone deleted it), the answer falls back to a
+ * new reply. Listing alone (`openTasks`, behind `open_work`) acknowledges nothing.
+ *
+ * The ⏳ is deliberately STATIC. Google Slides comments are plain text: there are no animated
+ * emoji or GIFs. The only way to "animate" one would be to keep editing the reply ("." ->
+ * ".." -> "..."), which costs a Drive write per second per open comment; at thousands of users
+ * that is exactly the API spam this design avoids.
+ *
  * Watches expire on their own after `WATCH_LIFETIME_MS` (24 hours) unless `watch_comments`
  * is called again for the same deck, in case the user forgets to stop one.
  *
@@ -33,7 +46,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { assertNever } from "../google-auth";
 import type { RecordStore } from "../http/oauth-store";
-import { SLIDES_MIME_TYPE, type BotDrive, type DriveComment } from "./bot-drive";
+import { SLIDES_MIME_TYPE, type BotDrive, type DriveComment, type DriveResult } from "./bot-drive";
 import { CHANNEL_KEY, type BotChannel, type CommentTask, type CommentWatch, type FileCursor } from "./comment-records";
 
 /** How long a watch lasts unless renewed by calling `watch_comments` again. */
@@ -50,6 +63,8 @@ export const CHANNEL_RENEW_MARGIN_MS = 24 * 60 * 60 * 1000;
 export const COMMENT_SCAN_CONCURRENCY = 4;
 export const MAX_WATCHES_PER_OWNER = 20;
 export const MAX_REPLY_CHARACTERS = 4_000;
+/** What the acknowledgement says; one is chosen per comment, deterministically. */
+export const ACKNOWLEDGEMENT_TEXTS: readonly string[] = ["On it ⏳", "Got it, working on it ⏳", "On it, give me a moment ⏳"];
 /**
  * The watch's start is our clock and a comment's `createdTime` is Google's. A comment written
  * this long before the watch began still counts, so a slightly fast server clock cannot drop
@@ -103,6 +118,8 @@ export type CommentBot = Readonly<{
   listWatches(options: Readonly<{ ownerSubject: string }>): Promise<readonly CommentWatch[]>;
   /** The owner's open tasks, oldest first. */
   openTasks(options: Readonly<{ ownerSubject: string }>): Promise<readonly CommentTask[]>;
+  /** `openTasks`, after posting the acknowledgement into each thread not yet acknowledged. */
+  pickUpTasks(options: Readonly<{ ownerSubject: string }>): Promise<readonly CommentTask[]>;
   reply(options: Readonly<{ ownerSubject: string; taskId: string; text: string }>): Promise<ReplyOutcome>;
   handlePush(options: Readonly<{ headers: PushHeaders }>): Promise<PushOutcome>;
   /** Resolves once no sync is running or scheduled to run immediately; for tests and shutdown. */
@@ -151,6 +168,9 @@ export function createCommentBot(
   // Channel creation, renewal and teardown run one at a time, so two watches started together
   // cannot open two channels.
   let channelQueue: Promise<unknown> = Promise.resolve();
+  // One acknowledgement in flight per task, so two `comment_tasks` calls at once cannot post
+  // two, and an answer arriving meanwhile waits for the reply it will replace.
+  const acknowledging = new Map<string, Promise<void>>();
 
   function exclusive<TValue>(work: () => Promise<TValue>): Promise<TValue> {
     const next = channelQueue.then(work, work);
@@ -376,10 +396,57 @@ export function createCommentBot(
           createdTime: post.createdTime,
           state: "open",
           botReplyId: null,
+          acknowledgement: { kind: "not-posted" },
         };
         tasks.set(taskId, task);
         await store.commentTasks.put({ key: taskId, value: task });
       }
+    }
+  }
+
+  function acknowledge(taskId: string): Promise<void> {
+    const inFlight = acknowledging.get(taskId);
+    if (inFlight !== undefined) return inFlight;
+    const work = postAcknowledgement(taskId).finally(() => acknowledging.delete(taskId));
+    acknowledging.set(taskId, work);
+    return work;
+  }
+
+  async function postAcknowledgement(taskId: string): Promise<void> {
+    const task = tasks.get(taskId);
+    if (task === undefined || task.state !== "open" || task.acknowledgement.kind !== "not-posted") return;
+    const posted = await drive.createReply({ fileId: task.fileId, commentId: task.commentId, content: acknowledgementText(task.commentId) });
+    if (posted.kind === "failed") warn(`comment bot: could not acknowledge a comment (${posted.reason}); the answer will be a new reply`);
+    // Re-read: the watch may have ended while the reply was posted.
+    const latest = tasks.get(taskId);
+    if (latest === undefined) return;
+    const acknowledged: CommentTask = {
+      ...latest,
+      acknowledgement: posted.kind === "ok" ? { kind: "posted", replyId: posted.value } : { kind: "failed" },
+    };
+    tasks.set(taskId, acknowledged);
+    await store.commentTasks.put({ key: taskId, value: acknowledged });
+  }
+
+  /** The answer rewrites the acknowledgement when there is one; otherwise it is a new reply. */
+  async function postAnswer(options: Readonly<{ task: CommentTask; content: string }>): Promise<DriveResult<string>> {
+    const { task, content } = options;
+    const postNewReply = (): Promise<DriveResult<string>> => drive.createReply({ fileId: task.fileId, commentId: task.commentId, content });
+    // An already answered task is answered again: a follow-up, so a new reply.
+    if (task.state === "answered") return postNewReply();
+    switch (task.acknowledgement.kind) {
+      case "not-posted":
+      case "failed":
+        return postNewReply();
+      case "posted": {
+        const replyId = task.acknowledgement.replyId;
+        const updated = await drive.updateReply({ fileId: task.fileId, commentId: task.commentId, replyId, content });
+        if (updated.kind === "ok") return { kind: "ok", value: replyId };
+        // Deleted, most likely; any failure is worth one plain reply rather than no answer.
+        return postNewReply();
+      }
+      default:
+        return assertNever(task.acknowledgement);
     }
   }
 
@@ -471,15 +538,23 @@ export function createCommentBot(
         .filter((task) => task.ownerSubject === ownerSubject && task.state === "open")
         .sort((left, right) => left.createdTime.localeCompare(right.createdTime));
     },
+    pickUpTasks: async ({ ownerSubject }) => {
+      const open = await bot.openTasks({ ownerSubject });
+      await inParallel({ items: open.map((task) => task.taskId), limit: COMMENT_SCAN_CONCURRENCY, run: acknowledge });
+      return open.map((task) => tasks.get(task.taskId) ?? task);
+    },
     reply: async ({ ownerSubject, taskId, text }) => {
-      const task = tasks.get(taskId);
-      if (task === undefined || task.ownerSubject !== ownerSubject) return { kind: "unknown-task" };
+      const found = tasks.get(taskId);
+      if (found === undefined || found.ownerSubject !== ownerSubject) return { kind: "unknown-task" };
       const content = text.trim();
       if (content === "") return { kind: "invalid-text", reason: "the reply is empty" };
       if (content.length > MAX_REPLY_CHARACTERS) {
         return { kind: "invalid-text", reason: `the reply is longer than ${String(MAX_REPLY_CHARACTERS)} characters` };
       }
-      const posted = await drive.createReply({ fileId: task.fileId, commentId: task.commentId, content });
+      await acknowledging.get(taskId);
+      const task = tasks.get(taskId);
+      if (task === undefined) return { kind: "unknown-task" };
+      const posted = await postAnswer({ task, content });
       if (posted.kind === "failed") return { kind: "drive-failed", reason: posted.reason };
       const answered: CommentTask = { ...task, state: "answered", botReplyId: posted.value };
       tasks.set(taskId, answered);
@@ -543,6 +618,12 @@ export function describeWatchOutcome(outcome: WatchOutcome): string {
     default:
       return assertNever(outcome);
   }
+}
+
+/** The acknowledgement for a comment: the same variant every time for the same comment. */
+export function acknowledgementText(commentId: string): string {
+  const index = createHash("sha256").update(commentId).digest()[0] ?? 0;
+  return ACKNOWLEDGEMENT_TEXTS[index % ACKNOWLEDGEMENT_TEXTS.length] ?? "On it ⏳";
 }
 
 /** Drive's answers for a page token it no longer honours. */

@@ -55,8 +55,9 @@ When the user wants their deck's comments answered, call **`watch_comments`** `{
 with the deck URL. If it says to share the deck with the bot address, tell the user exactly
 that and call it again afterwards. While the watch lasts (24 hours; calling it again renews),
 every new comment or reply on the deck becomes a task: **`comment_tasks`** lists them (so
-does `open_work`), and **`reply_comment_task`** `{ taskId, text }` posts your answer into the
-thread as the Sasha bot; a link in the text is fine. **`list_watches`** shows the active
+does `open_work`) and posts an "On it ⏳" acknowledgement in each new task's thread by itself,
+and **`reply_comment_task`** `{ taskId, text }` replaces that acknowledgement with your answer,
+as the Sasha bot; a link in the text is fine. **`list_watches`** shows the active
 watches; call **`stop_watching`** `{ watchId }` when the user is done.
 
 ## Slides are 1-based

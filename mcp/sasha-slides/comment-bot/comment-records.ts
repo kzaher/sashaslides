@@ -12,7 +12,9 @@
  *    scanned, so a scan asks Drive only for what changed since (`startModifiedTime`).
  *  - `commentTasks`: one per comment or reply a watch turned into work, keyed by `taskId`, a
  *    hash of (watchId, commentId, replyId), which is what makes a re-scan, a duplicate push
- *    or a restart unable to create the same task twice.
+ *    or a restart unable to create the same task twice. A task also remembers the bot's
+ *    "On it ⏳" acknowledgement, so neither a second `comment_tasks` nor a restart posts it
+ *    again, and the answer can replace it in place.
  *
  * Comment text is stored as Drive returned it, unsealed: it is readable by everyone the deck
  * is shared with, and the bot has to quote it back to the watch owner's session.
@@ -71,7 +73,17 @@ export type CommentTask = Readonly<{
   state: "open" | "answered";
   /** Drive's id of the bot's latest reply to this task; null until answered. */
   botReplyId: string | null;
+  acknowledgement: Acknowledgement;
 }>;
+
+/**
+ * The short reply the bot posts in the thread when the session first picks the task up.
+ * `failed` is not retried: the answer then simply arrives as a new reply.
+ */
+export type Acknowledgement =
+  | Readonly<{ kind: "not-posted" }>
+  | Readonly<{ kind: "posted"; replyId: string }>
+  | Readonly<{ kind: "failed" }>;
 
 export const botChannelCodec: JsonCodec<BotChannel> = {
   encode: (value) => value,
@@ -159,6 +171,16 @@ export const commentTaskCodec: JsonCodec<CommentTask> = {
       createdTime,
       state,
       botReplyId: asString(record["botReplyId"]),
+      acknowledgement: decodeAcknowledgement(record["acknowledgement"]),
     };
   },
 };
+
+/** A task stored before acknowledgements existed has none: `not-posted`. */
+function decodeAcknowledgement(value: unknown): Acknowledgement {
+  const record = asRecord(value);
+  if (record?.["kind"] === "failed") return { kind: "failed" };
+  const replyId = asString(record?.["replyId"]);
+  if (record?.["kind"] === "posted" && replyId !== null) return { kind: "posted", replyId };
+  return { kind: "not-posted" };
+}

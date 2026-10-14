@@ -1,6 +1,6 @@
 /**
  * The comment bot's Drive, as the bot's own Google account (`sasha@sashaslides.com`): the
- * seven Drive v3 REST calls the bot makes, over an injected `HttpFetch`, so the tests run a
+ * eight Drive v3 REST calls the bot makes, over an injected `HttpFetch`, so the tests run a
  * fake Drive and count every call.
  *
  * Configured by `--comment-bot <file>`, parsed here at the boundary:
@@ -74,6 +74,8 @@ export type BotDrive = Readonly<{
     options: Readonly<{ fileId: string; modifiedAfter: string; pageToken: string | null }>,
   ): Promise<DriveResult<CommentPage>>;
   createReply(options: Readonly<{ fileId: string; commentId: string; content: string }>): Promise<DriveResult<string>>;
+  /** Rewrites a reply's text in place; Drive allows it only for the reply's own author. */
+  updateReply(options: Readonly<{ fileId: string; commentId: string; replyId: string; content: string }>): Promise<DriveResult<null>>;
 }>;
 
 export function parseCommentBotConfig(text: string): CommentBotConfigParse {
@@ -131,7 +133,7 @@ export function googleBotDrive(
 
   /** One authorised request; a 401 (token revoked early) drops the cache and retries once. */
   async function call(
-    request: Readonly<{ method: "GET" | "POST"; url: string; body?: unknown }>,
+    request: Readonly<{ method: "GET" | "POST" | "PATCH"; url: string; body?: unknown }>,
   ): Promise<DriveResult<Readonly<Record<string, unknown>> | null>> {
     try {
       for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -254,6 +256,13 @@ export function googleBotDrive(
       if (answer.kind === "failed") return answer;
       const id = asString(answer.value?.id);
       return id === null ? { kind: "failed", status: 502, reason: "drive answered a reply with no id" } : { kind: "ok", value: id };
+    },
+    updateReply: async ({ fileId, commentId, replyId, content }) => {
+      const url =
+        `${DRIVE_API}/files/${encodeURIComponent(fileId)}/comments/${encodeURIComponent(commentId)}` +
+        `/replies/${encodeURIComponent(replyId)}?fields=id`;
+      const answer = await call({ method: "PATCH", url, body: { content } });
+      return answer.kind === "failed" ? answer : { kind: "ok", value: null };
     },
   };
 }

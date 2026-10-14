@@ -1,6 +1,6 @@
 /**
  * A fake Google for the comment bot, at the HTTP level: it answers the token endpoint and the
- * seven Drive v3 endpoints `comment-bot/bot-drive.ts` calls, from an in-memory change feed and
+ * eight Drive v3 endpoints `comment-bot/bot-drive.ts` calls, from an in-memory change feed and
  * comment threads, and COUNTS every call by endpoint, so a test can state exactly how many
  * requests an event cost.
  */
@@ -16,12 +16,13 @@ export type Endpoint =
   | "channels.stop"
   | "changes.list"
   | "comments.list"
-  | "replies.create";
+  | "replies.create"
+  | "replies.update";
 
 export type FakeChannel = Readonly<{ id: string; token: string; address: string; resourceId: string; expiresAtMs: number }>;
 
 type FakeAuthor = Readonly<{ displayName: string; me: boolean }>;
-type FakeReply = { id: string; content: string; author: FakeAuthor; createdTime: string };
+type FakeReply = { id: string; content: string; author: FakeAuthor; createdTime: string; deleted: boolean };
 type FakeComment = {
   id: string;
   fileId: string;
@@ -46,6 +47,8 @@ export type FakeBotDrive = Readonly<{
   /** Someone comments: a new thread, and a change on the bot's feed. */
   addComment(options: Readonly<{ fileId: string; author: string; content: string; anchor?: string; quoted?: string }>): string;
   addReply(options: Readonly<{ fileId: string; commentId: string; author: string; content: string }>): string;
+  /** Someone deletes a reply (the bot's acknowledgement, say): Drive keeps it, marked deleted. */
+  deleteReply(options: Readonly<{ commentId: string; replyId: string }>): void;
   /** An edit that is not a comment: just a change on the feed. */
   touch(options: Readonly<{ fileId: string }>): void;
   /** The thread as Drive holds it, bot replies included. */
@@ -118,6 +121,19 @@ export function createFakeBotDrive(options: Readonly<{ now: () => Date }>): Fake
       });
       return json(200, { changes, newStartPageToken: `${String(epoch)}-${String(feed.length)}` });
     }
+    const updateMatch = /^\/files\/([^/]+)\/comments\/([^/]+)\/replies\/([^/]+)$/.exec(path);
+    if (init.method === "PATCH" && updateMatch !== null) {
+      record("replies.update", url);
+      const comment = comments.get(decodeURIComponent(updateMatch[2] ?? ""));
+      const reply = comment?.replies.find((candidate) => candidate.id === decodeURIComponent(updateMatch[3] ?? ""));
+      // Drive lets only a reply's author change it, and a deleted reply is gone for good.
+      if (comment === undefined || reply === undefined || reply.deleted) return json(404, { error: { status: "NOT_FOUND" } });
+      if (!reply.author.me) return json(403, { error: { status: "PERMISSION_DENIED" } });
+      reply.content = String(body.content);
+      comment.modifiedTime = iso();
+      feed.push(comment.fileId);
+      return json(200, { id: reply.id });
+    }
     const replyMatch = /^\/files\/([^/]+)\/comments\/([^/]+)\/replies$/.exec(path);
     if (init.method === "POST" && replyMatch !== null) {
       record("replies.create", url);
@@ -144,7 +160,7 @@ export function createFakeBotDrive(options: Readonly<{ now: () => Date }>): Fake
           deleted: false,
           ...(comment.anchor === null ? {} : { anchor: comment.anchor }),
           ...(comment.quoted === null ? {} : { quotedFileContent: { mimeType: "text/plain", value: comment.quoted } }),
-          replies: comment.replies.map((reply) => ({ ...reply, deleted: false })),
+          replies: comment.replies.map((reply) => ({ ...reply })),
         }));
       return json(200, { comments: listed });
     }
@@ -161,7 +177,7 @@ export function createFakeBotDrive(options: Readonly<{ now: () => Date }>): Fake
 
   function pushReply(options: Readonly<{ comment: FakeComment; author: FakeAuthor; content: string }>): string {
     const id = `r${String(nextId++)}`;
-    options.comment.replies.push({ id, content: options.content, author: options.author, createdTime: iso() });
+    options.comment.replies.push({ id, content: options.content, author: options.author, createdTime: iso(), deleted: false });
     options.comment.modifiedTime = iso();
     feed.push(options.comment.fileId);
     return id;
@@ -176,6 +192,7 @@ export function createFakeBotDrive(options: Readonly<{ now: () => Date }>): Fake
     "changes.list": 0,
     "comments.list": 0,
     "replies.create": 0,
+    "replies.update": 0,
   });
 
   return {
@@ -212,6 +229,15 @@ export function createFakeBotDrive(options: Readonly<{ now: () => Date }>): Fake
       const comment = comments.get(commentId);
       if (comment === undefined) throw new Error(`no comment ${commentId}`);
       return pushReply({ comment, author: { displayName: author, me: false }, content });
+    },
+    deleteReply: ({ commentId, replyId }) => {
+      const comment = comments.get(commentId);
+      const reply = comment?.replies.find((candidate) => candidate.id === replyId);
+      if (comment === undefined || reply === undefined) throw new Error(`no reply ${replyId} in ${commentId}`);
+      reply.deleted = true;
+      reply.content = "";
+      comment.modifiedTime = iso();
+      feed.push(comment.fileId);
     },
     touch: ({ fileId }) => {
       feed.push(fileId);

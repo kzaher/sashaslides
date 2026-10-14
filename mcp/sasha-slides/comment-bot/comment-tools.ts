@@ -4,8 +4,9 @@
  *   watch_comments { deck }            start (or renew) a watch; returns its watchId
  *   stop_watching { watchId }          end it; the last one ending stops the bot's Drive channel
  *   list_watches {}                    the caller's active watches
- *   comment_tasks {}                   the caller's open comment tasks
- *   reply_comment_task { taskId, text } the bot posts `text` into the comment thread
+ *   comment_tasks {}                   the caller's open comment tasks; picking one up posts
+ *                                      the bot's "On it ⏳" acknowledgement into its thread
+ *   reply_comment_task { taskId, text } the bot's answer, replacing that acknowledgement
  *
  * The caller is the Google identity the connector's bearer token names (`googleSubjectOf`):
  * a session sees, stops and answers only its own watches and tasks. On stdio, or with no
@@ -106,13 +107,15 @@ export function registerCommentTools(options: Readonly<{ server: McpServer; comm
       title: "Comments waiting for an answer",
       description:
         "The open comment tasks on the decks this account watches: who wrote what, on which deck, the thread it " +
-        "belongs to and the text it is attached to. Answer each with reply_comment_task; the bot posts the reply " +
-        "into the comment thread. Empty means nothing is waiting.",
+        "belongs to and the text it is attached to. The first time a task is listed here, the bot automatically " +
+        "posts a short acknowledgement in its thread (\"On it ⏳\"), so the commenter sees work has started; do not " +
+        "post one yourself. Answer each with reply_comment_task, which replaces that acknowledgement with your " +
+        "answer. Empty means nothing is waiting.",
       inputSchema: {},
     },
     async (_arguments, extra) =>
       withCaller({ commentBot, authInfo: extra.authInfo }, async (bot, ownerSubject) => {
-        const tasks = await bot.openTasks({ ownerSubject });
+        const tasks = await bot.pickUpTasks({ ownerSubject });
         return jsonResult({ count: tasks.length, tasks: tasks.map(commentTaskPayload) });
       }),
   );
@@ -122,8 +125,10 @@ export function registerCommentTools(options: Readonly<{ server: McpServer; comm
     {
       title: "Answer a comment",
       description:
-        "Post a reply into a comment task's thread, as the Sasha bot account, and mark the task answered. Plain " +
-        "text; https links are fine (for example to the deck, or to a proposal page).",
+        "Answer a comment task in its thread, as the Sasha bot account, and mark the task answered. The answer " +
+        "replaces the \"On it ⏳\" acknowledgement comment_tasks posted, so the thread reads as the question and " +
+        "then this answer (a new reply only if that acknowledgement is gone). Plain text; https links are fine " +
+        "(for example to the deck, or to a proposal page).",
       inputSchema: {
         taskId: z.string().min(1).describe("The taskId from comment_tasks."),
         text: z.string().min(1).max(MAX_REPLY_CHARACTERS).describe("The reply, as the user should read it in the thread."),

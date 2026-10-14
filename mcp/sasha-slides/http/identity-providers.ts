@@ -59,7 +59,7 @@ import { asRecord, asString, asStringArray, parseJson } from "./json-values";
 export type HttpFetch = (url: string, init: HttpFetchInit) => Promise<HttpFetchResponse>;
 
 export type HttpFetchInit = Readonly<{
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PATCH";
   headers: Readonly<Record<string, string>>;
   body?: string;
   signal: AbortSignal;
