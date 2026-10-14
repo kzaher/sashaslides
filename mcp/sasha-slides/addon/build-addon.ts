@@ -48,6 +48,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SERVER_FUNCTION_NAMES } from "./src/bridge.ts";
+import { connectorUrlOf } from "./src/connector-url.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -1038,8 +1039,8 @@ async function main(): Promise<void> {
   });
   //    The SIDEBAR gets the two facts its "nothing is listening" setup panel prints: this
   //    checkout's absolute path (the Dev tab's exact command) and the hosted connector's address
-  //    (the Setup tab), or `null` when SASHA_CONNECTOR_URL is unset -- the panel then says it is
-  //    not configured rather than printing a placeholder someone would paste.
+  //    (the Setup tab): production unless SASHA_CONNECTOR_URL names another, and `null` only for
+  //    SASHA_CONNECTOR_URL=none -- the panel then says it is not configured (src/connector-url.ts).
   const connectorUrl = connectorUrlOf(process.env.SASHA_CONNECTOR_URL);
   const sidebarJs = await bundleSurface({
     entry: join(HERE, "src", "sidebar.tsx"),
@@ -1049,7 +1050,7 @@ async function main(): Promise<void> {
       __SASHA_CONNECTOR_URL__: JSON.stringify(connectorUrl),
     },
   });
-  process.stdout.write(`connector  ${connectorUrl ?? "not configured (set SASHA_CONNECTOR_URL)"}\n`);
+  process.stdout.write(`connector  ${connectorUrl ?? "not configured (SASHA_CONNECTOR_URL=none)"}\n`);
 
   // 4. The three pages. No `eval` anywhere and no external <script src>: the Slides editor serves
   //    an HtmlService document from a sandboxed googleusercontent iframe whose CSP forbids
@@ -1116,24 +1117,6 @@ async function main(): Promise<void> {
     );
   }
   process.stdout.write(`\nclasp:  cd ${OUT} && clasp push\n`);
-}
-
-/**
- * The hosted connector address from the environment, or null when unset. Claude will not connect a
- * remote connector over plain HTTP (CONNECT.md section B), so anything but an https URL fails the
- * build instead of shipping an address that cannot work.
- */
-function connectorUrlOf(raw: string | undefined): string | null {
-  const trimmed = raw?.trim() ?? "";
-  if (trimmed === "") return null;
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    throw new Error(`SASHA_CONNECTOR_URL is not a URL: ${trimmed}`);
-  }
-  if (parsed.protocol !== "https:") throw new Error(`SASHA_CONNECTOR_URL must be https: ${trimmed}`);
-  return parsed.href;
 }
 
 /** One surface's inlined IIFE bundle. */

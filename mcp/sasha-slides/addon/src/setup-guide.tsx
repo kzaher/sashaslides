@@ -235,6 +235,8 @@ function BotSteps({
   switch (bot) {
     case "claude-app":
       return (
+        <>
+        <WalkthroughVideo connectorUrl={connectorUrl} file="claude-ai.mp4" />
         <ol className="sasha-setup-steps">
           <li>
             In claude.ai or Claude Desktop open Customize → Connectors, press + Add, then Add custom
@@ -252,8 +254,8 @@ function BotSteps({
             In a new chat, paste:
             <CopyBlock text={prompt} />
           </li>
-          <WalkthroughLink connectorUrl={connectorUrl} file="claude-ai.mp4" />
         </ol>
+        </>
       );
     case "claude-code":
       return (
@@ -277,6 +279,7 @@ function BotSteps({
       // (developers.openai.com/api/docs/guides/custom-mcp-server) and help centre article 12584461.
       return (
         <>
+          <WalkthroughVideo connectorUrl={connectorUrl} file="chatgpt.mp4" />
           <p className="sasha-dim">
             Needs ChatGPT on the web. Checked on a Plus account: adding the server, signing in,
             staging slides and receiving your pick all worked. OpenAI lists full MCP with write tools
@@ -307,7 +310,6 @@ function BotSteps({
               <CopyBlock text={prompt} />
               ChatGPT asks you to confirm each Sasha action that writes to your Drive; approve them.
             </li>
-            <WalkthroughLink connectorUrl={connectorUrl} file="chatgpt.mp4" />
           </ol>
         </>
       );
@@ -318,20 +320,22 @@ function BotSteps({
 
 /**
  * The recorded walkthrough for this assistant, served next to the connector (`/videos/<file>` on its
- * host, uploaded by deploy/publish.sh videos). Nothing when the address does not parse.
+ * host, uploaded by deploy/publish.sh videos), playing in place ABOVE the written steps: asked for
+ * 2026-10-14 instead of a link out at the bottom. `preload="metadata"` fetches only enough for the
+ * first frame and the length, so the sidebar does not download the whole recording on open.
+ * Nothing when the address does not parse.
  */
-function WalkthroughLink({ connectorUrl, file }: { connectorUrl: string; file: string }): JSX.Element | null {
+function WalkthroughVideo({ connectorUrl, file }: { connectorUrl: string; file: string }): JSX.Element | null {
   let origin: string;
   try {
     origin = new URL(connectorUrl).origin;
   } catch {
     return null;
   }
-  const href = `${origin}/videos/${file}`;
   return (
-    <li>
-      Prefer to watch? <a href={href} target="_blank" rel="noreferrer">Every click, recorded</a>.
-    </li>
+    <video className="sasha-setup-video" src={`${origin}/videos/${file}`} controls preload="metadata" playsInline>
+      Your browser cannot play this video.
+    </video>
   );
 }
 

@@ -144,7 +144,9 @@ test("storage that throws is survived: nothing is remembered, nothing crashes", 
   assert.deepEqual(working.load(), { tab: "dev", bot: "claude-code" });
 });
 
-test("the Claude app and ChatGPT steps link their walkthrough video on the connector's host", () => {
+// Asked for 2026-10-14: the walkthrough plays in place, above the written steps, instead of a
+// link out ("Prefer to watch? Every click, recorded") at the bottom of the list.
+test("the Claude app and ChatGPT walkthroughs play inline, above the written steps, from the connector's host", () => {
   const rows: readonly { bot: SetupChoice["bot"]; video: string | null }[] = [
     { bot: "claude-app", video: "https://sasha.example.com/videos/claude-ai.mp4" },
     { bot: "chatgpt", video: "https://sasha.example.com/videos/chatgpt.mp4" },
@@ -152,11 +154,19 @@ test("the Claude app and ChatGPT steps link their walkthrough video on the conne
   ];
   for (const row of rows) {
     const markup = textOf(markupOf({ connectorUrl: HOSTED, choice: { tab: "setup", bot: row.bot } }));
-    if (row.video === null) assert.doesNotMatch(markup, /\/videos\//, row.bot);
-    else assert.ok(markup.includes(`href="${row.video}"`), `${row.bot} links ${row.video}`);
+    if (row.video === null) {
+      assert.doesNotMatch(markup, /\/videos\/|<video/, row.bot);
+      continue;
+    }
+    const video = markup.indexOf("<video");
+    assert.ok(video >= 0, `${row.bot} embeds a <video>`);
+    assert.ok(markup.includes(`src="${row.video}"`), `${row.bot} plays ${row.video}`);
+    assert.match(markup.slice(video, markup.indexOf(">", video)), /controls/, `${row.bot}'s video has a play button`);
+    assert.ok(video < markup.indexOf('class="sasha-setup-steps"'), `${row.bot}'s video comes before the steps`);
+    assert.doesNotMatch(markup, /Every click, recorded/, `${row.bot} no longer links out`);
   }
   for (const bot of ["claude-app", "chatgpt"] as const) {
-    assert.doesNotMatch(textOf(markupOf({ connectorUrl: null, choice: { tab: "setup", bot } })), /\/videos\//, "no link without a host");
+    assert.doesNotMatch(textOf(markupOf({ connectorUrl: null, choice: { tab: "setup", bot } })), /\/videos\/|<video/, "no video without a host");
   }
 });
 
