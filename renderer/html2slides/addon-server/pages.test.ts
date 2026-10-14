@@ -17,6 +17,8 @@ test("each public address maps to its page, and the old home page moved to /dev"
     { path: "/dev/", file: "app.html" },
     { path: "/privacy", file: "privacy.html" },
     { path: "/terms", file: "terms.html" },
+    { path: "/walkthroughs/claude-ai", file: "walkthroughs/claude-ai.html" },
+    { path: "/walkthroughs/chatgpt", file: "walkthroughs/chatgpt.html" },
     { path: "/shell.html", file: null },
     { path: "/privacy/extra", file: null },
   ];
@@ -100,6 +102,39 @@ test("every public page declares the Sasha Slides favicon, and the files exist",
 
 test("the home page links the walkthrough video for each assistant", () => {
   const home = read("home.html");
-  for (const href of ['href="/videos/claude-ai.mp4"', 'href="/videos/chatgpt.mp4"']) assert.ok(home.includes(href), href);
+  for (const href of ['href="/walkthroughs/claude-ai"', 'href="/walkthroughs/chatgpt"']) assert.ok(home.includes(href), href);
   assert.match(home, /https:\/\/sashaslides\.com\/mcp/, "and the connector address to paste");
+});
+
+test("the home page describes the comment flow: the bot address, the share step and the stop step", () => {
+  const home = read("home.html");
+  assert.match(home, /aria-label="Answering comments"/);
+  assert.match(home, /sasha@sashaslides\.com/, "names the address to share the deck with");
+  assert.match(home, /Share your deck with/, "says to share the deck");
+  assert.match(home, /Tell your assistant you are done/, "says how to stop");
+  assert.match(home, /24 hours/);
+  assert.match(home, /Stop when I say I&rsquo;m done/, "has the example prompt");
+});
+
+test("the setup walkthrough pages exist, each with its title, the animated player and the production connector", () => {
+  const rows: readonly { file: string; flow: string; title: string }[] = [
+    { file: "walkthroughs/claude-ai.html", flow: "claude-ai", title: "Connect Claude to Sasha Slides" },
+    { file: "walkthroughs/chatgpt.html", flow: "chatgpt", title: "Connect ChatGPT to Sasha Slides" },
+  ];
+  for (const row of rows) {
+    assert.ok(existsSync(join(PUBLIC_DIR, row.file)), `${row.file}: run mcp/sasha-slides/addon npm run build:walkthroughs`);
+    const page = read(row.file);
+    assert.ok(page.includes(`<title>${row.title}</title>`), `${row.file}: title`);
+    assert.ok(page.includes(`data-flow="${row.flow}"`), `${row.file}: names its flow`);
+    assert.ok(page.includes('data-connector="https://sashaslides.com/mcp"'), `${row.file}: types the production address`);
+    assert.ok(page.includes("sasha-wt-viewport") && page.includes("Play the walkthrough"), `${row.file}: carries the player`);
+    assert.doesNotMatch(page, /<script[^>]+src=|<link[^>]+stylesheet|\.mp4/, `${row.file}: self-contained`);
+  }
+});
+
+test("the home page's data section offers Enterprise on your own servers and states the free-plan data use", () => {
+  const home = read("home.html");
+  assert.match(home, /<h2>Your data stays yours<\/h2>/);
+  assert.match(home, /Enterprise:<\/strong> run Sasha Slides on your own servers/);
+  assert.match(home, /On the free plan we may use data about how you use Sasha Slides to improve it; on a paid plan we never do\./);
 });

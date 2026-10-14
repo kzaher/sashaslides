@@ -492,7 +492,6 @@ html, body { margin: 0; padding: 0; background: #fff; }
 .sasha-setup-bots { display: flex; gap: 4px; flex-wrap: wrap; }
 .sasha-setup-panel { display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 1.5; color: #3c4043; }
 .sasha-setup-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
-.sasha-setup-video { display: block; width: 100%; max-width: 100%; border-radius: 6px; background: #000; margin: 0 0 8px; }
 .sasha-setup-missing { margin: 0; line-height: 1.5; }
 .sasha-setup-inline { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
 .sasha-copy-row { display: flex; align-items: flex-start; gap: 4px; margin-top: 4px; }

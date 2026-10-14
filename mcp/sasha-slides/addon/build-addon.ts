@@ -50,6 +50,7 @@ import { fileURLToPath } from "node:url";
 import { SERVER_FUNCTION_NAMES } from "./src/bridge.ts";
 import { connectorUrlOf } from "./src/connector-url.ts";
 import { PICKER_CSS } from "./src/picker-styles.ts";
+import { WALKTHROUGH_CSS } from "./src/walkthrough-styles.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -1177,6 +1178,11 @@ const MINIFIED_STYLESHEET: Plugin = {
   setup(builder) {
     builder.onLoad({ filter: /[\\/]picker-styles\.ts$/ }, () => ({
       contents: `export const PICKER_CSS = ${JSON.stringify(transformSync(PICKER_CSS, { loader: "css", minify: true }).code)};`,
+      loader: "ts",
+    }));
+    // The setup walkthrough's own stylesheet (src/walkthrough-player.tsx renders it), the same way.
+    builder.onLoad({ filter: /[\\/]walkthrough-styles\.ts$/ }, () => ({
+      contents: `export const WALKTHROUGH_CSS = ${JSON.stringify(transformSync(WALKTHROUGH_CSS, { loader: "css", minify: true }).code)};`,
       loader: "ts",
     }));
   },

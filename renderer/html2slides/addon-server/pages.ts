@@ -7,6 +7,9 @@ export const PAGES: Readonly<Record<string, string>> = {
   "/dev/": "app.html",
   "/privacy": "privacy.html",
   "/terms": "terms.html",
+  // Animated setup walkthroughs (built by mcp/sasha-slides/addon `npm run build:walkthroughs`).
+  "/walkthroughs/claude-ai": "walkthroughs/claude-ai.html",
+  "/walkthroughs/chatgpt": "walkthroughs/chatgpt.html",
 };
 
 /** The file in public/ that a path is served from, or null when it is not one of the pages. */

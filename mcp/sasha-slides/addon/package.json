@@ -7,6 +7,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "build": "npx tsx build-addon.ts",
+    "build:walkthroughs": "npx tsx build-walkthroughs.ts",
     "test": "npm run -s typecheck && node --test --import tsx \"src/**/*.test.ts\"",
     "smoke": "node --import tsx src/smoke.e2e.ts"
   },

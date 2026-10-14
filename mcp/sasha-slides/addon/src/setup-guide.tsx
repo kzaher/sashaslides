@@ -14,6 +14,7 @@
 import { type JSX, useRef, useState } from "react";
 import type { NothingListeningNotice } from "../../feedback-delivery.ts";
 import { assertNever } from "./protocol.ts";
+import { WalkthroughPlayer } from "./walkthrough-player.tsx";
 
 /** Everything the panel needs from outside: two build-time constants and where choices are kept. */
 export type SetupEnvironment = Readonly<{
@@ -236,7 +237,7 @@ function BotSteps({
     case "claude-app":
       return (
         <>
-        <WalkthroughVideo connectorUrl={connectorUrl} file="claude-ai.mp4" />
+        <WalkthroughPlayer flow="claude-ai" connectorUrl={connectorUrl} />
         <ol className="sasha-setup-steps">
           <li>
             In claude.ai or Claude Desktop open Customize → Connectors, press + Add, then Add custom
@@ -279,7 +280,7 @@ function BotSteps({
       // (developers.openai.com/api/docs/guides/custom-mcp-server) and help centre article 12584461.
       return (
         <>
-          <WalkthroughVideo connectorUrl={connectorUrl} file="chatgpt.mp4" />
+          <WalkthroughPlayer flow="chatgpt" connectorUrl={connectorUrl} />
           <p className="sasha-dim">
             Needs ChatGPT on the web. Checked on a Plus account: adding the server, signing in,
             staging slides and receiving your pick all worked. OpenAI lists full MCP with write tools
@@ -316,27 +317,6 @@ function BotSteps({
     default:
       return assertNever(bot);
   }
-}
-
-/**
- * The recorded walkthrough for this assistant, served next to the connector (`/videos/<file>` on its
- * host, uploaded by deploy/publish.sh videos), playing in place ABOVE the written steps: asked for
- * 2026-10-14 instead of a link out at the bottom. `preload="metadata"` fetches only enough for the
- * first frame and the length, so the sidebar does not download the whole recording on open.
- * Nothing when the address does not parse.
- */
-function WalkthroughVideo({ connectorUrl, file }: { connectorUrl: string; file: string }): JSX.Element | null {
-  let origin: string;
-  try {
-    origin = new URL(connectorUrl).origin;
-  } catch {
-    return null;
-  }
-  return (
-    <video className="sasha-setup-video" src={`${origin}/videos/${file}`} controls preload="metadata" playsInline>
-      Your browser cannot play this video.
-    </video>
-  );
 }
 
 /** A link out of the sidebar. The HtmlService frame cannot navigate itself, so it opens a new tab. */

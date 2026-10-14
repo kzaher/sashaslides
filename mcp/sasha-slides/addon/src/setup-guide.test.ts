@@ -144,29 +144,31 @@ test("storage that throws is survived: nothing is remembered, nothing crashes", 
   assert.deepEqual(working.load(), { tab: "dev", bot: "claude-code" });
 });
 
-// Asked for 2026-10-14: the walkthrough plays in place, above the written steps, instead of a
-// link out ("Prefer to watch? Every click, recorded") at the bottom of the list.
-test("the Claude app and ChatGPT walkthroughs play inline, above the written steps, from the connector's host", () => {
-  const rows: readonly { bot: SetupChoice["bot"]; video: string | null }[] = [
-    { bot: "claude-app", video: "https://sasha.example.com/videos/claude-ai.mp4" },
-    { bot: "chatgpt", video: "https://sasha.example.com/videos/chatgpt.mp4" },
-    { bot: "claude-code", video: null },
+// Asked for 2026-10-14: the walkthrough plays in place, above the written steps. Since then it is
+// an animated mock of the clicks (walkthrough-player.tsx) rather than a recorded video: shorter,
+// readable at sidebar width, and typing the real connector address.
+test("the Claude app and ChatGPT walkthroughs play inline, above the written steps, instead of a video", () => {
+  const rows: readonly { bot: SetupChoice["bot"]; firstCaption: RegExp | null }[] = [
+    { bot: "claude-app", firstCaption: /claude\.ai home page \(claude\.ai\/new\), already signed in/ },
+    { bot: "chatgpt", firstCaption: /chatgpt\.com home page, signed in \(ChatGPT Plus\)/ },
+    { bot: "claude-code", firstCaption: null },
   ];
   for (const row of rows) {
     const markup = textOf(markupOf({ connectorUrl: HOSTED, choice: { tab: "setup", bot: row.bot } }));
-    if (row.video === null) {
-      assert.doesNotMatch(markup, /\/videos\/|<video/, row.bot);
+    assert.doesNotMatch(markup, /<video|\/videos\//, `${row.bot} embeds no video`);
+    if (row.firstCaption === null) {
+      assert.doesNotMatch(markup, /class="sasha-wt"/, row.bot);
       continue;
     }
-    const video = markup.indexOf("<video");
-    assert.ok(video >= 0, `${row.bot} embeds a <video>`);
-    assert.ok(markup.includes(`src="${row.video}"`), `${row.bot} plays ${row.video}`);
-    assert.match(markup.slice(video, markup.indexOf(">", video)), /controls/, `${row.bot}'s video has a play button`);
-    assert.ok(video < markup.indexOf('class="sasha-setup-steps"'), `${row.bot}'s video comes before the steps`);
+    const player = markup.indexOf('class="sasha-wt"');
+    assert.ok(player >= 0, `${row.bot} shows the walkthrough`);
+    assert.match(markup, /aria-label="Play the walkthrough"/, `${row.bot}'s walkthrough has a play button`);
+    assert.match(markup, row.firstCaption, `${row.bot} captions its first step`);
+    assert.ok(player < markup.indexOf('class="sasha-setup-steps"'), `${row.bot}'s walkthrough comes before the steps`);
     assert.doesNotMatch(markup, /Every click, recorded/, `${row.bot} no longer links out`);
   }
   for (const bot of ["claude-app", "chatgpt"] as const) {
-    assert.doesNotMatch(textOf(markupOf({ connectorUrl: null, choice: { tab: "setup", bot } })), /\/videos\/|<video/, "no video without a host");
+    assert.doesNotMatch(textOf(markupOf({ connectorUrl: null, choice: { tab: "setup", bot } })), /class="sasha-wt"/, "no walkthrough without a host");
   }
 });
 

@@ -40,6 +40,18 @@ a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-ra
 .section h2 { margin: 0; font-size: 28px; letter-spacing: -.02em; font-weight: 600; }
 .section p { margin: 0; color: var(--muted); }
 
+.comments { margin-top: 64px; display: grid; gap: 20px; }
+.comments .steps { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.comments .step { padding: 22px 18px; }
+.comments-intro { display: grid; gap: 8px; max-width: 64ch; }
+.comments-intro h2 { margin: 0; font-size: 28px; letter-spacing: -.02em; font-weight: 600; }
+.comments-intro p, .comments-note { margin: 0; color: var(--muted); }
+.comments-note { max-width: 64ch; font-size: 15px; }
+.step code { font-size: 12.5px; background: var(--bg); padding: 1px 4px; border-radius: 5px; white-space: nowrap; }
+.step .aside { font-size: 14px; opacity: .85; }
+.prompt { margin: 0; background: var(--panel); border-radius: 18px; padding: 22px 28px; font-size: 19px; line-height: 1.4; display: grid; gap: 6px; overflow-wrap: anywhere; }
+.prompt span { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+
 /* Legal */
 .legal { max-width: 68ch; }
 .legal h1 { font-size: clamp(34px, 5vw, 48px); letter-spacing: -.035em; line-height: 1.08; margin: 0 0 8px; font-weight: 600; }
