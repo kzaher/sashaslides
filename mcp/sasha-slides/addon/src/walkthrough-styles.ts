@@ -35,6 +35,14 @@ export const WALKTHROUGH_CSS = [
   ".sasha-wt-step { font-family: Roboto, Arial, sans-serif; display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 9px;",
   "  background: #1a73e8; color: #fff; font-size: 0.85em; font-weight: 600; }",
 
+  // ---- full screen: the stage fits the screen's width AND height, the caption grows to match
+  ".sasha-wt:fullscreen { margin: 0; justify-content: center; align-items: center; gap: 14px; padding: 24px; background: #eef1f6; font-size: 20px; }",
+  ".sasha-wt:fullscreen .sasha-wt-viewport { width: min(100%, calc((100vh - 220px) * 1.6)); flex: none; border-radius: 14px; cursor: default; }",
+  ".sasha-wt:fullscreen .sasha-wt-controls, .sasha-wt:fullscreen .sasha-wt-caption { width: min(100%, calc((100vh - 220px) * 1.6)); }",
+  ".sasha-wt:fullscreen .sasha-wt-control { width: 38px; height: 38px; }",
+  ".sasha-wt:fullscreen .sasha-wt-time { font-size: 15px; }",
+  ".sasha-wt:fullscreen .sasha-wt-caption { min-height: 3.2em; padding: 12px 16px; border-radius: 12px; }",
+
   // ---- shared mock pieces
   ".sasha-wt-screen { position: absolute; left: 0; top: 0; width: 800px; height: 500px; }",
   ".sasha-wt-screen * { font-family: inherit; }",

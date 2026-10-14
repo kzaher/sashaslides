@@ -15,6 +15,7 @@ test("the first frame is the start screen under a play button, with the first ca
   assert.match(markup, /claude\.ai home page \(claude\.ai\/new\), already signed in/);
   assert.match(markup, /role="progressbar"/);
   assert.match(markup, /aria-label="Restart"/);
+  assert.match(markup, /aria-label="Full screen"/, "the sidebar player can go full screen");
   assert.ok(markup.indexOf("sasha-wt-stage") < markup.indexOf("sasha-wt-caption"), "the caption sits outside, below the stage");
   assert.doesNotMatch(markup, /<video|<img/);
 });

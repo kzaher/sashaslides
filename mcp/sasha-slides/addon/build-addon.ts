@@ -50,6 +50,7 @@ import { fileURLToPath } from "node:url";
 import { SERVER_FUNCTION_NAMES } from "./src/bridge.ts";
 import { connectorUrlOf } from "./src/connector-url.ts";
 import { PICKER_CSS } from "./src/picker-styles.ts";
+import { TIDEPOOL_CALM_CSS } from "./src/tidepool-calm-styles.ts";
 import { TIDEPOOL_CSS } from "./src/tidepool-styles.ts";
 import { WALKTHROUGH_CSS } from "./src/walkthrough-styles.ts";
 
@@ -1150,6 +1151,11 @@ const MINIFIED_STYLESHEET: Plugin = {
     // The setup walkthrough's own stylesheet (src/walkthrough-player.tsx renders it), the same way.
     builder.onLoad({ filter: /[\\/]walkthrough-styles\.ts$/ }, () => ({
       contents: `export const WALKTHROUGH_CSS = ${JSON.stringify(transformSync(WALKTHROUGH_CSS, { loader: "css", minify: true }).code)};`,
+      loader: "ts",
+    }));
+    // The slides window's calmer Tidepool (src/tidepool-calm-styles.ts), the same way.
+    builder.onLoad({ filter: /[\\/]tidepool-calm-styles\.ts$/ }, () => ({
+      contents: `export const TIDEPOOL_CALM_CSS = ${JSON.stringify(transformSync(TIDEPOOL_CALM_CSS, { loader: "css", minify: true }).code)};`,
       loader: "ts",
     }));
     // The sidebar's Tidepool look (src/tidepool-styles.ts), the same way.

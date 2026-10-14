@@ -24,6 +24,7 @@
 
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { PICKER_CSS } from "./picker-styles.ts";
+import { TIDEPOOL_CALM_CSS } from "./tidepool-calm-styles.ts";
 import { ELEMENT_INSPECTOR_CSS } from "./element-inspector.tsx";
 import { SlideEditorWindow } from "./slide-editor-window.tsx";
 import { CommentCard, CommentHead } from "./comment-card.tsx";
@@ -699,8 +700,9 @@ function Shell({ children }: { children: ReactNode }): JSX.Element {
       <style>
         {PICKER_CSS}
         {ELEMENT_INSPECTOR_CSS}
+        {TIDEPOOL_CALM_CSS}
       </style>
-      <div className="sasha-shell sasha-shell-wide">{children}</div>
+      <div className="sasha-shell sasha-shell-wide sasha-calm">{children}</div>
     </>
   );
 }

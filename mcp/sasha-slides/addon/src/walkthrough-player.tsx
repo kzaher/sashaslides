@@ -16,6 +16,11 @@
 // The pointer and its click ring are drawn inside the stage but enlarged when the stage is small,
 // so they stay obvious at any width.
 //
+// FULL SCREEN, asked for 2026-10-14: at sidebar width the mocked screens are small. The button puts
+// the whole player (stage, controls, caption) into the browser's full screen; the stage then fits
+// the screen's width AND height, and the same button or Escape leaves. Measured in the live sidebar:
+// HtmlService's frames allow it (`fullscreenEnabled` true, `allow="fullscreen *"`).
+//
 // NO MOTION UNLESS ASKED. With `prefers-reduced-motion: reduce` it does not start by itself: it shows
 // the first frame under the play button until the viewer presses it.
 
@@ -46,7 +51,20 @@ export function WalkthroughPlayer({
   const timeline = useMemo(() => timelineOf(scriptOf({ flow, connectorUrl })), [flow, connectorUrl]);
   const [state, dispatch] = useReducer(reducePlayer, timeline.totalMs, initialPlayerState);
   const viewport = useRef<HTMLDivElement | null>(null);
+  const player = useRef<HTMLElement | null>(null);
   const [scale, setScale] = useState<number>(UNMEASURED_SCALE);
+  const [fullScreen, setFullScreen] = useState(false);
+
+  useEffect(() => {
+    const onChange = (): void => setFullScreen(document.fullscreenElement !== null && document.fullscreenElement === player.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  const toggleFullScreen = (): void => {
+    // A refusal (a host that forbids it) leaves the player as it was; there is nothing else to do.
+    if (document.fullscreenElement !== null) void document.exitFullscreen().catch(() => undefined);
+    else void player.current?.requestFullscreen().catch(() => undefined);
+  };
 
   useEffect(() => {
     const element = viewport.current;
@@ -99,7 +117,7 @@ export function WalkthroughPlayer({
   };
   const percent = timeline.totalMs === 0 ? 0 : (state.elapsedMs / timeline.totalMs) * 100;
   return (
-    <figure className="sasha-wt" aria-label={`How to connect ${assistantNameOf(flow)} to Sasha Slides`}>
+    <figure className="sasha-wt" ref={player} aria-label={`How to connect ${assistantNameOf(flow)} to Sasha Slides`}>
       <style>{WALKTHROUGH_CSS}</style>
       <div className="sasha-wt-viewport" ref={viewport} onClick={toggle}>
         <div className="sasha-wt-stage" style={{ transform: `scale(${scale})` }} aria-hidden="true">
@@ -145,6 +163,14 @@ export function WalkthroughPlayer({
         <span className="sasha-wt-time">
           {clockOf(state.elapsedMs)} / {clockOf(timeline.totalMs)}
         </span>
+        <button
+          type="button"
+          className="sasha-wt-control"
+          aria-label={fullScreen ? "Exit full screen" : "Full screen"}
+          onClick={toggleFullScreen}
+        >
+          {fullScreen ? <ExitFullScreenIcon /> : <FullScreenIcon />}
+        </button>
       </div>
       <figcaption className="sasha-wt-caption" aria-live="polite">
         <span className="sasha-wt-step">{frame.label === "Start" ? "Start" : `Step ${frame.label}`}</span>
@@ -274,6 +300,22 @@ function PointerLayer({ frame, scale }: Readonly<{ frame: WalkthroughFrame; scal
 function clockOf(timeMs: number): string {
   const seconds = Math.floor(timeMs / 1000);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function FullScreenIcon(): JSX.Element {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path d="M1.5 5V1.5H5M9 1.5h3.5V5M12.5 9v3.5H9M5 12.5H1.5V9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ExitFullScreenIcon(): JSX.Element {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path d="M5 1.5V5H1.5M12.5 5H9V1.5M9 12.5V9h3.5M1.5 9H5v3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function PlayIcon(): JSX.Element {
