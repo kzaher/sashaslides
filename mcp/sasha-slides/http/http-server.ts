@@ -39,6 +39,7 @@ import type { AuthorizationServer, OAuthErrorCode } from "./authorization-server
 import type { AccountPortal } from "./account-portal";
 import type { DeckRouter } from "../decks/deck-router";
 import type { DeckSockets } from "../decks/deck-socket";
+import type { CommentAccessPage } from "../comment-bot/comment-access-page";
 
 export type RequestListener = (request: IncomingMessage, response: ServerResponse) => void;
 
@@ -53,6 +54,12 @@ export function createSashaSlidesHttpServer(
     accountPortal?: AccountPortal;
     /** Absent: no comment bot. Present: Drive's push notifications at `/hooks/drive` go to it. */
     driveHook?: DriveHook;
+    /**
+     * Absent: no `/comments/allow`. Present: the comment bot's per-deck picker page
+     * (`comment-bot/comment-access-page.ts`), which also answers the shared Google callback for
+     * the states it issued.
+     */
+    commentAccess?: CommentAccessPage;
     /** Absent: no decks. Present: the deck pages, `/deck-api/*` and the deck WebSocket upgrade. */
     decks?: DeckEntryPoints;
   }>,
@@ -95,11 +102,17 @@ export function sashaSlidesRequestListener(
     accountPortal?: AccountPortal;
     /** Absent: no comment bot. Present: Drive's push notifications at `/hooks/drive` go to it. */
     driveHook?: DriveHook;
+    /**
+     * Absent: no `/comments/allow`. Present: the comment bot's per-deck picker page
+     * (`comment-bot/comment-access-page.ts`), which also answers the shared Google callback for
+     * the states it issued.
+     */
+    commentAccess?: CommentAccessPage;
     /** Absent: no decks. Present: the deck pages and `/deck-api/*`. */
     decks?: DeckEntryPoints;
   }>,
 ): RequestListener {
-  const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal, driveHook, decks } = options;
+  const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal, driveHook, commentAccess, decks } = options;
   const { endpoints } = authorizationServer;
 
   async function route(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -117,6 +130,11 @@ export function sashaSlidesRequestListener(
     // origin (no CORS), and the shared Google callback offered to the Google Slides module first,
     // which answers only a `state` it issued.
     if (decks !== undefined && (await decks.router.handleRequest({ request, response, url }))) return;
+
+    // The comment bot's picker page (a browser page on this origin, so no CORS), and the shared
+    // Google callback for the states that page issued; every other callback falls through to the
+    // authorization server below.
+    if (commentAccess !== undefined && (await commentAccess.handleRequest({ request, response, url }))) return;
 
     // Server-to-server from Google, so no CORS. Checked before anything else reads a body.
     if (driveHook !== undefined && path === DRIVE_HOOK_PATH) {

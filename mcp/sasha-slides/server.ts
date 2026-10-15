@@ -288,7 +288,7 @@ export function createSashaSlidesServer(
      * caller upload any file here (the OAuth store, the key store) into their own Drive.
      */
     remote: boolean;
-    /** Absent (stdio, or no `--comment-bot`): the comment tools answer that the bot is off. */
+    /** Absent (stdio): the comment tools answer that they need the remote connector. */
     commentBot?: CommentBot;
     /** Absent (stdio, or no account portal): the deck tools are listed and answer why they cannot work. */
     decks?: DeckToolWiring;
@@ -1706,8 +1706,6 @@ export type ServerMode =
       identityProvidersPath: string | null;
       /** Null leaves email and password sign-in off; a path is the Gmail API sender's JSON file. */
       mailSenderPath: string | null;
-      /** Null leaves the comment bot off; a path is the bot account's refresh-token JSON file. */
-      commentBotPath: string | null;
       /** Comma-separated proxy addresses or subnets whose X-Real-IP is believed; null is loopback alone. */
       trustedProxies: string | null;
       /** Null disables handshake recording; a path appends one JSON line per `initialize`. */
@@ -1769,6 +1767,8 @@ export function parseServerMode(args: readonly string[]): ServerMode {
   }
   const port = parsePort(values.get("--port"));
   if (port === null) return { kind: "usage", reason: "--port must be an integer between 1 and 65535" };
+  // Kept as a known flag only to refuse it by name: a silent no-op would hide a stale deploy.
+  if (values.has("--comment-bot")) return { kind: "usage", reason: COMMENT_BOT_FLAG_REMOVED };
   const storePath = values.get("--store") ?? null;
   const keyStorePath = values.get("--key-store") ?? null;
   if ((storePath === null) !== (keyStorePath === null)) {
@@ -1788,7 +1788,6 @@ export function parseServerMode(args: readonly string[]): ServerMode {
     googleClientPath: values.get("--google-client") ?? CLIENT_PATH,
     identityProvidersPath: values.get("--identity-providers") ?? null,
     mailSenderPath: values.get("--mail-sender") ?? null,
-    commentBotPath: values.get("--comment-bot") ?? null,
     trustedProxies: values.get("--trusted-proxy") ?? null,
     handshakeLogPath,
     frameLogPath,
@@ -1801,7 +1800,7 @@ export function parseServerMode(args: readonly string[]): ServerMode {
 
 export const USAGE = `sasha-slides MCP server
 
-  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--mail-sender <path> [--trusted-proxy <subnets>]] [--comment-bot <path>] [--google-client <path>] [--deck-data <directory>] [--web-build <directory>]
+  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--mail-sender <path> [--trusted-proxy <subnets>]] [--google-client <path>] [--deck-data <directory>] [--web-build <directory>]
   npx tsx mcp/sasha-slides/server.ts --stdio
   npx tsx mcp/sasha-slides/server.ts --selftest
 
@@ -1837,12 +1836,15 @@ export const USAGE = `sasha-slides MCP server
                  "from": "Sasha Slides <address>"}. Mint it with
                    npx tsx mcp/sasha-slides/e2e/gmail-sender-token.ts <file>
                  (scope gmail.send only). Needs SASHA_SESSION_SECRET, like the flag above.
-  --comment-bot  JSON file that turns on the comment bot (watch_comments and the other comment
-                 tools): {"clientId": "...", "clientSecret": "...", "refreshToken": "...",
-                 "address": "sasha@sashaslides.com"}, a refresh token for the bot account
-                 with scope https://www.googleapis.com/auth/drive. Google pushes Drive changes
-                 to <public-url>/hooks/drive, so that path must reach this server over HTTPS.
-                 Needs --store to keep watches across restarts.
+  Comments     watch_comments and the other comment tools are always on with --http: each
+                 watch reads and answers comments as the user who started it, with their own
+                 Google grant (drive.file), and every line starts with "Sasha: ". Google pushes
+                 Drive changes to <public-url>/hooks/drive, so that path must reach this server
+                 over HTTPS; --store keeps watches across restarts. The first time for a deck the
+                 user chooses it once on <public-url>/comments/allow, which opens the Google
+                 Picker and needs SASHA_PICKER_API_KEY (an API key of the OAuth client's
+                 project, Google Picker API enabled). (--comment-bot, a shared bot account,
+                 was removed and is refused.)
   --trusted-proxy  Comma-separated addresses or CIDR subnets of the reverse proxy, whose
                  X-Real-IP header is believed when limiting sign-in attempts and mail per
                  client. Loopback is always trusted. Behind Docker's published port the
@@ -2129,6 +2131,11 @@ function randomSuffix(): string {
   return randomBytes(4).readUInt32BE(0).toString(36).padStart(6, "0").slice(-6);
 }
 
+/** Why `--comment-bot` is refused: the shared Sasha Google account it configured is gone. */
+export const COMMENT_BOT_FLAG_REMOVED =
+  "--comment-bot was removed: the comment bot now acts as each signed-in user with their own Google grant, so there is " +
+  "no bot account to configure. Drop the flag (and its secret file); see mcp/sasha-slides/CONNECT.md, \"Answering comments\".";
+
 const VALUE_FLAGS: readonly string[] = [
   "--public-url",
   "--skill-file",
@@ -2293,13 +2300,15 @@ function serveHttp(
     process.exitCode = 1;
     return Promise.resolve();
   }
-  const commentBot = loadCommentBot({ path: mode.commentBotPath, publicUrl: mode.publicUrl, store: stack.store, warn });
-  if (commentBot.kind === "failed") {
-    process.stderr.write(`[${SERVER_NAME}] cannot start: ${commentBot.message}\n`);
-    process.exitCode = 1;
-    return Promise.resolve();
-  }
-  const bot = commentBot.kind === "ok" ? commentBot.bot : null;
+  const commentBot = loadCommentBot({
+    publicUrl: mode.publicUrl,
+    googleCallbackUrl: stack.endpoints.googleCallbackUrl,
+    googleClient: stack.googleClient,
+    pickerApiKey: process.env.SASHA_PICKER_API_KEY,
+    store: stack.store,
+    warn,
+  });
+  const bot = commentBot.bot;
   const instructions = workflowInstructionsFromDisk({
     cwd: process.cwd(),
     override: mode.skillFilePath,
@@ -2318,7 +2327,7 @@ function serveHttp(
         resolveFeedbackEnvironment: brokeredFeedbackEnvironmentResolver({ userDrive: stack.userDrive }),
         instructions: instructions.text,
         remote: true,
-        ...(bot === null ? {} : { commentBot: bot }),
+        commentBot: bot,
         ...(deckServer === null ? {} : { decks: { deckService: deckServer.deckService, callerFor: deckServer.callerFor, publicUrl: mode.publicUrl } }),
       }),
     instrumentTransport: (inner) =>
@@ -2329,7 +2338,8 @@ function serveHttp(
       }),
     warn,
     ...(portal.kind === "ok" ? { accountPortal: portal.portal } : {}),
-    ...(bot === null ? {} : { driveHook: driveHookFor(bot) }),
+    driveHook: driveHookFor(bot),
+    commentAccess: commentBot.accessPage,
     ...(deckServer === null ? {} : { decks: deckServer }),
   });
   if (deckServer !== null) shutDownOnTerminate({ deckServer, httpServer, warn });
@@ -2347,7 +2357,7 @@ function serveHttp(
       for (const line of portal.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
       for (const line of commentBot.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
       for (const line of decks.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
-      if (bot !== null) void bot.start().catch((cause: unknown) => warn(`comment bot: start failed: ${String(cause)}`));
+      void bot.start().catch((cause: unknown) => warn(`comment bot: start failed: ${String(cause)}`));
       resolve();
     });
   });

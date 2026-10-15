@@ -40,12 +40,13 @@ HEALTHCHECK --interval=30s --timeout=4s --start-period=20s --retries=3 \
 # (172.30.0.1 on sasha-connector_default, measured 2026-10-13), so X-Real-IP is believed from it
 # alone. If the network is recreated with another gateway, the server warns once and counts every
 # visitor as one client: stricter limits, never a bypass.
-# An empty mail-sender.json or comment-bot.json (the deploy's placeholders) leaves that feature off.
+# An empty mail-sender.json (the deploy's placeholder) leaves email sign-in off. Comment watches
+# need no secret file: they act as each signed-in user (SASHA_PICKER_API_KEY in connector.env
+# turns on the /comments/allow picker).
 ENTRYPOINT ["node_modules/.bin/tsx", "mcp/sasha-slides/server.ts", "--http", "--host", "0.0.0.0", "--port", "8787"]
 CMD ["--public-url", "https://sashaslides.com", \
      "--store", "/data/oauth-store.json", "--key-store", "/data/account-keys.json", \
      "--google-client", "/run/secrets/google_oauth_web.json", \
      "--identity-providers", "/run/secrets/identity-providers.json", \
      "--mail-sender", "/run/secrets/mail-sender.json", \
-     "--trusted-proxy", "172.30.0.1", \
-     "--comment-bot", "/run/secrets/comment-bot.json"]
+     "--trusted-proxy", "172.30.0.1"]

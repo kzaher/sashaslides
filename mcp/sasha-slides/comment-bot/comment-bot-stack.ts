@@ -1,44 +1,47 @@
 /**
- * Wires the comment bot for `server.ts --http`: reads `--comment-bot <file>`, builds the
- * bot's Drive over the real `fetch`, and hands back the banner lines. Without the flag (or
- * with an empty placeholder file, as the deploy bind-mounts every secret by name) the bot is
- * off and says so, like email sign-in.
+ * Wires the comment bot for `server.ts --http`: the bot over each watch owner's own Google grant
+ * (`owner-drive.ts`), and the `/comments/allow` page (`comment-access-page.ts`) where a user lets
+ * Sasha at one deck. Always on with `--http`: it needs nothing but the connector's own OAuth
+ * client and grant store. There is no shared bot account and no `--comment-bot` file any more.
+ *
+ * The picker on that page needs a browser API key: `SASHA_PICKER_API_KEY` (a Google Cloud API
+ * key of the OAuth client's project, with the Google Picker API enabled, restricted to the
+ * site). Without it the page says it is not set up, and watches still work for decks the user's
+ * grant can already read (for example, ones Sasha created).
  */
 import { randomBytes } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
-import { emailHint } from "../http/account-directory";
 import { DRIVE_HOOK_PATH } from "../http/http-server";
-import { BOT_DRIVE_TIMEOUT_MS, googleBotDrive, parseCommentBotConfig } from "./bot-drive";
+import type { GoogleClientCredentials } from "../google-auth";
+import type { GoogleIdentity, RecordStore } from "../http/oauth-store";
+import { exchangeAuthorizationCode } from "../google-slides/google-oauth";
+import { createIdentityVerifier } from "../google-slides/identity-token";
 import { createCommentBot, WATCH_LIFETIME_MS, type CommentBot, type CommentBotStore } from "./comment-bot";
+import { allowUrlFor, COMMENTS_ALLOW_PATH, createCommentAccessPage, projectNumberOf, type CommentAccessPage, type GoogleSignIn } from "./comment-access-page";
+import { googleOwnerDrives, OWNER_DRIVE_TIMEOUT_MS } from "./owner-drive";
 
-export type CommentBotLoad =
-  | Readonly<{ kind: "ok"; bot: CommentBot; banner: readonly string[] }>
-  | Readonly<{ kind: "off"; banner: readonly string[] }>
-  | Readonly<{ kind: "failed"; message: string }>;
+export type CommentBotLoad = Readonly<{ bot: CommentBot; accessPage: CommentAccessPage; banner: readonly string[] }>;
 
 export function loadCommentBot(
-  options: Readonly<{ path: string | null; publicUrl: string; store: CommentBotStore; warn: (message: string) => void }>,
+  options: Readonly<{
+    publicUrl: string;
+    /** The connector's registered Google redirect URI, shared with the sign-in. */
+    googleCallbackUrl: string;
+    googleClient: GoogleClientCredentials;
+    /** `process.env.SASHA_PICKER_API_KEY`; empty or absent leaves the picker off. */
+    pickerApiKey: string | undefined;
+    store: CommentBotStore & Readonly<{ googleIdentities: RecordStore<GoogleIdentity> }>;
+    warn: (message: string) => void;
+  }>,
 ): CommentBotLoad {
-  const { path, warn } = options;
-  if (path === null) return { kind: "off", banner: ["comment bot: off (give --comment-bot <file> to offer watch_comments)"] };
-  let text: string;
-  try {
-    if (statSync(path).size === 0) return { kind: "off", banner: [`comment bot: off (${path} is empty)`] };
-    text = readFileSync(path, "utf-8");
-  } catch (cause) {
-    const code = cause instanceof Error && "code" in cause && typeof cause.code === "string" ? cause.code : "unreadable";
-    return { kind: "failed", message: `--comment-bot: cannot read the file (${code})` };
-  }
-  const parsed = parseCommentBotConfig(text);
-  if (parsed.kind === "error") return { kind: "failed", message: `--comment-bot: ${parsed.message}` };
+  const { publicUrl, googleCallbackUrl, googleClient, store, warn } = options;
   const now = (): Date => new Date();
-  const webhookUrl = `${options.publicUrl.replace(/\/+$/, "")}${DRIVE_HOOK_PATH}`;
+  const base = publicUrl.replace(/\/+$/, "");
+  const webhookUrl = `${base}${DRIVE_HOOK_PATH}`;
   const bot = createCommentBot({
-    drive: googleBotDrive({ config: parsed.config, fetch, now, timeoutMs: BOT_DRIVE_TIMEOUT_MS }),
-    store: options.store,
-    address: parsed.config.address,
-    replyPrefix: parsed.config.replyPrefix,
+    drives: googleOwnerDrives({ grants: store.googleIdentities, client: googleClient, fetch, now, timeoutMs: OWNER_DRIVE_TIMEOUT_MS }),
+    store,
     webhookUrl,
+    allowUrlFor: (fileId) => allowUrlFor({ publicUrl, fileId }),
     now,
     setTimer: ({ delayMs, run }) => {
       const timer = setTimeout(run, delayMs);
@@ -49,12 +52,53 @@ export function loadCommentBot(
     randomToken: () => randomBytes(24).toString("base64url"),
     warn,
   });
+  const apiKey = options.pickerApiKey ?? "";
+  const appId = projectNumberOf(googleClient.clientId);
+  const picker = apiKey === "" || appId === null ? null : { apiKey, appId };
+  const accessPage = createCommentAccessPage({
+    publicUrl,
+    googleCallbackUrl,
+    googleClient,
+    picker,
+    grants: store.googleIdentities,
+    signIn: googleSignIn({ client: googleClient }),
+    now,
+    randomToken: () => randomBytes(32).toString("base64url"),
+    warn,
+  });
   return {
-    kind: "ok",
     bot,
+    accessPage,
     banner: [
-      `comment bot: on, as ${emailHint(parsed.config.address)}; Drive pushes to ${webhookUrl}`,
-      `comment bot: watches last ${String(WATCH_LIFETIME_MS / 3_600_000)} h unless renewed; no watch, no Drive channel and no calls`,
+      `comments: on, each watch acting as its own signed-in user; Drive pushes to ${webhookUrl}`,
+      `comments: watches last ${String(WATCH_LIFETIME_MS / 3_600_000)} h unless renewed; a user with no watch has no Drive channel and costs no call`,
+      picker === null
+        ? `comments: ${base}${COMMENTS_ALLOW_PATH} is off (set SASHA_PICKER_API_KEY${appId === null ? " and use a Web OAuth client" : ""}), so only decks a grant can already read can be watched`
+        : `comments: ${base}${COMMENTS_ALLOW_PATH} opens the Google Picker for app ${appId}`,
     ],
+  };
+}
+
+/** The real sign-in: the code exchange over `fetch`, then the identity token checked against Google's keys. */
+function googleSignIn(options: Readonly<{ client: GoogleClientCredentials }>): GoogleSignIn {
+  const { client } = options;
+  const verifier = createIdentityVerifier({ fetch, now: () => Date.now() });
+  return {
+    finish: async ({ code, redirectAddress }) => {
+      const exchanged = await exchangeAuthorizationCode({ fetch, client, code, redirectAddress, now: () => Date.now() });
+      if (exchanged.kind === "failed") return { kind: "failed", reason: exchanged.message };
+      if (exchanged.identityToken === null) return { kind: "failed", reason: "Google returned no identity token" };
+      const verdict = await verifier.verify({ token: exchanged.identityToken, audience: client.clientId });
+      if (verdict.kind === "rejected") return { kind: "failed", reason: verdict.reason };
+      return {
+        kind: "ok",
+        subject: verdict.claims.subject,
+        email: verdict.claims.email.length > 0 ? verdict.claims.email : null,
+        accessToken: exchanged.accessToken,
+        refreshToken: exchanged.refreshToken,
+        accessTokenExpiresAtMs: exchanged.expiresAt,
+        grantedScopes: exchanged.grantedScopes,
+      };
+    },
   };
 }

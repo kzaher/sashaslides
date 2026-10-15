@@ -146,5 +146,3 @@ a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-ra
 }
 
 /* Early-access label on a section that is not open to everyone yet. */
-.badge { display: inline-block; vertical-align: middle; margin-left: 8px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--fg); background: var(--glass-strong); border: 1px solid var(--glass-edge); }
-.early-access { font-size: 15px; }

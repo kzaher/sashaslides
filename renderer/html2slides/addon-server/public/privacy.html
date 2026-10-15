@@ -41,7 +41,7 @@
       <tr><td><code>openid</code></td><td>To confirm which Google account is signing in.</td></tr>
       <tr><td><code>email</code> (<code>https://www.googleapis.com/auth/userinfo.email</code>)</td><td>To show you which account is connected and to contact you about your account if needed.</td></tr>
       <tr><td><code>https://www.googleapis.com/auth/presentations</code></td><td>To read the presentation you are working on and to insert the slide you choose into it.</td></tr>
-      <tr><td><code>https://www.googleapis.com/auth/drive.file</code></td><td>To create, read and update only the files the Service creates for you: candidate slides, their manifest and a session log, kept in a folder named Sasha Slides Inbox in your Drive. It does not give us access to your other Drive files.</td></tr>
+      <tr><td><code>https://www.googleapis.com/auth/drive.file</code></td><td>To create, read and update only the files the Service creates for you: candidate slides, their manifest and a session log, kept in a folder named Sasha Slides Inbox in your Drive. If you ask your assistant to answer a deck&rsquo;s comments, also that one deck, once you choose it in Google&rsquo;s file picker, to read its comments and post the replies. It does not give us access to your other Drive files.</td></tr>
     </tbody>
   </table></div>
   <p>The Google Slides add-on runs inside Google's Apps Script under your own account. It asks Google for access to your presentations and Drive so it can find the candidate slides in your Sasha Slides Inbox folder, show them in a sidebar and insert the one you pick. The add-on talks to Google's services directly and does not send your presentation content to our servers.</p>
@@ -64,7 +64,7 @@
     <li>On the free plan, data about how you use the Service, as described under "Improving the Service".</li>
   </ul>
   <p>All of this is encrypted with a data key that belongs to your account alone.</p>
-  <p>If you ask your assistant to answer the comments on a deck, you share that deck with sasha@sashaslides.com. We then read the comments on that deck, only while a watch is active, pass them to your assistant, and post its replies as Sasha. We do not read decks that are not shared with that address.</p>
+  <p>If you ask your assistant to answer the comments on a deck, you choose that deck once in Google&rsquo;s file picker, which lets the Service reach that one file with the <code>drive.file</code> permission. We then read the comments on that deck with your own Google sign-in, only while a watch you started is active, pass them to your assistant, and post its replies in the thread as you, each starting with &ldquo;Sasha:&rdquo;. We do not read decks you have not chosen, and no shared Sasha account is involved.</p>
   <p>The candidate slides, their manifest and the session log are saved in your own Google Drive, in the Sasha Slides Inbox folder, not on our server. You can view or delete them there at any time.</p>
   <p>When you use the conversion tools on the website, the content you send is processed to produce the result and is not kept after the request finishes.</p>
   <p>The website uses no analytics, advertising or tracking cookies.</p>

@@ -34,7 +34,7 @@ import { googleBroker } from "./google-broker";
 import { endpointsFor, type Endpoints } from "./oauth-metadata";
 import { fileBackedAuthStore, inMemoryAuthStore, type AuthStore } from "./oauth-store";
 import { googleUserDriveFactory, type UserDriveFactory } from "./user-drive";
-import { assertNever, describeAuthFailure, loadClientCredentials } from "../google-auth";
+import { assertNever, describeAuthFailure, loadClientCredentials, type GoogleClientCredentials } from "../google-auth";
 
 export type BrokeredStack = Readonly<{
   endpoints: Endpoints;
@@ -51,6 +51,8 @@ export type BrokeredStack = Readonly<{
   storeDescription: string;
   /** Where the per-account data keys are kept, for the startup banner. */
   keyStoreDescription: string;
+  /** The connector's own Google OAuth client: every stored grant was issued to it (the comment bot refreshes with it). */
+  googleClient: GoogleClientCredentials;
 }>;
 
 export type BrokeredStackLoad =
@@ -114,6 +116,7 @@ export function loadBrokeredStack(
       }),
       storeDescription: options.storePath === null ? "in memory (lost on restart)" : options.storePath,
       keyStoreDescription: options.keyStorePath === null ? "in memory (lost on restart)" : options.keyStorePath,
+      googleClient: credentials.credentials,
     },
   };
 }

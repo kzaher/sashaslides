@@ -42,8 +42,10 @@ CONNECTOR_UID="10100"
 # (mcp/sasha-slides/deploy/docker-compose.yml). apple-signin.p8 is the Sign in with Apple key;
 # mail-sender.json is the Gmail sender for email sign-in; with a service account it names
 # gmail-service-account.json, the domain-wide-delegation key it signs with.
-# comment-bot.json is the Sasha bot account's Drive refresh token (mcp/sasha-slides/comment-bot); empty = off.
-SECRET_FILES="google_oauth_web.json identity-providers.json apple-signin.p8 mail-sender.json gmail-service-account.json comment-bot.json"
+# There is no comment-bot.json any more: the comment bot acts as each signed-in user with their own
+# Google grant (mcp/sasha-slides/comment-bot/owner-drive.ts), and the remote step below deletes a
+# leftover one. Its picker page reads SASHA_PICKER_API_KEY from connector.env (set by hand).
+SECRET_FILES="google_oauth_web.json identity-providers.json apple-signin.p8 mail-sender.json gmail-service-account.json"
 # The server's host keys are pinned in the repo, so a rebuilt container (empty ~/.ssh) deploys
 # without a prompt and still refuses an impostor. Refresh with: ssh-keyscan 78.46.91.218 > deploy/known_hosts
 KNOWN_HOSTS="$(cd "$(dirname "$0")" && pwd)/known_hosts"
@@ -244,6 +246,11 @@ for name in $names; do
     echo "  -> created an empty placeholder $name"
   fi
 done
+# The shared comment-bot account's refresh token is obsolete: never leave a Drive grant lying around.
+if [ -e comment-bot.json ] || [ -e comment-bot.json.new ]; then
+  rm -f comment-bot.json comment-bot.json.new
+  echo "  -> removed the obsolete comment-bot.json (the comment bot now acts as each signed-in user)"
+fi
 if [ ! -f identity-providers.json ]; then
   echo '{"providers":[{"name":"google"}]}' > identity-providers.json
   chown "$uid:$uid" identity-providers.json; chmod 600 identity-providers.json

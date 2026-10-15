@@ -361,6 +361,14 @@ insufficient for commenting on a deck the user made. Treat `drive` as required f
 until someone measures otherwise. `presentations` is needed for the 1-based slide number (and
 for `insertComment`, if anchored writes are added).
 
+The **comment bot** (`watch_comments`, `comment-bot/`) does not wait for that measurement and
+does not ask for `drive`: it uses the watch owner's own `drive.file` grant, which reaches a deck
+the user did not create once they choose it in the Google Picker opened by this app
+(`/comments/allow`, `comment-bot/comment-access-page.ts`). Until then Drive answers 404 for the
+deck and the tool hands out that page's link. Its replies are posted as the user and start with
+`Sasha: `, which is also how it tells its own lines from the user's (`author.me` is true for
+both).
+
 ## Invariants this channel honours
 
 - **Nothing is written to a thread but a reply.** The user's comment is never edited, never

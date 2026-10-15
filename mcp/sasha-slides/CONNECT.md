@@ -165,6 +165,33 @@ lists the candidates. Toggle **HTML (authoritative)** against **Converted slide*
 over anything the conversion got wrong, and press **Insert option N**. It lands as real,
 editable Slides objects.
 
+## E. Answering comments
+
+Ask your assistant to watch a deck's comments ("watch the comments on <deck link> and answer
+each one"). Sasha reads and answers them **as you**, with the Google sign-in you connected Sasha
+Slides with, and every line it posts starts with `Sasha: `. There is no shared Sasha account and
+nothing to share the deck with.
+
+1. **The first time for a deck**, `watch_comments` answers with a link,
+   `https://sashaslides.com/comments/allow?deck=<id>`. It bounces through Google (silently when
+   you have already allowed Sasha files you choose) and opens Google's file picker with that one
+   deck. Choose it: that is the one click that lets Sasha read and answer that deck's comments,
+   under the `drive.file` permission. Nothing else in your Drive.
+2. Tell your assistant it is done; it calls `watch_comments` again and the watch starts.
+3. New comments and replies become tasks in that chat; each answer replaces a short
+   `Sasha: On it ⏳` in the thread. Say you are done, or the watch ends after 24 hours.
+
+**Operator setup (once per server).** The picker needs a browser API key from the same Google
+Cloud project as the Web OAuth client: enable the **Google Picker API** in that project, create
+an API key restricted to the Google Picker API and to the HTTP referrer
+`https://sashaslides.com/*`, and put it in the connector's environment as
+`SASHA_PICKER_API_KEY` (production: `/root/sasha-connector/secrets/connector.env`). The app id
+the picker needs is the project number, read from the OAuth client id itself. Without the key,
+`/comments/allow` says it is not set up yet and only decks a grant can already read can be
+watched. `/comments/allow` uses the connector's one registered Google redirect URI, so no new
+redirect URI is needed. The old `--comment-bot` flag (a shared bot account) was removed; the
+server refuses to start with it.
+
 ## If it says a server error occurred while reading from storage
 
 That is Google refusing to run the add-on, not a fault in the picker. The error panel now

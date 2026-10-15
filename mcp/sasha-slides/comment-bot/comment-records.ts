@@ -4,28 +4,31 @@
  *
  * Four collections:
  *
- *  - `commentBotChannel`: at most one record (key `CHANNEL_KEY`), the bot account's ONE
- *    Drive `changes.watch` channel and the change-feed page token. Absent whenever no watch
- *    is active, so an idle bot holds no channel and makes no calls.
+ *  - `commentChannels`: per watch OWNER (key: their Google subject), that owner's one Drive
+ *    `changes.watch` channel on their own change feed, and the feed's page token. A record
+ *    exists only while the owner has an active watch, so a user with none holds no channel and
+ *    costs no calls.
  *  - `commentWatches`: one per `watch_comments` call, keyed by `watchId`.
- *  - `commentFileCursors`: per watched deck, the newest comment `modifiedTime` already
- *    scanned, so a scan asks Drive only for what changed since (`startModifiedTime`).
+ *  - `commentFileCursors`: per (owner, watched deck), keyed by `fileCursorKey`, the newest
+ *    comment `modifiedTime` already scanned with that owner's grant, so a scan asks Drive only
+ *    for what changed since (`startModifiedTime`).
  *  - `commentTasks`: one per comment or reply a watch turned into work, keyed by `taskId`, a
  *    hash of (watchId, commentId, replyId), which is what makes a re-scan, a duplicate push
- *    or a restart unable to create the same task twice. A task also remembers the bot's
+ *    or a restart unable to create the same task twice. A task also remembers Sasha's
  *    "On it ⏳" acknowledgement, so neither a second `comment_tasks` nor a restart posts it
  *    again, and the answer can replace it in place.
  *
  * Comment text is stored as Drive returned it, unsealed: it is readable by everyone the deck
- * is shared with, and the bot has to quote it back to the watch owner's session.
+ * is shared with, and the bot has to quote it back to the watch owner's session. No token is
+ * stored here: the owner's Google grant stays sealed in `googleIdentities`.
  */
 import { asNumber, asRecord, asString } from "../http/json-values";
 import type { JsonCodec } from "../http/oauth-store";
 
-/** The one key of the `commentBotChannel` collection. */
-export const CHANNEL_KEY = "channel";
-
-export type BotChannel = Readonly<{
+/** One owner's change-feed channel; the `commentChannels` key is `ownerSubject`. */
+export type OwnerChannel = Readonly<{
+  /** The Google subject whose grant opened the channel and whose feed it watches. */
+  ownerSubject: string;
   /** Our id for the channel; Google echoes it as `X-Goog-Channel-ID`. */
   channelId: string;
   /** Google's id for the watched resource; `channels.stop` needs it. */
@@ -46,6 +49,11 @@ export type CommentWatch = Readonly<{
   startedAtMs: number;
   expiresAtMs: number;
 }>;
+
+/** The `commentFileCursors` key: cursors are per owner, because each owner reads with their own grant. */
+export function fileCursorKey(options: Readonly<{ ownerSubject: string; fileId: string }>): string {
+  return `${options.ownerSubject}/${options.fileId}`;
+}
 
 export type FileCursor = Readonly<{
   /** RFC 3339; the next `comments.list` passes it as `startModifiedTime`. */
@@ -71,13 +79,13 @@ export type CommentTask = Readonly<{
   anchor: string | null;
   createdTime: string;
   state: "open" | "answered";
-  /** Drive's id of the bot's latest reply to this task; null until answered. */
+  /** Drive's id of Sasha's latest reply to this task (posted as the owner); null until answered. */
   botReplyId: string | null;
   acknowledgement: Acknowledgement;
 }>;
 
 /**
- * The short reply the bot posts in the thread when the session first picks the task up.
+ * The short reply Sasha posts in the thread, as the owner, when the session first picks the task up.
  * `failed` is not retried: the answer then simply arrives as a new reply.
  */
 export type Acknowledgement =
@@ -85,18 +93,21 @@ export type Acknowledgement =
   | Readonly<{ kind: "posted"; replyId: string }>
   | Readonly<{ kind: "failed" }>;
 
-export const botChannelCodec: JsonCodec<BotChannel> = {
+export const ownerChannelCodec: JsonCodec<OwnerChannel> = {
   encode: (value) => value,
   decode: (value) => {
     const record = asRecord(value);
     if (record === null) return null;
+    const ownerSubject = asString(record["ownerSubject"]);
     const channelId = asString(record["channelId"]);
     const resourceId = asString(record["resourceId"]);
     const token = asString(record["token"]);
     const expiresAtMs = asNumber(record["expiresAtMs"]);
     const pageToken = asString(record["pageToken"]);
-    if (channelId === null || resourceId === null || token === null || expiresAtMs === null || pageToken === null) return null;
-    return { channelId, resourceId, token, expiresAtMs, pageToken };
+    if (ownerSubject === null || channelId === null || resourceId === null || token === null || expiresAtMs === null || pageToken === null) {
+      return null;
+    }
+    return { ownerSubject, channelId, resourceId, token, expiresAtMs, pageToken };
   },
 };
 

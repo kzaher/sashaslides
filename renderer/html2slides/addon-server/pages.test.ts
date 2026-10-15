@@ -106,11 +106,13 @@ test("the home page links the walkthrough video for each assistant", () => {
   assert.match(home, /https:\/\/sashaslides\.com\/mcp/, "and the connector address to paste");
 });
 
-test("the home page describes the comment flow: the bot address, the share step and the stop step", () => {
+test("the home page describes the comment flow: ask, allow in Google's picker, answers as you with 'Sasha:', stop", () => {
   const home = read("home.html");
   assert.match(home, /aria-label="Answering comments"/);
-  assert.match(home, /sasha@sashaslides\.com/, "names the address to share the deck with");
-  assert.match(home, /Share your deck with/, "says to share the deck");
+  assert.doesNotMatch(home, /sasha@sashaslides\.com|Share your deck with/, "no shared bot account to share the deck with");
+  assert.match(home, /ask it to watch the comments/, "says to ask the assistant");
+  assert.match(home, /Google&rsquo;s file picker with that deck; choose it, one click/, "says how to allow the deck once");
+  assert.match(home, /as you, starting with &ldquo;Sasha:&rdquo;/, "says how the answers appear");
   assert.match(home, /Tell your assistant you are done/, "says how to stop");
   assert.match(home, /24 hours/);
   assert.match(home, /Stop when I say I&rsquo;m done/, "has the example prompt");
@@ -148,8 +150,15 @@ test("the home page links to the deck list as 'Your decks', which the connector 
   assert.match(read("site.css"), /\.cta \{/, "the call to action is styled");
 });
 
-test("the comment section is visible and says plainly that it is early access", () => {
+test("the comment section is visible and open to every signed-in user: no early-access badge or note", () => {
   const home = read("home.html");
   assert.match(home, /<section class="comments" aria-label="Answering comments">/, "shown, not hidden");
-  assert.match(home, /Early access: this opens to everyone when the Sasha account goes live/);
+  assert.doesNotMatch(home, /Early access|early-access/);
+});
+
+test("the privacy page describes the per-deck picker grant, not a shared Sasha address", () => {
+  const privacy = read("privacy.html");
+  assert.doesNotMatch(privacy, /sasha@sashaslides\.com/);
+  assert.match(privacy, /choose that deck once in Google&rsquo;s file picker/);
+  assert.match(privacy, /post its replies in the thread as you, each starting with &ldquo;Sasha:&rdquo;/);
 });

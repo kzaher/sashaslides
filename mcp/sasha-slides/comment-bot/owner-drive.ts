@@ -1,46 +1,40 @@
 /**
- * The comment bot's Drive, as the bot's own Google account (`sasha@sashaslides.com`): the
- * eight Drive v3 REST calls the bot makes, over an injected `HttpFetch`, so the tests run a
- * fake Drive and count every call.
+ * The comment bot's Drive, as the WATCH OWNER: every Drive v3 call a watch makes (the deck
+ * check, the change feed and its push channel, `comments.list`, the acknowledgement and the
+ * answer) carries the access token of the Sasha user who started that watch, refreshed from the
+ * Google grant they gave when they signed in (`store.googleIdentities`, keyed by their Google
+ * subject). There is no shared Sasha Google account: an answer appears in the thread as the
+ * user, starting with "Sasha: " (`comment-bot.ts`).
  *
- * Configured by `--comment-bot <file>`, parsed here at the boundary:
+ * WHY THE OWNER'S OWN GRANT, asked for by the product owner on 2026-10-15 ("don't do it under my
+ * account"): a shared account would read every deck shared with it, for every user, and post as
+ * one identity nobody owns. The owner's grant reaches only what that owner can reach, and only
+ * the decks they handed to Sasha (next paragraph).
  *
- *     { "clientId": "...", "clientSecret": "...", "refreshToken": "...",
- *       "address": "sasha@sashaslides.com" }
+ * LEAST PRIVILEGE. Drive has no comments-only scope. The grant has `drive.file` (sign-in asks for
+ * it, `http/oauth-metadata.ts` BROKERED_SCOPES), which covers only files the person opened with
+ * this app: a deck they choose once in the Google Picker on `/comments/allow`
+ * (`comment-access-page.ts`). Until then Drive answers 404 for the deck, which the bot turns into
+ * that page's link. The restricted full `drive` scope is never requested.
  *
- * The refresh token is the bot account's own consent to the `drive` scope (minted like the
- * mail sender's, `e2e/gmail-sender-token.ts`, with that scope). `address` is what users are
- * told to share their deck with.
- *
- * WHY NOT THE DOMAIN-WIDE-DELEGATION SERVICE ACCOUNT the mail sender can use: delegation is
- * granted per client ID and scope for the whole Workspace domain, so a service account with
- * the `drive` scope could act as ANY user of the domain and read every one of their files,
- * not just the bot's. A refresh token for the bot account alone can only ever reach what
- * people chose to share with that one address.
- *
- * Error messages name the offending key and never echo a value, and failure reasons carry
- * Google's status and error code, never a body, a token or an address.
+ * Every method is one HTTP request, plus a token refresh when the owner's access token is due,
+ * over an injected `HttpFetch`, so the tests run a fake Google with per-user grants and count
+ * every call and whose token it carried. Failure reasons carry Google's status and error code,
+ * never a body or a token.
  */
-import { asNumber, asRecord, asString, parseJson } from "../http/json-values";
+import { asNumber, asRecord, asString } from "../http/json-values";
 import type { HttpFetch } from "../http/identity-providers";
-import { GOOGLE_TOKEN_URL, isMailboxAddress } from "../http/gmail-sender";
+import { GOOGLE_TOKEN_URL } from "../http/gmail-sender";
+import type { GoogleClientCredentials } from "../google-auth";
+import type { GoogleIdentity, RecordStore } from "../http/oauth-store";
 
 export const DRIVE_API = "https://www.googleapis.com/drive/v3";
-export const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+/** Per file, granted by choosing the file in the Google Picker. Non-sensitive. */
+export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+/** Restricted; never requested here, but a grant that already holds it can read comments too. */
+export const FULL_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 export const SLIDES_MIME_TYPE = "application/vnd.google-apps.presentation";
-export const BOT_DRIVE_TIMEOUT_MS = 10_000;
-
-/**
- * `replyPrefix` is the STOPGAP for running the bot as a person's own Google account until a
- * dedicated Sasha account exists (asked for 2026-10-15): every line the bot posts starts with it
- * ("Sasha: "), and the bot then tells its own lines from that person's by the prefix instead of by
- * authorship. Empty for a dedicated account.
- */
-export type CommentBotConfig = Readonly<{ clientId: string; clientSecret: string; refreshToken: string; address: string; replyPrefix: string }>;
-
-export type CommentBotConfigParse =
-  | Readonly<{ kind: "ok"; config: CommentBotConfig }>
-  | Readonly<{ kind: "error"; message: string }>;
+export const OWNER_DRIVE_TIMEOUT_MS = 10_000;
 
 export type DriveFailure = Readonly<{ kind: "failed"; status: number; reason: string }>;
 export type DriveResult<TValue> = Readonly<{ kind: "ok"; value: TValue }> | DriveFailure;
@@ -52,6 +46,7 @@ export type ChangePage = Readonly<{
   nextPageToken: string | null;
   newStartPageToken: string | null;
 }>;
+/** `me` is relative to the caller: with the owner's token it marks the owner's own posts. */
 export type DriveAuthor = Readonly<{ displayName: string; me: boolean }>;
 export type DriveReply = Readonly<{ id: string; content: string; author: DriveAuthor; createdTime: string; deleted: boolean }>;
 export type DriveComment = Readonly<{
@@ -67,8 +62,8 @@ export type DriveComment = Readonly<{
 }>;
 export type CommentPage = Readonly<{ comments: readonly DriveComment[]; nextPageToken: string | null }>;
 
-/** The bot's Drive. Every method is one HTTP request (plus a token refresh when due). */
-export type BotDrive = Readonly<{
+/** One owner's Drive. Every method is one HTTP request (plus a token refresh when due). */
+export type OwnerDrive = Readonly<{
   getFile(options: Readonly<{ fileId: string }>): Promise<DriveResult<DriveDeck>>;
   getStartPageToken(): Promise<DriveResult<string>>;
   watchChanges(
@@ -84,44 +79,74 @@ export type BotDrive = Readonly<{
   updateReply(options: Readonly<{ fileId: string; commentId: string; replyId: string; content: string }>): Promise<DriveResult<null>>;
 }>;
 
-export function parseCommentBotConfig(text: string): CommentBotConfigParse {
-  const parsed = parseJson(text);
-  if (parsed.kind === "error") return { kind: "error", message: `comment bot file is not JSON: ${parsed.reason}` };
-  const root = asRecord(parsed.value);
-  if (root === null) return { kind: "error", message: `comment bot file must be an object with ${CONFIG_KEYS.join(", ")}` };
-  const unknownKey = Object.keys(root).find((key) => !CONFIG_KEYS.includes(key));
-  if (unknownKey !== undefined) return { kind: "error", message: `unknown key ${JSON.stringify(unknownKey)} (allowed: ${CONFIG_KEYS.join(", ")})` };
-  // The values are deliberately absent from every message below.
-  const clientId = asString(root.clientId);
-  if (clientId === null || clientId === "") return { kind: "error", message: "clientId must be a non-empty string" };
-  const clientSecret = asString(root.clientSecret);
-  if (clientSecret === null || clientSecret === "") return { kind: "error", message: "clientSecret must be a non-empty string" };
-  const refreshToken = asString(root.refreshToken);
-  if (refreshToken === null || refreshToken === "") return { kind: "error", message: "refreshToken must be a non-empty string" };
-  const address = asString(root.address);
-  if (address === null || !isMailboxAddress(address)) return { kind: "error", message: "address must be the bot account's email address" };
-  const replyPrefix = root.replyPrefix === undefined ? "" : asString(root.replyPrefix);
-  if (replyPrefix === null) return { kind: "error", message: "replyPrefix must be a string, e.g. \"Sasha: \"" };
-  return { kind: "ok", config: { clientId, clientSecret, refreshToken, address, replyPrefix } };
-}
+export type OwnerDriveLookup =
+  | Readonly<{ kind: "ok"; drive: OwnerDrive; scopeAccess: ScopeAccess }>
+  /** No stored Google grant for this subject, or one with no usable token: sign in again. */
+  | Readonly<{ kind: "no-grant" }>;
 
-export function googleBotDrive(
-  options: Readonly<{ config: CommentBotConfig; fetch: HttpFetch; now: () => Date; timeoutMs: number }>,
-): BotDrive {
-  const { config, fetch, now, timeoutMs } = options;
-  let cached: Readonly<{ accessToken: string; expiresAtMs: number }> | null = null;
+/**
+ * What the stored grant's scopes say about reading comments. `per-file` is `drive.file`: decks
+ * chosen in the picker only. `missing` needs the incremental consent on `/comments/allow`.
+ * `unknown` is a grant Google reported no scopes for: the Drive call itself decides.
+ */
+export type ScopeAccess = "per-file" | "full" | "missing" | "unknown";
 
-  async function accessToken(): Promise<DriveResult<string>> {
+/** Hands out each watch owner's Drive; the comment bot never holds any other. */
+export type OwnerDrives = Readonly<{
+  forOwner(options: Readonly<{ ownerSubject: string }>): Promise<OwnerDriveLookup>;
+}>;
+
+export function googleOwnerDrives(
+  options: Readonly<{
+    /** The connector's sealed grant store, keyed by Google subject. Read only: refreshed tokens stay in memory. */
+    grants: Pick<RecordStore<GoogleIdentity>, "get">;
+    /** The connector's own OAuth client, which every stored refresh token was issued to. */
+    client: GoogleClientCredentials;
+    fetch: HttpFetch;
+    now: () => Date;
+    timeoutMs: number;
+  }>,
+): OwnerDrives {
+  const { grants, client, fetch, now, timeoutMs } = options;
+  // Per owner, so one user's refresh can never hand out another's token.
+  const cachedTokens = new Map<string, Readonly<{ accessToken: string; expiresAtMs: number }>>();
+
+  return {
+    forOwner: async ({ ownerSubject }) => {
+      const identity = await grants.get({ key: ownerSubject });
+      if (identity === null || (identity.refreshToken === null && identity.accessToken === null)) return { kind: "no-grant" };
+      const stored = identity.accessToken;
+      const storedExpiry = identity.accessTokenExpiresAtMs;
+      if (!cachedTokens.has(ownerSubject) && stored !== null && storedExpiry !== null) {
+        cachedTokens.set(ownerSubject, { accessToken: stored, expiresAtMs: storedExpiry });
+      }
+      const drive = ownerDrive({
+        accessToken: (forceRefresh) => accessTokenFor({ ownerSubject, refreshToken: identity.refreshToken, forceRefresh }),
+        fetch,
+        timeoutMs,
+      });
+      return { kind: "ok", drive, scopeAccess: scopeAccessOf(identity.grantedScopes) };
+    },
+  };
+
+  async function accessTokenFor(
+    request: Readonly<{ ownerSubject: string; refreshToken: string | null; forceRefresh: boolean }>,
+  ): Promise<DriveResult<string>> {
     const nowMs = now().getTime();
-    if (cached !== null && cached.expiresAtMs - ACCESS_TOKEN_MARGIN_MS > nowMs) return { kind: "ok", value: cached.accessToken };
+    const cached = cachedTokens.get(request.ownerSubject);
+    if (!request.forceRefresh && cached !== undefined && cached.expiresAtMs - ACCESS_TOKEN_MARGIN_MS > nowMs) {
+      return { kind: "ok", value: cached.accessToken };
+    }
+    cachedTokens.delete(request.ownerSubject);
+    if (request.refreshToken === null) return { kind: "failed", status: 401, reason: "the Google grant has expired; sign in to Sasha Slides again" };
     const response = await fetch(GOOGLE_TOKEN_URL, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-        refresh_token: config.refreshToken,
+        client_id: client.clientId,
+        client_secret: client.clientSecret,
+        refresh_token: request.refreshToken,
       }).toString(),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -132,20 +157,37 @@ export function googleBotDrive(
       return {
         kind: "failed",
         status: response.status,
-        reason: `token refresh answered ${String(response.status)} ${errorCode(body?.error)}; mint a new refresh token for the bot account (scope drive)`,
+        reason: `token refresh answered ${String(response.status)} ${errorCode(body?.error)}; sign in to Sasha Slides again`,
       };
     }
-    cached = { accessToken: token, expiresAtMs: nowMs + expiresIn * 1000 };
+    cachedTokens.set(request.ownerSubject, { accessToken: token, expiresAtMs: nowMs + expiresIn * 1000 });
     return { kind: "ok", value: token };
   }
+}
 
-  /** One authorised request; a 401 (token revoked early) drops the cache and retries once. */
+/** Which kind of Drive access the granted scopes give; see `ScopeAccess`. */
+export function scopeAccessOf(grantedScopes: readonly string[]): ScopeAccess {
+  if (grantedScopes.length === 0) return "unknown";
+  if (grantedScopes.includes(FULL_DRIVE_SCOPE)) return "full";
+  if (grantedScopes.includes(DRIVE_FILE_SCOPE)) return "per-file";
+  return "missing";
+}
+
+/** Refresh this long before Google's stated expiry, so a token never dies mid-request. */
+const ACCESS_TOKEN_MARGIN_MS = 60 * 1000;
+
+function ownerDrive(
+  options: Readonly<{ accessToken: (forceRefresh: boolean) => Promise<DriveResult<string>>; fetch: HttpFetch; timeoutMs: number }>,
+): OwnerDrive {
+  const { accessToken, fetch, timeoutMs } = options;
+
+  /** One authorised request; a 401 (token revoked early) refreshes and retries once. */
   async function call(
     request: Readonly<{ method: "GET" | "POST" | "PATCH"; url: string; body?: unknown }>,
   ): Promise<DriveResult<Readonly<Record<string, unknown>> | null>> {
     try {
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const token = await accessToken();
+        const token = await accessToken(attempt > 0);
         if (token.kind === "failed") return token;
         const response = await fetch(request.url, {
           method: request.method,
@@ -157,10 +199,7 @@ export function googleBotDrive(
           ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
           signal: AbortSignal.timeout(timeoutMs),
         });
-        if (response.status === 401 && attempt === 0) {
-          cached = null;
-          continue;
-        }
+        if (response.status === 401 && attempt === 0) continue;
         const body = asRecord(await response.json().catch(() => null));
         if (response.status >= 200 && response.status < 300) return { kind: "ok", value: body };
         const error = asRecord(body?.error);
@@ -275,10 +314,6 @@ export function googleBotDrive(
   };
 }
 
-const CONFIG_KEYS: readonly string[] = ["clientId", "clientSecret", "refreshToken", "address", "replyPrefix"];
-/** Refresh this long before Google's stated expiry, so a token never dies mid-request. */
-const ACCESS_TOKEN_MARGIN_MS = 60 * 1000;
-
 function errorCode(value: unknown): string {
   const code = asString(value);
   return code !== null && /^[A-Za-z_]{1,64}$/.test(code) ? code : "(no error code)";
@@ -311,8 +346,7 @@ function parseComment(value: unknown): DriveComment | null {
 
 /**
  * Drive gives a comment's author only `displayName`, `photoLink` and `me`: its documentation
- * states "The author's email address and permission ID will not be populated." `me` is
- * relative to the caller, so with the bot's token it marks the bot's own posts.
+ * states "The author's email address and permission ID will not be populated."
  */
 function parseAuthor(value: unknown): DriveAuthor {
   const author = asRecord(value);

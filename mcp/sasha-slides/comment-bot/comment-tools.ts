@@ -2,15 +2,17 @@
  * The comment bot's tools on the connector, for the signed-in user's own Claude session:
  *
  *   watch_comments { deck }            start (or renew) a watch; returns its watchId
- *   stop_watching { watchId }          end it; the last one ending stops the bot's Drive channel
+ *   stop_watching { watchId }          end it; the caller's last one ending stops their Drive channel
  *   list_watches {}                    the caller's active watches
  *   comment_tasks {}                   the caller's open comment tasks; picking one up posts
- *                                      the bot's "On it ⏳" acknowledgement into its thread
- *   reply_comment_task { taskId, text } the bot's answer, replacing that acknowledgement
+ *                                      Sasha's "On it ⏳" acknowledgement into its thread
+ *   reply_comment_task { taskId, text } the answer, replacing that acknowledgement
  *
  * The caller is the Google identity the connector's bearer token names (`googleSubjectOf`):
- * a session sees, stops and answers only its own watches and tasks. On stdio, or with no
- * `--comment-bot`, the tools are still listed and answer why they cannot work.
+ * a session sees, stops and answers only its own watches and tasks, and every Drive call is
+ * made with that same person's Google grant, so Sasha's lines appear as them, starting with
+ * "Sasha: " (`comment-bot.ts`). On stdio the tools are still listed and answer why they cannot
+ * work.
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
@@ -51,11 +53,12 @@ export function registerCommentTools(options: Readonly<{ server: McpServer; comm
     {
       title: "Watch a deck's comments",
       description:
-        "Start watching every comment on one of the user's Google Slides decks. The user must have shared the deck " +
-        "with the Sasha bot account (Editor or Commenter); if not, this says which address to share it with. While " +
-        "the watch lasts (24 hours, renewed by calling this again), every new comment or reply on the deck becomes a " +
-        "comment task for THIS session: read them with comment_tasks, answer with reply_comment_task, and call " +
-        "stop_watching when the user is done. Returns the watchId.",
+        "Start watching every comment on one of the user's Google Slides decks. Sasha reads and answers the comments " +
+        "as the user, with the Google sign-in they connected Sasha Slides with. The first time for a deck, this answers " +
+        "with a link instead: give it to the user (they choose the deck once in Google's file picker), then call this " +
+        "again when they say it is done. While the watch lasts (24 hours, renewed by calling this again), every new " +
+        "comment or reply on the deck becomes a comment task for THIS session: read them with comment_tasks, answer " +
+        "with reply_comment_task, and call stop_watching when the user is done. Returns the watchId.",
       inputSchema: { deck: z.string().min(1).describe("The deck's URL (https://docs.google.com/presentation/d/<id>/edit) or its file id.") },
     },
     async ({ deck }, extra) =>
@@ -107,8 +110,8 @@ export function registerCommentTools(options: Readonly<{ server: McpServer; comm
       title: "Comments waiting for an answer",
       description:
         "The open comment tasks on the decks this account watches: who wrote what, on which deck, the thread it " +
-        "belongs to and the text it is attached to. The first time a task is listed here, the bot automatically " +
-        "posts a short acknowledgement in its thread (\"On it ⏳\"), so the commenter sees work has started; do not " +
+        "belongs to and the text it is attached to. The first time a task is listed here, Sasha automatically " +
+        "posts a short acknowledgement in its thread (\"Sasha: On it ⏳\"), so the commenter sees work has started; do not " +
         "post one yourself. Answer each with reply_comment_task, which replaces that acknowledgement with your " +
         "answer. Empty means nothing is waiting.",
       inputSchema: {},
@@ -125,10 +128,10 @@ export function registerCommentTools(options: Readonly<{ server: McpServer; comm
     {
       title: "Answer a comment",
       description:
-        "Answer a comment task in its thread, as the Sasha bot account, and mark the task answered. The answer " +
-        "replaces the \"On it ⏳\" acknowledgement comment_tasks posted, so the thread reads as the question and " +
-        "then this answer (a new reply only if that acknowledgement is gone). Plain text; https links are fine " +
-        "(for example to the deck, or to a proposal page).",
+        "Answer a comment task in its thread and mark the task answered. It is posted as the user, starting with " +
+        "\"Sasha: \" (added for you; do not write it yourself), and replaces the \"On it ⏳\" acknowledgement " +
+        "comment_tasks posted, so the thread reads as the question and then this answer (a new reply only if that " +
+        "acknowledgement is gone). Plain text; https links are fine (for example to the deck, or to a proposal page).",
       inputSchema: {
         taskId: z.string().min(1).describe("The taskId from comment_tasks."),
         text: z.string().min(1).max(MAX_REPLY_CHARACTERS).describe("The reply, as the user should read it in the thread."),
@@ -141,7 +144,7 @@ export function registerCommentTools(options: Readonly<{ server: McpServer; comm
   );
 }
 
-/** What `open_work` adds: the caller's open comment tasks, or nothing when the bot is off. */
+/** What `open_work` adds: the caller's open comment tasks, or nothing on stdio. */
 export async function openCommentTasks(
   options: Readonly<{ commentBot: CommentBot | null; authInfo: AuthInfo | undefined }>,
 ): Promise<readonly CommentTaskPayload[]> {
@@ -196,7 +199,7 @@ async function withCaller(
   work: (bot: CommentBot, ownerSubject: string) => Promise<CallToolResult>,
 ): Promise<CallToolResult> {
   if (options.commentBot === null) {
-    return errorResult("the comment bot is off on this connector (the server was started without --comment-bot)");
+    return errorResult("comment watches need the remote Sasha Slides connector (https://sashaslides.com/mcp); this local server cannot watch comments");
   }
   const ownerSubject = googleSubjectOf({ authInfo: options.authInfo });
   if (ownerSubject === null) return errorResult("comment watches need the signed-in remote connector; this session has no Google identity");

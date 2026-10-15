@@ -38,6 +38,10 @@ const CONNECTOR_PATHS: readonly string[] = [
   "/account/logout",
   // Drive push notifications for the comment bot (mcp/sasha-slides/comment-bot).
   "/hooks/drive",
+  // The comment bot's per-deck picker page and its script (comment-bot/comment-access-page.ts).
+  "/comments/allow",
+  "/comments/allow/",
+  "/comments/allow/picker.js",
 ];
 
 /** The deck server inside the connector (mcp/sasha-slides/decks): pages, built files, the API and its socket. */
@@ -67,6 +71,11 @@ const SITE_PATHS: readonly string[] = [
   "/.well-known/security.txt",
   "/hooks",
   "/hooks/drivex",
+  // Near-misses of the picker page's paths.
+  "/comments",
+  "/comments/allowx",
+  "/comments/allow/other.js",
+  "/comments/allow/pickerxjs",
   // Near-misses of the deck server's paths.
   "/deckhouse",
   "/decks.css",
