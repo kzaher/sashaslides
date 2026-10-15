@@ -170,7 +170,10 @@ describe("/comments/allow", () => {
       assert.match(html, /data-key="AIza-test-key" data-app="980752129078"/);
       assert.match(html, new RegExp(`<script src="${PUBLIC_URL}${PICKER_SCRIPT_PATH}" defer></script>`));
       assert.equal(response.headers.get("cache-control"), "no-store");
-      assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+      // The Picker key is restricted to https://sashaslides.com/*, so Google must see this origin; with
+      // no-referrer it answered "The API developer key is invalid" (live, 2026-10-15). strict-origin
+      // sends the origin only, never this URL's code and state.
+      assert.equal(response.headers.get("referrer-policy"), "strict-origin");
       const policy = response.headers.get("content-security-policy") ?? "";
       assert.match(policy, new RegExp(`script-src ${PUBLIC_URL}${PICKER_SCRIPT_PATH} https://apis.google.com`));
       assert.match(policy, /frame-ancestors 'none'/);

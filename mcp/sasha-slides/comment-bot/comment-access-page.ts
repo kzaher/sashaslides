@@ -231,6 +231,10 @@ export function createCommentAccessPage(
       cookies,
       html: pickerPage({ picker, fileId: started.fileId, accessToken: signedIn.accessToken, email: signedIn.email ?? stored.email, scriptUrl: `${origin}${PICKER_SCRIPT_PATH}` }),
       policy: pickerPolicy({ scriptUrl: `${origin}${PICKER_SCRIPT_PATH}` }),
+      // The Picker's API key is restricted to this site, which Google checks by the Referer: with
+      // no-referrer the picker said "The API developer key is invalid" (live, 2026-10-15). The
+      // origin alone matches the restriction and never carries this callback URL's code and state.
+      referrerPolicy: "strict-origin",
     });
     return true;
   }
@@ -318,12 +322,13 @@ function pickerPolicy(options: Readonly<{ scriptUrl: string }>): string {
 }
 
 function sendPage(
-  options: Readonly<{ response: ServerResponse; status: number; html: string; cookies?: readonly string[]; policy?: string }>,
+  options: Readonly<{ response: ServerResponse; status: number; html: string; cookies?: readonly string[]; policy?: string; referrerPolicy?: string }>,
 ): void {
   const cookies = options.cookies ?? [];
   options.response.writeHead(options.status, {
     ...PAGE_HEADERS,
     ...(options.policy === undefined ? {} : { "content-security-policy": options.policy }),
+    ...(options.referrerPolicy === undefined ? {} : { "referrer-policy": options.referrerPolicy }),
     ...(cookies.length === 0 ? {} : { "set-cookie": [...cookies] }),
   });
   options.response.end(options.html);
