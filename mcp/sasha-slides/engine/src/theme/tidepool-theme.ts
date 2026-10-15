@@ -13,10 +13,14 @@
 //    degrees and saturate 1 to 1.15 over 40 seconds, in 120 steps, paused during gestures); nothing
 //    moves behind a slide being edited. The LIVELY drifting shapes are only for empty and home
 //    screens.
-//  * CHROME IS LIQUID GLASS WITHOUT A BACKDROP BLUR on the editing screen: a translucent tint, a
-//    bright 1 pixel top edge and a soft lift shadow. Re-blurring the animated wash behind three
-//    full-height panels costs every frame of a drag; the calm slides window already dropped the blur
-//    for the same reason. `backdrop-filter` is used only on the lively home screens.
+//  * CHROME IS LIQUID GLASS (milestone 2, SPEC.md 21.11): panels are white at 0.26 to 0.45
+//    (`panelGlass`), with a bright 1 pixel top edge, a soft lift shadow, and a backdrop blur plus
+//    saturation (`panelBackdrop`) -- but ONLY while no gesture is active on the engine root
+//    (`:not([data-gesture="active"])`). Re-blurring the animated wash behind three full-height
+//    panels on every frame of a drag is what milestone 1 measured as too slow; a drag drops the
+//    blur and the wash is paused anyway, so nothing behind the glass moves while it is sharp.
+//    The more translucent glass lets more of the wash through, so the text colours are chosen to
+//    pass 4.5:1 over the most saturated wash the backdrop filter can produce (the theme test).
 //  * CHROME THAT CAN OVERLAP THE SLIDE (menus, the context menu, the inline text toolbar, popovers)
 //    is `glassOverCanvas`, nearly opaque: over an arbitrary slide -- black, white, a photo -- the
 //    translucent glass fails text contrast (measured: 3.31:1 over black). Dialogs sit on `scrim`, a
@@ -40,7 +44,7 @@ export type TidepoolScheme = Readonly<{
   /** The lively shapes' gradient pairs (home and empty screens only). */
   livelyShapeGradients: readonly (readonly [string, string])[];
   livelyShapeOpacity: number;
-  /** Fixed chrome panels on the editing screen (no blur). */
+  /** Fixed chrome panels on the editing screen; alpha 0.26 to 0.45, blurred while no gesture runs. */
   panelGlass: string;
   /** Cards and grouped controls inside a panel. */
   cardGlass: string;
@@ -110,6 +114,8 @@ export type TidepoolTokens = Readonly<{
   layers: Readonly<{ wash: number; canvas: number; canvasOverlay: number; chrome: number; popover: number; scrim: number; dialog: number; notice: number; presenter: number }>;
   /** Only on the lively home screens (see the header). */
   livelyBackdropFilter: string;
+  /** The chrome panels' backdrop, applied only while no gesture is active (see the header). */
+  panelBackdrop: Readonly<{ blurPixels: number; saturation: number }>;
   motion: Readonly<{
     calmHueSeconds: number;
     calmHueMaximumDegrees: number;
@@ -135,7 +141,7 @@ export const TIDEPOOL_TOKENS: TidepoolTokens = {
       ["#a5b4fc", "#67e8f9"],
     ],
     livelyShapeOpacity: 0.85,
-    panelGlass: "rgba(255, 255, 255, 0.55)",
+    panelGlass: "rgba(255, 255, 255, 0.38)",
     cardGlass: "rgba(255, 255, 255, 0.45)",
     livelyGlass: "rgba(255, 255, 255, 0.26)",
     glassOverCanvas: "rgba(255, 255, 255, 0.92)",
@@ -182,7 +188,7 @@ export const TIDEPOOL_TOKENS: TidepoolTokens = {
       ["#4338ca", "#0e7490"],
     ],
     livelyShapeOpacity: 0.45,
-    panelGlass: "rgba(24, 30, 48, 0.72)",
+    panelGlass: "rgba(24, 30, 48, 0.45)",
     cardGlass: "rgba(36, 46, 72, 0.55)",
     livelyGlass: "rgba(30, 38, 60, 0.45)",
     glassOverCanvas: "rgba(24, 30, 48, 0.94)",
@@ -192,8 +198,10 @@ export const TIDEPOOL_TOKENS: TidepoolTokens = {
     liftShadow: "0 12px 32px rgba(0, 0, 0, 0.35)",
     scrim: "rgba(0, 0, 0, 0.5)",
     text: "#eef1f8",
-    textMuted: "#aeb6c9",
-    textSubtle: "#aeb6c9",
+    // Lightened from #aeb6c9 for the 0.45 glass: the dark teal wash, saturated by the backdrop
+    // filter, left subtle text on a hovered secondary pill at 4.29:1.
+    textMuted: "#bcc3d4",
+    textSubtle: "#bcc3d4",
     accent: "#a5b4fc",
     accentSoft: "rgba(165, 180, 252, 0.14)",
     selection: "#818cf8",
@@ -231,6 +239,7 @@ export const TIDEPOOL_TOKENS: TidepoolTokens = {
   disabledOpacity: 0.45,
   layers: { wash: -1, canvas: 1, canvasOverlay: 2, chrome: 10, popover: 20, scrim: 30, dialog: 31, notice: 40, presenter: 50 },
   livelyBackdropFilter: "blur(12px) saturate(170%)",
+  panelBackdrop: { blurPixels: 18, saturation: 1.5 },
   motion: {
     calmHueSeconds: 40,
     calmHueMaximumDegrees: 70,
@@ -304,6 +313,7 @@ function sharedProperties(tokens: TidepoolTokens): readonly CustomProperty[] {
     { name: "disabled-opacity", value: String(tokens.disabledOpacity) },
     ...Object.entries(tokens.layers).map(([key, value]) => ({ name: `layer-${kebabCase(key)}`, value: String(value) })),
     { name: "lively-backdrop-filter", value: tokens.livelyBackdropFilter },
+    { name: "panel-backdrop-filter", value: `blur(${tokens.panelBackdrop.blurPixels}px) saturate(${Math.round(tokens.panelBackdrop.saturation * 100)}%)` },
     { name: "calm-hue-duration", value: `${tokens.motion.calmHueSeconds}s` },
     { name: "chrome-transition-duration", value: `${tokens.motion.chromeTransitionMilliseconds}ms` },
   ];

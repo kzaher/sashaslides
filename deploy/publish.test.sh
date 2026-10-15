@@ -31,6 +31,7 @@ for target in site connector all; do
   fi
   if [ "$target" != site ]; then
     expect "$target: connector tarball size" 'connector-src\.tgz: [0-9]+ files, [0-9]+ bytes' "$output"
+    expect "$target: builds the deck web application before packing" 'npm run -s build:web' "$output"
     expect "$target: master key only generated when absent" "grep -q '\^SASHA_MASTER_KEY=' " "$output"
     expect "$target: refuses a new key over existing account keys" 'A new key cannot unwrap' "$output"
     expect "$target: checks the protected-resource document" 'oauth-protected-resource/mcp' "$output"

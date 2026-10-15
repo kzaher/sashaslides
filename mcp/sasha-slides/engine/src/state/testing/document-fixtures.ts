@@ -5,6 +5,7 @@
 import {
   DEFAULT_TEXT_BOX_STYLE,
   EMPTY_DISCUSSION,
+  LOCAL_COLLABORATION_STATUS,
   EMPTY_TEXT_BODY,
   lineFrame,
   mintId,
@@ -226,6 +227,8 @@ export function editorStateFor(document: DocumentSnapshot, overrides: Partial<Ed
     document,
     discussion: EMPTY_DISCUSSION,
     containerSize: { width: 1360, height: 800 },
+    collaboration: LOCAL_COLLABORATION_STATUS,
+    recentColours: [],
   });
   return { ...state, ...overrides };
 }

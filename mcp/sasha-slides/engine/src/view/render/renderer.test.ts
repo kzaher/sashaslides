@@ -27,7 +27,7 @@ import {
 } from "../sample/snapshot-builders.ts";
 import { renderSlideMarkup } from "./slide-markup.tsx";
 import { StaticSlide } from "./static-slide.tsx";
-import { BORDER_STYLE_FOR_DASH } from "./style-css.ts";
+import { BORDER_STYLE_FOR_DASH } from "./inline-styles.ts";
 import { listMarkers, textStyleContextOf } from "./text-layout.ts";
 
 const ids = new IdMinter("Renderer");
@@ -44,19 +44,19 @@ describe("static markup per style feature", () => {
     assert.match(markup, /border-left:0 none/);
   });
 
-  const dashRows: readonly Readonly<{ dash: DashStyle; css: string }>[] = [
-    { dash: "solid", css: "solid" },
-    { dash: "dot", css: "dotted" },
-    { dash: "dash", css: "dashed" },
-    { dash: "longDash", css: "dashed" },
-    { dash: "dashDot", css: "dashed" },
-    { dash: "longDashDot", css: "dashed" },
+  const dashRows: readonly Readonly<{ dash: DashStyle; keyword: string }>[] = [
+    { dash: "solid", keyword: "solid" },
+    { dash: "dot", keyword: "dotted" },
+    { dash: "dash", keyword: "dashed" },
+    { dash: "longDash", keyword: "dashed" },
+    { dash: "dashDot", keyword: "dashed" },
+    { dash: "longDashDot", keyword: "dashed" },
   ];
   for (const row of dashRows) {
-    it(`the ${row.dash} dash becomes a ${row.css} border on every side`, () => {
-      assert.equal(BORDER_STYLE_FOR_DASH[row.dash], row.css);
+    it(`the ${row.dash} dash becomes a ${row.keyword} border on every side`, () => {
+      assert.equal(BORDER_STYLE_FOR_DASH[row.dash], row.keyword);
       const markup = elementMarkup(shapeElement({ id: ids.next("element"), style: { border: { kind: "uniform", stroke: { width: 3, colour: ink, dash: row.dash } } } }));
-      for (const side of ["top", "right", "bottom", "left"]) assert.match(markup, new RegExp(`border-${side}:3px ${row.css} #1c2333`));
+      for (const side of ["top", "right", "bottom", "left"]) assert.match(markup, new RegExp(`border-${side}:3px ${row.keyword} #1c2333`));
     });
   }
 

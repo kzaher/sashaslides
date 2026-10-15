@@ -2,7 +2,9 @@
 // Y.Doc holding the sample deck, with the real model, state and presenter. `?editors=2` shows two
 // editors side by side on two replicas joined by the model's in-memory loopback and presence hub,
 // so each editor shows the other's cursor and selection -- milestone 1's proof of presence.
-// `?embed=addon` runs the editor as the add-on dialog would (Present opens a tab).
+// `?embed=addon` runs the editor as the add-on dialog would (Present opens a tab). Every editor
+// gets a stand-in deck server session (demo-collaboration.ts) whose members -- Ada, Grace and
+// Claude -- are who "@" can mention; `?role=` and `?connection=` show the read-only chrome.
 //
 // Explicit resource management is imported FIRST (SPEC.md section 16): the engine's objects are
 // `Disposable` and Safari lacks `Symbol.dispose`.
@@ -16,6 +18,7 @@ import type { Person } from "../../contracts/discussion.ts";
 import type { AssetRecord } from "../../contracts/document.ts";
 import type { AssetStore, DocumentStore } from "../../contracts/document-store.ts";
 import type { EditorEmbedding } from "../../contracts/editor-state.ts";
+import { STANDALONE_EDITOR_HOST } from "../../contracts/editor-system.ts";
 import { mintId, parsePersonId, type AssetId, type IdSeed } from "../../contracts/ids.ts";
 import { LivelyShapes } from "../../theme/lively-shapes.tsx";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
@@ -24,6 +27,9 @@ import { sampleSlides } from "../sample/sample-deck.ts";
 import { fixtureDeckId } from "../sample/snapshot-builders.ts";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { composeEditor, type ComposedEditor } from "./compose-editor.ts";
+import { createDemoCollaborationSession, demoConnection, demoRole } from "./demo-collaboration.ts";
+import type { CollaborationSession } from "../../contracts/collaboration.ts";
+import type { DeckMember } from "../../contracts/deck-access.ts";
 import { EditorApplication } from "./editor-application.tsx";
 import { PAGE_CONFIGURATION_ID, PAGE_ROOT_ID } from "./editor-page.ts";
 
@@ -40,27 +46,35 @@ async function startDemo(): Promise<ReactElement> {
   const first = new Doc();
   const store = createDocumentStore({ sharedDocument: first, seed: { kind: "blankDeck", deckId: "deck_demo" }, now: () => Date.now(), random: Math.random, scheduler: asyncScheduler, repairPolicy: "repairAfterTransaction", typingMergeWindowMilliseconds: 500 });
   const ada = person({ id: "person_ada", displayName: "Ada Lovelace", colourIndex: 0 });
+  const grace = person({ id: "person_grace", displayName: "Grace Hopper", colourIndex: 2 });
+  const claude: Person = { ...person({ id: "agent_claude", displayName: "Claude", colourIndex: 5 }), kind: "agent" };
+  const members: readonly DeckMember[] = [
+    { person: ada, role: "owner", email: null },
+    { person: grace, role: "editor", email: null },
+    { person: claude, role: "editor", email: null },
+  ];
+  const collaboration = createDemoCollaborationSession({ members, role: demoRole(parameters.get("role")), connection: demoConnection(parameters.get("connection")) });
   await addSampleSlides({ store, assetStore, author: ada });
 
-  const editors: DemoEditor[] = [{ label: "Ada's editor", composed: editorFor({ store, assetStore, me: ada, embedding, runnerAddress: configuration.runnerAddress, presenceClient: first.clientID, twoEditors: parameters.get("editors") === "2" }), assetStore }];
+  const editors: DemoEditor[] = [{ label: "Ada's editor", composed: editorFor({ store, assetStore, me: ada, embedding, runnerAddress: configuration.runnerAddress, presenceClient: first.clientID, twoEditors: parameters.get("editors") === "2", collaboration }), assetStore }];
   if (parameters.get("editors") === "2") {
     const second = new Doc();
     connectInMemory({ first, second });
     const replica = createDocumentStore({ sharedDocument: second, seed: { kind: "none" }, now: () => Date.now(), random: Math.random, scheduler: asyncScheduler, repairPolicy: "reportOnly", typingMergeWindowMilliseconds: 500 });
-    const grace = person({ id: "person_grace", displayName: "Grace Hopper", colourIndex: 2 });
-    editors.push({ label: "Grace's editor", composed: editorFor({ store: replica, assetStore, me: grace, embedding, runnerAddress: configuration.runnerAddress, presenceClient: second.clientID, twoEditors: true }), assetStore });
+    const graceSession = createDemoCollaborationSession({ members, role: "editor", connection: { kind: "online" } });
+    editors.push({ label: "Grace's editor", composed: editorFor({ store: replica, assetStore, me: grace, embedding, runnerAddress: configuration.runnerAddress, presenceClient: second.clientID, twoEditors: true, collaboration: graceSession }), assetStore });
   }
   if (editors.length === 1) {
     const only = editors[0];
     if (only === undefined) throw new Error("No editor was composed.");
-    return <EditorApplication system={only.composed.system} assetStore={only.assetStore} browser={only.composed.browser} presenterDependencies={only.composed.presenterDependencies} clipboardContentFor={only.composed.clipboardContentFor} arrangeThreads={only.composed.arrangeThreads} />;
+    return <EditorApplication system={only.composed.system} assetStore={only.assetStore} browser={only.composed.browser} presenterDependencies={only.composed.presenterDependencies} clipboardContentFor={only.composed.clipboardContentFor} arrangeThreads={only.composed.arrangeThreads} host={STANDALONE_EDITOR_HOST} />;
   }
   return (
     <div className={VIEW_CLASS.sideBySide}>
       {editors.map((editor) => (
         <section key={editor.label} className={VIEW_CLASS.demoPane} aria-label={editor.label}>
           <p className={VIEW_CLASS.demoLabel}>{editor.label}</p>
-          <EditorApplication system={editor.composed.system} assetStore={editor.assetStore} browser={editor.composed.browser} presenterDependencies={editor.composed.presenterDependencies} clipboardContentFor={editor.composed.clipboardContentFor} arrangeThreads={editor.composed.arrangeThreads} />
+          <EditorApplication system={editor.composed.system} assetStore={editor.assetStore} browser={editor.composed.browser} presenterDependencies={editor.composed.presenterDependencies} clipboardContentFor={editor.composed.clipboardContentFor} arrangeThreads={editor.composed.arrangeThreads} host={STANDALONE_EDITOR_HOST} />
         </section>
       ))}
     </div>
@@ -70,13 +84,15 @@ async function startDemo(): Promise<ReactElement> {
 /** One presence hub for the page, so every editor on it sees every other. */
 const presenceHub = createMemoryPresenceHub({ now: () => Date.now() });
 
-function editorFor(options: Readonly<{ store: DocumentStore; assetStore: AssetStore; me: Person; embedding: EditorEmbedding; runnerAddress: string; presenceClient: number; twoEditors: boolean }>): ComposedEditor {
+function editorFor(options: Readonly<{ store: DocumentStore; assetStore: AssetStore; me: Person; embedding: EditorEmbedding; runnerAddress: string; presenceClient: number; twoEditors: boolean; collaboration: CollaborationSession }>): ComposedEditor {
   return composeEditor({
     page: window,
     documentStore: options.store,
     discussionStore: createMemoryDiscussionStore({ actor: options.me, now: () => Date.now(), initialLog: [] }),
     assetStore: options.assetStore,
     presence: options.twoEditors ? presenceHub.channelFor(options.presenceClient) : null,
+    collaboration: options.collaboration,
+    recentColours: [],
     me: options.me,
     embedding: options.embedding,
     runnerAddress: options.runnerAddress,

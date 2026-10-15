@@ -52,7 +52,7 @@ export const BORDER_STYLE_FOR_DASH: Readonly<Record<DashStyle, "solid" | "dotted
 export const LINE_HEIGHT_PER_LINE_SPACING = 1.2;
 
 /** A drawable colour for a document colour, resolved against the deck theme. */
-export function colourCss(colour: Colour, theme: ThemeSnapshot): string {
+export function colourValue(colour: Colour, theme: ThemeSnapshot): string {
   switch (colour.kind) {
     case "literal":
       return hexadecimalWithAlpha(colour.hexadecimal, colour.alpha);
@@ -64,13 +64,13 @@ export function colourCss(colour: Colour, theme: ThemeSnapshot): string {
 }
 
 /** A colour or explicit "no colour" as a drawable value; "none" is transparent. */
-export function optionalColourCss(colour: Colour | NoColour, theme: ThemeSnapshot): string {
+export function optionalColourValue(colour: Colour | NoColour, theme: ThemeSnapshot): string {
   switch (colour.kind) {
     case "none":
       return "transparent";
     case "literal":
     case "theme":
-      return colourCss(colour, theme);
+      return colourValue(colour, theme);
     default:
       return assertNever(colour);
   }
@@ -92,17 +92,17 @@ export function fillRendering(options: Readonly<{ fill: Fill; theme: ThemeSnapsh
     case "none":
       return { background: {}, imageLayer: null };
     case "solid":
-      return { background: { backgroundColor: colourCss(fill.colour, options.theme) }, imageLayer: null };
+      return { background: { backgroundColor: colourValue(fill.colour, options.theme) }, imageLayer: null };
     case "linearGradient":
-      return { background: { backgroundImage: linearGradientCss({ angle: fill.angle, stops: fill.stops, theme: options.theme }) }, imageLayer: null };
+      return { background: { backgroundImage: linearGradientValue({ angle: fill.angle, stops: fill.stops, theme: options.theme }) }, imageLayer: null };
     case "radialGradient":
       return {
-        background: { backgroundImage: radialGradientCss({ centreX: fill.centreX, centreY: fill.centreY, stops: fill.stops, theme: options.theme }) },
+        background: { backgroundImage: radialGradientValue({ centreX: fill.centreX, centreY: fill.centreY, stops: fill.stops, theme: options.theme }) },
         imageLayer: null,
       };
     case "image": {
       const address = options.assetAddress(fill.assetId);
-      const image: CSSProperties = address === null ? MISSING_IMAGE_BACKGROUND : { backgroundImage: `url("${address}")`, ...imageFitCss(fill.fit) };
+      const image: CSSProperties = address === null ? MISSING_IMAGE_BACKGROUND : { backgroundImage: `url("${address}")`, ...imageFitDeclarations(fill.fit) };
       if (fill.opacity >= 1) return { background: image, imageLayer: null };
       return { background: {}, imageLayer: { position: "absolute", inset: 0, borderRadius: "inherit", opacity: fill.opacity, ...image } };
     }
@@ -111,16 +111,16 @@ export function fillRendering(options: Readonly<{ fill: Fill; theme: ThemeSnapsh
   }
 }
 
-export function linearGradientCss(options: Readonly<{ angle: number; stops: readonly GradientStop[]; theme: ThemeSnapshot }>): string {
-  return `linear-gradient(${roundNumber(options.angle)}deg, ${gradientStopsCss(options.stops, options.theme)})`;
+export function linearGradientValue(options: Readonly<{ angle: number; stops: readonly GradientStop[]; theme: ThemeSnapshot }>): string {
+  return `linear-gradient(${roundNumber(options.angle)}deg, ${gradientStopsValue(options.stops, options.theme)})`;
 }
 
-export function radialGradientCss(options: Readonly<{ centreX: number; centreY: number; stops: readonly GradientStop[]; theme: ThemeSnapshot }>): string {
-  return `radial-gradient(ellipse farthest-corner at ${percent(options.centreX)} ${percent(options.centreY)}, ${gradientStopsCss(options.stops, options.theme)})`;
+export function radialGradientValue(options: Readonly<{ centreX: number; centreY: number; stops: readonly GradientStop[]; theme: ThemeSnapshot }>): string {
+  return `radial-gradient(ellipse farthest-corner at ${percent(options.centreX)} ${percent(options.centreY)}, ${gradientStopsValue(options.stops, options.theme)})`;
 }
 
 /** How an image fill sits in its box. */
-export function imageFitCss(fit: ImageFit): CSSProperties {
+export function imageFitDeclarations(fit: ImageFit): CSSProperties {
   switch (fit) {
     case "cover":
       return { backgroundSize: "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat" };
@@ -136,20 +136,20 @@ export function imageFitCss(fit: ImageFit): CSSProperties {
 }
 
 /** Per-side border declarations for a box (the rectangle family, images, table cells). */
-export function borderCss(border: Border, theme: ThemeSnapshot): CSSProperties {
+export function borderDeclarations(border: Border, theme: ThemeSnapshot): CSSProperties {
   switch (border.kind) {
     case "none":
       return { borderStyle: "none", borderWidth: 0 };
     case "uniform": {
-      const side = strokeBorderCss(border.stroke, theme);
+      const side = strokeBorderValue(border.stroke, theme);
       return { borderTop: side, borderRight: side, borderBottom: side, borderLeft: side };
     }
     case "perSide":
       return {
-        borderTop: optionalStrokeBorderCss(border.top, theme),
-        borderRight: optionalStrokeBorderCss(border.right, theme),
-        borderBottom: optionalStrokeBorderCss(border.bottom, theme),
-        borderLeft: optionalStrokeBorderCss(border.left, theme),
+        borderTop: optionalStrokeBorderValue(border.top, theme),
+        borderRight: optionalStrokeBorderValue(border.right, theme),
+        borderBottom: optionalStrokeBorderValue(border.bottom, theme),
+        borderLeft: optionalStrokeBorderValue(border.left, theme),
       };
     default:
       return assertNever(border);
@@ -157,12 +157,12 @@ export function borderCss(border: Border, theme: ThemeSnapshot): CSSProperties {
 }
 
 /** One side's `border` shorthand; a missing side draws nothing. */
-export function optionalStrokeBorderCss(stroke: Stroke | null, theme: ThemeSnapshot): string {
-  return stroke === null ? "0 none" : strokeBorderCss(stroke, theme);
+export function optionalStrokeBorderValue(stroke: Stroke | null, theme: ThemeSnapshot): string {
+  return stroke === null ? "0 none" : strokeBorderValue(stroke, theme);
 }
 
-export function strokeBorderCss(stroke: Stroke, theme: ThemeSnapshot): string {
-  return `${roundNumber(stroke.width)}px ${BORDER_STYLE_FOR_DASH[stroke.dash]} ${colourCss(stroke.colour, theme)}`;
+export function strokeBorderValue(stroke: Stroke, theme: ThemeSnapshot): string {
+  return `${roundNumber(stroke.width)}px ${BORDER_STYLE_FOR_DASH[stroke.dash]} ${colourValue(stroke.colour, theme)}`;
 }
 
 /** The SVG `stroke-dasharray` of a dash, scaled by the stroke width; undefined for solid. */
@@ -187,7 +187,7 @@ export function strokeDashArray(dash: DashStyle, width: number): string | undefi
 }
 
 /** `border-radius` for a uniform or per-corner radius (top-left, top-right, bottom-right, bottom-left). */
-export function cornerRadiusCss(radius: CornerRadius): string {
+export function cornerRadiusValue(radius: CornerRadius): string {
   switch (radius.kind) {
     case "uniform":
       return `${roundNumber(radius.radius)}px`;
@@ -199,17 +199,17 @@ export function cornerRadiusCss(radius: CornerRadius): string {
 }
 
 /** A box's drop shadow (spread included). */
-export function boxShadowCss(shadow: Shadow, theme: ThemeSnapshot): string {
-  return `${roundNumber(shadow.offsetX)}px ${roundNumber(shadow.offsetY)}px ${roundNumber(shadow.blur)}px ${roundNumber(shadow.spread)}px ${colourCss(shadow.colour, theme)}`;
+export function boxShadowValue(shadow: Shadow, theme: ThemeSnapshot): string {
+  return `${roundNumber(shadow.offsetX)}px ${roundNumber(shadow.offsetY)}px ${roundNumber(shadow.blur)}px ${roundNumber(shadow.spread)}px ${colourValue(shadow.colour, theme)}`;
 }
 
 /** A vector shape's drop shadow: a filter has no spread, so it is dropped (as on export). */
-export function dropShadowFilterCss(shadow: Shadow, theme: ThemeSnapshot): string {
-  return `drop-shadow(${roundNumber(shadow.offsetX)}px ${roundNumber(shadow.offsetY)}px ${roundNumber(shadow.blur / 2)}px ${colourCss(shadow.colour, theme)})`;
+export function dropShadowFilterValue(shadow: Shadow, theme: ThemeSnapshot): string {
+  return `drop-shadow(${roundNumber(shadow.offsetX)}px ${roundNumber(shadow.offsetY)}px ${roundNumber(shadow.blur / 2)}px ${colourValue(shadow.colour, theme)})`;
 }
 
 /** Rotation and flips as ONE transform about the frame's centre; undefined when neither applies. */
-export function frameTransformCss(frame: Frame): string | undefined {
+export function frameTransformValue(frame: Frame): string | undefined {
   const rotation = frame.rotation === 0 ? null : `rotate(${roundNumber(frame.rotation)}deg)`;
   const flip = frame.flipHorizontal || frame.flipVertical ? `scale(${frame.flipHorizontal ? -1 : 1}, ${frame.flipVertical ? -1 : 1})` : null;
   if (rotation === null && flip === null) return undefined;
@@ -217,8 +217,8 @@ export function frameTransformCss(frame: Frame): string | undefined {
 }
 
 /** Where a leaf element sits: absolutely, at its unrotated frame, rotated and flipped about its centre. */
-export function leafFrameCss(frame: Frame): CSSProperties {
-  const transform = frameTransformCss(frame);
+export function leafFrameDeclarations(frame: Frame): CSSProperties {
+  const transform = frameTransformValue(frame);
   const position: CSSProperties = {
     position: "absolute",
     left: roundNumber(frame.x),
@@ -234,39 +234,39 @@ export function leafFrameCss(frame: Frame): CSSProperties {
  * The counter-transform of a text layer inside a flipped element: Slides mirrors a shape, never the
  * letters in it, so the text is flipped back inside the mirrored box.
  */
-export function textCounterFlipCss(frame: Frame): string | undefined {
+export function textCounterFlipValue(frame: Frame): string | undefined {
   if (!frame.flipHorizontal && !frame.flipVertical) return undefined;
   return `scale(${frame.flipHorizontal ? -1 : 1}, ${frame.flipVertical ? -1 : 1})`;
 }
 
 /** A run's inline style; `fontScale` is the shrink-on-overflow factor (1 when the text fits). */
-export function runCss(options: Readonly<{ style: RunStyle; theme: ThemeSnapshot; fontScale: number }>): CSSProperties {
+export function runDeclarations(options: Readonly<{ style: RunStyle; theme: ThemeSnapshot; fontScale: number }>): CSSProperties {
   const style = options.style;
   const fontSize = style.fontSize * options.fontScale * BASELINE_SIZE_FACTOR[style.baselineOffset];
   const decorations = [style.underline ? "underline" : null, style.strikethrough ? "line-through" : null].filter((part): part is string => part !== null);
-  const css: CSSProperties = {
-    fontFamily: fontFamilyCss(style.fontFamily),
+  const declarations: CSSProperties = {
+    fontFamily: fontFamilyValue(style.fontFamily),
     fontSize: `${roundNumber(fontSize)}px`,
     fontWeight: style.fontWeight,
     fontStyle: style.fontStyle,
-    color: colourCss(style.colour, options.theme),
+    color: colourValue(style.colour, options.theme),
     textDecoration: decorations.length === 0 ? "none" : decorations.join(" "),
   };
-  const highlight = optionalColourCss(style.highlight, options.theme);
+  const highlight = optionalColourValue(style.highlight, options.theme);
   return {
-    ...css,
+    ...declarations,
     ...(highlight === "transparent" ? {} : { backgroundColor: highlight }),
     ...(style.baselineOffset === "none" ? {} : { verticalAlign: BASELINE_VERTICAL_ALIGN[style.baselineOffset] }),
     ...(style.letterSpacing === 0 ? {} : { letterSpacing: `${roundNumber(style.letterSpacing * options.fontScale)}px` }),
-    ...textCaseCss(style.textCase),
+    ...textCaseDeclarations(style.textCase),
   };
 }
 
 /** A paragraph's inline style. `base` is the paragraph's own run style, so an empty line keeps its height. */
-export function paragraphCss(options: Readonly<{ style: ParagraphStyle; base: RunStyle; theme: ThemeSnapshot; fontScale: number; listIndent: number }>): CSSProperties {
+export function paragraphDeclarations(options: Readonly<{ style: ParagraphStyle; base: RunStyle; theme: ThemeSnapshot; fontScale: number; listIndent: number }>): CSSProperties {
   const style = options.style;
   const scale = options.fontScale;
-  const css: CSSProperties = {
+  const declarations: CSSProperties = {
     position: "relative",
     margin: 0,
     marginTop: `${roundNumber(style.spaceAbove * scale)}px`,
@@ -276,11 +276,11 @@ export function paragraphCss(options: Readonly<{ style: ParagraphStyle; base: Ru
     textAlign: TEXT_ALIGN[style.alignment],
     direction: style.direction === "rightToLeft" ? "rtl" : "ltr",
     lineHeight: roundNumber(style.lineSpacing * LINE_HEIGHT_PER_LINE_SPACING),
-    fontFamily: fontFamilyCss(options.base.fontFamily),
+    fontFamily: fontFamilyValue(options.base.fontFamily),
     fontSize: `${roundNumber(options.base.fontSize * scale)}px`,
-    color: colourCss(options.base.colour, options.theme),
+    color: colourValue(options.base.colour, options.theme),
   };
-  return css;
+  return declarations;
 }
 
 /** How a text layer stacks its paragraphs for vertical alignment. */
@@ -298,7 +298,7 @@ export function verticalJustification(alignment: VerticalAlignment): "flex-start
 }
 
 /** A family name as a stylesheet value, quoted, with a generic fallback so missing fonts stay sans. */
-export function fontFamilyCss(family: string): string {
+export function fontFamilyValue(family: string): string {
   return `"${family.replace(/["\\]/g, "")}", sans-serif`;
 }
 
@@ -330,8 +330,8 @@ function hexadecimalWithAlpha(hexadecimal: string, alpha: number): string {
   return `rgba(${red}, ${green}, ${blue}, ${roundNumber(Math.max(0, alpha))})`;
 }
 
-function gradientStopsCss(stops: readonly GradientStop[], theme: ThemeSnapshot): string {
-  return stops.map((stop) => `${colourCss(stop.colour, theme)} ${percent(stop.offset)}`).join(", ");
+function gradientStopsValue(stops: readonly GradientStop[], theme: ThemeSnapshot): string {
+  return stops.map((stop) => `${colourValue(stop.colour, theme)} ${percent(stop.offset)}`).join(", ");
 }
 
 function percent(fraction: number): string {
@@ -357,7 +357,7 @@ const TEXT_ALIGN: Readonly<Record<TextAlignment, "start" | "center" | "end" | "j
   justify: "justify",
 };
 
-function textCaseCss(textCase: RunStyle["textCase"]): CSSProperties {
+function textCaseDeclarations(textCase: RunStyle["textCase"]): CSSProperties {
   switch (textCase) {
     case "none":
       return {};

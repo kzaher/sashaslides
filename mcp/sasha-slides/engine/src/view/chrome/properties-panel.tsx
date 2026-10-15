@@ -3,25 +3,41 @@
 // comes from properties-values.ts (points for font sizes, "mixed" across a selection, locked
 // controls for values from a newer version); this file only lays the controls out.
 //
-// Key decision: THE PANEL DOES NOT RENDER DURING A DRAG. It subscribes to the slices it shows --
-// selection, document, typing style, measured layout, its own tab -- and never to the gesture, so a
-// pointer move re-renders the canvas and nothing here (the 4 millisecond drag budget).
+// Key decisions:
+//
+//  * THE PANEL DOES NOT RENDER DURING A DRAG. It subscribes to the slices it shows -- selection,
+//    document, typing style, measured layout, its own tab -- and never to the gesture, so a pointer
+//    move re-renders the canvas and nothing here (the 4 millisecond drag budget).
+//  * STYLE GROUPS ARE EDITED FROM THE FIRST LEAF THAT HAS THEM. A padding, a stroke width, a border
+//    width is sent as that first leaf's whole group with the one field replaced; the reducer merges
+//    the changed field into every selected element's own group (state element-patches.ts), so the
+//    fields SHOW the shared value ("mixed" when the selection differs) but EDIT from that base.
+//  * A ROLE THAT CANNOT EDIT SEES THE PANEL READ-ONLY: the tab body sits in a disabled fieldset with
+//    the reason above it (access.ts), so every control is disabled at once and says why.
+//  * THE TABS ARE A TABLIST with a roving tab index; the arrow keys switch tabs and never nudge the
+//    selected element (pill-group.ts).
 
-import { memo, useRef, type ReactElement } from "react";
+import { memo, useRef, useState, type ReactElement } from "react";
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { BuiltinTransitionEffect, ElementSnapshot, ImageCrop, ImageElement, ShapeElement, SlideDirection, SlideTransition, TableElement, ThemeSnapshot } from "../../contracts/document.ts";
+import { mintId } from "../../contracts/ids.ts";
 import type { EditorEvent } from "../../contracts/editor-events.ts";
 import type { EditorState, PropertiesTab } from "../../contracts/editor-state.ts";
-import type { Border, Colour, CornerRadius, DashStyle, Fill, ImageFit, NoColour, Shadow, Stroke, TextBoxStyle } from "../../contracts/style.ts";
+import type { Border, Colour, CornerRadius, DashStyle, Fill, ImageFit, ListGlyph, NoColour, Shadow, Stroke, TextBoxStyle } from "../../contracts/style.ts";
 import { literalColour, themeColour } from "../../contracts/style.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { shallowEqual, useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
 import { isRectangleFamily } from "../render/shape-geometry.ts";
+import { linearGradientValue, radialGradientValue } from "../render/inline-styles.ts";
 import { slideBackground } from "../render/static-slide.tsx";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
+import { editingDisabledReason } from "./access.ts";
 import { ChoiceField, ColourField, NumberField, PillChoice, Section, ToggleButton } from "./fields.tsx";
+import { MAXIMUM_GRADIENT_STOPS, MINIMUM_GRADIENT_STOPS, withAddedStop, withLinearAngle, withRadialCentre, withStopColour, withStopOffset, withoutStop, type GradientFill } from "./gradient-stops.ts";
 import { Icon } from "./icons.tsx";
-import { fontSizeEvent, frameValues, lockedExplanation, panelSubject, roundTo, sharedValue, subjectElements, textValues, type PanelSubject, type SharedValue } from "./properties-values.ts";
+import { LIST_GLYPH_PRESETS } from "./list-glyphs.ts";
+import { handlePillGroupKey, rovingTabIndex } from "./pill-group.ts";
+import { fontSizeEvent, frameValues, leafElements, lockedExplanation, panelSubject, roundTo, sharedValue, subjectElements, textValues, type PanelSubject, type SharedValue } from "./properties-values.ts";
 
 export const PROPERTIES_TABS: readonly Readonly<{ tab: PropertiesTab; label: string }>[] = [
   { tab: "arrange", label: "Arrange" },
@@ -38,26 +54,50 @@ export const CURATED_FONT_FAMILIES: readonly string[] = ["Manrope", "Inter", "Ro
 
 export const PropertiesPanel = memo(function PropertiesPanel(): ReactElement {
   const services = useEditorServices();
-  const tab = useEditorSelector((state) => state.ui.propertiesTab);
+  const tab = useEditorSelector((state) => state.chrome.propertiesTab);
   useEditorSelector(
-    (state) => ({ selection: state.selection, document: state.document, typing: state.textEditing.typingStyle, measured: state.measuredLayouts, currentSlideId: state.currentSlideId, preview: state.ui.transitionPreview }),
+    (state) => ({ selection: state.selection, document: state.document, typing: state.textEditing.typingStyle, measured: state.measuredLayouts, currentSlideId: state.currentSlideId, preview: state.chrome.transitionPreview }),
     shallowEqual,
   );
   const state = services.system.currentState();
   const dispatch = services.system.dispatch;
+  const refusal = editingDisabledReason(state);
+  const chosenIndex = PROPERTIES_TABS.findIndex((entry) => entry.tab === tab);
   return (
     <aside className={`${TIDEPOOL_CLASS.panel} ${VIEW_CLASS.sidePanel}`} aria-label="Properties">
       <div className={VIEW_CLASS.panelHeader}>
-        <div className={TIDEPOOL_CLASS.tabs} role="tablist" aria-label="Properties">
-          {PROPERTIES_TABS.map((entry) => (
-            <button key={entry.tab} type="button" role="tab" className={TIDEPOOL_CLASS.tab} aria-selected={entry.tab === tab} onClick={() => dispatch({ kind: "propertiesTabChosen", tab: entry.tab })}>
+        <div
+          className={TIDEPOOL_CLASS.tabs}
+          role="tablist"
+          aria-label="Properties"
+          onKeyDown={(event) =>
+            handlePillGroupKey(event, (index) => {
+              const entry = PROPERTIES_TABS[index];
+              if (entry !== undefined) dispatch({ kind: "propertiesTabChosen", tab: entry.tab });
+            })
+          }
+        >
+          {PROPERTIES_TABS.map((entry, index) => (
+            <button
+              key={entry.tab}
+              type="button"
+              role="tab"
+              className={TIDEPOOL_CLASS.tab}
+              aria-selected={entry.tab === tab}
+              tabIndex={rovingTabIndex({ index, chosenIndex })}
+              data-properties-tab={entry.tab}
+              onClick={() => dispatch({ kind: "propertiesTabChosen", tab: entry.tab })}
+            >
               {entry.label}
             </button>
           ))}
         </div>
       </div>
       <div className={VIEW_CLASS.panelBody} role="tabpanel">
-        <TabBody tab={tab} state={state} dispatch={dispatch} />
+        {refusal === null ? null : <p className={VIEW_CLASS.explanation}>{refusal}</p>}
+        <fieldset className={VIEW_CLASS.panelFieldset} disabled={refusal !== null} title={refusal ?? undefined}>
+          <TabBody tab={tab} state={state} dispatch={dispatch} />
+        </fieldset>
       </div>
     </aside>
   );
@@ -66,18 +106,19 @@ export const PropertiesPanel = memo(function PropertiesPanel(): ReactElement {
 function TabBody(properties: Readonly<{ tab: PropertiesTab; state: EditorState; dispatch: (event: EditorEvent) => void }>): ReactElement {
   const subject = panelSubject(properties.state);
   const elements = subjectElements(subject);
+  const leaves = elements.flatMap(leafElements);
   const nothing = <p className={TIDEPOOL_CLASS.muted}>Select something on the slide to change it here.</p>;
   switch (properties.tab) {
     case "arrange":
       return elements.length === 0 ? nothing : <ArrangeTab state={properties.state} elements={elements} dispatch={properties.dispatch} />;
     case "fill":
-      return elements.length === 0 ? nothing : <FillTab theme={properties.state.document.theme} elements={elements} dispatch={properties.dispatch} />;
+      return elements.length === 0 ? nothing : <FillTab theme={properties.state.document.theme} elements={leaves} dispatch={properties.dispatch} />;
     case "border":
-      return elements.length === 0 ? nothing : <BorderTab theme={properties.state.document.theme} elements={elements} dispatch={properties.dispatch} />;
+      return elements.length === 0 ? nothing : <BorderTab theme={properties.state.document.theme} elements={leaves} dispatch={properties.dispatch} />;
     case "effects":
-      return elements.length === 0 ? nothing : <EffectsTab theme={properties.state.document.theme} elements={elements} dispatch={properties.dispatch} />;
+      return elements.length === 0 ? nothing : <EffectsTab theme={properties.state.document.theme} elements={leaves} dispatch={properties.dispatch} />;
     case "text":
-      return textBearing(elements) ? <TextTab state={properties.state} subject={subject} elements={elements} dispatch={properties.dispatch} /> : <p className={TIDEPOOL_CLASS.muted}>Select a text box, a shape or a table, or click into its text.</p>;
+      return textBearing(elements) ? <TextTab state={properties.state} subject={subject} elements={leaves} dispatch={properties.dispatch} /> : <p className={TIDEPOOL_CLASS.muted}>Select a text box, a shape or a table, or click into its text.</p>;
     case "slide":
       return <SlideTab state={properties.state} dispatch={properties.dispatch} />;
     case "transition":
@@ -107,7 +148,7 @@ function ArrangeTab(properties: Readonly<{ state: EditorState; elements: readonl
           <NumberField label="Rotation" suffix="degrees" value={values.rotation} onCommit={field("rotation")} explanation={locked} />
         </div>
         <div className={VIEW_CLASS.fieldRow}>
-          <ToggleButton label="Lock the aspect ratio" icon="lock" pressed={properties.state.ui.aspectRatioLocked} onToggle={() => dispatch({ kind: "aspectRatioLockToggled" })} explanation={locked} />
+          <ToggleButton label="Lock the aspect ratio" icon="lock" pressed={properties.state.chrome.aspectRatioLocked} onToggle={() => dispatch({ kind: "aspectRatioLockToggled" })} explanation={locked} />
           <ToggleButton label="Flip horizontally" icon="flipHorizontal" pressed={false} onToggle={arrange({ kind: "flip", axis: "horizontal" })} explanation={locked} />
           <ToggleButton label="Flip vertically" icon="flipVertical" pressed={false} onToggle={arrange({ kind: "flip", axis: "vertical" })} explanation={locked} />
           <ToggleButton label="Rotate 90 degrees" icon="rotate" pressed={false} onToggle={arrange({ kind: "rotate", degrees: 90 })} explanation={locked} />
@@ -149,13 +190,13 @@ function FillTab(properties: Readonly<{ theme: ThemeSnapshot; elements: readonly
   const boxes = properties.elements.flatMap(boxStyleOf);
   const tables = properties.elements.flatMap(tablesOf);
   if (boxes.length === 0 && tables.length > 0) {
-    const cellFill = sharedValue(tables.flatMap((table) => table.cells.map((cell) => cell.fill)), sameJson);
+    const cellFill = sharedValue(tables.flatMap((table) => table.cells.map((cell) => cell.fill)), sameStructure);
     const setCellFill = (next: Fill): void => properties.dispatch({ kind: "tableCellPatchRequested", patch: { fill: next } });
     return <FillEditor title="Cell fill" theme={properties.theme} fill={cellFill} onFill={setCellFill} explanation={null} allowImage={false} destination="fill" dispatch={properties.dispatch} />;
   }
   if (boxes.length === 0) return <p className={TIDEPOOL_CLASS.muted}>Lines and groups have no fill; select a shape, an image or a text box.</p>;
   const locked = lockedExplanation({ elements: properties.elements, control: "fill" });
-  const fill = sharedValue(boxes.map((box) => box.fill), sameJson);
+  const fill = sharedValue(boxes.map((box) => box.fill), sameStructure);
   const setFill = (next: Fill): void => properties.dispatch({ kind: "elementPatchRequested", patch: { fill: next } });
   return <FillEditor title="Fill" theme={properties.theme} fill={fill} onFill={setFill} explanation={locked} allowImage destination="fill" dispatch={properties.dispatch} />;
 }
@@ -239,27 +280,8 @@ function FillDetails(properties: Readonly<{ fill: Fill; theme: ThemeSnapshot; on
     case "solid":
       return <ColourField label="Colour" value={{ kind: "value", value: fill.colour }} theme={properties.theme} onChoose={(colour) => properties.onFill({ kind: "solid", colour })} explanation={properties.explanation} />;
     case "linearGradient":
-    case "radialGradient": {
-      const stops = fill.stops;
-      const setStop = (index: number) => (colour: Colour) => properties.onFill({ ...fill, stops: stops.map((stop, stopIndex) => (stopIndex === index ? { ...stop, colour } : stop)) });
-      return (
-        <>
-          <div className={VIEW_CLASS.fieldGrid}>
-            {stops.slice(0, 2).map((stop, index) => (
-              <ColourField key={index} label={index === 0 ? "From" : "To"} value={{ kind: "value", value: stop.colour }} theme={properties.theme} onChoose={setStop(index)} explanation={properties.explanation} />
-            ))}
-          </div>
-          {fill.kind === "linearGradient" ? (
-            <NumberField label="Angle" suffix="degrees" value={{ kind: "value", value: fill.angle }} onCommit={(text) => numberOr(text, (angle) => properties.onFill({ ...fill, angle }))} explanation={properties.explanation} />
-          ) : (
-            <div className={VIEW_CLASS.fieldGrid}>
-              <NumberField label="Centre across" suffix="percent" value={{ kind: "value", value: roundTo(fill.centreX * 100, 1) }} onCommit={(text) => numberOr(text, (value) => properties.onFill({ ...fill, centreX: value / 100 }))} explanation={properties.explanation} />
-              <NumberField label="Centre down" suffix="percent" value={{ kind: "value", value: roundTo(fill.centreY * 100, 1) }} onCommit={(text) => numberOr(text, (value) => properties.onFill({ ...fill, centreY: value / 100 }))} explanation={properties.explanation} />
-            </div>
-          )}
-        </>
-      );
-    }
+    case "radialGradient":
+      return <GradientEditor fill={fill} theme={properties.theme} onFill={properties.onFill} explanation={properties.explanation} />;
     case "image":
       return (
         <div className={VIEW_CLASS.fieldGrid}>
@@ -278,6 +300,74 @@ function FillDetails(properties: Readonly<{ fill: Fill; theme: ThemeSnapshot; on
   }
 }
 
+/**
+ * A gradient's stops -- colour and position each, added in the widest gap and removed down to two,
+ * at most ten -- and its angle (linear) or centre (radial); positions and centres in percent
+ * (gradient-stops.ts holds the rules).
+ */
+export function GradientEditor(properties: Readonly<{ fill: GradientFill; theme: ThemeSnapshot; onFill: (fill: Fill) => void; explanation: string | null }>): ReactElement {
+  const fill = properties.fill;
+  const explanation = properties.explanation;
+  const added = withAddedStop(fill);
+  return (
+    <>
+      <div className={VIEW_CLASS.gradientPreview} aria-hidden="true" style={{ background: gradientPreviewValue(fill, properties.theme) }} />
+      <div className={VIEW_CLASS.gradientStops} role="group" aria-label="Gradient stops">
+        {fill.stops.map((stop, index) => (
+          <div key={index} className={VIEW_CLASS.gradientStopRow}>
+            <ColourField label={`Stop ${index + 1}`} value={{ kind: "value", value: stop.colour }} theme={properties.theme} onChoose={(colour) => properties.onFill(withStopColour(fill, { index, colour }))} explanation={explanation} />
+            <NumberField label="Position" suffix="percent" value={{ kind: "value", value: roundTo(stop.offset * 100, 1) }} onCommit={(text) => numberOr(text, (percent) => properties.onFill(withStopOffset(fill, { index, offset: percent / 100 })))} explanation={explanation} />
+            <button
+              type="button"
+              className={TIDEPOOL_CLASS.iconButton}
+              aria-label={`Remove stop ${index + 1}`}
+              title={fill.stops.length <= MINIMUM_GRADIENT_STOPS ? `A gradient needs at least ${MINIMUM_GRADIENT_STOPS} stops` : `Remove stop ${index + 1}`}
+              disabled={explanation !== null || fill.stops.length <= MINIMUM_GRADIENT_STOPS}
+              onClick={() => {
+                const removed = withoutStop(fill, index);
+                if (removed !== null) properties.onFill(removed);
+              }}
+            >
+              <Icon name="close" />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className={TIDEPOOL_CLASS.secondaryPill}
+          disabled={explanation !== null || added === null}
+          title={added === null ? `A gradient holds at most ${MAXIMUM_GRADIENT_STOPS} stops` : undefined}
+          onClick={() => {
+            if (added !== null) properties.onFill(added);
+          }}
+        >
+          <Icon name="plus" /> Add a stop
+        </button>
+      </div>
+      {fill.kind === "linearGradient" ? (
+        <NumberField label="Angle" suffix="degrees" value={{ kind: "value", value: fill.angle }} onCommit={(text) => numberOr(text, (angle) => properties.onFill(withLinearAngle(fill, angle)))} explanation={explanation} />
+      ) : (
+        <div className={VIEW_CLASS.fieldGrid}>
+          <NumberField label="Centre across" suffix="percent" value={{ kind: "value", value: roundTo(fill.centreX * 100, 1) }} onCommit={(text) => numberOr(text, (value) => properties.onFill(withRadialCentre(fill, { x: value / 100 })))} explanation={explanation} />
+          <NumberField label="Centre down" suffix="percent" value={{ kind: "value", value: roundTo(fill.centreY * 100, 1) }} onCommit={(text) => numberOr(text, (value) => properties.onFill(withRadialCentre(fill, { y: value / 100 })))} explanation={explanation} />
+        </div>
+      )}
+    </>
+  );
+}
+
+/** The gradient as the preview strip draws it: a linear one across, at its own stops. */
+function gradientPreviewValue(fill: GradientFill, theme: ThemeSnapshot): string {
+  switch (fill.kind) {
+    case "linearGradient":
+      return linearGradientValue({ angle: 90, stops: fill.stops, theme });
+    case "radialGradient":
+      return radialGradientValue({ centreX: fill.centreX, centreY: fill.centreY, stops: fill.stops, theme });
+    default:
+      return assertNever(fill);
+  }
+}
+
 function BorderTab(properties: Readonly<{ theme: ThemeSnapshot; elements: readonly ElementSnapshot[]; dispatch: (event: EditorEvent) => void }>): ReactElement {
   const lines = properties.elements.flatMap(lineOf);
   if (lines.length > 0) return <LineStrokeEditor theme={properties.theme} elements={properties.elements} lines={lines} dispatch={properties.dispatch} />;
@@ -287,10 +377,12 @@ function BorderTab(properties: Readonly<{ theme: ThemeSnapshot; elements: readon
   if (boxes.length === 0) return <p className={TIDEPOOL_CLASS.muted}>Select a shape, an image, a line or a table.</p>;
   const locked = lockedExplanation({ elements: properties.elements, control: "border" });
   const radiusLocked = lockedExplanation({ elements: properties.elements, control: "cornerRadius" });
-  const border = sharedValue(boxes.map((box) => box.border), sameJson);
   const first = boxes[0];
   const perSideAllowed = properties.elements.every(allowsPerSide);
-  const current = border.kind === "value" ? border.value : null;
+  // Edits start from the first box's border (see the header); the fields show what the boxes share.
+  const current = first?.border ?? null;
+  const kind = sharedValue(boxes.map((box) => box.border.kind));
+  const strokes = boxes.flatMap((box) => drawnStrokes(box.border));
   const stroke = current === null ? DEFAULT_STROKE : borderStroke(current);
   const setBorder = (next: Border): void => properties.dispatch({ kind: "elementPatchRequested", patch: { border: next } });
   const setRadius = (next: CornerRadius): void => properties.dispatch({ kind: "elementPatchRequested", patch: { cornerRadius: next } });
@@ -299,7 +391,7 @@ function BorderTab(properties: Readonly<{ theme: ThemeSnapshot; elements: readon
       <Section title="Border" explanation={locked}>
         <PillChoice
           label="Border kind"
-          value={current?.kind ?? null}
+          value={kind.kind === "value" ? kind.value : null}
           disabled={locked !== null}
           onChoose={(kind) => setBorder(borderOfKind({ kind, stroke }))}
           options={[{ value: "none", label: "None" }, { value: "uniform", label: "All sides" }, ...(perSideAllowed ? [{ value: "perSide" as const, label: "Per side" }] : [])]}
@@ -307,10 +399,10 @@ function BorderTab(properties: Readonly<{ theme: ThemeSnapshot; elements: readon
         {current === null || borderKindIsNone(current) ? null : (
           <>
             <div className={VIEW_CLASS.fieldGrid}>
-              <NumberField label="Width" value={{ kind: "value", value: stroke.width }} onCommit={(text) => numberOr(text, (width) => setBorder(withStroke(current, { ...stroke, width: Math.max(0, width) })))} explanation={locked} />
-              <ChoiceField<DashStyle> label="Dash" value={{ kind: "value", value: stroke.dash }} options={DASH_OPTIONS} onChoose={(dash) => setBorder(withStroke(current, { ...stroke, dash }))} explanation={locked} />
+              <NumberField label="Width" value={sharedValue(strokes.map((side) => side.width))} onCommit={(text) => numberOr(text, (width) => setBorder(withStroke(current, { ...stroke, width: Math.max(0, width) })))} explanation={locked} />
+              <ChoiceField<DashStyle> label="Dash" value={sharedValue(strokes.map((side) => side.dash))} options={DASH_OPTIONS} onChoose={(dash) => setBorder(withStroke(current, { ...stroke, dash }))} explanation={locked} />
             </div>
-            <ColourField label="Colour" value={{ kind: "value", value: stroke.colour }} theme={properties.theme} onChoose={(colour) => setBorder(withStroke(current, { ...stroke, colour }))} explanation={locked} />
+            <ColourField label="Colour" value={sharedValue(strokes.map((side) => side.colour), sameStructure)} theme={properties.theme} onChoose={(colour) => setBorder(withStroke(current, { ...stroke, colour }))} explanation={locked} />
             {current.kind === "perSide" ? <SideToggles border={current} stroke={stroke} onBorder={setBorder} explanation={locked} /> : null}
           </>
         )}
@@ -390,7 +482,7 @@ function LineStrokeEditor(properties: Readonly<{ theme: ThemeSnapshot; elements:
         <ChoiceField label="Start" value={sharedValue(properties.lines.map((line) => line.startArrow))} options={arrowOptions} onChoose={(startArrow) => properties.dispatch({ kind: "elementPatchRequested", patch: { startArrow } })} explanation={locked} />
         <ChoiceField label="End" value={sharedValue(properties.lines.map((line) => line.endArrow))} options={arrowOptions} onChoose={(endArrow) => properties.dispatch({ kind: "elementPatchRequested", patch: { endArrow } })} explanation={locked} />
       </div>
-      <ColourField label="Colour" value={sharedValue(properties.lines.map((line) => line.stroke.colour), sameJson)} theme={properties.theme} onChoose={(colour) => patch({ colour })} explanation={locked} />
+      <ColourField label="Colour" value={sharedValue(properties.lines.map((line) => line.stroke.colour), sameStructure)} theme={properties.theme} onChoose={(colour) => patch({ colour })} explanation={locked} />
     </Section>
   );
 }
@@ -399,24 +491,26 @@ function EffectsTab(properties: Readonly<{ theme: ThemeSnapshot; elements: reado
   const boxes = properties.elements.flatMap(boxStyleOf);
   const shadowLocked = lockedExplanation({ elements: properties.elements, control: "shadow" });
   const opacityLocked = lockedExplanation({ elements: properties.elements, control: "opacity" });
-  const shadow = sharedValue(boxes.map((box) => box.shadow), sameJson);
-  const current = shadow.kind === "value" ? shadow.value : null;
+  // Edits start from the first box's shadow (see the header); on and off show what the boxes share.
+  const shadowOn = sharedValue(boxes.map((box) => (box.shadow === null ? "off" : "on")));
+  const current = boxes[0]?.shadow ?? null;
+  const shadows = boxes.flatMap((box) => (box.shadow === null ? [] : [box.shadow]));
   const opacities = properties.elements.flatMap(opacityOf);
   const setShadow = (next: Shadow | null): void => properties.dispatch({ kind: "elementPatchRequested", patch: { shadow: next } });
   return (
     <>
       {boxes.length === 0 ? null : (
         <Section title="Shadow" explanation={shadowLocked}>
-          <PillChoice label="Shadow" value={current === null ? "off" : "on"} disabled={shadowLocked !== null} options={[{ value: "off", label: "Off" }, { value: "on", label: "On" }]} onChoose={(choice) => setShadow(choice === "on" ? (current ?? DEFAULT_SHADOW) : null)} />
+          <PillChoice label="Shadow" value={shadowOn.kind === "value" ? shadowOn.value : null} disabled={shadowLocked !== null} options={[{ value: "off", label: "Off" }, { value: "on", label: "On" }]} onChoose={(choice) => setShadow(choice === "on" ? (current ?? DEFAULT_SHADOW) : null)} />
           {current === null ? null : (
             <>
               <div className={VIEW_CLASS.fieldGrid}>
-                <NumberField label="Across" value={{ kind: "value", value: current.offsetX }} onCommit={(text) => numberOr(text, (offsetX) => setShadow({ ...current, offsetX }))} explanation={shadowLocked} />
-                <NumberField label="Down" value={{ kind: "value", value: current.offsetY }} onCommit={(text) => numberOr(text, (offsetY) => setShadow({ ...current, offsetY }))} explanation={shadowLocked} />
-                <NumberField label="Blur" value={{ kind: "value", value: current.blur }} onCommit={(text) => numberOr(text, (blur) => setShadow({ ...current, blur: Math.max(0, blur) }))} explanation={shadowLocked} />
-                <NumberField label="Spread" value={{ kind: "value", value: current.spread }} onCommit={(text) => numberOr(text, (spread) => setShadow({ ...current, spread }))} explanation={shadowLocked} />
+                <NumberField label="Across" value={sharedValue(shadows.map((each) => each.offsetX))} onCommit={(text) => numberOr(text, (offsetX) => setShadow({ ...current, offsetX }))} explanation={shadowLocked} />
+                <NumberField label="Down" value={sharedValue(shadows.map((each) => each.offsetY))} onCommit={(text) => numberOr(text, (offsetY) => setShadow({ ...current, offsetY }))} explanation={shadowLocked} />
+                <NumberField label="Blur" value={sharedValue(shadows.map((each) => each.blur))} onCommit={(text) => numberOr(text, (blur) => setShadow({ ...current, blur: Math.max(0, blur) }))} explanation={shadowLocked} />
+                <NumberField label="Spread" value={sharedValue(shadows.map((each) => each.spread))} onCommit={(text) => numberOr(text, (spread) => setShadow({ ...current, spread }))} explanation={shadowLocked} />
               </div>
-              <ColourField label="Colour" value={{ kind: "value", value: current.colour }} theme={properties.theme} onChoose={(colour) => setShadow({ ...current, colour })} explanation={shadowLocked} />
+              <ColourField label="Colour" value={sharedValue(shadows.map((each) => each.colour), sameStructure)} theme={properties.theme} onChoose={(colour) => setShadow({ ...current, colour })} explanation={shadowLocked} />
             </>
           )}
         </Section>
@@ -534,6 +628,7 @@ function TextTab(properties: Readonly<{ state: EditorState; subject: PanelSubjec
           <ToggleButton label="Bulleted list" icon="bulletedList" pressed={sharedIs(values.listKind, "bulleted")} onToggle={() => dispatch({ kind: "listToggled", list: "bulleted" })} explanation={locked} />
           <ToggleButton label="Numbered list" icon="numberedList" pressed={sharedIs(values.listKind, "numbered")} onToggle={() => dispatch({ kind: "listToggled", list: "numbered" })} explanation={locked} />
         </div>
+        <ListGlyphPicker chosen={values.listGlyph} explanation={locked} onChoose={(glyph) => dispatch(listGlyphEvent({ glyph, listId: values.firstListId, state: properties.state }))} />
         <div className={VIEW_CLASS.fieldGrid}>
           <NumberField label="Line spacing" value={values.lineSpacing} onCommit={(text) => numberOr(text, (lineSpacing) => paragraphStyle({ lineSpacing: Math.max(0.5, lineSpacing) }))} explanation={locked} />
           <NumberField label="Indent" value={values.indentStart} onCommit={(text) => numberOr(text, (indentStart) => paragraphStyle({ indentStart: Math.max(0, indentStart) }))} explanation={locked} />
@@ -555,15 +650,64 @@ function TextTab(properties: Readonly<{ state: EditorState; subject: PanelSubjec
           />
           <PillChoice label="Wrap text" value={firstShape.textBox.wrap ? "wrap" : "noWrap"} disabled={textBoxLocked !== null} options={[{ value: "wrap", label: "Wrap" }, { value: "noWrap", label: "One line" }]} onChoose={(choice) => setTextBox({ wrap: choice === "wrap" })} />
           <div className={VIEW_CLASS.fieldGrid}>
-            <NumberField label="Padding top" value={{ kind: "value", value: firstShape.textBox.paddingTop }} onCommit={(text) => numberOr(text, (paddingTop) => setTextBox({ paddingTop: Math.max(0, paddingTop) }))} explanation={textBoxLocked} />
-            <NumberField label="Padding bottom" value={{ kind: "value", value: firstShape.textBox.paddingBottom }} onCommit={(text) => numberOr(text, (paddingBottom) => setTextBox({ paddingBottom: Math.max(0, paddingBottom) }))} explanation={textBoxLocked} />
-            <NumberField label="Padding left" value={{ kind: "value", value: firstShape.textBox.paddingLeft }} onCommit={(text) => numberOr(text, (paddingLeft) => setTextBox({ paddingLeft: Math.max(0, paddingLeft) }))} explanation={textBoxLocked} />
-            <NumberField label="Padding right" value={{ kind: "value", value: firstShape.textBox.paddingRight }} onCommit={(text) => numberOr(text, (paddingRight) => setTextBox({ paddingRight: Math.max(0, paddingRight) }))} explanation={textBoxLocked} />
+            <NumberField label="Padding top" value={sharedValue(shapes.map((shape) => shape.textBox.paddingTop))} onCommit={(text) => numberOr(text, (paddingTop) => setTextBox({ paddingTop: Math.max(0, paddingTop) }))} explanation={textBoxLocked} />
+            <NumberField label="Padding bottom" value={sharedValue(shapes.map((shape) => shape.textBox.paddingBottom))} onCommit={(text) => numberOr(text, (paddingBottom) => setTextBox({ paddingBottom: Math.max(0, paddingBottom) }))} explanation={textBoxLocked} />
+            <NumberField label="Padding left" value={sharedValue(shapes.map((shape) => shape.textBox.paddingLeft))} onCommit={(text) => numberOr(text, (paddingLeft) => setTextBox({ paddingLeft: Math.max(0, paddingLeft) }))} explanation={textBoxLocked} />
+            <NumberField label="Padding right" value={sharedValue(shapes.map((shape) => shape.textBox.paddingRight))} onCommit={(text) => numberOr(text, (paddingRight) => setTextBox({ paddingRight: Math.max(0, paddingRight) }))} explanation={textBoxLocked} />
           </div>
         </Section>
       )}
     </>
   );
+}
+
+/** The 12 list styles (list-glyphs.ts), as a radio group; choosing one styles the selected paragraphs. */
+export function ListGlyphPicker(properties: Readonly<{ chosen: SharedValue<ListGlyph | "none">; explanation: string | null; onChoose: (glyph: ListGlyph) => void }>): ReactElement {
+  const chosen = properties.chosen.kind === "value" ? properties.chosen.value : null;
+  const chosenIndex = LIST_GLYPH_PRESETS.findIndex((preset) => preset.glyph === chosen);
+  return (
+    <div
+      className={VIEW_CLASS.glyphGrid}
+      role="radiogroup"
+      aria-label="List style"
+      title={properties.explanation ?? undefined}
+      onKeyDown={(event) =>
+        handlePillGroupKey(event, (index) => {
+          const preset = LIST_GLYPH_PRESETS[index];
+          if (preset !== undefined) properties.onChoose(preset.glyph);
+        })
+      }
+    >
+      {LIST_GLYPH_PRESETS.map((preset, index) => (
+        <button
+          key={preset.glyph}
+          type="button"
+          role="radio"
+          className={VIEW_CLASS.glyphChoice}
+          aria-checked={preset.glyph === chosen}
+          aria-label={preset.label}
+          title={preset.label}
+          data-list-glyph={preset.glyph}
+          tabIndex={rovingTabIndex({ index, chosenIndex })}
+          disabled={properties.explanation !== null}
+          onClick={() => properties.onChoose(preset.glyph)}
+        >
+          {preset.sample}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The picker's request: a paragraph list style with the chosen glyph. The reducer keeps each
+ * paragraph's own list and level and mints a list for paragraphs in none (state text-editing.ts
+ * `chooseListGlyph`), so the list id sent only has to be a valid one: the selection's first list,
+ * or the next id the editor's seed would mint (never stored).
+ */
+export function listGlyphEvent(options: Readonly<{ glyph: ListGlyph; listId: ReturnType<typeof textValues>["firstListId"]; state: EditorState }>): EditorEvent {
+  const listId = options.listId ?? mintId({ seed: options.state.idSeed, kind: "list" }).id;
+  return { kind: "paragraphStyleRequested", patch: { list: { kind: "list", listId, glyph: options.glyph, level: 0 } }, clear: [] };
 }
 
 function SlideTab(properties: Readonly<{ state: EditorState; dispatch: (event: EditorEvent) => void }>): ReactElement {
@@ -602,16 +746,20 @@ function SlideTab(properties: Readonly<{ state: EditorState; dispatch: (event: E
   );
 }
 
-function TransitionTab(properties: Readonly<{ state: EditorState; dispatch: (event: EditorEvent) => void }>): ReactElement {
+/** The Transition tab; "Scripted" in a deck without scripts says how to get one (SPEC.md 21.9, fix 5). */
+export function TransitionTab(properties: Readonly<{ state: EditorState; dispatch: (event: EditorEvent) => void }>): ReactElement {
   const services = useEditorServices();
+  // "Scripted" chosen while the deck has no script cannot be stored (a scripted transition names
+  // its script), so the choice is this tab's own until a script exists.
+  const [pickedScripted, setPickedScripted] = useState(false);
   const state = properties.state;
   const slide = state.document.slides.find((candidate) => candidate.id === state.currentSlideId) ?? null;
   if (slide === null) return <p className={TIDEPOOL_CLASS.muted}>Add a slide to give it a transition.</p>;
   const transition = slide.transition;
   const set = (next: SlideTransition | null): void => properties.dispatch({ kind: "slidePropertiesRequested", patch: { transition: next } });
-  const choice = transitionChoice(transition);
+  const choice = pickedScripted && transition === null ? "scripted" : transitionChoice(transition);
   const scripts = state.document.transitionScripts;
-  const preview = state.ui.transitionPreview;
+  const preview = state.chrome.transitionPreview;
   const Preview = services.TransitionPreview;
   return (
     <>
@@ -628,9 +776,13 @@ function TransitionTab(properties: Readonly<{ state: EditorState; dispatch: (eve
             { value: "morph", label: "Morph" },
             { value: "scripted", label: "Scripted by Claude or you" },
           ]}
-          onChoose={(next) => set(transitionFor({ choice: next, previous: transition, scripts }))}
+          onChoose={(next) => {
+            setPickedScripted(next === "scripted");
+            set(transitionFor({ choice: next, previous: transition, scripts }));
+          }}
           explanation={null}
         />
+        {choice === "scripted" && scripts.length === 0 ? <NoScriptsYet onWrite={() => properties.dispatch({ kind: "transitionScriptEditorOpened", scriptId: null })} /> : null}
         {transition === null ? null : (
           <NumberField label="Duration" suffix="milliseconds" value={{ kind: "value", value: transition.durationMilliseconds }} onCommit={(text) => numberOr(text, (duration) => set({ ...transition, durationMilliseconds: clamp(duration, 50, 10_000) }))} explanation={null} />
         )}
@@ -669,6 +821,23 @@ function TransitionTab(properties: Readonly<{ state: EditorState; dispatch: (eve
         )}
       </Section>
     </>
+  );
+}
+
+export const NO_SCRIPTS_EXPLANATION = "No scripted transitions in this deck yet. Ask Claude to write one (it arrives for your approval), or write one yourself.";
+
+function NoScriptsYet(properties: Readonly<{ onWrite: () => void }>): ReactElement {
+  return (
+    <div className={VIEW_CLASS.section} role="note">
+      <p className={TIDEPOOL_CLASS.muted} style={{ margin: 0 }}>
+        {NO_SCRIPTS_EXPLANATION}
+      </p>
+      <div className={VIEW_CLASS.fieldRow}>
+        <button type="button" className={TIDEPOOL_CLASS.primaryPill} onClick={properties.onWrite}>
+          Write a script
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -779,7 +948,7 @@ const WEIGHT_OPTIONS: readonly Readonly<{ value: string; label: string }>[] = [
  */
 function CellBordersEditor(properties: Readonly<{ theme: ThemeSnapshot; tables: readonly TableElement[]; dispatch: (event: EditorEvent) => void }>): ReactElement {
   const sides = properties.tables.flatMap((table) => table.cells.flatMap((cell) => [cell.borders.top, cell.borders.right, cell.borders.bottom, cell.borders.left]));
-  const shared = sharedValue(sides, sameJson);
+  const shared = sharedValue(sides, sameStructure);
   const current = shared.kind === "value" ? shared.value : null;
   const stroke = current ?? DEFAULT_STROKE;
   const setSides = (next: Stroke | null): void => properties.dispatch({ kind: "tableCellPatchRequested", patch: { borders: { top: next, right: next, bottom: next, left: next } } });
@@ -913,6 +1082,20 @@ function allowsPerSide(element: ElementSnapshot): boolean {
       return false;
     default:
       return assertNever(element);
+  }
+}
+
+/** The strokes a border draws, one per drawn side (none for no border). */
+function drawnStrokes(border: Border): readonly Stroke[] {
+  switch (border.kind) {
+    case "none":
+      return [];
+    case "uniform":
+      return [border.stroke];
+    case "perSide":
+      return [border.top, border.right, border.bottom, border.left].filter((side): side is Stroke => side !== null);
+    default:
+      return assertNever(border);
   }
 }
 
@@ -1053,6 +1236,6 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-function sameJson<TValue>(first: TValue, second: TValue): boolean {
+function sameStructure<TValue>(first: TValue, second: TValue): boolean {
   return first === second || JSON.stringify(first) === JSON.stringify(second);
 }

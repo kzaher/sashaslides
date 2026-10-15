@@ -12,18 +12,30 @@
 //    menu needs a clipboard read no browser grants a page without a prompt, so it says to use the
 //    keyboard shortcut; in the add-on dialog copy and cut say the same (SPEC.md section 14).
 //  * SHORTCUTS ARE SPELLED OUT ("Control+Z"), or with the macOS symbols, never abbreviated.
+//  * A ROLE THAT CANNOT EDIT SEES WHY. For a viewer or commenter (or a closed connection) every entry
+//    that would change the document is disabled with the reason as its hint (access.ts), and
+//    Comment with the commenting reason; copying, presenting and the View toggles stay.
+//  * THE HOST'S ITEMS END THE FILE MENU (contracts/editor-system.ts `EditorHost.fileMenuItems`),
+//    in the host's order, run inside the click because one may open a window; a disabled one shows
+//    its `disabledReason`.
 
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { ShapePreset } from "../../contracts/document.ts";
 import type { EditorEvent } from "../../contracts/editor-events.ts";
 import type { ContextMenu, EditorState, MenuName } from "../../contracts/editor-state.ts";
+import type { HostMenuItem } from "../../contracts/editor-system.ts";
 import type { ElementId } from "../../contracts/ids.ts";
+import { commentingDisabledReason, editingDisabledReason } from "./access.ts";
 
 export type MenuAction =
   | Readonly<{ kind: "dispatch"; event: EditorEvent }>
   | Readonly<{ kind: "present"; from: "beginning" | "currentSlide"; withSpeakerView: boolean }>
   | Readonly<{ kind: "clipboardWrite"; operation: "copy" | "cut" }>
-  | Readonly<{ kind: "openInNewTab" }>;
+  | Readonly<{ kind: "openInNewTab" }>
+  /** A host's File item (EditorHost.fileMenuItems), run inside the click. */
+  | Readonly<{ kind: "host"; run: () => void }>
+  /** View > Show annotations: the viewer's own display choice (editor-services.tsx `ViewPreferences`). */
+  | Readonly<{ kind: "toggleAnnotations" }>;
 
 export type MenuEntry =
   | Readonly<{ kind: "item"; label: string; shortcut: string | null; action: MenuAction; disabled: boolean; hint: string | null; checked: boolean | null }>
@@ -44,15 +56,17 @@ export const MENU_LABEL: Readonly<Record<MenuName, string>> = {
 /** How the primary modifier is written in shortcuts. */
 export type ShortcutStyle = "control" | "macOS";
 
-export function menuEntries(options: Readonly<{ menu: MenuName; state: EditorState; shortcuts: ShortcutStyle }>): readonly MenuEntry[] {
+export function menuEntries(options: Readonly<{ menu: MenuName; state: EditorState; shortcuts: ShortcutStyle; hostItems: readonly HostMenuItem[]; showAnnotations: boolean }>): readonly MenuEntry[] {
   const { state } = options;
   const key = shortcutWriter(options.shortcuts);
   const elementsSelected = selectedElementIds(state).length > 0;
   const addon = inAddonDialog(state);
+  const editing = editingDisabledReason(state);
+  const commenting = commentingDisabledReason(state);
   switch (options.menu) {
     case "file":
       return [
-        item({ label: "Rename deck", event: { kind: "dialogOpened", dialog: { kind: "renameDeck" } } }),
+        item({ label: "Rename deck", event: { kind: "dialogOpened", dialog: { kind: "renameDeck" } }, refusal: editing }),
         separator(),
         { ...presentItem({ label: "Present from the beginning", from: "beginning", withSpeakerView: false }), shortcut: null },
         { ...presentItem({ label: "Present from this slide", from: "currentSlide", withSpeakerView: false }), shortcut: key({ primary: true, key: "Enter" }) },
@@ -60,49 +74,52 @@ export function menuEntries(options: Readonly<{ menu: MenuName; state: EditorSta
         ...(addon ? [separator(), { kind: "item" as const, label: "Open in a new tab", shortcut: null, action: { kind: "openInNewTab" as const }, disabled: false, hint: null, checked: null }] : []),
         separator(),
         item({ label: "Keyboard shortcuts", event: { kind: "dialogOpened", dialog: { kind: "keyboardShortcuts" } }, shortcut: key({ primary: true, key: "/" }) }),
+        ...(options.hostItems.length === 0 ? [] : [separator(), ...options.hostItems.map(hostEntry)]),
       ];
     case "edit":
       return [
-        item({ label: "Undo", event: { kind: "undoRequested" }, shortcut: key({ primary: true, key: "Z" }), disabled: !state.history.canUndo }),
-        item({ label: "Redo", event: { kind: "redoRequested" }, shortcut: key({ primary: true, shift: true, key: "Z" }), disabled: !state.history.canRedo }),
+        item({ label: "Undo", event: { kind: "undoRequested" }, shortcut: key({ primary: true, key: "Z" }), disabled: !state.history.canUndo, refusal: editing }),
+        item({ label: "Redo", event: { kind: "redoRequested" }, shortcut: key({ primary: true, shift: true, key: "Z" }), disabled: !state.history.canRedo, refusal: editing }),
         separator(),
-        clipboardItem({ label: "Cut", operation: "cut", shortcut: key({ primary: true, key: "X" }), addon, available: somethingCopyable(state) }),
+        refused(clipboardItem({ label: "Cut", operation: "cut", shortcut: key({ primary: true, key: "X" }), addon, available: somethingCopyable(state) }), editing),
         clipboardItem({ label: "Copy", operation: "copy", shortcut: key({ primary: true, key: "C" }), addon, available: somethingCopyable(state) }),
         { kind: "item", label: "Paste", shortcut: key({ primary: true, key: "V" }), action: { kind: "dispatch", event: { kind: "menuClosed" } }, disabled: true, hint: `Use ${key({ primary: true, key: "V" })} to paste`, checked: null },
-        item({ label: "Duplicate", event: { kind: "duplicateRequested" }, shortcut: key({ primary: true, key: "D" }), disabled: !somethingCopyable(state) }),
-        item({ label: "Delete", event: { kind: "deleteRequested" }, shortcut: "Delete", disabled: !somethingCopyable(state) }),
+        item({ label: "Duplicate", event: { kind: "duplicateRequested" }, shortcut: key({ primary: true, key: "D" }), disabled: !somethingCopyable(state), refusal: editing }),
+        item({ label: "Delete", event: { kind: "deleteRequested" }, shortcut: "Delete", disabled: !somethingCopyable(state), refusal: editing }),
         separator(),
         item({ label: "Select all", event: { kind: "selectAllRequested" }, shortcut: key({ primary: true, key: "A" }) }),
       ];
     case "view":
       return [
-        toggleItem({ label: "Filmstrip", event: { kind: "panelToggled", panel: "filmstrip" }, checked: state.ui.filmstripOpen }),
-        toggleItem({ label: "Properties panel", event: { kind: "panelToggled", panel: "properties" }, checked: state.ui.propertiesPanelOpen }),
-        toggleItem({ label: "Speaker notes", event: { kind: "panelToggled", panel: "speakerNotes" }, checked: state.ui.speakerNotesOpen }),
-        toggleItem({ label: "Comments", event: { kind: "panelToggled", panel: "comments" }, checked: state.ui.commentsOpen }),
+        toggleItem({ label: "Filmstrip", event: { kind: "panelToggled", panel: "filmstrip" }, checked: state.chrome.filmstripOpen }),
+        toggleItem({ label: "Properties panel", event: { kind: "panelToggled", panel: "properties" }, checked: state.chrome.propertiesPanelOpen }),
+        toggleItem({ label: "Speaker notes", event: { kind: "panelToggled", panel: "speakerNotes" }, checked: state.chrome.speakerNotesOpen }),
+        toggleItem({ label: "Comments", event: { kind: "panelToggled", panel: "comments" }, checked: state.chrome.commentsOpen }),
         separator(),
         toggleItem({ label: "Fit to window", event: { kind: "zoomRequested", zoom: { kind: "fit" } }, checked: state.viewport.zoom.kind === "fit" }),
         ...[0.5, 1, 2].map((scale) => toggleItem({ label: `${scale * 100} percent`, event: { kind: "zoomRequested", zoom: { kind: "fixed", scale } }, checked: fixedZoom(state) === scale })),
+        separator(),
+        { kind: "item", label: "Show annotations", shortcut: null, action: { kind: "toggleAnnotations" }, disabled: false, hint: null, checked: options.showAnnotations },
       ];
     case "insert":
       return [
-        item({ label: "Text box", event: { kind: "toolChosen", tool: { kind: "shape", preset: "textBox" } } }),
-        item({ label: "Image", event: { kind: "dialogOpened", dialog: { kind: "insertImage" } } }),
+        item({ label: "Text box", event: { kind: "toolChosen", tool: { kind: "shape", preset: "textBox" } }, refusal: editing }),
+        item({ label: "Image", event: { kind: "dialogOpened", dialog: { kind: "insertImage" } }, refusal: editing }),
         separator(),
-        ...INSERTABLE_SHAPES.map((shape) => item({ label: shape.label, event: { kind: "toolChosen", tool: { kind: "shape", preset: shape.preset } } })),
-        item({ label: "Line", event: { kind: "toolChosen", tool: { kind: "line", routing: "straight", startArrow: "none", endArrow: "none" } } }),
-        item({ label: "Arrow", event: { kind: "toolChosen", tool: { kind: "line", routing: "straight", startArrow: "none", endArrow: "triangle" } } }),
-        item({ label: "Table", event: { kind: "dialogOpened", dialog: { kind: "insertTable" } } }),
+        ...INSERTABLE_SHAPES.map((shape) => item({ label: shape.label, event: { kind: "toolChosen", tool: { kind: "shape", preset: shape.preset } }, refusal: editing })),
+        item({ label: "Line", event: { kind: "toolChosen", tool: { kind: "line", routing: "straight", startArrow: "none", endArrow: "none" } }, refusal: editing }),
+        item({ label: "Arrow", event: { kind: "toolChosen", tool: { kind: "line", routing: "straight", startArrow: "none", endArrow: "triangle" } }, refusal: editing }),
+        item({ label: "Table", event: { kind: "dialogOpened", dialog: { kind: "insertTable" } }, refusal: editing }),
         separator(),
-        item({ label: "Slide number", event: { kind: "automaticTextInsertRequested", field: "slideNumber" }, disabled: !editingText(state), hint: editingText(state) ? null : "Place the caret in a text box first" }),
-        commentItem({ state, shortcut: key({ primary: true, alt: true, key: "M" }) }),
+        item({ label: "Slide number", event: { kind: "automaticTextInsertRequested", field: "slideNumber" }, disabled: !editingText(state), hint: editingText(state) ? null : "Place the caret in a text box first", refusal: editing }),
+        refused(commentItem({ state, shortcut: key({ primary: true, alt: true, key: "M" }) }), commenting),
         separator(),
-        item({ label: "New slide", event: { kind: "newSlideRequested", layoutId: null }, shortcut: key({ primary: true, key: "M" }) }),
+        item({ label: "New slide", event: { kind: "newSlideRequested", layoutId: null }, shortcut: key({ primary: true, key: "M" }), refusal: editing }),
       ];
     case "slide":
-      return slideEntries({ state, key });
+      return slideEntries({ state, key }).map((entry) => refused(entry, editing));
     case "arrange":
-      return [
+      return refusedAll(editing, [
         item({ label: "Bring to front", event: arrange({ kind: "reorder", placement: "front" }), shortcut: key({ primary: true, shift: true, key: "Up" }), disabled: !elementsSelected }),
         item({ label: "Bring forward", event: arrange({ kind: "reorder", placement: "forward" }), shortcut: key({ primary: true, key: "Up" }), disabled: !elementsSelected }),
         item({ label: "Send backward", event: arrange({ kind: "reorder", placement: "backward" }), shortcut: key({ primary: true, key: "Down" }), disabled: !elementsSelected }),
@@ -127,7 +144,7 @@ export function menuEntries(options: Readonly<{ menu: MenuName; state: EditorSta
         item({ label: "Flip vertically", event: arrange({ kind: "flip", axis: "vertical" }), disabled: !elementsSelected }),
         item({ label: "Centre on slide horizontally", event: arrange({ kind: "centreOnSlide", axis: "horizontal" }), disabled: !elementsSelected }),
         item({ label: "Centre on slide vertically", event: arrange({ kind: "centreOnSlide", axis: "vertical" }), disabled: !elementsSelected }),
-      ];
+      ]);
     case "help":
       return [item({ label: "Keyboard shortcuts", event: { kind: "dialogOpened", dialog: { kind: "keyboardShortcuts" } }, shortcut: key({ primary: true, key: "/" }) })];
     default:
@@ -140,35 +157,37 @@ export function contextMenuEntries(options: Readonly<{ menu: ContextMenu; state:
   const { state } = options;
   const key = shortcutWriter(options.shortcuts);
   const addon = inAddonDialog(state);
+  const editing = editingDisabledReason(state);
+  const commenting = commentingDisabledReason(state);
   const paste: MenuEntry = { kind: "item", label: "Paste", shortcut: key({ primary: true, key: "V" }), action: { kind: "dispatch", event: { kind: "contextMenuClosed" } }, disabled: true, hint: `Use ${key({ primary: true, key: "V" })} to paste`, checked: null };
   switch (options.menu.scope) {
     case "element":
       return [
-        clipboardItem({ label: "Cut", operation: "cut", shortcut: key({ primary: true, key: "X" }), addon, available: somethingCopyable(state) }),
+        refused(clipboardItem({ label: "Cut", operation: "cut", shortcut: key({ primary: true, key: "X" }), addon, available: somethingCopyable(state) }), editing),
         clipboardItem({ label: "Copy", operation: "copy", shortcut: key({ primary: true, key: "C" }), addon, available: somethingCopyable(state) }),
         paste,
-        item({ label: "Duplicate", event: { kind: "duplicateRequested" }, shortcut: key({ primary: true, key: "D" }) }),
-        item({ label: "Delete", event: { kind: "deleteRequested" }, shortcut: "Delete" }),
+        item({ label: "Duplicate", event: { kind: "duplicateRequested" }, shortcut: key({ primary: true, key: "D" }), refusal: editing }),
+        item({ label: "Delete", event: { kind: "deleteRequested" }, shortcut: "Delete", refusal: editing }),
         separator(),
-        item({ label: "Bring to front", event: arrange({ kind: "reorder", placement: "front" }) }),
-        item({ label: "Send to back", event: arrange({ kind: "reorder", placement: "back" }) }),
-        item({ label: "Group", event: arrange({ kind: "group" }), disabled: selectedElementIds(state).length < 2 }),
-        item({ label: "Ungroup", event: arrange({ kind: "ungroup" }) }),
+        item({ label: "Bring to front", event: arrange({ kind: "reorder", placement: "front" }), refusal: editing }),
+        item({ label: "Send to back", event: arrange({ kind: "reorder", placement: "back" }), refusal: editing }),
+        item({ label: "Group", event: arrange({ kind: "group" }), disabled: selectedElementIds(state).length < 2, refusal: editing }),
+        item({ label: "Ungroup", event: arrange({ kind: "ungroup" }), refusal: editing }),
         separator(),
-        commentItem({ state, shortcut: key({ primary: true, alt: true, key: "M" }) }),
+        refused(commentItem({ state, shortcut: key({ primary: true, alt: true, key: "M" }) }), commenting),
       ];
     case "canvas":
       return [
         paste,
         item({ label: "Select all", event: { kind: "selectAllRequested" }, shortcut: key({ primary: true, key: "A" }) }),
         separator(),
-        item({ label: "New slide", event: { kind: "newSlideRequested", layoutId: null } }),
+        item({ label: "New slide", event: { kind: "newSlideRequested", layoutId: null }, refusal: editing }),
         item({ label: "Change background", event: { kind: "propertiesTabChosen", tab: "slide" } }),
         item({ label: "Transition", event: { kind: "propertiesTabChosen", tab: "transition" } }),
-        commentItem({ state, shortcut: key({ primary: true, alt: true, key: "M" }) }),
+        refused(commentItem({ state, shortcut: key({ primary: true, alt: true, key: "M" }) }), commenting),
       ];
     case "filmstrip":
-      return slideEntries({ state, key });
+      return slideEntries({ state, key }).map((entry) => refused(entry, editing));
     default:
       return assertNever(options.menu.scope);
   }
@@ -255,8 +274,32 @@ function scriptedTransitionId(transition: NonNullable<EditorState["document"]["s
   }
 }
 
-function item(options: Readonly<{ label: string; event: EditorEvent; shortcut?: string; disabled?: boolean; hint?: string | null }>): MenuEntry {
-  return { kind: "item", label: options.label, shortcut: options.shortcut ?? null, action: { kind: "dispatch", event: options.event }, disabled: options.disabled ?? false, hint: options.hint ?? null, checked: null };
+/** An entry that dispatches `event`; `refusal` (why this person cannot do it now) disables it with that hint. */
+function item(options: Readonly<{ label: string; event: EditorEvent; shortcut?: string; disabled?: boolean; hint?: string | null; refusal?: string | null }>): MenuEntry {
+  const entry: MenuEntry = { kind: "item", label: options.label, shortcut: options.shortcut ?? null, action: { kind: "dispatch", event: options.event }, disabled: options.disabled ?? false, hint: options.hint ?? null, checked: null };
+  return refused(entry, options.refusal ?? null);
+}
+
+/** The entry disabled with `refusal` as its hint; unchanged when there is none. Separators pass. */
+function refused(entry: MenuEntry, refusal: string | null): MenuEntry {
+  if (refusal === null) return entry;
+  switch (entry.kind) {
+    case "item":
+      return { ...entry, disabled: true, hint: refusal };
+    case "separator":
+      return entry;
+    default:
+      return assertNever(entry);
+  }
+}
+
+function refusedAll(refusal: string | null, entries: readonly MenuEntry[]): readonly MenuEntry[] {
+  return entries.map((entry) => refused(entry, refusal));
+}
+
+/** A host's File item: runs inside the click; a disabled one explains itself. */
+function hostEntry(hostItem: HostMenuItem): MenuEntry {
+  return { kind: "item", label: hostItem.label, shortcut: null, action: { kind: "host", run: hostItem.run }, disabled: hostItem.disabledReason !== null, hint: hostItem.disabledReason, checked: null };
 }
 
 function toggleItem(options: Readonly<{ label: string; event: EditorEvent; checked: boolean }>): MenuEntry {

@@ -187,6 +187,9 @@ export const SECTION_PRIORITY: readonly string[] = [
   // Reached only when the user asks for their own deck's comments to be answered, and each
   // comment tool's description carries the same loop.
   "## Comments in the user's own deck",
+  // Reached only when the user works in a Sasha deck (sashaslides.com/deck/...), and every deck_*
+  // tool's description carries its own rules; ranked with the other conditional sections.
+  "## Sasha decks",
   // Reached only when the user asks to change part of a slide already in the deck, and
   // propose_slides and slide_structure describe the same steps in their own descriptions.
   "## Redesigning part of an existing slide",

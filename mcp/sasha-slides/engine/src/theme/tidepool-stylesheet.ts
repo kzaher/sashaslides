@@ -13,8 +13,10 @@
 //    the page forces light, and on `[data-theme="dark"]` when the page forces dark.
 //  * CLASS NAMES ARE CONSTANTS (`TIDEPOOL_CLASS`), so a component never spells a class string and a
 //    rename is a compile error, not a silently unstyled button.
-//  * NO BACKDROP FILTER ON THE EDITING SCREEN (tidepool-theme.ts header); the calm wash changes in
-//    discrete steps and pauses while `data-gesture="active"` is on the engine root.
+//  * THE PANELS' BACKDROP BLUR IS GATED ON THE GESTURE (tidepool-theme.ts header): it is declared
+//    only under `.sasha-engine:not([data-gesture="active"])`, so the moment a drag starts the blur
+//    is gone and a pointer move never re-blurs the wash; the wash changes in discrete steps and
+//    pauses while `data-gesture="active"` is on the engine root.
 //  * THE CONTROL RESET HAS ZERO SPECIFICITY. Buttons and fields inherit the chrome font and colour
 //    through `:where(...)`, so any class rule wins over the reset. Written as
 //    `.sasha-engine button` it outranked `.sasha-pill-primary` and the ink pills' text vanished
@@ -122,9 +124,10 @@ ${livelyAnimations(tokens)}
 
 .${classes.panel}, .${classes.card}, .${classes.livelyCard}, .${classes.popover}, .${classes.dialog} {
   border: 1px solid var(--sasha-glass-edge);
-  box-shadow: inset 0 1.5px 0 var(--sasha-glass-top-highlight), inset 0 -1px 0 var(--sasha-glass-bottom-shade), var(--sasha-lift-shadow);
+  box-shadow: inset 0 1px 0 var(--sasha-glass-top-highlight), inset 0 -1px 0 var(--sasha-glass-bottom-shade), var(--sasha-lift-shadow);
 }
 .${classes.panel} { background: var(--sasha-panel-glass); border-radius: var(--sasha-radius-panel); z-index: var(--sasha-layer-chrome); }
+.${classes.root}:not([data-gesture="active"]) .${classes.panel} { -webkit-backdrop-filter: var(--sasha-panel-backdrop-filter); backdrop-filter: var(--sasha-panel-backdrop-filter); }
 .${classes.card} { background: var(--sasha-card-glass); border-radius: var(--sasha-radius-card); padding: var(--sasha-space-medium); }
 .${classes.livelyCard} { background: var(--sasha-lively-glass); border-radius: var(--sasha-radius-panel); padding: var(--sasha-space-large); -webkit-backdrop-filter: var(--sasha-lively-backdrop-filter); backdrop-filter: var(--sasha-lively-backdrop-filter); }
 .${classes.popover} { background: var(--sasha-glass-over-canvas); border-radius: var(--sasha-radius-card); padding: var(--sasha-space-extra-small); z-index: var(--sasha-layer-popover); }

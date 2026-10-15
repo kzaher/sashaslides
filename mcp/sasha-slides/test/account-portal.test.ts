@@ -216,7 +216,7 @@ function csrfOf(body: string): string {
 /** The whole browser dance for a provider: login → provider → callback → /account. */
 async function signIn(
   portal: Portal,
-  options: Readonly<{ provider: "okta" | "github"; email: string }>,
+  options: Readonly<{ provider: "okta" | "github"; email: string; emailVerified?: boolean }>,
 ): Promise<Readonly<{ session: string; callback: string; signinCookie: string }>> {
   const login = await visit({ url: `${portal.baseUrl}/account/login/${options.provider}`, cookies: {} });
   assert.equal(login.status, 302, login.body);
@@ -224,7 +224,7 @@ async function signIn(
   const signinCookie = cookieValue(login.setCookies, SIGNIN_COOKIE) ?? "";
   const parameters =
     options.provider === "okta"
-      ? portal.okta.authorize({ authorizationUrl: login.location, subject: "okta-user", email: options.email, emailVerified: true, tamper: {} })
+      ? portal.okta.authorize({ authorizationUrl: login.location, subject: "okta-user", email: options.email, emailVerified: options.emailVerified ?? true, tamper: {} })
       : portal.github.authorize({ authorizationUrl: login.location });
   const redirectUri = new URL(login.location).searchParams.get("redirect_uri");
   assert.equal(redirectUri, `${PUBLIC_URL}/account/callback/${options.provider}`);
@@ -295,6 +295,16 @@ describe("sign-in round trip", () => {
     assert.ok(!page.body.includes("ada@example.com"), "never the full address");
     assert.ok(page.body.includes("Reset my key and delete my data"));
     assert.ok(page.body.includes("Sign out"));
+  });
+
+  // Deck invitations become memberships by matching this address, so an address the provider
+  // does not vouch for must never be kept (control: the verified row above keeps it).
+  test("an address the provider did not verify is not kept on the account", async () => {
+    const portal = await startPortal({ providers: ["okta"], eraseReport: REVOKED });
+    const { session } = await signIn(portal, { provider: "okta", email: "victim@example.com", emailVerified: false });
+    const page = await visit({ url: `${portal.baseUrl}/account`, cookies: { [SESSION_COOKIE]: session } });
+    assert.equal(page.status, 200);
+    assert.ok(!page.body.includes("v•••@example.com"), "no email hint for an unverified address");
   });
 
   test("GitHub signs in through the same portal", async () => {

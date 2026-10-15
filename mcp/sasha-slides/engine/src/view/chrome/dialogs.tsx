@@ -23,7 +23,7 @@ import { shortcutRows } from "./menu-model.ts";
 import { shortcutStyle } from "./menus.tsx";
 
 export function DialogLayer(): ReactElement | null {
-  const dialog = useEditorSelector((state) => state.ui.dialog);
+  const dialog = useEditorSelector((state) => state.chrome.dialog);
   const dispatch = useEditorServices().system.dispatch;
   if (!dialogIsOpen(dialog)) return null;
   const close = (): void => dispatch({ kind: "dialogClosed" });
@@ -313,7 +313,7 @@ type ScriptTab = "script" | "stylesheet" | "markup" | "reference";
 function TransitionScriptDialog(properties: Readonly<{ editor: TransitionScriptEditor; close: () => void }>): ReactElement {
   const services = useEditorServices();
   const dispatch = services.system.dispatch;
-  const view = useEditorSelector((state) => ({ scripts: state.document.transitionScripts, preview: state.ui.transitionPreview, currentSlideId: state.currentSlideId, document: state.document }), shallowEqual);
+  const view = useEditorSelector((state) => ({ scripts: state.document.transitionScripts, preview: state.chrome.transitionPreview, currentSlideId: state.currentSlideId, document: state.document }), shallowEqual);
   const [tab, setTab] = useState<ScriptTab>("script");
   const draft = properties.editor.draft;
   const record = view.scripts.find((script) => script.id === draft.id) ?? null;

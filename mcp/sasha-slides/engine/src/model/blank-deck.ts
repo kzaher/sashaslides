@@ -7,31 +7,13 @@
 // runs once, on the replica that creates the deck. Its ids come from `mintId` with a session prefix
 // drawn from the store's injected random source, so a seeded test is fully deterministic.
 
-import type {
-  DeckId,
-  ElementId,
-  IdSeed,
-  LayoutId,
-  LayoutSnapshot,
-  PlaceholderReference,
-  PlaceholderRole,
-  PlaceholderStyle,
-  RandomSource,
-  RunStyle,
-  ShapeElement,
-  SlideSnapshot,
-  ThemeColourSlot,
-  ThemeSnapshot,
-} from "../contracts/index.ts";
-import {
-  DEFAULT_TEXT_BOX_STYLE,
-  EMPTY_TEXT_BODY,
-  identityFrame,
-  mintId,
-  newSessionPrefix,
-  PLAIN_BOX_STYLE,
-  themeColour,
-} from "../contracts/index.ts";
+import type { LayoutSnapshot, PlaceholderReference, PlaceholderRole, PlaceholderStyle, ShapeElement, SlideSnapshot, ThemeSnapshot } from "../contracts/document.ts";
+import type { DeckId, ElementId, IdSeed, LayoutId, RandomSource } from "../contracts/ids.ts";
+import type { RunStyle, ThemeColourSlot } from "../contracts/style.ts";
+import { EMPTY_TEXT_BODY } from "../contracts/document.ts";
+import { identityFrame } from "../contracts/geometry.ts";
+import { mintId, newSessionPrefix } from "../contracts/ids.ts";
+import { DEFAULT_TEXT_BOX_STYLE, PLAIN_BOX_STYLE, themeColour } from "../contracts/style.ts";
 
 /** What seeding writes, as plain values (document-writer.ts stores them). */
 export type BlankDeck = Readonly<{

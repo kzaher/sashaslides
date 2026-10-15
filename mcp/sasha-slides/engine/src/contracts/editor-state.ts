@@ -34,6 +34,7 @@
 //    handler reads `clipboardContentFor(state)` (editor-system.ts) instead of a round trip.
 
 import { assertNever } from "./assert-never.ts";
+import type { CollaborationStatus } from "./collaboration.ts";
 import type { ElementPatch, FrameUpdate, QueuedEdit, CommandOutcome, TransitionScriptDraft } from "./commands.ts";
 import type { CommentTargetDraft, DiscussionCommand, DiscussionSnapshot, Marking, Person } from "./discussion.ts";
 import type { HistoryAvailability, HistoryOutcome, TextRange } from "./document-store.ts";
@@ -49,6 +50,7 @@ import type {
   LayoutId,
   MessageId,
   NoticeId,
+  PersonId,
   SlideId,
   TableColumnId,
   TableRowId,
@@ -58,7 +60,7 @@ import type {
 } from "./ids.ts";
 import type { PeerPresence } from "./presence.ts";
 import type { Selection, TextTarget } from "./selection.ts";
-import type { ArrowHead, LineRouting, ParagraphStylePatch, RunStylePatch } from "./style.ts";
+import type { ArrowHead, Colour, LineRouting, ParagraphStylePatch, RunStylePatch } from "./style.ts";
 
 export type EditorState = Readonly<{
   me: Person;
@@ -100,7 +102,15 @@ export type EditorState = Readonly<{
    */
   pointer: Point | null;
   peers: readonly PeerPresence[];
-  ui: EditorChrome;
+  /**
+   * The connection, this person's role and the deck's members (collaboration.ts). The reducer
+   * refuses document edits unless the role may edit (a notice says why), and discussion requests
+   * unless it may comment; the server enforces the same table, this only keeps the UI honest.
+   */
+  collaboration: CollaborationStatus;
+  /** Agent sessions whose revert ("Undo Claude's edit") the collaboration feedback is running. */
+  pendingAgentReverts: readonly string[];
+  chrome: EditorChrome;
   notices: readonly Notice[];
   /** Non-null while the presenter should be showing; the app shell mounts it. */
   presentation: PresentationRequest | null;
@@ -307,6 +317,7 @@ export type DiscussionCommandDraft =
       markings: readonly Marking[];
       messageId: MessageId;
       body: string;
+      mentions: readonly PersonId[];
     }>;
 
 /** What the view measured for an element (SPEC.md "Measured layout"). */
@@ -349,6 +360,8 @@ export type CommentComposer =
       region: FractionalRegion | null;
       markings: readonly Marking[];
       draft: string;
+      /** Members picked from the mention list while typing; sent with the comment. */
+      mentions: readonly PersonId[];
     }>;
 
 export type ContextMenu = Readonly<{ at: Point; scope: "canvas" | "element" | "filmstrip" }>;
@@ -374,7 +387,15 @@ export type EditorChrome = Readonly<{
   aspectRatioLocked: boolean;
   /** The transition preview playing in the properties panel; `generation` restarts it. */
   transitionPreview: Readonly<{ slideId: SlideId; generation: number }> | null;
+  /**
+   * The colour picker's "Recent" row, most recent first, at most `RECENT_COLOUR_LIMIT`, without
+   * duplicates. Per viewer, never in the document: the web module persists it in local storage and
+   * passes it to `initialEditorState`.
+   */
+  recentColours: readonly Colour[];
 }>;
+
+export const RECENT_COLOUR_LIMIT = 10;
 
 export type NoticeAction =
   /** Milestone 2: revert an agent session's edits (`deck_revert`). */

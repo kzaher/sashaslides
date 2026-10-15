@@ -17,30 +17,14 @@
 // something the projection would refuse to read.
 
 import * as Y from "yjs";
-import type {
-  ArrowHead,
-  AssetRecord,
-  Border,
-  CellBorders,
-  CornerRadius,
-  Fill,
-  Frame,
-  ImageCrop,
-  LineRouting,
-  ParagraphAttributeName,
-  PlaceholderReference,
-  Point,
-  RunAttributeName,
-  SerialisableObject,
-  Shadow,
-  ShapePreset,
-  SlideTransition,
-  Stroke,
-  TextBoxStyle,
-  TransitionApproval,
-  TransitionAuthor,
-} from "../contracts/index.ts";
-import { assertNever, PLACEHOLDER_ROLES, THEME_COLOUR_SLOTS } from "../contracts/index.ts";
+import type { AssetRecord, CellBorders, ImageCrop, PlaceholderReference, ShapePreset, SlideTransition, TransitionApproval, TransitionAuthor } from "../contracts/document.ts";
+import type { Frame, Point } from "../contracts/geometry.ts";
+import type { SerialisableObject } from "../contracts/serialisable.ts";
+import type { ArrowHead, Border, CornerRadius, Fill, LineRouting, Shadow, Stroke, TextBoxStyle } from "../contracts/style.ts";
+import type { ParagraphAttributeName, RunAttributeName } from "../contracts/yjs-schema.ts";
+import { assertNever } from "../contracts/assert-never.ts";
+import { PLACEHOLDER_ROLES } from "../contracts/document.ts";
+import { THEME_COLOUR_SLOTS } from "../contracts/style.ts";
 
 export type Verdict = "valid" | "unsupported" | "wrongType";
 

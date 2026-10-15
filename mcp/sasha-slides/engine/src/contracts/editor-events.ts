@@ -30,10 +30,11 @@ import type { DocumentChange, TextRange } from "./document-store.ts";
 import type { AssetMediaType, AssetRecord, Paragraph, ShapePreset } from "./document.ts";
 import type { ElementPatch, ReorderPlacement, SlidePropertiesPatch, TableCellPatch, TransitionScriptDraft } from "./commands.ts";
 import type { FlipAxis, FractionalRegion, Point, Size } from "./geometry.ts";
-import type { AssetId, DiscussionRequestId, ElementId, LayoutId, MessageId, NoticeId, SlideId, ThreadId, TransitionScriptId, UploadId } from "./ids.ts";
+import type { AgentRevertOutcome, CollaborationNotice, CollaborationStatus } from "./collaboration.ts";
+import type { AssetId, DiscussionRequestId, ElementId, LayoutId, MessageId, NoticeId, PersonId, SlideId, ThreadId, TransitionScriptId, UploadId } from "./ids.ts";
 import type { PeerPresence } from "./presence.ts";
 import type { TextTarget } from "./selection.ts";
-import type { ParagraphStylePatch, RunStylePatch } from "./style.ts";
+import type { Colour, ParagraphStylePatch, RunStylePatch } from "./style.ts";
 import type { ParagraphAttributeName, RunAttributeName } from "./yjs-schema.ts";
 
 export type EditorEvent =
@@ -109,13 +110,13 @@ export type EditorEvent =
   | Readonly<{ kind: "assetAvailable"; assetId: AssetId }>
   // --- comments and annotations
   | Readonly<{ kind: "commentComposerOpened"; slideId: SlideId; elementId: ElementId | null; textRange: TextRange | null; region: FractionalRegion | null }>
-  | Readonly<{ kind: "commentDraftChanged"; draft: string }>
+  | Readonly<{ kind: "commentDraftChanged"; draft: string; mentions: readonly PersonId[] }>
   | Readonly<{ kind: "markingDrawn"; marking: Marking }>
   | Readonly<{ kind: "commentSubmitted" }>
   | Readonly<{ kind: "commentComposerClosed" }>
   | Readonly<{ kind: "threadFocused"; threadId: ThreadId | null }>
-  | Readonly<{ kind: "threadReplied"; threadId: ThreadId; body: string }>
-  | Readonly<{ kind: "messageEdited"; threadId: ThreadId; messageId: MessageId; body: string }>
+  | Readonly<{ kind: "threadReplied"; threadId: ThreadId; body: string; mentions: readonly PersonId[] }>
+  | Readonly<{ kind: "messageEdited"; threadId: ThreadId; messageId: MessageId; body: string; mentions: readonly PersonId[] }>
   | Readonly<{ kind: "messageDeleted"; threadId: ThreadId; messageId: MessageId }>
   | Readonly<{ kind: "threadResolved"; threadId: ThreadId }>
   | Readonly<{ kind: "threadReopened"; threadId: ThreadId }>
@@ -157,7 +158,18 @@ export type EditorEvent =
    */
   | Readonly<{ kind: "feedbackFailed"; context: string; message: string }>
   /** Milestone 2: the sync provider learned that an agent session changed the deck. */
-  | Readonly<{ kind: "agentEditObserved"; agentSessionId: string; agentName: string; summary: string }>;
+  | Readonly<{ kind: "agentEditObserved"; agentSessionId: string; agentName: string; summary: string }>
+  // --- collaboration (milestone 2; collaboration.ts)
+  /** The collaboration feedback's report of a new status (connection, role, members, unsent changes). */
+  | Readonly<{ kind: "collaborationChanged"; status: CollaborationStatus }>
+  /** A one-off server notice other than `agentEdit` (which arrives as `agentEditObserved`). */
+  | Readonly<{ kind: "collaborationNoticeReceived"; notice: Exclude<CollaborationNotice, { kind: "agentEdit" }> }>
+  /** "Try now" on the offline indicator. */
+  | Readonly<{ kind: "reconnectRequested" }>
+  /** The revert an "Undo Claude's edit" action asked for has finished. */
+  | Readonly<{ kind: "agentRevertSettled"; agentSessionId: string; outcome: AgentRevertOutcome }>
+  /** The colour picker applied a colour; it moves to the front of `chrome.recentColours`. */
+  | Readonly<{ kind: "recentColourUsed"; colour: Colour }>;
 
 export type EditorEventKind = EditorEvent["kind"];
 

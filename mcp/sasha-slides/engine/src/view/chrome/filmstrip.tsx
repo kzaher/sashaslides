@@ -12,7 +12,7 @@
 //  * DRAGGING IS REPORTED, the reducer moves: `slideDragStarted`, `slideDragOver` with the slide
 //    the drop would land after, `slideDragEnded`; the drop indicator draws from the gesture.
 
-import { memo, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactElement } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from "react";
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { CommentThread } from "../../contracts/discussion.ts";
 import type { DocumentSnapshot, SlideSnapshot } from "../../contracts/document.ts";
@@ -23,6 +23,8 @@ import type { Selection } from "../../contracts/selection.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { shallowEqual, useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
 import { peerColour } from "../canvas/canvas-overlay.tsx";
+import { editingDisabledReason } from "./access.ts";
+import { shownPeers, usePresenceNow } from "./presence.ts";
 import { StaticSlide } from "../render/static-slide.tsx";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { Icon } from "./icons.tsx";
@@ -63,6 +65,7 @@ export const Filmstrip = memo(function Filmstrip(): ReactElement {
       dragging: draggingSlides(state.gesture),
       peers: state.peers,
       discussion: state.discussion,
+      editing: editingDisabledReason(state),
     }),
     shallowEqual,
   );
@@ -75,6 +78,8 @@ export const Filmstrip = memo(function Filmstrip(): ReactElement {
   const range = visibleThumbnailRange({ slideCount: slides.length, scrollTop, viewportHeight, itemHeight });
   const selected = selectedSlides({ selection: view.selection, currentSlideId: view.currentSlideId });
   const openThreads = threadCountsBySlide(view.discussion.threads);
+  const presenceNow = usePresenceNow({ now: services.now, watching: view.peers.length > 0 });
+  const peers = useMemo(() => shownPeers({ peers: view.peers, now: presenceNow }).map((entry) => entry.peer), [view.peers, presenceNow]);
 
   useLayoutEffect(() => {
     const element = scroller.current;
@@ -145,7 +150,7 @@ export const Filmstrip = memo(function Filmstrip(): ReactElement {
                 current={slide.id === view.currentSlideId}
                 selected={selected.includes(slide.id)}
                 openThreads={openThreads.get(slide.id) ?? 0}
-                peers={view.peers}
+                peers={peers}
                 onDragStart={() => {
                   dropped.current = false;
                   dispatch({ kind: "slideDragStarted", slideIds: selected.includes(slide.id) ? selected : [slide.id] });
@@ -160,7 +165,7 @@ export const Filmstrip = memo(function Filmstrip(): ReactElement {
         </div>
       </div>
       <div style={{ padding: "8px" }}>
-        <button type="button" className={TIDEPOOL_CLASS.secondaryPill} style={{ inlineSize: "100%" }} onClick={() => dispatch({ kind: "newSlideRequested", layoutId: null })}>
+        <button type="button" className={TIDEPOOL_CLASS.secondaryPill} style={{ inlineSize: "100%" }} disabled={view.editing !== null} title={view.editing ?? undefined} onClick={() => dispatch({ kind: "newSlideRequested", layoutId: null })}>
           <Icon name="plus" /> New slide
         </button>
       </div>
@@ -225,7 +230,7 @@ const Thumbnail = memo(function Thumbnail(properties: Readonly<{
           )}
           {properties.openThreads === 0 ? null : <span title={`${properties.openThreads} open comments`}>{properties.openThreads}</span>}
           {lookers.slice(0, 3).map((peer) => (
-            <span key={peer.clientId} title={`${peer.person.displayName} is here`} style={{ backgroundColor: peerColour(peer.person.colourIndex), color: "var(--sasha-peer-label-text)" }}>
+            <span key={peer.clientId} className={VIEW_CLASS.thumbnailAvatar} title={`${peer.person.displayName} is on this slide`} style={{ backgroundColor: peerColour(peer.person.colourIndex) }} data-peer={peer.person.id}>
               {initials(peer.person.displayName)}
             </span>
           ))}

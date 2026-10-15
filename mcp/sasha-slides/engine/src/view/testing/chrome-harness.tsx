@@ -73,22 +73,22 @@ export function scenarioState(options: Readonly<{ scenario: HarnessScenario; ima
     case "editor":
       return { ...withPeers, selection: styles !== undefined && gradientBox !== undefined ? { kind: "elements", slideId: styles.id, elementIds: [gradientBox.id] } : { kind: "none" }, notices: [{ id: noticeId(), tone: "information", message: "Claude wrote a transition: review it before presenting.", action: { kind: "reviewTransitionScript", scriptId: script.id }, expiresAfterMilliseconds: null }] };
     case "menuOverBlack":
-      return { ...base, currentSlideId: black?.id ?? null, ui: { ...base.ui, openMenu: "insert" } };
+      return { ...base, currentSlideId: black?.id ?? null, chrome: { ...base.chrome, openMenu: "insert" } };
     case "contextMenu":
-      return { ...base, currentSlideId: black?.id ?? null, ui: { ...base.ui, contextMenu: { at: { x: 720, y: 430 }, scope: "canvas" } } };
+      return { ...base, currentSlideId: black?.id ?? null, chrome: { ...base.chrome, contextMenu: { at: { x: 720, y: 430 }, scope: "canvas" } } };
     case "scriptDialog":
-      return { ...withPeers, ui: { ...base.ui, dialog: { kind: "transitionScriptEditor", editor: { draft: { id: script.id, name: script.name, description: script.description, script: script.script, stylesheet: script.stylesheet, markup: script.markup, defaultParameters: script.defaultParameters }, basedOnUpdatedAt: script.updatedAt, conflict: false, previewGeneration: 0 } } } };
+      return { ...withPeers, chrome: { ...base.chrome, dialog: { kind: "transitionScriptEditor", editor: { draft: { id: script.id, name: script.name, description: script.description, script: script.script, stylesheet: script.stylesheet, markup: script.markup, defaultParameters: script.defaultParameters }, basedOnUpdatedAt: script.updatedAt, conflict: false, previewGeneration: 0 } } } };
     case "comments":
-      return { ...withPeers, ui: { ...base.ui, commentsOpen: true, focusedThreadId: withPeers.discussion.threads[0]?.id ?? null } };
+      return { ...withPeers, chrome: { ...base.chrome, commentsOpen: true, focusedThreadId: withPeers.discussion.threads[0]?.id ?? null } };
     case "text":
-      return { ...withPeers, selection: styles !== undefined && listBox !== undefined ? { kind: "text", target: { kind: "element", slideId: styles.id, elementId: listBox.id }, anchor: 22, focus: 26 } : { kind: "none" }, ui: { ...base.ui, propertiesTab: "text" } };
+      return { ...withPeers, selection: styles !== undefined && listBox !== undefined ? { kind: "text", target: { kind: "element", slideId: styles.id, elementId: listBox.id }, anchor: 22, focus: 26 } : { kind: "none" }, chrome: { ...base.chrome, propertiesTab: "text" } };
     case "filmstrip":
       return { ...base, currentSlideId: document.slides[30]?.id ?? null };
     case "drag":
     case "measure":
-      return { ...base, currentSlideId: document.slides[0]?.id ?? null, ui: { ...base.ui, speakerNotesOpen: false } };
+      return { ...base, currentSlideId: document.slides[0]?.id ?? null, chrome: { ...base.chrome, speakerNotesOpen: false } };
     case "addon":
-      return { ...withPeers, embedding: { kind: "addonDialog", webApplicationAddress: "https://sashaslides.com/deck/deck_harness" }, ui: { ...base.ui, openMenu: "edit" } };
+      return { ...withPeers, embedding: { kind: "addonDialog", webApplicationAddress: "https://sashaslides.com/deck/deck_harness" }, chrome: { ...base.chrome, openMenu: "edit" } };
     default:
       return base;
   }
@@ -187,8 +187,8 @@ function sampleDiscussion(slide: SlideSnapshot): DiscussionSnapshot {
       createdBy: adaPerson,
       createdAt: 1,
       messages: [
-        { id: ids.next("message"), author: adaPerson, body: "Can the gradient run the other way, so it matches the title slide?", createdAt: 1, editedAt: null },
-        { id: ids.next("message"), author: claudePerson, body: "Done: it now runs from teal to indigo. Undo my edit if you preferred it before.", createdAt: 2, editedAt: null },
+        { id: ids.next("message"), author: adaPerson, body: "Can the gradient run the other way, so it matches the title slide?", mentions: [], createdAt: 1, editedAt: null },
+        { id: ids.next("message"), author: claudePerson, body: "Done: it now runs from teal to indigo. Undo my edit if you preferred it before.", mentions: [], createdAt: 2, editedAt: null },
       ],
       markings: [],
     },
@@ -198,7 +198,7 @@ function sampleDiscussion(slide: SlideSnapshot): DiscussionSnapshot {
       status: { kind: "open" },
       createdBy: claudePerson,
       createdAt: 3,
-      messages: [{ id: ids.next("message"), author: claudePerson, body: "This image is still a placeholder; shall I find a photograph?", createdAt: 3, editedAt: null }],
+      messages: [{ id: ids.next("message"), author: claudePerson, body: "This image is still a placeholder; shall I find a photograph?", mentions: [], createdAt: 3, editedAt: null }],
       markings: [],
     },
   ];

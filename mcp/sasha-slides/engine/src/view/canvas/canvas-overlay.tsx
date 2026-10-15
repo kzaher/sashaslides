@@ -7,6 +7,14 @@
 //
 // Only handles, pins and boundary strips take pointer events; every outline lets the pointer
 // through to the element under it.
+//
+// MARKINGS ARE FRACTIONS OF THEIR REFERENCE BOX (discussion.ts): the element's frame as it is NOW
+// for an element or text comment, so moving or resizing the element carries the drawing with it;
+// where the element was (`elementFrameAtCreation`) once it is gone; the slide for a slide comment.
+// The focused thread's markings show unless the viewer turned "Show annotations" off; the
+// markings of the comment being written always show, since they are being drawn.
+//
+// PEERS ARE THE SHOWN ONES (chrome/presence.ts): a silent peer's cursor fades, then leaves.
 
 import { memo, type CSSProperties, type ReactElement } from "react";
 import { assertNever } from "../../contracts/assert-never.ts";
@@ -19,6 +27,7 @@ import type { Box, Frame, FractionalPoint, Point } from "../../contracts/geometr
 import type { ElementId } from "../../contracts/ids.ts";
 import type { ElementMeasurement } from "../../contracts/editor-state.ts";
 import type { PeerPresence } from "../../contracts/presence.ts";
+import type { Size } from "../../contracts/geometry.ts";
 import type { Selection } from "../../contracts/selection.ts";
 import { TIDEPOOL_TOKENS } from "../../theme/tidepool-theme.ts";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
@@ -47,6 +56,11 @@ export type CanvasOverlayProperties = Readonly<{
   pins: readonly ArrangedThread[];
   composer: CommentComposer;
   focusedThread: ArrangedThread | null;
+  /** View > Show annotations (editor-services.tsx `ViewPreferences`). */
+  showAnnotations: boolean;
+  pageSize: Size;
+  /** Peers that are away are drawn faded (chrome/presence.ts); gone peers are not passed in. */
+  awayClientIds: ReadonlySet<number>;
 }>;
 
 export const CanvasOverlay = memo(function CanvasOverlay(properties: CanvasOverlayProperties): ReactElement {
@@ -56,9 +70,9 @@ export const CanvasOverlay = memo(function CanvasOverlay(properties: CanvasOverl
       <PeerSelections slide={properties.slide} scale={properties.scale} peers={properties.peers} />
       <SelectionLayer outline={outline} scale={properties.scale} measured={properties.measured} />
       <GestureLayer gesture={properties.gesture} scale={properties.scale} slide={properties.slide} />
-      <MarkingsLayer slide={properties.slide} scale={properties.scale} composer={properties.composer} focusedThread={properties.focusedThread} gesture={properties.gesture} />
+      <MarkingsLayer slide={properties.slide} scale={properties.scale} composer={properties.composer} focusedThread={properties.showAnnotations ? properties.focusedThread : null} gesture={properties.gesture} pageSize={properties.pageSize} />
       <CommentPins pins={properties.pins} scale={properties.scale} />
-      <PeerCursors slideId={properties.slide.id} scale={properties.scale} peers={properties.peers} />
+      <PeerCursors slideId={properties.slide.id} scale={properties.scale} peers={properties.peers} awayClientIds={properties.awayClientIds} />
     </div>
   );
 });
@@ -84,7 +98,7 @@ function SelectionLayer(properties: Readonly<{ outline: ReturnType<typeof select
       return (
         <>
           {outline.frames.map((frame, index) => (
-            <div key={index} className={VIEW_CLASS.selectionBox} data-subtle="true" style={frameBoxCss(frame, properties.scale)} />
+            <div key={index} className={VIEW_CLASS.selectionBox} data-subtle="true" style={frameBoxDeclarations(frame, properties.scale)} />
           ))}
           <FrameBox frame={{ ...outline.bounds, rotation: 0, flipHorizontal: false, flipVertical: false }} scale={properties.scale} handles element={null} measured={properties.measured} />
         </>
@@ -97,7 +111,7 @@ function SelectionLayer(properties: Readonly<{ outline: ReturnType<typeof select
 function FrameBox(properties: Readonly<{ frame: Frame; scale: number; handles: boolean; element: ElementSnapshot | null; measured: ReadonlyMap<ElementId, ElementMeasurement> }>): ReactElement {
   const table = properties.element === null ? null : tableOf(properties.element);
   return (
-    <div className={VIEW_CLASS.selectionBox} style={frameBoxCss(properties.frame, properties.scale)}>
+    <div className={VIEW_CLASS.selectionBox} style={frameBoxDeclarations(properties.frame, properties.scale)}>
       {properties.handles ? (
         <>
           <div className={VIEW_CLASS.rotationStem} />
@@ -137,7 +151,7 @@ function LineHandles(properties: Readonly<{ element: ElementSnapshot; scale: num
   ];
   return (
     <>
-      <svg className={VIEW_CLASS.overlaySvg} aria-hidden="true">
+      <svg className={VIEW_CLASS.overlayDrawing} aria-hidden="true">
         <line x1={line.start.x * scale} y1={line.start.y * scale} x2={line.end.x * scale} y2={line.end.y * scale} className={VIEW_CLASS.selectionLine} />
       </svg>
       {properties.showHandles
@@ -161,7 +175,7 @@ function GestureLayer(properties: Readonly<{ gesture: Gesture; scale: number; sl
         <>
           <Guides guides={gesture.guides} scale={scale} />
           {fixed === null ? null : (
-            <svg className={VIEW_CLASS.overlaySvg} aria-hidden="true">
+            <svg className={VIEW_CLASS.overlayDrawing} aria-hidden="true">
               <line x1={fixed.x * scale} y1={fixed.y * scale} x2={gesture.point.x * scale} y2={gesture.point.y * scale} className={VIEW_CLASS.selectionLine} />
             </svg>
           )}
@@ -169,9 +183,9 @@ function GestureLayer(properties: Readonly<{ gesture: Gesture; scale: number; sl
       );
     }
     case "marquee":
-      return <div className={VIEW_CLASS.marquee} style={boxCss(marqueeBox(gesture), scale)} />;
+      return <div className={VIEW_CLASS.marquee} style={boxDeclarations(marqueeBox(gesture), scale)} />;
     case "creating":
-      return <div className={VIEW_CLASS.creationBox} style={boxCss(marqueeBox(gesture), scale)} />;
+      return <div className={VIEW_CLASS.creationBox} style={boxDeclarations(marqueeBox(gesture), scale)} />;
     case "resizingTableLine":
       return null;
     case "idle":
@@ -215,20 +229,27 @@ function PeerSelections(properties: Readonly<{ slide: SlideSnapshot; scale: numb
         return elementIds.flatMap((elementId) => {
           const element = findElement(properties.slide.elements, elementId);
           if (element === null) return [];
-          return [<div key={`${peer.clientId}:${elementId}`} className={VIEW_CLASS.peerSelection} style={{ ...frameBoxCss(element.frame, properties.scale), color: peerColour(peer.person.colourIndex) }} title={`${peer.person.displayName} has this selected`} />];
+          return [<div key={`${peer.clientId}:${elementId}`} className={VIEW_CLASS.peerSelection} style={{ ...frameBoxDeclarations(element.frame, properties.scale), color: peerColour(peer.person.colourIndex) }} title={`${peer.person.displayName} has this selected`} />];
         });
       })}
     </>
   );
 }
 
-function PeerCursors(properties: Readonly<{ slideId: SlideSnapshot["id"]; scale: number; peers: readonly PeerPresence[] }>): ReactElement {
+function PeerCursors(properties: Readonly<{ slideId: SlideSnapshot["id"]; scale: number; peers: readonly PeerPresence[]; awayClientIds: ReadonlySet<number> }>): ReactElement {
   return (
     <>
       {properties.peers.map((peer) => {
         if (peer.slideId !== properties.slideId || peer.pointer === null) return null;
         return (
-          <div key={peer.clientId} className={VIEW_CLASS.peerCursor} style={{ left: peer.pointer.x * properties.scale, top: peer.pointer.y * properties.scale, color: peerColour(peer.person.colourIndex) }} data-activity={peer.activity}>
+          <div
+            key={peer.clientId}
+            className={VIEW_CLASS.peerCursor}
+            style={{ left: peer.pointer.x * properties.scale, top: peer.pointer.y * properties.scale, color: peerColour(peer.person.colourIndex) }}
+            data-activity={peer.activity}
+            data-away={properties.awayClientIds.has(peer.clientId) ? "true" : "false"}
+            data-peer={peer.person.id}
+          >
             <svg viewBox="0 0 16 20" aria-hidden="true">
               <path d="M1 1 15 10l-6.5 1.5L5 19z" fill="currentColor" stroke="var(--sasha-peer-label-text)" strokeWidth="1.2" strokeLinejoin="round" />
             </svg>
@@ -267,8 +288,8 @@ function CommentPins(properties: Readonly<{ pins: readonly ArrangedThread[]; sca
 }
 
 /** The markings of the comment being written, of the focused thread, and of the one being drawn. */
-function MarkingsLayer(properties: Readonly<{ slide: SlideSnapshot; scale: number; composer: CommentComposer; focusedThread: ArrangedThread | null; gesture: Gesture }>): ReactElement | null {
-  const slideBox: Box = { x: 0, y: 0, width: 1280, height: 720 };
+function MarkingsLayer(properties: Readonly<{ slide: SlideSnapshot; scale: number; composer: CommentComposer; focusedThread: ArrangedThread | null; gesture: Gesture; pageSize: Size }>): ReactElement | null {
+  const slideBox: Box = { x: 0, y: 0, width: properties.pageSize.width, height: properties.pageSize.height };
   const drawn: { marking: Marking; reference: Box }[] = [];
   if (properties.composer.kind === "composing" && properties.composer.slideId === properties.slide.id) {
     const reference = referenceBox({ slide: properties.slide, elementId: draftElementId(properties.composer.target), fallback: slideBox });
@@ -277,14 +298,14 @@ function MarkingsLayer(properties: Readonly<{ slide: SlideSnapshot; scale: numbe
   }
   const focused = properties.focusedThread;
   if (focused !== null) {
-    const box = placementBox(focused);
-    if (box !== null) for (const marking of focused.thread.markings) drawn.push({ marking, reference: box });
+    const reference = markingReferenceBox({ arranged: focused, slide: properties.slide, slideBox });
+    if (reference !== null) for (const marking of focused.thread.markings) drawn.push({ marking, reference });
   }
   if (drawn.length === 0) return null;
   const scale = properties.scale;
   const point = (reference: Box, fraction: FractionalPoint): Point => ({ x: (reference.x + fraction.x * reference.width) * scale, y: (reference.y + fraction.y * reference.height) * scale });
   return (
-    <svg className={VIEW_CLASS.overlaySvg} aria-hidden="true">
+    <svg className={VIEW_CLASS.overlayDrawing} aria-hidden="true" data-markings={drawn.length}>
       {drawn.map((entry, index) => markingShape({ key: index, marking: entry.marking, reference: entry.reference, scale, point }))}
     </svg>
   );
@@ -323,6 +344,28 @@ function markingShape(options: Readonly<{ key: number; marking: Marking; referen
   }
 }
 
+/**
+ * What a thread's markings are fractions of, in slide units (see the header): the element's frame
+ * now, where it was once removed, or the slide; null for a thread on a deleted slide.
+ */
+export function markingReferenceBox(options: Readonly<{ arranged: ArrangedThread; slide: SlideSnapshot; slideBox: Box }>): Box | null {
+  const placement = options.arranged.placement;
+  switch (placement.kind) {
+    case "onElement": {
+      const element = findElement(options.slide.elements, placement.elementId);
+      return element === null ? null : { x: element.frame.x, y: element.frame.y, width: element.frame.width, height: element.frame.height };
+    }
+    case "elementRemoved":
+      return options.arranged.thread.anchor.elementFrameAtCreation ?? options.slideBox;
+    case "onSlide":
+      return options.slideBox;
+    case "slideRemoved":
+      return null;
+    default:
+      return assertNever(placement);
+  }
+}
+
 /** Where a thread's pin sits, in slide units; null for a thread on a deleted slide. */
 export function placementBox(arranged: ArrangedThread): Box | null {
   const placement = arranged.placement;
@@ -338,7 +381,7 @@ export function placementBox(arranged: ArrangedThread): Box | null {
   }
 }
 
-function frameBoxCss(frame: Frame, scale: number): CSSProperties {
+function frameBoxDeclarations(frame: Frame, scale: number): CSSProperties {
   return {
     left: frame.x * scale,
     top: frame.y * scale,
@@ -348,7 +391,7 @@ function frameBoxCss(frame: Frame, scale: number): CSSProperties {
   };
 }
 
-function boxCss(box: Box, scale: number): CSSProperties {
+function boxDeclarations(box: Box, scale: number): CSSProperties {
   return { left: box.x * scale, top: box.y * scale, width: box.width * scale, height: box.height * scale };
 }
 

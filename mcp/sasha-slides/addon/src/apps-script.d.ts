@@ -93,6 +93,10 @@ declare global {
     sashaReportWindowUrl(spec: Readonly<Record<string, never>>): void;
     /** Which candidate the report window was opened on, read once and cleared. */
     sashaTakeReportTarget(): void;
+    /** The editor shell's "Import again" (SPEC.md 21.13): replaces the bound deck, answers `{ deckId, ticket }`. */
+    sashaImportAgain(spec: Readonly<{ importToken: string; deckId: string }>): void;
+    /** The editor's export through the add-on's own authorization: answers `{ exportId, outcome, message }`. */
+    sashaRunExport(exportId: string): void;
   }>;
 
   const google: Readonly<{

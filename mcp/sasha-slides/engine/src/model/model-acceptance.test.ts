@@ -793,7 +793,7 @@ describe("model acceptance", () => {
       requestId: mint("discussionRequest"),
       actor: alice,
       at: 100,
-      command: { kind: "createThread", threadId, anchor: { slideId, target: { kind: "slide" }, region: null, elementFrameAtCreation: null }, markings: [], messageId, body: "Is this right?" },
+      command: { kind: "createThread", threadId, anchor: { slideId, target: { kind: "slide" }, region: null, elementFrameAtCreation: null }, markings: [], messageId, body: "Is this right?", mentions: [] },
     };
     for (const row of [
       { name: "a non-author's edit is rejected notAuthor", actor: bob, expected: "rejected" },
@@ -801,7 +801,7 @@ describe("model acceptance", () => {
     ] as const) {
       test(row.name, async () => {
         using store = createMemoryDiscussionStore({ actor: row.actor, now: () => 200, initialLog: [created] });
-        const outcome = await store.submit({ requestId: mint("discussionRequest"), command: { kind: "editMessage", threadId, messageId, body: "Is this right now?" } });
+        const outcome = await store.submit({ requestId: mint("discussionRequest"), command: { kind: "editMessage", threadId, messageId, body: "Is this right now?", mentions: [] } });
         assert.equal(outcome.kind, row.expected);
         if (outcome.kind === "rejected") assert.equal(outcome.reason, "notAuthor");
       });

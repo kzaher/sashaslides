@@ -36,7 +36,8 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, statSync } from "node:fs";
-import type { IncomingHttpHeaders } from "node:http";
+import { dirname, join } from "node:path";
+import type { IncomingHttpHeaders, Server as ListeningServer } from "node:http";
 import { z } from "zod";
 import { appendClientHandshake, handshakeRecordingTransport } from "./client-handshake.ts";
 import { formatFrameLine } from "./jsonrpc-recording-transport.ts";
@@ -68,14 +69,26 @@ import { googleFeedbackChannel, type FeedbackChannel } from "./feedback/feedback
 import { FEEDBACK_DELIVERY_THRESHOLD_MS } from "./feedback-delivery";
 import { pollProgressReporter } from "./long-poll-progress.ts";
 import { describeCommentAnchor } from "./feedback/comment-anchor";
-import { CLIENT_PATH, assertNever, describeAuthFailure, loadOAuthClient } from "./google-auth";
+import { CLIENT_PATH, assertNever, describeAuthFailure, loadClientCredentials, loadOAuthClient } from "./google-auth";
 import { googleSubjectOf } from "./http/authorization-server";
-import { loadBrokeredStack } from "./http/brokered-stack";
+import { loadBrokeredStack, type BrokeredStack } from "./http/brokered-stack";
 import { createSashaSlidesHttpServer } from "./http/http-server";
 import type { CommentBot } from "./comment-bot/comment-bot";
 import { loadCommentBot } from "./comment-bot/comment-bot-stack";
 import { openCommentTasks, registerCommentTools, type CommentTaskPayload } from "./comment-bot/comment-tools";
 import { loadAccountPortal } from "./http/account-portal-stack";
+import { parseSessionSecret } from "./http/account-portal";
+import { withDeckErasure } from "./http/account-eraser";
+import { storeAccountDirectory } from "./http/account-directory";
+import { randomAccountId } from "./http/accounts";
+import { randomUrlSafeToken } from "./http/authorization-server";
+import type { DeckCallerResolution, DeckService } from "./deck-contracts/deck-service-contract";
+import { registerDeckTools } from "./deck-tools/deck-tools";
+import { createGoogleSlidesInterchange } from "./google-slides/google-slides-interchange";
+import { cryptoRandom } from "./decks/deck-identity";
+import { REAL_TIMERS } from "./decks/deck-registry";
+import { createDeckServer, type DeckServer } from "./decks/deck-stack";
+import { memoryDeckStorage, openFileDeckStorage, type DeckStorage } from "./decks/deck-storage";
 import type { Endpoints } from "./http/oauth-metadata";
 import type { UserDriveFactory } from "./http/user-drive";
 import {
@@ -245,6 +258,20 @@ export function slideSourcesFrom(
   return { kind: "ok", sources };
 }
 
+/** What Claude's deck tools need from the deck server (SPEC.md 21.14). */
+export type DeckToolWiring = Readonly<{
+  deckService: DeckService;
+  callerFor: DeckServer["callerFor"];
+  publicUrl: string;
+}>;
+
+/** Where deck addresses point when no deck server runs here (the tools then explain why they cannot work). */
+const DEFAULT_DECK_ORIGIN = "https://sashaslides.com";
+
+function decksUnavailable(): Promise<DeckCallerResolution> {
+  return Promise.resolve({ kind: "unavailable", message: "Sasha decks need the remote connector with its account portal (SASHA_SESSION_SECRET)." });
+}
+
 export function createSashaSlidesServer(
   options: Readonly<{
     resolveEnvironment: ResolveEnvironment;
@@ -263,6 +290,8 @@ export function createSashaSlidesServer(
     remote: boolean;
     /** Absent (stdio, or no `--comment-bot`): the comment tools answer that the bot is off. */
     commentBot?: CommentBot;
+    /** Absent (stdio, or no account portal): the deck tools are listed and answer why they cannot work. */
+    decks?: DeckToolWiring;
   }>,
 ): McpServer {
   // The connector's own onboarding: the spec lets a server describe how it is meant to be
@@ -480,6 +509,14 @@ export function createSashaSlidesServer(
   );
 
   registerCommentTools({ server, commentBot });
+  registerDeckTools({
+    server,
+    deckService: options.decks?.deckService ?? null,
+    callerFor: options.decks?.callerFor ?? decksUnavailable,
+    publicUrl: options.decks?.publicUrl ?? DEFAULT_DECK_ORIGIN,
+    fetch,
+    now: () => Date.now(),
+  });
 
   server.registerTool(
     "read_feedback",
@@ -1681,6 +1718,10 @@ export type ServerMode =
       skillFilePath: string | null;
       /** How many characters of `instructions` the client will keep. 0 means "no limit". */
       instructionsBudget: number;
+      /** Where `decks/` and `deck-profiles/` live; null is beside `--store`, or in memory without it. */
+      deckDataDirectory: string | null;
+      /** The built web application (`engine/dist/web`); null is the one beside this server. */
+      webBuildDirectory: string | null;
     }>
   | Readonly<{ kind: "selftest" }>
   | Readonly<{ kind: "usage"; reason: string | null }>;
@@ -1753,12 +1794,14 @@ export function parseServerMode(args: readonly string[]): ServerMode {
     frameLogPath,
     skillFilePath,
     instructionsBudget,
+    deckDataDirectory: values.get("--deck-data") ?? null,
+    webBuildDirectory: values.get("--web-build") ?? null,
   };
 }
 
 export const USAGE = `sasha-slides MCP server
 
-  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--mail-sender <path> [--trusted-proxy <subnets>]] [--comment-bot <path>] [--google-client <path>]
+  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--mail-sender <path> [--trusted-proxy <subnets>]] [--comment-bot <path>] [--google-client <path>] [--deck-data <directory>] [--web-build <directory>]
   npx tsx mcp/sasha-slides/server.ts --stdio
   npx tsx mcp/sasha-slides/server.ts --selftest
 
@@ -1804,6 +1847,12 @@ export const USAGE = `sasha-slides MCP server
                  X-Real-IP header is believed when limiting sign-in attempts and mail per
                  client. Loopback is always trusted. Behind Docker's published port the
                  connection comes from the bridge gateway, e.g. --trusted-proxy 172.16.0.0/12.
+  --deck-data    Directory for the deck server's files: decks/ (every record sealed with the
+                 owner's account key) and deck-profiles/. Defaults to the directory of --store
+                 (/data in production); without --store, decks live in memory. Decks need the
+                 account portal (SASHA_SESSION_SECRET), where people sign in to them.
+  --web-build    The built deck web application (manifest.json and its files). Defaults to
+                 engine/dist/web next to this server; without a build, /decks answers 503.
   --google-callback-url  TESTING. Where Google returns the user, instead of
                  <public-url>/oauth/google/callback. A Desktop OAuth client only accepts
                  http://127.0.0.1 redirects, so behind a tunnel this keeps Google's leg on
@@ -2096,6 +2145,8 @@ const VALUE_FLAGS: readonly string[] = [
   "--google-client",
   "--handshake-log",
   "--frame-log",
+  "--deck-data",
+  "--web-build",
 ];
 const BARE_FLAGS: readonly string[] = ["--http", "--stdio", "--selftest", "--help", "-h"];
 
@@ -2217,6 +2268,13 @@ function serveHttp(
     return Promise.resolve();
   }
   const { stack } = loaded;
+  const decks = loadDeckServer({ mode, stack, warn });
+  if (decks.kind === "failed") {
+    process.stderr.write(`[${SERVER_NAME}] cannot start: ${decks.message}\n`);
+    process.exitCode = 1;
+    return Promise.resolve();
+  }
+  const deckServer = decks.kind === "ok" ? decks.server : null;
   const portal = loadAccountPortal({
     publicUrl: mode.publicUrl,
     identityProvidersPath: mode.identityProvidersPath,
@@ -2226,7 +2284,8 @@ function serveHttp(
     sessionSecret: process.env.SASHA_SESSION_SECRET,
     store: stack.store,
     vault: stack.vault,
-    eraser: stack.eraser,
+    eraser: deckServer === null ? stack.eraser : withDeckErasure({ eraser: stack.eraser, eraseDecks: deckServer.eraseAccount }),
+    deckSessionStart: deckServer === null ? null : deckServer.deckSessionStart,
     warn,
   });
   if (portal.kind === "failed") {
@@ -2260,6 +2319,7 @@ function serveHttp(
         instructions: instructions.text,
         remote: true,
         ...(bot === null ? {} : { commentBot: bot }),
+        ...(deckServer === null ? {} : { decks: { deckService: deckServer.deckService, callerFor: deckServer.callerFor, publicUrl: mode.publicUrl } }),
       }),
     instrumentTransport: (inner) =>
       instrumentedTransport({
@@ -2270,7 +2330,9 @@ function serveHttp(
     warn,
     ...(portal.kind === "ok" ? { accountPortal: portal.portal } : {}),
     ...(bot === null ? {} : { driveHook: driveHookFor(bot) }),
+    ...(deckServer === null ? {} : { decks: deckServer }),
   });
+  if (deckServer !== null) shutDownOnTerminate({ deckServer, httpServer, warn });
   return new Promise<void>((resolve) => {
     httpServer.listen(mode.port, mode.host, () => {
       for (const line of startupBanner({
@@ -2284,9 +2346,83 @@ function serveHttp(
       }
       for (const line of portal.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
       for (const line of commentBot.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
+      for (const line of decks.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
       if (bot !== null) void bot.start().catch((cause: unknown) => warn(`comment bot: start failed: ${String(cause)}`));
       resolve();
     });
+  });
+}
+
+type DeckServerLoad =
+  | Readonly<{ kind: "ok"; server: DeckServer; banner: readonly string[] }>
+  | Readonly<{ kind: "off"; banner: readonly string[] }>
+  | Readonly<{ kind: "failed"; message: string }>;
+
+/**
+ * The deck server (decks/deck-stack.ts) when the account portal can sign people in to it: it needs
+ * SASHA_SESSION_SECRET for its cookie. Files go beside `--store` (or `--deck-data`), else memory.
+ */
+function loadDeckServer(
+  options: Readonly<{
+    mode: Extract<ServerMode, Readonly<{ kind: "http" }>>;
+    stack: Pick<BrokeredStack, "store" | "vault">;
+    warn: (message: string) => void;
+  }>,
+): DeckServerLoad {
+  const { mode, stack, warn } = options;
+  const secretText = process.env.SASHA_SESSION_SECRET;
+  if (secretText === undefined || secretText === "") return { kind: "off", banner: ["decks: off (they sign in through /account; set SASHA_SESSION_SECRET)"] };
+  const secret = parseSessionSecret(secretText);
+  if (secret.kind === "error") return { kind: "failed", message: secret.message };
+  const credentials = loadClientCredentials({ path: mode.googleClientPath });
+  if (credentials.kind !== "ok") return { kind: "failed", message: describeAuthFailure(credentials) };
+  const dataDirectory = mode.deckDataDirectory ?? (mode.storePath === null ? null : dirname(mode.storePath));
+  let storage: DeckStorage;
+  if (dataDirectory === null) storage = memoryDeckStorage();
+  else {
+    const opened = openFileDeckStorage({ decksDirectory: join(dataDirectory, "decks"), profilesDirectory: join(dataDirectory, "deck-profiles"), vault: stack.vault, warn });
+    if (opened.kind === "failed") return opened;
+    storage = opened.storage;
+  }
+  const webBuildDirectory = mode.webBuildDirectory ?? join(__dirname, "engine", "dist", "web");
+  const server = createDeckServer({
+    publicUrl: mode.publicUrl,
+    storage,
+    store: stack.store,
+    vault: stack.vault,
+    directory: storeAccountDirectory({ store: stack.store, vault: stack.vault, now: () => new Date(), newAccountId: randomAccountId }),
+    sessionSecret: secret.secret,
+    webDistributionDirectory: webBuildDirectory,
+    googleClient: credentials.credentials,
+    createGoogleSlidesInterchange,
+    timers: REAL_TIMERS,
+    now: () => Date.now(),
+    random: Math.random,
+    randomBytes: cryptoRandom,
+    randomToken: randomUrlSafeToken,
+    fetch,
+    warn,
+  });
+  return {
+    kind: "ok",
+    server,
+    banner: [`decks: ${mode.publicUrl.replace(/\/+$/, "")}/decks (files: ${storage.description}; web build: ${webBuildDirectory})`],
+  };
+}
+
+/**
+ * SIGTERM (Docker stop, a deploy): every deck socket closes `serverShuttingDown` (4013) so clients
+ * reconnect with backoff, every room flushes its last 250 milliseconds, then the process exits.
+ */
+function shutDownOnTerminate(options: Readonly<{ deckServer: DeckServer; httpServer: ListeningServer; warn: (message: string) => void }>): void {
+  process.once("SIGTERM", () => {
+    options.deckServer
+      .shutdown()
+      .catch((cause: unknown) => options.warn(`decks: shutdown failed: ${String(cause)}`))
+      .finally(() => {
+        options.httpServer.close();
+        process.exit(0);
+      });
   });
 }
 

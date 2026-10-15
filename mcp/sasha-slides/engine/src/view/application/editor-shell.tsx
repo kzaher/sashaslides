@@ -12,27 +12,34 @@
 //    primary+Enter, which must enter full screen inside the key event and so presents from here.
 //  * THE PRESENTATION HOST IS ALWAYS MOUNTED, so the Present handler has an element to make full
 //    screen synchronously; the presenter renders into it once `presentation` is set.
-//  * `data-gesture="active"` ON THE ROOT pauses the calm wash while something is dragged (the shared
-//    stylesheet's rule): nothing moves behind a slide being edited.
+//  * `data-gesture="active"` ON THE ROOT pauses the calm wash while something is dragged and drops
+//    the panels' backdrop blur (the shared stylesheet's rules): nothing moves behind a slide being
+//    edited, and nothing is re-blurred per pointer move.
+//  * A CLOSED CONNECTION IS A BANNER under the top bar with the reason; the editor is read-only
+//    (the reducer refuses edits, the controls say why).
+//  * ARROW KEYS IN A PILL GROUP STAY THERE: a focused tab or segmented choice owns the arrow keys,
+//    Home and End (chrome/pill-group.ts), so they never become a nudge of the selected element.
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react";
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { Gesture } from "../../contracts/editor-state.ts";
 import type { SlideId } from "../../contracts/ids.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { EditableCanvas } from "../canvas/editable-canvas.tsx";
+import { CLOSED_EXPLANATION, closedReason } from "../chrome/access.ts";
 import { CommentRail } from "../chrome/comment-rail.tsx";
 import { DialogLayer } from "../chrome/dialogs.tsx";
 import { Filmstrip } from "../chrome/filmstrip.tsx";
 import { ContextMenuLayer } from "../chrome/menus.tsx";
 import { PropertiesPanel } from "../chrome/properties-panel.tsx";
 import { Notices, SpeakerNotes } from "../chrome/speaker-notes.tsx";
+import { PILL_GROUP_KEYS, PILL_GROUP_SELECTOR } from "../chrome/pill-group.ts";
 import { Toolbar, TopBar } from "../chrome/top-bar.tsx";
 import { TEXT_EDITOR_ATTRIBUTE } from "../text/inline-text-editor.tsx";
 import { chordOf, modifiersOf } from "../text/text-editor-handlers.ts";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { loadDeckFonts } from "./browser-services.ts";
-import { EditorGestureContext, EditorServicesContext, FloatingLayerContext, shallowEqual, useEditorSelector, useEditorServices, type EditorServices } from "./editor-services.tsx";
+import { EditorGestureContext, EditorServicesContext, FloatingLayerContext, ViewPreferencesContext, shallowEqual, useEditorSelector, useEditorServices, type EditorServices, type ViewPreferences } from "./editor-services.tsx";
 import { handleClipboardWrite, handlePaste, handlePresent, type GestureContext } from "./gesture-handlers.ts";
 
 export function EditorShell(properties: Readonly<{ services: EditorServices }>): ReactElement {
@@ -43,10 +50,15 @@ export function EditorShell(properties: Readonly<{ services: EditorServices }>):
     () => ({ system: services.system, browser: services.browser, clipboardContentFor: services.clipboardContentFor, presentationHost: () => presentationHost.current, speakerWindow }),
     [services],
   );
+  const [showAnnotations, setShowAnnotations] = useState(true);
+  const toggleAnnotations = useCallback(() => setShowAnnotations((shown) => !shown), []);
+  const preferences = useMemo<ViewPreferences>(() => ({ showAnnotations, toggleAnnotations }), [showAnnotations, toggleAnnotations]);
   return (
     <EditorServicesContext.Provider value={services}>
       <EditorGestureContext.Provider value={gesture}>
-        <EditorScreen gesture={gesture} presentationHost={presentationHost} />
+        <ViewPreferencesContext.Provider value={preferences}>
+          <EditorScreen gesture={gesture} presentationHost={presentationHost} />
+        </ViewPreferencesContext.Provider>
       </EditorGestureContext.Provider>
     </EditorServicesContext.Provider>
   );
@@ -57,10 +69,11 @@ function EditorScreen(properties: Readonly<{ gesture: GestureContext; presentati
   const view = useEditorSelector(
     (state) => ({
       gestureActive: gestureIsActive(state.gesture),
-      filmstripOpen: state.ui.filmstripOpen,
-      side: state.ui.commentsOpen ? "comments" : state.ui.propertiesPanelOpen ? "properties" : "none",
+      filmstripOpen: state.chrome.filmstripOpen,
+      side: state.chrome.commentsOpen ? "comments" : state.chrome.propertiesPanelOpen ? "properties" : "none",
       presentation: state.presentation,
       document: state.document,
+      closed: closedReason(state.collaboration),
     }),
     shallowEqual,
   );
@@ -78,6 +91,7 @@ function EditorScreen(properties: Readonly<{ gesture: GestureContext; presentati
     <div
       className={`${TIDEPOOL_CLASS.root} ${TIDEPOOL_CLASS.calmGround} ${VIEW_CLASS.editor}`}
       data-gesture={view.gestureActive ? "active" : "idle"}
+      data-banner={view.closed === null ? "false" : "true"}
       onKeyDown={onKeyDown}
       onCopy={(event) => {
         if (!ownsClipboardEvent(event.target)) return;
@@ -93,6 +107,12 @@ function EditorScreen(properties: Readonly<{ gesture: GestureContext; presentati
       }}
     >
       <TopBar />
+      {view.closed === null ? null : (
+        <div className={VIEW_CLASS.readOnlyBanner} role="alert">
+          <strong>Read-only.</strong>
+          <span>{CLOSED_EXPLANATION[view.closed]}</span>
+        </div>
+      )}
       <Toolbar />
       <div className={VIEW_CLASS.workspace} data-filmstrip={view.filmstripOpen ? "open" : "closed"} data-side={view.side === "none" ? "closed" : "open"}>
         {view.filmstripOpen ? <Filmstrip /> : null}
@@ -149,6 +169,8 @@ export type ShellKeyEvent = Readonly<{
 export function handleShellKey(options: Readonly<{ event: ShellKeyEvent; gesture: GestureContext; primaryModifier: "control" | "meta" }>): void {
   const event = options.event;
   if (event.defaultPrevented || insideEditableField(event.target)) return;
+  // A focused tab or segmented choice owns its arrow keys (chrome/pill-group.ts): never a nudge.
+  if (PILL_GROUP_KEYS.has(event.key) && closestMatches(event.target, PILL_GROUP_SELECTOR)) return;
   const modifiers = modifiersOf({ event, primaryModifier: options.primaryModifier });
   // A focused button keeps the keys that operate it: Enter and Space press it, Tab moves focus on.
   // Without this every toolbar, panel and filmstrip button was unreachable from the keyboard.

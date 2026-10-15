@@ -4,8 +4,12 @@
 // a number field on Enter or when it loses focus, never per keystroke, so one edit is one undo step.
 //
 // The colour field's popover is drawn over whatever is below it, which may be the slide, so it is a
-// `.sasha-popover` (nearly opaque glass). Its palette holds SLIDE colours (theme slots and a standard
-// set), which are document values, not chrome colours.
+// `.sasha-popover` (nearly opaque glass). Its palette holds SLIDE colours (theme slots, a standard
+// set and this viewer's recent choices), which are document values, not chrome colours. Every
+// colour the picker applies is reported as `recentColourUsed`, which keeps the "Recent" row.
+//
+// A pill choice is a radio group with a roving tab index: the arrow keys, Home and End move between
+// its pills and choose, and never reach the canvas (pill-group.ts).
 
 import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -13,10 +17,11 @@ import { assertNever } from "../../contracts/assert-never.ts";
 import type { ThemeSnapshot } from "../../contracts/document.ts";
 import { THEME_COLOUR_SLOTS, literalColour, themeColour, type Colour, type ThemeColourSlot } from "../../contracts/style.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
-import { FloatingLayerContext } from "../application/editor-services.tsx";
-import { colourCss } from "../render/style-css.ts";
+import { FloatingLayerContext, arrayItemsEqual, useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
+import { colourValue } from "../render/inline-styles.ts";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { Icon, type IconName } from "./icons.tsx";
+import { handlePillGroupKey, rovingTabIndex } from "./pill-group.ts";
 import { MIXED_PLACEHOLDER, type SharedValue } from "./properties-values.ts";
 
 export function NumberField(properties: Readonly<{
@@ -127,9 +132,20 @@ export function ToggleButton(properties: Readonly<{ label: string; icon: IconNam
 }
 
 export function PillChoice<TValue extends string>(properties: Readonly<{ label: string; value: TValue | null; options: readonly Readonly<{ value: TValue; label: string }>[]; onChoose: (value: TValue) => void; disabled?: boolean }>): ReactElement {
+  const chosenIndex = properties.options.findIndex((option) => option.value === properties.value);
   return (
-    <div className={TIDEPOOL_CLASS.tabs} role="radiogroup" aria-label={properties.label}>
-      {properties.options.map((option) => (
+    <div
+      className={TIDEPOOL_CLASS.tabs}
+      role="radiogroup"
+      aria-label={properties.label}
+      onKeyDown={(event) =>
+        handlePillGroupKey(event, (index) => {
+          const option = properties.options[index];
+          if (option !== undefined) properties.onChoose(option.value);
+        })
+      }
+    >
+      {properties.options.map((option, index) => (
         <button
           key={option.value}
           type="button"
@@ -137,6 +153,7 @@ export function PillChoice<TValue extends string>(properties: Readonly<{ label: 
           className={TIDEPOOL_CLASS.tab}
           aria-checked={properties.value === option.value}
           aria-selected={properties.value === option.value}
+          tabIndex={rovingTabIndex({ index, chosenIndex })}
           disabled={properties.disabled === true}
           onClick={() => properties.onChoose(option.value)}
         >
@@ -168,7 +185,9 @@ export function ColourField(properties: Readonly<{
   const [open, setOpen] = useState(false);
   const popoverId = useId();
   const button = useRef<HTMLButtonElement>(null);
-  const shown = properties.value.kind === "value" ? colourCss(properties.value.value, properties.theme) : "transparent";
+  const recent = useEditorSelector((state) => state.chrome.recentColours, arrayItemsEqual);
+  const dispatch = useEditorServices().system.dispatch;
+  const shown = properties.value.kind === "value" ? colourValue(properties.value.value, properties.theme) : "transparent";
   return (
     <div className={VIEW_CLASS.popoverAnchor}>
       <span className={VIEW_CLASS.fieldLabel}>{properties.label}</span>
@@ -192,8 +211,10 @@ export function ColourField(properties: Readonly<{
           id={popoverId}
           theme={properties.theme}
           value={properties.value}
+          recent={recent}
           onChoose={(colour) => {
             properties.onChoose(colour);
+            dispatch({ kind: "recentColourUsed", colour });
             setOpen(false);
           }}
           onClose={() => setOpen(false)}
@@ -203,10 +224,7 @@ export function ColourField(properties: Readonly<{
   );
 }
 
-function ColourPopover(properties: Readonly<{ anchor: HTMLElement | null; id: string; theme: ThemeSnapshot; value: SharedValue<Colour>; onChoose: (colour: Colour) => void; onClose: () => void }>): ReactElement {
-  const current = properties.value.kind === "value" ? properties.value.value : null;
-  const [hexadecimal, setHexadecimal] = useState(current === null ? "" : colourCss({ ...current, alpha: 1 }, properties.theme));
-  const [alpha, setAlpha] = useState(current?.alpha ?? 1);
+function ColourPopover(properties: Readonly<{ anchor: HTMLElement | null; id: string; theme: ThemeSnapshot; value: SharedValue<Colour>; recent: readonly Colour[]; onChoose: (colour: Colour) => void; onClose: () => void }>): ReactElement {
   const root = useRef<HTMLDivElement>(null);
   const floatingLayer = useContext(FloatingLayerContext);
   const [position, setPosition] = useState<Readonly<{ left: number; top: number }> | null>(null);
@@ -234,6 +252,46 @@ function ColourPopover(properties: Readonly<{ anchor: HTMLElement | null; id: st
         }
       }}
     >
+      <ColourPalette theme={properties.theme} value={properties.value} recent={properties.recent} onChoose={properties.onChoose} />
+    </div>
+  );
+  const layered = (
+    <>
+      <div style={{ position: "fixed", inset: 0 }} onPointerDown={properties.onClose} aria-hidden="true" />
+      {popover}
+    </>
+  );
+  return floatingLayer === null ? layered : createPortal(layered, floatingLayer);
+}
+
+/**
+ * The colour picker's content: "Recent" (this viewer's last choices, most recent first, from
+ * `chrome.recentColours`), the theme, a standard set, hexadecimal entry and alpha.
+ */
+export function ColourPalette(properties: Readonly<{ theme: ThemeSnapshot; value: SharedValue<Colour>; recent: readonly Colour[]; onChoose: (colour: Colour) => void }>): ReactElement {
+  const current = properties.value.kind === "value" ? properties.value.value : null;
+  const [hexadecimal, setHexadecimal] = useState(current === null ? "" : colourValue({ ...current, alpha: 1 }, properties.theme));
+  const [alpha, setAlpha] = useState(current?.alpha ?? 1);
+  return (
+    <>
+      {properties.recent.length === 0 ? null : (
+        <>
+          <span className={TIDEPOOL_CLASS.subtle}>Recent</span>
+          <div className={VIEW_CLASS.swatches} role="group" aria-label="Recent colours">
+            {properties.recent.map((colour, index) => (
+              <button
+                key={index}
+                type="button"
+                className={VIEW_CLASS.swatch}
+                style={{ background: colourValue(colour, properties.theme) }}
+                aria-label={`Recent: ${colourName(colour, properties.theme)}`}
+                aria-pressed={current !== null && sameColour(current, colour)}
+                onClick={() => properties.onChoose(colour)}
+              />
+            ))}
+          </div>
+        </>
+      )}
       <span className={TIDEPOOL_CLASS.subtle}>Theme</span>
       <div className={VIEW_CLASS.swatches}>
         {THEME_COLOUR_SLOTS.slice(0, 10).map((slot) => {
@@ -268,15 +326,21 @@ function ColourPopover(properties: Readonly<{ anchor: HTMLElement | null; id: st
       >
         Use this colour
       </button>
-    </div>
-  );
-  const layered = (
-    <>
-      <div style={{ position: "fixed", inset: 0 }} onPointerDown={properties.onClose} aria-hidden="true" />
-      {popover}
     </>
   );
-  return floatingLayer === null ? layered : createPortal(layered, floatingLayer);
+}
+
+/** A colour in words for a swatch's accessible name: the theme slot's name, or its hexadecimal value and opacity. */
+function colourName(colour: Colour, theme: ThemeSnapshot): string {
+  const opacity = colour.alpha === 1 ? "" : ` at ${Math.round(colour.alpha * 100)} percent`;
+  switch (colour.kind) {
+    case "theme":
+      return `${THEME_SLOT_LABEL[colour.slot]}${opacity}`;
+    case "literal":
+      return `${colourValue({ ...colour, alpha: 1 }, theme)}${opacity}`;
+    default:
+      return assertNever(colour);
+  }
 }
 
 /** The theme slots in words, as the colour picker names them. */
@@ -319,7 +383,7 @@ function colourLabel(value: SharedValue<Colour>, theme: ThemeSnapshot): string {
         case "theme":
           return THEME_SLOT_LABEL[colour.slot];
         case "literal":
-          return colourCss({ ...colour, alpha: 1 }, theme);
+          return colourValue({ ...colour, alpha: 1 }, theme);
         default:
           return assertNever(colour);
       }
@@ -333,6 +397,14 @@ function colourLabel(value: SharedValue<Colour>, theme: ThemeSnapshot): string {
   }
 }
 
+/** Same kind, value and alpha (the state module's recent-colours rule). */
 function sameColour(first: Colour, second: Colour): boolean {
-  return JSON.stringify(first) === JSON.stringify(second);
+  switch (first.kind) {
+    case "literal":
+      return second.kind === "literal" && first.hexadecimal === second.hexadecimal && first.alpha === second.alpha;
+    case "theme":
+      return second.kind === "theme" && first.slot === second.slot && first.alpha === second.alpha;
+    default:
+      return assertNever(first);
+  }
 }

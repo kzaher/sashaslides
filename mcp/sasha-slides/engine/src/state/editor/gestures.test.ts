@@ -170,7 +170,7 @@ describe("gestures (acceptance 6)", () => {
     it(`resize ${row.name}`, () => {
       const unlocked = withSelection(editorStateFor(moveDocument), ["shape_moved"]);
       const selected = row.locked ? reduceEditor(unlocked, { kind: "aspectRatioLockToggled" }) : unlocked;
-      assert.equal(selected.ui.aspectRatioLocked, row.locked);
+      assert.equal(selected.chrome.aspectRatioLocked, row.locked);
       const pointer = { x: 500, y: 220 };
       const resizing = reduceAll(selected, [down(handle("bottomRight"), 300, 200), move(pointer.x, pointer.y, { modifiers: row.modifiers })]);
       const original = moveDocument.slides[0]?.elements[0];

@@ -17,16 +17,11 @@
 
 import { Subject } from "rxjs";
 import * as Y from "yjs";
-import type {
-  AssetId,
-  AssetMediaType,
-  ConnectInMemory,
-  CreateMemoryAssetStore,
-  CreateMemoryPresenceHub,
-  PeerPresence,
-  PresenceChannel,
-} from "../contracts/index.ts";
-import { REMOTE_SYNC_ORIGIN } from "../contracts/index.ts";
+import type { ConnectInMemory, CreateMemoryAssetStore } from "../contracts/document-store.ts";
+import type { AssetMediaType } from "../contracts/document.ts";
+import type { AssetId } from "../contracts/ids.ts";
+import type { CreateMemoryPresenceHub, PeerPresence, PresenceChannel } from "../contracts/presence.ts";
+import { REMOTE_SYNC_ORIGIN } from "../contracts/yjs-schema.ts";
 
 export const createMemoryAssetStore: CreateMemoryAssetStore = (options) => {
   const entries = new Map<AssetId, Readonly<{ bytes: ArrayBuffer; mediaType: AssetMediaType; address: string }>>();

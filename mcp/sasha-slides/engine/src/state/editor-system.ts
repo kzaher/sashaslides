@@ -1,11 +1,13 @@
 // THE EDITOR, ASSEMBLED: the pure reducer, the starting state read from the stores, and every
 // feedback with the dependencies the composition root injected (contracts/editor-system.ts). Nothing
-// here reaches for a global: the stores, the scheduler, the presence channel, the clock for the event
-// log and the error reporter all arrive as arguments, so a test builds the same system from fakes.
+// here reaches for a global: the stores, the scheduler, the presence channel, the deck server session,
+// the clock for the event log and the error reporter all arrive as arguments, so a test builds the
+// same system from fakes.
 
-import type { CreateEditorSystem, EditorEvent, EditorState } from "../contracts/index.ts";
+import { LOCAL_COLLABORATION_STATUS, type CreateEditorSystem, type EditorEvent, type EditorState } from "../contracts/index.ts";
 import { initialEditorState } from "./editor/initial-editor-state.ts";
 import { reduceEditor } from "./editor/reduce-editor.ts";
+import { collaborationFeedback } from "./feedbacks/collaboration-feedbacks.ts";
 import { discussionRequestsFeedback, textAnchorsFeedback } from "./feedbacks/discussion-feedbacks.ts";
 import { applyEditsFeedback, storeChangesFeedback } from "./feedbacks/document-feedbacks.ts";
 import { assetAvailabilityFeedback, noticeExpiryFeedback, presenceFeedback, uploadsFeedback } from "./feedbacks/scheduled-feedbacks.ts";
@@ -23,6 +25,8 @@ export const createEditorSystem: CreateEditorSystem = (dependencies) =>
       document: dependencies.documentStore.snapshot(),
       discussion: dependencies.discussionStore.snapshot(),
       containerSize: { width: 0, height: 0 },
+      collaboration: dependencies.collaboration?.status() ?? LOCAL_COLLABORATION_STATUS,
+      recentColours: dependencies.recentColours,
     }),
     reduce: reduceEditor,
     feedbacks: [
@@ -34,6 +38,7 @@ export const createEditorSystem: CreateEditorSystem = (dependencies) =>
       assetAvailabilityFeedback(dependencies),
       presenceFeedback(dependencies),
       noticeExpiryFeedback(dependencies),
+      collaborationFeedback(dependencies),
     ],
     onReducerError: (error, event) => dependencies.reportError(error, `reducing ${event.kind}`),
     onFeedbackError: (error, feedbackIndex) => dependencies.reportError(error, `editor feedback ${feedbackIndex} stopped`),

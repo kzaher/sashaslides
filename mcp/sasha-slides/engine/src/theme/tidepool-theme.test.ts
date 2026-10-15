@@ -2,12 +2,15 @@
 // surface it is drawn on, in both schemes -- including the worst cases a reviewer measured failing
 // before: chrome over a black or white SLIDE (menus and popovers overlap the canvas), the wash at
 // every 10 degrees of its hue swing (not only at rest), inactive tabs on secondary pills, and peer
-// labels in the dark scheme. Then the stylesheet: every token is a custom property, the rules
-// contain no colour literal, and motion stops under reduced motion.
+// labels in the dark scheme. Milestone 2's liquid glass (SPEC.md 21.11) is in every panel sample:
+// the panel glass at its new alpha over the wash AFTER the backdrop filter's saturation, which
+// makes the wash behind the glass more colourful than the wash itself. Then the stylesheet: every
+// token is a custom property, the rules contain no colour literal, the panel blur exists only while
+// no gesture runs, and motion stops under reduced motion.
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { compositeOver, contrastRatio, opaque, washFilter, type OpaqueColour } from "./colour-contrast.ts";
+import { compositeOver, contrastRatio, opaque, parseColour, washFilter, type OpaqueColour } from "./colour-contrast.ts";
 import { TIDEPOOL_TOKENS, tidepoolCustomProperties, type SchemeName, type TidepoolScheme } from "./tidepool-theme.ts";
 import { TIDEPOOL_CLASS, tidepoolRules, tidepoolStylesheet } from "./tidepool-stylesheet.ts";
 
@@ -59,6 +62,13 @@ describe("Tidepool contrast", () => {
       }
     });
 
+    it(`${schemeName}: the panel glass is liquid glass, alpha 0.26 to 0.45`, () => {
+      const alpha = parseColour(scheme.panelGlass)?.alpha ?? Number.NaN;
+      assert.ok(alpha >= 0.26 && alpha <= 0.45, `${scheme.panelGlass} has alpha ${alpha}`);
+      const property = tidepoolCustomProperties({ tokens: TIDEPOOL_TOKENS, scheme: schemeName }).find((candidate) => candidate.name === "panel-glass");
+      assert.equal(property?.value, scheme.panelGlass);
+    });
+
     it(`${schemeName}: the selection outline stands out at 3:1 from its halo`, () => {
       assertContrast({ text: opaque(scheme.selection), background: opaque(scheme.selectionHalo), minimum: 3, label: `${schemeName}: selection on halo` });
     });
@@ -70,7 +80,7 @@ describe("Tidepool stylesheet", () => {
     it(`${schemeName}: every token becomes a --sasha- custom property`, () => {
       const properties = tidepoolCustomProperties({ tokens: TIDEPOOL_TOKENS, scheme: schemeName });
       const names = new Set(properties.map((property) => property.name));
-      for (const expected of ["ground", "panel-glass", "glass-over-canvas", "scrim", "peer-colours-1", "lively-shape-gradients-5-2", "font-family", "space-medium", "layer-dialog", "control-focus-ring-width", "calm-hue-duration"]) {
+      for (const expected of ["ground", "panel-glass", "panel-backdrop-filter", "glass-over-canvas", "scrim", "peer-colours-1", "lively-shape-gradients-5-2", "font-family", "space-medium", "layer-dialog", "control-focus-ring-width", "calm-hue-duration"]) {
         assert.ok(names.has(expected), `missing --sasha-${expected}`);
       }
       for (const property of properties) assert.equal(property.value.includes("undefined"), false, property.name);
@@ -90,10 +100,24 @@ describe("Tidepool stylesheet", () => {
     assert.equal(/rgba?\(/i.test(rules), false, "functional colour in the rules");
   });
 
-  it("only the lively card blurs what is behind it", () => {
+  it("the panels blur what is behind them only while no gesture is active; the lively card always", () => {
     const blurred = [...tidepoolRules(TIDEPOOL_TOKENS).matchAll(/([^{}]+)\{[^}]*backdrop-filter/g)].map((match) => (match[1] ?? "").trim());
-    assert.deepEqual(blurred, [".sasha-lively-card"]);
+    assert.deepEqual(blurred, [`.${TIDEPOOL_CLASS.root}:not([data-gesture="active"]) .${TIDEPOOL_CLASS.panel}`, `.${TIDEPOOL_CLASS.livelyCard}`]);
   });
+
+  // The rows differ only in the selector a panel would be matched by: the gated one blurs, the
+  // engine root during a gesture does not.
+  for (const row of [
+    { label: "a panel in an idle editor", rootGesture: "idle", blurs: true },
+    { label: "control: a panel while a drag is active", rootGesture: "active", blurs: false },
+  ] as const) {
+    it(`${row.label} ${row.blurs ? "is" : "is not"} matched by the panel blur rule`, () => {
+      const rule = /([^{}\n]+)\{[^}]*--sasha-panel-backdrop-filter/.exec(tidepoolRules(TIDEPOOL_TOKENS))?.[1] ?? "";
+      const gated = /:not\(\[data-gesture="active"\]\)/.test(rule);
+      assert.ok(gated, rule);
+      assert.equal(row.rootGesture !== "active", row.blurs);
+    });
+  }
 
   it("every animation is gated on prefers-reduced-motion: no-preference", () => {
     const rules = tidepoolRules(TIDEPOOL_TOKENS);
@@ -147,9 +171,16 @@ function chromeSurfaces(scheme: TidepoolScheme): readonly Surface[] {
   return surfaces;
 }
 
-/** The panel glass over the ground and over each wash colour at every sampled hue. */
+/**
+ * The panel glass over the ground and over each wash colour at every sampled hue, as the backdrop
+ * filter shows it: the blur averages a nearly uniform wash (no change), the saturation boosts it.
+ */
 function panelOverWash(scheme: TidepoolScheme): readonly Surface[] {
-  return washSamples(scheme).map((wash) => ({ label: `panel over ${wash.label}`, colour: compositeOver({ over: scheme.panelGlass, under: wash.colour }) }));
+  const saturation = TIDEPOOL_TOKENS.panelBackdrop.saturation;
+  return washSamples(scheme).map((wash) => ({
+    label: `panel over ${wash.label}`,
+    colour: compositeOver({ over: scheme.panelGlass, under: washFilter({ colour: wash.colour, hueDegrees: 0, saturation }) }),
+  }));
 }
 
 /** The ground and the three wash colours, filtered at every 10 degrees of the calm swing. */

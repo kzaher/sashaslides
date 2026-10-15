@@ -19,6 +19,8 @@
  *   --step code      set Code.gs
  *   --step sidebar   add Sidebar.html and set it
  *   --step manifest  set appsscript.json (needs the manifest shown in editor settings)
+ *   --step editor    add EditorShell.html when missing and set it (the deck editor's frame host)
+ *   --step put       --file <Name.gs|Name.html> --from <path>: create the file when missing, set it
  *   --step verify    read every model back and compare lengths to disk
  */
 import CDPraw from "chrome-remote-interface";
@@ -42,7 +44,7 @@ const SCRIPT_ID = option("--script-id") ?? "1GqibbX21wU_8SMuFAC8nWStv6Y8wfrBNfiK
 const STEP = option("--step") ?? "verify";
 const PORT = Number(option("--port") ?? 9223);
 
-type Step = "code" | "sidebar" | "dialog" | "report" | "manifest" | "create" | "push" | "verify";
+type Step = "code" | "sidebar" | "dialog" | "report" | "editor" | "put" | "manifest" | "create" | "push" | "verify";
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled case: ${String(value)}`);
@@ -55,6 +57,8 @@ function parseStep(raw: string): Step {
     raw === "sidebar" ||
     raw === "dialog" ||
     raw === "report" ||
+    raw === "editor" ||
+    raw === "put" ||
     raw === "manifest" ||
     raw === "create" ||
     raw === "push" ||
@@ -62,7 +66,7 @@ function parseStep(raw: string): Step {
   ) {
     return raw;
   }
-  throw new Error(`unknown --step ${raw} (code | sidebar | dialog | report | manifest | create | push | verify)`);
+  throw new Error(`unknown --step ${raw} (code | sidebar | dialog | report | editor | put | manifest | create | push | verify)`);
 }
 
 async function ev(client: CdpClient, expression: string): Promise<string> {
@@ -361,8 +365,29 @@ async function main(): Promise<void> {
       if (await setActiveModel(client, readFileSync(`${DIST}/Report.html`, "utf-8"))) await save(client);
       break;
     }
+    case "editor": {
+      if (!(await createFile(client, { name: "EditorShell.html", kind: "html" })) || !(await selectFile(client, "EditorShell.html"))) {
+        process.exitCode = 1;
+        break;
+      }
+      if (await setActiveModel(client, readFileSync(`${DIST}/EditorShell.html`, "utf-8"))) await save(client);
+      break;
+    }
+    case "put": {
+      const name = option("--file");
+      const from = option("--from");
+      if (name === undefined || from === undefined) { console.error("--step put needs --file <Name> --from <path>"); process.exitCode = 1; break; }
+      if (!(await createFile(client, { name, kind: name.endsWith(".gs") ? "script" : "html" })) || !(await selectFile(client, name))) { process.exitCode = 1; break; }
+      if (await setActiveModel(client, readFileSync(from, "utf-8"))) await save(client);
+      break;
+    }
     case "manifest": {
-      if (!(await selectFile(client, "appsscript.json"))) { process.exitCode = 1; break; }
+      // A tab opened before "Show appsscript.json" was ticked lists no manifest until it reloads.
+      if (!(await selectFile(client, "appsscript.json"))) {
+        await client.Page.reload({});
+        await until({ client, budgetMs: 30_000, label: "the editor to come back", expression: `String(!!window.monaco && [...document.querySelectorAll('div,li,span')].some(n => (n.innerText || '').trim() === 'appsscript.json'))` });
+        if (!(await selectFile(client, "appsscript.json"))) { process.exitCode = 1; break; }
+      }
       const manifest = readFileSync(`${DIST}/appsscript.json`, "utf-8");
       if (await setActiveModel(client, manifest)) await save(client);
       break;

@@ -48,7 +48,9 @@ export const initialEditorState: InitialEditorState = (options) => {
     measuredLayouts: new Map(),
     pointer: null,
     peers: [],
-    ui: {
+    collaboration: options.collaboration,
+    pendingAgentReverts: [],
+    chrome: {
       propertiesTab: "arrange",
       propertiesPanelOpen: true,
       filmstripOpen: true,
@@ -62,6 +64,7 @@ export const initialEditorState: InitialEditorState = (options) => {
       showResolvedThreads: false,
       aspectRatioLocked: false,
       transitionPreview: null,
+      recentColours: options.recentColours,
     },
     notices: [],
     presentation: null,

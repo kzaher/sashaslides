@@ -14,35 +14,15 @@
 //    order and the shown order agree again.
 
 import * as Y from "yjs";
-import type {
-  CommandAuthor,
-  DocumentCommand,
-  ElementId,
-  ElementPatch,
-  RandomSource,
-  SlideId,
-  StoredElementKind,
-  TableCellPatch,
-  TableColumnId,
-  TableRowId,
-  TransitionApproval,
-  TransitionScriptSaveApproval,
-  TransitionScriptDraft,
-} from "../contracts/index.ts";
-import {
-  assertNever,
-  ELEMENT_KEY,
-  LAYOUT_KEY,
-  META_KEY,
-  MINIMUM_FRAME_SIZE,
-  normaliseRotation,
-  scriptFingerprint,
-  SLIDE_KEY,
-  TABLE_CELL_KEY,
-  tableCellKey,
-  transitionAuthorOf,
-  TRANSITION_SCRIPT_KEY,
-} from "../contracts/index.ts";
+import type { CommandAuthor, DocumentCommand, ElementPatch, TableCellPatch, TransitionScriptSaveApproval, TransitionScriptDraft } from "../contracts/commands.ts";
+import type { TransitionApproval } from "../contracts/document.ts";
+import type { ElementId, RandomSource, SlideId, TableColumnId, TableRowId } from "../contracts/ids.ts";
+import type { StoredElementKind } from "../contracts/yjs-schema.ts";
+import { assertNever } from "../contracts/assert-never.ts";
+import { transitionAuthorOf } from "../contracts/commands.ts";
+import { scriptFingerprint } from "../contracts/document.ts";
+import { MINIMUM_FRAME_SIZE, normaliseRotation } from "../contracts/geometry.ts";
+import { ELEMENT_KEY, LAYOUT_KEY, META_KEY, SLIDE_KEY, TABLE_CELL_KEY, tableCellKey, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
 import { childArray, childMap, elementsMapOf, slideMapOf, textOf, type DocumentRoots } from "./document-paths.ts";
 import { orderedChildren } from "./document-projection.ts";
 import { createCellMap, setTextBody, writeElementList, writeElementTrees, writeLayout, writeSlide, writeThemePatch } from "./document-writer.ts";

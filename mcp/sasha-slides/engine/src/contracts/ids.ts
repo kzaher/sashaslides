@@ -144,9 +144,41 @@ export function parseAssetId(candidate: string): AssetId | null {
 
 export const ASSET_ID_PATTERN = /^[0-9a-f]{64}$/;
 
+/** Deck ids are minted by the deck server as `dk_` + 22 random base-62 characters. */
+export function parseDeckId(candidate: string): DeckId | null {
+  // The brand is only a compile-time marker; the pattern check is the runtime invariant.
+  return isObjectId(candidate) ? (candidate as DeckId) : null;
+}
+
 export function parsePersonId(candidate: string): PersonId | null {
   // Person ids come from the account service; the same object-id shape keeps them printable.
   return isObjectId(candidate) ? (candidate as PersonId) : null;
+}
+
+export function parseLayoutId(candidate: string): LayoutId | null {
+  // The brand is only a compile-time marker; the pattern check is the runtime invariant.
+  return isObjectId(candidate) ? (candidate as LayoutId) : null;
+}
+
+export function parseThreadId(candidate: string): ThreadId | null {
+  // The brand is only a compile-time marker; the pattern check is the runtime invariant.
+  return isObjectId(candidate) ? (candidate as ThreadId) : null;
+}
+
+export function parseMessageId(candidate: string): MessageId | null {
+  // The brand is only a compile-time marker; the pattern check is the runtime invariant.
+  return isObjectId(candidate) ? (candidate as MessageId) : null;
+}
+
+/** A deck address's `?reviewTransitionScript=` value, an agent's tool input, a pasted script. */
+export function parseTransitionScriptId(candidate: string): TransitionScriptId | null {
+  // The brand is only a compile-time marker; the pattern check is the runtime invariant.
+  return isObjectId(candidate) ? (candidate as TransitionScriptId) : null;
+}
+
+export function parseListId(candidate: string): ListId | null {
+  // The brand is only a compile-time marker; the pattern check is the runtime invariant.
+  return isObjectId(candidate) ? (candidate as ListId) : null;
 }
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";

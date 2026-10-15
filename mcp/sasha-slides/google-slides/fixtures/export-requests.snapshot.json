@@ -1,0 +1,1394 @@
+{
+ "slide background and skip": [
+  {
+   "createSlide": {
+    "objectId": "sl_first0001",
+    "insertionIndex": 0,
+    "slideLayoutReference": {
+     "predefinedLayout": "BLANK"
+    }
+   }
+  },
+  {
+   "updatePageProperties": {
+    "objectId": "sl_first0001",
+    "pageProperties": {
+     "pageBackgroundFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 0.2,
+         "green": 0.4,
+         "blue": 0.6
+        }
+       },
+       "alpha": 1
+      }
+     }
+    },
+    "fields": "pageBackgroundFill.solidFill"
+   }
+  },
+  {
+   "updateSlideProperties": {
+    "objectId": "sl_first0001",
+    "slideProperties": {
+     "isSkipped": true
+    },
+    "fields": "isSkipped"
+   }
+  }
+ ],
+ "rectangle with uniform border": [
+  {
+   "createShape": {
+    "objectId": "el_shape0001",
+    "shapeType": "RECTANGLE",
+    "elementProperties": {
+     "pageObjectId": "sl_shapes0001",
+     "size": {
+      "width": {
+       "magnitude": 2143125,
+       "unit": "EMU"
+      },
+      "height": {
+       "magnitude": 1143000,
+       "unit": "EMU"
+      }
+     },
+     "transform": {
+      "scaleX": 1,
+      "scaleY": 1,
+      "shearX": 0,
+      "shearY": 0,
+      "translateX": 714375,
+      "translateY": 857250,
+      "unit": "EMU"
+     }
+    }
+   }
+  },
+  {
+   "updateShapeProperties": {
+    "objectId": "el_shape0001",
+    "shapeProperties": {
+     "shapeBackgroundFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 0.2627,
+         "green": 0.2196,
+         "blue": 0.7922
+        }
+       },
+       "alpha": 0.5
+      }
+     },
+     "outline": {
+      "outlineFill": {
+       "solidFill": {
+        "color": {
+         "rgbColor": {
+          "red": 1,
+          "green": 0,
+          "blue": 0
+         }
+        },
+        "alpha": 1
+       }
+      },
+      "weight": {
+       "magnitude": 28575,
+       "unit": "EMU"
+      },
+      "dashStyle": "DASH"
+     },
+     "contentAlignment": "TOP"
+    },
+    "fields": "shapeBackgroundFill,outline,contentAlignment"
+   }
+  }
+ ],
+ "text with list and automatic number": [
+  {
+   "insertText": {
+    "objectId": "el_text00001",
+    "text": "Title 1\nOne\n\tTwo",
+    "insertionIndex": 0
+   }
+  },
+  {
+   "createParagraphBullets": {
+    "objectId": "el_text00001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 8,
+     "endIndex": 16
+    },
+    "bulletPreset": "BULLET_DISC_CIRCLE_SQUARE"
+   }
+  },
+  {
+   "updateParagraphStyle": {
+    "objectId": "el_text00001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 0,
+     "endIndex": 8
+    },
+    "style": {
+     "alignment": "CENTER",
+     "lineSpacing": 115,
+     "spaceAbove": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "spaceBelow": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "direction": "LEFT_TO_RIGHT",
+     "indentStart": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "indentFirstLine": {
+      "magnitude": 0,
+      "unit": "PT"
+     }
+    },
+    "fields": "alignment,lineSpacing,spaceAbove,spaceBelow,indentStart,indentFirstLine,direction"
+   }
+  },
+  {
+   "updateTextStyle": {
+    "objectId": "el_text00001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 0,
+     "endIndex": 6
+    },
+    "style": {
+     "weightedFontFamily": {
+      "fontFamily": "Arial",
+      "weight": 700
+     },
+     "fontSize": {
+      "magnitude": 14,
+      "unit": "PT"
+     },
+     "bold": true,
+     "italic": false,
+     "underline": false,
+     "strikethrough": false,
+     "smallCaps": false,
+     "baselineOffset": "NONE",
+     "foregroundColor": {
+      "opaqueColor": {
+       "rgbColor": {
+        "red": 0,
+        "green": 0,
+        "blue": 0
+       }
+      }
+     },
+     "backgroundColor": {}
+    },
+    "fields": "weightedFontFamily,fontSize,bold,italic,underline,strikethrough,smallCaps,baselineOffset,foregroundColor,backgroundColor,link"
+   }
+  },
+  {
+   "updateTextStyle": {
+    "objectId": "el_text00001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 6,
+     "endIndex": 7
+    },
+    "style": {
+     "weightedFontFamily": {
+      "fontFamily": "Arial",
+      "weight": 400
+     },
+     "fontSize": {
+      "magnitude": 14,
+      "unit": "PT"
+     },
+     "bold": false,
+     "italic": false,
+     "underline": false,
+     "strikethrough": false,
+     "smallCaps": false,
+     "baselineOffset": "NONE",
+     "foregroundColor": {
+      "opaqueColor": {
+       "rgbColor": {
+        "red": 0,
+        "green": 0,
+        "blue": 0
+       }
+      }
+     },
+     "backgroundColor": {}
+    },
+    "fields": "weightedFontFamily,fontSize,bold,italic,underline,strikethrough,smallCaps,baselineOffset,foregroundColor,backgroundColor,link"
+   }
+  },
+  {
+   "updateParagraphStyle": {
+    "objectId": "el_text00001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 8,
+     "endIndex": 12
+    },
+    "style": {
+     "alignment": "START",
+     "lineSpacing": 115,
+     "spaceAbove": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "spaceBelow": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "direction": "LEFT_TO_RIGHT"
+    },
+    "fields": "alignment,lineSpacing,spaceAbove,spaceBelow,direction"
+   }
+  },
+  {
+   "updateTextStyle": {
+    "objectId": "el_text00001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 8,
+     "endIndex": 11
+    },
+    "style": {
+     "weightedFontFamily": {
+      "fontFamily": "Arial",
+      "weight": 400
+     },
+     "fontSize": {
+      "magnitude": 14,
+      "unit": "PT"
+     },
+     "bold": false,
+     "italic": false,
+     "underline": false,
+     "strikethrough": false,
+     "smallCaps": false,
+     "baselineOffset": "NONE",
+     "foregroundColor": {
+      "opaqueColor": {
+       "rgbColor": {
+        "red": 0,
+        "green": 0,
+        "blue": 0
+       }
+      }
+     },
+     "backgroundColor": {},
+     "link": {
+      "url": "https://example.com"
+     }
+    },
+    "fields": "weightedFontFamily,fontSize,bold,italic,underline,strikethrough,smallCaps,baselineOffset,foregroundColor,backgroundColor,link"
+   }
+  },
+  {
+   "updateParagraphStyle": {
+    "objectId": "el_text00001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 12,
+     "endIndex": 15
+    },
+    "style": {
+     "alignment": "START",
+     "lineSpacing": 115,
+     "spaceAbove": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "spaceBelow": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "direction": "LEFT_TO_RIGHT"
+    },
+    "fields": "alignment,lineSpacing,spaceAbove,spaceBelow,direction"
+   }
+  },
+  {
+   "updateTextStyle": {
+    "objectId": "el_text00001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 12,
+     "endIndex": 15
+    },
+    "style": {
+     "weightedFontFamily": {
+      "fontFamily": "Arial",
+      "weight": 400
+     },
+     "fontSize": {
+      "magnitude": 14,
+      "unit": "PT"
+     },
+     "bold": false,
+     "italic": true,
+     "underline": false,
+     "strikethrough": false,
+     "smallCaps": false,
+     "baselineOffset": "NONE",
+     "foregroundColor": {
+      "opaqueColor": {
+       "rgbColor": {
+        "red": 0,
+        "green": 0,
+        "blue": 0
+       }
+      }
+     },
+     "backgroundColor": {}
+    },
+    "fields": "weightedFontFamily,fontSize,bold,italic,underline,strikethrough,smallCaps,baselineOffset,foregroundColor,backgroundColor,link"
+   }
+  }
+ ],
+ "image": [
+  {
+   "createImage": {
+    "objectId": "el_image0001",
+    "url": "https://sashaslides.example/deck-api/export-assets/TOKEN/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "elementProperties": {
+     "pageObjectId": "sl_image0001",
+     "size": {
+      "width": {
+       "magnitude": 2143125,
+       "unit": "EMU"
+      },
+      "height": {
+       "magnitude": 1143000,
+       "unit": "EMU"
+      }
+     },
+     "transform": {
+      "scaleX": 1,
+      "scaleY": 1,
+      "shearX": 0,
+      "shearY": 0,
+      "translateX": 714375,
+      "translateY": 857250,
+      "unit": "EMU"
+     }
+    }
+   }
+  },
+  {
+   "updateImageProperties": {
+    "objectId": "el_image0001",
+    "imageProperties": {
+     "outline": {
+      "outlineFill": {
+       "solidFill": {
+        "color": {
+         "rgbColor": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+         }
+        },
+        "alpha": 1
+       }
+      },
+      "weight": {
+       "magnitude": 14288,
+       "unit": "EMU"
+      },
+      "dashStyle": "SOLID"
+     }
+    },
+    "fields": "outline"
+   }
+  }
+ ],
+ "line": [
+  {
+   "createLine": {
+    "objectId": "el_line00001",
+    "lineCategory": "BENT",
+    "elementProperties": {
+     "pageObjectId": "sl_line00001",
+     "size": {
+      "width": {
+       "magnitude": 1428750,
+       "unit": "EMU"
+      },
+      "height": {
+       "magnitude": 1428750,
+       "unit": "EMU"
+      }
+     },
+     "transform": {
+      "scaleX": -1,
+      "scaleY": 1,
+      "shearX": 0,
+      "shearY": 0,
+      "translateX": 2857500,
+      "translateY": 714375,
+      "unit": "EMU"
+     }
+    }
+   }
+  },
+  {
+   "updateLineProperties": {
+    "objectId": "el_line00001",
+    "lineProperties": {
+     "lineFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 0.0667,
+         "green": 0.1333,
+         "blue": 0.2
+        }
+       },
+       "alpha": 1
+      }
+     },
+     "weight": {
+      "magnitude": 28575,
+      "unit": "EMU"
+     },
+     "dashStyle": "DASH_DOT",
+     "startArrow": "STEALTH_ARROW",
+     "endArrow": "FILL_SQUARE"
+    },
+    "fields": "lineFill,weight,dashStyle,startArrow,endArrow"
+   }
+  }
+ ],
+ "table": [
+  {
+   "createTable": {
+    "objectId": "el_table0001",
+    "rows": 2,
+    "columns": 2,
+    "elementProperties": {
+     "pageObjectId": "sl_table0001",
+     "size": {
+      "width": {
+       "magnitude": 2143125,
+       "unit": "EMU"
+      },
+      "height": {
+       "magnitude": 1143000,
+       "unit": "EMU"
+      }
+     },
+     "transform": {
+      "scaleX": 1,
+      "scaleY": 1,
+      "shearX": 0,
+      "shearY": 0,
+      "translateX": 714375,
+      "translateY": 857250,
+      "unit": "EMU"
+     }
+    }
+   }
+  },
+  {
+   "updateTableColumnProperties": {
+    "objectId": "el_table0001",
+    "columnIndices": [
+     0
+    ],
+    "tableColumnProperties": {
+     "columnWidth": {
+      "magnitude": 714375,
+      "unit": "EMU"
+     }
+    },
+    "fields": "columnWidth"
+   }
+  },
+  {
+   "updateTableColumnProperties": {
+    "objectId": "el_table0001",
+    "columnIndices": [
+     1
+    ],
+    "tableColumnProperties": {
+     "columnWidth": {
+      "magnitude": 857250,
+      "unit": "EMU"
+     }
+    },
+    "fields": "columnWidth"
+   }
+  },
+  {
+   "updateTableRowProperties": {
+    "objectId": "el_table0001",
+    "rowIndices": [
+     0
+    ],
+    "tableRowProperties": {
+     "minRowHeight": {
+      "magnitude": 285750,
+      "unit": "EMU"
+     }
+    },
+    "fields": "minRowHeight"
+   }
+  },
+  {
+   "updateTableRowProperties": {
+    "objectId": "el_table0001",
+    "rowIndices": [
+     1
+    ],
+    "tableRowProperties": {
+     "minRowHeight": {
+      "magnitude": 285750,
+      "unit": "EMU"
+     }
+    },
+    "fields": "minRowHeight"
+   }
+  },
+  {
+   "mergeTableCells": {
+    "objectId": "el_table0001",
+    "tableRange": {
+     "location": {
+      "rowIndex": 0,
+      "columnIndex": 0
+     },
+     "rowSpan": 1,
+     "columnSpan": 2
+    }
+   }
+  },
+  {
+   "insertText": {
+    "objectId": "el_table0001",
+    "text": "Head",
+    "insertionIndex": 0,
+    "cellLocation": {
+     "rowIndex": 0,
+     "columnIndex": 0
+    }
+   }
+  },
+  {
+   "updateParagraphStyle": {
+    "objectId": "el_table0001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 0,
+     "endIndex": 4
+    },
+    "style": {
+     "alignment": "START",
+     "lineSpacing": 115,
+     "spaceAbove": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "spaceBelow": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "direction": "LEFT_TO_RIGHT",
+     "indentStart": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "indentFirstLine": {
+      "magnitude": 0,
+      "unit": "PT"
+     }
+    },
+    "fields": "alignment,lineSpacing,spaceAbove,spaceBelow,indentStart,indentFirstLine,direction",
+    "cellLocation": {
+     "rowIndex": 0,
+     "columnIndex": 0
+    }
+   }
+  },
+  {
+   "updateTextStyle": {
+    "objectId": "el_table0001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 0,
+     "endIndex": 4
+    },
+    "style": {
+     "weightedFontFamily": {
+      "fontFamily": "Arial",
+      "weight": 400
+     },
+     "fontSize": {
+      "magnitude": 14,
+      "unit": "PT"
+     },
+     "bold": false,
+     "italic": false,
+     "underline": false,
+     "strikethrough": false,
+     "smallCaps": false,
+     "baselineOffset": "NONE",
+     "foregroundColor": {
+      "opaqueColor": {
+       "rgbColor": {
+        "red": 0,
+        "green": 0,
+        "blue": 0
+       }
+      }
+     },
+     "backgroundColor": {}
+    },
+    "fields": "weightedFontFamily,fontSize,bold,italic,underline,strikethrough,smallCaps,baselineOffset,foregroundColor,backgroundColor,link",
+    "cellLocation": {
+     "rowIndex": 0,
+     "columnIndex": 0
+    }
+   }
+  },
+  {
+   "updateTableCellProperties": {
+    "objectId": "el_table0001",
+    "tableRange": {
+     "location": {
+      "rowIndex": 0,
+      "columnIndex": 0
+     },
+     "rowSpan": 1,
+     "columnSpan": 2
+    },
+    "tableCellProperties": {
+     "tableCellBackgroundFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 0.9333,
+         "green": 0.9333,
+         "blue": 0.9333
+        }
+       },
+       "alpha": 1
+      }
+     },
+     "contentAlignment": "TOP"
+    },
+    "fields": "tableCellBackgroundFill,contentAlignment"
+   }
+  },
+  {
+   "updateTableBorderProperties": {
+    "objectId": "el_table0001",
+    "tableRange": {
+     "location": {
+      "rowIndex": 0,
+      "columnIndex": 0
+     },
+     "rowSpan": 1,
+     "columnSpan": 2
+    },
+    "borderPosition": "TOP",
+    "tableBorderProperties": {
+     "tableBorderFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 1,
+         "green": 0,
+         "blue": 0
+        }
+       },
+       "alpha": 1
+      }
+     },
+     "weight": {
+      "magnitude": 14288,
+      "unit": "EMU"
+     },
+     "dashStyle": "SOLID"
+    },
+    "fields": "tableBorderFill,weight,dashStyle"
+   }
+  },
+  {
+   "updateTableBorderProperties": {
+    "objectId": "el_table0001",
+    "tableRange": {
+     "location": {
+      "rowIndex": 0,
+      "columnIndex": 0
+     },
+     "rowSpan": 1,
+     "columnSpan": 2
+    },
+    "borderPosition": "BOTTOM",
+    "tableBorderProperties": {
+     "tableBorderFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 0,
+         "green": 0,
+         "blue": 0
+        }
+       },
+       "alpha": 0
+      }
+     },
+     "weight": {
+      "magnitude": 12700,
+      "unit": "EMU"
+     },
+     "dashStyle": "SOLID"
+    },
+    "fields": "tableBorderFill,weight,dashStyle"
+   }
+  },
+  {
+   "updateTableBorderProperties": {
+    "objectId": "el_table0001",
+    "tableRange": {
+     "location": {
+      "rowIndex": 0,
+      "columnIndex": 0
+     },
+     "rowSpan": 1,
+     "columnSpan": 2
+    },
+    "borderPosition": "LEFT",
+    "tableBorderProperties": {
+     "tableBorderFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 1,
+         "green": 0,
+         "blue": 0
+        }
+       },
+       "alpha": 1
+      }
+     },
+     "weight": {
+      "magnitude": 14288,
+      "unit": "EMU"
+     },
+     "dashStyle": "SOLID"
+    },
+    "fields": "tableBorderFill,weight,dashStyle"
+   }
+  },
+  {
+   "updateTableBorderProperties": {
+    "objectId": "el_table0001",
+    "tableRange": {
+     "location": {
+      "rowIndex": 0,
+      "columnIndex": 0
+     },
+     "rowSpan": 1,
+     "columnSpan": 2
+    },
+    "borderPosition": "RIGHT",
+    "tableBorderProperties": {
+     "tableBorderFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 0,
+         "green": 0,
+         "blue": 0
+        }
+       },
+       "alpha": 0
+      }
+     },
+     "weight": {
+      "magnitude": 12700,
+      "unit": "EMU"
+     },
+     "dashStyle": "SOLID"
+    },
+    "fields": "tableBorderFill,weight,dashStyle"
+   }
+  },
+  {
+   "insertText": {
+    "objectId": "el_table0001",
+    "text": "A",
+    "insertionIndex": 0,
+    "cellLocation": {
+     "rowIndex": 1,
+     "columnIndex": 0
+    }
+   }
+  },
+  {
+   "updateParagraphStyle": {
+    "objectId": "el_table0001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 0,
+     "endIndex": 1
+    },
+    "style": {
+     "alignment": "START",
+     "lineSpacing": 115,
+     "spaceAbove": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "spaceBelow": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "direction": "LEFT_TO_RIGHT",
+     "indentStart": {
+      "magnitude": 0,
+      "unit": "PT"
+     },
+     "indentFirstLine": {
+      "magnitude": 0,
+      "unit": "PT"
+     }
+    },
+    "fields": "alignment,lineSpacing,spaceAbove,spaceBelow,indentStart,indentFirstLine,direction",
+    "cellLocation": {
+     "rowIndex": 1,
+     "columnIndex": 0
+    }
+   }
+  },
+  {
+   "updateTextStyle": {
+    "objectId": "el_table0001",
+    "textRange": {
+     "type": "FIXED_RANGE",
+     "startIndex": 0,
+     "endIndex": 1
+    },
+    "style": {
+     "weightedFontFamily": {
+      "fontFamily": "Arial",
+      "weight": 400
+     },
+     "fontSize": {
+      "magnitude": 14,
+      "unit": "PT"
+     },
+     "bold": false,
+     "italic": false,
+     "underline": false,
+     "strikethrough": false,
+     "smallCaps": false,
+     "baselineOffset": "NONE",
+     "foregroundColor": {
+      "opaqueColor": {
+       "rgbColor": {
+        "red": 0,
+        "green": 0,
+        "blue": 0
+       }
+      }
+     },
+     "backgroundColor": {}
+    },
+    "fields": "weightedFontFamily,fontSize,bold,italic,underline,strikethrough,smallCaps,baselineOffset,foregroundColor,backgroundColor,link",
+    "cellLocation": {
+     "rowIndex": 1,
+     "columnIndex": 0
+    }
+   }
+  },
+  {
+   "updateTableCellProperties": {
+    "objectId": "el_table0001",
+    "tableRange": {
+     "location": {
+      "rowIndex": 1,
+      "columnIndex": 0
+     },
+     "rowSpan": 1,
+     "columnSpan": 1
+    },
+    "tableCellProperties": {
+     "tableCellBackgroundFill": {
+      "propertyState": "NOT_RENDERED"
+     },
+     "contentAlignment": "TOP"
+    },
+    "fields": "tableCellBackgroundFill,contentAlignment"
+   }
+  },
+  {
+   "updateTableBorderProperties": {
+    "objectId": "el_table0001",
+    "tableRange": {
+     "location": {
+      "rowIndex": 1,
+      "columnIndex": 0
+     },
+     "rowSpan": 1,
+     "columnSpan": 1
+    },
+    "borderPosition": "TOP",
+    "tableBorderProperties": {
+     "tableBorderFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 0,
+         "green": 0,
+         "blue": 0
+        }
+       },
+       "alpha": 0
+      }
+     },
+     "weight": {
+      "magnitude": 12700,
+      "unit": "EMU"
+     },
+     "dashStyle": "SOLID"
+    },
+    "fields": "tableBorderFill,weight,dashStyle"
+   }
+  },
+  {
+   "updateTableBorderProperties": {
+    "objectId": "el_table0001",
+    "tableRange": {
+     "location": {
+      "rowIndex": 1,
+      "columnIndex": 0
+     },
+     "rowSpan": 1,
+     "columnSpan": 1
+    },
+    "borderPosition": "BOTTOM",
+    "tableBorderProperties": {
+     "tableBorderFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 0,
+         "green": 0,
+         "blue": 0
+        }
+       },
+       "alpha": 0
+      }
+     },
+     "weight": {
+      "magnitude": 12700,
+      "unit": "EMU"
+     },
+     "dashStyle": "SOLID"
+    },
+    "fields": "tableBorderFill,weight,dashStyle"
+   }
+  },
+  {
+   "updateTableBorderProperties": {
+    "objectId": "el_table0001",
+    "tableRange": {
+     "location": {
+      "rowIndex": 1,
+      "columnIndex": 0
+     },
+     "rowSpan": 1,
+     "columnSpan": 1
+    },
+    "borderPosition": "LEFT",
+    "tableBorderProperties": {
+     "tableBorderFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 0,
+         "green": 0,
+         "blue": 0
+        }
+       },
+       "alpha": 0
+      }
+     },
+     "weight": {
+      "magnitude": 12700,
+      "unit": "EMU"
+     },
+     "dashStyle": "SOLID"
+    },
+    "fields": "tableBorderFill,weight,dashStyle"
+   }
+  },
+  {
+   "updateTableBorderProperties": {
+    "objectId": "el_table0001",
+    "tableRange": {
+     "location": {
+      "rowIndex": 1,
+      "columnIndex": 0
+     },
+     "rowSpan": 1,
+     "columnSpan": 1
+    },
+    "borderPosition": "RIGHT",
+    "tableBorderProperties": {
+     "tableBorderFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 0,
+         "green": 0,
+         "blue": 0
+        }
+       },
+       "alpha": 0
+      }
+     },
+     "weight": {
+      "magnitude": 12700,
+      "unit": "EMU"
+     },
+     "dashStyle": "SOLID"
+    },
+    "fields": "tableBorderFill,weight,dashStyle"
+   }
+  }
+ ],
+ "rotated group": [
+  {
+   "createShape": {
+    "objectId": "el_child0001",
+    "shapeType": "RECTANGLE",
+    "elementProperties": {
+     "pageObjectId": "sl_group0001",
+     "size": {
+      "width": {
+       "magnitude": 714375,
+       "unit": "EMU"
+      },
+      "height": {
+       "magnitude": 357188,
+       "unit": "EMU"
+      }
+     },
+     "transform": {
+      "scaleX": 1,
+      "scaleY": 1,
+      "shearX": 0,
+      "shearY": 0,
+      "translateX": 753940,
+      "translateY": 933473,
+      "unit": "EMU"
+     }
+    }
+   }
+  },
+  {
+   "updateShapeProperties": {
+    "objectId": "el_child0001",
+    "shapeProperties": {
+     "shapeBackgroundFill": {
+      "propertyState": "NOT_RENDERED"
+     },
+     "outline": {
+      "propertyState": "NOT_RENDERED"
+     },
+     "contentAlignment": "TOP"
+    },
+    "fields": "shapeBackgroundFill,outline,contentAlignment"
+   }
+  },
+  {
+   "createShape": {
+    "objectId": "el_child0002",
+    "shapeType": "ELLIPSE",
+    "elementProperties": {
+     "pageObjectId": "sl_group0001",
+     "size": {
+      "width": {
+       "magnitude": 428625,
+       "unit": "EMU"
+      },
+      "height": {
+       "magnitude": 428625,
+       "unit": "EMU"
+      }
+     },
+     "transform": {
+      "scaleX": 1,
+      "scaleY": 1,
+      "shearX": 0,
+      "shearY": 0,
+      "translateX": 1718942,
+      "translateY": 464344,
+      "unit": "EMU"
+     }
+    }
+   }
+  },
+  {
+   "updateShapeProperties": {
+    "objectId": "el_child0002",
+    "shapeProperties": {
+     "shapeBackgroundFill": {
+      "propertyState": "NOT_RENDERED"
+     },
+     "outline": {
+      "propertyState": "NOT_RENDERED"
+     },
+     "contentAlignment": "TOP"
+    },
+    "fields": "shapeBackgroundFill,outline,contentAlignment"
+   }
+  },
+  {
+   "groupObjects": {
+    "groupObjectId": "el_group0001",
+    "childrenObjectIds": [
+     "el_child0001",
+     "el_child0002"
+    ]
+   }
+  },
+  {
+   "updatePageElementTransform": {
+    "objectId": "el_group0001",
+    "applyMode": "RELATIVE",
+    "transform": {
+     "scaleX": 0.866025,
+     "scaleY": 0.866025,
+     "shearX": -0.5,
+     "shearY": 0.5,
+     "translateX": 665331,
+     "translateY": -625673,
+     "unit": "EMU"
+    }
+   }
+  }
+ ],
+ "per-side border composition": [
+  {
+   "createShape": {
+    "objectId": "cmpaeoet8_rect1",
+    "shapeType": "RECTANGLE",
+    "elementProperties": {
+     "pageObjectId": "sl_compose01",
+     "size": {
+      "width": {
+       "magnitude": 2143125,
+       "unit": "EMU"
+      },
+      "height": {
+       "magnitude": 1143000,
+       "unit": "EMU"
+      }
+     },
+     "transform": {
+      "scaleX": 1,
+      "scaleY": 1,
+      "translateX": 714375,
+      "translateY": 857250,
+      "unit": "EMU"
+     }
+    }
+   }
+  },
+  {
+   "updateShapeProperties": {
+    "objectId": "cmpaeoet8_rect1",
+    "shapeProperties": {
+     "shapeBackgroundFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 1,
+         "green": 1,
+         "blue": 1
+        }
+       },
+       "alpha": 1
+      }
+     },
+     "outline": {
+      "propertyState": "NOT_RENDERED"
+     }
+    },
+    "fields": "shapeBackgroundFill.solidFill.color,shapeBackgroundFill.solidFill.alpha,outline.propertyState"
+   }
+  },
+  {
+   "createLine": {
+    "objectId": "cmpaeoet8_edgetop2",
+    "lineCategory": "STRAIGHT",
+    "elementProperties": {
+     "pageObjectId": "sl_compose01",
+     "size": {
+      "width": {
+       "magnitude": 2143125,
+       "unit": "EMU"
+      },
+      "height": {
+       "magnitude": 1,
+       "unit": "EMU"
+      }
+     },
+     "transform": {
+      "scaleX": 1,
+      "scaleY": 1,
+      "translateX": 714375,
+      "translateY": 857250,
+      "unit": "EMU"
+     }
+    }
+   }
+  },
+  {
+   "updateLineProperties": {
+    "objectId": "cmpaeoet8_edgetop2",
+    "lineProperties": {
+     "lineFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 1,
+         "green": 0,
+         "blue": 0
+        }
+       },
+       "alpha": 1
+      }
+     },
+     "weight": {
+      "magnitude": 28575,
+      "unit": "EMU"
+     },
+     "dashStyle": "SOLID"
+    },
+    "fields": "lineFill.solidFill.color,weight,dashStyle"
+   }
+  },
+  {
+   "createLine": {
+    "objectId": "cmpaeoet8_edgebottom3",
+    "lineCategory": "STRAIGHT",
+    "elementProperties": {
+     "pageObjectId": "sl_compose01",
+     "size": {
+      "width": {
+       "magnitude": 2143125,
+       "unit": "EMU"
+      },
+      "height": {
+       "magnitude": 1,
+       "unit": "EMU"
+      }
+     },
+     "transform": {
+      "scaleX": 1,
+      "scaleY": 1,
+      "translateX": 714375,
+      "translateY": 2000250,
+      "unit": "EMU"
+     }
+    }
+   }
+  },
+  {
+   "updateLineProperties": {
+    "objectId": "cmpaeoet8_edgebottom3",
+    "lineProperties": {
+     "lineFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 0,
+         "green": 0,
+         "blue": 1
+        }
+       },
+       "alpha": 1
+      }
+     },
+     "weight": {
+      "magnitude": 14288,
+      "unit": "EMU"
+     },
+     "dashStyle": "DASH"
+    },
+    "fields": "lineFill.solidFill.color,weight,dashStyle"
+   }
+  }
+ ],
+ "per-corner radius composition": [
+  {
+   "createShape": {
+    "objectId": "cmpb8n7w5_rect1",
+    "shapeType": "ROUND_2_SAME_RECTANGLE",
+    "elementProperties": {
+     "pageObjectId": "sl_compose02",
+     "size": {
+      "width": {
+       "magnitude": 2143125,
+       "unit": "EMU"
+      },
+      "height": {
+       "magnitude": 1143000,
+       "unit": "EMU"
+      }
+     },
+     "transform": {
+      "scaleX": 1,
+      "scaleY": 1,
+      "translateX": 714375,
+      "translateY": 857250,
+      "unit": "EMU"
+     }
+    }
+   }
+  },
+  {
+   "updateShapeProperties": {
+    "objectId": "cmpb8n7w5_rect1",
+    "shapeProperties": {
+     "shapeBackgroundFill": {
+      "solidFill": {
+       "color": {
+        "rgbColor": {
+         "red": 1,
+         "green": 1,
+         "blue": 1
+        }
+       },
+       "alpha": 1
+      }
+     },
+     "outline": {
+      "propertyState": "NOT_RENDERED"
+     }
+    },
+    "fields": "shapeBackgroundFill.solidFill.color,shapeBackgroundFill.solidFill.alpha,outline.propertyState"
+   }
+  }
+ ]
+}

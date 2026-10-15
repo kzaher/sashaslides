@@ -194,7 +194,7 @@ function surviveChange(state: EditorState, previousDocument: DocumentSnapshot): 
   const enteredGroupId = enteredGroupSurvives(state, currentSlideId) ? state.enteredGroupId : null;
   const composition = state.textEditing.composition;
   const survivingComposition = composition !== null && textBodyOf(state.document, composition.target) === null ? null : composition;
-  const composer = state.ui.composer;
+  const composer = state.chrome.composer;
   const survivingComposer = composerSurvives(state, composer) ? composer : ({ kind: "closed" } as const);
   return {
     ...state,
@@ -203,7 +203,7 @@ function surviveChange(state: EditorState, previousDocument: DocumentSnapshot): 
     selection: surviveDocument(state),
     gesture: slideChanged ? { kind: "idle" } : state.gesture,
     textEditing: survivingComposition === composition ? state.textEditing : { ...state.textEditing, composition: survivingComposition },
-    ui: { ...state.ui, composer: survivingComposer, dialog: followScriptSave(state) },
+    chrome: { ...state.chrome, composer: survivingComposer, dialog: followScriptSave(state) },
   };
 }
 
@@ -223,7 +223,7 @@ function survivingSlideId(state: EditorState, previousDocument: DocumentSnapshot
   return neighbour?.id ?? null;
 }
 
-function composerSurvives(state: EditorState, composer: EditorState["ui"]["composer"]): boolean {
+function composerSurvives(state: EditorState, composer: EditorState["chrome"]["composer"]): boolean {
   switch (composer.kind) {
     case "closed":
       return true;
@@ -235,8 +235,8 @@ function composerSurvives(state: EditorState, composer: EditorState["ui"]["compo
 }
 
 /** The script dialog's base moves to the saved record once OUR text is what the document holds. */
-function followScriptSave(state: EditorState): EditorState["ui"]["dialog"] {
-  const dialog = state.ui.dialog;
+function followScriptSave(state: EditorState): EditorState["chrome"]["dialog"] {
+  const dialog = state.chrome.dialog;
   switch (dialog.kind) {
     case "transitionScriptEditor": {
       const record = state.document.transitionScripts.find((script) => script.id === dialog.editor.draft.id);
@@ -277,13 +277,13 @@ function rejectEnvelope(state: EditorState, commandId: QueuedEditCommandId, reje
     inFlightCommandIds: state.inFlightCommandIds.filter((inFlight) => inFlight !== commandId),
   };
   const survived: EditorState = { ...withoutEdit, selection: surviveDocument({ ...withoutEdit, selection }) };
-  const dialog = survived.ui.dialog;
+  const dialog = survived.chrome.dialog;
   switch (rejection.reason) {
     case "staleScript":
       switch (dialog.kind) {
         case "transitionScriptEditor":
           if (dialog.editor.draft.id === rejection.scriptId) {
-            return { ...survived, ui: { ...survived.ui, dialog: { ...dialog, editor: { ...dialog.editor, conflict: true } } } };
+            return { ...survived, chrome: { ...survived.chrome, dialog: { ...dialog, editor: { ...dialog.editor, conflict: true } } } };
           }
           break;
         case "none":

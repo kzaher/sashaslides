@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { of } from "rxjs";
 import type { AssetId, AssetStore, ChosenImageFile, EditorEvent, EditorState, LocalPresence, Modifiers, PeerPresence, PresenceChannel } from "../../contracts/index.ts";
+import { PRESENCE_PUBLISH_INTERVAL_MILLISECONDS } from "../../contracts/presence.ts";
 import { COLLABORATOR_CHANGED_MESSAGE } from "../editor/document-changes.ts";
 import { reduceEditor } from "../editor/reduce-editor.ts";
 import { editorStateFor, elementId, shape, slide, slideId, testDocument, textBody } from "../testing/document-fixtures.ts";
@@ -30,7 +31,7 @@ describe("discussion requests (acceptance 13)", () => {
     harness.dispatch({ kind: "textEditingRequested", target: { kind: "element", slideId: SLIDE, elementId: TEXT }, at: { index: 0 } });
     harness.dispatch({ kind: "textSelectionChanged", anchor: 0, focus: 5 });
     harness.dispatch({ kind: "keyPressed", chord: { key: "m", code: "KeyM", modifiers: PRIMARY_ALT } });
-    harness.dispatch({ kind: "commentDraftChanged", draft: "Typo here?" });
+    harness.dispatch({ kind: "commentDraftChanged", draft: "Typo here?", mentions: [] });
     harness.dispatch({ kind: "commentSubmitted" });
 
     assert.deepEqual(harness.state().pendingDiscussion, [], "the feedback reported it sent");
@@ -158,7 +159,7 @@ describe("undo against collaborators (acceptance 15)", () => {
 });
 
 describe("presence and asset availability", () => {
-  it("publishes this editor's presence at most once per 50 milliseconds, the last state included", () => {
+  it("publishes this editor's presence at most once per interval, the last state included", () => {
     const published: Readonly<{ at: number; presence: LocalPresence }>[] = [];
     const listener: { current: ((peers: readonly PeerPresence[]) => void) | null } = { current: null };
     let clock = (): number => 0;
@@ -175,7 +176,7 @@ describe("presence and asset availability", () => {
     harness.dispatch({ kind: "slideActivated", slideId: slideId("slide_two") });
     harness.dispatch({ kind: "slideActivated", slideId: SLIDE });
     harness.dispatch({ kind: "slideActivated", slideId: slideId("slide_two") });
-    harness.scheduler.advanceBy(49);
+    harness.scheduler.advanceBy(PRESENCE_PUBLISH_INTERVAL_MILLISECONDS - 1);
     assert.equal(published.length, before, "nothing more inside the window");
     harness.scheduler.advanceBy(1);
     assert.equal(published.length, before + 1);

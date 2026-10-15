@@ -31,7 +31,7 @@ import {
 } from "./bridge.ts";
 import { SEEN_LIMIT, parseSeen, seenStore, serializeSeen, type KeyValueStorage } from "./seen-store.ts";
 
-test("there are exactly twenty server functions, and they are the ones Code.gs declares", () => {
+test("there are exactly twenty-two server functions, and they are the ones Code.gs declares", () => {
   assert.deepEqual(SERVER_FUNCTION_NAMES, [
     // The picker's five.
     "sashaHello",
@@ -73,6 +73,10 @@ test("there are exactly twenty server functions, and they are the ones Code.gs d
     // Script can give, and this is how the client learns whether one has been deployed.
     "sashaReportWindowUrl",
     "sashaTakeReportTarget",
+    // The DECK EDITOR's two (SPEC.md 21.13): the shell's "Import again", and an export run with the
+    // add-on's own Slides authorization when the server holds no Google grant.
+    "sashaImportAgain",
+    "sashaRunExport",
   ]);
 });
 
@@ -260,6 +264,8 @@ function silentRunner(): AppsScriptRunner {
     sashaTakeReportTarget: () => undefined,
     sashaRenderPreviews: () => undefined,
     sashaTakePickerTarget: () => undefined,
+    sashaImportAgain: () => undefined,
+    sashaRunExport: () => undefined,
   };
   return runner;
 }
@@ -292,6 +298,8 @@ function failingRunner(error: unknown): AppsScriptRunner {
     sashaTakeReportTarget: () => onFailure?.(error),
     sashaRenderPreviews: () => undefined,
     sashaTakePickerTarget: () => undefined,
+    sashaImportAgain: () => undefined,
+    sashaRunExport: () => undefined,
   };
   return runner;
 }
@@ -323,6 +331,8 @@ function throwingRunner(): AppsScriptRunner {
     sashaTakeReportTarget: () => undefined,
     sashaRenderPreviews: () => undefined,
     sashaTakePickerTarget: () => undefined,
+    sashaImportAgain: () => undefined,
+    sashaRunExport: () => undefined,
   };
   return runner;
 }
@@ -357,6 +367,8 @@ function stubCall(replies: Readonly<Record<string, unknown>>) {
     sashaOpenDefectReport: answer("sashaOpenDefectReport"),
     sashaReportWindowUrl: answer("sashaReportWindowUrl"),
     sashaTakeReportTarget: answer("sashaTakeReportTarget"),
+    sashaImportAgain: answer("sashaImportAgain"),
+    sashaRunExport: answer("sashaRunExport"),
   };
   return appsScriptCall({ run: runner });
 }

@@ -43,7 +43,7 @@ import {
   slideBox,
   textShapeOf,
 } from "./document-lookup.ts";
-import { queueEnvelope } from "./editor-queue.ts";
+import { queueEnvelope, refuse } from "./editor-queue.ts";
 import { isElementSelected, selectedElements, selectElements, textSelectionOf } from "./editor-selection.ts";
 import {
   createLine,
@@ -69,6 +69,7 @@ import {
 } from "./frame-updates.ts";
 import { snapMove } from "./snapping.ts";
 import { applyCapturedFormat } from "./format-painter.ts";
+import { editingRefusal } from "./access.ts";
 import { openComposer, referenceBoxForComposer } from "./comments.ts";
 import { startTextEditing } from "./text-editing.ts";
 
@@ -85,7 +86,7 @@ type PointerDown = Extract<EditorEvent, { kind: "canvasPointerDown" }>;
 
 export function reducePointerDown(state: EditorState, event: PointerDown): EditorState {
   if (!gestureIsIdle(state.gesture)) return state;
-  const closed: EditorState = { ...state, ui: { ...state.ui, openMenu: null, contextMenu: null } };
+  const closed: EditorState = { ...state, chrome: { ...state.chrome, openMenu: null, contextMenu: null } };
   switch (event.button) {
     case "primary":
       break;
@@ -103,8 +104,11 @@ export function reducePointerDown(state: EditorState, event: PointerDown): Edito
       return pressWithSelect(closed, event);
     case "shape":
     case "line":
-    case "table":
+    case "table": {
+      const refusal = editingRefusal(closed);
+      if (refusal !== null) return refuse({ ...closed, tool: { kind: "select" } }, refusal);
       return { ...closed, gesture: { kind: "creating", tool, origin: point, current: point } };
+    }
     case "comment":
     case "formatPainter":
       return { ...closed, gesture: { kind: "pressed", origin: event.sample, target: event.target, modifiers: event.modifiers } };
@@ -309,6 +313,10 @@ function editingTextOf(state: EditorState, elementId: ElementId): boolean {
 
 function beginDrag(state: EditorState, pressed: Extract<Gesture, { kind: "pressed" }>, sample: PointerSample, modifiers: Modifiers): EditorState {
   const target = pressed.target;
+  // A drag that would change the document is refused up front for a viewer or commenter (access.ts),
+  // so nothing previews a move that could never be saved.
+  const refusal = dragEditsDocument({ target, tool: state.tool }) ? editingRefusal(state) : null;
+  if (refusal !== null) return refuse({ ...state, gesture: { kind: "idle" } }, refusal);
   switch (target.kind) {
     case "element":
       return beginElementDrag(state, pressed, target.elementPath, sample, modifiers);
@@ -340,6 +348,44 @@ function beginDrag(state: EditorState, pressed: Extract<Gesture, { kind: "presse
       return { ...state, gesture: { kind: "idle" } };
     default:
       return assertNever(target);
+  }
+}
+
+/** Whether dragging from this target with this tool would move, resize or reshape something. */
+function dragEditsDocument(options: Readonly<{ target: Extract<Gesture, { kind: "pressed" }>["target"]; tool: EditorState["tool"] }>): boolean {
+  const target = options.target;
+  switch (target.kind) {
+    case "element":
+      return toolDragsElements(options.tool);
+    case "resizeHandle":
+    case "rotationHandle":
+    case "lineEnd":
+    case "tableColumnBoundary":
+    case "tableRowBoundary":
+      return true;
+    case "outside":
+    case "slideBackground":
+    case "commentPin":
+      return false;
+    default:
+      return assertNever(target);
+  }
+}
+
+function toolDragsElements(tool: EditorState["tool"]): boolean {
+  switch (tool.kind) {
+    case "select":
+      return true;
+    case "comment":
+    case "formatPainter":
+    case "shape":
+    case "line":
+    case "table":
+    case "annotate":
+    case "pan":
+      return false;
+    default:
+      return assertNever(tool);
   }
 }
 
@@ -427,7 +473,7 @@ function updateResize(state: EditorState, gesture: Extract<Gesture, { kind: "res
   const selected = selectedElements(state);
   if (selected === null) return { ...state, gesture: { ...gesture, current: sample } };
   const only = selected.elements.length === 1 ? selected.elements[0] : undefined;
-  const resize = { handle: gesture.handle, pointer: sample.slidePoint, keepAspectRatio: modifiers.shift || state.ui.aspectRatioLocked, fromCentre: modifiers.alt };
+  const resize = { handle: gesture.handle, pointer: sample.slidePoint, keepAspectRatio: modifiers.shift || state.chrome.aspectRatioLocked, fromCentre: modifiers.alt };
   if (only !== undefined && resizesOwnFrame(only)) {
     const preview: FrameUpdate[] = [{ kind: "box", elementId: only.id, frame: resizeFrame({ frame: only.frame, ...resize }) }];
     return { ...state, gesture: { ...gesture, current: sample, preview } };
@@ -557,7 +603,7 @@ function clickWithSelect(state: EditorState, target: HitTarget, modifiers: Modif
       if (modifiers.shift) return state;
       return { ...selectElements(state, []), enteredGroupId: null };
     case "commentPin":
-      return { ...state, ui: { ...state.ui, focusedThreadId: target.threadId, commentsOpen: true } };
+      return { ...state, chrome: { ...state.chrome, focusedThreadId: target.threadId, commentsOpen: true } };
     case "resizeHandle":
     case "rotationHandle":
     case "lineEnd":
@@ -581,7 +627,7 @@ function clickWithComment(state: EditorState, target: HitTarget): EditorState {
     case "slideBackground":
       return openComposer(state, { slideId, elementId: null, textRange: null, region: null });
     case "commentPin":
-      return { ...state, ui: { ...state.ui, focusedThreadId: target.threadId, commentsOpen: true } };
+      return { ...state, chrome: { ...state.chrome, focusedThreadId: target.threadId, commentsOpen: true } };
     case "resizeHandle":
     case "rotationHandle":
     case "lineEnd":
@@ -794,8 +840,11 @@ function markingStartingAt(kind: Marking["kind"], at: Point, colour: string): Ma
 /** While drawing, a rectangle keeps its start corner in x/y and a signed size; the commit normalises. */
 function extendMarking(marking: Marking, at: Point): Marking {
   switch (marking.kind) {
-    case "pen":
-      return { ...marking, points: [...marking.points, at] };
+    case "pen": {
+      // Pointer up repeats the last move's position; a stroke never stores the same point twice in a row.
+      const last = marking.points[marking.points.length - 1];
+      return last !== undefined && last.x === at.x && last.y === at.y ? marking : { ...marking, points: [...marking.points, at] };
+    }
     case "rectangle":
     case "highlight":
       return { ...marking, region: { x: marking.region.x, y: marking.region.y, width: at.x - marking.region.x, height: at.y - marking.region.y } };
@@ -809,10 +858,10 @@ function extendMarking(marking: Marking, at: Point): Marking {
 function commitMarking(state: EditorState, marking: Marking): EditorState {
   const normalised = normaliseMarking(marking);
   const opened = ensureComposer(state);
-  const composer: CommentComposer = opened.ui.composer;
+  const composer: CommentComposer = opened.chrome.composer;
   switch (composer.kind) {
     case "composing":
-      return { ...opened, ui: { ...opened.ui, composer: { ...composer, markings: [...composer.markings, normalised] } } };
+      return { ...opened, chrome: { ...opened.chrome, composer: { ...composer, markings: [...composer.markings, normalised] } } };
     case "closed":
       return opened;
     default:
@@ -844,13 +893,13 @@ function normaliseMarking(marking: Marking): Marking {
 }
 
 function ensureComposer(state: EditorState): EditorState {
-  switch (state.ui.composer.kind) {
+  switch (state.chrome.composer.kind) {
     case "composing":
       return state;
     case "closed":
       return state.currentSlideId === null ? state : openComposer(state, { slideId: state.currentSlideId, elementId: null, textRange: null, region: null });
     default:
-      return assertNever(state.ui.composer);
+      return assertNever(state.chrome.composer);
   }
 }
 

@@ -4,6 +4,8 @@
 
 import {
   EMPTY_DISCUSSION,
+  type CollaborationSession,
+  type Colour,
   type DiscussionSnapshot,
   type DocumentSnapshot,
   type EditorEvent,
@@ -44,6 +46,8 @@ export function createEditorHarness(
     settle?: "synchronously" | Readonly<{ delayMilliseconds: number }>;
     putBehaviours?: readonly PutBehaviour[];
     presence?: PresenceChannel;
+    collaboration?: CollaborationSession;
+    recentColours?: readonly Colour[];
   }>,
 ): EditorHarness {
   const scheduler = createVirtualScheduler({ startAt: 0 });
@@ -60,6 +64,8 @@ export function createEditorHarness(
     discussionStore,
     assetStore,
     presence: options.presence ?? null,
+    collaboration: options.collaboration ?? null,
+    recentColours: options.recentColours ?? [],
     scheduler,
     now: () => scheduler.now(),
     sessionPrefix: "Test0000",

@@ -23,7 +23,7 @@ import { SLIDE_ID_ATTRIBUTE, SLIDE_ROOT_CLASS, type AssetAddressResolver, type S
 import type { Fill, RunLink } from "../../contracts/style.ts";
 import { ElementView } from "./element-view.tsx";
 import type { EditableTextSlot, MeasurementReporter, SlideRenderContext } from "./render-context.ts";
-import { fillRendering, roundNumber } from "./style-css.ts";
+import { fillRendering, roundNumber } from "./inline-styles.ts";
 
 export const StaticSlide = memo(function StaticSlide(properties: StaticSlideProperties): ReactElement {
   const pageHeight = properties.document.pageSize.height;

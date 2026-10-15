@@ -23,7 +23,7 @@ type FakePosition = Readonly<{ index: number }>;
 
 const positionOf = (container: unknown, offset: number): number | null => (isFakePosition(container) ? container.index + offset : null);
 const richParagraphs = [paragraph([run("rich", { fontWeight: 700 })])];
-const context = { positionOf, richTextFrom: (html: string) => (html.includes("<b>") ? richParagraphs : null) };
+const context = { positionOf, richTextFrom: (markup: string) => (markup.includes("<b>") ? richParagraphs : null) };
 
 type MappingRow = Readonly<{ inputType: string; data?: string; transfer?: Readonly<Record<string, string>>; range?: Readonly<{ start: number; end: number }>; expected: TextInput }>;
 

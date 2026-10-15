@@ -18,19 +18,19 @@ const DRAG_THRESHOLD = 3;
 export function harnessReduce(state: EditorState, event: EditorEvent): EditorState {
   switch (event.kind) {
     case "menuOpened":
-      return withUi(state, { openMenu: event.menu, contextMenu: null });
+      return withChrome(state, { openMenu: event.menu, contextMenu: null });
     case "menuClosed":
-      return withUi(state, { openMenu: null });
+      return withChrome(state, { openMenu: null });
     case "contextMenuOpened":
-      return withUi(state, { contextMenu: { at: event.at, scope: event.scope }, openMenu: null });
+      return withChrome(state, { contextMenu: { at: event.at, scope: event.scope }, openMenu: null });
     case "contextMenuClosed":
-      return withUi(state, { contextMenu: null });
+      return withChrome(state, { contextMenu: null });
     case "dialogOpened":
-      return withUi(state, { dialog: event.dialog, openMenu: null, contextMenu: null });
+      return withChrome(state, { dialog: event.dialog, openMenu: null, contextMenu: null });
     case "dialogClosed":
-      return withUi(state, { dialog: { kind: "none" } });
+      return withChrome(state, { dialog: { kind: "none" } });
     case "propertiesTabChosen":
-      return withUi(state, { propertiesTab: event.tab, propertiesPanelOpen: true, commentsOpen: false });
+      return withChrome(state, { propertiesTab: event.tab, propertiesPanelOpen: true, commentsOpen: false });
     case "panelToggled":
       return togglePanel(state, event.panel);
     case "toolChosen":
@@ -38,9 +38,9 @@ export function harnessReduce(state: EditorState, event: EditorEvent): EditorSta
     case "slideActivated":
       return { ...state, currentSlideId: event.slideId, selection: { kind: "none" } };
     case "threadFocused":
-      return withUi(state, { focusedThreadId: event.threadId });
+      return withChrome(state, { focusedThreadId: event.threadId });
     case "resolvedThreadsToggled":
-      return withUi(state, { showResolvedThreads: !state.ui.showResolvedThreads });
+      return withChrome(state, { showResolvedThreads: !state.chrome.showResolvedThreads });
     case "noticeDismissed":
       return { ...state, notices: state.notices.filter((notice) => notice.id !== event.noticeId) };
     case "viewportResized":
@@ -75,20 +75,20 @@ export function harnessReduce(state: EditorState, event: EditorEvent): EditorSta
   }
 }
 
-function withUi(state: EditorState, patch: Partial<EditorState["ui"]>): EditorState {
-  return { ...state, ui: { ...state.ui, ...patch } };
+function withChrome(state: EditorState, patch: Partial<EditorState["chrome"]>): EditorState {
+  return { ...state, chrome: { ...state.chrome, ...patch } };
 }
 
 function togglePanel(state: EditorState, panel: "properties" | "filmstrip" | "speakerNotes" | "comments"): EditorState {
   switch (panel) {
     case "properties":
-      return withUi(state, { propertiesPanelOpen: !state.ui.propertiesPanelOpen, commentsOpen: false });
+      return withChrome(state, { propertiesPanelOpen: !state.chrome.propertiesPanelOpen, commentsOpen: false });
     case "filmstrip":
-      return withUi(state, { filmstripOpen: !state.ui.filmstripOpen });
+      return withChrome(state, { filmstripOpen: !state.chrome.filmstripOpen });
     case "speakerNotes":
-      return withUi(state, { speakerNotesOpen: !state.ui.speakerNotesOpen });
+      return withChrome(state, { speakerNotesOpen: !state.chrome.speakerNotesOpen });
     case "comments":
-      return withUi(state, { commentsOpen: !state.ui.commentsOpen });
+      return withChrome(state, { commentsOpen: !state.chrome.commentsOpen });
     default:
       return state;
   }
@@ -112,7 +112,7 @@ function pointerDown(state: EditorState, event: Extract<EditorEvent, { kind: "ca
         return { ...state, gesture: { kind: "idle" }, selection: { kind: "text", target: { kind: "element", slideId: slide.id, elementId }, anchor: 0, focus: 0 } };
       }
       if (state.selection.kind === "text" && state.selection.target.kind === "element" && state.selection.target.elementId === elementId) return state;
-      return { ...state, gesture: pressed, selection: { kind: "elements", slideId: slide.id, elementIds: [elementId] }, ui: { ...state.ui, contextMenu: null, openMenu: null } };
+      return { ...state, gesture: pressed, selection: { kind: "elements", slideId: slide.id, elementIds: [elementId] }, chrome: { ...state.chrome, contextMenu: null, openMenu: null } };
     }
     case "resizeHandle":
     case "rotationHandle":
@@ -121,10 +121,10 @@ function pointerDown(state: EditorState, event: Extract<EditorEvent, { kind: "ca
     case "tableRowBoundary":
       return { ...state, gesture: pressed };
     case "commentPin":
-      return withUi({ ...state, gesture: { kind: "idle" } }, { focusedThreadId: event.target.threadId, commentsOpen: true });
+      return withChrome({ ...state, gesture: { kind: "idle" } }, { focusedThreadId: event.target.threadId, commentsOpen: true });
     case "slideBackground":
     case "outside":
-      return { ...state, gesture: pressed, selection: { kind: "none" }, ui: { ...state.ui, contextMenu: null, openMenu: null } };
+      return { ...state, gesture: pressed, selection: { kind: "none" }, chrome: { ...state.chrome, contextMenu: null, openMenu: null } };
     default:
       return state;
   }

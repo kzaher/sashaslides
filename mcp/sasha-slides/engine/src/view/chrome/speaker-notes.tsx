@@ -26,7 +26,7 @@ const NOTES_READING_SCALE = 0.6;
 const NOTES_INK = "var(--sasha-text)";
 
 export const SpeakerNotes = memo(function SpeakerNotes(): ReactElement | null {
-  const view = useEditorSelector((state) => ({ document: state.document, currentSlideId: state.currentSlideId, selection: state.selection, open: state.ui.speakerNotesOpen }), shallowEqual);
+  const view = useEditorSelector((state) => ({ document: state.document, currentSlideId: state.currentSlideId, selection: state.selection, open: state.chrome.speakerNotesOpen }), shallowEqual);
   const services = useEditorServices();
   if (!view.open) return null;
   const index = view.document.slides.findIndex((slide) => slide.id === view.currentSlideId);

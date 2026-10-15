@@ -8,34 +8,13 @@
 // here (and an issue in validation.ts), never an exception in the renderer.
 
 import * as Y from "yjs";
-import type {
-  AssetRecord,
-  DeckId,
-  DocumentSnapshot,
-  ElementSnapshot,
-  LayoutId,
-  LayoutSnapshot,
-  PlaceholderRole,
-  PlaceholderStyle,
-  RunStyle,
-  SlideId,
-  SlideSnapshot,
-  ThemeColourSlot,
-  ThemeSnapshot,
-  TransitionScriptId,
-  TransitionScriptRecord,
-} from "../contracts/index.ts";
-import {
-  EMPTY_TEXT_BODY,
-  LAYOUT_KEY,
-  META_KEY,
-  PLACEHOLDER_ROLES,
-  SLIDE_KEY,
-  SLIDE_WIDTH_UNITS,
-  THEME_COLOUR_SLOTS,
-  THEME_KEY,
-  TRANSITION_SCRIPT_KEY,
-} from "../contracts/index.ts";
+import type { AssetRecord, DocumentSnapshot, ElementSnapshot, LayoutSnapshot, PlaceholderRole, PlaceholderStyle, SlideSnapshot, ThemeSnapshot, TransitionScriptRecord } from "../contracts/document.ts";
+import type { DeckId, LayoutId, SlideId, TransitionScriptId } from "../contracts/ids.ts";
+import type { RunStyle, ThemeColourSlot } from "../contracts/style.ts";
+import { EMPTY_TEXT_BODY, PLACEHOLDER_ROLES } from "../contracts/document.ts";
+import { SLIDE_WIDTH_UNITS } from "../contracts/geometry.ts";
+import { THEME_COLOUR_SLOTS } from "../contracts/style.ts";
+import { LAYOUT_KEY, META_KEY, SLIDE_KEY, THEME_KEY, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
 import { DEFAULT_PLACEHOLDER_STYLES, DEFAULT_RUN_STYLE, DEFAULT_THEME } from "./blank-deck.ts";
 import { childMap, childText, type DocumentRoots } from "./document-paths.ts";
 import { flattenElements, projectElementTree, readSlideStructure } from "./element-tree.ts";

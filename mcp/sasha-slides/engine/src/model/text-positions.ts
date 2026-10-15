@@ -9,8 +9,11 @@
 // character and ends after its last one, so typing at either edge stays outside the range.
 
 import * as Y from "yjs";
-import type { EncodedTextAnchor, ElementId, Selection, SlideId, TextRange, TextTarget } from "../contracts/index.ts";
-import { assertNever, ELEMENT_KEY } from "../contracts/index.ts";
+import type { EncodedTextAnchor, TextRange } from "../contracts/document-store.ts";
+import type { ElementId, SlideId } from "../contracts/ids.ts";
+import type { Selection, TextTarget } from "../contracts/selection.ts";
+import { assertNever } from "../contracts/assert-never.ts";
+import { ELEMENT_KEY } from "../contracts/yjs-schema.ts";
 import { childArray, elementMapOf, slideMapOf, textOf, type DocumentRoots } from "./document-paths.ts";
 import { tableLineIds } from "./element-tree.ts";
 

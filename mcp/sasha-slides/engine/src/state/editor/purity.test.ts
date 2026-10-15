@@ -8,7 +8,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { EMPTY_DISCUSSION, type EditorEvent, type Modifiers } from "../../contracts/index.ts";
+import { EMPTY_DISCUSSION, LOCAL_COLLABORATION_STATUS, type EditorEvent, type Modifiers } from "../../contracts/index.ts";
 import { elementId, ME, shape, slide, slideId, testDocument, textBody } from "../testing/document-fixtures.ts";
 import { createEditorHarness } from "../testing/editor-harness.ts";
 import { clipboardContentFor } from "./clipboard.ts";
@@ -54,7 +54,7 @@ describe("purity (acceptance 5)", () => {
       pointer("canvasPointerUp", 760, 420),
       { kind: "keyPressed", chord: { key: "ArrowRight", code: "ArrowRight", modifiers: { ...NONE, shift: true } } },
       { kind: "commentComposerOpened", slideId: slideId("slide_one"), elementId: elementId("shape_box"), textRange: null, region: null },
-      { kind: "commentDraftChanged", draft: "Bigger?" },
+      { kind: "commentDraftChanged", draft: "Bigger?", mentions: [] },
       { kind: "commentSubmitted" },
       { kind: "undoRequested" },
     ];
@@ -73,6 +73,8 @@ describe("purity (acceptance 5)", () => {
       document,
       discussion: EMPTY_DISCUSSION,
       containerSize: { width: 0, height: 0 },
+      collaboration: LOCAL_COLLABORATION_STATUS,
+      recentColours: [],
     });
     const replayed = logged.map((entry) => entry.event).reduce(reduceEditor, initial);
     assert.deepStrictEqual(replayed, harness.state());

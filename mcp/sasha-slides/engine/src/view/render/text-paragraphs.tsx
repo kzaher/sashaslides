@@ -22,7 +22,7 @@ import type { Paragraph, TextBody, TextRun } from "../../contracts/document.ts";
 import type { SlideId } from "../../contracts/ids.ts";
 import type { RunLink } from "../../contracts/style.ts";
 import { SLIDE_LINK_ATTRIBUTE } from "../../contracts/render.ts";
-import { paragraphCss, roundNumber, runCss } from "./style-css.ts";
+import { paragraphDeclarations, roundNumber, runDeclarations } from "./inline-styles.ts";
 import {
   LIST_INDENT_PER_LEVEL,
   listMarkers,
@@ -88,16 +88,16 @@ function ParagraphView(options: Readonly<{ paragraph: Paragraph; start: number; 
   const base = paragraphBaseRunStyle({ context, paragraph });
   const level = listLevel(style.list);
   const listIndent = level === null ? 0 : (level + 1) * LIST_INDENT_PER_LEVEL;
-  const css = inked(paragraphCss({ style, base, theme: context.theme, fontScale: properties.fontScale, listIndent }), properties.inkColour);
+  const declarations = inked(paragraphDeclarations({ style, base, theme: context.theme, fontScale: properties.fontScale, listIndent }), properties.inkColour);
   const starts = runStarts(paragraph, options.start);
   const attributes = {
     [PARAGRAPH_START_ATTRIBUTE]: options.start,
     [RENDER_GENERATION_ATTRIBUTE]: properties.renderGeneration,
   };
   return (
-    <div style={css} {...attributes}>
+    <div style={declarations} {...attributes}>
       {options.marker === null || level === null ? null : (
-        <span contentEditable={false} {...{ [LIST_MARKER_ATTRIBUTE]: "" }} style={markerCss({ level, indentStart: style.indentStart, fontScale: properties.fontScale, runStyle: inked(runCss({ style: base, theme: context.theme, fontScale: properties.fontScale }), properties.inkColour) })}>
+        <span contentEditable={false} {...{ [LIST_MARKER_ATTRIBUTE]: "" }} style={markerDeclarations({ level, indentStart: style.indentStart, fontScale: properties.fontScale, runStyle: inked(runDeclarations({ style: base, theme: context.theme, fontScale: properties.fontScale }), properties.inkColour) })}>
           {options.marker}
         </span>
       )}
@@ -109,23 +109,23 @@ function ParagraphView(options: Readonly<{ paragraph: Paragraph; start: number; 
 function RunView(options: Readonly<{ run: TextRun; start: number; properties: TextParagraphsProperties }>): ReactElement {
   const { run, properties } = options;
   const style = resolveRunStyle({ context: properties.styleContext, patch: run.style });
-  const css = inked(runCss({ style, theme: properties.styleContext.theme, fontScale: properties.fontScale }), properties.inkColour);
+  const declarations = inked(runDeclarations({ style, theme: properties.styleContext.theme, fontScale: properties.fontScale }), properties.inkColour);
   const text = runDisplayText({ run, slideNumber: properties.slideNumber });
-  const content = runContent({ run, text, start: options.start, css });
+  const content = runContent({ run, text, start: options.start, declarations });
   return linkWrapped({ link: style.link, content, slideNumberOf: properties.slideNumberOf });
 }
 
-function runContent(options: Readonly<{ run: TextRun; text: string; start: number; css: CSSProperties }>): ReactElement {
+function runContent(options: Readonly<{ run: TextRun; text: string; start: number; declarations: CSSProperties }>): ReactElement {
   switch (options.run.kind) {
     case "text":
       return (
-        <span style={options.css} {...{ [RUN_START_ATTRIBUTE]: options.start }}>
+        <span style={options.declarations} {...{ [RUN_START_ATTRIBUTE]: options.start }}>
           {options.text}
         </span>
       );
     case "automaticText":
       return (
-        <span style={options.css} contentEditable={false} {...{ [RUN_START_ATTRIBUTE]: options.start, [AUTOMATIC_TEXT_ATTRIBUTE]: options.run.field }}>
+        <span style={options.declarations} contentEditable={false} {...{ [RUN_START_ATTRIBUTE]: options.start, [AUTOMATIC_TEXT_ATTRIBUTE]: options.run.field }}>
           {options.text}
         </span>
       );
@@ -158,8 +158,8 @@ function linkWrapped(options: Readonly<{ link: RunLink; content: ReactElement; s
   }
 }
 
-function inked(css: CSSProperties, inkColour: string | undefined): CSSProperties {
-  return inkColour === undefined ? css : { ...css, color: inkColour };
+function inked(declarations: CSSProperties, inkColour: string | undefined): CSSProperties {
+  return inkColour === undefined ? declarations : { ...declarations, color: inkColour };
 }
 
 function listLevel(list: ReturnType<typeof resolveParagraphStyle>["list"]): number | null {
@@ -173,7 +173,7 @@ function listLevel(list: ReturnType<typeof resolveParagraphStyle>["list"]): numb
   }
 }
 
-function markerCss(options: Readonly<{ level: number; indentStart: number; fontScale: number; runStyle: CSSProperties }>): CSSProperties {
+function markerDeclarations(options: Readonly<{ level: number; indentStart: number; fontScale: number; runStyle: CSSProperties }>): CSSProperties {
   return {
     ...options.runStyle,
     position: "absolute",

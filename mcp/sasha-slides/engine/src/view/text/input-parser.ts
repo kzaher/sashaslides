@@ -52,7 +52,7 @@ export type BeforeInputContext = Readonly<{
   /** A page position inside the editor as a body index; null outside the edited body. */
   positionOf: (container: unknown, offset: number) => number | null;
   /** Rich text pasted from Docs or the web, reduced to the engine's styles; null when there is none. */
-  richTextFrom: (html: string) => readonly Paragraph[] | null;
+  richTextFrom: (markup: string) => readonly Paragraph[] | null;
 }>;
 
 /** What the editor does with one `beforeinput`. */

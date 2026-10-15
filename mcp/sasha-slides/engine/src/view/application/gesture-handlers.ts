@@ -90,7 +90,7 @@ export function handlePaste(options: Readonly<{
   context: GestureContext;
   event: ClipboardTransferEvent;
   at: Point | null;
-  richTextFrom: (html: string) => readonly Paragraph[] | null;
+  richTextFrom: (markup: string) => readonly Paragraph[] | null;
   readImageFile: (file: File) => Promise<ChosenImageFile | null>;
 }>): void {
   const transfer = options.event.clipboardData;
@@ -113,7 +113,7 @@ export function handlePaste(options: Readonly<{
 }
 
 /** What a transfer holds that needs no file read: the engine payload, rich text or plain text. */
-export function pastedContentOf(options: Readonly<{ transfer: Pick<NonNullable<ClipboardTransferEvent["clipboardData"]>, "getData" | "types">; richTextFrom: (html: string) => readonly Paragraph[] | null }>): PastedContent | null {
+export function pastedContentOf(options: Readonly<{ transfer: Pick<NonNullable<ClipboardTransferEvent["clipboardData"]>, "getData" | "types">; richTextFrom: (markup: string) => readonly Paragraph[] | null }>): PastedContent | null {
   const transfer = options.transfer;
   if (transfer.types.includes(ENGINE_CLIPBOARD_MEDIA_TYPE)) {
     const payload = parseClipboardPayload(transfer.getData(ENGINE_CLIPBOARD_MEDIA_TYPE));

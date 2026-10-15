@@ -24,7 +24,7 @@ declare module "chrome-remote-interface" {
     };
     Input: {
       dispatchMouseEvent(parameters: Readonly<{ type: "mousePressed" | "mouseReleased" | "mouseMoved"; x: number; y: number; button?: "left" | "none" | "right"; buttons?: number; clickCount?: number }>): Promise<void>;
-      dispatchKeyEvent(parameters: Readonly<{ type: "keyDown" | "keyUp" | "rawKeyDown" | "char"; key?: string; code?: string; text?: string; windowsVirtualKeyCode?: number; modifiers?: number }>): Promise<void>;
+      dispatchKeyEvent(parameters: Readonly<{ type: "keyDown" | "keyUp" | "rawKeyDown" | "char"; key?: string; code?: string; text?: string; windowsVirtualKeyCode?: number; nativeVirtualKeyCode?: number; modifiers?: number }>): Promise<void>;
       insertText(parameters: Readonly<{ text: string }>): Promise<void>;
     };
     close(): Promise<void>;

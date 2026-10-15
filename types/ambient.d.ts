@@ -10,9 +10,3 @@ declare module "chrome-remote-interface" {
   const CDP: unknown;
   export default CDP;
 }
-
-declare module "ws" {
-  const WS: unknown;
-  export default WS;
-  export const WebSocket: unknown;
-}

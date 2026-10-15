@@ -2,6 +2,8 @@
 // discussion: it composes a thread (target, region, markings, text), queues `DiscussionRequest`
 // drafts in `pendingDiscussion`, and the discussion feedback encodes text anchors and submits them.
 // The authority's log comes back as `discussionChanged`; each verdict as `discussionSettled`.
+// A viewer (or anyone on a closed connection) is refused at the door, with a notice saying why
+// (access.ts); the authority would refuse them too.
 //
 // SENT IS AN EVENT. The discussion feedback reports `discussionRequestSent` as it hands a request to
 // the authority, and `markDiscussionSent` moves it from `pendingDiscussion` to `inFlightDiscussion`.
@@ -18,12 +20,14 @@ import {
   type EditorState,
   type ElementId,
   type FractionalRegion,
+  type PersonId,
   type SlideId,
   type TextRange,
   type ThreadId,
 } from "../../contracts/index.ts";
+import { commentingRefusal } from "./access.ts";
 import { findElement, findSlide, slideBox } from "./document-lookup.ts";
-import { optimisticText, raiseNotice } from "./editor-queue.ts";
+import { optimisticText, raiseNotice, refuse } from "./editor-queue.ts";
 import { elementIdOfTarget } from "./editor-selection.ts";
 import { createIdMinter } from "./id-minter.ts";
 import { plainTextOfFlat } from "./text-model.ts";
@@ -33,21 +37,23 @@ export function openComposer(
   options: Readonly<{ slideId: SlideId; elementId: ElementId | null; textRange: TextRange | null; region: FractionalRegion | null }>,
 ): EditorState {
   if (findSlide(state.document, options.slideId) === null) return state;
+  const refusal = commentingRefusal(state);
+  if (refusal !== null) return refuse({ ...state, tool: { kind: "select" } }, refusal);
   const target = composerTarget(state, options);
   return {
     ...state,
     tool: { kind: "select" },
-    ui: {
-      ...state.ui,
+    chrome: {
+      ...state.chrome,
       commentsOpen: true,
-      composer: { kind: "composing", slideId: options.slideId, target, region: options.region, markings: [], draft: "" },
+      composer: { kind: "composing", slideId: options.slideId, target, region: options.region, markings: [], draft: "", mentions: [] },
     },
   };
 }
 
 /** What a region and markings are fractions of: the target element's frame, or the slide. */
 export function referenceBoxForComposer(state: EditorState): Box {
-  const composer = state.ui.composer;
+  const composer = state.chrome.composer;
   switch (composer.kind) {
     case "closed":
       return slideBox(state.document);
@@ -59,7 +65,7 @@ export function referenceBoxForComposer(state: EditorState): Box {
 }
 
 export function submitComment(state: EditorState): EditorState {
-  const composer = state.ui.composer;
+  const composer = state.chrome.composer;
   switch (composer.kind) {
     case "closed":
       return state;
@@ -81,9 +87,10 @@ export function submitComment(state: EditorState): EditorState {
           markings: composer.markings,
           messageId,
           body,
+          mentions: composer.mentions,
         },
       );
-      return { ...queued, ui: { ...queued.ui, composer: { kind: "closed" }, focusedThreadId: threadId } };
+      return { ...queued, chrome: { ...queued.chrome, composer: { kind: "closed" }, focusedThreadId: threadId } };
     }
     default:
       return assertNever(composer);
@@ -91,17 +98,19 @@ export function submitComment(state: EditorState): EditorState {
 }
 
 export function queueDiscussion(state: EditorState, command: DiscussionCommandDraft): EditorState {
+  const refusal = commentingRefusal(state);
+  if (refusal !== null) return refuse(state, refusal);
   const minter = createIdMinter(state.idSeed);
   const requestId = minter.next("discussionRequest");
   return { ...state, idSeed: minter.seed(), pendingDiscussion: [...state.pendingDiscussion, { requestId, command }] };
 }
 
-export function replyToThread(state: EditorState, threadId: ThreadId, body: string): EditorState {
+export function replyToThread(state: EditorState, threadId: ThreadId, body: string, mentions: readonly PersonId[]): EditorState {
   const text = body.trim();
   if (text.length === 0) return state;
   const minter = createIdMinter(state.idSeed);
   const messageId = minter.next("message");
-  return queueDiscussion({ ...state, idSeed: minter.seed() }, { kind: "reply", threadId, messageId, body: text });
+  return queueDiscussion({ ...state, idSeed: minter.seed() }, { kind: "reply", threadId, messageId, body: text, mentions });
 }
 
 export function reduceDiscussionSettled(state: EditorState, outcome: DiscussionOutcome): EditorState {

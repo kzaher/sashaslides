@@ -13,6 +13,12 @@
  *                                     (Apple); each provider's callback takes one method
  *   POST /account/erase               session + CSRF token + confirmation → eraser
  *   POST /account/logout              session + CSRF token → clear the session
+ *   GET  /account/deck-session?return=<path>   the deck web application's session (SPEC.md
+ *                                     21.2): signed in, set the `sasha_deck` cookie and 303 to the
+ *                                     validated return path (`/decks` or `/deck/<id>`); signed out,
+ *                                     remember the path in a 10-minute `sasha_return` cookie and
+ *                                     send the browser to sign in -- after ANY sign-in method
+ *                                     `/account` sends it back here
  *   GET  /account/passkey.js          the passkey script (`passkey-browser/passkey.ts`)
  *   POST /account/passkey/<ceremony>/options   a fresh challenge, bound to this browser
  *   POST /account/passkey/<ceremony>/verify    check the authenticator's answer (`webauthn.ts`)
@@ -132,7 +138,24 @@ export type AccountPortal = Readonly<{
   ): Promise<boolean>;
 }>;
 
+/**
+ * The deck server's half of `/account/deck-session` (decks/deck-stack.ts): the portal decides who is
+ * signed in; this mints the deck session for them and says which return paths are allowed.
+ */
+export type DeckSessionStart = Readonly<{
+  /** The `Set-Cookie` value of a fresh deck session; also turns the account's pending invitations into memberships. */
+  issueCookie(options: Readonly<{ accountId: AccountId }>): Promise<string>;
+  /** `/decks` or `/deck/<valid id>`; anything else (another site, another page) becomes `/decks`. */
+  validReturnPath(candidate: string | null): string;
+  /** The `Set-Cookie` value that removes the deck session, sent with every sign-out. */
+  clearCookie(): string;
+}>;
+
 export const ACCOUNT_PATH = "/account";
+export const DECK_SESSION_PATH = `${ACCOUNT_PATH}/deck-session`;
+/** Where `/account` sends the browser after a sign-in that started at `/account/deck-session`. */
+export const RETURN_COOKIE_NAME = "sasha_return";
+export const RETURN_COOKIE_LIFETIME_MS = 10 * 60 * 1000;
 export const SESSION_COOKIE_NAME = "sasha_account";
 export const SIGNIN_COOKIE_NAME = "sasha_signin";
 export const PASSKEY_COOKIE_NAME = "sasha_passkey";
@@ -190,10 +213,13 @@ export function createAccountPortal(
     warn: (message: string) => void;
     /** Email and password sign-in; absent or null when no mail sender is configured. */
     passwordSignIn?: Readonly<{ service: PasswordSignIn; trustedProxies: TrustedProxies }> | null;
+    /** The deck web application's session start; absent or null answers `/account/deck-session` with 404. */
+    deckSessionStart?: DeckSessionStart | null;
   }>,
 ): AccountPortal {
   const { publicUrl, sessionSecret, directory, eraser, now, randomToken, warn } = options;
   const passwordSignIn = options.passwordSignIn ?? null;
+  const deckSessionStart = options.deckSessionStart ?? null;
   const providers = new Map(options.providers.map((provider) => [provider.name, provider]));
   const pendingSignIns = new Map<string, Readonly<{ pending: PendingSignIn; expiresAtMs: number }>>();
   const pendingPasskeys = new Map<string, Readonly<{ pending: PendingPasskey; expiresAtMs: number }>>();
@@ -238,6 +264,10 @@ export function createAccountPortal(
         if (passwordSignIn === null) break;
         if (method !== "GET" && method !== "POST") return sendMethodNotAllowed({ response, allow: "GET, POST" });
         return emailRoute({ request, response, action: target.action, method, password: passwordSignIn.service });
+      case "deck-session":
+        if (deckSessionStart === null) break;
+        if (method !== "GET") return sendMethodNotAllowed({ response, allow: "GET" });
+        return deckSession(request, response, deckSessionStart);
       case "not-found":
         return sendPage({ response, status: 404, html: messagePage({ title: "Not found", message: "There is no such page." }) });
       default:
@@ -268,12 +298,37 @@ export function createAccountPortal(
       });
       return;
     }
+    const pendingReturn = cookieValues({ request, name: RETURN_COOKIE_NAME })[0];
+    if (deckSessionStart !== null && pendingReturn !== undefined) {
+      // A sign-in that began at /account/deck-session goes back there, whichever method was used.
+      const target = deckSessionStart.validReturnPath(safeDecode(pendingReturn));
+      sendRedirect({ response, status: 303, location: `${DECK_SESSION_PATH}?return=${encodeURIComponent(target)}`, cookies: [clearReturnCookie()] });
+      return;
+    }
     sendPage({
       response,
       status: 200,
       html: signedInPage({ links: description.links, providers, csrf: session.csrf, scriptUrl: scriptUrlFor(relyingParty) }),
       headers: passkeyHeaders,
     });
+  }
+
+  /** `/account/deck-session` (see the header): the deck session for whoever is signed in here. */
+  async function deckSession(request: IncomingMessage, response: ServerResponse, start: DeckSessionStart): Promise<void> {
+    const target = start.validReturnPath(new URLSearchParams(requestQuery(request)).get("return"));
+    const session = sessions.read({ request, nowMs: now().getTime() });
+    const description = session === null ? null : await directory.describe({ accountId: session.accountId });
+    if (session === null || description === null) {
+      sendRedirect({
+        response,
+        status: 303,
+        location: ACCOUNT_PATH,
+        cookies: [setCookie({ name: RETURN_COOKIE_NAME, value: encodeURIComponent(target), path: ACCOUNT_PATH, maxAgeSeconds: RETURN_COOKIE_LIFETIME_MS / 1000, sameSite: "Lax" })],
+      });
+      return;
+    }
+    const deckCookie = await start.issueCookie({ accountId: session.accountId });
+    sendRedirect({ response, status: 303, location: target, cookies: [deckCookie, clearReturnCookie()] });
   }
 
   async function login(response: ServerResponse, providerName: string): Promise<void> {
@@ -378,7 +433,11 @@ export function createAccountPortal(
     const accountId = await directory.findOrCreateByIdentity({
       provider: identity.provider,
       subject: identity.subject,
-      email: identity.email,
+      // Only an address the provider vouches for is kept: deck invitations become memberships by
+      // matching it (decks/deck-manager.ts `acceptInvitations`), so an unverified claim -- any
+      // tenant of a generic OpenID provider can put any address there -- would join decks shared
+      // with someone else's address.
+      email: identity.emailVerified ? identity.email : null,
     });
     sendRedirect({
       response,
@@ -428,13 +487,16 @@ export function createAccountPortal(
   }
 
   async function logout(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    // The deck session is a cookie of its own (Path=/deck-api) that renews itself while a deck is
+    // open; signing out here must end it too, or this browser keeps every deck for 12 more hours.
+    const signedOut = [clearSessionCookie(), ...(deckSessionStart === null ? [] : [deckSessionStart.clearCookie()])];
     if (sessions.read({ request, nowMs: now().getTime() }) === null) {
-      sendRedirect({ response, status: 303, location: ACCOUNT_PATH, cookies: [clearSessionCookie()] });
+      sendRedirect({ response, status: 303, location: ACCOUNT_PATH, cookies: signedOut });
       return;
     }
     const form = await readVerifiedForm(request, response);
     if (form === null) return;
-    sendRedirect({ response, status: 303, location: ACCOUNT_PATH, cookies: [clearSessionCookie()] });
+    sendRedirect({ response, status: 303, location: ACCOUNT_PATH, cookies: signedOut });
   }
 
   /**
@@ -986,6 +1048,7 @@ type PortalRoute =
   | Readonly<{ kind: "passkey-script" }>
   | Readonly<{ kind: "passkey-options"; ceremony: PasskeyCeremony }>
   | Readonly<{ kind: "passkey-verify"; ceremony: PasskeyCeremony }>
+  | Readonly<{ kind: "deck-session" }>
   | Readonly<{ kind: "not-found" }>;
 
 const MAX_PENDING_SIGNINS = 10_000;
@@ -1021,6 +1084,7 @@ function parseRoute(
   }
   if (providerName !== undefined) return { kind: "not-found" };
   if (section === "erase") return { kind: "erase" };
+  if (section === "deck-session") return { kind: "deck-session" };
   if (section === "logout") return { kind: "logout" };
   return { kind: "not-found" };
 }
@@ -1209,6 +1273,19 @@ function clearCookie(options: Readonly<{ name: string; path: string; sameSite: S
 
 function clearSessionCookie(): string {
   return clearCookie({ name: SESSION_COOKIE_NAME, path: ACCOUNT_PATH, sameSite: "Lax" });
+}
+
+function clearReturnCookie(): string {
+  return clearCookie({ name: RETURN_COOKIE_NAME, path: ACCOUNT_PATH, sameSite: "Lax" });
+}
+
+/** A cookie value we encoded; null when it is not valid percent-encoding (then `/decks` is used). */
+function safeDecode(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
 }
 
 /** Every value sent under `name`, most specific path first (the order browsers send them in). */

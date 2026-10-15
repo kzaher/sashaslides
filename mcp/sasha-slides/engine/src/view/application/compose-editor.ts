@@ -1,8 +1,9 @@
 // THE COMPOSITION ROOT: where the real model, state and presenter are wired together for one editor
 // on one page. Every effectful dependency is created here, once -- the scheduler, the clocks, the
 // random session prefix, the browser capabilities, the presenter's dependencies -- and passed down
-// (editor-system.ts header); nothing below reaches for a global. The demo uses it now; the deck page
-// at sashaslides.com/deck/<id> (milestone 2) will use it with a synced document instead.
+// (editor-system.ts header); nothing below reaches for a global. The demo uses it with in-memory
+// stores; the deck page at sashaslides.com/deck/<id> (the web module) passes a synced document, the
+// deck server's `CollaborationSession` and the viewer's remembered recent colours.
 //
 // Key decisions:
 //
@@ -12,6 +13,7 @@
 //    network); a face that cannot be fetched is left out and the runner falls back to system fonts.
 
 import { asyncScheduler, fromEvent, map, startWith, type Observable } from "rxjs";
+import type { CollaborationSession } from "../../contracts/collaboration.ts";
 import type { DiscussionStore, Person } from "../../contracts/discussion.ts";
 import type { AssetStore, DocumentStore } from "../../contracts/document-store.ts";
 import type { EditorEvent } from "../../contracts/editor-events.ts";
@@ -22,6 +24,7 @@ import type { PresenceChannel } from "../../contracts/presence.ts";
 import type { PresenterDependencies } from "../../contracts/presenter.ts";
 import type { FontFaceRequest } from "../../contracts/render.ts";
 import type { RunningSystem } from "../../contracts/rxfeedback.ts";
+import type { Colour } from "../../contracts/style.ts";
 import type { TransferredFont } from "../../contracts/transition-protocol.ts";
 import { arrangeThreads, clipboardContentFor, createEditorSystem, createSystem, react, reactSet } from "../../state/index.ts";
 import { renderSlideMarkup } from "../render/slide-markup.tsx";
@@ -43,6 +46,10 @@ export function composeEditor(options: Readonly<{
   discussionStore: DiscussionStore;
   assetStore: AssetStore;
   presence: PresenceChannel | null;
+  /** The deck server session; null for a local deck (the demo). */
+  collaboration: CollaborationSession | null;
+  /** The viewer's remembered "Recent" colours, most recent first. */
+  recentColours: readonly Colour[];
   me: Person;
   embedding: EditorEmbedding;
   runnerAddress: string;
@@ -56,6 +63,8 @@ export function composeEditor(options: Readonly<{
     discussionStore: options.discussionStore,
     assetStore: options.assetStore,
     presence: options.presence,
+    collaboration: options.collaboration,
+    recentColours: options.recentColours,
     scheduler: asyncScheduler,
     now,
     sessionPrefix,

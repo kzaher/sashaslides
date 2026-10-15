@@ -6,10 +6,13 @@
 //
 // It also answers "what will this text body be": the snapshot's body with every queued `editText`
 // replayed over it (text-model.ts), because the caret already lives in that future.
+//
+// AN EDIT THE PERSON MAY NOT MAKE IS REFUSED HERE, at the one door every document change passes
+// (access.ts): a viewer, a commenter, a closed connection or a newer document queues nothing and
+// sees why, once (`refuse` does not repeat a notice that is already showing).
 
 import {
   assertNever,
-  DOCUMENT_SCHEMA_VERSION,
   textTargetKey,
   type CommandAuthor,
   type DocumentCommand,
@@ -19,6 +22,7 @@ import {
   type Selection,
   type TextTarget,
 } from "../../contracts/index.ts";
+import { editingRefusal } from "./access.ts";
 import { asEditText } from "./command-kinds.ts";
 import { textBodyOf } from "./document-lookup.ts";
 import { createIdMinter } from "./id-minter.ts";
@@ -42,7 +46,8 @@ export type EnvelopeRequest = Readonly<{
 /** Append one envelope (one undo step) and show its `selectionAfter` now. */
 export function queueEnvelope(state: EditorState, request: EnvelopeRequest): EditorState {
   if (request.commands.length === 0) return { ...state, selection: request.selectionAfter };
-  if (isReadOnly(state)) return state;
+  const refusal = editingRefusal(state);
+  if (refusal !== null) return refuse(state, refusal);
   const minter = createIdMinter(state.idSeed);
   const commandId = minter.next("command");
   return {
@@ -68,6 +73,8 @@ export function queueEnvelope(state: EditorState, request: EnvelopeRequest): Edi
 
 export function queueHistory(state: EditorState, direction: "undo" | "redo"): EditorState {
   if (state.textEditing.composition !== null) return state;
+  const refusal = editingRefusal(state);
+  if (refusal !== null) return refuse(state, refusal);
   const minter = createIdMinter(state.idSeed);
   const commandId = minter.next("command");
   return { ...state, idSeed: minter.seed(), pendingEdits: [...state.pendingEdits, { kind: direction, commandId }] };
@@ -86,9 +93,10 @@ export function raiseNotice(
   };
 }
 
-/** A document from a newer schema opens read-only (SPEC.md section 5, "Versions"). */
-export function isReadOnly(state: EditorState): boolean {
-  return state.document.schemaVersion > DOCUMENT_SCHEMA_VERSION;
+/** The same state with a refusal shown, unless that exact notice is already showing (see the header). */
+export function refuse(state: EditorState, message: string): EditorState {
+  if (state.notices.some((notice) => notice.message === message)) return state;
+  return raiseNotice(state, { tone: "information", message, action: null });
 }
 
 /** The body as it will be once every queued edit on it applies; null when the body is gone. */

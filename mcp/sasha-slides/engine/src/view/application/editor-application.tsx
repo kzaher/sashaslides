@@ -28,8 +28,10 @@ export function EditorApplication(properties: EditorApplicationProperties): Reac
       richTextFrom: richTextFromMarkup,
       readImageFile,
       measurePointerMoves: false,
+      host: properties.host,
+      now: properties.presenterDependencies.now,
     }),
-    [properties.system, properties.browser, properties.assetStore, properties.presenterDependencies, properties.clipboardContentFor, properties.arrangeThreads],
+    [properties.system, properties.browser, properties.assetStore, properties.presenterDependencies, properties.clipboardContentFor, properties.arrangeThreads, properties.host],
   );
   return <EditorShell services={services} />;
 }

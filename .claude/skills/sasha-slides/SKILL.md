@@ -60,6 +60,24 @@ and **`reply_comment_task`** `{ taskId, text }` replaces that acknowledgement wi
 as the Sasha bot; a link in the text is fine. **`list_watches`** shows the active
 watches; call **`stop_watching`** `{ watchId }` when the user is done.
 
+## Sasha decks
+
+Decks in Sasha's own editor (`https://sashaslides.com/deck/<id>`) are edited live: people
+see your change as you make it, under your `summary`, and can undo it.
+
+* **`deck_list`** and **`deck_create`** `{ title }` give each deck's `address`; hand it to
+  the user.
+* **`deck_read`** `{ deckId }` **before every edit**: slide and element ids, frames, text.
+* **`deck_edit`** `{ deckId, summary, edits }`: **one call per user request**. All its edits
+  are one undo step, all or nothing; a refusal names the failing `editIndex` and why. Give a
+  new slide or element your own `id` to address it later in the same call.
+* **`deck_write_transition`** saves a scripted transition **unapproved**: it runs only after
+  a person reviews it, so give the user its `reviewAddress`.
+* **`deck_revert`** `{ deckId }` undoes this session's edits.
+* Comments: **`deck_read_comments`** returns a `sequence`; **`deck_reply_comment`**,
+  **`deck_resolve_comment`** `{ note? }`; **`deck_await_comments`** `{ afterSequence }` waits
+  for the next one. Answering is the completion signal.
+
 ## Slides are 1-based
 
 Candidate 1 is the first slide you passed; the picker, `await_pick` and the user agree.

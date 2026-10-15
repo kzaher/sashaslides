@@ -40,6 +40,9 @@ const CONNECTOR_PATHS: readonly string[] = [
   "/hooks/drive",
 ];
 
+/** The deck server inside the connector (mcp/sasha-slides/decks): pages, built files, the API and its socket. */
+const DECK_PATHS: readonly string[] = ["/decks", "/decks/", "/deck/dk_x", "/deck-app/a.js", "/deck-app/runner/index.html", "/deck-api/session", "/deck-api/sync/dk_x"];
+
 /** The website's routes (addon-server/server.ts, pages.ts), plus near-misses of connector paths. */
 const SITE_PATHS: readonly string[] = [
   "/",
@@ -64,6 +67,11 @@ const SITE_PATHS: readonly string[] = [
   "/.well-known/security.txt",
   "/hooks",
   "/hooks/drivex",
+  // Near-misses of the deck server's paths.
+  "/deckhouse",
+  "/decks.css",
+  "/decksx",
+  "/deck",
 ];
 
 type Modifier = "exact" | "prefix" | "prefix-no-regex" | "regex";
@@ -111,6 +119,36 @@ test("connector locations stream, forward the client's identity, and are never c
     const timeout = /proxy_read_timeout\s+(\d+)s;/.exec(body);
     assert.ok(timeout !== null && Number(timeout[1]) > 3600, `${path} must outlast await_pick's 3600 s limit`);
   }
+});
+
+test("the deck server's paths reach the connector with the WebSocket upgrade forwarded", () => {
+  const server = httpsServer();
+  for (const path of DECK_PATHS) {
+    const location = selectLocation({ server, path });
+    assert.equal(proxyTarget(location), CONNECTOR, `${path} must reach the connector`);
+    for (const directive of [
+      /proxy_http_version\s+1\.1;/,
+      /proxy_set_header\s+Upgrade\s+\$http_upgrade;/,
+      /proxy_set_header\s+Connection\s+\$connection_upgrade;/,
+      /proxy_set_header\s+Host\s+\$host;/,
+      /proxy_set_header\s+X-Real-IP\s+\$remote_addr;/,
+      /proxy_set_header\s+X-Forwarded-Proto\s+\$scheme;/,
+      /proxy_buffering\s+off;/,
+    ]) {
+      assert.match(location.body, directive, `${path} is missing ${String(directive)}`);
+    }
+    assert.doesNotMatch(location.body, /add_header\s+Cache-Control/, `${path}: the connector sets its own caching (immutable /deck-app/ files)`);
+    const timeout = /proxy_read_timeout\s+(\d+)s;/.exec(location.body);
+    assert.ok(timeout !== null && Number(timeout[1]) >= 3600, `${path} must keep an idle socket open`);
+  }
+});
+
+test("the Connection header of an upgrade comes from a map: upgrade for an upgrade, close otherwise", () => {
+  const text = CONFIG_TEXT.replace(/#[^\n]*/g, "");
+  const map = /map\s+\$http_upgrade\s+\$connection_upgrade\s*\{([^}]*)\}/.exec(text);
+  assert.ok(map !== null, "no map for $connection_upgrade");
+  assert.match(map[1] ?? "", /default\s+upgrade;/);
+  assert.match(map[1] ?? "", /''\s+close;/);
 });
 
 test("walkthrough videos are served from disk on the server, never from git or the site image", () => {

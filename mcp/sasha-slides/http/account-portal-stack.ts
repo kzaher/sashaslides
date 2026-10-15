@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { assertNever, describeAuthFailure, loadClientCredentials } from "../google-auth";
 import { storeAccountDirectory } from "./account-directory";
-import { accountCallbackUrl, createAccountPortal, parseSessionSecret, ACCOUNT_PATH, type AccountPortal } from "./account-portal";
+import { accountCallbackUrl, createAccountPortal, parseSessionSecret, ACCOUNT_PATH, type AccountPortal, type DeckSessionStart } from "./account-portal";
 import type { AccountEraser, AccountVault } from "./account-vault";
 import { randomAccountId } from "./accounts";
 import {
@@ -59,6 +59,8 @@ export function loadAccountPortal(
     store: Pick<AuthStore, "accounts" | "accountLinks" | "passwordCredentials">;
     vault: AccountVault;
     eraser: AccountEraser;
+    /** The deck web application's session start (decks/deck-stack.ts), or null without decks. */
+    deckSessionStart: DeckSessionStart | null;
     warn: (message: string) => void;
   }>,
 ): AccountPortalLoad {
@@ -96,6 +98,7 @@ export function loadAccountPortal(
     randomToken: randomSignInToken,
     warn: options.warn,
     passwordSignIn: password.passwordSignIn,
+    deckSessionStart: options.deckSessionStart,
   });
   return {
     kind: "ok",

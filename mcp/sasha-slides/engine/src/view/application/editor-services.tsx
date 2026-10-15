@@ -12,13 +12,19 @@
 //  * THE STATE MODULE'S SELECTORS ARE SERVICES (`clipboardContentFor`, `arrangeThreads`) rather than
 //    imports, because `EditorApplicationProperties` (editor-system.ts) does not carry them and the
 //    view must stay testable with fakes before and after the state module exists.
+//  * THE HOST'S ADDITIONS ARE A SERVICE TOO (`host`, contracts/editor-system.ts `EditorHost`): the
+//    web module's Share button, account menu and File items reach the top bar and the menus without
+//    the view importing the web module.
+//  * VIEWING PREFERENCES THAT ARE NOT EDITOR STATE live in the shell (`ViewPreferencesContext`):
+//    whether comment markings are drawn ("View > Show annotations") is this viewer's choice for
+//    this page, read by the canvas and the View menu, and nothing else needs it.
 
 import { createContext, useCallback, useContext, useRef, useSyncExternalStore, type ComponentType } from "react";
 import type { Paragraph } from "../../contracts/document.ts";
 import type { AssetStore } from "../../contracts/document-store.ts";
 import type { ChosenImageFile, EditorEvent } from "../../contracts/editor-events.ts";
 import type { EditorState } from "../../contracts/editor-state.ts";
-import type { ArrangeThreads, BrowserCapabilities, ClipboardContentFor } from "../../contracts/editor-system.ts";
+import type { ArrangeThreads, BrowserCapabilities, ClipboardContentFor, EditorHost } from "../../contracts/editor-system.ts";
 import type { PresentationProperties, PresenterDependencies, TransitionPreviewProperties } from "../../contracts/presenter.ts";
 import type { AssetAddressResolver } from "../../contracts/render.ts";
 import type { RunningSystem } from "../../contracts/rxfeedback.ts";
@@ -38,12 +44,25 @@ export type EditorServices = Readonly<{
   /** Cmd on macOS, Ctrl elsewhere (editor-state.ts `Modifiers.primary`). */
   primaryModifier: "control" | "meta";
   /** Rich text from a paste or drop, reduced to the engine's styles; null when the markup has none. */
-  richTextFrom: (html: string) => readonly Paragraph[] | null;
+  richTextFrom: (markup: string) => readonly Paragraph[] | null;
   /** Reads an image file's bytes and pixel size; null for a file that is not a supported image. */
   readImageFile: (file: File) => Promise<ChosenImageFile | null>;
   /** Marks every canvas pointer move and measures it to its commit (the drag budget, e2e only). */
   measurePointerMoves: boolean;
+  /** The page hosting the editor: the logo's address, the top bar accessory, File menu items. */
+  host: EditorHost;
+  /** The clock presence reads to show a silent peer as away, then gone (chrome/presence.ts). */
+  now: () => number;
 }>;
+
+/** This viewer's display choices that are not editor state (see the header). */
+export type ViewPreferences = Readonly<{ showAnnotations: boolean; toggleAnnotations: () => void }>;
+
+export const ViewPreferencesContext = createContext<ViewPreferences>({ showAnnotations: true, toggleAnnotations: () => undefined });
+
+export function useViewPreferences(): ViewPreferences {
+  return useContext(ViewPreferencesContext);
+}
 
 export const EditorServicesContext = createContext<EditorServices | null>(null);
 

@@ -15,16 +15,11 @@
 // namespaces stay apart on write as well as on read.
 
 import * as Y from "yjs";
-import type {
-  AutomaticTextField,
-  Paragraph,
-  ParagraphStylePatch,
-  RunStylePatch,
-  TextBody,
-  TextOperation,
-  TextRun,
-} from "../contracts/index.ts";
-import { assertNever, AUTOMATIC_TEXT_EMBED_KEY, PARAGRAPH_ATTRIBUTE_NAMES, RUN_ATTRIBUTE_NAMES } from "../contracts/index.ts";
+import type { TextOperation } from "../contracts/commands.ts";
+import type { AutomaticTextField, Paragraph, TextBody, TextRun } from "../contracts/document.ts";
+import type { ParagraphStylePatch, RunStylePatch } from "../contracts/style.ts";
+import { assertNever } from "../contracts/assert-never.ts";
+import { AUTOMATIC_TEXT_EMBED_KEY, PARAGRAPH_ATTRIBUTE_NAMES, RUN_ATTRIBUTE_NAMES } from "../contracts/yjs-schema.ts";
 import { isRecord, PARAGRAPH_ATTRIBUTE_CHECKS, RUN_ATTRIBUTE_CHECKS } from "./stored-values.ts";
 
 /** Attribute values as Yjs stores them; `null` removes an attribute (yjs-schema.ts). */

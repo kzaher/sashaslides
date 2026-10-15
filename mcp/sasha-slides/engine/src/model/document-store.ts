@@ -23,30 +23,14 @@
 
 import { Subject, type Subscription } from "rxjs";
 import * as Y from "yjs";
-import type {
-  CommandEnvelope,
-  CommandOutcome,
-  CreateDocumentStore,
-  DocumentChange,
-  DocumentChangeOrigin,
-  ElementId,
-  HistoryAvailability,
-  HistoryOutcome,
-  SlideId,
-  TextDelta,
-  TextDeltaOperation,
-  TextTargetKey,
-} from "../contracts/index.ts";
-import {
-  assertNever,
-  DOCUMENT_SCHEMA_VERSION,
-  LOCAL_EDIT_ORIGIN,
-  META_KEY,
-  REPAIR_ORIGIN,
-  SEED_ORIGIN,
-  textTargetKey,
-  UNDO_SCOPE_ROOTS,
-} from "../contracts/index.ts";
+import type { CommandEnvelope, CommandOutcome } from "../contracts/commands.ts";
+import type { CreateDocumentStore, DocumentChange, DocumentChangeOrigin, HistoryAvailability, HistoryOutcome } from "../contracts/document-store.ts";
+import type { ElementId, SlideId } from "../contracts/ids.ts";
+import type { TextDelta, TextDeltaOperation, TextTargetKey } from "../contracts/text-delta.ts";
+import { assertNever } from "../contracts/assert-never.ts";
+import { DOCUMENT_SCHEMA_VERSION } from "../contracts/document.ts";
+import { textTargetKey } from "../contracts/text-delta.ts";
+import { LOCAL_EDIT_ORIGIN, META_KEY, REPAIR_ORIGIN, SEED_ORIGIN, UNDO_SCOPE_ROOTS } from "../contracts/yjs-schema.ts";
 import { blankDeck } from "./blank-deck.ts";
 import { applyCommand } from "./command-application.ts";
 import { validateEnvelope } from "./command-validation.ts";

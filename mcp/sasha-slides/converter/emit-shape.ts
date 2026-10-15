@@ -48,7 +48,8 @@ export function emitRect(
   }
 
   const objectId = context.ids.next("rect");
-  const shapeType = shapeTypeForRect(decoration, bounds);
+  const corners = cornerPresetFor(decoration, bounds);
+  const shapeType = corners.shapeType;
   const borderAsLines = decoration.border !== null && !decoration.border.uniform;
   const properties = shapePropertiesFor({
     decoration,
@@ -60,7 +61,7 @@ export function emitRect(
   });
 
   const requests: SlidesApiRequest[] = [
-    { createShape: { objectId, shapeType, elementProperties: placeElement({ element, context }) } },
+    { createShape: { objectId, shapeType, elementProperties: placeElement({ element: turnedElement({ element, quarterTurns: corners.quarterTurns }), context }) } },
   ];
   const update = updateShapePropertiesRequest({ objectId, built: properties });
   if (update !== null) requests.push(update);
@@ -469,6 +470,61 @@ export function shapeTypeForRect(decoration: BoxDecoration, bounds: BoundsPx): S
     Math.abs(bounds.w - bounds.h) <= 1 &&
     radii.every((radius) => radius >= halfShortEdge - 0.5);
   return isCircle ? "ELLIPSE" : "ROUND_RECTANGLE";
+}
+
+/**
+ * Which preset draws a box's corners, and how many quarter turns orient it.
+ *
+ * The rules are extract-dom.ts's "CORNER RADIUS RULES" (the source of truth for border and radius
+ * rendering), moved to emission: one rounded corner is a ROUND_1_RECTANGLE (OOXML `round1Rect`
+ * rounds the top-right corner), two on one side a ROUND_2_SAME_RECTANGLE (`round2SameRect` rounds
+ * the top pair), two diagonal ones a ROUND_2_DIAGONAL_RECTANGLE (`round2DiagRect` rounds top-left
+ * and bottom-right). Any other mix, three corners or four unequal ones, keeps the nearest uniform
+ * ROUND_RECTANGLE. The preset's radius itself cannot be set (no adjust handle in the API), which
+ * `reportBoxDecoration` still reports.
+ *
+ * A quarter turn rotates the preset about the box centre so its rounded corners face the right
+ * way; for an odd number of turns the preset's own box is the element's with width and height
+ * swapped, so the turned shape covers the same rectangle (`turnedElement`).
+ */
+export function cornerPresetFor(
+  decoration: BoxDecoration,
+  bounds: BoundsPx,
+): Readonly<{ shapeType: ShapeType; quarterTurns: 0 | 1 | 2 | 3 }> {
+  const uniform = shapeTypeForRect(decoration, bounds);
+  const [topLeft, topRight, bottomRight, bottomLeft] = decoration.cornerRadiiPx;
+  const rounded = [topLeft > 0.5, topRight > 0.5, bottomRight > 0.5, bottomLeft > 0.5] as const;
+  const roundedCount = rounded.filter((corner) => corner).length;
+  const allEqual = decoration.cornerRadiiPx.every((radius) => Math.abs(radius - topLeft) <= 0.5);
+  if (roundedCount === 0 || allEqual) return { shapeType: uniform, quarterTurns: 0 };
+  if (roundedCount === 1) {
+    // round1Rect rounds the top-right corner; each clockwise quarter turn moves it one corner on.
+    const turns = rounded[1] ? 0 : rounded[2] ? 1 : rounded[3] ? 2 : 3;
+    return { shapeType: "ROUND_1_RECTANGLE", quarterTurns: turns };
+  }
+  if (roundedCount === 2) {
+    if (rounded[0] && rounded[1]) return { shapeType: "ROUND_2_SAME_RECTANGLE", quarterTurns: 0 };
+    if (rounded[1] && rounded[2]) return { shapeType: "ROUND_2_SAME_RECTANGLE", quarterTurns: 1 };
+    if (rounded[2] && rounded[3]) return { shapeType: "ROUND_2_SAME_RECTANGLE", quarterTurns: 2 };
+    if (rounded[3] && rounded[0]) return { shapeType: "ROUND_2_SAME_RECTANGLE", quarterTurns: 3 };
+    return { shapeType: "ROUND_2_DIAGONAL_RECTANGLE", quarterTurns: rounded[0] ? 0 : 1 };
+  }
+  return { shapeType: "ROUND_RECTANGLE", quarterTurns: 0 };
+}
+
+/** The element as the turned preset sees it: rotated by the turns, with its own box swapped for odd turns. */
+function turnedElement(
+  options: Readonly<{ element: RectElement; quarterTurns: 0 | 1 | 2 | 3 }>,
+): Readonly<{ bounds: BoundsPx; rotateDeg: number; naturalSizePx: SizePx | null }> {
+  const { element, quarterTurns } = options;
+  if (quarterTurns === 0) return element;
+  const natural = element.naturalSizePx ?? { w: element.bounds.w, h: element.bounds.h };
+  const odd = quarterTurns % 2 === 1;
+  return {
+    bounds: element.bounds,
+    rotateDeg: element.rotateDeg + quarterTurns * 90,
+    naturalSizePx: odd ? { w: natural.h, h: natural.w } : natural,
+  };
 }
 
 /**

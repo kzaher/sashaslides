@@ -27,7 +27,8 @@ import type { ArrangedThread } from "../../contracts/editor-system.ts";
 import type { ElementId, SlideId } from "../../contracts/ids.ts";
 import type { Selection, TextTarget } from "../../contracts/selection.ts";
 import { textTargetKey } from "../../contracts/text-delta.ts";
-import { useEditorSelector, useEditorServices, shallowEqual } from "../application/editor-services.tsx";
+import { useEditorSelector, useEditorServices, useViewPreferences, shallowEqual } from "../application/editor-services.tsx";
+import { PEER_IS_AWAY, shownPeers, usePresenceNow } from "../chrome/presence.ts";
 import type { EditableTextSlot, MeasurementReporter } from "../render/render-context.ts";
 import { SlideRoot, useSlideRenderContext } from "../render/static-slide.tsx";
 import { InlineTextEditor, TEXT_EDITOR_ATTRIBUTE } from "../text/inline-text-editor.tsx";
@@ -54,9 +55,9 @@ export const EditableCanvas = memo(function EditableCanvas(): ReactElement {
       peers: state.peers,
       discussion: state.discussion,
       resolvedTextAnchors: state.resolvedTextAnchors,
-      composer: state.ui.composer,
-      focusedThreadId: state.ui.focusedThreadId,
-      showResolvedThreads: state.ui.showResolvedThreads,
+      composer: state.chrome.composer,
+      focusedThreadId: state.chrome.focusedThreadId,
+      showResolvedThreads: state.chrome.showResolvedThreads,
       measured: state.measuredLayouts,
       tool: state.tool,
     }),
@@ -77,6 +78,11 @@ export const EditableCanvas = memo(function EditableCanvas(): ReactElement {
 
   const measurement = useMeasurementReporter({ slideId: slide?.id ?? null, dispatch });
   const editableText = useEditableTextSlot(view.selection, slide?.id ?? null);
+  const preferences = useViewPreferences();
+  const presenceNow = usePresenceNow({ now: services.now, watching: view.peers.length > 0 });
+  const peers = useMemo(() => shownPeers({ peers: view.peers, now: presenceNow }), [view.peers, presenceNow]);
+  const shownPeerPresences = useMemo(() => peers.map((entry) => entry.peer), [peers]);
+  const awayClientIds = useMemo(() => new Set(peers.flatMap((entry) => (PEER_IS_AWAY[entry.status] ? [entry.peer.clientId] : []))), [peers]);
   const pins = useMemo(() => pinsOnSlide({ arranged: services.arrangeThreads({ discussion: view.discussion, document: view.document, resolvedTextAnchors: view.resolvedTextAnchors }), slideId: slide?.id ?? null, showResolved: view.showResolvedThreads }), [services, view.discussion, view.document, view.resolvedTextAnchors, slide, view.showResolvedThreads]);
   const focusedThread = pins.find((pin) => pin.thread.id === view.focusedThreadId) ?? null;
 
@@ -189,10 +195,13 @@ export const EditableCanvas = memo(function EditableCanvas(): ReactElement {
               selection={view.selection}
               gesture={view.gesture}
               measured={view.measured}
-              peers={view.peers}
+              peers={shownPeerPresences}
               pins={pins}
               composer={view.composer}
               focusedThread={focusedThread}
+              showAnnotations={preferences.showAnnotations}
+              pageSize={view.document.pageSize}
+              awayClientIds={awayClientIds}
             />
           </div>
         )}

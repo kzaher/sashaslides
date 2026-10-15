@@ -61,7 +61,7 @@ export function encodeRequest(request: PendingDiscussionRequest, documentStore: 
       };
       return {
         requestId: request.requestId,
-        command: { kind: "createThread", threadId: command.threadId, anchor, markings: command.markings, messageId: command.messageId, body: command.body },
+        command: { kind: "createThread", threadId: command.threadId, anchor, markings: command.markings, messageId: command.messageId, body: command.body, mentions: command.mentions },
       };
     }
     case "reply":

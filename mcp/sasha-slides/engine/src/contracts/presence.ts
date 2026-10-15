@@ -32,7 +32,12 @@ export type PeerPresence = LocalPresence &
     lastSeenAt: number;
   }>;
 
-export const PRESENCE_PUBLISH_INTERVAL_MILLISECONDS = 50;
+/**
+ * Ten updates a second: smooth enough for a cursor, and half of the deck server's 20 frames a
+ * second per connection (COLLABORATION_LIMITS), so a pointer that never stops still leaves room for
+ * document updates and discussion (at 50 milliseconds presence alone used the whole rate).
+ */
+export const PRESENCE_PUBLISH_INTERVAL_MILLISECONDS = 100;
 /** A peer whose `lastSeenAt` is older than this is shown as away, then dropped after 4 times as long. */
 export const PRESENCE_STALE_AFTER_MILLISECONDS = 30_000;
 

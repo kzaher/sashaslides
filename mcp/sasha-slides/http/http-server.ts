@@ -18,6 +18,7 @@
  *    cannot see the challenge that starts the flow.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -36,6 +37,8 @@ import {
 import { assertNever } from "../google-auth";
 import type { AuthorizationServer, OAuthErrorCode } from "./authorization-server";
 import type { AccountPortal } from "./account-portal";
+import type { DeckRouter } from "../decks/deck-router";
+import type { DeckSockets } from "../decks/deck-socket";
 
 export type RequestListener = (request: IncomingMessage, response: ServerResponse) => void;
 
@@ -50,10 +53,36 @@ export function createSashaSlidesHttpServer(
     accountPortal?: AccountPortal;
     /** Absent: no comment bot. Present: Drive's push notifications at `/hooks/drive` go to it. */
     driveHook?: DriveHook;
+    /** Absent: no decks. Present: the deck pages, `/deck-api/*` and the deck WebSocket upgrade. */
+    decks?: DeckEntryPoints;
   }>,
 ): Server {
-  return createServer(sashaSlidesRequestListener(options));
+  const server = createServer(sashaSlidesRequestListener(options));
+  const { decks, warn } = options;
+  // The deck WebSocket shares the connector's port (SPEC.md 21.1); nothing else here upgrades.
+  server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+    if (decks === undefined) {
+      socket.destroy();
+      return;
+    }
+    decks.sockets
+      .handleUpgrade({ request, socket, head })
+      .then((handled) => {
+        if (!handled) socket.destroy();
+      })
+      .catch((cause: unknown) => {
+        warn(`deck upgrade failed: ${String(cause)}`);
+        socket.destroy();
+      });
+  });
+  return server;
 }
+
+/** The deck server's two entry points on this HTTP server (decks/deck-stack.ts). */
+export type DeckEntryPoints = Readonly<{
+  router: Pick<DeckRouter, "handleRequest">;
+  sockets: Pick<DeckSockets, "handleUpgrade">;
+}>;
 
 export function sashaSlidesRequestListener(
   options: Readonly<{
@@ -66,9 +95,11 @@ export function sashaSlidesRequestListener(
     accountPortal?: AccountPortal;
     /** Absent: no comment bot. Present: Drive's push notifications at `/hooks/drive` go to it. */
     driveHook?: DriveHook;
+    /** Absent: no decks. Present: the deck pages and `/deck-api/*`. */
+    decks?: DeckEntryPoints;
   }>,
 ): RequestListener {
-  const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal, driveHook } = options;
+  const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal, driveHook, decks } = options;
   const { endpoints } = authorizationServer;
 
   async function route(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -81,6 +112,11 @@ export function sashaSlidesRequestListener(
     // The account portal (`account-portal.ts`) goes first: its HTML pages are for a browser
     // on this origin only, so they get no CORS headers, and it claims only `/account/...`.
     if (accountPortal !== undefined && (await accountPortal.handleRequest({ request, response, url }))) return;
+
+    // The deck server (decks/deck-router.ts): its pages and `/deck-api/*` for a browser on this
+    // origin (no CORS), and the shared Google callback offered to the Google Slides module first,
+    // which answers only a `state` it issued.
+    if (decks !== undefined && (await decks.router.handleRequest({ request, response, url }))) return;
 
     // Server-to-server from Google, so no CORS. Checked before anything else reads a body.
     if (driveHook !== undefined && path === DRIVE_HOOK_PATH) {

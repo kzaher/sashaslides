@@ -12,7 +12,7 @@ import { reduceEditor } from "./reduce-editor.ts";
 describe("renaming the deck", () => {
   const renaming: EditorState = (() => {
     const state = editorStateFor(testDocument({ slides: [slide({ id: "slide_one", elements: [] })] }));
-    return { ...state, ui: { ...state.ui, dialog: { kind: "renameDeck" } } };
+    return { ...state, chrome: { ...state.chrome, dialog: { kind: "renameDeck" } } };
   })();
   for (const row of [
     { name: "a new title queues setTitle, trimmed", typed: "  Quarterly review ", expected: [{ kind: "setTitle", title: "Quarterly review" }] },
@@ -23,7 +23,7 @@ describe("renaming the deck", () => {
       const renamed = reduceEditor(renaming, { kind: "deckRenamed", title: row.typed });
       const commands: readonly DocumentCommand[] = renamed.pendingEdits.flatMap((edit) => (edit.kind === "apply" ? edit.envelope.commands : []));
       assert.deepEqual(commands, row.expected);
-      assert.equal(renamed.ui.dialog.kind, "none", "the dialog closes either way");
+      assert.equal(renamed.chrome.dialog.kind, "none", "the dialog closes either way");
     });
   }
 });

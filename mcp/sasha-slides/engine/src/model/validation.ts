@@ -20,29 +20,13 @@
 //    nothing to check, and nothing must be written.
 
 import * as Y from "yjs";
-import type {
-  ElementId,
-  ElementKey,
-  RandomSource,
-  SlideId,
-  ValidationIssue,
-  ValidationProblem,
-} from "../contracts/index.ts";
-import {
-  assertNever,
-  DOCUMENT_SCHEMA_VERSION,
-  ELEMENT_KEYS_BY_KIND,
-  ELEMENT_KEY,
-  LAYOUT_KEY,
-  META_KEY,
-  PLACEHOLDER_ROLES,
-  RUN_ATTRIBUTE_NAMES,
-  SLIDE_KEY,
-  TABLE_CELL_KEY,
-  THEME_COLOUR_SLOTS,
-  THEME_KEY,
-  TRANSITION_SCRIPT_KEY,
-} from "../contracts/index.ts";
+import type { ValidationIssue, ValidationProblem } from "../contracts/document-store.ts";
+import type { ElementId, RandomSource, SlideId } from "../contracts/ids.ts";
+import type { ElementKey } from "../contracts/yjs-schema.ts";
+import { assertNever } from "../contracts/assert-never.ts";
+import { DOCUMENT_SCHEMA_VERSION, PLACEHOLDER_ROLES } from "../contracts/document.ts";
+import { THEME_COLOUR_SLOTS } from "../contracts/style.ts";
+import { ELEMENT_KEYS_BY_KIND, ELEMENT_KEY, LAYOUT_KEY, META_KEY, RUN_ATTRIBUTE_NAMES, SLIDE_KEY, TABLE_CELL_KEY, THEME_KEY, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
 import { DEFAULT_THEME } from "./blank-deck.ts";
 import { dissolveGroup } from "./command-application.ts";
 import { childMap, type DocumentRoots } from "./document-paths.ts";

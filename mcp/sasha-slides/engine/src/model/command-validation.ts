@@ -13,36 +13,15 @@
 // refuse to read; a value this client would call "unsupported" is refused too, since a client
 // only ever writes values it understands.
 
-import type {
-  AssetId,
-  CommandAuthor,
-  CommandEnvelope,
-  CommandRejection,
-  DocumentCommand,
-  ElementId,
-  ElementPatch,
-  ElementSnapshot,
-  LayoutId,
-  SlideId,
-  SlideSnapshot,
-  TextBody,
-  TextOperation,
-  TextTarget,
-  ThemeSnapshot,
-  TransitionScriptId,
-} from "../contracts/index.ts";
-import {
-  assertNever,
-  ELEMENT_KEY,
-  isObjectId,
-  parseAssetId,
-  RUN_ATTRIBUTE_NAMES,
-  PARAGRAPH_ATTRIBUTE_NAMES,
-  scriptFingerprint,
-  textBodyLength,
-  textTargetKey,
-  TRANSITION_SCRIPT_KEY,
-} from "../contracts/index.ts";
+import type { CommandAuthor, CommandEnvelope, CommandRejection, DocumentCommand, ElementPatch, TextOperation } from "../contracts/commands.ts";
+import type { ElementSnapshot, SlideSnapshot, TextBody, ThemeSnapshot } from "../contracts/document.ts";
+import type { AssetId, ElementId, LayoutId, SlideId, TransitionScriptId } from "../contracts/ids.ts";
+import type { TextTarget } from "../contracts/selection.ts";
+import { assertNever } from "../contracts/assert-never.ts";
+import { scriptFingerprint, textBodyLength } from "../contracts/document.ts";
+import { isObjectId, parseAssetId } from "../contracts/ids.ts";
+import { textTargetKey } from "../contracts/text-delta.ts";
+import { ELEMENT_KEY, RUN_ATTRIBUTE_NAMES, PARAGRAPH_ATTRIBUTE_NAMES, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
 import { childArray, childMap, elementsMapOf, textOf, type DocumentRoots } from "./document-paths.ts";
 import { readSlideStructure, tableLineIds, type SlideStructure } from "./element-tree.ts";
 import {
@@ -81,7 +60,8 @@ import {
   type StoredValueCheck,
   type Verdict,
 } from "./stored-values.ts";
-import { PLACEHOLDER_ROLES, THEME_COLOUR_SLOTS } from "../contracts/index.ts";
+import { PLACEHOLDER_ROLES } from "../contracts/document.ts";
+import { THEME_COLOUR_SLOTS } from "../contracts/style.ts";
 
 export type ValidationContext = Readonly<{ roots: DocumentRoots; revision: number }>;
 

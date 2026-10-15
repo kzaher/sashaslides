@@ -144,12 +144,12 @@ export function editFrameField(state: EditorState, field: "x" | "y" | "width" | 
       return queueFrames(state, selected.slide.id, translateUpdates(leafUpdates(selected.elements), 0, value - from.y));
     case "width": {
       const width = Math.max(1, value);
-      const height = state.ui.aspectRatioLocked && from.width > 0 ? Math.max(1, (from.height * width) / from.width) : from.height;
+      const height = state.chrome.aspectRatioLocked && from.width > 0 ? Math.max(1, (from.height * width) / from.width) : from.height;
       return queueFrames(state, selected.slide.id, scaleUpdates(updates, from, { ...from, width, height }));
     }
     case "height": {
       const height = Math.max(1, value);
-      const width = state.ui.aspectRatioLocked && from.height > 0 ? Math.max(1, (from.width * height) / from.height) : from.width;
+      const width = state.chrome.aspectRatioLocked && from.height > 0 ? Math.max(1, (from.width * height) / from.height) : from.width;
       return queueFrames(state, selected.slide.id, scaleUpdates(updates, from, { ...from, width, height }));
     }
     case "rotation": {

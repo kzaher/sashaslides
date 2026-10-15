@@ -351,13 +351,13 @@ describe("discussion authority", () => {
     using aliceStore = createMemoryDiscussionStore({ actor: alice, now: () => 42, initialLog: [] });
     const threadId = mint("thread");
     const requestId = mint("discussionRequest");
-    const create = { kind: "createThread", threadId, anchor: { slideId: mint("slide"), target: { kind: "slide" }, region: null, elementFrameAtCreation: null }, markings: [], messageId: mint("message"), body: "Hi" } as const;
+    const create = { kind: "createThread", threadId, anchor: { slideId: mint("slide"), target: { kind: "slide" }, region: null, elementFrameAtCreation: null }, markings: [], messageId: mint("message"), body: "Hi", mentions: [] } as const;
     const first = await aliceStore.submit({ requestId, command: create });
     const again = await aliceStore.submit({ requestId, command: create });
     assert.deepEqual(again, first);
     assert.equal(aliceStore.snapshot().threads.length, 1);
     assert.equal(aliceStore.snapshot().threads[0]?.createdAt, 42);
-    const missing = await aliceStore.submit({ requestId: mint("discussionRequest"), command: { kind: "reply", threadId: mint("thread"), messageId: mint("message"), body: "?" } });
+    const missing = await aliceStore.submit({ requestId: mint("discussionRequest"), command: { kind: "reply", threadId: mint("thread"), messageId: mint("message"), body: "?", mentions: [] } });
     assert.equal(missing.kind === "rejected" ? missing.reason : null, "threadMissing");
     using bobStore = createMemoryDiscussionStore({ actor: bob, now: () => 43, initialLog: [{ sequence: 1, requestId, actor: alice, at: 42, command: create }] });
     const deleted = await bobStore.submit({ requestId: mint("discussionRequest"), command: { kind: "deleteThread", threadId } });

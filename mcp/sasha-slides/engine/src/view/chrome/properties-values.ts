@@ -21,10 +21,12 @@ import type { EditorEvent } from "../../contracts/editor-events.ts";
 import type { EditorState } from "../../contracts/editor-state.ts";
 import { pointsFromSlideUnits, rotatedBounds, slideUnitsFromPoints } from "../../contracts/geometry.ts";
 import type { CellAddress, TextTarget } from "../../contracts/selection.ts";
-import type { Colour, NoColour, ParagraphStyle, RunStyle } from "../../contracts/style.ts";
+import type { ListId } from "../../contracts/ids.ts";
+import type { Colour, ListGlyph, NoColour, ParagraphStyle, RunStyle } from "../../contracts/style.ts";
 import type { ElementKey } from "../../contracts/yjs-schema.ts";
 import { findElement, visibleFrame } from "../canvas/canvas-geometry.ts";
 import { paragraphBaseRunStyle, resolveParagraphStyle, resolveRunStyle, textStyleContextOf, type TextStyleContext } from "../render/text-layout.ts";
+import { listGlyphFamily } from "./list-glyphs.ts";
 
 /** One control's value across everything it edits. */
 export type SharedValue<TValue> = Readonly<{ kind: "value"; value: TValue }> | Readonly<{ kind: "mixed" }> | Readonly<{ kind: "none" }>;
@@ -100,6 +102,10 @@ export type TextValues = Readonly<{
   indentFirstLine: SharedValue<number>;
   direction: SharedValue<ParagraphStyle["direction"]>;
   listKind: SharedValue<"none" | "bulleted" | "numbered">;
+  /** The list style picker's current glyph; "none" for paragraphs in no list. */
+  listGlyph: SharedValue<ListGlyph | "none">;
+  /** The first list among the paragraphs, which the picker names in its request (the reducer keeps each paragraph's own). */
+  firstListId: ListId | null;
 }>;
 
 export function textValues(state: EditorState): TextValues {
@@ -127,6 +133,8 @@ export function textValues(state: EditorState): TextValues {
     indentFirstLine: sharedValue(paragraphs.map((style) => style.indentFirstLine)),
     direction: sharedValue(paragraphs.map((style) => style.direction)),
     listKind: sharedValue(paragraphs.map((style) => listKindOf(style))),
+    listGlyph: sharedValue(paragraphs.map((style) => listGlyphOf(style))),
+    firstListId: paragraphs.map((style) => listIdOf(style)).find((listId) => listId !== null) ?? null,
   };
 }
 
@@ -325,13 +333,51 @@ function listKindOf(style: ParagraphStyle): "none" | "bulleted" | "numbered" {
     case "none":
       return "none";
     case "list":
-      return NUMBERED_GLYPHS.has(list.glyph) ? "numbered" : "bulleted";
+      return listGlyphFamily(list.glyph);
     default:
       return assertNever(list);
   }
 }
 
-const NUMBERED_GLYPHS: ReadonlySet<string> = new Set(["decimal", "decimalZeroPadded", "upperAlphabetic", "lowerAlphabetic", "upperRoman", "lowerRoman"]);
+function listGlyphOf(style: ParagraphStyle): ListGlyph | "none" {
+  const list = style.list;
+  switch (list.kind) {
+    case "none":
+      return "none";
+    case "list":
+      return list.glyph;
+    default:
+      return assertNever(list);
+  }
+}
+
+function listIdOf(style: ParagraphStyle): ListId | null {
+  const list = style.list;
+  switch (list.kind) {
+    case "none":
+      return null;
+    case "list":
+      return list.listId;
+    default:
+      return assertNever(list);
+  }
+}
+
+/** The leaves under an element (a group's children, recursively), the elements style edits reach. */
+export function leafElements(element: ElementSnapshot): readonly ElementSnapshot[] {
+  switch (element.kind) {
+    case "group":
+      return element.children.flatMap(leafElements);
+    case "shape":
+    case "image":
+    case "line":
+    case "table":
+    case "unsupported":
+      return [element];
+    default:
+      return assertNever(element);
+  }
+}
 
 function definedPatch(patch: Partial<RunStyle>): Partial<RunStyle> {
   return Object.fromEntries(Object.entries(patch).filter((entry) => entry[1] !== undefined));

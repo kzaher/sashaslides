@@ -75,8 +75,15 @@ export type Marking =
 export type CommentMessage = Readonly<{
   id: MessageId;
   author: Person;
-  /** Plain text; `@displayName` mentions are resolved by the view, not stored as markup. */
+  /** Plain text; a mention reads `@displayName` in it. */
   body: string;
+  /**
+   * The people this message mentions, by id, as the composer chose them from the members list.
+   * The server keeps only ids of current members (others are dropped, at most
+   * `COLLABORATION_LIMITS.maximumMentionsPerMessage`); the view highlights `@displayName` for each.
+   * Stored as ids, not parsed from the text, because two members may share a display name.
+   */
+  mentions: readonly PersonId[];
   createdAt: number;
   editedAt: number | null;
 }>;
@@ -107,15 +114,28 @@ export const EMPTY_DISCUSSION: DiscussionSnapshot = { sequence: 0, threads: [] }
 
 /** What a client asks the authority to do. Ids are minted by the client (ids.ts). */
 export type DiscussionCommand =
-  | Readonly<{ kind: "createThread"; threadId: ThreadId; anchor: CommentAnchor; markings: readonly Marking[]; messageId: MessageId; body: string }>
-  | Readonly<{ kind: "reply"; threadId: ThreadId; messageId: MessageId; body: string }>
+  | Readonly<{
+      kind: "createThread";
+      threadId: ThreadId;
+      anchor: CommentAnchor;
+      markings: readonly Marking[];
+      messageId: MessageId;
+      body: string;
+      mentions: readonly PersonId[];
+    }>
+  | Readonly<{ kind: "reply"; threadId: ThreadId; messageId: MessageId; body: string; mentions: readonly PersonId[] }>
   /** Only the message's author; rejected `notAuthor` otherwise. */
-  | Readonly<{ kind: "editMessage"; threadId: ThreadId; messageId: MessageId; body: string }>
+  | Readonly<{ kind: "editMessage"; threadId: ThreadId; messageId: MessageId; body: string; mentions: readonly PersonId[] }>
   /** Only the message's author. */
   | Readonly<{ kind: "deleteMessage"; threadId: ThreadId; messageId: MessageId }>
   | Readonly<{ kind: "resolveThread"; threadId: ThreadId }>
   | Readonly<{ kind: "reopenThread"; threadId: ThreadId }>
-  /** Only the thread's creator (or the deck owner, milestone 2). */
+  /**
+   * Only the thread's creator, or a role with `moderateDiscussion` (deck-access.ts). The AUTHORITY
+   * decides (the deck server refuses anyone else with `notPermitted`); the log's fold
+   * (model/discussion-log.ts) applies a `deleteThread` from any actor the authority accepted, since
+   * a fold cannot see roles. The in-memory authority of milestone 1 stays creator-only.
+   */
   | Readonly<{ kind: "deleteThread"; threadId: ThreadId }>;
 
 export type DiscussionRequest = Readonly<{ requestId: DiscussionRequestId; command: DiscussionCommand }>;

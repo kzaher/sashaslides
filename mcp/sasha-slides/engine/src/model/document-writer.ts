@@ -12,29 +12,11 @@
 //    "rowId|columnId".
 
 import * as Y from "yjs";
-import type {
-  ElementId,
-  ElementSnapshot,
-  LayoutSnapshot,
-  RandomSource,
-  SlideSnapshot,
-  TableCell,
-  TableElement,
-  TextBody,
-  ThemeSnapshot,
-} from "../contracts/index.ts";
-import {
-  assertNever,
-  DOCUMENT_SCHEMA_VERSION,
-  ELEMENT_KEY,
-  EMPTY_TEXT_BODY,
-  LAYOUT_KEY,
-  META_KEY,
-  SLIDE_KEY,
-  TABLE_CELL_KEY,
-  tableCellKey,
-  THEME_KEY,
-} from "../contracts/index.ts";
+import type { ElementSnapshot, LayoutSnapshot, SlideSnapshot, TableCell, TableElement, TextBody, ThemeSnapshot } from "../contracts/document.ts";
+import type { ElementId, RandomSource } from "../contracts/ids.ts";
+import { assertNever } from "../contracts/assert-never.ts";
+import { DOCUMENT_SCHEMA_VERSION, EMPTY_TEXT_BODY } from "../contracts/document.ts";
+import { ELEMENT_KEY, LAYOUT_KEY, META_KEY, SLIDE_KEY, TABLE_CELL_KEY, tableCellKey, THEME_KEY } from "../contracts/yjs-schema.ts";
 import type { BlankDeck } from "./blank-deck.ts";
 import type { DocumentRoots } from "./document-paths.ts";
 import { defaultTableCell } from "./element-tree.ts";

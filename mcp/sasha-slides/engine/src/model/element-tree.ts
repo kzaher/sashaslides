@@ -20,41 +20,16 @@
 //    previous snapshot's object is returned, which React memoisation relies on (document.ts).
 
 import * as Y from "yjs";
-import type {
-  AssetId,
-  BoxStyle,
-  CellBorders,
-  ElementCommon,
-  ElementId,
-  ElementSnapshot,
-  Fill,
-  Frame,
-  ImageCrop,
-  Point,
-  StoredElementKind,
-  Stroke,
-  TableCell,
-  TableColumn,
-  TableColumnId,
-  TableElement,
-  TableRow,
-  TableRowId,
-} from "../contracts/index.ts";
-import {
-  assertNever,
-  boundsOfPoints,
-  DEFAULT_TEXT_BOX_STYLE,
-  ELEMENT_KEY,
-  EMPTY_TEXT_BODY,
-  frameCentre,
-  frameCorners,
-  identityFrame,
-  lineFrame,
-  normaliseRotation,
-  rotatePoint,
-  TABLE_CELL_KEY,
-  tableCellKey,
-} from "../contracts/index.ts";
+import type { CellBorders, ElementCommon, ElementSnapshot, ImageCrop, TableCell, TableColumn, TableElement, TableRow } from "../contracts/document.ts";
+import type { Frame, Point } from "../contracts/geometry.ts";
+import type { AssetId, ElementId, TableColumnId, TableRowId } from "../contracts/ids.ts";
+import type { BoxStyle, Fill, Stroke } from "../contracts/style.ts";
+import type { StoredElementKind } from "../contracts/yjs-schema.ts";
+import { assertNever } from "../contracts/assert-never.ts";
+import { EMPTY_TEXT_BODY } from "../contracts/document.ts";
+import { boundsOfPoints, frameCentre, frameCorners, identityFrame, lineFrame, normaliseRotation, rotatePoint } from "../contracts/geometry.ts";
+import { DEFAULT_TEXT_BOX_STYLE } from "../contracts/style.ts";
+import { ELEMENT_KEY, TABLE_CELL_KEY, tableCellKey } from "../contracts/yjs-schema.ts";
 import { childArray, childMap, childText } from "./document-paths.ts";
 import { compareOrderedSiblings } from "./order-keys.ts";
 import {

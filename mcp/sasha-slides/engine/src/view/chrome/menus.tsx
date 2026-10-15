@@ -3,7 +3,7 @@
 // section 2) -- with the keyboard navigation a menu needs: arrow keys, Enter and Space, Escape,
 // Home and End, left and right to the neighbouring menu, and type-ahead by first letter.
 //
-// Which menu is open is editor state (`ui.openMenu`, `ui.contextMenu`); which item is highlighted is
+// Which menu is open is editor state (`chrome.openMenu`, `chrome.contextMenu`); which item is highlighted is
 // this component's own, because it lives exactly as long as the open menu and nothing else reads it.
 // An item runs through `performMenuAction`, inside the click or key event, so copy and Present keep
 // their user gesture (gesture-handlers.ts).
@@ -14,7 +14,7 @@ import { assertNever } from "../../contracts/assert-never.ts";
 import type { MenuName } from "../../contracts/editor-state.ts";
 import type { Point } from "../../contracts/geometry.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
-import { FloatingLayerContext, useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
+import { FloatingLayerContext, useEditorSelector, useEditorServices, useViewPreferences } from "../application/editor-services.tsx";
 import { handleMenuClipboardWrite, handleOpenInNewTab, handlePresent, type GestureContext } from "../application/gesture-handlers.ts";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { Icon } from "./icons.tsx";
@@ -22,7 +22,7 @@ import { MENU_LABEL, MENU_ORDER, contextMenuEntries, menuEntries, type MenuActio
 
 export function MenuBar(properties: Readonly<{ gesture: GestureContext }>): ReactElement {
   const services = useEditorServices();
-  const openMenu = useEditorSelector((state) => state.ui.openMenu);
+  const openMenu = useEditorSelector((state) => state.chrome.openMenu);
   const buttons = useRef(new Map<MenuName, HTMLButtonElement | null>());
   return (
     <nav className={VIEW_CLASS.menuBar} aria-label="Menus">
@@ -52,7 +52,8 @@ export function MenuBar(properties: Readonly<{ gesture: GestureContext }>): Reac
 function OpenMenu(properties: Readonly<{ menu: MenuName; at: () => Point | null; gesture: GestureContext }>): ReactElement {
   const state = useEditorSelector((current) => current);
   const services = useEditorServices();
-  const entries = menuEntries({ menu: properties.menu, state, shortcuts: shortcutStyle(services.primaryModifier) });
+  const preferences = useViewPreferences();
+  const entries = menuEntries({ menu: properties.menu, state, shortcuts: shortcutStyle(services.primaryModifier), hostItems: services.host.fileMenuItems, showAnnotations: preferences.showAnnotations });
   return (
     <MenuPopover
       label={MENU_LABEL[properties.menu]}
@@ -69,7 +70,7 @@ function OpenMenu(properties: Readonly<{ menu: MenuName; at: () => Point | null;
 export function ContextMenuLayer(properties: Readonly<{ gesture: GestureContext }>): ReactElement | null {
   const state = useEditorSelector((current) => current);
   const services = useEditorServices();
-  const menu = state.ui.contextMenu;
+  const menu = state.chrome.contextMenu;
   if (menu === null) return null;
   return (
     <MenuPopover
@@ -85,7 +86,7 @@ export function ContextMenuLayer(properties: Readonly<{ gesture: GestureContext 
 }
 
 /** Performs one menu action inside the event that chose it (see the header). */
-export function performMenuAction(options: Readonly<{ action: MenuAction; gesture: GestureContext; close: () => void }>): void {
+export function performMenuAction(options: Readonly<{ action: MenuAction; gesture: GestureContext; close: () => void; toggleAnnotations: () => void }>): void {
   const action = options.action;
   switch (action.kind) {
     case "dispatch":
@@ -103,6 +104,15 @@ export function performMenuAction(options: Readonly<{ action: MenuAction; gestur
     case "openInNewTab":
       handleOpenInNewTab(options.gesture);
       options.close();
+      return;
+    case "host":
+      // Inside the click: a host item may open a window (EditorHost, editor-system.ts).
+      action.run();
+      options.close();
+      return;
+    case "toggleAnnotations":
+      options.close();
+      options.toggleAnnotations();
       return;
     default:
       assertNever(action);
@@ -132,6 +142,7 @@ export function MenuPopover(properties: Readonly<{
 }>): ReactElement {
   const container = useRef<HTMLDivElement>(null);
   const floatingLayer = useContext(FloatingLayerContext);
+  const preferences = useViewPreferences();
   const items = properties.entries.flatMap((entry, index) => (entryIsItem(entry) ? [{ entry, index }] : []));
   const [active, setActive] = useState(() => items.findIndex((item) => !item.entry.disabled));
   const [position, setPosition] = useState<Point | null>(null);
@@ -156,7 +167,7 @@ export function MenuPopover(properties: Readonly<{
   const choose = (index: number): void => {
     const chosen = items[index];
     if (chosen === undefined || chosen.entry.disabled) return;
-    performMenuAction({ action: chosen.entry.action, gesture: properties.gesture, close: properties.onClose });
+    performMenuAction({ action: chosen.entry.action, gesture: properties.gesture, close: properties.onClose, toggleAnnotations: preferences.toggleAnnotations });
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {

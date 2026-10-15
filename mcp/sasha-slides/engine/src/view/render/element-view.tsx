@@ -41,18 +41,18 @@ import type { SlideRenderContext } from "./render-context.ts";
 import { effectiveCornerRadius, isRectangleFamily, presetTextInset, shapeOutlinePath, type TextInset } from "./shape-geometry.ts";
 import {
   PLACEHOLDER_HATCHING,
-  borderCss,
-  boxShadowCss,
-  colourCss,
-  cornerRadiusCss,
-  dropShadowFilterCss,
+  borderDeclarations,
+  boxShadowValue,
+  colourValue,
+  cornerRadiusValue,
+  dropShadowFilterValue,
   fillRendering,
-  leafFrameCss,
+  leafFrameDeclarations,
   roundNumber,
   strokeDashArray,
-  textCounterFlipCss,
+  textCounterFlipValue,
   verticalJustification,
-} from "./style-css.ts";
+} from "./inline-styles.ts";
 import { textStyleContextOf, type TextStyleContext } from "./text-layout.ts";
 import { TextParagraphs } from "./text-paragraphs.tsx";
 
@@ -105,7 +105,7 @@ function ShapeView(properties: Readonly<{ element: ShapeElement; context: SlideR
   const box = element.box;
   const theme = context.theme;
   const fill = fillRendering({ fill: box.fill, theme, assetAddress: context.assetAddress });
-  const leaf: CSSProperties = { ...leafFrameCss(frame), ...(box.opacity < 1 ? { opacity: box.opacity } : {}) };
+  const leaf: CSSProperties = { ...leafFrameDeclarations(frame), ...(box.opacity < 1 ? { opacity: box.opacity } : {}) };
   const text = (
     <ShapeTextLayer element={element} context={context} inset={presetTextInset(element.preset)} />
   );
@@ -114,9 +114,9 @@ function ShapeView(properties: Readonly<{ element: ShapeElement; context: SlideR
     const style: CSSProperties = {
       ...leaf,
       ...fill.background,
-      ...borderCss(box.border, theme),
-      borderRadius: cornerRadiusCss(radius),
-      ...(box.shadow === null ? {} : { boxShadow: boxShadowCss(box.shadow, theme) }),
+      ...borderDeclarations(box.border, theme),
+      borderRadius: cornerRadiusValue(radius),
+      ...(box.shadow === null ? {} : { boxShadow: boxShadowValue(box.shadow, theme) }),
     };
     return (
       <div style={style} {...elementAttributes(element)}>
@@ -130,13 +130,13 @@ function ShapeView(properties: Readonly<{ element: ShapeElement; context: SlideR
   const stroke = vectorStroke(element);
   return (
     <div style={leaf} {...elementAttributes(element)}>
-      <div style={{ position: "absolute", inset: 0, ...(box.shadow === null ? {} : { filter: dropShadowFilterCss(box.shadow, theme) }) }}>
+      <div style={{ position: "absolute", inset: 0, ...(box.shadow === null ? {} : { filter: dropShadowFilterValue(box.shadow, theme) }) }}>
         <div style={{ position: "absolute", inset: 0, clipPath: `path("${outline}")`, ...fill.background }}>
           {fill.imageLayer === null ? null : <div style={fill.imageLayer} />}
         </div>
         {stroke === null ? null : (
           <svg width={roundNumber(frame.width)} height={roundNumber(frame.height)} viewBox={`0 0 ${roundNumber(frame.width)} ${roundNumber(frame.height)}`} style={{ position: "absolute", inset: 0, overflow: "visible" }} aria-hidden="true">
-            <path d={outline} fill="none" stroke={colourCss(stroke.colour, theme)} strokeWidth={roundNumber(stroke.width)} strokeDasharray={strokeDashArray(stroke.dash, stroke.width)} strokeLinejoin="round" />
+            <path d={outline} fill="none" stroke={colourValue(stroke.colour, theme)} strokeWidth={roundNumber(stroke.width)} strokeDasharray={strokeDashArray(stroke.dash, stroke.width)} strokeLinejoin="round" />
           </svg>
         )}
       </div>
@@ -171,7 +171,7 @@ function ShapeTextLayer(properties: Readonly<{ element: ShapeElement; context: S
   useTextHeightReport({ content, element, context, inset });
   const textBox = element.textBox;
   const frame = element.frame;
-  const counterFlip = textCounterFlipCss(frame);
+  const counterFlip = textCounterFlipValue(frame);
   const style: CSSProperties = {
     position: "absolute",
     left: roundNumber(inset.left * frame.width),
@@ -182,7 +182,7 @@ function ShapeTextLayer(properties: Readonly<{ element: ShapeElement; context: S
     flexDirection: "column",
     justifyContent: verticalJustification(textBox.verticalAlignment),
     boxSizing: "border-box",
-    ...textBoxPaddingCss(textBox),
+    ...textBoxPaddingDeclarations(textBox),
     whiteSpace: textBox.wrap ? "pre-wrap" : "pre",
     overflowWrap: "break-word",
     ...(counterFlip === undefined ? {} : { transform: counterFlip }),
@@ -273,12 +273,12 @@ function ImageView(properties: Readonly<{ element: ImageElement; context: SlideR
   const fill = fillRendering({ fill: box.fill, theme, assetAddress: context.assetAddress });
   const address = context.assetAddress(element.assetId);
   const style: CSSProperties = {
-    ...leafFrameCss(frame),
+    ...leafFrameDeclarations(frame),
     ...(box.opacity < 1 ? { opacity: box.opacity } : {}),
     ...fill.background,
-    ...borderCss(box.border, theme),
-    borderRadius: cornerRadiusCss(box.cornerRadius),
-    ...(box.shadow === null ? {} : { boxShadow: boxShadowCss(box.shadow, theme) }),
+    ...borderDeclarations(box.border, theme),
+    borderRadius: cornerRadiusValue(box.cornerRadius),
+    ...(box.shadow === null ? {} : { boxShadow: boxShadowValue(box.shadow, theme) }),
     overflow: "hidden",
   };
   return (
@@ -287,7 +287,7 @@ function ImageView(properties: Readonly<{ element: ImageElement; context: SlideR
       {address === null ? (
         <div style={{ position: "absolute", inset: 0, ...PLACEHOLDER_HATCHING }} title="This image is still loading or is not available here." />
       ) : (
-        <div role="img" aria-label={element.description} style={croppedImageCss({ crop: element.crop, address })} />
+        <div role="img" aria-label={element.description} style={croppedImageDeclarations({ crop: element.crop, address })} />
       )}
       <UnsupportedValues keys={element.unsupportedKeys} />
     </div>
@@ -298,7 +298,7 @@ function LineView(properties: Readonly<{ element: LineElement; context: SlideRen
   const { element, context } = properties;
   const frame = element.frame;
   const stroke = element.stroke;
-  const colour = colourCss(stroke.colour, context.theme);
+  const colour = colourValue(stroke.colour, context.theme);
   const margin = Math.max(12, stroke.width * 4);
   const left = frame.x - margin;
   const top = frame.y - margin;
@@ -309,7 +309,7 @@ function LineView(properties: Readonly<{ element: LineElement; context: SlideRen
   const endMarker = arrowMarker({ id: `${element.id}-end`, head: element.endArrow, colour, size: markerSize, atStart: false });
   const path = linePath(element);
   return (
-    <div style={{ ...leafFrameCss(frame), overflow: "visible", ...(element.opacity < 1 ? { opacity: element.opacity } : {}) }} {...elementAttributes(element)}>
+    <div style={{ ...leafFrameDeclarations(frame), overflow: "visible", ...(element.opacity < 1 ? { opacity: element.opacity } : {}) }} {...elementAttributes(element)}>
       <svg
         width={roundNumber(width)}
         height={roundNumber(height)}
@@ -346,7 +346,7 @@ function LineView(properties: Readonly<{ element: LineElement; context: SlideRen
  * background rather than an `<img>`: the server renderer would hoist an image preload link in front
  * of the slide root, and the sandbox markup must be ONE root element.
  */
-export function croppedImageCss(options: Readonly<{ crop: ImageElement["crop"]; address: string }>): CSSProperties {
+export function croppedImageDeclarations(options: Readonly<{ crop: ImageElement["crop"]; address: string }>): CSSProperties {
   const crop = options.crop;
   const visibleWidth = Math.max(0.01, 1 - crop.left - crop.right);
   const visibleHeight = Math.max(0.01, 1 - crop.top - crop.bottom);
@@ -422,7 +422,7 @@ function TableView(properties: Readonly<{ element: TableElement; context: SlideR
   const styleContext = textStyleContextOf({ theme: context.theme, element });
   const columnCount = element.columns.length;
   return (
-    <div style={{ ...leafFrameCss(element.frame), height: "auto", minHeight: roundNumber(element.frame.height), ...(element.opacity < 1 ? { opacity: element.opacity } : {}) }} {...elementAttributes(element)}>
+    <div style={{ ...leafFrameDeclarations(element.frame), height: "auto", minHeight: roundNumber(element.frame.height), ...(element.opacity < 1 ? { opacity: element.opacity } : {}) }} {...elementAttributes(element)}>
       <table style={{ borderCollapse: "collapse", tableLayout: "fixed", width: roundNumber(element.frame.width), borderSpacing: 0 }}>
         <colgroup>
           {element.columns.map((column) => (
@@ -461,10 +461,10 @@ function TableCellView(properties: Readonly<{ element: TableElement; cell: Table
     position: "relative",
     padding: 0,
     ...fill.background,
-    borderTop: borders.top === null ? "0 none" : borderCss({ kind: "uniform", stroke: borders.top }, theme).borderTop,
-    borderRight: borders.right === null ? "0 none" : borderCss({ kind: "uniform", stroke: borders.right }, theme).borderRight,
-    borderBottom: borders.bottom === null ? "0 none" : borderCss({ kind: "uniform", stroke: borders.bottom }, theme).borderBottom,
-    borderLeft: borders.left === null ? "0 none" : borderCss({ kind: "uniform", stroke: borders.left }, theme).borderLeft,
+    borderTop: borders.top === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.top }, theme).borderTop,
+    borderRight: borders.right === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.right }, theme).borderRight,
+    borderBottom: borders.bottom === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.bottom }, theme).borderBottom,
+    borderLeft: borders.left === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.left }, theme).borderLeft,
     // The three vertical alignments are also the stylesheet's names for them.
     verticalAlign: cell.textBox.verticalAlignment,
   };
@@ -472,7 +472,7 @@ function TableCellView(properties: Readonly<{ element: TableElement; cell: Table
   return (
     <td style={style} rowSpan={cell.rowSpan} colSpan={cell.columnSpan} {...{ [TABLE_CELL_COLUMN_ATTRIBUTE]: cell.columnId }}>
       {fill.imageLayer === null ? null : <div style={fill.imageLayer} />}
-      <div style={{ position: "relative", ...textBoxPaddingCss(cell.textBox), whiteSpace: cell.textBox.wrap ? "pre-wrap" : "pre", overflowWrap: "break-word" }} {...{ [TEXT_LAYER_ATTRIBUTE]: "" }}>
+      <div style={{ position: "relative", ...textBoxPaddingDeclarations(cell.textBox), whiteSpace: cell.textBox.wrap ? "pre-wrap" : "pre", overflowWrap: "break-word" }} {...{ [TEXT_LAYER_ATTRIBUTE]: "" }}>
         <TextContent target={target} body={cell.text} styleContext={properties.styleContext} context={context} fontScale={1} />
       </div>
     </td>
@@ -504,7 +504,7 @@ function GroupView(properties: Readonly<{ element: GroupElement; context: SlideR
 function UnsupportedView(properties: Readonly<{ element: UnsupportedElement }>): ReactElement {
   const element = properties.element;
   return (
-    <div style={{ ...leafFrameCss(element.frame), ...PLACEHOLDER_HATCHING }} title={NEWER_VERSION_EXPLANATION} {...elementAttributes(element)} {...{ [UNSUPPORTED_ATTRIBUTE]: element.storedKind }} />
+    <div style={{ ...leafFrameDeclarations(element.frame), ...PLACEHOLDER_HATCHING }} title={NEWER_VERSION_EXPLANATION} {...elementAttributes(element)} {...{ [UNSUPPORTED_ATTRIBUTE]: element.storedKind }} />
   );
 }
 
@@ -514,7 +514,7 @@ function UnsupportedValues(properties: Readonly<{ keys: readonly string[] }>): R
   return <div style={{ position: "absolute", inset: 0, ...PLACEHOLDER_HATCHING, pointerEvents: "none" }} title={`${NEWER_VERSION_EXPLANATION} (${properties.keys.join(", ")})`} {...{ [UNSUPPORTED_ATTRIBUTE]: properties.keys.join(" ") }} />;
 }
 
-function textBoxPaddingCss(textBox: TextBoxStyle): CSSProperties {
+function textBoxPaddingDeclarations(textBox: TextBoxStyle): CSSProperties {
   return {
     paddingTop: roundNumber(textBox.paddingTop),
     paddingRight: roundNumber(textBox.paddingRight),

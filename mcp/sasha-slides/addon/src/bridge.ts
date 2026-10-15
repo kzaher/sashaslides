@@ -176,7 +176,9 @@ export type ServerFunctionName =
   | "sashaTakePickerTarget"
   | "sashaOpenDefectReport"
   | "sashaReportWindowUrl"
-  | "sashaTakeReportTarget";
+  | "sashaTakeReportTarget"
+  | "sashaImportAgain"
+  | "sashaRunExport";
 
 export const SERVER_FUNCTION_NAMES: readonly ServerFunctionName[] = [
   "sashaHello",
@@ -199,6 +201,8 @@ export const SERVER_FUNCTION_NAMES: readonly ServerFunctionName[] = [
   "sashaOpenDefectReport",
   "sashaReportWindowUrl",
   "sashaTakeReportTarget",
+  "sashaImportAgain",
+  "sashaRunExport",
 ];
 
 /**

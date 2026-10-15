@@ -17,16 +17,28 @@ import {
   type ShapePreset,
 } from "../../contracts/index.ts";
 import { reduceArrange, editFrameField, nudgeSelection } from "./arrange.ts";
+import { commentingRefusal, editingRefusal } from "./access.ts";
 import { cutSelection, pasteContent } from "./clipboard.ts";
+import {
+  announceAgentScripts,
+  newUnapprovedAgentScripts,
+  reduceAgentRevertSettled,
+  reduceCollaborationChanged,
+  reduceCollaborationNotice,
+  requestAgentRevert,
+  requestReconnect,
+} from "./collaboration.ts";
 import { markDiscussionSent, openComposer, queueDiscussion, reduceDiscussionSettled, replyToThread, submitComment } from "./comments.ts";
 import { reduceDocumentChanged, reduceEditSettled } from "./document-changes.ts";
 import { findElementPath, findSlide, leavesOf, textShapeOf } from "./document-lookup.ts";
-import { queueEnvelope, queueHistory, raiseNotice } from "./editor-queue.ts";
+import { queueEnvelope, queueHistory, raiseNotice, refuse } from "./editor-queue.ts";
+import { perElementPatches } from "./element-patches.ts";
 import { elementIdOfTarget, selectedElements, selectElements, textSelectionOf } from "./editor-selection.ts";
 import { captureFormat } from "./format-painter.ts";
 import { scaleFor } from "./initial-editor-state.ts";
 import { chordToIntent, type KeyIntent } from "./keyboard.ts";
 import { reduceSlideLayoutChosen } from "./layout-remap.ts";
+import { withRecentColour } from "./recent-colours.ts";
 import { reduceLayoutMeasured } from "./measured-layout.ts";
 import { cancelGesture, gestureIsIdle, reducePointerDown, reducePointerMove, reducePointerUp } from "./pointer-gestures.ts";
 import {
@@ -110,13 +122,13 @@ export function applyKeyIntent(state: EditorState, intent: KeyIntent | null): Ed
     case "toggleList":
       return toggleList(state, intent.list);
     case "openLinkEditor":
-      return { ...state, ui: { ...state.ui, dialog: { kind: "linkEditor" } } };
+      return { ...state, chrome: { ...state.chrome, dialog: { kind: "linkEditor" } } };
     case "newSlide":
       return newSlide(state, null);
     case "comment":
       return commentOnSelection(state);
     case "showKeyboardShortcuts":
-      return { ...state, ui: { ...state.ui, dialog: { kind: "keyboardShortcuts" } } };
+      return { ...state, chrome: { ...state.chrome, dialog: { kind: "keyboardShortcuts" } } };
     case "goToSlide":
       return goToSlide(state, intent.step);
     default:
@@ -177,7 +189,7 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
     case "frameFieldEdited":
       return editFrameField(state, event.field, event.value);
     case "aspectRatioLockToggled":
-      return { ...state, ui: { ...state.ui, aspectRatioLocked: !state.ui.aspectRatioLocked } };
+      return { ...state, chrome: { ...state.chrome, aspectRatioLocked: !state.chrome.aspectRatioLocked } };
     case "arrangeRequested":
       return reduceArrange(state, event.action);
     case "shapePresetChanged":
@@ -221,7 +233,7 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
     case "transitionPreviewRequested":
       return previewTransition(state, event.slideId);
     case "transitionPreviewEnded":
-      return { ...state, ui: { ...state.ui, transitionPreview: null } };
+      return { ...state, chrome: { ...state.chrome, transitionPreview: null } };
     // --- clipboard
     case "copied":
       return { ...state, clipboard: { pasteCascade: null } };
@@ -241,8 +253,10 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
     case "redoRequested":
       return queueHistory(state, "redo");
     // --- images and assets
-    case "imageFilesChosen":
-      return startUpload(state, { files: event.files, at: event.at, destination: event.destination });
+    case "imageFilesChosen": {
+      const refusal = editingRefusal(state);
+      return refusal === null ? startUpload(state, { files: event.files, at: event.at, destination: event.destination }) : refuse(state, refusal);
+    }
     case "assetStored":
       return reduceAssetStored(state, event.uploadId, event.asset);
     case "assetStoreFailed":
@@ -253,19 +267,19 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
     case "commentComposerOpened":
       return openComposer(state, { slideId: event.slideId, elementId: event.elementId, textRange: event.textRange, region: event.region });
     case "commentDraftChanged":
-      return updateComposer(state, (composer) => ({ ...composer, draft: event.draft }));
+      return updateComposer(state, (composer) => ({ ...composer, draft: event.draft, mentions: event.mentions }));
     case "markingDrawn":
       return updateComposer(state, (composer) => ({ ...composer, markings: [...composer.markings, event.marking] }));
     case "commentSubmitted":
       return submitComment(state);
     case "commentComposerClosed":
-      return { ...state, ui: { ...state.ui, composer: { kind: "closed" } } };
+      return { ...state, chrome: { ...state.chrome, composer: { kind: "closed" } } };
     case "threadFocused":
-      return { ...state, ui: { ...state.ui, focusedThreadId: event.threadId } };
+      return { ...state, chrome: { ...state.chrome, focusedThreadId: event.threadId } };
     case "threadReplied":
-      return replyToThread(state, event.threadId, event.body);
+      return replyToThread(state, event.threadId, event.body, event.mentions);
     case "messageEdited":
-      return queueDiscussion(state, { kind: "editMessage", threadId: event.threadId, messageId: event.messageId, body: event.body });
+      return queueDiscussion(state, { kind: "editMessage", threadId: event.threadId, messageId: event.messageId, body: event.body, mentions: event.mentions });
     case "messageDeleted":
       return queueDiscussion(state, { kind: "deleteMessage", threadId: event.threadId, messageId: event.messageId });
     case "threadResolved":
@@ -275,24 +289,24 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
     case "threadDeleted":
       return queueDiscussion(state, { kind: "deleteThread", threadId: event.threadId });
     case "resolvedThreadsToggled":
-      return { ...state, ui: { ...state.ui, showResolvedThreads: !state.ui.showResolvedThreads } };
+      return { ...state, chrome: { ...state.chrome, showResolvedThreads: !state.chrome.showResolvedThreads } };
     // --- chrome
     case "menuOpened":
-      return { ...state, ui: { ...state.ui, openMenu: event.menu, contextMenu: null } };
+      return { ...state, chrome: { ...state.chrome, openMenu: event.menu, contextMenu: null } };
     case "menuClosed":
-      return { ...state, ui: { ...state.ui, openMenu: null } };
+      return { ...state, chrome: { ...state.chrome, openMenu: null } };
     case "contextMenuOpened":
-      return { ...state, ui: { ...state.ui, contextMenu: { at: event.at, scope: event.scope }, openMenu: null } };
+      return { ...state, chrome: { ...state.chrome, contextMenu: { at: event.at, scope: event.scope }, openMenu: null } };
     case "contextMenuClosed":
-      return { ...state, ui: { ...state.ui, contextMenu: null } };
+      return { ...state, chrome: { ...state.chrome, contextMenu: null } };
     case "dialogOpened":
-      return { ...state, ui: { ...state.ui, dialog: event.dialog, openMenu: null, contextMenu: null } };
+      return { ...state, chrome: { ...state.chrome, dialog: event.dialog, openMenu: null, contextMenu: null } };
     case "dialogClosed":
-      return { ...state, ui: { ...state.ui, dialog: { kind: "none" } } };
+      return { ...state, chrome: { ...state.chrome, dialog: { kind: "none" } } };
     case "deckRenamed":
       return renameDeck(state, event.title);
     case "propertiesTabChosen":
-      return { ...state, ui: { ...state.ui, propertiesTab: event.tab, propertiesPanelOpen: true } };
+      return { ...state, chrome: { ...state.chrome, propertiesTab: event.tab, propertiesPanelOpen: true } };
     case "panelToggled":
       return togglePanel(state, event.panel);
     case "noticeDismissed":
@@ -312,8 +326,12 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
     // --- effect results
     case "editSettled":
       return reduceEditSettled(state, event.settlement);
-    case "documentChanged":
-      return reduceDocumentChanged(state, event.change);
+    case "documentChanged": {
+      const changed = reduceDocumentChanged(state, event.change);
+      const before = state.document.transitionScripts;
+      const after = event.change.snapshot.transitionScripts;
+      return before === after ? changed : announceAgentScripts(changed, newUnapprovedAgentScripts({ before, after }));
+    }
     case "discussionChanged":
       return { ...state, discussion: event.snapshot };
     case "discussionRequestSent":
@@ -334,6 +352,17 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
         message: `${event.agentName} edited the deck: ${event.summary}`,
         action: { kind: "undoAgentEdits", agentSessionId: event.agentSessionId, agentName: event.agentName },
       });
+    // --- collaboration (collaboration.ts)
+    case "collaborationChanged":
+      return reduceCollaborationChanged(state, event.status);
+    case "collaborationNoticeReceived":
+      return reduceCollaborationNotice(state, event.notice);
+    case "reconnectRequested":
+      return requestReconnect(state);
+    case "agentRevertSettled":
+      return reduceAgentRevertSettled(state, { agentSessionId: event.agentSessionId, outcome: event.outcome });
+    case "recentColourUsed":
+      return { ...state, chrome: { ...state.chrome, recentColours: withRecentColour(state.chrome.recentColours, event.colour) } };
     default:
       return assertNever(event);
   }
@@ -342,9 +371,9 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
 /** Escape peels one layer: gesture, menus, dialog, composer, text, group, tool, selection. */
 function escape(state: EditorState): EditorState {
   if (!gestureIsIdle(state.gesture)) return cancelGesture(state);
-  if (state.ui.openMenu !== null || state.ui.contextMenu !== null) return { ...state, ui: { ...state.ui, openMenu: null, contextMenu: null } };
-  if (dialogIsOpen(state)) return { ...state, ui: { ...state.ui, dialog: { kind: "none" } } };
-  if (composerIsOpen(state)) return { ...state, ui: { ...state.ui, composer: { kind: "closed" } } };
+  if (state.chrome.openMenu !== null || state.chrome.contextMenu !== null) return { ...state, chrome: { ...state.chrome, openMenu: null, contextMenu: null } };
+  if (dialogIsOpen(state)) return { ...state, chrome: { ...state.chrome, dialog: { kind: "none" } } };
+  if (composerIsOpen(state)) return { ...state, chrome: { ...state.chrome, composer: { kind: "closed" } } };
   if (textSelectionOf(state.selection) !== null) return endTextEditing(state);
   if (state.enteredGroupId !== null) return leaveGroup(state, state.enteredGroupId);
   if (!toolIsSelect(state)) return { ...state, tool: { kind: "select" } };
@@ -418,22 +447,32 @@ function chooseTool(state: EditorState, tool: EditorState["tool"]): EditorState 
       return idle;
     case "shape":
     case "line":
-    case "table":
-    case "comment":
-    case "annotate":
+    case "table": {
+      const refusal = editingRefusal(state);
+      if (refusal !== null) return refuse({ ...state, tool: { kind: "select" } }, refusal);
       return textSelectionOf(idle.selection) === null ? idle : endTextEditing(idle);
+    }
+    case "comment":
+    case "annotate": {
+      const refusal = commentingRefusal(state);
+      if (refusal !== null) return refuse({ ...state, tool: { kind: "select" } }, refusal);
+      return textSelectionOf(idle.selection) === null ? idle : endTextEditing(idle);
+    }
     default:
       return assertNever(tool);
   }
 }
 
-/** A panel field for the selected elements' leaves; the model skips fields a kind does not have. */
+/**
+ * A panel field for the selected elements' leaves, merged per element (element-patches.ts), in one
+ * envelope; the model skips fields a kind does not have.
+ */
 function patchSelectedElements(state: EditorState, patch: ElementPatch): EditorState {
   const selected = selectedElements(state);
   if (selected === null) return state;
-  const elementIds = selected.elements.flatMap(leavesOf).map((leaf) => leaf.id);
+  const groups = perElementPatches({ leaves: selected.elements.flatMap(leavesOf), patch });
   return queueEnvelope(state, {
-    commands: [{ kind: "updateElements", slideId: selected.slide.id, elementIds, patch }],
+    commands: groups.map((group) => ({ kind: "updateElements", slideId: selected.slide.id, elementIds: group.elementIds, patch: group.patch })),
     selectionAfter: state.selection,
     mergeWithPrevious: false,
   });
@@ -453,14 +492,14 @@ function changePreset(state: EditorState, preset: ShapePreset): EditorState {
 
 function updateComposer(
   state: EditorState,
-  change: (composer: Extract<EditorState["ui"]["composer"], { kind: "composing" }>) => Extract<EditorState["ui"]["composer"], { kind: "composing" }>,
+  change: (composer: Extract<EditorState["chrome"]["composer"], { kind: "composing" }>) => Extract<EditorState["chrome"]["composer"], { kind: "composing" }>,
 ): EditorState {
-  const composer = state.ui.composer;
+  const composer = state.chrome.composer;
   switch (composer.kind) {
     case "closed":
       return state;
     case "composing":
-      return { ...state, ui: { ...state.ui, composer: change(composer) } };
+      return { ...state, chrome: { ...state.chrome, composer: change(composer) } };
     default:
       return assertNever(composer);
   }
@@ -469,13 +508,13 @@ function updateComposer(
 function togglePanel(state: EditorState, panel: "properties" | "filmstrip" | "speakerNotes" | "comments"): EditorState {
   switch (panel) {
     case "properties":
-      return { ...state, ui: { ...state.ui, propertiesPanelOpen: !state.ui.propertiesPanelOpen } };
+      return { ...state, chrome: { ...state.chrome, propertiesPanelOpen: !state.chrome.propertiesPanelOpen } };
     case "filmstrip":
-      return { ...state, ui: { ...state.ui, filmstripOpen: !state.ui.filmstripOpen } };
+      return { ...state, chrome: { ...state.chrome, filmstripOpen: !state.chrome.filmstripOpen } };
     case "speakerNotes":
-      return { ...state, ui: { ...state.ui, speakerNotesOpen: !state.ui.speakerNotesOpen } };
+      return { ...state, chrome: { ...state.chrome, speakerNotesOpen: !state.chrome.speakerNotesOpen } };
     case "comments":
-      return { ...state, ui: { ...state.ui, commentsOpen: !state.ui.commentsOpen } };
+      return { ...state, chrome: { ...state.chrome, commentsOpen: !state.chrome.commentsOpen } };
     default:
       return assertNever(panel);
   }
@@ -510,8 +549,7 @@ function chooseNoticeAction(state: EditorState, noticeId: NoticeId): EditorState
     case "reviewTransitionScript":
       return openScriptEditor(removed, action.scriptId);
     case "undoAgentEdits":
-      // Milestone 2 (`deck_revert` through the connector); nothing to revert locally yet.
-      return raiseNotice(removed, { tone: "information", message: `Undoing ${action.agentName}'s edits arrives with shared decks.`, action: null });
+      return requestAgentRevert(removed, { agentSessionId: action.agentSessionId, agentName: action.agentName });
     case "openInNewTab":
       // The view's click handler opened the tab (BrowserCapabilities.openTab) before dispatching.
       return removed;
@@ -532,7 +570,7 @@ function openInNewTabAction(state: EditorState): EditorState["notices"][number][
 }
 
 function dialogIsOpen(state: EditorState): boolean {
-  switch (state.ui.dialog.kind) {
+  switch (state.chrome.dialog.kind) {
     case "none":
       return false;
     case "insertImage":
@@ -544,18 +582,18 @@ function dialogIsOpen(state: EditorState): boolean {
     case "newSlideFromLayout":
       return true;
     default:
-      return assertNever(state.ui.dialog);
+      return assertNever(state.chrome.dialog);
   }
 }
 
 function composerIsOpen(state: EditorState): boolean {
-  switch (state.ui.composer.kind) {
+  switch (state.chrome.composer.kind) {
     case "closed":
       return false;
     case "composing":
       return true;
     default:
-      return assertNever(state.ui.composer);
+      return assertNever(state.chrome.composer);
   }
 }
 
@@ -585,7 +623,7 @@ function withPointer(state: EditorState, pointer: Point | null): EditorState {
 
 /** The rename dialog's title: one `setTitle` envelope when it is non-empty and new; the dialog closes either way. */
 function renameDeck(state: EditorState, title: string): EditorState {
-  const closed: EditorState = { ...state, ui: { ...state.ui, dialog: { kind: "none" } } };
+  const closed: EditorState = { ...state, chrome: { ...state.chrome, dialog: { kind: "none" } } };
   const trimmed = title.trim();
   if (trimmed.length === 0 || trimmed === state.document.title) return closed;
   return queueEnvelope(closed, { commands: [{ kind: "setTitle", title: trimmed }], selectionAfter: state.selection, mergeWithPrevious: false });

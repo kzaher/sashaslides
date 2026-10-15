@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { PAGES, pageFor } from "./pages.ts";
+import { DECK_LIST_ADDRESS, PAGES, pageFor } from "./pages.ts";
 
 const PUBLIC_DIR = join(import.meta.dirname, "public");
 const read = (file: string): string => readFileSync(join(PUBLIC_DIR, file), "utf8");
@@ -137,4 +137,13 @@ test("the home page's data section offers Enterprise on your own servers and sta
   assert.match(home, /<h2>Your data stays yours<\/h2>/);
   assert.match(home, /Enterprise:<\/strong> run Sasha Slides on your own servers/);
   assert.match(home, /On the free plan we may use data about how you use Sasha Slides to improve it; on a paid plan we never do\./);
+});
+
+test("the home page links to the deck list as 'Your decks', which the connector serves, not the website", () => {
+  const home = read("home.html");
+  assert.equal(DECK_LIST_ADDRESS, "/decks");
+  const links = [...home.matchAll(/<a [^>]*href="\/decks"[^>]*>([^<]+)<\/a>/g)].map((match) => match[1]);
+  assert.deepEqual(links, ["Your decks", "Your decks"], "in the bar and under the hero");
+  assert.equal(pageFor(DECK_LIST_ADDRESS), null, "nginx routes /decks to the connector");
+  assert.match(read("site.css"), /\.cta \{/, "the call to action is styled");
 });

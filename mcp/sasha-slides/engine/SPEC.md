@@ -24,7 +24,8 @@ the points not taken as proposed.
 4. **Collaboration**: Yjs is the stored source of truth for the document. Comments and annotations
    are anchored, threaded and resolvable. Presence shows cursors and selections.
 5. **Two hosts, one engine**: web application and add-on share this package.
-6. **Google Slides import and export** (milestone 3), reusing `mcp/sasha-slides/converter`.
+6. **Google Slides import and export** (pulled into milestone 2, section 21.12), reusing
+   `mcp/sasha-slides/converter`.
 
 Not goals: a pixel-for-pixel Slides clone; offline-first sync (milestone 2 is online with an
 in-memory replica); charts linked to Sheets; video editing.
@@ -51,7 +52,7 @@ adds the same check for its own stylesheet).
 | Pearl ground `#eef1f6` | `body` background; dark scheme `#0e1220` |
 | Calm wash behind the canvas | `.sasha-calm-ground::before`: three radial gradients whose `filter: hue-rotate(0 to 70 degrees) saturate(1 to 1.15)` swings over 40 seconds in 120 discrete steps, paused while `data-gesture="active"` is on the engine root. Nothing moves behind a slide being edited, and the wash repaints a few times a second at most |
 | Lively shapes only where nothing is edited | `LivelyShapes` on the deck list, an empty deck and the presenter's end screen |
-| Chrome is liquid glass, without a backdrop blur | panels: `--sasha-panel-glass` (white at 0.55), a bright 1 pixel top edge, a soft lift shadow. Re-blurring the animated wash behind three full-height panels costs every frame of a drag, which is why the calm slides window already has no blur. `backdrop-filter` appears only on `.sasha-lively-card` over the lively shapes |
+| Chrome is liquid glass | milestone 2 (section 21.11): panels are white at 0.26 to 0.45 (`--sasha-panel-glass`), a bright 1 pixel top edge, a soft lift shadow, and `backdrop-filter: blur() saturate()` ONLY while `data-gesture` is not `active` on the engine root, so a drag never re-blurs the animated wash behind three full-height panels (milestone 1 had no panel blur for that reason). Text on the more translucent glass is darkened until every pair still passes 4.5:1 over every sampled wash colour |
 | Chrome over the slide is nearly opaque | menus, the context menu, the inline text toolbar and popovers use `--sasha-glass-over-canvas` (0.92): over a black slide the old 0.45 glass gave text 3.31:1 |
 | Dialogs never blur the canvas | a `--sasha-scrim` dimming layer, then a dialog in `--sasha-glass-over-canvas` |
 | Ink pills | primary `#1c2333` with white text, secondary `rgba(28, 35, 51, 0.07)` with ink text, danger pill, all `border-radius: 999px`; tabs are pills, the active one (`aria-selected="true"`) white with a small lift |
@@ -117,7 +118,7 @@ or 3 or after; "not planned" means we have a reason not to.
 | Present: full screen, keyboard, blank screen, go to number, end screen | Milestone 1 | |
 | Speaker view (notes, next slide, timer) | Milestone 1 | same React tree in a second window |
 | Audience questions, laser pointer | Not planned / later | laser pointer later |
-| Comments: anchored, threaded, resolvable | Milestone 1 (local) | shared in milestone 2 |
+| Comments: anchored, threaded, resolvable | Milestone 1 (local) | shared in milestone 2, with mentions (section 21) |
 | Annotations drawn over the slide | Milestone 1 (local) | pen, rectangle, arrow, highlight |
 | Presence (cursors, selections) | Milestone 2 | milestone 1 proves it with an in-memory two-editor demo |
 | Real-time collaboration | Milestone 2 | Yjs from day one, so milestone 2 is transport only |
@@ -129,8 +130,8 @@ or 3 or after; "not planned" means we have a reason not to.
 | Charts linked to Sheets | Not planned | imported as images |
 | Video, audio | Later | |
 | Word art | Not planned | a shape with text covers it |
-| Import from Google Slides | Milestone 3 | |
-| Export to Google Slides | Milestone 3 | |
+| Import from Google Slides | Milestone 2 | section 21.12 |
+| Export to Google Slides | Milestone 2 | section 21.12 |
 | Printable document and image export | Later | print stylesheet of the presenter |
 
 ## 4. Architecture
@@ -606,6 +607,9 @@ Types: `discussion.ts`, `presence.ts`.
 
 ## 13. Persistence and sync (milestone 2)
 
+> Revision 3: section 21 is the milestone 2 design and wins wherever it differs from sections 13
+> to 15 (the API cookie path, the WebSocket address, storage records, the add-on no longer gated).
+
 - **Where**: in the connector (`mcp/sasha-slides/http/`), because it already owns accounts,
   sessions, per-account encryption keys and the brokered Google grants. New files: `deck-server.ts`
   (routes), `deck-store.ts` (persistence), `deck-access.ts` (access list). nginx routes `/deck`,
@@ -639,6 +643,9 @@ Types: `discussion.ts`, `presence.ts`.
   `agentEditObserved`, which raises a notice with the action "Undo Claude's edit".
 
 ## 14. Add-on embedding
+
+> Superseded in part by section 21.13: export ships in milestone 2, so the embedded editor ships
+> with it, opened from a new add-on menu item "Open in Sasha editor".
 
 **Confirmed: the add-on embeds the web application; it does not bundle the engine.** HtmlService pages
 must stay under 500 kilobytes (`SURFACE_BUDGET_BYTES` in `addon/build-addon.ts`) and `Dialog.html`
@@ -679,6 +686,8 @@ Plan (milestone 3):
    new tab" for anything else the dialog limits.
 
 ## 15. Google Slides import and export (milestone 3)
+
+> Pulled into milestone 2; section 21.12 has the full mapping tables and wins where they differ.
 
 - **Import** (server side, with the user's brokered grant): `presentations.get` -> commands on a
   fresh Y.Doc. Mapping: page size in English metric units / 7143.75 -> slide units; `shape` ->
@@ -813,3 +822,528 @@ were taken only in part:
 - **2, "this also removes the need for `staleText`"**: the delta log in the store is gone as
   proposed, but `staleText` stays as a guard rejection. The ordering rules make it unreachable; if
   they are ever broken, a visible rejection is better than a keystroke applied at the wrong index.
+
+## 21. Milestone 2
+
+Milestone 2 makes decks shared and reachable: a deck server inside the connector, the web
+application at `sashaslides.com/decks` and `sashaslides.com/deck/<id>`, the shared discussion with
+presence, Google Slides import and export with the add-on embedding, and Claude's deck tools.
+Contracts: `src/contracts/collaboration.ts` (the WebSocket protocol and the editor's status),
+`deck-access.ts` (roles and permissions), `deck-api.ts` (HTTP), `assistant-deck-tools.ts` (the
+tools' vocabulary) and, on the connector side, `mcp/sasha-slides/deck-contracts/deck-service-contract.ts`
+(the seams between the three connector modules). Where this section differs from sections 13 to
+15, this section wins.
+
+### 21.1 Decisions
+
+| Decision | Chosen | Why not the alternative |
+|---|---|---|
+| Where the deck server runs | **Inside the connector process**, on its `node:http` server (WebSocket upgrade on the same port) | A sibling process would need its own copy of accounts, sessions, the vault and the brokered Google grants, plus an internal API for the MCP tools to reach live rooms. In-process, an agent edit is a function call on the room every editor is connected to. Cost: one instance only (rooms are in memory); `DEPLOY.md` says never scale the connector past one replica |
+| Engine code on the server | The connector imports `engine/src/model/` and a new platform-free `engine/src/server/` (the room: Yjs sync, awareness relay, enforcement guard, discussion authority). Connector files NEVER import `yjs` or `y-protocols` themselves | One copy of Yjs: the engine's `node_modules` in development, `/app/node_modules` in the image. A second copy breaks Yjs's `instanceof` checks and prints "Yjs was already imported" |
+| How a rule a client cannot be trusted with is enforced | **Correct, never reject** (collaboration.ts header): apply the editor's update in its own transaction, inspect the protected fields it changed, write a correction, broadcast the update merged with its correction | A Yjs update cannot be partially accepted, and refusing one strands the sender's replica ahead of everyone (every later update depends on it). Moving approvals out of the document into a server log would have re-plumbed the model, state, presenter and view of milestone 1 for the same guarantee |
+| Session for the web application | Cookie `sasha_deck; Path=/deck-api; HttpOnly; Secure; SameSite=Strict`, 12 hours, minted at `/account/deck-session` | Pages are static shells, so only the API needs it; Strict is possible because only our own pages call the API |
+| Session inside the add-on dialog | Single-use ticket in the frame's address fragment, exchanged for a 15-minute bearer token kept in memory | Third-party frames get no cookies (and browsers block third-party cookies outright) |
+| Comments, presence | Same socket: discussion as JSON text frames, presence as Yjs awareness | One connection per open deck; one place for authentication, rate limits and reconnection |
+| Google writes from the add-on | The add-on's own authorization (Apps Script advanced service `Slides`) runs the server-built requests when the account has no Google grant on the server | An add-on user may never have signed in to sashaslides.com with Google; the add-on already holds `presentations` authority for the open presentation |
+
+### 21.2 Endpoints
+
+All under `https://sashaslides.com`. "Cookie" means the deck session cookie or, inside the add-on,
+the bearer token; every state-changing request with a session also needs `X-Sasha-Csrf` and an
+`Origin` equal to the public origin. Non-2xx answers carry `DeckApiErrorBody`. Unknown decks and
+decks the caller cannot read are both 404, so membership is not disclosed.
+
+| Method and path | Who | Permission | Answer |
+|---|---|---|---|
+| GET `/decks` | anyone | - | list page shell (`manifest.listPage`), `Content-Security-Policy: manifest.contentSecurityPolicy` |
+| GET `/deck/<deckId>` | anyone | - | editor shell; with `?embed=addon`, `manifest.embeddedContentSecurityPolicy` (frame-ancestors `ADDON_FRAME_ANCESTORS`) |
+| GET `/deck-app/<file>` | anyone | - | built assets, `Cache-Control: public, max-age=31536000, immutable`; `/deck-app/runner/<page>` with the runner policy |
+| GET `/account/deck-session?return=<path>` | browser | - | signed in: sets the cookie, 303 to `return` (only `/decks` or `/deck/<valid id>`, otherwise `/decks`); signed out: the sign-in page, and after ANY sign-in method `/account` redirects back here (a 10-minute `sasha_return` cookie, `Path=/account`) |
+| GET `/deck-api/session` | cookie | - | `DeckSessionBody`; renews the cookie past half its life; 401 `signedOut` with `signInAddress` (every 401 does: its `return` is the `?return=` of the request, else the path of a same-origin `Referer`, else `/decks`, so a signed-out `/deck/<id>` comes back to that deck) |
+| GET, PUT `/deck-api/profile` | cookie | - | `ProfileBody` (display name 1 to 60 characters, sealed per account) |
+| GET `/deck-api/decks` | cookie | - | `DeckListBody` |
+| POST `/deck-api/decks` | cookie | - | 201 `CreateDeckBody`; 409 `limitReached` past 500 decks |
+| GET `/deck-api/decks/<id>` | cookie | read | `DeckDetailsBody` (emails and invitations only for `share`) |
+| PATCH `/deck-api/decks/<id>` | cookie | share | `UpdateDeckRequest` -> `DeckDetailsBody` |
+| DELETE `/deck-api/decks/<id>` | cookie | deleteDeck | 204; open sockets close `deckDeleted` |
+| POST `/deck-api/decks/<id>/members` | cookie | share | `InviteRequest` -> `InviteBody`; 100 invitations per account per day |
+| PATCH, DELETE `/deck-api/decks/<id>/members/<personId>` | cookie | share (DELETE also self) | `DeckDetailsBody`; the member's sockets get `accessChanged` or close `accessRevoked` |
+| DELETE `/deck-api/decks/<id>/invitations/<invitationId>` | cookie | share | `DeckDetailsBody` |
+| PUT `/deck-api/decks/<id>/assets` | cookie | editDocument | raw bytes, `Content-Type` an `AssetMediaType` confirmed by magic bytes -> `AssetUploadBody`; 413 over 25 megabytes or past 512 per deck; 415 otherwise |
+| GET `/deck-api/decks/<id>/assets/<sha256>` | cookie | read | bytes; `Cache-Control: private, max-age=31536000, immutable`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox` (an SVG opened directly runs nothing) |
+| POST `/deck-api/decks/<id>/agent-sessions/<agentSessionId>/revert` | cookie | revertAgentEdits | `AgentRevertBody` |
+| GET (upgrade) `/deck-api/sync/<id>?discussionAfter=<n>` | cookie or bearer subprotocol | read | WebSocket, subprotocol `sasha-deck.1` (21.4) |
+| POST `/deck-api/embed/session` | ticket | - | `EmbedSessionBody`; ticket single use, 2 minutes |
+| POST `/deck-api/embed/renew` | bearer | - | `EmbedSessionBody` |
+| GET `/deck-api/google-slides/connect?return=<path>` | cookie | - | Google consent for the `presentations` and `drive.file` scopes; back through the shared `/oauth/google/callback` |
+| POST `/deck-api/google-slides/import` | cookie | - | `GoogleSlidesImportRequest` -> 201 `GoogleSlidesImportBody`; 409 `googleNotConnected` with `connectAddress` |
+| POST `/deck-api/decks/<id>/google-slides/export` | cookie | exchangeWithGoogleSlides | `GoogleSlidesExportRequest` -> `GoogleSlidesExportBody` |
+| GET `/deck-api/export-assets/<token>/<sha256>` | capability | - | image bytes for Google's `createImage`, 30 minutes |
+| POST `/deck-api/addon/handoff`, `/deck-api/addon/import`; GET `/deck-api/addon/export/<id>`; POST `.../result` | Code.gs (identity token + binding secret) | editors of the presentation | 21.13 |
+
+The router (collaboration server module) owns every path above and delegates the
+`GOOGLE_SLIDES_ROUTE_PREFIXES`, `/deck-api/decks/<id>/google-slides/` and the shared
+`/oauth/google/callback` (first, by `state`) to the Google Slides module's handler
+(`deck-service-contract.ts`).
+
+### 21.3 Authentication
+
+- **Cookie**: `HMAC-SHA256(SASHA_SESSION_SECRET, "sasha-deck-session.v1." + payload)` over
+  `{accountId, exp, csrf}`; a tampered, expired or erased-account cookie reads as signed out.
+  Every request and every WebSocket upgrade re-reads the account in the directory, so erasing an
+  account signs it out everywhere at once.
+- **Bearer** (add-on): random 32 bytes, stored hashed in memory with `{accountId, deckId, exp}`,
+  valid for that one deck only, 15 minutes, renewed by `POST /deck-api/embed/renew` 2 minutes before
+  expiry. Lost on a server restart: the frame shows "Reopen from the add-on menu".
+- **WebSocket**: authenticated at the upgrade only (cookie or `sasha-bearer.<token>` subprotocol,
+  never echoed), `Origin` must be the public origin; the server re-checks the session's expiry on
+  every heartbeat and closes `unauthenticated` (4001) when it passed; the client refreshes the
+  session and reconnects.
+- **Person identity**: `pr_<32 hexadecimal>` and `ag_<same>` (deck-access.ts); display name from the
+  profile, else the part of the sign-in address before "@", else "Collaborator";
+  `colourIndex = parseInt(first 8 hexadecimal, 16) % peerColourCount`.
+
+### 21.4 The WebSocket protocol
+
+```
+client                                                          server
+  │ GET /deck-api/sync/<id>?discussionAfter=<n>                   │ authenticate, check role, load room
+  │   Sec-WebSocket-Protocol: sasha-deck.1[, sasha-bearer.<t>]    │
+  │◄──────────────── 101, Sec-WebSocket-Protocol: sasha-deck.1 ───│
+  │◄── text  welcome { me, role, members, discussionSequence } ───│
+  │◄── binary sync step 1 (server state vector) ──────────────────│
+  │◄── binary awareness (every other connection's state) ─────────│
+  │◄── text  discussionEntries { entries after n } ───────────────│
+  │─── binary sync step 1 (client state vector) ─────────────────►│
+  │◄── binary sync step 2 (what the client lacks) ────────────────│  client: "online" after applying it
+  │─── binary sync step 2 (what the server lacks) ───────────────►│  dropped unless the role edits
+  │◄──► binary sync update / awareness; text discussion, heartbeat│
+```
+
+- Binary frames are exactly y-websocket's (`BINARY_MESSAGE_TYPE`); text frames are
+  `ClientMessage` / `ServerMessage`, parsed at the boundary by the receiver (the server parses
+  `ClientMessage`, the web module parses `ServerMessage`), unknown kinds ignored and counted.
+- **Discussion**: `discussionRequest` is answered by exactly one `discussionOutcome`; a `requestId`
+  among the last 1,000 is answered with its first outcome again (a retry after a reconnect never
+  doubles a comment). New entries reach every connection, the sender included, in sequence order.
+  A request sent while offline waits in the client's queue and is sent after the next welcome.
+- **Heartbeat**: the server sends `heartbeat` every 15 seconds (and WebSocket pings, which browsers
+  answer by themselves); a client that hears nothing for 40 seconds reconnects.
+- **Reconnection**: full-jitter exponential backoff from 0.5 seconds doubling to 30
+  (`RECONNECT_POLICY`); immediately on the browser's `online` event, on the page becoming visible
+  after being hidden past a heartbeat, or on "Try now". After each close the client follows
+  `RECONNECT_AFTER_CLOSE`.
+- **Offline edits**: the Y.Doc keeps them; the sync step 2 after reconnecting sends them, and
+  merging is Yjs's. `unsentChanges` is true from a local transaction while not online until the
+  client has sent its step 2 after the next welcome and the socket's `bufferedAmount` is 0. Nothing
+  is kept across a reload (not offline-first, section 1); the editor warns before unload while
+  `unsentChanges` is true.
+- **Resynchronise**: on `resynchroniseRequired` the web module disposes the editor, drops the
+  replica and composes a fresh one from the server, then shows the notice.
+- **Agent edits**: every `deck_edit` and import that runs on the room sends `agentEdit` to editors;
+  the editor's notice offers "Undo Claude's edit" (`revertAgentSession`).
+
+### 21.5 Permissions and where each is enforced
+
+Roles and the permission table: `deck-access.ts` (owner, editor, commenter, viewer; link sharing
+`off` or anyone signed in as viewer or commenter, never editor).
+
+| Rule | Enforced at | How |
+|---|---|---|
+| Only members, or link sharing, can read | upgrade, every `/deck-api/decks/<id>` route, `DeckService.openDeck` | access record; 404 otherwise |
+| Viewers and commenters never change the document | room, inbound sync step 2 and update | discarded; a non-empty one -> `resynchroniseRequired` (`updateFromReadOnlyRole`) |
+| `approved` only by a person who may approve, naming themself and the current fingerprint | room guard after the sender's transaction (`engine/src/server`) | correction to `unapproved`, merged broadcast, `correction` to the sender |
+| A changed script's `author` is its sender | room guard | correction, `scriptAuthorRestored` |
+| `meta.deckId`, `schemaVersion`, `createdAt` never change | room guard | correction, `metaRestored` |
+| An agent never approves; agent scripts land unapproved | model (`approvalNeedsPerson`), `deck_write_transition` saves with `"unapproved"` | rejected |
+| Discussion actor and time | room discussion authority | stamped from the session and the server clock |
+| Discussion permissions | room discussion authority | `comment` to create, reply, resolve, reopen; author-only edit and delete; delete a thread: its creator or `moderateDiscussion`; mentions kept only for current members, at most 20 |
+| Presence identity | room awareness relay | `presence.person` overwritten with the connection's person; an awareness client id bound to the first connection using it; removed on close |
+| Share, link sharing, delete | routes | owner only |
+| Uploads | asset route | `editDocument`, size, media type by magic bytes |
+| Add-on identity | handoff routes (Google Slides module) | identity token signature (Google's keys), issuer, expiry, audience pinned from a real token; binding secret hash |
+| Limits | room and routes | `COLLABORATION_LIMITS` (21.10) |
+
+### 21.6 The room and the guard
+
+One room per loaded deck: the authoritative Y.Doc, a model `DocumentStore` over it with
+`repairPolicy: "repairAfterTransaction"` and `seed: none`, the discussion log, the awareness
+instance and the connections. Each inbound sync update is applied in its own transaction with the
+CONNECTION as the origin. In `afterTransaction` the guard reads, for every transition script the
+transaction touched and for `meta`, the value before (from the transaction's `changed` keys and
+the store's previous snapshot) and after, and decides with a pure function
+`correctionsFor({ before, after, sender })` (person or agent, role) the
+`ProtectedFieldCorrection`s. Corrections are written in one follow-up transaction with
+`REPAIR_ORIGIN`; the update the sender sent and the correction's update are merged
+(`Y.mergeUpdates`) and only the merge is broadcast and persisted, so no other replica ever holds
+the forbidden state. Updates from the server's own replica (agent edits, imports, repairs) carry
+server origins and skip the guard; the model's own validation already covers them. What an
+editor's update leaves pending (Yjs structures waiting for a missing dependency) is taken out of the
+shared store and retried only with that connection's next update, so it is always judged as its
+sender's and never integrates inside a colleague's transaction (deck-room.ts `applyGuarded`).
+
+Agent history: one `Y.UndoManager` per agent session over `UNDO_SCOPE_ROOTS`, tracking that
+session's own origin object, so `revertAgentSession` undoes only its steps, newest first, skipping
+steps collaborators overwrote (document-store.ts "Undo against collaborators"). Histories are in
+memory: a room with an agent history stays loaded 30 minutes after its last agent edit; after a
+restart a revert answers `nothingToRevert`. `UNDO_SCOPE_ROOTS` does not include `meta`, so an
+agent's `setTitle` is not on its history: `revertAgentSession` does not undo it, and it does not
+keep the room loaded for 30 minutes.
+
+Lifecycle: loaded on first use (upgrade, API, `DeckService.openDeck`), unloaded 60 seconds after
+its last connection and lease closed and its log flushed. On `SIGTERM`: flush every room, close
+every socket with `serverShuttingDown`, then exit.
+
+### 21.7 Storage
+
+Everything under the existing `/data` volume, every record sealed with the OWNER's data key
+(`account-keys.ts`; `seal` takes text, so bytes are base64url), so erasing the owner's account
+makes their decks unreadable and the eraser removes them.
+
+```
+/data/decks/
+  index.json                 { version: 1, decks: { <deckId>: { ownerAccountId, memberAccountIds[],
+                               invitationEmailHashes[], addonBindingHashes[], createdAt } } }
+                             (no personal data in the clear; atomic write, mode 0600)
+  <deckId>/
+    deck.sealed              DeckRecord: members [{accountId, role, addedAt}], invitations
+                             [{invitationId, emailHash, email, role, invitedAt}], linkSharing,
+                             googleSlides link, title and updatedAt caches
+    document.snapshot        line 1 "sasha-deck-snapshot 1 <throughSequence>", line 2 sealed
+                             Y.encodeStateAsUpdate
+    document.log             one line per flush: "<sequence> <sealed Y.mergeUpdates(batch)>"
+    discussion.log           one line per entry: "<sequence> <sealed DiscussionLogEntry JSON>"
+    assets/<sha256>          line 1 "<mediaType> <byteLength>", line 2 sealed bytes
+/data/deck-profiles/<accountId>.sealed   the display name, sealed under that account's own key
+```
+
+- **Writes**: document updates are batched and appended every 250 milliseconds (and at unload),
+  each flush one `appendFile` plus `fsync`. Discussion entries are appended before their outcome is
+  sent. A crash loses at most the last 250 milliseconds on the server, and the clients still hold
+  those updates and send them again in their next sync step 2.
+- **Compaction**: past 1 megabyte or 500 records of `document.log`, write `document.snapshot.tmp`
+  (through the last sequence), `fsync`, rename over the snapshot, then replace the log with an
+  empty one the same way. Loading applies the snapshot, then every log record; applying a record
+  the snapshot already contains is harmless (Yjs updates are idempotent), so a crash between the
+  two renames loses nothing.
+- **Corruption**: a record that does not open or decode is skipped with a warning naming the deck
+  and sequence; the room loads with whatever Yjs can apply (missing dependencies wait as pending
+  structures, and a client's next step 2 may fill them). Yjs clocks are consecutive per replica, so
+  a skipped record also holds back every LATER record from the same replica: the deck loads with
+  what came before the bad record (decks/deck-storage.test.ts asserts exactly that).
+- **Deck ids**: `dk_` + 22 random base-62 characters (`parseDeckId`).
+- **Erase**: `account-eraser.ts` also deletes the directories of decks the account owns, removes it
+  from every other deck's members, closes its sockets, and deletes its profile.
+
+### 21.8 Web application (web module)
+
+- **`/decks`**: the real logo (`SASHA_ICON_SVG`) and "Sasha Slides" in a glass header with the
+  account (address, "Account", which links to `/account`); `LivelyShapes` behind; one
+  `.sasha-lively-card` per deck (title, role, owner, "edited 3 minutes ago"), opening on click or
+  Enter; "New deck" (primary pill), "Import from Google Slides" (a dialog taking an address; on
+  `googleNotConnected` it offers "Connect Google Slides", which navigates to `connectAddress`);
+  per-card menu "Share" (owner), "Delete" (owner, with confirmation). Empty state: one card "Make
+  your first deck". Signed out: the browser goes to `signInAddress`.
+- **Share dialog** (list page and the editor's top bar): members with role pickers, "Invite by
+  email" with a role, pending invitations, link sharing; viewers and commenters see the people list
+  read-only.
+- **`/deck/<id>`**: the shell reads the session, opens the socket, composes the model store
+  (`seed: none`, `repairPolicy: "reportOnly"`), the WebSocket `DiscussionStore`, an awareness
+  `PresenceChannel`, an HTTP `AssetStore` (bytes fetched with the session into object addresses, so
+  the cookie and bearer paths behave the same), a `CollaborationSession`, then mounts
+  `EditorApplication` with an `EditorHost` (Share and the account in the top bar; File menu "All
+  decks", "Export to Google Slides", "Export to the linked presentation", and in the add-on "Open in
+  a new tab"). Until the first sync it shows the calm wash with a "Opening deck..." card. Recent
+  colours live in local storage (`recentColours`); the page title is the deck title.
+- **Embedded** (`?embed=addon`): exchanges `#ticket=`, removes the fragment from the address,
+  renews the bearer, posts `ready` to the shell, runs export through the shell when the server
+  answers `runInAddon` (`AddonShellMessage`).
+- **Build**: `build-web.ts` bundles both pages, the runner (`buildPresenterAssets` into
+  `dist/web/runner/`) and writes `dist/web/manifest.json` (`WebBuildManifest`). The policy:
+  `default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com
+  'sha256-<presenter rules>' 'sha256-<speaker window sheet>'; style-src-attr 'unsafe-inline';
+  font-src https://fonts.gstatic.com; img-src 'self' blob: data:; connect-src 'self'
+  https://fonts.googleapis.com https://fonts.gstatic.com; frame-src 'self'; base-uri 'none';
+  form-action 'self'; frame-ancestors 'none'` (the embedded variant replaces the last directive).
+  The two hashes are of the presenter's own `<style>` elements (the presentation and transition
+  preview render `PRESENTER_RULES`; the speaker window adds the Tidepool sheet and the rules),
+  computed by `build-web.ts` from the same constants (`content-security-policy.ts`), so no other
+  inline stylesheet runs; `connect-src` names Google Fonts because the presenter fetches font files
+  for the transition runner (without them a scripted transition shows fallback fonts). Both were
+  found by the integrated run in Chrome, which now records zero policy violations while presenting.
+  The runner page loads `runner-bootstrap.js` beside it, so the connector serves every plain file
+  name under `/deck-app/runner/`.
+- **Review address**: `/deck/<id>?reviewTransitionScript=<scriptId>` (`TRANSITION_REVIEW_QUERY`,
+  what `deck_write_transition` answers) opens that script's review once the editor is ready and
+  removes the parameter from the address (`web/deck-page/review-address.ts`). The connector reads the manifest at startup;
+  without one, `/decks` answers 503 "the web application is not built".
+
+### 21.9 Discussion, presence and the editor fixes (discussion module)
+
+- **Threads** anchored to a slide, an element, a text range or a region (the existing
+  `CommentAnchor`), with replies, edit and delete of one's own messages, resolve and reopen, a
+  filter (open, resolved, mentions of me) and "on deleted slides". Numbered glass pins on the
+  canvas; the focused thread's region and markings drawn over the slide.
+- **Annotations**: pen and rectangle drawn while composing (the `annotate` tool), stored in the
+  thread's `markings` (fractions of the element's frame or of the slide), never in the slide; a
+  "Show annotations" toggle in View.
+- **Mentions**: typing "@" opens the members list (`collaboration.members`), filtered as one types;
+  choosing inserts "@Display Name" and records the person id in `mentions`; messages highlight their
+  mentions; the agent's messages are labelled "Claude".
+- **Presence**: peer cursors with name labels in the peer colour, peers' selection outlines, avatars
+  on the filmstrip thumbnail each peer is on, and a stack of avatars in the top bar whose popover
+  lists who is on which slide (a click goes there). Away after 30 seconds, gone after 2 minutes.
+- **Connection**: the top bar shows nothing while online; "Offline - reconnecting in 8 s - Try now"
+  while offline, "Changes not sent yet" while `unsentChanges`, and for `closed` a banner with the
+  reason and the editor read-only. A commenter's and a viewer's editing controls are disabled with
+  the reason ("You can comment on this deck"); the reducer refuses such edits with a notice.
+- **Agent notices**: `agentEditObserved` -> "Claude edited the deck: <summary>" with "Undo Claude's
+  edit" (`pendingAgentReverts`, the collaboration feedback calls `revertAgentSession`, then
+  `agentRevertSettled`); a new unapproved agent script -> "Claude wrote a transition: review it".
+- **Milestone 1 review fixes**:
+  1. Multi-selection edits merge PER ELEMENT: changing one field of a style group (text box padding,
+     a line's stroke width) writes, for each selected element, that element's own group with only
+     the changed field replaced, never the first element's group onto all.
+  2. A list style picker with the 12 `ListGlyph` presets (bulleted and numbered), per paragraph range.
+  3. Gradients: stop positions editable, stops added and removed (2 to 10), the radial centre (x, y)
+     editable, the angle for linear.
+  4. "Recent" colours in the colour picker (`chrome.recentColours`, `recentColourUsed`).
+  5. "Scripted" with no scripts in the deck explains itself: "No scripted transitions in this deck
+     yet. Ask Claude to write one (it arrives for your approval), or write one yourself" with "Write
+     a script".
+  6. Arrow keys on a focused pill group (tabs, segmented choices) move between pills (roving tab
+     index, `role="tablist"`/`radiogroup`) and never reach the canvas's nudge.
+  7. Full-word identifiers: every `...Css` (about 30), `sameJson`, `withUi`, `state.ui` (renamed to
+     `state.chrome` by the architect) and any other abbreviation, enforced by a test that scans the
+     engine's sources for declared identifiers containing `Css`, `Json`, `Ui`, `Svg`, `Html` or
+     `Dom` as a word part.
+  8. Liquid glass (section 2) and the real logo in the editor's top bar, linking to `homeAddress`.
+
+### 21.10 Limits
+
+`COLLABORATION_LIMITS` in collaboration.ts: frames 4 megabytes; the deck's encoded state 32
+megabytes; 20 messages per second per connection, burst 100, closed after 10 seconds over (a
+document update over the rate closes at once instead of being dropped, so the client's step 2
+resends it; presence publishes at most 10 a second, `PRESENCE_PUBLISH_INTERVAL_MILLISECONDS`, and
+a connection holds at most 4 awareness client ids); 50
+connections per deck and 20 per account; awareness state 8 kilobytes; comment body 10,000
+characters, 50 markings of at most 2,000 points per thread, 5,000 threads per deck, 20 mentions;
+assets 25 megabytes each and 512 per deck; 500 decks per account; 100 members per deck; 100
+invitations per account per day; 200 commands per agent edit; transition scripts per
+`TRANSITION_LIMITS`. Request bodies: 1 megabyte for JSON except the add-on import (48 megabytes).
+
+### 21.11 Visual rules for milestone 2
+
+The list page uses the lively shapes and `.sasha-lively-card`s; the editor keeps the calm wash.
+Panel glass per section 2. Every new stylesheet rule reads `--sasha-*` properties only (each
+module's stylesheet test forbids colour literals), and the theme's contrast test covers the new
+glass values and the new text colours.
+
+### 21.12 Google Slides import and export (Google Slides module)
+
+Units: Slides pages are 9,144,000 English metric units wide (720 points); the engine's page is
+1280 units wide, so `units = englishMetricUnits * 1280 / pageWidthEnglishMetricUnits` and
+`units = points * 1280 / 720` (the section 15 constant, 1 / 0.5625). The page height follows the
+aspect ratio.
+
+**Import** (`presentations.get`, then ONE envelope on a new deck: theme, layouts, slides; author
+the importing person; images first stored with `putAsset` and registered):
+
+| Slides | Engine | Notes and losses |
+|---|---|---|
+| `pageSize` | `meta.pageHeight` | width always 1280 |
+| `transform` + `size` of an element | one `frame` | width = `size.width * hypot(scaleX, shearY)`, height = `size.height * hypot(shearX, scaleY)`, rotation = `atan2(shearY, scaleX)` in degrees; a negative determinant reads as a HORIZONTAL flip with rotation `atan2(-shearY, -scaleX)` (what Slides' Flip horizontally writes; the same drawing); centre = transform of the box centre, so `x = centreX - width / 2` (rotation about the centre, geometry.ts) |
+| `shape.shapeType` `TEXT_BOX`, `RECTANGLE`, `ROUND_RECTANGLE`, `ELLIPSE`, `TRIANGLE`, `RIGHT_TRIANGLE`, `DIAMOND`, `PARALLELOGRAM`, `TRAPEZOID`, `PENTAGON`, `HEXAGON`, `OCTAGON`, `STAR_5`, `PLUS`, `HEART`, `CLOUD`, `WEDGE_RECTANGLE_CALLOUT` and `WEDGE_ROUND_RECTANGLE_CALLOUT`, `CHEVRON`, `RIGHT_ARROW`, `LEFT_ARROW`, `UP_ARROW`, `DOWN_ARROW` | `ShapePreset` of the same name (`STAR_5` -> `fivePointStar`, callouts -> `speechBubble`) | any other type -> `rectangle` with loss `shapePreset` naming it |
+| `shapeBackgroundFill` solid, `NOT_RENDERED`, `INHERIT` | `Fill` solid, none, resolved from the placeholder parent | `themeColor` -> theme slot reference |
+| `outline` weight, `dashStyle`, fill, `NOT_RENDERED` | `Border` uniform or none | dash names map one to one |
+| `shadow` | `Shadow` from blur radius and offset | approximate; loss `shadow` when its alignment is not bottom-right-like |
+| `contentAlignment`, `autofit.autofitType` (`NONE`, `SHAPE_AUTOFIT`, `TEXT_AUTOFIT`) | `textBox.verticalAlignment`, `autofit` (`none`, `resizeShape`, `shrinkText`) | |
+| text runs: `weightedFontFamily`, `fontSize`, `bold`, `italic`, `underline`, `strikethrough`, `foregroundColor`, `backgroundColor`, `link` (url, `pageObjectId`, `slideIndex`, relative), `baselineOffset`, `smallCaps` | `RunStylePatch` (size in units, `fontWeight` from the weight, highlight, `RunLink` web address or slide) | effective style resolved through the placeholder chain (element -> layout -> master) and written explicitly; colours keep theme references |
+| paragraph: `alignment`, `lineSpacing` (percent), `spaceAbove`, `spaceBelow`, `indentStart`, `indentFirstLine`, `direction` | `ParagraphStylePatch` | |
+| `bullet` (`listId`, `nestingLevel`) with the list's glyph | `ListMembership` (same `listId`, level, the nearest of the 12 `ListGlyph` presets) | loss `listGlyph` when not exact |
+| `autoText` `SLIDE_NUMBER` | `automaticText` slideNumber | other kinds: their rendered text, loss |
+| `image` (`contentUrl`, fetched within its 30 minutes), `cropProperties`, `transparency`, `outline` | `ImageElement` with `ImageCrop`, opacity, border | brightness, contrast, recolour: loss `imageAdjustment`; a failed fetch: a hatched rectangle named "Image could not be imported", loss |
+| `line` (`lineCategory` `STRAIGHT`, `BENT`, `CURVED`; weight, dash, fill, `startArrow`, `endArrow`) | `LineElement` (routing straight, elbow, curved; end points from the box diagonal and flips; `ArrowHead` nearest of 7) | connection sites: loss `connection` |
+| `table` (`tableRows[].rowHeight`, `tableColumns[].columnWidth`, cells with spans, text, `tableCellBackgroundFill`, `contentAlignment`; borders from `tableBorderRows` / `tableBorderColumns`) | `TableElement` with minted row and column ids and `CellBorders` per side | |
+| `elementGroup` | group (children absolute, the group's own rotation) | |
+| `sheetsChart` | image of its `contentUrl` | loss `linkedChart` |
+| `video` | rectangle named "Video: <address>" | loss `video` |
+| `wordArt` | text box with its rendered text | loss `wordArt` |
+| `speakerSpotlight` | omitted | loss |
+| placeholders (`TITLE`, `CENTERED_TITLE`, `SUBTITLE`, `BODY`, `SLIDE_NUMBER`, `FOOTER`, `DATE_AND_TIME`, `PICTURE`) | `PlaceholderReference` roles | other types -> `body`, loss |
+| the first master's `colorScheme` and title and body text styles; its placeholders | `ThemeSnapshot` (12 slots, heading and body families, `placeholderStyles`, default background) | further masters: loss `masters` |
+| layouts (`layoutProperties.displayName`, placeholders) | `LayoutSnapshot`s | |
+| page background (solid, `stretchedPictureFill`, inherited) | slide `background` | |
+| notes page body (`speakerNotesObjectId`) | `speakerNotes` | |
+| `slideProperties.isSkipped` | `skipped` | |
+| object ids | kept when they match `OBJECT_ID_PATTERN` and are unique; minted otherwise | Slides' short ids like `p` are minted |
+| transitions, animations | none | the API exposes neither; loss `transition` once per deck |
+
+The import report lists every loss with its slide and element. `GoogleSlidesLink` records the
+presentation, its title and `revisionId`.
+
+**Export** (engine document -> `presentations.create` when new, then `batchUpdate` per slide):
+
+| Engine | Slides requests | Notes and losses |
+|---|---|---|
+| page size | `presentations.create` `pageSize` | |
+| slide | `createSlide` with the engine slide id as `objectId` (ids.ts guarantees a valid object id), `predefinedLayout: BLANK` | layouts and placeholders become plain positioned elements: loss `layouts` once |
+| re-export to the linked presentation | per slide: `deleteObject` of the page with that id in one batch, `createSlide` with the same id in the next | slides deleted in the engine are deleted there; slides added there by hand are kept |
+| background | `updatePageProperties` `pageBackgroundFill` (solid, `stretchedPictureFill` from an export asset address) | gradient background: first stop, loss |
+| rectangle-family shape with a uniform border and uniform radius, other presets | `createShape` (`shapeType` from the preset), `updateShapeProperties` (solid fill or none, outline weight, dash and colour, `contentAlignment`) | theme colours written as their resolved colour (loss `themeColourLink` once) |
+| what Slides cannot express: per-side borders, per-corner radii, radial and multi-stop gradients, shadows | the element is adapted into the converter's `SlideElement` extraction type and `emitSlideRequests` (`mcp/sasha-slides/converter/emit-requests.ts`) composes it (border strips, ROUND_1 corners) | the converter's `UnsupportedFeature`s become losses |
+| text | `insertText`, `updateTextStyle` per run range, `updateParagraphStyle` per paragraph, `createParagraphBullets` with the matching `bulletPreset` per list run | `automaticText` -> the number as text, loss; autofit other than none: loss (the API cannot set it) |
+| image | `createImage` from `/deck-api/export-assets/<token>/<sha256>` | crop is read-only in the API: exported uncropped, loss `crop`; images over 50 megabytes or 25 megapixels: loss |
+| line | `createLine` (`lineCategory`), `updateLineProperties` (weight, dash, fill, arrows) | |
+| table | `createTable`, `updateTableColumnProperties`, `updateTableRowProperties`, `insertText` per cell, `updateTableCellProperties`, `updateTableBorderProperties` per side, `mergeTableCells` for spans | |
+| group | children first, then `groupObjects`; the group's rotation through `updatePageElementTransform` | |
+| speaker notes | `insertText` into the new slide's `speakerNotesObjectId` (read back after `createSlide`) | |
+| skip | `updateSlideProperties` `isSkipped` | |
+| transitions, built-in and scripted | none | the API cannot set transitions: loss `transition` per slide that has one |
+
+Requests are sent per slide (each `batchUpdate` atomic), in slide order. Reusing an object id right
+after its `deleteObject` IN THE SAME batch works for slides and elements (measured,
+`OBJECT_ID_REUSE_AFTER_DELETE` in google-slides/), so a re-exported slide is replaced atomically in
+one batch. Tables: export skips cells covered by a span (document.ts `TableCell.rowSpan`). A plan
+the add-on runs (`AddonExportPlanBody.requests`) also carries two host instructions Code.gs
+interprets itself (google-slides/slides-requests.ts `ExportInstruction`):
+`{ sashaSlideBoundary: { slideId, slideNumber } }` starts the next slide's batch, so a failure names
+its slide, and `{ sashaSpeakerNotes: { slideObjectId, text } }` writes notes into the notes shape
+that exists only after `createSlide`. The add-on's export calls carry `ADDON_REQUEST_HEADERS`
+(deck-api.ts). A failed batch stops the
+export and reports which slide failed and why; the slides before it are already written, and the
+next export replaces them again, because pages are addressed by the engine's ids.
+
+**Google authorization**: the account's grant in the connector's store (`GoogleGrantStore`); the
+web application's connect flow asks for `https://www.googleapis.com/auth/presentations` and
+`drive.file` with `include_granted_scopes`, through the already registered
+`/oauth/google/callback`. Without a grant, import answers `googleNotConnected`; export in the add-on
+answers `runInAddon`.
+
+### 21.13 The add-on embedding (Google Slides module)
+
+1. Code.gs adds the menu item **"Open in Sasha editor"** -> `sashaOpenEditor()`:
+   - the binding secret: `PropertiesService.getDocumentProperties()` `sashaDeckBinding`, created
+     on first use from two `Utilities.getUuid()` values (244 random bits), base64url;
+   - `revisionId` from `Slides.Presentations.get(id, { fields: "revisionId" })`;
+   - `POST /deck-api/addon/handoff` with `ScriptApp.getIdentityToken()` (adds the `openid` and
+     `email` scopes to `appsscript.json`: one re-consent);
+   - `needsImport` -> `Slides.Presentations.get(id)` -> `POST /deck-api/addon/import`;
+     `changedSinceImport` -> the shell first asks "Open the Sasha deck" or "Import again";
+   - `HtmlService` shows `EditorShell.html` with `showModelessDialog` at the largest size Slides
+     accepts (measured), holding one `<iframe src="https://sashaslides.com/deck/<id>?embed=addon#ticket=<t>"
+     allow="clipboard-write; fullscreen">`.
+2. `EditorShell.html` is built from TypeScript (`addon/src/editor-shell.ts`) by `build-addon.ts`, a
+   few kilobytes, far under `SURFACE_BUDGET_BYTES`; it only relays `AddonShellMessage`s
+   (checking `event.origin === "https://sashaslides.com"`) and calls `google.script.run`.
+3. The server's handoff verifies the identity token against Google's published keys, issuer
+   `https://accounts.google.com`, expiry, and an audience pinned from one real token decoded in
+   this project (the auto-created script project's client); finds or opens the account for the
+   token's subject (`GoogleIdentityAccounts`); binds `SHA-256(binding secret)` to the deck on first
+   import; refuses a binding hash already bound to a deck the account cannot edit.
+4. Export in the dialog: File > "Export to this presentation" -> `runInAddon` when the account
+   has no grant -> `exportRequested` -> `google.script.run.sashaRunExport(exportId)` -> Code.gs
+   fetches the plan (identity token and binding secret as headers), runs
+   `Slides.Presentations.batchUpdate` in chunks, posts the result -> `exportFinished` to the frame.
+5. Frame limits (section 14 item 4) stand: Present opens a top-level tab; menu copy and paste
+   point to the keyboard shortcuts.
+
+### 21.14 Claude's deck tools (assistant module)
+
+Registered by `registerDeckTools` next to `registerCommentTools` in `server.ts`; contract
+`assistant-deck-tools.ts`. Every tool resolves the caller from the MCP bearer (Google subject ->
+account), acts with that account's role, and goes through `DeckService`, so edits reach open
+editors live. `agentSessionId = "as_" + first 24 hexadecimal of SHA-256(MCP session id)`.
+
+| Tool | Input | Output |
+|---|---|---|
+| `deck_list` | - | decks with `address` (`https://sashaslides.com/deck/<id>`) and role |
+| `deck_create` | `title` | `deckId`, `address` |
+| `deck_read` | `deckId`, `detail` (`outline` or `full`), `slideIds` | `DeckOutline` |
+| `deck_edit` | `deckId`, `summary` (one sentence collaborators see), `edits: AssistantEdit[]` (at most 200 commands after expansion) | `AssistantEditOutcome` (all or nothing, one envelope, one undo step) |
+| `deck_write_transition` | `AssistantTransitionScript` | `scriptId`, `approved: false`, `reviewAddress`; saved `"unapproved"`, sizes per `TRANSITION_LIMITS`, the slides in `assignTo` switch to it in the same envelope |
+| `deck_revert` | `deckId`, `agentSessionId` (default: this session) | `AgentRevertOutcome` |
+| `deck_read_comments` | `deckId`, `status` (`open` or `all`), `slideId` | `sequence`, `AssistantThread[]` |
+| `deck_reply_comment` | `deckId`, `threadId`, `body` | `DiscussionOutcome` (as the agent person) |
+| `deck_resolve_comment` | `deckId`, `threadId`, optional `note` (replied first) | `DiscussionOutcome` |
+| `deck_await_comments` | `deckId`, `afterSequence`, `timeoutSeconds` (at most 3000) | new threads and messages since, with progress notifications while waiting (`long-poll-progress.ts`) |
+
+`deck_edit` expansion rules: new shapes take the theme's default text style and the layout's
+placeholder frame when `frame` is omitted; `addImage` fetches https only, at most 25 megabytes,
+media type by magic bytes; `restyleElements` merges per element; `setText` replaces the body with
+one `editText` (delete all, insert paragraphs with complete attribute sets, yjs-schema.ts);
+`replaceText` and `styleText` find text in the current snapshot. The workflow skill
+(`.claude/skills/sasha-slides/SKILL.md`) gains a short "Sasha decks" section: read before editing,
+one `deck_edit` per user request, scripts are reviewed by a person.
+
+### 21.15 nginx and Docker
+
+- nginx: one more connector location, `location ~ ^/(decks/?$|deck/|deck-app/|deck-api/)`, with
+  the existing proxy headers plus `proxy_set_header Upgrade $http_upgrade;` and
+  `proxy_set_header Connection $connection_upgrade;` (a `map` at the top of the file),
+  `proxy_read_timeout 3700s`, buffering off. `nginx-routing.test.ts` gains the paths, the upgrade
+  headers and the cases that must stay with the website (`/deckhouse`, `/decks.css`).
+- Image: `deploy/package.json` adds `yjs`, `y-protocols`, `lib0`, `rxjs` and `ws` at the versions
+  installed in development; `context-files.ts` adds the engine sources the server imports (found
+  by esbuild like everything else) and `engine/dist/web/**` (read at runtime);
+  `publish.sh` builds the web application (`npm ci` and `npm run -s build:web` in the engine)
+  before packing. `docker-compose.yml` keeps `/data` as the one writable volume. The repository
+  root gains `ws` and `@types/ws` (today `ws` is only a transitive dependency of
+  chrome-remote-interface).
+
+### 21.16 Failure handling
+
+| Failure | What happens |
+|---|---|
+| Network drops | `offline` with backoff; edits stay in the replica; "Changes not sent yet"; sync on reconnect |
+| Server restarts | sockets close `serverShuttingDown`; rooms reload from snapshot and log; clients resend what the last 250 milliseconds lost |
+| Disk write fails | the room keeps working in memory and keeps relaying, retries the flush with backoff from 1 second to 30 and warns; after 60 seconds of failures it closes its sockets `serverShuttingDown`, so the clients keep their edits and resend them once the server recovers |
+| Session expires | 4001; the client refreshes the session (the cookie lives 12 hours) or, past it, sends the browser to sign in after warning about unsent changes |
+| Role lowered or removed | `accessChanged` (editor becomes read-only at once) or close `accessRevoked` |
+| Deck deleted, owner erased | close `deckDeleted`; the list no longer shows it |
+| Rejected agent edit | `rejected` with the failing edit's index and the model's reason; nothing written |
+| Google not connected, permission denied, not found | `googleNotConnected` with the connect address, `googlePermissionDenied`, `googlePresentationNotFound` |
+| An image fails to import | a placeholder rectangle and a loss; the import continues |
+| An export batch fails | the export stops at that slide and says which; re-export replaces |
+| Add-on identity token invalid | 401 `addonIdentityRejected`; the shell says "Sign in again" |
+| Over a limit | the matching `rateLimited`, `tooLarge`, `limitReached` or `resynchroniseRequired` (`updateTooLarge`) |
+
+### 21.17 Modules
+
+Five modules with disjoint owned paths. The architect keeps `src/contracts/**`,
+`src/platform/**`, `src/module-surfaces-check.ts`, the engine's `package.json`,
+`package-lock.json` and `tsconfig*.json`, `mcp/sasha-slides/deck-contracts/**`,
+`mcp/sasha-slides/tsconfig.json` and this document. Milestone 2 hands `src/theme/**` to the
+discussion module and `src/model/**` to the collaboration server module. The presenter is frozen.
+
+| Module | Owns | Hooks it exposes or consumes |
+|---|---|---|
+| 1 collaboration server | `engine/src/model/**`, `engine/src/server/**`, `mcp/sasha-slides/decks/**` (its tests beside the code), `server.ts`, `http/http-server.ts`, `http/account-portal.ts`, `http/account-portal-stack.ts`, `http/account-eraser.ts`, `http/account-keys.ts`, `test/account-portal*.test.ts`, `test/account-keys.test.ts`, `test/oauth.test.ts`, `mcp/sasha-slides/deploy/**`, the repository's `deploy/**`, `renderer/html2slides/addon-server/deploy/nginx-sashaslides.conf` and `nginx-routing.test.ts`, the repository root `package.json` and `package-lock.json` | implements `DeckService`, `EmbedTicketIssuer`, `GoogleIdentityAccounts`, `GoogleGrantStore`; mounts `createGoogleSlidesInterchange` and calls `registerDeckTools`; ships `decks/memory-deck-service.ts` (a real `DeckService` over real rooms in memory) FIRST, for modules 4 and 5 |
+| 2 web application | `engine/src/web/**`, `engine/build-web.ts`, `engine/e2e/web/**`, the website's `pages.ts`, `pages.test.ts`, `public/*.html` and `public/site.css` | implements `CollaborationSession`, the WebSocket `DiscussionStore`, the awareness `PresenceChannel`, the HTTP `AssetStore`; passes `EditorHost`; writes `WebBuildManifest` |
+| 3 discussion and editor | `engine/src/state/**`, `engine/src/view/**`, `engine/src/theme/**`, `engine/build-demo.ts`, `engine/e2e/editor/**` | consumes `CollaborationSession` through `EditorDependencies`; renders `EditorHost` |
+| 4 Google Slides | `mcp/sasha-slides/google-slides/**` (tests beside the code), `mcp/sasha-slides/addon/**`, `mcp/sasha-slides/converter/**`, `mcp/sasha-slides/e2e/google-slides*.ts`, the website's `public/addon-bundle/**` | implements `CreateGoogleSlidesInterchange`; consumes `DeckService` and the hooks above |
+| 5 assistant deck tools | `mcp/sasha-slides/deck-tools/**` (tests beside the code), `test/workflow-guidance.test.ts` (its tool count), `.claude/skills/sasha-slides/SKILL.md` | implements `RegisterDeckTools`; consumes `DeckService` |
+
+Integration order: module 1's `memory-deck-service.ts` and `engine/src/server/` room unblock the
+others' integration tests; module 2's end-to-end run needs module 1's server and module 3's
+rendering of `collaboration`; until then each module tests against its own fakes of the contracts.
+
+### 21.18 Risks and open questions
+
+- **`require` of the engine's ECMAScript modules from the connector's CommonJS**: ANSWERED. tsx's
+  CommonJS loads them through `require(esm)` (Node v24.21.0: `npx tsx mcp/sasha-slides/server.ts
+  --help` exits 0 with `engine/src/server` and `engine/src/model` loaded; `decks/packaging.test.ts`
+  checks it). Neither directory has a top-level `await`, and the image ships `engine/package.json`,
+  so `"type": "module"` applies there exactly as in development.
+- **The identity token's audience**: pinned from the bound script's own access token (tokeninfo
+  `azp`/`aud`, 2026-10-15, `ADDON_IDENTITY_AUDIENCES`), NOT yet from an identity token: the bound
+  script's manifest could not gain `openid` from the test browser ("Show appsscript.json" does not
+  save), so `ScriptApp.getIdentityToken()` returned null. Tick that setting by hand once, deploy the
+  manifest step, re-consent and run `open-editor`; a mismatch is logged with the token's own `aud`.
+- **The largest modeless dialog size**: MEASURED, Slides clamps the request to the window (a 4000 by
+  3000 request in a 1599 by 812 window gave a 1327 by 733 dialog, `EDITOR_DIALOG_SIZE`).
+- **Reusing an object id right after `deleteObject`**: MEASURED, works in the same batch (21.12).
+- **One process, rooms in memory**: a second connector replica would split rooms. Recorded in
+  `DEPLOY.md`.
+- **The runner on the editor's own site** until a second registrable domain exists: a busy-loop
+  transition can freeze the editor tab (section 11); only approved scripts run.

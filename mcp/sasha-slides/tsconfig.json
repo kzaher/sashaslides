@@ -36,5 +36,5 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true
   },
-  "include": ["*.ts", "feedback/*.ts", "comment-bot/*.ts", "test/*.ts"]
+  "include": ["*.ts", "feedback/*.ts", "comment-bot/*.ts", "decks/*.ts", "deck-contracts/*.ts", "deck-tools/*.ts", "google-slides/*.ts", "test/*.ts"]
 }

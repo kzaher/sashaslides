@@ -8,8 +8,8 @@
 //  * ASSET AVAILABILITY: the store's `available` stream, plus a check of every asset the document
 //    names that is not known to be loadable yet (an image pasted by a peer, a reopened deck).
 //  * PRESENCE: this editor's slide, selection, pointer and activity, published at most once per
-//    50 milliseconds (leading and trailing, so the last position always goes out); peers come back
-//    as `peersChanged`.
+//    `PRESENCE_PUBLISH_INTERVAL_MILLISECONDS` (leading and trailing, so the last position always
+//    goes out); peers come back as `peersChanged`.
 //  * NOTICE EXPIRY: one timer per expiring notice; a notice dismissed first takes its timer with it.
 
 import { concat, defer, EMPTY, from, merge, Observable, of, timer, type SchedulerLike } from "rxjs";

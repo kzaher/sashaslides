@@ -143,6 +143,51 @@ function reportedKinds(unsupported: readonly UnsupportedFeature[]): readonly str
 }
 
 {
+  // PER-CORNER RADII pick the preset whose rounded corners match, turned to face them
+  // (emit-shape.ts cornerPresetFor). Parametric over which corners are rounded: the uniform row is
+  // the control, and every row reports the radius loss because no preset radius can be set.
+  // Columns: radii clockwise from top-left -> preset, quarter turns (read back from the transform:
+  // an odd turn swaps the preset's own width and height).
+  const rows: readonly Readonly<{ radii: readonly [number, number, number, number]; preset: string; quarterTurns: number }>[] = [
+    { radii: [12, 12, 12, 12], preset: "ROUND_RECTANGLE", quarterTurns: 0 },
+    { radii: [0, 16, 0, 0], preset: "ROUND_1_RECTANGLE", quarterTurns: 0 },
+    { radii: [0, 0, 16, 0], preset: "ROUND_1_RECTANGLE", quarterTurns: 1 },
+    { radii: [0, 0, 0, 16], preset: "ROUND_1_RECTANGLE", quarterTurns: 2 },
+    { radii: [16, 0, 0, 0], preset: "ROUND_1_RECTANGLE", quarterTurns: 3 },
+    { radii: [16, 16, 0, 0], preset: "ROUND_2_SAME_RECTANGLE", quarterTurns: 0 },
+    { radii: [0, 16, 16, 0], preset: "ROUND_2_SAME_RECTANGLE", quarterTurns: 1 },
+    { radii: [0, 0, 16, 16], preset: "ROUND_2_SAME_RECTANGLE", quarterTurns: 2 },
+    { radii: [16, 0, 0, 16], preset: "ROUND_2_SAME_RECTANGLE", quarterTurns: 3 },
+    { radii: [16, 0, 16, 0], preset: "ROUND_2_DIAGONAL_RECTANGLE", quarterTurns: 0 },
+    { radii: [0, 16, 0, 16], preset: "ROUND_2_DIAGONAL_RECTANGLE", quarterTurns: 1 },
+    { radii: [16, 16, 16, 0], preset: "ROUND_RECTANGLE", quarterTurns: 0 },
+  ];
+  for (const row of rows) {
+    const [tl, tr, br, bl] = row.radii;
+    const { requests, unsupported } = convert([
+      { type: "rect", bounds: { x: 100, y: 100, w: 200, h: 80 }, fill: "#ffffff", cornerRadii: { tl, tr, br, bl } },
+    ]);
+    const [shape] = requestsOfKind(asRecords(requests), "createShape");
+    const label = `corners ${row.radii.join(",")}`;
+    test.equal(`${label}: preset`, shape?.["shapeType"], row.preset);
+    const placed = shape?.["elementProperties"] as
+      | Readonly<{ size: { width: { magnitude: number }; height: { magnitude: number } }; transform: { scaleX: number; shearY?: number; translateX: number; translateY: number } }>
+      | undefined;
+    const turns = Math.round(((Math.atan2(placed?.transform.shearY ?? 0, placed?.transform.scaleX ?? 1) * 180) / Math.PI + 360) / 90) % 4;
+    test.equal(`${label}: quarter turns`, turns, row.quarterTurns);
+    const odd = row.quarterTurns % 2 === 1;
+    test.near(`${label}: preset width`, placed?.size.width.magnitude ?? -1, (odd ? 80 : 200) * EMU_PER_PX, 1);
+    // The turned box still covers the element: its centre stays at (200, 140).
+    const width = (odd ? 80 : 200) * EMU_PER_PX;
+    const height = (odd ? 200 : 80) * EMU_PER_PX;
+    const radians = (row.quarterTurns * Math.PI) / 2;
+    const centreX = (placed?.transform.translateX ?? 0) + (Math.cos(radians) * width) / 2 - (Math.sin(radians) * height) / 2;
+    test.near(`${label}: centre x`, centreX, 200 * EMU_PER_PX, 2);
+    test.equal(`${label}: radius loss`, reportedKinds(unsupported), ["corner-radius-approximated"]);
+  }
+}
+
+{
   const { requests, unsupported } = convert([
     {
       type: "rect",

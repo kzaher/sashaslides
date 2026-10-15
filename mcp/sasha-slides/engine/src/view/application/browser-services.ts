@@ -44,9 +44,9 @@ export function primaryModifierOf(page: Window): "control" | "meta" {
 }
 
 /** Rich text from pasted markup, reduced to the engine's styles (see the header); null when it has no text. */
-export function richTextFromMarkup(html: string): readonly Paragraph[] | null {
+export function richTextFromMarkup(markup: string): readonly Paragraph[] | null {
   if (typeof DOMParser === "undefined") return null;
-  const parsed = new DOMParser().parseFromString(html, "text/html");
+  const parsed = new DOMParser().parseFromString(markup, "text/html");
   const paragraphs: Paragraph[] = [];
   let runs: TextRun[] = [];
   const flush = (): void => {
@@ -156,15 +156,15 @@ function inlineStyleOf(element: HTMLElement): RunStylePatch {
     const address = element.getAttribute("href") ?? "";
     if (/^(https?:|mailto:)/i.test(address)) style.link = { kind: "webAddress", address };
   }
-  const css = element.style;
-  const weight = Number(css.fontWeight);
-  if (css.fontWeight === "bold" || weight >= 600) style.fontWeight = 700;
-  if (css.fontStyle === "italic") style.fontStyle = "italic";
-  if (css.textDecoration.includes("underline")) style.underline = true;
-  if (css.textDecoration.includes("line-through")) style.strikethrough = true;
-  const points = /^([\d.]+)pt$/.exec(css.fontSize);
+  const declared = element.style;
+  const weight = Number(declared.fontWeight);
+  if (declared.fontWeight === "bold" || weight >= 600) style.fontWeight = 700;
+  if (declared.fontStyle === "italic") style.fontStyle = "italic";
+  if (declared.textDecoration.includes("underline")) style.underline = true;
+  if (declared.textDecoration.includes("line-through")) style.strikethrough = true;
+  const points = /^([\d.]+)pt$/.exec(declared.fontSize);
   if (points !== null) style.fontSize = Math.round(slideUnitsFromPoints(Number(points[1])) * 100) / 100;
-  const colour = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(css.color);
+  const colour = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(declared.color);
   if (colour !== null) style.colour = literalColour({ hexadecimal: `#${[colour[1], colour[2], colour[3]].map((channel) => Number(channel ?? "0").toString(16).padStart(2, "0")).join("")}`, alpha: 1 });
   return style;
 }

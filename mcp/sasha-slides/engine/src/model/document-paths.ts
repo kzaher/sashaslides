@@ -7,8 +7,11 @@
 // body involved without diffing anything.
 
 import * as Y from "yjs";
-import type { DocumentRootName, ElementId, SlideId, TableColumnId, TableRowId, TextTarget } from "../contracts/index.ts";
-import { assertNever, DOCUMENT_ROOT, ELEMENT_KEY, SLIDE_KEY, TABLE_CELL_KEY, tableCellKey } from "../contracts/index.ts";
+import type { ElementId, SlideId, TableColumnId, TableRowId } from "../contracts/ids.ts";
+import type { TextTarget } from "../contracts/selection.ts";
+import type { DocumentRootName } from "../contracts/yjs-schema.ts";
+import { assertNever } from "../contracts/assert-never.ts";
+import { DOCUMENT_ROOT, ELEMENT_KEY, SLIDE_KEY, TABLE_CELL_KEY, tableCellKey } from "../contracts/yjs-schema.ts";
 
 /** The root maps of a document Y.Doc (yjs-schema.ts). */
 export type DocumentRoots = Readonly<Record<DocumentRootName, Y.Map<unknown>>>;

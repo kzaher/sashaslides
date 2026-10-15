@@ -7,7 +7,9 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // ESNext.Disposable: the editor shell types its messages with the engine's deck-api.ts
+    // contract, whose neighbours name `Disposable` (they are only ever types here).
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "ESNext.Disposable"],
     // Deliberately NOT @types/node: these sources ship into a browser (the HtmlService sidebar
     // iframe), and letting node's globals in would make `fetch`, `setTimeout` and `Blob` resolve to
     // undici/node shapes, so the gate would stop catching a browser/node mix-up. There is also no

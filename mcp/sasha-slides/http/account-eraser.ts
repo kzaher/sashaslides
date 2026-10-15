@@ -80,6 +80,32 @@ export function createAccountEraser(
 }
 
 /**
+ * "Delete my data" with decks (SPEC.md 21.7 "Erase"): the decks the account owns are deleted, its
+ * memberships removed and its open deck sockets closed BEFORE the inner eraser destroys the key --
+ * the deck records it must rewrite are sealed under OTHER owners' keys, and the owned decks'
+ * directories need no key to delete. The key is still destroyed when the deck step throws (the
+ * inner eraser runs in `finally`), and the deck failure is rethrown afterwards, so the caller learns
+ * that something was left behind, all of it unreadable.
+ */
+export function withDeckErasure(
+  options: Readonly<{ eraser: AccountEraser; eraseDecks: (options: Readonly<{ accountId: string }>) => Promise<void> }>,
+): AccountEraser {
+  return {
+    eraseAccount: async ({ accountId }) => {
+      let deckFailure: unknown = null;
+      try {
+        await options.eraseDecks({ accountId });
+      } catch (cause) {
+        deckFailure = cause;
+      }
+      const report = await options.eraser.eraseAccount({ accountId });
+      if (deckFailure !== null) throw deckFailure;
+      return report;
+    },
+  };
+}
+
+/**
  * Production revocation: `POST https://oauth2.googleapis.com/revoke` with `token=`, bounded
  * by `timeoutMs`. Google answers 200 on success and 400 for a token it no longer knows.
  */

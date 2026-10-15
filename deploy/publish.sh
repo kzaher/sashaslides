@@ -176,6 +176,15 @@ regenerate_site_downloads() {
 # ── connector ────────────────────────────────────────────────────────────────
 
 publish_connector() {
+  # The deck web application is read from disk at runtime (engine/dist/web), so it is built here,
+  # before context-files.ts lists it; the image never builds it (no esbuild, no React in it).
+  step "connector: building the deck web application (engine/dist/web)"
+  run timeout "$BUDGET_UPLOAD" bash -c 'cd mcp/sasha-slides/engine && npm ci --no-audit --no-fund && npm run -s build:web'
+  if [ "$DRY" != 1 ]; then
+    [ -f mcp/sasha-slides/engine/dist/web/manifest.json ] \
+      || die "mcp/sasha-slides/engine/dist/web/manifest.json missing after build:web — /decks would answer 503"
+  fi
+
   step "connector: computing build context from server.ts's import graph"
   timeout 60 npx tsx "$CONNECTOR_DEPLOY_DIR/context-files.ts" > "$WORK/connector-files.txt" \
     || die "context-files.ts failed"

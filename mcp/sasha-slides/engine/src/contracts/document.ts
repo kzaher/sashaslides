@@ -251,7 +251,11 @@ export type CellBorders = Readonly<{
 export type TableCell = Readonly<{
   rowId: TableRowId;
   columnId: TableColumnId;
-  /** 1 unless merged; a cell covered by another's span is absent from `cells`. Merging is later. */
+  /**
+   * 1 unless merged. The model keeps a cell for EVERY row and column, so a cell covered by another's
+   * span is present as an empty default cell; readers that draw or export a table skip covered
+   * cells themselves (writing their default borders over a merged cell erases its lines).
+   */
   rowSpan: number;
   columnSpan: number;
   fill: Fill;

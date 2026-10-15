@@ -23,7 +23,7 @@
 //    of following siblings that makes room, and as a last resort the whole list, always keeping
 //    the displayed order.
 
-import type { RandomSource } from "../contracts/index.ts";
+import type { RandomSource } from "../contracts/ids.ts";
 
 export const ORDER_KEY_DIGITS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 

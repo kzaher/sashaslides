@@ -1,0 +1,10 @@
+// The deck tools' model-backed tests. They run the REAL engine model (fake-deck-service.ts), whose
+// contracts index also declares the presenter's browser types, so they compile with the DOM
+// library, which the connector's own tsconfig (mcp/sasha-slides/tsconfig.json) leaves out.
+//
+//   npx tsc -p mcp/sasha-slides/deck-tools/model-tests
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "lib": ["ES2022", "DOM"] },
+  "include": ["*.ts"]
+}

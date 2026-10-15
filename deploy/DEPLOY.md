@@ -15,9 +15,24 @@ nginx terminates TLS and routes by path
 `nginx-routing.test.ts` beside it). These paths go to the connector: `/mcp`, `/register`,
 `/authorize`, `/token`, `/oauth/google/callback`, `/.well-known/oauth-protected-resource`,
 `/.well-known/oauth-authorization-server`, `/.well-known/openid-configuration` (each with or
-without `/mcp` appended), `/account` and everything under `/account/`. The connector's
-`/healthz` is published as `/connector/healthz`. Everything else, including `/healthz`, goes to
-the website.
+without `/mcp` appended), `/account` and everything under `/account/`, and the deck server's
+`/decks`, `/deck/`, `/deck-app/` and `/deck-api/` (the last with WebSocket upgrades, for
+`/deck-api/sync/<id>`). The connector's `/healthz` is published as `/connector/healthz`. Everything
+else, including `/healthz`, `/deckhouse` and `/decks.css`, goes to the website.
+
+**Never run more than one connector replica.** The deck server lives inside the connector
+process (SPEC.md 21.1): each open deck is one room in that process's memory, the single
+authoritative replica every editor and every agent edit goes through. A second replica would split
+a deck's editors between two rooms that never see each other's changes, and both would write the
+same files under `/data/decks`. `docker-compose.yml` runs one container; keep it so, and restart
+rather than scale. A restart is safe: on `SIGTERM` the connector flushes every room and closes the
+deck sockets with `serverShuttingDown` (4013), and the editors reconnect and resend anything the
+last 250 milliseconds lost.
+
+`publish.sh connector` also builds the deck web application (`npm ci` and `npm run -s build:web`
+in `mcp/sasha-slides/engine`) before packing, because the connector serves
+`engine/dist/web/**` from disk. Deck data lives in the same `/data` volume as the auth store:
+`/data/decks/` (every record sealed with the deck owner's account key) and `/data/deck-profiles/`.
 
 ## One-time server setup
 

@@ -247,7 +247,7 @@ export function requestPresentation(state: EditorState, from: "beginning" | "cur
   }
   const startSlideId = startingSlide(state, from);
   if (startSlideId === null) return state;
-  return { ...state, presentation: { startSlideId, withSpeakerView }, gesture: { kind: "idle" }, ui: { ...state.ui, openMenu: null, contextMenu: null } };
+  return { ...state, presentation: { startSlideId, withSpeakerView }, gesture: { kind: "idle" }, chrome: { ...state.chrome, openMenu: null, contextMenu: null } };
 }
 
 export function endPresentation(state: EditorState, lastSlideId: SlideId | null): EditorState {

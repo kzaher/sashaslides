@@ -12,23 +12,17 @@
 //  * THE AUTHORITY CHECKS BEFORE IT APPENDS, so a client learns of a refusal (`notAuthor`,
 //    `threadMissing` ...) from `submit` instead of finding its request silently ignored. A request
 //    id already in the log answers with its original outcome: a retried request is not applied twice.
+//  * DELETING A THREAD IS THE ONE RULE THE FOLD CANNOT RE-CHECK. The creator may delete a thread,
+//    and so may a role with `moderateDiscussion` (deck-access.ts) -- but roles live on the deck
+//    server, not in the log. So the fold applies a `deleteThread` from any actor the authority
+//    accepted, while the authorities refuse it: the in-memory one to everyone but the creator, the
+//    deck server (engine/src/server) to everyone but the creator and the moderating roles.
+//    `discussionRefusal` is exported so the deck server applies exactly these rules first.
 
 import { Subject } from "rxjs";
-import type {
-  CommentMessage,
-  CommentThread,
-  CreateMemoryDiscussionStore,
-  DiscussionCommand,
-  DiscussionLogEntry,
-  DiscussionOutcome,
-  DiscussionRejectionReason,
-  DiscussionRequest,
-  DiscussionSnapshot,
-  DiscussionStore,
-  Person,
-  ReduceDiscussionLog,
-} from "../contracts/index.ts";
-import { assertNever, EMPTY_DISCUSSION } from "../contracts/index.ts";
+import type { CommentMessage, CommentThread, CreateMemoryDiscussionStore, DiscussionCommand, DiscussionLogEntry, DiscussionOutcome, DiscussionRejectionReason, DiscussionRequest, DiscussionSnapshot, DiscussionStore, Person, ReduceDiscussionLog } from "../contracts/discussion.ts";
+import { assertNever } from "../contracts/assert-never.ts";
+import { EMPTY_DISCUSSION } from "../contracts/discussion.ts";
 
 export const reduceDiscussionLog: ReduceDiscussionLog = (snapshot, entry) => {
   const threads = applyEntry({ threads: snapshot.threads, entry });
@@ -49,7 +43,7 @@ export const createMemoryDiscussionStore: CreateMemoryDiscussionStore = (options
     submit: (request: DiscussionRequest): Promise<DiscussionOutcome> => {
       const earlier = log.find((entry) => entry.requestId === request.requestId);
       if (earlier !== undefined) return Promise.resolve({ kind: "applied", requestId: request.requestId, sequence: earlier.sequence });
-      const refusal = refusalOf({ threads: snapshot.threads, command: request.command, actor: options.actor });
+      const refusal = discussionRefusal({ threads: snapshot.threads, command: request.command, actor: options.actor, mayDeleteAnyThread: false });
       if (refusal !== null) return Promise.resolve({ kind: "rejected", requestId: request.requestId, reason: refusal.reason, message: refusal.message });
       const entry: DiscussionLogEntry = {
         sequence: snapshot.sequence + 1,
@@ -68,57 +62,15 @@ export const createMemoryDiscussionStore: CreateMemoryDiscussionStore = (options
   return store;
 };
 
-type Refusal = Readonly<{ reason: DiscussionRejectionReason; message: string }>;
+export type DiscussionRefusal = Readonly<{ reason: DiscussionRejectionReason; message: string }>;
 
-/** The new thread list, or null when the entry does not apply (see the header: it is skipped). */
-function applyEntry(options: Readonly<{ threads: readonly CommentThread[]; entry: DiscussionLogEntry }>): readonly CommentThread[] | null {
-  const { threads, entry } = options;
-  const command = entry.command;
-  if (refusalOf({ threads, command, actor: entry.actor }) !== null) return null;
-  switch (command.kind) {
-    case "createThread": {
-      const message: CommentMessage = { id: command.messageId, author: entry.actor, body: command.body, createdAt: entry.at, editedAt: null };
-      return [
-        ...threads,
-        { id: command.threadId, anchor: command.anchor, status: { kind: "open" }, createdBy: entry.actor, createdAt: entry.at, messages: [message], markings: command.markings },
-      ];
-    }
-    case "reply":
-      return updateThread({
-        threads,
-        threadId: command.threadId,
-        update: (thread) => ({ ...thread, messages: [...thread.messages, { id: command.messageId, author: entry.actor, body: command.body, createdAt: entry.at, editedAt: null }] }),
-      });
-    case "editMessage":
-      return updateThread({
-        threads,
-        threadId: command.threadId,
-        update: (thread) => ({
-          ...thread,
-          messages: thread.messages.map((message) => (message.id === command.messageId ? { ...message, body: command.body, editedAt: entry.at } : message)),
-        }),
-      });
-    case "deleteMessage":
-      return updateThread({ threads, threadId: command.threadId, update: (thread) => ({ ...thread, messages: thread.messages.filter((message) => message.id !== command.messageId) }) });
-    case "resolveThread":
-      return updateThread({ threads, threadId: command.threadId, update: (thread) => ({ ...thread, status: { kind: "resolved", resolvedBy: entry.actor, resolvedAt: entry.at } }) });
-    case "reopenThread":
-      return updateThread({ threads, threadId: command.threadId, update: (thread) => ({ ...thread, status: { kind: "open" } }) });
-    case "deleteThread":
-      return threads.filter((thread) => thread.id !== command.threadId);
-    default:
-      return assertNever(command);
-  }
-}
-
-function updateThread(
-  options: Readonly<{ threads: readonly CommentThread[]; threadId: CommentThread["id"]; update: (thread: CommentThread) => CommentThread }>,
-): readonly CommentThread[] {
-  return options.threads.map((thread) => (thread.id === options.threadId ? options.update(thread) : thread));
-}
-
-/** Why `actor` may not do `command` now, or null when it may. Shared by the authority and the fold. */
-function refusalOf(options: Readonly<{ threads: readonly CommentThread[]; command: DiscussionCommand; actor: Person }>): Refusal | null {
+/**
+ * Why `actor` may not do `command` now, or null when it may. Shared by the authorities and the
+ * fold; `mayDeleteAnyThread` is the moderation the authority already decided (see the header).
+ */
+export function discussionRefusal(
+  options: Readonly<{ threads: readonly CommentThread[]; command: DiscussionCommand; actor: Person; mayDeleteAnyThread: boolean }>,
+): DiscussionRefusal | null {
   const { threads, command, actor } = options;
   const allMessageIds = (): ReadonlySet<string> => new Set(threads.flatMap((thread) => thread.messages.map((message) => message.id)));
   switch (command.kind) {
@@ -150,9 +102,60 @@ function refusalOf(options: Readonly<{ threads: readonly CommentThread[]; comman
     case "deleteThread": {
       const thread = threads.find((candidate) => candidate.id === command.threadId);
       if (thread === undefined) return { reason: "threadMissing", message: "the thread does not exist" };
-      return thread.createdBy.id === actor.id ? null : { reason: "notAuthor", message: "only the thread's creator may delete it" };
+      if (options.mayDeleteAnyThread || thread.createdBy.id === actor.id) return null;
+      return { reason: "notAuthor", message: "only the thread's creator may delete it" };
     }
     default:
       return assertNever(command);
   }
+}
+
+/** The new thread list, or null when the entry does not apply (see the header: it is skipped). */
+function applyEntry(options: Readonly<{ threads: readonly CommentThread[]; entry: DiscussionLogEntry }>): readonly CommentThread[] | null {
+  const { threads, entry } = options;
+  const command = entry.command;
+  if (discussionRefusal({ threads, command, actor: entry.actor, mayDeleteAnyThread: true }) !== null) return null;
+  switch (command.kind) {
+    case "createThread": {
+      const message: CommentMessage = { id: command.messageId, author: entry.actor, body: command.body, mentions: command.mentions, createdAt: entry.at, editedAt: null };
+      return [
+        ...threads,
+        { id: command.threadId, anchor: command.anchor, status: { kind: "open" }, createdBy: entry.actor, createdAt: entry.at, messages: [message], markings: command.markings },
+      ];
+    }
+    case "reply":
+      return updateThread({
+        threads,
+        threadId: command.threadId,
+        update: (thread) => ({
+          ...thread,
+          messages: [...thread.messages, { id: command.messageId, author: entry.actor, body: command.body, mentions: command.mentions, createdAt: entry.at, editedAt: null }],
+        }),
+      });
+    case "editMessage":
+      return updateThread({
+        threads,
+        threadId: command.threadId,
+        update: (thread) => ({
+          ...thread,
+          messages: thread.messages.map((message) => (message.id === command.messageId ? { ...message, body: command.body, mentions: command.mentions, editedAt: entry.at } : message)),
+        }),
+      });
+    case "deleteMessage":
+      return updateThread({ threads, threadId: command.threadId, update: (thread) => ({ ...thread, messages: thread.messages.filter((message) => message.id !== command.messageId) }) });
+    case "resolveThread":
+      return updateThread({ threads, threadId: command.threadId, update: (thread) => ({ ...thread, status: { kind: "resolved", resolvedBy: entry.actor, resolvedAt: entry.at } }) });
+    case "reopenThread":
+      return updateThread({ threads, threadId: command.threadId, update: (thread) => ({ ...thread, status: { kind: "open" } }) });
+    case "deleteThread":
+      return threads.filter((thread) => thread.id !== command.threadId);
+    default:
+      return assertNever(command);
+  }
+}
+
+function updateThread(
+  options: Readonly<{ threads: readonly CommentThread[]; threadId: CommentThread["id"]; update: (thread: CommentThread) => CommentThread }>,
+): readonly CommentThread[] {
+  return options.threads.map((thread) => (thread.id === options.threadId ? options.update(thread) : thread));
 }

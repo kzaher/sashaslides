@@ -4,7 +4,7 @@
 // (editable-canvas.tsx); this driver drags one element 80 steps with real input events and reads
 // those measures back. It also checks the wash is paused while the drag lasts.
 //
-//   npx tsx e2e/editor/drag-budget.ts
+//   npx tsx e2e/editor/drag-budget.ts [harness directory]
 //
 // Chrome must be listening on 127.0.0.1:9223. Whole run: under 30 seconds.
 
@@ -16,7 +16,8 @@ const BUDGET_MILLISECONDS = 4;
 const STEPS = 80;
 const WARM_UP_STEPS = 5;
 
-const bundle = join(tmpdir(), "sasha-editor-harness");
+// A directory of this run's own (argument 1), so parallel runs never serve each other's bundle.
+const bundle = process.argv[2] ?? join(tmpdir(), "sasha-editor-harness");
 await buildHarness(bundle);
 await using server = await serveDirectory(bundle);
 

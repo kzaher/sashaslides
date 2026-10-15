@@ -12,7 +12,9 @@
 // opening the speaker view window or a new tab -- is not here: the view's handlers do it directly
 // through `BrowserCapabilities` and then dispatch what happened (editor-state.ts header).
 
+import type { ReactNode } from "react";
 import type { SchedulerLike } from "rxjs";
+import type { CollaborationSession, CollaborationStatus } from "./collaboration.ts";
 import type { CommentThread, DiscussionSnapshot, DiscussionStore, Person } from "./discussion.ts";
 import type { AssetStore, DocumentStore, TextRange } from "./document-store.ts";
 import type { DocumentSnapshot } from "./document.ts";
@@ -23,6 +25,7 @@ import type { ElementId, SlideId, ThreadId } from "./ids.ts";
 import type { PresenceChannel } from "./presence.ts";
 import type { PresenterDependencies } from "./presenter.ts";
 import type { RunningSystem } from "./rxfeedback.ts";
+import type { Colour } from "./style.ts";
 
 export type EditorDependencies = Readonly<{
   documentStore: DocumentStore;
@@ -30,6 +33,13 @@ export type EditorDependencies = Readonly<{
   assetStore: AssetStore;
   /** null: no collaboration transport (single-user demo). */
   presence: PresenceChannel | null;
+  /**
+   * The deck server session (collaboration.ts): status, server notices, reconnect and agent
+   * revert. null for a local deck (the demo, tests), whose status is `LOCAL_COLLABORATION_STATUS`.
+   */
+  collaboration: CollaborationSession | null;
+  /** The viewer's remembered recent colours, most recent first (the web module keeps them in local storage). */
+  recentColours: readonly Colour[];
   /** Every timer in every feedback (see the header). */
   scheduler: SchedulerLike;
   /** For the event log's timestamps only. */
@@ -53,6 +63,10 @@ export type InitialEditorState = (options: Readonly<{
   document: DocumentSnapshot;
   discussion: DiscussionSnapshot;
   containerSize: Size;
+  /** `collaboration.status()` when connected; `LOCAL_COLLABORATION_STATUS` otherwise. */
+  collaboration: CollaborationStatus;
+  /** The viewer's remembered recent colours (local storage in the web module), most recent first. */
+  recentColours: readonly Colour[];
 }>) => EditorState;
 
 /**
@@ -110,4 +124,31 @@ export type EditorApplicationProperties = Readonly<{
   /** The state module's pure selectors, passed in by the composition root so the view never imports the state module. */
   clipboardContentFor: ClipboardContentFor;
   arrangeThreads: ArrangeThreads;
+  /** What the page hosting the editor adds to its chrome (`STANDALONE_EDITOR_HOST` in the demo). */
+  host: EditorHost;
 }>;
+
+/**
+ * The web module's additions to the editor chrome, so the view never imports the web module and
+ * the web module never reaches into the view's menus. The view renders the real Sasha Slides logo
+ * (http/sasha-icon.generated.ts) itself, linking to `homeAddress`.
+ */
+export type EditorHost = Readonly<{
+  /** Where the logo and File > "All decks" go (sashaslides.com/decks); null in the demo. */
+  homeAddress: string | null;
+  /** Rendered in the top bar after the peers and before Present: the Share button, the account menu. */
+  topBarAccessory: ReactNode;
+  /** Appended to the File menu in order: Import from / Export to Google Slides, Open in a new tab. */
+  fileMenuItems: readonly HostMenuItem[];
+}>;
+
+export type HostMenuItem = Readonly<{
+  id: string;
+  label: string;
+  /** Shown as the disabled item's explanation; null when enabled. */
+  disabledReason: string | null;
+  /** Called inside the click or key handler (it may open a window). */
+  run: () => void;
+}>;
+
+export const STANDALONE_EDITOR_HOST: EditorHost = { homeAddress: null, topBarAccessory: null, fileMenuItems: [] };

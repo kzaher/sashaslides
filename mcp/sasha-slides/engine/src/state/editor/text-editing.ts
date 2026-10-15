@@ -17,6 +17,7 @@ import {
   type ElementSnapshot,
   type FontStyleName,
   type ListGlyph,
+  type ListId,
   type ListMembership,
   type NoList,
   type ParagraphAttributeName,
@@ -246,7 +247,14 @@ export function applyRunStyle(state: EditorState, patch: RunStylePatch, clear: r
   return formatWholeBodies(state, (length) => [{ kind: "formatRuns", index: 0, length, patch, clear }]);
 }
 
+/**
+ * Paragraph style for every paragraph overlapping the selection, or whole bodies of selected
+ * elements. A LIST value picks a glyph (the list style picker, SPEC.md 21.9): `chooseListGlyph`
+ * keeps each paragraph's own list and level, so its `listId` and `level` are not read here.
+ */
 export function applyParagraphStyle(state: EditorState, patch: ParagraphStylePatch, clear: readonly ParagraphAttributeName[]): EditorState {
+  const list = patch.list === undefined ? null : listMembershipOf(patch.list);
+  if (list !== null) return chooseListGlyph(state, list.glyph);
   const selection = textSelectionOf(state.selection);
   if (selection !== null) {
     const range = rangeOf(selection);
@@ -289,6 +297,51 @@ export function toggleList(state: EditorState, list: "bulleted" | "numbered"): E
   return formatWholeBodies({ ...state, idSeed: minter.seed() }, (length) => [
     { kind: "formatParagraphs", index: 0, length, patch: { list: { kind: "list", listId, glyph, level: 0 } }, clear: [] },
   ]);
+}
+
+/**
+ * The list style picker: every paragraph overlapping the selection (or every paragraph of the
+ * selected elements' bodies) gets `glyph`, one `formatParagraphs` per paragraph. A paragraph already
+ * in a list keeps its list and level; one that is not joins the first list among them, or a new one.
+ */
+export function chooseListGlyph(state: EditorState, glyph: ListGlyph): EditorState {
+  const minter = createIdMinter(state.idSeed);
+  let newListId: ListId | null = null;
+  const listIdFor = (memberships: readonly (ListMembership | null)[]): ListId => {
+    const existing = memberships.find((membership) => membership !== null)?.listId;
+    if (existing !== undefined) return existing;
+    newListId = newListId ?? minter.next("list");
+    return newListId;
+  };
+  const operationsFor = (items: FlatText, index: number, length: number): readonly TextOperation[] => {
+    const marks = [...paragraphMarkIndices({ items, index, length })];
+    const memberships = marks.map((mark) => listMembershipOf(paragraphStylesOverlapping({ items, index: mark, length: 0 })[0]?.list));
+    const joined = memberships.some((membership) => membership === null) ? listIdFor(memberships) : null;
+    return marks.map((mark, position): TextOperation => {
+      const membership = memberships[position] ?? null;
+      const list: ListMembership = membership === null ? { kind: "list", listId: joined ?? listIdFor(memberships), glyph, level: 0 } : { ...membership, glyph };
+      return { kind: "formatParagraphs", index: mark, length: 1, patch: { list }, clear: [] };
+    });
+  };
+  const selection = textSelectionOf(state.selection);
+  if (selection !== null) {
+    const items = optimisticText(state, selection.target);
+    if (items === null) return state;
+    const range = rangeOf(selection);
+    const operations = operationsFor(items, range.start, range.end - range.start);
+    return queueTextOperations({ state: { ...state, idSeed: minter.seed() }, target: selection.target, operations, caret: { anchor: selection.anchor, focus: selection.focus }, merge: false });
+  }
+  const selected = selectedElements(state);
+  if (selected === null) return state;
+  const commands = selected.elements
+    .flatMap((element) => leavesOf(element))
+    .flatMap((element) => textTargetsOf(selected.slide.id, element))
+    .flatMap((target) => {
+      const items = optimisticText(state, target);
+      if (items === null) return [];
+      return [{ kind: "editText" as const, target, basedOnRevision: state.document.revision, operations: operationsFor(items, 0, items.length) }];
+    });
+  return queueEnvelope({ ...state, idSeed: minter.seed() }, { commands, selectionAfter: state.selection, mergeWithPrevious: false });
 }
 
 /** Tab and Shift+Tab in a list: every overlapping list paragraph one level in or out. */

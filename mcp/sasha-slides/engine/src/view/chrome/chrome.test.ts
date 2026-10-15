@@ -78,7 +78,7 @@ describe("properties panel", () => {
   const document = documentSnapshot({ deckId: fixtureDeckId("deck_panel"), title: "Panel", slides: [slide] });
   const stateWith = (elements: readonly ElementSnapshot[], tab: PropertiesTab): EditorState => {
     const state = fixtureEditorState({ document });
-    return { ...state, currentSlideId: slide.id, selection: { kind: "elements", slideId: slide.id, elementIds: elements.map((element) => element.id) }, ui: { ...state.ui, propertiesTab: tab } };
+    return { ...state, currentSlideId: slide.id, selection: { kind: "elements", slideId: slide.id, elementIds: elements.map((element) => element.id) }, chrome: { ...state.chrome, propertiesTab: tab } };
   };
 
   it("an 18 point run (32 slide units) shows 18", () => {

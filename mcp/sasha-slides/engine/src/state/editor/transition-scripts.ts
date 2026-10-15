@@ -79,16 +79,16 @@ export function approveScript(state: EditorState, scriptId: TransitionScriptId, 
 }
 
 export function previewTransition(state: EditorState, slideId: SlideId): EditorState {
-  const generation = (state.ui.transitionPreview?.generation ?? 0) + 1;
+  const generation = (state.chrome.transitionPreview?.generation ?? 0) + 1;
   const editor = currentEditor(state);
   const previewed = editor === null ? state : withEditor(state, { ...editor, previewGeneration: editor.previewGeneration + 1 });
-  return { ...previewed, ui: { ...previewed.ui, transitionPreview: { slideId, generation } } };
+  return { ...previewed, chrome: { ...previewed.chrome, transitionPreview: { slideId, generation } } };
 }
 
-type ScriptEditorState = Extract<EditorState["ui"]["dialog"], { kind: "transitionScriptEditor" }>["editor"];
+type ScriptEditorState = Extract<EditorState["chrome"]["dialog"], { kind: "transitionScriptEditor" }>["editor"];
 
 function currentEditor(state: EditorState): ScriptEditorState | null {
-  const dialog = state.ui.dialog;
+  const dialog = state.chrome.dialog;
   switch (dialog.kind) {
     case "transitionScriptEditor":
       return dialog.editor;
@@ -106,5 +106,5 @@ function currentEditor(state: EditorState): ScriptEditorState | null {
 }
 
 function withEditor(state: EditorState, editor: ScriptEditorState): EditorState {
-  return { ...state, ui: { ...state.ui, dialog: { kind: "transitionScriptEditor", editor } } };
+  return { ...state, chrome: { ...state.chrome, dialog: { kind: "transitionScriptEditor", editor } } };
 }

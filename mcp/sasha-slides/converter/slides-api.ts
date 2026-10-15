@@ -108,7 +108,11 @@ export type ShapeType =
   | "RECTANGLE"
   | "ROUND_RECTANGLE"
   | "ELLIPSE"
-  | "TRIANGLE";
+  | "TRIANGLE"
+  /** Rounded corners chosen per corner (emit-shape.ts `cornerPresetFor`). */
+  | "ROUND_1_RECTANGLE"
+  | "ROUND_2_SAME_RECTANGLE"
+  | "ROUND_2_DIAGONAL_RECTANGLE";
 
 export type CreateShapeRequest = Readonly<{
   objectId: string;

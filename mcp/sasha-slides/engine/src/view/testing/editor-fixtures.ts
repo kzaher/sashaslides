@@ -6,11 +6,12 @@
 
 import { BehaviorSubject, EMPTY, asyncScheduler, of } from "rxjs";
 import type { DocumentSnapshot, Paragraph } from "../../contracts/document.ts";
+import { LOCAL_COLLABORATION_STATUS } from "../../contracts/collaboration.ts";
 import { EMPTY_DISCUSSION, type Person } from "../../contracts/discussion.ts";
 import type { AssetStore } from "../../contracts/document-store.ts";
 import type { EditorEvent } from "../../contracts/editor-events.ts";
 import type { EditorChrome, EditorEmbedding, EditorState } from "../../contracts/editor-state.ts";
-import type { ArrangeThreads, BrowserCapabilities, ClipboardContentFor } from "../../contracts/editor-system.ts";
+import { STANDALONE_EDITOR_HOST, type ArrangeThreads, type BrowserCapabilities, type ClipboardContentFor, type EditorHost } from "../../contracts/editor-system.ts";
 import { parsePersonId, type AssetId } from "../../contracts/ids.ts";
 import type { PresenterDependencies } from "../../contracts/presenter.ts";
 import type { LoggedEvent, RunningSystem } from "../../contracts/rxfeedback.ts";
@@ -32,6 +33,7 @@ export const CLOSED_CHROME: EditorChrome = {
   showResolvedThreads: false,
   aspectRatioLocked: false,
   transitionPreview: null,
+  recentColours: [],
 };
 
 /** A complete editor state over `document`, as the state module's `initialEditorState` would make it. */
@@ -62,7 +64,9 @@ export function fixtureEditorState(options: Readonly<{ document: DocumentSnapsho
     measuredLayouts: new Map(),
     pointer: null,
     peers: [],
-    ui: CLOSED_CHROME,
+    collaboration: LOCAL_COLLABORATION_STATUS,
+    pendingAgentReverts: [],
+    chrome: CLOSED_CHROME,
     notices: [],
     presentation: null,
   };
@@ -132,8 +136,10 @@ export function fixtureServices(options: Readonly<{
   clipboardContentFor?: ClipboardContentFor;
   arrangeThreads?: ArrangeThreads;
   assetStore?: AssetStore;
-  richTextFrom?: (html: string) => readonly Paragraph[] | null;
+  richTextFrom?: (markup: string) => readonly Paragraph[] | null;
   measurePointerMoves?: boolean;
+  host?: EditorHost;
+  now?: () => number;
 }>): EditorServices {
   const assetStore = options.assetStore ?? EMPTY_ASSET_STORE;
   return {
@@ -150,6 +156,8 @@ export function fixtureServices(options: Readonly<{
     richTextFrom: options.richTextFrom ?? (() => null),
     readImageFile: () => Promise.resolve(null),
     measurePointerMoves: options.measurePointerMoves ?? false,
+    host: options.host ?? STANDALONE_EDITOR_HOST,
+    now: options.now ?? (() => 0),
   };
 }
 
