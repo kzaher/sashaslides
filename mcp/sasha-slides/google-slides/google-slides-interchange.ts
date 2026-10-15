@@ -198,7 +198,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     if (!roleAllows({ role: deck.role(), permission: "exchangeWithGoogleSlides" })) return answerError({ response, status: 403, error: "notPermitted", message: "Only editors can export this deck." });
     const link = deck.googleSlidesLink();
     if (targetKind === "linkedPresentation" && link === null) return answerError({ response, status: 409, error: "invalidRequest", message: "This deck is not linked to a presentation yet." });
-    const target: ExportTarget = targetKind === "linkedPresentation" && link !== null ? { kind: "linkedPresentation", presentationId: link.presentationId } : { kind: "newPresentation" };
+    const target: ExportTarget = targetKind === "linkedPresentation" && link !== null ? { kind: "linkedPresentation", presentationId: link.presentationId, importedPageIds: link.importedPageIds } : { kind: "newPresentation" };
 
     const grant = await options.googleGrants.forAccount({ accountId: caller.accountId });
     const token = grant.kind === "ok" ? await accessTokenForIdentity({ fetch: options.fetch, client: options.googleClient, identity: grant.identity, now }) : null;
@@ -337,7 +337,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     await using deck = opened.deck;
     const snapshot = deck.snapshot();
     const existingPageIds = (headerOf(request.request, ADDON_PAGE_IDS_HEADER) ?? "").split(",").filter((pageId) => pageId.length > 0);
-    const plan = addonExportRequests({ snapshot, existingPageIds, assetAddress: exportAssetAddresses({ caller: record.caller, deckId: record.deckId, assetIds: snapshot.assets.map((asset) => asset.id) }) });
+    const plan = addonExportRequests({ snapshot, existingPageIds, importedPageIds: deck.googleSlidesLink()?.importedPageIds ?? [], assetAddress: exportAssetAddresses({ caller: record.caller, deckId: record.deckId, assetIds: snapshot.assets.map((asset) => asset.id) }) });
     const answer: AddonExportPlanBody = { presentationId: record.presentationId, requests: plan.requests };
     answerWithBody({ response, status: 200, body: answer });
   };
@@ -439,6 +439,7 @@ function exportedLink(options: Readonly<{ previous: GoogleSlidesLink | null; pre
     lastImportedAt: same ? (options.previous?.lastImportedAt ?? null) : null,
     lastExportedAt: options.now,
     importedRevisionId: same ? (options.previous?.importedRevisionId ?? null) : null,
+    importedPageIds: same ? (options.previous?.importedPageIds ?? []) : [],
   };
 }
 

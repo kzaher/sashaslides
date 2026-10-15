@@ -158,6 +158,12 @@ export type GoogleSlidesLink = Readonly<{
   lastExportedAt: number | null;
   /** `revisionId` of the presentation the last import read; the add-on compares it to offer a re-import. */
   importedRevisionId: string | null;
+  /**
+   * Every page id the last import read. A linked export deletes these when the deck no longer
+   * holds them -- including pages whose Google id was too short to keep, which the import renamed
+   * (measured 2026-10-15: page "p" survived beside its renamed copy). Empty for links made before.
+   */
+  importedPageIds: readonly string[];
 }>;
 
 export type DeckSummary = Readonly<{

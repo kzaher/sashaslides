@@ -63,6 +63,7 @@ export async function importIntoDeck(
     lastImportedAt: options.now(),
     lastExportedAt: previous?.presentationId === presentation.presentationId ? previous.lastExportedAt : null,
     importedRevisionId: presentation.revisionId,
+    importedPageIds: presentation.slides.map((slide) => slide.objectId),
   };
   await options.deck.setGoogleSlidesLink({ link });
   return {

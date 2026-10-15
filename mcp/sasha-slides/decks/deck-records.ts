@@ -187,7 +187,10 @@ function parseGoogleSlidesLink(value: unknown): GoogleSlidesLink | null {
   const importedRevisionId = record["importedRevisionId"] === null ? null : asString(record["importedRevisionId"]);
   if (presentationId === null || presentationAddress === null || title === null || lastImportedAt === undefined || lastExportedAt === undefined) return null;
   if (record["importedRevisionId"] !== null && importedRevisionId === null) return null;
-  return { presentationId, presentationAddress, title, lastImportedAt, lastExportedAt, importedRevisionId };
+  // Links stored before importedPageIds existed read as an empty list.
+  const rawPageIds = record["importedPageIds"];
+  const importedPageIds = Array.isArray(rawPageIds) ? rawPageIds.filter((pageId): pageId is string => typeof pageId === "string") : [];
+  return { presentationId, presentationAddress, title, lastImportedAt, lastExportedAt, importedRevisionId, importedPageIds };
 }
 
 function parseList<TValue>(options: Readonly<{ value: unknown; parse: (value: unknown) => TValue | null }>): readonly TValue[] | null {

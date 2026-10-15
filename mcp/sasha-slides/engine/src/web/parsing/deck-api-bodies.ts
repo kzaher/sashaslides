@@ -194,6 +194,7 @@ function readGoogleSlidesLink(value: unknown): GoogleSlidesLink {
     lastImportedAt: numberOrNullAt(record, "lastImportedAt"),
     lastExportedAt: numberOrNullAt(record, "lastExportedAt"),
     importedRevisionId: stringOrNullAt(record, "importedRevisionId"),
+    importedPageIds: Array.isArray(record["importedPageIds"]) ? record["importedPageIds"].filter((pageId): pageId is string => typeof pageId === "string") : [],
   };
 }
 

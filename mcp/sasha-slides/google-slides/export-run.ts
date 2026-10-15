@@ -21,7 +21,10 @@ import { OBJECT_ID_REUSE_AFTER_DELETE, planExport, type ExportPlan } from "./exp
 import { googleFailureCodeOf, presentationAddressOf, type SlidesClient } from "./slides-client.ts";
 import type { ExportInstruction, ExportRequest } from "./slides-requests.ts";
 
-export type ExportTarget = Readonly<{ kind: "newPresentation" }> | Readonly<{ kind: "linkedPresentation"; presentationId: string }>;
+export type ExportTarget =
+  | Readonly<{ kind: "newPresentation" }>
+  /** `importedPageIds`: the link's record of the pages the last import read (GoogleSlidesLink). */
+  | Readonly<{ kind: "linkedPresentation"; presentationId: string; importedPageIds: readonly string[] }>;
 
 export type ExportRunOutcome =
   | Readonly<{ kind: "exported"; report: GoogleSlidesExportReport; title: string }>
@@ -85,7 +88,12 @@ export async function runExport(
  * Code.gs sends one batch per boundary, so a failure names its slide there too.
  */
 export function addonExportRequests(
-  options: Readonly<{ snapshot: DocumentSnapshot; existingPageIds: readonly string[]; assetAddress: (assetId: AssetId) => string }>,
+  options: Readonly<{
+    snapshot: DocumentSnapshot;
+    existingPageIds: readonly string[];
+    importedPageIds: readonly string[];
+    assetAddress: (assetId: AssetId) => string;
+  }>,
 ): Readonly<{ requests: readonly (ExportRequest | ExportInstruction)[]; losses: readonly InterchangeLoss[] }> {
   const { snapshot, existingPageIds } = options;
   const plan = planExport({
@@ -99,7 +107,7 @@ export function addonExportRequests(
     requests.push({ sashaSlideBoundary: { slideId: deletion.slideId, slideNumber: 0 } }, ...deletion.requests);
   }
   for (const batch of plan.batches) requests.push({ sashaSlideBoundary: { slideId: batch.slideId, slideNumber: batch.slideNumber } }, ...batch.requests);
-  const stale = stalePages({ existingPageIds, snapshot, target: { kind: "linkedPresentation", presentationId: "" } });
+  const stale = stalePages({ existingPageIds, snapshot, target: { kind: "linkedPresentation", presentationId: "", importedPageIds: options.importedPageIds } });
   if (stale.length > 0) requests.push({ sashaSlideBoundary: { slideId: "cleanup", slideNumber: 0 } }, ...stale.map((objectId): ExportRequest => ({ deleteObject: { objectId } })));
   for (const batch of plan.batches) if (batch.speakerNotes !== null) requests.push({ sashaSpeakerNotes: { slideObjectId: batch.slideId, text: batch.speakerNotes } });
   return { requests, losses: plan.losses };
@@ -137,8 +145,12 @@ function stalePages(options: Readonly<{ existingPageIds: readonly string[]; snap
   switch (options.target.kind) {
     case "newPresentation":
       return options.existingPageIds.filter((pageId) => !deckSlideIds.has(pageId));
-    case "linkedPresentation":
-      return options.existingPageIds.filter((pageId) => !deckSlideIds.has(pageId) && pageId.startsWith("sl_"));
+    case "linkedPresentation": {
+      // Ours to remove: pages an earlier export wrote (sl_…) and pages the import read, when the deck
+      // no longer holds them. A page someone added in Google after the import is neither, and stays.
+      const imported = new Set(options.target.importedPageIds);
+      return options.existingPageIds.filter((pageId) => !deckSlideIds.has(pageId) && (pageId.startsWith("sl_") || imported.has(pageId)));
+    }
     default:
       return assertNever(options.target);
   }

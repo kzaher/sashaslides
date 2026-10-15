@@ -364,3 +364,25 @@ function afterAllWrite(): void {
     writeFileSync(SNAPSHOT_PATH, `${JSON.stringify(snapshots, null, 1)}\n`);
   });
 }
+
+describe("exporting into the linked presentation replaces imported pages, even renamed ones (live bug 2026-10-15)", () => {
+  // Measured live: the test deck's first page has the Google id "p", too short to keep as a Sasha
+  // object id, so the import minted a new id for it. The linked export wrote that new page and
+  // left "p" in place, so the deck grew from 10 to 11 slides with a blank duplicate at the end.
+  test("an imported page the deck no longer holds is deleted; a page added in Google later is kept", async () => {
+    const { addonExportRequests } = await import("./export-run.ts");
+    const deck = deckOf([slide({ id: "sl_renamed001" }), slide({ id: "sasha_kept0001" })]);
+    const { requests } = addonExportRequests({
+      snapshot: deck,
+      existingPageIds: ["p", "sasha_kept0001", "added_in_google"],
+      importedPageIds: ["p", "sasha_kept0001"],
+      assetAddress,
+    });
+    const deleted = requests.flatMap((request) => {
+      const body = (request as Readonly<Record<string, unknown>>)["deleteObject"] as Readonly<{ objectId?: string }> | undefined;
+      return body?.objectId === undefined ? [] : [body.objectId];
+    });
+    assert.ok(deleted.includes("p"), `the renamed original must go: deleted ${JSON.stringify(deleted)}`);
+    assert.ok(!deleted.includes("added_in_google"), "a page someone added in Google after the import stays");
+  });
+});

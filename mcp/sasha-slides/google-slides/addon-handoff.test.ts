@@ -122,7 +122,10 @@ describe("add-on handoff (fake Google keys)", () => {
     const plan = await bodyOf<AddonExportPlanBody>(await harness.server.call({ method: "GET", path: `/deck-api/addon/export/${requested.exportId}`, headers }));
     assert.equal(plan.presentationId, PRESENTATION_ID);
     const text = JSON.stringify(plan.requests);
-    assert.equal((text.match(/"sashaSlideBoundary"/g) ?? []).length, 8, "one boundary per slide");
+    // One boundary per slide, plus the clean-up: the recorded page "p" is too short an id to keep, so
+    // the import renamed it, and the export must remove the original (live bug 2026-10-15).
+    assert.equal((text.match(/"sashaSlideBoundary"/g) ?? []).length, 9, "one boundary per slide and one clean-up");
+    assert.ok(text.includes('"deleteObject":{"objectId":"p"}'), "the renamed original page is removed");
     assert.ok(text.includes('"deleteObject":{"objectId":"g1a2b3c4d5_0_1"}'), "an existing page is replaced");
     assert.ok(!text.includes('"objectId":"hand_made_slide"'), "a page added by hand is kept");
     assert.ok(text.includes('"sashaSpeakerNotes":{"slideObjectId":"g1a2b3c4d5_0_1","text":"Say the budget first.\\nThen the timeline."}'));
