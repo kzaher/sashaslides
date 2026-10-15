@@ -10,6 +10,7 @@
  * in TypeScript and the server; the editor's part is appended from editor-code-gs.ts.
  */
 import { editorCodeGs } from "./editor-code-gs.ts";
+import { inboxMarkerQueries, MARKER_QUERY_URL_PREFIX, URL_FETCH_MAXIMUM_URL_LENGTH } from "./inbox-scan.ts";
 import { insertionIndexFor } from "./slide-insert.ts";
 
 /** Stamped into every generated file. */
@@ -259,13 +260,15 @@ function sashaScanInboxRest_(pageSize) {
     'files(id,name,createdTime)', pageSize
   );
   var byFolder = {};
-  // A Drive query has a length limit, so the parents are asked about in chunks.
-  for (var start = 0; start < folders.length; start += 40) {
-    var parents = folders.slice(start, start + 40).map(function (folder) { return "'" + folder.id + "' in parents"; }).join(' or ');
-    sashaDriveList_(
-      "(name = 'READY' or name = 'PICK' or name = 'manifest.json') and trashed = false and (" + parents + ")",
-      'files(id,name,parents)', 1000
-    ).forEach(function (file) {
+  // Grouped by the URL each query makes, not by a folder count: groups of 40 overflowed UrlFetch's
+  // URL limit once the inbox held 35+ proposals (measured 2026-10-15; see src/inbox-scan.ts).
+  var queries = sashaInboxMarkerQueries_({
+    folderIds: folders.map(function (folder) { return folder.id; }),
+    urlPrefix: ${JSON.stringify(MARKER_QUERY_URL_PREFIX)},
+    maximumUrlLength: ${String(URL_FETCH_MAXIMUM_URL_LENGTH)}
+  });
+  for (var index = 0; index < queries.length; index++) {
+    sashaDriveList_(queries[index], 'files(id,name,parents)', 1000).forEach(function (file) {
       (file.parents || []).forEach(function (parent) {
         var found = byFolder[parent] || (byFolder[parent] = {});
         if (!found[file.name]) found[file.name] = file.id;
@@ -407,6 +410,9 @@ function sashaPlaceNewSlide_(spec) {
   first.createSlide.insertionIndex = insertionIndex;
   return insertionIndex;
 }
+
+// inbox-scan.ts inboxMarkerQueries, VERBATIM (its .toString()); inbox-scan.test.ts runs that copy.
+var sashaInboxMarkerQueries_ = ${inboxMarkerQueries.toString()};
 
 // slide-insert.ts insertionIndexFor, VERBATIM (its .toString()), so the rule the unit tests check
 // is the rule that runs here. slide-insert.test.ts proves it needs nothing else in scope.

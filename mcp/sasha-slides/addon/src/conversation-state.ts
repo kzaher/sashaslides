@@ -624,6 +624,9 @@ export function stagedResultOf(staged: StagedLoad): Readonly<{ proposals: readon
  * is that there is no spinner that cannot end, so the failure is said out loud instead.
  */
 export function conversationIsOpening(conversation: Conversation): boolean {
+  // A trouble before anything loaded ends the opening: a failed sashaHello stops sidebar.tsx before
+  // any scan lands, and a spinner under the error would turn for ever.
+  if (conversation.trouble !== null) return false;
   switch (conversation.staged.kind) {
     case "unrequested":
       return true;

@@ -833,3 +833,13 @@ function archivedEventFile(slideIndex: number, atMillis = ARCHIVE_AT_MS): Sessio
     text: JSON.stringify({ protocolVersion: 1, at: AT, kind: "slide-archived", slideIndex }),
   };
 }
+
+test("a failed hello stops the spinner: the trouble is the panel, not a line above a spinner that never ends", () => {
+  // sidebar.tsx returns after a failed sashaHello, so no scan result is ever applied and the staged
+  // load stays "unrequested" -- the panel must still stop opening.
+  const troubled = reduceConversation(INITIAL_CONVERSATION, { kind: "trouble", message: "Authorization is required to perform that action." });
+  assert.equal(conversationIsOpening(troubled), false);
+  const markup = markupOf(troubled);
+  assert.doesNotMatch(markup, /class="sasha-opening"/);
+  assert.match(markup, /Authorization is required/);
+});
