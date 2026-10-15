@@ -89,7 +89,11 @@ async function until(options: { readonly client: CdpClient; readonly expression:
 async function attach(): Promise<CdpClient> {
   const list = (await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()) as readonly { id: string; type: string; url: string }[];
   // Match the FULL script id so we can never attach to a truncated/duplicate tab.
-  const target = list.find((t) => t.type === "page" && t.url.includes(SCRIPT_ID));
+  // THE CODE EDITOR, not any tab of the project: twice on 2026-10-15 a tab left on the project's
+  // Executions page matched first, and the push failed with "could not find Code.gs in the file list".
+  const target =
+    list.find((t) => t.type === "page" && t.url.includes(SCRIPT_ID) && /\/edit(?:[?#]|$)/.test(t.url)) ??
+    list.find((t) => t.type === "page" && t.url.includes(SCRIPT_ID));
   if (target === undefined) throw new Error(`no editor tab containing ${SCRIPT_ID}`);
   const client: CdpClient = await CDP({ port: PORT, target: target.id });
   await client.Runtime.enable();

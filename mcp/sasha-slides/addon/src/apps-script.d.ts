@@ -18,6 +18,8 @@ import type {
   OpenPickerSpec,
   PageElementsSpec,
   ReadEventsSpec,
+  ReadTextsSpec,
+  ScanSpec,
   CommentReplySpec,
   ReportTargetSpec,
   WriteEventSpec,
@@ -55,10 +57,10 @@ declare global {
     withSuccessHandler(handler: (value: unknown) => void): AppsScriptRunner;
     withFailureHandler(handler: (error: unknown) => void): AppsScriptRunner;
     sashaHello(): void;
-    sashaScanInbox(spec: Readonly<{ pageSize: number }>): void;
+    sashaScanInbox(spec: ScanSpec): void;
     sashaReadText(spec: Readonly<{ fileId: string }>): void;
     /** Several files' text in one round trip, each file succeeding or failing on its own. */
-    sashaReadTexts(spec: Readonly<{ fileIds: readonly string[] }>): void;
+    sashaReadTexts(spec: ReadTextsSpec): void;
     /** One proposal's whole `events/` folder, name and bytes per file. See session-log.ts. */
     sashaReadEvents(spec: ReadEventsSpec): void;
     /** CREATE one event file under `<proposal>/events/`. Drive has no append (PROTOCOL.md). */

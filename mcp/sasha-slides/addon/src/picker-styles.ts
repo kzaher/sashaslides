@@ -230,6 +230,8 @@ html, body { margin: 0; padding: 0; background: #fff; }
 /* The spinner may not change the header's height (it used to push Refresh to a second row). */
 .sasha-header { position: relative; }
 .sasha-header-spin { position: absolute; right: 0; top: 50%; margin-top: -6px; }
+/* "Updating" while the panel shows the boot seed: absolute like the spinner, so it moves nothing. */
+.sasha-header-refreshing { position: absolute; right: 0; top: 50%; transform: translateY(-50%); font-size: 11px; font-weight: 400; color: #5f6368; }
 .sasha-filter .sasha-tab { display: inline-flex; align-items: center; gap: 5px; }
 .sasha-filter-count { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #e8eaed; color: #5f6368; font-size: 10px; font-weight: 600; }
 .sasha-tab-on .sasha-filter-count { background: #1a73e8; color: #fff; }

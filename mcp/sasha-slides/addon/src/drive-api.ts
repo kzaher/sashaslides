@@ -39,6 +39,8 @@ import type {
   WriteEventReply,
   WriteEventSpec,
   ReadTextsReply,
+  ReadTextsSpec,
+  ScanSpec,
 } from "./bridge.ts";
 import type { SendFeedbackSpec } from "./feedback.ts";
 import type { SlidesApiRequest } from "./converter-contract.ts";
@@ -49,7 +51,7 @@ export type DriveApi = Readonly<{
    * `READY` and a `PICK`. Both marks come back together because the observer always needs them at
    * once: a proposal that already has a PICK has been answered and must not be offered again.
    */
-  scanInbox(spec: Readonly<{ pageSize: number }>): Promise<CallOutcome<readonly ProposalMark[]>>;
+  scanInbox(spec: ScanSpec): Promise<CallOutcome<readonly ProposalMark[]>>;
   /** READY, manifest.json and NN.html are all just text read by file id. */
   downloadText(fileId: string): Promise<CallOutcome<string>>;
 }>;
@@ -59,7 +61,10 @@ export type DriveApi = Readonly<{
  * Its own capability so only the surface that batches needs it; `DriveApi` stays one file per call.
  */
 export type BatchReadApi = Readonly<{
-  downloadTexts(fileIds: readonly string[]): Promise<CallOutcome<ReadTextsReply>>;
+  downloadTexts(
+    fileIds: readonly string[],
+    options?: Readonly<{ rememberForSidebar?: ReadTextsSpec["rememberForSidebar"] }>,
+  ): Promise<CallOutcome<ReadTextsReply>>;
 }>;
 
 /**

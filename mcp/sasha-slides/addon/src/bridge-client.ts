@@ -154,9 +154,9 @@ export async function helloFromServer({ call }: { call: ServerCall }): Promise<C
 
 export function appsScriptDriveApi({ call }: { call: ServerCall }): DriveApi {
   return {
-    async scanInbox({ pageSize }) {
+    async scanInbox(spec) {
       const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaScanInbox({ pageSize }),
+        invoke: (runner) => runner.sashaScanInbox(spec),
         what: "sashaScanInbox",
       });
       if (replied.kind !== "ok") return replied;
@@ -180,9 +180,11 @@ export function appsScriptDriveApi({ call }: { call: ServerCall }): DriveApi {
 
 export function appsScriptBatchReadApi({ call }: { call: ServerCall }): BatchReadApi {
   return {
-    async downloadTexts(fileIds) {
+    async downloadTexts(fileIds, options) {
+      const rememberForSidebar = options?.rememberForSidebar;
       const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaReadTexts({ fileIds }),
+        invoke: (runner) =>
+          runner.sashaReadTexts(rememberForSidebar === undefined ? { fileIds } : { fileIds, rememberForSidebar }),
         what: "sashaReadTexts",
       });
       if (replied.kind !== "ok") return replied;

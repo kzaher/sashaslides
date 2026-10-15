@@ -12,6 +12,18 @@
 import { editorCodeGs } from "./editor-code-gs.ts";
 import { inboxMarkerQueries, MARKER_QUERY_URL_PREFIX, URL_FETCH_MAXIMUM_URL_LENGTH } from "./inbox-scan.ts";
 import { insertionIndexFor } from "./slide-insert.ts";
+import { SIDEBAR_SEED_ELEMENT_ID } from "./sidebar-seed.ts";
+
+/**
+ * THE SIDEBAR'S REMEMBERED READS (src/sidebar-seed.ts), in CacheService's own limits: a value may
+ * be at most 100 KB and live at most 6 hours. The character cap leaves room for multi-byte text;
+ * a put that still overflows throws, and that is caught. A larger value is simply not remembered,
+ * and the panel opens the old way.
+ */
+export const SIDEBAR_MEMORY_SECONDS = 6 * 60 * 60;
+export const SIDEBAR_MEMORY_MAXIMUM_CHARACTERS = 90 * 1024;
+/** Versioned, so a change of shape cannot be read by an older or newer panel as its own. */
+export const SIDEBAR_MEMORY_KEY_PREFIX = "sashaSidebar.v1.";
 
 /** Stamped into every generated file. */
 export const GENERATED_BY = "build-addon.ts (mcp/sasha-slides/addon)";
@@ -122,6 +134,11 @@ var SASHA_DIALOG_HEIGHT = 760;
 var SASHA_REPORT_WIDTH = 1100;
 var SASHA_REPORT_HEIGHT = 800;
 var SASHA_DEFAULT_PAGE_SIZE = 100;
+// THE SIDEBAR'S REMEMBERED READS (src/sidebar-seed.ts): one user-cache entry per deck and slot.
+var SASHA_SIDEBAR_MEMORY_PREFIX = ${JSON.stringify(SIDEBAR_MEMORY_KEY_PREFIX)};
+var SASHA_SIDEBAR_MEMORY_SLOTS = ['scan', 'manifest', 'log'];
+var SASHA_SIDEBAR_MEMORY_SECONDS = ${String(SIDEBAR_MEMORY_SECONDS)};
+var SASHA_SIDEBAR_MEMORY_MAXIMUM_CHARACTERS = ${String(SIDEBAR_MEMORY_MAXIMUM_CHARACTERS)};
 // WHICH CANDIDATE THE REPORT WINDOW WAS OPENED ON, parked between documents that cannot talk to
 // each other. Whoever pressed the button writes it (sashaOpenDefectReport) and the report window
 // reads it exactly once (sashaTakeReportTarget). UserProperties rather than a template parameter:
@@ -169,7 +186,75 @@ function onInstall(e) {
 
 function showSidebar() {
   var page = HtmlService.createHtmlOutputFromFile('Sidebar').setTitle('Ask Sasha');
+  // THE SEED (src/sidebar-seed.ts): sashaHello's answer plus what the sidebar last read on this
+  // deck, so the panel draws at once instead of after three round trips in series. Inert
+  // text/plain, like showPicker's; every '<' is escaped so the JSON cannot end the element.
+  var boot = sashaSidebarBoot_();
+  if (boot) {
+    page.append('<script type="text/plain" id="${SIDEBAR_SEED_ELEMENT_ID}">' + JSON.stringify(boot).replace(/</g, '\\\\u003c') + '</script>');
+  }
   SlidesApp.getUi().showSidebar(page);
+}
+
+/**
+ * The hello, and every remembered read for THIS deck in one getAll. Any failure is "no seed" for
+ * that part, never a sidebar that does not open: the panel then asks for itself.
+ */
+function sashaSidebarBoot_() {
+  var hello;
+  try {
+    hello = sashaHello();
+  } catch (helloError) {
+    console.warn('sasha-slides: no sidebar seed, sashaHello failed: ' + helloError);
+    return null;
+  }
+  var remembered = {};
+  try {
+    var presentationId = SlidesApp.getActivePresentation().getId();
+    var keys = SASHA_SIDEBAR_MEMORY_SLOTS.map(function (slot) {
+      return sashaSidebarMemoryKey_({ presentationId: presentationId, slot: slot });
+    });
+    var found = CacheService.getUserCache().getAll(keys);
+    SASHA_SIDEBAR_MEMORY_SLOTS.forEach(function (slot, at) {
+      if (found[keys[at]]) remembered[slot] = JSON.parse(found[keys[at]]);
+    });
+  } catch (memoryError) {
+    console.warn('sasha-slides: the sidebar seed has no remembered reads: ' + memoryError);
+  }
+  return { hello: hello, remembered: remembered };
+}
+
+/** One deck's one slot. The deck is in the KEY, so another deck's reads are never even fetched. */
+function sashaSidebarMemoryKey_(spec) {
+  return SASHA_SIDEBAR_MEMORY_PREFIX + spec.presentationId + '.' + spec.slot;
+}
+
+/**
+ * KEEP A COPY OF ONE SIDEBAR READ for the next showSidebar on this deck. A side effect of a read
+ * that was happening anyway, so it must never fail that read: every error is swallowed. Too large
+ * to keep means the old copy is removed rather than left to contradict the newer read.
+ */
+function sashaRememberForSidebar_(slot, value) {
+  var cache;
+  var key;
+  try {
+    var presentationId = SlidesApp.getActivePresentation().getId();
+    cache = CacheService.getUserCache();
+    key = sashaSidebarMemoryKey_({ presentationId: presentationId, slot: slot });
+    var text = JSON.stringify({
+      presentationId: presentationId,
+      readAt: new Date().toISOString(),
+      value: value
+    });
+    if (text.length > SASHA_SIDEBAR_MEMORY_MAXIMUM_CHARACTERS) {
+      cache.remove(key);
+      return;
+    }
+    cache.put(key, text, SASHA_SIDEBAR_MEMORY_SECONDS);
+  } catch (rememberError) {
+    console.warn('sasha-slides: could not remember the sidebar ' + slot + ': ' + rememberError);
+    try { if (cache && key) cache.remove(key); } catch (removeError) { /* nothing more to do */ }
+  }
 }
 
 /**
@@ -219,7 +304,12 @@ function sashaHello() {
 // anywhere — they are private to the MCP server's client and invisible here.
 // ---------------------------------------------------------------------------
 function sashaScanInbox(spec) {
-  var pageSize = (spec && spec.pageSize) || SASHA_DEFAULT_PAGE_SIZE;
+  var reply = sashaScanInboxWalk_((spec && spec.pageSize) || SASHA_DEFAULT_PAGE_SIZE);
+  if (spec && spec.rememberForSidebar) sashaRememberForSidebar_('scan', reply);
+  return reply;
+}
+
+function sashaScanInboxWalk_(pageSize) {
   // THE REST WALK FIRST: measured 2026-10-11 in one execution, 662 ms for three Drive queries
   // against 1,945 ms for the DriveApp walk below (one call per folder and per marker). It also
   // names each folder's manifest.json, so READY and the manifest can be read in ONE round trip.
@@ -325,7 +415,7 @@ function sashaReadTexts(spec) {
       muteHttpExceptions: true
     };
   }));
-  return {
+  var reply = {
     texts: responses.map(function (response, at) {
       var status = response.getResponseCode();
       return status >= 200 && status <= 299
@@ -333,6 +423,14 @@ function sashaReadTexts(spec) {
         : { fileId: fileIds[at], error: 'HTTP ' + status };
     })
   };
+  // The sidebar's READY + manifest read, kept with the event it was read at (src/sidebar-seed.ts).
+  if (spec && spec.rememberForSidebar) {
+    sashaRememberForSidebar_('manifest', {
+      forEventId: spec.rememberForSidebar.forEventId || null,
+      texts: reply.texts
+    });
+  }
+  return reply;
 }
 
 // ---------------------------------------------------------------------------
@@ -678,10 +776,9 @@ function sashaWritePick(spec) {
 function sashaReadEvents(spec) {
   var pageSize = (spec && spec.pageSize) || SASHA_DEFAULT_PAGE_SIZE;
   var folders = DriveApp.getFolderById(spec.folderId).getFoldersByName(SASHA_EVENTS_FOLDER_NAME);
-  if (!folders.hasNext()) return { events: [] };
-  var files = folders.next().getFiles();
+  var files = folders.hasNext() ? folders.next().getFiles() : null;
   var events = [];
-  while (files.hasNext() && events.length < pageSize) {
+  while (files && files.hasNext() && events.length < pageSize) {
     var file = files.next();
     // The ID as well as the name: it is the last tie-break of the event sort (session-log.ts),
     // because two writers can mint the same millisecond and the same random suffix, and Drive
@@ -692,6 +789,8 @@ function sashaReadEvents(spec) {
       text: file.getBlob().getDataAsString('UTF-8')
     });
   }
+  // With the folder it was read from, so the next sidebar only uses it for that set.
+  if (spec.rememberForSidebar) sashaRememberForSidebar_('log', { folderId: spec.folderId, events: events });
   return { events: events };
 }
 

@@ -37,6 +37,7 @@ import {
   assistantConnectionOf,
   candidateListsOf,
   conversationIsOpening,
+  seedIsRefreshing,
   type AssistantConnection,
   type Conversation,
   type ConversationSlide,
@@ -129,7 +130,12 @@ function ConversationHeader({
   conversation: Conversation;
   connection: AssistantConnection;
 }): JSX.Element {
+  // LAST KNOWN, SAID AS SUCH. While anything on screen is still the boot seed's (sidebar-seed.ts)
+  // the header says so in one quiet word instead of a spinner, and it says it even beside the
+  // setup guide: that guide may be the last session's verdict, about to be replaced.
+  const refreshing = seedIsRefreshing(conversation);
   const working =
+    !refreshing &&
     connection.kind !== "nothing-listening" &&
     (conversation.log.kind === "loading" || conversation.staged.kind === "loading");
   return (
@@ -137,6 +143,11 @@ function ConversationHeader({
       {/* The real logo, a generated constant (docs/brand/export-brand.ts), never user content. */}
       <span className="sasha-tide-logo" aria-hidden="true" dangerouslySetInnerHTML={{ __html: SASHA_ICON_SVG }} />
       <strong>Ask Sasha</strong>
+      {refreshing ? (
+        <span className="sasha-header-refreshing" role="status" title="Showing what was last seen, while it is read again">
+          Updating
+        </span>
+      ) : null}
       {working ? <span className="sasha-header-spin" aria-label="working" /> : null}
     </header>
   );

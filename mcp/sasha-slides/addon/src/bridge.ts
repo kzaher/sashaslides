@@ -61,6 +61,22 @@ export type HelloReply = Readonly<{ protocolVersion: number; presentationUrl: st
 
 export type ScanReply = Readonly<{ marks: readonly ProposalMark[] }>;
 
+/**
+ * `sashaScanInbox()`'s request. `rememberForSidebar` asks Code.gs to keep a copy of the reply for
+ * the next time Ask Sasha opens on this deck (sidebar-seed.ts); only the sidebar sets it.
+ */
+export type ScanSpec = Readonly<{ pageSize: number; rememberForSidebar?: boolean }>;
+
+/**
+ * `sashaReadTexts()`'s request. `rememberForSidebar` marks the sidebar's READY + manifest read, so
+ * Code.gs keeps it for the next open together with the newest set-changing event the sidebar had
+ * seen when it asked -- which is what says, later, whether that manifest is still current.
+ */
+export type ReadTextsSpec = Readonly<{
+  fileIds: readonly string[];
+  rememberForSidebar?: Readonly<{ forEventId: string | null }>;
+}>;
+
 /** `sashaReadTexts()`, keyed by file id: each file's text, or why that one file could not be read. */
 export type ReadTextsReply = ReadonlyMap<string, CallOutcome<string>>;
 
@@ -285,7 +301,7 @@ export type ReadEventsReply = Readonly<{ events: readonly RawEventFile[] }>;
 /** `fileId` is the sort's last tie-break -- see session-log.ts's `sessionEventsOf`. */
 export type RawEventFile = Readonly<{ fileId: string; name: string; text: string }>;
 
-export type ReadEventsSpec = Readonly<{ folderId: string; pageSize: number }>;
+export type ReadEventsSpec = Readonly<{ folderId: string; pageSize: number; rememberForSidebar?: boolean }>;
 
 /** `sashaWriteEvent()`. One event file CREATED under `<proposal>/events/` -- never an append. */
 export type WriteEventSpec = Readonly<{

@@ -22,6 +22,12 @@
 // what is staged, `sashaOpenPicker` asks Apps Script to show it -- which is also why "the dialog
 // opens by itself when slides arrive" is a decision made HERE (`proposalToAutoOpen`) and executed
 // as a server call.
+//
+// THE BOOT SEED (sidebar-seed.ts). Code.gs hands the panel the LAST KNOWN scan, manifest and log
+// for this deck when it opens it, so the panel draws at once instead of after three round trips in
+// series (measured 2026-10-15: candidates at 4.6 s, the connection at 6.4 s). A seed is a head start
+// and never the truth: `seeded` marks what came from it, every seeded read is re-read at once, and
+// the first FRESH scan decides whether the seeded set is still the one to follow.
 
 import { nothingListeningNotice, type NothingListeningNotice } from "../../feedback-delivery.ts";
 import type { ProposalMark } from "./bridge.ts";
@@ -80,6 +86,31 @@ export type Conversation = Readonly<{
    * which is typed absence rather than a sentinel `0`.
    */
   nowMs: number | null;
+  /**
+   * WHICH READS ON SCREEN CAME FROM THE BOOT SEED and have not yet been confirmed or replaced by a
+   * fresh one. Each flag makes its read due at once (`needsStaged`, `needsLog`), holds back
+   * anything that would act on unverified data (`proposalToAutoOpen`), and is what the panel's
+   * "Updating" marker shows.
+   */
+  seeded: SeededReads;
+}>;
+
+/** One flag per read the seed can stand in for. All false outside the first seconds after opening. */
+export type SeededReads = Readonly<{ scan: boolean; manifest: boolean; log: boolean }>;
+
+export const NOTHING_SEEDED: SeededReads = { scan: false, manifest: false, log: false };
+
+/**
+ * WHAT THE BOOT SEED SAYS, already parsed (sidebar-seed.ts): the last scan this user's sidebar made
+ * on this deck, and the manifest and log it last read for a proposal folder. The manifest and log
+ * are only used when they belong to the set the seeded scan follows.
+ */
+export type SidebarSeed = Readonly<{
+  marks: readonly ProposalMark[];
+  scanReadAt: string;
+  /** `forEventId` is the newest set-changing event the sidebar had seen when it read this manifest. */
+  manifest: Readonly<{ manifest: Manifest; forEventId: string | null }> | null;
+  log: Readonly<{ folderId: string; events: readonly SessionEvent[]; readAt: string }> | null;
 }>;
 
 /** Same "a re-read keeps what it had" rule everywhere: a poll must never blank what is on screen. */
@@ -193,6 +224,8 @@ export type OpenPhase =
 export type ConversationEvent =
   /** `sashaHello` answered: whatever went wrong before it is no longer the panel's trouble. */
   | Readonly<{ kind: "connected" }>
+  /** The boot seed, applied once before any read: only onto a panel that has read nothing yet. */
+  | Readonly<{ kind: "seeded"; seed: SidebarSeed }>
   | Readonly<{ kind: "trouble"; message: string }>
   | Readonly<{ kind: "staged-requested" }>
   | Readonly<{ kind: "staged-arrived"; marks: readonly ProposalMark[]; readAt: string }>
@@ -201,7 +234,12 @@ export type ConversationEvent =
   | Readonly<{ kind: "manifest-arrived"; manifest: Manifest }>
   | Readonly<{ kind: "manifest-failed"; message: string }>
   | Readonly<{ kind: "log-requested" }>
-  | Readonly<{ kind: "log-arrived"; events: readonly SessionEvent[]; readAt: string }>
+  /**
+   * `proposalId` is the set the log was read FOR. A reply for a set this panel no longer follows
+   * (the fresh scan replaced a seeded one while the read was in flight) is dropped. Replayed
+   * single-set fixtures leave it out.
+   */
+  | Readonly<{ kind: "log-arrived"; events: readonly SessionEvent[]; readAt: string; proposalId?: string }>
   | Readonly<{ kind: "log-failed"; message: string }>
   | Readonly<{ kind: "slide-requested"; slideIndex: number }>
   | Readonly<{ kind: "slide-arrived"; slideIndex: number; html: string }>
@@ -231,6 +269,7 @@ export const INITIAL_CONVERSATION: Conversation = {
   logReadOnce: false,
   trouble: null,
   nowMs: null,
+  seeded: NOTHING_SEEDED,
 };
 
 export function reduceConversation(conversation: Conversation, event: ConversationEvent): Conversation {
@@ -240,6 +279,9 @@ export function reduceConversation(conversation: Conversation, event: Conversati
 
     case "trouble":
       return { ...conversation, trouble: event.message };
+
+    case "seeded":
+      return seededFrom({ conversation, seed: event.seed });
 
     case "clock-ticked":
       // Identity is preserved when the millisecond has not moved, so a tick that lands twice in the
@@ -295,10 +337,15 @@ export function reduceConversation(conversation: Conversation, event: Conversati
 
     case "staged-arrived": {
       const proposals = stagedProposalsOf({ marks: event.marks });
+      // THE FIRST FRESH SCAN AFTER A SEED decides whether the seeded set is still the one to
+      // follow. The set is otherwise sticky, which is right for a set the user has seen answered
+      // in this session and wrong for one remembered from the last: a fresh "nothing staged" or a
+      // different newest proposal must replace what the seed drew.
+      const base = conversation.seeded.scan ? confirmedOrForgotten({ conversation, proposals }) : conversation;
       return {
-        ...conversation,
+        ...base,
         staged: { kind: "loaded", proposals, readAt: event.readAt },
-        ...followOn({ conversation, proposals }),
+        ...followOn({ conversation: base, proposals }),
       };
     }
 
@@ -309,7 +356,10 @@ export function reduceConversation(conversation: Conversation, event: Conversati
       return withSet(conversation, (set) => ({ ...set, manifest: { kind: "loading" } }));
 
     case "manifest-arrived":
-      return withSet(conversation, (set) => ({
+      // A manifest for another proposal is a read that was in flight when the followed set
+      // changed. Its own set has a read of its own coming, so this one is dropped.
+      if (followedSet(conversation)?.proposalId !== event.manifest.proposalId) return conversation;
+      return withSet({ ...conversation, seeded: { ...conversation.seeded, manifest: false } }, (set) => ({
         ...set,
         manifest: {
           kind: "loaded",
@@ -323,7 +373,7 @@ export function reduceConversation(conversation: Conversation, event: Conversati
       }));
 
     case "manifest-failed":
-      return withSet(conversation, (set) => ({
+      return withSet({ ...conversation, seeded: { ...conversation.seeded, manifest: false } }, (set) => ({
         ...set,
         manifest: {
           kind: "failed",
@@ -338,12 +388,24 @@ export function reduceConversation(conversation: Conversation, event: Conversati
       return { ...conversation, log: { kind: "loading", events: loadedEvents(conversation.log) } };
 
     case "log-arrived":
+      if (event.proposalId !== undefined && followedSet(conversation)?.proposalId !== event.proposalId) {
+        return conversation;
+      }
       return {
         ...conversation,
         log: { kind: "loaded", events: event.events, readAt: event.readAt },
         // A written click whose event is now in the log is handed over to the log.
         archivePending: pendingAfterLog({ pending: conversation.archivePending, events: event.events }),
         logReadOnce: true,
+        seeded: {
+          ...conversation.seeded,
+          log: false,
+          // A SEEDED MANIFEST IS VERIFIED BY THE FRESH LOG, not by reading it again: the protocol's
+          // own rule is that a set-changing event is what makes a manifest stale. If the newest one
+          // is still the one it was read at, it is current; if not, `needsManifest` re-reads it and
+          // `manifest-arrived` clears the flag.
+          manifest: conversation.seeded.manifest && !seededManifestIsCurrent({ conversation, events: event.events }),
+        },
       };
 
     case "log-failed":
@@ -450,7 +512,11 @@ export function presenceReadsOf(conversation: Conversation): PresenceReads {
     case "none":
       return { incomplete: reasonOfStagedScan(conversation.staged) };
     case "following":
-      return { incomplete: conversation.logReadOnce ? null : reasonOfLogRead(conversation.log) };
+      // A SEEDED LOG IS EVIDENCE TOO -- last known, shown as such -- so the connection line is drawn
+      // from it at once rather than "checking" until the fresh read lands.
+      return {
+        incomplete: conversation.logReadOnce || conversation.seeded.log ? null : reasonOfLogRead(conversation.log),
+      };
     default:
       return assertNever(conversation.set);
   }
@@ -464,6 +530,10 @@ export function presenceReadsOf(conversation: Conversation): PresenceReads {
  * values and so a user who closes the window is not dragged back into it on the next poll.
  */
 export function proposalToAutoOpen(conversation: Conversation): string | null {
+  // NEVER ON A SEED. The seeded set may have been answered or replaced since it was remembered, and
+  // a window opened onto it would be acting on what the last session saw. The fresh reads land
+  // within seconds, and the decision is made on them.
+  if (seedIsRefreshing(conversation)) return null;
   // It waits for the MANIFEST rather than firing on the scan, and that costs one round trip on
   // purpose: `READY` survives a clear, so a scan alone cannot tell a staged set from a discarded
   // one, and opening a window onto nothing is worse than opening it a second later.
@@ -652,7 +722,11 @@ export function needsStaged(conversation: Conversation): boolean {
     case "failed":
       return true;
     case "loaded":
-      return isStale({ readAt: conversation.staged.readAt, nowMs: conversation.nowMs, freshMs: SCAN_FRESH_MS });
+      // A seeded scan is due at once, whenever it was made: it is what the LAST session saw.
+      return (
+        conversation.seeded.scan ||
+        isStale({ readAt: conversation.staged.readAt, nowMs: conversation.nowMs, freshMs: SCAN_FRESH_MS })
+      );
     case "loading":
       return false;
     default:
@@ -689,7 +763,10 @@ export function needsLog(conversation: Conversation): boolean {
     case "failed":
       return true;
     case "loaded":
-      return isStale({ readAt: conversation.log.readAt, nowMs: conversation.nowMs, freshMs: READ_FRESH_MS });
+      return (
+        conversation.seeded.log ||
+        isStale({ readAt: conversation.log.readAt, nowMs: conversation.nowMs, freshMs: READ_FRESH_MS })
+      );
     case "loading":
       return false;
     default:
@@ -780,6 +857,109 @@ function unstagedReachability(staged: StagedLoad): SlidesReachability {
 }
 
 /**
+ * WHETHER ANYTHING ON SCREEN IS STILL THE SEED'S, i.e. last known rather than just read. The panel
+ * says "Updating" while it is, and nothing acts on the data until it is not.
+ */
+export function seedIsRefreshing(conversation: Conversation): boolean {
+  const seeded = conversation.seeded;
+  return seeded.scan || seeded.manifest || seeded.log;
+}
+
+/**
+ * THE SEED, applied. Only onto a panel that has read nothing yet: a seed must never overwrite a
+ * fresh read, so arriving late it changes nothing. The manifest and the log are only taken when
+ * they belong to the set the seeded scan follows; anything else is another set's, and dropped.
+ */
+function seededFrom({ conversation, seed }: { conversation: Conversation; seed: SidebarSeed }): Conversation {
+  if (conversation.staged.kind !== "unrequested" || conversation.set.kind !== "none") return conversation;
+  const proposals = stagedProposalsOf({ marks: seed.marks });
+  const scanned: Conversation = {
+    ...conversation,
+    staged: { kind: "loaded", proposals, readAt: seed.scanReadAt },
+    ...followOn({ conversation, proposals }),
+    seeded: { scan: true, manifest: false, log: false },
+  };
+  const set = scanned.set;
+  if (set.kind !== "following") return scanned;
+  const log = seed.log !== null && seed.log.folderId === set.folderId ? seed.log : null;
+  const logged: Conversation =
+    log === null
+      ? scanned
+      : {
+          ...scanned,
+          log: { kind: "loaded", events: log.events, readAt: log.readAt },
+          seeded: { ...scanned.seeded, log: true },
+        };
+  const remembered = seed.manifest;
+  if (remembered === null || remembered.manifest.proposalId !== set.proposalId) return logged;
+  return {
+    ...logged,
+    set: {
+      ...set,
+      manifest: loadedManifestOf({ manifest: remembered.manifest, forEventId: remembered.forEventId }),
+      slides: remembered.manifest.slides.map((slide) => slideOf({ slide, slides: [] })),
+    },
+    seeded: { ...logged.seeded, manifest: true },
+  };
+}
+
+/**
+ * THE FIRST FRESH SCAN AFTER A SEED. The seeded set is kept when the scan's newest proposal is the
+ * same folder with the same READY; otherwise everything the seed drew is forgotten, so `followOn`
+ * adopts from nothing exactly as it would have without a seed.
+ */
+function confirmedOrForgotten({
+  conversation,
+  proposals,
+}: {
+  conversation: Conversation;
+  proposals: readonly StagedProposal[];
+}): Conversation {
+  const newest = proposals[proposals.length - 1];
+  const set = conversation.set;
+  const confirmed =
+    set.kind === "following" &&
+    newest !== undefined &&
+    newest.proposalId === set.proposalId &&
+    newest.folderId === set.folderId &&
+    newest.readyFileId === set.readyFileId;
+  if (confirmed) return { ...conversation, seeded: { ...conversation.seeded, scan: false } };
+  return {
+    ...conversation,
+    set: { kind: "none" },
+    log: { kind: "unrequested" },
+    logReadOnce: false,
+    candidateTab: "working",
+    archivePending: [],
+    archiveTrouble: null,
+    seeded: NOTHING_SEEDED,
+  };
+}
+
+/** Whether the seeded manifest was read at the newest set-changing event of a FRESH log. */
+function seededManifestIsCurrent({
+  conversation,
+  events,
+}: {
+  conversation: Conversation;
+  events: readonly SessionEvent[];
+}): boolean {
+  const set = conversation.set;
+  return set.kind === "following" && set.manifest.kind === "loaded" && set.manifest.forEventId === newestSetChangeIn(events);
+}
+
+function loadedManifestOf({ manifest, forEventId }: { manifest: Manifest; forEventId: string | null }): ManifestLoad {
+  return {
+    kind: "loaded",
+    count: manifest.count,
+    revision: manifest.revision,
+    forEventId,
+    presentationId: manifest.presentationId,
+    merge: manifest.merge,
+  };
+}
+
+/**
  * Adopt or replace the followed set. A STRICTLY NEWER proposal replaces it (and resets the log and
  * the manifest, which are both about the old one); the same proposal, or an older one still sitting
  * in the inbox, changes nothing -- re-adopting would re-fetch the manifest on every poll.
@@ -815,6 +995,8 @@ function followOn({
     archiveTrouble: null,
     // A NEW set's log has not been read; the old set's read says nothing about it.
     logReadOnce: false,
+    // Nor is a seeded manifest or log about it.
+    seeded: { ...conversation.seeded, manifest: false, log: false },
   };
 }
 

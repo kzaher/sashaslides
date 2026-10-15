@@ -107,12 +107,14 @@ async function main(): Promise<void> {
   const server = await listen({
     "/dialog.html": stubbed(DIALOG_FILE),
     "/sidebar.html": stubbed(SIDEBAR_FILE),
+    "/sidebar-seeded.html": seededSidebar(),
     "/report.html": stubbed(REPORT_FILE),
   });
   const failures: string[] = [];
   try {
     // ASK SASHA FIRST, because it is the one thing the menu opens.
     await driveSidebar({ failures });
+    await driveSeededSidebar({ failures });
     await driveDialog({ failures });
     await driveReport({ failures });
   } finally {
@@ -1693,6 +1695,116 @@ async function driveReport({ failures }: { failures: string[] }): Promise<void> 
 }
 
 /** One emitted page with the stub injected ahead of its bundle. */
+/** How long the seeded sidebar's server takes to answer anything: long enough to see the seed alone. */
+const SEEDED_ANSWER_DELAY_MS = 3_000;
+
+/**
+ * ASK SASHA AS showSidebar SERVES IT WITH A SEED (sidebar-seed.ts): the same stubbed page, a slow
+ * server, and the inert seed element appended after the document exactly as HtmlOutput.append
+ * puts it. The remembered reads are for the stub's own deck and proposal.
+ */
+function seededSidebar(): string {
+  const remembered = (value: unknown): unknown => ({
+    presentationId: "deck_smoke_0123456789",
+    readAt: new Date().toISOString(),
+    value,
+  });
+  const slides = Array.from({ length: COUNT }, (_, at) => ({
+    index: at + 1,
+    fileId: `html_${at + 1}`,
+    name: `0${at + 1}.html`,
+    label: `option ${at + 1}`,
+  }));
+  const manifest = {
+    protocolVersion: 1,
+    proposalId: PROPOSAL_ID,
+    createdAt: "2026-10-03T12:00:00.000Z",
+    presentationId: "deck_smoke_0123456789",
+    count: COUNT,
+    slides,
+    revision: 2,
+  };
+  const boot = {
+    hello: { protocolVersion: 1, presentationUrl: "https://docs.google.com/presentation/d/deck_smoke_0123456789/edit" },
+    remembered: {
+      scan: remembered({
+        marks: [
+          {
+            proposalId: PROPOSAL_ID,
+            folderId: "folder_1",
+            readyFileId: "ready",
+            pickFileId: null,
+            manifestFileId: "manifest",
+            createdTime: "2026-10-03T12:00:00.000Z",
+          },
+        ],
+      }),
+      manifest: remembered({ forEventId: null, texts: [{ fileId: "manifest", text: JSON.stringify(manifest) }] }),
+      log: remembered({ folderId: "folder_1", events: [] }),
+    },
+  };
+  const element =
+    `<script type="text/plain" id="sasha-sidebar-seed">` + JSON.stringify(boot).replace(/</g, "\\u003c") + `</script>`;
+  // After the page's OWN <head>, the first one: the stub that follows carries candidate documents
+  // with heads of their own inside a string.
+  return stubbed(SIDEBAR_FILE).replace(
+    "<head>",
+    `<head>\n<script>window.__SASHA_ANSWER_DELAY_MS__ = ${SEEDED_ANSWER_DELAY_MS};</script>`,
+  ) + element;
+}
+
+/**
+ * THE SEEDED BOOT IN A REAL PAGE: the candidates are drawn before any server call has answered,
+ * no sashaHello is sent, the scan and the log read go out together, and "Updating" goes away once
+ * the fresh reads land.
+ */
+async function driveSeededSidebar({ failures }: { failures: string[] }): Promise<void> {
+  const tab = await CDP.New({ port: CDP_PORT, url: `http://127.0.0.1:${PORT}/sidebar-seeded.html` });
+  let client: CdpClient | null = null;
+  try {
+    client = await CDP({ target: tab, port: CDP_PORT });
+    const { Runtime, Page } = client;
+    await Page.enable();
+    await Runtime.enable();
+    const errors: string[] = [];
+    client.on("Runtime.exceptionThrown", (params: unknown) => errors.push(JSON.stringify(params).slice(0, 400)));
+    const drawn = await pollFor({
+      client,
+      expression: "document.querySelectorAll('.sasha-stack-slide').length === " + String(COUNT),
+    });
+    const early = await evaluateString({
+      client,
+      expression:
+        "JSON.stringify({calls:window.__SASHA_CALLS__||[],answered:window.__SASHA_ANSWERED__||0," +
+        "updating:!!document.querySelector('.sasha-header-refreshing'),spinner:!!document.querySelector('.sasha-opening')})",
+    });
+    const seen = JSON.parse(early) as Readonly<{ calls: readonly string[]; answered: number; updating: boolean; spinner: boolean }>;
+    check({
+      failures,
+      what: "SEEDED: the candidates are drawn before any server call has answered",
+      ok: drawn && seen.answered === 0,
+      detail: early,
+    });
+    check({
+      failures,
+      what: "SEEDED: no sashaHello, the scan and the log read already out, marked Updating, no spinner",
+      ok:
+        !seen.calls.includes("sashaHello") &&
+        seen.calls.includes("sashaScanInbox") &&
+        seen.calls.includes("sashaReadEvents") &&
+        seen.updating &&
+        !seen.spinner,
+      detail: early,
+    });
+    const settled = await pollFor({ client, expression: "!document.querySelector('.sasha-header-refreshing')" });
+    check({ failures, what: "SEEDED: Updating goes away once the fresh reads land", ok: settled });
+    for (const error of errors) failures.push(`seeded sidebar uncaught: ${error}`);
+  } finally {
+    if (client !== null) await client.close();
+    await CDP.Close({ port: CDP_PORT, id: tab.id });
+  }
+}
+
 function stubbed(file: string): string {
   const page = readFileSync(file, "utf-8");
   if (!page.includes("<script>")) throw new Error(`${file} has no inline bundle -- run build-addon.ts first`);
@@ -1954,10 +2066,15 @@ const STUB_SCRIPT = `<script>
     };
     Object.keys(answers).forEach(function (name) {
       self[name] = function (spec) {
+        // RECORDED, and optionally SLOW: the seeded sidebar page sets a delay so its first paint
+        // can be checked before any answer has landed, and the record is what proves which calls
+        // the boot made at all.
+        (window.__SASHA_CALLS__ = window.__SASHA_CALLS__ || []).push(name);
         setTimeout(function () {
+          window.__SASHA_ANSWERED__ = (window.__SASHA_ANSWERED__ || 0) + 1;
           try { if (onSuccess) onSuccess(answers[name](spec)); }
           catch (error) { if (onFailure) onFailure(error); }
-        }, 0);
+        }, window.__SASHA_ANSWER_DELAY_MS__ || 0);
       };
     });
     return self;
