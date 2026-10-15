@@ -45,10 +45,20 @@
  *    500 a day for a consumer account); recipients are validated by `gmail-sender.ts`.
  *  - **Resource exhaustion by long passwords.** At most 256 characters, checked before
  *    hashing.
+ *
+ * ADDING an email and password to an account that is already signed in (`startLink`,
+ * `confirmLink`) mails the same kind of single-use link, and the link only works for the
+ * account that asked, in a browser signed in to it. Without that binding, an attacker could
+ * ask to add the VICTIM's address to the ATTACKER's account and wait for the victim to press
+ * the button in the mail: the attacker's account would then hold a verified copy of the
+ * victim's address, and deck invitations sent to it would land there. An address that
+ * already signs in to an account gets a notice instead of a link (merging accounts is not
+ * supported), and the answer on the page is the same either way, so the form cannot be used
+ * to learn which addresses have accounts.
  */
 import { createHash } from "node:crypto";
 import { assertNever } from "../google-auth";
-import { emailHint, type AccountDirectory } from "./account-directory";
+import { emailHint, type AccountDirectory, type IdentityLinkOutcome } from "./account-directory";
 import type { AccountId } from "./account-vault";
 import { isMailboxAddress, type MailSender, type OutgoingMail } from "./gmail-sender";
 import type { PasswordCredential, RecordStore } from "./oauth-store";
@@ -106,7 +116,15 @@ export type LinkOutcome =
   | Readonly<{ kind: "invalid-link" }>
   | Readonly<{ kind: "invalid"; problem: InputProblem }>;
 
-export type LinkPurpose = "confirm" | "reset";
+export type LinkPurpose = "confirm" | "reset" | "link";
+
+export type EmailLinkOutcome =
+  /** `IdentityLinkOutcome` from the directory, the password saved when it is `linked`. */
+  | IdentityLinkOutcome
+  /** Unknown, used, retired by a newer one, or expired. */
+  | Readonly<{ kind: "invalid-link" }>
+  /** The browser is signed in to a different account than the one that asked; the link still works. */
+  | Readonly<{ kind: "wrong-account" }>;
 
 export type PasswordSignIn = Readonly<{
   signUp(options: Readonly<{ email: string; password: string; clientAddress: string }>): Promise<MailRequestOutcome>;
@@ -116,6 +134,12 @@ export type PasswordSignIn = Readonly<{
   isLinkLive(options: Readonly<{ purpose: LinkPurpose; token: string }>): boolean;
   confirmAddress(options: Readonly<{ token: string }>): Promise<LinkOutcome>;
   completeReset(options: Readonly<{ token: string; password: string }>): Promise<LinkOutcome>;
+  /** Mails a link that adds this address and password to `accountId`. Same answer for any address. */
+  startLink(
+    options: Readonly<{ accountId: AccountId; email: string; password: string; clientAddress: string }>,
+  ): Promise<MailRequestOutcome>;
+  /** Uses the mailed link, only for the account that asked for it. */
+  confirmLink(options: Readonly<{ token: string; accountId: AccountId }>): Promise<EmailLinkOutcome>;
 }>;
 
 /** The `accountLinks` / `passwordCredentials` key for an email subject. */
@@ -153,9 +177,12 @@ export function createPasswordSignIn(
   const { credentials, directory, mailSender, throttle, limits, now, randomToken, scryptCost, runInBackground, warn } = options;
   const baseUrl = options.publicUrl.replace(/\/+$/, "");
   const unconfirmed = new Map<string, UnconfirmedSignUp>();
+  /** Addresses being added to a signed-in account, keyed by subject; a newer request replaces an older one. */
+  const pendingLinks = new Map<string, PendingEmailLink>();
   const links: Readonly<Record<LinkPurpose, SingleUseLinks>> = {
     confirm: singleUseLinks({ now, randomToken, lifetimeMs: EMAIL_LINK_LIFETIME_MS }),
     reset: singleUseLinks({ now, randomToken, lifetimeMs: EMAIL_LINK_LIFETIME_MS }),
+    link: singleUseLinks({ now, randomToken, lifetimeMs: EMAIL_LINK_LIFETIME_MS }),
   };
   // Verified against when the address is unknown, so that answer takes as long as a real one.
   let dummyHash: Promise<string> | null = null;
@@ -312,6 +339,50 @@ export function createPasswordSignIn(
       // The directory already holds this account's sealed address; null here never overwrites it.
       return { kind: "signed-in", accountId: await directory.findOrCreateByIdentity({ provider: EMAIL_PROVIDER, subject, email: null }) };
     },
+
+    startLink: async ({ accountId, email, password, clientAddress }) => {
+      const normalised = normaliseEmail(email);
+      if (normalised === null) return { kind: "invalid", problem: "address" };
+      const passwordProblem = checkPassword(password);
+      if (passwordProblem !== null) return { kind: "invalid", problem: passwordProblem };
+      const subject = emailSubject(normalised);
+      const admitted = admitMail({ clientAddress, subject });
+      if (admitted.kind === "refused") return { kind: "throttled", retryAfterMs: admitted.retryAfterMs };
+      // Hashed on both paths below, as in sign-up, so a taken address does not answer faster.
+      const passwordHash = await hashPassword({ password, cost: scryptCost });
+      if ((await credentials.get({ key: emailLinkKey(subject) })) !== null) {
+        deliver({ mail: alreadyInUseMail({ to: normalised, baseUrl }), what: "address-in-use notice" });
+        return { kind: "accepted" };
+      }
+      const nowMs = now().getTime();
+      for (const [key, entry] of pendingLinks) {
+        if (entry.expiresAtMs <= nowMs) pendingLinks.delete(key);
+      }
+      if (pendingLinks.size >= MAX_UNCONFIRMED) {
+        const oldest = pendingLinks.keys().next();
+        if (oldest.done !== true) pendingLinks.delete(oldest.value);
+      }
+      pendingLinks.set(subject, { accountId, email: normalised, passwordHash, expiresAtMs: nowMs + EMAIL_LINK_LIFETIME_MS });
+      const token = links.link.issue(subject);
+      deliver({ mail: addAddressMail({ to: normalised, link: `${baseUrl}/account/email/link?token=${token}` }), what: "add-address" });
+      return { kind: "accepted" };
+    },
+
+    confirmLink: async ({ token, accountId }) => {
+      const subject = links.link.subjectOf(token);
+      const pending = subject === null ? undefined : pendingLinks.get(subject);
+      if (subject === null || pending === undefined || pending.expiresAtMs <= now().getTime()) return { kind: "invalid-link" };
+      // Checked before the link is used, so opening it in the wrong browser does not cost it.
+      if (pending.accountId !== accountId) return { kind: "wrong-account" };
+      links.link.take(token);
+      pendingLinks.delete(subject);
+      const outcome = await directory.linkIdentity({ accountId, provider: EMAIL_PROVIDER, subject, email: pending.email });
+      // The password only once the address is this account's: never over another account's.
+      if (outcome.kind === "linked") {
+        await credentials.put({ key: emailLinkKey(subject), value: { subject, passwordHash: pending.passwordHash, updatedAtMs: now().getTime() } });
+      }
+      return outcome;
+    },
   };
 }
 
@@ -329,6 +400,8 @@ function checkPassword(password: string): InputProblem | null {
 
 type UnconfirmedSignUp = Readonly<{ subject: string; email: string; passwordHash: string; expiresAtMs: number }>;
 
+type PendingEmailLink = Readonly<{ accountId: AccountId; email: string; passwordHash: string; expiresAtMs: number }>;
+
 /** Bounds memory against a flood of sign-ups that never confirm; the oldest go first. */
 const MAX_UNCONFIRMED = 10_000;
 const MAX_LINKS = 10_000;
@@ -337,6 +410,8 @@ type SingleUseLinks = Readonly<{
   /** A new token for `subject`; any earlier token for it stops working. */
   issue(subject: string): string;
   isLive(token: string): boolean;
+  /** The subject of a live token, without using it up; null when it is not live. */
+  subjectOf(token: string): string | null;
   /** The subject, once; null when unknown, retired, expired or already taken. */
   take(token: string): string | null;
 }>;
@@ -380,6 +455,7 @@ function singleUseLinks(options: Readonly<{ now: () => Date; randomToken: () => 
       return token;
     },
     isLive: (token) => live(token) !== null,
+    subjectOf: (token) => live(token)?.subject ?? null,
     take: (token) => {
       const entry = live(token);
       if (entry === null) return null;
@@ -419,6 +495,32 @@ function alreadyRegisteredMail(options: Readonly<{ to: string; baseUrl: string }
       "To sign in, use your existing password. If you have forgotten it, set a new one here:",
     ],
     link: `${options.baseUrl}/account/email/forgot`,
+    after: ["If this was not you, you can ignore this message."],
+  });
+}
+
+function addAddressMail(options: Readonly<{ to: string; link: string }>): OutgoingMail {
+  return mail({
+    to: options.to,
+    subject: "Add this email address to your Sasha Slides account",
+    paragraphs: [
+      "Someone signed in to Sasha Slides, hopefully you, asked to add this email address and a password as a way to sign in to their account.",
+      "To add it, open this link within 30 minutes in the browser where you are signed in, and press the button on the page:",
+    ],
+    link: options.link,
+    after: ["If you did not ask for this, ignore this message: the address is not added unless the link is used."],
+  });
+}
+
+function alreadyInUseMail(options: Readonly<{ to: string; baseUrl: string }>): OutgoingMail {
+  return mail({
+    to: options.to,
+    subject: "This email address already has a Sasha Slides account",
+    paragraphs: [
+      "Someone signed in to Sasha Slides, hopefully you, asked to add this email address to their account, but the address already signs in to a different Sasha Slides account, so nothing was changed.",
+      "Merging two accounts is not supported yet. To use this address, sign in with it and its password.",
+    ],
+    link: `${options.baseUrl}/account`,
     after: ["If this was not you, you can ignore this message."],
   });
 }

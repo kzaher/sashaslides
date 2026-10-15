@@ -6,7 +6,7 @@
  *
  * Ordered like a visit: the signed-out page, the sign-in round trip and its replay and
  * cross-browser defences, Sign in with Apple's form POST callback, the session cookie, then
- * erase and sign-out, then escaping.
+ * linking and removing sign-in methods, erase and sign-out, then escaping.
  */
 import { strict as assert } from "node:assert";
 import { createServer } from "node:http";
@@ -86,6 +86,7 @@ type Portal = Readonly<{
   apple: FakeApple;
   directory: AccountDirectory;
   eraseCalls: AccountId[];
+  warnings: string[];
   advanceClock: (milliseconds: number) => void;
 }>;
 
@@ -127,8 +128,9 @@ async function startPortal(
   const network = fakeFetch({ routes: [okta.route, google.route, github.route, apple.route] });
   let counter = 0;
   const randomToken = (): string => `random-${String((counter += 1))}-${"x".repeat(32)}`;
-  const directory = inMemoryAccountDirectory({ randomToken });
+  const directory = inMemoryAccountDirectory({ randomToken, now });
   const eraseCalls: AccountId[] = [];
+  const warnings: string[] = [];
   const portal = createAccountPortal({
     publicUrl: PUBLIC_URL,
     sessionSecret: SESSION_SECRET,
@@ -144,7 +146,9 @@ async function startPortal(
     },
     now,
     randomToken,
-    warn: () => undefined,
+    warn: (message) => {
+      warnings.push(message);
+    },
   });
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://host.invalid");
@@ -162,6 +166,7 @@ async function startPortal(
     apple,
     directory,
     eraseCalls,
+    warnings,
     advanceClock: (milliseconds) => {
       nowMs += milliseconds;
     },
@@ -216,7 +221,7 @@ function csrfOf(body: string): string {
 /** The whole browser dance for a provider: login → provider → callback → /account. */
 async function signIn(
   portal: Portal,
-  options: Readonly<{ provider: "okta" | "github"; email: string; emailVerified?: boolean }>,
+  options: Readonly<{ provider: "okta" | "github"; email: string; emailVerified?: boolean; subject?: string }>,
 ): Promise<Readonly<{ session: string; callback: string; signinCookie: string }>> {
   const login = await visit({ url: `${portal.baseUrl}/account/login/${options.provider}`, cookies: {} });
   assert.equal(login.status, 302, login.body);
@@ -224,7 +229,7 @@ async function signIn(
   const signinCookie = cookieValue(login.setCookies, SIGNIN_COOKIE) ?? "";
   const parameters =
     options.provider === "okta"
-      ? portal.okta.authorize({ authorizationUrl: login.location, subject: "okta-user", email: options.email, emailVerified: options.emailVerified ?? true, tamper: {} })
+      ? portal.okta.authorize({ authorizationUrl: login.location, subject: options.subject ?? "okta-user", email: options.email, emailVerified: options.emailVerified ?? true, tamper: {} })
       : portal.github.authorize({ authorizationUrl: login.location });
   const redirectUri = new URL(login.location).searchParams.get("redirect_uri");
   assert.equal(redirectUri, `${PUBLIC_URL}/account/callback/${options.provider}`);
@@ -542,6 +547,286 @@ describe("session cookie", () => {
     portal.advanceClock(15 * 60 * 1000 + 1000);
     const page = await visit({ url: `${portal.baseUrl}/account`, cookies: { [SESSION_COOKIE]: session } });
     assert.match(page.body, /Sign in to manage your Sasha Slides data/);
+  });
+});
+
+const MINUTE_MS = 60 * 1000;
+const LINK_COOKIE = "sasha_link";
+
+/** The signed-in page's start link for `provider`, as the browser would follow it. */
+async function linkStartUrl(portal: Portal, options: Readonly<{ session: string; provider: string }>): Promise<string> {
+  const page = await visit({ url: `${portal.baseUrl}/account`, cookies: { [SESSION_COOKIE]: options.session } });
+  const match = new RegExp(`href="(/account/link/${options.provider}\\?token=[^"]+)"`).exec(page.body);
+  if (match?.[1] === undefined) throw new Error(`no link start for ${options.provider} in: ${page.body.slice(0, 400)}`);
+  return `${portal.baseUrl}${match[1]}`;
+}
+
+type LinkRun = Readonly<{ started: Visit; callback: string; signinCookie: string; parked: Visit; linkCookie: string }>;
+
+/** Start → provider → callback, up to the parked identity; `completeLink` finishes it. */
+async function runLinkToCallback(
+  portal: Portal,
+  options: Readonly<{ session: string; provider: "okta" | "github"; subject?: string; email?: string; emailVerified?: boolean }>,
+): Promise<LinkRun> {
+  const started = await visit({ url: await linkStartUrl(portal, options), cookies: { [SESSION_COOKIE]: options.session } });
+  assert.equal(started.status, 302, started.body);
+  const location = started.location ?? "";
+  const signinCookie = cookieValue(started.setCookies, SIGNIN_COOKIE) ?? "";
+  const parameters =
+    options.provider === "okta"
+      ? portal.okta.authorize({ authorizationUrl: location, subject: options.subject ?? "okta-user", email: options.email ?? "ada@example.com", emailVerified: options.emailVerified ?? true, tamper: {} })
+      : portal.github.authorize({ authorizationUrl: location });
+  const callback = `${portal.baseUrl}/account/callback/${options.provider}?${new URLSearchParams(parameters).toString()}`;
+  const parked = await visit({ url: callback, cookies: { [SIGNIN_COOKIE]: signinCookie, [SESSION_COOKIE]: options.session } });
+  return { started, callback, signinCookie, parked, linkCookie: cookieValue(parked.setCookies, LINK_COOKIE) ?? "" };
+}
+
+async function completeLink(portal: Portal, options: Readonly<{ session: string; linkCookie: string }>): Promise<Visit> {
+  return visit({ url: `${portal.baseUrl}/account/link-complete`, cookies: { [SESSION_COOKIE]: options.session, [LINK_COOKIE]: options.linkCookie } });
+}
+
+async function providersOnPage(portal: Portal, session: string): Promise<string> {
+  return (await visit({ url: `${portal.baseUrl}/account`, cookies: { [SESSION_COOKIE]: session } })).body;
+}
+
+describe("linking another sign-in method", () => {
+  test("Okta links GitHub with state + PKCE; both are listed, and signing in with GitHub later lands in the same account", async () => {
+    const portal = await startPortal({ providers: ["okta", "github"], eraseReport: REVOKED });
+    const { session } = await signIn(portal, { provider: "okta", email: "ada@example.com" });
+    const before = await providersOnPage(portal, session);
+    assert.match(before, /Sign-in methods/);
+    assert.match(before, /Continue with GitHub/, "GitHub is offered");
+    assert.doesNotMatch(before, /href="\/account\/link\/okta/, "the linked provider is not offered again");
+
+    const run = await runLinkToCallback(portal, { session, provider: "github" });
+    const query = new URL(run.started.location ?? "").searchParams;
+    assert.equal(query.get("code_challenge_method"), "S256");
+    assert.ok((query.get("state") ?? "") !== "", "a state");
+    assert.equal(run.parked.status, 303, run.parked.body);
+    assert.equal(run.parked.location, "/account/link-complete");
+    assert.equal(cookieValue(run.parked.setCookies, SESSION_COOKIE), null, "a link never signs in");
+    assert.match(cookieLine(run.parked.setCookies, LINK_COOKIE), /Path=\/account\/link-complete/);
+    const done = await completeLink(portal, { session, linkCookie: run.linkCookie });
+    assert.equal(done.status, 303, done.body);
+    assert.equal(done.location, "/account");
+
+    const after = await providersOnPage(portal, session);
+    assert.match(after, /<span class="method-name">Okta<\/span>/);
+    assert.match(after, /<span class="method-name">GitHub<\/span>/);
+    assert.ok(after.includes("o•••@example.com"), "GitHub's verified address as the hint");
+    assert.match(after, /Added 11 October 2026/);
+
+    const okta = await portal.directory.findOrCreateByIdentity({ provider: "okta", subject: "okta-user", email: null });
+    const github = await signIn(portal, { provider: "github", email: "" });
+    const csrf = csrfOf(await providersOnPage(portal, github.session));
+    await visit({ url: `${portal.baseUrl}/account/erase`, cookies: { [SESSION_COOKIE]: github.session }, form: { csrf, confirm: "yes" } });
+    assert.deepEqual(portal.eraseCalls, [okta], "GitHub signed in to the Okta account");
+  });
+
+  // Parametric over the age of the sign-in behind the session: the 10-minute rule.
+  const freshnessRows: readonly Readonly<{ ageMinutes: number; status: number; offered: boolean }>[] = [
+    { ageMinutes: 0, status: 302, offered: true },
+    { ageMinutes: 9, status: 302, offered: true },
+    { ageMinutes: 11, status: 403, offered: false },
+  ];
+  for (const row of freshnessRows) {
+    test(`a session ${String(row.ageMinutes)} minutes after sign-in ${row.offered ? "may link" : "must sign in again first"}`, async () => {
+      const portal = await startPortal({ providers: ["okta", "github"], eraseReport: REVOKED });
+      const { session } = await signIn(portal, { provider: "okta", email: "ada@example.com" });
+      const startUrl = await linkStartUrl(portal, { session, provider: "github" });
+      portal.advanceClock(row.ageMinutes * MINUTE_MS);
+      const page = await providersOnPage(portal, session);
+      assert.equal(/Continue with GitHub/.test(page), row.offered, "add buttons only on a fresh session");
+      assert.equal(/Sign out and sign in again/.test(page), !row.offered, "otherwise the sign-in-again notice");
+      const started = await visit({ url: startUrl, cookies: { [SESSION_COOKIE]: session } });
+      assert.equal(started.status, row.status, started.body);
+      if (!row.offered) assert.match(started.body, /Please sign in again first/);
+      assert.equal(cookieValue(started.setCookies, SIGNIN_COOKIE) !== null, row.offered, "a pending link only when allowed");
+    });
+  }
+
+  const startGates: readonly Readonly<{ name: string; withSession: boolean; url: (startUrl: string) => string; status: number }>[] = [
+    { name: "control: the page's own link", withSession: true, url: (startUrl) => startUrl, status: 302 },
+    { name: "no token", withSession: true, url: (startUrl) => startUrl.replace(/\?.*$/, ""), status: 403 },
+    { name: "a forged token", withSession: true, url: (startUrl) => startUrl.replace(/token=[^&]+/, "token=forged"), status: 403 },
+    { name: "no session", withSession: false, url: (startUrl) => startUrl, status: 401 },
+  ];
+  for (const gate of startGates) {
+    test(`starting a link with ${gate.name} → ${String(gate.status)}`, async () => {
+      const portal = await startPortal({ providers: ["okta", "github"], eraseReport: REVOKED });
+      const { session } = await signIn(portal, { provider: "okta", email: "ada@example.com" });
+      const startUrl = await linkStartUrl(portal, { session, provider: "github" });
+      const started = await visit({ url: gate.url(startUrl), cookies: gate.withSession ? { [SESSION_COOKIE]: session } : {} });
+      assert.equal(started.status, gate.status, started.body);
+    });
+  }
+
+  test("an identity that already opens another account is refused, and neither account changes", async () => {
+    const portal = await startPortal({ providers: ["okta", "github"], eraseReport: REVOKED });
+    const githubFirst = await signIn(portal, { provider: "github", email: "" });
+    const { session } = await signIn(portal, { provider: "okta", email: "ada@example.com" });
+    const run = await runLinkToCallback(portal, { session, provider: "github" });
+    const refused = await completeLink(portal, { session, linkCookie: run.linkCookie });
+    assert.equal(refused.status, 409, refused.body);
+    assert.match(refused.body, /belongs to another account/);
+    assert.match(refused.body, /Merging two accounts is not supported yet/);
+    assert.doesNotMatch(await providersOnPage(portal, session), /<span class="method-name">GitHub<\/span>/);
+    const githubPage = await providersOnPage(portal, githubFirst.session);
+    assert.doesNotMatch(githubPage, /<span class="method-name">Okta<\/span>/, "no silent merge the other way either");
+  });
+
+  // Parametric over the provider's verification: only a verified address is kept as the hint.
+  const verificationRows: readonly Readonly<{ emailVerified: boolean; hintKept: boolean }>[] = [
+    { emailVerified: true, hintKept: true },
+    { emailVerified: false, hintKept: false },
+  ];
+  for (const row of verificationRows) {
+    test(`a linked provider address that is ${row.emailVerified ? "verified is kept (control)" : "not verified is not kept"}`, async () => {
+      const portal = await startPortal({ providers: ["okta", "github"], eraseReport: REVOKED });
+      const { session } = await signIn(portal, { provider: "github", email: "" });
+      const run = await runLinkToCallback(portal, { session, provider: "okta", subject: "okta-linked", email: "victim@example.com", emailVerified: row.emailVerified });
+      assert.equal((await completeLink(portal, { session, linkCookie: run.linkCookie })).status, 303);
+      const page = await providersOnPage(portal, session);
+      assert.match(page, /<span class="method-name">Okta<\/span>/, "linked either way");
+      assert.equal(page.includes("v•••@example.com"), row.hintKept);
+    });
+  }
+
+  test("the callback and the completion are single use, and the completion expires after 5 minutes", async () => {
+    const portal = await startPortal({ providers: ["okta", "github"], eraseReport: REVOKED });
+    const { session } = await signIn(portal, { provider: "okta", email: "ada@example.com" });
+    const run = await runLinkToCallback(portal, { session, provider: "github" });
+    const replayedCallback = await visit({ url: run.callback, cookies: { [SIGNIN_COOKIE]: run.signinCookie, [SESSION_COOKIE]: session } });
+    assert.equal(replayedCallback.status, 400);
+    assert.equal((await completeLink(portal, { session, linkCookie: run.linkCookie })).status, 303);
+    assert.equal((await completeLink(portal, { session, linkCookie: run.linkCookie })).status, 400, "a reload attaches nothing");
+
+    const second = await signIn(portal, { provider: "okta", subject: "okta-other", email: "bo@example.com" });
+    const late = await runLinkToCallback(portal, { session: second.session, provider: "github" });
+    portal.advanceClock(5 * MINUTE_MS + 1000);
+    const expired = await completeLink(portal, { session: second.session, linkCookie: late.linkCookie });
+    assert.equal(expired.status, 400, expired.body);
+  });
+
+  test("a link callback in a browser that did not start it is refused", async () => {
+    const portal = await startPortal({ providers: ["okta", "github"], eraseReport: REVOKED });
+    const { session } = await signIn(portal, { provider: "okta", email: "ada@example.com" });
+    const started = await visit({ url: await linkStartUrl(portal, { session, provider: "github" }), cookies: { [SESSION_COOKIE]: session } });
+    const parameters = portal.github.authorize({ authorizationUrl: started.location ?? "" });
+    const elsewhere = await visit({ url: `${portal.baseUrl}/account/callback/github?${new URLSearchParams(parameters).toString()}`, cookies: { [SESSION_COOKIE]: session } });
+    assert.equal(elsewhere.status, 400);
+    assert.equal(cookieValue(elsewhere.setCookies, LINK_COOKIE), null);
+  });
+
+  // Bound to the session that started it: a different session, even in the same browser, attaches nothing.
+  const sessionRows: readonly Readonly<{ name: string; finishWith: "same" | "another account" | "none"; status: number }>[] = [
+    { name: "the session that started it (control)", finishWith: "same", status: 303 },
+    { name: "a session of another account", finishWith: "another account", status: 403 },
+    { name: "no session", finishWith: "none", status: 403 },
+  ];
+  for (const row of sessionRows) {
+    test(`finishing a link with ${row.name} → ${String(row.status)}`, async () => {
+      const portal = await startPortal({ providers: ["okta", "github"], eraseReport: REVOKED });
+      const { session } = await signIn(portal, { provider: "okta", email: "ada@example.com" });
+      const other = await signIn(portal, { provider: "okta", subject: "okta-other", email: "bo@example.com" });
+      const run = await runLinkToCallback(portal, { session, provider: "github" });
+      const finishSession = row.finishWith === "same" ? session : row.finishWith === "another account" ? other.session : "";
+      const done = await visit({
+        url: `${portal.baseUrl}/account/link-complete`,
+        cookies: { ...(finishSession === "" ? {} : { [SESSION_COOKIE]: finishSession }), [LINK_COOKIE]: run.linkCookie },
+      });
+      assert.equal(done.status, row.status, done.body);
+      assert.equal(/<span class="method-name">GitHub<\/span>/.test(await providersOnPage(portal, session)), row.status === 303);
+      assert.doesNotMatch(await providersOnPage(portal, other.session), /<span class="method-name">GitHub<\/span>/);
+    });
+  }
+
+  test("links and unlinks are audited by account, provider and outcome, never by subject or address", async () => {
+    const portal = await startPortal({ providers: ["okta", "github"], eraseReport: REVOKED });
+    const { session } = await signIn(portal, { provider: "okta", email: "ada@example.com" });
+    const run = await runLinkToCallback(portal, { session, provider: "github" });
+    await completeLink(portal, { session, linkCookie: run.linkCookie });
+    const page = await providersOnPage(portal, session);
+    const githubLink = /name="link" value="([^"]+)"><button type="submit" class="quiet" aria-label="Remove GitHub/.exec(page)?.[1] ?? "";
+    await visit({ url: `${portal.baseUrl}/account/unlink`, cookies: { [SESSION_COOKIE]: session }, form: { csrf: csrfOf(page), link: githubLink } });
+    const accountId = await portal.directory.findOrCreateByIdentity({ provider: "okta", subject: "okta-user", email: null });
+    const audit = portal.warnings.filter((line) => line.includes("audit:"));
+    assert.deepEqual(audit, [`account portal: audit: account ${accountId} link github: linked`, `account portal: audit: account ${accountId} unlink github: unlinked`]);
+    for (const secret of ["octo@example.com", "ada@example.com", "okta-user", run.linkCookie]) {
+      assert.ok(!portal.warnings.join("\n").includes(secret), `${secret} not logged`);
+    }
+  });
+});
+
+describe("linking with Apple's form POST callback", () => {
+  test("the cross-site POST carries no session, so the identity is parked and attached on the GET that follows", async () => {
+    const portal = await startPortal({ providers: ["okta", "apple"], eraseReport: REVOKED });
+    const { session } = await signIn(portal, { provider: "okta", email: "ada@example.com" });
+    const started = await visit({ url: await linkStartUrl(portal, { session, provider: "apple" }), cookies: { [SESSION_COOKIE]: session } });
+    assert.equal(started.status, 302, started.body);
+    assert.equal(new URL(started.location ?? "").searchParams.get("response_mode"), "form_post");
+    const signinCookie = cookieValue(started.setCookies, SIGNIN_COOKIE) ?? "";
+    const form = portal.apple.authorize({ authorizationUrl: started.location ?? "", subject: APPLE_SUBJECT, email: "x7k2q9@privaterelay.appleid.com", emailVerified: "true", tamper: {} });
+    // Exactly what the browser sends on Apple's cross-site POST: the SameSite=None state cookie, not the Lax session.
+    const parked = await visit({ url: `${portal.baseUrl}/account/callback/apple`, cookies: { [SIGNIN_COOKIE]: signinCookie }, form: { ...form } });
+    assert.equal(parked.status, 303, parked.body);
+    assert.equal(parked.location, "/account/link-complete");
+    assert.equal(cookieValue(parked.setCookies, SESSION_COOKIE), null);
+    const done = await completeLink(portal, { session, linkCookie: cookieValue(parked.setCookies, LINK_COOKIE) ?? "" });
+    assert.equal(done.status, 303, done.body);
+    const page = await providersOnPage(portal, session);
+    assert.match(page, /<span class="method-name">Apple<\/span>/);
+    const okta = await portal.directory.findOrCreateByIdentity({ provider: "okta", subject: "okta-user", email: null });
+    assert.equal(await portal.directory.findOrCreateByIdentity({ provider: "apple", subject: APPLE_SUBJECT, email: null }), okta);
+  });
+});
+
+describe("removing a sign-in method", () => {
+  async function twoMethods(): Promise<Readonly<{ portal: Portal; session: string; page: string }>> {
+    const portal = await startPortal({ providers: ["okta", "github"], eraseReport: REVOKED });
+    const { session } = await signIn(portal, { provider: "okta", email: "ada@example.com" });
+    const run = await runLinkToCallback(portal, { session, provider: "github" });
+    await completeLink(portal, { session, linkCookie: run.linkCookie });
+    return { portal, session, page: await providersOnPage(portal, session) };
+  }
+
+  function removeField(page: string, label: string): string {
+    return new RegExp(`name="link" value="([^"]+)"><button type="submit" class="quiet" aria-label="Remove ${label}`).exec(page)?.[1] ?? "";
+  }
+
+  const rows: readonly Readonly<{ name: string; ageMinutes: number; form: (page: string) => Record<string, string>; status: number; githubAfter: boolean }>[] = [
+    { name: "control: CSRF token, fresh session", ageMinutes: 0, form: (page) => ({ csrf: csrfOf(page), link: removeField(page, "GitHub") }), status: 303, githubAfter: false },
+    { name: "no CSRF token", ageMinutes: 0, form: (page) => ({ link: removeField(page, "GitHub") }), status: 403, githubAfter: true },
+    { name: "a session 11 minutes after sign-in", ageMinutes: 11, form: (page) => ({ csrf: csrfOf(page), link: removeField(page, "GitHub") }), status: 403, githubAfter: true },
+    { name: "an unknown link id", ageMinutes: 0, form: (page) => ({ csrf: csrfOf(page), link: "no-such-link" }), status: 404, githubAfter: true },
+  ];
+  for (const row of rows) {
+    test(`with ${row.name} → ${String(row.status)}`, async () => {
+      const { portal, session, page } = await twoMethods();
+      portal.advanceClock(row.ageMinutes * MINUTE_MS);
+      const answer = await visit({ url: `${portal.baseUrl}/account/unlink`, cookies: { [SESSION_COOKIE]: session }, form: row.form(page) });
+      assert.equal(answer.status, row.status, answer.body);
+      assert.equal(/<span class="method-name">GitHub<\/span>/.test(await providersOnPage(portal, session)), row.githubAfter);
+    });
+  }
+
+  test("the last method has no Remove button, and removing it anyway is refused", async () => {
+    const { portal, session, page } = await twoMethods();
+    const csrf = csrfOf(page);
+    await visit({ url: `${portal.baseUrl}/account/unlink`, cookies: { [SESSION_COOKIE]: session }, form: { csrf, link: removeField(page, "GitHub") } });
+    const alone = await providersOnPage(portal, session);
+    assert.doesNotMatch(alone, />Remove</, "no Remove button on the only method");
+    const refused = await visit({ url: `${portal.baseUrl}/account/unlink`, cookies: { [SESSION_COOKIE]: session }, form: { csrf, link: removeField(page, "Okta") } });
+    assert.equal(refused.status, 409, refused.body);
+    assert.match(refused.body, /only way to sign in/);
+    assert.match(await providersOnPage(portal, session), /<span class="method-name">Okta<\/span>/);
+  });
+
+  test("a removed method signs in to a new, separate account afterwards", async () => {
+    const { portal, session, page } = await twoMethods();
+    await visit({ url: `${portal.baseUrl}/account/unlink`, cookies: { [SESSION_COOKIE]: session }, form: { csrf: csrfOf(page), link: removeField(page, "GitHub") } });
+    const github = await signIn(portal, { provider: "github", email: "" });
+    assert.doesNotMatch(await providersOnPage(portal, github.session), /<span class="method-name">Okta<\/span>/);
   });
 });
 

@@ -30,7 +30,20 @@
  * account is one keyed read with no index. It is random bytes chosen by the authenticator,
  * so it reveals nothing about the person. The user handle is still stored (a fresh random
  * value per passkey, never the account id) and checked when an authenticator returns it.
+ *
+ * LINKING a further sign-in to a signed-in account (`linkIdentity`) writes the same
+ * `<provider>:<subject>` link a first sign-in would, so a later sign-in with it lands in this
+ * account and erasing the account (which walks `linkKeys`) removes it. It never moves a link:
+ * an identity that already opens ANOTHER account is refused, because a silent move would
+ * merge two accounts' data under one key without either owner agreeing, and merging is not
+ * supported. One link per provider (passkeys aside): an account has one Google Slides
+ * connection, so a second Google could not be told apart from the first. `unlink` removes a
+ * link and the password stored under the same key, and refuses the last one, which would
+ * leave an account nobody can open (only "delete my data" ends an account). Links are
+ * addressed from the page by `linkId`, a hash of the key, so the page never carries a
+ * provider's subject.
  */
+import { createHash } from "node:crypto";
 import type { AccountId, AccountVault } from "./account-vault";
 import type { AccountLink, AuthStore, StoredPasskey } from "./oauth-store";
 import type { PasskeyAlgorithm } from "./webauthn";
@@ -52,6 +65,12 @@ export type AccountDirectory = Readonly<{
   recordPasskeyUse(options: Readonly<{ credentialId: string; signCount: number }>): Promise<void>;
   /** The account's passkey credential ids, so registering one the authenticator already holds is refused there. */
   passkeyIds(options: Readonly<{ accountId: AccountId }>): Promise<readonly string[]>;
+  /** Attaches a verified provider identity to an account that already exists (see the header). */
+  linkIdentity(
+    options: Readonly<{ accountId: AccountId; provider: string; subject: string; email: string | null }>,
+  ): Promise<IdentityLinkOutcome>;
+  /** Removes one of the account's sign-ins, never its last. */
+  unlink(options: Readonly<{ accountId: AccountId; linkId: string }>): Promise<UnlinkOutcome>;
 }>;
 
 /** The provider name every passkey link carries; reserved, so no configured provider can take it. */
@@ -79,14 +98,40 @@ export type PasskeyLinkOutcome =
   /** `addPasskey` only: the account was erased since the session was issued. */
   | Readonly<{ kind: "account-missing" }>;
 
+export type IdentityLinkOutcome =
+  | Readonly<{ kind: "linked" }>
+  /** This identity already signs in to this account: nothing to do. */
+  | Readonly<{ kind: "already-linked-here" }>
+  /** This identity opens a different account; accounts are never merged. */
+  | Readonly<{ kind: "linked-to-another-account" }>
+  /** The account already has a sign-in with this provider (a different identity). */
+  | Readonly<{ kind: "provider-already-linked" }>
+  | Readonly<{ kind: "account-missing" }>;
+
+export type UnlinkOutcome =
+  | Readonly<{ kind: "unlinked"; provider: string }>
+  /** It is the account's only sign-in. */
+  | Readonly<{ kind: "last-method" }>
+  /** No sign-in of this account has that id (already removed, or another account's). */
+  | Readonly<{ kind: "not-found" }>
+  | Readonly<{ kind: "account-missing" }>;
+
 export type AccountDescription = Readonly<{ links: readonly LinkedSignIn[] }>;
 
 export type LinkedSignIn = Readonly<{
+  /** `linkIdOf(<provider>:<subject>)`: names the link on the page without its subject. */
+  linkId: string;
   /** The configured provider name, e.g. `google`, `github`, `okta`. */
   provider: string;
   /** `emailHint(email)`, or null when the provider gave no address. */
   emailHint: string | null;
+  linkedAtMs: number;
 }>;
+
+/** A link's page-facing id: SHA-256 of its key, base64url. Stable, and reveals no subject. */
+export function linkIdOf(linkKey: string): string {
+  return createHash("sha256").update(linkKey, "utf-8").digest("base64url");
+}
 
 /** `ada@example.com` → `a•••@example.com`. Enough to recognise, not enough to reuse. */
 export function emailHint(email: string): string {
@@ -97,16 +142,30 @@ export function emailHint(email: string): string {
 }
 
 /** Tests and a single-process deployment without a store: lost on restart. */
-export function inMemoryAccountDirectory(options: Readonly<{ randomToken: () => string }>): AccountDirectory {
+export function inMemoryAccountDirectory(options: Readonly<{ randomToken: () => string; now: () => Date }>): AccountDirectory {
+  const { now } = options;
   const accountByLink = new Map<string, AccountId>();
-  const linksByAccount = new Map<AccountId, LinkedSignIn[]>();
+  /** Each account's links, keyed by link key, in the order they were added. */
+  const linksByAccount = new Map<AccountId, Map<string, LinkedSignIn>>();
   const passkeys = new Map<string, PasskeyCredential>();
+
+  const addLink = (link: Readonly<{ accountId: AccountId; provider: string; subject: string; email: string | null }>): void => {
+    const linkKey = `${link.provider}:${link.subject}`;
+    accountByLink.set(linkKey, link.accountId);
+    const links = linksByAccount.get(link.accountId) ?? new Map<string, LinkedSignIn>();
+    links.set(linkKey, {
+      linkId: linkIdOf(linkKey),
+      provider: link.provider,
+      emailHint: link.email === null ? null : emailHint(link.email),
+      linkedAtMs: now().getTime(),
+    });
+    linksByAccount.set(link.accountId, links);
+  };
 
   const linkPasskey = (accountId: AccountId, passkey: NewPasskey): PasskeyLinkOutcome => {
     const linkKey = `${PASSKEY_PROVIDER}:${passkey.credentialId}`;
     if (accountByLink.has(linkKey)) return { kind: "already-registered" };
-    accountByLink.set(linkKey, accountId);
-    linksByAccount.set(accountId, [...(linksByAccount.get(accountId) ?? []), { provider: PASSKEY_PROVIDER, emailHint: null }]);
+    addLink({ accountId, provider: PASSKEY_PROVIDER, subject: passkey.credentialId, email: null });
     passkeys.set(passkey.credentialId, { ...passkey, accountId });
     return { kind: "linked", accountId };
   };
@@ -117,13 +176,35 @@ export function inMemoryAccountDirectory(options: Readonly<{ randomToken: () => 
       const existing = accountByLink.get(linkKey);
       if (existing !== undefined) return Promise.resolve(existing);
       const accountId = options.randomToken();
-      accountByLink.set(linkKey, accountId);
-      linksByAccount.set(accountId, [{ provider, emailHint: email === null ? null : emailHint(email) }]);
+      addLink({ accountId, provider, subject, email });
       return Promise.resolve(accountId);
+    },
+    linkIdentity: ({ accountId, provider, subject, email }) => {
+      const links = linksByAccount.get(accountId);
+      if (links === undefined) return Promise.resolve({ kind: "account-missing" });
+      const owner = accountByLink.get(`${provider}:${subject}`);
+      if (owner !== undefined) return Promise.resolve({ kind: owner === accountId ? "already-linked-here" : "linked-to-another-account" });
+      if (provider !== PASSKEY_PROVIDER && [...links.values()].some((link) => link.provider === provider)) {
+        return Promise.resolve({ kind: "provider-already-linked" });
+      }
+      addLink({ accountId, provider, subject, email });
+      return Promise.resolve({ kind: "linked" });
+    },
+    unlink: ({ accountId, linkId }) => {
+      const links = linksByAccount.get(accountId);
+      if (links === undefined) return Promise.resolve({ kind: "account-missing" });
+      const found = [...links.entries()].find(([, link]) => link.linkId === linkId);
+      if (found === undefined) return Promise.resolve({ kind: "not-found" });
+      if (links.size <= 1) return Promise.resolve({ kind: "last-method" });
+      const [linkKey, link] = found;
+      links.delete(linkKey);
+      accountByLink.delete(linkKey);
+      if (link.provider === PASSKEY_PROVIDER) passkeys.delete(linkKey.slice(PASSKEY_PROVIDER.length + 1));
+      return Promise.resolve({ kind: "unlinked", provider: link.provider });
     },
     describe: ({ accountId }) => {
       const links = linksByAccount.get(accountId);
-      return Promise.resolve(links === undefined ? null : { links: [...links] });
+      return Promise.resolve(links === undefined ? null : { links: [...links.values()] });
     },
     createAccountWithPasskey: ({ passkey }) => {
       if (passkeys.has(passkey.credentialId)) return Promise.resolve({ kind: "already-registered" });
@@ -151,7 +232,8 @@ export function inMemoryAccountDirectory(options: Readonly<{ randomToken: () => 
  */
 export function storeAccountDirectory(
   options: Readonly<{
-    store: Pick<AuthStore, "accounts" | "accountLinks">;
+    /** `passwordCredentials`: unlinking an email sign-in removes its password with it, as erasing does. */
+    store: Pick<AuthStore, "accounts" | "accountLinks" | "passwordCredentials">;
     vault: AccountVault;
     now: () => Date;
     newAccountId: () => AccountId;
@@ -252,11 +334,72 @@ export function storeAccountDirectory(
         if (link === null) continue;
         // A destroyed key opens to null: the hint is simply gone, which is the point of it.
         const email = link.sealedEmail === null ? null : await vault.open({ accountId, sealed: link.sealedEmail });
-        links.push({ provider: link.provider, emailHint: email === null ? null : emailHint(email) });
+        links.push({ linkId: linkIdOf(linkKey), provider: link.provider, emailHint: email === null ? null : emailHint(email), linkedAtMs: link.linkedAtMs });
       }
       return { links };
     },
+    linkIdentity: async ({ accountId, provider, subject, email }) => {
+      const account = await store.accounts.get({ key: accountId });
+      if (account === null) return { kind: "account-missing" };
+      const linkKey = `${provider}:${subject}`;
+      const existing = await store.accountLinks.get({ key: linkKey });
+      if (existing !== null) return { kind: existing.accountId === accountId ? "already-linked-here" : "linked-to-another-account" };
+      if (provider !== PASSKEY_PROVIDER && (await liveLinks({ account })).some((link) => link.provider === provider)) {
+        return { kind: "provider-already-linked" };
+      }
+      const takesGoogle = provider === GOOGLE_PROVIDER && account.googleSubject === null;
+      // The account's list first, as `addPasskey` does: a crash leaves a key naming no link.
+      await store.accounts.put({
+        key: accountId,
+        value: { ...account, linkKeys: [...account.linkKeys, linkKey], googleSubject: takesGoogle ? subject : account.googleSubject },
+      });
+      await store.accountLinks.put({
+        key: linkKey,
+        value: {
+          accountId,
+          provider,
+          subject,
+          sealedEmail: email === null ? null : await vault.seal({ accountId, plaintext: email }),
+          linkedAtMs: now().getTime(),
+        },
+      });
+      return { kind: "linked" };
+    },
+    unlink: async ({ accountId, linkId }) => {
+      const account = await store.accounts.get({ key: accountId });
+      if (account === null) return { kind: "account-missing" };
+      const links = await liveLinks({ account });
+      const found = links.find((link) => linkIdOf(link.key) === linkId);
+      if (found === undefined) return { kind: "not-found" };
+      if (links.length <= 1) return { kind: "last-method" };
+      // The link first: once it is gone nothing signs in with it, whatever happens next.
+      await store.accountLinks.remove({ key: found.key });
+      await store.passwordCredentials.remove({ key: found.key });
+      const releasesGoogle = found.provider === GOOGLE_PROVIDER && account.googleSubject === found.subject;
+      await store.accounts.put({
+        key: accountId,
+        value: {
+          ...account,
+          linkKeys: account.linkKeys.filter((linkKey) => linkKey !== found.key),
+          // The grant stays sealed under the subject, but no account reaches it any more.
+          googleSubject: releasesGoogle ? null : account.googleSubject,
+        },
+      });
+      return { kind: "unlinked", provider: found.provider };
+    },
   };
+
+  /** The account's links that still exist, with their keys; a key naming no link is skipped. */
+  async function liveLinks(
+    context: Readonly<{ account: Readonly<{ linkKeys: readonly string[] }> }>,
+  ): Promise<readonly Readonly<{ key: string; provider: string; subject: string }>[]> {
+    const found: Readonly<{ key: string; provider: string; subject: string }>[] = [];
+    for (const key of context.account.linkKeys) {
+      const link = await store.accountLinks.get({ key });
+      if (link !== null) found.push({ key, provider: link.provider, subject: link.subject });
+    }
+    return found;
+  }
 }
 
 /** The provider name whose subject is also the account's Google Slides connection. */

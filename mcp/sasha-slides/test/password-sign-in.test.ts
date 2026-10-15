@@ -4,15 +4,16 @@
  *
  *   node --test --import tsx mcp/sasha-slides/test/password-sign-in.test.ts
  *
- * Ordered like a visit: sign up and confirm, sign in, reset a forgotten password, then the
- * throttles, the forms' cross-site defence, and erasure.
+ * Ordered like a visit: sign up and confirm, sign in, reset a forgotten password, add an
+ * address to an account that signed in another way, then the throttles, the forms'
+ * cross-site defence, and erasure.
  */
 import { strict as assert } from "node:assert";
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, describe, test } from "node:test";
-import { inMemoryAccountDirectory, storeAccountDirectory } from "../http/account-directory";
+import { inMemoryAccountDirectory, storeAccountDirectory, type AccountDirectory } from "../http/account-directory";
 import { createAccountEraser } from "../http/account-eraser";
 import { createAccountVault, inMemoryDataKeyStore } from "../http/account-keys";
 import { createAccountPortal } from "../http/account-portal";
@@ -45,6 +46,8 @@ type Portal = Readonly<{
   advanceClock: (milliseconds: number) => void;
   credentials: RecordStore<PasswordCredential>;
   warnings: readonly string[];
+  directory: AccountDirectory;
+  nowMs: () => number;
 }>;
 
 const servers: { close: () => void }[] = [];
@@ -60,7 +63,7 @@ async function startPortal(
   const gmail = createFakeGmail({ clientId: "mail-client", clientSecret: "mail-secret", refreshToken: "mail-refresh", accessTokenLifetimeSeconds: 3599 });
   const network = fakeFetch({ routes: [gmail.route] });
   const randomToken = (): string => randomBytes(32).toString("base64url");
-  const directory = inMemoryAccountDirectory({ randomToken });
+  const directory = inMemoryAccountDirectory({ randomToken, now });
   const credentials = inMemoryRecordStore<PasswordCredential>();
   const background: Promise<void>[] = [];
   const warnings: string[] = [];
@@ -122,6 +125,8 @@ async function startPortal(
     },
     credentials,
     warnings,
+    directory,
+    nowMs: () => nowMs,
   };
 }
 
@@ -502,6 +507,155 @@ describe("password reset", () => {
     assert.equal(short.status, 400);
     assert.match(short.body, /at least 8/);
     sessionOf(await followLink(portal, { link, fields: { password: "long enough this time" } }));
+  });
+});
+
+/**
+ * A session cookie for an account that signed in some other way just now, minted with the
+ * portal's secret exactly as `account-portal.ts` mints one: the email portal here has no
+ * other provider to sign in with.
+ */
+function sessionFor(options: Readonly<{ accountId: string; nowMs: number }>): string {
+  const payload = Buffer.from(
+    JSON.stringify({ accountId: options.accountId, exp: options.nowMs + 15 * MINUTE, csrf: `csrf-${options.accountId}-${"x".repeat(32)}`, auth: options.nowMs }),
+    "utf-8",
+  ).toString("base64url");
+  return `${payload}.${createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url")}`;
+}
+
+function accountOf(session: string): string {
+  const [payload] = session.split(".");
+  const claims = JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf-8")) as Readonly<{ accountId?: unknown }>;
+  return String(claims.accountId);
+}
+
+describe("adding an email address and password to a signed-in account", () => {
+  async function gitHubAccount(portal: Portal, subject = "7"): Promise<Readonly<{ accountId: string; session: string }>> {
+    const accountId = await portal.directory.findOrCreateByIdentity({ provider: "github", subject, email: null });
+    return { accountId, session: sessionFor({ accountId, nowMs: portal.nowMs() }) };
+  }
+
+  /** The add form, submitted as the signed-in browser does. */
+  async function askToAdd(portal: Portal, options: Readonly<{ session: string; email: string }>): Promise<Visit> {
+    const form = await visit({ url: `${portal.baseUrl}/account/email/add`, cookies: { [SESSION_COOKIE]: options.session } });
+    assert.equal(form.status, 200, form.body);
+    return visit({
+      url: `${portal.baseUrl}/account/email/add`,
+      cookies: { [SESSION_COOKIE]: options.session },
+      form: { csrf: fieldOf(form.body, "csrf"), email: options.email, password: PASSWORD },
+      headers: { "x-real-ip": "198.51.100.1" },
+    });
+  }
+
+  /** Opens the mailed link in a browser with `session`, then presses the button if the page has one. */
+  async function confirmIn(portal: Portal, options: Readonly<{ link: string; session: string | null }>): Promise<Visit> {
+    const cookies = options.session === null ? {} : { [SESSION_COOKIE]: options.session };
+    const page = await visit({ url: `${portal.baseUrl}${options.link.slice(PUBLIC_URL.length)}`, cookies });
+    if (page.status !== 200) return page;
+    return visit({ url: `${portal.baseUrl}/account/email/link`, cookies, form: { csrf: fieldOf(page.body, "csrf"), token: fieldOf(page.body, "token") } });
+  }
+
+  test("the address is added after the mailed link is confirmed, and signs in to the same account", async () => {
+    const portal = await startPortal();
+    const { accountId, session } = await gitHubAccount(portal);
+    assert.match(await accountPage(portal, session), /href="\/account\/email\/add"/, "offered on the account page");
+    const asked = await askToAdd(portal, { session, email: "Ada@Example.com" });
+    assert.equal(asked.status, 200, asked.body);
+    assert.match(asked.body, /Check your email/);
+    const mail = mailAt(await portal.mailbox(), -1);
+    assert.equal(mail.headers.get("to"), "ada@example.com");
+    const link = linkIn(mail, `${PUBLIC_URL}/account/email/link?token=`);
+    assert.match(link, /token=[A-Za-z0-9_-]{43}$/);
+    assert.equal((await signIn(portal, { email: "ada@example.com", password: PASSWORD })).status, 401, "nothing signs in before the link is used");
+
+    const done = await confirmIn(portal, { link, session });
+    assert.equal(done.status, 303, done.body);
+    const page = await accountPage(portal, session);
+    assert.match(page, /<span class="method-name">Email and password<\/span>/);
+    assert.ok(page.includes("a•••@example.com"));
+    assert.doesNotMatch(page, /href="\/account\/email\/add"/, "no longer offered once added");
+    assert.equal(accountOf(sessionOf(await signIn(portal, { email: "ada@example.com", password: PASSWORD }))), accountId, "the password signs in to the same account");
+  });
+
+  // Bound to the account that asked: otherwise someone could add a victim's address to their own
+  // account and wait for the victim to press the button in the mail.
+  const browserRows: readonly Readonly<{ name: string; opener: "same" | "another account" | "signed out"; status: number; added: boolean }>[] = [
+    { name: "the account that asked (control)", opener: "same", status: 303, added: true },
+    { name: "another account", opener: "another account", status: 403, added: false },
+    { name: "a signed-out browser", opener: "signed out", status: 401, added: false },
+  ];
+  for (const row of browserRows) {
+    test(`the mailed link opened by ${row.name} → ${String(row.status)}`, async () => {
+      const portal = await startPortal();
+      const asker = await gitHubAccount(portal, "7");
+      const other = await gitHubAccount(portal, "8");
+      await askToAdd(portal, { session: asker.session, email: "ada@example.com" });
+      const link = linkIn(mailAt(await portal.mailbox(), -1), `${PUBLIC_URL}/account/email/link?token=`);
+      const session = row.opener === "same" ? asker.session : row.opener === "another account" ? other.session : null;
+      const answer = await confirmIn(portal, { link, session });
+      assert.equal(answer.status, row.status, answer.body);
+      const page = await accountPage(portal, asker.session);
+      assert.equal(/<span class="method-name">Email and password<\/span>/.test(page), row.added);
+      if (!row.added) assert.equal((await confirmIn(portal, { link, session: asker.session })).status, 303, "the link still works for the account that asked");
+    });
+  }
+
+  test("an address that already has an account gets the same answer on the page, a notice in the mail, and is never merged", async () => {
+    const portal = await startPortal();
+    const owner = await signedUp(portal, "ada@example.com");
+    const { session } = await gitHubAccount(portal);
+    const asked = await askToAdd(portal, { session, email: "ada@example.com" });
+    assert.equal(asked.status, 200);
+    assert.match(asked.body, /Check your email/, "the same answer as for a free address");
+    const notice = mailAt(await portal.mailbox(), -1);
+    assert.match(notice.text, /already signs in to a different Sasha Slides account/);
+    assert.match(notice.text, /Merging two accounts is not supported yet/);
+    assert.ok(!notice.text.includes("/account/email/link?token="), "no link to press");
+    assert.doesNotMatch(await accountPage(portal, session), /<span class="method-name">Email and password<\/span>/);
+    assert.equal(accountOf(sessionOf(await signIn(portal, { email: "ada@example.com", password: PASSWORD }))), accountOf(owner));
+  });
+
+  test("the link is single use and opening it alone changes nothing", async () => {
+    const portal = await startPortal();
+    const { session } = await gitHubAccount(portal);
+    await askToAdd(portal, { session, email: "ada@example.com" });
+    const link = linkIn(mailAt(await portal.mailbox(), -1), `${PUBLIC_URL}/account/email/link?token=`);
+    await visit({ url: `${portal.baseUrl}${link.slice(PUBLIC_URL.length)}`, cookies: { [SESSION_COOKIE]: session } });
+    assert.doesNotMatch(await accountPage(portal, session), /<span class="method-name">Email and password<\/span>/, "a GET, as a mail scanner sends, adds nothing");
+    assert.equal((await confirmIn(portal, { link, session })).status, 303);
+    assert.equal((await confirmIn(portal, { link, session })).status, 400, "used up");
+  });
+
+  // Parametric over the age of the sign-in behind the session.
+  const freshnessRows: readonly Readonly<{ ageMinutes: number; status: number }>[] = [
+    { ageMinutes: 9, status: 200 },
+    { ageMinutes: 11, status: 403 },
+  ];
+  for (const row of freshnessRows) {
+    test(`asking ${String(row.ageMinutes)} minutes after signing in → ${String(row.status)}`, async () => {
+      const portal = await startPortal();
+      const { session } = await gitHubAccount(portal);
+      const form = await visit({ url: `${portal.baseUrl}/account/email/add`, cookies: { [SESSION_COOKIE]: session } });
+      portal.advanceClock(row.ageMinutes * MINUTE);
+      const reopened = await visit({ url: `${portal.baseUrl}/account/email/add`, cookies: { [SESSION_COOKIE]: session } });
+      assert.equal(reopened.status, row.status);
+      const posted = await visit({
+        url: `${portal.baseUrl}/account/email/add`,
+        cookies: { [SESSION_COOKIE]: session },
+        form: { csrf: fieldOf(form.body, "csrf"), email: "ada@example.com", password: PASSWORD },
+      });
+      assert.equal(posted.status, row.status, posted.body);
+      if (row.status === 403) assert.match(posted.body, /Please sign in again first/);
+      assert.equal((await portal.mailbox()).length, row.status === 200 ? 1 : 0, "mail only when allowed");
+    });
+  }
+
+  test("a cross-site post without the session's CSRF token mails nothing", async () => {
+    const portal = await startPortal();
+    const { session } = await gitHubAccount(portal);
+    const forged = await visit({ url: `${portal.baseUrl}/account/email/add`, cookies: { [SESSION_COOKIE]: session }, form: { email: "ada@example.com", password: PASSWORD } });
+    assert.equal(forged.status, 403);
+    assert.equal((await portal.mailbox()).length, 0);
   });
 });
 

@@ -53,7 +53,7 @@ async function startPortal(): Promise<Portal> {
   const network = fakeFetch({ routes: [github.route] });
   let counter = 0;
   const randomToken = (): string => `random-${String((counter += 1))}-${"x".repeat(32)}`;
-  const directory = inMemoryAccountDirectory({ randomToken });
+  const directory = inMemoryAccountDirectory({ randomToken, now });
   const warnings: string[] = [];
   const portal = createAccountPortal({
     publicUrl: PUBLIC_URL,
@@ -258,7 +258,8 @@ describe("create an account with a passkey, then sign in with it", () => {
     assert.ok(accountId !== null);
     assert.equal((await portal.directory.findPasskey({ credentialId: authenticator.credentialId }))?.accountId, accountId);
     const page = await send(portal, { browser, path: "/account" });
-    assert.match(page.body, /<li><span>Passkey<\/span><\/li>/);
+    assert.match(page.body, /<span class="method-name">Passkey<\/span>/);
+    assert.doesNotMatch(page.body, />Remove</, "its only sign-in cannot be removed");
     assert.match(page.body, /Reset my key and delete my data/);
   });
 
@@ -313,7 +314,9 @@ describe("add a passkey to an account that signed in another way", () => {
     assert.equal(sessionAccount(browser), githubAccount, "still the same session's account");
 
     const listed = await send(portal, { browser, path: "/account" });
-    assert.match(listed.body, /<li><span>GitHub<\/span><span class="hint">o•••@example.com<\/span><\/li>\s*<li><span>Passkey<\/span><\/li>/);
+    assert.match(listed.body, /<span class="method-name">GitHub<\/span><span class="hint">o•••@example.com<\/span>/);
+    // Listed by the name it was offered under in the passkey manager, and the day it was added.
+    assert.match(listed.body, /<span class="method-name">Passkey<\/span><span class="hint">Sasha Slides account \(2026-10-13\)<\/span><\/span><span class="method-side"><span>Added 13 October 2026<\/span>/);
     const next = await ceremonyOptions(portal, browser, "add", { csrf });
     assert.deepEqual(next.excludeCredentials, [{ type: "public-key", id: authenticator.credentialId }], "the authenticator is told it already has one");
 
@@ -322,10 +325,12 @@ describe("add a passkey to an account that signed in another way", () => {
     assert.equal(sessionAccount(elsewhere), githubAccount);
   });
 
-  const gates: readonly Readonly<{ name: string; signedIn: boolean; body: (csrf: string) => Record<string, unknown>; status: number }>[] = [
-    { name: "without a session", signedIn: false, body: () => ({}), status: 401 },
-    { name: "without the CSRF token", signedIn: true, body: () => ({}), status: 403 },
-    { name: "with a wrong CSRF token", signedIn: true, body: () => ({ csrf: "forged" }), status: 403 },
+  const gates: readonly Readonly<{ name: string; signedIn: boolean; ageMinutes: number; body: (csrf: string) => Record<string, unknown>; status: number }>[] = [
+    { name: "9 minutes after signing in (control)", signedIn: true, ageMinutes: 9, body: (csrf) => ({ csrf }), status: 200 },
+    { name: "without a session", signedIn: false, ageMinutes: 0, body: () => ({}), status: 401 },
+    { name: "without the CSRF token", signedIn: true, ageMinutes: 0, body: () => ({}), status: 403 },
+    { name: "with a wrong CSRF token", signedIn: true, ageMinutes: 0, body: () => ({ csrf: "forged" }), status: 403 },
+    { name: "11 minutes after signing in", signedIn: true, ageMinutes: 11, body: (csrf) => ({ csrf }), status: 403 },
   ];
   for (const gate of gates) {
     test(`asking to add one ${gate.name} → ${String(gate.status)}`, async () => {
@@ -336,9 +341,11 @@ describe("add a passkey to an account that signed in another way", () => {
         await signInWithGitHub(portal, browser);
         csrf = csrfOf((await send(portal, { browser, path: "/account" })).body);
       }
+      portal.advanceClock(gate.ageMinutes * 60 * 1000);
       const answer = await send(portal, { browser, path: "/account/passkey/add/options", json: gate.body(csrf) });
       assert.equal(answer.status, gate.status, answer.body);
-      assert.ok(!browser.has(PASSKEY_COOKIE), "no challenge issued");
+      assert.equal(browser.has(PASSKEY_COOKIE), gate.status === 200, "a challenge only when allowed");
+      if (gate.ageMinutes > 10) assert.match(answer.body, /sign in again/);
     });
   }
 

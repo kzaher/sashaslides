@@ -19,6 +19,12 @@
  *                                     remember the path in a 10-minute `sasha_return` cookie and
  *                                     send the browser to sign in -- after ANY sign-in method
  *                                     `/account` sends it back here
+ *   GET  /account/link/<provider>?token=…   signed in, with a sign-in from the last 10 minutes:
+ *                                     → 302 to the provider in LINK mode; its callback (the same
+ *                                     `/account/callback/<provider>`) attaches the identity to
+ *                                     this account instead of signing in
+ *   GET  /account/link-complete       the second half of a link (see "Linking" below)
+ *   POST /account/unlink              session + CSRF token + `link` id → remove one sign-in
  *   GET  /account/passkey.js          the passkey script (`passkey-browser/passkey.ts`)
  *   POST /account/passkey/<ceremony>/options   a fresh challenge, bound to this browser
  *   POST /account/passkey/<ceremony>/verify    check the authenticator's answer (`webauthn.ts`)
@@ -33,6 +39,8 @@
  *   GET|POST /account/email/verify    the mailed link → a confirm button → signed in
  *   GET|POST /account/email/forgot    form → mail a reset link
  *   GET|POST /account/email/reset     the mailed link → a new-password form → signed in
+ *   GET|POST /account/email/add       signed in: address + password → mail a link
+ *   GET|POST /account/email/link      the mailed link → a confirm button → the address is added
  *
  * Security choices, each against a named attack:
  *
@@ -81,6 +89,34 @@
  *    Adding a passkey also needs the session and its CSRF token, and the session must still
  *    be the one the challenge was issued to.
  *
+ * LINKING another sign-in to the signed-in account, against the attacks it adds:
+ *
+ *  - **A stolen or unattended session adding the thief's sign-in.** Adding or removing a
+ *    sign-in method needs a session from a sign-in in the last `LINK_FRESHNESS_MS` (10
+ *    minutes); the session cookie carries when its sign-in happened. Otherwise the page asks
+ *    to sign in again first.
+ *  - **A link started from another site.** The start link carries `HMAC(session secret,
+ *    session CSRF token)`, which a cross-site page cannot compute. It is a GET rather than a
+ *    form POST because the page's `form-action 'self'` would block a form's redirect on to
+ *    the provider.
+ *  - **Replay and cross-browser callbacks.** A link uses the sign-in machinery unchanged:
+ *    `state` + PKCE (+ nonce), the state cookie, single use, 10 minutes. The pending entry
+ *    also names the account and the session (its CSRF token) that started it.
+ *  - **Finishing in another session.** The callback does not attach anything itself: Apple's
+ *    callback is a cross-site POST, which never carries the Lax session cookie. It parks the
+ *    verified identity for 5 minutes under a random token, sets that token as a cookie on
+ *    `/account/link-complete`, and sends the browser there; that GET carries the session
+ *    cookie (top-level navigation), and the identity is attached only when the session is
+ *    still the one that started the link. One path for every provider.
+ *  - **Silent account merges.** An identity that already opens another account is refused
+ *    with a message saying merging is not supported (`account-directory.ts`).
+ *  - **Unverified addresses.** As at sign-in, only an address the provider verified is kept.
+ *  - **Locking oneself out.** The last sign-in method cannot be removed.
+ *
+ * Every link and unlink is logged through `warn` as an `account portal: audit:` line naming
+ * the account, the provider and the outcome, never a subject, an address or a token. (There is
+ * no per-account audit record to write it to yet.)
+ *
  * Pending sign-ins live in this process's memory for 10 minutes. A deployment with several
  * instances behind a load balancer would need sticky sessions or a shared store for them.
  *
@@ -93,13 +129,15 @@ import { assertNever } from "../google-auth";
 import {
   PASSKEY_PROVIDER,
   type AccountDirectory,
+  type IdentityLinkOutcome,
   type LinkedSignIn,
   type NewPasskey,
   type PasskeyLinkOutcome,
+  type UnlinkOutcome,
 } from "./account-directory";
 import type { AccountEraser, AccountId, EraseReport } from "./account-vault";
 import { clientAddress, type TrustedProxies } from "./client-address";
-import type { IdentityProvider, PendingSignIn, ResponseMode } from "./identity-providers";
+import type { IdentityProvider, PendingSignIn, ResponseMode, VerifiedIdentity } from "./identity-providers";
 import { asRecord, asString, parseJson } from "./json-values";
 import {
   EMAIL_LINK_LIFETIME_MS,
@@ -107,6 +145,7 @@ import {
   EMAIL_PROVIDER_DISPLAY_NAME,
   MAX_PASSWORD_LENGTH,
   MIN_PASSWORD_LENGTH,
+  type EmailLinkOutcome,
   type InputProblem,
   type LinkOutcome,
   type LinkPurpose,
@@ -168,6 +207,12 @@ export const PENDING_SIGNIN_LIFETIME_MS = 10 * 60 * 1000;
 export const PASSKEY_CHALLENGE_LIFETIME_MS = 5 * 60 * 1000;
 export const PASSKEY_SCRIPT_PATH = `${ACCOUNT_PATH}/passkey.js`;
 export const MIN_SESSION_SECRET_LENGTH = 32;
+/** Adding or removing a sign-in method needs a sign-in at most this long ago. */
+export const LINK_FRESHNESS_MS = 10 * 60 * 1000;
+export const LINK_COMPLETE_PATH = `${ACCOUNT_PATH}/link-complete`;
+/** The parked, verified identity of a link in progress (see "Linking" in the header). */
+export const LINK_COOKIE_NAME = "sasha_link";
+export const LINK_COMPLETION_LIFETIME_MS = 5 * 60 * 1000;
 export const GOOGLE_PERMISSIONS_URL = "https://myaccount.google.com/permissions";
 
 /** Where a provider sends the browser back to. Register exactly this with the provider. */
@@ -221,7 +266,8 @@ export function createAccountPortal(
   const passwordSignIn = options.passwordSignIn ?? null;
   const deckSessionStart = options.deckSessionStart ?? null;
   const providers = new Map(options.providers.map((provider) => [provider.name, provider]));
-  const pendingSignIns = new Map<string, Readonly<{ pending: PendingSignIn; expiresAtMs: number }>>();
+  const pendingSignIns = new Map<string, Readonly<{ pending: PendingProviderFlow; expiresAtMs: number }>>();
+  const pendingLinkCompletions = new Map<string, Readonly<{ pending: LinkCompletion; expiresAtMs: number }>>();
   const pendingPasskeys = new Map<string, Readonly<{ pending: PendingPasskey; expiresAtMs: number }>>();
   // "preferred": a PIN-less security key is still a phishing-proof possession factor.
   const relyingParty = relyingPartyFor({ publicUrl, requireUserVerification: false });
@@ -243,6 +289,15 @@ export function createAccountPortal(
       case "login":
         if (method !== "GET") return sendMethodNotAllowed({ response, allow: "GET" });
         return login(response, target.provider);
+      case "link":
+        if (method !== "GET") return sendMethodNotAllowed({ response, allow: "GET" });
+        return linkStart(request, response, target.provider);
+      case "link-complete":
+        if (method !== "GET") return sendMethodNotAllowed({ response, allow: "GET" });
+        return linkComplete(request, response);
+      case "unlink":
+        if (method !== "POST") return sendMethodNotAllowed({ response, allow: "POST" });
+        return unlink(request, response);
       case "callback":
         return callback({ request, response, providerName: target.provider, method });
       case "erase":
@@ -264,6 +319,14 @@ export function createAccountPortal(
         if (passwordSignIn === null) break;
         if (method !== "GET" && method !== "POST") return sendMethodNotAllowed({ response, allow: "GET, POST" });
         return emailRoute({ request, response, action: target.action, method, password: passwordSignIn.service });
+      case "email-add":
+        if (passwordSignIn === null) break;
+        if (method !== "GET" && method !== "POST") return sendMethodNotAllowed({ response, allow: "GET, POST" });
+        return emailAdd({ request, response, method, password: passwordSignIn.service });
+      case "email-link":
+        if (passwordSignIn === null) break;
+        if (method !== "GET" && method !== "POST") return sendMethodNotAllowed({ response, allow: "GET, POST" });
+        return emailLink({ request, response, method, password: passwordSignIn.service });
       case "deck-session":
         if (deckSessionStart === null) break;
         if (method !== "GET") return sendMethodNotAllowed({ response, allow: "GET" });
@@ -308,9 +371,245 @@ export function createAccountPortal(
     sendPage({
       response,
       status: 200,
-      html: signedInPage({ links: description.links, providers, csrf: session.csrf, scriptUrl: scriptUrlFor(relyingParty) }),
+      html: signedInPage({
+        links: description.links,
+        providers,
+        csrf: session.csrf,
+        scriptUrl: scriptUrlFor(relyingParty),
+        fresh: isFresh(session),
+        linkToken: linkStartToken(session),
+        emailEnabled: passwordSignIn !== null,
+      }),
       headers: passkeyHeaders,
     });
+  }
+
+  /** Whether the session's sign-in is recent enough to add or remove a sign-in method. */
+  function isFresh(session: Session): boolean {
+    return session.authenticatedAtMs > now().getTime() - LINK_FRESHNESS_MS;
+  }
+
+  /** The start link's token: only a page rendered for this session can carry it. */
+  function linkStartToken(session: Session): string {
+    return createHmac("sha256", sessionSecret).update(`link-start:${session.csrf}`).digest("base64url");
+  }
+
+  /** `account portal: audit: …`: account, provider and outcome; never a subject, address or token. */
+  function audit(entry: Readonly<{ accountId: AccountId; action: "link" | "unlink"; provider: string; outcome: string }>): void {
+    warn(`account portal: audit: account ${entry.accountId} ${entry.action} ${entry.provider}: ${entry.outcome}`);
+  }
+
+  /**
+   * `GET /account/link/<provider>?token=…`: a sign-in with the provider in LINK mode. Needs
+   * the session, its start token and a recent sign-in; then exactly the sign-in redirect,
+   * with the pending entry naming the account and the session it is for.
+   */
+  async function linkStart(request: IncomingMessage, response: ServerResponse, providerName: string): Promise<void> {
+    const session = sessions.read({ request, nowMs: now().getTime() });
+    if (session === null) return sendSessionEnded(response);
+    const token = new URLSearchParams(requestQuery(request)).get("token");
+    if (token === null || !constantTimeEqual(token, linkStartToken(session))) {
+      return sendPage({ response, status: 403, html: nothingChangedPage("This request did not come from your account page. Open the page again and retry.") });
+    }
+    if (!isFresh(session)) return sendPage({ response, status: 403, html: signInAgainPage() });
+    const provider = providers.get(providerName);
+    if (provider === undefined) {
+      sendPage({ response, status: 404, html: messagePage({ title: "Not found", message: "That sign-in option is not available." }) });
+      return;
+    }
+    await beginProviderFlow({ response, provider, purpose: { kind: "link", accountId: session.accountId, sessionCsrf: session.csrf } });
+  }
+
+  /**
+   * `GET /account/link-complete`: attaches the identity the callback parked, if this browser
+   * holds its cookie and is still signed in with the session that started the link.
+   */
+  async function linkComplete(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const token = cookieValues({ request, name: LINK_COOKIE_NAME })[0] ?? null;
+    const entry = token === null ? undefined : pendingLinkCompletions.get(token);
+    // Taken on first sight, like a pending sign-in, so a reload cannot attach it twice.
+    if (token !== null) pendingLinkCompletions.delete(token);
+    const clearLink = clearCookie({ name: LINK_COOKIE_NAME, path: LINK_COMPLETE_PATH, sameSite: "Lax" });
+    if (entry === undefined || entry.expiresAtMs <= now().getTime()) {
+      return sendPage({
+        response,
+        status: 400,
+        html: messagePage({
+          title: "Nothing was added",
+          message: "This request has expired, was already used, or was opened in a different browser.",
+          action: { href: ACCOUNT_PATH, label: "Back to your account" },
+        }),
+        cookies: [clearLink],
+      });
+    }
+    const { pending } = entry;
+    const session = sessions.read({ request, nowMs: now().getTime() });
+    if (session === null || session.accountId !== pending.accountId || !constantTimeEqual(session.csrf, pending.sessionCsrf)) {
+      audit({ accountId: pending.accountId, action: "link", provider: pending.identity.provider, outcome: "refused, the session changed" });
+      return sendPage({
+        response,
+        status: 403,
+        html: messagePage({
+          title: "Nothing was added",
+          message: "You are no longer signed in with the session that started this, so nothing was added. Sign in and try again.",
+          action: { href: ACCOUNT_PATH, label: "Back to the account page" },
+        }),
+        cookies: [clearLink],
+      });
+    }
+    const outcome = await directory.linkIdentity({ accountId: pending.accountId, ...pending.identity });
+    sendLinkOutcome({ response, accountId: pending.accountId, provider: pending.identity.provider, outcome, cookies: [clearLink] });
+  }
+
+  /** The answer to a finished link, for every kind of sign-in method. */
+  function sendLinkOutcome(
+    options: Readonly<{ response: ServerResponse; accountId: AccountId; provider: string; outcome: IdentityLinkOutcome; cookies: readonly string[] }>,
+  ): void {
+    const { response, accountId, provider, outcome, cookies } = options;
+    const name = linkLabel({ provider, providers });
+    audit({ accountId, action: "link", provider, outcome: outcome.kind });
+    const back = { href: ACCOUNT_PATH, label: "Back to your account" };
+    switch (outcome.kind) {
+      case "linked":
+        return sendRedirect({ response, status: 303, location: ACCOUNT_PATH, cookies });
+      case "already-linked-here":
+        return sendPage({ response, status: 200, html: messagePage({ title: "Already added", message: `This ${name} sign-in already signs in to your account.`, action: back }), cookies });
+      case "linked-to-another-account":
+        return sendPage({
+          response,
+          status: 409,
+          html: messagePage({
+            title: "This sign-in belongs to another account",
+            message:
+              `This ${name} sign-in already opens a different Sasha Slides account, so it was not added to this one. ` +
+              "Merging two accounts is not supported yet. To move it here, sign in with it, delete that account's data, then add it to this account.",
+            action: back,
+          }),
+          cookies,
+        });
+      case "provider-already-linked":
+        return sendPage({
+          response,
+          status: 409,
+          html: messagePage({ title: "Nothing was added", message: `Your account already has a ${name} sign-in. Remove it first to use a different one.`, action: back }),
+          cookies,
+        });
+      case "account-missing":
+        return sendPage({ response, status: 410, html: messagePage({ title: "Nothing was added", message: "This account no longer exists. Please sign in again.", action: back }), cookies });
+      default:
+        return assertNever(outcome);
+    }
+  }
+
+  /** `POST /account/unlink`: removes one sign-in method, never the last. */
+  async function unlink(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const form = await readVerifiedForm(request, response);
+    if (form === null) return;
+    if (!isFresh(form.session)) return sendPage({ response, status: 403, html: signInAgainPage() });
+    const outcome: UnlinkOutcome = await directory.unlink({ accountId: form.accountId, linkId: form.fields.get("link") ?? "" });
+    const back = { href: ACCOUNT_PATH, label: "Back to your account" };
+    switch (outcome.kind) {
+      case "unlinked":
+        audit({ accountId: form.accountId, action: "unlink", provider: outcome.provider, outcome: "unlinked" });
+        return sendRedirect({ response, status: 303, location: ACCOUNT_PATH, cookies: [] });
+      case "last-method":
+        return sendPage({
+          response,
+          status: 409,
+          html: messagePage({
+            title: "Nothing was removed",
+            message: "This is the only way to sign in to your account, so it cannot be removed. Add another sign-in method first.",
+            action: back,
+          }),
+        });
+      case "not-found":
+        return sendPage({ response, status: 404, html: messagePage({ title: "Nothing was removed", message: "That sign-in method is not on your account any more.", action: back }) });
+      case "account-missing":
+        return sendPage({ response, status: 410, html: messagePage({ title: "Nothing was removed", message: "This account no longer exists.", action: back }) });
+      default:
+        return assertNever(outcome);
+    }
+  }
+
+  /** `/account/email/add`: the form, then a mailed link (`password-sign-in.ts` `startLink`). */
+  async function emailAdd(
+    target: Readonly<{ request: IncomingMessage; response: ServerResponse; method: "GET" | "POST"; password: PasswordSignIn }>,
+  ): Promise<void> {
+    const { request, response, method, password } = target;
+    if (method === "GET") {
+      const session = sessions.read({ request, nowMs: now().getTime() });
+      if (session === null) return sendRedirect({ response, status: 303, location: ACCOUNT_PATH, cookies: [] });
+      if (!isFresh(session)) return sendPage({ response, status: 403, html: signInAgainPage() });
+      return sendPage({ response, status: 200, html: addEmailPage({ csrf: session.csrf, email: "", error: null }) });
+    }
+    const form = await readVerifiedForm(request, response);
+    if (form === null) return;
+    if (!isFresh(form.session)) return sendPage({ response, status: 403, html: signInAgainPage() });
+    const email = form.fields.get("email") ?? "";
+    const outcome = await password.startLink({ accountId: form.accountId, email, password: form.fields.get("password") ?? "", clientAddress: clientOf(request) });
+    switch (outcome.kind) {
+      case "accepted":
+        return sendPage({
+          response,
+          status: 200,
+          html: checkEmailPage({ message: "We sent a message to the address you entered. Open the link in it within 30 minutes, in this browser, to add it to your account." }),
+        });
+      case "invalid":
+        return sendPage({ response, status: 400, html: addEmailPage({ csrf: form.session.csrf, email, error: problemText(outcome.problem) }) });
+      case "throttled":
+        return sendThrottled({ response, retryAfterMs: outcome.retryAfterMs });
+      default:
+        return assertNever(outcome);
+    }
+  }
+
+  /** `/account/email/link`: the mailed link's page, a button, and the address added on POST. */
+  async function emailLink(
+    target: Readonly<{ request: IncomingMessage; response: ServerResponse; method: "GET" | "POST"; password: PasswordSignIn }>,
+  ): Promise<void> {
+    const { request, response, method, password } = target;
+    if (method === "GET") {
+      const linkToken = new URLSearchParams(requestQuery(request)).get("token") ?? "";
+      if (!password.isLinkLive({ purpose: "link", token: linkToken })) return sendPage({ response, status: 400, html: deadLinkPage("link") });
+      const session = sessions.read({ request, nowMs: now().getTime() });
+      if (session === null) {
+        return sendPage({
+          response,
+          status: 401,
+          html: messagePage({
+            title: "Sign in first",
+            message: "Sign in to the account you are adding this address to, then open the link in the message again. It works for 30 minutes.",
+            action: { href: ACCOUNT_PATH, label: "Sign in" },
+          }),
+        });
+      }
+      return sendPage({ response, status: 200, html: confirmAddressLinkPage({ csrf: session.csrf, linkToken }) });
+    }
+    const form = await readVerifiedForm(request, response);
+    if (form === null) return;
+    const outcome: EmailLinkOutcome = await password.confirmLink({ token: form.fields.get("token") ?? "", accountId: form.accountId });
+    switch (outcome.kind) {
+      case "invalid-link":
+        return sendPage({ response, status: 400, html: deadLinkPage("link") });
+      case "wrong-account":
+        return sendPage({
+          response,
+          status: 403,
+          html: messagePage({
+            title: "This link is for another account",
+            message: "Sign in to the account that asked to add this address, then open the link in the message again.",
+            action: { href: ACCOUNT_PATH, label: "Back to the account page" },
+          }),
+        });
+      case "linked":
+      case "already-linked-here":
+      case "linked-to-another-account":
+      case "provider-already-linked":
+      case "account-missing":
+        return sendLinkOutcome({ response, accountId: form.accountId, provider: EMAIL_PROVIDER, outcome, cookies: [] });
+      default:
+        return assertNever(outcome);
+    }
   }
 
   /** `/account/deck-session` (see the header): the deck session for whoever is signed in here. */
@@ -337,6 +636,14 @@ export function createAccountPortal(
       sendPage({ response, status: 404, html: messagePage({ title: "Not found", message: "That sign-in option is not available." }) });
       return;
     }
+    await beginProviderFlow({ response, provider, purpose: { kind: "sign-in" } });
+  }
+
+  /** Sends the browser to the provider, remembering the flow under its `state` and binding it to this browser. */
+  async function beginProviderFlow(
+    options: Readonly<{ response: ServerResponse; provider: IdentityProvider; purpose: FlowPurpose }>,
+  ): Promise<void> {
+    const { response, provider, purpose } = options;
     const begun = await provider.begin({ redirectUri: accountCallbackUrl({ publicUrl, provider: provider.name }) });
     if (begun.kind === "failed") {
       warn(`account portal: cannot start ${provider.name} sign-in: ${begun.reason}`);
@@ -347,7 +654,7 @@ export function createAccountPortal(
       });
       return;
     }
-    rememberPendingSignIn(begun.pending);
+    rememberPendingSignIn({ signIn: begun.pending, purpose });
     const scope = signInCookieScope(provider);
     sendRedirect({
       response,
@@ -365,8 +672,8 @@ export function createAccountPortal(
     });
   }
 
-  function rememberPendingSignIn(pending: PendingSignIn): void {
-    rememberBounded({ entries: pendingSignIns, key: pending.state, pending, nowMs: now().getTime(), lifetimeMs: PENDING_SIGNIN_LIFETIME_MS });
+  function rememberPendingSignIn(pending: PendingProviderFlow): void {
+    rememberBounded({ entries: pendingSignIns, key: pending.signIn.state, pending, nowMs: now().getTime(), lifetimeMs: PENDING_SIGNIN_LIFETIME_MS });
   }
 
   async function callback(
@@ -396,7 +703,7 @@ export function createAccountPortal(
       !boundStates.some((boundState) => constantTimeEqual(state, boundState)) ||
       entry === undefined ||
       entry.expiresAtMs <= now().getTime() ||
-      entry.pending.provider !== provider.name
+      entry.pending.signIn.provider !== provider.name
     ) {
       sendPage({
         response,
@@ -410,35 +717,55 @@ export function createAccountPortal(
       });
       return;
     }
+    const { purpose } = entry.pending;
     const outcome = await provider.complete({
-      pending: entry.pending,
+      pending: entry.pending.signIn,
       parameters,
       redirectUri: accountCallbackUrl({ publicUrl, provider: provider.name }),
     });
     if (outcome.kind === "failed") {
-      warn(`account portal: ${provider.name} sign-in failed: ${outcome.reason}`);
+      warn(`account portal: ${provider.name} ${purpose.kind} failed: ${outcome.reason}`);
       sendPage({
         response,
         status: 400,
         html: messagePage({
           title: "Sign-in did not complete",
-          message: `${provider.displayName} did not confirm who you are, so you are not signed in.`,
+          message: `${provider.displayName} did not confirm who you are, so ${purposeConsequence(purpose)}.`,
           action: { href: ACCOUNT_PATH, label: "Try again" },
         }),
         cookies: [clearSignIn],
       });
       return;
     }
-    const { identity } = outcome;
-    const accountId = await directory.findOrCreateByIdentity({
-      provider: identity.provider,
-      subject: identity.subject,
-      // Only an address the provider vouches for is kept: deck invitations become memberships by
-      // matching it (decks/deck-manager.ts `acceptInvitations`), so an unverified claim -- any
-      // tenant of a generic OpenID provider can put any address there -- would join decks shared
-      // with someone else's address.
-      email: identity.emailVerified ? identity.email : null,
-    });
+    const identity = keptIdentity(outcome.identity);
+    switch (purpose.kind) {
+      case "sign-in":
+        break;
+      case "link": {
+        // Parked, not attached: see "Finishing in another session" in the header.
+        const token = randomToken();
+        rememberBounded({
+          entries: pendingLinkCompletions,
+          key: token,
+          pending: { accountId: purpose.accountId, sessionCsrf: purpose.sessionCsrf, identity },
+          nowMs: now().getTime(),
+          lifetimeMs: LINK_COMPLETION_LIFETIME_MS,
+        });
+        sendRedirect({
+          response,
+          status: 303,
+          location: LINK_COMPLETE_PATH,
+          cookies: [
+            clearSignIn,
+            setCookie({ name: LINK_COOKIE_NAME, value: token, path: LINK_COMPLETE_PATH, maxAgeSeconds: LINK_COMPLETION_LIFETIME_MS / 1000, sameSite: "Lax" }),
+          ],
+        });
+        return;
+      }
+      default:
+        return assertNever(purpose);
+    }
+    const accountId = await directory.findOrCreateByIdentity(identity);
     sendRedirect({
       response,
       status: 303,
@@ -522,6 +849,10 @@ export function createAccountPortal(
       case "add": {
         const session = passkeySession({ request, response, body });
         if (session === null) return;
+        if (!isFresh(session)) {
+          sendJson({ response, status: 403, body: { message: SIGN_IN_AGAIN_MESSAGE }, cookies: [] });
+          return;
+        }
         const userHandle = randomBytes(PASSKEY_RANDOM_BYTES).toString("base64url");
         pending = { ceremony, challenge, accountId: session.accountId, userHandle };
         const excludeIds = await directory.passkeyIds({ accountId: session.accountId });
@@ -622,6 +953,7 @@ export function createAccountPortal(
       createdAtMs: now().getTime(),
     };
     const outcome = await linkRegisteredPasskey({ pending, passkey });
+    if (pending.ceremony === "add") audit({ accountId: pending.accountId, action: "link", provider: PASSKEY_PROVIDER, outcome: outcome.kind });
     switch (outcome.kind) {
       case "linked":
         break;
@@ -957,7 +1289,7 @@ export function createAccountPortal(
   async function readVerifiedForm(
     request: IncomingMessage,
     response: ServerResponse,
-  ): Promise<Readonly<{ accountId: AccountId; fields: URLSearchParams }> | null> {
+  ): Promise<Readonly<{ accountId: AccountId; session: Session; fields: URLSearchParams }> | null> {
     if (mediaTypeOf(request) !== "application/x-www-form-urlencoded") {
       sendPage({ response, status: 415, html: messagePage({ title: "Unsupported request", message: "This form must be sent by the account page." }) });
       return null;
@@ -969,15 +1301,7 @@ export function createAccountPortal(
     }
     const session = sessions.read({ request, nowMs: now().getTime() });
     if (session === null) {
-      sendPage({
-        response,
-        status: 401,
-        html: messagePage({
-          title: "Your session has ended",
-          message: "For your safety, sessions last 15 minutes. Sign in again to continue; nothing was changed.",
-          action: { href: ACCOUNT_PATH, label: "Sign in again" },
-        }),
-      });
+      sendSessionEnded(response);
       return null;
     }
     const fields = new URLSearchParams(body);
@@ -994,7 +1318,7 @@ export function createAccountPortal(
       });
       return null;
     }
-    return { accountId: session.accountId, fields };
+    return { accountId: session.accountId, session, fields };
   }
 
   return {
@@ -1038,8 +1362,27 @@ type Refuse = (refusal: Readonly<{ status: number; message: string; reason: stri
 
 type EmailAction = "signup" | "signin" | "verify" | "forgot" | "reset";
 
+/**
+ * A provider round trip in flight, keyed by its `state`: a sign-in, or a link that attaches
+ * the identity to `accountId`, started by the session whose CSRF token is `sessionCsrf`.
+ */
+type PendingProviderFlow = Readonly<{ signIn: PendingSignIn; purpose: FlowPurpose }>;
+
+type FlowPurpose = Readonly<{ kind: "sign-in" }> | Readonly<{ kind: "link"; accountId: AccountId; sessionCsrf: string }>;
+
+/** A link whose provider round trip verified: waiting for `/account/link-complete`. */
+type LinkCompletion = Readonly<{ accountId: AccountId; sessionCsrf: string; identity: KeptIdentity }>;
+
+/** What the directory is given for a verified identity: the address only when the provider vouches for it. */
+type KeptIdentity = Readonly<{ provider: string; subject: string; email: string | null }>;
+
 type PortalRoute =
   | Readonly<{ kind: "email"; action: EmailAction }>
+  | Readonly<{ kind: "email-add" }>
+  | Readonly<{ kind: "email-link" }>
+  | Readonly<{ kind: "link"; provider: string }>
+  | Readonly<{ kind: "link-complete" }>
+  | Readonly<{ kind: "unlink" }>
   | Readonly<{ kind: "home" }>
   | Readonly<{ kind: "login"; provider: string }>
   | Readonly<{ kind: "callback"; provider: string }>
@@ -1076,14 +1419,19 @@ function parseRoute(
   if (section === "passkey.js" && providerName === undefined) return { kind: "passkey-script" };
   if (section === "passkey") return parsePasskeyRoute({ ceremony: providerName, step: extra, rest });
   if (extra !== undefined) return { kind: "not-found" };
-  if (section === "email" && options.emailEnabled && providerName !== undefined && isEmailAction(providerName)) {
-    return { kind: "email", action: providerName };
+  if (section === "email" && options.emailEnabled && providerName !== undefined) {
+    if (providerName === "add") return { kind: "email-add" };
+    if (providerName === "link") return { kind: "email-link" };
+    if (isEmailAction(providerName)) return { kind: "email", action: providerName };
   }
-  if ((section === "login" || section === "callback") && providerName !== undefined && providerName !== "") {
+  if ((section === "login" || section === "callback" || section === "link") && providerName !== undefined && providerName !== "") {
+    if (section === "link") return { kind: "link", provider: providerName };
     return section === "login" ? { kind: "login", provider: providerName } : { kind: "callback", provider: providerName };
   }
   if (providerName !== undefined) return { kind: "not-found" };
   if (section === "erase") return { kind: "erase" };
+  if (section === "link-complete") return { kind: "link-complete" };
+  if (section === "unlink") return { kind: "unlink" };
   if (section === "deck-session") return { kind: "deck-session" };
   if (section === "logout") return { kind: "logout" };
   return { kind: "not-found" };
@@ -1136,6 +1484,28 @@ function requestQuery(request: IncomingMessage): string {
   const raw = request.url ?? "";
   const question = raw.indexOf("?");
   return question < 0 ? "" : raw.slice(question + 1);
+}
+
+/**
+ * Only an address the provider vouches for is kept: deck invitations become memberships by
+ * matching it (decks/deck-manager.ts `acceptInvitations`), so an unverified claim -- any tenant
+ * of a generic OpenID provider can put any address there -- would join decks shared with
+ * someone else's address. The same rule for a sign-in and for a link.
+ */
+function keptIdentity(identity: VerifiedIdentity): KeptIdentity {
+  return { provider: identity.provider, subject: identity.subject, email: identity.emailVerified ? identity.email : null };
+}
+
+/** The end of "… did not confirm who you are, so …". */
+function purposeConsequence(purpose: FlowPurpose): string {
+  switch (purpose.kind) {
+    case "sign-in":
+      return "you are not signed in";
+    case "link":
+      return "nothing was added to your account";
+    default:
+      return assertNever(purpose);
+  }
 }
 
 function callbackMethod(responseMode: ResponseMode): "GET" | "POST" {
@@ -1194,7 +1564,8 @@ function signInCookieScope(provider: IdentityProvider): Readonly<{ path: string;
 
 // ---------------------------------------------------------------- session cookie
 
-type Session = Readonly<{ accountId: AccountId; expiresAtMs: number; csrf: string }>;
+/** `authenticatedAtMs`: when the sign-in behind it happened, for `LINK_FRESHNESS_MS`. */
+type Session = Readonly<{ accountId: AccountId; expiresAtMs: number; csrf: string; authenticatedAtMs: number }>;
 
 type SessionCodec = Readonly<{
   issue(options: Readonly<{ accountId: AccountId; nowMs: number; csrf: string }>): string;
@@ -1205,7 +1576,8 @@ function sessionCodec(options: Readonly<{ secret: string }>): SessionCodec {
   const mac = (payload: string): string => createHmac("sha256", options.secret).update(payload).digest("base64url");
   return {
     issue: ({ accountId, nowMs, csrf }) => {
-      const payload = Buffer.from(JSON.stringify({ accountId, exp: nowMs + SESSION_LIFETIME_MS, csrf }), "utf-8").toString("base64url");
+      // Every session is issued by a sign-in, so its issue time is when the sign-in happened.
+      const payload = Buffer.from(JSON.stringify({ accountId, exp: nowMs + SESSION_LIFETIME_MS, csrf, auth: nowMs }), "utf-8").toString("base64url");
       return setCookie({
         name: SESSION_COOKIE_NAME,
         value: `${payload}.${mac(payload)}`,
@@ -1227,7 +1599,9 @@ function sessionCodec(options: Readonly<{ secret: string }>): SessionCodec {
       const expiresAtMs = claims?.exp;
       if (accountId === null || csrf === null || typeof expiresAtMs !== "number") return null;
       if (expiresAtMs <= nowMs) return null;
-      return { accountId, expiresAtMs, csrf };
+      // A cookie from before `auth` existed was issued at sign-in, one lifetime before it expires.
+      const authenticatedAtMs = typeof claims?.auth === "number" ? claims.auth : expiresAtMs - SESSION_LIFETIME_MS;
+      return { accountId, expiresAtMs, csrf, authenticatedAtMs };
     },
   };
 }
@@ -1368,8 +1742,8 @@ function readBodyUpTo(options: Readonly<{ request: IncomingMessage; maxBytes: nu
 // ---------------------------------------------------------------- responses
 
 const STYLE = `
-:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--panel:#f5f5f7;--link:#0066cc;--danger:#c4161c;--sans:"Helvetica Neue",Helvetica,Arial,system-ui,-apple-system,sans-serif}
-@media (prefers-color-scheme:dark){:root{--bg:#000;--fg:#f5f5f7;--muted:#a1a1a6;--line:#2c2c2e;--panel:#111113;--link:#2997ff;--danger:#ff453a;color-scheme:dark}}
+:root{--bg:#EEF1F6;--fg:#1C2333;--muted:#4B5468;--line:rgba(28,35,51,.12);--panel:rgba(255,255,255,.62);--panel-edge:rgba(255,255,255,.85);--link:#4338CA;--danger:#c4161c;--sans:"Manrope","Helvetica Neue",Helvetica,Arial,system-ui,-apple-system,sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#0E1220;--fg:#EEF1F8;--muted:#AEB6C9;--line:rgba(255,255,255,.12);--panel:rgba(36,46,72,.62);--panel-edge:rgba(255,255,255,.16);--link:#A5B4FC;--danger:#ff6961;color-scheme:dark}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased}
 a{color:var(--link);text-decoration:none}
@@ -1410,11 +1784,22 @@ label.field input{display:block;width:100%;margin-top:6px;padding:11px 12px;bord
 label.field+button,label.field~button{margin-top:22px}
 .error{color:var(--danger);font-weight:500}
 .alternatives{margin-top:20px;display:flex;flex-wrap:wrap;gap:8px 20px}
+ul.links li{align-items:center}
+.method{display:flex;flex-direction:column;min-width:0}
+.method-name{font-weight:500}
+.method-side{display:flex;align-items:center;gap:16px;color:var(--muted);font-size:15px}
+form.inline{display:inline;margin:0}
+.notice{margin-top:16px;padding:16px 18px;border-radius:14px;background:var(--panel);border:1px solid var(--panel-edge)}
+.notice p{margin:0 0 14px}
 `;
 
 /** A key, drawn in the text colour: passkeys belong to no company, so no logo. */
 const PASSKEY_MARK =
   '<svg class="mark" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 21 2M15.5 7.5l3 3M18 5l2 2"/></svg>';
+
+/** An envelope, drawn in the text colour like the passkey's key. */
+const EMAIL_MARK =
+  '<svg class="mark" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
 
 /** The CSP admits exactly this stylesheet by hash, so no `'unsafe-inline'` is needed. */
 const STYLE_HASH = `'sha256-${createHash("sha256").update(STYLE, "utf-8").digest("base64")}'`;
@@ -1669,6 +2054,8 @@ function startAgain(purpose: LinkPurpose): Readonly<{ href: string; label: strin
       return { href: `${ACCOUNT_PATH}/email/signup`, label: "Sign up again" };
     case "reset":
       return { href: `${ACCOUNT_PATH}/email/forgot`, label: "Ask for a new link" };
+    case "link":
+      return { href: `${ACCOUNT_PATH}/email/add`, label: "Ask for a new link" };
     default:
       return assertNever(purpose);
   }
@@ -1709,28 +2096,64 @@ function buttonClass(providerName: string): string {
 }
 
 function signedInPage(
-  options: Readonly<{ links: readonly LinkedSignIn[]; providers: ReadonlyMap<string, IdentityProvider>; csrf: string; scriptUrl: string }>,
+  options: Readonly<{
+    links: readonly LinkedSignIn[];
+    providers: ReadonlyMap<string, IdentityProvider>;
+    csrf: string;
+    scriptUrl: string;
+    /** A sign-in within `LINK_FRESHNESS_MS`: methods can be added and removed. */
+    fresh: boolean;
+    /** The `?token=` of the provider link-start URLs. */
+    linkToken: string;
+    emailEnabled: boolean;
+  }>,
 ): string {
-  const { links, providers, csrf } = options;
+  const { links, providers, csrf, fresh } = options;
+  const csrfField = `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">`;
+  const removable = fresh && links.length > 1;
   const items = links
     .map((link) => {
       const name = linkLabel({ provider: link.provider, providers });
-      const hint = link.emailHint === null ? "" : `<span class="hint">${escapeHtml(link.emailHint)}</span>`;
-      return `<li><span>${escapeHtml(name)}</span>${hint}</li>`;
+      const detail = linkDetail(link);
+      const remove = removable
+        ? `<form class="inline" method="post" action="${ACCOUNT_PATH}/unlink">${csrfField}<input type="hidden" name="link" value="${escapeHtml(link.linkId)}"><button type="submit" class="quiet" aria-label="Remove ${escapeHtml(name)}${detail === null ? "" : ` ${escapeHtml(detail)}`}">Remove</button></form>`
+        : "";
+      return `<li><span class="method"><span class="method-name">${escapeHtml(name)}</span>${detail === null ? "" : `<span class="hint">${escapeHtml(detail)}</span>`}</span><span class="method-side"><span>Added ${escapeHtml(formatDay(link.linkedAtMs))}</span>${remove}</span></li>`;
     })
     .join("\n");
-  const csrfField = `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">`;
+  const linkedProviders = new Set(links.map((link) => link.provider));
+  const addButtons = [...providers.values()]
+    .filter((provider) => !linkedProviders.has(provider.name))
+    .map(
+      (provider) =>
+        `<a class="${buttonClass(provider.name)}" href="${escapeHtml(`${ACCOUNT_PATH}/link/${encodeURIComponent(provider.name)}?token=${encodeURIComponent(options.linkToken)}`)}">${providerMark(provider.name)}Continue with ${escapeHtml(provider.displayName)}</a>`,
+    );
+  if (options.emailEnabled && !linkedProviders.has(EMAIL_PROVIDER)) {
+    addButtons.push(`<a class="button" href="${ACCOUNT_PATH}/email/add">${EMAIL_MARK}Add an email address and password</a>`);
+  }
+  const adding = fresh
+    ? `<h2>Add a sign-in method</h2>
+<p class="muted">Each one you add signs in to this same account.</p>
+${addButtons.length === 0 ? "" : `<nav class="providers" aria-label="Add a sign-in method">\n${addButtons.join("\n")}\n</nav>`}
+<div class="providers" data-passkeys data-csrf="${escapeHtml(csrf)}" hidden>
+<button type="button" class="button" data-passkey="add">${PASSKEY_MARK}Add a passkey</button>
+<p class="status" role="status" data-passkey-status hidden></p>
+</div>`
+    : `<div class="notice">
+<p>${escapeHtml(SIGN_IN_AGAIN_MESSAGE)}</p>
+<form method="post" action="${ACCOUNT_PATH}/logout">
+${csrfField}
+<button type="submit">Sign out and sign in again</button>
+</form>
+</div>`;
   return layout({
     title: "Your account",
     main: `<h1>Your Sasha Slides account</h1>
-<h2>Signed in with</h2>
+<h2>Sign-in methods</h2>
 <ul class="links">
 ${items}
 </ul>
-<div class="passkeys" data-passkeys data-csrf="${escapeHtml(csrf)}" hidden>
-<button type="button" class="button" data-passkey="add">${PASSKEY_MARK}Add a passkey</button>
-<p class="status" role="status" data-passkey-status hidden></p>
-</div>
+${adding}
 <h2>Delete your data</h2>
 <p>Everything Sasha Slides keeps about you — your sign-ins, your Google connection, and data kept to improve the service — is encrypted with a key that belongs to your account alone.</p>
 <p>Resetting that key makes all of it unreadable at once, including copies in backups. We also ask Google to remove Sasha Slides' access. Your slides stay in your own Google Drive.</p>
@@ -1744,6 +2167,73 @@ ${csrfField}
 <button type="submit" class="quiet">Sign out</button>
 </form>`,
     scriptUrl: options.scriptUrl,
+  });
+}
+
+/** The second line of a linked sign-in: its address hint, or a passkey's name. */
+function linkDetail(link: LinkedSignIn): string | null {
+  // The name the passkey was offered under (`creationOptions`), as the person's passkey manager shows it.
+  if (link.provider === PASSKEY_PROVIDER) return `Sasha Slides account (${new Date(link.linkedAtMs).toISOString().slice(0, 10)})`;
+  return link.emailHint;
+}
+
+const DAY_FORMAT = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
+/** `11 October 2026`: full words, one form for every reader. */
+function formatDay(timeMs: number): string {
+  return DAY_FORMAT.format(new Date(timeMs));
+}
+
+function addEmailPage(options: Readonly<{ csrf: string; email: string; error: string | null }>): string {
+  return layout({
+    title: "Add an email address",
+    main: `<h1>Add an email address and password</h1>
+<p class="muted">We will email you a link. Open it in this browser, while signed in, to add the address as a way to sign in to this account.</p>
+${errorLine(options.error)}<form method="post" action="${ACCOUNT_PATH}/email/add">
+<input type="hidden" name="csrf" value="${escapeHtml(options.csrf)}">
+${emailInput({ value: options.email, autocomplete: "username" })}
+${passwordInput({ autocomplete: "new-password" })}
+<p class="muted">At least ${String(MIN_PASSWORD_LENGTH)} characters.</p>
+<button type="submit">Email me a link</button>
+</form>
+<p class="alternatives"><a href="${ACCOUNT_PATH}">Back to your account</a></p>`,
+  });
+}
+
+function confirmAddressLinkPage(options: Readonly<{ csrf: string; linkToken: string }>): string {
+  return layout({
+    title: "Add this email address",
+    main: `<h1>Add this email address</h1>
+<p>Press the button to add this address and its password as a way to sign in to your Sasha Slides account.</p>
+<form method="post" action="${ACCOUNT_PATH}/email/link">
+<input type="hidden" name="csrf" value="${escapeHtml(options.csrf)}">
+<input type="hidden" name="token" value="${escapeHtml(options.linkToken)}">
+<button type="submit">Add to my account</button>
+</form>`,
+  });
+}
+
+/** Shown wherever adding or removing a sign-in method meets a session that is not fresh. */
+const SIGN_IN_AGAIN_MESSAGE =
+  `For your safety, adding or removing a sign-in method needs a sign-in from the last ${String(LINK_FRESHNESS_MS / 60_000)} minutes. Sign out, sign in again, then try again.`;
+
+function signInAgainPage(): string {
+  return messagePage({ title: "Please sign in again first", message: SIGN_IN_AGAIN_MESSAGE, action: { href: ACCOUNT_PATH, label: "Back to your account" } });
+}
+
+function nothingChangedPage(message: string): string {
+  return messagePage({ title: "Nothing was changed", message, action: { href: ACCOUNT_PATH, label: "Back to your account" } });
+}
+
+function sendSessionEnded(response: ServerResponse): void {
+  sendPage({
+    response,
+    status: 401,
+    html: messagePage({
+      title: "Your session has ended",
+      message: "For your safety, sessions last 15 minutes. Sign in again to continue; nothing was changed.",
+      action: { href: ACCOUNT_PATH, label: "Sign in again" },
+    }),
   });
 }
 
