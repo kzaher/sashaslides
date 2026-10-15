@@ -37,6 +37,7 @@ export function loadCommentBot(
     drive: googleBotDrive({ config: parsed.config, fetch, now, timeoutMs: BOT_DRIVE_TIMEOUT_MS }),
     store: options.store,
     address: parsed.config.address,
+    replyPrefix: parsed.config.replyPrefix,
     webhookUrl,
     now,
     setTimer: ({ delayMs, run }) => {

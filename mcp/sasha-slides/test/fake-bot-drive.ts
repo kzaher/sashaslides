@@ -45,8 +45,9 @@ export type FakeBotDrive = Readonly<{
   /** A deck the bot can see (shared with it). `canComment: false` is a Viewer share. */
   addDeck(options: Readonly<{ fileId: string; name: string; canComment?: boolean; mimeType?: string }>): void;
   /** Someone comments: a new thread, and a change on the bot's feed. */
-  addComment(options: Readonly<{ fileId: string; author: string; content: string; anchor?: string; quoted?: string }>): string;
-  addReply(options: Readonly<{ fileId: string; commentId: string; author: string; content: string }>): string;
+  /** `me` marks a comment written by the bot's own account (the stopgap where the bot runs as the user). */
+  addComment(options: Readonly<{ fileId: string; author: string; content: string; anchor?: string; quoted?: string; me?: boolean }>): string;
+  addReply(options: Readonly<{ fileId: string; commentId: string; author: string; content: string; me?: boolean }>): string;
   /** Someone deletes a reply (the bot's acknowledgement, say): Drive keeps it, marked deleted. */
   deleteReply(options: Readonly<{ commentId: string; replyId: string }>): void;
   /** An edit that is not a comment: just a change on the feed. */
@@ -209,13 +210,13 @@ export function createFakeBotDrive(options: Readonly<{ now: () => Date }>): Fake
     addDeck: ({ fileId, name, canComment, mimeType }) => {
       decks.set(fileId, { name, mimeType: mimeType ?? SLIDES_MIME_TYPE, canComment: canComment ?? true });
     },
-    addComment: ({ fileId, author, content, anchor, quoted }) => {
+    addComment: ({ fileId, author, content, anchor, quoted, me = false }) => {
       const id = `c${String(nextId++)}`;
       comments.set(id, {
         id,
         fileId,
         content,
-        author: { displayName: author, me: false },
+        author: { displayName: author, me },
         createdTime: iso(),
         modifiedTime: iso(),
         anchor: anchor ?? null,
@@ -225,10 +226,10 @@ export function createFakeBotDrive(options: Readonly<{ now: () => Date }>): Fake
       feed.push(fileId);
       return id;
     },
-    addReply: ({ commentId, author, content }) => {
+    addReply: ({ commentId, author, content, me = false }) => {
       const comment = comments.get(commentId);
       if (comment === undefined) throw new Error(`no comment ${commentId}`);
-      return pushReply({ comment, author: { displayName: author, me: false }, content });
+      return pushReply({ comment, author: { displayName: author, me }, content });
     },
     deleteReply: ({ commentId, replyId }) => {
       const comment = comments.get(commentId);

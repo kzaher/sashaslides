@@ -40,7 +40,7 @@ import { createFakeBotDrive, type FakeBotDrive } from "./fake-bot-drive.ts";
 const T0 = Date.parse("2026-10-14T09:00:00.000Z");
 const BOT = "sasha@sashaslides.com";
 const HOOK = "https://sashaslides.com/hooks/drive";
-const CONFIG: CommentBotConfig = { clientId: "client", clientSecret: "secret", refreshToken: "refresh", address: BOT };
+const CONFIG: CommentBotConfig = { clientId: "client", clientSecret: "secret", refreshToken: "refresh", address: BOT, replyPrefix: "" };
 const DECK = "deckAAAAAAAAAAAAAAAAAAAAAAAA";
 const OTHER_DECK = "deckBBBBBBBBBBBBBBBBBBBBBBBB";
 const ALICE = "google-sub-alice";
@@ -56,7 +56,9 @@ type Harness = Readonly<{
   push: (options?: Readonly<{ state?: string; token?: string; channelId?: string }>) => Promise<string>;
 }>;
 
-function harness(options: Readonly<{ store?: CommentBotStore; google?: FakeBotDrive; clock?: { ms: number } }> = {}): Harness {
+function harness(
+  options: Readonly<{ store?: CommentBotStore; google?: FakeBotDrive; clock?: { ms: number }; replyPrefix?: string }> = {},
+): Harness {
   const clock = options.clock ?? { ms: T0 };
   const now = (): Date => new Date(clock.ms);
   const google = options.google ?? createFakeBotDrive({ now });
@@ -77,6 +79,7 @@ function harness(options: Readonly<{ store?: CommentBotStore; google?: FakeBotDr
     drive: googleBotDrive({ config: CONFIG, fetch: google.fetch, now, timeoutMs: 1_000 }),
     store,
     address: BOT,
+    replyPrefix: options.replyPrefix ?? "",
     webhookUrl: HOOK,
     now,
     setTimer,
@@ -582,3 +585,43 @@ async function text(result: Promise<Awaited<ReturnType<Client["callTool"]>>>): P
   const first = Array.isArray(content) ? (content[0] as { type?: string; text?: string } | undefined) : undefined;
   return first?.text ?? "";
 }
+
+describe("running as the user's own account until a dedicated Sasha account exists", () => {
+  test("the user's own comment becomes a task; the bot's 'Sasha: ' lines never do, and every bot line carries the prefix", async () => {
+    const h = harness({ replyPrefix: "Sasha: " });
+    await watching(h);
+    // Written by the same Google account the bot runs as -- the stopgap the user asked for.
+    const commentId = h.google.addComment({ fileId: DECK, author: "Kruno", content: "make slide 2 calmer", me: true });
+    await h.push();
+    await h.advance(PUSH_DEBOUNCE_MS);
+    const [task] = await h.bot.pickUpTasks({ ownerSubject: ALICE });
+    assert.ok(task !== undefined, "the user's own comment is work, even though Drive says it is 'me'");
+    const acknowledgement = h.google.thread({ commentId })?.replies[0];
+    assert.ok(acknowledgement !== undefined && acknowledgement.content.startsWith("Sasha: ") && acknowledgement.content.endsWith("⏳"));
+
+    const replied = await h.bot.reply({ ownerSubject: ALICE, taskId: task.taskId, text: "Softened the colours." });
+    assert.equal(replied.kind, "replied");
+    assert.deepEqual(h.google.thread({ commentId })?.replies.map((reply) => reply.content), ["Sasha: Softened the colours."]);
+
+    // The bot's own line comes back on the next sync and must not become a task.
+    h.google.touch({ fileId: DECK });
+    await h.push();
+    await h.advance(PUSH_DEBOUNCE_MS);
+    assert.deepEqual(await h.bot.openTasks({ ownerSubject: ALICE }), []);
+
+    // The user replying in the same thread, as the same account, is work again.
+    h.google.addReply({ fileId: DECK, commentId, author: "Kruno", content: "and slide 3 too", me: true });
+    await h.push();
+    await h.advance(PUSH_DEBOUNCE_MS);
+    assert.deepEqual((await h.bot.openTasks({ ownerSubject: ALICE })).map((open) => open.text), ["and slide 3 too"]);
+  });
+
+  test("with a dedicated account (no prefix) every line by the bot's account is still skipped, as before", async () => {
+    const h = harness();
+    await watching(h);
+    h.google.addComment({ fileId: DECK, author: "Sasha", content: "an old bot note", me: true });
+    await h.push();
+    await h.advance(PUSH_DEBOUNCE_MS);
+    assert.deepEqual(await h.bot.openTasks({ ownerSubject: ALICE }), []);
+  });
+});

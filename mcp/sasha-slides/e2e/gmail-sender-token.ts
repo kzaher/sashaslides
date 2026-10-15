@@ -28,6 +28,10 @@
  *
  *   npx tsx mcp/sasha-slides/e2e/gmail-sender-token.ts .auth/comment-bot.json --comment-bot sasha@sashaslides.com --client .auth/google_oauth_mail.json
  *
+ * STOPGAP, until a dedicated Sasha account exists: sign in as YOUR OWN account and add
+ * `--reply-prefix "Sasha: "`. The bot then posts as you, starts every line with the prefix, and
+ * tells its lines from yours by it (comment-bot/bot-drive.ts `replyPrefix`).
+ *
  * The flow is authorization code + PKCE (S256) + state, written against `fetch` directly
  * so it needs no client library. Nothing secret is printed: the file is the only output.
  */
@@ -46,12 +50,13 @@ const CONSENT_TIMEOUT_MS = 10 * 60 * 1000;
 type Arguments = Readonly<{ outputPath: string; purpose: Purpose; port: number; clientPath: string }>;
 
 /** What the file is for: the mail sender (`--from`) or the comment bot (`--comment-bot`). */
-type Purpose = Readonly<{ kind: "mail-sender"; from: string }> | Readonly<{ kind: "comment-bot"; address: string }>;
+type Purpose = Readonly<{ kind: "mail-sender"; from: string }> | Readonly<{ kind: "comment-bot"; address: string; replyPrefix: string }>;
 
 function parseArguments(argv: readonly string[]): Arguments | string {
   const positional: string[] = [];
   let from: string | null = null;
   let botAddress: string | null = null;
+  let replyPrefix = "";
   let port = 8080;
   let clientPath = CLIENT_PATH;
   for (let index = 0; index < argv.length; index += 1) {
@@ -61,6 +66,9 @@ function parseArguments(argv: readonly string[]): Arguments | string {
       index += 1;
     } else if (argument === "--comment-bot") {
       botAddress = argv[index + 1] ?? null;
+      index += 1;
+    } else if (argument === "--reply-prefix") {
+      replyPrefix = argv[index + 1] ?? "";
       index += 1;
     } else if (argument === "--client") {
       clientPath = argv[index + 1] ?? "";
@@ -79,7 +87,7 @@ function parseArguments(argv: readonly string[]): Arguments | string {
   }
   if (!Number.isInteger(port) || port < 1 || port > 65535) return "--port must be an integer between 1 and 65535";
   if (clientPath === "") return "--client needs the path of a Desktop OAuth client JSON file";
-  const purpose: Purpose = from !== null ? { kind: "mail-sender", from } : { kind: "comment-bot", address: botAddress ?? "" };
+  const purpose: Purpose = from !== null ? { kind: "mail-sender", from } : { kind: "comment-bot", address: botAddress ?? "", replyPrefix };
   return { outputPath, purpose, port, clientPath };
 }
 
@@ -141,7 +149,7 @@ async function main(): Promise<number> {
   const document =
     purpose.kind === "mail-sender"
       ? `${JSON.stringify({ clientId, clientSecret, refreshToken, from: purpose.from }, null, 2)}\n`
-      : `${JSON.stringify({ clientId, clientSecret, refreshToken, address: purpose.address }, null, 2)}\n`;
+      : `${JSON.stringify({ clientId, clientSecret, refreshToken, address: purpose.address, ...(purpose.replyPrefix === "" ? {} : { replyPrefix: purpose.replyPrefix }) }, null, 2)}\n`;
   // Checked with the server's own parser, so a file that is written is a file that loads.
   const check =
     purpose.kind === "mail-sender"

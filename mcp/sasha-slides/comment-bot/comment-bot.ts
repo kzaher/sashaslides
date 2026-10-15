@@ -149,6 +149,11 @@ export function createCommentBot(
     drive: BotDrive;
     store: CommentBotStore;
     address: string;
+    /**
+     * Empty for a dedicated bot account. When the bot runs as a person's own account (the
+     * stopgap), every line it posts starts with this, and only lines that do are its own.
+     */
+    replyPrefix: string;
     /** `<public-url>/hooks/drive`: where Google pushes. */
     webhookUrl: string;
     now: () => Date;
@@ -158,7 +163,14 @@ export function createCommentBot(
     warn: (message: string) => void;
   }>,
 ): CommentBot {
-  const { drive, store, address, webhookUrl, now, setTimer, randomToken, warn } = options;
+  const { drive, store, address, replyPrefix, webhookUrl, now, setTimer, randomToken, warn } = options;
+  const signed = (text: string): string => `${replyPrefix}${text}`;
+  /**
+   * Whose line is it? With a dedicated account, Drive's `me` says so. Running as a person's own
+   * account, `me` is also true for everything THAT PERSON writes, so only the prefix marks the bot.
+   */
+  const isBotLine = (post: Readonly<{ author: Readonly<{ me: boolean }>; content: string }>): boolean =>
+    post.author.me && (replyPrefix === "" || post.content.trimStart().startsWith(replyPrefix.trim()));
   const watches = new Map<string, CommentWatch>();
   const tasks = new Map<string, CommentTask>();
   let tickTimer: Readonly<{ cancel(): void }> | null = null;
@@ -374,7 +386,7 @@ export function createCommentBot(
     ];
     for (const post of posts) {
       // The bot's own replies are answers, not work; an empty reply is a resolve or reopen.
-      if (post.deleted || post.author.me || post.content.trim() === "") continue;
+      if (post.deleted || isBotLine(post) || post.content.trim() === "") continue;
       const createdMs = Date.parse(post.createdTime);
       for (const watch of watchers) {
         if (!(createdMs >= watch.startedAtMs - CLOCK_SKEW_MS)) continue;
@@ -415,7 +427,7 @@ export function createCommentBot(
   async function postAcknowledgement(taskId: string): Promise<void> {
     const task = tasks.get(taskId);
     if (task === undefined || task.state !== "open" || task.acknowledgement.kind !== "not-posted") return;
-    const posted = await drive.createReply({ fileId: task.fileId, commentId: task.commentId, content: acknowledgementText(task.commentId) });
+    const posted = await drive.createReply({ fileId: task.fileId, commentId: task.commentId, content: signed(acknowledgementText(task.commentId)) });
     if (posted.kind === "failed") warn(`comment bot: could not acknowledge a comment (${posted.reason}); the answer will be a new reply`);
     // Re-read: the watch may have ended while the reply was posted.
     const latest = tasks.get(taskId);
@@ -554,7 +566,7 @@ export function createCommentBot(
       await acknowledging.get(taskId);
       const task = tasks.get(taskId);
       if (task === undefined) return { kind: "unknown-task" };
-      const posted = await postAnswer({ task, content });
+      const posted = await postAnswer({ task, content: signed(content) });
       if (posted.kind === "failed") return { kind: "drive-failed", reason: posted.reason };
       const answered: CommentTask = { ...task, state: "answered", botReplyId: posted.value };
       tasks.set(taskId, answered);

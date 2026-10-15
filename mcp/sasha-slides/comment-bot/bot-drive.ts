@@ -30,7 +30,13 @@ export const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 export const SLIDES_MIME_TYPE = "application/vnd.google-apps.presentation";
 export const BOT_DRIVE_TIMEOUT_MS = 10_000;
 
-export type CommentBotConfig = Readonly<{ clientId: string; clientSecret: string; refreshToken: string; address: string }>;
+/**
+ * `replyPrefix` is the STOPGAP for running the bot as a person's own Google account until a
+ * dedicated Sasha account exists (asked for 2026-10-15): every line the bot posts starts with it
+ * ("Sasha: "), and the bot then tells its own lines from that person's by the prefix instead of by
+ * authorship. Empty for a dedicated account.
+ */
+export type CommentBotConfig = Readonly<{ clientId: string; clientSecret: string; refreshToken: string; address: string; replyPrefix: string }>;
 
 export type CommentBotConfigParse =
   | Readonly<{ kind: "ok"; config: CommentBotConfig }>
@@ -94,7 +100,9 @@ export function parseCommentBotConfig(text: string): CommentBotConfigParse {
   if (refreshToken === null || refreshToken === "") return { kind: "error", message: "refreshToken must be a non-empty string" };
   const address = asString(root.address);
   if (address === null || !isMailboxAddress(address)) return { kind: "error", message: "address must be the bot account's email address" };
-  return { kind: "ok", config: { clientId, clientSecret, refreshToken, address } };
+  const replyPrefix = root.replyPrefix === undefined ? "" : asString(root.replyPrefix);
+  if (replyPrefix === null) return { kind: "error", message: "replyPrefix must be a string, e.g. \"Sasha: \"" };
+  return { kind: "ok", config: { clientId, clientSecret, refreshToken, address, replyPrefix } };
 }
 
 export function googleBotDrive(
@@ -267,7 +275,7 @@ export function googleBotDrive(
   };
 }
 
-const CONFIG_KEYS: readonly string[] = ["clientId", "clientSecret", "refreshToken", "address"];
+const CONFIG_KEYS: readonly string[] = ["clientId", "clientSecret", "refreshToken", "address", "replyPrefix"];
 /** Refresh this long before Google's stated expiry, so a token never dies mid-request. */
 const ACCESS_TOKEN_MARGIN_MS = 60 * 1000;
 
