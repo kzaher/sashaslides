@@ -10,4 +10,4 @@ export { parseClientMessage, parseDiscussionRequest, type ParsedClientMessage } 
 export { decideDiscussionRequest, discussionAuthorityFromLog, type DiscussionAuthorityState, type DiscussionDecision } from "./discussion-authority.ts";
 export { correctionsFor, type GuardDecision, type GuardSender } from "./protected-field-guard.ts";
 export { DEFAULT_RATE_LIMIT_POLICY, initialRateLimitState, takeToken, type RateLimitPolicy, type RateLimitState, type RateLimitVerdict } from "./rate-limit.ts";
-export { mergeDocumentUpdates } from "./document-updates.ts";
+export { isDocumentUpdate, mergeDocumentUpdates } from "./document-updates.ts";

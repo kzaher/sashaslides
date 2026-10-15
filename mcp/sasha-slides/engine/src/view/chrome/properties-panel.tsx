@@ -36,6 +36,7 @@ import { ChoiceField, ColourField, NumberField, PillChoice, Section, ToggleButto
 import { MAXIMUM_GRADIENT_STOPS, MINIMUM_GRADIENT_STOPS, withAddedStop, withLinearAngle, withRadialCentre, withStopColour, withStopOffset, withoutStop, type GradientFill } from "./gradient-stops.ts";
 import { Icon } from "./icons.tsx";
 import { LIST_GLYPH_PRESETS } from "./list-glyphs.ts";
+import { UNGROUP_HINT, selectionHoldsGroup } from "./menu-model.ts";
 import { handlePillGroupKey, rovingTabIndex } from "./pill-group.ts";
 import { fontSizeEvent, frameValues, leafElements, lockedExplanation, panelSubject, roundTo, sharedValue, subjectElements, textValues, type PanelSubject, type SharedValue } from "./properties-values.ts";
 
@@ -179,7 +180,7 @@ function ArrangeTab(properties: Readonly<{ state: EditorState; elements: readonl
       <Section title="Group">
         <div className={VIEW_CLASS.fieldRow}>
           <button type="button" className={TIDEPOOL_CLASS.secondaryPill} disabled={properties.elements.length < 2} onClick={arrange({ kind: "group" })}>Group</button>
-          <button type="button" className={TIDEPOOL_CLASS.secondaryPill} onClick={arrange({ kind: "ungroup" })}>Ungroup</button>
+          <button type="button" className={TIDEPOOL_CLASS.secondaryPill} disabled={!selectionHoldsGroup(properties.state)} title={selectionHoldsGroup(properties.state) ? undefined : UNGROUP_HINT} onClick={arrange({ kind: "ungroup" })}>Ungroup</button>
         </div>
       </Section>
     </>

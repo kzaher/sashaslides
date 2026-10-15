@@ -18,7 +18,14 @@
  * signed-in `caller`. The add-on's routes get none: Code.gs proves the PERSON with Google's
  * identity token (identity-token.ts, audience pinned in addon-identity.ts) and proves EDIT ACCESS
  * TO THE PRESENTATION with the binding secret only its editors can read; the server stores and
- * compares only the secret's SHA-256 (`DeckService.bindAddon`). Import tokens are single use.
+ * compares only the secret's SHA-256 (`DeckService.bindAddon`). Import tokens are single use. An
+ * add-on EXPORT is answered only to the account that started it: the binding secret proves the
+ * presentation, not the person (every editor of it can read the secret), so the identity token's
+ * Google subject is mapped to its account the way the handoff maps it and compared with the
+ * export's caller.
+ *
+ * AN UNREADABLE DECK (its saved snapshot does not open or decode) answers 503 `deckUnreadable`
+ * with the service's sentence, never a 404 or an import into a partial deck.
  */
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -166,6 +173,8 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
       case "notFound":
       case "notPermitted":
         return answerError({ response, status: 403, error: "notPermitted", message: "A deck could not be created." });
+      case "deckUnreadable":
+        return answerUnreadable({ response, message: created.message });
       default:
         return assertNever(created);
     }
@@ -183,6 +192,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     const targetKind = body.kind === "parsed" ? stringFieldOf(fieldOf(body.value, "target"), "kind") : null;
     if (targetKind !== "newPresentation" && targetKind !== "linkedPresentation") return answerError({ response, status: 400, error: "invalidRequest", message: "Say where to export: a new or the linked presentation." });
     const opened = await deckService.openDeck({ caller, deckId });
+    if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
     if (opened.kind !== "opened") return answerError({ response, status: 404, error: "notFound", message: "No such deck." });
     await using deck = opened.deck;
     if (!roleAllows({ role: deck.role(), permission: "exchangeWithGoogleSlides" })) return answerError({ response, status: 403, error: "notPermitted", message: "Only editors can export this deck." });
@@ -223,6 +233,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     const grant = exportAssets.get(request.token);
     if (grant === null || !grant.assetIds.has(request.assetId)) return answerError({ response, status: 404, error: "notFound", message: "No such picture." });
     const opened = await deckService.openDeck({ caller: grant.caller, deckId: grant.deckId });
+    if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
     if (opened.kind !== "opened") return answerError({ response, status: 404, error: "notFound", message: "No such picture." });
     await using deck = opened.deck;
     const asset = await deck.readAsset({ assetId: request.assetId });
@@ -263,6 +274,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
       return answerWithBody({ response, status: 200, body: answer });
     }
     const opened = await deckService.openDeck({ caller, deckId: boundDeckId });
+    if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
     if (opened.kind !== "opened") return answerError({ response, status: 403, error: "notPermitted", message: "This presentation's Sasha deck belongs to someone who has not shared it with you." });
     await using deck = opened.deck;
     if (!roleAllows({ role: deck.role(), permission: "editDocument" })) {
@@ -288,6 +300,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     if (stringFieldOf(presentation, "presentationId") !== ticket.presentationId) return answerError({ response, status: 400, error: "invalidRequest", message: "The presentation is not the one the handoff named." });
     const { caller } = ticket;
     const opened = ticket.replaceDeckId === null ? await deckService.createDeck({ caller, title: stringFieldOf(presentation, "title") ?? "Imported presentation" }) : await deckService.openDeck({ caller, deckId: ticket.replaceDeckId });
+    if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
     if (opened.kind !== "opened") return answerError({ response, status: opened.kind === "limitReached" ? 409 : 403, error: opened.kind === "limitReached" ? "limitReached" : "notPermitted", message: "The deck could not be opened for the import." });
     await using deck = opened.deck;
     const imported = await importIntoDeck({ presentationAnswer: presentation, deck, author: authorOf(caller), fetch: options.fetch, accessToken: null, idSeed: idSeedFrom(options.randomToken()), now });
@@ -305,6 +318,11 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     if (record === null || identityToken === null || bindingSecret === null) return null;
     const claims = await verifyAddon(identityToken);
     if (claims === null) return null;
+    const signedIn = await options.accounts.accountForGoogleIdentity({ subject: claims.subject, email: claims.email, emailVerified: claims.emailVerified });
+    if (signedIn.accountId !== record.caller.accountId) {
+      options.warn("google-slides: add-on export refused: the identity token belongs to a different account than the one that started the export");
+      return null;
+    }
     const boundDeckId = await deckService.findDeckByAddonBinding({ bindingSecretHash: sha256(bindingSecret) });
     return boundDeckId === record.deckId ? record : null;
   };
@@ -314,6 +332,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     const record = await authenticateAddonExport(request);
     if (record === null) return answerError({ response, status: 401, error: "addonIdentityRejected", message: "Sign in again: this export could not be verified." });
     const opened = await deckService.openDeck({ caller: record.caller, deckId: record.deckId });
+    if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
     if (opened.kind !== "opened") return answerError({ response, status: 404, error: "notFound", message: "No such deck." });
     await using deck = opened.deck;
     const snapshot = deck.snapshot();
@@ -421,6 +440,11 @@ function exportedLink(options: Readonly<{ previous: GoogleSlidesLink | null; pre
     lastExportedAt: options.now,
     importedRevisionId: same ? (options.previous?.importedRevisionId ?? null) : null,
   };
+}
+
+/** 503 `deckUnreadable`: the deck's saved snapshot does not open or decode, so it was refused. */
+function answerUnreadable(options: Readonly<{ response: ServerResponse; message: string }>): void {
+  answerError({ response: options.response, status: 503, error: "deckUnreadable", message: options.message });
 }
 
 function answerImportFailure(options: Readonly<{ response: ServerResponse; outcome: Exclude<ImportOutcome, Readonly<{ kind: "imported" }>> }>): void {

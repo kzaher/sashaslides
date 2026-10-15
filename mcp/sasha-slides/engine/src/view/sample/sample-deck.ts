@@ -128,7 +128,7 @@ export function sampleSlides(options: SampleDeckOptions): readonly SlideSnapshot
         texts: [
           ["Feature", "Status", "Notes"],
           ["Per-side borders", "Milestone 1", "Exported as composed shapes"],
-          ["Scripted transitions", "Milestone 1", "Run sandboxed once a person approved them; the runner is another site"],
+          ["Scripted transitions", "Milestone 1", "Run in an isolated frame on the editor's own site, once a person approved them"],
         ],
       }),
     ],

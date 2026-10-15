@@ -17,6 +17,10 @@
 //    with a lift shadow; anything over the slide is `glass-over-canvas`. The wash is drawn in the
 //    editor's own box (not the viewport), so two editors side by side each keep theirs.
 //  * MOTION ONLY UNDER `prefers-reduced-motion: no-preference`.
+//  * NOTICES STACK IN THE END CORNER, NOT OVER THE SLIDE. A column as wide as the side panel sits on
+//    the panel's bottom (bottom-right), placed in the editor's own box (`position: absolute`, so the
+//    add-on's smaller dialog keeps it inside its frame), newest nearest the corner, and scrolls past
+//    half the editor's height instead of climbing over the canvas.
 //  * CLASS NAMES ARE CONSTANTS (`VIEW_CLASS`), like the shared `TIDEPOOL_CLASS`, so a rename is a
 //    compile error, not a silently unstyled control.
 
@@ -212,6 +216,7 @@ html, body { margin: 0; block-size: 100%; }
   .${classes.workspace}[data-filmstrip="closed"] { grid-template-columns: minmax(0, 1fr) 250px; }
   .${classes.workspace}[data-side="closed"] { grid-template-columns: 150px minmax(0, 1fr); }
   .${classes.menuBar} { display: none; }
+  .${classes.notices} { inline-size: min(250px, 100% - 2 * var(--sasha-space-small)); }
 }
 @media (max-width: 1023px) {
   .${classes.workspace}, .${classes.workspace}[data-filmstrip="closed"], .${classes.workspace}[data-side="closed"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
@@ -344,7 +349,7 @@ html, body { margin: 0; block-size: 100%; }
 .${classes.messageActions} { margin-inline-start: auto; display: flex; gap: 2px; font-size: var(--sasha-font-size-caption); }
 .${classes.textArea} { inline-size: 100%; min-block-size: 72px; padding: var(--sasha-space-small); border: 1px solid var(--sasha-hairline); border-radius: var(--sasha-radius-control); background: var(--sasha-card-glass); color: var(--sasha-text); resize: vertical; }
 
-.${classes.notices} { position: fixed; inset-inline-start: var(--sasha-space-large); inset-block-end: var(--sasha-space-large); z-index: var(--sasha-layer-notice); display: flex; flex-direction: column-reverse; gap: var(--sasha-space-small); max-inline-size: min(420px, calc(100vw - 32px)); }
+.${classes.notices} { position: absolute; inset-inline-end: var(--sasha-space-small); inset-block-end: var(--sasha-space-small); z-index: var(--sasha-layer-notice); display: flex; flex-direction: column-reverse; gap: var(--sasha-space-small); inline-size: min(300px, 100% - 2 * var(--sasha-space-small)); max-block-size: min(50%, 420px); overflow-y: auto; overscroll-behavior: contain; }
 .${classes.noticeRow} { display: flex; align-items: center; gap: var(--sasha-space-small); }
 .${classes.noticeRow} > p { margin: 0; flex: 1; }
 

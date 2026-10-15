@@ -164,7 +164,12 @@ export type CloseReason =
   /** Too many connections to this deck or for this account: retry with backoff. */
   | "tooManyConnections"
   /** The server is restarting: reconnect with backoff. */
-  | "serverShuttingDown";
+  | "serverShuttingDown"
+  /**
+   * The deck's saved snapshot does not open or decode, so the server refuses to load it rather than
+   * serve (and later compact over) a partial deck; the file is kept for recovery. Retrying cannot help.
+   */
+  | "deckUnreadable";
 
 /** Application close codes (4000-4999 are reserved for applications by RFC 6455). Total over reasons. */
 export const CLOSE_CODE_BY_REASON: Readonly<Record<CloseReason, number>> = {
@@ -177,6 +182,7 @@ export const CLOSE_CODE_BY_REASON: Readonly<Record<CloseReason, number>> = {
   documentSchemaTooNew: 4011,
   tooManyConnections: 4012,
   serverShuttingDown: 4013,
+  deckUnreadable: 4014,
 };
 
 /** What the client does after each close reason. Total, so a new reason must decide. */
@@ -190,6 +196,7 @@ export const RECONNECT_AFTER_CLOSE: Readonly<Record<CloseReason, "refreshSession
   documentSchemaTooNew: "stop",
   tooManyConnections: "reconnectWithBackoff",
   serverShuttingDown: "reconnectWithBackoff",
+  deckUnreadable: "stop",
 };
 
 // --- timing and limits --------------------------------------------------------------------------
@@ -230,6 +237,12 @@ export const COLLABORATION_LIMITS = {
   maximumMarkingsPerThread: 50,
   maximumPointsPerMarking: 2_000,
   maximumThreadsPerDeck: 5_000,
+  /** A conversation far longer than any review needs; at 10,000 characters a message it is still under the deck's text budget per thread. */
+  maximumMessagesPerThread: 500,
+  /** UTF-8 bytes of every live message body in a deck: roughly 1,500 pages of prose, small enough to send to every client on open. */
+  maximumDiscussionBytesPerDeck: 5 * 1024 * 1024,
+  /** Fixing typos needs a handful; a hundred stops a loop rewriting one message forever (each edit is a log entry kept for good). */
+  maximumEditsPerMessage: 100,
   maximumMentionsPerMessage: 20,
   /** One uploaded image. */
   maximumAssetBytes: 25 * 1024 * 1024,
@@ -260,7 +273,7 @@ export type ConnectionState =
 
 export type OfflineReason = "networkLost" | "serverUnreachable" | "heartbeatMissed" | "rateLimited" | "tooManyConnections" | "serverRestarting";
 
-export type ClosedReason = "accessRevoked" | "deckNotFound" | "deckDeleted" | "signedOut" | "protocolVersionUnsupported" | "documentSchemaTooNew";
+export type ClosedReason = "accessRevoked" | "deckNotFound" | "deckDeleted" | "signedOut" | "protocolVersionUnsupported" | "documentSchemaTooNew" | "deckUnreadable";
 
 /** Everything the collaboration session tells the editor, as one value. */
 export type CollaborationStatus = Readonly<{

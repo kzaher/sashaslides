@@ -63,7 +63,7 @@ describe("the WebSocket protocol", () => {
 
   it("the client stops for good only where retrying cannot help", () => {
     const stops = (Object.keys(RECONNECT_AFTER_CLOSE) as readonly CloseReason[]).filter((reason) => RECONNECT_AFTER_CLOSE[reason] === "stop").sort();
-    assert.deepEqual(stops, ["accessRevoked", "deckDeleted", "deckNotFound", "documentSchemaTooNew", "protocolVersionUnsupported"]);
+    assert.deepEqual(stops, ["accessRevoked", "deckDeleted", "deckNotFound", "deckUnreadable", "documentSchemaTooNew", "protocolVersionUnsupported"]);
   });
 
   it("the sync endpoint lives under the session cookie's path, so the upgrade carries the cookie", () => {

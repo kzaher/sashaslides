@@ -155,6 +155,8 @@ const REJECTION_REASONS = keysOf<DiscussionRejectionReason>({
   duplicateId: true,
   invalidValue: true,
   notPermitted: true,
+  limitReached: true,
+  rateLimited: true,
 });
 const CORRECTION_KINDS = keysOf<ProtectedFieldCorrection["kind"]>({ approvalRevoked: true, scriptAuthorRestored: true, metaRestored: true });
 const APPROVAL_REVOCATION_REASONS = keysOf<ApprovalRevocationReason>({ approvedByAnotherPerson: true, fingerprintMismatch: true, notPermitted: true });

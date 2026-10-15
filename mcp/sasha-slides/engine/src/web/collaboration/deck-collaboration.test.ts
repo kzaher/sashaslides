@@ -267,6 +267,25 @@ describe("5. the discussion over the socket", () => {
     assert.match(harness.server.latest().address, /discussionAfter=3$/);
   });
 
+  it("a rateLimited or limitReached answer settles the request, and the next welcome does not send it again", async () => {
+    using harness = createCollaborationHarness({ random: () => 0 });
+    harness.server.latest().handshake();
+    const dropped = request("dq_TestDropped");
+    const full = request("dq_TestFullDck");
+    const droppedOutcome = harness.collaboration.discussionStore.submit(dropped);
+    const fullOutcome = harness.collaboration.discussionStore.submit(full);
+    harness.server.latest().sendMessage({ kind: "discussionOutcome", outcome: { kind: "rejected", requestId: dropped.requestId, reason: "rateLimited", message: "too many messages at once" } });
+    harness.server.latest().sendMessage({ kind: "discussionOutcome", outcome: { kind: "rejected", requestId: full.requestId, reason: "limitReached", message: "a thread holds at most 500 messages" } });
+    harness.server.flush();
+    assert.deepEqual(await droppedOutcome, { kind: "rejected", requestId: dropped.requestId, reason: "rateLimited", message: "too many messages at once" });
+    assert.deepEqual(await fullOutcome, { kind: "rejected", requestId: full.requestId, reason: "limitReached", message: "a thread holds at most 500 messages" });
+    assert.equal(harness.collaboration.connection.currentState().malformedFrames, 0);
+    harness.server.latest().close(CLOSE_CODE_BY_REASON.serverShuttingDown);
+    harness.scheduler.advanceBy(0);
+    harness.server.latest().handshake();
+    assert.deepEqual(harness.server.discussionRequests(), [dropped, full], "each sent once: the editor's notice offers to send it again");
+  });
+
   it("refuses waiting requests when the connection closes for good", async () => {
     using harness = createCollaborationHarness();
     harness.server.latest().handshake();

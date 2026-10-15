@@ -86,7 +86,11 @@ export function TopBarAccessory(properties: Readonly<{ deck: DeckClient; showAcc
       <button type="button" className={TIDEPOOL_CLASS.secondaryPill} onClick={() => setSharing(true)}>
         Share
       </button>
-      {properties.showAccount ? <a href="/account">Account</a> : null}
+      {properties.showAccount ? (
+        <a className={TIDEPOOL_CLASS.secondaryPill} href="/account">
+          Account
+        </a>
+      ) : null}
       {sharing
         ? createPortal(
             <div className={TIDEPOOL_CLASS.root}>

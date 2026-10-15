@@ -51,6 +51,7 @@ export const CLOSED_MESSAGE: Readonly<Record<ClosedReason, string>> = {
   signedOut: "You were signed out. Sign in again to keep editing.",
   protocolVersionUnsupported: "This editor is out of date. Reload the page to keep editing.",
   documentSchemaTooNew: "This deck was made with a newer version of Sasha Slides. Reload the page to edit it.",
+  deckUnreadable: "This deck's saved copy could not be read, so it was not opened. Nothing was changed; ask the server's operator to recover it.",
 };
 
 export const NEWER_SCHEMA_MESSAGE = "This deck was made with a newer version of Sasha Slides, so it opens read-only here.";

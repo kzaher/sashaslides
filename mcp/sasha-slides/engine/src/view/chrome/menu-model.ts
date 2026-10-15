@@ -25,6 +25,7 @@ import type { EditorEvent } from "../../contracts/editor-events.ts";
 import type { ContextMenu, EditorState, MenuName } from "../../contracts/editor-state.ts";
 import type { HostMenuItem } from "../../contracts/editor-system.ts";
 import type { ElementId } from "../../contracts/ids.ts";
+import { findElement } from "../canvas/canvas-geometry.ts";
 import { commentingDisabledReason, editingDisabledReason } from "./access.ts";
 
 export type MenuAction =
@@ -60,6 +61,7 @@ export function menuEntries(options: Readonly<{ menu: MenuName; state: EditorSta
   const { state } = options;
   const key = shortcutWriter(options.shortcuts);
   const elementsSelected = selectedElementIds(state).length > 0;
+  const groupSelected = selectionHoldsGroup(state);
   const addon = inAddonDialog(state);
   const editing = editingDisabledReason(state);
   const commenting = commentingDisabledReason(state);
@@ -136,7 +138,7 @@ export function menuEntries(options: Readonly<{ menu: MenuName; state: EditorSta
         item({ label: "Distribute vertically", event: arrange({ kind: "distribute", axis: "vertical" }), disabled: selectedElementIds(state).length < 3, hint: selectedElementIds(state).length < 3 ? "Select three or more" : null }),
         separator(),
         item({ label: "Group", event: arrange({ kind: "group" }), shortcut: key({ primary: true, key: "G" }), disabled: selectedElementIds(state).length < 2 }),
-        item({ label: "Ungroup", event: arrange({ kind: "ungroup" }), shortcut: key({ primary: true, shift: true, key: "G" }), disabled: !elementsSelected }),
+        item({ label: "Ungroup", event: arrange({ kind: "ungroup" }), shortcut: key({ primary: true, shift: true, key: "G" }), disabled: !groupSelected, hint: groupSelected ? null : UNGROUP_HINT }),
         separator(),
         item({ label: "Rotate clockwise 90 degrees", event: arrange({ kind: "rotate", degrees: 90 }), disabled: !elementsSelected }),
         item({ label: "Rotate counter-clockwise 90 degrees", event: arrange({ kind: "rotate", degrees: -90 }), disabled: !elementsSelected }),
@@ -172,7 +174,7 @@ export function contextMenuEntries(options: Readonly<{ menu: ContextMenu; state:
         item({ label: "Bring to front", event: arrange({ kind: "reorder", placement: "front" }), refusal: editing }),
         item({ label: "Send to back", event: arrange({ kind: "reorder", placement: "back" }), refusal: editing }),
         item({ label: "Group", event: arrange({ kind: "group" }), disabled: selectedElementIds(state).length < 2, refusal: editing }),
-        item({ label: "Ungroup", event: arrange({ kind: "ungroup" }), refusal: editing }),
+        item({ label: "Ungroup", event: arrange({ kind: "ungroup" }), disabled: !selectionHoldsGroup(state), hint: selectionHoldsGroup(state) ? null : UNGROUP_HINT, refusal: editing }),
         separator(),
         refused(commentItem({ state, shortcut: key({ primary: true, alt: true, key: "M" }) }), commenting),
       ];
@@ -235,6 +237,18 @@ export function selectedElementIds(state: EditorState): readonly ElementId[] {
       return assertNever(selection);
   }
 }
+
+/** Whether the selection holds at least one group: Ungroup has nothing to do on anything else. */
+export function selectionHoldsGroup(state: EditorState): boolean {
+  const selection = state.selection;
+  if (selection.kind !== "elements") return false;
+  const slide = state.document.slides.find((candidate) => candidate.id === selection.slideId);
+  if (slide === undefined) return false;
+  return selection.elementIds.some((id) => findElement(slide.elements, id)?.kind === "group");
+}
+
+/** Why Ungroup is unavailable, as its hint. */
+export const UNGROUP_HINT = "Select a group first";
 
 const INSERTABLE_SHAPES: readonly Readonly<{ label: string; preset: ShapePreset }>[] = [
   { label: "Rectangle", preset: "rectangle" },

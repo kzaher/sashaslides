@@ -58,7 +58,13 @@ export type DeckOpenOutcome =
   | Readonly<{ kind: "notFound" }>
   | Readonly<{ kind: "notPermitted" }>
   /** `COLLABORATION_LIMITS.maximumDecksPerAccount` reached (create only). */
-  | Readonly<{ kind: "limitReached"; message: string }>;
+  | Readonly<{ kind: "limitReached"; message: string }>
+  /**
+   * The deck's saved snapshot does not open or decode: it is refused rather than opened partially
+   * (decks/deck-storage.ts), and `message` is a sentence for the person. Routes answer 503
+   * `deckUnreadable`; sockets close `deckUnreadable` (4014).
+   */
+  | Readonly<{ kind: "deckUnreadable"; message: string }>;
 
 /** A lease on a deck's live room. `await using deck = ...`: disposing releases the lease. */
 export interface DeckHandle extends AsyncDisposable {

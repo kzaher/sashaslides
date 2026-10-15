@@ -437,8 +437,8 @@ function UnapprovedNotice(properties: Readonly<{ record: TransitionScriptRecord;
   return (
     <div className={`${TIDEPOOL_CLASS.card} ${VIEW_CLASS.fieldRow}`} role="note">
       <span style={{ flex: 1 }}>
-        <strong>Not approved yet.</strong> Written by {authorName(properties.record.author)}. Read the whole script below before approving it: until then, presenting plays a simple fade instead. It runs in a sandbox
-        on another site with no network.
+        <strong>Not approved yet.</strong> Written by {authorName(properties.record.author)}. Read the whole script below before approving it: until then, presenting plays a simple fade instead. It runs in an
+        isolated frame on this site with no network, and only approved scripts run.
       </span>
       <button type="button" className={TIDEPOOL_CLASS.primaryPill} onClick={properties.onApprove}>
         Approve

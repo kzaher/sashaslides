@@ -48,7 +48,9 @@ export function DeckListPage(properties: DeckListPageProperties): ReactElement {
         </a>
         <span className={WEB_CLASS.account}>
           {state.session?.email === null || state.session === null ? null : <span className={TIDEPOOL_CLASS.muted}>{state.session.email}</span>}
-          <a href="/account">Account</a>
+          <a className={TIDEPOOL_CLASS.secondaryPill} href="/account">
+            Account
+          </a>
         </span>
       </header>
       <main className={WEB_CLASS.main}>

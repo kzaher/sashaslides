@@ -13,6 +13,14 @@
  *  - INVITATIONS BECOME MEMBERSHIPS when an account with that address signs in
  *    (`acceptInvitations`, called by the session start, the add-on's identity and the session
  *    endpoint). An address that already belongs to an account is added at once.
+ *  - A ROLE READ BEFORE AN AWAIT IS READ AGAIN AFTER IT. Opening a connection or reverting awaits
+ *    the room's load; an owner may lower the caller's role or remove them meanwhile, and that change
+ *    reached no socket because this one was not registered yet. So the role is re-read once the
+ *    connection is registered (from then on `pushAccess` reaches it) and applied, or the
+ *    connection closed `accessRevoked`; a revert checks its permission again after the load.
+ *  - INVITATION ADDRESSES ARE HASHED WITH A SERVER KEY (deck-identity.ts `invitationEmailHasher`).
+ *    Records from before the key carry the old unkeyed hash: acceptance matches both forms, and
+ *    every change to a record rewrites its pending invitations in the keyed form.
  *  - LIMITS ARE CHECKED HERE (COLLABORATION_LIMITS): decks per account, members per deck,
  *    invitations per account per day (counted in memory: a restart forgives the day), assets per
  *    deck, connections per deck and per account.
@@ -27,9 +35,9 @@ import type { AssetId, CommandId, DeckId, PersonId } from "../engine/src/contrac
 import type { RoomConnection, RoomConnectionPort } from "../engine/src/server/index.ts";
 import type { AccountId } from "../http/account-vault";
 import type { DeckAccounts, DeckPeople } from "./deck-accounts";
-import { emailHash, isEmailAddress, newDeckId, normaliseEmail, personIdFor } from "./deck-identity";
+import { isEmailAddress, newDeckId, normaliseEmail, personIdFor, type InvitationEmailHasher } from "./deck-identity";
 import { roleOf, type DeckRecord, type InvitationRecord } from "./deck-records";
-import type { DeckLease, DeckRegistry } from "./deck-registry";
+import type { DeckLease, DeckRegistry, RoomRefusal } from "./deck-registry";
 import type { DeckStorage, StoredAsset } from "./deck-storage";
 
 /** What an operation answers when it did not do the thing. */
@@ -38,7 +46,9 @@ export type Refusal =
   | Readonly<{ kind: "notPermitted" }>
   | Readonly<{ kind: "limitReached"; message: string }>
   | Readonly<{ kind: "invalidRequest"; message: string }>
-  | Readonly<{ kind: "tooLarge"; message: string }>;
+  | Readonly<{ kind: "tooLarge"; message: string }>
+  /** The deck's saved snapshot does not open or decode; it is refused, never loaded partially (deck-storage.ts). */
+  | Readonly<{ kind: "deckUnreadable"; message: string }>;
 
 export type Outcome<TValue> = Readonly<{ kind: "ok"; value: TValue }> | Refusal;
 
@@ -79,9 +89,11 @@ export function createDeckManager(
     people: DeckPeople;
     now: () => number;
     random: (size: number) => Uint8Array;
+    /** Keyed with a server secret at the composition root (deck-stack.ts). */
+    invitationEmails: InvitationEmailHasher;
   }>,
 ): DeckManager {
-  const { registry, storage, accounts, people, now } = options;
+  const { registry, storage, accounts, people, now, invitationEmails } = options;
   const invitationsSent = new Map<AccountId, number[]>();
   const connectingByAccount = new Map<AccountId, number>();
   const connectingByDeck = new Map<DeckId, number>();
@@ -150,8 +162,20 @@ export function createDeckManager(
     }
   };
 
+  /** Pending invitations in the keyed form; the same record when they already are (see the header). */
+  const withKeyedInvitations = (record: DeckRecord): DeckRecord => {
+    if (record.invitations.every((invitation) => invitation.emailHash === invitationEmails.hash(invitation.email))) return record;
+    return { ...record, invitations: record.invitations.map((invitation) => ({ ...invitation, emailHash: invitationEmails.hash(invitation.email) })) };
+  };
+
   const changeRecord = async (deckId: DeckId, change: (record: DeckRecord) => DeckRecord): Promise<DeckRecord | null> => {
-    const next = await registry.updateRecord({ deckId, change });
+    const next = await registry.updateRecord({
+      deckId,
+      change: (current) => {
+        const changed = change(current);
+        return changed === current ? current : withKeyedInvitations(changed);
+      },
+    });
     if (next !== null) pushAccess(next);
     return next;
   };
@@ -249,7 +273,7 @@ export function createDeckManager(
       const outcome: InviteBody["outcome"] = invitee === null ? "invited" : "added";
       const next = await changeRecord(deckId, (record) => {
         if (invitee !== null) return { ...record, members: [...record.members, { accountId: invitee, role, addedAt: now() }] };
-        const hash = emailHash(email);
+        const hash = invitationEmails.hash(email);
         const invitation: InvitationRecord = {
           invitationId: `iv_${Buffer.from(options.random(12)).toString("hex")}`,
           emailHash: hash,
@@ -258,7 +282,7 @@ export function createDeckManager(
           invitedAt: now(),
           invitedBy: accountId,
         };
-        return { ...record, invitations: [...record.invitations.filter((existing) => existing.emailHash !== hash), invitation] };
+        return { ...record, invitations: [...record.invitations.filter((existing) => normaliseEmail(existing.email) !== normaliseEmail(email)), invitation] };
       });
       const after = await detailsAfter(accountId, next);
       return after.kind === "ok" ? { kind: "ok", value: { outcome, details: after.value } } : after;
@@ -292,7 +316,7 @@ export function createDeckManager(
       return detailsAfter(accountId, await changeRecord(deckId, (record) => ({ ...record, invitations: record.invitations.filter((invitation) => invitation.invitationId !== invitationId) })));
     },
     acceptInvitations: async ({ accountId }) => {
-      const hashes = new Set((await accounts.emailsOf({ accountId })).map(emailHash));
+      const hashes = new Set((await accounts.emailsOf({ accountId })).flatMap((email) => invitationEmails.acceptedHashes(email)));
       if (hashes.size === 0) return;
       for (const [deckId, entry] of Object.entries(storage.readIndex().decks)) {
         if (!entry.invitationEmailHashes.some((hash) => hashes.has(hash))) continue;
@@ -333,9 +357,13 @@ export function createDeckManager(
     revertAgentSession: async ({ accountId, deckId, agentSessionId }) => {
       const found = await permitted({ accountId, deckId, permission: "revertAgentEdits" });
       if (!("record" in found)) return found;
-      const lease = await registry.acquire({ deckId });
-      if (lease === null) return { kind: "notFound" };
+      const acquired = await registry.acquire({ deckId });
+      if (acquired.kind !== "acquired") return roomRefusal(acquired);
+      const { lease } = acquired;
       try {
+        // Read again after the load (see the header): the role may have been lowered meanwhile.
+        const still = await permitted({ accountId, deckId, permission: "revertAgentEdits" });
+        if (!("record" in still)) return still;
         return { kind: "ok", value: lease.deck.room.revertAgentSession({ agentSessionId }) };
       } finally {
         lease.release();
@@ -355,8 +383,27 @@ export function createDeckManager(
       const connecting = countConnecting({ accountId, deckId });
       try {
         const person = (await people.callerFor({ accountId })).person;
-        const connection = await registry.connect({ deckId, accountId, person, role: found.role, discussionAfter, port });
-        return connection === null ? { kind: "refused", reason: "deckNotFound" } : { kind: "connected", connection };
+        const connected = await registry.connect({ deckId, accountId, person, role: found.role, discussionAfter, port });
+        switch (connected.kind) {
+          case "connected":
+            break;
+          case "notFound":
+            return { kind: "refused", reason: "deckNotFound" };
+          case "unreadable":
+            return { kind: "refused", reason: "deckUnreadable" };
+          default:
+            return assertNever(connected);
+        }
+        // `found.role` was read before the awaits above; the connection is registered now, so any
+        // later change reaches it through `pushAccess`, and this read catches any earlier one.
+        const { connection } = connected;
+        const current = await access({ accountId, deckId });
+        if (current === null) {
+          connection.disconnect();
+          return { kind: "refused", reason: "accessRevoked" };
+        }
+        if (current.role !== connection.role()) connection.setRole(current.role);
+        return { kind: "connected", connection };
       } finally {
         connecting[Symbol.dispose]();
       }
@@ -399,6 +446,21 @@ export function memberPersonId(accountId: AccountId): PersonId {
   return personIdFor({ accountId });
 }
 
+/** A room that did not load, as the refusal an operation answers. */
+function roomRefusal(refusal: RoomRefusal): Refusal {
+  switch (refusal.kind) {
+    case "notFound":
+      return { kind: "notFound" };
+    case "unreadable":
+      return { kind: "deckUnreadable", message: DECK_UNREADABLE_MESSAGE };
+    default:
+      return assertNever(refusal);
+  }
+}
+
+/** What a person is told about an unreadable deck (the operator's warning names the file). */
+export const DECK_UNREADABLE_MESSAGE = "This deck's saved copy could not be read, so it was not opened. Nothing was changed; ask the server's operator to recover it.";
+
 const DAY_MILLISECONDS = 24 * 60 * 60 * 1000;
 /** SPEC.md 21.10: 512 assets per deck. */
 const ASSETS_PER_DECK = 512;
@@ -416,6 +478,8 @@ export function refusalStatus(refusal: Refusal): number {
       return 400;
     case "tooLarge":
       return 413;
+    case "deckUnreadable":
+      return 503;
     default:
       return assertNever(refusal);
   }

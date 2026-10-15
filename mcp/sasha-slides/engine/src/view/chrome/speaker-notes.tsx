@@ -81,9 +81,11 @@ export const Notices = memo(function Notices(): ReactElement | null {
   const notices = useEditorSelector((state) => state.notices, arrayItemsEqual);
   const gesture = useGestureContext();
   if (notices.length === 0) return null;
+  // Newest first: the column lays out from the bottom up (view-stylesheet.ts), so the newest notice
+  // sits nearest the corner and older ones scroll away above it.
   return (
     <div className={VIEW_CLASS.notices} role="region" aria-label="Notices" aria-live="polite">
-      {notices.map((notice) => (
+      {[...notices].reverse().map((notice) => (
         <NoticeCard key={notice.id} notice={notice} onAction={() => runNoticeAction({ notice, gesture })} onDismiss={() => gesture.system.dispatch({ kind: "noticeDismissed", noticeId: notice.id })} />
       ))}
     </div>
@@ -118,6 +120,7 @@ function runNoticeAction(options: Readonly<{ notice: Notice; gesture: ReturnType
       return;
     case "undoAgentEdits":
     case "retryUpload":
+    case "retryDiscussion":
     case "reviewTransitionScript":
       options.gesture.system.dispatch({ kind: "noticeActionChosen", noticeId: options.notice.id });
       return;
@@ -132,6 +135,8 @@ export function noticeActionLabel(action: NoticeAction): string {
       return `Undo ${action.agentName}'s edit`;
     case "retryUpload":
       return "Try again";
+    case "retryDiscussion":
+      return "Send again";
     case "reviewTransitionScript":
       return "Review it";
     case "openInNewTab":

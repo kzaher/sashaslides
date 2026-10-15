@@ -20,8 +20,16 @@
  *    over the old one; then the log is replaced by an empty one the same way. A crash between the
  *    two leaves the new snapshot and the old log, and applying a log record the snapshot already
  *    contains changes nothing (Yjs updates are idempotent), so the deck reloads identically.
- *  - A CORRUPT RECORD IS SKIPPED, NEVER FATAL: a line that does not parse, open or decode is
+ *  - A CORRUPT LOG RECORD IS SKIPPED, NEVER FATAL: a line that does not parse, open or decode is
  *    reported with the deck and its sequence, and loading carries on with the rest.
+ *  - AN UNREADABLE SNAPSHOT REFUSES THE DECK. A snapshot holds everything compacted out of the log,
+ *    so loading "the log alone" would serve a partial deck, and the next compaction would write that
+ *    partial deck over the snapshot and lose the rest for good. `loadDocument` answers
+ *    `snapshotUnreadable` instead (the room is never created, so nothing is ever compacted over
+ *    it), and the file is left exactly where it is for recovery.
+ *  - EVERY TEMPORARY FILE HAS ITS OWN RANDOM NAME (`<target>.<random>.tmp`), so two writes of the
+ *    same target at once (the same image uploaded twice, two profile saves) never share one: each
+ *    renames its own whole file into place, and the last rename wins.
  *  - THE INDEX FILE REFUSES TO LOAD RATHER THAN START EMPTY when it is unreadable, because the next
  *    write would forget every deck (the same rule as the key store).
  *
@@ -30,10 +38,12 @@
  */
 import { mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import type { DiscussionLogEntry } from "../engine/src/contracts/discussion.ts";
 import type { AssetMediaType } from "../engine/src/contracts/document.ts";
 import { parseAssetId, type AssetId, type DeckId } from "../engine/src/contracts/ids.ts";
+import { isDocumentUpdate } from "../engine/src/server/index.ts";
 import { parseDiscussionLogEntry } from "./deck-wire-values";
 import type { AccountId, AccountVault } from "../http/account-vault";
 import { EMPTY_DECK_INDEX, parseDeckIndex, parseDeckRecord, type DeckIndex, type DeckRecord } from "./deck-records";
@@ -47,7 +57,8 @@ export type DeckStorage = Readonly<{
   /** Null when the record is missing, does not open (the owner's key was reset) or does not parse. */
   readRecord(options: Readonly<{ deckId: DeckId; ownerAccountId: AccountId }>): Promise<DeckRecord | null>;
   writeRecord(record: DeckRecord): Promise<void>;
-  loadDocument(options: DeckLocation): Promise<StoredDocument>;
+  /** The stored document, or `snapshotUnreadable` when a snapshot exists but does not open or decode (see the header). */
+  loadDocument(options: DeckLocation): Promise<DocumentLoad>;
   /** Appends one record; resolves with what it added to the log (the caller keeps the running size). */
   appendDocument(options: DeckLocation & Readonly<{ sequence: number; update: Uint8Array }>): Promise<LogSize>;
   /** Replaces snapshot and log with `state` (see the header). */
@@ -72,6 +83,8 @@ export type StoredDocument = Readonly<{
   lastSequence: number;
   logSize: LogSize;
 }>;
+
+export type DocumentLoad = Readonly<{ kind: "loaded"; document: StoredDocument }> | Readonly<{ kind: "snapshotUnreadable"; message: string }>;
 
 /** How big `document.log` is, for the compaction thresholds. */
 export type LogSize = Readonly<{ records: number; bytes: number }>;
@@ -130,11 +143,14 @@ export function openFileDeckStorage(
         const [header, sealed] = snapshot.split("\n");
         const match = SNAPSHOT_HEADER.exec(header ?? "");
         const opened = match === null || sealed === undefined ? null : await openSealed(ownerAccountId, sealed.trim());
-        if (match === null || opened === null) warn(`deck ${deckId}: document.snapshot does not open; loading the log alone`);
-        else {
-          lastSequence = Number(match[1]);
-          updates.push(Buffer.from(opened, "base64url"));
+        const state = opened === null ? null : Buffer.from(opened, "base64url");
+        if (match === null || state === null || !isDocumentUpdate(state)) {
+          const message = `deck ${deckId}: document.snapshot does not open or decode; the deck is refused until it is recovered, and the file is kept as it is`;
+          warn(message);
+          return { kind: "snapshotUnreadable", message };
         }
+        lastSequence = Number(match[1]);
+        updates.push(state);
       }
       const log = await readIfExists(join(deckDirectory(deckId), "document.log"));
       let records = 0;
@@ -154,7 +170,7 @@ export function openFileDeckStorage(
         lastSequence = Math.max(lastSequence, parsed.sequence);
         updates.push(Buffer.from(opened, "base64url"));
       }
-      return { updates, lastSequence, logSize: { records, bytes: Buffer.byteLength(log ?? "", "utf-8") } };
+      return { kind: "loaded", document: { updates, lastSequence, logSize: { records, bytes: Buffer.byteLength(log ?? "", "utf-8") } } };
     },
     appendDocument: async ({ deckId, ownerAccountId, sequence, update }) => {
       await mkdir(deckDirectory(deckId), { recursive: true, mode: 0o700 });
@@ -273,7 +289,7 @@ export function memoryDeckStorage(): DeckStorage {
       const document = documentOf(deckId);
       const updates = [...(document.snapshot === null ? [] : [document.snapshot]), ...document.log.map((record) => record.update)];
       const lastSequence = Math.max(document.throughSequence, ...document.log.map((record) => record.sequence));
-      return Promise.resolve({ updates, lastSequence, logSize: logSize(deckId) });
+      return Promise.resolve({ kind: "loaded", document: { updates, lastSequence, logSize: logSize(deckId) } });
     },
     appendDocument: ({ deckId, sequence, update }) => {
       documentOf(deckId).log.push({ sequence, update });
@@ -385,17 +401,26 @@ async function appendDurably(options: Readonly<{ path: string; text: string }>):
   }
 }
 
-/** Temp file, fsync, rename over the target, fsync the directory: a crash leaves the old file or the new one. */
+/**
+ * Temp file, fsync, rename over the target, fsync the directory: a crash leaves the old file or the
+ * new one. The temporary name is unique per write (see the header); a failed write removes its own.
+ */
 async function writeAtomically(options: Readonly<{ path: string; text: string }>): Promise<void> {
-  const temporary = `${options.path}.tmp`;
-  const handle = await open(temporary, "w", 0o600);
+  const temporary = `${options.path}.${randomBytes(8).toString("hex")}.tmp`;
+  // "wx": never open another write's file; only a file this call created is removed on failure.
+  const handle = await open(temporary, "wx", 0o600);
   try {
-    await handle.write(options.text);
-    await handle.sync();
-  } finally {
-    await handle.close();
+    try {
+      await handle.write(options.text);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, options.path);
+  } catch (cause) {
+    await rm(temporary, { force: true });
+    throw cause;
   }
-  await rename(temporary, options.path);
   const directory = await open(join(options.path, ".."), "r");
   try {
     await directory.sync();

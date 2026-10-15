@@ -116,6 +116,8 @@ export type DeckApiErrorCode =
   | "googlePresentationNotFound"
   | "googleFailed"
   | "addonIdentityRejected"
+  /** 503: the deck's saved snapshot does not open or decode; it is refused, not loaded partially. */
+  | "deckUnreadable"
   | "serverError";
 
 /** The body of every non-2xx JSON answer. */

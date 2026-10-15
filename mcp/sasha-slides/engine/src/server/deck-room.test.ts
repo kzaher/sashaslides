@@ -14,6 +14,7 @@ import type {
   DeckId,
   DeckMember,
   DeckRole,
+  DiscussionOutcome,
   Person,
   ProtectedFieldCorrection,
   ServerMessage,
@@ -328,6 +329,38 @@ describe("rate limit", () => {
     assert.equal(client.closedWith(), null);
   });
 
+  test("a discussion request dropped by the rate is answered rateLimited, and the same request succeeds once the rate allows", async () => {
+    using setup = testRoom();
+    using client = connectFakeClient({ room: setup.room, person: ALICE, role: "editor" });
+    const heartbeat = JSON.stringify({ kind: "heartbeat" });
+    for (let index = 0; index < 150; index += 1) client.sendText(heartbeat);
+    const comment = JSON.stringify({
+      kind: "discussionRequest",
+      request: {
+        requestId: "dq_ratelimited01",
+        command: {
+          kind: "createThread",
+          threadId: "th_ratelimited01",
+          anchor: { slideId: "sl_ratelimited01", target: { kind: "slide" }, region: null, elementFrameAtCreation: null },
+          markings: [],
+          messageId: "ms_ratelimited01",
+          body: "Over the rate",
+          mentions: [],
+        },
+      },
+    });
+    client.sendText(comment);
+    const outcomes = (): readonly DiscussionOutcome[] => client.messages().flatMap((message) => (message.kind === "discussionOutcome" ? [message.outcome] : []));
+    await waitFor(() => outcomes().length === 1);
+    const [dropped] = outcomes();
+    assert.equal(dropped?.kind === "rejected" ? dropped.reason : dropped?.kind, "rateLimited");
+    setup.clock.set(setup.clock.now() + 10_000);
+    client.sendText(comment);
+    await waitFor(() => outcomes().length === 2);
+    assert.equal(outcomes()[1]?.kind, "applied", "the rate-limited answer was not remembered as the request's outcome");
+    assert.equal(client.closedWith(), null);
+  });
+
   test("a document update over the rate closes the connection instead of being dropped", () => {
     using setup = testRoom();
     using client = connectFakeClient({ room: setup.room, person: ALICE, role: "editor" });
@@ -484,4 +517,12 @@ function syncStepOne(): Uint8Array {
 
 function lengthPrefixed(bytes: Uint8Array): readonly number[] {
   return [bytes.length, ...bytes];
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) return;
+    await Promise.resolve();
+  }
+  throw new Error("the condition never held");
 }

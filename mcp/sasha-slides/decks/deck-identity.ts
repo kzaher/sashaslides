@@ -8,11 +8,24 @@
  *    "Collaborator"; the agent is always "Claude".
  *  - The PEER COLOUR is the first 8 hexadecimal characters of the person id modulo the theme's
  *    number of peer colours, so everyone sees the same colour for the same person.
- *  - DECK IDS are `dk_` + 22 random base-62 characters; INVITATION EMAILS are indexed by a
- *    labelled SHA-256 of the normalised address, so `index.json` names no address in the clear.
+ *  - DECK IDS are `dk_` + 22 random base-62 characters.
+ *  - INVITATION EMAILS are indexed by HMAC-SHA256 of the labelled, normalised address, keyed with a
+ *    key derived from the server's session secret (`invitationEmailHasher`, built in deck-stack.ts),
+ *    so `index.json` names no address in the clear AND a copy of it cannot be tested against a list
+ *    of addresses without the secret (a plain hash can: hash every candidate and compare).
+ *
+ *    MIGRATION. Index files and records written before the key hold the old unkeyed hash
+ *    (`legacyInvitationEmailHash`). Rewriting them all at startup would need every owner's data key
+ *    and a pass over every deck, so instead: acceptance matches BOTH forms (`acceptedHashes`), so no
+ *    pending invitation silently stops matching, and every change to a record rewrites its pending
+ *    invitations in the keyed form from the address the sealed record keeps (deck-manager.ts). An
+ *    untouched old deck keeps its old-form hashes until its first change or acceptance.
+ *
+ *    ROTATING SASHA_SESSION_SECRET changes the key: keyed hashes written under the old secret stop
+ *    matching at sign-in (the invitation still shows to the deck's sharers, who can invite again).
  *  - An AGENT SESSION is `as_` + the first 24 hexadecimal characters of SHA-256(MCP session id).
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { AGENT_DISPLAY_NAME, AGENT_PERSON_ID_PREFIX, PERSON_ID_DIGEST_LENGTH, PERSON_ID_HASH_LABEL, PERSON_ID_PREFIX } from "../engine/src/contracts/deck-access.ts";
 import type { Person } from "../engine/src/contracts/discussion.ts";
 import { parseDeckId, parsePersonId, type DeckId, type PersonId } from "../engine/src/contracts/ids.ts";
@@ -85,8 +98,26 @@ export function normaliseEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-/** What `index.json` stores for an invitation: never the address itself (SPEC.md 21.7). */
-export function emailHash(email: string): string {
+/** What `index.json` stores for an invitation: never the address itself (SPEC.md 21.7, see the header). */
+export type InvitationEmailHasher = Readonly<{
+  /** The keyed hash new invitations are stored under. */
+  hash(email: string): string;
+  /** Every stored form that means this address: the keyed hash and the old unkeyed one (see the header). */
+  acceptedHashes(email: string): readonly string[];
+}>;
+
+/** `secret` is the server's session secret; the HMAC key is derived from it under its own label. */
+export function invitationEmailHasher(options: Readonly<{ secret: string }>): InvitationEmailHasher {
+  const key = createHmac("sha256", options.secret).update(INVITATION_KEY_LABEL, "utf-8").digest();
+  const hash = (email: string): string => createHmac("sha256", key).update(`${EMAIL_HASH_LABEL}${normaliseEmail(email)}`, "utf-8").digest("hex");
+  return {
+    hash,
+    acceptedHashes: (email) => [hash(email), legacyInvitationEmailHash(email)],
+  };
+}
+
+/** The unkeyed form written before `invitationEmailHasher`; only ever matched, never written. */
+export function legacyInvitationEmailHash(email: string): string {
   return createHash("sha256").update(`${EMAIL_HASH_LABEL}${normaliseEmail(email)}`, "utf-8").digest("hex");
 }
 
@@ -98,6 +129,7 @@ export function isEmailAddress(candidate: string): boolean {
 const DECK_ID_RANDOM_CHARACTERS = 22;
 const BASE62_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const EMAIL_HASH_LABEL = "sasha-invitation-email.v1:";
+const INVITATION_KEY_LABEL = "sasha-invitation-email-key.v1";
 
 function personDigest(accountId: AccountId): string {
   return createHash("sha256").update(`${PERSON_ID_HASH_LABEL}${accountId}`, "utf-8").digest("hex").slice(0, PERSON_ID_DIGEST_LENGTH);

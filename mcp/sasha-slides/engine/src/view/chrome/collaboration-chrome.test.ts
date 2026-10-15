@@ -170,7 +170,7 @@ describe("mentions (acceptance 12)", () => {
   });
 
   it("a message highlights its mentions, and only the recorded ones", () => {
-    const message: CommentMessage = { id: ids.next("message"), author: claude, body: "@Grace Hopper and @Greg House, see this", mentions: [grace.id], createdAt: 1, editedAt: null };
+    const message: CommentMessage = { id: ids.next("message"), author: claude, body: "@Grace Hopper and @Greg House, see this", mentions: [grace.id], createdAt: 1, editedAt: null, editCount: 0 };
     const markup = renderToStaticMarkup(createElement(MessageBody, { message, people: members }));
     assert.match(markup, new RegExp(`<span class="${VIEW_CLASS.mention}" data-mention="person_grace"[^>]*>@Grace Hopper</span>`));
     assert.doesNotMatch(markup, /data-mention="person_greg"/);
@@ -357,7 +357,7 @@ function threadWith(options: Readonly<{ mentions: CommentMessage["mentions"] }>)
     status: { kind: "open" },
     createdBy: grace,
     createdAt: 1,
-    messages: [{ id: ids.next("message"), author: grace, body: "Have a look", mentions: options.mentions, createdAt: 1, editedAt: null }],
+    messages: [{ id: ids.next("message"), author: grace, body: "Have a look", mentions: options.mentions, createdAt: 1, editedAt: null, editCount: 0 }],
     markings: [],
   };
 }

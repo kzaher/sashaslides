@@ -21,7 +21,10 @@
 //    changes the server will never have.
 //  * THE RATE LIMIT COUNTS EVERY INBOUND FRAME, before it is decoded (rate-limit.ts). Over the rate,
 //    awareness and text frames are dropped; a document update closes the connection instead,
-//    because a dropped one would strand the sender's replica ahead of the server.
+//    because a dropped one would strand the sender's replica ahead of the server. A dropped
+//    discussion request is still answered, `rateLimited`, because its sender waits for exactly one
+//    outcome per request; that answer bypasses the authority, so it is never remembered as the
+//    request's outcome and the same request sent again later is decided normally.
 //  * DISCUSSION REQUESTS ARE SERIALISED. Each is decided against the authority's state, its entry
 //    persisted (`persistDiscussionEntry` resolves once it is on disk, or once the first attempt
 //    failed and the storage retries it), then broadcast to every connection, the sender included,
@@ -228,6 +231,7 @@ export function createDeckRoom(options: CreateDeckRoomOptions): DeckRoom {
           return;
         }
         if (taken.verdict.notify) sendMessage(record, { kind: "rateLimited", retryAfterMilliseconds: taken.verdict.retryAfterMilliseconds });
+        answerDroppedDiscussionRequest(record, frame);
         return;
       case "close":
         closeWith(record, "rateLimited");
@@ -245,6 +249,20 @@ export function createDeckRoom(options: CreateDeckRoomOptions): DeckRoom {
       default:
         assertNever(frame);
     }
+  }
+
+  /** See the header: a dropped discussion request gets a `rateLimited` outcome, decided by nobody. */
+  function answerDroppedDiscussionRequest(record: ConnectionRecord, frame: RoomFrame): void {
+    if (frame.kind !== "text" || frame.text.length > COLLABORATION_LIMITS.maximumMessageBytes) return;
+    const parsed = parseClientMessage(frame.text);
+    if (parsed.kind !== "message" || parsed.message.kind !== "discussionRequest") return;
+    const outcome: DiscussionOutcome = {
+      kind: "rejected",
+      requestId: parsed.message.request.requestId,
+      reason: "rateLimited",
+      message: "too many messages at once; send it again in a moment",
+    };
+    sendMessage(record, { kind: "discussionOutcome", outcome });
   }
 
   function receiveBinary(record: ConnectionRecord, bytes: Uint8Array): void {

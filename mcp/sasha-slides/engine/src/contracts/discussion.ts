@@ -86,6 +86,8 @@ export type CommentMessage = Readonly<{
   mentions: readonly PersonId[];
   createdAt: number;
   editedAt: number | null;
+  /** How many times the author edited it, counted by the fold; the deck server limits it (`COLLABORATION_LIMITS.maximumEditsPerMessage`). */
+  editCount: number;
 }>;
 
 export type ThreadStatus =
@@ -149,7 +151,20 @@ export type DiscussionLogEntry = Readonly<{
   command: DiscussionCommand;
 }>;
 
-export type DiscussionRejectionReason = "threadMissing" | "messageMissing" | "notAuthor" | "duplicateId" | "invalidValue" | "notPermitted";
+export type DiscussionRejectionReason =
+  | "threadMissing"
+  | "messageMissing"
+  | "notAuthor"
+  | "duplicateId"
+  | "invalidValue"
+  | "notPermitted"
+  /** The deck's discussion is full: threads per deck, messages per thread, edits per message or text per deck (`COLLABORATION_LIMITS`). */
+  | "limitReached"
+  /**
+   * The deck server dropped the request because its connection was over the rate. NOT remembered as
+   * the request's outcome: sending the same request again once the rate allows can succeed.
+   */
+  | "rateLimited";
 
 export type DiscussionOutcome =
   | Readonly<{ kind: "applied"; requestId: DiscussionRequestId; sequence: number }>

@@ -20,6 +20,8 @@ import {
   type EditorState,
   type ElementId,
   type FractionalRegion,
+  type NoticeAction,
+  type PendingDiscussionRequest,
   type PersonId,
   type SlideId,
   type TextRange,
@@ -114,6 +116,7 @@ export function replyToThread(state: EditorState, threadId: ThreadId, body: stri
 }
 
 export function reduceDiscussionSettled(state: EditorState, outcome: DiscussionOutcome): EditorState {
+  const request = [...state.pendingDiscussion, ...state.inFlightDiscussion].find((candidate) => candidate.requestId === outcome.requestId) ?? null;
   const settled: EditorState = {
     ...state,
     pendingDiscussion: state.pendingDiscussion.filter((request) => request.requestId !== outcome.requestId),
@@ -123,7 +126,7 @@ export function reduceDiscussionSettled(state: EditorState, outcome: DiscussionO
     case "applied":
       return settled;
     case "rejected":
-      return raiseNotice(settled, { tone: "warning", message: `The comment was not saved: ${outcome.message}`, action: null });
+      return raiseNotice(settled, rejectionNotice({ outcome, request }));
     default:
       return assertNever(outcome);
   }
@@ -138,6 +141,35 @@ export function markDiscussionSent(state: EditorState, requestId: DiscussionRequ
     pendingDiscussion: state.pendingDiscussion.filter((request) => request.requestId !== requestId),
     inFlightDiscussion: [...state.inFlightDiscussion, sent],
   };
+}
+
+/**
+ * A comment dropped over the server's rate was never decided, so it is offered back ("Send again")
+ * instead of being retried by itself: an automatic retry under overload only adds to it, and the
+ * person's text is not lost. Every other refusal is final and says the server's sentence.
+ */
+function rejectionNotice(
+  options: Readonly<{ outcome: Extract<DiscussionOutcome, { kind: "rejected" }>; request: PendingDiscussionRequest | null }>,
+): Readonly<{ tone: "warning"; message: string; action: NoticeAction | null }> {
+  const { outcome, request } = options;
+  switch (outcome.reason) {
+    case "rateLimited":
+      return {
+        tone: "warning",
+        message: "The comment was not sent: the server is busy. Send it again in a moment.",
+        action: request === null ? null : { kind: "retryDiscussion", command: request.command },
+      };
+    case "threadMissing":
+    case "messageMissing":
+    case "notAuthor":
+    case "duplicateId":
+    case "invalidValue":
+    case "notPermitted":
+    case "limitReached":
+      return { tone: "warning", message: `The comment was not saved: ${outcome.message}`, action: null };
+    default:
+      return assertNever(outcome.reason);
+  }
 }
 
 function composerTarget(

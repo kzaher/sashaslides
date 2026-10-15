@@ -129,6 +129,8 @@ function unavailableSentence(reason: ClosedReason): string {
       return "This page is out of date. Reload it to open the deck.";
     case "documentSchemaTooNew":
       return "This deck was saved by a newer version of Sasha Slides. Reload the page.";
+    case "deckUnreadable":
+      return "This deck's saved copy could not be read, so it was not opened. Nothing was changed; ask the server's operator to recover it.";
     default:
       return assertNever(reason);
   }

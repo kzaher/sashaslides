@@ -137,6 +137,27 @@ describe("Tidepool stylesheet", () => {
     });
   }
 
+  // A link dressed as a pill (the top bar's "Account") must read as the pill: the root's link rule
+  // (`.sasha-engine a`, accent and underlined) outranks a bare pill class, so each pill needs an
+  // anchor rule of its own. The control row is the link rule the Account link used to fall to.
+  const linkRule = `.${TIDEPOOL_CLASS.root} a`;
+  for (const row of [
+    { pill: TIDEPOOL_CLASS.primaryPill, colour: "var(--sasha-ink-button-text)" },
+    { pill: TIDEPOOL_CLASS.secondaryPill, colour: "var(--sasha-text)" },
+    { pill: TIDEPOOL_CLASS.dangerPill, colour: "var(--sasha-danger-button-text)" },
+  ] as const) {
+    it(`a link with ${row.pill} has no underline, the pill's text colour, and outranks the root's link rule`, () => {
+      const rules = [...tidepoolRules(TIDEPOOL_TOKENS).matchAll(/([^{}]+)\{([^}]*)\}/g)].map((match) => ({ selectors: (match[1] ?? "").split(",").map((selector) => selector.trim()), body: match[2] ?? "" }));
+      const anchored = rules.filter((rule) => rule.selectors.some((selector) => selector.endsWith(`a.${row.pill}`)));
+      assert.ok(anchored.length > 0, `a rule for links with ${row.pill}`);
+      const body = anchored.map((rule) => rule.body).join(" ");
+      assert.match(body, /text-decoration: none;/);
+      assert.ok(body.includes(`color: ${row.colour};`), body);
+      const selector = anchored.flatMap((rule) => rule.selectors).find((candidate) => candidate.endsWith(`a.${row.pill}`)) ?? "";
+      assert.ok(compareSpecificity(selectorSpecificity(selector), selectorSpecificity(linkRule)) > 0, `${selector} outranks ${linkRule}`);
+    });
+  }
+
   it("the calm wash is drawn in its own element's box, not the viewport", () => {
     const washRule = /\.sasha-calm-ground::before \{([^}]*)\}/.exec(tidepoolRules(TIDEPOOL_TOKENS))?.[1] ?? "";
     assert.match(washRule, /position: absolute;/);

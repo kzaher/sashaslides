@@ -5,7 +5,8 @@
  *   are refused with 401 addonIdentityRejected, and a valid one is accepted (the control row);
  *   a valid token on a new binding -> needsImport; after the import -> open while the revision is
  *   unchanged, changedSinceImport when it differs; only SHA-256(binding secret) is stored; an
- *   import token works once; a binding bound to a deck the account cannot edit is refused.
+ *   import token works once; a binding bound to a deck the account cannot edit is refused; an
+ *   add-on export answers only the Google account that started it.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -128,6 +129,27 @@ describe("add-on handoff (fake Google keys)", () => {
     const result = await harness.server.call({ method: "POST", path: `/deck-api/addon/export/${requested.exportId}/result`, headers, body: { outcome: { kind: "applied" } } });
     assert.equal(result.status, 200);
     assert.ok((harness.service.decks.get(imported.deckId)?.link?.lastExportedAt ?? 0) > 0, "the link records the export");
+  });
+
+  test("an export is refused to a valid token from a different Google subject, even with the presentation's binding secret", async () => {
+    await using harness = await createHarness();
+    const starter = identity({ subject: "subject-one" });
+    const first = await bodyOf<AddonHandoffBody>(await handoff({ harness, token: starter, revisionId: RECORDED_REVISION }));
+    if (first.kind !== "needsImport") throw new Error(first.kind);
+    const imported = await bodyOf<AddonImportBody>(await harness.server.call({ method: "POST", path: "/deck-api/addon/import", body: { importToken: first.importToken, presentation: RECORDED, replaceDeckId: null } }));
+    const requested = await bodyOf<GoogleSlidesExportBody>(
+      await harness.server.call({ method: "POST", path: `/deck-api/decks/${imported.deckId}/google-slides/export`, account: "subject-one", body: { target: { kind: "linkedPresentation" } }, headers: { authorization: "Bearer embedded" } }),
+    );
+    if (requested.kind !== "runInAddon") throw new Error(requested.kind);
+    // Another editor of the same presentation: Google vouches for them, and they can read its binding secret.
+    const stranger = { [ADDON_IDENTITY_HEADER]: identity({ subject: "subject-two" }), [ADDON_BINDING_SECRET_HEADER]: BINDING_SECRET };
+    const plan = await harness.server.call({ method: "GET", path: `/deck-api/addon/export/${requested.exportId}`, headers: stranger });
+    assert.equal(plan.status, 401, "the plan is only for the account that started the export");
+    assert.equal((await bodyOf<DeckApiErrorBody>(plan)).error, "addonIdentityRejected");
+    const result = await harness.server.call({ method: "POST", path: `/deck-api/addon/export/${requested.exportId}/result`, headers: stranger, body: { outcome: { kind: "applied" } } });
+    assert.equal(result.status, 401, "and so is reporting its result");
+    const own = await harness.server.call({ method: "GET", path: `/deck-api/addon/export/${requested.exportId}`, headers: { [ADDON_IDENTITY_HEADER]: starter, [ADDON_BINDING_SECRET_HEADER]: BINDING_SECRET } });
+    assert.equal(own.status, 200, "control: the starter's own token is accepted");
   });
 });
 

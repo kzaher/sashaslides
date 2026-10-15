@@ -190,3 +190,32 @@ describe("Claude's edits", () => {
     });
   }
 });
+
+describe("a comment the server did not take says so", () => {
+  const queued = (): EditorState => reduceEditor(stateAs(withRole("commenter")), COMMENT);
+
+  it("limitReached: the notice carries the server's sentence", () => {
+    const state = queued();
+    const request = state.pendingDiscussion[0];
+    assert.ok(request !== undefined);
+    const message = "a thread holds at most 500 messages";
+    const next = reduceEditor(state, { kind: "discussionSettled", outcome: { kind: "rejected", requestId: request.requestId, reason: "limitReached", message } });
+    assert.deepEqual(next.notices.map((notice) => notice.message), [`The comment was not saved: ${message}`]);
+    assert.equal(next.pendingDiscussion.length, 0);
+  });
+
+  it("rateLimited: the notice offers to send it again, and choosing that queues the same comment", () => {
+    const state = queued();
+    const request = state.pendingDiscussion[0];
+    assert.ok(request !== undefined);
+    const next = reduceEditor(state, { kind: "discussionSettled", outcome: { kind: "rejected", requestId: request.requestId, reason: "rateLimited", message: "too many messages at once" } });
+    const notice = next.notices[0];
+    assert.ok(notice !== undefined);
+    assert.equal(notice.message, "The comment was not sent: the server is busy. Send it again in a moment.");
+    assert.deepEqual(notice.action, { kind: "retryDiscussion", command: request.command });
+    assert.equal(next.pendingDiscussion.length, 0, "nothing retries by itself");
+    const retried = reduceEditor(next, { kind: "noticeActionChosen", noticeId: notice.id });
+    assert.deepEqual(retried.pendingDiscussion.map((pending) => pending.command), [request.command]);
+    assert.equal(retried.notices.length, 0);
+  });
+});

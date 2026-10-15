@@ -1,12 +1,15 @@
 /**
  * Deck storage on a real temporary directory with the real vault (acceptance 6): the 250 ms flush
  * cadence, losing only what was not flushed, compaction at 500 records, a crash between the two
- * compaction renames, a corrupt record, nothing readable in the files, and a reset owner key.
+ * compaction renames, a corrupt record, nothing readable in the files, and a reset owner key;
+ * an unreadable snapshot refusing the deck everywhere (service, socket, HTTP) and never being
+ * written over; a role changed while a connection is still opening; two concurrent writes of one
+ * file; and invitations stored under the old unkeyed email hash.
  *
  *   cd mcp/sasha-slides && npx tsx --test decks/deck-storage.test.ts
  */
 import { strict as assert } from "node:assert";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +17,8 @@ import { after, describe, test } from "node:test";
 import type { DocumentCommand } from "../engine/src/contracts/commands.ts";
 import type { DocumentSnapshot } from "../engine/src/contracts/document.ts";
 import { identityFrame } from "../engine/src/contracts/geometry.ts";
-import type { CommandId, ElementId } from "../engine/src/contracts/ids.ts";
+import { CLOSE_CODE_BY_REASON } from "../engine/src/contracts/collaboration.ts";
+import type { AssetId, CommandId, ElementId } from "../engine/src/contracts/ids.ts";
 import { DEFAULT_TEXT_BOX_STYLE, PLAIN_BOX_STYLE } from "../engine/src/contracts/style.ts";
 import type { DeckCaller, DeckHandle } from "../deck-contracts/deck-service-contract";
 import { storeAccountDirectory } from "../http/account-directory";
@@ -23,9 +27,12 @@ import { createAccountVault, inMemoryDataKeyStore } from "../http/account-keys";
 import type { AccountVault } from "../http/account-vault";
 import { randomAccountId, withSealedGoogleIdentities } from "../http/accounts";
 import { inMemoryAuthStore, type AuthStore } from "../http/oauth-store";
+import { legacyInvitationEmailHash, newDeckId } from "./deck-identity";
+import { refusalStatus } from "./deck-manager";
+import { indexEntryOf } from "./deck-records";
 import { createDeckServer, type DeckServer } from "./deck-stack";
 import { openFileDeckStorage, type DeckStorage } from "./deck-storage";
-import { manualTimers, settle, type ManualTimers } from "./deck-test-support";
+import { connectSocket, manualTimers, send, settle, startLoopbackServer, type ManualTimers } from "./deck-test-support";
 
 const SLIDE_TEXT = "Quarterly pineapple forecast";
 const MEMBER_EMAIL = "secret.member@example.com";
@@ -198,6 +205,182 @@ describe("deck storage", () => {
     assert.equal(existsSync(join(world.directory, "decks", deck.deckId)), false);
     const index: unknown = JSON.parse(readFileSync(join(world.directory, "decks", "index.json"), "utf-8"));
     assert.equal(JSON.stringify(index).includes(deck.deckId), false);
+  });
+
+  for (const damage of ["does not open", "opens but does not decode"] as const) {
+    test(`a snapshot that ${damage} refuses the deck everywhere with deckUnreadable, and the file is kept as it is`, async () => {
+      const world = newWorld();
+      const captured: { storage: DeckStorage | null } = { storage: null };
+      const first = openServer(world, (storage) => {
+        captured.storage = storage;
+        return storage;
+      });
+      const owner = await signIn(world, first, "owner@example.com");
+      const deck = await createDeck(first, owner);
+      await applyTitle(deck, owner, "Snapshotted title");
+      world.timers.advance(250);
+      await first.manager.registry.flushAll();
+      const room = first.manager.registry.loaded({ deckId: deck.deckId })?.room;
+      assert.ok(room !== undefined && captured.storage !== null);
+      await captured.storage.compactDocument({ deckId: deck.deckId, ownerAccountId: owner.accountId, state: room.encodeState(), throughSequence: 1 });
+      await applyTitle(deck, owner, "Logged title");
+      world.timers.advance(250);
+      await first.manager.registry.flushAll();
+      await first.shutdown();
+
+      const snapshotPath = join(world.directory, "decks", deck.deckId, "document.snapshot");
+      const [header] = readFileSync(snapshotPath, "utf-8").split("\n");
+      const sealedGarbage = await world.vault.seal({ accountId: owner.accountId, plaintext: Buffer.from("not a Yjs update at all", "utf-8").toString("base64url") });
+      const damaged = damage === "does not open" ? `${header ?? ""}\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n` : `${header ?? ""}\n${sealedGarbage}\n`;
+      writeFileSync(snapshotPath, damaged);
+
+      const second = openServer(world);
+      const opened = await second.deckService.openDeck({ caller: owner, deckId: deck.deckId });
+      assert.equal(opened.kind, "deckUnreadable", "the service refuses rather than opening the log alone");
+      const port = { send: () => undefined, close: () => undefined };
+      const connected = await second.manager.connect({ accountId: owner.accountId, deckId: deck.deckId, discussionAfter: 0, port });
+      assert.deepEqual(connected, { kind: "refused", reason: "deckUnreadable" });
+      const reverted = await second.manager.revertAgentSession({ accountId: owner.accountId, deckId: deck.deckId, agentSessionId: "as_000000000000000000000000" });
+      assert.equal(reverted.kind, "deckUnreadable");
+      assert.equal(refusalStatus({ kind: "deckUnreadable", message: "" }), 503);
+
+      const loopback = await startLoopbackServer({ portal: null, decks: second });
+      try {
+        const cookie = (await second.deckSessionStart.issueCookie({ accountId: owner.accountId })).split(";")[0] ?? "";
+        const session = await send({ baseUrl: loopback.baseUrl, method: "GET", path: "/deck-api/session", headers: { cookie } });
+        const csrf = String((session.value() as Record<string, unknown>)["csrfToken"]);
+        const revert = await send({
+          baseUrl: loopback.baseUrl,
+          method: "POST",
+          path: `/deck-api/decks/${deck.deckId}/agent-sessions/as_000000000000000000000000/revert`,
+          headers: { cookie, origin: "https://decks.example.test", "x-sasha-csrf": csrf },
+        });
+        assert.equal(revert.status, 503, revert.body.toString());
+        assert.equal((revert.value() as Record<string, unknown>)["error"], "deckUnreadable");
+        const socket = connectSocket({ port: loopback.port, path: `/deck-api/sync/${deck.deckId}`, origin: "https://decks.example.test", cookie });
+        assert.equal(await socket.closed, CLOSE_CODE_BY_REASON.deckUnreadable);
+      } finally {
+        await loopback[Symbol.asyncDispose]();
+      }
+
+      await second.manager.registry.flushAll();
+      await second.shutdown();
+      assert.equal(readFileSync(snapshotPath, "utf-8"), damaged, "the unreadable snapshot is never compacted over or removed");
+      assert.ok(
+        world.warnings.some((warning) => warning.includes(deck.deckId) && warning.includes("document.snapshot")),
+        world.warnings.join("\n"),
+      );
+    });
+  }
+
+  test("a role lowered, or a member removed, while their connection is opening is not honoured with the old role", async () => {
+    const world = newWorld();
+    const first = openServer(world);
+    const owner = await signIn(world, first, "owner@example.com");
+    const member = await signIn(world, first, MEMBER_EMAIL);
+    const deck = await createDeck(first, owner);
+    assert.equal((await first.manager.invite({ accountId: owner.accountId, deckId: deck.deckId, email: MEMBER_EMAIL, role: "editor" })).kind, "ok");
+    await first.shutdown();
+
+    for (const change of ["lowered", "removed"] as const) {
+      const gate: { open: () => void } = { open: () => undefined };
+      const gateOpened = new Promise<void>((resolve) => {
+        gate.open = resolve;
+      });
+      const loading: { started: boolean } = { started: false };
+      const server = openServer(world, (storage) => ({
+        ...storage,
+        loadDocument: async (location) => {
+          loading.started = true;
+          await gateOpened;
+          return storage.loadDocument(location);
+        },
+      }));
+      const port = { send: () => undefined, close: () => undefined };
+      const connecting = server.manager.connect({ accountId: member.accountId, deckId: deck.deckId, discussionAfter: 0, port });
+      for (let round = 0; round < 50 && !loading.started; round += 1) await settle(1);
+      assert.ok(loading.started, "the connection is waiting on the room's load");
+      const personId = member.person.id;
+      const outcome =
+        change === "lowered"
+          ? await server.manager.changeMember({ accountId: owner.accountId, deckId: deck.deckId, personId, role: "viewer" })
+          : await server.manager.removeMember({ accountId: owner.accountId, deckId: deck.deckId, personId });
+      assert.equal(outcome.kind, "ok");
+      gate.open();
+      const connected = await connecting;
+      if (change === "lowered") {
+        assert.equal(connected.kind, "connected");
+        if (connected.kind === "connected") assert.equal(connected.connection.role(), "viewer", "the role lowered during the load applies");
+      } else {
+        assert.equal(connected.kind, "refused", "a member removed during the load is not connected");
+      }
+      await server.shutdown();
+      if (change === "lowered") {
+        const restored = openServer(world);
+        assert.equal((await restored.manager.invite({ accountId: owner.accountId, deckId: deck.deckId, email: MEMBER_EMAIL, role: "editor" })).kind, "ok");
+        await restored.shutdown();
+      }
+    }
+  });
+
+  test("two concurrent writes of the same file both succeed and leave one whole version", async () => {
+    const world = newWorld();
+    const opened = openFileDeckStorage({ decksDirectory: join(world.directory, "decks"), profilesDirectory: join(world.directory, "deck-profiles"), vault: world.vault, warn: () => undefined });
+    if (opened.kind === "failed") throw new Error(opened.message);
+    const storage = opened.storage;
+    const accountId = randomAccountId();
+    const deckId = newDeckId((size) => randomBytes(size));
+    const bytes = Uint8Array.from(randomBytes(4096));
+    const assetId = createHash("sha256").update(bytes).digest("hex") as AssetId;
+    for (let round = 0; round < 20; round += 1) {
+      await Promise.all([
+        storage.putAsset({ deckId, ownerAccountId: accountId, assetId, mediaType: "image/png", bytes }),
+        storage.putAsset({ deckId, ownerAccountId: accountId, assetId, mediaType: "image/png", bytes }),
+        storage.writeProfile({ accountId, displayName: `Alpha ${String(round)}` }),
+        storage.writeProfile({ accountId, displayName: `Beta ${String(round)}` }),
+      ]);
+      const stored = await storage.readAsset({ deckId, ownerAccountId: accountId, assetId });
+      assert.ok(stored !== null && Buffer.from(stored.bytes).equals(Buffer.from(bytes)), "the image is whole");
+      assert.ok([`Alpha ${String(round)}`, `Beta ${String(round)}`].includes((await storage.readProfile({ accountId })) ?? ""));
+    }
+    assert.deepEqual(
+      everyFile(world.directory).filter((file) => file.includes(".tmp")),
+      [],
+      "no temporary file is left behind",
+    );
+  });
+
+  test("invitations stored under the old unkeyed hash are still accepted at sign-in, and rewritten in the keyed form at the next change", async () => {
+    const world = newWorld();
+    const captured: { storage: DeckStorage | null } = { storage: null };
+    const first = openServer(world, (storage) => {
+      captured.storage = storage;
+      return storage;
+    });
+    const owner = await signIn(world, first, "owner@example.com");
+    const deck = await createDeck(first, owner);
+    const early = "early.invitee@example.com";
+    const late = "late.invitee@example.com";
+    for (const email of [early, late]) assert.equal((await first.manager.invite({ accountId: owner.accountId, deckId: deck.deckId, email, role: "commenter" })).kind, "ok");
+    await first.shutdown();
+    const storage = captured.storage;
+    assert.ok(storage !== null);
+    const record = await storage.readRecord({ deckId: deck.deckId, ownerAccountId: owner.accountId });
+    assert.ok(record !== null);
+    // The data as a server before the keyed hash wrote it.
+    const legacyRecord = { ...record, invitations: record.invitations.map((invitation) => ({ ...invitation, emailHash: legacyInvitationEmailHash(invitation.email) })) };
+    await storage.writeRecord(legacyRecord);
+    await storage.updateIndex((index) => ({ version: 1, decks: { ...index.decks, [deck.deckId]: indexEntryOf(legacyRecord) } }));
+
+    const second = openServer(world);
+    const earlyCaller = await signIn(world, second, early);
+    await second.manager.acceptInvitations({ accountId: earlyCaller.accountId });
+    assert.equal((await second.manager.access({ accountId: earlyCaller.accountId, deckId: deck.deckId }))?.role, "commenter", "an old-form invitation became a membership");
+    const indexText = readFileSync(join(world.directory, "decks", "index.json"), "utf-8");
+    assert.equal(indexText.includes(legacyInvitationEmailHash(late)), false, "the change rewrote the pending invitation's hash in the keyed form");
+    const lateCaller = await signIn(world, second, late);
+    await second.manager.acceptInvitations({ accountId: lateCaller.accountId });
+    assert.equal((await second.manager.access({ accountId: lateCaller.accountId, deckId: deck.deckId }))?.role, "commenter", "the rewritten invitation still matches");
   });
 });
 

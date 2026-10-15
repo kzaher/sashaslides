@@ -502,6 +502,8 @@ function sendRefusal(response: ServerResponse, refusal: Refusal): void {
       return sendError({ response, status: 400, error: "invalidRequest", message: refusal.message });
     case "tooLarge":
       return sendError({ response, status: 413, error: "tooLarge", message: refusal.message });
+    case "deckUnreadable":
+      return sendError({ response, status: 503, error: "deckUnreadable", message: refusal.message });
     default:
       return assertNever(refusal);
   }

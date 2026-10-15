@@ -110,6 +110,8 @@ export const registerDeckTools: RegisterDeckTools = (options) => {
           case "notFound":
           case "notPermitted":
             return refusalResult(`${outcome.kind}: this account cannot create decks`);
+          case "deckUnreadable":
+            return refusalResult(`deckUnreadable: ${outcome.message}`);
           default:
             return assertNever(outcome);
         }
@@ -325,6 +327,8 @@ async function withDeck(
         return refusalResult(`notPermitted: this account cannot open deck ${options.deckId}`);
       case "limitReached":
         return refusalResult(`limitReached: ${outcome.message}`);
+      case "deckUnreadable":
+        return refusalResult(`deckUnreadable: deck ${options.deckId} was not opened. ${outcome.message}`);
       default:
         return assertNever(outcome);
     }
@@ -605,6 +609,9 @@ function discussionResult(options: Readonly<{ deck: DeckHandle; outcome: Discuss
         case "notAuthor":
         case "duplicateId":
         case "invalidValue":
+        case "limitReached":
+        // An agent submits through the room directly, never over a rate-limited socket; kept total.
+        case "rateLimited":
           return refusalResult(`${outcome.reason}: ${outcome.message}`);
         default:
           return assertNever(outcome.reason);

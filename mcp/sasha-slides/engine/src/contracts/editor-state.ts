@@ -401,6 +401,8 @@ export type NoticeAction =
   /** Milestone 2: revert an agent session's edits (`deck_revert`). */
   | Readonly<{ kind: "undoAgentEdits"; agentSessionId: string; agentName: string }>
   | Readonly<{ kind: "retryUpload"; uploadId: UploadId }>
+  /** The deck server dropped this comment over its rate; choosing it queues the same command again. */
+  | Readonly<{ kind: "retryDiscussion"; command: DiscussionCommandDraft }>
   | Readonly<{ kind: "reviewTransitionScript"; scriptId: TransitionScriptId }>
   /** In the add-on dialog: open the same deck as a top-level tab. */
   | Readonly<{ kind: "openInNewTab" }>;

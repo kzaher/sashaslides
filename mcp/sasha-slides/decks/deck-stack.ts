@@ -30,6 +30,7 @@ import {
   type DeckAccounts,
   type DeckPeople,
 } from "./deck-accounts";
+import { invitationEmailHasher } from "./deck-identity";
 import { createDeckManager, membersOf, type DeckManager } from "./deck-manager";
 import { createDeckRegistry, type DeckTimers } from "./deck-registry";
 import { createDeckRouter, validDeckReturnPath, type DeckRouter } from "./deck-router";
@@ -93,7 +94,15 @@ export function createDeckServer(
     membersOf: (record) => membersOf({ record, people }),
     warn,
   });
-  const manager = createDeckManager({ registry, storage, accounts, people, now, random: options.randomBytes });
+  const manager = createDeckManager({
+    registry,
+    storage,
+    accounts,
+    people,
+    now,
+    random: options.randomBytes,
+    invitationEmails: invitationEmailHasher({ secret: options.sessionSecret }),
+  });
   const deckService = createDeckService({ manager, timers });
   const embeds = createEmbedSessions({ now, randomToken });
   const cookies = deckSessionCookies({ secret: options.sessionSecret, now, randomToken });

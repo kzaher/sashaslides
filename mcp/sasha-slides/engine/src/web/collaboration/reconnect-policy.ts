@@ -52,6 +52,7 @@ export const CLOSE_HANDLING: Readonly<Record<CloseReason, CloseHandling>> = {
   documentSchemaTooNew: { kind: "stop", closedReason: "documentSchemaTooNew" },
   tooManyConnections: { kind: "reconnectWithBackoff", offlineReason: "tooManyConnections" },
   serverShuttingDown: { kind: "reconnectWithBackoff", offlineReason: "serverRestarting" },
+  deckUnreadable: { kind: "stop", closedReason: "deckUnreadable" },
 };
 
 /** How a close with `code` is handled: a named reason's entry, or backoff for any other code. */

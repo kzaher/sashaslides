@@ -341,7 +341,9 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
     case "textAnchorsResolved":
       return { ...state, resolvedTextAnchors: event.ranges };
     case "peersChanged":
-      return { ...state, peers: event.peers };
+      // Peers are OTHER people. After a reload or a deck switch this person's previous connection
+      // lingers in awareness under an old client id until it times out; it is still this person.
+      return { ...state, peers: event.peers.filter((peer) => peer.person.id !== state.me.id) };
     case "feedbackFailed":
       return raiseNotice(state, { tone: "warning", message: `${event.context} failed: ${event.message}`, action: null });
     case "noticeExpired":
@@ -529,6 +531,7 @@ function dismissNotice(state: EditorState, noticeId: NoticeId): EditorState {
   switch (action.kind) {
     case "retryUpload":
       return abandonUpload(removed, action.uploadId);
+    case "retryDiscussion":
     case "undoAgentEdits":
     case "reviewTransitionScript":
     case "openInNewTab":
@@ -546,6 +549,8 @@ function chooseNoticeAction(state: EditorState, noticeId: NoticeId): EditorState
   switch (action.kind) {
     case "retryUpload":
       return retryUpload(removed, action.uploadId);
+    case "retryDiscussion":
+      return queueDiscussion(removed, action.command);
     case "reviewTransitionScript":
       return openScriptEditor(removed, action.scriptId);
     case "undoAgentEdits":

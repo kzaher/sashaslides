@@ -459,8 +459,9 @@ The script dialog is a plain-text code editor (system monospace, Tab inserts spa
 `staleScript`. An unapproved script shows who wrote it, the full text, and "Approve".
 
 Menus and the context menu are `.sasha-popover`s with keyboard navigation (arrow keys, Enter,
-Escape, type-ahead). Dialogs are `.sasha-dialog`s on a `.sasha-scrim`. Notices stack bottom-left as
-`.sasha-notice`s with an optional action. Every control has an accessible name; focus rings use
+Escape, type-ahead). Dialogs are `.sasha-dialog`s on a `.sasha-scrim`. Notices stack as `.sasha-notice`s
+with an optional action in a column in the bottom-right corner, over the side panel's end rather than the
+slide, newest nearest the corner, scrolling past half the editor's height. Every control has an accessible name; focus rings use
 `--sasha-focus-ring` at `--sasha-control-focus-ring-width`.
 
 ## 10. The presenter (presenter module)
@@ -923,10 +924,15 @@ client                                                          server
 - Binary frames are exactly y-websocket's (`BINARY_MESSAGE_TYPE`); text frames are
   `ClientMessage` / `ServerMessage`, parsed at the boundary by the receiver (the server parses
   `ClientMessage`, the web module parses `ServerMessage`), unknown kinds ignored and counted.
-- **Discussion**: `discussionRequest` is answered by exactly one `discussionOutcome`; a `requestId`
-  among the last 1,000 is answered with its first outcome again (a retry after a reconnect never
-  doubles a comment). New entries reach every connection, the sender included, in sequence order.
-  A request sent while offline waits in the client's queue and is sent after the next welcome.
+- **Discussion**: `discussionRequest` is answered by exactly one `discussionOutcome`; the same
+  person's `requestId` among the last 1,000 is answered with its first outcome again (a retry after
+  a reconnect never doubles a comment; another person's request with the same id is decided on its
+  own). A request dropped over the rate limit is still answered, rejected `rateLimited`, and that
+  answer is not remembered, so sending it again later can succeed; the editor offers "Send again"
+  instead of retrying by itself. A full discussion is rejected `limitReached` (21.10) and the
+  editor shows the server's sentence. New entries reach every connection, the sender included, in
+  sequence order. A request sent while offline waits in the client's queue and is sent after the
+  next welcome.
 - **Heartbeat**: the server sends `heartbeat` every 15 seconds (and WebSocket pings, which browsers
   answer by themselves); a client that hears nothing for 40 seconds reconnects.
 - **Reconnection**: full-jitter exponential backoff from 0.5 seconds doubling to 30
@@ -1004,7 +1010,10 @@ makes their decks unreadable and the eraser removes them.
 /data/decks/
   index.json                 { version: 1, decks: { <deckId>: { ownerAccountId, memberAccountIds[],
                                invitationEmailHashes[], addonBindingHashes[], createdAt } } }
-                             (no personal data in the clear; atomic write, mode 0600)
+                             (no personal data in the clear; atomic write, mode 0600;
+                               invitation hashes are HMAC-SHA256 keyed from SASHA_SESSION_SECRET,
+                               decks/deck-identity.ts; older unkeyed hashes still match and are
+                               rewritten keyed at the record's next change)
   <deckId>/
     deck.sealed              DeckRecord: members [{accountId, role, addedAt}], invitations
                              [{invitationId, emailHash, email, role, invitedAt}], linkSharing,
@@ -1021,16 +1030,26 @@ makes their decks unreadable and the eraser removes them.
   each flush one `appendFile` plus `fsync`. Discussion entries are appended before their outcome is
   sent. A crash loses at most the last 250 milliseconds on the server, and the clients still hold
   those updates and send them again in their next sync step 2.
-- **Compaction**: past 1 megabyte or 500 records of `document.log`, write `document.snapshot.tmp`
+- **Atomic writes** (the index, records, snapshots, assets, profiles) go to a temporary file named
+  `<target>.<random>.tmp`, unique per write, so two writes of one target at once never share it.
+- **Compaction**: past 1 megabyte or 500 records of `document.log`, write a temporary snapshot
   (through the last sequence), `fsync`, rename over the snapshot, then replace the log with an
   empty one the same way. Loading applies the snapshot, then every log record; applying a record
   the snapshot already contains is harmless (Yjs updates are idempotent), so a crash between the
   two renames loses nothing.
-- **Corruption**: a record that does not open or decode is skipped with a warning naming the deck
+- **Corruption**: a LOG record that does not open or decode is skipped with a warning naming the deck
   and sequence; the room loads with whatever Yjs can apply (missing dependencies wait as pending
   structures, and a client's next step 2 may fill them). Yjs clocks are consecutive per replica, so
   a skipped record also holds back every LATER record from the same replica: the deck loads with
   what came before the bad record (decks/deck-storage.test.ts asserts exactly that).
+- **Unreadable snapshot**: a `document.snapshot` that exists but does not open or decode REFUSES
+  the deck instead. Loading the log alone would serve a partial deck, and its next compaction would
+  write that partial deck over the snapshot and lose the rest for good. So no room is created (and
+  nothing is ever compacted over it), the file is left in place for recovery, the warning names the
+  deck, and every way in answers a distinct error: HTTP routes 503 `deckUnreadable`, the socket
+  closes `deckUnreadable` (4014, the client stops), `DeckService.openDeck` answers
+  `{ kind: "deckUnreadable", message }`. Nothing is cached, so the deck opens again once an
+  operator restores a readable snapshot.
 - **Deck ids**: `dk_` + 22 random base-62 characters (`parseDeckId`).
 - **Erase**: `account-eraser.ts` also deletes the directories of decks the account owns, removes it
   from every other deck's members, closes its sockets, and deletes its profile.
@@ -1127,7 +1146,9 @@ document update over the rate closes at once instead of being dropped, so the cl
 resends it; presence publishes at most 10 a second, `PRESENCE_PUBLISH_INTERVAL_MILLISECONDS`, and
 a connection holds at most 4 awareness client ids); 50
 connections per deck and 20 per account; awareness state 8 kilobytes; comment body 10,000
-characters, 50 markings of at most 2,000 points per thread, 5,000 threads per deck, 20 mentions;
+characters, 50 markings of at most 2,000 points per thread, 5,000 threads per deck, 500 messages
+per thread, 100 edits per message, 5 megabytes of live message bodies (UTF-8) per deck, 20 mentions
+(the per-deck discussion limits answer `limitReached`);
 assets 25 megabytes each and 512 per deck; 500 decks per account; 100 members per deck; 100
 invitations per account per day; 200 commands per agent edit; transition scripts per
 `TRANSITION_LIMITS`. Request bodies: 1 megabyte for JSON except the add-on import (48 megabytes).
@@ -1306,6 +1327,8 @@ one `deck_edit` per user request, scripts are reviewed by a person.
 | An image fails to import | a placeholder rectangle and a loss; the import continues |
 | An export batch fails | the export stops at that slide and says which; re-export replaces |
 | Add-on identity token invalid | 401 `addonIdentityRejected`; the shell says "Sign in again" |
+| Add-on export called with a valid token of another Google account | 401 `addonIdentityRejected`: an export answers only the account that started it |
+| A deck's snapshot does not open or decode | the deck is refused, never loaded partially: 503 `deckUnreadable`, close `deckUnreadable` (4014); the file is kept for recovery (21.7) |
 | Over a limit | the matching `rateLimited`, `tooLarge`, `limitReached` or `resynchroniseRequired` (`updateTooLarge`) |
 
 ### 21.17 Modules

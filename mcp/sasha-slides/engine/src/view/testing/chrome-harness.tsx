@@ -1,6 +1,7 @@
 // THE CHROME HARNESS: the real editor shell over the sample deck and a fake system, in named
 // scenarios -- the editing screen with a collaborator, a menu over a black slide, the script dialog,
-// the comment rail, text editing, a 60-slide filmstrip, a 200-element drag, measured layout. The
+// the comment rail, text editing, a 60-slide filmstrip, a 200-element drag, measured layout, seven
+// stacked notices (also in the add-on dialog's smaller frame). The
 // end-to-end drivers in e2e/editor/ bundle it, open a scenario in Chrome and screenshot or measure
 // it. It needs nothing from the model or state modules, so the view's look and cost are checked on
 // their own.
@@ -25,7 +26,7 @@ import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { EMPTY_ASSET_STORE, createRecordingSystem, fixtureEditorState, fixtureServices, type RecordingSystem } from "./editor-fixtures.ts";
 import { harnessReduce } from "./harness-reducer.ts";
 
-export const HARNESS_SCENARIOS = ["editor", "menuOverBlack", "contextMenu", "scriptDialog", "comments", "text", "filmstrip", "drag", "measure", "addon"] as const;
+export const HARNESS_SCENARIOS = ["editor", "menuOverBlack", "contextMenu", "scriptDialog", "comments", "text", "filmstrip", "drag", "measure", "addon", "notices", "addonNotices"] as const;
 export type HarnessScenario = (typeof HARNESS_SCENARIOS)[number];
 
 export type HarnessHandle = Readonly<{
@@ -89,6 +90,10 @@ export function scenarioState(options: Readonly<{ scenario: HarnessScenario; ima
       return { ...base, currentSlideId: document.slides[0]?.id ?? null, chrome: { ...base.chrome, speakerNotesOpen: false } };
     case "addon":
       return { ...withPeers, embedding: { kind: "addonDialog", webApplicationAddress: "https://sashaslides.com/deck/deck_harness" }, chrome: { ...base.chrome, openMenu: "edit" } };
+    case "notices":
+      return { ...withPeers, notices: sampleNotices(script.id) };
+    case "addonNotices":
+      return { ...withPeers, embedding: { kind: "addonDialog", webApplicationAddress: "https://sashaslides.com/deck/deck_harness" }, notices: sampleNotices(script.id) };
     default:
       return base;
   }
@@ -187,8 +192,8 @@ function sampleDiscussion(slide: SlideSnapshot): DiscussionSnapshot {
       createdBy: adaPerson,
       createdAt: 1,
       messages: [
-        { id: ids.next("message"), author: adaPerson, body: "Can the gradient run the other way, so it matches the title slide?", mentions: [], createdAt: 1, editedAt: null },
-        { id: ids.next("message"), author: claudePerson, body: "Done: it now runs from teal to indigo. Undo my edit if you preferred it before.", mentions: [], createdAt: 2, editedAt: null },
+        { id: ids.next("message"), author: adaPerson, body: "Can the gradient run the other way, so it matches the title slide?", mentions: [], createdAt: 1, editedAt: null, editCount: 0 },
+        { id: ids.next("message"), author: claudePerson, body: "Done: it now runs from teal to indigo. Undo my edit if you preferred it before.", mentions: [], createdAt: 2, editedAt: null, editCount: 0 },
       ],
       markings: [],
     },
@@ -198,7 +203,7 @@ function sampleDiscussion(slide: SlideSnapshot): DiscussionSnapshot {
       status: { kind: "open" },
       createdBy: claudePerson,
       createdAt: 3,
-      messages: [{ id: ids.next("message"), author: claudePerson, body: "This image is still a placeholder; shall I find a photograph?", mentions: [], createdAt: 3, editedAt: null }],
+      messages: [{ id: ids.next("message"), author: claudePerson, body: "This image is still a placeholder; shall I find a photograph?", mentions: [], createdAt: 3, editedAt: null, editCount: 0 }],
       markings: [],
     },
   ];
@@ -220,6 +225,21 @@ function fakeArrangeThreads(input: Readonly<{ discussion: DiscussionSnapshot; do
       ? { thread, placement: { kind: "elementRemoved", slideId: slide.id, box: thread.anchor.elementFrameAtCreation ?? { x: 0, y: 0, width: 10, height: 10 } } }
       : { thread, placement: { kind: "onElement", slideId: slide.id, elementId: element.id, box: element.frame, textRange: null } };
   });
+}
+
+/** Seven notices of every tone, oldest first, as a busy session raises them (the notice stack's screenshot). */
+function sampleNotices(scriptId: TransitionScriptRecord["id"]): EditorState["notices"] {
+  const ids = new IdMinter("Notices2");
+  const notice = (tone: EditorState["notices"][number]["tone"], message: string, action: EditorState["notices"][number]["action"]): EditorState["notices"][number] => ({ id: ids.next("notice"), tone, message, action, expiresAfterMilliseconds: null });
+  return [
+    notice("information", "Exported to Google Slides.", null),
+    notice("warning", "You can comment on this deck, but not edit it.", null),
+    notice("information", "Claude wrote a transition: review it before presenting.", { kind: "reviewTransitionScript", scriptId }),
+    notice("error", "The image upload failed: the file is larger than 25 megabytes.", null),
+    notice("warning", "The server is receiving too many changes from this window; it takes them again in 3 seconds.", null),
+    notice("information", "Claude edited the deck: tightened the title slide.", null),
+    notice("information", "Copied 2 elements.", null),
+  ];
 }
 
 function noticeId(): EditorState["notices"][number]["id"] {

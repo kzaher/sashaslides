@@ -18,6 +18,8 @@
 //    accepted, while the authorities refuse it: the in-memory one to everyone but the creator, the
 //    deck server (engine/src/server) to everyone but the creator and the moderating roles.
 //    `discussionRefusal` is exported so the deck server applies exactly these rules first.
+//  * EDITS ARE COUNTED BY THE FOLD (`CommentMessage.editCount`), so the deck server's limit on
+//    edits per message reads the same value on every replica and after a restart replays the log.
 
 import { Subject } from "rxjs";
 import type { CommentMessage, CommentThread, CreateMemoryDiscussionStore, DiscussionCommand, DiscussionLogEntry, DiscussionOutcome, DiscussionRejectionReason, DiscussionRequest, DiscussionSnapshot, DiscussionStore, Person, ReduceDiscussionLog } from "../contracts/discussion.ts";
@@ -117,7 +119,7 @@ function applyEntry(options: Readonly<{ threads: readonly CommentThread[]; entry
   if (discussionRefusal({ threads, command, actor: entry.actor, mayDeleteAnyThread: true }) !== null) return null;
   switch (command.kind) {
     case "createThread": {
-      const message: CommentMessage = { id: command.messageId, author: entry.actor, body: command.body, mentions: command.mentions, createdAt: entry.at, editedAt: null };
+      const message: CommentMessage = { id: command.messageId, author: entry.actor, body: command.body, mentions: command.mentions, createdAt: entry.at, editedAt: null, editCount: 0 };
       return [
         ...threads,
         { id: command.threadId, anchor: command.anchor, status: { kind: "open" }, createdBy: entry.actor, createdAt: entry.at, messages: [message], markings: command.markings },
@@ -129,7 +131,7 @@ function applyEntry(options: Readonly<{ threads: readonly CommentThread[]; entry
         threadId: command.threadId,
         update: (thread) => ({
           ...thread,
-          messages: [...thread.messages, { id: command.messageId, author: entry.actor, body: command.body, mentions: command.mentions, createdAt: entry.at, editedAt: null }],
+          messages: [...thread.messages, { id: command.messageId, author: entry.actor, body: command.body, mentions: command.mentions, createdAt: entry.at, editedAt: null, editCount: 0 }],
         }),
       });
     case "editMessage":
@@ -138,7 +140,7 @@ function applyEntry(options: Readonly<{ threads: readonly CommentThread[]; entry
         threadId: command.threadId,
         update: (thread) => ({
           ...thread,
-          messages: thread.messages.map((message) => (message.id === command.messageId ? { ...message, body: command.body, mentions: command.mentions, editedAt: entry.at } : message)),
+          messages: thread.messages.map((message) => (message.id === command.messageId ? { ...message, body: command.body, mentions: command.mentions, editedAt: entry.at, editCount: message.editCount + 1 } : message)),
         }),
       });
     case "deleteMessage":

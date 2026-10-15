@@ -18,6 +18,9 @@
  *    `serverShuttingDown`, so clients keep their edits and resend them when the server recovers.
  *  - THE RECORD IS CACHED AND WRITTEN THROUGH. Every change to a deck's members, sharing or links
  *    goes through `updateRecord`, serialised per deck, which writes `deck.sealed` and the index.
+ *  - AN UNREADABLE SNAPSHOT IS NEVER LOADED (deck-storage.ts): `acquire` and `connect` answer
+ *    `unreadable`, no room exists, so no flush or compaction can write over the snapshot. Nothing
+ *    is cached, so the next attempt reads the files again (after an operator restored them).
  *  - TIMERS ARE INJECTED (`DeckTimers`), so the lifecycle is tested on a virtual clock.
  */
 import type { SchedulerLike } from "rxjs";
@@ -61,6 +64,9 @@ export type LoadedDeck = Readonly<{ deckId: DeckId; room: DeckRoom; record: () =
 /** Holding one keeps the room loaded; `release` lets it unload once idle. */
 export type DeckLease = Readonly<{ deck: LoadedDeck; release: () => void }>;
 
+/** Why a deck's room did not load: unknown (or its record does not open), or its snapshot is unreadable. */
+export type RoomRefusal = Readonly<{ kind: "notFound" }> | Readonly<{ kind: "unreadable"; message: string }>;
+
 export type DeckRegistry = Readonly<{
   /** The record, from the cache or storage; null when the deck is unknown or does not open. */
   readRecord(options: Readonly<{ deckId: DeckId }>): Promise<DeckRecord | null>;
@@ -68,13 +74,13 @@ export type DeckRegistry = Readonly<{
   updateRecord(options: Readonly<{ deckId: DeckId; change: (record: DeckRecord) => DeckRecord }>): Promise<DeckRecord | null>;
   /** Writes a new deck's record and index entry and loads its room, seeded blank. */
   createDeck(options: Readonly<{ record: DeckRecord }>): Promise<DeckLease>;
-  acquire(options: Readonly<{ deckId: DeckId }>): Promise<DeckLease | null>;
+  acquire(options: Readonly<{ deckId: DeckId }>): Promise<Readonly<{ kind: "acquired"; lease: DeckLease }> | RoomRefusal>;
   /** The room if it is loaded now (no loading). */
   loaded(options: Readonly<{ deckId: DeckId }>): LoadedDeck | null;
   /** Connects a socket to the deck's room (loading it), remembering the account for `closeAccount`. */
   connect(
     options: Readonly<{ deckId: DeckId; accountId: AccountId; person: Person; role: DeckRole; discussionAfter: number; port: RoomConnectionPort }>,
-  ): Promise<RoomConnection | null>;
+  ): Promise<Readonly<{ kind: "connected"; connection: RoomConnection }> | RoomRefusal>;
   /** The open connections of an account, with their decks. */
   connectionsOf(options: Readonly<{ accountId: AccountId }>): readonly Readonly<{ deckId: DeckId; connection: RoomConnection }>[];
   /** The open connections to one deck, with their accounts. */
@@ -103,7 +109,7 @@ export function createDeckRegistry(
   const records = new Map<DeckId, DeckRecord>();
   const recordTails = new Map<DeckId, Promise<unknown>>();
   const entries = new Map<DeckId, RoomEntry>();
-  const loading = new Map<DeckId, Promise<RoomEntry | null>>();
+  const loading = new Map<DeckId, Promise<RoomEntry | RoomRefusal>>();
   const unloading = new Map<DeckId, Promise<void>>();
 
   const readRecord = async ({ deckId }: Readonly<{ deckId: DeckId }>): Promise<DeckRecord | null> => {
@@ -139,15 +145,17 @@ export function createDeckRegistry(
     return result;
   };
 
-  const loadEntry = async (deckId: DeckId, seed: "blankDeck" | "stored"): Promise<RoomEntry | null> => {
+  const loadEntry = async (deckId: DeckId, seed: "blankDeck" | "stored"): Promise<RoomEntry | RoomRefusal> => {
     const pendingUnload = unloading.get(deckId);
     if (pendingUnload !== undefined) await pendingUnload;
     const existing = entries.get(deckId);
     if (existing !== undefined) return existing;
     const record = await readRecord({ deckId });
-    if (record === null) return null;
+    if (record === null) return { kind: "notFound" };
     const location = { deckId, ownerAccountId: record.ownerAccountId };
-    const stored = seed === "stored" ? await storage.loadDocument(location) : { updates: [], lastSequence: 0, logSize: { records: 0, bytes: 0 } };
+    const loaded = seed === "stored" ? await storage.loadDocument(location) : { kind: "loaded" as const, document: { updates: [], lastSequence: 0, logSize: { records: 0, bytes: 0 } } };
+    if (loaded.kind === "snapshotUnreadable") return { kind: "unreadable", message: loaded.message };
+    const stored = loaded.document;
     const discussion = seed === "stored" ? await storage.loadDiscussion(location) : [];
     const members = await options.membersOf(record);
     const entry: RoomEntry = {
@@ -189,7 +197,7 @@ export function createDeckRegistry(
     return entry;
   };
 
-  const ensureEntry = (deckId: DeckId, seed: "blankDeck" | "stored"): Promise<RoomEntry | null> => {
+  const ensureEntry = (deckId: DeckId, seed: "blankDeck" | "stored"): Promise<RoomEntry | RoomRefusal> => {
     const existing = entries.get(deckId);
     if (existing !== undefined && !unloading.has(deckId)) return Promise.resolve(existing);
     const inFlight = loading.get(deckId);
@@ -340,12 +348,12 @@ export function createDeckRegistry(
     createDeck: async ({ record }) => {
       await writeRecord(record);
       const entry = await ensureEntry(record.deckId, "blankDeck");
-      if (entry === null) throw new Error(`deck ${record.deckId}: written but not loadable`);
+      if (isRefusal(entry)) throw new Error(`deck ${record.deckId}: written but not loadable`);
       return leaseOf(entry);
     },
     acquire: async ({ deckId }) => {
       const entry = await ensureEntry(deckId, "stored");
-      return entry === null ? null : leaseOf(entry);
+      return isRefusal(entry) ? entry : { kind: "acquired", lease: leaseOf(entry) };
     },
     loaded: ({ deckId }) => {
       const entry = entries.get(deckId);
@@ -353,7 +361,7 @@ export function createDeckRegistry(
     },
     connect: async ({ deckId, accountId, person, role, discussionAfter, port }) => {
       const entry = await ensureEntry(deckId, "stored");
-      if (entry === null) return null;
+      if (isRefusal(entry)) return entry;
       let connection: RoomConnection | null = null;
       const tracked: RoomConnectionPort = {
         send: port.send,
@@ -367,11 +375,14 @@ export function createDeckRegistry(
       const opened = connection;
       entry.connections.set(opened.id, { accountId, connection: opened });
       return {
-        ...opened,
-        disconnect: () => {
-          entry.connections.delete(opened.id);
-          opened.disconnect();
-          scheduleUnloadCheck(entry);
+        kind: "connected",
+        connection: {
+          ...opened,
+          disconnect: () => {
+            entry.connections.delete(opened.id);
+            opened.disconnect();
+            scheduleUnloadCheck(entry);
+          },
         },
       };
     },
@@ -424,6 +435,11 @@ type RoomEntry = {
   unloadTimer: Disposable | null;
   lastRecordTouch: number;
 };
+
+/** A room entry is the registry's own mutable bookkeeping; a refusal is a frozen tagged value. */
+function isRefusal(loaded: RoomEntry | RoomRefusal): loaded is RoomRefusal {
+  return "kind" in loaded;
+}
 
 function describe(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);

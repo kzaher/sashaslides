@@ -156,6 +156,7 @@ const DECK_API_ERROR_CODES = keysOf<DeckApiErrorCode>({
   googlePresentationNotFound: true,
   googleFailed: true,
   addonIdentityRejected: true,
+  deckUnreadable: true,
   serverError: true,
 });
 const AUTHENTICATION_KINDS = keysOf<DeckSessionBody["authentication"]>({ cookie: true, bearer: true });

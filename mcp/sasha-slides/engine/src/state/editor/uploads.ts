@@ -123,6 +123,7 @@ export function retriesUpload(action: EditorState["notices"][number]["action"], 
   switch (action.kind) {
     case "retryUpload":
       return action.uploadId === uploadId;
+    case "retryDiscussion":
     case "undoAgentEdits":
     case "reviewTransitionScript":
     case "openInNewTab":

@@ -28,6 +28,9 @@
 //    a menu drawn inside the top bar can never rise above the toolbar below it, whatever its own
 //    z-index. Render menus, popovers and context menus into a floating layer at the engine root
 //    (the view's portal) so `--sasha-layer-popover` compares against the panels themselves.
+//  * A LINK CAN WEAR A PILL. `.sasha-engine a` (accent, underlined) outranks a bare pill class, so
+//    each pill has an `a.<pill>` rule of its own: the top bar's "Account" link reads as the
+//    secondary pill beside Share and Comments, not as the browser's underlined link.
 //  * THE SLIDE ROOT RESETS INHERITANCE (`all: initial`), so nothing of the chrome -- font, colour,
 //    line height -- leaks into slide content; the renderer sets every slide style inline.
 
@@ -163,6 +166,10 @@ ${livelyAnimations(tokens)}
 .${classes.notice}[data-tone="warning"] { color: var(--sasha-warning); }
 .${classes.notice}[data-tone="error"] { color: var(--sasha-danger); }
 .${classes.root} a { color: var(--sasha-accent); }
+.${classes.root} a.${classes.primaryPill}, .${classes.root} a.${classes.secondaryPill}, .${classes.root} a.${classes.dangerPill} { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.${classes.root} a.${classes.primaryPill} { color: var(--sasha-ink-button-text); }
+.${classes.root} a.${classes.secondaryPill} { color: var(--sasha-text); }
+.${classes.root} a.${classes.dangerPill} { color: var(--sasha-danger-button-text); }
 
 .${classes.root} :focus-visible { outline: var(--sasha-control-focus-ring-width) solid var(--sasha-focus-ring); outline-offset: 2px; }
 .${classes.root} [disabled], .${classes.root} [aria-disabled="true"] { opacity: var(--sasha-disabled-opacity); cursor: not-allowed; }

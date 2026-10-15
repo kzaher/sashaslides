@@ -18,7 +18,7 @@ import type { DeckSummary } from "../engine/src/contracts/deck-api.ts";
 import type { DiscussionSnapshot, Person } from "../engine/src/contracts/discussion.ts";
 import type { DeckCaller, DeckHandle, DeckOpenOutcome, DeckService } from "../deck-contracts/deck-service-contract";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
-import type { DeckManager } from "./deck-manager";
+import { DECK_UNREADABLE_MESSAGE, type DeckManager } from "./deck-manager";
 import { roleOf } from "./deck-records";
 import type { DeckLease, DeckTimers } from "./deck-registry";
 
@@ -44,6 +44,8 @@ export function createDeckService(options: Readonly<{ manager: DeckManager; time
           return { kind: "notFound" };
         case "notPermitted":
           return { kind: "notPermitted" };
+        case "deckUnreadable":
+          return { kind: "deckUnreadable", message: created.message };
         default:
           return assertNever(created);
       }
@@ -51,9 +53,17 @@ export function createDeckService(options: Readonly<{ manager: DeckManager; time
     openDeck: async ({ caller, deckId }) => {
       const access = await manager.access({ accountId: caller.accountId, deckId });
       if (access === null) return { kind: "notFound" };
-      const lease = await manager.registry.acquire({ deckId });
-      if (lease === null) return { kind: "notFound" };
-      return { kind: "opened", deck: await handleFor(caller, lease) };
+      const acquired = await manager.registry.acquire({ deckId });
+      switch (acquired.kind) {
+        case "acquired":
+          return { kind: "opened", deck: await handleFor(caller, acquired.lease) };
+        case "notFound":
+          return { kind: "notFound" };
+        case "unreadable":
+          return { kind: "deckUnreadable", message: DECK_UNREADABLE_MESSAGE };
+        default:
+          return assertNever(acquired);
+      }
     },
     findDeckByAddonBinding: ({ bindingSecretHash }) => Promise.resolve(manager.findDeckByAddonBinding({ bindingSecretHash })),
   };
@@ -142,6 +152,7 @@ function deckHandle(
         case "notFound":
         case "notPermitted":
         case "invalidRequest":
+        case "deckUnreadable":
           return { kind: "notPermitted" };
         default:
           return assertNever(stored);
