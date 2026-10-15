@@ -82,7 +82,12 @@ function addonExportNotice(finished: Readonly<{ outcome: "applied" | "failed"; m
 }
 
 function exportedNotice(report: GoogleSlidesExportReport): PageNotice {
-  const losses = report.losses.length === 0 ? "" : ` ${report.losses.length} ${report.losses.length === 1 ? "thing" : "things"} Google Slides cannot show were simplified.`;
+  const losses =
+    report.losses.length === 0
+      ? ""
+      : report.losses.length === 1
+        ? " 1 thing Google Slides cannot show was simplified."
+        : ` ${String(report.losses.length)} things Google Slides cannot show were simplified.`;
   return {
     tone: "information",
     message: `Exported ${report.slideCount} ${report.slideCount === 1 ? "slide" : "slides"} to Google Slides.${losses}`,
