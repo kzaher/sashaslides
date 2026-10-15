@@ -1,6 +1,8 @@
 // The room over fake connections (acceptance 1, 2, 3 and 5): sync and convergence, the awareness
 // relay's identity rules, the protected-field guard end to end with a third replica watching every
-// transaction, read-only roles, and the rate limit on a virtual clock.
+// transaction -- for transition scripts and for scripted build steps' scripts alike, and for a
+// script whose purpose is flipped under an approval -- read-only roles, and the rate limit on a
+// virtual clock.
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
@@ -12,6 +14,7 @@ import { BINARY_MESSAGE_TYPE } from "../contracts/collaboration.ts";
 import type {
   CommandAuthor,
   DeckId,
+  ScriptPurpose,
   DeckMember,
   DeckRole,
   DiscussionOutcome,
@@ -121,6 +124,8 @@ describe("the protected-field guard", () => {
   const SCRIPT_ID = "tr_guardScript1" as TransitionScriptId;
   type Row = Readonly<{
     name: string;
+    /** The editor approves the current text in a transaction of its own before `write` (allowed: an editor may approve). */
+    approvedFirst?: boolean;
     write: (scriptMap: Y.Map<unknown>, meta: Y.Map<unknown>, current: string) => void;
     expectedApproval: "approved" | "unapproved";
     expectedAuthor: CommandAuthorView;
@@ -168,6 +173,27 @@ describe("the protected-field guard", () => {
       expectedMeta: META,
     },
     {
+      name: "control: an approved script is renamed, text and purpose unchanged",
+      approvedFirst: true,
+      write: (script) => script.set("name", "Wipe, renamed"),
+      expectedApproval: "approved",
+      expectedAuthor: AGENT_AUTHOR,
+      expectedCorrections: [],
+      expectedMeta: META,
+    },
+    {
+      name: "the purpose flips under an approval (a build step's script turned into a transition, or the reverse)",
+      approvedFirst: true,
+      write: (script) => script.set("purpose", script.get("purpose") === "animation" ? "transition" : "animation"),
+      expectedApproval: "unapproved",
+      expectedAuthor: EDITOR_AUTHOR,
+      expectedCorrections: [
+        { kind: "scriptAuthorRestored", scriptId: SCRIPT_ID },
+        { kind: "approvalRevoked", scriptId: SCRIPT_ID, reason: "fingerprintMismatch" },
+      ],
+      expectedMeta: META,
+    },
+    {
       name: "meta.deckId changes",
       write: (_script, meta) => meta.set("deckId", "dk_somethingElse0000000001"),
       expectedApproval: "unapproved",
@@ -190,8 +216,11 @@ describe("the protected-field guard", () => {
       expectedMeta: META,
     },
   ];
+  // Every row runs for a transition's script and a build step's script: the purpose must not change
+  // what the guard allows, only what an approval covers.
+  for (const purpose of ["transition", "animation"] as const satisfies readonly ScriptPurpose[])
   for (const row of rows) {
-    test(row.name, () => {
+    test(`${row.name} (${purpose} script)`, () => {
       using setup = testRoom();
       const writer: CommandAuthor = { kind: "agent", name: "Claude", agentSessionId: "as_writer" };
       const saved = setup.room.applyEnvelope({
@@ -200,7 +229,7 @@ describe("the protected-field guard", () => {
           commands: [
             {
               kind: "upsertTransitionScript",
-              script: { id: SCRIPT_ID, name: "Wipe", description: "", script: "sashaTransition.define({ run: () => {} });", stylesheet: "", markup: "", defaultParameters: {} },
+              script: { id: SCRIPT_ID, name: "Wipe", description: "", purpose, script: "sashaTransition.define({ run: () => {} });", stylesheet: "", markup: "", defaultParameters: {} },
               basedOnUpdatedAt: null,
               approval: "unapproved",
             },
@@ -217,6 +246,12 @@ describe("the protected-field guard", () => {
 
       const scriptMap = scriptMapOf(editor.sharedDocument, SCRIPT_ID);
       const current = currentFingerprint(scriptMap);
+      if (row.approvedFirst === true) {
+        editor.sharedDocument.transact(() => scriptMap.set("approval", { kind: "approved", approvedBy: ALICE.id, fingerprint: current }));
+        assert.equal(approvalKind(serverDocumentOf(setup.room), SCRIPT_ID), "approved", "the setup approval stands");
+        // Only what the offending update leaves may never be "approved"; the setup's own approval was allowed.
+        approvalsSeen.length = 0;
+      }
       editor.sharedDocument.transact(() => row.write(scriptMap, roots(editor.sharedDocument).meta, current));
 
       for (const replica of [serverDocumentOf(setup.room), editor.sharedDocument, observer.sharedDocument]) {
@@ -233,6 +268,35 @@ describe("the protected-field guard", () => {
       }
     });
   }
+
+  // The room's own replica applies agent envelopes (Claude's tools); the model refuses an agent's
+  // approval there, and an agent's save of a build step's script lands unapproved whatever it asks.
+  for (const row of [
+    { name: "an agent's save asking authorDecides", author: "agent", command: "save", expected: "unapproved" },
+    { name: "an agent approving the script", author: "agent", command: "approve", expected: "rejected" },
+    { name: "control: a person approving the script", author: "person", command: "approve", expected: "approved" },
+  ] as const) {
+    test(`a build step's script through the room: ${row.name}`, () => {
+      using setup = testRoom();
+      const agent: CommandAuthor = { kind: "agent", name: "Claude", agentSessionId: "as_writer" };
+      const draft = { id: SCRIPT_ID, name: "Bounce", description: "", purpose: "animation", script: "sashaTransition.define({ run: () => {} });", stylesheet: "", markup: "", defaultParameters: {} } as const;
+      const saved = setup.room.applyEnvelope({
+        envelope: envelope({ author: agent, commands: [{ kind: "upsertTransitionScript", script: draft, basedOnUpdatedAt: null, approval: row.command === "save" ? "authorDecides" : "unapproved" }] }),
+        summaryForCollaborators: "wrote a build animation",
+      });
+      assert.equal(saved.kind, "applied");
+      if (row.command === "approve") {
+        const author: CommandAuthor = row.author === "agent" ? agent : { kind: "person", personId: ALICE.id };
+        const approved = setup.room.applyEnvelope({
+          envelope: envelope({ author, commands: [{ kind: "approveTransitionScript", scriptId: SCRIPT_ID, fingerprint: scriptFingerprint(draft) }] }),
+          summaryForCollaborators: "approved",
+        });
+        assert.equal(approved.kind === "rejected" ? "rejected" : approvalKind(serverDocumentOf(setup.room), SCRIPT_ID), row.expected);
+        return;
+      }
+      assert.equal(approvalKind(serverDocumentOf(setup.room), SCRIPT_ID), row.expected);
+    });
+  }
 });
 
 describe("structures waiting for their dependencies", () => {
@@ -245,7 +309,7 @@ describe("structures waiting for their dependencies", () => {
         commands: [
           {
             kind: "upsertTransitionScript",
-            script: { id: scriptId, name: "Wipe", description: "", script: "benign();", stylesheet: "", markup: "", defaultParameters: {} },
+            script: { id: scriptId, name: "Wipe", description: "", purpose: "transition", script: "benign();", stylesheet: "", markup: "", defaultParameters: {} },
             basedOnUpdatedAt: null,
             approval: "unapproved",
           },
@@ -268,7 +332,7 @@ describe("structures waiting for their dependencies", () => {
       const script = scriptMapOf(forger, scriptId);
       script.set("script", forgedText);
       script.set("author", { kind: "person", personId: ALICE.id });
-      script.set("approval", { kind: "approved", approvedBy: ALICE.id, fingerprint: scriptFingerprint({ script: forgedText, stylesheet: "", markup: "" }) });
+      script.set("approval", { kind: "approved", approvedBy: ALICE.id, fingerprint: scriptFingerprint({ script: forgedText, stylesheet: "", markup: "", purpose: "transition" }) });
     });
     bob.sendBinary(syncUpdate(Y.encodeStateAsUpdate(forger, gap)));
 
@@ -479,7 +543,7 @@ function currentFingerprint(script: Y.Map<unknown>): string {
     const value: unknown = script.get(key);
     return typeof value === "string" ? value : "";
   };
-  return scriptFingerprint({ script: text("script"), stylesheet: text("stylesheet"), markup: text("markup") });
+  return scriptFingerprint({ script: text("script"), stylesheet: text("stylesheet"), markup: text("markup"), purpose: script.get("purpose") === "animation" ? "animation" : "transition" });
 }
 
 function approvalKind(sharedDocument: Y.Doc, scriptId: TransitionScriptId): string {

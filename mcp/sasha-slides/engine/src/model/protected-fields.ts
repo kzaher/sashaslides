@@ -1,6 +1,7 @@
 // THE PROTECTED FIELDS OF A DOCUMENT, as the deck server's guard reads and corrects them
-// (collaboration.ts header, SPEC.md 21.6): every transition script's author, approval and the
-// fingerprint of its text, and the three `meta` keys that never change after creation.
+// (collaboration.ts header, SPEC.md 21.6): every script's author, approval and the fingerprint of its
+// text and purpose -- transitions and scripted build steps alike, they share the store and the rule
+// -- and the three `meta` keys that never change after creation.
 //
 // Key decisions:
 //
@@ -15,7 +16,7 @@
 import * as Y from "yjs";
 import { assertNever } from "../contracts/assert-never.ts";
 import type { ProtectedMetaKey } from "../contracts/collaboration.ts";
-import { scriptFingerprint, type TransitionApproval } from "../contracts/document.ts";
+import { scriptFingerprint, type ScriptPurpose, type TransitionApproval } from "../contracts/document.ts";
 import type { TransitionScriptId } from "../contracts/ids.ts";
 import { META_KEY, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
 import { documentRoots } from "./document-paths.ts";
@@ -25,7 +26,13 @@ export type ProtectedScriptFields = Readonly<{
   author: unknown;
   /** The stored approval value, unparsed. */
   approval: unknown;
-  /** `scriptFingerprint` of the stored script, stylesheet and markup (a missing source reads as ""). */
+  /**
+   * `scriptFingerprint` of the stored script, stylesheet, markup and purpose (a missing source reads
+   * as ""; a missing purpose as "transition", what records from before builds mean). Because the
+   * purpose is in it, turning an approved build-step script into a transition, or back, is a text
+   * change to the guard: the sender becomes its author and the approval is revoked unless they may
+   * approve and do.
+   */
   fingerprint: string;
 }>;
 
@@ -66,6 +73,7 @@ export function readProtectedFields(sharedDocument: Y.Doc): ProtectedFields {
         script: text(TRANSITION_SCRIPT_KEY.script),
         stylesheet: text(TRANSITION_SCRIPT_KEY.stylesheet),
         markup: text(TRANSITION_SCRIPT_KEY.markup),
+        purpose: purposeOf(value.get(TRANSITION_SCRIPT_KEY.purpose)),
       }),
     });
   });
@@ -98,4 +106,9 @@ export function writeProtectedFields(options: Readonly<{ sharedDocument: Y.Doc; 
       }
     }
   }, options.origin);
+}
+
+/** The stored purpose; anything but "animation" reads as "transition" (an unknown value can never claim a build step's approval). */
+function purposeOf(stored: unknown): ScriptPurpose {
+  return stored === "animation" ? "animation" : "transition";
 }

@@ -8,6 +8,9 @@
 // sheet plus the presenter's rules) into that window's head, and takes it away again on unmount.
 // Slides are drawn with `PlacedSlide`, never the in-page transition stage: the stage is registered
 // by run id for the audience window, and a second registration would steal the animation.
+//
+// The current slide is drawn at the build position the audience sees, with "build 2 of 5" beside
+// its counter while it has clicks; the next slide is drawn as it will arrive, at build 0.
 
 import { useLayoutEffect, type ReactElement } from "react";
 import { createPortal } from "react-dom";
@@ -15,8 +18,8 @@ import { plainText } from "../../contracts/document.ts";
 import type { PresenterDependencies, PresenterEvent } from "../../contracts/presenter.ts";
 import { TIDEPOOL_CLASS, tidepoolStylesheet } from "../../theme/tidepool-stylesheet.ts";
 import { TIDEPOOL_TOKENS } from "../../theme/tidepool-theme.ts";
-import { currentSlideOf, deckSlideNumber, slideById, type PresenterSystemState } from "../presenter-state.ts";
-import { PresenterControls, slideCounterText } from "./presenter-controls.tsx";
+import { currentBuildOf, currentSlideOf, deckSlideNumber, slideById, type PresenterSystemState } from "../presenter-state.ts";
+import { PresenterControls, buildCounterText, slideCounterText } from "./presenter-controls.tsx";
 import { PRESENTER_CLASS, PRESENTER_RULES } from "./presenter-stylesheet.ts";
 import { PlacedSlide, SlideViewport } from "./slide-surfaces.tsx";
 
@@ -55,6 +58,7 @@ export function SpeakerView(
   const currentSlide = slideById(document, current);
   const notes = currentSlide === null ? "" : plainText({ body: currentSlide.speakerNotes, slideNumber: deckSlideNumber(document, current) }).trim();
   const noHandlers = { onClick: undefined, onContextMenu: undefined, style: {} };
+  const buildText = buildCounterText(state);
   return (
     <div className={`${TIDEPOOL_CLASS.root} ${TIDEPOOL_CLASS.calmGround} ${PRESENTER_CLASS.speakerView}`} data-speaker-view="true">
       <header className={`${TIDEPOOL_CLASS.panel} ${PRESENTER_CLASS.speakerHeader}`}>
@@ -74,10 +78,13 @@ export function SpeakerView(
       </header>
       <div className={PRESENTER_CLASS.speakerGrid}>
         <section className={`${TIDEPOOL_CLASS.panel} ${PRESENTER_CLASS.speakerCurrent}`} aria-label="Current slide">
-          <h2 className={PRESENTER_CLASS.speakerHeading}>Current slide · {slideCounterText(state)}</h2>
+          <h2 className={PRESENTER_CLASS.speakerHeading}>
+            Current slide · {slideCounterText(state)}
+            {buildText === null ? null : <span data-build-counter="true"> · {buildText}</span>}
+          </h2>
           <div className={PRESENTER_CLASS.speakerSlideBox}>
             <SlideViewport document={document} {...noHandlers}>
-              {(box) => (box === null ? null : <PlacedSlide dependencies={properties.dependencies} document={document} slideId={current} box={box} />)}
+              {(box) => (box === null ? null : <PlacedSlide dependencies={properties.dependencies} document={document} slideId={current} build={currentBuildOf(state)} box={box} />)}
             </SlideViewport>
           </div>
         </section>
@@ -89,7 +96,7 @@ export function SpeakerView(
                 <p className={TIDEPOOL_CLASS.muted}>End of presentation</p>
               ) : (
                 <SlideViewport document={document} {...noHandlers}>
-                  {(box) => (box === null ? null : <PlacedSlide dependencies={properties.dependencies} document={document} slideId={nextSlideId} box={box} />)}
+                  {(box) => (box === null ? null : <PlacedSlide dependencies={properties.dependencies} document={document} slideId={nextSlideId} build={0} box={box} />)}
                 </SlideViewport>
               )}
             </div>

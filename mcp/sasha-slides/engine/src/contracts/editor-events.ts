@@ -27,11 +27,12 @@
 import type { ClipboardPayload, EditSettlement, EditorDialog, HitTarget, MenuName, Modifiers, PointerButton, PointerSample, PropertiesTab, Tool, ZoomSetting, ElementMeasurement } from "./editor-state.ts";
 import type { DiscussionOutcome, DiscussionSnapshot, Marking } from "./discussion.ts";
 import type { DocumentChange, TextRange } from "./document-store.ts";
-import type { AssetMediaType, AssetRecord, Paragraph, ShapePreset } from "./document.ts";
+import type { AnimationEffect, AnimationStepPatch } from "./animations.ts";
+import type { AssetMediaType, AssetRecord, Paragraph, ScriptPurpose, ShapePreset } from "./document.ts";
 import type { ElementPatch, ReorderPlacement, SlidePropertiesPatch, TableCellPatch, TransitionScriptDraft } from "./commands.ts";
 import type { FlipAxis, FractionalRegion, Point, Size } from "./geometry.ts";
 import type { AgentRevertOutcome, CollaborationNotice, CollaborationStatus } from "./collaboration.ts";
-import type { AssetId, DiscussionRequestId, ElementId, LayoutId, MessageId, NoticeId, PersonId, SlideId, ThreadId, TransitionScriptId, UploadId } from "./ids.ts";
+import type { AnimationStepId, AssetId, DiscussionRequestId, ElementId, LayoutId, MessageId, NoticeId, PersonId, SlideId, ThreadId, TransitionScriptId, UploadId } from "./ids.ts";
 import type { PeerPresence } from "./presence.ts";
 import type { TextTarget } from "./selection.ts";
 import type { Colour, ParagraphStylePatch, RunStylePatch } from "./style.ts";
@@ -88,13 +89,24 @@ export type EditorEvent =
   /** Changes the layout and remaps placeholders by (role, index) in one envelope. */
   | Readonly<{ kind: "slideLayoutChosen"; layoutId: LayoutId }>
   // --- transition scripts (their own dialog, plain text, never the slide text pipeline)
-  | Readonly<{ kind: "transitionScriptEditorOpened"; scriptId: TransitionScriptId | null }>
+  /** `purpose` is what a NEW script (`scriptId` null) is for; an existing one keeps its own. */
+  | Readonly<{ kind: "transitionScriptEditorOpened"; scriptId: TransitionScriptId | null; purpose: ScriptPurpose }>
   | Readonly<{ kind: "transitionScriptDraftChanged"; draft: TransitionScriptDraft }>
   | Readonly<{ kind: "transitionScriptSaveRequested"; overwrite: boolean }>
   | Readonly<{ kind: "transitionScriptReloadRequested" }>
   | Readonly<{ kind: "transitionScriptApproved"; scriptId: TransitionScriptId; fingerprint: string }>
   | Readonly<{ kind: "transitionPreviewRequested"; slideId: SlideId }>
   | Readonly<{ kind: "transitionPreviewEnded" }>
+  // --- builds: the Animate tab (animations.ts)
+  /** One step per selected element, after the chosen step (or at the end), triggered on click. */
+  | Readonly<{ kind: "animationAddRequested"; effect: AnimationEffect }>
+  | Readonly<{ kind: "animationStepSelected"; stepId: AnimationStepId | null }>
+  | Readonly<{ kind: "animationStepPatchRequested"; stepId: AnimationStepId; patch: AnimationStepPatch }>
+  /** Drag or keyboard reorder: the steps keep their relative order and land after `after` (first when null). */
+  | Readonly<{ kind: "animationStepsMoved"; stepIds: readonly AnimationStepId[]; after: AnimationStepId | null }>
+  | Readonly<{ kind: "animationStepRemoved"; stepId: AnimationStepId }>
+  | Readonly<{ kind: "buildPreviewRequested"; slideId: SlideId }>
+  | Readonly<{ kind: "buildPreviewEnded" }>
   // --- clipboard: the view writes the system clipboard itself (editor-state.ts header)
   | Readonly<{ kind: "copied" }>
   | Readonly<{ kind: "cutRequested" }>

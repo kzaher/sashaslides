@@ -273,7 +273,7 @@ function slideEntries(options: Readonly<{ state: EditorState; key: ShortcutWrite
     separator(),
     item({ label: "Change background", event: { kind: "propertiesTabChosen", tab: "slide" } }),
     item({ label: "Transition", event: { kind: "propertiesTabChosen", tab: "transition" } }),
-    item({ label: scriptId === null ? "Write a transition script" : "Edit transition script", event: { kind: "transitionScriptEditorOpened", scriptId } }),
+    item({ label: scriptId === null ? "Write a transition script" : "Edit transition script", event: { kind: "transitionScriptEditorOpened", scriptId, purpose: "transition" } }),
   ];
 }
 

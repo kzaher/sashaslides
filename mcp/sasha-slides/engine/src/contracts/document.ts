@@ -37,6 +37,7 @@
 //    slide number) is one embedded item of length 1. An empty body is a single empty paragraph,
 //    length 1. Text selections and text commands use these indices.
 
+import type { AnimationStep } from "./animations.ts";
 import { assertNever } from "./assert-never.ts";
 import type { Frame, PageSize, Point } from "./geometry.ts";
 import type {
@@ -131,6 +132,8 @@ export type SlideSnapshot = Readonly<{
   speakerNotes: TextBody;
   /** The transition INTO this slide, as in Slides and Keynote. null: a cut. */
   transition: SlideTransition | null;
+  /** The build sequence of this slide's objects, in play order (animations.ts). Empty: no builds. */
+  animations: readonly AnimationStep[];
   /** Top level, z-order back to front. */
   elements: readonly ElementSnapshot[];
 }>;
@@ -364,6 +367,15 @@ export type TransitionApproval =
   | Readonly<{ kind: "approved"; approvedBy: PersonId; fingerprint: string }>;
 
 /**
+ * What a script in the deck's script store is for. A transition animates from one slide to the next;
+ * an animation is a scripted build step (animations.ts) animating from one build state of a slide
+ * to the next. Both run in the same sandbox under the same approval rule. The purpose is part of
+ * the fingerprint an approval covers (`scriptFingerprint`): code a person approved as a build step
+ * is not thereby approved to run between slides, and the reverse.
+ */
+export type ScriptPurpose = "transition" | "animation";
+
+/**
  * A scripted transition: JavaScript (and optional markup and stylesheet) that runs in the
  * sandboxed runner (transition-protocol.ts). Stored once per deck and referenced by any number of
  * slides, so Claude can write one "ink wipe" and the user can apply it everywhere. The source is
@@ -378,6 +390,8 @@ export type TransitionScriptRecord = Readonly<{
   id: TransitionScriptId;
   name: string;
   description: string;
+  /** "transition" for records stored before builds existed. */
+  purpose: ScriptPurpose;
   author: TransitionAuthor;
   /** The script body; calls `sashaTransition.define(...)` (transition-protocol.ts). */
   script: string;
@@ -424,13 +438,27 @@ export function plainText(options: Readonly<{ body: TextBody; slideNumber: numbe
 }
 
 /**
- * A short, synchronous fingerprint of a script's three sources (two 32-bit Fowler-Noll-Vo hashes
- * with different offsets, 16 hexadecimal digits). Not a security hash: it only has to change when the
- * text changes, so an approval cannot outlive an edit (`TransitionApproval`).
+ * A short, synchronous fingerprint of a script's three sources and its purpose (two 32-bit
+ * Fowler-Noll-Vo hashes with different offsets, 16 hexadecimal digits). Not a security hash: it only
+ * has to change when the text or the purpose changes, so an approval cannot outlive an edit
+ * (`TransitionApproval`) or follow the code into another role (`ScriptPurpose`). A transition's
+ * fingerprint is the three sources alone, exactly as before builds existed, so every approval given
+ * then still holds.
  */
-export function scriptFingerprint(sources: Readonly<{ script: string; stylesheet: string; markup: string }>): string {
-  const text = `${sources.script}\u0000${sources.stylesheet}\u0000${sources.markup}`;
+export function scriptFingerprint(sources: Readonly<{ script: string; stylesheet: string; markup: string; purpose: ScriptPurpose }>): string {
+  const text = `${sources.script}\u0000${sources.stylesheet}\u0000${sources.markup}${purposeSuffix(sources.purpose)}`;
   return fowlerNollVo({ text, offset: 0x811c9dc5 }) + fowlerNollVo({ text, offset: 0x01000193 ^ 0x5bd1e995 });
+}
+
+function purposeSuffix(purpose: ScriptPurpose): string {
+  switch (purpose) {
+    case "transition":
+      return "";
+    case "animation":
+      return "\u0000animation";
+    default:
+      return assertNever(purpose);
+  }
 }
 
 function plainRunText(options: Readonly<{ run: TextRun; slideNumber: number | null }>): string {

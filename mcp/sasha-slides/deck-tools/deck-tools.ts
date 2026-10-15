@@ -7,6 +7,7 @@
  *   deck_read                 a deck's outline (ids, frames, plain text); `full` adds slide values
  *   deck_edit                 edits in a person's words, applied as ONE undo step, all or nothing
  *   deck_write_transition     a scripted transition, saved UNAPPROVED for a person to review
+ *   deck_write_animation      a scripted build step's script, saved UNAPPROVED, and the steps using it
  *   deck_revert               undo an agent session's edits (this session's by default)
  *   deck_read_comments        the discussion, as threads an agent can act on
  *   deck_reply_comment        reply in a thread as the account's agent ("Claude")
@@ -27,7 +28,7 @@
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { randomInt } from "node:crypto";
-import type { AssistantEditOutcome, AssistantTransitionScript } from "../engine/src/contracts/assistant-deck-tools.ts";
+import type { AssistantAnimationScript, AssistantEditOutcome, AssistantTransitionScript } from "../engine/src/contracts/assistant-deck-tools.ts";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
 import type { CommandAuthor, CommandEnvelope, CommandRejection, DocumentCommand } from "../engine/src/contracts/commands.ts";
 import { roleAllows, type DeckPermission, type DeckRole } from "../engine/src/contracts/deck-access.ts";
@@ -40,9 +41,9 @@ import { pollProgressReporter, type ProgressSink } from "../long-poll-progress.t
 import type { AssistantEditRequest } from "./assistant-edit-request.ts";
 import { assistantThreads, discussionChanges, type DiscussionChange } from "./assistant-threads.ts";
 import { deckAddress, deckOutline } from "./deck-outline.ts";
-import { describeRejection, editIndexOfRejection, expandAssistantEdits } from "./edit-expansion.ts";
+import { describeRejection, editIndexOfRejection, expandAssistantEdits, type CreatedIds } from "./edit-expansion.ts";
 import { fetchImageSource } from "./image-source.ts";
-import { expandTransitionScript } from "./transition-script-edit.ts";
+import { expandAnimationScript, expandTransitionScript } from "./transition-script-edit.ts";
 import {
   DECK_AWAIT_COMMENTS_INPUT,
   DECK_CREATE_INPUT,
@@ -53,6 +54,7 @@ import {
   DECK_REPLY_COMMENT_INPUT,
   DECK_RESOLVE_COMMENT_INPUT,
   DECK_REVERT_INPUT,
+  DECK_WRITE_ANIMATION_INPUT,
   DECK_WRITE_TRANSITION_INPUT,
   parsedEditRequest,
 } from "./tool-input-schemas.ts";
@@ -125,6 +127,7 @@ export const registerDeckTools: RegisterDeckTools = (options) => {
       description:
         "A deck's outline: layouts and their placeholders, every slide in order with its elements (ids, kinds, frames in slide units, plain text), " +
         "transition scripts and open comment count. Read before editing: deck_edit addresses slides and elements by these ids. " +
+        "Each slide lists its build steps (`animations`, in play order) and each element its `morphKey`. " +
         "detail 'full' also returns the complete values (styles, text runs) of the slides in slideIds.",
       inputSchema: DECK_READ_INPUT,
     },
@@ -147,7 +150,11 @@ export const registerDeckTools: RegisterDeckTools = (options) => {
         "and tables. Everything in one call is applied together as ONE undo step, or nothing is (the answer names the failing edit). Collaborators " +
         "see the change live with your `summary` and can undo it. Omitted styles come from the theme; omitted frames from the layout. To address " +
         "something added earlier in the same call, give it an `id` of your choosing (e.g. sl_pricing01, el_proCard01). Read the deck first. " +
-        "Use one deck_edit per user request.",
+        "Builds (object animations) are addAnimations, updateAnimations, moveAnimations and removeAnimations: steps play one click at a time " +
+        "(trigger withPrevious or afterPrevious chains a step to the one before); added steps' ids come back in `created[].animationStepIds`. " +
+        "A morph transition is setSlide { patch: { transition: { kind: 'builtin', effect: { effect: 'morph' }, durationMilliseconds } } } on the slide it " +
+        "leads into: it pairs elements of the two slides by `morphKey` (the element id unless set), so set the same key with " +
+        "restyleElements { patch: { morphKey } } to make two different elements glide into each other. Use one deck_edit per user request.",
       inputSchema: DECK_EDIT_INPUT,
     },
     async ({ deckId, summary, edits }, extra) =>
@@ -168,6 +175,25 @@ export const registerDeckTools: RegisterDeckTools = (options) => {
     },
     async (request, extra) =>
       withDeck({ tools, extra, deckId: request.deckId, permission: "editDocument" }, async ({ deck, resolution }) => writeTransition({ tools, deck, resolution, request })),
+  );
+
+  server.registerTool(
+    "deck_write_animation",
+    {
+      title: "Write a scripted animation",
+      description:
+        "Save the script of a scripted BUILD STEP (an object animation no built-in effect covers) and append one step per assignTo entry to " +
+        "that slide's build sequence. The script calls sashaTransition.define({ name, async run(context) { ... } }) and runs in the same " +
+        "sandbox as a scripted transition: context.outgoing is the slide before the step, context.incoming the slide after it, " +
+        "context.parameters.targetElementId the element to animate (find it in context.elements('incoming'), or context.elements('outgoing') " +
+        "for an exit), context.durationMilliseconds the step's duration, and context.reducedMotion asks for no motion. The declared category " +
+        "decides where the element rests (entrance shown, exit hidden, emphasis unchanged) whatever the script draws. It is saved " +
+        "UNAPPROVED: until a person reviews and approves it in the editor the step shows its resting state at once, so give the user the " +
+        "reviewAddress. Pass scriptId to replace one of the deck's animation scripts.",
+      inputSchema: DECK_WRITE_ANIMATION_INPUT,
+    },
+    async (request, extra) =>
+      withDeck({ tools, extra, deckId: request.deckId, permission: "editDocument" }, async ({ deck, resolution }) => writeAnimation({ tools, deck, resolution, request })),
   );
 
   server.registerTool(
@@ -375,7 +401,7 @@ const PERMISSION_WORDS: Readonly<Record<DeckPermission, string>> = {
  */
 async function applyEdits(
   options: Readonly<{ tools: Tools; deck: DeckHandle; resolution: ResolvedCaller; summary: string; edits: readonly AssistantEditRequest[] }>,
-): Promise<AssistantEditOutcome | Readonly<{ kind: "notPermitted" | "tooLarge"; message: string }>> {
+): Promise<DeckEditOutcome | Readonly<{ kind: "notPermitted" | "tooLarge"; message: string }>> {
   const { deck, resolution } = options;
   const images = await storeImages(options);
   switch (images.kind) {
@@ -418,6 +444,13 @@ async function applyEdits(
   }
 }
 
+/**
+ * deck_edit's answer: the contract's `AssistantEditOutcome`, whose `created` entries also carry the
+ * build step ids an `addAnimations` minted (edit-expansion.ts `CreatedIds`). Still assignable to
+ * the contract type, so a client reading the contract shape reads this one.
+ */
+type DeckEditOutcome = Exclude<AssistantEditOutcome, Readonly<{ kind: "applied" }>> | Readonly<{ kind: "applied"; agentSessionId: string; created: readonly CreatedIds[] }>;
+
 /** Only a deck that changed between reading and applying is worth a second expansion. Total over reasons. */
 const WORTH_RETRYING: Readonly<Record<CommandRejection["reason"], boolean>> = {
   staleText: true,
@@ -427,6 +460,7 @@ const WORTH_RETRYING: Readonly<Record<CommandRejection["reason"], boolean>> = {
   transitionScriptMissing: false,
   assetMissing: false,
   tableLineMissing: false,
+  animationStepMissing: false,
   duplicateId: false,
   invalidId: false,
   invalidValue: false,
@@ -506,6 +540,10 @@ function imageSourceOf(edit: AssistantEditRequest): string | null {
     case "reorderElements":
     case "groupElements":
     case "setTitle":
+    case "addAnimations":
+    case "updateAnimations":
+    case "moveAnimations":
+    case "removeAnimations":
     case "raw":
       return null;
     default:
@@ -513,7 +551,7 @@ function imageSourceOf(edit: AssistantEditRequest): string | null {
   }
 }
 
-function editOutcomeResult(outcome: AssistantEditOutcome | Readonly<{ kind: "notPermitted" | "tooLarge"; message: string }>): CallToolResult {
+function editOutcomeResult(outcome: DeckEditOutcome | Readonly<{ kind: "notPermitted" | "tooLarge"; message: string }>): CallToolResult {
   switch (outcome.kind) {
     case "applied":
       return structuredResult(outcome);
@@ -577,6 +615,44 @@ async function writeTransition(options: Readonly<{ tools: Tools; deck: DeckHandl
         assignedSlideIds: request.assignTo.map((assignment) => assignment.slideId),
         agentSessionId: resolution.agentSessionId,
         note: "Saved unapproved: it runs only after a person approves it in the editor. Give the user the reviewAddress.",
+      });
+    case "rejected":
+      return refusalResult(describeRejection(applied.outcome.rejection));
+    case "notPermitted":
+      return refusalResult(notPermittedMessage({ deck, permission: "editDocument" }));
+    case "tooLarge":
+      return refusalResult(`tooLarge: ${applied.message}`);
+    default:
+      return assertNever(applied);
+  }
+}
+
+// --- deck_write_animation ---------------------------------------------------------------------------
+
+async function writeAnimation(options: Readonly<{ tools: Tools; deck: DeckHandle; resolution: ResolvedCaller; request: AssistantAnimationScript }>): Promise<CallToolResult> {
+  const { deck, resolution, request } = options;
+  const expansion = expandAnimationScript({ snapshot: deck.snapshot(), request, seed: freshSeed() });
+  switch (expansion.kind) {
+    case "rejected":
+      return refusalResult(expansion.reason);
+    case "expanded":
+      break;
+    default:
+      return assertNever(expansion);
+  }
+  const envelope = agentEnvelope({ resolution, commands: expansion.commands, seed: expansion.seed });
+  const count = expansion.stepIds.length;
+  const assigned = count === 0 ? "" : ` for ${String(count)} build step${count === 1 ? "" : "s"}`;
+  const applied = await deck.apply({ envelope, summaryForCollaborators: `wrote the animation "${request.name}"${assigned}; it runs once someone reviews and approves it` });
+  switch (applied.kind) {
+    case "applied":
+      return structuredResult({
+        scriptId: expansion.scriptId,
+        approved: false,
+        reviewAddress: `${deckAddress({ publicUrl: options.tools.publicUrl, deckId: deck.deckId })}?${TRANSITION_REVIEW_QUERY}=${encodeURIComponent(expansion.scriptId)}`,
+        animationStepIds: expansion.stepIds,
+        agentSessionId: resolution.agentSessionId,
+        note: "Saved unapproved: until a person approves it in the editor its steps show their end state at once. Give the user the reviewAddress.",
       });
     case "rejected":
       return refusalResult(describeRejection(applied.outcome.rejection));

@@ -33,6 +33,8 @@ export const CLOSED_CHROME: EditorChrome = {
   showResolvedThreads: false,
   aspectRatioLocked: false,
   transitionPreview: null,
+  selectedAnimationStepId: null,
+  buildPreview: null,
   recentColours: [],
 };
 
@@ -152,6 +154,7 @@ export function fixtureServices(options: Readonly<{
     arrangeThreads: options.arrangeThreads ?? (() => []),
     Presentation: () => null,
     TransitionPreview: () => null,
+    BuildPreview: () => null,
     primaryModifier: "control",
     richTextFrom: options.richTextFrom ?? (() => null),
     readImageFile: () => Promise.resolve(null),

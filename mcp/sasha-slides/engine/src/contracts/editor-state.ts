@@ -41,6 +41,7 @@ import type { HistoryAvailability, HistoryOutcome, TextRange } from "./document-
 import type { AssetMediaType, AssetRecord, DocumentSnapshot, ElementSnapshot, ShapePreset, SlideSnapshot, TextBody, TransitionScriptRecord } from "./document.ts";
 import type { Box, FractionalRegion, Point, ResizeHandle, Size } from "./geometry.ts";
 import type {
+  AnimationStepId,
   AssetId,
   CommandId,
   DeckId,
@@ -327,7 +328,7 @@ export type ElementMeasurement =
   /** Height the text needs inside the box, padding included, slide units. */
   | Readonly<{ kind: "text"; contentHeight: number }>;
 
-export type PropertiesTab = "arrange" | "fill" | "border" | "effects" | "text" | "slide" | "transition";
+export type PropertiesTab = "arrange" | "fill" | "border" | "effects" | "text" | "slide" | "transition" | "animate";
 
 export type MenuName = "file" | "edit" | "view" | "insert" | "slide" | "arrange" | "help";
 
@@ -387,6 +388,10 @@ export type EditorChrome = Readonly<{
   aspectRatioLocked: boolean;
   /** The transition preview playing in the properties panel; `generation` restarts it. */
   transitionPreview: Readonly<{ slideId: SlideId; generation: number }> | null;
+  /** The build step the Animate tab is editing; null when none is chosen (or it was deleted). */
+  selectedAnimationStepId: AnimationStepId | null;
+  /** The Animate tab's "Preview": the slide's builds playing over the canvas; `generation` restarts it. */
+  buildPreview: Readonly<{ slideId: SlideId; generation: number }> | null;
   /**
    * The colour picker's "Recent" row, most recent first, at most `RECENT_COLOUR_LIMIT`, without
    * duplicates. Per viewer, never in the document: the web module persists it in local storage and

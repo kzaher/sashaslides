@@ -1,5 +1,5 @@
 // IDENTIFIERS for everything a collaborator can address: slides, elements, layouts, assets, comment
-// threads, transition scripts, people, the commands themselves, and the editor's own effect
+// threads, transition scripts, animation steps, people, the commands themselves, and the editor's own effect
 // requests (uploads, notices, transition runs).
 //
 // Three decisions live here:
@@ -38,6 +38,8 @@ export type AssetId = Branded<string, "AssetId">;
 export type ThreadId = Branded<string, "ThreadId">;
 export type MessageId = Branded<string, "MessageId">;
 export type TransitionScriptId = Branded<string, "TransitionScriptId">;
+/** One step of a slide's build sequence (animations.ts); addressed by id so a concurrent reorder never loses an edit. */
+export type AnimationStepId = Branded<string, "AnimationStepId">;
 /** A table row or column. Rows and columns are addressed by id, not index, so a concurrent insert
  *  of a row cannot shift another collaborator's cell edit into the wrong row. */
 export type TableRowId = Branded<string, "TableRowId">;
@@ -70,6 +72,7 @@ export type MintedIdByKind = Readonly<{
   thread: ThreadId;
   message: MessageId;
   transitionScript: TransitionScriptId;
+  animationStep: AnimationStepId;
   tableRow: TableRowId;
   tableColumn: TableColumnId;
   list: ListId;
@@ -176,6 +179,12 @@ export function parseTransitionScriptId(candidate: string): TransitionScriptId |
   return isObjectId(candidate) ? (candidate as TransitionScriptId) : null;
 }
 
+/** An animation step id from an agent's tool input or a pasted slide. */
+export function parseAnimationStepId(candidate: string): AnimationStepId | null {
+  // The brand is only a compile-time marker; the pattern check is the runtime invariant.
+  return isObjectId(candidate) ? (candidate as AnimationStepId) : null;
+}
+
 export function parseListId(candidate: string): ListId | null {
   // The brand is only a compile-time marker; the pattern check is the runtime invariant.
   return isObjectId(candidate) ? (candidate as ListId) : null;
@@ -191,6 +200,7 @@ const PREFIX: Readonly<Record<ObjectIdKind, string>> = {
   thread: "th",
   message: "ms",
   transitionScript: "tr",
+  animationStep: "an",
   tableRow: "rw",
   tableColumn: "cl",
   list: "ls",

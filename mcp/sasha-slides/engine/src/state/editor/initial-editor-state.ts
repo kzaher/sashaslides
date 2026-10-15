@@ -64,6 +64,8 @@ export const initialEditorState: InitialEditorState = (options) => {
       showResolvedThreads: false,
       aspectRatioLocked: false,
       transitionPreview: null,
+      selectedAnimationStepId: null,
+      buildPreview: null,
       recentColours: options.recentColours,
     },
     notices: [],

@@ -9,6 +9,8 @@
 //    original across slides.
 //  * Consecutive pastes of one payload onto one slide cascade by 10 units each; a copy pasted onto the
 //    slide it came from starts one step out so it never hides its original.
+//  * A pasted slide keeps its build sequence, remapped to the new element ids (element-factory.ts
+//    `reidentifySlide`); scripted steps, like a scripted transition, follow a script renamed here.
 //  * Scripts pasted from another deck arrive UNAPPROVED: the paste saves them with
 //    `approval: "unapproved"`, still authored by the person pasting, because carrying a script
 //    across decks is not reviewing it.
@@ -19,6 +21,7 @@
 import {
   assertNever,
   plainText,
+  type AnimationEffect,
   type AssetId,
   type AssetRecord,
   type ClipboardContent,
@@ -33,6 +36,7 @@ import {
   type Point,
   type SlideId,
   type SlideSnapshot,
+  type SlideTransition,
   type TransitionScriptId,
   type TransitionScriptRecord,
 } from "../../contracts/index.ts";
@@ -230,7 +234,7 @@ function foreignScripts(
     if (id !== record.id) renamed.set(record.id, id);
     return {
       kind: "upsertTransitionScript",
-      script: { id, name: record.name, description: record.description, script: record.script, stylesheet: record.stylesheet, markup: record.markup, defaultParameters: record.defaultParameters },
+      script: { id, name: record.name, description: record.description, purpose: record.purpose, script: record.script, stylesheet: record.stylesheet, markup: record.markup, defaultParameters: record.defaultParameters },
       basedOnUpdatedAt: null,
       approval: "unapproved",
     };
@@ -238,18 +242,50 @@ function foreignScripts(
   return { commands, renamed };
 }
 
+/** The slide's scripted transition and scripted build steps following scripts renamed on paste. */
 function withScriptRenamed(slide: SlideSnapshot, renamed: ReadonlyMap<TransitionScriptId, TransitionScriptId>): SlideSnapshot {
-  const transition = slide.transition;
-  if (transition === null) return slide;
+  if (renamed.size === 0) return slide;
+  return { ...slide, transition: transitionWithScriptRenamed(slide.transition, renamed), animations: slide.animations.map((step) => ({ ...step, effect: effectWithScriptRenamed(step.effect, renamed) })) };
+}
+
+function transitionWithScriptRenamed(transition: SlideTransition | null, renamed: ReadonlyMap<TransitionScriptId, TransitionScriptId>): SlideTransition | null {
+  if (transition === null) return null;
   switch (transition.kind) {
     case "builtin":
-      return slide;
+      return transition;
     case "scripted": {
       const scriptId = renamed.get(transition.scriptId);
-      return scriptId === undefined ? slide : { ...slide, transition: { ...transition, scriptId } };
+      return scriptId === undefined ? transition : { ...transition, scriptId };
     }
     default:
       return assertNever(transition);
+  }
+}
+
+function effectWithScriptRenamed(effect: AnimationEffect, renamed: ReadonlyMap<TransitionScriptId, TransitionScriptId>): AnimationEffect {
+  switch (effect.kind) {
+    case "scripted": {
+      const scriptId = renamed.get(effect.scriptId);
+      return scriptId === undefined ? effect : { ...effect, scriptId };
+    }
+    case "appear":
+    case "fadeIn":
+    case "flyIn":
+    case "zoomIn":
+    case "floatIn":
+    case "wipe":
+    case "pulse":
+    case "growShrink":
+    case "spin":
+    case "colourChange":
+    case "disappear":
+    case "fadeOut":
+    case "flyOut":
+    case "zoomOut":
+    case "motionPath":
+      return effect;
+    default:
+      return assertNever(effect);
   }
 }
 
@@ -323,9 +359,14 @@ function assetIdsOfFill(fill: Fill | null): readonly AssetId[] {
   }
 }
 
+/** The scripts the slides' transitions and build steps name, so a paste into another deck carries them. */
 function scriptsUsedBy(state: EditorState, slides: readonly SlideSnapshot[]): readonly TransitionScriptRecord[] {
   const used = new Set<TransitionScriptId>();
   for (const slide of slides) {
+    for (const step of slide.animations) {
+      const scriptId = scriptIdOfEffect(step.effect);
+      if (scriptId !== null) used.add(scriptId);
+    }
     const transition = slide.transition;
     if (transition === null) continue;
     switch (transition.kind) {
@@ -339,6 +380,31 @@ function scriptsUsedBy(state: EditorState, slides: readonly SlideSnapshot[]): re
     }
   }
   return state.document.transitionScripts.filter((script) => used.has(script.id));
+}
+
+function scriptIdOfEffect(effect: AnimationEffect): TransitionScriptId | null {
+  switch (effect.kind) {
+    case "scripted":
+      return effect.scriptId;
+    case "appear":
+    case "fadeIn":
+    case "flyIn":
+    case "zoomIn":
+    case "floatIn":
+    case "wipe":
+    case "pulse":
+    case "growShrink":
+    case "spin":
+    case "colourChange":
+    case "disappear":
+    case "fadeOut":
+    case "flyOut":
+    case "zoomOut":
+    case "motionPath":
+      return null;
+    default:
+      return assertNever(effect);
+  }
 }
 
 function plainTextOfElements(elements: readonly ElementSnapshot[], slideNumber: number | null): string {

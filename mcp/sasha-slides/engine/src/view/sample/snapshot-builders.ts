@@ -7,6 +7,7 @@
 // Ids come from `IdMinter`, a deterministic wrapper over `mintId` (ids.ts), so builders never
 // brand a string by hand.
 
+import type { AnimationEffect, AnimationStep, AnimationTrigger } from "../../contracts/animations.ts";
 import type {
   DocumentSnapshot,
   ElementSnapshot,
@@ -288,7 +289,7 @@ export function tableElement(options: Readonly<{ ids: IdMinter; id: ElementId; b
   };
 }
 
-export function slideSnapshot(options: Readonly<{ ids: IdMinter; id?: SlideId; elements: readonly ElementSnapshot[]; background?: SlideSnapshot["background"]; notes?: string; skipped?: boolean; transition?: SlideSnapshot["transition"] }>): SlideSnapshot {
+export function slideSnapshot(options: Readonly<{ ids: IdMinter; id?: SlideId; elements: readonly ElementSnapshot[]; background?: SlideSnapshot["background"]; notes?: string; skipped?: boolean; transition?: SlideSnapshot["transition"]; animations?: readonly AnimationStep[] }>): SlideSnapshot {
   return {
     id: options.id ?? options.ids.next("slide"),
     layoutId: null,
@@ -296,7 +297,22 @@ export function slideSnapshot(options: Readonly<{ ids: IdMinter; id?: SlideId; e
     skipped: options.skipped ?? false,
     speakerNotes: options.notes === undefined ? EMPTY_TEXT_BODY : plainBody(options.notes, { fontSize: 24 }),
     transition: options.transition ?? null,
+    animations: options.animations ?? [],
     elements: options.elements,
+  };
+}
+
+/** A build step on `elementId` with the usual timing (500 milliseconds, no delay, ease out). */
+export function animationStep(options: Readonly<{ ids: IdMinter; elementId: ElementId; effect: AnimationEffect; trigger: AnimationTrigger; durationMilliseconds?: number }>): AnimationStep {
+  return {
+    id: options.ids.next("animationStep"),
+    elementId: options.elementId,
+    effect: options.effect,
+    trigger: options.trigger,
+    durationMilliseconds: options.durationMilliseconds ?? 500,
+    delayMilliseconds: 0,
+    easing: "easeOut",
+    unsupportedKeys: [],
   };
 }
 

@@ -113,7 +113,7 @@ describe("Scripted with no scripts explains itself (acceptance 5)", () => {
     { name: "a deck without scripts: the explanation and Write a script", scripts: [], explains: true },
     {
       name: "control: a deck with a script: no explanation",
-      scripts: [{ id: scriptId, name: "Ink wipe", description: "", author: { kind: "agent", name: "Claude", agentSessionId: "agent_session" }, script: "", stylesheet: "", markup: "", defaultParameters: {}, approval: { kind: "unapproved" }, updatedAt: 1 }],
+      scripts: [{ id: scriptId, name: "Ink wipe", description: "", purpose: "transition", author: { kind: "agent", name: "Claude", agentSessionId: "agent_session" }, script: "", stylesheet: "", markup: "", defaultParameters: {}, approval: { kind: "unapproved" }, updatedAt: 1 }],
       explains: false,
     },
   ];

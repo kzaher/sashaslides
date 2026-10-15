@@ -11,7 +11,7 @@ import type { AssetRecord } from "../../contracts/document.ts";
 import type { AssetId } from "../../contracts/ids.ts";
 import type { PresenterDependencies, TransitionDiagnostic } from "../../contracts/presenter.ts";
 import { TRANSITION_LIMITS, TRANSITION_PROTOCOL } from "../../contracts/transition-protocol.ts";
-import { builtinTransition, scriptedTransition, type FixtureScript, type FixtureSlide } from "../testing/document-fixture.ts";
+import { animationStep, builtinTransition, scriptIdOf, scriptedTransition, type FixtureScript, type FixtureSlide } from "../testing/document-fixture.ts";
 import { fakeRenderSlideMarkup, presenterHarness, type PresenterHarness } from "../testing/presenter-harness.ts";
 import type { PresenterSystemState } from "../presenter-state.ts";
 import { RUNNER_CONTENT_SECURITY_POLICY } from "../runner/runner-page.ts";
@@ -38,7 +38,7 @@ describe("sandboxed runner lifecycle", () => {
     assert.equal(harness.state().run?.phase, "running");
     assert.equal(harness.site.frames[0]?.shown, true, "the frame shows only once the run started");
     await harness.advanceBy(600);
-    assert.deepEqual(harness.state().screen, { kind: "slide", slideId: "slide_b" });
+    assert.deepEqual(harness.state().screen, { kind: "slide", slideId: "slide_b", build: 0 });
     assert.deepEqual(harness.site.postedKinds().slice(0, 3), ["prepare", "start", "ping"]);
     assert.equal(harness.site.frames[0]?.disposed, true, "the used runner is removed");
     assert.equal(fallbacks(harness).length, 0);
@@ -131,7 +131,7 @@ describe("sandboxed runner lifecycle", () => {
     await harness.advanceBy(300);
     assert.equal(fallbacks(harness)[0]?.reason, "scriptFailed");
     assert.match(fallbacks(harness)[0]?.message ?? "", /ReferenceError: oops/);
-    assert.deepEqual(harness.state().screen, { kind: "slide", slideId: "slide_b" });
+    assert.deepEqual(harness.state().screen, { kind: "slide", slideId: "slide_b", build: 0 });
   });
 
   const loads = [
@@ -277,6 +277,39 @@ async function waitFor(options: Readonly<{ harness: PresenterHarness; condition:
 }
 
 /** Runs until the first ping was sent; returns that time (to the 10 millisecond step). */
+describe("a scripted build step in the sandbox", () => {
+  const sparkle: FixtureScript = { id: "script_sparkle", script: "sashaTransition.define({ name: 'Sparkle', run() {} });", approved: true, purpose: "animation" };
+  const slides: readonly FixtureSlide[] = [
+    {
+      id: "slide_a",
+      elements: [{ id: "box_a", frame: { x: 0, y: 0, width: 100, height: 100 } }, { id: "box_b", frame: { x: 200, y: 0, width: 100, height: 100 } }],
+      animations: [
+        animationStep({ id: "step_a", elementId: "box_a", effect: { kind: "scripted", scriptId: scriptIdOf("script_sparkle"), category: "entrance", parameters: {} }, durationMilliseconds: 600 }),
+      ],
+    },
+    { id: "slide_b" },
+  ];
+
+  it("plays through the runner from the slide before the step to the slide after it, then rests at build 1", async () => {
+    const harness = presenterHarness({ slides, scripts: [sparkle] });
+    await harness.advanceBy(100);
+    assert.equal(harness.state().spareRunner.kind, "ready", "a show with a scripted step warms a runner");
+    harness.press("ArrowRight");
+    await harness.advanceBy(300);
+    const prepare = harness.site.hostPosts.map((post) => post.message).find((message): message is PrepareMessage => message.kind === "prepare");
+    assert.deepEqual(prepare?.outgoing?.elements.map((element) => element.elementId), ["box_b"], "before the entrance");
+    assert.deepEqual(prepare?.incoming.elements.map((element) => element.elementId), ["box_a", "box_b"], "after it");
+    assert.equal(prepare?.durationMilliseconds, 600);
+    assert.deepEqual(prepare?.parameters, { targetElementId: "box_a", category: "entrance" });
+    await harness.advanceBy(600);
+    assert.deepEqual(harness.state().screen, { kind: "slide", slideId: "slide_a", build: 1 });
+    assert.equal(fallbacks(harness).length, 0);
+    harness.press("ArrowRight");
+    await harness.advanceBy(10);
+    assert.deepEqual(harness.state().screen, { kind: "slide", slideId: "slide_b", build: 0 }, "control: the next press leaves the slide");
+  });
+});
+
 async function startRunning(harness: PresenterHarness): Promise<number> {
   await harness.advanceBy(100);
   harness.press("ArrowRight");

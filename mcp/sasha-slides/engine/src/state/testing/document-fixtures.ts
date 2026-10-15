@@ -10,6 +10,7 @@ import {
   lineFrame,
   mintId,
   NEW_TEXT_BOX_STYLE,
+  parseAnimationStepId,
   parseElementId,
   parsePersonId,
   parseSlideId,
@@ -19,6 +20,10 @@ import {
   boundsOfBoxes,
   identityFrame,
   rotatedBounds,
+  type AnimationEffect,
+  type AnimationStep,
+  type AnimationStepId,
+  type AnimationTrigger,
   type DeckId,
   type DocumentSnapshot,
   type EditorState,
@@ -185,7 +190,7 @@ export function table(options: Readonly<{ id: string; x: number; y: number; colu
   };
 }
 
-export function slide(options: Readonly<{ id: string; elements: readonly ElementSnapshot[]; layoutId?: LayoutId }>): SlideSnapshot {
+export function slide(options: Readonly<{ id: string; elements: readonly ElementSnapshot[]; layoutId?: LayoutId; animations?: readonly AnimationStep[] }>): SlideSnapshot {
   return {
     id: slideId(options.id),
     layoutId: options.layoutId ?? null,
@@ -193,7 +198,28 @@ export function slide(options: Readonly<{ id: string; elements: readonly Element
     skipped: false,
     speakerNotes: EMPTY_TEXT_BODY,
     transition: null,
+    animations: options.animations ?? [],
     elements: options.elements,
+  };
+}
+
+export function animationStepId(text: string): AnimationStepId {
+  const parsed = parseAnimationStepId(text);
+  if (parsed === null) throw new Error(`Not an animation step id: ${text}`);
+  return parsed;
+}
+
+/** A build step on `elementId`: a fade in on click unless stated. */
+export function animationStep(options: Readonly<{ id: string; elementId: ElementId; effect?: AnimationEffect; trigger?: AnimationTrigger }>): AnimationStep {
+  return {
+    id: animationStepId(options.id),
+    elementId: options.elementId,
+    effect: options.effect ?? { kind: "fadeIn" },
+    trigger: options.trigger ?? "onClick",
+    durationMilliseconds: 500,
+    delayMilliseconds: 0,
+    easing: "easeOut",
+    unsupportedKeys: [],
   };
 }
 

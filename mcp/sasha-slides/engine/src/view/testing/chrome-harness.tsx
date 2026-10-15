@@ -1,7 +1,7 @@
 // THE CHROME HARNESS: the real editor shell over the sample deck and a fake system, in named
 // scenarios -- the editing screen with a collaborator, a menu over a black slide, the script dialog,
 // the comment rail, text editing, a 60-slide filmstrip, a 200-element drag, measured layout, seven
-// stacked notices (also in the add-on dialog's smaller frame). The
+// stacked notices (also in the add-on dialog's smaller frame), the Animate tab on the builds slide. The
 // end-to-end drivers in e2e/editor/ bundle it, open a scenario in Chrome and screenshot or measure
 // it. It needs nothing from the model or state modules, so the view's look and cost are checked on
 // their own.
@@ -26,7 +26,7 @@ import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { EMPTY_ASSET_STORE, createRecordingSystem, fixtureEditorState, fixtureServices, type RecordingSystem } from "./editor-fixtures.ts";
 import { harnessReduce } from "./harness-reducer.ts";
 
-export const HARNESS_SCENARIOS = ["editor", "menuOverBlack", "contextMenu", "scriptDialog", "comments", "text", "filmstrip", "drag", "measure", "addon", "notices", "addonNotices"] as const;
+export const HARNESS_SCENARIOS = ["editor", "menuOverBlack", "contextMenu", "scriptDialog", "comments", "text", "filmstrip", "drag", "measure", "addon", "notices", "addonNotices", "animate"] as const;
 export type HarnessScenario = (typeof HARNESS_SCENARIOS)[number];
 
 export type HarnessHandle = Readonly<{
@@ -78,7 +78,7 @@ export function scenarioState(options: Readonly<{ scenario: HarnessScenario; ima
     case "contextMenu":
       return { ...base, currentSlideId: black?.id ?? null, chrome: { ...base.chrome, contextMenu: { at: { x: 720, y: 430 }, scope: "canvas" } } };
     case "scriptDialog":
-      return { ...withPeers, chrome: { ...base.chrome, dialog: { kind: "transitionScriptEditor", editor: { draft: { id: script.id, name: script.name, description: script.description, script: script.script, stylesheet: script.stylesheet, markup: script.markup, defaultParameters: script.defaultParameters }, basedOnUpdatedAt: script.updatedAt, conflict: false, previewGeneration: 0 } } } };
+      return { ...withPeers, chrome: { ...base.chrome, dialog: { kind: "transitionScriptEditor", editor: { draft: { id: script.id, name: script.name, description: script.description, purpose: script.purpose, script: script.script, stylesheet: script.stylesheet, markup: script.markup, defaultParameters: script.defaultParameters }, basedOnUpdatedAt: script.updatedAt, conflict: false, previewGeneration: 0 } } } };
     case "comments":
       return { ...withPeers, chrome: { ...base.chrome, commentsOpen: true, focusedThreadId: withPeers.discussion.threads[0]?.id ?? null } };
     case "text":
@@ -94,6 +94,12 @@ export function scenarioState(options: Readonly<{ scenario: HarnessScenario; ima
       return { ...withPeers, notices: sampleNotices(script.id) };
     case "addonNotices":
       return { ...withPeers, embedding: { kind: "addonDialog", webApplicationAddress: "https://sashaslides.com/deck/deck_harness" }, notices: sampleNotices(script.id) };
+    case "animate": {
+      const builds = document.slides.find((candidate) => candidate.animations.length > 0);
+      const chosen = builds?.animations[1];
+      if (builds === undefined || chosen === undefined) return base;
+      return { ...base, currentSlideId: builds.id, selection: { kind: "elements", slideId: builds.id, elementIds: [chosen.elementId] }, chrome: { ...base.chrome, propertiesTab: "animate", selectedAnimationStepId: chosen.id } };
+    }
     default:
       return base;
   }
@@ -149,6 +155,7 @@ function sampleScript(): TransitionScriptRecord {
     id: ids.next("transitionScript"),
     name: "Ink wipe",
     description: "Reveals the next slide behind a moving clip, with its elements rising in.",
+    purpose: "transition",
     author: { kind: "agent", name: "Claude", agentSessionId: "session_sample" },
     script: INK_WIPE,
     stylesheet: "",

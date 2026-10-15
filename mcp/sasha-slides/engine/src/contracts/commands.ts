@@ -38,6 +38,7 @@
 //    apply to an element's kind is skipped for that element, not an error, which is what a
 //    properties panel showing "the controls the selection shares" needs.
 
+import type { AnimationStep, AnimationStepPatch } from "./animations.ts";
 import { assertNever } from "./assert-never.ts";
 import type {
   AssetRecord,
@@ -45,6 +46,7 @@ import type {
   ElementSnapshot,
   ImageCrop,
   LayoutSnapshot,
+  ScriptPurpose,
   ShapePreset,
   SlideSnapshot,
   SlideTransition,
@@ -54,6 +56,7 @@ import type {
 } from "./document.ts";
 import type { Frame, Point } from "./geometry.ts";
 import type {
+  AnimationStepId,
   AssetId,
   CommandId,
   ElementId,
@@ -133,7 +136,7 @@ export type DocumentCommand =
   | Readonly<{ kind: "setSlideProperties"; slideId: SlideId; patch: SlidePropertiesPatch }>
   /** Insert element trees (groups with their children) at `placement` (see the header on trees). */
   | Readonly<{ kind: "insertElements"; slideId: SlideId; elements: readonly ElementSnapshot[]; placement: InsertPlacement }>
-  /** Deleting a group deletes its children. */
+  /** Deleting a group deletes its children; the build steps of every deleted element go with them (animations.ts). */
   | Readonly<{ kind: "deleteElements"; slideId: SlideId; elementIds: readonly ElementId[] }>
   /** Final geometry of leaves and group rotations: a move, resize, rotate, flip, nudge or align. */
   | Readonly<{ kind: "setFrames"; slideId: SlideId; frames: readonly FrameUpdate[] }>
@@ -153,7 +156,14 @@ export type DocumentCommand =
   | Readonly<{ kind: "deleteTableColumns"; slideId: SlideId; elementId: ElementId; columnIds: readonly TableColumnId[] }>
   | Readonly<{ kind: "setTableColumnWidths"; slideId: SlideId; elementId: ElementId; widths: readonly Readonly<{ columnId: TableColumnId; width: number }>[] }>
   | Readonly<{ kind: "setTableRowHeights"; slideId: SlideId; elementId: ElementId; heights: readonly Readonly<{ rowId: TableRowId; minimumHeight: number }>[] }>
-  | Readonly<{ kind: "updateTableCells"; slideId: SlideId; elementId: ElementId; cells: readonly CellAddress[]; patch: TableCellPatch }>;
+  | Readonly<{ kind: "updateTableCells"; slideId: SlideId; elementId: ElementId; cells: readonly CellAddress[]; patch: TableCellPatch }>
+  /** Insert complete build steps (fresh ids) into the slide's sequence after `after`, or first when null. */
+  | Readonly<{ kind: "insertAnimationSteps"; slideId: SlideId; steps: readonly AnimationStep[]; after: AnimationStepId | null }>
+  /** Set the given fields on every named step; a step's other fields keep their values. */
+  | Readonly<{ kind: "updateAnimationSteps"; slideId: SlideId; stepIds: readonly AnimationStepId[]; patch: AnimationStepPatch }>
+  /** Move the steps, keeping their relative order, to just after `after` (first when null). */
+  | Readonly<{ kind: "moveAnimationSteps"; slideId: SlideId; stepIds: readonly AnimationStepId[]; after: AnimationStepId | null }>
+  | Readonly<{ kind: "deleteAnimationSteps"; slideId: SlideId; stepIds: readonly AnimationStepId[] }>;
 
 export type DocumentCommandKind = DocumentCommand["kind"];
 
@@ -170,6 +180,8 @@ export type TransitionScriptDraft = Readonly<{
   id: TransitionScriptId;
   name: string;
   description: string;
+  /** A slide transition or a scripted build step (document.ts `ScriptPurpose`). */
+  purpose: ScriptPurpose;
   script: string;
   stylesheet: string;
   markup: string;
@@ -278,6 +290,7 @@ export type CommandRejection =
   | Readonly<{ reason: "transitionScriptMissing"; scriptId: TransitionScriptId }>
   | Readonly<{ reason: "assetMissing"; assetId: AssetId }>
   | Readonly<{ reason: "tableLineMissing"; elementId: ElementId; id: string }>
+  | Readonly<{ reason: "animationStepMissing"; slideId: SlideId; stepId: AnimationStepId }>
   | Readonly<{ reason: "duplicateId"; id: string }>
   | Readonly<{ reason: "invalidId"; id: string }>
   /** `path` is a dotted path into the command, e.g. "commands.2.patch.opacity". */

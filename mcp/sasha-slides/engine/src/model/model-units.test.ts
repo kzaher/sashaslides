@@ -213,7 +213,7 @@ describe("repairs on the repairing replica", () => {
     const second = mint("slide");
     applyOrThrow(store, envelope({ commands: [
       { kind: "insertElements", slideId, placement: { kind: "front" }, elements: [shape({ id: shapeId, text: textBody("abc") })] },
-      { kind: "insertSlides", slides: [{ id: second, layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, elements: [] }], after: slideId },
+      { kind: "insertSlides", slides: [{ id: second, layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, animations: [], elements: [] }], after: slideId },
     ] }));
     flush();
     const roots = documentRoots(sharedDocument);

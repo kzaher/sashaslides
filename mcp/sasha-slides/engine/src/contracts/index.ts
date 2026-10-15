@@ -10,6 +10,7 @@ export * from "./serialisable.ts";
 export * from "./geometry.ts";
 export * from "./style.ts";
 export * from "./document.ts";
+export * from "./animations.ts";
 export * from "./yjs-schema.ts";
 export * from "./selection.ts";
 export * from "./text-delta.ts";

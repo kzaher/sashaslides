@@ -162,7 +162,7 @@ export function clipboardMarkup(options: Readonly<{ payload: ClipboardPayload; d
     case "sasha-engine/elements@1": {
       const source = options.document.slides.find((slide) => slide.id === payload.slideId);
       const slideNumber = options.document.slides.findIndex((slide) => slide.id === payload.slideId) + 1;
-      const slide = { id: payload.slideId, layoutId: source?.layoutId ?? null, background: source?.background ?? null, skipped: false, speakerNotes: { paragraphs: [{ style: {}, runs: [] }] }, transition: null, elements: payload.elements };
+      const slide = { id: payload.slideId, layoutId: source?.layoutId ?? null, background: source?.background ?? null, skipped: false, speakerNotes: { paragraphs: [{ style: {}, runs: [] }] }, transition: null, animations: [], elements: payload.elements };
       return renderSlideMarkup({ slide, document: options.document, slideNumber: Math.max(1, slideNumber) }).markup;
     }
     default:

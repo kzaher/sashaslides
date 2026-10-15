@@ -7,14 +7,17 @@
 // state's `TransitionScriptEditor`: Save is a person approving what they saved; a script written by
 // an agent or pasted from another deck shows its author and full text and an "Approve" button; a
 // save that lost a race offers "Reload theirs" or "Overwrite" (SPEC.md section 9). Run plays the
-// saved transition into the current slide with the presenter's `TransitionPreview`.
+// saved transition into the current slide with the presenter's `TransitionPreview`. A BUILD STEP
+// script (purpose "animation") is worded as one, and its Run plays the current slide's builds with
+// `BuildPreview` instead.
 
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { TransitionScriptDraft } from "../../contracts/commands.ts";
-import { scriptFingerprint, type TransitionScriptRecord } from "../../contracts/document.ts";
-import type { EditorDialog, TransitionScriptEditor } from "../../contracts/editor-state.ts";
-import type { LayoutId } from "../../contracts/ids.ts";
+import { scriptFingerprint, type DocumentSnapshot, type ScriptPurpose, type TransitionScriptRecord } from "../../contracts/document.ts";
+import type { EditorEvent } from "../../contracts/editor-events.ts";
+import type { EditorDialog, EditorState, TransitionScriptEditor } from "../../contracts/editor-state.ts";
+import type { LayoutId, SlideId } from "../../contracts/ids.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { shallowEqual, useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
@@ -313,20 +316,24 @@ type ScriptTab = "script" | "stylesheet" | "markup" | "reference";
 function TransitionScriptDialog(properties: Readonly<{ editor: TransitionScriptEditor; close: () => void }>): ReactElement {
   const services = useEditorServices();
   const dispatch = services.system.dispatch;
-  const view = useEditorSelector((state) => ({ scripts: state.document.transitionScripts, preview: state.chrome.transitionPreview, currentSlideId: state.currentSlideId, document: state.document }), shallowEqual);
+  const view = useEditorSelector(
+    (state) => ({ scripts: state.document.transitionScripts, preview: state.chrome.transitionPreview, buildPreview: state.chrome.buildPreview, currentSlideId: state.currentSlideId, document: state.document }),
+    shallowEqual,
+  );
   const [tab, setTab] = useState<ScriptTab>("script");
   const draft = properties.editor.draft;
   const record = view.scripts.find((script) => script.id === draft.id) ?? null;
   const change = (patch: Partial<TransitionScriptDraft>): void => dispatch({ kind: "transitionScriptDraftChanged", draft: { ...draft, ...patch } });
-  const Preview = services.TransitionPreview;
+  const words = SCRIPT_WORDS[draft.purpose];
+  const run = (slideId: SlideId): EditorEvent => runEventFor({ purpose: draft.purpose, slideId });
   return (
     <Dialog
       wide
-      title={record === null ? "New transition script" : `Transition script: ${record.name}`}
+      title={record === null ? `New ${words.noun} script` : `${words.title} script: ${record.name}`}
       close={properties.close}
       actions={
         <>
-          <button type="button" className={TIDEPOOL_CLASS.secondaryPill} disabled={view.currentSlideId === null || record === null} title={record === null ? "Save the script first" : "Plays the saved script into this slide"} onClick={() => view.currentSlideId !== null && dispatch({ kind: "transitionPreviewRequested", slideId: view.currentSlideId })}>
+          <button type="button" className={TIDEPOOL_CLASS.secondaryPill} disabled={view.currentSlideId === null || record === null} title={record === null ? "Save the script first" : words.runHint} onClick={() => view.currentSlideId !== null && dispatch(run(view.currentSlideId))}>
             <Icon name="present" /> Run
           </button>
           <button type="button" className={TIDEPOOL_CLASS.secondaryPill} onClick={properties.close}>Close</button>
@@ -362,13 +369,61 @@ function TransitionScriptDialog(properties: Readonly<{ editor: TransitionScriptE
         ))}
       </div>
       <ScriptTabBody tab={tab} draft={draft} change={change} />
-      {view.preview === null ? null : (
-        <div className={VIEW_CLASS.previewBox}>
-          <Preview dependencies={services.presenterDependencies} document={view.document} slideId={view.preview.slideId} generation={view.preview.generation} width={420} onEnded={() => dispatch({ kind: "transitionPreviewEnded" })} />
-        </div>
-      )}
+      <ScriptRunPreview purpose={draft.purpose} transitionPreview={view.preview} buildPreview={view.buildPreview} document={view.document} />
     </Dialog>
   );
+}
+
+/** Where a script's purpose changes the dialog's words: a build step is not a transition. */
+const SCRIPT_WORDS: Readonly<Record<ScriptPurpose, Readonly<{ noun: string; title: string; runHint: string; fallback: string }>>> = {
+  transition: { noun: "transition", title: "Transition", runHint: "Plays the saved script into this slide", fallback: "presenting plays a simple fade instead" },
+  animation: { noun: "build step", title: "Build step", runHint: "Plays this slide's builds, this script's steps included", fallback: "its build steps show the element without animation" },
+};
+
+function runEventFor(options: Readonly<{ purpose: ScriptPurpose; slideId: SlideId }>): EditorEvent {
+  switch (options.purpose) {
+    case "transition":
+      return { kind: "transitionPreviewRequested", slideId: options.slideId };
+    case "animation":
+      return { kind: "buildPreviewRequested", slideId: options.slideId };
+    default:
+      return assertNever(options.purpose);
+  }
+}
+
+/** "Run": a transition plays into the current slide; a build step script plays the slide's builds. */
+function ScriptRunPreview(properties: Readonly<{
+  purpose: ScriptPurpose;
+  transitionPreview: EditorState["chrome"]["transitionPreview"];
+  buildPreview: EditorState["chrome"]["buildPreview"];
+  document: DocumentSnapshot;
+}>): ReactElement | null {
+  const services = useEditorServices();
+  const dispatch = services.system.dispatch;
+  switch (properties.purpose) {
+    case "transition": {
+      const preview = properties.transitionPreview;
+      if (preview === null) return null;
+      const Preview = services.TransitionPreview;
+      return (
+        <div className={VIEW_CLASS.previewBox}>
+          <Preview dependencies={services.presenterDependencies} document={properties.document} slideId={preview.slideId} generation={preview.generation} width={420} onEnded={() => dispatch({ kind: "transitionPreviewEnded" })} />
+        </div>
+      );
+    }
+    case "animation": {
+      const preview = properties.buildPreview;
+      if (preview === null) return null;
+      const Preview = services.BuildPreview;
+      return (
+        <div className={VIEW_CLASS.previewBox}>
+          <Preview key={preview.generation} dependencies={services.presenterDependencies} document={properties.document} slideId={preview.slideId} generation={preview.generation} width={420} onEnded={() => dispatch({ kind: "buildPreviewEnded" })} />
+        </div>
+      );
+    }
+    default:
+      return assertNever(properties.purpose);
+  }
 }
 
 const SCRIPT_TAB_LABEL: Readonly<Record<ScriptTab, string>> = { script: "Script", stylesheet: "Stylesheet", markup: "Overlay markup", reference: "How to write one" };
@@ -382,7 +437,7 @@ function ScriptTabBody(properties: Readonly<{ tab: ScriptTab; draft: TransitionS
     case "markup":
       return <CodeArea label="Overlay markup" value={properties.draft.markup} onChange={(markup) => properties.change({ markup })} />;
     case "reference":
-      return <pre className={`${TIDEPOOL_CLASS.code} ${VIEW_CLASS.scriptReference}`}>{AUTHORING_REFERENCE}</pre>;
+      return <pre className={`${TIDEPOOL_CLASS.code} ${VIEW_CLASS.scriptReference}`}>{REFERENCE_FOR[properties.draft.purpose]}</pre>;
     default:
       return assertNever(properties.tab);
   }
@@ -437,8 +492,8 @@ function UnapprovedNotice(properties: Readonly<{ record: TransitionScriptRecord;
   return (
     <div className={`${TIDEPOOL_CLASS.card} ${VIEW_CLASS.fieldRow}`} role="note">
       <span style={{ flex: 1 }}>
-        <strong>Not approved yet.</strong> Written by {authorName(properties.record.author)}. Read the whole script below before approving it: until then, presenting plays a simple fade instead. It runs in an
-        isolated frame on this site with no network, and only approved scripts run.
+        <strong>Not approved yet.</strong> Written by {authorName(properties.record.author)}. Read the whole script below before approving it: until then, {SCRIPT_WORDS[properties.record.purpose].fallback}. It runs
+        in an isolated frame on this site with no network, and only approved scripts run.
       </span>
       <button type="button" className={TIDEPOOL_CLASS.primaryPill} onClick={properties.onApprove}>
         Approve
@@ -479,3 +534,15 @@ context.wait(milliseconds)                  resolves later, rejects on abort
 
 Morphing: interpolate x, y, width and height of the UNROTATED frame, and rotation separately.
 The runner has no network: images and fonts arrive as bytes with the slides.`;
+
+/** What a build step script gets on top of a transition's context (contracts/animations.ts, scripted steps). */
+export const BUILD_STEP_REFERENCE = `A build step script runs for one step of a slide's builds:
+context.outgoing        the slide BEFORE the step (its earlier builds done)
+context.incoming        the slide AFTER the step: animate the step's element into how it looks here
+context.parameters      { ...defaults, ...the step's parameters, targetElementId, category }
+                        targetElementId: the element the step animates (a group's leaves keep their own ids)
+                        category: "entrance" | "emphasis" | "exit" -- where the element rests afterwards
+
+`;
+
+const REFERENCE_FOR: Readonly<Record<ScriptPurpose, string>> = { transition: AUTHORING_REFERENCE, animation: BUILD_STEP_REFERENCE + AUTHORING_REFERENCE };

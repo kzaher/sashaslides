@@ -5,6 +5,8 @@
 //  * RE-IDENTIFYING keeps or replaces each id independently (a cut pasted back into its deck keeps
 //    every id that is still free, so comments stay on their element) and, unless asked otherwise,
 //    keeps morph keys, so a duplicated slide still morphs like Keynote's Magic Move.
+//  * A SLIDE'S BUILD SEQUENCE FOLLOWS ITS ELEMENTS: re-identifying a slide remaps every step to the
+//    copy's element and mints fresh step ids (`reidentifySlide`).
 //  * TRANSLATING a tree moves leaves and line end points; a group's frame is derived by the model and
 //    moved only so the value stays consistent.
 
@@ -17,6 +19,7 @@ import {
   NEW_TEXT_BOX_STYLE,
   PLAIN_BOX_STYLE,
   themeColour,
+  type AnimationStep,
   type AssetRecord,
   type Box,
   type ElementId,
@@ -32,6 +35,7 @@ import {
   type TableElement,
   type TextBody,
 } from "../../contracts/index.ts";
+import { childrenOf } from "./document-lookup.ts";
 import type { IdMinter } from "./id-minter.ts";
 
 /** What a click (no drag) with an insert tool creates, in slide units (SPEC.md section 7, "create"). */
@@ -170,9 +174,20 @@ export function reidentifyElement(element: ElementSnapshot, options: Reidentify,
   }
 }
 
+/**
+ * The slide with its element trees re-identified and its build sequence carried along: each step
+ * names the copy's element and gets a fresh id; a step whose element is not on the slide (left
+ * dangling by a concurrent delete) is dropped, since nothing in the copy could play it.
+ */
 export function reidentifySlide(slide: SlideSnapshot, options: Reidentify & Readonly<{ keepSlideId: (slideId: SlideId) => boolean }>): SlideSnapshot {
   const id = options.keepSlideId(slide.id) ? slide.id : options.minter.next("slide");
-  return { ...slide, id, elements: slide.elements.map((element) => reidentifyElement(element, options, null)) };
+  const elements = slide.elements.map((element) => reidentifyElement(element, options, null));
+  const copyOf = copiedElementIds({ originals: slide.elements, copies: elements });
+  const animations = slide.animations.flatMap((step): AnimationStep[] => {
+    const elementId = copyOf.get(step.elementId);
+    return elementId === undefined ? [] : [{ ...step, id: options.minter.next("animationStep"), elementId }];
+  });
+  return { ...slide, id, elements, animations };
 }
 
 export function translateElement(element: ElementSnapshot, deltaX: number, deltaY: number): ElementSnapshot {
@@ -238,4 +253,19 @@ const TEXT_BOX_PRESET: Readonly<Record<ShapePreset, boolean>> = {
 
 export function isTextBoxPreset(preset: ShapePreset): boolean {
   return TEXT_BOX_PRESET[preset];
+}
+
+/** Original element id to its copy's, by walking the two trees side by side (reidentifyElement keeps the shape). */
+function copiedElementIds(options: Readonly<{ originals: readonly ElementSnapshot[]; copies: readonly ElementSnapshot[] }>): ReadonlyMap<ElementId, ElementId> {
+  const pairs = new Map<ElementId, ElementId>();
+  const visit = (originals: readonly ElementSnapshot[], copies: readonly ElementSnapshot[]): void => {
+    originals.forEach((original, index) => {
+      const copy = copies[index];
+      if (copy === undefined) return;
+      pairs.set(original.id, copy.id);
+      visit(childrenOf(original), childrenOf(copy));
+    });
+  };
+  visit(options.originals, options.copies);
+  return pairs;
 }

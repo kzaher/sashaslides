@@ -7,6 +7,11 @@
 // for that registration, builds the `TransitionContext` (transition-context.ts) and runs the
 // definition; when the run leaves state (finished, skipped, cut by a deadline) the subscription is
 // dropped and the abort cancels every animation it started.
+//
+// BOTH SIDES ARE SLIDES AT BUILD POSITIONS (contracts/presenter.ts): the element records a run's
+// definition sees come from `slideAtBuild` at the run's `fromBuild` and `toBuild` (builds/run-slides.ts), exactly what the
+// stage draws, so a morph out of a built slide pairs the elements the audience last saw. A build
+// segment's run plays the build player (builds/build-player.ts) on the same stage.
 
 import { BehaviorSubject, EMPTY, Observable, filter, map, switchMap, take } from "rxjs";
 import { assertNever } from "../../contracts/assert-never.ts";
@@ -15,8 +20,12 @@ import type { PresenterEvent, RxFeedbackToolkit, TransitionRun } from "../../con
 import type { Feedback } from "../../contracts/rxfeedback.ts";
 import type { SerialisableObject } from "../../contracts/serialisable.ts";
 import { TRANSITION_LIMITS, type TransitionDefinition } from "../../contracts/transition-protocol.ts";
+import type { DocumentSnapshot } from "../../contracts/document.ts";
 import { BUILTIN_TRANSITIONS, SUBSTITUTED_FADE_PARAMETERS } from "../builtin/builtin-transitions.ts";
 import { builtinParameters } from "../builtin/builtin-parameters.ts";
+import { createBuildPlayer } from "../builds/build-player.ts";
+import { buildSegmentTimeline } from "../builds/build-states.ts";
+import { slideOnSide } from "../builds/run-slides.ts";
 import { hostRunnerId } from "../presenter-queries.ts";
 import { slideById, type PresenterSystemState } from "../presenter-state.ts";
 import { stageElementRecordsOf } from "../stage-elements.ts";
@@ -72,7 +81,10 @@ export function inPageRunFeedback(
 type InPageRequest = Readonly<{ run: TransitionRun; state: PresenterSystemState }>;
 
 /** The definition and parameters an in-page run plays; null for a run that does not belong in-page. */
-export function inPagePlayback(run: TransitionRun): Readonly<{ definition: TransitionDefinition; parameters: SerialisableObject; durationMilliseconds: number }> | null {
+export function inPagePlayback(
+  options: Readonly<{ run: TransitionRun; document: DocumentSnapshot }>,
+): Readonly<{ definition: TransitionDefinition; parameters: SerialisableObject; durationMilliseconds: number }> | null {
+  const run = options.run;
   const transition = run.transition;
   switch (transition.kind) {
     case "builtin":
@@ -83,6 +95,14 @@ export function inPagePlayback(run: TransitionRun): Readonly<{ definition: Trans
       };
     case "substitutedFade":
       return { definition: BUILTIN_TRANSITIONS.fade, parameters: SUBSTITUTED_FADE_PARAMETERS, durationMilliseconds: TRANSITION_LIMITS.substituteFadeMilliseconds };
+    case "build": {
+      const slide = slideById(options.document, run.toSlideId);
+      const definition: TransitionDefinition =
+        slide === null
+          ? NOTHING_TO_PLAY
+          : createBuildPlayer({ timeline: buildSegmentTimeline({ slide, completed: run.fromBuild, segment: transition.segment }), pageSize: options.document.pageSize });
+      return { definition, parameters: {}, durationMilliseconds: transition.segment.durationMilliseconds };
+    }
     case "scripted":
       return null;
     default:
@@ -90,15 +110,18 @@ export function inPagePlayback(run: TransitionRun): Readonly<{ definition: Trans
   }
 }
 
+/** A build run whose slide was deleted under it: it ends at once (the reducer then finishes it). */
+const NOTHING_TO_PLAY: TransitionDefinition = { name: "Nothing", run: () => undefined };
+
 function playInPage(
   options: Readonly<{ request: InPageRequest; stage: TransitionStage; animateNode: AnimateNode; now: () => number; startTimer: StartTimer }>,
 ): Observable<PresenterEvent> {
   const run = options.request.run;
-  const playback = inPagePlayback(run);
-  if (playback === null) return EMPTY;
   const document = options.request.state.document;
-  const outgoingSlide = run.fromSlideId === null ? null : slideById(document, run.fromSlideId);
-  const incomingSlide = slideById(document, run.toSlideId);
+  const playback = inPagePlayback({ run, document });
+  if (playback === null) return EMPTY;
+  const outgoingSlide = slideOnSide({ run, document, side: "outgoing" });
+  const incomingSlide = slideOnSide({ run, document, side: "incoming" });
   return new Observable<PresenterEvent>((subscriber) => {
     const controller = new AbortController();
     const context = buildTransitionContext({

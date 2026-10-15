@@ -26,7 +26,7 @@ import type { ElementKey } from "../contracts/yjs-schema.ts";
 import { assertNever } from "../contracts/assert-never.ts";
 import { DOCUMENT_SCHEMA_VERSION, PLACEHOLDER_ROLES } from "../contracts/document.ts";
 import { THEME_COLOUR_SLOTS } from "../contracts/style.ts";
-import { ELEMENT_KEYS_BY_KIND, ELEMENT_KEY, LAYOUT_KEY, META_KEY, RUN_ATTRIBUTE_NAMES, SLIDE_KEY, TABLE_CELL_KEY, THEME_KEY, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
+import { ANIMATION_STEP_KEY, ELEMENT_KEYS_BY_KIND, ELEMENT_KEY, LAYOUT_KEY, META_KEY, RUN_ATTRIBUTE_NAMES, SLIDE_KEY, TABLE_CELL_KEY, THEME_KEY, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
 import { DEFAULT_THEME } from "./blank-deck.ts";
 import { dissolveGroup } from "./command-application.ts";
 import { childMap, type DocumentRoots } from "./document-paths.ts";
@@ -34,6 +34,8 @@ import { orderedChildren } from "./document-projection.ts";
 import { readSlideStructure, STORED_ELEMENT_KINDS, type ElementRecord } from "./element-tree.ts";
 import { isCanonicalOrderKey, planReorderKeys, type OrderedSibling } from "./order-keys.ts";
 import {
+  ANIMATION_EFFECT,
+  ANIMATION_TRIGGER,
   ARROW_HEAD,
   ASSET_RECORD,
   BOOLEAN,
@@ -53,6 +55,7 @@ import {
   parseValue,
   PLACEHOLDER,
   RUN_ATTRIBUTE_CHECKS,
+  SCRIPT_PURPOSE,
   SERIALISABLE_OBJECT,
   SHADOW,
   SHAPE_PRESET,
@@ -61,6 +64,7 @@ import {
   TEXT,
   TRANSITION_APPROVAL,
   TRANSITION_AUTHOR,
+  TRANSITION_EASING,
   type StoredValueCheck,
 } from "./stored-values.ts";
 import { endsWithParagraphMark, PARAGRAPH_MARK, paragraphMarkAttributes } from "./text-body.ts";
@@ -104,8 +108,14 @@ export function findIssues(options: Readonly<{ roots: DocumentRoots; scope: Vali
     // Slide ids are the keys of the slides root by construction (document-writer.ts).
     if (scope.slides !== "all" && !scope.slides.has(id as SlideId)) return;
     // Slide maps are Y.Map<unknown> (document-writer.ts); the parameter is erased at runtime.
-    if (value instanceof Y.Map) findContainerIssues({ map: value as Y.Map<unknown>, path: `slides/${id}`, id, specs: SLIDE_KEY_SPECS, findings });
-    else findings.push({ path: `slides/${id}`, problem: "wrongType", message: "a slide must be a map", action: NO_REPAIR });
+    if (!(value instanceof Y.Map)) {
+      findings.push({ path: `slides/${id}`, problem: "wrongType", message: "a slide must be a map", action: NO_REPAIR });
+      return;
+    }
+    // As above: slide maps are Y.Map<unknown>.
+    const slide = value as Y.Map<unknown>;
+    findContainerIssues({ map: slide, path: `slides/${id}`, id, specs: SLIDE_KEY_SPECS, findings });
+    findAnimationIssues({ slide, path: `slides/${id}/${SLIDE_KEY.animations}`, findings });
   });
   return findings;
 }
@@ -253,6 +263,20 @@ const SLIDE_KEY_SPECS: Readonly<Record<string, KeySpec>> = {
   [SLIDE_KEY.speakerNotes]: { kind: "text" },
   [SLIDE_KEY.transition]: { kind: "value", check: SLIDE_TRANSITION, fallback: () => null },
   [SLIDE_KEY.elements]: { kind: "map" },
+  // A slide from before builds existed lacks it; the repairing replica adds it (yjs-schema.ts).
+  [SLIDE_KEY.animations]: { kind: "map" },
+};
+
+/** One build step's keys. A dangling `elementId` is not structural: the step is shown as such and skipped when presenting. */
+const ANIMATION_STEP_KEY_SPECS: Readonly<Record<string, KeySpec>> = {
+  [ANIMATION_STEP_KEY.id]: { kind: "identity" },
+  [ANIMATION_STEP_KEY.position]: { kind: "position" },
+  [ANIMATION_STEP_KEY.elementId]: { kind: "reportOnly", check: TEXT },
+  [ANIMATION_STEP_KEY.effect]: { kind: "value", check: ANIMATION_EFFECT, fallback: () => ({ kind: "appear" }) },
+  [ANIMATION_STEP_KEY.trigger]: { kind: "value", check: ANIMATION_TRIGGER, fallback: () => "onClick" },
+  [ANIMATION_STEP_KEY.durationMilliseconds]: { kind: "value", check: NUMBER, fallback: () => 500 },
+  [ANIMATION_STEP_KEY.delayMilliseconds]: { kind: "value", check: NUMBER, fallback: () => 0 },
+  [ANIMATION_STEP_KEY.easing]: { kind: "value", check: TRANSITION_EASING, fallback: () => "easeOut" },
 };
 
 const LAYOUT_KEY_SPECS: Readonly<Record<string, KeySpec>> = {
@@ -267,6 +291,7 @@ const SCRIPT_KEY_SPECS: Readonly<Record<string, KeySpec>> = {
   [TRANSITION_SCRIPT_KEY.id]: { kind: "identity" },
   [TRANSITION_SCRIPT_KEY.name]: { kind: "value", check: TEXT, fallback: () => "" },
   [TRANSITION_SCRIPT_KEY.description]: { kind: "value", check: TEXT, fallback: () => "" },
+  [TRANSITION_SCRIPT_KEY.purpose]: { kind: "value", check: SCRIPT_PURPOSE, fallback: () => "transition" },
   [TRANSITION_SCRIPT_KEY.author]: { kind: "value", check: TRANSITION_AUTHOR, fallback: () => ({ kind: "agent", name: "unknown", agentSessionId: "" }) },
   [TRANSITION_SCRIPT_KEY.script]: { kind: "value", check: TEXT, fallback: () => "" },
   [TRANSITION_SCRIPT_KEY.stylesheet]: { kind: "value", check: TEXT, fallback: () => "" },
@@ -413,6 +438,21 @@ function findContainerIssues(
     const siblings = structure.childrenOf(parent).filter((record) => !structure.displaced.has(record.id));
     findSiblingOrderIssues({ owner: elements, siblings, path: `${path}/elements`, findings });
   }
+}
+
+/** A slide's build steps: each step's keys, and their order keys as one sibling list. */
+function findAnimationIssues(options: Readonly<{ slide: Y.Map<unknown>; path: string; findings: Finding[] }>): void {
+  const animations = childMap(options.slide, SLIDE_KEY.animations);
+  if (animations === null) return;
+  animations.forEach((_value, id) => {
+    const step = childMap(animations, id);
+    if (step === null) {
+      options.findings.push({ path: `${options.path}/${id}`, problem: "wrongType", message: "a build step must be a map", action: NO_REPAIR });
+      return;
+    }
+    findKeyIssues({ map: step, path: `${options.path}/${id}`, id, specs: ANIMATION_STEP_KEY_SPECS, findings: options.findings });
+  });
+  findOrderIssues({ owner: animations, path: options.path, findings: options.findings });
 }
 
 function findOrderIssues(options: Readonly<{ owner: Y.Map<unknown>; path: string; findings: Finding[] }>): void {

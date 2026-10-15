@@ -3,6 +3,10 @@
  * and plain text -- not the Yjs structure (assistant-deck-tools.ts "read returns ids and plain
  * text"). `detail: "full"` adds the complete slide values of the slides asked for, for the rare
  * edit that needs an exact style.
+ *
+ * Builds are addressed like elements: each slide lists its steps in play order with their ids
+ * (`animations`, the snapshot's own values), and each element its `morphKey`, the key the morph
+ * transition pairs elements by, so a model can see which elements already glide into each other.
  */
 import type { DeckOutline, ElementOutline, SlideOutline } from "../engine/src/contracts/assistant-deck-tools.ts";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
@@ -64,6 +68,7 @@ function slideOutline(options: Readonly<{ slide: SlideSnapshot; number: number }
     transition: describeTransition(slide.transition),
     speakerNotes: plainText({ body: slide.speakerNotes, slideNumber: options.number }),
     elements: slide.elements.map((element) => elementOutline({ element, slideNumber: options.number })),
+    animations: slide.animations,
   };
 }
 
@@ -74,6 +79,7 @@ function elementOutline(options: Readonly<{ element: ElementSnapshot; slideNumbe
     kind: element.kind,
     name: element.name,
     frame: element.frame,
+    morphKey: element.morphKey,
     text: elementText(options),
     placeholder: element.placeholder?.role ?? null,
     children: childrenOf(element).map((child) => elementOutline({ element: child, slideNumber: options.slideNumber })),

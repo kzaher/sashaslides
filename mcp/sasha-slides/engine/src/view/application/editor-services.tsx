@@ -25,7 +25,7 @@ import type { AssetStore } from "../../contracts/document-store.ts";
 import type { ChosenImageFile, EditorEvent } from "../../contracts/editor-events.ts";
 import type { EditorState } from "../../contracts/editor-state.ts";
 import type { ArrangeThreads, BrowserCapabilities, ClipboardContentFor, EditorHost } from "../../contracts/editor-system.ts";
-import type { PresentationProperties, PresenterDependencies, TransitionPreviewProperties } from "../../contracts/presenter.ts";
+import type { BuildPreviewProperties, PresentationProperties, PresenterDependencies, TransitionPreviewProperties } from "../../contracts/presenter.ts";
 import type { AssetAddressResolver } from "../../contracts/render.ts";
 import type { RunningSystem } from "../../contracts/rxfeedback.ts";
 import type { GestureContext } from "./gesture-handlers.ts";
@@ -41,6 +41,8 @@ export type EditorServices = Readonly<{
   arrangeThreads: ArrangeThreads;
   Presentation: ComponentType<PresentationProperties>;
   TransitionPreview: ComponentType<TransitionPreviewProperties>;
+  /** The Animate tab's Preview: the slide's builds, played once over the canvas. */
+  BuildPreview: ComponentType<BuildPreviewProperties>;
   /** Cmd on macOS, Ctrl elsewhere (editor-state.ts `Modifiers.primary`). */
   primaryModifier: "control" | "meta";
   /** Rich text from a paste or drop, reduced to the engine's styles; null when the markup has none. */

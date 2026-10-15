@@ -7,7 +7,7 @@
 
 import { useMemo, type ReactElement } from "react";
 import type { EditorApplicationProperties } from "../../contracts/editor-system.ts";
-import { Presentation, TransitionPreview } from "../../presenter/index.ts";
+import { BuildPreview, Presentation, TransitionPreview } from "../../presenter/index.ts";
 import { primaryModifierOf, readImageFile, richTextFromMarkup } from "./browser-services.ts";
 import type { EditorServices } from "./editor-services.tsx";
 import { EditorShell } from "./editor-shell.tsx";
@@ -24,6 +24,7 @@ export function EditorApplication(properties: EditorApplicationProperties): Reac
       arrangeThreads: properties.arrangeThreads,
       Presentation,
       TransitionPreview,
+      BuildPreview,
       primaryModifier: typeof window === "undefined" ? "control" : primaryModifierOf(window),
       richTextFrom: richTextFromMarkup,
       readImageFile,

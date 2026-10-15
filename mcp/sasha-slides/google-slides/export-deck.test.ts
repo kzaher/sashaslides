@@ -16,7 +16,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { emitSlideRequests } from "../converter/emit-requests.ts";
 import type { DocumentSnapshot, ElementSnapshot, ShapeElement, ShapePreset, SlideSnapshot, TextBody, ThemeSnapshot } from "../engine/src/contracts/document.ts";
-import type { AssetId, DeckId, ElementId, ListId, SlideId, TableColumnId, TableRowId } from "../engine/src/contracts/ids.ts";
+import type { AnimationStep } from "../engine/src/contracts/animations.ts";
+import type { AnimationStepId, AssetId, DeckId, ElementId, ListId, SlideId, TableColumnId, TableRowId } from "../engine/src/contracts/ids.ts";
 import type { BoxStyle } from "../engine/src/contracts/style.ts";
 import { planExport, SHAPE_TYPE_BY_PRESET, type ExportPlan } from "./export-deck.ts";
 import type { ExportRequest } from "./slides-requests.ts";
@@ -204,6 +205,23 @@ describe("export mapping (SPEC.md 21.12 export table)", () => {
     assert.deepEqual(plan.losses.filter((loss) => loss.feature === "transition").map((loss) => loss.slideId), ["sl_trans0001", "sl_trans0003"]);
   });
 
+  // Parametric over the number of build steps on a slide, with a slide without builds as the control.
+  for (const row of [
+    { stepCount: 0, detail: null },
+    { stepCount: 1, detail: "Slide 2: its animation is not exported; Google Slides' programming interface cannot create animations." },
+    { stepCount: 4, detail: "Slide 2: its 4 animations are not exported; Google Slides' programming interface cannot create animations." },
+  ] as const) {
+    test(`a slide with ${String(row.stepCount)} build steps -> ${row.detail === null ? "no animation loss" : "one animation loss naming the slide and the count"}, and no request`, () => {
+      const steps = Array.from({ length: row.stepCount }, (_, index) => buildStep({ id: `an_build000${String(index)}`, elementId: "el_built0001" }));
+      const built = slide({ id: "sl_built0002", elements: [shape({ id: "el_built0001", preset: "rectangle", box: PLAIN })], animations: steps });
+      const plan = planOf([slide({ id: "sl_plain0001" }), built]);
+      const losses = plan.losses.filter((loss) => loss.feature === "animation");
+      assert.deepEqual(losses, row.detail === null ? [] : [{ slideId: "sl_built0002", elementId: null, feature: "animation", detail: row.detail }]);
+      const withoutBuilds = planOf([slide({ id: "sl_plain0001" }), slide({ id: "sl_built0002", elements: [shape({ id: "el_built0001", preset: "rectangle", box: PLAIN })] })]);
+      assert.deepEqual(plan.batches, withoutBuilds.batches, "builds add no request: the programming interface has none for animations");
+    });
+  }
+
   test("requests are grouped ONE BATCH PER SLIDE in slide order; a re-export deletes and recreates each page in its own batch", () => {
     const slides = [slide({ id: "sl_order0001" }), slide({ id: "sl_order0002" }), slide({ id: "sl_order0003" })];
     const plan = planOf(slides);
@@ -265,7 +283,17 @@ function deckOf(slides: readonly SlideSnapshot[]): DocumentSnapshot {
   };
 }
 
-function slide(options: Readonly<{ id: string; background?: SlideSnapshot["background"]; skipped?: boolean; layoutId?: string; elements?: readonly ElementSnapshot[]; transition?: SlideSnapshot["transition"] }>): SlideSnapshot {
+function slide(
+  options: Readonly<{
+    id: string;
+    background?: SlideSnapshot["background"];
+    skipped?: boolean;
+    layoutId?: string;
+    elements?: readonly ElementSnapshot[];
+    transition?: SlideSnapshot["transition"];
+    animations?: SlideSnapshot["animations"];
+  }>,
+): SlideSnapshot {
   return {
     // Test ids are written in the object-id shape (ids.ts); the brands record that.
     id: options.id as SlideId,
@@ -275,6 +303,21 @@ function slide(options: Readonly<{ id: string; background?: SlideSnapshot["backg
     speakerNotes: { paragraphs: [{ style: {}, runs: [] }] },
     transition: options.transition ?? null,
     elements: options.elements ?? [],
+    animations: options.animations ?? [],
+  };
+}
+
+function buildStep(options: Readonly<{ id: string; elementId: string }>): AnimationStep {
+  return {
+    // Test ids are written in the object-id shape (ids.ts); the brands record that.
+    id: options.id as AnimationStepId,
+    elementId: options.elementId as ElementId,
+    effect: { kind: "fadeIn" },
+    trigger: "onClick",
+    durationMilliseconds: 500,
+    delayMilliseconds: 0,
+    easing: "easeOut",
+    unsupportedKeys: [],
   };
 }
 

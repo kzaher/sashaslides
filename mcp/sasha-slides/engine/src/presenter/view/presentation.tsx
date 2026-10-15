@@ -15,8 +15,8 @@
 //    adopt the window it returns (navigation-keys.ts, presenter-controls.tsx).
 //  * KEYS ARE HEARD IN BOTH WINDOWS, so the speaker can drive the show from the speaker view.
 //  * OBSERVABLE STATE IS ON THE ROOT as data attributes (screen, run phase, the latest fallback,
-//    the rejected message count), for end-to-end drivers and the editor's diagnostics, never as a
-//    second copy of state.
+//    the rejected message count, the build position and "clicks done/clicks"), for end-to-end
+//    drivers and the editor's diagnostics, never as a second copy of state.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { assertNever } from "../../contracts/assert-never.ts";
@@ -25,11 +25,11 @@ import type { KeyChord } from "../../contracts/editor-events.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { createInPageStageRegistry } from "../in-page/in-page-run-feedback.ts";
 import { presenterKeyIntent, type PresenterKeyIntent } from "../navigation-keys.ts";
-import { currentSlideOf, initialShowState, type PresenterSystemState } from "../presenter-state.ts";
+import { currentBuildOf, currentSlideOf, initialShowState, type PresenterSystemState } from "../presenter-state.ts";
 import { isBlankScreen } from "../presenter-queries.ts";
 import { createPresenterSystem } from "../presenter-system.ts";
 import { createBrowserPresenterEnvironment, windowOf } from "./browser-environment.ts";
-import { PresenterControls } from "./presenter-controls.tsx";
+import { PresenterControls, buildClicksOf } from "./presenter-controls.tsx";
 import { PRESENTATION_SURFACE, PRESENTER_CLASS, PRESENTER_RULES } from "./presenter-stylesheet.ts";
 import { ScreenContent, SlideViewport } from "./slide-surfaces.tsx";
 import { SpeakerViewPortal } from "./speaker-view.tsx";
@@ -85,6 +85,7 @@ export function Presentation(properties: PresentationProperties): ReactElement {
   }, [speakerWindow, onSpeakerViewRequested, dispatch]);
   usePresenterKeys({ root, speakerWindow, dispatch, state, requestSpeakerView });
   const lastFallback = [...state.diagnostics].reverse().find((diagnostic) => diagnostic.kind === "fallback");
+  const buildClicks = buildClicksOf(state);
   return (
     <div
       ref={root}
@@ -92,6 +93,8 @@ export function Presentation(properties: PresentationProperties): ReactElement {
       style={{ background: PRESENTATION_SURFACE.letterbox }}
       data-screen={state.screen.kind}
       data-slide-id={currentSlideOf(state)}
+      data-build={currentBuildOf(state)}
+      data-build-clicks={buildClicks === null ? "0/0" : `${buildClicks.done}/${buildClicks.total}`}
       data-run-phase={state.run?.phase ?? "none"}
       data-run-host={state.run?.host.kind ?? "none"}
       data-last-fallback={lastFallback?.reason ?? ""}

@@ -64,6 +64,7 @@ export function newSlide(state: EditorState, layoutId: LayoutId | null): EditorS
     background: null,
     skipped: false,
     speakerNotes: EMPTY_TEXT_BODY,
+    animations: [],
     transition: null,
     elements,
   };

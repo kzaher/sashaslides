@@ -11,6 +11,10 @@
 // pixels are slide units, exactly as in the runner. The layers carry no z-index of their own except
 // the overlay, so a transition that lifts the incoming slide with `style.zIndex = "2"` puts it on top
 // (the documented ink-wipe example does exactly that).
+//
+// EVERY SLIDE IS DRAWN AT A BUILD POSITION (contracts/presenter.ts): the slide on screen at its
+// `build`, a run's two sides at `fromBuild` and `toBuild` (builds/run-slides.ts), so a build segment
+// and a transition out of a built slide draw what the audience last saw.
 
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEventHandler, type ReactElement, type ReactNode } from "react";
 import { assertNever } from "../../contracts/assert-never.ts";
@@ -19,6 +23,8 @@ import type { AssetId, SlideId } from "../../contracts/ids.ts";
 import type { PresenterDependencies, TransitionRun } from "../../contracts/presenter.ts";
 import type { AssetAddressResolver } from "../../contracts/render.ts";
 import type { InPageStageRegistry } from "../in-page/in-page-run-feedback.ts";
+import { slideAtBuild } from "../builds/build-states.ts";
+import { slideOnSide } from "../builds/run-slides.ts";
 import { hostRunnerId } from "../presenter-queries.ts";
 import { deckSlideNumber, slideById, type PresenterSystemState } from "../presenter-state.ts";
 import { EndScreen } from "./end-screen.tsx";
@@ -67,16 +73,17 @@ export function SlideViewport(
   );
 }
 
-/** One slide, scaled into `box`. */
+/** One slide at a build position, scaled into `box`. */
 export function PlacedSlide(
-  properties: Readonly<{ dependencies: PresenterDependencies; document: DocumentSnapshot; slideId: SlideId; box: ViewportBox }>,
+  properties: Readonly<{ dependencies: PresenterDependencies; document: DocumentSnapshot; slideId: SlideId; build: number; box: ViewportBox }>,
 ): ReactElement | null {
   const assetAddress = useAssetAddress(properties.dependencies);
-  const slide = slideById(properties.document, properties.slideId);
-  if (slide === null) return null;
+  const stored = slideById(properties.document, properties.slideId);
+  if (stored === null) return null;
+  const slide = slideAtBuild({ slide: stored, completed: properties.build });
   const StaticSlide = properties.dependencies.StaticSlide;
   return (
-    <div className={PRESENTER_CLASS.placedSlide} style={boxStyle(properties.box)} data-slide-id={slide.id}>
+    <div className={PRESENTER_CLASS.placedSlide} style={boxStyle(properties.box)} data-slide-id={slide.id} data-build={properties.build}>
       <StaticSlide slide={slide} document={properties.document} slideNumber={deckSlideNumber(properties.document, slide.id)} scale={properties.box.scale} assetAddress={assetAddress} />
     </div>
   );
@@ -90,13 +97,13 @@ export function ScreenContent(
   const common = { dependencies: properties.dependencies, document: properties.state.document, box: properties.box };
   switch (screen.kind) {
     case "slide":
-      return <PlacedSlide {...common} slideId={screen.slideId} />;
+      return <PlacedSlide {...common} slideId={screen.slideId} build={screen.build} />;
     case "transition": {
       const run = properties.state.run;
-      if (run === null) return <PlacedSlide {...common} slideId={screen.toSlideId} />;
+      if (run === null) return <PlacedSlide {...common} slideId={screen.toSlideId} build={0} />;
       if (hostRunnerId(run.host) === null) return <InPageStage {...common} run={run} stages={properties.stages} />;
       // A sandboxed run: the outgoing slide stays until the runner's frame shows (SPEC.md section 11).
-      return run.fromSlideId === null ? null : <PlacedSlide {...common} slideId={run.fromSlideId} />;
+      return run.fromSlideId === null ? null : <PlacedSlide {...common} slideId={run.fromSlideId} build={run.fromBuild} />;
     }
     case "blank":
       return <div className={PRESENTER_CLASS.blank} style={{ background: BLANK_COLOURS[screen.colour] }} aria-label={`${screen.colour} screen`} />;
@@ -131,19 +138,19 @@ function InPageStage(
   const page = document.pageSize;
   const layerStyle: CSSProperties = { width: page.width, height: page.height };
   const StaticSlide = properties.dependencies.StaticSlide;
-  const slideOf = (slideId: SlideId | null): ReactElement | null => {
-    const slide = slideId === null ? null : slideById(document, slideId);
+  const slideOf = (side: "outgoing" | "incoming"): ReactElement | null => {
+    const slide = slideOnSide({ run: properties.run, document, side });
     return slide === null ? null : <StaticSlide slide={slide} document={document} slideNumber={deckSlideNumber(document, slide.id)} scale={1} assetAddress={assetAddress} />;
   };
   return (
     <div className={PRESENTER_CLASS.placedSlide} style={boxStyle(properties.box)} data-run-id={runId}>
       <div ref={stage} className={PRESENTER_CLASS.stage} style={{ ...layerStyle, transform: `scale(${properties.box.scale})` }}>
         <div ref={incoming} className={PRESENTER_CLASS.stageLayer} style={layerStyle}>
-          {slideOf(properties.run.toSlideId)}
+          {slideOf("incoming")}
         </div>
         {properties.run.fromSlideId === null ? null : (
           <div ref={outgoing} className={PRESENTER_CLASS.stageLayer} style={layerStyle}>
-            {slideOf(properties.run.fromSlideId)}
+            {slideOf("outgoing")}
           </div>
         )}
         <div ref={overlay} className={PRESENTER_CLASS.stageLayer} style={{ ...layerStyle, zIndex: 3, pointerEvents: "none" }} />

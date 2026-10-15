@@ -5,6 +5,10 @@
 import { VirtualTimeScheduler } from "rxjs";
 import * as Y from "yjs";
 import type {
+  AnimationEffect,
+  AnimationStep,
+  AnimationStepId,
+  AnimationTrigger,
   AssetId,
   AssetRecord,
   CommandAuthor,
@@ -132,6 +136,22 @@ export function envelope(
 export function applyOrThrow(store: DocumentStore, applied: CommandEnvelope): void {
   const outcome = store.apply(applied);
   if (outcome.kind !== "applied") throw new Error(`fixture envelope rejected: ${JSON.stringify(outcome.rejection)}`);
+}
+
+/** A build step with the usual timing; the effect defaults to a fade in, the trigger to a click. */
+export function buildStep(
+  options: Readonly<{ id: AnimationStepId; elementId: ElementId; effect?: AnimationEffect; trigger?: AnimationTrigger; durationMilliseconds?: number; delayMilliseconds?: number }>,
+): AnimationStep {
+  return {
+    id: options.id,
+    elementId: options.elementId,
+    effect: options.effect ?? { kind: "fadeIn" },
+    trigger: options.trigger ?? "onClick",
+    durationMilliseconds: options.durationMilliseconds ?? 500,
+    delayMilliseconds: options.delayMilliseconds ?? 0,
+    easing: "easeOut",
+    unsupportedKeys: [],
+  };
 }
 
 export function textBody(...paragraphs: readonly string[]): TextBody {

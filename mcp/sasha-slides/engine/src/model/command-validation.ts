@@ -13,18 +13,22 @@
 // refuse to read; a value this client would call "unsupported" is refused too, since a client
 // only ever writes values it understands.
 
+import type { AnimationEffect, AnimationStep, AnimationStepPatch } from "../contracts/animations.ts";
 import type { CommandAuthor, CommandEnvelope, CommandRejection, DocumentCommand, ElementPatch, TextOperation } from "../contracts/commands.ts";
-import type { ElementSnapshot, SlideSnapshot, TextBody, ThemeSnapshot } from "../contracts/document.ts";
-import type { AssetId, ElementId, LayoutId, SlideId, TransitionScriptId } from "../contracts/ids.ts";
+import type { ElementSnapshot, ScriptPurpose, SlideSnapshot, TextBody, ThemeSnapshot } from "../contracts/document.ts";
+import type { AnimationStepId, AssetId, ElementId, LayoutId, SlideId, TransitionScriptId } from "../contracts/ids.ts";
 import type { TextTarget } from "../contracts/selection.ts";
+import { ANIMATION_LIMITS } from "../contracts/animations.ts";
 import { assertNever } from "../contracts/assert-never.ts";
 import { scriptFingerprint, textBodyLength } from "../contracts/document.ts";
 import { isObjectId, parseAssetId } from "../contracts/ids.ts";
 import { textTargetKey } from "../contracts/text-delta.ts";
-import { ELEMENT_KEY, RUN_ATTRIBUTE_NAMES, PARAGRAPH_ATTRIBUTE_NAMES, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
-import { childArray, childMap, elementsMapOf, textOf, type DocumentRoots } from "./document-paths.ts";
+import { ANIMATION_STEP_KEY, ELEMENT_KEY, RUN_ATTRIBUTE_NAMES, PARAGRAPH_ATTRIBUTE_NAMES, SLIDE_KEY, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
+import { childArray, childMap, elementsMapOf, slideMapOf, textOf, type DocumentRoots } from "./document-paths.ts";
 import { readSlideStructure, tableLineIds, type SlideStructure } from "./element-tree.ts";
 import {
+  ANIMATION_EFFECT,
+  ANIMATION_TRIGGER,
   ARROW_HEAD,
   ASSET_RECORD,
   BORDER,
@@ -52,10 +56,12 @@ import {
   readStored,
   RUN_ATTRIBUTE_CHECKS,
   SHADOW,
+  SCRIPT_PURPOSE,
   SHAPE_PRESET,
   SLIDE_TRANSITION,
   STROKE,
   TEXT,
+  TRANSITION_EASING,
   valueOr,
   type StoredValueCheck,
   type Verdict,
@@ -77,7 +83,7 @@ export function validateEnvelope(options: Readonly<{ context: ValidationContext;
 
 /** An element as the prospective document sees it. */
 type ProspectiveElement = Readonly<{ kind: string; parent: ElementId | null }>;
-type ScriptState = Readonly<{ updatedAt: number; fingerprint: string }>;
+type ScriptState = Readonly<{ updatedAt: number; fingerprint: string; purpose: ScriptPurpose }>;
 type TableLines = Readonly<{ rows: readonly string[]; columns: readonly string[] }>;
 
 /** The document as the commands validated so far will leave it (see the header). */
@@ -97,6 +103,9 @@ type Prospect = Readonly<{
   recordTextLength: (target: TextTarget, length: number | null) => void;
   tableLines: (slideId: SlideId, elementId: ElementId) => TableLines | null;
   recordTableLines: (slideId: SlideId, elementId: ElementId, lines: TableLines) => void;
+  /** The slide's build steps and the element each targets, as the envelope will leave them. */
+  steps: (slideId: SlideId) => ReadonlyMap<AnimationStepId, ElementId>;
+  recordStep: (slideId: SlideId, stepId: AnimationStepId, elementId: ElementId | null) => void;
 }>;
 
 function createProspect(roots: DocumentRoots): Prospect {
@@ -108,6 +117,7 @@ function createProspect(roots: DocumentRoots): Prospect {
   const assets = new Set<AssetId>();
   const textLengths = new Map<string, number | null>();
   const tables = new Map<string, TableLines>();
+  const stepOverlay = new Map<SlideId, Map<AnimationStepId, ElementId | null>>();
 
   const structureOf = (slideId: SlideId): SlideStructure | null => {
     if (!structures.has(slideId)) {
@@ -135,6 +145,7 @@ function createProspect(roots: DocumentRoots): Prospect {
     slideExists,
     recordSlide: (slideId, exists) => {
       slides.set(slideId, exists);
+      stepOverlay.delete(slideId);
       if (exists) structures.set(slideId, null);
     },
     element,
@@ -155,13 +166,16 @@ function createProspect(roots: DocumentRoots): Prospect {
       const map = childMap(roots.transitionScripts, scriptId);
       if (map === null) return null;
       const text = (key: string): string => valueOr(readStored({ map, key, kind: TEXT }), "");
+      const purpose = valueOr(readStored({ map, key: TRANSITION_SCRIPT_KEY.purpose, kind: SCRIPT_PURPOSE }), "transition");
       return {
         updatedAt: valueOr(readStored({ map, key: TRANSITION_SCRIPT_KEY.updatedAt, kind: NUMBER }), 0),
         fingerprint: scriptFingerprint({
           script: text(TRANSITION_SCRIPT_KEY.script),
           stylesheet: text(TRANSITION_SCRIPT_KEY.stylesheet),
           markup: text(TRANSITION_SCRIPT_KEY.markup),
+          purpose,
         }),
+        purpose,
       };
     },
     recordScript: (scriptId, state) => scripts.set(scriptId, state),
@@ -187,6 +201,30 @@ function createProspect(roots: DocumentRoots): Prospect {
       return { rows: tableLineIds(childArray(map, ELEMENT_KEY.rows)), columns: tableLineIds(childArray(map, ELEMENT_KEY.columns)) };
     },
     recordTableLines: (slideId, elementId, lines) => tables.set(elementKey(slideId, elementId), lines),
+    steps: (slideId) => {
+      const steps = new Map<AnimationStepId, ElementId>();
+      if (!slideExists(slideId)) return steps;
+      if (slides.get(slideId) !== true) {
+        const slide = slideMapOf(roots, slideId);
+        const stored = slide === null ? null : childMap(slide, SLIDE_KEY.animations);
+        stored?.forEach((_value, id) => {
+          const step = childMap(stored, id);
+          const target = step === null ? null : step.get(ANIMATION_STEP_KEY.elementId);
+          // Keys of a slide's animations map are step ids, and its element ids name elements (document-writer.ts).
+          if (typeof target === "string") steps.set(id as AnimationStepId, target as ElementId);
+        });
+      }
+      for (const [stepId, target] of stepOverlay.get(slideId) ?? []) {
+        if (target === null) steps.delete(stepId);
+        else steps.set(stepId, target);
+      }
+      return steps;
+    },
+    recordStep: (slideId, stepId, target) => {
+      const overlay = stepOverlay.get(slideId) ?? new Map<AnimationStepId, ElementId | null>();
+      overlay.set(stepId, target);
+      stepOverlay.set(slideId, overlay);
+    },
   };
 
   function targetExists(target: TextTarget): boolean {
@@ -284,9 +322,18 @@ function validateCommand(options: CommandCheck): CommandRejection | null {
       for (const elementId of command.elementIds) {
         if (prospect.element(command.slideId, elementId) === null) return elementMissing({ prospect, slideId: command.slideId, elementId });
       }
+      const deleted = new Set<ElementId>();
       for (const elementId of command.elementIds) {
-        for (const descendant of descendantsOf({ prospect, slideId: command.slideId, elementId })) prospect.recordElement(command.slideId, descendant, null);
+        for (const descendant of descendantsOf({ prospect, slideId: command.slideId, elementId })) {
+          prospect.recordElement(command.slideId, descendant, null);
+          deleted.add(descendant);
+        }
         prospect.recordElement(command.slideId, elementId, null);
+        deleted.add(elementId);
+      }
+      // The model deletes the steps of every deleted element with it (commands.ts `deleteElements`).
+      for (const [stepId, target] of prospect.steps(command.slideId)) {
+        if (deleted.has(target)) prospect.recordStep(command.slideId, stepId, null);
       }
       return null;
     }
@@ -330,6 +377,11 @@ function validateCommand(options: CommandCheck): CommandRejection | null {
     case "setTableRowHeights":
     case "updateTableCells":
       return validateTableCommand({ prospect, command, path });
+    case "insertAnimationSteps":
+    case "updateAnimationSteps":
+    case "moveAnimationSteps":
+    case "deleteAnimationSteps":
+      return validateAnimationCommand({ prospect, command, path });
     default:
       return assertNever(command);
   }
@@ -435,13 +487,15 @@ function validateScriptUpsert(
   if (!isRecord(draft.defaultParameters) || checkSerialisable(draft.defaultParameters) !== "valid") {
     return value({ path: `${path}.script.defaultParameters`, verdict: "wrongType" });
   }
+  const purposeRejection = checked({ path: `${path}.script.purpose`, candidate: draft.purpose, kind: SCRIPT_PURPOSE });
+  if (purposeRejection !== null) return purposeRejection;
   const current = prospect.script(draft.id);
   if (current === null && command.basedOnUpdatedAt !== null) return { reason: "transitionScriptMissing", scriptId: draft.id };
   if (current !== null && command.basedOnUpdatedAt !== current.updatedAt) {
     return { reason: "staleScript", scriptId: draft.id, basedOnUpdatedAt: command.basedOnUpdatedAt, currentUpdatedAt: current.updatedAt };
   }
   // The stamp is the store's to choose; any value newer than every earlier save keeps later checks right.
-  prospect.recordScript(draft.id, { updatedAt: Number.NaN, fingerprint: scriptFingerprint(draft) });
+  prospect.recordScript(draft.id, { updatedAt: Number.NaN, fingerprint: scriptFingerprint(draft), purpose: draft.purpose });
   return null;
 }
 
@@ -468,6 +522,8 @@ function validateSlideInsert(
     if (treeRejection !== null) return treeRejection;
     prospect.recordTextLength({ kind: "speakerNotes", slideId: slide.id }, textBodyLength(slide.speakerNotes));
     recordTrees({ prospect, slideId: slide.id, elements: slide.elements, parent: null });
+    const stepRejection = validateNewSteps({ prospect, slideId: slide.id, steps: slide.animations, path: `${slidePath}.animations` });
+    if (stepRejection !== null) return stepRejection;
   }
   return null;
 }
@@ -930,4 +986,133 @@ function validateTableCommand(options: Readonly<{ prospect: Prospect; command: T
     default:
       return assertNever(command);
   }
+}
+
+type AnimationCommand = Extract<DocumentCommand, { kind: "insertAnimationSteps" | "updateAnimationSteps" | "moveAnimationSteps" | "deleteAnimationSteps" }>;
+
+function validateAnimationCommand(options: Readonly<{ prospect: Prospect; command: AnimationCommand; path: string }>): CommandRejection | null {
+  const { prospect, command, path } = options;
+  if (!prospect.slideExists(command.slideId)) return { reason: "slideMissing", slideId: command.slideId };
+  const existing = prospect.steps(command.slideId);
+  switch (command.kind) {
+    case "insertAnimationSteps":
+      if (command.after !== null && !existing.has(command.after)) return { reason: "animationStepMissing", slideId: command.slideId, stepId: command.after };
+      return validateNewSteps({ prospect, slideId: command.slideId, steps: command.steps, path: `${path}.steps` });
+    case "updateAnimationSteps": {
+      const missing = stepMissing({ slideId: command.slideId, stepIds: command.stepIds, existing });
+      if (missing !== null) return missing;
+      const rejection = validateStepPatch({ prospect, slideId: command.slideId, patch: command.patch, path: `${path}.patch` });
+      if (rejection !== null) return rejection;
+      const target = command.patch.elementId;
+      if (target !== undefined) for (const stepId of command.stepIds) prospect.recordStep(command.slideId, stepId, target);
+      return null;
+    }
+    case "moveAnimationSteps": {
+      const missing = stepMissing({ slideId: command.slideId, stepIds: command.stepIds, existing });
+      if (missing !== null) return missing;
+      if (command.after !== null && !existing.has(command.after)) return { reason: "animationStepMissing", slideId: command.slideId, stepId: command.after };
+      if (command.after !== null && command.stepIds.includes(command.after)) {
+        return { reason: "invalidValue", path: `${path}.after`, message: "a step cannot move after itself" };
+      }
+      return null;
+    }
+    case "deleteAnimationSteps": {
+      const missing = stepMissing({ slideId: command.slideId, stepIds: command.stepIds, existing });
+      if (missing !== null) return missing;
+      for (const stepId of command.stepIds) prospect.recordStep(command.slideId, stepId, null);
+      return null;
+    }
+    default:
+      return assertNever(command);
+  }
+}
+
+function stepMissing(options: Readonly<{ slideId: SlideId; stepIds: readonly AnimationStepId[]; existing: ReadonlyMap<AnimationStepId, ElementId> }>): CommandRejection | null {
+  const stepId = options.stepIds.find((candidate) => !options.existing.has(candidate));
+  return stepId === undefined ? null : { reason: "animationStepMissing", slideId: options.slideId, stepId };
+}
+
+/** New steps: fresh ids, an element of the slide, valid values, and the slide's sequence within its limit. */
+function validateNewSteps(options: Readonly<{ prospect: Prospect; slideId: SlideId; steps: readonly AnimationStep[]; path: string }>): CommandRejection | null {
+  const { prospect, slideId, path } = options;
+  const existing = prospect.steps(slideId);
+  if (existing.size + options.steps.length > ANIMATION_LIMITS.maximumStepsPerSlide) {
+    return { reason: "invalidValue", path, message: `a slide holds at most ${ANIMATION_LIMITS.maximumStepsPerSlide} build steps` };
+  }
+  const seen = new Set<string>();
+  for (const [index, step] of options.steps.entries()) {
+    if (!isObjectId(step.id)) return { reason: "invalidId", id: step.id };
+    if (seen.has(step.id) || existing.has(step.id)) return { reason: "duplicateId", id: step.id };
+    seen.add(step.id);
+    const rejection = validateStepPatch({
+      prospect,
+      slideId,
+      patch: { elementId: step.elementId, effect: step.effect, trigger: step.trigger, durationMilliseconds: step.durationMilliseconds, delayMilliseconds: step.delayMilliseconds, easing: step.easing },
+      path: `${path}.${index}`,
+    });
+    if (rejection !== null) return rejection;
+  }
+  for (const step of options.steps) prospect.recordStep(slideId, step.id, step.elementId);
+  return null;
+}
+
+function validateStepPatch(options: Readonly<{ prospect: Prospect; slideId: SlideId; patch: AnimationStepPatch; path: string }>): CommandRejection | null {
+  const { prospect, slideId, patch, path } = options;
+  if (patch.elementId !== undefined && prospect.element(slideId, patch.elementId) === null) return elementMissing({ prospect, slideId, elementId: patch.elementId });
+  return (
+    (patch.effect === undefined ? null : validateEffect({ prospect, effect: patch.effect, path: `${path}.effect` })) ??
+    optionalChecked({ path: `${path}.trigger`, candidate: patch.trigger, kind: ANIMATION_TRIGGER }) ??
+    optionalChecked({ path: `${path}.easing`, candidate: patch.easing, kind: TRANSITION_EASING }) ??
+    withinLimit({ path: `${path}.durationMilliseconds`, candidate: patch.durationMilliseconds, minimum: 0, maximum: ANIMATION_LIMITS.maximumDurationMilliseconds }) ??
+    withinLimit({ path: `${path}.delayMilliseconds`, candidate: patch.delayMilliseconds, minimum: 0, maximum: ANIMATION_LIMITS.maximumDelayMilliseconds })
+  );
+}
+
+/** The stored shape, then the command-only ranges (stored-values.ts `ANIMATION_EFFECT`), then a scripted step's script. */
+function validateEffect(options: Readonly<{ prospect: Prospect; effect: AnimationEffect; path: string }>): CommandRejection | null {
+  const { effect, path } = options;
+  const shape = checked({ path, candidate: effect, kind: ANIMATION_EFFECT });
+  if (shape !== null) return shape;
+  switch (effect.kind) {
+    case "appear":
+    case "fadeIn":
+    case "flyIn":
+    case "zoomIn":
+    case "floatIn":
+    case "wipe":
+    case "pulse":
+    case "colourChange":
+    case "disappear":
+    case "fadeOut":
+    case "flyOut":
+    case "zoomOut":
+      return null;
+    case "growShrink":
+      return withinLimit({ path: `${path}.scale`, candidate: effect.scale, minimum: ANIMATION_LIMITS.minimumScale, maximum: ANIMATION_LIMITS.maximumScale });
+    case "spin":
+      return withinLimit({ path: `${path}.degrees`, candidate: effect.degrees, minimum: -ANIMATION_LIMITS.maximumSpinDegrees, maximum: ANIMATION_LIMITS.maximumSpinDegrees });
+    case "motionPath":
+      return (
+        withinLimit({ path: `${path}.offsetX`, candidate: effect.offsetX, minimum: -ANIMATION_LIMITS.maximumMotionOffset, maximum: ANIMATION_LIMITS.maximumMotionOffset }) ??
+        withinLimit({ path: `${path}.offsetY`, candidate: effect.offsetY, minimum: -ANIMATION_LIMITS.maximumMotionOffset, maximum: ANIMATION_LIMITS.maximumMotionOffset })
+      );
+    case "scripted": {
+      const script = options.prospect.script(effect.scriptId);
+      if (script === null) return { reason: "transitionScriptMissing", scriptId: effect.scriptId };
+      if (script.purpose !== "animation") return { reason: "invalidValue", path: `${path}.scriptId`, message: "a scripted build step names an animation script, not a transition" };
+      return null;
+    }
+    default:
+      return assertNever(effect);
+  }
+}
+
+function withinLimit(options: Readonly<{ path: string; candidate: number | undefined; minimum: number; maximum: number }>): CommandRejection | null {
+  const candidate = options.candidate;
+  if (candidate === undefined) return null;
+  if (typeof candidate !== "number" || !Number.isFinite(candidate)) return value({ path: options.path, verdict: "wrongType" });
+  if (candidate < options.minimum || candidate > options.maximum) {
+    return { reason: "invalidValue", path: options.path, message: `between ${options.minimum} and ${options.maximum}` };
+  }
+  return null;
 }

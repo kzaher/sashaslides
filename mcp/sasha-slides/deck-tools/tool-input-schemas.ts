@@ -17,11 +17,13 @@
  *    (engine/src/model/command-validation.ts), and a malformed one comes back as a rejection.
  */
 import { z } from "zod";
+import { ANIMATION_LIMITS, DEFAULT_ANIMATION_DURATION_MILLISECONDS, type AnimationEdge, type AnimationTrigger, type ScriptedAnimationCategory } from "../engine/src/contracts/animations.ts";
 import type { AssistantParagraph } from "../engine/src/contracts/assistant-deck-tools.ts";
 import type { DocumentCommand, DocumentCommandKind } from "../engine/src/contracts/commands.ts";
-import type { ShapePreset } from "../engine/src/contracts/document.ts";
+import type { ShapePreset, TransitionEasing } from "../engine/src/contracts/document.ts";
 import { COLLABORATION_LIMITS } from "../engine/src/contracts/collaboration.ts";
 import {
+  parseAnimationStepId,
   parseAssetId,
   parseDeckId,
   parseElementId,
@@ -45,6 +47,7 @@ export const threadIdSchema = brandedId({ parse: parseThreadId, label: "thread i
 export const transitionScriptIdSchema = brandedId({ parse: parseTransitionScriptId, label: "transition script id" });
 const assetIdSchema = brandedId({ parse: parseAssetId, label: "asset id (64 lowercase hexadecimal)" });
 const listIdSchema = brandedId({ parse: parseListId, label: "list id" });
+const animationStepIdSchema = brandedId({ parse: parseAnimationStepId, label: "build step id" });
 
 // --- style values (style.ts) --------------------------------------------------------------------
 
@@ -317,6 +320,76 @@ const slidePropertiesPatchSchema = z.object({
   layoutId: layoutIdSchema.nullable().exactOptional(),
 });
 
+// --- builds (animations.ts) -------------------------------------------------------------------
+
+const ANIMATION_EDGE_VALUES = ["left", "right", "top", "bottom"] as const satisfies readonly AnimationEdge[];
+const ANIMATION_TRIGGER_VALUES = ["onClick", "withPrevious", "afterPrevious"] as const satisfies readonly AnimationTrigger[];
+const SCRIPTED_CATEGORY_VALUES = ["entrance", "emphasis", "exit"] as const satisfies readonly ScriptedAnimationCategory[];
+const EASING_VALUES = ["linear", "easeIn", "easeOut", "easeInOut"] as const satisfies readonly TransitionEasing[];
+
+const motionOffsetSchema = z.number().min(-ANIMATION_LIMITS.maximumMotionOffset).max(ANIMATION_LIMITS.maximumMotionOffset);
+
+/** Every effect of `AnimationEffect` with its options; omitted options take `defaultAnimationEffect`'s values. */
+export const animationEffectSchema = z
+  .discriminatedUnion("kind", [
+    z.object({ kind: z.literal("appear") }),
+    z.object({ kind: z.literal("fadeIn") }),
+    z.object({ kind: z.literal("flyIn"), from: z.enum(ANIMATION_EDGE_VALUES).default("left") }),
+    z.object({ kind: z.literal("zoomIn") }),
+    z.object({ kind: z.literal("floatIn") }),
+    z.object({ kind: z.literal("wipe"), from: z.enum(ANIMATION_EDGE_VALUES).default("left") }),
+    z.object({ kind: z.literal("pulse") }),
+    z.object({ kind: z.literal("growShrink"), scale: z.number().min(ANIMATION_LIMITS.minimumScale).max(ANIMATION_LIMITS.maximumScale).default(1.5).describe("Ends this many times its size.") }),
+    z.object({
+      kind: z.literal("spin"),
+      degrees: z.number().min(-ANIMATION_LIMITS.maximumSpinDegrees).max(ANIMATION_LIMITS.maximumSpinDegrees).default(360).describe("Positive is clockwise; 360 is one turn."),
+    }),
+    z.object({ kind: z.literal("colourChange"), colour: colourSchema, part: z.enum(["fill", "text"]).default("fill") }),
+    z.object({ kind: z.literal("disappear") }),
+    z.object({ kind: z.literal("fadeOut") }),
+    z.object({ kind: z.literal("flyOut"), to: z.enum(ANIMATION_EDGE_VALUES).default("right") }),
+    z.object({ kind: z.literal("zoomOut") }),
+    z.object({ kind: z.literal("motionPath"), offsetX: motionOffsetSchema, offsetY: motionOffsetSchema }).describe("A straight move by the offset, in slide units."),
+    z.object({
+      kind: z.literal("scripted"),
+      scriptId: transitionScriptIdSchema.describe("An animation script of this deck (deck_write_animation writes one)."),
+      category: z.enum(SCRIPTED_CATEGORY_VALUES).describe("Where the element rests: entrance shown, exit hidden, emphasis unchanged."),
+      parameters: serialisableObjectSchema.default({}),
+    }),
+  ])
+  .meta({
+    id: "SashaAnimationEffect",
+    description:
+      "Entrances (appear, fadeIn, flyIn, zoomIn, floatIn, wipe) hide the element until the step runs; emphasis (pulse, growShrink, spin, colourChange) " +
+      "changes it; exits (disappear, fadeOut, flyOut, zoomOut) hide it after; motionPath moves it.",
+  });
+
+const animationTriggerSchema = z.enum(ANIMATION_TRIGGER_VALUES).describe("onClick: the presenter's next click; withPrevious: together with the step before; afterPrevious: when it ends.");
+const animationDurationSchema = z.number().min(0).max(ANIMATION_LIMITS.maximumDurationMilliseconds);
+const animationDelaySchema = z.number().min(0).max(ANIMATION_LIMITS.maximumDelayMilliseconds);
+
+const assistantAnimationStepSchema = z
+  .object({
+    elementId: elementIdSchema.describe("The element (or group) it animates; may be one added earlier in the same call."),
+    effect: animationEffectSchema,
+    trigger: animationTriggerSchema.default("onClick"),
+    durationMilliseconds: animationDurationSchema.default(DEFAULT_ANIMATION_DURATION_MILLISECONDS),
+    delayMilliseconds: animationDelaySchema.default(0),
+    easing: z.enum(EASING_VALUES).default("easeOut"),
+  })
+  .meta({ id: "SashaAnimationStep" });
+
+const animationStepPatchSchema = z.object({
+  elementId: elementIdSchema.exactOptional(),
+  effect: animationEffectSchema.exactOptional(),
+  trigger: animationTriggerSchema.exactOptional(),
+  durationMilliseconds: animationDurationSchema.exactOptional(),
+  delayMilliseconds: animationDelaySchema.exactOptional(),
+  easing: z.enum(EASING_VALUES).exactOptional(),
+});
+
+const animationStepIdsSchema = z.array(animationStepIdSchema).min(1).max(ANIMATION_LIMITS.maximumStepsPerSlide);
+
 // --- the edits ----------------------------------------------------------------------------------
 
 const DOCUMENT_COMMAND_KIND_TABLE: Readonly<Record<DocumentCommandKind, true>> = {
@@ -347,6 +420,10 @@ const DOCUMENT_COMMAND_KIND_TABLE: Readonly<Record<DocumentCommandKind, true>> =
   setTableColumnWidths: true,
   setTableRowHeights: true,
   updateTableCells: true,
+  insertAnimationSteps: true,
+  updateAnimationSteps: true,
+  moveAnimationSteps: true,
+  deleteAnimationSteps: true,
 };
 
 // `Object.keys` widens to string[]; the record above has exactly the DocumentCommandKind keys.
@@ -434,6 +511,20 @@ const assistantEditSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("reorderElements"), slideId: slideIdSchema, elementIds: z.array(elementIdSchema).min(1), placement: reorderPlacementSchema }),
   z.object({ kind: z.literal("groupElements"), id: newElementIdSchema, slideId: slideIdSchema, elementIds: z.array(elementIdSchema).min(2) }),
   z.object({ kind: z.literal("setTitle"), title: z.string().min(1).max(500) }),
+  z.object({
+    kind: z.literal("addAnimations"),
+    slideId: slideIdSchema,
+    after: animationStepIdSchema.nullable().default(null).describe("After this build step; null: at the end of the slide's sequence."),
+    steps: z.array(assistantAnimationStepSchema).min(1).max(ANIMATION_LIMITS.maximumStepsPerSlide).describe("Played in this order; the answer reports their ids."),
+  }),
+  z.object({ kind: z.literal("updateAnimations"), slideId: slideIdSchema, stepIds: animationStepIdsSchema, patch: animationStepPatchSchema }),
+  z.object({
+    kind: z.literal("moveAnimations"),
+    slideId: slideIdSchema,
+    stepIds: animationStepIdsSchema,
+    after: animationStepIdSchema.nullable().describe("Move to just after this step; null: to the start of the sequence."),
+  }),
+  z.object({ kind: z.literal("removeAnimations"), slideId: slideIdSchema, stepIds: animationStepIdsSchema }),
   z.object({ kind: z.literal("raw"), commands: z.array(rawCommandSchema).min(1).describe("Escape hatch: DocumentCommands exactly as the engine's commands.ts defines them.") }),
 ]);
 
@@ -478,6 +569,30 @@ export const DECK_WRITE_TRANSITION_INPUT = {
     .max(500)
     .default([])
     .describe("Slides whose transition (into them) becomes this script."),
+};
+
+export const DECK_WRITE_ANIMATION_INPUT = {
+  deckId: deckIdSchema,
+  scriptId: transitionScriptIdSchema.nullable().default(null).describe("null: a new script; an id: replace that animation script."),
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).default(""),
+  script: z.string().min(1).describe("JavaScript calling sashaTransition.define(...); at most 256 kilobytes."),
+  stylesheet: z.string().default(""),
+  markup: z.string().default(""),
+  defaultParameters: serialisableObjectSchema.default({}),
+  assignTo: z
+    .array(
+      z.object({
+        slideId: slideIdSchema,
+        elementId: elementIdSchema.describe("The element the step animates (context.parameters.targetElementId)."),
+        category: z.enum(SCRIPTED_CATEGORY_VALUES).describe("Where the element rests after the step: entrance shown, exit hidden, emphasis unchanged."),
+        trigger: animationTriggerSchema.default("onClick"),
+        durationMilliseconds: animationDurationSchema.default(1000),
+      }),
+    )
+    .max(ANIMATION_LIMITS.maximumStepsPerSlide)
+    .default([])
+    .describe("Build steps appended to these slides' sequences, one per entry, each running this script on its element."),
 };
 
 export const DECK_REVERT_INPUT = {

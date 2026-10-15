@@ -16,6 +16,7 @@ import {
   type Point,
   type ShapePreset,
 } from "../../contracts/index.ts";
+import { addAnimation, chooseAnimationStep, endBuildPreview, moveAnimationSteps, patchAnimationStep, previewBuilds, removeAnimationStep, surviveAnimationChoice } from "./animations.ts";
 import { reduceArrange, editFrameField, nudgeSelection } from "./arrange.ts";
 import { commentingRefusal, editingRefusal } from "./access.ts";
 import { cutSelection, pasteContent } from "./clipboard.ts";
@@ -79,7 +80,7 @@ import { abandonUpload, reduceAssetStored, reduceAssetStoreFailed, retryUpload, 
 import { flattenBody, runStyleAt } from "./text-model.ts";
 
 export function reduceEditor(state: EditorState, event: EditorEvent): EditorState {
-  return reduceEvent(state, event);
+  return surviveAnimationChoice({ before: state, after: reduceEvent(state, event) });
 }
 
 /** What a chord's intent does here; the clipboard and Present are the view's (keyboard.ts header). */
@@ -221,7 +222,7 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
       return reduceSlideLayoutChosen(state, event.layoutId);
     // --- transition scripts
     case "transitionScriptEditorOpened":
-      return openScriptEditor(state, event.scriptId);
+      return openScriptEditor(state, { scriptId: event.scriptId, purpose: event.purpose });
     case "transitionScriptDraftChanged":
       return changeScriptDraft(state, event.draft);
     case "transitionScriptSaveRequested":
@@ -234,6 +235,21 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
       return previewTransition(state, event.slideId);
     case "transitionPreviewEnded":
       return { ...state, chrome: { ...state.chrome, transitionPreview: null } };
+    // --- builds: the Animate tab (animations.ts)
+    case "animationAddRequested":
+      return addAnimation(state, event.effect);
+    case "animationStepSelected":
+      return chooseAnimationStep(state, event.stepId);
+    case "animationStepPatchRequested":
+      return patchAnimationStep(state, { stepId: event.stepId, patch: event.patch });
+    case "animationStepsMoved":
+      return moveAnimationSteps(state, { stepIds: event.stepIds, after: event.after });
+    case "animationStepRemoved":
+      return removeAnimationStep(state, event.stepId);
+    case "buildPreviewRequested":
+      return previewBuilds(state, event.slideId);
+    case "buildPreviewEnded":
+      return endBuildPreview(state);
     // --- clipboard
     case "copied":
       return { ...state, clipboard: { pasteCascade: null } };
@@ -552,7 +568,7 @@ function chooseNoticeAction(state: EditorState, noticeId: NoticeId): EditorState
     case "retryDiscussion":
       return queueDiscussion(removed, action.command);
     case "reviewTransitionScript":
-      return openScriptEditor(removed, action.scriptId);
+      return openScriptEditor(removed, { scriptId: action.scriptId, purpose: "transition" });
     case "undoAgentEdits":
       return requestAgentRevert(removed, { agentSessionId: action.agentSessionId, agentName: action.agentName });
     case "openInNewTab":

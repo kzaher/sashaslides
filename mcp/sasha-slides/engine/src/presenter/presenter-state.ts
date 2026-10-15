@@ -20,6 +20,7 @@
 //  * A PREVIEW IS A SHOW OF ONE TRANSITION. `TransitionPreview` runs the same reducer and hosts in
 //    `mode: "preview"`, starting with the run already in place (the transition into the previewed
 //    slide from the slide before it in deck order, skipped or not), and ignores navigation.
+//    `BuildPreview` is the same in `mode: "buildPreview"`, starting on its slide at build 0.
 
 import type { DocumentSnapshot, SlideSnapshot } from "../contracts/document.ts";
 import { assertNever } from "../contracts/assert-never.ts";
@@ -43,7 +44,7 @@ export function initialShowState(
     ? options.startSlideId
     : nearestFollowingSlide({ playlist, order: options.document.slides, slideId: options.startSlideId });
   const screen: PresenterScreen =
-    startSlideId === null ? { kind: "end", lastSlideId: options.startSlideId } : { kind: "slide", slideId: startSlideId };
+    startSlideId === null ? { kind: "end", lastSlideId: options.startSlideId } : { kind: "slide", slideId: startSlideId, build: 0 };
   return baseState({ ...options, playlist, screen, mode: "show" });
 }
 
@@ -53,10 +54,17 @@ export function initialShowState(
  * transition resolution; this is the state before that run.
  */
 export function initialPreviewBaseState(
-  options: Readonly<{ document: DocumentSnapshot; slideId: SlideId; idSeed: IdSeed; now: number; reducedMotion: boolean }>,
+  options: Readonly<{
+    document: DocumentSnapshot;
+    slideId: SlideId;
+    idSeed: IdSeed;
+    now: number;
+    reducedMotion: boolean;
+    mode: Exclude<PresenterMode, "show">;
+  }>,
 ): PresenterSystemState {
   const playlist = options.document.slides.map((slide) => slide.id);
-  return baseState({ ...options, playlist, screen: { kind: "slide", slideId: options.slideId }, mode: "preview" });
+  return baseState({ ...options, playlist, screen: { kind: "slide", slideId: options.slideId, build: 0 } });
 }
 
 /** Non-skipped slides in deck order. */
@@ -96,6 +104,23 @@ export function currentSlideOf(state: PresenterState): SlideId {
   }
 }
 
+/** The build position the audience sees the current slide at (a run: the position it arrives at). */
+export function currentBuildOf(state: PresenterState): number {
+  const screen = state.screen;
+  switch (screen.kind) {
+    case "slide":
+      return screen.build;
+    case "transition":
+      return state.run?.toBuild ?? 0;
+    case "blank":
+      return screen.resumeBuild;
+    case "end":
+      return 0;
+    default:
+      return assertNever(screen);
+  }
+}
+
 export function slideById(document: DocumentSnapshot, slideId: SlideId): SlideSnapshot | null {
   return document.slides.find((slide) => slide.id === slideId) ?? null;
 }
@@ -114,6 +139,8 @@ export function runDurationMilliseconds(run: TransitionRun, substituteFadeMillis
       return transition.durationMilliseconds;
     case "substitutedFade":
       return substituteFadeMilliseconds;
+    case "build":
+      return transition.segment.durationMilliseconds;
     default:
       return assertNever(transition);
   }

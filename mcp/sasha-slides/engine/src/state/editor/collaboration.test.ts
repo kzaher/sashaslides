@@ -162,6 +162,7 @@ describe("Claude's edits", () => {
     id: SCRIPT,
     name: "Ink wipe",
     description: "",
+    purpose: "transition",
     author: { kind: "agent", name: "Claude", agentSessionId: "agent_session_4" },
     script: "sashaTransition.define({})",
     stylesheet: "",

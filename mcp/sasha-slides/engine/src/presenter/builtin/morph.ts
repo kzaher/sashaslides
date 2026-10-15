@@ -16,6 +16,12 @@
 //    the shared path while its outgoing twin fades out along it -- a cross-fade of content.
 //  * FRAMES ARE TRANSFORMS, never left/top/width/height: no layout per frame, and text keeps its
 //    line breaks while it scales.
+//  * A LEAF FADES TO ITS OWN OPACITY, never to 1: an element stored at 50 % would otherwise flash to
+//    full strength for the length of the morph and snap back. The renderer writes a leaf's opacity
+//    inline on the node that carries the element id (render.ts), in the page and in the runner
+//    alike, so the definition reads it there and stays runnable from the `TransitionContext` alone.
+//  * THE INCOMING SLIDE IS DRAWN AT ITS ARRIVAL BUILD AND THE OUTGOING ONE AT ITS FINAL BUILD
+//    (in-page-run-feedback.ts), so a morph out of a built slide starts from what the audience saw.
 
 import type { Frame } from "../../contracts/geometry.ts";
 import type { TransitionDefinition } from "../../contracts/transition-protocol.ts";
@@ -35,16 +41,18 @@ export const MORPH_TRANSITION: TransitionDefinition = {
     const animations: Animation[] = [context.animate(context.outgoing, [{ opacity: 1 }, { opacity: 0 }], timing)];
     for (const pair of pairs) {
       const path = morphPath({ from: pair.outgoing.frame, to: pair.incoming.frame });
-      animations.push(context.animate(pair.incoming.node, [{ transform: path.incomingStart, opacity: 0 }, { transform: path.incomingEnd, opacity: 1 }], timing));
+      animations.push(
+        context.animate(pair.incoming.node, [{ transform: path.incomingStart, opacity: 0 }, { transform: path.incomingEnd, opacity: ownOpacity(pair.incoming.node) }], timing),
+      );
       animations.push(context.animate(pair.outgoing.node, [{ transform: path.outgoingStart }, { transform: path.outgoingEnd }], timing));
     }
     for (const handle of context.elements("incoming")) {
       if (pairedIncoming.has(handle.elementId)) continue;
-      animations.push(context.animate(handle.node, [{ opacity: 0 }, { opacity: 1 }], timing));
+      animations.push(context.animate(handle.node, [{ opacity: 0 }, { opacity: ownOpacity(handle.node) }], timing));
     }
     for (const handle of context.elements("outgoing")) {
       if (pairedOutgoing.has(handle.elementId)) continue;
-      animations.push(context.animate(handle.node, [{ opacity: 1 }, { opacity: 0 }], timing));
+      animations.push(context.animate(handle.node, [{ opacity: ownOpacity(handle.node) }, { opacity: 0 }], timing));
     }
     await allFinished(animations);
   },
@@ -82,6 +90,12 @@ export function morphPath(options: Readonly<{ from: Frame; to: Frame }>): MorphP
       scaleY: safeRatio(to.height, from.height) * flipSign(to.flipVertical),
     }),
   };
+}
+
+/** The opacity a leaf is drawn at: the renderer's inline value (see the header), 1 when it sets none. */
+export function ownOpacity(node: HTMLElement): number {
+  const parsed = Number.parseFloat(node.style.opacity);
+  return Number.isFinite(parsed) ? Math.min(Math.max(parsed, 0), 1) : 1;
 }
 
 /** Signed degrees in (-180, 180] that turn `from` onto `to` the short way. */

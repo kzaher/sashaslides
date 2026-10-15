@@ -114,7 +114,7 @@ or 3 or after; "not planned" means we have a reason not to.
 | Slide transitions: fade, push, slide, zoom, morph | Milestone 1 | built-ins run in the presenter's page |
 | Scripted transitions written by Claude | Milestone 1 | the headline feature; run sandboxed, only once a person approved them |
 | Flip, cube, gallery transitions | Later | as further built-ins |
-| Object animations (builds) | Later | same sandbox, a per-slide script |
+| Object animations (builds) | Builds milestone | section 11.1: 16 effects (15 built-in entrances, emphases, exits and a motion path, plus scripted steps Claude writes, run in the transition sandbox once a person approved them); triggers on click, with previous, after previous; duration, delay, easing; the Animate tab with Preview; the presenter steps through builds click by click; export reports them as a loss |
 | Present: full screen, keyboard, blank screen, go to number, end screen | Milestone 1 | |
 | Speaker view (notes, next slide, timer) | Milestone 1 | same React tree in a second window |
 | Audience questions, laser pointer | Not planned / later | laser pointer later |
@@ -174,6 +174,11 @@ Layout and decisions: `src/contracts/yjs-schema.ts` header. In short:
 
 - Root maps `meta`, `theme`, `layouts`, `slides`, `assets`, `transitionScripts` in one Y.Doc.
   Comments are not in it (section 12).
+- **Build steps** live under each slide as a keyed map `animations` (AnimationStepId -> a map of
+  `id`, `position`, `elementId`, `effect` value, `trigger`, `durationMilliseconds`,
+  `delayMilliseconds`, `easing`), ordered by fractional `position` keys like slides and elements
+  (section 11.1). A slide stored before builds existed has no `animations` map and reads as an
+  empty sequence; the repairing replica adds the empty map.
 - **Order** of slides and z-order of elements are fractional index keys (`position`), so a move is one
   field write and concurrent moves never duplicate. Every newly minted key ends in a random suffix of
   about 4 characters from the model's injected random source, so two people inserting runs into the
@@ -201,7 +206,9 @@ Layout and decisions: `src/contracts/yjs-schema.ts` header. In short:
   Accepted loss: two people making the very first edit to that same cell at the same moment lose one
   of the two first edits.
 - **Transition scripts** are plain strings (last writer wins), saved whole with the `updatedAt` they
-  were based on; never shared text (section 11).
+  were based on; never shared text (section 11). Each carries a `purpose`, `transition` or
+  `animation` (a scripted build step); a record stored before builds existed reads as
+  `transition`.
 - **Assets**: `AssetRecord` is metadata, add-only and outside undo; bytes go through `AssetStore`.
 - **Undo scope**: `theme`, `layouts`, `slides`, `transitionScripts`; never `meta` or `assets`.
 - **Versions**: `meta.schemaVersion` is `DOCUMENT_SCHEMA_VERSION` (1). A replica seeing a newer
@@ -450,7 +457,8 @@ italic, underline, strikethrough, colour, highlight, link, baseline, letter spac
 alignment, line spacing, spacing above and below, indents, list type and glyph; vertical alignment,
 padding, autofit); Slide (background, layout, skip); Transition (none, five built-ins with duration,
 easing and direction, or a scripted transition; "Preview" mounts the presenter's
-`TransitionPreview`; "Edit script" opens the script dialog). Mixed values show an empty field with
+`TransitionPreview`; "Edit script" opens the script dialog); Animate (the slide's build sequence,
+section 11.1). Mixed values show an empty field with
 a "mixed" placeholder; controls for an element's `unsupportedKeys` are disabled with an explanation.
 
 The script dialog is a plain-text code editor (system monospace, Tab inserts spaces) over
@@ -486,6 +494,8 @@ State and events: `presenter.ts`. Behaviour:
   next slide, speaker notes (read only), elapsed timer, clock, slide n of m, the same controls.
 - Pressing next during a transition cancels it and shows the incoming slide; the next press
   navigates.
+- A slide with builds is shown at a build position: next plays the slide's next build segment
+  before it leaves the slide (section 11.1).
 - The presenter's RxFeedback system is built with the injected `RxFeedbackToolkit` (the state
   module's implementation), so the presenter never imports the state module.
 
@@ -573,6 +583,75 @@ The agent writes a script with the connector (milestone 2 tool `deck_write_trans
 `setSlideProperties { transition: { kind: "scripted", scriptId, durationMilliseconds, parameters } }`.
 The user sees a notice "Claude wrote a transition: review it", approves it in the script dialog, and
 keeps editing the slides normally; the transition only ever sees rendered snapshots.
+
+### 11.1 Builds (object animations)
+
+Contract: `src/contracts/animations.ts` (steps, effects, segments), `presenter.ts` (the header
+bullet "A slide is shown at a build position"), `editor-state.ts` and `editor-events.ts` (the
+Animate tab). A transition animates from one slide to the next; a build animates the objects ON a
+slide, one click at a time, as PowerPoint's animations and Keynote's builds do.
+
+**The document.** Each slide holds an ordered sequence of steps (section 5). A step names one
+element (a leaf or a group) by id, an effect, a trigger (`onClick`, `withPrevious`,
+`afterPrevious`), a duration, a delay and an easing. There are 16 effects: entrances `appear`,
+`fadeIn`, `flyIn` (from an edge), `zoomIn`, `floatIn`, `wipe` (from an edge); emphases `pulse`,
+`growShrink` (to a scale), `spin` (by degrees), `colourChange` (fill or text, to a colour); exits
+`disappear`, `fadeOut`, `flyOut` (to an edge), `zoomOut`; `motionPath` (a straight move by an
+offset); and `scripted`. Ranges are `ANIMATION_LIMITS` (100 steps a slide, 20 seconds of duration
+and of delay, scale 0.1 to 10, 3600 degrees, offsets within five slide widths).
+
+- **Keyed steps with order keys**, like slides and elements: two people adding steps at once both
+  keep theirs, a reorder is one field write, and every field is its own value, so one person
+  changing a duration while another changes the trigger keeps both changes.
+- **Steps go with their element.** `deleteElements` and `ungroupElements` delete the steps of
+  every element they remove in the same transaction, so one undo restores both. A step left
+  dangling by a concurrent delete is kept, shown in the Animate tab as "element removed", and
+  skipped by the presenter. A step with a stored value this client does not understand is shown,
+  never played or rewritten.
+- **Commands**: `insertAnimationSteps`, `updateAnimationSteps`, `moveAnimationSteps`,
+  `deleteAnimationSteps` (commands.ts); a missing step is rejected `animationStepMissing`.
+- **Every step has a resting state**: an entrance leaves its element visible, an exit hidden, an
+  emphasis or motion changes its frame or colour. What a slide looks like after N segments is
+  derived from these declared outcomes alone, never by replaying animations; a scripted step
+  declares its `category` (entrance, emphasis or exit) for exactly that reason.
+- **Segments are what the presenter plays** (`buildSegmentsOf`): a step on click starts a
+  segment, steps chained with previous or after previous join it on one timeline; a scripted step
+  is a segment of its own, and a step chained to it starts after it.
+
+**The editor's Animate tab** (properties panel): the slide's sequence in play order with each
+step's element, effect and trigger; "Add animation" adds one step per selected element after the
+chosen step (or at the end), triggered on click; the chosen step's effect, its options, trigger,
+duration, delay and easing; reorder by drag or keyboard; remove; and "Preview", which plays the
+slide's builds over the canvas (`BuildPreview`). A scripted step names one of the deck's animation
+scripts; the script dialog, opened with purpose `animation` for a new one, writes, reviews and
+approves them as it does transitions.
+
+**The presenter's stepping rules** (`presenter.ts`, "A slide is shown at a build position"):
+
+| Situation | What happens |
+|---|---|
+| Next on a slide with segments left | the next segment runs, and every segment chained to it follows by itself; only when the sequence is done does next leave the slide |
+| Previous | steps back to the previous click boundary without animating; from build 0 it goes to the previous slide |
+| Arriving backward | the slide is shown fully built, as PowerPoint and Keynote do |
+| Arriving forward | build 0: entrance elements hidden |
+| Reduced motion | every build appears at once in its resting state |
+| An unapproved or missing script | that scripted step shows its resting state at once |
+| Morph out of a slide with builds | the morph starts from the slide's final build state, so the slides the morph pairs are the ones the audience saw |
+| Speaker view | shows "build 2 of 5": clicks done of clicks the sequence takes (`buildClickCount`) |
+
+Built-in effects run in the presenter's page with Web Animations; a scripted step runs in the
+sandboxed runner with the transition lifecycle and deadlines above.
+
+**Scripted steps share the transition sandbox and its approval rule.** A scripted step names a
+script in the deck's script store whose `purpose` is `animation` (a step naming a transition
+script is rejected `invalidValue`). The script calls `sashaTransition.define(...)` like a
+transition: `context.outgoing` is the slide before the step, `context.incoming` the slide after it,
+`context.parameters.targetElementId` the step's element, and `context.reducedMotion` asks for no
+motion. Only an approved script runs (section 21.5): an agent never approves, the room guard
+covers scripts of both purposes, and the purpose is part of `scriptFingerprint`, so changing a
+script's purpose voids its approval: code a person approved as a build step is not thereby
+approved to run between slides, and the reverse. Claude writes one with `deck_write_animation`
+(section 21.14), which saves it unapproved and appends the steps that use it.
 
 ## 12. Comments, annotations, presence
 
@@ -961,7 +1040,9 @@ Roles and the permission table: `deck-access.ts` (owner, editor, commenter, view
 | `approved` only by a person who may approve, naming themself and the current fingerprint | room guard after the sender's transaction (`engine/src/server`) | correction to `unapproved`, merged broadcast, `correction` to the sender |
 | A changed script's `author` is its sender | room guard | correction, `scriptAuthorRestored` |
 | `meta.deckId`, `schemaVersion`, `createdAt` never change | room guard | correction, `metaRestored` |
-| An agent never approves; agent scripts land unapproved | model (`approvalNeedsPerson`), `deck_write_transition` saves with `"unapproved"` | rejected |
+| An agent never approves; agent scripts land unapproved | model (`approvalNeedsPerson`), `deck_write_transition` and `deck_write_animation` save with `"unapproved"` | rejected |
+| The approval rules cover scripts of both purposes (transitions and scripted build steps) | model and room guard | a purpose change changes the fingerprint, so it voids an approval like a text change |
+| A scripted build step names an animation script | model (`invalidValue`) | rejected |
 | Discussion actor and time | room discussion authority | stamped from the session and the server clock |
 | Discussion permissions | room discussion authority | `comment` to create, reply, resolve, reopen; author-only edit and delete; delete a thread: its creator or `moderateDiscussion`; mentions kept only for current members, at most 20 |
 | Presence identity | room awareness relay | `presence.person` overwritten with the connection's person; an awareness client id bound to the first connection using it; removed on close |
@@ -1198,7 +1279,8 @@ the importing person; images first stored with `putAsset` and registered):
 | notes page body (`speakerNotesObjectId`) | `speakerNotes` | |
 | `slideProperties.isSkipped` | `skipped` | |
 | object ids | kept when they match `OBJECT_ID_PATTERN` and are unique; minted otherwise | Slides' short ids like `p` are minted |
-| transitions, animations | none | the API exposes neither; loss `transition` once per deck |
+| transitions | none | the programming interface exposes none; loss `transition` once per deck |
+| animations | none: every slide's `animations` is empty | the programming interface exposes none; the deck's one `transition` loss says so |
 
 The import report lists every loss with its slide and element. `GoogleSlidesLink` records the
 presentation, its title and `revisionId`.
@@ -1221,6 +1303,7 @@ presentation, its title and `revisionId`.
 | speaker notes | `insertText` into the new slide's `speakerNotesObjectId` (read back after `createSlide`) | |
 | skip | `updateSlideProperties` `isSkipped` | |
 | transitions, built-in and scripted | none | the API cannot set transitions: loss `transition` per slide that has one |
+| animations (build steps) | none | the programming interface exposes no animations: loss `animation` per slide with steps, worded for a person ("Slide 3: its 4 animations are not exported; Google Slides' programming interface cannot create animations.") |
 
 Requests are sent per slide (each `batchUpdate` atomic), in slide order. Reusing an object id right
 after its `deleteObject` IN THE SAME batch works for slides and elements (measured,
@@ -1283,6 +1366,7 @@ editors live. `agentSessionId = "as_" + first 24 hexadecimal of SHA-256(MCP sess
 | `deck_read` | `deckId`, `detail` (`outline` or `full`), `slideIds` | `DeckOutline` |
 | `deck_edit` | `deckId`, `summary` (one sentence collaborators see), `edits: AssistantEdit[]` (at most 200 commands after expansion) | `AssistantEditOutcome` (all or nothing, one envelope, one undo step) |
 | `deck_write_transition` | `AssistantTransitionScript` | `scriptId`, `approved: false`, `reviewAddress`; saved `"unapproved"`, sizes per `TRANSITION_LIMITS`, the slides in `assignTo` switch to it in the same envelope |
+| `deck_write_animation` | `AssistantAnimationScript` | `scriptId`, `approved: false`, `reviewAddress`, `animationStepIds`; saved with purpose `animation` and `"unapproved"` whatever the account, sizes per `TRANSITION_LIMITS`; one scripted step per `assignTo` entry (`effect: { kind: "scripted", scriptId, category, parameters: {} }`, its trigger and duration) is appended to that slide's sequence in the same envelope. Neither tool replaces a script of the other purpose |
 | `deck_revert` | `deckId`, `agentSessionId` (default: this session) | `AgentRevertOutcome` |
 | `deck_read_comments` | `deckId`, `status` (`open` or `all`), `slideId` | `sequence`, `AssistantThread[]` |
 | `deck_reply_comment` | `deckId`, `threadId`, `body` | `DiscussionOutcome` (as the agent person) |
@@ -1293,9 +1377,19 @@ editors live. `agentSessionId = "as_" + first 24 hexadecimal of SHA-256(MCP sess
 placeholder frame when `frame` is omitted; `addImage` fetches https only, at most 25 megabytes,
 media type by magic bytes; `restyleElements` merges per element; `setText` replaces the body with
 one `editText` (delete all, insert paragraphs with complete attribute sets, yjs-schema.ts);
-`replaceText` and `styleText` find text in the current snapshot. The workflow skill
+`replaceText` and `styleText` find text in the current snapshot. Builds: `addAnimations` appends
+steps to a slide's sequence (or inserts them after `after`), filling omitted timing with 500
+milliseconds, no delay and ease out, and omitted effect options with `defaultAnimationEffect`'s; a
+step may target an element added earlier in the same call; `updateAnimations`, `moveAnimations`
+(`after: null` moves to the start) and `removeAnimations` address steps by the ids `deck_read`
+lists per slide (`SlideOutline.animations`). Each `created` entry of the answer carries
+`animationStepIds` next to `elementIds` (empty when the edit added no step). Morph is
+`setSlide { patch: { transition: { kind: "builtin", effect: { effect: "morph" }, ... } } }` on the
+slide it leads into; it pairs elements by `morphKey` (in the outline per element; the element id
+unless set), which `restyleElements { patch: { morphKey } }` sets. The workflow skill
 (`.claude/skills/sasha-slides/SKILL.md`) gains a short "Sasha decks" section: read before editing,
-one `deck_edit` per user request, scripts are reviewed by a person.
+one `deck_edit` per user request, builds and morph through `deck_edit`, scripts (transitions and
+scripted build steps) are reviewed by a person.
 
 ### 21.15 nginx and Docker
 

@@ -11,10 +11,12 @@
 //                      placeholderStyles value, defaultRunStyle value
 //   layouts            LayoutId -> { id, name, position, background value, elements {ElementId -> element} }
 //   slides             SlideId  -> { id, position, layoutId, background value, skipped,
-//                                    speakerNotes Y.Text, transition value, elements {ElementId -> element} }
+//                                    speakerNotes Y.Text, transition value, elements {ElementId -> element},
+//                                    animations {AnimationStepId -> { id, position, elementId, effect value,
+//                                    trigger, durationMilliseconds, delayMilliseconds, easing }} }
 //   assets             AssetId  -> AssetRecord value                       (add-only, not undoable)
-//   transitionScripts  TransitionScriptId -> { id, name, description, author value, script, stylesheet,
-//                                    markup, defaultParameters value, approval value, updatedAt }
+//   transitionScripts  TransitionScriptId -> { id, name, description, purpose, author value, script,
+//                                    stylesheet, markup, defaultParameters value, approval value, updatedAt }
 //
 // Comments are NOT here: they are a server-authoritative log (discussion.ts), not shared state.
 //
@@ -77,6 +79,13 @@
 //    of the two first edits is lost (last writer wins on the key). It needs a concurrent row AND
 //    column insert followed by simultaneous first typing into their intersection.
 //
+//  * A SLIDE'S BUILD SEQUENCE IS A KEYED MAP WITH ORDER KEYS, exactly like its elements: each step
+//    is a map with its own `position`, so two people adding steps at once both keep theirs, a
+//    reorder is one field write, and per-field values let a duration change and a trigger change
+//    made at the same moment both survive. A slide stored before builds existed has no
+//    `animations` map: it reads as an empty sequence, and the repairing replica adds the empty map
+//    (validation.ts), so clients never have to create it concurrently.
+//
 //  * THE UNDO HISTORY COVERS `UNDO_SCOPE_ROOTS` ONLY: theme, layouts, slides and transition
 //    scripts. `meta` (identity, schema version) and `assets` (add-only) are never undone.
 
@@ -132,6 +141,19 @@ export const SLIDE_KEY = {
   speakerNotes: "speakerNotes",
   transition: "transition",
   elements: "elements",
+  animations: "animations",
+} as const;
+
+/** Keys of one build step's map under a slide's `animations` (animations.ts `AnimationStep`). */
+export const ANIMATION_STEP_KEY = {
+  id: "id",
+  position: "position",
+  elementId: "elementId",
+  effect: "effect",
+  trigger: "trigger",
+  durationMilliseconds: "durationMilliseconds",
+  delayMilliseconds: "delayMilliseconds",
+  easing: "easing",
 } as const;
 
 /** Keys of every element map. Which ones are present depends on `kind` (ELEMENT_KEYS_BY_KIND). */
@@ -211,6 +233,7 @@ export const TRANSITION_SCRIPT_KEY = {
   id: "id",
   name: "name",
   description: "description",
+  purpose: "purpose",
   author: "author",
   script: "script",
   stylesheet: "stylesheet",

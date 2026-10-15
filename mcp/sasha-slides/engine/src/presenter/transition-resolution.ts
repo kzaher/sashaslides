@@ -10,11 +10,14 @@
 //  * ONLY AN APPROVAL OF THIS EXACT TEXT COUNTS. The approval names a `scriptFingerprint`; any later
 //    edit changes the fingerprint and voids it (document.ts `TransitionApproval`), so the check is
 //    "approved AND the fingerprint still matches", never the approval kind alone.
+//  * A SLIDE TRANSITION RUNS ONLY A SCRIPT WRITTEN AS ONE. A script whose purpose is "animation" (a
+//    scripted build step, document.ts `ScriptPurpose`) named by a slide's transition is treated as
+//    missing: its approval covered running it as a build step, not between slides.
 //  * DURATIONS ARE CLAMPED to [0, maximumDurationMilliseconds] here, once, so every deadline the
 //    reducer computes from a run is bounded.
 
 import { assertNever } from "../contracts/assert-never.ts";
-import { scriptFingerprint, type SlideTransition, type TransitionApproval, type TransitionScriptRecord } from "../contracts/document.ts";
+import { scriptFingerprint, type ScriptPurpose, type SlideTransition, type TransitionApproval, type TransitionScriptRecord } from "../contracts/document.ts";
 import type { ResolvedTransition } from "../contracts/presenter.ts";
 import type { SerialisableObject } from "../contracts/serialisable.ts";
 import { TRANSITION_LIMITS } from "../contracts/transition-protocol.ts";
@@ -44,7 +47,7 @@ export function resolveTransition(
       };
     case "scripted": {
       const record = options.scripts.find((script) => script.id === transition.scriptId);
-      if (record === undefined) return substituted("scriptMissing");
+      if (record === undefined || !servesTransitions(record.purpose)) return substituted("scriptMissing");
       const fingerprint = scriptFingerprint(record);
       if (!approvalCovers({ approval: record.approval, fingerprint })) return substituted("scriptNotApproved");
       return {
@@ -79,6 +82,17 @@ export function approvalCovers(options: Readonly<{ approval: TransitionApproval;
 export function clampDuration(milliseconds: number): number {
   if (!Number.isFinite(milliseconds)) return 0;
   return Math.min(Math.max(milliseconds, 0), TRANSITION_LIMITS.maximumDurationMilliseconds);
+}
+
+function servesTransitions(purpose: ScriptPurpose): boolean {
+  switch (purpose) {
+    case "transition":
+      return true;
+    case "animation":
+      return false;
+    default:
+      return assertNever(purpose);
+  }
 }
 
 function substituted(reason: Extract<ResolvedTransition, { kind: "substitutedFade" }>["reason"]): TransitionResolution {

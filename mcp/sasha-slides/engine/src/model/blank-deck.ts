@@ -123,6 +123,7 @@ export function blankDeck(options: Readonly<{ deckId: string; random: RandomSour
     skipped: false,
     speakerNotes: EMPTY_TEXT_BODY,
     transition: null,
+    animations: [],
     elements: (titleLayout?.elements ?? []).map((element) => {
       const id = nextElementId();
       return { ...element, id, morphKey: id };

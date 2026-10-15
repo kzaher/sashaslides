@@ -1,7 +1,8 @@
 // FAKE STORES for the editor's tests: the document store, discussion authority and asset store the
 // feedbacks talk to, small enough to read in one sitting and controllable from a test. The real ones
 // are the model module's; these only implement what the state module's acceptance tests exercise --
-// text edits (through the same flat text model the reducer replays), frames, inserts and deletes --
+// text edits (through the same flat text model the reducer replays), frames, inserts and deletes,
+// and the four build step commands with the model's ordering (deleting an element takes its steps) --
 // and can SETTLE LATER: apply on call, but emit the change on a virtual scheduler, which is how the
 // typing test proves the second keystroke is computed from the queued first.
 
@@ -12,6 +13,8 @@ import {
   lineFrame,
   normaliseRotation,
   textTargetKey,
+  type AnimationStep,
+  type AnimationStepId,
   type AssetId,
   type AssetMediaType,
   type AssetStore,
@@ -229,9 +232,32 @@ function applyCommands(start: DocumentSnapshot, commands: readonly DocumentComma
         changed.add(command.slideId);
         break;
       case "deleteElements":
-        snapshot = mapSlide(snapshot, command.slideId, (slide) => ({ ...slide, elements: withoutIds(slide.elements, new Set<string>(command.elementIds)) }));
+        snapshot = mapSlide(snapshot, command.slideId, (slide) => {
+          const elements = withoutIds(slide.elements, new Set<string>(command.elementIds));
+          const remaining = new Set<string>(idsInTrees(elements));
+          return { ...slide, elements, animations: slide.animations.filter((step) => remaining.has(step.elementId)) };
+        });
         changed.add(command.slideId);
         break;
+      case "insertAnimationSteps":
+      case "updateAnimationSteps":
+      case "moveAnimationSteps":
+      case "deleteAnimationSteps": {
+        const slide = snapshot.slides.find((candidate) => candidate.id === command.slideId);
+        if (slide === undefined) return { kind: "rejected", rejection: { reason: "slideMissing", slideId: command.slideId } };
+        const result = applyStepCommand({ animations: slide.animations, command });
+        switch (result.kind) {
+          case "rejected":
+            return result;
+          case "applied":
+            snapshot = mapSlide(snapshot, command.slideId, (current) => ({ ...current, animations: result.animations }));
+            changed.add(command.slideId);
+            break;
+          default:
+            assertNever(result);
+        }
+        break;
+      }
       case "deleteSlides":
         snapshot = { ...snapshot, slides: snapshot.slides.filter((slide) => !command.slideIds.includes(slide.id)) };
         break;
@@ -269,6 +295,58 @@ function applyCommands(start: DocumentSnapshot, commands: readonly DocumentComma
     }
   }
   return { kind: "applied", snapshot, textChanges, changedSlideIds: [...changed] };
+}
+
+type StepCommand = Extract<DocumentCommand, { kind: "insertAnimationSteps" | "updateAnimationSteps" | "moveAnimationSteps" | "deleteAnimationSteps" }>;
+
+type StepResult = Readonly<{ kind: "applied"; animations: readonly AnimationStep[] }> | Extract<ApplyResult, { kind: "rejected" }>;
+
+/** The model's order semantics for the four step commands (model/command-application.ts), on plain arrays. */
+function applyStepCommand(options: Readonly<{ animations: readonly AnimationStep[]; command: StepCommand }>): StepResult {
+  const { animations, command } = options;
+  const known = new Set<string>(animations.map((step) => step.id));
+  const missing = (stepIds: readonly AnimationStepId[]): StepResult | null => {
+    const stepId = stepIds.find((candidate) => !known.has(candidate));
+    return stepId === undefined ? null : { kind: "rejected", rejection: { reason: "animationStepMissing", slideId: command.slideId, stepId } };
+  };
+  const insertAfter = (remaining: readonly AnimationStep[], after: AnimationStepId | null, inserted: readonly AnimationStep[]): readonly AnimationStep[] => {
+    const index = after === null ? 0 : remaining.findIndex((step) => step.id === after) + 1;
+    return [...remaining.slice(0, index), ...inserted, ...remaining.slice(index)];
+  };
+  switch (command.kind) {
+    case "insertAnimationSteps":
+      return missing(command.after === null ? [] : [command.after]) ?? { kind: "applied", animations: insertAfter(animations, command.after, command.steps) };
+    case "updateAnimationSteps":
+      return missing(command.stepIds) ?? { kind: "applied", animations: animations.map((step) => (command.stepIds.includes(step.id) ? { ...step, ...command.patch } : step)) };
+    case "moveAnimationSteps": {
+      const rejected = missing([...command.stepIds, ...(command.after === null ? [] : [command.after])]);
+      if (rejected !== null) return rejected;
+      const moved = animations.filter((step) => command.stepIds.includes(step.id));
+      const remaining = animations.filter((step) => !command.stepIds.includes(step.id));
+      return { kind: "applied", animations: insertAfter(remaining, command.after, moved) };
+    }
+    case "deleteAnimationSteps":
+      return missing(command.stepIds) ?? { kind: "applied", animations: animations.filter((step) => !command.stepIds.includes(step.id)) };
+    default:
+      return assertNever(command);
+  }
+}
+
+function idsInTrees(elements: readonly ElementSnapshot[]): readonly string[] {
+  return elements.flatMap((element) => {
+    switch (element.kind) {
+      case "group":
+        return [element.id, ...idsInTrees(element.children)];
+      case "shape":
+      case "image":
+      case "line":
+      case "table":
+      case "unsupported":
+        return [element.id];
+      default:
+        return assertNever(element);
+    }
+  });
 }
 
 /** One character per index: what `deltaBetween` diffs. */

@@ -8,6 +8,7 @@
 import { strict as assert } from "node:assert";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import type { AnimationStep } from "../../engine/src/contracts/animations.ts";
 import type { AssistantEditOutcome, AssistantThread, DeckOutline } from "../../engine/src/contracts/assistant-deck-tools.ts";
 import type { DeckCaller } from "../../deck-contracts/deck-service-contract.ts";
 import type { DiscussionSnapshot } from "../../engine/src/contracts/discussion.ts";
@@ -16,6 +17,7 @@ import { parseDeckId, parseElementId, parseSlideId, type DeckId, type ElementId,
 import { TRANSITION_LIMITS } from "../../engine/src/contracts/transition-protocol.ts";
 import { PARAGRAPH_ATTRIBUTE_NAMES } from "../../engine/src/contracts/yjs-schema.ts";
 import { connectAssistant, TEST_PUBLIC_URL, type AssistantConnection } from "../assistant-harness.ts";
+import type { CreatedIds } from "../edit-expansion.ts";
 import { SCRIPT_LIMITS } from "../transition-limits.ts";
 import { createFakeDeckService, fakeCaller, type FakeDeckService } from "./fake-deck-service.ts";
 
@@ -93,8 +95,8 @@ describe("deck_edit: one envelope, one undo step, attributed to the agent sessio
     const after = store.snapshot();
     const pricing = slideById(after, "sl_pricing01");
     assert.deepEqual(outcome.created, [
-      { editIndex: 0, slideId: "sl_pricing01", elementIds: pricing.elements.filter((element) => element.placeholder !== null).map((element) => element.id) },
-      { editIndex: 1, slideId: null, elementIds: ["el_proCard01"] },
+      { editIndex: 0, slideId: "sl_pricing01", elementIds: pricing.elements.filter((element) => element.placeholder !== null).map((element) => element.id), animationStepIds: [] },
+      { editIndex: 1, slideId: null, elementIds: ["el_proCard01"], animationStepIds: [] },
     ]);
     assert.deepEqual(after.slides.map((slide) => slide.id), [...before.slides.map((slide) => slide.id), "sl_pricing01"], "added at the end");
     const title = pricing.elements.find((element) => element.placeholder?.role === "title");
@@ -390,6 +392,243 @@ describe("deck_write_transition (acceptance 8)", () => {
   }
 });
 
+describe("builds through deck_edit (addAnimations, updateAnimations, moveAnimations, removeAnimations)", () => {
+  const fade = { kind: "fadeIn" } as const;
+
+  test("steps added in the call that adds their elements, with the defaults, their minted ids reported; then moved, updated and removed", async () => {
+    const assistant = await connect({ sessionId: "session-A", caller: OWNER });
+    const { deckId } = await createDeck(assistant);
+    const slideId = firstSlide(deckId);
+    const added = (await assistant.read("deck_edit", {
+      deckId,
+      summary: "added two cards that fly in",
+      edits: [
+        { kind: "addShape", id: "el_buildCard1", slideId, preset: "rectangle" },
+        { kind: "addShape", id: "el_buildCard2", slideId, preset: "ellipse" },
+        {
+          kind: "addAnimations",
+          slideId,
+          steps: [
+            { elementId: "el_buildCard1", effect: { kind: "flyIn", from: "bottom" } },
+            { elementId: "el_buildCard2", effect: { kind: "spin" }, trigger: "withPrevious", durationMilliseconds: 800 },
+          ],
+        },
+      ],
+    })) as DeckEditApplied;
+    assert.equal(added.kind, "applied", JSON.stringify(added));
+    const minted = added.created[2]?.animationStepIds ?? [];
+    assert.equal(minted.length, 2);
+    assert.deepEqual(added.created.slice(0, 2).map((entry) => entry.animationStepIds), [[], []], "an edit that adds no step reports none");
+    const [first, second] = minted;
+    assert.ok(first !== undefined && second !== undefined);
+    assert.deepEqual(stepsOf(deckId, slideId), [
+      { id: first, elementId: "el_buildCard1", effect: { kind: "flyIn", from: "bottom" }, trigger: "onClick", durationMilliseconds: 500, delayMilliseconds: 0, easing: "easeOut", unsupportedKeys: [] },
+      { id: second, elementId: "el_buildCard2", effect: { kind: "spin", degrees: 360 }, trigger: "withPrevious", durationMilliseconds: 800, delayMilliseconds: 0, easing: "easeOut", unsupportedKeys: [] },
+    ]);
+
+    const appended = (await assistant.read("deck_edit", { deckId, summary: "and a pulse", edits: [{ kind: "addAnimations", slideId, steps: [{ elementId: "el_buildCard1", effect: { kind: "pulse" } }] }] })) as DeckEditApplied;
+    assert.equal(appended.kind, "applied", JSON.stringify(appended));
+    const third = appended.created[0]?.animationStepIds[0] ?? "";
+    assert.deepEqual(stepIdsOf(deckId, slideId), [first, second, third], "after null appends at the END of the sequence");
+
+    const reordered = (await assistant.read("deck_edit", {
+      deckId,
+      summary: "pulse first, slower spin",
+      edits: [
+        { kind: "moveAnimations", slideId, stepIds: [third], after: null },
+        { kind: "updateAnimations", slideId, stepIds: [second], patch: { durationMilliseconds: 1500, trigger: "afterPrevious" } },
+      ],
+    })) as DeckEditApplied;
+    assert.equal(reordered.kind, "applied", JSON.stringify(reordered));
+    assert.deepEqual(stepIdsOf(deckId, slideId), [third, first, second], "moveAnimations after null moves to the start");
+    const spin = stepsOf(deckId, slideId)[2];
+    assert.deepEqual([spin?.durationMilliseconds, spin?.trigger, spin?.effect], [1500, "afterPrevious", { kind: "spin", degrees: 360 }], "an update keeps every field it does not name");
+
+    const removed = (await assistant.read("deck_edit", { deckId, summary: "no pulse", edits: [{ kind: "removeAnimations", slideId, stepIds: [third] }] })) as DeckEditApplied;
+    assert.equal(removed.kind, "applied", JSON.stringify(removed));
+    assert.deepEqual(stepIdsOf(deckId, slideId), [first, second]);
+
+    const outline = (await assistant.read("deck_read", { deckId })) as DeckOutline;
+    assert.deepEqual(outline.slides[0]?.animations.map((step) => step.id), [first, second], "deck_read lists the sequence in play order");
+  });
+
+  // Parametric over where the new step goes: `after` names a step, or is null (the end); the
+  // control adds to a slide without steps.
+  for (const row of [
+    { name: "after the first step", existing: 2, afterIndex: 0, expectedIndex: 1 },
+    { name: "after null: at the end", existing: 2, afterIndex: null, expectedIndex: 2 },
+    { name: "control: a slide without steps", existing: 0, afterIndex: null, expectedIndex: 0 },
+  ] as const) {
+    test(`addAnimations ${row.name} -> position ${String(row.expectedIndex)}`, async () => {
+      const assistant = await connect({ sessionId: "session-A", caller: OWNER });
+      const { deckId } = await createDeck(assistant);
+      const slideId = firstSlide(deckId);
+      const seeded = (await assistant.read("deck_edit", {
+        deckId,
+        summary: "a card",
+        edits: [
+          { kind: "addShape", id: "el_buildCard1", slideId, preset: "rectangle" },
+          ...(row.existing === 0 ? [] : [{ kind: "addAnimations", slideId, steps: Array.from({ length: row.existing }, () => ({ elementId: "el_buildCard1", effect: fade })) }]),
+        ],
+      })) as DeckEditApplied;
+      assert.equal(seeded.kind, "applied", JSON.stringify(seeded));
+      const before = stepIdsOf(deckId, slideId);
+      const after = row.afterIndex === null ? null : before[row.afterIndex];
+      const added = (await assistant.read("deck_edit", { deckId, summary: "one more", edits: [{ kind: "addAnimations", slideId, after, steps: [{ elementId: "el_buildCard1", effect: { kind: "zoomIn" } }] }] })) as DeckEditApplied;
+      assert.equal(added.kind, "applied", JSON.stringify(added));
+      const stepId = added.created[0]?.animationStepIds[0];
+      assert.equal(stepIdsOf(deckId, slideId).indexOf(stepId ?? ""), row.expectedIndex);
+      assert.equal(stepIdsOf(deckId, slideId).length, row.existing + 1);
+    });
+  }
+
+  // Each refusal names the edit and writes nothing; the control row is the same call made valid.
+  for (const row of [
+    { name: "a step on an element not on the slide", edit: { kind: "addAnimations", steps: [{ elementId: "el_missing001", effect: fade }] }, reason: /^elementMissing: .*el_missing001/u },
+    { name: "an update of a step that is not there", edit: { kind: "updateAnimations", stepIds: ["an_missing001"], patch: { durationMilliseconds: 900 } }, reason: /^animationStepMissing: .*an_missing001/u },
+    { name: "a move after a step that is not there", edit: { kind: "moveAnimations", stepIds: ["an_missing001"], after: null }, reason: /^animationStepMissing: .*an_missing001/u },
+    { name: "control: a valid step", edit: { kind: "addAnimations", steps: [{ elementId: "el_buildCard1", effect: fade }] }, reason: null },
+  ] as const) {
+    test(`${row.name}: ${row.reason === null ? "applied" : "rejected at edit 1, nothing written"}`, async () => {
+      const assistant = await connect({ sessionId: "session-A", caller: OWNER });
+      const { deckId } = await createDeck(assistant);
+      const before = service.store(deckId).snapshot();
+      const slideId = firstSlide(deckId);
+      const answer = await assistant.call("deck_edit", { deckId, summary: "a built card", edits: [{ kind: "addShape", id: "el_buildCard1", slideId, preset: "rectangle" }, { ...row.edit, slideId }] });
+      const outcome = JSON.parse(answer.text) as AssistantEditOutcome;
+      if (row.reason === null) {
+        assert.equal(outcome.kind, "applied", answer.text);
+        assert.equal(stepIdsOf(deckId, slideId).length, 1);
+        return;
+      }
+      assert.equal(answer.isError, true);
+      assert.equal(outcome.kind, "rejected");
+      if (outcome.kind !== "rejected") return;
+      assert.equal(outcome.editIndex, 1);
+      assert.match(outcome.reason, row.reason);
+      assert.deepEqual(service.store(deckId).snapshot(), before, "nothing was written");
+    });
+  }
+
+  // The input schema holds every effect option to ANIMATION_LIMITS; the control is at the limit.
+  for (const row of [
+    { name: "growShrink scale 10 (the limit)", effect: { kind: "growShrink", scale: 10 }, accepted: true },
+    { name: "growShrink scale 10.5", effect: { kind: "growShrink", scale: 10.5 }, accepted: false },
+    { name: "spin 3601 degrees", effect: { kind: "spin", degrees: 3601 }, accepted: false },
+    { name: "a motion path 6401 units away", effect: { kind: "motionPath", offsetX: 6401, offsetY: 0 }, accepted: false },
+    { name: "an effect kind that does not exist", effect: { kind: "explode" }, accepted: false },
+  ] as const) {
+    test(`${row.name}: ${row.accepted ? "accepted" : "refused by the input schema"}`, async () => {
+      const assistant = await connect({ sessionId: "session-A", caller: OWNER });
+      const { deckId } = await createDeck(assistant);
+      const slideId = firstSlide(deckId);
+      const answer = await assistant.call("deck_edit", {
+        deckId,
+        summary: "an effect",
+        edits: [
+          { kind: "addShape", id: "el_buildCard1", slideId, preset: "rectangle" },
+          { kind: "addAnimations", slideId, steps: [{ elementId: "el_buildCard1", effect: row.effect }] },
+        ],
+      });
+      assert.equal(answer.isError === true, !row.accepted, answer.text);
+      assert.equal(stepIdsOf(deckId, slideId).length, row.accepted ? 1 : 0);
+    });
+  }
+
+  test("deleting an element in a later edit of the call drops its steps from the working copy too: a step added after the delete appends correctly", async () => {
+    const assistant = await connect({ sessionId: "session-A", caller: OWNER });
+    const { deckId } = await createDeck(assistant);
+    const slideId = firstSlide(deckId);
+    const outcome = (await assistant.read("deck_edit", {
+      deckId,
+      summary: "built, then rebuilt",
+      edits: [
+        { kind: "addShape", id: "el_buildCard1", slideId, preset: "rectangle" },
+        { kind: "addShape", id: "el_buildCard2", slideId, preset: "rectangle" },
+        { kind: "addAnimations", slideId, steps: [{ elementId: "el_buildCard2", effect: fade }, { elementId: "el_buildCard1", effect: fade }] },
+        { kind: "deleteElements", slideId, elementIds: ["el_buildCard1"] },
+        { kind: "addAnimations", slideId, steps: [{ elementId: "el_buildCard2", effect: { kind: "fadeOut" } }] },
+      ],
+    })) as DeckEditApplied;
+    assert.equal(outcome.kind, "applied", JSON.stringify(outcome));
+    // `created` lists only the edits that added something, each with its edit index.
+    const stepsOfEdit = (editIndex: number): readonly string[] => outcome.created.find((entry) => entry.editIndex === editIndex)?.animationStepIds ?? [];
+    const kept = stepsOfEdit(2)[0];
+    const appended = stepsOfEdit(4)[0];
+    assert.deepEqual(stepIdsOf(deckId, slideId), [kept, appended], "the deleted card's step went with it; the new step follows the kept one");
+  });
+
+  test("an agent's step is undone with the call in ONE undo step", async () => {
+    const assistant = await connect({ sessionId: "session-A", caller: OWNER });
+    const { deckId } = await createDeck(assistant);
+    const slideId = firstSlide(deckId);
+    const before = service.store(deckId).snapshot();
+    const outcome = (await assistant.read("deck_edit", {
+      deckId,
+      summary: "a built card",
+      edits: [{ kind: "addShape", id: "el_buildCard1", slideId, preset: "rectangle" }, { kind: "addAnimations", slideId, steps: [{ elementId: "el_buildCard1", effect: fade }] }],
+    })) as DeckEditApplied;
+    assert.equal(outcome.kind, "applied");
+    assert.equal(service.store(deckId).undo().kind, "applied");
+    assert.deepEqual(service.store(deckId).snapshot().slides, before.slides);
+  });
+});
+
+describe("morph through deck_edit", () => {
+  test("setSlide sets a morph transition and restyleElements a shared morph key; deck_read shows both", async () => {
+    const assistant = await connect({ sessionId: "session-A", caller: OWNER });
+    const { deckId } = await createDeck(assistant);
+    const firstId = firstSlide(deckId);
+    const outcome = (await assistant.read("deck_edit", {
+      deckId,
+      summary: "the logo glides to the corner",
+      edits: [
+        { kind: "addShape", id: "el_logoBig001", slideId: firstId, preset: "ellipse", frame: { x: 440, y: 160, width: 400, height: 400 } },
+        { kind: "addSlide", id: "sl_morphNext1", placeholderText: { title: ["Next"] } },
+        { kind: "addShape", id: "el_logoSmall1", slideId: "sl_morphNext1", preset: "ellipse", frame: { x: 1120, y: 40, width: 120, height: 120 } },
+        { kind: "restyleElements", slideId: firstId, elementIds: ["el_logoBig001"], patch: { morphKey: "logo" } },
+        { kind: "restyleElements", slideId: "sl_morphNext1", elementIds: ["el_logoSmall1"], patch: { morphKey: "logo" } },
+        { kind: "setSlide", slideId: "sl_morphNext1", patch: { transition: { kind: "builtin", effect: { effect: "morph" }, durationMilliseconds: 900 } } },
+      ],
+    })) as DeckEditApplied;
+    assert.equal(outcome.kind, "applied", JSON.stringify(outcome));
+    const snapshot = service.store(deckId).snapshot();
+    assert.deepEqual(slideById(snapshot, "sl_morphNext1").transition, { kind: "builtin", effect: { effect: "morph" }, durationMilliseconds: 900, easing: "easeInOut" });
+    assert.equal(slideById(snapshot, firstId).transition, null, "control: the slide it leaves keeps its own transition");
+    const outline = (await assistant.read("deck_read", { deckId })) as DeckOutline;
+    const keys = outline.slides.flatMap((slide) => slide.elements.filter((element) => element.elementId === "el_logoBig001" || element.elementId === "el_logoSmall1").map((element) => element.morphKey));
+    assert.deepEqual(keys, ["logo", "logo"]);
+    assert.equal(outline.slides[1]?.transition, "morph 900 ms");
+    const untouched = outline.slides[1]?.elements.find((element) => element.placeholder === "title");
+    assert.equal(untouched?.morphKey, untouched?.elementId, "control: an element nobody keyed morphs by its own id");
+  });
+});
+
+describe("deck_write_animation and deck_write_transition keep their purposes apart", () => {
+  test("an animation script is saved with purpose animation and steps; deck_write_transition refuses to replace it", async () => {
+    const assistant = await connect({ sessionId: "session-A", caller: OWNER });
+    const { deckId } = await createDeck(assistant);
+    const slideId = firstSlide(deckId);
+    const titleId = slideById(service.store(deckId).snapshot(), slideId).elements.find((element) => element.placeholder !== null)?.id ?? elementId("el_noTitle0001");
+    const written = (await assistant.read("deck_write_animation", {
+      deckId,
+      name: "Rise",
+      script: "sashaTransition.define({ name: 'Rise', async run(context) {} });",
+      assignTo: [{ slideId, elementId: titleId, category: "entrance" }],
+    })) as Readonly<{ scriptId: string; approved: boolean; animationStepIds: readonly string[] }>;
+    assert.equal(written.approved, false);
+    const snapshot = service.store(deckId).snapshot();
+    assert.equal(snapshot.transitionScripts.find((script) => script.id === written.scriptId)?.purpose, "animation");
+    assert.deepEqual(stepsOf(deckId, slideId).map((step) => [step.id, step.elementId, step.effect, step.durationMilliseconds]), [
+      [written.animationStepIds[0], titleId, { kind: "scripted", scriptId: written.scriptId, category: "entrance", parameters: {} }, 1000],
+    ]);
+    const replaced = await assistant.call("deck_write_transition", { deckId, scriptId: written.scriptId, name: "Rise", script: "sashaTransition.define({});" });
+    assert.equal(replaced.isError, true);
+    assert.match(replaced.text, /^invalidValue: script .* is an animation script; replace it with deck_write_animation/u);
+    assert.deepEqual(service.store(deckId).snapshot(), snapshot, "nothing was written");
+  });
+});
+
 describe("deck_revert (acceptance 9)", () => {
   test("reverting session A keeps session B's edits and the person's", async () => {
     const sessionA = await connect({ sessionId: "session-A", caller: OWNER });
@@ -573,6 +812,17 @@ function slideById(snapshot: DocumentSnapshot, slideId: string): SlideSnapshot {
   const slide = snapshot.slides.find((candidate) => candidate.id === slideId);
   if (slide === undefined) throw new Error(`no slide ${slideId}`);
   return slide;
+}
+
+/** deck_edit's applied answer, whose created entries carry the minted build step ids. */
+type DeckEditApplied = Readonly<{ kind: "applied" | "rejected"; created: readonly CreatedIds[] }>;
+
+function stepsOf(deckId: DeckId, slideId: string): readonly AnimationStep[] {
+  return slideById(service.store(deckId).snapshot(), slideId).animations;
+}
+
+function stepIdsOf(deckId: DeckId, slideId: string): readonly string[] {
+  return stepsOf(deckId, slideId).map((step) => step.id);
 }
 
 function firstSlide(deckId: DeckId): SlideId {

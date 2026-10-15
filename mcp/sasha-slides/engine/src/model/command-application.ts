@@ -11,21 +11,25 @@
 //    in order into the group's place among its siblings (yjs-schema.ts "GROUPS ARE A POINTER");
 //  * elements shown in front because their group is missing (element-tree.ts "displaced") are
 //    re-keyed to where they are shown before anything is inserted next to them, so the stored
-//    order and the shown order agree again.
+//    order and the shown order agree again;
+//  * build steps are ordered like slides (`planGapKeys` in the slide's `animations` map), and a
+//    command that removes elements -- a delete, an ungroup, a group tidied away -- removes the steps
+//    of every element it removed in the same transaction, so one undo restores both.
 
 import * as Y from "yjs";
 import type { CommandAuthor, DocumentCommand, ElementPatch, TableCellPatch, TransitionScriptSaveApproval, TransitionScriptDraft } from "../contracts/commands.ts";
 import type { TransitionApproval } from "../contracts/document.ts";
+import type { AnimationStepPatch } from "../contracts/animations.ts";
 import type { ElementId, RandomSource, SlideId, TableColumnId, TableRowId } from "../contracts/ids.ts";
 import type { StoredElementKind } from "../contracts/yjs-schema.ts";
 import { assertNever } from "../contracts/assert-never.ts";
 import { transitionAuthorOf } from "../contracts/commands.ts";
 import { scriptFingerprint } from "../contracts/document.ts";
 import { MINIMUM_FRAME_SIZE, normaliseRotation } from "../contracts/geometry.ts";
-import { ELEMENT_KEY, LAYOUT_KEY, META_KEY, SLIDE_KEY, TABLE_CELL_KEY, tableCellKey, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
+import { ANIMATION_STEP_KEY, ELEMENT_KEY, LAYOUT_KEY, META_KEY, SLIDE_KEY, TABLE_CELL_KEY, tableCellKey, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
 import { childArray, childMap, elementsMapOf, slideMapOf, textOf, type DocumentRoots } from "./document-paths.ts";
 import { orderedChildren } from "./document-projection.ts";
-import { createCellMap, setTextBody, writeElementList, writeElementTrees, writeLayout, writeSlide, writeThemePatch } from "./document-writer.ts";
+import { createCellMap, setTextBody, writeAnimationStep, writeElementList, writeElementTrees, writeLayout, writeSlide, writeThemePatch } from "./document-writer.ts";
 import { DEFAULT_COLUMN_WIDTH, DEFAULT_ROW_HEIGHT, defaultTableCell, readSlideStructure, STORED_ELEMENT_KINDS, tableLineIds, type SlideStructure } from "./element-tree.ts";
 import { mintOrderKeys, planGapKeys, planReorderKeys, type OrderedSibling } from "./order-keys.ts";
 import { CELL_BORDERS, FRAME, NUMBER, readStored, valueOr } from "./stored-values.ts";
@@ -111,6 +115,7 @@ export function applyCommand(context: ApplicationContext, command: DocumentComma
       return;
     case "deleteElements":
       deleteElements({ context, slideId: command.slideId, elementIds: command.elementIds });
+      deleteStepsOfRemovedElements({ roots, slideId: command.slideId });
       return;
     case "setFrames": {
       const elements = elementsMapOf(roots, command.slideId);
@@ -153,6 +158,7 @@ export function applyCommand(context: ApplicationContext, command: DocumentComma
       const elements = elementsMapOf(roots, command.slideId);
       if (elements === null) return;
       for (const groupId of command.groupIds) dissolveGroup({ elementsMap: elements, groupId, random });
+      deleteStepsOfRemovedElements({ roots, slideId: command.slideId });
       return;
     }
     case "editText": {
@@ -169,9 +175,89 @@ export function applyCommand(context: ApplicationContext, command: DocumentComma
     case "updateTableCells":
       applyTableCommand({ roots, command });
       return;
+    case "insertAnimationSteps": {
+      const animations = animationsMapOf({ roots, slideId: command.slideId });
+      if (animations === null) return;
+      const siblings = orderedChildren(animations).map(({ id, key }): OrderedSibling => ({ id, key }));
+      const gapIndex = command.after === null ? 0 : siblings.findIndex((sibling) => sibling.id === command.after) + 1;
+      const keys = planGapKeys({ siblings, gapIndex, count: command.steps.length, random });
+      writeStepPositions(animations, keys.rekeyed);
+      command.steps.forEach((step, index) => writeAnimationStep({ animations, step, key: keys.inserted[index] ?? fallbackKey(random) }));
+      return;
+    }
+    case "updateAnimationSteps": {
+      const animations = animationsMapOf({ roots, slideId: command.slideId });
+      if (animations === null) return;
+      for (const stepId of command.stepIds) {
+        const step = childMap(animations, stepId);
+        if (step !== null) patchAnimationStep({ map: step, patch: command.patch });
+      }
+      return;
+    }
+    case "moveAnimationSteps": {
+      const animations = animationsMapOf({ roots, slideId: command.slideId });
+      if (animations === null) return;
+      const moving = new Set<string>(command.stepIds);
+      const all = orderedChildren(animations).map(({ id, key }): OrderedSibling => ({ id, key }));
+      const moved = all.filter((sibling) => moving.has(sibling.id));
+      const remaining = all.filter((sibling) => !moving.has(sibling.id));
+      const gapIndex = command.after === null ? 0 : remaining.findIndex((sibling) => sibling.id === command.after) + 1;
+      const keys = planGapKeys({ siblings: remaining, gapIndex, count: moved.length, random });
+      writeStepPositions(animations, keys.rekeyed);
+      writeStepPositions(animations, new Map(moved.map((sibling, index) => [sibling.id, keys.inserted[index] ?? sibling.key])));
+      return;
+    }
+    case "deleteAnimationSteps": {
+      const animations = animationsMapOf({ roots, slideId: command.slideId });
+      if (animations === null) return;
+      for (const stepId of command.stepIds) animations.delete(stepId);
+      return;
+    }
     default:
       assertNever(command);
   }
+}
+
+/**
+ * The slide's `animations` map. A slide stored before builds existed gets one here if the repairing
+ * replica has not added it yet (yjs-schema.ts); null when the slide is gone.
+ */
+function animationsMapOf(options: Readonly<{ roots: DocumentRoots; slideId: SlideId }>): Y.Map<unknown> | null {
+  const slide = slideMapOf(options.roots, options.slideId);
+  if (slide === null) return null;
+  const existing = childMap(slide, SLIDE_KEY.animations);
+  if (existing !== null) return existing;
+  const created = new Y.Map<unknown>();
+  slide.set(SLIDE_KEY.animations, created);
+  return created;
+}
+
+function patchAnimationStep(options: Readonly<{ map: Y.Map<unknown>; patch: AnimationStepPatch }>): void {
+  const { map, patch } = options;
+  if (patch.elementId !== undefined) map.set(ANIMATION_STEP_KEY.elementId, patch.elementId);
+  if (patch.effect !== undefined) map.set(ANIMATION_STEP_KEY.effect, patch.effect);
+  if (patch.trigger !== undefined) map.set(ANIMATION_STEP_KEY.trigger, patch.trigger);
+  if (patch.durationMilliseconds !== undefined) map.set(ANIMATION_STEP_KEY.durationMilliseconds, patch.durationMilliseconds);
+  if (patch.delayMilliseconds !== undefined) map.set(ANIMATION_STEP_KEY.delayMilliseconds, patch.delayMilliseconds);
+  if (patch.easing !== undefined) map.set(ANIMATION_STEP_KEY.easing, patch.easing);
+}
+
+function writeStepPositions(animations: Y.Map<unknown>, keys: ReadonlyMap<string, string>): void {
+  for (const [id, key] of keys) childMap(animations, id)?.set(ANIMATION_STEP_KEY.position, key);
+}
+
+/** Delete every build step whose element is no longer on the slide (see the header). */
+function deleteStepsOfRemovedElements(options: Readonly<{ roots: DocumentRoots; slideId: SlideId }>): void {
+  const slide = slideMapOf(options.roots, options.slideId);
+  const animations = slide === null ? null : childMap(slide, SLIDE_KEY.animations);
+  const elements = elementsMapOf(options.roots, options.slideId);
+  if (animations === null || elements === null) return;
+  const doomed: string[] = [];
+  animations.forEach((_value, stepId) => {
+    const target: unknown = childMap(animations, stepId)?.get(ANIMATION_STEP_KEY.elementId);
+    if (typeof target === "string" && !elements.has(target)) doomed.push(stepId);
+  });
+  for (const stepId of doomed) animations.delete(stepId);
 }
 
 /** Dissolve a group: its children take its place among its siblings, in order, and it is deleted. */
@@ -243,6 +329,7 @@ function writeScript(options: Readonly<{ context: ApplicationContext; draft: Tra
   map.set(TRANSITION_SCRIPT_KEY.id, draft.id);
   map.set(TRANSITION_SCRIPT_KEY.name, draft.name);
   map.set(TRANSITION_SCRIPT_KEY.description, draft.description);
+  map.set(TRANSITION_SCRIPT_KEY.purpose, draft.purpose);
   map.set(TRANSITION_SCRIPT_KEY.author, transitionAuthorOf(author));
   map.set(TRANSITION_SCRIPT_KEY.script, draft.script);
   map.set(TRANSITION_SCRIPT_KEY.stylesheet, draft.stylesheet);

@@ -33,6 +33,7 @@ export const PRESENTER_CLASS = {
   endCard: "sasha-end-card",
   controls: "sasha-presenter-controls",
   slideCounter: "sasha-slide-counter",
+  buildCounter: "sasha-build-counter",
   speakerView: "sasha-speaker-view",
   speakerHeader: "sasha-speaker-header",
   speakerGrid: "sasha-speaker-grid",
@@ -86,6 +87,7 @@ export function presenterRules(): string {
 .${classes.controls}[data-visible="false"] { opacity: 0; pointer-events: none; }
 .${classes.controls} .${tidepool.secondaryPill}, .${classes.controls} .${tidepool.primaryPill} { min-height: calc(var(--sasha-control-height) - 2px); padding: 0 var(--sasha-space-medium); }
 .${classes.slideCounter} { min-width: 5.5em; text-align: center; font-variant-numeric: tabular-nums; color: var(--sasha-text-muted); font-weight: var(--sasha-font-weight-semibold); }
+.${classes.buildCounter} { padding-right: var(--sasha-space-small); font-variant-numeric: tabular-nums; font-size: var(--sasha-font-size-small); white-space: nowrap; }
 
 .${classes.speakerView} { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr auto; gap: var(--sasha-space-medium); padding: var(--sasha-space-medium); box-sizing: border-box; }
 .${classes.speakerView} .${tidepool.panel} { padding: var(--sasha-space-medium); min-height: 0; }

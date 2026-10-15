@@ -28,6 +28,17 @@
 //  * BACKWARD NAVIGATION plays the transition of the slide being LEFT with direction "backward"
 //    (Keynote's behaviour), so a push from the right reverses into a push from the left.
 //
+//  * A SLIDE IS SHOWN AT A BUILD POSITION. `build` counts the slide's build segments already played
+//    (animations.ts `buildSegmentsOf`): a click or Next runs the next segment, and the segments
+//    chained to it follow by themselves; only at the end of the sequence does Next leave the slide.
+//    Previous steps back to the last click boundary without animating, and from the first one it
+//    goes to the previous slide, arriving FULLY BUILT, as PowerPoint and Keynote do. A slide entered
+//    forward starts at build 0, its entrance elements hidden. What the slide looks like at a
+//    position is derived from the steps' declared outcomes alone (presenter/builds/), so a jump, a
+//    step back, reduced motion (builds appear at once) and the transition out of the slide -- a
+//    morph included -- all draw the same slide. A build segment is a run like a transition's: in
+//    the page for built-in effects, in the sandbox for a scripted step, with the same deadlines.
+//
 //  * THE SPEAKER VIEW IS THE SAME REACT TREE IN A SECOND WINDOW, rendered by portal into a window
 //    the CALLER opened inside a click or key handler (popup blockers refuse `window.open` after an
 //    asynchronous step): either the caller's own Present handler (`speakerWindow`), or the
@@ -37,6 +48,7 @@
 
 import type { Observable, SchedulerLike } from "rxjs";
 import type { AssetStore } from "./document-store.ts";
+import type { BuildSegment } from "./animations.ts";
 import type { BuiltinTransitionEffect, DocumentSnapshot, TransitionEasing } from "./document.ts";
 import type { KeyChord } from "./editor-events.ts";
 import type { IdSeed, RunnerId, SlideId, TransitionRunId, TransitionScriptId } from "./ids.ts";
@@ -91,7 +103,11 @@ export type PresenterState = Readonly<{
   previewEnded: boolean;
 }>;
 
-export type PresenterMode = "show" | "preview";
+/**
+ * A show; `TransitionPreview`'s show of one transition; or `BuildPreview`'s play-through of one
+ * slide's builds (every segment in turn, clicks included, then ended). Both previews ignore navigation.
+ */
+export type PresenterMode = "show" | "preview" | "buildPreview";
 
 export type SpareRunnerRetry = Readonly<{
   /** Consecutive spare runners that never became ready. */
@@ -101,10 +117,12 @@ export type SpareRunnerRetry = Readonly<{
 }>;
 
 export type PresenterScreen =
-  | Readonly<{ kind: "slide"; slideId: SlideId }>
+  /** `build`: how many of the slide's build segments have played (see the header). */
+  | Readonly<{ kind: "slide"; slideId: SlideId; build: number }>
   /** Drawing the run's stage over the outgoing slide. */
   | Readonly<{ kind: "transition"; fromSlideId: SlideId | null; toSlideId: SlideId }>
-  | Readonly<{ kind: "blank"; colour: "black" | "white"; resumeSlideId: SlideId }>
+  /** `resumeBuild`: the build position the slide is resumed at, so blanking never replays or loses builds. */
+  | Readonly<{ kind: "blank"; colour: "black" | "white"; resumeSlideId: SlideId; resumeBuild: number }>
   /** "End of presentation" after the last slide; next exits. */
   | Readonly<{ kind: "end"; lastSlideId: SlideId }>;
 
@@ -117,7 +135,9 @@ export type RunnerSlot =
 export type ResolvedTransition =
   | Readonly<{ kind: "builtin"; effect: BuiltinTransitionEffect; durationMilliseconds: number; easing: TransitionEasing }>
   | Readonly<{ kind: "scripted"; scriptId: TransitionScriptId; fingerprint: string; durationMilliseconds: number; parameters: SerialisableObject }>
-  | Readonly<{ kind: "substitutedFade"; reason: TransitionSubstitutionReason }>;
+  | Readonly<{ kind: "substitutedFade"; reason: TransitionSubstitutionReason }>
+  /** A segment of built-in build steps, played in the page on one slide (a scripted step is `scripted`). */
+  | Readonly<{ kind: "build"; segment: BuildSegment }>;
 
 export type TransitionRunHost =
   | Readonly<{ kind: "inPage" }>
@@ -130,6 +150,13 @@ export type TransitionRun = Readonly<{
   host: TransitionRunHost;
   fromSlideId: SlideId | null;
   toSlideId: SlideId;
+  /**
+   * The build positions the two sides are drawn at: the outgoing slide as the audience last saw it,
+   * the incoming slide as it arrives. A build segment's run has `fromSlideId === toSlideId` and
+   * `toBuild === fromBuild + 1`.
+   */
+  fromBuild: number;
+  toBuild: number;
   transition: ResolvedTransition;
   direction: TransitionDirection;
   phase: TransitionRunPhase;
@@ -225,6 +252,22 @@ export type PresentationProperties = Readonly<{
    */
   onSpeakerViewRequested: () => Window | null;
   onExit: (lastSlideId: SlideId | null) => void;
+}>;
+
+/**
+ * src/presenter/index.ts exports `BuildPreview`: every build segment of `slideId` played in turn in a
+ * box laid over the editor's canvas (the Animate tab's "Preview"), clicks taken as given, then
+ * `onEnded`. Same hosts and rules as a show (a scripted step runs only once approved); under reduced
+ * motion the builds appear at once. `generation` restarts it.
+ */
+export type BuildPreviewProperties = Readonly<{
+  dependencies: PresenterDependencies;
+  document: DocumentSnapshot;
+  slideId: SlideId;
+  generation: number;
+  /** Width of the preview box in client pixels; the height follows the page. */
+  width: number;
+  onEnded: () => void;
 }>;
 
 /**

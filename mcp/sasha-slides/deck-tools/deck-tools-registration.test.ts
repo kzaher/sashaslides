@@ -23,6 +23,7 @@ const VALID_CALLS: Readonly<Record<(typeof ASSISTANT_DECK_TOOL_NAMES)[number], R
   deck_read: { deckId: DECK },
   deck_edit: { deckId: DECK, summary: "added a slide", edits: [{ kind: "setTitle", title: "Q3" }] },
   deck_write_transition: { deckId: DECK, name: "Ink wipe", script: "sashaTransition.define({})" },
+  deck_write_animation: { deckId: DECK, name: "Rise", script: "sashaTransition.define({})" },
   deck_revert: { deckId: DECK },
   deck_read_comments: { deckId: DECK },
   deck_reply_comment: { deckId: DECK, threadId: THREAD, body: "Done" },

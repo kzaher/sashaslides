@@ -109,6 +109,7 @@ describe("clipboard (acceptance 11)", () => {
       id: scriptId,
       name: "Wipe",
       description: "",
+      purpose: "transition",
       author: { kind: "person", personId: ME.id },
       script: "sashaTransition.define({ name: 'Wipe', async run() {} });",
       stylesheet: "",

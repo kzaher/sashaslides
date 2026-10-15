@@ -151,6 +151,15 @@ export const VIEW_CLASS = {
   presentationHost: "sasha-view-presentation-host",
   floatingLayer: "sasha-view-floating-layer",
   previewBox: "sasha-view-preview-box",
+  /** The Animate tab's sequence: a listbox of steps, each a row with its number and labels. */
+  animationList: "sasha-view-animation-list",
+  animationRow: "sasha-view-animation-row",
+  animationNumber: "sasha-view-animation-number",
+  animationDetail: "sasha-view-animation-detail",
+  /** The numbered badges on animated elements while the Animate tab is open ("1, 3"). */
+  animationBadge: "sasha-view-animation-badge",
+  /** The Animate tab's Preview, laid exactly over the slide on the canvas. */
+  buildPreviewLayer: "sasha-view-build-preview-layer",
   sideBySide: "sasha-view-side-by-side",
   demoPane: "sasha-view-demo-pane",
   demoLabel: "sasha-view-demo-label",
@@ -362,6 +371,20 @@ html, body { margin: 0; block-size: 100%; }
 .${classes.presentationHost} { position: fixed; inset: 0; z-index: var(--sasha-layer-presenter); display: none; }
 .${classes.presentationHost}[data-active="true"] { display: block; }
 .${classes.previewBox} { border-radius: var(--sasha-radius-control); overflow: hidden; box-shadow: var(--sasha-tab-on-shadow); }
+.${classes.animationList} { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.${classes.animationRow} { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: var(--sasha-space-small); align-items: start; padding: var(--sasha-space-extra-small) var(--sasha-space-small); border-radius: var(--sasha-radius-control); color: var(--sasha-text); cursor: grab; }
+.${classes.animationRow}:hover { background: var(--sasha-secondary-button); }
+.${classes.animationRow}[aria-selected="true"] { background: var(--sasha-accent-soft); }
+.${classes.animationRow}[aria-selected="true"] .${classes.animationNumber} { background: var(--sasha-ink-button); color: var(--sasha-ink-button-text); }
+.${classes.animationRow}:focus-visible { outline: var(--sasha-control-focus-ring-width) solid var(--sasha-focus-ring); outline-offset: 0; }
+.${classes.animationRow}[data-status="elementRemoved"] .${classes.animationDetail}, .${classes.animationRow}[data-status="newerVersion"] .${classes.animationDetail} { opacity: var(--sasha-disabled-opacity); }
+.${classes.animationRow}[data-dragging="true"] { opacity: var(--sasha-disabled-opacity); cursor: grabbing; }
+.${classes.animationNumber} { inline-size: 22px; block-size: 22px; border-radius: var(--sasha-radius-pill); display: inline-grid; place-items: center; background: var(--sasha-glass-over-canvas); box-shadow: 0 0 0 1px var(--sasha-glass-edge); font-size: var(--sasha-font-size-caption); font-weight: var(--sasha-font-weight-bold); }
+.${classes.animationDetail} { display: flex; flex-direction: column; min-width: 0; font-size: var(--sasha-font-size-small); }
+.${classes.animationDetail} > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.${classes.animationDetail} > span { color: var(--sasha-text-muted); }
+.${classes.animationBadge} { position: absolute; min-inline-size: 22px; block-size: 22px; padding: 0 6px; transform: translate(-40%, -40%); display: inline-grid; place-items: center; border-radius: var(--sasha-radius-pill); border: 1px solid var(--sasha-glass-edge); background: var(--sasha-glass-over-canvas); color: var(--sasha-accent); font-size: var(--sasha-font-size-caption); font-weight: var(--sasha-font-weight-bold); white-space: nowrap; box-shadow: var(--sasha-lift-shadow); pointer-events: none; }
+.${classes.buildPreviewLayer} { position: absolute; inset: 0; z-index: var(--sasha-layer-canvas-overlay); overflow: hidden; }
 
 .${classes.sideBySide} { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sasha-space-small); block-size: 100vh; padding: var(--sasha-space-small); box-sizing: border-box; }
 .${classes.demoPane} { position: relative; min-inline-size: 0; min-block-size: 0; display: flex; flex-direction: column; }

@@ -40,6 +40,7 @@ import {
   applyOrThrow,
   assetRecord,
   box,
+  buildStep,
   CLAUDE,
   createTestStore,
   elementId,
@@ -178,12 +179,23 @@ describe("model acceptance", () => {
       author?: CommandEnvelope["author"];
       expect: (snapshot: DocumentSnapshot, fixture: Fixture) => void;
     }>;
-    const newSlide = (id: SlideId): SlideSnapshot => ({ id, layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, elements: [] });
+    const newSlide = (id: SlideId): SlideSnapshot => ({ id, layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, animations: [], elements: [] });
     const scriptId = mint("transitionScript");
-    const draft = { id: scriptId, name: "Ink wipe", description: "", script: "sashaTransition.define({})", stylesheet: "", markup: "", defaultParameters: {} };
+    const draft = { id: scriptId, name: "Ink wipe", description: "", script: "sashaTransition.define({})", stylesheet: "", markup: "", defaultParameters: {}, purpose: "transition" as const };
     const extraSlideOne = mint("slide");
     const extraSlideTwo = mint("slide");
     const extraLayout = mint("layout");
+    const stepOne = mint("animationStep");
+    const stepTwo = mint("animationStep");
+    const twoSteps = (fixture: Fixture): readonly DocumentCommand[] => [
+      {
+        kind: "insertAnimationSteps",
+        slideId: fixture.slideId,
+        after: null,
+        steps: [buildStep({ id: stepOne, elementId: fixture.shapeId }), buildStep({ id: stepTwo, elementId: fixture.imageId, effect: { kind: "flyIn", from: "left" } })],
+      },
+    ];
+    const stepIdsOf = (snapshot: DocumentSnapshot): readonly string[] => firstSlide(snapshot).animations.map((step) => step.id);
     const rows: Readonly<Record<DocumentCommandKind, Row>> = {
       setTitle: { commands: () => [{ kind: "setTitle", title: "Quarterly review" }], expect: (snapshot) => assert.equal(snapshot.title, "Quarterly review") },
       updateTheme: { commands: () => [{ kind: "updateTheme", patch: { name: "Night" } }], expect: (snapshot) => assert.equal(snapshot.theme.name, "Night") },
@@ -315,6 +327,33 @@ describe("model acceptance", () => {
           assert.equal(updated.kind === "table" ? updated.rows[1]?.minimumHeight : 0, 80);
         },
       },
+      insertAnimationSteps: {
+        commands: (fixture) => twoSteps(fixture),
+        expect: (snapshot) => {
+          assert.deepEqual(stepIdsOf(snapshot), [stepOne, stepTwo]);
+          assert.deepEqual(firstSlide(snapshot).animations[1]?.effect, { kind: "flyIn", from: "left" });
+        },
+      },
+      updateAnimationSteps: {
+        setup: (fixture) => twoSteps(fixture),
+        commands: (fixture) => [{ kind: "updateAnimationSteps", slideId: fixture.slideId, stepIds: [stepTwo], patch: { trigger: "afterPrevious", durationMilliseconds: 900 } }],
+        expect: (snapshot) => {
+          const step = firstSlide(snapshot).animations[1];
+          assert.equal(step?.trigger, "afterPrevious");
+          assert.equal(step?.durationMilliseconds, 900);
+          assert.deepEqual(step?.effect, { kind: "flyIn", from: "left" }, "fields the patch does not name keep their values");
+        },
+      },
+      moveAnimationSteps: {
+        setup: (fixture) => twoSteps(fixture),
+        commands: (fixture) => [{ kind: "moveAnimationSteps", slideId: fixture.slideId, stepIds: [stepTwo], after: null }],
+        expect: (snapshot) => assert.deepEqual(stepIdsOf(snapshot), [stepTwo, stepOne]),
+      },
+      deleteAnimationSteps: {
+        setup: (fixture) => twoSteps(fixture),
+        commands: (fixture) => [{ kind: "deleteAnimationSteps", slideId: fixture.slideId, stepIds: [stepOne] }],
+        expect: (snapshot) => assert.deepEqual(stepIdsOf(snapshot), [stepTwo]),
+      },
       updateTableCells: {
         commands: (fixture) => [
           {
@@ -366,7 +405,7 @@ describe("model acceptance", () => {
   test("3. structural sharing: setFrames rebuilds only the moved element and its slide", () => {
     const { store } = createTestStore({ seed: "blankDeck" });
     const fixture = buildFixture(store);
-    applyOrThrow(store, envelope({ commands: [{ kind: "insertSlides", slides: [{ id: mint("slide"), layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, elements: [shape({ id: mint("element") })] }], after: fixture.slideId }] }));
+    applyOrThrow(store, envelope({ commands: [{ kind: "insertSlides", slides: [{ id: mint("slide"), layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, animations: [], elements: [shape({ id: mint("element") })] }], after: fixture.slideId }] }));
     const before = store.snapshot();
     applyOrThrow(store, envelope({ commands: [{ kind: "setFrames", slideId: fixture.slideId, frames: [{ kind: "box", elementId: fixture.memberIds[0] ?? fixture.shapeId, frame: box({ x: 1, y: 2, width: 30, height: 40 }) }] }] }));
     const after = store.snapshot();
@@ -590,7 +629,7 @@ describe("model acceptance", () => {
         const runs = [idMinter(`RunA${String(seed).padStart(4, "0")}`), idMinter(`RunB${String(seed).padStart(4, "0")}`)];
         const insert = (store: DocumentStore, next: (typeof runs)[number]): readonly SlideId[] => {
           const slides = [next("slide"), next("slide"), next("slide")];
-          applyOrThrow(store, envelope({ commands: [{ kind: "insertSlides", slides: slides.map((id) => ({ id, layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, elements: [] })), after: anchor }] }));
+          applyOrThrow(store, envelope({ commands: [{ kind: "insertSlides", slides: slides.map((id) => ({ id, layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, animations: [], elements: [] })), after: anchor }] }));
           return slides;
         };
         const runA = insert(first.store, runs[0] ?? idMinter("Fallback"));
@@ -735,7 +774,7 @@ describe("model acceptance", () => {
   test("16. transition scripts: stale saves, agent saves, person approvals, clock stamps", () => {
     const { store, clock } = createTestStore({ seed: "blankDeck" });
     const scriptId = mint("transitionScript");
-    const draft = { id: scriptId, name: "Wipe", description: "", script: "sashaTransition.define({ run() {} })", stylesheet: "", markup: "", defaultParameters: {} };
+    const draft = { id: scriptId, name: "Wipe", description: "", script: "sashaTransition.define({ run() {} })", stylesheet: "", markup: "", defaultParameters: {}, purpose: "transition" as const };
     clock.set(5_000);
     applyOrThrow(store, envelope({ commands: [{ kind: "upsertTransitionScript", script: draft, basedOnUpdatedAt: null, approval: "authorDecides" }] }));
     const saved = store.snapshot().transitionScripts[0];
@@ -776,7 +815,7 @@ describe("model acceptance", () => {
   ] as const) {
     test(`16. a save by ${row.label} is stored ${row.expected}`, () => {
       const { store } = createTestStore({ seed: "blankDeck" });
-      const draft = { id: mint("transitionScript"), name: "Wipe", description: "", script: "sashaTransition.define({ run() {} })", stylesheet: "", markup: "", defaultParameters: {} };
+      const draft = { id: mint("transitionScript"), name: "Wipe", description: "", script: "sashaTransition.define({ run() {} })", stylesheet: "", markup: "", defaultParameters: {}, purpose: "transition" as const };
       applyOrThrow(store, envelope({ ...(row.author === "agent" ? { author: CLAUDE } : {}), commands: [{ kind: "upsertTransitionScript", script: draft, basedOnUpdatedAt: null, approval: row.saveApproval }] }));
       assert.equal(store.snapshot().transitionScripts[0]?.approval.kind, row.expected);
     });
@@ -900,15 +939,16 @@ function randomCommands(
   const pick = <TItem>(items: readonly TItem[]): TItem | undefined => items[Math.floor(random() * items.length)];
   const slide = pick(snapshot.slides);
   if (slide === undefined) {
-    return [{ kind: "insertSlides", slides: [{ id: next("slide"), layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, elements: [] }], after: null }];
+    return [{ kind: "insertSlides", slides: [{ id: next("slide"), layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, animations: [], elements: [] }], after: null }];
   }
   const elements = [...flattenElements(slide.elements).values()];
   const element = pick(elements);
   const shapes = elements.filter((candidate) => candidate.kind === "shape");
   const topLevel = slide.elements;
-  switch (Math.floor(random() * 10)) {
+  const step = pick(slide.animations);
+  switch (Math.floor(random() * 14)) {
     case 0:
-      return [{ kind: "insertSlides", slides: [{ id: next("slide"), layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, elements: [] }], after: pick(snapshot.slides)?.id ?? null }];
+      return [{ kind: "insertSlides", slides: [{ id: next("slide"), layoutId: null, background: null, skipped: false, speakerNotes: textBody(""), transition: null, animations: [], elements: [] }], after: pick(snapshot.slides)?.id ?? null }];
     case 1:
       return [{ kind: "insertElements", slideId: slide.id, elements: [shape({ id: next("element"), text: textBody("abc") })], placement: { kind: "front" } }];
     case 2:
@@ -936,6 +976,18 @@ function randomCommands(
       return element === undefined ? [] : [{ kind: "reorderElements", slideId: slide.id, elementIds: [element.id], placement: pick(["front", "forward", "backward", "back"] as const) ?? "front" }];
     case 8:
       return [{ kind: "moveSlides", slideIds: [slide.id], after: null }];
+    case 10:
+      return element === undefined
+        ? []
+        : [{ kind: "insertAnimationSteps", slideId: slide.id, after: pick(slide.animations)?.id ?? null, steps: [buildStep({ id: next("animationStep"), elementId: element.id, effect: { kind: "flyIn", from: "left" } })] }];
+    case 11:
+      return step === undefined
+        ? []
+        : [{ kind: "updateAnimationSteps", slideId: slide.id, stepIds: [step.id], patch: random() < 0.5 ? { durationMilliseconds: Math.floor(random() * 2000) } : { trigger: pick(["onClick", "withPrevious", "afterPrevious"] as const) ?? "onClick" } }];
+    case 12:
+      return step === undefined ? [] : [{ kind: "moveAnimationSteps", slideId: slide.id, stepIds: [step.id], after: null }];
+    case 13:
+      return step === undefined ? [] : [{ kind: "deleteAnimationSteps", slideId: slide.id, stepIds: [step.id] }];
     default:
       return [{ kind: "setTitle", title: `Title ${Math.floor(random() * 100)}` }];
   }

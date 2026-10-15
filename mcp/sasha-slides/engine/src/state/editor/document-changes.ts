@@ -121,6 +121,8 @@ export function rejectionMessage(rejection: CommandRejection): string {
       return "That image is not stored yet.";
     case "tableLineMissing":
       return "That table row or column was deleted.";
+    case "animationStepMissing":
+      return "That animation was removed.";
     case "duplicateId":
       return "Something with the same identity already exists, so the change was not made.";
     case "invalidId":
@@ -304,6 +306,7 @@ function rejectEnvelope(state: EditorState, commandId: QueuedEditCommandId, reje
     case "transitionScriptMissing":
     case "assetMissing":
     case "tableLineMissing":
+    case "animationStepMissing":
     case "duplicateId":
     case "invalidId":
     case "invalidValue":

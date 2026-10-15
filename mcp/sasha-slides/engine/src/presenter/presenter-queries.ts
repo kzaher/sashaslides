@@ -6,6 +6,8 @@ import { assertNever } from "../contracts/assert-never.ts";
 import type { RunnerId } from "../contracts/ids.ts";
 import type { PresenterScreen, ResolvedTransition, RunnerSlot, TransitionRun, TransitionRunHost, TransitionRunPhase } from "../contracts/presenter.ts";
 import { TRANSITION_LIMITS, type TransitionFallbackReason } from "../contracts/transition-protocol.ts";
+import { resolveBuildSegment, type BuildResolution } from "./builds/build-resolution.ts";
+import { slideBuildSegments } from "./builds/build-states.ts";
 import { runDurationMilliseconds, slideById, type PresenterSystemState } from "./presenter-state.ts";
 import { resolveTransition, type TransitionResolution } from "./transition-resolution.ts";
 
@@ -66,12 +68,14 @@ export function hostRunnerId(host: TransitionRunHost): RunnerId | null {
   }
 }
 
-/** True when moving to or from some playlist slide would run a script in the sandbox. */
-export function playlistHasScriptedTransition(state: PresenterSystemState): boolean {
+/** True when moving to or from some playlist slide, or one of its build segments, would run a script in the sandbox. */
+export function playlistUsesSandbox(state: PresenterSystemState): boolean {
+  const scripts = state.document.transitionScripts;
   return state.playlist.some((slideId) => {
-    const transition = slideById(state.document, slideId)?.transition ?? null;
-    const resolution = resolveTransition({ transition, scripts: state.document.transitionScripts, reducedMotion: state.reducedMotion });
-    return runsInSandbox(resolution);
+    const slide = slideById(state.document, slideId);
+    if (slide === null) return false;
+    if (runsInSandbox(resolveTransition({ transition: slide.transition, scripts, reducedMotion: state.reducedMotion }))) return true;
+    return slideBuildSegments(slide).some((segment) => buildRunsInSandbox(resolveBuildSegment({ segment, scripts, reducedMotion: state.reducedMotion })));
   });
 }
 
@@ -81,6 +85,7 @@ export function isScripted(transition: ResolvedTransition): boolean {
       return true;
     case "builtin":
     case "substitutedFade":
+    case "build":
       return false;
     default:
       return assertNever(transition);
@@ -90,6 +95,17 @@ export function isScripted(transition: ResolvedTransition): boolean {
 function runsInSandbox(resolution: TransitionResolution): boolean {
   switch (resolution.kind) {
     case "cut":
+      return false;
+    case "play":
+      return isScripted(resolution.transition);
+    default:
+      return assertNever(resolution);
+  }
+}
+
+function buildRunsInSandbox(resolution: BuildResolution): boolean {
+  switch (resolution.kind) {
+    case "instant":
       return false;
     case "play":
       return isScripted(resolution.transition);

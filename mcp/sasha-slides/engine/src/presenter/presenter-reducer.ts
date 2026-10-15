@@ -24,7 +24,23 @@
 //  * RUNNER MESSAGES ARE CHECKED AGAINST THE LIVE RUN: wrong runner, wrong `runId`, or a message
 //    out of phase order is counted (`rejectedMessageCount`) or ends the run as `protocolViolation`;
 //    nothing a runner says is trusted beyond moving its own run forward.
+//  * A BUILD SEGMENT IS A RUN ON ONE SLIDE (`fromSlideId === toSlideId`, `toBuild = fromBuild + 1`),
+//    hosted like a transition: in the page for built-in effects, in the sandbox for a scripted step,
+//    with the same deadlines and the same two endings. Next runs the next segment and only leaves the
+//    slide at the end of its sequence, the outgoing slide drawn at its final build; Previous steps
+//    back to the last click boundary WITHOUT animating, and from the first one goes to the previous
+//    slide, which arrives fully built.
+//  * CHAINED SEGMENTS FOLLOW BY THEMSELVES, as a normalisation after every event (`continueBuilds`,
+//    like the spare runner's): whenever no run is live and the slide rests on a segment that does
+//    not wait for a click, it starts. So the arrival of a slide, the end of the previous segment, a
+//    fallback, the start of the show and a jump all chain the same way, with nothing to forget.
+//  * NAVIGATION DURING A RUN FINISHES IT TO THE NEXT CLICK BOUNDARY: the run's outcome is shown and
+//    the chained segments after it appear at once, so the following press continues from where the
+//    presenter would have been waiting anyway.
+//  * A BUILD THAT CANNOT PLAY APPEARS AT ONCE (builds/build-resolution.ts): reduced motion silently,
+//    an unapproved, missing or wrong-purpose script with a substitution diagnostic.
 
+import { isRestingBuild, type BuildSegment } from "../contracts/animations.ts";
 import { assertNever } from "../contracts/assert-never.ts";
 import type { DocumentSnapshot } from "../contracts/document.ts";
 import type { KeyChord } from "../contracts/editor-events.ts";
@@ -47,11 +63,14 @@ import {
   type TransitionFallbackReason,
   type TransitionSubstitutionReason,
 } from "../contracts/transition-protocol.ts";
+import { BUILD_SUBSTITUTION_MESSAGES, resolveBuildSegment } from "./builds/build-resolution.ts";
+import { clampBuild, finalBuildOf, slideBuildSegments } from "./builds/build-states.ts";
 import { presenterKeyIntent, type PresenterKeyIntent } from "./navigation-keys.ts";
-import { hostRunnerId, isBlankScreen, phaseDeadline, playlistHasScriptedTransition, slotRunnerId } from "./presenter-queries.ts";
+import { hostRunnerId, isBlankScreen, phaseDeadline, playlistUsesSandbox, slotRunnerId } from "./presenter-queries.ts";
 import {
   CONTROLS_HIDE_AFTER_MILLISECONDS,
   MAXIMUM_DIAGNOSTICS,
+  currentBuildOf,
   currentSlideOf,
   initialPreviewBaseState,
   nearestFollowingSlide,
@@ -62,19 +81,33 @@ import {
 import { resolveTransition } from "./transition-resolution.ts";
 
 export function reducePresenter(state: PresenterSystemState, event: PresenterEvent): PresenterSystemState {
-  return ensureSpareRunner(reduceEvent(state, event));
+  return ensureSpareRunner(continueBuilds(reduceEvent(state, event)));
 }
 
-/** A preview's starting state: the run into `slideId` already in place (presenter-state.ts header). */
-export function initialPreviewState(
-  options: Parameters<typeof initialPreviewBaseState>[0],
-): PresenterSystemState {
-  const base = initialPreviewBaseState(options);
+/**
+ * A preview's starting state: the run into `slideId` already in place (presenter-state.ts header),
+ * from the slide before it drawn fully built, as the audience would have left it.
+ */
+export function initialPreviewState(options: PreviewStartOptions): PresenterSystemState {
+  const base = initialPreviewBaseState({ ...options, mode: "preview" });
   const index = options.document.slides.findIndex((slide) => slide.id === options.slideId);
-  const fromSlideId = index > 0 ? (options.document.slides[index - 1]?.id ?? null) : null;
-  const played = transitionTo(base, { fromSlideId, toSlideId: options.slideId, direction: "forward" });
+  const fromSlide = index > 0 ? options.document.slides[index - 1] : undefined;
+  const played = transitionTo(base, {
+    fromSlideId: fromSlide?.id ?? null,
+    toSlideId: options.slideId,
+    direction: "forward",
+    fromBuild: fromSlide === undefined ? 0 : finalBuildOf(fromSlide),
+    toBuild: 0,
+  });
   return played.run === null ? { ...played, previewEnded: true } : played;
 }
+
+/** `BuildPreview`'s starting state: the slide at build 0 with its first segment already playing (or ended at once). */
+export function initialBuildPreviewState(options: PreviewStartOptions): PresenterSystemState {
+  return continueBuilds(initialPreviewBaseState({ ...options, mode: "buildPreview" }));
+}
+
+type PreviewStartOptions = Omit<Parameters<typeof initialPreviewBaseState>[0], "mode">;
 
 function reduceEvent(state: PresenterSystemState, event: PresenterEvent): PresenterSystemState {
   switch (event.kind) {
@@ -130,7 +163,7 @@ function documentChanged(state: PresenterSystemState, document: DocumentSnapshot
   const updated: PresenterSystemState = { ...state, document, playlist };
   const lastSlideId = playlist[playlist.length - 1];
   if (lastSlideId === undefined) return { ...updated, run: null, screen: { kind: "end", lastSlideId: current }, previewEnded: true };
-  if (playlist.includes(current)) return keepCurrentSlide(updated);
+  if (playlist.includes(current)) return clampScreenBuild(keepCurrentSlide(updated));
   const target =
     nearestFollowingSlide({ playlist, order: state.document.slides, slideId: current }) ??
     nearestFollowingSlide({ playlist, order: document.slides, slideId: current });
@@ -140,10 +173,10 @@ function documentChanged(state: PresenterSystemState, document: DocumentSnapshot
     case "end":
       return { ...moved, screen: { kind: "end", lastSlideId } };
     case "blank":
-      return target === null ? { ...moved, screen: { kind: "end", lastSlideId } } : { ...moved, screen: { ...screen, resumeSlideId: target } };
+      return target === null ? { ...moved, screen: { kind: "end", lastSlideId } } : { ...moved, screen: { ...screen, resumeSlideId: target, resumeBuild: 0 } };
     case "slide":
     case "transition":
-      return target === null ? { ...moved, screen: { kind: "end", lastSlideId } } : { ...moved, screen: { kind: "slide", slideId: target } };
+      return target === null ? { ...moved, screen: { kind: "end", lastSlideId } } : { ...moved, screen: { kind: "slide", slideId: target, build: 0 } };
     default:
       return assertNever(screen);
   }
@@ -154,10 +187,41 @@ function playlistFor(state: PresenterSystemState, document: DocumentSnapshot): r
     case "show":
       return playlistOf(document);
     case "preview":
+    case "buildPreview":
       return document.slides.map((slide) => slide.id);
     default:
       return assertNever(state.mode);
   }
+}
+
+/** The slide on screen (or a blank screen's) holds at most as many segments as it has now. */
+function clampScreenBuild(state: PresenterSystemState): PresenterSystemState {
+  const screen = state.screen;
+  switch (screen.kind) {
+    case "slide": {
+      const build = buildOn({ state, slideId: screen.slideId, build: screen.build });
+      return build === screen.build ? state : { ...state, screen: { ...screen, build } };
+    }
+    case "blank": {
+      const resumeBuild = buildOn({ state, slideId: screen.resumeSlideId, build: screen.resumeBuild });
+      return resumeBuild === screen.resumeBuild ? state : { ...state, screen: { ...screen, resumeBuild } };
+    }
+    case "transition":
+    case "end":
+      return state;
+    default:
+      return assertNever(screen);
+  }
+}
+
+/** `build` clamped to the segments the slide has in the state's document. */
+function buildOn(options: Readonly<{ state: PresenterSystemState; slideId: SlideId; build: number }>): number {
+  return clampBuild({ build: options.build, segments: segmentsOf(options.state, options.slideId) });
+}
+
+function segmentsOf(state: PresenterSystemState, slideId: SlideId): readonly BuildSegment[] {
+  const slide = slideById(state.document, slideId);
+  return slide === null ? [] : slideBuildSegments(slide);
 }
 
 /** The current slide survived; a run whose outgoing slide was deleted cannot draw it, so it finishes. */
@@ -232,6 +296,7 @@ function isShowMode(state: PresenterSystemState): boolean {
     case "show":
       return true;
     case "preview":
+    case "buildPreview":
       return false;
     default:
       return assertNever(state.mode);
@@ -241,7 +306,7 @@ function isShowMode(state: PresenterSystemState): boolean {
 function navigate(state: PresenterSystemState, navigation: PresenterNavigation): PresenterSystemState {
   if (!acceptsInput(state)) return state;
   const cleared: PresenterSystemState = state.typedSlideNumber === "" ? state : { ...state, typedSlideNumber: "" };
-  if (cleared.run !== null) return completeRun(cleared);
+  if (cleared.run !== null) return finishRunToClickBoundary(cleared);
   const screen = cleared.screen;
   switch (screen.kind) {
     case "blank":
@@ -249,10 +314,10 @@ function navigate(state: PresenterSystemState, navigation: PresenterNavigation):
     case "end":
       return navigateFromEnd(cleared, { navigation, lastSlideId: screen.lastSlideId });
     case "slide":
-      return navigateFromSlide(cleared, { navigation, slideId: screen.slideId });
+      return navigateFromSlide(cleared, { navigation, slideId: screen.slideId, build: screen.build });
     case "transition":
       // A transition screen without a run cannot persist (completeRun replaces it); treat it as its target.
-      return navigateFromSlide(cleared, { navigation, slideId: screen.toSlideId });
+      return navigateFromSlide(cleared, { navigation, slideId: screen.toSlideId, build: 0 });
     default:
       return assertNever(screen);
   }
@@ -260,26 +325,37 @@ function navigate(state: PresenterSystemState, navigation: PresenterNavigation):
 
 function navigateFromSlide(
   state: PresenterSystemState,
-  options: Readonly<{ navigation: PresenterNavigation; slideId: SlideId }>,
+  options: Readonly<{ navigation: PresenterNavigation; slideId: SlideId; build: number }>,
 ): PresenterSystemState {
   const index = state.playlist.indexOf(options.slideId);
   const navigation = options.navigation;
+  const segments = segmentsOf(state, options.slideId);
   switch (navigation.kind) {
     case "next": {
+      const segment = segments[options.build];
+      if (segment !== undefined) return playSegment(state, { slideId: options.slideId, build: options.build, segment });
       const following = state.playlist[index + 1];
       if (following === undefined) return { ...state, screen: { kind: "end", lastSlideId: options.slideId } };
-      return transitionTo(state, { fromSlideId: options.slideId, toSlideId: following, direction: "forward" });
+      return transitionTo(state, { fromSlideId: options.slideId, toSlideId: following, direction: "forward", fromBuild: options.build, toBuild: 0 });
     }
     case "previous": {
+      const resting = previousRestingBuild({ segments, build: options.build });
+      if (resting !== null) return { ...state, screen: { kind: "slide", slideId: options.slideId, build: resting } };
       const preceding = index > 0 ? state.playlist[index - 1] : undefined;
       if (preceding === undefined) return state;
-      return transitionTo(state, { fromSlideId: options.slideId, toSlideId: preceding, direction: "backward" });
+      return transitionTo(state, {
+        fromSlideId: options.slideId,
+        toSlideId: preceding,
+        direction: "backward",
+        fromBuild: options.build,
+        toBuild: segmentsOf(state, preceding).length,
+      });
     }
     case "first":
     case "last":
     case "slide":
     case "number":
-      return cutTo(state, jumpTarget(state, navigation));
+      return cutTo(state, { slideId: jumpTarget(state, navigation), build: 0 });
     default:
       return assertNever(navigation);
   }
@@ -293,13 +369,16 @@ function navigateFromEnd(
   switch (navigation.kind) {
     case "next":
       return requestExit(state);
-    case "previous":
-      return cutTo(state, state.playlist.includes(options.lastSlideId) ? options.lastSlideId : (state.playlist[state.playlist.length - 1] ?? null));
+    case "previous": {
+      // Back from the end screen: the last slide, fully built, as going back always arrives.
+      const slideId = state.playlist.includes(options.lastSlideId) ? options.lastSlideId : (state.playlist[state.playlist.length - 1] ?? null);
+      return cutTo(state, { slideId, build: slideId === null ? 0 : segmentsOf(state, slideId).length });
+    }
     case "first":
     case "last":
     case "slide":
     case "number":
-      return cutTo(state, jumpTarget(state, navigation));
+      return cutTo(state, { slideId: jumpTarget(state, navigation), build: 0 });
     default:
       return assertNever(navigation);
   }
@@ -320,16 +399,16 @@ function jumpTarget(state: PresenterSystemState, navigation: Exclude<PresenterNa
   }
 }
 
-function cutTo(state: PresenterSystemState, slideId: SlideId | null): PresenterSystemState {
-  if (slideId === null) return state;
-  return { ...state, screen: { kind: "slide", slideId } };
+function cutTo(state: PresenterSystemState, options: Readonly<{ slideId: SlideId | null; build: number }>): PresenterSystemState {
+  if (options.slideId === null) return state;
+  return { ...state, screen: { kind: "slide", slideId: options.slideId, build: options.build } };
 }
 
 function resumeFromBlank(state: PresenterSystemState): PresenterSystemState {
   const screen = state.screen;
   switch (screen.kind) {
     case "blank":
-      return { ...state, typedSlideNumber: "", screen: { kind: "slide", slideId: screen.resumeSlideId } };
+      return { ...state, typedSlideNumber: "", screen: { kind: "slide", slideId: screen.resumeSlideId, build: buildOn({ state, slideId: screen.resumeSlideId, build: screen.resumeBuild }) } };
     case "slide":
     case "transition":
     case "end":
@@ -343,7 +422,7 @@ function blankToggled(state: PresenterSystemState, colour: "black" | "white"): P
   if (!acceptsInput(state)) return state;
   const settled = state.run === null ? state : completeRun(state);
   if (blankColourOf(settled.screen) === colour) return resumeFromBlank(settled);
-  return { ...settled, typedSlideNumber: "", screen: { kind: "blank", colour, resumeSlideId: currentSlideOf(settled) } };
+  return { ...settled, typedSlideNumber: "", screen: { kind: "blank", colour, resumeSlideId: currentSlideOf(settled), resumeBuild: currentBuildOf(settled) } };
 }
 
 function blankColourOf(screen: PresenterScreen): "black" | "white" | null {
@@ -373,20 +452,35 @@ function requestExit(state: PresenterSystemState): PresenterSystemState {
 // Starting and ending runs
 // ---------------------------------------------------------------------------------------------
 
+/** The last click boundary before `build`: the largest position below it whose segment waits for a click. */
+function previousRestingBuild(options: Readonly<{ segments: readonly BuildSegment[]; build: number }>): number | null {
+  for (let position = Math.min(options.build, options.segments.length) - 1; position >= 0; position -= 1) {
+    if (options.segments[position]?.startsOnClick === true) return position;
+  }
+  return null;
+}
+
+/** The first click boundary at or after `build`. */
+function nextRestingBuild(options: Readonly<{ segments: readonly BuildSegment[]; build: number }>): number {
+  let position = clampBuild({ build: options.build, segments: options.segments });
+  while (!isRestingBuild({ segments: options.segments, completed: position })) position += 1;
+  return position;
+}
+
 /**
  * Leave `fromSlideId` for `toSlideId`. Forward plays the transition INTO the incoming slide;
  * backward plays the transition of the slide being LEFT, with direction "backward".
  */
 function transitionTo(
   state: PresenterSystemState,
-  options: Readonly<{ fromSlideId: SlideId | null; toSlideId: SlideId; direction: TransitionDirection }>,
+  options: Readonly<{ fromSlideId: SlideId | null; toSlideId: SlideId; direction: TransitionDirection; fromBuild: number; toBuild: number }>,
 ): PresenterSystemState {
   const owner = transitionOwner(options);
   const transition = owner === null ? null : (slideById(state.document, owner)?.transition ?? null);
   const resolution = resolveTransition({ transition, scripts: state.document.transitionScripts, reducedMotion: state.reducedMotion });
   switch (resolution.kind) {
     case "cut":
-      return { ...state, run: null, screen: { kind: "slide", slideId: options.toSlideId } };
+      return { ...state, run: null, screen: { kind: "slide", slideId: options.toSlideId, build: options.toBuild } };
     case "play":
       return startRun(state, { ...options, transition: resolution.transition });
     default:
@@ -405,9 +499,81 @@ function transitionOwner(options: Readonly<{ fromSlideId: SlideId | null; toSlid
   }
 }
 
+/**
+ * Play segment `build` of the slide on screen, or, when it cannot play (builds/build-resolution.ts),
+ * show its outcome at once.
+ */
+function playSegment(state: PresenterSystemState, options: Readonly<{ slideId: SlideId; build: number; segment: BuildSegment }>): PresenterSystemState {
+  const resolution = resolveBuildSegment({ segment: options.segment, scripts: state.document.transitionScripts, reducedMotion: state.reducedMotion });
+  switch (resolution.kind) {
+    case "play":
+      return startRun(state, {
+        fromSlideId: options.slideId,
+        toSlideId: options.slideId,
+        fromBuild: options.build,
+        toBuild: options.build + 1,
+        direction: "forward",
+        transition: resolution.transition,
+      });
+    case "instant": {
+      const shown: PresenterSystemState = { ...state, run: null, screen: { kind: "slide", slideId: options.slideId, build: options.build + 1 } };
+      if (resolution.substitution === null) return shown;
+      return appendDiagnostic(shown, {
+        at: state.now,
+        slideId: options.slideId,
+        kind: "substitution",
+        reason: resolution.substitution,
+        message: BUILD_SUBSTITUTION_MESSAGES[resolution.substitution],
+      });
+    }
+    default:
+      return assertNever(resolution);
+  }
+}
+
+/** Chained segments follow by themselves (see the header); a build preview plays every segment, then ends. */
+function continueBuilds(state: PresenterSystemState): PresenterSystemState {
+  if (state.exitRequested || state.run !== null) return state;
+  const screen = state.screen;
+  switch (screen.kind) {
+    case "slide":
+      break;
+    case "transition":
+    case "blank":
+    case "end":
+      return state;
+    default:
+      return assertNever(screen);
+  }
+  const segments = segmentsOf(state, screen.slideId);
+  const segment = segments[screen.build];
+  switch (state.mode) {
+    case "preview":
+      return state;
+    case "show":
+      if (segment === undefined || isRestingBuild({ segments, completed: screen.build })) return state;
+      return continueBuilds(playSegment(state, { slideId: screen.slideId, build: screen.build, segment }));
+    case "buildPreview":
+      if (state.previewEnded) return state;
+      if (segment === undefined) return { ...state, previewEnded: true };
+      // Under reduced motion the preview shows the fully built slide and ends.
+      if (state.reducedMotion) return { ...state, screen: { ...screen, build: segments.length }, previewEnded: true };
+      return continueBuilds(playSegment(state, { slideId: screen.slideId, build: screen.build, segment }));
+    default:
+      return assertNever(state.mode);
+  }
+}
+
 function startRun(
   state: PresenterSystemState,
-  options: Readonly<{ fromSlideId: SlideId | null; toSlideId: SlideId; direction: TransitionDirection; transition: ResolvedTransition }>,
+  options: Readonly<{
+    fromSlideId: SlideId | null;
+    toSlideId: SlideId;
+    fromBuild: number;
+    toBuild: number;
+    direction: TransitionDirection;
+    transition: ResolvedTransition;
+  }>,
 ): PresenterSystemState {
   const minted = mintId({ seed: state.idSeed, kind: "transitionRun" });
   const placement = placeRun({ state: { ...state, idSeed: minted.seed }, transition: options.transition });
@@ -416,6 +582,8 @@ function startRun(
     host: placement.host,
     fromSlideId: options.fromSlideId,
     toSlideId: options.toSlideId,
+    fromBuild: options.fromBuild,
+    toBuild: options.toBuild,
     transition: options.transition,
     direction: options.direction,
     phase: placement.phase,
@@ -449,6 +617,7 @@ function placeRun(
   switch (options.transition.kind) {
     case "builtin":
     case "substitutedFade":
+    case "build":
       return { state, host: { kind: "inPage" }, phase: "running" };
     case "scripted":
       break;
@@ -482,6 +651,7 @@ function substitutionOf(transition: ResolvedTransition): TransitionSubstitutionR
   switch (transition.kind) {
     case "builtin":
     case "scripted":
+    case "build":
       return null;
     case "substitutedFade":
       return transition.reason;
@@ -496,7 +666,7 @@ const SUBSTITUTION_MESSAGES: Readonly<Record<TransitionSubstitutionReason, strin
   scriptMissing: "Played a short fade instead: the transition script this slide names is not in the deck.",
 };
 
-/** The incoming slide on screen; the run (and so its frame) is gone. */
+/** The incoming slide on screen at the run's build position; the run (and so its frame) is gone. */
 function completeRun(state: PresenterSystemState): PresenterSystemState {
   const run = state.run;
   if (run === null) return state;
@@ -504,9 +674,38 @@ function completeRun(state: PresenterSystemState): PresenterSystemState {
     ...state,
     run: null,
     runLogCount: 0,
-    screen: { kind: "slide", slideId: run.toSlideId },
-    previewEnded: !isShowMode(state) || state.previewEnded,
+    screen: { kind: "slide", slideId: run.toSlideId, build: buildOn({ state, slideId: run.toSlideId, build: run.toBuild }) },
+    previewEnded: endsWithOneRun(state) || state.previewEnded,
   };
+}
+
+/** A transition preview ends with its one run; a build preview plays segment after segment. */
+function endsWithOneRun(state: PresenterSystemState): boolean {
+  switch (state.mode) {
+    case "preview":
+      return true;
+    case "show":
+    case "buildPreview":
+      return false;
+    default:
+      return assertNever(state.mode);
+  }
+}
+
+/** Navigation during a run (see the header): the run's outcome, then every chained segment at once. */
+function finishRunToClickBoundary(state: PresenterSystemState): PresenterSystemState {
+  const completed = completeRun(state);
+  const screen = completed.screen;
+  switch (screen.kind) {
+    case "slide":
+      return { ...completed, screen: { ...screen, build: nextRestingBuild({ segments: segmentsOf(completed, screen.slideId), build: screen.build }) } };
+    case "transition":
+    case "blank":
+    case "end":
+      return completed;
+    default:
+      return assertNever(screen);
+  }
 }
 
 /** Cut to the incoming slide and say why. */
@@ -615,7 +814,7 @@ function spareBackoffMilliseconds(failures: number): number {
 
 function ensureSpareRunner(state: PresenterSystemState): PresenterSystemState {
   if (slotRunnerId(state.spareRunner) !== null || state.run !== null || state.exitRequested) return state;
-  if (!isShowMode(state) || state.now < state.spareRetry.notBefore || !playlistHasScriptedTransition(state)) return state;
+  if (!isShowMode(state) || state.now < state.spareRetry.notBefore || !playlistUsesSandbox(state)) return state;
   const runner = mintId({ seed: state.idSeed, kind: "runner" });
   return { ...state, idSeed: runner.seed, spareRunner: { kind: "loading", runnerId: runner.id, since: state.now, loadCount: 0 } };
 }

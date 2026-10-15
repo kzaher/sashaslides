@@ -15,7 +15,7 @@ import type {
   InitialEditorState,
 } from "./editor-system.ts";
 import type { CreateMemoryPresenceHub } from "./presence.ts";
-import type { PresentationProperties, TransitionPreviewProperties } from "./presenter.ts";
+import type { BuildPreviewProperties, PresentationProperties, TransitionPreviewProperties } from "./presenter.ts";
 import type { RenderSlideMarkup, StaticSlideComponent } from "./render.ts";
 import type { CreateReactFeedback, CreateReactSetFeedback, CreateSystem } from "./rxfeedback.ts";
 
@@ -51,6 +51,7 @@ export type ViewModule = Readonly<{
 export type PresenterModule = Readonly<{
   Presentation: ComponentType<PresentationProperties>;
   TransitionPreview: ComponentType<TransitionPreviewProperties>;
+  BuildPreview: ComponentType<BuildPreviewProperties>;
 }>;
 
 /**

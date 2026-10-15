@@ -105,6 +105,7 @@ export function planExport(
     requests.push(...backgroundRequests({ slide, theme: snapshot.theme, assetAddress: options.assetAddress, assets, losses }));
     if (slide.skipped) requests.push({ updateSlideProperties: { objectId: slide.id, slideProperties: { isSkipped: true }, fields: "isSkipped" } });
     if (slide.transition !== null) losses.add({ feature: "transition", detail: "Google Slides' programming interface cannot set transitions; this slide's transition was left out." });
+    if (slide.animations.length > 0) losses.add({ feature: "animation", detail: animationLossDetail({ slideNumber: index + 1, stepCount: slide.animations.length }) });
     if (slide.layoutId !== null) collector.sink.addOncePerDeck({ feature: "layouts", detail: "Layouts and placeholders became plain positioned elements on BLANK slides." });
     const context: ExportContext = {
       slideId: slide.id,
@@ -130,6 +131,15 @@ export function planExport(
     assetIds: [...assets],
     losses: collector.losses(),
   };
+}
+
+/**
+ * One line per slide with builds, worded for the person reading the export notice: the Slides
+ * programming interface has no request that creates an animation, so every step stays behind.
+ */
+function animationLossDetail(options: Readonly<{ slideNumber: number; stepCount: number }>): string {
+  const what = options.stepCount === 1 ? "its animation is" : `its ${String(options.stepCount)} animations are`;
+  return `Slide ${String(options.slideNumber)}: ${what} not exported; Google Slides' programming interface cannot create animations.`;
 }
 
 /** The Slides shape type for each preset (the inverse of the import table). */

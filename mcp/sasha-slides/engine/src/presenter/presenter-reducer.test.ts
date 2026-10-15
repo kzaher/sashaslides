@@ -104,8 +104,8 @@ describe("presenter reducer: navigation keys", () => {
   for (const row of blanks) {
     it(`${row.key} blanks the screen ${row.colour} and any key resumes on the same slide`, () => {
       const blank = press(showState({ slides: fourSlides, start: "slide_b" }), row.key);
-      assert.deepEqual(blank.screen, { kind: "blank", colour: row.colour, resumeSlideId: slideIdOf("slide_b") });
-      for (const resumeKey of ["x", "ArrowRight", row.key]) assert.deepEqual(press(blank, resumeKey).screen, { kind: "slide", slideId: slideIdOf("slide_b") });
+      assert.deepEqual(blank.screen, { kind: "blank", colour: row.colour, resumeSlideId: slideIdOf("slide_b"), resumeBuild: 0 });
+      for (const resumeKey of ["x", "ArrowRight", row.key]) assert.deepEqual(press(blank, resumeKey).screen, { kind: "slide", slideId: slideIdOf("slide_b"), build: 0 });
     });
   }
 
@@ -128,7 +128,7 @@ describe("presenter reducer: navigation keys", () => {
     assert.equal(inTransition.screen.kind, "transition");
     assert.notEqual(inTransition.run, null);
     const finished = press(inTransition, "ArrowRight");
-    assert.deepEqual(finished.screen, { kind: "slide", slideId: slideIdOf("slide_b") });
+    assert.deepEqual(finished.screen, { kind: "slide", slideId: slideIdOf("slide_b"), build: 0 });
     assert.equal(finished.run, null);
     assert.equal(onScreen(press(finished, "ArrowRight")), "slide_c");
   });

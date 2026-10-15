@@ -17,12 +17,25 @@
 // something the projection would refuse to read.
 
 import * as Y from "yjs";
-import type { AssetRecord, CellBorders, ImageCrop, PlaceholderReference, ShapePreset, SlideTransition, TransitionApproval, TransitionAuthor } from "../contracts/document.ts";
+import type { AnimationEffect, AnimationTrigger } from "../contracts/animations.ts";
+import type {
+  AssetRecord,
+  CellBorders,
+  ImageCrop,
+  PlaceholderReference,
+  ScriptPurpose,
+  ShapePreset,
+  SlideTransition,
+  TransitionApproval,
+  TransitionAuthor,
+  TransitionEasing,
+} from "../contracts/document.ts";
 import type { Frame, Point } from "../contracts/geometry.ts";
 import type { SerialisableObject } from "../contracts/serialisable.ts";
 import type { ArrowHead, Border, CornerRadius, Fill, LineRouting, Shadow, Stroke, TextBoxStyle } from "../contracts/style.ts";
 import type { ParagraphAttributeName, RunAttributeName } from "../contracts/yjs-schema.ts";
 import { assertNever } from "../contracts/assert-never.ts";
+import { ANIMATION_EDGES, ANIMATION_TRIGGERS } from "../contracts/animations.ts";
 import { PLACEHOLDER_ROLES } from "../contracts/document.ts";
 import { THEME_COLOUR_SLOTS } from "../contracts/style.ts";
 
@@ -355,13 +368,56 @@ export const SLIDE_TRANSITION: StoredValueCheck<SlideTransition | null> = {
         combine([
           checkBuiltinEffect(record["effect"]),
           checkNonNegative(record["durationMilliseconds"]),
-          checkEnumeration(record["easing"], ["linear", "easeIn", "easeOut", "easeInOut"]),
+          checkEnumeration(record["easing"], EASINGS),
         ]),
       scripted: (record) =>
         combine([checkString(record["scriptId"]), checkNonNegative(record["durationMilliseconds"]), isRecord(record["parameters"]) ? checkSerialisable(record["parameters"]) : "wrongType"]),
     });
   },
   describe: "a slide transition or null",
+};
+export const TRANSITION_EASING: StoredValueCheck<TransitionEasing> = {
+  check: (candidate) => checkEnumeration(candidate, EASINGS),
+  describe: "an easing",
+};
+export const SCRIPT_PURPOSE: StoredValueCheck<ScriptPurpose> = {
+  check: (candidate) => checkEnumeration(candidate, ["transition", "animation"]),
+  describe: "a script purpose",
+};
+export const ANIMATION_TRIGGER: StoredValueCheck<AnimationTrigger> = {
+  check: (candidate) => checkEnumeration(candidate, ANIMATION_TRIGGERS),
+  describe: "an animation trigger",
+};
+/**
+ * A build step's effect. The ranges of its numbers (ANIMATION_LIMITS) are a COMMAND rule, not a
+ * stored one: a stored spin of 7200 degrees is still a spin, played clamped, never "repaired".
+ */
+export const ANIMATION_EFFECT: StoredValueCheck<AnimationEffect> = {
+  check: (candidate) =>
+    checkKind(candidate, {
+      appear: () => "valid",
+      fadeIn: () => "valid",
+      flyIn: (record) => checkEnumeration(record["from"], ANIMATION_EDGES),
+      zoomIn: () => "valid",
+      floatIn: () => "valid",
+      wipe: (record) => checkEnumeration(record["from"], ANIMATION_EDGES),
+      pulse: () => "valid",
+      growShrink: (record) => checkPositive(record["scale"]),
+      spin: (record) => checkNumber(record["degrees"]),
+      colourChange: (record) => combine([checkColour(record["colour"]), checkEnumeration(record["part"], ["fill", "text"])]),
+      disappear: () => "valid",
+      fadeOut: () => "valid",
+      flyOut: (record) => checkEnumeration(record["to"], ANIMATION_EDGES),
+      zoomOut: () => "valid",
+      motionPath: (record) => combine([checkNumber(record["offsetX"]), checkNumber(record["offsetY"])]),
+      scripted: (record) =>
+        combine([
+          checkString(record["scriptId"]),
+          checkEnumeration(record["category"], ["entrance", "emphasis", "exit"]),
+          isRecord(record["parameters"]) ? checkSerialisable(record["parameters"]) : "wrongType",
+        ]),
+    }),
+  describe: "an animation effect",
 };
 export const TRANSITION_AUTHOR: StoredValueCheck<TransitionAuthor> = {
   check: (candidate) =>
@@ -449,6 +505,7 @@ const LIST_GLYPHS: readonly string[] = [
 ];
 const SIDES = ["top", "right", "bottom", "left"] as const;
 const CORNERS = ["topLeft", "topRight", "bottomRight", "bottomLeft"] as const;
+const EASINGS: readonly string[] = ["linear", "easeIn", "easeOut", "easeInOut"];
 const SLIDE_DIRECTIONS: readonly string[] = ["fromLeft", "fromRight", "fromTop", "fromBottom"];
 
 /** A discriminated object: an unknown `kind` string is a newer client's (see the header). */

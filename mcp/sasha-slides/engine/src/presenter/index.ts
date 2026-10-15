@@ -8,5 +8,6 @@
 
 export { Presentation } from "./view/presentation.tsx";
 export { TransitionPreview } from "./view/transition-preview.tsx";
+export { BuildPreview } from "./view/build-preview.tsx";
 export { BUILTIN_TRANSITIONS } from "./builtin/builtin-transitions.ts";
 export { INK_WIPE_EXAMPLE_SCRIPT } from "./examples/ink-wipe.ts";

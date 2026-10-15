@@ -14,6 +14,9 @@
 //  * THE APPROVAL IS RE-CHECKED against the text being sent: the run was resolved from an approved
 //    fingerprint, and a script edited between the key press and the gathering must not run under
 //    the old approval.
+//  * BOTH SLIDES ARE RENDERED AT THE RUN'S BUILD POSITIONS (builds/run-slides.ts):
+//    a scripted transition out of a built slide starts from what the audience saw, and a scripted
+//    build step animates from the slide before it to the slide after it.
 
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { AssetStore } from "../../contracts/document-store.ts";
@@ -28,7 +31,8 @@ import {
   type TransferredAsset,
   type TransitionFallbackReason,
 } from "../../contracts/transition-protocol.ts";
-import { deckSlideNumber, slideById } from "../presenter-state.ts";
+import { slideOnSide } from "../builds/run-slides.ts";
+import { deckSlideNumber } from "../presenter-state.ts";
 
 export type PrepareMessage = Extract<HostToRunnerMessage, Readonly<{ kind: "prepare" }>>;
 
@@ -52,6 +56,7 @@ export async function gatherPrepare(
       break;
     case "builtin":
     case "substitutedFade":
+    case "build":
       return fallBack("protocolViolation", "Only scripted transitions are prepared in the runner.");
     default:
       return assertNever(transition);
@@ -65,9 +70,9 @@ export async function gatherPrepare(
     tooLarge({ text: record.markup, limit: TRANSITION_LIMITS.maximumOverlayMarkupBytes, what: "overlay markup" });
   if (sourceProblem !== null) return fallBack("scriptTooLarge", sourceProblem);
 
-  const incomingSlide = slideById(options.document, options.run.toSlideId);
+  const incomingSlide = slideOnSide({ run: options.run, document: options.document, side: "incoming" });
   if (incomingSlide === null) return fallBack("scriptFailed", "The incoming slide was deleted before the transition could run.");
-  const outgoingSlide = options.run.fromSlideId === null ? null : slideById(options.document, options.run.fromSlideId);
+  const outgoingSlide = slideOnSide({ run: options.run, document: options.document, side: "outgoing" });
   const incoming = options.renderSlideMarkup({ slide: incomingSlide, document: options.document, slideNumber: deckSlideNumber(options.document, incomingSlide.id) });
   const outgoing =
     outgoingSlide === null ? null : options.renderSlideMarkup({ slide: outgoingSlide, document: options.document, slideNumber: deckSlideNumber(options.document, outgoingSlide.id) });

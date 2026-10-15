@@ -8,18 +8,21 @@
 // here (and an issue in validation.ts), never an exception in the renderer.
 
 import * as Y from "yjs";
+import type { AnimationStep } from "../contracts/animations.ts";
 import type { AssetRecord, DocumentSnapshot, ElementSnapshot, LayoutSnapshot, PlaceholderRole, PlaceholderStyle, SlideSnapshot, ThemeSnapshot, TransitionScriptRecord } from "../contracts/document.ts";
-import type { DeckId, LayoutId, SlideId, TransitionScriptId } from "../contracts/ids.ts";
+import type { AnimationStepId, DeckId, ElementId, LayoutId, SlideId, TransitionScriptId } from "../contracts/ids.ts";
 import type { RunStyle, ThemeColourSlot } from "../contracts/style.ts";
 import { EMPTY_TEXT_BODY, PLACEHOLDER_ROLES } from "../contracts/document.ts";
 import { SLIDE_WIDTH_UNITS } from "../contracts/geometry.ts";
 import { THEME_COLOUR_SLOTS } from "../contracts/style.ts";
-import { LAYOUT_KEY, META_KEY, SLIDE_KEY, THEME_KEY, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
+import { ANIMATION_STEP_KEY, LAYOUT_KEY, META_KEY, SLIDE_KEY, THEME_KEY, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
 import { DEFAULT_PLACEHOLDER_STYLES, DEFAULT_RUN_STYLE, DEFAULT_THEME } from "./blank-deck.ts";
 import { childMap, childText, type DocumentRoots } from "./document-paths.ts";
 import { flattenElements, projectElementTree, readSlideStructure } from "./element-tree.ts";
 import { compareOrderedSiblings, type OrderedSibling } from "./order-keys.ts";
 import {
+  ANIMATION_EFFECT,
+  ANIMATION_TRIGGER,
   ASSET_RECORD,
   BOOLEAN,
   checkTextBoxField,
@@ -30,12 +33,15 @@ import {
   OPTIONAL_TEXT,
   POSITIVE_NUMBER,
   readStored,
+  SCRIPT_PURPOSE,
   SERIALISABLE_OBJECT,
   SLIDE_TRANSITION,
   TEXT,
   TRANSITION_APPROVAL,
   TRANSITION_AUTHOR,
+  TRANSITION_EASING,
   valueOr,
+  type Parsed,
 } from "./stored-values.ts";
 import { paragraphStyleOf, projectTextBody, runStyleOf } from "./text-body.ts";
 
@@ -133,6 +139,44 @@ function projectSlide(
     speakerNotes: notes === null ? EMPTY_TEXT_BODY : projectTextBody(notes),
     transition: valueOr(readStored({ map, key: SLIDE_KEY.transition, kind: SLIDE_TRANSITION }), null),
     elements: projectElements({ map, previous: options.previous?.elements ?? [], touched: options.touched }),
+    animations: projectAnimations({ map, previous: options.previous?.animations ?? [] }),
+  };
+}
+
+/**
+ * The slide's build steps in play order. A step equal to the previous snapshot's keeps its identity,
+ * and an unchanged sequence keeps the previous array (document.ts "STRUCTURAL SHARING").
+ */
+function projectAnimations(options: Readonly<{ map: Y.Map<unknown>; previous: readonly AnimationStep[] }>): readonly AnimationStep[] {
+  const animations = childMap(options.map, SLIDE_KEY.animations);
+  if (animations === null) return options.previous.length === 0 ? options.previous : [];
+  const previousById = new Map<string, AnimationStep>(options.previous.map((step) => [step.id, step]));
+  const projected = orderedChildren(animations).map(({ id, map: stepMap }) => {
+    const step = projectAnimationStep({ id, map: stepMap });
+    const old = previousById.get(id);
+    return old !== undefined && JSON.stringify(old) === JSON.stringify(step) ? old : step;
+  });
+  return sameItems(options.previous, projected) ? options.previous : projected;
+}
+
+function projectAnimationStep(options: Readonly<{ id: string; map: Y.Map<unknown> }>): AnimationStep {
+  const { map } = options;
+  const unsupportedKeys: string[] = [];
+  const read = <TValue>(key: string, parsed: Parsed<TValue>, fallback: TValue): TValue => {
+    if (parsed.kind === "unsupported") unsupportedKeys.push(key);
+    return valueOr(parsed, fallback);
+  };
+  return {
+    // Keys of a slide's animations map are step ids by construction (document-writer.ts).
+    id: options.id as AnimationStepId,
+    // A stored element id names an element of this slide when its writer stored it (commands check it).
+    elementId: read(ANIMATION_STEP_KEY.elementId, readStored({ map, key: ANIMATION_STEP_KEY.elementId, kind: TEXT }), "") as ElementId,
+    effect: read(ANIMATION_STEP_KEY.effect, readStored({ map, key: ANIMATION_STEP_KEY.effect, kind: ANIMATION_EFFECT }), { kind: "appear" }),
+    trigger: read(ANIMATION_STEP_KEY.trigger, readStored({ map, key: ANIMATION_STEP_KEY.trigger, kind: ANIMATION_TRIGGER }), "onClick"),
+    durationMilliseconds: read(ANIMATION_STEP_KEY.durationMilliseconds, readStored({ map, key: ANIMATION_STEP_KEY.durationMilliseconds, kind: NUMBER }), 500),
+    delayMilliseconds: read(ANIMATION_STEP_KEY.delayMilliseconds, readStored({ map, key: ANIMATION_STEP_KEY.delayMilliseconds, kind: NUMBER }), 0),
+    easing: read(ANIMATION_STEP_KEY.easing, readStored({ map, key: ANIMATION_STEP_KEY.easing, kind: TRANSITION_EASING }), "easeOut"),
+    unsupportedKeys,
   };
 }
 
@@ -176,6 +220,7 @@ function projectScripts(map: Y.Map<unknown>): readonly TransitionScriptRecord[] 
       id: id as TransitionScriptId,
       name: text(TRANSITION_SCRIPT_KEY.name),
       description: text(TRANSITION_SCRIPT_KEY.description),
+      purpose: valueOr(readStored({ map: script, key: TRANSITION_SCRIPT_KEY.purpose, kind: SCRIPT_PURPOSE }), "transition"),
       author: valueOr(readStored({ map: script, key: TRANSITION_SCRIPT_KEY.author, kind: TRANSITION_AUTHOR }), UNKNOWN_AUTHOR),
       script: text(TRANSITION_SCRIPT_KEY.script),
       stylesheet: text(TRANSITION_SCRIPT_KEY.stylesheet),

@@ -36,6 +36,10 @@ export function asEditText(command: DocumentCommand): EditTextCommand | null {
     case "setTableColumnWidths":
     case "setTableRowHeights":
     case "updateTableCells":
+    case "insertAnimationSteps":
+    case "updateAnimationSteps":
+    case "moveAnimationSteps":
+    case "deleteAnimationSteps":
       return null;
     default:
       return assertNever(command);

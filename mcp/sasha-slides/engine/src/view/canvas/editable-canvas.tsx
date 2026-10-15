@@ -14,6 +14,8 @@
 //    SPEC.md section 17); the end-to-end driver reads those measures.
 //  * MEASURED LAYOUT IS DEDUPLICATED before it is dispatched, so a table that measures the same
 //    rows on every render reports them once.
+//  * THE ANIMATE TAB DRAWS HERE TOO: numbered badges on animated elements while the tab shows, and
+//    its Preview over the slide frame (build-overlays.tsx).
 //  * TEXT INSIDE THE EDITOR IS THE BROWSER'S. A press inside the inline editor is left to the
 //    browser (caret placement, word selection), never reported as a canvas gesture.
 
@@ -35,6 +37,7 @@ import { InlineTextEditor, TEXT_EDITOR_ATTRIBUTE } from "../text/inline-text-edi
 import { modifiersOf } from "../text/text-editor-handlers.ts";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { applyFramePreview, hitTargetOf, tableCellTargetOf, type AttributeReader } from "./canvas-geometry.ts";
+import { AnimationBadgeLayer, BuildPreviewLayer, animateTabShowing } from "./build-overlays.tsx";
 import { CanvasOverlay, placementBox } from "./canvas-overlay.tsx";
 
 /** Client pixels of calm ground kept around the slide. */
@@ -60,6 +63,8 @@ export const EditableCanvas = memo(function EditableCanvas(): ReactElement {
       showResolvedThreads: state.chrome.showResolvedThreads,
       measured: state.measuredLayouts,
       tool: state.tool,
+      animateTabShowing: animateTabShowing(state.chrome),
+      buildPreview: state.chrome.buildPreview,
     }),
     shallowEqual,
   );
@@ -203,6 +208,10 @@ export const EditableCanvas = memo(function EditableCanvas(): ReactElement {
               pageSize={view.document.pageSize}
               awayClientIds={awayClientIds}
             />
+            {view.animateTabShowing ? <AnimationBadgeLayer slide={previewSlide} scale={scale} /> : null}
+            {view.buildPreview === null || view.buildPreview.slideId !== previewSlide.id ? null : (
+              <BuildPreviewLayer document={view.document} slideId={view.buildPreview.slideId} generation={view.buildPreview.generation} width={1280 * scale} dispatch={dispatch} />
+            )}
           </div>
         )}
       </div>

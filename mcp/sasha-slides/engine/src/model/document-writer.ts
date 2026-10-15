@@ -9,14 +9,17 @@
 //    `groupId` derived from the tree (a disagreeing `groupId` field in the input is ignored);
 //  * every text body is a Y.Text written with the attribute rules of text-body.ts;
 //  * a table stores row and column id ARRAYS, size maps keyed by id, and cell maps keyed
-//    "rowId|columnId".
+//    "rowId|columnId";
+//  * a slide's build steps are maps under `animations`, each with its own order key and one plain
+//    value per field (yjs-schema.ts), so concurrent edits to different fields of a step both land.
 
 import * as Y from "yjs";
+import type { AnimationStep } from "../contracts/animations.ts";
 import type { ElementSnapshot, LayoutSnapshot, SlideSnapshot, TableCell, TableElement, TextBody, ThemeSnapshot } from "../contracts/document.ts";
 import type { ElementId, RandomSource } from "../contracts/ids.ts";
 import { assertNever } from "../contracts/assert-never.ts";
 import { DOCUMENT_SCHEMA_VERSION, EMPTY_TEXT_BODY } from "../contracts/document.ts";
-import { ELEMENT_KEY, LAYOUT_KEY, META_KEY, SLIDE_KEY, TABLE_CELL_KEY, tableCellKey, THEME_KEY } from "../contracts/yjs-schema.ts";
+import { ANIMATION_STEP_KEY, ELEMENT_KEY, LAYOUT_KEY, META_KEY, SLIDE_KEY, TABLE_CELL_KEY, tableCellKey, THEME_KEY } from "../contracts/yjs-schema.ts";
 import type { BlankDeck } from "./blank-deck.ts";
 import type { DocumentRoots } from "./document-paths.ts";
 import { defaultTableCell } from "./element-tree.ts";
@@ -54,6 +57,28 @@ export function writeSlide(options: Readonly<{ slides: Y.Map<unknown>; slide: Sl
   setTextBody({ map, key: SLIDE_KEY.speakerNotes, body: slide.speakerNotes });
   map.set(SLIDE_KEY.transition, slide.transition);
   writeElementList({ owner: map, elements: slide.elements, random: options.random });
+  const animations = new Y.Map<unknown>();
+  map.set(SLIDE_KEY.animations, animations);
+  const keys = mintOrderKeys({ lower: null, upper: null, count: slide.animations.length, random: options.random }) ?? [];
+  slide.animations.forEach((step, index) => {
+    const key = keys[index];
+    if (key !== undefined) writeAnimationStep({ animations, step, key });
+  });
+}
+
+/** Write one build step as a new map under `animations`, at order key `key`. */
+export function writeAnimationStep(options: Readonly<{ animations: Y.Map<unknown>; step: AnimationStep; key: string }>): void {
+  const { step } = options;
+  const map = new Y.Map<unknown>();
+  options.animations.set(step.id, map);
+  map.set(ANIMATION_STEP_KEY.id, step.id);
+  map.set(ANIMATION_STEP_KEY.position, options.key);
+  map.set(ANIMATION_STEP_KEY.elementId, step.elementId);
+  map.set(ANIMATION_STEP_KEY.effect, step.effect);
+  map.set(ANIMATION_STEP_KEY.trigger, step.trigger);
+  map.set(ANIMATION_STEP_KEY.durationMilliseconds, step.durationMilliseconds);
+  map.set(ANIMATION_STEP_KEY.delayMilliseconds, step.delayMilliseconds);
+  map.set(ANIMATION_STEP_KEY.easing, step.easing);
 }
 
 export function writeLayout(options: Readonly<{ layouts: Y.Map<unknown>; layout: LayoutSnapshot; key: string; random: RandomSource }>): void {

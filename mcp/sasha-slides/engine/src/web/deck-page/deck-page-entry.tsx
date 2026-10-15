@@ -296,7 +296,7 @@ function composeWorkspace(deck: StartedDeck): DeckWorkspace<DeckEditor> {
         const review = reviewRequestOf(window.location);
         if (review === null) return;
         window.history.replaceState(null, "", review.addressWithoutRequest);
-        view.editor.system.dispatch({ kind: "transitionScriptEditorOpened", scriptId: review.scriptId });
+        view.editor.system.dispatch({ kind: "transitionScriptEditorOpened", scriptId: review.scriptId, purpose: "transition" });
         return;
       }
       case "opening":

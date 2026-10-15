@@ -168,6 +168,8 @@ export function planImport(
       skipped: slide.isSkipped,
       speakerNotes: importTextBody({ text: slide.speakerNotes, placeholderParentId: null, context: context.text }),
       transition: null,
+      // The Slides programming interface exposes no animations; the deck-wide "transition" loss says so.
+      animations: [],
       elements: [
         ...importElements({ elements: decorations, parentTransform: IDENTITY_TRANSFORM, groupId: null, context: { ...context, copying: true }, losses }),
         ...importElements({ elements: slide.elements, parentTransform: IDENTITY_TRANSFORM, groupId: null, context, losses }),

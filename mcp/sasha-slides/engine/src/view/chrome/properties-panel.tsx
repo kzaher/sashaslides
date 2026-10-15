@@ -1,6 +1,6 @@
 // THE PROPERTIES PANEL: a glass panel with pill tabs -- Arrange, Fill, Border, Effects, Text, Slide,
-// Transition -- whose controls each dispatch one event (SPEC.md section 9). What a control shows
-// comes from properties-values.ts (points for font sizes, "mixed" across a selection, locked
+// Transition, Animate (animate-tab.tsx) -- whose controls each dispatch one event (SPEC.md section
+// 9). What a control shows comes from properties-values.ts (points for font sizes, "mixed" across a selection, locked
 // controls for values from a newer version); this file only lays the controls out.
 //
 // Key decisions:
@@ -32,6 +32,7 @@ import { linearGradientValue, radialGradientValue } from "../render/inline-style
 import { slideBackground } from "../render/static-slide.tsx";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { editingDisabledReason } from "./access.ts";
+import { AnimateTab } from "./animate-tab.tsx";
 import { ChoiceField, ColourField, NumberField, PillChoice, Section, ToggleButton } from "./fields.tsx";
 import { MAXIMUM_GRADIENT_STOPS, MINIMUM_GRADIENT_STOPS, withAddedStop, withLinearAngle, withRadialCentre, withStopColour, withStopOffset, withoutStop, type GradientFill } from "./gradient-stops.ts";
 import { Icon } from "./icons.tsx";
@@ -48,6 +49,7 @@ export const PROPERTIES_TABS: readonly Readonly<{ tab: PropertiesTab; label: str
   { tab: "text", label: "Text" },
   { tab: "slide", label: "Slide" },
   { tab: "transition", label: "Transition" },
+  { tab: "animate", label: "Animate" },
 ];
 
 /** Families offered besides the theme's two: Google Fonts with open licences (SPEC.md section 19). */
@@ -57,7 +59,15 @@ export const PropertiesPanel = memo(function PropertiesPanel(): ReactElement {
   const services = useEditorServices();
   const tab = useEditorSelector((state) => state.chrome.propertiesTab);
   useEditorSelector(
-    (state) => ({ selection: state.selection, document: state.document, typing: state.textEditing.typingStyle, measured: state.measuredLayouts, currentSlideId: state.currentSlideId, preview: state.chrome.transitionPreview }),
+    (state) => ({
+      selection: state.selection,
+      document: state.document,
+      typing: state.textEditing.typingStyle,
+      measured: state.measuredLayouts,
+      currentSlideId: state.currentSlideId,
+      preview: state.chrome.transitionPreview,
+      chosenStep: state.chrome.selectedAnimationStepId,
+    }),
     shallowEqual,
   );
   const state = services.system.currentState();
@@ -124,6 +134,8 @@ function TabBody(properties: Readonly<{ tab: PropertiesTab; state: EditorState; 
       return <SlideTab state={properties.state} dispatch={properties.dispatch} />;
     case "transition":
       return <TransitionTab state={properties.state} dispatch={properties.dispatch} />;
+    case "animate":
+      return <AnimateTab state={properties.state} dispatch={properties.dispatch} />;
     default:
       return assertNever(properties.tab);
   }
@@ -783,7 +795,7 @@ export function TransitionTab(properties: Readonly<{ state: EditorState; dispatc
           }}
           explanation={null}
         />
-        {choice === "scripted" && scripts.length === 0 ? <NoScriptsYet onWrite={() => properties.dispatch({ kind: "transitionScriptEditorOpened", scriptId: null })} /> : null}
+        {choice === "scripted" && scripts.length === 0 ? <NoScriptsYet onWrite={() => properties.dispatch({ kind: "transitionScriptEditorOpened", scriptId: null, purpose: "transition" })} /> : null}
         {transition === null ? null : (
           <NumberField label="Duration" suffix="milliseconds" value={{ kind: "value", value: transition.durationMilliseconds }} onCommit={(text) => numberOr(text, (duration) => set({ ...transition, durationMilliseconds: clamp(duration, 50, 10_000) }))} explanation={null} />
         )}
@@ -801,7 +813,7 @@ export function TransitionTab(properties: Readonly<{ state: EditorState; dispatc
           <>
             <ChoiceField label="Script" value={{ kind: "value", value: transition.scriptId }} options={scripts.map((script) => ({ value: script.id, label: script.name }))} onChoose={(scriptId) => set({ ...transition, scriptId })} explanation={scripts.length === 0 ? "No scripts yet." : null} />
             <div className={VIEW_CLASS.fieldRow}>
-              <button type="button" className={TIDEPOOL_CLASS.secondaryPill} onClick={() => properties.dispatch({ kind: "transitionScriptEditorOpened", scriptId: transition.scriptId })}>
+              <button type="button" className={TIDEPOOL_CLASS.secondaryPill} onClick={() => properties.dispatch({ kind: "transitionScriptEditorOpened", scriptId: transition.scriptId, purpose: "transition" })}>
                 Edit script
               </button>
             </div>
@@ -811,7 +823,7 @@ export function TransitionTab(properties: Readonly<{ state: EditorState; dispatc
           <button type="button" className={TIDEPOOL_CLASS.primaryPill} disabled={transition === null} onClick={() => properties.dispatch({ kind: "transitionPreviewRequested", slideId: slide.id })}>
             <Icon name="present" /> Preview
           </button>
-          <button type="button" className={TIDEPOOL_CLASS.secondaryPill} onClick={() => properties.dispatch({ kind: "transitionScriptEditorOpened", scriptId: null })}>
+          <button type="button" className={TIDEPOOL_CLASS.secondaryPill} onClick={() => properties.dispatch({ kind: "transitionScriptEditorOpened", scriptId: null, purpose: "transition" })}>
             New script
           </button>
         </div>

@@ -252,8 +252,8 @@ describe("a real server.ts --stdio subprocess", () => {
     try {
       assert.equal(connected.client.getInstructions(), FALLBACK_WORKFLOW_INSTRUCTIONS);
       const tools = await connected.client.listTools();
-      // 18 workflow and comment tools, plus the ten Sasha deck tools (ASSISTANT_DECK_TOOL_NAMES).
-      assert.equal(tools.tools.length, 28, "the whole tool surface is still served");
+      // 18 workflow and comment tools, plus the eleven Sasha deck tools (ASSISTANT_DECK_TOOL_NAMES).
+      assert.equal(tools.tools.length, 29, "the whole tool surface is still served");
       const prompts = await connected.client.listPrompts();
       assert.deepEqual(prompts.prompts.map((prompt) => prompt.name), [...WORKFLOW_PROMPT_NAMES]);
     } finally {

@@ -1,7 +1,8 @@
 // THE SAMPLE DECK: one deck that exercises every style feature the renderer draws -- per-side
 // borders and dashes, per-corner radii, linear and radial gradients, shadows, opacity, rotation and
 // flips, vector presets, lists, links, the automatic slide number, a table, a group, a line with
-// arrowheads, a black slide, and an element from a "newer version". The demo inserts it into a fresh
+// arrowheads, a black slide, an element from a "newer version", a slide of builds (a fade in, a fly in,
+// a spin and a fly out) and a pair of slides that morph. The demo inserts it into a fresh
 // document, the chrome harness renders it for screenshots, and the tests read single slides from it,
 // so what the screenshots show is what the tests pin.
 
@@ -10,6 +11,7 @@ import type { AssetId, DeckId } from "../../contracts/ids.ts";
 import { literalColour, themeColour, type Stroke } from "../../contracts/style.ts";
 import {
   IdMinter,
+  animationStep,
   documentSnapshot,
   groupElement,
   imageElement,
@@ -160,12 +162,55 @@ export function sampleSlides(options: SampleDeckOptions): readonly SlideSnapshot
     ],
   });
 
+  const buildsTitle = shapeElement({ id: ids.next("element"), preset: "textBox", box: { x: 60, y: 30, width: 1000, height: 80 }, placeholder: { role: "title", index: 0 }, text: plainBody("Builds, one click at a time", { fontSize: 48 }) });
+  const flyer = shapeElement({ id: ids.next("element"), preset: "roundedRectangle", box: { x: 160, y: 240, width: 300, height: 220 }, style: { fill: { kind: "solid", colour: accent } }, text: plainBody("Flies in, then spins", { fontSize: 26, colour: themeColour({ slot: "light1", alpha: 1 }) }), textBox: { verticalAlignment: "middle" } });
+  const leaver = shapeElement({ id: ids.next("element"), preset: "ellipse", box: { x: 760, y: 240, width: 320, height: 220 }, style: { fill: { kind: "solid", colour: themeColour({ slot: "accent2", alpha: 1 }) } }, text: plainBody("Flies out", { fontSize: 28, colour: themeColour({ slot: "light1", alpha: 1 }) }), textBox: { verticalAlignment: "middle" } });
+  const builds = slideSnapshot({
+    ids,
+    notes: "Click through: the title fades in, the card flies in from the left and spins, the oval flies out.",
+    elements: [buildsTitle, flyer, leaver],
+    animations: [
+      animationStep({ ids, elementId: buildsTitle.id, effect: { kind: "fadeIn" }, trigger: "onClick" }),
+      animationStep({ ids, elementId: flyer.id, effect: { kind: "flyIn", from: "left" }, trigger: "onClick", durationMilliseconds: 700 }),
+      animationStep({ ids, elementId: flyer.id, effect: { kind: "spin", degrees: 360 }, trigger: "afterPrevious", durationMilliseconds: 800 }),
+      animationStep({ ids, elementId: leaver.id, effect: { kind: "flyOut", to: "right" }, trigger: "onClick", durationMilliseconds: 600 }),
+    ],
+  });
+
+  // Two slides whose elements share morph keys: position, size, rotation, colour, corner radius and text all change.
+  const morphCaption = (text: string, box: Readonly<{ x: number; y: number; width: number; height: number }>) =>
+    shapeElement({ id: ids.next("element"), preset: "textBox", morphKey: "morph_caption", box, text: plainBody(text, { fontSize: 40, fontWeight: 700 }) });
+  const morphBefore = slideSnapshot({
+    ids,
+    notes: "The next slide morphs from this one.",
+    elements: [
+      morphCaption("Before the morph", { x: 80, y: 60, width: 700, height: 80 }),
+      shapeElement({ id: ids.next("element"), preset: "roundedRectangle", morphKey: "morph_card", box: { x: 120, y: 260, width: 260, height: 180 }, style: { fill: { kind: "solid", colour: accent }, cornerRadius: { kind: "uniform", radius: 8 } } }),
+      shapeElement({ id: ids.next("element"), preset: "ellipse", morphKey: "morph_dot", box: { x: 900, y: 420, width: 120, height: 120 }, style: { fill: { kind: "solid", colour: themeColour({ slot: "accent3", alpha: 1 }) } } }),
+    ],
+  });
+  const morphAfter = slideSnapshot({
+    ids,
+    transition: { kind: "builtin", effect: { effect: "morph" }, durationMilliseconds: 900, easing: "easeInOut" },
+    elements: [
+      morphCaption("After the morph", { x: 420, y: 600, width: 760, height: 80 }),
+      shapeElement({
+        id: ids.next("element"),
+        preset: "roundedRectangle",
+        morphKey: "morph_card",
+        frame: { x: 640, y: 120, width: 480, height: 320, rotation: 15, flipHorizontal: false, flipVertical: false },
+        style: { fill: { kind: "solid", colour: themeColour({ slot: "accent5", alpha: 1 }) }, cornerRadius: { kind: "uniform", radius: 72 } },
+      }),
+      shapeElement({ id: ids.next("element"), preset: "ellipse", morphKey: "morph_dot", box: { x: 140, y: 200, width: 260, height: 260 }, style: { fill: { kind: "solid", colour: themeColour({ slot: "accent6", alpha: 1 }) } } }),
+    ],
+  });
+
   const extra = Array.from({ length: options.extraSlideCount }, (_, index) =>
     slideSnapshot({
       ids,
       skipped: index % 7 === 3,
-      elements: [shapeElement({ id: ids.next("element"), preset: "textBox", box: { x: 80, y: 300, width: 1120, height: 120 }, text: plainBody(`Slide ${index + 6}`, { fontSize: 72, fontWeight: 700 }), textBox: { verticalAlignment: "middle" } })],
+      elements: [shapeElement({ id: ids.next("element"), preset: "textBox", box: { x: 80, y: 300, width: 1120, height: 120 }, text: plainBody(`Slide ${index + 9}`, { fontSize: 72, fontWeight: 700 }), textBox: { verticalAlignment: "middle" } })],
     }),
   );
-  return [title, styles, table, dark, grouped, ...extra];
+  return [title, styles, table, dark, grouped, builds, morphBefore, morphAfter, ...extra];
 }

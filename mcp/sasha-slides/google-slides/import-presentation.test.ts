@@ -477,6 +477,12 @@ describe("import mapping (SPEC.md 21.12 import table, recorded fixture)", () => 
     assert.equal(plan.losses.filter((loss) => loss.feature === "transition").length, 1);
   });
 
+  test("animations: every imported slide has an empty build sequence, and no loss beyond the deck's one transition loss", () => {
+    assert.ok(plan.slides.length > 1, "the recorded presentation has several slides");
+    assert.deepEqual(plan.slides.map((slide) => slide.animations), plan.slides.map(() => []));
+    assert.deepEqual(plan.losses.filter((loss) => loss.feature === "animation"), [], "the Slides programming interface exposes none, so none were lost one by one");
+  });
+
   test("the whole plan is ONE envelope the real model accepts", async () => {
     const service = await createTestDeckService();
     const caller = testCaller("importer");

@@ -13,11 +13,17 @@
  * for addressing, never the authority: the model validates the whole envelope again and writes
  * nothing if any command fails (`DocumentStore.apply`).
  *
+ * BUILD STEPS ride in the same working copy: each slide's sequence (step ids in play order, with
+ * the element each animates), so `addAnimations` with no `after` appends after steps added earlier
+ * in the call, a step can target an element added earlier in the call, and deleting an element
+ * drops its steps from the copy as the model drops them from the deck.
+ *
  * Pure: the snapshot, the fetched image records and an id seed in; commands, the ids it minted
- * and the next seed out. A refusal names the edit (`editIndex`) and why, in the model's own
+ * (slides, elements and build steps, per edit) and the next seed out. A refusal names the edit (`editIndex`) and why, in the model's own
  * rejection vocabulary where one fits ("elementMissing: ...").
  */
-import type { AssistantFrame, AssistantParagraph } from "../engine/src/contracts/assistant-deck-tools.ts";
+import type { AssistantEditOutcome, AssistantFrame, AssistantParagraph } from "../engine/src/contracts/assistant-deck-tools.ts";
+import type { AnimationStep } from "../engine/src/contracts/animations.ts";
 import type { CommandRejection, DocumentCommand, ElementPatch, FrameUpdate, TextOperation } from "../engine/src/contracts/commands.ts";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
 import {
@@ -52,7 +58,7 @@ import {
   type Frame,
   type Point,
 } from "../engine/src/contracts/geometry.ts";
-import { mintId, type ElementId, type IdSeed, type LayoutId, type MintedIdByKind, type ObjectIdKind, type SlideId } from "../engine/src/contracts/ids.ts";
+import { mintId, type AnimationStepId, type ElementId, type IdSeed, type LayoutId, type MintedIdByKind, type ObjectIdKind, type SlideId } from "../engine/src/contracts/ids.ts";
 import type { TextTarget } from "../engine/src/contracts/selection.ts";
 import { DEFAULT_TEXT_BOX_STYLE, NEW_TEXT_BOX_STYLE, PLAIN_BOX_STYLE, themeColour, type ParagraphStylePatch, type RunStylePatch } from "../engine/src/contracts/style.ts";
 import { PARAGRAPH_ATTRIBUTE_NAMES } from "../engine/src/contracts/yjs-schema.ts";
@@ -61,8 +67,16 @@ import type { AssistantEditRequest, AssistantStylePatch } from "./assistant-edit
 import { applyTextOperations, flattenTextBody, runStyleAt, searchableText, textBodyOfFlat, type FlatItem, type FlatText } from "./flat-text.ts";
 import { applyElementPatch, DEFAULT_STROKE, mergeStylePatch } from "./style-merge.ts";
 
-/** Ids minted (or chosen by the model) for what one edit added. */
-export type CreatedIds = Readonly<{ editIndex: number; slideId: SlideId | null; elementIds: readonly ElementId[] }>;
+/**
+ * Ids minted (or chosen by the model) for what one edit added: the contract's entry
+ * (`AssistantEditOutcome` "created"), widened by the build steps an `addAnimations` minted, so the
+ * next call can update, move or remove them. Every entry carries the field, empty when the edit
+ * added no step, so the answer has one shape.
+ */
+export type CreatedIds = Extract<AssistantEditOutcome, { kind: "applied" }>["created"][number] & Readonly<{ animationStepIds: readonly AnimationStepId[] }>;
+
+/** What one edit added, before its edit index is known. */
+type CreatedByEdit = Omit<CreatedIds, "editIndex">;
 
 export type ExpansionOutcome =
   | Readonly<{
@@ -105,7 +119,7 @@ export function expandAssistantEdits(
         working = step.working;
         commands.push(...step.commands);
         commandEditIndexes.push(...step.commands.map(() => editIndex));
-        if (step.created !== null) created.push({ editIndex, slideId: step.created.slideId, elementIds: step.created.elementIds });
+        if (step.created !== null) created.push({ editIndex, ...step.created });
         break;
       default:
         return assertNever(step);
@@ -160,6 +174,8 @@ export function editIndexOfRejection(
       return mentioning(rejection.id);
     case "groupCycle":
       return mentioning(rejection.groupId);
+    case "animationStepMissing":
+      return mentioning(rejection.stepId);
     case "textOutOfRange":
     case "staleText":
       return null;
@@ -183,6 +199,8 @@ export function describeRejection(rejection: CommandRejection): string {
       return `assetMissing: the image ${rejection.assetId} is not registered in this deck`;
     case "tableLineMissing":
       return `tableLineMissing: table ${rejection.elementId} has no row or column ${rejection.id}`;
+    case "animationStepMissing":
+      return animationStepMissing({ slideId: rejection.slideId, stepId: rejection.stepId });
     case "duplicateId":
       return `duplicateId: ${rejection.id} is already used in this deck`;
     case "invalidId":
@@ -217,7 +235,11 @@ type WorkingSlide = Readonly<{
   speakerNotes: TextBody;
   /** Bodies this call has edited, by `textKey`; the others are read from `elements`. */
   texts: ReadonlyMap<string, FlatText>;
+  /** The build sequence in play order. */
+  steps: readonly WorkingStep[];
 }>;
+
+type WorkingStep = Readonly<{ id: AnimationStepId; elementId: ElementId }>;
 
 type Working = Readonly<{
   snapshot: DocumentSnapshot;
@@ -228,7 +250,7 @@ type Working = Readonly<{
 }>;
 
 type Step =
-  | Readonly<{ kind: "step"; working: Working; commands: readonly DocumentCommand[]; created: Readonly<{ slideId: SlideId | null; elementIds: readonly ElementId[] }> | null }>
+  | Readonly<{ kind: "step"; working: Working; commands: readonly DocumentCommand[]; created: CreatedByEdit | null }>
   | Readonly<{ kind: "rejected"; reason: string }>;
 
 function initialWorking(options: Readonly<{ snapshot: DocumentSnapshot; seed: IdSeed }>): Working {
@@ -245,7 +267,13 @@ function initialWorking(options: Readonly<{ snapshot: DocumentSnapshot; seed: Id
 function workingSlideOf(slide: SlideSnapshot): WorkingSlide {
   const elements = new Map<ElementId, ElementSnapshot>();
   for (const element of flattenElements(slide.elements)) elements.set(element.id, element);
-  return { layoutId: slide.layoutId, elements, speakerNotes: slide.speakerNotes, texts: new Map() };
+  return {
+    layoutId: slide.layoutId,
+    elements,
+    speakerNotes: slide.speakerNotes,
+    texts: new Map(),
+    steps: slide.animations.map((animation) => ({ id: animation.id, elementId: animation.elementId })),
+  };
 }
 
 function flattenElements(elements: readonly ElementSnapshot[]): readonly ElementSnapshot[] {
@@ -267,8 +295,20 @@ function childrenOf(element: ElementSnapshot): readonly ElementSnapshot[] {
   }
 }
 
-function step(options: Readonly<{ working: Working; commands: readonly DocumentCommand[]; created?: Readonly<{ slideId: SlideId | null; elementIds: readonly ElementId[] }> }>): Step {
-  return { kind: "step", working: options.working, commands: options.commands, created: options.created ?? null };
+function step(
+  options: Readonly<{
+    working: Working;
+    commands: readonly DocumentCommand[];
+    created?: Readonly<{ slideId: SlideId | null; elementIds: readonly ElementId[]; animationStepIds?: readonly AnimationStepId[] }>;
+  }>,
+): Step {
+  const created = options.created;
+  return {
+    kind: "step",
+    working: options.working,
+    commands: options.commands,
+    created: created === undefined ? null : { slideId: created.slideId, elementIds: created.elementIds, animationStepIds: created.animationStepIds ?? [] },
+  };
 }
 
 function rejected(reason: string): Step {
@@ -291,6 +331,10 @@ function slideMissing(slideId: SlideId): string {
 
 function elementMissing(options: Readonly<{ slideId: SlideId; elementId: ElementId }>): string {
   return `elementMissing: there is no element ${options.elementId} on slide ${options.slideId}`;
+}
+
+function animationStepMissing(options: Readonly<{ slideId: SlideId; stepId: AnimationStepId }>): string {
+  return `animationStepMissing: there is no build step ${options.stepId} on slide ${options.slideId} (deck_read lists each slide's animations)`;
 }
 
 function elementIdTaken(options: Readonly<{ working: Working; elementId: ElementId }>): boolean {
@@ -370,12 +414,18 @@ function expandEdit(options: Readonly<{ working: Working; edit: AssistantEditReq
       const slide = working.slides.get(edit.slideId);
       if (slide === undefined) return step({ working, commands: [edit] });
       const elements = new Map(slide.elements);
+      const deleted = new Set<ElementId>();
       for (const elementId of edit.elementIds) {
         const element = elements.get(elementId);
         if (element === undefined) continue;
-        for (const removed of flattenElements([element])) elements.delete(removed.id);
+        for (const removed of flattenElements([element])) {
+          elements.delete(removed.id);
+          deleted.add(removed.id);
+        }
       }
-      return step({ working: withSlide({ working, slideId: edit.slideId, slide: { ...slide, elements } }), commands: [edit] });
+      // The model deletes the steps of every deleted element in the same transaction (commands.ts).
+      const steps = slide.steps.filter((animation) => !deleted.has(animation.elementId));
+      return step({ working: withSlide({ working, slideId: edit.slideId, slide: { ...slide, elements, steps } }), commands: [edit] });
     }
     case "reorderElements":
       return step({ working, commands: [{ kind: "reorderElements", slideId: edit.slideId, elementIds: edit.elementIds, placement: edit.placement }] });
@@ -383,6 +433,14 @@ function expandEdit(options: Readonly<{ working: Working; edit: AssistantEditReq
       return expandGroup({ working, edit });
     case "setTitle":
       return step({ working, commands: [{ kind: "setTitle", title: edit.title }] });
+    case "addAnimations":
+      return expandAddAnimations({ working, edit });
+    case "updateAnimations":
+      return expandUpdateAnimations({ working, edit });
+    case "moveAnimations":
+      return expandMoveAnimations({ working, edit });
+    case "removeAnimations":
+      return expandRemoveAnimations({ working, edit });
     case "raw":
       return step({ working, commands: edit.commands });
     default:
@@ -408,7 +466,7 @@ function expandAddSlide(options: Readonly<{ working: Working; edit: Extract<Assi
     elements.push(copied);
   }
   const speakerNotes = bodyOfPlainText({ text: edit.speakerNotes, style: {} });
-  const slide: SlideSnapshot = { id: slideId, layoutId: layout?.id ?? null, background: edit.background, skipped: false, speakerNotes, transition: null, elements };
+  const slide: SlideSnapshot = { id: slideId, layoutId: layout?.id ?? null, background: edit.background, skipped: false, speakerNotes, transition: null, elements, animations: [] };
   // "after: null" means AT THE END for the assistant, and FIRST for the command.
   const after = edit.after ?? working.slideOrder.at(-1) ?? null;
   const at = after === null ? 0 : working.slideOrder.indexOf(after) + 1;
@@ -942,6 +1000,86 @@ function expandRestyle(options: Readonly<{ working: Working; edit: Extract<Assis
     elements.set(elementId, applyElementPatch({ element, patch }));
   }
   return step({ working: withSlide({ working, slideId: edit.slideId, slide: { ...slide, elements } }), commands });
+}
+
+// --- build steps --------------------------------------------------------------------------------
+
+/**
+ * New steps with minted ids, after `after` or (null) after the slide's last step: the contract's
+ * "appended" (the command's null means FIRST). Each step's element must be on the slide, counting
+ * elements added earlier in the call.
+ */
+function expandAddAnimations(options: Readonly<{ working: Working; edit: Extract<AssistantEditRequest, { kind: "addAnimations" }> }>): Step {
+  const { working, edit } = options;
+  const slide = working.slides.get(edit.slideId);
+  if (slide === undefined) return rejected(slideMissing(edit.slideId));
+  if (edit.after !== null && !slide.steps.some((animation) => animation.id === edit.after)) return rejected(animationStepMissing({ slideId: edit.slideId, stepId: edit.after }));
+  const missingElement = edit.steps.find((animation) => !slide.elements.has(animation.elementId));
+  if (missingElement !== undefined) return rejected(elementMissing({ slideId: edit.slideId, elementId: missingElement.elementId }));
+  const minter = minterFor(working);
+  const steps: AnimationStep[] = edit.steps.map((animation) => ({ id: minter.mint("animationStep"), ...animation, unsupportedKeys: [] }));
+  const after = edit.after ?? slide.steps.at(-1)?.id ?? null;
+  const at = after === null ? 0 : slide.steps.findIndex((animation) => animation.id === after) + 1;
+  const added = steps.map((animation) => ({ id: animation.id, elementId: animation.elementId }));
+  const next = { ...slide, steps: [...slide.steps.slice(0, at), ...added, ...slide.steps.slice(at)] };
+  return step({
+    working: withSlide({ working: { ...working, seed: minter.seed() }, slideId: edit.slideId, slide: next }),
+    commands: [{ kind: "insertAnimationSteps", slideId: edit.slideId, steps, after }],
+    created: { slideId: null, elementIds: [], animationStepIds: steps.map((animation) => animation.id) },
+  });
+}
+
+function expandUpdateAnimations(options: Readonly<{ working: Working; edit: Extract<AssistantEditRequest, { kind: "updateAnimations" }> }>): Step {
+  const { working, edit } = options;
+  const slide = working.slides.get(edit.slideId);
+  if (slide === undefined) return rejected(slideMissing(edit.slideId));
+  const missing = missingStep({ slide, slideId: edit.slideId, stepIds: edit.stepIds });
+  if (missing !== null) return rejected(missing);
+  const elementId = edit.patch.elementId;
+  if (elementId !== undefined && !slide.elements.has(elementId)) return rejected(elementMissing({ slideId: edit.slideId, elementId }));
+  if (Object.keys(edit.patch).length === 0) return step({ working, commands: [] });
+  const changing = new Set<AnimationStepId>(edit.stepIds);
+  const steps = elementId === undefined ? slide.steps : slide.steps.map((animation) => (changing.has(animation.id) ? { ...animation, elementId } : animation));
+  return step({
+    working: withSlide({ working, slideId: edit.slideId, slide: { ...slide, steps } }),
+    commands: [{ kind: "updateAnimationSteps", slideId: edit.slideId, stepIds: edit.stepIds, patch: edit.patch }],
+  });
+}
+
+function expandMoveAnimations(options: Readonly<{ working: Working; edit: Extract<AssistantEditRequest, { kind: "moveAnimations" }> }>): Step {
+  const { working, edit } = options;
+  const slide = working.slides.get(edit.slideId);
+  if (slide === undefined) return rejected(slideMissing(edit.slideId));
+  const missing = missingStep({ slide, slideId: edit.slideId, stepIds: [...edit.stepIds, ...(edit.after === null ? [] : [edit.after])] });
+  if (missing !== null) return rejected(missing);
+  const moving = new Set<AnimationStepId>(edit.stepIds);
+  if (edit.after !== null && moving.has(edit.after)) return rejected(`invalidValue: build step ${edit.after} cannot be moved after itself`);
+  const remaining = slide.steps.filter((animation) => !moving.has(animation.id));
+  const moved = slide.steps.filter((animation) => moving.has(animation.id));
+  const at = edit.after === null ? 0 : remaining.findIndex((animation) => animation.id === edit.after) + 1;
+  return step({
+    working: withSlide({ working, slideId: edit.slideId, slide: { ...slide, steps: [...remaining.slice(0, at), ...moved, ...remaining.slice(at)] } }),
+    commands: [{ kind: "moveAnimationSteps", slideId: edit.slideId, stepIds: edit.stepIds, after: edit.after }],
+  });
+}
+
+function expandRemoveAnimations(options: Readonly<{ working: Working; edit: Extract<AssistantEditRequest, { kind: "removeAnimations" }> }>): Step {
+  const { working, edit } = options;
+  const slide = working.slides.get(edit.slideId);
+  if (slide === undefined) return rejected(slideMissing(edit.slideId));
+  const missing = missingStep({ slide, slideId: edit.slideId, stepIds: edit.stepIds });
+  if (missing !== null) return rejected(missing);
+  const removed = new Set<AnimationStepId>(edit.stepIds);
+  return step({
+    working: withSlide({ working, slideId: edit.slideId, slide: { ...slide, steps: slide.steps.filter((animation) => !removed.has(animation.id)) } }),
+    commands: [{ kind: "deleteAnimationSteps", slideId: edit.slideId, stepIds: edit.stepIds }],
+  });
+}
+
+function missingStep(options: Readonly<{ slide: WorkingSlide; slideId: SlideId; stepIds: readonly AnimationStepId[] }>): string | null {
+  const present = new Set<AnimationStepId>(options.slide.steps.map((animation) => animation.id));
+  const stepId = options.stepIds.find((candidate) => !present.has(candidate));
+  return stepId === undefined ? null : animationStepMissing({ slideId: options.slideId, stepId });
 }
 
 // --- text -------------------------------------------------------------------------------------------

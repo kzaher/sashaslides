@@ -13,7 +13,7 @@ import { fixtureShape, fixtureSlide, elementIdOf, type FixtureElement } from "..
 import { buildTransitionContext, clampTiming } from "../transition-context.ts";
 import { BUILTIN_TRANSITIONS } from "./builtin-transitions.ts";
 import { builtinParameters } from "./builtin-parameters.ts";
-import { shortestTurn } from "./morph.ts";
+import { morphPath, shortestTurn } from "./morph.ts";
 
 describe("built-in transitions on the in-page context", () => {
   const rows: readonly Readonly<{ label: string; effect: BuiltinTransitionEffect; direction: TransitionDirection; expected: readonly ExpectedAnimation[]; incomingOnTop: boolean }>[] = [
@@ -142,6 +142,47 @@ describe("morph", () => {
     assert.equal(animated.includes("group_wrap"), false);
   });
 
+  const opacities = [
+    { label: "a paired leaf fades in to its own opacity (0.5), never to 1", elements: "paired", opacity: "0.5", expected: [0, 0.5] },
+    { label: "control: a paired leaf with no inline opacity fades in to 1", elements: "paired", opacity: "", expected: [0, 1] },
+    { label: "an unpaired incoming leaf fades in to its own opacity", elements: "unpairedIncoming", opacity: "0.25", expected: [0, 0.25] },
+    { label: "an unpaired outgoing leaf fades out from its own opacity", elements: "unpairedOutgoing", opacity: "0.25", expected: [0.25, 0] },
+  ] as const;
+  for (const row of opacities) {
+    it(`opacity: ${row.label}`, async () => {
+      const lone: FixtureElement = { id: "lone_box", frame: { x: 0, y: 0, width: 10, height: 10 } };
+      const sides = {
+        paired: { outgoing: [rotated], incoming: [rotatedTarget], node: "box_in" },
+        unpairedIncoming: { outgoing: [], incoming: [lone], node: "lone_box" },
+        unpairedOutgoing: { outgoing: [lone], incoming: [], node: "lone_box" },
+      }[row.elements];
+      const harness = stageHarness({ outgoingElements: sides.outgoing, incomingElements: sides.incoming, opacities: { [sides.node]: row.opacity } });
+      await BUILTIN_TRANSITIONS.morph.run(harness.context({ effect: { effect: "morph" }, direction: "forward" }));
+      const keyframes = harness.recorded.find((animation) => harness.nameOf(animation.node) === sides.node)?.keyframes;
+      assert.ok(Array.isArray(keyframes));
+      assert.deepEqual(keyframes.map((keyframe) => keyframe.opacity), row.expected);
+    });
+  }
+
+  it("a flip and a turn across 0 degrees: the incoming leaf starts mirrored and turns the short way to its own transform", () => {
+    const path = morphPath({
+      from: { x: 0, y: 0, width: 100, height: 100, rotation: 350, flipHorizontal: true, flipVertical: false },
+      to: { x: 0, y: 0, width: 100, height: 100, rotation: 10, flipHorizontal: false, flipVertical: false },
+    });
+    assert.equal(path.incomingStart, "translate(0px, 0px) rotate(-10deg) scale(-1, 1)");
+    // Exactly the renderer's own leaf transform (rotate, then the flips) at the end.
+    assert.equal(path.incomingEnd, "translate(0px, 0px) rotate(10deg) scale(1, 1)");
+    assert.equal(path.outgoingEnd, "translate(0px, 0px) rotate(370deg) scale(1, 1)");
+  });
+
+  it("a line keeps its zero-thick axis unscaled; control: its length scales", () => {
+    const path = morphPath({
+      from: { x: 0, y: 0, width: 100, height: 0, rotation: 0, flipHorizontal: false, flipVertical: false },
+      to: { x: 0, y: 0, width: 200, height: 0, rotation: 0, flipHorizontal: false, flipVertical: false },
+    });
+    assert.equal(path.incomingStart, "translate(-50px, 0px) rotate(0deg) scale(0.5, 1)");
+  });
+
   const turns = [
     { from: 350, to: 10, expected: 20 },
     { from: 10, to: 350, expected: -20 },
@@ -184,10 +225,17 @@ type ExpectedAnimation = Readonly<{ on: string; keyframes: readonly Keyframe[] }
 
 type RecordedAnimation = { node: object; keyframes: Keyframe[] | PropertyIndexedKeyframes; options: KeyframeAnimationOptions; cancelled: boolean };
 
-type FakeNode = { name: string; style: { zIndex: string }; children: FakeNode[]; querySelector: (selector: string) => FakeNode | null };
+type FakeNode = { name: string; style: { zIndex: string; opacity: string }; children: FakeNode[]; querySelector: (selector: string) => FakeNode | null };
 
 function stageHarness(
-  options: Readonly<{ outgoingElements: readonly FixtureElement[]; incomingElements: readonly FixtureElement[]; fromBlack?: boolean; groupIncoming?: boolean }>,
+  options: Readonly<{
+    outgoingElements: readonly FixtureElement[];
+    incomingElements: readonly FixtureElement[];
+    fromBlack?: boolean;
+    groupIncoming?: boolean;
+    /** Inline opacities the renderer would have written, by element id. */
+    opacities?: Readonly<Record<string, string>>;
+  }>,
 ) {
   const recorded: RecordedAnimation[] = [];
   const outgoingSlide = fixtureSlide({ id: "slide_out", elements: options.outgoingElements });
@@ -195,10 +243,10 @@ function stageHarness(
   const incomingSlide = options.groupIncoming === true ? { ...plainIncoming, elements: [groupOf(plainIncoming.elements)] } : plainIncoming;
   const layers = {
     stage: fakeNode({ name: "stage", children: [] }),
-    outgoing: fakeNode({ name: "outgoing", children: options.outgoingElements.map((element) => fakeNode({ name: element.id, children: [] })) }),
+    outgoing: fakeNode({ name: "outgoing", children: options.outgoingElements.map((element) => fakeNode({ name: element.id, children: [], opacity: options.opacities?.[element.id] })) }),
     incoming: fakeNode({
       name: "incoming",
-      children: options.incomingElements.map((element) => fakeNode({ name: element.id, children: [] })),
+      children: options.incomingElements.map((element) => fakeNode({ name: element.id, children: [], opacity: options.opacities?.[element.id] })),
     }),
     overlay: fakeNode({ name: "overlay", children: [] }),
   };
@@ -254,10 +302,10 @@ function recordAnimation(
   return fake as unknown as Animation;
 }
 
-function fakeNode(options: Readonly<{ name: string; children: FakeNode[] }>): FakeNode {
+function fakeNode(options: Readonly<{ name: string; children: FakeNode[]; opacity?: string | undefined }>): FakeNode {
   const node: FakeNode = {
     name: options.name,
-    style: { zIndex: "" },
+    style: { zIndex: "", opacity: options.opacity ?? "" },
     children: options.children,
     querySelector(selector) {
       const match = new RegExp(`^\\[${ELEMENT_ID_ATTRIBUTE}="(.+)"\\]$`).exec(selector);

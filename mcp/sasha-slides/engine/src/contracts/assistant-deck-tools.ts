@@ -17,18 +17,26 @@
 //    them as ONE `CommandEnvelope` with `author: { kind: "agent", agentSessionId }`: all or
 //    nothing, one step for "Undo Claude's edit", one `agentEdit` notice to the editors.
 //
-//  * SCRIPTS STAY UNAPPROVED. `deck_write_transition` saves with approval "unapproved" whoever the
-//    account is; only a person approving in the editor makes it run (collaboration.ts header).
+//  * SCRIPTS STAY UNAPPROVED. `deck_write_transition` and `deck_write_animation` save with approval
+//    "unapproved" whoever the account is; only a person approving in the editor makes it run
+//    (collaboration.ts header). An animation script is a scripted BUILD STEP (animations.ts): same
+//    sandbox, same rule, its own purpose so an approval of one is never an approval of the other.
+//
+//  * BUILDS ARE EDITS LIKE ANY OTHER. `deck_edit` adds, changes, reorders and removes a slide's build
+//    steps (`addAnimations` and friends), and a slide transition -- morph included -- is
+//    `setSlide { patch: { transition } }`; morph pairs elements by `morphKey` (the element id unless
+//    set), which `restyleElements` can set so two different elements glide into each other.
 //
 //  * READ RETURNS IDS AND PLAIN TEXT, NOT THE YJS STRUCTURE. The outline is what a model needs to
 //    address things (`DeckOutline`); `detail: "full"` adds the snapshot of the slides asked for.
 
+import type { AnimationEffect, AnimationStep, AnimationStepPatch, AnimationTrigger, ScriptedAnimationCategory } from "./animations.ts";
 import type { ElementPatch, SlidePropertiesPatch } from "./commands.ts";
 import type { DocumentCommand } from "./commands.ts";
 import type { CommentTarget } from "./discussion.ts";
-import type { ElementKind, PlaceholderRole, ShapePreset, SlideSnapshot } from "./document.ts";
+import type { ElementKind, PlaceholderRole, ShapePreset, SlideSnapshot, TransitionEasing } from "./document.ts";
 import type { Frame, FractionalRegion, Point } from "./geometry.ts";
-import type { DeckId, ElementId, LayoutId, MessageId, SlideId, ThreadId, TransitionScriptId } from "./ids.ts";
+import type { AnimationStepId, DeckId, ElementId, LayoutId, MessageId, SlideId, ThreadId, TransitionScriptId } from "./ids.ts";
 import type { SerialisableObject } from "./serialisable.ts";
 import type { Fill, ParagraphStylePatch, RunStylePatch } from "./style.ts";
 import type { DeckRole } from "./deck-access.ts";
@@ -39,6 +47,7 @@ export const ASSISTANT_DECK_TOOL_NAMES = [
   "deck_read",
   "deck_edit",
   "deck_write_transition",
+  "deck_write_animation",
   "deck_revert",
   "deck_read_comments",
   "deck_reply_comment",
@@ -106,8 +115,23 @@ export type AssistantEdit =
   | Readonly<{ kind: "reorderElements"; slideId: SlideId; elementIds: readonly ElementId[]; placement: "front" | "forward" | "backward" | "back" }>
   | Readonly<{ kind: "groupElements"; slideId: SlideId; elementIds: readonly ElementId[] }>
   | Readonly<{ kind: "setTitle"; title: string }>
+  /** Build steps appended to the slide's sequence (or after `after`), in order; the tool mints their ids. */
+  | Readonly<{ kind: "addAnimations"; slideId: SlideId; after: AnimationStepId | null; steps: readonly AssistantAnimationStep[] }>
+  | Readonly<{ kind: "updateAnimations"; slideId: SlideId; stepIds: readonly AnimationStepId[]; patch: AnimationStepPatch }>
+  | Readonly<{ kind: "moveAnimations"; slideId: SlideId; stepIds: readonly AnimationStepId[]; after: AnimationStepId | null }>
+  | Readonly<{ kind: "removeAnimations"; slideId: SlideId; stepIds: readonly AnimationStepId[] }>
   /** Escape hatch: commands exactly as commands.ts defines them, validated by the model like any other. */
   | Readonly<{ kind: "raw"; commands: readonly DocumentCommand[] }>;
+
+/** A build step as a model writes it; omitted timing takes the defaults (500 milliseconds, no delay, ease out). */
+export type AssistantAnimationStep = Readonly<{
+  elementId: ElementId;
+  effect: AnimationEffect;
+  trigger: AnimationTrigger;
+  durationMilliseconds: number;
+  delayMilliseconds: number;
+  easing: TransitionEasing;
+}>;
 
 /** deck_read's answer. */
 export type DeckOutline = Readonly<{
@@ -134,6 +158,8 @@ export type SlideOutline = Readonly<{
   transition: string;
   speakerNotes: string;
   elements: readonly ElementOutline[];
+  /** The build sequence in play order, with ids to update, move or remove steps by. */
+  animations: readonly AnimationStep[];
 }>;
 
 export type ElementOutline = Readonly<{
@@ -141,6 +167,8 @@ export type ElementOutline = Readonly<{
   kind: ElementKind;
   name: string;
   frame: Frame;
+  /** What the morph transition pairs by: an element on the next slide with the same key glides into it. */
+  morphKey: string;
   /** Plain text of a shape, or of each table cell row by row joined with tabs and newlines. */
   text: string;
   placeholder: PlaceholderRole | null;
@@ -170,6 +198,28 @@ export type AssistantTransitionScript = Readonly<{
   defaultParameters: SerialisableObject;
   /** Slides that should use it; their transition becomes `{ kind: "scripted", scriptId, durationMilliseconds, parameters: {} }`. */
   assignTo: readonly Readonly<{ slideId: SlideId; durationMilliseconds: number }>[];
+}>;
+
+/** deck_write_animation's input: a scripted build step's script, and the steps that use it. */
+export type AssistantAnimationScript = Readonly<{
+  deckId: DeckId;
+  /** Omitted to create a new script; given to replace one (the save is based on its current `updatedAt`). */
+  scriptId: TransitionScriptId | null;
+  name: string;
+  description: string;
+  /** Calls `sashaTransition.define(...)`; it animates from the slide before the step (`outgoing`) to after it (`incoming`). */
+  script: string;
+  stylesheet: string;
+  markup: string;
+  defaultParameters: SerialisableObject;
+  /** Steps appended to these slides' sequences, each animating one element with this script. */
+  assignTo: readonly Readonly<{
+    slideId: SlideId;
+    elementId: ElementId;
+    category: ScriptedAnimationCategory;
+    trigger: AnimationTrigger;
+    durationMilliseconds: number;
+  }>[];
 }>;
 
 /** deck_read_comments' answer: threads as the agent needs them. */

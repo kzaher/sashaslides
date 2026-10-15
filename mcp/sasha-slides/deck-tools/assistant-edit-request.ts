@@ -58,6 +58,7 @@ export type AssistantEditRequest =
   | Readonly<{ kind: "moveElements"; slideId: SlideId; moves: readonly Readonly<{ elementId: ElementId; frame: Partial<AssistantFrame> }>[] }>
   | Readonly<{ kind: "restyleElements"; slideId: SlideId; elementIds: readonly ElementId[]; patch: AssistantStylePatch }>
   | Extract<AssistantEdit, { kind: "setText" | "replaceText" | "styleText" | "deleteElements" | "reorderElements" | "setTitle" }>
+  | Extract<AssistantEdit, { kind: "addAnimations" | "updateAnimations" | "moveAnimations" | "removeAnimations" }>
   | Readonly<{ kind: "groupElements"; id?: ElementId | null; slideId: SlideId; elementIds: readonly ElementId[] }>
   | Readonly<{ kind: "raw"; commands: readonly DocumentCommand[] }>;
 
