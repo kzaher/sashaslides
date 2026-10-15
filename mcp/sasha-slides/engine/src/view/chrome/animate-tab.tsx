@@ -64,11 +64,11 @@ export function AnimateTab(properties: Readonly<{ state: EditorState; dispatch: 
           </button>
           {chosen === null ? null : (
             <>
-              <button type="button" className={TIDEPOOL_CLASS.secondaryPill} aria-label={`Move animation ${chosen.number} up`} disabled={chosen.number === 1} onClick={() => move(chosen.step.id, "up")}>
-                Move up
+              <button type="button" className={TIDEPOOL_CLASS.iconButton} aria-label={`Move animation ${chosen.number} up`} title="Move up" disabled={chosen.number === 1} onClick={() => move(chosen.step.id, "up")}>
+                <Icon name="chevronUp" />
               </button>
-              <button type="button" className={TIDEPOOL_CLASS.secondaryPill} aria-label={`Move animation ${chosen.number} down`} disabled={chosen.number === rows.length} onClick={() => move(chosen.step.id, "down")}>
-                Move down
+              <button type="button" className={TIDEPOOL_CLASS.iconButton} aria-label={`Move animation ${chosen.number} down`} title="Move down" disabled={chosen.number === rows.length} onClick={() => move(chosen.step.id, "down")}>
+                <Icon name="chevronDown" />
               </button>
             </>
           )}

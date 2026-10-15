@@ -18,6 +18,7 @@ export type IconName =
   | "comment"
   | "present"
   | "chevronDown"
+  | "chevronUp"
   | "plus"
   | "close"
   | "bold"
@@ -87,6 +88,7 @@ const ICON_DRAWINGS: Readonly<Record<IconName, ReactElement>> = {
   comment: <path d="M20 12a7.5 7.5 0 0 1-11 6.6L4 20l1.4-4.4A7.5 7.5 0 1 1 20 12z" />,
   present: <path d="M8 5.5v13l11-6.5z" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
+  chevronUp: <path d="m6 15 6-6 6 6" />,
   plus: <path d="M12 5v14M5 12h14" />,
   close: <path d="M6 6l12 12M18 6 6 18" />,
   bold: <path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z" />,

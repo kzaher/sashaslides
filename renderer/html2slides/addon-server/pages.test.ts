@@ -147,3 +147,9 @@ test("the home page links to the deck list as 'Your decks', which the connector 
   assert.equal(pageFor(DECK_LIST_ADDRESS), null, "nginx routes /decks to the connector");
   assert.match(read("site.css"), /\.cta \{/, "the call to action is styled");
 });
+
+test("the comment section is visible and says plainly that it is early access", () => {
+  const home = read("home.html");
+  assert.match(home, /<section class="comments" aria-label="Answering comments">/, "shown, not hidden");
+  assert.match(home, /Early access: this opens to everyone when the Sasha account goes live/);
+});
