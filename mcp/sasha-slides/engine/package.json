@@ -1,0 +1,26 @@
+{
+  "name": "sasha-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sasha Slides' own presentation editor and presentation engine: a Yjs document of structured slides, an RxFeedback editor, a React view in the Tidepool look, and a presenter whose scripted transitions run sandboxed. Shared by the web application at sashaslides.com/deck/<id> and the Google Slides add-on, which embeds it.",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "npm run -s typecheck && node --test --import tsx \"src/**/*.test.ts\"",
+    "build:demo": "npx tsx build-demo.ts"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "rxjs": "^7.8.2",
+    "yjs": "^13.6.33"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "esbuild": "^0.28.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,0 +1,39 @@
+// The engine's shipped sources: src/**/*.ts(x) is bundled by esbuild (build-demo.ts now, the
+// sashaslides.com/deck/<id> page in milestone 2) into browser code. THIS file is the gate, not the
+// bundler: esbuild strips types without checking them, so `tsc --noEmit` runs as its own failing
+// step (`npm run typecheck`) before anything is emitted.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "ESNext.Disposable"],
+    // Deliberately NOT @types/node: these sources ship into a browser, and node's globals would
+    // make `setTimeout`, `fetch` and `Blob` resolve to node shapes, so the gate would stop catching
+    // a browser/node mix-up. Tests and build scripts get node types from tsconfig.test.json.
+    "types": [],
+    "jsx": "react-jsx",
+
+    // esbuild is the emitter; tsc only ever checks. `allowImportingTsExtensions` lets sources
+    // import "./x.ts" by its real name, which is also what esbuild resolves.
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+
+    // --- the gate. `strict` alone leaves the bug classes below legal, so they are named.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

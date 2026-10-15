@@ -1,0 +1,10 @@
+// The node side of the engine: unit tests (node:test + tsx), the build scripts and the Chrome
+// end-to-end drivers. Same gate as tsconfig.json, plus node's types.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts", "*.ts"],
+  "exclude": []
+}
