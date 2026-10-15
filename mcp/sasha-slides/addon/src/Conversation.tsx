@@ -9,7 +9,9 @@
 //
 //   1. the header
 //   2. THE CONNECTION -- one status line while an assistant is listening, and the setup guide
-//      (setup-guide.tsx, with its animated walkthrough) when nothing is
+//      (setup-guide.tsx, with its animated walkthrough) when nothing is; under it, only when Sasha
+//      cannot yet answer this deck's comments with the user's own Google grant, one small card
+//      that says so and, when one click can fix it, offers "Allow" (comment-access-state.ts)
 //   3. THE ASSETS -- the staged candidates with Working / Archived, Open, Archive and
 //      "Open artifacts", which is the way back to the slides window
 //
@@ -44,6 +46,7 @@ import {
   type OpenPhase,
 } from "./conversation-state.ts";
 import { describeElapsed } from "./waiting.ts";
+import type { CommentAccessCard } from "./comment-access-state.ts";
 
 /** Everything the panel is allowed to cause. Injected, so the tree renders with no ports. */
 export type ConversationActions = Readonly<{
@@ -60,17 +63,25 @@ export type ConversationActions = Readonly<{
   setCandidateArchived(target: Readonly<{ proposalId: string; slideIndex: number; archived: boolean }>): void;
   /** Which of the set card's lists is shown. In the tree, so a poll cannot reset it. */
   chooseCandidateTab(tab: CandidateTab): void;
+  /**
+   * THE ALLOW LINK WAS OPENED (in a new tab: the link itself navigates). Recorded so the user's
+   * return to the deck re-checks once and the card goes away when it worked.
+   */
+  allowCommentAccessOpened(): void;
 }>;
 
 export function ConversationPanel({
   conversation,
   previews,
+  commentAccess,
   setup,
   actions,
 }: {
   conversation: Conversation;
   /** The candidates' thumbnails (slide-previews.ts), held beside the state by sidebar.tsx. */
   previews: SlidePreviews;
+  /** The "Let Sasha answer comments" card (comment-access-state.ts), or null for none. */
+  commentAccess: CommentAccessCard | null;
   /** Build-time connection facts and the viewer's remembered tab, for the setup guide. */
   setup: SetupEnvironment;
   actions: ConversationActions;
@@ -86,7 +97,7 @@ export function ConversationPanel({
             <span className="sasha-opening-ring" aria-hidden="true" />
           </p>
         ) : (
-          <ConversationBody conversation={conversation} previews={previews} setup={setup} actions={actions} />
+          <ConversationBody conversation={conversation} previews={previews} commentAccess={commentAccess} setup={setup} actions={actions} />
         )}
       </section>
     </ConversationShell>
@@ -97,11 +108,13 @@ export function ConversationPanel({
 function ConversationBody({
   conversation,
   previews,
+  commentAccess,
   setup,
   actions,
 }: {
   conversation: Conversation;
   previews: SlidePreviews;
+  commentAccess: CommentAccessCard | null;
   setup: SetupEnvironment;
   actions: ConversationActions;
 }): JSX.Element {
@@ -110,6 +123,7 @@ function ConversationBody({
     <>
       <ConversationHeader conversation={conversation} connection={connection} />
       <ConnectionStatus connection={connection} setup={setup} />
+      {commentAccess === null ? null : <CommentAccessNotice card={commentAccess} onAllowOpened={actions.allowCommentAccessOpened} />}
       <OpenStatus open={conversation.open} />
       <Assets conversation={conversation} previews={previews} actions={actions} />
     </>
@@ -195,6 +209,37 @@ function ConnectionStatus({
       return <SetupGuide notice={connection.notice} environment={setup} />;
     default:
       return assertNever(connection);
+  }
+}
+
+/**
+ * CAN SASHA ANSWER COMMENTS HERE? Shown only when it cannot yet. "Allow" is a real link with
+ * target=_blank -- the HtmlService sandbox lets a user-clicked link open a tab, while script
+ * `window.open` is unreliable there -- and it opens the connector's allow page with this deck
+ * preselected in Google's picker. The other two cases have no one-click fix, so they are one line.
+ */
+function CommentAccessNotice({ card, onAllowOpened }: { card: CommentAccessCard; onAllowOpened: () => void }): JSX.Element {
+  switch (card.kind) {
+    case "allow":
+      return (
+        <div className="sasha-comment-access" role="status">
+          <p className="sasha-comment-access-line">Let Sasha answer comments on this deck</p>
+          <p className="sasha-dim sasha-comment-access-hint">One click in Google&apos;s file picker, for this deck only.</p>
+          <a className="sasha-primary sasha-comment-access-allow" href={card.allowUrl} target="_blank" rel="noopener noreferrer" onClick={onAllowOpened}>
+            {card.checking ? "Checking..." : "Allow"}
+          </a>
+        </div>
+      );
+    case "notConnected":
+      return (
+        <p className="sasha-dim sasha-comment-access-note">
+          Sasha cannot answer comments here yet: connect Sasha Slides to your assistant with this Google account. The Setup guide shows how.
+        </p>
+      );
+    case "viewOnly":
+      return <p className="sasha-dim sasha-comment-access-note">You can view this deck but not comment; ask the owner for Commenter access.</p>;
+    default:
+      return assertNever(card);
   }
 }
 

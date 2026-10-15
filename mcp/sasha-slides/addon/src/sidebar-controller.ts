@@ -21,6 +21,10 @@
 //     state, when the manifest changed, and whether anything is listening are all derived from it.
 //   * "show the slides" -- `sashaOpenPicker`, because `showModelessDialog` is a server-side
 //     `SlidesApp.getUi()` call and no amount of client JavaScript in this document can do it.
+//   * "can Sasha answer comments here" -- `sashaCommentAccess`, which asks the connector about the
+//     user's own Google grant (comment-access-state.ts). It goes out LAST in the boot's one pump,
+//     beside the other reads and never after one of them answers, so it adds no round trip in
+//     series; and it is asked again only when the user comes back after pressing Allow.
 //
 // THE DIALOG OPENS BY ITSELF WHEN SLIDES ARRIVE, and that decision is `proposalToAutoOpen`'s --
 // state, not a side effect buried in a fetch handler -- so it happens once per proposal and a user
@@ -34,6 +38,7 @@ import {
   appsScriptDriveApi,
   appsScriptPickerWindowApi,
   appsScriptSessionLogApi,
+  commentAccessFromServer,
   helloFromServer,
   type ServerCall,
 } from "./bridge-client.ts";
@@ -66,6 +71,15 @@ import {
   type SlidePreviews,
 } from "./slide-previews.ts";
 import { pickerSeedOf } from "./picker-seed.ts";
+import {
+  INITIAL_COMMENT_ACCESS,
+  commentAccessCardOf,
+  needsCommentAccessCheck,
+  reduceCommentAccess,
+  type CommentAccessCard,
+  type CommentAccessEvent,
+  type CommentAccessState,
+} from "./comment-access-state.ts";
 import { parseSidebarBoot, sidebarSeedOf, type SidebarBoot } from "./sidebar-seed.ts";
 
 /** One scan of the inbox. The same page size the observer uses. */
@@ -100,6 +114,8 @@ const NOT_CONNECTED =
 export type SidebarView = Readonly<{
   conversation: Conversation;
   previews: SlidePreviews;
+  /** The "Let Sasha answer comments" card, or null when there is nothing to ask of the user. */
+  commentAccess: CommentAccessCard | null;
   actions: ConversationActions;
 }>;
 
@@ -109,6 +125,11 @@ export type SidebarHost = Readonly<{
   render: (view: SidebarView) => void;
   isVisible: () => boolean;
   onVisibilityChange: (listener: () => void) => void;
+  /**
+   * The panel's window got focus. With the visibility change, how the panel learns the user is
+   * back from the allow page: a new TAB hides and shows the deck, a new WINDOW only moves focus.
+   */
+  onWindowFocus: (listener: () => void) => void;
   /** The text of the seed element `showSidebar` appended, or null when there is none. */
   seedText: string | null;
 }>;
@@ -143,6 +164,8 @@ export function startSidebar(host: SidebarHost): SidebarController {
    * revision is a miss without anything having to invalidate it.
    */
   let previews: SlidePreviews = NO_PREVIEWS;
+  /** Whether Sasha can answer this deck's comments: its own small store, like the thumbnails. */
+  let access: CommentAccessState = INITIAL_COMMENT_ACCESS;
   let services: Services | null = null;
   /** The scan started before `sashaHello` answered, consumed once by the first `loadStaged`. */
   let earlyScan: ReturnType<DriveApi["scanInbox"]> | null = null;
@@ -167,6 +190,9 @@ export function startSidebar(host: SidebarHost): SidebarController {
     },
     chooseCandidateTab(tab) {
       dispatch({ kind: "candidate-tab-chosen", tab });
+    },
+    allowCommentAccessOpened() {
+      dispatchAccess({ kind: "access-allow-opened" });
     },
   };
 
@@ -195,6 +221,8 @@ export function startSidebar(host: SidebarHost): SidebarController {
       if (mark.manifestFileId !== undefined) manifestFileIds.set(mark.proposalId, mark.manifestFileId);
     }
     if (seed !== null) state = reduceConversation(state, { kind: "seeded", seed });
+    const seededAccess = boot?.remembered.commentAccess ?? null;
+    if (seededAccess !== null) access = reduceCommentAccess(access, { kind: "access-seeded", answer: seededAccess.value });
     render();
 
     // WITH A SEED THERE IS NO HELLO ROUND TRIP: Code.gs computed it while serving the page.
@@ -236,13 +264,15 @@ export function startSidebar(host: SidebarHost): SidebarController {
     host.onVisibilityChange(() => {
       schedulePoll();
       scheduleClock();
+      if (host.isVisible()) dispatchAccess({ kind: "access-returned" });
     });
+    host.onWindowFocus(() => dispatchAccess({ kind: "access-returned" }));
     schedulePoll();
     scheduleClock();
   }
 
   function render(): void {
-    host.render({ conversation: state, previews, actions });
+    host.render({ conversation: state, previews, commentAccess: commentAccessCardOf(access), actions });
   }
 
   /**
@@ -258,6 +288,15 @@ export function startSidebar(host: SidebarHost): SidebarController {
     // next tick either way, so pausing it cannot make evidence look fresher than it is.
     if (!host.isVisible()) return;
     clockHandle = setInterval(() => dispatch({ kind: "clock-ticked", nowMs: Date.now() }), CLOCK_TICK_MS);
+  }
+
+  /** The comment-access card's own loop: same shape as `dispatch`, a separate store. */
+  function dispatchAccess(event: CommentAccessEvent): void {
+    const next = reduceCommentAccess(access, event);
+    if (next === access) return;
+    access = next;
+    render();
+    pump();
   }
 
   /** The thumbnails' own loop: same shape as `dispatch`, a separate store. */
@@ -341,6 +380,18 @@ export function startSidebar(host: SidebarHost): SidebarController {
       dispatch({ kind: "auto-opened", proposalId: autoOpen });
       void showSlides();
     }
+    // LAST OF ALL: the card is a convenience (and usually already drawn from the seed), so it never
+    // goes out ahead of a read the panel is waiting on -- but it does go out in this same pump.
+    if (needsCommentAccessCheck(access)) {
+      dispatchAccess({ kind: "access-check-requested" });
+      void loadCommentAccess();
+    }
+  }
+
+  /** One check with the connector; a failure keeps whatever card is on screen (comment-access-state.ts). */
+  async function loadCommentAccess(): Promise<void> {
+    const replied = await commentAccessFromServer({ call: host.call });
+    dispatchAccess(replied.kind === "ok" ? { kind: "access-check-arrived", answer: replied.value } : { kind: "access-check-failed", message: replied.message });
   }
 
   /** The inbox name walk, reduced to "what is staged and unanswered". */

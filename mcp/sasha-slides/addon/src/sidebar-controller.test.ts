@@ -67,27 +67,39 @@ function fakeServer(): Readonly<{
   };
 }
 
-function seedText(): string {
+const ALLOW_URL = `https://sashaslides.com/comments/allow?deck=${DECK}`;
+
+function seedText(options: Readonly<{ commentAccess?: unknown }> = {}): string {
   const remembered = (value: unknown): unknown => ({ presentationId: DECK, readAt: READ_AT, value });
   return JSON.stringify({
     hello: HELLO,
     remembered: {
       scan: remembered({ marks: [MARK] }),
       log: remembered({ folderId: "folder_1", events: [] }),
+      ...(options.commentAccess === undefined ? {} : { commentAccess: remembered(options.commentAccess) }),
     },
   });
 }
 
-function start({ call, text }: { call: ServerCall; text: string | null }): Readonly<{ controller: SidebarController; views: SidebarView[] }> {
+type Started = Readonly<{ controller: SidebarController; views: SidebarView[]; focus: () => void }>;
+
+function start({ call, text }: { call: ServerCall; text: string | null }): Started {
   const views: SidebarView[] = [];
+  const focusListeners: (() => void)[] = [];
   const controller = startSidebar({
     call,
     render: (view) => views.push(view),
     isVisible: () => true,
     onVisibilityChange: () => {},
+    onWindowFocus: (listener) => focusListeners.push(listener),
     seedText: text,
   });
-  return { controller, views };
+  return { controller, views, focus: () => focusListeners.forEach((listener) => listener()) };
+}
+
+/** Lets every settled fake answer run through the client's parse and the dispatch it causes. */
+function settle(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function namesOf(invoked: readonly Invocation[]): readonly string[] {
@@ -133,10 +145,10 @@ test("AN UNSEEDED BOOT scans in parallel with sashaHello, and reads the log only
     assert.deepEqual(namesOf(server.invoked), ["sashaScanInbox", "sashaHello"]);
     server.answer("sashaHello", HELLO);
     await controller.started;
-    assert.deepEqual(namesOf(server.invoked), ["sashaScanInbox", "sashaHello"], "the early scan is consumed, not repeated");
+    assert.deepEqual(namesOf(server.invoked), ["sashaScanInbox", "sashaHello", "sashaCommentAccess"], "the early scan is consumed, not repeated");
     server.answer("sashaScanInbox", { marks: [MARK] });
-    await new Promise((resolve) => setImmediate(resolve));
-    const after = namesOf(server.invoked).slice(2);
+    await settle();
+    const after = namesOf(server.invoked).slice(3);
     assert.ok(after.includes("sashaReadEvents"), after.join(", "));
     assert.ok(after.includes("sashaReadTexts"), after.join(", "));
   } finally {
@@ -151,7 +163,65 @@ test("a seed from another deck is not drawn, but its hello still saves the round
   try {
     await controller.started;
     assert.equal(views[0]?.conversation.set.kind, "none");
-    assert.deepEqual(namesOf(server.invoked), ["sashaScanInbox"]);
+    assert.deepEqual(namesOf(server.invoked), ["sashaScanInbox", "sashaCommentAccess"]);
+  } finally {
+    controller.stop();
+  }
+});
+
+test("THE COMMENT ACCESS CHECK adds no serial round trip: it goes out in the boot's one pump, last, before anything answers", async () => {
+  const server = fakeServer();
+  const { controller } = start({ call: server.call, text: seedText() });
+  try {
+    await controller.started;
+    const names = namesOf(server.invoked);
+    // Nothing has answered, and the check is already out beside the other boot reads.
+    assert.deepEqual(names, ["sashaScanInbox", "sashaReadTexts", "sashaReadEvents", "sashaCommentAccess"]);
+    assert.equal(names.filter((name) => name === "sashaCommentAccess").length, 1, "asked once per open");
+    // Answering every boot read starts no second check: it is not on the poll.
+    server.answer("sashaCommentAccess", { access: "ready" });
+    server.answer("sashaScanInbox", { marks: [MARK] });
+    server.answer("sashaReadEvents", { events: [] });
+    await settle();
+    assert.equal(namesOf(server.invoked).filter((name) => name === "sashaCommentAccess").length, 1);
+  } finally {
+    controller.stop();
+  }
+});
+
+test("the remembered answer draws the card on the FIRST paint; the fresh one replaces it", async () => {
+  const server = fakeServer();
+  const { controller, views } = start({ call: server.call, text: seedText({ commentAccess: { access: "needsAllow", allowUrl: ALLOW_URL } }) });
+  try {
+    await controller.started;
+    assert.deepEqual(views[0]?.commentAccess, { kind: "allow", allowUrl: ALLOW_URL, checking: false });
+    server.answer("sashaCommentAccess", { access: "ready" });
+    await settle();
+    assert.equal(views.at(-1)?.commentAccess, null, "ready now: no card");
+  } finally {
+    controller.stop();
+  }
+});
+
+test("Allow, then coming back to the deck, re-checks once and hides the card when Sasha can answer", async () => {
+  const server = fakeServer();
+  const { controller, views, focus } = start({ call: server.call, text: seedText() });
+  const checks = (): number => namesOf(server.invoked).filter((name) => name === "sashaCommentAccess").length;
+  try {
+    await controller.started;
+    server.answer("sashaCommentAccess", { access: "needsAllow", allowUrl: ALLOW_URL });
+    await settle();
+    assert.deepEqual(views.at(-1)?.commentAccess, { kind: "allow", allowUrl: ALLOW_URL, checking: false });
+    focus();
+    assert.equal(checks(), 1, "focus without pressing Allow asks nothing");
+    views.at(-1)?.actions.allowCommentAccessOpened();
+    focus();
+    focus();
+    assert.equal(checks(), 2, "the return re-checks exactly once");
+    assert.deepEqual(views.at(-1)?.commentAccess, { kind: "allow", allowUrl: ALLOW_URL, checking: true });
+    server.answer("sashaCommentAccess", { access: "ready" });
+    await settle();
+    assert.equal(views.at(-1)?.commentAccess, null);
   } finally {
     controller.stop();
   }

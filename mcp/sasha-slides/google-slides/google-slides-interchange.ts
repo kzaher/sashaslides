@@ -48,12 +48,12 @@ import {
   type DeckCaller,
   type DeckRouteHandler,
 } from "../deck-contracts/deck-service-contract.ts";
-import { ADDON_BINDING_SECRET_HEADER, ADDON_IDENTITY_AUDIENCES, ADDON_IDENTITY_HEADER, ADDON_PAGE_IDS_HEADER } from "./addon-identity.ts";
+import { ADDON_BINDING_SECRET_HEADER, ADDON_IDENTITY_HEADER, ADDON_PAGE_IDS_HEADER, MINIMUM_BINDING_SECRET_LENGTH, verifyAddonIdentityToken } from "./addon-identity.ts";
 import { addonExportRequests, runExport, type ExportTarget } from "./export-run.ts";
 import { createExpiringTable } from "./expiring-table.ts";
 import { accessTokenForIdentity, exchangeAuthorizationCode, GOOGLE_SLIDES_CONNECT_SCOPES, googleConsentAddress } from "./google-oauth.ts";
 import { answerError, answerWithBody, fieldOf, readRequestBody, redirect, stringFieldOf } from "./http-answers.ts";
-import { createIdentityVerifier, unverifiedClaims, type IdentityClaims } from "./identity-token.ts";
+import { createIdentityVerifier, type IdentityClaims } from "./identity-token.ts";
 import { idSeedFrom, importIntoDeck, type ImportOutcome } from "./import-into-deck.ts";
 import { createSlidesClient, googleFailureCodeOf, presentationAddressOf, presentationIdFrom } from "./slides-client.ts";
 
@@ -83,20 +83,8 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     return (assetId) => `${options.publicUrl.replace(/\/$/, "")}${DECK_API_PATHS.exportAsset(token, assetId)}`;
   };
 
-  const verifyAddon = async (identityToken: string): Promise<IdentityClaims | null> => {
-    for (const pinned of ADDON_IDENTITY_AUDIENCES) {
-      const verdict = await verifier.verify({ token: identityToken, audience: pinned.audience });
-      if (verdict.kind === "verified") return verdict.claims;
-      if (verdict.reason !== "wrong audience") {
-        options.warn(`google-slides: add-on identity token rejected: ${verdict.reason}`);
-        return null;
-      }
-    }
-    // The audience is not a secret, and naming it is how a new Apps Script project's client is
-    // found and pinned (addon-identity.ts).
-    options.warn(`google-slides: add-on identity token rejected: wrong audience ${JSON.stringify(unverifiedClaims(identityToken)?.["aud"] ?? null)}`);
-    return null;
-  };
+  const verifyAddon = (identityToken: string): Promise<IdentityClaims | null> =>
+    verifyAddonIdentityToken({ verifier, identityToken, warn: (message) => options.warn(`google-slides: ${message}`) });
 
   const handleConnect = async (request: RouteRequest): Promise<void> => {
     const { response, url, caller } = request;
@@ -164,6 +152,8 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
       const code = googleFailureCodeOf(read.status);
       return answerError({ response, status: statusOfGoogleFailure(code), error: code, message: read.message, ...(code === "googleNotConnected" ? { connectAddress } : {}) });
     }
+    // Started before the deck is created so the two overlap; it never rejects (a failure is a value).
+    const exporting = slides.exportPresentationPptx({ presentationId });
     const created = await deckService.createDeck({ caller, title: stringFieldOf(read.body, "title") ?? "Imported presentation" });
     switch (created.kind) {
       case "opened":
@@ -179,7 +169,17 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
         return assertNever(created);
     }
     await using deck = created.deck;
-    const imported = await importIntoDeck({ presentationAnswer: read.body, deck, author: authorOf(caller), fetch: options.fetch, accessToken: token.accessToken, idSeed: idSeedFrom(options.randomToken()), now });
+    const exported = await exporting;
+    const imported = await importIntoDeck({
+      presentationAnswer: read.body,
+      deck,
+      author: authorOf(caller),
+      fetch: options.fetch,
+      accessToken: token.accessToken,
+      pptxExport: exported.kind === "exported" ? exported.bytes : null,
+      idSeed: idSeedFrom(options.randomToken()),
+      now,
+    });
     if (imported.kind !== "imported") return answerImportFailure({ response, outcome: imported });
     const answer: GoogleSlidesImportBody = { deck: deck.summary(), report: imported.report };
     answerWithBody({ response, status: 201, body: answer });
@@ -303,7 +303,8 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
     if (opened.kind !== "opened") return answerError({ response, status: opened.kind === "limitReached" ? 409 : 403, error: opened.kind === "limitReached" ? "limitReached" : "notPermitted", message: "The deck could not be opened for the import." });
     await using deck = opened.deck;
-    const imported = await importIntoDeck({ presentationAnswer: presentation, deck, author: authorOf(caller), fetch: options.fetch, accessToken: null, idSeed: idSeedFrom(options.randomToken()), now });
+    // Code.gs posts only the presentations.get answer, so gradient fills are reported as lost here.
+    const imported = await importIntoDeck({ presentationAnswer: presentation, deck, author: authorOf(caller), fetch: options.fetch, accessToken: null, pptxExport: null, idSeed: idSeedFrom(options.randomToken()), now });
     if (imported.kind !== "imported") return answerImportFailure({ response, outcome: imported });
     await deck.bindAddon({ bindingSecretHash: ticket.bindingSecretHash, presentationId: ticket.presentationId });
     const answer: AddonImportBody = { deckId: deck.deckId, ticket: await options.embedTickets.issue({ accountId: caller.accountId, deckId: deck.deckId }), report: imported.report };
@@ -395,9 +396,6 @@ type RouteRequest = Readonly<{ request: IncomingMessage; response: ServerRespons
 type ImportTicket = Readonly<{ caller: DeckCaller; presentationId: string; bindingSecretHash: string; replaceDeckId: DeckId | null }>;
 
 type AddonExport = Readonly<{ caller: DeckCaller; deckId: DeckId; presentationId: string; finished: "applied" | "failed" | null }>;
-
-/** Two `Utilities.getUuid()` values base64url-encoded are 43 characters; anything much shorter is not one. */
-const MINIMUM_BINDING_SECRET_LENGTH = 32;
 
 async function answered(work: Promise<void>): Promise<true> {
   await work;

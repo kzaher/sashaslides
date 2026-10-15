@@ -1,7 +1,9 @@
 /**
  * Wires the comment bot for `server.ts --http`: the bot over each watch owner's own Google grant
- * (`owner-drive.ts`), and the `/comments/allow` page (`comment-access-page.ts`) where a user lets
- * Sasha at one deck. Always on with `--http`: it needs nothing but the connector's own OAuth
+ * (`owner-drive.ts`), the `/comments/allow` page (`comment-access-page.ts`) where a user lets
+ * Sasha at one deck, and the add-on's `POST /comments/access` check (`comment-access-check.ts`),
+ * which asks the same per-owner Drives whether the asker's own grant already reaches the deck.
+ * Always on with `--http`: it needs nothing but the connector's own OAuth
  * client and grant store. There is no shared bot account and no `--comment-bot` file any more.
  *
  * The picker on that page needs a browser API key: `SASHA_PICKER_API_KEY` (a Google Cloud API
@@ -11,14 +13,18 @@
  */
 import { randomBytes } from "node:crypto";
 import { DRIVE_HOOK_PATH } from "../http/http-server";
+import { MCP_PATH } from "../http/oauth-metadata";
 import type { GoogleClientCredentials } from "../google-auth";
 import type { GoogleIdentity, RecordStore } from "../http/oauth-store";
 import { exchangeAuthorizationCode } from "../google-slides/google-oauth";
+import { verifyAddonIdentityToken } from "../google-slides/addon-identity";
 import { createIdentityVerifier } from "../google-slides/identity-token";
 import { createCommentBot, WATCH_LIFETIME_MS, type CommentBot, type CommentBotStore } from "./comment-bot";
+import { createCommentAccessCheck } from "./comment-access-check";
 import { allowUrlFor, COMMENTS_ALLOW_PATH, createCommentAccessPage, projectNumberOf, type CommentAccessPage, type GoogleSignIn } from "./comment-access-page";
 import { googleOwnerDrives, OWNER_DRIVE_TIMEOUT_MS } from "./owner-drive";
 
+/** `accessPage` answers both `/comments/allow*` (the picker page) and `POST /comments/access` (the add-on's check). */
 export type CommentBotLoad = Readonly<{ bot: CommentBot; accessPage: CommentAccessPage; banner: readonly string[] }>;
 
 export function loadCommentBot(
@@ -37,8 +43,10 @@ export function loadCommentBot(
   const now = (): Date => new Date();
   const base = publicUrl.replace(/\/+$/, "");
   const webhookUrl = `${base}${DRIVE_HOOK_PATH}`;
+  // ONE set of per-owner Drives for the bot and the add-on's check, so they share each owner's cached token.
+  const drives = googleOwnerDrives({ grants: store.googleIdentities, client: googleClient, fetch, now, timeoutMs: OWNER_DRIVE_TIMEOUT_MS });
   const bot = createCommentBot({
-    drives: googleOwnerDrives({ grants: store.googleIdentities, client: googleClient, fetch, now, timeoutMs: OWNER_DRIVE_TIMEOUT_MS }),
+    drives,
     store,
     webhookUrl,
     allowUrlFor: (fileId) => allowUrlFor({ publicUrl, fileId }),
@@ -55,7 +63,7 @@ export function loadCommentBot(
   const apiKey = options.pickerApiKey ?? "";
   const appId = projectNumberOf(googleClient.clientId);
   const picker = apiKey === "" || appId === null ? null : { apiKey, appId };
-  const accessPage = createCommentAccessPage({
+  const allowPage = createCommentAccessPage({
     publicUrl,
     googleCallbackUrl,
     googleClient,
@@ -66,6 +74,18 @@ export function loadCommentBot(
     randomToken: () => randomBytes(32).toString("base64url"),
     warn,
   });
+  const addonVerifier = createIdentityVerifier({ fetch, now: () => Date.now() });
+  const accessCheck = createCommentAccessCheck({
+    drives,
+    verifyIdentity: (identityToken) => verifyAddonIdentityToken({ verifier: addonVerifier, identityToken, warn: (message) => warn(`comment access: ${message}`) }),
+    allowUrlFor: (fileId) => allowUrlFor({ publicUrl, fileId }),
+    connectUrl: `${base}${MCP_PATH}`,
+    now,
+    warn,
+  });
+  const accessPage: CommentAccessPage = {
+    handleRequest: async (request) => (await allowPage.handleRequest(request)) || accessCheck.handleRequest(request),
+  };
   return {
     bot,
     accessPage,

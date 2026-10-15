@@ -99,6 +99,7 @@ declare global {
     sashaImportAgain(spec: Readonly<{ importToken: string; deckId: string }>): void;
     /** The editor's export through the add-on's own authorization: answers `{ exportId, outcome, message }`. */
     sashaRunExport(exportId: string): void;
+    sashaCommentAccess(): void;
   }>;
 
   const google: Readonly<{

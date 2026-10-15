@@ -22,6 +22,7 @@
  * entry here.
  */
 import { ADDON_REQUEST_HEADERS } from "../engine/src/contracts/deck-api.ts";
+import { unverifiedClaims, type IdentityClaims, type IdentityVerifier } from "./identity-token.ts";
 
 export const ADDON_IDENTITY_AUDIENCES: readonly Readonly<{ audience: string; project: string; measuredOn: string; method: string }>[] = [
   {
@@ -37,3 +38,31 @@ export const ADDON_IDENTITY_HEADER = ADDON_REQUEST_HEADERS.identityToken;
 export const ADDON_BINDING_SECRET_HEADER = ADDON_REQUEST_HEADERS.bindingSecret;
 /** The add-on presentation's current page ids, comma separated, so the plan knows which pages to replace. */
 export const ADDON_PAGE_IDS_HEADER = ADDON_REQUEST_HEADERS.presentationPageIds;
+
+/**
+ * Two `Utilities.getUuid()` values base64url-encoded are 43 characters; anything much shorter is
+ * not a binding secret (editor-code-gs.ts `sashaBindingSecret_`).
+ */
+export const MINIMUM_BINDING_SECRET_LENGTH = 32;
+
+/**
+ * The add-on's identity token checked against every pinned audience: the claims, or null after a
+ * warning. Shared by the editor handoff (google-slides-interchange.ts) and the comment access check
+ * (comment-bot/comment-access-check.ts), so the two can never disagree about who is asking.
+ */
+export async function verifyAddonIdentityToken(
+  options: Readonly<{ verifier: IdentityVerifier; identityToken: string; warn: (message: string) => void }>,
+): Promise<IdentityClaims | null> {
+  for (const pinned of ADDON_IDENTITY_AUDIENCES) {
+    const verdict = await options.verifier.verify({ token: options.identityToken, audience: pinned.audience });
+    if (verdict.kind === "verified") return verdict.claims;
+    if (verdict.reason !== "wrong audience") {
+      options.warn(`add-on identity token rejected: ${verdict.reason}`);
+      return null;
+    }
+  }
+  // The audience is not a secret, and naming it is how a new Apps Script project's client is
+  // found and pinned (ADDON_IDENTITY_AUDIENCES above).
+  options.warn(`add-on identity token rejected: wrong audience ${JSON.stringify(unverifiedClaims(options.identityToken)?.["aud"] ?? null)}`);
+  return null;
+}

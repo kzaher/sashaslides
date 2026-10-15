@@ -37,7 +37,7 @@ const SETUP: SetupEnvironment = {
 
 let root: Root | null = null;
 
-function render({ conversation, previews, actions }: SidebarView): void {
+function render({ conversation, previews, commentAccess, actions }: SidebarView): void {
   if (root === null) {
     const existing = document.getElementById(ROOT_ELEMENT_ID);
     const host = existing ?? document.createElement("div");
@@ -45,7 +45,7 @@ function render({ conversation, previews, actions }: SidebarView): void {
     if (existing === null) document.body.append(host);
     root = createRoot(host);
   }
-  root.render(createElement(ConversationPanel, { conversation, previews, setup: SETUP, actions }));
+  root.render(createElement(ConversationPanel, { conversation, previews, commentAccess, setup: SETUP, actions }));
 }
 
 /**
@@ -59,6 +59,7 @@ function boot(): void {
     render,
     isVisible: () => document.visibilityState === "visible",
     onVisibilityChange: (listener) => document.addEventListener("visibilitychange", listener),
+    onWindowFocus: (listener) => window.addEventListener("focus", listener),
     seedText: document.getElementById(SIDEBAR_SEED_ELEMENT_ID)?.textContent ?? null,
   });
 }

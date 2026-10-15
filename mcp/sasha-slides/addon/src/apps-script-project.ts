@@ -136,7 +136,7 @@ var SASHA_REPORT_HEIGHT = 800;
 var SASHA_DEFAULT_PAGE_SIZE = 100;
 // THE SIDEBAR'S REMEMBERED READS (src/sidebar-seed.ts): one user-cache entry per deck and slot.
 var SASHA_SIDEBAR_MEMORY_PREFIX = ${JSON.stringify(SIDEBAR_MEMORY_KEY_PREFIX)};
-var SASHA_SIDEBAR_MEMORY_SLOTS = ['scan', 'manifest', 'log'];
+var SASHA_SIDEBAR_MEMORY_SLOTS = ['scan', 'manifest', 'log', 'commentAccess'];
 var SASHA_SIDEBAR_MEMORY_SECONDS = ${String(SIDEBAR_MEMORY_SECONDS)};
 var SASHA_SIDEBAR_MEMORY_MAXIMUM_CHARACTERS = ${String(SIDEBAR_MEMORY_MAXIMUM_CHARACTERS)};
 // WHICH CANDIDATE THE REPORT WINDOW WAS OPENED ON, parked between documents that cannot talk to

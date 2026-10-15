@@ -6,8 +6,10 @@
  * The server renders everything the picker needs on one `[data-picker]` element: the person's
  * access token (`data-token`), the picker's API key (`data-key`), the OAuth client's project
  * number (`data-app`, which ties the grant to Sasha's app), the deck (`data-deck`) and Google's
- * loader (`data-loader`). The picker opens by itself once Google's loader is ready; the button
- * reopens it after a cancel.
+ * loader (`data-loader`). The picker opens by itself once Google's loader is ready, so a person
+ * sent here from the deck's "Ask Sasha" sidebar (or by their assistant) has the deck already
+ * preselected and needs one click. Some browsers refuse to show it without a user gesture; then
+ * the "Choose the deck" button is the way in, and it also reopens the picker after a cancel.
  *
  * Not React (the TypeScript skill's default for UI): there is no state to render, only one
  * button and one status line on server-rendered markup. Bundled by `build.ts` into
@@ -77,7 +79,11 @@ function start(root: HTMLElement): void {
       callback: () => {
         button.disabled = false;
         button.addEventListener("click", () => openPicker({ settings, status }));
-        openPicker({ settings, status });
+        try {
+          openPicker({ settings, status });
+        } catch {
+          say({ status, text: "Press \u201cChoose the deck\u201d to open Google\u2019s file picker." });
+        }
       },
       onerror: () => say({ status, text: "Google's file picker did not load. Reload the page." }),
     });
@@ -105,7 +111,7 @@ function openPicker(options: Readonly<{ settings: Settings; status: HTMLElement 
         say({
           status,
           text: chosen
-            ? "Done. Go back to your assistant and tell it Sasha may answer the comments now."
+            ? "Done. Go back to your deck: Sasha can read and answer its comments now. If your assistant sent you this link, tell it it is done."
             : "That was a different file. Press the button and choose the deck from the link.",
           done: chosen,
         });

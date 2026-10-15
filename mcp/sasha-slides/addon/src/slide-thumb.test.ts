@@ -85,7 +85,7 @@ test("every candidate in the set card carries its thumbnail", () => {
 
 function markupOf({ conversation, previews }: { conversation: Conversation; previews: SlidePreviews }): string {
   return renderToStaticMarkup(
-    createElement(ConversationPanel, { conversation, previews, setup: UNCONFIGURED_SETUP, actions: INERT_CONVERSATION_ACTIONS }),
+    createElement(ConversationPanel, { conversation, previews, commentAccess: null, setup: UNCONFIGURED_SETUP, actions: INERT_CONVERSATION_ACTIONS }),
   );
 }
 

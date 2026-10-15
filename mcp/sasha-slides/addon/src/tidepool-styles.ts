@@ -55,7 +55,7 @@ html, body { background: #eef1f6; }
 .sasha-tide-logo svg { width: 100%; height: 100%; }
 
 /* Liquid glass: translucent fill, bright top edge, soft lift. */
-.sasha-tide .sasha-connection, .sasha-tide .sasha-artifact, .sasha-tide .sasha-nobody-listening {
+.sasha-tide .sasha-connection, .sasha-tide .sasha-artifact, .sasha-tide .sasha-nobody-listening, .sasha-tide .sasha-comment-access {
   position: relative; overflow: hidden;
   border-radius: 22px; padding: 14px 16px;
   background: rgba(255, 255, 255, .26);
@@ -73,6 +73,14 @@ html, body { background: #eef1f6; }
 .sasha-tide .sasha-connection-dot-on::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: #34d399; animation: sashaTideBreathe 3.6s ease-in-out infinite; }
 .sasha-tide .sasha-connection-hint { margin-left: 19px; }
 .sasha-tide .sasha-dim { color: #3d4659; }
+
+/* "Let Sasha answer comments": a small glass card under the connection, only when it is needed. */
+.sasha-tide .sasha-comment-access { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; }
+.sasha-tide .sasha-comment-access-line { margin: 0; font-size: 13.5px; font-weight: 600; color: #1c2333; }
+.sasha-tide .sasha-comment-access-hint, .sasha-tide .sasha-comment-access-note { margin: 0; font-size: 12px; }
+.sasha-tide .sasha-comment-access-note { padding: 0 6px; }
+.sasha-tide .sasha-comment-access-allow { align-self: flex-start; margin-top: 6px; padding: 6px 16px; font-size: 12.5px; font-weight: 600; text-decoration: none; }
+.sasha-tide .sasha-comment-access-allow:hover, .sasha-tide .sasha-comment-access-allow:focus-visible { color: #fff; background: #4338ca; text-decoration: none; }
 
 /* The assets card. */
 .sasha-tide .sasha-artifact { gap: 10px; padding: 14px; }

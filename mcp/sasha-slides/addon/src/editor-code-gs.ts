@@ -8,6 +8,9 @@
  *   sashaRunExport(exportId) the editor's "Export to this presentation" when the server holds no
  *                            Google grant: fetch the plan, run it with the add-on's own Slides
  *                            authorization one slide per batch, post the result
+ *   sashaCommentAccess()     the Ask Sasha sidebar's "can Sasha answer comments on this deck?":
+ *                            the same identity token and binding secret, POSTed to the connector's
+ *                            comment access check, and the answer remembered for the next open
  *
  * THIN, like the rest of Code.gs: the server decided every request; the two plan instructions
  * (`sashaSlideBoundary`, `sashaSpeakerNotes`, google-slides/slides-requests.ts) are interpreted
@@ -19,6 +22,7 @@
  * is packed into 32 bytes and sent base64url. The server keeps only its SHA-256.
  */
 import { ADDON_REQUEST_HEADERS } from "../../engine/src/contracts/deck-api.ts";
+import { COMMENT_ACCESS_PATH } from "../../comment-bot/comment-access-contract.ts";
 
 /**
  * MEASURED, not chosen: the largest modeless dialog Slides shows (SPEC.md 21.13 "at the largest
@@ -103,6 +107,26 @@ function sashaRunExport(exportId) {
   var outcome = sashaRunPlan_(plan.presentationId, plan.requests || []);
   sashaEditorFetch_(path + '/result', { method: 'post', headers: headers, body: { outcome: outcome } });
   return { exportId: exportId, outcome: outcome.kind, message: outcome.message || '' };
+}
+
+/**
+ * Whether Sasha can read and answer this deck's comments with the USER'S OWN Google grant, asked of
+ * the connector with the handoff's proof (identity token + binding secret). The sidebar calls it
+ * beside its other boot reads, never after them; the answer is kept in the user cache so the next
+ * showSidebar draws the right card at once (src/comment-access-state.ts). Throws the connector's
+ * sentence on failure, which the sidebar treats as "nothing new to show".
+ */
+function sashaCommentAccess() {
+  var answer = sashaEditorFetch_('${COMMENT_ACCESS_PATH}', {
+    method: 'post',
+    body: {
+      identityToken: ScriptApp.getIdentityToken(),
+      presentationId: SlidesApp.getActivePresentation().getId(),
+      bindingSecret: sashaBindingSecret_()
+    }
+  });
+  sashaRememberForSidebar_('commentAccess', answer);
+  return answer;
 }
 
 /** One batch per sashaSlideBoundary (in chunks of 500), stopping at the first failure; notes last. */

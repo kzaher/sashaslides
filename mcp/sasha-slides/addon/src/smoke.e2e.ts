@@ -1796,8 +1796,21 @@ async function driveSeededSidebar({ failures }: { failures: string[] }): Promise
         !seen.spinner,
       detail: early,
     });
+    check({
+      failures,
+      what: "SEEDED: the comment access check is out with the other boot reads, before any answer",
+      ok: seen.calls.includes("sashaCommentAccess") && seen.answered === 0,
+      detail: early,
+    });
     const settled = await pollFor({ client, expression: "!document.querySelector('.sasha-header-refreshing')" });
     check({ failures, what: "SEEDED: Updating goes away once the fresh reads land", ok: settled });
+    const allow = await pollFor({
+      client,
+      expression:
+        "(function(){var link=document.querySelector('.sasha-comment-access-allow');" +
+        "return !!link&&link.target==='_blank'&&link.href.indexOf('/comments/allow?deck=deck_smoke_0123456789')>0&&link.textContent==='Allow';})()",
+    });
+    check({ failures, what: "the needsAllow answer draws the card with an Allow link that opens a new tab", ok: allow });
     for (const error of errors) failures.push(`seeded sidebar uncaught: ${error}`);
   } finally {
     if (client !== null) await client.close();
@@ -1880,6 +1893,10 @@ const STUB_SCRIPT = `<script>
   var answers = {
     sashaHello: function () {
       return { protocolVersion: 1, presentationUrl: 'https://docs.google.com/presentation/d/deck_smoke_0123456789/edit' };
+    },
+    // The connector's answer for a deck the user has not chosen in the picker yet.
+    sashaCommentAccess: function () {
+      return { access: 'needsAllow', allowUrl: 'https://sashaslides.com/comments/allow?deck=deck_smoke_0123456789' };
     },
     sashaScanInbox: function () {
       return { marks: [{ proposalId: PROPOSAL, folderId: 'folder_1', readyFileId: 'ready',

@@ -68,6 +68,7 @@ export const INERT_CONVERSATION_ACTIONS: ConversationActions = {
   openArtifact() {},
   setCandidateArchived() {},
   chooseCandidateTab() {},
+  allowCommentAccessOpened() {},
 };
 
 /** A build with no hosted connector address, and a viewer whose storage remembers nothing. */

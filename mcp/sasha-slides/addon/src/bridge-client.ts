@@ -46,6 +46,7 @@ import {
   type WriteRenderReply,
   type WriteRenderSpec, explainHostFailure } from "./bridge.ts";
 import { parseHelloReply } from "./bridge.ts";
+import { parseCommentAccessAnswer, type CommentAccessAnswer } from "../../comment-bot/comment-access-contract.ts";
 import type {
   BatchReadApi,
   CandidateCommentsApi,
@@ -150,6 +151,17 @@ export async function helloFromServer({ call }: { call: ServerCall }): Promise<C
   const replied = await call<unknown>({ invoke: (runner) => runner.sashaHello(), what: "sashaHello" });
   if (replied.kind !== "ok") return replied;
   return outcomeOf({ parsed: parseHelloReply(replied.value), what: "sashaHello" });
+}
+
+/**
+ * `sashaCommentAccess()`: Code.gs asks the connector whether the user's own grant reaches this
+ * deck's comments (comment-access-state.ts). Its reply is the connector's answer, parsed here.
+ */
+export async function commentAccessFromServer({ call }: { call: ServerCall }): Promise<CallOutcome<CommentAccessAnswer>> {
+  const replied = await call<unknown>({ invoke: (runner) => runner.sashaCommentAccess(), what: "sashaCommentAccess" });
+  if (replied.kind !== "ok") return replied;
+  const answer = parseCommentAccessAnswer(replied.value);
+  return answer === null ? { kind: "failed", message: "sashaCommentAccess returned no access answer" } : { kind: "ok", value: answer };
 }
 
 export function appsScriptDriveApi({ call }: { call: ServerCall }): DriveApi {

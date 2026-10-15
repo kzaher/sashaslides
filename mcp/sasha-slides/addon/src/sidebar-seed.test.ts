@@ -141,6 +141,7 @@ function markupOf(conversation: Conversation): string {
     createElement(ConversationPanel, {
       conversation,
       previews: NO_PREVIEWS,
+      commentAccess: null,
       setup: UNCONFIGURED_SETUP,
       actions: INERT_CONVERSATION_ACTIONS,
     }),
@@ -165,9 +166,10 @@ test("ANOTHER DECK'S remembered reads are dropped, every one of them", () => {
     scan: remembered({ marks: [stagedMark] }, OTHER_DECK),
     manifest: remembered({ forEventId: null, texts: [{ fileId: "manifest_1", text: manifestText }] }, OTHER_DECK),
     log: remembered({ folderId: "folder_1", events: [stagedEvent] }, OTHER_DECK),
+    commentAccess: remembered({ access: "ready" }, OTHER_DECK),
   });
   const parsed = parseSidebarBoot(text);
-  assert.deepEqual(parsed.kind === "ok" ? parsed.value.remembered : parsed, { scan: null, manifest: null, log: null });
+  assert.deepEqual(parsed.kind === "ok" ? parsed.value.remembered : parsed, { scan: null, manifest: null, log: null, commentAccess: null });
   assert.equal(parsed.kind === "ok" ? sidebarSeedOf(parsed.value) : "invalid", null, "no scan, so no seed: the panel opens the old way");
   assert.deepEqual(parsed.kind === "ok" ? parsed.value.hello : null, HELLO, "the hello still saves its round trip");
 });
@@ -187,6 +189,22 @@ test("a malformed remembered read is dropped on its own; a missing hello refuses
   }
   assert.equal(parseSidebarBoot("{").kind, "invalid");
   assert.equal(parseSidebarBoot(JSON.stringify({ remembered: {} })).kind, "invalid");
+});
+
+test("the remembered comment-access answer is this deck's, parsed, and dropped when it is not one", () => {
+  const allowUrl = `https://sashaslides.com/comments/allow?deck=${DECK}`;
+  // Columns: what Code.gs remembered -> what the panel is seeded with.
+  const rows: readonly Readonly<{ label: string; value: unknown; expected: unknown }>[] = [
+    { label: "needsAllow", value: { access: "needsAllow", allowUrl }, expected: { access: "needsAllow", allowUrl } },
+    { label: "ready", value: { access: "ready" }, expected: { access: "ready" } },
+    { label: "an unknown answer", value: { access: "maybe" }, expected: null },
+    { label: "an allow link that is not https", value: { access: "needsAllow", allowUrl: "javascript:alert(1)" }, expected: null },
+  ];
+  for (const row of rows) {
+    const parsed = parseSidebarBoot(bootText({ commentAccess: remembered(row.value) }));
+    const read = parsed.kind === "ok" ? parsed.value.remembered.commentAccess : null;
+    assert.deepEqual(read === null ? null : read.value, row.expected, row.label);
+  }
 });
 
 test("a log from a folder the scan does not name is not seeded", () => {

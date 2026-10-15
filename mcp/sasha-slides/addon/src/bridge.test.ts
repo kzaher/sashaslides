@@ -31,7 +31,7 @@ import {
 } from "./bridge.ts";
 import { SEEN_LIMIT, parseSeen, seenStore, serializeSeen, type KeyValueStorage } from "./seen-store.ts";
 
-test("there are exactly twenty-two server functions, and they are the ones Code.gs declares", () => {
+test("there are exactly twenty-three server functions, and they are the ones Code.gs declares", () => {
   assert.deepEqual(SERVER_FUNCTION_NAMES, [
     // The picker's five.
     "sashaHello",
@@ -77,6 +77,9 @@ test("there are exactly twenty-two server functions, and they are the ones Code.
     // add-on's own Slides authorization when the server holds no Google grant.
     "sashaImportAgain",
     "sashaRunExport",
+    // Whether the user's own Google grant lets Sasha answer this deck's comments, asked of the
+    // connector with the editor handoff's identity proof (comment-access-state.ts).
+    "sashaCommentAccess",
   ]);
 });
 
@@ -266,6 +269,7 @@ function silentRunner(): AppsScriptRunner {
     sashaTakePickerTarget: () => undefined,
     sashaImportAgain: () => undefined,
     sashaRunExport: () => undefined,
+    sashaCommentAccess: () => undefined,
   };
   return runner;
 }
@@ -300,6 +304,7 @@ function failingRunner(error: unknown): AppsScriptRunner {
     sashaTakePickerTarget: () => undefined,
     sashaImportAgain: () => undefined,
     sashaRunExport: () => undefined,
+    sashaCommentAccess: () => undefined,
   };
   return runner;
 }
@@ -333,6 +338,7 @@ function throwingRunner(): AppsScriptRunner {
     sashaTakePickerTarget: () => undefined,
     sashaImportAgain: () => undefined,
     sashaRunExport: () => undefined,
+    sashaCommentAccess: () => undefined,
   };
   return runner;
 }
@@ -369,6 +375,7 @@ function stubCall(replies: Readonly<Record<string, unknown>>) {
     sashaTakeReportTarget: answer("sashaTakeReportTarget"),
     sashaImportAgain: answer("sashaImportAgain"),
     sashaRunExport: answer("sashaRunExport"),
+    sashaCommentAccess: answer("sashaCommentAccess"),
   };
   return appsScriptCall({ run: runner });
 }

@@ -19,8 +19,11 @@
 // taking the rest with it; and what conversation-state.ts does with the rest is mark it `seeded`,
 // so it is replaced by the fresh reads and acted on only once they confirm it.
 //
+// The connector's comment-access answer rides along the same way (`commentAccess`), so the "Let
+// Sasha answer comments" card is right on the first paint (comment-access-state.ts).
+//
 // NOTHING SECRET IS IN IT: Drive ids, proposal names, manifest and event bytes the user's own
-// sidebar read -- never a token. The user cache is private to this user and this script.
+// sidebar read, and the comment-access answer (a public page address at most) -- never a token. The user cache is private to this user and this script.
 
 import {
   parseHelloReply,
@@ -32,6 +35,7 @@ import {
   type RawEventFile,
 } from "./bridge.ts";
 import type { SidebarSeed } from "./conversation-state.ts";
+import { parseCommentAccessAnswer, type CommentAccessAnswer } from "../../comment-bot/comment-access-contract.ts";
 import { parseManifest, type Manifest, type Parsed } from "./protocol.ts";
 import { sessionEventsOf } from "./session-log.ts";
 
@@ -51,6 +55,8 @@ export type SidebarBoot = Readonly<{
     scan: RememberedRead<readonly ProposalMark[]> | null;
     manifest: RememberedRead<RememberedManifest> | null;
     log: RememberedRead<RememberedLog> | null;
+    /** Whether Sasha could answer this deck's comments last time (comment-access-state.ts). */
+    commentAccess: RememberedRead<CommentAccessAnswer> | null;
   }>;
 }>;
 
@@ -85,6 +91,7 @@ export function parseSidebarBoot(text: string): Parsed<SidebarBoot> {
         }),
         manifest: mapRead(entry("manifest"), rememberedManifestOf),
         log: mapRead(entry("log"), rememberedLogOf),
+        commentAccess: mapRead(entry("commentAccess"), parseCommentAccessAnswer),
       },
     },
   };

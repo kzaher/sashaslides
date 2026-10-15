@@ -194,7 +194,8 @@ export type ServerFunctionName =
   | "sashaReportWindowUrl"
   | "sashaTakeReportTarget"
   | "sashaImportAgain"
-  | "sashaRunExport";
+  | "sashaRunExport"
+  | "sashaCommentAccess";
 
 export const SERVER_FUNCTION_NAMES: readonly ServerFunctionName[] = [
   "sashaHello",
@@ -219,6 +220,7 @@ export const SERVER_FUNCTION_NAMES: readonly ServerFunctionName[] = [
   "sashaTakeReportTarget",
   "sashaImportAgain",
   "sashaRunExport",
+  "sashaCommentAccess",
 ];
 
 /**

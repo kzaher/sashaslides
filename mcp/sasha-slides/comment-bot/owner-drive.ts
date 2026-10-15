@@ -156,7 +156,9 @@ export function googleOwnerDrives(
     if (response.status !== 200 || token === null || expiresIn === null) {
       return {
         kind: "failed",
-        status: response.status,
+        // `invalid_grant` is Google's answer for a refresh token it no longer honours (revoked, or
+        // past the 7 days of a Testing-mode client): the grant is gone, which callers read as 401.
+        status: errorCode(body?.error) === "invalid_grant" ? 401 : response.status,
         reason: `token refresh answered ${String(response.status)} ${errorCode(body?.error)}; sign in to Sasha Slides again`,
       };
     }

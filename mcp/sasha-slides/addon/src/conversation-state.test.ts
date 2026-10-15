@@ -473,6 +473,7 @@ test("the open handler is wired, and nothing fires on render", () => {
     createElement(ConversationPanel, {
       conversation: withCandidates({ nowMs: SOON_AFTER_STAGING }),
       previews: NO_PREVIEWS,
+      commentAccess: null,
       setup: UNCONFIGURED_SETUP,
       actions: { ...INERT_CONVERSATION_ACTIONS, openArtifact: (target) => asked.push(target) },
     }),
@@ -688,6 +689,7 @@ function markupOf(conversation: Conversation): string {
     createElement(ConversationPanel, {
       conversation,
       previews: NO_PREVIEWS,
+      commentAccess: null,
       setup: UNCONFIGURED_SETUP,
       actions: INERT_CONVERSATION_ACTIONS,
     }),
@@ -842,4 +844,25 @@ test("a failed hello stops the spinner: the trouble is the panel, not a line abo
   const markup = markupOf(troubled);
   assert.doesNotMatch(markup, /class="sasha-opening"/);
   assert.match(markup, /Authorization is required/);
+});
+
+test("the comment-access card: Allow is a new-tab link to the allow page, and the other answers are one line", () => {
+  const allowUrl = "https://sashaslides.com/comments/allow?deck=deck_0123456789";
+  const render = (commentAccess: Parameters<typeof ConversationPanel>[0]["commentAccess"]): string =>
+    renderToStaticMarkup(
+      createElement(ConversationPanel, {
+        conversation: withCandidates({ nowMs: SOON_AFTER_STAGING }),
+        previews: NO_PREVIEWS,
+        commentAccess,
+        setup: UNCONFIGURED_SETUP,
+        actions: INERT_CONVERSATION_ACTIONS,
+      }),
+    );
+  const allow = render({ kind: "allow", allowUrl, checking: false });
+  assert.match(allow, /Let Sasha answer comments on this deck/);
+  assert.match(allow, new RegExp(`<a class="[^"]*sasha-comment-access-allow" href="${allowUrl.replace(/[?.]/g, "\\$&")}" target="_blank" rel="noopener noreferrer">Allow</a>`));
+  assert.match(render({ kind: "allow", allowUrl, checking: true }), />Checking\.\.\.</);
+  assert.match(render({ kind: "viewOnly" }), /You can view this deck but not comment; ask the owner for Commenter access\./);
+  assert.match(render({ kind: "notConnected" }), /The Setup guide shows how\./);
+  assert.doesNotMatch(render(null), /class="[^"]*sasha-comment-access/, "ready (or unknown): no card at all");
 });
