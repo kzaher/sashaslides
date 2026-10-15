@@ -350,8 +350,11 @@ html, body { margin: 0; block-size: 100%; }
 .${classes.textArea} { inline-size: 100%; min-block-size: 72px; padding: var(--sasha-space-small); border: 1px solid var(--sasha-hairline); border-radius: var(--sasha-radius-control); background: var(--sasha-card-glass); color: var(--sasha-text); resize: vertical; }
 
 .${classes.notices} { position: absolute; inset-inline-end: var(--sasha-space-small); inset-block-end: var(--sasha-space-small); z-index: var(--sasha-layer-notice); display: flex; flex-direction: column-reverse; gap: var(--sasha-space-small); inline-size: min(300px, 100% - 2 * var(--sasha-space-small)); max-block-size: min(50%, 420px); overflow-y: auto; overscroll-behavior: contain; }
-.${classes.noticeRow} { display: flex; align-items: center; gap: var(--sasha-space-small); }
-.${classes.noticeRow} > p { margin: 0; flex: 1; }
+.${classes.noticeRow} { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sasha-space-small); }
+/* The message keeps a readable width and the actions wrap below it; measured 2026-10-15, a nowrap
+   row squeezed "Claude edited the deck: Added a hello slide" to one word per line beside its button. */
+.${classes.noticeRow} > p { margin: 0; flex: 1 1 170px; min-inline-size: 0; }
+.${classes.noticeRow} > button { white-space: nowrap; }
 
 .${classes.floatingLayer} { position: fixed; inset: 0; z-index: var(--sasha-layer-popover); pointer-events: none; }
 .${classes.floatingLayer}:empty { display: none; }
