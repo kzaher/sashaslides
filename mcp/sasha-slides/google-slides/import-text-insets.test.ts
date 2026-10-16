@@ -80,6 +80,32 @@ describe("an edge the shape does not state inherits along the placeholder chain 
   }
 });
 
+describe("Google's own 0.1 inch inset, exported as 91425, is drawn as its measured 85725", () => {
+  // Google stores insets on a 25 EMU grid (the converter's 21431 / 34290 / 91440 came back from the
+  // upload as 21425 / 34275 / 91425), so 91425 is its stored 0.1 inch: what every box the Slides API
+  // creates carries, and what a pptx's 0.1 inch becomes. Slides DRAWS the left and right of it 85725
+  // EMU from the frame (converter/geometry.ts; the test deck's ink). Taken at face value it took
+  // 2 x 0.8 units from every such column, and boxes the forward converter sized to their text
+  // wrapped in Sasha only: the test deck's "Q3 revenue, bold light" (slide 9), "02 / 03" (slide 7).
+  // Top and bottom stay as stated: the vertical line model was measured with them (import-presentation.ts).
+  test("the left and right edges of a box whose export states 91425 get 12 units of a 1280 page", () => {
+    const box = shapeByObjectId({
+      plan: planOf({ raw: COMPLEX_SLIDE_38, textInsets: new Map([["p38_i13", { left: 91_425, top: 91_425, right: 91_425, bottom: 91_425 }]]) }),
+      objectId: "p38_i13",
+    });
+    const stated = roundToThousandth(91_425 * UNITS_PER_ENGLISH_METRIC_UNIT);
+    assert.deepEqual(paddingOf(box), [FALLBACK, stated, FALLBACK, stated]);
+  });
+
+  test("an inset the converter chose keeps its stated value (control)", () => {
+    const box = shapeByObjectId({
+      plan: planOf({ raw: COMPLEX_SLIDE_38, textInsets: new Map([["p38_i13", { left: 0, top: 91_400, right: 0, bottom: 0 }]]) }),
+      objectId: "p38_i13",
+    });
+    assert.deepEqual(paddingOf(box), [0, roundToThousandth(91_400 * UNITS_PER_ENGLISH_METRIC_UNIT), 0, 0]);
+  });
+});
+
 function planOf(options: Readonly<{ raw: unknown; textInsets: ReadonlyMap<string, TextInsetsEnglishMetricUnits> | undefined }>): ImportPlan {
   const parsed = parsePresentation(options.raw);
   if (parsed.kind !== "ok") throw new Error(parsed.message);

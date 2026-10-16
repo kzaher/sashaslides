@@ -360,6 +360,19 @@ const ROUTING_BY_CATEGORY: ReadonlyMap<string, LineRouting> = new Map<string, Li
  * pptx export when the caller passes it (`textInsets`; see textInsetsOf).
  */
 const TEXT_INSET_ENGLISH_METRIC_UNITS = 85_725;
+/**
+ * The inset Google's pptx export states for that same default: 0.1 inch (91440) on the 25 EMU grid
+ * Google stores insets on (an uploaded 21431 / 34290 / 91440 comes back as 21425 / 34275 / 91425).
+ * Every box the Slides API creates exports it, and Slides draws its LEFT and RIGHT edges 85725 from
+ * the frame, not 91425: read literally it narrowed each such column by 1.6 units of a 1280 page,
+ * and text the forward converter fitted to its box (box = text + 2 x 85725) wrapped in Sasha and
+ * not in Google ("Q3 revenue, bold light" on the test deck's slide 9). Measured on the test deck's
+ * ink, Sasha minus Google, three boxes: left edge +0.57 / +0.85 / +0.66 units with 91425, -0.23 /
+ * +0.05 / -0.14 with 85725. TOP and BOTTOM keep the stated value: the engine's vertical line model
+ * (text-vertical-metrics.ts) was measured against Google's thumbnails of boxes imported with it,
+ * and 85725 there lifted the same three boxes' ink from -0.21 / -0.53 / -0.42 to -1.81 / -1.33 / -1.22.
+ */
+const EXPORTED_DEFAULT_TEXT_INSET_ENGLISH_METRIC_UNITS = 91_425;
 /** A shape is never thinner than this (geometry.ts MINIMUM_FRAME_SIZE); a line may be. */
 const MINIMUM_FRAME_SIZE = 1;
 
@@ -809,6 +822,7 @@ type TextInsetUnits = Readonly<{ left: number; top: number; right: number; botto
  * default. Why not the default everywhere: a box uploaded from a pptx keeps that file's insets (the
  * html2slides converter writes 0 on 1051 of its 1052 text shapes), and the 9-unit default inset of
  * a 1280 page then pushed text right and down and wrapped narrow boxes mid-word ("41%" -> "41/%").
+ * A left or right edge stating Google's exported default is drawn where Slides actually draws it.
  */
 function textInsetsOf(options: Readonly<{ objectId: string; shape: SlidesShape; context: ElementContext }>): TextInsetUnits {
   const { context } = options;
@@ -823,11 +837,18 @@ function textInsetsOf(options: Readonly<{ objectId: string; shape: SlidesShape; 
     if (stated !== undefined) chain.push(stated);
     parentId = context.placeholderParents.get(parentId)?.placeholder?.parentObjectId ?? null;
   }
-  const edge = (pick: (insets: TextInsetsEnglishMetricUnits) => number | undefined): number => {
-    const stated = chain.map(pick).find((value) => value !== undefined && Number.isFinite(value) && value >= 0);
-    return roundUnits((stated ?? TEXT_INSET_ENGLISH_METRIC_UNITS) * context.scale.unitsPerEnglishMetricUnit);
+  const edge = (options: Readonly<{ pick: (insets: TextInsetsEnglishMetricUnits) => number | undefined; horizontal: boolean }>): number => {
+    const stated = chain.map(options.pick).find((value) => value !== undefined && Number.isFinite(value) && value >= 0);
+    const exportedDefault = options.horizontal && stated === EXPORTED_DEFAULT_TEXT_INSET_ENGLISH_METRIC_UNITS;
+    const drawn = stated === undefined || exportedDefault ? TEXT_INSET_ENGLISH_METRIC_UNITS : stated;
+    return roundUnits(drawn * context.scale.unitsPerEnglishMetricUnit);
   };
-  return { left: edge((insets) => insets.left), top: edge((insets) => insets.top), right: edge((insets) => insets.right), bottom: edge((insets) => insets.bottom) };
+  return {
+    left: edge({ pick: (insets) => insets.left, horizontal: true }),
+    top: edge({ pick: (insets) => insets.top, horizontal: false }),
+    right: edge({ pick: (insets) => insets.right, horizontal: true }),
+    bottom: edge({ pick: (insets) => insets.bottom, horizontal: false }),
+  };
 }
 
 /** The shape, then its layout placeholder, then the master's: where an INHERIT property comes from. */
