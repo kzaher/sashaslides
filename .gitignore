@@ -104,3 +104,6 @@ mcp/sasha-slides/extension/offscreen.js
 
 # SxS output of mcp/sasha-slides/converter/calibration/sxs-candidates.ts (regenerated, never reviewed in git).
 .sxs-candidates/
+
+# Forward SxS results for the user to rate (copied from a regen run; never reviewed in git).
+.sxs-forward/
