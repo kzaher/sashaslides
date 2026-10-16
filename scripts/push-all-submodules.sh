@@ -11,10 +11,9 @@ done
 
 branch=$(git symbolic-ref --short HEAD) && git check-ref-format --branch "$branch" && git submodule foreach --recursive "
   case \"\$displaypath\" in
-    workout/*holosweat.api)
-      # The holosweat.api submodule nested inside workout is not ours to push;
-      # skip it (the root-level \"api\" submodule is still pushed).
-      echo \"skipping \$displaypath (api submodule nested inside workout)\" ;;
+    deps/drawio)
+      # deps/drawio tracks upstream jgraph/drawio, which is not ours to push.
+      echo \"skipping \$displaypath (upstream jgraph/drawio)\" ;;
     *)
       git checkout -B '$branch' HEAD && (git push $push_opt origin '$branch' || echo 'push failed') ;;
   esac
