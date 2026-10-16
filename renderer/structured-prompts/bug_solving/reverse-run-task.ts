@@ -144,7 +144,7 @@ export function reverseRunTask(session: Session, task: Task, settings: ReverseTa
       const gate = readReverseGateResult(fork.gateResult);
       if (!gate.ok) {
         lines.push(
-          `REVERSE REGRESSION GATE FAILED (${gate.regressions.length}) — slides outside this cluster drifted from the user's goldens-reverse or rose more than ${REVERSE_METRIC_RISE_LIMIT} points:`,
+          `REVERSE REGRESSION GATE FAILED (${gate.regressions.length}) — slides outside this cluster drifted from the user's goldens-reverse, rose more than ${REVERSE_METRIC_RISE_LIMIT} points, or moved a region away from Google's thumbnail:`,
           ...gate.findings.map((finding) => `  - ${finding.slide} ${finding.kind}: ${finding.detail}`),
         );
       }

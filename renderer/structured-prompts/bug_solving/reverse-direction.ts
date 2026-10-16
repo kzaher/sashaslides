@@ -79,6 +79,16 @@ export const REVERSE_METRIC_RISE_LIMIT = 0.05;
  *  after reverse-metrics.ts's blur. An unchanged render measures 0. */
 export const REVERSE_GOLDEN_DRIFT_LIMIT = 0.05;
 
+/** How far one changed region's mean error against Google's thumbnail may rise (0-765 per pixel,
+ *  scored with one pixel of context: renderer/html2slides/reverse/changed-regions.ts), and how many
+ *  changed pixels make a region count. Calibrated 2026-10-16 on every region the reverse merge
+ *  changed: slide 05's table re-rasterised +2.9/+7.1 over ~1,600-2,000 px, slide 25's superscript
+ *  +24.8 over 39 px, basic slide 14's border shifted a sub-pixel (+39.8/-45.9 over 1 x 50 px), the
+ *  fixes fell 1.4-100.5, and slide 30's status dots, drawn 1.7x too big, rose +104.8 to +141.8 over
+ *  ~87 px each while the slide's percentage rose only 0.033 points. */
+export const REVERSE_REGION_RISE_LIMIT = 60;
+export const REVERSE_REGION_MIN_PIXELS = 50;
+
 /** The Chrome the reverse pipeline screenshots with: a HEADLESS one, where each fork's capture
  *  window keeps rendering while another fork's is in front (the headed container Chrome on :9223
  *  occludes it; renderer/html2slides/reverse/chrome-capture.ts has the measurements). Kept equal to

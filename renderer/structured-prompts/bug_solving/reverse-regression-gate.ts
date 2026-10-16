@@ -9,7 +9,11 @@
  *   · the user's goldens (`e2e/goldens-reverse/<set>__slide_NN.png`, blessed only by the user's
  *     "Good" click): a golden slide's fresh render must still match it, and
  *   · the current metrics: no slide's reverse mismatch may rise by more than
- *     REVERSE_METRIC_RISE_LIMIT points.
+ *     REVERSE_METRIC_RISE_LIMIT points, and
+ *   · Google's thumbnail, region by region: no changed region may move further from it than
+ *     REVERSE_REGION_RISE_LIMIT. The slide-wide percentage hides a tight local regression
+ *     (measured 2026-10-16: slide 30's status dots drawn 1.7x too big rose its mismatch by only 0.033
+ *     points, under the limit, while each dot's region rose from ~8 to ~150-200 mean error).
  * "Current" is a BASELINE render of the untouched tree that the scaffolding records once per run
  * (falling back to `.sxs-reverse/metrics.json`). Measured 2026-10-16: the canonical results already
  * lag the tree (complex__slide_30 0.243% there, 0% re-rendered) and two deck goldens differ from
@@ -25,6 +29,7 @@
  * step reads back with readReverseGateResult.
  */
 import { existsSync, readFileSync } from "node:fs";
+import type { ChangedRegion } from "../../html2slides/reverse/changed-regions.js";
 
 /** One slide's measured numbers, as the CLI collects them. */
 export type ReverseGateSlide = Readonly<{
@@ -41,9 +46,12 @@ export type ReverseGateSlide = Readonly<{
   baselineGoldenDriftPercent: number | null;
   /** True when the user blessed a golden for this slide. */
   hasGolden: boolean;
+  /** Where the fork's render differs from the baseline's, each region scored against Google's
+   *  thumbnail before and after; empty when the renders are identical or a side is missing. */
+  changedRegions: readonly ChangedRegion[];
 }>;
 
-export type ReverseGateFindingKind = "metric-rise" | "golden-drift" | "missing-render";
+export type ReverseGateFindingKind = "metric-rise" | "golden-drift" | "region-regression" | "missing-render";
 
 export type ReverseGateFinding = Readonly<{ slide: string; kind: ReverseGateFindingKind; detail: string }>;
 
@@ -67,6 +75,10 @@ export type ReverseGateLimits = Readonly<{
   metricRise: number;
   /** Percent of pixels a golden slide's fresh render may differ from its golden. */
   goldenDrift: number;
+  /** How far a changed region's mean error against Google may rise (0-765 per pixel). */
+  regionRise: number;
+  /** Changed pixels a region needs before its rise counts. */
+  regionPixels: number;
 }>;
 
 export function reverseRegressionGate(options: Readonly<{
@@ -135,6 +147,18 @@ function findingsOf(options: Readonly<{ slide: ReverseGateSlide; limits: Reverse
         detail: `reverse mismatch rose ${slide.baselineMismatchPercent}% -> ${slide.candidateMismatchPercent}% (+${rise.toFixed(3)} points, limit ${limits.metricRise})`,
       });
     }
+  }
+  const worse = slide.changedRegions
+    .filter((region) => region.changedPixels >= limits.regionPixels && region.errorAfter - region.errorBefore > limits.regionRise)
+    .sort((first, second) => (second.errorAfter - second.errorBefore) - (first.errorAfter - first.errorBefore));
+  if (worse.length > 0) {
+    const shown = worse.slice(0, 3).map((region) =>
+      `${region.width}x${region.height} px at (${region.x}, ${region.y}) ${region.errorBefore} -> ${region.errorAfter}`).join("; ");
+    findings.push({
+      slide: slide.id,
+      kind: "region-regression",
+      detail: `${worse.length} changed region(s) moved away from Google's thumbnail (mean RGB error before -> after, limit +${limits.regionRise}): ${shown}${worse.length > 3 ? "; …" : ""}`,
+    });
   }
   if (slide.hasGolden && slide.goldenDriftPercent === null) {
     findings.push({ slide: slide.id, kind: "missing-render", detail: "the user blessed a golden but the fork rendered nothing to compare" });

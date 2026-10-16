@@ -37,10 +37,10 @@ const GATE_CLI = join(HERE, "scripts", "reverse-regression-gate.ts");
 const WAIT_CLI = join(HERE, "scripts", "wait-for-ratings.ts");
 const RATING_SERVER = resolve(HERE, "../../html2slides/rating-server.ts");
 const RENDERER = resolve(HERE, "../..");
-const limits = { metricRise: 0.05, goldenDrift: 0.05 };
+const limits = { metricRise: 0.05, goldenDrift: 0.05, regionRise: 60, regionPixels: 50 };
 
 function slide(id: string, fields: Partial<Omit<ReverseGateSlide, "id">>): ReverseGateSlide {
-  return { id, baselineMismatchPercent: 0.1, candidateMismatchPercent: 0.1, goldenDriftPercent: null, baselineGoldenDriftPercent: null, hasGolden: false, ...fields };
+  return { id, baselineMismatchPercent: 0.1, candidateMismatchPercent: 0.1, goldenDriftPercent: null, baselineGoldenDriftPercent: null, hasGolden: false, changedRegions: [], ...fields };
 }
 
 async function main(): Promise<void> {
@@ -77,6 +77,16 @@ function pureGate(): void {
   writeFileSync(malformed, "{ not json");
   ok("(1i) a malformed result file reads back as FAILED", !readReverseGateResult(malformed).ok);
   rmSync(malformed, { force: true });
+  // One of slide 30's status dots after the 2026-10-16 merge: +0.033 points slide-wide, +141.8 in its region.
+  const dot = { x: 551, y: 312, width: 12, height: 12, changedPixels: 88, errorBefore: 6.2, errorAfter: 148 };
+  const dots = reverseRegressionGate({ slides: [slide("complex__slide_30", { baselineMismatchPercent: 0, candidateMismatchPercent: 0.033, changedRegions: [dot] })], clusterSlides: ["complex__slide_14"], limits });
+  ok("(1j) a region that moved far from Google fails although the slide-wide rise is under the limit", !dots.ok && dots.findings[0]?.kind === "region-regression" && dots.findings[0]?.detail.includes("12x12 px at (551, 312) 6.2 -> 148"), JSON.stringify(dots.findings));
+  const ownDots = reverseRegressionGate({ slides: [slide("complex__slide_30", { changedRegions: [dot] })], clusterSlides: ["complex__slide_30"], limits });
+  ok("(1k) the cluster's own slide never fails on a region (the user rates it)", ownDots.ok);
+  const superscript = reverseRegressionGate({ slides: [slide("complex__slide_25", { changedRegions: [{ x: 563, y: 225, width: 6, height: 9, changedPixels: 39, errorBefore: 74.6, errorAfter: 115 }] })], clusterSlides: [], limits });
+  ok("(1l) a region under the pixel minimum passes (39 px, the size of slide 25's approved superscript change)", superscript.ok);
+  const tableRows = reverseRegressionGate({ slides: [slide("complex__slide_05", { changedRegions: [{ x: 80, y: 103, width: 1440, height: 43, changedPixels: 1566, errorBefore: 4.1, errorAfter: 11.5 }] })], clusterSlides: [], limits });
+  ok("(1m) a large region that barely moved passes (like slide 05's approved table re-rasterisation)", tableRows.ok);
 }
 
 function cliOnFakeTree(root: string): void {
@@ -114,6 +124,24 @@ function cliOnFakeTree(root: string): void {
   const crashOut = join(root, "crash.json");
   execFileSync("npx", ["tsx", GATE_CLI, "--results", candidate, "--goldens", goldens, "--out", crashOut], { cwd: RENDERER, stdio: ["ignore", "ignore", "pipe"], timeout: 25_000 });
   ok("(2f) a bad invocation still writes a FAILED result and exits 0", existsSync(crashOut) && !readReverseGateResult(crashOut).ok);
+  // A dot outside the cluster grows past Google's: same slide-wide metrics, so only the region check sees it.
+  const regionBaseline = join(root, "region-baseline");
+  const regionCandidate = join(root, "region-every-set");
+  for (const directory of [regionBaseline, regionCandidate]) {
+    for (const sub of ["slides", "originals"]) mkdirSync(join(directory, "complex", sub), { recursive: true });
+  }
+  writePngWithSquare(join(regionBaseline, "complex", "originals", "slide_30.png"), [20, 10, 6]);
+  writePngWithSquare(join(regionBaseline, "complex", "slides", "slide_30.png"), [20, 10, 6]);
+  writePngWithSquare(join(regionCandidate, "complex", "originals", "slide_30.png"), [20, 10, 6]);
+  writePngWithSquare(join(regionCandidate, "complex", "slides", "slide_30.png"), [17, 7, 12]);
+  writeMetrics(regionBaseline, [["complex", "slide_30", 0]]);
+  writeMetrics(regionCandidate, [["complex", "slide_30", 0.033]]);
+  const regionOut = join(root, "region-gate.json");
+  execFileSync("npx", ["tsx", GATE_CLI, "--results", regionCandidate, "--baseline", regionBaseline, "--goldens", goldens, "--cluster", "complex__slide_14", "--out", regionOut], {
+    cwd: RENDERER, stdio: ["ignore", "ignore", "pipe"], timeout: 25_000,
+  });
+  const regionResult = readReverseGateResult(regionOut);
+  ok("(2g) the CLI measures the grown dot as a region regression", !regionResult.ok && regionResult.findings.some((finding) => finding.slide === "complex__slide_30" && finding.kind === "region-regression"), JSON.stringify(regionResult.findings));
 }
 
 async function forkRatingBlock(root: string): Promise<void> {
@@ -169,6 +197,22 @@ function writePng(path: string, value: number): void {
     png.data[offset + 1] = value;
     png.data[offset + 2] = value;
     png.data[offset + 3] = 255;
+  }
+  writeFileSync(path, PNG.sync.write(png));
+}
+
+/** A white 64 x 36 PNG with one dark square [x, y, size]. */
+function writePngWithSquare(path: string, [left, top, size]: readonly [number, number, number]): void {
+  const png = new PNG({ width: 64, height: 36 });
+  for (let y = 0; y < 36; y++) {
+    for (let x = 0; x < 64; x++) {
+      const offset = (y * 64 + x) * 4;
+      const value = x >= left && x < left + size && y >= top && y < top + size ? 30 : 255;
+      png.data[offset] = value;
+      png.data[offset + 1] = value;
+      png.data[offset + 2] = value;
+      png.data[offset + 3] = 255;
+    }
   }
   writeFileSync(path, PNG.sync.write(png));
 }

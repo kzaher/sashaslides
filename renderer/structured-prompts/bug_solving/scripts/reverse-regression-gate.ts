@@ -4,15 +4,17 @@
  * (../reverse-regression-gate.ts has the decision and why it exists).
  *
  * It measures, it does not decide: for every slide of every set it collects the baseline reverse
- * mismatch, the fork's reverse mismatch, and (for a slide the user blessed) both renders against
- * the user's golden, then hands the numbers to reverseRegressionGate and writes the result.
+ * mismatch, the fork's reverse mismatch, (for a slide the user blessed) both renders against the
+ * user's golden, and (where the fork's render differs from the baseline's) each changed region
+ * scored against Google's thumbnail, then hands the numbers to reverseRegressionGate and writes
+ * the result.
  * --baseline is a reverse results directory of the UNTOUCHED tree (the run's baseline recording,
  * or the canonical .sxs-reverse when that is missing): its metrics.json and <set>/slides/.
  * The goldens directory is only READ; nothing here writes goldens.
  *
  *   npx tsx reverse-regression-gate.ts --results <fork every-set dir> --baseline <baseline results dir>
  *     --goldens <renderer/html2slides/e2e/goldens-reverse> --cluster complex__slide_05[,…] --out <result.json>
- *     [--metric-rise 0.05] [--golden-drift 0.05]
+ *     [--metric-rise 0.05] [--golden-drift 0.05] [--region-rise 60] [--region-pixels 50]
  *
  * ALWAYS exits 0 and always writes --out: a crash is recorded as a failed gate, so the fork's assert
  * step fails the attempt with the reason instead of the shell node dying without one.
@@ -20,9 +22,16 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PNG } from "pngjs";
+import { changedRegions, type ChangedRegion } from "../../../html2slides/reverse/changed-regions.js";
 import { compareImages, type RgbaImage } from "../../../html2slides/reverse/reverse-metrics.js";
 import { setLayoutOf, type SlideMetrics } from "../../../html2slides/reverse/reverse-results.js";
-import { parseReverseSlideId, REVERSE_GOLDEN_DRIFT_LIMIT, REVERSE_METRIC_RISE_LIMIT } from "../reverse-direction.js";
+import {
+  parseReverseSlideId,
+  REVERSE_GOLDEN_DRIFT_LIMIT,
+  REVERSE_METRIC_RISE_LIMIT,
+  REVERSE_REGION_MIN_PIXELS,
+  REVERSE_REGION_RISE_LIMIT,
+} from "../reverse-direction.js";
 import { reverseRegressionGate, type ReverseGateResult, type ReverseGateSlide } from "../reverse-regression-gate.js";
 
 type GateArguments = Readonly<{
@@ -33,6 +42,8 @@ type GateArguments = Readonly<{
   out: string;
   metricRise: number;
   goldenDrift: number;
+  regionRise: number;
+  regionPixels: number;
 }>;
 
 function main(): void {
@@ -40,7 +51,7 @@ function main(): void {
   const result = reverseRegressionGate({
     slides: measuredSlides(parsed),
     clusterSlides: parsed.cluster,
-    limits: { metricRise: parsed.metricRise, goldenDrift: parsed.goldenDrift },
+    limits: { metricRise: parsed.metricRise, goldenDrift: parsed.goldenDrift, regionRise: parsed.regionRise, regionPixels: parsed.regionPixels },
   });
   writeResult({ path: parsed.out, result });
   console.error(
@@ -65,7 +76,24 @@ function measuredSlides(parsed: GateArguments): readonly ReverseGateSlide[] {
     hasGolden: goldens.has(id),
     goldenDriftPercent: goldens.has(id) ? goldenDrift({ id, goldens: parsed.goldens, results: parsed.results }) : null,
     baselineGoldenDriftPercent: goldens.has(id) ? goldenDrift({ id, goldens: parsed.goldens, results: parsed.baseline }) : null,
+    changedRegions: regionsOf({ id, baseline: parsed.baseline, results: parsed.results }),
   }));
+}
+
+/** The regions where the fork's render differs from the baseline's, scored against Google's
+ *  thumbnail. Identical renders (most slides, byte for byte) cost no decoding. */
+function regionsOf(options: Readonly<{ id: string; baseline: string; results: string }>): readonly ChangedRegion[] {
+  const reference = parseReverseSlideId(options.id);
+  if (reference === null) return [];
+  const layout = (outputRoot: string) => setLayoutOf({ outputRoot, set: reference.set });
+  const before = join(layout(options.baseline).slides, `${reference.fileId}.png`);
+  const after = join(layout(options.results).slides, `${reference.fileId}.png`);
+  const google = [options.results, options.baseline].map((root) => join(layout(root).originals, `${reference.fileId}.png`)).find((path) => existsSync(path));
+  if (!existsSync(before) || !existsSync(after) || google === undefined) return [];
+  const beforeBytes = readFileSync(before);
+  const afterBytes = readFileSync(after);
+  if (beforeBytes.equals(afterBytes)) return [];
+  return changedRegions({ google: decodePng(readFileSync(google)), baseline: decodePng(beforeBytes), candidate: decodePng(afterBytes) });
 }
 
 function metricsById(path: string): ReadonlyMap<string, SlideMetrics> {
@@ -124,6 +152,8 @@ function parseArguments(argv: readonly string[]): GateArguments {
     out: required("--out"),
     metricRise: limit("--metric-rise", REVERSE_METRIC_RISE_LIMIT),
     goldenDrift: limit("--golden-drift", REVERSE_GOLDEN_DRIFT_LIMIT),
+    regionRise: limit("--region-rise", REVERSE_REGION_RISE_LIMIT),
+    regionPixels: limit("--region-pixels", REVERSE_REGION_MIN_PIXELS),
   };
 }
 
