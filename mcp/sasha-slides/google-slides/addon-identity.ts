@@ -31,6 +31,12 @@ export const ADDON_IDENTITY_AUDIENCES: readonly Readonly<{ audience: string; pro
     measuredOn: "2026-10-15",
     method: "tokeninfo azp of the project's own access token (granted: drive, presentations, script.container.ui, script.external_request, spreadsheets.readonly)",
   },
+  {
+    audience: "208631238841-k4qehdn5bavg3g1bk1m04cvbh9ror67o.apps.googleusercontent.com",
+    project: "second test deck bound script 108CjW5E50kHgTsAEdrUWDBmwFQ0bxiUys7s7bhtzA5WRwYZIbYstGSTR (deck 1rSamevPmnXhKVIVcBgNx_dNsza8MbR_7xXj_6VlsgIQ)",
+    measuredOn: "2026-10-16",
+    method: "the connector's own 'wrong audience' log line for this project's identity token (comment access check)",
+  },
 ];
 
 /** Headers Code.gs sends on GET /deck-api/addon/export/<id> and its result (deck-api.ts ADDON_REQUEST_HEADERS). */
