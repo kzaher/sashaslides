@@ -1225,7 +1225,16 @@ function importTable(
       text,
     });
   }
-  return { ...options.common, kind: "table", columns, rows, cells, opacity: 1 };
+  // Google stores every table at a 3000000 x 3000000 placeholder size, in the API and the pptx export
+  // alike, and draws the grid; the engine keeps a table's frame equal to its columns by its rows (a
+  // column or row drag rewrites it to their sum), so the frame takes the grid's size. Its top left
+  // corner stays where the placeholder put it: Slides tables are never rotated or scaled.
+  const frame = { ...options.common.frame, width: sumOf(columns.map((column) => column.width)), height: sumOf(rows.map((row) => row.minimumHeight)) };
+  return { ...options.common, frame, kind: "table", columns, rows, cells, opacity: 1 };
+}
+
+function sumOf(values: readonly number[]): number {
+  return roundUnits(values.reduce((total, value) => total + value, 0));
 }
 
 /**

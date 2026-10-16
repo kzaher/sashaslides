@@ -63,6 +63,23 @@ describe("table cells: margins that keep Google's row heights, and no line where
     assert.ok(Math.abs(FORWARD_HORIZONTAL_MARGIN - 10) < 0.01, "the forward converter's 10 pixel side margin is 10 units");
   });
 
+  // Google stores every table at a 3000000 x 3000000 unit placeholder size (the API's `size` and
+  // the pptx export's `<a:ext>` alike) whatever its grid; the grid is what Slides draws. The engine
+  // keeps a table's frame equal to its columns and rows (a column drag rewrites the frame to their
+  // sum), so a placeholder frame made the editor's selection box and the exported wrapper a square
+  // that matched neither: 420 units wide over a 1152 unit table on the complex set's slide 5.
+  test("a table's frame is its grid: the sum of its columns by the sum of its rows, at its stored origin", () => {
+    for (const table of tablesOf(parsedRecording())) {
+      const width = table.columns.reduce((total, column) => total + column.width, 0);
+      const height = table.rows.reduce((total, row) => total + row.minimumHeight, 0);
+      assert.ok(Math.abs(table.frame.width - width) < 0.01, `${table.id}: frame width ${table.frame.width} against columns ${width}`);
+      assert.ok(Math.abs(table.frame.height - height) < 0.01, `${table.id}: frame height ${table.frame.height} against rows ${height}`);
+    }
+    const [first] = tablesOf(parsedRecording());
+    // p17_i18 is translated to (640080, 667512) with no scale: its top left corner stays there.
+    assert.ok(first !== undefined && Math.abs(first.frame.x - 640_080 * UNITS_PER_ENGLISH_METRIC_UNIT) < 0.01 && Math.abs(first.frame.y - 667_512 * UNITS_PER_ENGLISH_METRIC_UNIT) < 0.01, `origin ${first?.frame.x}, ${first?.frame.y}`);
+  });
+
   test("a border stored fully transparent imports as no border; an opaque one is kept", () => {
     const [transparentTable, whiteGridTable] = tablesOf(parsedRecording());
     assert.ok(transparentTable !== undefined && whiteGridTable !== undefined);

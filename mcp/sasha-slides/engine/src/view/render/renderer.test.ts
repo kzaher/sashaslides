@@ -22,6 +22,7 @@ import {
   run,
   shapeElement,
   slideSnapshot,
+  tableElement,
   textBody,
   unsupportedElement,
 } from "../sample/snapshot-builders.ts";
@@ -256,6 +257,50 @@ describe("static markup per style feature", () => {
   it("the slide root carries the root class and resets inheritance before its own styles", () => {
     const markup = staticMarkup({ elements: [], slideNumber: 1 });
     assert.match(markup, new RegExp(`class="${SLIDE_ROOT_CLASS}" style="all:initial;display:block;position:relative;width:1280px;height:720px;overflow:hidden`));
+  });
+});
+
+// A table is drawn as a real table, never as cells or text placed at computed coordinates: the
+// browser lays the grid out from the stored column widths and row minimums, each cell's text flows
+// inside its margins as padding, and a row grows with its text the way Google's rows do. Editing
+// (double click into a cell, the row and column attributes) and the exported HTML rely on it, and a
+// person reading the exported HTML (asked on the reverse SxS, complex slide 5) sees a table.
+describe("tables are structural markup", () => {
+  const box = { x: 40, y: 60, width: 600, height: 120 };
+  const base = tableElement({ ids, id: ids.next("element"), box, texts: [["Feature", "Pro"], ["Real-time", "\u2713"]] });
+  const table: typeof base = {
+    ...base,
+    cells: base.cells.map((cell, index) => ({
+      ...cell,
+      textBox: { ...cell.textBox, paddingTop: 6.002, paddingRight: 20, paddingBottom: 4, paddingLeft: 12, verticalAlignment: index % 2 === 0 ? "top" : "middle" },
+    })),
+  };
+  const markup = elementMarkup(table);
+  const tableMarkup = markup.slice(markup.indexOf("<table"), markup.indexOf("</table>"));
+
+  it("is one table whose columns and rows carry the stored widths and minimum heights", () => {
+    assert.equal(markup.match(/<table /g)?.length, 1);
+    assert.match(tableMarkup, /border-collapse:collapse;table-layout:fixed;width:600px/);
+    assert.deepEqual([...tableMarkup.matchAll(/<col style="width:([\d.]+)px"\/>/g)].map((match) => Number(match[1])), table.columns.map((column) => column.width));
+    assert.deepEqual([...tableMarkup.matchAll(/<tr style="height:([\d.]+)px"/g)].map((match) => Number(match[1])), table.rows.map((row) => row.minimumHeight));
+  });
+
+  it("holds every cell's text inside its td, padded by the cell's margins, with nothing absolutely positioned", () => {
+    assert.doesNotMatch(tableMarkup, /position:absolute/);
+    const cells = tableMarkup.split("<td ").slice(1);
+    assert.equal(cells.length, table.cells.length);
+    cells.forEach((cellMarkup, index) => {
+      assert.match(cellMarkup, /^style="position:relative;padding:0;/, `cell ${index} is a positioned table cell, not a placed box`);
+      assert.match(cellMarkup, /padding-top:6.002px;padding-right:20px;padding-bottom:4px;padding-left:12px/, `cell ${index} padding`);
+      assert.match(cellMarkup, new RegExp(`vertical-align:${index % 2 === 0 ? "top" : "middle"}`), `cell ${index} vertical alignment`);
+    });
+    assert.match(cells[3] ?? "", />\u2713<\/span>/);
+  });
+
+  it("lets a row grow with its text: no fixed height, clipping or overflow on rows and cells", () => {
+    assert.doesNotMatch(tableMarkup, /max-height|overflow:hidden|<td[^>]*height:/);
+    // The wrapper holds the grid's height as a minimum, so a grown row extends it rather than clipping.
+    assert.match(markup, /height:auto;box-sizing:border-box;min-height:120px/);
   });
 });
 
