@@ -20,6 +20,9 @@
  *     [--output /workspaces/sashaslides/.sxs-reverse] [--chrome-port 9223]
  *     [--presentation basic=<id>] [--fresh-upload] [--refresh-thumbnails] [--refresh-fixture-shots]
  *     [--offline [--pptx basic=<path>]]   re-measure from the recordings when the token has expired
+ *     [--slides complex__slide_05,slide_07]  export + measure only these slides (the import stays whole);
+ *                                            "<set>__slide_NN" names one set, a bare "slide_NN" every set.
+ *                                            The bug_solving reverse direction re-renders a cluster this way.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -45,6 +48,8 @@ type Arguments = Readonly<{
   offline: boolean;
   /** A .pptx to use as a set's export offline, when its own export was never recorded. */
   pptxOverrides: ReadonlyMap<ReverseSet, string>;
+  /** --slides: the slide references to measure; empty means every slide. */
+  slideReferences: readonly string[];
 }>;
 
 const CONVERTER_DIRECTORY = dirname(fileURLToPath(import.meta.url));
@@ -88,6 +93,7 @@ async function main(): Promise<void> {
         refreshThumbnails: parsed.refreshThumbnails,
         refreshFixtureShots: parsed.refreshFixtureShots,
         offline: parsed.offline,
+        onlySlides: onlySlidesOf({ set, references: parsed.slideReferences }),
         google,
         chrome,
         now: Date.now,
@@ -108,6 +114,24 @@ async function main(): Promise<void> {
     log(`\n${failures.length} set(s) failed:\n${failures.join("\n")}`);
     process.exitCode = 1;
   }
+}
+
+/**
+ * The slide file ids of one set that --slides selects, or null when --slides was not given. A
+ * reference is "<set>__slide_NN" (that set only) or "slide_NN" (every set).
+ */
+function onlySlidesOf(options: Readonly<{ set: ReverseSet; references: readonly string[] }>): ReadonlySet<string> | null {
+  if (options.references.length === 0) return null;
+  const selected = new Set<string>();
+  for (const reference of options.references) {
+    const separator = reference.indexOf("__");
+    if (separator < 0) {
+      selected.add(reference);
+      continue;
+    }
+    if (reference.slice(0, separator) === options.set) selected.add(reference.slice(separator + 2));
+  }
+  return selected;
 }
 
 /** Each requested set's recorded presentation, by the presentation id its state.json names. */
@@ -218,6 +242,7 @@ function parseArguments(argv: readonly string[]): Arguments {
   let refreshFixtureShots = false;
   let offline = false;
   const pptxOverrides = new Map<ReverseSet, string>();
+  let slideReferences: readonly string[] = [];
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index];
     const value = (): string => {
@@ -262,6 +287,9 @@ function parseArguments(argv: readonly string[]): Arguments {
         pptxOverrides.set(parseSet(set), resolve(path));
         break;
       }
+      case "--slides":
+        slideReferences = value().split(",").map((reference) => reference.trim()).filter((reference) => reference.length > 0);
+        break;
       default:
         throw new Error(`unknown argument ${argument}`);
     }
@@ -269,7 +297,7 @@ function parseArguments(argv: readonly string[]): Arguments {
   if (!Number.isInteger(chromePort) || chromePort <= 0) throw new Error("--chrome-port must be a port number");
   if (!(deviceScaleFactor > 0)) throw new Error("--device-scale-factor must be positive");
   if (offline && (freshUpload || refreshThumbnails)) throw new Error("--offline cannot upload or download thumbnails");
-  return { sets, output, chromePort, deviceScaleFactor, givenPresentations, freshUpload, refreshThumbnails, refreshFixtureShots, offline, pptxOverrides };
+  return { sets, output, chromePort, deviceScaleFactor, givenPresentations, freshUpload, refreshThumbnails, refreshFixtureShots, offline, pptxOverrides, slideReferences };
 }
 
 function parseSet(name: string): ReverseSet {

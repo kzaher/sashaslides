@@ -41,6 +41,7 @@ import {
   DEFAULT_BRANCHES_ROOT,
   DEFAULT_SHARED_ROOT,
 } from "./startup-detection.js";
+import type { MergeSettings } from "./main.js";
 
 const HISTORY_DIR = "/workspaces/sashaslides/.bug-solving-history";
 
@@ -72,6 +73,11 @@ export interface ResumeMergeArgs {
   io?: IO;
   /** demote a bad/unrated cluster's slides back to the ledger. Default ledgerDemote. */
   demote?: (slides: string[], task: string, reason: string) => void;
+  /** the run direction's merge settings (main.ts mergeSettingsFor). Absent = the
+   *  forward settings this module always used (forward ledger, converter filter,
+   *  marker slides as intended forward-deck slides). A REVERSE --continue must pass
+   *  them, or the reverse files would be filtered out of the fold. */
+  merge?: MergeSettings;
   /** monitor port for the standalone engine (avoid 4711/4712). Default 4713. */
   port?: number;
   log?: (m: string) => void;
@@ -141,7 +147,7 @@ export async function resumeMerge(args: ResumeMergeArgs): Promise<ResumeMergeRes
   const sharedRoot = args.sharedRoot ?? DEFAULT_SHARED_ROOT;
   const upperRoot = args.upperRoot ?? branchesRoot;
   const demote = args.demote ?? ((slides: string[], task: string, reason: string) => {
-    try { ledgerDemote(HISTORY_DIR, slides, task, reason); }
+    try { ledgerDemote(args.merge?.historyDir ?? HISTORY_DIR, slides, task, reason); }
     catch (e) { log(`[resume-merge] demote wiring failure for ${task} (non-fatal): ${(e as Error)?.message ?? String(e)}`); }
   });
 
@@ -172,7 +178,7 @@ export async function resumeMerge(args: ResumeMergeArgs): Promise<ResumeMergeRes
       continue;
     }
     if (marker.green) {
-      green.push({ task, branch_id: id, slides: marker.slides, shared_dir: marker.shared_dir });
+      green.push({ task, branch_id: id, slides: args.merge ? args.merge.forwardDeckSlides(marker.slides) : marker.slides, shared_dir: marker.shared_dir });
       log(`[resume-merge] ${task} (${id}) → GREEN — fold candidate (slides ${marker.slides.join(", ") || "(none)"}).`);
     } else {
       demoted.push(task);
@@ -199,13 +205,13 @@ export async function resumeMerge(args: ResumeMergeArgs): Promise<ResumeMergeRes
     ? { io: args.io, persist: false, hookSignals: false, log: false, port: 0 }
     : { persist: false, port };
   const engine = engineKind === "codex" ? new CodexEngine(engineOpts) : new ClaudeEngine(engineOpts);
-  const ops = args.ops ?? realLlmMergeOps({ repo: args.repo, fixturesDir: args.fixturesDir, historyDir: HISTORY_DIR });
+  const ops = args.ops ?? realLlmMergeOps({ repo: args.repo, fixturesDir: args.fixturesDir, historyDir: args.merge?.historyDir ?? HISTORY_DIR });
 
   let report: MergeReport | null = null;
   try {
     report = await engine.execute(
       new Session({ sessionId: `resume-merge-${Date.now()}`, cwd: args.repo }),
-      (s) => llmMerge(s, { repo: args.repo, greenClusters: green, ops, upperRoot }),
+      (s) => llmMerge(s, { repo: args.repo, greenClusters: green, ops, upperRoot, ...(args.merge ? { converterFilter: args.merge.converterFilter } : {}) }),
     );
   } finally {
     await engine.shutdown();

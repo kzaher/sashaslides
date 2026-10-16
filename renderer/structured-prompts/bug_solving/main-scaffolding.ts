@@ -52,6 +52,13 @@
  *       renderer/structured-prompts/bug_solving/main-scaffolding.ts
  *   node structured-prompting/dist/main-scaffolding.mjs
  *
+ * ## Direction (--direction=forward|reverse, env BUG_SOLVING_DIRECTION; default forward)
+ *   reverse: clusters from .sxs-reverse/ratings-reverse.json (BUG_SOLVING_RATINGS_JSON /
+ *   BUG_SOLVING_SXS_DIR override the ratings file / results root, BUG_SOLVING_REVERSE_GOLDENS_DIR
+ *   the goldens the gate READS, BUG_SOLVING_REVERSE_CHROME_PORT the Chrome, default 9223).
+ *   No BEFORE pptx is recorded (the canonical .sxs-reverse renders are the BEFORE); each
+ *   fork runs reverseRunTask (reverse-run-task.ts). See main.ts's header.
+ *
  * ## Monitor URL
  *   Engine prints it on stderr as soon as it binds the port (look for
  *   `┌── structured-prompting monitor`). We echo it again at end of run.
@@ -67,7 +74,19 @@ import { join } from "path";
 import { ClaudeEngine, CodexEngine, Session, branchRunCommand } from "../../../structured-prompting/src/index.js";
 import { buildTasks, selectOnlyClusters } from "./workspace-setup.js";
 // (stability recording now lives in the main graph — main.ts:stabilityBranch)
-import { main, type TaskResult } from "./main.js";
+import { main, mergeSettingsFor, type TaskResult } from "./main.js";
+import {
+  clustersFromReverseRatings,
+  defaultReversePaths,
+  DEFAULT_REVERSE_CHROME_PORT,
+  parseSolveDirection,
+  reverseBaselineDirectory,
+  reverseClusterMemberKey,
+  reverseRenderOf,
+  REVERSE_SCRIPTS,
+  type ReversePaths,
+  type SolveDirection,
+} from "./reverse-direction.js";
 import { cleanupAllOverlays } from "./overlay-cleanup.js";
 import {
   detectPriorState,
@@ -101,6 +120,33 @@ function printBrokenSlides(clusters: Cluster[], ratingsPath: string, sxsDir: str
     console.error(`      ATTEMPT:    ${pathJoin(sxsDir, "slides", `${id}.png`)}`);
     console.error(`      annotation: ${pathJoin(sxsDir, "annotations", `${id}.png`)}`);
   }
+}
+
+/** The reverse twin of printBrokenSlides: Google's thumbnail is the TARGET, the Sasha
+ *  render the ATTEMPT, and the exported page is what several comments are about. */
+function printBrokenReverseSlides(clusters: Cluster[], paths: ReversePaths): void {
+  console.error(`\n[scaffold] REVERSE slides marked for solving (from ${paths.ratingsFile}): ${clusters.length ? clusters.map((c) => c.slide_ids.join(",")).join(", ") : "(none)"}`);
+  for (const c of clusters) {
+    for (const id of c.slide_ids) {
+      const render = reverseRenderOf({ resultsDirectory: paths.resultsRoot, slideId: id });
+      console.error(`  ■ ${id} [${c.task_id}]`);
+      console.error(`      ATTEMPT:    ${render?.png ?? "(not a reverse id)"}`);
+      console.error(`      HTML:       ${render?.html ?? "(not a reverse id)"}`);
+      console.error(`      annotation: ${pathJoin(paths.resultsRoot, "annotations", `${id}.png`)}`);
+    }
+  }
+}
+
+/** The reverse inputs, overridable for a run against another (e.g. a test) results tree. */
+function reversePathsFromEnvironment(): ReversePaths {
+  const defaults = defaultReversePaths(REPO_ROOT);
+  const resultsRoot = process.env.BUG_SOLVING_SXS_DIR ?? defaults.resultsRoot;
+  return {
+    resultsRoot,
+    ratingsFile: process.env.BUG_SOLVING_RATINGS_JSON ?? pathJoin(resultsRoot, "ratings-reverse.json"),
+    goldensDirectory: process.env.BUG_SOLVING_REVERSE_GOLDENS_DIR ?? defaults.goldensDirectory,
+    historyDirectory: defaults.historyDirectory,
+  };
 }
 
 // Absolute paths to helper scripts. Resolved from the repo root
@@ -196,6 +242,28 @@ async function recordBeforePptx(tasks: ReturnType<typeof buildTasks>): Promise<v
   }));
 }
 
+/** REVERSE: render every set ONCE from the untouched tree (host-level, before any worker runs)
+ *  into the run's shared baseline dir — the "current metrics" and golden-drift baseline every
+ *  fork's regression gate compares against. Non-fatal: on failure the gates fall back to the
+ *  canonical .sxs-reverse results (which can lag the tree). ~2 min for the three sets. */
+async function recordReverseBaseline(tasks: ReturnType<typeof buildTasks>, paths: ReversePaths, chromePort: number): Promise<void> {
+  const first = tasks[0];
+  if (first === undefined) return;
+  const output = reverseBaselineDirectory(first.shared_dir);
+  console.error(`[scaffolding] recording the REVERSE baseline (every set, untouched tree) → ${output} …`);
+  try {
+    await execFileAsync("npx", [
+      "tsx", resolve(REPO_ROOT, REVERSE_SCRIPTS.record),
+      "--canonical", paths.resultsRoot, "--output", output, "--chrome-port", String(chromePort),
+    ], { cwd: resolve(REPO_ROOT, "renderer"), maxBuffer: 32 * 1024 * 1024 });
+    console.error(`[scaffolding] reverse baseline ready → ${output}/metrics.json`);
+  } catch (e: unknown) {
+    // Node decorates the promisified execFile rejection (an ExecException) with stdout/stderr.
+    const err = e as ExecException & { stdout?: string; stderr?: string };
+    console.error(`[scaffolding] reverse baseline FAILED (non-fatal; gates fall back to ${paths.resultsRoot}): ${err.message}\n${(err.stderr ?? "").slice(-2000)}`);
+  }
+}
+
 // (The 3× stability classification moved OUT of the scaffolding pre-step and INTO
 // the main graph as a parallel "stability" branch — see main.ts:stabilityBranch.
 // It no longer blocks startup; it runs concurrently with the solve fork-set.)
@@ -225,6 +293,16 @@ async function run(): Promise<void> {
     throw new Error(`--engine must be "claude" or "codex" (got "${engineArg}")`);
   }
   const isCodex = engineKind === "codex";
+
+  // --direction=forward|reverse (solve.sh --direction → BUG_SOLVING_DIRECTION).
+  const direction: SolveDirection = parseSolveDirection(
+    process.argv.find((a) => a.startsWith("--direction="))?.slice("--direction=".length)
+      ?? process.env.BUG_SOLVING_DIRECTION
+      ?? "forward",
+  );
+  const reversePaths: ReversePaths | null = direction === "reverse" ? reversePathsFromEnvironment() : null;
+  const reverseChromePort = Number(process.env.BUG_SOLVING_REVERSE_CHROME_PORT ?? DEFAULT_REVERSE_CHROME_PORT);
+  console.error(`[scaffold] direction: ${direction}${reversePaths ? ` (results ${reversePaths.resultsRoot}, ratings ${reversePaths.ratingsFile}, goldens ${reversePaths.goldensDirectory} read-only, chrome :${reverseChromePort})` : ""}`);
   const monitorPort = isCodex ? 4712 : 4711;
   const portBase = isCodex ? 4760 : 4720;
   console.error(`[scaffold] engine: ${engineKind} (monitor :${monitorPort}, task ports ${portBase}-${portBase + 39})`);
@@ -260,7 +338,7 @@ async function run(): Promise<void> {
     process.exit(2);
   } else if (decision.action === "resume") {
     console.error("[scaffold] --continue → RESUME-MERGE on persisted overlays (skipping solve).");
-    await resumeMerge({ repo: REPO_ROOT, engine: engineKind });
+    await resumeMerge({ repo: REPO_ROOT, engine: engineKind, merge: mergeSettingsFor(direction, reversePaths) });
     console.error("[scaffold] resume-merge done.");
     return;
   } else if (decision.action === "clean") {
@@ -282,22 +360,29 @@ async function run(): Promise<void> {
   // marked BAD (with their live comments) are the source of truth at solve start.
   // No clusters.ts, no ledger reconciliation that could let a stale history
   // override your current ratings.
-  const ratingsPath = process.env.BUG_SOLVING_RATINGS_JSON ?? "/tmp/sxs-complex/ratings.json";
-  const sxsDir = process.env.BUG_SOLVING_SXS_DIR ?? "/tmp/sxs-complex";
+  const ratingsPath = reversePaths?.ratingsFile ?? process.env.BUG_SOLVING_RATINGS_JSON ?? "/tmp/sxs-complex/ratings.json";
+  const sxsDir = reversePaths?.resultsRoot ?? process.env.BUG_SOLVING_SXS_DIR ?? "/tmp/sxs-complex";
   const fixturesDir = process.env.BUG_SOLVING_FIXTURES_DIR ?? "renderer/html2slides/e2e/fixtures";
-  let liveClusters = clustersFromRatings(ratingsPath, { retryBudget });
+  let liveClusters = reversePaths
+    ? clustersFromReverseRatings({ ratingsPath, retryBudget: retryBudget ?? null })
+    : clustersFromRatings(ratingsPath, { retryBudget });
   // --clusters (BUG_SOLVING_CLUSTERS): manually GROUP the auto per-slide clusters,
   // e.g. --clusters="[['slide_35','slide_36','slide_37','slide_38']]" solves those
   // four as ONE cluster (one root cause + one fork) instead of four issues.
   const manualClusterSpec = (process.env.BUG_SOLVING_CLUSTERS || "").trim();
   if (manualClusterSpec) {
-    liveClusters = applyManualClusters(liveClusters, manualClusterSpec);
+    liveClusters = applyManualClusters(
+      liveClusters,
+      manualClusterSpec,
+      reversePaths ? { memberKey: reverseClusterMemberKey(liveClusters.flatMap((c) => c.slide_ids)) } : {},
+    );
     console.error(
       `[scaffold] --clusters applied → ${liveClusters.length} cluster(s): ` +
         liveClusters.map((c) => `${c.task_id}[${c.slide_ids.join(",")}]`).join(" · "),
     );
   }
-  printBrokenSlides(liveClusters, ratingsPath, sxsDir, fixturesDir);
+  if (reversePaths) printBrokenReverseSlides(liveClusters, reversePaths);
+  else printBrokenSlides(liveClusters, ratingsPath, sxsDir, fixturesDir);
   if (liveClusters.length === 0) {
     console.error(`\n❌ No slides marked BAD in ${ratingsPath} — nothing to solve. Rate slides bad in the SxS UI first.`);
     process.exit(2);
@@ -323,6 +408,8 @@ async function run(): Promise<void> {
   if (process.env.BUG_SOLVING_FIXTURES_DIR) buildOpts.fixtures_dir = process.env.BUG_SOLVING_FIXTURES_DIR;
   if (process.env.BUG_SOLVING_SXS_DIR) buildOpts.sxs_dir = process.env.BUG_SOLVING_SXS_DIR;
   if (process.env.BUG_SOLVING_RATINGS_JSON) buildOpts.ratings_json = process.env.BUG_SOLVING_RATINGS_JSON;
+  buildOpts.direction = direction;
+  buildOpts.reverse_paths = reversePaths;
   console.error(`[scaffold] fixtures_dir: ${buildOpts.fixtures_dir ?? "(default fixtures/)"}`);
 
   // Pre-flight Google OAuth BEFORE creating worktrees. A dead grant makes every
@@ -358,7 +445,9 @@ async function run(): Promise<void> {
     console.error(`  ${t.slides.map((s) => s.slide_id).join(",").padEnd(24)} :${t.server_port}   [${t.task_id}]  (opens on solve)`);
   }
 
-  await recordBeforePptx(tasks);
+  // Forward only: the reverse BEFORE is the canonical .sxs-reverse render the user rated.
+  if (reversePaths === null) await recordBeforePptx(tasks);
+  else await recordReverseBaseline(tasks, reversePaths, reverseChromePort);
 
   // NOTE: the 3× whole-deck stability classification is NO LONGER a blocking
   // pre-step here. It now runs INSIDE the main graph as its own "stability"
@@ -410,7 +499,12 @@ async function run(): Promise<void> {
 
   let results;
   try {
-    results = await engine.execute(session, (s) => main({ session: s, tasks }));
+    results = await engine.execute(session, (s) => main({
+      session: s,
+      tasks,
+      direction,
+      reverse: reversePaths ? { paths: reversePaths, chromePort: reverseChromePort } : null,
+    }));
   } finally {
     clearInterval(portWatch);
   }

@@ -18,6 +18,23 @@
  *   skips solve and resumes MERGE_PHASE off the persisted overlays + green markers;
  *   `--clean` wipes prior state. The engine monitor + per-task SxS URLs are printed.
  *
+ * ## Directions (`solve.sh --direction forward|reverse`, default forward)
+ *   · forward — HTML fixture -> pptx -> Google Slides. Clusters from the forward SxS
+ *     ratings.json; the fork's chain is `runTask` below (record pptx, diff, off-target
+ *     gate, Google render, verdict).
+ *   · reverse — Google Slides -> Sasha engine document -> Sasha HTML. Clusters from
+ *     `.sxs-reverse/ratings-reverse.json` (keyed "<set>__slide_NN", the user's comment,
+ *     annotation and zoom crops are the issue); the fork's chain is `reverseRunTask`
+ *     (reverse-run-task.ts): the worker fixes the importer / engine renderer / HTML export,
+ *     the reverse pipeline re-records the cluster's slides OFFLINE from the fork, a
+ *     regression gate re-runs every set and compares against the user's goldens-reverse
+ *     and the current metrics (no slide may rise > 0.05 points), the verdict compares the
+ *     Sasha render with Google's thumbnail, and the fork's own reverse rating UI BLOCKS
+ *     for the user's good/bad. Same overlays, retries, markers and MERGE_PHASE (its
+ *     converter filter widened to the reverse files; the stability branch is skipped —
+ *     it classifies the forward deck). Goldens stay user-only in both directions.
+ *   Pure parts live in reverse-direction.ts and reverse-regression-gate.ts.
+ *
  * `main()` is SOLVE-ONLY: it returns the parallelFork `Array<Result<TaskResult>>`.
  * PER_FORK_RATE + MERGE_PHASE run post-run in main-scaffolding.ts (opt-out with
  * `BUG_SOLVING_NO_ACCEPT=1`).
@@ -33,9 +50,11 @@ import type { Result } from "../../../structured-prompting/src/index.js";
 import { writeFileSync, readFileSync, readdirSync, copyFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { fixtureSetSlug } from "./workspace-setup.js";
-import { llmMerge, ledgerDemote, realLlmMergeOps, type GreenCluster, type MergeReport } from "./llm-merge.js";
+import { llmMerge, ledgerDemote, realLlmMergeOps, defaultConverterFilter, type GreenCluster, type MergeReport } from "./llm-merge.js";
 import { acceptDisabled } from "./accept-orchestration.js";
 import { STABILITY_JSON } from "./stability.js";
+import { isReverseFixFile, type ReversePaths, type ReverseSlideContext, type SolveDirection } from "./reverse-direction.js";
+import { reverseRunTask } from "./reverse-run-task.js";
 
 /**
  * Write the sxs-meta.json sidecar consumed by rating-server.ts so each SxS card
@@ -132,6 +151,9 @@ export interface SlideTask {
                                      //    from the just-recorded AFTER thumbnail)
   img_highlighted?: string;          // slide_NN_highlighted_attempt.png — max-contrast composite
                                      //   (annotation applied over the slide)
+  /** REVERSE direction only: the exported Sasha page, the fixture, the import, the
+   *  user's zoom crops and the current metrics row (reverse-direction.ts). */
+  reverse?: ReverseSlideContext;
 }
 
 export interface Task {
@@ -151,6 +173,7 @@ export interface Task {
   slides: SlideTask[];
   cluster_description: string;       // root-cause hypothesis for the wave
   retry_budget: number;              // e.g. 3
+  direction: SolveDirection;         // which round trip this fork repairs (forward = runTask, reverse = reverseRunTask)
 }
 
 export interface SlideVerdict {
@@ -479,6 +502,36 @@ export function selectGreenClusters(
   return { green, classified };
 }
 
+/** What MERGE_PHASE needs to know about the run's direction (the phase itself is
+ *  shared). */
+export interface MergeSettings {
+  /** the ledger excluded clusters are demoted into. */
+  historyDir: string;
+  /** which changed files the LLM merge folds. */
+  converterFilter: (relativePath: string) => boolean;
+  /** a green cluster's slides as FORWARD-deck slide ids — the retest renders the
+   *  forward deck, so only those are "intended" changes there. */
+  forwardDeckSlides: (slides: string[]) => string[];
+}
+
+/**
+ * The merge settings of a direction. Reverse: its own ledger (reverse ids never
+ * enter the forward reconcile), the importer / engine / export files, and NO
+ * intended forward-deck slide — a reverse fix must leave the forward deck unchanged,
+ * so the unchanged forward retest reports any forward change as a ripple to rate.
+ */
+export function mergeSettingsFor(direction: SolveDirection, reversePaths: ReversePaths | null): MergeSettings {
+  switch (direction) {
+    case "forward":
+      return { historyDir: HISTORY_DIR, converterFilter: defaultConverterFilter, forwardDeckSlides: (slides) => slides };
+    case "reverse":
+      if (reversePaths === null) throw new Error("mergeSettingsFor(reverse): the reverse paths are required");
+      return { historyDir: reversePaths.historyDirectory, converterFilter: isReverseFixFile, forwardDeckSlides: () => [] };
+    default:
+      return assertNever(direction);
+  }
+}
+
 /**
  * Wire the FINAL merge phase onto a chain after the parallelFork barrier. Runs
  * as engine nodes (monitor-visible). Because the execution branch can't receive
@@ -494,6 +547,9 @@ export function finalMergePhase(
   opts: {
     repo: string;
     tasks: Task[];
+    /** which direction the run repairs: picks the ledger, the files the merge folds,
+     *  and which slides the forward retest treats as intended (mergeSettingsFor). */
+    merge: MergeSettings;
     /** injected for tests; production uses the real disk wiring. */
     readMarker?: (task: Task) => RatingOutcomeMarker | null;
     demote?: (slides: string[], cluster: string, reason: string) => void;
@@ -520,7 +576,7 @@ export function finalMergePhase(
 
   // Real demote (ledger only). ledgerDemote is idempotent + non-throwing.
   const demote = opts.demote ?? ((slides: string[], cluster: string, reason: string) => {
-    try { ledgerDemote(HISTORY_DIR, slides, cluster, reason); }
+    try { ledgerDemote(opts.merge.historyDir, slides, cluster, reason); }
     catch (e) { log(`[merge-final] demote wiring failure for ${cluster} (non-fatal): ${(e as Error)?.message ?? String(e)}`); }
   });
   const readMarker = opts.readMarker ?? readRatingMarker;
@@ -531,7 +587,8 @@ export function finalMergePhase(
   return branch
     .executeShell(() => `echo merge-final:selecting-green`)
     .pipe<MergeReport | null>((s) => {
-      const { green } = selectGreenClusters(opts.tasks, { readMarker, demote, log });
+      const selected = selectGreenClusters(opts.tasks, { readMarker, demote, log });
+      const green = selected.green.map((cluster) => ({ ...cluster, slides: opts.merge.forwardDeckSlides(cluster.slides) }));
       if (green.length === 0) {
         log("[merge-final] no GREEN clusters — nothing to merge.");
         return installNullReport(s);
@@ -543,7 +600,8 @@ export function finalMergePhase(
         llmMerge(s2, {
           repo: opts.repo,
           greenClusters: g,
-          ops: realLlmMergeOps({ repo: opts.repo, fixturesDir: runFixturesDir(opts.repo, opts.tasks), historyDir: HISTORY_DIR }),
+          converterFilter: opts.merge.converterFilter,
+          ops: realLlmMergeOps({ repo: opts.repo, fixturesDir: runFixturesDir(opts.repo, opts.tasks), historyDir: opts.merge.historyDir }),
         }));
       return runMerge(s, green).combineWith<string, MergeReport | null>(
         (b2) => b2.executeShell(() => `echo merge-final:done`),
@@ -639,6 +697,10 @@ export function stabilityCommand(opts: { repo: string; fixturesDirRel: string })
 export function main(args: {
   session: Session;
   tasks: Task[];
+  /** the run's direction (every task shares it) and, for reverse, where its inputs
+   *  live + the Chrome it screenshots with. */
+  direction: SolveDirection;
+  reverse: Readonly<{ paths: ReversePaths; chromePort: number }> | null;
 }): SessionWithResult<Array<Result<TaskResult>>> {
 
   // --- inner per-task attempt body ----------------------------------------
@@ -1075,6 +1137,33 @@ export function main(args: {
       );
   };
 
+  // Each fork runs its direction's chain (forward = runTask above, reverse =
+  // reverseRunTask in reverse-run-task.ts); everything around it is shared.
+  const runTaskFor = (s: Session, task: Task): SessionWithResult<TaskResult> => {
+    switch (task.direction) {
+      case "forward":
+        return runTask(s, task);
+      case "reverse": {
+        if (args.reverse === null) throw new Error(`${task.task_id}: a reverse task needs main({ reverse })`);
+        return reverseRunTask(s, task, {
+          paths: args.reverse.paths,
+          chromePort: args.reverse.chromePort,
+          branchCdRenderer: BRANCH_CD_RENDERER,
+          parseVerdict: parseSlideVerdict,
+          verdictRetries: VERDICT_RETRIES,
+          validationModel: VALIDATION_MODEL,
+          ratingMarkerPath,
+          readRatingMarker,
+          acceptDisabled: acceptDisabled(process.env),
+          waitRatingsScript: SCRIPTS.waitRatings,
+          compositeScript: SCRIPTS.composite,
+        });
+      }
+      default:
+        return assertNever(task.direction);
+    }
+  };
+
   // --- outer parallel fork, opus all the way --------------------------------
   // parallelFork spawns independent child sessions per task; explicit
   // fork()/compact() on the outer session isn't needed — the scaffolding
@@ -1115,13 +1204,17 @@ export function main(args: {
           // isolated upper layer and never touch the base tree (nor sibling forks).
           .switchBranch(task.branch_id)
           .try<Result<TaskResult>>(
-            (s) => s.tryMultipleTimes<TaskResult>(task.retry_budget, (s2) => runTask(s2, task)),
+            (s) => s.tryMultipleTimes<TaskResult>(task.retry_budget, (s2) => runTaskFor(s2, task)),
             // Don't cancel sibling tasks when one task fails outright.
             (s, e) => s.materializeError(describeError(e)),
           )),
       // BRANCH 2 — the stability classification (its own thread; non-throwing so
       // a flaky render can't cancel BRANCH 1).
-      (stab) => stabilityBranch(stab, { repo, fixturesDirRel }),
+      // The stability classification describes the FORWARD deck; a reverse run's
+      // merge retest needs no classifier (it degrades to xml-stable), so skip it.
+      (stab) => stabilityApplies(args.direction)
+        ? stabilityBranch(stab, { repo, fixturesDirRel })
+        : stab.executeShell(() => `echo "[stability] skipped (reverse direction)"`),
       // JOIN — keep the fork results; stability's side effect was STABILITY_JSON.
       (taskResults, _stability) => taskResults,
     )
@@ -1129,7 +1222,23 @@ export function main(args: {
     // rating-outcome markers the forks wrote (and STABILITY_JSON) OFF DISK, so the
     // combine just returns the upstream TaskResults.
     .combineWith<MergeReport | null, Array<Result<TaskResult>>>(
-      (branch) => finalMergePhase(branch, { repo, tasks: args.tasks }),
+      (branch) => finalMergePhase(branch, { repo, tasks: args.tasks, merge: mergeSettingsFor(args.direction, args.reverse?.paths ?? null) }),
       (taskResults) => taskResults,
     );
+}
+
+/** Whether the forward stability classification is worth running for a direction. */
+function stabilityApplies(direction: SolveDirection): boolean {
+  switch (direction) {
+    case "forward":
+      return true;
+    case "reverse":
+      return false;
+    default:
+      return assertNever(direction);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled case: ${String(value)}`);
 }

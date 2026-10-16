@@ -13,6 +13,22 @@
 #   npm run renderer:solver:run -- --clusters="[['slide_35','slide_36','slide_37','slide_38']]"
 #                                                                group BAD slides into ONE shared cluster
 #                                                                (more groups: [[...],[...]]; ungrouped bad slides stay 1-per-slide)
+#   npm run renderer:solver:run -- --direction reverse          solve the REVERSE round trip (Google Slides -> Sasha HTML)
+#   npm run renderer:solver:run -- --direction reverse --only complex__slide_14
+#   npm run renderer:solver:run -- --direction reverse --clusters="[['complex__slide_05','complex__slide_30']]"
+#
+# --direction = forward | reverse              (default forward; unsupported → error)
+#   forward: clusters = slides marked BAD in the forward SxS ratings.json (/tmp/sxs-complex).
+#   reverse: clusters = slides marked BAD in /workspaces/sashaslides/.sxs-reverse/ratings-reverse.json,
+#            ids "<set>__slide_NN" (--only / --clusters also accept "slide_NN" when it is unique). Each
+#            fork fixes the importer (mcp/sasha-slides/google-slides), the engine renderer or the HTML
+#            export; re-records the cluster's slides with the reverse pipeline OFFLINE (recorded Google
+#            exports, so no token is spent) into its shared dir; re-runs EVERY set and gates on the
+#            user's goldens-reverse + the current metrics (no slide may rise > 0.05 points); the verdict
+#            compares Sasha's render with Google's thumbnail; then the fork's own reverse rating UI
+#            (rating-server.ts --direction reverse) BLOCKS for your good/bad. Merge phase unchanged.
+#            Needs Chrome on :9223 (BUG_SOLVING_REVERSE_CHROME_PORT; started headless when absent).
+#            Goldens-reverse are only READ — your "Good" click in the main reverse UI stays their only writer.
 #
 # --model    = opus | sonnet | haiku | fable   (unsupported → error)
 # --only     = a task_id, a substring of it, or a slide id (e.g. slide_03) — run just that cluster
@@ -36,6 +52,7 @@ VALMODEL="${BUG_SOLVING_VALIDATION_MODEL:-}"   # per-slide verdict model; defaul
 ENGINE="${BUG_SOLVING_ENGINE:-claude}"
 ATTEMPTS="${BUG_SOLVING_RETRY_BUDGET:-5}"
 ONLY="${BUG_SOLVING_ONLY:-}"   # limit the run to ONE cluster (task_id / substring / slide id)
+DIRECTION="${BUG_SOLVING_DIRECTION:-forward}"   # forward (HTML -> Slides) | reverse (Slides -> Sasha HTML)
 REGEN=1          # fresh solve regenerates clusters.ts from the reconciled ledgers
 CLUSTERS_SPEC="" # --clusters="[['slide_35','slide_36']]" → manually group BAD slides into one cluster
 PASS=()
@@ -49,6 +66,8 @@ while [ $# -gt 0 ]; do
     --engine=*)   ENGINE="${1#*=}"; shift ;;
     --attempts)  ATTEMPTS="${2:?--attempts needs a value}"; shift 2 ;;
     --attempts=*) ATTEMPTS="${1#*=}"; shift ;;
+    --direction) DIRECTION="${2:?--direction needs a value}"; shift 2 ;;
+    --direction=*) DIRECTION="${1#*=}"; shift ;;
     --only)      ONLY="${2:?--only needs a value}"; shift 2 ;;   # solve just this cluster
     --only=*)     ONLY="${1#*=}"; shift ;;
     --clusters)  CLUSTERS_SPEC="${2:?--clusters needs a value}"; shift 2 ;;  # manual grouping
@@ -65,6 +84,10 @@ for m in "$MODEL:--model" "$VALMODEL:--validation-model"; do
     *) echo "❌ unsupported ${m#*:} '${m%%:*}' — must be one of: opus | sonnet | haiku | fable" >&2; exit 2 ;;
   esac
 done
+case "$DIRECTION" in
+  forward|reverse) ;;
+  *) echo "❌ unsupported --direction '$DIRECTION' — must be one of: forward | reverse" >&2; exit 2 ;;
+esac
 case "$ENGINE" in
   claude|codex) ;;
   *) echo "❌ unsupported --engine '$ENGINE' — must be one of: claude | codex" >&2; exit 2 ;;
@@ -73,7 +96,12 @@ case "$ATTEMPTS" in
   ''|*[!0-9]*) echo "❌ --attempts '$ATTEMPTS' must be a positive integer" >&2; exit 2 ;;
 esac
 [ "$ATTEMPTS" -ge 1 ] || { echo "❌ --attempts must be >= 1 (got $ATTEMPTS)" >&2; exit 2; }
-echo "▶ model=$MODEL  validation-model=$VALMODEL  engine=$ENGINE  attempts=$ATTEMPTS${ONLY:+  only=$ONLY}  extra=[${PASS[*]:-}]"
+if [ "$DIRECTION" = reverse ]; then
+  SXS_DEFAULT="$ROOT/.sxs-reverse"; RATINGS_DEFAULT="$ROOT/.sxs-reverse/ratings-reverse.json"
+else
+  SXS_DEFAULT="/tmp/sxs-complex"; RATINGS_DEFAULT="/tmp/sxs-complex/ratings.json"
+fi
+echo "▶ direction=$DIRECTION  model=$MODEL  validation-model=$VALMODEL  engine=$ENGINE  attempts=$ATTEMPTS${ONLY:+  only=$ONLY}  extra=[${PASS[*]:-}]"
 
 # 0. NO clusters.ts / no regen: clusters are derived at solve start DIRECTLY from
 #    the live SxS ratings (the slides you marked BAD, with their live comments +
@@ -89,6 +117,18 @@ if ! curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; th
   for i in $(seq 1 25); do curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
 fi
 curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1 || { echo "❌ Chrome not on :9222"; exit 1; }
+# 1b. REVERSE: the reverse pipeline screenshots the Sasha export on its own Chrome (:9223 by
+#     default, where the canonical .sxs-reverse renders were captured) — start one if absent.
+if [ "$DIRECTION" = reverse ]; then
+  RPORT="${BUG_SOLVING_REVERSE_CHROME_PORT:-9223}"
+  if ! curl -s --max-time 2 "http://127.0.0.1:$RPORT/json/version" >/dev/null 2>&1; then
+    echo "▶ starting headless Chrome on :$RPORT for the reverse pipeline …"
+    setsid google-chrome-stable --headless=new --remote-debugging-port="$RPORT" --no-sandbox \
+      --user-data-dir="/tmp/chrome-cdp-$RPORT" >"/tmp/chrome-$RPORT.log" 2>&1 < /dev/null & disown
+    for i in $(seq 1 25); do curl -s --max-time 2 "http://127.0.0.1:$RPORT/json/version" >/dev/null 2>&1 && break; sleep 1; done
+  fi
+  curl -s --max-time 2 "http://127.0.0.1:$RPORT/json/version" >/dev/null 2>&1 || { echo "❌ Chrome not on :$RPORT"; exit 1; }
+fi
 
 # 2. Build the bundle (into structured-prompting/dist, where preact + the workspace lib resolve).
 echo "▶ building $BUNDLE …"
@@ -97,7 +137,7 @@ npx tsx structured-prompting/build.ts renderer/structured-prompts/bug_solving/ma
 # 3. Show which slides are currently marked BAD in the live SxS ratings — these
 #    become the clusters at solve start (clustersFromRatings). No longer baked
 #    into the bundle, so grepping the bundle would (misleadingly) show nothing.
-RJSON="${BUG_SOLVING_RATINGS_JSON:-/tmp/sxs-complex/ratings.json}"
+RJSON="${BUG_SOLVING_RATINGS_JSON:-$RATINGS_DEFAULT}"
 echo "▶ slides marked BAD in $RJSON (→ clusters):"
 if [ -f "$RJSON" ]; then
   npx tsx -e 'const r=require(process.argv[1]);const bad=Object.keys(r).filter(k=>((r[k].status??r[k].verdict??"")+"").toLowerCase()==="bad"||r[k].good===false).sort();console.log(bad.length?"    "+bad.join(", "):"    (none — rate slides BAD in the SxS UI first)")' "$RJSON" 2>/dev/null || echo "    (could not read ratings)"
@@ -114,7 +154,8 @@ BUG_SOLVING_MODEL="$MODEL" \
 BUG_SOLVING_ONLY="$ONLY" \
 BUG_SOLVING_CLUSTERS="$CLUSTERS_SPEC" \
 BUG_SOLVING_RETRY_BUDGET="$ATTEMPTS" \
-BUG_SOLVING_SXS_DIR="${BUG_SOLVING_SXS_DIR:-/tmp/sxs-complex}" \
-BUG_SOLVING_RATINGS_JSON="${BUG_SOLVING_RATINGS_JSON:-/tmp/sxs-complex/ratings.json}" \
+BUG_SOLVING_DIRECTION="$DIRECTION" \
+BUG_SOLVING_SXS_DIR="${BUG_SOLVING_SXS_DIR:-$SXS_DEFAULT}" \
+BUG_SOLVING_RATINGS_JSON="${BUG_SOLVING_RATINGS_JSON:-$RATINGS_DEFAULT}" \
 BUG_SOLVING_FIXTURES_DIR="${BUG_SOLVING_FIXTURES_DIR:-renderer/html2slides/e2e/fixtures}" \
   exec node "$BUNDLE" "--engine=$ENGINE" "${PASS[@]}"

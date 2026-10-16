@@ -60,6 +60,13 @@ export type SetRunOptions = Readonly<{
    * export is left as it is on disk.
    */
   offline: boolean;
+  /**
+   * The slide file ids (`slide_NN`) to export, screenshot and measure; null means every slide.
+   * The bug_solving reverse direction re-renders only a cluster's slides per attempt, so the
+   * import still reads the whole presentation (slide ids and assets depend on it) but the
+   * per-slide work is skipped, and metrics.json keeps the other slides' earlier rows.
+   */
+  onlySlides: ReadonlySet<string> | null;
   google: GoogleSlidesSource;
   chrome: ChromeTab;
   now: () => number;
@@ -112,6 +119,7 @@ export async function runReverseSet(options: SetRunOptions): Promise<readonly Sl
   for (let index = 0; index < slideCount; index++) {
     const slideNumber = index + 1;
     const fileId = slideFileId(slideNumber);
+    if (options.onlySlides !== null && !options.onlySlides.has(fileId)) continue;
     const googleSlide = presentation.slides[index];
     const sashaSlide = imported.snapshot.slides[index];
     if (googleSlide === undefined || sashaSlide === undefined) throw new Error(`[${options.set}] slide ${slideNumber} is missing on one side`);
@@ -173,11 +181,24 @@ export async function runReverseSet(options: SetRunOptions): Promise<readonly Sl
     );
   }
 
-  writeJson(layout.metricsPath, rows);
+  writeJson(layout.metricsPath, options.onlySlides === null ? rows : mergedMetrics({ previous: readMetrics(layout.metricsPath), measured: rows }));
   writeMeta({ options, layout, presentation, state, fixtureCount: fixtureFiles.length });
   if (!existsSync(layout.ratingsPath)) writeJson(layout.ratingsPath, {});
   if (fixtureFiles.length > 0 && !existsSync(layout.roundTrip.ratingsPath)) writeJson(layout.roundTrip.ratingsPath, {});
   return rows;
+}
+
+/** A filtered run's rows replace the same slides' earlier rows; every other slide keeps its row. */
+function mergedMetrics(options: Readonly<{ previous: readonly SlideMetrics[]; measured: readonly SlideMetrics[] }>): readonly SlideMetrics[] {
+  const measuredIds = new Set(options.measured.map((row) => row.slideId));
+  return [...options.previous.filter((row) => !measuredIds.has(row.slideId)), ...options.measured].sort((left, right) => left.slideNumber - right.slideNumber);
+}
+
+function readMetrics(path: string): readonly SlideMetrics[] {
+  if (!existsSync(path)) return [];
+  const raw: unknown = JSON.parse(readFileSync(path, "utf-8"));
+  // metrics.json is written only by this module, as an array of SlideMetrics.
+  return Array.isArray(raw) ? (raw as readonly SlideMetrics[]) : [];
 }
 
 /**

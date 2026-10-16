@@ -35,6 +35,7 @@ function mkTask(sharedDir: string, taskId = "clip"): Task {
     slides: [],
     cluster_description: "",
     retry_budget: 0,
+    direction: "forward",
   } as Task;
 }
 

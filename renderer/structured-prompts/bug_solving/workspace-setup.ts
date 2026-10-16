@@ -22,9 +22,11 @@
  * branch naturally; the gate is obsolete.
  */
 import { readFileSync, existsSync, mkdirSync, copyFileSync } from "fs";
+import { tmpdir } from "os";
 import { resolve } from "path";
 import type { SlideTask, Task } from "./main.js";
 import { makeAnnotationComposite } from "./scripts/annotation-composite.js";
+import { buildReverseSlideTasks, type ReversePaths, type SolveDirection } from "./reverse-direction.js";
 
 /**
  * Turn a repo-relative fixtures dir path into a dir-safe slug so that
@@ -57,6 +59,8 @@ export interface BuildOptions {
   port_base: number;                // default: 4720
   retry_budget: number;             // default: 3
   repo_root: string;                // default: process.cwd()
+  direction: SolveDirection;        // default: forward. reverse reads the slides from reverse_paths
+  reverse_paths: ReversePaths | null; // required when direction is reverse (.sxs-reverse, its ratings, goldens)
 }
 
 const DEFAULTS: Omit<BuildOptions, "clusters"> = {
@@ -66,6 +70,8 @@ const DEFAULTS: Omit<BuildOptions, "clusters"> = {
   port_base: 4720,
   retry_budget: 3,
   repo_root: process.cwd(),
+  direction: "forward",
+  reverse_paths: null,
 };
 
 /** One rating entry as stored in ratings.json. Only `comment` is consumed
@@ -195,7 +201,8 @@ export function stageSlideImages(slides: SlideTask[], imagesDir: string): void {
 export function selectOnlyClusters(clusters: readonly Cluster[], only: string): Cluster[] {
   const q = (only ?? "").trim();
   if (!q) return [...clusters];
-  return clusters.filter((c) => c.task_id === q || c.task_id.includes(q) || c.slide_ids.includes(q));
+  // A reverse slide id is "<set>__slide_NN"; "slide_NN" alone names it too.
+  return clusters.filter((c) => c.task_id === q || c.task_id.includes(q) || c.slide_ids.includes(q) || c.slide_ids.some((id) => id.endsWith(`__${q}`)));
 }
 
 export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "clusters">): Task[] {
@@ -204,7 +211,7 @@ export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "
   const out: Task[] = [];
   for (let i = 0; i < opts.clusters.length; i++) {
     const c = opts.clusters[i];
-    const slides = buildSlideTasks(c.slide_ids, opts);
+    const slides = slideTasksFor(c.slide_ids, opts);
     const { branch_id } = createOverlayBranch(c.task_id);
     const shared_dir = `${SHARED_ROOT}/${runId}/${c.task_id}`;
     // Consolidate this task's per-slide SxS images into the jail-visible shared
@@ -232,7 +239,29 @@ export function buildTasks(options: Partial<BuildOptions> & Pick<BuildOptions, "
       slides,
       cluster_description: c.cluster_description,
       retry_budget: c.retry_budget ?? opts.retry_budget,
+      direction: opts.direction,
     });
   }
   return out;
+}
+
+/** The SlideTask records of one cluster in the run's direction. The reverse annotation
+ *  composites go to a scratch dir, never into the user's .sxs-reverse results. */
+function slideTasksFor(slideIds: string[], opts: BuildOptions): SlideTask[] {
+  switch (opts.direction) {
+    case "forward":
+      return buildSlideTasks(slideIds, opts);
+    case "reverse": {
+      if (opts.reverse_paths === null) throw new Error("buildTasks: direction reverse needs reverse_paths");
+      const compositesDirectory = resolve(tmpdir(), "bug-solving-reverse-composites");
+      mkdirSync(compositesDirectory, { recursive: true });
+      return buildReverseSlideTasks({ slideIds, paths: opts.reverse_paths, repositoryRoot: opts.repo_root, compositesDirectory });
+    }
+    default:
+      return assertNever(opts.direction);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled case: ${String(value)}`);
 }

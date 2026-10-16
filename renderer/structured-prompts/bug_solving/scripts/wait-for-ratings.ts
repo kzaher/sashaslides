@@ -19,6 +19,10 @@
  *   --history-dir <dir>   optional; passed through to resolveRatingIo (unused by
  *                         the gate itself, kept for symmetry / future use).
  *   --poll-ms <n>         optional poll interval (default 2000).
+ *   --ratings-file <f>    optional; the verdict file to block on instead of
+ *                         <results-dir>/ratings.json. The REVERSE direction
+ *                         (rating-server.ts --direction reverse) writes its verdicts
+ *                         to ratings-reverse.json, so its forks pass that file here.
  *
  * Env policy (shared with the old post-run accept):
  *   BUG_SOLVING_NO_ACCEPT=1        → skip the wait ENTIRELY. Writes a marker with
@@ -41,7 +45,7 @@
  * abort the already-SOLVED fork).
  */
 import { writeFileSync, mkdirSync } from "fs";
-import { dirname } from "path";
+import { dirname, resolve } from "path";
 import { resolveRatingIo } from "../sxs-io.js";
 import { waitForRatings, readRatings, type RatingSplit } from "../rating-gate.js";
 import { resolveRatingTimeoutMs, acceptDisabled } from "../accept-orchestration.js";
@@ -73,6 +77,7 @@ async function main(): Promise<void> {
   const markerFile = arg("--marker");
   const historyDir = arg("--history-dir");
   const pollMs = Number(arg("--poll-ms") ?? "2000");
+  const ratingsFileOverride = arg("--ratings-file");
 
   if (!resultsDir || !markerFile) {
     console.error("wait-for-ratings: --results-dir and --marker are REQUIRED");
@@ -88,7 +93,8 @@ async function main(): Promise<void> {
   }
 
   const slides = slidesCsv ? slidesCsv.split(",").map((s) => s.trim()).filter(Boolean) : [];
-  const io = resolveRatingIo({ resultsDir, historyDir: historyDir ?? null, filterSlides: slides.length ? slides : null });
+  const resolvedIo = resolveRatingIo({ resultsDir, historyDir: historyDir ?? null, filterSlides: slides.length ? slides : null });
+  const io = ratingsFileOverride ? { ...resolvedIo, ratingsFile: resolve(ratingsFileOverride) } : resolvedIo;
 
   // NO_ACCEPT → skip the wait entirely. The final merge phase is a no-op under
   // NO_ACCEPT, and the fork already booted its UI for review; don't block.

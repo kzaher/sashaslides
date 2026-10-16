@@ -77,8 +77,17 @@ export function clustersFromRatings(ratingsPath: string, opts: { retryBudget?: n
  *
  * Only slides that are already in `auto` (i.e. marked BAD) can be grouped — a
  * name that matches no bad slide is skipped with a warning.
+ *
+ * `options.memberKey` maps a spec entry AND a cluster's slide id to the key they
+ * are matched on. Default: the slide number (forward ids are unique per number).
+ * The reverse direction's ids ("complex__slide_05") repeat numbers across sets, so
+ * it passes reverseClusterMemberKey (reverse-direction.ts) instead.
  */
-export function applyManualClusters(auto: Cluster[], specRaw: string): Cluster[] {
+export function applyManualClusters(
+  auto: Cluster[],
+  specRaw: string,
+  options: { memberKey?: (reference: string) => string } = {},
+): Cluster[] {
   const raw = (specRaw ?? "").trim();
   if (!raw) return auto;
   let spec: unknown;
@@ -94,14 +103,15 @@ export function applyManualClusters(auto: Cluster[], specRaw: string): Cluster[]
     throw new Error("--clusters must be an array of arrays, e.g. [['slide_35','slide_36']]");
   }
   const numOf = (s: unknown): number => Number(String(s).replace(/[^0-9]/g, "")) || -1;
-  const byNum = new Map<number, Cluster>();
-  for (const c of auto) for (const sid of c.slide_ids) byNum.set(numOf(sid), c);
+  const keyOf = options.memberKey ?? ((reference: string): string => String(numOf(reference)));
+  const byNum = new Map<string, Cluster>();
+  for (const c of auto) for (const sid of c.slide_ids) byNum.set(keyOf(sid), c);
 
   const grouped = new Set<Cluster>();
   const merged: Cluster[] = [];
   for (const group of spec as unknown[][]) {
     const members = [
-      ...new Set(group.map(numOf).map((n) => byNum.get(n)).filter((c): c is Cluster => !!c)),
+      ...new Set(group.map((reference) => keyOf(String(reference))).map((key) => byNum.get(key)).filter((c): c is Cluster => !!c)),
     ];
     if (members.length === 0) {
       console.error(`[clusters] manual group ${JSON.stringify(group)} matched no BAD slide — skipped`);
