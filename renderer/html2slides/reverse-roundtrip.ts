@@ -17,7 +17,7 @@
  *
  * Run through reverse-sxs.sh, which supplies the engine's JSX settings, or as:
  *   npx tsx --tsconfig ../../mcp/sasha-slides/engine/tsconfig.json reverse-roundtrip.ts [--sets basic,complex,deck]
- *     [--output /workspaces/sashaslides/.sxs-reverse] [--chrome-port 9223]
+ *     [--output /workspaces/sashaslides/.sxs-reverse] [--chrome-port 9222]
  *     [--presentation basic=<id>] [--fresh-upload] [--refresh-thumbnails] [--refresh-fixture-shots]
  *     [--offline [--pptx basic=<path>]]   re-measure from the recordings when the token has expired
  *     [--slides complex__slide_05,slide_07]  export + measure only these slides (the import stays whole);
@@ -27,7 +27,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { openChromeTab } from "./reverse/chrome-capture.ts";
+import { DEFAULT_CAPTURE_CHROME_PORT, openChromeTab } from "./reverse/chrome-capture.ts";
 import { createGoogleSlidesSource, createRecordedGoogleSlidesSource, type GoogleSlidesSource, type PresentationRecording } from "./reverse/google-slides-source.ts";
 import { ALL_SETS, setLayoutOf, type ReverseSet, type SlideMetrics } from "./reverse/reverse-results.ts";
 import { runReverseSet, type SetSource } from "./reverse/reverse-set.ts";
@@ -234,7 +234,7 @@ function meanOf(values: readonly (number | null)[]): number | null {
 function parseArguments(argv: readonly string[]): Arguments {
   let sets: readonly ReverseSet[] = ALL_SETS;
   let output = join(REPOSITORY_ROOT, ".sxs-reverse");
-  let chromePort = 9223;
+  let chromePort = DEFAULT_CAPTURE_CHROME_PORT;
   let deviceScaleFactor = 1.25;
   const givenPresentations = new Map<ReverseSet, string>();
   let freshUpload = false;

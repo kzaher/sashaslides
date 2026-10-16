@@ -17,4 +17,12 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
+# Screenshots are taken in the headless Chrome on :9222 (reverse/chrome-capture.ts says why it
+# must be headless); it dies with the container, so start it when it is absent.
+if ! curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
+  echo "▶ starting headless Chrome on :9222 …"
+  setsid google-chrome-stable --headless=new --remote-debugging-port=9222 --no-sandbox \
+    --user-data-dir=/tmp/chrome-cdp >/tmp/chrome.log 2>&1 < /dev/null & disown
+  for _ in $(seq 1 25); do curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
+fi
 exec npx tsx --tsconfig ../../mcp/sasha-slides/engine/tsconfig.json reverse-roundtrip.ts "$@"

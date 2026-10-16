@@ -108,6 +108,13 @@ Important:
   holding the new `Dialog.html` (length verified after reload), dialogs opened from an already-open deck still ran the
   old bundle (`window.sashaBuild` showed the old hash). Reload the deck tab after every deploy, and check
   `sashaBuild` in the served frame before trusting a live result.
+* **Parallel captures in ONE Chrome window stall each other; separate windows fix it ONLY in headless Chrome.**
+  `Page.bringToFront()` hides every other tab of that window, and a hidden tab never runs requestAnimationFrame
+  (measured 2026-10-16: bug_solving forks' reverse captures failed "two animation frames took longer than 2000 ms").
+  `Target.createTarget({ newWindow: true })` keeps both rendering on the headless :9222, but on the headed container
+  Chrome (:9223) the window behind is occluded and stalls anyway. Both render byte-identical pixels (64/64 slides), so
+  capture in headless, one window per tab: `renderer/html2slides/reverse/chrome-capture.ts`, test
+  `reverse/chrome-capture.e2e.test.ts` (fails 3/3 on the same-window code).
 * **`CDP.New({ url })` truncates the address at the first `&`** (chrome-remote-interface sends it to `/json/new`
   unencoded). Measured 2026-10-11: an OAuth `/authorize?response_type=code&client_id=…` opened as
   `/authorize?response_type=code`, and the server correctly answered `unknown client_id` — which read as a server bug

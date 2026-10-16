@@ -27,7 +27,7 @@
 #            user's goldens-reverse + the current metrics (no slide may rise > 0.05 points); the verdict
 #            compares Sasha's render with Google's thumbnail; then the fork's own reverse rating UI
 #            (rating-server.ts --direction reverse) BLOCKS for your good/bad. Merge phase unchanged.
-#            Needs Chrome on :9223 (BUG_SOLVING_REVERSE_CHROME_PORT; started headless when absent).
+#            Needs a headless Chrome, :9222 by default (BUG_SOLVING_REVERSE_CHROME_PORT; started when absent).
 #            Goldens-reverse are only READ — your "Good" click in the main reverse UI stays their only writer.
 #
 # --model    = opus | sonnet | haiku | fable   (unsupported → error)
@@ -117,10 +117,11 @@ if ! curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; th
   for i in $(seq 1 25); do curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
 fi
 curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1 || { echo "❌ Chrome not on :9222"; exit 1; }
-# 1b. REVERSE: the reverse pipeline screenshots the Sasha export on its own Chrome (:9223 by
-#     default, where the canonical .sxs-reverse renders were captured) — start one if absent.
+# 1b. REVERSE: the reverse pipeline screenshots in a HEADLESS Chrome, one window per capture, so
+#     parallel forks never hide each other's page (reverse/chrome-capture.ts). That is :9222 above
+#     by default; an override port gets a headless one started when absent.
 if [ "$DIRECTION" = reverse ]; then
-  RPORT="${BUG_SOLVING_REVERSE_CHROME_PORT:-9223}"
+  RPORT="${BUG_SOLVING_REVERSE_CHROME_PORT:-9222}"
   if ! curl -s --max-time 2 "http://127.0.0.1:$RPORT/json/version" >/dev/null 2>&1; then
     echo "▶ starting headless Chrome on :$RPORT for the reverse pipeline …"
     setsid google-chrome-stable --headless=new --remote-debugging-port="$RPORT" --no-sandbox \

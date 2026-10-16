@@ -20,7 +20,7 @@
  * page by its file address, and the jail's private upper layer is invisible to it.
  *
  *   npx tsx record-reverse.ts --canonical /workspaces/sashaslides/.sxs-reverse --output <dir>
- *     [--slides complex__slide_05,…] [--chrome-port 9223]
+ *     [--slides complex__slide_05,…] [--chrome-port 9222]
  *
  * Exits with the pipeline's status: a fix that breaks the importer must fail the attempt.
  */

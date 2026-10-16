@@ -55,7 +55,7 @@
  * ## Direction (--direction=forward|reverse, env BUG_SOLVING_DIRECTION; default forward)
  *   reverse: clusters from .sxs-reverse/ratings-reverse.json (BUG_SOLVING_RATINGS_JSON /
  *   BUG_SOLVING_SXS_DIR override the ratings file / results root, BUG_SOLVING_REVERSE_GOLDENS_DIR
- *   the goldens the gate READS, BUG_SOLVING_REVERSE_CHROME_PORT the Chrome, default 9223).
+ *   the goldens the gate READS, BUG_SOLVING_REVERSE_CHROME_PORT the Chrome, default the headless 9222).
  *   No BEFORE pptx is recorded (the canonical .sxs-reverse renders are the BEFORE); each
  *   fork runs reverseRunTask (reverse-run-task.ts). See main.ts's header.
  *

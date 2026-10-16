@@ -79,9 +79,12 @@ export const REVERSE_METRIC_RISE_LIMIT = 0.05;
  *  after reverse-metrics.ts's blur. An unchanged render measures 0. */
 export const REVERSE_GOLDEN_DRIFT_LIMIT = 0.05;
 
-/** The Chrome the reverse pipeline screenshots with. The canonical results were captured on the
- *  container Chrome (:9223), and solve.sh starts a headless one there when it is absent. */
-export const DEFAULT_REVERSE_CHROME_PORT = 9223;
+/** The Chrome the reverse pipeline screenshots with: a HEADLESS one, where each fork's capture
+ *  window keeps rendering while another fork's is in front (the headed container Chrome on :9223
+ *  occludes it; renderer/html2slides/reverse/chrome-capture.ts has the measurements). Kept equal to
+ *  chrome-capture.ts's DEFAULT_CAPTURE_CHROME_PORT, which the bundle cannot import (it would pull
+ *  chrome-remote-interface in). solve.sh starts it when it is absent. */
+export const DEFAULT_REVERSE_CHROME_PORT = 9222;
 
 /** Repository-relative script paths the reverse fork runs. */
 export const REVERSE_SCRIPTS = {

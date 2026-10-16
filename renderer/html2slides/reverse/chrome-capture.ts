@@ -9,6 +9,15 @@
  *   * `Page.bringToFront()` before capturing: a hidden tab never runs requestAnimationFrame;
  *   * readiness is POLLED (100 ms steps, a few seconds' budget), never slept for.
  *
+ * ONE WINDOW PER TAB, ON A HEADLESS CHROME. Parallel bug_solving forks capture in the same Chrome,
+ * and bringing one tab to the front hides every other tab of its window, whose two-frame wait then
+ * times out ("two animation frames took longer than 2000 ms", measured 2026-10-16 on the reverse
+ * run). Each tab is therefore opened in a window of its own. That isolates it on a headless
+ * Chrome only: measured the same day, two windows on the headless :9222 both kept rendering, while
+ * on the headed container Chrome (:9223) the window behind was occluded and stalled all the same.
+ * Hence DEFAULT_CAPTURE_CHROME_PORT. The two render the same pixels: all 64 reverse slides captured
+ * on :9222 were byte-identical to the :9223 baseline of the same tree.
+ *
  * READINESS. A page from the engine's exporter marks its root `data-sasha-export-ready="true"`
  * once fonts have arrived and shrink-to-fit text has been laid out; any other page (a fixture) is
  * ready when `document.fonts` has finished loading. Two animation frames then let the last layout
@@ -31,6 +40,8 @@ export type ChromeTab = AsyncDisposable &
     capture(options: Readonly<{ address: string }>): Promise<Capture>;
   }>;
 
+/** The headless Chrome the round trip captures with (see ONE WINDOW PER TAB above). */
+export const DEFAULT_CAPTURE_CHROME_PORT = 9222;
 export const PAGE_WIDTH = 1280;
 export const PAGE_HEIGHT = 720;
 const LOAD_BUDGET_MILLISECONDS = 15_000;
@@ -38,7 +49,7 @@ const READY_BUDGET_MILLISECONDS = 8_000;
 const POLL_MILLISECONDS = 100;
 
 export async function openChromeTab(options: Readonly<{ port: number; deviceScaleFactor: number }>): Promise<ChromeTab> {
-  const target = await CDP.New({ port: options.port, url: "about:blank" });
+  const target = await openWindow({ port: options.port });
   let client: CdpClient;
   try {
     client = await CDP({ port: options.port, target: target.id });
@@ -126,6 +137,19 @@ const VISIBLE_TEXT_EXPRESSION = `(() => {
 
 const TWO_FRAMES_EXPRESSION = "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))";
 
+/** A blank page in a new window of its own, created over the browser's endpoint (`/json/new`
+ *  can only add a tab to an existing window). */
+async function openWindow(options: Readonly<{ port: number }>): Promise<CdpTarget> {
+  const version = await CDP.Version({ port: options.port });
+  const browser = await CDP({ port: options.port, target: version.webSocketDebuggerUrl });
+  try {
+    const { targetId } = await browser.Target.createTarget({ url: "about:blank", newWindow: true });
+    return { id: targetId };
+  } finally {
+    await browser.close();
+  }
+}
+
 async function withinBudget<TValue>(options: Readonly<{ promise: Promise<TValue>; milliseconds: number; what: string }>): Promise<TValue> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<never>((_, reject) => {
@@ -156,13 +180,16 @@ type CdpClient = Readonly<{
   Emulation: Readonly<{
     setDeviceMetricsOverride(parameters: Readonly<{ width: number; height: number; deviceScaleFactor: number; mobile: boolean }>): Promise<unknown>;
   }>;
+  Target: Readonly<{
+    createTarget(parameters: Readonly<{ url: string; newWindow: boolean }>): Promise<Readonly<{ targetId: string }>>;
+  }>;
   close(): Promise<void>;
 }>;
 type CdpModule = ((options: Readonly<{ port: number; target: string }>) => Promise<CdpClient>) &
   Readonly<{
-    New(options: Readonly<{ port: number; url: string }>): Promise<CdpTarget>;
+    Version(options: Readonly<{ port: number }>): Promise<Readonly<{ webSocketDebuggerUrl: string }>>;
     Close(options: Readonly<{ port: number; id: string }>): Promise<void>;
   }>;
-// The module's default export is callable with `New` and `Close` attached, as documented by
+// The module's default export is callable with `Version` and `Close` attached, as documented by
 // chrome-remote-interface; the ambient declaration only types it `unknown`.
 const CDP = CDPDefault as CdpModule;
