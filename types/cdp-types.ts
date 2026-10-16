@@ -133,6 +133,9 @@ export interface CdpDeviceMetricsParams {
 
 export interface CdpEmulation {
   setDeviceMetricsOverride(params: CdpDeviceMetricsParams): Promise<void>;
+  /** CDP Emulation.setDefaultBackgroundColorOverride: no color restores the page's own background.
+   *  convert-pptx-io.ts sets alpha 0 to capture a text glow as a transparent PNG. */
+  setDefaultBackgroundColorOverride(params: { color?: { r: number; g: number; b: number; a?: number } }): Promise<void>;
 }
 
 /** A connected CDP client (the resolved value of calling the default export). */
