@@ -1,5 +1,5 @@
 #!/bin/bash
-# Starts Xvfb + Chrome with remote debugging and the Polybot extension loaded.
+# Starts Xvfb, x11vnc, noVNC and a headed Chrome with remote debugging on :9222.
 # Called automatically by devcontainer postStartCommand.
 
 set -e
