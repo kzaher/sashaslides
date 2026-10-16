@@ -46,6 +46,7 @@ import type { ArrowHead, Border, Colour, DashStyle, Fill, LineRouting, Shadow, S
 import { colourOf, FALLBACK_SLOT_COLOURS, THEME_SLOT_BY_SLIDES_TYPE, type ColourContext } from "./import-colours.ts";
 import type { PptxElementSupplement, PptxGradient, PptxSupplement } from "./import-pptx-supplement.ts";
 import { roundedShapeOf, type ShapeAdjustments, type ShapeAdjustmentsByObjectId } from "./import-shape-geometry.ts";
+import { insetsForUploadedText, uploadedTrailingSpacingPoints } from "./import-uploaded-leading.ts";
 import { EMPTY_BODY, importTextBody, resolvedPlaceholderStyle, roundUnits, type TextContext } from "./import-text.ts";
 import { composeTransforms, frameForTransform, pageScaleFor, rotationOf, transformPoint, type PageScale } from "./interchange-geometry.ts";
 import { createLossCollector, type InterchangeLossSink } from "./interchange-losses.ts";
@@ -754,7 +755,9 @@ function importShape(options: Readonly<{ shape: SlidesShape; objectId: string; c
   const contentAlignment = chain.map((link) => link.contentAlignment).find((value) => value !== null) ?? "TOP";
   const autofitType = chain.map((link) => link.autofitType).find((value) => value !== null) ?? null;
   const placeholder = placeholderReferenceOf({ placeholder: shape.placeholder, losses });
+  const verticalAlignment = verticalAlignmentOf(contentAlignment);
   const inset = textInsetsOf({ objectId: options.objectId, shape, context });
+  const vertical = insetsForUploadedText({ verticalAlignment, top: inset.top, bottom: inset.bottom, trailingSpacing: uploadedTrailingSpacingPoints(shape.text) * context.scale.unitsPerPoint });
   const text: TextBody =
     context.onLayout && shape.placeholder !== null
       ? EMPTY_BODY
@@ -773,10 +776,10 @@ function importShape(options: Readonly<{ shape: SlidesShape; objectId: string; c
       opacity: 1,
     },
     textBox: {
-      verticalAlignment: verticalAlignmentOf(contentAlignment),
-      paddingTop: inset.top,
+      verticalAlignment,
+      paddingTop: vertical.top,
       paddingRight: inset.right,
-      paddingBottom: inset.bottom,
+      paddingBottom: vertical.bottom,
       paddingLeft: inset.left,
       autofit: autofitOf({ autofitType, shapeType: shape.shapeType }),
       wrap: true,

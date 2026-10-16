@@ -231,6 +231,8 @@ export type SlidesParagraphStyle = Readonly<{
   indentStartPoints?: number;
   indentFirstLinePoints?: number;
   direction?: string;
+  /** NEVER_COLLAPSE marks a paragraph uploaded from a .pptx (import-uploaded-leading.ts). */
+  spacingMode?: string;
 }>;
 
 export type ParsedPresentation =
@@ -660,6 +662,7 @@ function parseParagraphStyle(raw: unknown): SlidesParagraphStyle {
   const indentFirstLine = points("indentFirstLine");
   if (indentFirstLine !== undefined) result.indentFirstLinePoints = indentFirstLine;
   if (typeof style["direction"] === "string") result.direction = style["direction"];
+  if (typeof style["spacingMode"] === "string") result.spacingMode = style["spacingMode"];
   return result;
 }
 

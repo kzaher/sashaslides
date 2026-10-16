@@ -13,6 +13,9 @@
 //  * DASHES MAP TO THE THREE BORDER STYLES A BOX HAS: dot to dotted; dash, long dash and the
 //    dash-dot variants to dashed. Vector shapes and lines get exact patterns through
 //    `strokeDashArray`; exact patterns on boxes are a later vector overlay (SPEC.md section 8).
+//  * A LINE SITS WHERE GOOGLE SLIDES PUTS IT: extra line spacing goes below the glyphs, not half
+//    above, and the baseline offset does not depend on the family (text-vertical-metrics.ts has the
+//    measurements). Runs carry their own line box; the paragraph only hands them its spacing.
 //  * FLIPS COMPOSE BEFORE THE ROTATION in ONE transform (geometry.ts header): `rotate() scale()`
 //    applies the scale first, which is the mirror inside the element's own box.
 
@@ -38,6 +41,7 @@ import type {
   TextAlignment,
   VerticalAlignment,
 } from "../../contracts/style.ts";
+import { LINE_BOX_PER_LINE_SPACING, paragraphLineDropEm, strutLineHeight, stylesheetBaselineInLineBox } from "./text-vertical-metrics.ts";
 
 /** The stylesheet border style each Slides dash becomes on a box (see the header). */
 export const BORDER_STYLE_FOR_DASH: Readonly<Record<DashStyle, "solid" | "dotted" | "dashed">> = {
@@ -50,7 +54,17 @@ export const BORDER_STYLE_FOR_DASH: Readonly<Record<DashStyle, "solid" | "dotted
 };
 
 /** A line height of `lineSpacing` is this multiple of the font size (SPEC.md section 8). */
-export const LINE_HEIGHT_PER_LINE_SPACING = 1.2;
+export const LINE_HEIGHT_PER_LINE_SPACING = LINE_BOX_PER_LINE_SPACING;
+
+/**
+ * The paragraph's line spacing and its share of each run's drop (text-vertical-metrics.ts), handed
+ * to the runs as custom properties so a run's declarations stay a function of the run's own style.
+ */
+export const LINE_SPACING_PROPERTY = "--sasha-line-spacing";
+export const LINE_DROP_PROPERTY = "--sasha-line-drop";
+
+/** Inline custom properties; React writes a `--name` key verbatim. */
+type CustomProperties = Readonly<Record<`--${string}`, string>>;
 
 /** A drawable colour for a document colour, resolved against the deck theme. */
 export function colourValue(colour: Colour, theme: ThemeSnapshot): string {
@@ -257,7 +271,7 @@ export function runDeclarations(options: Readonly<{ style: RunStyle; theme: Them
   return {
     ...declarations,
     ...(highlight === "transparent" ? {} : { backgroundColor: highlight }),
-    ...(style.baselineOffset === "none" ? {} : { verticalAlign: BASELINE_VERTICAL_ALIGN[style.baselineOffset] }),
+    ...runLineBoxDeclarations(style),
     ...(style.letterSpacing === 0 ? {} : { letterSpacing: `${roundNumber(style.letterSpacing * options.fontScale)}px` }),
     ...textCaseDeclarations(style.textCase),
   };
@@ -267,7 +281,10 @@ export function runDeclarations(options: Readonly<{ style: RunStyle; theme: Them
 export function paragraphDeclarations(options: Readonly<{ style: ParagraphStyle; base: RunStyle; theme: ThemeSnapshot; fontScale: number; listIndent: number }>): CSSProperties {
   const style = options.style;
   const scale = options.fontScale;
-  const declarations: CSSProperties = {
+  const spacing = style.lineSpacing;
+  const declarations: CSSProperties & CustomProperties = {
+    [LINE_SPACING_PROPERTY]: String(roundNumber(spacing)),
+    [LINE_DROP_PROPERTY]: String(roundNumber(paragraphLineDropEm(spacing))),
     position: "relative",
     margin: 0,
     marginTop: `${roundNumber(style.spaceAbove * scale)}px`,
@@ -276,7 +293,9 @@ export function paragraphDeclarations(options: Readonly<{ style: ParagraphStyle;
     textIndent: `${roundNumber(style.indentFirstLine * scale)}px`,
     textAlign: TEXT_ALIGN[style.alignment],
     direction: style.direction === "rightToLeft" ? "rtl" : "ltr",
-    lineHeight: roundNumber(style.lineSpacing * LINE_HEIGHT_PER_LINE_SPACING),
+    // The strut never reaches above a run's box; an empty paragraph keeps one full line through min-height.
+    lineHeight: roundNumber(strutLineHeight({ lineSpacing: spacing, family: options.base.fontFamily })),
+    minHeight: `${roundNumber(spacing * LINE_HEIGHT_PER_LINE_SPACING)}em`,
     fontFamily: fontFamilyValue(options.base.fontFamily),
     fontSize: `${roundNumber(options.base.fontSize * scale)}px`,
     color: colourValue(options.base.colour, options.theme),
@@ -336,6 +355,24 @@ function percent(fraction: number): string {
 
 function dashPattern(multiples: readonly number[], unit: number): string {
   return multiples.map((multiple) => roundNumber(multiple * unit)).join(" ");
+}
+
+/**
+ * A run's line box, placed the way Google places a line (text-vertical-metrics.ts): `lineSpacing`
+ * x 1.2 of the run's own size tall, lowered so its top is Google's baseline offset above the
+ * baseline, and its glyphs raised back onto the line's baseline. Both moves are one length in em
+ * of the run's size, so shrink-on-overflow scales them with the font. A superscript or subscript
+ * keeps the stylesheet's raise and takes no room of its own: Google's lines ignore them too.
+ */
+function runLineBoxDeclarations(style: RunStyle): CSSProperties {
+  if (style.baselineOffset !== "none") return { verticalAlign: BASELINE_VERTICAL_ALIGN[style.baselineOffset], lineHeight: 0 };
+  const shift = `calc(-1em * (${roundNumber(stylesheetBaselineInLineBox(style.fontFamily))} + var(${LINE_DROP_PROPERTY}, ${roundNumber(paragraphLineDropEm(1))})))`;
+  return {
+    lineHeight: `calc(${LINE_HEIGHT_PER_LINE_SPACING} * var(${LINE_SPACING_PROPERTY}, 1))`,
+    verticalAlign: shift,
+    position: "relative",
+    top: shift,
+  };
 }
 
 const BASELINE_SIZE_FACTOR: Readonly<Record<RunStyle["baselineOffset"], number>> = { none: 1, superscript: 0.7, subscript: 0.7 };

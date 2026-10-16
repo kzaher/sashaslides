@@ -421,7 +421,9 @@ attempts, 0.5 seconds doubling) and a 20 second timeout per attempt, all on the 
   vector `<path>` scaled to the box with `fill`, `stroke`, `stroke-dasharray` and
   `filter: drop-shadow`; text sits in a layer above the path inset by the preset's text box.
 - Text: a flex column for vertical alignment; each paragraph a `<div>` with alignment, line height
-  (`lineSpacing` x 1.2 of the font size), spacing and indents; list markers as an absolutely
+  (`lineSpacing` x 1.2 of the line's largest font size, placed as Google Slides places it: the extra
+  spacing below the glyphs, the baseline 0.9465 x the size below the line's top whatever the family;
+  `render/text-vertical-metrics.ts`), spacing and indents; list markers as an absolutely
   positioned span (numbering by `listId` and level); runs as `<span>` with inline styles; a link to a
   slide navigates in the presenter; the automatic slide number prints `slideNumber`. Font sizes are
   slide units; the properties panel shows points (`pointsFromSlideUnits`).
