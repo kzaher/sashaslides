@@ -186,12 +186,12 @@ describe("static markup per style feature", () => {
   ];
   for (const row of runRows) {
     it(`a run with ${row.label} carries it inline`, () => {
-      const styled = elementMarkup(shapeElement({ id: ids.next("element"), text: textBody([paragraph([run("styled", row.style)])]) }));
-      const plain = elementMarkup(shapeElement({ id: ids.next("element"), text: textBody([paragraph([run("styled")])]) }));
-      const styledRun = /<span style="([^"]*)" data-sasha-run-start="0">styled<\/span>/.exec(styled)?.[1] ?? "";
-      const plainRun = /<span style="([^"]*)" data-sasha-run-start="0">styled<\/span>/.exec(plain)?.[1] ?? "";
+      // The first run is the paragraph's own style, declared once on the paragraph; a later run states only what differs.
+      const styled = elementMarkup(shapeElement({ id: ids.next("element"), text: textBody([paragraph([run("plain "), run("styled", row.style)])]) }));
+      const plain = elementMarkup(shapeElement({ id: ids.next("element"), text: textBody([paragraph([run("plain "), run("styled")])]) }));
+      const styledRun = /<span style="([^"]*)" data-sasha-run-start="6">styled<\/span>/.exec(styled)?.[1] ?? "";
       assert.match(styledRun, row.expected);
-      assert.doesNotMatch(plainRun, row.expected);
+      assert.match(plain, /<span data-sasha-run-start="6">styled<\/span>/);
     });
   }
 
@@ -290,11 +290,20 @@ describe("tables are structural markup", () => {
     const cells = tableMarkup.split("<td ").slice(1);
     assert.equal(cells.length, table.cells.length);
     cells.forEach((cellMarkup, index) => {
-      assert.match(cellMarkup, /^style="position:relative;padding:0;/, `cell ${index} is a positioned table cell, not a placed box`);
-      assert.match(cellMarkup, /padding-top:6.002px;padding-right:20px;padding-bottom:4px;padding-left:12px/, `cell ${index} padding`);
+      // The margins are the td's own padding and the paragraphs are its children: no wrapper box.
+      assert.match(cellMarkup, /^style="padding-top:6.002px;padding-right:20px;padding-bottom:4px;padding-left:12px;/, `cell ${index} padding`);
+      assert.doesNotMatch(cellMarkup.slice(0, cellMarkup.indexOf(">")), /position:/, `cell ${index} is a plain table cell, not a positioned box`);
+      assert.match(cellMarkup, /^[^>]*data-sasha-text-layer=""><div style="[^"]*" data-sasha-paragraph-start="0"/, `cell ${index} holds its paragraphs directly`);
       assert.match(cellMarkup, new RegExp(`vertical-align:${index % 2 === 0 ? "top" : "middle"}`), `cell ${index} vertical alignment`);
     });
     assert.match(cells[3] ?? "", />\u2713<\/span>/);
+  });
+
+  // complex slide 30 on the reverse SxS: a frame wider than the grid (Google's placeholder size)
+  // stretched every column, the last cell visibly, because a fixed-layout table spreads its width.
+  it("is as wide as its columns, whatever its frame", () => {
+    const wide = elementMarkup({ ...table, frame: { ...table.frame, width: 840 } });
+    assert.match(wide, /table-layout:fixed;width:600px/);
   });
 
   it("lets a row grow with its text: no fixed height, clipping or overflow on rows and cells", () => {

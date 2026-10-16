@@ -15,7 +15,9 @@
 //    `strokeDashArray`; exact patterns on boxes are a later vector overlay (SPEC.md section 8).
 //  * A LINE SITS WHERE GOOGLE SLIDES PUTS IT: extra line spacing goes below the glyphs, not half
 //    above, and the baseline offset does not depend on the family (text-vertical-metrics.ts has the
-//    measurements). Runs carry their own line box; the paragraph only hands them its spacing.
+//    measurements). A paragraph's runs sit in ONE span carrying the base run's typography and line
+//    box; a run states only what differs from it, and only a run larger than the base moves its
+//    own box, so exported HTML stays editable.
 //  * FLIPS COMPOSE BEFORE THE ROTATION in ONE transform (geometry.ts header): `rotate() scale()`
 //    applies the scale first, which is the mirror inside the element's own box.
 
@@ -55,16 +57,6 @@ export const BORDER_STYLE_FOR_DASH: Readonly<Record<DashStyle, "solid" | "dotted
 
 /** A line height of `lineSpacing` is this multiple of the font size (SPEC.md section 8). */
 export const LINE_HEIGHT_PER_LINE_SPACING = LINE_BOX_PER_LINE_SPACING;
-
-/**
- * The paragraph's line spacing and its share of each run's drop (text-vertical-metrics.ts), handed
- * to the runs as custom properties so a run's declarations stay a function of the run's own style.
- */
-export const LINE_SPACING_PROPERTY = "--sasha-line-spacing";
-export const LINE_DROP_PROPERTY = "--sasha-line-drop";
-
-/** Inline custom properties; React writes a `--name` key verbatim. */
-type CustomProperties = Readonly<Record<`--${string}`, string>>;
 
 /** A drawable colour for a document colour, resolved against the deck theme. */
 export function colourValue(colour: Colour, theme: ThemeSnapshot): string {
@@ -254,26 +246,67 @@ export function textCounterFlipValue(frame: Frame): string | undefined {
   return `scale(${frame.flipHorizontal ? -1 : 1}, ${frame.flipVertical ? -1 : 1})`;
 }
 
-/** A run's inline style; `fontScale` is the shrink-on-overflow factor (1 when the text fits). */
-export function runDeclarations(options: Readonly<{ style: RunStyle; theme: ThemeSnapshot; fontScale: number }>): CSSProperties {
-  const style = options.style;
-  const fontSize = style.fontSize * options.fontScale * BASELINE_SIZE_FACTOR[style.baselineOffset];
-  const decorations = [style.underline ? "underline" : null, style.strikethrough ? "line-through" : null].filter((part): part is string => part !== null);
-  const declarations: CSSProperties = {
-    fontFamily: fontFamilyValue(style.fontFamily),
-    fontSize: `${roundNumber(fontSize)}px`,
-    fontWeight: style.fontWeight,
-    fontStyle: style.fontStyle,
-    color: colourValue(style.colour, options.theme),
-    textDecoration: decorations.length === 0 ? "none" : decorations.join(" "),
+/**
+ * The ONE span a paragraph's runs sit in, carrying the paragraph's base run (see the header): its
+ * family, size, weight, style and colour, and the line box Google draws (runLineBoxDeclarations).
+ * Every run inherits all of it, so a run in the paragraph's own style is a bare span and an HTML
+ * editor can type into the paragraph without breaking a line apart. Exactly the declarations every
+ * run used to repeat, so the paragraph draws as it always did.
+ */
+export function paragraphRunsDeclarations(options: Readonly<{ base: RunStyle; lineSpacing: number; theme: ThemeSnapshot; fontScale: number }>): CSSProperties {
+  return {
+    ...baseTypography({ base: options.base, theme: options.theme, fontScale: options.fontScale }),
+    ...lineBoxDeclarations({ family: options.base.fontFamily, lineSpacing: options.lineSpacing }),
   };
+}
+
+/**
+ * Whether a run's line box lies inside the paragraph span's: a run no taller above or below the
+ * baseline than the base run (a smaller size, a code font) cannot change its line, so it needs no
+ * placement of its own and its glyphs simply sit on the span's baseline. Only a run that reaches
+ * past the span's box (a BIG word) is moved, by the difference of the two drops.
+ */
+export function runFitsParagraphSpan(options: Readonly<{ style: RunStyle; base: RunStyle; lineSpacing: number }>): boolean {
+  const extent = (style: RunStyle): Readonly<{ above: number; below: number }> => {
+    const halfLine = (LINE_HEIGHT_PER_LINE_SPACING * options.lineSpacing) / 2;
+    const centre = stylesheetBaselineInLineBox(style.fontFamily) - LINE_HEIGHT_PER_LINE_SPACING / 2;
+    return { above: style.fontSize * (halfLine + centre), below: style.fontSize * (halfLine - centre) };
+  };
+  const run = extent(options.style);
+  const span = extent(options.base);
+  return run.above <= span.above && run.below <= span.below;
+}
+
+/**
+ * A run's inline style inside its paragraph's span: only what differs from the base run.
+ * Decoration and highlight are never inherited (an underline could not be taken off one run), so a
+ * run states them itself. `fontScale` is the shrink-on-overflow factor (1 when the text fits).
+ */
+export function runDeclarations(options: Readonly<{ style: RunStyle; base: RunStyle; lineSpacing: number; theme: ThemeSnapshot; fontScale: number }>): CSSProperties {
+  const style = options.style;
+  const own = runTypography({ style, theme: options.theme, fontScale: options.fontScale });
+  const inherited = baseTypography({ base: options.base, theme: options.theme, fontScale: options.fontScale });
+  const differing = Object.fromEntries(INHERITED_TYPOGRAPHY.filter((key) => own[key] !== inherited[key]).map((key) => [key, own[key]]));
+  const decorations = [style.underline ? "underline" : null, style.strikethrough ? "line-through" : null].filter((part): part is string => part !== null);
   const highlight = optionalColourValue(style.highlight, options.theme);
   return {
-    ...declarations,
+    ...differing,
+    ...(decorations.length === 0 ? {} : { textDecoration: decorations.join(" ") }),
     ...(highlight === "transparent" ? {} : { backgroundColor: highlight }),
-    ...runLineBoxDeclarations(style),
+    ...runLineBoxDeclarations({ style, base: options.base, lineSpacing: options.lineSpacing, fontScale: options.fontScale }),
     ...(style.letterSpacing === 0 ? {} : { letterSpacing: `${roundNumber(style.letterSpacing * options.fontScale)}px` }),
     ...textCaseDeclarations(style.textCase),
+  };
+}
+
+/** A list marker's inline style: the paragraph's base run with its line box, in a box of its own. */
+export function markerRunDeclarations(options: Readonly<{ base: RunStyle; lineSpacing: number; theme: ThemeSnapshot; fontScale: number }>): CSSProperties {
+  return {
+    ...runTypography({ style: options.base, theme: options.theme, fontScale: options.fontScale }),
+    textDecoration: "none",
+    ...lineBoxDeclarations({ family: options.base.fontFamily, lineSpacing: options.lineSpacing }),
+    ...(options.base.letterSpacing === 0 ? {} : { letterSpacing: `${roundNumber(options.base.letterSpacing * options.fontScale)}px` }),
+    ...textCaseDeclarations(options.base.textCase),
   };
 }
 
@@ -282,9 +315,7 @@ export function paragraphDeclarations(options: Readonly<{ style: ParagraphStyle;
   const style = options.style;
   const scale = options.fontScale;
   const spacing = style.lineSpacing;
-  const declarations: CSSProperties & CustomProperties = {
-    [LINE_SPACING_PROPERTY]: String(roundNumber(spacing)),
-    [LINE_DROP_PROPERTY]: String(roundNumber(paragraphLineDropEm(spacing))),
+  return {
     position: "relative",
     margin: 0,
     marginTop: `${roundNumber(style.spaceAbove * scale)}px`,
@@ -300,7 +331,27 @@ export function paragraphDeclarations(options: Readonly<{ style: ParagraphStyle;
     fontSize: `${roundNumber(options.base.fontSize * scale)}px`,
     color: colourValue(options.base.colour, options.theme),
   };
-  return declarations;
+}
+
+/** The typography the paragraph's span declares and its runs inherit. */
+const INHERITED_TYPOGRAPHY = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "color"] as const;
+
+type Typography = Readonly<Pick<CSSProperties, (typeof INHERITED_TYPOGRAPHY)[number]>>;
+
+function runTypography(options: Readonly<{ style: RunStyle; theme: ThemeSnapshot; fontScale: number }>): Typography {
+  const style = options.style;
+  return {
+    fontFamily: fontFamilyValue(style.fontFamily),
+    fontSize: `${roundNumber(style.fontSize * options.fontScale * BASELINE_SIZE_FACTOR[style.baselineOffset])}px`,
+    fontWeight: style.fontWeight,
+    fontStyle: style.fontStyle,
+    color: colourValue(style.colour, options.theme),
+  };
+}
+
+/** The base run's typography at its full size: a superscript first run still sets the line's size. */
+function baseTypography(options: Readonly<{ base: RunStyle; theme: ThemeSnapshot; fontScale: number }>): Typography {
+  return runTypography({ style: { ...options.base, baselineOffset: "none" }, theme: options.theme, fontScale: options.fontScale });
 }
 
 /** How a text layer stacks its paragraphs for vertical alignment. */
@@ -358,21 +409,47 @@ function dashPattern(multiples: readonly number[], unit: number): string {
 }
 
 /**
- * A run's line box, placed the way Google places a line (text-vertical-metrics.ts): `lineSpacing`
- * x 1.2 of the run's own size tall, lowered so its top is Google's baseline offset above the
- * baseline, and its glyphs raised back onto the line's baseline. Both moves are one length in em
- * of the run's size, so shrink-on-overflow scales them with the font. A superscript or subscript
- * keeps the stylesheet's raise and takes no room of its own: Google's lines ignore them too.
+ * A line box placed the way Google places a line (text-vertical-metrics.ts): `lineSpacing` x 1.2
+ * of the box's own size tall, lowered so its top is Google's baseline offset above the baseline,
+ * and its glyphs raised back onto the line's baseline. Both moves are one length in em of the
+ * box's size, so shrink-on-overflow scales them with the font. The line height is unitless, so a
+ * run inside the paragraph's span gets a box of its own size.
  */
-function runLineBoxDeclarations(style: RunStyle): CSSProperties {
-  if (style.baselineOffset !== "none") return { verticalAlign: BASELINE_VERTICAL_ALIGN[style.baselineOffset], lineHeight: 0 };
-  const shift = `calc(-1em * (${roundNumber(stylesheetBaselineInLineBox(style.fontFamily))} + var(${LINE_DROP_PROPERTY}, ${roundNumber(paragraphLineDropEm(1))})))`;
+function lineBoxDeclarations(options: Readonly<{ family: string; lineSpacing: number }>): CSSProperties {
+  const shift = `${roundNumber(-writtenDropEm(options))}em`;
   return {
-    lineHeight: `calc(${LINE_HEIGHT_PER_LINE_SPACING} * var(${LINE_SPACING_PROPERTY}, 1))`,
+    lineHeight: Math.round(LINE_HEIGHT_PER_LINE_SPACING * roundNumber(options.lineSpacing) * 1e6) / 1e6,
     verticalAlign: shift,
     position: "relative",
     top: shift,
   };
+}
+
+/**
+ * A run's own placement inside the paragraph's span. A superscript or subscript keeps the
+ * stylesheet's raise and takes no room: Google's lines ignore them too. A run whose box fits the
+ * span's needs nothing (runFitsParagraphSpan). A larger run is lowered by the difference between
+ * its drop and the base's, so its box is placed as its own drop places it, and its glyphs raised
+ * back onto the line's baseline: a BIG word sets its line's height as in Google Slides.
+ */
+function runLineBoxDeclarations(options: Readonly<{ style: RunStyle; base: RunStyle; lineSpacing: number; fontScale: number }>): CSSProperties {
+  const style = options.style;
+  if (style.baselineOffset !== "none") return { verticalAlign: BASELINE_VERTICAL_ALIGN[style.baselineOffset], lineHeight: 0 };
+  if (runFitsParagraphSpan({ style, base: options.base, lineSpacing: options.lineSpacing })) return {};
+  const own = writtenDropEm({ family: style.fontFamily, lineSpacing: options.lineSpacing }) * style.fontSize * options.fontScale;
+  const paragraph = writtenDropEm({ family: options.base.fontFamily, lineSpacing: options.lineSpacing }) * options.base.fontSize * options.fontScale;
+  const shift = roundNumber(own - paragraph);
+  if (shift === 0) return {};
+  return { verticalAlign: `${-shift}px`, position: "relative", top: `${-shift}px` };
+}
+
+/**
+ * How far a stylesheet's line box must move down for Google's baseline (text-vertical-metrics.ts),
+ * in em of the box's size: the family's offset plus the paragraph's share, each to a thousandth as
+ * the renderer has always written them.
+ */
+function writtenDropEm(options: Readonly<{ family: string; lineSpacing: number }>): number {
+  return roundNumber(stylesheetBaselineInLineBox(options.family)) + roundNumber(paragraphLineDropEm(options.lineSpacing));
 }
 
 const BASELINE_SIZE_FACTOR: Readonly<Record<RunStyle["baselineOffset"], number>> = { none: 1, superscript: 0.7, subscript: 0.7 };

@@ -23,12 +23,14 @@
 //  * SPACE ABOVE AND BELOW and vertical alignment behave as a stylesheet's do: a middle- or
 //    bottom-aligned box centres the full `lineSpacing` x 1.2 lines, trailing spacing included.
 //
-// How the stylesheet gets there (inline-styles.ts): every run is a box `lineSpacing` x 1.2 of its
-// own size tall, LOWERED by `runDropEm` (vertical-align) so its top is the baseline's distance
-// above it, and its glyphs RAISED back by the same amount (relative `top`), so all runs keep one
-// baseline. A line box is the union of its runs' boxes, which is exactly Google's "largest size on
-// the line" rule, a BIG word included. The paragraph's own strut is sized by `strutLineHeight` so it
-// never reaches above the runs; an empty paragraph keeps its height through `min-height`.
+// How the stylesheet gets there (inline-styles.ts): a line box is `lineSpacing` x 1.2 of its own
+// size tall, LOWERED by `runDropEm` (vertical-align) so its top is the baseline's distance above
+// it, and its glyphs RAISED back by the same amount (relative `top`), so all text keeps one
+// baseline. A paragraph's runs share one such box (the one span they sit in); a run larger than
+// the base moves its own box by the difference of the two drops. A line box is the union of these boxes, which is
+// exactly Google's "largest size on the line" rule, a BIG word included. The paragraph's own strut
+// is sized by `strutLineHeight` so it never reaches above them; an empty paragraph keeps its height
+// through `min-height`.
 
 /** Google's baseline below the line's top at 100 % spacing, per unit of font size, for every family. */
 export const SLIDES_BASELINE_PER_FONT_SIZE = 0.9465;

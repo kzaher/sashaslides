@@ -444,9 +444,14 @@ function TableView(properties: Readonly<{ element: TableElement; context: SlideR
   useTableRowReport({ element, context, rowElements });
   const styleContext = textStyleContextOf({ theme: context.theme, element });
   const columnCount = element.columns.length;
+  // The table is as wide as its columns, never its frame: a fixed-layout table wider than its
+  // columns hands the excess to every column (the last cell visibly stretched on the reverse SxS,
+  // complex slide 30), and a column added in an HTML editor then widens the table instead of
+  // squeezing its neighbours.
+  const gridWidth = element.columns.reduce((total, column) => total + column.width, 0);
   return (
     <div style={{ ...leafFrameDeclarations(element.frame), height: "auto", minHeight: roundNumber(element.frame.height), ...(element.opacity < 1 ? { opacity: element.opacity } : {}) }} {...elementAttributes(element)}>
-      <table style={{ borderCollapse: "collapse", tableLayout: "fixed", width: roundNumber(element.frame.width), borderSpacing: 0 }}>
+      <table style={{ borderCollapse: "collapse", tableLayout: "fixed", width: roundNumber(gridWidth), borderSpacing: 0 }}>
         <colgroup>
           {element.columns.map((column) => (
             <col key={column.id} style={{ width: roundNumber(column.width) }} />
@@ -480,9 +485,13 @@ function TableCellView(properties: Readonly<{ element: TableElement; cell: Table
   const theme = context.theme;
   const fill = fillRendering({ fill: cell.fill, theme, assetAddress: context.assetAddress });
   const borders = cell.borders;
+  // The cell IS the text layer: its margins are the cell's own padding and its paragraphs sit
+  // directly inside it, so an HTML editor sees a plain cell, not a positioned box inside one.
   const style: CSSProperties = {
-    position: "relative",
-    padding: 0,
+    ...(fill.imageLayer === null ? {} : { position: "relative" }),
+    ...textBoxPaddingDeclarations(cell.textBox),
+    whiteSpace: cell.textBox.wrap ? "pre-wrap" : "pre",
+    overflowWrap: "break-word",
     ...fill.background,
     borderTop: borders.top === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.top }, theme).borderTop,
     borderRight: borders.right === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.right }, theme).borderRight,
@@ -493,11 +502,9 @@ function TableCellView(properties: Readonly<{ element: TableElement; cell: Table
   };
   const target: TextTarget = { kind: "tableCell", slideId: context.slideId, elementId: properties.element.id, cell: { rowId: cell.rowId, columnId: cell.columnId } };
   return (
-    <td style={style} rowSpan={cell.rowSpan} colSpan={cell.columnSpan} {...{ [TABLE_CELL_COLUMN_ATTRIBUTE]: cell.columnId }}>
+    <td style={style} rowSpan={cell.rowSpan} colSpan={cell.columnSpan} {...{ [TABLE_CELL_COLUMN_ATTRIBUTE]: cell.columnId, [TEXT_LAYER_ATTRIBUTE]: "" }}>
       {fill.imageLayer === null ? null : <div style={fill.imageLayer} />}
-      <div style={{ position: "relative", ...textBoxPaddingDeclarations(cell.textBox), whiteSpace: cell.textBox.wrap ? "pre-wrap" : "pre", overflowWrap: "break-word" }} {...{ [TEXT_LAYER_ATTRIBUTE]: "" }}>
-        <TextContent target={target} body={cell.text} styleContext={properties.styleContext} context={context} fontScale={1} />
-      </div>
+      <TextContent target={target} body={cell.text} styleContext={properties.styleContext} context={context} fontScale={1} />
     </td>
   );
 }

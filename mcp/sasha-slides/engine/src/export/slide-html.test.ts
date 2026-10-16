@@ -12,7 +12,7 @@ import type { AssetId } from "../contracts/ids.ts";
 import { literalColour } from "../contracts/style.ts";
 import { sampleDeck } from "../view/sample/sample-deck.ts";
 import { IdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, groupElement, plainBody, shapeElement, slideSnapshot } from "../view/sample/snapshot-builders.ts";
-import { EXPORT_PAGE_SIZE, EXPORT_READY_ATTRIBUTE, fontStylesheetAddresses, pagePlacement, renderDeckHtml, renderSlideHtml, shrinkTargetsOf } from "./slide-html.ts";
+import { EXPORT_PAGE_SIZE, EXPORT_READY_ATTRIBUTE, fontStylesheetAddresses, pagePlacement, renderDeckHtml, renderSlideHtml, shrinkTargetsOf, unsubsetCharacters } from "./slide-html.ts";
 
 const PHOTO = fixtureAssetId("export-photo");
 const PHOTO_ADDRESS = "data:image/png;base64,iVBORw0KGgo=";
@@ -132,6 +132,32 @@ describe("fonts", () => {
 
   it("a weight between steps is requested at the nearest one", () => {
     assert.deepEqual(fontStylesheetAddresses([{ family: "Inter", weight: 650, style: "normal" }]).at(-1), "https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,700&display=block");
+  });
+
+  it("drawn symbols no default subset covers get ONE text= stylesheet for every family, so Inter draws its own star", () => {
+    assert.deepEqual(
+      fontStylesheetAddresses(
+        [
+          { family: "Inter", weight: 700, style: "normal" },
+          { family: "Playfair Display", weight: 400, style: "italic" },
+          { family: "Arial", weight: 400, style: "normal" },
+        ],
+        "★",
+      ).filter((address) => address.includes("text=")),
+      ["https://fonts.googleapis.com/css2?family=Inter&family=Playfair+Display&text=%E2%98%85&display=block"],
+    );
+  });
+
+  it("control: symbols on a slide drawn only in system families request nothing", () => {
+    assert.deepEqual(fontStylesheetAddresses([{ family: "Arial", weight: 400, style: "normal" }], "★"), []);
+  });
+
+  it("only symbols past the default subsets are collected, each once", () => {
+    assert.equal(unsubsetCharacters("★ ★ Acme — Привет ✓★"), "★✓");
+  });
+
+  it("control: a slide without such symbols requests no text= stylesheet", () => {
+    assert.doesNotMatch(renderDeckHtml({ snapshot: deck, assetAddress })[0]?.html ?? "", /&amp;text=/);
   });
 
   it("control: a system family is never requested", () => {

@@ -82,8 +82,9 @@ function indexInParagraph(options: Readonly<{ paragraph: Element; childOffset: n
   for (let index = children.length - 1; index >= 0; index -= 1) {
     const child = children[index];
     if (!(child instanceof Element) || child.hasAttribute(LIST_MARKER_ATTRIBUTE)) continue;
-    const run = child.hasAttribute(RUN_START_ATTRIBUTE) ? child : child.querySelector(`[${RUN_START_ATTRIBUTE}]`);
-    if (run !== null) return runStart(run) + runLength(run);
+    // A child holding runs (the paragraph's span, a link) ends where its LAST run ends.
+    const run = child.hasAttribute(RUN_START_ATTRIBUTE) ? child : Array.from(child.querySelectorAll(`[${RUN_START_ATTRIBUTE}]`)).pop();
+    if (run !== undefined) return runStart(run) + runLength(run);
   }
   return paragraphStart(options.paragraph);
 }

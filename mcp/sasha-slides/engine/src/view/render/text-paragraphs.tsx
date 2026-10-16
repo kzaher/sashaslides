@@ -7,6 +7,11 @@
 //    the index of its first character (`data-sasha-paragraph-start`, `data-sasha-run-start`), in the
 //    Y.Text index space (text-layout.ts). The inline editor maps a page selection back to indices
 //    through them and nothing else, so drawing and editing agree by construction.
+//  * A PARAGRAPH'S RUNS SIT IN ONE SPAN that carries the paragraph's base run (its first run):
+//    family, size, weight, style, colour and Google's line box (inline-styles.ts). A run states
+//    only what differs from it, so a run in the paragraph's own style is a bare span and exported
+//    HTML can be edited in an HTML editor without the text breaking apart (complex slide 25). Only a
+//    run larger than the base (a BIG word) moves its own box, by the difference of the two drops.
 //  * PARAGRAPH KEYS CARRY A PREFIX. The inline editor passes `renderGeneration` into it, so when an
 //    input-method composition ends the paragraphs remount instead of React reconciling text the
 //    browser wrote into the page itself (SPEC.md "Input method composition").
@@ -39,9 +44,9 @@ import { memo, type CSSProperties, type ReactElement } from "react";
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { Paragraph, TextBody, TextRun } from "../../contracts/document.ts";
 import type { SlideId } from "../../contracts/ids.ts";
-import { listMarkerColour, type ListMembership, type ParagraphStyle, type RunLink } from "../../contracts/style.ts";
+import { listMarkerColour, type ListMembership, type ParagraphStyle, type RunLink, type RunStyle } from "../../contracts/style.ts";
 import { SLIDE_LINK_ATTRIBUTE } from "../../contracts/render.ts";
-import { colourValue, paragraphDeclarations, roundNumber, runDeclarations } from "./inline-styles.ts";
+import { colourValue, markerRunDeclarations, paragraphDeclarations, paragraphRunsDeclarations, roundNumber, runDeclarations } from "./inline-styles.ts";
 import {
   LIST_INDENT_PER_LEVEL,
   listMarkers,
@@ -117,19 +122,29 @@ function ParagraphView(options: Readonly<{ paragraph: Paragraph; start: number; 
   return (
     <div style={declarations} {...attributes}>
       {options.marker === null || list === null || layout === null ? null : (
-        <span contentEditable={false} {...{ [LIST_MARKER_ATTRIBUTE]: "" }} style={markerDeclarations({ layout, fontScale: properties.fontScale, runStyle: inked(runDeclarations({ style: base, theme: context.theme, fontScale: properties.fontScale }), properties.inkColour) })}>
+        <span contentEditable={false} {...{ [LIST_MARKER_ATTRIBUTE]: "" }} style={markerDeclarations({ layout, fontScale: properties.fontScale, runStyle: inked(markerRunDeclarations({ base, lineSpacing: style.lineSpacing, theme: context.theme, fontScale: properties.fontScale }), properties.inkColour) })}>
           {markerGlyph({ marker: options.marker, list, properties })}
         </span>
       )}
-      {paragraph.runs.length === 0 ? <br /> : paragraph.runs.map((run, index) => <RunView key={index} run={run} start={starts[index] ?? options.start} properties={properties} />)}
+      {paragraph.runs.length === 0 ? (
+        <br />
+      ) : (
+        <span style={inked(paragraphRunsDeclarations({ base, lineSpacing: style.lineSpacing, theme: context.theme, fontScale: properties.fontScale }), properties.inkColour)}>
+          {paragraph.runs.map((run, index) => (
+            <RunView key={index} run={run} base={base} lineSpacing={style.lineSpacing} start={starts[index] ?? options.start} properties={properties} />
+          ))}
+        </span>
+      )}
     </div>
   );
 }
 
-function RunView(options: Readonly<{ run: TextRun; start: number; properties: TextParagraphsProperties }>): ReactElement {
+function RunView(options: Readonly<{ run: TextRun; base: RunStyle; lineSpacing: number; start: number; properties: TextParagraphsProperties }>): ReactElement {
   const { run, properties } = options;
   const style = resolveRunStyle({ context: properties.styleContext, patch: run.style });
-  const declarations = inked(runDeclarations({ style, theme: properties.styleContext.theme, fontScale: properties.fontScale }), properties.inkColour);
+  const declarations = runDeclarations({ style, base: options.base, lineSpacing: options.lineSpacing, theme: properties.styleContext.theme, fontScale: properties.fontScale });
+  // The ink colour is on the paragraph's span already; a run's own colour would override it.
+  if (properties.inkColour !== undefined) delete declarations.color;
   const text = runDisplayText({ run, slideNumber: properties.slideNumber }).replace(SOFT_LINE_BREAKS, "\n");
   const content = runContent({ run, text, start: options.start, declarations });
   return linkWrapped({ link: style.link, content, slideNumberOf: properties.slideNumberOf });

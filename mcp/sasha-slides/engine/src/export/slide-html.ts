@@ -108,21 +108,39 @@ export function shrinkTargetsOf(elements: readonly ElementSnapshot[]): readonly 
   return targets;
 }
 
-/** The Google Fonts stylesheets for a slide's faces: one per face, plus each family's regular face. */
-export function fontStylesheetAddresses(faces: readonly FontFaceRequest[]): readonly string[] {
+/** The first code point past the subsets css2 serves by default (latin's U+2000-206F ends below it). */
+const FIRST_UNSUBSET_CODE_POINT = 0x2070;
+
+/** The drawn symbols css2's default subsets leave out (★, ✓, ➤...), each once, in first-seen order. */
+export function unsubsetCharacters(text: string): string {
+  return [...new Set([...text].filter((character) => (character.codePointAt(0) ?? 0) >= FIRST_UNSUBSET_CODE_POINT))].join("");
+}
+
+/**
+ * The Google Fonts stylesheets for a slide's faces: one per face, plus each family's regular face.
+ * css2's default subsets omit symbols a family does draw (Inter's ★ is U+2605, which no subset
+ * covers), so the browser falls back to another font and the glyph changes shape and width. When
+ * the slide draws such `symbols`, ONE more stylesheet asks for them in the regular face of every
+ * family (`text=`): its faces are limited to exactly those code points, so every other character
+ * keeps the default subsets, and a slide costs one extra request however many faces it draws.
+ */
+export function fontStylesheetAddresses(faces: readonly FontFaceRequest[], symbols = ""): readonly string[] {
   const requested = new Map<string, string>();
+  const families = new Set<string>();
   const add = (face: FontFaceRequest): void => {
     if (isSystemFontFamily(face.family)) return;
     const weight = Math.max(100, Math.min(900, Math.round(face.weight / 100) * 100));
     const italic = face.style === "italic" ? 1 : 0;
     const family = encodeURIComponent(face.family).replace(/%20/g, "+");
+    families.add(family);
     requested.set(`${face.family}|${italic}|${weight}`, `https://fonts.googleapis.com/css2?family=${family}:ital,wght@${italic},${weight}&display=block`);
   };
   for (const face of faces) {
     add({ family: face.family, weight: 400, style: "normal" });
     add(face);
   }
-  return [...requested.values()];
+  const symbolSheet = symbols === "" || families.size === 0 ? [] : [`https://fonts.googleapis.com/css2?${[...families].map((family) => `family=${family}`).join("&")}&text=${encodeURIComponent(symbols)}&display=block`];
+  return [...requested.values(), ...symbolSheet];
 }
 
 /** The page for one slide (see the header). */
@@ -158,7 +176,8 @@ function slidePage(options: Readonly<{
     scaleStep: SHRINK_STEP,
     fontWaitMilliseconds: FONT_WAIT_MILLISECONDS,
   };
-  const fontLinks = fontStylesheetAddresses(faces).map((address) => `<link rel="stylesheet" href="${escapeAttribute(address)}">`);
+  const symbols = unsubsetCharacters(slideMarkup.replace(/<[^>]*>/g, ""));
+  const fontLinks = fontStylesheetAddresses(faces, symbols).map((address) => `<link rel="stylesheet" href="${escapeAttribute(address)}">`);
   const title = `${options.snapshot.title.trim() === "" ? "Slide" : options.snapshot.title} - slide ${options.slideNumber}`;
   return [
     "<!doctype html>",
