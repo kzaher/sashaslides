@@ -28,6 +28,10 @@
     ".claude/worktrees",
     "**/dist",
     "**/build",
-    "structured-prompting/src/client/**"
+    "structured-prompting/src/client/**",
+    // The reverse round trip imports the Sasha engine's .tsx renderer, which needs the engine's
+    // JSX setting; it is checked by its own project, renderer/html2slides/reverse/tsconfig.json.
+    "renderer/html2slides/reverse/**",
+    "renderer/html2slides/reverse-roundtrip.ts"
   ]
 }

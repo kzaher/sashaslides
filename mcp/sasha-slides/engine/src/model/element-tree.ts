@@ -37,6 +37,7 @@ import {
   BORDER,
   CELL_BORDERS,
   CORNER_RADIUS,
+  CUSTOM_OUTLINE,
   FILL,
   FRAME,
   IMAGE_CROP,
@@ -326,11 +327,13 @@ function projectLeaf(options: Readonly<{ record: ElementRecord; groupId: Element
   switch (kind) {
     case "shape": {
       const preset = reader.read(ELEMENT_KEY.preset, SHAPE_PRESET, "rectangle");
+      // Optional key (yjs-schema.ts): absent on preset shapes and on decks older than freeforms.
+      const customOutline = reader.read(ELEMENT_KEY.customOutline, CUSTOM_OUTLINE, null);
       const box = readBoxStyle(reader);
       const textBox = reader.read(ELEMENT_KEY.textBox, TEXT_BOX_STYLE, DEFAULT_TEXT_BOX_STYLE);
       const text = childText(record.map, ELEMENT_KEY.text);
       const frame = reader.read(ELEMENT_KEY.frame, FRAME, DEFAULT_FRAME);
-      return { ...readCommon({ record, reader, groupId, frame }), kind: "shape", preset, box, textBox, text: text === null ? EMPTY_TEXT_BODY : projectTextBody(text) };
+      return { ...readCommon({ record, reader, groupId, frame }), kind: "shape", preset, customOutline, box, textBox, text: text === null ? EMPTY_TEXT_BODY : projectTextBody(text) };
     }
     case "image": {
       // An asset id is the content address the writer stored (commands validate it); the brand

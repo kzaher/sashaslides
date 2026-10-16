@@ -1,7 +1,8 @@
 // A SLIDE AS A MARKUP STRING for the transition sandbox (contracts/render.ts `RenderSlideMarkup`):
 // the same `SlideRoot` the editor and presenter draw, rendered with `renderToStaticMarkup`, plus
 // what the runner needs to stage it -- the leaf elements a script animates, the assets the markup
-// refers to, and the font faces whose bytes the host must send.
+// refers to, and the font faces whose bytes the host must send (with the web stand-in of a family
+// the platform may lack, view/render/font-families.ts).
 //
 // Key decisions:
 //
@@ -21,6 +22,7 @@ import { rotatedBounds } from "../../contracts/geometry.ts";
 import type { AssetId, ElementId } from "../../contracts/ids.ts";
 import { assetAddressToken, type FontFaceRequest, type RenderSlideMarkup, type StageElementRecord } from "../../contracts/render.ts";
 import type { Fill } from "../../contracts/style.ts";
+import { withFontStandIns } from "./font-families.ts";
 import type { SlideRenderContext } from "./render-context.ts";
 import { SlideRoot, slideBackground, slideNumberLookup } from "./static-slide.tsx";
 import { resolvedRunStylesOf, textStyleContextOf, type TextStyleContext } from "./text-layout.ts";
@@ -40,7 +42,7 @@ export const renderSlideMarkup: RenderSlideMarkup = (input) => {
     markup,
     elements: stageElementRecords(input.slide.elements),
     assetIds: referencedAssetIds({ slide: input.slide, document: input.document }),
-    fontFaces: fontFacesOf({ slide: input.slide, document: input.document }),
+    fontFaces: withFontStandIns(fontFacesOf({ slide: input.slide, document: input.document })),
   };
 };
 

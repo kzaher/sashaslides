@@ -9,6 +9,7 @@
 
 import type { AnimationEffect, AnimationStep, AnimationTrigger } from "../../contracts/animations.ts";
 import type {
+  CustomOutline,
   DocumentSnapshot,
   ElementSnapshot,
   GroupElement,
@@ -147,6 +148,7 @@ export function plainBody(text: string, style: RunStylePatch = {}): TextBody {
 export type ShapeOptions = Readonly<{
   id: ElementId;
   preset?: ShapePreset;
+  customOutline?: CustomOutline | null;
   box?: Box;
   frame?: Frame;
   style?: Partial<BoxStyle>;
@@ -170,6 +172,7 @@ export function shapeElement(options: ShapeOptions): ShapeElement {
     placeholder: options.placeholder ?? null,
     unsupportedKeys: options.unsupportedKeys ?? [],
     preset: options.preset ?? "rectangle",
+    customOutline: options.customOutline ?? null,
     box: { ...PLAIN_BOX_STYLE, ...options.style },
     textBox: { ...DEFAULT_TEXT_BOX_STYLE, ...options.textBox },
     text: options.text ?? EMPTY_TEXT_BODY,

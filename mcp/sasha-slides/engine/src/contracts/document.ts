@@ -210,11 +210,46 @@ export const RECTANGLE_FAMILY_PRESETS: readonly ShapePreset[] = ["textBox", "rec
 export type ShapeElement = ElementCommon &
   Readonly<{
     kind: "shape";
+    /** The preset the shape is drawn as, and the one an editor or older client falls back to while `customOutline` is set. */
     preset: ShapePreset;
+    /** A freeform outline drawn INSTEAD of the preset; null draws the preset (see `CustomOutline`). */
+    customOutline: CustomOutline | null;
     box: BoxStyle;
     textBox: TextBoxStyle;
     text: TextBody;
   }>;
+
+/**
+ * A FREEFORM OUTLINE: what Google Slides calls a custom shape and Office XML writes as
+ * `<a:custGeom>` (a funnel's trapezoids, a hand-drawn polygon). Presets cannot hold it, so a shape
+ * carries one of these beside its preset and is drawn by it.
+ *
+ * Key decisions:
+ *
+ *  * FRACTIONS OF THE BOX, not slide units. Office states each path in its own `w` x `h` space that
+ *    is stretched to the shape's box, so a resized freeform reshapes with its box; fractions keep
+ *    exactly that, and a frame edit never has to rewrite the outline. A point may lie outside 0..1:
+ *    Office lets a path overhang its box.
+ *  * STRAIGHT, QUADRATIC AND CUBIC SEGMENTS ONLY. Office's elliptical `arcTo` is converted to cubic
+ *    curves by whoever reads it, so every renderer and exporter handles four drawing commands.
+ *  * EACH PATH SAYS WHETHER IT IS FILLED AND STROKED, as Office's `<a:path fill="none" stroke="0">`
+ *    does: a shape's outline and its fill region can differ (an open curve drawn over a filled body).
+ *  * OPTIONAL IN STORAGE. The stored key is absent on every shape written before freeforms existed
+ *    and on every preset shape; absent reads as null, so older decks need no repair.
+ */
+export type CustomOutline = Readonly<{ paths: readonly OutlinePath[] }>;
+
+export type OutlinePath = Readonly<{ commands: readonly OutlineCommand[]; filled: boolean; stroked: boolean }>;
+
+/** A point as fractions of the element's box: (0, 0) its top-left corner, (1, 1) its bottom-right. */
+export type OutlinePoint = Readonly<{ x: number; y: number }>;
+
+export type OutlineCommand =
+  | Readonly<{ kind: "move"; to: OutlinePoint }>
+  | Readonly<{ kind: "line"; to: OutlinePoint }>
+  | Readonly<{ kind: "quadratic"; control: OutlinePoint; to: OutlinePoint }>
+  | Readonly<{ kind: "cubic"; firstControl: OutlinePoint; secondControl: OutlinePoint; to: OutlinePoint }>
+  | Readonly<{ kind: "close" }>;
 
 /** Fractions of the source image trimmed from each side, 0..1. */
 export type ImageCrop = Readonly<{ left: number; top: number; right: number; bottom: number }>;

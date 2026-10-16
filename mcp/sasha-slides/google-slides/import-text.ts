@@ -12,10 +12,18 @@
  * what the person saw. Colours keep their theme references, so a theme change still recolours.
  *
  * The chain is walked by `parentObjectId` through an index of every layout and master element.
+ *
+ * A BULLET'S OWN STYLE CROSSES ONLY WHERE IT DIFFERS. Slides reports a `bulletStyle` per list
+ * paragraph; the engine's marker otherwise takes the first run's style, so only a colour or size
+ * that differs from that run's is written (`markerColour`, `markerFontSize`). The html2slides
+ * converter's blue, red, green and orange dots came out grey without it.
+ *
+ * A SOFT LINE BREAK STAYS U+000B. Slides stores Shift+Enter as a vertical tab inside a run, and so
+ * does the engine (state/editor/text-model.ts `LINE_BREAK_CHARACTER`); the renderer draws it.
  */
 import type { Paragraph, TextBody, TextRun } from "../engine/src/contracts/document.ts";
 import type { ListId, SlideId } from "../engine/src/contracts/ids.ts";
-import type { BaselineOffset, ListGlyph, ParagraphStylePatch, RunLink, RunStylePatch, TextAlignment } from "../engine/src/contracts/style.ts";
+import type { BaselineOffset, Colour, ListGlyph, ListMarkerColour, ListMembership, ParagraphStylePatch, RunLink, RunStylePatch, TextAlignment } from "../engine/src/contracts/style.ts";
 import { colourOf, type ColourContext } from "./import-colours.ts";
 import type { InterchangeLossSink } from "./interchange-losses.ts";
 import type { SlidesLink, SlidesParagraph, SlidesParagraphStyle, SlidesShape, SlidesText, SlidesTextStyle } from "./slides-presentation.ts";
@@ -63,7 +71,8 @@ export function importTextBody(
           return assertNever(run);
       }
     });
-    return { style: paragraphPatch({ style: paragraphStyle, paragraph, context }), runs: mergeAdjacentRuns(runs) };
+    const firstRunStyle = runs[0]?.style ?? runStylePatch({ style: mergeTextStyles([...chain.map((parent) => parent.markStyle), paragraph.markStyle]), context });
+    return { style: paragraphPatch({ style: paragraphStyle, paragraph, firstRunStyle, context }), runs: mergeAdjacentRuns(runs) };
   });
   return { paragraphs };
 }
@@ -76,7 +85,7 @@ export function resolvedPlaceholderStyle(
   const chain = parentParagraphs({ parentId: options.shape.placeholder?.parentObjectId ?? null, level: 0, context: options.context });
   const markStyles = [...chain.map((parent) => parent.markStyle), ...(own === undefined ? [] : [own.markStyle])];
   const paragraphStyles = [...chain.map((parent) => parent.style), ...(own === undefined ? [] : [own.style])];
-  const paragraph = paragraphPatch({ style: mergeParagraphStyles(paragraphStyles), paragraph: null, context: options.context });
+  const paragraph = paragraphPatch({ style: mergeParagraphStyles(paragraphStyles), paragraph: null, firstRunStyle: {}, context: options.context });
   return { run: runStylePatch({ style: mergeTextStyles(markStyles), context: options.context }), paragraph };
 }
 
@@ -225,7 +234,7 @@ function baselineOffsetOf(offset: string): BaselineOffset {
 }
 
 function paragraphPatch(
-  options: Readonly<{ style: SlidesParagraphStyle; paragraph: SlidesParagraph | null; context: TextContext }>,
+  options: Readonly<{ style: SlidesParagraphStyle; paragraph: SlidesParagraph | null; firstRunStyle: RunStylePatch; context: TextContext }>,
 ): ParagraphStylePatch {
   const { style, paragraph, context } = options;
   const patch: { -readonly [Key in keyof ParagraphStylePatch]: ParagraphStylePatch[Key] } = {};
@@ -247,8 +256,36 @@ function paragraphPatch(
   }
   const glyph = listGlyphFor(bullet.glyph);
   if (!glyph.exact) context.losses.add({ feature: "listGlyph", detail: `The bullet "${bullet.glyph}" is shown as the nearest preset, ${glyph.glyph}.` });
-  patch.list = { kind: "list", listId: context.listIdFor(bullet.listId), glyph: glyph.glyph, level: Math.min(8, Math.max(0, bullet.nestingLevel)) };
+  const membership: ListMembership = { kind: "list", listId: context.listIdFor(bullet.listId), glyph: glyph.glyph, level: Math.min(8, Math.max(0, bullet.nestingLevel)) };
+  patch.list = { ...membership, ...markerStyle({ bulletStyle: runStylePatch({ style: bullet.style, context }), firstRunStyle: options.firstRunStyle }) };
   return patch;
+}
+
+/** The bullet's colour and size where they differ from the text the marker would otherwise copy (see the header). */
+function markerStyle(
+  options: Readonly<{ bulletStyle: RunStylePatch; firstRunStyle: RunStylePatch }>,
+): Readonly<{ markerColour?: ListMarkerColour; markerFontSize?: number }> {
+  const { bulletStyle, firstRunStyle } = options;
+  const colour = bulletStyle.colour;
+  const differentColour = colour !== undefined && JSON.stringify(colour) !== JSON.stringify(firstRunStyle.colour);
+  const fontSize = bulletStyle.fontSize;
+  const differentSize = fontSize !== undefined && fontSize !== firstRunStyle.fontSize;
+  return {
+    ...(differentColour ? { markerColour: markerColourOf(colour) } : {}),
+    ...(differentSize ? { markerFontSize: fontSize } : {}),
+  };
+}
+
+/** A colour as the membership's flat marker colour; the alpha is dropped (Slides' bullets are opaque). */
+function markerColourOf(colour: Colour): ListMarkerColour {
+  switch (colour.kind) {
+    case "literal":
+      return colour.hexadecimal;
+    case "theme":
+      return colour.slot;
+    default:
+      return assertNever(colour);
+  }
 }
 
 function alignmentOf(alignment: string): TextAlignment {

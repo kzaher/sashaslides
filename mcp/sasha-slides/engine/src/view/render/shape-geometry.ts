@@ -12,15 +12,24 @@
 //    to about a sixth of the short side, so an imported or freshly drawn one is never square.
 //  * TEXT INSETS are fractions of the box, approximating Slides' own text rectangles per preset (an
 //    ellipse's text box is its inscribed rectangle, a triangle's sits in its lower half, and so on).
+//  * A FREEFORM OUTLINE (document.ts `CustomOutline`) REPLACES THE PRESET'S DRAWING. It is always a
+//    vector path, whatever the preset, its text uses the whole box (Office's `<a:rect l="l" t="t"
+//    r="r" b="b"/>`, the only text rectangle the Google export writes), and its fill and its stroke
+//    are two separate paths because each Office path says whether it is filled and stroked.
 
 import { assertNever } from "../../contracts/assert-never.ts";
-import type { ShapePreset } from "../../contracts/document.ts";
+import type { CustomOutline, OutlinePoint, ShapeElement, ShapePreset } from "../../contracts/document.ts";
 import type { CornerRadius } from "../../contracts/style.ts";
 
 /** The text rectangle inside a shape, as fractions of its box from each side. */
 export type TextInset = Readonly<{ top: number; right: number; bottom: number; left: number }>;
 
 export const NO_TEXT_INSET: TextInset = { top: 0, right: 0, bottom: 0, left: 0 };
+
+/** Whether a shape is drawn as a box (stylesheet borders and radii) rather than a vector path. */
+export function isDrawnAsBox(element: Pick<ShapeElement, "preset" | "customOutline">): boolean {
+  return element.customOutline === null && isRectangleFamily(element.preset);
+}
 
 /** Total over ShapePreset: true for the presets drawn as a box. */
 export function isRectangleFamily(preset: ShapePreset): boolean {
@@ -134,6 +143,35 @@ export function shapeOutlinePath(options: Readonly<{ preset: ShapePreset; width:
     default:
       return assertNever(options.preset);
   }
+}
+
+/**
+ * A freeform outline as one SVG path scaled to an element's box: its filled paths for `part:
+ * "fill"`, its stroked ones for `"stroke"`; empty when no path takes that part.
+ */
+export function customOutlinePath(options: Readonly<{ outline: CustomOutline; width: number; height: number; part: "fill" | "stroke" }>): string {
+  const at = (point: OutlinePoint): string => `${round(point.x * options.width)} ${round(point.y * options.height)}`;
+  return options.outline.paths
+    .filter((path) => (options.part === "fill" ? path.filled : path.stroked))
+    .flatMap((path) =>
+      path.commands.map((command): string => {
+        switch (command.kind) {
+          case "move":
+            return `M ${at(command.to)}`;
+          case "line":
+            return `L ${at(command.to)}`;
+          case "quadratic":
+            return `Q ${at(command.control)} ${at(command.to)}`;
+          case "cubic":
+            return `C ${at(command.firstControl)} ${at(command.secondControl)} ${at(command.to)}`;
+          case "close":
+            return "Z";
+          default:
+            return assertNever(command);
+        }
+      }),
+    )
+    .join(" ");
 }
 
 /** Where a preset's text sits inside its box (see the header). */

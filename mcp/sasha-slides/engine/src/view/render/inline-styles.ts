@@ -21,6 +21,7 @@ import { assertNever } from "../../contracts/assert-never.ts";
 import type { ThemeSnapshot } from "../../contracts/document.ts";
 import type { Frame } from "../../contracts/geometry.ts";
 import type { AssetAddressResolver } from "../../contracts/render.ts";
+import { fontFamilyValue } from "./font-families.ts";
 import type {
   Border,
   Colour,
@@ -295,11 +296,6 @@ export function verticalJustification(alignment: VerticalAlignment): "flex-start
     default:
       return assertNever(alignment);
   }
-}
-
-/** A family name as a stylesheet value, quoted, with a generic fallback so missing fonts stay sans. */
-export function fontFamilyValue(family: string): string {
-  return `"${family.replace(/["\\]/g, "")}", sans-serif`;
 }
 
 /** Numbers in styles keep at most three decimals, so markup stays stable and readable. */

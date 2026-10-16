@@ -293,7 +293,7 @@ describe("import mapping (SPEC.md 21.12 import table, recorded fixture)", () => 
       assert.equal(created.kind, "opened");
       if (created.kind !== "opened") continue;
       const fakeFetch: typeof fetch = async () => row.answer();
-      const outcome = await importIntoDeck({ presentationAnswer: RECORDED, deck: created.deck, author: { kind: "person", personId: caller.person.id }, fetch: fakeFetch, accessToken: null, idSeed: SEED, now: () => 1 });
+      const outcome = await importIntoDeck({ presentationAnswer: RECORDED, deck: created.deck, author: { kind: "person", personId: caller.person.id }, fetch: fakeFetch, accessToken: null, pptxExport: null, idSeed: SEED, now: () => 1 });
       assert.equal(outcome.kind, "imported", row.label);
       const snapshot = created.deck.snapshot();
       const logo = snapshot.slides.find((slide) => slide.id === "media_slide")?.elements.find((element) => element.id === "logo_image");
@@ -490,7 +490,7 @@ describe("import mapping (SPEC.md 21.12 import table, recorded fixture)", () => 
     assert.equal(created.kind, "opened");
     if (created.kind !== "opened") return;
     const fakeFetch: typeof fetch = async () => new Response(PNG_BYTES, { status: 200 });
-    const outcome = await importIntoDeck({ presentationAnswer: RECORDED, deck: created.deck, author: { kind: "person", personId: caller.person.id }, fetch: fakeFetch, accessToken: null, idSeed: SEED, now: () => 1 });
+    const outcome = await importIntoDeck({ presentationAnswer: RECORDED, deck: created.deck, author: { kind: "person", personId: caller.person.id }, fetch: fakeFetch, accessToken: null, pptxExport: null, idSeed: SEED, now: () => 1 });
     assert.equal(outcome.kind, "imported");
     assert.equal(service.decks.get(created.deck.deckId)?.applied.length, 1, "one envelope");
     assert.equal(created.deck.snapshot().slides.length, 8);
@@ -512,7 +512,7 @@ function parsed(raw: unknown): SlidesPresentation {
 }
 
 function planOf(options: Readonly<{ raw: unknown; images: ReadonlyMap<string, ImportedImage> }>): ImportPlan {
-  return planImport({ presentation: parsed(options.raw), images: options.images, idSeed: SEED });
+  return planImport({ presentation: parsed(options.raw), images: options.images, idSeed: SEED, pptxSupplement: null });
 }
 
 function storedImages(presentation: SlidesPresentation): ReadonlyMap<string, ImportedImage> {

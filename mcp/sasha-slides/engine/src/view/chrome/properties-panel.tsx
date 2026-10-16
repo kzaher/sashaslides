@@ -27,7 +27,7 @@ import type { Border, Colour, CornerRadius, DashStyle, Fill, ImageFit, ListGlyph
 import { literalColour, themeColour } from "../../contracts/style.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { shallowEqual, useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
-import { isRectangleFamily } from "../render/shape-geometry.ts";
+import { isDrawnAsBox } from "../render/shape-geometry.ts";
 import { linearGradientValue, radialGradientValue } from "../render/inline-styles.ts";
 import { slideBackground } from "../render/static-slide.tsx";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
@@ -1085,7 +1085,7 @@ function textBearing(elements: readonly ElementSnapshot[]): boolean {
 function allowsPerSide(element: ElementSnapshot): boolean {
   switch (element.kind) {
     case "shape":
-      return isRectangleFamily(element.preset);
+      return isDrawnAsBox(element);
     case "image":
       return true;
     case "line":

@@ -13,6 +13,10 @@
 import type { DeckApiErrorCode } from "../engine/src/contracts/deck-api.ts";
 
 export const SLIDES_API_ORIGIN = "https://slides.googleapis.com";
+/** Drive serves the .pptx export (`files.export`); it is a read and changes nothing. */
+export const DRIVE_API_ORIGIN = "https://www.googleapis.com";
+/** Drive's export media type for a presentation as .pptx. */
+export const PPTX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 export type SlidesCallOutcome =
   | Readonly<{ kind: "ok"; body: unknown }>
@@ -23,7 +27,11 @@ export type SlidesClient = Readonly<{
   createPresentation(options: Readonly<{ title: string; widthEnglishMetricUnits: number; heightEnglishMetricUnits: number }>): Promise<SlidesCallOutcome>;
   batchUpdate(options: Readonly<{ presentationId: string; requests: readonly unknown[] }>): Promise<SlidesCallOutcome>;
   getThumbnail(options: Readonly<{ presentationId: string; pageObjectId: string }>): Promise<SlidesCallOutcome>;
+  /** The presentation as .pptx, for what `presentations.get` leaves out (import-pptx-supplement.ts). */
+  exportPresentationPptx(options: Readonly<{ presentationId: string }>): Promise<PptxExportOutcome>;
 }>;
+
+export type PptxExportOutcome = Readonly<{ kind: "exported"; bytes: Uint8Array }> | Readonly<{ kind: "failed"; status: number; message: string }>;
 
 export function createSlidesClient(options: Readonly<{ fetch: typeof fetch; accessToken: string }>): SlidesClient {
   const call = (request: Readonly<{ method: "GET" | "POST"; path: string; body: unknown }>): Promise<SlidesCallOutcome> =>
@@ -55,7 +63,32 @@ export function createSlidesClient(options: Readonly<{ fetch: typeof fetch; acce
         path: `/v1/presentations/${encodeURIComponent(presentationId)}/pages/${encodeURIComponent(pageObjectId)}/thumbnail?thumbnailProperties.thumbnailSize=LARGE`,
         body: null,
       }),
+    exportPresentationPptx: ({ presentationId }) => exportPptx({ fetch: options.fetch, accessToken: options.accessToken, presentationId }),
   };
+}
+
+/**
+ * Drive's `files.export` of a presentation as .pptx. It needs a Drive scope that reaches the file:
+ * `drive.file` reaches only files this app created or the person opened with it, so on other
+ * presentations Google answers 403 or 404, which the import reports as lost gradients instead of
+ * failing.
+ */
+async function exportPptx(options: Readonly<{ fetch: typeof fetch; accessToken: string; presentationId: string }>): Promise<PptxExportOutcome> {
+  let response: Response;
+  try {
+    response = await options.fetch(`${DRIVE_API_ORIGIN}/drive/v3/files/${encodeURIComponent(options.presentationId)}/export?mimeType=${encodeURIComponent(PPTX_MEDIA_TYPE)}`, {
+      method: "GET",
+      headers: { authorization: `Bearer ${options.accessToken}` },
+      signal: AbortSignal.timeout(SLIDES_CALL_TIMEOUT_MILLISECONDS),
+    });
+  } catch (cause) {
+    return { kind: "failed", status: 0, message: cause instanceof Error ? cause.message : String(cause) };
+  }
+  if (!response.ok) {
+    const text = await response.text();
+    return { kind: "failed", status: response.status, message: googleMessageOf({ parsed: parseBodyText(text), text }) };
+  }
+  return { kind: "exported", bytes: new Uint8Array(await response.arrayBuffer()) };
 }
 
 /**

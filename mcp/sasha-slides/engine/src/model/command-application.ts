@@ -313,6 +313,8 @@ function patchElement(options: Readonly<{ map: Y.Map<unknown>; patch: ElementPat
     // `ElementPatch` field names are the stored ELEMENT_KEY names (yjs-schema.ts), one to one.
     if (value !== undefined) options.map.set(field, value);
   }
+  // Choosing a preset replaces a freeform outline: the shape is then drawn as the preset it names.
+  if (kind === "shape" && options.patch.preset !== undefined && options.map.has(ELEMENT_KEY.customOutline)) options.map.delete(ELEMENT_KEY.customOutline);
 }
 
 function writeScript(options: Readonly<{ context: ApplicationContext; draft: TransitionScriptDraft; saveApproval: TransitionScriptSaveApproval }>): void {

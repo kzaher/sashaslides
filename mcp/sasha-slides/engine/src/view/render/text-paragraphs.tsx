@@ -15,14 +15,33 @@
 //    value. Both are `contentEditable={false}`, so a caret never lands inside them.
 //  * A LINK TO A SLIDE is an anchor carrying `data-sasha-link-slide-id`: the presenter navigates on
 //    it; the editor never follows a link on click.
+//  * A LIST PARAGRAPH WITH ITS OWN INDENTS IS LAID OUT THE WAY SLIDES LAYS IT OUT. With both indents
+//    0 (every list made in the engine) the marker sits in a gutter of LIST_INDENT_PER_LEVEL per
+//    level before the text. A paragraph that states indents (an imported list: Slides' default is
+//    start 36 points, first line 18) means them as Slides does, and export writes them back as
+//    such (google-slides/export-text.ts): the wrapped lines start at indentStart, and with a
+//    hanging first line (indentFirstLine < 0) so does the first line's text, while the marker
+//    ENDS at indentStart + indentFirstLine, right-aligned there. Measured on Google's thumbnails
+//    of all four hanging lists in the SxS decks (deck 8, complex 30, basic 12 and 16): the
+//    glyph's ink ends 0.8 to 3.2 units before that point (its side bearing) at sizes 12 to 40,
+//    where a marker STARTING there was 4 to 25 units right of Google's. Adding the engine's gutter
+//    on top as well drew the marker over the first letter and every line 32 units right of
+//    Slides' (deck 8). A first line indented past indentStart (no measured case) starts the
+//    marker there and the text one gutter later, as the engine's own lists do.
+//  * A MARKER CAN HAVE ITS OWN COLOUR AND SIZE (`markerColour`, `markerFontSize`, Slides'
+//    `bulletStyle`). The marker box keeps the paragraph's own font and line height, so its line
+//    has the same baseline as the text's, and an inner span carries the glyph's colour and size.
+//  * A SOFT LINE BREAK (U+000B, Shift+Enter, as Slides stores it) is drawn as "\n", which the text
+//    layer's pre-wrap breaks on. Both are one character, so the positions the inline editor reads
+//    from text node lengths do not move; a raw U+000B drew as a missing-glyph box.
 
 import { memo, type CSSProperties, type ReactElement } from "react";
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { Paragraph, TextBody, TextRun } from "../../contracts/document.ts";
 import type { SlideId } from "../../contracts/ids.ts";
-import type { RunLink } from "../../contracts/style.ts";
+import { listMarkerColour, type ListMembership, type ParagraphStyle, type RunLink } from "../../contracts/style.ts";
 import { SLIDE_LINK_ATTRIBUTE } from "../../contracts/render.ts";
-import { paragraphDeclarations, roundNumber, runDeclarations } from "./inline-styles.ts";
+import { colourValue, paragraphDeclarations, roundNumber, runDeclarations } from "./inline-styles.ts";
 import {
   LIST_INDENT_PER_LEVEL,
   listMarkers,
@@ -86,9 +105,10 @@ function ParagraphView(options: Readonly<{ paragraph: Paragraph; start: number; 
   const context = properties.styleContext;
   const style = resolveParagraphStyle({ context, patch: paragraph.style });
   const base = paragraphBaseRunStyle({ context, paragraph });
-  const level = listLevel(style.list);
-  const listIndent = level === null ? 0 : (level + 1) * LIST_INDENT_PER_LEVEL;
-  const declarations = inked(paragraphDeclarations({ style, base, theme: context.theme, fontScale: properties.fontScale, listIndent }), properties.inkColour);
+  const list = listOf(style.list);
+  const layout = list === null ? null : listLayout({ style, level: list.level });
+  const laidOut = layout === null ? style : { ...style, indentFirstLine: layout.textIndent };
+  const declarations = inked(paragraphDeclarations({ style: laidOut, base, theme: context.theme, fontScale: properties.fontScale, listIndent: layout?.listIndent ?? 0 }), properties.inkColour);
   const starts = runStarts(paragraph, options.start);
   const attributes = {
     [PARAGRAPH_START_ATTRIBUTE]: options.start,
@@ -96,9 +116,9 @@ function ParagraphView(options: Readonly<{ paragraph: Paragraph; start: number; 
   };
   return (
     <div style={declarations} {...attributes}>
-      {options.marker === null || level === null ? null : (
-        <span contentEditable={false} {...{ [LIST_MARKER_ATTRIBUTE]: "" }} style={markerDeclarations({ level, indentStart: style.indentStart, fontScale: properties.fontScale, runStyle: inked(runDeclarations({ style: base, theme: context.theme, fontScale: properties.fontScale }), properties.inkColour) })}>
-          {options.marker}
+      {options.marker === null || list === null || layout === null ? null : (
+        <span contentEditable={false} {...{ [LIST_MARKER_ATTRIBUTE]: "" }} style={markerDeclarations({ layout, fontScale: properties.fontScale, runStyle: inked(runDeclarations({ style: base, theme: context.theme, fontScale: properties.fontScale }), properties.inkColour) })}>
+          {markerGlyph({ marker: options.marker, list, properties })}
         </span>
       )}
       {paragraph.runs.length === 0 ? <br /> : paragraph.runs.map((run, index) => <RunView key={index} run={run} start={starts[index] ?? options.start} properties={properties} />)}
@@ -110,7 +130,7 @@ function RunView(options: Readonly<{ run: TextRun; start: number; properties: Te
   const { run, properties } = options;
   const style = resolveRunStyle({ context: properties.styleContext, patch: run.style });
   const declarations = inked(runDeclarations({ style, theme: properties.styleContext.theme, fontScale: properties.fontScale }), properties.inkColour);
-  const text = runDisplayText({ run, slideNumber: properties.slideNumber });
+  const text = runDisplayText({ run, slideNumber: properties.slideNumber }).replace(SOFT_LINE_BREAKS, "\n");
   const content = runContent({ run, text, start: options.start, declarations });
   return linkWrapped({ link: style.link, content, slideNumberOf: properties.slideNumberOf });
 }
@@ -162,27 +182,67 @@ function inked(declarations: CSSProperties, inkColour: string | undefined): CSSP
   return inkColour === undefined ? declarations : { ...declarations, color: inkColour };
 }
 
-function listLevel(list: ReturnType<typeof resolveParagraphStyle>["list"]): number | null {
+/** Slides' soft line break, drawn as a line feed (see the header). */
+const SOFT_LINE_BREAKS = /\u000B/g;
+
+/** The membership with its level clamped to 0..8, or null outside a list. */
+function listOf(list: ParagraphStyle["list"]): ListMembership | null {
   switch (list.kind) {
     case "none":
       return null;
     case "list":
-      return Math.max(0, Math.min(8, list.level));
+      return { ...list, level: Math.max(0, Math.min(8, list.level)) };
     default:
       return assertNever(list);
   }
 }
 
-function markerDeclarations(options: Readonly<{ level: number; indentStart: number; fontScale: number; runStyle: CSSProperties }>): CSSProperties {
+/** Where a list paragraph's marker and text go, in slide units from the text box's content start. */
+export type ListLayout = Readonly<{
+  /** Added to `indentStart` as the paragraph's start padding: the wrapped lines' start. */
+  listIndent: number;
+  /** The first line's text indent from the wrapped lines' start. */
+  textIndent: number;
+  /** The marker's box: its start, its width, and which edge of it the glyph keeps to. */
+  markerStart: number;
+  markerWidth: number;
+  markerAlignment: "start" | "end";
+}>;
+
+/** The two list layouts (see the header): the engine's gutter, or Slides' own indents. */
+export function listLayout(options: Readonly<{ style: Pick<ParagraphStyle, "indentStart" | "indentFirstLine">; level: number }>): ListLayout {
+  const { indentStart, indentFirstLine } = options.style;
+  if (indentStart === 0 && indentFirstLine === 0) {
+    return { listIndent: (options.level + 1) * LIST_INDENT_PER_LEVEL, textIndent: 0, markerStart: options.level * LIST_INDENT_PER_LEVEL, markerWidth: LIST_INDENT_PER_LEVEL, markerAlignment: "start" };
+  }
+  const firstLineStart = indentStart + indentFirstLine;
+  return indentFirstLine < 0
+    ? { listIndent: 0, textIndent: 0, markerStart: firstLineStart - LIST_INDENT_PER_LEVEL, markerWidth: LIST_INDENT_PER_LEVEL, markerAlignment: "end" }
+    : { listIndent: 0, textIndent: indentFirstLine + LIST_INDENT_PER_LEVEL, markerStart: firstLineStart, markerWidth: LIST_INDENT_PER_LEVEL, markerAlignment: "start" };
+}
+
+function markerDeclarations(options: Readonly<{ layout: ListLayout; fontScale: number; runStyle: CSSProperties }>): CSSProperties {
   return {
     ...options.runStyle,
     position: "absolute",
-    insetInlineStart: `${roundNumber((options.indentStart + options.level * LIST_INDENT_PER_LEVEL) * options.fontScale)}px`,
-    width: `${roundNumber(LIST_INDENT_PER_LEVEL * options.fontScale)}px`,
+    insetInlineStart: `${roundNumber(options.layout.markerStart * options.fontScale)}px`,
+    width: `${roundNumber(options.layout.markerWidth * options.fontScale)}px`,
     textIndent: 0,
+    ...(options.layout.markerAlignment === "end" ? { textAlign: "end", whiteSpace: "nowrap" } : {}),
     textDecoration: "none",
     userSelect: "none",
   };
+}
+
+/** The marker text, in its own colour and size when the list states them (see the header). */
+function markerGlyph(options: Readonly<{ marker: string; list: ListMembership; properties: TextParagraphsProperties }>): ReactElement | string {
+  const { list, properties } = options;
+  if (list.markerColour === undefined && list.markerFontSize === undefined) return options.marker;
+  const declarations: CSSProperties = {
+    ...(list.markerColour === undefined || properties.inkColour !== undefined ? {} : { color: colourValue(listMarkerColour(list.markerColour), properties.styleContext.theme) }),
+    ...(list.markerFontSize === undefined ? {} : { fontSize: `${roundNumber(list.markerFontSize * properties.fontScale)}px` }),
+  };
+  return <span style={declarations}>{options.marker}</span>;
 }
 
 /** Only web addresses a browser treats as navigation, never `javascript:` (pasted content is untrusted). */

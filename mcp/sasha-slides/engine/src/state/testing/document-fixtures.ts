@@ -110,6 +110,7 @@ export function shape(
     placeholder: options.placeholder ?? null,
     unsupportedKeys: [],
     preset,
+    customOutline: null,
     box: PLAIN_BOX_STYLE,
     textBox: { ...(isTextBoxPreset(preset) ? NEW_TEXT_BOX_STYLE : DEFAULT_TEXT_BOX_STYLE), ...(options.autofit === undefined ? {} : { autofit: options.autofit }) },
     text: options.text ?? EMPTY_TEXT_BODY,

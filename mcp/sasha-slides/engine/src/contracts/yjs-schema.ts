@@ -179,6 +179,8 @@ export const ELEMENT_KEY = {
   opacity: "opacity",
   // shape
   preset: "preset",
+  /** Optional: absent means none (document.ts `CustomOutline`). */
+  customOutline: "customOutline",
   textBox: "textBox",
   text: "text",
   // image
@@ -209,10 +211,12 @@ const BOX_STYLE_KEYS = ["fill", "border", "cornerRadius", "shadow", "opacity"] a
 /**
  * Exactly which keys each element kind stores. A missing required key is STRUCTURAL damage and is
  * reported (and, on the repairing replica only, repaired with the default). An unexpected key is
- * ignored and never deleted: a newer client may have written it.
+ * ignored and never deleted: a newer client may have written it. A key added after schema version 1
+ * (`customOutline`) is listed so its VALUE is checked, but it is optional: its absence is the default
+ * (validation.ts `optionalValue`), so a deck written before it existed is not damaged.
  */
 export const ELEMENT_KEYS_BY_KIND: Readonly<Record<StoredElementKind, readonly ElementKey[]>> = {
-  shape: [...COMMON_KEYS, "frame", ...BOX_STYLE_KEYS, "preset", "textBox", "text"],
+  shape: [...COMMON_KEYS, "frame", ...BOX_STYLE_KEYS, "preset", "customOutline", "textBox", "text"],
   image: [...COMMON_KEYS, "frame", ...BOX_STYLE_KEYS, "assetId", "crop"],
   line: [...COMMON_KEYS, "lineGeometry", "routing", "stroke", "startArrow", "endArrow", "opacity"],
   table: [...COMMON_KEYS, "frame", "opacity", "rows", "columns", "rowHeights", "columnWidths", "cells"],

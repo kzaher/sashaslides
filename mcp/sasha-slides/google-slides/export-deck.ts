@@ -267,6 +267,8 @@ function wireTransform(transform: Omit<WireTransform, "unit">): WireTransform {
 function exportShape(options: Readonly<{ shape: ShapeElement; objectId: string; context: ExportContext }>): ElementExport {
   const { shape, objectId, context } = options;
   const role = shape.placeholder?.role ?? null;
+  // The Slides programming interface creates presets only; a freeform cannot be drawn through it.
+  if (shape.customOutline !== null) context.losses.add({ feature: "customShape", detail: "Slides cannot create a custom outline through its programming interface; the freeform was exported as its fallback preset." });
   if (needsComposition(shape.box)) {
     const composed = composedBoxRequests({
       box: shape.box,

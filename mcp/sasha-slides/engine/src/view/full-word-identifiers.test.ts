@@ -26,6 +26,14 @@ const FORBIDDEN_WORDS: readonly string[] = ["css", "json", "ui", "svg", "html", 
 const DICTATED_NAMES: ReadonlySet<string> = new Set(["__html"]);
 
 /**
+ * Names one file must declare because its outside callers dictate them: the slide page export's
+ * interface, which the reverse importer's pipeline and rating tools were written against.
+ */
+const DICTATED_IN_FILE: Readonly<Record<string, readonly string[]>> = {
+  "export/slide-html.ts": ["renderSlideHtml", "renderDeckHtml", "html"],
+};
+
+/**
  * Files this module does not own, whose names its owner must still change. The presenter is frozen
  * for milestone 2 (SPEC.md 21.17); the architect clears this entry with the presenter's next
  * change. The test also fails when an entry no longer occurs, so the list can only shrink.
@@ -65,7 +73,7 @@ describe("full-word identifiers in src/", () => {
   const findings = sourceFiles(sourceRoot).flatMap((file) => forbiddenDeclarations({ file: relative(sourceRoot, file), text: readFileSync(file, "utf8") }));
 
   it("no declared name contains an abbreviation as a word, outside the known list", () => {
-    const unexpected = findings.filter((finding) => !(KNOWN_ELSEWHERE[finding.file] ?? []).includes(finding.name));
+    const unexpected = findings.filter((finding) => !(KNOWN_ELSEWHERE[finding.file] ?? []).includes(finding.name) && !(DICTATED_IN_FILE[finding.file] ?? []).includes(finding.name));
     assert.deepEqual(unexpected.map((finding) => `${finding.file}:${finding.line} ${finding.name}`), []);
   });
 

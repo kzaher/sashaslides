@@ -38,7 +38,7 @@ import { ELEMENT_ID_ATTRIBUTE, ELEMENT_KIND_ATTRIBUTE, MORPH_KEY_ATTRIBUTE } fro
 import type { TextTarget } from "../../contracts/selection.ts";
 import type { Stroke, TextBoxStyle } from "../../contracts/style.ts";
 import type { SlideRenderContext } from "./render-context.ts";
-import { effectiveCornerRadius, isRectangleFamily, presetTextInset, shapeOutlinePath, type TextInset } from "./shape-geometry.ts";
+import { customOutlinePath, effectiveCornerRadius, isDrawnAsBox, NO_TEXT_INSET, presetTextInset, shapeOutlinePath, type TextInset } from "./shape-geometry.ts";
 import {
   PLACEHOLDER_HATCHING,
   borderDeclarations,
@@ -107,9 +107,9 @@ function ShapeView(properties: Readonly<{ element: ShapeElement; context: SlideR
   const fill = fillRendering({ fill: box.fill, theme, assetAddress: context.assetAddress });
   const leaf: CSSProperties = { ...leafFrameDeclarations(frame), ...(box.opacity < 1 ? { opacity: box.opacity } : {}) };
   const text = (
-    <ShapeTextLayer element={element} context={context} inset={presetTextInset(element.preset)} />
+    <ShapeTextLayer element={element} context={context} inset={element.customOutline === null ? presetTextInset(element.preset) : NO_TEXT_INSET} />
   );
-  if (isRectangleFamily(element.preset)) {
+  if (isDrawnAsBox(element)) {
     const radius = effectiveCornerRadius({ preset: element.preset, radius: box.cornerRadius, width: frame.width, height: frame.height });
     const style: CSSProperties = {
       ...leaf,
@@ -126,17 +126,20 @@ function ShapeView(properties: Readonly<{ element: ShapeElement; context: SlideR
       </div>
     );
   }
-  const outline = shapeOutlinePath({ preset: element.preset, width: frame.width, height: frame.height }) ?? "";
+  const outline = vectorOutline(element);
   const stroke = vectorStroke(element);
   return (
     <div style={leaf} {...elementAttributes(element)}>
       <div style={{ position: "absolute", inset: 0, ...(box.shadow === null ? {} : { filter: dropShadowFilterValue(box.shadow, theme) }) }}>
-        <div style={{ position: "absolute", inset: 0, clipPath: `path("${outline}")`, ...fill.background }}>
-          {fill.imageLayer === null ? null : <div style={fill.imageLayer} />}
-        </div>
-        {stroke === null ? null : (
+        {/* An empty clip path would clip nothing, so a freeform with no filled path draws no fill at all. */}
+        {outline.fill === "" ? null : (
+          <div style={{ position: "absolute", inset: 0, clipPath: `path(${outline.fillRule}"${outline.fill}")`, ...fill.background }}>
+            {fill.imageLayer === null ? null : <div style={fill.imageLayer} />}
+          </div>
+        )}
+        {stroke === null || outline.stroke === "" ? null : (
           <svg width={roundNumber(frame.width)} height={roundNumber(frame.height)} viewBox={`0 0 ${roundNumber(frame.width)} ${roundNumber(frame.height)}`} style={{ position: "absolute", inset: 0, overflow: "visible" }} aria-hidden="true">
-            <path d={outline} fill="none" stroke={colourValue(stroke.colour, theme)} strokeWidth={roundNumber(stroke.width)} strokeDasharray={strokeDashArray(stroke.dash, stroke.width)} strokeLinejoin="round" />
+            <path d={outline.stroke} fill="none" stroke={colourValue(stroke.colour, theme)} strokeWidth={roundNumber(stroke.width)} strokeDasharray={strokeDashArray(stroke.dash, stroke.width)} strokeLinejoin="round" />
           </svg>
         )}
       </div>
@@ -144,6 +147,26 @@ function ShapeView(properties: Readonly<{ element: ShapeElement; context: SlideR
       <UnsupportedValues keys={element.unsupportedKeys} />
     </div>
   );
+}
+
+type VectorOutline = Readonly<{ fill: string; stroke: string; fillRule: "" | "evenodd, " }>;
+
+/**
+ * The fill region and the stroked line of a shape drawn as a path. A preset uses one path for both.
+ * A freeform fills even-odd, as Office and LibreOffice fill a multi-path outline (a combined shape's
+ * hole stays open); a single closed path, the common case, fills the same under either rule.
+ */
+function vectorOutline(element: ShapeElement): VectorOutline {
+  const { width, height } = element.frame;
+  if (element.customOutline !== null) {
+    return {
+      fill: customOutlinePath({ outline: element.customOutline, width, height, part: "fill" }),
+      stroke: customOutlinePath({ outline: element.customOutline, width, height, part: "stroke" }),
+      fillRule: "evenodd, ",
+    };
+  }
+  const preset = shapeOutlinePath({ preset: element.preset, width, height }) ?? "";
+  return { fill: preset, stroke: preset, fillRule: "" };
 }
 
 /** A vector preset has one outline: a uniform border, or the first side of a per-side one. */

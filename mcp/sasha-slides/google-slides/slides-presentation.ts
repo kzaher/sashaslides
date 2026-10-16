@@ -100,6 +100,14 @@ export type SlidesPageElement = Readonly<{
   content: SlidesElementContent;
 }>;
 
+/**
+ * The shape type of a shape Google answers WITHOUT one: an outline that is no preset, such as a pptx
+ * custom geometry (measured: the html2slides complex fixtures' funnel trapezoids). It is the Slides
+ * `ShapeType` enum's own name for a custom shape. Reading it as a text box (the old default) drew it
+ * as one, silently, and let it grow with its text.
+ */
+export const CUSTOM_SHAPE_TYPE = "CUSTOM";
+
 export type SlidesShape = Readonly<{
   kind: "shape";
   shapeType: string;
@@ -120,7 +128,16 @@ export type SlidesTableCell = Readonly<{
   text: SlidesText | null;
   fill: SlidesFill;
   contentAlignment: string | null;
+  /**
+   * The cell's text margins. `presentations.get` does NOT return them (TableCellProperties holds
+   * only the fill and the alignment), so the parser always leaves this null; only a reader of the
+   * presentation's pptx export (its `<a:tcPr marL/marR/marT/marB>`, which Google writes from the
+   * stored values) can fill it in. The importer infers margins when it is null.
+   */
+  marginsEnglishMetricUnits: SlidesCellMargins | null;
 }>;
+
+export type SlidesCellMargins = Readonly<{ top: number; right: number; bottom: number; left: number }>;
 
 export type SlidesTableBorder = Readonly<{ solid: SlidesSolidFill | null; weightEnglishMetricUnits: number; dashStyle: string }>;
 
@@ -170,8 +187,8 @@ export type SlidesText = Readonly<{ paragraphs: readonly SlidesParagraph[] }>;
 
 export type SlidesParagraph = Readonly<{
   style: SlidesParagraphStyle;
-  /** null: not a list paragraph. */
-  bullet: Readonly<{ listId: string; nestingLevel: number; glyph: string }> | null;
+  /** null: not a list paragraph. `style` is the bullet's own `bulletStyle` (its colour and size). */
+  bullet: Readonly<{ listId: string; nestingLevel: number; glyph: string; style: SlidesTextStyle }> | null;
   /** Nesting level for style inheritance: the bullet's, else 0. */
   nestingLevel: number;
   runs: readonly SlidesRun[];
@@ -370,7 +387,7 @@ function parseShape(shape: Readonly<Record<string, unknown>>): SlidesShape {
   const autofit = record(properties["autofit"]);
   return {
     kind: "shape",
-    shapeType: stringOr(shape["shapeType"], "TEXT_BOX"),
+    shapeType: stringOr(shape["shapeType"], CUSTOM_SHAPE_TYPE),
     placeholder: parsePlaceholder(shape["placeholder"]),
     text: shape["text"] === undefined ? null : parseText(shape["text"]),
     fill: parseFill(properties["shapeBackgroundFill"]),
@@ -444,6 +461,7 @@ function parseTable(table: Readonly<Record<string, unknown>>): SlidesElementCont
         text: cell["text"] === undefined ? null : parseText(cell["text"]),
         fill: parseFill(properties["tableCellBackgroundFill"]),
         contentAlignment: typeof properties["contentAlignment"] === "string" ? properties["contentAlignment"] : null,
+        marginsEnglishMetricUnits: null,
       });
     }
   }
@@ -589,7 +607,12 @@ export function parseText(raw: unknown): SlidesText {
 function parseBullet(raw: unknown): SlidesParagraph["bullet"] {
   const bullet = record(raw);
   if (bullet === null) return null;
-  return { listId: stringOr(bullet["listId"], ""), nestingLevel: numberOr(bullet["nestingLevel"], 0), glyph: stringOr(bullet["glyph"], "") };
+  return {
+    listId: stringOr(bullet["listId"], ""),
+    nestingLevel: numberOr(bullet["nestingLevel"], 0),
+    glyph: stringOr(bullet["glyph"], ""),
+    style: parseTextStyle(bullet["bulletStyle"]),
+  };
 }
 
 function parseTextStyle(raw: unknown): SlidesTextStyle {

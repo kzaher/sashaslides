@@ -60,6 +60,19 @@ describe("export mapping (SPEC.md 21.12 export table)", () => {
     });
   });
 
+  test("a freeform (custom outline) is created as its fallback preset plus a customShape loss; a preset shape (control) has none", () => {
+    const outline = { paths: [{ commands: [{ kind: "move" as const, to: { x: 0, y: 0 } }, { kind: "line" as const, to: { x: 1, y: 1 } }, { kind: "close" as const }], filled: true, stroked: true }] };
+    const rows: readonly Readonly<{ label: string; element: ShapeElement; losses: number }>[] = [
+      { label: "freeform", element: { ...shape({ id: "el_shape0001", preset: "rectangle" }), customOutline: outline }, losses: 1 },
+      { label: "control", element: shape({ id: "el_shape0001", preset: "rectangle" }), losses: 0 },
+    ];
+    for (const row of rows) {
+      const plan = planOf([slide({ id: "sl_shapes0001", elements: [row.element] })]);
+      assert.equal(field(onlyBatch(plan).slice(2)[0], "createShape")?.["shapeType"], "RECTANGLE", row.label);
+      assert.equal(plan.losses.filter((loss) => loss.feature === "customShape").length, row.losses, row.label);
+    }
+  });
+
   test("text: insertText, bullets per list run, paragraph styles, run styles; automaticText -> the number plus a loss", () => {
     const listId = "ls_list00001" as ListId;
     const body: TextBody = {
@@ -336,7 +349,7 @@ function common(options: Readonly<{ id: string }>) {
 }
 
 function shape(options: Readonly<{ id: string; preset: ShapePreset; box?: BoxStyle; text?: TextBody; frame?: ShapeElement["frame"] }>): ShapeElement {
-  return { ...common(options), frame: options.frame ?? FRAME, kind: "shape", preset: options.preset, box: options.box ?? PLAIN, textBox: TEXT_BOX, text: options.text ?? { paragraphs: [{ style: {}, runs: [] }] } };
+  return { ...common(options), frame: options.frame ?? FRAME, kind: "shape", preset: options.preset, customOutline: null, box: options.box ?? PLAIN, textBox: TEXT_BOX, text: options.text ?? { paragraphs: [{ style: {}, runs: [] }] } };
 }
 
 function textOf(text: string): TextBody {

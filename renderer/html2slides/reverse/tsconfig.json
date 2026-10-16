@@ -1,0 +1,33 @@
+// The reverse round trip's own TypeScript gate. It exists because these sources import the Sasha
+// engine's .tsx renderer, which needs the engine's JSX setting ("react-jsx", automatic runtime)
+// that the repository root tsconfig does not set; the root tsconfig excludes these files.
+//
+//   npx tsc -p renderer/html2slides/reverse/tsconfig.json   (typecheck; emits nothing)
+//
+// At RUNTIME reverse-sxs.sh hands tsx the engine's own tsconfig instead: tsx applies a tsconfig
+// only to the files it includes, and the engine's sources must run with the engine's settings.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable", "ESNext.Disposable"],
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["*.ts", "../reverse-roundtrip.ts", "../../../types/ambient.d.ts"]
+}

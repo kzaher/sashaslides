@@ -110,7 +110,17 @@ async function importForStandIn(
   const caller = testCaller("development-owner");
   const created = await options.service.createDeck({ caller, title: "" });
   if (created.kind !== "opened") throw new Error(created.kind);
-  const imported = await importIntoDeck({ presentationAnswer: read.body, deck: created.deck, author: { kind: "person", personId: caller.person.id }, fetch, accessToken: grant.accessToken, idSeed: { sessionPrefix: "StandIn0", counter: 0 }, now: Date.now });
+  const exported = await createSlidesClient({ fetch, accessToken: grant.accessToken }).exportPresentationPptx({ presentationId: options.presentationId });
+  const imported = await importIntoDeck({
+    presentationAnswer: read.body,
+    deck: created.deck,
+    author: { kind: "person", personId: caller.person.id },
+    fetch,
+    accessToken: grant.accessToken,
+    pptxExport: exported.kind === "exported" ? exported.bytes : null,
+    idSeed: { sessionPrefix: "StandIn0", counter: 0 },
+    now: Date.now,
+  });
   options.log({ standInImport: imported.kind === "imported" ? { slides: imported.report.slideCount, elements: imported.report.elementCount, losses: imported.report.losses.length } : imported });
   return created.deck.deckId;
 }

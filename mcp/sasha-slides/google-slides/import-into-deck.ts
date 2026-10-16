@@ -14,6 +14,7 @@ import type { CommandId, IdSeed } from "../engine/src/contracts/ids.ts";
 import { mintId } from "../engine/src/contracts/ids.ts";
 import type { DeckHandle } from "../deck-contracts/deck-service-contract.ts";
 import { fetchImportImages } from "./import-assets.ts";
+import { readPptxSupplement } from "./import-pptx-supplement.ts";
 import { imageAddressesIn, planImport, type ImportPlan } from "./import-presentation.ts";
 import { presentationAddressOf } from "./slides-client.ts";
 import { parsePresentation } from "./slides-presentation.ts";
@@ -32,6 +33,12 @@ export async function importIntoDeck(
     fetch: typeof fetch;
     /** The grant's token, for pictures Google serves only to it; null on the add-on path. */
     accessToken: string | null;
+    /**
+     * The presentation as Drive exports it (.pptx), read for what `presentations.get` leaves out
+     * (gradient stops: import-pptx-supplement.ts); null when it could not be fetched, and then
+     * every such shape is reported as a loss.
+     */
+    pptxExport: Uint8Array | null;
     idSeed: IdSeed;
     now: () => number;
   }>,
@@ -40,7 +47,8 @@ export async function importIntoDeck(
   if (parsed.kind === "invalid") return { kind: "invalidPresentation", message: parsed.message };
   const presentation = parsed.presentation;
   const images = await fetchImportImages({ addresses: imageAddressesIn(presentation), fetch: options.fetch, deck: options.deck, accessToken: options.accessToken });
-  const plan = planImport({ presentation, images, idSeed: options.idSeed });
+  const supplement = options.pptxExport === null ? null : readPptxSupplement({ archive: options.pptxExport, presentation });
+  const plan = planImport({ presentation, images, idSeed: options.idSeed, pptxSupplement: supplement?.kind === "read" ? supplement.supplement : null });
   const envelope = importEnvelope({ plan, existing: options.deck.snapshot(), author: options.author, commandId: mintId({ seed: options.idSeed, kind: "command" }).id });
   const applied = await options.deck.apply({ envelope, summaryForCollaborators: `imported "${presentation.title}" from Google Slides` });
   switch (applied.kind) {

@@ -92,6 +92,7 @@ async function roundTrip(options: Readonly<{ slides: SlidesClient; presentationI
     author: { kind: "person", personId: caller.person.id },
     fetch,
     accessToken: options.accessToken,
+    pptxExport: await pptxExportOf({ slides: options.slides, presentationId: options.presentationId }),
     idSeed: { sessionPrefix: "RoundTr1", counter: 0 },
     now: Date.now,
   });
@@ -110,6 +111,14 @@ async function roundTrip(options: Readonly<{ slides: SlidesClient; presentationI
   compare({ original: parsed(original.body), copy: parsed(copy.body) });
   await thumbnails({ slides, presentation: parsed(original.body), label: "original" });
   await thumbnails({ slides, presentation: parsed(copy.body), label: "export" });
+}
+
+/** The presentation's .pptx export for the import's gradient stops, or null (then they are reported as lost). */
+async function pptxExportOf(options: Readonly<{ slides: SlidesClient; presentationId: string }>): Promise<Uint8Array | null> {
+  const exported = await options.slides.exportPresentationPptx({ presentationId: options.presentationId });
+  if (exported.kind === "exported") return exported.bytes;
+  process.stdout.write(`the .pptx export failed (HTTP ${exported.status}): ${exported.message}\n`);
+  return null;
 }
 
 function parsed(body: unknown): SlidesPresentation {

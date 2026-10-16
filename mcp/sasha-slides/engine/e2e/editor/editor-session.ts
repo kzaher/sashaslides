@@ -60,7 +60,12 @@ export async function serveDirectory(directory: string): Promise<StaticServer> {
   const port = typeof address === "object" && address !== null ? address.port : 0;
   return {
     address: `http://127.0.0.1:${port}/`,
-    [Symbol.asyncDispose]: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    // Chrome keeps its connections alive, and `close` waits for them: drop them first, or the driver never exits.
+    [Symbol.asyncDispose]: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      }),
   };
 }
 

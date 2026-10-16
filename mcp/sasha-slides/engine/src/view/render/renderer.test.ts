@@ -6,7 +6,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { DocumentSnapshot, ElementSnapshot, SlideSnapshot } from "../../contracts/document.ts";
+import type { CustomOutline, DocumentSnapshot, ElementSnapshot, SlideSnapshot } from "../../contracts/document.ts";
 import type { Frame } from "../../contracts/geometry.ts";
 import { ASSET_ADDRESS_SCHEME, SLIDE_ROOT_CLASS } from "../../contracts/render.ts";
 import { literalColour, themeColour, type DashStyle, type ImageFit, type ListGlyph, type RunStylePatch, type Stroke } from "../../contracts/style.ts";
@@ -106,6 +106,41 @@ describe("static markup per style feature", () => {
     assert.match(vector, /filter:drop-shadow\(0px 12px 12px rgba\(28, 35, 51, 0.3\)\)/);
     assert.doesNotMatch(none, /box-shadow|drop-shadow/);
   });
+
+  // A funnel trapezoid as complex fixture slide 13 imports it (fractions of its box), drawn in a 240 x 160 box.
+  const trapezoid: CustomOutline = {
+    paths: [
+      {
+        commands: [{ kind: "move", to: { x: 0, y: 0 } }, { kind: "line", to: { x: 1, y: 0 } }, { kind: "line", to: { x: 0.95, y: 1 } }, { kind: "line", to: { x: 0.05, y: 1 } }, { kind: "close" }],
+        filled: true,
+        stroked: true,
+      },
+    ],
+  };
+  const trapezoidPath = "M 0 0 L 240 0 L 228 160 L 12 160 Z";
+  const outlineRows: readonly Readonly<{ label: string; outline: CustomOutline | null; clip: string | null; strokePath: string | null; box: boolean }>[] = [
+    { label: "no custom outline (control): the rectangle is a box", outline: null, clip: null, strokePath: null, box: true },
+    { label: "a filled, stroked outline clips the fill and strokes the border along it", outline: trapezoid, clip: `clip-path:path(evenodd, &quot;${trapezoidPath}&quot;)`, strokePath: trapezoidPath, box: false },
+    { label: "an unfilled outline draws no fill at all", outline: { paths: trapezoid.paths.map((path) => ({ ...path, filled: false })) }, clip: null, strokePath: trapezoidPath, box: false },
+    { label: "an unstroked outline draws no border", outline: { paths: trapezoid.paths.map((path) => ({ ...path, stroked: false })) }, clip: `clip-path:path(evenodd, &quot;${trapezoidPath}&quot;)`, strokePath: null, box: false },
+  ];
+  for (const row of outlineRows) {
+    it(`custom outline: ${row.label}`, () => {
+      const markup = elementMarkup(
+        shapeElement({
+          id: ids.next("element"),
+          customOutline: row.outline,
+          box: { x: 100, y: 100, width: 240, height: 160 },
+          style: { fill: { kind: "solid", colour: ink }, border: { kind: "uniform", stroke: { width: 2, colour: ink, dash: "solid" } } },
+        }),
+      );
+      if (row.clip === null) assert.doesNotMatch(markup, /clip-path/, row.label);
+      else assert.ok(markup.includes(row.clip), `${row.label}: ${markup}`);
+      if (row.strokePath === null) assert.doesNotMatch(markup, /<path/, row.label);
+      else assert.ok(markup.includes(`<path d="${row.strokePath}" fill="none"`), `${row.label}: ${markup}`);
+      assert.equal(/border-top:2px solid/.test(markup), row.box, `${row.label}: drawn as a box`);
+    });
+  }
 
   const opacityRows: readonly Readonly<{ opacity: number; expected: RegExp | null }>[] = [
     { opacity: 0.85, expected: /opacity:0.85/ },

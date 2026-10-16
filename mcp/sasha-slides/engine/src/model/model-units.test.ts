@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import * as Y from "yjs";
-import type { CommandRejection, DocumentCommand, DocumentStore, ElementId, PeerPresence, SlideId, TextTarget } from "../contracts/index.ts";
+import type { CommandRejection, CustomOutline, DocumentCommand, DocumentStore, ElementId, ElementSnapshot, PeerPresence, SlideId, TextTarget } from "../contracts/index.ts";
 import { identityFrame } from "../contracts/index.ts";
 import { childMap, documentRoots, elementMapOf, slideMapOf, textOf } from "./document-paths.ts";
 import { derivedGroupFrame, flattenElements } from "./element-tree.ts";
@@ -259,6 +259,80 @@ describe("repairs on the repairing replica", () => {
     assert.equal(element?.kind === "unsupported" ? element.storedKind : "", "hologram");
     assert.deepEqual(element?.frame, identityFrame({ x: 1, y: 2, width: 3, height: 4 }));
     assert.deepEqual(store.validate().map((issue) => [issue.problem, issue.repair]), [["unsupportedValue", "none"]]);
+  });
+});
+
+describe("custom outlines (an optional stored key)", () => {
+  const trapezoid: CustomOutline = {
+    paths: [{ commands: [{ kind: "move", to: { x: 0, y: 0 } }, { kind: "line", to: { x: 1, y: 0 } }, { kind: "line", to: { x: 0.95, y: 1 } }, { kind: "line", to: { x: 0.05, y: 1 } }, { kind: "close" }], filled: true, stroked: true }],
+  };
+
+  function inserted(options: Readonly<{ customOutline?: CustomOutline }>): Readonly<{ store: DocumentStore; sharedDocument: Y.Doc; flush: () => void; slideId: SlideId; shapeId: ElementId }> {
+    const { store, sharedDocument, scheduler } = createTestStore({ seed: "blankDeck", repairPolicy: "repairAfterTransaction" });
+    const slideId = store.snapshot().slides[0]?.id ?? mint("slide");
+    const shapeId = mint("element");
+    applyOrThrow(store, envelope({ commands: [{ kind: "insertElements", slideId, placement: { kind: "front" }, elements: [shape({ id: shapeId, ...options })] }] }));
+    scheduler.flush();
+    return { store, sharedDocument, flush: () => scheduler.flush(), slideId, shapeId };
+  }
+
+  function shapeIn(store: DocumentStore, shapeId: ElementId): ElementSnapshot | undefined {
+    return flattenElements(store.snapshot().slides[0]?.elements ?? []).get(shapeId);
+  }
+
+  test("an outline is stored and projected; a preset shape stores no key and is not damaged", () => {
+    const withOutline = inserted({ customOutline: trapezoid });
+    const stored = elementMapOf(documentRoots(withOutline.sharedDocument), withOutline.slideId, withOutline.shapeId);
+    assert.deepEqual(stored?.get("customOutline"), trapezoid);
+    const projected = shapeIn(withOutline.store, withOutline.shapeId);
+    assert.deepEqual(projected?.kind === "shape" ? projected.customOutline : "not a shape", trapezoid);
+    assert.deepEqual(withOutline.store.validate(), []);
+
+    const control = inserted({});
+    assert.equal(elementMapOf(documentRoots(control.sharedDocument), control.slideId, control.shapeId)?.has("customOutline"), false);
+    const plain = shapeIn(control.store, control.shapeId);
+    assert.equal(plain?.kind === "shape" ? plain.customOutline : "not a shape", null);
+    assert.deepEqual(control.store.validate(), [], "absence is the default, not a missing key");
+  });
+
+  test("choosing a preset replaces the outline", () => {
+    const { store, sharedDocument, slideId, shapeId } = inserted({ customOutline: trapezoid });
+    applyOrThrow(store, envelope({ commands: [{ kind: "updateElements", slideId, elementIds: [shapeId], patch: { preset: "ellipse" } }] }));
+    const after = shapeIn(store, shapeId);
+    assert.deepEqual(after?.kind === "shape" ? [after.preset, after.customOutline] : "not a shape", ["ellipse", null]);
+    assert.equal(elementMapOf(documentRoots(sharedDocument), slideId, shapeId)?.has("customOutline"), false);
+  });
+
+  test("an insert with a damaged outline is refused; one from a client without the field is accepted", () => {
+    const { store, slideId } = inserted({});
+    const damaged = { ...shape({ id: mint("element") }), customOutline: { paths: [{ commands: [{ kind: "line" }], filled: true, stroked: true }] } };
+    // Deliberately malformed (a line with no end point): the point is what the command boundary does with it.
+    const refused = store.apply(envelope({ commands: [{ kind: "insertElements", slideId, placement: { kind: "front" }, elements: [damaged as unknown as ElementSnapshot] }] }));
+    assert.equal(refused.kind === "rejected" ? refused.rejection.reason : null, "invalidValue");
+    // An older client's insert has no customOutline field at all; the stored key then stays absent.
+    const older: Record<string, unknown> = { ...shape({ id: mint("element") }) };
+    delete older["customOutline"];
+    const accepted = store.apply(envelope({ commands: [{ kind: "insertElements", slideId, placement: { kind: "front" }, elements: [older as unknown as ElementSnapshot] }] }));
+    assert.equal(accepted.kind, "applied", JSON.stringify(accepted));
+  });
+
+  test("a damaged stored outline is repaired to none; an unknown command kind is a newer client's and is left alone", () => {
+    const damaged = inserted({ customOutline: trapezoid });
+    const roots = documentRoots(damaged.sharedDocument);
+    damaged.sharedDocument.transact(() => elementMapOf(roots, damaged.slideId, damaged.shapeId)?.set("customOutline", "trapezoid"));
+    assert.deepEqual(damaged.store.validate().map((issue) => [issue.problem, issue.repair]), [["wrongType", "writeDefault"]]);
+    damaged.flush();
+    assert.deepEqual(damaged.store.validate(), []);
+    assert.equal(elementMapOf(roots, damaged.slideId, damaged.shapeId)?.get("customOutline"), null);
+
+    const newer = inserted({ customOutline: trapezoid });
+    const newerRoots = documentRoots(newer.sharedDocument);
+    const arc = { paths: [{ commands: [{ kind: "move", to: { x: 0, y: 0 } }, { kind: "ellipticalArc", radius: 1 }], filled: true, stroked: true }] };
+    newer.sharedDocument.transact(() => elementMapOf(newerRoots, newer.slideId, newer.shapeId)?.set("customOutline", arc));
+    newer.flush();
+    assert.deepEqual(elementMapOf(newerRoots, newer.slideId, newer.shapeId)?.get("customOutline"), arc, "never overwritten");
+    const projected = shapeIn(newer.store, newer.shapeId);
+    assert.deepEqual(projected?.kind === "shape" ? [projected.customOutline, projected.unsupportedKeys] : "not a shape", [null, ["customOutline"]]);
   });
 });
 

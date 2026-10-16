@@ -14,6 +14,7 @@ import type {
   CommandAuthor,
   CommandEnvelope,
   CommandId,
+  CustomOutline,
   DocumentCommand,
   DocumentStore,
   ElementId,
@@ -162,7 +163,7 @@ export function box(options: Readonly<{ x: number; y: number; width: number; hei
   return identityFrame(options);
 }
 
-export function shape(options: Readonly<{ id: ElementId; frame?: Frame; text?: TextBody }>): ShapeElement {
+export function shape(options: Readonly<{ id: ElementId; frame?: Frame; text?: TextBody; customOutline?: CustomOutline }>): ShapeElement {
   return {
     id: options.id,
     kind: "shape",
@@ -174,6 +175,7 @@ export function shape(options: Readonly<{ id: ElementId; frame?: Frame; text?: T
     placeholder: null,
     unsupportedKeys: [],
     preset: "rectangle",
+    customOutline: options.customOutline ?? null,
     box: PLAIN_BOX_STYLE,
     textBox: DEFAULT_TEXT_BOX_STYLE,
     text: options.text ?? textBody(""),

@@ -101,7 +101,7 @@ describe("paragraph indents cross in both directions", () => {
 function planOf(raw: unknown): ImportPlan {
   const parsed = parsePresentation(raw);
   if (parsed.kind !== "ok") throw new Error(parsed.message);
-  return planImport({ presentation: parsed.presentation, images: new Map(), idSeed: { sessionPrefix: "Fidelity", counter: 0 } });
+  return planImport({ presentation: parsed.presentation, images: new Map(), idSeed: { sessionPrefix: "Fidelity", counter: 0 }, pptxSupplement: null });
 }
 
 function slideAt(options: Readonly<{ plan: ImportPlan; index: number }>): SlideSnapshot {

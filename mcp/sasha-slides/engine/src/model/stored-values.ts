@@ -21,6 +21,7 @@ import type { AnimationEffect, AnimationTrigger } from "../contracts/animations.
 import type {
   AssetRecord,
   CellBorders,
+  CustomOutline,
   ImageCrop,
   PlaceholderReference,
   ScriptPurpose,
@@ -129,6 +130,12 @@ export function checkColour(candidate: unknown): Verdict {
     literal: (record) => combine([HEXADECIMAL_PATTERN.test(String(record["hexadecimal"])) ? "valid" : "wrongType", checkUnit(record["alpha"])]),
     theme: (record) => combine([checkEnumeration(record["slot"], THEME_COLOUR_SLOTS), checkUnit(record["alpha"])]),
   });
+}
+
+/** A list marker's colour: "#rrggbb" or a theme slot name (style.ts `ListMarkerColour`). */
+export function checkListMarkerColour(candidate: unknown): Verdict {
+  if (typeof candidate !== "string") return "wrongType";
+  return candidate.startsWith("#") ? (HEXADECIMAL_PATTERN.test(candidate) ? "valid" : "wrongType") : checkEnumeration(candidate, THEME_COLOUR_SLOTS);
 }
 
 export function checkColourOrNone(candidate: unknown): Verdict {
@@ -251,6 +258,8 @@ export const PARAGRAPH_ATTRIBUTE_CHECKS: Readonly<Record<ParagraphAttributeName,
           checkString(record["listId"]),
           checkEnumeration(record["glyph"], LIST_GLYPHS),
           typeof record["level"] === "number" && Number.isInteger(record["level"]) && record["level"] >= 0 && record["level"] <= 8 ? "valid" : "wrongType",
+          record["markerColour"] === undefined ? "valid" : checkListMarkerColour(record["markerColour"]),
+          record["markerFontSize"] === undefined ? "valid" : checkPositive(record["markerFontSize"]),
         ]),
     }),
 };
@@ -317,6 +326,16 @@ export const OPACITY: StoredValueCheck<number> = { check: checkUnit, describe: "
 export const SHAPE_PRESET: StoredValueCheck<ShapePreset> = {
   check: (candidate) => checkEnumeration(candidate, SHAPE_PRESETS),
   describe: "a shape preset",
+};
+export const CUSTOM_OUTLINE: StoredValueCheck<CustomOutline | null> = {
+  check: (candidate) => {
+    if (candidate === null) return "valid";
+    if (!isRecord(candidate)) return "wrongType";
+    const paths = candidate["paths"];
+    if (!Array.isArray(paths)) return "wrongType";
+    return combine(paths.map((path: unknown) => checkOutlinePath(path)));
+  },
+  describe: "a custom outline or null",
 };
 export const TEXT_BOX_STYLE: StoredValueCheck<TextBoxStyle> = { check: checkTextBoxStyle, describe: "a text box style" };
 export const IMAGE_CROP: StoredValueCheck<ImageCrop> = {
@@ -520,6 +539,26 @@ function checkKind(candidate: unknown, cases: Readonly<Record<string, (record: R
 function checkStops(candidate: unknown): Verdict {
   if (!Array.isArray(candidate) || candidate.length === 0) return "wrongType";
   return combine(candidate.map((stop: unknown) => (isRecord(stop) ? combine([checkColour(stop["colour"]), checkUnit(stop["offset"])]) : "wrongType")));
+}
+
+/** One path of a custom outline: its drawing commands (an unknown command kind is a newer client's) and its two flags. */
+function checkOutlinePath(candidate: unknown): Verdict {
+  if (!isRecord(candidate)) return "wrongType";
+  const commands = candidate["commands"];
+  if (!Array.isArray(commands)) return "wrongType";
+  return combine([
+    checkBoolean(candidate["filled"]),
+    checkBoolean(candidate["stroked"]),
+    ...commands.map((command: unknown) =>
+      checkKind(command, {
+        move: (record) => checkPoint(record["to"]),
+        line: (record) => checkPoint(record["to"]),
+        quadratic: (record) => combine([checkPoint(record["control"]), checkPoint(record["to"])]),
+        cubic: (record) => combine([checkPoint(record["firstControl"]), checkPoint(record["secondControl"]), checkPoint(record["to"])]),
+        close: () => "valid",
+      }),
+    ),
+  ]);
 }
 
 function checkOptionalStroke(candidate: unknown): Verdict {

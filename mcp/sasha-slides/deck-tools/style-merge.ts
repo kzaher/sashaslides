@@ -68,7 +68,7 @@ export function applyElementPatch(options: Readonly<{ element: ElementSnapshot; 
   };
   switch (element.kind) {
     case "shape":
-      return { ...element, ...common, box: patchedBox({ box: element.box, patch }), textBox: patch.textBox ?? element.textBox, preset: patch.preset ?? element.preset };
+      return { ...element, ...common, box: patchedBox({ box: element.box, patch }), textBox: patch.textBox ?? element.textBox, preset: patch.preset ?? element.preset, customOutline: patch.preset === undefined ? element.customOutline : null };
     case "image":
       return { ...element, ...common, box: patchedBox({ box: element.box, patch }), crop: patch.crop ?? element.crop, assetId: patch.assetId ?? element.assetId };
     case "line":

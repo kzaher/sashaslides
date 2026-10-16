@@ -97,6 +97,7 @@ export function fixtureShape(element: FixtureElement): ElementSnapshot {
     placeholder: null,
     unsupportedKeys: [],
     preset: "rectangle",
+    customOutline: null,
     box: { ...PLAIN_BOX_STYLE, fill: element.fill === undefined ? { kind: "none" } : { kind: "solid", colour: literalColour({ hexadecimal: element.fill, alpha: 1 }) } },
     textBox: DEFAULT_TEXT_BOX_STYLE,
     text: textBodyOf(element.text ?? ""),

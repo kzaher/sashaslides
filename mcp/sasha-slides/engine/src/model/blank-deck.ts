@@ -179,6 +179,7 @@ function placeholderShape(options: Readonly<{ id: ElementId; placeholder: Placeh
     placeholder: reference,
     unsupportedKeys: [],
     preset: "textBox",
+    customOutline: null,
     box: PLAIN_BOX_STYLE,
     textBox: { ...DEFAULT_TEXT_BOX_STYLE, ...DEFAULT_PLACEHOLDER_STYLES[placeholder.role].textBox },
     text: EMPTY_TEXT_BODY,

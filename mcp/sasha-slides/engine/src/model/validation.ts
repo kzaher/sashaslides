@@ -42,6 +42,7 @@ import {
   BORDER,
   checkTextBoxStyle,
   CORNER_RADIUS,
+  CUSTOM_OUTLINE,
   FILL,
   FRAME,
   IMAGE_CROP,
@@ -200,6 +201,8 @@ const REPAIR_ORDER: Readonly<Record<RepairAction["kind"], number>> = {
 /** How one key of a container is checked and what its default is. */
 type KeySpec =
   | Readonly<{ kind: "value"; check: StoredValueCheck<unknown>; fallback: (id: string) => unknown }>
+  /** A key added after schema version 1: absent is its default and fine; a damaged value is repaired to `fallback`. */
+  | Readonly<{ kind: "optionalValue"; check: StoredValueCheck<unknown>; fallback: () => unknown }>
   | Readonly<{ kind: "text" }>
   | Readonly<{ kind: "array" }>
   | Readonly<{ kind: "map" }>
@@ -228,6 +231,7 @@ const ELEMENT_KEY_SPECS: Readonly<Record<ElementKey, KeySpec>> = {
   shadow: { kind: "value", check: SHADOW, fallback: () => null },
   opacity: { kind: "value", check: OPACITY, fallback: () => 1 },
   preset: { kind: "value", check: SHAPE_PRESET, fallback: () => "rectangle" },
+  customOutline: { kind: "optionalValue", check: CUSTOM_OUTLINE, fallback: () => null },
   textBox: { kind: "value", check: { check: checkTextBoxStyle, describe: "a text box style" }, fallback: () => DEFAULT_TEXT_BOX },
   text: { kind: "text" },
   assetId: { kind: "value", check: TEXT, fallback: () => "" },
@@ -527,6 +531,14 @@ function findKeyIssues(
         const parsed = present ? parseValue({ candidate: value, kind: spec.check }) : ({ kind: "missing" } as const);
         if (parsed.kind === "valid") break;
         const action: RepairAction = parsed.kind === "unsupported" ? NO_REPAIR : { kind: "writeDefault", map, key, value: () => spec.fallback(id) };
+        findings.push({ path: keyPath, problem: problemOf(parsed.kind), message: parsed.kind === "unsupported" ? `a value from a newer editor (expected ${spec.check.describe})` : `expected ${spec.check.describe}`, action });
+        break;
+      }
+      case "optionalValue": {
+        if (!present) break;
+        const parsed = parseValue({ candidate: value, kind: spec.check });
+        if (parsed.kind === "valid") break;
+        const action: RepairAction = parsed.kind === "unsupported" ? NO_REPAIR : { kind: "writeDefault", map, key, value: spec.fallback };
         findings.push({ path: keyPath, problem: problemOf(parsed.kind), message: parsed.kind === "unsupported" ? `a value from a newer editor (expected ${spec.check.describe})` : `expected ${spec.check.describe}`, action });
         break;
       }

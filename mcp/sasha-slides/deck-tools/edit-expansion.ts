@@ -595,6 +595,7 @@ function expandAddShape(options: Readonly<{ working: Working; edit: Extract<Assi
     placeholder: null,
     unsupportedKeys: [],
     preset: edit.preset,
+    customOutline: null,
     // A drawn shape is filled with the theme's first accent; a text box is not (element-factory.ts).
     box: isTextBox ? PLAIN_BOX_STYLE : { ...PLAIN_BOX_STYLE, fill: { kind: "solid", colour: themeColour({ slot: "accent1", alpha: 1 }) } },
     textBox: isTextBox ? NEW_TEXT_BOX_STYLE : DEFAULT_TEXT_BOX_STYLE,

@@ -160,6 +160,9 @@ function writeElement(
       map.set(ELEMENT_KEY.frame, element.frame);
       writeBoxStyle(map, element.box);
       map.set(ELEMENT_KEY.preset, element.preset);
+      // Optional key: a preset shape stores none, exactly like a deck written before freeforms. An
+      // insert from a client older than freeforms has no field at all (command-validation.ts).
+      if (element.customOutline !== null && element.customOutline !== undefined) map.set(ELEMENT_KEY.customOutline, element.customOutline);
       map.set(ELEMENT_KEY.textBox, element.textBox);
       setTextBody({ map, key: ELEMENT_KEY.text, body: element.text });
       return;

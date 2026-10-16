@@ -24,6 +24,7 @@ import type { InterchangeLoss } from "../engine/src/contracts/deck-api.ts";
 import type {
   AssetRecord,
   CellBorders,
+  CustomOutline,
   ElementSnapshot,
   GroupElement,
   LayoutSnapshot,
@@ -43,10 +44,13 @@ import type { ElementId, IdSeed, LayoutId, ListId, MintedIdByKind, SlideId, Tabl
 import { isObjectId, mintId } from "../engine/src/contracts/ids.ts";
 import type { ArrowHead, Border, Colour, DashStyle, Fill, LineRouting, Shadow, Stroke, TextAutofit, TextBoxStyle, VerticalAlignment } from "../engine/src/contracts/style.ts";
 import { colourOf, FALLBACK_SLOT_COLOURS, THEME_SLOT_BY_SLIDES_TYPE, type ColourContext } from "./import-colours.ts";
+import type { PptxElementSupplement, PptxGradient, PptxSupplement } from "./import-pptx-supplement.ts";
+import { roundedShapeOf, type ShapeAdjustments, type ShapeAdjustmentsByObjectId } from "./import-shape-geometry.ts";
 import { EMPTY_BODY, importTextBody, resolvedPlaceholderStyle, roundUnits, type TextContext } from "./import-text.ts";
 import { composeTransforms, frameForTransform, pageScaleFor, rotationOf, transformPoint, type PageScale } from "./interchange-geometry.ts";
 import { createLossCollector, type InterchangeLossSink } from "./interchange-losses.ts";
 import {
+  CUSTOM_SHAPE_TYPE,
   IDENTITY_TRANSFORM,
   type SlidesElementContent,
   type SlidesFill,
@@ -57,7 +61,9 @@ import {
   type SlidesPresentation,
   type SlidesShape,
   type SlidesSolidFill,
+  type SlidesCellMargins,
   type SlidesTableBorder,
+  type SlidesTableCell,
   type SlidesTransform,
 } from "./slides-presentation.ts";
 
@@ -78,8 +84,33 @@ export type ImportPlan = Readonly<{
   elementCount: number;
 }>;
 
+/**
+ * One shape's text insets in English Metric Units, as Google's own pptx export of the presentation
+ * states them (`<a:bodyPr lIns tIns rIns bIns>`). `presentations.get` reports no inset at all, so
+ * this is the only place the true value can come from. An edge left out was not stated for that
+ * element (a placeholder's bare `<a:bodyPr/>`): it inherits from the placeholder parent.
+ */
+export type TextInsetsEnglishMetricUnits = Readonly<{ left?: number; top?: number; right?: number; bottom?: number }>;
+
 export function planImport(
-  options: Readonly<{ presentation: SlidesPresentation; images: ReadonlyMap<string, ImportedImage>; idSeed: IdSeed }>,
+  options: Readonly<{
+    presentation: SlidesPresentation;
+    images: ReadonlyMap<string, ImportedImage>;
+    idSeed: IdSeed;
+    /** What the presentation's .pptx export adds (import-pptx-supplement.ts); null when it could not be read. */
+    pptxSupplement: PptxSupplement | null;
+    /**
+     * Text insets by Slides object id (masters' and layouts' placeholders included). Absent: taken
+     * from `pptxSupplement`; an edge no element of the chain states falls back to
+     * TEXT_INSET_ENGLISH_METRIC_UNITS.
+     */
+    textInsets?: ReadonlyMap<string, TextInsetsEnglishMetricUnits>;
+    /**
+     * Rounded-corner adjustments by Slides object id (`presetGeometryOf`); presentations.get never
+     * reports them. Absent: taken from `pptxSupplement`, and the preset defaults without one.
+     */
+    shapeAdjustments?: ShapeAdjustmentsByObjectId;
+  }>,
 ): ImportPlan {
   const { presentation } = options;
   const collector = createLossCollector();
@@ -114,6 +145,9 @@ export function planImport(
     },
     losses,
   });
+  const textInsets = options.textInsets ?? supplementMap(options.pptxSupplement, (element) => element.textInsets);
+  const shapeAdjustments = options.shapeAdjustments ?? supplementMap(options.pptxSupplement, (element) => element.shapeAdjustments);
+  const customOutlines = supplementMap(options.pptxSupplement, (element) => element.customOutline);
   const elementContext = (pageIndex: number | null, losses: InterchangeLossSink, onLayout: boolean): ElementContext => ({
     scale,
     colours,
@@ -123,6 +157,10 @@ export function planImport(
     text: textContextFor(pageIndex, losses),
     placeholderParents,
     onLayout,
+    pptxSupplement: options.pptxSupplement,
+    textInsets,
+    shapeAdjustments,
+    customOutlines,
   });
 
   if (scale.pageHeight !== 720) {
@@ -249,6 +287,10 @@ export const PRESET_BY_SHAPE_TYPE: ReadonlyMap<string, ShapePreset> = new Map<st
   ["TEXT_BOX", "textBox"],
   ["RECTANGLE", "rectangle"],
   ["ROUND_RECTANGLE", "roundedRectangle"],
+  // The one- and two-corner presets are rounded rectangles with per-corner radii (import-shape-geometry.ts).
+  ["ROUND_1_RECTANGLE", "roundedRectangle"],
+  ["ROUND_2_SAME_RECTANGLE", "roundedRectangle"],
+  ["ROUND_2_DIAGONAL_RECTANGLE", "roundedRectangle"],
   ["ELLIPSE", "ellipse"],
   ["TRIANGLE", "triangle"],
   ["RIGHT_TRIANGLE", "rightTriangle"],
@@ -311,10 +353,12 @@ const ROUTING_BY_CATEGORY: ReadonlyMap<string, LineRouting> = new Map<string, Li
   ["CURVED", "curved"],
 ]);
 
-/** Slides' default text inset, 9 pixels of a 1280 page on every side (converter/geometry.ts, measured). */
+/**
+ * Slides' default text inset, 9 pixels of a 1280 page on every side (converter/geometry.ts, measured
+ * on boxes the Slides API created). Only the FALLBACK: the inset a shape actually has comes from the
+ * pptx export when the caller passes it (`textInsets`; see textInsetsOf).
+ */
 const TEXT_INSET_ENGLISH_METRIC_UNITS = 85_725;
-/** Slides' ROUND_RECTANGLE corner: one sixth of the shorter side (its default adjustment). */
-const ROUND_RECTANGLE_RADIUS_SHARE = 0.16667;
 /** A shape is never thinner than this (geometry.ts MINIMUM_FRAME_SIZE); a line may be. */
 const MINIMUM_FRAME_SIZE = 1;
 
@@ -352,7 +396,29 @@ type ElementContext = Readonly<{
   onLayout: boolean;
   /** Copies of master and layout decorations onto a slide: every id is minted fresh. */
   copying?: boolean;
+  /** Values only the .pptx export carries (gradient stops), by Slides object id; null without an export. */
+  pptxSupplement: PptxSupplement | null;
+  /** Text insets the pptx export states, by Slides object id (planImport's `textInsets`). */
+  textInsets: ReadonlyMap<string, TextInsetsEnglishMetricUnits>;
+  /** Rounded-corner adjustments by Slides object id (planImport's `shapeAdjustments`). */
+  shapeAdjustments: ShapeAdjustmentsByObjectId;
+  /** Custom shapes' outlines the pptx export carries, by Slides object id; empty without an export. */
+  customOutlines: ReadonlyMap<string, CustomOutline>;
 }>;
+
+/** One field of every element the pptx export supplements, by Slides object id; empty without an export. */
+function supplementMap<Value>(
+  supplement: PptxSupplement | null,
+  pick: (element: PptxElementSupplement) => Value | null,
+): ReadonlyMap<string, Value> {
+  const values = new Map<string, Value>();
+  if (supplement === null) return values;
+  for (const [objectId, element] of supplement.elements) {
+    const value = pick(element);
+    if (value !== null) values.set(objectId, value);
+  }
+  return values;
+}
 
 /**
  * Keeps a Slides id when it is a valid, unused object id and mints one otherwise (see the header).
@@ -433,6 +499,11 @@ function importTheme(
     text: options.text,
     placeholderParents: new Map(),
     onLayout: true,
+    // A page background never reads the export: only shape fills arrive as an undescribed `{}`.
+    pptxSupplement: null,
+    textInsets: new Map(),
+    shapeAdjustments: new Map(),
+    customOutlines: new Map(),
   };
   const background = master === undefined ? null : backgroundFill({ background: master.background, context: backgroundContext });
   return {
@@ -600,7 +671,7 @@ function importElement(
   const content: SlidesElementContent = element.content;
   switch (content.kind) {
     case "shape":
-      return [importShape({ shape: content, common, context, losses })];
+      return [importShape({ shape: content, objectId: element.objectId, common, context, losses })];
     case "image": {
       const placeholder = placeholderReferenceOf({ placeholder: content.placeholder, losses });
       return [
@@ -633,7 +704,7 @@ function importElement(
     case "line":
       return [importLine({ line: content, element, transform, common, context, losses })];
     case "table":
-      return [importTable({ table: content, common, context, losses })];
+      return [importTable({ table: content, objectId: element.objectId, common, context, losses })];
     case "group":
       return importGroup({ group: content, transform, common, context, losses });
     case "video":
@@ -669,19 +740,21 @@ type Common = Readonly<{
   unsupportedKeys: readonly string[];
 }>;
 
-function importShape(options: Readonly<{ shape: SlidesShape; common: Common; context: ElementContext; losses: InterchangeLossSink }>): ShapeElement {
+function importShape(options: Readonly<{ shape: SlidesShape; objectId: string; common: Common; context: ElementContext; losses: InterchangeLossSink }>): ShapeElement {
   const { shape, common, context, losses } = options;
-  const known = PRESET_BY_SHAPE_TYPE.get(shape.shapeType);
-  if (known === undefined) losses.add({ feature: "shapePreset", detail: `The ${shape.shapeType} shape became a rectangle; the engine has no such preset yet.` });
-  const preset = known ?? "rectangle";
+  const adjustments: ShapeAdjustments | null = context.shapeAdjustments.get(options.objectId) ?? null;
+  const rounded = roundedShapeOf({ shapeType: shape.shapeType, width: common.frame.width, height: common.frame.height, adjustments });
+  // A custom shape is drawn by its export outline; its preset stays the rectangle older clients and the Slides export fall back to.
+  const customOutline = shape.shapeType === CUSTOM_SHAPE_TYPE ? (context.customOutlines.get(options.objectId) ?? null) : null;
+  const preset = rounded?.preset ?? (customOutline === null ? presetOf({ shapeType: shape.shapeType, losses }) : "rectangle");
   const chain = shapeChain({ shape, context });
-  const fill = fillOf({ fill: firstDecided(chain.map((link) => link.fill)), context });
+  const fill = shapeFillOf({ chain, objectIds: shapeChainObjectIds({ shape, objectId: options.objectId, length: chain.length, context }), context, losses });
   const border = borderOf({ outline: firstDecidedOutline(chain.map((link) => link.outline)), context });
   const shadow = shadowOf({ shape: chain.find((link) => link.shadow !== null && link.shadow.state !== "inherit") ?? shape, context, losses });
   const contentAlignment = chain.map((link) => link.contentAlignment).find((value) => value !== null) ?? "TOP";
   const autofitType = chain.map((link) => link.autofitType).find((value) => value !== null) ?? null;
   const placeholder = placeholderReferenceOf({ placeholder: shape.placeholder, losses });
-  const inset = TEXT_INSET_ENGLISH_METRIC_UNITS * context.scale.unitsPerEnglishMetricUnit;
+  const inset = textInsetsOf({ objectId: options.objectId, shape, context });
   const text: TextBody =
     context.onLayout && shape.placeholder !== null
       ? EMPTY_BODY
@@ -691,24 +764,67 @@ function importShape(options: Readonly<{ shape: SlidesShape; common: Common; con
     placeholder,
     kind: "shape",
     preset,
+    customOutline,
     box: {
       fill,
       border,
-      cornerRadius: { kind: "uniform", radius: shape.shapeType === "ROUND_RECTANGLE" ? roundUnits(Math.min(common.frame.width, common.frame.height) * ROUND_RECTANGLE_RADIUS_SHARE) : 0 },
+      cornerRadius: rounded?.cornerRadius ?? { kind: "uniform", radius: 0 },
       shadow,
       opacity: 1,
     },
     textBox: {
       verticalAlignment: verticalAlignmentOf(contentAlignment),
-      paddingTop: roundUnits(inset),
-      paddingRight: roundUnits(inset),
-      paddingBottom: roundUnits(inset),
-      paddingLeft: roundUnits(inset),
+      paddingTop: inset.top,
+      paddingRight: inset.right,
+      paddingBottom: inset.bottom,
+      paddingLeft: inset.left,
       autofit: autofitOf({ autofitType, shapeType: shape.shapeType }),
       wrap: true,
     },
     text,
   };
+}
+
+/** The engine preset of a Slides shape type; a rectangle and a reported loss when the engine has none. */
+function presetOf(options: Readonly<{ shapeType: string; losses: InterchangeLossSink }>): ShapePreset {
+  const known = PRESET_BY_SHAPE_TYPE.get(options.shapeType);
+  if (known !== undefined) return known;
+  if (options.shapeType === CUSTOM_SHAPE_TYPE) {
+    options.losses.add({ feature: "customShape", detail: "The custom outline (a freeform, or a PowerPoint custom shape) became a rectangle: the .pptx export that carries its path was not read, or the path uses values this importer cannot read." });
+  } else {
+    options.losses.add({ feature: "shapePreset", detail: `The ${options.shapeType} shape became a rectangle; the engine has no such preset yet.` });
+  }
+  return "rectangle";
+}
+
+type TextInsetUnits = Readonly<{ left: number; top: number; right: number; bottom: number }>;
+
+/**
+ * A shape's four text insets in engine units. Each edge is the first one the pptx export states
+ * along the placeholder chain (the shape, its layout placeholder, the master's), exactly how
+ * PowerPoint and Slides resolve a bare `<a:bodyPr/>`; an edge nobody states is Slides' measured
+ * default. Why not the default everywhere: a box uploaded from a pptx keeps that file's insets (the
+ * html2slides converter writes 0 on 1051 of its 1052 text shapes), and the 9-unit default inset of
+ * a 1280 page then pushed text right and down and wrapped narrow boxes mid-word ("41%" -> "41/%").
+ */
+function textInsetsOf(options: Readonly<{ objectId: string; shape: SlidesShape; context: ElementContext }>): TextInsetUnits {
+  const { context } = options;
+  const chain: TextInsetsEnglishMetricUnits[] = [];
+  const own = context.textInsets.get(options.objectId);
+  if (own !== undefined) chain.push(own);
+  const visited = new Set<string>();
+  let parentId = options.shape.placeholder?.parentObjectId ?? null;
+  while (parentId !== null && !visited.has(parentId)) {
+    visited.add(parentId);
+    const stated = context.textInsets.get(parentId);
+    if (stated !== undefined) chain.push(stated);
+    parentId = context.placeholderParents.get(parentId)?.placeholder?.parentObjectId ?? null;
+  }
+  const edge = (pick: (insets: TextInsetsEnglishMetricUnits) => number | undefined): number => {
+    const stated = chain.map(pick).find((value) => value !== undefined && Number.isFinite(value) && value >= 0);
+    return roundUnits((stated ?? TEXT_INSET_ENGLISH_METRIC_UNITS) * context.scale.unitsPerEnglishMetricUnit);
+  };
+  return { left: edge((insets) => insets.left), top: edge((insets) => insets.top), right: edge((insets) => insets.right), bottom: edge((insets) => insets.bottom) };
 }
 
 /** The shape, then its layout placeholder, then the master's: where an INHERIT property comes from. */
@@ -726,8 +842,61 @@ function shapeChain(options: Readonly<{ shape: SlidesShape; context: ElementCont
   return chain;
 }
 
-function firstDecided(fills: readonly SlidesFill[]): SlidesFill {
-  return fills.find((fill) => fill.state !== "inherit") ?? { state: "notRendered", solid: null };
+/** The Slides object id of each link of `shapeChain`'s chain, in the same order (the same walk). */
+function shapeChainObjectIds(options: Readonly<{ shape: SlidesShape; objectId: string; length: number; context: ElementContext }>): readonly string[] {
+  const objectIds: string[] = [options.objectId];
+  let parentId = options.shape.placeholder?.parentObjectId ?? null;
+  while (parentId !== null && objectIds.length < options.length) {
+    objectIds.push(parentId);
+    parentId = options.context.placeholderParents.get(parentId)?.placeholder?.parentObjectId ?? null;
+  }
+  return objectIds;
+}
+
+/**
+ * A shape's fill from the first link of its chain that decides it. A RENDERED fill with no solid
+ * colour is one the Slides interface does not describe (a gradient arrives as `{}`): its stops come
+ * from the .pptx export when that link was matched there, and otherwise the shape is drawn without
+ * a fill and the loss is reported, never silently.
+ */
+function shapeFillOf(
+  options: Readonly<{ chain: readonly SlidesShape[]; objectIds: readonly string[]; context: ElementContext; losses: InterchangeLossSink }>,
+): Fill {
+  const { context } = options;
+  const decidingIndex = options.chain.findIndex((link) => link.fill.state !== "inherit");
+  const deciding = options.chain[decidingIndex];
+  if (deciding === undefined) return { kind: "none" };
+  if (deciding.fill.state !== "rendered" || deciding.fill.solid !== null) return fillOf({ fill: deciding.fill, context });
+  const objectId = options.objectIds[decidingIndex];
+  const gradient = objectId === undefined ? null : (context.pptxSupplement?.elements.get(objectId)?.gradient ?? null);
+  if (gradient !== null) return gradientFillOf({ gradient, context });
+  options.losses.add({ feature: "gradientFill", detail: unreadableGradientDetail({ supplement: context.pptxSupplement, objectId }) });
+  return { kind: "none" };
+}
+
+function unreadableGradientDetail(options: Readonly<{ supplement: PptxSupplement | null; objectId: string | undefined }>): string {
+  const lead = "The shape's fill is a gradient, which the Slides interface does not describe";
+  if (options.supplement === null) return `${lead}, and the presentation's .pptx export could not be read; the shape was imported with no fill.`;
+  if (options.objectId !== undefined && options.supplement.elements.has(options.objectId)) {
+    return `${lead}, and its .pptx export describes that fill in a form this importer does not read; the shape was imported with no fill.`;
+  }
+  return `${lead}, and the shape could not be matched to the presentation's .pptx export; it was imported with no fill.`;
+}
+
+/** Office's gradient angle (0 runs left to right, clockwise) is the stylesheet's (0 runs upwards) minus 90. */
+const STYLESHEET_ANGLE_OFFSET_DEGREES = 90;
+
+function gradientFillOf(options: Readonly<{ gradient: PptxGradient; context: ElementContext }>): Fill {
+  const { gradient, context } = options;
+  const stops = gradient.stops.map((stop) => ({ offset: stop.offset, colour: colourOfFill({ fill: stop.fill, context }) }));
+  switch (gradient.kind) {
+    case "linear":
+      return { kind: "linearGradient", angle: roundUnits((((gradient.angleDegrees + STYLESHEET_ANGLE_OFFSET_DEGREES) % 360) + 360) % 360), stops };
+    case "radial":
+      return { kind: "radialGradient", centreX: gradient.centreX, centreY: gradient.centreY, stops };
+    default:
+      return assertNever(gradient);
+  }
 }
 
 function firstDecidedOutline(outlines: readonly SlidesOutline[]): SlidesOutline {
@@ -853,6 +1022,7 @@ function stubShape(options: Readonly<{ common: Common; text: TextBody; fill: Fil
     ...options.common,
     kind: "shape",
     preset: "rectangle",
+    customOutline: null,
     box: { fill: options.fill, border: options.border ?? { kind: "none" }, cornerRadius: { kind: "uniform", radius: 0 }, shadow: null, opacity: 1 },
     textBox: { verticalAlignment: "top", paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, autofit: "none", wrap: true },
     text: options.text,
@@ -901,11 +1071,79 @@ function importLine(
   };
 }
 
+/**
+ * CELL MARGINS. `presentations.get` does not return a cell's margins, and a wrong guess is not
+ * cosmetic: the engine's row is the text plus the margins, so a margin larger than Google's grows
+ * every row past the height Google stored and pushes the whole table, and everything laid out
+ * against its rows, downwards (measured on the reverse round trip: a fixed 12 unit margin grew a
+ * 9 row table from 268 to 344 pixels; Google's real margins there were 6 by 20).
+ *
+ * So the margins come from, in order: the cell's own `marginsEnglishMetricUnits` when a reader of
+ * the pptx export supplied them (exact); otherwise the left and right margins are the pptx default
+ * (ECMA-376 `marL`/`marR`, 0.1 inch), and the top and bottom ones are INFERRED from the rows.
+ * Google stores a row that fits its text as the text plus both margins, so each row bounds the
+ * margin from above: (stored height - the text's line boxes) / 2. The text's height counted here
+ * is one line per paragraph, a lower bound (a wrapped paragraph is taller), so every row's bound
+ * is at least the real margin, and the table's SMALLEST bound is the closest. It is capped at the
+ * ECMA-376 `marT`/`marB` default: a row someone dragged taller says nothing about its margins.
+ */
+const DEFAULT_HORIZONTAL_CELL_MARGIN_ENGLISH_METRIC_UNITS = 91_440;
+const DEFAULT_VERTICAL_CELL_MARGIN_ENGLISH_METRIC_UNITS = 45_720;
+/** The engine draws a line at font size x line spacing x 1.2 (render/inline-styles.ts); Google's line box is 1.197 (measured). */
+const LINE_BOX_PER_LINE_SPACING = 1.2;
+
+/** One cell's text height counting one line per paragraph, or null when a paragraph has no known font size. */
+function minimumTextHeightOf(body: TextBody): number | null {
+  let height = 0;
+  for (const paragraph of body.paragraphs) {
+    let fontSize = 0;
+    for (const run of paragraph.runs) fontSize = Math.max(fontSize, run.style.fontSize ?? 0);
+    if (fontSize <= 0) return null;
+    const style = paragraph.style;
+    height += (style.spaceAbove ?? 0) + (style.spaceBelow ?? 0) + fontSize * (style.lineSpacing ?? 1) * LINE_BOX_PER_LINE_SPACING;
+  }
+  return height;
+}
+
+/** The table's top and bottom margin in engine units, inferred from its stored row heights (see above). */
+function inferredVerticalCellMargin(
+  options: Readonly<{ rowHeights: readonly number[]; cells: readonly Readonly<{ source: SlidesTableCell; text: TextBody }>[]; unitsPerEnglishMetricUnit: number }>,
+): number {
+  const ceiling = DEFAULT_VERTICAL_CELL_MARGIN_ENGLISH_METRIC_UNITS * options.unitsPerEnglishMetricUnit;
+  let margin = ceiling;
+  for (const cell of options.cells) {
+    if (cell.source.rowSpan !== 1) continue;
+    const rowHeight = options.rowHeights[cell.source.rowIndex];
+    const textHeight = minimumTextHeightOf(cell.text);
+    if (rowHeight === undefined || textHeight === null) continue;
+    margin = Math.min(margin, (rowHeight - textHeight) / 2);
+  }
+  return roundUnits(Math.max(0, margin));
+}
+
+function cellPaddingOf(
+  options: Readonly<{ margins: SlidesCellMargins | null; inferredVertical: number; unitsPerEnglishMetricUnit: number }>,
+): Pick<TextBoxStyle, "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft"> {
+  const units = (englishMetricUnits: number): number => roundUnits(Math.max(0, englishMetricUnits) * options.unitsPerEnglishMetricUnit);
+  if (options.margins !== null) {
+    return { paddingTop: units(options.margins.top), paddingRight: units(options.margins.right), paddingBottom: units(options.margins.bottom), paddingLeft: units(options.margins.left) };
+  }
+  const horizontal = units(DEFAULT_HORIZONTAL_CELL_MARGIN_ENGLISH_METRIC_UNITS);
+  return { paddingTop: options.inferredVertical, paddingRight: horizontal, paddingBottom: options.inferredVertical, paddingLeft: horizontal };
+}
+
 function importTable(
-  options: Readonly<{ table: Extract<SlidesElementContent, { kind: "table" }>; common: Common; context: ElementContext; losses: InterchangeLossSink }>,
+  options: Readonly<{ table: Extract<SlidesElementContent, { kind: "table" }>; objectId: string; common: Common; context: ElementContext; losses: InterchangeLossSink }>,
 ): TableElement {
   const { table, context, losses } = options;
   const unitsPerEnglishMetricUnit = context.scale.unitsPerEnglishMetricUnit;
+  // The export lists one `<a:tc>` per grid position, merged ones included, so row-major order matches
+  // the API's (rowIndex, columnIndex); a count that disagrees means the two do not describe one grid.
+  const exportedMargins = context.pptxSupplement?.elements.get(options.objectId)?.cellMargins ?? [];
+  const columnCount = table.columnWidthsEnglishMetricUnits.length;
+  const exportMatchesGrid = exportedMargins.length === columnCount * table.rowHeightsEnglishMetricUnits.length;
+  const marginsOf = (cell: SlidesTableCell): SlidesCellMargins | null =>
+    cell.marginsEnglishMetricUnits ?? (exportMatchesGrid ? (exportedMargins[cell.rowIndex * columnCount + cell.columnIndex] ?? null) : null);
   const rows = table.rowHeightsEnglishMetricUnits.map((height) => ({ id: context.ids.row(), minimumHeight: Math.max(1, roundUnits(height * unitsPerEnglishMetricUnit)) }));
   const columns = table.columnWidthsEnglishMetricUnits.map((width) => ({ id: context.ids.column(), width: Math.max(1, roundUnits(width * unitsPerEnglishMetricUnit)) }));
   const covered = new Set<string>();
@@ -916,17 +1154,27 @@ function importTable(
       }
     }
   }
+  // A border Google stores fully transparent draws nothing there, so the engine holds no line: a
+  // transparent CSS border on a collapsed table still opens a gap between the cells' fills, which
+  // shows whatever is behind the table as a faint grid (measured on the reverse round trip).
   const strokeOf = (border: SlidesTableBorder | null | undefined): Stroke | null => {
-    if (border === null || border === undefined || border.solid === null || border.weightEnglishMetricUnits <= 0) return null;
+    if (border === null || border === undefined || border.solid === null || border.solid.alpha <= 0 || border.weightEnglishMetricUnits <= 0) return null;
     return {
       width: roundUnits(border.weightEnglishMetricUnits * unitsPerEnglishMetricUnit),
       colour: colourOfFill({ fill: border.solid, context }),
       dash: DASH_BY_SLIDES_STYLE.get(border.dashStyle) ?? "solid",
     };
   };
+  const texts = table.cells
+    .filter((cell) => !covered.has(`${cell.rowIndex}:${cell.columnIndex}`) && rows[cell.rowIndex] !== undefined && columns[cell.columnIndex] !== undefined)
+    .map((cell) => ({ source: cell, text: importTextBody({ text: cell.text, placeholderParentId: null, context: { ...context.text, losses } }) }));
+  const inferredVertical = inferredVerticalCellMargin({
+    rowHeights: table.rowHeightsEnglishMetricUnits.map((height) => height * unitsPerEnglishMetricUnit),
+    cells: texts,
+    unitsPerEnglishMetricUnit,
+  });
   const cells: TableCell[] = [];
-  for (const cell of table.cells) {
-    if (covered.has(`${cell.rowIndex}:${cell.columnIndex}`)) continue;
+  for (const { source: cell, text } of texts) {
     const row = rows[cell.rowIndex];
     const column = columns[cell.columnIndex];
     if (row === undefined || column === undefined) continue;
@@ -944,8 +1192,13 @@ function importTable(
       columnSpan: cell.columnSpan,
       fill: fillOf({ fill: cell.fill, context }),
       borders,
-      textBox: { verticalAlignment: verticalAlignmentOf(cell.contentAlignment ?? "TOP"), paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, autofit: "none", wrap: true },
-      text: importTextBody({ text: cell.text, placeholderParentId: null, context: { ...context.text, losses } }),
+      textBox: {
+        verticalAlignment: verticalAlignmentOf(cell.contentAlignment ?? "TOP"),
+        ...cellPaddingOf({ margins: marginsOf(cell), inferredVertical, unitsPerEnglishMetricUnit }),
+        autofit: "none",
+        wrap: true,
+      },
+      text,
     });
   }
   return { ...options.common, kind: "table", columns, rows, cells, opacity: 1 };

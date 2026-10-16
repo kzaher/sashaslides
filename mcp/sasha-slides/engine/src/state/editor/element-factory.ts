@@ -58,6 +58,7 @@ export function createShape(options: Readonly<{ id: ElementId; preset: ShapePres
     placeholder: null,
     unsupportedKeys: [],
     preset: options.preset,
+    customOutline: null,
     box: isTextBox ? PLAIN_BOX_STYLE : { ...PLAIN_BOX_STYLE, fill: { kind: "solid", colour: themeColour({ slot: "accent1", alpha: 1 }) } },
     textBox: isTextBox ? NEW_TEXT_BOX_STYLE : DEFAULT_TEXT_BOX_STYLE,
     text: options.text,

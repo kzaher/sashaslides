@@ -185,10 +185,34 @@ export type ListGlyph =
   | "lowerRoman";
 
 /**
+ * A list marker's own colour: a literal "#rrggbb" or a theme slot name (a slot never starts with
+ * "#"). A string and not a `Colour`, because a `Colour` is an object and the membership must stay
+ * one FLAT attribute value (see the header on Yjs equality). Read it with `listMarkerColour`.
+ */
+export type ListMarkerColour = HexadecimalColour | ThemeColourSlot;
+
+/**
  * A paragraph's list membership. Paragraphs sharing a `listId` number together; `level` is the
  * nesting depth 0..8 (Tab / Shift+Tab). Flat on purpose (see the header on Yjs equality).
+ *
+ * `markerColour` and `markerFontSize` (slide units) style the marker apart from the text, as
+ * Slides' `bulletStyle` does (a blue dot before grey text). Absent, the marker
+ * takes the paragraph's first run's style, which is what a list made in the engine always does.
  */
-export type ListMembership = Readonly<{ kind: "list"; listId: ListId; glyph: ListGlyph; level: number }>;
+export type ListMembership = Readonly<{
+  kind: "list";
+  listId: ListId;
+  glyph: ListGlyph;
+  level: number;
+  markerColour?: ListMarkerColour;
+  markerFontSize?: number;
+}>;
+
+/** A stored marker colour as a `Colour` (opaque: Slides' bullet colours carry no alpha). */
+export function listMarkerColour(value: ListMarkerColour): Colour {
+  const slot = THEME_COLOUR_SLOTS.find((candidate) => candidate === value);
+  return slot === undefined ? { kind: "literal", hexadecimal: value, alpha: 1 } : { kind: "theme", slot, alpha: 1 };
+}
 
 /** Not a list paragraph, stored as a value so it can override a placeholder's list style. */
 export type NoList = Readonly<{ kind: "none" }>;

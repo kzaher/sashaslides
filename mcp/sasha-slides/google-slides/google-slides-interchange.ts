@@ -152,6 +152,8 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
       const code = googleFailureCodeOf(read.status);
       return answerError({ response, status: statusOfGoogleFailure(code), error: code, message: read.message, ...(code === "googleNotConnected" ? { connectAddress } : {}) });
     }
+    // Started before the deck is created so the two overlap; it never rejects (a failure is a value).
+    const exporting = slides.exportPresentationPptx({ presentationId });
     const created = await deckService.createDeck({ caller, title: stringFieldOf(read.body, "title") ?? "Imported presentation" });
     switch (created.kind) {
       case "opened":
@@ -167,7 +169,17 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
         return assertNever(created);
     }
     await using deck = created.deck;
-    const imported = await importIntoDeck({ presentationAnswer: read.body, deck, author: authorOf(caller), fetch: options.fetch, accessToken: token.accessToken, idSeed: idSeedFrom(options.randomToken()), now });
+    const exported = await exporting;
+    const imported = await importIntoDeck({
+      presentationAnswer: read.body,
+      deck,
+      author: authorOf(caller),
+      fetch: options.fetch,
+      accessToken: token.accessToken,
+      pptxExport: exported.kind === "exported" ? exported.bytes : null,
+      idSeed: idSeedFrom(options.randomToken()),
+      now,
+    });
     if (imported.kind !== "imported") return answerImportFailure({ response, outcome: imported });
     const answer: GoogleSlidesImportBody = { deck: deck.summary(), report: imported.report };
     answerWithBody({ response, status: 201, body: answer });
@@ -291,7 +303,8 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
     if (opened.kind !== "opened") return answerError({ response, status: opened.kind === "limitReached" ? 409 : 403, error: opened.kind === "limitReached" ? "limitReached" : "notPermitted", message: "The deck could not be opened for the import." });
     await using deck = opened.deck;
-    const imported = await importIntoDeck({ presentationAnswer: presentation, deck, author: authorOf(caller), fetch: options.fetch, accessToken: null, idSeed: idSeedFrom(options.randomToken()), now });
+    // Code.gs posts only the presentations.get answer, so gradient fills are reported as lost here.
+    const imported = await importIntoDeck({ presentationAnswer: presentation, deck, author: authorOf(caller), fetch: options.fetch, accessToken: null, pptxExport: null, idSeed: idSeedFrom(options.randomToken()), now });
     if (imported.kind !== "imported") return answerImportFailure({ response, outcome: imported });
     await deck.bindAddon({ bindingSecretHash: ticket.bindingSecretHash, presentationId: ticket.presentationId });
     const answer: AddonImportBody = { deckId: deck.deckId, ticket: await options.embedTickets.issue({ accountId: caller.accountId, deckId: deck.deckId }), report: imported.report };

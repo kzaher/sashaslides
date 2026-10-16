@@ -9,7 +9,9 @@
 //    run, nothing loads) and reduced to the engine's run and paragraph styles; nothing of it is ever
 //    put into the page.
 //  * FONTS LOAD ONCE PER FAMILY, by a `<link>` to Google Fonts' stylesheet, regular and bold, upright
-//    and italic. System and generic families are never requested.
+//    and italic. System and generic families are never requested, but the metric-compatible web
+//    stand-in of one the platform may lack is, and gets the original's vertical metrics once its
+//    stylesheet has loaded (Georgia -> Gelasio, view/render/font-families.ts).
 
 import type { AssetMediaType, DocumentSnapshot, Paragraph, TextRun } from "../../contracts/document.ts";
 import type { ChosenImageFile } from "../../contracts/editor-events.ts";
@@ -17,6 +19,7 @@ import type { BrowserCapabilities } from "../../contracts/editor-system.ts";
 import { slideUnitsFromPoints } from "../../contracts/geometry.ts";
 import { literalColour, type RunStylePatch } from "../../contracts/style.ts";
 import { assertNever } from "../../contracts/assert-never.ts";
+import { applyFontMetricOverrides, fontMetricOverridesFor, fontStandInOf } from "../render/font-families.ts";
 
 /** The real browser operations (contracts/editor-system.ts `BrowserCapabilities`). */
 export function pageBrowserCapabilities(page: Window): BrowserCapabilities {
@@ -90,14 +93,23 @@ export async function readImageFile(file: File): Promise<ChosenImageFile | null>
 
 /** Loads the deck's font families from Google Fonts, once each (see the header). */
 export function loadDeckFonts(options: Readonly<{ page: Document; document: DocumentSnapshot; loaded: Set<string> }>): void {
-  for (const family of deckFontFamilies(options.document)) {
-    if (options.loaded.has(family) || SYSTEM_FAMILIES.has(family.toLowerCase())) continue;
+  const named = deckFontFamilies(options.document);
+  const overrides = fontMetricOverridesFor(named);
+  const standIns = new Set([...named].map(fontStandInOf).filter((family): family is string => family !== null));
+  for (const family of [...named, ...standIns]) {
+    if (options.loaded.has(family) || isSystemFontFamily(family)) continue;
     options.loaded.add(family);
     const link = options.page.createElement("link");
+    if (standIns.has(family)) link.addEventListener("load", () => applyFontMetricOverrides(options.page.fonts, overrides));
     link.rel = "stylesheet";
     link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, "+")}:ital,wght@0,400;0,700;1,400;1,700&display=swap`;
     options.page.head.appendChild(link);
   }
+}
+
+/** Whether a family is a system or generic one, which is never requested from Google Fonts. */
+export function isSystemFontFamily(family: string): boolean {
+  return SYSTEM_FAMILIES.has(family.toLowerCase());
 }
 
 /** Every family the deck's theme and text name. */

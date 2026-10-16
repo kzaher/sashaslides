@@ -156,6 +156,7 @@ describe("deck storage", () => {
             placeholder: null,
             unsupportedKeys: [],
             preset: "rectangle",
+            customOutline: null,
             box: PLAIN_BOX_STYLE,
             textBox: DEFAULT_TEXT_BOX_STYLE,
             text: { paragraphs: [{ style: {}, runs: [{ kind: "text", text: SLIDE_TEXT, style: {} }] }] },

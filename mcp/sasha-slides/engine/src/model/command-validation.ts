@@ -44,6 +44,7 @@ import {
   checkTextBoxField,
   checkTextBoxStyle,
   CORNER_RADIUS,
+  CUSTOM_OUTLINE,
   FILL,
   IMAGE_CROP,
   isRecord,
@@ -592,6 +593,8 @@ function validateElementValues(
         value({ path: `${path}.frame`, verdict: checkFrame(element.frame) }) ??
         validateBox({ box: element.box, path: `${path}.box` }) ??
         checked({ path: `${path}.preset`, candidate: element.preset, kind: SHAPE_PRESET }) ??
+        // Optional: an insert from a client older than freeforms carries no such field.
+        optionalChecked({ path: `${path}.customOutline`, candidate: element.customOutline, kind: CUSTOM_OUTLINE }) ??
         value({ path: `${path}.textBox`, verdict: checkTextBoxStyle(element.textBox) }) ??
         validateBody({ body: element.text, path: `${path}.text` })
       );

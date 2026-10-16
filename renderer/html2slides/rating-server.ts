@@ -11,14 +11,40 @@
  *   slide_01_original.png, slide_01_slides.png, slide_02_original.png, ...
  * Or structured as:
  *   originals/slide_01.png, slides/slide_01.png
+ *
+ * REVERSE mode (--direction reverse, see serve-sxs-reverse.sh and reverse-rating.ts)
+ * rates the Google Slides -> Sasha HTML importer instead: "original" is Google's
+ * thumbnail, "test" is the Sasha HTML screenshot, a toggle shows the full round trip
+ * (original fixture HTML vs Sasha HTML) from round-trip/, each slide shows its
+ * metrics.json numbers, verdicts go to ratings-reverse.json (forward ratings.json is
+ * never touched) and the user's "Good" click blesses into e2e/goldens-reverse/
+ * (override with --reverse-goldens-dir; a forward goldens directory is refused).
  */
 
 import { createServer } from "http";
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, copyFileSync, statSync, unlinkSync } from "fs";
 import { join, resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 import { PNG } from "pngjs";
 import { resolveRatingIo, describeRatingIo } from "../structured-prompts/bug_solving/sxs-io.js";
+import {
+  assertReverseGoldensDirectory,
+  blessReverseGolden,
+  describeReverseIo,
+  findReverseSlide,
+  isReverseDirection,
+  parseRatingDirection,
+  parseReverseView,
+  reverseRatingsFileName,
+  scanReverseResults,
+  summarizeReverse,
+  type FixtureDirectories,
+  type RatingDirection,
+  type ReverseSlide,
+  type ReverseView,
+} from "./reverse-rating.js";
+import { reverseBarHtml, reverseClientScript, reverseMetricsHtml, reversePageStyles, reverseZoomCropLabels } from "./reverse-rating-page.js";
 
 const args = process.argv.slice(2);
 const resultsDir = resolve(args[0] || ".");
@@ -70,6 +96,11 @@ let rejectAllButton = false;
 // command is set, a "🔔 NOTIFY USER" line is ALWAYS printed to stdout on boot so an
 // orchestrator (or the human) watching stdout always learns a UI is waiting.
 let notifyCmd: string | null = process.env.BUG_SOLVING_NOTIFY_CMD ?? null;
+// --direction forward|reverse: which importer is being rated (see the header).
+let direction: RatingDirection = "forward";
+// --reverse-goldens-dir: where a reverse "Good" click blesses to. Defaults to
+// e2e/goldens-reverse/ next to this file; tests point it at a temp directory.
+let reverseGoldensDirOverride: string | null = null;
 for (let i = 0; i < args.length; i++) {
   const v = args[i];
   if (v === "--port") port = parseInt(args[++i]);
@@ -86,7 +117,22 @@ for (let i = 0; i < args.length; i++) {
   else if (v === "--reject-all-button") rejectAllButton = true;
   else if (v === "--show-all") showAllDefault = true;
   else if (v === "--notify-cmd") notifyCmd = args[++i];
+  else if (v === "--direction") direction = parseRatingDirection(args[++i] ?? "");
+  else if (v === "--reverse-goldens-dir") reverseGoldensDirOverride = resolve(args[++i]);
 }
+
+const reverseMode = isReverseDirection(direction);
+const htmlToSlidesDir = dirname(fileURLToPath(import.meta.url));
+// Where a metrics row's "set" finds its original fixture HTML (round-trip label link).
+const fixtureDirectories: FixtureDirectories = {
+  basic: join(htmlToSlidesDir, "e2e", "fixtures-basic"),
+  complex: join(htmlToSlidesDir, "e2e", "fixtures"),
+};
+const reverseGoldensDir = reverseGoldensDirOverride ?? join(htmlToSlidesDir, "e2e", "goldens-reverse");
+if (reverseMode) assertReverseGoldensDirectory(reverseGoldensDir);
+// Reverse verdicts get their own file so a reverse rating can never overwrite a
+// forward one, even when both modes are pointed at the same results directory.
+const ratingsFilePath = join(resultsDir, reverseMode ? reverseRatingsFileName : "ratings.json");
 
 // Resolve the full, documented I/O contract (sxs-io.ts) from the parsed flags.
 // This is the single source of truth for WHICH files this server reads (slides,
@@ -150,6 +196,9 @@ try {
     });
   renderBadgeHtml = parts.join("");
 } catch { /* meta is optional */ }
+// The forward badge describes pptx conversion parameters, which say nothing about
+// a reverse run; name the direction instead so the two UIs are never confused.
+if (reverseMode) renderBadgeHtml = `<span class="render-badge badge-reverse">Reverse: Google Slides &rarr; Sasha HTML</span>`;
 
 interface RenderedRegion { x: number; y: number; w: number; h: number; kind: string; }
 interface SlideComparison {
@@ -179,6 +228,9 @@ interface SlideComparison {
   // each marked region, one per side (original + test/slides), shown below the
   // slide so you can compare the exact spot you flagged at high zoom.
   zoomCrops?: string[];
+  // REVERSE mode only: every file and metric of the slide (round-trip pair, Sasha
+  // HTML, fixture HTML, metrics.json row), read by reverse-rating-page.ts.
+  reverse?: ReverseSlide;
 }
 
 // Zoom-crops live alongside the annotations under the results dir so they
@@ -269,6 +321,9 @@ function generateZoomCrops(
   shapes: Array<{ kind?: string; x: number; y: number; w: number; h: number }> | null,
   canvasSize: { w: number; h: number } | null,
   padPx: number,
+  // Further images cropped at the same regions, as [side name, png path]. Reverse
+  // mode passes the round trip's fixture screenshot as side "fixture".
+  extraSides: ReadonlyArray<readonly [string, string]> = [],
 ): string[] {
   // Clear stale crops for this slide first so a re-rate with fewer marks
   // doesn't leave orphans.
@@ -280,7 +335,7 @@ function generateZoomCrops(
   mkdirSync(zoomDir, { recursive: true });
   const written: string[] = [];
   const writePair = (idx: number, bbox: { x: number; y: number; w: number; h: number; canvasW: number; canvasH: number }) => {
-    const sides: Array<["original" | "rendered", string]> = [["original", originalPng], ["rendered", slidesPng]];
+    const sides: ReadonlyArray<readonly [string, string]> = [["original", originalPng], ["rendered", slidesPng], ...extraSides];
     for (const [side, srcPath] of sides) {
       if (!existsSync(srcPath)) continue;
       const outPath = join(zoomDir, `${id}-${String(idx).padStart(2, "0")}-${side}.png`);
@@ -305,6 +360,10 @@ function generateZoomCrops(
 }
 
 function findComparisons(): SlideComparison[] {
+  // REVERSE: the slide list, pairs and metrics come from reverse-rating.ts; the
+  // forward-only merges below (meta.json htmlDir positions, goldens regression
+  // report, rendered regions, upload manifest) describe the pptx direction.
+  if (reverseMode) return attachRatingsAndFilter(findReverseComparisons());
   const comparisons: SlideComparison[] = [];
 
   // Check for originals/ and slides/ subdirectories. --originals-dir /
@@ -491,8 +550,29 @@ function findComparisons(): SlideComparison[] {
     } catch {}
   }
 
+  return attachRatingsAndFilter(comparisons);
+}
+
+/** Reverse slides as comparisons: original = Google thumbnail, test = Sasha HTML screenshot. */
+function findReverseComparisons(): SlideComparison[] {
+  const scan = scanReverseResults({ resultsDirectory: resultsDir, fixtureDirectories });
+  return scan.slides.map((slide): SlideComparison => ({
+    id: slide.id,
+    originalPng: slide.googlePng,
+    slidesPng: slide.sashaPng,
+    status: "pending",
+    // htmlFile / slidesUrl stay unset: they would fill the forward "Round-1
+    // provenance" panel, and the reverse pane labels already link the fixture,
+    // the Sasha HTML and the Google deck (reverse-rating-page.ts).
+    ...(slide.reverseDiffPng ? { diffPng: slide.reverseDiffPng } : {}),
+    reverse: slide,
+  }));
+}
+
+/** Shared tail of both directions: saved verdicts, on-disk zoom-crops, --filter-slides. */
+function attachRatingsAndFilter(comparisons: SlideComparison[]): SlideComparison[] {
   // Load existing ratings (user ratings override auto-blessing).
-  const ratingsFile = join(resultsDir, "ratings.json");
+  const ratingsFile = ratingsFilePath;
   if (existsSync(ratingsFile)) {
     const ratings = JSON.parse(readFileSync(ratingsFile, "utf-8"));
     for (const c of comparisons) {
@@ -532,6 +612,10 @@ function findComparisons(): SlideComparison[] {
  *    Pattern 2: <resultsDir>/<id>_original.png + <resultsDir>/<id>_slides.png
  *  A side whose file is absent comes back null. */
 function resolveSlidePaths(id: string): { originalPng: string | null; slidesPng: string | null } {
+  if (reverseMode) {
+    const slide = findReverseSlide({ resultsDirectory: resultsDir, fixtureDirectories, slideId: id });
+    return { originalPng: slide?.googlePng ?? null, slidesPng: slide?.sashaPng ?? null };
+  }
   const originalsDir = originalsDirOverride
     ?? (existsSync(join(resultsDir, "originals")) ? join(resultsDir, "originals") : resultsDir);
   const slidesDir = slidesDirOverride
@@ -552,8 +636,8 @@ function resolveSlidePaths(id: string): { originalPng: string | null; slidesPng:
   };
 }
 
-function saveRating(id: string, status: "good" | "bad", comment?: string, annotationPng?: string): string | null {
-  const ratingsFile = join(resultsDir, "ratings.json");
+function saveRating(id: string, status: "good" | "bad", comment?: string, annotationPng?: string, reviewedView?: ReverseView): string | null {
+  const ratingsFile = ratingsFilePath;
   const ratings = existsSync(ratingsFile) ? JSON.parse(readFileSync(ratingsFile, "utf-8")) : {};
   const prior = ratings[id];
   // READ-ONLY verdict: a rating must NOT overwrite the comment. When no comment
@@ -562,6 +646,12 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
   const keepComment = comment !== undefined ? comment : (readOnly ? prior?.comment : undefined);
   const entry: any = { status, ratedAt: new Date().toISOString() };
   if (keepComment !== undefined) entry.comment = keepComment;
+  // REVERSE: record which pair the verdict was given on (reverse step or full
+  // round trip), since a slide can be faithful to Google and still lose the fixture.
+  if (reverseMode) {
+    entry.direction = "reverse";
+    entry.view = reviewedView ?? "reverse";
+  }
   let savedAnnotPath: string | null = null;
   if (annotationPng) {
     // Annotations persist under resultsDir/annotations/ so /tmp wipes only
@@ -655,11 +745,23 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
       copyFileSync(originalPng, join(snapshotDir, `${id}_original.png`));
       copyFileSync(slidesPng, join(snapshotDir, `${id}_slides.png`));
 
+      // REVERSE: the user's Good click is the ONLY writer of e2e/goldens-reverse/,
+      // and it must never reach the forward goldens below (meta.json in a reverse
+      // results directory may name the fixtures' htmlDir, whose sibling is the
+      // FORWARD goldens/ directory).
+      const reverseSlide = reverseMode
+        ? findReverseSlide({ resultsDirectory: resultsDir, fixtureDirectories, slideId: id })
+        : null;
+      if (reverseSlide) {
+        const blessed = blessReverseGolden({ slide: reverseSlide, goldensDirectory: reverseGoldensDir });
+        console.log(`  BLESSED (reverse) ${id} → ${blessed}`);
+      }
+
       // Bless the blessed golden — THIS is the only sanctioned writer of the
       // goldens directory. We infer goldens dir from meta.json (htmlDir is
       // `fixtures-basic/`; goldens sit at the sibling `goldens/`).
       const metaFile = join(resultsDir, "meta.json");
-      if (existsSync(metaFile)) {
+      if (!reverseMode && existsSync(metaFile)) {
         const meta = JSON.parse(readFileSync(metaFile, "utf-8"));
         if (meta.htmlDir) {
           const goldensDir = meta.goldensDir || join(dirname(meta.htmlDir), "goldens");
@@ -696,7 +798,7 @@ function clearAnnotation(id: string): void {
 
   // 3. Drop the annotation reference from ratings.json so the next save's
   //    preserve-prior-annotation branch can't bring it back.
-  const ratingsFile = join(resultsDir, "ratings.json");
+  const ratingsFile = ratingsFilePath;
   if (existsSync(ratingsFile)) {
     try {
       const ratings = JSON.parse(readFileSync(ratingsFile, "utf-8"));
@@ -729,7 +831,7 @@ const HTML = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>${taskTitle || "html2slides Rating"}</title>
+<title>${taskTitle || (reverseMode ? "Reverse import rating" : "html2slides Rating")}</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; }
@@ -827,16 +929,18 @@ const HTML = `<!DOCTYPE html>
   .orig-meta .om-annotation figcaption, .orig-meta .om-comment .om-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
   .orig-meta .om-comment { flex: 1; min-width: 200px; font-size: 13px; color: #ddd; white-space: pre-wrap; word-break: break-word; }
   .orig-meta figure { margin: 0; }
+${reverseMode ? reversePageStyles : ""}
 </style>
 </head>
 <body>
 <div class="header">
-  <h1>${taskTitle || "html2slides Fidelity Rating"}</h1>
+  <h1>${taskTitle || (reverseMode ? "Reverse import fidelity: Google Slides → Sasha HTML" : "html2slides Fidelity Rating")}</h1>
   <div class="header-right">${renderBadgeHtml}<div class="stats" id="stats"></div></div>
 </div>
 <div id="regressionBanner"></div>
 <div id="renderedBanner"></div>
 <div class="nav" id="nav"></div>
+${reverseMode ? reverseBarHtml : ""}
 <div class="labels"><span id="labelOriginal">Original HTML</span><span id="labelSlides">Google Slides</span></div>
 <div class="flip-tabs" id="flipTabs">
   <button class="flip-tab" id="flipOriginal" onclick="setFlipSide('left')" title="Show the original (target) full-size">Original</button>
@@ -853,7 +957,7 @@ const HTML = `<!DOCTYPE html>
     <input type="checkbox" id="showRendered" onchange="toggleShowRendered()"> Highlight rendered regions (+128 channels)
   </label>
   <span style="width: 24px;"></span>
-${readOnly ? "" : `  <span>Draw on Slides render:</span>
+${readOnly ? "" : `  <span>Draw on ${reverseMode ? "Sasha HTML" : "Slides"} render:</span>
   <button id="drawToggle" onclick="toggleDraw()">Draw</button>
   <button id="toolPen" class="active" onclick="setTool('pen')" title="Freehand pen">&#9998; Pen</button>
   <button id="toolRect" onclick="setTool('rect')" title="Drag to draw a rectangle">&#9645; Rect</button>
@@ -879,6 +983,7 @@ ${readOnly ? "" : `  <span>Draw on Slides render:</span>
   </div>
 </div>
 <div class="slide-id" id="slideId"></div>
+${reverseMode ? reverseMetricsHtml : ""}
 <div class="slide-links" id="slideLinks"></div>
 <!-- Round-1 provenance panel: original source HTML link, live presentation
      link, the original annotation the user drew, and the original comment they
@@ -915,6 +1020,12 @@ const TASK_SCOPED = ${taskAnalysisPath || taskDiffsDir ? "true" : "false"};
 // from the boot --read-only flag. When true the drawing tools / comment box are
 // absent from the DOM and rate() sends only { id, status }.
 const readOnly = ${readOnly ? "true" : "false"};
+// 'forward' (HTML -> Google Slides) or 'reverse' (Google Slides -> Sasha HTML).
+const DIRECTION = '${direction}';
+// Zoom-crop sides and their captions; reverse adds the round trip's fixture side.
+const ZOOM_CROP_LABELS = ${JSON.stringify(reverseMode ? reverseZoomCropLabels : [["original", "original (target)"], ["rendered", "test (slides)"]])};
+const ZOOM_CROP_TITLE = ${JSON.stringify(reverseMode ? "original (Google Slides) vs test (Sasha HTML), plus the fixture HTML" : "original (target) vs test (Slides render)")};
+${reverseMode ? reverseClientScript : ""}
 let comparisons = [];
 let currentIdx = 0;
 
@@ -970,7 +1081,8 @@ async function refreshReport() {
 async function load() {
   const resp = await fetch('/api/comparisons');
   comparisons = await resp.json();
-  refreshReport();
+  if (DIRECTION === 'reverse') { deckOrder = comparisons.map(c => c.id); applyReverseOrder(); refreshReverseReport(); }
+  else refreshReport();
   const visible = visibleComparisons();
   const pendingIdx = visible.findIndex(c => c.status === 'pending');
   const firstVisibleId = (visible[pendingIdx >= 0 ? pendingIdx : 0] || {}).id;
@@ -1007,8 +1119,8 @@ function render() {
     ? `(c.annotationPng ? '<img class="prior-annot" id="savedAnnot" src="/img?path=' + encodeURIComponent(c.annotationPng) + '">' : '')`
     : `'<canvas id="drawCanvas"></canvas>'`};
   const pairHtml =
-    '<div class="panel original"><img id="originalImg" src="/img?path=' + encodeURIComponent(c.originalPng) + '">' + diffOverlay + '</div>' +
-    '<div class="panel slides"><img id="slidesImg" src="/img?path=' + encodeURIComponent(c.slidesPng) + '">' + renderedOverlayHtml + priorAnnotHtml + slidesExtra + '</div>';
+    '<div class="panel original"><img id="originalImg" src="/img?path=' + encodeURIComponent(${reverseMode ? "reverseOriginalPath(c)" : "c.originalPng"}) + '">' + diffOverlay + '</div>' +
+    '<div class="panel slides"><img id="slidesImg" src="/img?path=' + encodeURIComponent(${reverseMode ? "reverseTestPath(c)" : "c.slidesPng"}) + '">' + renderedOverlayHtml + priorAnnotHtml + slidesExtra + '</div>';
   document.getElementById('pair').innerHTML = pairHtml;
 ${readOnly ? "" : `  setupDrawCanvas(c.annotationPng);
   applyPriorMarks(); // honor the "Prior marks" toggle on the freshly-built panel`}
@@ -1061,6 +1173,7 @@ ${readOnly ? "" : `  setupDrawCanvas(c.annotationPng);
     ? '<a href="' + c.slidesUrl + '" target="_blank">Google Slides ↗</a>'
     : 'Google Slides';
   document.getElementById('slideLinks').innerHTML = ''; // links now live in the top labels
+  if (DIRECTION === 'reverse') { applyReverseLabels(c); renderReverseMetrics(c); }
 
   // Stats
   const good = comparisons.filter(c => c.status === 'good').length;
@@ -1072,6 +1185,7 @@ ${readOnly ? "" : `  setupDrawCanvas(c.annotationPng);
   document.getElementById('nav').innerHTML = visible.map(c => {
     const i = comparisons.findIndex(x => x.id === c.id);
     const cls = (i === currentIdx ? 'current ' : '') + 'status-' + c.status + ' diff-' + (c.diffStatus || 'none');
+    if (DIRECTION === 'reverse') return '<a href="#" class="' + cls + reverseNavigationClass(c) + '" title="' + reverseNavigationTitle(c) + '" onclick="currentIdx=' + i + '; render(); return false;">' + reverseNavigationLabel(c) + '</a>';
     return '<a href="#" class="' + cls + '" onclick="currentIdx=' + i + '; render(); return false;">' + c.id.replace('slide_', 'S') + '</a>';
   }).join('');
 
@@ -1127,17 +1241,17 @@ ${readOnly ? "" : `  setupDrawCanvas(c.annotationPng);
   if (c.zoomCrops && c.zoomCrops.length) {
     const groups = {};
     for (const p of c.zoomCrops) {
-      const m = p.match(/-(\\d+)-(original|rendered)\\.png$/);
+      const m = p.match(/-(\\d+)-(original|rendered|fixture)\\.png$/);
       const key = m ? m[1] : '00';
       const side = m ? m[2] : 'crop';
       (groups[key] = groups[key] || {})[side] = p;
     }
     const keys = Object.keys(groups).sort();
-    let html = '<div class="zoom-crops"><div class="zoom-crops-label">🔍 Marked regions — original (target) vs test (Slides render), ' + keys.length + ' region(s):</div><div class="zoom-crops-grid">';
+    let html = '<div class="zoom-crops"><div class="zoom-crops-label">🔍 Marked regions — ' + ZOOM_CROP_TITLE + ', ' + keys.length + ' region(s):</div><div class="zoom-crops-grid">';
     for (const k of keys) {
       const g = groups[k];
       html += '<div class="zoom-crop-pair">';
-      [['original', 'original (target)'], ['rendered', 'test (slides)']].forEach(function(pair) {
+      ZOOM_CROP_LABELS.forEach(function(pair) {
         if (g[pair[0]]) {
           html += '<div class="zoom-crop"><figure><figcaption>' + pair[1] + '</figcaption><img src="/img?path=' + encodeURIComponent(g[pair[0]]) + '&t=' + Date.now() + '"></figure></div>';
         }
@@ -1209,7 +1323,7 @@ ${readOnly ? `async function rate(status) {
   const resp = await fetch('/api/rate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: c.id, status, comment: comment || undefined, annotation, shapes, canvasSize, pencilPadding: 24 }),
+    body: JSON.stringify({ id: c.id, status, comment: comment || undefined, annotation, shapes, canvasSize, pencilPadding: 24, view: DIRECTION === 'reverse' ? reverseView : undefined }),
   });
   const result = await resp.json().catch(() => ({}));
   c.status = status;
@@ -1573,7 +1687,8 @@ ${readOnly ? `  // READ-ONLY keyboard: navigation + the two rating verdicts only
   if (e.key === 'ArrowLeft' || e.key === 'p') navigate(-1);
   if (e.key === 'g') rate('good');
   if (e.key === 'b') rate('bad');
-  if (e.key === 'f') { flickFlip(); e.preventDefault(); } // blink-flick original↔rendered` : `  // Ctrl/Cmd+Z — undo last drawing stroke (works globally, even while typing
+  if (e.key === 'f') { flickFlip(); e.preventDefault(); } // blink-flick original↔rendered
+  if (e.key === 'v' && DIRECTION === 'reverse') setReverseView(reverseView === 'reverse' ? 'round-trip' : 'reverse');` : `  // Ctrl/Cmd+Z — undo last drawing stroke (works globally, even while typing
   // in the comment box, so drawing workflow isn't interrupted).
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     undoDraw();
@@ -1591,6 +1706,7 @@ ${readOnly ? `  // READ-ONLY keyboard: navigation + the two rating verdicts only
   if (e.key === 'ArrowLeft' || e.key === 'p') navigate(-1);
   if (e.key === 'g') rate('good');
   if (e.key === 'f') { flickFlip(); e.preventDefault(); } // blink-flick original↔rendered
+  if (e.key === 'v' && DIRECTION === 'reverse') setReverseView(reverseView === 'reverse' ? 'round-trip' : 'reverse'); // reverse step ↔ round trip
   if (e.key === 'b') { commentEl.focus(); e.preventDefault(); }
   if (e.key === 'Enter') { const comment = commentEl.value.trim(); if (comment) rate('bad'); }`}
 });
@@ -1673,6 +1789,20 @@ const server = createServer((req, res) => {
     // so its mtime proves the render was actually re-scraped. The golden
     // file's own mtime is irrelevant (a golden could be years old and still
     // correct).
+    if (reverseMode) {
+      // REVERSE: deck-level fidelity numbers from metrics.json, verdict counts from
+      // ratings-reverse.json, and how many reverse goldens the user has blessed.
+      const statusById = new Map(findComparisons().map((comparison) => [comparison.id, comparison.status] as const));
+      const summary = summarizeReverse({
+        scan: scanReverseResults({ resultsDirectory: resultsDir, fixtureDirectories }),
+        statusById,
+        goldensDirectory: reverseGoldensDir,
+        ratingsFile: ratingsFilePath,
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(summary));
+      return;
+    }
     const metaFile = join(resultsDir, "meta.json");
     let goldensDir: string | null = null;
     if (existsSync(metaFile)) {
@@ -1730,14 +1860,19 @@ const server = createServer((req, res) => {
         res.end(JSON.stringify({ ok: true }));
         return;
       }
-      const { id, status, comment, annotation, shapes, canvasSize, pencilPadding } = JSON.parse(body);
-      const annotationPath = saveRating(id, status, comment, annotation);
+      const { id, status, comment, annotation, shapes, canvasSize, pencilPadding, view } = JSON.parse(body);
+      const annotationPath = saveRating(id, status, comment, annotation, reverseMode ? parseReverseView(view) : undefined);
       // Per-annotation zoom-crops: crop original + test at each marked region.
       // Resolve THIS slide's two paths directly (resolveSlidePaths) rather than
       // scanning the whole deck via findComparisons() just to read one pair.
       let zoomCrops: string[] = [];
       if (annotation) {
         const paths = resolveSlidePaths(id);
+        // REVERSE: also crop the round trip's fixture screenshot at the same marks,
+        // so a flagged region shows Google | Sasha | fixture side by side.
+        const fixturePng = reverseMode
+          ? findReverseSlide({ resultsDirectory: resultsDir, fixtureDirectories, slideId: id })?.fixturePng ?? null
+          : null;
         if (paths.originalPng && paths.slidesPng) {
           try {
             const annotBytes = Buffer.from(String(annotation).replace(/^data:image\/png;base64,/, ""), "base64");
@@ -1746,6 +1881,7 @@ const server = createServer((req, res) => {
               Array.isArray(shapes) ? shapes : null,
               canvasSize && typeof canvasSize.w === "number" ? canvasSize : null,
               typeof pencilPadding === "number" ? pencilPadding : 20,
+              fixturePng ? [["fixture", fixturePng]] : [],
             );
           } catch (e) { console.error("zoom-crop generation failed:", (e as Error).message); }
         }
@@ -1891,15 +2027,22 @@ server.listen(port, () => {
   console.log(`\n  Rating server: ${url}\n`);
   console.log(`  Results dir: ${resultsDir}`);
   console.log(`  Comparisons: ${findComparisons().length}`);
-  console.log(`\n${describeRatingIo(io)}\n`);
-  console.log(`  Keyboard: g=good, b=bad, n/→=next, p/←=prev\n`);
+  // The sxs-io contract names ratings.json; reverse writes its own verdicts file.
+  console.log(`\n${reverseMode ? describeRatingIo(io).replace(io.ratingsFile, ratingsFilePath) : describeRatingIo(io)}\n`);
+  if (reverseMode) {
+    console.log(`${describeReverseIo({ resultsDirectory: resultsDir, goldensDirectory: reverseGoldensDir, ratingsFile: ratingsFilePath })}\n`);
+    const scan = scanReverseResults({ resultsDirectory: resultsDir, fixtureDirectories });
+    for (const problem of scan.problems) console.log(`  ⚠ ${problem}`);
+    if (scan.missingSashaRender.length) console.log(`  ⚠ no Sasha render for: ${scan.missingSashaRender.join(", ")}`);
+  }
+  console.log(`  Keyboard: g=good, b=bad, n/→=next, p/←=prev${reverseMode ? ", v=reverse step ↔ round trip" : ""}\n`);
   fireNotify(url);
 
   // Per-fork gate: poll every 5s and EXIT(0) once every filtered slide is rated
   // good/bad, so the solver's rating-gate node (which runs this server in the
   // FOREGROUND) unblocks — no detached process, no leaked capture pipe.
   if (exitWhenAllRated && filterSlides && filterSlides.length) {
-    const ratingsFile = join(resultsDir, "ratings.json");
+    const ratingsFile = ratingsFilePath;
     const wanted = filterSlides;
     const poll = setInterval(() => {
       let ratings: Record<string, { status?: string }> = {};
