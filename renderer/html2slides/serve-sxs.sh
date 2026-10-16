@@ -16,10 +16,11 @@
 # what puts the server in "goldens mode"; it is the ONLY sanctioned writer
 # of e2e/goldens/ and only ever fires on the user's own "Good" click.
 #
-# Usage: ./serve-sxs.sh [sxs-dir=/tmp/sxs] [port=3456]
+# Usage: ./serve-sxs.sh [sxs-dir=/tmp/sxs] [port=3456] [goldens-dir]
 set -euo pipefail
 SXS="${1:-/tmp/sxs}"
 PORT="${2:-3456}"
+GOLDENS_ARGUMENT="${3:-}"
 H2S="$(cd "$(dirname "$0")" && pwd)"
 FILTERED="$H2S/../structured-prompts/bug_solving/scripts/filtered-rating-server.ts"
 
@@ -32,7 +33,14 @@ mkdir -p "$SXS/diffs"
 # `goldens/` of htmlDir (matching the retired rating-server.ts convention).
 HTML_DIR="$(python3 -c "import json,sys; print(json.load(open('$SXS/meta.json')).get('htmlDir',''))" 2>/dev/null || true)"
 HTML_DIR="${HTML_DIR:-$H2S/e2e/fixtures-basic}"
-GOLDENS="$(dirname "$HTML_DIR")/goldens"
+# The complex set's goldens are e2e/goldens-complex (regen-complex.sh), NOT the sibling goldens/ of
+# e2e/fixtures: deriving the sibling sent a complex "Good" into the BASIC goldens (caught 2026-10-16
+# before any click). An explicit third argument always wins.
+case "$HTML_DIR" in
+  */e2e/fixtures|*/e2e/fixtures/) GOLDENS="$(dirname "$HTML_DIR")/goldens-complex" ;;
+  *) GOLDENS="$(dirname "$HTML_DIR")/goldens" ;;
+esac
+GOLDENS="${GOLDENS_ARGUMENT:-$GOLDENS}"
 
 # slides list = basenames of originals/slide_*.png
 SLIDES="$(ls "$SXS"/originals/slide_*.png 2>/dev/null | xargs -n1 basename | sed 's/\.png$//' | sort | paste -sd, -)"
