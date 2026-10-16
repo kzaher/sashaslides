@@ -242,7 +242,24 @@ export async function extractFromHtml(
     const el = retypedExtraction.elements[i];
     if ((el.type === "visual" || el.type === "image") && el.bounds.w > 5 && el.bounds.h > 5) {
       const clip = { x: el.bounds.x, y: el.bounds.y, width: el.bounds.w, height: el.bounds.h, scale: RETINA_SCALE };
+      // A `text-glow` visual is the halo of a glowing text-shadow ALONE: hide
+      // everything else and make the glyph fill transparent, so the PNG holds
+      // only the shadow over transparency and the native text paints on top.
+      const glowId = el.type === "visual" && el.tag === "text-glow" ? el.glowId : undefined;
+      if (glowId !== undefined) {
+        const sel = `[data-h2s-glow="${glowId}"]`;
+        const css = `html,body{background:transparent !important}*,*::before,*::after{visibility:hidden !important}` +
+          `${sel},${sel} *{visibility:visible !important;color:transparent !important;` +
+          `-webkit-text-fill-color:transparent !important;background:transparent !important;border-color:transparent !important}`;
+        await Runtime.evaluate({ expression: `(() => { const s = document.createElement("style"); s.id = "h2s-glow-capture"; s.textContent = ${JSON.stringify(css)}; document.head.appendChild(s); })()` });
+        // `omitBackground` alone still returns an opaque white PNG here.
+        await Emulation.setDefaultBackgroundColorOverride({ color: { r: 0, g: 0, b: 0, a: 0 } });
+      }
       const ss = await Page.captureScreenshot({ format: "png", clip, captureBeyondViewport: true, omitBackground: true });
+      if (glowId !== undefined) {
+        await Runtime.evaluate({ expression: `document.getElementById("h2s-glow-capture")?.remove()` });
+        await Emulation.setDefaultBackgroundColorOverride({});
+      }
       visualPngs.set(i, Buffer.from(ss.data, "base64"));
     }
   }

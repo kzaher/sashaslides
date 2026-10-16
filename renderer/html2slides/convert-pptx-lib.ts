@@ -1164,6 +1164,8 @@ export interface VisualElement extends ElementCommon {
   /** Per-corner radii the `clipped-container` device PNG was captured under —
    * used to tag its rendered region descriptively. */
   readonly cornerRadii?: CornerRadii;
+  /** `text-glow` visual: the `data-h2s-glow` id the io capture isolates. */
+  readonly glowId?: number;
 }
 
 export interface ImageElement extends ElementCommon {

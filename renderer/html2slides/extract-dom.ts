@@ -431,6 +431,8 @@ interface ExtractedElement {
   shapeRenderEmpty?: boolean;
   // visual / image
   tag?: string;
+  // `text-glow` visual: matches the source element's `data-h2s-glow` attribute.
+  glowId?: number;
   src?: string;
   cornerRadius?: number;
   // Generic clipping context inherited from an `overflow:hidden|clip` ancestor
@@ -1854,6 +1856,44 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     }
   }
 
+  // Glowing `text-shadow` (zero offset, blur > 0 — slide_28 `.shadow-text h3
+  // { text-shadow: 0 0 20px rgba(74,108,247,.8), 0 0 40px … }`). OOXML text
+  // glow does not survive the Google Slides import, and a native radial-gradient
+  // stand-in renders as a flat wash with hard edges instead of a halo hugging
+  // the glyphs. So the halo is rasterised ALONE: the element is tagged
+  // `data-h2s-glow=<n>` and a `text-glow` visual (the glyph box padded by the
+  // widest blur) is pushed BEFORE the native text, so the PNG sits behind it.
+  // convert-pptx-io.ts captures it with everything else hidden and the glyph
+  // fill transparent, which leaves only the shadow on a transparent PNG; the
+  // text itself stays native and editable. Offset (drop-style) shadows are
+  // left alone.
+  let _glowCounter = 0;
+  function emitTextGlow(el: Element, cs: CSSStyleDeclaration): void {
+    const ts = cs.textShadow;
+    if (!ts || ts === "none") return;
+    let blur = 0;
+    for (const layer of ts.split(/,(?![^(]*\))/)) {
+      const colorTok = layer.match(/rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}/)?.[0];
+      const lengths = layer.replace(/rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}/, "").trim()
+        .split(/\s+/).map(v => parseFloat(v) || 0);
+      const [ox = 0, oy = 0, bl = 0] = lengths;
+      if (!colorTok || ox !== 0 || oy !== 0 || bl <= 0 || rgbAlpha(colorTok) <= 0) continue;
+      blur = Math.max(blur, bl);
+    }
+    if (blur <= 0) return;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const ink = range.getBoundingClientRect();
+    if (ink.width < 1 || ink.height < 1) return;
+    const x0 = Math.max(0, Math.floor(ink.left - blur));
+    const y0 = Math.max(0, Math.floor(ink.top - blur));
+    const x1 = Math.min(W, Math.ceil(ink.right + blur));
+    const y1 = Math.min(H, Math.ceil(ink.bottom + blur));
+    const glowId = _glowCounter++;
+    (el as HTMLElement).setAttribute("data-h2s-glow", String(glowId));
+    elements.push({ type: "visual", tag: "text-glow", glowId, bounds: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } });
+  }
+
   function emitRect(el: Element, s: ElementStyle, b: Bounds): void {
     // No size filter: if CSS paints a box, we extract it. Filtering by dimension
     // previously dropped 2px connector/divider divs. Zero-area elements are
@@ -3143,6 +3183,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     // Text content
     if (directText && directText.trim() && !isPillCard) {
       seen.add(el);
+      emitTextGlow(el, cs);
       const padLeft = parseFloat(cs.paddingLeft) || 0;
       const padRight = parseFloat(cs.paddingRight) || 0;
       const padTop = parseFloat(cs.paddingTop) || 0;
