@@ -133,6 +133,12 @@ fi
 # 2. Build the bundle (into structured-prompting/dist, where preact + the workspace lib resolve).
 echo "▶ building $BUNDLE …"
 npx tsx structured-prompting/build.ts renderer/structured-prompts/bug_solving/main-scaffolding.ts "$BUNDLE"
+# Every jailed fork spawns cow-workspace/dist/ns-exec.mjs, a gitignored build output; without it all
+# forks die at their first command ("Cannot find module …/ns-exec.mjs", measured 2026-10-16).
+if [ ! -f cow-workspace/dist/ns-exec.mjs ]; then
+  echo "▶ building cow-workspace/dist/ns-exec.mjs …"
+  (cd cow-workspace && npm run -s build) || { echo "❌ cow-workspace build failed"; exit 1; }
+fi
 
 # 3. Show which slides are currently marked BAD in the live SxS ratings — these
 #    become the clusters at solve start (clustersFromRatings). No longer baked

@@ -312,6 +312,11 @@ async function run(): Promise<void> {
   // sandboxes the worker CLI + retest: the base REPO is overlay copy-on-write,
   // /tmp is a disposable tmpfs, everything else read-only.
   process.env.COW_WORKSPACE_JAIL = "1";
+  // cow-workspace now dispatches every branch command on COW_WORKSPACE_PROVIDER (Linux overlayfs vs
+  // Windows VHDX, since its 520b54f "Consolidate Windows workspaces on VHDX"); a launcher that builds
+  // the env by hand must name it, or every fork dies at its first command with "COW_WORKSPACE_PROVIDER
+  // must be 'overlayfs' or 'vhdx'" (measured 2026-10-16: all four reverse clusters failed that way).
+  process.env.COW_WORKSPACE_PROVIDER = process.env.COW_WORKSPACE_PROVIDER ?? (process.platform === "win32" ? "vhdx" : "overlayfs");
   // The worker CLI's OWN state (~/.claude / ~/.codex sessions) must PERSIST to
   // the real fs — the monitor + `claude --resume` read it from there. So it is
   // SHARED read-write (NOT copy-on-write); only the repo is sandboxed. (Overlaying
