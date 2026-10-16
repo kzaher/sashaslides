@@ -136,18 +136,20 @@
  *    us the full border-box width.
  *
  *
- * 7. LINE SPACING  — three branches (this is the bug-prone zone)
+ * 7. LINE SPACING AND THE FIRST LINE  (this is the bug-prone zone)
+ *
+ *    Google's line model (measured for the Sasha engine, see
+ *    slides-first-baseline.ts): a line is spcPct x 1.2 x its largest
+ *    font size tall, extra spacing goes BELOW the glyphs, and the
+ *    baseline sits 0.9465 x size below the line top for every family.
  *
  *      if (lineHeight && fontSize) {
  *        if (valign === "middle" && verticallyCentered) {
- *          // BRANCH 1 — single-line centered shape text
- *          lineSpacingMultiple = 1.2;
- *        } else if (lineHeightMeasured === true) {
- *          // BRANCH 2 — content-driven measured pitch (.text-block)
- *          lineSpacing = lineHeight × PX2PT;     // absolute pts
+ *          lineSpacingMultiple = 1.2;                 // BRANCH 1
+ *        } else if (lineHeightMeasured) {
+ *          lineSpacing = lineHeight × PX2PT;          // BRANCH 2
  *        } else {
- *          // BRANCH 3 — default
- *          lineSpacingMultiple = (lineHeight / fontSize) / 1.2;
+ *          lineSpacingMultiple = (lineHeight / fontSize) / 1.2;  // BRANCH 3
  *        }
  *      }
  *
@@ -156,18 +158,22 @@
  *      (multiplier 1.2). Pin explicitly — skipping lnSpc lets Slides
  *      infer a per-slide default that drifts when other shapes land.
  *
- *    BRANCH 2 (wave-10A): when extract-dom flags `lineHeightMeasured`
- *      (.text-block on slide_25 with inline .code chips, .big,
- *      .highlight inflating the line box past the CSS spec), use an
- *      ABSOLUTE point value. spcPct can't represent content-driven
- *      inflation because it's not a percentage of font leading.
- *      Wave-9 emitted absolute pts unconditionally and broke every
- *      plain paragraph; the flag re-narrows the gate.
+ *    BRANCH 2 (wave-10A): a MEASURED pitch (.text-block on slide_25,
+ *      inline chips inflating the line boxes) stays absolute points.
+ *      Google stores it as a percentage of another size (23.4 pt came
+ *      back as 173 %), but the percentage of the paragraph's own size
+ *      measured worse: Google sizes a line by its largest word.
  *
- *    BRANCH 3: default. Slides treats spcPct as a percentage of its
- *      inferred font-default leading (≈ 1.2 × fontSize for the deck's
- *      fonts), so dividing by 1.2 lands the rendered pitch on CSS
- *      line-height.
+ *    BRANCH 3: the pitch. spcPct x 1.2 x size = CSS line-height.
+ *
+ *    FIRST LINE (top-anchored text in BRANCH 3 and native lists): extract-dom
+ *      measures Chrome's first baseline (`firstBaselineY`) and the
+ *      line's largest font size; topAnchoredTextPlacement turns the gap
+ *      to Google's baseline into tIns (or raises the box). That covers
+ *      CSS half-leading, padding-top and each family's own ascent. The
+ *      older estimates (padding-top, the 1.197 line-box fix, the
+ *      measured-pitch lead) remain only for elements without a
+ *      measurement.
  *
  *
  * 8. WHY THIS DESIGN
@@ -195,6 +201,7 @@
 import * as pptxgenModule from "pptxgenjs";
 import type PptxGenJS from "pptxgenjs";
 import JSZip from "jszip";
+import { topAnchoredTextPlacement } from "./slides-first-baseline";
 /** Deterministic 8-hex digest (FNV-1a 32-bit) — platform-neutral: this module
  * is ALSO bundled for the browser (Sidebar.html), where node:crypto doesn't
  * exist. Collision strength is irrelevant here; the digest only makes drawio
@@ -568,7 +575,32 @@ function emitStyledText(
     typeof s.lineHeight === "number" && fontPx > 0 && s.lineHeight > fontPx
       ? ((s.lineHeight - fontPx) / 2) * PX2PT
       : 0;
-  const tInsPt = padTopPt + lineBoxFixPt + centerDigitInsetPt + measuredFirstLineLeadPt;
+  // MEASURED first baseline (supersedes the three estimates above for top-anchored text in
+  // percentage line spacing). Chrome's baseline is where extract-dom measured it; Google's sits a
+  // fixed 0.9465 x size below the line top whatever the family and spacing (slides-first-baseline.ts),
+  // so the inset is their difference. It also covers padding-top and `line-height: normal`, which
+  // the estimates took as 1.2 for every family: Playfair's taller ascent left complex slide_17's
+  // title 6.4 px high, and the 0.2 em half-leading of slide_06's quote at 1.6 another 6.4 px.
+  // The measured-pitch path (absolute spcPts) keeps its own first-line lead: Google turns spcPts
+  // into a percentage of another size, so the model's offset does not describe those lines.
+  const measuredBaseline =
+    valign === "top" && rotateDeg === 0 && vertOpt === undefined && s.lineHeightMeasured !== true &&
+    typeof s.firstBaselineY === "number" && typeof s.firstLineFontSize === "number" && s.firstLineFontSize > 0
+      ? topAnchoredTextPlacement({
+          boxTopPx: by,
+          boxHeightPx: bh,
+          chromeFirstBaselinePx: s.firstBaselineY,
+          lineSpacingMultiple: s.lineHeight && s.fontSize ? (s.lineHeight / s.fontSize) / 1.2 : 1,
+          firstLineFontSizePx: s.firstLineFontSize,
+        })
+      : null;
+  if (measuredBaseline !== null) {
+    by = measuredBaseline.topPx;
+    bh = measuredBaseline.heightPx;
+  }
+  const tInsPt = measuredBaseline !== null
+    ? measuredBaseline.topInsetPx * PX2PT
+    : padTopPt + lineBoxFixPt + centerDigitInsetPt + measuredFirstLineLeadPt;
   const commonOpts: TextPropsOptions = {
     x: px2in(bx), y: px2in(by), w: px2in(bw), h: px2in(bh),
     valign,
@@ -614,6 +646,10 @@ function emitStyledText(
     if (isSingleLineCentered) {
       commonOpts.lineSpacingMultiple = 1.2;
     } else if (s.lineHeightMeasured === true) {
+      // Kept absolute although Google stores it as a percentage of another size (slide_25's
+      // 23.4 pt came back as 173.33 %): emitting (pitch / size) / 1.2 instead was measured WORSE on
+      // slide_25 (0.97 % -> 1.40 %), because Google sizes the line holding the 24 px .big word by
+      // that word, 55.5 px against Chrome's ~50, and every later line followed it down.
       commonOpts.lineSpacing = s.lineHeight * PX2PT;
     } else {
       commonOpts.lineSpacingMultiple = (s.lineHeight / s.fontSize) / 1.2;
@@ -938,6 +974,10 @@ export interface ElementStyle {
   readonly fontStyle?: "italic" | "normal" | string;
   readonly lineHeight?: number;
   readonly lineHeightMeasured?: boolean;
+  /** Chrome's first-line baseline (client y px), measured by extract-dom.ts measureFirstLine. */
+  readonly firstBaselineY?: number;
+  /** The largest baseline-aligned font size (px) on Chrome's first line: Google sizes the line by it. */
+  readonly firstLineFontSize?: number;
   readonly textAlign?: "left" | "center" | "right" | "end" | "justify" | string;
   readonly textTransform?: "uppercase" | "lowercase" | "none" | string;
   readonly writingMode?: string | null;
@@ -1081,6 +1121,10 @@ export interface ListElement extends ElementCommon {
   /** True when the <ul>/<ol> is itself the visual (own bg/border/radius or a
    * majority of items use a border-bottom separator) — rows never get markers. */
   readonly isContainerList?: boolean;
+  /** Chrome's first-line baseline of the list (client y px), measured by extract-dom.ts measureFirstLine. */
+  readonly firstBaselineY?: number;
+  /** The largest baseline-aligned font size (px) on the list's first line. */
+  readonly firstLineFontSize?: number;
 }
 
 export interface TableCell {
@@ -2407,7 +2451,24 @@ export function buildPptx(
             const liPadTopPx = (firstIt.padding && firstIt.padding.top) || 0;
             const liFirstLineLeadPx =
               liPadTopPx + (liUseRatio && firstIt.fontSize ? ((liRatio - 1) / 2) * firstIt.fontSize : 0);
-            const listTopInsetPt = liFirstLineLeadPx > 1 ? liFirstLineLeadPx * PX2PT : 0;
+            // When extract-dom measured Chrome's first baseline, place Google's on it instead
+            // (slides-first-baseline.ts): the lead above is a stylesheet half-leading, but Google
+            // puts a line's extra spacing below the glyphs, so slide_11's Roboto items at 1.5 drew
+            // about 1.5 px low with it.
+            const listPlacement =
+              typeof el.firstBaselineY === "number" && typeof el.firstLineFontSize === "number" && el.firstLineFontSize > 0
+                ? topAnchoredTextPlacement({
+                    boxTopPx: b.y,
+                    boxHeightPx: b.h,
+                    chromeFirstBaselinePx: el.firstBaselineY,
+                    lineSpacingMultiple: liUseRatio ? liEmittedRatio : 1,
+                    firstLineFontSizePx: el.firstLineFontSize,
+                  })
+                : null;
+            const listBox = listPlacement === null ? { y: b.y, h: b.h } : { y: listPlacement.topPx, h: listPlacement.heightPx };
+            const listTopInsetPt = listPlacement !== null
+              ? listPlacement.topInsetPx * PX2PT
+              : liFirstLineLeadPx > 1 ? liFirstLineLeadPx * PX2PT : 0;
             // Per-item native-bullet colors ride the side-band registry
             // (pptxgenjs has no <a:buClr> support); the BUCLR_<n> objectName
             // tag is how injectBulletColorsIntoZip finds this textbox. One
@@ -2419,7 +2480,7 @@ export function buildPptx(
             const bulletClrName = needBulletClr ? `BUCLR_${bulletColorRegistry.length}` : undefined;
             if (needBulletClr) bulletColorRegistry.push({ colors: nativeBulletColors });
             slide.addText(paragraphs, {
-              x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
+              x: px2in(b.x), y: px2in(listBox.y), w: px2in(b.w), h: px2in(listBox.h),
               valign: "top",
               align: "left",
               fill: { type: "none" },

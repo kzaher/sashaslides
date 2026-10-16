@@ -28,7 +28,8 @@ interface CDPModule {
 }
 const CDP = CDPDefault as CDPModule;
 
-const PORT = 9222;
+// HTML2SLIDES_CHROME_PORT selects the browser, as in convert-pptx-io.ts.
+const PORT = Number(process.env.HTML2SLIDES_CHROME_PORT ?? "9222");
 const dir = resolve(process.argv[2]);
 const out = resolve(process.argv[3]);
 mkdirSync(out, { recursive: true });

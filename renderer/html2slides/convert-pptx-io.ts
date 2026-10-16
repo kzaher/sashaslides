@@ -52,7 +52,9 @@ import {
   type BulletColorList,
 } from "./convert-pptx-lib.js";
 
-const CDP_PORT = 9222;
+// The Chrome DevTools port. HTML2SLIDES_CHROME_PORT lets a run use its own browser, so two
+// conversions (or an agent and the container Chrome) never share one tab pool.
+const CDP_PORT = Number(process.env.HTML2SLIDES_CHROME_PORT ?? "9222");
 
 // chrome-remote-interface ships no .d.ts; its default export is declared
 // `unknown` (types/ambient.d.ts). `CdpModule` is the shared, precise boundary

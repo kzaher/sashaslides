@@ -181,6 +181,12 @@ interface ElementStyle {
   // inflated the line boxes beyond the CSS spec) rather than the CSS value —
   // the converter emits absolute <a:spcPts> line spacing for measured pitches.
   lineHeightMeasured?: boolean;
+  // Chrome's FIRST-LINE BASELINE (client y) and the largest baseline-aligned font size on that line.
+  // Google Slides places a top-anchored line by its own fixed offset, not the CSS half-leading or
+  // the family's ascent, so the converter turns these into the inset that lands Google's baseline
+  // here (slides-first-baseline.ts).
+  firstBaselineY?: number;
+  firstLineFontSize?: number;
   textDecoration: string | null;
   textTransform: string | null;
   letterSpacing: number;
@@ -396,6 +402,9 @@ interface ExtractedElement {
   ordered?: boolean;
   anyStyledItem?: boolean;
   isContainerList?: boolean;
+  // A list's first-line baseline (client y) and that line's largest font size: see measureFirstLine.
+  firstBaselineY?: number;
+  firstLineFontSize?: number;
   columnCount?: number;
   listStyleType?: string;
   hasPseudoBullet?: boolean;
@@ -864,6 +873,62 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     };
   }
 
+  /**
+   * Chrome's first-line baseline inside `el` (client y) and the largest baseline-aligned font size on
+   * that line, or null when `el` has no laid-out text. A text node's client rect is its content
+   * area, whose top is the baseline minus the font's ascent; the ascent comes from canvas
+   * `fontBoundingBoxAscent`, the same rounded metric layout uses (checked against an inserted
+   * zero-size inline-block on complex slides 06, 11 and 17: equal to the pixel). Absolutely
+   * positioned and sub/superscript text does not sit on the line's baseline, so it is skipped.
+   */
+  function measureFirstLine(el: Element): { baselineY: number; fontSize: number } | null {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let first: { baselineY: number; fontSize: number } | null = null;
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      if (!node.textContent || !node.textContent.trim()) continue;
+      const parent = node.parentElement;
+      if (parent === null || !sitsOnLineBaseline(parent, el)) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rect = Array.from(range.getClientRects()).find((r) => r.width > 0 && r.height > 0);
+      if (rect === undefined) continue;
+      const pcs = getComputedStyle(parent);
+      const baselineY = rect.top + fontAscentPx(pcs);
+      const fontSize = parseFloat(pcs.fontSize) || 0;
+      if (first === null) {
+        first = { baselineY, fontSize };
+        continue;
+      }
+      if (Math.abs(baselineY - first.baselineY) > 1) break;
+      first = { baselineY: first.baselineY, fontSize: Math.max(first.fontSize, fontSize) };
+    }
+    return first;
+  }
+
+  function sitsOnLineBaseline(node: Element, container: Element): boolean {
+    for (let current: Element | null = node; current !== null; current = current.parentElement) {
+      const ccs = getComputedStyle(current);
+      if (ccs.display === "none") return false;
+      if (current === container) return true;
+      if (ccs.position === "absolute" || ccs.position === "fixed") return false;
+      if (ccs.verticalAlign !== "baseline") return false;
+    }
+    return false;
+  }
+
+  const fontAscentCache = new Map<string, number>();
+  function fontAscentPx(pcs: CSSStyleDeclaration): number {
+    const font = `${pcs.fontStyle} ${pcs.fontWeight} ${pcs.fontSize} ${pcs.fontFamily}`;
+    const cached = fontAscentCache.get(font);
+    if (cached !== undefined) return cached;
+    const context = document.createElement("canvas").getContext("2d");
+    if (context === null) return (parseFloat(pcs.fontSize) || 0) * 0.9465;
+    context.font = font;
+    const ascent = context.measureText("x").fontBoundingBoxAscent;
+    fontAscentCache.set(font, ascent);
+    return ascent;
+  }
+
   function isVisible(el: Element, bounds: Bounds): boolean {
     if (bounds.w < 1 || bounds.h < 1) return false;
     if (bounds.x + bounds.w < 0 || bounds.y + bounds.h < 0) return false;
@@ -1210,11 +1275,14 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       !!it.borderBottom && !it.bgColor && !((it.borderRadius ?? 0) > 0)
     ).length;
     const isContainerList = containerHasBox || rowSeparatorCount >= Math.max(1, Math.ceil(items.length / 2));
+    const firstLine = measureFirstLine(list);
     return {
       type: "list", bounds, ordered, items, columnCount, listStyleType,
       hasPseudoBullet, pseudoBulletChar, pseudoBulletColor,
       anyStyledItem,
       isContainerList,
+      firstBaselineY: firstLine?.baselineY,
+      firstLineFontSize: firstLine?.fontSize,
       // List container's own box — so convert-pptx can paint the background
       // rounded rect / border around the bulleted list (e.g. features card).
       containerStyle: {
@@ -3221,6 +3289,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       const effectiveLineHeight = lineHeightMeasured
         ? (measuredLinePitch as number)
         : style.lineHeight;
+      const firstLine = measureFirstLine(el);
       // bgColorBehind: nearest ancestor solid bg, sampled only when the
       // element is semi-transparent. Google Slides drops <a:alpha> on text
       // <a:solidFill> at PPTX import, so the converter folds opacity into
@@ -3236,6 +3305,8 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         textAlign: effectiveAlign,
         lineHeight: effectiveLineHeight,
         lineHeightMeasured,
+        firstBaselineY: firstLine?.baselineY,
+        firstLineFontSize: firstLine?.fontSize,
         textDecoration: inlineBorderUnderline ? "underline" : style.textDecoration,
         textTransform: style.textTransform,
         letterSpacing: style.letterSpacing,
