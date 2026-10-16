@@ -30,6 +30,7 @@ import {
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCowWorkspace, cleanupAllCowWorkspaces, cleanupCowWorkspace, type CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
+import { overlayWorkspaceOptions } from "./cow-options.js";
 import { realLlmMergeOps, ledgerDemote, type GreenCluster } from "./llm-merge.js";
 import { writeStabilityJson } from "./stability.js";
 import { detectPriorState, decideStartup } from "./startup-detection.js";
@@ -62,7 +63,7 @@ function overlayAvailable(): string | null {
 const CONVERTER_REL = "renderer/html2slides/convert-pptx.ts";
 const BASE_FILE = ["// convert-pptx.ts (test fixture)", "export const A = 1;", ""].join("\n");
 function makeFork(base: string, upperRoot: string, id: string, fixConst: string): CowWorkspace {
-  const ws = createCowWorkspace({ base, upperRoot, id });
+  const ws = createCowWorkspace(overlayWorkspaceOptions({ base, upperRoot, id }));
   const r = ws.run("bash", ["-c", `printf '%s\\n' 'export const ${fixConst} = "${fixConst}";' >> ${CONVERTER_REL}`]);
   if (r.code !== 0) throw new Error(`fork edit failed for ${id}: ${r.stderr}`);
   return ws;
@@ -156,8 +157,9 @@ async function main(): Promise<void> {
         process.env.COW_WORKSPACE_ROOT = ${JSON.stringify(UPPER_ROOT)};
         const { createCowWorkspace } = await import(${JSON.stringify(resolve(REPO, "cow-workspace/cow-workspace.ts"))});
         const { registerOverlayCleanup } = await import(${JSON.stringify(resolve(HERE, "overlay-cleanup.ts"))});
+        const { overlayWorkspaceOptions } = await import(${JSON.stringify(resolve(HERE, "cow-options.ts"))});
         registerOverlayCleanup();                    // no-op: no startup sweep, no death handler
-        const ws = createCowWorkspace({ base: ${JSON.stringify(base)}, id: ${JSON.stringify(id)}, upperRoot: ${JSON.stringify(UPPER_ROOT)} });
+        const ws = createCowWorkspace(overlayWorkspaceOptions({ base: ${JSON.stringify(base)}, id: ${JSON.stringify(id)}, upperRoot: ${JSON.stringify(UPPER_ROOT)} }));
         const r = ws.run("bash", ["-c", "echo x > persist_probe.txt"]);
         if (r.code !== 0) { console.error("run failed", r.stderr); process.exit(3); }
         process.exit(0);                             // clean exit — nothing must reap
@@ -271,7 +273,7 @@ async function main(): Promise<void> {
     writeFileSync(join(stateDir, "session"), "orig\n");
     const root = `/overlays/lc-jail-${process.pid}`;
     const canWrite = (id: string, cmd: string): boolean => {
-      try { return createCowWorkspace({ base, upperRoot: root, id, jail: true, overlayExtra: [stateDir, "/home/node/.codex"] }).runShell(cmd).code === 0; }
+      try { return createCowWorkspace(overlayWorkspaceOptions({ base, upperRoot: root, id, jail: true, overlayExtra: [stateDir, "/home/node/.codex"] })).runShell(cmd).code === 0; }
       catch { return false; }
     };
     try {

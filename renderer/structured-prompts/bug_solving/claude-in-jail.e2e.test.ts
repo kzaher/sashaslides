@@ -17,6 +17,7 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { createCowWorkspace, cleanupAllCowWorkspaces } from "../../../cow-workspace/cow-workspace.js";
+import { overlayWorkspaceOptions } from "./cow-options.js";
 
 let passed = 0, failed = 0;
 const ok = (n: string, c: boolean, e = "") => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.log(`  ✗ ${n}${e ? ` — ${e}` : ""}`); } };
@@ -38,7 +39,7 @@ function main() {
   writeFileSync(join(base, "NOTES.md"), "# Notes\n\nStatus: pending\n");
   const root = `/overlays/cij-${process.pid}`;
   const id = "cij";
-  const ws = createCowWorkspace({ base, upperRoot: root, id, jail: true, overlayExtra: ["/home/node/.claude"] });
+  const ws = createCowWorkspace(overlayWorkspaceOptions({ base, upperRoot: root, id, jail: true, overlayExtra: ["/home/node/.claude"] }));
   try {
     cleanupAllCowWorkspaces(root);
     // Run claude on a plain editing task INSIDE the jail (jail:true). `env

@@ -27,6 +27,7 @@ import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
 import { createCowWorkspace, cleanupAllCowWorkspaces } from "../../../cow-workspace/cow-workspace.js";
+import { overlayWorkspaceOptions } from "./cow-options.js";
 
 const REPO = "/workspaces/sashaslides";
 const ROOT = "/overlays/switch-branch-e2e"; // isolated root — never touches a live run
@@ -38,6 +39,9 @@ const MARKER = `switch-branch-e2e-marker-${process.pid}`;
 // this process means both our direct `sh(...)` calls AND the engine-spawned
 // branch runs (realIO forwards process.env to the child) use the isolated root.
 process.env.OVERLAY_BRANCH_ROOT = ROOT;
+// cow-workspace dispatches every branch run on the provider and no longer defaults it; the
+// scaffolding names it for real runs (main-scaffolding.ts), so this test must as well.
+process.env.COW_WORKSPACE_PROVIDER = "overlayfs";
 const env = { ...process.env, OVERLAY_BRANCH_ROOT: ROOT };
 
 let passed = 0, failed = 0;
@@ -85,7 +89,7 @@ async function main() {
       tail.includes(MARKER), `tail=${JSON.stringify(tail.trim())}`);
 
     // (a) the edit is a real tracked change in the branch's upper layer.
-    const changed = createCowWorkspace({ base: REPO, upperRoot: ROOT, id: BRANCH }).changed();
+    const changed = createCowWorkspace(overlayWorkspaceOptions({ base: REPO, upperRoot: ROOT, id: BRANCH })).changed();
     ok("(a) switchBranch edit shows in `overlay-branch.sh changed`",
       changed.includes(CANARY), `changed=${JSON.stringify(changed)}`);
 

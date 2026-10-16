@@ -36,6 +36,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
 import { createCowWorkspace } from "../../../cow-workspace/cow-workspace.js";
+import { overlayWorkspaceOptions } from "./cow-options.js";
 import { realLlmMergeOps } from "./llm-merge.js";
 import { writeStabilityJson } from "./stability.js";
 import type { RenderRecord } from "./stability.js";
@@ -73,7 +74,7 @@ function setupBase(tag: string, stab: { pixelPerfect: string[]; xmlStable: strin
   return { base, fixturesDir, stabilityPath, historyDir };
 }
 function makeFork(base: string, upperRoot: string, id: string, fixConst: string): CowWorkspace {
-  const ws = createCowWorkspace({ base, upperRoot, id });
+  const ws = createCowWorkspace(overlayWorkspaceOptions({ base, upperRoot, id }));
   const r = ws.run("bash", ["-c", `printf '%s\\n' 'export const ${fixConst} = "${fixConst}";' >> ${CONVERTER_REL}`]);
   if (r.code !== 0) throw new Error(`fork edit failed for ${id}: ${r.stderr}`);
   return ws;

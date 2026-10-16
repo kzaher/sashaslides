@@ -73,6 +73,7 @@ import {
   cleanupCowWorkspace,
   type CowWorkspace,
 } from "../../../cow-workspace/cow-workspace.js";
+import { overlayWorkspaceOptions } from "./cow-options.js";
 import { makeChangeGate } from "./regression-gate.js";
 import {
   type RenderRecord,
@@ -406,7 +407,7 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
   // converter files live in its upper, readable via a handle over its branch id.
   const forkHandles = green.map((g) => ({
     cluster: g,
-    ws: createCowWorkspace({ base: repo, id: g.branch_id, upperRoot: args.upperRoot }),
+    ws: createCowWorkspace(overlayWorkspaceOptions({ base: repo, id: g.branch_id, upperRoot: args.upperRoot })),
   }));
   // file (repo-relative) → [{ cluster, content }]
   const fileForks = new Map<string, Array<{ cluster: GreenCluster; content: string }>>();
@@ -435,7 +436,7 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
   }
 
   // ── (2) ALL-AT-ONCE, wrapped in a try that falls back to SEQUENTIAL ─────────
-  const allWs = createCowWorkspace({ base: repo, id: `llm-merge-all-${process.pid}-${Date.now()}`, upperRoot: args.upperRoot });
+  const allWs = createCowWorkspace(overlayWorkspaceOptions({ base: repo, id: `llm-merge-all-${process.pid}-${Date.now()}`, upperRoot: args.upperRoot }));
   const allState = { merged: {} as Record<string, string> };
 
   return session.try<MergeReport>(
@@ -540,7 +541,7 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
   const { green, fileForks, baseContent, ops, report } = ctx;
   report.mode = "sequential";
 
-  const seqWs = createCowWorkspace({ base: ctx.repo, id: `llm-merge-seq-${process.pid}-${Date.now()}`, upperRoot: ctx.upperRoot });
+  const seqWs = createCowWorkspace(overlayWorkspaceOptions({ base: ctx.repo, id: `llm-merge-seq-${process.pid}-${Date.now()}`, upperRoot: ctx.upperRoot }));
   const seqInputsRoot = mkdtempSync(join(tmpdir(), "sp-merge-inputs-seq-"));
 
   // The CURRENT accepted contents per file (starts empty = base; mutates as

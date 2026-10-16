@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { mergeRenderCommand } from "./llm-merge.js";
 import { createCowWorkspace } from "../../../cow-workspace/cow-workspace.js";
 import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
+import { overlayWorkspaceOptions } from "./cow-options.js";
 
 let passed = 0, failed = 0;
 const failures: Array<{ name: string; err: unknown }> = [];
@@ -68,7 +69,7 @@ async function main(): Promise<void> {
     const repo = process.cwd().replace(/\/renderer\/structured-prompts\/bug_solving.*$/, "");
     if (!existsSync(join(repo, REC_REL))) { console.log(`      ⚠ SKIP — record-rendering.ts not found under ${repo}`); return; }
     const id = `render-seam-${process.pid}-${Math.floor(process.hrtime()[1])}`;
-    const ws = createCowWorkspace({ base: repo, id });
+    const ws = createCowWorkspace(overlayWorkspaceOptions({ base: repo, id }));
     try {
       const { cmd, outDir } = mergeRenderCommand(ws, {
         recRel: REC_REL,

@@ -13,6 +13,7 @@ import { execSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync, appendFileSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { createCowWorkspace, cleanupAllCowWorkspaces, cleanupCowWorkspace } from "../../../cow-workspace/cow-workspace.js";
+import { overlayWorkspaceOptions } from "./cow-options.js";
 
 const REPO = "/workspaces/sashaslides";
 const ROOT = "/overlays/e2e-branches"; // isolated root so we never touch a live run's branches
@@ -28,7 +29,7 @@ function sh(cmd: string): string {
 }
 /** run a command inside a branch, return stdout */
 function inBranch(id: string, bash: string): string {
-  return createCowWorkspace({ base: REPO, upperRoot: ROOT, id }).runShell(bash).stdout;
+  return createCowWorkspace(overlayWorkspaceOptions({ base: REPO, upperRoot: ROOT, id })).runShell(bash).stdout;
 }
 
 function overlayAvailable(): string | null {
@@ -63,12 +64,12 @@ function main() {
 
     // 3) changed lists the TRACKED changed file.
     inBranch("b3", `echo "// e2e-b3" >> ${CANARY}`);
-    const changed = createCowWorkspace({ base: REPO, upperRoot: ROOT, id: "b3" }).changed();
+    const changed = createCowWorkspace(overlayWorkspaceOptions({ base: REPO, upperRoot: ROOT, id: "b3" })).changed();
     ok("(3) changed lists the edited tracked file", changed.includes(CANARY), `changed=${JSON.stringify(changed)}`);
 
     // 4) gitignore honored — a change to an IGNORED path is NOT reported as changed.
     inBranch("b4", `echo x > node_modules/.e2e-ignored-probe 2>/dev/null || true; echo "// e2e-b4" >> ${CANARY}`);
-    const changed4 = createCowWorkspace({ base: REPO, upperRoot: ROOT, id: "b4" }).changed();
+    const changed4 = createCowWorkspace(overlayWorkspaceOptions({ base: REPO, upperRoot: ROOT, id: "b4" })).changed();
     ok("(4) gitignore honored — ignored file not in changed set",
       changed4.every(f => !f.includes("node_modules")) && changed4.includes(CANARY), `changed=${JSON.stringify(changed4)}`);
 
@@ -104,9 +105,10 @@ function main() {
       const { registerOverlayCleanup } = await import(${JSON.stringify(resolve(REPO, "renderer/structured-prompts/bug_solving/overlay-cleanup.ts"))});
       const { execSync } = await import("child_process");
       const { createCowWorkspace } = await import(${JSON.stringify(resolve(REPO, "cow-workspace/cow-workspace.ts"))});
+      const { overlayWorkspaceOptions } = await import(${JSON.stringify(resolve(REPO, "renderer/structured-prompts/bug_solving/cow-options.ts"))});
       registerOverlayCleanup();                       // NO-OP now: no startup sweep
       const afterSweep = execSync("ls ${ROOT} 2>/dev/null | wc -l").toString().trim();
-      createCowWorkspace({ base: ${JSON.stringify(REPO)}, upperRoot: ${JSON.stringify(ROOT)}, id: "exitbr" }).runShell("true"); // create a branch
+      createCowWorkspace(overlayWorkspaceOptions({ base: ${JSON.stringify(REPO)}, upperRoot: ${JSON.stringify(ROOT)}, id: "exitbr" })).runShell("true"); // create a branch
       const created = execSync("ls ${ROOT} 2>/dev/null | wc -l").toString().trim();
       console.log("SWEEP=" + afterSweep + " CREATED=" + created);
       process.exit(0);                                // NO 'exit' handler → nothing reaps
