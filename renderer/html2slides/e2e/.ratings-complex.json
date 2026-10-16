@@ -11,23 +11,19 @@
   },
   "slide_03": {
     "status": "good",
-    "comment": "Everything is moved up a bit everywhere, entire list, small 0.3pp down, bars on graphs.",
-    "ratedAt": "2026-07-01T18:34:09.727Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_03.png"
+    "ratedAt": "2026-10-16T22:16:33.542Z"
   },
   "slide_04": {
     "status": "good",
-    "ratedAt": "2026-07-12T00:56:16.602Z",
-    "comment": "Bad tick positioning, not centered."
+    "ratedAt": "2026-10-16T22:16:36.956Z"
   },
   "slide_05": {
     "status": "good",
-    "ratedAt": "2026-06-30T23:11:00.861Z"
+    "ratedAt": "2026-10-16T22:16:39.628Z"
   },
   "slide_06": {
     "status": "good",
-    "comment": "Center text is moved or aligned wrong. On the original it's lower, also the Quote is positioned too high.",
-    "ratedAt": "2026-06-30T23:11:10.583Z"
+    "ratedAt": "2026-10-16T22:16:42.806Z"
   },
   "slide_07": {
     "status": "good",
@@ -36,15 +32,11 @@
   },
   "slide_08": {
     "status": "good",
-    "comment": "numbers in circle look off center.",
-    "ratedAt": "2026-07-01T18:35:20.685Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_08.png"
+    "ratedAt": "2026-10-16T22:16:45.599Z"
   },
   "slide_09": {
     "status": "good",
-    "comment": "There are two underlines. Header items are just offset. to the left.",
-    "ratedAt": "2026-07-01T18:35:33.903Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_09.png"
+    "ratedAt": "2026-10-16T22:16:55.515Z"
   },
   "slide_10": {
     "status": "good",
@@ -54,29 +46,23 @@
   },
   "slide_11": {
     "status": "good",
-    "comment": "Not a list in output, is it possible to color bullets in a list element?",
-    "ratedAt": "2026-07-03T08:48:35.834Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_11.png"
+    "ratedAt": "2026-10-16T22:17:03.420Z"
   },
   "slide_12": {
     "status": "good",
-    "comment": "Black borders are too big, wrong corner radius. Also letter spacing is wrong on produce features, but unusre can this be fixed.",
-    "ratedAt": "2026-07-05T18:14:46.049Z"
+    "ratedAt": "2026-10-16T22:17:11.467Z"
   },
   "slide_13": {
     "status": "good",
-    "ratedAt": "2026-07-12T00:56:28.337Z",
-    "comment": "Why are there so many rendered regions on the right, this looks like it should be possible to support trapezoid shape and more generic shapes with gradient."
+    "ratedAt": "2026-10-16T22:17:15.516Z"
   },
   "slide_14": {
     "status": "good",
-    "comment": "The top border style is transferred wrong, like rounded border vs straight top line which is clipped by the mask of the element (there is clipping code which works recursively when it tries to then overlap clipping elements and reuse some existing ones.\nIn this case there should be an element which can present this cut.",
-    "ratedAt": "2026-06-30T23:16:47.084Z"
+    "ratedAt": "2026-10-16T22:17:18.521Z"
   },
   "slide_15": {
     "status": "good",
-    "comment": "Why can't you make the text just a single text area (curl -X Post, ....), at least why can't you make each line one text? I would expect that if there are spans inside of div, they should just mark style.\nThe left area has wrong size.\nAlso fix the spacing in the original html view, it's glued together for some reason.",
-    "ratedAt": "2026-06-30T23:16:55.736Z"
+    "ratedAt": "2026-10-16T22:17:20.817Z"
   },
   "slide_16": {
     "status": "good",
@@ -84,9 +70,7 @@
   },
   "slide_17": {
     "status": "good",
-    "comment": "Series A Funded should be in a single line.",
-    "ratedAt": "2026-07-01T18:37:34.771Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_17.png"
+    "ratedAt": "2026-10-16T22:17:23.885Z"
   },
   "slide_18": {
     "status": "good",
@@ -95,85 +79,69 @@
   },
   "slide_19": {
     "status": "good",
-    "ratedAt": "2026-07-12T00:56:47.262Z",
-    "comment": "The icons on the left side of buttons look like they have white background. On the bottom side the red text is misaligned with exclamation marks."
+    "ratedAt": "2026-10-16T22:17:26.653Z"
   },
   "slide_20": {
     "status": "good",
-    "comment": "Inner and outer circles are wrong, in the original outer circle is larger.",
-    "ratedAt": "2026-05-02T08:11:43.727Z"
+    "ratedAt": "2026-10-16T22:17:28.911Z"
   },
   "slide_21": {
     "status": "good",
-    "comment": "A+ aligned wrong and wrong line height for text.",
-    "ratedAt": "2026-07-05T18:18:39.220Z"
+    "ratedAt": "2026-10-16T22:17:30.604Z"
   },
   "slide_22": {
     "status": "good",
-    "comment": "3 is aligned wrong (top vs middle)",
-    "ratedAt": "2026-06-30T23:19:48.400Z"
+    "ratedAt": "2026-10-16T22:17:32.114Z"
   },
   "slide_23": {
     "status": "good",
-    "ratedAt": "2026-05-14T14:13:45.549Z"
+    "ratedAt": "2026-10-16T22:17:34.860Z"
   },
   "slide_24": {
     "status": "good",
-    "ratedAt": "2026-05-14T14:13:52.958Z"
+    "ratedAt": "2026-10-16T22:17:36.232Z"
   },
   "slide_25": {
     "status": "good",
-    "comment": "The start of the text is moved up (The quick brown fox jumps ...)",
-    "ratedAt": "2026-07-01T18:37:55.997Z"
+    "ratedAt": "2026-10-16T22:17:56.346Z"
   },
   "slide_26": {
     "status": "good",
-    "comment": "Everything is heavily moved up.",
-    "ratedAt": "2026-07-01T18:38:03.130Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_26.png"
+    "ratedAt": "2026-10-16T22:18:00.719Z"
   },
   "slide_27": {
     "status": "good",
-    "ratedAt": "2026-06-30T23:20:49.075Z"
+    "ratedAt": "2026-10-16T22:18:01.961Z"
   },
   "slide_28": {
     "status": "good",
-    "comment": "100% is wrongly aligned, top vs middle",
-    "ratedAt": "2026-07-01T18:38:20.976Z"
+    "ratedAt": "2026-10-16T22:59:55.640Z",
+    "comment": "Glowing text shadow is missing.",
+    "annotation": "/workspaces/sashaslides/.sxs-forward/complex/annotations/slide_28.png"
   },
   "slide_29": {
     "status": "good",
-    "comment": "Everything moved up. The more to the bottom the worse.",
-    "ratedAt": "2026-07-01T18:38:27.713Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_29.png"
+    "ratedAt": "2026-10-16T22:18:36.095Z"
   },
   "slide_30": {
     "status": "good",
-    "comment": "Not a list element, just text with bullets. can't bullets in a list in slides be colored?",
-    "ratedAt": "2026-07-05T18:19:26.869Z"
+    "ratedAt": "2026-10-16T22:18:39.973Z"
   },
   "slide_31": {
     "status": "good",
-    "comment": "Everything moved up. Title not in two rows.",
-    "ratedAt": "2026-07-01T18:39:33.015Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_31.png"
+    "ratedAt": "2026-10-16T22:18:43.167Z"
   },
   "slide_32": {
     "status": "good",
-    "comment": "It does feel like bottom rectangle is moved up, the more to the bottom, the bigger the error.",
-    "ratedAt": "2026-07-05T18:19:38.746Z"
+    "ratedAt": "2026-10-16T22:18:45.968Z"
   },
   "slide_33": {
     "status": "good",
-    "comment": "Cards moved to up.",
-    "ratedAt": "2026-07-01T18:40:04.065Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_33.png"
+    "ratedAt": "2026-10-16T22:18:51.221Z"
   },
   "slide_34": {
     "status": "good",
-    "comment": "Card moved up. Wrong padding below the first item and horizontal line. Looks like some letter spacing is missing, not sure can something be done there.",
-    "ratedAt": "2026-07-01T18:40:43.434Z",
-    "annotation": "/tmp/sxs-complex/annotations/slide_34.png"
+    "ratedAt": "2026-10-16T22:18:57.581Z"
   },
   "slide_35": {
     "status": "good",
@@ -183,9 +151,7 @@
   },
   "slide_36": {
     "status": "good",
-    "ratedAt": "2026-07-21T17:13:52.099Z",
-    "comment": "Nothing is there, golden numbers, text of list item, subtitle, nothing is there.",
-    "annotation": "/tmp/sxs-complex/annotations/slide_36.png"
+    "ratedAt": "2026-10-16T22:18:59.732Z"
   },
   "slide_37": {
     "status": "good",
@@ -195,8 +161,6 @@
   },
   "slide_38": {
     "status": "good",
-    "ratedAt": "2026-07-21T17:14:00.808Z",
-    "comment": "Left border is wrong, everything is camped into a single row.",
-    "annotation": "/tmp/sxs-complex/annotations/slide_38.png"
+    "ratedAt": "2026-10-16T22:19:03.735Z"
   }
 }
