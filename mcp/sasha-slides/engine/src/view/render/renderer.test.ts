@@ -306,6 +306,19 @@ describe("tables are structural markup", () => {
     assert.match(wide, /table-layout:fixed;width:600px/);
   });
 
+  // complex slide 30 on the reverse SxS: Chrome anti-aliases each cell's fill on its own, so a dark
+  // header showed light hairlines where two fills met on a fractional device pixel.
+  it("closes the seams between solid cell fills toward the inner neighbours only", () => {
+    const solid = (alpha: number): (typeof table.cells)[number]["fill"] => ({ kind: "solid", colour: { kind: "literal", hexadecimal: "#2d3748", alpha } });
+    const shadows = (alpha: number): (string | undefined)[] =>
+      elementMarkup({ ...table, cells: table.cells.map((cell) => ({ ...cell, fill: solid(alpha) })) })
+        .split("<td ")
+        .slice(1)
+        .map((cellMarkup) => /box-shadow:([^;"]*)/.exec(cellMarkup.slice(0, cellMarkup.indexOf(">")))?.[1]);
+    assert.deepEqual(shadows(1), ["0.5px 0 0 #2d3748, 0 0.5px 0 #2d3748", "0 0.5px 0 #2d3748", "0.5px 0 0 #2d3748", undefined]);
+    assert.deepEqual(shadows(0.5), [undefined, undefined, undefined, undefined], "a translucent fill would double its alpha");
+  });
+
   it("lets a row grow with its text: no fixed height, clipping or overflow on rows and cells", () => {
     assert.doesNotMatch(tableMarkup, /max-height|overflow:hidden|<td[^>]*height:/);
     // The wrapper holds the grid's height as a minimum, so a grown row extends it rather than clipping.

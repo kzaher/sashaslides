@@ -33,6 +33,7 @@ import type {
   TextBody,
   UnsupportedElement,
 } from "../../contracts/document.ts";
+import type { ThemeSnapshot } from "../../contracts/document.ts";
 import type { Frame } from "../../contracts/geometry.ts";
 import { ELEMENT_ID_ATTRIBUTE, ELEMENT_KIND_ATTRIBUTE, MORPH_KEY_ATTRIBUTE } from "../../contracts/render.ts";
 import type { TextTarget } from "../../contracts/selection.ts";
@@ -469,7 +470,7 @@ function TableView(properties: Readonly<{ element: TableElement; context: SlideR
             >
               {element.columns.map((column, columnIndex) => {
                 const cell = element.cells[rowIndex * columnCount + columnIndex];
-                return cell === undefined ? <td key={column.id} /> : <TableCellView key={column.id} element={element} cell={cell} context={context} styleContext={styleContext} />;
+                return cell === undefined ? <td key={column.id} /> : <TableCellView key={column.id} element={element} cell={cell} context={context} styleContext={styleContext} rowIndex={rowIndex} columnIndex={columnIndex} />;
               })}
             </tr>
           ))}
@@ -480,7 +481,9 @@ function TableView(properties: Readonly<{ element: TableElement; context: SlideR
   );
 }
 
-function TableCellView(properties: Readonly<{ element: TableElement; cell: TableCell; context: SlideRenderContext; styleContext: TextStyleContext }>): ReactElement {
+function TableCellView(
+  properties: Readonly<{ element: TableElement; cell: TableCell; context: SlideRenderContext; styleContext: TextStyleContext; rowIndex: number; columnIndex: number }>,
+): ReactElement {
   const { cell, context } = properties;
   const theme = context.theme;
   const fill = fillRendering({ fill: cell.fill, theme, assetAddress: context.assetAddress });
@@ -493,6 +496,7 @@ function TableCellView(properties: Readonly<{ element: TableElement; cell: Table
     whiteSpace: cell.textBox.wrap ? "pre-wrap" : "pre",
     overflowWrap: "break-word",
     ...fill.background,
+    ...cellSeamCover({ cell, theme, rowIndex: properties.rowIndex, columnIndex: properties.columnIndex, element: properties.element }),
     borderTop: borders.top === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.top }, theme).borderTop,
     borderRight: borders.right === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.right }, theme).borderRight,
     borderBottom: borders.bottom === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.bottom }, theme).borderBottom,
@@ -508,6 +512,26 @@ function TableCellView(properties: Readonly<{ element: TableElement; cell: Table
     </td>
   );
 }
+
+/**
+ * Chrome anti-aliases every cell's fill on its own, so where two fills meet on a fractional device
+ * pixel the page shows through as a hairline: light "column rules" across a dark header that Google
+ * never draws (reverse SxS, complex slide 30). A half-pixel shadow of the cell's own solid colour
+ * reaches under its right and lower neighbours and closes the seam; it is painted with the
+ * backgrounds, so collapsed borders and text still draw over it, and it never crosses the table's
+ * outer edge. Translucent fills are left alone: the overlap would double their alpha.
+ */
+function cellSeamCover(options: Readonly<{ element: TableElement; cell: TableCell; theme: ThemeSnapshot; rowIndex: number; columnIndex: number }>): CSSProperties {
+  const fill = options.cell.fill;
+  if (fill.kind !== "solid" || fill.colour.alpha < 1) return {};
+  const colour = colourValue(fill.colour, options.theme);
+  const shadows: string[] = [];
+  if (options.columnIndex + options.cell.columnSpan < options.element.columns.length) shadows.push(`${SEAM_COVER_PX}px 0 0 ${colour}`);
+  if (options.rowIndex + options.cell.rowSpan < options.element.rows.length) shadows.push(`0 ${SEAM_COVER_PX}px 0 ${colour}`);
+  return shadows.length === 0 ? {} : { boxShadow: shadows.join(", ") };
+}
+
+const SEAM_COVER_PX = 0.5;
 
 /** Reports the visible row heights after layout (rows grow with their text). */
 function useTableRowReport(options: Readonly<{ element: TableElement; context: SlideRenderContext; rowElements: RefObject<(HTMLTableRowElement | null)[]> }>): void {
