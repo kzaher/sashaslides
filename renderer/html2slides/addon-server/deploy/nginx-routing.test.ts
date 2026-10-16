@@ -42,6 +42,9 @@ const CONNECTOR_PATHS: readonly string[] = [
   "/comments/allow",
   "/comments/allow/",
   "/comments/allow/picker.js",
+  // The sidebar's access check (comment-bot/comment-access-check.ts). Live 2026-10-16 it was missing
+  // here, so Code.gs got the website's 404 and the Allow card never appeared.
+  "/comments/access",
 ];
 
 /** The deck server inside the connector (mcp/sasha-slides/decks): pages, built files, the API and its socket. */
