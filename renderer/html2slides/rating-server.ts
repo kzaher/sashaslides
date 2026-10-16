@@ -36,6 +36,7 @@ import {
   isReverseDirection,
   parseRatingDirection,
   parseReverseView,
+  reverseGoldenStatus,
   reverseRatingsFileName,
   scanReverseResults,
   summarizeReverse,
@@ -45,6 +46,7 @@ import {
   type ReverseView,
 } from "./reverse-rating.js";
 import { reverseBarHtml, reverseClientScript, reverseMetricsHtml, reversePageStyles, reverseZoomCropLabels } from "./reverse-rating-page.js";
+import { REVERSE_GOLDEN_DRIFT_LIMIT } from "../structured-prompts/bug_solving/reverse-direction.js";
 
 const args = process.argv.slice(2);
 const resultsDir = resolve(args[0] || ".");
@@ -561,6 +563,8 @@ function findReverseComparisons(): SlideComparison[] {
     originalPng: slide.googlePng,
     slidesPng: slide.sashaPng,
     status: "pending",
+    // Against the user's golden, so a Good slide that drifted shows in the default view.
+    ...reverseGoldenStatus({ slide, goldensDirectory: reverseGoldensDir, driftLimitPercent: REVERSE_GOLDEN_DRIFT_LIMIT }),
     // htmlFile / slidesUrl stay unset: they would fill the forward "Round-1
     // provenance" panel, and the reverse pane labels already link the fixture,
     // the Sasha HTML and the Google deck (reverse-rating-page.ts).

@@ -11,7 +11,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { PNG } from "pngjs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -24,6 +25,7 @@ import {
   parseRatingDirection,
   parseReverseMetrics,
   parseReverseView,
+  reverseGoldenStatus,
   scanReverseResults,
   summarizeReverse,
   type FixtureDirectories,
@@ -225,6 +227,29 @@ test("blessReverseGolden copies the Sasha screenshot into the given directory on
   assert.deepEqual(readFileSync(written), readFileSync(slide.sashaPng));
   assert.throws(() => blessReverseGolden({ slide, goldensDirectory: join(directory, "..", "goldens") }), /forward goldens/);
   assert.equal(existsSync(join(directory, "..", "goldens")), false);
+});
+
+test("reverseGoldenStatus tells new, matching, drifted and missing renders apart", () => {
+  const { directory, fixtureDirectories } = fakeWorkspace();
+  const slide = findReverseSlide({ resultsDirectory: directory, fixtureDirectories, slideId: "complex__slide_07" });
+  assert.ok(slide);
+  const goldensDirectory = join(directory, "..", "goldens-reverse-status");
+  const status = (driftLimitPercent = 0.05) => reverseGoldenStatus({ slide, goldensDirectory, driftLimitPercent });
+  assert.equal(status().diffStatus, "new");
+  blessReverseGolden({ slide, goldensDirectory });
+  assert.deepEqual(status(), { diffStatus: "ok", diffPixels: 0 });
+  // A golden that holds a different image (as deck 02/03 held each other's) has drifted.
+  const png = PNG.sync.read(readFileSync(slide.sashaPng));
+  for (let offset = 0; offset < png.data.length; offset += 4) {
+    for (const channel of [0, 1, 2]) png.data[offset + channel] = 255 - (png.data[offset + channel] ?? 0);
+  }
+  writeFileSync(join(goldensDirectory, "complex__slide_07.png"), PNG.sync.write(png));
+  const drifted = status();
+  assert.equal(drifted.diffStatus, "regressed");
+  assert.ok(drifted.diffPixels > 0);
+  assert.equal(status(100).diffStatus, "ok", "a drift under the limit is ok");
+  rmSync(slide.sashaPng);
+  assert.equal(status().diffStatus, "missing-current");
 });
 
 test("summarizeReverse averages only the metrics that exist and names the worst slides", () => {

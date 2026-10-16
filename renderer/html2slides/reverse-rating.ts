@@ -33,6 +33,8 @@
  */
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "fs";
 import { basename, join } from "path";
+import { PNG } from "pngjs";
+import { compareImages, type RgbaImage } from "./reverse/reverse-metrics.js";
 
 /** Which way the rating server compares: forward = HTML -> Google Slides, reverse = Google Slides -> Sasha HTML. */
 export type RatingDirection = "forward" | "reverse";
@@ -264,6 +266,51 @@ export function blessReverseGolden(options: Readonly<{ slide: ReverseSlide; gold
   const target = join(options.goldensDirectory, `${options.slide.id}.png`);
   copyFileSync(options.slide.sashaPng, target);
   return target;
+}
+
+/** How a reverse slide's current render compares with the golden the user blessed for it. */
+export type ReverseGoldenStatus = Readonly<{
+  /** "ok" matches, "regressed" drifted past the limit, "new" has no golden,
+   *  "missing-current" has a golden but no render. */
+  diffStatus: "ok" | "regressed" | "new" | "missing-current";
+  /** Pixels that differ after the reverse metric's blur (0 when byte-identical). */
+  diffPixels: number;
+}>;
+
+const goldenStatusCache = new Map<string, ReverseGoldenStatus>();
+
+/**
+ * The rating UI's default view hides a slide rated Good unless its golden check says it diverged,
+ * and the reverse direction had no golden check. A Good slide whose golden no longer matched could
+ * therefore not be found without "show all". Measured 2026-10-16: deck slides 02/03 sat 18% and 23%
+ * from goldens holding each other's image, every slide was rated Good, the default view was empty,
+ * and the user's re-bless click landed on the page's fallback slide (basic 01) instead. Uses the
+ * same measure and limit as the bug_solving reverse gate, so the page and the gate agree. Cached
+ * by both files' mtime and size: only a changed render or golden is compared again.
+ */
+export function reverseGoldenStatus(options: Readonly<{ slide: ReverseSlide; goldensDirectory: string; driftLimitPercent: number }>): ReverseGoldenStatus {
+  const golden = join(options.goldensDirectory, `${options.slide.id}.png`);
+  if (!existsSync(golden)) return { diffStatus: "new", diffPixels: 0 };
+  if (!existsSync(options.slide.sashaPng)) return { diffStatus: "missing-current", diffPixels: 0 };
+  const goldenStat = statSync(golden);
+  const renderStat = statSync(options.slide.sashaPng);
+  const key = `${golden}:${goldenStat.mtimeMs}:${goldenStat.size}|${options.slide.sashaPng}:${renderStat.mtimeMs}:${renderStat.size}:${options.driftLimitPercent}`;
+  const cached = goldenStatusCache.get(key);
+  if (cached !== undefined) return cached;
+  const goldenBytes = readFileSync(golden);
+  const renderBytes = readFileSync(options.slide.sashaPng);
+  let status: ReverseGoldenStatus = { diffStatus: "ok", diffPixels: 0 };
+  if (!goldenBytes.equals(renderBytes)) {
+    const comparison = compareImages({ expected: decodePng(goldenBytes), actual: decodePng(renderBytes) });
+    status = { diffStatus: comparison.mismatchPercent > options.driftLimitPercent ? "regressed" : "ok", diffPixels: comparison.mismatchedPixels };
+  }
+  goldenStatusCache.set(key, status);
+  return status;
+}
+
+function decodePng(bytes: Buffer): RgbaImage {
+  const png = PNG.sync.read(bytes);
+  return { width: png.width, height: png.height, data: png.data };
 }
 
 /** Deck-level numbers for the report strip under the rating UI. */
