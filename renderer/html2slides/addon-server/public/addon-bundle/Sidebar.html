@@ -1963,15 +1963,36 @@
   let _domCounter = 0;
   let _currentClipMask = null;
   const _deferredEls = [];
+  let _currentStackZ = null;
   const _origPush = elements.push.bind(elements);
   elements.push = (...items) => {
     for (const it of items) {
       if (!it) continue;
       if (it._domIdx === void 0) it._domIdx = _domCounter++;
       if (it.clipMask === void 0) it.clipMask = _currentClipMask;
+      if (it.stackZ === void 0) it.stackZ = _currentStackZ;
     }
     return _origPush(...items);
   };
+  const _origDeferredPush = _deferredEls.push.bind(_deferredEls);
+  _deferredEls.push = (...items) => {
+    for (const it of items) {
+      if (it && it.stackZ === void 0) it.stackZ = _currentStackZ;
+    }
+    return _origDeferredPush(...items);
+  };
+  function rootStackZOf(el) {
+    let found = null;
+    for (let node = el; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+      const nodeCs = getComputedStyle(node);
+      if (nodeCs.zIndex === "auto") continue;
+      const parentDisplay = node.parentElement ? getComputedStyle(node.parentElement).display : "";
+      const applies = nodeCs.position !== "static" || /flex|grid/.test(parentDisplay);
+      const z = parseInt(nodeCs.zIndex, 10);
+      if (applies && Number.isFinite(z)) found = z;
+    }
+    return found;
+  }
   function rectsIntersect(a, b, eps = 0.5) {
     return !(a.x + a.w <= b.x + eps || b.x + b.w <= a.x + eps || a.y + a.h <= b.y + eps || b.y + b.h <= a.y + eps);
   }
@@ -3386,6 +3407,15 @@
     return false;
   }
   function walk(el) {
+    const _outerStackZ = _currentStackZ;
+    _currentStackZ = rootStackZOf(el);
+    try {
+      walkElement(el);
+    } finally {
+      _currentStackZ = _outerStackZ;
+    }
+  }
+  function walkElement(el) {
     if (seen.has(el)) return;
     const tag = (el.tagName || "").toUpperCase();
     if (!tag) return;
@@ -4033,7 +4063,11 @@
     }
   }
   walk(document.body);
-  for (const sp of _deferredChipSpans) emitPillSpan(sp);
+  for (const sp of _deferredChipSpans) {
+    _currentStackZ = rootStackZOf(sp);
+    emitPillSpan(sp);
+  }
+  _currentStackZ = null;
   for (const de of _deferredEls) elements.push(de);
   const bodyCs = getComputedStyle(document.body);
   const htmlCs = getComputedStyle(document.documentElement);
@@ -4142,15 +4176,36 @@
   let _domCounter = 0;
   let _currentClipMask = null;
   const _deferredEls = [];
+  let _currentStackZ = null;
   const _origPush = elements.push.bind(elements);
   elements.push = (...items) => {
     for (const it of items) {
       if (!it) continue;
       if (it._domIdx === void 0) it._domIdx = _domCounter++;
       if (it.clipMask === void 0) it.clipMask = _currentClipMask;
+      if (it.stackZ === void 0) it.stackZ = _currentStackZ;
     }
     return _origPush(...items);
   };
+  const _origDeferredPush = _deferredEls.push.bind(_deferredEls);
+  _deferredEls.push = (...items) => {
+    for (const it of items) {
+      if (it && it.stackZ === void 0) it.stackZ = _currentStackZ;
+    }
+    return _origDeferredPush(...items);
+  };
+  function rootStackZOf(el) {
+    let found = null;
+    for (let node = el; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+      const nodeCs = getComputedStyle(node);
+      if (nodeCs.zIndex === "auto") continue;
+      const parentDisplay = node.parentElement ? getComputedStyle(node.parentElement).display : "";
+      const applies = nodeCs.position !== "static" || /flex|grid/.test(parentDisplay);
+      const z = parseInt(nodeCs.zIndex, 10);
+      if (applies && Number.isFinite(z)) found = z;
+    }
+    return found;
+  }
   function rectsIntersect(a, b, eps = 0.5) {
     return !(a.x + a.w <= b.x + eps || b.x + b.w <= a.x + eps || a.y + a.h <= b.y + eps || b.y + b.h <= a.y + eps);
   }
@@ -5565,6 +5620,15 @@
     return false;
   }
   function walk(el) {
+    const _outerStackZ = _currentStackZ;
+    _currentStackZ = rootStackZOf(el);
+    try {
+      walkElement(el);
+    } finally {
+      _currentStackZ = _outerStackZ;
+    }
+  }
+  function walkElement(el) {
     if (seen.has(el)) return;
     const tag = (el.tagName || "").toUpperCase();
     if (!tag) return;
@@ -6212,7 +6276,11 @@
     }
   }
   walk(document.body);
-  for (const sp of _deferredChipSpans) emitPillSpan(sp);
+  for (const sp of _deferredChipSpans) {
+    _currentStackZ = rootStackZOf(sp);
+    emitPillSpan(sp);
+  }
+  _currentStackZ = null;
   for (const de of _deferredEls) elements.push(de);
   const bodyCs = getComputedStyle(document.body);
   const htmlCs = getComputedStyle(document.documentElement);
