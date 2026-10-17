@@ -20,6 +20,7 @@
  *   --step sidebar   add Sidebar.html and set it
  *   --step manifest  set appsscript.json (needs the manifest shown in editor settings)
  *   --step editor    add EditorShell.html when missing and set it (the deck editor's frame host)
+ *   --step diagram   add Diagram.html when missing and set it (the draw.io diagram dialog)
  *   --step put       --file <Name.gs|Name.html> --from <path>: create the file when missing, set it
  *   --step verify    read every model back and compare lengths to disk
  */
@@ -44,7 +45,7 @@ const SCRIPT_ID = option("--script-id") ?? "1GqibbX21wU_8SMuFAC8nWStv6Y8wfrBNfiK
 const STEP = option("--step") ?? "verify";
 const PORT = Number(option("--port") ?? 9223);
 
-type Step = "code" | "sidebar" | "dialog" | "report" | "editor" | "put" | "manifest" | "create" | "push" | "verify";
+type Step = "code" | "sidebar" | "dialog" | "report" | "editor" | "diagram" | "put" | "manifest" | "create" | "push" | "verify";
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled case: ${String(value)}`);
@@ -58,6 +59,7 @@ function parseStep(raw: string): Step {
     raw === "dialog" ||
     raw === "report" ||
     raw === "editor" ||
+    raw === "diagram" ||
     raw === "put" ||
     raw === "manifest" ||
     raw === "create" ||
@@ -375,6 +377,14 @@ async function main(): Promise<void> {
         break;
       }
       if (await setActiveModel(client, readFileSync(`${DIST}/EditorShell.html`, "utf-8"))) await save(client);
+      break;
+    }
+    case "diagram": {
+      if (!(await createFile(client, { name: "Diagram.html", kind: "html" })) || !(await selectFile(client, "Diagram.html"))) {
+        process.exitCode = 1;
+        break;
+      }
+      if (await setActiveModel(client, readFileSync(`${DIST}/Diagram.html`, "utf-8"))) await save(client);
       break;
     }
     case "put": {

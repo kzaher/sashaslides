@@ -27,8 +27,23 @@ into your Google Slides deck as native, editable objects. The website is <https:
 | `types/`, `deps/`, `cow-workspace/` | Shared typings, forked dependencies (pptxgenjs, drawio), copy-on-write workspaces |
 
 Older work still in the tree, outside the product above: `presentations/` and
-`presentation-templates/` (the whiteboard deck pipeline) and `bridge/` (the live-display bridge,
-still offered on the site's `/dev` page).
+`presentation-templates/` (the whiteboard deck pipeline).
+
+## The developer page and draw.io diagrams
+
+`https://sashaslides.com/dev` is a TypeScript developer page built on the product converter
+(`renderer/html2slides/addon-server/`), not linked from any public page. Paste or drop HTML, preview
+it with the converter's warnings, insert it into your own deck with your Google sign-in
+(`POST /deck-api/google-slides/insert-html`), download a `.pptx`, or export slides as PNG
+(`POST /deck-api/google-slides/export-png`).
+
+A draw.io diagram on a slide is a picture whose alternative-text description carries the stamp
+`drawio:<id>;v=<version>` and whose link points at
+`sasha_slides/slide/<presentationId>/drawio/<id>.drawio` in the person's Drive
+(`mcp/sasha-slides/converter/drawio-diagram.ts`). The add-on's diagram dialog edits it; saving a
+diagram whose source lives under another document writes a copy under this one
+(`drawio-save-plan.ts`). Assistants use the connector: `propose_slides` with a draw.io source, and
+the `deck_diagrams` tool.
 
 ## Development
 

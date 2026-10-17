@@ -29,6 +29,12 @@ declare global {
   const __SASHA_REPO_ROOT__: string;
 
   /**
+   * Where the deck editor and the self-hosted draw.io editor live (`SASHA_EDITOR_ORIGIN`, default
+   * https://sashaslides.com), inlined by build-addon.ts for the slides window and the diagram dialog.
+   */
+  const __SASHA_EDITOR_ORIGIN__: string;
+
+  /**
    * The hosted connector's `https://<host>/mcp` address, from `SASHA_CONNECTOR_URL` at build time,
    * or null when the build was given none. Defined for the sidebar bundle only.
    */

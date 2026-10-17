@@ -54,4 +54,6 @@ jobs:
             npm run -s renderer:solver:all-tests
             npx tsx --test $(ls renderer/html2slides/*.test.ts renderer/html2slides/reverse/*.test.ts \
               | grep -v -e drawio-store.e2e.test.ts -e chrome-capture.e2e.test.ts)
+            npx tsx --test mcp/sasha-slides/converter/test/drawio-*.test.ts
+            npm ci --prefix renderer/html2slides/addon-server && npm test --prefix renderer/html2slides/addon-server
             node --test report-service/test/*.test.ts

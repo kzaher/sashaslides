@@ -6,6 +6,7 @@
  *   src/dialog.tsx   ->  Dialog.html    (the slides: the grid + the mark-up view)
  *   src/report.tsx   ->  Report.html    (the defect report: anonymise, review, send)
  *   src/editor-shell.ts -> EditorShell.html (the deck editor's thin frame host, SPEC.md 21.13)
+ *   src/diagram.tsx  ->  Diagram.html   (the draw.io diagram dialog: list, edit, save copy-on-write)
  *   src/apps-script-project.ts codeGs() -> Code.gs (every google.script.run function + the two menu items)
  *   src/apps-script-project.ts APPS_SCRIPT_MANIFEST -> appsscript.json
  *
@@ -26,12 +27,12 @@
  *
  * Output goes to the repo-root dist/ (gitignored), mirroring the source path:
  *
- *   dist/mcp/sasha-slides/addon/{appsscript.json, Code.gs, Sidebar.html, Dialog.html, Report.html, EditorShell.html}
+ *   dist/mcp/sasha-slides/addon/{appsscript.json, Code.gs, Sidebar.html, Dialog.html, Report.html, EditorShell.html, Diagram.html}
  *
  * SASHA_EDITOR_ORIGIN (default https://sashaslides.com) is where Code.gs sends the editor handoff
  * and where the editor frame is loaded from; a development build points it at a tunnel.
  *
- * It mirrors renderer/html2slides/browser/build-addon.ts in spirit and differs in two ways that
+ * It mirrors the retired html2slides add-on build (renderer/html2slides/browser/build-addon.ts, deleted) in spirit and differs in two ways that
  * matter:
  *
  *   1. THE TYPECHECK IS ITS OWN FAILING STEP, BEFORE ANYTHING IS EMITTED. esbuild strips types
@@ -86,7 +87,7 @@ async function main(): Promise<void> {
   const extractorJs = extractorScript({ minify: true });
   // Base64, not a raw string literal. HtmlService sanitises and relays the sidebar document, and a
   // large inlined blob has been observed to come back corrupted ("Uncaught SyntaxError: Invalid or
-  // unexpected token" -- see renderer/html2slides/browser/build-addon.ts step 3). Base64 narrows
+  // unexpected token" -- measured in the retired html2slides add-on build, step 3). Base64 narrows
   // the whole payload to [A-Za-z0-9+/=], which nothing in that pipeline can mangle; the 33% growth
   // is the price. sidebar.tsx decodes it with atob + TextDecoder.
   const extractorBase64 = Buffer.from(extractorJs, "utf-8").toString("base64");
@@ -102,11 +103,24 @@ async function main(): Promise<void> {
   //    needs nor contains the blob. The ANONYMISER goes only to report.tsx. That is the whole
   //    reason the three differ so much in size -- see the printed figures below, and the ceiling
   //    they exist to stay under.
+  // Where the deck editor and the self-hosted draw.io editor live: Code.gs's handoff target, the
+  // slides window's draw.io renderer and the diagram dialog's editor frame all use this one origin.
+  const editorOrigin = process.env.SASHA_EDITOR_ORIGIN ?? DEFAULT_EDITOR_ORIGIN;
+  if (!/^https:\/\/[a-z0-9.-]+$/.test(editorOrigin)) throw new Error(`SASHA_EDITOR_ORIGIN must be an https origin, got ${editorOrigin}`);
   const dialogJs = await bundleSurface({
     entry: join(HERE, "src", "dialog.tsx"),
     define: {
       "process.env.NODE_ENV": '"production"',
       __SASHA_EXTRACTOR_JS_B64__: JSON.stringify(extractorBase64),
+      __SASHA_EDITOR_ORIGIN__: JSON.stringify(editorOrigin),
+    },
+  });
+  //    THE DIAGRAM DIALOG: the draw.io editor is framed from the editor origin, never bundled.
+  const diagramJs = await bundleSurface({
+    entry: join(HERE, "src", "diagram.tsx"),
+    define: {
+      "process.env.NODE_ENV": '"production"',
+      __SASHA_EDITOR_ORIGIN__: JSON.stringify(editorOrigin),
     },
   });
   const reportJs = await bundleSurface({
@@ -140,8 +154,6 @@ async function main(): Promise<void> {
   //    THE EDITOR SHELL: a few kilobytes that only host the deck editor's frame and relay its
   //    messages (src/editor-shell.ts). Told nothing at build time: Code.gs seeds it at runtime.
   const editorShellJs = await bundleSurface({ entry: join(HERE, "src", "editor-shell.ts"), define: {} });
-  const editorOrigin = process.env.SASHA_EDITOR_ORIGIN ?? DEFAULT_EDITOR_ORIGIN;
-  if (!/^https:\/\/[a-z0-9.-]+$/.test(editorOrigin)) throw new Error(`SASHA_EDITOR_ORIGIN must be an https origin, got ${editorOrigin}`);
   process.stdout.write(`editor     ${editorOrigin}\n`);
   const CODE_GS = codeGs({ editorOrigin });
   const editorShellHtml = surfaceHtml({ from: "src/editor-shell.ts", script: editorShellJs });
@@ -149,6 +161,7 @@ async function main(): Promise<void> {
   const dialogHtml = surfaceHtml({ from: "src/dialog.tsx", script: dialogJs });
   const reportHtml = surfaceHtml({ from: "src/report.tsx", script: reportJs });
   const sidebarHtml = surfaceHtml({ from: "src/sidebar.tsx", script: sidebarJs });
+  const diagramHtml = surfaceHtml({ from: "src/diagram.tsx", script: diagramJs });
 
   // 5. Emit.
   mkdirSync(OUT, { recursive: true });
@@ -158,6 +171,7 @@ async function main(): Promise<void> {
   writeFileSync(join(OUT, "Dialog.html"), dialogHtml);
   writeFileSync(join(OUT, "Report.html"), reportHtml);
   writeFileSync(join(OUT, "EditorShell.html"), editorShellHtml);
+  writeFileSync(join(OUT, "Diagram.html"), diagramHtml);
   process.stdout.write(`\nwrote the Apps Script project to ${OUT}\n`);
   process.stdout.write(`    appsscript.json  (6 scopes)\n`);
   /*
@@ -187,6 +201,7 @@ async function main(): Promise<void> {
   process.stdout.write(`    Sidebar.html     (${kb(sidebarHtml)} KB, Ask Sasha -- connection + assets)\n`);
   process.stdout.write(`    Dialog.html      (${kb(dialogHtml)} KB, the slides + converter)\n`);
   process.stdout.write(`    Report.html      (${kb(reportHtml)} KB, the defect report + anonymiser)\n`);
+  process.stdout.write(`    Diagram.html     (${kb(diagramHtml)} KB, the draw.io diagram dialog)\n`);
   process.stdout.write(`    EditorShell.html (${(editorShellHtml.length / 1024).toFixed(1)} KB, the deck editor's frame host)\n`);
 
   // 6. THE CEILING, enforced rather than hoped for. HtmlService has been observed corrupting a
@@ -199,6 +214,7 @@ async function main(): Promise<void> {
     { name: "Dialog.html", html: dialogHtml },
     { name: "Report.html", html: reportHtml },
     { name: "EditorShell.html", html: editorShellHtml },
+    { name: "Diagram.html", html: diagramHtml },
   ].filter((page) => page.html.length > SURFACE_BUDGET_BYTES);
   if (tooBig.length > 0) {
     const named = tooBig.map((page) => `${page.name} is ${kb(page.html)} KB`).join(", ");

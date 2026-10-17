@@ -28,11 +28,18 @@
  * different types, and a model built by a parser has no use for the
  * distinction — every field is always present, sometimes empty.
  *
+ * draw.io: the extractor reports the page's `#drawio-source` XML (`drawioSource`), the paired
+ * picture's outerHTML when it is an inline `<svg>` (`drawioBaseSvg`), and flags the ONE element
+ * that draws the diagram (`_drawioPaired`). They are folded into `ParsedExtraction.drawio`,
+ * re-validated with drawio-diagram.ts `parseDrawioSource`; a slide without a source gets `null`.
+ *
  * Hand-written narrowing rather than typia: typia needs its `ts-patch`
  * transform registered in a tsconfig, and this module is checked with
  * `--ignoreConfig` and bundled for a content script, so the transform would
  * never run and the call would degrade to a bare cast.
  */
+import { parseDrawioSource } from "./drawio-diagram.js";
+import { assertNever } from "../engine/src/contracts/assert-never.js";
 
 /** CSS px in the extractor's 1280x720 viewport. */
 export type BoundsPx = Readonly<{ x: number; y: number; w: number; h: number }>;
@@ -207,8 +214,13 @@ export type ImageElement = ElementCommon &
     border: Border | null;
   }>;
 
-/** `<svg>`, `<canvas>`, conic gradients, clip-path hosts — bitmap-only content. */
-export type VisualElement = ElementCommon & Readonly<{ kind: "visual"; tag: string }>;
+/**
+ * `<svg>`, `<canvas>`, conic gradients and clip-path hosts (`css-effect`), rounded clipping
+ * containers (`clipped-container`) and glowing text (`text-glow`) — bitmap-only content.
+ * `glowId` is the `data-h2s-glow` stamp the extractor put on a glowing element, so the
+ * rasteriser can find it again; null for every other tag.
+ */
+export type VisualElement = ElementCommon & Readonly<{ kind: "visual"; tag: string; glowId: number | null }>;
 
 export type LineElement = ElementCommon &
   Readonly<{
@@ -254,7 +266,32 @@ export type ParsedExtraction = Readonly<{
   elements: readonly SlideElement[];
   /** Entries rejected outright (no usable `bounds`); a non-zero count is a bug signal. */
   malformedCount: number;
+  /**
+   * The slide's draw.io source, or null when the page carries no `#drawio-source`. Optional so an
+   * extraction built by hand (google-slides/export-composition.ts) needs no diagram field; the
+   * parser always sets it.
+   */
+  drawio?: DrawioExtraction | null;
 }>;
+
+/**
+ * A draw.io source on the slide and the element that draws it. `invalid` keeps the reason: the
+ * picture is still placed, but it is not stamped as a diagram, and the loss is reported.
+ */
+export type DrawioExtraction =
+  | Readonly<{
+      kind: "valid";
+      /**
+       * `<mxfile>` XML, normalised by `parseDrawioSource`. Diagram ids and versions are computed on
+       * THIS text: the connector names the Drive files it writes by the same normalised source.
+       */
+      xml: string;
+      /** The paired inline `<svg>`'s outerHTML, or null (a raster `<img>`, or none found). */
+      baseSvg: string | null;
+      /** `paintIndex` of the element flagged `_drawioPaired`, or null when the extractor paired none. */
+      pairedPaintIndex: number | null;
+    }>
+  | Readonly<{ kind: "invalid"; reason: string; pairedPaintIndex: number | null }>;
 
 /**
  * Narrow the extractor's JSON into the model above.
@@ -275,15 +312,67 @@ export function parseExtraction(raw: unknown): ParsedExtraction {
 
   const elements: SlideElement[] = [];
   let malformedCount = 0;
+  let pairedPaintIndex: number | null = null;
   for (const candidate of rawElements) {
     const element = parseElement(candidate, elements.length);
     if (element === null) {
       malformedCount++;
       continue;
     }
+    if (pairedPaintIndex === null && isRecord(candidate) && candidate["_drawioPaired"] === true && canDrawDiagram(element)) {
+      pairedPaintIndex = element.paintIndex;
+    }
     elements.push(element);
   }
-  return { viewportPx, elements, malformedCount };
+  return { viewportPx, elements, malformedCount, drawio: parseDrawio({ raw, pairedPaintIndex }) };
+}
+
+/**
+ * The source is untrusted page content: it is re-validated here. A source that is not draw.io XML,
+ * or is past `DRAWIO_MAXIMUM_XML_CHARACTERS`, is `invalid` (the picture is still placed, just not
+ * stamped as a diagram, and the emitter reports why).
+ */
+function parseDrawio(
+  options: Readonly<{ raw: Readonly<Record<string, unknown>>; pairedPaintIndex: number | null }>,
+): DrawioExtraction | null {
+  const source = options.raw["drawioSource"];
+  if (typeof source !== "string" || source.length === 0) return null;
+  const parsed = parseDrawioSource(source);
+  switch (parsed.kind) {
+    case "invalid":
+      return { kind: "invalid", reason: parsed.reason, pairedPaintIndex: options.pairedPaintIndex };
+    case "ok": {
+      const baseSvg = options.raw["drawioBaseSvg"];
+      return {
+        kind: "valid",
+        xml: parsed.xml,
+        baseSvg: typeof baseSvg === "string" && baseSvg.length > 0 ? baseSvg : null,
+        pairedPaintIndex: options.pairedPaintIndex,
+      };
+    }
+    default:
+      return assertNever(parsed);
+  }
+}
+
+/** Only a picture can carry the diagram stamp: the extractor pairs an `<svg>` or an `<img>`. */
+function canDrawDiagram(element: SlideElement): boolean {
+  switch (element.kind) {
+    case "visual":
+    case "image":
+      return true;
+    case "rect":
+    case "text":
+    case "list":
+    case "table":
+    case "line":
+    case "triangle":
+    case "poly":
+    case "ignored":
+      return false;
+    default:
+      return assertNever(element);
+  }
 }
 
 /** The extractor's own fallback when `document.body` reports no size. */
@@ -330,7 +419,12 @@ function parseElement(candidate: unknown, paintIndex: number): SlideElement | nu
         border: parseBorder(candidate, candidate),
       };
     case "visual":
-      return { ...common, kind: "visual", tag: stringOr(candidate["tag"], "unknown") };
+      return {
+        ...common,
+        kind: "visual",
+        tag: stringOr(candidate["tag"], "unknown"),
+        glowId: optionalInteger(candidate["glowId"]),
+      };
     case "line":
       return parseLineElement(candidate, bounds, common);
     case "poly":

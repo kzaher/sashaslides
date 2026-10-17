@@ -117,6 +117,7 @@ describe("deck sessions over HTTP", () => {
       { name: "control: no Referer", query: "", referer: null, expected: "/decks" },
       { name: "a page on another origin", query: "", referer: `${FOREIGN}${deckPath}`, expected: "/decks" },
       { name: "a page on our origin that is not a deck page", query: "", referer: `${ORIGIN}/account`, expected: "/decks" },
+      { name: "the developer page on our origin", query: "", referer: `${ORIGIN}/dev`, expected: "/dev" },
       { name: "an explicit ?return= wins over the Referer", query: `?return=${encodeURIComponent(otherDeckPath)}`, referer: `${ORIGIN}${deckPath}`, expected: otherDeckPath },
     ];
     for (const row of rows) {
@@ -144,6 +145,9 @@ describe("deck sessions over HTTP", () => {
       { returnPath: `/deck/${deckId}`, expectedLocation: `/deck/${deckId}` },
       { returnPath: "//evil.example", expectedLocation: "/decks" },
       { returnPath: "/account", expectedLocation: "/decks" },
+      { returnPath: "/dev", expectedLocation: "/dev" },
+      { returnPath: "/dev/other", expectedLocation: "/decks" },
+      { returnPath: "/developer", expectedLocation: "/decks" },
     ];
     for (const row of rows) {
       const answer = await send({ baseUrl: site.baseUrl, method: "GET", path: `/account/deck-session?return=${encodeURIComponent(row.returnPath)}`, headers: { cookie: account } });
@@ -275,6 +279,60 @@ describe("deck access over HTTP", () => {
 });
 
 describe("delegation to the Google Slides module", () => {
+  test("the developer page's POSTs need our Origin, the CSRF header and the cookie session; a bearer is refused 403", async () => {
+    const timers = manualTimers(Date.parse("2026-10-15T10:00:00Z"));
+    const seen: string[] = [];
+    const decks = createMemoryDeckService({
+      now: timers.now,
+      timers,
+      publicUrl: PUBLIC_URL,
+      createGoogleSlidesInterchange: () => ({
+        handleRequest: ({ url, caller, response }) => {
+          seen.push(`${url.pathname} ${caller === null ? "no caller" : "caller"}`);
+          response.writeHead(204).end();
+          return Promise.resolve(true);
+        },
+      }),
+    });
+    const loopback = await startLoopbackServer({ portal: null, decks: decks.server });
+    cleanups.push(async () => {
+      await decks[Symbol.asyncDispose]();
+      await loopback[Symbol.asyncDispose]();
+    });
+    const owner = await decks.signIn({ email: "owner@example.com" });
+    const cookie = (await decks.server.deckSessionStart.issueCookie({ accountId: owner.accountId })).split(";")[0] ?? "";
+    const session = asObject((await send({ baseUrl: loopback.baseUrl, method: "GET", path: "/deck-api/session", headers: { cookie } })).value());
+    const csrf = String(session["csrfToken"]);
+    for (const path of ["/deck-api/google-slides/insert-html", "/deck-api/google-slides/export-png"]) {
+      type Row = Readonly<{ name: string; headers: Readonly<Record<string, string>>; status: number; error: string | null }>;
+      const rows: readonly Row[] = [
+        { name: "no CSRF header", headers: { cookie, origin: ORIGIN }, status: 403, error: "csrfMismatch" },
+        { name: "a wrong CSRF header", headers: { cookie, origin: ORIGIN, "x-sasha-csrf": `${csrf}x` }, status: 403, error: "csrfMismatch" },
+        { name: "a foreign Origin", headers: { cookie, origin: FOREIGN, "x-sasha-csrf": csrf }, status: 403, error: "originRefused" },
+        { name: "no Origin", headers: { cookie, "x-sasha-csrf": csrf }, status: 403, error: "originRefused" },
+        { name: "signed out", headers: { origin: ORIGIN, referer: `${ORIGIN}/dev` }, status: 401, error: "signedOut" },
+        { name: "control: the cookie, our Origin and the token", headers: { cookie, origin: ORIGIN, "x-sasha-csrf": csrf }, status: 204, error: null },
+      ];
+      for (const row of rows) {
+        const answer = await send({ baseUrl: loopback.baseUrl, method: "POST", path, headers: { ...row.headers, "content-type": "application/json" }, body: "{}" });
+        assert.equal(answer.status, row.status, `${path}: ${row.name}`);
+        if (row.error !== null) assert.equal(asObject(answer.value())["error"], row.error, `${path}: ${row.name}`);
+        if (row.error === "signedOut") assert.equal(asObject(answer.value())["signInAddress"], `/account/deck-session?return=${encodeURIComponent("/dev")}`, `${path}: back to /dev`);
+      }
+    }
+    assert.deepEqual(seen, ["/deck-api/google-slides/insert-html caller", "/deck-api/google-slides/export-png caller"], "only the control rows reached the module");
+
+    const created = await send({ baseUrl: loopback.baseUrl, method: "POST", path: "/deck-api/decks", headers: { cookie, origin: ORIGIN, "x-sasha-csrf": csrf, "content-type": "application/json" }, body: JSON.stringify({ title: "Embedded" }) });
+    const deckId = String(asObject(asObject(created.value())["deck"])["deckId"]) as DeckId;
+    const ticket = await decks.server.embeds.issue({ accountId: owner.accountId, deckId });
+    const embed = asObject((await send({ baseUrl: loopback.baseUrl, method: "POST", path: "/deck-api/embed/session", headers: { origin: ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ ticket }) })).value());
+    const bearer = { authorization: `Bearer ${String(embed["bearerToken"])}`, origin: ORIGIN, "x-sasha-csrf": String(asObject(embed["session"])["csrfToken"]), "content-type": "application/json" };
+    const refused = await send({ baseUrl: loopback.baseUrl, method: "POST", path: "/deck-api/google-slides/insert-html", headers: bearer, body: "{}" });
+    assert.equal(refused.status, 403);
+    assert.equal(asObject(refused.value())["error"], "notPermitted");
+    assert.equal(seen.length, 2, "the bearer never reached the module");
+  });
+
   test("add-on and capability paths reach the module with no caller (and no Origin needed); its session paths with the caller; the shared callback first", async () => {
     const timers = manualTimers(Date.parse("2026-10-15T10:00:00Z"));
     const seen: string[] = [];

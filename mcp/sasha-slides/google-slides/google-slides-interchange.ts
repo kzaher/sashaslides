@@ -7,6 +7,9 @@
  *   GET  /deck-api/google-slides/connect?return=   consent for presentations + drive.file
  *   GET  /oauth/google/callback                     that consent's answer, saved via GoogleGrantStore
  *   POST /deck-api/google-slides/import             presentations.get with the grant -> a new deck
+ *   POST /deck-api/google-slides/insert-html        the developer page's converted slides -> new slides
+ *                                                   in the person's presentation (insert-html.ts)
+ *   POST /deck-api/google-slides/export-png         the person's presentation -> a zip of slide PNGs
  *   POST /deck-api/decks/<id>/google-slides/export  exported (grant) | runInAddon (embedded, no grant)
  *   GET  /deck-api/export-assets/<token>/<sha256>   a picture for Google's createImage, 30 minutes
  *   POST /deck-api/addon/handoff                    identity token + binding secret -> open | changed | needsImport
@@ -24,16 +27,21 @@
  * Google subject is mapped to its account the way the handoff maps it and compared with the
  * export's caller.
  *
+ * THE DEVELOPER PAGE'S TWO ROUTES (insert-html, export-png; insert-html-contract.ts) run only on
+ * the browser's cookie session: an embedded editor's bearer token is refused (403), and the
+ * router has already checked `Origin` and `X-Sasha-Csrf` for these POSTs (decks/deck-router.ts).
+ * Without a grant they answer 409 with a connect address that returns to `/dev`.
+ *
  * AN UNREADABLE DECK (its saved snapshot does not open or decode) answers 503 `deckUnreadable`
  * with the service's sentence, never a 404 or an import into a partial deck.
  */
 import { createHash } from "node:crypto";
+import { setTimeout as sleepFor } from "node:timers/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
   AddonExportPlanBody,
   AddonHandoffBody,
   AddonImportBody,
-  DeckApiErrorCode,
   GoogleSlidesExportBody,
   GoogleSlidesImportBody,
   GoogleSlidesLink,
@@ -47,7 +55,9 @@ import {
   type CreateGoogleSlidesInterchange,
   type DeckCaller,
   type DeckRouteHandler,
+  type GoogleSlidesInterchange,
 } from "../deck-contracts/deck-service-contract.ts";
+import { DRIVE_FILE_SCOPE } from "../google-constants.ts";
 import { ADDON_BINDING_SECRET_HEADER, ADDON_IDENTITY_HEADER, ADDON_PAGE_IDS_HEADER, MINIMUM_BINDING_SECRET_LENGTH, verifyAddonIdentityToken } from "./addon-identity.ts";
 import { addonExportRequests, runExport, type ExportTarget } from "./export-run.ts";
 import { createExpiringTable } from "../http/expiring-table.ts";
@@ -56,7 +66,19 @@ import { readJsonBody, redirect, sendDeckApiError, sendJson } from "../http/http
 import { fieldOf, stringFieldOf } from "../http/json-values.ts";
 import { createIdentityVerifier, type IdentityClaims } from "./identity-token.ts";
 import { idSeedFrom, importIntoDeck, type ImportOutcome } from "./import-into-deck.ts";
-import { createSlidesClient, googleFailureCodeOf, presentationAddressOf, presentationIdFrom } from "./slides-client.ts";
+import { createSlidesClient, googleFailureCodeOf, httpStatusOfGoogleFailure, presentationAddressOf, presentationIdFrom } from "./slides-client.ts";
+import { createDriveClient } from "./drive-files.ts";
+import { parseExportPngBody, runExportPng } from "./export-png.ts";
+import { runInsertHtml } from "./insert-html.ts";
+import {
+  DEV_PAGE_PATH,
+  EXPORT_PNG_MEDIA_TYPE,
+  GOOGLE_SLIDES_EXPORT_PNG_PATH,
+  GOOGLE_SLIDES_INSERT_HTML_PATH,
+  INSERT_HTML_LIMITS,
+} from "./insert-html-contract.ts";
+import { parseInsertHtmlBody } from "./insert-html-parse.ts";
+import { storedZip } from "./stored-zip.ts";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export const EXPORT_ASSET_LIFETIME_MILLISECONDS = 30 * 60 * 1000;
@@ -68,7 +90,14 @@ const REQUEST_BODY_LIMIT_BYTES = 1024 * 1024;
 const ADDON_IMPORT_BODY_LIMIT_BYTES = 48 * 1024 * 1024;
 const TABLE_CAPACITY = 10_000;
 
-export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (options) => {
+/**
+ * The composition root's options, plus `sleep` for the PNG export's pacing (export-png.ts): tests
+ * pass one that advances a virtual clock instead of waiting.
+ */
+export type GoogleSlidesInterchangeOptions = Parameters<CreateGoogleSlidesInterchange>[0] &
+  Readonly<{ sleep?: (milliseconds: number) => Promise<void> }>;
+
+export function createGoogleSlidesInterchange(options: GoogleSlidesInterchangeOptions): GoogleSlidesInterchange {
   const { deckService, now } = options;
   const verifier = createIdentityVerifier({ fetch: options.fetch, now });
   const connectStates = createExpiringTable<Readonly<{ caller: DeckCaller; returnPath: string }>>({ now, capacity: TABLE_CAPACITY });
@@ -77,6 +106,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
   const addonExports = createExpiringTable<AddonExport>({ now, capacity: TABLE_CAPACITY });
   const redirectAddress = `${options.publicUrl.replace(/\/$/, "")}${GOOGLE_CALLBACK_SHARED_PATH}`;
   const authorOf = (caller: DeckCaller) => ({ kind: "person" as const, personId: caller.person.id });
+  const sleep = options.sleep ?? ((milliseconds: number) => sleepFor(milliseconds));
 
   /** A fresh export-asset capability for these assets (30 minutes), and the address maker over it. */
   const exportAssetAddresses = (grant: Readonly<{ caller: DeckCaller; deckId: DeckId; assetIds: readonly AssetId[] }>): ((assetId: AssetId) => string) => {
@@ -152,7 +182,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     const read = await slides.getPresentation({ presentationId, fields: null });
     if (read.kind === "failed") {
       const code = googleFailureCodeOf(read.status);
-      return sendDeckApiError({ response, status: statusOfGoogleFailure(code), error: code, message: read.message, ...(code === "googleNotConnected" ? { connectAddress } : {}) });
+      return sendDeckApiError({ response, status: httpStatusOfGoogleFailure(code), error: code, message: read.message, ...(code === "googleNotConnected" ? { connectAddress } : {}) });
     }
     // Started before the deck is created so the two overlap; it never rejects (a failure is a value).
     const exporting = slides.exportPresentationPptx({ presentationId });
@@ -224,7 +254,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
       }
       case "failed":
         if (outcome.presentationId !== null) await deck.setGoogleSlidesLink({ link: exportedLink({ previous: link, presentationId: outcome.presentationId, title: snapshot.title, now: now() }) });
-        return sendDeckApiError({ response, status: statusOfGoogleFailure(outcome.code), error: outcome.code, message: outcome.message });
+        return sendDeckApiError({ response, status: httpStatusOfGoogleFailure(outcome.code), error: outcome.code, message: outcome.message });
       default:
         return assertNever(outcome);
     }
@@ -248,6 +278,88 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     });
     response.end(Buffer.from(asset.bytes));
+  };
+
+  /**
+   * The developer page's caller: signed in with the browser's cookie session. Answers 401 or 403
+   * itself and resolves null when there is none.
+   */
+  const developerPageCaller = (request: RouteRequest): DeckCaller | null => {
+    const { response, caller } = request;
+    if (caller === null) {
+      sendDeckApiError({ response, status: 401, error: "signedOut", message: "Sign in to use your Google Slides presentations.", signInAddress: `/account/deck-session?return=${DEV_PAGE_PATH}` });
+      return null;
+    }
+    if (isEmbedded(request.request)) {
+      sendDeckApiError({ response, status: 403, error: "notPermitted", message: "This works from the signed-in developer page only, not from an embedded editor." });
+      return null;
+    }
+    return caller;
+  };
+
+  /** A token from the caller's grant: Slides always (accessTokenForIdentity checks it), Drive files when `drive`. */
+  const developerPageToken = async (wanted: Readonly<{ caller: DeckCaller; drive: boolean }>): Promise<Readonly<{ kind: "ok"; accessToken: string }> | Readonly<{ kind: "notConnected"; message: string }>> => {
+    const grant = await options.googleGrants.forAccount({ accountId: wanted.caller.accountId });
+    if (grant.kind === "notConnected") return { kind: "notConnected", message: "Connect Google Slides first." };
+    if (wanted.drive && !grant.identity.grantedScopes.includes(DRIVE_FILE_SCOPE)) return { kind: "notConnected", message: "The Google grant does not include the Drive files Sasha creates." };
+    return accessTokenForIdentity({ fetch: options.fetch, client: options.googleClient, identity: grant.identity, now });
+  };
+
+  const handleInsertHtml = async (request: RouteRequest): Promise<void> => {
+    const { response } = request;
+    const caller = developerPageCaller(request);
+    if (caller === null) return;
+    // Drained, not destroyed, past the limit: the page then reads the 413 instead of a reset.
+    const body = await readJsonBody({ request: request.request, maximumBytes: INSERT_HTML_LIMITS.maximumBodyBytes, onOverflow: "drain" });
+    if (body.kind !== "parsed") return sendDeckApiError({ response, status: body.kind === "tooLarge" ? 413 : 400, error: body.kind === "tooLarge" ? "tooLarge" : "invalidRequest", message: "The request is not a JSON insert request within the size limit." });
+    const parsed = parseInsertHtmlBody({ body: body.value, idPrefix: insertObjectIdPrefix(options.randomToken()) });
+    if (parsed.kind === "invalid") return sendDeckApiError({ response, status: 400, error: "invalidRequest", message: parsed.message });
+    const access = await developerPageToken({ caller, drive: true });
+    if (access.kind === "notConnected") return sendDeckApiError({ response, status: 409, error: "googleNotConnected", message: access.message, connectAddress: DEVELOPER_PAGE_CONNECT_ADDRESS });
+    const outcome = await runInsertHtml({
+      slides: createSlidesClient({ fetch: options.fetch, accessToken: access.accessToken }),
+      drive: createDriveClient({ fetch: options.fetch, accessToken: access.accessToken }),
+      insert: parsed.insert,
+    });
+    switch (outcome.kind) {
+      case "inserted":
+        return sendJson({ response, status: 200, body: outcome.answer });
+      case "failed":
+        return sendDeckApiError({ response, status: httpStatusOfGoogleFailure(outcome.code), error: outcome.code, message: outcome.message, ...(outcome.code === "googleNotConnected" ? { connectAddress: DEVELOPER_PAGE_CONNECT_ADDRESS } : {}) });
+      default:
+        return assertNever(outcome);
+    }
+  };
+
+  const handleExportPng = async (request: RouteRequest): Promise<void> => {
+    const { response } = request;
+    const caller = developerPageCaller(request);
+    if (caller === null) return;
+    const body = await readJsonBody({ request: request.request, maximumBytes: REQUEST_BODY_LIMIT_BYTES, onOverflow: "destroy" });
+    if (body.kind !== "parsed") return sendDeckApiError({ response, status: body.kind === "tooLarge" ? 413 : 400, error: body.kind === "tooLarge" ? "tooLarge" : "invalidRequest", message: "The request is not a JSON export request." });
+    const parsed = parseExportPngBody(body.value);
+    if (parsed.kind === "invalid") return sendDeckApiError({ response, status: 400, error: "invalidRequest", message: parsed.message });
+    const access = await developerPageToken({ caller, drive: false });
+    if (access.kind === "notConnected") return sendDeckApiError({ response, status: 409, error: "googleNotConnected", message: access.message, connectAddress: DEVELOPER_PAGE_CONNECT_ADDRESS });
+    const outcome = await runExportPng({ slides: createSlidesClient({ fetch: options.fetch, accessToken: access.accessToken }), fetch: options.fetch, request: parsed.request, now, sleep });
+    switch (outcome.kind) {
+      case "exported": {
+        const zip = storedZip({ entries: outcome.entries, modifiedAt: new Date(now()) });
+        response.writeHead(200, {
+          "content-type": EXPORT_PNG_MEDIA_TYPE,
+          "content-length": String(zip.byteLength),
+          "content-disposition": `attachment; filename="${parsed.request.presentationId}-slides.zip"`,
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+        });
+        response.end(zip);
+        return;
+      }
+      case "failed":
+        return sendDeckApiError({ response, status: outcome.status, error: outcome.code, message: outcome.message, ...(outcome.code === "googleNotConnected" ? { connectAddress: DEVELOPER_PAGE_CONNECT_ADDRESS } : {}) });
+      default:
+        return assertNever(outcome);
+    }
   };
 
   const handleHandoff = async (request: RouteRequest): Promise<void> => {
@@ -370,6 +482,8 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     if (path === GOOGLE_CALLBACK_SHARED_PATH) return method === "GET" ? handleCallback(routed) : false;
     if (path === DECK_API_PATHS.googleSlidesConnect && method === "GET") return answered(handleConnect(routed));
     if (path === DECK_API_PATHS.googleSlidesImport && method === "POST") return answered(handleImport(routed));
+    if (path === GOOGLE_SLIDES_INSERT_HTML_PATH && method === "POST") return answered(handleInsertHtml(routed));
+    if (path === GOOGLE_SLIDES_EXPORT_PNG_PATH && method === "POST") return answered(handleExportPng(routed));
     if (path === DECK_API_PATHS.addonHandoff && method === "POST") return answered(handleHandoff(routed));
     if (path === DECK_API_PATHS.addonImport && method === "POST") return answered(handleAddonImport(routed));
     const exportMatch = /^\/deck-api\/decks\/([^/]+)\/google-slides\/export$/.exec(path);
@@ -391,7 +505,18 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     return false;
   };
   return { handleRequest };
-};
+}
+
+/** Where the developer page sends a person without a Google grant; consent returns to `/dev`. */
+const DEVELOPER_PAGE_CONNECT_ADDRESS = `${DECK_API_PATHS.googleSlidesConnect}?return=${encodeURIComponent(DEV_PAGE_PATH)}`;
+
+/**
+ * Every object id of one insert starts with this: a letter, twelve hexadecimal digits of the
+ * random token's hash and an underscore, so ids stay well inside Google's 50 characters.
+ */
+function insertObjectIdPrefix(randomToken: string): string {
+  return `h${sha256(randomToken).slice(0, 12)}_`;
+}
 
 type RouteRequest = Readonly<{ request: IncomingMessage; response: ServerResponse; url: URL; caller: DeckCaller | null }>;
 
@@ -418,10 +543,13 @@ function headerOf(request: IncomingMessage, name: string): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-/** Only `/decks` or `/deck/<valid id>` (the account portal's rule for `return`, SPEC.md 21.2). */
+/**
+ * Only `/decks`, `/deck/<valid id>` (the account portal's rule for `return`, SPEC.md 21.2) or the
+ * developer page `/dev` (insert-html-contract.ts), exactly.
+ */
 export function safeReturnPath(candidate: string | null): string {
   if (candidate === null) return "/decks";
-  if (candidate === "/decks") return candidate;
+  if (candidate === "/decks" || candidate === DEV_PAGE_PATH) return candidate;
   const deck = /^\/deck\/([^/?#]+)$/.exec(candidate);
   return deck?.[1] !== undefined && parseDeckId(deck[1]) !== null ? candidate : "/decks";
 }
@@ -459,20 +587,6 @@ function answerImportFailure(options: Readonly<{ response: ServerResponse; outco
       return sendDeckApiError({ response, status: 403, error: "notPermitted", message: "You cannot edit this deck." });
     default:
       return assertNever(outcome);
-  }
-}
-
-/** The HTTP status for the error code a failed Google call became (slides-client.ts googleFailureCodeOf). */
-function statusOfGoogleFailure(code: DeckApiErrorCode): number {
-  switch (code) {
-    case "googleNotConnected":
-      return 409;
-    case "googlePermissionDenied":
-      return 403;
-    case "googlePresentationNotFound":
-      return 404;
-    default:
-      return 502;
   }
 }
 

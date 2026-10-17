@@ -43,6 +43,8 @@ import type {
   ScanSpec,
 } from "./bridge.ts";
 import type { SendFeedbackSpec } from "./feedback.ts";
+import type { DiagramLinkSpec, DiagramSaveSpec } from "./diagram-host.ts";
+import type { DiagramSaved, DiagramsLinked, DiagramSourceRead } from "./diagram-wire.ts";
 import type { SlidesApiRequest } from "./converter-contract.ts";
 import { asRecord } from "./json-fields.ts";
 
@@ -188,6 +190,17 @@ export type PickerWindowApi = Readonly<{
  */
 export type ReportTargetApi = Readonly<{
   takeTarget(): Promise<CallOutcome<ReportTargetReply>>;
+}>;
+
+/**
+ * DRAW.IO DIAGRAMS: the diagram dialog's save and source reads, and the candidates window's linking
+ * of the diagrams an insert put on a slide. Every spec is computed in diagram-flow.ts and executed by
+ * diagram-host.ts inside Code.gs, so a save is ONE round trip.
+ */
+export type DiagramApi = Readonly<{
+  save(spec: DiagramSaveSpec): Promise<CallOutcome<DiagramSaved>>;
+  readSources(fileIds: readonly string[]): Promise<CallOutcome<readonly DiagramSourceRead[]>>;
+  linkInserted(spec: DiagramLinkSpec): Promise<CallOutcome<DiagramsLinked>>;
 }>;
 
 /** Writing `PICK` -- deliberately its own capability, because it is the one file the UI may create. */

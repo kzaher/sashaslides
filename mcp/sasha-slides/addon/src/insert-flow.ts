@@ -19,15 +19,18 @@
 // `clear_slides` honours if the event has not landed yet. Separate from dialog.tsx so the order and
 // the count of host calls are asserted against the fake Drive (insert-flow.test.ts).
 
+import type { ConvertedDiagram } from "../../converter/convert-html-to-slide-requests.ts";
 import type { RenderRequest } from "./bridge.ts";
 import type { ConversionResult, SlidesApiRequest } from "./converter-contract.ts";
-import { createdObjectIdsOf, type SlidesApi } from "./drive-api.ts";
+import type { DiagramLinkSpec } from "./diagram-host.ts";
+import type { DiagramsLinked } from "./diagram-wire.ts";
+import { createdObjectIdsOf, type DiagramApi, type SlidesApi } from "./drive-api.ts";
 import type { PickOutcome } from "./pick-writer.ts";
 import { renderArtifactOf, type RenderArtifactOutcome } from "./render-artifact.ts";
 import {
   insertedWhereOf,
   insertRequests,
-  retargetConversion,
+  retargetConversionNamed,
   type InsertedWhere,
   type InsertPosition,
 } from "./slide-insert.ts";
@@ -45,7 +48,9 @@ export type InsertAttempt = Readonly<{ kind: "inserted"; inserted: Inserted }> |
 /**
  * The requests to insert, from the PREVIEW'S conversion when this window already has it, converted
  * afresh only when it does not. `reused` is reported so the test -- and a console line -- can tell
- * which happened.
+ * which happened. `diagrams` are the draw.io pictures under the ids they will have IN THE DECK, so the
+ * insert can link them to their sources afterwards; a diagram whose picture was not renamed (it is
+ * not among the requests) is dropped rather than pointed at an id that will not exist.
  */
 export async function conversionForInsert({
   preview,
@@ -59,15 +64,43 @@ export async function conversionForInsert({
   /** The page id Slides will create. */
   pageObjectId: string;
   convert: () => Promise<ConversionResult>;
-}): Promise<Readonly<{ requests: readonly SlidesApiRequest[]; reused: boolean }>> {
+}): Promise<Readonly<{ requests: readonly SlidesApiRequest[]; reused: boolean; diagrams: readonly ConvertedDiagram[] }>> {
   if (preview !== null) {
-    return {
-      requests: retargetConversion({ requests: preview.requests, fromPageObjectId: previewPageObjectId, toPageObjectId: pageObjectId }),
-      reused: true,
-    };
+    const retargeted = retargetConversionNamed({ requests: preview.requests, fromPageObjectId: previewPageObjectId, toPageObjectId: pageObjectId });
+    const diagrams = (preview.drawioDiagrams ?? []).flatMap((diagram) => {
+      const objectId = retargeted.renamed.get(diagram.objectId);
+      return objectId === undefined ? [] : [{ ...diagram, objectId }];
+    });
+    return { requests: retargeted.requests, reused: true, diagrams };
   }
   const converted = await convert();
-  return { requests: converted.requests, reused: false };
+  return { requests: converted.requests, reused: false, diagrams: converted.drawioDiagrams ?? [] };
+}
+
+/**
+ * AFTER THE USER HAS BEEN TOLD: the inserted diagrams' source files, links and stamps, in one host
+ * call. Best effort like the render artifact: the slide is in the deck and its pictures are right,
+ * so a failure here costs only the edit link (the diagram dialog can still upload the source), and
+ * it is logged, never shown as a failed insert. No call at all for a slide without diagrams.
+ */
+export async function linkInsertedDiagramsBestEffort({
+  diagramsApi,
+  spec,
+  warn,
+}: {
+  diagramsApi: DiagramApi;
+  spec: DiagramLinkSpec | null;
+  warn: (message: string) => void;
+}): Promise<DiagramsLinked | null> {
+  if (spec === null) return null;
+  try {
+    const linked = await diagramsApi.linkInserted(spec);
+    if (linked.kind === "ok") return linked.value;
+    warn(`the inserted diagrams were not linked to their sources: ${linked.message}`);
+  } catch (cause) {
+    warn(`the inserted diagrams were not linked to their sources: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  return null;
 }
 
 /**

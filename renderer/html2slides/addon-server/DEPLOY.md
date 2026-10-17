@@ -1,58 +1,51 @@
-# Deploying html2slides (server + SSL + Google Slides add-on)
+# The sashaslides.com website
 
-Two halves:
-1. **The UI server** — a Docker container on the holosweat server, behind its nginx and certbot certificate.
-2. **The add-on** — a Google Apps Script project that loads the server-hosted UI into the Slides sidebar.
+`renderer/html2slides/addon-server/` is the website: the product home page (`/`), the legal pages
+(`/privacy`, `/terms`), the setup walkthroughs (`/walkthroughs/*`), the developer page (`/dev`, linked
+from no public page) and the self-hosted draw.io editor (`/drawio/`). `server.ts` serves static files
+only; nginx sends the connector's paths (`/mcp`, `/account`, `/decks`, `/deck-api`, ...) to the
+connector (`deploy/nginx-sashaslides.conf`, contract in `deploy/nginx-routing.test.ts`).
 
----
+## Develop
 
-## Phase 1 — UI server + SSL
-
-`bash deploy/publish.sh site` (or `npm run renderer:deploy`) from the repository root builds the image on the
-server, installs the nginx site and obtains the certificate on a first deploy. See `deploy/DEPLOY.md`.
-
----
-
-## Phase 2 — the Google Slides add-on
-
-### 2a. Build the add-on pointing at your server
 ```bash
-cd renderer/html2slides
-SERVER_ORIGIN=https://slides.yourdomain.com npx tsx browser/build-addon.ts
-# → dist/renderer/html2slides/addon/{Code.gs, Sidebar.html, appsscript.json}
+cd renderer/html2slides/addon-server
+npm ci                 # preact (the page's renderer); everything else comes from the repository root
+npm run build          # dev/build.ts -> public/dev.js, public/dev-pptx.js, public/e2e-drawio.js
+PORT=8787 npm start    # http://127.0.0.1:8787/dev
+npm test               # type check (three projects), build, unit tests, routing contract
+npm run smoke          # headless Chrome on :9222 drives /dev on a free port (no Google)
 ```
 
-### 2b. Push it to Apps Script (clasp)
-```bash
-npm i -g @google/clasp
-clasp login
-cd dist/renderer/html2slides/addon
-clasp create --type slides --title "html2slides"   # or: clasp clone <existing scriptId>
-clasp push
-```
-(Or manually: open a Google Slides deck → **Extensions → Apps Script**, paste `Code.gs`, add `Sidebar.html`, set the manifest from `appsscript.json`.)
+The page's TypeScript lives in `dev/`:
 
-### 2c. OAuth consent (one-time)
-- The script needs scopes: `presentations`, `drive`, `script.container.ui`, `script.external_request`.
-- In the linked Google Cloud project → **OAuth consent screen**: for personal use, set **User type = External**, publishing status **Testing**, and add your own Google account as a **test user**. (Publishing for others requires Google's add-on verification — a separate review process.)
+| File | What it is |
+|---|---|
+| `dev-page.tsx` | The page (Preact). Renders the pure modules below. |
+| `queue-state.ts` | The queue of pasted or dropped documents and their conversions (a reducer). |
+| `conversion.ts` | One document through the PRODUCT converter (`mcp/sasha-slides/converter`), with the compiled extractor and draw.io rendering at `/drawio/`. |
+| `warnings.ts` | The converter's `unsupported` list as numbered marks over the preview. |
+| `insert-request.ts` | The body of `POST /deck-api/google-slides/insert-html` (`mcp/sasha-slides/google-slides/insert-html-contract.ts`). |
+| `export-request.ts` | The body of `POST /deck-api/google-slides/export-png`. |
+| `deck-api.ts` | The session (`GET /deck-api/session`), insert and export calls, and their answers. |
+| `pptx-builder.ts`, `pptx-download.ts` | The offline `.pptx` download: a separate bundle loaded on demand, the command-line converter's browser core with our pptxgenjs fork built from `deps/pptxgenjs/src`. |
+| `drawio-harness.ts` | `public/e2e-drawio.html`'s `window.__run`, driven by `renderer/html2slides/e2e/drawio-editor.e2e.ts`. |
+| `build.ts` | The esbuild build. The type check is `npm run typecheck`, never the bundler. |
 
-### 2d. Use it
-- Open any Google Slides presentation → **Extensions → html2slides → Open html2slides**.
-- The sidebar loads the UI from `https://slides.yourdomain.com` (via `Code.gs`'s `UrlFetchApp` + `HtmlService`).
-- First open prompts for the OAuth scopes — approve.
+## Signing in and Google
 
----
+The page uses the deck web application's session: the `sasha_deck` cookie (`Path=/deck-api`), read with
+`GET /deck-api/session`, and the `X-Sasha-Csrf` header on every POST. Signed out, "Sign in" goes to
+`/account/deck-session?return=/dev`. Without a Google grant the connector answers 409
+`googleNotConnected` with a `connectAddress`, which the page offers as "Connect Google Slides". Inserting
+and exporting run on the signed-in person's own Google grant, on the connector; the website holds no
+Google credentials at all.
 
-## Phase 3 — E2E smoke test in Slides
-1. **Insert HTML**: paste/URL/drop a fixture → "Insert after current slide" (set oversampling 1–8×).
-2. **Export**: slide-range + "Exclude skipped" → "Download slides as PNG (.zip)".
-3. **drawio**: "Detect in deck" lists diagram images; Edit opens the self-hosted editor; the off-canvas `FF00FF` `DRAWIO_SRC_*` field round-trips the source.
+## Deploy
 
----
+`bash deploy/publish.sh site` from the repository root packs the build context, builds the image on the
+server (the `Dockerfile` builds the page's bundles itself) and restarts it. See `deploy/DEPLOY.md`.
 
-## Updating the UI later (no add-on redeploy)
-Because the sidebar fetches its UI from the server, UI changes ship by redeploying the container only:
-```bash
-bash deploy/publish.sh site
-```
-Re-push the add-on **only** when `Code.gs` / scopes / `SERVER_ORIGIN` change.
+After a deploy, check: `/`, `/dev`, `/static/dev.js`, `/drawio/` and `/walkthroughs/claude-ai` answer
+200; `/shell.html`, `/install.sh`, `/api/config` and `/api/fetch-html` answer 404; on `/dev`, signed in,
+an insert into a scratch presentation lands at the chosen position, and a PNG export of it downloads.

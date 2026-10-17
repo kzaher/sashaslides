@@ -38,8 +38,12 @@ DRAWIO_WEBAPP="deps/drawio/src/main/webapp"
 SITE_HOME="/root/sashaslides"
 # Trees under renderer/ that the site image never builds from nor serves: the e2e fixture corpus
 # and the bug_solving scaffolding (13 MB of the 14 MB context). The image builds only from
-# browser/build-addon.ts's and addon-server/server.ts's import graphs. .dockerignore lists the same.
+# addon-server's own build and server.ts's import graphs. .dockerignore lists the same.
 SITE_EXCLUDES=(renderer/html2slides/e2e renderer/structured-prompts)
+# Sources outside renderer/ that the site image builds from (its Dockerfile COPYs exactly these).
+SITE_SHARED_SOURCES=(mcp/sasha-slides/converter mcp/sasha-slides/engine/src/contracts mcp/sasha-slides/engine/src/shared
+  mcp/sasha-slides/engine/src/web/parsing mcp/sasha-slides/google-slides/insert-html-contract.ts
+  mcp/sasha-slides/google-slides/slides-client.ts)
 CONNECTOR_HOME="/root/sasha-connector"
 # The connector's container user (mcp/sasha-slides/deploy/Dockerfile). Not 1000: on the
 # server uid 1000 is a login user, who would then own the secrets.
@@ -109,15 +113,17 @@ publish_site() {
   step "website: preflight"
   [ -f "$DRAWIO_WEBAPP/index.html" ] \
     || die "$DRAWIO_WEBAPP/index.html missing — the site image refuses to build without the drawio webapp"
-  regenerate_site_downloads
 
-  step "website: packing build context (package*.json, .dockerignore, deps/pptxgenjs, renderer)"
+  step "website: packing build context (package*.json, .dockerignore, deps/pptxgenjs, renderer, the converter)"
+  # The developer page bundles the product converter and the deck API contracts it shares with the
+  # connector: the same paths the site Dockerfile COPYs (addon-server/dev/build.test.ts checks them).
   tar -czf "$WORK/site-src.tgz" \
     "${SITE_EXCLUDES[@]/#/--exclude=}" \
     --exclude=node_modules --exclude=.git --exclude=__pycache__ --exclude='*.pyc' \
     --exclude='*.log' --exclude='.sxs-*' --exclude=.auth \
     --exclude=deps/pptxgenjs/dist --exclude=deps/pptxgenjs/demos \
-    package.json package-lock.json .dockerignore deps/pptxgenjs renderer
+    package.json package-lock.json .dockerignore deps/pptxgenjs renderer \
+    "${SITE_SHARED_SOURCES[@]}"
   report_tarball "$WORK/site-src.tgz"
   local excluded
   for excluded in "${SITE_EXCLUDES[@]}"; do
@@ -167,26 +173,6 @@ docker compose -p sashaslides "${env_args[@]}" build
 docker compose -p sashaslides "${env_args[@]}" up -d
 docker compose -p sashaslides "${env_args[@]}" ps
 REMOTE
-}
-
-# The two committed downloads regenerated before every build: the Claude-bridge zip (drawio
-# embedding) and the old html2slides Apps Script add-on bundle that install.sh?doc= pushes.
-regenerate_site_downloads() {
-  if [ "$DRY" = 1 ]; then
-    info "[dry-run] would regenerate $SITE_DIR/public/sasha-bridge.zip and $SITE_DIR/public/addon-bundle/"
-    return
-  fi
-  if [ -f bridge/build_zip.py ]; then
-    info "regenerating $SITE_DIR/public/sasha-bridge.zip"
-    python3 bridge/build_zip.py "$SITE_DIR/public/sasha-bridge.zip" || info "zip regeneration failed — shipping the committed copy"
-  fi
-  info "regenerating $SITE_DIR/public/addon-bundle/ (SERVER_ORIGIN=https://$DOMAIN)"
-  ( cd renderer/html2slides && SERVER_ORIGIN="https://$DOMAIN" timeout 300 npx tsx browser/build-addon.ts ) \
-    || die "add-on bundle build failed"
-  mkdir -p "$SITE_DIR/public/addon-bundle"
-  for file in Code.gs appsscript.json Sidebar.html; do
-    cp "dist/renderer/html2slides/addon/$file" "$SITE_DIR/public/addon-bundle/$file" || die "bundle file missing: $file"
-  done
 }
 
 # ── connector ────────────────────────────────────────────────────────────────

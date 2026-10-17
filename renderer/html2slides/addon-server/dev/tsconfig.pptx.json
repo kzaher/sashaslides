@@ -1,0 +1,21 @@
+// The offline .pptx bundle (pptx-download.ts -> public/dev-pptx.js). It pulls in the command-line
+// converter (renderer/html2slides/browser/convert-core.ts, convert-pptx-lib.ts), which is held to the
+// repository's root settings (tsconfig.json at the root), so this project checks it under those and
+// no stricter: the page's own sources are checked strictly by dev/tsconfig.json.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // As the root project: convert-pptx-lib.ts names Node's Buffer in a type (its command-line half).
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true
+  },
+  "files": ["pptx-download.ts"]
+}

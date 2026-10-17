@@ -23,6 +23,8 @@
 import {
   convertHtmlToSlideRequests as convertWithRealConverter,
   describeUnsupportedFeature,
+  type ConvertedDiagram,
+  type DrawioRender,
   type FractionalRegion,
   type UnsupportedFeature as ConverterUnsupportedFeature,
 } from "../../converter/index.ts";
@@ -51,6 +53,12 @@ export type UnsupportedFeature = Readonly<{
 export type ConversionResult = Readonly<{
   requests: readonly SlidesApiRequest[];
   unsupported: readonly UnsupportedFeature[];
+  /**
+   * The draw.io diagrams on the slide (the converter's own objectIds), which the insert links to
+   * their source files afterwards (diagram-flow.ts insertedDiagramLinkSpec). Absent means none: a
+   * result built by hand, or remembered by an older build, carries no diagrams.
+   */
+  drawioDiagrams?: readonly ConvertedDiagram[];
 }>;
 
 /**
@@ -89,9 +97,15 @@ export type ConvertSlideHtml = (
 export function browserSlideConverter({
   extractorScript,
   container,
+  renderDrawio,
 }: {
   extractorScript: string;
   container: HTMLElement;
+  /**
+   * Draws a diagram that arrived as bare draw.io XML (a pending placeholder) before the page is
+   * measured: `({ xml }) => renderDrawioPicture({ document, editorOrigin, xml })`.
+   */
+  renderDrawio: (options: Readonly<{ xml: string }>) => Promise<DrawioRender>;
 }): ConvertSlideHtml {
   return async ({ html, presentationId, pageObjectId, objectIdPrefix }) => {
     const converted = await convertWithRealConverter({
@@ -101,11 +115,13 @@ export function browserSlideConverter({
       objectIdPrefix,
       extractorScript,
       container,
+      renderDrawio,
     });
     return {
       requests: converted.requests,
       unsupported: normalizeUnsupported(converted.unsupported),
       stackedElements: converted.stackedElements,
+      drawioDiagrams: converted.drawioDiagrams,
     };
   };
 }

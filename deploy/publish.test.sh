@@ -19,6 +19,11 @@ expect() {
   if grep -qE -- "$pattern" <<< "$text"; then echo "ok   $label"; return; fi
   echo "FAIL $label (no line matching: $pattern)"; failures=$((failures + 1))
 }
+reject() {
+  local label="$1" pattern="$2" text="$3"
+  if ! grep -qE -- "$pattern" <<< "$text"; then echo "ok   $label"; return; fi
+  echo "FAIL $label (unexpected line matching: $pattern)"; failures=$((failures + 1))
+}
 
 for target in site connector all; do
   output="$(PATH="$STUBS:$PATH" timeout 25 bash "$HERE/publish.sh" --dry-run "$target" 2>&1)" \
@@ -31,6 +36,8 @@ for target in site connector all; do
     # The site image neither builds from nor serves the e2e corpus or bug_solving (13 MB of 14).
     expect "$target: site tarball excludes e2e and structured-prompts" \
       'site-src\.tgz excludes renderer/html2slides/e2e renderer/structured-prompts$' "$output"
+    # The bridge zip and the old html2slides add-on bundle were retired on 2026-10-17.
+    reject "$target: no legacy downloads regenerated" 'sasha-bridge\.zip|addon-bundle|build-addon' "$output"
   fi
   if [ "$target" != site ]; then
     expect "$target: connector tarball size" 'connector-src\.tgz: [0-9]+ files, [0-9]+ bytes' "$output"

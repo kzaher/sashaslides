@@ -41,6 +41,7 @@ import {
   stripSkillFrontmatter,
 } from "../workflow-instructions";
 import {
+  editDiagramsPrompt,
   newDeckPrompt,
   reviseFromFeedbackPrompt,
   secondWavePrompt,
@@ -252,8 +253,8 @@ describe("a real server.ts --stdio subprocess", () => {
     try {
       assert.equal(connected.client.getInstructions(), FALLBACK_WORKFLOW_INSTRUCTIONS);
       const tools = await connected.client.listTools();
-      // 18 workflow and comment tools, plus the eleven Sasha deck tools (ASSISTANT_DECK_TOOL_NAMES).
-      assert.equal(tools.tools.length, 29, "the whole tool surface is still served");
+      // 19 workflow, diagram and comment tools, plus the eleven Sasha deck tools (ASSISTANT_DECK_TOOL_NAMES).
+      assert.equal(tools.tools.length, 30, "the whole tool surface is still served");
       const prompts = await connected.client.listPrompts();
       assert.deepEqual(prompts.prompts.map((prompt) => prompt.name), [...WORKFLOW_PROMPT_NAMES]);
     } finally {
@@ -306,6 +307,7 @@ describe("prompts/list", () => {
     assert.deepEqual(declared.get("new_deck"), ["request"]);
     assert.deepEqual(declared.get("revise_from_feedback"), ["presentationId"]);
     assert.deepEqual(declared.get("second_wave"), ["proposalId"]);
+    assert.deepEqual(declared.get("edit_diagrams"), ["presentationId"]);
     for (const prompt of listed.prompts) {
       assert.deepEqual(
         (prompt.arguments ?? []).map((argument) => argument.required),
@@ -377,6 +379,16 @@ describe("prompts/get", () => {
     assert.ok(text.includes("1-based"));
   });
 
+  test("edit_diagrams walks list, read, write and says a write does not re-draw", async () => {
+    const text = textOf(
+      await connection.client().getPrompt({ name: "edit_diagrams", arguments: { presentationId: "deck-7" } }),
+    );
+    assert.ok(text.includes("deck-7"));
+    for (const word of ["deck_diagrams list", "deck_diagrams read", "deck_diagrams write", "copy-on-write", "Edit diagram", "drawioPath"]) {
+      assert.ok(text.includes(word), `names ${word}`);
+    }
+  });
+
   test("a missing required argument is an error, not an empty template", async () => {
     await assert.rejects(() => connection.client().getPrompt({ name: "new_deck", arguments: {} }));
   });
@@ -392,6 +404,7 @@ describe("the prompt builders", () => {
     assert.match(newDeckPrompt({ request: "pricing" }).description ?? "", /pricing/);
     assert.match(reviseFromFeedbackPrompt({ presentationId: "deck-1" }).description ?? "", /deck-1/);
     assert.match(secondWavePrompt({ proposalId: "p_1_a" }).description ?? "", /p_1_a/);
+    assert.match(editDiagramsPrompt({ presentationId: "deck-2" }).description ?? "", /deck-2/);
   });
 
   test("produce user turns only - a prompt is words the user is submitting, never words the model said", () => {
@@ -399,6 +412,7 @@ describe("the prompt builders", () => {
       newDeckPrompt({ request: "x" }),
       reviseFromFeedbackPrompt({ presentationId: "d" }),
       secondWavePrompt({ proposalId: "p" }),
+      editDiagramsPrompt({ presentationId: "d" }),
     ];
     for (const result of every) {
       for (const message of result.messages) assert.equal(message.role, "user");

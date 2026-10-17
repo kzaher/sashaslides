@@ -53,7 +53,18 @@ const CONNECTOR_PATHS: readonly string[] = [
 ];
 
 /** The deck server inside the connector (mcp/sasha-slides/decks): pages, built files, the API and its socket. */
-const DECK_PATHS: readonly string[] = ["/decks", "/decks/", "/deck/dk_x", "/deck-app/a.js", "/deck-app/runner/index.html", "/deck-api/session", "/deck-api/sync/dk_x"];
+const DECK_PATHS: readonly string[] = [
+  "/decks",
+  "/decks/",
+  "/deck/dk_x",
+  "/deck-app/a.js",
+  "/deck-app/runner/index.html",
+  "/deck-api/session",
+  "/deck-api/sync/dk_x",
+  // The developer page's two Google Slides routes (google-slides/insert-html-contract.ts).
+  "/deck-api/google-slides/insert-html",
+  "/deck-api/google-slides/export-png",
+];
 
 /** The website's routes (addon-server/server.ts, pages.ts), plus near-misses of connector paths. */
 const SITE_PATHS: readonly string[] = [
@@ -63,13 +74,13 @@ const SITE_PATHS: readonly string[] = [
   "/privacy",
   "/terms",
   "/healthz",
-  "/static/app.css",
+  // The developer page's built scripts and its draw.io harness.
+  "/static/dev.js",
+  "/static/dev-pptx.js",
+  "/static/dev.css",
+  "/e2e-drawio.html",
   "/drawio",
   "/drawio/index.html",
-  "/api/config",
-  "/api/export",
-  "/install.sh",
-  "/shell.html",
   "/favicon.ico",
   "/home.html",
   "/accounting",

@@ -9,6 +9,7 @@
  * Code.gs is plain V8 Apps Script and a THIN ADAPTER (see the banner below): every decision lives
  * in TypeScript and the server; the editor's part is appended from editor-code-gs.ts.
  */
+import { DIAGRAM_MENU_ITEM, diagramCodeGs } from "./diagram-code-gs.ts";
 import { editorCodeGs } from "./editor-code-gs.ts";
 import { inboxMarkerQueries, MARKER_QUERY_URL_PREFIX, URL_FETCH_MAXIMUM_URL_LENGTH } from "./inbox-scan.ts";
 import { insertionIndexFor } from "./slide-insert.ts";
@@ -33,7 +34,7 @@ export const DEFAULT_EDITOR_ORIGIN = "https://sashaslides.com";
 
 /** The whole Code.gs, for one editor origin. */
 export function codeGs(options: Readonly<{ editorOrigin: string }>): string {
-  return `${CODE_GS_BASE}\n${editorCodeGs({ editorOrigin: options.editorOrigin })}`;
+  return `${CODE_GS_BASE}\n${editorCodeGs({ editorOrigin: options.editorOrigin })}\n${diagramCodeGs()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,15 +170,18 @@ var SASHA_COMMENT_FIELDS =
  * onOpen is a SIMPLE trigger, so it runs WITHOUT data scopes — SlidesApp.getActivePresentation()
  * throws here. Only getUi() (the script.container.ui scope) is available.
  *
- * TWO ITEMS. Ask Sasha (UI-CONTRACT.md) is the conversation: the slides window is opened BY it and
+ * THREE ITEMS. Ask Sasha (UI-CONTRACT.md) is the conversation: the slides window is opened BY it and
  * the defect report by a button in either, so neither is a menu item. "Open in Sasha editor"
  * (SPEC.md 21.13) is a different thing, the deck's own editor in a dialog, and has no other door.
+ * "${DIAGRAM_MENU_ITEM.label}" opens the draw.io diagram dialog on the selected picture
+ * (src/diagram-code-gs.ts).
  */
 function onOpen(e) {
   SlidesApp.getUi()
     .createMenu('SashaSlides')
     .addItem('Ask Sasha', 'showSidebar')
     .addItem('Open in Sasha editor', 'sashaOpenEditor')
+    .addItem('${DIAGRAM_MENU_ITEM.label}', '${DIAGRAM_MENU_ITEM.functionName}')
     .addToUi();
 }
 

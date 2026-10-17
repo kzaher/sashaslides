@@ -3394,7 +3394,9 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         // `data-drawio` <svg>/<img>; otherwise fall back to the first visual or
         // image element on the slide.
         let pairedDom: Element | null = document.querySelector("[data-drawio]");
-        if (pairedDom && pairedDom.tagName !== "SVG" && pairedDom.tagName !== "IMG") {
+        // tagName is lowercase for an inline <svg> in an HTML document ("svg"), uppercase for <img>.
+        const pairedTag = (element: Element | null): string => (element === null ? "" : element.tagName.toUpperCase());
+        if (pairedDom && pairedTag(pairedDom) !== "SVG" && pairedTag(pairedDom) !== "IMG") {
           pairedDom = pairedDom.querySelector("svg, img");
         }
         // Phase 1: when the paired diagram is an inline <svg>, capture its
@@ -3402,7 +3404,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         // `content=` attribute makes it round-trip as an editable drawio file).
         // For a raster <img> there is no SVG to wrap, so drawioBaseSvg stays
         // undefined and a minimal wrapper is emitted downstream instead.
-        if (pairedDom && pairedDom.tagName === "SVG") {
+        if (pairedDom && pairedTag(pairedDom) === "SVG") {
           drawioBaseSvg = pairedDom.outerHTML;
         }
         // Resolve to the extracted element. The walk seen-marks the <svg>/<img>

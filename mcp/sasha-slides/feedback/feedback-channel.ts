@@ -20,6 +20,8 @@
 import { google, type drive_v3, type slides_v1 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
+import type { DeckPicture } from "../converter/drawio-save-plan.ts";
+import type { SlidesApiRequest } from "../converter/slides-api.ts";
 
 export type FeedbackChannel = Readonly<{
   /**
@@ -52,7 +54,27 @@ export type FeedbackChannel = Readonly<{
    * connector's one Slides-reading capability with the CALLER's own grant, in both modes.
    */
   readSlide(options: Readonly<{ presentationId: string; slide: SlideSelector }>): Promise<SlideRead>;
+
+  /**
+   * Every picture in the deck (inside groups too), with its slide: what `deck_diagrams` reads the
+   * draw.io stamps and source links from. Same grant as `readSlide`.
+   */
+  readDeckPictures(options: Readonly<{ presentationId: string }>): Promise<DeckPicturesRead>;
+
+  /** One atomic Slides `batchUpdate`, with the caller's grant. Google's refusal comes back verbatim. */
+  updatePresentation(
+    options: Readonly<{ presentationId: string; requests: readonly SlidesApiRequest[] }>,
+  ): Promise<PresentationUpdate>;
 }>;
+
+/** A picture and the 1-based filmstrip position of the slide it is on. */
+export type SlidePicture = DeckPicture & Readonly<{ slideNumber: number }>;
+
+export type DeckPicturesRead =
+  | Readonly<{ kind: "ok"; pictures: readonly SlidePicture[] }>
+  | Readonly<{ kind: "unavailable"; reason: string }>;
+
+export type PresentationUpdate = Readonly<{ kind: "ok" }> | Readonly<{ kind: "unavailable"; reason: string }>;
 
 /** Which slide: by its page object id, or by its 1-based filmstrip position. */
 export type SlideSelector = Readonly<{ kind: "object-id"; objectId: string }> | Readonly<{ kind: "number"; number: number }>;
@@ -218,7 +240,59 @@ export function googleFeedbackChannel(options: Readonly<{ auth: OAuth2Client }>)
         return { kind: "unavailable", reason: cause instanceof Error ? cause.message : String(cause) };
       }
     },
+
+    readDeckPictures: async ({ presentationId }) => {
+      try {
+        const deck = await slides.presentations.get({ presentationId, fields: DECK_PICTURE_FIELDS });
+        return { kind: "ok", pictures: picturesOfSlides(deck.data.slides ?? []) };
+      } catch (cause) {
+        return { kind: "unavailable", reason: cause instanceof Error ? cause.message : String(cause) };
+      }
+    },
+
+    updatePresentation: async ({ presentationId, requests }) => {
+      try {
+        await slides.presentations.batchUpdate({
+          presentationId,
+          // SlidesApiRequest (converter/slides-api.ts) is a hand-typed subset of Slides' own
+          // Request schema, field for field, so the generated type describes the same JSON.
+          requestBody: { requests: requests as unknown as slides_v1.Schema$Request[] },
+        });
+        return { kind: "ok" };
+      } catch (cause) {
+        return { kind: "unavailable", reason: cause instanceof Error ? cause.message : String(cause) };
+      }
+    },
   };
+}
+
+/**
+ * Groups are walked to any depth: a diagram grouped with a caption is still a diagram. `fields`
+ * cannot express recursion, so the whole element is requested for groups (decks are small).
+ */
+const DECK_PICTURE_FIELDS = "slides(objectId,pageElements)";
+
+export function picturesOfSlides(pages: readonly slides_v1.Schema$Page[]): readonly SlidePicture[] {
+  const pictures: SlidePicture[] = [];
+  const walk = (options: Readonly<{ elements: readonly slides_v1.Schema$PageElement[]; pageObjectId: string; slideNumber: number }>): void => {
+    for (const element of options.elements) {
+      const children = element.elementGroup?.children;
+      if (children !== undefined && children !== null) walk({ ...options, elements: children });
+      if (element.image === undefined || element.image === null || typeof element.objectId !== "string") continue;
+      pictures.push({
+        pageObjectId: options.pageObjectId,
+        slideNumber: options.slideNumber,
+        objectId: element.objectId,
+        description: typeof element.description === "string" ? element.description : null,
+        linkUrl: element.image.imageProperties?.link?.url ?? null,
+      });
+    }
+  };
+  for (const [position, page] of pages.entries()) {
+    if (typeof page.objectId !== "string") continue;
+    walk({ elements: page.pageElements ?? [], pageObjectId: page.objectId, slideNumber: position + 1 });
+  }
+  return pictures;
 }
 
 function slideObjectIdOf(options: Readonly<{ slide: SlideSelector; pageObjectIds: readonly string[] }>): string | null {

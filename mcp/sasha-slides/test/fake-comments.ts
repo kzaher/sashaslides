@@ -22,8 +22,10 @@ import {
   type CommentThread,
   type DeckPages,
   type FeedbackChannel,
+  type SlidePicture,
   type SlideRead,
 } from "../feedback/feedback-channel";
+import type { SlidesApiRequest } from "../converter/slides-api.ts";
 
 export type FakeComments = Readonly<{
   channel: FeedbackChannel;
@@ -49,6 +51,12 @@ export type FakeComments = Readonly<{
   setDeckPages: (options: Readonly<{ pages: DeckPages }>) => void;
   /** What `readSlide` answers next. Unset, it answers `unavailable`, like a deck nobody shared. */
   setSlideRead: (options: Readonly<{ read: SlideRead }>) => void;
+  /** The deck's pictures as `readDeckPictures` reports them; null makes it answer `unavailable`. */
+  setDeckPictures: (options: Readonly<{ pictures: readonly SlidePicture[] | null }>) => void;
+  /** The pictures after every `updatePresentation` so far (links and descriptions applied). */
+  deckPictures: () => readonly SlidePicture[];
+  /** Every `updatePresentation` batch, in order. */
+  presentationUpdates: () => readonly (readonly SlidesApiRequest[])[];
 }>;
 
 export type RecordedCall = Readonly<{ op: RecordedOperation; detail: string }>;
@@ -60,7 +68,9 @@ export type RecordedOperation =
   | "createReply"
   | "deleteComment"
   | "listSlidePages"
-  | "readSlide";
+  | "readSlide"
+  | "readDeckPictures"
+  | "updatePresentation";
 
 export const FAKE_OWNER = "Ante M";
 
@@ -82,6 +92,8 @@ export function createFakeComments(
   let nextId = 1;
   let deckPages: DeckPages = { kind: "ok", pageObjectIds: options.pageObjectIds };
   let slideRead: SlideRead = { kind: "unavailable", reason: "fake Slides: no slide was set" };
+  let pictures: SlidePicture[] | null = null;
+  const updates: (readonly SlidesApiRequest[])[] = [];
 
   const stamp = (): string => options.now().toISOString();
   const mintId = (prefix: string): string => {
@@ -180,6 +192,21 @@ export function createFakeComments(
         calls.push({ op: "readSlide", detail: `${presentationId}/${describeSlide(slide)}` });
         return Promise.resolve(slideRead);
       },
+
+      readDeckPictures: ({ presentationId }) => {
+        calls.push({ op: "readDeckPictures", detail: presentationId });
+        return Promise.resolve(
+          pictures === null ? { kind: "unavailable", reason: "fake Slides: no pictures were set" } : { kind: "ok", pictures: [...pictures] },
+        );
+      },
+
+      updatePresentation: ({ presentationId, requests }) => {
+        calls.push({ op: "updatePresentation", detail: `${presentationId}/${String(requests.length)}` });
+        if (pictures === null) return Promise.resolve({ kind: "unavailable", reason: "fake Slides: no pictures were set" });
+        updates.push(requests);
+        pictures = pictures.map((picture) => applyPictureRequests({ picture, requests }));
+        return Promise.resolve({ kind: "ok" });
+      },
     },
 
     calls: () => [...calls],
@@ -238,7 +265,26 @@ export function createFakeComments(
     setSlideRead: ({ read }) => {
       slideRead = read;
     },
+    setDeckPictures: ({ pictures: next }) => {
+      pictures = next === null ? null : [...next];
+    },
+    deckPictures: () => [...(pictures ?? [])],
+    presentationUpdates: () => [...updates],
   };
+}
+
+/** What Slides does to one picture for the two requests a diagram write sends; others are ignored. */
+function applyPictureRequests(options: Readonly<{ picture: SlidePicture; requests: readonly SlidesApiRequest[] }>): SlidePicture {
+  let picture = options.picture;
+  for (const request of options.requests) {
+    if ("updateImageProperties" in request && request.updateImageProperties.objectId === picture.objectId) {
+      picture = { ...picture, linkUrl: request.updateImageProperties.imageProperties.link?.url ?? picture.linkUrl };
+    }
+    if ("updatePageElementAltText" in request && request.updatePageElementAltText.objectId === picture.objectId) {
+      picture = { ...picture, description: request.updatePageElementAltText.description ?? picture.description };
+    }
+  }
+  return picture;
 }
 
 /** The fake's own storage: the one place in these files that is deliberately mutable. */

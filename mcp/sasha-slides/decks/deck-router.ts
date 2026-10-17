@@ -21,6 +21,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
+import { DEV_PAGE_PATH } from "../google-slides/insert-html-contract.ts";
 import {
   CSRF_HEADER_NAME,
   DECK_API_PATHS,
@@ -77,10 +78,13 @@ export type DeckRouterOptions = Readonly<{
   warn: (message: string) => void;
 }>;
 
-/** The return paths `/account/deck-session` accepts; anything else becomes `/decks`. */
+/**
+ * The return paths `/account/deck-session` accepts: the deck list, a deck page, or the developer
+ * page `/dev` (insert-html-contract.ts), exactly; anything else becomes `/decks`.
+ */
 export function validDeckReturnPath(candidate: string | null): string {
   if (candidate === null) return DECK_LIST_PAGE_PATH;
-  if (candidate === DECK_LIST_PAGE_PATH) return candidate;
+  if (candidate === DECK_LIST_PAGE_PATH || candidate === DEV_PAGE_PATH) return candidate;
   if (candidate.startsWith(DECK_PAGE_PATH_PREFIX) && parseDeckId(candidate.slice(DECK_PAGE_PATH_PREFIX.length)) !== null) return candidate;
   return DECK_LIST_PAGE_PATH;
 }
@@ -171,7 +175,8 @@ export function createDeckRouter(options: DeckRouterOptions): DeckRouter {
     const path = url.pathname;
     const accountId = session.accountId;
     if (path.startsWith(GOOGLE_SLIDES_SESSION_PREFIX)) {
-      if (session.kind === "bearer") return notFound(response);
+      // An embedded editor reaches Google only through its own deck's export (the deck segment).
+      if (session.kind === "bearer") return sendDeckApiError({ response, status: 403, error: "notPermitted", message: "An embedded editor cannot use these Google Slides routes." });
       if (!(await interchange.handleRequest({ request: request.request, response, url, caller: await people.callerFor({ accountId }) }))) notFound(response);
       return;
     }

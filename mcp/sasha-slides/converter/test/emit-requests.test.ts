@@ -31,7 +31,9 @@ import {
   stagedImageOf,
   stagedImageUrl,
 } from "../index.js";
-import type { SlidesApiRequest, UnsupportedFeature } from "../index.js";
+import { diagramIdForSource, diagramVersionOf, drawioAltText } from "../index.js";
+import type { ConversionResult, SlidesApiRequest, UnsupportedFeature, VisualRaster } from "../index.js";
+import { createHash } from "node:crypto";
 import { kindOf, requestsOfKind, startTestRun } from "./assert.js";
 
 const test = startTestRun("emit-requests");
@@ -1182,6 +1184,213 @@ function reportedKinds(unsupported: readonly UnsupportedFeature[]): readonly str
     "the indents are applied AFTER the bullets, or createParagraphBullets overwrites them",
     bulletsAt >= 0 && indentAt > bulletsAt,
     `bullets at ${String(bulletsAt)}, indent at ${String(indentAt)}`,
+  );
+}
+
+/* ------------------------------------- 10. visuals as pictures, and draw.io diagrams */
+
+/** A PNG `data:` address of `bytes` payload bytes; only the length matters to the emitter. */
+function pngDataUrl(bytes: number): string {
+  return `data:image/png;base64,${"iVBORw0KGgo".padEnd(Math.ceil((bytes * 4) / 3), "A")}`;
+}
+
+function emitWith(
+  options: Readonly<{ raw: Readonly<Record<string, unknown>>; rasters?: ReadonlyMap<number, VisualRaster> }>,
+): ConversionResult {
+  return emitSlideRequests({
+    extraction: parseExtraction(options.raw),
+    pageObjectId: "p1",
+    objectIdPrefix: "pics",
+    ...(options.rasters === undefined ? {} : { visualRasters: options.rasters }),
+  });
+}
+
+function slideOf(elements: readonly RawElement[], extra: Readonly<Record<string, unknown>> = {}): Readonly<Record<string, unknown>> {
+  return { viewport: { w: 1280, h: 720 }, elementCount: elements.length, elements, ...extra };
+}
+
+{
+  // A drawn visual is placed like an <img>: past the url cap its bytes are staged on Drive.
+  const raw = slideOf([{ type: "visual", bounds: { x: 320, y: 180, w: 640, h: 360 }, tag: "svg", _domIdx: 4 }]);
+  const result = emitWith({ raw, rasters: new Map([[0, { kind: "drawn", pngDataUrl: pngDataUrl(30_000) }]]) });
+  test.equal("a drawn visual emits one createImage", kinds(result.requests), ["createImage"]);
+  const [request] = asRecords(result.requests);
+  const create = request?.["createImage"] as Readonly<{ objectId?: string; url?: string; elementProperties?: unknown }> | undefined;
+  test.equal("a large picture carries the staged placeholder url", create?.url, STAGED_IMAGE_URL);
+  test.equal("and the staging sidecar names a PNG", request === undefined ? null : stagedImageOf(request)?.mimeType, "image/png");
+  test.check("its object id says it is a visual", (create?.objectId ?? "").includes("_visual"), create?.objectId);
+  test.equal("it covers the visual's box", JSON.stringify(create?.elementProperties).includes(`"translateX":${320 * EMU_PER_PX}`), true);
+  const [report] = result.unsupported;
+  test.equal("the region is still reported, as rasterised (a picture is not editable)", [report?.kind, report?.fallback], [
+    "rasterised-visual",
+    "rasterised",
+  ]);
+  test.check(
+    "and the sentence says it is a picture",
+    report !== undefined && describeUnsupportedFeature(report).includes("placed as a picture"),
+    report === undefined ? "" : describeUnsupportedFeature(report),
+  );
+}
+
+{
+  // An icon-sized picture travels inline as the url itself: nothing to stage.
+  const raw = slideOf([{ type: "visual", bounds: { x: 0, y: 0, w: 20, h: 20 }, tag: "canvas" }]);
+  const result = emitWith({ raw, rasters: new Map([[0, { kind: "drawn", pngDataUrl: pngDataUrl(300) }]]) });
+  const [request] = asRecords(result.requests);
+  const create = request?.["createImage"] as Readonly<{ url?: string }> | undefined;
+  test.check("a small picture is inline", (create?.url ?? "").startsWith("data:image/png;base64,"));
+  test.equal("and carries no staging sidecar", request === undefined ? "missing" : stagedImageOf(request), null);
+}
+
+{
+  // Drawing failed: nothing reaches the slide and the reason is kept.
+  const raw = slideOf([{ type: "visual", bounds: { x: 0, y: 0, w: 100, h: 100 }, tag: "canvas" }]);
+  const result = emitWith({ raw, rasters: new Map([[0, { kind: "failed", reason: "the canvas holds cross-origin pixels" }]]) });
+  test.equal("a failed visual emits nothing", kinds(result.requests), []);
+  const [report] = result.unsupported;
+  test.equal("and is reported omitted with its reason", report?.kind === "rasterised-visual" ? [report.fallback, report.reason] : null, [
+    "omitted",
+    "the canvas holds cross-origin pixels",
+  ]);
+  test.check(
+    "the sentence carries the reason",
+    report !== undefined && describeUnsupportedFeature(report).includes("cross-origin"),
+  );
+}
+
+{
+  // No rasteriser ran (a recorded extraction): the old behaviour, and NO object id is used, so
+  // every id after the visual is exactly what it was before rasterising existed.
+  const elements: readonly RawElement[] = [
+    { type: "visual", bounds: { x: 0, y: 0, w: 100, h: 100 }, tag: "svg" },
+    { type: "rect", bounds: { x: 0, y: 0, w: 10, h: 10 }, fill: "#000000" },
+  ];
+  const result = emitWith({ raw: slideOf(elements) });
+  test.equal("without a raster a visual emits nothing", kinds(result.requests), ["createShape", "updateShapeProperties"]);
+  const firstId = (asRecords(result.requests)[0]?.["createShape"] as Readonly<{ objectId?: string }> | undefined)?.objectId;
+  test.equal("and consumes no object id", firstId, "pics_rect1");
+  const [report] = result.unsupported;
+  test.equal("and is reported omitted with no reason", report?.kind === "rasterised-visual" ? [report.fallback, report.reason] : null, [
+    "omitted",
+    null,
+  ]);
+}
+
+{
+  // THE BYTE-IDENTICAL GUARD. This extraction's requests were recorded from the converter BEFORE
+  // rasterising and draw.io existed (sha256 of the JSON, 18 requests). A slide without a draw.io
+  // source, converted without rasters, must not change by one byte.
+  const guard: readonly RawElement[] = [
+    { type: "rect", bounds: { x: 0, y: 0, w: 1280, h: 720 }, fill: "#f8fafc", fillAlpha: 1 },
+    { type: "text", bounds: { x: 64, y: 40, w: 800, h: 60 }, text: "Safety pipeline", style: { fontFamily: "Arial", fontSize: 44, fontWeight: "bold", color: "#1f2937" } },
+    { type: "image", bounds: { x: 100, y: 150, w: 400, h: 300 }, src: `data:image/png;base64,${"iVBORw0KGgo".padEnd(4000, "A")}`, tag: "img", _domIdx: 3 },
+    { type: "visual", bounds: { x: 600, y: 150, w: 300, h: 300 }, tag: "svg", _domIdx: 4 },
+    { type: "list", bounds: { x: 950, y: 150, w: 300, h: 200 }, items: [{ text: "one", level: 0 }, { text: "two", level: 1 }], style: { fontFamily: "Arial", fontSize: 18 } },
+    { type: "line", bounds: { x: 10, y: 700, w: 1000, h: 0 }, x1: 10, y1: 700, x2: 1010, y2: 700, color: "#ff0000", strokeWidth: 2 },
+  ];
+  const result = emitSlideRequests({ extraction: parseExtraction(slideOf(guard)), pageObjectId: "p1", objectIdPrefix: "guard" });
+  const text = JSON.stringify(result.requests);
+  test.equal("a slide with no draw.io source emits exactly the pre-draw.io requests", [
+    result.requests.length,
+    createHash("sha256").update(text).digest("hex").slice(0, 16),
+  ], [18, "ccceec534efcf439"]);
+  test.equal("and lists no diagram", result.drawioDiagrams, []);
+  test.equal("its extraction carries no diagram", parseExtraction(slideOf(guard)).drawio, null);
+}
+
+const DIAGRAM_XML =
+  '<mxfile><diagram id="d1" name="Page-1"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>';
+
+{
+  // A raster <img data-drawio> paired with the page's source: picture, then its stamp.
+  const raw = slideOf(
+    [
+      { type: "rect", bounds: { x: 0, y: 0, w: 1280, h: 720 }, fill: "#ffffff" },
+      { type: "image", bounds: { x: 64, y: 72, w: 1152, h: 576 }, src: pngDataUrl(30_000), tag: "img", _drawioPaired: true },
+    ],
+    { drawioSource: DIAGRAM_XML },
+  );
+  const result = emitWith({ raw });
+  const stamp = drawioAltText({ diagramId: diagramIdForSource(DIAGRAM_XML), version: diagramVersionOf(DIAGRAM_XML) });
+  test.equal("a paired picture is followed by its alt-text stamp", kinds(result.requests), [
+    "createShape",
+    "updateShapeProperties",
+    "createImage",
+    "updatePageElementAltText",
+  ]);
+  const imageId = (asRecords(result.requests)[2]?.["createImage"] as Readonly<{ objectId?: string }> | undefined)?.objectId ?? "<missing>";
+  test.equal("the stamp targets the picture and reads drawio:<id>;v=<version>", asRecords(result.requests)[3]?.["updatePageElementAltText"], {
+    objectId: imageId,
+    description: stamp,
+  });
+  test.equal("the diagram is listed with the emitted object id", result.drawioDiagrams, [
+    { objectId: imageId, diagramId: diagramIdForSource(DIAGRAM_XML), version: diagramVersionOf(DIAGRAM_XML), xml: DIAGRAM_XML },
+  ]);
+  test.equal(
+    "the stamp is in the picture's merge group",
+    result.stackedElements.map((element) => element.requests.length),
+    [2, 2],
+  );
+}
+
+{
+  // An inline <svg> paired with the source: stamped only once it was drawn.
+  const elements: readonly RawElement[] = [
+    { type: "visual", bounds: { x: 0, y: 0, w: 1280, h: 720 }, tag: "svg", _drawioPaired: true },
+  ];
+  const raw = slideOf(elements, { drawioSource: DIAGRAM_XML, drawioBaseSvg: "<svg data-drawio></svg>" });
+  const parsedDrawio = parseExtraction(raw).drawio;
+  test.equal("the parser keeps the paired svg's markup", parsedDrawio?.kind === "valid" ? parsedDrawio.baseSvg : null, "<svg data-drawio></svg>");
+  const drawn = emitWith({ raw, rasters: new Map([[0, { kind: "drawn", pngDataUrl: pngDataUrl(30_000) }]]) });
+  test.equal("a drawn diagram svg is a stamped picture", kinds(drawn.requests), ["createImage", "updatePageElementAltText"]);
+  test.equal("and is listed", drawn.drawioDiagrams.length, 1);
+  const undrawn = emitWith({ raw });
+  test.equal("an undrawn diagram svg has nothing to stamp", kinds(undrawn.requests), []);
+  test.equal("and lists no diagram", undrawn.drawioDiagrams, []);
+}
+
+{
+  // The source is page content: re-validated at the boundary.
+  const pairedImage: RawElement = { type: "image", bounds: { x: 0, y: 0, w: 10, h: 10 }, src: "https://e.com/a.png", tag: "img", _drawioPaired: true };
+  const invalid = emitWith({ raw: slideOf([pairedImage], { drawioSource: "<html>nope</html>" }) });
+  test.equal("a source that is not draw.io XML keeps the picture, unstamped", kinds(invalid.requests), ["createImage"]);
+  test.equal("and lists no diagram", invalid.drawioDiagrams, []);
+  const invalidReport = invalid.unsupported.find((feature) => feature.kind === "drawio-source-invalid");
+  test.equal("and reports why, over the picture, as a plain picture", invalidReport === undefined ? null : [invalidReport.fallback, invalidReport.region], [
+    "rasterised",
+    { x: 0, y: 0, w: 0.0078, h: 0.0139 },
+  ]);
+  test.check("the sentence names the reason", invalidReport !== undefined && describeUnsupportedFeature(invalidReport).includes("not draw.io XML"));
+  // The connector names Drive files by the NORMALISED source, so ids are computed on it.
+  const bare = '<mxGraphModel><root><mxCell id="0"/></root></mxGraphModel>';
+  const normalised = parseExtraction(slideOf([pairedImage], { drawioSource: bare })).drawio;
+  const normalisedXml = normalised?.kind === "valid" ? normalised.xml : "";
+  test.equal("a bare <mxGraphModel> is normalised into an <mxfile>", normalisedXml.startsWith("<mxfile><diagram"), true);
+  test.equal(
+    "the diagram id and version are those of the normalised source",
+    emitWith({ raw: slideOf([pairedImage], { drawioSource: bare }) }).drawioDiagrams.map((diagram) => [diagram.diagramId, diagram.version, diagram.xml]),
+    [[diagramIdForSource(normalisedXml), diagramVersionOf(normalisedXml), normalisedXml]],
+  );
+  test.equal(
+    "a pairing flag on a shape is ignored (only a picture can carry the stamp)",
+    parseExtraction(slideOf([{ type: "rect", bounds: { x: 0, y: 0, w: 10, h: 10 }, fill: "#000000", _drawioPaired: true }], { drawioSource: DIAGRAM_XML })).drawio
+      ?.pairedPaintIndex,
+    null,
+  );
+  test.equal(
+    "a glowing text's stamp id is parsed for the rasteriser",
+    parseExtraction(slideOf([{ type: "visual", bounds: { x: 0, y: 0, w: 10, h: 10 }, tag: "text-glow", glowId: 3 }])).elements.map((element) =>
+      element.kind === "visual" ? element.glowId : "not a visual",
+    ),
+    [3],
+  );
+}
+
+{
+  const site = { region: { x: 0.05, y: 0.06, w: 0.9, h: 0.89 }, elementType: "drawio", domIndex: null };
+  test.check(
+    "an undrawn placeholder says why",
+    describeUnsupportedFeature({ ...site, kind: "drawio-not-rendered", fallback: "omitted", reason: "editor offline" }).includes("editor offline"),
   );
 }
 

@@ -27,7 +27,15 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { convertInPage, evaluate, openConverter } from "../calibration/in-page-converter.js";
 import type { CdpPage, Conversion } from "../calibration/in-page-converter.js";
-import { STAGED_IMAGE_URL, stagedImageOf } from "../index.js";
+import {
+  STAGED_IMAGE_URL,
+  diagramIdForSource,
+  diagramVersionOf,
+  drawioAltText,
+  drawioCandidateHtml,
+  parseDrawioSource,
+  stagedImageOf,
+} from "../index.js";
 import type { SlideImageUpload } from "../index.js";
 import { kindOf, startTestRun } from "./assert.js";
 
@@ -35,6 +43,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../../..");
 const BASIC_FIXTURES = join(REPO_ROOT, "renderer/html2slides/e2e/fixtures-basic");
 const OWN_FIXTURES = join(HERE, "fixtures");
+const DRAWIO_DEMO = join(REPO_ROOT, "renderer/html2slides/e2e/drawio-demo/safety-pipeline.html");
 
 /** 9144000 EMU / 1280 px. */
 const EMU_PER_PX = 7143.75;
@@ -180,6 +189,24 @@ async function main(): Promise<void> {
       ),
     );
 
+    if (only === null || only.some((name) => EXPECTED_PICTURES.some((expectation) => expectation.fixture === name))) {
+      checkRasterisedVisuals(
+        await Promise.all(
+          EXPECTED_PICTURES.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
+            async (expectation) => ({
+              expectation,
+              report: await convert(page, {
+                html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
+                name: expectation.fixture,
+              }),
+            }),
+          ),
+        ),
+      );
+    }
+
+    if (only === null || only.includes("drawio")) await checkDrawio(page);
+
     reportTimings(timings);
   } finally {
     await browser.close();
@@ -321,7 +348,7 @@ const KNOWN_FALLBACKS: ReadonlySet<string> = new Set([
   "edge-lines",
   "geometry-floor",
   "font-substituted",
-  "needs-raster",
+  "rasterised",
 ]);
 
 function checkElementProperties(
@@ -512,8 +539,9 @@ const EXPECTED_ANOMALIES: readonly Readonly<{
   { fixture: "block_child_typography.html", mustReport: ["letter-spacing"], mustNotReport: ["font-unavailable"] },
   // An image's BORDER crosses as an outline; its RADIUS cannot, and must be admitted.
   { fixture: "image_border.html", mustReport: ["image-corner-radius"], mustNotReport: ["image-source-not-fetchable"] },
-  // A conic is genuinely beyond the API, and it says so.
+  // A conic is genuinely beyond the API, and it says so (it now arrives as a picture).
   { fixture: "page_gradient.html", mustReport: ["rasterised-visual"] },
+  { fixture: "canvas_drawing.html", mustReport: ["rasterised-visual"] },
 ];
 
 /**
@@ -827,6 +855,168 @@ function checkExpectedCellFills(
       );
     }
   }
+}
+
+/**
+ * VISUALS ARRIVE AS PICTURES. The converter used to emit nothing for these and report a promise
+ * ("needs-raster") nothing kept. Now each is drawn in the staged page and placed with createImage
+ * over its own box, and the anomaly says `rasterised`. Boxes in CSS px of the 1280x720 page.
+ */
+const EXPECTED_PICTURES: readonly Readonly<{ fixture: string; tag: string; box: Readonly<{ x: number; y: number; w: number; h: number }> }>[] = [
+  { fixture: "svg_inline.html", tag: "svg", box: { x: 120, y: 120, w: 300, h: 300 } },
+  { fixture: "page_gradient.html", tag: "css-effect", box: { x: 0, y: 0, w: 1280, h: 720 } },
+  { fixture: "canvas_drawing.html", tag: "canvas", box: { x: 240, y: 200, w: 800, h: 400 } },
+];
+
+function checkRasterisedVisuals(
+  results: readonly Readonly<{ expectation: (typeof EXPECTED_PICTURES)[number]; report: ConversionReport }>[],
+): void {
+  for (const { expectation, report } of results) {
+    const name = expectation.fixture;
+    const anomaly = report.unsupported.find((feature) => feature.kind === "rasterised-visual");
+    test.equal(`${name}: the <${expectation.tag}> is reported as rasterised`, anomaly?.fallback, "rasterised");
+    const picture = report.requests.find((request) => {
+      const create = request["createImage"] as Readonly<{ objectId?: string }> | undefined;
+      return create !== undefined && (create.objectId ?? "").includes("_visual");
+    });
+    const create = picture?.["createImage"] as
+      | Readonly<{ url?: string; elementProperties?: Readonly<{ size?: Readonly<{ width?: { magnitude?: number }; height?: { magnitude?: number } }>; transform?: Readonly<{ translateX?: number; translateY?: number }> }> }>
+      | undefined;
+    test.check(`${name}: the <${expectation.tag}> is placed with createImage`, create !== undefined);
+    if (create === undefined || picture === undefined) continue;
+    const staged = stagedImageOf(picture);
+    test.check(
+      `${name}: the picture is a PNG, inline or staged`,
+      staged !== null ? staged.mimeType === "image/png" : (create.url ?? "").startsWith("data:image/png;base64,"),
+      staged === null ? (create.url ?? "").slice(0, 40) : staged.mimeType,
+    );
+    const properties = create.elementProperties;
+    test.near(`${name}: picture left`, properties?.transform?.translateX ?? -1, expectation.box.x * EMU_PER_PX, EMU_PER_PX * 2);
+    test.near(`${name}: picture top`, properties?.transform?.translateY ?? -1, expectation.box.y * EMU_PER_PX, EMU_PER_PX * 2);
+    test.near(`${name}: picture width`, properties?.size?.width?.magnitude ?? -1, expectation.box.w * EMU_PER_PX, EMU_PER_PX * 2);
+    test.near(`${name}: picture height`, properties?.size?.height?.magnitude ?? -1, expectation.box.h * EMU_PER_PX, EMU_PER_PX * 2);
+  }
+}
+
+/** A minimal diagram for the pending-placeholder cases. */
+const SMALL_DIAGRAM =
+  '<mxfile><diagram id="d1" name="Page-1"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>' +
+  '<mxCell id="2" value="Start" style="rounded=1;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="120" height="60" as="geometry"/></mxCell>' +
+  "</root></mxGraphModel></diagram></mxfile>";
+
+/**
+ * A stand-in for the draw.io editor (drawio-embed.ts renderDrawioPicture needs the hosted editor):
+ * a 400x200 PNG drawn on a canvas in the page, so the fitted placement is predictable.
+ */
+const FAKE_RENDERER = `async ({ xml }) => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 400;
+  canvas.height = 200;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#fff3e0";
+  context.fillRect(0, 0, 400, 200);
+  context.strokeStyle = "#e65100";
+  context.lineWidth = 6;
+  context.strokeRect(40, 40, 120, 60);
+  return { kind: "rendered", picture: { pngDataUrl: canvas.toDataURL("image/png"), svg: "<svg xmlns='http://www.w3.org/2000/svg'/>", xml } };
+}`;
+
+/**
+ * DRAW.IO IS EMBEDDABLE. The demo slide (an inline <svg data-drawio> + #drawio-source) becomes one
+ * full-slide picture stamped `drawio:<id>;v=<version>`, listed in `drawioDiagrams`; a candidate an
+ * agent handed over as bare XML is drawn by the host's renderer first; without one it says so.
+ */
+async function checkDrawio(page: CdpPage): Promise<void> {
+  const demoHtml = readFileSync(DRAWIO_DEMO, "utf-8");
+  const demo = await convert(page, { html: demoHtml, name: "safety-pipeline.html" });
+  checkFixture({ name: "safety-pipeline.html", report: demo });
+  const demoSource = /<script[^>]*id="drawio-source"[^>]*>([\s\S]*?)<\/script>/.exec(demoHtml)?.[1] ?? "";
+  const demoXmlStart = demoSource.indexOf("<mxfile");
+  const demoXml = demoSource.slice(demoXmlStart, demoSource.lastIndexOf("</mxfile>") + "</mxfile>".length);
+  checkStampedDiagram({ name: "safety-pipeline.html", report: demo, xml: demoXml, box: { x: 0, y: 0, w: 1280, h: 720 } });
+  test.check(
+    "safety-pipeline.html: the diagram's picture is staged on Drive (too big for the url)",
+    demo.requests.some((request) => request["createImage"] !== undefined && stagedImageOf(request) !== null),
+  );
+
+  const candidateHtml = drawioCandidateHtml({ xml: SMALL_DIAGRAM, title: null });
+  const rendered = await convertInPage({
+    page,
+    html: candidateHtml,
+    name: "drawio-candidate",
+    presentationId: "test-presentation",
+    pageObjectId: "p1",
+    renderDrawioSource: FAKE_RENDERER,
+  });
+  checkFixture({ name: "drawio-candidate", report: rendered });
+  // The placeholder is 1152x640 at (64,40); a 2:1 picture fits as 1152x576, centred: top 72.
+  checkStampedDiagram({ name: "drawio-candidate", report: rendered, xml: SMALL_DIAGRAM, box: { x: 64, y: 72, w: 1152, h: 576 } });
+  test.check(
+    "drawio-candidate: a drawn placeholder is not reported",
+    !rendered.unsupported.some((feature) => feature.kind === "drawio-not-rendered"),
+  );
+
+  const unrendered = await convertInPage({
+    page,
+    html: candidateHtml,
+    name: "drawio-unrendered",
+    presentationId: "test-presentation",
+    pageObjectId: "p1",
+  });
+  const missing = unrendered.unsupported.find((feature) => feature.kind === "drawio-not-rendered");
+  test.check("drawio-unrendered: no renderer reports the placeholder", missing !== undefined);
+  test.equal("drawio-unrendered: and nothing reached the slide there", missing?.fallback, "omitted");
+  test.near("drawio-unrendered: over the placeholder's left", missing?.region.x ?? -1, 64 / 1280, 0.002);
+  test.near("drawio-unrendered: over the placeholder's height", missing?.region.h ?? -1, 640 / 720, 0.002);
+  test.equal("drawio-unrendered: no picture, no diagram", unrendered.drawioDiagrams, []);
+
+  const failed = await convertInPage({
+    page,
+    html: candidateHtml,
+    name: "drawio-failed",
+    presentationId: "test-presentation",
+    pageObjectId: "p1",
+    renderDrawioSource: `async () => ({ kind: "failed", reason: "editor offline" })`,
+  });
+  const failure = failed.unsupported.find((feature) => feature.kind === "drawio-not-rendered");
+  test.equal("drawio-failed: the renderer's reason reaches the report", failure !== undefined && "reason" in failure ? failure.reason : null, "editor offline");
+}
+
+function checkStampedDiagram(
+  options: Readonly<{ name: string; report: ConversionReport; xml: string; box: Readonly<{ x: number; y: number; w: number; h: number }> }>,
+): void {
+  const { name, report, box } = options;
+  const parsed = parseDrawioSource(options.xml);
+  const xml = parsed.kind === "ok" ? parsed.xml : "";
+  test.check(`${name}: the page's draw.io source parses`, xml.length > 0);
+  const stamp = drawioAltText({ diagramId: diagramIdForSource(xml), version: diagramVersionOf(xml) });
+  test.equal(
+    `${name}: exactly one diagram is listed`,
+    report.drawioDiagrams.map((diagram) => ({ diagramId: diagram.diagramId, version: diagram.version, xml: diagram.xml })),
+    [{ diagramId: diagramIdForSource(xml), version: diagramVersionOf(xml), xml }],
+  );
+  const objectId = report.drawioDiagrams[0]?.objectId;
+  const pictureAt = report.requests.findIndex(
+    (request) => (request["createImage"] as Readonly<{ objectId?: string }> | undefined)?.objectId === objectId,
+  );
+  const altTextAt = report.requests.findIndex(
+    (request) => (request["updatePageElementAltText"] as Readonly<{ objectId?: string }> | undefined)?.objectId === objectId,
+  );
+  test.check(`${name}: the listed object is a picture this batch creates`, pictureAt >= 0, String(objectId));
+  test.equal(`${name}: the stamp follows the picture`, altTextAt, pictureAt + 1);
+  test.equal(
+    `${name}: the stamp is drawio:<id>;v=<version>`,
+    (report.requests[altTextAt]?.["updatePageElementAltText"] as Readonly<{ description?: string }> | undefined)?.description,
+    stamp,
+  );
+  const create = report.requests[pictureAt]?.["createImage"] as
+    | Readonly<{ elementProperties?: Readonly<{ size?: Readonly<{ width?: { magnitude?: number }; height?: { magnitude?: number } }>; transform?: Readonly<{ translateX?: number; translateY?: number }> }> }>
+    | undefined;
+  const properties = create?.elementProperties;
+  test.near(`${name}: diagram left`, properties?.transform?.translateX ?? -1, box.x * EMU_PER_PX, EMU_PER_PX * 2);
+  test.near(`${name}: diagram top`, properties?.transform?.translateY ?? -1, box.y * EMU_PER_PX, EMU_PER_PX * 2);
+  test.near(`${name}: diagram width`, properties?.size?.width?.magnitude ?? -1, box.w * EMU_PER_PX, EMU_PER_PX * 2);
+  test.near(`${name}: diagram height`, properties?.size?.height?.magnitude ?? -1, box.h * EMU_PER_PX, EMU_PER_PX * 2);
 }
 
 function fixtureDirFor(name: string): string {

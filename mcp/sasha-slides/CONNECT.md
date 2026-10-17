@@ -25,9 +25,10 @@ Check it attached:
 claude mcp list
 ```
 
-You should see `sasha-slides` and these eleven tools: `propose_slides`, `await_pick`,
+You should see `sasha-slides` and its tools, among them `propose_slides`, `await_pick`,
 `slide_images`, `proposal_state`, `read_feedback`, `reply_feedback`, `resolve_feedback`,
-`await_feedback`, `revise_slide`, `clear_slides`, `session_events`.
+`await_feedback`, `revise_slide`, `clear_slides`, `session_events`, `slide_structure` and
+`deck_diagrams` (the draw.io diagrams in a deck).
 
 `--stdio` uses the single Google account whose token is in `.auth/tokens.json`. That is the
 right mode for one person on one machine. It is NOT safe to share, because everyone who

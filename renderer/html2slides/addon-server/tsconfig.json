@@ -1,0 +1,28 @@
+// The website's Node side: server.ts, pages.ts, the build script, the smoke test and every test
+// (which also import the developer page's pure modules). The browser sources have their own gate,
+// dev/tsconfig.json (no Node types) and dev/tsconfig.pptx.json (the offline .pptx bundle).
+//
+//   npm run typecheck
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "ESNext.Disposable"],
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["../../../types/ambient.d.ts", "server.ts", "pages.ts", "*.test.ts", "deploy/*.test.ts", "dev/*.test.ts", "dev/build.ts", "dev/*.smoke.ts"]
+}

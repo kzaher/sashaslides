@@ -15,6 +15,7 @@
 // survives the window, is capped, and throws on access in a private window or with blocked site
 // data. Every path is guarded, and a miss is always a legal answer -- it just means converting.
 
+import type { ConvertedDiagram } from "../../converter/convert-html-to-slide-requests.ts";
 import type { ConversionResult, SlidesApiRequest, UnsupportedFeature } from "./converter-contract.ts";
 import { browserShelf, evictOldest, textHashOf } from "./render-cache.ts";
 
@@ -71,7 +72,7 @@ export function rememberConversion(key: string, result: ConversionResult, store?
   if (shelf === null) return;
   let serialised: string;
   try {
-    serialised = JSON.stringify({ requests: result.requests, unsupported: result.unsupported, at: Date.now() });
+    serialised = JSON.stringify({ requests: result.requests, unsupported: result.unsupported, drawioDiagrams: result.drawioDiagrams ?? [], at: Date.now() });
   } catch {
     return;
   }
@@ -92,7 +93,7 @@ export function rememberConversion(key: string, result: ConversionResult, store?
 /** PARSE AT THE BOUNDARY: storage is untrusted, so anything not shaped like a conversion misses. */
 function conversionOf(parsed: unknown): ConversionResult | null {
   if (typeof parsed !== "object" || parsed === null) return null;
-  const record = parsed as Readonly<{ requests?: unknown; unsupported?: unknown }>;
+  const record = parsed as Readonly<{ requests?: unknown; unsupported?: unknown; drawioDiagrams?: unknown }>;
   if (!Array.isArray(record.requests) || !Array.isArray(record.unsupported)) return null;
   const requests: SlidesApiRequest[] = [];
   for (const request of record.requests as readonly unknown[]) {
@@ -106,7 +107,21 @@ function conversionOf(parsed: unknown): ConversionResult | null {
     if (feature === null) return null;
     unsupported.push(feature);
   }
-  return { requests, unsupported };
+  // The diagrams are what the insert links afterwards; an entry without them (an older build) has none.
+  const drawioDiagrams: ConvertedDiagram[] = [];
+  for (const entry of Array.isArray(record.drawioDiagrams) ? (record.drawioDiagrams as readonly unknown[]) : []) {
+    const diagram = convertedDiagramOf(entry);
+    if (diagram === null) return null;
+    drawioDiagrams.push(diagram);
+  }
+  return drawioDiagrams.length === 0 ? { requests, unsupported } : { requests, unsupported, drawioDiagrams };
+}
+
+function convertedDiagramOf(entry: unknown): ConvertedDiagram | null {
+  if (typeof entry !== "object" || entry === null) return null;
+  const record = entry as Readonly<{ objectId?: unknown; diagramId?: unknown; version?: unknown; xml?: unknown }>;
+  if (typeof record.objectId !== "string" || typeof record.diagramId !== "string" || typeof record.version !== "string" || typeof record.xml !== "string") return null;
+  return { objectId: record.objectId, diagramId: record.diagramId, version: record.version, xml: record.xml };
 }
 
 function unsupportedOf(entry: unknown): UnsupportedFeature | null {

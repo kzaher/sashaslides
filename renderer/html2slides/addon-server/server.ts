@@ -1,82 +1,47 @@
 /**
- * addon-server — the externally-hosted UI + API for the html2slides Google Slides
- * add-on. The Apps Script sidebar is a thin shell: `Code.gs` fetches `/shell.html`
- * from this server and serves it via HtmlService (so the UI updates without
- * redeploying the add-on), while the heavy UI bundle + the self-hosted drawio
- * editor load directly from this server (script-src / iframe).
+ * The sashaslides.com website: the product home page, the legal pages, the setup walkthroughs, the
+ * developer page (/dev, unlinked) and the self-hosted draw.io editor (/drawio/). Plain HTTP on $PORT
+ * behind the server's nginx, which terminates TLS and sends the connector's paths (/mcp, /account,
+ * /decks, /deck-api, ...) to the connector instead (deploy/nginx-sashaslides.conf).
  *
- * Dependency-free on purpose (native `http` + libs already in the repo's root
- * node_modules) so it runs without an npm install, and so the Docker image stays
- * small. TLS/Let's Encrypt is terminated by Caddy in front of this (see Caddyfile);
- * this process always speaks plain HTTP on $PORT behind it.
+ * Dependency-free on purpose (native `http` only), so it runs without an npm install and the image
+ * stays small. Every page is a static file in public/; the developer page's scripts are built from
+ * TypeScript by dev/build.ts (public/dev.js, dev-pptx.js, e2e-drawio.js).
  *
- * Routes (│ = filled by a parallel feature workstream):
- *   GET  /healthz                 — liveness (Caddy upstream check)
- *   GET  /                        — the product home page (public/home.html)
- *   GET  /dev                     — the full option-rich developer UI (public/app.html)
- *   GET  /privacy, /terms         — the legal pages the Google OAuth consent screen links to
- *   GET  /shell.html              — small shell Code.gs fetches → HtmlService
- *   GET  /static/*                — public/ assets (app.js, app.css)
- *   GET  /drawio/*                — self-hosted drawio webapp (deps/drawio)        │ D
- *   GET  /api/config              — UI defaults (oversampling, etc.)
- *   POST /api/export              — zip of non-skipped slides as PNG (slide range) │ B
- *   POST /api/drawio/render       — drawio mxfile XML → PNG (+embedded XML chunk)  │ D
- *   POST /api/drawio/detect       — scan a PNG for an embedded drawio mxfile       │ D
+ * Routes:
+ *   GET /healthz      liveness
+ *   GET <page>        pages.ts: /, /dev, /privacy, /terms, /walkthroughs/*
+ *   GET /static/*     public/ assets
+ *   GET /drawio/*     the self-hosted draw.io webapp (deps/drawio), used by /dev and the add-on
+ *   GET /<file>       public/ files by name (favicon.ico, e2e-drawio.html, ...)
  */
 
-import { createServer, IncomingMessage, ServerResponse } from "http";
-import { existsSync, statSync, createReadStream, readFileSync } from "fs";
-import { join, normalize, extname, dirname } from "path";
-import { fileURLToPath } from "url";
-import { apiHandlers } from "./registry.js";
-import { pageFor } from "./pages.js";
-// Feature modules register their routes (via ./registry) at import time. Static
-// imports so tsx resolves the .js→.ts mapping; each is a no-op stub until its
-// workstream lands. Adding a workstream = new file under api/ + one import here.
-import "./api/export.js";
-import "./api/drawio.js";
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { createServer, type ServerResponse } from "node:http";
+import { dirname, extname, join, normalize, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { pageFor } from "./pages.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(HERE, "public");
-// drawio webapp root once the submodule is populated on the host. The Maven
-// webapp source lives under src/main/webapp; a built/exported copy may live in
-// a `build/` dir — prefer whichever exists.
-const DRAWIO_CANDIDATES = [
-  join(HERE, "../../../deps/drawio/src/main/webapp"),
-  join(HERE, "../../../deps/drawio/build"),
-];
-const DRAWIO_DIR = DRAWIO_CANDIDATES.find((d) => existsSync(d)) || null;
+// The draw.io webapp: the Maven webapp source of the deps/drawio submodule, or a built copy.
+const DRAWIO_CANDIDATES = [join(HERE, "../../../deps/drawio/src/main/webapp"), join(HERE, "../../../deps/drawio/build")];
+const DRAWIO_DIR = DRAWIO_CANDIDATES.find((candidate) => existsSync(candidate)) ?? null;
 
-const PORT = Number(process.env.PORT) || 8787;
-const HOST = process.env.HOST || "0.0.0.0";
+const PORT = Number(process.env["PORT"]) || 8787;
+const HOST = process.env["HOST"] ?? "0.0.0.0";
 
-// Build stamp written into the image at build time (Dockerfile → public/build-info.json),
-// surfaced via /api/config so the UI can show when it was last refreshed.
-let BUILD_DATE = "dev";
-try { BUILD_DATE = JSON.parse(readFileSync(join(PUBLIC_DIR, "build-info.json"), "utf8")).buildDate || "dev"; } catch { /* no stamp (dev) */ }
-
-// Default UI config — overridable via env so the container is configurable.
-const CONFIG = {
-  buildDate: BUILD_DATE,
-  oversampling: { default: Number(process.env.OVERSAMPLING_DEFAULT) || 2, min: 1, max: 8 },
-  drawioAvailable: Boolean(DRAWIO_DIR),
-  // Marker fill used for the off-canvas drawio-XML text field so it's easy to
-  // find in the Slides selection pane / API. Bright magenta, deliberately garish.
-  drawioMetaColor: process.env.DRAWIO_META_COLOR || "FF00FF",
-};
-
-const MIME: Record<string, string> = {
+const MEDIA_TYPES: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
-  ".gs": "text/plain; charset=utf-8",
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".woff2": "font/woff2",
   ".map": "application/json; charset=utf-8",
-  // drawio webapp assets (served under /drawio/) — fonts, stencils, icons.
+  // draw.io webapp assets (served under /drawio/): fonts, stencils, icons.
   ".gif": "image/gif",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -91,120 +56,49 @@ const MIME: Record<string, string> = {
   ".webp": "image/webp",
 };
 
-function send(res: ServerResponse, status: number, body: string | Buffer, type = "text/plain; charset=utf-8") {
-  res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store" });
-  res.end(body);
-}
-
-/** Read the JSON body of a request (capped). */
-function readBody(req: IncomingMessage, limit = 64 * 1024 * 1024): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let n = 0;
-    req.on("data", (c: Buffer) => {
-      n += c.length;
-      if (n > limit) { reject(new Error("payload too large")); req.destroy(); return; }
-      chunks.push(c);
-    });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
-  });
-}
-
-/** Serve a file from a root, blocking path traversal. */
-function serveStatic(res: ServerResponse, root: string, relPath: string): boolean {
-  const safe = normalize(relPath).replace(/^(\.\.[/\\])+/, "");
-  const full = join(root, safe);
-  if (!full.startsWith(root) || !existsSync(full) || !statSync(full).isFile()) return false;
-  const type = MIME[extname(full)] || "application/octet-stream";
-  res.writeHead(200, { "Content-Type": type, "Cache-Control": "public, max-age=300" });
-  createReadStream(full).pipe(res);
-  return true;
-}
-
-// Feature extension points live in ./registry (apiHandlers + registerApi),
-// imported above — kept in a separate module so feature files don't import this
-// server module (circular import + top-level await = deadlock).
-
-const server = createServer(async (req, res) => {
+const server = createServer((request, response) => {
   try {
-    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-    const p = url.pathname;
-    const method = (req.method || "GET").toUpperCase();
-    // lazy body reader (only the handler that needs it pays for it)
-    let bodyPromise: Promise<Buffer> | null = null;
-    const body = () => (bodyPromise ??= readBody(req));
+    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    const method = (request.method ?? "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD") return send({ response, status: 405, body: "method not allowed" });
+    if (path === "/healthz") return send({ response, status: 200, body: "ok" });
 
-    // CORS for the Apps Script HtmlService origin + local dev. The UI is loaded
-    // cross-origin (script-src / iframe from googleusercontent.com), so allow it.
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    // `*` = allow any request header (the sidebar runs cross-origin in the Apps
-    // Script iframe; a too-narrow list fails the preflight → "Failed to fetch").
-    res.setHeader("Access-Control-Allow-Headers", "*");
-    if (method === "OPTIONS") { res.writeHead(204); res.end(); return; }
-
-    if (p === "/healthz") return send(res, 200, "ok");
-    if (p === "/api/config") return send(res, 200, JSON.stringify(CONFIG), MIME[".json"]);
-
-    // registered API handlers (export, drawio, …)
-    for (const h of apiHandlers) {
-      if (h.method === method && p === h.path) {
-        if (await h.fn(req, res, url, body)) return;
-      }
+    if (path === "/drawio" || path.startsWith("/drawio/")) {
+      if (DRAWIO_DIR === null) return send({ response, status: 503, body: "the drawio submodule is not populated on this host" });
+      const relative = path === "/drawio" || path === "/drawio/" ? "index.html" : path.slice("/drawio/".length);
+      if (serveStatic({ response, root: DRAWIO_DIR, relativePath: relative })) return;
+      return send({ response, status: 404, body: "drawio asset not found" });
     }
 
-    // self-hosted drawio webapp
-    if (p === "/drawio" || p.startsWith("/drawio/")) {
-      if (!DRAWIO_DIR) return send(res, 503, "drawio submodule not populated on this host");
-      const rel = p === "/drawio" || p === "/drawio/" ? "index.html" : p.slice("/drawio/".length);
-      if (serveStatic(res, DRAWIO_DIR, rel)) return;
-      return send(res, 404, "drawio asset not found");
-    }
-
-    // One-line installers, both under /install.sh:
-    //   no params      → the Sasha bridge installer (public/install.sh)
-    //   ?doc=<id>      → the ADD-ON installer for that Slides deck / Google Doc
-    //                    (public/install-addon.sh with the id baked in; binds an
-    //                    Apps Script project via clasp and pushes /addon-bundle/*)
-    if (p === "/install.sh") {
-      const proto = (req.headers["x-forwarded-proto"] as string)
-        || (url.hostname === "localhost" || url.hostname.startsWith("127.") ? "http" : "https");
-      const origin = `${proto}://${req.headers.host}`;
-      const doc = url.searchParams.get("doc");
-      let template = "install.sh";
-      let sh: string;
-      if (doc != null) {
-        if (!/^[A-Za-z0-9_-]{20,}$/.test(doc)) return send(res, 400, "invalid doc id (expect the id from docs.google.com/…/d/<id>/edit)");
-        template = "install-addon.sh";
-        sh = readFileSync(join(PUBLIC_DIR, template), "utf8")
-          .split("__ORIGIN__").join(origin)
-          .split("__DOC_ID__").join(doc);
-      } else {
-        sh = readFileSync(join(PUBLIC_DIR, template), "utf8").split("__ORIGIN__").join(origin);
-      }
-      res.writeHead(200, { "Content-Type": "text/x-shellscript", "Cache-Control": "no-store" });
-      res.end(sh);
-      return;
-    }
-
-    // UI shell + app + static
-    const page = pageFor(p);
-    if (page !== null) { if (serveStatic(res, PUBLIC_DIR, page)) return; }
-    if (p === "/shell.html") { if (serveStatic(res, PUBLIC_DIR, "shell.html")) return; }
-    if (p.startsWith("/static/")) { if (serveStatic(res, PUBLIC_DIR, p.slice("/static/".length))) return; }
-    if (serveStatic(res, PUBLIC_DIR, p.slice(1))) return;
-
-    send(res, 404, "not found");
-  } catch (err) {
-    send(res, 500, `server error: ${(err as Error).message}`);
+    const page = pageFor(path);
+    if (page !== null && serveStatic({ response, root: PUBLIC_DIR, relativePath: page })) return;
+    if (path.startsWith("/static/") && serveStatic({ response, root: PUBLIC_DIR, relativePath: path.slice("/static/".length) })) return;
+    if (serveStatic({ response, root: PUBLIC_DIR, relativePath: path.slice(1) })) return;
+    send({ response, status: 404, body: "not found" });
+  } catch (error) {
+    send({ response, status: 500, body: `server error: ${error instanceof Error ? error.message : String(error)}` });
   }
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[addon-server] listening on http://${HOST}:${PORT}`);
-  console.log(`[addon-server] drawio: ${DRAWIO_DIR ? "self-hosted at /drawio" : "NOT populated (submodule)"}`);
-  console.log(`[addon-server] oversampling default ${CONFIG.oversampling.default}x (${CONFIG.oversampling.min}-${CONFIG.oversampling.max})`);
+  console.log(`[site] listening on http://${HOST}:${PORT}`);
+  console.log(`[site] drawio: ${DRAWIO_DIR === null ? "NOT populated (submodule)" : "self-hosted at /drawio/"}`);
 });
 
-export { server, CONFIG, PUBLIC_DIR, DRAWIO_DIR };
+export { server, PUBLIC_DIR, DRAWIO_DIR };
+
+function send(options: Readonly<{ response: ServerResponse; status: number; body: string }>): void {
+  options.response.writeHead(options.status, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+  options.response.end(options.body);
+}
+
+/** Serves a file under `root`, refusing any path that leaves it. False when there is no such file. */
+function serveStatic(options: Readonly<{ response: ServerResponse; root: string; relativePath: string }>): boolean {
+  if (options.relativePath === "") return false;
+  const full = join(options.root, normalize(options.relativePath));
+  if (!full.startsWith(options.root + sep) || !existsSync(full) || !statSync(full).isFile()) return false;
+  const mediaType = MEDIA_TYPES[extname(full)] ?? "application/octet-stream";
+  options.response.writeHead(200, { "Content-Type": mediaType, "Cache-Control": "public, max-age=300" });
+  createReadStream(full).pipe(options.response);
+  return true;
+}

@@ -193,6 +193,9 @@ export const SECTION_PRIORITY: readonly string[] = [
   // Reached only when the user asks to change part of a slide already in the deck, and
   // propose_slides and slide_structure describe the same steps in their own descriptions.
   "## Redesigning part of an existing slide",
+  // Reached only when the user asks for a diagram, and propose_slides and deck_diagrams carry
+  // the same steps in their own descriptions.
+  "## Diagrams",
   "## Before the first call",
   "## Connecting the connector",
   "## Harness",
@@ -250,7 +253,8 @@ Its own usage guide could not be read, so these are the invariants only:
 - After \`propose_slides\`, call \`await_pick\` with the \`proposalId\`. It blocks, which is correct, and returns the pick plus any anomalies the user marked.
 - Slides are 1-based everywhere, so "option 3" means the same slide to everyone.
 - \`slide_images\` returns local paths, never image data. \`proposal_state\` reports markers and a manifest summary, never slide content.
-- The user's review arrives as native Google Slides comments: \`read_feedback\`, \`await_feedback\`, \`reply_feedback\`, \`resolve_feedback\`. Answer where they asked.`;
+- The user's review arrives as native Google Slides comments: \`read_feedback\`, \`await_feedback\`, \`reply_feedback\`, \`resolve_feedback\`. Answer where they asked.
+- A draw.io diagram is a candidate too: \`propose_slides\` with \`drawioPath\` (or \`drawio\`, the XML) and the \`presentationId\`. \`deck_diagrams\` lists, reads (as a file path) and writes the diagrams already in a deck; a write does not re-draw the picture until the user opens SashaSlides › Edit diagram.`;
 
 /**
  * The composition root's reader: the one place that touches the filesystem and `__dirname`.

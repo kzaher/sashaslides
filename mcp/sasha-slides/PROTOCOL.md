@@ -18,7 +18,7 @@ it in parallel, so **change this file first, never a component's local assumptio
 5. The extension writes `PICK`. The MCP server is waiting on it and returns the choice plus
    any anomalies to Claude.
 
-Slides are **1-based** everywhere, matching `sasha-bridge`'s existing convention, so a human
+Slides are **1-based** everywhere, so a human
 can say "option 3" and every component means the same slide.
 
 ## Drive layout
@@ -163,7 +163,7 @@ may be empty and may reference slides other than the picked one.
 - **`protocolVersion` is checked on read.** An unknown version is ignored with a logged
   warning, never guessed at.
 - **Slide HTML is a full self-contained 1280×720 document** (own `<head><style>`,
-  `body{width:1280px;height:720px}`) — not a fragment. Same rule as `sasha-bridge`.
+  `body{width:1280px;height:720px}`) — not a fragment.
 - **The HTML is authoritative.** The rendered slide is a lossy projection of it, which is
   why the user can toggle and file anomalies.
 - **A proposal folder is disposable.** The server may delete it after `PICK` is consumed;
@@ -853,6 +853,45 @@ resolved), its `zOrder` (0 = rearmost) and its placeholder type. It reads with t
 grant, which includes the `presentations` scope, so any deck the user can open is readable —
 `drive.file` alone would only see files this app created.
 
+
+## Draw.io diagrams: `propose_slides` with `drawio`, and `deck_diagrams`
+
+The model is `converter/drawio-diagram.ts`: a diagram on a slide is a PICTURE whose alternative
+text is `drawio:<diagramId>;v=<version>` (the version is a hash of the XML it shows) and whose link
+is its source, `sasha_slides/slide/<presentationId>/drawio/<diagramId>.drawio` (`<mxfile>` XML,
+`application/vnd.jgraph.mxfile`) in the presenting user's Drive.
+
+**A diagram candidate.** A `propose_slides` slide may be `{ drawio }` (XML: `<mxfile>`,
+`<mxGraphModel>` or an editable SVG) or, on the local connector, `{ drawioPath }` (`.drawio`,
+`.drawio.svg`, `.drawio.png` with the source in its `mxfile` text chunk, `.xml`), plus an optional
+`title`. The connector validates it (`parseDrawioSource`) and stages `drawioCandidateHtml`: a
+1280×720 page with a `data-drawio-render="pending"` placeholder and the
+`<script type="application/vnd.drawio+xml" id="drawio-source">`; the add-on's converter draws the
+placeholder with the self-hosted editor. An HTML candidate may carry the same script beside an
+inline `<svg data-drawio>`.
+
+**The source is written at proposal time** when `presentationId` is known (best-effort, reported as
+`diagrams` / `diagramWarnings` beside the proposal): folders are found or created by name and
+parent, and the file is created when absent. An existing file of that name is never overwritten:
+the id is a hash of the source, so a different body means the diagram was edited in the deck since.
+The reason is measured, not stylistic: the connector holds `drive.file`, so it can later read only
+files IT created; the add-on (full `drive`) links the inserted picture to the file by name and
+creates it only when absent.
+
+**`deck_diagrams`** reads the deck's pictures with the caller's `presentations` grant:
+
+- `list {presentationId}`: every picture stamped `drawio:` (or linked to a `<id>.drawio` file the
+  connector can see) with its slide number, object id, diagram id, picture version, Drive file id,
+  `readable`, `inThisDeckFolder`, the file's version and `stale` (picture version ≠ file version).
+- `read {presentationId, diagramId | objectId}`: the XML as a file PATH (local) or inline `xml`
+  (remote); `not-readable` with a reason and what to do when Drive answers 404 to this app.
+- `write {presentationId, diagramId | objectId, xml | path}`: `planDiagramSave` decides the file
+  side. In place only when the source is already in THIS presentation's folder; otherwise (another
+  deck's folder, the old store, a file the connector cannot see) a new file in this deck's folder,
+  named `<id>` or the first free `<id>-N`, the old file untouched, and every reference here
+  re-pointed with `updateImageProperties.link` (and the alternative text's id when the name
+  changed). The version stamp is NOT changed: the picture still shows the old drawing, so it reads
+  as stale until the user opens SashaSlides › Edit diagram, which re-draws stale pictures.
 
 # `feedback-delivered`: proof that something is listening
 

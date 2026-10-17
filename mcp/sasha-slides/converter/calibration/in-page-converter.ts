@@ -14,6 +14,7 @@ import type { CdpModule } from "../../../../types/cdp-types.ts";
 import { extractorScript as compileExtractorScript } from "../../../../renderer/html2slides/extractor-script.ts";
 import type { SlidesApiRequest } from "../slides-api.js";
 import type { UnsupportedFeature } from "../unsupported-feature.js";
+import type { ConvertedDiagram } from "../emit-requests.js";
 
 // chrome-remote-interface ships no .d.ts; its default export is `unknown` in
 // types/ambient.d.ts. Narrowed once here.
@@ -40,6 +41,7 @@ export type Conversion = Readonly<{
   malformedCount: number;
   elapsedMs: number;
   stackedZ: readonly number[];
+  drawioDiagrams: readonly ConvertedDiagram[];
 }>;
 
 /** Bundle the converter as the extension will, inject it, hand back the tab. */
@@ -83,6 +85,11 @@ export async function convertInPage(
     presentationId: string;
     /** Defaults to `name` with everything but letters and digits removed, cut to 16 characters. */
     objectIdPrefix?: string;
+    /**
+     * Page-side source of the `renderDrawio` option: a JavaScript function expression evaluated in
+     * the tab (the real renderer needs the draw.io editor, so tests pass a stand-in).
+     */
+    renderDrawioSource?: string;
   }>,
 ): Promise<Conversion> {
   const objectIdPrefix = options.objectIdPrefix ?? options.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 16);
@@ -95,6 +102,7 @@ export async function convertInPage(
       extractorScript: window.__EXTRACTOR__,
       container: document.body,
       objectIdPrefix: ${JSON.stringify(objectIdPrefix)},
+      ${options.renderDrawioSource === undefined ? "" : `renderDrawio: (${options.renderDrawioSource}),`}
     });
     return JSON.stringify({
       requests: result.requests,
@@ -103,6 +111,7 @@ export async function convertInPage(
       malformedCount: result.malformedCount,
       elapsedMs: performance.now() - started,
       stackedZ: result.stackedElements.map((element) => element.zIndex),
+      drawioDiagrams: result.drawioDiagrams,
     });
   })()`;
   const raw = await evaluate(options.page, expression, true);

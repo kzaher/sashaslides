@@ -60,7 +60,7 @@ export function createSlidesClient(options: Readonly<{ fetch: typeof fetch; acce
     getThumbnail: ({ presentationId, pageObjectId }) =>
       call({
         method: "GET",
-        path: `/v1/presentations/${encodeURIComponent(presentationId)}/pages/${encodeURIComponent(pageObjectId)}/thumbnail?thumbnailProperties.thumbnailSize=LARGE`,
+        path: `/v1/presentations/${encodeURIComponent(presentationId)}/pages/${encodeURIComponent(pageObjectId)}/thumbnail?thumbnailProperties.mimeType=PNG&thumbnailProperties.thumbnailSize=LARGE`,
         body: null,
       }),
     exportPresentationPptx: ({ presentationId }) => exportPptx({ fetch: options.fetch, accessToken: options.accessToken, presentationId }),
@@ -100,6 +100,20 @@ export function googleFailureCodeOf(status: number): DeckApiErrorCode {
   if (status === 403) return "googlePermissionDenied";
   if (status === 404) return "googlePresentationNotFound";
   return "googleFailed";
+}
+
+/** The HTTP status a route answers for the error code a failed Google call became. */
+export function httpStatusOfGoogleFailure(code: DeckApiErrorCode): number {
+  switch (code) {
+    case "googleNotConnected":
+      return 409;
+    case "googlePermissionDenied":
+      return 403;
+    case "googlePresentationNotFound":
+      return 404;
+    default:
+      return 502;
+  }
 }
 
 /**

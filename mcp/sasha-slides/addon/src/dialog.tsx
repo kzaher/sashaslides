@@ -31,6 +31,7 @@ import {
   appsScriptCall,
   appsScriptCandidateCommentsApi,
   appsScriptCommentThreadApi,
+  appsScriptDiagramApi,
   appsScriptDriveApi,
   appsScriptFeedbackApi,
   appsScriptPickApi,
@@ -42,9 +43,13 @@ import {
 } from "./bridge-client.ts";
 import { EVENT_PAGE_SIZE, INBOX_PAGE_SIZE, presentationIdOf, type RenderRequest } from "./bridge.ts";
 import { browserSlideConverter, type ConversionResult, type ConvertSlideHtml } from "./converter-contract.ts";
+import type { ConvertedDiagram } from "../../converter/convert-html-to-slide-requests.ts";
+import { renderDrawioPicture } from "../../converter/drawio-embed.ts";
+import { insertedDiagramLinkSpec } from "./diagram-flow.ts";
 import {
   type CandidateCommentsApi,
   type CommentThreadApi,
+  type DiagramApi,
   type DriveApi,
   type FeedbackApi,
   type PickApi,
@@ -91,7 +96,7 @@ import {
 } from "./session-log.ts";
 import { applyMergeCandidate } from "./merge-apply.ts";
 import { newPageObjectId, previewConversionSpec, type InsertPosition } from "./slide-insert.ts";
-import { conversionForInsert, insertNewSlide, recordInsert, type Inserted } from "./insert-flow.ts";
+import { conversionForInsert, insertNewSlide, linkInsertedDiagramsBestEffort, recordInsert, type Inserted } from "./insert-flow.ts";
 import { extractorSource, seedText, stageElement, surfaceRenderer } from "./surface-host.ts";
 
 /** One read of a candidate's comment threads -- a candidate with more than this is not the case. */
@@ -155,6 +160,8 @@ type Services = Readonly<{
   threads: CommentThreadApi;
   log: SessionLogApi;
   window: PickerWindowApi;
+  /** Linking an inserted slide's draw.io pictures to their sources (diagram-flow.ts). */
+  diagrams: DiagramApi;
   observer: Observer;
   convert: ConvertSlideHtml;
   presentationId: string | null;
@@ -220,8 +227,15 @@ async function main(): Promise<void> {
     threads: appsScriptCommentThreadApi({ call }),
     log: appsScriptSessionLogApi({ call }),
     window: appsScriptPickerWindowApi({ call }),
+    diagrams: appsScriptDiagramApi({ call }),
     observer,
-    convert: browserSlideConverter({ extractorScript: extractorSource(), container: stageElement() }),
+    convert: browserSlideConverter({
+      extractorScript: extractorSource(),
+      container: stageElement(),
+      // A diagram an agent handed over as bare draw.io XML is drawn by the self-hosted editor (the
+      // origin the deck editor uses) in a hidden frame before the slide is measured.
+      renderDrawio: ({ xml }) => renderDrawioPicture({ document, editorOrigin: __SASHA_EDITOR_ORIGIN__, xml }),
+    }),
     presentationId,
   };
 
@@ -1044,6 +1058,12 @@ async function submitInsert({ picked, position }: { picked: number; position: In
   // this proposal again -- inviting a second insert of a slide that is already in the deck.
   running.observer.dispatch({ kind: "resolved", proposalId: proposal.proposalId, nowMs: Date.now() });
 
+  // The diagrams' links ride beside the bookkeeping, never before the answer above (insert-flow.ts).
+  const linking = linkInsertedDiagramsBestEffort({
+    diagramsApi: running.diagrams,
+    spec: insertedDiagramLinkSpec({ presentationId: placed.presentationId, diagrams: placed.diagrams }),
+    warn: (message) => console.warn(`[sasha-slides] option ${String(picked)}: ${message}`),
+  });
   const written = await recordInsert({
     slides: running.slides,
     presentationId: placed.presentationId,
@@ -1063,6 +1083,7 @@ async function submitInsert({ picked, position }: { picked: number; position: In
     warn: (message) => console.warn(`[sasha-slides] option ${String(picked)}: ${message}`),
   });
   dispatch({ kind: "told", proposalId: proposal.proposalId, telling: tellingOf(written) });
+  await linking;
 }
 
 /**
@@ -1112,7 +1133,13 @@ function tellingOf(written: PickOutcome): Telling {
 }
 
 /** What a pick put in the deck, and what the bookkeeping after it needs to know. */
-type Placed = Readonly<{ inserted: Inserted; presentationId: string; render: RenderRequest | null }>;
+type Placed = Readonly<{
+  inserted: Inserted;
+  presentationId: string;
+  render: RenderRequest | null;
+  /** The draw.io pictures the insert created, under their ids in the deck. A merge links none. */
+  diagrams: readonly ConvertedDiagram[];
+}>;
 
 /**
  * Put the picked candidate in the deck, or return null when that failed (the reducer has been
@@ -1165,6 +1192,7 @@ async function insertPicked({
           inserted: { objectIds: merged.createdObjectIds, pageObjectId: merged.pageObjectId, where: null },
           presentationId,
           render: renderAt(merge.slideObjectId),
+          diagrams: [],
         };
       case "refused":
       case "failed":
@@ -1207,7 +1235,7 @@ async function insertPicked({
   });
   switch (attempt.kind) {
     case "inserted":
-      return { inserted: attempt.inserted, presentationId, render: renderAt(pageObjectId) };
+      return { inserted: attempt.inserted, presentationId, render: renderAt(pageObjectId), diagrams: conversion.diagrams };
     case "failed":
       dispatch({ kind: "submit-failed", message: attempt.message });
       return null;

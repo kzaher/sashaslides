@@ -1,6 +1,6 @@
 /**
  * insert-feature.ts — the HTML→pptx conversion + insert, wired to the
- * server-hosted UI's bridge. Bundled (esbuild, same config as addon-main) to
+ * server-hosted UI's bridge. Bundled (esbuild, browser-bundle.ts) to
  * addon-server/public/convert-bundle.js and loaded by app.html, so the new
  * sidebar UI can actually Insert (the conversion lived only in the old
  * Sidebar.html before).
@@ -11,8 +11,7 @@
  * google.script.run with the base64 bytes.
  */
 import { processFile, buildPptxInMemory, type Slide, type SlideInput } from "./convert-core";
-// H2sBridge + the window.h2s shape are declared ambiently (shared with
-// addon-main.ts) in ./h2s-host.d.ts.
+// H2sBridge + the window.h2s shape are declared ambiently in ./h2s-host.d.ts.
 
 interface GsRunner { [fn: string]: (...a: unknown[]) => void }
 declare const google: {

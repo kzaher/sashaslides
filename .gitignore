@@ -5,7 +5,7 @@ node_modules/
 dist/
 build/
 
-# Python (bridge/)
+# Python
 __pycache__/
 *.py[cod]
 
@@ -50,7 +50,7 @@ renderer/html2slides/e2e/_gtl-out/
 renderer/html2slides/e2e/gtl-dataset*.json
 
 # html2slides distribution build output — regenerable via `npm run build`
-# (mirrors source path: dist/renderer/html2slides/{browser,addon}/...).
+# (mirrors source path: dist/renderer/html2slides/browser/...).
 # Note: the generic `dist/` above already matches this; kept explicit for clarity.
 /dist/
 
@@ -71,8 +71,6 @@ renderer/html2slides/e2e/.ratings-backup/
 
 # fork-migration scratch (renders/diffs) — keep in /tmp normally
 .fork-*/
-renderer/html2slides/addon-server/public/convert-bundle.js
-renderer/html2slides/addon-server/public/pptxgen.bundle.js
 
 # git worktrees used by bug_solving / parallel experiments (exp1, exp2, review)
 .worktrees/

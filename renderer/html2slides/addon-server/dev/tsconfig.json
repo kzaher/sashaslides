@@ -1,0 +1,28 @@
+// The developer page's browser sources (bundled by build.ts into public/dev.js and e2e-drawio.js).
+// THIS is the gate, not the bundler: esbuild strips types without checking them. Deliberately no
+// Node types: these files run in a browser, so `fetch`, `setTimeout` and `Blob` must be the DOM's.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "ESNext.Disposable"],
+    "types": [],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "files": ["dev-page.tsx", "drawio-harness.ts"]
+}

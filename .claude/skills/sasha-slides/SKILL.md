@@ -125,6 +125,27 @@ slide's kept content, anything else in front. `propose_slides` `{ slides: [{ pat
 remove }], merge: { presentationId, slideObjectId } }`. If the slide changed before the pick, the
 add-on refuses the stale ids and changes nothing; read it again and re-propose.
 
+## Diagrams (draw.io)
+
+A draw.io diagram goes into a deck as a picture linked to its editable source, kept in the
+user's Drive at `sasha_slides/slide/<presentationId>/drawio/<diagramId>.drawio`.
+
+* **New diagram:** `propose_slides` `{ slides: [{ drawioPath, title?, label }], presentationId }`
+  with a `.drawio`, `.drawio.svg`, `.drawio.png` or `.xml` file (remote connector: `drawio`, the
+  XML itself). Pass `presentationId`: the source is then saved where `deck_diagrams` can read it.
+  A diagram inside your own HTML candidate works too: an inline `<svg data-drawio>` plus
+  `<script type="application/vnd.drawio+xml" id="drawio-source">` holding the XML.
+* **Existing diagram:** `deck_diagrams` `{ action: "list", presentationId }` gives each one's
+  slide, `objectId`, `diagramId`, `readable` and `stale`. `read` `{ presentationId, diagramId }`
+  returns a PATH to the XML; edit that file, then `write` `{ presentationId, diagramId, path }`.
+  Writing never re-draws the picture: ask the user to open **SashaSlides › Edit diagram** in the
+  deck, which refreshes stale pictures, or propose the new version as a `drawio` candidate.
+* **Copy-on-write:** a slide copied from another deck still links to that deck's file. `write`
+  saves a copy in THIS deck's folder and re-links every picture here; the other deck is untouched.
+* **`readable: false`:** the connector holds Google's `drive.file` permission, so it reads only
+  files it created; a diagram drawn in the add-on is not readable. Ask the user for the `.drawio`
+  file, or `write` new XML, which creates this deck's own copy.
+
 ## Anomalies and what cannot convert
 
 An anomaly is a complaint about the conversion of that region. Fixable in HTML → write a

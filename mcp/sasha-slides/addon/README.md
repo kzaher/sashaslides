@@ -329,7 +329,7 @@ candidate it could not read.
 ## Known limits
 
 - **THE SIZE CEILING IS ENFORCED BY THE BUILD, not hoped for.** `build-addon.ts` fails if any page
-  exceeds **500 KB**, because `renderer/html2slides/browser/build-addon.ts` records HtmlService
+  exceeds **500 KB**, because the retired html2slides add-on recorded HtmlService
   relaying a ~560 KB inlined minified bundle back CORRUPTED, as `Uncaught SyntaxError: Invalid or
   unexpected token`. There is no base64 escape for the page itself: the sandbox's CSP forbids
   `unsafe-eval`, so the bundle has to be JavaScript the parser reads directly. Raising that number

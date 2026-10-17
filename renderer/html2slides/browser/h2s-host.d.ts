@@ -1,12 +1,10 @@
 /**
- * h2s-host.d.ts — the single, shared shape of the `window.h2s` host bridge that
- * the server-hosted UI shell (app.html / shell.html) injects. Both browser
- * bundles consume it: addon-main.ts reads `window.h2s.bridge.oversampling`, and
- * insert-feature.ts registers an `insert(position)` handler via
+ * h2s-host.d.ts — the shape of the `window.h2s` host object that the developer
+ * page injects. insert-feature.ts registers an `insert(position)` handler via
  * `window.h2s.register(...)`.
  *
- * Declared once here (ambient, program-wide) so the two bundles can't drift into
- * conflicting `interface Window` augmentations.
+ * Declared once here (ambient, program-wide) so no bundle can drift into a
+ * conflicting `interface Window` augmentation.
  */
 import type { LogFn } from "./convert-core";
 

@@ -1,6 +1,6 @@
 /**
  * browser-bundle.ts — the ONE esbuild configuration for the in-browser converter bundles
- * (build.ts's standalone page, build-addon.ts's sidebar and the site's convert-bundle.js).
+ * (build.ts's standalone page and the developer page's .pptx download, insert-feature.ts).
  *
  * The bundle graph (entry → convert-core.ts → convert-pptx-lib.ts) imports no Node module, so the
  * only aliases are the two vendors: `pptxgenjs` and `jszip` are inlined as vendor <script> tags (or

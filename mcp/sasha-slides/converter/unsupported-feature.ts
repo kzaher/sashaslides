@@ -26,6 +26,7 @@ export type FractionalRegion = Readonly<{
  * What the emitter did instead. `omitted` is the only value that means nothing
  * at all reached the slide; everything else means a visible-but-different
  * element exists, which the UI should outline rather than flag as missing.
+ * `rasterised` is a picture of the original: it looks right and is not editable.
  */
 export type UnsupportedFallback =
   | "omitted"
@@ -34,7 +35,7 @@ export type UnsupportedFallback =
   | "edge-lines"
   | "geometry-floor"
   | "font-substituted"
-  | "needs-raster";
+  | "rasterised";
 
 type FeatureSite = Readonly<{
   /** Where on the slide, for the anomaly overlay. */
@@ -94,12 +95,39 @@ export type UnsupportedFeature =
         fallback: "omitted";
         pointCount: number;
       }>)
-  /** `<svg>`, `<canvas>`, conic gradients — only a bitmap can carry these. */
+  /**
+   * `<svg>`, `<canvas>`, conic gradients, clip-path hosts, rounded clipping containers and glowing
+   * text — only a bitmap can carry these. `rasterised` when the converter drew the picture and
+   * placed it (convert-html-to-slide-requests.ts rasterises in the staged document); `omitted`
+   * when nothing could draw it, with the reason (null when no rasteriser ran at all, as for a
+   * caller that emits from a recorded extraction).
+   */
   | (FeatureSite &
       Readonly<{
         kind: "rasterised-visual";
-        fallback: "needs-raster";
+        fallback: "rasterised" | "omitted";
         tag: string;
+        reason: string | null;
+      }>)
+  /**
+   * A draw.io placeholder (`data-drawio-render="pending"`, drawio-diagram.ts drawioCandidateHtml)
+   * that could not be drawn before the page was measured: no renderer was supplied, or it failed.
+   */
+  /**
+   * The page's `#drawio-source` is not draw.io XML (or is too large): the diagram's picture is
+   * placed as a plain picture, without the stamp that makes it editable as a diagram.
+   */
+  | (FeatureSite &
+      Readonly<{
+        kind: "drawio-source-invalid";
+        fallback: "rasterised";
+        reason: string;
+      }>)
+  | (FeatureSite &
+      Readonly<{
+        kind: "drawio-not-rendered";
+        fallback: "omitted";
+        reason: string;
       }>)
   /**
    * `createImage.url` is fetched server-side, so a source whose bytes are not
@@ -203,7 +231,11 @@ export function describeUnsupportedFeature(feature: UnsupportedFeature): string 
     case "clip-path-polygon":
       return `clip-path polygon with ${feature.pointCount} points dropped — the API has no custom geometry`;
     case "rasterised-visual":
-      return `<${feature.tag}> needs a bitmap: no native Slides element can express it`;
+      return describeRasterisedVisual(feature);
+    case "drawio-source-invalid":
+      return `draw.io source unusable (${feature.reason}) — the diagram is placed as a plain picture and cannot be edited as a diagram`;
+    case "drawio-not-rendered":
+      return `draw.io diagram not drawn (${feature.reason}) — its area is left empty`;
     case "image-source-not-fetchable":
       return `image skipped: Slides fetches image URLs server-side and cannot read a "${feature.scheme}" source`;
     case "image-too-large":
@@ -226,5 +258,18 @@ export function describeUnsupportedFeature(feature: UnsupportedFeature): string 
       return `${feature.elementType} element has no Slides mapping and was skipped`;
     default:
       return assertNever(feature);
+  }
+}
+
+function describeRasterisedVisual(feature: Extract<UnsupportedFeature, { kind: "rasterised-visual" }>): string {
+  switch (feature.fallback) {
+    case "rasterised":
+      return `<${feature.tag}> placed as a picture — it looks the same but is not editable in Slides`;
+    case "omitted":
+      return feature.reason === null
+        ? `<${feature.tag}> dropped: only a picture can carry it and none was drawn`
+        : `<${feature.tag}> dropped: only a picture can carry it and drawing one failed (${feature.reason})`;
+    default:
+      return assertNever(feature.fallback);
   }
 }

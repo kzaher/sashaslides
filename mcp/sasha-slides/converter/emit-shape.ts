@@ -246,27 +246,67 @@ export function emitPoly(
   };
 }
 
-/** `<svg>`, `<canvas>`, conic gradients: only a bitmap can carry these. */
+/**
+ * A visual's picture, drawn in the staged document before emission (rasterise-visual.ts), or why
+ * none could be drawn. The emitter stays pure: it only ever sees the finished PNG.
+ */
+export type VisualRaster =
+  | Readonly<{ kind: "drawn"; pngDataUrl: string }>
+  | Readonly<{ kind: "failed"; reason: string }>;
+
+/**
+ * `<svg>`, `<canvas>`, conic gradients, clipping hosts, glowing text: only a bitmap can carry
+ * these. With a drawn `raster` the picture is placed like any `<img>` (inline, or staged on Drive
+ * by the host, slide-image.ts) and the region is still reported, as `rasterised`, because a
+ * picture is not editable. Without one (`null`: no rasteriser ran) nothing is emitted and no
+ * object id is used, exactly as before rasterising existed.
+ */
 export function emitVisual(
-  options: Readonly<{ element: VisualElement; viewportPx: SizePx }>,
+  options: Readonly<{ element: VisualElement; context: EmitContext; viewportPx: SizePx; raster: VisualRaster | null }>,
 ): ElementEmission {
-  const { element, viewportPx } = options;
-  return {
+  const { element, context, viewportPx, raster } = options;
+  const site = featureSite({
+    bounds: element.bounds,
+    viewportPx,
+    elementType: "visual",
+    domIndex: element.domIndex,
+  });
+  const omitted = (reason: string | null): ElementEmission => ({
     requests: [],
-    unsupported: [
-      {
-        ...featureSite({
-          bounds: element.bounds,
-          viewportPx,
-          elementType: "visual",
-          domIndex: element.domIndex,
-        }),
-        kind: "rasterised-visual",
-        fallback: "needs-raster",
-        tag: element.tag,
-      },
-    ],
-  };
+    unsupported: [{ ...site, kind: "rasterised-visual", fallback: "omitted", tag: element.tag, reason }],
+  });
+  if (raster === null) return omitted(null);
+  switch (raster.kind) {
+    case "failed":
+      return omitted(raster.reason);
+    case "drawn":
+      break;
+    default:
+      return assertNever(raster);
+  }
+
+  const objectId = context.ids.next("visual");
+  const source = slideImageSourceFor({ src: raster.pngDataUrl, objectId });
+  const reported: readonly UnsupportedFeature[] = [
+    { ...site, kind: "rasterised-visual", fallback: "rasterised", tag: element.tag, reason: null },
+  ];
+  const elementProperties = placeElement({ element, context });
+  switch (source.kind) {
+    case "unusable":
+      return omitted(`the picture is not a PNG data address (${source.scheme})`);
+    case "too-large":
+      return omitted(`${Math.round(source.bytes / (1024 * 1024))}MB is past what Slides accepts for one picture`);
+    case "fetchable":
+    case "inline":
+      return { requests: [{ createImage: { objectId, url: source.url, elementProperties } }], unsupported: reported };
+    case "staged":
+      return {
+        requests: [{ createImage: { objectId, url: source.url, elementProperties }, [STAGED_IMAGE_FIELD]: source.upload }],
+        unsupported: reported,
+      };
+    default:
+      return assertNever(source);
+  }
 }
 
 /**

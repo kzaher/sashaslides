@@ -42,6 +42,11 @@ export type FakeDrive = Readonly<{
    * its body. Not recorded as a call: this server did not make it.
    */
   editAsAnotherApp: (options: Readonly<{ fileId: string; name: string; text: string }>) => void;
+  /**
+   * A file another app (the add-on, with the full `drive` scope) created: it exists, but under
+   * `drive.file` this connector can neither locate nor read it.
+   */
+  putUnreadableFile: (options: Readonly<{ name: string; parentId: string | null; text: string }>) => FakeDriveFile;
 }>;
 
 export type RecordedCall = Readonly<{ op: RecordedOperation; name: string }>;
@@ -53,7 +58,8 @@ export type RecordedOperation =
   | "deleteFile"
   | "listFiles"
   | "readTextFile"
-  | "download";
+  | "download"
+  | "fileLocation";
 
 export type FakeDriveFile = DriveFile &
   Readonly<{
@@ -64,8 +70,14 @@ export type FakeDriveFile = DriveFile &
     sourcePath: string | null;
   }>;
 
-export function createFakeDrive(): FakeDrive {
+/**
+ * `idPrefix` defaults to `fake-`; a test whose ids must look like real Drive ids (ten or more
+ * characters, as a diagram link requires) passes a longer one.
+ */
+export function createFakeDrive(options: Readonly<{ idPrefix?: string }> = {}): FakeDrive {
+  const idPrefix = options.idPrefix ?? "fake-";
   const files: FakeDriveFile[] = [];
+  const unreadable = new Set<string>();
   const calls: RecordedCall[] = [];
   const downloads: Readonly<{ fileId: string; destinationPath: string }>[] = [];
   let nextId = 1;
@@ -73,7 +85,7 @@ export function createFakeDrive(): FakeDrive {
   function add(
     file: Omit<FakeDriveFile, "id"> & Readonly<{ appProperties: DriveAppProperties }>,
   ): FakeDriveFile {
-    const stored: FakeDriveFile = { ...file, id: `fake-${String(nextId)}` };
+    const stored: FakeDriveFile = { ...file, id: `${idPrefix}${String(nextId)}` };
     nextId += 1;
     files.push(stored);
     return stored;
@@ -137,12 +149,12 @@ export function createFakeDrive(): FakeDrive {
 
     listFiles: ({ query }) => {
       calls.push({ op: "listFiles", name: describeQuery(query) });
-      return Promise.resolve(files.filter((file) => matches({ file, query })));
+      return Promise.resolve(files.filter((file) => !unreadable.has(file.id) && matches({ file, query })));
     },
 
     readTextFile: ({ fileId }) => {
       calls.push({ op: "readTextFile", name: fileId });
-      const file = files.find((candidate) => candidate.id === fileId);
+      const file = unreadable.has(fileId) ? undefined : files.find((candidate) => candidate.id === fileId);
       if (file === undefined) return Promise.reject(new Error(`no such fake file: ${fileId}`));
       if (file.text === null) {
         return Promise.reject(new Error(`fake file ${file.name} has no text body (streamed upload)`));
@@ -154,6 +166,13 @@ export function createFakeDrive(): FakeDrive {
       calls.push({ op: "download", name: destinationPath });
       downloads.push({ fileId, destinationPath });
       return Promise.resolve();
+    },
+
+    fileLocation: ({ fileId }) => {
+      calls.push({ op: "fileLocation", name: fileId });
+      const file = unreadable.has(fileId) ? undefined : files.find((candidate) => candidate.id === fileId);
+      if (file === undefined) return Promise.resolve(null);
+      return Promise.resolve({ id: file.id, name: file.name, parentIds: file.parentId === null ? [] : [file.parentId] });
     },
   };
 
@@ -170,6 +189,11 @@ export function createFakeDrive(): FakeDrive {
       const existing = files[at];
       if (existing === undefined) throw new Error(`no fake file ${fileId}`);
       files[at] = { ...existing, name, text };
+    },
+    putUnreadableFile: ({ name, parentId, text }) => {
+      const file = add({ name, parentId, mimeType: "application/vnd.jgraph.mxfile", appProperties: {}, text, sourcePath: null });
+      unreadable.add(file.id);
+      return file;
     },
   };
 }

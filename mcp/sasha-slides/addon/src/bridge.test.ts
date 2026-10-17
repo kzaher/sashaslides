@@ -31,7 +31,7 @@ import {
 } from "./bridge.ts";
 import { SEEN_LIMIT, parseSeen, seenStore, serializeSeen, type KeyValueStorage } from "./seen-store.ts";
 
-test("there are exactly twenty-three server functions, and they are the ones Code.gs declares", () => {
+test("there are exactly twenty-six server functions, and they are the ones Code.gs declares", () => {
   assert.deepEqual(SERVER_FUNCTION_NAMES, [
     // The picker's five.
     "sashaHello",
@@ -80,6 +80,11 @@ test("there are exactly twenty-three server functions, and they are the ones Cod
     // Whether the user's own Google grant lets Sasha answer this deck's comments, asked of the
     // connector with the editor handoff's identity proof (comment-access-state.ts).
     "sashaCommentAccess",
+    // The DIAGRAM DIALOG's (diagram-code-gs.ts): one save executes a whole copy-on-write plan, the
+    // sources the seed did not carry, and linking an insert's diagrams to their source files.
+    "sashaSaveDiagram",
+    "sashaReadDiagramSources",
+    "sashaLinkInsertedDiagrams",
   ]);
 });
 
@@ -270,6 +275,9 @@ function silentRunner(): AppsScriptRunner {
     sashaImportAgain: () => undefined,
     sashaRunExport: () => undefined,
     sashaCommentAccess: () => undefined,
+    sashaSaveDiagram: () => undefined,
+    sashaReadDiagramSources: () => undefined,
+    sashaLinkInsertedDiagrams: () => undefined,
   };
   return runner;
 }
@@ -305,6 +313,9 @@ function failingRunner(error: unknown): AppsScriptRunner {
     sashaImportAgain: () => undefined,
     sashaRunExport: () => undefined,
     sashaCommentAccess: () => undefined,
+    sashaSaveDiagram: () => undefined,
+    sashaReadDiagramSources: () => undefined,
+    sashaLinkInsertedDiagrams: () => undefined,
   };
   return runner;
 }
@@ -339,6 +350,9 @@ function throwingRunner(): AppsScriptRunner {
     sashaImportAgain: () => undefined,
     sashaRunExport: () => undefined,
     sashaCommentAccess: () => undefined,
+    sashaSaveDiagram: () => undefined,
+    sashaReadDiagramSources: () => undefined,
+    sashaLinkInsertedDiagrams: () => undefined,
   };
   return runner;
 }
@@ -376,6 +390,9 @@ function stubCall(replies: Readonly<Record<string, unknown>>) {
     sashaImportAgain: answer("sashaImportAgain"),
     sashaRunExport: answer("sashaRunExport"),
     sashaCommentAccess: answer("sashaCommentAccess"),
+    sashaSaveDiagram: answer("sashaSaveDiagram"),
+    sashaReadDiagramSources: answer("sashaReadDiagramSources"),
+    sashaLinkInsertedDiagrams: answer("sashaLinkInsertedDiagrams"),
   };
   return appsScriptCall({ run: runner });
 }

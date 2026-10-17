@@ -31,7 +31,8 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { randomBytes } from "node:crypto";
-import { appendFileSync, statSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { IncomingHttpHeaders, Server as ListeningServer } from "node:http";
 import { z } from "zod";
@@ -130,6 +131,20 @@ import {
   type SessionEventRecord,
 } from "./session-log";
 import { assertNever } from "./engine/src/contracts/assert-never.ts";
+import { drawioCandidateHtml } from "./converter/drawio-diagram.ts";
+import {
+  diagramRequestFrom,
+  diagramSourcesInHtml,
+  listDeckDiagrams,
+  loadDiagramSource,
+  presentationIdOf,
+  readDeckDiagram,
+  writeDeckDiagram,
+  writeDiagramSources,
+  type DiagramDeckEnvironment,
+  type DiagramFileWrite,
+  type ReadLocalBytes,
+} from "./diagram-tools.ts";
 
 export const SERVER_NAME = "sasha-slides";
 export const SERVER_VERSION = "0.1.0";
@@ -169,6 +184,12 @@ export type ToolOutcome<TPayload> =
 type SlideArgument = Readonly<{
   path?: string | undefined;
   html?: string | undefined;
+  /** A draw.io diagram as XML: the candidate is a slide drawing it (drawio-diagram.ts drawioCandidateHtml). */
+  drawio?: string | undefined;
+  /** Local connector only: a .drawio / .drawio.svg / .drawio.png / .xml file holding the diagram. */
+  drawioPath?: string | undefined;
+  /** A diagram candidate's heading; nothing else takes it. */
+  title?: string | undefined;
   label?: string | undefined;
   remove?: readonly string[] | undefined;
 }>;
@@ -216,20 +237,33 @@ export function mergeRequestFrom(
 }
 
 /**
- * The propose_slides / revise_slide argument boundary: each slide carries exactly one of `path`
- * or `html`, and a remote connector refuses `path` without echoing it back.
+ * The propose_slides / revise_slide argument boundary: each slide carries exactly one of `path`,
+ * `html`, `drawio` or `drawioPath`, and a remote connector refuses both paths without echoing them
+ * back. `diagrams` is every draw.io source the candidates carry (a `drawio` slide, or an inline
+ * `html` document with a `#drawio-source` script), normalised as the converter stamps them; a
+ * `path` slide is never opened, so its diagrams are not listed.
  */
 export function slideSourcesFrom(
-  options: Readonly<{ slides: readonly SlideArgument[]; remote: boolean }>,
-): Readonly<{ kind: "ok"; sources: readonly SlideSource[] }> | Readonly<{ kind: "error"; message: string }> {
+  options: Readonly<{ slides: readonly SlideArgument[]; remote: boolean; readBytes?: ReadLocalBytes }>,
+): Readonly<{ kind: "ok"; sources: readonly SlideSource[]; diagrams: readonly string[] }> | Readonly<{ kind: "error"; message: string }> {
+  const readBytes = options.readBytes ?? readLocalBytes;
   const sources: SlideSource[] = [];
+  const diagrams: string[] = [];
   for (const [position, slide] of options.slides.entries()) {
     const which = `slide ${String(position + 1)}`;
     const label = slide.label ?? null;
-    if (slide.path !== undefined && slide.html !== undefined) {
-      return { kind: "error", message: `${which}: give path or html, not both` };
+    const given = [slide.path, slide.html, slide.drawio, slide.drawioPath].filter((value) => value !== undefined).length;
+    if (given > 1) return { kind: "error", message: `${which}: give exactly one of path, html, drawio or drawioPath` };
+    if (slide.title !== undefined && slide.drawio === undefined && slide.drawioPath === undefined) {
+      return { kind: "error", message: `${which}: \`title\` is for a drawio slide; put a heading in the HTML instead` };
     }
-    if (slide.html !== undefined) {
+    if (slide.drawio !== undefined || slide.drawioPath !== undefined) {
+      const loaded = loadDiagramSource({ xml: slide.drawio, path: slide.drawioPath, remote: options.remote, readBytes, what: which });
+      if (loaded.kind === "error") return loaded;
+      diagrams.push(loaded.xml);
+      sources.push({ html: drawioCandidateHtml({ xml: loaded.xml, title: slide.title ?? null }), label });
+    } else if (slide.html !== undefined) {
+      diagrams.push(...diagramSourcesInHtml(slide.html));
       sources.push({ html: slide.html, label });
     } else if (slide.path !== undefined) {
       if (options.remote) {
@@ -242,10 +276,19 @@ export function slideSourcesFrom(
       }
       sources.push({ path: slide.path, label });
     } else {
-      return { kind: "error", message: `${which}: give the slide as path or html` };
+      return { kind: "error", message: `${which}: give the slide as path or html (or a diagram as drawio)` };
     }
   }
-  return { kind: "ok", sources };
+  return { kind: "ok", sources, diagrams };
+}
+
+/** A local diagram file's bytes, or null. Only diagram sources are read this way, never slide HTML. */
+export function readLocalBytes(path: string): Uint8Array | null {
+  try {
+    return readFileSync(path);
+  } catch {
+    return null;
+  }
 }
 
 /** What Claude's deck tools need from the deck server (SPEC.md 21.14). */
@@ -322,7 +365,11 @@ export function createSashaSlidesServer(
         "SLIDE instead of adding a new one, pass `merge` (the slide; read it first with " +
         "slide_structure) and give each candidate only the NEW parts plus `remove`, the object ids " +
         "it replaces. Each new element's CSS z-index on its top-level box places it: negative goes " +
-        "behind the slide's kept content (still in front of a full-page background), anything else in front.",
+        "behind the slide's kept content (still in front of a full-page background), anything else in front. " +
+        "A DRAW.IO DIAGRAM is a candidate too: give `drawio` (its XML) or, locally, `drawioPath` (.drawio, " +
+        ".drawio.svg, .drawio.png, .xml) plus an optional `title`; the add-on draws it and inserts an editable, " +
+        "linked diagram picture. With presentationId the source is also saved to the person's Drive at " +
+        "sasha_slides/slide/<presentationId>/drawio/<diagramId>.drawio, so deck_diagrams can read it later.",
       inputSchema: {
         slides: z
           .array(
@@ -337,6 +384,20 @@ export function createSashaSlidesServer(
                 .min(1)
                 .optional()
                 .describe("Remote connector: the complete self-contained 1280x720 HTML document. Give path or html, not both."),
+              drawio: z
+                .string()
+                .min(1)
+                .optional()
+                .describe("A draw.io diagram as XML (<mxfile>, <mxGraphModel> or an editable SVG): the candidate is a slide drawing it."),
+              drawioPath: z
+                .string()
+                .min(1)
+                .optional()
+                .describe("Local connector only: a .drawio, .drawio.svg, .drawio.png or .xml file holding the diagram."),
+              title: z
+                .string()
+                .optional()
+                .describe("Diagram candidates only: a heading drawn above the diagram."),
               label: z
                 .string()
                 .optional()
@@ -380,7 +441,12 @@ export function createSashaSlidesServer(
           presentationId: presentationId ?? null,
           ...(merged.merge === null ? {} : { merge: merged.merge }),
         });
-        return toCallToolResult(proposeSlidesPayload(outcome));
+        const deckId = presentationId ?? merge?.presentationId ?? null;
+        const diagramFiles =
+          outcome.kind === "ok" && parsed.diagrams.length > 0
+            ? await diagramFilesFor({ drive: env.drive, presentationId: deckId, sources: parsed.diagrams })
+            : null;
+        return toCallToolResult(withDiagramFiles({ outcome: proposeSlidesPayload(outcome), diagramFiles }));
       }),
   );
 
@@ -795,6 +861,61 @@ export function createSashaSlidesServer(
   );
 
   server.registerTool(
+    "deck_diagrams",
+    {
+      title: "List, read and write the draw.io diagrams in a deck",
+      description:
+        "The draw.io diagrams already in a Google Slides deck: pictures stamped `drawio:<diagramId>` and linked " +
+        "to their source in the person's Drive (sasha_slides/slide/<presentationId>/drawio/<diagramId>.drawio). " +
+        "`list` {presentationId} gives each one's slide, objectId, diagramId, Drive fileId, whether this connector " +
+        "can read the source (it reaches only files it created) and `stale` (the picture is older than its source). " +
+        "`read` {presentationId, diagramId | objectId} returns the source XML as a file PATH (an inline `xml` on " +
+        "the remote connector), or status not-readable with what to do. `write` {presentationId, diagramId | " +
+        "objectId, xml | path} saves new XML copy-on-write: in place when the source is in this deck's own folder, " +
+        "otherwise as a new file there with every picture re-linked to it (the other deck's file is untouched). " +
+        "Writing does NOT re-draw the pictures: tell the person to open SashaSlides > Edit diagram in the deck, " +
+        "or propose_slides the diagram as `drawio` to show it rendered.",
+      inputSchema: {
+        action: z.enum(["list", "read", "write"]).describe("list: every diagram; read: one diagram's source; write: replace one diagram's source."),
+        presentationId: z.string().min(1).describe("The deck id (or its docs.google.com address)."),
+        diagramId: z.string().min(1).optional().describe("read/write: the diagram id from list. Give this or objectId."),
+        objectId: z.string().min(1).optional().describe("read/write: the picture's object id from list. Give this or diagramId."),
+        xml: z.string().min(1).optional().describe("write: the new draw.io XML (<mxfile>, <mxGraphModel> or an editable SVG)."),
+        path: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("write, local connector only: a .drawio, .drawio.svg, .drawio.png or .xml file instead of xml."),
+      },
+    },
+    async (args, extra) => {
+      const parsed = diagramRequestFrom({ args, remote, readBytes: readLocalBytes });
+      if (parsed.kind === "error") return errorResult(parsed.message);
+      return withCandidateEnvironment(extra, async (env) => {
+        const diagramEnv: DiagramDeckEnvironment = {
+          drive: env.proposal.drive,
+          slides: env.feedback.channel,
+          remote,
+          saveLocalCopy: saveDiagramLocally,
+        };
+        const { request } = parsed;
+        switch (request.action) {
+          case "list":
+            return toCallToolResult(await listDeckDiagrams({ env: diagramEnv, presentationId: request.presentationId }));
+          case "read":
+            return toCallToolResult(await readDeckDiagram({ env: diagramEnv, presentationId: request.presentationId, target: request.target }));
+          case "write":
+            return toCallToolResult(
+              await writeDeckDiagram({ env: diagramEnv, presentationId: request.presentationId, target: request.target, xml: request.xml }),
+            );
+          default:
+            return assertNever(request);
+        }
+      });
+    },
+  );
+
+  server.registerTool(
     "slide_structure",
     {
       title: "Read an existing slide's elements",
@@ -863,6 +984,48 @@ export function slideStructurePayload(
     default:
       return assertNever(read);
   }
+}
+
+/** What propose_slides did with the diagram sources its candidates carry. */
+export type DiagramFilesSummary = Readonly<{ diagrams: readonly DiagramFileWrite[]; diagramWarnings: readonly string[] }>;
+
+/**
+ * Best-effort: saves each diagram source in the person's Drive so `deck_diagrams` can read it once
+ * the picture is in the deck. Never fails the proposal; what went wrong is reported beside it.
+ */
+export async function diagramFilesFor(
+  options: Readonly<{ drive: DriveChannel; presentationId: string | null; sources: readonly string[] }>,
+): Promise<DiagramFilesSummary> {
+  const { drive, presentationId, sources } = options;
+  const deckId = presentationId === null ? null : presentationIdOf(presentationId);
+  if (deckId === null) {
+    return {
+      diagrams: [],
+      diagramWarnings: [
+        "the diagram sources were not saved to Drive because no presentationId was given; the add-on saves them " +
+          "when the pick is inserted, but this connector will not be able to read them with deck_diagrams",
+      ],
+    };
+  }
+  const written = await writeDiagramSources({ drive, presentationId: deckId, sources });
+  return { diagrams: written.files, diagramWarnings: written.warnings };
+}
+
+export function withDiagramFiles(
+  options: Readonly<{ outcome: ToolOutcome<ProposeSlidesPayload>; diagramFiles: DiagramFilesSummary | null }>,
+): ToolOutcome<ProposeSlidesPayload & Partial<DiagramFilesSummary>> {
+  const { outcome, diagramFiles } = options;
+  if (outcome.kind === "error" || diagramFiles === null) return outcome;
+  return { kind: "payload", payload: { ...outcome.payload, ...diagramFiles } };
+}
+
+/** Local connector: a diagram read lands in a file, and only its path crosses into the conversation. */
+function saveDiagramLocally(options: Readonly<{ presentationId: string; diagramId: string; xml: string }>): string {
+  const directory = join(tmpdir(), "sasha-slides-diagrams", options.presentationId);
+  mkdirSync(directory, { recursive: true });
+  const path = join(directory, `${options.diagramId}.drawio`);
+  writeFileSync(path, options.xml, "utf8");
+  return path;
 }
 
 export const DEFAULT_PICK_TIMEOUT_SECONDS = 300;

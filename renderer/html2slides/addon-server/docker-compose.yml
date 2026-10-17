@@ -1,35 +1,26 @@
-# sashaslides addon-server — fits the holosweat server (nginx + certbot front it).
+# The sashaslides.com website, on the holosweat server behind its nginx and certbot certificate.
 #
-# This container speaks PLAIN HTTP on 127.0.0.1:${HOST_PORT} only (never exposed
-# publicly). nginx terminates TLS for slides.holosweat.com and reverse-proxies to
-# it — same shape as api.holosweat.com -> localhost:5002. Certs are certbot's,
-# untouched by this stack.
+# This container speaks PLAIN HTTP on 127.0.0.1:${HOST_PORT} only (never exposed publicly); nginx
+# terminates TLS and proxies to it (deploy/nginx-sashaslides.conf), and sends the connector's paths
+# (/mcp, /account, /decks, /deck-api, ...) to the connector instead.
 #
-# Its own compose project + dir (/root/sashaslides) so it never disturbs the
-# existing /root/holosweat/images stack. Built on the server by deploy/publish.sh.
+# Its own compose project and directory (/root/sashaslides). Built on the server by deploy/publish.sh.
 
 services:
   sashaslides:
     image: holosweat-sashaslides:latest
-    # Multi-stage build (see Dockerfile): the BUILDER stage runs native (fast on
-    # an arm64 Mac) and the RUNTIME stage is `FROM --platform=linux/amd64`, so the
-    # produced image is amd64 (matches the server) without QEMU-emulating the whole
-    # build. Context is the REPO ROOT because the build compiles the pptxgenjs fork
-    # + renderer source from scratch (nothing stale). args bake the deployed origin.
+    # Multi-stage build (Dockerfile): the builder stage runs native and the runtime stage is
+    # `--platform=linux/amd64`, so the image matches the server without emulating the build. The
+    # context is the REPOSITORY ROOT: the page bundles the product converter (mcp/sasha-slides) and
+    # the pptxgenjs fork (deps/pptxgenjs) from source.
     build:
       context: ../../..
       dockerfile: renderer/html2slides/addon-server/Dockerfile
       args:
-        SERVER_ORIGIN: https://sashaslides.com
         BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
     environment:
       - PORT=8787
-      - OVERSAMPLING_DEFAULT=2
-    # localhost-only publish — nginx (on the host) proxies to this. Nothing on a
-    # public interface, so no new firewall opening is required for the app port.
+    # localhost-only publish: nginx on the host proxies to this, so no firewall opening is needed.
     ports:
       - "127.0.0.1:${HOST_PORT:-6000}:8787"
-    # drawio editor webapp is OPTIONAL for v1: /drawio 503s until you populate the
-    # submodule and rebuild with it baked in (deploy/publish.sh uploads it).
-    # Detection, export, oversampling, and the UI all work without it.

@@ -51,7 +51,9 @@ export type SlidesApiRequest =
   | Readonly<{ updateTableColumnProperties: UpdateTableColumnPropertiesRequest }>
   | Readonly<{ updateTableCellProperties: UpdateTableCellPropertiesRequest }>
   | Readonly<{ updateTableBorderProperties: UpdateTableBorderPropertiesRequest }>
-  | Readonly<{ mergeTableCells: MergeTableCellsRequest }>;
+  | Readonly<{ mergeTableCells: MergeTableCellsRequest }>
+  | Readonly<{ updatePageElementAltText: UpdatePageElementAltTextRequest }>
+  | Readonly<{ replaceImage: ReplaceImageRequest }>;
 
 /* ---------------------------------------------------------------- geometry */
 
@@ -159,9 +161,28 @@ export type UpdateShapePropertiesRequest = Readonly<{
  */
 export type UpdateImagePropertiesRequest = Readonly<{
   objectId: string;
-  imageProperties: Readonly<{ outline?: Outline }>;
+  /** `link` makes the picture a hyperlink: a draw.io diagram links to its `.drawio` source on Drive. */
+  imageProperties: Readonly<{ outline?: Outline; link?: Readonly<{ url: string }> }>;
   /** Comma-separated field mask; `*` is legal but destroys unlisted fields. */
   fields: string;
+}>;
+
+/**
+ * The alternative text of any page element. A draw.io diagram's picture carries
+ * `drawio:<diagramId>;v=<version>` in `description` (drawio-diagram.ts), which
+ * is how the add-on and the connector find every reference to a diagram.
+ */
+export type UpdatePageElementAltTextRequest = Readonly<{
+  objectId: string;
+  title?: string;
+  description?: string;
+}>;
+
+/** Swaps a picture's bytes in place and keeps its object id, size and position. */
+export type ReplaceImageRequest = Readonly<{
+  imageObjectId: string;
+  url: string;
+  imageReplaceMethod: "CENTER_INSIDE" | "CENTER_CROP";
 }>;
 
 /* ------------------------------------------------------------------- lines */

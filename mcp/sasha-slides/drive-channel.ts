@@ -61,7 +61,16 @@ export type DriveChannel = Readonly<{
 
   /** Streams to disk, creating parent directories. Keeps image bytes out of the process. */
   downloadBinaryFile(options: Readonly<{ fileId: string; destinationPath: string }>): Promise<void>;
+
+  /**
+   * Where a file is, or null when Drive says it does not exist FOR THIS APP. Under `drive.file`
+   * that is also the answer for a file another app created (the add-on's Apps Script project), so
+   * null means "not readable here", not "deleted". Any other failure throws.
+   */
+  fileLocation(options: Readonly<{ fileId: string }>): Promise<DriveFileLocation | null>;
 }>;
+
+export type DriveFileLocation = Readonly<{ id: string; name: string; parentIds: readonly string[] }>;
 
 export type DriveFile = Readonly<{
   id: string;
@@ -200,7 +209,30 @@ export function googleDriveChannel(options: Readonly<{ auth: OAuth2Client }>): D
       const body = response.data as unknown as Readable;
       await pipeline(body, createWriteStream(destinationPath));
     },
+
+    fileLocation: async ({ fileId }) => {
+      try {
+        const response = await drive.files.get({ fileId, fields: "id, name, parents" });
+        const { id, name } = response.data;
+        if (typeof id !== "string" || typeof name !== "string") return null;
+        return { id, name, parentIds: [...(response.data.parents ?? [])] };
+      } catch (cause) {
+        if (httpStatusOf(cause) === 404) return null;
+        throw cause;
+      }
+    },
   };
+}
+
+/** The HTTP status on a googleapis (gaxios) error, or null for any other failure. */
+export function httpStatusOf(cause: unknown): number | null {
+  if (typeof cause !== "object" || cause === null) return null;
+  const direct: unknown = Reflect.get(cause, "status");
+  if (typeof direct === "number") return direct;
+  const response: unknown = Reflect.get(cause, "response");
+  if (typeof response !== "object" || response === null) return null;
+  const nested: unknown = Reflect.get(response, "status");
+  return typeof nested === "number" ? nested : null;
 }
 
 const DRIVE_FILE_FIELDS = "id, name, mimeType, appProperties";

@@ -8,14 +8,19 @@
  * Elements are emitted in the extractor's CSS paint order. Slides stacks page
  * elements by creation order, so paint order IS z-order and no explicit
  * reordering request is needed.
+ *
+ * Pictures of visuals (`visualRasters`) are drawn by the caller that owns the
+ * DOM and handed in finished, so this stage stays DOM-free.
  */
-import type { ParsedExtraction, SlideElement } from "./extraction.js";
+import type { DrawioExtraction, ParsedExtraction, SlideElement } from "./extraction.js";
 import { DEFAULT_PAGE_SIZE_EMU, DEFAULT_TEXT_INSET_EMU, pageScaleFor } from "./geometry.js";
 import type { SlidePageSizeEmu, TextInsetEmu } from "./geometry.js";
 import type { SlidesApiRequest } from "./slides-api.js";
 import type { ElementEmission, EmitContext } from "./emit-context.js";
 import { createObjectIdAllocator, featureSite, mergeEmissions } from "./emit-context.js";
 import { emitImage, emitLine, emitPoly, emitRect, emitTriangle, emitVisual } from "./emit-shape.js";
+import type { VisualRaster } from "./emit-shape.js";
+import { diagramIdForSource, diagramVersionOf, drawioAltText } from "./drawio-diagram.js";
 import { emitList, emitText } from "./emit-text.js";
 import { emitTable } from "./emit-table.js";
 import type { UnsupportedFeature } from "./unsupported-feature.js";
@@ -34,6 +39,11 @@ export type EmitOptions = Readonly<{
   pageSizeEmu?: SlidePageSizeEmu;
   /** Override once a credentialed round-trip has measured the real insets. */
   textInsetEmu?: TextInsetEmu;
+  /**
+   * Pictures of the `visual` elements, by `paintIndex`. A visual missing from the map emits
+   * nothing and is reported `omitted`, as it was before rasterising existed.
+   */
+  visualRasters?: ReadonlyMap<number, VisualRaster>;
 }>;
 
 export type ConversionResult = Readonly<{
@@ -51,7 +61,17 @@ export type ConversionResult = Readonly<{
    * CSS z-index (mcp/sasha-slides PROTOCOL.md "Merge proposals").
    */
   stackedElements: readonly StackedElement[];
+  /** The slide's draw.io diagram, once its picture was placed and stamped; empty otherwise. */
+  drawioDiagrams: readonly ConvertedDiagram[];
 }>;
+
+/**
+ * A draw.io diagram on the converted slide: the picture's object id (as emitted, before any host
+ * renames ids), its stamp and its source. The host writes the source to Drive after the insert
+ * (sasha_slides/slide/<presentationId>/drawio/<diagramId>.drawio) and links the picture to it
+ * (drawio-save-plan.ts diagramLinkRequests).
+ */
+export type ConvertedDiagram = Readonly<{ objectId: string; diagramId: string; version: string; xml: string }>;
 
 /** One extracted element's requests and the z-index it stacks at in the root stacking context. */
 export type StackedElement = Readonly<{
@@ -72,8 +92,15 @@ export function emitSlideRequests(options: EmitOptions): ConversionResult {
 
   const parts: ElementEmission[] = [];
   const stackedElements: StackedElement[] = [];
+  const drawioDiagrams: ConvertedDiagram[] = [];
+  const rasters = options.visualRasters ?? NO_RASTERS;
   for (const element of extraction.elements) {
-    const emission = emitElement({ element, context, viewportPx: extraction.viewportPx });
+    const plain = emitElement({ element, context, viewportPx: extraction.viewportPx, rasters });
+    const drawio = extraction.drawio ?? null;
+    const paired = drawio !== null && drawio.pairedPaintIndex === element.paintIndex ? drawio : null;
+    const diagram = paired === null ? null : diagramEmission({ emission: plain, drawio: paired, element, viewportPx: extraction.viewportPx });
+    const emission = diagram === null ? plain : diagram.emission;
+    if (diagram !== null && diagram.diagram !== null) drawioDiagrams.push(diagram.diagram);
     parts.push(emission);
     if (emission.requests.length > 0) {
       stackedElements.push({ zIndex: element.stackZ ?? 0, requests: emission.requests });
@@ -85,6 +112,76 @@ export function emitSlideRequests(options: EmitOptions): ConversionResult {
     unsupported: merged.unsupported,
     elementCount: extraction.elements.length,
     stackedElements,
+    drawioDiagrams,
+  };
+}
+
+const NO_RASTERS: ReadonlyMap<number, VisualRaster> = new Map();
+
+/**
+ * The paired element's emission with the draw.io outcome folded in: a valid source stamps the
+ * picture; an invalid one leaves the picture as a plain picture and reports why, over it.
+ */
+function diagramEmission(
+  options: Readonly<{
+    emission: ElementEmission;
+    drawio: DrawioExtraction;
+    element: SlideElement;
+    viewportPx: ParsedExtraction["viewportPx"];
+  }>,
+): Readonly<{ emission: ElementEmission; diagram: ConvertedDiagram | null }> | null {
+  const { emission, drawio, element, viewportPx } = options;
+  switch (drawio.kind) {
+    case "valid":
+      return stampDiagram({ emission, xml: drawio.xml });
+    case "invalid":
+      return {
+        emission: {
+          requests: emission.requests,
+          unsupported: [
+            ...emission.unsupported,
+            {
+              ...featureSite({ bounds: element.bounds, viewportPx, elementType: "drawio", domIndex: element.domIndex }),
+              kind: "drawio-source-invalid",
+              fallback: "rasterised",
+              reason: drawio.reason,
+            },
+          ],
+        },
+        diagram: null,
+      };
+    default:
+      return assertNever(drawio);
+  }
+}
+
+/**
+ * The diagram's picture gets the `drawio:<id>;v=<version>` alternative text right after its
+ * `createImage`, in the same element group so a merge stacks it with the picture. Null when the
+ * paired element placed no picture (its raster failed, or its source was unusable): there is then
+ * nothing to stamp, and the loss is already reported by that element.
+ */
+function stampDiagram(
+  options: Readonly<{ emission: ElementEmission; xml: string }>,
+): Readonly<{ emission: ElementEmission; diagram: ConvertedDiagram }> | null {
+  const { emission, xml } = options;
+  const at = emission.requests.findIndex((request) => "createImage" in request);
+  const create = emission.requests[at];
+  if (create === undefined || !("createImage" in create)) return null;
+  const objectId = create.createImage.objectId;
+  const diagram: ConvertedDiagram = { objectId, diagramId: diagramIdForSource(xml), version: diagramVersionOf(xml), xml };
+  const stamp: SlidesApiRequest = {
+    updatePageElementAltText: {
+      objectId,
+      description: drawioAltText({ diagramId: diagram.diagramId, version: diagram.version }),
+    },
+  };
+  return {
+    emission: {
+      requests: [...emission.requests.slice(0, at + 1), stamp, ...emission.requests.slice(at + 1)],
+      unsupported: emission.unsupported,
+    },
+    diagram,
   };
 }
 
@@ -98,9 +195,10 @@ function emitElement(
     element: SlideElement;
     context: EmitContext;
     viewportPx: ParsedExtraction["viewportPx"];
+    rasters: ReadonlyMap<number, VisualRaster>;
   }>,
 ): ElementEmission {
-  const { element, context, viewportPx } = options;
+  const { element, context, viewportPx, rasters } = options;
   switch (element.kind) {
     case "rect":
       return emitRect({ element, context, viewportPx });
@@ -113,7 +211,7 @@ function emitElement(
     case "image":
       return emitImage({ element, context, viewportPx });
     case "visual":
-      return emitVisual({ element, viewportPx });
+      return emitVisual({ element, context, viewportPx, raster: rasters.get(element.paintIndex) ?? null });
     case "line":
       return emitLine({ element, context });
     case "triangle":

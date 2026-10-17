@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; background: #fff; font-family: Arial, sans-serif; }
+</style></head><body>
+<!-- A <canvas> chart: only its pixels exist, so it can only travel as a picture. -->
+<canvas id="chart" width="800" height="400" style="position:absolute;left:240px;top:200px;width:800px;height:400px"></canvas>
+<div style="position:absolute;left:240px;top:120px;font-size:40px">Drawn on a canvas</div>
+<script>
+  const context = document.getElementById("chart").getContext("2d");
+  context.fillStyle = "#e3f2fd";
+  context.fillRect(0, 0, 800, 400);
+  const values = [120, 260, 180, 340, 300];
+  values.forEach((value, index) => {
+    context.fillStyle = index % 2 === 0 ? "#1e88e5" : "#43a047";
+    context.fillRect(60 + index * 150, 400 - value, 100, value);
+  });
+</script>
+</body></html>

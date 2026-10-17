@@ -1,0 +1,5 @@
+# Built by dev/build.ts (npm run build); the image builds them too.
+public/dev.js
+public/dev-pptx.js
+public/e2e-drawio.js
+node_modules/

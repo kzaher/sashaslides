@@ -40,7 +40,7 @@ import type { GetPromptResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 /** Every prompt name this server registers, in the order a user meets them. */
-export const WORKFLOW_PROMPT_NAMES: readonly string[] = ["new_deck", "revise_from_feedback", "second_wave"];
+export const WORKFLOW_PROMPT_NAMES: readonly string[] = ["new_deck", "revise_from_feedback", "second_wave", "edit_diagrams"];
 
 export function registerWorkflowPrompts(options: Readonly<{ server: McpServer }>): void {
   const { server } = options;
@@ -86,6 +86,20 @@ export function registerWorkflowPrompts(options: Readonly<{ server: McpServer }>
       },
     },
     (args) => secondWavePrompt({ proposalId: args.proposalId }),
+  );
+
+  server.registerPrompt(
+    "edit_diagrams",
+    {
+      title: "Work on the draw.io diagrams in a deck",
+      description:
+        "List the draw.io diagrams in a Google Slides deck, edit their source, and save it back " +
+        "copy-on-write; or add a new diagram as a candidate slide.",
+      argsSchema: {
+        presentationId: z.string().min(1).describe("The Google Slides file id whose diagrams to work on."),
+      },
+    },
+    (args) => editDiagramsPrompt({ presentationId: args.presentationId }),
   );
 }
 
@@ -139,6 +153,25 @@ export function secondWavePrompt(options: Readonly<{ proposalId: string }>): Get
   ];
   return {
     description: `Second wave of candidates for ${proposalId}`,
+    messages: [userMessage({ text: lines.join("\n") })],
+  };
+}
+
+export function editDiagramsPrompt(options: Readonly<{ presentationId: string }>): GetPromptResult {
+  const { presentationId } = options;
+  const lines = [
+    `Work on the draw.io diagrams in the deck ${presentationId}.`,
+    "",
+    "(What I want changed is in the message this arrived with.)",
+    "",
+    "1. deck_diagrams list on that presentationId: each diagram's slide, objectId, diagramId, whether you can read it and whether its picture is stale.",
+    "2. To change one: deck_diagrams read (you get a file path), edit that file, then deck_diagrams write with the path. It saves copy-on-write, so a diagram copied from another deck gets its own copy here.",
+    "3. A write does not re-draw the picture: tell me to open SashaSlides > Edit diagram in the deck, or show me the result as a candidate with propose_slides (drawioPath, presentationId) and await_pick.",
+    "4. A diagram you cannot read was drawn in the add-on: ask me for its .drawio file instead of guessing.",
+    "5. A NEW diagram is a propose_slides candidate: write the .drawio file and pass it as drawioPath with the presentationId.",
+  ];
+  return {
+    description: `The draw.io diagrams in ${presentationId}`,
     messages: [userMessage({ text: lines.join("\n") })],
   };
 }

@@ -35,6 +35,7 @@ import type { FeedbackCommentRecord, FeedbackReply, SendFeedbackResult, SendFeed
 // once (UI-CONTRACT.md on `SlideEditor`); session-log.ts owns the session-log shapes, so the
 // parser imports the type it fills in rather than inventing a twin.
 import type { CandidateCommentsEntry } from "./session-log.ts";
+import type { DiagramLinkSpec, DiagramSaveSpec } from "./diagram-host.ts";
 import type { PickerSeed } from "./picker-seed.ts";
 import { describeParsedFailure, type Parsed } from "./protocol.ts";
 import type { InsertPosition } from "./slide-insert.ts";
@@ -210,6 +211,12 @@ export type ServerFunctionArgs = {
   /** The editor's export through the add-on's own authorization: answers `{ exportId, outcome, message }`. */
   sashaRunExport: [exportId: string];
   sashaCommentAccess: [];
+  /** The diagram dialog's save (edit, new, upload, stale refresh): diagram-host.ts executeDiagramSave. */
+  sashaSaveDiagram: [spec: DiagramSaveSpec];
+  /** Diagram sources the dialog's seed did not carry: diagram-host.ts readDiagramSources. */
+  sashaReadDiagramSources: [spec: Readonly<{ fileIds: readonly string[] }>];
+  /** After an insert: each diagram's source file, link and stamp (diagram-host.ts executeDiagramLinks). */
+  sashaLinkInsertedDiagrams: [spec: DiagramLinkSpec];
 };
 
 export type ServerFunctionName = keyof ServerFunctionArgs;
@@ -242,6 +249,9 @@ const SERVER_FUNCTIONS: Readonly<Record<ServerFunctionName, true>> = {
   sashaImportAgain: true,
   sashaRunExport: true,
   sashaCommentAccess: true,
+  sashaSaveDiagram: true,
+  sashaReadDiagramSources: true,
+  sashaLinkInsertedDiagrams: true,
 };
 
 // SAFETY: `Object.keys` of a total `Record<ServerFunctionName, true>` literal is exactly its keys.

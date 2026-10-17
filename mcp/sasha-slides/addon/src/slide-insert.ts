@@ -84,6 +84,22 @@ export function retargetConversion({
   fromPageObjectId: string;
   toPageObjectId: string;
 }): readonly SlidesApiRequest[] {
+  return retargetConversionNamed({ requests, fromPageObjectId, toPageObjectId }).requests;
+}
+
+/**
+ * `retargetConversion`, with the renaming it applied: preview id -> inserted id. The insert needs it
+ * to find, after the batchUpdate, the pictures the converter reported as draw.io diagrams.
+ */
+export function retargetConversionNamed({
+  requests,
+  fromPageObjectId,
+  toPageObjectId,
+}: {
+  requests: readonly SlidesApiRequest[];
+  fromPageObjectId: string;
+  toPageObjectId: string;
+}): Readonly<{ requests: readonly SlidesApiRequest[]; renamed: ReadonlyMap<string, string> }> {
   const renamed = new Map<string, string>([[fromPageObjectId, toPageObjectId]]);
   const rename = (objectId: string): string => {
     const known = renamed.get(objectId);
@@ -92,7 +108,7 @@ export function retargetConversion({
     renamed.set(objectId, fresh);
     return fresh;
   };
-  return requests.map((request) => renamedRecord({ record: request, rename }));
+  return { requests: requests.map((request) => renamedRecord({ record: request, rename })), renamed };
 }
 
 /**

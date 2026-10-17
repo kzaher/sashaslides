@@ -37,10 +37,12 @@ import {
   type ServerFunctions,
 } from "./bridge.ts";
 import { parseCommentAccessAnswer, type CommentAccessAnswer } from "../../comment-bot/comment-access-contract.ts";
+import { parseDiagramLinkReply, parseDiagramSaveReply, parseDiagramSourcesReply } from "./diagram-wire.ts";
 import type {
   BatchReadApi,
   CandidateCommentsApi,
   CommentThreadApi,
+  DiagramApi,
   DriveApi,
   FeedbackApi,
   PickApi,
@@ -248,6 +250,20 @@ export function appsScriptSlidesApi({ call }: { call: ServerCall }): SlidesApi {
     writeRender: (spec) => invoke({ call, name: "sashaWriteRender", args: [spec], parse: parseWriteRenderReply }),
     pageElements: (spec) => invoke({ call, name: "sashaPageElements", args: [spec], parse: parsePageElementsReply }),
     renderPreviews: (spec) => invoke({ call, name: "sashaRenderPreviews", args: [spec], parse: parseRenderPreviewsReply }),
+  };
+}
+
+/**
+ * A diagram save stages a picture, writes a Drive file and runs a batchUpdate in one execution, and
+ * queues behind any other call this user has in flight, so it gets the long budget.
+ */
+export const DIAGRAM_CALL_BUDGET_MS = 90_000;
+
+export function appsScriptDiagramApi({ call }: { call: ServerCall }): DiagramApi {
+  return {
+    save: (spec) => invoke({ call, name: "sashaSaveDiagram", args: [spec], parse: parseDiagramSaveReply, budgetMs: DIAGRAM_CALL_BUDGET_MS }),
+    readSources: (fileIds) => invoke({ call, name: "sashaReadDiagramSources", args: [{ fileIds }], parse: parseDiagramSourcesReply, budgetMs: DIAGRAM_CALL_BUDGET_MS }),
+    linkInserted: (spec) => invoke({ call, name: "sashaLinkInsertedDiagrams", args: [spec], parse: parseDiagramLinkReply, budgetMs: DIAGRAM_CALL_BUDGET_MS }),
   };
 }
 

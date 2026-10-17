@@ -1,9 +1,9 @@
 /**
  * Shared browser-side HTML→pptx conversion core.
  *
- * Used by BOTH front-ends:
- *   - main.ts          — standalone html2slides page (download flow)
- *   - addon-main.ts    — Google Slides add-on sidebar (insert-into-deck flow)
+ * Used by:
+ *   - main.ts           — standalone html2slides page (download flow)
+ *   - insert-feature.ts — the developer page's .pptx download
  *
  * Everything here is pure browser code: it renders the input HTML into an
  * offscreen 1280×720 iframe, injects the precompiled extract-dom blob, applies
@@ -18,7 +18,7 @@
 import { buildPptxInMemory, type Extraction, type ExtractedElement, type SlideInput } from "../convert-pptx-lib";
 import { applyPostExtractionFixes, clampOversampling, rasterJobFor, type RasterJob } from "../post-extraction";
 
-// Build-time string substitution. Both build.ts and build-addon.ts replace
+// Build-time string substitution. Every browser-bundle.ts caller replaces
 // __EXTRACT_JS_LITERAL__ with the compiled extract-dom.ts source via esbuild
 // `define`. The browser path runs the compiled blob via
 // `win.eval(__EXTRACT_JS_LITERAL__)` inside the iframe.

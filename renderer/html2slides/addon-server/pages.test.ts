@@ -1,5 +1,5 @@
 // THE PUBLIC PAGES: the product home page, the legal pages Google's OAuth consent screen links to,
-// and the developer UI that used to live at "/".
+// and the developer page at "/dev" (built from dev/*.ts, linked from no public page).
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -10,11 +10,11 @@ import { DECK_LIST_ADDRESS, PAGES, pageFor } from "./pages.ts";
 const PUBLIC_DIR = join(import.meta.dirname, "public");
 const read = (file: string): string => readFileSync(join(PUBLIC_DIR, file), "utf8");
 
-test("each public address maps to its page, and the old home page moved to /dev", () => {
+test("each public address maps to its page, and /dev is the developer page", () => {
   const rows: readonly { path: string; file: string | null }[] = [
     { path: "/", file: "home.html" },
-    { path: "/dev", file: "app.html" },
-    { path: "/dev/", file: "app.html" },
+    { path: "/dev", file: "dev.html" },
+    { path: "/dev/", file: "dev.html" },
     { path: "/privacy", file: "privacy.html" },
     { path: "/terms", file: "terms.html" },
     { path: "/walkthroughs/claude-ai", file: "walkthroughs/claude-ai.html" },
@@ -37,7 +37,18 @@ test("the public pages link both legal pages and never advertise the developer t
     assert.doesNotMatch(page, /href="\/dev"/, `${file}: no link to /dev`);
     assert.doesNotMatch(page, />Developers</, `${file}: no Developers entry`);
   }
-  assert.equal(pageFor("/dev"), "app.html", "the developer UI is still served, just not linked");
+  assert.equal(pageFor("/dev"), "dev.html", "the developer page is served, just not linked");
+});
+
+test("the developer page is the TypeScript build: its shell loads only the built script and stylesheet", () => {
+  const page = read("dev.html");
+  assert.match(page, /<script src="\/static\/dev\.js"><\/script>/);
+  assert.match(page, /<link rel="stylesheet" href="\/static\/dev\.css">/);
+  assert.match(page, /<meta name="robots" content="noindex">/);
+  assert.equal([...page.matchAll(/<script\b/g)].length, 1, "no inline or hand-written script");
+  for (const retired of ["app.html", "app.js", "feature-drawio.js", "shell.html", "install.sh", "install-addon.sh", "sasha-bridge.zip", "addon-bundle", "edit.html", "convert-bundle.js"]) {
+    assert.ok(!existsSync(join(PUBLIC_DIR, retired)), `${retired} is retired`);
+  }
 });
 
 test("the privacy policy carries what Google's verification checks for", () => {
