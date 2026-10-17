@@ -20,31 +20,37 @@ import { assertNever } from "../../contracts/assert-never.ts";
 import type { DocumentSnapshot, ElementSnapshot, SlideSnapshot, TextBody } from "../../contracts/document.ts";
 import { rotatedBounds } from "../../contracts/geometry.ts";
 import type { AssetId, ElementId } from "../../contracts/ids.ts";
-import { assetAddressToken, type FontFaceRequest, type RenderSlideMarkup, type StageElementRecord } from "../../contracts/render.ts";
+import { assetAddressToken, type AssetAddressResolver, type FontFaceRequest, type RenderSlideMarkup, type StageElementRecord } from "../../contracts/render.ts";
 import type { Fill } from "../../contracts/style.ts";
 import { withFontStandIns } from "./font-families.ts";
 import type { SlideRenderContext } from "./render-context.ts";
 import { SlideRoot, slideBackground, slideNumberLookup } from "./static-slide.tsx";
 import { resolvedRunStylesOf, textStyleContextOf, type TextStyleContext } from "./text-layout.ts";
 
-export const renderSlideMarkup: RenderSlideMarkup = (input) => {
+export const renderSlideMarkup: RenderSlideMarkup = (input) => ({
+  markup: slideMarkupWith({ ...input, assetAddress: assetAddressToken }),
+  elements: stageElementRecords(input.slide.elements),
+  assetIds: referencedAssetIds({ slide: input.slide, document: input.document }),
+  fontFaces: withFontStandIns(fontFacesOf({ slide: input.slide, document: input.document })),
+});
+
+/**
+ * The slide's markup with its images at `assetAddress`'s addresses: the tokens for the sandbox, the
+ * page's own addresses for a copy that leaves the editor (gesture-handlers.ts); null draws the
+ * placeholder, as on the canvas.
+ */
+export function slideMarkupWith(input: Readonly<{ slide: SlideSnapshot; document: DocumentSnapshot; slideNumber: number; assetAddress: AssetAddressResolver }>): string {
   const context: SlideRenderContext = {
     theme: input.document.theme,
     slideId: input.slide.id,
     slideNumber: input.slideNumber,
     slideNumberOf: slideNumberLookup(input.document),
-    assetAddress: assetAddressToken,
+    assetAddress: input.assetAddress,
     measurement: null,
     editableText: null,
   };
-  const markup = renderToStaticMarkup(<SlideRoot slide={input.slide} document={input.document} context={context} />);
-  return {
-    markup,
-    elements: stageElementRecords(input.slide.elements),
-    assetIds: referencedAssetIds({ slide: input.slide, document: input.document }),
-    fontFaces: withFontStandIns(fontFacesOf({ slide: input.slide, document: input.document })),
-  };
-};
+  return renderToStaticMarkup(<SlideRoot slide={input.slide} document={input.document} context={context} />);
+}
 
 /** Every leaf, back to front, with its unrotated frame, rotated bounds and enclosing groups. */
 export function stageElementRecords(elements: readonly ElementSnapshot[]): readonly StageElementRecord[] {

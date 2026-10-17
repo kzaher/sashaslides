@@ -8,8 +8,8 @@ import { describe, it } from "node:test";
 import type { ClipboardContent, EditorEmbedding, EditorState } from "../../contracts/editor-state.ts";
 import type { EditorEvent } from "../../contracts/editor-events.ts";
 import { ENGINE_CLIPBOARD_MEDIA_TYPE, type BrowserCapabilities } from "../../contracts/editor-system.ts";
-import { SLIDE_ROOT_CLASS } from "../../contracts/render.ts";
-import { IdMinter, documentSnapshot, fixtureDeckId, plainBody, shapeElement, slideSnapshot } from "../sample/snapshot-builders.ts";
+import { ASSET_ADDRESS_SCHEME, SLIDE_ROOT_CLASS } from "../../contracts/render.ts";
+import { IdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, imageElement, plainBody, shapeElement, slideSnapshot } from "../sample/snapshot-builders.ts";
 import { createRecordingSystem, fixtureEditorState } from "../testing/editor-fixtures.ts";
 import { handleShellKey } from "./editor-shell.tsx";
 import { handleClipboardWrite, handlePaste, handlePresent, type ClipboardTransferEvent, type GestureContext } from "./gesture-handlers.ts";
@@ -18,6 +18,9 @@ const ids = new IdMinter("Gesture1");
 const element = shapeElement({ id: ids.next("element"), text: plainBody("Copied words") });
 const slide = slideSnapshot({ ids, elements: [element] });
 const document = documentSnapshot({ deckId: fixtureDeckId("deck_gesture"), title: "Gestures", slides: [slide] });
+/** An image whose bytes the page holds, at the address the editor draws it from. */
+const PHOTO = fixtureAssetId("copied-photo");
+const PHOTO_ADDRESS = "blob:https://sashaslides.test/0b6f-photo";
 const CONTENT: ClipboardContent = {
   payload: { format: "sasha-engine/elements@1", operation: "copy", sourceDeckId: document.deckId, slideId: slide.id, elements: [element], assets: [] },
   plainText: "Copied words",
@@ -55,6 +58,22 @@ describe("copy and cut", () => {
       assert.deepEqual(harness.dispatched, [row.dispatched]);
     });
   }
+
+  it("the copied markup draws images from the page's own addresses, never the sandbox's tokens other applications cannot load", () => {
+    const loaded = imageElement({ id: ids.next("element"), assetId: PHOTO, box: { x: 0, y: 0, width: 400, height: 300 } });
+    const notYetHere = imageElement({ id: ids.next("element"), assetId: fixtureAssetId("not-here-yet"), box: { x: 400, y: 0, width: 400, height: 300 } });
+    const content: ClipboardContent = {
+      payload: { format: "sasha-engine/elements@1", operation: "copy", sourceDeckId: document.deckId, slideId: slide.id, elements: [loaded, notYetHere], assets: [] },
+      plainText: "",
+    };
+    const written = new Map<string, string>();
+    const harness = gestureHarness({ calls: [], embedding: { kind: "webApplication" }, content });
+    const event: ClipboardTransferEvent = { clipboardData: { setData: (format, data) => written.set(format, data), getData: () => "", types: [], files: [] }, preventDefault: () => undefined };
+    assert.equal(handleClipboardWrite({ context: harness.context, event, operation: "copy" }), true);
+    const markup = written.get("text/html") ?? "";
+    assert.ok(markup.includes(PHOTO_ADDRESS), "the loaded image is drawn from its address");
+    assert.ok(!markup.includes(ASSET_ADDRESS_SCHEME), "no image refers to a sasha-asset token");
+  });
 
   it("with nothing copyable, the browser's own copy runs and nothing is dispatched", () => {
     const calls: string[] = [];
@@ -171,6 +190,7 @@ function gestureHarness(options: Readonly<{ calls: string[]; embedding: EditorEm
     // Any element will do: the fake full-screen request only records that it was asked.
     presentationHost: () => ({}) as Element,
     speakerWindow: { current: null },
+    assetAddress: (assetId) => (assetId === PHOTO ? PHOTO_ADDRESS : null),
   };
   return { context, dispatched: recording.dispatched, tabs };
 }

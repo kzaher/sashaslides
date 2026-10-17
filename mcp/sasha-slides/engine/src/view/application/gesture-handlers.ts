@@ -9,6 +9,9 @@
 //  * COPY READS STATE, NOT A ROUND TRIP. The `copy` and `cut` handlers call
 //    `clipboardContentFor(current state, operation)` (the state module's pure selector) and fills the event's DataTransfer with the engine's
 //    own payload, rendered markup and plain text before it returns, then dispatches `copied`.
+//  * COPIED MARKUP DRAWS IMAGES FROM THE PAGE'S OWN ADDRESSES (`assetAddress`, as the canvas does),
+//    never the `sasha-asset://` tokens of the transition sandbox, which no other application can
+//    load; an image whose bytes have not arrived is the canvas's placeholder.
 //  * PRESENT ENTERS FULL SCREEN FIRST, then opens the speaker window, then dispatches
 //    `presentRequested`; the shell mounts the presenter into the element that went full screen with
 //    the window it got. In the add-on dialog neither is delegated through the frame chain, so
@@ -23,8 +26,9 @@ import type { ChosenImageFile, EditorEvent, PastedContent } from "../../contract
 import type { ClipboardPayload, EditorState } from "../../contracts/editor-state.ts";
 import { ENGINE_CLIPBOARD_MEDIA_TYPE, type BrowserCapabilities, type ClipboardContentFor } from "../../contracts/editor-system.ts";
 import type { Point } from "../../contracts/geometry.ts";
+import type { AssetAddressResolver } from "../../contracts/render.ts";
 import type { RunningSystem } from "../../contracts/rxfeedback.ts";
-import { renderSlideMarkup } from "../render/slide-markup.tsx";
+import { slideMarkupWith } from "../render/slide-markup.tsx";
 
 export type GestureContext = Readonly<{
   system: RunningSystem<EditorState, EditorEvent>;
@@ -34,6 +38,8 @@ export type GestureContext = Readonly<{
   presentationHost: () => Element | null;
   /** Where the Present handler leaves the speaker window it opened, for the presenter to render into. */
   speakerWindow: { current: Window | null };
+  /** Where a copy's images load from: the editor's own `assetStore.addressFor` (see the header). */
+  assetAddress: AssetAddressResolver;
 }>;
 
 /** The parts of a clipboard event the copy, cut and paste handlers use. */
@@ -58,7 +64,7 @@ export function handleClipboardWrite(options: Readonly<{ context: GestureContext
     return false;
   }
   event.clipboardData.setData(ENGINE_CLIPBOARD_MEDIA_TYPE, JSON.stringify(content.payload));
-  event.clipboardData.setData("text/html", clipboardMarkup({ payload: content.payload, document: state.document }));
+  event.clipboardData.setData("text/html", clipboardMarkup({ payload: content.payload, document: state.document, assetAddress: context.assetAddress }));
   event.clipboardData.setData("text/plain", content.plainText);
   event.preventDefault();
   context.system.dispatch(CLIPBOARD_WRITTEN[options.operation]);
@@ -76,7 +82,7 @@ export function handleMenuClipboardWrite(options: Readonly<{ context: GestureCon
   if (content === null) return;
   const written = context.browser.writeClipboard({
     plainText: content.plainText,
-    markup: clipboardMarkup({ payload: content.payload, document: state.document }),
+    markup: clipboardMarkup({ payload: content.payload, document: state.document, assetAddress: context.assetAddress }),
     enginePayloadText: JSON.stringify(content.payload),
   });
   written.then(
@@ -154,16 +160,16 @@ export function parseClipboardPayload(text: string): ClipboardPayload | null {
 }
 
 /** The markup a copy carries for other applications: the copied slides, or the elements on their slide's background. */
-export function clipboardMarkup(options: Readonly<{ payload: ClipboardPayload; document: DocumentSnapshot }>): string {
+export function clipboardMarkup(options: Readonly<{ payload: ClipboardPayload; document: DocumentSnapshot; assetAddress: AssetAddressResolver }>): string {
   const payload = options.payload;
   switch (payload.format) {
     case "sasha-engine/slides@1":
-      return payload.slides.map((slide, index) => renderSlideMarkup({ slide, document: options.document, slideNumber: index + 1 }).markup).join("");
+      return payload.slides.map((slide, index) => slideMarkupWith({ slide, document: options.document, slideNumber: index + 1, assetAddress: options.assetAddress })).join("");
     case "sasha-engine/elements@1": {
       const source = options.document.slides.find((slide) => slide.id === payload.slideId);
       const slideNumber = options.document.slides.findIndex((slide) => slide.id === payload.slideId) + 1;
       const slide = { id: payload.slideId, layoutId: source?.layoutId ?? null, background: source?.background ?? null, skipped: false, speakerNotes: { paragraphs: [{ style: {}, runs: [] }] }, transition: null, animations: [], elements: payload.elements };
-      return renderSlideMarkup({ slide, document: options.document, slideNumber: Math.max(1, slideNumber) }).markup;
+      return slideMarkupWith({ slide, document: options.document, slideNumber: Math.max(1, slideNumber), assetAddress: options.assetAddress });
     }
     default:
       return assertNever(payload);

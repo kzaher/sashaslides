@@ -127,7 +127,8 @@ export function checkEnumeration(candidate: unknown, values: readonly string[]):
 
 export function checkColour(candidate: unknown): Verdict {
   return checkKind(candidate, {
-    literal: (record) => combine([HEXADECIMAL_PATTERN.test(String(record["hexadecimal"])) ? "valid" : "wrongType", checkUnit(record["alpha"])]),
+    // Text first: `String()` of a list or an object would pass the pattern and reach the renderer.
+    literal: (record) => combine([checkHexadecimal(record["hexadecimal"]), checkUnit(record["alpha"])]),
     theme: (record) => combine([checkEnumeration(record["slot"], THEME_COLOUR_SLOTS), checkUnit(record["alpha"])]),
   });
 }
@@ -135,7 +136,12 @@ export function checkColour(candidate: unknown): Verdict {
 /** A list marker's colour: "#rrggbb" or a theme slot name (style.ts `ListMarkerColour`). */
 export function checkListMarkerColour(candidate: unknown): Verdict {
   if (typeof candidate !== "string") return "wrongType";
-  return candidate.startsWith("#") ? (HEXADECIMAL_PATTERN.test(candidate) ? "valid" : "wrongType") : checkEnumeration(candidate, THEME_COLOUR_SLOTS);
+  return candidate.startsWith("#") ? checkHexadecimal(candidate) : checkEnumeration(candidate, THEME_COLOUR_SLOTS);
+}
+
+/** "#rrggbb" as text. */
+function checkHexadecimal(candidate: unknown): Verdict {
+  return typeof candidate === "string" && HEXADECIMAL_PATTERN.test(candidate) ? "valid" : "wrongType";
 }
 
 export function checkColourOrNone(candidate: unknown): Verdict {

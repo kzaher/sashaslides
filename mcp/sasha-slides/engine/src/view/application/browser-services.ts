@@ -17,9 +17,10 @@ import type { AssetMediaType, DocumentSnapshot, Paragraph, TextRun } from "../..
 import type { ChosenImageFile } from "../../contracts/editor-events.ts";
 import type { BrowserCapabilities } from "../../contracts/editor-system.ts";
 import { slideUnitsFromPoints } from "../../contracts/geometry.ts";
-import { literalColour, type RunStylePatch } from "../../contracts/style.ts";
+import type { RunStylePatch } from "../../contracts/style.ts";
 import { assertNever } from "../../contracts/assert-never.ts";
 import { applyFontMetricOverrides, fontMetricOverridesFor, fontStandInOf } from "../render/font-families.ts";
+import { colourFromBrowser } from "../text/input-parser.ts";
 
 /** The real browser operations (contracts/editor-system.ts `BrowserCapabilities`). */
 export function pageBrowserCapabilities(page: Window): BrowserCapabilities {
@@ -71,7 +72,7 @@ export function richTextFromMarkup(markup: string): readonly Paragraph[] | null 
     }
     const block = BLOCK_TAGS.has(tag);
     if (block && runs.length > 0) flush();
-    const nested = { ...style, ...inlineStyleOf(node) };
+    const nested = { ...style, ...pastedRunStyleOf(node) };
     for (const child of Array.from(node.childNodes)) walk(child, nested);
     if (block && runs.length > 0) flush();
   };
@@ -155,7 +156,15 @@ function slideFamilies(slide: DocumentSnapshot["slides"][number]): ReadonlySet<s
   return families;
 }
 
-function inlineStyleOf(element: HTMLElement): RunStylePatch {
+/** What `pastedRunStyleOf` reads of a pasted element (an `HTMLElement` of the parsed markup). */
+export type PastedElement = Readonly<{
+  tagName: string;
+  getAttribute: (name: string) => string | null;
+  style: Readonly<Pick<CSSStyleDeclaration, "fontWeight" | "fontStyle" | "textDecoration" | "fontSize" | "color">>;
+}>;
+
+/** The run style one pasted element contributes, from its tag and its inline style as the browser reports it. */
+export function pastedRunStyleOf(element: PastedElement): RunStylePatch {
   const tag = element.tagName.toLowerCase();
   const style: { -readonly [Key in keyof RunStylePatch]: RunStylePatch[Key] } = {};
   if (tag === "b" || tag === "strong" || /^h[1-6]$/.test(tag)) style.fontWeight = 700;
@@ -176,8 +185,9 @@ function inlineStyleOf(element: HTMLElement): RunStylePatch {
   if (declared.textDecoration.includes("line-through")) style.strikethrough = true;
   const points = /^([\d.]+)pt$/.exec(declared.fontSize);
   if (points !== null) style.fontSize = Math.round(slideUnitsFromPoints(Number(points[1])) * 100) / 100;
-  const colour = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(declared.color);
-  if (colour !== null) style.colour = literalColour({ hexadecimal: `#${[colour[1], colour[2], colour[3]].map((channel) => Number(channel ?? "0").toString(16).padStart(2, "0")).join("")}`, alpha: 1 });
+  // Translucent colours and #rrggbbaa arrive as rgba(); the text input's colour reader keeps their alpha.
+  const colour = colourFromBrowser(declared.color);
+  if (colour !== null) style.colour = colour;
   return style;
 }
 

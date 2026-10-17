@@ -234,6 +234,23 @@ describe("repairs on the repairing replica", () => {
     assert.deepEqual(store.snapshot().slides.map((slide) => slide.id), order);
   });
 
+  test("a colour whose hexadecimal is not text is damage: never projected, repaired to the default", () => {
+    const { store, sharedDocument, flush, slideId } = repairing();
+    const shapeId = mint("element");
+    applyOrThrow(store, envelope({ commands: [{ kind: "insertElements", slideId, placement: { kind: "front" }, elements: [shape({ id: shapeId })] }] }));
+    flush();
+    const roots = documentRoots(sharedDocument);
+    // Any editor-role client can write this with a raw Yjs update; `String()` of it reads "#112233",
+    // and the renderer would call `toLowerCase()` on the list.
+    sharedDocument.transact(() => elementMapOf(roots, slideId, shapeId)?.set("fill", { kind: "solid", colour: { kind: "literal", hexadecimal: ["#112233"], alpha: 1 } }));
+    const projected = flattenElements(store.snapshot().slides[0]?.elements ?? []).get(shapeId);
+    assert.deepEqual(projected?.kind === "shape" ? projected.box.fill : null, { kind: "none" });
+    assert.deepEqual(store.validate().map((issue) => [issue.path.endsWith("/fill"), issue.problem, issue.repair]), [[true, "wrongType", "writeDefault"]]);
+    flush();
+    assert.deepEqual(elementMapOf(roots, slideId, shapeId)?.get("fill"), { kind: "none" });
+    assert.deepEqual(store.validate(), []);
+  });
+
   test("meta is never repaired, and nothing is written on a report-only replica", () => {
     const { store, sharedDocument, scheduler } = createTestStore({ seed: "blankDeck", repairPolicy: "reportOnly" });
     sharedDocument.transact(() => documentRoots(sharedDocument).meta.delete("title"));

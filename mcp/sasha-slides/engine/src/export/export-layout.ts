@@ -12,7 +12,8 @@
 //  * IT RESCALES THE SAME DECLARATIONS THE RENDERER SCALES. The renderer multiplies a fixed set of
 //    pixel values by `fontScale` (inline-styles.ts `runDeclarations` and `paragraphDeclarations`,
 //    text-paragraphs.tsx `markerDeclarations`); the markup holds them at scale 1, so this pass
-//    multiplies exactly those properties and leaves unitless line heights alone, as the renderer does.
+//    multiplies exactly those properties and leaves unitless line heights and em lengths alone, as
+//    the renderer does (export-layout.test.ts compares the two after a step).
 //  * WRITTEN IN TYPESCRIPT, SHIPPED AS ITS COMPILED SOURCE. slide-html.ts inlines
 //    `layOutExportedSlide.toString()`, so the function must be self-contained: no imports, no module
 //    constants (everything arrives in `settings`), and no `CSS.escape`, which node tests lack.
@@ -63,8 +64,9 @@ export async function layOutExportedSlide(page: Document, settings: ExportLayout
       Promise.all(fontLoads).then(() => page.fonts.ready),
       new Promise((resolve) => setTimeout(resolve, settings.fontWaitMilliseconds)),
     ]);
-    // Properties the renderer multiplies by `fontScale` on every text node, and the two only a list marker scales.
-    const textProperties = ["font-size", "letter-spacing", "margin-top", "margin-bottom", "padding-inline-start", "text-indent"];
+    // Properties the renderer multiplies by `fontScale` on every text node (a run bigger than its
+    // paragraph's base is moved by `vertical-align` and `top` in px), and the two only a list marker scales.
+    const textProperties = ["font-size", "letter-spacing", "margin-top", "margin-bottom", "padding-inline-start", "text-indent", "vertical-align", "top"];
     const markerProperties = ["inset-inline-start", "width"];
     for (const target of settings.shrinkTargets) {
       const quotedIdentifier = target.elementId.replace(/["\\]/g, "\\$&");
