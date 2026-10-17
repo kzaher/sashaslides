@@ -26,7 +26,7 @@ import {
 } from "./picker-state.ts";
 import { WHOLE_SLIDE } from "./protocol.ts";
 import { previewElementsOf } from "./rendered-preview.ts";
-import { pickerMarkupOf as markupOf, replay, stubConvertHtmlToSlideRequests } from "./test-support.ts";
+import { attributeOf, pickerMarkupOf as markupOf, replay, stubConvertHtmlToSlideRequests, tagsWithClass } from "./test-support.ts";
 
 const proposal: Proposal = {
   merge: null,
@@ -144,7 +144,8 @@ test("the dialog numbers the candidates 1..N so the user can say 'option 3'", ()
   // The number is ON THE PICTURE now, not in a caption under it, and "4 candidate slides p_..."
   // is gone from the header: the count is the number of slides the reader is looking at.
   for (const index of [1, 2, 3]) {
-    assert.match(markup, new RegExp(`sasha-cell-number" aria-hidden="true">${index}<`), `badge ${index}`);
+    const badge = tagsWithClass(markup, "sasha-cell-number").find((tag) => markup.includes(`${tag}${index}<`));
+    assert.equal(attributeOf(badge ?? "", "aria-hidden"), "true", `badge ${index}`);
   }
   // The count survives only as the grid's `aria-label`, which is what a screen reader needs; it
   // is no longer a heading over the pictures.
@@ -204,7 +205,7 @@ test("a tab with no presentation says so and disables insert", () => {
   assert.match(markup, /not an editable presentation/);
   // Insert is per candidate now, so EVERY one of them is disabled.
   assert.equal(
-    (markup.match(/class="sasha-primary sasha-small" disabled=""/g) ?? []).length,
+    tagsWithClass(markup, "sasha-primary", "sasha-small").filter((tag) => attributeOf(tag, "disabled") === "").length,
     3,
     "no candidate can be inserted into a tab that is not a presentation",
   );

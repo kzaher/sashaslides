@@ -1,8 +1,0 @@
-{
-  "name": "analysis-scripts",
-  "type": "module",
-  "dependencies": {
-    "chrome-remote-interface": "^0.33.2",
-    "tsx": "^4.19.0"
-  }
-}

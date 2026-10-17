@@ -50,6 +50,7 @@ import {
   type ReportAnnotation,
 } from "./defect-state.ts";
 import { INERT_DEFECT_ACTIONS } from "./inert-actions.ts";
+import { attributeOf, tagsWithClass } from "./test-support.ts";
 
 const SEED = "test-seed";
 const HTML =
@@ -317,7 +318,7 @@ test("A HAND EDIT THAT PUTS THE ORIGINAL'S WORDS BACK CANNOT BE PREPARED AT ALL"
   assert.match(leak?.detail ?? "", /Northwind revenue/);
   const markup = markupOf(edited);
   assert.match(markup, /own words are back on this slide/);
-  assert.match(markup, /class="sasha-secondary sasha-prepare" disabled/);
+  assert.equal(attributeOf(tagsWithClass(markup, "sasha-secondary", "sasha-prepare")[0] ?? "", "disabled"), "");
   // Undoing the edit clears it, so a refusal is recoverable rather than a dead end.
   assert.equal(preparable(play(edited, [{ kind: "sent-reset" }])).kind, "ready");
 });
@@ -360,7 +361,7 @@ test("AND AN EDIT AFTER PREPARING MAKES IT UNSENDABLE, with the reason on screen
   assert.equal(sendablePreview(retitled), null);
   assert.equal(previewIsStale(retitled), true);
   assert.match(markupOf(retitled), /Prepare it again/);
-  assert.match(markupOf(retitled), /class="sasha-primary sasha-send" disabled/);
+  assert.equal(attributeOf(tagsWithClass(markupOf(retitled), "sasha-primary", "sasha-send")[0] ?? "", "disabled"), "");
 });
 
 test("A HAND EDIT TO THE SENT SLIDE ALSO MAKES IT UNSENDABLE, even though the pass did not move", () => {

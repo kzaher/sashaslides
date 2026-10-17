@@ -14,6 +14,30 @@ import type { PickerState } from "./picker-state.ts";
 import { WHOLE_SLIDE } from "./protocol.ts";
 import { NO_PREVIEWS, type SlidePreviews } from "./slide-previews.ts";
 
+/**
+ * Every opening tag in `markup`. ATTRIBUTE ORDER AND THE BOOLEAN FORM ARE SERIALISER DETAILS, not
+ * behaviour: preact/compat (what every surface ships, build-addon.ts) writes `class` after the other
+ * attributes, a boolean as a bare name (`disabled`, `sandbox`) and `>` unescaped inside a value.
+ * So a test asks about one tag and its attributes, never about where in the tag an attribute sits.
+ */
+export function openingTags(markup: string): readonly string[] {
+  return markup.match(/<[a-zA-Z][a-zA-Z0-9-]*(?:\s+[^\s=>"/]+(?:="[^"]*")?)*\s*\/?>/g) ?? [];
+}
+
+/** The opening tags whose class list holds every one of `classNames`. */
+export function tagsWithClass(markup: string, ...classNames: readonly string[]): readonly string[] {
+  return openingTags(markup).filter((tag) => {
+    const classes = (attributeOf(tag, "class") ?? "").split(" ");
+    return classNames.every((name) => classes.includes(name));
+  });
+}
+
+/** `name`'s value on `tag` ("" for a bare boolean attribute), or null when the tag lacks it. */
+export function attributeOf(tag: string, name: string): string | null {
+  const match = new RegExp(`\\s${name}(?:="([^"]*)")?(?=[\\s/>])`).exec(tag);
+  return match === null ? null : (match[1] ?? "");
+}
+
 /** `events` folded through `reduce`, starting from `initial`. */
 export function replay<State, Event>(
   reduce: (state: State, event: Event) => State,

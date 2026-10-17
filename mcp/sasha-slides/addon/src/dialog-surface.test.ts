@@ -31,7 +31,14 @@ import {
   type PickerState,
 } from "./picker-state.ts";
 import { UNMEASURED_SCALE } from "./scaled-frame.tsx";
-import { pickerMarkupOf as markupOf, replay, stubConvertHtmlToSlideRequests } from "./test-support.ts";
+import {
+  attributeOf,
+  openingTags,
+  pickerMarkupOf as markupOf,
+  replay,
+  stubConvertHtmlToSlideRequests,
+  tagsWithClass,
+} from "./test-support.ts";
 import { describeEdit, type SlideEdit } from "./editor/index.ts";
 
 const proposal: Proposal = {
@@ -166,7 +173,8 @@ test("the grid draws one cell per candidate, numbered 1..N", () => {
   const markup = markupOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
   assert.equal(countOf(markup, /class="sasha-cell[ "]/g), 4, "four cells for four candidates");
   for (const index of [1, 2, 3, 4]) {
-    assert.match(markup, new RegExp(`sasha-cell-number" aria-hidden="true">${index}<`), `cell ${index} carries its own number`);
+    const numbered = tagsWithClass(markup, "sasha-cell-number").find((tag) => markup.includes(`${tag}${index}<`));
+    assert.equal(attributeOf(numbered ?? "", "aria-hidden"), "true", `cell ${index} carries its own number`);
   }
   assert.match(markup, /class="sasha-grid"/);
   // THE PICTURE IS THE CONTROL. A transparent button over the stage opens the editor on that
@@ -198,7 +206,8 @@ test("a grid cell renders the candidate's own HTML in a scaled sandboxed iframe,
   // granted nowhere, under either sandbox, so no candidate ever executes anything.
   // EVERY grid cell is inert. The live editor lives in the editor window, which is the only
   // place a candidate gets `allow-same-origin` -- so the grid cannot be reached into at all.
-  assert.equal(countOf(markup, /sandbox=""/g), 2, "both cells inert in the grid");
+  const inert = openingTags(markup).filter((tag) => tag.startsWith("<iframe") && attributeOf(tag, "sandbox") === "");
+  assert.equal(inert.length, 2, "both cells inert in the grid");
   assert.equal(countOf(markup, /sandbox="allow-same-origin"/g), 0, "the grid never hosts the editor");
   assert.doesNotMatch(markup, /allow-scripts/);
   assert.match(markup, new RegExp(`transform:scale\\(${UNMEASURED_SCALE}\\)`));
@@ -264,7 +273,8 @@ test("the cell's unresolved badge is the conversation's number, and never a sile
     },
   ]);
   const markup = markupOf(read);
-  assert.match(markup, /class="sasha-cell-unresolved sasha-unresolved-known" title="1 open comment"/);
+  const [known = ""] = tagsWithClass(markup, "sasha-cell-unresolved", "sasha-unresolved-known");
+  assert.equal(attributeOf(known, "title"), "1 open comment");
   assert.match(markup, /class="sasha-cell-unresolved sasha-unresolved-unreachable"/);
   assert.match(markup, /open comments could not be read: HTTP 404/);
 });
@@ -388,7 +398,7 @@ test("the visual editor's slot says what it is for, and lists the edits once the
   // its empty state is part of the grid's vertical budget -- the sentence is the header's caption
   // rather than a paragraph under it, and the Undo button only exists once there is something to
   // undo. The browser smoke test measures the budget and fails if this grows back.
-  assert.match(empty, /travels to Sasha as the change itself, never as the slide&#x27;s markup/);
+  assert.match(empty, /travels to Sasha as the change itself, never as the slide's markup/);
   assert.doesNotMatch(empty, />Undo</, "nothing to undo yet, so no button taking a row's worth of height");
 
   const edited = markupOf(

@@ -36,7 +36,7 @@ import { sessionEventsOf, type SessionEventFile } from "./session-log.ts";
 import { INERT_CONVERSATION_ACTIONS, UNCONFIGURED_SETUP } from "./inert-actions.ts";
 import { NO_PREVIEWS } from "./slide-previews.ts";
 import type { Manifest } from "./protocol.ts";
-import { conversationMarkupOf as markupOf, replay as replayEvents } from "./test-support.ts";
+import { attributeOf, conversationMarkupOf as markupOf, replay as replayEvents, tagsWithClass } from "./test-support.ts";
 
 const AT = "2026-10-04T12:00:00.000Z";
 const PROPOSAL = "p_1733219000000_a1b2c3";
@@ -847,7 +847,11 @@ test("the comment-access card: Allow is a new-tab link to the allow page, and th
     );
   const allow = render({ kind: "allow", allowUrl, checking: false });
   assert.match(allow, /Let Sasha answer comments on this deck/);
-  assert.match(allow, new RegExp(`<a class="[^"]*sasha-comment-access-allow" href="${allowUrl.replace(/[?.]/g, "\\$&")}" target="_blank" rel="noopener noreferrer">Allow</a>`));
+  const [allowLink = ""] = tagsWithClass(allow, "sasha-comment-access-allow");
+  assert.ok(allowLink.startsWith("<a ") && allow.includes(`${allowLink}Allow</a>`), allow);
+  assert.equal(attributeOf(allowLink, "href"), allowUrl);
+  assert.equal(attributeOf(allowLink, "target"), "_blank");
+  assert.equal(attributeOf(allowLink, "rel"), "noopener noreferrer");
   assert.match(render({ kind: "allow", allowUrl, checking: true }), />Checking\.\.\.</);
   assert.match(render({ kind: "viewOnly" }), /You can view this deck but not comment; ask the owner for Commenter access\./);
   assert.match(render({ kind: "notConnected" }), /The Setup guide shows how\./);

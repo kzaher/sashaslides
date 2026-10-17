@@ -18,7 +18,7 @@ import {
 } from "./session-log.ts";
 import { NO_PREVIEWS, previewsToLoad, reducePreviews, type SlidePreviews } from "./slide-previews.ts";
 import { SlideThumb } from "./slide-thumb.tsx";
-import { conversationMarkupOf, replay as replayEvents } from "./test-support.ts";
+import { attributeOf, conversationMarkupOf, openingTags, replay as replayEvents } from "./test-support.ts";
 
 const AT = "2026-10-04T12:00:00.000Z";
 const PROPOSAL = "p_1733219000000_a1b2c3";
@@ -52,8 +52,9 @@ test("a ready thumbnail is the candidate's own HTML in the strict sandbox, never
     createElement(SlideThumb, { preview: { kind: "ready", html: "<p>hello</p>" }, title: "candidate 1" }),
   );
   assert.match(markup, /class="sasha-stage sasha-thumb"/);
-  assert.match(markup, /<iframe[^>]*sandbox=""/);
-  assert.match(markup, /srcDoc="&lt;p&gt;hello&lt;\/p&gt;"|srcdoc="&lt;p&gt;hello&lt;\/p&gt;"/i);
+  const [frame = ""] = openingTags(markup).filter((tag) => tag.startsWith("<iframe"));
+  assert.equal(attributeOf(frame, "sandbox"), "");
+  assert.equal(attributeOf(frame, "srcdoc"), "&lt;p>hello&lt;/p>");
 });
 
 test("a loading thumbnail is an empty box of the same size, so the row does not jump", () => {
@@ -77,7 +78,7 @@ test("every candidate in the set card carries its thumbnail", () => {
   const markup = markupOf({ conversation, previews: loadedPreviews(conversation) });
   const stack = markup.slice(markup.indexOf('class="sasha-stack"'), markup.indexOf("Open artifacts"));
   assert.equal((stack.match(/class="sasha-stage sasha-thumb"/g) ?? []).length, 2, "one per candidate");
-  assert.match(stack, /srcDoc="&lt;p&gt;slide 1&lt;\/p&gt;"|srcdoc="&lt;p&gt;slide 1&lt;\/p&gt;"/i);
+  assert.ok(openingTags(stack).some((tag) => attributeOf(tag, "srcdoc") === "&lt;p>slide 1&lt;/p>"), stack);
 });
 
 // --- helpers --------------------------------------------------------------------

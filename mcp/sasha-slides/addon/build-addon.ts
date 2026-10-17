@@ -232,6 +232,19 @@ async function bundleSurface({
     target: "es2020",
     jsx: "automatic",
     jsxImportSource: "react",
+    // PREACT, NOT REACT, IN EVERY SHIPPED PAGE (review S-1). The sources keep importing "react" and
+    // are type-checked against @types/react; only the bundle swaps the runtime. Measured: react-dom
+    // was ~209 KB of each page, preact/compat is ~10 KB, so every surface gains ~200 KB of headroom
+    // under SURFACE_BUDGET_BYTES. package.json maps react/react-dom to @preact/compat as well, so
+    // the node tests exercise the same runtime the pages ship -- never test React while shipping
+    // Preact. The engine keeps React for its own web build; none of its React modules is bundled
+    // here (only its contracts and theme constants).
+    alias: {
+      react: "preact/compat",
+      "react-dom": "preact/compat",
+      "react-dom/client": "preact/compat/client",
+      "react/jsx-runtime": "preact/jsx-runtime",
+    },
     minify: true,
     sourcemap: false,
     legalComments: "none",

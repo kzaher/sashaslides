@@ -17,6 +17,7 @@ import {
   formatMarkup,
   tagNameOf,
 } from "./element-inspector.tsx";
+import { attributeOf, openingTags, tagsWithClass } from "./test-support.ts";
 
 /** The props a test does not care about, so each test states only what it is about. */
 function render(props: Partial<ElementInspectorProps>): string {
@@ -60,14 +61,15 @@ test("the textarea is monospace and holds the PRETTY-PRINTED markup, not the raw
 
 test("Apply and Revert are disabled while the text is unchanged", () => {
   const markup = render({ html: "<p>Hi</p>", selector: "p" });
-  assert.match(markup, /class="sasha-ei-apply" disabled=""/);
-  assert.match(markup, /class="sasha-ei-revert" disabled=""/);
+  assert.equal(attributeOf(tagsWithClass(markup, "sasha-ei-apply")[0] ?? "", "disabled"), "");
+  assert.equal(attributeOf(tagsWithClass(markup, "sasha-ei-revert")[0] ?? "", "disabled"), "");
 });
 
 test("`disabled` disables the field and both buttons, so nothing can be committed mid-flight", () => {
   const markup = render({ html: "<p>Hi</p>", selector: "p", disabled: true });
-  assert.match(markup, /<textarea[^>]*disabled=""/);
-  assert.equal(countOf({ haystack: markup, needle: 'disabled=""' }), 3);
+  const tags = openingTags(markup);
+  assert.equal(attributeOf(tags.find((tag) => tag.startsWith("<textarea")) ?? "", "disabled"), "");
+  assert.equal(tags.filter((tag) => attributeOf(tag, "disabled") === "").length, 3);
 });
 
 test("UNTRUSTED MARKUP NEVER REACHES AN EXECUTABLE POSITION", () => {
@@ -75,7 +77,7 @@ test("UNTRUSTED MARKUP NEVER REACHES AN EXECUTABLE POSITION", () => {
   const markup = render({ html: hostile, selector: "script" });
   // Not one `<script` survives: the string is a textarea value and text children, both escaped.
   assert.ok(!markup.includes("<script"), markup);
-  assert.ok(markup.includes("&lt;script&gt;alert(1)&lt;/script&gt;"), markup);
+  assert.ok(markup.includes(escapeMarkup(hostile)), markup);
 });
 
 test("an event-handler attribute and a javascript: url come out as text too", () => {
@@ -202,15 +204,13 @@ test("a draft typed against another selection is discarded, not carried over", (
 test("two siblings with identical markup are still different selections", () => {
   const first = render({ html: "<li>Same</li>", selector: "ul > li:nth-of-type(1)" });
   const second = render({ html: "<li>Same</li>", selector: "ul > li:nth-of-type(2)" });
-  assert.ok(first.includes('title="ul &gt; li:nth-of-type(1)"'), first);
-  assert.ok(second.includes('title="ul &gt; li:nth-of-type(2)"'), second);
+  assert.ok(first.includes(`title="${escapeMarkup("ul > li:nth-of-type(1)")}"`), first);
+  assert.ok(second.includes(`title="${escapeMarkup("ul > li:nth-of-type(2)")}"`), second);
 });
 
 /** What React's escaping does to a string it renders as text, so an expectation can name it. */
+// Preact's server escaping (what the tests render with, and what ships): `&`, `<` and `"`. A `>`
+// stays literal, which is harmless -- with every `<` escaped, nothing can open a tag.
 function escapeMarkup(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function countOf(options: Readonly<{ haystack: string; needle: string }>): number {
-  return options.haystack.split(options.needle).length - 1;
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 }

@@ -566,6 +566,12 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
     // selects that paragraph, and "I can't select anything and move it" is a complaint no
     // attribute assertion can catch. `slide-editor.ts` `attach` refuses with a reason when it
     // cannot reach in, so a failure here is either that refusal or a dead pointer handler.
+    // WAIT FOR THE ATTACH ITSELF, not just for a frame that could be attached to. The editor attaches
+    // in an effect (editor-slot.tsx `EditorAttachment`), and Preact schedules effects after the next
+    // paint. Measured 2026-10-17 under Preact: 1 run in 4 logged the attach but never the click's
+    // pointerdown, i.e. the click below landed before the listener existed. `attach` mounts the
+    // chrome root into this document (slide-editor.ts `mountChrome`), which is the observable proof.
+    const attached = await pollFor({ client, expression: "!!document.querySelector('.sasha-ed-root')" });
     const attachWarning = await evaluateString({
       client,
       expression: "JSON.stringify(window.__SASHA_EDITOR_WARNINGS__ || [])",
@@ -573,7 +579,7 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
     check({
       failures,
       what: "the visual editor attached to the open candidate without refusing",
-      ok: !/cannot attach/.test(attachWarning),
+      ok: attached && !/cannot attach/.test(attachWarning),
       detail: attachWarning.slice(0, 220),
     });
 
