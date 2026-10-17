@@ -31,7 +31,7 @@ import { COLLABORATION_LIMITS, type AgentRevertOutcome, type CloseReason } from 
 import { roleAllows, type DeckMember, type DeckPermission, type DeckRole, type LinkSharing } from "../engine/src/contracts/deck-access.ts";
 import type { DeckDetailsBody, DeckSummary, InviteBody } from "../engine/src/contracts/deck-api.ts";
 import type { AssetMediaType } from "../engine/src/contracts/document.ts";
-import type { AssetId, CommandId, DeckId, PersonId } from "../engine/src/contracts/ids.ts";
+import type { AssetId, CommandId, DeckId } from "../engine/src/contracts/ids.ts";
 import type { RoomConnection, RoomConnectionPort } from "../engine/src/server/index.ts";
 import type { AccountId } from "../http/account-vault";
 import type { DeckAccounts, DeckPeople } from "./deck-accounts";
@@ -441,11 +441,6 @@ export async function membersOf(options: Readonly<{ record: DeckRecord; people: 
   return members;
 }
 
-/** `PersonId` of an account, re-exported for routes that address members by person. */
-export function memberPersonId(accountId: AccountId): PersonId {
-  return personIdFor({ accountId });
-}
-
 /** A room that did not load, as the refusal an operation answers. */
 function roomRefusal(refusal: RoomRefusal): Refusal {
   switch (refusal.kind) {
@@ -465,22 +460,3 @@ const DAY_MILLISECONDS = 24 * 60 * 60 * 1000;
 /** SPEC.md 21.10: 512 assets per deck. */
 const ASSETS_PER_DECK = 512;
 
-/** Exhaustiveness helper for callers that switch over `Refusal`. */
-export function refusalStatus(refusal: Refusal): number {
-  switch (refusal.kind) {
-    case "notFound":
-      return 404;
-    case "notPermitted":
-      return 403;
-    case "limitReached":
-      return 409;
-    case "invalidRequest":
-      return 400;
-    case "tooLarge":
-      return 413;
-    case "deckUnreadable":
-      return 503;
-    default:
-      return assertNever(refusal);
-  }
-}

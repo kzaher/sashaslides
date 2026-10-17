@@ -17,7 +17,8 @@
  *   npx tsx mcp/sasha-slides/e2e/google-slides-round-trip.ts --measure-reuse
  */
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssetId } from "../engine/src/contracts/ids.ts";
 import { importIntoDeck } from "../google-slides/import-into-deck.ts";
@@ -28,7 +29,8 @@ import { IDENTITY_TRANSFORM, parsePresentation, type SlidesPageElement, type Sli
 import { createTestDeckService, testCaller } from "../google-slides/testing-deck-service.ts";
 import { developmentGrant } from "./google-slides-development-grant.ts";
 
-const SHOTS = "/home/node/.claude/jobs/940e4929/tmp/engine-m2/google-slides";
+const SHOTS = join(tmpdir(), "sasha-slides-e2e");
+mkdirSync(SHOTS, { recursive: true });
 
 async function main(): Promise<void> {
   const [argument] = process.argv.slice(2);

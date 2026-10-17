@@ -7,11 +7,14 @@
  *   npx tsx mcp/sasha-slides/e2e/google-slides-fixture-editor.ts <presentationId> <step>
  *   steps: slide-numbers | word-art | look
  */
+import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CdpKeyEventParams } from "../../../types/cdp-types.ts";
 import { openTab, pointerPressExpression } from "./google-slides-browser.ts";
 
-const SHOTS = "/home/node/.claude/jobs/940e4929/tmp/engine-m2/google-slides";
+const SHOTS = join(tmpdir(), "sasha-slides-e2e");
+mkdirSync(SHOTS, { recursive: true });
 
 async function main(): Promise<void> {
   const [presentationId, step] = process.argv.slice(2);

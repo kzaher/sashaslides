@@ -14,7 +14,7 @@
 import type { ElementPatch } from "../engine/src/contracts/commands.ts";
 import type { ElementSnapshot, ImageCrop } from "../engine/src/contracts/document.ts";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
-import { DEFAULT_TEXT_BOX_STYLE, themeColour, type Border, type BoxStyle, type Shadow, type Stroke, type TextBoxStyle } from "../engine/src/contracts/style.ts";
+import { themeColour, type Border, type BoxStyle, type Shadow, type Stroke } from "../engine/src/contracts/style.ts";
 import type { AssistantStylePatch, BorderPatch } from "./assistant-edit-request.ts";
 
 /** What a border, a line or a shadow starts from when the element had none (the editor's own defaults). */
@@ -89,11 +89,6 @@ export function applyElementPatch(options: Readonly<{ element: ElementSnapshot; 
     default:
       return assertNever(element);
   }
-}
-
-/** A complete text box style from a partial one, over `base`. */
-export function completeTextBox(options: Readonly<{ base: TextBoxStyle; patch: Partial<TextBoxStyle> | undefined }>): TextBoxStyle {
-  return { ...DEFAULT_TEXT_BOX_STYLE, ...options.base, ...(options.patch ?? {}) };
 }
 
 function boxPatch(options: Readonly<{ box: BoxStyle; patch: AssistantStylePatch }>): ElementPatch {

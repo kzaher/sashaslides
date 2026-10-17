@@ -1,6 +1,6 @@
 // The connector image's build context: exactly the files `server.ts` reaches at runtime,
 // one repo-relative path per line on stdout. `deploy/publish.sh` tars this list, so the
-// server never receives the add-on, the extension, the e2e drivers or any secret.
+// server never receives the add-on, the e2e drivers or any secret.
 //
 //   npx tsx mcp/sasha-slides/deploy/context-files.ts      (from the repo root)
 //

@@ -28,7 +28,6 @@ import type { AccountVault } from "../http/account-vault";
 import { randomAccountId, withSealedGoogleIdentities } from "../http/accounts";
 import { inMemoryAuthStore, type AuthStore } from "../http/oauth-store";
 import { legacyInvitationEmailHash, newDeckId } from "./deck-identity";
-import { refusalStatus } from "./deck-manager";
 import { indexEntryOf } from "./deck-records";
 import { createDeckServer, type DeckServer } from "./deck-stack";
 import { openFileDeckStorage, type DeckStorage } from "./deck-storage";
@@ -243,7 +242,6 @@ describe("deck storage", () => {
       assert.deepEqual(connected, { kind: "refused", reason: "deckUnreadable" });
       const reverted = await second.manager.revertAgentSession({ accountId: owner.accountId, deckId: deck.deckId, agentSessionId: "as_000000000000000000000000" });
       assert.equal(reverted.kind, "deckUnreadable");
-      assert.equal(refusalStatus({ kind: "deckUnreadable", message: "" }), 503);
 
       const loopback = await startLoopbackServer({ portal: null, decks: second });
       try {

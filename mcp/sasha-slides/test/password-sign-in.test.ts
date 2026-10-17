@@ -13,7 +13,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, describe, test } from "node:test";
-import { inMemoryAccountDirectory, storeAccountDirectory, type AccountDirectory } from "../http/account-directory";
+import { storeAccountDirectory, type AccountDirectory } from "../http/account-directory";
 import { createAccountEraser } from "../http/account-eraser";
 import { createAccountVault, inMemoryDataKeyStore } from "../http/account-keys";
 import { createAccountPortal } from "../http/account-portal";
@@ -63,7 +63,12 @@ async function startPortal(
   const gmail = createFakeGmail({ clientId: "mail-client", clientSecret: "mail-secret", refreshToken: "mail-refresh", accessTokenLifetimeSeconds: 3599 });
   const network = fakeFetch({ routes: [gmail.route] });
   const randomToken = (): string => randomBytes(32).toString("base64url");
-  const directory = inMemoryAccountDirectory({ randomToken, now });
+  const directory = storeAccountDirectory({
+    store: inMemoryAuthStore(),
+    vault: createAccountVault({ keyStore: inMemoryDataKeyStore(), masterKey: randomBytes(32) }),
+    now,
+    newAccountId: randomToken,
+  });
   const credentials = inMemoryRecordStore<PasswordCredential>();
   const background: Promise<void>[] = [];
   const warnings: string[] = [];

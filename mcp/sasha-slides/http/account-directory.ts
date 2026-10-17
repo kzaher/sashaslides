@@ -5,15 +5,14 @@
  * It is a port so the portal does not learn how accounts are stored. The production adapter
  * (`storeAccountDirectory`) sits over `oauth-store.ts`'s `accountLinks` (keyed
  * `<provider>:<subject>`) and `accounts` collections, sealing the email with the account's
- * vault key; `inMemoryAccountDirectory` is the reference behaviour, and the tests hold both
- * to the same rules.
+ * vault key.
  *
  * A Google sign-in records its subject as the account's `googleSubject`, the same link the
  * brokered Slides flow (`accounts.ts`) writes: Google's `sub` is one per Google account, so
  * signing in here and connecting Slides there land in one account, and erasing it reaches
  * the Google grant.
  *
- * Two rules every implementation must keep:
+ * Two rules the directory keeps:
  *
  *  - **The key is provider + subject, never the email.** Two sign-ins that report the same
  *    address are two accounts unless something stronger links them. Merging on email would
@@ -139,90 +138,6 @@ export function emailHint(email: string): string {
   const local = at < 0 ? email : email.slice(0, at);
   const first = Array.from(local)[0] ?? "";
   return at < 0 ? `${first}•••` : `${first}•••${email.slice(at)}`;
-}
-
-/** Tests and a single-process deployment without a store: lost on restart. */
-export function inMemoryAccountDirectory(options: Readonly<{ randomToken: () => string; now: () => Date }>): AccountDirectory {
-  const { now } = options;
-  const accountByLink = new Map<string, AccountId>();
-  /** Each account's links, keyed by link key, in the order they were added. */
-  const linksByAccount = new Map<AccountId, Map<string, LinkedSignIn>>();
-  const passkeys = new Map<string, PasskeyCredential>();
-
-  const addLink = (link: Readonly<{ accountId: AccountId; provider: string; subject: string; email: string | null }>): void => {
-    const linkKey = `${link.provider}:${link.subject}`;
-    accountByLink.set(linkKey, link.accountId);
-    const links = linksByAccount.get(link.accountId) ?? new Map<string, LinkedSignIn>();
-    links.set(linkKey, {
-      linkId: linkIdOf(linkKey),
-      provider: link.provider,
-      emailHint: link.email === null ? null : emailHint(link.email),
-      linkedAtMs: now().getTime(),
-    });
-    linksByAccount.set(link.accountId, links);
-  };
-
-  const linkPasskey = (accountId: AccountId, passkey: NewPasskey): PasskeyLinkOutcome => {
-    const linkKey = `${PASSKEY_PROVIDER}:${passkey.credentialId}`;
-    if (accountByLink.has(linkKey)) return { kind: "already-registered" };
-    addLink({ accountId, provider: PASSKEY_PROVIDER, subject: passkey.credentialId, email: null });
-    passkeys.set(passkey.credentialId, { ...passkey, accountId });
-    return { kind: "linked", accountId };
-  };
-
-  return {
-    findOrCreateByIdentity: ({ provider, subject, email }) => {
-      const linkKey = `${provider}:${subject}`;
-      const existing = accountByLink.get(linkKey);
-      if (existing !== undefined) return Promise.resolve(existing);
-      const accountId = options.randomToken();
-      addLink({ accountId, provider, subject, email });
-      return Promise.resolve(accountId);
-    },
-    linkIdentity: ({ accountId, provider, subject, email }) => {
-      const links = linksByAccount.get(accountId);
-      if (links === undefined) return Promise.resolve({ kind: "account-missing" });
-      const owner = accountByLink.get(`${provider}:${subject}`);
-      if (owner !== undefined) return Promise.resolve({ kind: owner === accountId ? "already-linked-here" : "linked-to-another-account" });
-      if (provider !== PASSKEY_PROVIDER && [...links.values()].some((link) => link.provider === provider)) {
-        return Promise.resolve({ kind: "provider-already-linked" });
-      }
-      addLink({ accountId, provider, subject, email });
-      return Promise.resolve({ kind: "linked" });
-    },
-    unlink: ({ accountId, linkId }) => {
-      const links = linksByAccount.get(accountId);
-      if (links === undefined) return Promise.resolve({ kind: "account-missing" });
-      const found = [...links.entries()].find(([, link]) => link.linkId === linkId);
-      if (found === undefined) return Promise.resolve({ kind: "not-found" });
-      if (links.size <= 1) return Promise.resolve({ kind: "last-method" });
-      const [linkKey, link] = found;
-      links.delete(linkKey);
-      accountByLink.delete(linkKey);
-      if (link.provider === PASSKEY_PROVIDER) passkeys.delete(linkKey.slice(PASSKEY_PROVIDER.length + 1));
-      return Promise.resolve({ kind: "unlinked", provider: link.provider });
-    },
-    describe: ({ accountId }) => {
-      const links = linksByAccount.get(accountId);
-      return Promise.resolve(links === undefined ? null : { links: [...links.values()] });
-    },
-    createAccountWithPasskey: ({ passkey }) => {
-      if (passkeys.has(passkey.credentialId)) return Promise.resolve({ kind: "already-registered" });
-      return Promise.resolve(linkPasskey(options.randomToken(), passkey));
-    },
-    addPasskey: ({ accountId, passkey }) => {
-      if (!linksByAccount.has(accountId)) return Promise.resolve({ kind: "account-missing" });
-      return Promise.resolve(linkPasskey(accountId, passkey));
-    },
-    findPasskey: ({ credentialId }) => Promise.resolve(passkeys.get(credentialId) ?? null),
-    recordPasskeyUse: ({ credentialId, signCount }) => {
-      const existing = passkeys.get(credentialId);
-      if (existing !== undefined) passkeys.set(credentialId, { ...existing, signCount });
-      return Promise.resolve();
-    },
-    passkeyIds: ({ accountId }) =>
-      Promise.resolve([...passkeys.values()].filter((passkey) => passkey.accountId === accountId).map((passkey) => passkey.credentialId)),
-  };
 }
 
 /**

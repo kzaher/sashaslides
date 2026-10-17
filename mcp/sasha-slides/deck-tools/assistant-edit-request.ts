@@ -62,8 +62,6 @@ export type AssistantEditRequest =
   | Readonly<{ kind: "groupElements"; id?: ElementId | null; slideId: SlideId; elementIds: readonly ElementId[] }>
   | Readonly<{ kind: "raw"; commands: readonly DocumentCommand[] }>;
 
-export type AssistantEditRequestKind = AssistantEditRequest["kind"];
-
 /**
  * A style as a model states it: every field optional, and the grouped values (border, stroke,
  * shadow, text box, crop) partial too. `mergeStylePatch` (style-merge.ts) completes it against

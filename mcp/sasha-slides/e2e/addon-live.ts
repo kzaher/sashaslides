@@ -15,7 +15,9 @@
 import CDPraw from "chrome-remote-interface";
 import type { CdpClient, CdpModule } from "../../../types/cdp-types.ts";
 import { evaluateText, realClick, bringToFront } from "./cdp-page.ts";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 // chrome-remote-interface ships no .d.ts; CdpModule is the repo's shared boundary type.
 const CDP = CDPraw as CdpModule;
@@ -27,7 +29,7 @@ const option = (name: string): string | undefined => {
 };
 const DECK = option("--deck") ?? "1zsd1n66C18A4dAzSsxmmD_H1k8KLo9z3HUJu01zHF8U";
 const PORT = Number(option("--port") ?? 9223);
-const SHOT = option("--out") ?? "/tmp/claude-1000/-workspaces-sashaslides/d3311559-3f2a-424e-b301-c486b6eb8ec6/scratchpad/addon-picker.png";
+const SHOT = option("--out") ?? join(tmpdir(), "sasha-slides-e2e", "addon-picker.png");
 /**
  * The add-on menu holds exactly ONE item, and the UI redesign renamed it: "Open the picker"
  * became "Ask Sasha", because there is no longer a separate picker surface to open - the
@@ -160,6 +162,7 @@ async function main(): Promise<void> {
   }
 
   const shot = await c.Page.captureScreenshot({ format: "png" });
+  mkdirSync(dirname(SHOT), { recursive: true });
   writeFileSync(SHOT, Buffer.from(shot.data, "base64"));
   console.log(`      screenshot: ${SHOT}`);
   await c.close();

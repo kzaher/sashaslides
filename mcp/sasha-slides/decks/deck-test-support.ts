@@ -110,13 +110,6 @@ export function send(
   });
 }
 
-/** The `name=value` part of a `Set-Cookie` header, ready for a `Cookie` header. */
-export function cookiePair(headers: IncomingHttpHeaders, name: string): string | null {
-  const setCookies = headers["set-cookie"] ?? [];
-  const found = setCookies.find((cookie) => cookie.startsWith(`${name}=`));
-  return found === undefined ? null : (found.split(";")[0] ?? null);
-}
-
 /** The full `Set-Cookie` line for `name`, attributes included. */
 export function setCookieLine(headers: IncomingHttpHeaders, name: string): string | null {
   return (headers["set-cookie"] ?? []).find((cookie) => cookie.startsWith(`${name}=`)) ?? null;

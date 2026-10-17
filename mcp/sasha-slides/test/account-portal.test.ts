@@ -9,13 +9,16 @@
  * linking and removing sign-in methods, erase and sign-out, then escaping.
  */
 import { strict as assert } from "node:assert";
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, describe, test } from "node:test";
-import { inMemoryAccountDirectory, type AccountDirectory } from "../http/account-directory";
+import { storeAccountDirectory, type AccountDirectory } from "../http/account-directory";
+import { createAccountVault, inMemoryDataKeyStore } from "../http/account-keys";
 import { createAccountPortal } from "../http/account-portal";
 import type { AccountId, EraseReport } from "../http/account-vault";
 import { createIdentityProvider, type IdentityProviderSpec } from "../http/identity-providers";
+import { inMemoryAuthStore } from "../http/oauth-store";
 import {
   createFakeApple,
   createFakeGitHub,
@@ -128,7 +131,12 @@ async function startPortal(
   const network = fakeFetch({ routes: [okta.route, google.route, github.route, apple.route] });
   let counter = 0;
   const randomToken = (): string => `random-${String((counter += 1))}-${"x".repeat(32)}`;
-  const directory = inMemoryAccountDirectory({ randomToken, now });
+  const directory = storeAccountDirectory({
+    store: inMemoryAuthStore(),
+    vault: createAccountVault({ keyStore: inMemoryDataKeyStore(), masterKey: randomBytes(32) }),
+    now,
+    newAccountId: randomToken,
+  });
   const eraseCalls: AccountId[] = [];
   const warnings: string[] = [];
   const portal = createAccountPortal({

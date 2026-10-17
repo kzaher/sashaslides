@@ -23,8 +23,6 @@ import { googleSubjectOf } from "../http/authorization-server";
 import { describeWatchOutcome, MAX_REPLY_CHARACTERS, type CommentBot, type ReplyOutcome } from "./comment-bot";
 import type { CommentTask, CommentWatch } from "./comment-records";
 
-export const COMMENT_TOOL_NAMES = ["watch_comments", "stop_watching", "list_watches", "comment_tasks", "reply_comment_task"] as const;
-
 /** One comment task as the session sees it. */
 export type CommentTaskPayload = Readonly<{
   taskId: string;

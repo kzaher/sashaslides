@@ -878,6 +878,19 @@ idle over standard input and **5 minutes** over the web transport, so a connecte
 comment well inside five minutes. Past it, the overwhelmingly likely cause is that nothing is
 attached.
 
+## Why a parked tool call, not a server push
+
+Measured with two probes now only in git history (`e2e/reverse-channel-probe.ts`,
+`e2e/elicitation-probe-server.ts`): on SDK 1.32.1 a server can send `sampling/createMessage` or
+`elicitation/create` to a client only when that client declared the capability in `initialize`
+(otherwise `-32601 Method not found`), and over the stateless HTTP mode the only deliverable shape
+is a request nested inside a tool call (`extra.sendRequest`), whose reply rides that call's own
+stream; this server offers no resource subscriptions. Claude Code 2.1.285 (2026-10-04) declared
+`elicitation` and `roots` but not `sampling`, so no server can put a question to its model, while
+a tool call it made held for 150 s and returned normally. Nothing reaches the agent unless it is
+already inside one of our tool calls, which is why Sasha waits in `await_feedback` and
+`await_pick` instead of being pushed to.
+
 ## When nothing is listening, say what to do
 
 Print something the user can act on, not a diagnosis. It must name the proposal, and it must be

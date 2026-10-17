@@ -13,7 +13,8 @@
  * The connector is the loopback stand-in (google-slides-addon-server.ts) behind a cloudflared
  * tunnel, and the add-on was built with SASHA_EDITOR_ORIGIN set to that tunnel.
  */
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import CDPraw from "chrome-remote-interface";
 import type { CdpModule } from "../../../types/cdp-types.ts";
@@ -25,7 +26,8 @@ const DevTools = CDPraw as CdpModule;
 
 const SCRIPT_ID = "1GqibbX21wU_8SMuFAC8nWStv6Y8wfrBNfiK1nQnbiawQXuABRNgr9NFo";
 const DEVELOPMENT_DECK = "1zsd1n66C18A4dAzSsxmmD_H1k8KLo9z3HUJu01zHF8U";
-const SHOTS = "/home/node/.claude/jobs/940e4929/tmp/engine-m2/google-slides";
+const SHOTS = join(tmpdir(), "sasha-slides-e2e");
+mkdirSync(SHOTS, { recursive: true });
 
 async function main(): Promise<void> {
   const [step] = process.argv.slice(2);

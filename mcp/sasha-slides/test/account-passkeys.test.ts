@@ -11,12 +11,15 @@
  * replayed challenge, a challenge carried to another browser, and the request gates.
  */
 import { strict as assert } from "node:assert";
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, describe, test } from "node:test";
-import { inMemoryAccountDirectory, type AccountDirectory } from "../http/account-directory";
+import { storeAccountDirectory, type AccountDirectory } from "../http/account-directory";
+import { createAccountVault, inMemoryDataKeyStore } from "../http/account-keys";
 import { createAccountPortal } from "../http/account-portal";
 import { createIdentityProvider } from "../http/identity-providers";
+import { inMemoryAuthStore } from "../http/oauth-store";
 import { PASSKEY_SCRIPT } from "../http/passkey-script.generated";
 import { createFakeGitHub, fakeFetch, type FakeGitHub } from "./fake-identity-providers";
 import { createSoftwareAuthenticator, type CeremonyTamper, type SoftwareAuthenticator } from "./software-authenticator";
@@ -53,7 +56,12 @@ async function startPortal(): Promise<Portal> {
   const network = fakeFetch({ routes: [github.route] });
   let counter = 0;
   const randomToken = (): string => `random-${String((counter += 1))}-${"x".repeat(32)}`;
-  const directory = inMemoryAccountDirectory({ randomToken, now });
+  const directory = storeAccountDirectory({
+    store: inMemoryAuthStore(),
+    vault: createAccountVault({ keyStore: inMemoryDataKeyStore(), masterKey: randomBytes(32) }),
+    now,
+    newAccountId: randomToken,
+  });
   const warnings: string[] = [];
   const portal = createAccountPortal({
     publicUrl: PUBLIC_URL,

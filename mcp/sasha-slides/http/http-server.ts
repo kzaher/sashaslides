@@ -41,29 +41,29 @@ import type { DeckRouter } from "../decks/deck-router";
 import type { DeckSockets } from "../decks/deck-socket";
 import type { CommentAccessPage } from "../comment-bot/comment-access-page";
 
-export type RequestListener = (request: IncomingMessage, response: ServerResponse) => void;
+type RequestListener = (request: IncomingMessage, response: ServerResponse) => void;
 
-export function createSashaSlidesHttpServer(
-  options: Readonly<{
-    authorizationServer: AuthorizationServer;
-    createMcpServer: () => McpServer;
-    /** Wraps the per-request transport; the identity function in a plain deployment. */
-    instrumentTransport: (inner: Transport) => Transport;
-    warn: (message: string) => void;
-    /** Absent: no `/account` routes. Present: it answers every path under `/account`. */
-    accountPortal?: AccountPortal;
-    /** Absent: no comment bot. Present: Drive's push notifications at `/hooks/drive` go to it. */
-    driveHook?: DriveHook;
-    /**
-     * Absent: no `/comments/allow`. Present: the comment bot's per-deck picker page
-     * (`comment-bot/comment-access-page.ts`), which also answers the shared Google callback for
-     * the states it issued.
-     */
-    commentAccess?: CommentAccessPage;
-    /** Absent: no decks. Present: the deck pages, `/deck-api/*` and the deck WebSocket upgrade. */
-    decks?: DeckEntryPoints;
-  }>,
-): Server {
+type HttpServerOptions = Readonly<{
+  authorizationServer: AuthorizationServer;
+  createMcpServer: () => McpServer;
+  /** Wraps the per-request transport; the identity function in a plain deployment. */
+  instrumentTransport: (inner: Transport) => Transport;
+  warn: (message: string) => void;
+  /** Absent: no `/account` routes. Present: it answers every path under `/account`. */
+  accountPortal?: AccountPortal;
+  /** Absent: no comment bot. Present: Drive's push notifications at `/hooks/drive` go to it. */
+  driveHook?: DriveHook;
+  /**
+   * Absent: no `/comments/allow`. Present: the comment bot's per-deck picker page
+   * (`comment-bot/comment-access-page.ts`), which also answers the shared Google callback for
+   * the states it issued.
+   */
+  commentAccess?: CommentAccessPage;
+  /** Absent: no decks. Present: the deck pages, `/deck-api/*` and the deck WebSocket upgrade. */
+  decks?: DeckEntryPoints;
+}>;
+
+export function createSashaSlidesHttpServer(options: HttpServerOptions): Server {
   const server = createServer(sashaSlidesRequestListener(options));
   const { decks, warn } = options;
   // The deck WebSocket shares the connector's port (SPEC.md 21.1); nothing else here upgrades.
@@ -91,27 +91,7 @@ export type DeckEntryPoints = Readonly<{
   sockets: Pick<DeckSockets, "handleUpgrade">;
 }>;
 
-export function sashaSlidesRequestListener(
-  options: Readonly<{
-    authorizationServer: AuthorizationServer;
-    createMcpServer: () => McpServer;
-    /** Wraps the per-request transport; the identity function in a plain deployment. */
-    instrumentTransport: (inner: Transport) => Transport;
-    warn: (message: string) => void;
-    /** Absent: no `/account` routes. Present: it answers every path under `/account`. */
-    accountPortal?: AccountPortal;
-    /** Absent: no comment bot. Present: Drive's push notifications at `/hooks/drive` go to it. */
-    driveHook?: DriveHook;
-    /**
-     * Absent: no `/comments/allow`. Present: the comment bot's per-deck picker page
-     * (`comment-bot/comment-access-page.ts`), which also answers the shared Google callback for
-     * the states it issued.
-     */
-    commentAccess?: CommentAccessPage;
-    /** Absent: no decks. Present: the deck pages and `/deck-api/*`. */
-    decks?: DeckEntryPoints;
-  }>,
-): RequestListener {
+function sashaSlidesRequestListener(options: HttpServerOptions): RequestListener {
   const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal, driveHook, commentAccess, decks } = options;
   const { endpoints } = authorizationServer;
 
@@ -209,7 +189,7 @@ export function sashaSlidesRequestListener(
   };
 }
 
-export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 
 /**
  * Receives one Drive push notification: everything it carries is in the `X-Goog-*` headers
@@ -220,7 +200,7 @@ export type DriveHook = (options: Readonly<{ headers: IncomingMessage["headers"]
 export const DRIVE_HOOK_PATH = "/hooks/drive";
 
 /** RFC 6749 section 5.2 / RFC 6750: which status an error code is reported with. */
-export function statusForOAuthError(error: OAuthErrorCode): number {
+function statusForOAuthError(error: OAuthErrorCode): number {
   switch (error) {
     case "invalid_client":
       return 401;

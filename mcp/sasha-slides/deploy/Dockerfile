@@ -20,8 +20,7 @@ COPY .claude/skills/sasha-slides/SKILL.md .claude/skills/sasha-slides/SKILL.md
 COPY mcp/sasha-slides mcp/sasha-slides
 
 # Fail the build, not the first request, when the context is short of a file: --help
-# loads the whole import graph. (Not --selftest: that gates protocol behaviour, which the
-# unit tests own, and a red check there must not block shipping a fix.)
+# loads the whole import graph.
 RUN node_modules/.bin/tsx mcp/sasha-slides/server.ts --help > /dev/null
 
 # A dedicated unprivileged user. Not the image's `node` (uid 1000): on the server uid 1000

@@ -5,7 +5,6 @@
  *
  *   npx tsx mcp/sasha-slides/server.ts --http --public-url https://slides.example.com
  *   npx tsx mcp/sasha-slides/server.ts --stdio      # dev only: one developer's token
- *   npx tsx mcp/sasha-slides/server.ts --selftest   # exercise every tool against a fake Drive
  *
  * **The mode is explicit, never inferred.** `--http` is the real deployment: a remote
  * Streamable HTTP server that brokers each connecting user through Google and acts as
@@ -17,8 +16,7 @@
  *
  * Composition root. Everything effectful — the Drive channel, the clock, the randomness, the
  * filesystem probe, the warning sink — is constructed here and injected into `proposal.ts`,
- * which is why `--selftest` and the unit tests can run the entire protocol with no
- * credentials. Tool payloads are shaped by the exported pure `*Payload` functions below, so
+ * which is why the unit tests can run the entire protocol with no credentials. Tool payloads are shaped by the exported pure `*Payload` functions below, so
  * the wire contract is testable without a transport.
  *
  * The only difference between the two modes below `createSashaSlidesServer` is *which*
@@ -27,8 +25,6 @@
  *
  * stdout belongs to the stdio MCP transport: diagnostics go to stderr, always.
  */
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
@@ -39,8 +35,7 @@ import { appendFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { IncomingHttpHeaders, Server as ListeningServer } from "node:http";
 import { z } from "zod";
-import { appendClientHandshake, handshakeRecordingTransport } from "./client-handshake.ts";
-import { formatFrameLine } from "./jsonrpc-recording-transport.ts";
+import { formatFrameLine, RecordingTransport } from "./jsonrpc-recording-transport.ts";
 import { googleDriveChannel, type DriveChannel } from "./drive-channel";
 import {
   DEFAULT_RESOLVE_NOTE,
@@ -98,7 +93,7 @@ import {
   type WorkflowInstructions,
   type WorkflowInstructionsSource,
 } from "./workflow-instructions.ts";
-import { registerWorkflowPrompts, WORKFLOW_PROMPT_NAMES } from "./workflow-prompts.ts";
+import { registerWorkflowPrompts } from "./workflow-prompts.ts";
 import {
   awaitPick,
   clearSlides,
@@ -132,10 +127,6 @@ import {
   type ReadSessionEventsOutcome,
   type SessionEventRecord,
 } from "./session-log";
-// The self-test drives the real tool surface against the same in-memory channel the unit
-// tests use; one fake, one source of truth for "what Drive does".
-import { createFakeDrive } from "./test/fake-drive";
-import { createFakeComments } from "./test/fake-comments";
 
 export const SERVER_NAME = "sasha-slides";
 export const SERVER_VERSION = "0.1.0";
@@ -356,7 +347,7 @@ export function createSashaSlidesServer(
         presentationId: z
           .string()
           .optional()
-          .describe("Target deck id, when known, so the extension can insert into it."),
+          .describe("Target deck id, when known, so the add-on can insert into it."),
         merge: z
           .object({
             presentationId: z.string().min(1).describe("The deck holding the slide."),
@@ -393,7 +384,7 @@ export function createSashaSlidesServer(
       description:
         "Block until the user picks one of a proposal's slides in Google Slides (or dismisses " +
         "the picker), polling Drive with backoff. Returns the 1-based index, any conversion " +
-        "anomalies the user filed, and the object ids the extension inserted. A timeout is " +
+        "anomalies the user filed, and the object ids the add-on inserted. A timeout is " +
         "returned as status 'timeout' with picked = null, never an exception.",
       inputSchema: {
         proposalId: z.string().min(1).describe("The proposalId returned by propose_slides."),
@@ -433,10 +424,10 @@ export function createSashaSlidesServer(
     {
       title: "Fetch rendered slide previews",
       description:
-        "Download any rendered previews the Google Slides extension has published for a " +
+        "Download any rendered previews the Google Slides add-on has published for a " +
         "proposal, and return local file PATHS - never image data - so nothing enters this " +
         "conversation unless you choose to read a path. Rendering is client-side in the " +
-        "extension; if it has published nothing, this reports status 'unavailable' rather " +
+        "add-on; if it has published nothing, this reports status 'unavailable' rather " +
         "than inventing an image.",
       inputSchema: {
         proposalId: z.string().min(1).describe("The proposalId returned by propose_slides."),
@@ -987,7 +978,7 @@ export function awaitPickPayload(outcome: PickOutcome): ToolOutcome<AwaitPickPay
           anomalies: [],
           insertedObjectIds: [],
           decidedAt: null,
-          note: `the extension wrote a PICK with protocolVersion ${String(outcome.version)}; this server only reads version 1 and will not guess at it`,
+          note: `the add-on wrote a PICK with protocolVersion ${String(outcome.version)}; this server only reads version 1 and will not guess at it`,
         },
       };
     case "unknown-proposal":
@@ -1682,7 +1673,6 @@ export function brokeredEnvironmentResolver(
 export type ServerMode =
   | Readonly<{
       kind: "stdio";
-      handshakeLogPath: string | null;
       frameLogPath: string | null;
       /** Null looks for the skill markdown next to the server; a path overrides it. */
       skillFilePath: string | null;
@@ -1708,8 +1698,6 @@ export type ServerMode =
       mailSenderPath: string | null;
       /** Comma-separated proxy addresses or subnets whose X-Real-IP is believed; null is loopback alone. */
       trustedProxies: string | null;
-      /** Null disables handshake recording; a path appends one JSON line per `initialize`. */
-      handshakeLogPath: string | null;
       /** Null disables frame recording; a path appends one JSON line per JSON-RPC frame. */
       frameLogPath: string | null;
       /** Null looks for the skill markdown next to the server; a path overrides it. */
@@ -1721,7 +1709,6 @@ export type ServerMode =
       /** The built web application (`engine/dist/web`); null is the one beside this server. */
       webBuildDirectory: string | null;
     }>
-  | Readonly<{ kind: "selftest" }>
   | Readonly<{ kind: "usage"; reason: string | null }>;
 
 export const DEFAULT_HTTP_PORT = 8787;
@@ -1744,12 +1731,10 @@ export function parseServerMode(args: readonly string[]): ServerMode {
     flags.add(argument);
   }
   if (flags.has("--help") || flags.has("-h")) return { kind: "usage", reason: null };
-  if (flags.has("--selftest")) return { kind: "selftest" };
 
   const wantsStdio = flags.has("--stdio");
   const wantsHttp = flags.has("--http");
   if (wantsStdio && wantsHttp) return { kind: "usage", reason: "--stdio and --http are exclusive" };
-  const handshakeLogPath = values.get("--handshake-log") ?? null;
   const frameLogPath = values.get("--frame-log") ?? null;
   const skillFilePath = values.get("--skill-file") ?? null;
   const instructionsBudget = parseInstructionsBudget(values.get("--instructions-budget"));
@@ -1757,9 +1742,9 @@ export function parseServerMode(args: readonly string[]): ServerMode {
     return { kind: "usage", reason: "--instructions-budget must be a non-negative integer (0 = no limit)" };
   }
   if (wantsStdio) {
-    return { kind: "stdio", handshakeLogPath, frameLogPath, skillFilePath, instructionsBudget };
+    return { kind: "stdio", frameLogPath, skillFilePath, instructionsBudget };
   }
-  if (!wantsHttp) return { kind: "usage", reason: "a mode is required: --http, --stdio or --selftest" };
+  if (!wantsHttp) return { kind: "usage", reason: "a mode is required: --http or --stdio" };
 
   const publicUrl = values.get("--public-url");
   if (publicUrl === undefined) {
@@ -1789,7 +1774,6 @@ export function parseServerMode(args: readonly string[]): ServerMode {
     identityProvidersPath: values.get("--identity-providers") ?? null,
     mailSenderPath: values.get("--mail-sender") ?? null,
     trustedProxies: values.get("--trusted-proxy") ?? null,
-    handshakeLogPath,
     frameLogPath,
     skillFilePath,
     instructionsBudget,
@@ -1802,7 +1786,6 @@ export const USAGE = `sasha-slides MCP server
 
   npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--mail-sender <path> [--trusted-proxy <subnets>]] [--google-client <path>] [--deck-data <directory>] [--web-build <directory>]
   npx tsx mcp/sasha-slides/server.ts --stdio
-  npx tsx mcp/sasha-slides/server.ts --selftest
 
   --http         Remote Streamable HTTP server with per-user brokered Google OAuth.
                  Each connecting user signs in with their own Google account and the
@@ -1861,11 +1844,6 @@ export const USAGE = `sasha-slides MCP server
                  loopback -- which only works for a browser on the server's own machine.
   --stdio        DEV ONLY. Serves over stdio using the single token in
                  .auth/tokens.json. No per-user identity exists on this transport.
-  --selftest     Run the whole tool surface against an in-memory Drive and exit.
-  --handshake-log  File to append one JSON line per client initialize to, recording the
-                 protocol version, clientInfo and the capabilities the client declared -
-                 which is what decides whether this server may issue sampling/createMessage,
-                 elicitation/create or roots/list back to it. Diagnostics only.
   --skill-file   The workflow guide returned to the client as the MCP "instructions"
                  string. Defaults to ${SKILL_RELATIVE_PATH} next to the server. If it
                  cannot be read the server still starts and serves a terse built-in
@@ -2150,12 +2128,11 @@ const VALUE_FLAGS: readonly string[] = [
   "--comment-bot",
   "--trusted-proxy",
   "--google-client",
-  "--handshake-log",
   "--frame-log",
   "--deck-data",
   "--web-build",
 ];
-const BARE_FLAGS: readonly string[] = ["--http", "--stdio", "--selftest", "--help", "-h"];
+const BARE_FLAGS: readonly string[] = ["--http", "--stdio", "--help", "-h"];
 
 /** Null is "not a budget"; `undefined` is "not given", which takes the measured default. */
 function parseInstructionsBudget(value: string | undefined): number | null {
@@ -2179,9 +2156,6 @@ async function main(): Promise<void> {
     case "http":
       await serveHttp(mode);
       return;
-    case "selftest":
-      process.exitCode = (await runSelfTest()) ? 0 : 1;
-      return;
     case "usage":
       process.stderr.write(USAGE);
       if (mode.reason !== null) {
@@ -2196,7 +2170,6 @@ async function main(): Promise<void> {
 
 async function serveStdio(
   mode: Readonly<{
-    handshakeLogPath: string | null;
     frameLogPath: string | null;
     skillFilePath: string | null;
     instructionsBudget: number;
@@ -2216,7 +2189,6 @@ async function serveStdio(
   await server.connect(
     instrumentedTransport({
       inner: new StdioServerTransport(),
-      handshakeLogPath: mode.handshakeLogPath,
       frameLogPath: mode.frameLogPath,
     }),
   );
@@ -2227,32 +2199,17 @@ async function serveStdio(
 }
 
 /**
- * The composition root's one decision about observability: with neither `--handshake-log` nor
- * `--frame-log` the transport is handed over untouched, so the logging path cannot affect a
- * real deployment.
+ * The composition root's one decision about observability: without `--frame-log` the transport
+ * is handed over untouched, so the logging path cannot affect a real deployment.
  */
-function instrumentedTransport(
-  options: Readonly<{ inner: Transport; handshakeLogPath: string | null; frameLogPath: string | null }>,
-): Transport {
-  const { inner, handshakeLogPath, frameLogPath } = options;
-  if (handshakeLogPath === null && frameLogPath === null) return inner;
-  return handshakeRecordingTransport({
+function instrumentedTransport(options: Readonly<{ inner: Transport; frameLogPath: string | null }>): Transport {
+  const { inner, frameLogPath } = options;
+  if (frameLogPath === null) return inner;
+  return new RecordingTransport({
     inner,
     endpoint: "server",
     now: () => new Date(),
-    record: (frame) => {
-      if (frameLogPath === null) return;
-      appendFileSync(frameLogPath, formatFrameLine(frame), "utf8");
-    },
-    emit: (handshake) => {
-      if (handshakeLogPath === null) return;
-      appendClientHandshake({ path: handshakeLogPath, handshake });
-      process.stderr.write(
-        `[${SERVER_NAME}] client initialize: ${handshake.clientInfo.name} ${handshake.clientInfo.version} ` +
-          `protocol=${handshake.protocolVersion} sampling=${String(handshake.supportsSampling)} ` +
-          `elicitation=${String(handshake.supportsElicitation)} roots=${String(handshake.supportsRoots)}\n`,
-      );
-    },
+    record: (frame) => appendFileSync(frameLogPath, formatFrameLine(frame), "utf8"),
   });
 }
 
@@ -2333,7 +2290,6 @@ function serveHttp(
     instrumentTransport: (inner) =>
       instrumentedTransport({
         inner,
-        handshakeLogPath: mode.handshakeLogPath,
         frameLogPath: mode.frameLogPath,
       }),
     warn,
@@ -2498,405 +2454,6 @@ function instructionsHeadline(source: WorkflowInstructionsSource): string {
     default:
       return assertNever(source);
   }
-}
-
-/**
- * Smoke-runs the full tool surface against the in-memory Drive: registers every tool (so a
- * broken zod schema fails here), stages a proposal, has a stand-in extension write PICK, and
- * checks the shaped payloads. Deep protocol assertions live in `test/protocol.test.ts`.
- */
-async function runSelfTest(): Promise<boolean> {
-  const fake = createFakeDrive();
-  let nowMs = Date.parse("2026-10-03T12:00:00.000Z");
-  const env: ProposalEnvironment = {
-    drive: fake.channel,
-    now: () => new Date(nowMs),
-    randomSuffix: () => "selfts",
-    sleep: ({ milliseconds }) => {
-      nowMs += milliseconds;
-      return Promise.resolve();
-    },
-    statFile: () => ({ bytes: 1234 }),
-    warn: (message) => void process.stdout.write(`  warn: ${message}\n`),
-  };
-
-  const checks: Readonly<{ label: string; ok: boolean }>[] = [];
-  const check = (label: string, ok: boolean): void => void checks.push({ label, ok });
-
-  // The SAME clock the proposal environment uses, so a cursor taken "now" cannot land
-  // ahead of a comment written "now".
-  const fakeComments = createFakeComments({
-    now: () => new Date(nowMs),
-    pageObjectIds: ["p", "slide_two", "slide_three"],
-    defaultFileId: "deck-1",
-  });
-  const feedbackEnv: FeedbackEnvironment = {
-    channel: fakeComments.channel,
-    now: () => new Date(nowMs),
-    sleep: ({ milliseconds }) => {
-      nowMs += milliseconds;
-      return Promise.resolve();
-    },
-    warn: (message) => void process.stdout.write(`  warn: ${message}\n`),
-  };
-
-  // The real resolution path, not a literal: the self-test is where "the skill markdown is
-  // actually readable from where the server runs" gets proven.
-  const instructions = workflowInstructionsFromDisk({
-    cwd: process.cwd(),
-    override: null,
-    budget: CLAUDE_CODE_INSTRUCTIONS_BUDGET,
-  });
-  const smokeServer = createSashaSlidesServer({
-    resolveEnvironment: () => Promise.resolve({ kind: "ok", env }),
-    resolveFeedbackEnvironment: () => Promise.resolve({ kind: "ok", env: feedbackEnv }),
-    instructions: instructions.text,
-    remote: false,
-  });
-  check("all eleven tools register", true);
-  check(`client instructions resolve to the workflow skill (${instructions.detail})`, instructions.source === "skill-file");
-  check(
-    `instructions fit the measured ${String(CLAUDE_CODE_INSTRUCTIONS_BUDGET)}-char client budget`,
-    instructions.text.length <= CLAUDE_CODE_INSTRUCTIONS_BUDGET,
-  );
-  check(
-    "a skill path that cannot be read degrades to the built-in fallback instead of throwing",
-    workflowInstructionsFromDisk({
-      cwd: process.cwd(),
-      override: "/nonexistent/SKILL.md",
-      budget: CLAUDE_CODE_INSTRUCTIONS_BUDGET,
-    }).source === "fallback",
-  );
-
-  // What a connecting client is handed before it has called anything: the workflow
-  // instructions and the slash-command entry points. Measured over a real connection,
-  // because "we passed an options field" is not the same claim as "the handshake carries it".
-  const handed = await whatAConnectingClientSees({ server: smokeServer });
-  check("the initialize result carries the workflow instructions", handed.instructions === instructions.text);
-  check("the prompts capability is declared", handed.declaresPrompts);
-  check(
-    `prompts/list offers ${String(WORKFLOW_PROMPT_NAMES.length)} entry points, named as documented`,
-    handed.promptNames.join(",") === WORKFLOW_PROMPT_NAMES.join(","),
-  );
-  check(
-    "prompts/get returns a user turn naming propose_slides and await_pick",
-    handed.newDeckTurn.includes("propose_slides") && handed.newDeckTurn.includes("await_pick"),
-  );
-
-  const created = await createProposal({
-    env,
-    slides: [
-      { path: "/tmp/a.html", label: "option A" },
-      { path: "/tmp/b.html", label: null },
-    ],
-    presentationId: "deck-1",
-  });
-  const proposed = proposeSlidesPayload(created);
-  check("propose_slides returns a payload", proposed.kind === "payload");
-  if (created.kind !== "ok" || proposed.kind !== "payload") {
-    return report({ checks: [...checks, { label: "staging succeeded", ok: false }] });
-  }
-  check("two slides, 1-based, zero padded", proposed.payload.slides.map((slide) => slide.name).join(",") === "01.html,02.html");
-  check(
-    "READY written last",
-    fake.calls().filter((call) => call.op === "createFile").at(-1)?.name === "READY",
-  );
-  check(
-    "slide HTML reached Drive as a streamed path, never as a body",
-    fake
-      .files()
-      .filter((file) => file.name.endsWith(".html"))
-      .every((file) => file.text === null && file.sourcePath !== null),
-  );
-
-  const staged = proposalStatePayload(await readProposalState({ env, proposalId: created.proposalId }));
-  check("proposal_state sees READY and the manifest", staged.kind === "payload" && staged.payload.ready && staged.payload.count === 2);
-
-  const timedOut = awaitPickPayload(await awaitPick({ env, proposalId: created.proposalId, timeoutSeconds: 5 }));
-  check("await_pick times out with picked null", timedOut.kind === "payload" && timedOut.payload.status === "timeout" && timedOut.payload.picked === null);
-
-  fake.putForeignFile({
-    name: "PICK",
-    parentId: created.folderId,
-    mimeType: "application/json",
-    text: JSON.stringify({
-      protocolVersion: 1,
-      proposalId: created.proposalId,
-      picked: 2,
-      decidedAt: "2026-10-03T12:00:21.000Z",
-      insertedObjectIds: ["g123abc"],
-      anomalies: [{ index: 2, note: "chart gridlines lost", region: { x: 0.1, y: 0.2, w: 0.3, h: 0.2 } }],
-    }),
-    appProperties: { sashaSlides: "pick", proposalId: created.proposalId },
-  });
-  const picked = awaitPickPayload(await awaitPick({ env, proposalId: created.proposalId, timeoutSeconds: 5 }));
-  check(
-    "await_pick parses a well-formed PICK",
-    picked.kind === "payload" && picked.payload.status === "picked" && picked.payload.picked === 2 && picked.payload.anomalies.length === 1,
-  );
-
-  const images = slideImagesPayload(
-    await downloadSlideImages({ env, proposalId: created.proposalId, indices: null, outDir: "/tmp/out", remote: false }),
-  );
-  check("slide_images reports previews unavailable", images.kind === "payload" && images.payload.status === "unavailable");
-
-  // --- comments on the CANDIDATE, driven through the same shaped payloads.
-  const candidateTwo = created.slides.find((slide) => slide.index === 2);
-  if (candidateTwo === undefined) {
-    return report({ checks: [...checks, { label: "candidate 2 exists", ok: false }] });
-  }
-  const candidateEnv: CandidateFeedbackEnvironment = { proposal: env, feedback: feedbackEnv };
-  const userComment = fakeComments.putUserComment({
-    // The comment is on 02.html itself, which is what makes the slide unambiguous.
-    fileId: candidateTwo.fileId,
-    text: "the chart on this candidate is unreadable",
-    anchor: null,
-  });
-  const read = readFeedbackPayload(
-    await readCandidateFeedback({
-      env: candidateEnv,
-      proposalId: created.proposalId,
-      slideIndex: null,
-      since: null,
-      includeResolved: false,
-    }),
-  );
-  check(
-    "read_feedback places a comment by the candidate file it is on, with no anchor needed",
-    read.kind === "payload" &&
-      read.payload.threadCount === 1 &&
-      read.payload.threads[0]?.slideNumber === 2 &&
-      read.payload.threads[0]?.pageObjectId === null,
-  );
-  check(
-    "read_feedback reports an unresolved count for EVERY candidate",
-    read.kind === "payload" &&
-      read.payload.unresolved.length === 2 &&
-      read.payload.unresolved.find((entry) => entry.slideIndex === 2)?.unresolved === 1 &&
-      read.payload.unresolved.find((entry) => entry.slideIndex === 1)?.unresolved === 0,
-  );
-
-  const wrongSlide = replyFeedbackPayload({
-    outcome: await replyToCandidateComment({
-      env: candidateEnv,
-      proposalId: created.proposalId,
-      slideIndex: 1,
-      commentId: userComment.id,
-      text: "answering the wrong candidate",
-    }),
-    tool: "reply_feedback",
-  });
-  check(
-    "a reply addressed to the wrong candidate is refused, not silently posted elsewhere",
-    wrongSlide.kind === "error",
-  );
-
-  const replied = replyFeedbackPayload({
-    outcome: await replyToCandidateComment({
-      env: candidateEnv,
-      proposalId: created.proposalId,
-      slideIndex: 2,
-      commentId: userComment.id,
-      text: "redrawn with bigger labels",
-    }),
-    tool: "reply_feedback",
-  });
-  check(
-    "reply_feedback posts into the user's thread and logs comment-answered",
-    replied.kind === "payload" && !replied.payload.resolved && replied.payload.logged,
-  );
-
-  // The agent just replied; await_feedback must NOT wake on its own words.
-  const quiet = awaitFeedbackPayload(
-    await awaitCandidateFeedback({
-      env: candidateEnv,
-      proposalId: created.proposalId,
-      slideIndex: 2,
-      since: null,
-      timeoutMs: 3_000,
-    }),
-  );
-  check("await_feedback ignores the agent's own reply", quiet.kind === "payload" && quiet.payload.status === "timeout");
-
-  fakeComments.putUserReply({ commentId: userComment.id, text: "better, thanks" });
-  const arrived = awaitFeedbackPayload(
-    await awaitCandidateFeedback({
-      env: candidateEnv,
-      proposalId: created.proposalId,
-      slideIndex: 2,
-      since: quiet.kind === "payload" ? quiet.payload.cursor : null,
-      timeoutMs: 3_000,
-    }),
-  );
-  check(
-    "await_feedback wakes on the user's reply, on the right candidate",
-    arrived.kind === "payload" &&
-      arrived.payload.status === "arrived" &&
-      arrived.payload.posts.length === 1 &&
-      arrived.payload.posts[0]?.text === "better, thanks" &&
-      arrived.payload.posts[0]?.slideNumber === 2,
-  );
-
-  // --- revise the candidate IN PLACE: same file id, so the threads survive.
-  const revised = reviseSlidePayload(
-    await reviseSlide({
-      env,
-      proposalId: created.proposalId,
-      slideIndex: 2,
-      htmlPath: "/tmp/b-v2.html",
-      label: "option B, bigger labels",
-      answeredCommentIds: [userComment.id],
-    }),
-  );
-  check(
-    "revise_slide keeps the file id and bumps the revision",
-    revised.kind === "payload" &&
-      revised.payload.fileId === candidateTwo.fileId &&
-      revised.payload.revision === 2,
-  );
-  const afterRevision = readFeedbackPayload(
-    await readCandidateFeedback({
-      env: candidateEnv,
-      proposalId: created.proposalId,
-      slideIndex: 2,
-      since: null,
-      includeResolved: false,
-    }),
-  );
-  check(
-    "the comment thread survived the revision, because the file id did not change",
-    afterRevision.kind === "payload" && afterRevision.payload.threadCount === 1,
-  );
-  // `revision` is the poll signal, so the manifest MUST be the last write of a revision:
-  // a reader woken by it would otherwise re-read a proposal that is still half written.
-  const revisionWrites = fake
-    .calls()
-    .filter((call) => call.op === "createFile" || call.op === "updateFileContent" || call.op === "deleteFile")
-    .map((call) => `${call.op}:${call.name}`)
-    .slice(-3);
-  check(
-    `the manifest is written AFTER the revised HTML and the event (${revisionWrites.join(" ")})`,
-    revisionWrites[0] === "updateFileContent:02.html" &&
-      (revisionWrites[1] ?? "").endsWith("-slide-revised.json") &&
-      revisionWrites[2] === "updateFileContent:manifest.json",
-  );
-
-  const resolved = replyFeedbackPayload({
-    outcome: await resolveCandidateComment({
-      env: candidateEnv,
-      proposalId: created.proposalId,
-      slideIndex: 2,
-      commentId: userComment.id,
-      text: null,
-    }),
-    tool: "resolve_feedback",
-  });
-  check("resolve_feedback resolves the thread", resolved.kind === "payload" && resolved.payload.resolved);
-
-  const afterResolve = readFeedbackPayload(
-    await readCandidateFeedback({
-      env: candidateEnv,
-      proposalId: created.proposalId,
-      slideIndex: 2,
-      since: null,
-      includeResolved: false,
-    }),
-  );
-  check(
-    "a resolved thread leaves the open list and the unresolved count",
-    afterResolve.kind === "payload" &&
-      afterResolve.payload.threadCount === 0 &&
-      afterResolve.payload.unresolved.find((entry) => entry.slideIndex === 2)?.unresolved === 0,
-  );
-
-  // --- the log, read back in order, with an event this build does not know in the middle.
-  const eventsFolder = fake.find({ name: "events" });
-  if (eventsFolder !== null) {
-    fake.putForeignFile({
-      name: `${String(nowMs + 1)}-zzzzzz-slide-anonymised.json`,
-      parentId: eventsFolder.id,
-      mimeType: "application/json",
-      text: JSON.stringify({ protocolVersion: 1, at: "2026-10-03T12:01:00.000Z", kind: "slide-anonymised", slideIndex: 2 }),
-      appProperties: { sashaSlides: "event", proposalId: created.proposalId },
-    });
-  }
-  const events = sessionEventsPayload(await readProposalLog({ env, proposalId: created.proposalId }));
-  check(
-    "session_events replays the log in order",
-    events.kind === "payload" &&
-      events.payload.events.map((event) => event.kind).join(",") ===
-        "slides-staged,comment-answered,slide-revised,comment-resolved,slide-anonymised",
-  );
-  check(
-    "an event kind written by a NEWER build survives as an opaque line, never dropped",
-    events.kind === "payload" &&
-      events.payload.events.at(-1)?.kind === "slide-anonymised" &&
-      (events.payload.events.at(-1)?.summary ?? "").includes("something happened"),
-  );
-
-  // --- clearing: never silent, and it verifies what it deleted.
-  const cleared = clearSlidesPayload(
-    await clearSlides({ env, proposalId: created.proposalId, reason: "starting over" }),
-  );
-  check(
-    "clear_slides deletes the uninserted candidates and keeps the picked one",
-    cleared.kind === "payload" &&
-      cleared.payload.countBefore === 2 &&
-      cleared.payload.countAfter === 1 &&
-      cleared.payload.keptSlideIndices.join(",") === "2" &&
-      cleared.payload.cleared.map((entry) => entry.index).join(",") === "1",
-  );
-  const clearedLog = sessionEventsPayload(await readProposalLog({ env, proposalId: created.proposalId }));
-  check(
-    "clearing is never silent: slides-cleared is in the log",
-    clearedLog.kind === "payload" &&
-      clearedLog.payload.events.some((event) => event.kind === "slides-cleared"),
-  );
-
-  return report({ checks });
-}
-
-/**
- * Connects a throwaway `Client` to `server` in memory and reports what the handshake handed
- * it. The one thing a field on an options object cannot prove: that the SDK put it on the
- * wire.
- */
-async function whatAConnectingClientSees(
-  options: Readonly<{ server: McpServer }>,
-): Promise<
-  Readonly<{
-    instructions: string | undefined;
-    declaresPrompts: boolean;
-    promptNames: readonly string[];
-    newDeckTurn: string;
-  }>
-> {
-  const client = new Client({ name: "selftest-client", version: SERVER_VERSION }, { capabilities: {} });
-  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await options.server.connect(serverSide);
-  await client.connect(clientSide);
-  try {
-    const listed = await client.listPrompts();
-    const got = await client.getPrompt({ name: "new_deck", arguments: { request: "self-test" } });
-    return {
-      instructions: client.getInstructions(),
-      declaresPrompts: (client.getServerCapabilities() ?? {}).prompts !== undefined,
-      promptNames: listed.prompts.map((prompt) => prompt.name),
-      newDeckTurn: got.messages
-        .map((message) => (message.content.type === "text" ? message.content.text : ""))
-        .join("\n"),
-    };
-  } finally {
-    await client.close();
-    await options.server.close();
-  }
-}
-
-function report(options: Readonly<{ checks: readonly Readonly<{ label: string; ok: boolean }>[] }>): boolean {
-  for (const { label, ok } of options.checks) process.stdout.write(`${ok ? "PASS" : "FAIL"}  ${label}\n`);
-  const failed = options.checks.filter((entry) => !entry.ok).length;
-  process.stdout.write(`\n${String(options.checks.length - failed)}/${String(options.checks.length)} self-test checks passed\n`);
-  return failed === 0;
 }
 
 /**

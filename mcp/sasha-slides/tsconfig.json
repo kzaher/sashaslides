@@ -1,6 +1,6 @@
 // The server-side TypeScript: the MCP server itself, the Drive protocol, the feedback
 // channel and the unit tests that inject fakes into them. These run on Node, so unlike
-// `addon/` and `extension/` this project does take @types/node.
+// `addon/` this project does take @types/node.
 //
 // THIS file is the gate. `tsx` (which is how every entry point here is actually run) only
 // strips types, so nothing is checked unless this runs:
