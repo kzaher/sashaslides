@@ -1283,6 +1283,1590 @@ export type PresentationWithRegistries = PptxGenJS & {
   __bulletColors: BulletColorList[];
 };
 
+export function buildPptx(
+  slides: readonly SlideInput[],
+  title: string,
+): { pres: PresentationWithRegistries; renderedRegions: RenderedRegion[][]; drawioDiagrams: DrawioDiagram[] } {
+  // ESM/CJS interop — `import * as pptxgenModule from "pptxgenjs"` lands a
+  // module-namespace wrapper whose shape varies by loader:
+  //   - Plain Node ESM:   M.default = <ctor>                    (1-level wrap)
+  //   - tsx from .mts:    M.default = { default: <ctor>, ... }  (2-level wrap)
+  //   - Browser stub:     M.default = <ctor>                    (1-level)
+  // Unwrap `.default` until we land on the actual constructor (a function).
+  const resolveCtor = (m: unknown): new () => PptxGenJS => {
+    let v: unknown = m;
+    while (typeof v !== "function" && v != null && typeof (v as { default?: unknown }).default !== "undefined") {
+      v = (v as { default: unknown }).default;
+    }
+    return v as new () => PptxGenJS;
+  };
+  const PptxGenJSCtor = resolveCtor(pptxgenModule);
+  const pres = new PptxGenJSCtor() as PresentationWithRegistries;
+  const gradientRegistry: Gradient[] = [];
+  pres.__gradients = gradientRegistry;
+  const bulletColorRegistry: BulletColorList[] = [];
+  pres.__bulletColors = bulletColorRegistry;
+  pres.title = title;
+  pres.layout = "LAYOUT_WIDE"; // 13.333" x 7.5" — wait, we want 10" x 5.625"
+
+  // Actually define custom layout matching our slide dimensions
+  pres.defineLayout({ name: "CUSTOM", width: SLIDE_W_IN, height: SLIDE_H_IN });
+  pres.layout = "CUSTOM";
+
+  const renderedRegions: RenderedRegion[][] = [];
+  const drawioDiagrams: DrawioDiagram[] = [];
+
+  for (let si = 0; si < slides.length; si++) {
+    const { extraction, visualPngs } = slides[si];
+    const slideRegions: RenderedRegion[] = [];
+    renderedRegions.push(slideRegions);
+    const ctx: EmitContext = {
+      slide: pres.addSlide(),
+      slideIndex: si,
+      extraction,
+      visualPngs,
+      gradientRegistry,
+      bulletColorRegistry,
+      slideRegions,
+      drawioDiagrams,
+    };
+    // Re-read the element on every step: emitRect replaces a text it absorbs
+    // further down the array with a `_skip` sentinel.
+    for (let ei = 0; ei < extraction.elements.length; ei++) {
+      emitElement(ctx, extraction.elements[ei], ei);
+    }
+    // Phase 1: a drawio diagram's editable source rides `drawioDiagrams` (see
+    // emitVisual), and runConvertPptx uploads it as a `.drawio.svg` to Drive
+    // after the presentation upload, so the slide XML carries no off-canvas
+    // marker box.
+  }
+
+  return { pres, renderedRegions, drawioDiagrams };
+}
+
+/** What every element emitter of one slide shares: the slide being written,
+ * its extraction (whose `elements` emitRect rewrites when it absorbs a text),
+ * the deck-wide side-band registries, and the per-slide / per-deck outputs. */
+interface EmitContext {
+  readonly slide: Slide;
+  /** 0-based slide index. */
+  readonly slideIndex: number;
+  readonly extraction: Extraction;
+  readonly visualPngs: ReadonlyMap<number, Uint8Array | Buffer>;
+  /** Gradients for injectGradientsIntoZip, indexed by the GRAD_<n> objectName. */
+  readonly gradientRegistry: Gradient[];
+  /** Native-bullet colours for injectBulletColorsIntoZip, indexed by BUCLR_<n>. */
+  readonly bulletColorRegistry: BulletColorList[];
+  /** Rasterised regions of this slide, surfaced to the rating UI. */
+  readonly slideRegions: RenderedRegion[];
+  readonly drawioDiagrams: DrawioDiagram[];
+}
+
+/** Emits one extracted element (at index `ei`) onto the context's slide. */
+function emitElement(ctx: EmitContext, el: ExtractedElement, ei: number): void {
+  switch (el.type) {
+    case "_skip":
+    case "br":
+      return;
+    case "rect":
+      return emitRect(ctx, el, ei);
+    case "triangle":
+      return emitTriangle(ctx.slide, el);
+    case "poly":
+      return emitPoly(ctx, el);
+    case "line":
+      return emitLine(ctx.slide, el);
+    case "text":
+      // All slack/rotation/run-mapping logic lives in emitStyledText so
+      // this site stays a single dispatch. Standalone-text defaults are
+      // 16px / #000 (vs. the merged-into-rect path's 14px / #333 — those
+      // texts are absorbed into a card and inherit a card-text vibe).
+      return emitStyledText(
+        ctx.slide, el, el.bounds,
+        ctx.extraction.elements, ei,
+        el.verticallyCentered ? "middle" : "top",
+        true, // standalone text honors style.opacity via pptxgenjs transparency
+        { color: "#000000", fontSize: 16 },
+      );
+    case "list":
+      return emitList(ctx, el);
+    case "table":
+      return emitTable(ctx.slide, el);
+    case "visual":
+    case "image":
+      return emitVisual(ctx, el, ei);
+    default:
+      return assertNever(el);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled case: ${String(value)}`);
+}
+
+/** The gradient when it has the two or more stops a gradient fill needs. */
+function multiStopGradient(gradient: Gradient | null | undefined): Gradient | null {
+  return gradient && gradient.stops && gradient.stops.length >= 2 ? gradient : null;
+}
+
+/** Fill of a rect or polygon shape. A gradient is registered in the registry
+ * and painted as a SOLID first-stop placeholder tagged `GRAD_<n>`: stock
+ * pptxgenjs can't emit shape gradients, so injectGradientsIntoZip rewrites the
+ * tagged `<a:solidFill>` into the real `<a:gradFill>`. `gradientId` is -1 for
+ * a solid or absent fill. */
+function registerShapeFill(
+  registry: Gradient[],
+  el: { readonly fill?: string | null; readonly fillAlpha?: number; readonly gradient?: Gradient | null },
+): { readonly fill?: ShapeProps["fill"]; readonly objectName?: string; readonly gradientId: number } {
+  const gradient = multiStopGradient(el.gradient);
+  if (gradient) {
+    const gradientId = registry.length;
+    registry.push(gradient);
+    return { fill: { color: hexToRgb(gradient.stops[0].color) }, objectName: `GRAD_${gradientId}`, gradientId };
+  }
+  if (el.fill) {
+    const fill: NonNullable<ShapeProps["fill"]> = { color: hexToRgb(el.fill) };
+    if (typeof el.fillAlpha === "number" && el.fillAlpha < 1) {
+      // pptxgenjs `transparency` is percent-transparent: 0 = opaque, 100 = invisible.
+      fill.transparency = Math.round((1 - el.fillAlpha) * 100);
+    }
+    return { fill, gradientId: -1 };
+  }
+  return { gradientId: -1 };
+}
+
+/** An OOXML outer shadow for a CSS box-shadow. OOXML shadow dir: 0°=east,
+ * 90°=south — matches CSS offsetY>0=down. */
+function outerShadow(shadow: {
+  readonly blurPx: number;
+  readonly dx: number;
+  readonly dy: number;
+  readonly color: string;
+  readonly opacity: number;
+}): PptxGenJS.ShadowProps {
+  const { dx, dy } = shadow;
+  let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  if (dx === 0 && dy === 0) angle = 90;
+  if (angle < 0) angle += 360;
+  return {
+    type: "outer",
+    blur: Math.min(shadow.blurPx * PX2PT, 30),
+    offset: Math.sqrt(dx * dx + dy * dy) * PX2PT,
+    color: hexToRgb(shadow.color),
+    opacity: shadow.opacity,
+    angle: Math.round(angle),
+  };
+}
+
+/** Text options of one styled run: each field the run does not override is
+ * inherited from its container (list item or table cell). */
+function inheritedRunOptions(
+  style: RunStyle,
+  inherited: {
+    readonly fontFamily: string;
+    readonly fontSize: number;
+    readonly color: string;
+    readonly bold: boolean;
+    readonly italic: boolean;
+  },
+): TextPropsOptions {
+  return {
+    fontFace: mapFont(style.fontFamily || inherited.fontFamily),
+    fontSize: (style.fontSize || inherited.fontSize) * PX2PT,
+    color: hexToRgb(style.color || inherited.color),
+    bold: style.fontWeight === "bold" || (!style.fontWeight && inherited.bold),
+    italic: style.fontStyle === "italic" || (!style.fontStyle && inherited.italic),
+  };
+}
+
+/** One painted edge strip of a box with per-side borders. */
+interface BorderStrip {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly color: string;
+  readonly style: string | undefined;
+}
+
+/** The strips (px, inside `box`) of every side of `sides` that has a width
+ * and a colour, in top, bottom, left, right order. */
+function borderStrips(box: Bounds, sides: BorderSides): BorderStrip[] {
+  const { top, bottom, left, right } = sides;
+  return [
+    top?.width > 0 && top?.color ? { x: box.x, y: box.y, w: box.w, h: top.width, color: top.color, style: top.style } : null,
+    bottom?.width > 0 && bottom?.color ? { x: box.x, y: box.y + box.h - bottom.width, w: box.w, h: bottom.width, color: bottom.color, style: bottom.style } : null,
+    left?.width > 0 && left?.color ? { x: box.x, y: box.y, w: left.width, h: box.h, color: left.color, style: left.style } : null,
+    right?.width > 0 && right?.color ? { x: box.x + box.w - right.width, y: box.y, w: right.width, h: box.h, color: right.color, style: right.style } : null,
+  ].filter((strip): strip is BorderStrip => strip !== null);
+}
+
+/** Paints a border strip as a filled, outline-free rect. */
+function emitSolidStrip(slide: Slide, strip: BorderStrip): void {
+  slide.addShape("rect", {
+    x: px2in(strip.x), y: px2in(strip.y), w: px2in(strip.w), h: px2in(strip.h),
+    fill: { color: hexToRgb(strip.color) },
+    line: { type: "none" },
+  });
+}
+
+// --- rect ---
+
+/** A `rect` element: background, card, pill, circle or stripe. May absorb the
+ * text it hosts (see takeMergedText) and paints a non-uniform border over its
+ * own fill. */
+function emitRect(ctx: EmitContext, el: RectElement, ei: number): void {
+  // Rule 1: a fully-transparent element with no content contributes
+  // nothing to the slide. Don't emit a phantom shape — it pollutes the
+  // outline pane in Slides and confuses post-pass element counting.
+  if (!rectPaintsAnything(el)) return;
+  const { slide } = ctx;
+  const b = el.bounds;
+
+  // Full-slide background. pptxgenjs `slide.background` can only carry a
+  // solid fill, so skip this shortcut when the element owns a multi-stop
+  // gradient: the rect drops through to the regular shape path, and the
+  // post-processing gradFill injector rewrites <a:solidFill> → <a:gradFill>
+  // (slide_17 navy→purple body wash).
+  if (b.w > SLIDE_W_PX * 0.9 && b.h > SLIDE_H_PX * 0.9 && !multiStopGradient(el.gradient)) {
+    if (el.fill) {
+      slide.background = { fill: hexToRgb(el.fill) };
+    }
+    return;
+  }
+
+  const cr = el.cornerRadii || { tl: el.borderRadius || 0, tr: el.borderRadius || 0, br: el.borderRadius || 0, bl: el.borderRadius || 0 };
+  const corner = rectCornerShape(b, cr);
+  const merged = takeMergedText(ctx.extraction.elements, ei, b, corner.isCircle);
+  // Non-uniform border info — computed now, painted AFTER content.
+  const partialBorder = nonUniformBorderSides(el);
+  // Only a bare fill (no absorbed text, no border to lose) may be left to a
+  // rasterised clipping host's PNG.
+  const bareFill = !merged && !partialBorder;
+
+  // Rasterised top-strip skip: when a rounded clipping host had only its
+  // dark top region rasterised (rasterBottomY set), any fill fully above
+  // that line — the navy status bar, the black notch, the status dots —
+  // is already painted (correctly rounded) by the 2× device PNG. Skip
+  // the native overlay so a clamped/duplicate corner can't show over the
+  // image. The notch hugs the top edge without touching a rounded corner
+  // (so it has no clip patch), which is why this skip lives here rather
+  // than in rectHostShape's patch block. Text rides on top via its own element.
+  const rby = el.clipMask?.rasterizedHost ? el.clipMask.rasterBottomY : undefined;
+  if (typeof rby === "number" && bareFill && b.y + b.h <= rby + 0.5) return;
+
+  const host = rectHostShape(ctx.gradientRegistry, el, cr, corner, bareFill);
+  if (host === null) return;
+  slide.addShape(host.shapeName, host.opts);
+
+  // Side-rounded masks (0b0110 = right side, 0b1001 = left side) emit
+  // as `roundRect` above with all-4 curves; square off the CSS-flat
+  // corner pair by painting R×R overlays in the same fill. Skipped
+  // for gradient rects so the GRAD_N tag on the parent shape keeps
+  // its solitary solidFill match for the injector.
+  if (corner.anyRounded && !corner.isCircle && !el.gradient && needsFlatCornerOverlay(cr) && host.opts.fill) {
+    emitFlatCornerOverlays(slide, b, cr, host.opts.fill);
+  }
+
+  if (partialBorder) emitRectPartialBorder(slide, el, cr, corner.anyRounded, partialBorder);
+
+  // Overlay native editable text on merged text elements.
+  // Preserve per-run styling (font-size, color, weight) when the merged
+  // text has styled inline children — e.g. `$19<span>/mo</span>` must
+  // keep /mo at its smaller size after being absorbed into a card-header.
+  //
+  // Two-bug fix (slide_24 — deep-nest innermost text):
+  //   1. Alignment — hardcoding `align: "center"` forced every merged
+  //      text to center. `.innermost` inherits `text-align: start`
+  //      (left) and must stay left when absorbed into the parent rect.
+  //   2. Bounds — using the rect's `b` (level-4 at 837×164) makes the
+  //      text box wider than the source innermost div (769×96), so
+  //      wrap points shift. Fall back to `mergedTextEl.bounds` so
+  //      Chrome's wrap survives the merge; valign:"middle" still
+  //      centers vertically within the rect because the DOM y/h is
+  //      the flex-centered position Chrome already computed.
+  if (merged) {
+    const mb = merged.text.bounds || b;
+    // Honour the extractor's verticallyCentered flag instead of
+    // hardcoding "middle". Single-line absorbed text (chip labels,
+    // card headers, flex-centered content) keeps verticallyCentered=
+    // true and stays centered; multi-line absorbed text (slide_30
+    // .code-block, padding:14px, multiple <br>s) gets verticallyCentered=
+    // false and is emitted "top" so emitStyledText folds the CSS
+    // padding-top into the textbox's tIns — first line sits at the
+    // padding distance, matching Chrome's top-flowed layout.
+    const mergedValign: "top" | "middle" =
+      merged.text.verticallyCentered === false ? "top" : "middle";
+    emitStyledText(
+      slide, merged.text, mb,
+      ctx.extraction.elements, merged.index,
+      mergedValign,
+      false, // merged-rect path historically didn't fold opacity into color
+      { color: "#333333", fontSize: 14 },
+    );
+  }
+}
+
+/** False for a rect with no fill, border, shadow or gradient. */
+function rectPaintsAnything(r: RectElement): boolean {
+  const hasFill = r.fill && r.fill !== "transparent" && (r.fillAlpha === undefined || r.fillAlpha > 0);
+  const hasBorder = (r.borderWidth || 0) > 0 && r.borderColor;
+  const hasSideBorder = r.borderSides
+    ? [r.borderSides.top, r.borderSides.right, r.borderSides.bottom, r.borderSides.left].some((s) => (s?.width || 0) > 0)
+    : false;
+  const hasShadow = !!r.boxShadow && (Array.isArray(r.boxShadow) ? r.boxShadow.length > 0 : true);
+  const hasGradient = !!r.gradient && !!r.gradient.stops && r.gradient.stops.length > 0;
+  return !!(hasFill || hasBorder || hasSideBorder || hasShadow || hasGradient);
+}
+
+/** The preset a rect's corner radii map to. Per-corner mask → OOXML preset +
+ * flips so asymmetric border-radius (e.g. top-only round on a card header)
+ * renders correctly rather than getting collapsed into an all-corners
+ * roundRect. */
+interface RectCornerShape {
+  readonly preset: ShapeName;
+  readonly flipH: boolean;
+  readonly flipV: boolean;
+  readonly isCircle: boolean;
+  readonly anyRounded: boolean;
+}
+
+function rectCornerShape(b: Bounds, cr: CornerRadii): RectCornerShape {
+  const minDim = Math.min(b.w, b.h);
+  const isCircle = cr.tl >= minDim * 0.4 && cr.tr >= minDim * 0.4 && cr.br >= minDim * 0.4 && cr.bl >= minDim * 0.4
+    && Math.abs(b.w - b.h) < b.w * 0.3;
+  const anyRounded = cr.tl > 2 || cr.tr > 2 || cr.br > 2 || cr.bl > 2;
+  if (isCircle) return { preset: "ellipse", flipH: false, flipV: false, isCircle, anyRounded };
+  if (anyRounded) return { ...cornerPresetFromRadii(cr), isCircle, anyRounded };
+  return { preset: "rect", flipH: false, flipV: false, isCircle, anyRounded };
+}
+
+/** Finds the text element this rect absorbs, replaces it with a `_skip`
+ * sentinel in `elements` (so it is not emitted again), and returns it with its
+ * index; null when the rect absorbs nothing.
+ *
+ * IMPORTANT: only merge if this rect is the *innermost* ancestor that fits
+ * the text. Otherwise a deeper-nested rect (with its own bg) will paint over
+ * the merged text and bury it (slide_24: text inside 5 nested cards was
+ * merged into level-3, then hidden by level-4's solid fill). */
+function takeMergedText(
+  elements: ExtractedElement[],
+  ei: number,
+  b: Bounds,
+  isCircle: boolean,
+): { readonly text: TextElement; readonly index: number } | null {
+  if (hostsSeveralTexts(elements, ei, b)) return null;
+  for (let ti = ei + 1; ti < elements.length; ti++) {
+    const next = elements[ti];
+    if (next.type !== "text" || !next.bounds) continue;
+    const nb = next.bounds;
+    const sameBounds = Math.abs(nb.x - b.x) < 5 && Math.abs(nb.y - b.y) < 5 &&
+                       Math.abs(nb.w - b.w) < 5 && Math.abs(nb.h - b.h) < 5;
+    const tcx = nb.x + nb.w / 2, tcy = nb.y + nb.h / 2;
+    const insideBounds = tcx >= b.x && tcx <= b.x + b.w && tcy >= b.y && tcy <= b.y + b.h;
+    const textDominates = nb.h >= b.h * 0.5 && nb.w <= b.w + 4;
+    if (sameBounds || (insideBounds && (isCircle || textDominates))) {
+      // Check if a rect *after* this one also contains the text and
+      // would paint over it. If so, defer the merge — the text will
+      // ride on that deeper rect (or be emitted standalone as a text
+      // element after all the nested fills).
+      for (let di = ei + 1; di < ti; di++) {
+        const mid = elements[di];
+        if (mid.type !== "rect" || !mid.bounds || (!mid.fill && !mid.gradient)) continue;
+        const mb = mid.bounds;
+        const textInsideMid = tcx >= mb.x && tcx <= mb.x + mb.w && tcy >= mb.y && tcy <= mb.y + mb.h;
+        if (textInsideMid) return null; // don't merge — let text render on its own
+      }
+      elements[ti] = { type: "_skip", bounds: nb };
+      return { text: next, index: ti };
+    }
+  }
+  return null;
+}
+
+/** True when more than one text element after `ei` is centred inside `b`
+ * (before the scan passes the rect's vertical extent). A pull-quote
+ * (`.pull-quote { bg + border-left } > <p> + .attr`) hosts TWO block texts —
+ * merging just the first would center it vertically and push the `.attr`
+ * caption off the decorated box. When multiple texts live inside, skip merging
+ * and let each text emit at its own bounds so the rect acts as a pure
+ * background + accent stripe. */
+function hostsSeveralTexts(elements: readonly ExtractedElement[], ei: number, b: Bounds): boolean {
+  let insideTextCount = 0;
+  for (let ti = ei + 1; ti < elements.length; ti++) {
+    const next = elements[ti];
+    if (next.type !== "text" || !next.bounds) continue;
+    const nb = next.bounds;
+    const tcx = nb.x + nb.w / 2, tcy = nb.y + nb.h / 2;
+    if (tcx >= b.x && tcx <= b.x + b.w && tcy >= b.y && tcy <= b.y + b.h) {
+      insideTextCount++;
+      if (insideTextCount > 1) break;
+    }
+    // Stop scanning past this rect's vertical extent — avoids counting
+    // unrelated texts from sibling sections that sit below.
+    if (nb.y > b.y + b.h) break;
+  }
+  return insideTextCount > 1;
+}
+
+/** The rect's border sides when they are NOT uniform and at least one side
+ * has a width and a colour; such borders are painted as separate strips. */
+function nonUniformBorderSides(el: RectElement): BorderSides | null {
+  const bs = el.borderSides;
+  if (!bs || el.borderUniform) return null;
+  const anySide = (bs.top?.width > 0 && bs.top?.color) || (bs.right?.width > 0 && bs.right?.color) ||
+    (bs.bottom?.width > 0 && bs.bottom?.color) || (bs.left?.width > 0 && bs.left?.color);
+  return anySide ? bs : null;
+}
+
+/** The rect's own content shape: fill, corners, uniform border, shadow,
+ * rotation and the clip by a rounded ancestor. Null when a rasterised clipping
+ * host already paints it (only for a `bareFill`). May rewrite the angle of the
+ * gradient it registers. */
+function rectHostShape(
+  gradientRegistry: Gradient[],
+  el: RectElement,
+  cr: CornerRadii,
+  corner: RectCornerShape,
+  bareFill: boolean,
+): { readonly shapeName: ShapeName; readonly opts: ShapeProps } | null {
+  const b = el.bounds;
+  const opts: ShapeProps = {
+    x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
+    line: { type: "none" },
+  };
+
+  // Fill (gradient tagged via objectName for post-processing — pptxgenjs has no gradient API).
+  // `gradientId` is kept so the clip path (applyClipPatch) can angle-compensate
+  // the registered gradient when it flips or rotates the shape; opts.fill is
+  // re-synced from the registry just before returning.
+  const paint = registerShapeFill(gradientRegistry, el);
+  if (paint.fill) opts.fill = paint.fill;
+  if (paint.objectName) opts.objectName = paint.objectName;
+  const gradientId = paint.gradientId;
+
+  // Corner radius (pptxgenjs rectRadius is in inches).
+  // Clamp to half the shorter dimension — CSS `border-radius: 50px` on
+  // a 18px-tall pill gives radius > h/2, which produces an invalid
+  // OOXML `adj` value; Google Slides then renders the shape as empty
+  // (no fill, no outline), leaving the tag's text floating on the slide
+  // background. Clamping yields a proper stadium/pill shape.
+  if (corner.anyRounded && !corner.isCircle) {
+    const maxR = Math.min(b.w, b.h) / 2;
+    const maxRadiusPx = Math.max(cr.tl, cr.tr, cr.br, cr.bl);
+    opts.rectRadius = px2in(Math.min(maxRadiusPx, maxR));
+    if (corner.flipH) opts.flipH = true;
+    if (corner.flipV) opts.flipV = true;
+  }
+
+  // Border outline (uniform)
+  if (!nonUniformBorderSides(el) && el.borderUniform && el.borderWidth !== undefined && el.borderWidth > 0 && el.borderColor) {
+    const borderW = el.borderWidth;
+    opts.line = {
+      color: hexToRgb(el.borderColor),
+      width: Math.min(borderW * PX2PT, 6),
+      // Thin (≤2px) dashed borders use the finer sysDash cadence;
+      // prstDash="dash" renders 1px hairline dividers as coarse long
+      // dashes that don't match the CSS look (slide_33 .out).
+      dashType: asDashType(el.borderStyle === "dashed" ? (borderW <= 2 ? "sysDash" : "dash") : el.borderStyle === "dotted" ? "dot" : "solid"),
+    };
+  }
+
+  // Box shadow
+  if (el.boxShadow && ((el.boxShadow.blur ?? 0) > 0 || el.boxShadow.offsetX !== 0 || el.boxShadow.offsetY !== 0)) {
+    opts.shadow = outerShadow({
+      blurPx: el.boxShadow.blur ?? 0,
+      dx: el.boxShadow.offsetX || 0,
+      dy: el.boxShadow.offsetY || 0,
+      color: el.boxShadow.color || "#000000",
+      opacity: el.boxShadow.alpha ?? 0.25,
+    });
+  }
+
+  // Rotation: a CSS `transform: rotate(Xdeg)` element's bbox is the
+  // post-transform axis-aligned box. Drawing that box as-is turns a
+  // thin slanted line (e.g. `.profit-line { height:2px; rotate(-8deg) }`)
+  // into a fat filled rectangle. Re-center the shape on the bbox center
+  // at its natural (pre-transform) size and apply pptxgenjs rotate.
+  const rectRot = typeof el.rotate === "number" ? el.rotate : 0;
+  if (Math.abs(rectRot) > 0.5 && el.naturalWidth && el.naturalHeight) {
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    const nw = el.naturalWidth;
+    const nh = el.naturalHeight;
+    opts.x = px2in(cx - nw / 2);
+    opts.y = px2in(cy - nh / 2);
+    opts.w = px2in(nw);
+    opts.h = px2in(nh);
+    opts.rotate = ((rectRot % 360) + 360) % 360;
+  }
+
+  // Rule 3: rounded clipping mask from any `overflow:hidden` ancestor.
+  // When a child is clipped by a rounded parent, the host MUST itself
+  // become the clipped, correctly-cornered shape — adopting the patch's
+  // bounds and rounding ONLY the corners that coincide with a rounded
+  // parent corner (computeClippedPatch already zeroed the non-touching
+  // ones). The previous "rounded underlay + full-square host on top"
+  // was a fake clip: the square host re-squared every corner. Reuse the
+  // existing [TL,TR,BR,BL] → ROUND_* preset mapping so e.g. a left-flush
+  // pill → roundRect+flat-right overlays (left rounded only), a top
+  // stripe / status-bar → round2SameRect (top rounded, bottom square).
+  // A GRADIENT host keeps its GRAD_<n> objectName: that tag is what
+  // injectGradientsIntoZip matches on (slide_32 P0/P1/P2 were invisible
+  // when the clip path clobbered it).
+  let shapeName = corner.preset;
+  const patch = computeClippedPatch(b, el.clipMask);
+  if (patch && opts.fill) {
+    if (bareFill && rasterHostPaintsPatch(el.clipMask, patch)) return null;
+    shapeName = applyClipPatch(opts, patch, gradientRegistry, gradientId);
+  }
+
+  // Keep the solid placeholder in sync with the (possibly angle-mutated)
+  // registry entry; injectGradientsIntoZip reads the registry directly for
+  // the final <a:gradFill>, so only the first-stop placeholder matters here.
+  if (gradientId >= 0) opts.fill = { color: hexToRgb(gradientRegistry[gradientId].stops[0].color) };
+
+  return { shapeName, opts };
+}
+
+/** Un-representable corner: the clipped region needs a radius larger than 50%
+ * of its own dimension (e.g. slide_12's navy status-bar strip / notch hugging
+ * the device top — radius 32px on a ~44px strip). A native roundRect's `adj`
+ * maxes at 50% ("only goes halfway"), so emitting one would clamp the curve
+ * and the squared shoulder would poke past the device's true rounded edge.
+ * True when the clipping host was rasterised WHOLE to a 2× PNG
+ * (rasterizedHost, no top-strip split) and the patch needs such a corner: that
+ * backing image already paints the correct rounded chrome, so the native
+ * overlay is skipped. Sub-50% corners (e.g. the tall gradient screen at the
+ * device bottom) stay native. The top-strip case is handled in emitRect
+ * before the patch is even computed, so it also catches the notch, which hugs
+ * the top edge without touching a rounded corner. */
+function rasterHostPaintsPatch(mask: ClipMask | null | undefined, patch: PatchGeometry): boolean {
+  if (!mask?.rasterizedHost || typeof mask.rasterBottomY === "number") return false;
+  const mcr = mask.cornerRadii;
+  const pb0 = patch.bounds;
+  const capR = Math.min(pb0.w, pb0.h) / 2;
+  const reqR = Math.max(
+    patch.cornerRadii.tl > 0 ? mcr.tl : 0,
+    patch.cornerRadii.tr > 0 ? mcr.tr : 0,
+    patch.cornerRadii.br > 0 ? mcr.br : 0,
+    patch.cornerRadii.bl > 0 ? mcr.bl : 0,
+  );
+  return reqR > capR + 0.5;
+}
+
+/** Turns the host shape `opts` into the clipped patch: its bounds and the
+ * preset of its rounded corners. Returns the preset to draw. A registered
+ * gradient (`gradientId >= 0`) is pre-compensated for the flip or rotation the
+ * preset needs, so its VISIBLE direction is unchanged. */
+function applyClipPatch(
+  opts: ShapeProps,
+  patch: PatchGeometry,
+  gradientRegistry: Gradient[],
+  gradientId: number,
+): ShapeName {
+  const pcr = patch.cornerRadii;
+  const pcp = cornerPresetFromRadii(pcr);
+  const pb = patch.bounds;
+  opts.x = px2in(pb.x); opts.y = px2in(pb.y);
+  opts.w = px2in(pb.w); opts.h = px2in(pb.h);
+  if (pcp.preset === "rect") return pcp.preset;
+  opts.rectRadius = px2in(Math.max(pcr.tl, pcr.tr, pcr.br, pcr.bl));
+  opts.flipH = pcp.flipH || undefined;
+  opts.flipV = pcp.flipV || undefined;
+  // A gradient fill rotates WITH the shape (rotWithShape="1"), so the
+  // corner-preset flip(s) mirror the fill too — a 135° screen gradient
+  // on a bottom-rounded device screen (round2SameRect + flipV) renders
+  // upside-down (slide_12). Pre-mirror the stored CSS angle by the same
+  // flip(s) so the VISIBLE direction is unchanged: vertical flip
+  // θ→180−θ, horizontal flip θ→360−θ (they compose). The side-rounded
+  // 90/270 path below handles the rotation case (angle−rot).
+  if (gradientId >= 0 && (pcp.flipH || pcp.flipV)) {
+    const g = gradientRegistry[gradientId];
+    if (g && g.type !== "radial") {
+      let a = (((g.angle ?? 180) % 360) + 360) % 360;
+      if (pcp.flipV) a = (((180 - a) % 360) + 360) % 360;
+      if (pcp.flipH) a = (((360 - a) % 360) + 360) % 360;
+      gradientRegistry[gradientId] = { ...g, angle: a };
+    }
+  }
+  if (!needsFlatCornerOverlay(pcr)) return pcp.preset;
+  // Side-rounded clip (TL+BL / TR+BR) has no direct OOXML preset.
+  // The old path fell back to an all-corners `roundRect` + solid R×R
+  // corner overlays to square the flat pair — but on a GRADIENT host
+  // those overlays use the solid first-stop fallback fill, painting a
+  // mismatched solid block over the gradient and leaving the "straight"
+  // edge rounded with artifacts (slide_32 P0/P1/P2 pills clipped at the
+  // left edge of a rounded `.row`). Per the user's guidance: because
+  // the radii are < half the dimension, draw it as a SINGLE
+  // `round2SameRect` (rounds the TOP pair by default) rotated so the
+  // rounded pair lands on the correct side — 270° → left-rounded,
+  // 90° → right-rounded. No overlays, gradient injects onto the one
+  // shape. Rotating swaps the footprint's w/h, so emit the un-rotated
+  // shape with swapped ext, recentered on the patch center.
+  const leftRounded = pcr.tl > 2 && pcr.bl > 2; // else right-rounded (TR+BR)
+  const rot = leftRounded ? 270 : 90;
+  const cx = pb.x + pb.w / 2;
+  const cy = pb.y + pb.h / 2;
+  const W0 = pb.h; // un-rotated width  (becomes footprint height after 90/270)
+  const H0 = pb.w; // un-rotated height (becomes footprint width)
+  const rPx = Math.min(
+    Math.max(pcr.tl, pcr.tr, pcr.br, pcr.bl),
+    Math.min(W0, H0) / 2,
+  );
+  opts.x = px2in(cx - W0 / 2);
+  opts.y = px2in(cy - H0 / 2);
+  opts.w = px2in(W0);
+  opts.h = px2in(H0);
+  opts.rectRadius = px2in(rPx);
+  opts.rotate = rot;
+  opts.flipH = undefined;
+  opts.flipV = undefined;
+  // Gradient fill rotates WITH the shape (rotWithShape="1"), so
+  // pre-rotate the stored angle by -rot to keep the visible
+  // direction unchanged.
+  if (gradientId >= 0) {
+    const g = gradientRegistry[gradientId];
+    if (g && g.type !== "radial") {
+      gradientRegistry[gradientId] = {
+        ...g,
+        angle: (((g.angle ?? 180) - rot) % 360 + 360) % 360,
+      };
+    }
+  }
+  return "round2SameRect";
+}
+
+/** Paints non-uniform border strips OVER the content shape so they survive
+ * the bg fill (otherwise a 4px bottom-border on a white card disappears under
+ * the white fill rect). A rounded, filled card takes the sandwich when it
+ * applies; everything else gets flat strips. */
+function emitRectPartialBorder(
+  slide: Slide,
+  el: RectElement,
+  cr: CornerRadii,
+  anyRounded: boolean,
+  bs: BorderSides,
+): void {
+  if (anyRounded && el.fill && emitRoundedBorderSandwich(slide, el.bounds, cr, bs, { fill: el.fill, borderRadius: el.borderRadius ?? 0 })) return;
+  for (const side of borderStrips(el.bounds, bs)) {
+    if (side.style === "dashed" || side.style === "dotted") {
+      const isHoriz = side.w > side.h;
+      // Minimum 1pt stroke for dashed/dotted — Google Slides renders
+      // sub-pt dashed strokes as a single thin solid line (or drops
+      // them entirely), erasing `.stat-row { border-bottom: 1px
+      // dotted }`-style dividers. 1pt is barely visible but keeps
+      // the dash pattern intact.
+      slide.addShape("line", {
+        x: px2in(side.x), y: px2in(side.y),
+        w: isHoriz ? px2in(side.w) : 0,
+        h: isHoriz ? 0 : px2in(side.h),
+        line: {
+          color: hexToRgb(side.color),
+          width: Math.max((isHoriz ? side.h : side.w) * PX2PT, 1),
+          // Thin (≤2px) dashed → finer sysDash cadence (slide_33
+          // .out `border-top: 1px dashed`); coarse "dash" only for
+          // thicker borders.
+          dashType: side.style === "dashed" ? ((isHoriz ? side.h : side.w) <= 2 ? "sysDash" : "dash") : "sysDot",
+        },
+      });
+    } else {
+      emitSolidStrip(slide, side);
+    }
+  }
+}
+
+/** Rounded + partial borders, painted so the bordered sides follow the curve
+ * (a flat strip along the edge would cut straight across the rounded corners,
+ * slide_09). Two-rect sandwich:
+ *   1. Outer rounded rect filled with the border color.
+ *   2. Inner rounded rect filled with the card's own background, inset by
+ *      (borderWidth) on each bordered side and 0 on the non-bordered sides.
+ * Only the bordered sides' strips remain visible, and they curve along the
+ * shared border-radius. Works for any single side, any combination, any
+ * radius. Returns false (painting nothing) when any bordered side is
+ * dashed/dotted (the inner-fill trick would blur the dashes), when the bordered
+ * sides disagree on color, or when no bordered side touches a rounded corner. */
+function emitRoundedBorderSandwich(
+  slide: Slide,
+  b: Bounds,
+  cr: CornerRadii,
+  bs: BorderSides,
+  card: { readonly fill: string; readonly borderRadius: number },
+): boolean {
+  const hasTop = (bs.top?.width || 0) > 0 && bs.top?.color;
+  const hasBottom = (bs.bottom?.width || 0) > 0 && bs.bottom?.color;
+  const hasLeft = (bs.left?.width || 0) > 0 && bs.left?.color;
+  const hasRight = (bs.right?.width || 0) > 0 && bs.right?.color;
+  const borderColors = [hasTop && bs.top.color, hasBottom && bs.bottom.color, hasLeft && bs.left.color, hasRight && bs.right.color].filter(Boolean) as string[];
+  const sameColor = borderColors.every((c: string) => c === borderColors[0]);
+  const allSolid = [hasTop && bs.top, hasBottom && bs.bottom, hasLeft && bs.left, hasRight && bs.right]
+    .filter(Boolean)
+    .every((s) => (s as BorderSide).style !== "dashed" && (s as BorderSide).style !== "dotted");
+  // Only run the sandwich when at least one bordered side actually
+  // touches a rounded corner. slide_25's `border-left: 4px; border-radius: 0 8px 8px 0`
+  // has its single bordered side (left) on two flat corners (TL,BL);
+  // the sandwich would then paint a full-footprint border-coloured
+  // roundRect behind an inner fill that's inset only on the left,
+  // leaving a visible blue crescent at TR/BR where the outer's
+  // radius-8 curve extends past the inner's shrunk radius. In that
+  // geometry the flat-strip emitter does the right thing.
+  const roundedCornerOnBorderedSide =
+    (hasTop && (cr.tl > 2 || cr.tr > 2)) ||
+    (hasBottom && (cr.bl > 2 || cr.br > 2)) ||
+    (hasLeft && (cr.tl > 2 || cr.bl > 2)) ||
+    (hasRight && (cr.tr > 2 || cr.br > 2));
+  if (!(sameColor && allSolid && borderColors.length > 0 && roundedCornerOnBorderedSide)) return false;
+  // Both outer and inner sandwich rects MUST honor the same
+  // per-corner preset as the content shape — otherwise the
+  // outer's `roundRect` (all-4-corners) draws a curved bottom
+  // edge under a top-only-rounded card header (slide_01
+  // Professional pricing card).
+  const sandwichCp = cornerPresetFromRadii(cr);
+  const sandwichOuterOpts: ShapeProps = {
+    x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
+    fill: { color: hexToRgb(borderColors[0]) },
+    line: { type: "none" },
+  };
+  if (sandwichCp.preset !== "rect") {
+    sandwichOuterOpts.rectRadius = px2in(card.borderRadius);
+    if (sandwichCp.flipH) sandwichOuterOpts.flipH = true;
+    if (sandwichCp.flipV) sandwichOuterOpts.flipV = true;
+  }
+  // 1. Outer = border color across the full footprint, same corner mask.
+  slide.addShape(sandwichCp.preset, sandwichOuterOpts);
+  if (needsFlatCornerOverlay(cr)) {
+    emitFlatCornerOverlays(slide, b, cr, sandwichOuterOpts.fill);
+  }
+  // 2. Inner = card fill, inset by border widths on bordered sides only.
+  const iTop = hasTop ? (bs.top.width || 0) : 0;
+  const iBottom = hasBottom ? (bs.bottom.width || 0) : 0;
+  const iLeft = hasLeft ? (bs.left.width || 0) : 0;
+  const iRight = hasRight ? (bs.right.width || 0) : 0;
+  const ix = b.x + iLeft;
+  const iy = b.y + iTop;
+  const iw = Math.max(0, b.w - iLeft - iRight);
+  const ih = Math.max(0, b.h - iTop - iBottom);
+  // Inner per-corner radii: shrink each rounded corner by the MIN
+  // of its two adjacent-side insets. Using `max(insets)` across
+  // all sides caused a blue crescent at TR/BR on a left-only
+  // bordered card because a 4 px left-inset was subtracted from
+  // a radius whose adjacent sides (top, right) had 0 inset — the
+  // inner's curve pulled away from the outer's curve and the
+  // border-coloured ring leaked through on the non-bordered side.
+  const innerCr = {
+    tl: cr.tl > 2 ? Math.max(0, cr.tl - Math.min(iTop, iLeft)) : 0,
+    tr: cr.tr > 2 ? Math.max(0, cr.tr - Math.min(iTop, iRight)) : 0,
+    br: cr.br > 2 ? Math.max(0, cr.br - Math.min(iBottom, iRight)) : 0,
+    bl: cr.bl > 2 ? Math.max(0, cr.bl - Math.min(iBottom, iLeft)) : 0,
+  };
+  const innerCp = cornerPresetFromRadii(innerCr);
+  const innerR = Math.max(innerCr.tl, innerCr.tr, innerCr.br, innerCr.bl);
+  const innerOpts: ShapeProps = {
+    x: px2in(ix), y: px2in(iy), w: px2in(iw), h: px2in(ih),
+    fill: { color: hexToRgb(card.fill) },
+    line: { type: "none" },
+  };
+  if (innerR > 0 && innerCp.preset !== "rect") {
+    innerOpts.rectRadius = px2in(innerR);
+    if (innerCp.flipH) innerOpts.flipH = true;
+    if (innerCp.flipV) innerOpts.flipV = true;
+  }
+  slide.addShape(innerR > 0 ? innerCp.preset : "rect", innerOpts);
+  if (innerR > 0 && needsFlatCornerOverlay(innerCr)) {
+    emitFlatCornerOverlays(slide, { x: ix, y: iy, w: iw, h: ih }, innerCr, innerOpts.fill);
+  }
+  return true;
+}
+
+// --- triangle, poly, line ---
+
+/** CSS border-triangle arrow → pptxgenjs `triangle` preset (apex-up by
+ * default). `rotate` selects which way the apex points: 0=up, 90=right,
+ * 180=down, 270=left.
+ *
+ * OOXML rotation rotates the shape about the bbox center but keeps the bbox
+ * axis-aligned and fixed in size. A 12×16 triangle rotated 90° would render
+ * inside a 12×16 slot, clipping apex/base. For 90° and 270° rotations we swap
+ * w and h around the center so the post-rotation shape fits its visual
+ * extent. */
+function emitTriangle(slide: Slide, el: TriangleElement): void {
+  const b = el.bounds;
+  const rot = typeof el.rotate === "number" ? el.rotate : 0;
+  let rx = b.x, ry = b.y, rw = b.w, rh = b.h;
+  if (rot === 90 || rot === 270) {
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    rw = b.h; rh = b.w;
+    rx = cx - rw / 2; ry = cy - rh / 2;
+  }
+  const triOpts: ShapeProps = {
+    x: px2in(rx), y: px2in(ry), w: px2in(rw), h: px2in(rh),
+    fill: { color: hexToRgb(el.fill || "#000000") },
+    line: { type: "none" },
+  };
+  if (rot !== 0) triOpts.rotate = rot;
+  slide.addShape("triangle", triOpts);
+}
+
+/** CSS `clip-path: polygon(...)` host → native `custGeom` freeform. Emitting
+ * the polygon as a real Slides shape (instead of a rasterised PNG) makes
+ * trapezoids/arbitrary convex shapes editable and lets them carry a solid OR
+ * linear-gradient fill. slide_13's four funnel stages are the motivating case:
+ * four screenshots collapse into four shapes. */
+function emitPoly(ctx: EmitContext, el: PolyElement): void {
+  const b = el.bounds;
+  const pts = el.points || [];
+  if (pts.length < 3) return;
+  // Points arrive as px offsets relative to the shape's bbox top-left;
+  // custGeom expects them in the frame's own inch coordinate space.
+  const polyPoints: NonNullable<ShapeProps["points"]> = pts.map((p) => ({
+    x: px2in(p.x), y: px2in(p.y),
+  }));
+  polyPoints.push({ close: true });
+  const polyOpts: ShapeProps = {
+    x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
+    points: polyPoints,
+    line: { type: "none" },
+  };
+  const paint = registerShapeFill(ctx.gradientRegistry, el);
+  if (paint.fill) polyOpts.fill = paint.fill;
+  if (paint.objectName) polyOpts.objectName = paint.objectName;
+  // `custGeom` is a valid runtime shape (pptxgen.es.js emits <a:custGeom>)
+  // but the published SHAPE_NAME union omits it — cast like the preset path.
+  ctx.slide.addShape("custGeom" as Parameters<Slide["addShape"]>[0], polyOpts);
+}
+
+/** A hairline: endpoint-defined (`x1/y1/x2/y2`), or a thin decorative strip
+ * drawn along its long axis. */
+function emitLine(slide: Slide, el: LineElement): void {
+  if (
+    typeof el.x1 === "number" && typeof el.y1 === "number" &&
+    typeof el.x2 === "number" && typeof el.y2 === "number"
+  ) {
+    const dx = el.x2 - el.x1;
+    const dy = el.y2 - el.y1;
+    const lineOpts: ShapeProps = {
+      x: px2in(Math.min(el.x1, el.x2)),
+      y: px2in(Math.min(el.y1, el.y2)),
+      w: px2in(Math.abs(dx)),
+      h: px2in(Math.abs(dy)),
+      line: {
+        color: hexToRgb(el.color || "#000000"),
+        width: Math.max(0.5, (el.strokeWidth || 1) * PX2PT),
+      },
+    };
+    if (dx * dy < 0) lineOpts.flipV = true;
+    slide.addShape("line", lineOpts);
+    return;
+  }
+  const b = el.bounds;
+  const isVertical = b.h > b.w * 2;
+  const stroke: ShapeLineProps = {
+    color: hexToRgb(el.color || "#000000"),
+    width: Math.max(0.5, isVertical ? b.w * PX2PT : b.h * PX2PT),
+  };
+  // Decorative dashed strips (e.g. slide_33 `.road::before` centerline)
+  // carry a dashType from extract-dom.
+  // TODO(types): `dashType` is a raw OOXML preset string from extract-dom;
+  // the published pptxgenjs union is narrower than the valid preset set.
+  if (el.dashType && el.dashType !== "solid") stroke.dashType = el.dashType as DashTypeValue;
+  // An OOXML line stroke is CENTERED on its position, so a decorative
+  // strip must sit on its CENTER axis, not its top/left edge. The strip
+  // bounds carry the full box (e.g. slide_33 `.road::before`: top:5px,
+  // height:4px → visual center is the road's center). Placing the stroke
+  // at `b.y` would render `b.h/2` (~2px) too high; center it instead.
+  slide.addShape("line", {
+    x: px2in(isVertical ? b.x + b.w / 2 : b.x),
+    y: px2in(isVertical ? b.y : b.y + b.h / 2),
+    w: isVertical ? 0 : px2in(b.w),
+    h: isVertical ? px2in(b.h) : 0,
+    line: stroke,
+  });
+}
+
+// --- list ---
+
+/** Lists come in two flavors:
+ *   1. Pure-text lists → render natively with pptxgenjs bullet/number so the
+ *      user sees real disc/decimal markers (Google Slides keeps them editable
+ *      as a real bulleted list).
+ *   2. Styled lists (any <li> has borderBottom, bg, or its own border/radius)
+ *      → render item-by-item so we can paint per-row boxes, separators, and
+ *      mixed backgrounds.
+ * The list's container background (bg+border+radius on the <ul>/<ol> itself)
+ * is emitted as a separate "rect" element upstream in walk(). */
+function emitList(ctx: EmitContext, el: ListElement): void {
+  const items: readonly ListItem[] = (el.items || []).filter((it) => (it.text || "").trim().length > 0);
+  if (items.length === 0) return;
+  if (el.anyStyledItem) emitStyledList(ctx.slide, el, items);
+  else emitPlainList(ctx, el, items);
+}
+
+/** Options of a list marker run typed as text, in the item's font. */
+function listMarkerOptions(it: ListItem, listStyle: ElementStyle, color: string): TextPropsOptions {
+  return {
+    fontFace: mapFont(it.fontFamily || listStyle.fontFamily || "Arial"),
+    fontSize: (it.fontSize || listStyle.fontSize || 14) * PX2PT,
+    color: hexToRgb(color),
+  };
+}
+
+/** What a list item's styled runs inherit from the item and the list. */
+function listItemRunInheritance(it: ListItem, listStyle: ElementStyle): Parameters<typeof inheritedRunOptions>[1] {
+  return {
+    fontFamily: it.fontFamily || listStyle.fontFamily || "Arial",
+    fontSize: it.fontSize || listStyle.fontSize || 14,
+    color: it.color || listStyle.color || "#333333",
+    bold: it.fontWeight === "bold",
+    italic: it.fontStyle === "italic",
+  };
+}
+
+/** Pure text — a bulleted/numbered list in a single textbox.
+ *
+ * Native pptxgenjs `bullet` (→ `<a:buAutoNum>`/`<a:buChar>`) works only when
+ * the paragraph is a single run. As soon as an item has multiple runs,
+ * pptxgenjs writes a second <a:pPr> with <a:buNone/> between runs, and Google
+ * Slides reads that and drops the marker. Workaround: when ANY item has styled
+ * runs, prepend the marker as a plain text run and skip `bullet`. */
+function emitPlainList(ctx: EmitContext, el: ListElement, items: readonly ListItem[]): void {
+  const b = el.bounds;
+  const listStyle = el.style || {};
+  const ordered = !!el.ordered;
+  const noListStyle = (el.listStyleType || "disc") === "none";
+  const anyItemHasStyledRuns = items.some((it) =>
+    (it.runs || []).length > 0 && (it.runs || []).some((r) => r.style !== null)
+  );
+  // Per-item ::before bullet colours (e.g. slide_30 Key Priorities,
+  // where each <li.red>/<li.green>/etc gets its own coloured 8×8
+  // dot). pptxgenjs' native `bullet:` paints every marker in the
+  // paragraph's text colour, so per-item bullet colour cannot be
+  // honoured through the native path.
+  //
+  // wave-12D decision: we always prefer native pptxgenjs bullets
+  // (<a:buChar>) over the literal "•  " text-prefix fallback —
+  // the user explicitly accepted monochrome bullets in exchange
+  // for a real bulleted list (proper hanging-indent, real wrap,
+  // editable list in Slides). The OLD gate `&& !anyPerItemBulletColor`
+  // forced the text-prefix path on slide_11 SWOT and slide_30 Key
+  // Priorities, breaking word-wrap.
+  // A `list-style:none` list normally has no markers, EXCEPT when
+  // each <li> draws a CSS dot via `::before { content:''; background }`
+  // (slide_30 Key Priorities) — those filled dots ARE the bullets and
+  // were being dropped entirely ("There are no list items"). Those
+  // dot-bullet lists now go NATIVE (see useNativeBullet below); a
+  // literal-glyph `::before { content:'•'; color }` list (slide_11
+  // SWOT) keeps its prior plain-text rendering untouched.
+  const anyDotBullet = noListStyle && !ordered && items.some((it) => !!it.bulletColor && it.bulletIsDot);
+  // list-style:none with a LITERAL-GLYPH ::before ('•', color) — slide_11
+  // SWOT — was dropping its markers entirely; revive them too.
+  const anyGlyphBullet = noListStyle && !ordered && items.some((it) => !!it.bulletColor && !it.bulletIsDot);
+  const anyPerItemBulletColor = (!noListStyle && !ordered && items.some((it) => !!it.bulletColor)) || anyDotBullet || anyGlyphBullet;
+  // Exclude ORDERED lists from the native autonumber path: pptxgenjs
+  // hardcodes its autonumber buFont to the theme major font (Calibri
+  // Light), so "1." markers render smaller/thinner than the item's
+  // Arial (slide_12). The text-marker fallback (`marker + it.text`)
+  // emits the number in the item's own font/size instead.
+  //
+  // `anyDotBullet` lists (list-style:none + CSS dot ::before,
+  // slide_30) take the NATIVE path too: user feedback wave-13 —
+  // "Not a list element, just text with bullets" — the typed
+  // '•  ' glyph run is not a real Slides list. Per-item bullet
+  // COLOR (which pptxgenjs cannot express) is recorded in
+  // bulletColorRegistry and injected as <a:buClr> by the
+  // injectBulletColorsIntoZip post-patch.
+  const useNativeBullet = (!noListStyle || anyDotBullet) && !anyItemHasStyledRuns && !ordered;
+  const paragraphs = items.map((it: ListItem, ii: number) => {
+    const marker = ordered ? `${ii + 1}.  ` : "•  ";
+    const markerColor = it.bulletColor || it.color || listStyle.color || "#333333";
+    const rs: readonly TextRun[] | null = (it.runs && it.runs.length > 0) ? it.runs.filter((r) => r.text.length > 0) : null;
+    if (rs && rs.length > 0 && rs.some((r) => r.style !== null)) {
+      const out: TextProps[] = [];
+      if (!useNativeBullet && (!noListStyle || anyDotBullet)) {
+        // Plain marker prefix coloured per-item (falls back to the
+        // item's text colour when there is no per-item bullet).
+        // `anyDotBullet` lets a `list-style:none` list with CSS dot
+        // markers still emit them in front of styled-run items.
+        out.push({ text: marker, options: listMarkerOptions(it, listStyle, markerColor) });
+      }
+      rs.forEach((run: TextRun, ri: number) => {
+        const opts = inheritedRunOptions(run.style || {}, listItemRunInheritance(it, listStyle));
+        if (useNativeBullet && ri === 0 && out.length === 0) {
+          opts.bullet = ordered ? { type: "number", indent: 12 } : { indent: 12 };
+        }
+        if (ri === rs.length - 1) opts.breakLine = true;
+        out.push({ text: run.text, options: opts });
+      });
+      return out;
+    }
+    const baseOpts: TextPropsOptions = {
+      fontFace: mapFont(it.fontFamily || listStyle.fontFamily || "Arial"),
+      fontSize: (it.fontSize || listStyle.fontSize || 14) * PX2PT,
+      color: hexToRgb(it.color || listStyle.color || "#333333"),
+      bold: it.fontWeight === "bold",
+      italic: it.fontStyle === "italic",
+      breakLine: true,
+    };
+    if (useNativeBullet) {
+      // CSS-dot items (::before filled box) get ● (U+25CF) so the
+      // native marker approximates the original fat 8×8 dot — the
+      // default • renders visibly smaller than the CSS dot.
+      baseOpts.bullet = it.bulletIsDot && it.bulletColor
+        ? { characterCode: "25CF", indent: 12 }
+        : { indent: 12 };
+      return [{ text: it.text, options: baseOpts }];
+    }
+    // Colored marker prefix when the list carries per-item bullet
+    // colours (e.g. slide_30 Key Priorities). Split into a
+    // coloured marker run + the item-coloured text run so each
+    // row's "●" matches its CSS ::before background while body
+    // text keeps the item colour.
+    if (!ordered && anyPerItemBulletColor) {
+      return [
+        { text: marker, options: listMarkerOptions(it, listStyle, markerColor) },
+        { text: it.text, options: { ...baseOpts } },
+      ];
+    }
+    return [{ text: noListStyle ? it.text : marker + it.text, options: baseOpts }];
+  }).flat();
+
+  const layout = plainListLayout(el, items[0] || {});
+  // Per-item native-bullet colors ride the side-band registry
+  // (pptxgenjs has no <a:buClr> support); the BUCLR_<n> objectName
+  // tag is how injectBulletColorsIntoZip finds this textbox. One
+  // registry slot per item paragraph, null = keep default marker.
+  const nativeBulletColors: (string | null)[] = useNativeBullet
+    ? items.map((it) => (it.bulletColor ? hexToRgb(it.bulletColor) : null))
+    : [];
+  const needBulletClr = nativeBulletColors.some((c) => c !== null);
+  const bulletClrName = needBulletClr ? `BUCLR_${ctx.bulletColorRegistry.length}` : undefined;
+  if (needBulletClr) ctx.bulletColorRegistry.push({ colors: nativeBulletColors });
+  ctx.slide.addText(paragraphs, {
+    x: px2in(b.x), y: px2in(layout.y), w: px2in(b.w), h: px2in(layout.h),
+    valign: "top",
+    align: "left",
+    fill: { type: "none" },
+    line: { type: "none" },
+    margin: layout.topInsetPt > 0 ? [0, 0, 0, layout.topInsetPt] : 0,
+    paraSpaceAfter: layout.paraSpaceAfterPt > 0 ? layout.paraSpaceAfterPt : undefined,
+    lineSpacingMultiple: layout.lineSpacingMultiple,
+    objectName: bulletClrName,
+  });
+}
+
+/** Vertical placement and spacing of a plain list's textbox, from its first
+ * item's line-height, margin and padding. */
+function plainListLayout(el: ListElement, firstIt: ListItem): {
+  readonly y: number;
+  readonly h: number;
+  readonly topInsetPt: number;
+  readonly paraSpaceAfterPt: number;
+  readonly lineSpacingMultiple: number | undefined;
+} {
+  const b = el.bounds;
+  // Honor CSS line-height when explicitly set. Emit
+  // `lineSpacingMultiple` → `<a:lnSpc><a:spcPct/></a:lnSpc>`
+  // pre-divided by 1.2 (Slides' inferred font-default leading)
+  // so the rendered multiplier matches the CSS ratio. List items
+  // never go through extract-dom's measured-pitch override
+  // (no inline-inflated boxes), so the absolute-pts path used by
+  // .text-block is wrong here — wave-9 emitted absolute pts
+  // unconditionally and rendered slide_11 SWOT bullets too loose
+  // ("line height is wrong"). Skip the override when ratio is at
+  // (or near) the 1.2 default — Slides' built-in default already
+  // matches.
+  //
+  // CSS `li { padding: 4px 0 }` adds 8 px of inter-line spacing in the
+  // browser; OOXML paragraph spacing has no padding concept, so fold
+  // li padding-top + padding-bottom into paraSpaceAfter alongside
+  // marginBottom (slide_11 SWOT bullets render too tight without this).
+  const liPadV = ((firstIt.padding && firstIt.padding.top) || 0)
+    + ((firstIt.padding && firstIt.padding.bottom) || 0);
+  const paraSpaceAfterPt = ((firstIt.marginBottom || 0) + liPadV) * PX2PT;
+  const liRatio = firstIt.lineHeight && firstIt.fontSize
+    ? firstIt.lineHeight / firstIt.fontSize
+    : 0;
+  const liUseRatio = liRatio >= 1.05 && liRatio <= 3.0 && Math.abs(liRatio - 1.2) > 0.08;
+  const liEmittedRatio = liRatio / 1.2;
+  // First-line leading compensation. `paraSpaceAfter` spaces items
+  // BETWEEN each other but never adds the leading Chrome renders ABOVE
+  // the FIRST line: the first <li>'s padding-top + half-leading
+  // ((ratio−1)/2 × font). Google Slides anchors the first paragraph at
+  // the textbox top, so the whole list rides up and packs against the
+  // card header — the user's "positioning of the text is too high"
+  // report on slide_11 (~7px: li padding-top 4px + half-leading 3.5px
+  // @ line-height 1.5). Fold that first-line lead into the textbox top
+  // inset. No-op for tight/zero-padding lists (lead ≤ 1px).
+  const liPadTopPx = (firstIt.padding && firstIt.padding.top) || 0;
+  const liFirstLineLeadPx =
+    liPadTopPx + (liUseRatio && firstIt.fontSize ? ((liRatio - 1) / 2) * firstIt.fontSize : 0);
+  // When extract-dom measured Chrome's first baseline, place Google's on it instead
+  // (slides-first-baseline.ts): the lead above is a stylesheet half-leading, but Google
+  // puts a line's extra spacing below the glyphs, so slide_11's Roboto items at 1.5 drew
+  // about 1.5 px low with it.
+  const listPlacement =
+    typeof el.firstBaselineY === "number" && typeof el.firstLineFontSize === "number" && el.firstLineFontSize > 0
+      ? topAnchoredTextPlacement({
+          boxTopPx: b.y,
+          boxHeightPx: b.h,
+          chromeFirstBaselinePx: el.firstBaselineY,
+          lineSpacingMultiple: liUseRatio ? liEmittedRatio : 1,
+          firstLineFontSizePx: el.firstLineFontSize,
+        })
+      : null;
+  return {
+    y: listPlacement === null ? b.y : listPlacement.topPx,
+    h: listPlacement === null ? b.h : listPlacement.heightPx,
+    topInsetPt: listPlacement !== null
+      ? listPlacement.topInsetPx * PX2PT
+      : liFirstLineLeadPx > 1 ? liFirstLineLeadPx * PX2PT : 0,
+    paraSpaceAfterPt,
+    lineSpacingMultiple: liUseRatio ? liEmittedRatio : undefined,
+  };
+}
+
+/** Styled list — per-item rendering with optional per-row box. Semantically
+ * still a list: prepend the bullet/number marker to each item's text so
+ * disc/decimal markers survive the split. Suppress markers only when the item
+ * is pill-like (large radius, content-fit width) — in that case the visual is
+ * the pill chip, not a list row. */
+function emitStyledList(slide: Slide, el: ListElement, items: readonly ListItem[]): void {
+  const b = el.bounds;
+  const rowH = b.h / items.length;
+  for (let ii = 0; ii < items.length; ii++) {
+    const it = items[ii];
+    const ib = it.bounds || { x: b.x, y: b.y + ii * rowH, w: b.w, h: rowH };
+    emitStyledListItem(slide, el, it, ii, ib);
+  }
+}
+
+function emitStyledListItem(slide: Slide, el: ListElement, it: ListItem, ii: number, ib: Bounds): void {
+  const listStyle = el.style || {};
+  const ordered = !!el.ordered;
+  const noListStyle = (el.listStyleType || "disc") === "none";
+  const text = it.text || "";
+
+  // Per-item background / border / radius. Uniform borders ride on
+  // the shape's `line`; non-uniform borders (e.g. a row with only
+  // borderBottom, or a highlighted row with only borderLeft accent)
+  // are painted as per-side strips so we don't draw a full outline.
+  const bs: BorderSides = it.borderSides || { top: { width: 0, color: "" }, right: { width: 0, color: "" }, bottom: { width: 0, color: "" }, left: { width: 0, color: "" } };
+  const sides: readonly BorderSide[] = [bs.top, bs.right, bs.bottom, bs.left];
+  const uniformItemBorder = sides.every((s) =>
+    s && s.width === bs.top.width && s.color === bs.top.color && s.style === bs.top.style,
+  ) && (bs.top.width || 0) > 0;
+  const hasItemBg = !!it.bgColor;
+  const hasAnyItemBorder = sides.some((s) => s && (s.width || 0) > 0 && s.color);
+
+  if (hasItemBg || uniformItemBorder) {
+    const rectOpts: ShapeProps = {
+      x: px2in(ib.x), y: px2in(ib.y), w: px2in(ib.w), h: px2in(ib.h),
+      line: { type: "none" },
+    };
+    if (hasItemBg) {
+      rectOpts.fill = { color: hexToRgb(it.bgColor) };
+      if (typeof it.bgAlpha === "number" && it.bgAlpha < 1) {
+        rectOpts.fill.transparency = Math.round((1 - it.bgAlpha) * 100);
+      }
+    } else {
+      rectOpts.fill = { type: "none" };
+    }
+    if (uniformItemBorder) {
+      rectOpts.line = {
+        color: hexToRgb(bs.top.color),
+        width: Math.min((bs.top.width || 0) * PX2PT, 6),
+        dashType: asDashType(bs.top.style === "dashed" ? "dash" : bs.top.style === "dotted" ? "dot" : "solid"),
+      };
+    }
+    const rounded = it.borderRadius && it.borderRadius > 0;
+    if (rounded) rectOpts.rectRadius = px2in(it.borderRadius);
+    slide.addShape(rounded ? "roundRect" : "rect", rectOpts);
+  }
+  if (!uniformItemBorder && hasAnyItemBorder) {
+    for (const strip of borderStrips(ib, bs)) emitSolidStrip(slide, strip);
+  }
+
+  // Respect <li> *horizontal* padding so text inside rounded pills
+  // doesn't collide with curved edges. Vertically we use the full
+  // item bounds and let `valign: "middle"` center the text —
+  // subtracting top/bottom padding makes the text sit with extra
+  // top-gap because padded middle ≠ full-box middle for asymmetric
+  // CSS padding (slide_13: 12px top padding on features li with
+  // an 8px ul padding-top).
+  const ipad = it.padding || { top: 0, right: 0, bottom: 0, left: 0 };
+  const isPillLike = (it.borderRadius || 0) >= Math.min(ib.w, ib.h) * 0.4 && ib.w < 400;
+  const tx = ib.x + ipad.left;
+  const ty = ib.y;
+  const tw = Math.max(1, ib.w - ipad.left - ipad.right);
+  const th = ib.h;
+  const textOpts: TextPropsOptions = {
+    x: px2in(tx), y: px2in(ty), w: px2in(tw), h: px2in(th),
+    valign: "middle",
+    align: isPillLike ? "center" : it.textAlign === "center" ? "center" : it.textAlign === "right" ? "right" : "left",
+    fontSize: (it.fontSize || listStyle.fontSize || 14) * PX2PT,
+    fontFace: mapFont(it.fontFamily || listStyle.fontFamily || "Arial"),
+    color: hexToRgb(it.color || listStyle.color || "#333333"),
+    bold: it.fontWeight === "bold",
+    italic: it.fontStyle === "italic",
+    fill: { type: "none" },
+    line: { type: "none" },
+    margin: 0,
+  };
+
+  // Marker decision is per-LIST, not per-item. The per-item rule was
+  // wrong because (a) :last-child losing its border-bottom
+  // regressed into "marker added", and (b) a highlighted row with
+  // `background` inside a card container wrongly flipped into a
+  // marker row.
+  //
+  // `el.isContainerList` is true when the <ul>/<ol> has its own
+  // bg/border/radius OR a majority of items use border-bottom as
+  // row separator. In both cases the container is the visual,
+  // rows inside never get markers.
+  const showMarker = !el.isContainerList && !isPillLike && !noListStyle;
+  const marker = ordered ? `${ii + 1}.  ` : "•  ";
+
+  if (it.runs && it.runs.length > 0 && it.runs.some((r) => r.style !== null)) {
+    const textRuns: TextProps[] = [];
+    if (showMarker) {
+      textRuns.push({ text: marker, options: listMarkerOptions(it, listStyle, it.color || listStyle.color || "#333333") });
+    }
+    for (const run of it.runs.filter((r) => r.text.length > 0)) {
+      textRuns.push({ text: run.text, options: inheritedRunOptions(run.style || {}, listItemRunInheritance(it, listStyle)) });
+    }
+    slide.addText(textRuns, textOpts);
+  } else {
+    slide.addText(showMarker ? marker + text : text, textOpts);
+  }
+
+  if (it.borderBottom) {
+    slide.addShape("line", {
+      x: px2in(ib.x), y: px2in(ib.y + ib.h),
+      w: px2in(ib.w), h: 0,
+      line: { color: hexToRgb(it.borderBottom), width: 0.5 },
+    });
+  }
+}
+
+// --- table ---
+
+/** Rule 2: every HTML table emits as a native pptx `<a:tbl>`, except the
+ * `<table data-shape-render>` debug path (renderTableAsShapes). */
+function emitTable(slide: Slide, el: TableElement): void {
+  // DEBUG path — `<table data-shape-render="true|empty">`. Render
+  // the entire table via per-cell addShape rects + per-edge filled
+  // rect borders (see renderTableAsShapes). Bypasses native `<a:tbl>` so we can
+  // isolate geometry issues from `<a:tc>` rasterisation quirks.
+  if (el.renderAsShapes) {
+    renderTableAsShapes(slide, el);
+    return;
+  }
+  const rows = el.rows || [];
+  const tableCornerRadii = el.cornerRadii || { tl: 0, tr: 0, br: 0, bl: 0 };
+  const tableHasRadius = (el.borderRadius || 0) > 0;
+  // tablesFormat=native renders a real, editable <a:tbl> which CANNOT
+  // express rounded corners — so a rounded table here renders SQUARE.
+  // Warn so the reviewer knows to re-run with tablesFormat=baked (which
+  // rasterises the table, preserving rounded corners + all elements).
+  // In baked mode the table was retyped to an image upstream
+  // (extract-dom / io) and never reaches this native branch.
+  // (Rounded-corner edge/corner patching — synthMask + shape-twice
+  // underlays — was removed for the same reason.)
+  const anyCornerRadius = tableHasRadius
+    || tableCornerRadii.tl > 0 || tableCornerRadii.tr > 0
+    || tableCornerRadii.br > 0 || tableCornerRadii.bl > 0;
+  if (anyCornerRadius) {
+    console.warn("  ⚠ tablesFormat=native: rounded-corner table detected — "
+      + "native tables render SQUARE corners. Re-run with --tables-format baked "
+      + "for rounded corners + full fidelity.");
+  }
+  if (rows.length > 0) {
+    emitNativeTable(slide, el, rows, tableHasRadius);
+    return;
+  }
+  // A table without rows has no cells to draw; a rounded one still gets its
+  // outer frame.
+  if (tableHasRadius) emitTableOutline(slide, el, tableCornerRadii);
+}
+
+/** One side of a native table cell's `border: [t, r, b, l]` option. */
+type BorderOpt = { type: "solid" | "dash" | "sysDot" | "none"; pt: number; color: string };
+
+/** Per-side border of a native pptxgenjs cell. pptxgenjs's table cell `border`
+ * option accepts a `[t, r, b, l]` array of `{type, pt, color}` (verified at
+ * pptxgen.es.js:5341-5358) which emits `<a:lnT/lnR/lnB/lnL>` per cell —
+ * exactly what CSS encodes (slide_15 "not a table in sides"). */
+function sideToBorderOpt(side: BorderSide | undefined): BorderOpt {
+  if (!side || !side.width || side.width <= 0) return { type: "none", pt: 0, color: "000000" };
+  const dashType: BorderOpt["type"] = side.style === "dashed" ? "dash" : side.style === "dotted" ? "sysDot" : "solid";
+  return { type: dashType, pt: Math.max(0.5, side.width * PX2PT), color: hexToRgb(side.color || "#000000") };
+}
+
+/** The native, editable `<a:tbl>`. */
+function emitNativeTable(slide: Slide, el: TableElement, rows: readonly TableRow[], tableHasRadius: boolean): void {
+  // The table-level border (declared on the `<table>` element itself, e.g.
+  // `table.rounded { border:1px solid #d1d5db }`). CSS does NOT bubble this
+  // into per-cell `getComputedStyle()`, so it is grafted onto the outer-edge
+  // cells' tuples (see nativeTableCell).
+  const tableBorderSides = el.borderSides;
+  // True when a rounded post-table outline ring would be drawn on top
+  // of the native <a:tbl>. When it WOULD draw, folding the table border
+  // into native edge cells double-inks the perimeter:
+  // the outline's `algn="in"` 1 px stroke sits at the rect's inner
+  // edge, but native cell borders use `algn="ctr"` and straddle the
+  // cell edge — the two paint at DIFFERENT pixels and combine to a
+  // ~1.5 px gray bar (slide_17 L1 "double border on right side").
+  // Suppress the fold in that case; the outline alone carries the
+  // perimeter. Flat tables (no outline) keep the fold so they still
+  // have an outer frame.
+  const foldTableBorder = !(tableHasRadius
+    && !!tableBorderSides
+    && (tableBorderSides.top?.width || 0) > 0
+    && !!tableBorderSides.top?.color);
+  const geometry = nativeTableGeometry(el, rows);
+  const grid = { rowCount: rows.length, colCount: rows[0].length };
+  const tableRows = rows.map((row: readonly TableCell[], ri: number) => row.map((cell: TableCell, ci: number) =>
+    nativeTableCell(cell, { ri, ci, ...grid, tableBg: el.bgColor || undefined, foldedBorder: foldTableBorder ? tableBorderSides ?? null : null })));
+  slide.addTable(tableRows, {
+    ...geometry,
+    autoPage: false,
+    fontFace: "Arial",
+  });
+}
+
+/** Frame and grid of the native table, in inches.
+ *
+ * Quantize all table geometry to 1/100" so the graphicFrame and every
+ * gridline land on the SAME source-inch lattice. Without quantization each
+ * edge sits at arbitrary fractional inches (the px → inch conversion is
+ * `* 10/1280 = * 0.0078125` per CSS pixel), and Slides rasterises shapes vs
+ * <a:graphicFrame> cells onto display pixels independently → 1-2 display-px
+ * seams at every boundary (the "missing white border" family of
+ * complaints). */
+function nativeTableGeometry(el: TableElement, rows: readonly TableRow[]): {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly colW: number[];
+  readonly rowH: number[];
+} {
+  const b = el.bounds;
+  const tableBorderSides = el.borderSides;
+  const rowCount = rows.length;
+  const q = (v: number): number => Math.round(v * 100) / 100;
+  // Content extent = table bounds minus the outer border (the
+  // per-`<td>` bounds exclude the table's CSS border). The native
+  // cells must span EXACTLY this, edge to edge.
+  const twL0 = px2in(tableBorderSides?.left?.width || 0);
+  const twR0 = px2in(tableBorderSides?.right?.width || 0);
+  const twT0 = px2in(tableBorderSides?.top?.width || 0);
+  const twB0 = px2in(tableBorderSides?.bottom?.width || 0);
+  // EDGE-ANCHORED table coords. Quantise the ABSOLUTE edges, never
+  // position+size separately: `q(px2in(b.x)) + q(px2in(b.w))`
+  // double-rounds (b.x 5.1875→5.19 AND b.w 4.125→4.13) and pushes
+  // the right/bottom edge ~1-2 display-px PAST the table box — the
+  // "slightly misaligned right/bottom edge" the user flagged on
+  // every corner. `q(px2in(b.x + b.w))` rounds the edge once, so
+  // the table spans exactly [xL,xR]×[yT,yB].
+  const xL = q(px2in(b.x));
+  const xR = q(px2in(b.x + b.w));
+  const yT = q(px2in(b.y));
+  const yB = q(px2in(b.y + b.h));
+  const contentW = (xR - xL) - twL0 - twR0;
+  const contentH = (yB - yT) - twT0 - twB0;
+  // Column geometry — DRIFT-FREE and edge-anchored. Per-`<td>`
+  // bounds sum to ~1 px less than `contentW` (extraction floors
+  // each width), so scale the raw widths to fill `contentW`
+  // exactly, accumulate, and quantize each cumulative gridline to
+  // the 0.01" lattice; per-column widths are the differences.
+  // Quantizing each width independently then summing (the old
+  // approach) drifts short of the edge. Scaling +
+  // cumulative-then-difference makes the columns span exactly
+  // [0, contentW] with every gridline on the lattice.
+  const firstRow = rows[0];
+  const colWraw = firstRow.map((c: TableCell) => px2in(c.bounds?.w || b.w / firstRow.length));
+  const colRawTotal = colWraw.reduce((a, w) => a + w, 0);
+  const colScale = colRawTotal > 0 ? contentW / colRawTotal : 1;
+  const colXPrefix: number[] = [0];
+  { let acc = 0; for (const w of colWraw) { acc += w * colScale; colXPrefix.push(q(acc)); } }
+  const colW = colWraw.map((_, i) => q(colXPrefix[i + 1] - colXPrefix[i]));
+  // Row geometry — DRIFT-FREE, same cumulative-quantize model as
+  // the columns above.
+  const rowHraw = rows.map((row) => row[0]?.bounds ? px2in(row[0].bounds.h) : px2in(b.h / Math.max(1, rowCount)));
+  const rowRawTotal = rowHraw.reduce((a, h) => a + h, 0);
+  const rowScale = rowRawTotal > 0 ? contentH / rowRawTotal : 1;
+  const rowYPrefix: number[] = [0];
+  { let acc = 0; for (const h of rowHraw) { acc += h * rowScale; rowYPrefix.push(q(acc)); } }
+  const rowH = rowHraw.map((_, i) => q(rowYPrefix[i + 1] - rowYPrefix[i]));
+  // Pin each row's height to its CSS height so Google Slides
+  // doesn't re-flow rows under the per-cell border tuples —
+  // without an explicit `rowH`, pptxgenjs writes `<a:tr h="0">` and
+  // Slides auto-sizes, producing a phantom blank row (slide_17, slide_05).
+  // Pin the graphicFrame's `<a:ext cy>` to sum(rowH). Without
+  // `h`, pptxgenjs falls back to a hard-coded 1 inch
+  // (pptxgen.es.js:5187 `cy || EMU`), and Google Slides
+  // compresses the rows to fit (the "phantom row" bug, slide_17 / slide_05).
+  const tableH = rowH.reduce((a, b) => a + b, 0);
+  // Shift the native <a:tbl> graphicFrame inward by the CSS
+  // outer table border width. Per-`<td>` bounds (the basis for
+  // `colW` / `rowH`) are INSET by `tw` on each side, so
+  // `sum(colW) = px2in(b.w) - twLeft - twRight`. Placing the
+  // graphicFrame at `(b.x, b.y, b.w, tableH)` leaves a
+  // `tw`-wide unpainted gap on the right + bottom of the table
+  // area — which `.table-wrap`'s pink shows through, reading
+  // as the "double border on right" and the "bottom border
+  // too high" the user reported on slide_17. Shifting the
+  // frame to `(b.x + twLeft, b.y + twTop, sumColW, sumRowH)`
+  // makes native cells fill the CSS content area exactly.
+  const tblTwLeft   = q(px2in(tableBorderSides?.left?.width   || 0));
+  const tblTwTop    = q(px2in(tableBorderSides?.top?.width    || 0));
+  const tableColSum = q(colW.reduce((acc: number, w: number) => acc + w, 0));
+  return {
+    x: q(xL + tblTwLeft),
+    y: q(yT + tblTwTop),
+    w: tableColSum,
+    h: q(tableH),
+    colW,
+    rowH,
+  };
+}
+
+/** One native table cell: text (or styled runs), font, fill, borders, spans
+ * and padding. */
+function nativeTableCell(
+  cell: TableCell,
+  at: {
+    readonly ri: number;
+    readonly ci: number;
+    readonly rowCount: number;
+    readonly colCount: number;
+    /** CSS layers the `<table>`'s own background BEHIND every cell: a
+     * transparent `<td>` shows the table bg, not the slide bg (slide_17's pink
+     * `.table-wrap` leaked through odd-row cells without this fallback). */
+    readonly tableBg: string | undefined;
+    /** Table-level border folded onto outer-edge cells, or null when not folded. */
+    readonly foldedBorder: BorderSides | null;
+  },
+): { text: string; options: TableCellProps } {
+  const cs = cell.style || {};
+  const cellOpts: TableCellProps = {
+    align: cs.textAlign === "center" ? "center" : cs.textAlign === "right" ? "right" : "left",
+    valign: "middle",
+    fontFace: mapFont(cs.fontFamily || "Arial"),
+    fontSize: (cs.fontSize || 14) * PX2PT,
+    color: hexToRgb(cs.color || "#111111"),
+    bold: cs.fontWeight === "bold" || cell.isHeader,
+    italic: cs.fontStyle === "italic",
+    // TODO(types): BorderOpt carries "sysDot" (valid OOXML, accepted by
+    // the fork) which the published BorderProps union omits; the tuple
+    // overlaps BorderProps so a direct assertion is type-checked.
+    border: cellBorderTuple(cs.borderSides, at) as [BorderProps, BorderProps, BorderProps, BorderProps],
+  };
+  const effectiveBg = cs.bgColor || at.tableBg;
+  if (effectiveBg) cellOpts.fill = { color: hexToRgb(effectiveBg) };
+  if (cell.colspan && cell.colspan > 1) cellOpts.colspan = cell.colspan;
+  if (cell.rowspan && cell.rowspan > 1) cellOpts.rowspan = cell.rowspan;
+  // Cell padding → pptxgenjs cell margin (inches). pptxgenjs
+  // defaults to `[0.05, 0.1, 0.05, 0.1]` which is much narrower
+  // than typical CSS table padding (e.g. `14px 20px` in
+  // complex_slide_05). Honor the cell's CSS padding directly. (A previous
+  // col-0 "48px floor" on wide left-aligned cells — added for
+  // box-shadow-halo wrapper tables — shifted plain tables' first column
+  // ~0.5″ right [slide_15], so it's removed; CSS padding is authoritative.)
+  if (cell.padding) {
+    const p = cell.padding;
+    cellOpts.margin = [px2in(p.top), px2in(p.right), px2in(p.bottom), px2in(p.left)];
+  }
+  // Styled runs (e.g. `<span class="feature-desc">` rendered
+  // as a smaller grey secondary line below the main cell text)
+  // can't survive the plain-string `cell.text` path: pptxgenjs
+  // would render them concatenated at the parent style. Build
+  // a pptxgenjs `TableCell[]` array with per-paragraph styling
+  // when runs contain a `\n` separator or any per-run style.
+  const runs = cell.runs || [];
+  const hasNewline = runs.some((r) => r.text === "\n");
+  const hasStyledRun = runs.some((r) => r.style != null);
+  if (runs.length > 0 && (hasNewline || hasStyledRun)) {
+    const inherited = {
+      fontFamily: cs.fontFamily || "Arial",
+      fontSize: cs.fontSize || 14,
+      color: cs.color || "#111111",
+      bold: cs.fontWeight === "bold" || !!cell.isHeader,
+      italic: cs.fontStyle === "italic",
+    };
+    const entries: Array<{ text: string; options: TextPropsOptions }> = [];
+    for (const r of runs) {
+      if (r.text === "\n") {
+        if (entries.length > 0) entries[entries.length - 1].options.breakLine = true;
+        continue;
+      }
+      if (!r.text) continue;
+      entries.push({ text: r.text, options: inheritedRunOptions(r.style || {}, inherited) });
+    }
+    if (entries.length > 0) {
+      // pptxgenjs accepts a run array as a cell's `text`; its published cell
+      // type only declares a string.
+      return { text: entries as unknown as string, options: cellOpts };
+    }
+  }
+  return { text: cell.text || "", options: cellOpts };
+}
+
+/** The cell's own per-side borders, with the table-level border folded onto
+ * the outer-edge sides that have none (an explicit per-cell border wins). */
+function cellBorderTuple(
+  bs: BorderSides | undefined,
+  at: {
+    readonly ri: number;
+    readonly ci: number;
+    readonly rowCount: number;
+    readonly colCount: number;
+    readonly foldedBorder: BorderSides | null;
+  },
+): [BorderOpt, BorderOpt, BorderOpt, BorderOpt] {
+  const out: [BorderOpt, BorderOpt, BorderOpt, BorderOpt] = [
+    sideToBorderOpt(bs?.top),
+    sideToBorderOpt(bs?.right),
+    sideToBorderOpt(bs?.bottom),
+    sideToBorderOpt(bs?.left),
+  ];
+  const table = at.foldedBorder;
+  if (table) {
+    if (at.ri === 0 && out[0].type === "none") out[0] = sideToBorderOpt(table.top);
+    if (at.ri === at.rowCount - 1 && out[2].type === "none") out[2] = sideToBorderOpt(table.bottom);
+    if (at.ci === 0 && out[3].type === "none") out[3] = sideToBorderOpt(table.left);
+    if (at.ci === at.colCount - 1 && out[1].type === "none") out[1] = sideToBorderOpt(table.right);
+  }
+  return out;
+}
+
+/** Outer rounded frame of a table — no fill, so it acts as a mask outline.
+ * Honors per-corner table radii: a table with `border-radius: 10px 10px 0 0`
+ * outlines only the top corners, not all 4. */
+function emitTableOutline(slide: Slide, el: TableElement, tableCornerRadii: CornerRadii): void {
+  const b = el.bounds;
+  const tableCp = cornerPresetFromRadii(tableCornerRadii);
+  const outlineOpts: ShapeProps = {
+    x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
+    fill: { type: "none" },
+  };
+  if (tableCp.preset !== "rect") {
+    outlineOpts.rectRadius = px2in(el.borderRadius ?? 0);
+    if (tableCp.flipH) outlineOpts.flipH = true;
+    if (tableCp.flipV) outlineOpts.flipV = true;
+  }
+  if (el.borderSides && (el.borderSides.top?.width || 0) > 0 && el.borderSides.top?.color) {
+    outlineOpts.line = {
+      color: hexToRgb(el.borderSides.top.color),
+      width: Math.min((el.borderSides.top.width || 1) * PX2PT, 6),
+    };
+  } else {
+    outlineOpts.line = { type: "none" };
+  }
+  slide.addShape(tableCp.preset, outlineOpts);
+}
+
 /**
  * Pure-shape table renderer — debug path for `<table data-shape-render>`.
  *
@@ -1457,1857 +3041,84 @@ function renderTableAsShapes(slide: Slide, el: TableElement): void {
   }
 }
 
-export function buildPptx(
-  slides: readonly SlideInput[],
-  title: string,
-): { pres: PresentationWithRegistries; renderedRegions: RenderedRegion[][]; drawioDiagrams: DrawioDiagram[] } {
-  // ESM/CJS interop — `import * as pptxgenModule from "pptxgenjs"` lands a
-  // module-namespace wrapper whose shape varies by loader:
-  //   - Plain Node ESM:   M.default = <ctor>                    (1-level wrap)
-  //   - tsx from .mts:    M.default = { default: <ctor>, ... }  (2-level wrap)
-  //   - Browser stub:     M.default = <ctor>                    (1-level)
-  // Unwrap `.default` until we land on the actual constructor (a function).
-  const resolveCtor = (m: unknown): new () => PptxGenJS => {
-    let v: unknown = m;
-    while (typeof v !== "function" && v != null && typeof (v as { default?: unknown }).default !== "undefined") {
-      v = (v as { default: unknown }).default;
-    }
-    return v as new () => PptxGenJS;
+// --- visual / image ---
+
+/** A rasterised element: its PNG (when one was captured for index `ei`),
+ * recorded as a rendered region. */
+function emitVisual(ctx: EmitContext, el: VisualElement | ImageElement, ei: number): void {
+  const buf = ctx.visualPngs.get(ei);
+  if (!buf) return;
+  const b = el.bounds;
+  const imgOpts: NonNullable<Parameters<Slide["addImage"]>[0]> = {
+    data: `image/png;base64,${bytesToBase64(buf)}`,
+    x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
   };
-  const PptxGenJSCtor = resolveCtor(pptxgenModule);
-  const pres = new PptxGenJSCtor() as PresentationWithRegistries;
-  const gradientRegistry: Gradient[] = [];
-  pres.__gradients = gradientRegistry;
-  const bulletColorRegistry: BulletColorList[] = [];
-  pres.__bulletColors = bulletColorRegistry;
-  pres.title = title;
-  pres.layout = "LAYOUT_WIDE"; // 13.333" x 7.5" — wait, we want 10" x 5.625"
-
-  // Actually define custom layout matching our slide dimensions
-  pres.defineLayout({ name: "CUSTOM", width: SLIDE_W_IN, height: SLIDE_H_IN });
-  pres.layout = "CUSTOM";
-
-  const renderedRegions: RenderedRegion[][] = [];
-  const drawioDiagrams: DrawioDiagram[] = [];
-
-  for (let si = 0; si < slides.length; si++) {
-    const { extraction, visualPngs } = slides[si];
-    const slide = pres.addSlide();
-    const slideRegions: RenderedRegion[] = [];
-    renderedRegions.push(slideRegions);
-
-    for (let ei = 0; ei < extraction.elements.length; ei++) {
-      const el = extraction.elements[ei];
-      if (el.type === "_skip") continue;
-      const b = el.bounds;
-
-      // Rule 1: a fully-transparent element with no content contributes
-      // nothing to the slide. Don't emit a phantom shape — it pollutes the
-      // outline pane in Slides and confuses post-pass element counting.
-      // Element types that may carry visible content even with a transparent
-      // background (text, list, table, image, visual) are left untouched.
-      if (el.type === "rect") {
-        const r = el as RectElement;
-        const hasFill = r.fill && r.fill !== "transparent" && (r.fillAlpha === undefined || r.fillAlpha > 0);
-        const hasBorder = (r.borderWidth || 0) > 0 && r.borderColor;
-        const hasSideBorder = r.borderSides
-          ? [r.borderSides.top, r.borderSides.right, r.borderSides.bottom, r.borderSides.left].some((s) => (s?.width || 0) > 0)
-          : false;
-        const hasShadow = !!r.boxShadow && (Array.isArray(r.boxShadow) ? r.boxShadow.length > 0 : true);
-        const hasGradient = !!r.gradient && !!r.gradient.stops && r.gradient.stops.length > 0;
-        if (!hasFill && !hasBorder && !hasSideBorder && !hasShadow && !hasGradient) continue;
-      }
-
-      switch (el.type) {
-        case "rect": {
-          // Full-slide background
-          if (b.w > SLIDE_W_PX * 0.9 && b.h > SLIDE_H_PX * 0.9) {
-            // pptxgenjs `slide.background` can only carry a solid fill, so
-            // skip this shortcut when the element owns a multi-stop gradient.
-            // The rect drops through to the regular shape path, and the
-            // post-processing gradFill injector rewrites <a:solidFill> →
-            // <a:gradFill> (slide_17 navy→purple body wash).
-            if (el.gradient && el.gradient.stops && el.gradient.stops.length >= 2) {
-              // fall through to shape path below
-            } else {
-              if (el.fill) {
-                slide.background = { fill: hexToRgb(el.fill) };
-              }
-              break;
-            }
-          }
-
-          // Determine shape type
-          const cr = el.cornerRadii || { tl: el.borderRadius || 0, tr: el.borderRadius || 0, br: el.borderRadius || 0, bl: el.borderRadius || 0 };
-          const minDim = Math.min(b.w, b.h);
-          const isCircle = cr.tl >= minDim * 0.4 && cr.tr >= minDim * 0.4 && cr.br >= minDim * 0.4 && cr.bl >= minDim * 0.4
-            && Math.abs(b.w - b.h) < b.w * 0.3;
-          const anyRounded = cr.tl > 2 || cr.tr > 2 || cr.br > 2 || cr.bl > 2;
-
-          // Per-corner mask → OOXML preset + flips so asymmetric border-radius
-          // (e.g. top-only round on a card header) renders correctly rather
-          // than getting collapsed into an all-corners roundRect.
-          let cornerPreset: ShapeName;
-          let cornerFlipH = false;
-          let cornerFlipV = false;
-          if (isCircle) {
-            cornerPreset = "ellipse";
-          } else if (anyRounded) {
-            const cp = cornerPresetFromRadii(cr);
-            cornerPreset = cp.preset;
-            cornerFlipH = cp.flipH;
-            cornerFlipV = cp.flipV;
-          } else {
-            cornerPreset = "rect";
-          }
-          const shapeName = cornerPreset;
-
-          // Scan for text to merge into this shape. IMPORTANT: only merge if
-          // this rect is the *innermost* ancestor that fits the text. Otherwise
-          // a deeper-nested rect (with its own bg) will paint over the merged
-          // text and bury it (slide_24: text inside 5 nested cards was merged
-          // into level-3, then hidden by level-4's solid fill).
-          //
-          // Also count how many text elements are wholly inside this rect's
-          // vertical range (before the next same-depth sibling paints). A
-          // pull-quote (`.pull-quote { bg + border-left } > <p> + .attr`) hosts
-          // TWO block texts — merging just the first would center it vertically
-          // and push the `.attr` caption off the decorated box. When multiple
-          // texts live inside, skip merging and let each text emit at its own
-          // bounds so the rect acts as a pure background + accent stripe.
-          let insideTextCount = 0;
-          for (let ti = ei + 1; ti < extraction.elements.length; ti++) {
-            const next = extraction.elements[ti];
-            if (next.type !== "text" || !next.bounds) continue;
-            const nb = next.bounds;
-            const tcx = nb.x + nb.w / 2, tcy = nb.y + nb.h / 2;
-            if (tcx >= b.x && tcx <= b.x + b.w && tcy >= b.y && tcy <= b.y + b.h) {
-              insideTextCount++;
-              if (insideTextCount > 1) break;
-            }
-            // Stop scanning past this rect's vertical extent — avoids counting
-            // unrelated texts from sibling sections that sit below.
-            if (nb.y > b.y + b.h) break;
-          }
-          const skipMergeMultiText = insideTextCount > 1;
-
-          let mergedTextEl: TextElement | null = null;
-          let mergedTextIndex = -1;
-          for (let ti = ei + 1; ti < extraction.elements.length && !skipMergeMultiText; ti++) {
-            const next = extraction.elements[ti];
-            if (next.type !== "text" || !next.bounds) continue;
-            const nb = next.bounds;
-            const sameBounds = Math.abs(nb.x - b.x) < 5 && Math.abs(nb.y - b.y) < 5 &&
-                               Math.abs(nb.w - b.w) < 5 && Math.abs(nb.h - b.h) < 5;
-            const tcx = nb.x + nb.w / 2, tcy = nb.y + nb.h / 2;
-            const insideBounds = tcx >= b.x && tcx <= b.x + b.w && tcy >= b.y && tcy <= b.y + b.h;
-            const textDominates = nb.h >= b.h * 0.5 && nb.w <= b.w + 4;
-            if (sameBounds || (insideBounds && (isCircle || textDominates))) {
-              // Check if a rect *after* this one also contains the text and
-              // would paint over it. If so, defer the merge — the text will
-              // ride on that deeper rect (or be emitted standalone as a text
-              // element after all the nested fills).
-              let deeperFillsOver = false;
-              for (let di = ei + 1; di < ti; di++) {
-                const mid = extraction.elements[di];
-                if (mid.type !== "rect" || !mid.bounds || (!mid.fill && !mid.gradient)) continue;
-                const mb = mid.bounds;
-                const textInsideMid = tcx >= mb.x && tcx <= mb.x + mb.w && tcy >= mb.y && tcy <= mb.y + mb.h;
-                if (textInsideMid) { deeperFillsOver = true; break; }
-              }
-              if (deeperFillsOver) break; // don't merge — let text render on its own
-              mergedTextEl = next;
-              mergedTextIndex = ti;
-              extraction.elements[ti] = { type: "_skip", bounds: nb };
-              break;
-            }
-          }
-
-          // Non-uniform border info — computed now, painted AFTER content.
-          const bs = el.borderSides;
-          const uniform = el.borderUniform;
-          const hasNonUniformBorder = bs && !uniform &&
-            ((bs.top?.width > 0 && bs.top?.color) || (bs.right?.width > 0 && bs.right?.color) ||
-             (bs.bottom?.width > 0 && bs.bottom?.color) || (bs.left?.width > 0 && bs.left?.color));
-
-          // Rasterised top-strip skip: when a rounded clipping host had only its
-          // dark top region rasterised (rasterBottomY set), any fill fully above
-          // that line — the navy status bar, the black notch, the status dots —
-          // is already painted (correctly rounded) by the 2× device PNG. Skip
-          // the native overlay so a clamped/duplicate corner can't show over the
-          // image. The notch hugs the top edge without touching a rounded corner
-          // (so it has no clip patch), which is why this skip lives here rather
-          // than in the patch block below. Text rides on top via its own element.
-          {
-            const rby = el.clipMask?.rasterizedHost ? el.clipMask.rasterBottomY : undefined;
-            if (typeof rby === "number" && !mergedTextEl && !hasNonUniformBorder
-                && b.y + b.h <= rby + 0.5) break;
-          }
-
-          // Content shape
-          const opts: ShapeProps = {
-            x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
-            line: { type: "none" },
-          };
-
-          // Fill (gradient tagged via objectName for post-processing — pptxgenjs has no gradient API)
-          // `gradGid` is captured so the side-rounded clip path (below) can
-          // angle-compensate the registered gradient when it rotates the shape.
-          let gradGid = -1;
-          if (el.gradient && el.gradient.stops && el.gradient.stops.length >= 2) {
-            // Native gradient fill — the vendored pptxgenjs fork emits <a:gradFill>
-            // directly from this spec (no GRAD_<n> tag + zip post-patch). The angle
-            // may be mutated below (flip/rotate clip compensation); opts.fill is
-            // re-synced from gradientRegistry[gradGid] just before addShape so the
-            // emitted gradient reflects the final, compensated angle.
-            const gid = gradientRegistry.length;
-            gradientRegistry.push(el.gradient);
-            gradGid = gid;
-            // Emit a SOLID placeholder fill (first stop). Stock pptxgenjs can't
-            // emit shape gradients, but injectGradientsIntoZip rewrites this
-            // <a:solidFill> into the real <a:gradFill> via the GRAD_<n> tag below.
-            opts.fill = { color: hexToRgb(el.gradient.stops[0].color) };
-            // GRAD_<n> object name marks the shape for the gradient injector.
-            opts.objectName = `GRAD_${gid}`;
-          } else if (el.fill) {
-            const fillOpts: NonNullable<ShapeProps["fill"]> = { color: hexToRgb(el.fill) };
-            if (typeof el.fillAlpha === "number" && el.fillAlpha < 1) {
-              // pptxgenjs `transparency` is percent-transparent: 0 = opaque, 100 = invisible.
-              fillOpts.transparency = Math.round((1 - el.fillAlpha) * 100);
-            }
-            opts.fill = fillOpts;
-          }
-
-          // Corner radius (pptxgenjs rectRadius is in inches).
-          // Clamp to half the shorter dimension — CSS `border-radius: 50px` on
-          // a 18px-tall pill gives radius > h/2, which produces an invalid
-          // OOXML `adj` value; Google Slides then renders the shape as empty
-          // (no fill, no outline), leaving the tag's text floating on the slide
-          // background. Clamping yields a proper stadium/pill shape.
-          if (anyRounded && !isCircle) {
-            const maxR = Math.min(b.w, b.h) / 2;
-            const maxRadiusPx = Math.max(cr.tl, cr.tr, cr.br, cr.bl);
-            opts.rectRadius = px2in(Math.min(maxRadiusPx, maxR));
-            if (cornerFlipH) opts.flipH = true;
-            if (cornerFlipV) opts.flipV = true;
-          }
-
-          // Border outline (uniform)
-          if (!hasNonUniformBorder && uniform && el.borderWidth !== undefined && el.borderWidth > 0 && el.borderColor) {
-            const borderW = el.borderWidth;
-            opts.line = {
-              color: hexToRgb(el.borderColor),
-              width: Math.min(borderW * PX2PT, 6),
-              // Thin (≤2px) dashed borders use the finer sysDash cadence;
-              // prstDash="dash" renders 1px hairline dividers as coarse long
-              // dashes that don't match the CSS look (slide_33 .out).
-              dashType: asDashType(el.borderStyle === "dashed" ? (borderW <= 2 ? "sysDash" : "dash") : el.borderStyle === "dotted" ? "dot" : "solid"),
-            };
-          }
-
-          // Box shadow
-          if (el.boxShadow && ((el.boxShadow.blur ?? 0) > 0 || el.boxShadow.offsetX !== 0 || el.boxShadow.offsetY !== 0)) {
-            const dx = el.boxShadow.offsetX || 0;
-            const dy = el.boxShadow.offsetY || 0;
-            // OOXML shadow dir: 0°=east, 90°=south — matches CSS offsetY>0=down
-            let angle = Math.atan2(dy, dx) * 180 / Math.PI;
-            if (dx === 0 && dy === 0) angle = 90;
-            if (angle < 0) angle += 360;
-            opts.shadow = {
-              type: "outer",
-              blur: Math.min((el.boxShadow.blur ?? 0) * PX2PT, 30),
-              offset: Math.sqrt(dx * dx + dy * dy) * PX2PT,
-              color: hexToRgb(el.boxShadow.color || "#000000"),
-              opacity: el.boxShadow.alpha ?? 0.25,
-              angle: Math.round(angle),
-            };
-          }
-
-          // Rotation: a CSS `transform: rotate(Xdeg)` element's bbox is the
-          // post-transform axis-aligned box. Drawing that box as-is turns a
-          // thin slanted line (e.g. `.profit-line { height:2px; rotate(-8deg) }`)
-          // into a fat filled rectangle. Re-center the shape on the bbox center
-          // at its natural (pre-transform) size and apply pptxgenjs rotate.
-          const rectRot = typeof el.rotate === "number" ? el.rotate : 0;
-          if (Math.abs(rectRot) > 0.5 && el.naturalWidth && el.naturalHeight) {
-            const cx = b.x + b.w / 2;
-            const cy = b.y + b.h / 2;
-            const nw = el.naturalWidth;
-            const nh = el.naturalHeight;
-            opts.x = px2in(cx - nw / 2);
-            opts.y = px2in(cy - nh / 2);
-            opts.w = px2in(nw);
-            opts.h = px2in(nh);
-            opts.rotate = ((rectRot % 360) + 360) % 360;
-          }
-
-          // Rule 3: rounded clipping mask from any `overflow:hidden` ancestor.
-          // When the host rect would visually be clipped by a parent's
-          // rounded corners, draw an underlay patch in the same fill with
-          // the rounded outline, then the host on top (sharp shape covered
-          // by the rounded patch above is invisible). Both shapes are tagged
-          // with the same group id; the JSZip post-process groups them so
-          // resize/move in Slides keeps them together.
-          // For a GRADIENT host the clip-underlay must NOT overwrite
-          // opts.objectName — that GRAD_<n> tag is what injectGradientsIntoZip
-          // matches on, and clobbering it (the original bug) left the pill with
-          // its transparent fallback fill (slide_32 P0/P1/P2 invisible). Instead
-          // tag the rounded underlay with the SAME GRAD_<n> name so the injector
-          // fills both, and leave the host tag intact. Solid hosts keep the
-          // original host/patch grouping.
-          // When a child is clipped by a rounded parent, the host MUST itself
-          // become the clipped, correctly-cornered shape — adopting the patch's
-          // bounds and rounding ONLY the corners that coincide with a rounded
-          // parent corner (computeClippedPatch already zeroed the non-touching
-          // ones). The previous "rounded underlay + full-square host on top"
-          // was a fake clip: the square host re-squared every corner. Reuse the
-          // existing [TL,TR,BR,BL] → ROUND_* preset mapping so e.g. a left-flush
-          // pill → roundRect+flat-right overlays (left rounded only), a top
-          // stripe / status-bar → round2SameRect (top rounded, bottom square).
-          let hostShapeName = shapeName;
-          let clipFlatCr: CornerRadii | null = null;
-          let clipFlatBounds: Bounds = b;
-          const patch = computeClippedPatch(b, el.clipMask);
-          if (patch && opts.fill) {
-            // Un-representable corner: the clipped region needs a radius larger
-            // than 50% of its own dimension (e.g. slide_12's navy status-bar
-            // strip / notch hugging the device top — radius 32px on a ~44px
-            // strip). A native roundRect's `adj` maxes at 50% ("only goes
-            // halfway"), so emitting one here clamps the curve and the squared
-            // shoulder pokes past the device's true rounded edge. When the
-            // clipping host was rasterised to a 2× PNG (rasterizedHost), that
-            // backing image already paints the correct rounded chrome, so skip
-            // the clamped native overlay and let the image show through. Only
-            // applies to pure background fills (no merged text/border to lose).
-            // Sub-50% corners (e.g. the tall gradient screen at the device
-            // bottom) stay on the native roundRect path with the correct radius.
-            // No top-strip split (whole host rasterised): skip only the
-            // overlays whose clipped corner radius exceeds 50% of their
-            // dimension (un-representable); representable corners stay native.
-            // (The top-strip case is handled by the containment skip above,
-            // before the patch is even computed, so it also catches the notch
-            // which hugs the top edge without touching a rounded corner.)
-            if (el.clipMask?.rasterizedHost && typeof el.clipMask.rasterBottomY !== "number"
-                && !mergedTextEl && !hasNonUniformBorder) {
-              const mcr = el.clipMask.cornerRadii;
-              const pb0 = patch.bounds;
-              const capR = Math.min(pb0.w, pb0.h) / 2;
-              const reqR = Math.max(
-                patch.cornerRadii.tl > 0 ? mcr.tl : 0,
-                patch.cornerRadii.tr > 0 ? mcr.tr : 0,
-                patch.cornerRadii.br > 0 ? mcr.br : 0,
-                patch.cornerRadii.bl > 0 ? mcr.bl : 0,
-              );
-              if (reqR > capR + 0.5) break;
-            }
-            const pcr = patch.cornerRadii;
-            const pcp = cornerPresetFromRadii(pcr);
-            const pb = patch.bounds;
-            opts.x = px2in(pb.x); opts.y = px2in(pb.y);
-            opts.w = px2in(pb.w); opts.h = px2in(pb.h);
-            hostShapeName = pcp.preset;
-            if (pcp.preset !== "rect") {
-              opts.rectRadius = px2in(Math.max(pcr.tl, pcr.tr, pcr.br, pcr.bl));
-              opts.flipH = pcp.flipH || undefined;
-              opts.flipV = pcp.flipV || undefined;
-              // A gradient fill rotates WITH the shape (rotWithShape="1"), so the
-              // corner-preset flip(s) mirror the fill too — a 135° screen gradient
-              // on a bottom-rounded device screen (round2SameRect + flipV) renders
-              // upside-down (slide_12). Pre-mirror the stored CSS angle by the same
-              // flip(s) so the VISIBLE direction is unchanged: vertical flip
-              // θ→180−θ, horizontal flip θ→360−θ (they compose). The sibling 90/270
-              // path below handles the rotation case (angle−rot).
-              if (gradGid >= 0 && (pcp.flipH || pcp.flipV)) {
-                const g = gradientRegistry[gradGid];
-                if (g && g.type !== "radial") {
-                  let a = (((g.angle ?? 180) % 360) + 360) % 360;
-                  if (pcp.flipV) a = (((180 - a) % 360) + 360) % 360;
-                  if (pcp.flipH) a = (((360 - a) % 360) + 360) % 360;
-                  gradientRegistry[gradGid] = { ...g, angle: a };
-                }
-              }
-            }
-            // Side-rounded clip (TL+BL / TR+BR) has no direct OOXML preset.
-            // The old path fell back to an all-corners `roundRect` + solid R×R
-            // corner overlays to square the flat pair — but on a GRADIENT host
-            // those overlays use the solid first-stop fallback fill, painting a
-            // mismatched solid block over the gradient and leaving the "straight"
-            // edge rounded with artifacts (slide_32 P0/P1/P2 pills clipped at the
-            // left edge of a rounded `.row`). Per the user's guidance: because
-            // the radii are < half the dimension, draw it as a SINGLE
-            // `round2SameRect` (rounds the TOP pair by default) rotated so the
-            // rounded pair lands on the correct side — 270° → left-rounded,
-            // 90° → right-rounded. No overlays, gradient injects onto the one
-            // shape. Rotating swaps the footprint's w/h, so emit the un-rotated
-            // shape with swapped ext, recentered on the patch center.
-            if (needsFlatCornerOverlay(pcr)) {
-              const leftRounded = pcr.tl > 2 && pcr.bl > 2; // else right-rounded (TR+BR)
-              const rot = leftRounded ? 270 : 90;
-              const cx = pb.x + pb.w / 2;
-              const cy = pb.y + pb.h / 2;
-              const W0 = pb.h; // un-rotated width  (becomes footprint height after 90/270)
-              const H0 = pb.w; // un-rotated height (becomes footprint width)
-              const rPx = Math.min(
-                Math.max(pcr.tl, pcr.tr, pcr.br, pcr.bl),
-                Math.min(W0, H0) / 2,
-              );
-              hostShapeName = "round2SameRect";
-              opts.x = px2in(cx - W0 / 2);
-              opts.y = px2in(cy - H0 / 2);
-              opts.w = px2in(W0);
-              opts.h = px2in(H0);
-              opts.rectRadius = px2in(rPx);
-              opts.rotate = rot;
-              opts.flipH = undefined;
-              opts.flipV = undefined;
-              clipFlatCr = null; // single shape — no squaring overlays
-              // Gradient fill rotates WITH the shape (rotWithShape="1"), so
-              // pre-rotate the stored angle by -rot to keep the visible
-              // direction unchanged.
-              if (gradGid >= 0) {
-                const g = gradientRegistry[gradGid];
-                if (g && g.type !== "radial") {
-                  gradientRegistry[gradGid] = {
-                    ...g,
-                    angle: (((g.angle ?? 180) - rot) % 360 + 360) % 360,
-                  };
-                }
-              }
-            } else {
-              clipFlatBounds = pb;
-              clipFlatCr = null;
-            }
-          }
-
-          // Keep the solid placeholder in sync with the (possibly angle-mutated)
-          // registry entry; injectGradientsIntoZip reads the registry directly for
-          // the final <a:gradFill>, so only the first-stop placeholder matters here.
-          if (gradGid >= 0) opts.fill = { color: hexToRgb(gradientRegistry[gradGid].stops[0].color) };
-
-          slide.addShape(hostShapeName, opts);
-
-          if (clipFlatCr) {
-            emitFlatCornerOverlays(slide, clipFlatBounds, clipFlatCr, opts.fill);
-          }
-
-          // Side-rounded masks (0b0110 = right side, 0b1001 = left side) emit
-          // as `roundRect` above with all-4 curves; square off the CSS-flat
-          // corner pair by painting R×R overlays in the same fill. Skipped
-          // for gradient rects so the GRAD_N tag on the parent shape keeps
-          // its solitary solidFill match for the injector.
-          if (anyRounded && !isCircle && !el.gradient && needsFlatCornerOverlay(cr) && opts.fill) {
-            emitFlatCornerOverlays(slide, b, cr, opts.fill);
-          }
-
-          // Paint non-uniform border strips OVER the content shape so they
-          // survive the bg fill (otherwise a 4px bottom-border on a white
-          // card disappears under the white fill rect).
-          //
-          // When the element has a border-radius, a flat strip along the edge
-          // would cut straight across the rounded corners (slide_09: a top
-          // border on a rounded card that visibly ignores the radius). In
-          // that case we paint the entire rounded outline in the border
-          // color, then draw background-colored strips over the sides that
-          // don't have a border — which "erases" those segments, leaving only
-          // the bordered side rounded along the corners.
-          // Rounded + partial borders: paint them so the bordered sides
-          // follow the curve. Strategy — two-rect sandwich:
-          //   1. Outer rounded rect filled with the border color.
-          //   2. Inner rounded rect filled with the card's own background,
-          //      inset by (borderWidth) on each bordered side and 0 on the
-          //      non-bordered sides.
-          // Only the bordered sides' strips remain visible, and they curve
-          // along the shared border-radius. Works for any single side, any
-          // combination, any radius. Skipped when any bordered side has a
-          // dashed/dotted style (the inner-fill trick would blur the dashes)
-          // or when the bordered sides disagree on color.
-          let borderHandledRounded = false;
-          if (hasNonUniformBorder && anyRounded && el.fill) {
-            const hasTop = (bs.top?.width || 0) > 0 && bs.top?.color;
-            const hasBottom = (bs.bottom?.width || 0) > 0 && bs.bottom?.color;
-            const hasLeft = (bs.left?.width || 0) > 0 && bs.left?.color;
-            const hasRight = (bs.right?.width || 0) > 0 && bs.right?.color;
-            const borderColors = [hasTop && bs.top.color, hasBottom && bs.bottom.color, hasLeft && bs.left.color, hasRight && bs.right.color].filter(Boolean) as string[];
-            const sameColor = borderColors.every((c: string) => c === borderColors[0]);
-            const allSolid = [hasTop && bs.top, hasBottom && bs.bottom, hasLeft && bs.left, hasRight && bs.right]
-              .filter(Boolean)
-              .every((s) => (s as BorderSide).style !== "dashed" && (s as BorderSide).style !== "dotted");
-            // Only run the sandwich when at least one bordered side actually
-            // touches a rounded corner. slide_25's `border-left: 4px; border-radius: 0 8px 8px 0`
-            // has its single bordered side (left) on two flat corners (TL,BL);
-            // the sandwich would then paint a full-footprint border-coloured
-            // roundRect behind an inner fill that's inset only on the left,
-            // leaving a visible blue crescent at TR/BR where the outer's
-            // radius-8 curve extends past the inner's shrunk radius. In that
-            // geometry the flat-strip emitter does the right thing.
-            const roundedCornerOnBorderedSide =
-              (hasTop && (cr.tl > 2 || cr.tr > 2)) ||
-              (hasBottom && (cr.bl > 2 || cr.br > 2)) ||
-              (hasLeft && (cr.tl > 2 || cr.bl > 2)) ||
-              (hasRight && (cr.tr > 2 || cr.br > 2));
-            if (sameColor && allSolid && borderColors.length > 0 && roundedCornerOnBorderedSide) {
-              // Both outer and inner sandwich rects MUST honor the same
-              // per-corner preset as the content shape — otherwise the
-              // outer's `roundRect` (all-4-corners) draws a curved bottom
-              // edge under a top-only-rounded card header (slide_01
-              // Professional pricing card).
-              const sandwichCp = cornerPresetFromRadii(cr);
-              const sandwichOuterOpts: ShapeProps = {
-                x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
-                fill: { color: hexToRgb(borderColors[0]) },
-                line: { type: "none" },
-              };
-              if (sandwichCp.preset !== "rect") {
-                sandwichOuterOpts.rectRadius = px2in(el.borderRadius ?? 0);
-                if (sandwichCp.flipH) sandwichOuterOpts.flipH = true;
-                if (sandwichCp.flipV) sandwichOuterOpts.flipV = true;
-              }
-              // 1. Outer = border color across the full footprint, same corner mask.
-              slide.addShape(sandwichCp.preset, sandwichOuterOpts);
-              if (needsFlatCornerOverlay(cr)) {
-                emitFlatCornerOverlays(slide, b, cr, sandwichOuterOpts.fill);
-              }
-              // 2. Inner = card fill, inset by border widths on bordered sides only.
-              const iTop = hasTop ? (bs.top.width || 0) : 0;
-              const iBottom = hasBottom ? (bs.bottom.width || 0) : 0;
-              const iLeft = hasLeft ? (bs.left.width || 0) : 0;
-              const iRight = hasRight ? (bs.right.width || 0) : 0;
-              const ix = b.x + iLeft;
-              const iy = b.y + iTop;
-              const iw = Math.max(0, b.w - iLeft - iRight);
-              const ih = Math.max(0, b.h - iTop - iBottom);
-              // Inner per-corner radii: shrink each rounded corner by the MIN
-              // of its two adjacent-side insets. Using `max(insets)` across
-              // all sides caused a blue crescent at TR/BR on a left-only
-              // bordered card because a 4 px left-inset was subtracted from
-              // a radius whose adjacent sides (top, right) had 0 inset — the
-              // inner's curve pulled away from the outer's curve and the
-              // border-coloured ring leaked through on the non-bordered side.
-              const innerCr = {
-                tl: cr.tl > 2 ? Math.max(0, cr.tl - Math.min(iTop, iLeft)) : 0,
-                tr: cr.tr > 2 ? Math.max(0, cr.tr - Math.min(iTop, iRight)) : 0,
-                br: cr.br > 2 ? Math.max(0, cr.br - Math.min(iBottom, iRight)) : 0,
-                bl: cr.bl > 2 ? Math.max(0, cr.bl - Math.min(iBottom, iLeft)) : 0,
-              };
-              const innerCp = cornerPresetFromRadii(innerCr);
-              const innerR = Math.max(innerCr.tl, innerCr.tr, innerCr.br, innerCr.bl);
-              const innerOpts: ShapeProps = {
-                x: px2in(ix), y: px2in(iy), w: px2in(iw), h: px2in(ih),
-                fill: { color: hexToRgb(el.fill) },
-                line: { type: "none" },
-              };
-              if (innerR > 0 && innerCp.preset !== "rect") {
-                innerOpts.rectRadius = px2in(innerR);
-                if (innerCp.flipH) innerOpts.flipH = true;
-                if (innerCp.flipV) innerOpts.flipV = true;
-              }
-              slide.addShape(innerR > 0 ? innerCp.preset : "rect", innerOpts);
-              if (innerR > 0 && needsFlatCornerOverlay(innerCr)) {
-                emitFlatCornerOverlays(slide, { x: ix, y: iy, w: iw, h: ih }, innerCr, innerOpts.fill);
-              }
-              borderHandledRounded = true;
-            }
-          }
-          if (hasNonUniformBorder && !borderHandledRounded) {
-            const sides = [
-              bs.top?.width > 0 && bs.top?.color ? { x: b.x, y: b.y, w: b.w, h: bs.top.width, color: bs.top.color, style: bs.top.style } : null,
-              bs.bottom?.width > 0 && bs.bottom?.color ? { x: b.x, y: b.y + b.h - bs.bottom.width, w: b.w, h: bs.bottom.width, color: bs.bottom.color, style: bs.bottom.style } : null,
-              bs.left?.width > 0 && bs.left?.color ? { x: b.x, y: b.y, w: bs.left.width, h: b.h, color: bs.left.color, style: bs.left.style } : null,
-              bs.right?.width > 0 && bs.right?.color ? { x: b.x + b.w - bs.right.width, y: b.y, w: bs.right.width, h: b.h, color: bs.right.color, style: bs.right.style } : null,
-            ].filter(Boolean) as { x: number; y: number; w: number; h: number; color: string; style?: string }[];
-            for (const side of sides) {
-              if (side.style === "dashed" || side.style === "dotted") {
-                const isHoriz = side.w > side.h;
-                // Minimum 1pt stroke for dashed/dotted — Google Slides renders
-                // sub-pt dashed strokes as a single thin solid line (or drops
-                // them entirely), erasing `.stat-row { border-bottom: 1px
-                // dotted }`-style dividers. 1pt is barely visible but keeps
-                // the dash pattern intact.
-                slide.addShape("line", {
-                  x: px2in(side.x), y: px2in(side.y),
-                  w: isHoriz ? px2in(side.w) : 0,
-                  h: isHoriz ? 0 : px2in(side.h),
-                  line: {
-                    color: hexToRgb(side.color),
-                    width: Math.max((isHoriz ? side.h : side.w) * PX2PT, 1),
-                    // Thin (≤2px) dashed → finer sysDash cadence (slide_33
-                    // .out `border-top: 1px dashed`); coarse "dash" only for
-                    // thicker borders.
-                    dashType: side.style === "dashed" ? ((isHoriz ? side.h : side.w) <= 2 ? "sysDash" : "dash") : "sysDot",
-                  },
-                });
-              } else {
-                slide.addShape("rect", {
-                  x: px2in(side.x), y: px2in(side.y), w: px2in(side.w), h: px2in(side.h),
-                  fill: { color: hexToRgb(side.color) },
-                  line: { type: "none" },
-                });
-              }
-            }
-          }
-
-          // Overlay native editable text on merged text elements.
-          // Preserve per-run styling (font-size, color, weight) when the merged
-          // text has styled inline children — e.g. `$19<span>/mo</span>` must
-          // keep /mo at its smaller size after being absorbed into a card-header.
-          //
-          // Two-bug fix (slide_24 — deep-nest innermost text):
-          //   1. Alignment — hardcoding `align: "center"` forced every merged
-          //      text to center. `.innermost` inherits `text-align: start`
-          //      (left) and must stay left when absorbed into the parent rect.
-          //   2. Bounds — using the rect's `b` (level-4 at 837×164) makes the
-          //      text box wider than the source innermost div (769×96), so
-          //      wrap points shift. Fall back to `mergedTextEl.bounds` so
-          //      Chrome's wrap survives the merge; valign:"middle" still
-          //      centers vertically within the rect because the DOM y/h is
-          //      the flex-centered position Chrome already computed.
-          if (mergedTextEl) {
-            const mb = mergedTextEl.bounds || b;
-            // Honour the extractor's verticallyCentered flag instead of
-            // hardcoding "middle". Single-line absorbed text (chip labels,
-            // card headers, flex-centered content) keeps verticallyCentered=
-            // true and stays centered; multi-line absorbed text (slide_30
-            // .code-block, padding:14px, multiple <br>s) gets verticallyCentered=
-            // false and is emitted "top" so emitStyledText folds the CSS
-            // padding-top into the textbox's tIns — first line sits at the
-            // padding distance, matching Chrome's top-flowed layout.
-            const mergedValign: "top" | "middle" =
-              mergedTextEl.verticallyCentered === false ? "top" : "middle";
-            emitStyledText(
-              slide, mergedTextEl, mb,
-              extraction.elements, mergedTextIndex,
-              mergedValign,
-              false, // merged-rect path historically didn't fold opacity into color
-              { color: "#333333", fontSize: 14 },
-            );
-          }
-
-          break;
-        }
-
-        case "triangle": {
-          // CSS border-triangle arrow → pptxgenjs `triangle` preset (apex-up
-          // by default). `rotate` selects which way the apex points:
-          //   0=up, 90=right, 180=down, 270=left.
-          //
-          // OOXML rotation rotates the shape about the bbox center but keeps
-          // the bbox axis-aligned and fixed in size. A 12×16 triangle rotated
-          // 90° would render inside a 12×16 slot, clipping apex/base. For 90°
-          // and 270° rotations we swap w and h around the center so the
-          // post-rotation shape fits its visual extent.
-          const rot = typeof el.rotate === "number" ? el.rotate : 0;
-          let rx = b.x, ry = b.y, rw = b.w, rh = b.h;
-          if (rot === 90 || rot === 270) {
-            const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-            rw = b.h; rh = b.w;
-            rx = cx - rw / 2; ry = cy - rh / 2;
-          }
-          const triOpts: ShapeProps = {
-            x: px2in(rx), y: px2in(ry), w: px2in(rw), h: px2in(rh),
-            fill: { color: hexToRgb(el.fill || "#000000") },
-            line: { type: "none" },
-          };
-          if (rot !== 0) triOpts.rotate = rot;
-          slide.addShape("triangle", triOpts);
-          break;
-        }
-
-        case "poly": {
-          // CSS `clip-path: polygon(...)` host → native `custGeom` freeform.
-          // Emitting the polygon as a real Slides shape (instead of a rasterised
-          // PNG) makes trapezoids/arbitrary convex shapes editable and lets them
-          // carry a solid OR linear-gradient fill. slide_13's four funnel stages
-          // are the motivating case: four screenshots collapse into four shapes.
-          const pts = el.points || [];
-          if (pts.length < 3) break;
-          // Points arrive as px offsets relative to the shape's bbox top-left;
-          // custGeom expects them in the frame's own inch coordinate space.
-          const polyPoints: NonNullable<ShapeProps["points"]> = pts.map((p) => ({
-            x: px2in(p.x), y: px2in(p.y),
-          }));
-          polyPoints.push({ close: true });
-          const polyOpts: ShapeProps = {
-            x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
-            points: polyPoints,
-            line: { type: "none" },
-          };
-          if (el.gradient && el.gradient.stops && el.gradient.stops.length >= 2) {
-            // Same GRAD_<n> placeholder + zip-injection dance as the rect path:
-            // stock pptxgenjs can't emit a shape <a:gradFill>, so tag the shape
-            // and let injectGradientsIntoZip rewrite the solid placeholder.
-            const gid = gradientRegistry.length;
-            gradientRegistry.push(el.gradient);
-            polyOpts.fill = { color: hexToRgb(el.gradient.stops[0].color) };
-            polyOpts.objectName = `GRAD_${gid}`;
-          } else if (el.fill) {
-            const fillOpts: NonNullable<ShapeProps["fill"]> = { color: hexToRgb(el.fill) };
-            if (typeof el.fillAlpha === "number" && el.fillAlpha < 1) {
-              fillOpts.transparency = Math.round((1 - el.fillAlpha) * 100);
-            }
-            polyOpts.fill = fillOpts;
-          }
-          // `custGeom` is a valid runtime shape (pptxgen.es.js emits <a:custGeom>)
-          // but the published SHAPE_NAME union omits it — cast like the preset path.
-          slide.addShape("custGeom" as Parameters<Slide["addShape"]>[0], polyOpts);
-          break;
-        }
-
-        case "line": {
-          const endpointLine = el as typeof el & {
-            x1?: number; y1?: number; x2?: number; y2?: number; strokeWidth?: number;
-          };
-          if (
-            typeof endpointLine.x1 === "number" && typeof endpointLine.y1 === "number" &&
-            typeof endpointLine.x2 === "number" && typeof endpointLine.y2 === "number"
-          ) {
-            const dx = endpointLine.x2 - endpointLine.x1;
-            const dy = endpointLine.y2 - endpointLine.y1;
-            const lineOpts: ShapeProps = {
-              x: px2in(Math.min(endpointLine.x1, endpointLine.x2)),
-              y: px2in(Math.min(endpointLine.y1, endpointLine.y2)),
-              w: px2in(Math.abs(dx)),
-              h: px2in(Math.abs(dy)),
-              line: {
-                color: hexToRgb(el.color || "#000000"),
-                width: Math.max(0.5, (endpointLine.strokeWidth || 1) * PX2PT),
-              },
-            };
-            if (dx * dy < 0) lineOpts.flipV = true;
-            slide.addShape("line", lineOpts);
-            break;
-          }
-          const isVertical = b.h > b.w * 2;
-          // An OOXML line stroke is CENTERED on its position, so a decorative
-          // strip must sit on its CENTER axis, not its top/left edge. The strip
-          // bounds carry the full box (e.g. slide_33 `.road::before`: top:5px,
-          // height:4px → visual center is the road's center). Placing the stroke
-          // at `b.y` would render `b.h/2` (~2px) too high; center it instead.
-          const lineOpts: ShapeProps = {
-            x: px2in(isVertical ? b.x + b.w / 2 : b.x),
-            y: px2in(isVertical ? b.y : b.y + b.h / 2),
-            w: isVertical ? 0 : px2in(b.w),
-            h: isVertical ? px2in(b.h) : 0,
-            line: {
-              color: hexToRgb(el.color || "#000000"),
-              width: Math.max(0.5, isVertical ? b.w * PX2PT : b.h * PX2PT),
-            },
-          };
-          // Decorative dashed strips (e.g. slide_33 `.road::before` centerline)
-          // carry a dashType from extract-dom.
-          // TODO(types): `dashType` is a raw OOXML preset string from extract-dom;
-          // the published pptxgenjs union is narrower than the valid preset set.
-          if (el.dashType && el.dashType !== "solid") lineOpts.line!.dashType = el.dashType as DashTypeValue;
-          slide.addShape("line", lineOpts);
-          break;
-        }
-
-        case "text": {
-          // All slack/rotation/run-mapping logic lives in emitStyledText so
-          // this site stays a single dispatch. Standalone-text defaults are
-          // 16px / #000 (vs. the merged-into-rect path's 14px / #333 — those
-          // texts are absorbed into a card and inherit a card-text vibe).
-          emitStyledText(
-            slide, el, b,
-            extraction.elements, ei,
-            el.verticallyCentered ? "middle" : "top",
-            true, // standalone text honors style.opacity via pptxgenjs transparency
-            { color: "#000000", fontSize: 16 },
-          );
-          break;
-        }
-
-        case "list": {
-          // Lists come in two flavors:
-          //   1. Pure-text lists → render natively with pptxgenjs bullet/number
-          //      so the user sees real disc/decimal markers (Google Slides
-          //      keeps them editable as a real bulleted list).
-          //   2. Styled lists (any <li> has borderBottom, bg, or its own
-          //      border/radius) → render item-by-item so we can paint per-row
-          //      boxes, separators, and mixed backgrounds.
-          // The list's container background (bg+border+radius on the <ul>/<ol>
-          // itself) is emitted as a separate "rect" element upstream in walk().
-          const items: readonly ListItem[] = (el.items || []).filter((it) => (it.text || "").trim().length > 0);
-          if (items.length === 0) break;
-          const listStyle = el.style || {};
-          const ordered = !!el.ordered;
-          const noListStyle = (el.listStyleType || "disc") === "none";
-          const styled = !!el.anyStyledItem;
-
-          if (!styled) {
-            // Pure text — bulleted/numbered list in a single textbox.
-            //
-            // Native pptxgenjs `bullet` (→ `<a:buAutoNum>`/`<a:buChar>`) works
-            // only when the paragraph is a single run. As soon as an item
-            // has multiple runs, pptxgenjs writes a second <a:pPr> with
-            // <a:buNone/> between runs, and Google Slides reads that and
-            // drops the marker. Workaround: when ANY item has styled runs,
-            // prepend the marker as a plain text run and skip `bullet`.
-            const anyItemHasStyledRuns = items.some((it) =>
-              (it.runs || []).length > 0 && (it.runs || []).some((r) => r.style !== null)
-            );
-            // Per-item ::before bullet colours (e.g. slide_30 Key Priorities,
-            // where each <li.red>/<li.green>/etc gets its own coloured 8×8
-            // dot). pptxgenjs' native `bullet:` paints every marker in the
-            // paragraph's text colour, so per-item bullet colour cannot be
-            // honoured through the native path.
-            //
-            // wave-12D decision: we always prefer native pptxgenjs bullets
-            // (<a:buChar>) over the literal "•  " text-prefix fallback —
-            // the user explicitly accepted monochrome bullets in exchange
-            // for a real bulleted list (proper hanging-indent, real wrap,
-            // editable list in Slides). The OLD gate `&& !anyPerItemBulletColor`
-            // forced the text-prefix path on slide_11 SWOT and slide_30 Key
-            // Priorities, breaking word-wrap.
-            // A `list-style:none` list normally has no markers, EXCEPT when
-            // each <li> draws a CSS dot via `::before { content:''; background }`
-            // (slide_30 Key Priorities) — those filled dots ARE the bullets and
-            // were being dropped entirely ("There are no list items"). Those
-            // dot-bullet lists now go NATIVE (see useNativeBullet below); a
-            // literal-glyph `::before { content:'•'; color }` list (slide_11
-            // SWOT) keeps its prior plain-text rendering untouched.
-            const anyDotBullet = noListStyle && !ordered && items.some((it) => !!it.bulletColor && it.bulletIsDot);
-            // list-style:none with a LITERAL-GLYPH ::before ('•', color) — slide_11
-            // SWOT — was dropping its markers entirely; revive them too.
-            const anyGlyphBullet = noListStyle && !ordered && items.some((it) => !!it.bulletColor && !it.bulletIsDot);
-            const anyPerItemBulletColor = (!noListStyle && !ordered && items.some((it) => !!it.bulletColor)) || anyDotBullet || anyGlyphBullet;
-            // Exclude ORDERED lists from the native autonumber path: pptxgenjs
-            // hardcodes its autonumber buFont to the theme major font (Calibri
-            // Light), so "1." markers render smaller/thinner than the item's
-            // Arial (slide_12). The text-marker fallback (`marker + it.text`)
-            // emits the number in the item's own font/size instead.
-            //
-            // `anyDotBullet` lists (list-style:none + CSS dot ::before,
-            // slide_30) take the NATIVE path too: user feedback wave-13 —
-            // "Not a list element, just text with bullets" — the typed
-            // '•  ' glyph run is not a real Slides list. Per-item bullet
-            // COLOR (which pptxgenjs cannot express) is recorded in
-            // bulletColorRegistry and injected as <a:buClr> by the
-            // injectBulletColorsIntoZip post-patch.
-            const useNativeBullet = (!noListStyle || anyDotBullet) && !anyItemHasStyledRuns && !ordered;
-            const paragraphs = items.map((it: ListItem, ii: number) => {
-              const marker = ordered ? `${ii + 1}.  ` : "•  ";
-              const markerColor = it.bulletColor || it.color || listStyle.color || "#333333";
-              const rs: readonly TextRun[] | null = (it.runs && it.runs.length > 0) ? it.runs.filter((r) => r.text.length > 0) : null;
-              if (rs && rs.length > 0 && rs.some((r) => r.style !== null)) {
-                const out: TextProps[] = [];
-                if (!useNativeBullet && (!noListStyle || anyDotBullet)) {
-                  // Plain marker prefix coloured per-item (falls back to the
-                  // item's text colour when there is no per-item bullet).
-                  // `anyDotBullet` lets a `list-style:none` list with CSS dot
-                  // markers still emit them in front of styled-run items.
-                  out.push({
-                    text: marker,
-                    options: {
-                      fontFace: mapFont(it.fontFamily || listStyle.fontFamily || "Arial"),
-                      fontSize: (it.fontSize || listStyle.fontSize || 14) * PX2PT,
-                      color: hexToRgb(markerColor),
-                    },
-                  });
-                }
-                rs.forEach((run: TextRun, ri: number) => {
-                  const s: RunStyle = run.style || {};
-                  const opts: TextPropsOptions = {
-                    fontFace: mapFont(s.fontFamily || it.fontFamily || listStyle.fontFamily || "Arial"),
-                    fontSize: (s.fontSize || it.fontSize || listStyle.fontSize || 14) * PX2PT,
-                    color: hexToRgb(s.color || it.color || listStyle.color || "#333333"),
-                    bold: s.fontWeight === "bold" || (!s.fontWeight && it.fontWeight === "bold"),
-                    italic: s.fontStyle === "italic" || (!s.fontStyle && it.fontStyle === "italic"),
-                  };
-                  if (useNativeBullet && ri === 0 && out.length === 0) {
-                    opts.bullet = ordered ? { type: "number", indent: 12 } : { indent: 12 };
-                  }
-                  if (ri === rs.length - 1) opts.breakLine = true;
-                  out.push({ text: run.text, options: opts });
-                });
-                return out;
-              }
-              const baseOpts: TextPropsOptions = {
-                fontFace: mapFont(it.fontFamily || listStyle.fontFamily || "Arial"),
-                fontSize: (it.fontSize || listStyle.fontSize || 14) * PX2PT,
-                color: hexToRgb(it.color || listStyle.color || "#333333"),
-                bold: it.fontWeight === "bold",
-                italic: it.fontStyle === "italic",
-                breakLine: true,
-              };
-              if (useNativeBullet) {
-                // CSS-dot items (::before filled box) get ● (U+25CF) so the
-                // native marker approximates the original fat 8×8 dot — the
-                // default • renders visibly smaller than the CSS dot.
-                baseOpts.bullet = it.bulletIsDot && it.bulletColor
-                  ? { characterCode: "25CF", indent: 12 }
-                  : { indent: 12 };
-                return [{ text: it.text, options: baseOpts }];
-              }
-              // Colored marker prefix when the list carries per-item bullet
-              // colours (e.g. slide_30 Key Priorities). Split into a
-              // coloured marker run + the item-coloured text run so each
-              // row's "●" matches its CSS ::before background while body
-              // text keeps the item colour.
-              if (!ordered && anyPerItemBulletColor) {
-                return [
-                  {
-                    text: marker,
-                    options: {
-                      fontFace: mapFont(it.fontFamily || listStyle.fontFamily || "Arial"),
-                      fontSize: (it.fontSize || listStyle.fontSize || 14) * PX2PT,
-                      color: hexToRgb(markerColor),
-                    },
-                  },
-                  { text: it.text, options: { ...baseOpts } },
-                ];
-              }
-              return [{ text: noListStyle ? it.text : marker + it.text, options: baseOpts }];
-            }).flat();
-
-            // Honor CSS line-height when explicitly set. Emit
-            // `lineSpacingMultiple` → `<a:lnSpc><a:spcPct/></a:lnSpc>`
-            // pre-divided by 1.2 (Slides' inferred font-default leading)
-            // so the rendered multiplier matches the CSS ratio. List items
-            // never go through extract-dom's measured-pitch override
-            // (no inline-inflated boxes), so the absolute-pts path used by
-            // .text-block is wrong here — wave-9 emitted absolute pts
-            // unconditionally and rendered slide_11 SWOT bullets too loose
-            // ("line height is wrong"). Skip the override when ratio is at
-            // (or near) the 1.2 default — Slides' built-in default already
-            // matches.
-            const firstIt = items[0] || {};
-            // CSS `li { padding: 4px 0 }` adds 8 px of inter-line spacing in the
-            // browser; OOXML paragraph spacing has no padding concept, so fold
-            // li padding-top + padding-bottom into paraSpaceAfter alongside
-            // marginBottom (slide_11 SWOT bullets render too tight without this).
-            const liPadV = ((firstIt.padding && firstIt.padding.top) || 0)
-              + ((firstIt.padding && firstIt.padding.bottom) || 0);
-            const paraSpaceAfterPt = ((firstIt.marginBottom || 0) + liPadV) * PX2PT;
-            const liRatio = firstIt.lineHeight && firstIt.fontSize
-              ? firstIt.lineHeight / firstIt.fontSize
-              : 0;
-            const liUseRatio = liRatio >= 1.05 && liRatio <= 3.0 && Math.abs(liRatio - 1.2) > 0.08;
-            const liEmittedRatio = liRatio / 1.2;
-            // First-line leading compensation. `paraSpaceAfter` spaces items
-            // BETWEEN each other but never adds the leading Chrome renders ABOVE
-            // the FIRST line: the first <li>'s padding-top + half-leading
-            // ((ratio−1)/2 × font). Google Slides anchors the first paragraph at
-            // the textbox top, so the whole list rides up and packs against the
-            // card header — the user's "positioning of the text is too high"
-            // report on slide_11 (~7px: li padding-top 4px + half-leading 3.5px
-            // @ line-height 1.5). Fold that first-line lead into the textbox top
-            // inset. No-op for tight/zero-padding lists (lead ≤ 1px).
-            const liPadTopPx = (firstIt.padding && firstIt.padding.top) || 0;
-            const liFirstLineLeadPx =
-              liPadTopPx + (liUseRatio && firstIt.fontSize ? ((liRatio - 1) / 2) * firstIt.fontSize : 0);
-            // When extract-dom measured Chrome's first baseline, place Google's on it instead
-            // (slides-first-baseline.ts): the lead above is a stylesheet half-leading, but Google
-            // puts a line's extra spacing below the glyphs, so slide_11's Roboto items at 1.5 drew
-            // about 1.5 px low with it.
-            const listPlacement =
-              typeof el.firstBaselineY === "number" && typeof el.firstLineFontSize === "number" && el.firstLineFontSize > 0
-                ? topAnchoredTextPlacement({
-                    boxTopPx: b.y,
-                    boxHeightPx: b.h,
-                    chromeFirstBaselinePx: el.firstBaselineY,
-                    lineSpacingMultiple: liUseRatio ? liEmittedRatio : 1,
-                    firstLineFontSizePx: el.firstLineFontSize,
-                  })
-                : null;
-            const listBox = listPlacement === null ? { y: b.y, h: b.h } : { y: listPlacement.topPx, h: listPlacement.heightPx };
-            const listTopInsetPt = listPlacement !== null
-              ? listPlacement.topInsetPx * PX2PT
-              : liFirstLineLeadPx > 1 ? liFirstLineLeadPx * PX2PT : 0;
-            // Per-item native-bullet colors ride the side-band registry
-            // (pptxgenjs has no <a:buClr> support); the BUCLR_<n> objectName
-            // tag is how injectBulletColorsIntoZip finds this textbox. One
-            // registry slot per item paragraph, null = keep default marker.
-            const nativeBulletColors: (string | null)[] = useNativeBullet
-              ? items.map((it) => (it.bulletColor ? hexToRgb(it.bulletColor) : null))
-              : [];
-            const needBulletClr = nativeBulletColors.some((c) => c !== null);
-            const bulletClrName = needBulletClr ? `BUCLR_${bulletColorRegistry.length}` : undefined;
-            if (needBulletClr) bulletColorRegistry.push({ colors: nativeBulletColors });
-            slide.addText(paragraphs, {
-              x: px2in(b.x), y: px2in(listBox.y), w: px2in(b.w), h: px2in(listBox.h),
-              valign: "top",
-              align: "left",
-              fill: { type: "none" },
-              line: { type: "none" },
-              margin: listTopInsetPt > 0 ? [0, 0, 0, listTopInsetPt] : 0,
-              paraSpaceAfter: paraSpaceAfterPt > 0 ? paraSpaceAfterPt : undefined,
-              lineSpacingMultiple: liUseRatio ? liEmittedRatio : undefined,
-              objectName: bulletClrName,
-            });
-            break;
-          }
-
-          // Styled list — per-item rendering with optional per-row box.
-          // Semantically still a list: prepend the bullet/number marker to
-          // each item's text so disc/decimal markers survive the split.
-          // Suppress markers only when the item is pill-like (large radius,
-          // content-fit width) — in that case the visual is the pill chip,
-          // not a list row.
-          const rowH = b.h / items.length;
-          for (let ii = 0; ii < items.length; ii++) {
-            const it = items[ii];
-            const text = it.text || "";
-            const ib = it.bounds || { x: b.x, y: b.y + ii * rowH, w: b.w, h: rowH };
-
-            // Per-item background / border / radius. Uniform borders ride on
-            // the shape's `line`; non-uniform borders (e.g. a row with only
-            // borderBottom, or a highlighted row with only borderLeft accent)
-            // are painted as per-side strips so we don't draw a full outline.
-            const bs: BorderSides = it.borderSides || { top: { width: 0, color: "" }, right: { width: 0, color: "" }, bottom: { width: 0, color: "" }, left: { width: 0, color: "" } };
-            const sides: readonly BorderSide[] = [bs.top, bs.right, bs.bottom, bs.left];
-            const uniformItemBorder = sides.every((s) =>
-              s && s.width === bs.top.width && s.color === bs.top.color && s.style === bs.top.style,
-            ) && (bs.top.width || 0) > 0;
-            const hasItemBg = !!it.bgColor;
-            const hasAnyItemBorder = sides.some((s) => s && (s.width || 0) > 0 && s.color);
-
-            if (hasItemBg || uniformItemBorder) {
-              const rectOpts: ShapeProps = {
-                x: px2in(ib.x), y: px2in(ib.y), w: px2in(ib.w), h: px2in(ib.h),
-                line: { type: "none" },
-              };
-              if (hasItemBg) {
-                rectOpts.fill = { color: hexToRgb(it.bgColor) };
-                if (typeof it.bgAlpha === "number" && it.bgAlpha < 1) {
-                  rectOpts.fill.transparency = Math.round((1 - it.bgAlpha) * 100);
-                }
-              } else {
-                rectOpts.fill = { type: "none" };
-              }
-              if (uniformItemBorder) {
-                rectOpts.line = {
-                  color: hexToRgb(bs.top.color),
-                  width: Math.min((bs.top.width || 0) * PX2PT, 6),
-                  dashType: asDashType(bs.top.style === "dashed" ? "dash" : bs.top.style === "dotted" ? "dot" : "solid"),
-                };
-              }
-              const rounded = it.borderRadius && it.borderRadius > 0;
-              if (rounded) rectOpts.rectRadius = px2in(it.borderRadius);
-              slide.addShape(rounded ? "roundRect" : "rect", rectOpts);
-            }
-            if (!uniformItemBorder && hasAnyItemBorder) {
-              const strips = [
-                bs.top?.width > 0 && bs.top?.color ? { x: ib.x, y: ib.y, w: ib.w, h: bs.top.width, color: bs.top.color } : null,
-                bs.bottom?.width > 0 && bs.bottom?.color ? { x: ib.x, y: ib.y + ib.h - bs.bottom.width, w: ib.w, h: bs.bottom.width, color: bs.bottom.color } : null,
-                bs.left?.width > 0 && bs.left?.color ? { x: ib.x, y: ib.y, w: bs.left.width, h: ib.h, color: bs.left.color } : null,
-                bs.right?.width > 0 && bs.right?.color ? { x: ib.x + ib.w - bs.right.width, y: ib.y, w: bs.right.width, h: ib.h, color: bs.right.color } : null,
-              ].filter((s): s is { x: number; y: number; w: number; h: number; color: string } => s !== null);
-              for (const s of strips) {
-                slide.addShape("rect", {
-                  x: px2in(s.x), y: px2in(s.y), w: px2in(s.w), h: px2in(s.h),
-                  fill: { color: hexToRgb(s.color) }, line: { type: "none" },
-                });
-              }
-            }
-
-            // Respect <li> *horizontal* padding so text inside rounded pills
-            // doesn't collide with curved edges. Vertically we use the full
-            // item bounds and let `valign: "middle"` center the text —
-            // subtracting top/bottom padding makes the text sit with extra
-            // top-gap because padded middle ≠ full-box middle for asymmetric
-            // CSS padding (slide_13: 12px top padding on features li with
-            // an 8px ul padding-top).
-            const ipad = it.padding || { top: 0, right: 0, bottom: 0, left: 0 };
-            const isPillLike = (it.borderRadius || 0) >= Math.min(ib.w, ib.h) * 0.4 && ib.w < 400;
-            const tx = ib.x + ipad.left;
-            const ty = ib.y;
-            const tw = Math.max(1, ib.w - ipad.left - ipad.right);
-            const th = ib.h;
-            const textOpts: TextPropsOptions = {
-              x: px2in(tx), y: px2in(ty), w: px2in(tw), h: px2in(th),
-              valign: "middle",
-              align: isPillLike ? "center" : it.textAlign === "center" ? "center" : it.textAlign === "right" ? "right" : "left",
-              fontSize: (it.fontSize || listStyle.fontSize || 14) * PX2PT,
-              fontFace: mapFont(it.fontFamily || listStyle.fontFamily || "Arial"),
-              color: hexToRgb(it.color || listStyle.color || "#333333"),
-              bold: it.fontWeight === "bold",
-              italic: it.fontStyle === "italic",
-              fill: { type: "none" },
-              line: { type: "none" },
-              margin: 0,
-            };
-
-            // Marker decision is per-LIST, not per-item. See
-            // /tmp/list_line_height_analysis.md — the per-item rule was
-            // wrong because (a) :last-child losing its border-bottom
-            // regressed into "marker added", and (b) a highlighted row with
-            // `background` inside a card container wrongly flipped into a
-            // marker row.
-            //
-            // `el.isContainerList` is true when the <ul>/<ol> has its own
-            // bg/border/radius OR a majority of items use border-bottom as
-            // row separator. In both cases the container is the visual,
-            // rows inside never get markers.
-            const showMarker = !el.isContainerList && !isPillLike && !noListStyle;
-            const marker = ordered ? `${ii + 1}.  ` : "•  ";
-
-            if (it.runs && it.runs.length > 0 && it.runs.some((r) => r.style !== null)) {
-              const textRuns: TextProps[] = [];
-              if (showMarker) {
-                textRuns.push({
-                  text: marker,
-                  options: {
-                    fontFace: mapFont(it.fontFamily || listStyle.fontFamily || "Arial"),
-                    fontSize: (it.fontSize || listStyle.fontSize || 14) * PX2PT,
-                    color: hexToRgb(it.color || listStyle.color || "#333333"),
-                  },
-                });
-              }
-              for (const run of it.runs.filter((r) => r.text.length > 0)) {
-                const rs = run.style || {};
-                textRuns.push({
-                  text: run.text,
-                  options: {
-                    fontFace: mapFont(rs.fontFamily || it.fontFamily || listStyle.fontFamily || "Arial"),
-                    fontSize: (rs.fontSize || it.fontSize || listStyle.fontSize || 14) * PX2PT,
-                    color: hexToRgb(rs.color || it.color || listStyle.color || "#333333"),
-                    bold: rs.fontWeight === "bold" || (!rs.fontWeight && it.fontWeight === "bold"),
-                    italic: rs.fontStyle === "italic" || (!rs.fontStyle && it.fontStyle === "italic"),
-                  },
-                });
-              }
-              slide.addText(textRuns, textOpts);
-            } else {
-              slide.addText(showMarker ? marker + text : text, textOpts);
-            }
-
-            if (it.borderBottom) {
-              slide.addShape("line", {
-                x: px2in(ib.x), y: px2in(ib.y + ib.h),
-                w: px2in(ib.w), h: 0,
-                line: { color: hexToRgb(it.borderBottom), width: 0.5 },
-              });
-            }
-          }
-          break;
-        }
-
-        case "table": {
-          // DEBUG path — `<table data-shape-render="true|empty">`. Render
-          // the entire table via per-cell addShape rects + per-edge filled
-          // rect borders (see renderTableAsShapes). Bypasses native `<a:tbl>` so we can
-          // isolate geometry issues from `<a:tc>` rasterisation quirks.
-          if (el.renderAsShapes) {
-            renderTableAsShapes(slide, el);
-            break;
-          }
-          // Two rendering paths:
-          //   1. `addTable` (native, editable in Google Slides) when every
-          //      cell shares the same uniform border (or has no border) and
-          //      the table has no border-radius. This keeps the output a
-          //      real `<a:tbl>` that users can edit as a table.
-          //   2. Per-cell rect rendering for mixed/collapsed/dashed/rounded
-          //      tables where `addTable` can't express the geometry.
-          const rows = el.rows || [];
-          const tableCornerRadii = el.cornerRadii || { tl: 0, tr: 0, br: 0, bl: 0 };
-          const tableHasRadius = (el.borderRadius || 0) > 0;
-          // tablesFormat=native renders a real, editable <a:tbl> which CANNOT
-          // express rounded corners — so a rounded table here renders SQUARE.
-          // Warn so the reviewer knows to re-run with tablesFormat=baked (which
-          // rasterises the table, preserving rounded corners + all elements).
-          // In baked mode the table was retyped to an image upstream
-          // (extract-dom / io) and never reaches this native branch.
-          const _anyCornerRadius = tableHasRadius
-            || tableCornerRadii.tl > 0 || tableCornerRadii.tr > 0
-            || tableCornerRadii.br > 0 || tableCornerRadii.bl > 0;
-          if (_anyCornerRadius) {
-            console.warn("  ⚠ tablesFormat=native: rounded-corner table detected — "
-              + "native tables render SQUARE corners. Re-run with --tables-format baked "
-              + "for rounded corners + full fidelity.");
-          }
-          const rowCount = rows.length;
-          // CSS layers the `<table>`'s own background BEHIND every cell:
-          // a transparent `<td>` shows the table bg, not the slide bg. Our
-          // per-cell extraction captures `cs.bgColor` faithfully but never
-          // emitted the table-level fill, so cells with no own bg rendered
-          // transparent in pptx and exposed whatever sat behind the table
-          // (slide_17's pink `.table-wrap` made this obvious — odd-row
-          // cells leaked pink instead of showing `#fff`). Plumb the table
-          // bg in as a fallback so the layered semantics survive.
-          const tableBgHex: string | undefined = (el as { bgColor?: string }).bgColor || undefined;
-
-          // Rule 3 (table case): rounded-corner edge/corner patching
-          // (synthMask + shape-twice underlays) was removed — native
-          // tables render square corners; use tablesFormat=baked for
-          // rounded corners + full fidelity.
-
-          // Decide path: a table is "native-eligible" when every cell can
-          // describe its border with a single (width, color, style) triple.
-          // CSS allows per-side borders (e.g. a left-only green accent),
-          // but pptxgenjs cell borders here are one-spec-per-cell, so
-          // falling out of native means the table goes into a shape-stack
-          // fallback that LOSES rule 2 ("every <table> must be a native
-          // <a:tbl>"). Rather than refuse for non-uniform cells, we
-          // COERCE them: pick the side with the largest width as the
-          // dominant border and emit a console warning. The cell visually
-          // loses its per-side accent (a 3px green LEFT-only bar collapses
-          // into a 3px green frame on all 4 sides), but the table stays
-          // native — strict win on rule 2 vs the alternative.
-          const cellUniformBorder = (
-            cs: { readonly borderSides?: BorderSides } | undefined,
-          ): { width: number; color: string; style: string } => {
-            const bs = cs?.borderSides;
-            if (!bs) return { width: 0, color: "", style: "none" };
-            const sides: readonly BorderSide[] = [bs.top, bs.right, bs.bottom, bs.left];
-            const widths = sides.map((s) => s?.width || 0);
-            const hasAny = widths.some((w: number) => w > 0);
-            if (!hasAny) return { width: 0, color: "", style: "none" };
-            const same = sides.every((s) =>
-              s && s.width === bs.top.width && s.color === bs.top.color && s.style === bs.top.style,
-            );
-            if (same) {
-              return { width: bs.top.width, color: bs.top.color, style: bs.top.style ?? "solid" };
-            }
-            // Non-uniform: report the widest side so the corner-underlay's
-            // shape-twice has a sensible single border to draw against. Per-
-            // side rendering inside the table cell is handled by the 4-tuple
-            // `cellBorderTuple` below (pptxgenjs supports per-side cell
-            // borders via `border: [t, r, b, l]`).
-            let dominantIdx = 0;
-            for (let i = 1; i < 4; i++) {
-              if ((sides[i]?.width || 0) > (sides[dominantIdx]?.width || 0)) dominantIdx = i;
-            }
-            const dom = sides[dominantIdx];
-            return { width: dom.width, color: dom.color, style: dom.style ?? "solid" };
-          };
-          // Per-side border tuple for native pptxgenjs cells. The user's
-          // slide_15 complaint ("not a table in sides") flagged that
-          // coercing a 3px green LEFT-only accent into a 3px green frame
-          // around the whole cell loses the per-side styling. pptxgenjs's
-          // table cell `border` option accepts a `[t, r, b, l]` array of
-          // `{type, pt, color}` (verified at pptxgen.es.js:5341-5358) which
-          // emits `<a:lnT/lnR/lnB/lnL>` per cell — exactly what CSS encodes.
-          type BorderOpt = { type: "solid" | "dash" | "sysDot" | "none"; pt: number; color: string };
-          const sideToBorderOpt = (side: BorderSide | undefined): BorderOpt => {
-            if (!side || !side.width || side.width <= 0) return { type: "none", pt: 0, color: "000000" };
-            const dashType: BorderOpt["type"] = side.style === "dashed" ? "dash" : side.style === "dotted" ? "sysDot" : "solid";
-            return { type: dashType, pt: Math.max(0.5, side.width * PX2PT), color: hexToRgb(side.color || "#000000") };
-          };
-          // Compute the table-level border (declared on the `<table>`
-          // element itself, e.g. `table.rounded { border:1px solid #d1d5db }`).
-          // CSS does NOT bubble this into per-cell `getComputedStyle()`, so
-          // we read it from `el.borderSides` and graft it onto the outer-
-          // edge cells' tuples so the native <a:tbl> reproduces the visible
-          // outer frame.
-          const tableBorderSides = (el as { borderSides?: BorderSides | null }).borderSides;
-          const tableSideOpt = (key: "top" | "right" | "bottom" | "left"): BorderOpt =>
-            sideToBorderOpt(tableBorderSides ? tableBorderSides[key] : undefined);
-          // True when a rounded post-table outline ring will be drawn on top
-          // of the native <a:tbl> (see ~L2557). When it WILL draw, folding
-          // `tableSideOpt` into native edge cells double-inks the perimeter:
-          // the outline's `algn="in"` 1 px stroke sits at the rect's inner
-          // edge, but native cell borders use `algn="ctr"` and straddle the
-          // cell edge — the two paint at DIFFERENT pixels and combine to a
-          // ~1.5 px gray bar (slide_17 L1 "double border on right side").
-          // Suppress the fold in that case; the outline alone carries the
-          // perimeter. Flat tables (no outline) keep the fold so they still
-          // have an outer frame.
-          const willDrawTableOutline = tableHasRadius
-            && !!tableBorderSides
-            && (tableBorderSides.top?.width || 0) > 0
-            && !!tableBorderSides.top?.color;
-          const cellBorderTuple = (
-            cs: { readonly borderSides?: BorderSides } | undefined,
-            ri: number,
-            ci: number,
-            colCount: number,
-            rowCnt: number,
-          ): [BorderOpt, BorderOpt, BorderOpt, BorderOpt] => {
-            const bs = cs?.borderSides;
-            const t = sideToBorderOpt(bs?.top);
-            const r = sideToBorderOpt(bs?.right);
-            const bm = sideToBorderOpt(bs?.bottom);
-            const l = sideToBorderOpt(bs?.left);
-            // Fold table-level border onto outer-edge cells whose own side
-            // has no width. (Does not override an explicit per-cell border.)
-            const out: [BorderOpt, BorderOpt, BorderOpt, BorderOpt] = [t, r, bm, l];
-            if (!willDrawTableOutline) {
-              if (ri === 0 && out[0].type === "none") out[0] = tableSideOpt("top");
-              if (ri === rowCnt - 1 && out[2].type === "none") out[2] = tableSideOpt("bottom");
-              if (ci === 0 && out[3].type === "none") out[3] = tableSideOpt("left");
-              if (ci === colCount - 1 && out[1].type === "none") out[1] = tableSideOpt("right");
-            }
-            return out;
-          };
-          // Rule 2: every HTML table emits as a native pptx <a:tbl>. With
-          // cellUniformBorder now coercing non-uniform borders to their
-          // dominant side (see helper above), ALL cells return a valid
-          // (width, color, style) triple — so `allCellsUniform` is always
-          // true, and the native path always fires. The per-cell shape
-          // fallback below is dead code for rule-2 compliance and remains
-          // only as a defensive backstop.
-          let allCellsUniform = true;
-          let tableBorder: { width: number; color: string; style: string } | null = null;
-          for (const row of rows) for (const cell of row) {
-            const ub = cellUniformBorder(cell.style || {});
-            if (!tableBorder && ub.width > 0) tableBorder = ub;
-            else if (tableBorder && ub.width > 0 &&
-              (tableBorder.width !== ub.width || tableBorder.color !== ub.color || tableBorder.style !== ub.style)) {
-              // Mixed border widths across cells (different borders per
-              // header/body row) — still native-eligible, pptxgenjs accepts
-              // per-cell border specs via the `border` option.
-              tableBorder = null;
-              break;
-            }
-          }
-
-          if (allCellsUniform && rows.length > 0) {
-            // Rule 3 (table case — "shape twice" per corner cell).
-            //
-            // The whole-table underlay patch the v1 code emitted couldn't
-            // satisfy all four corners: a single dominant fill bleeds
-            // through transparent body rows when the header is coloured,
-            // and the patch's CSS bounds don't match the native <a:tbl>'s
-            // rendered height so it overshoots vertically. The user's
-            // prescription: for each clipped corner cell, render TWO
-            // stacked rounded shapes underneath the table (bottom = cell
-            // border colour, top = cell fill, inset by the border width)
-            // and mark the cell itself transparent in the native <a:tbl>.
-            // Centre / non-corner cells stay normal.
-            //
-            // The 4 corner cells are identified positionally: first row
-            // first/last cell for the top corners, last row first/last
-            // cell for the bottom corners. colspan/rowspan edge cases
-            // are deferred to a follow-up — every fixture we test has
-            // rectangular row/col layout.
-            type CornerKind = "tl" | "tr" | "br" | "bl";
-            interface CornerSpec {
-              kind: CornerKind;
-              rowIdx: number;
-              cellIdx: number;
-              cell: TableCell;
-            }
-            const transparentCellKeys = new Set<string>();
-            const cornerSpecs: CornerSpec[] = [];
-
-            // Quantize all rounded-table geometry to 1/100" so the
-            // underlay rect, the per-corner shape-twice rects, the native
-            // <a:tbl> graphicFrame and the outline stroke all land on the
-            // SAME source-inch lattice. Without quantization each shape's
-            // edges sit at arbitrary fractional inches (the px → inch
-            // conversion is `* 10/1280 = * 0.0078125` per CSS pixel), and
-            // Slides rasterises shapes vs <a:graphicFrame> cells onto
-            // display pixels independently → 1-2 display-px seams at every
-            // corner/cell boundary (the entire "missing white border"
-            // family of complaints). Snapping all coords to 0.01"
-            // eliminates the per-shape fractional offset.
-            const q = (v: number): number => Math.round(v * 100) / 100;
-            // Content extent = table bounds minus the outer border (the
-            // per-`<td>` bounds exclude the table's CSS border). The native
-            // cells and the corner masks must span EXACTLY this, edge to
-            // edge — the underlay is painted at this same extent, so any
-            // shortfall exposes it as a white strip at the right/bottom.
-            const twL0 = px2in(tableBorderSides?.left?.width || 0);
-            const twR0 = px2in(tableBorderSides?.right?.width || 0);
-            const twT0 = px2in(tableBorderSides?.top?.width || 0);
-            const twB0 = px2in(tableBorderSides?.bottom?.width || 0);
-            // EDGE-ANCHORED table coords. Quantise the ABSOLUTE edges, never
-            // position+size separately: `q(px2in(b.x)) + q(px2in(b.w))`
-            // double-rounds (b.x 5.1875→5.19 AND b.w 4.125→4.13) and pushes
-            // the right/bottom edge ~1-2 display-px PAST the table box — the
-            // "slightly misaligned right/bottom edge" the user flagged on
-            // every corner. `q(px2in(b.x + b.w))` rounds the edge once, so
-            // the table spans exactly [xL,xR]×[yT,yB]. Everything below (the
-            // underlay, the corner/band masks via contentW/H, and the native
-            // <a:tbl>) anchors to these so they all end on the same pixel.
-            const xL = q(px2in(b.x));
-            const xR = q(px2in(b.x + b.w));
-            const yT = q(px2in(b.y));
-            const yB = q(px2in(b.y + b.h));
-            const contentW = (xR - xL) - twL0 - twR0;
-            const contentH = (yB - yT) - twT0 - twB0;
-            // Column geometry — DRIFT-FREE and edge-anchored. Per-`<td>`
-            // bounds sum to ~1 px less than `contentW` (extraction floors
-            // each width), so scale the raw widths to fill `contentW`
-            // exactly, accumulate, and quantize each cumulative gridline to
-            // the 0.01" lattice; per-column widths are the differences.
-            // Quantizing each width independently then summing (the old
-            // approach) drifts short of the edge — that left the white
-            // underlay exposed as a strip at the TR/BR corners. Scaling +
-            // cumulative-then-difference makes the columns span exactly
-            // [0, contentW] with every gridline on the lattice.
-            const firstRow = rows[0];
-            const colCnt = firstRow.length;
-            const colWraw = firstRow.map((c: TableCell) => px2in(c.bounds?.w || b.w / firstRow.length));
-            const colRawTotal = colWraw.reduce((a, w) => a + w, 0);
-            const colScale = colRawTotal > 0 ? contentW / colRawTotal : 1;
-            const colXPrefix: number[] = [0];
-            { let acc = 0; for (const w of colWraw) { acc += w * colScale; colXPrefix.push(q(acc)); } }
-            const colW = colWraw.map((_, i) => q(colXPrefix[i + 1] - colXPrefix[i]));
-            const cornerKindByKey = new Map<string, CornerKind>();
-            for (const c of cornerSpecs) cornerKindByKey.set(`${c.rowIdx}:${c.cellIdx}`, c.kind);
-            const tableRows = rows.map((row: readonly TableCell[], ri: number) => row.map((cell: TableCell, ci: number) => {
-              const cs = cell.style || {};
-              const transparent = transparentCellKeys.has(`${ri}:${ci}`);
-              // Per-side border tuple. For corner cells the OUTER-facing
-              // sides (e.g. top + left for TL) are owned by the shape-
-              // twice underlay; the INNER-facing sides keep the cell's
-              // CSS-resolved border so the table's inter-cell grid (the
-              // #fff lines in `.colored`, the #e5e7eb under-header line
-              // in `.rounded`) still draws across the corner cell.
-              let border: [BorderOpt, BorderOpt, BorderOpt, BorderOpt];
-              if (transparent) {
-                const cornerKind = cornerKindByKey.get(`${ri}:${ci}`)!;
-                const full = cellBorderTuple(cs, ri, ci, colCnt, rowCount);
-                const none: BorderOpt = { type: "none", pt: 0, color: "000000" };
-                const zeroTop    = cornerKind === "tl" || cornerKind === "tr";
-                const zeroRight  = cornerKind === "tr" || cornerKind === "br";
-                const zeroBottom = cornerKind === "bl" || cornerKind === "br";
-                const zeroLeft   = cornerKind === "tl" || cornerKind === "bl";
-                border = [
-                  zeroTop    ? none : full[0],
-                  zeroRight  ? none : full[1],
-                  zeroBottom ? none : full[2],
-                  zeroLeft   ? none : full[3],
-                ];
-              } else {
-                border = cellBorderTuple(cs, ri, ci, colCnt, rowCount);
-              }
-              const cellOpts: TableCellProps = {
-                align: cs.textAlign === "center" ? "center" : cs.textAlign === "right" ? "right" : "left",
-                valign: "middle",
-                fontFace: mapFont(cs.fontFamily || "Arial"),
-                fontSize: (cs.fontSize || 14) * PX2PT,
-                color: hexToRgb(cs.color || "#111111"),
-                bold: cs.fontWeight === "bold" || cell.isHeader,
-                italic: cs.fontStyle === "italic",
-                // TODO(types): BorderOpt carries "sysDot" (valid OOXML, accepted by
-                // the fork) which the published BorderProps union omits; the tuple
-                // overlaps BorderProps so a direct assertion is type-checked.
-                border: border as [BorderProps, BorderProps, BorderProps, BorderProps],
-              };
-              const effectiveBg = cs.bgColor || tableBgHex;
-              if (!transparent && effectiveBg) cellOpts.fill = { color: hexToRgb(effectiveBg) };
-              if (cell.colspan && cell.colspan > 1) cellOpts.colspan = cell.colspan;
-              if (cell.rowspan && cell.rowspan > 1) cellOpts.rowspan = cell.rowspan;
-              // Cell padding → pptxgenjs cell margin (inches). pptxgenjs
-              // defaults to `[0.05, 0.1, 0.05, 0.1]` which is much narrower
-              // than typical CSS table padding (e.g. `14px 20px` in
-              // complex_slide_05). Without this, the left column reads as
-              // missing left padding compared to the Chrome baseline.
-              //
-              // Wide left-aligned col-0 cells get an extra leading-bump:
-              // feature-comparison tables in Chrome ride inside a
-              // `box-shadow`-haloed wrapper (e.g. `.table-wrap`), which
-              // pptx can't replicate, so the cell-edge sits flush against
-              // slide-bg with no transition. Visually this reads as "text
-              // hugs the border" even when CSS padding is honoured.
-              // Honor the cell's CSS padding directly. (A previous col-0 "48px
-              // floor" on wide left-aligned cells — added for box-shadow-halo
-              // wrapper tables — shifted plain tables' first column ~0.5″ right
-              // [slide_15], so it's removed; CSS padding is authoritative.)
-              if (cell.padding) {
-                const p = cell.padding;
-                cellOpts.margin = [px2in(p.top), px2in(p.right), px2in(p.bottom), px2in(p.left)];
-              }
-              // Styled runs (e.g. `<span class="feature-desc">` rendered
-              // as a smaller grey secondary line below the main cell text)
-              // can't survive the plain-string `cell.text` path: pptxgenjs
-              // would render them concatenated at the parent style. Build
-              // a pptxgenjs `TableCell[]` array with per-paragraph styling
-              // when runs contain a `\n` separator or any per-run style.
-              const runs = cell.runs || [];
-              const hasNewline = runs.some((r) => r.text === "\n");
-              const hasStyledRun = runs.some((r) => r.style != null);
-              if (runs.length > 0 && (hasNewline || hasStyledRun)) {
-                interface RunOpts {
-                  fontFace: string;
-                  fontSize: number;
-                  color: string;
-                  bold: boolean;
-                  italic: boolean;
-                  breakLine?: boolean;
-                }
-                const entries: Array<{ text: string; options: RunOpts }> = [];
-                for (const r of runs) {
-                  if (r.text === "\n") {
-                    if (entries.length > 0) entries[entries.length - 1].options.breakLine = true;
-                    continue;
-                  }
-                  if (!r.text) continue;
-                  const rs = r.style || {};
-                  entries.push({
-                    text: r.text,
-                    options: {
-                      fontFace: mapFont(rs.fontFamily || cs.fontFamily || "Arial"),
-                      fontSize: (rs.fontSize || cs.fontSize || 14) * PX2PT,
-                      color: hexToRgb(rs.color || cs.color || "#111111"),
-                      bold: rs.fontWeight === "bold" || (!rs.fontWeight && (cs.fontWeight === "bold" || !!cell.isHeader)),
-                      italic: rs.fontStyle === "italic" || (!rs.fontStyle && cs.fontStyle === "italic"),
-                    },
-                  });
-                }
-                if (entries.length > 0) {
-                  return { text: entries as unknown as string, options: cellOpts };
-                }
-              }
-              return { text: cell.text || "", options: cellOpts };
-            }));
-            // Compute the row heights (in inches) early so corner-shape
-            // positions can be derived from the native <a:tbl> layout, not
-            // from DOM cell bounds. The DOM cell rects are inset by the
-            // table's outer border (border-top/left/right/bottom of
-            // `<table>`), but the native pptx table's rows start exactly at
-            // its xfrm `b.y` (no implicit border padding), and columns at
-            // `b.x`. Positioning corner shapes from `cb.x/y` therefore
-            // mis-renders the corners by ~1 px (border-width) in each
-            // direction: top corners sit 1 px below row 0, bottom corners
-            // overhang the table by 1 px (the "phantom 5th row" the user
-            // flagged on slide_17 and complex_slide_05).
-            // Row geometry — DRIFT-FREE, same cumulative-quantize model as
-            // the columns above (so the bottom corners reach the table's
-            // bottom edge with no exposed underlay strip). Prefix sums give
-            // the native cell origin for any (ri, ci):
-            //   x = px2in(b.x) + colXPrefix[ci]   width  = colW[ci]
-            //   y = px2in(b.y) + rowYPrefix[ri]   height = rowH[ri]
-            const rowHraw = rows.map((row) => row[0]?.bounds ? px2in(row[0].bounds.h) : px2in(b.h / Math.max(1, rowCount)));
-            const rowRawTotal = rowHraw.reduce((a, h) => a + h, 0);
-            const rowScale = rowRawTotal > 0 ? contentH / rowRawTotal : 1;
-            const rowYPrefix: number[] = [0];
-            { let acc = 0; for (const h of rowHraw) { acc += h * rowScale; rowYPrefix.push(q(acc)); } }
-            const rowH = rowHraw.map((_, i) => q(rowYPrefix[i + 1] - rowYPrefix[i]));
-
-            // (rowH computed earlier so corner shapes can prefix-sum it.)
-            // Pin each row's height to its CSS height so Google Slides
-            // doesn't re-flow rows under the per-cell border tuples or
-            // shape-twice corner underlays — without an explicit `rowH`,
-            // pptxgenjs writes `<a:tr h="0">` and Slides auto-sizes,
-            // making the corner underlays float below the rendered table
-            // and producing a phantom blank row (slide_17, slide_05).
-            // Pin the graphicFrame's `<a:ext cy>` to sum(rowH). Without
-            // `h`, pptxgenjs falls back to a hard-coded 1 inch
-            // (pptxgen.es.js:5187 `cy || EMU`), and Google Slides
-            // compresses the rows to fit — leaving the shape-twice
-            // bottom-corner underlays floating below the rendered table
-            // (the "phantom row" bug, slide_17 / slide_05).
-            const tableH = rowH.reduce((a, b) => a + b, 0);
-            // Shift the native <a:tbl> graphicFrame inward by the CSS
-            // outer table border width. Per-`<td>` bounds (the basis for
-            // `colW` / `rowH`) are INSET by `tw` on each side, so
-            // `sum(colW) = px2in(b.w) - twLeft - twRight`. Placing the
-            // graphicFrame at `(b.x, b.y, b.w, tableH)` leaves a
-            // `tw`-wide unpainted gap on the right + bottom of the table
-            // area — which `.table-wrap`'s pink shows through, reading
-            // as the "double border on right" and the "bottom border
-            // too high" the user reported on slide_17. Shifting the
-            // frame to `(b.x + twLeft, b.y + twTop, sumColW, sumRowH)`
-            // makes native cells fill the CSS content area exactly, so
-            // the post-table outline stroke (algn="in", 1 px) abuts the
-            // cell edges with zero gap.
-            const tableTw = (el as { borderSides?: BorderSides | null }).borderSides;
-            const tblTwLeft   = q(px2in(tableTw?.left?.width   || 0));
-            const tblTwTop    = q(px2in(tableTw?.top?.width    || 0));
-            const tableColSum = q(colW.reduce((acc: number, w: number) => acc + w, 0));
-            const tableOpts: Parameters<Slide["addTable"]>[1] = {
-              x: q(xL + tblTwLeft),
-              y: q(yT + tblTwTop),
-              w: tableColSum,
-              h: q(tableH),
-              colW,
-              rowH,
-              autoPage: false,
-              fontFace: "Arial",
-            };
-            slide.addTable(tableRows, tableOpts);
-            // Rounded-table outer outline. The per-corner shape-twice
-            // sandwich leaves a 1×bw px notch at each corner cell's
-            // inner-side corner where neither outer nor inner rect
-            // reaches; on a wrapper-with-non-slide-bg fixture
-            // (slide_17's pink `.table-wrap`) that notch leaks the
-            // wrapper colour, plus there is no table-level top/left
-            // border drawn at all in the native-addTable branch (the
-            // outline below was only reachable from the per-cell
-            // branch). Emit it here so the stroke covers the perimeter
-            // notches AND draws the table's own border on top of the
-            // native cells (`injectStrokeAlignment` later adds
-            // algn="in" so the stroke lives inside the geometry —
-            // pixel-aligned with the corner-shape outer ring).
-            // (Earlier versions of this code emitted a "post-table outline
-            // stroke" `addShape` here for the perimeter. With the
-            // full-table underlay + corner shape-twice combination the
-            // outline produced a visible double-border, and when I gated
-            // it out for the outer-border case I left an `addShape` with
-            // both fill+line set to none — an invisible shape stacked
-            // over every rounded table. Removed entirely.)
-            break;
-          }
-
-          // Corner-cell shape resolver: when the table has a border-radius,
-          // each corner cell is rendered as `round1Rect` with flipH/flipV so
-          // that only its OUTER corner is rounded; adjacent cells paint flat
-          // against the cell's 3 square corners, matching CSS's overflow:hidden
-          // clipping on tables. The table outline is drawn last.
-          // OOXML `round1Rect` rounds the TOP-RIGHT corner (ECMA-376 preset
-          // geometry). To orient the rounded corner toward each of the four
-          // table corners:
-          //   TL cell  → flipH (TR→TL)
-          //   TR cell  → no flip (stays TR)
-          //   BL cell  → flipH + flipV (TR→BL)
-          //   BR cell  → flipV (TR→BR)
-          const cornerOf = (ri: number, ci: number, colCount: number): { shape: ShapeName; flipH?: boolean; flipV?: boolean } | null => {
-            if (!tableHasRadius) return null;
-            if (ri === 0 && ci === 0 && tableCornerRadii.tl > 0) return { shape: "round1Rect", flipH: true };
-            if (ri === 0 && ci === colCount - 1 && tableCornerRadii.tr > 0) return { shape: "round1Rect" };
-            if (ri === rowCount - 1 && ci === 0 && tableCornerRadii.bl > 0) return { shape: "round1Rect", flipH: true, flipV: true };
-            if (ri === rowCount - 1 && ci === colCount - 1 && tableCornerRadii.br > 0) return { shape: "round1Rect", flipV: true };
-            return null;
-          };
-
-          for (let ri = 0; ri < rows.length; ri++) {
-            const row = rows[ri];
-            for (let ci = 0; ci < row.length; ci++) {
-              const cell = row[ci];
-              const cb = cell.bounds || b;
-              const cs = cell.style || {};
-              // Cell-level radius (rare; only use for cells that explicitly
-              // declare their own border-radius). Table-level radius is now
-              // rendered as a single outer rounded frame after the loop so
-              // individual corner cells stay square — avoids pill-shaped
-              // header cells from per-cell rectRadius clipping.
-              const cellR = (cs.borderRadius || 0) > 0 ? (cs.borderRadius ?? 0) : 0;
-
-              // Cell background + outer line (pptxgenjs line is uniform; per-side
-              // borders are painted as strips below).
-              const rectOpts: ShapeProps = {
-                x: px2in(cb.x), y: px2in(cb.y), w: px2in(cb.w), h: px2in(cb.h),
-                line: { type: "none" },
-              };
-              if (cs.bgColor) {
-                rectOpts.fill = { color: hexToRgb(cs.bgColor) };
-                if (typeof cs.bgAlpha === "number" && cs.bgAlpha < 1) {
-                  rectOpts.fill.transparency = Math.round((1 - cs.bgAlpha) * 100);
-                }
-              } else {
-                rectOpts.fill = { type: "none" };
-              }
-
-              // Uniform border via shape line when all 4 sides match (common case).
-              const bs: BorderSides = cs.borderSides || { top: { width: 0, color: "" }, bottom: { width: 0, color: "" }, left: { width: 0, color: "" }, right: { width: 0, color: "" } };
-              const sides: readonly BorderSide[] = [bs.top, bs.right, bs.bottom, bs.left];
-              const uniform = sides.every((s) =>
-                s && s.width === bs.top.width && s.color === bs.top.color && s.style === bs.top.style,
-              ) && (bs.top.width || 0) > 0;
-
-              const corner = cornerOf(ri, ci, row.length);
-              const rounded = cellR > 0;
-              if (rounded) rectOpts.rectRadius = px2in(cellR);
-              if (corner) {
-                rectOpts.rectRadius = px2in(el.borderRadius ?? 0);
-                if (corner.flipH) rectOpts.flipH = true;
-                if (corner.flipV) rectOpts.flipV = true;
-              }
-
-              if (uniform) {
-                rectOpts.line = {
-                  color: hexToRgb(bs.top.color),
-                  width: Math.min((bs.top.width || 0) * PX2PT, 6),
-                  dashType: asDashType(bs.top.style === "dashed" ? "dash" : bs.top.style === "dotted" ? "dot" : "solid"),
-                };
-              }
-              const shapeToDraw: ShapeName = corner ? corner.shape : (rounded ? "roundRect" : "rect");
-              slide.addShape(shapeToDraw, rectOpts);
-
-              // Non-uniform per-side border strips
-              if (!uniform) {
-                const strips = [
-                  bs.top?.width > 0 && bs.top?.color ? { x: cb.x, y: cb.y, w: cb.w, h: bs.top.width, color: bs.top.color, style: bs.top.style } : null,
-                  bs.bottom?.width > 0 && bs.bottom?.color ? { x: cb.x, y: cb.y + cb.h - bs.bottom.width, w: cb.w, h: bs.bottom.width, color: bs.bottom.color, style: bs.bottom.style } : null,
-                  bs.left?.width > 0 && bs.left?.color ? { x: cb.x, y: cb.y, w: bs.left.width, h: cb.h, color: bs.left.color, style: bs.left.style } : null,
-                  bs.right?.width > 0 && bs.right?.color ? { x: cb.x + cb.w - bs.right.width, y: cb.y, w: bs.right.width, h: cb.h, color: bs.right.color, style: bs.right.style } : null,
-                ].filter((s): s is { x: number; y: number; w: number; h: number; color: string; style: string | undefined } => s !== null);
-                for (const s of strips) {
-                  if (s.style === "dashed" || s.style === "dotted") {
-                    // Render dashed/dotted as a line so dashType applies.
-                    const isHoriz = s.w > s.h;
-                    slide.addShape("line", {
-                      x: px2in(s.x), y: px2in(s.y),
-                      w: isHoriz ? px2in(s.w) : 0,
-                      h: isHoriz ? 0 : px2in(s.h),
-                      line: {
-                        color: hexToRgb(s.color),
-                        width: Math.max((isHoriz ? s.h : s.w) * PX2PT, 1),
-                        dashType: s.style === "dashed" ? "dash" : "sysDot",
-                      },
-                    });
-                  } else {
-                    slide.addShape("rect", {
-                      x: px2in(s.x), y: px2in(s.y), w: px2in(s.w), h: px2in(s.h),
-                      fill: { color: hexToRgb(s.color) }, line: { type: "none" },
-                    });
-                  }
-                }
-              }
-
-              // Cell text (with padding + alignment).
-              // When a cell is clipped (e.g. wrapper overflow:hidden with a
-              // rounded corner) padding can exceed the available height or
-              // width, yielding a 0-sized text box and invisible text. Clamp
-              // each axis independently so a clipped-height cell still keeps
-              // its horizontal padding (slide_05 summary row: rounded-wrapper
-              // clip shortens the last row's height, but the 20-px left/right
-              // padding still fits comfortably inside the cell's width).
-              const pad = cell.padding || { top: 0, right: 0, bottom: 0, left: 0 };
-              const padW = pad.left + pad.right;
-              const padH = pad.top + pad.bottom;
-              const useH = padW < cb.w;
-              const useV = padH < cb.h;
-              const tb = {
-                x: useH ? cb.x + pad.left : cb.x,
-                y: useV ? cb.y + pad.top : cb.y,
-                w: useH ? cb.w - padW : cb.w,
-                h: useV ? cb.h - padH : cb.h,
-              };
-              const text = cell.text || "";
-              if (text.trim().length > 0) {
-                const align = cs.textAlign === "center" ? "center" : cs.textAlign === "right" ? "right" : "left";
-                const textOpts: TextPropsOptions = {
-                  x: px2in(tb.x), y: px2in(tb.y), w: px2in(tb.w), h: px2in(tb.h),
-                  valign: "middle",
-                  align,
-                  fontSize: (cs.fontSize || 14) * PX2PT,
-                  fontFace: mapFont(cs.fontFamily || "Arial"),
-                  color: hexToRgb(cs.color || "#111111"),
-                  bold: cs.fontWeight === "bold" || cell.isHeader,
-                  italic: cs.fontStyle === "italic",
-                  fill: { type: "none" }, line: { type: "none" }, margin: 0,
-                };
-                if (cell.runs && cell.runs.length > 0 && cell.runs.some((r) => r.style !== null)) {
-                  const textRuns = cell.runs.filter((r) => r.text.length > 0).map((run: TextRun) => {
-                    const rs: RunStyle = run.style || {};
-                    return {
-                      text: run.text,
-                      options: {
-                        fontFace: mapFont(rs.fontFamily || cs.fontFamily || "Arial"),
-                        fontSize: (rs.fontSize || cs.fontSize || 14) * PX2PT,
-                        color: hexToRgb(rs.color || cs.color || "#111111"),
-                        bold: rs.fontWeight === "bold" || (!rs.fontWeight && (cs.fontWeight === "bold" || cell.isHeader)),
-                        italic: rs.fontStyle === "italic" || (!rs.fontStyle && cs.fontStyle === "italic"),
-                      },
-                    };
-                  });
-                  slide.addText(textRuns, textOpts);
-                } else {
-                  slide.addText(text, textOpts);
-                }
-              }
-            }
-          }
-          // Outer rounded frame on the table itself — drawn on top with no
-          // fill so it acts as a mask outline. Cells under the corners still
-          // render square, but the combined visual reads as a rounded table.
-          if (tableHasRadius) {
-            // Honor per-corner table radii — a table with `border-radius:
-            // 10px 10px 0 0` should outline only the top corners, not all 4.
-            const tableCp = cornerPresetFromRadii(tableCornerRadii);
-            const outlineOpts: ShapeProps = {
-              x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
-              fill: { type: "none" },
-            };
-            if (tableCp.preset !== "rect") {
-              outlineOpts.rectRadius = px2in(el.borderRadius ?? 0);
-              if (tableCp.flipH) outlineOpts.flipH = true;
-              if (tableCp.flipV) outlineOpts.flipV = true;
-            }
-            if (el.borderSides && (el.borderSides.top?.width || 0) > 0 && el.borderSides.top?.color) {
-              outlineOpts.line = {
-                color: hexToRgb(el.borderSides.top.color),
-                width: Math.min((el.borderSides.top.width || 1) * PX2PT, 6),
-              };
-            } else {
-              outlineOpts.line = { type: "none" };
-            }
-            slide.addShape(tableCp.preset, outlineOpts);
-          }
-          break;
-        }
-
-        case "visual":
-        case "image": {
-          const buf = visualPngs.get(ei);
-          if (buf) {
-            const imgOpts: NonNullable<Parameters<Slide["addImage"]>[0]> = {
-              data: `image/png;base64,${bytesToBase64(buf)}`,
-              x: px2in(b.x), y: px2in(b.y), w: px2in(b.w), h: px2in(b.h),
-            };
-            // Phase 1: a drawio-rendered diagram image gets a DETERMINISTIC
-            // identity so the post-upload pass (runConvertPptx) can find it in
-            // the imported Slides deck and link it to its editable `.drawio.svg`
-            // on Drive. `objectName` sets the pptx cNvPr name (does NOT survive
-            // Slides import) and `altText` sets the cNvPr descr (DOES survive as
-            // the image's description/alt-text). Gated on `_drawioPaired` +
-            // `drawioSource` — a strict no-op for every other image (byte output
-            // unchanged on non-drawio slides).
-            if (el._drawioPaired && extraction.drawioSource) {
-              const si1 = si + 1;
-              const hash = fnv1a8(extraction.drawioSource);
-              const diagramId = `slide${si1}_${hash}`;
-              const altText = `drawio:${diagramId}`;
-              imgOpts.objectName = `DRAWIO_IMG_${si}`;
-              imgOpts.altText = altText;
-              drawioDiagrams.push({
-                slideIndex1: si1,
-                diagramId,
-                xml: extraction.drawioSource,
-                baseSvg: extraction.drawioBaseSvg,
-                altText,
-              });
-            }
-            // Drop-shadow plumbed through from extract-dom.ts's clipped-
-            // container branch (e.g. slide_12 .device's `box-shadow: 0 0 0
-            // 2px #333`). Rendering the shadow natively via pptxgenjs lets
-            // it follow the image's rect cleanly — without this, the
-            // captured PNG bleeds halo pixels past its rounded corners
-            // ("gray leftovers" — wave-12B target).
-            // SAFETY: `boxShadow` is attached only on clipped-container visual
-            // elements by extract-dom (wave-12B); not on the generic
-            // VisualElement / ImageElement variant. We probe optionally and
-            // null-guard before reading any sub-field below.
-            const sh = (el as unknown as { boxShadow?: { blur?: number; offsetX?: number; offsetY?: number; color?: string; alpha?: number } }).boxShadow;
-            if (sh && ((sh.blur || 0) > 0 || (sh.offsetX || 0) !== 0 || (sh.offsetY || 0) !== 0)) {
-              const dx = sh.offsetX || 0;
-              const dy = sh.offsetY || 0;
-              let angle = Math.atan2(dy, dx) * 180 / Math.PI;
-              if (dx === 0 && dy === 0) angle = 90;
-              if (angle < 0) angle += 360;
-              imgOpts.shadow = {
-                type: "outer",
-                blur: Math.min((sh.blur || 0) * PX2PT, 30),
-                offset: Math.sqrt(dx * dx + dy * dy) * PX2PT,
-                color: hexToRgb(sh.color || "#000000"),
-                opacity: sh.alpha ?? 0.25,
-                angle: Math.round(angle),
-              };
-            }
-            slide.addImage(imgOpts);
-            // A large-radius `clipped-container` (phone/device mockup) is the
-            // rasterised >50%-corner fallback: its rounded chrome can't be a
-            // native roundRect, so it's emitted as this 2× PNG. Tag the region
-            // descriptively so the rating UI's "Highlight rendered regions"
-            // checkbox can mark/audit the device image.
-            const isClippedContainer =
-              el.type === "visual" && (el as VisualElement).tag === "clipped-container";
-            slideRegions.push({
-              x: b.x / SLIDE_W_PX, y: b.y / SLIDE_H_PX,
-              w: b.w / SLIDE_W_PX, h: b.h / SLIDE_H_PX,
-              kind: (el.type === "image" && el._wasEmojiText) ? "emoji"
-                : isClippedContainer ? "device-corner-image"
-                : el.type,
-            });
-          }
-          break;
-        }
-      }
-    }
-
-    // Phase 1: the drawio editable source is NO LONGER stashed in an on-slide
-    // hidden magenta text box. Instead the paired image (tagged with
-    // `altText = drawio:<diagramId>` above) is collected into `drawioDiagrams`,
-    // and runConvertPptx uploads each as an editable `.drawio.svg` to Drive
-    // after the presentation upload, then links the on-slide image to it. This
-    // keeps the slide XML free of the off-canvas marker box entirely.
+  // Phase 1: a drawio-rendered diagram image gets a DETERMINISTIC
+  // identity so the post-upload pass (runConvertPptx) can find it in
+  // the imported Slides deck and link it to its editable `.drawio.svg`
+  // on Drive. `objectName` sets the pptx cNvPr name (does NOT survive
+  // Slides import) and `altText` sets the cNvPr descr (DOES survive as
+  // the image's description/alt-text). Gated on `_drawioPaired` +
+  // `drawioSource` — a strict no-op for every other image (byte output
+  // unchanged on non-drawio slides).
+  const { extraction, slideIndex: si } = ctx;
+  if (el._drawioPaired && extraction.drawioSource) {
+    const si1 = si + 1;
+    const hash = fnv1a8(extraction.drawioSource);
+    const diagramId = `slide${si1}_${hash}`;
+    const altText = `drawio:${diagramId}`;
+    imgOpts.objectName = `DRAWIO_IMG_${si}`;
+    imgOpts.altText = altText;
+    ctx.drawioDiagrams.push({
+      slideIndex1: si1,
+      diagramId,
+      xml: extraction.drawioSource,
+      baseSvg: extraction.drawioBaseSvg,
+      altText,
+    });
   }
+  // Drop-shadow plumbed through from extract-dom.ts's clipped-
+  // container branch (e.g. slide_12 .device's `box-shadow: 0 0 0
+  // 2px #333`). Rendering the shadow natively via pptxgenjs lets
+  // it follow the image's rect cleanly — without this, the
+  // captured PNG bleeds halo pixels past its rounded corners
+  // ("gray leftovers" — wave-12B target).
+  // SAFETY: `boxShadow` is attached only on clipped-container visual
+  // elements by extract-dom (wave-12B); not on the generic
+  // VisualElement / ImageElement variant. We probe optionally and
+  // null-guard before reading any sub-field below.
+  const sh = (el as unknown as { boxShadow?: { blur?: number; offsetX?: number; offsetY?: number; color?: string; alpha?: number } }).boxShadow;
+  if (sh && ((sh.blur || 0) > 0 || (sh.offsetX || 0) !== 0 || (sh.offsetY || 0) !== 0)) {
+    imgOpts.shadow = outerShadow({
+      blurPx: sh.blur || 0,
+      dx: sh.offsetX || 0,
+      dy: sh.offsetY || 0,
+      color: sh.color || "#000000",
+      opacity: sh.alpha ?? 0.25,
+    });
+  }
+  ctx.slide.addImage(imgOpts);
+  // A large-radius `clipped-container` (phone/device mockup) is the
+  // rasterised >50%-corner fallback: its rounded chrome can't be a
+  // native roundRect, so it's emitted as this 2× PNG. Tag the region
+  // descriptively so the rating UI's "Highlight rendered regions"
+  // checkbox can mark/audit the device image.
+  ctx.slideRegions.push({
+    x: b.x / SLIDE_W_PX, y: b.y / SLIDE_H_PX,
+    w: b.w / SLIDE_W_PX, h: b.h / SLIDE_H_PX,
+    kind: renderedRegionKind(el),
+  });
+}
 
-  return { pres, renderedRegions, drawioDiagrams };
+function renderedRegionKind(el: VisualElement | ImageElement): string {
+  switch (el.type) {
+    case "image":
+      return el._wasEmojiText ? "emoji" : el.type;
+    case "visual":
+      return el.tag === "clipped-container" ? "device-corner-image" : el.type;
+    default:
+      return assertNever(el);
+  }
 }
 
 // --- Gradient post-processing ---

@@ -11,8 +11,8 @@ Generate a whiteboard-styled Google Slides presentation from a markdown slides f
    - `whiteboard_background.png` as the slide background
    - `whiteboard-graphs.js` library available for hand-drawn charts/diagrams
    - 14 pre-rendered hand-drawn icons for contextual placement
-3. Uploads the .pptx to Google Drive via CDP file input injection
-4. Opens it as a Google Slides presentation
+3. Uploads the .pptx through the Drive API, which converts it to Google Slides (`presentations/scripts/upload-pptx-to-slides.ts` prints the address)
+4. Prints the new presentation address
 5. (Optional) imports the slides into an existing presentation via `File > Import slides`
 
 **Execute:** `.agent/skills/whiteboard-presentation/whiteboard-presentation.sh <slides.md> [presentation-url]`

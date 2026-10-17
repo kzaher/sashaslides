@@ -19,12 +19,12 @@
 import CDPraw from "chrome-remote-interface";
 import { google } from "googleapis";
 import type { CdpModule } from "../../types/cdp-types.ts";
-import { readFileSync, writeFileSync, readdirSync } from "fs";
+import { writeFileSync, readdirSync } from "fs";
 import { join, resolve, dirname, basename } from "path";
-import { Readable } from "stream";
 
 import { extractorScript } from "./extractor-script.ts";
 import { loadDevOAuthClient } from "./dev-google-auth.ts";
+import { presentationUrl, uploadPptxAsSlides } from "./upload-pptx-as-slides.ts";
 import { applyPostExtractionFixes, clampOversampling, rasterJobFor, type RasterJob, type TablesFormat } from "./post-extraction.ts";
 
 import {
@@ -204,7 +204,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
     .sort()
     .map(f => join(htmlDir, f));
 
-  if (htmlFiles.length === 0) { console.error("No HTML files found in", htmlDir); process.exit(1); }
+  if (htmlFiles.length === 0) throw new Error(`No HTML files found in ${htmlDir}`);
   console.log(`Converting ${htmlFiles.length} HTML slides → pptx "${title}"`);
   console.log(`  tablesFormat: ${tablesFormat}`);
   console.log(`  oversampling: ${oversampling}×`);
@@ -270,18 +270,8 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   console.log("\nUploading to Google Slides...");
   const auth = loadDevOAuthClient({ persistRefreshedTokens: true });
   const driveApi = google.drive({ version: "v3", auth });
-
-  const buf = readFileSync(pptxPath);
-  const res = await driveApi.files.create({
-    requestBody: { name: title, mimeType: "application/vnd.google-apps.presentation" },
-    media: {
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      body: Readable.from(buf),
-    },
-    fields: "id",
-  });
-  const presId = res.data.id;
-  console.log(`  → https://docs.google.com/presentation/d/${presId}/edit`);
+  const presId = await uploadPptxAsSlides({ auth, pptxPath, title });
+  console.log(`  → ${presentationUrl(presId)}`);
 
   // Step 4 (Phase 1, drawio): upload each editable diagram source as a
   // `.drawio.svg` under drawio/slide/<presId>/ on Drive, then link the on-slide
@@ -291,7 +281,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   // updateImageProperties fields:"link"; the Drive webViewLink ends in the
   // fileId, so the editor detects editability by URL shape + resolves the file
   // by path. Strict no-op when the deck carries no drawio diagrams.
-  if (presId && drawioDiagrams.length > 0) {
+  if (drawioDiagrams.length > 0) {
     console.log(`\nUploading ${drawioDiagrams.length} drawio diagram(s) to Drive...`);
     const slidesApi = google.slides({ version: "v1", auth });
     const folderId = await ensureFolderPath(driveApi, drawioFolderSegments("slide", presId));
@@ -330,7 +320,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   }
 
   console.log("Done.");
-  return { pptxPath, presId: presId ?? undefined, slideCount: htmlFiles.length, regionsPath };
+  return { pptxPath, presId, slideCount: htmlFiles.length, regionsPath };
 }
 
 // The glow id a capture isolates, or undefined for a capture of the region as painted.

@@ -3,8 +3,9 @@
  * from ONE codebase, gated on the boot `--read-only` flag (rating-server.ts):
  *
  *   READ-ONLY  (--read-only, the merge/verdict gate): comment input + every
- *              annotation drawing tool (pen/rect/clear/colour/size + draw canvas
- *              & handlers) are STRIPPED from the served HTML; /api/clear-annotation
+ *              annotation drawing tool (pen/rect/clear/colour/size) is STRIPPED
+ *              from the served HTML and the embedded config says readOnly, so the
+ *              client (rating-ui.ts) builds no draw canvas; /api/clear-annotation
  *              returns 410; /api/rate records ONLY { id, status } and IGNORES any
  *              injected comment/annotation (the pre-existing ledger comment is
  *              preserved untouched); an invalid status is 400.
@@ -110,17 +111,18 @@ async function main() {
   if (ro.up) {
     const html = await (await fetch(`http://localhost:${ro.port}/`)).text();
     // (a) Good/Bad verdict controls present (the only mutating controls).
-    ok("[RO] Good rating control present", html.includes("rate('good')") && html.includes("Good"));
-    ok("[RO] Bad rating control present", html.includes("rate('bad')"));
+    ok("[RO] Good rating control present", html.includes('id="rateGood"') && html.includes("Good"));
+    ok("[RO] Bad rating control present", html.includes('id="rateBad"'));
+    ok("[RO] embedded config is read-only", html.includes('"readOnly":true'), "config not read-only");
     // (b) comment input + drawing controls are GONE.
     ok("[RO] no comment textarea (id=\"comment\")", !html.includes('id="comment"'), "found comment input");
-    ok("[RO] no Pen tool (toolPen/setTool)", !html.includes("toolPen") && !html.includes("setTool("), "found pen tool");
+    ok("[RO] no Pen tool (toolPen)", !html.includes("toolPen"), "found pen tool");
     ok("[RO] no Rect tool (toolRect)", !html.includes("toolRect"), "found rect tool");
     ok("[RO] no Clear button (clearDraw)", !html.includes("clearDraw"), "found clear button");
-    ok("[RO] no draw canvas / handlers (drawCanvas/setupDrawCanvas)", !html.includes("drawCanvas") && !html.includes("setupDrawCanvas"), "found draw canvas");
+    ok("[RO] no draw canvas (drawCanvas)", !html.includes("drawCanvas"), "found draw canvas");
     ok("[RO] no draw colour picker (drawColor)", !html.includes("drawColor"), "found colour picker");
     // (b2) completion popup ships in read-only too.
-    ok("[RO] completion popup present (#donePopup + showDone)", html.includes('id="donePopup"') && html.includes("showDone()"));
+    ok("[RO] completion popup present (#donePopup + Dismiss)", html.includes('id="donePopup"') && html.includes('id="dismissDone"'));
     // (c) /api/clear-annotation is disabled (410 Gone).
     const clearResp = await fetch(`http://localhost:${ro.port}/api/clear-annotation`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: "slide_01" }),
@@ -155,12 +157,15 @@ async function main() {
     const html = await (await fetch(`http://localhost:${ed.port}/`)).text();
     // Editable controls present.
     ok("[ED] comment textarea present (id=\"comment\")", html.includes('id="comment"'), "no comment input");
-    ok("[ED] Pen tool present (toolPen)", html.includes("toolPen") && html.includes("setTool("), "no pen tool");
+    ok("[ED] Pen tool present (toolPen)", html.includes('id="toolPen"'), "no pen tool");
+    ok("[ED] embedded config is editable", html.includes('"readOnly":false'), "config not editable");
     ok("[ED] Rect tool present (toolRect)", html.includes("toolRect"), "no rect tool");
     ok("[ED] Clear button present (clearDraw)", html.includes("clearDraw"), "no clear button");
-    ok("[ED] draw canvas present (drawCanvas/setupDrawCanvas)", html.includes("drawCanvas") && html.includes("setupDrawCanvas"), "no draw canvas");
+    // The draw canvas is built by the client bundle (rating-ui.ts), served at the script the page loads.
+    const client = html.includes('<script src="/rating-ui.js">') ? await (await fetch(`http://localhost:${ed.port}/rating-ui.js`)).text() : "";
+    ok("[ED] client bundle builds the draw canvas (drawCanvas/setupDrawCanvas)", client.includes("drawCanvas") && client.includes("setupDrawCanvas"), "no draw canvas in /rating-ui.js");
     // Completion popup ships in editable too.
-    ok("[ED] completion popup present (#donePopup + showDone)", html.includes('id="donePopup"') && html.includes("showDone()"));
+    ok("[ED] completion popup present (#donePopup + Dismiss)", html.includes('id="donePopup"') && html.includes('id="dismissDone"'));
 
     // /api/rate WITH a comment persists it (editable semantics).
     const rateResp = await fetch(`http://localhost:${ed.port}/api/rate`, {

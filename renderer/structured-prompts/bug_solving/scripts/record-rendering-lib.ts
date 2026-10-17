@@ -17,14 +17,14 @@
  * Idempotent per-step: a step is skipped if its primary output already
  * exists.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
-import { Readable } from "stream";
 import { pathToFileURL } from "url";
 import CDPDefault from "chrome-remote-interface";
 import { google } from "googleapis";
 import { runConvertPptx } from "../../../html2slides/convert-pptx-io";
 import { DEV_CREDENTIALS_PATH, DEV_TOKENS_PATH, loadDevOAuthClient } from "../../../html2slides/dev-google-auth.ts";
+import { presentationUrl, uploadPptxAsSlides } from "../../../html2slides/upload-pptx-as-slides.ts";
 import { DEFAULT_CAPTURE_CHROME_PORT, openChromeTab } from "../../../html2slides/reverse/chrome-capture.ts";
 import { exportThumbs } from "../../../html2slides/export-thumbs-lib";
 import type { CdpModule } from "../../../../types/cdp-types.ts";
@@ -250,17 +250,8 @@ async function uploadAndScrape(
 
   // Upload as Google Slides presentation.
   const auth = getGoogleAuth();
-  const drive = google.drive({ version: "v3", auth });
-  const res = await drive.files.create({
-    requestBody: { name: title, mimeType: "application/vnd.google-apps.presentation" },
-    media: {
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      body: Readable.from(readFileSync(pptxPath)),
-    },
-    fields: "id",
-  });
-  const presId = res.data.id!;
-  console.log(`    presentation: https://docs.google.com/presentation/d/${presId}/edit`);
+  const presId = await uploadPptxAsSlides({ auth, pptxPath, title });
+  console.log(`    presentation: ${presentationUrl(presId)}`);
 
   // Scrape per-slide thumbnails. Pass `fileNames` so exportThumbs writes
   // each PNG directly under its fixture-id name (no position-based

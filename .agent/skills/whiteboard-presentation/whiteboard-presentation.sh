@@ -33,8 +33,8 @@ fi
 echo "=== Generating $OUT_PPTX from $SLIDES_MD ==="
 (cd "$SCRIPTS" && npx tsx generate-pptx.ts "$SLIDES_MD" "$OUT_PPTX")
 
-# Upload to Google Drive
-echo "=== Uploading $OUT_PPTX to Google Drive ==="
+# Upload to Google Drive; Drive converts it to Google Slides and the script prints its address
+echo "=== Uploading $OUT_PPTX to Google Slides ==="
 (cd "$SCRIPTS" && npx tsx upload-pptx-to-slides.ts "$OUT_PPTX")
 
 if [ -n "$EXISTING_URL" ]; then
@@ -43,9 +43,6 @@ if [ -n "$EXISTING_URL" ]; then
   # Extract file ID
   PRES_ID=$(echo "$EXISTING_URL" | grep -oP '/d/\K[a-zA-Z0-9_-]+')
   (cd "$SCRIPTS" && PRES_ID="$PRES_ID" npx tsx reimport-original.ts)
-else
-  echo "=== Opening uploaded presentation as Google Slides ==="
-  (cd "$SCRIPTS" && npx tsx find-and-open-pptx.ts)
 fi
 
 echo "=== Done ==="

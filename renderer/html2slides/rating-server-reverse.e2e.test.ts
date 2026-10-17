@@ -88,11 +88,11 @@ test("reverse: the page and comparisons describe Google Slides vs Sasha HTML wit
   try {
     const reversePage = await getText({ port: reverse.port, path: "/" });
     const forwardPage = await getText({ port: forward.port, path: "/" });
-    for (const marker of ["Full round trip: fixture HTML", "const DIRECTION = 'reverse'", "Worst reverse mismatch first", "reverseMetrics", "test (Sasha HTML)"]) {
+    for (const marker of ["Full round trip: fixture HTML", '"direction":"reverse"', "Worst reverse mismatch first", "reverseMetrics", "test (Sasha HTML)"]) {
       assert.ok(reversePage.includes(marker), `reverse page has ${marker}`);
       assert.ok(!forwardPage.includes(marker), `forward page lacks ${marker}`);
     }
-    assert.ok(forwardPage.includes("const DIRECTION = 'forward'"));
+    assert.ok(forwardPage.includes('"direction":"forward"'));
 
     const comparisons = JSON.parse(await getText({ port: reverse.port, path: "/api/comparisons" })) as ReadonlyArray<Readonly<{
       id: string; originalPng: string; slidesPng: string;

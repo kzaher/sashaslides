@@ -3,9 +3,10 @@
  * `convert-pptx.ts <fixture dir>` builds ONE combined .pptx of every fixture (one slide each, in
  * file-name order) and uploads it once, and the presentation id is read from the address it prints.
  *
- * It runs as a child process because convert-pptx.ts is a script with its own Chrome session and
- * Drive upload, not a library. The child is watched like a watchdog would: killed when it prints
- * nothing for STALL_MILLISECONDS, or when it runs past TOTAL_MILLISECONDS.
+ * It runs as a child process (not `runConvertPptx` in-process) so a wedged Chrome session or Drive
+ * upload can be killed like a watchdog would: when it prints nothing for STALL_MILLISECONDS, or when
+ * it runs past TOTAL_MILLISECONDS. The id comes from the editor address the upload prints
+ * (`presentationUrl` in upload-pptx-as-slides.ts).
  */
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";

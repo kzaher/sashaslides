@@ -20,10 +20,8 @@ echo "=== 1/4 Regenerating assets from graphs.json ==="
 echo "=== 2/4 Regenerating $PPTX ==="
 (cd "$SCRIPTS" && npx tsx generate-pptx.ts "$SLIDES_MD" "$PPTX")
 
-echo "=== 3/4 Uploading to Drive (replacing existing file) ==="
+echo "=== 3/4 Uploading to Google Slides (a new presentation each run) ==="
 (cd "$SCRIPTS" && npx tsx upload-pptx-to-slides.ts "$PPTX")
-(cd "$SCRIPTS" && npx tsx click-replace.ts)
-sleep 1.5
 
 echo "=== 4/4 Re-importing into original presentation ==="
 (cd "$SCRIPTS" && npx tsx reimport-original.ts)

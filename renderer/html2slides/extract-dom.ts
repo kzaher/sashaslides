@@ -128,6 +128,7 @@ import type {
   TableCell,
   TableRow,
   ShadowRing,
+  BoxShadow,
   Gradient,
   ExtractedElement,
   Extraction,
@@ -505,29 +506,7 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
       ...(() => {
         const sh = cs.boxShadow;
         if (!sh || sh === "none") return { boxShadow: null, shadowRings: [] as ShadowRing[] };
-        // Split on top-level commas (never inside rgba()).
-        const parts: string[] = [];
-        let depth = 0, buf = "";
-        for (const ch of sh) {
-          if (ch === "(") depth++;
-          else if (ch === ")") depth--;
-          if (ch === "," && depth === 0) { parts.push(buf.trim()); buf = ""; }
-          else buf += ch;
-        }
-        if (buf.trim()) parts.push(buf.trim());
-        const layers = parts.map(p => {
-          const nums = p.match(/(-?\d+(?:\.\d+)?)px/g);
-          if (!nums || nums.length < 2) return null;
-          const vals = nums.map(n => parseFloat(n));
-          const rgbaMatch = p.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-          const alpha = rgbaMatch && rgbaMatch[4] !== undefined ? parseFloat(rgbaMatch[4]) : 1;
-          return {
-            offsetX: vals[0], offsetY: vals[1],
-            blur: vals[2] || 0, spread: vals[3] || 0,
-            color: rgb2hex(p) || "#000000",
-            alpha,
-          };
-        }).filter((l): l is NonNullable<typeof l> => l !== null);
+        const layers = parseBoxShadowLayers(sh);
         // Ring = offset=0 and spread>0. These can't be expressed as a PPTX
         // shadow effect; emit as concentric halo rects instead.
         const rings = layers
@@ -537,6 +516,39 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
         return { boxShadow: drop, shadowRings: rings };
       })(),
     };
+  }
+
+  type BoxShadowLayer = Readonly<{
+    offsetX: number; offsetY: number; blur: number; spread: number; color: string; alpha: number;
+  }>;
+
+  /** The layers of a computed `box-shadow` list, skipping any layer without an x and y offset. */
+  function parseBoxShadowLayers(boxShadow: string): BoxShadowLayer[] {
+    // Split on top-level commas (never inside rgba()).
+    const parts: string[] = [];
+    let depth = 0, buf = "";
+    for (const ch of boxShadow) {
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      if (ch === "," && depth === 0) { parts.push(buf.trim()); buf = ""; }
+      else buf += ch;
+    }
+    if (buf.trim()) parts.push(buf.trim());
+    const layers: BoxShadowLayer[] = [];
+    for (const p of parts) {
+      const nums = p.match(/(-?\d+(?:\.\d+)?)px/g);
+      if (!nums || nums.length < 2) continue;
+      const vals = nums.map(n => parseFloat(n));
+      const rgbaMatch = p.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+      const alpha = rgbaMatch && rgbaMatch[4] !== undefined ? parseFloat(rgbaMatch[4]) : 1;
+      layers.push({
+        offsetX: vals[0], offsetY: vals[1],
+        blur: vals[2] || 0, spread: vals[3] || 0,
+        color: rgb2hex(p) || "#000000",
+        alpha,
+      });
+    }
+    return layers;
   }
 
   function getBounds(el: Element): Bounds {
@@ -2162,6 +2174,11 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     finally { _currentStackZ = _outerStackZ; }
   }
 
+  /**
+   * Emits `el` and, where its kind lets the walk continue, its subtree. Each kind of box is one
+   * named step below; the order of the checks is the precedence between them (a table is never a
+   * clipped container, a clipped container is never a flex row, and so on).
+   */
   function walkElement(el: Element): void {
     if (seen.has(el)) return;
 
@@ -2172,101 +2189,17 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     const bounds = getBounds(el);
     if (!isVisible(el, bounds)) return;
 
-    // Establish a clip mask for this element's DESCENDANTS when the element
-    // itself clips overflow with rounded corners. The mask the element
-    // *itself* renders under is the OUTER `_currentClipMask` (set by an
-    // ancestor); we restore it in `finally` so siblings see the correct
-    // ambient. The local clip is recorded into _walkLocalClip so we can
-    // re-enter children with it set without recomputing.
-    const _outerClipMask = _currentClipMask;
-    const _localClipCs = getComputedStyle(el);
-    const _localOv = _localClipCs.overflow;
-    const _localClips = _localOv === "hidden" || _localOv === "clip"
-                     || _localOv === "auto" || _localOv === "scroll";
-    const _ltl = parseFloat(_localClipCs.borderTopLeftRadius) || 0;
-    const _ltr = parseFloat(_localClipCs.borderTopRightRadius) || 0;
-    const _lbr = parseFloat(_localClipCs.borderBottomRightRadius) || 0;
-    const _lbl = parseFloat(_localClipCs.borderBottomLeftRadius) || 0;
-    const _localMaxR = Math.max(_ltl, _ltr, _lbr, _lbl);
-    const _hasLocalClip = _localClips && _localMaxR > 0;
-    // Mask propagated to children. Computed eagerly so each branch below can
-    // assign it before recursing (e.g. flex/grid loop, generic child loop).
-    const _childClipMask: ClipMask | null = _hasLocalClip
-      ? refineClipMask(_outerClipMask, {
-          bounds: { ...bounds },
-          cornerRadii: { tl: _ltl, tr: _ltr, br: _lbr, bl: _lbl },
-        })
-      : _outerClipMask;
+    const childClipMask = childClipMaskOf(el, bounds);
 
-    // TABLE
     if (tag === "TABLE") {
-      seen.add(el);
-      el.querySelectorAll("tr, td, th, thead, tbody, tfoot").forEach(c => seen.add(c));
-      elements.push(extractTable(el as HTMLTableElement));
-      /*
-       * THE <caption> IS NOT PART OF THE GRID, AND IT WAS BEING THROWN AWAY.
-       *
-       * `extractTable` walks rows and cells; a caption is neither, and this branch RETURNS, so
-       * the caption's subtree was never visited by the walker either. The sentence under the
-       * table simply vanished from the slide -- measured on a real candidate, where "Each row is
-       * one Drive write..." was in the HTML and absent from the conversion.
-       *
-       * It is walked as an ordinary element rather than taught to `extractTable`: a caption is a
-       * block of text that happens to sit above or below a table (`caption-side`), and the text
-       * extractor already knows how to place a block of text by its own bounds. No basic or
-       * complex fixture uses one, so no golden moves.
-       */
-      el.querySelectorAll(":scope > caption").forEach(caption => walk(caption));
-      // After the table, emit inline "pill" spans (span with bg/border/radius)
-      // as rect + centered text overlays. The table's cell-text already
-      // contains the same string, but it sits below the pill. We re-draw the
-      // text so the `<span class="partial">Partial</span>` amber-on-cream
-      // pill effect is reconstructed on top.
-      el.querySelectorAll("td span, th span").forEach(sp => emitPillSpan(sp as Element));
+      extractTableElement(el as HTMLTableElement);
       return;
     }
-
-    // LIST
-    if (tag === "UL" || tag === "OL") {
-      if ((!el.parentElement || el.parentElement.tagName.toUpperCase() !== "LI")
-          && !isStructuredCardList(el as HTMLElement)) {
-        seen.add(el);
-        el.querySelectorAll("li, ul, ol").forEach(c => seen.add(c));
-        // Emit the list's own background/border/radius rect BEFORE the list
-        // items so the card-style background (e.g. features pricing list with
-        // border + radius + bg) gets painted under the bullets.
-        const listStyle = getStyle(el);
-        emitRect(el, listStyle, bounds);
-        elements.push(extractList(el as HTMLElement));
-        return;
-      }
-    }
-
-    // IMG
+    if ((tag === "UL" || tag === "OL") && extractStandaloneList(el as HTMLElement, bounds)) return;
     if (tag === "IMG") {
-      seen.add(el);
-      /*
-       * AN IMAGE'S OWN BOX TRAVELS WITH IT. This used to push bounds and src and nothing else,
-       * so a picture's `border` was dropped silently and its `border-radius` never even reached
-       * the converter -- `cornerRadius` is read on the other side and was always absent, which
-       * is why the rounded-corner LOSS was never reported either. The border is expressible as a
-       * Slides image outline; the radius is not, and now at least says so.
-       */
-      const imgStyle = getStyle(el);
-      elements.push({
-        type: "image",
-        bounds,
-        src: (el as HTMLImageElement).src || (el as HTMLImageElement).currentSrc || "",
-        cornerRadius: imgStyle.borderRadius,
-        borderWidth: imgStyle.borderWidth,
-        borderColor: imgStyle.borderColor,
-        borderStyle: imgStyle.borderStyle,
-        borderSides: imgStyle.borderSides,
-      });
+      extractImage(el as HTMLImageElement, bounds);
       return;
     }
-
-    // SVG / CANVAS
     if (tag === "SVG" || tag === "CANVAS") {
       seen.add(el);
       elements.push({ type: "visual", bounds, tag: tag.toLowerCase() });
@@ -2275,462 +2208,799 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
 
     // CSS effects that truly can't be shapes: conic-gradient, clip-path
     const elCs = getComputedStyle(el);
-    const bgImg = elCs.backgroundImage || "";
-    const clipP = elCs.clipPath || "";
-
-    // A `clip-path: polygon(...)` host whose fill is a solid colour or a
-    // linear-gradient is a NATIVE shape — emit it as a custGeom freeform with
-    // the polygon's points instead of rasterising a rectangular PNG. This is
-    // what turns slide_13's four funnel trapezoids from four "rendered region"
-    // screenshots into four editable, gradient-capable Slides shapes. Only take
-    // this path when the background is a solid/linear-gradient we can express;
-    // conic-gradients, real background images, and non-polygon clips still fall
-    // through to the rasteriser below.
-    if (clipP.trim().startsWith("polygon(") && bounds.w > 10 && bounds.h > 10
-        && !bgImg.includes("conic-gradient") && !bgImg.includes("url(")
-        && !bgImg.includes("radial-gradient")) {
-      const pts = parsePolygonClip(clipP, bounds.w, bounds.h);
-      const polyFill = rgb2hex(elCs.backgroundColor);
-      const polyFillAlpha = rgbAlpha(elCs.backgroundColor);
-      const polyGradient = bgImg.includes("linear-gradient")
-        ? parseLinearGradient(bgImg) : null;
-      // Need at least a triangle and SOME fill (solid or gradient) to be worth
-      // emitting as a shape; otherwise fall through to the generic handler.
-      if (pts && pts.length >= 3 && ((polyFill && polyFillAlpha > 0) || polyGradient)) {
-        seen.add(el);
-        elements.push({
-          type: "poly",
-          bounds,
-          points: pts,
-          fill: polyFill,
-          fillAlpha: polyFillAlpha,
-          gradient: polyGradient,
-          zIndex: parseInt(elCs.zIndex) || null,
-          position: elCs.position,
-        });
-        // Walk children so their text/rects re-emit as EDITABLE overlays on top
-        // of the native shape (mirrors the raster path's child re-walk, but
-        // without hiding text — nothing is baked into a PNG here).
-        for (const c of Array.from((el as HTMLElement).children)) walk(c);
-        return;
-      }
-    }
-
-    const hasCssVisual =
-      (bgImg !== "none" && bgImg.includes("conic-gradient")) ||
-      (clipP !== "none" && clipP !== "inset(0px)" && clipP.length > 0);
-    if (hasCssVisual && bounds.w > 10 && bounds.h > 10) {
-      seen.add(el);
-      // Mark the host so the screenshot loop can hide descendant text via
-      // injected CSS before capture. Children are NOT seen-marked: walk()
-      // recurses through them so their native text/rect content emits as
-      // editable overlays on top of the captured gradient/clip-path PNG.
-      // User feedback (slide_07 donuts, slide_13 funnel stages): "text should
-      // never be rendered, … put text as children so it's editable."
-      (el as HTMLElement).setAttribute("data-h2s-hide-text", "1");
-      elements.push({ type: "visual", bounds, tag: "css-effect" });
-      const childArrCss = Array.from((el as HTMLElement).children);
-      _currentClipMask = _childClipMask;
-      try { for (const c of childArrCss) walk(c); }
-      finally { _currentClipMask = _outerClipMask; }
+    if (extractPolygonClip(el as HTMLElement, elCs, bounds)) return;
+    if (isCssEffectHost(elCs, bounds)) {
+      extractCssEffectHost(el as HTMLElement, bounds, childClipMask);
       return;
     }
-
-    // Large-radius overflow:hidden containers (e.g. phone device mockups with
-    // border-radius ≥ 20px) clip ALL children at the rounded boundary. PPTX
-    // shapes don't inherit parent clipping, so child rects and screenshots
-    // protrude past the rounded corners. Screenshot the whole container as a
-    // single visual — the browser handles the clipping naturally.
-    const elOv = elCs.overflow;
-    const elBR = parseFloat(elCs.borderTopLeftRadius) || 0;
-    const elBR_tl = parseFloat(elCs.borderTopLeftRadius) || 0;
-    const elBR_tr = parseFloat(elCs.borderTopRightRadius) || 0;
-    const elBR_br = parseFloat(elCs.borderBottomRightRadius) || 0;
-    const elBR_bl = parseFloat(elCs.borderBottomLeftRadius) || 0;
-    // Per-corner radii for the captured PNG so the downstream alpha-mask pass
-    // can punch the corner pixels transparent — without this, the rectangular
-    // screenshot bleeds ancestor-background pixels (light-blue on slide_12's
-    // .device inside .left) into the four corner cut-outs.
-    const containerCornerRadii = { tl: elBR_tl, tr: elBR_tr, br: elBR_br, bl: elBR_bl };
-    if ((elOv === "hidden" || elOv === "clip") && elBR >= 20
-        && bounds.w >= 100 && bounds.h >= 100 && (el as HTMLElement).children.length > 0) {
-      seen.add(el);
-      // Mirror Path A (the conic-gradient / clip-path host above): do NOT
-      // seen-mark every descendant. Instead hide their TEXT in the captured
-      // PNG via injected CSS (`data-h2s-hide-text`) and re-walk the children
-      // below so their text + own-background rects re-emit as EDITABLE
-      // overlays, clipped to the device's rounded boundary via _childClipMask.
-      // The host PNG stays as background/chrome only (notch, bezel, screen
-      // gradient). User feedback (slide_12): "the entire center area is
-      // rendered as one picture instead of divided into elements … achievable
-      // with shapes … all the shapes are rounded rectangles with some
-      // clipping." Without hiding text first we'd get DOUBLED glyphs (baked +
-      // overlay); without the child walk the text is baked + uneditable.
-      (el as HTMLElement).setAttribute("data-h2s-hide-text", "1");
-      // Rasterise ONLY the "top black area", not the entire device. The device
-      // body decomposes into a short dark strip hugging the top (status bar +
-      // notch) and a tall content region below (the gradient screen). The top
-      // strip is the ONLY part a native roundRect can't reproduce: its corner
-      // radius (≥20px) exceeds 50% of the strip's small height, so the OOXML
-      // `adj` clamps ("only goes halfway"). The bottom region's radius is well
-      // under 50% of its height, so the gradient screen rounds its own bottom
-      // corners natively — and with NO full-device image behind it, there is no
-      // corner double-render / colour bleed (the pink crescent the user saw).
-      // topRegionH = the bottom of the children that hug the device top edge,
-      // floored to the corner radius so the curve is fully captured. When a
-      // child instead spans the full height (no distinct bottom region) this
-      // degrades to the original full-device capture.
-      let topRegionH = Math.max(elBR_tl, elBR_tr);
-      for (const c of Array.from((el as HTMLElement).children)) {
-        const cb = getBounds(c);
-        if (cb.h > 0 && cb.y <= bounds.y + 2) {
-          topRegionH = Math.max(topRegionH, cb.y + cb.h - bounds.y);
-        }
-      }
-      topRegionH = Math.min(topRegionH, bounds.h);
-      const hasDistinctBottom = topRegionH < bounds.h - 4;
-      const visualBounds = hasDistinctBottom
-        ? { x: bounds.x, y: bounds.y, w: bounds.w, h: topRegionH }
-        : bounds;
-      // Top strip is square along its bottom edge (it meets the native screen);
-      // only the device's true top corners get rounded in the image.
-      const visualCorners = hasDistinctBottom
-        ? { tl: elBR_tl, tr: elBR_tr, br: 0, bl: 0 }
-        : containerCornerRadii;
-      // Absolute y where the rasterised strip ends — child overlays fully above
-      // it are painted by the PNG and skipped by the emitter (see rasterizedHost).
-      const rasterBottomY = hasDistinctBottom ? bounds.y + topRegionH : undefined;
-      // Spread-only box-shadow layers (`0 0 0 Npx color`) paint a concentric
-      // halo ring OUTSIDE the element's bbox — the screenshot capture clips at
-      // the element bounds and never sees these rings. Emit halo rects BEFORE
-      // the visual so the device's `box-shadow: ..., 0 0 0 2px #333` (slide_12)
-      // renders as a 2-px frame around the captured phone-mockup image.
-      // Mirrors the ring loop in emitRect (lines ~1262–1279).
-      const sh = elCs.boxShadow;
-      if (sh && sh !== "none") {
-        const parts: string[] = [];
-        let depth = 0, buf = "";
-        for (const ch of sh) {
-          if (ch === "(") depth++;
-          else if (ch === ")") depth--;
-          if (ch === "," && depth === 0) { parts.push(buf.trim()); buf = ""; }
-          else buf += ch;
-        }
-        if (buf.trim()) parts.push(buf.trim());
-        const rings: { spread: number; color: string; alpha: number }[] = [];
-        let dropShadow: { offsetX: number; offsetY: number; blur: number; spread: number; color: string; alpha: number } | null = null;
-        for (const p of parts) {
-          const nums = p.match(/(-?\d+(?:\.\d+)?)px/g);
-          if (!nums || nums.length < 2) continue;
-          const vals = nums.map(n => parseFloat(n));
-          const offsetX = vals[0], offsetY = vals[1], blur = vals[2] || 0, spread = vals[3] || 0;
-          const rgbaMatch = p.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-          const alpha = rgbaMatch && rgbaMatch[4] !== undefined ? parseFloat(rgbaMatch[4]) : 1;
-          const color = rgb2hex(p) || "#000000";
-          if (offsetX === 0 && offsetY === 0 && spread > 0) {
-            rings.push({ spread, color, alpha });
-          } else if ((offsetX !== 0 || offsetY !== 0 || blur > 0) && !dropShadow) {
-            // First drop-shadow layer (offset and/or blur, ignoring spread).
-            // `addImage` only supports a single shadow — first wins.
-            dropShadow = { offsetX, offsetY, blur, spread: 0, color, alpha };
-          }
-        }
-        // When only the top strip is rasterised, the device drop-shadow can't
-        // ride on that small PNG (it would float mid-device); hang it on the
-        // outermost full-device ring instead so it follows the whole frame.
-        const outerRingIdx = rings.reduce((bi, r, i, a) => (r.spread > a[bi].spread ? i : bi), 0);
-        // Outermost ring first so it paints behind inner rings + visual.
-        for (let i = rings.length - 1; i >= 0; i--) {
-          const ring = rings[i];
-          const sp = ring.spread;
-          const haloR = elBR + sp;
-          elements.push({
-            type: "rect",
-            bounds: { x: bounds.x - sp, y: bounds.y - sp, w: bounds.w + 2 * sp, h: bounds.h + 2 * sp },
-            fill: ring.color,
-            fillAlpha: ring.alpha,
-            gradient: null,
-            borderRadius: haloR,
-            cornerRadii: { tl: haloR, tr: haloR, br: haloR, bl: haloR },
-            borderUniform: true,
-            borderSides: null,
-            borderColor: null,
-            borderWidth: 0,
-            borderStyle: "solid",
-            zIndex: 0,
-            position: "static",
-            boxShadow: (hasDistinctBottom && i === outerRingIdx) ? dropShadow : null,
-          });
-        }
-        elements.push({ type: "visual", bounds: visualBounds, tag: "clipped-container", cornerRadii: visualCorners, boxShadow: hasDistinctBottom ? null : dropShadow });
-        // Stroke-only roundRect FRAME on top of the visual, tracing the CSS
-        // spread ring EXACTLY. pptxgenjs `addImage` only writes <p:pic
-        // prstGeom prst="rect">, so the captured PNG's RECTANGULAR corners
-        // are opaque page-background pixels that cover the underlying halo's
-        // curved corners — the ring must be re-painted ON TOP at the corners
-        // (slide_12 ".device {box-shadow: 0 0 0 2px #333}"). The frame sits
-        // on the halo's inflated bounds with borderWidth == spread: with the
-        // `algn="in"` stroke `injectStrokeAlignment` forces, the band
-        // occupies exactly [device edge, device edge + spread] — a thin
-        // spread-px ring whose inner arc lands at the device's own radius
-        // (matched corners). Anything wider (the old spread*2 stroke at
-        // device bounds) eats INTO the screen and reads as a fat bezel with a
-        // mismatched inner corner radius. Same xfrm as the halo ⇒ identical
-        // EMU rounding ⇒ the filled halo behind never peeks past the frame.
-        // Use the OPAQUE outermost ring (highest spread) — translucent inner
-        // rings can't usefully over-paint a captured image. Frame zIndex high
-        // so it paints last.
-        const opaqueOuter = rings.find(r => r.alpha >= 0.95);
-        if (opaqueOuter) {
-          const osp = opaqueOuter.spread;
-          const frameR = elBR + osp;
-          elements.push({
-            type: "rect",
-            bounds: { x: bounds.x - osp, y: bounds.y - osp, w: bounds.w + 2 * osp, h: bounds.h + 2 * osp },
-            fill: null,
-            fillAlpha: 1,
-            gradient: null,
-            borderRadius: frameR,
-            cornerRadii: { tl: frameR, tr: frameR, br: frameR, bl: frameR },
-            borderUniform: true,
-            borderSides: null,
-            borderColor: opaqueOuter.color,
-            borderWidth: osp,
-            borderStyle: "solid",
-            zIndex: 1000,
-            position: "static",
-            boxShadow: null,
-          });
-        }
-      } else {
-        elements.push({ type: "visual", bounds: visualBounds, tag: "clipped-container", cornerRadii: visualCorners });
-      }
-      // Re-walk children as editable overlays ON TOP of the captured PNG,
-      // clipped to the device's rounded boundary (so child rects/text can't
-      // protrude past the rounded corners — that was Path C's original reason
-      // to seen-mark everything). The visual above already captured the
-      // chrome/background WITHOUT text (data-h2s-hide-text), so this produces
-      // no doubled glyphs. Mirrors Path A's recurse-under-_childClipMask.
-      const childArrDev = Array.from((el as HTMLElement).children);
-      // Flag the child mask as rasterised-host so the emitter knows a 2×
-      // device PNG already paints the rounded chrome: child overlays whose
-      // clipped corner radius exceeds 50% of their dimension (un-representable
-      // as a native roundRect — e.g. the navy status-bar strip / notch at the
-      // device top) are skipped and the backing image shows through instead.
-      _currentClipMask = _childClipMask
-        ? { ..._childClipMask, rasterizedHost: true, rasterBottomY }
-        : _childClipMask;
-      try { for (const c of childArrDev) walk(c); }
-      finally { _currentClipMask = _outerClipMask; }
+    if (isClippedContainer(el as HTMLElement, elCs, bounds)) {
+      extractClippedContainer(el as HTMLElement, elCs, bounds, childClipMask);
       return;
     }
 
     const style = getStyle(el);
-
-    // Flex/grid containers
-    if ((style.display === "flex" || style.display === "inline-flex" || style.display === "grid" || style.display === "inline-grid") && (el as HTMLElement).children.length > 0) {
-      // Skip the flex/grid walk when every child is a chromeless inline tag
-      // (SPAN/A/etc. with no background, no border, not positioned). Such
-      // containers are pure rich-text rows — slide_15 .line wraps line-num /
-      // keyword / string / comment / punct spans, each colour-only. Falling
-      // through to the regular text-emit path runs getTextRuns() once on the
-      // container and produces ONE editable text element per row with one
-      // styled run per span, instead of the previous one-text-element-per-span
-      // fragmentation. Real flex layouts (rows of cards, legend dots, etc.)
-      // contain at least one widget child and continue down the existing
-      // branch unchanged.
-      const flexKids0 = Array.from((el as HTMLElement).children);
-      // Distributed-justify rows (space-between / -around / -evenly) intentionally
-      // push their children apart along the main axis — e.g. slide_27
-      // `.stat-row { justify-content: space-between }` with `<span>label</span>
-      // <span class="val">+14.3%</span>`. Collapsing those into ONE text element
-      // (below) flattens them to a single left-aligned line and the trailing
-      // value never reaches the right edge. Excluding distributed rows here lets
-      // them fall through to the normal flex branch, which walks each span as its
-      // own text element at its real (already right-pushed) bounds — so the value
-      // renders flush right. Centered/left rows still collapse for clean rich text.
-      const _jc0 = style.justifyContent;
-      const isDistributedRow = _jc0 === "space-between" || _jc0 === "space-around" || _jc0 === "space-evenly";
-      const hasInlineSpacingChild = flexKids0.some(c => {
-        const ccs = getComputedStyle(c);
-        return (parseFloat(ccs.letterSpacing) || 0) !== 0 || (parseFloat(ccs.marginRight) || 0) > 2;
-      });
-      const allInlineChromeless = !isDistributedRow && !hasInlineSpacingChild && flexKids0.length > 0 && flexKids0.every(c => {
-        const ctag = (c.tagName || "").toUpperCase();
-        if (!INLINE_TAGS.includes(ctag)) return false;
-        const ccs = getComputedStyle(c);
-        if (ccs.position === "absolute" || ccs.position === "fixed") return false;
-        if (rgb2hex(ccs.backgroundColor)) return false;
-        const bw = (parseFloat(ccs.borderTopWidth) || 0) +
-                   (parseFloat(ccs.borderRightWidth) || 0) +
-                   (parseFloat(ccs.borderBottomWidth) || 0) +
-                   (parseFloat(ccs.borderLeftWidth) || 0);
-        if (bw > 0) return false;
-        return true;
-      });
-      if (allInlineChromeless) {
-        // Fall through to the post-flex code path which uses getTextRuns
-        // and emits a single text element with styled runs.
-      } else {
-      emitRect(el, style, bounds);
-      emitPseudoRect(el, bounds);
-      emitPseudoText(el, bounds, style);
-      // Mixed content: a flex container may have a text node sibling next to
-      // element children (e.g. <div class="legend-item"><div class="dot"/>Revenue</div>).
-      // Walk children normally, but if any direct text node has non-empty
-      // content, emit a text element at the container's bounds so the label
-      // survives. Without this, "Revenue"/"Expenses" legend text vanishes.
-      let directFlexText = "";
-      for (const node of el.childNodes) {
-        if (node.nodeType === 3) {
-          const t = (node.textContent || "").replace(/[ \t\n\r\f]+/g, " ").trim();
-          if (t) directFlexText += (directFlexText ? " " : "") + t;
-        }
-      }
-      if (directFlexText) {
-        const cs = getComputedStyle(el);
-        // Offset the text past the rightmost child's visual extent so a flex
-        // label like `<div class="dot"/>Revenue` doesn't render with "R"
-        // sitting under the dot. The legend-dot renders first as a sibling
-        // rect; the text starts after it plus CSS `gap`.
-        const gap = parseFloat(cs.gap) || parseFloat(cs.columnGap) || 0;
-        let textX = bounds.x;
-        let textW = bounds.w;
-        const kids = Array.from((el as HTMLElement).children).filter(c => {
-          const ccs = getComputedStyle(c);
-          return ccs.position !== "absolute" && ccs.position !== "fixed";
-        });
-        if (kids.length > 0) {
-          const last = kids[kids.length - 1] as HTMLElement;
-          const lb = getBounds(last);
-          const lcs = getComputedStyle(last);
-          const marginRight = parseFloat(lcs.marginRight) || 0;
-          textX = Math.max(bounds.x, lb.x + lb.w + marginRight + gap);
-          textW = Math.max(20, bounds.w - (textX - bounds.x));
-        }
-        elements.push({
-          type: "text",
-          bounds: { x: textX, y: bounds.y, w: textW, h: bounds.h },
-          text: directFlexText,
-          style: {
-            fontFamily: style.fontFamily,
-            fontSize: style.fontSize,
-            fontWeight: style.fontWeight,
-            fontStyle: style.fontStyle,
-            color: style.color,
-            textAlign: style.justifyContent === "center" ? "center" : style.justifyContent === "flex-end" ? "right" : "left",
-            lineHeight: style.lineHeight,
-            textDecoration: style.textDecoration,
-            textTransform: style.textTransform,
-            letterSpacing: style.letterSpacing,
-            paddingLeft: 0,
-            paddingTop: 0,
-          },
-          runs: [{ text: directFlexText, style: null }],
-          zIndex: style.zIndex,
-          position: style.position,
-          verticallyCentered: true,
-        });
-      }
-      // Sort children by CSS paint order so absolutely-positioned siblings
-      // (e.g. `.badge{position:absolute;top:-14px}` on a pricing card) paint
-       // AFTER static siblings, matching browser rendering. Without this the
-      // flex branch walked DOM order and the badge ended up beneath the
-      // card header instead of overhanging on top of it.
-      const flexChildren = Array.from((el as HTMLElement).children);
-      const flexPaintBucket = (c: Element): number => {
-        const ccs = getComputedStyle(c);
-        const zStr = ccs.zIndex;
-        const positioned = ccs.position !== "static";
-        if (!positioned) return 0;
-        if (zStr === "auto") return 1;
-        const z = parseInt(zStr);
-        if (isNaN(z)) return 1;
-        if (z < 0) return -1;
-        if (z > 0) return 2;
-        return 1;
-      };
-      const flexIndexed = flexChildren.map((c, i) => ({ c, i, b: flexPaintBucket(c) }));
-      flexIndexed.sort((a, b) => a.b - b.b || a.i - b.i);
-      _currentClipMask = _childClipMask;
-      try { for (const { c } of flexIndexed) walk(c); }
-      finally { _currentClipMask = _outerClipMask; }
+    if (isFlexOrGrid(style) && (el as HTMLElement).children.length > 0
+        && !isInlineRichTextRow(el as HTMLElement, style)) {
+      extractFlexContainer(el as HTMLElement, style, bounds, childClipMask);
       return;
-      } // end of !allInlineChromeless branch
+    }
+
+    if (extractBorderArrow(el, style, bounds)) return;
+
+    // Borders are handled by emitRect's borderSides data — no separate border lines
+    emitOwnBox(el, style, bounds);
+
+    // Horizontal rules / lines
+    if (bounds.h <= 4 && bounds.w > 20 && style.bgColor) {
+      elements.push({ type: "line", bounds, color: style.bgColor || style.borderColor || style.color });
     }
 
     const directText = getDirectText(el);
+    if (directText.trim() && !isPillCard(el as HTMLElement)) {
+      extractDirectText(el as HTMLElement, style, bounds, directText);
+      return;
+    }
 
-    // CSS border-triangle arrows: width:0; height:0 with one colored border
-    // side + transparent perpendicular sides. Emit as a preset triangle shape
-    // instead of a rect (which would render as a thin colored strip).
+    walkChildrenInPaintOrder(el as HTMLElement, childClipMask);
+  }
+
+  /**
+   * The clip mask `el`'s DESCENDANTS render under. When the element itself clips overflow with
+   * rounded corners it refines the ambient mask with its own box; otherwise children inherit the
+   * ambient one. The mask the element *itself* renders under stays the ambient `_currentClipMask`
+   * (set by an ancestor), which each step restores after walking children so siblings see it.
+   */
+  function childClipMaskOf(el: Element, bounds: Bounds): ClipMask | null {
+    const cs = getComputedStyle(el);
+    const overflow = cs.overflow;
+    const clips = overflow === "hidden" || overflow === "clip"
+               || overflow === "auto" || overflow === "scroll";
+    const tl = parseFloat(cs.borderTopLeftRadius) || 0;
+    const tr = parseFloat(cs.borderTopRightRadius) || 0;
+    const br = parseFloat(cs.borderBottomRightRadius) || 0;
+    const bl = parseFloat(cs.borderBottomLeftRadius) || 0;
+    if (!clips || Math.max(tl, tr, br, bl) <= 0) return _currentClipMask;
+    return refineClipMask(_currentClipMask, {
+      bounds: { ...bounds },
+      cornerRadii: { tl, tr, br, bl },
+    });
+  }
+
+  /** Walks `children` in the order given with `clipMask` as the ambient mask, restoring it after. */
+  function walkUnderClip(children: readonly Element[], clipMask: ClipMask | null): void {
+    const outerClipMask = _currentClipMask;
+    _currentClipMask = clipMask;
+    try { for (const child of children) walk(child); }
+    finally { _currentClipMask = outerClipMask; }
+  }
+
+  /**
+   * Recurses into `el`'s children in CSS paint order:
+   *   bucket -1 : negative z-index positioned   (group 2)
+   *   bucket  0 : in-flow non-positioned        (groups 3–5)
+   *   bucket  1 : positioned with z:auto or 0   (group 6)
+   *   bucket  2 : positive z-index positioned   (group 7)
+   * Stable sort preserves document order inside each bucket. This scopes paint order per-subtree,
+   * so a parent's own rect (emitted before recursion) paints first, and positioned siblings paint
+   * above static siblings within the same parent — matching CSS 2.1 Appendix E. It is also why an
+   * absolutely-positioned flex child (`.badge{position:absolute;top:-14px}` on a pricing card)
+   * overhangs the card header instead of sitting beneath it.
+   */
+  function walkChildrenInPaintOrder(el: HTMLElement, childClipMask: ClipMask | null): void {
+    const indexed = Array.from(el.children).map((child, index) => ({ child, index, bucket: paintBucket(child) }));
+    indexed.sort((a, b) => a.bucket - b.bucket || a.index - b.index);
+    walkUnderClip(indexed.map(entry => entry.child), childClipMask);
+  }
+
+  function paintBucket(child: Element): number {
+    const ccs = getComputedStyle(child);
+    const zStr = ccs.zIndex;
+    const positioned = ccs.position !== "static";
+    if (!positioned) return 0;
+    if (zStr === "auto") return 1;
+    const z = parseInt(zStr);
+    if (isNaN(z)) return 1;
+    if (z < 0) return -1;
+    if (z > 0) return 2;
+    return 1;
+  }
+
+  /** The box `el` paints itself: its own rect and its ::before/::after rects and text. */
+  function emitOwnBox(el: Element, style: ElementStyle, bounds: Bounds): void {
+    emitRect(el, style, bounds);
+    emitPseudoRect(el, bounds);
+    emitPseudoText(el, bounds, style);
+  }
+
+  // --- TABLE ---
+  function extractTableElement(table: HTMLTableElement): void {
+    seen.add(table);
+    table.querySelectorAll("tr, td, th, thead, tbody, tfoot").forEach(c => seen.add(c));
+    elements.push(extractTable(table));
+    /*
+     * THE <caption> IS NOT PART OF THE GRID, AND IT WAS BEING THROWN AWAY.
+     *
+     * `extractTable` walks rows and cells; a caption is neither, and this branch RETURNS, so
+     * the caption's subtree was never visited by the walker either. The sentence under the
+     * table simply vanished from the slide -- measured on a real candidate, where "Each row is
+     * one Drive write..." was in the HTML and absent from the conversion.
+     *
+     * It is walked as an ordinary element rather than taught to `extractTable`: a caption is a
+     * block of text that happens to sit above or below a table (`caption-side`), and the text
+     * extractor already knows how to place a block of text by its own bounds. No basic or
+     * complex fixture uses one, so no golden moves.
+     */
+    table.querySelectorAll(":scope > caption").forEach(caption => walk(caption));
+    // After the table, emit inline "pill" spans (span with bg/border/radius)
+    // as rect + centered text overlays. The table's cell-text already
+    // contains the same string, but it sits below the pill. We re-draw the
+    // text so the `<span class="partial">Partial</span>` amber-on-cream
+    // pill effect is reconstructed on top.
+    table.querySelectorAll("td span, th span").forEach(sp => emitPillSpan(sp as Element));
+  }
+
+  // --- LIST ---
+  /**
+   * Emits a top-level list (not nested in an <li>, not a list of structured cards) as one list
+   * element and returns true; returns false for any other list, which is walked as a plain box.
+   */
+  function extractStandaloneList(list: HTMLElement, bounds: Bounds): boolean {
+    if (list.parentElement && list.parentElement.tagName.toUpperCase() === "LI") return false;
+    if (isStructuredCardList(list)) return false;
+    seen.add(list);
+    list.querySelectorAll("li, ul, ol").forEach(c => seen.add(c));
+    // Emit the list's own background/border/radius rect BEFORE the list
+    // items so the card-style background (e.g. features pricing list with
+    // border + radius + bg) gets painted under the bullets.
+    emitRect(list, getStyle(list), bounds);
+    elements.push(extractList(list));
+    return true;
+  }
+
+  // --- IMG ---
+  function extractImage(image: HTMLImageElement, bounds: Bounds): void {
+    seen.add(image);
+    /*
+     * AN IMAGE'S OWN BOX TRAVELS WITH IT. This used to push bounds and src and nothing else,
+     * so a picture's `border` was dropped silently and its `border-radius` never even reached
+     * the converter -- `cornerRadius` is read on the other side and was always absent, which
+     * is why the rounded-corner LOSS was never reported either. The border is expressible as a
+     * Slides image outline; the radius is not, and now at least says so.
+     */
+    const imgStyle = getStyle(image);
+    elements.push({
+      type: "image",
+      bounds,
+      src: image.src || image.currentSrc || "",
+      cornerRadius: imgStyle.borderRadius,
+      borderWidth: imgStyle.borderWidth,
+      borderColor: imgStyle.borderColor,
+      borderStyle: imgStyle.borderStyle,
+      borderSides: imgStyle.borderSides,
+    });
+  }
+
+  // --- CLIP-PATH POLYGON ---
+  /**
+   * A `clip-path: polygon(...)` host whose fill is a solid colour or a
+   * linear-gradient is a NATIVE shape — emit it as a custGeom freeform with
+   * the polygon's points instead of rasterising a rectangular PNG. This is
+   * what turns slide_13's four funnel trapezoids from four "rendered region"
+   * screenshots into four editable, gradient-capable Slides shapes. Only take
+   * this path when the background is a solid/linear-gradient we can express;
+   * conic-gradients, real background images, and non-polygon clips still fall
+   * through to the rasteriser (returns false).
+   */
+  function extractPolygonClip(el: HTMLElement, cs: CSSStyleDeclaration, bounds: Bounds): boolean {
+    const bgImg = cs.backgroundImage || "";
+    const clipP = cs.clipPath || "";
+    if (!clipP.trim().startsWith("polygon(") || bounds.w <= 10 || bounds.h <= 10) return false;
+    if (bgImg.includes("conic-gradient") || bgImg.includes("url(") || bgImg.includes("radial-gradient")) return false;
+    const pts = parsePolygonClip(clipP, bounds.w, bounds.h);
+    const polyFill = rgb2hex(cs.backgroundColor);
+    const polyFillAlpha = rgbAlpha(cs.backgroundColor);
+    const polyGradient = bgImg.includes("linear-gradient")
+      ? parseLinearGradient(bgImg) : null;
+    // Need at least a triangle and SOME fill (solid or gradient) to be worth
+    // emitting as a shape; otherwise fall through to the generic handler.
+    if (!pts || pts.length < 3 || !((polyFill && polyFillAlpha > 0) || polyGradient)) return false;
+    seen.add(el);
+    elements.push({
+      type: "poly",
+      bounds,
+      points: pts,
+      fill: polyFill,
+      fillAlpha: polyFillAlpha,
+      gradient: polyGradient,
+      zIndex: parseInt(cs.zIndex) || null,
+      position: cs.position,
+    });
+    // Walk children so their text/rects re-emit as EDITABLE overlays on top
+    // of the native shape (mirrors the raster path's child re-walk, but
+    // without hiding text — nothing is baked into a PNG here).
+    for (const c of Array.from(el.children)) walk(c);
+    return true;
+  }
+
+  // --- CSS EFFECT HOST (conic-gradient / clip-path, rasterised) ---
+  function isCssEffectHost(cs: CSSStyleDeclaration, bounds: Bounds): boolean {
+    const bgImg = cs.backgroundImage || "";
+    const clipP = cs.clipPath || "";
+    const hasCssVisual =
+      (bgImg !== "none" && bgImg.includes("conic-gradient")) ||
+      (clipP !== "none" && clipP !== "inset(0px)" && clipP.length > 0);
+    return hasCssVisual && bounds.w > 10 && bounds.h > 10;
+  }
+
+  function extractCssEffectHost(el: HTMLElement, bounds: Bounds, childClipMask: ClipMask | null): void {
+    seen.add(el);
+    // Mark the host so the screenshot loop can hide descendant text via
+    // injected CSS before capture. Children are NOT seen-marked: walk()
+    // recurses through them so their native text/rect content emits as
+    // editable overlays on top of the captured gradient/clip-path PNG.
+    // User feedback (slide_07 donuts, slide_13 funnel stages): "text should
+    // never be rendered, … put text as children so it's editable."
+    el.setAttribute("data-h2s-hide-text", "1");
+    elements.push({ type: "visual", bounds, tag: "css-effect" });
+    walkUnderClip(Array.from(el.children), childClipMask);
+  }
+
+  // --- CLIPPED CONTAINER (rounded overflow:hidden device mockups) ---
+  /**
+   * Large-radius overflow:hidden containers (e.g. phone device mockups with
+   * border-radius ≥ 20px) clip ALL children at the rounded boundary. PPTX
+   * shapes don't inherit parent clipping, so child rects and screenshots
+   * protrude past the rounded corners, and the container is captured instead.
+   */
+  function isClippedContainer(el: HTMLElement, cs: CSSStyleDeclaration, bounds: Bounds): boolean {
+    const overflow = cs.overflow;
+    const radius = parseFloat(cs.borderTopLeftRadius) || 0;
+    return (overflow === "hidden" || overflow === "clip") && radius >= 20
+      && bounds.w >= 100 && bounds.h >= 100 && el.children.length > 0;
+  }
+
+  function extractClippedContainer(
+    el: HTMLElement, cs: CSSStyleDeclaration, bounds: Bounds, childClipMask: ClipMask | null,
+  ): void {
+    seen.add(el);
+    // Mirror the CSS effect host: do NOT seen-mark every descendant. Instead
+    // hide their TEXT in the captured PNG via injected CSS
+    // (`data-h2s-hide-text`) and re-walk the children below so their text +
+    // own-background rects re-emit as EDITABLE overlays, clipped to the
+    // device's rounded boundary via childClipMask. The host PNG stays as
+    // background/chrome only (notch, bezel, screen gradient). User feedback
+    // (slide_12): "the entire center area is rendered as one picture instead
+    // of divided into elements … achievable with shapes … all the shapes are
+    // rounded rectangles with some clipping." Without hiding text first we'd
+    // get DOUBLED glyphs (baked + overlay); without the child walk the text is
+    // baked + uneditable.
+    el.setAttribute("data-h2s-hide-text", "1");
+    // Per-corner radii for the captured PNG so the downstream alpha-mask pass
+    // can punch the corner pixels transparent — without this, the rectangular
+    // screenshot bleeds ancestor-background pixels (light-blue on slide_12's
+    // .device inside .left) into the four corner cut-outs.
+    const cornerRadii = {
+      tl: parseFloat(cs.borderTopLeftRadius) || 0,
+      tr: parseFloat(cs.borderTopRightRadius) || 0,
+      br: parseFloat(cs.borderBottomRightRadius) || 0,
+      bl: parseFloat(cs.borderBottomLeftRadius) || 0,
+    };
+    const region = clippedContainerRasterRegion(el, bounds, cornerRadii);
+    emitClippedContainerVisual(cs, bounds, cornerRadii, region);
+    // Re-walk children as editable overlays ON TOP of the captured PNG,
+    // clipped to the device's rounded boundary (so child rects/text can't
+    // protrude past the rounded corners — the original reason to seen-mark
+    // everything). The visual above already captured the chrome/background
+    // WITHOUT text (data-h2s-hide-text), so this produces no doubled glyphs.
+    //
+    // Flag the child mask as rasterised-host so the emitter knows a 2×
+    // device PNG already paints the rounded chrome: child overlays whose
+    // clipped corner radius exceeds 50% of their dimension (un-representable
+    // as a native roundRect — e.g. the navy status-bar strip / notch at the
+    // device top) are skipped and the backing image shows through instead.
+    const rasterBottomY = region.rasterBottomY;
+    const rasterMask = childClipMask
+      ? { ...childClipMask, rasterizedHost: true, rasterBottomY }
+      : childClipMask;
+    walkUnderClip(Array.from(el.children), rasterMask);
+  }
+
+  type ClippedContainerRegion = Readonly<{
+    /** True when only the top strip is rasterised and the screen below renders natively. */
+    hasDistinctBottom: boolean;
+    visualBounds: Bounds;
+    visualCorners: CornerRadii;
+    /** Absolute y where the rasterised strip ends; undefined when the whole device is captured. */
+    rasterBottomY: number | undefined;
+  }>;
+
+  /**
+   * Rasterise ONLY the "top black area", not the entire device. The device
+   * body decomposes into a short dark strip hugging the top (status bar +
+   * notch) and a tall content region below (the gradient screen). The top
+   * strip is the ONLY part a native roundRect can't reproduce: its corner
+   * radius (≥20px) exceeds 50% of the strip's small height, so the OOXML
+   * `adj` clamps ("only goes halfway"). The bottom region's radius is well
+   * under 50% of its height, so the gradient screen rounds its own bottom
+   * corners natively — and with NO full-device image behind it, there is no
+   * corner double-render / colour bleed (the pink crescent the user saw).
+   * topRegionH = the bottom of the children that hug the device top edge,
+   * floored to the corner radius so the curve is fully captured. When a
+   * child instead spans the full height (no distinct bottom region) this
+   * degrades to the original full-device capture.
+   */
+  function clippedContainerRasterRegion(
+    el: HTMLElement, bounds: Bounds, cornerRadii: CornerRadii,
+  ): ClippedContainerRegion {
+    let topRegionH = Math.max(cornerRadii.tl, cornerRadii.tr);
+    for (const c of Array.from(el.children)) {
+      const cb = getBounds(c);
+      if (cb.h > 0 && cb.y <= bounds.y + 2) {
+        topRegionH = Math.max(topRegionH, cb.y + cb.h - bounds.y);
+      }
+    }
+    topRegionH = Math.min(topRegionH, bounds.h);
+    const hasDistinctBottom = topRegionH < bounds.h - 4;
+    return {
+      hasDistinctBottom,
+      visualBounds: hasDistinctBottom
+        ? { x: bounds.x, y: bounds.y, w: bounds.w, h: topRegionH }
+        : bounds,
+      // Top strip is square along its bottom edge (it meets the native screen);
+      // only the device's true top corners get rounded in the image.
+      visualCorners: hasDistinctBottom
+        ? { tl: cornerRadii.tl, tr: cornerRadii.tr, br: 0, bl: 0 }
+        : cornerRadii,
+      // Child overlays fully above it are painted by the PNG and skipped by the
+      // emitter (see rasterizedHost).
+      rasterBottomY: hasDistinctBottom ? bounds.y + topRegionH : undefined,
+    };
+  }
+
+  /**
+   * The captured visual, plus its spread-only box-shadow halo rings and the stroke frame on top.
+   * Spread-only layers (`0 0 0 Npx color`) paint a concentric halo ring OUTSIDE the element's
+   * bbox — the screenshot capture clips at the element bounds and never sees these rings. Halo
+   * rects are emitted BEFORE the visual so the device's `box-shadow: ..., 0 0 0 2px #333`
+   * (slide_12) renders as a 2-px frame around the captured phone-mockup image. Mirrors the ring
+   * loop in emitRect.
+   */
+  function emitClippedContainerVisual(
+    cs: CSSStyleDeclaration, bounds: Bounds, cornerRadii: CornerRadii, region: ClippedContainerRegion,
+  ): void {
+    const { hasDistinctBottom, visualBounds, visualCorners } = region;
+    const sh = cs.boxShadow;
+    if (!sh || sh === "none") {
+      elements.push({ type: "visual", bounds: visualBounds, tag: "clipped-container", cornerRadii: visualCorners });
+      return;
+    }
+    const rings: { spread: number; color: string; alpha: number }[] = [];
+    let dropShadow: BoxShadow | null = null;
+    for (const layer of parseBoxShadowLayers(sh)) {
+      const { offsetX, offsetY, blur, spread, color, alpha } = layer;
+      if (offsetX === 0 && offsetY === 0 && spread > 0) {
+        rings.push({ spread, color, alpha });
+      } else if ((offsetX !== 0 || offsetY !== 0 || blur > 0) && !dropShadow) {
+        // First drop-shadow layer (offset and/or blur, ignoring spread).
+        // `addImage` only supports a single shadow — first wins.
+        dropShadow = { offsetX, offsetY, blur, spread: 0, color, alpha };
+      }
+    }
+    const radius = cornerRadii.tl;
+    // When only the top strip is rasterised, the device drop-shadow can't
+    // ride on that small PNG (it would float mid-device); hang it on the
+    // outermost full-device ring instead so it follows the whole frame.
+    const outerRingIdx = rings.reduce((bi, r, i, a) => (r.spread > a[bi].spread ? i : bi), 0);
+    // Outermost ring first so it paints behind inner rings + visual.
+    for (let i = rings.length - 1; i >= 0; i--) {
+      const ring = rings[i];
+      const sp = ring.spread;
+      const haloR = radius + sp;
+      elements.push({
+        type: "rect",
+        bounds: { x: bounds.x - sp, y: bounds.y - sp, w: bounds.w + 2 * sp, h: bounds.h + 2 * sp },
+        fill: ring.color,
+        fillAlpha: ring.alpha,
+        gradient: null,
+        borderRadius: haloR,
+        cornerRadii: { tl: haloR, tr: haloR, br: haloR, bl: haloR },
+        borderUniform: true,
+        borderSides: null,
+        borderColor: null,
+        borderWidth: 0,
+        borderStyle: "solid",
+        zIndex: 0,
+        position: "static",
+        boxShadow: (hasDistinctBottom && i === outerRingIdx) ? dropShadow : null,
+      });
+    }
+    elements.push({ type: "visual", bounds: visualBounds, tag: "clipped-container", cornerRadii: visualCorners, boxShadow: hasDistinctBottom ? null : dropShadow });
+    // Stroke-only roundRect FRAME on top of the visual, tracing the CSS
+    // spread ring EXACTLY. pptxgenjs `addImage` only writes <p:pic
+    // prstGeom prst="rect">, so the captured PNG's RECTANGULAR corners
+    // are opaque page-background pixels that cover the underlying halo's
+    // curved corners — the ring must be re-painted ON TOP at the corners
+    // (slide_12 ".device {box-shadow: 0 0 0 2px #333}"). The frame sits
+    // on the halo's inflated bounds with borderWidth == spread: with the
+    // `algn="in"` stroke `injectStrokeAlignment` forces, the band
+    // occupies exactly [device edge, device edge + spread] — a thin
+    // spread-px ring whose inner arc lands at the device's own radius
+    // (matched corners). Anything wider (the old spread*2 stroke at
+    // device bounds) eats INTO the screen and reads as a fat bezel with a
+    // mismatched inner corner radius. Same xfrm as the halo ⇒ identical
+    // EMU rounding ⇒ the filled halo behind never peeks past the frame.
+    // Use the OPAQUE outermost ring (highest spread) — translucent inner
+    // rings can't usefully over-paint a captured image. Frame zIndex high
+    // so it paints last.
+    const opaqueOuter = rings.find(r => r.alpha >= 0.95);
+    if (!opaqueOuter) return;
+    const osp = opaqueOuter.spread;
+    const frameR = radius + osp;
+    elements.push({
+      type: "rect",
+      bounds: { x: bounds.x - osp, y: bounds.y - osp, w: bounds.w + 2 * osp, h: bounds.h + 2 * osp },
+      fill: null,
+      fillAlpha: 1,
+      gradient: null,
+      borderRadius: frameR,
+      cornerRadii: { tl: frameR, tr: frameR, br: frameR, bl: frameR },
+      borderUniform: true,
+      borderSides: null,
+      borderColor: opaqueOuter.color,
+      borderWidth: osp,
+      borderStyle: "solid",
+      zIndex: 1000,
+      position: "static",
+      boxShadow: null,
+    });
+  }
+
+  // --- FLEX / GRID CONTAINER ---
+  function isFlexOrGrid(style: ElementStyle): boolean {
+    return style.display === "flex" || style.display === "inline-flex"
+      || style.display === "grid" || style.display === "inline-grid";
+  }
+
+  /**
+   * True when every child of a flex/grid container is a chromeless inline tag
+   * (SPAN/A/etc. with no background, no border, not positioned). Such
+   * containers are pure rich-text rows — slide_15 .line wraps line-num /
+   * keyword / string / comment / punct spans, each colour-only — and skip the
+   * flex walk: the regular text-emit path runs getTextRuns() once on the
+   * container and produces ONE editable text element per row with one styled
+   * run per span, instead of one text element per span. Real flex layouts
+   * (rows of cards, legend dots, etc.) contain at least one widget child.
+   *
+   * Distributed-justify rows (space-between / -around / -evenly) intentionally
+   * push their children apart along the main axis — e.g. slide_27
+   * `.stat-row { justify-content: space-between }` with `<span>label</span>
+   * <span class="val">+14.3%</span>`. Collapsing those into ONE text element
+   * flattens them to a single left-aligned line and the trailing value never
+   * reaches the right edge, so they stay flex rows, walking each span as its
+   * own text element at its real (already right-pushed) bounds. Centered/left
+   * rows still collapse for clean rich text.
+   */
+  function isInlineRichTextRow(el: HTMLElement, style: ElementStyle): boolean {
+    const kids = Array.from(el.children);
+    const justify = style.justifyContent;
+    const isDistributedRow = justify === "space-between" || justify === "space-around" || justify === "space-evenly";
+    if (isDistributedRow) return false;
+    const hasInlineSpacingChild = kids.some(c => {
+      const ccs = getComputedStyle(c);
+      return (parseFloat(ccs.letterSpacing) || 0) !== 0 || (parseFloat(ccs.marginRight) || 0) > 2;
+    });
+    if (hasInlineSpacingChild) return false;
+    return kids.length > 0 && kids.every(c => {
+      const ctag = (c.tagName || "").toUpperCase();
+      if (!INLINE_TAGS.includes(ctag)) return false;
+      const ccs = getComputedStyle(c);
+      if (ccs.position === "absolute" || ccs.position === "fixed") return false;
+      if (rgb2hex(ccs.backgroundColor)) return false;
+      const bw = (parseFloat(ccs.borderTopWidth) || 0) +
+                 (parseFloat(ccs.borderRightWidth) || 0) +
+                 (parseFloat(ccs.borderBottomWidth) || 0) +
+                 (parseFloat(ccs.borderLeftWidth) || 0);
+      return bw <= 0;
+    });
+  }
+
+  function extractFlexContainer(
+    el: HTMLElement, style: ElementStyle, bounds: Bounds, childClipMask: ClipMask | null,
+  ): void {
+    emitOwnBox(el, style, bounds);
+    emitFlexDirectText(el, style, bounds);
+    walkChildrenInPaintOrder(el, childClipMask);
+  }
+
+  /**
+   * Mixed content: a flex container may have a text node sibling next to
+   * element children (e.g. <div class="legend-item"><div class="dot"/>Revenue</div>).
+   * Children are walked normally, but if any direct text node has non-empty
+   * content, a text element is emitted at the container's bounds so the label
+   * survives. Without this, "Revenue"/"Expenses" legend text vanishes.
+   */
+  function emitFlexDirectText(el: HTMLElement, style: ElementStyle, bounds: Bounds): void {
+    let directFlexText = "";
+    for (const node of el.childNodes) {
+      if (node.nodeType !== 3) continue;
+      const t = (node.textContent || "").replace(/[ \t\n\r\f]+/g, " ").trim();
+      if (t) directFlexText += (directFlexText ? " " : "") + t;
+    }
+    if (!directFlexText) return;
+    const cs = getComputedStyle(el);
+    // Offset the text past the rightmost child's visual extent so a flex
+    // label like `<div class="dot"/>Revenue` doesn't render with "R"
+    // sitting under the dot. The legend-dot renders first as a sibling
+    // rect; the text starts after it plus CSS `gap`.
+    const gap = parseFloat(cs.gap) || parseFloat(cs.columnGap) || 0;
+    let textX = bounds.x;
+    let textW = bounds.w;
+    const kids = Array.from(el.children).filter(c => {
+      const ccs = getComputedStyle(c);
+      return ccs.position !== "absolute" && ccs.position !== "fixed";
+    });
+    if (kids.length > 0) {
+      const last = kids[kids.length - 1] as HTMLElement;
+      const lb = getBounds(last);
+      const lcs = getComputedStyle(last);
+      const marginRight = parseFloat(lcs.marginRight) || 0;
+      textX = Math.max(bounds.x, lb.x + lb.w + marginRight + gap);
+      textW = Math.max(20, bounds.w - (textX - bounds.x));
+    }
+    elements.push({
+      type: "text",
+      bounds: { x: textX, y: bounds.y, w: textW, h: bounds.h },
+      text: directFlexText,
+      style: {
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+        fontWeight: style.fontWeight,
+        fontStyle: style.fontStyle,
+        color: style.color,
+        textAlign: style.justifyContent === "center" ? "center" : style.justifyContent === "flex-end" ? "right" : "left",
+        lineHeight: style.lineHeight,
+        textDecoration: style.textDecoration,
+        textTransform: style.textTransform,
+        letterSpacing: style.letterSpacing,
+        paddingLeft: 0,
+        paddingTop: 0,
+      },
+      runs: [{ text: directFlexText, style: null }],
+      zIndex: style.zIndex,
+      position: style.position,
+      verticallyCentered: true,
+    });
+  }
+
+  // --- CSS BORDER ARROWS ---
+  /**
+   * CSS border-triangle arrows: width:0; height:0 with one colored border
+   * side + transparent perpendicular sides. Emitted as a preset chevron or
+   * triangle shape instead of a rect (which would render as a thin colored
+   * strip); returns false when `el` is not one.
+   */
+  function extractBorderArrow(el: Element, style: ElementStyle, bounds: Bounds): boolean {
     const chev = detectBorderChevron(el, style, bounds);
     if (chev) {
       seen.add(el);
       emitChevron(chev, style);
-      return;
+      return true;
     }
-
     const tri = detectBorderTriangle(el, style, bounds);
-    if (tri) {
-      seen.add(el);
-      emitTriangle(bounds, tri.fill, tri.rotate, style);
+    if (!tri) return false;
+    seen.add(el);
+    emitTriangle(bounds, tri.fill, tri.rotate, style);
+    return true;
+  }
+
+  // --- PILL CARD ---
+  /**
+   * "Pill-card" shape (slide_31 `.step`): a block container whose ONLY
+   * direct/inline text comes from an inline-block pill chip (`.chip`), while
+   * the real content lives in block children (<h3>, <p>) that each carry
+   * their own font-size/weight and margins. getDirectText() returns just the
+   * chip text, so without this guard the element takes the direct-text merge
+   * path and `getTextRuns` flattens chip+h3+p into ONE box: the chip
+   * duplicates (re-drawn by emitMergedChips), the <h3> loses its bold/large
+   * style (block text runs are pushed style:null), and the inter-block
+   * margins collapse to a bare "\n". Detect the shape — a promotable pill chip
+   * child (own bg + radius >= 4, the same set emitMergedChips promotes)
+   * alongside a block child with real text — and fall through to normal child
+   * recursion so each block becomes its own styled, margin-positioned text
+   * element and the chip is walked as a native pill (single drawer). The
+   * card's own bg rect was already emitted by emitRect.
+   */
+  function isPillCard(el: HTMLElement): boolean {
+    const kids = Array.from(el.children);
+    const hasPillChipChild = kids.some(c => {
+      const ccs = getComputedStyle(c);
+      if (ccs.display !== "inline-block") return false;
+      if (ccs.position === "absolute" || ccs.position === "fixed") return false;
+      const cbg = rgb2hex(ccs.backgroundColor);
+      const cbr = parseFloat(ccs.borderTopLeftRadius) || 0;
+      return !!cbg && cbr >= 4;
+    });
+    const hasBlockTextChild = kids.some(c => {
+      const ctag = (c.tagName || "").toUpperCase();
+      if (INLINE_TAGS.includes(ctag)) return false;
+      const ccs = getComputedStyle(c);
+      if (ccs.position === "absolute" || ccs.position === "fixed") return false;
+      if (ccs.display === "none") return false;
+      return !!(c.textContent && c.textContent.trim());
+    });
+    return hasPillChipChild && hasBlockTextChild;
+  }
+
+  // --- DIRECT TEXT ---
+  /**
+   * A leaf-ish text box: `el`'s direct and inline text merged into one text element (or split per
+   * child for a flex-centred row of mixed font sizes). Children are not recursed.
+   */
+  function extractDirectText(el: HTMLElement, style: ElementStyle, bounds: Bounds, directText: string): void {
+    const cs = getComputedStyle(el);
+    const padL = parseFloat(cs.paddingLeft) || 0;
+    const padR = parseFloat(cs.paddingRight) || 0;
+    const hasLineBreaks = el.querySelector ? el.querySelector("br") !== null : false;
+    const leadingMarkerInset = leadingPseudoMarkerInset(el, style, cs);
+    const effectiveAlign = directTextAlign(el, style, bounds, cs, hasLineBreaks, leadingMarkerInset);
+
+    seen.add(el);
+    emitTextGlow(el, cs);
+    const padTop = parseFloat(cs.paddingTop) || 0;
+    const padBot = parseFloat(cs.paddingBottom) || 0;
+    const box = directTextBox(el, style, bounds, { padL, padR, padBot, leadingMarkerInset });
+    const cssLH = style.lineHeight || (style.fontSize || 14) * 1.2;
+    const measuredLinePitch = measureLinePitch(el, cssLH);
+    const lineHeightMeasured =
+      measuredLinePitch != null && measuredLinePitch > cssLH * 1.05;
+    const effectiveLineHeight = lineHeightMeasured
+      ? (measuredLinePitch as number)
+      : style.lineHeight;
+    const firstLine = measureFirstLine(el);
+    // bgColorBehind: nearest ancestor solid bg, sampled only when the
+    // element is semi-transparent. Google Slides drops <a:alpha> on text
+    // <a:solidFill> at PPTX import, so the converter folds opacity into
+    // the color by blending it against this bg instead of emitting alpha.
+    // Restored for slide_06 decorative quote watermark after commit 1be0daa
+    // broke it by switching to pptxgenjs native transparency.
+    const baseStyle = {
+      fontFamily: style.fontFamily,
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      fontStyle: style.fontStyle,
+      color: style.color,
+      textAlign: effectiveAlign,
+      lineHeight: effectiveLineHeight,
+      lineHeightMeasured,
+      firstBaselineY: firstLine?.baselineY,
+      firstLineFontSize: firstLine?.fontSize,
+      textDecoration: box.inlineBorderUnderline ? "underline" : style.textDecoration,
+      textTransform: style.textTransform,
+      letterSpacing: style.letterSpacing,
+      // CSS writing-mode: vertical-* — carry it onto the text element so
+      // convert-pptx emits a pptxgenjs `vert` body rotation instead of a
+      // 180° box rotation (slide_32 .axis). baseStyle is a hand-built
+      // carrier, so this field must be copied explicitly from getStyle.
+      writingMode: style.writingMode,
+      // Horizontal padding is owned by the Range-probe inset in
+      // directTextBox — it either folds padL/padR into the bounds or keeps
+      // the full border-box width for tight pills. Re-emitting paddingLeft/
+      // paddingRight here would compound with convert-pptx's inset pass,
+      // causing the double-shrink wraps documented there. Setting both to 0
+      // makes baseStyle a pure text-style carrier and convert-pptx a pure
+      // consumer of the bounds.
+      paddingLeft: 0,
+      paddingRight: 0,
+      paddingTop: padTop > 2 ? padTop : 0,
+      opacity: style.opacity !== undefined && style.opacity < 1 ? style.opacity : undefined,
+      bgColorBehind: style.opacity !== undefined && style.opacity < 1 ? detectBgColorBelow(el) : undefined,
+    };
+    const runs = getTextRuns(el, style);
+    const hasStyledRuns = runs.some(r => r.style !== null);
+    const flexCentered = isFlexCenteredShape(style, cs);
+    const verticallyCentered = isDirectTextVerticallyCentered(style, bounds, {
+      padTop, padBot, hasLineBreaks, flexCentered,
+    });
+    // Use a regex that excludes   so leading/trailing nbsp (used as
+    // visual indentation in code blocks like slide_15) survive. JS
+    // String.trim() strips Unicode whitespace including nbsp.
+    const textEl: ExtractedElement = {
+      type: "text",
+      bounds: box.bounds,
+      text: directText.replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, ""),
+      style: baseStyle,
+      zIndex: style.zIndex,
+      position: style.position,
+      verticallyCentered,
+      // True only when the Range probe confirmed the text laid out on a
+      // single line in Chrome. The converter uses this to enable slack
+      // widening for vertically-padded pill buttons whose border-box
+      // height (padding + line) exceeds the lineH×1.5 single-line
+      // heuristic — without this hint the slack is skipped and Slides'
+      // wider glyph metric wraps the label (slide_21 .btn "View Details").
+      singleLine: box.probedSingleLine,
+      // Rotation info: non-zero `rotate` means CSS `transform: rotate(...)`
+      // is on this element. getBoundingClientRect returns the post-transform
+      // axis-aligned bbox; `naturalWidth/Height` is the pre-transform layout
+      // box. The converter repositions the text box around the bbox center
+      // at its natural size and applies pptxgenjs `rotate`.
+      rotate: style.rotate || 0,
+      naturalWidth: style.naturalWidth,
+      naturalHeight: style.naturalHeight,
+    };
+    if (hasStyledRuns) {
+      const allRuns = trimRunEdges(runs);
+      textEl.runs = allRuns;
+      textEl.text = allRuns.map(r => r.text).join("");
+    }
+    const splitChildren = flexCentered && !hasLineBreaks && (cs.flexDirection || "row") === "row"
+      ? flexSplitChildrenOf(el)
+      : null;
+    if (splitChildren) {
+      emitFlexSplitChildren(splitChildren, style, baseStyle);
+      emitAbsoluteChildChevrons(el);
       return;
     }
+    elements.push(textEl);
+    // Direct-text containers return here and do not recurse children. Preserve
+    // absolutely-positioned decorative border chevrons such as slide_34
+    // `.r > .chev` before taking that fast path.
+    emitAbsoluteChildChevrons(el);
+    // Re-draw rounded inline-block pill chips that this merge flattened
+    // (slide_31 `.chip`) as standalone pills on top of the merged text.
+    if (hasStyledRuns) emitMergedChips(el);
+  }
 
-    emitRect(el, style, bounds);
-    emitPseudoRect(el, bounds);
-    emitPseudoText(el, bounds, style);
-    // Borders are handled by emitRect's borderSides data — no separate border lines
+  /**
+   * In-flow textual ::before leading marker (slide_13 `.conversion-badge`'s
+   * ▼). emitPseudoText emits the glyph as a separate LEFT-anchored element at
+   * the host's left padding; the label then (a) stays LEFT-aligned (the
+   * chip-center heuristic would otherwise center it) and (b) is inset past the
+   * glyph by the returned width so the two don't overlap. Null when there is
+   * no such marker.
+   */
+  function leadingPseudoMarkerInset(el: Element, style: ElementStyle, cs: CSSStyleDeclaration): number | null {
+    try {
+      const bcs = getComputedStyle(el, "::before");
+      const bRaw = bcs.content;
+      if (!bRaw || bRaw === "none" || bRaw === "normal" ||
+          bcs.position === "absolute" || bcs.position === "fixed") return null;
+      const bGlyph = bRaw.replace(/^['"]|['"]$/g, "").trim();
+      if (!bGlyph || bGlyph === '""' || bGlyph === "''") return null;
+      const bSize = parseFloat(bcs.fontSize) || style.fontSize || 12;
+      const bGap = parseFloat(cs.columnGap) || parseFloat(cs.gap) || 0;
+      return bSize + (bGap > 0 ? bGap : 4);
+    } catch { /* ignore pseudo read errors */ return null; }
+  }
 
-    // Horizontal rules / lines
-    if (tag === "HR" || (bounds.h <= 4 && bounds.w > 20 && style.bgColor)) {
-      elements.push({ type: "line", bounds, color: style.bgColor || style.borderColor || style.color });
-    }
-
-    // Effective text-align
+  /**
+   * The text alignment a direct-text box renders with: the CSS `text-align`,
+   * overridden by a centring flex `justify-content`, and by the "pill button"
+   * centring heuristic. CSS default text-align:start renders visually centered
+   * inside pill chips because the text line box is tight on width. Qualify as
+   * a pill when:
+   *   (1) horizontal padding is symmetric and > 5, AND
+   *   (2) EITHER vertical padding is symmetric and > 5 (a real padded chip)
+   *       OR border-radius >= h/2 (truly pill-round tag), AND
+   *   (3) bounds.h is under 2 lines tall (single-line content), AND
+   *   (4) the element isn't a clipped-overflow "fitted" container
+   *       (white-space:nowrap + overflow:hidden, like calendar event pills
+   *       on slide_18) and doesn't contain a <br> (multi-line blocks like
+   *       slide_30 .code-block). Both visually staircase when centered.
+   * This preserves slide_10 `.period { padding:6px 14px; radius:8 }`,
+   * slide_30 `.tag { padding:3px 10px; radius:50 }` (radius >= h/2).
+   */
+  function directTextAlign(
+    el: HTMLElement, style: ElementStyle, bounds: Bounds, cs: CSSStyleDeclaration,
+    hasLineBreaks: boolean, leadingMarkerInset: number | null,
+  ): string {
     let effectiveAlign = style.textAlign;
     if (style.display === "flex" || style.display === "inline-flex") {
       if (style.justifyContent === "center") effectiveAlign = "center";
       else if (style.justifyContent === "flex-end" || style.justifyContent === "end") effectiveAlign = "right";
     }
-    const cs = getComputedStyle(el);
     const padL = parseFloat(cs.paddingLeft) || 0;
     const padR = parseFloat(cs.paddingRight) || 0;
-    // In-flow textual ::before leading marker (slide_13 `.conversion-badge`'s
-    // ▼). emitPseudoText emits the glyph as a separate LEFT-anchored element at
-    // the host's left padding; here we (a) keep the label LEFT-aligned (the
-    // chip-center heuristic would otherwise center it) and (b) inset the label
-    // past the glyph (`leadingMarkerInset`) so the two don't overlap.
-    let hasLeadingPseudoMarker = false;
-    let leadingMarkerInset = 0;
-    try {
-      const bcs = getComputedStyle(el, "::before");
-      const bRaw = bcs.content;
-      if (bRaw && bRaw !== "none" && bRaw !== "normal" &&
-          bcs.position !== "absolute" && bcs.position !== "fixed") {
-        const bGlyph = bRaw.replace(/^['"]|['"]$/g, "").trim();
-        if (bGlyph && bGlyph !== '""' && bGlyph !== "''") {
-          hasLeadingPseudoMarker = true;
-          const bSize = parseFloat(bcs.fontSize) || style.fontSize || 12;
-          const bGap = parseFloat(cs.columnGap) || parseFloat(cs.gap) || 0;
-          leadingMarkerInset = bSize + (bGap > 0 ? bGap : 4);
-        }
-      }
-    } catch { /* ignore pseudo read errors */ }
-    // "Pill button" centering heuristic: CSS default text-align:start renders
-    // visually centered inside pill chips because the text line box is tight
-    // on width. Qualify as a pill when:
-    //   (1) horizontal padding is symmetric and > 5, AND
-    //   (2) EITHER vertical padding is symmetric and > 5 (a real padded chip)
-    //       OR border-radius >= h/2 (truly pill-round tag), AND
-    //   (3) bounds.h is under 2 lines tall (single-line content), AND
-    //   (4) the element isn't a clipped-overflow "fitted" container
-    //       (white-space:nowrap + overflow:hidden, like calendar event pills
-    //       on slide_18) and doesn't contain a <br> (multi-line blocks like
-    //       slide_30 .code-block). Both visually staircase when centered.
-    // This preserves slide_10 `.period { padding:6px 14px; radius:8 }`,
-    // slide_30 `.tag { padding:3px 10px; radius:50 }` (radius >= h/2).
     const padT2 = parseFloat(cs.paddingTop) || 0;
     const padB2 = parseFloat(cs.paddingBottom) || 0;
     const lineH2 = style.lineHeight || (style.fontSize || 14) * 1.2;
@@ -2750,7 +3020,6 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     const chipWithOwnBg = !!style.bgColor && padT2 > 0 && Math.abs(padT2 - padB2) < 3;
     const isClippedFitted = cs.whiteSpace === "nowrap"
       && (cs.overflow === "hidden" || cs.overflowX === "hidden");
-    const hasLineBreaks = el.querySelector ? el.querySelector("br") !== null : false;
     // Single-line check uses CONTENT height (bounds minus vertical padding) so
     // tight pills with thin borders still qualify. The earlier `bounds.h <
     // 2 * lineH2` test misfired on slide_17 `.label-badge` (padding 6 16, 1px
@@ -2760,508 +3029,402 @@ function vendorCss(cs: CSSStyleDeclaration): VendorCssDecl { return cs as Vendor
     const isSingleLineH = contentH < lineH2 * 1.5;
     if (effectiveAlign === "start" && padL > 5 && Math.abs(padL - padR) < 3 &&
         isSingleLineH && (padVSymmetric || fullyRoundedPill || chipWithOwnBg) &&
-        !isClippedFitted && !hasLineBreaks && !hasLeadingPseudoMarker) {
-      // TIGHT-vs-WIDE discriminator. The chip force-center is only valid when
-      // the box HUGS its content (shrink-to-fit pill): there the content FILLS
-      // the box, so start≈center visually and centering matches the render. A
-      // WIDE/STRETCHED box whose content occupies only a fraction of the width
-      // is NOT a chip — `text-align:start` there is a genuinely visible LEFT
-      // alignment that must be preserved.
-      //
-      // Measure the UNION horizontal extent of the content — all text-line
-      // rects PLUS direct child element rects — and compare to the content-box
-      // width. The UNION (not the widest single line) is essential for
-      // multi-child flex rows where each item is a separate box:
-      //   • slide_19 `.sentiment` (block flex stretched to full stage-card
-      //     width): emoji+short-label union ≈ 0.3–0.5 of the box → LEFT.
-      //   • slide_19 `.metric-pill` (flex, value + LONG label, shrink-to-fit in
-      //     a space-between row): union ≈ 1.0 → CENTER. (Its widest SINGLE span
-      //     is only ~0.6, so a max-line test wrongly left-aligned it — the bug
-      //     this union measurement fixes.)
-      //   • slide_21 `.inner-card-header` (full-width block banner): union ≈
-      //     0.34 → LEFT.
-      //   • slide_03 `.kpi-change`, slide_10 `.period`, slide_15 `.status-badge`,
-      //     slide_17 `.label-badge`, slide_21 `.tag`/`.btn`, slide_30 `.tag`:
-      //     union ≈ 0.95–1.0 → CENTER (unchanged from baseline).
-      // This covers flex and non-flex uniformly with no blanket flex rule (a
-      // blanket `!isFlex` wrongly left-aligned the tight inline-flex
-      // `.kpi-change` "▲ 12.5%").
-      let chipTextTight = true;
-      try {
-        const cr = document.createRange();
-        cr.selectNodeContents(el);
-        let lo = Infinity, hi = -Infinity;
-        for (const rc of Array.from(cr.getClientRects())) {
-          if (rc.width > 0) { lo = Math.min(lo, rc.left); hi = Math.max(hi, rc.right); }
-        }
-        for (const ch of Array.from((el as HTMLElement).children)) {
-          const cb = ch.getBoundingClientRect();
-          if (cb.width > 0) { lo = Math.min(lo, cb.left); hi = Math.max(hi, cb.right); }
-        }
-        const unionW = hi > lo ? hi - lo : 0;
-        const contentBoxW = bounds.w - padL - padR;
-        chipTextTight = contentBoxW <= 0 || unionW >= contentBoxW * 0.7;
-      } catch { chipTextTight = true; }
-      if (chipTextTight) effectiveAlign = "center";
+        !isClippedFitted && !hasLineBreaks && leadingMarkerInset === null &&
+        isChipContentTight(el, bounds, padL, padR)) {
+      effectiveAlign = "center";
     }
+    return effectiveAlign;
+  }
 
-    // "Pill-card" shape (slide_31 `.step`): a block container whose ONLY
-    // direct/inline text comes from an inline-block pill chip (`.chip`), while
-    // the real content lives in block children (<h3>, <p>) that each carry
-    // their own font-size/weight and margins. getDirectText() returns just the
-    // chip text, so without this guard the element takes the leaf merge path
-    // below and `getTextRuns` flattens chip+h3+p into ONE box: the chip
-    // duplicates (re-drawn by emitMergedChips), the <h3> loses its bold/large
-    // style (block text runs are pushed style:null at ~1147), and the inter-
-    // block margins collapse to a bare "\n" (~1242). Detect the shape — a
-    // promotable pill chip child (own bg + radius >= 4, the same set
-    // emitMergedChips promotes) alongside a block child with real text — and
-    // fall through to normal child recursion so each block becomes its own
-    // styled, margin-positioned text element and the chip is walked as a
-    // native pill (single drawer). The card's own bg rect was already emitted
-    // by emitRect above.
-    const _pillCardKids = Array.from((el as HTMLElement).children);
-    const _hasPillChipChild = _pillCardKids.some(c => {
-      const ccs = getComputedStyle(c);
-      if (ccs.display !== "inline-block") return false;
-      if (ccs.position === "absolute" || ccs.position === "fixed") return false;
-      const cbg = rgb2hex(ccs.backgroundColor);
-      const cbr = parseFloat(ccs.borderTopLeftRadius) || 0;
-      return !!cbg && cbr >= 4;
-    });
-    const _hasBlockTextChild = _pillCardKids.some(c => {
-      const ctag = (c.tagName || "").toUpperCase();
-      if (INLINE_TAGS.includes(ctag)) return false;
-      const ccs = getComputedStyle(c);
-      if (ccs.position === "absolute" || ccs.position === "fixed") return false;
-      if (ccs.display === "none") return false;
-      return !!(c.textContent && c.textContent.trim());
-    });
-    const isPillCard = _hasPillChipChild && _hasBlockTextChild;
-
-    // Text content
-    if (directText && directText.trim() && !isPillCard) {
-      seen.add(el);
-      emitTextGlow(el, cs);
-      const padTop = parseFloat(cs.paddingTop) || 0;
-      // Border-bottom on inline text elements (e.g. active nav-link underline)
-      // inflates getBoundingClientRect height. Subtract it so the text box
-      // matches the text content area. When the element has ONLY border-bottom
-      // (no top/left/right borders) and no background, the border is purely
-      // decorative — convert it to textDecoration:'underline' so the converter
-      // emits a native underline instead of a separate line element.
-      //
-      // IMPORTANT: this height reduction must ONLY fire for the inline-
-      // underline pattern. For full-border boxes like a pill button
-      // (`border: 1px solid X; padding: 10px 16px`), shrinking the text
-      // box by (bBot + padBot) makes the text container shorter than the
-      // rect, so even with `valign: middle` the text centers at (y + h/2)
-      // of the shrunken box — visibly above the pill's true center
-      // (slide_11 bug: 11 px upward offset).
-      const bBot = style.borderBottom || 0;
-      const padBot = parseFloat(cs.paddingBottom) || 0;
-      const disp = style.display || "";
-      const isInlineTag = disp === "inline" || disp === "inline-block" || tag === "SPAN" || tag === "A";
-      const inlineBorderUnderline =
-        bBot > 0 && isInlineTag &&
-        !style.borderTop && !style.borderLeft && !style.borderRight && !style.bgColor;
-      const borderAdjust = inlineBorderUnderline ? (bBot + padBot) : 0;
-      let textBounds = bounds;
-      if (borderAdjust > 0) {
-        textBounds = { ...bounds, h: Math.max(bounds.h - borderAdjust, style.fontSize || 10) };
+  /**
+   * TIGHT-vs-WIDE discriminator. The chip force-center is only valid when
+   * the box HUGS its content (shrink-to-fit pill): there the content FILLS
+   * the box, so start≈center visually and centering matches the render. A
+   * WIDE/STRETCHED box whose content occupies only a fraction of the width
+   * is NOT a chip — `text-align:start` there is a genuinely visible LEFT
+   * alignment that must be preserved.
+   *
+   * Measure the UNION horizontal extent of the content — all text-line
+   * rects PLUS direct child element rects — and compare to the content-box
+   * width. The UNION (not the widest single line) is essential for
+   * multi-child flex rows where each item is a separate box:
+   *   • slide_19 `.sentiment` (block flex stretched to full stage-card
+   *     width): emoji+short-label union ≈ 0.3–0.5 of the box → LEFT.
+   *   • slide_19 `.metric-pill` (flex, value + LONG label, shrink-to-fit in
+   *     a space-between row): union ≈ 1.0 → CENTER. (Its widest SINGLE span
+   *     is only ~0.6, so a max-line test wrongly left-aligned it — the bug
+   *     this union measurement fixes.)
+   *   • slide_21 `.inner-card-header` (full-width block banner): union ≈
+   *     0.34 → LEFT.
+   *   • slide_03 `.kpi-change`, slide_10 `.period`, slide_15 `.status-badge`,
+   *     slide_17 `.label-badge`, slide_21 `.tag`/`.btn`, slide_30 `.tag`:
+   *     union ≈ 0.95–1.0 → CENTER (unchanged from baseline).
+   * This covers flex and non-flex uniformly with no blanket flex rule (a
+   * blanket `!isFlex` wrongly left-aligned the tight inline-flex
+   * `.kpi-change` "▲ 12.5%").
+   */
+  function isChipContentTight(el: HTMLElement, bounds: Bounds, padL: number, padR: number): boolean {
+    try {
+      const cr = document.createRange();
+      cr.selectNodeContents(el);
+      let lo = Infinity, hi = -Infinity;
+      for (const rc of Array.from(cr.getClientRects())) {
+        if (rc.width > 0) { lo = Math.min(lo, rc.left); hi = Math.max(hi, rc.right); }
       }
-      // Unified horizontal-padding gate. Owns ALL inset decisions — applies to
-      // inline (span / a / inline-block) and non-inline tags alike. Previously
-      // the gate was scoped to non-inline, leaving inline chips like slide_15
-      // `.status-badge` (span, padding:3px 10px) to pass paddingLeft=10 down
-      // to convert-pptx, which then shrank the textbox 20 px and wrapped the
-      // pill. By running the Range probe here for every padded element and
-      // emitting paddingLeft=0 below, convert-pptx is a pure consumer (its
-      // inset site has been removed) and the double-shrink bug can't recur.
-      //
-      // Gate logic:
-      //   * Multi-line Chrome wrap  → inset (text already wrapped inside
-      //     content-box; insetting just shifts x).
-      //   * Single-line with slack  → inset (available ≥ maxLineW + SLACK so
-      //     Slides' wider measurement still fits).
-      //   * Single-line tight       → keep border-box width (no inset). The
-      //     padded element's bounds already include the padding, so centering
-      //     over the border-box visually matches centering over the content-
-      //     box for symmetric padding. For left/right alignment with
-      //     asymmetric padding, full-width renders fine because text-anchor
-      //     lands on the border edge but the padding keeps it inside.
-      let probedSingleLine: boolean | undefined;
-      if (padL > 2 || padR > 2) {
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        const lineRects = [...range.getClientRects()].filter(r => r.width > 0);
-        const maxLineW = lineRects.length ? Math.max(...lineRects.map(r => r.width)) : 0;
-        const isMultiLine = lineRects.length > 1;
-        probedSingleLine = lineRects.length === 1;
-        const available = textBounds.w - padL - padR;
-        const SLIDES_WIDTH_SLACK = 6;  // Slides glyph-measurement headroom
-        // A leading-marker badge keeps its label LEFT-aligned and must inset it
-        // BOTH by the left padding AND past the leading glyph so the label
-        // doesn't sit under the ▼. Force the inset (the tight shrink-to-fit
-        // badge would otherwise skip it) and keep the right edge at the border
-        // so the right padding is wrap slack.
-        const safeToInset = isMultiLine || available >= maxLineW + SLIDES_WIDTH_SLACK || hasLeadingPseudoMarker;
-        if (safeToInset) {
-          const minW = Math.max(style.fontSize || 10, 10);
-          const extraInset = hasLeadingPseudoMarker ? leadingMarkerInset : 0;
-          const insetW = hasLeadingPseudoMarker
-            ? Math.max(textBounds.w - padL - extraInset, minW)
-            : Math.max(available, minW);
-          textBounds = { ...textBounds, x: textBounds.x + padL + extraInset, w: insetW };
+      for (const ch of Array.from(el.children)) {
+        const cb = ch.getBoundingClientRect();
+        if (cb.width > 0) { lo = Math.min(lo, cb.left); hi = Math.max(hi, cb.right); }
+      }
+      const unionW = hi > lo ? hi - lo : 0;
+      const contentBoxW = bounds.w - padL - padR;
+      return contentBoxW <= 0 || unionW >= contentBoxW * 0.7;
+    } catch { return true; }
+  }
+
+  type DirectTextBox = Readonly<{
+    bounds: Bounds;
+    /** The element's lone border-bottom is drawn as a text underline instead of a line. */
+    inlineBorderUnderline: boolean;
+    /** True/false when the Range probe ran (horizontal padding > 2); undefined when it did not. */
+    probedSingleLine: boolean | undefined;
+  }>;
+
+  /**
+   * The text box of a direct-text element: its border box, shortened for an inline border
+   * underline and inset by its horizontal padding when the text still fits.
+   */
+  function directTextBox(
+    el: HTMLElement, style: ElementStyle, bounds: Bounds,
+    padding: Readonly<{ padL: number; padR: number; padBot: number; leadingMarkerInset: number | null }>,
+  ): DirectTextBox {
+    const { padL, padR, padBot, leadingMarkerInset } = padding;
+    const hasLeadingPseudoMarker = leadingMarkerInset !== null;
+    // Border-bottom on inline text elements (e.g. active nav-link underline)
+    // inflates getBoundingClientRect height. Subtract it so the text box
+    // matches the text content area. When the element has ONLY border-bottom
+    // (no top/left/right borders) and no background, the border is purely
+    // decorative — convert it to textDecoration:'underline' so the converter
+    // emits a native underline instead of a separate line element.
+    //
+    // IMPORTANT: this height reduction must ONLY fire for the inline-
+    // underline pattern. For full-border boxes like a pill button
+    // (`border: 1px solid X; padding: 10px 16px`), shrinking the text
+    // box by (bBot + padBot) makes the text container shorter than the
+    // rect, so even with `valign: middle` the text centers at (y + h/2)
+    // of the shrunken box — visibly above the pill's true center
+    // (slide_11 bug: 11 px upward offset).
+    const tag = (el.tagName || "").toUpperCase();
+    const bBot = style.borderBottom || 0;
+    const disp = style.display || "";
+    const isInlineTag = disp === "inline" || disp === "inline-block" || tag === "SPAN" || tag === "A";
+    const inlineBorderUnderline =
+      bBot > 0 && isInlineTag &&
+      !style.borderTop && !style.borderLeft && !style.borderRight && !style.bgColor;
+    const borderAdjust = inlineBorderUnderline ? (bBot + padBot) : 0;
+    let textBounds = bounds;
+    if (borderAdjust > 0) {
+      textBounds = { ...bounds, h: Math.max(bounds.h - borderAdjust, style.fontSize || 10) };
+    }
+    // Unified horizontal-padding gate. Owns ALL inset decisions — applies to
+    // inline (span / a / inline-block) and non-inline tags alike. Previously
+    // the gate was scoped to non-inline, leaving inline chips like slide_15
+    // `.status-badge` (span, padding:3px 10px) to pass paddingLeft=10 down
+    // to convert-pptx, which then shrank the textbox 20 px and wrapped the
+    // pill. By running the Range probe here for every padded element and
+    // emitting paddingLeft=0, convert-pptx is a pure consumer (its inset site
+    // has been removed) and the double-shrink bug can't recur.
+    //
+    // Gate logic:
+    //   * Multi-line Chrome wrap  → inset (text already wrapped inside
+    //     content-box; insetting just shifts x).
+    //   * Single-line with slack  → inset (available ≥ maxLineW + SLACK so
+    //     Slides' wider measurement still fits).
+    //   * Single-line tight       → keep border-box width (no inset). The
+    //     padded element's bounds already include the padding, so centering
+    //     over the border-box visually matches centering over the content-
+    //     box for symmetric padding. For left/right alignment with
+    //     asymmetric padding, full-width renders fine because text-anchor
+    //     lands on the border edge but the padding keeps it inside.
+    if (padL <= 2 && padR <= 2) {
+      return { bounds: textBounds, inlineBorderUnderline, probedSingleLine: undefined };
+    }
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const lineRects = [...range.getClientRects()].filter(r => r.width > 0);
+    const maxLineW = lineRects.length ? Math.max(...lineRects.map(r => r.width)) : 0;
+    const isMultiLine = lineRects.length > 1;
+    const probedSingleLine = lineRects.length === 1;
+    const available = textBounds.w - padL - padR;
+    const SLIDES_WIDTH_SLACK = 6;  // Slides glyph-measurement headroom
+    // A leading-marker badge keeps its label LEFT-aligned and must inset it
+    // BOTH by the left padding AND past the leading glyph so the label
+    // doesn't sit under the ▼. Force the inset (the tight shrink-to-fit
+    // badge would otherwise skip it) and keep the right edge at the border
+    // so the right padding is wrap slack.
+    const safeToInset = isMultiLine || available >= maxLineW + SLIDES_WIDTH_SLACK || hasLeadingPseudoMarker;
+    if (safeToInset) {
+      const minW = Math.max(style.fontSize || 10, 10);
+      const extraInset = leadingMarkerInset ?? 0;
+      const insetW = hasLeadingPseudoMarker
+        ? Math.max(textBounds.w - padL - extraInset, minW)
+        : Math.max(available, minW);
+      textBounds = { ...textBounds, x: textBounds.x + padL + extraInset, w: insetW };
+    }
+    return { bounds: textBounds, inlineBorderUnderline, probedSingleLine };
+  }
+
+  /**
+   * The ACTUAL rendered line pitch of `el`'s text, or null when it cannot be
+   * measured (fewer than two visual lines).
+   *
+   * CSS `line-height` × font-size gives the spec leading (39.6 px for
+   * slide_25 .text-block: 18 × 2.2), but inline children with their
+   * own padding/border/font-size inflate individual line boxes —
+   * .code (1px border + 2px padding ≈ +6 px), .highlight (+2 px),
+   * .big (font-size 24 px). Chrome paints each line at its inflated
+   * box height; the average rendered pitch in the .text-block is
+   * ~43 px, not 39.6. Emitting the CSS-spec value as `spcPts`
+   * makes Slides render uniformly tighter, pulling lines upward and
+   * leaving an apparent gap above the following block — the user's
+   * "entire main text is somehow moved up" report on slide_25. The
+   * caller uses the median per-line pitch when it exceeds CSS
+   * line-height by ≥5 %; otherwise it keeps style.lineHeight (single-line
+   * text and plain paragraphs are unchanged).
+   *
+   * Range.getClientRects() on a paragraph with inline children (.code,
+   * .highlight, .big, .small/.sub super-/subscripts) returns ONE rect
+   * per inline box, not per line. On slide_25 .text-block, the first
+   * line yields 16 rects all at top=131 — for the bare text and each
+   * styled span — and subsequent lines have rects at slightly different
+   * tops (172.59, 176.59, 178.59) because vertical-aligned glyphs
+   * (super/sub) and inflated-line-box children (.code with padding,
+   * .big at 24px) sit at different y-offsets within the same line.
+   * A naïve consecutive-top diff produces noise pitches like 2, 4,
+   * 7.59 from same-line offsets, which pull the median below cssLH so
+   * the override never fires (the failure mode of the previous
+   * attempt: median came out 34.2, threshold 41.58, no override).
+   * Cluster tops within cssLH/2 first → one entry per visual line →
+   * then take consecutive-line pitches → median.
+   */
+  function measureLinePitch(el: HTMLElement, cssLH: number): number | null {
+    try {
+      const lpRange = document.createRange();
+      lpRange.selectNodeContents(el);
+      const lpRects = [...lpRange.getClientRects()].filter(r => r.width > 0 && r.height > 0);
+      if (lpRects.length < 2) return null;
+      const sortedTops = lpRects.map(r => r.top).sort((a, b) => a - b);
+      const clusterTol = cssLH * 0.5;
+      const lineTops: number[] = [];
+      for (const t of sortedTops) {
+        if (lineTops.length === 0 || (t - lineTops[lineTops.length - 1]) > clusterTol) {
+          lineTops.push(t);
         }
       }
-      // Probe ACTUAL rendered line pitch via Range.getClientRects(). CSS
-      // `line-height` × font-size gives the spec leading (39.6 px for
-      // slide_25 .text-block: 18 × 2.2), but inline children with their
-      // own padding/border/font-size inflate individual line boxes —
-      // .code (1px border + 2px padding ≈ +6 px), .highlight (+2 px),
-      // .big (font-size 24 px). Chrome paints each line at its inflated
-      // box height; the average rendered pitch in the .text-block is
-      // ~43 px, not 39.6. Emitting the CSS-spec value as `spcPts`
-      // (convert-pptx.ts:299) makes Slides render uniformly tighter,
-      // pulling lines upward and leaving an apparent gap above the
-      // following block — the user's "entire main text is somehow moved
-      // up" report on slide_25. Use the median per-line pitch when it
-      // exceeds CSS line-height by ≥5 %; otherwise leave style.lineHeight
-      // (single-line text and plain paragraphs are unchanged).
-      // Range.getClientRects() on a paragraph with inline children (.code,
-      // .highlight, .big, .small/.sub super-/subscripts) returns ONE rect
-      // per inline box, not per line. On slide_25 .text-block, the first
-      // line yields 16 rects all at top=131 — for the bare text and each
-      // styled span — and subsequent lines have rects at slightly different
-      // tops (172.59, 176.59, 178.59) because vertical-aligned glyphs
-      // (super/sub) and inflated-line-box children (.code with padding,
-      // .big at 24px) sit at different y-offsets within the same line.
-      // A naïve consecutive-top diff produces noise pitches like 2, 4,
-      // 7.59 from same-line offsets, which pull the median below cssLH so
-      // the override never fires (the failure mode of the previous
-      // attempt: median came out 34.2, threshold 41.58, no override).
-      // Cluster tops within cssLH/2 first → one entry per visual line →
-      // then take consecutive-line pitches → median.
-      let measuredLinePitch: number | null = null;
-      const cssLH = style.lineHeight || (style.fontSize || 14) * 1.2;
-      try {
-        const lpRange = document.createRange();
-        lpRange.selectNodeContents(el);
-        const lpRects = [...lpRange.getClientRects()].filter(r => r.width > 0 && r.height > 0);
-        if (lpRects.length >= 2) {
-          const sortedTops = lpRects.map(r => r.top).sort((a, b) => a - b);
-          const clusterTol = cssLH * 0.5;
-          const lineTops: number[] = [];
-          for (const t of sortedTops) {
-            if (lineTops.length === 0 || (t - lineTops[lineTops.length - 1]) > clusterTol) {
-              lineTops.push(t);
-            }
-          }
-          if (lineTops.length >= 2) {
-            const pitches: number[] = [];
-            for (let i = 1; i < lineTops.length; i++) {
-              pitches.push(lineTops[i] - lineTops[i - 1]);
-            }
-            pitches.sort((a, b) => a - b);
-            // Drop trailing paragraph-break outliers (e.g. <br><br> in
-            // slide_24 .innermost): a pitch ≥ 1.5× the next-smaller is a
-            // paragraph gap, not a line pitch. Without this, sorted [24, 48]
-            // medians to 48 (Math.floor(2/2)=1) and the override fires
-            // wrongly, locking spcPts ≈ 27pt on bodies the user wants at
-            // their ratio line-height.
-            while (
-              pitches.length >= 2 &&
-              pitches[pitches.length - 1] >= pitches[pitches.length - 2] * 1.5
-            ) {
-              pitches.pop();
-            }
-            if (pitches.length >= 1) {
-              measuredLinePitch = pitches[Math.floor(pitches.length / 2)];
-            }
-          }
-        }
-      } catch { /* ignore */ }
-      const lineHeightMeasured =
-        measuredLinePitch != null && measuredLinePitch > cssLH * 1.05;
-      const effectiveLineHeight = lineHeightMeasured
-        ? (measuredLinePitch as number)
-        : style.lineHeight;
-      const firstLine = measureFirstLine(el);
-      // bgColorBehind: nearest ancestor solid bg, sampled only when the
-      // element is semi-transparent. Google Slides drops <a:alpha> on text
-      // <a:solidFill> at PPTX import, so the converter folds opacity into
-      // the color by blending it against this bg instead of emitting alpha.
-      // Restored for slide_06 decorative quote watermark after commit 1be0daa
-      // broke it by switching to pptxgenjs native transparency.
-      const baseStyle = {
-        fontFamily: style.fontFamily,
-        fontSize: style.fontSize,
-        fontWeight: style.fontWeight,
-        fontStyle: style.fontStyle,
-        color: style.color,
-        textAlign: effectiveAlign,
-        lineHeight: effectiveLineHeight,
-        lineHeightMeasured,
-        firstBaselineY: firstLine?.baselineY,
-        firstLineFontSize: firstLine?.fontSize,
-        textDecoration: inlineBorderUnderline ? "underline" : style.textDecoration,
-        textTransform: style.textTransform,
-        letterSpacing: style.letterSpacing,
-        // CSS writing-mode: vertical-* — carry it onto the text element so
-        // convert-pptx emits a pptxgenjs `vert` body rotation instead of a
-        // 180° box rotation (slide_32 .axis). baseStyle is a hand-built
-        // carrier, so this field must be copied explicitly from getStyle.
-        writingMode: style.writingMode,
-        // Horizontal padding is owned by the Range-probe inset above — it
-        // either folds padL/padR into textBounds or keeps the full border-
-        // box width for tight pills. Re-emitting paddingLeft/paddingRight
-        // here would compound with convert-pptx's inset pass, causing the
-        // double-shrink wraps documented in the probe comment. Setting both
-        // to 0 makes baseStyle a pure text-style carrier and convert-pptx a
-        // pure consumer of the bounds.
-        paddingLeft: 0,
-        paddingRight: 0,
-        paddingTop: padTop > 2 ? padTop : 0,
-        opacity: style.opacity !== undefined && style.opacity < 1 ? style.opacity : undefined,
-        bgColorBehind: style.opacity !== undefined && style.opacity < 1 ? detectBgColorBelow(el) : undefined,
-      };
-      const runs = getTextRuns(el, style);
-      const hasStyledRuns = runs.some(r => r.style !== null);
-      // Symmetric vertical padding (e.g. `padding: 10px 16px` on a pill
-      // button) makes Chrome render the single-line text at the visual
-      // vertical center of the border box, because the text line box is
-      // exactly `fontSize * lineHeight` tall and floats on the content area.
-      // pptxgenjs defaults to `valign: "top"` for text; without this hint the
-      // letters snap to the top of the box and look too high inside the
-      // pill. Mirror Chrome's behavior whenever top/bottom padding agree.
-      //
-      // Threshold is padTop >= 5, not > 2: small symmetric paddings like
-      // `.touchpoint { padding: 3px 0 }` (slide_19 bullet rows) create <1px of
-      // visual centering shift in Chrome but, once we emit anchor="ctr",
-      // Slides adds a noticeable implicit left inset to a pptx textbox whose
-      // bounds.x was already shifted by the Range-probe inset for the same
-      // element's padding-left — producing a doubled horizontal gap between
-      // the ::before bullet and the text. Genuine pill buttons (padding: 6px+
-      // vertically) still clear the threshold and keep vertical centering.
-      //
-      // Multi-line content (e.g. slide_30 .code-block with multiple <br>s and
-      // padding:14px) must NOT be marked vertically centered — Chrome flows
-      // multi-line block text from the content-box top, not the geometric
-      // center. The convert-pptx merged-rect path used to hardcode "middle"
-      // for absorbed text, masking this; once that site honours
-      // verticallyCentered, multi-line code blocks must opt out so the first
-      // line sits at the requested padding-top instead of mid-box.
-      //
-      // Fully-rounded pill chips (border-radius >= h/2) with any symmetric
-      // vertical padding > 0 also qualify, even if padTop < 5: the chip is
-      // narrow enough that Chrome's centered glyph baseline visibly diverges
-      // from a top-anchored emit. This covers slide_30 `.tag` (padding:3px
-      // 10px, radius:50) which previously relied on the merged-rect path's
-      // hardcoded "middle" for centering.
-      const fullyRoundedPillVC =
-        (style.borderRadius || 0) >= bounds.h / 2 && padTop > 0;
-      // Same chip-with-own-bg rule as the alignment gate above: an element
-      // that paints its own bgColor with any symmetric vertical padding is a
-      // styled chip and Chrome centers the glyph baseline inside it. slide_15
-      // `.status-badge` (padding:3px 10px, radius:4, bg:#1a4731) takes this
-      // branch — without it the green pill emits anchor="t" and "200 OK"
-      // hugs the top edge of the badge instead of riding mid-line.
-      const chipWithOwnBgVC = !!style.bgColor && padTop > 0;
-      // Flex/grid container whose CSS already centers the glyph baseline.
-      // The chip/pill gates above both require padTop>0 (their job is to
-      // detect padded chips); they miss the very common pattern of a 0-padding
-      // shape (circle, square chip, mini-button) using flex/grid to center.
-      // Affected on wave-10B: slide_02 `.avatar`, slide_17 `.investor-icon`,
-      // slide_18 `.nav-btn` + today-day `.day-num`, slide_22 `.badge-overlap`,
-      // slide_28 `.opacity-badge`, slide_29 `.icon-circle` — all 0-padding,
-      // some with gradient bg (no bgColor) and some with solid bg, all of which
-      // previously emitted anchor="t" and so showed the letter glued to the
-      // top of the disc. Cross-axis direction matters: for `flex-direction:
-      // row` (default), vertical centering is `align-items: center`. For
-      // `column`, vertical centering moves to `justify-content: center`.
-      const flexDir = cs.flexDirection || "row";
-      const isFlexVC =
-        (style.display === "flex" || style.display === "inline-flex") &&
-        (flexDir === "column" || flexDir === "column-reverse"
-          ? style.justifyContent === "center"
-          : style.alignItems === "center");
-      const isGridVC =
-        (style.display === "grid" || style.display === "inline-grid") &&
-        style.alignItems === "center";
-      const flexCenteredShapeVC = isFlexVC || isGridVC;
-      const verticallyCentered =
-        !hasLineBreaks &&
-        Math.abs(padTop - padBot) < 3 &&
-        (padTop >= 5 || fullyRoundedPillVC || chipWithOwnBgVC || flexCenteredShapeVC);
-      // Use a regex that excludes \u00a0 so leading/trailing nbsp (used as
-      // visual indentation in code blocks like slide_15) survive. JS
-      // String.trim() strips Unicode whitespace including nbsp.
-      const textEl: ExtractedElement = {
+      if (lineTops.length < 2) return null;
+      const pitches: number[] = [];
+      for (let i = 1; i < lineTops.length; i++) {
+        pitches.push(lineTops[i] - lineTops[i - 1]);
+      }
+      pitches.sort((a, b) => a - b);
+      // Drop trailing paragraph-break outliers (e.g. <br><br> in
+      // slide_24 .innermost): a pitch ≥ 1.5× the next-smaller is a
+      // paragraph gap, not a line pitch. Without this, sorted [24, 48]
+      // medians to 48 (Math.floor(2/2)=1) and the override fires
+      // wrongly, locking spcPts ≈ 27pt on bodies the user wants at
+      // their ratio line-height.
+      while (
+        pitches.length >= 2 &&
+        pitches[pitches.length - 1] >= pitches[pitches.length - 2] * 1.5
+      ) {
+        pitches.pop();
+      }
+      return pitches.length >= 1 ? pitches[Math.floor(pitches.length / 2)] : null;
+    } catch { /* ignore */ return null; }
+  }
+
+  /**
+   * Flex/grid container whose CSS already centers the glyph baseline.
+   * The chip/pill gates of isDirectTextVerticallyCentered both require
+   * padTop>0 (their job is to detect padded chips); they miss the very common
+   * pattern of a 0-padding shape (circle, square chip, mini-button) using
+   * flex/grid to center. Affected on wave-10B: slide_02 `.avatar`, slide_17
+   * `.investor-icon`, slide_18 `.nav-btn` + today-day `.day-num`, slide_22
+   * `.badge-overlap`, slide_28 `.opacity-badge`, slide_29 `.icon-circle` — all
+   * 0-padding, some with gradient bg (no bgColor) and some with solid bg, all
+   * of which previously emitted anchor="t" and so showed the letter glued to
+   * the top of the disc. Cross-axis direction matters: for `flex-direction:
+   * row` (default), vertical centering is `align-items: center`. For
+   * `column`, vertical centering moves to `justify-content: center`.
+   */
+  function isFlexCenteredShape(style: ElementStyle, cs: CSSStyleDeclaration): boolean {
+    const flexDir = cs.flexDirection || "row";
+    const isFlexVC =
+      (style.display === "flex" || style.display === "inline-flex") &&
+      (flexDir === "column" || flexDir === "column-reverse"
+        ? style.justifyContent === "center"
+        : style.alignItems === "center");
+    const isGridVC =
+      (style.display === "grid" || style.display === "inline-grid") &&
+      style.alignItems === "center";
+    return isFlexVC || isGridVC;
+  }
+
+  /**
+   * Symmetric vertical padding (e.g. `padding: 10px 16px` on a pill
+   * button) makes Chrome render the single-line text at the visual
+   * vertical center of the border box, because the text line box is
+   * exactly `fontSize * lineHeight` tall and floats on the content area.
+   * pptxgenjs defaults to `valign: "top"` for text; without this hint the
+   * letters snap to the top of the box and look too high inside the
+   * pill. Mirror Chrome's behavior whenever top/bottom padding agree.
+   *
+   * Threshold is padTop >= 5, not > 2: small symmetric paddings like
+   * `.touchpoint { padding: 3px 0 }` (slide_19 bullet rows) create <1px of
+   * visual centering shift in Chrome but, once we emit anchor="ctr",
+   * Slides adds a noticeable implicit left inset to a pptx textbox whose
+   * bounds.x was already shifted by the Range-probe inset for the same
+   * element's padding-left — producing a doubled horizontal gap between
+   * the ::before bullet and the text. Genuine pill buttons (padding: 6px+
+   * vertically) still clear the threshold and keep vertical centering.
+   *
+   * Multi-line content (e.g. slide_30 .code-block with multiple <br>s and
+   * padding:14px) must NOT be marked vertically centered — Chrome flows
+   * multi-line block text from the content-box top, not the geometric
+   * center. The convert-pptx merged-rect path used to hardcode "middle"
+   * for absorbed text, masking this; once that site honours
+   * verticallyCentered, multi-line code blocks must opt out so the first
+   * line sits at the requested padding-top instead of mid-box.
+   */
+  function isDirectTextVerticallyCentered(
+    style: ElementStyle, bounds: Bounds,
+    layout: Readonly<{ padTop: number; padBot: number; hasLineBreaks: boolean; flexCentered: boolean }>,
+  ): boolean {
+    const { padTop, padBot, hasLineBreaks, flexCentered } = layout;
+    // Fully-rounded pill chips (border-radius >= h/2) with any symmetric
+    // vertical padding > 0 also qualify, even if padTop < 5: the chip is
+    // narrow enough that Chrome's centered glyph baseline visibly diverges
+    // from a top-anchored emit. This covers slide_30 `.tag` (padding:3px
+    // 10px, radius:50) which previously relied on the merged-rect path's
+    // hardcoded "middle" for centering.
+    const fullyRoundedPillVC =
+      (style.borderRadius || 0) >= bounds.h / 2 && padTop > 0;
+    // Same chip-with-own-bg rule as the alignment gate: an element that
+    // paints its own bgColor with any symmetric vertical padding is a styled
+    // chip and Chrome centers the glyph baseline inside it. slide_15
+    // `.status-badge` (padding:3px 10px, radius:4, bg:#1a4731) takes this
+    // branch — without it the green pill emits anchor="t" and "200 OK"
+    // hugs the top edge of the badge instead of riding mid-line.
+    const chipWithOwnBgVC = !!style.bgColor && padTop > 0;
+    return !hasLineBreaks &&
+      Math.abs(padTop - padBot) < 3 &&
+      (padTop >= 5 || fullyRoundedPillVC || chipWithOwnBgVC || flexCentered);
+  }
+
+  /** Non-empty runs with leading whitespace trimmed off the first and trailing off the last. */
+  function trimRunEdges(runs: readonly TextRun[]): TextRun[] {
+    const allRuns: TextRun[] = runs.filter(r => r.text.length > 0).map(r => ({
+      text: r.text,
+      ...(r.style ? { style: r.style } : {}),
+    }));
+    while (allRuns.length > 0) {
+      const trimmed = allRuns[0].text.replace(/^[ \t\n\r\f]+/, "");
+      if (trimmed.length === 0) { allRuns.shift(); continue; }
+      allRuns[0] = { ...allRuns[0], text: trimmed };
+      break;
+    }
+    while (allRuns.length > 0) {
+      const last = allRuns[allRuns.length - 1];
+      const trimmed = last.text.replace(/[ \t\n\r\f]+$/, "");
+      if (trimmed.length === 0) { allRuns.pop(); continue; }
+      allRuns[allRuns.length - 1] = { ...last, text: trimmed };
+      break;
+    }
+    return allRuns;
+  }
+
+  /**
+   * Flex-centered mixed-font-size children: split into per-child text
+   * elements at Chrome's own span rects instead of merging into one
+   * multi-run paragraph (slide_19 `.sentiment` = 18px emoji + 11px word,
+   * `.metric-pill` = 16px bold value + 11px label). A flex row with
+   * `align-items: center` centers EACH item's line box independently,
+   * but Slides lays a merged paragraph out with all runs BASELINE-aligned
+   * on a line box sized by the tallest run, so the smaller run's glyphs
+   * sit visibly below the pill's vertical center (user: "Cautious not
+   * centered"). A per-run `<a:rPr baseline="...">` raise can't express
+   * this either — Google Slides quantizes baseline offsets to
+   * SUPERSCRIPT/SUBSCRIPT and auto-shrinks the offset run's font.
+   * Splitting also makes each child a genuine `singleLine` element with
+   * its own slack budget in the converter, so the long 11px label
+   * ("Avg. Time to Purchase") stops wrapping under Slides' wider glyph
+   * metrics — the merged element probed as multi-line (Range returns one
+   * client rect PER SPAN) and so got neither `singleLine` nor any slack.
+   * Gate (the caller checks the first): cross-axis-centered row without
+   * line breaks, ≥2 leaf inline-tag children with text, no bare text nodes,
+   * no child backgrounds (chip children keep the merged+emitMergedChips
+   * path), and ≥2 distinct child font sizes — uniform sizes share font
+   * metrics, so baseline-align == center-align and the merged paragraph
+   * already renders correctly. Null when the row should stay merged.
+   */
+  function flexSplitChildrenOf(el: HTMLElement): Element[] | null {
+    const bareText = Array.from(el.childNodes).some(
+      (n) => n.nodeType === 3 && !!n.textContent && !!n.textContent.trim());
+    if (bareText) return null;
+    const kids = Array.from(el.children).filter((c) => {
+      const kcs = getComputedStyle(c);
+      return kcs.display !== "none" && kcs.position !== "absolute" &&
+        kcs.position !== "fixed" && !!(c.textContent && c.textContent.trim());
+    });
+    if (kids.length < 2) return null;
+    const allLeafInline = kids.every((c) => {
+      if (!INLINE_TAGS.includes((c.tagName || "").toUpperCase())) return false;
+      if (c.children.length > 0) return false;
+      return !rgb2hex(getComputedStyle(c).backgroundColor);
+    });
+    if (!allLeafInline) return null;
+    const sizes = new Set(kids.map(
+      (c) => Math.round(parseFloat(getComputedStyle(c).fontSize) || 0)));
+    if (sizes.size < 2) return null;
+    return kids;
+  }
+
+  function emitFlexSplitChildren(
+    kids: readonly Element[], style: ElementStyle, baseStyle: NonNullable<ExtractedElement["style"]>,
+  ): void {
+    for (const ch of kids) {
+      const kcs = getComputedStyle(ch);
+      const kb = getBounds(ch);
+      const kFamily = kcs.fontFamily.split(",")[0].replace(/['"]/g, "").trim();
+      const kFont = parseFloat(kcs.fontSize) || style.fontSize;
+      elements.push({
         type: "text",
-        bounds: textBounds,
-        text: directText.replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, ""),
-        style: baseStyle,
+        bounds: kb,
+        text: (ch.textContent || "").replace(/[ \t\n\r\f]+/g, " ").trim(),
+        style: {
+          ...baseStyle,
+          fontFamily: kFamily,
+          fontSize: kFont,
+          fontWeight: resolveRenderedWeight(
+            kFamily, kcs.fontWeight === "bold" ? 700 : parseInt(kcs.fontWeight) || 400),
+          fontStyle: (kcs.fontStyle === "italic" ? "italic" : "normal") as "italic" | "normal",
+          color: resolveGradientTextColor(kcs) || rgb2hex(kcs.color),
+          // The box hugs the glyph run, so center-anchor == Chrome's
+          // position, and it stays fixed under the converter's
+          // symmetric single-line slack.
+          textAlign: "center",
+          lineHeight: parseFloat(kcs.lineHeight) || kFont * 1.2,
+          lineHeightMeasured: false,
+          textDecoration: kcs.textDecorationLine !== "none" ? kcs.textDecorationLine : null,
+          textTransform: kcs.textTransform,
+          letterSpacing: parseFloat(kcs.letterSpacing) || 0,
+          paddingTop: 0,
+        },
         zIndex: style.zIndex,
         position: style.position,
-        verticallyCentered,
-        // True only when the Range probe confirmed the text laid out on a
-        // single line in Chrome. The converter uses this to enable slack
-        // widening for vertically-padded pill buttons whose border-box
-        // height (padding + line) exceeds the lineH×1.5 single-line
-        // heuristic — without this hint the slack is skipped and Slides'
-        // wider glyph metric wraps the label (slide_21 .btn "View Details").
-        singleLine: probedSingleLine,
-        // Rotation info: non-zero `rotate` means CSS `transform: rotate(...)`
-        // is on this element. getBoundingClientRect returns the post-transform
-        // axis-aligned bbox; `naturalWidth/Height` is the pre-transform layout
-        // box. The converter repositions the text box around the bbox center
-        // at its natural size and applies pptxgenjs `rotate`.
-        rotate: style.rotate || 0,
-        naturalWidth: style.naturalWidth,
-        naturalHeight: style.naturalHeight,
-      };
-      if (hasStyledRuns) {
-        const allRuns = runs.filter(r => r.text.length > 0).map(r => ({
-          text: r.text,
-          ...(r.style ? { style: r.style } : {}),
-        }));
-        while (allRuns.length > 0) {
-          const trimmed = allRuns[0].text.replace(/^[ \t\n\r\f]+/, "");
-          if (trimmed.length === 0) { allRuns.shift(); continue; }
-          allRuns[0] = { ...allRuns[0], text: trimmed };
-          break;
-        }
-        while (allRuns.length > 0) {
-          const last = allRuns[allRuns.length - 1];
-          const trimmed = last.text.replace(/[ \t\n\r\f]+$/, "");
-          if (trimmed.length === 0) { allRuns.pop(); continue; }
-          allRuns[allRuns.length - 1] = { ...last, text: trimmed };
-          break;
-        }
-        textEl.runs = allRuns;
-        textEl.text = allRuns.map(r => r.text).join("");
-      }
-      // Flex-centered mixed-font-size children: split into per-child text
-      // elements at Chrome's own span rects instead of merging into one
-      // multi-run paragraph (slide_19 `.sentiment` = 18px emoji + 11px word,
-      // `.metric-pill` = 16px bold value + 11px label). A flex row with
-      // `align-items: center` centers EACH item's line box independently,
-      // but Slides lays a merged paragraph out with all runs BASELINE-aligned
-      // on a line box sized by the tallest run, so the smaller run's glyphs
-      // sit visibly below the pill's vertical center (user: "Cautious not
-      // centered"). A per-run `<a:rPr baseline="...">` raise can't express
-      // this either — Google Slides quantizes baseline offsets to
-      // SUPERSCRIPT/SUBSCRIPT and auto-shrinks the offset run's font.
-      // Splitting also makes each child a genuine `singleLine` element with
-      // its own slack budget in the converter, so the long 11px label
-      // ("Avg. Time to Purchase") stops wrapping under Slides' wider glyph
-      // metrics — the merged element probed as multi-line (Range returns one
-      // client rect PER SPAN) and so got neither `singleLine` nor any slack.
-      // Gate: cross-axis-centered row, ≥2 leaf inline-tag children with text,
-      // no bare text nodes, no child backgrounds (chip children keep the
-      // merged+emitMergedChips path), and ≥2 distinct child font sizes —
-      // uniform sizes share font metrics, so baseline-align == center-align
-      // and the merged paragraph already renders correctly.
-      const flexSplitChildren = (() => {
-        if (!flexCenteredShapeVC || hasLineBreaks) return null;
-        if (flexDir !== "row") return null;
-        const bareText = Array.from(el.childNodes).some(
-          (n) => n.nodeType === 3 && !!n.textContent && !!n.textContent.trim());
-        if (bareText) return null;
-        const kids = Array.from((el as HTMLElement).children).filter((c) => {
-          const kcs = getComputedStyle(c);
-          return kcs.display !== "none" && kcs.position !== "absolute" &&
-            kcs.position !== "fixed" && !!(c.textContent && c.textContent.trim());
-        });
-        if (kids.length < 2) return null;
-        const allLeafInline = kids.every((c) => {
-          if (!INLINE_TAGS.includes((c.tagName || "").toUpperCase())) return false;
-          if (c.children.length > 0) return false;
-          return !rgb2hex(getComputedStyle(c).backgroundColor);
-        });
-        if (!allLeafInline) return null;
-        const sizes = new Set(kids.map(
-          (c) => Math.round(parseFloat(getComputedStyle(c).fontSize) || 0)));
-        if (sizes.size < 2) return null;
-        return kids;
-      })();
-      if (flexSplitChildren) {
-        for (const ch of flexSplitChildren) {
-          const kcs = getComputedStyle(ch);
-          const kb = getBounds(ch);
-          const kFamily = kcs.fontFamily.split(",")[0].replace(/['"]/g, "").trim();
-          const kFont = parseFloat(kcs.fontSize) || style.fontSize;
-          elements.push({
-            type: "text",
-            bounds: kb,
-            text: (ch.textContent || "").replace(/[ \t\n\r\f]+/g, " ").trim(),
-            style: {
-              ...baseStyle,
-              fontFamily: kFamily,
-              fontSize: kFont,
-              fontWeight: resolveRenderedWeight(
-                kFamily, kcs.fontWeight === "bold" ? 700 : parseInt(kcs.fontWeight) || 400),
-              fontStyle: (kcs.fontStyle === "italic" ? "italic" : "normal") as "italic" | "normal",
-              color: resolveGradientTextColor(kcs) || rgb2hex(kcs.color),
-              // The box hugs the glyph run, so center-anchor == Chrome's
-              // position, and it stays fixed under the converter's
-              // symmetric single-line slack.
-              textAlign: "center",
-              lineHeight: parseFloat(kcs.lineHeight) || kFont * 1.2,
-              lineHeightMeasured: false,
-              textDecoration: kcs.textDecorationLine !== "none" ? kcs.textDecorationLine : null,
-              textTransform: kcs.textTransform,
-              letterSpacing: parseFloat(kcs.letterSpacing) || 0,
-              paddingTop: 0,
-            },
-            zIndex: style.zIndex,
-            position: style.position,
-            verticallyCentered: true,
-            singleLine: true,
-          });
-        }
-        emitAbsoluteChildChevrons(el);
-        return;
-      }
-      elements.push(textEl);
-      // Direct-text containers return here and do not recurse children. Preserve
-      // absolutely-positioned decorative border chevrons such as slide_34
-      // `.r > .chev` before taking that fast path.
-      emitAbsoluteChildChevrons(el);
-      // Re-draw rounded inline-block pill chips that this merge flattened
-      // (slide_31 `.chip`) as standalone pills on top of the merged text.
-      if (hasStyledRuns) emitMergedChips(el);
-      return;
+        verticallyCentered: true,
+        singleLine: true,
+      });
     }
-
-    // Recurse children in CSS paint order:
-    //   bucket -1 : negative z-index positioned   (group 2)
-    //   bucket  0 : in-flow non-positioned        (groups 3–5)
-    //   bucket  1 : positioned with z:auto or 0   (group 6)
-    //   bucket  2 : positive z-index positioned   (group 7)
-    // Stable sort preserves document order inside each bucket. This scopes paint
-    // order per-subtree, so a parent's own rect (emitted above before recursion)
-    // paints first, and positioned siblings paint above static siblings within
-    // the same parent — matching CSS 2.1 Appendix E.
-    const childArr = Array.from((el as HTMLElement).children);
-    const paintBucket = (c: Element): number => {
-      const ccs = getComputedStyle(c);
-      const zStr = ccs.zIndex;
-      const positioned = ccs.position !== "static";
-      if (!positioned) return 0;
-      if (zStr === "auto") return 1;
-      const z = parseInt(zStr);
-      if (isNaN(z)) return 1;
-      if (z < 0) return -1;
-      if (z > 0) return 2;
-      return 1;
-    };
-    const indexed = childArr.map((c, i) => ({ c, i, b: paintBucket(c) }));
-    indexed.sort((a, b) => a.b - b.b || a.i - b.i);
-    _currentClipMask = _childClipMask;
-    try { for (const { c } of indexed) walk(c); }
-    finally { _currentClipMask = _outerClipMask; }
   }
 
   walk(document.body);
