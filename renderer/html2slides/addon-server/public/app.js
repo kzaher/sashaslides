@@ -420,9 +420,9 @@
       const url = $("#url-input").value.trim(); if (!url) return;
       log(`fetching ${url} …`);
       try {
-        // CORS: prefer server-side fetch (add-on: UrlFetchApp via Code.gs; dev: this server proxy)
-        const html = inAddon ? await gsCall("fetchExternalHtml", url)
-                             : await (await fetch("/api/fetch-html?url=" + encodeURIComponent(url))).text();
+        // Server-side fetch only inside the add-on (Code.gs's UrlFetchApp). The site has no open proxy.
+        if (!inAddon) { log("loading from a URL works only inside the add-on; paste or drop the HTML instead"); return; }
+        const html = await gsCall("fetchExternalHtml", url);
         addHtml(url.split("/").pop() || "remote.html", html);
       } catch (e) { log("fetch failed: " + e.message); }
     });

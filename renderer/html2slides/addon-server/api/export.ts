@@ -12,29 +12,12 @@
  * (getAuth, same loader as export-thumbs-lib / convert-pptx-io). In the
  * add-on path Code.gs does the equivalent with UrlFetchApp + the user's
  * OAuth — see ./export-appsscript.gs.txt for the parallel implementation.
- *
- * Also hosts the dev-only /api/fetch-html proxy used by the URL loader when
- * the UI runs standalone (in the add-on, Code.gs's UrlFetchApp does this).
  */
-import { get as httpsGet } from "https";
-import { get as httpGet } from "http";
 import { readFileSync, writeFileSync } from "fs";
 import { google } from "googleapis";
 import type { Credentials } from "google-auth-library";
 import JSZip from "jszip";
 import { registerApi } from "../registry.js";
-
-// dev-only outbound HTML fetch (CORS bypass for the "load from URL" control)
-registerApi("GET", "/api/fetch-html", (req, res, url) => {
-  const target = url.searchParams.get("url");
-  if (!target) { res.writeHead(400); res.end("missing url"); return true; }
-  const getter = target.startsWith("https:") ? httpsGet : httpGet;
-  getter(target, (up) => {
-    res.writeHead(up.statusCode || 200, { "Content-Type": "text/html; charset=utf-8" });
-    up.pipe(res);
-  }).on("error", (e) => { res.writeHead(502); res.end("fetch failed: " + e.message); });
-  return true;
-});
 
 /**
  * Parse a slide-range spec like "1-5, 8, 11-13" into a Set of 1-based slide
