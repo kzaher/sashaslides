@@ -1,11 +1,11 @@
 /**
  * sxs-io.test.ts — the documented I/O contract resolvers + describers.
  *
- * resolveRatingIo / resolveRecordIo turn a partial input into fully-defaulted,
- * absolute paths; describeRatingIo / describeRecordIo print the IN/OUT/LEDGER
+ * resolveRatingIo turns a partial input into fully-defaulted, absolute paths;
+ * describeRatingIo prints the IN/OUT/LEDGER
  * groups. Pure functions, no fs/network — just assertions on the returned paths.
  */
-import { resolveRatingIo, resolveRecordIo, describeRatingIo, describeRecordIo } from "./sxs-io.js";
+import { resolveRatingIo, describeRatingIo } from "./sxs-io.js";
 import { join, resolve, isAbsolute } from "path";
 
 let passed = 0, failed = 0;
@@ -75,31 +75,6 @@ function main() {
   }
 
   // -------------------------------------------------------------------------
-  // resolveRecordIo
-  // -------------------------------------------------------------------------
-  {
-    const O = resolve("/tmp/out-x");
-    const cfg = resolveRecordIo({ fixturesDir: "/fx", slides: ["slide_01"], outDir: "/tmp/out-x" });
-    ok("(6a) outDir resolved absolute", cfg.outDir === O);
-    ok("(6b) pptxDir = <out>/pptx", cfg.pptxDir === join(O, "pptx"), cfg.pptxDir);
-    ok("(6c) screenshotsDir = <out>/screenshots", cfg.screenshotsDir === join(O, "screenshots"), cfg.screenshotsDir);
-    ok("(6d) thumbsDir = <out>/thumbs", cfg.thumbsDir === join(O, "thumbs"), cfg.thumbsDir);
-    ok("(6e) manifestFile = <out>/thumbs/manifest.json", cfg.manifestFile === join(O, "thumbs", "manifest.json"), cfg.manifestFile);
-    ok("(6f) fixturesDir resolved absolute", cfg.fixturesDir === resolve("/fx"));
-    ok("(6g) slides passthrough", JSON.stringify(cfg.slides) === '["slide_01"]');
-    ok("(6h) mode default 'full'", cfg.mode === "full");
-    ok("(6i) title default present", typeof cfg.title === "string" && cfg.title.length > 0, cfg.title);
-    ok("(6j) all record paths absolute", [cfg.outDir, cfg.pptxDir, cfg.screenshotsDir, cfg.thumbsDir, cfg.manifestFile, cfg.fixturesDir].every(isAbsolute));
-  }
-
-  // mode + title passthrough
-  {
-    const cfg = resolveRecordIo({ fixturesDir: "/fx", slides: ["a", "b"], outDir: "/tmp/o", mode: "pptx", title: "my-title" });
-    ok("(7a) mode passthrough", cfg.mode === "pptx");
-    ok("(7b) title passthrough", cfg.title === "my-title");
-  }
-
-  // -------------------------------------------------------------------------
   // describeRatingIo
   // -------------------------------------------------------------------------
   {
@@ -119,16 +94,10 @@ function main() {
     ok("(9) describeRatingIo prints resolved candidatesFile with historyDir", s.includes(cfg.candidatesFile as string) && !s.includes("LEDGER candidates              (none"), s);
   }
 
-  // -------------------------------------------------------------------------
-  // describeRecordIo
-  // -------------------------------------------------------------------------
+  // --ratings-file override reaches the contract (and the describer)
   {
-    const cfg = resolveRecordIo({ fixturesDir: "/fx", slides: ["slide_01"], outDir: "/tmp/rdesc" });
-    const s = describeRecordIo(cfg);
-    ok("(10a) describeRecordIo has IN group", s.includes("IN "));
-    ok("(10b) describeRecordIo has OUT group", s.includes("OUT "));
-    ok("(10c) describeRecordIo prints pptxDir under OUT", s.includes("OUT  pptx") && s.includes(cfg.pptxDir), cfg.pptxDir);
-    ok("(10d) describeRecordIo prints manifestFile", s.includes(cfg.manifestFile));
+    const cfg = resolveRatingIo({ resultsDir: "/tmp/desc-r", ratingsFile: "/tmp/elsewhere/ratings.json" });
+    ok("(10) ratingsFile override resolved + printed", cfg.ratingsFile === resolve("/tmp/elsewhere/ratings.json") && describeRatingIo(cfg).includes(cfg.ratingsFile), cfg.ratingsFile);
   }
 
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);

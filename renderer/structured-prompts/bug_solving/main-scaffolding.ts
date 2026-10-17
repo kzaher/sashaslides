@@ -23,29 +23,14 @@
  * ## Rating/merge env gates (handled inside the graph — see main.ts)
  *   BUG_SOLVING_NO_ACCEPT=1          forks boot UIs but SKIP their waits; the
  *                                    final merge phase is a no-op (nothing lands).
- *   BUG_SOLVING_RATING_TIMEOUT_MS=N  per-fork blocking-wait budget.
- *       Default (unset): 0 = wait FOREVER when stdin is a TTY; a finite
- *       default (30 min) when NOT a TTY, after which still-unrated slides
- *       are treated as NOT-GREEN so an unattended run can't hang.
- *       An explicit value applies regardless of TTY; 0 = forever always.
+ *   BUG_SOLVING_RATING_TIMEOUT_MS=N  per-fork blocking-wait budget, independent
+ *       of TTY (rating-gate.ts resolveRatingTimeoutMs): unset or 0 = wait forever,
+ *       N>0 = finite, after which still-unrated slides count as NOT-GREEN.
  *
- * ## Filling in task data (required before build)
- *   The `CLUSTERS` import below points at `./clusters.ts`, which DOES NOT
- *   EXIST in the repo. Create it with your actual bug clusters:
- *
- *     // renderer/structured-prompts/bug_solving/clusters.ts
- *     import type { Cluster } from "./workspace-setup.js";
- *     export const CLUSTERS: Cluster[] = [
- *       {
- *         task_id: "clipping-curves",
- *         cluster_description: "overflow:hidden + border-radius not honored",
- *         slide_ids: ["slide_11", "slide_12", "slide_14", "slide_28"],
- *       },
- *     ];
- *
- *   Until you create that file, the build will fail with
- *   "Could not resolve './clusters.js'" — this is intentional. It prevents
- *   accidental runs of an empty or demo cluster list.
+ * ## Clusters
+ *   The slides marked BAD in the live SxS ratings.json, one cluster per slide
+ *   (clusters.ts clustersFromRatings); `--clusters` (BUG_SOLVING_CLUSTERS) groups
+ *   them by hand.
  *
  * ## Build + run
  *   npx tsx structured-prompting/build.ts \
@@ -66,11 +51,8 @@
 import { execFile, type ExecException } from "child_process";
 import { promisify } from "util";
 import { resolve } from "path";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
 const execFileAsync = promisify(execFile);
-import { rmSync, existsSync } from "fs";
-import { join } from "path";
+import { rmSync } from "fs";
 import { ClaudeEngine, CodexEngine, Session, branchRunCommand } from "../../../structured-prompting/src/index.js";
 import { buildTasks, selectOnlyClusters } from "./workspace-setup.js";
 // (stability recording now lives in the main graph — main.ts:stabilityBranch)
@@ -97,11 +79,7 @@ import {
 } from "./startup-detection.js";
 import { resumeMerge } from "./resume-merge.js";
 
-// ❌ DO NOT REMOVE this import or replace with a dummy. Create the sibling
-// `./clusters.ts` file with your actual cluster definitions. esbuild will
-// refuse to build until that file exists — by design, to prevent
-// accidental smoke runs. See header for the file template.
-import { clustersFromRatings, applyManualClusters } from "./generate-clusters.js";
+import { clustersFromRatings, applyManualClusters } from "./clusters.js";
 import http from "node:http";
 import { join as pathJoin } from "node:path";
 import type { Cluster } from "./workspace-setup.js";
@@ -160,15 +138,9 @@ const REPO_ROOT = process.cwd();
 // pipeline as AFTER; this is the repo-root-relative path joined onto each
 // task's workspace_dir below.
 const RECORD_SCRIPT_REL = "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts";
-// A bug_solving branch is just a CowWorkspace over the repo; branchRunCommand
-// builds the raw `unshare … node ns-exec.mjs …` spawn to run inside it (no bash).
-// Keep fileURLToPath import reachable even if we stop using HERE later.
-const _HERE = dirname(fileURLToPath(import.meta.url)); void _HERE;
-
-// The per-fork rating UIs are now booted INSIDE the graph (runTask step A1,
-// detached via setsid), not here — so the scaffolding tracks no child servers.
-// An uncaughtException still exits non-zero. Those detached servers survive
-// scaffolding exit; the user kills them with `lsof -ti:4720-4800 | xargs -r kill`.
+// The per-fork rating UIs run INSIDE the graph (runTask step A1), in the
+// foreground of their node, and exit once every slide is rated — so the
+// scaffolding tracks no child servers. An uncaughtException still exits non-zero.
 process.on("uncaughtException", (e) => {
   console.error("[scaffolding] uncaughtException:", e);
   process.exit(1);
@@ -307,7 +279,7 @@ async function run(): Promise<void> {
   const portBase = isCodex ? 4760 : 4720;
   console.error(`[scaffold] engine: ${engineKind} (monitor :${monitorPort}, task ports ${portBase}-${portBase + 39})`);
 
-  // JAIL ON for solve + merge. Set BEFORE any workspace.sh run (recordBeforePptx,
+  // JAIL ON for solve + merge. Set BEFORE any branch run (recordBeforePptx,
   // the engine's per-fork solve commands, and the final merge). Every `run` then
   // sandboxes the worker CLI + retest: the base REPO is overlay copy-on-write,
   // /tmp is a disposable tmpfs, everything else read-only.
@@ -363,8 +335,8 @@ async function run(): Promise<void> {
 
   // Clusters come DIRECTLY from the live SxS ratings — the slides you actually
   // marked BAD (with their live comments) are the source of truth at solve start.
-  // No clusters.ts, no ledger reconciliation that could let a stale history
-  // override your current ratings.
+  // No ledger reconciliation that could let a stale history override your
+  // current ratings.
   const ratingsPath = reversePaths?.ratingsFile ?? process.env.BUG_SOLVING_RATINGS_JSON ?? "/tmp/sxs-complex/ratings.json";
   const sxsDir = reversePaths?.resultsRoot ?? process.env.BUG_SOLVING_SXS_DIR ?? "/tmp/sxs-complex";
   const fixturesDir = process.env.BUG_SOLVING_FIXTURES_DIR ?? "renderer/html2slides/e2e/fixtures";
@@ -572,11 +544,8 @@ async function run(): Promise<void> {
     console.error(`\n  Inspect the computation graph at ${engine.monitorUrl ?? "(engine gone)"} for the full trace.`);
   }
 
-  console.error(`\n[scaffolding] per-fork rating servers were booted inside the graph (detached via setsid).`);
-  console.error(`They will survive scaffolding exit; kill them with: lsof -ti:4720-4800 | xargs -r kill`);
-
-  // Done. The structured prompt has returned and rating-servers are detached.
-  // On failure we DELIBERATELY do not process.exit(1) while the monitor is
+  // Done. The structured prompt has returned; each fork's rating server exited
+  // when its slides were rated. On failure we DELIBERATELY do not process.exit(1) while the monitor is
   // still serving (persist:true): the in-process monitor IS the trace, and
   // exiting would tear it down exactly when you want to inspect the failure.
   // The listening monitor keeps the event loop alive, so the process stays up

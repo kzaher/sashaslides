@@ -29,7 +29,7 @@ import {
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createCowWorkspace, cleanupAllCowWorkspaces, cleanupCowWorkspace, type CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
+import { createCowWorkspace, cleanupAllCowWorkspaces, cleanupCowWorkspace, type CowWorkspace } from "../../../cow-workspace/cow-workspace.ts";
 import { overlayWorkspaceOptions } from "./cow-options.js";
 import { realLlmMergeOps, ledgerDemote, type GreenCluster } from "./llm-merge.js";
 import { writeStabilityJson } from "./stability.js";

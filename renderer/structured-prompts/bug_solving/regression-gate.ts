@@ -19,7 +19,7 @@
  * SERIAL TARGET-MUTATION: during the sequential fold each accepted fork MUTATES
  * the target it touched — that slide becomes the new accepted (green) state. The
  * gate never bakes in "base = pristine": the caller supplies the accepted base,
- * and `makeRegressionRetest` advances that base after every clean fork so a later
+ * and `makeChangeGate`'s `commitAccepted` advances that base after every clean fork so a later
  * fork is compared against the POST-previous-fork state (an earlier fork's
  * accepted change is NOT re-flagged as this fork's ripple).
  *
@@ -30,7 +30,7 @@
  * (llm-merge's `rateChanged`), and an accepted-green slide's render becomes its
  * new reference. See docs/merge-flow.drawio for the full state machine.
  */
-import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
+import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.ts";
 import {
   type RenderRecord,
   type StabilityClassification,

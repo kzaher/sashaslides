@@ -10,78 +10,14 @@
  * single root, and a `describe*()` helper so a script can print its own
  * interface on boot.
  *
- * Two consumers, two configs, one directory family:
- *   - RecordIoConfig  — `record-rendering.ts` turns html fixtures → pptx/thumbs.
- *   - RatingIoConfig  — `rating-server.ts` shows original-vs-test and records
- *                       good/bad verdicts; `rating-gate.ts` blocks on its output.
+ * RatingIoConfig: `rating-server.ts` shows original-vs-test and records good/bad
+ * verdicts; `rating-gate.ts` blocks on its output. (record-rendering-lib.ts lays
+ * out its own output directory and logs it.)
  *
  * Path roles are annotated inline as [IN] (read), [OUT] (written), or
  * [LEDGER] (persistent, shared across runs).
  */
 import { join, resolve } from "path";
-
-// ===========================================================================
-// record-rendering.ts  —  html fixtures  →  pptx / screenshots / thumbnails
-// ===========================================================================
-
-/** How much of the render pipeline to run. Each mode is a superset of the one
- *  before it. */
-export type RecordMode = "pptx" | "screenshots" | "full";
-
-/** Fully-resolved I/O contract for `record-rendering.ts`. Build with
- *  {@link resolveRecordIo}; never assemble paths by hand at a call site. */
-export interface RecordIoConfig {
-  /** [IN] the html2slides fixtures directory. Each `--slides` id maps to
-   *  `<fixturesDir>/<slide_id>.html`. REQUIRED — the script cannot render
-   *  without source fixtures. */
-  fixturesDir: string;
-  /** [IN] the slide ids to render (fixture basenames, no extension). */
-  slides: string[];
-  /** how far to run the pipeline. */
-  mode: RecordMode;
-  /** presentation title used for the Slides upload (mode: full). */
-  title: string;
-
-  /** root output dir (the old bare `--out`). Everything below defaults under it. */
-  outDir: string;
-  /** [OUT] per-slide pptx → `<outDir>/pptx/<slide_id>.pptx`. All modes. */
-  pptxDir: string;
-  /** [OUT] per-slide Chrome screenshots → `<outDir>/screenshots/<slide_id>.png`.
-   *  Modes: screenshots, full. */
-  screenshotsDir: string;
-  /** [OUT] per-slide Google-Slides-rendered thumbnails →
-   *  `<outDir>/thumbs/<slide_id>.png`. Mode: full only. */
-  thumbsDir: string;
-  /** [OUT] upload provenance → `<outDir>/thumbs/manifest.json`
-   *  = `{ presentation_id, slides, ... }`. Mode: full only. Consumed downstream
-   *  by {@link RatingIoConfig.manifestFile}. */
-  manifestFile: string;
-}
-
-export interface RecordIoInput {
-  fixturesDir: string;
-  slides: string[];
-  outDir: string;
-  mode?: RecordMode;
-  title?: string;
-}
-
-/** Resolve a partial record config to absolute, fully-defaulted paths. */
-export function resolveRecordIo(inp: RecordIoInput): RecordIoConfig {
-  const outDir = resolve(inp.outDir);
-  const thumbsDir = join(outDir, "thumbs");
-  return {
-    fixturesDir: resolve(inp.fixturesDir),
-    slides: inp.slides,
-    mode: inp.mode ?? "full",
-    title: inp.title ?? "bug_solving-record",
-    outDir,
-    pptxDir: join(outDir, "pptx"),
-    screenshotsDir: join(outDir, "screenshots"),
-    thumbsDir,
-    manifestFile: join(thumbsDir, "manifest.json"),
-  };
-}
 
 // ===========================================================================
 // rating-server.ts  —  original-vs-test review  →  good/bad verdicts
@@ -93,7 +29,7 @@ export function resolveRecordIo(inp: RecordIoInput): RecordIoConfig {
  *  mirrors verdicts into the [LEDGER] paths that survive across runs. */
 export interface RatingIoConfig {
   /** root results dir (the old bare positional arg). Typically
-   *  `<scratch>/thumbnails`. Defaults for every path below hang off it. */
+   *  a fork's `<shared>/forward/thumbnails`. Defaults for every path below hang off it. */
   resultsDir: string;
 
   // ---- INPUTS (the server expects these to already exist) ----
@@ -158,6 +94,8 @@ export interface RatingIoInput {
   filterSlides?: string[] | null;
   historyDir?: string | null;
   candidateMode?: boolean;
+  /** the verdicts file, when not `<resultsDir>/ratings.json` (rating-server --ratings-file). */
+  ratingsFile?: string;
 }
 
 /** Resolve a partial rating config to absolute, fully-defaulted paths. */
@@ -174,7 +112,7 @@ export function resolveRatingIo(inp: RatingIoInput): RatingIoConfig {
     sourceDir: join(resultsDir, "source"),
     origAnnotationsDir: join(resultsDir, "orig-annotations"),
     filterSlides: inp.filterSlides ?? null,
-    ratingsFile: join(resultsDir, "ratings.json"),
+    ratingsFile: inp.ratingsFile ? resolve(inp.ratingsFile) : join(resultsDir, "ratings.json"),
     annotationsDir: join(resultsDir, "annotations"),
     zoomCropsDir: join(resultsDir, "zoom-crops"),
     historyDir,
@@ -207,20 +145,6 @@ export function describeRatingIo(cfg: RatingIoConfig): string {
     `  LEDGER candidates              ${cfg.candidatesFile ?? "(none — no --history-dir)"}`,
     `  LEDGER canonical ratings       ${cfg.ledgerRatingsFile ?? "(none — no --history-dir)"}`,
     `  mode   ${cfg.candidateMode ? "candidate (unmerged attempt; canonical issue untouched)" : "canonical (updates the issue ledger)"}`,
-  ];
-  return lines.join("\n");
-}
-
-/** One line per path for the record pipeline, grouped IN / OUT. */
-export function describeRecordIo(cfg: RecordIoConfig): string {
-  const lines = [
-    `record-rendering I/O contract (outDir = ${cfg.outDir}, mode = ${cfg.mode})`,
-    `  IN   fixtures        ${cfg.fixturesDir}/<id>.html`,
-    `  IN   slides          ${cfg.slides.join(",")}`,
-    `  OUT  pptx            ${cfg.pptxDir}/<id>.pptx            [pptx,screenshots,full]`,
-    `  OUT  screenshots     ${cfg.screenshotsDir}/<id>.png      [screenshots,full]`,
-    `  OUT  thumbnails      ${cfg.thumbsDir}/<id>.png           [full]`,
-    `  OUT  upload manifest ${cfg.manifestFile}                 [full]`,
   ];
   return lines.join("\n");
 }

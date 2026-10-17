@@ -4,6 +4,7 @@
  *
  * Replaces the old binary-structural off-target check. The whole-deck
  * regression scan (main.ts step 4b) writes `<scratch>/reg-diffs/<slide>.diff`
+ * (`<scratch>` = the fork's `<shared>/forward`, forward-fork.ts)
  * for every slide; a non-cluster slide whose diff is not
  * "(no structural differences detected)" merely means the fix CHANGED that
  * slide's pptx — NOT that it looks worse. A shared-converter fix legitimately
@@ -29,9 +30,10 @@
  *   npx tsx offtarget-gate.ts --scratch <dir> --cluster <csv> --workdir <wt> \
  *     --fixtures <dir> --record <record-rendering.ts> --title <presentation-title>
  */
-import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from "fs";
+import { writeFileSync, existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
+import { changedOffTargets } from "../forward-fork.js";
 
 type Args = {
   scratch: string; cluster: string; workdir: string;
@@ -59,23 +61,6 @@ function parseArgs(argv: string[]): Args {
 }
 
 interface OffVerdict { slide_id: string; isVisibleRegression: boolean; rationale: string }
-
-/** Structurally-changed slides NOT in the cluster (the candidates to verify). */
-function changedOffTargets(scratch: string, clusterCsv: string): string[] {
-  const regDir = join(scratch, "reg-diffs");
-  if (!existsSync(regDir)) return [];
-  const cluster = new Set(clusterCsv.split(",").map(s => s.trim()).filter(Boolean));
-  const out: string[] = [];
-  for (const f of readdirSync(regDir)) {
-    if (!f.endsWith(".diff")) continue;
-    const sid = f.replace(/\.diff$/, "");
-    if (cluster.has(sid)) continue;
-    let txt = "";
-    try { txt = readFileSync(join(regDir, f), "utf-8"); } catch { continue; }
-    if (!/no structural differences/i.test(txt)) out.push(sid);
-  }
-  return out.sort();
-}
 
 /** Render the given slides to Google Slides (--mode full → thumbs/<id>.png). */
 function renderFull(a: Args, slidesCsv: string, outDir: string, titleSuffix: string): void {
@@ -127,10 +112,11 @@ function verifyOne(sid: string, beforePng: string, afterPng: string, diffPath: s
 
 function main(): void {
   const a = parseArgs(process.argv.slice(2));
+  mkdirSync(a.scratch, { recursive: true });
   const outFile = join(a.scratch, "offtarget-gate.json");
   const write = (o: unknown) => writeFileSync(outFile, JSON.stringify(o, null, 2));
 
-  const changed = changedOffTargets(a.scratch, a.cluster);
+  const changed = changedOffTargets(join(a.scratch, "reg-diffs"), a.cluster.split(",").map(s => s.trim()).filter(Boolean));
   if (changed.length === 0) {
     write({ regressions: [], verdicts: [], changed: [] });
     console.log("offtarget-gate: no off-target structural changes — PASS");

@@ -101,15 +101,15 @@ export function makeAnnotationComposite(
 }
 
 /**
- * Refresh the consolidated `slide_NN_attempt.png` (and, when an annotation
- * exists, `slide_NN_highlighted_attempt.png`) from the just-recorded AFTER
- * thumbnail so the verify step's images reflect the LATEST render rather than
- * the build-time "our current render". Best-effort: never throws, logs on miss.
+ * Copy the just-recorded AFTER render to `attemptOut` (forward: `<id>_after.png`)
+ * and, when an annotation exists, composite it over the AFTER render into
+ * `highlightedOut` (`<id>_highlighted_after.png`), for the verdict step.
+ * Best-effort: never throws, logs on miss.
  *
- * @param afterPng      the AFTER render (e.g. <scratch>/thumbnails/thumbs/<id>.png)
- * @param attemptOut    consolidated slide_NN_attempt.png to overwrite
- * @param annotationPng optional raw annotation to re-composite over the AFTER render
- * @param highlightedOut optional consolidated slide_NN_highlighted_attempt.png
+ * @param afterPng      the AFTER render (e.g. <shared>/forward/thumbnails/thumbs/<id>.png)
+ * @param attemptOut    where the AFTER render is copied
+ * @param annotationPng optional raw annotation to composite over the AFTER render
+ * @param highlightedOut optional composite output
  */
 export function refreshConsolidatedAttempt(
   afterPng: string,
@@ -118,7 +118,7 @@ export function refreshConsolidatedAttempt(
   highlightedOut?: string,
 ): void {
   if (!existsSync(afterPng)) {
-    console.error(`[annotation-composite] refresh: AFTER render missing ${afterPng} (keeping build-time attempt)`);
+    console.error(`[annotation-composite] refresh: AFTER render missing ${afterPng}`);
     return;
   }
   try { copyFileSync(afterPng, attemptOut); }

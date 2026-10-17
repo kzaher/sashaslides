@@ -9,7 +9,7 @@
 //
 // bug_solving runs on Linux over this git repository, so: overlayfs, filtered by `git check-ignore`
 // (the old default). Jail policy left unset is inherited from the ambient env the scaffolding sets.
-import type { CowWorkspaceOptions, OverlayfsCowWorkspaceProviderOptions } from "../../../cow-workspace/cow-workspace.js";
+import type { CowWorkspaceOptions, OverlayfsCowWorkspaceProviderOptions } from "../../../cow-workspace/cow-workspace.ts";
 
 export function overlayWorkspaceOptions(
   options: Readonly<{ base: string; id?: string } & Omit<OverlayfsCowWorkspaceProviderOptions, "type">>,

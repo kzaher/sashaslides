@@ -14,13 +14,18 @@
  *       "--fork-session" (contrast the /api/ask path, which DOES fork). The
  *       full arg list is asserted, mirroring session.test.ts's style.
  *
+ *   (c) monitor actions on a fork node (inject / retry / ask) replay the
+ *       call in that node's recorded execution context: the spawn carries
+ *       the node's copy-on-write `branchId` and `cwd`.
+ *
  * Run:
  *   npx tsx src/server/inject.test.ts
  */
 import { strict as assert } from "node:assert";
 import { ComputationGraph } from "./graph.js";
 import { MockIO, type EffectCall, type Matcher, type SpawnCaptureArgs, type SpawnCaptureResult } from "./io.js";
-import { handleInject } from "./server.js";
+import { claudeDriver } from "./claude-cli.js";
+import { handleAsk, handleInject, handleRetry } from "./server.js";
 
 // ---------------------------------------------------------------------------
 // Harness (mirrors session.test.ts)
@@ -142,7 +147,7 @@ async function main() {
     const reply = await handleInject(
       JSON.stringify({ nodeId: A.id, message: "please redo with extra context" }),
       g,
-      io,
+      { driver: claudeDriver, io },
     );
 
     // Exactly one claude spawn. Assert the COMPLETE arg list (command +
@@ -152,6 +157,7 @@ async function main() {
     assert.equal(list.length, 1, `expected exactly one spawn, got ${list.length}`);
     assert.equal(list[0]!.command, "claude");
     assert.equal(list[0]!.cwd, undefined);
+    assert.equal(list[0]!.branchId, undefined);
     assert.equal(list[0]!.timeoutMs, 60 * 60 * 1000);
     assert.deepEqual(list[0]!.args, [
       "-p", "please redo with extra context",
@@ -178,6 +184,97 @@ async function main() {
     assert.equal(reply.isError, false);
     assert.equal(reply.text, "post-inject");
     assert.equal(reply.sessionId, "sid-A-next");
+    io.assertExhaustive();
+  });
+
+  // (c) Monitor actions on a fork node run inside that fork's branch + jail.
+  const forkExecution = { cwd: "/repo", branchId: "bs-x" };
+
+  await test("handleInject on a node whose anchor ran in a branch spawns with that branchId and cwd", async () => {
+    const g = new ComputationGraph("root");
+    const fork = g.create({ parentId: g.rootId, kind: "send", label: "fork-send", input: { prompt: "a" } });
+    g.start(fork.id, { execution: forkExecution });
+    g.finishOk(fork.id, { text: "done" }, { sessionId: "sid-fork" });
+    // A not-yet-run send below it has no session of its own → anchor walk.
+    const next = g.create({ parentId: fork.id, kind: "send", label: "next", input: { prompt: "b" } });
+    const io = new MockIO({
+      matchers: [
+        ...baseMatchers(),
+        { name: "claude reply", when: (c) => c.method === "spawnCapture", returns: claudeReply({ result: "ok", sessionId: "sid-fork-2" }) },
+      ],
+    });
+
+    await handleInject(JSON.stringify({ nodeId: next.id, message: "again" }), g, { driver: claudeDriver, io });
+
+    const list = spawns(io);
+    assert.equal(list.length, 1);
+    assert.equal(list[0]!.command, "claude");
+    assert.equal(list[0]!.branchId, "bs-x");
+    assert.equal(list[0]!.cwd, "/repo");
+    assert.deepEqual(list[0]!.args, ["-p", "again", "--output-format", "json", "--dangerously-skip-permissions", "--resume", "sid-fork"]);
+    io.assertExhaustive();
+  });
+
+  await test("handleRetry re-runs an executeShell node inside its recorded branch and cwd", async () => {
+    const g = new ComputationGraph("root");
+    const shell = g.create({
+      parentId: g.rootId,
+      kind: "executeShell",
+      label: "shell",
+      callbacks: { buildCommand: () => "make test" },
+    });
+    g.start(shell.id, { input: { cmd: "make test" }, execution: forkExecution });
+    g.finishErr(shell.id, new Error("first run failed"));
+    // runShell reads no clock, so only the optional log matcher is shared.
+    const io = new MockIO({
+      matchers: [
+        ...baseMatchers().filter((m) => m.name !== "now"),
+        {
+          name: "shell retry",
+          when: (c) => c.method === "spawnCapture",
+          returns: { stdout: "all green", stderr: "", exitCode: 0, signal: null, timedOut: false, spawnError: null },
+        },
+      ],
+    });
+
+    const reply = await handleRetry(JSON.stringify({ nodeId: shell.id }), g, { driver: claudeDriver, io });
+
+    assert.equal(reply.status, "ok", reply.message);
+    const list = spawns(io);
+    assert.equal(list.length, 1);
+    assert.equal(list[0]!.command, "bash");
+    assert.deepEqual(list[0]!.args, ["-c", "make test"]);
+    assert.equal(list[0]!.branchId, "bs-x");
+    assert.equal(list[0]!.cwd, "/repo");
+    assert.equal(g.get(shell.id)!.status, "ok");
+    io.assertExhaustive();
+  });
+
+  await test("handleAsk on a fork node forks the anchor session inside its branch and cwd", async () => {
+    const g = new ComputationGraph("root");
+    const fork = g.create({ parentId: g.rootId, kind: "send", label: "fork-send", input: { prompt: "a" } });
+    g.start(fork.id, { execution: forkExecution });
+    g.finishOk(fork.id, { text: "done" }, { sessionId: "sid-fork" });
+    const io = new MockIO({
+      matchers: [
+        ...baseMatchers(),
+        { name: "claude reply", when: (c) => c.method === "spawnCapture", returns: claudeReply({ result: "answer", sessionId: "sid-ask" }) },
+      ],
+    });
+
+    const reply = await handleAsk(JSON.stringify({ nodeId: fork.id, prompt: "why?" }), g, { driver: claudeDriver, io });
+
+    const list = spawns(io);
+    assert.equal(list.length, 1);
+    assert.equal(list[0]!.branchId, "bs-x");
+    assert.equal(list[0]!.cwd, "/repo");
+    assert.deepEqual(list[0]!.args, [
+      "-p", "why?", "--output-format", "json", "--dangerously-skip-permissions",
+      "--resume", "sid-fork", "--fork-session",
+    ]);
+    // The follow-up node remembers the context, so a later session-send on
+    // its session resolves to the same branch.
+    assert.deepEqual(g.get(reply.newNodeId)!.execution, forkExecution);
     io.assertExhaustive();
   });
 

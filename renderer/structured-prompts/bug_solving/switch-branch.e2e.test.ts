@@ -9,7 +9,7 @@
  *     .executeShell(() => 'echo <marker> >> renderer/html2slides/convert-pptx.ts')
  *     .executeShell(() => 'tail -1 renderer/html2slides/convert-pptx.ts')
  * and asserts:
- *   (a) the edit shows up in `overlay-branch.sh changed <id>` (it landed in the
+ *   (a) the edit shows up in the workspace's `changed()` list (it landed in the
  *       branch's upper layer, gitignore-honored);
  *   (b) the BASE working-tree convert-pptx.ts is byte-for-byte UNCHANGED (the
  *       edit was isolated to the branch);
@@ -26,7 +26,7 @@ import { execSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
-import { createCowWorkspace, cleanupAllCowWorkspaces } from "../../../cow-workspace/cow-workspace.js";
+import { createCowWorkspace, cleanupAllCowWorkspaces } from "../../../cow-workspace/cow-workspace.ts";
 import { overlayWorkspaceOptions } from "./cow-options.js";
 
 const REPO = "/workspaces/sashaslides";
@@ -35,10 +35,14 @@ const CANARY = "renderer/html2slides/convert-pptx.ts"; // a real tracked convert
 const BRANCH = `sb-e2e-${process.pid}`;
 const MARKER = `switch-branch-e2e-marker-${process.pid}`;
 
-// overlay-branch.sh reads OVERLAY_BRANCH_ROOT from the environment; setting it on
+// cow-workspace's branch runner reads OVERLAY_BRANCH_ROOT from the environment; setting it on
 // this process means both our direct `sh(...)` calls AND the engine-spawned
 // branch runs (realIO forwards process.env to the child) use the isolated root.
 process.env.OVERLAY_BRANCH_ROOT = ROOT;
+// COW_WORKSPACE_ROOT wins over OVERLAY_BRANCH_ROOT in cow-workspace, and a codepit `cow.mjs run`
+// shell exports it (=/overlays/branches): pin it too, or the branch lands in that root while
+// changed() reads ROOT (measured 2026-10-17: changed=[] and a leaked branch dir).
+process.env.COW_WORKSPACE_ROOT = ROOT;
 // cow-workspace dispatches every branch run on the provider and no longer defaults it; the
 // scaffolding names it for real runs (main-scaffolding.ts), so this test must as well.
 process.env.COW_WORKSPACE_PROVIDER = "overlayfs";
@@ -71,7 +75,7 @@ async function main() {
 
   try {
     // The graph: switchBranch, then two executeShell nodes in that branch. The
-    // engine wraps EACH command via overlay-branch.sh because ctx.branchId is
+    // engine wraps EACH command via cow-workspace's branchRunCommand because ctx.branchId is
     // set. The tip value is the second shell's stdout (the `tail -1`).
     const tail = await engine.execute(
       new Session({ sessionId: "sb-e2e-session" }),
@@ -90,7 +94,7 @@ async function main() {
 
     // (a) the edit is a real tracked change in the branch's upper layer.
     const changed = createCowWorkspace(overlayWorkspaceOptions({ base: REPO, upperRoot: ROOT, id: BRANCH })).changed();
-    ok("(a) switchBranch edit shows in `overlay-branch.sh changed`",
+    ok("(a) switchBranch edit shows in the workspace changed() list",
       changed.includes(CANARY), `changed=${JSON.stringify(changed)}`);
 
     // (b) the BASE working tree is untouched — the edit stayed in the branch.

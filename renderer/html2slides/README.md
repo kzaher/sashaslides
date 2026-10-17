@@ -44,7 +44,7 @@ The script does, in order:
 
 ## Blessing goldens (USER-ONLY)
 
-**Only the human user may promote a rendered slide into `e2e/goldens/`.** The sanctioned path is the SxS rating UI — the user clicks **Good** on a slide, and the rating server (`serve-sxs.sh` → `filtered-rating-server`, run with `--goldens-dir`) copies the current thumb into `e2e/goldens/`. That is the one and only writer, and it fires only on the user's own "Good" click.
+**Only the human user may promote a rendered slide into `e2e/goldens/`.** The sanctioned path is the SxS rating UI — the user clicks **Good** on a slide, and the rating server (`serve-sxs.sh` → `rating-server.ts --goldens-dir`) copies the current thumb into `e2e/goldens/`. That is the one and only writer, and it fires only on the user's own "Good" click.
 
 Enforcement:
 - `check-goldens.ts --bless` is disabled — the flag errors out with exit code 2.
@@ -77,7 +77,7 @@ Rationale: pixel comparison catches silent regressions (a side-effect from one f
 
 ## Reviewing in the SxS rating UI
 
-`./serve-sxs.sh [sxs-dir=/tmp/sxs] [port=3456]` launches the single rating UI (the `filtered-rating-server`): SxS originals vs renders, a **🔍 Magnifier** (loupe, 2–8× slider), an annotation canvas, a client-side diff overlay, and HTML/Slides deep links. Clicking **Good** blesses the golden (user-only writer; see above). `rate-slides.sh` launches the same UI for an arbitrary html dir but **without** `--goldens-dir`, so it never writes goldens.
+`./serve-sxs.sh [sxs-dir=/tmp/sxs] [port=3456]` launches the single rating UI (`rating-server.ts`): SxS originals vs renders, a **🔍 Magnifier** (loupe, 2–8× slider), an annotation canvas, a client-side diff overlay, and HTML/Slides deep links. Clicking **Good** blesses the golden (user-only writer; see above). `rate-slides.sh` launches the same UI for an arbitrary html dir but **without** `--goldens-dir`, so it never writes goldens.
 
 ## Reverse direction: Google Slides → Sasha HTML (rating UI)
 

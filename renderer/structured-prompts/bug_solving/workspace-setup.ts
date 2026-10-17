@@ -2,7 +2,7 @@
  * Build the list of Task objects that main.ts will iterate over. Each task:
  *   - gets an OVERLAY BRANCH id (bs-<task>-<ts>). There is NO git worktree and
  *     NO disk copy: the overlay is mounted lazily, per-command, by
- *     structured-prompting's workspace.sh (lower = the working tree, upper = /overlays).
+ *     cow-workspace's branch runner (lower = the working tree, upper = /overlays).
  *     Every command the fork runs (worker model calls + record/diff shells)
  *     executes INSIDE that branch (engine `switchBranch`), so its edits +
  *     scratch land in the branch's isolated upper layer, never on the base tree.
@@ -27,22 +27,6 @@ import { resolve } from "path";
 import type { SlideTask, Task } from "./main.js";
 import { makeAnnotationComposite } from "./scripts/annotation-composite.js";
 import { buildReverseSlideTasks, type ReversePaths, type SolveDirection } from "./reverse-direction.js";
-
-/**
- * Turn a repo-relative fixtures dir path into a dir-safe slug so that
- * complex vs basic/simple fixture sets land in DISTINCT subdirs of the
- * consolidated per-task image dir. Any run of non-[a-z0-9] chars collapses
- * to a single dash, and leading/trailing dashes are trimmed.
- *   renderer/html2slides/e2e/fixtures       → renderer-html2slides-e2e-fixtures
- *   renderer/html2slides/e2e/fixtures-basic → renderer-html2slides-e2e-fixtures-basic
- */
-export function fixtureSetSlug(fixturesDir: string): string {
-  return fixturesDir
-    .replace(/^\.\/+/, "")
-    .replace(/[^a-zA-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase();
-}
 
 export interface Cluster {
   task_id: string;                  // "clipping-curves"
@@ -136,7 +120,7 @@ function buildSlideTasks(slideIds: string[], opts: BuildOptions): SlideTask[] {
 /**
  * Allocate a deterministic-per-run overlay branch id. NO git worktree, NO copy,
  * NO mount here — the overlay is mounted lazily on the FIRST command the engine
- * runs inside the branch (`overlay-branch.sh run <id> …`), with the working tree
+ * runs inside the branch (cow-workspace `branchRunCommand(<id>, …)`), with the working tree
  * as the lower layer and the branch's edits captured in its upper layer on the
  * /overlays volume. node_modules ride in the shared lower layer (gitignored, so
  * never counted as a change), so no symlink dance is needed either.

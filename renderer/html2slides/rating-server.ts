@@ -6,6 +6,12 @@
  * Two buttons: Good (saves to regression snapshots) / Bad (triggers analysis).
  *
  * Usage: npx tsx rating-server.ts <results-dir> [--port 3456]
+ *          [--goldens-dir <dir>] [--html-dir <dir>] [--ratings-file <file>]
+ *   --goldens-dir   where a forward "Good" blesses to (default: meta.json goldensDir,
+ *                   else the sibling goldens/ of meta.json htmlDir; neither → no bless).
+ *   --html-dir      the fixture HTML linked from each card (default: meta.json htmlDir).
+ *                   It never enables blessing on its own.
+ *   --ratings-file  where verdicts are saved (default: <results-dir>/ratings.json).
  *
  * Results dir should contain:
  *   slide_01_original.png, slide_01_slides.png, slide_02_original.png, ...
@@ -103,6 +109,11 @@ let direction: RatingDirection = "forward";
 // --reverse-goldens-dir: where a reverse "Good" click blesses to. Defaults to
 // e2e/goldens-reverse/ next to this file; tests point it at a temp directory.
 let reverseGoldensDirOverride: string | null = null;
+// --goldens-dir / --html-dir / --ratings-file: explicit forward overrides (serve-sxs.sh,
+// rate-slides.sh). See forwardGoldensDir() and the Usage block above.
+let goldensDirOverride: string | null = null;
+let htmlDirOverride: string | null = null;
+let ratingsFileOverride: string | null = null;
 for (let i = 0; i < args.length; i++) {
   const v = args[i];
   if (v === "--port") port = parseInt(args[++i]);
@@ -121,6 +132,9 @@ for (let i = 0; i < args.length; i++) {
   else if (v === "--notify-cmd") notifyCmd = args[++i];
   else if (v === "--direction") direction = parseRatingDirection(args[++i] ?? "");
   else if (v === "--reverse-goldens-dir") reverseGoldensDirOverride = resolve(args[++i]);
+  else if (v === "--goldens-dir") goldensDirOverride = resolve(args[++i]);
+  else if (v === "--html-dir") htmlDirOverride = resolve(args[++i]);
+  else if (v === "--ratings-file") ratingsFileOverride = resolve(args[++i]);
 }
 
 const reverseMode = isReverseDirection(direction);
@@ -134,7 +148,24 @@ const reverseGoldensDir = reverseGoldensDirOverride ?? join(htmlToSlidesDir, "e2
 if (reverseMode) assertReverseGoldensDirectory(reverseGoldensDir);
 // Reverse verdicts get their own file so a reverse rating can never overwrite a
 // forward one, even when both modes are pointed at the same results directory.
-const ratingsFilePath = join(resultsDir, reverseMode ? reverseRatingsFileName : "ratings.json");
+const ratingsFilePath = ratingsFileOverride ?? join(resultsDir, reverseMode ? reverseRatingsFileName : "ratings.json");
+
+/** The results directory's optional meta.json ({ htmlDir, goldensDir, presentationId,
+ *  slideIds, … }); {} when absent. */
+function readResultsMeta(): { htmlDir?: string; goldensDir?: string; presentationId?: string; slideIds?: Record<string, string> | string[] } {
+  const metaFile = join(resultsDir, "meta.json");
+  return existsSync(metaFile) ? JSON.parse(readFileSync(metaFile, "utf-8")) : {};
+}
+
+/** Where a forward "Good" blesses the current thumb: --goldens-dir, else meta.json's
+ *  goldensDir, else the sibling goldens/ of meta.json's htmlDir. --html-dir alone
+ *  never enables blessing (rate-slides.sh reviews arbitrary directories). */
+function forwardGoldensDir(): string | null {
+  if (goldensDirOverride) return goldensDirOverride;
+  const meta = readResultsMeta();
+  if (meta.goldensDir) return meta.goldensDir;
+  return meta.htmlDir ? join(dirname(meta.htmlDir), "goldens") : null;
+}
 
 // Resolve the full, documented I/O contract (sxs-io.ts) from the parsed flags.
 // This is the single source of truth for WHICH files this server reads (slides,
@@ -149,6 +180,7 @@ const io = resolveRatingIo({
   filterSlides,
   historyDir: historyDir ?? undefined,
   candidateMode,
+  ratingsFile: ratingsFileOverride ?? undefined,
 });
 
 /** Fire the per-UI notification when the server comes up. ALWAYS prints a
@@ -414,12 +446,12 @@ function findComparisons(): SlideComparison[] {
     }
   }
 
-  // Merge optional meta.json: { htmlDir, presentationId, slideIds? }
-  const metaFile = join(resultsDir, "meta.json");
-  if (existsSync(metaFile)) {
-    const meta = JSON.parse(readFileSync(metaFile, "utf-8"));
-    const htmlFiles = meta.htmlDir && existsSync(meta.htmlDir)
-      ? readdirSync(meta.htmlDir).filter((f: string) => f.endsWith(".html")).sort()
+  // Merge optional meta.json: { htmlDir, presentationId, slideIds? } (--html-dir wins).
+  {
+    const meta = readResultsMeta();
+    const htmlDir = htmlDirOverride ?? meta.htmlDir;
+    const htmlFiles = htmlDir && existsSync(htmlDir)
+      ? readdirSync(htmlDir).filter((f: string) => f.endsWith(".html")).sort()
       : [];
     for (let i = 0; i < comparisons.length; i++) {
       const c = comparisons[i];
@@ -428,10 +460,11 @@ function findComparisons(): SlideComparison[] {
       // to positional matching only when no id match exists.
       const byId = htmlFiles.find((f: string) => f.replace(/\.html$/, "") === c.id || f.startsWith(c.id + "."));
       const htmlName = byId ?? htmlFiles[i];
-      if (htmlName) c.htmlFile = join(meta.htmlDir, htmlName);
+      if (htmlName && htmlDir) c.htmlFile = join(htmlDir, htmlName);
       if (meta.presentationId) {
         // slideIds carry the per-slide object id for the #slide deep-link.
-        const sid = meta.slideIds?.[c.id] ?? meta.slideIds?.[i];
+        const ids = meta.slideIds as Record<string | number, string> | undefined;
+        const sid = ids?.[c.id] ?? ids?.[i];
         const slideFrag = sid ? `#slide=id.${sid}` : "";
         c.slidesUrl = `https://docs.google.com/presentation/d/${meta.presentationId}/edit${slideFrag}`;
       }
@@ -761,21 +794,16 @@ function saveRating(id: string, status: "good" | "bad", comment?: string, annota
         console.log(`  BLESSED (reverse) ${id} → ${blessed}`);
       }
 
-      // Bless the blessed golden — THIS is the only sanctioned writer of the
-      // goldens directory. We infer goldens dir from meta.json (htmlDir is
-      // `fixtures-basic/`; goldens sit at the sibling `goldens/`).
-      const metaFile = join(resultsDir, "meta.json");
-      if (!reverseMode && existsSync(metaFile)) {
-        const meta = JSON.parse(readFileSync(metaFile, "utf-8"));
-        if (meta.htmlDir) {
-          const goldensDir = meta.goldensDir || join(dirname(meta.htmlDir), "goldens");
-          mkdirSync(goldensDir, { recursive: true });
-          const srcBase = id.replace(/^slide_/, "slide_").split(".")[0];
-          const srcPng = join(resultsDir, "slides", `${srcBase}.png`);
-          if (existsSync(srcPng)) {
-            copyFileSync(srcPng, join(goldensDir, `${srcBase}.png`));
-            console.log(`  BLESSED ${srcBase} → ${goldensDir}`);
-          }
+      // Bless the golden — THIS is the only sanctioned writer of the goldens
+      // directory (forwardGoldensDir: --goldens-dir, else meta.json).
+      const goldensDir = reverseMode ? null : forwardGoldensDir();
+      if (goldensDir) {
+        mkdirSync(goldensDir, { recursive: true });
+        const srcBase = id.replace(/^slide_/, "slide_").split(".")[0];
+        const srcPng = join(resultsDir, "slides", `${srcBase}.png`);
+        if (existsSync(srcPng)) {
+          copyFileSync(srcPng, join(goldensDir, `${srcBase}.png`));
+          console.log(`  BLESSED ${srcBase} → ${goldensDir}`);
         }
       }
     }
@@ -1807,13 +1835,7 @@ const server = createServer((req, res) => {
       res.end(JSON.stringify(summary));
       return;
     }
-    const metaFile = join(resultsDir, "meta.json");
-    let goldensDir: string | null = null;
-    if (existsSync(metaFile)) {
-      const meta = JSON.parse(readFileSync(metaFile, "utf-8"));
-      if (meta.goldensDir) goldensDir = meta.goldensDir;
-      else if (meta.htmlDir) goldensDir = join(dirname(meta.htmlDir), "goldens");
-    }
+    const goldensDir = forwardGoldensDir();
     const comparisons = findComparisons();
     const matching = comparisons.filter(c => c.diffStatus === "ok").length;
     const regressed = comparisons.filter(c => c.diffStatus === "regressed").length;

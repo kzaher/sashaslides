@@ -3,7 +3,7 @@
  * rated good/bad, then reports the split. No real timers/fs/browser: the ledger
  * reader and the sleep are injected.
  */
-import { readRatings, waitForRatings, waitForRatingsIo, type RatingSplit } from "./rating-gate.js";
+import { readRatings, waitForRatings, waitForRatingsIo, resolveRatingTimeoutMs, acceptDisabled, type RatingSplit } from "./rating-gate.js";
 import { resolveRatingIo } from "./sxs-io.js";
 import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -93,6 +93,19 @@ async function main() {
     });
     ok("(6) waitForRatingsIo reads cfg.ratingsFile", seenFile === cfg.ratingsFile, `read ${seenFile}, want ${cfg.ratingsFile}`);
     ok("(6b) waitForRatingsIo blocks then resolves on all-rated", final.allRated && final.good.length === 1 && sleeps === 1, `sleeps=${sleeps}`);
+  }
+
+  // (7) resolveRatingTimeoutMs is TTY-independent: unset → 0 (forever); explicit bounds win.
+  {
+    const t = (v?: string) => resolveRatingTimeoutMs((v === undefined ? {} : { BUG_SOLVING_RATING_TIMEOUT_MS: v }) as NodeJS.ProcessEnv);
+    ok("(7) resolveRatingTimeoutMs: 5000 → 5000, 0 → 0, unset/garbage/negative → 0",
+      t("5000") === 5000 && t("0") === 0 && t() === 0 && t("nope") === 0 && t("-5") === 0);
+  }
+
+  // (8) acceptDisabled: only the exact "1" opt-out disables the rating gate.
+  {
+    const d = (v?: string) => acceptDisabled((v === undefined ? {} : { BUG_SOLVING_NO_ACCEPT: v }) as NodeJS.ProcessEnv);
+    ok("(8) acceptDisabled: '1' disables; unset, '0' and 'true' do not", d("1") && !d() && !d("0") && !d("true"));
   }
 
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);

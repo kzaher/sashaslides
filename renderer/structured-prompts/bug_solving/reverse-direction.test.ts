@@ -32,7 +32,7 @@ import {
   reverseSetsOf,
   type ReversePaths,
 } from "./reverse-direction.js";
-import { applyManualClusters } from "./generate-clusters.js";
+import { applyManualClusters } from "./clusters.js";
 import { selectOnlyClusters } from "./workspace-setup.js";
 import { mergeSettingsFor, type Task } from "./main.js";
 import { defaultConverterFilter } from "./llm-merge.js";

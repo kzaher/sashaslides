@@ -12,7 +12,7 @@
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync, appendFileSync, readFileSync } from "fs";
 import { resolve } from "path";
-import { createCowWorkspace, cleanupAllCowWorkspaces, cleanupCowWorkspace } from "../../../cow-workspace/cow-workspace.js";
+import { createCowWorkspace, cleanupAllCowWorkspaces, cleanupCowWorkspace } from "../../../cow-workspace/cow-workspace.ts";
 import { overlayWorkspaceOptions } from "./cow-options.js";
 
 const REPO = "/workspaces/sashaslides";

@@ -7,7 +7,7 @@
  * (no auto-reap) and are removed only on an EXPLICIT trigger:
  *   - success  → `cleanupOverlay(id)` reaps one merged+promoted cluster,
  *   - --clean  → `cleanupAllOverlays()` discards ALL prior state,
- *   - manual   → `workspace.sh cleanup-all`.
+ *   - manual   → `cleanupAllCowWorkspaces()` (cow-workspace).
  *
  * This module preserves the historical bug_solving names + the OVERLAY_BRANCH_ROOT
  * env passthrough the e2e tests rely on.
@@ -16,7 +16,7 @@ import {
   registerCowCleanup,
   cleanupAllCowWorkspaces,
   cleanupCowWorkspace,
-} from "../../../cow-workspace/cow-workspace.js";
+} from "../../../cow-workspace/cow-workspace.ts";
 
 /** Best-effort, synchronous, never-throws reap of ALL overlay branches
  *  (used by --clean). No explicit upperRoot: the runner honors

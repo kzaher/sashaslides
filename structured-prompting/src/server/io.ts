@@ -12,7 +12,7 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, openSync, closeSync } from "node:fs";
 import type { Buffer as NodeBuffer } from "node:buffer";
-import { branchRunCommand } from "../../../cow-workspace/cow-workspace.js";
+import { branchRunCommand } from "../../../cow-workspace/cow-workspace.ts";
 
 /**
  * When a spawn carries a `branchId`, `branchRunCommand` (from the cow-workspace
@@ -39,7 +39,7 @@ export interface SpawnCaptureArgs {
   nodeId?: string;
   /**
    * Opt-in overlay branch id. When set, the command is re-wrapped to run
-   * INSIDE the named overlayfs branch (via overlay-branch.sh) — the branch
+   * INSIDE the named overlayfs branch (via cow-workspace's branchRunCommand) — the branch
    * runner sets cwd = the merged working-tree root, so pass repo-relative
    * commands. Undefined = the command runs normally (byte-identical to the
    * pre-branch spawn). The `setpriv --pdeathsig` guard stays OUTSIDE the
@@ -262,9 +262,9 @@ export const realIO: IO = {
   writeFileSync(path, data) { writeFileSync(path, data); },
   rmSync(path, opts) { rmSync(path, opts); },
   now() { return Date.now(); },
-  log(level, ...parts) {
+  log(_level, ...parts) {
     // eslint-disable-next-line no-console
-    (level === "error" ? console.error : console.error)(...parts);
+    console.error(...parts);
   },
 };
 

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { IJsonSchemaUnit } from "@typia/interface";
-import type { ClaudeModel, NodeStatus, GraphSnapshot, GraphNode as WireGraphNode, NodeDiff } from "../api/wire.js";
+import type { ClaudeModel, NodeStatus, NodeDiff } from "../api/wire.js";
 import type {
   CommonSendArguments,
   PromptInput,
@@ -138,6 +138,15 @@ export interface NodeKindSchemas {
  */
 type NodeKind = keyof NodeKindSchemas;
 
+/**
+ * Where a node ran: the working directory and, for a fork running inside a
+ * copy-on-write branch, that branch's id (io.spawnCapture re-wraps a spawn
+ * carrying `branchId` to run inside the branch and its jail). The monitor's
+ * retry / ask / inject / session-send actions replay a node's model or shell
+ * call with exactly this context, so a fork's follow-up stays in its branch.
+ */
+export type NodeExecution = Readonly<{ cwd: string; branchId?: string }>;
+
 interface GraphNodeBase {
   id: string;
   parentId: string | null;
@@ -163,6 +172,9 @@ interface GraphNodeBase {
   children: string[];
   /** Working-tree git diff captured after file-mutating nodes. See NodeDiff. */
   diff?: NodeDiff | null;
+  /** Execution context the engine ran this node in. Absent on graphs saved
+   *  before it was recorded and on nodes the engine never started. */
+  execution?: NodeExecution | null;
 }
 
 /**
@@ -323,7 +335,7 @@ export class ComputationGraph {
     return node;
   }
 
-  start(id: string, extra: Partial<Pick<GraphNodeBase, "model" | "sessionId"> & { input: unknown }> = {}) {
+  start(id: string, extra: Partial<Pick<GraphNodeBase, "model" | "sessionId" | "execution"> & { input: unknown }> = {}) {
     const n = this.nodes.get(id);
     if (!n) return;
     n.status = "running";
@@ -331,6 +343,7 @@ export class ComputationGraph {
     if (extra.model !== undefined) n.model = extra.model;
     if (extra.sessionId !== undefined) n.sessionId = extra.sessionId;
     if (extra.input !== undefined) (n as { input: unknown }).input = extra.input;
+    if (extra.execution !== undefined) n.execution = extra.execution;
     this.version++;
     this.persist();
   }

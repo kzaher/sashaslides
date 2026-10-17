@@ -13,12 +13,12 @@
  *       ripple; base = pristine → same change IS flagged (gate uses given base)
  *   (6) adapter advances the accepted base after a clean fork (serial mutation)
  *
- * PURE only: these feed regressionGate/makeRegressionRetest plain RenderRecords
+ * PURE only: these feed regressionGate/makeChangeGate plain RenderRecords
  * (data — the recording is the mocked surface). The full merge THROUGH the real
  * gate (real overlays/engine/promote/ledger, mocking only the LLM + the recording)
  * lives in merge-e2e.test.ts.
  */
-import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
+import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.ts";
 import {
   regressionGate,
   makeChangeGate,
@@ -222,7 +222,7 @@ function pureTests(): void {
 // The full merge-through-the-REAL-gate wire-through (real overlays + engine +
 // promote + real ledger demote, mocking ONLY the LLM + the Slides recording per
 // the mock policy) now lives in merge-e2e.test.ts. This file keeps the PURE
-// gate/adapter unit tests, which feed regressionGate/makeRegressionRetest plain
+// gate/adapter unit tests, which feed regressionGate/makeChangeGate plain
 // RenderRecords (data, not a mocked component).
 function main(): void {
   pureTests();

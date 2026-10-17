@@ -8,7 +8,6 @@
 #   npm run renderer:solver:run -- --attempts 3                  retries per cluster before giving up
 #   npm run renderer:solver:run -- --validation-model haiku      cheaper per-slide verdict model
 #   npm run renderer:solver:run -- --clean | --continue          discard / resume persisted overlays
-#   npm run renderer:solver:run -- --no-regen                   keep hand-edited clusters.ts
 #   npm run renderer:solver:run -- --only slide-03               solve ONE cluster (substring/task_id/slide match)
 #   npm run renderer:solver:run -- --clusters="[['slide_35','slide_36','slide_37','slide_38']]"
 #                                                                group BAD slides into ONE shared cluster
@@ -36,8 +35,7 @@
 # --validation-model = opus|sonnet|haiku|fable  (per-slide verdict; default = --model)
 # --attempts = positive integer                (overrides per-cluster retry_budget)
 #
-# Regenerates clusters.ts from the reconciled ledgers on every fresh run (skip
-# with --no-regen to keep hand edits; --continue never regenerates), then solves.
+# Clusters are the slides marked BAD in the live SxS ratings at solve start.
 # Each fork solves in a JAILED, copy-free overlay sandbox; boots its own rating UI
 # and BLOCKS for your good/bad; green forks go through the LLM merge + regression
 # gate. Overlays PERSIST — on a re-run the engine makes you pick --clean/--continue.
@@ -53,7 +51,6 @@ ENGINE="${BUG_SOLVING_ENGINE:-claude}"
 ATTEMPTS="${BUG_SOLVING_RETRY_BUDGET:-5}"
 ONLY="${BUG_SOLVING_ONLY:-}"   # limit the run to ONE cluster (task_id / substring / slide id)
 DIRECTION="${BUG_SOLVING_DIRECTION:-forward}"   # forward (HTML -> Slides) | reverse (Slides -> Sasha HTML)
-REGEN=1          # fresh solve regenerates clusters.ts from the reconciled ledgers
 CLUSTERS_SPEC="" # --clusters="[['slide_35','slide_36']]" → manually group BAD slides into one cluster
 PASS=()
 while [ $# -gt 0 ]; do
@@ -72,8 +69,6 @@ while [ $# -gt 0 ]; do
     --only=*)     ONLY="${1#*=}"; shift ;;
     --clusters)  CLUSTERS_SPEC="${2:?--clusters needs a value}"; shift 2 ;;  # manual grouping
     --clusters=*) CLUSTERS_SPEC="${1#*=}"; shift ;;
-    --no-regen)  REGEN=0; shift ;;          # keep hand-edited clusters.ts as-is
-    --continue)  REGEN=0; PASS+=("$1"); shift ;;  # resume = same clusters, never regen
     *) PASS+=("$1"); shift ;;
   esac
 done
@@ -103,7 +98,7 @@ else
 fi
 echo "▶ direction=$DIRECTION  model=$MODEL  validation-model=$VALMODEL  engine=$ENGINE  attempts=$ATTEMPTS${ONLY:+  only=$ONLY}  extra=[${PASS[*]:-}]"
 
-# 0. NO clusters.ts / no regen: clusters are derived at solve start DIRECTLY from
+# 0. Clusters are derived at solve start DIRECTLY from
 #    the live SxS ratings (the slides you marked BAD, with their live comments +
 #    annotations). See main-scaffolding.ts → clustersFromRatings. The scaffolding
 #    prints the broken slides + their paths at start.
@@ -136,7 +131,8 @@ echo "▶ building $BUNDLE …"
 npx tsx structured-prompting/build.ts renderer/structured-prompts/bug_solving/main-scaffolding.ts "$BUNDLE"
 # Every jailed fork spawns cow-workspace/dist/ns-exec.mjs, a gitignored build output; without it all
 # forks die at their first command ("Cannot find module …/ns-exec.mjs", measured 2026-10-16).
-if [ ! -f cow-workspace/dist/ns-exec.mjs ]; then
+# Rebuild when it is missing OR older than its source, so a stale build never runs.
+if [ ! cow-workspace/dist/ns-exec.mjs -nt cow-workspace/ns-exec.mts ]; then
   echo "▶ building cow-workspace/dist/ns-exec.mjs …"
   (cd cow-workspace && npm run -s build) || { echo "❌ cow-workspace build failed"; exit 1; }
 fi

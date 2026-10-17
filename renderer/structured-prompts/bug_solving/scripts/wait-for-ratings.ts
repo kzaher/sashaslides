@@ -10,7 +10,7 @@
  * parallelFork barrier) reads those markers to decide which clusters to fold.
  *
  * Interface (all flags required except --history-dir / --poll-ms):
- *   --results-dir <dir>   the rating server's resultsDir (= <scratch>/thumbnails).
+ *   --results-dir <dir>   the rating server's resultsDir (= the fork's <shared>/forward/thumbnails).
  *                         resolveRatingIo derives ratings.json from it.
  *   --slides csv          the cluster's slide ids to wait on.
  *   --task-id <slug>      the cluster slug (recorded in the marker).
@@ -47,8 +47,7 @@
 import { writeFileSync, mkdirSync } from "fs";
 import { dirname, resolve } from "path";
 import { resolveRatingIo } from "../sxs-io.js";
-import { waitForRatings, readRatings, type RatingSplit } from "../rating-gate.js";
-import { resolveRatingTimeoutMs, acceptDisabled } from "../accept-orchestration.js";
+import { waitForRatings, readRatings, resolveRatingTimeoutMs, acceptDisabled, type RatingSplit } from "../rating-gate.js";
 
 interface RatingOutcome {
   task_id: string;

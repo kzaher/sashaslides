@@ -35,9 +35,10 @@
  *     it classifies the forward deck). Goldens stay user-only in both directions.
  *   Pure parts live in reverse-direction.ts and reverse-regression-gate.ts.
  *
- * `main()` is SOLVE-ONLY: it returns the parallelFork `Array<Result<TaskResult>>`.
- * PER_FORK_RATE + MERGE_PHASE run post-run in main-scaffolding.ts (opt-out with
- * `BUG_SOLVING_NO_ACCEPT=1`).
+ * `main()` builds the whole graph: the solve forks (each with its own rating
+ * gate, PER_FORK_RATE) and, after their barrier, MERGE_PHASE (finalMergePhase).
+ * It returns the forks' `Array<Result<TaskResult>>`. `BUG_SOLVING_NO_ACCEPT=1`
+ * skips the rating waits and the merge.
  */
 
 import {
@@ -47,84 +48,14 @@ import {
   type ClaudeModel,
 } from "../../../structured-prompting/src/index.js";
 import type { Result } from "../../../structured-prompting/src/index.js";
-import { writeFileSync, readFileSync, readdirSync, copyFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, readdirSync, existsSync } from "fs";
 import { join } from "path";
-import { fixtureSetSlug } from "./workspace-setup.js";
+import { forwardAfterImages, forwardForkPaths, forwardRatingServerArguments, forwardVerdictHeader, forwardVerdictPrompt, offTargetRegressions, writeSxsMeta } from "./forward-fork.js";
 import { llmMerge, ledgerDemote, realLlmMergeOps, defaultConverterFilter, type GreenCluster, type MergeReport } from "./llm-merge.js";
-import { acceptDisabled } from "./accept-orchestration.js";
+import { acceptDisabled } from "./rating-gate.js";
 import { STABILITY_JSON } from "./stability.js";
 import { isReverseFixFile, type ReversePaths, type ReverseSlideContext, type SolveDirection } from "./reverse-direction.js";
 import { reverseRunTask } from "./reverse-run-task.js";
-
-/**
- * Write the sxs-meta.json sidecar consumed by rating-server.ts so each SxS card
- * can show the round-1 provenance the user complained was missing: the original
- * source HTML, the live presentation URL, the original annotation they drew, and
- * the original comment they typed. The harness COPIES the html fixture + the
- * annotation PNG into resultsDir (source/ and orig-annotations/) so the rating
- * server's existing static routes can reach them (it cannot serve arbitrary
- * absolute /tmp paths via /html). Best-effort and fully non-fatal — a throw here
- * must NEVER convert an already-PASSED fix into a retry.
- *
- * @param resultsDir  the rating-server resultsDir (= <scratch>/thumbnails)
- * @param slides      per-slide round-1 records (html_file, user_comment, annotation_png)
- */
-function writeSxsMeta(resultsDir: string, slides: SlideTask[]): void {
-  try {
-    // Read the STRUCTURED manifest record-rendering --mode full wrote
-    // (<thumbs>/manifest.json = { presentation_id, slides, ... }) rather than
-    // regex-scraping the upload's stdout. The presentation URL is derived from
-    // the typed presentation_id field.
-    let presentationUrl: string | undefined;
-    const manifestPath = join(resultsDir, "thumbs", "manifest.json");
-    if (existsSync(manifestPath)) {
-      try {
-        const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as { presentation_id?: string };
-        if (typeof manifest.presentation_id === "string" && manifest.presentation_id) {
-          presentationUrl = `https://docs.google.com/presentation/d/${manifest.presentation_id}/edit`;
-        }
-      } catch { /* malformed manifest → no URL */ }
-    }
-
-    const sourceDir = join(resultsDir, "source");
-    const annotDir = join(resultsDir, "orig-annotations");
-    mkdirSync(resultsDir, { recursive: true });
-    mkdirSync(sourceDir, { recursive: true });
-    mkdirSync(annotDir, { recursive: true });
-
-    const meta: Record<string, {
-      html_file?: string;
-      presentation_url?: string;
-      original_comment?: string;
-      original_annotation?: string;
-      original_png?: string;
-    }> = {};
-
-    for (const s of slides) {
-      const entry: (typeof meta)[string] = {};
-      // Copy the source HTML into resultsDir/source/<id>.html (served via /html,
-      // which resolves relative to resultsDir).
-      if (s.html_file && existsSync(s.html_file)) {
-        const dst = join(sourceDir, `${s.slide_id}.html`);
-        try { copyFileSync(s.html_file, dst); entry.html_file = `source/${s.slide_id}.html`; } catch {}
-      }
-      if (presentationUrl) entry.presentation_url = presentationUrl;
-      if (s.user_comment) entry.original_comment = s.user_comment;
-      // Copy the original annotation PNG (served via /img by absolute path, but
-      // copy into resultsDir so it survives a /tmp wipe of the source).
-      if (s.annotation_png && existsSync(s.annotation_png)) {
-        const dst = join(annotDir, `${s.slide_id}.png`);
-        try { copyFileSync(s.annotation_png, dst); entry.original_annotation = `orig-annotations/${s.slide_id}.png`; } catch {}
-      }
-      if (s.original_png && existsSync(s.original_png)) entry.original_png = s.original_png;
-      meta[s.slide_id] = entry;
-    }
-
-    writeFileSync(join(resultsDir, "sxs-meta.json"), JSON.stringify(meta, null, 2));
-  } catch (e) {
-    console.error(`[writeSxsMeta] non-fatal: ${(e as Error).message}`);
-  }
-}
 
 // ---------- Types ----------
 
@@ -139,18 +70,15 @@ export interface SlideTask {
   rendered_png: string;              // absolute path in /tmp/sxs-complex/slides
   original_png: string;              // absolute path in /tmp/sxs-complex/originals
 
-  // ---- Consolidated per-task image dir (all under the WORKTREE scratch) ----
-  // Every image a worker needs for this slide lives in ONE dir keyed by the
-  // fixture set:  <worktree>/.bug-solving-scratch/<fixtureSetSlug>/slide_NN_*.png
-  // These are COPIES/derivations of the scattered /tmp sources, materialized in
-  // buildTasks() AFTER the worktree exists. All absolute paths inside the worktree.
+  // ---- Staged per-task images: <shared_dir>/images/ (workspace-setup.ts stageSlideImages) ----
+  // COPIES of the /tmp sources onto the /overlays volume, which the jailed fork can
+  // read (its /tmp is empty). Step 4e adds <id>_after.png / <id>_highlighted_after.png
+  // beside them (forward-fork.ts forwardAfterImages).
   img_original?: string;             // slide_NN_original.png  — the TARGET render
   img_annotations?: string;          // slide_NN_annotations.png — RAW annotation (may be absent)
-  img_attempt?: string;              // slide_NN_attempt.png — the render being evaluated
-                                     //   (build-time = OUR CURRENT render; verify-time refreshed
-                                     //    from the just-recorded AFTER thumbnail)
+  img_attempt?: string;              // slide_NN_attempt.png — the PRE-fix render the user rated
   img_highlighted?: string;          // slide_NN_highlighted_attempt.png — max-contrast composite
-                                     //   (annotation applied over the slide)
+                                     //   (annotation applied over the pre-fix render)
   /** REVERSE direction only: the exported Sasha page, the fixture, the import, the
    *  user's zoom crops and the current metrics row (reverse-direction.ts). */
   reverse?: ReverseSlideContext;
@@ -210,49 +138,7 @@ function parseSlideVerdict(raw: string, expectedSlideId: string): SlideVerdict {
   return { slide_id, rationale: o.rationale, isRegression: o.isRegression, bugSolved: o.bugSolved };
 }
 
-/**
- * C2 off-target regression detection. Reads the whole-deck diff produced by
- * step 4b (<scratch>/reg-diffs/<slide>.diff) and returns any slide NOT in this
- * cluster whose pptx changed between HEAD and the worker's fix (its diff is not
- * "(no structural differences detected)"). Those are unexpected regressions the
- * fix introduced on unrelated slides and must fail the attempt.
- */
-function detectOffTargetRegressions(task: Task): string[] {
-  const regDir = `${task.scratch_dir}/reg-diffs`;
-  if (!existsSync(regDir)) return [];
-  const clusterIds = new Set(task.slides.map(s => s.slide_id));
-  const out: string[] = [];
-  for (const f of readdirSync(regDir)) {
-    if (!f.endsWith(".diff")) continue;
-    const sid = f.replace(/\.diff$/, "");
-    if (clusterIds.has(sid)) continue; // cluster slides are EXPECTED to change
-    let txt = "";
-    try { txt = readFileSync(join(regDir, f), "utf-8"); } catch { continue; }
-    if (!/no structural differences/i.test(txt)) out.push(sid);
-  }
-  return out.sort();
-}
-
-/** Off-target regressions to FAIL on. Prefers the visual gate's verdict
- *  (<scratch>/offtarget-gate.json `regressions` = slides the image verifier
- *  judged visibly WORSE after the fix). Falls back to the conservative binary
- *  structural check (detectOffTargetRegressions) if the gate file is missing or
- *  corrupt, so a gate-script failure can never silently drop the off-target
- *  safety net. */
-function readOffTargetRegressions(task: Task): string[] {
-  const f = join(task.scratch_dir, "offtarget-gate.json");
-  if (existsSync(f)) {
-    try {
-      const o = JSON.parse(readFileSync(f, "utf-8")) as { regressions?: unknown };
-      if (Array.isArray(o.regressions)) return o.regressions.filter((s): s is string => typeof s === "string");
-    } catch { /* fall through to the structural check */ }
-  }
-  return detectOffTargetRegressions(task);
-}
-
-/** Spec for a post-run rating server that main-scaffolding.ts will boot as
- *  a tracked child process. main.ts returns this spec; it does NOT launch
- *  the server itself (see header: subprocess lifetime). */
+/** What a fork's rating UI shows (step A1 launches it from this spec). */
 export interface SxsServerSpec {
   port: number;
   slides: string[];                  // slide ids to show in the filtered UI
@@ -267,7 +153,7 @@ export interface TaskResult {
   workspace_dir: string;
   analysis_md: string;               // path to analysis.md written by the worker
   verdicts: SlideVerdict[];
-  sxs_server_spec: SxsServerSpec;    // scaffolding boots the server, not main.ts
+  sxs_server_spec: SxsServerSpec;    // what step A1's rating UI shows
   fix_summary: string;               // one-paragraph summary emitted by the worker
 
   // ---- Per-fork rating outcome (folded in by runTask steps A1–A3) ----
@@ -331,14 +217,14 @@ const SCRIPTS = {
   // resolve, and it writes per-slide pptx to <out>/pptx/<slide_id>.pptx.
   record: "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts",
   diff: "renderer/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts",
-  filteredServer: "renderer/structured-prompts/bug_solving/scripts/filtered-rating-server.ts",
+  // The fork's rating UI (step A1), launched with forwardRatingServerArguments.
+  ratingServer: "renderer/html2slides/rating-server.ts",
   // Visual off-target gate: renders changed non-cluster slides BEFORE/AFTER and
   // image-verifies whether the change is a VISIBLE regression (vs the old binary
-  // structural fail). Writes <scratch>/offtarget-gate.json.
+  // structural fail). Writes <shared>/forward/offtarget-gate.json.
   offtargetGate: "renderer/structured-prompts/bug_solving/scripts/offtarget-gate.ts",
-  // Refresh CLI (`refresh` mode): overwrites the consolidated slide_NN_attempt.png
-  // (and re-composites slide_NN_highlighted_attempt.png over the AFTER render)
-  // from the just-recorded AFTER thumbnail so the verifier sees the real attempt.
+  // Refresh CLI (`refresh` mode): copies the AFTER thumbnail to <id>_after.png
+  // (and composites <id>_highlighted_after.png over it) for the verdict.
   composite: "renderer/structured-prompts/bug_solving/scripts/annotation-composite.ts",
   // Rating gate CLI (`wait-for-ratings`): boots INSIDE the fork after step 7 —
   // BLOCKS on the cluster's ratings.json, then writes rating-outcome.json.
@@ -346,15 +232,14 @@ const SCRIPTS = {
 };
 
 /** History dir the per-fork rating server + gate mirror verdicts into (the
- *  persistent ledger the next clustering round reads). Matches
- *  filtered-rating-server.ts's hard-coded --history-dir. */
+ *  persistent, write-only audit ledger; the merge demotes into it too). */
 const HISTORY_DIR = "/workspaces/sashaslides/.bug-solving-history";
 
 const slideIdsCsv = (t: Task) => t.slides.map(s => s.slide_id).join(",");
 
 /**
  * Every executeShell command runs INSIDE the fork's overlay branch (the engine
- * wraps it via overlay-branch.sh once `.switchBranch(branch_id)` is set). The
+ * wraps it via cow-workspace's branchRunCommand once `.switchBranch(branch_id)` is set). The
  * branch runner sets cwd = the merged working-tree root, so at command start
  * `$PWD` IS the repo root inside the branch. We capture it as `$ROOT` so
  * repo-relative paths (scripts, fixtures, scratch — all stored repo-relative on
@@ -689,7 +574,7 @@ export function stabilityCommand(opts: { repo: string; fixturesDirRel: string })
 // rating gate (each solved fork boots its own UI and BLOCKS on the human rating,
 // steps A1–A3), THEN — after the parallelFork barrier — a FINAL merge phase
 // (finalMergePhase) folds every GREEN cluster together with the LLM conflict
-// resolver + whole-deck regression recording (mergePhase) and promotes the clean
+// resolver + whole-deck regression recording (llmMerge) and promotes the clean
 // result. The merge report is LOGGED, not returned: main() still returns the
 // per-task TaskResults (`SessionWithResult<Array<Result<TaskResult>>>`). Under
 // BUG_SOLVING_NO_ACCEPT the forks skip their waits and the final phase is a
@@ -706,6 +591,9 @@ export function main(args: {
   // --- inner per-task attempt body ----------------------------------------
   const runTask = (s: Session, task: Task): SessionWithResult<TaskResult> => {
     const ids = slideIdsCsv(task);
+    // Everything the HOST reads back from this fork (gate verdict, Google render,
+    // AFTER images, ratings) goes to the shared dir, outside the overlay.
+    const fork = forwardForkPaths(task.shared_dir);
     return s
       // Steps 1–4 combined: the worker runs the record/analyze/fix/
       // diff loop itself via its bash tool. We fold it into one `send`
@@ -779,10 +667,10 @@ export function main(args: {
 
       // Step 4b — REGRESSION SCAN across the WHOLE fixture deck (not just this
       // cluster's slides). Render every fixture WITH the worker's fix
-      // (after-all) and WITHOUT it (baseline — the fix git-stashed, then
-      // restored), then diff. Step 6b fails the attempt if any NON-cluster
-      // slide changed (an off-target regression). Dirs are cleared first so a
-      // retry never diffs stale pptx (the round-2 idempotent-cache trap).
+      // (after-all) and diff it against the pristine `before-all` baseline into
+      // <shared>/forward/reg-diffs, which step 4d and the host's step 6b read.
+      // Dirs are cleared first so a retry never diffs stale pptx (the round-2
+      // idempotent-cache trap).
       .executeShell(() => {
         const fx = task.fixtures_dir;
         const rec = SCRIPTS.record;
@@ -792,7 +680,7 @@ export function main(args: {
         const reg = `/tmp/bs-reg-${task.branch_id}`;
         return [
           BRANCH_CD_RENDERER,
-          `rm -rf ${reg} "$ROOT/${task.scratch_dir}/reg-diffs" && mkdir -p ${reg}`,
+          `rm -rf ${reg} "${fork.regDiffs}" && mkdir -p ${reg}`,
           `ALL=$(ls "$ROOT/${fx}"/slide_*.html | xargs -n1 basename | sed 's/[.]html$//' | sort -V | paste -sd,)`,
           // Whole-deck AFTER pass. Formerly RECORD_CONCURRENCY=1 because
           // concurrent Chrome tabs raced on web-font load → shifted text metrics
@@ -808,7 +696,7 @@ export function main(args: {
           // We do NOT re-render it here: mounting a fresh baseline overlay inside
           // the worker's jail is a nested overlay (overlay-over-overlay), which
           // the kernel rejects ("wrong fs type … on overlay", exit 32).
-          `npx tsx "$ROOT/${SCRIPTS.diff}" --before "$ROOT/${task.scratch_dir}/before-all/pptx" --after ${reg}/after-all/pptx --out "$ROOT/${task.scratch_dir}/reg-diffs"`,
+          `npx tsx "$ROOT/${SCRIPTS.diff}" --before "$ROOT/${task.scratch_dir}/before-all/pptx" --after ${reg}/after-all/pptx --out "${fork.regDiffs}"`,
         ].join(" && ");
       })
 
@@ -816,55 +704,49 @@ export function main(args: {
       // each per-slide verifier can VISUALLY compare the target vs the post-fix
       // render. This is what lets the verdict judge PIXEL-ONLY fixes the OOXML
       // structural diff is blind to (e.g. a rounded-corner image mask whose
-      // <p:pic> XML is unchanged). The thumbnails dir is cleared first so every
+      // <p:pic> XML is unchanged). It writes to <shared>/forward/thumbnails, which
+      // the host and the rating UI read. The dir is cleared first so every
       // retry attempt re-renders the NEW fix (uploadAndScrape is idempotent on a
       // present manifest and would otherwise reuse a stale render). Best-effort
       // (`|| true`): a flaky Google upload must not block the verdict — the
       // verifier falls back to the diff when the AFTER image is missing.
       .executeShell(() =>
-        `${BRANCH_CD_RENDERER} && rm -rf "$ROOT/${task.scratch_dir}/thumbnails" && ` +
+        `${BRANCH_CD_RENDERER} && rm -rf "${fork.thumbnails}" && ` +
         `npx tsx "$ROOT/${SCRIPTS.record}" ` +
         `--mode full --fixtures "$ROOT/${task.fixtures_dir}" ` +
         `--slides ${ids} --title "${task.presentation_title}" ` +
-        `--out "$ROOT/${task.scratch_dir}/thumbnails" || true`,
+        `--out "${fork.thumbnails}" || true`,
       )
 
       // Step 4d — VISUAL off-target gate. Reads step 4b's reg-diffs, and for any
       // NON-cluster slide the fix changed structurally, renders it BEFORE/AFTER
       // to Slides and asks an image-aware verifier whether the change is a
       // VISIBLE regression (a benign reflow passes). Writes
-      // <scratch>/offtarget-gate.json, which step 6b reads. Best-effort
-      // (`|| true`): the helper always writes the file + exits 0, and step 6b
-      // falls back to the conservative binary structural check if it's missing.
+      // <shared>/forward/offtarget-gate.json, which the host's step 6b reads.
+      // Best-effort (`|| true`): the helper exits 0, and step 6b falls back to the
+      // conservative binary structural check if the file is missing (a previous
+      // attempt's file is removed first so it can never stand in).
       .executeShell(() =>
-        `${BRANCH_CD_RENDERER} && npx tsx "$ROOT/${SCRIPTS.offtargetGate}" ` +
-        `--scratch "$ROOT/${task.scratch_dir}" --cluster ${ids} --workdir "$ROOT" ` +
+        `${BRANCH_CD_RENDERER} && rm -f "${fork.offtargetGate}" && npx tsx "$ROOT/${SCRIPTS.offtargetGate}" ` +
+        `--scratch "${fork.root}" --cluster ${ids} --workdir "$ROOT" ` +
         `--fixtures "$ROOT/${task.fixtures_dir}" ` +
         `--record "$ROOT/${SCRIPTS.record}" ` +
         `--title "${task.presentation_title}-offtarget" || true`,
       )
 
-      // Step 4e — REFRESH the consolidated per-slide attempt images from the
-      // AFTER thumbnails step 4c just rendered, so the verifier's
-      // slide_NN_attempt.png (and slide_NN_highlighted_attempt.png) reflect the
-      // REAL post-fix render rather than the build-time "our current render".
-      // Best-effort per slide (`|| true`) — a missing AFTER thumb just leaves
-      // the build-time attempt in place (the CLI logs and keeps it).
+      // Step 4e — copy each slide's AFTER thumbnail (step 4c) to
+      // <shared>/images/<id>_after.png and composite the user's marks over it
+      // (<id>_highlighted_after.png), next to the staged BEFORE images, for the
+      // verdict header (forwardVerdictHeader). Best-effort per slide (`|| true`):
+      // a missing AFTER thumb leaves no _after.png and the verdict says so.
       .executeShell(() => {
-        const slug = fixtureSetSlug(task.fixtures_dir);
-        const dir = `"$ROOT/${task.scratch_dir}/${slug}"`;
         const composite = `"$ROOT/${SCRIPTS.composite}"`;
         const cmds = task.slides.map(s => {
-          const after = `"$ROOT/${task.scratch_dir}/thumbnails/thumbs/${s.slide_id}.png"`;
-          const attempt = `${dir}/${s.slide_id}_attempt.png`;
-          const highlighted = `${dir}/${s.slide_id}_highlighted_attempt.png`;
-          // Pass the raw annotation (if any) so the highlighted composite is
-          // rebuilt over the AFTER render. Annotations live in /tmp (outside the
-          // overlay), reachable by absolute path inside the branch.
-          const ann = s.img_annotations ? ` "${s.img_annotations}" ${highlighted}` : ``;
-          return `npx tsx ${composite} refresh ${after} ${attempt}${ann} || true`;
+          const images = forwardAfterImages(fork, s.slide_id);
+          const ann = s.img_annotations ? ` "${s.img_annotations}" "${images.highlightedAfter}"` : ``;
+          return `npx tsx ${composite} refresh "${images.thumbnail}" "${images.after}"${ann} || true`;
         });
-        return `${BRANCH_CD_RENDERER} && mkdir -p ${dir} && ${cmds.join(" && ")}`;
+        return `${BRANCH_CD_RENDERER} && mkdir -p "${fork.images}" && ${cmds.join(" && ")}`;
       })
 
       // Step 5 — per-slide verdict fork. Each slide gets its own sub-
@@ -886,36 +768,8 @@ export function main(args: {
         (VALIDATION_MODEL ? child.switchModel(VALIDATION_MODEL) : child)
           .tryMultipleTimes<string>(VERDICT_RETRIES, (c) =>
           c
-            .prependToNextPrompt(
-              `You are verifying the fix for ${slide.slide_id}. ` +
-              `Analysis: ${task.analysis_dir}/analysis.md. ` +
-              `Diff (OOXML structural): ${task.scratch_dir}/diffs/${slide.slide_id}.diff. ` +
-              // Consolidated per-task images (one dir, self-describing names). The
-              // ATTEMPT + HIGHLIGHTED ATTEMPT were refreshed in step 4e from the
-              // just-recorded AFTER render, so they reflect the REAL post-fix output.
-              `TARGET render (what it SHOULD look like): ${slide.img_original ?? slide.original_png}. ` +
-              `ATTEMPT render (the post-fix Google-Slides output): ${slide.img_attempt ?? `${task.scratch_dir}/thumbnails/thumbs/${slide.slide_id}.png`}. ` +
-              ((slide.img_annotations ?? slide.annotation_png) ? `RAW annotation (the user's marks alone, on transparent bg): ${slide.img_annotations ?? slide.annotation_png}. ` : ``) +
-              ((slide.img_highlighted ?? slide.composite_png) ? `HIGHLIGHTED ATTEMPT (max contrast — shows WHERE the user marked, over the render): ${slide.img_highlighted ?? slide.composite_png}. ` : ``) +
-              `User's original comment: "${slide.user_comment}".`,
-            )
-            .send({
-              prompt: [
-                `Read analysis.md (the H2 section for ${slide.slide_id}) and the diff file.`,
-                `Then use the Read tool to VIEW (open as images — the Read tool renders a PNG visually) ALL of these from the header: the TARGET render, the ATTEMPT render, AND — if listed — the "RAW annotation" and the "HIGHLIGHTED ATTEMPT" (max-contrast composite) images. You MUST open the highlighted attempt when one is provided.`,
-                `The RAW annotation alone is transparent marks on nothing — open the HIGHLIGHTED ATTEMPT to locate the marked region ON the render (the marked region is colour-shifted so it pops). FOCUS your judgement on that MARKED REGION: locate the same region in the ATTEMPT render and the TARGET, and decide whether the specific defect the user marked is gone — not whether the slide merely looks broadly okay.`,
-                `Compare TARGET vs ATTEMPT (within the marked region first, then overall) against the user's comment to judge whether the defect is fixed and nothing new broke.`,
-                `IMPORTANT: the OOXML diff can be EMPTY for a correct PIXEL-ONLY fix (e.g. a rasterized rounded-corner image mask). In that case judge from the IMAGES, not the diff — an empty diff is NOT evidence of failure.`,
-                `If the ATTEMPT render file is missing/unreadable, judge from the diff + analysis alone and say so in the rationale.`,
-                `Respond with ONLY a single-line JSON object (no prose, no code fences, no trailing commentary) with these keys:`,
-                `  slide_id     (string, must equal "${slide.slide_id}"),`,
-                `  rationale    (string, <=500 chars; what changed visually and/or structurally, and why),`,
-                `  isRegression (boolean; true if the diff OR the AFTER image introduces NEW rendering problems not mentioned in analysis.md's Expected-diff section),`,
-                `  bugSolved    (boolean; true ONLY if the user's MARKED REGION (from the annotation) in the ATTEMPT render now matches the TARGET — the circled defect is visibly GONE — AND the user's comment is addressed AND it matches the Expected-diff claim. A pixel-only fix with an empty diff still counts as solved when the ATTEMPT image's marked region is correct. If an annotation was provided but you could not open it, set bugSolved=false and say so in the rationale).`,
-                `Example:`,
-                `{"slide_id":"${slide.slide_id}","rationale":"device corners now rounded in the AFTER render; target and after match","isRegression":false,"bugSolved":true}`,
-              ].join(" "),
-            })
+            .prependToNextPrompt(forwardVerdictHeader(task, slide))
+            .send({ prompt: forwardVerdictPrompt(slide.slide_id) })
             .assert((raw: string) => { parseSlideVerdict(raw, slide.slide_id); }),
         ),
       )
@@ -962,7 +816,7 @@ export function main(args: {
               // record-rendering --mode full writes the Slides thumbnail to
               // <out>/thumbs/<id>.png, so the SxS slides-dir must be that
               // subdir (not the bare out dir) or the rating UI shows no render.
-              thumbnails_dir: `${task.scratch_dir}/thumbnails/thumbs`,
+              thumbnails_dir: join(fork.thumbnails, "thumbs"),
               task_title: `bug_solving: ${task.task_id}`,
             },
             fix_summary: fixSummary.trim(),
@@ -992,23 +846,16 @@ export function main(args: {
         // C2: fail on off-target regressions — but ONLY ones the step-4d visual
         // gate confirmed are VISIBLY worse (not any structural change). Falls
         // back to the binary structural check if the gate file is absent.
-        const offTarget = readOffTargetRegressions(task);
+        const offTarget = offTargetRegressions(fork, task.slides.map(s => s.slide_id));
         if (offTarget.length)
           lines.push(`OFF-TARGET VISIBLE REGRESSIONS (${offTarget.length}) — non-cluster slides the image verifier judged visibly worse after this fix: ${offTarget.join(", ")}`);
         if (lines.length) throw new Error(lines.join("\n"));
       })
 
-      // Step 7 — upload consolidated pptx + scrape thumbnails.
-      //   This is our only Google-side effect in main.ts and it's
-      //   short-lived (finishes before the result is returned).
+      // Step 7 — upload consolidated pptx + scrape thumbnails into the shared
+      //   thumbnails dir (re-runs step 4c's render; every phase is idempotent).
       //   `combineWith` preserves the upstream TaskResult across the
       //   executeShell side effect.
-      //
-      // Step 8 — no action needed here. The TaskResult already carries
-      //   `sxs_server_spec` from step 6. main-scaffolding.ts reads it
-      //   after engine.execute resolves and spawns the filtered rating
-      //   server as a tracked child process (see file header:
-      //   "subprocess lifetime").
       .combineWith<string, TaskResult>(
         // upload-and-scrape.ts was inlined into record-rendering.ts (commit
         // 346965d), so `--mode full` (pptx + Slides upload + thumb scrape) is
@@ -1020,71 +867,54 @@ export function main(args: {
           `${BRANCH_CD_RENDERER} && npx tsx "$ROOT/${SCRIPTS.record}" ` +
           `--mode full --fixtures "$ROOT/${task.fixtures_dir}" ` +
           `--slides ${ids} --title "${task.presentation_title}" ` +
-          `--out "$ROOT/${task.scratch_dir}/thumbnails" || true`
+          `--out "${fork.thumbnails}" || true`
         ),
         (taskResult) => {
           // Best-effort: write the sxs-meta.json provenance sidecar into the
-          // rating-server resultsDir (= <scratch>/thumbnails) so every SxS card
+          // rating-server resultsDir (= <shared>/forward/thumbnails, which this
+          // host process can see) so every SxS card
           // shows the original HTML link, the presentation URL (read from the
           // structured manifest.json the upload wrote — not scraped from stdout),
           // the original annotation, and the original comment. A throw here must
           // not lose an already-PASSED fix → writeSxsMeta swallows its own errors.
-          writeSxsMeta(`${task.scratch_dir}/thumbnails`, task.slides);
+          writeSxsMeta(fork.thumbnails, task.slides);
           return taskResult;
         },
       )
 
-      // ── Step A1 — BOOT this fork's rating server DETACHED ──────────────────
+      // ── Step A1 — this fork's rating UI ─────────────────────────────────────
       // Only a SOLVED fork reaches here (step 6b threw for a failed verdict).
-      // The server survives this node (setsid + `& disown`) so the human can
-      // rate it while the fork blocks in A2 and the OTHER forks run in parallel.
-      // filtered-rating-server.ts translates the old argv into rating-server.ts
-      // (which prints the notify line + runs BUG_SOLVING_NOTIFY_CMD on boot),
-      // pointed at this cluster's thumbnails + diffs + analysis, filtered to its
-      // slides, with the persistent --history-dir. Under BUG_SOLVING_NO_ACCEPT
-      // we still boot the UI for review (the wait in A2 is skipped).
+      // rating-server.ts (forwardRatingServerArguments) on the fork's shared
+      // Google render, filtered to the cluster's slides, verdict-only, recording a
+      // candidate verdict into the history ledger. It runs in the FOREGROUND and
+      // exits once every slide is rated (--exit-when-all-rated), so THIS node is
+      // the wait; detaching it (`setsid … & disown`) leaked the engine's capture
+      // pipe and hung the node. The scaffolding announces "✅ RATING UI READY →
+      // url" when the port starts listening; stderr goes to the log. The server
+      // binds localhost:<port>, reachable from the host (only user+mount
+      // namespaces are unshared). NO_ACCEPT (no human to rate) skips the UI.
       .combineWith<string, TaskResult>(
         (branch) => branch.executeShell((tr) => {
-          const spec = tr.sxs_server_spec;
-          // spec.analysis_md / diffs_dir / thumbnails_dir are repo-relative
-          // (built from task.scratch_dir / analysis_dir); resolve them as
-          // absolute inside the branch via $ROOT. The rating server binds
-          // localhost:<port>, reachable from the host (the branch shares the
-          // host network namespace — only user+mount are unshared).
-          const server = `"$ROOT/${SCRIPTS.filteredServer}"`;
-          const log = `"$ROOT/${task.scratch_dir}/rating-server.log"`;
-          const inner =
-            `npx tsx ${server} ` +
-            `--port ${spec.port} ` +
-            `--slides ${spec.slides.join(",")} ` +
-            `--analysis "$ROOT/${spec.analysis_md}" ` +
-            `--diffs "$ROOT/${spec.diffs_dir}" ` +
-            `--thumbnails "$ROOT/${spec.thumbnails_dir}" ` +
-            // MERGE/VERDICT gate: this per-fork UI's ONLY considered signal is the
-            // Good/Bad verdict, so it boots READ-ONLY (no comment/annotation
-            // editing). The normal defect-identification rating stays editable.
-            `--read-only ` +
-            `--task-title "${spec.task_title}"`;
-          // NO_ACCEPT (machine-only, no human to rate): don't block — skip the UI.
-          // A2's wait is skipped too, so the fork proceeds without a rating.
           if (acceptDisabled(process.env)) {
             return `${BRANCH_CD_RENDERER} && echo "[rating-server] NO_ACCEPT → skipping ${task.task_id} rating UI"`;
           }
-          // Run the server in the FOREGROUND: it self-exits(0) once every slide
-          // is rated (--exit-when-all-rated, poll every 5s), so THIS node is the
-          // wait. We do NOT detach it — `setsid … & disown` leaked the engine's
-          // capture pipe (the node hung forever, so the rating was never seen).
-          // stderr → the log (progress); the URL is printed to the node output.
-          // The scaffolding (orchestrator) announces "✅ RATING UI READY → url"
-          // to the human's stderr the moment this port starts listening (a
-          // port-watcher spun up around engine.execute) — the ONLY place the
-          // human actually sees, since this node's stdout is captured by the
-          // engine. Here we just run the server foreground (it IS the gate) with
-          // stderr → log.
+          const spec = tr.sxs_server_spec;
+          const log = `${fork.root}/rating-server.log`;
+          const serverArguments = forwardRatingServerArguments({
+            resultsDirectory: fork.thumbnails,
+            slidesDirectory: spec.thumbnails_dir,
+            port: spec.port,
+            slides: spec.slides,
+            // repo-relative inside the branch → absolute via $ROOT
+            analysisPath: `$ROOT/${spec.analysis_md}`,
+            diffsDirectory: `$ROOT/${spec.diffs_dir}`,
+            taskTitle: spec.task_title,
+            historyDirectory: HISTORY_DIR,
+          });
           return (
-            `${BRANCH_CD_RENDERER} && ` +
-            `echo "[rating-server] ${task.task_id} → http://localhost:${spec.port} (log ${task.scratch_dir}/rating-server.log)" && ` +
-            `${inner} 2> ${log}`
+            `${BRANCH_CD_RENDERER} && mkdir -p "${fork.root}" && ` +
+            `echo "[rating-server] ${task.task_id} → http://localhost:${spec.port} (log ${log})" && ` +
+            `npx tsx "$ROOT/${SCRIPTS.ratingServer}" ${serverArguments.map((argument) => `"${argument}"`).join(" ")} 2> "${log}"`
           );
         }),
         (taskResult) => taskResult,
@@ -1109,7 +939,7 @@ export function main(args: {
           // final merge phase running outside it (NOT prefixed with $ROOT).
           return (
             `${BRANCH_CD_RENDERER} && npx tsx ${wait} ` +
-            `--results-dir "$ROOT/${task.scratch_dir}/thumbnails" ` +
+            `--results-dir "${fork.thumbnails}" ` +
             `--slides ${ids} ` +
             `--task-id ${task.task_id} ` +
             `--marker "${ratingMarkerPath(task)}" ` +
@@ -1174,7 +1004,7 @@ export function main(args: {
   // gate (runTask steps A1–A3: boot the fork's UI → BLOCK on the human rating →
   // write rating-outcome.json). AFTER the whole parallelFork barrier, a FINAL
   // merge phase (finalMergePhase) reads those markers off disk and folds the
-  // GREEN clusters through mergePhase (LLM compose + conflict resolution +
+  // GREEN clusters through llmMerge (LLM compose + conflict resolution +
   // whole-deck regression recording). The merge report is LOGGED, not returned —
   // main() still yields the per-task TaskResults.
   const repo = process.cwd();

@@ -54,7 +54,7 @@ export type ReverseTaskSettings = Readonly<{
   validationModel: ClaudeModel | undefined;
   ratingMarkerPath: (task: Task) => string;
   readRatingMarker: (task: Task) => RatingOutcomeMarker | null;
-  /** Whether BUG_SOLVING_NO_ACCEPT skips the blocking rating (accept-orchestration.ts). */
+  /** Whether BUG_SOLVING_NO_ACCEPT skips the blocking rating (rating-gate.ts). */
   acceptDisabled: boolean;
   /** Repository-relative wait-for-ratings.ts and annotation-composite.ts. */
   waitRatingsScript: string;

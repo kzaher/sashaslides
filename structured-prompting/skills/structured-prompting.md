@@ -96,7 +96,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
 ## Operation cheat sheet
 
-From `src/types.ts` and the README:
+From `src/server/types.ts` and the README:
 
 - `session.send<T>({prompt, base64_attachments?, timeout?})` -> `SessionWithResult<T>` — `prompt` may be a literal string OR `(upstream) => string`. The build step's transformer injects `schema: typia.json.schema<T>()` automatically; typia's esbuild plugin then inlines a JSON Schema literal. At exec time the engine forwards the schema to the CLI via `--json-schema` and reads `result.structured_output` for the parsed value. Omit the generic to get raw text (`SessionWithResult<string>`). You can also pass `schema` yourself: `session.send({schema: typia.json.schema<T>(), prompt})` — the first overload picks that up and inference still works via `__type`.
 - `session.fork()` -> `ForkedSession` (safe to branch from)
@@ -126,18 +126,18 @@ s.send<Measured>({ prompt: "…" });
 
 No `schema: ...` argument, no Zod, no runtime builder. This works because the build step (`structured-prompting/build.ts`) chains two transformations inside one `esbuild` onLoad hook:
 
-1. **`src/transformer.ts`** (AST rewrite) finds every `.send<T>({...})` call with a single object-literal argument and no `schema:` property, and injects `schema: typia.json.schema<T>()` into the literal. If `typia` wasn't imported, it prepends `import typia from "typia";`.
+1. **`src/server/transformer.ts`** (AST rewrite) finds every `.send<T>({...})` call with a single object-literal argument and no `schema:` property, and injects `schema: typia.json.schema<T>()` into the literal. If `typia` wasn't imported, it prepends `import typia from "typia";`.
 2. **`@typia/unplugin/api`'s `transformTypia`** (called in the same hook) then sees `typia.json.schema<T>()` at a concrete type — typia's own compiler pass — and inlines a literal JSON Schema object with full `$ref` / `components` structure.
 
 At execution time the engine flattens typia's `{schema: {$ref}, components}` unit into a standalone JSON Schema and forwards it to the CLI via **`claude -p --json-schema <json>`**. Claude Code handles the schema internally (exposes a `StructuredOutput` tool to the model) and returns the parsed object on the result event's `structured_output` field — no prompt-tail tricks, no local JSON-regex extraction.
 
 By the time `node dist/…mjs` runs, there is **no typia at runtime and no reflection** — the schemas are static data embedded in the bundle.
 
-Why a transformer is necessary: TypeScript generics are type-erased. `s.send<Measured>({...})` compiles to `s.send({...})` — the `<Measured>` is gone. Something has to run before type-erasure to turn that generic into a runtime value. Typia is that "something" for `typia.xxx<T>()` syntax, and `src/transformer.ts` is the glue that adapts our `.send<T>(...)` syntax to what typia recognizes.
+Why a transformer is necessary: TypeScript generics are type-erased. `s.send<Measured>({...})` compiles to `s.send({...})` — the `<Measured>` is gone. Something has to run before type-erasure to turn that generic into a runtime value. Typia is that "something" for `typia.xxx<T>()` syntax, and `src/server/transformer.ts` is the glue that adapts our `.send<T>(...)` syntax to what typia recognizes.
 
 Opt-outs / alternatives:
 
-- **Explicit schema**: write `s.send({ schema: typia.json.schema<Measured>(), prompt: "…" })` yourself. The first `send` overload picks this up and `R` is inferred from the schema's phantom `__type`. No `src/transformer.ts` needed — only `@typia/unplugin`.
+- **Explicit schema**: write `s.send({ schema: typia.json.schema<Measured>(), prompt: "…" })` yourself. The first `send` overload picks this up and `R` is inferred from the schema's phantom `__type`. No `src/server/transformer.ts` needed — only `@typia/unplugin`.
 - **Plain text**: `s.send({ prompt: "…" })` with no type argument returns `SessionWithResult<string>`.
 
 ## Building and running
@@ -158,7 +158,7 @@ If `outfile` is omitted the default is `dist/<basename>.mjs`. Then `node <outfil
 - The UI keeps showing the final state after the run finishes. Starting a new run replaces it.
 - When Claude Code itself exits, the engine's `SIGTERM` / `SIGINT` hooks shut the monitor down. If a stray process is still bound to 4711, `lsof -ti:4711 | xargs -r kill`.
 
-Model selection via the `Claude` namespace (`src/types.ts`): `Claude.haiku`, `Claude.sonnet`, `Claude.opus` — chain after `.compact()` with `.switchModel(...)`.
+Model selection via the `Claude` namespace (`src/server/types.ts`): `Claude.haiku`, `Claude.sonnet`, `Claude.opus` — chain after `.compact()` with `.switchModel(...)`.
 
 ## File conventions (main.ts + main-scaffolding.ts)
 
@@ -351,9 +351,9 @@ retries and re-binds the same port, the rebind is re-announced.
 ## References
 
 - `structured-prompting/README.md` — design spec (charitable reading; some typos).
-- `structured-prompting/src/types.ts` — authoritative option and model types.
-- `structured-prompting/src/graph.ts` — node kinds rendered by the monitor.
-- `structured-prompting/src/claude-cli.ts` — CLI adapter (`--output-format json`, `--resume`, `--fork-session`, `--append-system-prompt`, attachments via tempfiles).
-- `structured-prompting/src/transformer.ts` — the AST rewrite that makes `.send<T>({...})` structured-output work without passing schema explicitly.
+- `structured-prompting/src/server/types.ts` — authoritative option and model types.
+- `structured-prompting/src/server/graph.ts` — node kinds rendered by the monitor.
+- `structured-prompting/src/server/claude-cli.ts` — CLI adapter (`--output-format json`, `--resume`, `--fork-session`, `--append-system-prompt`, attachments via tempfiles).
+- `structured-prompting/src/server/transformer.ts` — the AST rewrite that makes `.send<T>({...})` structured-output work without passing schema explicitly.
 - `structured-prompting/build.ts` — single-pass esbuild build that chains the transformer and `@typia/unplugin`'s `transformTypia`. Accepts any entry file.
 - `structured-prompting/example/main.ts` — runnable demo; start here when writing a new entry point.

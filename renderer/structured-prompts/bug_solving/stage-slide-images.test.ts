@@ -13,6 +13,7 @@
  * Only the fs is real (no engine, no jail).
  */
 import { stageSlideImages, buildTasks } from "./workspace-setup.js";
+import { forwardVerdictHeader } from "./forward-fork.js";
 import type { SlideTask } from "./main.js";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -89,6 +90,12 @@ if (existsSync("/overlays")) {
   ok("(7a) staged original exists + byte-exact", sameBytes(s.img_original!, join(sxs, "originals", "slide_99.png")));
   ok("(7b) img_attempt on /overlays + byte-exact", !!s.img_attempt && s.img_attempt.startsWith("/overlays/") && sameBytes(s.img_attempt!, join(sxs, "slides", "slide_99.png")));
   ok("(7c) no annotation source → img_annotations undefined", s.img_annotations === undefined);
+  // The verdict judges the POST-fix render: step 4e's _after.png on /overlays, beside
+  // the staged pre-fix image (which the header labels BEFORE, never "post-fix").
+  const header = forwardVerdictHeader(tasks[0], s);
+  const afterPng = header.match(/AFTER render \(the post-fix Google-Slides output\): (\S+)\./)?.[1] ?? "";
+  ok("(7d) verdict header's AFTER is an _after.png under /overlays/", afterPng.startsWith("/overlays/") && afterPng.endsWith("/slide_99_after.png"), header);
+  ok("(7e) the staged pre-fix image is labelled BEFORE", header.includes(`BEFORE render (the pre-fix Google-Slides output the user rated BAD): ${s.img_attempt}.`));
   rmSync(repo, { recursive: true, force: true });
   rmSync(sxs, { recursive: true, force: true });
 } else {

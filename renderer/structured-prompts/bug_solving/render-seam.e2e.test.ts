@@ -20,8 +20,8 @@ import { existsSync, readdirSync, rmSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { mergeRenderCommand } from "./llm-merge.js";
-import { createCowWorkspace } from "../../../cow-workspace/cow-workspace.js";
-import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
+import { createCowWorkspace } from "../../../cow-workspace/cow-workspace.ts";
+import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.ts";
 import { overlayWorkspaceOptions } from "./cow-options.js";
 
 let passed = 0, failed = 0;

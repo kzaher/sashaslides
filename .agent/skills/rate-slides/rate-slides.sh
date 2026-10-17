@@ -7,7 +7,6 @@ PORT=3456
 RATE_DIR="/tmp/rate-slides-$$"
 RENDERER_DIR="/workspaces/sashaslides/renderer"
 H2S_DIR="$RENDERER_DIR/html2slides"
-FILTERED="$RENDERER_DIR/structured-prompts/bug_solving/scripts/filtered-rating-server.ts"
 
 # Resolve html dir
 HTML_DIR="$(cd "$HTML_DIR" && pwd)"
@@ -54,25 +53,17 @@ echo "==> $ORIG_COUNT originals, $SLIDES_COUNT slides thumbnails"
 lsof -ti:$PORT 2>/dev/null | xargs -r kill 2>/dev/null || true
 sleep 0.5
 
-# 5. Launch the unified SxS rating server (filtered-rating-server — the
-#    single rating UI: 🔍 magnifier, annotation canvas, client-side diff
-#    overlay). NO --goldens-dir here: rate-slides reviews arbitrary html
-#    dirs, so it never blesses goldens (that's serve-sxs.sh's basics flow).
-SLIDES="$(ls "$RATE_DIR"/originals/slide_*.png 2>/dev/null | xargs -n1 basename | sed 's/\.png$//' | sort | paste -sd, -)"
-[ -n "$SLIDES" ] || { echo "❌ no slide_*.png in $RATE_DIR/originals"; exit 1; }
-ANALYSIS="$RATE_DIR/analysis.md"; echo "(rate-slides — no per-slide analysis)" > "$ANALYSIS"
-mkdir -p "$RATE_DIR/diffs"
+# 5. Launch the SxS rating UI (rating-server.ts: 🔍 magnifier, annotation
+#    canvas, client-side diff overlay). NO --goldens-dir here: rate-slides
+#    reviews arbitrary html dirs, so it never blesses goldens (--html-dir only
+#    links the sources; that's serve-sxs.sh's job).
+ls "$RATE_DIR"/originals/slide_*.png >/dev/null 2>&1 || { echo "❌ no slide_*.png in $RATE_DIR/originals"; exit 1; }
 # manifest.json → Google-Slides deep links in the UI.
-printf '{"presentation_id":"%s"}\n' "$PRES_ID" > "$RATE_DIR/slides/manifest.json"
+printf '{"presentation_id":"%s"}\n' "$PRES_ID" > "$RATE_DIR/manifest.json"
 
-echo "==> Launching unified SxS rating UI at http://localhost:$PORT"
-exec npx tsx "$FILTERED" \
+echo "==> Launching SxS rating UI at http://localhost:$PORT"
+exec npx tsx "$H2S_DIR/rating-server.ts" "$RATE_DIR" \
   --port "$PORT" \
-  --slides "$SLIDES" \
-  --analysis "$ANALYSIS" \
-  --diffs "$RATE_DIR/diffs" \
-  --thumbnails "$RATE_DIR/slides" \
-  --originals "$RATE_DIR/originals" \
   --html-dir "$HTML_DIR" \
   --ratings-file "$RATE_DIR/ratings.json" \
   --task-title "rate-slides — $(basename "$HTML_DIR")"

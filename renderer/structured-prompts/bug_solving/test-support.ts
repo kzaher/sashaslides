@@ -17,7 +17,7 @@
  */
 import { realIO, type IO, type SpawnCaptureArgs, type SpawnCaptureResult } from "../../../structured-prompting/src/server/io.js";
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
-import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.js";
+import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.ts";
 import { llmMerge, type GreenCluster, type MergeOps, type MergeRatingArgs, type MergeRatingVerdict, type MergeRenderSeam, type MergeReport } from "./llm-merge.js";
 import type { RenderRecord } from "./stability.js";
 import { execSync } from "node:child_process";

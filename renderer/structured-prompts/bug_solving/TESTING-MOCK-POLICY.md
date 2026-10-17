@@ -25,7 +25,7 @@ and no scripted `ops.retest`.
 | `overlay-lifecycle.e2e.test.ts` (C1, R1) | ✅ markers | ✅ `mockLlm` | ✅ `recordingFromContent` | gate, overlays, promote, **real ledger (temp)**, `resumeMerge`, reaping |
 | `regression-gate.test.ts` | n/a | n/a | ✅ plain `RenderRecord` data into the pure gate | pure gate/adapter logic |
 | `stability.test.ts` | n/a | n/a | ✅ injected `record` fn (the recording seam) | `classifyStability` logic |
-| `rating-*.test.ts`, `wait-for-ratings`, `accept-orchestration` | ✅ rating files / injected verdict | n/a | n/a | gate/marker/ledger logic |
+| `rating-*.test.ts`, `wait-for-ratings` | ✅ rating files / injected verdict | n/a | n/a | gate/marker/ledger logic |
 
 ## What changed to get here
 - **Deleted** `llm-merge.e2e.test.ts` — it scripted the entire `ops.retest` (a

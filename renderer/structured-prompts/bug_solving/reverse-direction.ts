@@ -29,7 +29,7 @@ import {
   type ReverseSet,
   type SlideMetrics,
 } from "../../html2slides/reverse/reverse-results.js";
-import { issueKeyword } from "./generate-clusters.js";
+import { issueKeyword } from "./clusters.js";
 import { makeAnnotationComposite } from "./scripts/annotation-composite.js";
 import type { SlideTask } from "./main.js";
 import type { Cluster } from "./workspace-setup.js";

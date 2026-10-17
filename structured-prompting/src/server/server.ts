@@ -6,11 +6,12 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import * as esbuild from "esbuild";
-import type { ComputationGraph } from "./graph.js";
-import { callClaude } from "./claude-cli.js";
+import type { ComputationGraph, NodeExecution, RichGraphNode } from "./graph.js";
+import { claudeDriver } from "./claude-cli.js";
 import { runShell } from "./engine.js";
 import { realIO, type IO } from "./io.js";
 import { FatalShellError } from "./errors.js";
+import type { ModelDriver } from "./model-driver.js";
 
 // Bundle the Preact monitor UI (src/client/main.tsx) into a single classic
 // IIFE that the HTML response embeds inline. Zero dynamic imports, zero
@@ -286,18 +287,57 @@ interface RetryReply {
 }
 
 /**
+ * What a monitor action needs from the engine that owns the graph: its model
+ * driver (so a CodexEngine run's follow-ups spawn codex, not claude) and its
+ * IO (tests pass a MockIO). Callers without an engine get claude + realIO.
+ */
+export interface MonitorDeps {
+  readonly driver: ModelDriver;
+  readonly io: IO;
+}
+const defaultMonitorDeps: MonitorDeps = { driver: claudeDriver, io: realIO };
+
+/**
+ * The nearest node at or above `node` (via parentId) that carries a model
+ * sessionId. The clicked node may be a parallelFork / pipe / root with no
+ * session of its own; the follow-up then resumes the most recent ancestor
+ * send, in that send's recorded execution context.
+ */
+function findSessionAnchor(graph: ComputationGraph, node: RichGraphNode): RichGraphNode & { sessionId: string } {
+  let anchor = node;
+  while (!anchor.sessionId && anchor.parentId) {
+    const next = graph.get(anchor.parentId);
+    if (!next) break;
+    anchor = next;
+  }
+  const sessionId = anchor.sessionId;
+  if (!sessionId) {
+    throw new Error(
+      "no completed send in this branch yet — wait for the first claude " +
+      "round-trip to finish (sessionIds are populated when claude returns)",
+    );
+  }
+  return { ...anchor, sessionId };
+}
+
+/**
  * POST /api/retry {nodeId}: re-run a node in place using its saved input.
  *
  * Useful when a downstream step crashed (e.g. record-rendering script
  * couldn't find a path) and the user wants to resume after fixing the
  * environment, without re-running the whole graph (which would re-burn
- * tokens on the upstream sends). For shell nodes the cwd is read off
- * `node.input.cwd` (saved by the engine at start time); for sends the
+ * tokens on the upstream sends). Both kinds re-run in the node's recorded
+ * execution context (cwd + copy-on-write branch, so a fork's retry stays
+ * inside its branch and jail) through the engine's driver / IO; for sends the
  * resume target is the node's own sessionId (the session we resumed from
  * the first time) and fork:true is forced so the original branch's
  * downstream resume points stay clean.
  */
-async function handleRetry(rawBody: string, graph: ComputationGraph): Promise<RetryReply> {
+async function handleRetry(
+  rawBody: string,
+  graph: ComputationGraph,
+  deps: MonitorDeps = defaultMonitorDeps,
+): Promise<RetryReply> {
   const body = JSON.parse(rawBody) as RetryRequest;
   if (!body.nodeId) throw new Error("/api/retry requires {nodeId}");
   const node = graph.get(body.nodeId);
@@ -309,13 +349,14 @@ async function handleRetry(rawBody: string, graph: ComputationGraph): Promise<Re
   // The actual re-fire of the node happens below for shell/send kinds;
   // for everything else, resetSubtree returns the affected node ids and
   // the scheduler/engine handles re-execution.
+  const execution = node.execution ?? null;
   const cascade = body.cascade !== false;
   const resetNodeIds = cascade ? graph.resetSubtree(node.id) : (graph.resetNode(node.id), [node.id]);
 
   if (node.kind === "executeShell") {
     const input = (node.input ?? {}) as { cmd?: string; cwd?: string };
     if (!input.cmd) throw new Error("executeShell node has no saved cmd to retry");
-    const cwd = input.cwd ?? process.cwd();
+    const cwd = execution?.cwd ?? input.cwd ?? process.cwd();
     graph.start(node.id);
     try {
       // TODO(types): runShell resolves to the captured stdout string only —
@@ -323,7 +364,13 @@ async function handleRetry(rawBody: string, graph: ComputationGraph): Promise<Re
       // thrown StructuredError). The previous `{ stdout, stderr }` destructure
       // read undefined props off that string; record the stdout tail and leave
       // stderr empty to match the actual runShell contract.
-      const stdout = await runShell({ cmd: input.cmd, cwd, io: realIO, nodeId: node.id });
+      const stdout = await runShell({
+        cmd: input.cmd,
+        cwd,
+        branchId: execution?.branchId,
+        io: deps.io,
+        nodeId: node.id,
+      });
       graph.finishOk(node.id, {
         stdoutTail: stdout.slice(-400),
         stderrTail: "",
@@ -353,11 +400,14 @@ async function handleRetry(rawBody: string, graph: ComputationGraph): Promise<Re
     // and pollute downstream resume points.
     graph.start(node.id);
     try {
-      const r = await callClaude({
+      const r = await deps.driver.call({
         prompt: composed,
         resume: node.sessionId,
         fork: true,
-        model: (node.model as never) ?? undefined,
+        model: node.model ?? undefined,
+        cwd: execution?.cwd,
+        branchId: execution?.branchId,
+        io: deps.io,
       });
       if (r.isError) {
         graph.finishErr(node.id, { message: r.errorMessage ?? "retry failed", data: { stderr: r.stderr } });
@@ -385,7 +435,11 @@ async function handleRetry(rawBody: string, graph: ComputationGraph): Promise<Re
   throw new Error(`node kind "${node.kind}" is not retryable from the UI (callbacks were stripped at engine exit)`);
 }
 
-async function handleAsk(rawBody: string, graph: ComputationGraph): Promise<AskReply> {
+async function handleAsk(
+  rawBody: string,
+  graph: ComputationGraph,
+  deps: MonitorDeps = defaultMonitorDeps,
+): Promise<AskReply> {
   const body = JSON.parse(rawBody) as AskRequest;
   if (!body.nodeId || !body.prompt) {
     throw new Error("/api/ask requires {nodeId, prompt}");
@@ -393,25 +447,13 @@ async function handleAsk(rawBody: string, graph: ComputationGraph): Promise<AskR
   const node = graph.get(body.nodeId);
   if (!node) throw new Error(`node not found: ${body.nodeId}`);
 
-  // Walk the parentId chain to find the nearest ancestor that carries a
-  // claude sessionId. The clicked node may be a parallelFork / pipe /
-  // root with no sessionId of its own — in that case we fork from the
-  // most recent ancestor send. The new askFollowup node still parents
-  // the CLICKED node (so the user sees the question attached where they
-  // clicked it), even though the resume happens against the anchor.
-  let anchor = node;
-  while (!anchor.sessionId && anchor.parentId) {
-    const next = graph.get(anchor.parentId);
-    if (!next) break;
-    anchor = next;
-  }
-  if (!anchor.sessionId) {
-    throw new Error(
-      "no completed send in this branch yet — wait for the first claude " +
-      "round-trip to finish (sessionIds are populated when claude returns)",
-    );
-  }
+  // Resume the nearest ancestor send's session, in its execution context.
+  // The new askFollowup node still parents the CLICKED node (so the user
+  // sees the question attached where they clicked it), even though the
+  // resume happens against the anchor.
+  const anchor = findSessionAnchor(graph, node);
   const anchorModel = anchor.model ?? node.model;
+  const execution = anchor.execution ?? null;
 
   // Create the askFollowup node BEFORE the CLI call so the monitor's
   // 250ms poll picks it up in the "running" state and the user sees
@@ -425,17 +467,20 @@ async function handleAsk(rawBody: string, graph: ComputationGraph): Promise<AskR
     label: labelPreview,
     input: { prompt: body.prompt, anchorNodeId: anchor.id },
   });
-  graph.start(newNode.id, { model: anchorModel, sessionId: anchor.sessionId });
+  graph.start(newNode.id, { model: anchorModel, sessionId: anchor.sessionId, execution });
 
   try {
-    const r = await callClaude({
+    const r = await deps.driver.call({
       prompt: body.prompt,
       resume: anchor.sessionId,
       // Always fork: the anchor's session is shared with downstream sends
       // in the original execution; a non-forked ad-hoc reply would push a
       // new turn into that history and contaminate any future resume.
       fork: true,
-      model: (anchorModel as never) ?? undefined,
+      model: anchorModel ?? undefined,
+      cwd: execution?.cwd,
+      branchId: execution?.branchId,
+      io: deps.io,
     });
     if (r.isError) {
       graph.finishErr(newNode.id, { message: r.errorMessage ?? "ask follow-up failed", data: { stderr: r.stderr } });
@@ -516,10 +561,14 @@ interface InjectReply {
  * this endpoint's contract is exactly: erase node+successors' completed
  * state and re-run the node with the no-fork message.
  *
- * `io` is injected only for tests (MockIO); production passes realIO via
- * callClaude's default.
+ * The call runs through the engine's driver, in the anchor's recorded
+ * execution context (cwd + copy-on-write branch).
  */
-async function handleInject(rawBody: string, graph: ComputationGraph, io?: IO): Promise<InjectReply> {
+async function handleInject(
+  rawBody: string,
+  graph: ComputationGraph,
+  deps: MonitorDeps = defaultMonitorDeps,
+): Promise<InjectReply> {
   const body = JSON.parse(rawBody) as InjectRequest;
   if (!body.nodeId || !body.message) {
     throw new Error("/api/inject requires {nodeId, message}");
@@ -527,22 +576,10 @@ async function handleInject(rawBody: string, graph: ComputationGraph, io?: IO): 
   const node = graph.get(body.nodeId);
   if (!node) throw new Error(`node not found: ${body.nodeId}`);
 
-  // Resolve the resume anchor: nearest ancestor (via parentId) carrying a
-  // sessionId. Same walk as handleAsk — the clicked node may be a
-  // parallelFork / pipe / root with no session of its own.
-  let anchor = node;
-  while (!anchor.sessionId && anchor.parentId) {
-    const next = graph.get(anchor.parentId);
-    if (!next) break;
-    anchor = next;
-  }
-  if (!anchor.sessionId) {
-    throw new Error(
-      "no completed send in this branch yet — wait for the first claude " +
-      "round-trip to finish (sessionIds are populated when claude returns)",
-    );
-  }
+  // Resolve the resume anchor (same walk as handleAsk).
+  const anchor = findSessionAnchor(graph, node);
   const anchorModel = anchor.model ?? node.model;
+  const execution = anchor.execution ?? null;
 
   // ERASE completed state: this node + every transitive successor reset to
   // pending (output/error/timestamps cleared). Capture the ids so the
@@ -552,14 +589,16 @@ async function handleInject(rawBody: string, graph: ComputationGraph, io?: IO): 
   // Re-run THIS node with the injected message, resuming the SAME session
   // (fork:false). Unlike /api/ask, no new node is created and no fork
   // flag is added — the message is appended to the live conversation.
-  graph.start(node.id, { model: anchorModel ?? undefined, sessionId: anchor.sessionId });
+  graph.start(node.id, { model: anchorModel ?? undefined, sessionId: anchor.sessionId, execution });
   try {
-    const r = await callClaude({
+    const r = await deps.driver.call({
       prompt: body.message,
       resume: anchor.sessionId,
       fork: false,
-      model: (anchorModel as never) ?? undefined,
-      io,
+      model: anchorModel ?? undefined,
+      cwd: execution?.cwd,
+      branchId: execution?.branchId,
+      io: deps.io,
     });
     if (r.isError) {
       graph.finishErr(node.id, { message: r.errorMessage ?? "inject failed", data: { stderr: r.stderr } });
@@ -594,7 +633,7 @@ async function handleInject(rawBody: string, graph: ComputationGraph, io?: IO): 
   }
 }
 
-export { handleInject };
+export { handleInject, handleRetry, handleAsk };
 
 // ── Conversation transcript (Claude web-UI viewer) ─────────────────────────
 //
@@ -964,7 +1003,6 @@ function readCodexTranscript(sessionId: string): TranscriptReply {
 
 interface SessionSendRequest {
   sessionId: string;
-  cwd?: string;
   message: string;
   images?: Array<{ media_type: string; data: string }>;
 }
@@ -981,8 +1019,19 @@ interface SessionSendRequest {
  * Images are written to a per-call temp dir and referenced by absolute path
  * via callClaude's `attachments` (base64) mechanism, which appends the paths
  * to the prompt — the CLI then reads them as file attachments.
+ *
+ * The session runs in the execution context of the graph node that owns
+ * `sessionId` (or of the session-send that created it, via
+ * `monitorSessions`), never a client-supplied cwd. A sessionId the graph
+ * does not know is refused.
  */
-async function handleSessionSend(rawBody: string, res: ServerResponse): Promise<void> {
+async function handleSessionSend(
+  rawBody: string,
+  res: ServerResponse,
+  graph: ComputationGraph,
+  deps: MonitorDeps,
+  monitorSessions: Map<string, NodeExecution | null>,
+): Promise<void> {
   let body: SessionSendRequest;
   try {
     body = JSON.parse(rawBody) as SessionSendRequest;
@@ -996,6 +1045,15 @@ async function handleSessionSend(rawBody: string, res: ServerResponse): Promise<
     res.end(JSON.stringify({ error: "/api/session-send requires {sessionId, message}" }));
     return;
   }
+  const owner = monitorSessions.has(body.sessionId)
+    ? { execution: monitorSessions.get(body.sessionId) ?? null }
+    : graph.allNodes().find((n) => n.sessionId === body.sessionId);
+  if (!owner) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: `/api/session-send: session ${body.sessionId} is not part of this graph` }));
+    return;
+  }
+  const execution = owner.execution ?? null;
 
   res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -1014,17 +1072,20 @@ async function handleSessionSend(rawBody: string, res: ServerResponse): Promise<
     : [];
 
   try {
-    const r = await callClaude({
+    const r = await deps.driver.call({
       prompt: body.message,
       resume: body.sessionId,
       fork: false,          // CONTINUE the same session — a real continuation.
-      cwd: body.cwd,
+      cwd: execution?.cwd,
+      branchId: execution?.branchId,
+      io: deps.io,
       attachments,
       onPartialText: (textSoFar) => emit({ type: "delta", text: textSoFar }),
     });
     if (r.isError) {
       emit({ type: "error", error: r.errorMessage ?? "session-send failed" });
     } else {
+      if (r.sessionId) monitorSessions.set(r.sessionId, execution);
       emit({ type: "done", text: r.text, sessionId: r.sessionId });
     }
   } catch (err) {
@@ -1038,8 +1099,15 @@ export async function startMonitor(args: {
   graph: ComputationGraph;
   port?: number;
   host?: string;
+  /** The owning engine's driver; defaults to claude for a standalone viewer. */
+  driver?: ModelDriver;
+  /** The owning engine's IO; defaults to realIO. */
+  io?: IO;
 }): Promise<MonitorServer> {
   const { graph, port = 4711, host = "127.0.0.1" } = args;
+  const deps: MonitorDeps = { driver: args.driver ?? claudeDriver, io: args.io ?? realIO };
+  // Sessions created by /api/session-send itself → the context they ran in.
+  const monitorSessions = new Map<string, NodeExecution | null>();
   const server = createServer((req, res) => {
     const url = req.url ?? "/";
     if (url === "/" || url === "/index.html") {
@@ -1061,7 +1129,7 @@ export async function startMonitor(args: {
     if (url === "/api/retry" && req.method === "POST") {
       // POST /api/retry {nodeId}: re-run an existing node from its saved
       // input, in-place. Supported kinds:
-      //   executeShell — re-run `cmd` in the saved `cwd`. Replaces output.
+      //   executeShell — re-run `cmd` in the recorded cwd + branch. Replaces output.
       //   send / askFollowup — re-call claude with the saved
       //     composedPrompt and the node's prior resume sessionId, fork:true.
       // Other kinds are not retryable from the UI (callbacks were stripped
@@ -1069,7 +1137,7 @@ export async function startMonitor(args: {
       let body = "";
       req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
       req.on("end", () => {
-        void handleRetry(body, graph).then((reply) => {
+        void handleRetry(body, graph, deps).then((reply) => {
           res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
           res.end(JSON.stringify(reply));
         }).catch((err: unknown) => {
@@ -1088,7 +1156,7 @@ export async function startMonitor(args: {
       let body = "";
       req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
       req.on("end", () => {
-        void handleAsk(body, graph).then((reply) => {
+        void handleAsk(body, graph, deps).then((reply) => {
           res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
           res.end(JSON.stringify(reply));
         }).catch((err: unknown) => {
@@ -1116,12 +1184,12 @@ export async function startMonitor(args: {
       return;
     }
     if (url === "/api/session-send" && req.method === "POST") {
-      // POST /api/session-send {sessionId, cwd, message, images?}: continue the
+      // POST /api/session-send {sessionId, message, images?}: continue the
       // same claude session (resume, no fork) and stream the reply as SSE.
       let body = "";
       req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
       req.on("end", () => {
-        void handleSessionSend(body, res).catch((err: unknown) => {
+        void handleSessionSend(body, res, graph, deps, monitorSessions).catch((err: unknown) => {
           try {
             if (!res.headersSent) {
               res.writeHead(500, { "content-type": "application/json" });
@@ -1145,7 +1213,7 @@ export async function startMonitor(args: {
       let body = "";
       req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
       req.on("end", () => {
-        void handleInject(body, graph).then((reply) => {
+        void handleInject(body, graph, deps).then((reply) => {
           res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
           res.end(JSON.stringify(reply));
         }).catch((err: unknown) => {

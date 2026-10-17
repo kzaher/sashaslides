@@ -16,7 +16,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-/** Default on-disk overlay roots (mirror workspace.sh + workspace-setup.ts). */
+/** Default on-disk overlay roots (mirror cow-workspace's default root + workspace-setup.ts). */
 export const DEFAULT_BRANCHES_ROOT = "/overlays/branches";
 export const DEFAULT_SHARED_ROOT = "/overlays/shared";
 

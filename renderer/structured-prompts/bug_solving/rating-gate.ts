@@ -76,6 +76,25 @@ export async function waitForRatings(
   }
 }
 
+/** The per-task blocking-wait budget, from the env ALONE (no TTY). Ratings come
+ *  from the browser SxS UI, reachable regardless of TTY, and the scaffolding runs
+ *  detached while the human rates, so the unset default is "wait forever".
+ *    - explicit BUG_SOLVING_RATING_TIMEOUT_MS wins: N>0 = finite, 0 = forever.
+ *    - unset, garbage or negative → 0 = wait forever. */
+export function resolveRatingTimeoutMs(env: NodeJS.ProcessEnv): number {
+  const raw = env.BUG_SOLVING_RATING_TIMEOUT_MS;
+  if (raw != null && raw !== "") {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 0;
+}
+
+/** Is the human rating gate disabled (BUG_SOLVING_NO_ACCEPT=1, the opt-out)? */
+export function acceptDisabled(env: NodeJS.ProcessEnv): boolean {
+  return env.BUG_SOLVING_NO_ACCEPT === "1";
+}
+
 /** Config-driven convenience: block on the ratings.json named by the documented
  *  I/O contract ({@link RatingIoConfig.ratingsFile}) rather than a bare path, so
  *  callers pass the same config the rating server was booted with. */

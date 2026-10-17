@@ -135,6 +135,8 @@ export class Engine {
     }
     const monitor = await startMonitor({
       graph: session.graph,
+      driver: this.driver,
+      io: this.io,
       port: this.opts.port,
       host: this.opts.host,
     });
@@ -316,7 +318,11 @@ export class Engine {
     ctx: RunCtx,
     upstream: unknown,
   ): Promise<{ value: unknown; ctx: RunCtx }> {
-    graph.start(node.id, { model: ctx.model, sessionId: ctx.driverSessionId });
+    graph.start(node.id, {
+      model: ctx.model,
+      sessionId: ctx.driverSessionId,
+      execution: { cwd: ctx.cwd, branchId: ctx.branchId },
+    });
     try {
       switch (node.kind) {
         // --- trivial passthroughs (state mutations) --------------------------
@@ -747,7 +753,7 @@ export class Engine {
           const build = node.callbacks.buildCommand;
           const cmd = build(upstream);
           graph.setLabel(node.id, `executeShell: ${truncate(cmd, 60)}`);
-          graph.start(node.id, { input: { cmd } });
+          graph.start(node.id, { input: { cmd }, execution: { cwd: ctx.cwd, branchId: ctx.branchId } });
           const stdout = await runShell({ cmd, cwd: ctx.cwd, io: this.io, branchId: ctx.branchId });
           graph.finishOk(node.id, { stdoutTail: stdout.slice(-400) });
           return { value: stdout, ctx };
@@ -942,9 +948,6 @@ function resolvePrompt(p: unknown, upstream: unknown): string {
   return typeof p === "string" ? p : "";
 }
 
-function safeStringify(v: unknown): string {
-  try { return JSON.stringify(v); } catch { return String(v); }
-}
 function safeValue(v: unknown): unknown {
   try { JSON.stringify(v); return v; } catch { return String(v); }
 }

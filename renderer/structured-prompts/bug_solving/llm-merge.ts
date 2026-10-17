@@ -42,7 +42,8 @@
  *      file: `mergeN` 3-way-merges the forks → write into the workspace upper →
  *      ONE agentic `mergeEditPrompt` send (the model resolves/verifies the file in
  *      place) → read it back. Single-fork files: write their version directly.
- *      Then `ops.retest(mergeWs, allIntendedSlides)`.
+ *      Then `ops.detectChanged(mergeWs, allIntendedSlides)` and, when anything
+ *      changed, `ops.rateChanged` (the human).
  *   3. Retest clean (nothing OUTSIDE the intended slide set changed) →
  *      `mergeWs.promote(mergedFiles)` copies the merged files onto the REAL tree
  *      (the user commits). Report accepted. Done.
@@ -50,14 +51,14 @@
  *      merge workspace; fold forks one at a time. For each fork, for each of its
  *      files, 3-way-merge that fork's version into the CURRENT accepted file (which
  *      already includes the forks folded before it — the target MUTATES), let the
- *      model edit/verify it, read back, `ops.retest`. Keep the fork if clean;
+ *      model edit/verify it, read back, detect + rate. Keep the fork if clean;
  *      otherwise roll its writes back to the pre-fork accepted content and
  *      `ops.demote(slides, task, reason)`. Promote the final accepted set.
  *
  * ## Testability seam (`ops`)
  *
  * The only side-effects the orchestration performs beyond the workspace fs are
- * `retest` / `promote` / `demote`, bundled on an injectable `MergeOps`. Tests
+ * `detectChanged` / `commitAccepted` / `rateChanged` / `promote` / `demote`, bundled on an injectable `MergeOps`. Tests
  * mock ONLY the LLM (via MockIO) + the recording; the workspace, filesystem, git
  * 3-way merge, and ledger run for real. The LLM mock stands in for the model's
  * agentic edit — it reads EDIT_TARGET from the prompt and resolves markers on
@@ -72,7 +73,7 @@ import {
   createCowWorkspace,
   cleanupCowWorkspace,
   type CowWorkspace,
-} from "../../../cow-workspace/cow-workspace.js";
+} from "../../../cow-workspace/cow-workspace.ts";
 import { overlayWorkspaceOptions } from "./cow-options.js";
 import { makeChangeGate } from "./regression-gate.js";
 import {
@@ -1035,7 +1036,6 @@ function mergeRatingViaUI(a: MergeRatingViaUIArgs): MergeRatingVerdict {
  *   - candidates.json: flip each slide to status:"bad" (the green-gate the next
  *     round reads) with the merge-failure meta.
  *   - ratings.json: annotate the issue (WITHOUT clobbering the user's comment).
- * Ported verbatim from the removed merge-phase.ts `demoteForResolve`.
  */
 export function ledgerDemote(historyDir: string, slides: string[], cluster: string, reason: string): void {
   if (!slides.length) return;

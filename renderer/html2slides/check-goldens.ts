@@ -33,7 +33,7 @@ for (let i = 2; i < args.length; i++) {
   if (args[i] === "--threshold") threshold = parseFloat(args[++i]);
   if (args[i] === "--bless") {
     // Enforcement: ONLY the user may bless a golden, and only via the SxS
-    // rating UI (serve-sxs.sh → filtered-rating-server writes to goldens
+    // rating UI (serve-sxs.sh → rating-server.ts --goldens-dir writes to goldens
     // when a user clicks Good). This script must never bulk-promote renders.
     console.error(
       "ERROR: --bless is disabled. Goldens can only be updated through the " +
