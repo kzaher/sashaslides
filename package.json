@@ -5,7 +5,7 @@
     "sudo_codex": "specula-host -- codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
     "sudo_claude_fork": "claude --dangerously-skip-permissions --continue --fork-session",
     "sudo_claude_resume": "claude --dangerously-skip-permissions --continue",
-    "reinstall": "rm -rf node_modules renderer/node_modules && npm install",
+    "reinstall": "rm -rf node_modules && npm install",
     "typecheck": "tsc --noEmit",
     "cow-workspace:test": "npx tsx cow-workspace/cow-workspace.e2e.test.ts && npx tsx cow-workspace/workspace-jail.e2e.test.ts",
     "cow-workspace:test:api": "npx tsx cow-workspace/cow-workspace.e2e.test.ts",

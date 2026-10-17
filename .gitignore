@@ -64,7 +64,6 @@ renderer/html2slides/e2e/_gtl-fixtures/
 renderer/html2slides/e2e/_border/
 renderer/html2slides/e2e/_gtl-out/
 renderer/html2slides/e2e/gtl-dataset*.json
-renderer/html2slides/e2e/google-table-measurements.json
 
 # html2slides distribution build output — regenerable via `npm run build`
 # (mirrors source path: dist/renderer/html2slides/{browser,addon}/...).
