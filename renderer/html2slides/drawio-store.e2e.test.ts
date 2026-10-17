@@ -10,7 +10,7 @@
  */
 
 import { google } from "googleapis";
-import { getAuth } from "./convert-pptx-io.js";
+import { loadDevOAuthClient } from "./dev-google-auth.ts";
 import {
   buildEditableSvg,
   extractXmlFromEditableSvg,
@@ -81,7 +81,7 @@ async function main() {
   }
 
   // --- Step 2: Drive client ----------------------------------------------
-  const drive = google.drive({ version: "v3", auth: getAuth() });
+  const drive = google.drive({ version: "v3", auth: loadDevOAuthClient({ persistRefreshedTokens: true }) });
   const testDocId = `TEST_${Date.now()}`;
   const segments = drawioFolderSegments("slide", testDocId);
   const fileName = drawioFileName("diagA");

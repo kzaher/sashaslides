@@ -28,7 +28,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_CAPTURE_CHROME_PORT, openChromeTab } from "./reverse/chrome-capture.ts";
-import { createGoogleSlidesSource, createRecordedGoogleSlidesSource, type GoogleSlidesSource, type PresentationRecording } from "./reverse/google-slides-source.ts";
+import { createGoogleSlidesSource, createRecordedGoogleSlidesSource, developerSourceDependencies, type GoogleSlidesSource, type PresentationRecording } from "./reverse/google-slides-source.ts";
 import { ALL_SETS, setLayoutOf, type ReverseSet, type SlideMetrics } from "./reverse/reverse-results.ts";
 import { runReverseSet, type SetSource } from "./reverse/reverse-set.ts";
 
@@ -71,14 +71,7 @@ async function main(): Promise<void> {
   const workDirectory = join(parsed.output, ".work");
   const google: GoogleSlidesSource = parsed.offline
     ? createRecordedGoogleSlidesSource(recordingsOf(parsed))
-    : createGoogleSlidesSource({
-        credentialsPath: join(REPOSITORY_ROOT, ".auth", "google_oauth.json"),
-        tokensPath: join(REPOSITORY_ROOT, ".auth", "tokens.json"),
-        fetch,
-        delay: (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds)),
-        now: Date.now,
-        log,
-      });
+    : createGoogleSlidesSource(developerSourceDependencies(log));
   if (parsed.offline) log("OFFLINE: measuring from the recorded presentations, exports, thumbnails and pictures; nothing is read from Google");
   await using chrome = await openChromeTab({ port: parsed.chromePort, deviceScaleFactor: parsed.deviceScaleFactor });
   const failures: string[] = [];

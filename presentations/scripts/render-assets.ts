@@ -12,114 +12,7 @@
 import { cdp as CDP } from "./cdp.ts";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-
-// ── Slide parsing (same as generate-pptx.ts) ───────────────────────────────
-
-type TableRows = { headers: string[]; rows: string[][] };
-type TableData = TableRows | null;
-
-type ParsedSlide = {
-  title: string;
-  subtitle: string;
-  bodyLines: string[];
-  table: TableData;
-  notes: string;
-  isSectionHeader: boolean;
-  isTitleSlide: boolean;
-  isClosing: boolean;
-  whiteboard: boolean; // first `>` line was `whiteboard=1` — opt-in to whiteboard styling
-};
-
-function parseSlides(md: string): ParsedSlide[] {
-  const blocks = md.split(/\n---\n/);
-  const slides: ParsedSlide[] = [];
-
-  for (const block of blocks) {
-    const lines = block.trim().split("\n").filter((l) => l.trim() !== "");
-    if (lines.length === 0) continue;
-
-    let title = "";
-    let subtitle = "";
-    const bodyLines: string[] = [];
-    const notes: string[] = [];
-    let isSectionHeader = false;
-    let table: TableData = null;
-    let inTable = false;
-
-    for (let li = 0; li < lines.length; li++) {
-      const line = lines[li];
-
-      if (line.startsWith(">")) {
-        notes.push(line.replace(/^>\s*/, ""));
-        continue;
-      }
-
-      if (line.includes("|") && !line.startsWith("#")) {
-        const cells = line.split("|").map((c) => c.trim()).filter(Boolean);
-        if (/^[\s|:-]+$/.test(line)) continue;
-        if (!inTable) {
-          const next = lines[li + 1];
-          if (next && /^[\s|:-]+$/.test(next)) {
-            table = { headers: cells, rows: [] };
-            inTable = true;
-            continue;
-          }
-        }
-        if (inTable && table) {
-          // `prev` is annotated to break TS's circular-inference on the
-          // self-referential spread assignment (`table = {...table}`), which
-          // otherwise widens `table` to a non-spreadable type.
-          const prev: TableRows = table;
-          table = { ...prev, rows: [...prev.rows, cells] };
-          continue;
-        }
-      } else {
-        inTable = false;
-      }
-
-      if (/^#{1,2}\s/.test(line)) {
-        const text = line.replace(/^#+\s+/, "").replace(/\*\*/g, "");
-        if (text.startsWith("PART ")) {
-          isSectionHeader = true;
-          continue;
-        }
-        if (!title) title = text;
-        else if (!subtitle) subtitle = text;
-        continue;
-      }
-
-      bodyLines.push(line);
-    }
-
-    // The marker `whiteboard=1` MUST be the first `>` line — anywhere else
-    // is treated as a regular note. Strip it out before computing subtitle/notes.
-    let whiteboard = false;
-    if (notes[0] === "whiteboard=1") {
-      whiteboard = true;
-      notes.shift();
-    }
-
-    const isTitleSlide =
-      lines[0]?.startsWith("# ") && bodyLines.length === 0 && !isSectionHeader && !table;
-    const isClosing = title.toLowerCase().includes("thank you");
-    if (notes.length > 0 && !subtitle) subtitle = notes[0];
-    if (isTitleSlide && notes.length > 0) subtitle = notes.join(" | ");
-
-    slides.push({
-      title,
-      subtitle,
-      bodyLines,
-      table,
-      notes: notes.join("\n"),
-      isSectionHeader,
-      isTitleSlide,
-      isClosing,
-      whiteboard,
-    });
-  }
-
-  return slides;
-}
+import { parseSlides, type SlideData } from "./slides-md.ts";
 
 // ── Asset generation HTML ──────────────────────────────────────────────────
 
@@ -127,7 +20,7 @@ function cleanText(s: string): string {
   return s.replace(/\*\*/g, "");
 }
 
-function buildAssetHtml(slides: ParsedSlide[]): string {
+function buildAssetHtml(slides: SlideData[]): string {
   const rows: string[] = [];
 
   // 1. Underline variants — flatter aspect (2400x48) so the rough.js wobble

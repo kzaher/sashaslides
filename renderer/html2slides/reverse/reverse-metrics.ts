@@ -7,9 +7,9 @@
  * the fixture against Chrome on the Sasha export (round trip). Raw pixelmatch on those lights up
  * every antialiased glyph edge and every half-pixel offset, so a perfect import would still score
  * several percent and the number would track font hinting rather than fidelity. Both images are
- * resampled to one size and box-blurred (two passes, close to a Gaussian), the same idea as
- * check-goldens.ts's "blur 0x2" for its original-versus-render diff, so what survives is a
- * missing shape, a wrong colour or a shift of a few pixels.
+ * resampled to one size and box-blurred (two passes, close to a Gaussian), so what survives is a
+ * missing shape, a wrong colour or a shift of a few pixels. check-goldens.ts uses the same
+ * comparator for its original-versus-render diff of a slide that has no golden yet.
  *
  * WHY TEXT IS A MULTISET OF WORDS. Google's text comes from the presentation's runs, the Sasha and
  * fixture text from the DOM's `innerText`; the two disagree on line breaks, bullet glyphs, list
@@ -43,31 +43,46 @@ export const BLUR_RADIUS_AT_1280 = 2;
 /** pixelmatch's per-pixel YIQ threshold: 0.2 tolerates the blur's soft edges, not a wrong colour. */
 export const PIXEL_THRESHOLD = 0.2;
 
-/** Compares `actual` against `expected` at the expected image's size (see the header). */
-export function compareImages(options: Readonly<{ expected: RgbaImage; actual: RgbaImage }>): ImageComparison {
+/**
+ * Compares `actual` against `expected` at the expected image's size (see the header). `threshold`
+ * is pixelmatch's per-pixel YIQ threshold, PIXEL_THRESHOLD unless the caller needs a looser one;
+ * `blurRadius` fixes the box radius instead of scaling BLUR_RADIUS_AT_1280 with the width (two
+ * passes of radius 2 have a standard deviation of exactly 2 pixels).
+ */
+export function compareImages(
+  options: Readonly<{ expected: RgbaImage; actual: RgbaImage; threshold?: number; blurRadius?: number }>,
+): ImageComparison {
   const { width, height } = options.expected;
-  const blurRadius = Math.max(1, Math.round((BLUR_RADIUS_AT_1280 * width) / 1280));
+  const blurRadius = options.blurRadius ?? Math.max(1, Math.round((BLUR_RADIUS_AT_1280 * width) / 1280));
   const prepare = (image: RgbaImage): RgbaImage => blurImage({ image: blurImage({ image: flattenOnWhite(resampleImage({ image, width, height })), radius: blurRadius }), radius: blurRadius });
   const expected = prepare(options.expected);
   const actual = prepare(options.actual);
   const diffData = new Uint8Array(width * height * 4);
   const mismatchedPixels = pixelmatch(expected.data, actual.data, diffData, width, height, {
-    threshold: PIXEL_THRESHOLD,
+    threshold: options.threshold ?? PIXEL_THRESHOLD,
     includeAA: true,
     alpha: 0,
     diffColor: [255, 0, 0],
   });
-  // pixelmatch draws every pixel opaque; the rating UI overlays the diff on the original, so only
-  // the red marks stay visible.
-  for (let offset = 0; offset < diffData.length; offset += 4) {
-    const isMark = diffData[offset] === 255 && diffData[offset + 1] === 0 && diffData[offset + 2] === 0;
-    if (!isMark) diffData[offset + 3] = 0;
-  }
+  keepOnlyDiffMarks(diffData);
   return {
     mismatchPercent: roundTo((100 * mismatchedPixels) / (width * height), 3),
     mismatchedPixels,
     diffImage: { width, height, data: diffData },
   };
+}
+
+/**
+ * pixelmatch draws every pixel opaque (`alpha: 0` only greys the background to white); the rating
+ * UI overlays the diff on the original, so every pixel except the red diff and yellow antialiasing
+ * marks becomes fully transparent, in place.
+ */
+export function keepOnlyDiffMarks(diffData: Uint8Array): void {
+  for (let offset = 0; offset < diffData.length; offset += 4) {
+    const isRed = diffData[offset] === 255 && diffData[offset + 1] === 0 && diffData[offset + 2] === 0;
+    const isYellow = diffData[offset] === 255 && diffData[offset + 1] === 255 && diffData[offset + 2] === 0;
+    if (!isRed && !isYellow) diffData[offset + 3] = 0;
+  }
 }
 
 /** Area-average resampling (a box filter): exact for downscaling, nearest-like for upscaling. */

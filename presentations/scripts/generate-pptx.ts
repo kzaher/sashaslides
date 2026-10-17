@@ -41,6 +41,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import pptxgenModule from "pptxgenjs";
+import { parseSlides, type SlideData } from "./slides-md.ts";
 const pptxgen: any = (pptxgenModule as any).default || pptxgenModule;
 
 const ICON_DIR = resolve("/workspaces/sashaslides/presentations/1/icons");
@@ -86,117 +87,6 @@ const SLIDE_ICONS: Record<number, { name: string; x?: number; y?: number; w?: nu
   17: { name: "shield",           x: ICON_X,        y: ICON_Y,        w: ICON_SIZE,        h: ICON_SIZE },
   18: { name: "target",           x: CENTER_ICON_X, y: CENTER_ICON_Y, w: CENTER_ICON_SIZE, h: CENTER_ICON_SIZE },
 };
-
-// ── Slide parsing ──────────────────────────────────────────────────────────
-
-type SlideData = {
-  title: string;
-  subtitle: string;
-  bodyLines: string[];
-  table: { headers: string[]; rows: string[][] } | null;
-  notes: string;
-  isSectionHeader: boolean;
-  isTitleSlide: boolean;
-  isClosing: boolean;
-  whiteboard: boolean; // first `>` line was `whiteboard=1`
-};
-
-function parseSlides(md: string): SlideData[] {
-  const blocks = md.split(/\n---\n/);
-  const slides: SlideData[] = [];
-
-  for (const block of blocks) {
-    const lines = block.trim().split("\n").filter((l) => l.trim() !== "");
-    if (lines.length === 0) continue;
-
-    let title = "";
-    let subtitle = "";
-    const bodyLines: string[] = [];
-    const notes: string[] = [];
-    let isSectionHeader = false;
-    let table: SlideData["table"] = null;
-    let inTable = false;
-
-    for (let li = 0; li < lines.length; li++) {
-      const line = lines[li];
-
-      if (line.startsWith(">")) {
-        notes.push(line.replace(/^>\s*/, ""));
-        continue;
-      }
-
-      if (line.includes("|") && !line.startsWith("#")) {
-        const cells = line.split("|").map((c) => c.trim()).filter(Boolean);
-        if (/^[\s|:-]+$/.test(line)) continue;
-        // `started` lets `inTable = true` flow forward to the append check
-        // within this iteration (instead of only via the loop back-edge after
-        // a `continue`), which is what TS's control-flow analysis needs to
-        // prove the append block reachable — otherwise it narrows `table` to
-        // `never` and rejects the spread. Behaviour is identical to the prior
-        // start-then-continue / append-then-continue structure.
-        let started = false;
-        if (!inTable) {
-          const next = lines[li + 1];
-          if (next && /^[\s|:-]+$/.test(next)) {
-            table = { headers: cells, rows: [] };
-            inTable = true;
-            started = true;
-          }
-        }
-        let consumed = started;
-        if (!started && inTable && table) {
-          table = { ...table, rows: [...table.rows, cells] };
-          consumed = true;
-        }
-        if (consumed) continue;
-      } else {
-        inTable = false;
-      }
-
-      if (/^#{1,2}\s/.test(line)) {
-        const text = line.replace(/^#+\s+/, "").replace(/\*\*/g, "");
-        if (text.startsWith("PART ")) {
-          isSectionHeader = true;
-          continue;
-        }
-        if (!title) title = text;
-        else if (!subtitle) subtitle = text;
-        continue;
-      }
-
-      bodyLines.push(line);
-    }
-
-    // Opt-in marker MUST be the first `>` line on the slide. Strip it
-    // before computing subtitle/notes so it never leaks into displayed text.
-    let whiteboard = false;
-    if (notes[0] === "whiteboard=1") {
-      whiteboard = true;
-      notes.shift();
-    }
-
-    const isTitleSlide =
-      lines[0]?.startsWith("# ") && bodyLines.length === 0 && !isSectionHeader && !table;
-    const isClosing = title.toLowerCase().includes("thank you");
-
-    if (notes.length > 0 && !subtitle) subtitle = notes[0];
-    if (isTitleSlide && notes.length > 0) subtitle = notes.join(" | ");
-
-    slides.push({
-      title,
-      subtitle,
-      bodyLines,
-      table,
-      notes: notes.join("\n"),
-      isSectionHeader,
-      isTitleSlide,
-      isClosing,
-      whiteboard,
-    });
-  }
-
-  return slides;
-}
 
 function cleanText(s: string): string {
   return s.replace(/\*\*/g, "");

@@ -13,7 +13,7 @@
  *     which lays diagrams out under  My Drive / drawio / <kind> / <docId> /
  *     <diagramId>.drawio.svg  and updates-in-place on re-upload.
  *
- * Auth is the project's stored OAuth2 client (see getAuth in convert-pptx-io).
+ * Auth is the project's stored OAuth2 client (dev-google-auth.ts).
  */
 
 import { google } from "googleapis";

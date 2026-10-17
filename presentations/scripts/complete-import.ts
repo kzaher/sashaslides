@@ -2,7 +2,7 @@
  * Complete a stuck Import Slides dialog: select all + import button via
  * PointerEvent dispatches. Fast-fail polling.
  */
-import { cdp as CDP } from "./cdp.ts";
+import { cdp as CDP, jsClick } from "./cdp.ts";
 import { writeFileSync } from "node:fs";
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
@@ -21,53 +21,11 @@ async function main() {
   await sleep(300);
 
   // Click Select all slides via PointerEvent
-  await Runtime.evaluate({
-    expression: `(() => {
-      const btns = document.querySelectorAll('button, [role="button"]');
-      for (const b of btns) {
-        if (b.textContent?.trim() === 'Select all slides') {
-          const r = b.getBoundingClientRect();
-          if (r.width > 0) {
-            const opts = { bubbles: true, cancelable: true, clientX: r.x + r.width/2, clientY: r.y + r.height/2, pointerType: 'mouse', button: 0, pointerId: 1 };
-            b.dispatchEvent(new PointerEvent('pointerdown', opts));
-            b.dispatchEvent(new MouseEvent('mousedown', opts));
-            b.dispatchEvent(new PointerEvent('pointerup', opts));
-            b.dispatchEvent(new MouseEvent('mouseup', opts));
-            b.dispatchEvent(new MouseEvent('click', opts));
-            b.click();
-            return true;
-          }
-        }
-      }
-      return false;
-    })()`,
-    returnByValue: true,
-  });
+  await jsClick(Runtime, { text: "Select all slides" });
   await sleep(500);
 
   // Click Import slides button via PointerEvent
-  await Runtime.evaluate({
-    expression: `(() => {
-      const btns = document.querySelectorAll('button, [role="button"]');
-      for (const b of btns) {
-        if (b.textContent?.trim() === 'Import slides') {
-          const r = b.getBoundingClientRect();
-          if (r.y > 400 && r.width > 0) {
-            const opts = { bubbles: true, cancelable: true, clientX: r.x + r.width/2, clientY: r.y + r.height/2, pointerType: 'mouse', button: 0, pointerId: 1 };
-            b.dispatchEvent(new PointerEvent('pointerdown', opts));
-            b.dispatchEvent(new MouseEvent('mousedown', opts));
-            b.dispatchEvent(new PointerEvent('pointerup', opts));
-            b.dispatchEvent(new MouseEvent('mouseup', opts));
-            b.dispatchEvent(new MouseEvent('click', opts));
-            b.click();
-            return true;
-          }
-        }
-      }
-      return false;
-    })()`,
-    returnByValue: true,
-  });
+  await jsClick(Runtime, { text: "Import slides", minY: 400 });
 
   // Fast-fail polling: wait up to 6s for slide count to reach >= 20
   const start = Date.now();

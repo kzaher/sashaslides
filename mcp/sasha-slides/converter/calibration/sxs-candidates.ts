@@ -22,25 +22,23 @@
  * THE DECK IS A THROWAWAY and it is deleted on the way out (`--keep` to inspect it). Nothing here
  * touches the user's deck: the whole point of the picker is that a candidate is not in a deck yet.
  */
-import CDPraw from "chrome-remote-interface";
-import { build } from "esbuild";
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { Readable } from "node:stream";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { slides_v1 } from "googleapis";
-import type { CdpModule } from "../../../../types/cdp-types.ts";
-import { extractorScript as compileExtractorScript } from "../../../../renderer/html2slides/extractor-script.ts";
+import { createGoogleSlidesSource, developerSourceDependencies } from "../../../../renderer/html2slides/reverse/google-slides-source.ts";
+import { openChromeTab } from "../../../../renderer/html2slides/reverse/chrome-capture.ts";
 import type { SlidesApiRequest } from "../slides-api.js";
-import { asApiRequests, describeApiError, googleDrive, kindOf, slidesClient } from "./slides-client.js";
+import { argAfter } from "./args.js";
+import { convertInPage, openConverter } from "./in-page-converter.js";
+import type { CdpPage } from "./in-page-converter.js";
+import { applyWithDrops, googleDrive, kindOf, slidesClient } from "./slides-client.js";
 import type { SlidesClient } from "./slides-client.js";
 import { STAGED_IMAGE_FIELD, stagedImageOf } from "../slide-image.js";
 
-// chrome-remote-interface ships no .d.ts; its default export is `unknown` in types/ambient.d.ts.
-// Narrowed once here, as roundtrip.ts and the browser e2e test do.
-const CDP = CDPraw as CdpModule;
-
+/** The CDP port and scale the originals were always shot at: 1 makes a 1280x720 PNG. */
 const CDP_PORT = 9222;
+const ORIGINAL_DEVICE_SCALE_FACTOR = 1;
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../../..");
 /** The four documents the picker actually stages -- `mcp/sasha-slides/e2e/fixtures`. */
@@ -50,14 +48,6 @@ function candidatesDir(): string {
   const given = argAfter("--from");
   return given === null ? CANDIDATES : resolve(REPO_ROOT, given);
 }
-const HOST_PAGE = join(HERE, "../test/fixtures/host.html");
-const SLIDE_WIDTH_PX = 1280;
-const SLIDE_HEIGHT_PX = 720;
-
-type Conversion = Readonly<{
-  requests: readonly SlidesApiRequest[];
-  unsupported: readonly Readonly<Record<string, unknown>>[];
-}>;
 
 /**
  * `UnsupportedFeature` is a DISCRIMINATED UNION whose arms carry different fields -- there is no
@@ -102,10 +92,13 @@ async function main(): Promise<void> {
   }
 
   // --- THE TRUTH: Chrome's own rendering of each candidate ---------------------------------
-  for (const [at, name] of names.entries()) {
-    const png = await shootHtml(join(from, name));
-    writeFileSync(join(outDir, "originals", slideFile(at)), png);
-    process.stdout.write(`original  ${slideFile(at)}  ${name}  ${png.length} bytes\n`);
+  {
+    await using tab = await openChromeTab({ port: CDP_PORT, deviceScaleFactor: ORIGINAL_DEVICE_SCALE_FACTOR });
+    for (const [at, name] of names.entries()) {
+      const { png } = await tab.capture({ address: `file://${join(from, name)}` });
+      writeFileSync(join(outDir, "originals", slideFile(at)), png);
+      process.stdout.write(`original  ${slideFile(at)}  ${name}  ${png.length} bytes\n`);
+    }
   }
 
   // --- WHAT GOOGLE MAKES OF THE CONVERTER'S REQUESTS ----------------------------------------
@@ -141,21 +134,14 @@ async function main(): Promise<void> {
     // the thumbnails have to be read from the slides this script appended, in append order, or
     // every pair is off by one and the whole comparison is nonsense.
     const deck = await client.slides.presentations.get({ presentationId });
+    const thumbnails = createGoogleSlidesSource(developerSourceDependencies((line) => process.stdout.write(`${line}\n`)));
     const byObjectId = new Map((deck.data.slides ?? []).map((slide) => [slide.objectId ?? "", slide]));
     for (const [at, report] of reports.entries()) {
       if (!byObjectId.has(report.pageObjectId)) {
         process.stdout.write(`thumb     ${slideFile(at)}  MISSING -- ${report.pageObjectId} is not in the deck\n`);
         continue;
       }
-      const thumb = await client.slides.presentations.pages.getThumbnail({
-        presentationId,
-        pageObjectId: report.pageObjectId,
-        "thumbnailProperties.mimeType": "PNG",
-        "thumbnailProperties.thumbnailSize": "LARGE",
-      });
-      const url = thumb.data.contentUrl;
-      if (typeof url !== "string") throw new Error(`no thumbnail url for ${report.pageObjectId}`);
-      const png = Buffer.from(await (await fetch(url)).arrayBuffer());
+      const png = await thumbnails.downloadThumbnail({ presentationId, pageObjectId: report.pageObjectId });
       writeFileSync(join(outDir, "slides", slideFile(at)), png);
       process.stdout.write(`thumb     ${slideFile(at)}  ${report.fixture}  ${png.length} bytes\n`);
     }
@@ -180,7 +166,7 @@ async function oneCandidate(
   options: Readonly<{
     client: SlidesClient;
     presentationId: string;
-    page: Awaited<ReturnType<CdpModule>>;
+    page: CdpPage;
     name: string;
     at: number;
     html: string;
@@ -207,7 +193,7 @@ async function oneCandidate(
   const staged = await stageImages(conversion.requests);
   let submission;
   try {
-    submission = await applyWithDrops({ client, presentationId, requests: staged.requests });
+    submission = await applyWithDrops({ client, presentationId, requests: staged.requests, onUnnamedRejection: "dropLast" });
   } finally {
     // Slides COPIES the bytes during the batchUpdate, so the file is dead weight the moment the
     // call returns -- on the failure path too (converter/slide-image.ts).
@@ -219,7 +205,7 @@ async function oneCandidate(
     requestCount: conversion.requests.length,
     kinds,
     droppedCount: conversion.requests.length - submission.survivors.length,
-    rejections: submission.rejections,
+    rejections: submission.rejections.map((rejection) => ({ kind: rejection.kind, message: rejection.message.slice(0, 220) })),
     unsupported: conversion.unsupported.map(describeUnsupported),
   };
 }
@@ -274,157 +260,6 @@ async function unstage(fileIds: readonly string[]): Promise<void> {
   }
 }
 
-/**
- * A REJECTED BATCH IS ATOMIC, so one bad request loses the whole slide and the picture would be
- * empty for a reason that has nothing to do with fidelity. The API names the offending index, so
- * drop it, record its own words and retry -- which enumerates every rejection in one pass and
- * still leaves a slide worth photographing.
- */
-async function applyWithDrops(
-  options: Readonly<{ client: SlidesClient; presentationId: string; requests: readonly SlidesApiRequest[] }>,
-): Promise<Readonly<{ survivors: readonly SlidesApiRequest[]; rejections: readonly Readonly<{ kind: string; message: string }>[] }>> {
-  const { client, presentationId } = options;
-  let survivors = [...options.requests];
-  const rejections: Readonly<{ kind: string; message: string }>[] = [];
-  // Bounded by the request count: every pass either applies or removes exactly one request.
-  for (let attempt = 0; attempt <= options.requests.length; attempt += 1) {
-    if (survivors.length === 0) return { survivors, rejections };
-    try {
-      await client.slides.presentations.batchUpdate({
-        presentationId,
-        requestBody: { requests: asApiRequests(survivors) },
-      });
-      return { survivors, rejections };
-    } catch (cause: unknown) {
-      const failure = describeApiError(cause);
-      const at = indexInMessage(failure.message);
-      const offender = at === null ? survivors.length - 1 : at;
-      const dropped = survivors[offender];
-      rejections.push({ kind: dropped === undefined ? "?" : kindOf(dropped), message: failure.message.slice(0, 220) });
-      survivors = survivors.filter((_unused, position) => position !== offender);
-    }
-  }
-  return { survivors, rejections };
-}
-
-/** `Invalid requests[7].createShape: ...` -- the API points at the request it refused. */
-function indexInMessage(message: string): number | null {
-  const found = /requests\[(\d+)\]/.exec(message);
-  const at = found === null ? Number.NaN : Number(found[1]);
-  return Number.isInteger(at) ? at : null;
-}
-
-/** Chrome's rendering of one candidate at the slide's own pixel size. */
-async function shootHtml(path: string): Promise<Buffer> {
-  const tab = await CDP.New({ port: CDP_PORT, url: "about:blank" });
-  const page = await CDP({ target: tab, port: CDP_PORT });
-  try {
-    await page.Page.enable();
-    await page.Runtime.enable();
-    await page.Emulation.setDeviceMetricsOverride({
-      width: SLIDE_WIDTH_PX,
-      height: SLIDE_HEIGHT_PX,
-      deviceScaleFactor: 1,
-      mobile: false,
-    });
-    // SUBSCRIBE BEFORE NAVIGATING. `Page.loadEventFired()` awaited AFTER the navigation never
-    // resolves -- the event has already fired and it does not fire twice (CLAUDE.md).
-    const loaded = page.Page.loadEventFired();
-    await page.Page.navigate({ url: `file://${path}` });
-    await Promise.race([loaded, new Promise<void>((done) => setTimeout(done, 3000))]);
-    const shot = await page.Page.captureScreenshot({ format: "png" });
-    return Buffer.from(shot.data, "base64");
-  } finally {
-    await page.close();
-    await CDP.Close({ port: CDP_PORT, id: tab.id });
-  }
-}
-
-type Browser = Readonly<{ page: Awaited<ReturnType<CdpModule>>; close: () => Promise<void> }>;
-
-/** Bundle the converter as the extension will, inject it, hand back the tab. */
-async function openConverter(): Promise<Browser> {
-  const extractorScript = compileExtractorScript();
-  const bundled = await build({
-    entryPoints: [join(HERE, "../index.ts")],
-    bundle: true,
-    write: false,
-    format: "iife",
-    globalName: "SashaConverter",
-    platform: "browser",
-    target: "es2020",
-    logLevel: "silent",
-  });
-  const converterBundle = bundled.outputFiles[0]?.text ?? "";
-  if (converterBundle.length === 0) throw new Error("converter bundle is empty");
-  const tab = await CDP.New({ port: CDP_PORT, url: `file://${HOST_PAGE}` });
-  const page = await CDP({ target: tab, port: CDP_PORT });
-  await page.Page.enable();
-  await page.Runtime.enable();
-  await waitForReady(page);
-  await evaluate(page, converterBundle, false);
-  await evaluate(page, `window.__EXTRACTOR__ = ${JSON.stringify(extractorScript)}; true`, false);
-  return {
-    page,
-    close: async (): Promise<void> => {
-      await page.close();
-      await CDP.Close({ port: CDP_PORT, id: tab.id });
-    },
-  };
-}
-
-async function convertInPage(
-  options: Readonly<{
-    page: Awaited<ReturnType<CdpModule>>;
-    html: string;
-    name: string;
-    pageObjectId: string;
-    presentationId: string;
-  }>,
-): Promise<Conversion> {
-  const expression = `(async () => {
-    const result = await SashaConverter.convertHtmlToSlideRequests({
-      html: ${JSON.stringify(options.html)},
-      presentationId: ${JSON.stringify(options.presentationId)},
-      pageObjectId: ${JSON.stringify(options.pageObjectId)},
-      extractorScript: window.__EXTRACTOR__,
-      container: document.body,
-      objectIdPrefix: ${JSON.stringify(options.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 16))},
-    });
-    return JSON.stringify({ requests: result.requests, unsupported: result.unsupported });
-  })()`;
-  const raw = await evaluate(options.page, expression, true);
-  if (typeof raw !== "string") throw new Error(`conversion of ${options.name} returned ${typeof raw}`);
-  return JSON.parse(raw) as Conversion;
-}
-
-async function evaluate(
-  page: Awaited<ReturnType<CdpModule>>,
-  expression: string,
-  awaitPromise: boolean,
-): Promise<unknown> {
-  const response = await page.Runtime.evaluate({ expression, returnByValue: true, awaitPromise });
-  const thrown = response.exceptionDetails as
-    | Readonly<{ text?: string; exception?: Readonly<{ description?: string }> }>
-    | undefined
-    | null;
-  if (thrown !== undefined && thrown !== null) {
-    throw new Error(`page threw: ${thrown.exception?.description ?? thrown.text ?? "<no detail>"}`);
-  }
-  return response.result.value;
-}
-
-/** Poll for the static host page rather than sleeping on it. */
-async function waitForReady(page: Awaited<ReturnType<CdpModule>>): Promise<void> {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    const state = await evaluate(page, "document.readyState + '|' + !!document.body", false);
-    if (state === "complete|true") return;
-    await new Promise<void>((done) => setTimeout(done, 25));
-  }
-  throw new Error("host page did not become ready within 5s");
-}
-
 function printReport(report: CandidateReport): void {
   const kinds = Object.entries(report.kinds)
     .sort(([left], [right]) => left.localeCompare(right))
@@ -439,15 +274,6 @@ function printReport(report: CandidateReport): void {
 function slideFile(at: number): string {
   return `slide_${String(at + 1).padStart(2, "0")}.png`;
 }
-
-function argAfter(flag: string): string | null {
-  const index = process.argv.indexOf(flag);
-  return process.argv[index + 1] ?? null;
-}
-
-// `slides_v1` is imported for the SDK's own request type through slides-client.ts; referencing it
-// here keeps the import honest under `noUnusedLocals`.
-export type { slides_v1 };
 
 main().catch((error: unknown) => {
   console.error(error);

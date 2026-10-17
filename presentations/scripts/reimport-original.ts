@@ -2,7 +2,7 @@
  * Delete all slides from the original presentation, then import fresh from
  * the updated presentation. Uses the working File > Import slides flow.
  */
-import { cdp as CDP } from "./cdp.ts";
+import { cdp as CDP, jsClick } from "./cdp.ts";
 import { writeFileSync } from "node:fs";
 
 const ORIG_ID = "1xegFC0RQiZd-WaRogVOfSHVqmOFUVPbHUsOHSzPKUUY";
@@ -106,52 +106,10 @@ async function main() {
 
   // Step 4: Select all + Import via PointerEvent
   console.log("Selecting all and importing...");
-  await Runtime.evaluate({
-    expression: `(() => {
-      const btns = document.querySelectorAll('button, [role="button"]');
-      for (const b of btns) {
-        if (b.textContent?.trim() === 'Select all slides') {
-          const r = b.getBoundingClientRect();
-          if (r.width > 0) {
-            const opts = { bubbles: true, cancelable: true, clientX: r.x + r.width/2, clientY: r.y + r.height/2, pointerType: 'mouse', button: 0, pointerId: 1 };
-            b.dispatchEvent(new PointerEvent('pointerdown', opts));
-            b.dispatchEvent(new MouseEvent('mousedown', opts));
-            b.dispatchEvent(new PointerEvent('pointerup', opts));
-            b.dispatchEvent(new MouseEvent('mouseup', opts));
-            b.dispatchEvent(new MouseEvent('click', opts));
-            b.click();
-            return true;
-          }
-        }
-      }
-      return false;
-    })()`,
-    returnByValue: true,
-  });
+  await jsClick(Runtime, { text: "Select all slides" });
   await sleep(500);
 
-  await Runtime.evaluate({
-    expression: `(() => {
-      const btns = document.querySelectorAll('button, [role="button"]');
-      for (const b of btns) {
-        if (b.textContent?.trim() === 'Import slides') {
-          const r = b.getBoundingClientRect();
-          if (r.y > 400 && r.width > 0) {
-            const opts = { bubbles: true, cancelable: true, clientX: r.x + r.width/2, clientY: r.y + r.height/2, pointerType: 'mouse', button: 0, pointerId: 1 };
-            b.dispatchEvent(new PointerEvent('pointerdown', opts));
-            b.dispatchEvent(new MouseEvent('mousedown', opts));
-            b.dispatchEvent(new PointerEvent('pointerup', opts));
-            b.dispatchEvent(new MouseEvent('mouseup', opts));
-            b.dispatchEvent(new MouseEvent('click', opts));
-            b.click();
-            return true;
-          }
-        }
-      }
-      return false;
-    })()`,
-    returnByValue: true,
-  });
+  await jsClick(Runtime, { text: "Import slides", minY: 400 });
 
   // Poll for completion (fast-fail)
   console.log("Polling for import...");

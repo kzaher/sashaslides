@@ -1,19 +1,14 @@
 /**
  * slides-client.ts — the one place the calibration scripts touch Google.
  *
- * Auth is loaded exactly as `.auth/check-auth.ts` loads it: the Desktop-client
- * JSON plus the stored token, narrowed by explicit guards because both files are
- * untrusted input. Nothing here is part of the shipped converter — the converter
- * itself never sees a credential; it only ever *builds* request bodies.
+ * Auth is the developer grant every devcontainer harness shares
+ * (`renderer/html2slides/dev-google-auth.ts`). Nothing here is part of the shipped converter —
+ * the converter itself never sees a credential; it only ever *builds* request bodies.
  */
 import { google } from "googleapis";
 import type { drive_v3, slides_v1 } from "googleapis";
-import type { OAuth2Client } from "google-auth-library";
-import { readFileSync } from "node:fs";
+import { loadDevOAuthClient } from "../../../../renderer/html2slides/dev-google-auth.ts";
 import type { SlidesApiRequest } from "../slides-api.js";
-
-const CLIENT_PATH = "/workspaces/sashaslides/.auth/google_oauth.json";
-const TOKENS_PATH = "/workspaces/sashaslides/.auth/tokens.json";
 
 export type SlidesClient = Readonly<{
   slides: slides_v1.Slides;
@@ -26,29 +21,8 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
     : null;
 }
 
-function readJsonObject(path: string): Readonly<Record<string, unknown>> {
-  const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
-  const record = asRecord(parsed);
-  if (record === null) throw new Error(`${path}: top level is not an object`);
-  return record;
-}
-
-function oauthClient(): OAuth2Client {
-  const clientFile = readJsonObject(CLIENT_PATH);
-  const section = asRecord(clientFile["installed"]) ?? asRecord(clientFile["web"]);
-  if (section === null) throw new Error(`${CLIENT_PATH}: no "installed"/"web" section`);
-  const id = section["client_id"];
-  const secret = section["client_secret"];
-  if (typeof id !== "string" || typeof secret !== "string") {
-    throw new Error(`${CLIENT_PATH}: client_id/client_secret missing`);
-  }
-  const auth = new google.auth.OAuth2(id, secret, "http://localhost:8080");
-  auth.setCredentials(readJsonObject(TOKENS_PATH));
-  return auth;
-}
-
 export function slidesClient(): SlidesClient {
-  const auth = oauthClient();
+  const auth = loadDevOAuthClient({ persistRefreshedTokens: false });
   const slides = google.slides({ version: "v1", auth });
   const drive = google.drive({ version: "v3", auth });
   return {
@@ -118,9 +92,70 @@ export async function applyBatch(
   }
 }
 
+export type Rejection = Readonly<{
+  /** The refused request's operation name, or `<whole batch>` when the API named no index. */
+  kind: string;
+  /** The refused request's field mask, when it carries one. */
+  fields: string | null;
+  message: string;
+  status: number | null;
+}>;
+
+/**
+ * What to do when the API refuses a batch without naming a request index:
+ * `stop` reports the whole batch as refused (roundtrip: an honest "BATCH FAILED");
+ * `dropLast` drops the last request and goes on (sxs-candidates: a partial slide is still
+ * worth photographing).
+ */
+export type UnnamedRejection = "stop" | "dropLast";
+
+/**
+ * `batchUpdate` is atomic, so a single bad request hides every other verdict in
+ * the batch. The API names the offending index, so dropping it and resubmitting
+ * walks the whole batch and ends with the maximal accepted subset plus one
+ * recorded rejection per failure. Bounded by the request count: every pass either
+ * applies or removes exactly one request.
+ */
+export async function applyWithDrops(
+  options: Readonly<{
+    client: SlidesClient;
+    presentationId: string;
+    requests: readonly SlidesApiRequest[];
+    onUnnamedRejection: UnnamedRejection;
+  }>,
+): Promise<Readonly<{ applied: boolean; survivors: readonly SlidesApiRequest[]; rejections: readonly Rejection[] }>> {
+  const { client, presentationId } = options;
+  let survivors = [...options.requests];
+  const rejections: Rejection[] = [];
+  for (let attempt = 0; attempt <= options.requests.length; attempt++) {
+    if (survivors.length === 0) return { applied: true, survivors, rejections };
+    const outcome = await applyBatch({ client, presentationId, requests: survivors });
+    if (outcome.ok) return { applied: true, survivors, rejections };
+    const { failure } = outcome;
+    const named = failure.requestIndex;
+    const inRange = named !== null && named >= 0 && named < survivors.length;
+    if (!inRange && options.onUnnamedRejection === "stop") {
+      rejections.push({ kind: "<whole batch>", fields: null, message: failure.message, status: failure.status });
+      return { applied: false, survivors, rejections };
+    }
+    const index = inRange ? named : survivors.length - 1;
+    // SAFETY: index is either bounds-checked above or the last element of a non-empty array.
+    const offender = survivors[index]!;
+    rejections.push({ kind: kindOf(offender), fields: fieldMaskOf(offender), message: failure.message, status: failure.status });
+    survivors = [...survivors.slice(0, index), ...survivors.slice(index + 1)];
+  }
+  return { applied: false, survivors, rejections };
+}
+
+function fieldMaskOf(request: SlidesApiRequest): string | null {
+  const body = asRecord(Object.values(request)[0]);
+  const fields = body === null ? undefined : body["fields"];
+  return typeof fields === "string" ? fields : null;
+}
+
 /** A Drive handle on the same credentials, for the leftover audit. */
 export function googleDrive(): drive_v3.Drive {
-  return google.drive({ version: "v3", auth: oauthClient() });
+  return google.drive({ version: "v3", auth: loadDevOAuthClient({ persistRefreshedTokens: false }) });
 }
 
 /** The single operation name a request carries, e.g. `createShape`. */

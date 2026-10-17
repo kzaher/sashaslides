@@ -1,42 +1,34 @@
 #!/usr/bin/env npx tsx
-import CDPraw from "chrome-remote-interface";
+/**
+ * shot-originals.ts <html-dir> <out-dir> — the HTML truth of the goldens gate: every fixture at
+ * 1280 x 720, device scale 2, written as slide_NN.png in file order.
+ *
+ * Captured by reverse/chrome-capture.ts, the one HTML screenshotter: it subscribes to the load
+ * event before navigating and polls font readiness instead of sleeping. HTML2SLIDES_CHROME_PORT
+ * selects the browser, as in convert-pptx-io.ts.
+ */
 import { readdirSync, writeFileSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
-import type { CdpModule } from "../../types/cdp-types.ts";
+import { pathToFileURL } from "url";
+import { openChromeTab } from "./reverse/chrome-capture.ts";
 
-// chrome-remote-interface ships no .d.ts; its default export is declared
-// `unknown` (types/ambient.d.ts). Narrow it to the shared typed boundary once.
-const CDP = CDPraw as CdpModule;
-
-// HTML2SLIDES_CHROME_PORT selects the browser, as in convert-pptx-io.ts.
-const PORT = Number(process.env.HTML2SLIDES_CHROME_PORT ?? "9222");
-const dir = resolve(process.argv[2]);
-const out = resolve(process.argv[3]);
+const port = Number(process.env.HTML2SLIDES_CHROME_PORT ?? "9222");
+const dir = resolve(process.argv[2] ?? ".");
+const out = resolve(process.argv[3] ?? "originals");
 mkdirSync(out, { recursive: true });
-const files = readdirSync(dir).filter(f => f.endsWith(".html")).sort();
+const files = readdirSync(dir).filter((f) => f.endsWith(".html")).sort();
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-async function shot(htmlPath: string, outPath: string) {
-  const target = await CDP.New({ port: PORT, url: "about:blank" });
-  const client = await CDP({ target, port: PORT });
-  const { Page, Emulation } = client;
-  await Page.enable();
-  await Emulation.setDeviceMetricsOverride({ width: 1280, height: 720, deviceScaleFactor: 2, mobile: false });
-  await Page.navigate({ url: "file://" + htmlPath });
-  await Page.loadEventFired();
-  await sleep(300);
-  const { data } = await Page.captureScreenshot({ format: "png", clip: { x:0, y:0, width:1280, height:720, scale:1 } });
-  writeFileSync(outPath, Buffer.from(data, "base64"));
-  await client.close();
-  await CDP.Close({ port: PORT, id: target.id });
+async function main(): Promise<void> {
+  await using tab = await openChromeTab({ port, deviceScaleFactor: 2 });
+  for (const [i, file] of files.entries()) {
+    const outPath = join(out, `slide_${String(i + 1).padStart(2, "0")}.png`);
+    const capture = await tab.capture({ address: pathToFileURL(join(dir, file)).href });
+    writeFileSync(outPath, capture.png);
+    console.log(`  ${file} -> ${outPath}${capture.readiness === "ready" ? "" : " (fonts never finished loading)"}`);
+  }
 }
 
-(async () => {
-  for (let i = 0; i < files.length; i++) {
-    const htmlPath = join(dir, files[i]);
-    const outPath = join(out, `slide_${String(i+1).padStart(2,"0")}.png`);
-    await shot(htmlPath, outPath);
-    console.log(`  ${files[i]} -> ${outPath}`);
-  }
-})();
+main().catch((cause: unknown) => {
+  console.error(cause);
+  process.exit(1);
+});

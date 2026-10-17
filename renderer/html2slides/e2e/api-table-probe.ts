@@ -11,18 +11,14 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { google } from "googleapis";
+import { loadDevOAuthClient } from "../dev-google-auth.ts";
 
 const EMU_PER_IN = 914400;
 const PX_PER_IN = 128;                 // 1280px fixture = 10in slide
 const emuToPx = (emu: number) => (emu / EMU_PER_IN) * PX_PER_IN;
 
 function auth() {
-  const creds = JSON.parse(readFileSync(resolve("/workspaces/sashaslides/.auth/google_oauth.json"), "utf-8"));
-  const tokens = JSON.parse(readFileSync(resolve("/workspaces/sashaslides/.auth/tokens.json"), "utf-8"));
-  const c = creds.installed || creds.web || creds;
-  const o = new google.auth.OAuth2(c.client_id, c.client_secret, c.redirect_uris?.[0]);
-  o.setCredentials(tokens);
-  return o;
+  return loadDevOAuthClient({ persistRefreshedTokens: false });
 }
 
 async function main() {

@@ -1,6 +1,12 @@
-import { google } from "googleapis";
+/**
+ * The forward gate's thumbnail export: Google's LARGE PNG of every slide of one presentation, read
+ * through the reverse round trip's GoogleSlidesSource, so it is paced under the "expensive read
+ * requests per minute" quota (about 67 a minute) and backs off on 429 instead of failing a regen
+ * half way. That costs about 1 s a slide.
+ */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { dirname, join } from "path";
+import { createGoogleSlidesSource, developerSourceDependencies, type GoogleSlidesSource } from "./reverse/google-slides-source.ts";
 
 export async function exportThumbs(opts: {
   presId: string;
@@ -24,45 +30,28 @@ export async function exportThumbs(opts: {
   // Optional: when called from another script we still want to update the
   // sibling meta.json with slideIds. Caller can opt out by setting false.
   updateMetaJson?: boolean; // default true
+  /** Defaults to the developer grant; injected by tests. */
+  source?: GoogleSlidesSource;
 }): Promise<{ slideIds: string[] }> {
   const { presId, outDir } = opts;
-
-  const creds = JSON.parse(readFileSync("/workspaces/sashaslides/.auth/google_oauth.json", "utf-8")).installed;
-  const tokens = JSON.parse(readFileSync("/workspaces/sashaslides/.auth/tokens.json", "utf-8"));
-  const oauth2 = new google.auth.OAuth2(creds.client_id, creds.client_secret, "http://localhost");
-  oauth2.setCredentials(tokens);
-
-  const slidesApi = google.slides({ version: "v1", auth: oauth2 });
+  const log = (line: string): void => console.log(line);
+  const source = opts.source ?? createGoogleSlidesSource(developerSourceDependencies(log));
 
   mkdirSync(outDir, { recursive: true });
-  const pres = await slidesApi.presentations.get({ presentationId: presId });
-  const slides = pres.data.slides || [];
-  console.log(slides.length + " slides");
-  if (opts.fileNames && opts.fileNames.length !== slides.length) {
+  const slideIds = slideObjectIdsOf(await source.readPresentation(presId));
+  console.log(slideIds.length + " slides");
+  if (opts.fileNames && opts.fileNames.length !== slideIds.length) {
     throw new Error(
-      `exportThumbs: fileNames.length=${opts.fileNames.length} != presentation slides.length=${slides.length}`,
+      `exportThumbs: fileNames.length=${opts.fileNames.length} != presentation slides.length=${slideIds.length}`,
     );
   }
 
-  const slideIds: string[] = [];
-  for (let i = 0; i < slides.length; i++) {
-    const slideId = slides[i].objectId!;
-    slideIds.push(slideId);
-    const thumb = await slidesApi.presentations.pages.getThumbnail({
-      presentationId: presId,
-      pageObjectId: slideId,
-      "thumbnailProperties.mimeType": "PNG",
-      "thumbnailProperties.thumbnailSize": "LARGE",
-    });
-    const url = thumb.data.contentUrl!;
-    const resp = await fetch(url);
-    const buf = Buffer.from(await resp.arrayBuffer());
-    const outName = opts.fileNames
-      ? opts.fileNames[i]
-      : "slide_" + String(i + 1).padStart(2, "0") + ".png";
+  for (const [i, slideId] of slideIds.entries()) {
+    const png = await source.downloadThumbnail({ presentationId: presId, pageObjectId: slideId });
+    const outName = opts.fileNames?.[i] ?? "slide_" + String(i + 1).padStart(2, "0") + ".png";
     const outPath = outDir + "/" + outName;
-    writeFileSync(outPath, buf);
-    console.log("  Slide " + (i + 1) + " (" + outName + "): " + buf.length + " bytes");
+    writeFileSync(outPath, png);
+    console.log("  Slide " + (i + 1) + " (" + outName + "): " + png.length + " bytes");
   }
   console.log("Saved to " + outDir);
 
@@ -79,4 +68,16 @@ export async function exportThumbs(opts: {
   }
 
   return { slideIds };
+}
+
+/** The slides' object ids, in order, from an untrusted `presentations.get` answer. */
+export function slideObjectIdsOf(presentation: unknown): string[] {
+  const slides = typeof presentation === "object" && presentation !== null && "slides" in presentation ? presentation.slides : undefined;
+  if (slides === undefined || slides === null) return [];
+  if (!Array.isArray(slides)) throw new Error("presentations.get answered a non-array `slides`");
+  return slides.map((slide: unknown, index) => {
+    const objectId = typeof slide === "object" && slide !== null && "objectId" in slide ? slide.objectId : undefined;
+    if (typeof objectId !== "string") throw new Error(`presentations.get slide ${index + 1} has no objectId`);
+    return objectId;
+  });
 }

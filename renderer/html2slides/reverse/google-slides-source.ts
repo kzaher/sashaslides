@@ -4,10 +4,10 @@
  * the picture addresses the import fetches.
  *
  * WHY THE DEVELOPER TOKEN AND NOT THE BROKERED GRANT: this is a measuring harness run from the
- * devcontainer, the same position as record-rendering-lib.ts and export-thumbs-lib.ts, which build
- * an OAuth client from .auth/google_oauth.json + .auth/tokens.json. Nothing here writes to a
+ * devcontainer, so it uses the developer grant (dev-google-auth.ts). Nothing here writes to a
  * presentation; the only presentation the pipeline creates is the forward upload, done by
- * convert-pptx.ts.
+ * convert-pptx.ts. The forward gate's thumbnail export (export-thumbs-lib.ts) reads through this
+ * source too, so both directions share one quota pacing.
  *
  * The .pptx export (Drive `files.export`, also a read) carries the gradient stops the Slides
  * interface leaves out; the token's Drive scope reaches it.
@@ -21,6 +21,7 @@
  */
 import { google, type slides_v1 } from "googleapis";
 import { readFileSync } from "node:fs";
+import { EXPIRED_GRANT_REMEDY, isExpiredGrant, loadDevOAuthClient, type DevOAuthClient } from "../dev-google-auth.ts";
 import { PPTX_MEDIA_TYPE } from "../../../mcp/sasha-slides/google-slides/slides-client.ts";
 
 export type GoogleSlidesSource = Readonly<{
@@ -38,8 +39,7 @@ export type GoogleSlidesSource = Readonly<{
 }>;
 
 export type GoogleSlidesSourceDependencies = Readonly<{
-  credentialsPath: string;
-  tokensPath: string;
+  auth: DevOAuthClient;
   fetch: typeof fetch;
   /** Waits; injected so the pacing is testable and visible. */
   delay: (milliseconds: number) => Promise<void>;
@@ -53,8 +53,19 @@ const MAXIMUM_ATTEMPTS = 6;
 const FIRST_BACKOFF_MILLISECONDS = 5_000;
 const LONGEST_BACKOFF_MILLISECONDS = 60_000;
 
+/** The live dependencies: the developer grant, the global fetch, real time. */
+export function developerSourceDependencies(log: (line: string) => void): GoogleSlidesSourceDependencies {
+  return {
+    auth: loadDevOAuthClient({ persistRefreshedTokens: false }),
+    fetch,
+    delay: (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds)),
+    now: Date.now,
+    log,
+  };
+}
+
 export function createGoogleSlidesSource(dependencies: GoogleSlidesSourceDependencies): GoogleSlidesSource {
-  const client = oauthClientFrom(dependencies);
+  const client = dependencies.auth;
   const slides = google.slides({ version: "v1", auth: client });
   const drive = google.drive({ version: "v3", auth: client });
   let nextThumbnailAt = 0;
@@ -66,7 +77,7 @@ export function createGoogleSlidesSource(dependencies: GoogleSlidesSourceDepende
         return await attempt();
       } catch (cause) {
         if (isExpiredGrant(cause)) {
-          throw new Error(`Google refused the developer token (invalid_grant: the 7 day refresh token expired). A person must re-run "npx tsx .auth/generate-token.ts"; this pipeline does not re-consent.`);
+          throw new Error(EXPIRED_GRANT_REMEDY);
         }
         const status = statusOf(cause);
         const retryable = status === 429 || (status !== null && status >= 500);
@@ -119,39 +130,6 @@ export function createGoogleSlidesSource(dependencies: GoogleSlidesSourceDepende
       return answer.token;
     },
   };
-}
-
-type InstalledCredentials = Readonly<{ clientId: string; clientSecret: string }>;
-
-function oauthClientFrom(dependencies: GoogleSlidesSourceDependencies): InstanceType<typeof google.auth.OAuth2> {
-  const credentials = installedCredentialsOf(JSON.parse(readFileSync(dependencies.credentialsPath, "utf-8")));
-  const client = new google.auth.OAuth2(credentials.clientId, credentials.clientSecret, "http://localhost");
-  client.setCredentials(tokensOf(JSON.parse(readFileSync(dependencies.tokensPath, "utf-8"))));
-  return client;
-}
-
-function installedCredentialsOf(raw: unknown): InstalledCredentials {
-  const installed = fieldOf(raw, "installed");
-  const clientId = fieldOf(installed, "client_id");
-  const clientSecret = fieldOf(installed, "client_secret");
-  if (typeof clientId !== "string" || typeof clientSecret !== "string") throw new Error("google_oauth.json has no installed.client_id / client_secret");
-  return { clientId, clientSecret };
-}
-
-function tokensOf(raw: unknown): Readonly<{ refresh_token?: string; access_token?: string; expiry_date?: number }> {
-  const refreshToken = fieldOf(raw, "refresh_token");
-  const accessToken = fieldOf(raw, "access_token");
-  const expiryDate = fieldOf(raw, "expiry_date");
-  if (typeof refreshToken !== "string" && typeof accessToken !== "string") throw new Error("tokens.json holds neither a refresh nor an access token");
-  return {
-    ...(typeof refreshToken === "string" ? { refresh_token: refreshToken } : {}),
-    ...(typeof accessToken === "string" ? { access_token: accessToken } : {}),
-    ...(typeof expiryDate === "number" ? { expiry_date: expiryDate } : {}),
-  };
-}
-
-function isExpiredGrant(cause: unknown): boolean {
-  return messageOf(cause).includes("invalid_grant") || fieldOf(fieldOf(fieldOf(cause, "response"), "data"), "error") === "invalid_grant";
 }
 
 /** The HTTP status of a gaxios error (`status`, or the numeric `code`), else null. */

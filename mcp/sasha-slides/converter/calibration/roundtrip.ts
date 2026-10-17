@@ -21,33 +21,26 @@
  *   - whether the geometry read back by `presentations.get` is the geometry the
  *     converter asked for.
  *
- * The converter needs a DOM, so it runs bundled inside Chrome on CDP :9222 —
- * the same harness `test/browser.e2e.test.ts` uses, imported rather than copied.
+ * The converter needs a DOM, so it runs bundled inside Chrome on CDP :9222,
+ * through in-page-converter.ts, the harness the calibration scripts share.
  */
-import CDPraw from "chrome-remote-interface";
-import { build } from "esbuild";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { slides_v1 } from "googleapis";
-import type { CdpModule } from "../../../../types/cdp-types.ts";
-import { extractorScript as compileExtractorScript } from "../../../../renderer/html2slides/extractor-script.ts";
 import type { SlidesApiRequest } from "../slides-api.js";
-import { applyBatch, googleDrive, kindOf, slidesClient } from "./slides-client.js";
+import { argAfter } from "./args.js";
+import { convertInPage, openConverter } from "./in-page-converter.js";
+import type { CdpPage } from "./in-page-converter.js";
+import { applyBatch, applyWithDrops, googleDrive, kindOf, slidesClient } from "./slides-client.js";
 import type { SlidesClient } from "./slides-client.js";
 
-// chrome-remote-interface ships no .d.ts; its default export is `unknown` in
-// types/ambient.d.ts. Narrowed once here, as the browser e2e test does.
-const CDP = CDPraw as CdpModule;
-
-const CDP_PORT = 9222;
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../../..");
 const BASIC_FIXTURES = join(REPO_ROOT, "renderer/html2slides/e2e/fixtures-basic");
 const OWN_FIXTURES = join(HERE, "../test/fixtures");
 /** The four documents the PICKER stages -- the ones a user actually sees (sxs-candidates.ts). */
 const CANDIDATE_FIXTURES = join(HERE, "../../e2e/fixtures");
-const HOST_PAGE = join(OWN_FIXTURES, "host.html");
 
 /** 2 CSS px at 7143.75 EMU/px — the tolerance CLAUDE.md's measurements justify. */
 const GEOMETRY_TOLERANCE_EMU = 2 * 7143.75;
@@ -107,12 +100,6 @@ async function main(): Promise<void> {
     default:
       throw new Error(`unknown command ${String(command)}; want create|run|audit|dump|probe|tablegeom|bullets|report|drop`);
   }
-}
-
-function argAfter(flag: string): string | null {
-  const index = process.argv.indexOf(flag);
-  const value = index === -1 ? undefined : process.argv[index + 1];
-  return value ?? null;
 }
 
 function required(flag: string): string {
@@ -221,39 +208,6 @@ async function dump(): Promise<void> {
   }
 }
 
-type Browser = Readonly<{ page: Awaited<ReturnType<CdpModule>>; close: () => Promise<void> }>;
-
-/** Bundle the converter as the extension will, inject it, hand back the tab. */
-async function openConverter(): Promise<Browser> {
-  const extractorScript = compileExtractorScript();
-  const bundled = await build({
-    entryPoints: [join(HERE, "../index.ts")],
-    bundle: true,
-    write: false,
-    format: "iife",
-    globalName: "SashaConverter",
-    platform: "browser",
-    target: "es2020",
-    logLevel: "silent",
-  });
-  const converterBundle = bundled.outputFiles[0]?.text ?? "";
-  if (converterBundle.length === 0) throw new Error("converter bundle is empty");
-  const tab = await CDP.New({ port: CDP_PORT, url: `file://${HOST_PAGE}` });
-  const page = await CDP({ target: tab, port: CDP_PORT });
-  await page.Page.enable();
-  await page.Runtime.enable();
-  await waitForReady(page);
-  await evaluate(page, converterBundle, false);
-  await evaluate(page, `window.__EXTRACTOR__ = ${JSON.stringify(extractorScript)}; true`, false);
-  return {
-    page,
-    close: async (): Promise<void> => {
-      await page.close();
-      await CDP.Close({ port: CDP_PORT, id: tab.id });
-    },
-  };
-}
-
 async function run(): Promise<void> {
   const presentationId = required("--presentation");
   const outPath = required("--out");
@@ -290,7 +244,7 @@ async function oneFixture(
   options: Readonly<{
     client: SlidesClient;
     presentationId: string;
-    page: Awaited<ReturnType<CdpModule>>;
+    page: CdpPage;
     html: string;
     name: string;
   }>,
@@ -307,7 +261,7 @@ async function oneFixture(
   const kinds: Record<string, number> = {};
   for (const request of conversion.requests) kinds[kindOf(request)] = (kinds[kindOf(request)] ?? 0) + 1;
 
-  const submission = await applyWithDrops({ client, presentationId, requests: conversion.requests, fixture: name });
+  const submission = await applyWithDrops({ client, presentationId, requests: conversion.requests, onUnnamedRejection: "stop" });
   const readback = submission.applied
     ? await readGeometry({ client, presentationId, pageObjectId })
     : new Map<string, ReadElement>();
@@ -319,53 +273,13 @@ async function oneFixture(
     requestCount: conversion.requests.length,
     kinds,
     acceptedKinds: [...new Set(submission.survivors.map(kindOf))].sort(),
-    rejections: submission.rejections,
+    rejections: submission.rejections.map((rejection) => ({ fixture: name, ...rejection })),
     droppedCount: conversion.requests.length - submission.survivors.length,
     applied: submission.applied,
     worstDeltas: comparison.worst,
     missingFromReadback: comparison.missing,
     unsupportedKinds: [...new Set(conversion.unsupported.map((entry) => entry.kind))].sort(),
   };
-}
-
-/**
- * `batchUpdate` is atomic, so a single bad request hides every other verdict in
- * the batch. The API names the offending index, so dropping it and resubmitting
- * walks the whole batch and ends with the maximal accepted subset plus one
- * recorded rejection per failure.
- */
-async function applyWithDrops(
-  options: Readonly<{
-    client: SlidesClient;
-    presentationId: string;
-    requests: readonly SlidesApiRequest[];
-    fixture: string;
-  }>,
-): Promise<Readonly<{ applied: boolean; survivors: readonly SlidesApiRequest[]; rejections: readonly Rejection[] }>> {
-  const { client, presentationId, fixture } = options;
-  let survivors = [...options.requests];
-  const rejections: Rejection[] = [];
-  for (let attempt = 0; attempt < 40; attempt++) {
-    if (survivors.length === 0) return { applied: true, survivors, rejections };
-    const outcome = await applyBatch({ client, presentationId, requests: survivors });
-    if (outcome.ok) return { applied: true, survivors, rejections };
-    const { failure } = outcome;
-    const index = failure.requestIndex;
-    if (index === null || index < 0 || index >= survivors.length) {
-      rejections.push({ fixture, kind: "<whole batch>", fields: null, message: failure.message, status: failure.status });
-      return { applied: false, survivors, rejections };
-    }
-    // SAFETY: index was just bounds-checked against survivors.length.
-    const offender = survivors[index]!;
-    const body = Object.values(offender)[0];
-    const fields =
-      typeof body === "object" && body !== null && typeof (body as Record<string, unknown>)["fields"] === "string"
-        ? String((body as Record<string, unknown>)["fields"])
-        : null;
-    rejections.push({ fixture, kind: kindOf(offender), fields, message: failure.message, status: failure.status });
-    survivors = [...survivors.slice(0, index), ...survivors.slice(index + 1)];
-  }
-  return { applied: false, survivors, rejections };
 }
 
 type ReadElement = Readonly<{
@@ -751,63 +665,6 @@ async function bullets(): Promise<void> {
   }));
   console.log(JSON.stringify(summary, null, 2));
   if (outPath !== null) writeFileSync(outPath, JSON.stringify(summary, null, 2));
-}
-
-type Conversion = Readonly<{
-  requests: readonly SlidesApiRequest[];
-  unsupported: readonly Readonly<{ kind: string }>[];
-}>;
-
-async function convertInPage(
-  options: Readonly<{
-    page: Awaited<ReturnType<CdpModule>>;
-    html: string;
-    name: string;
-    pageObjectId: string;
-    presentationId: string;
-  }>,
-): Promise<Conversion> {
-  const expression = `(async () => {
-    const result = await SashaConverter.convertHtmlToSlideRequests({
-      html: ${JSON.stringify(options.html)},
-      presentationId: ${JSON.stringify(options.presentationId)},
-      pageObjectId: ${JSON.stringify(options.pageObjectId)},
-      extractorScript: window.__EXTRACTOR__,
-      container: document.body,
-      objectIdPrefix: ${JSON.stringify(options.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 16))},
-    });
-    return JSON.stringify({ requests: result.requests, unsupported: result.unsupported });
-  })()`;
-  const raw = await evaluate(options.page, expression, true);
-  if (typeof raw !== "string") throw new Error(`conversion of ${options.name} returned ${typeof raw}`);
-  return JSON.parse(raw) as Conversion;
-}
-
-async function evaluate(
-  page: Awaited<ReturnType<CdpModule>>,
-  expression: string,
-  awaitPromise: boolean,
-): Promise<unknown> {
-  const response = await page.Runtime.evaluate({ expression, returnByValue: true, awaitPromise });
-  const thrown = response.exceptionDetails as
-    | Readonly<{ text?: string; exception?: Readonly<{ description?: string }> }>
-    | undefined
-    | null;
-  if (thrown !== undefined && thrown !== null) {
-    throw new Error(`page threw: ${thrown.exception?.description ?? thrown.text ?? "<no detail>"}`);
-  }
-  return response.result.value;
-}
-
-/** Poll for the static host page rather than sleeping on it. */
-async function waitForReady(page: Awaited<ReturnType<CdpModule>>): Promise<void> {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    const state = await evaluate(page, "document.readyState + '|' + !!document.body", false);
-    if (state === "complete|true") return;
-    await new Promise<void>((done) => setTimeout(done, 25));
-  }
-  throw new Error("host page did not become ready within 5s");
 }
 
 main().catch((error: unknown) => {

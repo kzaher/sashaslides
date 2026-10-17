@@ -14,12 +14,15 @@
  */
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, copyFileSync } from "fs";
 import { join, dirname, resolve } from "path";
-import { execSync } from "child_process";
-import { createRequire } from "module";
-const require = createRequire("/workspaces/sashaslides/package.json");
-const pmMod = require("pixelmatch");
-const pixelmatch = pmMod.default || pmMod;
-const { PNG } = require("pngjs");
+import pixelmatch from "pixelmatch";
+import { PNG } from "pngjs";
+import { compareImages, keepOnlyDiffMarks, type RgbaImage } from "./reverse/reverse-metrics.ts";
+
+function writeDiffPng(path: string, image: RgbaImage): void {
+  const png = new PNG({ width: image.width, height: image.height });
+  png.data.set(image.data);
+  writeFileSync(path, PNG.sync.write(png));
+}
 
 const args = process.argv.slice(2);
 const currentDir = resolve(args[0]);
@@ -59,47 +62,22 @@ for (const f of currentFiles) {
   if (!existsSync(goldPath)) {
     // No golden yet — diff the current render against the HTML truth
     // (original screenshot) so the SxS can show "where does Slides deviate
-    // from the HTML I wrote?". Original is 2×; downscale to match the
-    // thumbnail before pixelmatch.
+    // from the HTML I wrote?". The original (2×) is resampled to the
+    // thumbnail's size and both are blurred before pixelmatch: Chrome's font
+    // hinting differs from Slides' thumbnail renderer, and the blur collapses
+    // that sub-pixel noise so only structural differences survive into the
+    // red overlay (reverse/reverse-metrics.ts, the reverse gate's comparator;
+    // radius 2 is a standard deviation of 2 px, what ImageMagick's
+    // `-blur 0x2` applied here before).
     const origPath = originalsDir ? join(originalsDir, f) : "";
     if (origPath && existsSync(origPath)) {
       try {
         const cur = PNG.sync.read(readFileSync(curPath));
-        // Both images are blurred and downscaled to a small common size before
-        // diff — raw pixelmatch on full-res screenshots lights up every
-        // antialiased glyph edge because Chrome's font hinting differs from
-        // Slides' thumbnail renderer. Blurring collapses that sub-pixel noise
-        // so only *structural* differences (missing shapes, wrong colors,
-        // position shifts of ≥~4px) survive into the red overlay.
-        const dw = cur.width, dh = cur.height;
-        const origResized = join(outDir, `_orig_resized_${f}`);
-        const curBlurred = join(outDir, `_cur_blurred_${f}`);
-        execSync(`convert "${origPath}" -resize ${dw}x${dh}! -blur 0x2 "${origResized}"`);
-        execSync(`convert "${curPath}" -blur 0x2 "${curBlurred}"`);
-        const orig = PNG.sync.read(readFileSync(origResized));
-        const curBl = PNG.sync.read(readFileSync(curBlurred));
-        try { require("fs").unlinkSync(origResized); } catch {}
-        try { require("fs").unlinkSync(curBlurred); } catch {}
-        const diff = new PNG({ width: dw, height: dh });
-        // alpha: 0 makes the grayscale background pure white (the math
-        // collapses to 255), but pixelmatch hardcodes opaque pixels. So the
-        // diff PNG renders as "white bg + red diffs" — when overlaid on the
-        // original in the UI, the white hides the original. Post-process: set
-        // alpha=0 on every non-diff pixel so the overlay is truly transparent
-        // except for the red/yellow diff marks.
-        const n = pixelmatch(orig.data, curBl.data, diff.data, dw, dh, {
-          threshold: 0.35, includeAA: true, alpha: 0,
-          diffColor: [255, 0, 0], aaColor: [255, 255, 0],
-        });
-        for (let i = 0; i < diff.data.length; i += 4) {
-          const r = diff.data[i], g = diff.data[i + 1], b = diff.data[i + 2];
-          const isDiffRed = r === 255 && g === 0 && b === 0;
-          const isAaYellow = r === 255 && g === 255 && b === 0;
-          if (!isDiffRed && !isAaYellow) diff.data[i + 3] = 0;
-        }
+        const orig = PNG.sync.read(readFileSync(origPath));
+        const comparison = compareImages({ expected: cur, actual: orig, threshold: 0.35, blurRadius: 2 });
         const diffPath = join(outDir, `diff_${f}`);
-        writeFileSync(diffPath, PNG.sync.write(diff));
-        results.push({ file: f, status: "new", diffPixels: n, diffPath });
+        writeDiffPng(diffPath, comparison.diffImage);
+        results.push({ file: f, status: "new", diffPixels: comparison.mismatchedPixels, diffPath });
         continue;
       } catch {
         // fall through — still mark as new
@@ -123,14 +101,8 @@ for (const f of currentFiles) {
     threshold, includeAA: false, alpha: 0,
     diffColor: [255, 0, 0], aaColor: [255, 255, 0],
   });
-  // Make non-diff pixels transparent so the diff PNG overlays cleanly on
-  // the original in the SxS UI (pixelmatch's drawPixel hardcodes alpha=255).
-  for (let i = 0; i < diff.data.length; i += 4) {
-    const r = diff.data[i], g = diff.data[i + 1], b = diff.data[i + 2];
-    const isDiffRed = r === 255 && g === 0 && b === 0;
-    const isAaYellow = r === 255 && g === 255 && b === 0;
-    if (!isDiffRed && !isAaYellow) diff.data[i + 3] = 0;
-  }
+  // Transparent except the marks, so the diff PNG overlays cleanly on the original in the SxS UI.
+  keepOnlyDiffMarks(diff.data);
   if (n > 0) {
     const diffPath = join(outDir, `diff_${f}`);
     writeFileSync(diffPath, PNG.sync.write(diff));

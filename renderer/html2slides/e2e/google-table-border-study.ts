@@ -20,9 +20,10 @@
  *     --out html2slides/e2e/_border/out --title gtl-border
  */
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { google } from "googleapis";
+import { loadDevOAuthClient } from "../dev-google-auth.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "_border");
@@ -84,12 +85,7 @@ function cmdGen() {
 }
 
 function auth() {
-  const creds = JSON.parse(readFileSync(resolve("/workspaces/sashaslides/.auth/google_oauth.json"), "utf-8"));
-  const tokens = JSON.parse(readFileSync(resolve("/workspaces/sashaslides/.auth/tokens.json"), "utf-8"));
-  const c = creds.installed || creds.web || creds;
-  const o = new google.auth.OAuth2(c.client_id, c.client_secret, c.redirect_uris?.[0]);
-  o.setCredentials(tokens);
-  return o;
+  return loadDevOAuthClient({ persistRefreshedTokens: false });
 }
 
 async function cmdAnalyze() {

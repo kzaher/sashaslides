@@ -4,42 +4,18 @@
  *
  * Usage: npx tsx screenshot-html-slides.ts <html-dir> [output-dir]
  *
- * Opens slides in Chrome at 1280x720@2x and captures screenshots.
- * Processes slides in parallel batches for speed.
+ * Captures every slide at 1280x720@2x as <name>.png with the converter's one HTML screenshotter
+ * (renderer/html2slides/reverse/chrome-capture.ts: load event subscribed before navigating, font
+ * readiness polled, not slept for). TAB_COUNT tabs, each in a window of its own, share the work.
  */
 
-import CDPraw from "chrome-remote-interface";
 import { writeFileSync, mkdirSync, readdirSync } from "fs";
 import { join, resolve } from "path";
-import type { CdpModule } from "../../types/cdp-types.ts";
-
-const CDP = CDPraw as CdpModule;
+import { pathToFileURL } from "url";
+import { openChromeTab } from "../../renderer/html2slides/reverse/chrome-capture.ts";
 
 const CDP_PORT = 9222;
-const BATCH_SIZE = 5; // parallel tabs at once
-
-async function screenshotOne(filePath: string, outPath: string): Promise<void> {
-  const tab = await CDP.New({ port: CDP_PORT, url: `file://${filePath}` });
-  try {
-    const client = await CDP({ target: tab, port: CDP_PORT });
-    const { Page, Emulation, Runtime } = client;
-    await Page.enable();
-    await Runtime.enable();
-    await Emulation.setDeviceMetricsOverride({ width: 1280, height: 720, deviceScaleFactor: 2, mobile: false });
-
-    // Wait for fonts instead of sleeping
-    await Runtime.evaluate({ expression: `document.fonts.ready.then(() => true)`, awaitPromise: true, returnByValue: true })
-      .catch(() => {}); // fallback if no fonts
-    // Small settle time for layout
-    await new Promise(r => setTimeout(r, 200));
-
-    const screenshot = await Page.captureScreenshot({ format: "png", captureBeyondViewport: false });
-    writeFileSync(outPath, Buffer.from(screenshot.data, "base64"));
-    await client.close();
-  } finally {
-    await CDP.Close({ port: CDP_PORT, id: tab.id }).catch(() => {});
-  }
-}
+const TAB_COUNT = 5;
 
 async function main() {
   const args = process.argv.slice(2);
@@ -61,23 +37,26 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`Screenshotting ${htmlFiles.length} slides (batch size ${BATCH_SIZE})`);
+  console.log(`Screenshotting ${htmlFiles.length} slides (${TAB_COUNT} tabs)`);
   const t0 = Date.now();
 
-  // Process in parallel batches
-  for (let i = 0; i < htmlFiles.length; i += BATCH_SIZE) {
-    const batch = htmlFiles.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(async (file) => {
-      const filePath = join(htmlDir, file);
+  const queue = [...htmlFiles];
+  const worker = async (): Promise<void> => {
+    await using tab = await openChromeTab({ port: CDP_PORT, deviceScaleFactor: 2 });
+    for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
+      const capture = await tab.capture({ address: pathToFileURL(join(htmlDir, file)).href });
       const outName = file.replace(".html", ".png");
-      const outPath = join(outputDir, outName);
-      await screenshotOne(filePath, outPath);
+      writeFileSync(join(outputDir, outName), capture.png);
       console.log(`  ${outName}`);
-    }));
-  }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(TAB_COUNT, htmlFiles.length) }, worker));
 
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`\nDone! ${htmlFiles.length} screenshots in ${elapsed}s → ${outputDir}/`);
 }
 
-main().catch(err => { console.error("Screenshot failed:", err); process.exit(1); });
+main().catch((cause: unknown) => {
+  console.error(cause);
+  process.exit(1);
+});

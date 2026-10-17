@@ -12,7 +12,6 @@
  *   - injectGradients(pptxPath, registry) — file-based wrapper for the in-zip
  *                                  helper that writes the patched bytes back.
  *   - injectStrokeAlignment(pptxPath) — file-based wrapper, ditto.
- *   - getAuth() — load the project's stored OAuth tokens for Drive.
  *   - runConvertPptx(opts) — orchestrator: walk a fixture directory in
  *                                  parallel, build a pptx, post-process, and
  *                                  (unless noUpload) upload to Drive.
@@ -20,7 +19,6 @@
 
 import CDPraw from "chrome-remote-interface";
 import { google } from "googleapis";
-import type { Credentials } from "google-auth-library";
 import type { CdpModule } from "../../types/cdp-types.ts";
 import { readFileSync, writeFileSync, readdirSync } from "fs";
 import { join, resolve, dirname, basename } from "path";
@@ -28,6 +26,7 @@ import { Readable } from "stream";
 import JSZip from "jszip";
 
 import { extractorScript } from "./extractor-script.ts";
+import { loadDevOAuthClient } from "./dev-google-auth.ts";
 
 import {
   buildEditableSvg,
@@ -75,19 +74,6 @@ export function clampOversampling(n: number | undefined | null): number {
   const v = Number(n);
   if (!Number.isFinite(v)) return 2;
   return Math.min(8, Math.max(1, v));
-}
-
-// --- Auth ----------------------------------------------------------------
-export function getAuth() {
-  const creds = JSON.parse(readFileSync("/workspaces/sashaslides/.auth/google_oauth.json", "utf-8")).installed;
-  const tokens = JSON.parse(readFileSync("/workspaces/sashaslides/.auth/tokens.json", "utf-8"));
-  const oauth2 = new google.auth.OAuth2(creds.client_id, creds.client_secret, "http://localhost:8080");
-  oauth2.setCredentials(tokens);
-  oauth2.on("tokens", (newTokens: Credentials) => {
-    const merged = { ...tokens, ...newTokens };
-    writeFileSync("/workspaces/sashaslides/.auth/tokens.json", JSON.stringify(merged, null, 2));
-  });
-  return oauth2;
 }
 
 // --- DOM Extraction ------------------------------------------------------
@@ -438,7 +424,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
 
   // Step 3: Upload to Google Drive as Google Slides
   console.log("\nUploading to Google Slides...");
-  const auth = getAuth();
+  const auth = loadDevOAuthClient({ persistRefreshedTokens: true });
   const driveApi = google.drive({ version: "v3", auth });
 
   const buf = readFileSync(pptxPath);

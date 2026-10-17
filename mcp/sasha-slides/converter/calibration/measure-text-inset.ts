@@ -34,6 +34,9 @@ import { outsetForTextInset, pageScaleFor, placeBox } from "../geometry.js";
 import type { PageScale, TextInsetEmu } from "../geometry.js";
 import { DEFAULT_TEXT_INSET_EMU } from "../geometry.js";
 import type { SlidesApiRequest } from "../slides-api.js";
+import { createGoogleSlidesSource, developerSourceDependencies } from "../../../../renderer/html2slides/reverse/google-slides-source.ts";
+import type { GoogleSlidesSource } from "../../../../renderer/html2slides/reverse/google-slides-source.ts";
+import { argAfter } from "./args.js";
 import { applyBatch, slidesClient } from "./slides-client.js";
 import type { SlidesClient } from "./slides-client.js";
 import { decodePng, inkEdges, linearFit } from "./ink.js";
@@ -69,12 +72,6 @@ const ROUND_CANDIDATES = [
   { label: "0.1in (shipped horizontal)", emu: 91440 },
   { label: "10px", emu: 95250 },
 ] as const;
-
-function argAfter(flag: string): string | null {
-  const index = process.argv.indexOf(flag);
-  const value = index === -1 ? undefined : process.argv[index + 1];
-  return value ?? null;
-}
 
 /**
  * Font sizes to probe. More points and a wider spread tighten the intercept;
@@ -123,6 +120,7 @@ async function main(): Promise<void> {
 
 async function run(options: Readonly<{ client: SlidesClient; presentationId: string }>): Promise<void> {
   const { client, presentationId } = options;
+  const source = createGoogleSlidesSource(developerSourceDependencies((line) => console.log(line)));
   const opening = await client.slides.presentations.get({ presentationId });
   const pageSize = opening.data.pageSize;
   const widthEmu = pageSize?.width?.magnitude;
@@ -159,8 +157,8 @@ async function run(options: Readonly<{ client: SlidesClient; presentationId: str
   const applied = await applyBatch({ client, presentationId, requests: probeRequests });
   if (!applied.ok) throw new Error(`probe batch rejected: ${applied.failure.message}`);
 
-  const topImage = await thumbnail({ client, presentationId, pageObjectId: "calTop" });
-  const endImage = await thumbnail({ client, presentationId, pageObjectId: "calEnd" });
+  const topImage = await thumbnail({ source, presentationId, pageObjectId: "calTop" });
+  const endImage = await thumbnail({ source, presentationId, pageObjectId: "calEnd" });
   const pixelsPerInch = topImage.width / page.widthIn;
   console.log(`thumbnail ${topImage.width}x${topImage.height} -> ${pixelsPerInch.toFixed(2)} px/in`);
 
@@ -229,6 +227,7 @@ async function run(options: Readonly<{ client: SlidesClient; presentationId: str
 
   const verification = await verifyCompensation({
     client,
+    source,
     presentationId,
     page,
     measured,
@@ -330,13 +329,14 @@ type VerificationRow = Readonly<{
 async function verifyCompensation(
   options: Readonly<{
     client: SlidesClient;
+    source: GoogleSlidesSource;
     presentationId: string;
     page: Page;
     measured: TextInsetEmu;
     slopes: Readonly<{ left: number; top: number }>;
   }>,
 ): Promise<readonly VerificationRow[]> {
-  const { client, presentationId, page, measured, slopes } = options;
+  const { client, source, presentationId, page, measured, slopes } = options;
   const scale = pageScaleFor({
     viewportPx: VIEWPORT_PX,
     pageSizeEmu: {
@@ -364,7 +364,7 @@ async function verifyCompensation(
   const applied = await applyBatch({ client, presentationId, requests });
   if (!applied.ok) throw new Error(`verification batch rejected: ${applied.failure.message}`);
 
-  const image = await thumbnail({ client, presentationId, pageObjectId: "calVerify" });
+  const image = await thumbnail({ source, presentationId, pageObjectId: "calVerify" });
   const pixelsPerInch = image.width / page.widthIn;
   const rows: VerificationRow[] = [];
   console.log("\nverification — residual displacement of the TEXT from its target point:");
@@ -456,21 +456,14 @@ function compensatedBox(
   ];
 }
 
+/** Google's LARGE PNG thumbnail of one page, paced under the thumbnail quota (google-slides-source.ts). */
 async function thumbnail(
-  options: Readonly<{ client: SlidesClient; presentationId: string; pageObjectId: string }>,
+  options: Readonly<{ source: GoogleSlidesSource; presentationId: string; pageObjectId: string }>,
 ): Promise<Image> {
-  const response = await options.client.slides.presentations.pages.getThumbnail({
-    presentationId: options.presentationId,
-    pageObjectId: options.pageObjectId,
-    "thumbnailProperties.mimeType": "PNG",
-    "thumbnailProperties.thumbnailSize": "LARGE",
-  });
-  const url = response.data.contentUrl;
-  if (typeof url !== "string") throw new Error("getThumbnail returned no contentUrl");
-  const fetched = await fetch(url);
-  if (!fetched.ok) throw new Error(`thumbnail fetch failed: ${fetched.status}`);
-  return decodePng(Buffer.from(await fetched.arrayBuffer()));
+  const png = await options.source.downloadThumbnail({ presentationId: options.presentationId, pageObjectId: options.pageObjectId });
+  return decodePng(Buffer.from(png));
 }
+
 
 main().catch((error: unknown) => {
   console.error(error);
