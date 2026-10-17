@@ -25,8 +25,7 @@ import { type JSX, type ReactNode } from "react";
 import { SlideThumb } from "./slide-thumb.tsx";
 import { previewOf, type SlidePreviews } from "./slide-previews.ts";
 import { SASHA_ICON_SVG } from "../../http/sasha-icon.generated.ts";
-import { PICKER_CSS } from "./picker-styles.ts";
-import { TIDEPOOL_CSS } from "./tidepool-styles.ts";
+import { SIDEBAR_STYLESHEETS } from "./surface-stylesheets.ts";
 import { SetupGuide, type SetupEnvironment } from "./setup-guide.tsx";
 import { plural } from "./plural.ts";
 import { assertNever } from "./protocol.ts";
@@ -532,8 +531,11 @@ function slideLabelOf(slide: ConversationSlide): string {
 function ConversationShell({ children }: { children: ReactNode }): JSX.Element {
   return (
     <>
-      <style>{PICKER_CSS}</style>
-      <style>{TIDEPOOL_CSS}</style>
+      {/* ONE <style> PER SHEET, not one joined: an @import only counts at the top of its sheet, and
+          the Tidepool look starts with the one that loads its font. */}
+      {SIDEBAR_STYLESHEETS.map((css, index) => (
+        <style key={index}>{css}</style>
+      ))}
       <div className="sasha-shell sasha-tide">
         <div className="sasha-tide-ambient" aria-hidden="true">
           <span />

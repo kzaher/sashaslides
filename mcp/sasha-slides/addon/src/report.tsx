@@ -57,7 +57,7 @@ import {
   type DefectEvent,
 } from "./defect-state.ts";
 import { DefectPanel, type DefectActions } from "./Defect.tsx";
-import { PICKER_CSS } from "./picker-styles.ts";
+import { REPORT_STYLESHEETS } from "./surface-stylesheets.ts";
 import { createSlideEditor } from "./editor/index.ts";
 import {
   browserHttpPost,
@@ -461,7 +461,7 @@ function ReportSurfacePanel({ surface }: { surface: ReportSurface }): ReturnType
     case "connecting":
       return (
         <>
-          <style>{PICKER_CSS}</style>
+          <style>{REPORT_STYLESHEETS.join("\n")}</style>
           <div className="sasha-shell sasha-shell-wide">
             <p className="sasha-busy">{surface.what}</p>
           </div>
@@ -470,7 +470,7 @@ function ReportSurfacePanel({ surface }: { surface: ReportSurface }): ReturnType
     case "trouble":
       return (
         <>
-          <style>{PICKER_CSS}</style>
+          <style>{REPORT_STYLESHEETS.join("\n")}</style>
           <div className="sasha-shell sasha-shell-wide">
             <p className="sasha-trouble">sasha-slides: {surface.message}</p>
           </div>
@@ -479,7 +479,7 @@ function ReportSurfacePanel({ surface }: { surface: ReportSurface }): ReturnType
     case "reporting":
       return (
         <>
-          <style>{PICKER_CSS}</style>
+          <style>{REPORT_STYLESHEETS.join("\n")}</style>
           <div className="sasha-shell sasha-shell-wide">
             <DefectPanel defect={surface.defect} actions={actions} />
           </div>

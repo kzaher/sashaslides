@@ -126,7 +126,7 @@ var SASHA_INBOX_FOLDER_NAME = 'Sasha Slides Inbox';
 // the view toggle and the footer need ~600px of grid, and 700 left the second row's caption below
 // the fold (seen in the smoke screenshot). Four candidates visible at once is the entire reason
 // this surface exists, so the height is set to fit them. A shorter window clamps it and THE GRID
-// SCROLLS -- never the shell, and never the footer (picker-styles.ts).
+// SCROLLS -- never the shell, and never the footer (window-styles.ts, dialog-styles.ts).
 var SASHA_DIALOG_WIDTH = 1000;
 var SASHA_DIALOG_HEIGHT = 760;
 // The DEFECT-REPORT window. Wider and taller than the slides window because its whole content is

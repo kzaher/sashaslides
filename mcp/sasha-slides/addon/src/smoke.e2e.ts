@@ -316,7 +316,7 @@ async function driveDialog({ failures }: { failures: string[] }): Promise<void> 
     });
 
     // THE GRID SAYS WHAT THE PICTURES ARE FOR, and not dimly: without it a slide reads as a
-    // thumbnail, and nobody clicks a thumbnail (picker-styles.ts `.sasha-toolbar-say`).
+    // thumbnail, and nobody clicks a thumbnail (window-styles.ts `.sasha-toolbar-say`).
     const callToAction = await evaluateString({
       client,
       expression: "(document.querySelector('.sasha-toolbar-say')||{}).textContent||''",
@@ -1667,7 +1667,7 @@ async function driveReport({ failures }: { failures: string[] }): Promise<void> 
 
     // THE WHOLE SURFACE, not the first 800 px of it -- INCLUDING BOTH SLIDES OF THE PAIR. The
     // REPORT PANEL's own scroll height, not the document's: the panel is the scroller here
-    // (picker-styles.ts), so the document stays exactly one viewport tall however long the notes
+    // (report-styles.ts), so the document stays exactly one viewport tall however long the notes
     // are. A taller viewport makes the panel taller, which is what puts the two slides, the notes,
     // the note box, the endpoint field and the send verdict in one picture.
     const reportHeight = await evaluateNumber({

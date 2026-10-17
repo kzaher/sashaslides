@@ -25,7 +25,13 @@ export function replay<State, Event>(
 
 /** The slides window's tree for `state`, with actions that do nothing. */
 export function pickerMarkupOf(state: PickerState): string {
-  return renderToStaticMarkup(createElement(Picker, { state, actions: INERT_PICKER_ACTIONS }));
+  // Without the shell's <style>: its rules name every class (`.sasha-mark-converter`), so a test
+  // asking whether the VIEW drew one would otherwise always find it. It used to be dropped by the
+  // renderer itself, which leaves a <style> with several children empty on the server.
+  return renderToStaticMarkup(createElement(Picker, { state, actions: INERT_PICKER_ACTIONS })).replace(
+    /<style>[^<]*<\/style>/,
+    "",
+  );
 }
 
 /** Ask Sasha's tree for `conversation`, with no hosted connector and actions that do nothing. */

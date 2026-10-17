@@ -17,9 +17,7 @@
 // (see picker-state.ts), and so is the defect-report mode: that is a third document now.
 
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import { PICKER_CSS } from "./picker-styles.ts";
-import { TIDEPOOL_CALM_CSS } from "./tidepool-calm-styles.ts";
-import { ELEMENT_INSPECTOR_CSS } from "./element-inspector.tsx";
+import { DIALOG_STYLESHEETS } from "./surface-stylesheets.ts";
 import { SlideEditorWindow } from "./slide-editor-window.tsx";
 import { CommentCard, CommentHead } from "./comment-card.tsx";
 import { CandidateGrid } from "./candidate-grid.tsx";
@@ -577,18 +575,12 @@ function readDiagnostics(): ReturnType<typeof collectDiagnostics> {
 /**
  * The DIALOG's shell. `sasha-shell-wide` is what distinguishes it from the sidebar's: the two are
  * separate HtmlService documents, each inlining its own copy of the same CSS, and the parts that
- * differ are scoped by this class rather than by a second stylesheet. See picker-styles.ts.
+ * differ are scoped by this class. Its sheets are DIALOG_STYLESHEETS (surface-stylesheets.ts).
  */
 function Shell({ children }: { children: ReactNode }): JSX.Element {
   return (
     <>
-      {/* The inspector ships its own rules with the component rather than having them live in a
-          stylesheet it does not own; one more string in the same tag costs nothing. */}
-      <style>
-        {PICKER_CSS}
-        {ELEMENT_INSPECTOR_CSS}
-        {TIDEPOOL_CALM_CSS}
-      </style>
+      <style>{DIALOG_STYLESHEETS.join("\n")}</style>
       <div className="sasha-shell sasha-shell-wide sasha-calm">{children}</div>
     </>
   );

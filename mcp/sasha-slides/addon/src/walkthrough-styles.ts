@@ -1,11 +1,11 @@
 // THE SETUP WALKTHROUGH'S STYLES: the player (controls, caption) and the three mock sites.
 //
-// Rendered by the player itself rather than spliced into PICKER_CSS: every surface ships
-// PICKER_CSS, and these rules would have cost the slides dialog 17 KB of its 500 KB budget for a
-// panel only the sidebar shows (measured 2026-10-14: Dialog.html 482 -> 499 KB). build-addon.ts
-// minifies this module at bundle time, as it does the shared stylesheet.
+// Rendered by the player itself rather than spliced into a surface's sheets: these rules would have
+// cost the slides dialog 17 KB of its 500 KB budget for a panel only the sidebar shows (measured
+// 2026-10-14: Dialog.html 482 -> 499 KB). build-addon.ts minifies this module at bundle time, as it
+// does every other stylesheet.
 //
-// Fonts are set on classes, and `.sasha-wt-screen *` inherits: PICKER_CSS sets `font-family` on `*`,
+// Fonts are set on classes, and `.sasha-wt-screen *` inherits: BASE_CSS sets `font-family` on `*`,
 // which would otherwise stop inheritance at every element. Sizes inside `.sasha-wt-stage` are in the stage's
 // own 800x500 pixels and shrink with it; the controls and caption are outside it, at page size.
 

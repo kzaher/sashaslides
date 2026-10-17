@@ -1,8 +1,8 @@
-// ONE STYLESHEET, TWO SURFACES: a class name may mean exactly one thing.
+// SHARED SHEETS, SEVERAL SURFACES: a class name may mean exactly one thing.
 //
-// `PICKER_CSS` is shipped by BOTH the slides dialog and the Ask Sasha sidebar (Conversation.tsx
-// renders it in its own `<style>`), so every rule in it applies to both documents. A class name
-// reused for a different component therefore silently restyles the other surface.
+// `BASE_CSS` ships on every surface and `WINDOW_CSS` on both wide windows (surface-stylesheets.ts),
+// so a rule in either applies to several documents. A class name reused for a different component
+// therefore silently restyles another surface -- and until 2026-10-17 ONE sheet shipped everywhere.
 //
 // THIS HAS HAPPENED TWICE. `.sasha-editor` was the visual editor's slot AND the editor window, so
 // the window's card rules (white, rounded, shadowed, overflow hidden) landed on the little panel.
@@ -15,9 +15,9 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PICKER_CSS } from "./picker-styles.ts";
+import { DIALOG_STYLESHEETS, SIDEBAR_STYLESHEETS } from "./surface-stylesheets.ts";
 
-/** Every class name a rule in the shared stylesheet targets. */
+/** Every class name a rule in the given stylesheet targets. */
 function styledClasses(css: string): ReadonlySet<string> {
   const found = new Set<string>();
   for (const match of css.matchAll(/\.([a-z][a-z0-9-]*)/gi)) {
@@ -46,18 +46,15 @@ test("the dialog's own class families are not the sidebar's, and never the rever
 });
 
 test("THE POPUP BUG: the slide comment popup does not take the sidebar's message-box name", () => {
-  const styled = styledClasses(PICKER_CSS);
-  // The popup exists under its own name...
-  assert.ok(styled.has("sasha-spot"), "the slide comment popup is styled");
-  // ...and it is NOT the floating treatment applied to `.sasha-composer`, which the sidebar uses
-  // for the box you type a message into. A rule for that class here would hover a tailed card
-  // over the Ask Sasha log, which is exactly what shipped.
-  assert.ok(
-    !/\.sasha-composer\s*\{[^}]*position:\s*absolute/.test(PICKER_CSS),
-    "the sidebar's message box must not be given the popup's absolute positioning",
-  );
-  assert.ok(
-    !/\.sasha-composer[^{]*::before/.test(PICKER_CSS),
-    "nor the popup's tail",
-  );
+  // The popup exists under its own name, on the dialog...
+  assert.ok(styledClasses(DIALOG_STYLESHEETS.join("\n")).has("sasha-spot"), "the slide comment popup is styled");
+  // ...and NEITHER surface gives `.sasha-composer`, the sidebar's box you type a message into, the
+  // popup's floating treatment: that hovered a tailed card over the Ask Sasha log, which shipped.
+  for (const css of [DIALOG_STYLESHEETS.join("\n"), SIDEBAR_STYLESHEETS.join("\n")]) {
+    assert.ok(
+      !/\.sasha-composer\s*\{[^}]*position:\s*absolute/.test(css),
+      "the sidebar's message box must not be given the popup's absolute positioning",
+    );
+    assert.ok(!/\.sasha-composer[^{]*::before/.test(css), "nor the popup's tail");
+  }
 });

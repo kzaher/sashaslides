@@ -106,7 +106,7 @@ addon/
     report-state.ts     the REPORT window's three statuses around `Defect`, and target selection
     report.tsx          the REPORT window's composition root (the third bundle)
     editor-pane.tsx     ONE slide in the editor, with its own frame and edits -- the report shows two
-    picker-styles.ts    the CSS for all three surfaces; `.sasha-shell-wide` is the wide ones\
+    *-styles.ts         one sheet per surface on a shared base; surface-stylesheets.ts says which\
     feedback.ts         the feedback WIRE CONTRACT: a note <-> a Slides comment body
     rendered-preview.ts the "rendered slide" projection of a batchUpdate
     html-check.ts       PROTOCOL.md's self-contained-1280x720 check
@@ -332,7 +332,7 @@ candidate it could not read.
   Current: **`Sidebar.html` 294 KB, `Dialog.html` 427 KB, `Report.html` 448 KB.** The report grew
   because it now carries the visual editor (~23 KB bundled) for its two panes; merging it back into
   `Dialog.html` would be ~870 KB and is not an option, so the two stay separate documents that share
-  components (`editor-pane.tsx`, `scaled-frame.tsx`, `picker-styles.ts`). `Dialog.html` was
+  components (`editor-pane.tsx`, `scaled-frame.tsx`, `base-styles.ts`, `window-styles.ts`). `Dialog.html` was
   **553 KB** before this work and over the observed threshold. Two decisions brought it back:
 
   1. **The defect report became its own document.** `src/anonymise/` (~47 KB bundled), `Defect.tsx`,

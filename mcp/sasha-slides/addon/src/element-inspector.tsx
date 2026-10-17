@@ -103,37 +103,6 @@ export type ElementInspectorProps = Readonly<{
 }>;
 
 /**
- * The inspector's own rules, spliced into PICKER_CSS by the shells.
- *
- * An array joined rather than a template literal: PICKER_CSS is itself one template literal, so a
- * backtick or a dollar-brace in here would terminate it.
- */
-export const ELEMENT_INSPECTOR_CSS = [
-  ".sasha-ei { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }",
-  ".sasha-ei-empty { margin: 10px 0 0; line-height: 1.5; }",
-  ".sasha-ei-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 12px; }",
-  ".sasha-ei-tag { font-size: 13px; color: #202124; }",
-  ".sasha-ei-selector {",
-  "  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;",
-  "  font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #5f6368;",
-  "}",
-  ".sasha-ei-markup {",
-  "  width: 100%; resize: vertical; min-height: 120px;",
-  "  font-family: ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.5; color: #202124;",
-  "  background: #fff; border: 1px solid #dadce0; border-radius: 4px; padding: 6px 8px;",
-  "  white-space: pre; overflow-wrap: normal; overflow-x: auto;",
-  "}",
-  ".sasha-ei-markup:disabled { background: #f1f3f4; color: #5f6368; }",
-  ".sasha-ei-actions { display: flex; gap: 6px; }",
-  ".sasha-ei-apply, .sasha-ei-revert {",
-  "  cursor: pointer; border: 1px solid #dadce0; border-radius: 4px; background: #fff;",
-  "  padding: 4px 12px; font-size: 12px; color: #202124;",
-  "}",
-  ".sasha-ei-apply { border-color: #1a73e8; background: #1a73e8; color: #fff; font-weight: 600; }",
-  ".sasha-ei-apply:disabled, .sasha-ei-revert:disabled { cursor: default; opacity: .5; }",
-].join("\n");
-
-/**
  * ONE TAG PER LINE, two spaces of indent.
  *
  * Pure, DOM-free and IDEMPOTENT: formatting already-formatted markup returns it unchanged, which is

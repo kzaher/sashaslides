@@ -45,21 +45,18 @@
  *
  * Run: cd mcp/sasha-slides/addon && npx tsx build-addon.ts
  */
-import { build, transformSync, type Plugin } from "esbuild";
+import { build, transformSync } from "esbuild";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findBinary, minifiedStylesheets } from "./build-support.ts";
 import { APPS_SCRIPT_MANIFEST, codeGs, DEFAULT_EDITOR_ORIGIN, GENERATED_BY } from "./src/apps-script-project.ts";
 import { extractorScript } from "../../../renderer/html2slides/extractor-script.ts";
 import { SERVER_FUNCTION_NAMES } from "./src/bridge.ts";
 import { connectorUrlOf } from "./src/connector-url.ts";
 import { EDITOR_SHELL_BUDGET_BYTES, SURFACE_BUDGET_BYTES } from "./src/surface-budget.ts";
-import { PICKER_CSS } from "./src/picker-styles.ts";
-import { TIDEPOOL_CALM_CSS } from "./src/tidepool-calm-styles.ts";
-import { TIDEPOOL_CSS } from "./src/tidepool-styles.ts";
-import { WALKTHROUGH_CSS } from "./src/walkthrough-styles.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -69,7 +66,7 @@ const TYPECHECK_PROJECTS = ["tsconfig.json", "tsconfig.test.json"] as const;
 async function main(): Promise<void> {
   // 1. THE GATE, before anything is emitted. Two projects: the shipped sources (browser types only)
   //    and the tests (which may also see @types/node). Both must be clean.
-  const tsc = findBinary("tsc");
+  const tsc = findBinary({ name: "tsc", roots: [HERE, REPO_ROOT], caller: "build-addon.ts" });
   for (const project of TYPECHECK_PROJECTS) {
     process.stdout.write(`typecheck  ${project}\n`);
     execFileSync(tsc, ["--noEmit", "-p", join(HERE, project)], { stdio: "inherit" });
@@ -218,40 +215,6 @@ async function main(): Promise<void> {
   process.stdout.write(`\nclasp:  cd ${OUT} && clasp push\n`);
 }
 
-/**
- * THE STYLESHEET SHIPS MINIFIED. picker-styles.ts is a template string written for people -- 82
- * block comments and indentation -- and esbuild's JS minifier leaves a string's contents alone, so
- * every surface used to carry all of it. Measured 2026-10-14: 52,165 -> 27,991 characters through
- * esbuild's own CSS minifier, about 24 KB off each page, which is what let the merge path
- * (src/merge-apply.ts) fit Dialog.html back under SURFACE_BUDGET_BYTES -- it had 1.5 KB left. The
- * module is swapped at bundle time for one exporting the minified string, so the source stays
- * readable and shared-css.test.ts still reads the original.
- */
-const MINIFIED_STYLESHEET: Plugin = {
-  name: "sasha-minified-stylesheet",
-  setup(builder) {
-    builder.onLoad({ filter: /[\\/]picker-styles\.ts$/ }, () => ({
-      contents: `export const PICKER_CSS = ${JSON.stringify(transformSync(PICKER_CSS, { loader: "css", minify: true }).code)};`,
-      loader: "ts",
-    }));
-    // The setup walkthrough's own stylesheet (src/walkthrough-player.tsx renders it), the same way.
-    builder.onLoad({ filter: /[\\/]walkthrough-styles\.ts$/ }, () => ({
-      contents: `export const WALKTHROUGH_CSS = ${JSON.stringify(transformSync(WALKTHROUGH_CSS, { loader: "css", minify: true }).code)};`,
-      loader: "ts",
-    }));
-    // The slides window's calmer Tidepool (src/tidepool-calm-styles.ts), the same way.
-    builder.onLoad({ filter: /[\\/]tidepool-calm-styles\.ts$/ }, () => ({
-      contents: `export const TIDEPOOL_CALM_CSS = ${JSON.stringify(transformSync(TIDEPOOL_CALM_CSS, { loader: "css", minify: true }).code)};`,
-      loader: "ts",
-    }));
-    // The sidebar's Tidepool look (src/tidepool-styles.ts), the same way.
-    builder.onLoad({ filter: /[\\/]tidepool-styles\.ts$/ }, () => ({
-      contents: `export const TIDEPOOL_CSS = ${JSON.stringify(transformSync(TIDEPOOL_CSS, { loader: "css", minify: true }).code)};`,
-      loader: "ts",
-    }));
-  },
-};
-
 /** One surface's inlined IIFE bundle. */
 async function bundleSurface({
   entry,
@@ -274,7 +237,7 @@ async function bundleSurface({
     legalComments: "none",
     logLevel: "warning",
     define: { ...define },
-    plugins: [MINIFIED_STYLESHEET],
+    plugins: [minifiedStylesheets()],
   });
   const text = bundled.outputFiles?.[0]?.text;
   if (text === undefined) throw new Error(`esbuild produced no output for ${entry}`);
@@ -353,14 +316,6 @@ function kb(text: string): string {
 }
 
 /** The repo root's binary, or the add-on's own if someone ran npm install here. */
-function findBinary(name: string): string {
-  for (const base of [join(HERE, "node_modules", ".bin"), join(REPO_ROOT, "node_modules", ".bin")]) {
-    const candidate = join(base, name);
-    if (existsSync(candidate)) return candidate;
-  }
-  throw new Error(`build-addon.ts: no ${name} -- run 'npm install' at the repo root`);
-}
-
 main().catch((cause: unknown) => {
   process.stderr.write(`build-addon failed: ${cause instanceof Error ? cause.message : String(cause)}\n`);
   process.exit(1);

@@ -3,9 +3,9 @@
 // slow enough to soothe (30-44 s per shape, minutes per colour swing). The website
 // (renderer/html2slides/addon-server/public/site.css) wears the same look.
 //
-// SIDEBAR ONLY. It is layered after picker-styles.ts and scoped under `.sasha-tide`, so the slides
-// window and the defect report -- Dialog.html sits close to its 500 KB budget -- neither carry nor
-// change. build-addon.ts minifies it like the other stylesheets.
+// SIDEBAR ONLY. It is layered after the sidebar's sheets (surface-stylesheets.ts) and scoped under
+// `.sasha-tide`, so the slides window and the defect report -- Dialog.html sits close to its 500 KB
+// budget -- neither carry nor change. build-addon.ts minifies it like the other stylesheets.
 //
 // Motion stops for anyone who prefers reduced motion; the glass and colours stay.
 

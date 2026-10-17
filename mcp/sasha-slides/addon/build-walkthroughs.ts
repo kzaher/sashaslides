@@ -12,22 +12,22 @@
  * Typechecked first, like build-addon.ts: esbuild strips types without checking them.
  */
 
-import { build, transformSync, type Plugin } from "esbuild";
+import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findBinary, minifiedStylesheets } from "./build-support.ts";
 import { PRODUCTION_CONNECTOR_URL } from "./src/connector-url.ts";
 import { WALKTHROUGH_ROOT_ID } from "./src/walkthrough-page.tsx";
 import { assistantNameOf, WALKTHROUGH_FLOWS, type WalkthroughFlow } from "./src/walkthrough-scripts.ts";
-import { WALKTHROUGH_CSS } from "./src/walkthrough-styles.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
 const OUT = join(REPO_ROOT, "renderer/html2slides/addon-server/public/walkthroughs");
 
 async function main(): Promise<void> {
-  const tsc = findBinary("tsc");
+  const tsc = findBinary({ name: "tsc", roots: [HERE, REPO_ROOT], caller: "build-walkthroughs.ts" });
   process.stdout.write("typecheck  tsconfig.json\n");
   execFileSync(tsc, ["--noEmit", "-p", join(HERE, "tsconfig.json")], { stdio: "inherit" });
 
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
     legalComments: "none",
     logLevel: "warning",
     define: { "process.env.NODE_ENV": '"production"' },
-    plugins: [MINIFIED_WALKTHROUGH_STYLESHEET],
+    plugins: [minifiedStylesheets()],
   });
   const script = bundled.outputFiles?.[0]?.text;
   if (script === undefined) throw new Error("esbuild produced no output for walkthrough-page.tsx");
@@ -57,17 +57,6 @@ async function main(): Promise<void> {
     process.stdout.write(`wrote      ${join(OUT, `${flow}.html`)} (${(html.length / 1024).toFixed(0)} KB)\n`);
   }
 }
-
-/** The walkthrough's stylesheet, minified at bundle time as build-addon.ts does; the source stays readable. */
-const MINIFIED_WALKTHROUGH_STYLESHEET: Plugin = {
-  name: "sasha-minified-walkthrough-stylesheet",
-  setup(builder) {
-    builder.onLoad({ filter: /[\\/]walkthrough-styles\.ts$/ }, () => ({
-      contents: `export const WALKTHROUGH_CSS = ${JSON.stringify(transformSync(WALKTHROUGH_CSS, { loader: "css", minify: true }).code)};`,
-      loader: "ts",
-    }));
-  },
-};
 
 /** Connect <assistant> to Sasha Slides, as a page. */
 function pageTitleOf(flow: WalkthroughFlow): string {
@@ -93,14 +82,6 @@ ${script}
 </body>
 </html>
 `;
-}
-
-function findBinary(name: string): string {
-  for (const base of [join(HERE, "node_modules", ".bin"), join(REPO_ROOT, "node_modules", ".bin")]) {
-    const candidate = join(base, name);
-    if (existsSync(candidate)) return candidate;
-  }
-  throw new Error(`build-walkthroughs.ts: no ${name} -- run 'npm install' at the repo root`);
 }
 
 main().catch((cause: unknown) => {

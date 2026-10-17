@@ -1,7 +1,7 @@
 // A candidate's own HTML, rendered at its real 1280x720 and SCALED to whatever box it is given.
 //
 // WHY THIS FILE EXISTS. The sidebar could scale by a constant: an HtmlService sidebar is a fixed
-// 300 px wide, so `transform: scale(0.214)` was exact (picker-styles.ts). A DIALOG cannot --
+// 300 px wide, so `transform: scale(0.214)` was exact (once in the stylesheet). A DIALOG cannot --
 // `setWidth`/`setHeight` are a REQUEST that the browser window clamps, so the cell width is only
 // known at runtime, and it changes again every time the grid reflows between two and one column.
 // A constant would either crop the document or leave half the cell empty.

@@ -9,8 +9,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { DIALOG_CSS } from "./dialog-styles.ts";
 import {
-  ELEMENT_INSPECTOR_CSS,
   ElementInspector,
   type ElementInspectorProps,
   draftTextFor,
@@ -45,7 +45,7 @@ test("a selected element shows the tag in bold and the selector in full in its t
   // The visible selector is clipped by CSS, so the untruncated value has to be reachable.
   assert.ok(markup.includes(`title="${escapeMarkup(selector)}"`), markup);
   assert.match(markup, /class="sasha-ei-selector"/);
-  assert.match(ELEMENT_INSPECTOR_CSS, /\.sasha-ei-selector \{[\s\S]*text-overflow: ellipsis/);
+  assert.match(DIALOG_CSS, /\.sasha-ei-selector \{[\s\S]*text-overflow: ellipsis/);
 });
 
 test("the textarea is monospace and holds the PRETTY-PRINTED markup, not the raw string", () => {
@@ -55,7 +55,7 @@ test("the textarea is monospace and holds the PRETTY-PRINTED markup, not the raw
   // React writes a textarea's value as its text child; both are escaped, which is the point.
   assert.ok(markup.includes(escapeMarkup(formatMarkup(html))), markup);
   assert.ok(!markup.includes(escapeMarkup(html)), "the raw one-line markup should not be what is shown");
-  assert.match(ELEMENT_INSPECTOR_CSS, /\.sasha-ei-markup \{[\s\S]*ui-monospace/);
+  assert.match(DIALOG_CSS, /\.sasha-ei-markup \{[\s\S]*ui-monospace/);
 });
 
 test("Apply and Revert are disabled while the text is unchanged", () => {
@@ -68,11 +68,6 @@ test("`disabled` disables the field and both buttons, so nothing can be committe
   const markup = render({ html: "<p>Hi</p>", selector: "p", disabled: true });
   assert.match(markup, /<textarea[^>]*disabled=""/);
   assert.equal(countOf({ haystack: markup, needle: 'disabled=""' }), 3);
-});
-
-test("the stylesheet fragment can be spliced into PICKER_CSS, which is one template literal", () => {
-  assert.ok(!ELEMENT_INSPECTOR_CSS.includes("`"), "a backtick would terminate PICKER_CSS");
-  assert.ok(!ELEMENT_INSPECTOR_CSS.includes("${"), "a dollar-brace would interpolate inside PICKER_CSS");
 });
 
 test("UNTRUSTED MARKUP NEVER REACHES AN EXECUTABLE POSITION", () => {
