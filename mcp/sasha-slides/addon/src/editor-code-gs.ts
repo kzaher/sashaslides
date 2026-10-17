@@ -23,6 +23,7 @@
  */
 import { ADDON_REQUEST_HEADERS } from "../../engine/src/contracts/deck-api.ts";
 import { COMMENT_ACCESS_PATH } from "../../comment-bot/comment-access-contract.ts";
+import { EDITOR_SEED_ELEMENT_ID } from "./editor-shell.ts";
 
 /**
  * MEASURED, not chosen: the largest modeless dialog Slides shows (SPEC.md 21.13 "at the largest
@@ -80,8 +81,7 @@ function sashaOpenEditor() {
   var page = HtmlService.createHtmlOutputFromFile('EditorShell')
     .setWidth(SASHA_EDITOR_WIDTH)
     .setHeight(SASHA_EDITOR_HEIGHT);
-  // Inert text/plain, like the bundle; every '<' escaped so the JSON cannot end the element.
-  page.append('<script type="text/plain" id="sasha-editor-seed">' + JSON.stringify(seed).replace(/</g, '\\\\u003c') + '</script>');
+  sashaAppendSeed_(page, ${JSON.stringify(EDITOR_SEED_ELEMENT_ID)}, seed);
   SlidesApp.getUi().showModelessDialog(page, 'Sasha editor');
 }
 

@@ -22,7 +22,7 @@
  * PROTOCOL.md requires (a self-contained 1280x720 document), and the one place it could disagree
  * with a browser — a `<` that is not a tag — it resolves the way browsers do, as text.
  */
-import { encodeHtmlAttributeValue } from "./html-entities.ts";
+import { assertNever } from "./never.ts";
 
 /** One attribute, carrying enough source detail to be re-emitted unchanged. */
 export type HtmlAttribute = Readonly<{
@@ -105,30 +105,6 @@ export function tokenizeHtml(html: string): readonly HtmlToken[] {
 /** The inverse of `tokenizeHtml`, byte for byte. */
 export function serializeHtmlTokens(tokens: readonly HtmlToken[]): string {
   return tokens.map(serializeToken).join("");
-}
-
-/** `name`'s attribute, or `null`. Lowercase comparison, because HTML attribute names are ASCII-insensitive. */
-export function attributeNamed({
-  token,
-  name,
-}: {
-  token: Readonly<{ attributes: readonly HtmlAttribute[] }>;
-  name: string;
-}): HtmlAttribute | null {
-  const wanted = name.toLowerCase();
-  return token.attributes.find((attribute) => attribute.name.toLowerCase() === wanted) ?? null;
-}
-
-/**
- * The same attribute with a new value, quoted and escaped so it survives re-parsing.
- *
- * An unquoted source value is promoted to double quotes rather than kept bare: a substitute can
- * contain characters (a space, a `>`) that would end an unquoted value, and silently producing
- * different markup is exactly what this module must not do.
- */
-export function withAttributeValue({ attribute, value }: { attribute: HtmlAttribute; value: string }): HtmlAttribute {
-  const quote = attribute.quote === "" ? '"' : attribute.quote;
-  return { ...attribute, assign: attribute.assign ?? "=", quote, value: encodeHtmlAttributeValue({ text: value, quote }) };
 }
 
 /** The same attribute with a value already escaped by the caller (a CSS or URL rewrite). */
@@ -294,8 +270,4 @@ function readRawText({ html, from, owner }: { html: string; from: number; owner:
 
 function isHtmlWhitespace(character: string): boolean {
   return character === " " || character === "\t" || character === "\n" || character === "\r" || character === "\f";
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled html token: ${JSON.stringify(value)}`);
 }

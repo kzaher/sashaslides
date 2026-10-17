@@ -31,6 +31,7 @@
 
 import { nothingListeningNotice, type NothingListeningNotice } from "../../feedback-delivery.ts";
 import type { ProposalMark } from "./bridge.ts";
+import type { HtmlLoad } from "./html-load.ts";
 import { assertNever, type Manifest, type MergeSpec, type SlideEntry } from "./protocol.ts";
 import { presenceIsSilent, sashaPresenceOf, type PresenceReads, type SashaPresence } from "./waiting.ts";
 import { newestSetChangeIn, slideIndexOf, type SessionEvent } from "./session-log.ts";
@@ -197,7 +198,7 @@ export type ConversationSlide = Readonly<{
   fileId: string;
   name: string;
   label: string;
-  html: SlideHtmlLoad;
+  html: HtmlLoad;
   /**
    * WHICH `slide-revised` EVENT THE BYTES IN HAND BELONG TO, or null for the bytes as first staged.
    *
@@ -207,12 +208,6 @@ export type ConversationSlide = Readonly<{
    */
   fetchedFor: string | null;
 }>;
-
-export type SlideHtmlLoad =
-  | Readonly<{ kind: "unrequested" }>
-  | Readonly<{ kind: "loading" }>
-  | Readonly<{ kind: "loaded"; html: string }>
-  | Readonly<{ kind: "failed"; message: string }>;
 
 /** Asking Apps Script to show another window. It can be refused, and a refusal has to reach the screen. */
 export type OpenPhase =
@@ -1093,7 +1088,7 @@ function wantsFetch({
   fetchedFor,
   latest,
 }: {
-  html: SlideHtmlLoad;
+  html: HtmlLoad;
   fetchedFor: string | null;
   latest: string;
 }): boolean {

@@ -35,6 +35,7 @@
 import { decodeHtmlEntities } from "./html-entities.ts";
 import { tokenizeHtml, type HtmlToken } from "./html-tokens.ts";
 import { hasSubstitutableCharacter } from "./substitute-text.ts";
+import { assertNever } from "./never.ts";
 
 /** The one token kind that carries attributes, named once so the helpers below can say it. */
 type HtmlStartTag = Extract<HtmlToken, { kind: "start-tag" }>;
@@ -209,8 +210,4 @@ function runSiteOf({
   const text = decodeHtmlEntities(middle);
   if (!hasSubstitutableCharacter(text)) return null;
   return { id, kind, tokenIndex, attributeIndex, prefix: leading, text, suffix: trailing };
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled token while collecting text runs: ${JSON.stringify(value)}`);
 }

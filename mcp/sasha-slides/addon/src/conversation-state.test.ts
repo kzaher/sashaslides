@@ -36,6 +36,7 @@ import { sessionEventsOf, type SessionEventFile } from "./session-log.ts";
 import { INERT_CONVERSATION_ACTIONS, UNCONFIGURED_SETUP } from "./inert-actions.ts";
 import { NO_PREVIEWS } from "./slide-previews.ts";
 import type { Manifest } from "./protocol.ts";
+import { conversationMarkupOf as markupOf, replay as replayEvents } from "./test-support.ts";
 
 const AT = "2026-10-04T12:00:00.000Z";
 const PROPOSAL = "p_1733219000000_a1b2c3";
@@ -679,21 +680,7 @@ for (const row of SIMPLIFIED_CASES) {
 // --- fixtures -----------------------------------------------------------------------
 
 function replay(events: readonly ConversationEvent[], from: Conversation = OPENED): Conversation {
-  let conversation = from;
-  for (const event of events) conversation = reduceConversation(conversation, event);
-  return conversation;
-}
-
-function markupOf(conversation: Conversation): string {
-  return renderToStaticMarkup(
-    createElement(ConversationPanel, {
-      conversation,
-      previews: NO_PREVIEWS,
-      commentAccess: null,
-      setup: UNCONFIGURED_SETUP,
-      actions: INERT_CONVERSATION_ACTIONS,
-    }),
-  );
+  return replayEvents(reduceConversation, from, events);
 }
 
 /** The staged set with its manifest read and this log. */

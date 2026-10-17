@@ -25,15 +25,15 @@
 // visible runs, its long poll and its parse are gone from here -- with them went the only reason
 // this window ever sent the slide's own words anywhere.
 
-import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
 import {
   appsScriptCall,
   appsScriptDriveApi,
   appsScriptReportTargetApi,
-  helloFromServer,
+  connect,
+  notConnected,
 } from "./bridge-client.ts";
-import { presentationIdOf } from "./bridge.ts";
+import { INBOX_PAGE_SIZE, presentationIdOf } from "./bridge.ts";
 import { browserReportConverter } from "./converter-contract.ts";
 import {
   anonymiseSlideHtml,
@@ -68,7 +68,9 @@ import {
 } from "./report-endpoint.ts";
 import type { DriveApi } from "./drive-api.ts";
 import { newPageObjectId } from "./slide-insert.ts";
-import { PROTOCOL_VERSION, assertNever, parseManifest, parseReadyMarker, type SlideEntry } from "./protocol.ts";
+import { PROTOCOL_VERSION, assertNever, type SlideEntry } from "./protocol.ts";
+import { readStagedManifest } from "./staged-set.ts";
+import { extractorSource, stageElement, surfaceRenderer } from "./surface-host.ts";
 import {
   INITIAL_REPORT_SURFACE,
   chosenTarget,
@@ -80,11 +82,6 @@ import {
 } from "./report-state.ts";
 import { stagedProposalsOf } from "./conversation-state.ts";
 
-const ROOT_ELEMENT_ID = "sasha-slides-root";
-/** Where the converter parks its offscreen 1280x720 staging iframe. */
-const STAGE_ELEMENT_ID = "sasha-slides-stage";
-/** One scan of the inbox. The same page size the observer uses. */
-const SCAN_PAGE_SIZE = 100;
 /**
  * THE BUILD IDENTIFIERS THAT TRAVEL WITH A DEFECT REPORT, and they are the only version strings in
  * the payload. The report service's schema allows exactly three (`addon`, `converter`, `protocol`)
@@ -96,7 +93,7 @@ const ADDON_VERSION = "0.1.0";
 const CONVERTER_VERSION = "2026.10.04";
 
 let state: ReportSurface = INITIAL_REPORT_SURFACE;
-let root: Root | null = null;
+const renderSurface = surfaceRenderer();
 let services: Services | null = null;
 
 type Services = Readonly<{
@@ -111,16 +108,9 @@ async function main(): Promise<void> {
   render();
   const call = appsScriptCall({ run: google.script.run });
 
-  const hello = await helloFromServer({ call });
+  const hello = await connect({ call, seeded: null, surface: "report" });
   if (hello.kind !== "ok") {
     dispatch({ kind: "trouble", message: hello.message });
-    return;
-  }
-  if (hello.value.protocolVersion !== PROTOCOL_VERSION) {
-    dispatch({
-      kind: "trouble",
-      message: `the add-on speaks protocolVersion ${hello.value.protocolVersion}, this report ${PROTOCOL_VERSION}`,
-    });
     return;
   }
   const presentationId = presentationIdOf(hello.value.presentationUrl);
@@ -177,8 +167,7 @@ async function main(): Promise<void> {
 
 /**
  * The candidates to choose from: the recorded proposal when it is still staged, otherwise the
- * newest one that is. READY first, because READY names the manifest and is written LAST -- its
- * presence is the only statement that the set is complete.
+ * newest one that is, read by the rule every reader of a set follows (staged-set.ts).
  */
 async function findCandidates({
   drive,
@@ -187,22 +176,24 @@ async function findCandidates({
   drive: DriveApi;
   proposalId: string | null;
 }): Promise<FoundCandidates> {
-  const scanned = await drive.scanInbox({ pageSize: SCAN_PAGE_SIZE });
+  const scanned = await drive.scanInbox({ pageSize: INBOX_PAGE_SIZE });
   if (scanned.kind !== "ok") return { kind: "unreadable", message: scanned.message };
   const staged = stagedProposalsOf({ marks: scanned.value });
   if (staged.length === 0) return { kind: "found", proposalId: "", slides: [] };
   const asked = proposalId === null ? undefined : staged.find((one) => one.proposalId === proposalId);
   const chosen = asked ?? staged[staged.length - 1];
   if (chosen === undefined) return { kind: "found", proposalId: "", slides: [] };
-  const readyText = await drive.downloadText(chosen.readyFileId);
-  if (readyText.kind !== "ok") return { kind: "unreadable", message: readyText.message };
-  const ready = parseReadyMarker(readyText.value);
-  if (ready.kind !== "ok") return { kind: "unreadable", message: "READY could not be read" };
-  const manifestText = await drive.downloadText(ready.value.manifestFileId);
-  if (manifestText.kind !== "ok") return { kind: "unreadable", message: manifestText.message };
-  const manifest = parseManifest(manifestText.value);
-  if (manifest.kind !== "ok") return { kind: "unreadable", message: "manifest.json could not be read" };
-  return { kind: "found", proposalId: chosen.proposalId, slides: manifest.value.slides };
+  const read = await readStagedManifest({ drive, set: chosen });
+  switch (read.kind) {
+    case "ok":
+      return { kind: "found", proposalId: chosen.proposalId, slides: read.value.slides };
+    case "unavailable":
+      return { kind: "unreadable", message: read.message };
+    case "rejected":
+      return { kind: "unreadable", message: read.reason };
+    default:
+      return assertNever(read);
+  }
 }
 
 type FoundCandidates =
@@ -258,8 +249,7 @@ async function loadSlideHtml(): Promise<void> {
   dispatchDefect({ kind: "slide-arrived", html: downloaded.value });
 }
 
-const NOT_CONNECTED =
-  "the add-on is not connected to Google Slides. Reload the presentation and open the report again.";
+const NOT_CONNECTED = notConnected("open the report again");
 
 /**
  * ONE ANONYMISATION PASS. Synchronous, so there is no in-flight state -- but it can throw on a
@@ -458,40 +448,8 @@ function freshSeed(): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-/**
- * The staging container for the converter's iframe. Kept out of the React tree on purpose: React
- * owns `#sasha-slides-root` and must never re-parent an iframe the converter is measuring.
- */
-function stageElement(): HTMLElement {
-  const existing = document.getElementById(STAGE_ELEMENT_ID);
-  if (existing !== null) return existing;
-  const stage = document.createElement("div");
-  stage.id = STAGE_ELEMENT_ID;
-  stage.style.cssText = "position:fixed;left:-99999px;top:0;width:0;height:0;overflow:hidden";
-  document.body.append(stage);
-  return stage;
-}
-
-/**
- * The extractor blob, decoded. It travels base64 so HtmlService's sanitiser cannot mangle it (see
- * build-addon.ts); `atob` yields LATIN-1 bytes, so it is decoded through TextDecoder rather than
- * used directly -- extract-dom.ts is not guaranteed to be pure ASCII.
- */
-function extractorSource(): string {
-  const binary = atob(__SASHA_EXTRACTOR_JS_B64__);
-  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
-
 function render(): void {
-  if (root === null) {
-    const existing = document.getElementById(ROOT_ELEMENT_ID);
-    const host = existing ?? document.createElement("div");
-    host.id = ROOT_ELEMENT_ID;
-    if (existing === null) document.body.append(host);
-    root = createRoot(host);
-  }
-  root.render(createElement(ReportSurfacePanel, { surface: state }));
+  renderSurface(createElement(ReportSurfacePanel, { surface: state }));
 }
 
 /**

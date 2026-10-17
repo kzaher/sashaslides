@@ -8,12 +8,13 @@
 // three small object shapes do not justify adding one (the MCP server's google-auth.ts makes the
 // same call for the same reason).
 
+import { asRecord, integerAt, stringAt } from "./json-fields.ts";
+
 /** The only protocol version this build understands. An unknown version is ignored, never guessed. */
 export const PROTOCOL_VERSION = 1;
 
 /** `appProperties.sashaSlides` values, which are what every Drive query matches on. */
 export const SASHA_SLIDES_PROPERTY = "sashaSlides";
-export const ROLE_READY = "ready";
 export const ROLE_PICK = "pick";
 
 /** `READY` — the final mark. Until it exists a proposal is partial and must be ignored. */
@@ -92,10 +93,24 @@ export type Pick = Readonly<{
   anomalies: readonly Anomaly[];
 }>;
 
-export type Parsed<TValue> =
-  | Readonly<{ kind: "ok"; value: TValue }>
+export type Parsed<TValue> = Readonly<{ kind: "ok"; value: TValue }> | ParseFailure;
+
+/** The two ways a parse can refuse. */
+export type ParseFailure =
   | Readonly<{ kind: "invalid"; reason: string }>
   | Readonly<{ kind: "unsupported-version"; protocolVersion: number }>;
+
+/** A refused parse, in words -- the one rendering every surface shows, for a call or a file alike. */
+export function describeParsedFailure({ parsed, what }: { parsed: ParseFailure; what: string }): string {
+  switch (parsed.kind) {
+    case "invalid":
+      return `${what}: ${parsed.reason}`;
+    case "unsupported-version":
+      return `${what} declares protocolVersion ${parsed.protocolVersion}`;
+    default:
+      return assertNever(parsed);
+  }
+}
 
 export function parseReadyMarker(body: string): Parsed<ReadyMarker> {
   const json = readJsonObject(body);
@@ -136,13 +151,8 @@ export function parseManifest(body: string): Parsed<Manifest> {
   if (slides.value.length !== count) {
     return { kind: "invalid", reason: `manifest count ${count} disagrees with ${slides.value.length} slides` };
   }
-  // 1-based and gap-free, because the picker numbers the chips off the index and the user says
-  // "option 3" meaning slides[2]. A hole here would silently renumber the offer.
-  for (let position = 0; position < slides.value.length; position++) {
-    const entry = slides.value[position];
-    if (entry === undefined || entry.index !== position + 1) {
-      return { kind: "invalid", reason: `manifest slides are not 1..${count} in order` };
-    }
+  if (!slidesAreNumbered({ slides: slides.value, count })) {
+    return { kind: "invalid", reason: `manifest slides are not 1..${count} in order` };
   }
   const merge = parseManifestMerge({ record: json.value, presentationId: presentationField });
   if (merge.kind !== "ok") return merge;
@@ -159,6 +169,45 @@ export function parseManifest(body: string): Parsed<Manifest> {
       merge: merge.value,
     },
   };
+}
+
+/**
+ * Whether `slides` are exactly 1..count, in order, with no holes. 1-based and gap-free, because the
+ * picker numbers the candidates off the index and the user says "option 3" meaning slides[2]; a
+ * hole would silently renumber the offer. The manifest and the slides window's seed both hold it.
+ */
+export function slidesAreNumbered({ slides, count }: { slides: readonly SlideEntry[]; count: number }): boolean {
+  return slides.length === count && slides.every((slide, position) => slide.index === position + 1);
+}
+
+/**
+ * THE ONE RULE FOR READING A STAGED SET'S TWO FILES (PROTOCOL.md, "What READY means now"), and
+ * every reader goes through it: the slides window's observer and its revision tick, Ask Sasha and
+ * the report window (staged-set.ts).
+ *
+ * READY says which manifest is the set's, and nothing else in it is trusted. Its `count` is the
+ * FIRST staging's: `clear_slides` and every revision leave READY in place while the manifest moves
+ * on, so the manifest's own count, slides and revision are the truth -- a cleared set is a manifest
+ * with count 0, never a mismatch. What never goes stale is WHOSE the files are, so both must name
+ * the folder they were found in (discovery is by name, so that is the proposal id).
+ */
+export function readyManifestFileIdOf({ readyText, proposalId }: { readyText: string; proposalId: string }): Parsed<string> {
+  const ready = parseReadyMarker(readyText);
+  if (ready.kind !== "ok") return ready;
+  if (ready.value.proposalId !== proposalId) {
+    return { kind: "invalid", reason: `it names ${ready.value.proposalId}, its folder ${proposalId}` };
+  }
+  return { kind: "ok", value: ready.value.manifestFileId };
+}
+
+/** The manifest READY named, held to the same rule: it must be the folder's own. See above. */
+export function stagedManifestOf({ manifestText, proposalId }: { manifestText: string; proposalId: string }): Parsed<Manifest> {
+  const manifest = parseManifest(manifestText);
+  if (manifest.kind !== "ok") return manifest;
+  if (manifest.value.proposalId !== proposalId) {
+    return { kind: "invalid", reason: `it names ${manifest.value.proposalId}, its folder ${proposalId}` };
+  }
+  return manifest;
 }
 
 /** The candidate's `remove` list, or none for a candidate of an ordinary proposal. */
@@ -310,20 +359,4 @@ function readJsonObject(body: string): Parsed<Readonly<Record<string, unknown>>>
   }
   const record = asRecord(parsed);
   return record === null ? { kind: "invalid", reason: "top level is not an object" } : { kind: "ok", value: record };
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function stringAt({ record, key }: { record: Readonly<Record<string, unknown>>; key: string }): string | null {
-  const value = record[key];
-  return typeof value === "string" ? value : null;
-}
-
-function integerAt({ record, key }: { record: Readonly<Record<string, unknown>>; key: string }): number | null {
-  const value = record[key];
-  return typeof value === "number" && Number.isInteger(value) ? value : null;
 }

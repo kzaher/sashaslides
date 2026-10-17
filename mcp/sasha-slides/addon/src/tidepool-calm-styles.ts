@@ -31,7 +31,6 @@ html, body { background: #eef1f6; }
 .sasha-calm .sasha-cell { gap: 6px; padding: 8px; border-radius: 20px; background: rgba(255, 255, 255, .45); border: 1px solid rgba(255, 255, 255, .9); box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, .95), 0 10px 26px rgba(80, 90, 140, .12); }
 .sasha-calm .sasha-cell-stage { border: 2px solid rgba(255, 255, 255, .9); border-radius: 12px; overflow: hidden; }
 .sasha-calm .sasha-cell-on > .sasha-cell-stage, .sasha-calm .sasha-cell:hover > .sasha-cell-stage { border-color: #6366f1; }
-.sasha-calm .sasha-cell-edited > .sasha-cell-stage { border-color: #059669; box-shadow: 0 0 0 3px rgba(5, 150, 105, .2); }
 .sasha-calm .sasha-cell-number { background: #1c2333; color: #fff; }
 .sasha-calm .sasha-cell-open:focus-visible { outline-color: #4338ca; }
 

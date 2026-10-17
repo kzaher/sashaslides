@@ -5,17 +5,11 @@
 // -- the reducer in picker-state.ts owns all of that, and the feedback loops in dialog.tsx own the
 // side effects.
 //
-// TWO INDEPENDENT AXES, AND NEITHER IS A SCREEN:
-//
-//   VIEW  grid | single      a ZOOM LEVEL. Every candidate at once, or one of them large.
-//   TOOL  edit | annotate    what the pointer does. `edit` from the first paint.
-//
-// All four combinations are legal and reachable from the toolbar, which is the correction this file
-// exists to carry. It used to hold ONE `surface` enum -- grid or "annotating" -- so a user had to
-// click a cell to ENTER a screen before annotation became possible, and leaving that screen took
-// the gesture away again. Now the zoom level and the tool are separate fields of `Offer`
-// (picker-state.ts) and neither transition touches the other, so clicking a slide changes what you
-// are looking at and never what you are allowed to do to it.
+// THE GRID AND THE EDITOR, AND NEITHER IS A SCREEN. The grid shows every candidate at once; picking
+// one opens the editor ON TOP of it (slide-editor-window.tsx), where the TOOL -- select or annotate,
+// what the pointer does -- lives. It used to hold ONE `surface` enum -- grid or "annotating" -- so a
+// user had to click a cell to ENTER a screen before annotation became possible, and leaving that
+// screen took the gesture away again.
 //
 // REVIEW IS PRE-INSERT AND IT HAPPENS HERE. A mark-up SENT from the tool panel becomes a native
 // Drive comment on the candidate's own `NN.html` -- not on the deck -- which is what lets Sasha
@@ -30,17 +24,10 @@ import { SlideEditorWindow } from "./slide-editor-window.tsx";
 import { CommentCard, CommentHead } from "./comment-card.tsx";
 import { CandidateGrid } from "./candidate-grid.tsx";
 import { collectDiagnostics, describeDiagnostics } from "./diagnostics.ts";
-import { EditorSlot } from "./editor-slot.tsx";
 import { assertNever, type Region } from "./protocol.ts";
 import { describeRegion } from "./region-overlay.tsx";
 export { SlideStage } from "./slide-stage.tsx";
-import {
-  describeUnresolvedCount,
-  unresolvedBadgeOf,
-  unresolvedCountFor,
-  type UnresolvedCount,
-} from "./session-log.ts";
-import type { SlideEdit, SlideEditor } from "./slide-editor.ts";
+import type { SlideEdit, SlideEditor } from "./editor/index.ts";
 import { describeInsertedWhere, type InsertPosition } from "./slide-insert.ts";
 import {
   editorIsLive,
@@ -52,21 +39,18 @@ import {
   selectedFrame,
   type AnomalySendPhase,
   type DraftAnomaly,
-  type EditorReach,
   type Offer,
   type OpenPhase,
   type PickerState,
   type SlideFrame,
   type SlideRendering,
   type SlideTool,
-  type SlideView,
   type SubmitStage,
   type Telling,
 } from "./picker-state.ts";
 
 /** Everything the UI is allowed to cause. Injected, so the tree renders in a test with no ports. */
 export type PickerActions = Readonly<{
-  selectSlide(index: number): void;
   /** Open the editor on one candidate. The grid stays underneath, remembering the choice. */
   openEditor(index: number): void;
   /** Replace the selected element's markup with what the inspector's textarea now holds. */
@@ -81,9 +65,7 @@ export type PickerActions = Readonly<{
    * thing a review window can do.
    */
   closeEditor(): void;
-  /** Change the ZOOM LEVEL. It may never change the tool -- that is the contract this window broke. */
-  chooseView(view: SlideView): void;
-  /** Change the TOOL. It may never change the zoom level, for the same reason. */
+  /** Change the TOOL, what the pointer does on the open candidate. */
   chooseTool(tool: SlideTool): void;
   chooseRendering(rendering: SlideRendering): void;
   /** Paint what the converter could not carry, or stop painting it. Off by default. */
@@ -104,8 +86,6 @@ export type PickerActions = Readonly<{
    * report (UI-CONTRACT.md).
    */
   sendAnomaly(spec: Readonly<{ index: number; anomalyId: string }>): void;
-  /** Show one candidate large. Selects it and changes the view; the tool is untouched. */
-  zoomCandidate(index: number): void;
   /** The visual editor's list, after it changed. The editor is the authority; this records it. */
   changeEdits(spec: Readonly<{ index: number; edits: readonly SlideEdit[] }>): void;
   /**
@@ -123,8 +103,8 @@ export type PickerActions = Readonly<{
   openReport(spec: Readonly<{ index: number }>): void;
   /**
    * The VISUAL EDITOR, bound to one candidate's HTML. An injected FACTORY rather than an action,
-   * because the editor is a dependency the composition root chooses (dialog.tsx picks the real
-   * module or `nullSlideEditor`) and this tree must not know which it got. See slide-editor.ts.
+   * because the editor is a dependency the composition root chooses (dialog.tsx the real module, a
+   * test inert-actions.ts's `nullSlideEditor`) and this tree must not know which it got.
    */
   createEditor(spec: Readonly<{ html: string; mode: "edit" | "comment" }>): SlideEditor;
 }>;
@@ -348,11 +328,8 @@ function Chooser<Choice extends string>({
 }
 
 /**
- * THE GRID, and only the grid.
- *
- * It used to switch between a grid and a single large pane on a `view` union. "One candidate,
- * large" is what the EDITOR is for now, so this is one shape rather than a choice: four
- * thumbnails, and picking one opens the editor on it.
+ * THE GRID, and only the grid: four thumbnails, and picking one opens the editor on it. "One
+ * candidate, large" is what the EDITOR is for, so the grid never hosts the live editor either.
  */
 function CandidateGridBody({
   offer,
@@ -367,8 +344,6 @@ function CandidateGridBody({
     <CandidateGrid
       offer={offer}
       disabled={busy}
-      editedIndex={null}
-      onEditFrame={noFrame}
       onZoom={actions.openEditor}
       onInsert={actions.insertPicked}
       onReport={actions.openReport}
@@ -377,50 +352,6 @@ function CandidateGridBody({
       onDraw={actions.drawAnomaly}
     />
   );
-}
-
-/** The grid never hosts the live editor -- that is the editor window's job. */
-function noFrame(): void {}
-
-/**
- * WHAT THE CURRENT TOOL NEEDS BELOW THE SLIDES, and nothing about the zoom level. The annotate tool
- * needs the boxes' notes and their Send; the edit tool needs the editor's own list. Exhaustive, so
- * a third tool cannot ship with no panel.
- */
-export function ToolPanel({
-  offer,
-  reach,
-  editor,
-  element,
-  busy,
-  onChange,
-  actions,
-}: {
-  offer: Offer;
-  reach: EditorReach;
-  editor: SlideEditor;
-  element: HTMLIFrameElement | null;
-  busy: boolean;
-  onChange: (edits: readonly SlideEdit[]) => void;
-  actions: PickerActions;
-}): JSX.Element {
-  switch (offer.tool) {
-    case "annotate":
-      return <AnomalyList offer={offer} disabled={busy} actions={actions} />;
-    case "select":
-      return (
-        <EditorSlot
-          editor={editor}
-          frame={element}
-          reach={reach}
-          edits={selectedFrame(offer)?.edits ?? []}
-          disabled={busy}
-          onChange={onChange}
-        />
-      );
-    default:
-      return assertNever(offer.tool);
-  }
 }
 
 /** Whether the report window appeared. Read back, never assumed -- a host can decline. */
@@ -454,57 +385,10 @@ function DialogHeader({ offer, stage }: { offer: Offer; stage: SubmitStage | nul
   );
 }
 
-/** 1-based chips. The number on the chip is the number in PICK and the number the user says out loud. */
-export function SlideChips({
-  offer,
-  disabled,
-  onSelect,
-}: {
-  offer: Offer;
-  disabled: boolean;
-  onSelect: (index: number) => void;
-}): JSX.Element {
-  return (
-    <nav className="sasha-chips" aria-label="candidate slides">
-      {offer.slides.map((frame) => (
-        <button
-          key={frame.index}
-          type="button"
-          disabled={disabled}
-          aria-pressed={frame.index === offer.selectedIndex}
-          className={frame.index === offer.selectedIndex ? "sasha-chip sasha-chip-on" : "sasha-chip"}
-          onClick={() => onSelect(frame.index)}
-        >
-          <span className="sasha-chip-number">{frame.index}</span>
-          <span className="sasha-chip-label">{frame.label === "" ? frame.name : frame.label}</span>
-          <ChipUnresolved
-            count={unresolvedCountFor({
-              comments: offer.comments,
-              proposalId: offer.proposal.proposalId,
-              slideIndex: frame.index,
-            })}
-          />
-        </button>
-      ))}
-    </nav>
-  );
-}
-
-/** The chip's unresolved badge. Same derivation as the cell's and the conversation's. */
-function ChipUnresolved({ count }: { count: UnresolvedCount }): JSX.Element | null {
-  const badge = unresolvedBadgeOf(count);
-  if (badge === null) return null;
-  return (
-    <span className={`sasha-chip-flag sasha-unresolved-${count.kind}`} title={describeUnresolvedCount(count)}>
-      {badge}
-    </span>
-  );
-}
-
 /**
- * EVERY MARK-UP ON EVERY CANDIDATE, each row naming its slide. It is not filtered to the selected
- * one on purpose: the annotate tool works at either zoom level, so a box dragged on cell 3 while
- * cell 1 is selected must still be visible and sendable without the user hunting for it.
+ * EVERY MARK-UP ON EVERY CANDIDATE, each row naming its slide. It is not filtered to the open one on
+ * purpose: a box drawn on another candidate must still be visible and sendable without the user
+ * hunting for it.
  */
 export function AnomalyList({
   offer,

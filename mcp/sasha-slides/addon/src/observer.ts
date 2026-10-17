@@ -95,9 +95,6 @@ export type ObserverEffect =
 
 export type Reduction = Readonly<{ state: ObserverState; effects: readonly ObserverEffect[] }>;
 
-/** Drive returns at most this many proposal folders per poll; far above any plausible backlog. */
-export const POLL_PAGE_SIZE = 100;
-
 export const INITIAL_OBSERVER_STATE: ObserverState = {
   phase: { kind: "stopped" },
   viewers: { count: 0, anyVisible: false },

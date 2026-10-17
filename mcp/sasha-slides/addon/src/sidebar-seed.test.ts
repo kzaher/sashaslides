@@ -4,11 +4,8 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
-import { createElement } from "react";
 import { codeGs, DEFAULT_EDITOR_ORIGIN, SIDEBAR_MEMORY_MAXIMUM_CHARACTERS, SIDEBAR_MEMORY_SECONDS } from "./apps-script-project.ts";
 import type { ProposalMark, RawEventFile } from "./bridge.ts";
-import { ConversationPanel } from "./Conversation.tsx";
 import {
   INITIAL_CONVERSATION,
   NOTHING_SEEDED,
@@ -26,10 +23,9 @@ import {
   type ConversationEvent,
   type SidebarSeed,
 } from "./conversation-state.ts";
-import { INERT_CONVERSATION_ACTIONS, UNCONFIGURED_SETUP } from "./inert-actions.ts";
 import { newestSetChangeIn, sessionEventsOf } from "./session-log.ts";
 import { SIDEBAR_SEED_ELEMENT_ID, parseSidebarBoot, sidebarSeedOf } from "./sidebar-seed.ts";
-import { NO_PREVIEWS } from "./slide-previews.ts";
+import { conversationMarkupOf as markupOf } from "./test-support.ts";
 
 const DECK = "deck_0123456789";
 const OTHER_DECK = "deck_9876543210";
@@ -136,17 +132,6 @@ function freshLog(files: readonly RawEventFile[], proposalId: string = PROPOSAL)
   };
 }
 
-function markupOf(conversation: Conversation): string {
-  return renderToStaticMarkup(
-    createElement(ConversationPanel, {
-      conversation,
-      previews: NO_PREVIEWS,
-      commentAccess: null,
-      setup: UNCONFIGURED_SETUP,
-      actions: INERT_CONVERSATION_ACTIONS,
-    }),
-  );
-}
 
 // --- parseSidebarBoot / sidebarSeedOf ----------------------------------------------------------
 
@@ -352,13 +337,14 @@ function functionBody(name: string): string {
 test("Code.gs: showSidebar appends the seed as an inert, escaped element before showing the page", () => {
   const body = functionBody("showSidebar");
   assert.match(body, /var boot = sashaSidebarBoot_\(\);/);
+  assert.ok(body.includes(`if (boot) sashaAppendSeed_(page, "${SIDEBAR_SEED_ELEMENT_ID}", boot);`), body);
+  assert.ok(body.indexOf("sashaAppendSeed_") < body.indexOf("showSidebar(page)"), "appended before it is shown");
   assert.ok(
-    body.includes(
-      `page.append('<script type="text/plain" id="${SIDEBAR_SEED_ELEMENT_ID}">' + JSON.stringify(boot).replace(/</g, '\\\\u003c') + '</script>');`,
+    functionBody("sashaAppendSeed_").includes(
+      `page.append('<script type="text/plain" id="' + id + '">' + JSON.stringify(value).replace(/</g, '\\\\u003c') + '</script>');`,
     ),
-    body,
+    "one inert element, every '<' escaped",
   );
-  assert.ok(body.indexOf("page.append") < body.indexOf("showSidebar(page)"), "appended before it is shown");
   const boot = functionBody("sashaSidebarBoot_");
   assert.match(boot, /hello = sashaHello\(\);/);
   assert.match(boot, /CacheService\.getUserCache\(\)\.getAll\(keys\)/, "one cache read for every slot");

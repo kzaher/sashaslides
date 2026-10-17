@@ -57,7 +57,7 @@ import type {
 import { assertNever } from "./protocol.ts";
 import type { ReportSubmission } from "./report-endpoint.ts";
 import { DEFAULT_REPORT_ENDPOINT } from "./report-endpoint.ts";
-import type { SlideEdit } from "./slide-editor.ts";
+import type { SlideEdit } from "./editor/index.ts";
 
 export type Defect = Readonly<{
   slide: SlideSource;

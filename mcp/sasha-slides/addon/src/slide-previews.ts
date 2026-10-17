@@ -18,14 +18,12 @@ import {
   type Conversation,
   type ConversationSlide,
 } from "./conversation-state.ts";
+import type { HtmlLoad } from "./html-load.ts";
 import { assertNever } from "./protocol.ts";
 import type { SessionEvent } from "./session-log.ts";
 
 /** One preview fetch, by key. Absent from the map means never requested. */
-export type PreviewLoad =
-  | Readonly<{ kind: "loading" }>
-  | Readonly<{ kind: "loaded"; html: string }>
-  | Readonly<{ kind: "failed"; message: string }>;
+export type PreviewLoad = Exclude<HtmlLoad, Readonly<{ kind: "unrequested" }>>;
 
 export type SlidePreviews = ReadonlyMap<string, PreviewLoad>;
 
@@ -105,17 +103,6 @@ export function previewsSettled({
 }): boolean {
   for (const load of previews.values()) if (load.kind === "loading") return false;
   return previewsToLoad({ conversation, previews }).length === 0;
-}
-
-/** The first of `previewsToLoad`, for callers that fetch one at a time. */
-export function nextPreviewToLoad({
-  conversation,
-  previews,
-}: {
-  conversation: Conversation;
-  previews: SlidePreviews;
-}): PreviewRequest | null {
-  return previewsToLoad({ conversation, previews })[0] ?? null;
 }
 
 /** What the thumbnail of one candidate shows right now. */

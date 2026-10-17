@@ -60,7 +60,9 @@ import {
 } from "./glyph-advance-widths.ts";
 import { keyStream, type KeyStream } from "./key-stream.ts";
 import { hasSubstitutableCharacter, type TextSubstituter } from "./substitute-text.ts";
+import { foldedForComparison } from "./replacement-policy.ts";
 import type { TextRunSite } from "./text-runs.ts";
+import { assertNever } from "./never.ts";
 
 export type LoremTexter = Readonly<{
   /**
@@ -381,10 +383,3 @@ function casedWord({ word, casing }: { word: string; casing: LetterCasing }): st
  * separate copies: each file states the comparison its own rule is written in, and a shared helper
  * would make one rule's fold changeable from the other's file.
  */
-function foldedForComparison(text: string): string {
-  return text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled lorem case: ${JSON.stringify(value)}`);
-}

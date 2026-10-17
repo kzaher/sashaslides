@@ -14,15 +14,13 @@
 // element `showSidebar` appended (sidebar-seed.ts), and React. Every loop and every decision about
 // what to read lives in sidebar-controller.ts, where a test can drive it with a fake server.
 
-import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
 import { appsScriptCall } from "./bridge-client.ts";
 import { ConversationPanel } from "./Conversation.tsx";
 import { storedSetupChoiceStore, type SetupEnvironment } from "./setup-guide.tsx";
 import { startSidebar, type SidebarView } from "./sidebar-controller.ts";
 import { SIDEBAR_SEED_ELEMENT_ID } from "./sidebar-seed.ts";
-
-const ROOT_ELEMENT_ID = "sasha-slides-root";
+import { seedText, surfaceRenderer } from "./surface-host.ts";
 
 /**
  * WHAT THE NOTHING-LISTENING PANEL NEEDS TO SAY HOW TO CONNECT: two constants build-addon.ts bakes
@@ -35,32 +33,26 @@ const SETUP: SetupEnvironment = {
   store: storedSetupChoiceStore(() => window.localStorage),
 };
 
-let root: Root | null = null;
+const renderSurface = surfaceRenderer();
 
 function render({ conversation, previews, commentAccess, actions }: SidebarView): void {
-  if (root === null) {
-    const existing = document.getElementById(ROOT_ELEMENT_ID);
-    const host = existing ?? document.createElement("div");
-    host.id = ROOT_ELEMENT_ID;
-    if (existing === null) document.body.append(host);
-    root = createRoot(host);
-  }
-  root.render(createElement(ConversationPanel, { conversation, previews, commentAccess, setup: SETUP, actions }));
+  renderSurface(createElement(ConversationPanel, { conversation, previews, commentAccess, setup: SETUP, actions }));
 }
 
 /**
  * THE SEED IS PARSED AFTER THE BUNDLE: `showSidebar` appends it to the page, behind the loader
- * that runs this script, so it is only in the document once parsing is done -- the same wait the
- * slides window makes for its own seed (dialog.tsx).
+ * that runs this script, so `seedText` waits for the document to finish parsing -- the same wait
+ * the slides window makes for its own seed.
  */
-function boot(): void {
+async function boot(): Promise<void> {
+  const seed = await seedText(SIDEBAR_SEED_ELEMENT_ID);
   startSidebar({
     call: appsScriptCall({ run: google.script.run }),
     render,
     isVisible: () => document.visibilityState === "visible",
     onVisibilityChange: (listener) => document.addEventListener("visibilitychange", listener),
     onWindowFocus: (listener) => window.addEventListener("focus", listener),
-    seedText: document.getElementById(SIDEBAR_SEED_ELEMENT_ID)?.textContent ?? null,
+    seedText: seed,
   });
 }
 
@@ -68,8 +60,4 @@ function boot(): void {
  * THE ENTRY POINT, and it is LAST on purpose: everything a module-level initialiser needs is
  * declared above it, so the first render cannot see an undefined `SETUP`.
  */
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", boot, { once: true });
-} else {
-  boot();
-}
+void boot();

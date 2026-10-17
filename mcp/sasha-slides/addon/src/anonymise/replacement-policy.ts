@@ -1,11 +1,11 @@
 /**
- * replacement-policy.ts — the gate a model-written replacement has to pass, and what it costs when
+ * replacement-policy.ts — the gate a user-edited replacement has to pass, and what it costs when
  * it passes.
  *
  * THE RULE THAT MATTERS: this module can only ever say "use this replacement" or "fall back". It
  * has no third answer, and in particular it cannot say "use the original". `anonymiseSlideHtml`
- * substitutes every run this module does not accept, so a model that is wrong, lazy, empty,
- * truncated, confused about ids or actively hostile costs READABILITY and never safety. That is
+ * substitutes every run this module does not accept, so an edit that is wrong, empty, truncated,
+ * confused about ids or actively hostile costs READABILITY and never safety. That is
  * the whole architecture in one sentence, and the hostile-reply cases in anonymise-leak.test.ts
  * are what hold it.
  *
@@ -37,18 +37,17 @@
  * of the heading run and into the footer run would pass a per-run check and put the name straight
  * into the output. The document-wide set is a superset, so it never accepts anything a per-run
  * check would reject; the price is that a legitimately-reused common word ("revenue") is rejected
- * too. `textRunRewriteRequest` states the rule in the prompt, so a cooperative model does not trip
- * it nearly as often as the raw rate above suggests.
+ * too.
  *
  * WHAT NO RULE HERE CAN CATCH, stated plainly because it belongs in the residual-risk list and not
- * in a reader's assumptions: a model that deliberately ENCODES the original — base64, an acrostic,
- * a cipher — defeats every check in this file, because its output shares no fragment with its input.
- * Nothing cheap detects that. The defences against it are that the model is shown only the visible
- * text (never the carriers) and that the user reads the after column before pressing send.
+ * in a reader's assumptions: a replacement that deliberately ENCODES the original — base64, an
+ * acrostic, a cipher — defeats every check in this file, because it shares no fragment with its
+ * input. Nothing cheap detects that; the user writes and reads every replacement before sending.
  */
 import type { TextRunId, TextRunKind, TextRunSite } from "./text-runs.ts";
+import { assertNever } from "./never.ts";
 
-/** What the model (or the user, having edited it) proposes: run id to replacement text. */
+/** What the user proposes: run id to replacement text. */
 export type TextRunReplacements = ReadonlyMap<TextRunId, string>;
 
 /** Why a proposal was thrown away. `detail` on `RejectedReplacement` says it in a sentence. */
@@ -96,8 +95,7 @@ export type ReplacementDecisions = Readonly<{
 /**
  * Every proposal judged against the runs of ONE document. Pure: same inputs, same decisions.
  *
- * `replacements` is untrusted — it comes from a model (through
- * `parseTextRunRewriteReply`) or from a user's edit box — so nothing here trusts its keys or its
+ * `replacements` is untrusted — it comes from a user's edit box — so nothing here trusts its keys or its
  * values. An id that is not a run becomes `unknown-run`; a value is normalised before it is judged
  * (see `visibleTextOf`) so an invisible character cannot smuggle an echo past the token check.
  */
@@ -200,7 +198,7 @@ export function forbiddenEchoFragmentsOf({ sites }: { sites: readonly TextRunSit
 const ECHO_FRAGMENT_LENGTH = 4;
 
 /**
- * Length is allowed to move a little, because a model cannot hit a character count exactly and a
+ * Length is allowed to move a little, because nobody hits a character count exactly and a
  * two-character drift on a short label changes nothing. Beyond this band a wrapped run can break
  * at a different word, which is reported rather than silently accepted.
  */
@@ -283,7 +281,8 @@ function visibleTextOf(proposed: string): string {
  * lowercased. `Ｒｅｖｅｎｕｅ`, `Revenue` and `Révenue` all fold to `revenue`, so none of them is a
  * way past a rule written about the other.
  */
-function foldedForComparison(text: string): string {
+/** Case- and accent-folded, so `Ä` and `a` compare equal. Shared with lorem-text.ts. */
+export function foldedForComparison(text: string): string {
   return text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
 }
 
@@ -300,8 +299,4 @@ function detailFor({ reason, runId }: { reason: ReplacementRejectionReason; runI
     default:
       return assertNever(reason);
   }
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled replacement case: ${JSON.stringify(value)}`);
 }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { attributeNamed, serializeHtmlTokens, tokenizeHtml, withAttributeValue } from "./html-tokens.ts";
+import { serializeHtmlTokens, tokenizeHtml } from "./html-tokens.ts";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../../../e2e/fixtures");
 
@@ -63,26 +63,3 @@ test("a raw-text element's body is one token and is never parsed as markup", () 
   assert.equal(body.text, "a{content:'<b>'}");
 });
 
-test("attribute names are matched case-insensitively and values keep their source quoting", () => {
-  const tokens = tokenizeHtml("<img SRC='a' ALT=bare>");
-  const tag = tokens[0];
-  assert.ok(tag !== undefined && tag.kind === "start-tag");
-  assert.equal(attributeNamed({ token: tag, name: "src" })?.value, "a");
-  assert.equal(attributeNamed({ token: tag, name: "alt" })?.quote, "");
-  assert.equal(attributeNamed({ token: tag, name: "missing" }), null);
-});
-
-test("a rewritten value is escaped, and an unquoted one is promoted to quotes", () => {
-  const tokens = tokenizeHtml("<img alt=bare>");
-  const tag = tokens[0];
-  assert.ok(tag !== undefined && tag.kind === "start-tag");
-  const attribute = attributeNamed({ token: tag, name: "alt" });
-  assert.ok(attribute !== null);
-  const rewritten = withAttributeValue({ attribute, value: 'has "quotes" & <angles>' });
-  assert.equal(rewritten.quote, '"');
-  assert.equal(rewritten.value, "has &quot;quotes&quot; &amp; &lt;angles&gt;");
-  assert.equal(
-    serializeHtmlTokens([{ ...tag, attributes: [rewritten] }]),
-    '<img alt="has &quot;quotes&quot; &amp; &lt;angles&gt;">',
-  );
-});

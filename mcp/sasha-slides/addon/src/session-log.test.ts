@@ -28,7 +28,6 @@ import {
   sessionEventsOf,
   slideCommentsOf,
   slideIndexOf,
-  unreadableSlidesOf,
   unresolvedBadgeOf,
   unresolvedCountFor,
   type SessionEventFile,
@@ -341,7 +340,6 @@ test("a PER-FILE Drive failure is per slide: one bad candidate does not blind th
     kind: "unreachable",
     message: "Drive HTTP 404",
   });
-  assert.deepEqual(unreadableSlidesOf({ comments }), ["slide 2: Drive HTTP 404"]);
 });
 
 test("A SLIDE DRIVE DID NOT ANSWER FOR is unreadable, not empty -- the join does not invent a zero", () => {

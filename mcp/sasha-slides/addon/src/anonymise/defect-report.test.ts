@@ -9,7 +9,6 @@ import {
   findForbiddenStrings,
   previewDefectReport,
   redactIdentifiers,
-  serializeDefectReport,
   type ConversionSummary,
   type ConvertForReport,
 } from "./defect-report.ts";
@@ -179,7 +178,7 @@ test("the serialized payload is JSON, and the HTML in it is the preview's HTML b
     versions: VERSIONS,
     mustNotContain: [],
   });
-  const body = serializeDefectReport(defectReportFrom(preview));
+  const body = JSON.stringify(defectReportFrom(preview));
   const parsed: unknown = JSON.parse(body);
   assert.equal((parsed as { slideHtml: string }).slideHtml, anonymised.html);
   assert.equal((parsed as { note: string }).note, 'needs "quotes" and a £ sign');

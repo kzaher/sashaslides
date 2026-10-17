@@ -1,5 +1,5 @@
-// THE DIALOG'S TWO AXES: the VIEW (grid or one slide) and the TOOL (edit or annotate), which are
-// independent, and the four combinations of them.
+// THE DIALOG: the grid, the editor that opens on one candidate, and the editor's TOOL (select or
+// annotate).
 //
 // Same shape as picker-state.test.ts -- the reducer is pure and the tree is rendered with
 // react-dom/server, so every combination is asserted in milliseconds with no browser and no Apps
@@ -7,19 +7,14 @@
 // then the selectors the dialog's feedback loops are gated on, then the markup.
 //
 // WHAT THESE TESTS PIN. The window used to hold ONE `surface` enum, so clicking a cell entered a
-// screen where annotation became possible and leaving it took the gesture away. The tests below
-// state the replacement as four properties: edit is the default, a zoom never moves the tool, a
-// tool never moves the zoom, and both tools render at both zoom levels.
+// screen where annotation became possible and leaving it took the gesture away. Select is the
+// default tool, and the window is read-only while a submit is in flight.
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
-import { createElement } from "react";
-import { stubConvertHtmlToSlideRequests } from "./converter-contract.ts";
 import { slideHtml } from "./fake-drive.ts";
-import { INERT_PICKER_ACTIONS } from "./inert-actions.ts";
+import { nullSlideEditor } from "./inert-actions.ts";
 import type { Proposal } from "./observer.ts";
-import { Picker } from "./Picker.tsx";
 import {
   INITIAL_PICKER_STATE,
   drawsRegions,
@@ -27,7 +22,7 @@ import {
   editorIsLive,
   editorReachOf,
   editsSlides,
-  nextHtmlToLoad,
+  htmlToLoad,
   nextToConvert,
   offerOf,
   reducePicker,
@@ -36,7 +31,8 @@ import {
   type PickerState,
 } from "./picker-state.ts";
 import { UNMEASURED_SCALE } from "./scaled-frame.tsx";
-import { describeSlideEdit, nullSlideEditor, slideEditRecord, type SlideEdit } from "./slide-editor.ts";
+import { pickerMarkupOf as markupOf, replay, stubConvertHtmlToSlideRequests } from "./test-support.ts";
+import { describeEdit, type SlideEdit } from "./editor/index.ts";
 
 const proposal: Proposal = {
   merge: null,
@@ -53,91 +49,25 @@ const proposal: Proposal = {
   })),
 };
 
-// --- the view and the tool, which are independent -------------------------
+// --- the grid and the tool -------------------------------------------------
 
 test("an offer opens on the GRID, because comparing the candidates is the point of the window", () => {
   const offer = offerOf(play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]));
   assert.ok(offer !== null);
-  assert.equal(offer.view, "grid");
+  assert.equal(offer.editing, null);
   assert.equal(offer.tool, "select", "and in the EDIT tool: editing is the default, not a destination");
   assert.equal(offer.selectedIndex, 1, "and option 1 is pre-selected, so Insert always has a target");
 });
 
-test("ZOOMING IN ON A CANDIDATE CHANGES THE VIEW AND NOTHING ELSE -- not the tool", () => {
-  const offer = offerOf(
-    play([
-      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
-      { kind: "tool-chosen", tool: "annotate" },
-      { kind: "candidate-zoomed", index: 3 },
-    ]),
-  );
-  assert.equal(offer?.view, "single");
-  assert.equal(offer?.selectedIndex, 3);
-  assert.equal(offer?.tool, "annotate", "the tool the user picked survives the zoom");
-});
-
-test("AND CHOOSING A TOOL CHANGES THE TOOL AND NOTHING ELSE -- not the view", () => {
-  const offer = offerOf(
-    play([
-      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
-      { kind: "candidate-zoomed", index: 2 },
-      { kind: "tool-chosen", tool: "annotate" },
-      { kind: "tool-chosen", tool: "select" },
-    ]),
-  );
-  assert.equal(offer?.view, "single", "two tool changes left the zoom level alone");
-  assert.equal(offer?.tool, "select");
-  assert.equal(offer?.selectedIndex, 2);
-});
-
-test("every one of the four view/tool combinations is reachable", () => {
-  for (const view of ["grid", "single"] as const) {
-    for (const tool of ["select", "annotate"] as const) {
-      const offer = offerOf(
-        play([
-          { kind: "proposal-offered", proposal, presentationId: "deck_1" },
-          { kind: "view-chosen", view },
-          { kind: "tool-chosen", tool },
-        ]),
-      );
-      assert.equal(offer?.view, view, `${view}/${tool}`);
-      assert.equal(offer?.tool, tool, `${view}/${tool}`);
-    }
-  }
-});
-
-test("a zoom is clamped like every other selection -- there is no option 9", () => {
-  const offer = offerOf(
-    play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }, { kind: "candidate-zoomed", index: 9 }]),
-  );
-  assert.equal(offer?.selectedIndex, 4);
-});
-
-test("going back to the grid keeps the selection, the tool and the notes", () => {
-  const offer = offerOf(
-    play([
-      { kind: "proposal-offered", proposal, presentationId: "deck_1" },
-      { kind: "tool-chosen", tool: "annotate" },
-      { kind: "candidate-zoomed", index: 2 },
-      { kind: "anomaly-drawn", index: 2, anomalyId: "user_1", region: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } },
-      { kind: "view-chosen", view: "grid" },
-    ]),
-  );
-  assert.equal(offer?.view, "grid");
-  assert.equal(offer?.tool, "annotate");
-  assert.equal(offer?.selectedIndex, 2);
-  assert.equal(offer?.slides[1]?.anomalies.length, 1);
-});
-
-test("the window is read-only while a submit is in flight -- view and tool both freeze", () => {
+test("the window is read-only while a submit is in flight -- the editor and the tool both freeze", () => {
   const state = play([
     { kind: "proposal-offered", proposal, presentationId: "deck_1" },
     { kind: "submit-started", picked: 1, stage: "inserting" },
-    { kind: "candidate-zoomed", index: 3 },
+    { kind: "editor-opened", index: 3 },
     { kind: "tool-chosen", tool: "annotate" },
   ]);
   assert.equal(state.status, "submitting");
-  assert.equal(offerOf(state)?.view, "grid", "zooming mid-insert changes nothing");
+  assert.equal(offerOf(state)?.editing, null, "opening a candidate mid-insert changes nothing");
   assert.equal(offerOf(state)?.tool, "select");
   assert.equal(offerOf(state)?.selectedIndex, 1);
 });
@@ -195,27 +125,16 @@ test("the visual editor's list is recorded on the candidate it belongs to", () =
 
 // --- what the dialog's loops fetch ----------------------------------------
 
-test("the grid wants EVERY candidate's HTML, one at a time, in order", () => {
-  let state = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
-  const asked: number[] = [];
-  for (let step = 0; step < proposal.count; step++) {
-    const next = nextHtmlToLoad(offerOf(state) ?? neverOffer());
-    assert.ok(next !== null, `step ${step} had nothing to load`);
-    asked.push(next.index);
-    state = reducePicker(state, { kind: "html-requested", index: next.index });
-    state = reducePicker(state, { kind: "html-arrived", index: next.index, html: "<html></html>" });
-  }
-  assert.deepEqual(asked, [1, 2, 3, 4]);
-  assert.equal(nextHtmlToLoad(offerOf(state) ?? neverOffer()), null, "and then it stops asking");
-});
-
 test("a candidate whose HTML failed is not asked for again, and the others still load", () => {
   const state = play([
     { kind: "proposal-offered", proposal, presentationId: "deck_1" },
     { kind: "html-requested", index: 1 },
     { kind: "html-failed", index: 1, message: "Drive said 404" },
   ]);
-  assert.equal(nextHtmlToLoad(offerOf(state) ?? neverOffer())?.index, 2);
+  assert.deepEqual(
+    htmlToLoad(offerOf(state) ?? neverOffer()).map((frame) => frame.index),
+    [2, 3, 4],
+  );
 });
 
 test("WHILE THE PREVIEW IS SHOWING, conversion waits for an idle browser -- never the user's click", () => {
@@ -489,7 +408,7 @@ test("the visual editor's slot says what it is for, and lists the edits once the
   );
   assert.match(edited, /2 edits/);
   assert.match(edited, />Undo</, "and the button appears once there is something to undo");
-  // The sentences are the EDITOR's own (`describeEdit`), re-exported through slide-editor.ts rather
+  // The sentences are the EDITOR's own (`describeEdit`, from editor/index.ts) rather
   // than reworded here -- the editor is the authority on what one of its edits means.
   assert.match(edited, /moved h1\.title to 8%,16%/);
   // `retext` quotes the new words, and only `retext` does: UI-CONTRACT.md makes it the one place
@@ -541,19 +460,6 @@ test("the null editor satisfies the interface: no edits, HTML unchanged, nothing
   assert.equal(editor.undo(), false);
 });
 
-test("the edit record carries the candidate's 1-based number and the edits, and no markup", () => {
-  const record = slideEditRecord({
-    candidateIndex: 2,
-    protocolVersion: 1,
-    edits: [{ kind: "recoloured", target: ".accent", property: "color", from: "#2b3a8f", to: "#111111" }],
-  });
-  assert.deepEqual(record, {
-    protocolVersion: 1,
-    candidateIndex: 2,
-    edits: [{ kind: "recoloured", target: ".accent", property: "color", from: "#2b3a8f", to: "#111111" }],
-  });
-});
-
 test("every edit kind has a sentence, so none can render as an object", () => {
   const every: readonly SlideEdit[] = [
     { kind: "moved", target: "a", from: { x: 0, y: 0 }, to: { x: 0.5, y: 0.25 } },
@@ -563,21 +469,15 @@ test("every edit kind has a sentence, so none can render as an object", () => {
     { kind: "removed", target: "e" },
   ];
   for (const edit of every) {
-    const sentence = describeSlideEdit(edit);
+    const sentence = describeEdit(edit);
     assert.notEqual(sentence, "");
     assert.doesNotMatch(sentence, /\[object/);
   }
-  assert.equal(describeSlideEdit(every[1] ?? neverEdit()), "resized b to 52%x30%");
+  assert.equal(describeEdit(every[1] ?? neverEdit()), "resized b to 52%x30%");
 });
 
 function play(events: readonly PickerEvent[]): PickerState {
-  let state = INITIAL_PICKER_STATE;
-  for (const event of events) state = reducePicker(state, event);
-  return state;
-}
-
-function markupOf(state: PickerState): string {
-  return renderToStaticMarkup(createElement(Picker, { state, actions: INERT_PICKER_ACTIONS }));
+  return replay(reducePicker, INITIAL_PICKER_STATE, events);
 }
 
 function countOf(markup: string, pattern: RegExp): number {

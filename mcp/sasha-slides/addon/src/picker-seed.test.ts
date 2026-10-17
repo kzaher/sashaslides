@@ -8,7 +8,8 @@ import { INITIAL_CONVERSATION, reduceConversation, type Conversation, type Conve
 import { SEED_HTML_BUDGET, parseBootSeed, pickerSeedOf, type BootSeed, type PickerSeed } from "./picker-seed.ts";
 import { htmlToLoad, offerOf, reducePicker, type PickerState } from "./picker-state.ts";
 import type { Manifest, MergeSpec } from "./protocol.ts";
-import { NO_PREVIEWS, nextPreviewToLoad, reducePreviews, type SlidePreviews } from "./slide-previews.ts";
+import { NO_PREVIEWS, previewsToLoad, reducePreviews, type SlidePreviews } from "./slide-previews.ts";
+import { replay as replayEvents } from "./test-support.ts";
 
 const AT = "2026-10-11T12:00:00.000Z";
 const PROPOSAL = "p_1760184000000_seed01";
@@ -177,9 +178,7 @@ function seeded(seed: PickerSeed): PickerState {
 }
 
 function replay(events: readonly ConversationEvent[]): Conversation {
-  let conversation = INITIAL_CONVERSATION;
-  for (const event of events) conversation = reduceConversation(conversation, event);
-  return conversation;
+  return replayEvents(reduceConversation, INITIAL_CONVERSATION, events);
 }
 
 function following(): Conversation {
@@ -194,7 +193,7 @@ function following(): Conversation {
 function loadAll({ conversation, html }: { conversation: Conversation; html: (index: number) => string | null }): SlidePreviews {
   let previews = NO_PREVIEWS;
   for (let guard = 0; guard < 20; guard += 1) {
-    const next = nextPreviewToLoad({ conversation, previews });
+    const next = previewsToLoad({ conversation, previews })[0] ?? null;
     if (next === null) return previews;
     previews = reducePreviews(previews, { kind: "preview-requested", key: next.key });
     const body = html(next.slideIndex);

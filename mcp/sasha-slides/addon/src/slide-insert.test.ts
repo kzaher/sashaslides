@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { stubConvertHtmlToSlideRequests } from "./converter-contract.ts";
+import { stubConvertHtmlToSlideRequests } from "./test-support.ts";
 import { fakeDrive } from "./fake-drive.ts";
 import { renderKeyOf } from "./render-cache.ts";
 import {

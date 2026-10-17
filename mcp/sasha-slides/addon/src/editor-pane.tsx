@@ -21,7 +21,8 @@
 
 import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import { ScaledHtmlFrame } from "./scaled-frame.tsx";
-import { describeSlideEdit, type SlideEdit, type SlideEditor } from "./slide-editor.ts";
+import type { SlideEdit, SlideEditor } from "./editor/index.ts";
+import { EditList } from "./editor-slot.tsx";
 
 export function EditorPane({
   title,
@@ -120,15 +121,7 @@ function PaneEdits({
           Undo all of them
         </button>
       )}
-      {edits.length === 0 ? null : (
-        <ul className="sasha-edits">
-          {edits.map((edit, position) => (
-            <li key={`${edit.kind}_${edit.target}_${position}`} className="sasha-edit">
-              {describeSlideEdit(edit)}
-            </li>
-          ))}
-        </ul>
-      )}
+      <EditList edits={edits} />
     </div>
   );
 }

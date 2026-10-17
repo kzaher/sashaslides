@@ -18,6 +18,7 @@
  */
 import type { AddonShellMessage } from "../../engine/src/contracts/deck-api.ts";
 import { TIDEPOOL_TOKENS } from "../../engine/src/theme/tidepool-theme.ts";
+import { assertNever } from "./protocol.ts";
 
 export type EditorSeed =
   | Readonly<{ kind: "open"; editorOrigin: string; deckId: string; ticket: string }>
@@ -109,10 +110,13 @@ function exportFinished(options: Readonly<{ exportId: string; outcome: ExportOut
   }
 }
 
+/** The element Code.gs appends the handoff under (editor-code-gs.ts `sashaOpenEditor`). */
+export const EDITOR_SEED_ELEMENT_ID = "sasha-editor-seed";
+
 /** The page: read the seed, draw the frame or the card, install the relay. */
 function renderShell(page: Readonly<{ document: Document; window: Window }>): void {
   const { document, window } = page;
-  const seedElement = document.getElementById("sasha-editor-seed");
+  const seedElement = document.getElementById(EDITOR_SEED_ELEMENT_ID);
   const seed = seedElement === null ? null : parseEditorSeed(seedElement.textContent ?? "");
   const style = document.createElement("style");
   style.textContent = shellStylesheet();
@@ -217,9 +221,6 @@ function stringField(value: unknown, key: string): string | null {
   return typeof field === "string" ? field : null;
 }
 
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
-}
 
 // The bundle runs in the HtmlService page; under the unit tests there is no document. Code.gs
 // APPENDS the seed after this bundle's loader (measured: read at once, the seed element did not

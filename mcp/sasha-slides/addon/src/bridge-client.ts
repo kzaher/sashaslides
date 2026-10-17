@@ -10,42 +10,32 @@
 
 import { CALLS_PER_MINUTE, createCallRateLimit } from "./call-budget.ts";
 import {
+  explainHostFailure,
   outcomeOf,
   parseCandidateCommentsReply,
+  parseCommentReply,
+  parseHelloReply,
   parseInsertReply,
-  parsePageElementsReply,
-  parseRenderPreviewsReply,
   parseOpenPickerReply,
+  parsePageElementsReply,
   parsePickerTargetReply,
-  parseReportWindowUrl,
   parseReadEventsReply,
   parseReadTextReply,
   parseReadTextsReply,
-  parseCommentReply,
+  parseRenderPreviewsReply,
   parseReportTargetReply,
+  parseReportWindowUrl,
   parseScanReply,
   parseSendFeedbackReply,
   parseWriteEventReply,
   parseWritePickReply,
   parseWriteRenderReply,
   type CallOutcome,
-  type CandidateCommentsReply,
   type HelloReply,
-  type InsertReply,
-  type PickerTargetReply,
-  type RenderPreviewsReply,
-  type InsertRequestSpec,
-  type OpenPickerReply,
-  type PageElementsReply,
-  type ProposalMark,
-  type ReadEventsReply,
-  type CommentReplyReply,
-  type ReportTargetReply,
-  type SendFeedbackReply,
-  type WriteEventReply,
-  type WriteRenderReply,
-  type WriteRenderSpec, explainHostFailure } from "./bridge.ts";
-import { parseHelloReply } from "./bridge.ts";
+  type ServerFunctionArgs,
+  type ServerFunctionName,
+  type ServerFunctions,
+} from "./bridge.ts";
 import { parseCommentAccessAnswer, type CommentAccessAnswer } from "../../comment-bot/comment-access-contract.ts";
 import type {
   BatchReadApi,
@@ -59,6 +49,7 @@ import type {
   SessionLogApi,
   SlidesApi,
 } from "./drive-api.ts";
+import { PROTOCOL_VERSION, type Parsed } from "./protocol.ts";
 
 /** How long any one server call may take before it is reported as a failure. */
 export const CALL_BUDGET_MS = 25_000;
@@ -147,189 +138,161 @@ export function appsScriptCall({
     });
 }
 
-export async function helloFromServer({ call }: { call: ServerCall }): Promise<CallOutcome<HelloReply>> {
-  const replied = await call<unknown>({ invoke: (runner) => runner.sashaHello(), what: "sashaHello" });
+/**
+ * ONE SERVER FUNCTION, CALLED AND PARSED: the call, then its reply through the bridge.ts parser that
+ * owns it. `name` is both the function invoked and the `what` every failure names, so the two can
+ * no longer disagree.
+ */
+async function invoke<Name extends ServerFunctionName, Reply>({
+  call,
+  name,
+  args,
+  parse,
+  budgetMs,
+}: {
+  call: ServerCall;
+  name: Name;
+  args: ServerFunctionArgs[Name];
+  parse: (value: unknown) => Parsed<Reply>;
+  budgetMs?: number;
+}): Promise<CallOutcome<Reply>> {
+  const replied = await call<unknown>({
+    invoke: (runner) => {
+      const functions: ServerFunctions = runner;
+      functions[name](...args);
+    },
+    what: name,
+    ...(budgetMs === undefined ? {} : { budgetMs }),
+  });
   if (replied.kind !== "ok") return replied;
-  return outcomeOf({ parsed: parseHelloReply(replied.value), what: "sashaHello" });
+  return outcomeOf({ parsed: parse(replied.value), what: name });
+}
+
+/** The value of a successful outcome, changed; a failure passes through. */
+function mapOk<Value, Changed>(outcome: CallOutcome<Value>, change: (value: Value) => Changed): CallOutcome<Changed> {
+  return outcome.kind === "ok" ? { kind: "ok", value: change(outcome.value) } : outcome;
+}
+
+export function helloFromServer({ call }: { call: ServerCall }): Promise<CallOutcome<HelloReply>> {
+  return invoke({ call, name: "sashaHello", args: [], parse: parseHelloReply });
+}
+
+/**
+ * EVERY SURFACE'S FIRST QUESTION: which deck, and does the server speak this build's protocol. The
+ * answer comes from the seed Code.gs appended when there is one, so the round trip is skipped. A host
+ * that does not answer, or speaks another version, is a failure with words -- a banner on screen
+ * rather than reads that silently never land.
+ */
+export async function connect({
+  call,
+  seeded,
+  surface,
+}: {
+  call: ServerCall;
+  seeded: HelloReply | null;
+  /** What this document calls itself in the version message: "panel", "slides window", "report". */
+  surface: string;
+}): Promise<CallOutcome<HelloReply>> {
+  const hello = seeded !== null ? { kind: "ok" as const, value: seeded } : await helloFromServer({ call });
+  if (hello.kind !== "ok" || hello.value.protocolVersion === PROTOCOL_VERSION) return hello;
+  return {
+    kind: "failed",
+    message: `the add-on speaks protocolVersion ${hello.value.protocolVersion}, this ${surface} ${PROTOCOL_VERSION}`,
+  };
+}
+
+/**
+ * WHAT A SURFACE SAYS WHEN IT IS NOT CONNECTED. Its services are null until the hello is in hand,
+ * and every path has to treat that as a REPORTABLE outcome: returning silently is what made a failed
+ * hello look like a hang -- a panel set its loading flags and sat on "loading..." for ever.
+ */
+export function notConnected(reopen: string): string {
+  return `the add-on is not connected to Google Slides. Reload the presentation and ${reopen}.`;
 }
 
 /**
  * `sashaCommentAccess()`: Code.gs asks the connector whether the user's own grant reaches this
  * deck's comments (comment-access-state.ts). Its reply is the connector's answer, parsed here.
  */
-export async function commentAccessFromServer({ call }: { call: ServerCall }): Promise<CallOutcome<CommentAccessAnswer>> {
-  const replied = await call<unknown>({ invoke: (runner) => runner.sashaCommentAccess(), what: "sashaCommentAccess" });
-  if (replied.kind !== "ok") return replied;
-  const answer = parseCommentAccessAnswer(replied.value);
-  return answer === null ? { kind: "failed", message: "sashaCommentAccess returned no access answer" } : { kind: "ok", value: answer };
+export function commentAccessFromServer({ call }: { call: ServerCall }): Promise<CallOutcome<CommentAccessAnswer>> {
+  return invoke({ call, name: "sashaCommentAccess", args: [], parse: parseAccessAnswer });
+}
+
+function parseAccessAnswer(value: unknown): Parsed<CommentAccessAnswer> {
+  const answer = parseCommentAccessAnswer(value);
+  return answer === null ? { kind: "invalid", reason: "it returned no access answer" } : { kind: "ok", value: answer };
 }
 
 export function appsScriptDriveApi({ call }: { call: ServerCall }): DriveApi {
   return {
-    async scanInbox(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaScanInbox(spec),
-        what: "sashaScanInbox",
-      });
-      if (replied.kind !== "ok") return replied;
-      const parsed = outcomeOf({ parsed: parseScanReply(replied.value), what: "sashaScanInbox" });
-      return parsed.kind === "ok"
-        ? { kind: "ok", value: parsed.value.marks satisfies readonly ProposalMark[] }
-        : parsed;
-    },
-
-    async downloadText(fileId) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaReadText({ fileId }),
-        what: "sashaReadText",
-      });
-      if (replied.kind !== "ok") return replied;
-      const parsed = outcomeOf({ parsed: parseReadTextReply(replied.value), what: "sashaReadText" });
-      return parsed.kind === "ok" ? { kind: "ok", value: parsed.value.text } : parsed;
-    },
+    scanInbox: async (spec) =>
+      mapOk(await invoke({ call, name: "sashaScanInbox", args: [spec], parse: parseScanReply }), (reply) => reply.marks),
+    downloadText: async (fileId) =>
+      mapOk(await invoke({ call, name: "sashaReadText", args: [{ fileId }], parse: parseReadTextReply }), (reply) => reply.text),
   };
 }
 
 export function appsScriptBatchReadApi({ call }: { call: ServerCall }): BatchReadApi {
   return {
-    async downloadTexts(fileIds, options) {
+    downloadTexts(fileIds, options) {
       const rememberForSidebar = options?.rememberForSidebar;
-      const replied = await call<unknown>({
-        invoke: (runner) =>
-          runner.sashaReadTexts(rememberForSidebar === undefined ? { fileIds } : { fileIds, rememberForSidebar }),
-        what: "sashaReadTexts",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({ parsed: parseReadTextsReply(replied.value), what: "sashaReadTexts" });
+      const spec = rememberForSidebar === undefined ? { fileIds } : { fileIds, rememberForSidebar };
+      return invoke({ call, name: "sashaReadTexts", args: [spec], parse: parseReadTextsReply });
     },
   };
 }
 
 export function appsScriptSlidesApi({ call }: { call: ServerCall }): SlidesApi {
   return {
-    async insert(spec: InsertRequestSpec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaInsert(spec),
-        what: "sashaInsert",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({ parsed: parseInsertReply(replied.value), what: "sashaInsert" }) satisfies CallOutcome<InsertReply>;
-    },
-
-    async writeRender(spec: WriteRenderSpec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaWriteRender(spec),
-        what: "sashaWriteRender",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseWriteRenderReply(replied.value),
-        what: "sashaWriteRender",
-      }) satisfies CallOutcome<WriteRenderReply>;
-    },
-
-    async pageElements(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaPageElements(spec),
-        what: "sashaPageElements",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parsePageElementsReply(replied.value),
-        what: "sashaPageElements",
-      }) satisfies CallOutcome<PageElementsReply>;
-    },
-
-    async renderPreviews(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaRenderPreviews(spec),
-        what: "sashaRenderPreviews",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseRenderPreviewsReply(replied.value),
-        what: "sashaRenderPreviews",
-      }) satisfies CallOutcome<RenderPreviewsReply>;
-    },
+    insert: (spec) => invoke({ call, name: "sashaInsert", args: [spec], parse: parseInsertReply }),
+    writeRender: (spec) => invoke({ call, name: "sashaWriteRender", args: [spec], parse: parseWriteRenderReply }),
+    pageElements: (spec) => invoke({ call, name: "sashaPageElements", args: [spec], parse: parsePageElementsReply }),
+    renderPreviews: (spec) => invoke({ call, name: "sashaRenderPreviews", args: [spec], parse: parseRenderPreviewsReply }),
   };
 }
 
 export function appsScriptPickApi({ call }: { call: ServerCall }): PickApi {
   return {
-    async createPick({ folderId, name, mimeType, body, appProperties }) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaWritePick({ folderId, name, mimeType, body, appProperties }),
-        what: "sashaWritePick",
-      });
-      if (replied.kind !== "ok") return replied;
-      const parsed = outcomeOf({ parsed: parseWritePickReply(replied.value), what: "sashaWritePick" });
-      return parsed.kind === "ok" ? { kind: "ok", value: { fileId: parsed.value.fileId } } : parsed;
-    },
+    createPick: async ({ folderId, name, mimeType, body, appProperties }) =>
+      mapOk(
+        await invoke({
+          call,
+          name: "sashaWritePick",
+          args: [{ folderId, name, mimeType, body, appProperties }],
+          parse: parseWritePickReply,
+        }),
+        (reply) => ({ fileId: reply.fileId }),
+      ),
   };
 }
 
 export function appsScriptSessionLogApi({ call }: { call: ServerCall }): SessionLogApi {
   return {
-    async readEvents(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaReadEvents(spec),
-        what: "sashaReadEvents",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseReadEventsReply(replied.value),
-        what: "sashaReadEvents",
-      }) satisfies CallOutcome<ReadEventsReply>;
-    },
-
-    async appendEvent(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaWriteEvent(spec),
-        what: "sashaWriteEvent",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseWriteEventReply(replied.value),
-        what: "sashaWriteEvent",
-      }) satisfies CallOutcome<WriteEventReply>;
-    },
+    readEvents: (spec) => invoke({ call, name: "sashaReadEvents", args: [spec], parse: parseReadEventsReply }),
+    appendEvent: (spec) => invoke({ call, name: "sashaWriteEvent", args: [spec], parse: parseWriteEventReply }),
   };
 }
 
 export function appsScriptCandidateCommentsApi({ call }: { call: ServerCall }): CandidateCommentsApi {
   return {
-    async read(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaCandidateComments(spec),
-        what: "sashaCandidateComments",
+    read: (spec) =>
+      invoke({
+        call,
+        name: "sashaCandidateComments",
+        args: [spec],
+        parse: parseCandidateCommentsReply,
         // THE HEAVY ONE, and the one most often made to wait. It is a Drive call PER CANDIDATE,
         // and on a cold start it queues behind the slides window fetching and converting every
         // candidate. At the 25 s default it was killed mid-queue and the window printed "open
         // comments could not be read" over a read that was merely waiting its turn.
         budgetMs: COMMENT_READ_BUDGET_MS,
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseCandidateCommentsReply(replied.value),
-        what: "sashaCandidateComments",
-      }) satisfies CallOutcome<CandidateCommentsReply>;
-    },
+      }),
   };
 }
 
 export function appsScriptFeedbackApi({ call }: { call: ServerCall }): FeedbackApi {
   return {
-    async send(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaSendFeedback(spec),
-        what: "sashaSendFeedback",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseSendFeedbackReply(replied.value),
-        what: "sashaSendFeedback",
-      }) satisfies CallOutcome<SendFeedbackReply>;
-    },
+    send: (spec) => invoke({ call, name: "sashaSendFeedback", args: [spec], parse: parseSendFeedbackReply }),
   };
 }
 
@@ -341,97 +304,24 @@ export function appsScriptFeedbackApi({ call }: { call: ServerCall }): FeedbackA
  */
 export function appsScriptCommentThreadApi({ call }: { call: ServerCall }): CommentThreadApi {
   return {
-    async reply(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaReplyToComment(spec),
-        what: "sashaReplyToComment",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseCommentReply(replied.value),
-        what: "sashaReplyToComment",
-      }) satisfies CallOutcome<CommentReplyReply>;
-    },
-
-    async resolve(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaResolveComment(spec),
-        what: "sashaResolveComment",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseCommentReply(replied.value),
-        what: "sashaResolveComment",
-      }) satisfies CallOutcome<CommentReplyReply>;
-    },
+    reply: (spec) => invoke({ call, name: "sashaReplyToComment", args: [spec], parse: parseCommentReply }),
+    resolve: (spec) => invoke({ call, name: "sashaResolveComment", args: [spec], parse: parseCommentReply }),
   };
 }
 
 export function appsScriptPickerWindowApi({ call }: { call: ServerCall }): PickerWindowApi {
   return {
-    async openPicker(target) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaOpenPicker(target),
-        what: "sashaOpenPicker",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseOpenPickerReply(replied.value),
-        what: "sashaOpenPicker",
-      }) satisfies CallOutcome<OpenPickerReply>;
-    },
-
-    async takePickerTarget() {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaTakePickerTarget(),
-        what: "sashaTakePickerTarget",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parsePickerTargetReply(replied.value),
-        what: "sashaTakePickerTarget",
-      }) satisfies CallOutcome<PickerTargetReply>;
-    },
-
-    async openDefectReport(spec) {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaOpenDefectReport(spec),
-        what: "sashaOpenDefectReport",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseOpenPickerReply(replied.value),
-        what: "sashaOpenDefectReport",
-      }) satisfies CallOutcome<OpenPickerReply>;
-    },
-
-    async reportWindowUrl() {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaReportWindowUrl({}),
-        what: "sashaReportWindowUrl",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseReportWindowUrl(replied.value),
-        what: "sashaReportWindowUrl",
-      }) satisfies CallOutcome<string | null>;
-    },
+    openPicker: (target) =>
+      invoke({ call, name: "sashaOpenPicker", args: target === undefined ? [] : [target], parse: parseOpenPickerReply }),
+    takePickerTarget: () => invoke({ call, name: "sashaTakePickerTarget", args: [], parse: parsePickerTargetReply }),
+    openDefectReport: (spec) => invoke({ call, name: "sashaOpenDefectReport", args: [spec], parse: parseOpenPickerReply }),
+    reportWindowUrl: () => invoke({ call, name: "sashaReportWindowUrl", args: [{}], parse: parseReportWindowUrl }),
   };
 }
 
 export function appsScriptReportTargetApi({ call }: { call: ServerCall }): ReportTargetApi {
   return {
-    async takeTarget() {
-      const replied = await call<unknown>({
-        invoke: (runner) => runner.sashaTakeReportTarget(),
-        what: "sashaTakeReportTarget",
-      });
-      if (replied.kind !== "ok") return replied;
-      return outcomeOf({
-        parsed: parseReportTargetReply(replied.value),
-        what: "sashaTakeReportTarget",
-      }) satisfies CallOutcome<ReportTargetReply>;
-    },
+    takeTarget: () => invoke({ call, name: "sashaTakeReportTarget", args: [], parse: parseReportTargetReply }),
   };
 }
 

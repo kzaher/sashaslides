@@ -38,6 +38,7 @@ import type { SidebarSeed } from "./conversation-state.ts";
 import { parseCommentAccessAnswer, type CommentAccessAnswer } from "../../comment-bot/comment-access-contract.ts";
 import { parseManifest, type Manifest, type Parsed } from "./protocol.ts";
 import { sessionEventsOf } from "./session-log.ts";
+import { asRecord } from "./json-fields.ts";
 
 /** The id of the inert element `showSidebar` appends to the panel's page. */
 export const SIDEBAR_SEED_ELEMENT_ID = "sasha-sidebar-seed";
@@ -174,10 +175,4 @@ function rememberedLogOf(value: unknown): RememberedLog | null {
   if (typeof folderId !== "string" || folderId === "") return null;
   const parsed = parseReadEventsReply(value);
   return parsed.kind === "ok" ? { folderId, events: parsed.value.events } : null;
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
 }

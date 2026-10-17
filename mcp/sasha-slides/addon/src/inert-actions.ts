@@ -10,7 +10,7 @@ import type { ConversationActions } from "./Conversation.tsx";
 import type { DefectActions } from "./Defect.tsx";
 import type { PickerActions } from "./Picker.tsx";
 import type { SetupEnvironment } from "./setup-guide.tsx";
-import { nullSlideEditor } from "./slide-editor.ts";
+import type { SlideEditor } from "./editor/index.ts";
 
 export const INERT_DEFECT_ACTIONS: DefectActions = {
   chooseView() {},
@@ -36,13 +36,11 @@ export const INERT_DEFECT_ACTIONS: DefectActions = {
 };
 
 export const INERT_PICKER_ACTIONS: PickerActions = {
-  selectSlide() {},
   openEditor() {},
   closeEditor() {},
   applyMarkup() {},
   replyToThread() {},
   resolveThread() {},
-  chooseView() {},
   chooseTool() {},
   chooseRendering() {},
   toggleFindings() {},
@@ -52,13 +50,12 @@ export const INERT_PICKER_ACTIONS: PickerActions = {
   commentOnSelection() {},
   clearSelection() {},
   sendAnomaly() {},
-  zoomCandidate() {},
   changeEdits() {},
   insertPicked() {},
   dismiss() {},
   openReport() {},
-  // The real factory is dialog.tsx's; the null editor is what the dialog ships with anyway, so a
-  // rendered tree in a test exercises the same slot the user sees.
+  // The real factory is dialog.tsx's; the null editor gives a rendered tree the same slot with
+  // nothing attached to it.
   createEditor({ html }) {
     return nullSlideEditor({ html });
   },
@@ -70,6 +67,25 @@ export const INERT_CONVERSATION_ACTIONS: ConversationActions = {
   chooseCandidateTab() {},
   allowCommentAccessOpened() {},
 };
+
+/**
+ * A `SlideEditor` that does nothing, for a tree rendered with no browser.
+ *
+ * It is not a silent no-op: it reports zero edits and returns the candidate's HTML UNCHANGED, which
+ * is exactly true of a session in which nothing was edited. `undo()` answers false -- there is
+ * nothing to undo -- which is the contract's own answer, not a special case.
+ */
+export function nullSlideEditor({ html }: { html: string }): SlideEditor {
+  return {
+    attach() {},
+    edits: () => [],
+    html: () => html,
+    undo: () => false,
+    selection: () => null,
+    replaceSelected: () => false,
+    detach() {},
+  };
+}
 
 /** A build with no hosted connector address, and a viewer whose storage remembers nothing. */
 export const UNCONFIGURED_SETUP: SetupEnvironment = {

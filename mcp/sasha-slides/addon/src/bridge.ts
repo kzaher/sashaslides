@@ -28,15 +28,17 @@
 // about whether a reply is usable is made here, in TypeScript that unit-tests.
 
 import { authoredByAgentText, withoutAgentMarker } from "../../agent-marker.ts";
-import type { FeedbackCommentRecord, FeedbackReply, SendFeedbackResult } from "./feedback.ts";
+import type { RenderPreviewsSpec } from "./drive-api.ts";
+import type { FeedbackCommentRecord, FeedbackReply, SendFeedbackResult, SendFeedbackSpec } from "./feedback.ts";
 // `CandidateCommentsEntry` is DECLARED in session-log.ts, not restated here. A second declaration
 // of the same wire shape compiles perfectly and then drifts, which this repo has already paid for
 // once (UI-CONTRACT.md on `SlideEditor`); session-log.ts owns the session-log shapes, so the
 // parser imports the type it fills in rather than inventing a twin.
 import type { CandidateCommentsEntry } from "./session-log.ts";
 import type { PickerSeed } from "./picker-seed.ts";
-import { assertNever, type Parsed } from "./protocol.ts";
+import { describeParsedFailure, type Parsed } from "./protocol.ts";
 import type { InsertPosition } from "./slide-insert.ts";
+import { asRecord, integerAt, stringAt } from "./json-fields.ts";
 
 /**
  * One proposal folder as the inbox name walk found it -- the replacement for the extension's
@@ -66,6 +68,11 @@ export type ScanReply = Readonly<{ marks: readonly ProposalMark[] }>;
  * the next time Ask Sasha opens on this deck (sidebar-seed.ts); only the sidebar sets it.
  */
 export type ScanSpec = Readonly<{ pageSize: number; rememberForSidebar?: boolean }>;
+
+/** One scan of the inbox, from every surface and as Code.gs's own default. */
+export const INBOX_PAGE_SIZE = 100;
+/** One read of a proposal's `events/` folder. A session with more events than this is not one. */
+export const EVENT_PAGE_SIZE = 500;
 
 /**
  * `sashaReadTexts()`'s request. `rememberForSidebar` marks the sidebar's READY + manifest read, so
@@ -171,57 +178,74 @@ export type CallOutcome<TValue> =
   | Readonly<{ kind: "ok"; value: TValue }>
   | Readonly<{ kind: "failed"; message: string }>;
 
-/** The functions Code.gs exposes. Arguments are one object each, as Apps Script prefers. */
-export type ServerFunctionName =
-  | "sashaHello"
-  | "sashaScanInbox"
-  | "sashaReadText"
-  | "sashaReadTexts"
-  | "sashaReadEvents"
-  | "sashaWriteEvent"
-  | "sashaCandidateComments"
-  | "sashaInsert"
-  | "sashaWriteRender"
-  | "sashaPageElements"
-  | "sashaRenderPreviews"
-  | "sashaWritePick"
-  | "sashaSendFeedback"
-  | "sashaReplyToComment"
-  | "sashaResolveComment"
-  | "sashaOpenPicker"
-  | "sashaTakePickerTarget"
-  | "sashaOpenDefectReport"
-  | "sashaReportWindowUrl"
-  | "sashaTakeReportTarget"
-  | "sashaImportAgain"
-  | "sashaRunExport"
-  | "sashaCommentAccess";
+/**
+ * THE FUNCTIONS Code.gs EXPOSES, each with the arguments it takes -- one object each, as Apps Script
+ * prefers. This is the one list: the runner's type (apps-script.d.ts), every client method
+ * (bridge-client.ts) and the build's check that Code.gs declares them all (build-addon.ts, through
+ * `SERVER_FUNCTION_NAMES`) are derived from it.
+ */
+export type ServerFunctionArgs = {
+  sashaHello: [];
+  sashaScanInbox: [spec: ScanSpec];
+  sashaReadText: [spec: Readonly<{ fileId: string }>];
+  sashaReadTexts: [spec: ReadTextsSpec];
+  sashaReadEvents: [spec: ReadEventsSpec];
+  sashaWriteEvent: [spec: WriteEventSpec];
+  sashaCandidateComments: [spec: CandidateCommentsSpec];
+  sashaInsert: [spec: InsertRequestSpec];
+  sashaWriteRender: [spec: WriteRenderSpec];
+  sashaPageElements: [spec: PageElementsSpec];
+  sashaRenderPreviews: [spec: RenderPreviewsSpec];
+  sashaWritePick: [spec: WritePickSpec];
+  sashaSendFeedback: [spec: SendFeedbackSpec];
+  sashaReplyToComment: [spec: CommentReplySpec];
+  sashaResolveComment: [spec: CommentReplySpec];
+  sashaOpenPicker: [spec?: OpenPickerSpec];
+  sashaTakePickerTarget: [];
+  sashaOpenDefectReport: [spec: ReportTargetSpec];
+  sashaReportWindowUrl: [spec: Readonly<Record<string, never>>];
+  sashaTakeReportTarget: [];
+  /** The editor shell's "Import again" (SPEC.md 21.13): replaces the bound deck, answers `{ deckId, ticket }`. */
+  sashaImportAgain: [spec: Readonly<{ importToken: string; deckId: string }>];
+  /** The editor's export through the add-on's own authorization: answers `{ exportId, outcome, message }`. */
+  sashaRunExport: [exportId: string];
+  sashaCommentAccess: [];
+};
 
-export const SERVER_FUNCTION_NAMES: readonly ServerFunctionName[] = [
-  "sashaHello",
-  "sashaScanInbox",
-  "sashaReadText",
-  "sashaReadTexts",
-  "sashaReadEvents",
-  "sashaWriteEvent",
-  "sashaCandidateComments",
-  "sashaInsert",
-  "sashaWriteRender",
-  "sashaPageElements",
-  "sashaRenderPreviews",
-  "sashaWritePick",
-  "sashaSendFeedback",
-  "sashaReplyToComment",
-  "sashaResolveComment",
-  "sashaOpenPicker",
-  "sashaTakePickerTarget",
-  "sashaOpenDefectReport",
-  "sashaReportWindowUrl",
-  "sashaTakeReportTarget",
-  "sashaImportAgain",
-  "sashaRunExport",
-  "sashaCommentAccess",
-];
+export type ServerFunctionName = keyof ServerFunctionArgs;
+
+/** The server functions as `google.script.run` exposes them (apps-script.d.ts `AppsScriptRunner`). */
+export type ServerFunctions = { readonly [Name in ServerFunctionName]: (...args: ServerFunctionArgs[Name]) => void };
+
+/** Every name above, as a value. A TOTAL record, so a function added to the type must be listed. */
+const SERVER_FUNCTIONS: Readonly<Record<ServerFunctionName, true>> = {
+  sashaHello: true,
+  sashaScanInbox: true,
+  sashaReadText: true,
+  sashaReadTexts: true,
+  sashaReadEvents: true,
+  sashaWriteEvent: true,
+  sashaCandidateComments: true,
+  sashaInsert: true,
+  sashaWriteRender: true,
+  sashaPageElements: true,
+  sashaRenderPreviews: true,
+  sashaWritePick: true,
+  sashaSendFeedback: true,
+  sashaReplyToComment: true,
+  sashaResolveComment: true,
+  sashaOpenPicker: true,
+  sashaTakePickerTarget: true,
+  sashaOpenDefectReport: true,
+  sashaReportWindowUrl: true,
+  sashaTakeReportTarget: true,
+  sashaImportAgain: true,
+  sashaRunExport: true,
+  sashaCommentAccess: true,
+};
+
+// SAFETY: `Object.keys` of a total `Record<ServerFunctionName, true>` literal is exactly its keys.
+export const SERVER_FUNCTION_NAMES = Object.keys(SERVER_FUNCTIONS) as readonly ServerFunctionName[];
 
 /**
  * `sashaReportWindowUrl()`. THE WEB-APP URL, or null when the script is not deployed as one.
@@ -754,16 +778,7 @@ export function parseReportTargetReply(value: unknown): Parsed<ReportTargetReply
 /** A parsed reply as a CallOutcome, so every caller handles one failure shape. */
 
 export function outcomeOf<TValue>({ parsed, what }: { parsed: Parsed<TValue>; what: string }): CallOutcome<TValue> {
-  switch (parsed.kind) {
-    case "ok":
-      return parsed;
-    case "invalid":
-      return { kind: "failed", message: `${what}: ${parsed.reason}` };
-    case "unsupported-version":
-      return { kind: "failed", message: `${what} declares protocolVersion ${parsed.protocolVersion}` };
-    default:
-      return assertNever(parsed);
-  }
+  return parsed.kind === "ok" ? parsed : { kind: "failed", message: describeParsedFailure({ parsed, what }) };
 }
 
 /**
@@ -812,20 +827,4 @@ function parsePostedReply({ value, what }: { value: unknown; what: string }): Pa
   const replyId = stringAt({ record, key: "replyId" });
   if (replyId === null || replyId === "") return { kind: "invalid", reason: `${what} returned no replyId` };
   return { kind: "ok", value: { replyId, resolved: record["resolved"] === true } };
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function stringAt({ record, key }: { record: Readonly<Record<string, unknown>>; key: string }): string | null {
-  const value = record[key];
-  return typeof value === "string" ? value : null;
-}
-
-function integerAt({ record, key }: { record: Readonly<Record<string, unknown>>; key: string }): number | null {
-  const value = record[key];
-  return typeof value === "number" && Number.isInteger(value) ? value : null;
 }

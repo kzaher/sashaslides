@@ -1,9 +1,8 @@
 // THE VISUAL EDITOR'S SLOT -- the one place the picker touches `SlideEditor`, and the EDIT tool's
-// own panel. It is not tied to a zoom level: the editor attaches to the selected candidate's frame
-// whether that frame is a grid cell or the single large pane (UI-CONTRACT.md, "The popup IS the
-// editor").
+// own panel (UI-CONTRACT.md, "The popup IS the editor").
 //
-// The editor module is NOT this package's (see slide-editor.ts); this file is the host half of the
+// The editor module is NOT this package's (`src/editor/`, consumed only through its index.ts); this
+// file is the host half of the
 // seam UI-CONTRACT.md specifies -- "The host supplies the iframe and decides when to persist. The
 // editor never calls the server." So:
 //
@@ -13,14 +12,11 @@
 //     management: the scope owns the lifetime, never a hand-written pair of calls);
 //   * every change is dispatched into the picker's state tree, because a Drive poll re-renders this
 //     whole component and anything kept in component state would be lost mid-edit.
-//
-// Until `src/editor/` lands, `nullSlideEditor` fills the slot: zero edits, HTML unchanged, `undo()`
-// false. The slot still says what it is for, because an empty box with no explanation is the thing
-// this project has already shipped once.
 
 import { useEffect, type JSX } from "react";
 import { describeEditorReach, editorIsLive, type EditorReach } from "./picker-state.ts";
-import { describeSlideEdit, type SlideEdit, type SlideEditor } from "./slide-editor.ts";
+import { describeEdit, type SlideEdit, type SlideEditor } from "./editor/index.ts";
+import { plural } from "./plural.ts";
 
 /**
  * ATTACH THE EDITOR TO ONE CANDIDATE, and nothing else.
@@ -105,16 +101,22 @@ export function EditorSlot({
         )}
       </header>
       {editorIsLive(reach) ? null : <p className="sasha-trouble">{describeEditorReach(reach)}</p>}
-      {edits.length === 0 ? null : (
-        <ul className="sasha-edits">
-          {edits.map((edit, position) => (
-            <li key={`${edit.kind}_${edit.target}_${position}`} className="sasha-edit">
-              {describeSlideEdit(edit)}
-            </li>
-          ))}
-        </ul>
-      )}
+      <EditList edits={edits} />
     </section>
+  );
+}
+
+/** The editor's edits, one sentence each, in the editor's own words; nothing when there are none. */
+export function EditList({ edits }: { edits: readonly SlideEdit[] }): JSX.Element | null {
+  if (edits.length === 0) return null;
+  return (
+    <ul className="sasha-edits">
+      {edits.map((edit, position) => (
+        <li key={`${edit.kind}_${edit.target}_${position}`} className="sasha-edit">
+          {describeEdit(edit)}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -136,7 +138,7 @@ function caption({
   edits: readonly SlideEdit[];
   reach: EditorReach;
 }): string {
-  if (edits.length > 0) return `${edits.length} edit${edits.length === 1 ? "" : "s"}`;
+  if (edits.length > 0) return plural(edits.length, "edit");
   if (!editorIsLive(reach)) return "not editable right now";
   return frame === null ? "waiting for the candidate to render" : "no edits yet";
 }

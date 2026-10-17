@@ -16,12 +16,6 @@ export type WalkthroughFlow = "claude-ai" | "chatgpt";
 
 export const WALKTHROUGH_FLOWS: readonly WalkthroughFlow[] = ["claude-ai", "chatgpt"];
 
-/** How long each screen recording ran. The walkthrough has to be at least 30% shorter. */
-export const RECORDING_LENGTH_MS: Readonly<Record<WalkthroughFlow, number>> = {
-  "claude-ai": 284_000,
-  chatgpt: 234_000,
-};
-
 /** What the user types into Claude's message box. */
 export const CLAUDE_PROMPT = "Use the sasha-slides connector: call open_work and tell me what is waiting for me.";
 /** What the user types into ChatGPT after picking Sasha Slides with @. */

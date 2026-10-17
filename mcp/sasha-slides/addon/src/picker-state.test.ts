@@ -8,7 +8,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { Picker, type PickerActions } from "./Picker.tsx";
 import { INERT_PICKER_ACTIONS } from "./inert-actions.ts";
-import { stubConvertHtmlToSlideRequests } from "./converter-contract.ts";
 import { slideHtml } from "./fake-drive.ts";
 import { marksOf } from "./slide-stage.tsx";
 import { unsentMarkUps } from "./picker-state.ts";
@@ -27,6 +26,7 @@ import {
 } from "./picker-state.ts";
 import { WHOLE_SLIDE } from "./protocol.ts";
 import { previewElementsOf } from "./rendered-preview.ts";
+import { pickerMarkupOf as markupOf, replay, stubConvertHtmlToSlideRequests } from "./test-support.ts";
 
 const proposal: Proposal = {
   merge: null,
@@ -67,16 +67,6 @@ test("the rendering toggle switches between the HTML and the converted slide and
   assert.equal(offerOf(state)?.rendering, "html");
 });
 
-test("selecting is 1-based and clamped to the manifest's count", () => {
-  let state = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
-  state = reducePicker(state, { kind: "slide-selected", index: 3 });
-  assert.equal(offerOf(state)?.selectedIndex, 3);
-  state = reducePicker(state, { kind: "slide-selected", index: 9 });
-  assert.equal(offerOf(state)?.selectedIndex, 3, "there is no option 9");
-  state = reducePicker(state, { kind: "slide-selected", index: 0 });
-  assert.equal(offerOf(state)?.selectedIndex, 1);
-});
-
 test("a box the user drew but never wrote on is still reported, as \"(no note)\"", () => {
   const state = play([
     { kind: "proposal-offered", proposal, presentationId: "deck_1" },
@@ -93,7 +83,7 @@ test("a box the user drew but never wrote on is still reported, as \"(no note)\"
 test("re-announcing the same proposal does not throw away the user's work", () => {
   const state = play([
     { kind: "proposal-offered", proposal, presentationId: "deck_1" },
-    { kind: "slide-selected", index: 2 },
+    { kind: "editor-opened", index: 2 },
     { kind: "anomaly-drawn", index: 2, anomalyId: "user_1", region: WHOLE_SLIDE },
     { kind: "anomaly-noted", index: 2, anomalyId: "user_1", note: "gridlines gone" },
     { kind: "proposal-offered", proposal, presentationId: "deck_1" },
@@ -131,10 +121,10 @@ test("the UI is read-only while a submit is in flight", () => {
   const state = play([
     { kind: "proposal-offered", proposal, presentationId: "deck_1" },
     { kind: "submit-started", picked: 1, stage: "inserting" },
-    { kind: "slide-selected", index: 3 },
+    { kind: "editor-opened", index: 3 },
   ]);
   assert.equal(state.status, "submitting");
-  assert.equal(offerOf(state)?.selectedIndex, 1, "clicking a chip mid-insert changes nothing");
+  assert.equal(offerOf(state)?.selectedIndex, 1, "opening a candidate mid-insert changes nothing");
 });
 
 test("a dormant sidebar says what it is waiting for instead of rendering blank", () => {
@@ -269,20 +259,8 @@ test("an insert offers BEFORE and AFTER the selected slide; a merge keeps its si
   assert.doesNotMatch(markupOf(merged), /Insert (before|after)/);
 });
 
-/**
- * The injected actions, from inert-actions.ts rather than restated here: a second copy of
- * `PickerActions` compiles until it drifts, and the whole point of the file is one substitution.
- */
-const inertActions: PickerActions = INERT_PICKER_ACTIONS;
-
 function play(events: readonly PickerEvent[]): PickerState {
-  let state = INITIAL_PICKER_STATE;
-  for (const event of events) state = reducePicker(state, event);
-  return state;
-}
-
-function markupOf(state: PickerState): string {
-  return renderToStaticMarkup(createElement(Picker, { state, actions: inertActions }));
+  return replay(reducePicker, INITIAL_PICKER_STATE, events);
 }
 
 function neverOffer(): never {

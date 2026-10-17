@@ -14,13 +14,13 @@ import type { Manifest } from "./protocol.ts";
 import { sessionEventsOf, type SessionEventFile } from "./session-log.ts";
 import {
   NO_PREVIEWS,
-  nextPreviewToLoad,
   previewsSettled,
   previewsToLoad,
   previewOf,
   reducePreviews,
   type SlidePreviews,
 } from "./slide-previews.ts";
+import { replay as replayEvents } from "./test-support.ts";
 
 const AT = "2026-10-04T12:00:00.000Z";
 const PROPOSAL = "p_1733219000000_a1b2c3";
@@ -47,27 +47,27 @@ const stagedMark: ProposalMark = {
   createdTime: "2026-10-04T11:59:00.000Z",
 };
 
-// --- nextPreviewToLoad ------------------------------------------------------
+// --- previewsToLoad ---------------------------------------------------------
 
 test("nothing is fetched before the manifest says which files the candidates are", () => {
-  assert.equal(nextPreviewToLoad({ conversation: replay([]), previews: NO_PREVIEWS }), null);
+  assert.deepEqual(previewsToLoad({ conversation: replay([]), previews: NO_PREVIEWS }), []);
 });
 
-test("each candidate's HTML is fetched once, in order, ONE AT A TIME so polls are never starved", () => {
+test("each candidate's HTML is fetched once, in order, and nothing more while a fetch is in flight", () => {
   const conversation = following();
-  const first = nextPreviewToLoad({ conversation, previews: NO_PREVIEWS });
+  const first = previewsToLoad({ conversation, previews: NO_PREVIEWS })[0] ?? null;
   assert.deepEqual(first && { slideIndex: first.slideIndex, fileId: first.fileId }, { slideIndex: 1, fileId: "html_1" });
   if (first === null) return;
   const inFlight = reducePreviews(NO_PREVIEWS, { kind: "preview-requested", key: first.key });
-  assert.equal(nextPreviewToLoad({ conversation, previews: inFlight }), null, "one request in flight at a time");
+  assert.deepEqual(previewsToLoad({ conversation, previews: inFlight }), [], "nothing while a fetch is in flight");
   const done = reducePreviews(inFlight, { kind: "preview-arrived", key: first.key, html: "<p>one</p>" });
-  assert.equal(nextPreviewToLoad({ conversation, previews: done })?.slideIndex, 2);
+  assert.equal(previewsToLoad({ conversation, previews: done })[0]?.slideIndex, 2);
 });
 
 test("a failed fetch is not retried in a loop -- the thumbnail says why instead", () => {
   const conversation = following();
   const failed = loadAll({ conversation, outcome: () => ({ kind: "failed", message: "Drive HTTP 500" }) });
-  assert.equal(nextPreviewToLoad({ conversation, previews: failed }), null);
+  assert.deepEqual(previewsToLoad({ conversation, previews: failed }), []);
   assert.deepEqual(previewOf({ conversation, previews: failed, slideIndex: 1 }), {
     kind: "unavailable",
     message: "Drive HTTP 500",
@@ -115,9 +115,7 @@ test("a slide that is not in the manifest is unavailable, not loading for ever",
 // --- helpers --------------------------------------------------------------------
 
 function replay(events: readonly ConversationEvent[]): Conversation {
-  let conversation = INITIAL_CONVERSATION;
-  for (const event of events) conversation = reduceConversation(conversation, event);
-  return conversation;
+  return replayEvents(reduceConversation, INITIAL_CONVERSATION, events);
 }
 
 function following(options: Readonly<{ events?: readonly SessionEventFileLike[] }> = {}): Conversation {
@@ -140,7 +138,7 @@ function loadAll({
 }): SlidePreviews {
   let previews = NO_PREVIEWS;
   for (let guard = 0; guard < 20; guard += 1) {
-    const next = nextPreviewToLoad({ conversation, previews });
+    const next = previewsToLoad({ conversation, previews })[0] ?? null;
     if (next === null) return previews;
     previews = reducePreviews(previews, { kind: "preview-requested", key: next.key });
     const result = outcome(next.slideIndex);

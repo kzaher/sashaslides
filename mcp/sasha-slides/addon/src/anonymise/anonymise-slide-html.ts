@@ -43,13 +43,13 @@
  * table above is the deterministic engine's under both, and neither has a value that emits the
  * original.
  *
- * MODEL-ASSISTED TEXT, and why it does not move the guarantee one inch. `replacements` offers
+ * THE USER'S OWN TEXT, and why it does not move the guarantee one inch. `replacements` offers
  * written text for the VISIBLE RUNS only — body text, `<title>`, `alt`, `aria-label`, SVG `<text>`
  * (text-runs.ts). Every entry is judged by replacement-policy.ts first, and everything it does not
  * accept — a run the reply skipped, an id this slide has no run for, an echo of the original, an
  * empty string, a malformed reply that produced no map at all — takes the substitution path in the
  * table above, unchanged. There is NO value of `replacements` that makes any carrier in that table
- * come out as its original: the model can only trade gibberish for prose. Each rejection is in
+ * come out as its original: an edit can only trade gibberish for prose. Each rejection is in
  * `rejectedReplacements` with its reason, each accepted run whose shape moved is in `shapeRisks`,
  * and `textRuns` is the after column run by run.
  *
@@ -120,6 +120,7 @@ import {
   type TextRunSite,
 } from "./text-runs.ts";
 import { hasSubstitutableCharacter, textSubstituter, type TextSubstituter } from "./substitute-text.ts";
+import { assertNever } from "./never.ts";
 
 /** Goes into the report so a payload can be read back by the version of this module that made it. */
 export const ANONYMISER_VERSION = "sasha-anonymise/1";
@@ -150,7 +151,7 @@ export type IdentifierPolicy = "preserve" | "rename";
  * visible run is substituted under both.
  *
  * Neither one can emit the original. `replacements` is not a third member here because it is not
- * an alternative to a strategy: an accepted model replacement wins for its own run and the
+ * an alternative to a strategy: an accepted replacement wins for its own run and the
  * strategy writes every other run, which is the fallback rule the whole architecture rests on.
  */
 export type TextStrategy = Readonly<{ kind: "substitute" }> | Readonly<{ kind: "lorem" }>;
@@ -166,7 +167,7 @@ export type AnonymiseOptions = Readonly<{
   seed: string;
   identifiers: IdentifierPolicy;
   /**
-   * Model-written (or user-edited) text for the visible runs of `html`, keyed by the ids
+   * The user's own text for the visible runs of `html`, keyed by the ids
    * `extractTextRuns` gave them. Absent, incomplete and rejected entries all mean the same thing:
    * that run is substituted deterministically. See replacement-policy.ts for the gate every entry
    * goes through, and note what this option CANNOT do — there is no value of it that makes a run
@@ -184,7 +185,7 @@ export type CarrierTreatment =
   | "substituted"
   /** A visible text run written as width-matched lorem ipsum, with no model and no network. */
   | "lorem-ipsum"
-  /** A visible text run replaced by model-written text that passed replacement-policy.ts. */
+  /** A visible text run replaced by the user's own text, which passed replacement-policy.ts. */
   | "rewritten"
   | "removed"
   | "replaced-with-placeholder"
@@ -397,7 +398,7 @@ export function residualRisksOf({
   retainedCount: number;
   preservedFontData: boolean;
   externalUrls: number;
-  /** How many visible runs came out as model-written text rather than as substituted gibberish. */
+  /** How many visible runs came out as the user's own text rather than as substituted gibberish. */
   rewrittenRuns: number;
   /** How many came out as width-matched lorem ipsum under `textStrategy: { kind: "lorem" }`. */
   loremRuns: number;
@@ -430,16 +431,11 @@ export function residualRisksOf({
       `${loremRuns} visible text run(s) in this preview are LOREM IPSUM matched to the original's rendered width, written here in your browser with no model and no network. The lorem words are from a fixed Latin vocabulary and say nothing about the slide, but what is preserved to make them fit is: the number of words, each word's width and capitalisation, every space and line break at its own position, and every figure's digit count and separators. A word of a single letter, a word holding a digit and a word in a non-Latin script are substituted character by character instead, because no lorem word is that narrow, a figure must stay a figure, and a script must stay its own script.`,
     );
   }
-  // Only disclosed when a model actually wrote something. It used to be unconditional, which
-  // meant that on the lorem-only path — where nothing leaves the browser — the preview told the
-  // user their slide's text had been sent to a model. A false privacy disclosure in the one
-  // place a user goes to check is worse than none. See model-risk-copy.test.ts.
+  // The replacements are the user's own edits: nothing here was ever sent anywhere to get them, so
+  // the note says whose words they are and claims nothing more. See model-risk-copy.test.ts.
   if (rewrittenRuns > 0) {
     risks.push(
-      "ASKING A MODEL FOR READABLE REPLACEMENT TEXT SENDS THIS SLIDE'S VISIBLE TEXT TO THAT MODEL — the body text, the `<title>`, every `alt` and `aria-label` and every SVG `<text>`, as you wrote them. That happens when the replacements are requested, which is BEFORE you see this preview, so it is worth knowing in advance rather than afterwards. The model is never shown an attribute, the stylesheet, a comment, a URL or an embedded image, and no reply of its is used unless it differs from the original and reuses no four consecutive letters or digits from any run of it; but a model that deliberately ENCODED the original (base64, an acrostic) would defeat that check, which is why the text in the after column is yours to read before you send it.",
-    );
-    risks.push(
-      `${rewrittenRuns} visible text run(s) in this preview are model-written rather than substituted character by character, so they read as prose a human wrote. Everything in the sentence above about what the model was shown applies to them.`,
+      `${rewrittenRuns} visible text run(s) in this preview are text you typed, sent as you wrote it. Each one passed the same check as any replacement -- it differs from the original and reuses no four consecutive letters or digits from any run of it -- but what you typed is yours to read before you send it.`,
     );
   }
   if (externalUrls > 0) {
@@ -817,8 +813,4 @@ function declaredImageSize(attributes: readonly HtmlAttribute[]): PixelSize {
 
 function splitTokens(value: string): readonly string[] {
   return value.split(/\s+/).filter((part) => part !== "");
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled anonymiser case: ${JSON.stringify(value)}`);
 }

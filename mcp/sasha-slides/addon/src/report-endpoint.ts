@@ -28,6 +28,7 @@
 
 import { assertNever, type Parsed } from "./protocol.ts";
 import type { DefectReport } from "./anonymise/index.ts";
+import { asRecord, nonEmptyStringAt } from "./json-fields.ts";
 
 /** Must equal the service's `DEFECT_REPORT_SCHEMA_VERSION`. */
 export const REPORT_SCHEMA_VERSION = 1;
@@ -234,7 +235,7 @@ export function submissionOf({ status, text }: { status: number; text: string })
     return { kind: "refused", status, code: "unreadable-answer", message: `the endpoint answered ${status} with no object` };
   }
   if (status === 200 || status === 201) {
-    const id = stringAt({ record, key: "id" });
+    const id = nonEmptyStringAt({ record, key: "id" });
     if (id === null) {
       return {
         kind: "refused",
@@ -243,7 +244,7 @@ export function submissionOf({ status, text }: { status: number; text: string })
         message: `the endpoint answered ${status} but reported no report id`,
       };
     }
-    const deletionToken = stringAt({ record, key: "deletionToken" });
+    const deletionToken = nonEmptyStringAt({ record, key: "deletionToken" });
     const storedBytes = record["storedBytes"];
     return {
       kind: "accepted",
@@ -257,11 +258,11 @@ export function submissionOf({ status, text }: { status: number; text: string })
   return {
     kind: "refused",
     status,
-    code: error === null ? "unreadable-answer" : (stringAt({ record: error, key: "code" }) ?? "unreadable-answer"),
+    code: error === null ? "unreadable-answer" : (nonEmptyStringAt({ record: error, key: "code" }) ?? "unreadable-answer"),
     message:
       error === null
         ? `the endpoint answered ${status} with no error object`
-        : (stringAt({ record: error, key: "message" }) ?? `the endpoint answered ${status}`),
+        : (nonEmptyStringAt({ record: error, key: "message" }) ?? `the endpoint answered ${status}`),
   };
 }
 
@@ -272,14 +273,3 @@ export function utf8Length(text: string): number {
 
 const VERSION_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._+:-]{0,63}$/;
 const UTC_INSTANT = /^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function stringAt({ record, key }: { record: Readonly<Record<string, unknown>>; key: string }): string | null {
-  const value = record[key];
-  return typeof value === "string" && value !== "" ? value : null;
-}

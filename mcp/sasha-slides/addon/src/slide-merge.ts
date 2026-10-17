@@ -31,6 +31,7 @@
 
 import type { SlidesApiRequest, StackedElement } from "./converter-contract.ts";
 import { assertNever } from "./protocol.ts";
+import { asRecord } from "./json-fields.ts";
 
 /** Why a merge was not planned. Every variant is something the user must be told, by `describeMergeRefusal`. */
 export type MergeRefusal =
@@ -184,10 +185,4 @@ function createdElementOf(request: SlidesApiRequest): Readonly<{ objectId: strin
     return { objectId, pageObjectId };
   }
   return null;
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
 }

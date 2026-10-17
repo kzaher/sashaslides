@@ -46,9 +46,8 @@
 import { FEEDBACK_DELIVERED_EVENT_KIND } from "../../feedback-delivery.ts";
 import { readFeedbackComment, type FeedbackCommentRecord, type FeedbackReply } from "./feedback.ts";
 import { PROTOCOL_VERSION, assertNever, type Parsed, type Region } from "./protocol.ts";
-
-/** The subfolder of a proposal folder that holds the event files. PROTOCOL.md's name. */
-export const SESSION_EVENTS_FOLDER = "events";
+import { asRecord, stringAt } from "./json-fields.ts";
+import { plural } from "./plural.ts";
 
 /** One event, as the log has it. `eventId` is the file's own name, which is also its order key. */
 export type SessionEvent = Readonly<{
@@ -214,6 +213,42 @@ export function sessionEventFileName({
     return { kind: "invalid", reason: "an event's tie-break suffix is six base36 characters" };
   }
   return { kind: "ok", value: `${atMillis}-${suffix}-${kind}.json` };
+}
+
+/** What an event file is uploaded as: one JSON object (PROTOCOL.md). */
+export const EVENT_MIME_TYPE = "application/json";
+
+/**
+ * ONE EVENT FILE TO CREATE -- its name, type and bytes -- or why this surface may not write it.
+ * Both surfaces write through this (the slides window's mark-ups and inserts, the sidebar's archive
+ * card), so the name grammar and the body cannot drift apart between them.
+ */
+export function sessionEventWrite({
+  body,
+  atMillis,
+  suffix = freshEventSuffix(),
+}: {
+  body: SessionEventBody;
+  atMillis: number;
+  suffix?: string;
+}): Parsed<Readonly<{ name: string; mimeType: string; body: string }>> {
+  if (body.kind === "opaque") return { kind: "invalid", reason: "an opaque event is only ever read, never written" };
+  const name = sessionEventFileName({ atMillis, suffix, kind: body.kind });
+  if (name.kind !== "ok") return name;
+  const serialized = serializeSessionEvent({ body, at: new Date(atMillis).toISOString() });
+  if (serialized.kind !== "ok") return serialized;
+  return { kind: "ok", value: { name: name.value, mimeType: EVENT_MIME_TYPE, body: serialized.value } };
+}
+
+/**
+ * The event name's six-base36 tie-break, from the browser's CSPRNG. Two events in the same
+ * millisecond would otherwise share a name, and a name collision in Drive is a lost event -- the
+ * exact failure one-file-per-event is designed to prevent.
+ */
+export function freshEventSuffix(): string {
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((byte) => (byte % 36).toString(36)).join("");
 }
 
 /**
@@ -412,8 +447,6 @@ export type SlideCommentsLoad =
   | Readonly<{ kind: "loaded"; slides: readonly SlideComments[]; readAt: string }>
   | Readonly<{ kind: "failed"; message: string; slides: readonly SlideComments[] }>;
 
-export const NO_SLIDE_COMMENTS: SlideCommentsLoad = { kind: "unrequested" };
-
 /** One candidate's comments exactly as `sashaCandidateComments` relayed them. */
 export type CandidateCommentFile = Readonly<{
   proposalId: string;
@@ -518,7 +551,7 @@ export function unresolvedCountFor({
 export function describeUnresolvedCount(count: UnresolvedCount): string {
   switch (count.kind) {
     case "known":
-      return count.count === 0 ? "no open comments" : `${count.count} open comment${count.count === 1 ? "" : "s"}`;
+      return count.count === 0 ? "no open comments" : plural(count.count, "open comment");
     case "unknown":
       return "open comments not read yet";
     case "unreachable":
@@ -540,13 +573,6 @@ export function unresolvedBadgeOf(count: UnresolvedCount): string | null {
     default:
       return assertNever(count);
   }
-}
-
-/** Which candidates could not be read, so a surface can say so once instead of per cell. */
-export function unreadableSlidesOf({ comments }: { comments: SlideCommentsLoad }): readonly string[] {
-  return loadedSlideComments(comments).flatMap((slide) =>
-    slide.threads.kind === "unreadable" ? [`slide ${slide.slideIndex}: ${slide.threads.message}`] : [],
-  );
 }
 
 /**
@@ -784,17 +810,6 @@ function parseJson(text: string): unknown {
 function millisOf(at: string): number {
   const parsed = Date.parse(at);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function stringAt({ record, key }: { record: Readonly<Record<string, unknown>>; key: string }): string | null {
-  const value = record[key];
-  return typeof value === "string" ? value : null;
 }
 
 function integerAt({ record, key }: { record: Readonly<Record<string, unknown>>; key: string }): number | null {

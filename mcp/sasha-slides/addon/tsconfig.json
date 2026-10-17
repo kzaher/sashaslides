@@ -42,5 +42,5 @@
     "skipLibCheck": true
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.e2e.ts", "src/fake-drive.ts", "src/inert-actions.ts"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.e2e.ts", "src/fake-drive.ts", "src/inert-actions.ts", "src/test-support.ts"]
 }

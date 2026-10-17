@@ -26,7 +26,6 @@
 // are functions OF the state. React is a passive subscriber -- it renders the state and calls the
 // actions, and decides nothing.
 
-import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
 import {
   appsScriptCall,
@@ -38,9 +37,10 @@ import {
   appsScriptPickerWindowApi,
   appsScriptSessionLogApi,
   appsScriptSlidesApi,
-  helloFromServer,
+  connect,
+  notConnected,
 } from "./bridge-client.ts";
-import { presentationIdOf, type RenderRequest } from "./bridge.ts";
+import { EVENT_PAGE_SIZE, INBOX_PAGE_SIZE, presentationIdOf, type RenderRequest } from "./bridge.ts";
 import { browserSlideConverter, type ConversionResult, type ConvertSlideHtml } from "./converter-contract.ts";
 import {
   type CandidateCommentsApi,
@@ -56,7 +56,6 @@ import { feedbackCommentsFor, sendOutcomeOf, type ReviewNote } from "./feedback.
 import { checkSlideHtml, domSlideDocumentParser } from "./html-check.ts";
 import { Picker, type PickerActions } from "./Picker.tsx";
 import { createObserver, fetchProposal, type Announcer, type Observer, type PollTimer } from "./observer-runtime.ts";
-import { POLL_PAGE_SIZE } from "./observer.ts";
 import { createReportWindow } from "./report-window.ts";
 import { SEED_ELEMENT_ID, parseBootSeed, type BootSeed } from "./picker-seed.ts";
 import { cachedConversion, conversionKeyOf, rememberConversion } from "./conversion-cache.ts";
@@ -81,30 +80,25 @@ import {
 import { createSlideEditor } from "./editor/index.ts";
 import { writePick, type PickOutcome } from "./pick-writer.ts";
 import { renderRequestFor } from "./render-artifact.ts";
-import { PROTOCOL_VERSION, assertNever, type Parsed } from "./protocol.ts";
+import { assertNever, describeParsedFailure } from "./protocol.ts";
 import { browserKeyValueStorage, seenStore } from "./seen-store.ts";
 import {
   candidateCommentsFrom,
   candidateSetRevisionIn,
+  sessionEventWrite,
   sessionEventsOf,
-  sessionEventFileName,
-  serializeSessionEvent,
   type SessionEventBody,
 } from "./session-log.ts";
 import { applyMergeCandidate } from "./merge-apply.ts";
 import { newPageObjectId, previewConversionSpec, type InsertPosition } from "./slide-insert.ts";
 import { conversionForInsert, insertNewSlide, recordInsert, type Inserted } from "./insert-flow.ts";
+import { extractorSource, seedText, stageElement, surfaceRenderer } from "./surface-host.ts";
 
-const ROOT_ELEMENT_ID = "sasha-slides-root";
 /** One read of a candidate's comment threads -- a candidate with more than this is not the case. */
 const CANDIDATE_COMMENT_PAGE_SIZE = 100;
-/** Where the converter parks its offscreen 1280x720 staging iframe. */
-const STAGE_ELEMENT_ID = "sasha-slides-stage";
-/** JSON, because an event file is one JSON object (PROTOCOL.md). */
-const EVENT_MIME_TYPE = "application/json";
 
 let state: PickerState = INITIAL_PICKER_STATE;
-let root: Root | null = null;
+const renderSurface = surfaceRenderer();
 /** The composed services, or null until `sashaHello` has answered. */
 let services: Services | null = null;
 
@@ -177,16 +171,9 @@ async function main(): Promise<void> {
   // UNLESS THE SIDEBAR SEEDED THIS WINDOW (picker-seed.ts): then Code.gs already put the answer
   // in the page, next to the proposal and its HTML, and the round trip is skipped.
   const boot = await bootSeedFromPage();
-  const hello = boot !== null ? { kind: "ok" as const, value: boot.hello } : await helloFromServer({ call });
+  const hello = await connect({ call, seeded: boot?.hello ?? null, surface: "picker" });
   if (hello.kind !== "ok") {
     dispatch({ kind: "trouble", message: hello.message });
-    return;
-  }
-  if (hello.value.protocolVersion !== PROTOCOL_VERSION) {
-    dispatch({
-      kind: "trouble",
-      message: `the add-on speaks protocolVersion ${hello.value.protocolVersion}, this picker ${PROTOCOL_VERSION}`,
-    });
     return;
   }
 
@@ -267,8 +254,6 @@ async function main(): Promise<void> {
 /** How often an open window checks the log for a revised set: quickly on screen, rarely behind another tab. */
 const REVISION_POLL_VISIBLE_MS = 5_000;
 const REVISION_POLL_HIDDEN_MS = 30_000;
-/** The same page the conversation reads the log with. */
-const EVENT_PAGE_SIZE = 500;
 
 /**
  * FOLLOW THE SET THIS WINDOW SHOWS. The observer only announces proposals it has not seen, so on
@@ -322,14 +307,9 @@ async function checkForRevision(): Promise<void> {
   });
   const newest = candidateSetRevisionIn(events);
   if (newest === null || (proposal.revision !== null && newest <= proposal.revision)) return;
-  // A CLEAR leaves READY in place with the old count, which `fetchProposal` rightly rejects as
-  // inconsistent -- so the log's own word is taken for it.
-  const cleared = events.some((event) => event.body.kind === "slides-cleared" && event.body.revision === newest);
-  if (cleared) {
-    dispatch({ kind: "proposal-offered", proposal: { ...proposal, count: 0, slides: [], revision: newest }, presentationId: offer.presentationId });
-    return;
-  }
-  const marks = await services.drive.scanInbox({ pageSize: POLL_PAGE_SIZE });
+  // A CLEAR is read like any revision: READY stays behind, and the manifest's count 0 is what says
+  // the set was cleared (staged-set.ts).
+  const marks = await services.drive.scanInbox({ pageSize: INBOX_PAGE_SIZE });
   if (marks.kind !== "ok") return;
   const mark = marks.value.find((candidate) => candidate.proposalId === proposal.proposalId);
   if (mark === undefined || mark.readyFileId === null) return;
@@ -352,25 +332,12 @@ async function checkForRevision(): Promise<void> {
  * dropped with a warning: the window then boots exactly as an unseeded one does.
  */
 async function bootSeedFromPage(): Promise<BootSeed | null> {
-  if (document.readyState === "loading") {
-    await new Promise<void>((resolve) => document.addEventListener("DOMContentLoaded", () => resolve(), { once: true }));
-  }
-  const element = document.getElementById(SEED_ELEMENT_ID);
-  if (element === null) return null;
-  const parsed = parseBootSeed(element.textContent ?? "");
-  element.remove();
-  switch (parsed.kind) {
-    case "ok":
-      return parsed.value;
-    case "invalid":
-      console.warn(`[sasha-slides] ignoring the slides seed: ${parsed.reason}`);
-      return null;
-    case "unsupported-version":
-      console.warn(`[sasha-slides] ignoring the slides seed: protocolVersion ${parsed.protocolVersion}`);
-      return null;
-    default:
-      return assertNever(parsed);
-  }
+  const text = await seedText(SEED_ELEMENT_ID);
+  if (text === null) return null;
+  const parsed = parseBootSeed(text);
+  if (parsed.kind === "ok") return parsed.value;
+  console.warn(`[sasha-slides] booting without ${describeParsedFailure({ parsed, what: "the slides seed" })}`);
+  return null;
 }
 
 /**
@@ -651,14 +618,8 @@ function buildStamp(): string {
   return typeof published === "string" && published !== "" ? published : "dev";
 }
 
-/**
- * `services` is null until `sashaHello` has answered, and `main()` returns early when it does
- * not. Every path therefore has to treat "not connected" as a REPORTABLE outcome. Returning
- * silently is what made a failed hello look like a hang: a panel set its loading flags, called
- * these functions, and got nothing back -- so it sat on "loading..." for ever, giving no reason.
- */
-const NOT_CONNECTED =
-  "the add-on is not connected to Google Slides. Reload the presentation and reopen the slides window.";
+/** `services` is null until `sashaHello` has answered; every path reports that (bridge-client.ts). */
+const NOT_CONNECTED = notConnected("reopen the slides window");
 
 /**
  * THE UNRESOLVED COUNTS' read, and it is the SAME one the conversation does: the comment threads on
@@ -836,20 +797,13 @@ async function sendAnomaly({ index, anomalyId }: { index: number; anomalyId: str
 async function appendEvent({ folderId, body }: { folderId: string; body: SessionEventBody }): Promise<void> {
   const running = services;
   if (running === null) return;
-  const at = new Date();
-  const name = sessionEventFileName({ atMillis: at.getTime(), suffix: freshSuffix(), kind: eventKindOf(body) });
-  const serialized = serializeSessionEvent({ body, at: at.toISOString() });
-  if (name.kind !== "ok" || serialized.kind !== "ok") {
-    console.warn(`[sasha-slides] could not write a ${body.kind} event: ${describeRefusal({ name, serialized })}`);
+  const write = sessionEventWrite({ body, atMillis: Date.now() });
+  if (write.kind !== "ok") {
+    console.warn(`[sasha-slides] could not write ${describeParsedFailure({ parsed: write, what: `a ${body.kind} event` })}`);
     return;
   }
-  const written = await running.log.appendEvent({
-    folderId,
-    name: name.value,
-    mimeType: EVENT_MIME_TYPE,
-    body: serialized.value,
-  });
-  if (written.kind !== "ok") console.warn(`[sasha-slides] could not write ${name.value}: ${written.message}`);
+  const written = await running.log.appendEvent({ folderId, ...write.value });
+  if (written.kind !== "ok") console.warn(`[sasha-slides] could not write ${write.value.name}: ${written.message}`);
 }
 
 /**
@@ -885,12 +839,6 @@ async function openReportWindow({ index }: { index: number }): Promise<void> {
 const reportWindow = createReportWindow({ api: () => services?.window ?? null, opener: window });
 
 const actions: PickerActions = {
-  selectSlide(index) {
-    dispatch({ kind: "slide-selected", index });
-  },
-  chooseView(view) {
-    dispatch({ kind: "view-chosen", view });
-  },
   chooseTool(tool) {
     dispatch({ kind: "tool-chosen", tool });
   },
@@ -929,9 +877,6 @@ const actions: PickerActions = {
   },
   sendAnomaly({ index, anomalyId }) {
     void sendAnomaly({ index, anomalyId });
-  },
-  zoomCandidate(index) {
-    dispatch({ kind: "candidate-zoomed", index });
   },
   openEditor(index) {
     dispatch({ kind: "editor-opened", index });
@@ -976,7 +921,7 @@ const actions: PickerActions = {
       mode,
       onSelect: (selection) => dispatch({ kind: "selection-changed", selection }),
       /*
-       * A REFUSED ATTACH MUST NOT BE SILENT. `slide-editor.ts` `attach` gives a reason when it
+       * A REFUSED ATTACH MUST NOT BE SILENT. `editor/slide-editor.ts` `attach` gives a reason when it
        * cannot reach into the candidate's document, but the default sink is `console.warn` -- so
        * to a user the editor simply did nothing when they clicked, which is indistinguishable
        * from a dead pointer handler. Keep them where both a person and the browser smoke test
@@ -1286,64 +1231,6 @@ function refusalOf(refused: readonly Readonly<{ noteId: string; reason: string }
   return first === undefined ? "there is nothing to send yet" : `nothing was sent: ${first.reason}`;
 }
 
-/** Which of the writable kinds a body is. A switch, so a new one has to be named here. */
-function eventKindOf(body: SessionEventBody): "comment-opened" | "slide-inserted" | "slide-archived" | "slide-restored" {
-  switch (body.kind) {
-    case "comment-opened":
-      return "comment-opened";
-    case "slide-inserted":
-      return "slide-inserted";
-    // Written by the sidebar's candidate card, never by this window; named so the switch stays total.
-    case "slide-archived":
-      return "slide-archived";
-    case "slide-restored":
-      return "slide-restored";
-    case "slides-staged":
-    case "comment-answered":
-    case "slide-revised":
-    case "comment-resolved":
-    case "slides-cleared":
-    case "feedback-delivered":
-    case "opaque":
-      // `serializeSessionEvent` refuses these, so the name is never used -- but it has to be a
-      // legal kind for the filename grammar, and the refusal is what reaches the log.
-      return "comment-opened";
-    default:
-      return assertNever(body);
-  }
-}
-
-/** Both refusals in one line, so the warning says which half of the write was impossible. */
-function describeRefusal({ name, serialized }: { name: Parsed<string>; serialized: Parsed<string> }): string {
-  const reasons = [name, serialized].flatMap((parsed) => (parsed.kind === "ok" ? [] : [reasonOf(parsed)]));
-  return reasons.length === 0 ? "both halves were fine, which cannot happen here" : reasons.join("; ");
-}
-
-/** Why one half was refused. The two failing arms of `Parsed`, through an exhaustive switch. */
-function reasonOf(parsed: Parsed<string>): string {
-  switch (parsed.kind) {
-    case "ok":
-      return "";
-    case "invalid":
-      return parsed.reason;
-    case "unsupported-version":
-      return `it declares protocolVersion ${parsed.protocolVersion}`;
-    default:
-      return assertNever(parsed);
-  }
-}
-
-/**
- * The event name's six-base36 tie-break, from the browser's CSPRNG. It exists because two events
- * in the same millisecond would otherwise share a name, and a name collision in Drive is a lost
- * event -- the exact failure one-file-per-event is designed to prevent.
- */
-function freshSuffix(): string {
-  const bytes = new Uint8Array(6);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((byte) => (byte % 36).toString(36)).join("");
-}
-
 /** One pending poll at a time; scheduling again replaces it, which is what a cadence change needs. */
 function singlePollTimer(): PollTimer {
   let handle: ReturnType<typeof setTimeout> | null = null;
@@ -1364,50 +1251,7 @@ function singlePollTimer(): PollTimer {
 }
 
 function render(): void {
-  if (root === null) {
-    const existing = document.getElementById(ROOT_ELEMENT_ID);
-    const host = existing ?? document.createElement("div");
-    host.id = ROOT_ELEMENT_ID;
-    if (existing === null) document.body.append(host);
-    root = createRoot(host);
-  }
-  root.render(createElement(Picker, { state, actions }));
-}
-
-/**
- * The staging container for the converter's iframe. Kept out of the React tree on purpose: React
- * owns `#sasha-slides-root` and must never re-parent an iframe the converter is measuring.
- */
-function stageElement(): HTMLElement {
-  const existing = document.getElementById(STAGE_ELEMENT_ID);
-  if (existing !== null) return existing;
-  const stage = document.createElement("div");
-  stage.id = STAGE_ELEMENT_ID;
-  /*
-   * IT HAS TO BE A REAL SIZE, not 0x0 with overflow hidden.
-   *
-   * The staged iframe is 1280x720, but a 0x0 `overflow:hidden` parent CLIPS IT AWAY ENTIRELY, and
-   * a browser does not paint -- or service `requestAnimationFrame` for -- a frame with no
-   * rendered area. The converter waits one frame after layout settles, so a frame that never
-   * paints used to hang the conversion outright (fixed in convert-html-to-slide-requests.ts) and
-   * now costs the whole frame budget on every candidate instead. Giving the stage the slide's own
-   * size lets the normal path run at normal speed. It stays off-screen and inert.
-   */
-  stage.style.cssText =
-    "position:fixed;left:-99999px;top:0;width:1280px;height:720px;overflow:hidden;pointer-events:none";
-  document.body.append(stage);
-  return stage;
-}
-
-/**
- * The extractor blob, decoded. It travels base64 so HtmlService's sanitiser cannot mangle it (see
- * build-addon.ts); `atob` yields LATIN-1 bytes, so it is decoded through TextDecoder rather than
- * used directly -- extract-dom.ts is not guaranteed to be pure ASCII.
- */
-function extractorSource(): string {
-  const binary = atob(__SASHA_EXTRACTOR_JS_B64__);
-  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+  renderSurface(createElement(Picker, { state, actions }));
 }
 
 /**

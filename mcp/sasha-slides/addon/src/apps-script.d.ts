@@ -6,26 +6,11 @@
 // instead of an index signature so a typo in a function name is a compile error and not a silent
 // "script function not found" at runtime.
 //
-// ALL THREE SURFACES GET THE SAME SHIM. The conversation, the slides window and the defect-report
-// window are separate HtmlService documents and each is injected its own `google.script.run`; none
-// uses every function (the conversation never inserts, the report window never picks), but the shim
-// is one declaration because Code.gs is one file.
+// EVERY SURFACE GETS THE SAME SHIM. Each HtmlService document is injected its own
+// `google.script.run`; none uses every function, but the shim is one declaration because Code.gs is
+// one file -- and its function list is bridge.ts's `ServerFunctionArgs`, not restated here.
 
-import type {
-  CandidateCommentsSpec,
-  InsertRequestSpec,
-  WriteRenderSpec,
-  OpenPickerSpec,
-  PageElementsSpec,
-  ReadEventsSpec,
-  ReadTextsSpec,
-  ScanSpec,
-  CommentReplySpec,
-  ReportTargetSpec,
-  WriteEventSpec,
-  WritePickSpec,
-} from "./bridge.ts";
-import type { SendFeedbackSpec } from "./feedback.ts";
+import type { ServerFunctions } from "./bridge.ts";
 
 declare global {
   /**
@@ -56,51 +41,8 @@ declare global {
   type AppsScriptRunner = Readonly<{
     withSuccessHandler(handler: (value: unknown) => void): AppsScriptRunner;
     withFailureHandler(handler: (error: unknown) => void): AppsScriptRunner;
-    sashaHello(): void;
-    sashaScanInbox(spec: ScanSpec): void;
-    sashaReadText(spec: Readonly<{ fileId: string }>): void;
-    /** Several files' text in one round trip, each file succeeding or failing on its own. */
-    sashaReadTexts(spec: ReadTextsSpec): void;
-    /** One proposal's whole `events/` folder, name and bytes per file. See session-log.ts. */
-    sashaReadEvents(spec: ReadEventsSpec): void;
-    /** CREATE one event file under `<proposal>/events/`. Drive has no append (PROTOCOL.md). */
-    sashaWriteEvent(spec: WriteEventSpec): void;
-    /** The comment threads on each candidate's own NN.html -- the unresolved counts' one source. */
-    sashaCandidateComments(spec: CandidateCommentsSpec): void;
-    sashaInsert(spec: InsertRequestSpec): void;
-    /** Photograph the inserted page into `<proposal>/render/NN.png`. Best effort, after the insert. */
-    sashaWriteRender(spec: WriteRenderSpec): void;
-    /** One slide's top-level element ids, back to front: what a merge validates `remove` against. */
-    sashaPageElements(spec: PageElementsSpec): void;
-    /**
-     * Photograph each candidate as Google draws it, in a THROWAWAY deck that is deleted again.
-     * This is what the "Converted" pane shows; see bridge.ts `parseRenderPreviewsReply`.
-     */
-    sashaRenderPreviews(spec: RenderPreviewsSpec): void;
-    sashaWritePick(spec: WritePickSpec): void;
-    sashaSendFeedback(spec: SendFeedbackSpec): void;
-    /** One reply on an existing thread, on whichever file the thread lives on. */
-    /** The same reply, with the field named `text` -- the thread rail's half of the migration. */
-    sashaReplyToComment(spec: CommentReplySpec): void;
-    /** Resolve a thread: Drive's reply with `action: "resolve"`. Either spec field carries the note. */
-    sashaResolveComment(spec: CommentReplySpec): void;
-    /** Takes nothing: the slides window is the same for every caller, and its size is Code.gs's. */
-    /** Open the slides window, optionally ON one candidate, seeded with what the sidebar knows (bridge.ts `OpenPickerSpec`). */
-    sashaOpenPicker(spec?: OpenPickerSpec): void;
-    /** Which candidate it was asked to open on. Reading CLEARS it. */
-    sashaTakePickerTarget(): void;
-    /** Show the DEFECT-REPORT window. Records which candidate, then shows that third document. */
-    sashaOpenDefectReport(spec: ReportTargetSpec): void;
-    /** The web-app URL for the report window, or null when the script is not deployed as one. */
-    sashaReportWindowUrl(spec: Readonly<Record<string, never>>): void;
-    /** Which candidate the report window was opened on, read once and cleared. */
-    sashaTakeReportTarget(): void;
-    /** The editor shell's "Import again" (SPEC.md 21.13): replaces the bound deck, answers `{ deckId, ticket }`. */
-    sashaImportAgain(spec: Readonly<{ importToken: string; deckId: string }>): void;
-    /** The editor's export through the add-on's own authorization: answers `{ exportId, outcome, message }`. */
-    sashaRunExport(exportId: string): void;
-    sashaCommentAccess(): void;
-  }>;
+  }> &
+    ServerFunctions;
 
   const google: Readonly<{
     script: Readonly<{

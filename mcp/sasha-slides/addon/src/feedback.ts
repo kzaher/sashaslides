@@ -28,6 +28,7 @@
 // `foreign` rather than as an error -- the replies view has to walk a pane it does not own.
 
 import { PROTOCOL_VERSION, assertNever, isFractionalRegion, type Parsed, type Region } from "./protocol.ts";
+import { asRecord, stringAt } from "./json-fields.ts";
 
 /**
  * One note the user wrote about their own deck. The same value is both the sidebar's DRAFT and what
@@ -310,15 +311,4 @@ function roundedRegion(region: Region): Region {
 function roundFraction(value: number): number {
   const scale = 10 ** REGION_DECIMALS;
   return Math.round(value * scale) / scale;
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function stringAt({ record, key }: { record: Readonly<Record<string, unknown>>; key: string }): string | null {
-  const value = record[key];
-  return typeof value === "string" ? value : null;
 }

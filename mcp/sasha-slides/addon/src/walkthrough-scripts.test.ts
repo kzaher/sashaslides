@@ -8,7 +8,13 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { WalkthroughScreen } from "./walkthrough-screens.tsx";
-import { RECORDING_LENGTH_MS, WALKTHROUGH_FLOWS, scriptOf, type WalkthroughFlow } from "./walkthrough-scripts.ts";
+import { WALKTHROUGH_FLOWS, scriptOf, type WalkthroughFlow } from "./walkthrough-scripts.ts";
+
+/** How long each screen recording ran. The walkthrough has to be at least 30% shorter. */
+const RECORDING_LENGTH_MS: Readonly<Record<WalkthroughFlow, number>> = {
+  "claude-ai": 284_000,
+  chatgpt: 234_000,
+};
 import { frameAt, timelineOf, type Timeline } from "./walkthrough-timeline.ts";
 
 const HOSTED = "https://sasha.example.com/mcp";

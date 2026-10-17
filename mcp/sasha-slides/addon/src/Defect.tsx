@@ -60,9 +60,10 @@ import {
   type SubmitPhase,
 } from "./defect-state.ts";
 import { EditorPane } from "./editor-pane.tsx";
+import { plural } from "./plural.ts";
 import { assertNever } from "./protocol.ts";
 import type { ReportSubmission } from "./report-endpoint.ts";
-import type { SlideEdit, SlideEditor } from "./slide-editor.ts";
+import type { SlideEdit, SlideEditor } from "./editor/index.ts";
 
 /** Everything the report surface is allowed to cause. Injected, so the tree renders with no ports. */
 export type DefectActions = Readonly<{
@@ -96,7 +97,7 @@ export type DefectActions = Readonly<{
   /**
    * THE VISUAL EDITOR, bound to one pane's document. An injected FACTORY rather than an action,
    * because the editor is a dependency the composition root chooses and this tree must not know
-   * which implementation it got -- the same seam the slides window has (slide-editor.ts).
+   * which implementation it got -- the same seam the slides window has (editor/index.ts).
    */
   createEditor(spec: Readonly<{ html: string }>): SlideEditor;
 }>;
@@ -329,17 +330,6 @@ function Annotations({ annotations }: { annotations: readonly ReportAnnotation[]
         Read these before you send. The numbered pins beside a slide mark the ones that are about
         that slide and need a decision; the rest are what the anonymiser reports about it.
       </strong>
-      {/*
-        THE ANONYMISER'S SENTENCES ARE RENDERED WORD FOR WORD, including the ones about a model
-        rewriting the text -- a paraphrase would be a second declaration that drifts, and this is a
-        privacy disclosure. But that mode is withdrawn here ("Anonymisation: lorem ipsum, always"),
-        so the standing caveat is stated once, above them, rather than by editing their words.
-      */}
-      <span className="sasha-dim">
-        These are the anonymiser&apos;s own words, unedited. Where they describe asking a model to
-        rewrite the text, that is a mode this report does not use: nothing here goes to a model, and
-        the only replacements are the ones you typed.
-      </span>
       <ol className="sasha-annot-list">
         {numbered(annotations).map((entry) => (
           <li key={entry.annotation.annotationId} className={`sasha-annot sasha-annot-${entry.annotation.tone}`}>
@@ -513,12 +503,10 @@ function PreparedSummary({ preview }: { preview: Extract<PreviewLoad, { kind: "b
   return (
     <span className="sasha-dim">
       Ready: {preview.sentHtml.length} bytes of the slide on the right,{" "}
-      {built.conversion.requests.length} converter request
-      {built.conversion.requests.length === 1 ? "" : "s"}, {built.conversion.unsupported.length} thing
-      {built.conversion.unsupported.length === 1 ? "" : "s"} the converter could not express,{" "}
-      {built.redactedIdentifierCount} identifier
-      {built.redactedIdentifierCount === 1 ? "" : "s"} and {built.redactedUrlCount} URL
-      {built.redactedUrlCount === 1 ? "" : "s"} redacted out of that conversion.
+      {plural(built.conversion.requests.length, "converter request")},{" "}
+      {plural(built.conversion.unsupported.length, "thing")} the converter could not express,{" "}
+      {plural(built.redactedIdentifierCount, "identifier")} and {plural(built.redactedUrlCount, "URL")} redacted out of
+      that conversion.
     </span>
   );
 }

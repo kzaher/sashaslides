@@ -9,6 +9,7 @@
 
 import { useCallback, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from "react";
 import type { Region } from "./protocol.ts";
+import { clamp01 } from "./rendered-preview.ts";
 
 /** One box already on the surface. `tone` only picks a colour; it carries no behaviour. */
 export type RegionMark = Readonly<{
@@ -141,6 +142,3 @@ function regionOfDragLoose(drag: Drag): Region {
   };
 }
 
-function clamp01(value: number): number {
-  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
-}

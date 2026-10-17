@@ -19,8 +19,9 @@
 import { parseHelloReply, type HelloReply } from "./bridge.ts";
 import type { Conversation } from "./conversation-state.ts";
 import type { Proposal } from "./observer.ts";
-import { parseMergeSpec, parseSlides, type Parsed } from "./protocol.ts";
+import { parseMergeSpec, parseSlides, slidesAreNumbered, type Parsed } from "./protocol.ts";
 import { previewOf, type SlidePreviews } from "./slide-previews.ts";
+import { asRecord } from "./json-fields.ts";
 
 export type SeedHtml = Readonly<{ index: number; html: string }>;
 
@@ -130,7 +131,7 @@ function parseProposal(field: unknown): Parsed<Proposal> {
   const slides = parseSlides(record["slides"]);
   if (slides.kind !== "ok") return slides;
   // The same rule the manifest parser enforces: candidates are 1..count, in order, no holes.
-  if (slides.value.length !== count || slides.value.some((slide, position) => slide.index !== position + 1)) {
+  if (!slidesAreNumbered({ slides: slides.value, count })) {
     return { kind: "invalid", reason: `the seed proposal's slides are not 1..${count} in order` };
   }
   // A MALFORMED merge refuses the whole seed rather than seeding the proposal as an insert: the
@@ -170,10 +171,4 @@ function parseSeedHtml({ field, count }: { field: unknown; count: number }): Par
 
 function slideIndexOf({ value, count }: { value: unknown; count: number }): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= count ? value : null;
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
 }

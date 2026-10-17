@@ -23,6 +23,7 @@
  * file has never heard of is anonymised rather than trusted.
  */
 import type { TextSubstituter } from "./substitute-text.ts";
+import { assertNever } from "./never.ts";
 
 /** Where in the grammar a piece sits. Selector context is also an at-rule prelude. */
 export type CssContext = "selector" | "declaration";
@@ -294,8 +295,4 @@ function unescapeCssString(raw: string): string {
 
 function escapeCssString({ text, quote }: { text: string; quote: string }): string {
   return text.replace(/\\/g, "\\\\").replace(new RegExp(quote, "g"), `\\${quote}`).replace(/\n/g, "\\a ");
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled css piece: ${JSON.stringify(value)}`);
 }

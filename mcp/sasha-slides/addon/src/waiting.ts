@@ -24,6 +24,7 @@
 // they used to find.
 
 import { FEEDBACK_DELIVERY_THRESHOLD_MS } from "../../feedback-delivery.ts";
+import { plural } from "./plural.ts";
 import { assertNever } from "./protocol.ts";
 import { sessionEventVoiceOf, type SessionEvent } from "./session-log.ts";
 
@@ -142,7 +143,7 @@ export function describeElapsed(elapsedMs: number | null): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours} h ${pad(minutes % 60)} min`;
   const days = Math.floor(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"} ${pad(hours % 24)} h`;
+  return `${plural(days, "day")} ${pad(hours % 24)} h`;
 }
 
 /**

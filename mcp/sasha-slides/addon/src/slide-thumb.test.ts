@@ -5,21 +5,20 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ProposalMark } from "./bridge.ts";
-import { ConversationPanel } from "./Conversation.tsx";
 import {
   INITIAL_CONVERSATION,
   reduceConversation,
   type Conversation,
   type ConversationEvent,
 } from "./conversation-state.ts";
-import { INERT_CONVERSATION_ACTIONS, UNCONFIGURED_SETUP } from "./inert-actions.ts";
 import type { Manifest } from "./protocol.ts";
 import {
   sessionEventsOf,
   type SessionEventFile,
 } from "./session-log.ts";
-import { NO_PREVIEWS, nextPreviewToLoad, reducePreviews, type SlidePreviews } from "./slide-previews.ts";
+import { NO_PREVIEWS, previewsToLoad, reducePreviews, type SlidePreviews } from "./slide-previews.ts";
 import { SlideThumb } from "./slide-thumb.tsx";
+import { conversationMarkupOf, replay as replayEvents } from "./test-support.ts";
 
 const AT = "2026-10-04T12:00:00.000Z";
 const PROPOSAL = "p_1733219000000_a1b2c3";
@@ -84,15 +83,11 @@ test("every candidate in the set card carries its thumbnail", () => {
 // --- helpers --------------------------------------------------------------------
 
 function markupOf({ conversation, previews }: { conversation: Conversation; previews: SlidePreviews }): string {
-  return renderToStaticMarkup(
-    createElement(ConversationPanel, { conversation, previews, commentAccess: null, setup: UNCONFIGURED_SETUP, actions: INERT_CONVERSATION_ACTIONS }),
-  );
+  return conversationMarkupOf(conversation, previews);
 }
 
 function replay(events: readonly ConversationEvent[]): Conversation {
-  let conversation = reduceConversation(INITIAL_CONVERSATION, { kind: "staged-arrived", marks: [], readAt: AT });
-  for (const event of events) conversation = reduceConversation(conversation, event);
-  return conversation;
+  return replayEvents(reduceConversation, INITIAL_CONVERSATION, [{ kind: "staged-arrived", marks: [], readAt: AT }, ...events]);
 }
 
 function withCandidates(): Conversation {
@@ -106,7 +101,7 @@ function withCandidates(): Conversation {
 function loadedPreviews(conversation: Conversation): SlidePreviews {
   let previews = NO_PREVIEWS;
   for (let guard = 0; guard < 10; guard += 1) {
-    const next = nextPreviewToLoad({ conversation, previews });
+    const next = previewsToLoad({ conversation, previews })[0] ?? null;
     if (next === null) return previews;
     previews = reducePreviews(previews, { kind: "preview-requested", key: next.key });
     previews = reducePreviews(previews, {

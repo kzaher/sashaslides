@@ -158,11 +158,6 @@ export function defectReportFrom(preview: DefectReportPreview): DefectReport {
   };
 }
 
-/** The bytes to POST. One shape, so a recipient can verify a digest of it. */
-export function serializeDefectReport(report: DefectReport): string {
-  return JSON.stringify(report);
-}
-
 /**
  * Every `forbidden` string that appears anywhere in `payload`, however deeply nested. Case
  * insensitive, because a file id is case sensitive but an email address is not, and the cost of

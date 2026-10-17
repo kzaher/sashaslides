@@ -1496,18 +1496,17 @@ async function driveReport({ failures }: { failures: string[] }): Promise<void> 
       detail: `${tally} carriers`,
     });
 
-    // THE STANDING CAVEAT. The anonymiser's sentences are rendered word for word, including the
-    // ones about asking a model to rewrite the text -- a mode this window does not use. Saying so
-    // once, above them, is what replaced the old "what asking a model SENDS" disclosure, and the
-    // stub's `__SASHA_REWRITE__` tripwire below is what proves the claim is true.
+    // NO NOTE CLAIMS THE TEXT WENT TO A MODEL. The anonymiser's sentences are rendered word for
+    // word, and none of them may say a slide's text was sent anywhere -- nothing was; the stub's
+    // `__SASHA_REWRITE__` tripwire below is what proves that.
     const caveat = await evaluateString({
       client,
       expression: "(document.querySelector('.sasha-annots')||{}).textContent||''",
     });
     check({
       failures,
-      what: "and the surface says in words that nothing here goes to a model",
-      ok: /nothing here goes to a model/.test(caveat) && /the only replacements are the ones you typed/.test(caveat),
+      what: "and no note claims the slide's text was sent to a model",
+      ok: caveat !== "" && !/asking a model|sends this slide|was sent to/i.test(caveat),
       detail: caveat.slice(0, 160),
     });
 

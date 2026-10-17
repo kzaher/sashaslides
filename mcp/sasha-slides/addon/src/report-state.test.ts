@@ -23,6 +23,7 @@ import {
   type ReportSurface,
   type ReportSurfaceEvent,
 } from "./report-state.ts";
+import { replay as replayEvents } from "./test-support.ts";
 
 const SEED = "a".repeat(64);
 const slides: readonly SlideEntry[] = [
@@ -128,9 +129,7 @@ test("the chosen candidate's explanation travels on the label the panel shows", 
 });
 
 function replay(events: readonly ReportSurfaceEvent[]): ReportSurface {
-  let surface = INITIAL_REPORT_SURFACE;
-  for (const event of events) surface = reduceReportSurface(surface, event);
-  return surface;
+  return replayEvents(reduceReportSurface, INITIAL_REPORT_SURFACE, events);
 }
 
 /**

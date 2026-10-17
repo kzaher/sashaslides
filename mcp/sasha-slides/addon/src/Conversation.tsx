@@ -28,6 +28,7 @@ import { SASHA_ICON_SVG } from "../../http/sasha-icon.generated.ts";
 import { PICKER_CSS } from "./picker-styles.ts";
 import { TIDEPOOL_CSS } from "./tidepool-styles.ts";
 import { SetupGuide, type SetupEnvironment } from "./setup-guide.tsx";
+import { plural } from "./plural.ts";
 import { assertNever } from "./protocol.ts";
 import {
   CANDIDATE_TABS,
@@ -343,7 +344,7 @@ function CandidateCard({
   return (
     <div className="sasha-artifact">
       <p className="sasha-artifact-head mono">
-        {count} candidate{count === 1 ? "" : "s"}
+        {plural(count, "candidate")}
       </p>
       <div className="sasha-candidate-tabs" role="group" aria-label="Candidates">
         {CANDIDATE_TABS.map((tab) => (

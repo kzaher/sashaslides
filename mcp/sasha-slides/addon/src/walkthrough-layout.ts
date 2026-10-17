@@ -148,15 +148,8 @@ export function targetPoint(screen: ScreenId, target: string): Point {
   return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
 }
 
-/** Every screen id, for tests and for anything that has to visit them all. */
-export const SCREEN_IDS: readonly ScreenId[] = Object.keys(SCREEN_LAYOUT).filter(isScreenId);
-
 /** The same table, widened so a target can be looked up by a plain string. */
 const LAYOUT_BY_NAME: Readonly<Record<ScreenId, Readonly<Record<string, Box>>>> = SCREEN_LAYOUT;
-
-function isScreenId(candidate: string): candidate is ScreenId {
-  return Object.hasOwn(SCREEN_LAYOUT, candidate);
-}
 
 function boxOf(box: Box): Box {
   return box;

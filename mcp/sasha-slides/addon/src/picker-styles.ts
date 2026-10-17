@@ -43,20 +43,6 @@ html, body { margin: 0; padding: 0; background: #fff; }
 .sasha-busy { color: #1a73e8; font-size: 12px; }
 .sasha-trouble { color: #c5221f; font-size: 12px; margin: 0; }
 .sasha-settled { font-size: 13px; margin: 0; }
-.sasha-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.sasha-chip {
-  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-  border: 1px solid #dadce0; border-radius: 999px; background: #fff;
-  padding: 4px 10px; font-size: 12px; max-width: 100%;
-}
-.sasha-chip-on { border-color: #1a73e8; background: #e8f0fe; }
-.sasha-chip:disabled { cursor: default; opacity: .6; }
-.sasha-chip-number { font-weight: 700; }
-.sasha-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The chip's unresolved badge. A PILL, not a bare glyph: it carries one of three background tones
-   (see the unresolved rules below) and a coloured background behind a 1-character glyph with no
-   size of its own renders as a thin vertical sliver -- seen in the browser smoke screenshot. */
-.sasha-chip-flag { min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; background: #c5221f; }
 .sasha-toggle { display: flex; gap: 4px; }
 .sasha-tab {
   cursor: pointer; border: 1px solid #dadce0; background: #fff;
@@ -94,7 +80,7 @@ html, body { margin: 0; padding: 0; background: #fff; }
 .sasha-mark-user { border: 2px solid #c5221f; background: rgba(197,34,31,.12); }
 .sasha-mark-converter { border: 2px dashed #e37400; background: rgba(227,116,0,.12); }
 .sasha-mark-drag { border: 2px dotted #202124; background: rgba(32,33,36,.08); }
-/* 32vh, and the big pane above gives up 8vh for it (see .sasha-pane-big .sasha-stage): a mark-up
+/* 32vh: a mark-up
    row is TWO lines now, so the one-line sizing clipped the second row mid-glyph with only two
    mark-ups on screen. padding-right keeps the remove button off the scrollbar when it does scroll.
    The browser smoke test asserts the last row is fully inside this box, so the split is measured
@@ -165,12 +151,9 @@ html, body { margin: 0; padding: 0; background: #fff; }
 }
 .sasha-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 /* THE CELL IS NO LONGER A BUTTON (candidate-grid.tsx): its picture belongs to the current tool, so
-   the frame that used to be the button's is on the stage itself. The selected cell is outlined, and
-   the cell the editor is attached to is outlined more strongly -- one glance has to answer "which
-   slide am I editing", because the editor's own chrome lives over the frame and nowhere else. */
+   the frame that used to be the button's is on the stage itself, and the selected cell is outlined. */
 .sasha-cell-stage { display: block; border: 2px solid #dadce0; border-radius: 8px; }
 .sasha-cell-on > .sasha-cell-stage { border-color: #1a73e8; }
-.sasha-cell-edited > .sasha-cell-stage { border-color: #188038; box-shadow: 0 0 0 2px rgba(24,128,56,.25); }
 /* THE WHOLE PICTURE IS CLICKABLE, so it has to LOOK clickable: a pointer everywhere over the
    stage, and the stage lifts on hover. The button is transparent and fills the stage -- it sits
    over the iframe, which would otherwise swallow the click (candidate-grid.tsx). */
@@ -248,13 +231,6 @@ html, body { margin: 0; padding: 0; background: #fff; }
 .sasha-none:hover:enabled { color: #202124; }
 .sasha-none:disabled { opacity: .5; cursor: default; }
 
-/* --- one candidate, large: the other zoom level, same tool ---------------------------- */
-.sasha-single { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px; }
-.sasha-backbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-/* Capped by HEIGHT as well as width: the pane, its notes and the editor slot all have to fit in a
-   dialog whose height the window may have clamped. */
-.sasha-pane-big { max-width: 920px; }
-.sasha-pane-big .sasha-stage { max-height: 44vh; }
 /* THE VISUAL EDITOR'S SLOT -- .sasha-editslot, not .sasha-editor. It used to share the name
    with the editor WINDOW below, so the window's card rules (white, rounded, shadowed, overflow
    hidden, flex:1) landed on this little panel too: it rendered as a floating card in the middle
@@ -387,10 +363,8 @@ html, body { margin: 0; padding: 0; background: #fff; }
    is blue, unknown ("?") is grey, unreachable ("!") is red. Showing an unread or unreachable
    count in the same ink as a real one is how the two views would start disagreeing quietly. */
 .sasha-cell-unresolved { position: absolute; top: 6px; right: 6px; z-index: 2; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; background: #1a73e8; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
-.sasha-cell-unresolved.sasha-unresolved-unknown,
-.sasha-chip-flag.sasha-unresolved-unknown { background: #9aa0a6; }
-.sasha-cell-unresolved.sasha-unresolved-unreachable,
-.sasha-chip-flag.sasha-unresolved-unreachable { background: #c5221f; }
+.sasha-cell-unresolved.sasha-unresolved-unknown { background: #9aa0a6; }
+.sasha-cell-unresolved.sasha-unresolved-unreachable { background: #c5221f; }
 
 /* --- sending a mark-up to Sasha (the pre-insert review path) ----------------------------- */
 .sasha-send-anomaly { font-size: 11px; padding: 3px 8px; border-radius: 4px; border: 1px solid #1a73e8; background: #fff; color: #1a73e8; cursor: pointer; white-space: nowrap; }

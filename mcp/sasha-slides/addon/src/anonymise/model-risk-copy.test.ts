@@ -31,7 +31,7 @@ test("with no model replacements, no residual risk mentions a model", () => {
   );
 });
 
-test("when a replacement IS accepted, the model disclosure comes back", () => {
+test("when the user's own replacement IS accepted, the note says it is theirs and claims no model", () => {
   const runs = anonymiseSlideHtml({ html: SLIDE, identifiers: "rename", seed: "copy-test" }).textRuns;
   const target = runs.find((run) => run.kind === "body-text");
   assert.ok(target !== undefined, "the fixture has a body-text run to replace");
@@ -45,8 +45,13 @@ test("when a replacement IS accepted, the model disclosure comes back", () => {
   // Only meaningful if the replacement was actually taken.
   if (out.textRuns.some((run) => run.origin === "rewritten")) {
     assert.ok(
-      out.residualRisks.some((risk) => /\bmodel\b/i.test(risk)),
-      "a rewritten run must carry the disclosure about what the model was shown",
+      out.residualRisks.some((risk) => /text you typed/.test(risk)),
+      "a rewritten run is named as the user's own text",
+    );
+    assert.equal(
+      out.residualRisks.some((risk) => /\bmodel\b/i.test(risk) && !/no model/i.test(risk)),
+      false,
+      "and nothing claims a model was involved",
     );
   }
 });

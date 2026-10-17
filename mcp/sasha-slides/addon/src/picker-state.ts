@@ -6,7 +6,8 @@ import type { ConversionResult, SlidesApiRequest, UnsupportedFeature } from "./c
 import type { Proposal } from "./observer.ts";
 import { WHOLE_SLIDE, assertNever, type Anomaly, type Region, type SlideEntry } from "./protocol.ts";
 import { loadedSlideComments, type SlideCommentsLoad } from "./session-log.ts";
-import type { SlideEdit } from "./slide-editor.ts";
+import type { SlideEdit } from "./editor/index.ts";
+import type { HtmlLoad } from "./html-load.ts";
 import type { InsertedWhere } from "./slide-insert.ts";
 
 export type PickerState =
@@ -77,20 +78,10 @@ export type Offer = Readonly<{
    */
   selection: Readonly<{ target: string; html: string; region: Region }> | null;
   /**
-   * THE ZOOM LEVEL -- every candidate at once, or one of them large. UI-CONTRACT.md, "The popup IS
-   * the editor": this is a view and nothing more, so changing it never changes what the user may
-   * do to a slide.
-   */
-  view: SlideView;
-  /**
    * WHAT THE POINTER DOES ON A SLIDE, and it is `edit` from the first paint. Editing is the
    * DEFAULT STATE and not somewhere you navigate to -- the thing this field exists to stop is the
    * old behaviour, where annotation only became possible after clicking a cell to "enter" a
    * different screen.
-   *
-   * INDEPENDENT OF `view`, deliberately: every one of the four combinations is legal, so a user can
-   * annotate from the grid or edit one slide large without the other choice moving. Two fields
-   * rather than one enum of screens is what makes that true by construction.
    */
   tool: SlideTool;
   /** Which rendering of the candidate is on screen. The HTML is authoritative, so it is first. */
@@ -122,14 +113,6 @@ export type OpenPhase =
   | Readonly<{ kind: "opening" }>
   | Readonly<{ kind: "opened" }>
   | Readonly<{ kind: "failed"; message: string }>;
-
-/**
- * THE VIEW: the grid, or one candidate up close. A ZOOM LEVEL -- UI-CONTRACT.md is explicit that it
- * is "nothing more" -- so it is deliberately not called a surface or a mode any more. Two values
- * rather than a boolean so every decision site is an exhaustive switch and a third zoom level is a
- * compile error, not a silent `else`.
- */
-export type SlideView = "grid" | "single";
 
 /** Which candidate the editor is open on, or null when the grid is all there is. */
 export type EditorTarget = number | null;
@@ -171,16 +154,10 @@ export type SlideFrame = Readonly<{
    * What the VISUAL EDITOR has done to this candidate, in the order it was done. It lives in the
    * state tree rather than inside the editor component for the same reason `Review.draft` does: a
    * Drive poll re-renders the whole tree, and anything held in component state would be lost.
-   * The editor is the authority on the list; this is the picker's copy of it. See slide-editor.ts.
+   * The editor is the authority on the list; this is the picker's copy of it. See editor/index.ts.
    */
   edits: readonly SlideEdit[];
 }>;
-
-export type HtmlLoad =
-  | Readonly<{ kind: "unrequested" }>
-  | Readonly<{ kind: "loading" }>
-  | Readonly<{ kind: "loaded"; html: string }>
-  | Readonly<{ kind: "failed"; message: string }>;
 
 export type RenderLoad =
   | Readonly<{ kind: "unrendered" }>
@@ -232,16 +209,13 @@ export type PickerEvent =
       slideIndex: number | null;
     }>
   | Readonly<{ kind: "trouble"; message: string }>
-  | Readonly<{ kind: "slide-selected"; index: number }>
   /** Open the editor on one candidate. The grid stays underneath, remembering the choice. */
   | Readonly<{ kind: "editor-opened"; index: number }>
   /** Close it. The grid keeps `selectedIndex`, so it comes back where the user was. */
   | Readonly<{ kind: "editor-closed" }>
   /** What the visual editor has selected, so the inspector under the slide can show its markup. */
   | Readonly<{ kind: "selection-changed"; selection: Readonly<{ target: string; html: string; region: Region }> | null }>
-  /** The ZOOM LEVEL changed. It never touches `tool`: a view is not a permission. */
-  | Readonly<{ kind: "view-chosen"; view: SlideView }>
-  /** The TOOL changed. It never touches `view`: a tool is not a zoom level. */
+  /** The TOOL changed: what the pointer does on the open candidate. */
   | Readonly<{ kind: "tool-chosen"; tool: SlideTool }>
   | Readonly<{ kind: "rendering-chosen"; rendering: SlideRendering }>
   | Readonly<{ kind: "findings-toggled" }>
@@ -257,12 +231,6 @@ export type PickerEvent =
   | Readonly<{ kind: "anomaly-drawn"; index: number; anomalyId: string; region: Region }>
   | Readonly<{ kind: "anomaly-noted"; index: number; anomalyId: string; note: string }>
   | Readonly<{ kind: "anomaly-removed"; index: number; anomalyId: string }>
-  /**
-   * ZOOM IN ON ONE CANDIDATE: select it and show it large. `tool` is deliberately absent from this
-   * transition -- "clicking a slide in the grid changes the VIEW; it does not change what you are
-   * allowed to do" (UI-CONTRACT.md), and the reducer is where that is made impossible to get wrong.
-   */
-  | Readonly<{ kind: "candidate-zoomed"; index: number }>
   | Readonly<{ kind: "edits-changed"; index: number; edits: readonly SlideEdit[] }>
   | Readonly<{ kind: "submit-started"; picked: number | null; stage: SubmitStage }>
   | Readonly<{ kind: "submit-stage"; stage: SubmitStage }>
@@ -324,9 +292,6 @@ export function reducePicker(state: PickerState, event: PickerEvent): PickerStat
       // poll that failed must not throw away the mark-ups they have typed.
       return offerOf(state) === null ? { status: "trouble", message: event.message } : state;
 
-    case "slide-selected":
-      return mapOffer(state, (offer) => ({ ...offer, selectedIndex: clampIndex({ offer, index: event.index }) }));
-
     case "editor-opened":
       // The index is clamped by the same rule the grid uses, so the editor can never be open on
       // a candidate the proposal does not have.
@@ -342,9 +307,6 @@ export function reducePicker(state: PickerState, event: PickerEvent): PickerStat
 
     case "selection-changed":
       return mapOffer(state, (offer) => ({ ...offer, selection: event.selection }));
-
-    case "view-chosen":
-      return mapOffer(state, (offer) => ({ ...offer, view: event.view }));
 
     case "tool-chosen":
       return mapOffer(state, (offer) => ({ ...offer, tool: event.tool }));
@@ -414,15 +376,6 @@ export function reducePicker(state: PickerState, event: PickerEvent): PickerStat
       return mapFrame(state, event.index, (frame) => ({
         ...frame,
         anomalies: frame.anomalies.filter((anomaly) => anomaly.anomalyId !== event.anomalyId),
-      }));
-
-    case "candidate-zoomed":
-      // `tool` is NOT in this update, and that is the contract: a zoom changes what you are looking
-      // at and never what you may do to it.
-      return mapOffer(state, (offer) => ({
-        ...offer,
-        selectedIndex: clampIndex({ offer, index: event.index }),
-        view: "single",
       }));
 
     case "edits-changed":
@@ -675,19 +628,6 @@ export function loadedHtmlOf(frame: SlideFrame | null): string | null {
 }
 
 /**
- * The next candidate whose HTML has not been asked for, or null when every one is in flight or in.
- *
- * EVERY candidate, not just the selected one. The grid shows all N at once, so all N documents are
- * needed; the sidebar only ever showed one pane and loaded lazily. They are loaded ONE AT A TIME
- * -- each arrival re-runs the pump, which picks the next -- because `google.script.run` is a round
- * trip to Google per call and firing N at once only makes the first one slower.
- */
-export function nextHtmlToLoad(offer: Offer): SlideFrame | null {
-  for (const frame of offer.slides) if (needsHtml(frame)) return frame;
-  return null;
-}
-
-/**
  * EVERY candidate whose HTML has not been asked for, so the window can ask for all of them AT
  * ONCE. Each `google.script.run` call is its own server execution and they run concurrently, so
  * N documents fetched one round trip after another was N times the wait for the last cell.
@@ -875,7 +815,6 @@ function freshOffer({
     selectedIndex: 1,
     // The GRID first: comparing the candidates against each other is the whole reason this window
     // exists, so nobody has to click to see what they were offered.
-    view: "grid",
     editing: null,
     selection: null,
     // EDIT FROM THE FIRST PAINT. UI-CONTRACT.md: "Editing is the default state, not a thing you

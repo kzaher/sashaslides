@@ -44,6 +44,7 @@ import type {
 } from "./bridge.ts";
 import type { SendFeedbackSpec } from "./feedback.ts";
 import type { SlidesApiRequest } from "./converter-contract.ts";
+import { asRecord } from "./json-fields.ts";
 
 export type DriveApi = Readonly<{
   /**
@@ -223,10 +224,4 @@ export function createdObjectIdsOf(response: unknown): readonly string[] {
     }
   }
   return ids;
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
 }

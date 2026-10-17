@@ -16,6 +16,7 @@
 
 import type { SlidesApiRequest } from "./converter-contract.ts";
 import type { Region } from "./protocol.ts";
+import { asRecord, nonEmptyStringAt } from "./json-fields.ts";
 
 export const PAGE_WIDTH_PT = 720;
 export const PAGE_HEIGHT_PT = 405;
@@ -54,13 +55,13 @@ export function previewElementsOf(requests: readonly SlidesApiRequest[]): readon
       if (kind === undefined) continue;
       const created = asRecord(payload);
       if (created === null) continue;
-      const objectId = stringAt({ record: created, key: "objectId" }) ?? `anonymous_${elements.length}`;
+      const objectId = nonEmptyStringAt({ record: created, key: "objectId" }) ?? `anonymous_${elements.length}`;
       positionById.set(objectId, elements.length);
       elements.push({
         objectId,
         kind,
         region: regionOf(asRecord(created["elementProperties"])),
-        label: stringAt({ record: created, key: "shapeType" }) ?? name.replace(/^create/, "").toLowerCase(),
+        label: nonEmptyStringAt({ record: created, key: "shapeType" }) ?? name.replace(/^create/, "").toLowerCase(),
         text: "",
       });
     }
@@ -80,8 +81,8 @@ function appendText({
 }): void {
   const insert = asRecord(request["insertText"]);
   if (insert === null) return;
-  const objectId = stringAt({ record: insert, key: "objectId" });
-  const text = stringAt({ record: insert, key: "text" });
+  const objectId = nonEmptyStringAt({ record: insert, key: "objectId" });
+  const text = nonEmptyStringAt({ record: insert, key: "text" });
   if (objectId === null || text === null) return;
   const position = positionById.get(objectId);
   if (position === undefined) return;
@@ -98,7 +99,7 @@ function regionOf(elementProperties: Readonly<Record<string, unknown>> | null): 
   const heightPt = pointsOf(asRecord(size?.["height"])) ?? PAGE_HEIGHT_PT;
   const scaleX = numberAt({ record: transform, key: "scaleX" }) ?? 1;
   const scaleY = numberAt({ record: transform, key: "scaleY" }) ?? 1;
-  const unit = stringAt({ record: transform ?? {}, key: "unit" }) ?? "PT";
+  const unit = nonEmptyStringAt({ record: transform ?? {}, key: "unit" }) ?? "PT";
   const divisor = unit === "EMU" ? EMU_PER_PT : 1;
   const leftPt = (numberAt({ record: transform, key: "translateX" }) ?? 0) / divisor;
   const topPt = (numberAt({ record: transform, key: "translateY" }) ?? 0) / divisor;
@@ -121,25 +122,15 @@ function clampToPage(region: Region): Region {
   };
 }
 
-function clamp01(value: number): number {
+/** A fraction of the slide, clamped to 0..1; anything not finite is 0. */
+export function clamp01(value: number): number {
   return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 }
 
 function pointsOf(dimension: Readonly<Record<string, unknown>> | null): number | null {
   const magnitude = numberAt({ record: dimension, key: "magnitude" });
   if (magnitude === null) return null;
-  return stringAt({ record: dimension ?? {}, key: "unit" }) === "EMU" ? magnitude / EMU_PER_PT : magnitude;
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function stringAt({ record, key }: { record: Readonly<Record<string, unknown>>; key: string }): string | null {
-  const value = record[key];
-  return typeof value === "string" && value !== "" ? value : null;
+  return nonEmptyStringAt({ record: dimension ?? {}, key: "unit" }) === "EMU" ? magnitude / EMU_PER_PT : magnitude;
 }
 
 function numberAt({ record, key }: { record: Readonly<Record<string, unknown>> | null; key: string }): number | null {

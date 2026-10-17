@@ -98,7 +98,6 @@ addon/
     slide-stage.tsx     one candidate's picture + whatever the current TOOL puts over it
     scaled-frame.tsx    1280x720 in a box of measured width -- the dialog's size is not fixed
     editor-slot.tsx     the visual editor's slot: attach/detach in a scope, edits into the tree
-    slide-editor.ts     the HOST's side of the editor seam: editor/ types re-exported + the stub
     editor/             NOT THIS COMPONENT'S: the visual editor module, consumed via its index.ts
     conversation-state.ts  ASK SASHA's state tree and pure reducer: the merged, ordered log
     Conversation.tsx    Ask Sasha's React tree: the connection status (or setup guide) and the assets
@@ -359,15 +358,10 @@ candidate it could not read.
   React state (0.371 at 1000 px wide, measured). The constant survives only as the pre-measurement
   fallback. Review mode's page thumbnail is a PNG, so it scales by its box
   (`object-fit:contain`) instead.
-- **The visual editor behind the slot is still a STUB.** `nullSlideEditor` satisfies the
-  `SlideEditor` interface, reports zero edits and returns the HTML unchanged. The real module now
-  exists at `src/editor/` (another component's work) and the host already depends on its **types** —
-  `src/slide-editor.ts` re-exports them from `./editor/index.ts` rather than restating them, so
-  there is exactly one declaration of `SlideEdit` and `SlideEditor` and the two halves cannot
-  drift. Only its *behaviour* is not wired yet: swapping it in is one line,
-  `createSlideEditor(...)` in `dialog.tsx`'s `createEditor`, and the compiler has already proved
-  the two are interchangeable. The slot, the edit list, Undo and the state-tree plumbing are real
-  and tested. Nothing yet writes the edit record or the edited HTML back to Drive: `PICK`'s shape is
+- **The visual editor is `src/editor/`**, wired in by `dialog.tsx`'s `createEditor`
+  (`createSlideEditor`). The host imports its types from `./editor/index.ts` and nowhere deeper, so
+  there is exactly one declaration of `SlideEdit` and `SlideEditor`; tests render the tree with
+  `inert-actions.ts`'s `nullSlideEditor`. Nothing yet writes the edit record or the edited HTML back to Drive: `PICK`'s shape is
   `PROTOCOL.md`'s and adding a field to it is not this package's call.
 - **THE SLIDES WINDOW'S GRID DOES NOT REFRESH ON A REVISION.** `manifest.revision` is the
   protocol's "have the candidates changed" signal, and the conversation acts on it (a revised slide

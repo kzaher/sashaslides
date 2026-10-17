@@ -39,10 +39,11 @@ import {
   appsScriptPickerWindowApi,
   appsScriptSessionLogApi,
   commentAccessFromServer,
-  helloFromServer,
+  connect,
+  notConnected,
   type ServerCall,
 } from "./bridge-client.ts";
-import type { CallOutcome, HelloReply } from "./bridge.ts";
+import { EVENT_PAGE_SIZE, INBOX_PAGE_SIZE } from "./bridge.ts";
 import type { ConversationActions } from "./Conversation.tsx";
 import {
   INITIAL_CONVERSATION,
@@ -58,9 +59,9 @@ import {
   type ConversationEvent,
 } from "./conversation-state.ts";
 import type { BatchReadApi, DriveApi, PickerWindowApi, SessionLogApi } from "./drive-api.ts";
-import { newestSetChangeIn, serializeSessionEvent, sessionEventFileName, sessionEventsOf } from "./session-log.ts";
+import { newestSetChangeIn, sessionEventWrite, sessionEventsOf } from "./session-log.ts";
 import { archiveEventBodyOf } from "./candidate-archive.ts";
-import { PROTOCOL_VERSION, assertNever, parseManifest, parseReadyMarker } from "./protocol.ts";
+import { assertNever, describeParsedFailure } from "./protocol.ts";
 import {
   NO_PREVIEWS,
   previewsSettled,
@@ -81,13 +82,8 @@ import {
   type CommentAccessState,
 } from "./comment-access-state.ts";
 import { parseSidebarBoot, sidebarSeedOf, type SidebarBoot } from "./sidebar-seed.ts";
+import { readStagedManifest } from "./staged-set.ts";
 
-/** One scan of the inbox. The same page size the observer uses. */
-const SCAN_PAGE_SIZE = 100;
-/** One read of a proposal's `events/` folder. A session with more events than this is not one. */
-const EVENT_PAGE_SIZE = 500;
-/** What an event file is uploaded as. The same type the slides window writes. */
-const EVENT_MIME_TYPE = "application/json";
 /**
  * How often everything is re-read while the panel is on screen, and while it is not. A sidebar the
  * user has switched away from drops to the slow cadence.
@@ -102,13 +98,8 @@ const HIDDEN_POLL_MS = 60_000;
  */
 const CLOCK_TICK_MS = 1_000;
 
-/**
- * `services` is null until the hello is in hand, and every path below therefore has to treat "not
- * connected" as a REPORTABLE outcome. Returning silently is what made a failed hello look like a
- * hang. A dead connection has to say so.
- */
-const NOT_CONNECTED =
-  "the add-on is not connected to Google Slides. Reload the presentation and reopen Ask Sasha.";
+/** `services` is null until the hello is in hand; every path reports that (bridge-client.ts). */
+const NOT_CONNECTED = notConnected("reopen Ask Sasha");
 
 /** What the panel draws: the state, the thumbnails beside it, and what it is allowed to cause. */
 export type SidebarView = Readonly<{
@@ -229,24 +220,10 @@ export function startSidebar(host: SidebarHost): SidebarController {
     // Without one, the inbox scan starts now, IN PARALLEL with `sashaHello` -- it needs nothing the
     // hello answers (measured 2026-10-11: 0.86 s + 2.55 s in series) -- and the first `loadStaged`
     // consumes it instead of asking again.
-    let hello: CallOutcome<HelloReply>;
-    if (boot === null) {
-      earlyScan = drive.scanInbox({ pageSize: SCAN_PAGE_SIZE, rememberForSidebar: true });
-      hello = await helloFromServer({ call });
-    } else {
-      hello = { kind: "ok", value: boot.hello };
-    }
-    // A host that does not answer, or speaks another protocol version, is a banner on screen rather
-    // than a panel of reads that silently never land.
+    if (boot === null) earlyScan = drive.scanInbox({ pageSize: INBOX_PAGE_SIZE, rememberForSidebar: true });
+    const hello = await connect({ call, seeded: boot?.hello ?? null, surface: "panel" });
     if (hello.kind !== "ok") {
       dispatch({ kind: "trouble", message: hello.message });
-      return;
-    }
-    if (hello.value.protocolVersion !== PROTOCOL_VERSION) {
-      dispatch({
-        kind: "trouble",
-        message: `the add-on speaks protocolVersion ${hello.value.protocolVersion}, this panel ${PROTOCOL_VERSION}`,
-      });
       return;
     }
 
@@ -404,7 +381,7 @@ export function startSidebar(host: SidebarHost): SidebarController {
     const pending = earlyScan;
     earlyScan = null;
     const replied = await (pending ??
-      running.drive.scanInbox({ pageSize: SCAN_PAGE_SIZE, rememberForSidebar: true }));
+      running.drive.scanInbox({ pageSize: INBOX_PAGE_SIZE, rememberForSidebar: true }));
     if (replied.kind !== "ok") {
       dispatch({ kind: "staged-failed", message: replied.message });
       return;
@@ -416,11 +393,12 @@ export function startSidebar(host: SidebarHost): SidebarController {
   }
 
   /**
-   * The followed proposal's manifest -- READY first, because READY is what names the manifest file.
+   * The followed proposal's manifest, by the rule every reader of a set follows (staged-set.ts):
+   * READY names the manifest, and the manifest's own `count` and `revision` say whether there are
+   * candidates -- `clear_slides` leaves READY in place while `count` drops to 0 (PROTOCOL.md).
    *
-   * READY's PRESENCE, though, is trusted for nothing after the first staging: `clear_slides` leaves
-   * the marker in place while `count` drops to 0, so the manifest's own `count` and `revision` are
-   * what say whether there are candidates (PROTOCOL.md).
+   * In ONE round trip when the scan named the manifest. This is the read the next open is seeded
+   * with, so it is remembered with the event it was read at.
    */
   async function loadManifest(): Promise<void> {
     const running = services;
@@ -430,42 +408,25 @@ export function startSidebar(host: SidebarHost): SidebarController {
       dispatch({ kind: "manifest-failed", message: NOT_CONNECTED });
       return;
     }
-    // BOTH IN ONE ROUND TRIP when the scan named the manifest. READY still decides: if it names a
-    // different manifest than the one read alongside it, that one is read instead. This is the
-    // read the next open is seeded with, so it is remembered with the event it was read at.
-    const knownManifest = manifestFileIds.get(followed.proposalId);
-    const forEventId = newestSetChangeIn(loadedEvents(state.log));
-    const together =
-      knownManifest === undefined
-        ? null
-        : await running.batch.downloadTexts([followed.readyFileId, knownManifest], {
-            rememberForSidebar: { forEventId },
-          });
-    const readyText =
-      together?.kind === "ok"
-        ? together.value.get(followed.readyFileId) ?? { kind: "failed" as const, message: "READY missing from the batch" }
-        : await running.drive.downloadText(followed.readyFileId);
-    if (readyText.kind !== "ok") {
-      dispatch({ kind: "manifest-failed", message: readyText.message });
-      return;
+    const read = await readStagedManifest({
+      drive: running.drive,
+      batch: running.batch,
+      set: { ...followed, manifestFileId: manifestFileIds.get(followed.proposalId) },
+      rememberForSidebar: { forEventId: newestSetChangeIn(loadedEvents(state.log)) },
+    });
+    switch (read.kind) {
+      case "ok":
+        dispatch({ kind: "manifest-arrived", manifest: read.value });
+        return;
+      case "unavailable":
+        dispatch({ kind: "manifest-failed", message: read.message });
+        return;
+      case "rejected":
+        dispatch({ kind: "manifest-failed", message: read.reason });
+        return;
+      default:
+        return assertNever(read);
     }
-    const ready = parseReadyMarker(readyText.value);
-    if (ready.kind !== "ok") {
-      dispatch({ kind: "manifest-failed", message: describeParsed({ parsed: ready, what: "READY" }) });
-      return;
-    }
-    const readAlongside = together?.kind === "ok" ? together.value.get(ready.value.manifestFileId) : undefined;
-    const manifestText = readAlongside ?? (await running.drive.downloadText(ready.value.manifestFileId));
-    if (manifestText.kind !== "ok") {
-      dispatch({ kind: "manifest-failed", message: manifestText.message });
-      return;
-    }
-    const manifest = parseManifest(manifestText.value);
-    if (manifest.kind !== "ok") {
-      dispatch({ kind: "manifest-failed", message: describeParsed({ parsed: manifest, what: "manifest.json" }) });
-      return;
-    }
-    dispatch({ kind: "manifest-arrived", manifest: manifest.value });
   }
 
   /**
@@ -568,23 +529,12 @@ export function startSidebar(host: SidebarHost): SidebarController {
       fail("that set of candidates is no longer the one on screen");
       return;
     }
-    const body = archiveEventBodyOf({ slideIndex, archived });
-    const name = sessionEventFileName({ atMillis, suffix: freshEventSuffix(), kind: body.kind });
-    if (name.kind !== "ok") {
-      fail(describeParsed({ parsed: name, what: "the event name" }));
+    const write = sessionEventWrite({ body: archiveEventBodyOf({ slideIndex, archived }), atMillis });
+    if (write.kind !== "ok") {
+      fail(describeParsedFailure({ parsed: write, what: "the event" }));
       return;
     }
-    const serialized = serializeSessionEvent({ body, at: new Date(atMillis).toISOString() });
-    if (serialized.kind !== "ok") {
-      fail(describeParsed({ parsed: serialized, what: "the event" }));
-      return;
-    }
-    const written = await running.log.appendEvent({
-      folderId: followed.folderId,
-      name: name.value,
-      mimeType: EVENT_MIME_TYPE,
-      body: serialized.value,
-    });
+    const written = await running.log.appendEvent({ folderId: followed.folderId, ...write.value });
     if (written.kind !== "ok") {
       fail(written.message);
       return;
@@ -642,27 +592,3 @@ export function startSidebar(host: SidebarHost): SidebarController {
   }
 }
 
-/** Six base36 characters: the event name's tie-break, so two writers in one millisecond do not collide. */
-function freshEventSuffix(): string {
-  const bytes = new Uint8Array(6);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((byte) => (byte % 36).toString(36)).join("");
-}
-
-/** A protocol parse failure, in words. The same two arms `outcomeOf` has, for a file rather than a call. */
-function describeParsed({
-  parsed,
-  what,
-}: {
-  parsed: Readonly<{ kind: "invalid"; reason: string }> | Readonly<{ kind: "unsupported-version"; protocolVersion: number }>;
-  what: string;
-}): string {
-  switch (parsed.kind) {
-    case "invalid":
-      return `${what}: ${parsed.reason}`;
-    case "unsupported-version":
-      return `${what} declares protocolVersion ${parsed.protocolVersion}`;
-    default:
-      return assertNever(parsed);
-  }
-}

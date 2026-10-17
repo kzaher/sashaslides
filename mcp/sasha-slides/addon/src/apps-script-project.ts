@@ -12,6 +12,7 @@
 import { editorCodeGs } from "./editor-code-gs.ts";
 import { inboxMarkerQueries, MARKER_QUERY_URL_PREFIX, URL_FETCH_MAXIMUM_URL_LENGTH } from "./inbox-scan.ts";
 import { insertionIndexFor } from "./slide-insert.ts";
+import { SEED_ELEMENT_ID } from "./picker-seed.ts";
 import { SIDEBAR_SEED_ELEMENT_ID } from "./sidebar-seed.ts";
 
 /**
@@ -187,13 +188,19 @@ function onInstall(e) {
 function showSidebar() {
   var page = HtmlService.createHtmlOutputFromFile('Sidebar').setTitle('Ask Sasha');
   // THE SEED (src/sidebar-seed.ts): sashaHello's answer plus what the sidebar last read on this
-  // deck, so the panel draws at once instead of after three round trips in series. Inert
-  // text/plain, like showPicker's; every '<' is escaped so the JSON cannot end the element.
+  // deck, so the panel draws at once instead of after three round trips in series.
   var boot = sashaSidebarBoot_();
-  if (boot) {
-    page.append('<script type="text/plain" id="${SIDEBAR_SEED_ELEMENT_ID}">' + JSON.stringify(boot).replace(/</g, '\\\\u003c') + '</script>');
-  }
+  if (boot) sashaAppendSeed_(page, ${JSON.stringify(SIDEBAR_SEED_ELEMENT_ID)}, boot);
   SlidesApp.getUi().showSidebar(page);
+}
+
+/**
+ * THE SEED a surface reads before its first paint (seedText, src/surface-host.ts), under the id
+ * the surface's own TypeScript names. Inert text/plain, like the bundle, so HtmlService's script
+ * rewriting never touches it; every '<' is escaped so the JSON cannot end the element.
+ */
+function sashaAppendSeed_(page, id, value) {
+  page.append('<script type="text/plain" id="' + id + '">' + JSON.stringify(value).replace(/</g, '\\\\u003c') + '</script>');
 }
 
 /**
@@ -268,11 +275,8 @@ function showPicker(boot) {
     .setWidth(SASHA_DIALOG_WIDTH)
     .setHeight(SASHA_DIALOG_HEIGHT);
   // THE SEED (src/picker-seed.ts): what the sidebar already read, plus sashaHello's answer, so the
-  // window draws without six round trips. Inert text/plain, like the bundle, so HtmlService's
-  // script rewriting never touches it; every '<' is escaped so the JSON cannot end the element.
-  if (boot) {
-    page.append('<script type="text/plain" id="sasha-seed">' + JSON.stringify(boot).replace(/</g, '\\\\u003c') + '</script>');
-  }
+  // window draws without six round trips.
+  if (boot) sashaAppendSeed_(page, ${JSON.stringify(SEED_ELEMENT_ID)}, boot);
   SlidesApp.getUi().showModelessDialog(page, 'Candidate slides');
 }
 
@@ -333,9 +337,13 @@ function sashaScanInboxWalk_(pageSize) {
       createdTime: folder.getDateCreated().toISOString()
     });
   }
-  // Oldest first, so a backlog drains in the order Claude produced it.
-  marks.sort(function (left, right) { return left.createdTime < right.createdTime ? -1 : left.createdTime > right.createdTime ? 1 : 0; });
+  marks.sort(sashaOldestFirst_);
   return { marks: marks };
+}
+
+// Oldest first, so a backlog drains in the order Claude produced it.
+function sashaOldestFirst_(left, right) {
+  return left.createdTime < right.createdTime ? -1 : left.createdTime > right.createdTime ? 1 : 0;
 }
 
 function sashaScanInboxRest_(pageSize) {
@@ -376,7 +384,7 @@ function sashaScanInboxRest_(pageSize) {
       createdTime: folder.createdTime
     };
   });
-  marks.sort(function (left, right) { return left.createdTime < right.createdTime ? -1 : left.createdTime > right.createdTime ? 1 : 0; });
+  marks.sort(sashaOldestFirst_);
   return { marks: marks };
 }
 

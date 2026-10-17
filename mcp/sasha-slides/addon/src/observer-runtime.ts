@@ -9,17 +9,18 @@
 // instead of `drive.listByRoles` (the appProperties query), and the `unauthorized` arm is gone
 // because Apps Script owns the grant -- there is no token for the sidebar to refresh.
 
+import { INBOX_PAGE_SIZE } from "./bridge.ts";
 import type { DriveApi } from "./drive-api.ts";
 import {
   INITIAL_OBSERVER_STATE,
-  POLL_PAGE_SIZE,
   reduceObserver,
   type ObserverEffect,
   type ObserverEvent,
   type ObserverState,
   type Proposal,
 } from "./observer.ts";
-import { assertNever, parseManifest, parseReadyMarker, type Parsed } from "./protocol.ts";
+import { assertNever } from "./protocol.ts";
+import { readStagedManifest } from "./staged-set.ts";
 
 /** Where a proposal (or a problem) is published. The sidebar's picker is the only subscriber. */
 export type Announcer = Readonly<{
@@ -138,7 +139,7 @@ export function createObserver({
     // The NAME walk, not an appProperties query -- see observer.ts's header. One call, because
     // Code.gs does the whole "Sasha Slides Inbox" -> <proposalId> -> READY/PICK descent server-side
     // where the three Drive requests cost no `google.script.run` round trips.
-    const outcome = await drive.scanInbox({ pageSize: POLL_PAGE_SIZE });
+    const outcome = await drive.scanInbox({ pageSize: INBOX_PAGE_SIZE });
     switch (outcome.kind) {
       case "ok":
         dispatch({ kind: "listed", marks: outcome.value, nowMs: nowMs() });
@@ -181,10 +182,9 @@ export type ProposalLoad =
   | Readonly<{ kind: "rejected"; reason: string }>;
 
 /**
- * READY -> manifest -> Proposal. READY is written LAST, so by the time its marker is visible both
- * files are complete and this needs no retry-until-consistent dance. The two are still cross-checked
- * against each other: they are separate uploads and a mismatch means the folder is not what the
- * marker claims.
+ * READY -> manifest -> Proposal, by the one rule every reader of a set follows (staged-set.ts): READY
+ * names the manifest, and the manifest's count, slides and revision are the truth. A cleared set is
+ * therefore a proposal with count 0 -- which the slides window shows as cleared -- not a mismatch.
  */
 export async function fetchProposal({
   drive,
@@ -197,27 +197,9 @@ export async function fetchProposal({
   readyFileId: string;
   folderId: string;
 }): Promise<ProposalLoad> {
-  const readyBody = await drive.downloadText(readyFileId);
-  if (readyBody.kind !== "ok") return { kind: "unavailable", message: describeDownload(readyBody) };
-  const ready = parseReadyMarker(readyBody.value);
-  const readyParsed = unwrap({ parsed: ready, what: "READY" });
-  if (readyParsed.kind !== "ok") return readyParsed;
-  if (readyParsed.value.proposalId !== proposalId) {
-    // Discovery is by name, so the folder's NAME is the id this is cross-checked against.
-    return { kind: "rejected", reason: `READY names ${readyParsed.value.proposalId}, its folder ${proposalId}` };
-  }
-
-  const manifestBody = await drive.downloadText(readyParsed.value.manifestFileId);
-  if (manifestBody.kind !== "ok") return { kind: "unavailable", message: describeDownload(manifestBody) };
-  const manifestParsed = unwrap({ parsed: parseManifest(manifestBody.value), what: "manifest.json" });
-  if (manifestParsed.kind !== "ok") return manifestParsed;
-  const manifest = manifestParsed.value;
-  if (manifest.proposalId !== proposalId) {
-    return { kind: "rejected", reason: `manifest names ${manifest.proposalId}, READY ${proposalId}` };
-  }
-  if (manifest.count !== readyParsed.value.count) {
-    return { kind: "rejected", reason: `READY count ${readyParsed.value.count} != manifest count ${manifest.count}` };
-  }
+  const read = await readStagedManifest({ drive, set: { proposalId, readyFileId } });
+  if (read.kind !== "ok") return read;
+  const manifest = read.value;
   return {
     kind: "ok",
     value: {
@@ -230,27 +212,4 @@ export async function fetchProposal({
       merge: manifest.merge,
     },
   };
-}
-
-function unwrap<TValue>({
-  parsed,
-  what,
-}: {
-  parsed: Parsed<TValue>;
-  what: string;
-}): Readonly<{ kind: "ok"; value: TValue }> | Readonly<{ kind: "rejected"; reason: string }> {
-  switch (parsed.kind) {
-    case "ok":
-      return parsed;
-    case "invalid":
-      return { kind: "rejected", reason: `${what} is malformed: ${parsed.reason}` };
-    case "unsupported-version":
-      return { kind: "rejected", reason: `${what} declares protocolVersion ${parsed.protocolVersion}` };
-    default:
-      return assertNever(parsed);
-  }
-}
-
-function describeDownload(outcome: Readonly<{ kind: "failed"; message: string }>): string {
-  return outcome.message;
 }

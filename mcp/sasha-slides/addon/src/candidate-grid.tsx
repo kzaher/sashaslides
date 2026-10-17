@@ -1,5 +1,5 @@
-// THE GRID: every candidate at once, two columns, rows as needed. One of the editor's two ZOOM
-// LEVELS, not a screen of its own.
+// THE GRID: every candidate at once, two columns, rows as needed. Picking one opens the editor on
+// top of it (slide-editor-window.tsx); the grid itself never hosts the live editor.
 //
 // UI-CONTRACT.md: "`N` candidates in two columns, rows as needed. Each cell renders the candidate's
 // own HTML in an iframe, scaled down, never a screenshot -- the HTML is authoritative and a
@@ -14,10 +14,8 @@
 // WHAT CHANGED, AND WHY THE CELL IS NO LONGER A BUTTON. The cell used to be one big `<button>` that
 // "opened" the candidate -- which is exactly the behaviour UI-CONTRACT.md's "The popup IS the
 // editor" forbids: clicking a slide entered a different screen where annotation suddenly became
-// possible. Now the cell's PICTURE belongs to the current tool (`SlideStage`): the annotate tool
-// gets the drag gesture right here in the grid, and the edit tool gets the visual editor on the
-// selected cell. Changing the zoom level is a NAMED control in the footer, because a picture that
-// is also a navigation target cannot host a gesture.
+// possible. Now the cell's picture is a transparent "open" button over the stage, and the
+// decisions a candidate can receive are NAMED controls in its footer.
 
 import type { JSX } from "react";
 import { SlideStage } from "./slide-stage.tsx";
@@ -34,8 +32,6 @@ import type { InsertPosition } from "./slide-insert.ts";
 export function CandidateGrid({
   offer,
   disabled,
-  editedIndex,
-  onEditFrame,
   onZoom,
   onInsert,
   onReport,
@@ -45,12 +41,6 @@ export function CandidateGrid({
 }: {
   offer: Offer;
   disabled: boolean;
-  /**
-   * The candidate the visual editor is attached to, or null when the edit tool cannot reach any of
-   * them. Exactly one cell at a time: the editor's chrome is host-level and one instance owns it.
-   */
-  editedIndex: number | null;
-  onEditFrame: (element: HTMLIFrameElement | null) => void;
   onZoom: (index: number) => void;
   /** Put THIS candidate in the deck, before or after the selected slide -- see `CandidateCell`. */
   onInsert: (spec: Readonly<{ index: number; position: InsertPosition }>) => void;
@@ -81,7 +71,6 @@ export function CandidateGrid({
             slideIndex: frame.index,
           })}
           disabled={disabled}
-          onEditFrame={frame.index === editedIndex ? onEditFrame : null}
           onZoom={onZoom}
           onInsert={onInsert}
           merging={offer.proposal.merge !== null}
@@ -102,7 +91,6 @@ function CandidateCell({
   chosen,
   unresolved,
   disabled,
-  onEditFrame,
   onZoom,
   onInsert,
   merging,
@@ -117,7 +105,6 @@ function CandidateCell({
   chosen: boolean;
   unresolved: UnresolvedCount;
   disabled: boolean;
-  onEditFrame: ((element: HTMLIFrameElement | null) => void) | null;
   onZoom: (index: number) => void;
   onInsert: (spec: Readonly<{ index: number; position: InsertPosition }>) => void;
   /** A merge redesigns its own slide, so it has nothing to place before or after. */
@@ -129,7 +116,7 @@ function CandidateCell({
 }): JSX.Element {
   const option = String(frame.index);
   return (
-    <div className={cellClass({ chosen, edited: onEditFrame !== null })} role="listitem">
+    <div className={chosen ? "sasha-cell sasha-cell-on" : "sasha-cell"} role="listitem">
       <span className="sasha-stage sasha-cell-stage">
         <SlideStage
           frame={frame}
@@ -140,7 +127,8 @@ function CandidateCell({
           // comparison -- which is exactly what the user reported seeing.
           showFindings={false}
           disabled={disabled}
-          onEditFrame={onEditFrame}
+          // The grid never hosts the live editor -- that is the editor window's job.
+          onEditFrame={null}
           onDraw={onDraw}
         />
         <span className="sasha-cell-number" aria-hidden="true">
@@ -234,13 +222,6 @@ function CellUnresolved({ count }: { count: UnresolvedCount }): JSX.Element | nu
       {badge}
     </span>
   );
-}
-
-function cellClass({ chosen, edited }: { chosen: boolean; edited: boolean }): string {
-  const classes = ["sasha-cell"];
-  if (chosen) classes.push("sasha-cell-on");
-  if (edited) classes.push("sasha-cell-edited");
-  return classes.join(" ");
 }
 
 /** Why you would press Report defect. On the button, because the cell's row has no words to spare. */
